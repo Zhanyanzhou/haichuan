@@ -642,29 +642,7 @@ export default function ProductManage() {
             </button>
           );
         })}
-        <button
-          type="button"
-          className="product-manage__tab"
-          onClick={() => message.info("当前没有违规商品")}
-        >
-          违规（0）
-        </button>
-        <Dropdown
-          overlayClassName="product-manage__dropdown"
-          menu={{
-            items: [
-              {
-                key: "violation",
-                label: "违规商品（0）",
-                onClick: () => message.info("当前没有违规商品"),
-              },
-            ],
-          }}
-        >
-          <Button type="text" className="product-manage__more-tab" aria-label="更多商品状态">
-            ···
-          </Button>
-        </Dropdown>
+        {/* 违规商品维度暂无真实数据来源，入口已移除；接入审核体系后再恢复，避免假计数误导运营 */}
       </div>
 
       <div className="product-manage__quality-notice">

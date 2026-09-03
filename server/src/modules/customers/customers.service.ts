@@ -1,7 +1,8 @@
 // 客户域服务：注册登录/资料地址/密码找回(邮件)/收藏/短信验证码/合规(导出与注销)
-import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -12,6 +13,7 @@ import { RefreshSessionService, type SessionMetadata } from '../../common/securi
 import { anonymizeCustomerConsultations } from '../leads/lead-privacy-disposition';
 import { customerFacingProductWhere } from '../products/product-eligibility';
 import { assertAccountPassword } from '../users/staff-password-policy';
+import { consumeCustomerSmsCode } from '../../common/sms/consume-customer-sms-code';
 
 type AddressInput = {
   recipientName: string;
@@ -24,8 +26,44 @@ type AddressInput = {
   isDefault?: boolean;
 };
 
+// ===== 客户登录分级挑战（防低速爆破，永不锁号）=====
+// 3 次失败要求图形验证码，5 次失败升级短信验证码：自动化爆破失效，
+// 真实客户始终可通过短信验证登录，任何人无法恶意锁死他人账户。
+// 计数为单实例内存（与员工域 auth.service 同口径）；多副本部署时各副本独立计数，
+// 阈值防御整体退化为按副本计数，仍远优于无挑战。
+const LOGIN_CHALLENGE_CAPTCHA_THRESHOLD = 3;
+const LOGIN_CHALLENGE_SMS_THRESHOLD = 5;
+const LOGIN_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+
+const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** 供用户不存在时执行的等耗时比较，消除登录响应时序侧信道 */
+const DUMMY_BCRYPT_HASH = bcrypt.hashSync('haichuan-dummy-password', 12);
+
+function renderCaptchaSvg(code: string): string {
+  const width = 120;
+  const height = 44;
+  const letters = [...code].map((char, index) => {
+    const x = 14 + index * 25 + randomInt(-3, 4);
+    const y = 30 + randomInt(-4, 5);
+    const rotate = randomInt(-22, 23);
+    const color = `#${randomInt(30, 120).toString(16).padStart(2, '0')}${randomInt(30, 120).toString(16).padStart(2, '0')}${randomInt(30, 120).toString(16).padStart(2, '0')}`;
+    return `<text x="${x}" y="${y}" font-size="26" font-family="Georgia,serif" font-weight="bold" fill="${color}" transform="rotate(${rotate} ${x} ${y})">${char}</text>`;
+  });
+  const noises = Array.from({ length: 4 }, () => {
+    const x1 = randomInt(0, width);
+    const y1 = randomInt(0, height);
+    const x2 = randomInt(0, width);
+    const y2 = randomInt(0, height);
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#9aa0a6" stroke-width="1" opacity="0.55"/>`;
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="图形验证码"><rect width="${width}" height="${height}" fill="#f5f2ec"/>${noises.join('')}${letters.join('')}</svg>`;
+}
+
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ordersService: OrdersService,
@@ -48,6 +86,80 @@ export class CustomersService {
     );
   }
 
+  // ===== 登录失败计数与分级挑战 =====
+
+  private readonly loginFailures = new Map<string, { count: number; updatedAt: number }>();
+  private readonly loginCaptchas = new Map<string, { answerHash: string; expiresAt: number }>();
+
+  private currentLoginFailureCount(phone: string): number {
+    const record = this.loginFailures.get(phone);
+    if (!record || Date.now() - record.updatedAt >= LOGIN_FAILURE_WINDOW_MS) return 0;
+    return record.count;
+  }
+
+  private recordLoginFailure(phone: string) {
+    const count = this.currentLoginFailureCount(phone) + 1;
+    this.loginFailures.set(phone, { count, updatedAt: Date.now() });
+    // 防内存膨胀：撞库常用大量随机手机号撑 Map；超阈值清理全部过期条目
+    if (this.loginFailures.size > 5000) {
+      const now = Date.now();
+      for (const [key, record] of this.loginFailures) {
+        if (now - record.updatedAt >= LOGIN_FAILURE_WINDOW_MS) {
+          this.loginFailures.delete(key);
+        }
+      }
+    }
+    return count;
+  }
+
+  /** 当前手机号登录需要的安全挑战等级（前端据此渲染验证码；与账号是否存在无关） */
+  loginChallenge(phoneInput: string) {
+    const phone = phoneInput?.trim();
+    if (!/^1\d{10}$/.test(phone || '')) {
+      throw new BadRequestException('请提供有效的手机号码');
+    }
+    const count = this.currentLoginFailureCount(phone);
+    return {
+      level: count >= LOGIN_CHALLENGE_SMS_THRESHOLD
+        ? ('sms' as const)
+        : count >= LOGIN_CHALLENGE_CAPTCHA_THRESHOLD
+          ? ('captcha' as const)
+          : ('none' as const),
+    };
+  }
+
+  /** 生成一次性图形验证码（内存 5 分钟时效；自绘 SVG 不引入依赖） */
+  issueLoginCaptcha() {
+    let code = '';
+    for (let i = 0; i < 4; i += 1) code += CAPTCHA_CHARS[randomInt(CAPTCHA_CHARS.length)];
+    const captchaId = randomBytes(16).toString('hex');
+    const answerHash = createHash('sha256').update(code).digest('hex');
+    this.loginCaptchas.set(captchaId, { answerHash, expiresAt: Date.now() + 5 * 60_000 });
+    // 上限清理：防止长期运行内存无界增长
+    if (this.loginCaptchas.size > 1000) {
+      const now = Date.now();
+      for (const [id, record] of this.loginCaptchas) {
+        if (record.expiresAt < now) this.loginCaptchas.delete(id);
+      }
+    }
+    return { captchaId, svg: renderCaptchaSvg(code) };
+  }
+
+  /** 校验并作废图形验证码（大小写不敏感；无论对错一次性消费） */
+  private verifyLoginCaptcha(captchaId: string | undefined, answer: string | undefined) {
+    const record = captchaId ? this.loginCaptchas.get(captchaId) : undefined;
+    if (captchaId) this.loginCaptchas.delete(captchaId);
+    if (!record || record.expiresAt < Date.now()) {
+      throw new BadRequestException('图形验证码已过期，请换一张后重试');
+    }
+    const answerHash = createHash('sha256')
+      .update((answer || '').trim().toUpperCase())
+      .digest('hex');
+    if (answerHash !== record.answerHash) {
+      throw new BadRequestException('图形验证码不正确');
+    }
+  }
+
   private validatePassword(password: string) {
     assertAccountPassword(password);
     return password;
@@ -68,12 +180,10 @@ export class CustomersService {
   }
 
   /**
-   * 发送注册验证码：60s 冷却 + 每日每号 ≤10 条 + SHA-256(phone:code) 哈希落库（5 分钟时效）。
-   * SMS 可用性前置到写库之前，杜绝"提示已发送但通道未配置"的假成功。
-   * 暴力风险评估：码空间 10^6，register 接口 5/min 限流 + 码 5 分钟时效 + 哈希绑定手机号，
-   * 有效尝试窗口内最多数百次，可接受。
+   * 发送验证码：60s 冷却 + 每日每号 ≤10 条 + SHA-256(phone:code) 哈希落库（5 分钟时效）。
+   * purpose 区分注册验真与登录挑战；SMS 可用性前置到写库之前，杜绝"提示已发送但通道未配置"。
    */
-  async requestSmsCode(phoneInput: string) {
+  async requestSmsCode(phoneInput: string, purpose: 'REGISTER' | 'LOGIN' = 'REGISTER') {
     const phone = phoneInput?.trim();
     if (!/^1\d{10}$/.test(phone || '')) {
       throw new BadRequestException('请提供有效的手机号码');
@@ -107,7 +217,7 @@ export class CustomersService {
       data: {
         phone,
         codeHash,
-        purpose: 'REGISTER',
+        purpose,
         expiresAt: new Date(now.getTime() + 5 * 60_000),
       },
     });
@@ -118,26 +228,36 @@ export class CustomersService {
     return { message: '验证码已发送，5 分钟内有效' };
   }
 
-  /** 校验并作废注册验证码（一次性；哈希绑定手机号，换号无效） */
+  /** 校验并作废验证码（一次性；共享实现见 common/sms，注册/登录/微信绑定共用） */
   private async consumeSmsCode(
     tx: Prisma.TransactionClient,
     phone: string,
     smsCode: string,
     now: Date,
+    purpose: 'REGISTER' | 'LOGIN' = 'REGISTER',
   ) {
-    const codeHash = createHash('sha256')
-      .update(`${phone}:${smsCode.trim()}`)
-      .digest('hex');
-    const record = await tx.customerSmsCode.findFirst({
-      where: { phone, codeHash, usedAt: null, expiresAt: { gte: now } },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!record) throw new BadRequestException('短信验证码错误或已过期');
-    const claimed = await tx.customerSmsCode.updateMany({
-      where: { id: record.id, usedAt: null, expiresAt: { gte: now } },
-      data: { usedAt: now },
-    });
-    if (claimed.count !== 1) throw new BadRequestException('短信验证码错误或已过期');
+    await consumeCustomerSmsCode(tx, phone, smsCode, now, purpose);
+  }
+
+  /**
+   * 验证码记录例行清理：已过期超过 7 天的行不再有审计或排查价值，
+   * 定期删除防止表无界膨胀（失败只记日志，不影响其他任务）。
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  async cleanExpiredSmsCodes() {
+    try {
+      const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const removed = await this.prisma.customerSmsCode.deleteMany({
+        where: { expiresAt: { lt: cutoff } },
+      });
+      if (removed.count > 0) {
+        this.logger.log(`已清理 ${removed.count} 条过期超 7 天的验证码记录`);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `验证码记录清理失败：${error instanceof Error ? error.message : error}`,
+      );
+    }
   }
 
   async register(
@@ -182,13 +302,44 @@ export class CustomersService {
     };
   }
 
-  async login(data: { phone: string; password: string }) {
+  async login(data: {
+    phone: string;
+    password: string;
+    captchaId?: string;
+    captchaCode?: string;
+    smsCode?: string;
+  }) {
     const phone = this.normalizePhone(data.phone);
+    // 分级挑战：先校验当前等级要求的验证，再做密码比较；成功后清零计数。
+    const failureCount = this.currentLoginFailureCount(phone);
+    if (failureCount >= LOGIN_CHALLENGE_SMS_THRESHOLD) {
+      if (!data.smsCode?.trim()) {
+        throw new BadRequestException('该手机号登录尝试过多，请先获取短信验证码后再试');
+      }
+      await this.consumeSmsCode(this.prisma, phone, data.smsCode, new Date(), 'LOGIN');
+    } else if (failureCount >= LOGIN_CHALLENGE_CAPTCHA_THRESHOLD) {
+      if (!data.captchaId || !data.captchaCode) {
+        throw new BadRequestException('该手机号登录尝试较多，请输入图形验证码后重试');
+      }
+      this.verifyLoginCaptcha(data.captchaId, data.captchaCode);
+    }
     const customer = await this.prisma.customer.findUnique({ where: { phone } });
-    if (!customer?.passwordHash || !(await bcrypt.compare(data.password || '', customer.passwordHash))) {
+    const passwordOk = customer?.passwordHash
+      ? await bcrypt.compare(data.password || '', customer.passwordHash)
+      // 用户不存在时执行等耗时比较，消除时序侧信道
+      : await bcrypt.compare(data.password || '', DUMMY_BCRYPT_HASH).then(() => false);
+    if (!customer || !customer.passwordHash || !passwordOk) {
+      const count = this.recordLoginFailure(phone);
+      if (count >= LOGIN_CHALLENGE_SMS_THRESHOLD) {
+        throw new UnauthorizedException('手机号或密码不正确；尝试过多，请先获取短信验证码后再试');
+      }
+      if (count >= LOGIN_CHALLENGE_CAPTCHA_THRESHOLD) {
+        throw new UnauthorizedException('手机号或密码不正确；请完成图形验证后重试');
+      }
       throw new UnauthorizedException('手机号或密码不正确');
     }
     if (customer.status === 'DISABLED') throw new UnauthorizedException('该账户已被停用');
+    this.loginFailures.delete(phone);
     return this.accountResponse(customer);
   }
 

@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   NotFoundException,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -143,6 +144,12 @@ export class InventoryService {
   async createWarehouse(data: CreateWarehouseDto) {
     const name = String(data.name || "").trim();
     if (!name) throw new BadRequestException("仓库名称不能为空");
+    // Schema 未对 name 建唯一约束（迁移前），先在服务层拒绝重名，避免库存归属出现同名歧义
+    const duplicate = await this.prisma.warehouse.findFirst({
+      where: { name },
+      select: { id: true },
+    });
+    if (duplicate) throw new ConflictException("同名仓库已存在，请更换名称");
     return this.prisma.warehouse.create({
       data: {
         name,
@@ -161,7 +168,19 @@ export class InventoryService {
     const warehouse = await this.prisma.warehouse.findUnique({ where: { id } });
     if (!warehouse) throw new NotFoundException("仓库不存在");
     const updateData: Prisma.WarehouseUpdateInput = {};
-    if (data.name !== undefined) updateData.name = String(data.name).trim();
+    if (data.name !== undefined) {
+      const name = String(data.name).trim();
+      if (name && name !== warehouse.name) {
+        const duplicate = await this.prisma.warehouse.findFirst({
+          where: { name },
+          select: { id: true },
+        });
+        if (duplicate && duplicate.id !== id) {
+          throw new ConflictException("同名仓库已存在，请更换名称");
+        }
+      }
+      updateData.name = name;
+    }
     if (data.type !== undefined) updateData.type = data.type;
     if (data.address !== undefined) updateData.address = data.address?.trim() || null;
     if (data.contact !== undefined) updateData.contact = data.contact?.trim() || null;

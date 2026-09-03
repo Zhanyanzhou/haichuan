@@ -153,7 +153,13 @@ export class MarketingService {
   async deletePromotion(id: number) { return this.prisma.promotion.update({ where: { id }, data: { isActive: false } }); }
 
   // Coupons
-  async getCoupons() { return this.prisma.coupon.findMany({ orderBy: { createdAt: 'desc' } }); }
+  // 管理端整表读取加安全上限：防止数据增长后无界查询拖垮内存与响应。
+  async getCoupons() {
+    return this.prisma.coupon.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+  }
   async createCoupon(data: CreateCouponDto) {
     const normalized = this.normalizeCouponInput(data);
     this.assertCouponTerms(normalized);

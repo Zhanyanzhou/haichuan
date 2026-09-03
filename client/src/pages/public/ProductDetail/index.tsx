@@ -699,6 +699,7 @@ export default function ProductDetail() {
                   src={mainImageUrl}
                   alt={product.name}
                   className="w-full h-full object-cover"
+                  priority
                 />
               ) : (
                 <span className="text-sm text-brand-muted">图片暂不可用</span>

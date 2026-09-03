@@ -248,6 +248,10 @@ export class PaymentGatewayService {
         },
         verifyNotification: async (_headers, rawBody) => {
           const parsed = Object.fromEntries(new URLSearchParams(rawBody));
+          // 应用身份交叉校验：签名证明来自支付宝，app_id 证明属于本商户应用
+          if (parsed.app_id && parsed.app_id !== appId) {
+            return { verified: false };
+          }
           // 支付宝异步通知是 urlencoded 表单；URLSearchParams 已完成一次解码，
           // V2 验签保持字段值原样，避免再次 decodeURIComponent 破坏 % 等合法内容。
           const pass = await sdk.checkNotifySignV2(parsed);

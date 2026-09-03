@@ -35,6 +35,20 @@ export interface DynamicTemplateValidationResult {
 
 export type DynamicTemplatePublishValidationResult = DynamicTemplateValidationResult;
 
+export const DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH = {
+  category: 50,
+  purpose: 100,
+  layoutType: 50,
+  slotSummary: 200,
+} as const;
+
+export const DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS = {
+  recommendedFor: { maxItems: 20, maxItemLength: 50 },
+  tags: { maxItems: 20, maxItemLength: 30 },
+} as const;
+
+export const DYNAMIC_TEMPLATE_SLOT_RULE_MAX_LINES = 20;
+
 const STABLE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 const SLOT_KEY_PATTERN = /^[a-z][A-Za-z0-9_]{0,63}$/;
 const RATIO_PATTERN = /^(auto|[1-9][0-9]{0,3}:[1-9][0-9]{0,3})$/;
@@ -212,6 +226,160 @@ function containsLegacyNumericProductReference(value: unknown): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function isDynamicTemplateStructureLocked(
+  node: TemplateDefinitionV2["nodes"][string] | undefined,
+): boolean {
+  return node?.authoring?.structureLocked === true;
+}
+
+function findDynamicTemplateParentIdForLock(
+  definition: TemplateDefinitionV2,
+  nodeId: string,
+): string | null {
+  for (const node of Object.values(definition.nodes)) {
+    if (node.childIds.includes(nodeId)) return node.nodeId;
+  }
+  return null;
+}
+
+export function getDynamicTemplateStructureLockOwnerId(
+  definition: TemplateDefinitionV2,
+  nodeId: string,
+): string | null {
+  const visited = new Set<string>();
+  let currentId: string | null = nodeId;
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    if (isDynamicTemplateStructureLocked(definition.nodes[currentId])) return currentId;
+    currentId = findDynamicTemplateParentIdForLock(definition, currentId);
+  }
+  return null;
+}
+
+export function isDynamicTemplateStructureProtected(
+  definition: TemplateDefinitionV2,
+  nodeId: string,
+): boolean {
+  return getDynamicTemplateStructureLockOwnerId(definition, nodeId) !== null;
+}
+
+export function getDynamicTemplateStructureProtectedNodeIds(
+  definition: TemplateDefinitionV2,
+): Set<string> {
+  const protectedNodeIds = new Set<string>();
+  const pending = Object.values(definition.nodes)
+    .filter(isDynamicTemplateStructureLocked)
+    .map((node) => node.nodeId);
+  while (pending.length > 0) {
+    const nodeId = pending.pop()!;
+    if (protectedNodeIds.has(nodeId)) continue;
+    protectedNodeIds.add(nodeId);
+    pending.push(...(definition.nodes[nodeId]?.childIds ?? []));
+  }
+  return protectedNodeIds;
+}
+
+function definitionWithoutNodeAuthoring(definition: TemplateDefinitionV2) {
+  return {
+    ...definition,
+    nodes: Object.fromEntries(Object.entries(definition.nodes).map(([nodeId, node]) => {
+      const runtimeNode = { ...node };
+      delete runtimeNode.authoring;
+      return [nodeId, runtimeNode];
+    })),
+  };
+}
+
+function getContinuouslyLockedStructureOwnerId(
+  previous: TemplateDefinitionV2,
+  next: TemplateDefinitionV2,
+  nodeId: string,
+): string | null {
+  const visited = new Set<string>();
+  let currentId: string | null = nodeId;
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    if (
+      isDynamicTemplateStructureLocked(previous.nodes[currentId])
+      && isDynamicTemplateStructureLocked(next.nodes[currentId])
+    ) {
+      return currentId;
+    }
+    currentId = findDynamicTemplateParentIdForLock(previous, currentId);
+  }
+  return null;
+}
+
+export function getDynamicTemplateStructureLockViolation(
+  previous: TemplateDefinitionV2,
+  next: TemplateDefinitionV2,
+  options: { mode?: "command" | "persistenceSnapshot" } = {},
+): string | null {
+  const persistenceSnapshot = options.mode === "persistenceSnapshot";
+  const sharedNodeIds = Object.keys(previous.nodes).filter((nodeId) => next.nodes[nodeId]);
+  const lockStateChanged = sharedNodeIds.some((nodeId) => (
+    isDynamicTemplateStructureLocked(previous.nodes[nodeId])
+      !== isDynamicTemplateStructureLocked(next.nodes[nodeId])
+  )) || Object.keys(next.nodes).some((nodeId) => (
+    !previous.nodes[nodeId] && isDynamicTemplateStructureLocked(next.nodes[nodeId])
+  ));
+  if (
+    !persistenceSnapshot
+    &&
+    lockStateChanged
+    && canonicalJson(definitionWithoutNodeAuthoring(previous))
+      !== canonicalJson(definitionWithoutNodeAuthoring(next))
+  ) {
+    return "结构锁定或解锁必须作为独立操作，不能同时修改模板结构。";
+  }
+
+  for (const previousNode of Object.values(previous.nodes)) {
+    const lockOwnerId = persistenceSnapshot
+      ? getContinuouslyLockedStructureOwnerId(previous, next, previousNode.nodeId)
+      : getDynamicTemplateStructureLockOwnerId(previous, previousNode.nodeId);
+    if (!lockOwnerId) continue;
+    const lockOwner = previous.nodes[lockOwnerId];
+    const lockLabel = `“${lockOwner?.name ?? previousNode.name}”已锁定`;
+    const nextNode = next.nodes[previousNode.nodeId];
+    if (!nextNode) return `${lockLabel}，不能删除其结构。`;
+    const previousParentId = findDynamicTemplateParentIdForLock(previous, previousNode.nodeId);
+    const nextParentId = findDynamicTemplateParentIdForLock(next, previousNode.nodeId);
+    if (previousParentId !== nextParentId) {
+      return `${lockLabel}，不能改变其内部节点的父级。`;
+    }
+    if (previousParentId && nextParentId
+      && previous.nodes[previousParentId].childIds.indexOf(previousNode.nodeId)
+        !== next.nodes[nextParentId].childIds.indexOf(previousNode.nodeId)) {
+      return `${lockLabel}，不能改变其内部节点的同级顺序。`;
+    }
+    if (canonicalJson(previousNode.childIds) !== canonicalJson(nextNode.childIds)) {
+      return `${lockLabel}，不能改变子节点结构。`;
+    }
+    if (canonicalJson(previousNode.responsive) !== canonicalJson(nextNode.responsive)) {
+      return `${lockLabel}，不能改变其内部节点的位置或尺寸。`;
+    }
+    if (previousNode.hidden !== nextNode.hidden || previousNode.name !== nextNode.name) {
+      return `${lockLabel}，请先解除锁定。`;
+    }
+    if (previousNode.type !== nextNode.type
+      || previousNode.slotId !== nextNode.slotId
+      || canonicalJson(previousNode.props) !== canonicalJson(nextNode.props)
+      || canonicalJson(previousNode.instanceEditPolicy) !== canonicalJson(nextNode.instanceEditPolicy)) {
+      return `${lockLabel}，不能改变其内部节点的模板构图。`;
+    }
+    if (previousNode.slotId) {
+      const previousSlot = previous.slots[previousNode.slotId];
+      const nextSlot = next.slots[previousNode.slotId];
+      if (!nextSlot) return `${lockLabel}，不能删除内容槽位。`;
+      if (canonicalJson(previousSlot.desktopRules) !== canonicalJson(nextSlot.desktopRules)
+        || canonicalJson(previousSlot.mobileRules) !== canonicalJson(nextSlot.mobileRules)) {
+        return `${lockLabel}，不能改变其内部槽位布局。`;
+      }
+    }
+  }
+  return null;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -609,10 +777,10 @@ function validateMetadata(value: unknown, issues: DynamicTemplateValidationIssue
   }
   validateKnownKeys(value, DYNAMIC_TEMPLATE_METADATA_FIELDS, "metadata", issues);
   for (const [key, maxLength] of [
-    ["category", 50],
-    ["purpose", 100],
-    ["layoutType", 50],
-    ["slotSummary", 200],
+    ["category", DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH.category],
+    ["purpose", DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH.purpose],
+    ["layoutType", DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH.layoutType],
+    ["slotSummary", DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH.slotSummary],
   ] as const) {
     if (!isNonEmptyString(value[key], maxLength)) {
       addIssue(issues, {
@@ -692,8 +860,16 @@ function validateMetadata(value: unknown, issues: DynamicTemplateValidationIssue
     }
   }
   for (const [key, maxItems, maxLength] of [
-    ["recommendedFor", 20, 50],
-    ["tags", 20, 30],
+    [
+      "recommendedFor",
+      DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS.recommendedFor.maxItems,
+      DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS.recommendedFor.maxItemLength,
+    ],
+    [
+      "tags",
+      DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS.tags.maxItems,
+      DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS.tags.maxItemLength,
+    ],
   ] as const) {
     const items = value[key];
     if (!Array.isArray(items)
@@ -766,8 +942,8 @@ function validateSlotRules(
   if (value.textAlign !== undefined && !TEXT_ALIGNS.has(String(value.textAlign))) {
     addIssue(issues, { level: "error", code: "INVALID_TEXT_ALIGN", path: `${path}.textAlign`, slotId, message: "textAlign 值无效。" });
   }
-  if (value.maxLines !== undefined && (!Number.isInteger(value.maxLines) || Number(value.maxLines) < 1 || Number(value.maxLines) > 20)) {
-    addIssue(issues, { level: "error", code: "INVALID_MAX_LINES", path: `${path}.maxLines`, slotId, message: "maxLines 必须是 1–20 的整数。" });
+  if (value.maxLines !== undefined && (!Number.isInteger(value.maxLines) || Number(value.maxLines) < 1 || Number(value.maxLines) > DYNAMIC_TEMPLATE_SLOT_RULE_MAX_LINES)) {
+    addIssue(issues, { level: "error", code: "INVALID_MAX_LINES", path: `${path}.maxLines`, slotId, message: `maxLines 必须是 1–${DYNAMIC_TEMPLATE_SLOT_RULE_MAX_LINES} 的整数。` });
   }
   if (value.overflow !== undefined && !SLOT_OVERFLOWS.has(String(value.overflow))) {
     addIssue(issues, { level: "error", code: "INVALID_SLOT_OVERFLOW", path: `${path}.overflow`, slotId, message: "槽位 overflow 值无效。" });
@@ -1082,7 +1258,7 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
       continue;
     }
     validateKnownKeys(rawNode, [
-      "nodeId", "type", "name", "slotId", "childIds", "props", "instanceEditPolicy", "responsive", "hidden",
+      "nodeId", "type", "name", "slotId", "childIds", "props", "authoring", "instanceEditPolicy", "responsive", "hidden",
     ], path, issues, { nodeId: nodeKey });
     if (rawNode.nodeId !== nodeKey) {
       addIssue(issues, {
@@ -1105,6 +1281,37 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
     }
     const type = rawNode.type;
     const registry = getDynamicTemplateNodeRegistryEntry(type);
+    if (rawNode.authoring !== undefined) {
+      if (!isRecord(rawNode.authoring)) {
+        addIssue(issues, {
+          level: "error",
+          code: "INVALID_NODE_AUTHORING",
+          path: `${path}.authoring`,
+          nodeId: nodeKey,
+          message: "authoring 必须是受控模板作者属性对象。",
+        });
+      } else {
+        validateKnownKeys(
+          rawNode.authoring,
+          ["structureLocked"],
+          `${path}.authoring`,
+          issues,
+          { nodeId: nodeKey },
+        );
+        if (
+          rawNode.authoring.structureLocked !== undefined
+          && typeof rawNode.authoring.structureLocked !== "boolean"
+        ) {
+          addIssue(issues, {
+            level: "error",
+            code: "INVALID_STRUCTURE_LOCK",
+            path: `${path}.authoring.structureLocked`,
+            nodeId: nodeKey,
+            message: "structureLocked 必须是布尔值。",
+          });
+        }
+      }
+    }
     validateInstanceEditPolicy(rawNode.instanceEditPolicy, `${path}.instanceEditPolicy`, issues, nodeKey);
     if (rawNode.instanceEditPolicy !== undefined && registry.kind !== "slot") {
       addIssue(issues, {
@@ -1764,6 +1971,17 @@ export function validateDynamicTemplatePublishDefinition(
       code: "PUBLISH_FORBIDS_MOCK_CONTENT",
       path: "previewContent",
       message: "Mock Content 只存在于预览内存，不能写入模板正式版本。",
+    });
+  }
+
+  for (const slot of Object.values(definition.slots)) {
+    if (slot.emptyPolicy !== "use-default") continue;
+    addIssue(issues, {
+      level: "error",
+      code: "PUBLISH_FORBIDS_LEGACY_EMPTY_POLICY",
+      path: `slots.${slot.slotId}.emptyPolicy`,
+      slotId: slot.slotId,
+      message: "正式版本不能依赖历史默认内容；请清理历史内容并让空槽位隐藏。",
     });
   }
 

@@ -81,10 +81,12 @@ export class QuotationItemInputDto {
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(99_999_999.99, { message: '单价不能超过 99,999,999.99' })
   unitPrice!: number; // 原价
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(99_999_999.99, { message: '报价不能超过 99,999,999.99' })
   quotedPrice!: number; // 报价（成交单价）
 }
 

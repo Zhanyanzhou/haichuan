@@ -40,6 +40,7 @@ const slotTypes = source?.$defs?.slotType?.enum;
 const nodeRegistry = source?.["x-nodeRegistry"];
 const templateInstanceSchema = source?.$defs?.templateInstanceV2;
 const metadataProperties = source?.$defs?.metadata?.properties;
+const nodeAuthoringSchema = source?.$defs?.nodeAuthoring;
 
 invariant(source?.$schema === "https://json-schema.org/draft/2020-12/schema", "必须使用 JSON Schema 2020-12");
 invariant(Number.isInteger(schemaVersion) && schemaVersion > 0, "schemaVersion 必须是正整数");
@@ -48,6 +49,9 @@ invariant(Array.isArray(slotTypes) && slotTypes.length > 0, "slotType 枚举不�
 invariant(nodeRegistry && typeof nodeRegistry === "object" && !Array.isArray(nodeRegistry), "x-nodeRegistry 缺失");
 invariant(templateInstanceSchema?.type === "object", "templateInstanceV2 合同缺失");
 invariant(metadataProperties && typeof metadataProperties === "object" && !Array.isArray(metadataProperties), "metadata 字段合同缺失");
+invariant(nodeAuthoringSchema?.type === "object", "nodeAuthoring 合同缺失");
+invariant(nodeAuthoringSchema?.additionalProperties === false, "nodeAuthoring 必须拒绝未知字段");
+invariant(nodeAuthoringSchema?.properties?.structureLocked?.type === "boolean", "nodeAuthoring.structureLocked 必须是布尔值");
 invariant(
   ["instanceId", "templateId", "templateVersion", "contentBySlotId", "layoutOverridesByNodeId", "hiddenSlotIds", "isVisible"]
     .every((field) => templateInstanceSchema.required?.includes(field)),
@@ -186,6 +190,11 @@ export interface DynamicTemplateNodeProps {
   contentTemplateDesignProps?: Record<string, string | number | boolean>;
 }
 
+/** 仅供母模板作者工作流使用；页面实例和公开 Renderer 必须忽略。 */
+export interface DynamicTemplateNodeAuthoring {
+  structureLocked?: boolean;
+}
+
 export interface DynamicTemplateInstanceEditPolicy {
   position: boolean;
   size: boolean;
@@ -209,6 +218,7 @@ export interface DynamicTemplateNode {
   slotId?: string;
   childIds: string[];
   props: DynamicTemplateNodeProps;
+  authoring?: DynamicTemplateNodeAuthoring;
   instanceEditPolicy?: DynamicTemplateInstanceEditPolicy;
   responsive: Record<DynamicTemplateDevice, DynamicTemplateResponsiveRules>;
   hidden: boolean;

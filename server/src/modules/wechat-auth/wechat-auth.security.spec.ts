@@ -28,7 +28,7 @@ function withWechatEnvironment(run: () => void | Promise<void>) {
 
 test('微信 state 为短签名值且只接受 CORS 白名单精确来源', async () => {
   await withWechatEnvironment(() => {
-    const service = new WechatAuthService({} as any, {} as any);
+    const service = new WechatAuthService({} as any, {} as any, { isAvailable: () => true } as any);
     const allowed = service.buildQrConnectUrl('https://shop.example.test');
     assert.ok(allowed.state.length <= 128);
     assert.equal(allowed.state.includes('shop.example.test'), false);

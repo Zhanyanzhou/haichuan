@@ -86,6 +86,10 @@ const PUCK_COMPONENT_LABELS = [
 const PUCK_COMPONENT_SET = new Set<string>(PUCK_COMPONENT_LABELS);
 const EDITOR_ONLY_COMPONENTS = new Set(["网站全局设置", "业务功能区"]);
 
+// 装修文档是不可信大 JSON：与母模板定义（dynamic-templates MAX_DEFINITION_BYTES）
+// 同一 1 MiB 上限，保存前失败关闭；HTTP 层另有 Express 默认 body 限制兜底。
+const MAX_PAGE_DOCUMENT_BYTES = 1024 * 1024;
+
 const PUCK_REQUIRED_IMAGE_FIELDS: Record<string, string[]> = {
   首屏主视觉: ["desktopImage"],
   单图海报: ["desktopImage"],
@@ -614,6 +618,14 @@ export class PageModulesService {
     const pageRule = getContentTemplatePageRule(pageKey);
     if (!pageRule) {
       throw new BadRequestException(`页面标识「${pageKey}」未在页面合同注册`);
+    }
+    // 字节上限先于归一化与引用校验：超限输入在触碰数据库前失败关闭。
+    if (
+      Buffer.byteLength(JSON.stringify(puckData ?? {}), "utf8")
+        + Buffer.byteLength(JSON.stringify(metadata ?? {}), "utf8")
+        > MAX_PAGE_DOCUMENT_BYTES
+    ) {
+      throw new BadRequestException("页面装修文档不能超过 1 MiB");
     }
     if (
       pageRule.contentPlacement === "root-only"

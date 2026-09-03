@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp, Button, Descriptions, Drawer, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
-import { afterSalesApi } from '@/services/api';
+import { afterSalesApi, orderApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import { useAuthStore } from '@/store/authStore';
-import type { AfterSalesCase, AfterSalesStatus, AfterSalesType, PaginatedResult } from '@/types';
+import type { AfterSalesCase, AfterSalesStatus, AfterSalesType, Order, PaginatedResult } from '@/types';
 
 const STATUS_META: Record<AfterSalesStatus, { color: string; label: string }> = {
   REQUESTED: { color: 'gold', label: '已申请' },
@@ -41,6 +41,48 @@ export default function AfterSalesManage() {
   const role = useAuthStore((state) => state.user?.role);
   // 与 after-sales.controller 类级 @Roles 一致：客服可登记、审核并推进售后。
   const canManageAfterSales = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'CUSTOMER_SERVICE';
+
+  // 登记售后：按订单号/客户搜索选定订单，自动带出客户与订单商品行，避免手填内部 ID 出错
+  const [orderOptions, setOrderOptions] = useState<
+    { value: number; label: string; order: Order }[]
+  >([]);
+  const [orderSearching, setOrderSearching] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  const searchOrders = async (kw: string) => {
+    if (!kw) { setOrderOptions([]); return; }
+    setOrderSearching(true);
+    try {
+      const res = await orderApi.getList({ keyword: kw, page: 1, pageSize: 10 });
+      const data = unwrapResponse<PaginatedResult<Order>>(res);
+      setOrderOptions((data?.list || []).map((o) => ({
+        value: o.id,
+        label: `${o.orderNo} · ${o.customerName || ''} ${o.customerPhone || ''}`.trim(),
+        order: o,
+      })));
+    } catch {
+      setOrderOptions([]);
+    } finally {
+      setOrderSearching(false);
+    }
+  };
+
+  const selectOrder = (orderId: number) => {
+    const opt = orderOptions.find((o) => o.value === orderId);
+    setSelectedOrder(opt?.order ?? null);
+    createForm.setFieldsValue({
+      orderId,
+      customerId: opt?.order?.customerId ?? undefined,
+      orderItemId: undefined,
+    });
+  };
+
+  const clearSelectedOrder = () => {
+    setSelectedOrder(null);
+    setOrderOptions([]);
+    createForm.setFieldsValue({ orderId: undefined, customerId: undefined, orderItemId: undefined });
+  };
+
   const [list, setList] = useState<AfterSalesListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -50,6 +92,7 @@ export default function AfterSalesManage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [keyword, setKeyword] = useState('');
+  const [keywordInput, setKeywordInput] = useState('');
   const [detail, setDetail] = useState<AfterSalesListItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -85,7 +128,10 @@ export default function AfterSalesManage() {
       const res = await afterSalesApi.getById(record.id);
       const full = unwrapResponse<AfterSalesListItem>(res);
       if (full) setDetail(full);
-    } catch { /* 保留列表数据 */ } finally {
+    } catch (e: unknown) {
+      // 保留列表快照展示，但明确告知详情刷新失败，可关闭重开重试
+      message.error(getSafeAdminErrorMessage(e, '售后详情加载失败，当前展示列表快照，请重新打开重试。'));
+    } finally {
       setDetailLoading(false);
     }
   };
@@ -188,8 +234,8 @@ export default function AfterSalesManage() {
         <Space>
           <Input.Search
             placeholder="工单号/订单号/客户"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            value={keywordInput}
+            onChange={(e) => setKeywordInput(e.target.value)}
             onSearch={(v) => { setKeyword(v); setPage(1); }}
             className="w-64"
             allowClear
@@ -292,7 +338,11 @@ export default function AfterSalesManage() {
             <Descriptions.Item label="审核通过退款额">{detail.approvedRefundAmount ? `¥${Number(detail.approvedRefundAmount).toLocaleString()}` : '—'}</Descriptions.Item>
             <Descriptions.Item label="处理备注">{detail.adminNote || '—'}</Descriptions.Item>
             <Descriptions.Item label="处理人">{detail.handler?.realName || detail.handler?.username || '—'}</Descriptions.Item>
-            <Descriptions.Item label="创建时间">{detail.createdAt}</Descriptions.Item>
+            <Descriptions.Item label="创建时间">
+              {detail.createdAt
+                ? new Date(detail.createdAt).toLocaleString('zh-CN')
+                : '—'}
+            </Descriptions.Item>
           </Descriptions>
         )}
       </Drawer>
@@ -306,14 +356,42 @@ export default function AfterSalesManage() {
         destroyOnHidden
       >
         <Form form={createForm} layout="vertical" onFinish={handleCreate} preserve={false}>
-          <Form.Item name="orderId" label="订单 ID" rules={[{ required: true, message: '请输入订单 ID' }]}>
-            <Input type="number" min={1} step={1} className="w-full" placeholder="请输入订单 ID（数字）" />
+          {/* 提交合同保持 orderId/customerId/orderItemId 数字字段；由下方选择器自动写入 */}
+          <Form.Item name="orderId" hidden rules={[{ required: true, message: '请先搜索并选择订单' }]}>
+            <Input type="number" />
           </Form.Item>
-          <Form.Item name="customerId" label="客户 ID" rules={[{ required: true, message: '请输入订单所属客户 ID' }]}>
-            <Input type="number" min={1} step={1} className="w-full" placeholder="必须与订单所属客户一致" />
+          <Form.Item name="customerId" hidden rules={[{ required: true, message: '所选订单缺少客户信息，请重新选择' }]}>
+            <Input type="number" />
           </Form.Item>
-          <Form.Item name="orderItemId" label="订单商品 ID" rules={[{ required: true, message: '请输入订单商品 ID' }]}>
-            <Input type="number" min={1} step={1} className="w-full" placeholder="必须是该订单内的商品行 ID" />
+          <Form.Item label="关联订单" required>
+            <Select
+              showSearch
+              filterOption={false}
+              onSearch={searchOrders}
+              loading={orderSearching}
+              placeholder="搜索订单号 / 客户姓名 / 手机号"
+              value={selectedOrder?.orderNo}
+              onSelect={(v) => selectOrder(Number(v))}
+              onClear={clearSelectedOrder}
+              options={orderOptions}
+              allowClear
+              notFoundContent={orderSearching ? '搜索中…' : '输入关键字搜索订单'}
+            />
+          </Form.Item>
+          {selectedOrder && (
+            <p className="text-xs text-brand-muted -mt-2 mb-3">
+              客户：{selectedOrder.customerName || '—'} · {selectedOrder.customerPhone || '—'}（自动关联，无需填写）
+            </p>
+          )}
+          <Form.Item name="orderItemId" label="订单商品" rules={[{ required: true, message: '请选择订单内的商品行' }]}>
+            <Select
+              placeholder={selectedOrder ? '选择该订单内的商品行' : '请先选择订单'}
+              disabled={!selectedOrder}
+              options={(selectedOrder?.items || []).map((it) => ({
+                value: it.id,
+                label: [it.productNameSnapshot, it.productCodeSnapshot].filter(Boolean).join(' · '),
+              }))}
+            />
           </Form.Item>
           <Form.Item name="type" label="售后类型" rules={[{ required: true, message: '请选择售后类型' }]}>
             <Select options={[

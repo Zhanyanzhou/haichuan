@@ -13,6 +13,21 @@ test("服务端使用与客户端同源的动态模板语义校验器", () => {
   assert.equal(result.valid, true);
   assert.equal(result.definition?.templateId, "tpl_server_validation");
 
+  const authoringLocked = definitionFixture();
+  authoringLocked.nodes.node_container.authoring = { structureLocked: true };
+  assert.equal(validateDynamicTemplateDefinition(authoringLocked).valid, true);
+
+  const invalidAuthoring = structuredClone(authoringLocked) as any;
+  invalidAuthoring.nodes.node_container.authoring = {
+    structureLocked: "yes",
+    unsafeField: true,
+  };
+  const authoringCodes = validateDynamicTemplateDefinition(invalidAuthoring).issues.map(
+    (issue) => issue.code,
+  );
+  assert.ok(authoringCodes.includes("INVALID_STRUCTURE_LOCK"));
+  assert.ok(authoringCodes.includes("UNKNOWN_PROPERTY"));
+
   const requiredReadOnly = definitionFixture();
   requiredReadOnly.slots.slot_heading.required = true;
   requiredReadOnly.slots.slot_heading.editable = false;
@@ -63,6 +78,12 @@ test("发布门禁以根节点高度为唯一尺寸事实并禁止模板保存�
   const leakCodes = validateDynamicTemplatePublishDefinition(contentLeak).issues.map((issue) => issue.code);
   assert.ok(leakCodes.includes("PUBLISH_FORBIDS_DEFAULT_CONTENT"));
   assert.ok(leakCodes.includes("PUBLISH_FORBIDS_MOCK_CONTENT"));
+
+  const legacyEmptyPolicy = structuredClone(fixed);
+  legacyEmptyPolicy.slots.slot_heading.emptyPolicy = "use-default";
+  assert.ok(validateDynamicTemplatePublishDefinition(legacyEmptyPolicy).issues.some(
+    (issue) => issue.code === "PUBLISH_FORBIDS_LEGACY_EMPTY_POLICY",
+  ));
 
   const forbiddenPolicy = structuredClone(fixed);
   forbiddenPolicy.slots.slot_heading.editable = false;

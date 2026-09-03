@@ -13,7 +13,13 @@ import "./AccountExperience.css";
 
 type AccountExperienceProps = {
   authLoading: boolean;
-  onLogin: (values: { phone: string; password: string }) => void;
+  onLogin: (values: {
+    phone: string;
+    password: string;
+    captchaId?: string;
+    captchaCode?: string;
+    smsCode?: string;
+  }) => void | Promise<unknown>;
   onRegister: (values: {
     phone: string;
     password: string;
@@ -33,8 +39,34 @@ function WechatLoginPanel({
   const [bindToken, setBindToken] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  // 新手机号建账户必须短信验真（服务端强制；既有账户绑定不需要）
+  const [smsCode, setSmsCode] = useState("");
+  const [smsCooldown, setSmsCooldown] = useState(0);
+  const [sendingSms, setSendingSms] = useState(false);
   const [binding, setBinding] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    if (smsCooldown <= 0) return;
+    const timer = setInterval(() => setSmsCooldown((v) => v - 1), 1000);
+    return () => clearInterval(timer);
+  }, [smsCooldown]);
+
+  const handleSendBindSmsCode = async () => {
+    if (!/^1\d{10}$/.test(phone)) {
+      alert("请先填写有效的手机号");
+      return;
+    }
+    setSendingSms(true);
+    try {
+      await customerApi.requestSmsCode({ phone });
+      setSmsCooldown(60);
+    } catch (error: unknown) {
+      alert(getRequestErrorMessage(error, "验证码发送失败"));
+    } finally {
+      setSendingSms(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -99,6 +131,7 @@ function WechatLoginPanel({
         bindToken: bindToken!,
         phone,
         password,
+        smsCode: smsCode.trim() || undefined,
       });
       const result = unwrapResponse<{ customer: CustomerAccount }>(res);
       if (!result?.customer) throw new Error("绑定成功但会话未建立");
@@ -139,8 +172,27 @@ function WechatLoginPanel({
             style={{ marginTop: 6 }}
           />
         </label>
+        <label style={{ display: "block", marginTop: 12 }}>
+          短信验证码（新手机号创建账户必填）
+          <span style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <input
+              value={smsCode}
+              onChange={(event) => setSmsCode(event.target.value)}
+              inputMode="numeric"
+              maxLength={6}
+            />
+            <button
+              type="button"
+              onClick={handleSendBindSmsCode}
+              disabled={sendingSms || smsCooldown > 0 || !/^1\d{10}$/.test(phone)}
+              style={{ whiteSpace: "nowrap", fontSize: 12, minHeight: 0, padding: "0 10px" }}
+            >
+              {smsCooldown > 0 ? `${smsCooldown}s` : sendingSms ? "发送中…" : "获取验证码"}
+            </button>
+          </span>
+        </label>
         <p className="text-xs" style={{ marginTop: 6 }}>
-          已注册手机号请填原密码；未注册将创建新会员账户，新密码需为 6–18 位。
+          已注册手机号填原密码即可绑定，无需验证码；未注册手机号将创建新会员账户，需短信验证，新密码需为 {ACCOUNT_PASSWORD_MIN_LENGTH}–{ACCOUNT_PASSWORD_MAX_LENGTH} 位。
         </p>
         <button
           type="button"
@@ -199,6 +251,62 @@ function MemberAccess({
   const [smsRequired, setSmsRequired] = useState(false);
   const [smsCooldown, setSmsCooldown] = useState(0);
   const [sendingSms, setSendingSms] = useState(false);
+  // 登录分级挑战：3 次失败要求图形验证码，5 次失败升级短信验证码（服务端判定）
+  const [loginChallenge, setLoginChallenge] = useState<"none" | "captcha" | "sms">("none");
+  const [captcha, setCaptcha] = useState<{ captchaId: string; svg: string } | null>(null);
+  const [captchaCode, setCaptchaCode] = useState("");
+  const [loginSmsCode, setLoginSmsCode] = useState("");
+  const [loginSmsCooldown, setLoginSmsCooldown] = useState(0);
+  const [sendingLoginSms, setSendingLoginSms] = useState(false);
+
+  const loadLoginCaptcha = async () => {
+    try {
+      const res = await customerApi.loginCaptcha();
+      const data = unwrapResponse<{ captchaId: string; svg: string }>(res);
+      if (data?.captchaId) {
+        setCaptcha({ captchaId: data.captchaId, svg: data.svg });
+        setCaptchaCode("");
+      }
+    } catch {
+      // 验证码加载失败不打断表单；提交时服务端会再次要求
+    }
+  };
+
+  const refreshLoginChallenge = async () => {
+    if (!/^1\d{10}$/.test(phone)) return "none" as const;
+    try {
+      const res = await customerApi.loginChallenge(phone);
+      const data = unwrapResponse<{ level: "none" | "captcha" | "sms" }>(res);
+      const level = data?.level ?? "none";
+      setLoginChallenge(level);
+      if (level === "captcha" && !captcha) await loadLoginCaptcha();
+      return level;
+    } catch {
+      return "none" as const;
+    }
+  };
+
+  useEffect(() => {
+    if (loginSmsCooldown <= 0) return;
+    const timer = setInterval(() => setLoginSmsCooldown((v) => v - 1), 1000);
+    return () => clearInterval(timer);
+  }, [loginSmsCooldown]);
+
+  const handleSendLoginSmsCode = async () => {
+    if (!/^1\d{10}$/.test(phone)) {
+      alert("请先填写有效的手机号");
+      return;
+    }
+    setSendingLoginSms(true);
+    try {
+      await customerApi.requestLoginSmsCode({ phone });
+      setLoginSmsCooldown(60);
+    } catch (error: unknown) {
+      alert(getRequestErrorMessage(error, "验证码发送失败"));
+    } finally {
+      setSendingLoginSms(false);
+    }
+  };
 
   useEffect(() => {
     customerApi
@@ -239,8 +347,26 @@ function MemberAccess({
       className="account-member-access"
       onSubmit={(event) => {
         event.preventDefault();
-        if (mode === "login") onLogin({ phone, password });
-        else
+        if (mode === "login") {
+          void (async () => {
+            // 提交前按服务端失败计数刷新挑战等级；缺失挑战输入时先补齐再提交
+            const level = await refreshLoginChallenge();
+            if (level === "captcha" && !captchaCode.trim()) {
+              if (!captcha) await loadLoginCaptcha();
+              return;
+            }
+            if (level === "sms" && !loginSmsCode.trim()) return;
+            await onLogin({
+              phone,
+              password,
+              captchaId: level === "captcha" ? captcha?.captchaId : undefined,
+              captchaCode: level === "captcha" ? captchaCode.trim() : undefined,
+              smsCode: level === "sms" ? loginSmsCode.trim() : undefined,
+            });
+            // 失败后等级可能升级；成功时组件已卸载，刷新无副作用
+            await refreshLoginChallenge();
+          })();
+        } else
           onRegister({
             phone,
             password,
@@ -323,6 +449,60 @@ function MemberAccess({
               style={{ whiteSpace: "nowrap", fontSize: 12, minHeight: 0, padding: "0 10px" }}
             >
               {smsCooldown > 0 ? `${smsCooldown}s` : sendingSms ? "发送中…" : "获取验证码"}
+            </button>
+          </span>
+        </label>
+      )}
+      {mode === "login" && loginChallenge === "captcha" && (
+        <label>
+          图形验证码
+          <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              value={captchaCode}
+              onChange={(event) => setCaptchaCode(event.target.value)}
+              maxLength={4}
+              autoCapitalize="characters"
+              style={{ textTransform: "uppercase", letterSpacing: 2 }}
+              required
+            />
+            {captcha ? (
+              <img
+                src={`data:image/svg+xml;base64,${btoa(captcha.svg)}`}
+                alt="图形验证码"
+                title="点击刷新"
+                onClick={() => void loadLoginCaptcha()}
+                style={{ height: 44, cursor: "pointer", borderRadius: 2, border: "1px solid #DDE1E2" }}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => void loadLoginCaptcha()}
+                style={{ whiteSpace: "nowrap", fontSize: 12, minHeight: 0, padding: "0 10px" }}
+              >
+                获取验证码
+              </button>
+            )}
+          </span>
+        </label>
+      )}
+      {mode === "login" && loginChallenge === "sms" && (
+        <label>
+          短信验证码（多次尝试后需验证手机）
+          <span style={{ display: "flex", gap: 8 }}>
+            <input
+              value={loginSmsCode}
+              onChange={(event) => setLoginSmsCode(event.target.value)}
+              inputMode="numeric"
+              maxLength={6}
+              required
+            />
+            <button
+              type="button"
+              onClick={handleSendLoginSmsCode}
+              disabled={sendingLoginSms || loginSmsCooldown > 0 || !/^1\d{10}$/.test(phone)}
+              style={{ whiteSpace: "nowrap", fontSize: 12, minHeight: 0, padding: "0 10px" }}
+            >
+              {loginSmsCooldown > 0 ? `${loginSmsCooldown}s` : sendingLoginSms ? "发送中…" : "获取验证码"}
             </button>
           </span>
         </label>

@@ -42,6 +42,7 @@ const testBoundaryFiles = {
     "admin-auth-store-capabilities.spec.ts",
     "admin-header-toolbar.spec.ts",
     "admin-operating-foundation-states.spec.ts",
+    "admin-role-route-consistency.spec.ts",
     "array-field.spec.ts",
     "attribute-manage.spec.ts",
     "booking-editor.spec.ts",
@@ -50,6 +51,8 @@ const testBoundaryFiles = {
     "customer-admin-client.spec.ts",
     "dynamic-template-foundation.spec.ts",
     "dynamic-template-page-instance.spec.ts",
+    "editable-target-geometry.spec.ts",
+    "editable-targets.spec.ts",
     "editor-draft-recovery.admin.spec.ts",
     "editor-leave-guard.admin.spec.ts",
     "editor-visual-redesign-acceptance.spec.ts",
@@ -82,6 +85,7 @@ const testBoundaryFiles = {
     "visual-editor-double-poster.spec.ts",
     "visual-editor-hero.spec.ts",
     "warehouse-manage.spec.ts",
+    "workspace-controller-boundaries.spec.ts",
   ],
 } as const;
 

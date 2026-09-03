@@ -1,7 +1,11 @@
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
 import { getTemplatePreviewContent } from "../preview/templatePreviewContent";
 import {
+  compileDynamicTemplateRenderPlan,
+  getEditableTargetCompactLabel,
+  resolveEditableTargets,
   resolveTemplateDesignFrame,
+  type EditableTargetDescriptor,
   type TemplateDefinitionV2,
 } from "../template-definition";
 import {
@@ -26,11 +30,14 @@ export type TemplateCatalogSlotKind =
   | "business";
 
 export interface TemplateCatalogSlotDescriptor {
+  targetId: string;
+  ownerNodeId: string;
   slotId: string;
   roleId?: string;
   kind: TemplateCatalogSlotKind;
   label: string;
   compactLabel: string;
+  locator: EditableTargetDescriptor["locator"];
 }
 
 export interface TemplateCatalogPreviewModel {
@@ -40,21 +47,6 @@ export interface TemplateCatalogPreviewModel {
   ratioLabel: string;
   slots: TemplateCatalogSlotDescriptor[];
 }
-
-const TEXT_SLOT_TYPES = new Set<DynamicTemplateSlotType>([
-  "heading",
-  "text",
-  "richText",
-  "badge",
-  "icon",
-]);
-const MEDIA_SLOT_TYPES = new Set<DynamicTemplateSlotType>([
-  "image",
-  "video",
-  "carousel",
-  "hotspot",
-  "beforeAfter",
-]);
 
 const TEMPLATE_DESIGN_SAMPLE_MEDIA = {
   wide: previewWide,
@@ -146,111 +138,41 @@ function withTemplateDesignSampleMedia(
   }));
 }
 
-function getCatalogSlotKind(slotType: DynamicTemplateSlotType): TemplateCatalogSlotKind | undefined {
-  if (slotType === "heading") return "title";
-  if (["text", "richText"].includes(slotType)) return "description";
-  if (TEXT_SLOT_TYPES.has(slotType)) return "text";
-  if (MEDIA_SLOT_TYPES.has(slotType)) return "media";
-  if (slotType === "button" || slotType === "link") return "button";
-  if (["product", "productCard", "productCollection"].includes(slotType)) return "product";
-  if (slotType === "collection" || slotType === "categoryCollection") return "collection";
-  return undefined;
-}
-
-function getCatalogSlotLabels(
-  slotType: DynamicTemplateSlotType,
-): Pick<TemplateCatalogSlotDescriptor, "label" | "compactLabel"> {
-  if (slotType === "image") return { label: "图片槽位", compactLabel: "图片" };
-  if (slotType === "video") return { label: "视频槽位", compactLabel: "视频" };
-  if (["carousel", "hotspot", "beforeAfter"].includes(slotType)) {
-    return { label: "媒体槽位", compactLabel: "媒体" };
-  }
-  if (slotType === "heading") return { label: "标题槽位", compactLabel: "标题" };
-  if (["text", "richText"].includes(slotType)) {
-    return { label: "描述槽位", compactLabel: "描述" };
-  }
-  if (["badge", "icon"].includes(slotType)) {
-    return { label: "文字槽位", compactLabel: "文字" };
-  }
-  if (["button", "link"].includes(slotType)) {
-    return { label: "按钮槽位", compactLabel: "按钮" };
-  }
-  if (["product", "productCard", "productCollection"].includes(slotType)) {
-    return { label: "商品槽位", compactLabel: "商品" };
-  }
-  if (["collection", "categoryCollection"].includes(slotType)) {
-    return { label: "集合槽位", compactLabel: "集合" };
-  }
-  return { label: "文字槽位", compactLabel: "文字" };
-}
-
-function getCatalogContractObjectKind(kind: string): TemplateCatalogSlotKind | undefined {
-  if (kind === "media" || kind === "video") return "media";
-  if (kind === "text") return "text";
-  if (kind === "action") return "button";
-  if (kind === "product") return "product";
-  if (kind === "collection" || kind === "category") return "collection";
-  if (kind === "business") return "business";
-  if (kind === "marker") return "text";
-  return undefined;
-}
-
-function getCatalogContractObjectLabels(
-  kind: TemplateCatalogSlotKind,
-  contractKind: string,
-  roleId: string,
-): Pick<TemplateCatalogSlotDescriptor, "kind" | "label" | "compactLabel"> {
-  if (kind === "media") {
-    return contractKind === "video"
-      ? { kind, label: "视频槽位", compactLabel: "视频" }
-      : { kind, label: "图片槽位", compactLabel: "图片" };
-  }
-  if (kind === "button") return { kind, label: "按钮槽位", compactLabel: "按钮" };
-  if (kind === "product") return { kind, label: "商品槽位", compactLabel: "商品" };
-  if (kind === "collection") {
-    return contractKind === "category"
-      ? { kind, label: "分类槽位", compactLabel: "分类" }
-      : { kind, label: "集合槽位", compactLabel: "集合" };
-  }
-  if (kind === "business") return { kind, label: "业务槽位", compactLabel: "业务" };
-  if (/(?:subtitle|summary|description|body)/i.test(roleId)) {
-    return { kind: "description", label: "描述槽位", compactLabel: "描述" };
-  }
-  if (/(?:title|heading)/i.test(roleId)) {
-    return { kind: "title", label: "标题槽位", compactLabel: "标题" };
-  }
-  if (contractKind === "marker") return { kind: "text", label: "标记槽位", compactLabel: "标记" };
-  return { kind: "text", label: "文字槽位", compactLabel: "文字" };
-}
-
 function createTemplateCatalogSlotDescriptors(
   definition: TemplateDefinitionV2,
+  device: "desktop" | "mobile",
 ): TemplateCatalogSlotDescriptor[] {
-  return Object.values(definition.slots).flatMap((slot) => {
-    const genericKind = getCatalogSlotKind(slot.type);
-    const generic: TemplateCatalogSlotDescriptor[] = genericKind ? [{
-      slotId: slot.slotId,
-      kind: genericKind,
-      ...getCatalogSlotLabels(slot.type),
-    }] : [];
-    const moduleType = getContentTemplateModuleTypeForSlotType(slot.type);
-    const contract = moduleType ? getContentTemplateContract(moduleType) : undefined;
-    const seenRoleIds = new Set<string>();
-    const contractRoles = contract?.editorCapabilities.editableObjects.flatMap((object) => {
-      const kind = getCatalogContractObjectKind(object.kind);
-      if (!kind) return [];
-      const roleIds = object.nodeIds ?? [object.roleId];
-      return roleIds.flatMap((roleId): TemplateCatalogSlotDescriptor[] => {
-        if (seenRoleIds.has(roleId)) return [];
-        seenRoleIds.add(roleId);
-        return [{
-          slotId: slot.slotId,
-          roleId,
-          ...getCatalogContractObjectLabels(kind, object.kind, roleId),
-        }];
-      });
-    }) ?? [];
-    return [...generic, ...contractRoles];
+  const compiled = compileDynamicTemplateRenderPlan(definition, {
+    device,
+    showEmptySlots: true,
+  });
+  if (!compiled.ok) return [];
+  const targets = resolveEditableTargets(
+    definition,
+    compiled.plan,
+    getContentTemplateContract,
+  ).filter((target) => target.slotId);
+  const contractSlotIds = new Set(targets
+    .filter((target) => target.source === "builtin-contract-role")
+    .flatMap((target) => target.slotId ? [target.slotId] : []));
+  return targets.flatMap((target): TemplateCatalogSlotDescriptor[] => {
+    if (!target.slotId) return [];
+    if (target.source === "definition-node" && contractSlotIds.has(target.slotId)) return [];
+    const kind: TemplateCatalogSlotKind = target.kind === "action"
+      ? "button"
+      : target.kind === "structured"
+        ? "business"
+        : target.kind;
+    return [{
+      targetId: target.targetId,
+      ownerNodeId: target.ownerNodeId,
+      slotId: target.slotId,
+      ...(target.contractRoleId ? { roleId: target.contractRoleId } : {}),
+      kind,
+      label: target.label,
+      compactLabel: getEditableTargetCompactLabel(target),
+      locator: target.locator,
+    }];
   });
 }
 
@@ -445,6 +367,6 @@ export function createTemplateCatalogPreviewModel(
     heightMode: frame.heightMode,
     fallbackHeight: frame.fallbackHeight,
     ratioLabel: frame.ratioLabel,
-    slots: createTemplateCatalogSlotDescriptors(definition),
+    slots: createTemplateCatalogSlotDescriptors(definition, device),
   };
 }

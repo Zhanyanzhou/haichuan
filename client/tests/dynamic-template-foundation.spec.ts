@@ -208,17 +208,17 @@ test.describe("动态 TemplateDefinition 基础", () => {
 
     const dense = previewCase("dense");
     await dense.hover();
-    for (const kind of ["media", "text"] as const) {
-      const box = dense.locator(`[data-slot-kind="${kind}"]`).first();
+    for (const kind of ["media", "title"] as const) {
+      const box = dense.locator(`[data-editable-target-kind="${kind}"]`).first();
       await expect(box).toBeVisible();
       await expect(box).toHaveCSS("border-top-style", "solid");
       await expect(box).toHaveCSS("pointer-events", "none");
     }
-    await expect(dense.locator('[data-slot-kind="action"], [data-slot-kind="structured"]'))
+    await expect(dense.locator('[data-editable-target-kind="action"], [data-editable-target-kind="structured"]'))
       .toHaveCount(0);
-    const readableLabel = dense.locator(".template-editor__catalog-slot-label").first();
+    const readableLabel = dense.locator(".template-editor__editable-overlay-label").first();
     await expect(readableLabel).toHaveCSS("font-size", "12px");
-    await expect(dense.locator(".template-editor__catalog-slot-overlay"))
+    await expect(dense.locator('[data-template-editor-overlay-root="catalog"]'))
       .toHaveCSS("pointer-events", "none");
     await expect(dense.locator(".homepage-editor__template-slot-summary, .homepage-editor__template-description, .homepage-editor__template-add"))
       .toHaveCount(0);
@@ -228,7 +228,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
     const mediaGeometry = await dense.evaluate((card) => {
       const host = card.querySelector<HTMLElement>("[data-preview-natural-height]");
       const frame = card.querySelector<HTMLIFrameElement>("iframe");
-      const overlay = card.querySelector<HTMLElement>('[data-slot-kind="media"]');
+      const overlay = card.querySelector<HTMLElement>('[data-editable-target-kind="media"]');
       const content = frame?.contentDocument?.querySelector<HTMLElement>(
         ".template-editor__catalog-canvas-renderer",
       );
@@ -303,7 +303,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
     await expect(imageNode).toHaveAttribute("data-template-slot-id", "slot_image");
   });
 
-  test("Renderer 只在模板定义工作面接收节点拖动、缩放和键盘微调回调", async ({ page }) => {
+  test("Renderer 只在模板定义工作面接收节点拖动和键盘微调，不再挂载局部缩放层", async ({ page }) => {
     const region = page.getByRole("region", { name: "V2 模板定义画布几何" });
     const node = region.locator('[data-template-node-id="node_image"]');
     const output = region.getByLabel("V2 模板构图预览覆盖");
@@ -312,7 +312,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
       "template-definition",
     );
     await expect(node).toHaveAttribute("data-template-selected", "true");
-    await expect(region.getByRole("button", { name: "调整主视觉图片大小" })).toBeVisible();
+    await expect(region.locator("[data-template-free-resize-handle], [data-template-node-toolbar]")).toHaveCount(0);
 
     await node.focus();
     await node.press("ArrowRight");
@@ -334,25 +334,14 @@ test.describe("动态 TemplateDefinition 基础", () => {
       return next.node_image?.desktop?.offsetXPercent ?? 0;
     }).toBeGreaterThan(beforeMove.node_image?.desktop?.offsetXPercent ?? 0);
 
-    const handle = region.getByRole("button", { name: "调整主视觉图片大小" });
-    const handleBox = await handle.boundingBox();
-    if (!handleBox) throw new Error("V2 缩放手柄没有几何尺寸");
-    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(handleBox.x + handleBox.width / 2 + 32, handleBox.y + handleBox.height / 2);
-    await page.mouse.up();
-    await expect.poll(async () => {
-      const next = JSON.parse(await output.textContent() || "{}") as Record<string, { desktop?: { widthPercent?: number } }>;
-      return next.node_image?.desktop?.widthPercent ?? 100;
-    }).toBeGreaterThan(101);
     await expect(region.getByLabel("V2 模板构图手势提交次数")).not.toHaveText("0");
   });
 
-  test("自由 Stack 使用归一化构图、八向缩放和单次手势提交", async ({ page }) => {
+  test("自由 Stack 使用归一化构图，局部手柄由唯一宿主覆盖层提供", async ({ page }) => {
     const region = page.getByRole("region", { name: "V2 自由层画布" });
     const node = region.locator('[data-template-node-id="node_heading"]');
     await expect(node).toHaveCSS("position", "absolute");
-    await expect(node.locator("[data-template-free-resize-handle]")).toHaveCount(8);
+    await expect(node.locator("[data-template-free-resize-handle]")).toHaveCount(0);
     await node.focus();
     await node.press("ArrowRight");
     await expect(region.getByLabel("自由层手势提交次数")).toHaveText("1");
@@ -402,6 +391,10 @@ test.describe("动态 TemplateDefinition 基础", () => {
       duplicateSlotIds: string[];
       duplicatedPreviewContent: unknown;
       duplicatedHasFormalDefault: boolean;
+      duplicatedEmptyPolicy?: string;
+      sourceDefaultContent: unknown;
+      sourcePreviewContent: unknown;
+      sourceEmptyPolicy?: string;
       duplicateRemoved: boolean;
       cycleCode: string;
     };
@@ -412,8 +405,12 @@ test.describe("动态 TemplateDefinition 基础", () => {
     expect(result.stackChildren).toHaveLength(1);
     expect(new Set(result.slotKeys).size).toBe(result.slotKeys.length);
     expect(result.duplicateSlotIds).toHaveLength(1);
-    expect(result.duplicatedPreviewContent).toBe("仅用于预览的示例");
+    expect(result.duplicatedPreviewContent).toBeUndefined();
     expect(result.duplicatedHasFormalDefault).toBe(false);
+    expect(result.duplicatedEmptyPolicy).toBe("hide");
+    expect(result.sourceDefaultContent).toBe("历史正式默认内容");
+    expect(result.sourcePreviewContent).toBe("仅用于预览的示例");
+    expect(result.sourceEmptyPolicy).toBe("use-default");
     expect(result.duplicateRemoved).toBe(true);
     expect(result.cycleCode).toBe("MOVE_WOULD_CREATE_CYCLE");
   });
@@ -421,9 +418,15 @@ test.describe("动态 TemplateDefinition 基础", () => {
   test("本机草稿保存、恢复、另存副本和 JSON 导入保持结构身份并移除内容值", async ({ page }) => {
     const result = JSON.parse(await page.getByTestId("local-draft-result").textContent() || "{}") as {
       savedId: string;
+      savedDefaultContentCount: number;
+      savedPreviewContentCount: number;
+      savedEmptyPolicy?: string;
       loadedId: string;
       copiedId: string;
       copiedName: string;
+      copiedDefaultContentCount: number;
+      copiedPreviewContentCount: number;
+      copiedEmptyPolicy?: string;
       importedId: string;
       importedName: string;
       importedDefaultContentCount: number;
@@ -435,9 +438,15 @@ test.describe("动态 TemplateDefinition 基础", () => {
       exportedSchemaVersion: number;
     };
     expect(result.loadedId).toBe(result.savedId);
+    expect(result.savedDefaultContentCount).toBe(0);
+    expect(result.savedPreviewContentCount).toBe(0);
+    expect(result.savedEmptyPolicy).toBe("hide");
     expect(result.copiedId).not.toBe(result.savedId);
     expect(result.importedId).not.toBe(result.savedId);
     expect(result.copiedName).toBe("本地草稿测试副本");
+    expect(result.copiedDefaultContentCount).toBe(0);
+    expect(result.copiedPreviewContentCount).toBe(0);
+    expect(result.copiedEmptyPolicy).toBe("hide");
     expect(result.importedName).toBe("本地草稿测试");
     expect(result.importedDefaultContentCount).toBe(0);
     expect(result.importedPreviewContentCount).toBe(0);

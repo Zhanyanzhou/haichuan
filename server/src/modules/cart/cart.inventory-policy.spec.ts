@@ -1,6 +1,6 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
-import { ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 import { CartService } from "./cart.service";
@@ -129,10 +129,10 @@ function createMergeService(initialRows: MemoryCart[]) {
 
 test("有效客户与当前 session 共存时原子认领游客购物车", async () => {
   const { service, rows } = createMergeService([
-    { id: 1, userId: null, sessionId: "cart-session", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
+    { id: 1, userId: null, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
   ]);
 
-  const cart = await service.getCart({ userId: 5, sessionId: "cart-session" });
+  const cart = await service.getCart({ userId: 5, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
 
   assert.equal(cart.length, 1);
   assert.equal(rows[0].userId, 5);
@@ -141,11 +141,11 @@ test("有效客户与当前 session 共存时原子认领游客购物车", async
 
 test("合并重复 SINGLE_UNIT SKU 时仅保留一件", async () => {
   const { service, rows } = createMergeService([
-    { id: 1, userId: null, sessionId: "cart-session", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
+    { id: 1, userId: null, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
     { id: 2, userId: 5, sessionId: null, skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
   ]);
 
-  await service.getCart({ userId: 5, sessionId: "cart-session" });
+  await service.getCart({ userId: 5, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
 
   assert.deepEqual(rows.map(({ id, userId, sessionId, quantity }) => ({ id, userId, sessionId, quantity })), [
     { id: 2, userId: 5, sessionId: null, quantity: 1 },
@@ -154,11 +154,11 @@ test("合并重复 SINGLE_UNIT SKU 时仅保留一件", async () => {
 
 test("合并普通 SKU 时数量不超过购物车上限", async () => {
   const { service, rows } = createMergeService([
-    { id: 1, userId: null, sessionId: "cart-session", skuId: 10, productId: 1, quantity: 5, inventoryPolicy: "STANDARD" },
+    { id: 1, userId: null, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab", skuId: 10, productId: 1, quantity: 5, inventoryPolicy: "STANDARD" },
     { id: 2, userId: 5, sessionId: null, skuId: 10, productId: 1, quantity: 98, inventoryPolicy: "STANDARD" },
   ]);
 
-  await service.getCart({ userId: 5, sessionId: "cart-session" });
+  await service.getCart({ userId: 5, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].quantity, 99);
@@ -166,14 +166,14 @@ test("合并普通 SKU 时数量不超过购物车上限", async () => {
 
 test("无客户身份时不能认领其他 session 的购物车", async () => {
   const { service, rows } = createMergeService([
-    { id: 1, userId: null, sessionId: "owner-session", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
+    { id: 1, userId: null, sessionId: "0f1e2d3c-0000-4000-8000-0123456789ab", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
   ]);
 
-  const cart = await service.getCart({ sessionId: "other-session" });
+  const cart = await service.getCart({ sessionId: "9a8b7c6d-0000-4000-8000-0123456789ab" });
 
   assert.equal(cart.length, 0);
   assert.equal(rows[0].userId, null);
-  assert.equal(rows[0].sessionId, "owner-session");
+  assert.equal(rows[0].sessionId, "0f1e2d3c-0000-4000-8000-0123456789ab");
 });
 
 test("读取购物车会重新核对商品、SKU、数量与库存并返回可解释状态", async () => {
@@ -245,4 +245,20 @@ test("读取购物车会重新核对商品、SKU、数量与库存并返回可�
   );
   assert.equal(cart[0].availability.available, true);
   assert.ok(cart.slice(1).every((item) => !item.availability.available));
+});
+
+// 游客会话标识合同：只接受标准 UUID，自报的宽松字符串（时间戳/短随机串）一律 400，
+// 防止猜测或撞到他人 sessionId 读改其购物车。
+test("游客会话标识必须是标准 UUID", async () => {
+  const { service } = createMergeService([]);
+
+  await assert.rejects(
+    () => service.getCart({ sessionId: "cart_lx92k" }),
+    (error: unknown) =>
+      error instanceof BadRequestException &&
+      /缺少有效的会话标识/.test(error.message),
+  );
+  await assert.doesNotReject(() =>
+    service.getCart({ sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" }),
+  );
 });

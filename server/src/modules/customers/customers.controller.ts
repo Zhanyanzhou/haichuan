@@ -28,6 +28,7 @@ import {
 } from '../../common/security/session-security';
 import { RefreshSessionService } from '../../common/security/refresh-session.service';
 import { CustomerNotificationsService } from './customer-notifications.service';
+import { MarketingService } from '../marketing/marketing.service';
 import { CustomerNotificationQueryDto } from './dto/customer-notification-query.dto';
 import { CustomerInquiryQueryDto } from './dto/customer-inquiry-query.dto';
 import type { CustomerRequest } from '../../common/security/authenticated-principal';
@@ -46,6 +47,7 @@ export class CustomersController {
     private readonly ordersService: OrdersService,
     private readonly customerNotifications: CustomerNotificationsService,
     private readonly refreshSessions: RefreshSessionService,
+    private readonly marketingService: MarketingService,
   ) {}
 
   // 游客下单已关闭（DECISIONS D.7）：checkout 必须先 login/register，不再签发 access token
@@ -162,6 +164,42 @@ export class CustomersController {
     return this.customersService.requestSmsCode(dto.phone);
   }
 
+  // ===== 登录分级挑战（防低速爆破；永不锁号，真实客户可用短信验证继续）=====
+
+  // ===== 结算可用券（客户侧只读试算；核销仍在建单事务内原子完成）=====
+
+  @Public()
+  @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @Get('me/coupons/usable')
+  usableCoupons(@Query('amountCents') amountCents: string) {
+    return this.marketingService.listUsableCoupons(Number(amountCents) || 0);
+  }
+
+  /** 查询手机号当前需要的挑战等级（无副作用；仅按失败计数，与账号是否存在无关） */
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Get('login/challenge')
+  loginChallenge(@Query('phone') phone: string) {
+    return this.customersService.loginChallenge(phone);
+  }
+
+  /** 一次性图形验证码（内存 5 分钟时效；点击/过期可重取） */
+  @Public()
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @Get('login/captcha')
+  loginCaptcha() {
+    return this.customersService.issueLoginCaptcha();
+  }
+
+  /** 登录挑战短信验证码（purpose=LOGIN，与注册码互不通用） */
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('login/sms-code')
+  loginSmsCode(@Body() dto: RequestSmsCodeDto) {
+    return this.customersService.requestSmsCode(dto.phone, 'LOGIN');
+  }
+
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me')
@@ -211,8 +249,18 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/orders/:id/tracking')
-  getOrderTracking(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  getTracking(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
     return this.ordersService.trackForCustomer(request.customer.id, id);
+  }
+
+  // 客户自助取消未付款订单（存在待处理支付时服务端拒绝，防止渠道扣款与取消竞态）
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Post('me/orders/:id/cancel')
+  cancelOrder(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
+    return this.ordersService.cancelForCustomer(request.customer.id, id);
   }
 
   @Public()

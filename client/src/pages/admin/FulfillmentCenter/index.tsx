@@ -3,18 +3,13 @@ import { Button, Drawer, Form, Input, message, Modal, Select, Space, Table, Tag,
 import { ExportOutlined, EyeOutlined, TruckOutlined } from '@ant-design/icons';
 import { fulfillmentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
+import { csvRow } from '@/utils/csv';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+import { FULFILLMENT_STATUS_META } from '@/constants/tradeStatusCopy';
 import type { FulfillmentStatus, PaginatedResult } from '@/types';
 
-// 履约状态映射（含颜色与中文标签）
-const STATUS_META: Record<FulfillmentStatus, { color: string; label: string }> = {
-  PENDING_PICK: { color: 'default', label: '待拣货' },
-  PENDING_CHECK: { color: 'gold', label: '待复核' },
-  PENDING_SHIP: { color: 'orange', label: '待发货' },
-  SHIPPED: { color: 'blue', label: '已发货' },
-  DELIVERED: { color: 'green', label: '已送达' },
-  ABNORMAL: { color: 'red', label: '物流异常' },
-};
+// 履约状态映射已收敛到 constants/tradeStatusCopy（与订单详情共用同一来源）
+const STATUS_META = FULFILLMENT_STATUS_META;
 
 const STATUS_TABS: Array<{ key: string; label: string }> = [
   { key: 'all', label: '全部' },
@@ -112,8 +107,9 @@ export default function FulfillmentCenter() {
       const res = await fulfillmentApi.getById(record.id);
       const full = unwrapResponse<FulfillmentListItem>(res);
       if (full) setDetail(full);
-    } catch {
-      // 保留列表数据即可
+    } catch (e: unknown) {
+      // 保留列表快照展示，但明确告知详情刷新失败，可关闭重开重试
+      message.error(getSafeAdminErrorMessage(e, '履约详情加载失败，当前展示列表快照，请重新打开重试。'));
     } finally {
       setDetailLoading(false);
     }
@@ -177,7 +173,15 @@ export default function FulfillmentCenter() {
     const csv = ['履约单号,订单号,客户,承运商,运单号,状态,发货时间']
       .concat(
         list.map((f) =>
-          `${f.fulfillmentNo},${f.order?.orderNo || ''},${f.order?.customerName || ''},${f.carrier || ''},${f.trackingNo || ''},${STATUS_META[f.status]?.label || f.status},${f.shippedAt || ''}`,
+          csvRow([
+            f.fulfillmentNo,
+            f.order?.orderNo || '',
+            f.order?.customerName || '',
+            f.carrier || '',
+            f.trackingNo || '',
+            STATUS_META[f.status]?.label || f.status,
+            f.shippedAt || '',
+          ]),
         ),
       )
       .join('\n');
@@ -329,7 +333,17 @@ export default function FulfillmentCenter() {
               { value: '其他', label: '其他' },
             ]} />
           </Form.Item>
-          <Form.Item name="trackingNo" label="运单号" rules={[{ required: true, message: '请填写运单号' }]}>
+          <Form.Item
+            name="trackingNo"
+            label="运单号"
+            rules={[
+              { required: true, message: '请填写运单号' },
+              {
+                pattern: /^[A-Za-z0-9][A-Za-z0-9-]{4,29}$/,
+                message: '运单号应为 5-30 位字母或数字（可含连字符）',
+              },
+            ]}
+          >
             <Input placeholder="物流单号" />
           </Form.Item>
           <Form.Item name="internalNote" label="内部备注"><Input.TextArea rows={3} /></Form.Item>

@@ -31,7 +31,8 @@ export default function StoreInfoBlock({ module, editMode }: StoreInfoBlockProps
   const resolvedHours = String(unifiedSettings?.businessHours || "");
   const resolvedPhone = String(unifiedSettings?.contactPhone || "");
   const rawMapUrl = String(unifiedSettings?.storeMapUrl || "").trim();
-  const resolvedMapUrl = /^https?:\/\//i.test(rawMapUrl) ? rawMapUrl : "";
+  // 与内容合同 externalLinkProtocol=https-only 保持一致：http 链接不渲染，避免混合内容
+  const resolvedMapUrl = /^https:\/\//i.test(rawMapUrl) ? rawMapUrl : "";
   const hasVisitDetails = Boolean(
     resolvedAddress || resolvedHours || resolvedPhone || resolvedMapUrl,
   );

@@ -5,7 +5,6 @@ import DynamicTemplateCanvas from "./DynamicTemplateCanvas";
 import DynamicTemplateInspectorPanel from "./DynamicTemplateInspectorPanel";
 import DynamicTemplateStructurePanel from "./DynamicTemplateStructurePanel";
 import TemplateEditorToolbar from "./TemplateEditorToolbar";
-import { hasUnpersistedTemplateDraft, useTemplateEditorSession } from "./templateEditorSession";
 import {
   exportDynamicTemplateDraftJson,
   importDynamicTemplateDraftJson,
@@ -16,56 +15,35 @@ import { BlockOutlined, ControlOutlined } from "@ant-design/icons";
 import TemplateEditorLibrary, {
   type TemplateEditorLibraryTarget,
 } from "./TemplateEditorLibrary";
-import { notifyDynamicTemplateCatalogChanged } from "./templateCatalogEvents";
+import { hasDynamicTemplateCompatibilityState } from "./dynamicTemplateEditorUtils";
+import type { TemplateWorkspaceController } from "./TemplateWorkspaceController";
 import { DynamicTemplateRenderer } from "../template-definition";
-import { unwrapResponse } from "@/utils/unwrap";
 import {
-  dynamicTemplateApi,
   type DynamicTemplateResource,
   type DynamicTemplateVersionResource,
 } from "@/services/clients/dynamicTemplateClient";
 
-export interface PersistTemplateOptions {
-  asCopy?: boolean;
-  overwriteCurrent?: boolean;
-  name?: string;
-}
-
 type TemplateTransitionDestination = "page" | "template";
 
-function getTemplateLifecycleErrorMessage(error: unknown, fallback: string) {
-  if (!(error instanceof Error)) return fallback;
-  const detail = error.message.trim();
-  return detail && !/^Request failed with status code \d+$/.test(detail) ? detail : fallback;
-}
-
 export default function TemplateWorkspace({
-  onPersist,
-  onPublish,
-  localOnly = false,
-  publishing = false,
-  onReturnPage,
-  onOpenSystemTemplate,
-  onOpenPersonalTemplate,
-  onCreateDynamicTemplate,
-  onOpenDynamicTemplate,
-  onOpenPersistedDynamicTemplate,
+  controller,
 }: {
-  onPersist: (options?: PersistTemplateOptions) => Promise<boolean>;
-  onPublish?: () => Promise<boolean>;
-  localOnly?: boolean;
-  publishing?: boolean;
-  onReturnPage: () => void;
-  onOpenSystemTemplate: (
-    moduleType: string,
-    current?: import("@/services/api").SystemContentTemplateCurrent,
-  ) => void;
-  onOpenPersonalTemplate: (template: import("@/services/api").PersonalContentTemplate) => void;
-  onCreateDynamicTemplate: () => void;
-  onOpenDynamicTemplate: (localDraftId: string) => void;
-  onOpenPersistedDynamicTemplate: (template: import("@/services/clients/dynamicTemplateClient").DynamicTemplateResource) => void;
+  controller: TemplateWorkspaceController;
 }) {
   const { message, modal } = AntdApp.useApp();
+  const {
+    localOnly,
+    publishing,
+    lifecycleBusy,
+    draft,
+    dirty,
+    hasBaseline,
+    device,
+    previewMode,
+    previewScenario,
+    saveStatus,
+    setPreviewMode,
+  } = controller;
   const [structureCollapsed, setStructureCollapsed] = useState(() => {
     try {
       const stored = sessionStorage.getItem("template-editor-structure-collapsed");
@@ -128,46 +106,12 @@ export default function TemplateWorkspace({
   const [versionsError, setVersionsError] = useState<string | null>(null);
   const [versions, setVersions] = useState<DynamicTemplateVersionResource[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
-  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const transitionInFlightRef = useRef(false);
-  const lifecycleInFlightRef = useRef(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
-  const draft = useTemplateEditorSession((state) => state.draft);
-  const device = useTemplateEditorSession((state) => state.device);
-  const previewMode = useTemplateEditorSession((state) => state.previewMode);
-  const previewScenario = useTemplateEditorSession((state) => state.previewScenario);
-  const setPreviewMode = useTemplateEditorSession((state) => state.setPreviewMode);
-  const saveStatus = useTemplateEditorSession((state) => state.saveStatus);
-  const dirty = useTemplateEditorSession((state) => state.dirty);
 
   const openTemplateTarget = useCallback((target: TemplateEditorLibraryTarget) => {
-    if (target.kind === "system-fixed") onOpenSystemTemplate(target.moduleType, target.current);
-    else if (target.kind === "personal-fixed") onOpenPersonalTemplate(target.template);
-    else if (target.kind === "dynamic-persisted") {
-      onOpenPersistedDynamicTemplate(target.template);
-      if (target.recoveryDefinition) {
-        const session = useTemplateEditorSession.getState();
-        const openedDraft = session.draft;
-        if (
-          openedDraft?.sourceType === "persisted"
-          && openedDraft.definition.templateId === target.template.templateId
-        ) {
-          session.setDynamicDefinition(target.recoveryDefinition);
-          session.selectObject(target.recoveryDefinition.rootNodeId);
-          message.warning("服务端草稿缺少当前系统模板组件，已载入系统基线供修复；原草稿尚未覆盖，确认后再保存");
-        }
-      }
-    }
-    else if (target.kind === "dynamic-local") onOpenDynamicTemplate(target.localDraftId);
-    else onCreateDynamicTemplate();
-  }, [
-    message,
-    onCreateDynamicTemplate,
-    onOpenDynamicTemplate,
-    onOpenPersistedDynamicTemplate,
-    onOpenPersonalTemplate,
-    onOpenSystemTemplate,
-  ]);
+    controller.openTarget(target);
+  }, [controller]);
 
   const requestTransition = useCallback((
     next: () => void,
@@ -184,12 +128,12 @@ export default function TemplateWorkspace({
       );
       return;
     }
-    if (!hasUnpersistedTemplateDraft()) {
+    if (!draft || !dirty) {
       next();
       return;
     }
     transitionInFlightRef.current = true;
-    const currentTemplateName = useTemplateEditorSession.getState().draft?.definition.name.trim()
+    const currentTemplateName = draft.definition.name.trim()
       || "当前模板";
     const transitionCopy = destination === "page"
       ? {
@@ -238,7 +182,7 @@ export default function TemplateWorkspace({
         </div>
       ),
       onOk: async () => {
-        const saved = await onPersist({ overwriteCurrent: true });
+        const saved = await controller.persist({ overwriteCurrent: true });
         transitionInFlightRef.current = false;
         if (saved) next();
       },
@@ -247,26 +191,18 @@ export default function TemplateWorkspace({
         transitionInFlightRef.current = false;
       },
     });
-  }, [lifecycleBusy, message, modal, onPersist, publishing, saveStatus]);
+  }, [controller, dirty, draft, lifecycleBusy, message, modal, publishing, saveStatus]);
 
   const requestOpenTemplateTarget = useCallback((target: TemplateEditorLibraryTarget) => {
     requestTransition(() => openTemplateTarget(target), "template");
   }, [openTemplateTarget, requestTransition]);
 
   const requestReturn = () => {
-    requestTransition(onReturnPage, "page");
+    requestTransition(controller.returnToPage, "page");
   };
 
   const moveTemplateToTrash = (template: Pick<DynamicTemplateResource, "templateId" | "name">) => {
-    const current = useTemplateEditorSession.getState();
-    const currentDraft = current.draft;
-    if (localOnly || lifecycleInFlightRef.current) return;
-    const archivingCurrentTemplate = currentDraft?.sourceType === "persisted"
-      && currentDraft.definition.templateId === template.templateId;
-    if (archivingCurrentTemplate && current.dirty) {
-      message.warning("请先保存草稿或放弃未保存修改，再将当前模板移入回收站。");
-      return;
-    }
+    if (localOnly || lifecycleBusy) return;
     let archiveDialog: { destroy: () => void } | null = null;
     archiveDialog = modal.confirm({
       title: `将模板“${template.name}”移入回收站？`,
@@ -275,58 +211,33 @@ export default function TemplateWorkspace({
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
-        lifecycleInFlightRef.current = true;
-        setLifecycleBusy(true);
-        try {
-          await dynamicTemplateApi.archive(template.templateId);
+        const archived = await controller.archive(template);
+        if (archived) {
           archiveDialog?.destroy();
-          const latest = useTemplateEditorSession.getState();
-          if (
-            latest.draft?.sourceType === "persisted"
-            && latest.draft.definition.templateId === template.templateId
-          ) latest.close();
-          notifyDynamicTemplateCatalogChanged();
-          message.success(`模板“${template.name}”已移入回收站`);
-        } catch (error) {
-          message.error(getTemplateLifecycleErrorMessage(error, "移入回收站失败，当前模板仍保留"));
-        } finally {
-          lifecycleInFlightRef.current = false;
-          setLifecycleBusy(false);
         }
       },
     });
   };
 
   const discardCurrentDraft = () => {
-    const current = useTemplateEditorSession.getState();
-    if (!current.draft || !current.dirty) return;
+    if (!draft || !dirty) return;
     modal.confirm({
-      title: `放弃“${current.draft.definition.name}”的未保存修改？`,
-      content: current.baseline
+      title: `放弃“${draft.definition.name}”的未保存修改？`,
+      content: hasBaseline
         ? "当前编辑会恢复到最近一次已保存草稿；正式版本和页面实例不会改变。"
         : "这是尚未保存的新模板，放弃后只会清除当前本地编辑会话。",
       okText: "放弃未保存修改",
       okButtonProps: { danger: true },
       cancelText: "继续编辑",
       onOk: () => {
-        const latest = useTemplateEditorSession.getState();
-        if (latest.baseline) latest.open(latest.baseline);
-        else latest.close();
+        controller.discardChanges();
         message.success("未保存的模板修改已放弃");
       },
     });
   };
 
   const permanentlyDeleteTemplate = (template: Pick<DynamicTemplateResource, "templateId" | "name">) => {
-    const current = useTemplateEditorSession.getState();
-    const currentDraft = current.draft;
-    if (localOnly || lifecycleInFlightRef.current) return;
-    const deletingCurrentTemplate = currentDraft?.sourceType === "persisted"
-      && currentDraft.definition.templateId === template.templateId;
-    if (deletingCurrentTemplate && current.dirty) {
-      message.warning("请先保存草稿或放弃未保存修改，再永久删除当前模板。");
-      return;
-    }
+    if (localOnly || lifecycleBusy) return;
     modal.confirm({
       title: `永久删除模板“${template.name}”？`,
       content: "永久删除后无法恢复。仅从未发布、没有版本历史且未被页面引用的自定义模板可以永久删除。",
@@ -334,47 +245,20 @@ export default function TemplateWorkspace({
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
-        lifecycleInFlightRef.current = true;
-        setLifecycleBusy(true);
-        try {
-          await dynamicTemplateApi.deleteDraft(template.templateId);
-          const latest = useTemplateEditorSession.getState();
-          if (
-            latest.draft?.sourceType === "persisted"
-            && latest.draft.definition.templateId === template.templateId
-          ) latest.close();
-          notifyDynamicTemplateCatalogChanged();
-          message.success(`模板“${template.name}”已永久删除`);
-        } catch (error) {
-          message.error(getTemplateLifecycleErrorMessage(error, "永久删除失败；模板和页面数据均未改变"));
-        } finally {
-          lifecycleInFlightRef.current = false;
-          setLifecycleBusy(false);
-        }
+        await controller.deleteDraft(template);
       },
     });
   };
 
   const restoreTemplate = (template: import("@/services/clients/dynamicTemplateClient").DynamicTemplateResource) => {
-    if (localOnly || lifecycleInFlightRef.current) return;
+    if (localOnly || lifecycleBusy) return;
     modal.confirm({
       title: `恢复模板“${template.name}”？`,
       content: "恢复后模板会重新进入可设计状态；若已有正式版本，也会重新进入页面装修目录。已有页面实例不会被修改。",
       okText: "恢复模板",
       cancelText: "取消",
       onOk: async () => {
-        lifecycleInFlightRef.current = true;
-        setLifecycleBusy(true);
-        try {
-          await dynamicTemplateApi.restore(template.templateId);
-          notifyDynamicTemplateCatalogChanged();
-          message.success(`模板“${template.name}”已恢复`);
-        } catch (error) {
-          message.error(getTemplateLifecycleErrorMessage(error, "模板恢复失败，请重试"));
-        } finally {
-          lifecycleInFlightRef.current = false;
-          setLifecycleBusy(false);
-        }
+        await controller.restore(template);
       },
     });
   };
@@ -388,13 +272,13 @@ export default function TemplateWorkspace({
         okText: "更新本机测试草稿",
         cancelText: "取消",
         onOk: async () => {
-          const saved = await onPersist({ overwriteCurrent: true });
+          const saved = await controller.persist({ overwriteCurrent: true });
           if (!saved) throw new Error("本机测试草稿保存失败");
         },
       });
       return;
     }
-    await onPersist({ overwriteCurrent: true });
+    await controller.persist({ overwriteCurrent: true });
   };
 
   const openSaveCopy = () => {
@@ -411,26 +295,24 @@ export default function TemplateWorkspace({
       return;
     }
     setModalSaving(true);
-    const saved = await onPersist({ asCopy: true, name });
+    const saved = await controller.persist({ asCopy: true, name });
     setModalSaving(false);
     if (saved) setCopyOpen(false);
   };
 
   const openVersionHistory = async () => {
-    const currentDraft = useTemplateEditorSession.getState().draft;
-    if (!currentDraft) return;
+    if (!draft) return;
     setVersionsOpen(true);
     setVersionsLoading(true);
     setVersionsError(null);
     try {
-      if (currentDraft.sourceType === "persisted") {
-        const response = await dynamicTemplateApi.listVersions(currentDraft.definition.templateId);
-        const list = unwrapResponse<DynamicTemplateVersionResource[]>(response) ?? [];
-        setVersions(list);
-        setSelectedVersion(list[0]?.version ?? null);
-      } else {
+      if (draft.sourceType !== "persisted") {
         setVersionsOpen(false);
+        return;
       }
+      const list = await controller.listVersions();
+      setVersions(list);
+      setSelectedVersion(list[0]?.version ?? null);
     } catch {
       setVersionsError("版本历史读取失败，当前模板草稿未改变");
     } finally {
@@ -439,15 +321,14 @@ export default function TemplateWorkspace({
   };
 
   const exportDynamicDraft = () => {
-    const currentDraft = useTemplateEditorSession.getState().draft;
-    if (!currentDraft) return;
+    if (!draft) return;
     try {
-      const source = exportDynamicTemplateDraftJson(currentDraft);
+      const source = exportDynamicTemplateDraftJson(draft);
       const blob = new Blob([source], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${currentDraft.definition.name.replace(/[\\/:*?"<>|]+/g, "-") || "dynamic-template"}.json`;
+      link.download = `${draft.definition.name.replace(/[\\/:*?"<>|]+/g, "-") || "dynamic-template"}.json`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
       message.success("已导出通过校验的模板定义文件");
@@ -460,12 +341,10 @@ export default function TemplateWorkspace({
     try {
       const imported = importDynamicTemplateDraftJson(await file.text());
       const replaceDraft = () => {
-        const session = useTemplateEditorSession.getState();
-        session.open(imported, { isNew: true });
-        session.selectObject(imported.definition.rootNodeId);
+        controller.openImportedDraft(imported);
         message.success("已导入模板结构；真实内容值未导入，请在页面装修中配置");
       };
-      if (!hasUnpersistedTemplateDraft()) {
+      if (!draft || !dirty) {
         replaceDraft();
         return;
       }
@@ -487,7 +366,7 @@ export default function TemplateWorkspace({
       <TemplateEditorToolbar
         onSave={() => { void saveCurrentTemplate(); }}
         onOpenSaveCopy={openSaveCopy}
-        onPublish={draft && onPublish ? () => { void onPublish(); } : undefined}
+        onPublish={draft && !localOnly ? () => { void controller.publish(); } : undefined}
         localOnly={localOnly}
         publishing={publishing}
         onExport={draft ? exportDynamicDraft : undefined}
@@ -648,6 +527,14 @@ export default function TemplateWorkspace({
         <p className="homepage-editor__properties-hint">
           将创建新的模板草稿；当前模板和页面内容保持不变。
         </p>
+        {draft && hasDynamicTemplateCompatibilityState(draft.definition) ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="副本不会包含历史默认内容或兼容规则"
+            description="系统只复制当前结构、构图、样式和槽位规则；旧模板中的内容与仅供历史读取的空值规则仍保留在来源记录中。"
+          />
+        ) : null}
       </Modal>
 
       <Modal

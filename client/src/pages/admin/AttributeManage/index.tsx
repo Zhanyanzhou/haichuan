@@ -81,7 +81,12 @@ export default function AttributeManage() {
   };
 
   const submitAttr = async () => {
-    const values = await form.validateFields();
+    let values: Awaited<ReturnType<typeof form.validateFields>>;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
     try {
       if (editing) await attributeApi.update(editing.id, values);
       else await attributeApi.create(values);
@@ -118,7 +123,12 @@ export default function AttributeManage() {
   };
 
   const submitValue = async () => {
-    const values = await valueForm.validateFields();
+    let values: Awaited<ReturnType<typeof valueForm.validateFields>>;
+    try {
+      values = await valueForm.validateFields();
+    } catch {
+      return;
+    }
     try {
       if (editingValue) {
         await attributeApi.updateValue(editingValue.id, values);

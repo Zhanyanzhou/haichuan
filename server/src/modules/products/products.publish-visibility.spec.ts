@@ -28,6 +28,7 @@ interface ProductRecord {
   id: number;
   status: Status;
   deletedAt: Date | null;
+  updatedAt?: Date | null;
   visibility: Visibility;
   publicationQualityStatus: PublicationQualityStatus;
   publicationQualityHash?: string | null;
@@ -245,6 +246,26 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
         if (!record) throw new Error("测试数据不存在");
         Object.assign(record, data);
         return { ...record };
+      },
+      // update 路径现以 updateMany + updatedAt 条件实现乐观并发控制；
+      // 测试记录不维护 updatedAt（where.updatedAt 为 undefined 时按 id 匹配，与 Prisma 语义一致）。
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: { id: number; updatedAt?: Date | undefined };
+        data: Record<string, any>;
+      }) => {
+        const record = records.find(
+          (r) =>
+            r.id === where.id &&
+            (where.updatedAt === undefined ||
+              new Date(r.updatedAt ?? 0).getTime() === new Date(where.updatedAt).getTime()),
+        );
+        if (!record) return { count: 0 };
+        productUpdateCount += 1;
+        Object.assign(record, data);
+        return { count: 1 };
       },
     },
     productSKU: {

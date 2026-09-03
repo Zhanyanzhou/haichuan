@@ -36,6 +36,7 @@ import {
   type OrderListQuery,
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { csvRow } from "@/utils/csv";
 import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
 import { useAuthStore } from "@/store/authStore";
 import type {
@@ -51,7 +52,13 @@ import type {
   OrderType,
   PaymentStatus,
   CustomStage,
+  Payment,
 } from "@/types";
+import {
+  PAYMENT_STATUS_META,
+  fulfillmentStatusLabel,
+  paymentStatusLabel,
+} from "@/constants/tradeStatusCopy";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -279,6 +286,7 @@ export default function OrderManage() {
   const [keyword, setKeyword] = useState("");
   const [keywordInput, setKeywordInput] = useState("");
   const [productKeyword, setProductKeyword] = useState("");
+  const [productKeywordInput, setProductKeywordInput] = useState("");
   const [dateRange, setDateRange] = useState<
     [Dayjs | null, Dayjs | null] | null
   >(null);
@@ -518,9 +526,16 @@ export default function OrderManage() {
         >(res) || [];
       const csv = ["订单号,客户,手机号,金额,状态,创建时间,收款时间"]
         .concat(
-          rows.map(
-            (r) =>
-              `${r.orderNo},${r.customerName},${r.customerPhone},¥${r.finalAmount},${STATUS_META[r.status as OrderStatus]?.t || r.status},${r.createdAt},${r.paymentConfirmedAt || ""}`,
+          rows.map((r) =>
+            csvRow([
+              r.orderNo,
+              r.customerName,
+              r.customerPhone,
+              `¥${r.finalAmount}`,
+              STATUS_META[r.status as OrderStatus]?.t || r.status,
+              r.createdAt,
+              r.paymentConfirmedAt || "",
+            ]),
           ),
         )
         .join("\n");
@@ -746,6 +761,7 @@ export default function OrderManage() {
     setKeyword("");
     setKeywordInput("");
     setProductKeyword("");
+    setProductKeywordInput("");
     setDateRange(null);
     setAmountRange({});
     setOrderTypeFilter("all");
@@ -811,7 +827,14 @@ export default function OrderManage() {
           <Input.Search
             placeholder="订单号 / 客户 / 手机号"
             value={keywordInput}
-            onChange={(e) => setKeywordInput(e.target.value)}
+            onChange={(e) => {
+              setKeywordInput(e.target.value);
+              // allowClear 清空时同步重置已应用关键词，避免界面清空但列表仍按旧词过滤
+              if (e.target.value === "" && keyword) {
+                setKeyword("");
+                setPage(1);
+              }
+            }}
             onSearch={(v) => {
               setKeyword(v);
               setPage(1);
@@ -821,9 +844,12 @@ export default function OrderManage() {
           />
           <Input.Search
             placeholder="商品名 / 货号"
-            value={productKeyword}
-            onChange={(e) => setProductKeyword(e.target.value)}
-            onSearch={() => setPage(1)}
+            value={productKeywordInput}
+            onChange={(e) => setProductKeywordInput(e.target.value)}
+            onSearch={(v) => {
+              setProductKeyword(v);
+              setPage(1);
+            }}
             className="w-44"
             allowClear
           />
@@ -919,6 +945,7 @@ export default function OrderManage() {
             rowKey="id"
             loading={loading}
             size="middle"
+            scroll={{ x: 1200 }}
             pagination={{
               current: page,
               pageSize,
@@ -1320,7 +1347,9 @@ export default function OrderManage() {
                             {p.paymentNo}
                           </code>
                         </span>
-                        <Tag>{p.status}</Tag>
+                        <Tag color={PAYMENT_STATUS_META[p.status as Payment["status"]]?.color}>
+                          {paymentStatusLabel(p.status)}
+                        </Tag>
                       </div>
                       <div className="flex justify-between">
                         <Text type="secondary">金额：</Text>
@@ -1418,7 +1447,7 @@ export default function OrderManage() {
                   </div>
                   {detail.fulfillments?.map((f) => (
                     <div key={f.id} className="text-xs text-brand-muted">
-                      履约单 {f.fulfillmentNo} · {f.status}
+                      履约单 {f.fulfillmentNo} · {fulfillmentStatusLabel(f.status)}
                     </div>
                   ))}
                 </div>
@@ -1559,7 +1588,13 @@ export default function OrderManage() {
             <Form.Item
               name="logisticsNo"
               label="物流单号"
-              rules={[{ required: true, message: "请填写物流单号" }]}
+              rules={[
+                { required: true, message: "请填写物流单号" },
+                {
+                  pattern: /^[A-Za-z0-9][A-Za-z0-9-]{4,29}$/,
+                  message: "物流单号应为 5-30 位字母或数字（可含连字符）",
+                },
+              ]}
             >
               <Input />
             </Form.Item>

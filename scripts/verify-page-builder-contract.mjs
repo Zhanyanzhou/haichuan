@@ -149,26 +149,8 @@ assert.match(
   "共享商品资格必须遵循当前发布画像",
 );
 
-const productVisibilityCases = [
-  { name: "public-ready", status: "PUBLISHED", quality: "READY", visibility: "PUBLIC", deletedAt: null, allowed: true },
-  { name: "quarantined", status: "PUBLISHED", quality: "QUARANTINED", visibility: "PUBLIC", deletedAt: null, allowed: false },
-  { name: "draft", status: "DRAFT", quality: "READY", visibility: "PUBLIC", deletedAt: null, allowed: false },
-  { name: "member", status: "PUBLISHED", quality: "READY", visibility: "MEMBER", deletedAt: null, allowed: false },
-  { name: "internal", status: "PUBLISHED", quality: "READY", visibility: "INTERNAL", deletedAt: null, allowed: false },
-  { name: "deleted", status: "PUBLISHED", quality: "READY", visibility: "PUBLIC", deletedAt: new Date(), allowed: false },
-];
-
-for (const product of productVisibilityCases) {
-  const isPubliclyVisible =
-    product.status === "PUBLISHED" &&
-    product.quality === "READY" &&
-    product.visibility === "PUBLIC" &&
-    product.deletedAt === null;
-  assert.equal(
-    isPubliclyVisible,
-    product.allowed,
-    `公开页面商品范围错误：${product.name}`,
-  );
-}
+// 商品公开可见性的行为级验证在服务端测试中执行（导入真实导出函数并对其实际输出求值）：
+// server/src/modules/products/product-eligibility.spec.ts。
+// 此处曾存在用本地复制的同一表达式自我断言的用例，不构成对真实门禁的验证，已移除。
 
 console.log(`页面构建器契约一致：${clientTypes.length} 种区块。`);

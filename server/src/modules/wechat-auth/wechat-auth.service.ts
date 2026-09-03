@@ -13,6 +13,8 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { resolveCorsOrigins } from "../../common/config/cors-origins";
 import { assertAccountPassword } from "../users/staff-password-policy";
+import { SmsService } from "../../common/sms/sms.service";
+import { consumeCustomerSmsCode } from "../../common/sms/consume-customer-sms-code";
 
 const WECHAT_QR_CONNECT = "https://open.weixin.qq.com/connect/qrconnect";
 const WECHAT_ACCESS_TOKEN_API =
@@ -116,6 +118,7 @@ export class WechatAuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly sms: SmsService,
   ) {}
 
   isConfigured(): boolean {
@@ -251,12 +254,16 @@ export class WechatAuthService {
     }
   }
 
-  /** 绑定：扫码拿到 openid 后，绑定到既有手机号账户（校验密码）或新建账户 */
+  /** 绑定：扫码拿到 openid 后，绑定到既有手机号账户（校验密码）或新建账户。
+   * 新建账户必须先用短信验证手机号主权（防任意手机号抢注与绕过注册验真）；
+   * 短信通道未配置时明确拒绝新建，只允许绑定既有账户。
+   */
   async bindWechat(data: {
     bindToken: string;
     phone: string;
     password: string;
     name?: string;
+    smsCode?: string;
   }) {
     let record: WechatBindClaims;
     try {
@@ -301,6 +308,16 @@ export class WechatAuthService {
         },
       });
     } else {
+      // 新手机号建账户：短信验真强制（不依赖注册开关，手机号主权必须证明）
+      if (!this.sms.isAvailable()) {
+        throw new ServiceUnavailableException(
+          "短信服务未配置，暂不能为新手机号创建账户；请先注册会员后再绑定微信",
+        );
+      }
+      if (!data.smsCode?.trim()) {
+        throw new BadRequestException("请输入该手机号收到的短信验证码后再创建账户");
+      }
+      await consumeCustomerSmsCode(this.prisma, phone, data.smsCode, new Date(), "REGISTER");
       assertAccountPassword(password);
       const passwordHash = await bcrypt.hash(password, 12);
       customer = await this.prisma.customer.create({

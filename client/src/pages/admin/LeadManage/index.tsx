@@ -154,6 +154,7 @@ export default function LeadManage() {
   const [status, setStatus] = useState("");
   const [leadType, setLeadType] = useState("");
   const [keyword, setKeyword] = useState("");
+  const [keywordInput, setKeywordInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [detailId, setDetailId] = useState<{ type: LeadType; id: number } | null>(
@@ -465,14 +466,14 @@ export default function LeadManage() {
       title: "负责人",
       dataIndex: "assigneeName",
       width: 80,
-      render: (v: string) => v || "-",
+      render: (v: string) => v || "—",
     },
     {
       title: "下次跟进",
       dataIndex: "nextFollowUpAt",
       width: 100,
       render: (v: string) =>
-        v ? new Date(v).toLocaleDateString("zh-CN") : "-",
+        v ? new Date(v).toLocaleDateString("zh-CN") : "—",
     },
     {
       title: "留存复核",
@@ -481,7 +482,7 @@ export default function LeadManage() {
         if (row.privacyDisposedAt) return <Tag>已匿名化</Tag>;
         if (row.legalHoldAt) return <Tag color="processing">法律保留</Tag>;
         const v = row.retentionUntil;
-        if (!v) return "-";
+        if (!v) return "—";
         const due = new Date(v).getTime() <= Date.now();
         return (
           <Tag color={due ? "error" : "default"}>
@@ -494,7 +495,7 @@ export default function LeadManage() {
       title: "提交时间",
       dataIndex: "createdAt",
       width: 150,
-      render: (v: string) => (v ? new Date(v).toLocaleString("zh-CN") : "-"),
+      render: (v: string) => (v ? new Date(v).toLocaleString("zh-CN") : "—"),
     },
     {
       title: "操作",
@@ -622,11 +623,21 @@ export default function LeadManage() {
       >
         <Space wrap>
           <Input
-            placeholder="客户姓名/电话"
+            placeholder="客户姓名/电话（回车应用）"
             prefix={<SearchOutlined />}
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            onPressEnter={fetchList}
+            value={keywordInput}
+            onChange={(e) => {
+              setKeywordInput(e.target.value);
+              // allowClear 清空时同步重置已应用的关键词
+              if (e.target.value === "" && keyword) {
+                setKeyword("");
+                setPage(1);
+              }
+            }}
+            onPressEnter={() => {
+              setKeyword(keywordInput);
+              setPage(1);
+            }}
             style={{ width: 200 }}
             allowClear
           />
@@ -704,10 +715,10 @@ export default function LeadManage() {
                 {detail.customerName}
               </Descriptions.Item>
               <Descriptions.Item label="电话">
-                {detail.phone || detail.customerPhone || "-"}
+                {detail.phone || detail.customerPhone || "—"}
               </Descriptions.Item>
               <Descriptions.Item label="邮箱">
-                {detail.email || detail.customerEmail || "-"}
+                {detail.email || detail.customerEmail || "—"}
               </Descriptions.Item>
               <Descriptions.Item label="类型">
                 <Tag>{detail.leadTypeLabel}</Tag>
@@ -737,16 +748,16 @@ export default function LeadManage() {
                 )}
               </Descriptions.Item>
               <Descriptions.Item label="负责人">
-                {detail.assignee?.realName || detail.handler?.realName || "-"}
+                {detail.assignee?.realName || detail.handler?.realName || "—"}
               </Descriptions.Item>
               <Descriptions.Item label="提交内容">
-                {detail.message || "-"}
+                {detail.message || "—"}
               </Descriptions.Item>
               <Descriptions.Item label="客户可见回复">
-                {detail.reply || "-"}
+                {detail.reply || "—"}
               </Descriptions.Item>
               <Descriptions.Item label="内部备注">
-                {detail.internalNote || "-"}
+                {detail.internalNote || "—"}
               </Descriptions.Item>
               {(detail.status === "COMPLETED" || detail.status === "INVALID") && (
                 <Descriptions.Item label="关闭原因">
@@ -756,7 +767,7 @@ export default function LeadManage() {
               <Descriptions.Item label="提交时间">
                 {detail.createdAt
                   ? new Date(detail.createdAt).toLocaleString("zh-CN")
-                  : "-"}
+                  : "—"}
               </Descriptions.Item>
             </Descriptions>
 

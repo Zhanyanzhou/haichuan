@@ -40,9 +40,12 @@ function formatTime(value: string): string {
 export default function Settings() {
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<BackupStatus | null>(null);
+  // 区分"确认无备份"与"查询失败"：失败时不得回落成"暂无备份产物"的安全假象
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     setChecking(true);
+    setLoadFailed(false);
     try {
       const res = await settingsApi.getBackupStatus();
       // 展示服务端真实状态：读 backup 容器产物目录，不假报成功
@@ -55,6 +58,7 @@ export default function Settings() {
       }
     } catch {
       setStatus(null);
+      setLoadFailed(true);
       message.error("查询备份状态失败，请检查后端服务");
     } finally {
       setChecking(false);
@@ -80,6 +84,8 @@ export default function Settings() {
             <p className="text-xs text-brand-muted">
               {checking && !status ? (
                 "查询备份产物中…"
+              ) : loadFailed ? (
+                "备份状态查询失败，无法确认最近备份时间"
               ) : status?.lastBackup ? (
                 <>
                   最近备份 {formatTime(status.lastBackup)}
@@ -95,7 +101,7 @@ export default function Settings() {
             loading={checking}
             onClick={() => void fetchStatus()}
           >
-            {checking ? "查询中..." : "刷新备份状态"}
+            {checking ? "查询中…" : "刷新备份状态"}
           </Button>
         </div>
 

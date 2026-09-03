@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Card, Table, Tag, Button, InputNumber, Modal, message } from 'antd';
+import { Alert, App as AntdApp, Card, Table, Tag, Button, InputNumber, Modal } from 'antd';
 import { ArrowUpOutlined, EditOutlined } from '@ant-design/icons';
 import { goldPriceApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -21,6 +21,7 @@ type GoldPriceRecord = {
 type GoldLoadErrors = Partial<Record<'current' | 'history' | 'automation', string>>;
 
 export default function GoldPrice() {
+  const { message } = AntdApp.useApp();
   const [loading, setLoading] = useState(true);
   const [currentPrice, setCurrentPrice] = useState<GoldPriceRecord | null>(null);
   const [history, setHistory] = useState<GoldPriceRecord[]>([]);
@@ -28,6 +29,7 @@ export default function GoldPrice() {
   const [loadErrors, setLoadErrors] = useState<GoldLoadErrors>({});
   const [modalOpen, setModalOpen] = useState(false);
   const [newPrice, setNewPrice] = useState<number | null>(null);
+  const [updating, setUpdating] = useState(false);
   const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
@@ -93,7 +95,9 @@ export default function GoldPrice() {
   useEffect(() => { void load(); }, [load]);
 
   const handleUpdate = async () => {
+    if (updating) return;
     if (!newPrice || newPrice <= 0) { message.warning('请输入有效金价'); return; }
+    setUpdating(true);
     try {
       await goldPriceApi.updateManually({ price: newPrice });
       message.success('金价已更新');
@@ -101,6 +105,8 @@ export default function GoldPrice() {
       void load();
     } catch (error: unknown) {
       message.error(getSafeAdminErrorMessage(error, '金价更新失败，请核对输入后重试。'));
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -138,7 +144,7 @@ export default function GoldPrice() {
               <AdminErrorState subject="当前金价" message={loadErrors.current} onRetry={() => void load()} />
             </Card>
           ) : currentPrice ? (
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
                 { t: '当前金价', v: typeof currentPrice.price === 'number' ? currentPrice.price.toFixed(2) : '—', u: '元/克' },
                 { t: '数据来源', v: currentPrice.source === 'MANUAL' ? '手动' : currentPrice.source === 'AUTO' ? '自动' : '—', u: '' },
@@ -173,10 +179,10 @@ export default function GoldPrice() {
       )}
 
       <Modal title="手动调整金价" open={modalOpen} onCancel={() => setModalOpen(false)} onOk={handleUpdate}
-        okText="更新金价" cancelText="取消">
+        confirmLoading={updating} okText="更新金价" cancelText="取消">
         <div className="py-4">
           <p className="text-sm text-brand-muted mb-3">请输入新的金价（元/克）</p>
-          <InputNumber min={0} step={0.01} value={newPrice} onChange={(v) => setNewPrice(v || 0)}
+          <InputNumber min={0} max={10000} step={0.01} value={newPrice} onChange={(v) => setNewPrice(v || 0)}
             className="w-full" size="large" prefix="¥" />
           <p className="text-xs text-brand-muted mt-3">
             更新后将自动按「金重 × 金价 × 系数 + 工费」重算全店已关联金重商品的 SKU 售价与起价，无需逐件调整。

@@ -8,6 +8,7 @@ import { createHash, randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import {
+  getDynamicTemplateStructureLockViolation,
   validateDynamicTemplateDefinition,
   validateDynamicTemplatePublishDefinition,
 } from "./generated/validateTemplateDefinition.generated";
@@ -74,6 +75,20 @@ function readTemplateContent(
     : {};
 }
 
+function getLegacyEmptyPolicySlotIds(definition: TemplateDefinitionV2): string[] {
+  return Object.values(definition.slots)
+    .filter((slot) => slot.emptyPolicy === "use-default")
+    .map((slot) => slot.slotId);
+}
+
+function clearTemplateCompatibilityContent(definition: TemplateDefinitionV2) {
+  definition.defaultContent = {};
+  definition.previewContent = {};
+  for (const slot of Object.values(definition.slots)) {
+    if (slot.emptyPolicy === "use-default") slot.emptyPolicy = "hide";
+  }
+}
+
 @Injectable()
 export class DynamicTemplatesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -138,6 +153,16 @@ export class DynamicTemplatesService {
     });
   }
 
+  private assertNewTemplateUsesCurrentEmptyPolicies(definition: TemplateDefinitionV2) {
+    const slotIds = getLegacyEmptyPolicySlotIds(definition);
+    if (slotIds.length === 0) return;
+    throw new BadRequestException({
+      message: "新母模板没有可读取的默认内容，空槽位必须隐藏或由页面填写",
+      code: "TEMPLATE_LEGACY_EMPTY_POLICY_NOT_ALLOWED",
+      slotIds,
+    });
+  }
+
   private assertHistoricalTemplateContentPreserved(
     existingDefinition: unknown,
     nextDefinition: TemplateDefinitionV2,
@@ -152,6 +177,32 @@ export class DynamicTemplatesService {
       message: "历史默认内容与预览内容只能保持原样或显式清空，不能新增或修改",
       code: "TEMPLATE_CONTENT_IS_READ_ONLY",
       fields: changedToPopulated,
+    });
+  }
+
+  private assertHistoricalEmptyPoliciesPreserved(
+    existingDefinition: unknown,
+    nextDefinition: TemplateDefinitionV2,
+  ) {
+    const existingSlots = existingDefinition
+      && typeof existingDefinition === "object"
+      && !Array.isArray(existingDefinition)
+      && (existingDefinition as Record<string, unknown>).slots
+      && typeof (existingDefinition as Record<string, unknown>).slots === "object"
+      && !Array.isArray((existingDefinition as Record<string, unknown>).slots)
+      ? (existingDefinition as { slots: Record<string, { emptyPolicy?: unknown }> }).slots
+      : {};
+    const addedSlotIds = Object.values(nextDefinition.slots)
+      .filter((slot) => (
+        slot.emptyPolicy === "use-default"
+        && existingSlots[slot.slotId]?.emptyPolicy !== "use-default"
+      ))
+      .map((slot) => slot.slotId);
+    if (addedSlotIds.length === 0) return;
+    throw new BadRequestException({
+      message: "历史 use-default 只能原样保留或改为 hide，不能新增或恢复",
+      code: "TEMPLATE_LEGACY_EMPTY_POLICY_IS_READ_ONLY",
+      slotIds: addedSlotIds,
     });
   }
 
@@ -347,6 +398,7 @@ export class DynamicTemplatesService {
     const resolvedOwnerId = this.requireOwnerId(ownerId);
     const validated = this.validateDefinition(input.definition);
     this.assertNewTemplateContentEmpty(validated.definition);
+    this.assertNewTemplateUsesCurrentEmptyPolicies(validated.definition);
     const templateId = this.assertTemplateId(validated.definition.templateId);
     const sourceReference = input.sourceReference?.trim();
     if (sourceReference && !TEMPLATE_ID_PATTERN.test(sourceReference)) {
@@ -426,7 +478,20 @@ export class DynamicTemplatesService {
     if (validated.definition.templateId !== existing.templateId) {
       throw new BadRequestException("草稿不能改变 templateId；请使用另存为");
     }
+    const existingDefinition = this.validateDefinition(existing.draft.definition).definition;
+    const structureLockViolation = getDynamicTemplateStructureLockViolation(
+      existingDefinition,
+      validated.definition,
+      { mode: "persistenceSnapshot" },
+    );
+    if (structureLockViolation) {
+      throw new BadRequestException({
+        message: structureLockViolation,
+        code: "TEMPLATE_STRUCTURE_LOCKED",
+      });
+    }
     this.assertHistoricalTemplateContentPreserved(existing.draft.definition, validated.definition);
+    this.assertHistoricalEmptyPoliciesPreserved(existing.draft.definition, validated.definition);
     const note = this.normalizeVersionNote(input.versionNote);
     try {
       const updated = await this.prisma.$transaction(async (tx) => {
@@ -472,11 +537,10 @@ export class DynamicTemplatesService {
     if (!source.draft) throw new ConflictException("来源模板没有可复制草稿");
     const name = input.name.trim();
     if (!name || name.length > 100) throw new BadRequestException("模板名称必须为 1–100 个字符");
-    const definition = structuredClone(source.draft.definition) as unknown as TemplateDefinitionV2;
+    const definition = this.validateDefinition(source.draft.definition).definition;
     definition.templateId = `tpl_${randomUUID()}`;
     definition.name = name;
-    definition.defaultContent = {};
-    definition.previewContent = {};
+    clearTemplateCompatibilityContent(definition);
     return this.create(resolvedOwnerId, {
       definition,
       versionNote: input.versionNote,

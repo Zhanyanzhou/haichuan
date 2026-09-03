@@ -324,6 +324,12 @@ export class CategoriesService {
     const categoryData = this.categoryData(data, level);
     await this.ensureSlugAvailable(categoryData.slug, id);
 
+    // 停用与 delete() 同口径：仍有未软删除子分类或商品时拒绝，
+    // 避免前台分类树隐藏该类目但商品在目录/搜索中仍可见可购的口径分裂。
+    if (categoryData.isActive === false) {
+      await this.assertDeactivatable(id);
+    }
+
     const parent =
       category.level === 1 || data.parentId === undefined
         ? undefined
@@ -337,7 +343,8 @@ export class CategoriesService {
     });
   }
 
-  async delete(id: number) {
+  /** 停用前检查：仍有关联的未软删除子分类或商品时拒绝。 */
+  private async assertDeactivatable(id: number) {
     const category = await this.prisma.category.findUnique({
       where: { id },
       include: {
@@ -350,10 +357,15 @@ export class CategoriesService {
         },
       },
     });
-    if (!category) throw new NotFoundException('类目不存在');
-    if (category._count.children > 0 || category._count.products > 0) {
+    if (category && (category._count.children > 0 || category._count.products > 0)) {
       throw new BadRequestException('该类目仍关联下级分类或商品，不能停用');
     }
+  }
+
+  async delete(id: number) {
+    const category = await this.prisma.category.findUnique({ where: { id } });
+    if (!category) throw new NotFoundException('类目不存在');
+    await this.assertDeactivatable(id);
     return this.prisma.category.update({ where: { id }, data: { isActive: false } });
   }
 

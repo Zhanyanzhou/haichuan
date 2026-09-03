@@ -12,7 +12,12 @@ import {
   createDynamicTemplateNode,
   createDynamicTemplateSlotDefinition,
 } from "./nodeRegistry";
-import { validateDynamicTemplateDefinition } from "./validateTemplateDefinition";
+import {
+  getDynamicTemplateStructureLockOwnerId,
+  getDynamicTemplateStructureLockViolation,
+  isDynamicTemplateStructureLocked,
+  validateDynamicTemplateDefinition,
+} from "./validateTemplateDefinition";
 
 export class DynamicTemplateOperationError extends Error {
   constructor(
@@ -33,6 +38,34 @@ function findParentId(definition: TemplateDefinitionV2, nodeId: string): string 
     if (node.childIds.includes(nodeId)) return node.nodeId;
   }
   return null;
+}
+
+export function setDynamicTemplateNodeStructureLocked(
+  definition: TemplateDefinitionV2,
+  nodeId: string,
+  structureLocked: boolean,
+): TemplateDefinitionV2 {
+  if (!definition.nodes[nodeId]) {
+    throw new DynamicTemplateOperationError("NODE_NOT_FOUND", "要锁定的节点不存在。");
+  }
+  const next = cloneDefinition(definition);
+  if (structureLocked) {
+    next.nodes[nodeId].authoring = { structureLocked: true };
+  } else {
+    delete next.nodes[nodeId].authoring;
+  }
+  assertValidOperationResult(next, definition);
+  return next;
+}
+
+function assertDynamicTemplateStructureLocksPreserved(
+  previous: TemplateDefinitionV2,
+  next: TemplateDefinitionV2,
+) {
+  const violation = getDynamicTemplateStructureLockViolation(previous, next);
+  if (violation) {
+    throw new DynamicTemplateOperationError("STRUCTURE_LOCKED", violation);
+  }
 }
 
 function collectSubtreeNodeIds(
@@ -108,7 +141,11 @@ function updateSlotSummary(definition: TemplateDefinitionV2) {
     : "暂无内容槽位";
 }
 
-function assertValidOperationResult(definition: TemplateDefinitionV2) {
+function assertValidOperationResult(
+  definition: TemplateDefinitionV2,
+  previous?: TemplateDefinitionV2,
+) {
+  if (previous) assertDynamicTemplateStructureLocksPreserved(previous, definition);
   const result = validateDynamicTemplateDefinition(definition);
   const firstError = result.issues.find((issue) => issue.level === "error");
   if (firstError) {
@@ -178,7 +215,7 @@ export function addDynamicTemplateNode(
   childIds.splice(targetIndex, 0, node.nodeId);
   syncPlacementForParent(next, node.nodeId, parentId, targetIndex);
   updateSlotSummary(next);
-  assertValidOperationResult(next);
+  assertValidOperationResult(next, definition);
   return { definition: next, nodeId: node.nodeId, ...(slot ? { slotId: slot.slotId } : {}) };
 }
 
@@ -196,6 +233,7 @@ export function renameDynamicTemplateNode(
   }
   const next = cloneDefinition(definition);
   next.nodes[nodeId].name = trimmed;
+  assertDynamicTemplateStructureLocksPreserved(definition, next);
   return next;
 }
 
@@ -212,6 +250,7 @@ export function setDynamicTemplateNodeHidden(
   }
   const next = cloneDefinition(definition);
   next.nodes[nodeId].hidden = hidden;
+  assertDynamicTemplateStructureLocksPreserved(definition, next);
   return next;
 }
 
@@ -226,7 +265,7 @@ export function updateDynamicTemplateNodeRules(
   }
   const next = cloneDefinition(definition);
   update(next.nodes[nodeId].responsive[device]);
-  assertValidOperationResult(next);
+  assertValidOperationResult(next, definition);
   return next;
 }
 
@@ -260,7 +299,7 @@ export function moveDynamicTemplateNode(
     : Math.max(0, Math.min(Math.trunc(index), targetChildren.length));
   targetChildren.splice(targetIndex, 0, nodeId);
   syncPlacementForParent(next, nodeId, nextParentId, targetIndex);
-  assertValidOperationResult(next);
+  assertValidOperationResult(next, definition);
   return next;
 }
 
@@ -277,6 +316,7 @@ export function reorderDynamicTemplateNode(
   if (currentIndex < 0) throw new DynamicTemplateOperationError("NODE_NOT_FOUND", "排序节点不存在。");
   childIds.splice(currentIndex, 1);
   childIds.splice(Math.max(0, Math.min(Math.trunc(nextIndex), childIds.length)), 0, nodeId);
+  assertDynamicTemplateStructureLocksPreserved(definition, next);
   return next;
 }
 
@@ -304,7 +344,7 @@ export function removeDynamicTemplateNode(
     delete next.nodes[childId];
   }
   updateSlotSummary(next);
-  assertValidOperationResult(next);
+  assertValidOperationResult(next, definition);
   return next;
 }
 
@@ -318,6 +358,13 @@ export function duplicateDynamicTemplateNode(
   const parentId = findParentId(definition, nodeId);
   if (!definition.nodes[nodeId] || !parentId) {
     throw new DynamicTemplateOperationError("NODE_NOT_FOUND", "要复制的节点不存在或没有父节点。");
+  }
+  const lockOwnerId = getDynamicTemplateStructureLockOwnerId(definition, nodeId);
+  if (lockOwnerId) {
+    throw new DynamicTemplateOperationError(
+      "STRUCTURE_LOCKED",
+      `“${definition.nodes[lockOwnerId].name}”已锁定，请先解除锁定。`,
+    );
   }
   const next = cloneDefinition(definition);
   const sourceIds = [...collectSubtreeNodeIds(next, nodeId)];
@@ -342,15 +389,8 @@ export function duplicateDynamicTemplateNode(
         key: clonedSlot.key,
         label: clonedSlot.label,
       };
-      const hasPreview = Object.prototype.hasOwnProperty.call(next.previewContent ?? {}, sourceNode.slotId);
-      const hasLegacyDefault = Object.prototype.hasOwnProperty.call(next.defaultContent, sourceNode.slotId);
-      if (hasPreview || hasLegacyDefault) {
-        next.previewContent ??= {};
-        next.previewContent[clonedSlot.slotId] = structuredClone(
-          hasPreview
-            ? next.previewContent[sourceNode.slotId]
-            : next.defaultContent[sourceNode.slotId],
-        );
+      if (next.slots[clonedSlot.slotId].emptyPolicy === "use-default") {
+        next.slots[clonedSlot.slotId].emptyPolicy = "hide";
       }
     }
   }
@@ -371,6 +411,6 @@ export function duplicateDynamicTemplateNode(
   const siblings = next.nodes[parentId].childIds;
   siblings.splice(siblings.indexOf(nodeId) + 1, 0, clonedRootId);
   updateSlotSummary(next);
-  assertValidOperationResult(next);
+  assertValidOperationResult(next, definition);
   return { definition: next, nodeId: clonedRootId };
 }

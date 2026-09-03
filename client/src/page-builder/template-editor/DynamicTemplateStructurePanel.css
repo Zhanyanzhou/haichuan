@@ -1,11 +1,11 @@
 .template-editor__structure--reference {
   --template-structure-row-radius: 6px;
-  --template-structure-accent: #2f6fe4;
-  --template-structure-accent-bg: #eef4ff;
-  --template-structure-hover: #f6f7f8;
-  --template-structure-line: #e5e7eb;
-  --template-structure-warning: #8a5a00;
-  --template-structure-warning-bg: #fff8e6;
+  --template-structure-accent: #335F7D;
+  --template-structure-accent-bg: #EEF4F7;
+  --template-structure-hover: #F7F8F8;
+  --template-structure-line: #ECEEEF;
+  --template-structure-warning: #7A531A;
+  --template-structure-warning-bg: #FBF4E8;
 
   height: 100%;
   box-sizing: border-box;
@@ -123,7 +123,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: #287a4b;
+  color: #356348;
   font-size: 10px;
 }
 
@@ -141,7 +141,7 @@
 }
 
 .template-editor__structure--reference .template-editor__structure-health.has-errors {
-  border-left-color: #b42318;
+  border-left-color: #8C3F3B;
 }
 
 .template-editor__structure--reference .template-editor__structure-health-summary {
@@ -159,7 +159,7 @@
 }
 
 .template-editor__structure--reference .template-editor__structure-health.has-errors .template-editor__structure-health-icon {
-  color: #b42318;
+  color: #8C3F3B;
 }
 
 .template-editor__structure--reference .template-editor__structure-health-summary strong {
@@ -193,7 +193,7 @@
   display: -webkit-box;
   overflow: hidden;
   padding: 4px 2px;
-  color: #6f4900;
+  color: #7A531A;
   font-size: 11px;
   line-height: 16px;
   overflow-wrap: break-word;
@@ -207,7 +207,7 @@
   padding: 3px 4px;
   border: 0;
   border-radius: 4px;
-  color: #6f4900;
+  color: #7A531A;
   background: transparent;
   font-size: 10px;
   font-weight: 600;
@@ -219,7 +219,7 @@
 
 .template-editor__structure--reference .template-editor__structure-issues button:hover,
 .template-editor__structure--reference .template-editor__structure-issues button:focus-visible {
-  background: rgba(138, 90, 0, 0.1);
+  background: #FBF4E8;
   outline: none;
 }
 
@@ -586,7 +586,7 @@
 .template-editor__add-popover-overlay .ant-popover-inner {
   padding: 0;
   overflow: hidden;
-  border: 1px solid #d9dfe5;
+  border: 1px solid #DDE1E2;
   border-radius: 6px;
   box-shadow: none;
 }
@@ -597,8 +597,8 @@
   --adm-text: #5f6568;
   --adm-muted: #6e7477;
   --adm-line: #dde1e2;
-  --template-structure-accent: #2f6fe4;
-  --template-structure-accent-bg: #f2f5ff;
+  --template-structure-accent: #335F7D;
+  --template-structure-accent-bg: #EEF4F7;
 }
 
 .template-editor__add-popover {

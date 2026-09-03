@@ -19,7 +19,9 @@
     "privacy:lead-retention": "npm run build && node dist/cli/lead-retention-disposition.js",
     "audit:template-v2-gate-b:readonly": "npm run build && node dist/cli/template-v2-gate-b-readonly.js",
     "page-revisions:backfill:dry-run": "npm run build && node dist/cli/page-published-revision-backfill.js",
-    "page-revisions:backfill:apply": "npm run build && node dist/cli/page-published-revision-backfill.js --apply"
+    "page-revisions:backfill:apply": "npm run build && node dist/cli/page-published-revision-backfill.js --apply",
+    "trade:reconcile": "npm run build && node dist/cli/payment-reconciliation.js",
+    "audit:public-media": "npm run build && node dist/cli/public-media-audit.js"
   },
   "dependencies": {
     "@alicloud/dysmsapi20170525": "^3.0.0",

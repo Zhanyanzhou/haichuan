@@ -35,3 +35,48 @@ test('CategoriesService resolveReferences preserves order and reasons', async ()
       ['missing', 'NOT_FOUND'],
     ]);
 });
+
+// update 停用必须与 delete() 同口径：仍关联未软删除商品/子分类时拒绝，
+// 避免前台分类树隐藏该类目但商品在目录/搜索中仍可见可购的口径分裂。
+function createUpdatePrisma(counts: { children: number; products: number }) {
+  const calls: Array<Record<string, unknown>> = [];
+  return {
+    calls,
+    prisma: {
+      category: {
+        findUnique: async (args: { include?: unknown }) => {
+          if (!args?.include) {
+            // update() 读取分类本体
+            return { id: 2, parentId: 1, slug: 'child', name: '子分类', level: 2, isActive: true, deletedAt: null };
+          }
+          // assertDeactivatable 的引用计数查询
+          return { id: 2, _count: counts };
+        },
+        update: async (args: Record<string, unknown>) => {
+          calls.push(args);
+          return { id: 2, ...args };
+        },
+      },
+    } as never,
+  };
+}
+
+test('update 停用仍关联未删商品时拒绝', async () => {
+  const { prisma } = createUpdatePrisma({ children: 0, products: 3 });
+  const service = new CategoriesService(prisma);
+
+  await assert.rejects(
+    service.update(2, { isActive: false } as never),
+    /该类目仍关联下级分类或商品，不能停用/,
+  );
+});
+
+test('update 停用无关联时放行并写入停用状态', async () => {
+  const { prisma, calls } = createUpdatePrisma({ children: 0, products: 0 });
+  const service = new CategoriesService(prisma);
+
+  await service.update(2, { isActive: false } as never);
+
+  assert.equal(calls.length, 1);
+  assert.equal((calls[0].data as { isActive?: boolean }).isActive, false);
+});

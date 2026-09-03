@@ -78,6 +78,7 @@ export default function PartnerApplications() {
   const [keyword, setKeyword] = useState("");
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<ApplicationRow | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [reviewing, setReviewing] = useState<ApplicationRow | null>(null);
   const [reviewForm] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
@@ -117,12 +118,15 @@ export default function PartnerApplications() {
   }, [reviewForm, writeEnabled]);
 
   const openDetail = async (row: ApplicationRow) => {
+    setDetailLoading(true);
     try {
       const full = unwrapResponse<ApplicationRow>(await partnerApi.adminGetById(row.id));
       setDetail(full);
       setDetailOpen(true);
     } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, "合作申请详情加载失败，请稍后重新加载。"));
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -179,7 +183,7 @@ export default function PartnerApplications() {
       width: 160,
       render: (_, r) => (
         <Space>
-          <Button size="small" onClick={() => openDetail(r)}>
+          <Button size="small" loading={detailLoading} onClick={() => openDetail(r)}>
             详情
           </Button>
           <Button

@@ -29,9 +29,9 @@ import {
 import type { User } from "@/types";
 import { useAuthStore } from "@/store/authStore";
 import {
-  ACCOUNT_PASSWORD_HINT,
-  ACCOUNT_PASSWORD_MAX_LENGTH,
-  ACCOUNT_PASSWORD_MIN_LENGTH,
+  STAFF_PASSWORD_HINT,
+  STAFF_PASSWORD_MAX_LENGTH,
+  STAFF_PASSWORD_MIN_LENGTH,
 } from "@/config/accountPasswordPolicy";
 
 const rm: Record<string, { c: string; t: string }> = {
@@ -46,6 +46,7 @@ const rm: Record<string, { c: string; t: string }> = {
 
 export default function UserManage() {
   const { message } = AntdApp.useApp();
+  const currentUserId = useAuthStore((state) => state.user?.id);
   const role = useAuthStore((state) => state.user?.role);
   const isSuperAdmin = role === "SUPER_ADMIN";
   const [users, setUsers] = useState<User[]>([]);
@@ -115,7 +116,12 @@ export default function UserManage() {
   };
 
   const handleSave = async () => {
-    const values = await form.validateFields();
+    let values: Awaited<ReturnType<typeof form.validateFields>>;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
     try {
       if (editing) {
         const editableValues = { ...values };
@@ -143,6 +149,11 @@ export default function UserManage() {
 
   const handleDisable = async (id: number) => {
     if (!isSuperAdmin) return;
+    // 前端防线：禁用自己会立即终止当前会话，先明确拒绝（服务端仍是最终权威）。
+    if (id === currentUserId) {
+      message.warning("不能禁用当前登录的账号。如需停用自己的账号，请由其他超级管理员操作。");
+      return;
+    }
     try {
       await userApi.delete(id);
       message.success("后台员工已禁用");
@@ -153,7 +164,12 @@ export default function UserManage() {
   };
 
   const handleResetPwd = async () => {
-    const values = await resetPwdForm.validateFields();
+    let values: Awaited<ReturnType<typeof resetPwdForm.validateFields>>;
+    try {
+      values = await resetPwdForm.validateFields();
+    } catch {
+      return;
+    }
     if (!resetPwdUser) return;
     try {
       await userApi.update(resetPwdUser.id, { password: values.newPassword });
@@ -191,7 +207,7 @@ export default function UserManage() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-7 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
             {Object.entries(rm).map(([k, v]) => (
               <div
                 key={k}
@@ -365,15 +381,15 @@ export default function UserManage() {
               rules={[
                 { required: true, message: "请输入登录密码" },
                 {
-                  min: ACCOUNT_PASSWORD_MIN_LENGTH,
-                  max: ACCOUNT_PASSWORD_MAX_LENGTH,
-                  message: ACCOUNT_PASSWORD_HINT,
+                  min: STAFF_PASSWORD_MIN_LENGTH,
+                  max: STAFF_PASSWORD_MAX_LENGTH,
+                  message: STAFF_PASSWORD_HINT,
                 },
               ]}
             >
               <Input.Password
                 placeholder="登录密码"
-                maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
+                maxLength={STAFF_PASSWORD_MAX_LENGTH}
               />
             </Form.Item>
           )}
@@ -397,15 +413,15 @@ export default function UserManage() {
             rules={[
               { required: true, message: "请输入新密码" },
               {
-                min: ACCOUNT_PASSWORD_MIN_LENGTH,
-                max: ACCOUNT_PASSWORD_MAX_LENGTH,
-                message: ACCOUNT_PASSWORD_HINT,
+                min: STAFF_PASSWORD_MIN_LENGTH,
+                max: STAFF_PASSWORD_MAX_LENGTH,
+                message: STAFF_PASSWORD_HINT,
               },
             ]}
           >
             <Input.Password
               placeholder="输入新密码"
-              maxLength={ACCOUNT_PASSWORD_MAX_LENGTH}
+              maxLength={STAFF_PASSWORD_MAX_LENGTH}
             />
           </Form.Item>
         </Form>

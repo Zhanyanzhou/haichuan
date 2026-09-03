@@ -53,17 +53,28 @@ test("购物车改量只允许 0 到 99 的整数", async () => {
 
 test("微信绑定 DTO 限制一次性 token、手机号和凭据输入上限", async () => {
   const result = await validateBody(BindWechatDto, {
-    bindToken: "a".repeat(48),
+    bindToken: "header.payload.signature",
     phone: "13800138000",
-    password: "123456",
+    password: "12345678",
     name: "测试客户",
+    smsCode: "123456",
     role: "SUPER_ADMIN",
   });
   assert.equal("role" in result, false);
 
+  // 非三段式 JWT 的旧格式令牌被拒绝
   await assert.rejects(
     validateBody(BindWechatDto, {
       bindToken: "a".repeat(48),
+      phone: "13800138000",
+      password: "12345678",
+    }),
+    BadRequestException,
+  );
+
+  await assert.rejects(
+    validateBody(BindWechatDto, {
+      bindToken: "header.payload.signature",
       phone: "13800138000",
       password: "x".repeat(129),
     }),

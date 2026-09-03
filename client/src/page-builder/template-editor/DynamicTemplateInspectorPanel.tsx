@@ -28,7 +28,7 @@ import {
   VerticalAlignTopOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
-import { Button, Input, InputNumber, Select } from "antd";
+import { Alert, Button, Input, InputNumber, Select } from "antd";
 import {
   useEffect,
   useLayoutEffect,
@@ -46,8 +46,13 @@ import InspectorDisclosure from "../inspector/InspectorDisclosure";
 import DynamicComplexContentFields, { isDynamicComplexSlotType } from "../inspector/controls/DynamicComplexContentFields";
 import {
   getDynamicTemplateNodeRegistryEntry,
+  getDynamicTemplateStructureLockOwnerId,
+  DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS,
+  DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH,
+  DYNAMIC_TEMPLATE_SLOT_RULE_MAX_LINES,
   moveDynamicTemplateNode,
   resolveTemplateDesignFrame,
+  setDynamicTemplateNodeStructureLocked,
   validateDynamicTemplateDefinition,
   validateDynamicTemplatePublishDefinition,
   type TemplateDefinitionV2,
@@ -58,8 +63,10 @@ import {
   type DynamicTemplateSlotDefinition,
 } from "../template-definition";
 import {
+  clearDynamicTemplateCompatibilityContent,
   findDynamicTemplateParentId,
   getDynamicTemplateAllowedParentIds,
+  hasDynamicTemplateCompatibilityState,
   parseCommaSeparatedValues,
 } from "./dynamicTemplateEditorUtils";
 import { useTemplateEditorSession } from "./templateEditorSession";
@@ -830,9 +837,13 @@ export default function DynamicTemplateInspectorPanel({
   const selectedRoleApplicable = !selectedRoleDefinition?.appliesTo
     || selectedRoleDefinition.appliesTo.includes(device);
   const inspectorTitle = isRoot ? definition.name : selectedRoleLabel ?? node.name;
-  const isLocked = node.props.contentTemplateDesignProps?.structureLocked === true;
+  const structureLockOwnerId = getDynamicTemplateStructureLockOwnerId(definition, activeNodeId);
+  const isLocked = structureLockOwnerId !== null;
+  const isOwnStructureLocked = structureLockOwnerId === activeNodeId;
+  const isLockedByAncestor = isLocked && !isOwnStructureLocked;
   const desktopFrame = resolveTemplateDesignFrame(definition, "desktop");
   const mobileFrame = resolveTemplateDesignFrame(definition, "mobile");
+  const hasCompatibilityState = hasDynamicTemplateCompatibilityState(definition);
   const inspectorBreadcrumb = isRoot
     ? "母模板草稿"
     : [definition.name, parentId ? definition.nodes[parentId]?.name : null]
@@ -868,6 +879,25 @@ export default function DynamicTemplateInspectorPanel({
         role="region"
         aria-label="模板属性功能区"
       >
+        {hasCompatibilityState ? (
+          <Alert
+            className="template-editor__compatibility-content-alert"
+            type="warning"
+            showIcon
+            message="当前草稿包含历史默认内容或兼容规则"
+            description="这些数据只为旧模板兼容保留，不能进入新的正式版本。清理只修改当前未保存草稿，可通过撤销恢复，不会影响旧版本或页面。"
+            action={(
+              <Button
+                size="small"
+                onClick={() => setDynamicDefinition(
+                  clearDynamicTemplateCompatibilityContent(definition),
+                )}
+              >
+                从当前草稿移除历史内容
+              </Button>
+            )}
+          />
+        ) : null}
         {TEMPLATE_INSPECTOR_PANELS[inspectorContext].map(({ panel: activePanel, label }) => (
           <div key={activePanel} role="group" aria-label={label} data-template-inspector-section={activePanel}>
         {!isRoot && activePanel === "definition" ? (
@@ -893,7 +923,7 @@ export default function DynamicTemplateInspectorPanel({
               <div className="template-editor__geometry-grid">
                 <TextField label="分类" value={definition.metadata.category} maxLength={50} onChange={(category) => updateDefinition((next) => { next.metadata.category = category; })} />
                 <TextField label="用途" value={definition.metadata.purpose} maxLength={100} onChange={(purpose) => updateDefinition((next) => { next.metadata.purpose = purpose; })} />
-                <TextField label="构图类型" value={definition.metadata.layoutType} maxLength={100} onChange={(layoutType) => updateDefinition((next) => { next.metadata.layoutType = layoutType; })} />
+                <TextField label="构图类型" value={definition.metadata.layoutType} maxLength={DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH.layoutType} onChange={(layoutType) => updateDefinition((next) => { next.metadata.layoutType = layoutType; })} />
               </div>
               <VisualChoiceField label="页面视觉职责" value={definition.metadata.visualRole ?? "support-stage"} columns={3} options={[
                 { value: "primary-stage", label: "主舞台", icon: <FullscreenOutlined /> },
@@ -909,18 +939,19 @@ export default function DynamicTemplateInspectorPanel({
           <section className="homepage-editor__inspector-section">
             <div className="homepage-editor__inspector-section-head"><strong>节点身份</strong><span>{registry.label}</span></div>
             <div className="homepage-editor__inspector-section-body">
-              <TextField label="节点名称" value={node.name} maxLength={TEMPLATE_NODE_NAME_MAX_LENGTH} onChange={(name) => updateDefinition((next) => { next.nodes[activeNodeId].name = name; })} />
+              <TextField label="节点名称" value={node.name} maxLength={TEMPLATE_NODE_NAME_MAX_LENGTH} readOnly={isLocked} onChange={(name) => updateDefinition((next) => { next.nodes[activeNodeId].name = name; })} />
               <SelectField
                 label="父节点"
                 value={parentId ?? ""}
                 options={allowedParents.map((candidateId) => ({ value: candidateId, label: definition.nodes[candidateId].name }))}
+                disabled={isLocked}
                 onChange={(nextParentId) => {
                   if (!nextParentId) return;
                   setDynamicDefinition(moveDynamicTemplateNode(definition, activeNodeId, nextParentId));
                   selectObject(activeNodeId);
                 }}
               />
-              <SwitchField label="模板中隐藏节点" hint="影响两种设备，可撤销；这不是页面装修的显隐设置。" value={node.hidden} onChange={(hidden) => updateDefinition((next) => { next.nodes[activeNodeId].hidden = hidden; })} />
+              <SwitchField label="模板中隐藏节点" hint="影响两种设备，可撤销；这不是页面装修的显隐设置。" value={node.hidden} disabled={isLocked} onChange={(hidden) => updateDefinition((next) => { next.nodes[activeNodeId].hidden = hidden; })} />
               <div className="template-editor__read-only-field"><span>节点类型</span><strong>{registry.label}</strong></div>
             </div>
           </section>
@@ -956,7 +987,16 @@ export default function DynamicTemplateInspectorPanel({
           </section>
         ) : null}
 
-        {selectedRoleObject && activePanel === "layout" ? (
+        {!isRoot && isLocked && activePanel === "layout" ? (
+          <Alert
+            type="info"
+            showIcon
+            message="当前节点已锁定"
+            description="位置、尺寸、顺序和槽位构图不可修改；请先在“限制”或“页面可编辑”中解除结构锁定。"
+          />
+        ) : null}
+
+        {selectedRoleObject && activePanel === "layout" && !isLocked ? (
           <section className="homepage-editor__inspector-section template-editor__role-layout-section">
             <div className="homepage-editor__inspector-section-head template-editor__slot-section-head">
               <strong>{selectedRoleLabel} · {device === "desktop" ? "桌面端布局" : "移动端布局"}</strong>
@@ -1076,7 +1116,7 @@ export default function DynamicTemplateInspectorPanel({
           </section>
         ) : null}
 
-        {activePanel === "layout" && !selectedRoleObject ? <section className="homepage-editor__inspector-section">
+        {activePanel === "layout" && !selectedRoleObject && !isLocked ? <section className="homepage-editor__inspector-section">
           <div className="homepage-editor__inspector-section-head">
             <strong>{selectedRoleObject ? `所属组件布局 · ${device === "desktop" ? "桌面端" : "移动端"}` : `${device === "desktop" ? "桌面端" : "移动端"}布局`}</strong>
             <span>{selectedRoleObject ? `影响“${node.name}”整体，不单独改变“${selectedRoleLabel}”` : "只改当前设备的几何规则"}</span>
@@ -1309,7 +1349,7 @@ export default function DynamicTemplateInspectorPanel({
           </section>
         ) : null}
 
-        {slot && !(selectedRoleObject && activePanel === "layout") ? (
+        {slot && !(selectedRoleObject && activePanel === "layout") && !(isLocked && activePanel === "layout") ? (
           <section className="homepage-editor__inspector-section template-editor__slot-properties-section">
             <div className={`homepage-editor__inspector-section-head${selectedRoleObject ? " template-editor__slot-section-head" : ""}`}>
               <strong>{activePanel === "definition" ? "槽位定义" : activePanel === "layout" ? `${device === "desktop" ? "桌面端" : "移动端"}槽位样式` : selectedRoleObject ? "页面装修可编辑项" : "槽位规则"}</strong>
@@ -1429,7 +1469,7 @@ export default function DynamicTemplateInspectorPanel({
                   <p>此处只确定槽位职责。图片、文字、链接和商品等实际内容仍在页面装修中配置。</p>
                 </div>
               ) : (
-                <TextField label="槽位名称" value={slot.label} maxLength={100} onChange={(label) => updateSlot((next) => { next.label = label; })} />
+                <TextField label="槽位名称" value={slot.label} maxLength={100} readOnly={isLocked} onChange={(label) => updateSlot((next) => { next.label = label; })} />
               )}
               {!selectedRoleObject ? <>
                 <div className="template-editor__read-only-field">
@@ -1596,7 +1636,7 @@ export default function DynamicTemplateInspectorPanel({
                   <div className="homepage-editor__inspector-field"><label>字号</label><LengthField label="字号" value={(device === "desktop" ? slot.desktopRules : slot.mobileRules).fontSize} onChange={(fontSize) => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).fontSize = fontSize; })} /></div>
                   <NumberField label="字重" min={100} max={900} step={100} value={(device === "desktop" ? slot.desktopRules : slot.mobileRules).fontWeight} onChange={(value) => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).fontWeight = value; })} onClear={() => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).fontWeight = undefined; })} />
                   <NumberField label="行高" min={0.8} max={3} step={0.1} value={(device === "desktop" ? slot.desktopRules : slot.mobileRules).lineHeight} onChange={(value) => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).lineHeight = value; })} onClear={() => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).lineHeight = undefined; })} />
-                  <NumberField label="最大行数" min={1} max={100} value={(device === "desktop" ? slot.desktopRules : slot.mobileRules).maxLines} onChange={(value) => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).maxLines = value; })} onClear={() => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).maxLines = undefined; })} />
+                  <NumberField label="最大行数" min={1} max={DYNAMIC_TEMPLATE_SLOT_RULE_MAX_LINES} value={(device === "desktop" ? slot.desktopRules : slot.mobileRules).maxLines} onChange={(value) => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).maxLines = Math.min(value, DYNAMIC_TEMPLATE_SLOT_RULE_MAX_LINES); })} onClear={() => updateSlot((next) => { (device === "desktop" ? next.desktopRules : next.mobileRules).maxLines = undefined; })} />
                   <VisualChoiceField label="文字对齐" value={(device === "desktop" ? slot.desktopRules : slot.mobileRules).textAlign ?? "default"} columns={4} options={[
                     { value: "default", label: "默认", icon: <MenuOutlined /> },
                     { value: "left", label: "左", icon: <AlignLeftOutlined /> },
@@ -1624,12 +1664,21 @@ export default function DynamicTemplateInspectorPanel({
           <section className="homepage-editor__inspector-section template-editor__structure-lock-section">
             <div className="homepage-editor__inspector-section-head"><strong>结构锁定</strong><span>锁定后仍可选中和查看</span></div>
             <div className="homepage-editor__inspector-section-body">
-              <SwitchField label="锁定位置、尺寸和层级" hint="锁定后不能拖动、缩放、删除或改变父级；可在此解除。" value={isLocked} onChange={(structureLocked) => updateDefinition((next) => {
-                next.nodes[activeNodeId].props.contentTemplateDesignProps = {
-                  ...next.nodes[activeNodeId].props.contentTemplateDesignProps,
-                  structureLocked,
-                };
-              })} />
+              <SwitchField
+                label="锁定位置、尺寸和层级"
+                hint={isLockedByAncestor
+                  ? `当前节点受“${definition.nodes[structureLockOwnerId!]?.name ?? "上级节点"}”保护，请先解除上级锁定。`
+                  : "锁定后不能拖动、缩放、删除或改变父级；可在此解除。"}
+                value={isOwnStructureLocked}
+                disabled={isLockedByAncestor}
+                onChange={(structureLocked) => setDynamicDefinition(
+                  setDynamicTemplateNodeStructureLocked(
+                    definition,
+                    activeNodeId,
+                    structureLocked,
+                  ),
+                )}
+              />
             </div>
           </section>
         ) : null}
@@ -1677,7 +1726,21 @@ export default function DynamicTemplateInspectorPanel({
               </div>
               <div className="homepage-editor__inspector-field">
                 <label htmlFor="dynamic-template-tags">标签</label>
-                <Input id="dynamic-template-tags" key={definition.metadata.tags.join("|")} defaultValue={definition.metadata.tags.join("，")} onBlur={(event) => updateDefinition((next) => { next.metadata.tags = parseCommaSeparatedValues(event.target.value); })} />
+                <Input
+                  id="dynamic-template-tags"
+                  aria-label="标签"
+                  key={definition.metadata.tags.join("|")}
+                  defaultValue={definition.metadata.tags.join("，")}
+                  onBlur={(event) => updateDefinition((next) => {
+                    next.metadata.tags = parseCommaSeparatedValues(
+                      event.target.value,
+                      DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS.tags,
+                    );
+                  })}
+                />
+                <span className="homepage-editor__inspector-hint">
+                  最多 {DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS.tags.maxItems} 个，每个最多 {DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS.tags.maxItemLength} 个字符
+                </span>
               </div>
               <div className="template-editor__read-only-field"><span>内容结构</span><strong>{definition.metadata.slotSummary}</strong></div>
             </div>

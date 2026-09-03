@@ -20,7 +20,7 @@ import { PlusOutlined, ReloadOutlined, EyeOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import type { FormInstance } from "antd";
-import { productApi, quotationApi } from "@/services/api";
+import { productApi, quotationApi, userApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import type {
@@ -109,17 +109,43 @@ type SkuSearchResult = Pick<
 function LinkedSkuSelector({
   fieldName,
   form,
+  initialProductId,
+  initialProductName,
+  initialSkuId,
+  initialSkuSpec,
 }: {
   fieldName: number;
   form: FormInstance<QuotationFormValues>;
+  initialProductId?: number;
+  initialProductName?: string;
+  initialSkuId?: number;
+  initialSkuSpec?: string;
 }) {
+  // 编辑回显：挂载时以已保存的关联商品/SKU 初始化，避免选择器空白误导重新选择
   const [productOptions, setProductOptions] = useState<
     { value: number; label: string; name: string }[]
-  >([]);
-  const [productId, setProductId] = useState<number | null>(null);
+  >(
+    initialProductId && initialProductName
+      ? [
+          {
+            value: initialProductId,
+            label: initialProductName,
+            name: initialProductName,
+          },
+        ]
+      : [],
+  );
+  const [productId, setProductId] = useState<number | null>(
+    initialProductId ?? null,
+  );
   const [skuOptions, setSkuOptions] = useState<
     { value: number; label: string; price: number; spec: string }[]
-  >([]);
+  >(
+    initialSkuId && initialSkuSpec
+      ? [{ value: initialSkuId, label: initialSkuSpec, price: 0, spec: initialSkuSpec }]
+      : [],
+  );
+  const [skuId, setSkuId] = useState<number | null>(initialSkuId ?? null);
   const [productSearching, setProductSearching] = useState(false);
   const [skuLoading, setSkuLoading] = useState(false);
 
@@ -165,9 +191,10 @@ function LinkedSkuSelector({
     }
   };
 
-  const selectSku = (skuId: number) => {
-    const opt = skuOptions.find((s) => s.value === skuId);
-    form.setFieldValue(["items", fieldName, "skuId"], skuId);
+  const selectSku = (selectedSkuId: number) => {
+    const opt = skuOptions.find((s) => s.value === selectedSkuId);
+    setSkuId(selectedSkuId);
+    form.setFieldValue(["items", fieldName, "skuId"], selectedSkuId);
     if (opt) {
       form.setFieldValue(["items", fieldName, "spec"], opt.spec);
       form.setFieldValue(["items", fieldName, "unitPrice"], opt.price);
@@ -187,7 +214,7 @@ function LinkedSkuSelector({
         style={{ width: "100%" }}
         value={productId || undefined}
         onChange={(v) => {
-          if (!v) { setProductId(null); setSkuOptions([]); }
+          if (!v) { setProductId(null); setSkuOptions([]); setSkuId(null); }
         }}
         onSelect={(v) => void selectProduct(v as number)}
         options={productOptions}
@@ -200,6 +227,7 @@ function LinkedSkuSelector({
           size="small"
           style={{ width: "100%" }}
           loading={skuLoading}
+          value={skuId ?? undefined}
           onSelect={(v) => selectSku(v as number)}
           options={skuOptions}
           notFoundContent={skuLoading ? "正在加载商品规格…" : "该商品暂无可用 SKU"}
@@ -226,6 +254,32 @@ export default function QuotationManage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<QuotationFormValues>();
+  // 销售顾问选项：从人员接口加载（与订单中心改派顾问同一来源），替代手填内部 ID
+  const [consultantOptions, setConsultantOptions] = useState<
+    { value: number; label: string }[]
+  >([]);
+
+  const loadConsultants = async () => {
+    if (consultantOptions.length > 0) return;
+    try {
+      const res = await userApi.getAssignable();
+      const users =
+        unwrapResponse<Array<{ id: number; name: string; role: string }>>(res) ||
+        [];
+      setConsultantOptions(
+        users
+          .filter(
+            (u) =>
+              u.role === "SALES_CONSULTANT" ||
+              u.role === "ADMIN" ||
+              u.role === "SUPER_ADMIN",
+          )
+          .map((u) => ({ value: u.id, label: u.name })),
+      );
+    } catch {
+      setConsultantOptions([]);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -331,9 +385,10 @@ export default function QuotationManage() {
         })),
       });
       setEditingId(record.id);
+      void loadConsultants();
       setCreateOpen(true);
     } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, "报价单列表加载失败，请稍后重新加载。"));
+      message.error(getSafeAdminErrorMessage(e, "报价单详情加载失败，请稍后重试。"));
     }
   };
 
@@ -392,7 +447,7 @@ export default function QuotationManage() {
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); form.resetFields(); setCreateOpen(true); }}>新建报价</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); form.resetFields(); void loadConsultants(); setCreateOpen(true); }}>新建报价</Button>
         </Space>
       </div>
 
@@ -558,7 +613,23 @@ export default function QuotationManage() {
       <Modal
         title={editingId ? "编辑报价单" : "新建报价单"}
         open={createOpen}
-        onCancel={() => { setCreateOpen(false); setEditingId(null); form.resetFields(); }}
+        onCancel={() => {
+          // 已有编辑时确认放弃，避免误触取消直接丢失填写的报价内容
+          if (form.isFieldsTouched()) {
+            Modal.confirm({
+              title: "放弃未保存的报价内容？",
+              content: "弹窗关闭后本次填写的客户与商品行将丢失。",
+              okText: "放弃修改",
+              okButtonProps: { danger: true },
+              cancelText: "继续编辑",
+              onOk: () => { setCreateOpen(false); setEditingId(null); form.resetFields(); },
+            });
+            return;
+          }
+          setCreateOpen(false);
+          setEditingId(null);
+          form.resetFields();
+        }}
         onOk={handleSave}
         confirmLoading={submitting}
         okText={editingId ? "保存修改" : "创建草稿"}
@@ -576,7 +647,15 @@ export default function QuotationManage() {
             <Form.Item name="customerEmail" label="邮箱（选填）"><Input maxLength={100} /></Form.Item>
             <Form.Item name="validUntil" label="报价有效期（选填）"><DatePicker className="w-full" /></Form.Item>
             <Form.Item name="depositAmount" label="建议定金（选填）"><InputNumber min={0} prefix="¥" className="w-full" /></Form.Item>
-            <Form.Item name="salesConsultantId" label="销售顾问ID（选填）"><InputNumber min={1} className="w-full" /></Form.Item>
+            <Form.Item name="salesConsultantId" label="销售顾问（选填）">
+              <Select
+                options={consultantOptions}
+                placeholder="选择销售顾问"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+              />
+            </Form.Item>
           </div>
           <Form.Item name="remark" label="备注（选填）"><Input.TextArea rows={2} maxLength={2000} /></Form.Item>
 
@@ -588,7 +667,14 @@ export default function QuotationManage() {
               <div className="space-y-2">
                 {fields.map((field) => (
                   <div key={field.key} className="space-y-2 border border-brand-line p-2 rounded">
-                    <LinkedSkuSelector fieldName={field.name} form={form} />
+                    <LinkedSkuSelector
+                      fieldName={field.name}
+                      form={form}
+                      initialProductId={form.getFieldValue(["items", field.name, "productId"]) as number | undefined}
+                      initialProductName={form.getFieldValue(["items", field.name, "productName"]) as string | undefined}
+                      initialSkuId={form.getFieldValue(["items", field.name, "skuId"]) as number | undefined}
+                      initialSkuSpec={form.getFieldValue(["items", field.name, "spec"]) as string | undefined}
+                    />
                     <Form.Item name={[field.name, "skuId"]} hidden><Input /></Form.Item>
                     <Form.Item name={[field.name, "productId"]} hidden><Input /></Form.Item>
                     <div className="grid grid-cols-12 gap-2 items-start">

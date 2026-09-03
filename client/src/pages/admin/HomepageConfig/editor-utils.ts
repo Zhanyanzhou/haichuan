@@ -6,7 +6,8 @@
 import type { ReactNode } from "react";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { isMobileCanvasWidth } from "@/page-builder/config/blockContracts";
-import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import type { PublishValidationIssue } from "@/page-builder/inspector/publishValidation";
+import { isPuckDocument, type PuckDocument, type PuckProps } from "@/page-builder/types";
 
 export type ViewportPreset = {
   label: string;
@@ -102,6 +103,37 @@ export function canonicalizePageContent(
   return `${canonicalizePuckContent(puck)}||${metadataSig}`;
 }
 
+/** Puck 首帧归一化不会因此被误判为用户编辑。 */
+export function dataSignature(data: unknown): string {
+  return canonicalizePuckContent(data);
+}
+
+export function normalizePuckMetadata(value: unknown): PuckProps {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as PuckProps
+    : {};
+}
+
+export function getPuckDocument(value: unknown): PuckDocument | null {
+  return isPuckDocument(value) ? value : null;
+}
+
+export function resolvePublishValidationIssues(result: {
+  errors?: string[];
+  issues?: PublishValidationIssue[];
+}): PublishValidationIssue[] {
+  const structuredIssues = result.issues ?? [];
+  const structuredErrorMessages = new Set(
+    structuredIssues
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => issue.message),
+  );
+  const fallbackErrors = (result.errors ?? [])
+    .filter((message) => !structuredErrorMessages.has(message))
+    .map((message) => ({ message, severity: "error" as const }));
+  return [...structuredIssues, ...fallbackErrors];
+}
+
 export function getModuleDisplayName(
   type: string,
   // 保留第二参以兼容历史调用签名；模块名固定取模板显示名，不再读取 props。
@@ -133,17 +165,6 @@ export function formatEditorTime(value?: string | Date | null) {
           minute: "2-digit",
         },
   );
-}
-
-export function getEditorErrorMessage(error: unknown, fallback: string) {
-  return getSafeAdminErrorMessage(error, fallback);
-}
-
-export function getEditorHttpStatus(error: unknown) {
-  const normalizedStatus = (error as { status?: unknown })?.status;
-  if (typeof normalizedStatus === "number") return normalizedStatus;
-  const status = (error as { response?: { status?: unknown } })?.response?.status;
-  return typeof status === "number" ? status : undefined;
 }
 
 export type InspectorDevice = "desktop" | "mobile";

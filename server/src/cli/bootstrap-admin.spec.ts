@@ -55,7 +55,7 @@ async function expectBootstrapError(
   );
 }
 
-test("首管理员输入保留用户名限制，但密码只校验 6-18 位长度", () => {
+test("首管理员输入保留用户名限制，但密码只校验 12-64 位长度", () => {
   assert.throws(
     () => validateFirstAdminInput({ username: "admin", password: "Strong!Pass123" }),
     (error: unknown) =>
@@ -63,12 +63,12 @@ test("首管理员输入保留用户名限制，但密码只校验 6-18 位长�
       && error.code === "bootstrap-username-invalid",
   );
   assert.deepEqual(
-    validateFirstAdminInput({ username: "owner", password: "123456" }),
-    { username: "owner", password: "123456", realName: undefined },
+    validateFirstAdminInput({ username: "owner", password: "123456789012" }),
+    { username: "owner", password: "123456789012", realName: undefined },
   );
   assert.deepEqual(
-    validateFirstAdminInput({ username: "owner", password: "owner1" }),
-    { username: "owner", password: "owner1", realName: undefined },
+    validateFirstAdminInput({ username: "owner", password: "owner1owner1" }),
+    { username: "owner", password: "owner1owner1", realName: undefined },
   );
   assert.throws(
     () => validateFirstAdminInput({ username: "owner", password: "12345" }),
@@ -77,7 +77,7 @@ test("首管理员输入保留用户名限制，但密码只校验 6-18 位长�
       && error.code === "bootstrap-password-invalid",
   );
   assert.throws(
-    () => validateFirstAdminInput({ username: "owner", password: "1234567890123456789" }),
+    () => validateFirstAdminInput({ username: "owner", password: "1".repeat(65) }),
     (error: unknown) =>
       error instanceof FirstAdminBootstrapError
       && error.code === "bootstrap-password-invalid",
@@ -90,7 +90,7 @@ test("首次初始化在同一事务创建唯一超管和脱敏审计事实", as
     database,
     {
       username: "owner.main",
-      password: "123456",
+      password: "123456789012",
       realName: "  系统负责人  ",
     },
     async () => "hashed-password",
@@ -109,7 +109,7 @@ test("首次初始化在同一事务创建唯一超管和脱敏审计事实", as
   assert.equal(operationLogs.length, 1);
   assert.equal(operationLogs[0].data.userId, 41);
   assert.equal(operationLogs[0].data.action, "bootstrap");
-  assert.doesNotMatch(operationLogs[0].data.detail, /password|123456/i);
+  assert.doesNotMatch(operationLogs[0].data.detail, /password|123456789012/i);
 });
 
 test("已有启用超管时拒绝重复初始化且不发生写入", async () => {

@@ -36,6 +36,19 @@ type Props = {
 const isWechatBrowser = () =>
   typeof navigator !== "undefined" && /MicroMessenger/i.test(navigator.userAgent);
 
+/** H5 支付跳转仅信任微信支付域名；后端被攻破或响应被污染时不跳向任意站点 */
+const isTrustedWechatPayUrl = (url: string) => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    return ["wx.tenpay.com", "pay.weixin.qq.com", "open.weixin.qq.com"].includes(
+      parsed.hostname,
+    );
+  } catch {
+    return false;
+  }
+};
+
 export default function CustomerPaymentDialog({
   open,
   order,
@@ -74,29 +87,33 @@ export default function CustomerPaymentDialog({
       }
       setStatusText(
         status.gatewayState === "USERPAYING"
-          ? "微信正在处理付款，请稍候"
-          : "尚未确认到账，请完成支付后再次查询",
+          ? "微信正在处理付款，稍后自动确认"
+          : "尚未确认到账；若您已完成支付，系统会自动确认，请勿重复付款",
       );
       return false;
     },
     [message, onPaid, order],
   );
 
-  const checkPayment = useCallback(async () => {
+  const checkPayment = useCallback(async (options?: { silent?: boolean }) => {
     if (!order) return false;
-    setChecking(true);
+    const silent = options?.silent === true;
+    if (!silent) setChecking(true);
     setError(null);
     try {
       const response = await customerApi.getOrderPayment(order.id);
       return applyStatus(unwrapResponse<PaymentStatusResult>(response));
     } catch (requestError: unknown) {
-      setError(getRequestErrorMessage(
-        requestError,
-        "支付状态暂时无法查询，请稍后重试。",
-      ));
+      // 静默轮询失败不打扰用户；下一轮或手动查询会再次尝试
+      if (!silent) {
+        setError(getRequestErrorMessage(
+          requestError,
+          "支付状态暂时无法查询，请稍后重试。",
+        ));
+      }
       return true;
     } finally {
-      setChecking(false);
+      if (!silent) setChecking(false);
     }
   }, [applyStatus, order]);
 
@@ -119,6 +136,9 @@ export default function CustomerPaymentDialog({
       trackAddPaymentInfo(order.id, Number(order.finalAmount), payment.provider);
       if (payment.scene === "h5") {
         if (!payment.payUrl) throw new Error("微信 H5 支付链接缺失");
+        if (!isTrustedWechatPayUrl(payment.payUrl)) {
+          throw new Error("微信支付链接异常，已阻止跳转；请关闭后重新发起支付");
+        }
         setStatusText("正在前往微信支付…");
         window.location.assign(payment.payUrl);
         return;
@@ -150,8 +170,10 @@ export default function CustomerPaymentDialog({
     }
   }, [checkPayment, createPayment, initialAction, open, order]);
 
+  // 掉单自愈：对话框打开期间（扫码展示、H5 回跳查单、人工查询后）统一自动轮询，
+  // 与服务端 5 分钟兜底查单互补；60 秒未到终态暂停，保留手动查询入口。
   useEffect(() => {
-    if (!open || result?.scene !== "native" || !result.qrCode) return;
+    if (!open || !order) return;
     const startedAt = Date.now();
     const timer = window.setInterval(() => {
       if (Date.now() - startedAt >= 60_000) {
@@ -159,12 +181,12 @@ export default function CustomerPaymentDialog({
         setStatusText("自动查询已暂停；完成支付后可手动查询");
         return;
       }
-      void checkPayment().then((terminal) => {
+      void checkPayment({ silent: true }).then((terminal) => {
         if (terminal) window.clearInterval(timer);
       });
     }, 3_000);
     return () => window.clearInterval(timer);
-  }, [checkPayment, open, result]);
+  }, [checkPayment, open, order]);
 
   const closePayment = () => {
     if (!order) return;

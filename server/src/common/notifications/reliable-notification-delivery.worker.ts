@@ -498,6 +498,16 @@ export class ReliableNotificationDeliveryWorker {
         },
       });
     });
-    this.logger.warn(`通知投递事件 ${event.id} 处理失败：${errorCode}`);
+    if (exhausted) {
+      // 死信告警：重试耗尽的通知进入 FAILED 终态，ERROR 级供值班监控直接告警；
+      // 事件 id/类型/错误码足够人工排查，不记录收件人或渠道原始响应
+      this.logger.error(
+        `通知投递死信：事件 ${event.id}（${event.eventType}）重试耗尽，最终错误 ${errorCode}，需人工核实投递`,
+      );
+    } else {
+      this.logger.warn(
+        `通知投递事件 ${event.id} 处理失败（第 ${event.attempts} 次）：${errorCode}，${delayMinutes} 分钟后重试`,
+      );
+    }
   }
 }

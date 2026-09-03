@@ -80,7 +80,12 @@ export default function TagManage() {
   };
 
   const handleSave = async () => {
-    const values = await form.validateFields();
+    let values: Awaited<ReturnType<typeof form.validateFields>>;
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
     setSaving(true);
     try {
       if (editing) {

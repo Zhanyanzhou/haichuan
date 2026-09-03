@@ -1,14 +1,4 @@
 import { useEffect, useRef, useState, type CSSProperties, type ElementType, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
-import {
-  AlignCenterOutlined,
-  CopyOutlined,
-  DeleteOutlined,
-  EyeInvisibleOutlined,
-  SwapOutlined,
-  VerticalAlignBottomOutlined,
-  VerticalAlignMiddleOutlined,
-  VerticalAlignTopOutlined,
-} from "@ant-design/icons";
 import type {
   TemplateDefinitionV2,
   DynamicTemplateLength,
@@ -20,13 +10,14 @@ import {
   compileDynamicTemplateRenderPlan,
   type DynamicTemplateRenderPlanNode,
 } from "./renderPlan";
+import { getContentTemplateContract } from "../generated/contentTemplates.generated";
+import { resolveEditableTargets } from "./editableTargets";
 import { getDynamicTemplateNodeAdapter } from "./dynamicTemplateNodeAdapters";
 import { objectPositionToPercent } from "./imagePosition";
 import {
   moveFreePlacement,
-  resizeFreePlacement,
-  type FreePlacementResizeHandle,
 } from "./freePlacementGeometry";
+import { getDynamicTemplateStructureProtectedNodeIds } from "./validateTemplateDefinition";
 
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
@@ -40,6 +31,8 @@ export interface DynamicTemplateRendererProps {
    * 可以注册内部节点选择和直接布局手势；未声明时按无内部交互处理。
    */
   editorSurface?: "page-instance" | "template-definition";
+  /** 同一编辑面只能有一个选择与手势 owner；宿主覆盖层接管时 Renderer 仅输出语义 DOM。 */
+  interactionOwner?: "renderer" | "host-overlay";
   /** 当前模板编辑会话；仅用于给隔离画布内的合同槽位建立可写回身份。 */
   templateEditorSessionId?: string;
   selectedNodeId?: string | null;
@@ -214,7 +207,14 @@ function getSafeActionContent(content: unknown): { label: string; href?: string 
   if (!content || typeof content !== "object" || Array.isArray(content)) return { label: "" };
   const record = content as Record<string, unknown>;
   const label = typeof record.label === "string" ? record.label : "";
-  if (record.targetType === "page" && typeof record.pagePath === "string" && record.pagePath.startsWith("/")) {
+  // 站内页面跳转只接受本站绝对路径；排除 `//` 协议相对地址（可被填成外站钓鱼链接）
+  if (
+    record.targetType === "page" &&
+    typeof record.pagePath === "string" &&
+    record.pagePath.startsWith("/") &&
+    !record.pagePath.startsWith("//") &&
+    !record.pagePath.includes("\\")
+  ) {
     return { label, href: record.pagePath };
   }
   if (record.targetType === "external" && typeof record.url === "string" && /^https:\/\//i.test(record.url)) {
@@ -235,16 +235,21 @@ function renderSlotContent(
   headingLevel: 1 | 2 = 2,
   editorBlockId?: string,
   editorViewport?: "desktop" | "mobile",
+  interactionOwner?: DynamicTemplateRendererProps["interactionOwner"],
 ): ReactNode {
   const { slot, content } = node;
   if (!slot) return null;
   const adapter = getDynamicTemplateNodeAdapter(slot.type);
   if (adapter) return adapter.render({
     content: editorBlockId && content && typeof content === "object" && !Array.isArray(content)
-      ? { ...content as Record<string, unknown>, id: editorBlockId, __editorViewport: editorViewport }
+      ? { ...content as Record<string, unknown>, id: editorBlockId, __editorViewport: editorViewport, __interactionOwner: interactionOwner }
       : editorBlockId
-        ? { id: editorBlockId, __editorViewport: editorViewport }
-        : content,
+        ? { id: editorBlockId, __editorViewport: editorViewport, __interactionOwner: interactionOwner }
+        : interactionOwner === "host-overlay" && content && typeof content === "object" && !Array.isArray(content)
+          ? { ...content as Record<string, unknown>, __interactionOwner: interactionOwner }
+          : interactionOwner === "host-overlay"
+            ? { __interactionOwner: interactionOwner }
+            : content,
     mode,
     nodeProps: node.props,
     headingLevel,
@@ -362,6 +367,10 @@ function RenderNode({
   onLayoutOverrideCommit,
   onTemplatePlacementCommit,
   templateEditorSessionId,
+  interactionOwner,
+  contentRenderMode,
+  structureProtectedNodeIds,
+  editableContractRoleIdsByNode,
   parentFree = false,
   siblingPlacements = [],
 }: {
@@ -379,12 +388,16 @@ function RenderNode({
   onLayoutOverrideCommit?: DynamicTemplateRendererProps["onLayoutOverrideCommit"];
   onTemplatePlacementCommit?: DynamicTemplateRendererProps["onTemplatePlacementCommit"];
   templateEditorSessionId?: string;
+  interactionOwner?: DynamicTemplateRendererProps["interactionOwner"];
+  contentRenderMode: NonNullable<DynamicTemplateRendererProps["mode"]>;
+  structureProtectedNodeIds?: ReadonlySet<string>;
+  editableContractRoleIdsByNode?: ReadonlyMap<string, ReadonlySet<string>>;
   parentFree?: boolean;
   siblingPlacements?: DynamicTemplatePlacement[];
 }) {
   const Element = nodeElementType(node);
   const interactive = mode === "editor" && Boolean(onSelectNode);
-  const structureLocked = node.props.contentTemplateDesignProps?.structureLocked === true;
+  const structureLocked = structureProtectedNodeIds?.has(node.nodeId) === true;
   const layoutEditable = Boolean(
     interactive &&
     !structureLocked &&
@@ -410,7 +423,6 @@ function RenderNode({
     startY: number;
     parentWidth: number;
     parentHeight: number;
-    handle?: FreePlacementResizeHandle;
     start: DynamicTemplatePlacement;
     current: DynamicTemplatePlacement;
   } | null>(null);
@@ -446,8 +458,7 @@ function RenderNode({
   const beginFreePlacementGesture = (event: PointerEvent) => {
     if (!freePlacementEditable || event.button !== 0 || !node.rules.placement) return false;
     const target = event.target as HTMLElement;
-    const handleElement = target.closest<HTMLElement>("[data-template-free-resize-handle]");
-    if (!handleElement && target.closest("a,button,input,textarea,select,[contenteditable='true']")) return false;
+    if (target.closest("a,button,input,textarea,select,[contenteditable='true']")) return false;
     event.preventDefault();
     event.stopPropagation();
     const owner = event.currentTarget as HTMLElement;
@@ -460,7 +471,6 @@ function RenderNode({
       startY: event.clientY,
       parentWidth: Math.max(1, parentRect.width),
       parentHeight: Math.max(1, parentRect.height),
-      handle: handleElement?.dataset.templateFreeResizeHandle as FreePlacementResizeHandle | undefined,
       start,
       current: start,
     };
@@ -474,9 +484,7 @@ function RenderNode({
     event.preventDefault();
     const dx = (event.clientX - gesture.startX) / gesture.parentWidth;
     const dy = (event.clientY - gesture.startY) / gesture.parentHeight;
-    const next = gesture.handle
-      ? resizeFreePlacement(gesture.start, gesture.handle, dx, dy, siblingPlacements)
-      : moveFreePlacement(gesture.start, dx, dy, siblingPlacements);
+    const next = moveFreePlacement(gesture.start, dx, dy, siblingPlacements);
     gesture.current = next;
     setPlacementPreview(next);
     return true;
@@ -501,10 +509,8 @@ function RenderNode({
   const beginLayoutGesture = (event: PointerEvent) => {
     if (!layoutEditable || event.button !== 0 || !node.instanceEditPolicy) return;
     const target = event.target as HTMLElement;
-    const resize = Boolean(target.closest("[data-template-resize-handle]"));
-    if (!resize && target.closest("a,button,input,textarea,select,[contenteditable='true']")) return;
-    if (resize && !node.instanceEditPolicy.size) return;
-    if (!resize && !node.instanceEditPolicy.position) return;
+    if (target.closest("a,button,input,textarea,select,[contenteditable='true']")) return;
+    if (!node.instanceEditPolicy.position) return;
     event.preventDefault();
     event.stopPropagation();
     const owner = event.currentTarget as HTMLElement;
@@ -512,7 +518,7 @@ function RenderNode({
     const start = { widthPercent: 100, ...node.layoutOverride };
     gestureRef.current = {
       pointerId: event.pointerId,
-      operation: resize ? "resize" : "move",
+      operation: "move",
       startX: event.clientX,
       startY: event.clientY,
       baseWidth: Math.max(1, rect.width / ((start.widthPercent ?? 100) / 100)),
@@ -569,22 +575,25 @@ function RenderNode({
   if (node.type === "Divider") {
     return <hr data-template-node-id={node.nodeId} style={{ borderStyle: node.props.dividerStyle ?? "solid" }} />;
   }
+  // 页面实例沿用预览渲染（链接与业务交互保持非活动），但不能把合同内部
+  // 编辑事件、标签、会话或 Overlay 带进 Puck 画布。
   const slotContent = node.slot
     ? renderSlotContent(
       node,
-      mode,
+      contentRenderMode,
       node.slotId === primaryHeadingSlotId ? primaryHeadingLevel : 2,
       mode === "editor" && templateEditorSessionId
         ? `template-editor:${templateEditorSessionId}:${node.nodeId}`
         : undefined,
       device,
+      interactionOwner,
     )
     : null;
   return (
     <Element
       data-template-node-id={node.nodeId}
       data-template-node-type={node.type}
-      data-template-node-label={node.name}
+      data-template-node-label={interactive ? node.name : undefined}
       data-template-slot-id={node.slotId}
       data-template-selected={selectedNodeId === node.nodeId ? "true" : undefined}
       data-template-selected-contract-role={selectedContractRole?.nodeId === node.nodeId ? selectedContractRole.roleId : undefined}
@@ -594,8 +603,6 @@ function RenderNode({
         ...rulesToStyle(node, layoutPreview, placementPreview, parentFree),
         ...(layoutEditable || freePlacementEditable ? {
           ...(layoutEditable ? { position: "relative" as const } : {}),
-          outline: "1px solid #335F7D",
-          outlineOffset: -1,
           cursor: freePlacementEditable || node.instanceEditPolicy?.position ? "move" : undefined,
         } : {}),
       }}
@@ -606,8 +613,18 @@ function RenderNode({
         onClick: (event: MouseEvent) => {
           if ((event.currentTarget as HTMLElement).closest('[data-editor-node-selection="module"]')) return;
           event.stopPropagation();
-          const roleElement = (event.target as HTMLElement).closest<HTMLElement>("[data-content-role], [data-content-node-id]");
-          const roleId = roleElement?.dataset.contentRole ?? roleElement?.dataset.contentNodeId;
+          const roleElement = (event.target as HTMLElement).closest<HTMLElement>(
+            "[data-content-role], [data-content-role-desktop], [data-content-role-mobile], [data-editor-field]",
+          );
+          const allowedRoleIds = editableContractRoleIdsByNode?.get(node.nodeId);
+          const roleId = [
+            roleElement?.dataset.contentRole,
+            roleElement?.dataset.contentRoleDesktop,
+            roleElement?.dataset.contentRoleMobile,
+            ...(roleElement?.dataset.editorField?.split(/\s+/) ?? []),
+          ].find((candidate): candidate is string => Boolean(
+            candidate && allowedRoleIds?.has(candidate),
+          ));
           if (roleId && onSelectContractRole) {
             onSelectContractRole(node.nodeId, roleId);
             return;
@@ -697,116 +714,16 @@ function RenderNode({
           onLayoutOverrideCommit={onLayoutOverrideCommit}
           onTemplatePlacementCommit={onTemplatePlacementCommit}
           templateEditorSessionId={templateEditorSessionId}
+          interactionOwner={interactionOwner}
+          contentRenderMode={contentRenderMode}
+          structureProtectedNodeIds={structureProtectedNodeIds}
+          editableContractRoleIdsByNode={editableContractRoleIdsByNode}
           parentFree={node.type === "Stack" && node.rules.layoutMode === "free"}
           siblingPlacements={node.children
             .filter((sibling) => sibling.nodeId !== child.nodeId)
             .flatMap((sibling) => sibling.rules.placement ? [sibling.rules.placement] : [])}
         />
       ))}
-      {interactive && selectedNodeId === node.nodeId && node.type !== "Section" && onNodeAction ? (
-        <div
-          role="toolbar"
-          aria-label={`${node.name}快捷操作`}
-          data-template-node-toolbar
-          style={{
-            position: "absolute",
-            top: 6,
-            right: 6,
-            zIndex: 40,
-            display: "flex",
-            gap: 3,
-            padding: 3,
-            border: "1px solid rgb(24 26 27 / 18%)",
-            borderRadius: 4,
-            background: "rgb(255 255 255 / 94%)",
-            boxShadow: "0 2px 10px rgb(0 0 0 / 12%)",
-          }}
-        >
-          <button type="button" aria-label="复制节点" title="复制" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "duplicate"); }}><CopyOutlined /></button>
-          {node.rules.placement ? <>
-            <button type="button" aria-label="在父容器中水平居中" title="水平居中" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "align-horizontal"); }}><AlignCenterOutlined /></button>
-            <button type="button" aria-label="在父容器中垂直居中" title="垂直居中" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "align-vertical"); }}><VerticalAlignMiddleOutlined /></button>
-            <button
-              type="button"
-              aria-label={`复制当前自由布局到${device === "desktop" ? "移动端" : "桌面端"}`}
-              title={`把当前自由布局及同级节点构图复制到${device === "desktop" ? "移动端" : "桌面端"}`}
-              onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "copy-responsive"); }}
-            >
-              <SwapOutlined />
-            </button>
-            <button type="button" aria-label="下移一层" title="下移一层" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "backward"); }}><VerticalAlignBottomOutlined /></button>
-            <button type="button" aria-label="上移一层" title="上移一层" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "forward"); }}><VerticalAlignTopOutlined /></button>
-          </> : null}
-          <button
-            type="button"
-            disabled={node.slot?.required === true}
-            aria-label={node.slot?.required ? "隐藏节点（必填槽位不可用）" : "隐藏节点"}
-            title={node.slot?.required ? "必填槽位不能隐藏" : "隐藏"}
-            style={node.slot?.required ? { cursor: "not-allowed", opacity: 0.42 } : undefined}
-            onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "hide"); }}
-          >
-            <EyeInvisibleOutlined />
-          </button>
-          <button
-            type="button"
-            disabled={node.slot?.required === true}
-            aria-label={node.slot?.required ? "删除节点（必填槽位不可用）" : "删除节点"}
-            title={node.slot?.required ? "必填槽位不能删除" : "删除"}
-            style={node.slot?.required ? { cursor: "not-allowed", opacity: 0.42 } : undefined}
-            onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "delete"); }}
-          >
-            <DeleteOutlined />
-          </button>
-        </div>
-      ) : null}
-      {freePlacementEditable ? (["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const).map((handle) => {
-        const positions: Record<FreePlacementResizeHandle, CSSProperties> = {
-          nw: { left: -5, top: -5, cursor: "nwse-resize" },
-          n: { left: "50%", top: -5, transform: "translateX(-50%)", cursor: "ns-resize" },
-          ne: { right: -5, top: -5, cursor: "nesw-resize" },
-          e: { right: -5, top: "50%", transform: "translateY(-50%)", cursor: "ew-resize" },
-          se: { right: -5, bottom: -5, cursor: "nwse-resize" },
-          s: { left: "50%", bottom: -5, transform: "translateX(-50%)", cursor: "ns-resize" },
-          sw: { left: -5, bottom: -5, cursor: "nesw-resize" },
-          w: { left: -5, top: "50%", transform: "translateY(-50%)", cursor: "ew-resize" },
-        };
-        return (
-          <span
-            key={handle}
-            aria-hidden="true"
-            data-template-free-resize-handle={handle}
-            style={{
-              position: "absolute",
-              zIndex: 30,
-              width: 10,
-              height: 10,
-              border: "1px solid #335F7D",
-              background: "#FFFFFF",
-              boxSizing: "border-box",
-              ...positions[handle],
-            }}
-          />
-        );
-      }) : null}
-      {layoutEditable && node.instanceEditPolicy?.size ? (
-        <button
-          type="button"
-          aria-label={`调整${node.name}大小`}
-          data-template-resize-handle
-          style={{
-            position: "absolute",
-            right: -6,
-            bottom: -6,
-            zIndex: 20,
-            width: 14,
-            height: 14,
-            padding: 0,
-            border: "1px solid #335F7D",
-            background: "#FFFFFF",
-            cursor: "nwse-resize",
-          }}
-        />
-      ) : null}
     </Element>
   );
 }
@@ -819,6 +736,7 @@ export default function DynamicTemplateRenderer({
   layoutOverridesByNodeId,
   mode = "public",
   editorSurface,
+  interactionOwner,
   templateEditorSessionId,
   selectedNodeId,
   selectedContractRole,
@@ -830,7 +748,16 @@ export default function DynamicTemplateRenderer({
   onLayoutOverrideCommit,
   onTemplatePlacementCommit,
 }: DynamicTemplateRendererProps) {
-  const allowsNodeInteraction = mode === "editor" && editorSurface === "template-definition";
+  const allowsNodeInteraction = mode === "editor"
+    && editorSurface === "template-definition"
+    && interactionOwner !== "host-overlay";
+  const contentRenderMode = mode === "editor"
+    && editorSurface !== "template-definition"
+    ? "preview"
+    : mode;
+  const structureProtectedNodeIds = allowsNodeInteraction
+    ? getDynamicTemplateStructureProtectedNodeIds(definition)
+    : undefined;
   const result = compileDynamicTemplateRenderPlan(definition, {
     device,
     contentBySlotId,
@@ -847,6 +774,16 @@ export default function DynamicTemplateRenderer({
       </section>
     );
   }
+  const editableTargets = allowsNodeInteraction
+    ? resolveEditableTargets(definition, result.plan, getContentTemplateContract)
+    : [];
+  const editableContractRoleIdsByNode = new Map<string, Set<string>>();
+  editableTargets.forEach((target) => {
+    if (target.source !== "builtin-contract-role" || !target.contractRoleId) return;
+    const roles = editableContractRoleIdsByNode.get(target.ownerNodeId) ?? new Set<string>();
+    roles.add(target.contractRoleId);
+    editableContractRoleIdsByNode.set(target.ownerNodeId, roles);
+  });
   const findPrimaryHeadingSlotId = (
     node: DynamicTemplateRenderPlanNode,
   ): string | undefined => {
@@ -878,7 +815,7 @@ export default function DynamicTemplateRenderer({
       data-dynamic-template-schema-version={result.plan.schemaVersion}
       data-dynamic-template-device={device}
       data-dynamic-template-mode={mode}
-      data-dynamic-template-editor-surface={mode === "editor" ? editorSurface ?? "none" : undefined}
+      data-dynamic-template-editor-surface={mode === "editor" ? editorSurface : undefined}
       data-template-default-background-token={result.plan.metadata.defaultBackgroundToken}
       style={{
         background: result.plan.metadata.defaultBackgroundToken
@@ -901,6 +838,10 @@ export default function DynamicTemplateRenderer({
         onLayoutOverrideCommit={allowsNodeInteraction ? onLayoutOverrideCommit : undefined}
         onTemplatePlacementCommit={allowsNodeInteraction ? onTemplatePlacementCommit : undefined}
         templateEditorSessionId={allowsNodeInteraction ? templateEditorSessionId : undefined}
+        interactionOwner={interactionOwner}
+        contentRenderMode={contentRenderMode}
+        structureProtectedNodeIds={structureProtectedNodeIds}
+        editableContractRoleIdsByNode={editableContractRoleIdsByNode}
       />
     </div>
   );

@@ -65,6 +65,7 @@ export default function PaymentReview() {
   const [detail, setDetail] = useState<PaymentListItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [queryingId, setQueryingId] = useState<number | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptSubmitting, setReceiptSubmitting] = useState(false);
   const [receiptForm] = Form.useForm<ReceiptFormValues>();
@@ -142,6 +143,30 @@ export default function PaymentReview() {
         }
       },
     });
+  };
+
+  // 掉单/对账工具：主动查渠道状态，核销逻辑与回调同源（服务端完成金额校验与幂等）。
+  const queryChannelStatus = async (payment: PaymentListItem) => {
+    setQueryingId(payment.id);
+    try {
+      const res = await paymentApi.queryChannel(payment.id);
+      const result = unwrapResponse<{ state: string; gatewayState: string | null }>(res);
+      if (result.state === 'PAID') {
+        message.success('渠道已确认到账，订单已按付款推进');
+      } else if (result.state === 'FAILED') {
+        message.info('渠道确认未支付或已关闭，可让客户重新发起支付');
+      } else if (result.state === 'ATTENTION') {
+        message.warning('渠道状态与本地记录需要人工核对，请勿让客户重复付款');
+      } else {
+        message.info('渠道仍在处理中，请稍后再次查询');
+      }
+      await load();
+      if (detail?.id === payment.id) void openDetail(payment);
+    } catch (e: unknown) {
+      message.error(getSafeAdminErrorMessage(e, '查单未完成，请稍后重试。'));
+    } finally {
+      setQueryingId(null);
+    }
   };
 
   // 异常线下实收；在线渠道由验签回调自动核销。
@@ -269,12 +294,24 @@ export default function PaymentReview() {
             },
             {
               title: '操作', render: (_: unknown, record: PaymentListItem) => (
-                isAdmin && record.status === 'PENDING' && !isOnlinePayment(record) ? (
-                  <Space>
-                    <Button size="small" type="primary" icon={<CheckOutlined />} loading={reviewing} onClick={() => review(record, true)}>确认收款</Button>
-                    <Button size="small" danger icon={<CloseOutlined />} onClick={() => review(record, false)}>驳回</Button>
-                  </Space>
-                ) : <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(record)}>详情</Button>
+                <Space>
+                  {isOnlinePayment(record) && ['PENDING', 'FAILED'].includes(record.status) ? (
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      loading={queryingId === record.id}
+                      onClick={() => void queryChannelStatus(record)}
+                    >
+                      立即查单
+                    </Button>
+                  ) : null}
+                  {isAdmin && record.status === 'PENDING' && !isOnlinePayment(record) ? (
+                    <>
+                      <Button size="small" type="primary" icon={<CheckOutlined />} loading={reviewing} onClick={() => review(record, true)}>确认收款</Button>
+                      <Button size="small" danger icon={<CloseOutlined />} onClick={() => review(record, false)}>驳回</Button>
+                    </>
+                  ) : <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(record)}>详情</Button>}
+                </Space>
               ),
             },
           ]}

@@ -456,6 +456,7 @@ function runOperationScenario() {
   definition.defaultContent[headingSlotId] = "历史正式默认内容";
   definition.previewContent ??= {};
   definition.previewContent[headingSlotId] = "仅用于预览的示例";
+  definition.slots[headingSlotId].emptyPolicy = "use-default";
   definition = reorderDynamicTemplateNode(definition, text.nodeId, 0);
   const duplicated = duplicateDynamicTemplateNode(definition, stack.nodeId);
   definition = duplicated.definition;
@@ -467,6 +468,10 @@ function runOperationScenario() {
     definition.defaultContent,
     duplicateSlotIds[0],
   );
+  const duplicatedEmptyPolicy = definition.slots[duplicateSlotIds[0]]?.emptyPolicy;
+  const sourceDefaultContent = definition.defaultContent[headingSlotId];
+  const sourcePreviewContent = definition.previewContent?.[headingSlotId];
+  const sourceEmptyPolicy = definition.slots[headingSlotId]?.emptyPolicy;
   definition = removeDynamicTemplateNode(definition, duplicated.nodeId);
 
   let cycleCode = "";
@@ -487,6 +492,10 @@ function runOperationScenario() {
     duplicateSlotIds,
     duplicatedPreviewContent,
     duplicatedHasFormalDefault,
+    duplicatedEmptyPolicy,
+    sourceDefaultContent,
+    sourcePreviewContent,
+    sourceEmptyPolicy,
     duplicateRemoved: !definition.nodes[duplicated.nodeId],
     cycleCode,
   };
@@ -497,6 +506,22 @@ function runLocalDraftScenario() {
     listLocalDynamicTemplateDrafts().map((draft) => draft.localDraftId),
   );
   const draft = createNewDynamicTemplateDraft("本地草稿测试");
+  const localContainer = addDynamicTemplateNode(
+    draft.definition,
+    draft.definition.rootNodeId,
+    "Container",
+  );
+  const localHeading = addDynamicTemplateNode(
+    localContainer.definition,
+    localContainer.nodeId,
+    "HeadingSlot",
+  );
+  draft.definition = localHeading.definition;
+  const localSlotId = localHeading.slotId!;
+  draft.definition.defaultContent[localSlotId] = "只属于来源草稿的历史默认内容";
+  draft.definition.previewContent ??= {};
+  draft.definition.previewContent[localSlotId] = "只属于来源草稿的历史预览内容";
+  draft.definition.slots[localSlotId].emptyPolicy = "use-default";
   const saved = saveLocalDynamicTemplateDraft(draft);
   const loaded = loadLocalDynamicTemplateDraft(saved.localDraftId);
   const copied = saveLocalDynamicTemplateDraft(saved, { asCopy: true, name: "本地草稿测试副本" });
@@ -514,9 +539,15 @@ function runLocalDraftScenario() {
   const storedDrafts = listLocalDynamicTemplateDrafts();
   return {
     savedId: saved.localDraftId,
+    savedDefaultContentCount: Object.keys(saved.definition.defaultContent).length,
+    savedPreviewContentCount: Object.keys(saved.definition.previewContent ?? {}).length,
+    savedEmptyPolicy: saved.definition.slots[localSlotId]?.emptyPolicy,
     loadedId: loaded?.localDraftId,
     copiedId: copied.localDraftId,
     copiedName: copied.definition.name,
+    copiedDefaultContentCount: Object.keys(copied.definition.defaultContent).length,
+    copiedPreviewContentCount: Object.keys(copied.definition.previewContent ?? {}).length,
+    copiedEmptyPolicy: copied.definition.slots[localSlotId]?.emptyPolicy,
     importedId: imported.localDraftId,
     importedName: imported.definition.name,
     importedDefaultContentCount: Object.keys(imported.definition.defaultContent).length,
@@ -1296,6 +1327,7 @@ const catalogPreviewMode = searchParams.has("catalogPreviews");
 if (catalogPreviewMode) {
   void import("../../src/styles/adminLuxury.css");
   void import("../../src/pages/admin/HomepageConfig/editor.css");
+  void import("../../src/page-builder/template-editor/TemplateWorkspace.css");
 }
 createRoot(document.getElementById("root")!).render(
   <MemoryRouter>

@@ -18,6 +18,15 @@ import {
   AdminErrorState,
 } from "@/components/common/AdminDataStates";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import UnsavedChangesGuard from "../HomepageConfig/components/UnsavedChangesGuard";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasFormErrorFields(error: unknown): boolean {
+  return isRecord(error) && Array.isArray(error.errorFields);
+}
 
 type SiteContentLoadState = "loading" | "empty" | "ready" | "error";
 
@@ -66,6 +75,7 @@ export default function SiteContent() {
   const [loadError, setLoadError] = useState<unknown>(null);
   const [loadedValues, setLoadedValues] = useState<SiteContentValues>({});
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   const loadSettings = useCallback(async () => {
     setLoadState("loading");
@@ -89,23 +99,47 @@ export default function SiteContent() {
     if (loadState !== "empty" && loadState !== "ready") return;
     form.resetFields();
     form.setFieldsValue(loadedValues);
+    setDirty(false);
   }, [form, loadedValues, loadState]);
 
-  const onFinish = async (values: SiteContentValues) => {
+  // 浏览器刷新/关闭同样拦截未保存修改；SPA 路由拦截由 UnsavedChangesGuard 承担。
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [dirty]);
+
+  const saveCurrentValues = async (): Promise<boolean> => {
     if (loadState !== "empty" && loadState !== "ready") {
       message.error("店铺资料尚未成功加载，请重试后再保存。");
-      return;
+      return false;
     }
     setSaving(true);
     try {
-      // 保存站点内容字段（品牌/联系方式/营业时间/SEO，含 siteName）
+      const values = await form.validateFields();
       await settingsApi.updateSettings(values);
+      setLoadedValues(values);
+      setDirty(false);
       message.success("店铺资料已保存");
+      return true;
     } catch (error) {
-      message.error(getSafeAdminErrorMessage(error, "店铺资料保存失败，请检查填写内容后重试。"));
+      // 校验失败由 antd 字段内提示；提交失败保持留在页面等待重试。
+      if (!hasFormErrorFields(error)) {
+        message.error(
+          getSafeAdminErrorMessage(error, "店铺资料保存失败，请检查填写内容后重试。"),
+        );
+      }
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const onFinish = async () => {
+    await saveCurrentValues();
   };
 
   const handleLogoUpload = async (file: File) => {
@@ -114,6 +148,8 @@ export default function SiteContent() {
       const data = unwrapResponse<{ url: string }>(res);
       if (data?.url) {
         form.setFieldsValue({ logo: data.url });
+        // setFieldsValue 不触发 onValuesChange，Logo 上传后手动标记未保存状态
+        setDirty(true);
         message.success("Logo 已上传，保存后生效");
       }
     } catch (error) {
@@ -157,6 +193,7 @@ export default function SiteContent() {
           <Form
             form={form}
             onFinish={onFinish}
+            onValuesChange={() => setDirty(true)}
             layout="vertical"
             style={{ maxWidth: 680 }}
           >
@@ -284,6 +321,12 @@ export default function SiteContent() {
           </Form>
         </>
       )}
+      <UnsavedChangesGuard
+        hasUnsavedChanges={dirty}
+        disabled={!canEdit}
+        onSaveAndLeave={saveCurrentValues}
+        subject="店铺资料"
+      />
     </div>
   );
 }

@@ -473,7 +473,7 @@ export default function PublicLayout() {
             <span className="site-header__brand-text">{siteName}</span>
           </Link>
 
-          <div className="site-header__right">
+          <nav className="site-header__right" aria-label="快捷入口">
             <Link
               to="/catalog"
               aria-label="选款中心"
@@ -504,7 +504,7 @@ export default function PublicLayout() {
                 我的账户
               </span>
             </Link>
-          </div>
+          </nav>
         </div>
       </header>
 

@@ -54,9 +54,25 @@ export class CustomerRegisterDto extends AccountPasswordDto {
 export class CustomerLoginDto extends CustomerPhoneDto {
   @IsString()
   @IsNotEmpty({ message: '请输入登录密码' })
-  // 登录只核对既有哈希并保留历史密码兼容；6-18 位合同用于新建/重置。
+  // 登录只核对既有哈希并保留历史密码兼容；长度合同用于新建/重置。
   @MaxLength(128, { message: '密码输入过长' })
   password!: string;
+
+  // 分级挑战（服务端按失败次数强制；缺失或错误由服务端返回明确提示）
+  @IsOptional()
+  @IsString()
+  @MaxLength(64, { message: '图形验证码编号无效' })
+  captchaId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8, { message: '图形验证码格式不正确' })
+  captchaCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: '短信验证码格式不正确' })
+  smsCode?: string;
 }
 
 export class ForgotPasswordDto {

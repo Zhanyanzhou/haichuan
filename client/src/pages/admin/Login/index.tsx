@@ -55,7 +55,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [remember, setRemember] = useState(false);
-  const [credentials, setCredentials] = useState({ username: '', password: '' });
+  // 登录值由 antd Form 托管（按钮 type=submit 走校验链），不再维护镜像 state。
   const usernameInputRef = useRef<InputRef>(null);
   const passwordInputRef = useRef<InputRef>(null);
   const navigate = useNavigate();
@@ -68,7 +68,6 @@ export default function Login() {
     if (saved) {
       setRemember(true);
       form.setFieldsValue({ username: saved });
-      setCredentials((current) => ({ ...current, username: saved }));
     }
   }, [form]);
 
@@ -175,9 +174,6 @@ export default function Login() {
               placeholder="输入用户名"
               autoFocus
               maxLength={50}
-              onChange={(e) => {
-                setCredentials((current) => ({ ...current, username: e.target.value }));
-              }}
               style={{
                 height: 56,
                 borderRadius: 8,
@@ -203,9 +199,6 @@ export default function Login() {
               autoComplete="current-password"
               prefix={<LockOutlined style={{ color: TOKENS.placeholder }} />}
               placeholder="输入密码"
-              onChange={(e) => {
-                setCredentials((current) => ({ ...current, password: e.target.value }));
-              }}
               iconRender={(visible) =>
                 visible ? (
                   <EyeOutlined style={{ color: TOKENS.muted }} aria-label="隐藏密码" />
@@ -247,21 +240,10 @@ export default function Login() {
             </div>
           )}
 
-          {/* 登录按钮 */}
+          {/* 登录按钮：type=submit 走 antd Form 校验链，字段级规则（长度/必填）在字段旁提示 */}
           <button
-            type="button"
+            type="submit"
             disabled={loading}
-            onClick={() => {
-              const usernameElement = document.getElementById('admin-login-username') as HTMLInputElement | null;
-              const passwordElement = document.getElementById('admin-login-password') as HTMLInputElement | null;
-              const username = usernameElement?.value ?? credentials.username;
-              const password = passwordElement?.value || credentials.password;
-              if (!username.trim() || !password) {
-                setError('请输入用户名和密码');
-                return;
-              }
-              void onFinish({ username, password });
-            }}
             style={{
               width: '100%',
               height: 54,

@@ -21,18 +21,23 @@ export class CartService {
     private readonly productsService: ProductsService,
   ) {}
 
+  // 游客购物车会话标识只接受标准 UUID：客户端自报的宽松字符串（时间戳/短随机串）
+  // 可被猜测或撞库，UUID 显著提高读到他人购物车内容的成本（购物车不含 PII/资金）。
+  private static readonly SESSION_ID_UUID =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   /** 解析购物车归属：登录客户优先，否则使用会话标识 */
   private resolveOwner(owner: Owner): { userId: number } | { sessionId: string } {
     const userId = owner.userId;
     if (userId) return { userId };
-    if (owner.sessionId && owner.sessionId.length > 0 && owner.sessionId.length <= 100) {
+    if (this.validSessionId(owner.sessionId)) {
       return { sessionId: owner.sessionId };
     }
     throw new BadRequestException('缺少有效的会话标识');
   }
 
   private validSessionId(sessionId?: string): sessionId is string {
-    return Boolean(sessionId && sessionId.length > 0 && sessionId.length <= 100);
+    return Boolean(sessionId && CartService.SESSION_ID_UUID.test(sessionId));
   }
 
   /**

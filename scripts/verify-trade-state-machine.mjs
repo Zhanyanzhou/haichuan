@@ -1,8 +1,10 @@
 // 交易域状态机静态契约测试
 // 验证订单、履约、售后三个状态机的合法转换与终态，以及关键写操作的状态守卫。
 // 运行：node scripts/verify-trade-state-machine.mjs
-// 说明：本脚本通过静态分析后端源码验证状态机规则；行为级测试（带数据库）
-//       需在本地环境执行 npm run dev + 接口联调，见最终报告。
+// 说明：本脚本只做源码结构存在性的静态字面检查——重构（重排数组、改文案、提取常量）
+//       会使检查失效，属于预期失败信号。订单状态机转换表的行为级断言位于
+//       server/src/modules/orders/trade-state-machine.spec.ts（导入真实导出）；
+//       更广的行为与联调验证仍需真实环境执行。
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";

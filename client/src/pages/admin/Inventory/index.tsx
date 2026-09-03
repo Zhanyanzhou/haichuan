@@ -14,6 +14,7 @@ import {
 import { ExportOutlined } from "@ant-design/icons";
 import { inventoryApi, warehouseApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { csvRow } from "@/utils/csv";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import {
   AdminEmptyState,
@@ -65,6 +66,7 @@ export default function Inventory() {
     record: InventoryRow | null;
   }>({ open: false, record: null });
   const [adjustQty, setAdjustQty] = useState<number | null>(0);
+  const [adjusting, setAdjusting] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -143,11 +145,17 @@ export default function Inventory() {
   );
 
   const handleAdjust = async () => {
+    if (adjusting) return;
     if (!adjustModal.record) return;
     if (adjustQty === null || !Number.isInteger(adjustQty) || adjustQty < 0) {
       message.error("目标库存必须是非负整数");
       return;
     }
+    if (adjustQty > 1_000_000) {
+      message.error("目标库存超出合理范围（上限 1,000,000），请核对数量");
+      return;
+    }
+    setAdjusting(true);
     try {
       await inventoryApi.update(adjustModal.record.id, {
         type: "adjust",
@@ -158,15 +166,22 @@ export default function Inventory() {
       void load();
     } catch (error: unknown) {
       message.error(getSafeAdminErrorMessage(error, "库存调整失败，请重新加载库存后核对数量。"));
+    } finally {
+      setAdjusting(false);
     }
   };
 
   const handleExport = () => {
     const csv = ["SKU,产品,仓库,库存,状态"]
       .concat(
-        filtered.map(
-          (i) =>
-            `${i.skuCode},${i.productName},${i.warehouse},${i.quantity},${sm[i.status]?.t || i.status}`,
+        filtered.map((i) =>
+          csvRow([
+            i.skuCode,
+            i.productName,
+            i.warehouse,
+            i.quantity,
+            sm[i.status]?.t || i.status,
+          ]),
         ),
       )
       .join("\n");
@@ -338,6 +353,7 @@ export default function Inventory() {
         open={adjustModal.open}
         onCancel={() => setAdjustModal({ open: false, record: null })}
         onOk={handleAdjust}
+        confirmLoading={adjusting}
         okText="保存库存调整"
         cancelText="取消"
       >
@@ -352,6 +368,8 @@ export default function Inventory() {
             aria-label="目标库存"
             changeOnBlur={false}
             inputMode="decimal"
+            min={0}
+            max={1000000}
             step={1}
             value={adjustQty}
             onChange={setAdjustQty}

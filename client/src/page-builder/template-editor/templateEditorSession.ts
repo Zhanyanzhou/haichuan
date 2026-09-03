@@ -6,7 +6,10 @@ import type {
   DynamicTemplatePreviewScenario,
   TemplateSaveStatus,
 } from "./types";
-import type { TemplateDefinitionV2 } from "../template-definition";
+import {
+  getDynamicTemplateStructureLockViolation,
+  type TemplateDefinitionV2,
+} from "../template-definition";
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
 import { getContentTemplateModuleTypeForSlotType } from "../template-definition/validateTemplateDefinition";
 
@@ -64,6 +67,7 @@ function resolveContractRoleForDevice(
   const moduleType = slot ? getContentTemplateModuleTypeForSlotType(slot.type) : undefined;
   const contract = moduleType ? getContentTemplateContract(moduleType) : undefined;
   const role = contract?.roles.find((candidate) => candidate.id === selection.roleId);
+  if (!role) return null;
   if (!role?.appliesTo?.length || role.appliesTo.includes(device)) return selection;
   const fallbackRole = role.fallbackRoleId
     ? contract?.roles.find((candidate) => candidate.id === role.fallbackRoleId)
@@ -79,6 +83,38 @@ function resolveContractRoleForDevice(
     return null;
   }
   return { nodeId: selection.nodeId, roleId: fallbackRole.id };
+}
+
+function repairTemplateEditorSelection(
+  definition: TemplateDefinitionV2,
+  selectedObjectId: string | null,
+  selectedContractRole: { nodeId: string; roleId: string } | null,
+  device: TemplateEditorDevice,
+) {
+  if (selectedContractRole && definition.nodes[selectedContractRole.nodeId]) {
+    const repairedRole = resolveContractRoleForDevice(
+      definition,
+      selectedContractRole,
+      device,
+    );
+    if (repairedRole) {
+      return {
+        selectedObjectId: repairedRole.nodeId,
+        selectedContractRole: repairedRole,
+      };
+    }
+    return {
+      selectedObjectId: selectedContractRole.nodeId,
+      selectedContractRole: null,
+    };
+  }
+  if (selectedObjectId && definition.nodes[selectedObjectId]) {
+    return { selectedObjectId, selectedContractRole: null };
+  }
+  return {
+    selectedObjectId: definition.rootNodeId,
+    selectedContractRole: null,
+  };
 }
 
 export type TemplateSaveReconcileResult = "saved" | "newer-changes" | "stale-session";
@@ -157,8 +193,15 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
       const previous = historyBaseline ?? state.draft;
       if (sameDraft(previous, draft) && sameDraft(state.draft, draft)) return state;
       const nextDraft = cloneDraft(draft);
+      const selection = repairTemplateEditorSelection(
+        nextDraft.definition,
+        state.selectedObjectId,
+        state.selectedContractRole,
+        state.device,
+      );
       return {
         draft: nextDraft,
+        ...selection,
         historyPast: sameDraft(previous, nextDraft)
           ? state.historyPast
           : [...state.historyPast, cloneDraft(previous)].slice(-HISTORY_LIMIT),
@@ -168,11 +211,21 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
       };
     }),
   previewDraft: (draft) =>
-    set((state) => state.draft ? {
-      draft: cloneDraft(draft),
-      dirty: !sameDraft(draft, state.baseline),
-      saveStatus: statusAfterDraftChange(state.saveStatus),
-    } : state),
+    set((state) => {
+      if (!state.draft) return state;
+      const nextDraft = cloneDraft(draft);
+      return {
+        draft: nextDraft,
+        ...repairTemplateEditorSelection(
+          nextDraft.definition,
+          state.selectedObjectId,
+          state.selectedContractRole,
+          state.device,
+        ),
+        dirty: !sameDraft(draft, state.baseline),
+        saveStatus: statusAfterDraftChange(state.saveStatus),
+      };
+    }),
   setName: (name) => {
     const state = useTemplateEditorSession.getState();
     if (!state.draft) return;
@@ -184,6 +237,7 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
   setDynamicDefinition: (definition) => {
     const state = useTemplateEditorSession.getState();
     if (!state.draft) return;
+    if (getDynamicTemplateStructureLockViolation(state.draft.definition, definition)) return;
     state.commitDraft({ ...state.draft, definition: structuredClone(definition) });
   },
   setDynamicVersionNote: (versionNote) => {
@@ -218,8 +272,15 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
         state.historyPast[state.historyPast.length - 1],
         state.draft,
       );
+      const selection = repairTemplateEditorSelection(
+        previous.definition,
+        state.selectedObjectId,
+        state.selectedContractRole,
+        state.device,
+      );
       return {
         draft: cloneDraft(previous),
+        ...selection,
         historyPast: state.historyPast.slice(0, -1),
         historyFuture: [cloneDraft(state.draft), ...state.historyFuture].slice(0, HISTORY_LIMIT),
         dirty: !sameDraft(previous, state.baseline),
@@ -230,8 +291,15 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
     set((state) => {
       if (!state.draft || state.historyFuture.length === 0) return state;
       const next = rebaseDraftPersistence(state.historyFuture[0], state.draft);
+      const selection = repairTemplateEditorSelection(
+        next.definition,
+        state.selectedObjectId,
+        state.selectedContractRole,
+        state.device,
+      );
       return {
         draft: cloneDraft(next),
+        ...selection,
         historyPast: [...state.historyPast, cloneDraft(state.draft)].slice(-HISTORY_LIMIT),
         historyFuture: state.historyFuture.slice(1),
         dirty: !sameDraft(next, state.baseline),
@@ -239,11 +307,20 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
       };
     }),
   markSaved: (draft) =>
-    set({
-      draft: cloneDraft(draft),
-      baseline: cloneDraft(draft),
-      dirty: false,
-      saveStatus: "success",
+    set((state) => {
+      const nextDraft = cloneDraft(draft);
+      return {
+        draft: nextDraft,
+        baseline: cloneDraft(draft),
+        ...repairTemplateEditorSelection(
+          nextDraft.definition,
+          state.selectedObjectId,
+          state.selectedContractRole,
+          state.device,
+        ),
+        dirty: false,
+        saveStatus: "success",
+      };
     }),
   reconcileSaveResult: ({ sessionId, requestedDraft, savedDraft, asCopy = false }) => {
     let result: TemplateSaveReconcileResult = "stale-session";
@@ -256,9 +333,16 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
 
       if (sameDraft(state.draft, requestedDraft)) {
         result = "saved";
+        const nextDraft = cloneDraft(savedDraft);
         return {
-          draft: cloneDraft(savedDraft),
+          draft: nextDraft,
           baseline: cloneDraft(savedDraft),
+          ...repairTemplateEditorSelection(
+            nextDraft.definition,
+            state.selectedObjectId,
+            state.selectedContractRole,
+            state.device,
+          ),
           dirty: false,
           saveStatus: "success",
         };
@@ -272,6 +356,12 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
       return {
         draft: rebasedDraft,
         baseline: cloneDraft(savedDraft),
+        ...repairTemplateEditorSelection(
+          rebasedDraft.definition,
+          state.selectedObjectId,
+          state.selectedContractRole,
+          state.device,
+        ),
         dirty: !sameDraft(rebasedDraft, savedDraft),
         saveStatus: "idle",
       };

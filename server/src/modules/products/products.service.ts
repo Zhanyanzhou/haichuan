@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  Logger,
   NotFoundException,
   ConflictException,
   UnprocessableEntityException,
@@ -505,6 +506,7 @@ function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
 
 @Injectable()
 export class ProductsService {
+  private readonly productsLogger = new Logger(ProductsService.name);
   private readonly publicEvents = new EventEmitter();
   private readonly resizedMediaCache = new Map<
     string,
@@ -707,14 +709,11 @@ export class ProductsService {
 
       return { list: enrichedList, total, page: _page, pageSize: _pageSize };
     } catch (error: unknown) {
-      // 记录完整查询上下文，便于定位 Prisma 校验异常
-      console.error("[findAll] Prisma 查询失败", {
-        message: error instanceof Error ? error.message : String(error),
-        where: JSON.stringify(where),
-        skip: (_page - 1) * _pageSize,
-        take: _pageSize,
-        orderBy: JSON.stringify(orderBy),
-      });
+      // 只记异常消息与分页位置；where 含后台用户键入的筛选关键词，不进日志
+      this.productsLogger.error(
+        "[findAll] Prisma 查询失败",
+        error instanceof Error ? error.message : String(error),
+      );
       throw error;
     }
   }
@@ -2089,7 +2088,7 @@ export class ProductsService {
     // 排除已软删除商品,避免改动或重新上架已删除记录
     const existing = await this.prisma.product.findFirst({
       where: { id, deletedAt: null },
-      select: { id: true, status: true },
+      select: { id: true, status: true, updatedAt: true },
     });
     if (!existing) throw new NotFoundException("商品不存在或已删除");
     // 回收站商品只读：禁止通过普通更新接口修改业务字段或直接改状态，唯一操作为恢复为草稿
@@ -2126,7 +2125,16 @@ export class ProductsService {
       const product = await this.prisma.$transaction(async (tx) => {
         await this.lockProductForTradeMutation(id, tx);
         if (Object.keys(data).length) {
-          await tx.product.update({ where: { id }, data });
+          // 乐观并发控制：读取基线后他人已保存过时拒绝本次覆盖，避免双人编辑静默互相冲写。
+          const updated = await tx.product.updateMany({
+            where: { id, updatedAt: existing.updatedAt },
+            data,
+          });
+          if (updated.count === 0) {
+            throw new ConflictException(
+              "商品已被其他操作更新，请重新加载后再编辑",
+            );
+          }
         }
 
         // 兼容旧编辑器的一口价字段：只允许映射到唯一有效 SKU，绝不直接写 Product.price。
@@ -2722,14 +2730,25 @@ export class ProductsService {
     if (name.length > 50) throw new BadRequestException("标签名称不能超过50字符");
     const exists = await this.prisma.tag.findUnique({ where: { slug: name } });
     if (exists) throw new ConflictException("同名标签已存在");
-    return this.prisma.tag.create({
-      data: {
-        name,
-        slug: name,
-        group: data.group?.trim() || null,
-        sortOrder: data.sortOrder ?? 0,
-      },
-    });
+    try {
+      return await this.prisma.tag.create({
+        data: {
+          name,
+          slug: name,
+          group: data.group?.trim() || null,
+          sortOrder: data.sortOrder ?? 0,
+        },
+      });
+    } catch (error) {
+      // 并发双击时先查后建存在窗口，靠 slug 唯一约束兜底并转为业务冲突
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new ConflictException("同名标签已存在");
+      }
+      throw error;
+    }
   }
 
   async updateTag(
@@ -2753,7 +2772,18 @@ export class ProductsService {
     if (data.group !== undefined) updateData.group = data.group?.trim() || null;
     if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
     if (data.isActive !== undefined) updateData.isActive = data.isActive;
-    return this.prisma.tag.update({ where: { id }, data: updateData });
+    try {
+      return await this.prisma.tag.update({ where: { id }, data: updateData });
+    } catch (error) {
+      // 并发改名撞 slug 唯一约束时转为业务冲突，而不是 500
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new ConflictException("同名标签已存在");
+      }
+      throw error;
+    }
   }
 
   /* ═══ 属性管理 ═══ */

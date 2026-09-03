@@ -9,6 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Prisma, PaymentStatus, RefundStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TradeEventsService } from '../trade-events/trade-events.service';
 import { TRADE_ENTITY_TYPE, TRADE_EVENT_TYPE, type OperatorContext } from '../trade-events/trade-events.constants';
@@ -981,6 +982,43 @@ export class RefundsService {
       refund.refundNo,
     );
     return this.applyOnlineRefundFact(refundId, fact, 'query');
+  }
+
+  /**
+   * 退款掉单兜底：渠道受理后回调丢失时，PROCESSING 退款会无限期滞留。
+   * 定期主动查单核销（与人工查询、回调共用 applyOnlineRefundFact 的
+   * 验签同源校验与状态推进）；单笔失败只告警不中断整批。不受退款发起门禁影响。
+   */
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async reconcileProcessingOnlineRefunds() {
+    const processingRefunds = await this.prisma.refund.findMany({
+      where: {
+        status: 'PROCESSING',
+        payment: { method: 'wechat' },
+        createdAt: {
+          lt: new Date(Date.now() - 30 * 60 * 1000),
+        },
+      },
+      select: { id: true, refundNo: true },
+      orderBy: { createdAt: 'asc' },
+      take: 30,
+    });
+    let reconciled = 0;
+    for (const refund of processingRefunds) {
+      try {
+        const result = await this.queryOnlineRefund(refund.id);
+        if (result.state === 'SUCCESS' || result.state === 'CLOSED') reconciled += 1;
+      } catch (error) {
+        this.logger.warn(
+          `退款掉单兜底查单失败 ${refund.refundNo}：${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
+    if (processingRefunds.length > 0) {
+      this.logger.log(
+        `退款掉单兜底：检查 ${processingRefunds.length} 笔处理中退款，${reconciled} 笔进入终态`,
+      );
+    }
   }
 
   /** 微信退款通知：验签和解密后才按退款号查找本地记录并推进。 */

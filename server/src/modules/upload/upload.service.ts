@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { join, relative, resolve, sep, extname } from 'path';
-import { existsSync, mkdirSync } from 'fs';
-import { readFile, stat, writeFile } from 'fs/promises';
+import { createReadStream, existsSync, mkdirSync } from 'fs';
+import { readFile, stat, unlink, writeFile } from 'fs/promises';
 import { randomUUID } from 'crypto';
 import dayjs from 'dayjs';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -189,7 +189,30 @@ export class UploadService {
     if (!relativePath || relativePath.startsWith('..')) {
       throw new BadRequestException('视频存储路径无效');
     }
+    // 内容魔数校验（与图片的 sharp 校验对齐）：MP4 头部 offset 4-7 为 "ftyp"，
+    // WebM/EBML 前 4 字节为 0x1A45DFA3。伪装视频的任意字节不再进入公开存储。
+    const header = await this.readLeadingBytes(file.path, 12);
+    const isMp4 =
+      header.length >= 8 &&
+      header[4] === 0x66 && header[5] === 0x74 && header[6] === 0x79 && header[7] === 0x70;
+    const isWebm =
+      header.length >= 4 &&
+      header[0] === 0x1a && header[1] === 0x45 && header[2] === 0xdf && header[3] === 0xa3;
+    if (!isMp4 && !isWebm) {
+      await unlink(file.path).catch(() => undefined);
+      throw new BadRequestException('文件内容不是有效的 MP4 或 WebM 视频');
+    }
     return { url: `/uploads/${relativePath}`, filename: file.filename, size: file.size };
+  }
+
+  private readLeadingBytes(path: string, count: number): Promise<Buffer> {
+    return new Promise((resolvePromise) => {
+      const stream = createReadStream(path, { start: 0, end: count - 1 });
+      const chunks: Buffer[] = [];
+      stream.on('data', (chunk: unknown) => chunks.push(chunk as Buffer));
+      stream.on('error', () => resolvePromise(Buffer.alloc(0)));
+      stream.on('end', () => resolvePromise(Buffer.concat(chunks)));
+    });
   }
 
   async uploadProductImages(

@@ -7,6 +7,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
 
 export interface ApiResponse<T> {
@@ -19,6 +20,31 @@ export interface ApiResponse<T> {
 
 // 与 @nestjs/common 的 SSE_METADATA 一致（@Sse 装饰器在 handler 上标记 '__sse__'）。
 const SSE_METADATA = '__sse__';
+
+/**
+ * Prisma Decimal 经 JSON.stringify 会序列化为字符串，而客户端金额类型声明为 number——
+ * 该裂缝曾迫使各页面到处 Number() 防御。在统一出口把 Decimal 归一化为 number，
+ * 让响应与前端类型合同重新一致。Date 原样保留（由 stringify 转 ISO），Buffer 跳过。
+ */
+export function normalizeDecimals(value: unknown): unknown {
+  if (value instanceof Prisma.Decimal) return value.toNumber();
+  if (Array.isArray(value)) {
+    return value.length ? value.map(normalizeDecimals) : value;
+  }
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    !(value instanceof Date) &&
+    !Buffer.isBuffer(value)
+  ) {
+    const output: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = normalizeDecimals(item);
+    }
+    return output;
+  }
+  return value;
+}
 
 @Injectable()
 export class TransformInterceptor<T>
@@ -54,7 +80,7 @@ export class TransformInterceptor<T>
           typeof request?.id === "string" ? request.id : undefined;
         return {
           code: 200,
-          data,
+          data: normalizeDecimals(data),
           message: 'success',
           timestamp: new Date().toISOString(),
           ...(requestId ? { requestId } : {}),

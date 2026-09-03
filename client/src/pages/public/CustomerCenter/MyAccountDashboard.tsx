@@ -624,6 +624,7 @@ export default function MyAccountDashboard({
             onCancelAfterSales={cancelAfterSales}
             onOpenProof={setProofOrderId}
             onOpenPayment={setPaymentOrder}
+            onRefresh={onRefresh}
           />
 
           <section

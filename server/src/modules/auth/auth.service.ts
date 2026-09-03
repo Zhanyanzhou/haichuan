@@ -16,6 +16,8 @@ type SafeStaff = Omit<User, 'password'>;
  */
 const LOGIN_MAX_FAILURES = 5;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
+/** 用户不存在时执行的等耗时比较目标，消除登录响应时序侧信道 */
+const DUMMY_BCRYPT_HASH = bcrypt.hashSync('haichuan-staff-dummy-password', 12);
 
 interface LoginAttemptRecord {
   failures: number;
@@ -80,7 +82,9 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({ where: { username } });
     if (!user) {
-      // 用户不存在同样计数：防攻击者借锁定行为差异枚举有效用户名
+      // 用户不存在同样计数：防攻击者借锁定行为差异枚举有效用户名；
+      // 并执行等耗时哑比较，消除"存在/不存在"的响应时序侧信道
+      await bcrypt.compare(password, DUMMY_BCRYPT_HASH).catch(() => false);
       this.recordLoginFailure(username);
       throw new UnauthorizedException('用户名或密码错误');
     }

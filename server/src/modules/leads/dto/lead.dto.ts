@@ -27,6 +27,7 @@ export class UpdateLeadDto {
 
   @IsOptional()
   @IsString({ message: '内部备注必须是字符串' })
+  @MaxLength(1000, { message: '内部备注不能超过 1000 个字符' })
   internalNote?: string;
 
   @IsOptional()
@@ -59,6 +60,7 @@ export class CreateLeadFollowUpDto {
   @IsString({ message: '跟进内容必须是字符串' })
   @IsNotEmpty({ message: '跟进内容不能为空' })
   @Matches(/\S/, { message: '跟进内容不能为空' })
+  @MaxLength(1000, { message: '跟进内容不能超过 1000 个字符' })
   content!: string;
 
   @IsOptional()

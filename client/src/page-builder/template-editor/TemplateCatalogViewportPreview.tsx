@@ -14,21 +14,10 @@ import {
   AUTO_ARTBOARD_MIN_HEIGHT,
   syncTemplateViewportStyles,
 } from "./TemplateViewportFrame";
+import EditableTargetOverlay from "./EditableTargetOverlay";
 import type {
   TemplateCatalogSlotDescriptor,
-  TemplateCatalogSlotKind,
 } from "./templatePreviewModel";
-
-interface TemplateCatalogSlotBox extends TemplateCatalogSlotDescriptor {
-  key: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  showLabel: boolean;
-  labelLeft: number;
-  labelTop: number;
-}
 
 // 同屏目录卡片会并行建立 iframe 与同步样式；低性能设备上 1.2 秒不足以区分
 // “渲染器缺失”和“仍在完成首帧”。保留有限等待，避免短暂拥塞被永久误报。
@@ -66,112 +55,6 @@ class TemplateCatalogPreviewErrorBoundary extends Component<{
   }
 }
 
-function normalizeContractSlotKind(
-  value: string | undefined,
-  semanticIdentity = "",
-): TemplateCatalogSlotKind | undefined {
-  if (value === "media") return "media";
-  if (value === "text") {
-    if (/(?:subtitle|summary|description|body)/i.test(semanticIdentity)) return "description";
-    if (/(?:title|heading)/i.test(semanticIdentity)) return "title";
-    return "text";
-  }
-  if (value === "action") return "button";
-  if (value === "product") return "product";
-  if (value === "collection" || value === "category") return "collection";
-  if (value === "business") return "business";
-  return undefined;
-}
-
-function contractSlotLabel(kind: TemplateCatalogSlotKind, currentLabel: string | undefined) {
-  if (kind === "title") return "标题槽位";
-  if (kind === "description") return "描述槽位";
-  if (kind === "button") return "按钮槽位";
-  if (kind === "product") return "商品槽位";
-  if (kind === "collection") return "集合槽位";
-  if (kind === "business") return "业务槽位";
-  return currentLabel || (kind === "media" ? "图片槽位" : "文字槽位");
-}
-
-function getRenderedTextSlotKind(element: HTMLElement): "title" | "description" | "text" {
-  const identity = `${element.dataset.editorField || ""} ${element.dataset.hcKeyboardNode || ""}`;
-  if (/(?:eyebrow|badge|label|tag)/i.test(identity)) return "text";
-  if (/(?:subtitle|summary|description|body)/i.test(identity) || element.tagName === "P") {
-    return "description";
-  }
-  if (/(?:title|heading)/i.test(identity) || /^H[1-6]$/.test(element.tagName)) return "title";
-  return "text";
-}
-
-function compactContractSlotLabel(kind: TemplateCatalogSlotKind, label: string) {
-  if (kind === "media") return label.includes("视频") ? "视频" : "图片";
-  if (kind === "title") return "标题";
-  if (kind === "description") return "描述";
-  if (kind === "button") return "按钮";
-  if (kind === "product") return "商品";
-  if (kind === "collection") return "集合";
-  if (kind === "business") return "业务";
-  return label.includes("标题") ? "标题" : label.includes("描述") ? "描述" : "文字";
-}
-
-function slotBoxesEqual(current: TemplateCatalogSlotBox[], next: TemplateCatalogSlotBox[]) {
-  if (current.length !== next.length) return false;
-  return current.every((box, index) => {
-    const candidate = next[index];
-    return Boolean(
-      candidate
-      && box.key === candidate.key
-      && box.kind === candidate.kind
-      && box.label === candidate.label
-      && box.compactLabel === candidate.compactLabel
-      && box.showLabel === candidate.showLabel
-      && Math.abs(box.labelLeft - candidate.labelLeft) < 0.5
-      && Math.abs(box.labelTop - candidate.labelTop) < 0.5
-      && Math.abs(box.left - candidate.left) < 0.5
-      && Math.abs(box.top - candidate.top) < 0.5
-      && Math.abs(box.width - candidate.width) < 0.5
-      && Math.abs(box.height - candidate.height) < 0.5
-    );
-  });
-}
-
-function placeSlotLabels(
-  boxes: TemplateCatalogSlotBox[],
-  viewportWidth: number,
-  viewportHeight: number,
-) {
-  const occupied: Array<{ left: number; top: number; right: number; bottom: number }> = [];
-  const labelHeight = 20;
-  return boxes.map((box) => {
-    if (!box.showLabel) return box;
-    const labelWidth = Math.min(
-      // 单列会显示完整“图片槽位”等文案；按完整标签预留空间，
-      // 双列切换成短标签时只会更宽松，不会重新制造遮挡。
-      Math.max(34, box.label.length * 12 + 12),
-      Math.max(34, viewportWidth),
-    );
-    const left = Math.max(0, Math.min(box.left + 2, viewportWidth - labelWidth));
-    const preferredTop = Math.max(0, Math.min(box.top + 2, viewportHeight - labelHeight));
-    const candidates = [
-      preferredTop,
-      Math.max(0, Math.min(box.top - labelHeight - 2, viewportHeight - labelHeight)),
-      Math.max(0, Math.min(box.top + box.height + 2, viewportHeight - labelHeight)),
-      ...Array.from({ length: Math.max(1, Math.ceil(viewportHeight / labelHeight)) }, (_, index) => (
-        Math.min(index * labelHeight, Math.max(0, viewportHeight - labelHeight))
-      )),
-    ];
-    const top = candidates.find((candidateTop) => !occupied.some((current) => (
-      left < current.right
-      && left + labelWidth > current.left
-      && candidateTop < current.bottom
-      && candidateTop + labelHeight > current.top
-    )));
-    if (top === undefined) return { ...box, showLabel: false };
-    occupied.push({ left, top, right: left + labelWidth, bottom: top + labelHeight });
-    return { ...box, labelLeft: left, labelTop: top };
-  });
-}
-
 export default function TemplateCatalogViewportPreview({
   children,
   fallbackHeight,
@@ -202,24 +85,15 @@ export default function TemplateCatalogViewportPreview({
     isUnavailable ? "unavailable" : "loading",
   );
   const [rendererReady, setRendererReady] = useState(false);
-  const [slotBoxes, setSlotBoxes] = useState<TemplateCatalogSlotBox[]>([]);
+  const [slotBoxCount, setSlotBoxCount] = useState(0);
+  const overlayTargets = useMemo(() => slots.map((slot) => ({
+    ...slot,
+    label: slot.compactLabel,
+  })), [slots]);
   const [measurement, setMeasurement] = useState({
     naturalHeight: initialNaturalHeight,
     scale: viewport === "mobile" ? 0.25 : 0.1,
   });
-  const slotDescriptorById = useMemo(
-    () => new Map(slots.filter((slot) => !slot.roleId).map((slot) => [slot.slotId, slot])),
-    [slots],
-  );
-  const roleDescriptorsByRoleId = useMemo(() => {
-    const descriptors = new Map<string, TemplateCatalogSlotDescriptor[]>();
-    slots.forEach((slot) => {
-      if (!slot.roleId) return;
-      descriptors.set(slot.roleId, [...(descriptors.get(slot.roleId) ?? []), slot]);
-    });
-    return descriptors;
-  }, [slots]);
-
   const syncFrameStyles = useCallback((nextDocument: Document) => {
     const syncId = styleSyncIdRef.current + 1;
     styleSyncIdRef.current = syncId;
@@ -269,7 +143,7 @@ export default function TemplateCatalogViewportPreview({
     }));
     setRenderFailed(false);
     setRendererReady(false);
-    setSlotBoxes([]);
+    setSlotBoxCount(0);
     setPreviewStatus(unavailable ? "unavailable" : "loading");
   }, [initialNaturalHeight, templateKey, unavailable, viewport]);
 
@@ -309,7 +183,7 @@ export default function TemplateCatalogViewportPreview({
   useLayoutEffect(() => {
     if (!renderFailed) return;
     setRendererReady(false);
-    setSlotBoxes([]);
+    setSlotBoxCount(0);
     setPreviewStatus("unavailable");
   }, [renderFailed]);
 
@@ -361,148 +235,6 @@ export default function TemplateCatalogViewportPreview({
       "[data-dynamic-template-id], [data-content-template-renderer], [data-template-node-id]",
     ));
 
-    const collectSlotBoxes = (contentBounds: DOMRect): TemplateCatalogSlotBox[] => {
-      const candidates: Array<{
-        element: HTMLElement;
-        descriptor: TemplateCatalogSlotDescriptor;
-        identity: string;
-      }> = [];
-      const matchedContractSlotIds = new Set<string>();
-
-      content.querySelectorAll<HTMLElement>("[data-hc-template-slot-kind]").forEach((element, index) => {
-        const semanticIdentity = `${element.dataset.hcKeyboardNode || ""} ${element.dataset.editorField || ""}`;
-        const kind = normalizeContractSlotKind(element.dataset.hcTemplateSlotKind, semanticIdentity);
-        if (!kind || element.getClientRects().length === 0) return;
-        const textElements = kind === "text"
-          ? Array.from(element.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6,p,[data-editor-field]"))
-            .filter((textElement) => textElement.getClientRects().length > 0)
-          : [];
-        if (kind !== "text" || textElements.length === 0) {
-          const label = contractSlotLabel(kind, element.dataset.hcTemplateSlotLabel);
-          candidates.push({
-            element,
-            identity: `contract:${element.dataset.hcKeyboardNode || element.dataset.contentRole || index}`,
-            descriptor: {
-              slotId: element.dataset.hcKeyboardNode || element.dataset.contentRole || `contract-${index}`,
-              kind,
-              label,
-              compactLabel: compactContractSlotLabel(kind, label),
-            },
-          });
-        }
-        textElements.forEach((textElement, textIndex) => {
-            if (textElement.getClientRects().length === 0) return;
-            const textKind = getRenderedTextSlotKind(textElement);
-            const textLabel = contractSlotLabel(textKind, undefined);
-            candidates.push({
-              element: textElement,
-              identity: `contract-text:${element.dataset.hcKeyboardNode || index}:${textIndex}`,
-              descriptor: {
-                slotId: `${element.dataset.hcKeyboardNode || index}:text:${textIndex}`,
-                kind: textKind,
-                label: textLabel,
-                compactLabel: compactContractSlotLabel(textKind, textLabel),
-              },
-            });
-          });
-      });
-
-      content.querySelectorAll<HTMLElement>(
-        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
-      ).forEach((element, index) => {
-        if (element.getClientRects().length === 0) return;
-        const bounds = element.getBoundingClientRect();
-        if (bounds.width <= 0 || bounds.height <= 0) return;
-        const roleIds = [
-          element.dataset.contentRole,
-          element.dataset.contentRoleDesktop,
-          element.dataset.contentRoleMobile,
-          ...(element.dataset.editorField?.split(/\s+/) ?? []),
-        ].filter((roleId): roleId is string => Boolean(roleId));
-        roleIds.forEach((roleId) => {
-          roleDescriptorsByRoleId.get(roleId)?.forEach((descriptor) => {
-            matchedContractSlotIds.add(descriptor.slotId);
-            const textElements = descriptor.kind === "text"
-              ? Array.from(element.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6,p,[data-editor-field]"))
-                .filter((textElement) => textElement.getClientRects().length > 0)
-              : [];
-            if (descriptor.kind !== "text" || textElements.length === 0) {
-              candidates.push({
-                element,
-                descriptor,
-                identity: `role:${descriptor.slotId}:${roleId}:${index}`,
-              });
-            }
-            textElements.forEach((textElement, textIndex) => {
-                if (textElement.getClientRects().length === 0) return;
-                const textKind = getRenderedTextSlotKind(textElement);
-                const textLabel = contractSlotLabel(textKind, undefined);
-                candidates.push({
-                  element: textElement,
-                  identity: `role-text:${descriptor.slotId}:${roleId}:${index}:${textIndex}`,
-                  descriptor: {
-                    slotId: descriptor.slotId,
-                    kind: textKind,
-                    label: textLabel,
-                    compactLabel: compactContractSlotLabel(textKind, textLabel),
-                  },
-                });
-              });
-          });
-        });
-      });
-
-      content.querySelectorAll<HTMLElement>("[data-template-slot-id]").forEach((element, index) => {
-        const slotId = element.dataset.templateSlotId;
-        const descriptor = slotId ? slotDescriptorById.get(slotId) : undefined;
-        if (
-          !slotId
-          || !descriptor
-          || element.getClientRects().length === 0
-          || matchedContractSlotIds.has(slotId)
-          || element.querySelector("[data-hc-template-slot-kind]")
-        ) return;
-        candidates.push({ element, descriptor, identity: `slot:${slotId}:${index}` });
-      });
-
-      const seen = new Set<string>();
-      const boxes = candidates.flatMap(({ element, descriptor, identity }): TemplateCatalogSlotBox[] => {
-        const bounds = element.getBoundingClientRect();
-        const left = (bounds.left - contentBounds.left) * measurement.scale;
-        const top = (bounds.top - contentBounds.top) * measurement.scale;
-        const width = bounds.width * measurement.scale;
-        const height = bounds.height * measurement.scale;
-        // 目录缩放后，真实正文行高可能不足 1px；仍保留其真实矩形，
-        // 否则标题可标注而描述槽位会被误判为不存在。
-        if (width <= 0.25 || height <= 0.25) return [];
-        const signature = [
-          descriptor.kind,
-          Math.round(left),
-          Math.round(top),
-          Math.round(width),
-          Math.round(height),
-        ].join(":");
-        if (seen.has(signature)) return [];
-        seen.add(signature);
-        return [{
-          ...descriptor,
-          key: `${identity}:${signature}`,
-          left,
-          top,
-          width,
-          height,
-          showLabel: width >= 32,
-          labelLeft: left,
-          labelTop: top,
-        }];
-      });
-      return placeSlotLabels(
-        boxes,
-        sourceWidth * measurement.scale,
-        Math.max(AUTO_ARTBOARD_MIN_HEIGHT, contentBounds.height) * measurement.scale,
-      );
-    };
-
     const commitMeasurements = () => {
       const contentBounds = content.getBoundingClientRect();
       const descendantBottom = Array.from(content.children).reduce((bottom, child) => (
@@ -518,11 +250,9 @@ export default function TemplateCatalogViewportPreview({
       setMeasurement((current) => Math.abs(current.naturalHeight - naturalHeight) < 1
         ? current
         : { ...current, naturalHeight });
-      const nextSlotBoxes = collectSlotBoxes(contentBounds);
-      setSlotBoxes((current) => slotBoxesEqual(current, nextSlotBoxes) ? current : nextSlotBoxes);
       const nextRendererReady = hasRenderedPreviewRoot();
       setRendererReady(nextRendererReady);
-      const genericSlotsReady = slots.length === 0 || nextSlotBoxes.length > 0;
+      const genericSlotsReady = slots.length === 0 || slotBoxCount > 0;
       lastMeasurementReady = nextRendererReady && genericSlotsReady;
       if (lastMeasurementReady) previewTimedOutRef.current = false;
       setPreviewStatus(lastMeasurementReady
@@ -548,8 +278,10 @@ export default function TemplateCatalogViewportPreview({
       subtree: true,
       attributes: true,
       attributeFilter: [
-        "data-hc-template-slot-kind",
-        "data-hc-template-slot-label",
+        "data-content-role",
+        "data-content-role-desktop",
+        "data-content-role-mobile",
+        "data-editor-field",
         "data-template-slot-id",
         "style",
       ],
@@ -583,9 +315,7 @@ export default function TemplateCatalogViewportPreview({
     fallbackHeight,
     frameDocument,
     heightMode,
-    measurement.scale,
-    roleDescriptorsByRoleId,
-    slotDescriptorById,
+    slotBoxCount,
     slots.length,
     sourceWidth,
     styleRevision,
@@ -603,7 +333,7 @@ export default function TemplateCatalogViewportPreview({
       data-preview-status={previewStatus}
       data-preview-renderer-ready={rendererReady ? "true" : "false"}
       data-preview-styles-ready={stylesReady ? "true" : "false"}
-      data-preview-slot-box-count={slotBoxes.length}
+      data-preview-slot-box-count={slotBoxCount}
     >
       <div
         ref={hostRef}
@@ -649,34 +379,15 @@ export default function TemplateCatalogViewportPreview({
               onLoad={connectFrame}
             />
             <span className="template-editor__catalog-artboard-boundary" aria-hidden="true" />
-            <div className="template-editor__catalog-slot-overlay" aria-hidden="true">
-              {slotBoxes.map((slot) => (
-                <span
-                  key={slot.key}
-                  className="template-editor__catalog-slot-box"
-                  data-slot-kind={slot.kind}
-                  data-slot-label={slot.compactLabel}
-                  style={{
-                    left: slot.left,
-                    top: slot.top,
-                    width: slot.width,
-                    height: slot.height,
-                  }}
-                >
-                </span>
-              ))}
-              {slotBoxes.filter((slot) => slot.showLabel).map((slot) => (
-                <span
-                  key={`${slot.key}:label`}
-                  className="template-editor__catalog-slot-label"
-                  data-slot-label-for={slot.compactLabel}
-                  style={{ left: slot.labelLeft, top: slot.labelTop }}
-                >
-                  <span className="is-full">{slot.label}</span>
-                  <span className="is-compact">{slot.compactLabel}</span>
-                </span>
-              ))}
-            </div>
+            <EditableTargetOverlay
+              sourceFrame={frameDocument ? frameRef.current : null}
+              sourceRoot={contentElement}
+              hostRoot={hostRef.current}
+              targets={overlayTargets}
+              surface="catalog"
+              annotations
+              onMeasurementChange={setSlotBoxCount}
+            />
             {previewStatus !== "ready" ? (
               <span className="template-editor__catalog-preview-state" role="status">
                 {previewStatus === "unavailable" ? "预览不可用" : "正在生成预览"}

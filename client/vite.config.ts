@@ -57,6 +57,12 @@ export default defineConfig(({ mode, command }) => {
     build: {
       // Windows 下清空包含大量图片的输出目录会触发 EPERM；Linux 容器仍执行干净构建。
       emptyOutDir: process.platform !== "win32",
+      // 品牌字体（woff2/woff）按 unicode-range 分片，必须保持独立哈希资产由浏览器按需下载；
+      // 内联成 data URI 会让异步 CSS chunk 携带全部分片字节，突破最大 CSS 块预算。
+      assetsInlineLimit(file) {
+        if (/\.(woff2?|ttf|otf)$/.test(file)) return false;
+        return undefined;
+      },
       rolldownOptions: {
         output: {
           // 只固定共享框架块；Ant Design 保持按懒加载路由拆分，避免公开页下载整个后台组件库。

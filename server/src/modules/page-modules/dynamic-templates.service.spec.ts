@@ -410,6 +410,7 @@ test("草稿更新绑定所有者、锁定 templateId 并使用乐观 revision",
     }),
     ConflictException,
   );
+
   const foreignIdentity = definitionFixture();
   foreignIdentity.templateId = "tpl_other_identity";
   await assert.rejects(
@@ -422,9 +423,91 @@ test("草稿更新绑定所有者、锁定 templateId 并使用乐观 revision",
   await assert.rejects(() => service.getDraft(99, definition.templateId), NotFoundException);
 });
 
+test("持久化快照允许解锁后修改或修改后锁定合并为一次保存", async () => {
+  const { service, getState } = createStatefulService();
+  const locked = definitionFixture();
+  locked.nodes.node_container.authoring = { structureLocked: true };
+  await service.create(17, { definition: locked });
+
+  const unlockedAndChanged = structuredClone(locked);
+  delete unlockedAndChanged.nodes.node_container.authoring;
+  unlockedAndChanged.nodes.node_heading.responsive.desktop.order = 4;
+  const changedAfterUnlock = await service.updateDraft(17, locked.templateId, {
+    expectedRevision: 1,
+    definition: unlockedAndChanged,
+  });
+  assert.equal(changedAfterUnlock?.draft?.revision, 2);
+  assert.equal(getState().draft.revision, 2);
+  assert.equal(getState().draft.definition.nodes.node_container.authoring, undefined);
+  assert.equal(getState().draft.definition.nodes.node_heading.responsive.desktop.order, 4);
+
+  const changedAndLocked = structuredClone(unlockedAndChanged);
+  changedAndLocked.nodes.node_heading.responsive.desktop.order = 5;
+  changedAndLocked.nodes.node_container.authoring = { structureLocked: true };
+  const lockedAfterChange = await service.updateDraft(17, locked.templateId, {
+    expectedRevision: 2,
+    definition: changedAndLocked,
+  });
+  assert.equal(lockedAfterChange?.draft?.revision, 3);
+  assert.equal(getState().draft.revision, 3);
+  assert.deepEqual(
+    getState().draft.definition.nodes.node_container.authoring,
+    { structureLocked: true },
+  );
+  assert.equal(getState().draft.definition.nodes.node_heading.responsive.desktop.order, 5);
+});
+
+test("持久化快照拒绝持续锁保护的变化且其他锁变化不能掩盖", async () => {
+  const { service, getState } = createStatefulService();
+  const locked = definitionFixture();
+  locked.nodes.node_container.authoring = { structureLocked: true };
+  await service.create(17, { definition: locked });
+
+  const assertStructureLocked = async (
+    submittedDefinition: typeof locked,
+    expectedRevision: number,
+  ) => {
+    await assert.rejects(
+      () => service.updateDraft(17, locked.templateId, {
+        expectedRevision,
+        definition: submittedDefinition,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof BadRequestException);
+        assert.equal((error.getResponse() as any).code, "TEMPLATE_STRUCTURE_LOCKED");
+        return true;
+      },
+    );
+    assert.equal(getState().draft.revision, expectedRevision);
+  };
+
+  const stillLockedAndChanged = structuredClone(locked);
+  stillLockedAndChanged.nodes.node_heading.responsive.desktop.order = 4;
+  await assertStructureLocked(stillLockedAndChanged, 1);
+
+  const persistentLockWithNewNestedLock = structuredClone(locked);
+  persistentLockWithNewNestedLock.nodes.node_heading.authoring = { structureLocked: true };
+  persistentLockWithNewNestedLock.nodes.node_heading.responsive.desktop.order = 4;
+  await assertStructureLocked(persistentLockWithNewNestedLock, 1);
+
+  const lockedWithNestedLock = structuredClone(locked);
+  lockedWithNestedLock.nodes.node_heading.authoring = { structureLocked: true };
+  const nestedLockUpdate = await service.updateDraft(17, locked.templateId, {
+    expectedRevision: 1,
+    definition: lockedWithNestedLock,
+  });
+  assert.equal(nestedLockUpdate?.draft?.revision, 2);
+
+  const persistentLockWithRemovedNestedLock = structuredClone(lockedWithNestedLock);
+  delete persistentLockWithRemovedNestedLock.nodes.node_heading.authoring;
+  persistentLockWithRemovedNestedLock.nodes.node_heading.responsive.desktop.order = 4;
+  await assertStructureLocked(persistentLockWithRemovedNestedLock, 2);
+});
+
 test("发布生成不可变正式版本、开放 STAFF 读取并保留下一版草稿", async () => {
   const { service, getState, calls } = createStatefulService();
   const definition = definitionFixture();
+  definition.nodes.node_container.authoring = { structureLocked: true };
   await service.create(17, {
     definition,
     versionNote: "首版",
@@ -438,6 +521,10 @@ test("发布生成不可变正式版本、开放 STAFF 读取并保留下一版�
   assert.equal(getState().draft.revision, 2);
   assert.equal(getState().versions.length, 1);
   assert.equal(getState().versions[0].versionNote, "首版");
+  assert.deepEqual(
+    (getState().versions[0].definition as any).nodes.node_container.authoring,
+    { structureLocked: true },
+  );
   const firstDraftClaim = calls.findIndex((call) => call.operation === "draft.updateMany");
   const firstVersionAdvance = calls.findIndex((call) => call.operation === "template.updateMany");
   const firstVersionInsert = calls.findIndex((call) => call.operation === "version.create");
@@ -461,7 +548,7 @@ test("发布生成不可变正式版本、开放 STAFF 读取并保留下一版�
     BadRequestException,
   );
 
-  const changed = definitionFixture();
+  const changed = structuredClone(definition);
   changed.name = "服务端母模板校验｜第二版";
   await service.updateDraft(17, definition.templateId, {
     expectedRevision: 2,
@@ -629,6 +716,33 @@ test("新母模板不持久化内容，历史内容只允许原样兼容或显�
       return true;
     },
   );
+  const withLegacyEmptyPolicy = definitionFixture();
+  withLegacyEmptyPolicy.slots.slot_heading.emptyPolicy = "use-default";
+  await assert.rejects(
+    () => direct.service.create(17, { definition: withLegacyEmptyPolicy }),
+    (error: unknown) => {
+      assert.ok(error instanceof BadRequestException);
+      assert.equal((error.getResponse() as any).code, "TEMPLATE_LEGACY_EMPTY_POLICY_NOT_ALLOWED");
+      return true;
+    },
+  );
+
+  const currentPolicy = createStatefulService();
+  const currentDefinition = definitionFixture();
+  await currentPolicy.service.create(17, { definition: currentDefinition });
+  const addedLegacyPolicy = structuredClone(currentDefinition);
+  addedLegacyPolicy.slots.slot_heading.emptyPolicy = "use-default";
+  await assert.rejects(
+    () => currentPolicy.service.updateDraft(17, currentDefinition.templateId, {
+      expectedRevision: 1,
+      definition: addedLegacyPolicy,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof BadRequestException);
+      assert.equal((error.getResponse() as any).code, "TEMPLATE_LEGACY_EMPTY_POLICY_IS_READ_ONLY");
+      return true;
+    },
+  );
 
   const historical = createStatefulService();
   const definition = definitionFixture();
@@ -636,6 +750,7 @@ test("新母模板不持久化内容，历史内容只允许原样兼容或显�
   const historicalDefinition = definitionFixture();
   historicalDefinition.defaultContent = { slot_heading: "历史默认标题" };
   historicalDefinition.previewContent = { slot_heading: "历史预览标题" };
+  historicalDefinition.slots.slot_heading.emptyPolicy = "use-default";
   historical.setDraftDefinition(historicalDefinition);
 
   const preserved = structuredClone(historicalDefinition);
@@ -665,12 +780,28 @@ test("新母模板不持久化内容，历史内容只允许原样兼容或显�
   const cleared = structuredClone(preserved);
   cleared.defaultContent = {};
   cleared.previewContent = {};
+  cleared.slots.slot_heading.emptyPolicy = "hide";
   await historical.service.updateDraft(17, definition.templateId, {
     expectedRevision: 2,
     definition: cleared,
   });
   assert.deepEqual(historical.getState().draft.definition.defaultContent, {});
   assert.deepEqual(historical.getState().draft.definition.previewContent, {});
+  assert.equal(historical.getState().draft.definition.slots.slot_heading.emptyPolicy, "hide");
+
+  const restoredLegacyPolicy = structuredClone(cleared);
+  restoredLegacyPolicy.slots.slot_heading.emptyPolicy = "use-default";
+  await assert.rejects(
+    () => historical.service.updateDraft(17, definition.templateId, {
+      expectedRevision: 3,
+      definition: restoredLegacyPolicy,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof BadRequestException);
+      assert.equal((error.getResponse() as any).code, "TEMPLATE_LEGACY_EMPTY_POLICY_IS_READ_ONLY");
+      return true;
+    },
+  );
 
   const copied = createStatefulService();
   await copied.service.create(17, { definition: definitionFixture() });
@@ -681,6 +812,7 @@ test("新母模板不持久化内容，历史内容只允许原样兼容或显�
   assert.ok(copy.draft);
   assert.deepEqual((copy.draft.definition as any).defaultContent, {});
   assert.deepEqual((copy.draft.definition as any).previewContent, {});
+  assert.equal((copy.draft.definition as any).slots.slot_heading.emptyPolicy, "hide");
 });
 
 test("仅回收站中从未发布且未被页面引用的 CUSTOM 草稿可以永久删除", async () => {

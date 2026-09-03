@@ -5,6 +5,9 @@ import {
   type TemplateDefinitionV2,
 } from "../template-definition";
 import type { TemplateEditorDraft } from "./types";
+import {
+  prepareDynamicTemplateDefinitionForNewIdentity,
+} from "./dynamicTemplateEditorUtils";
 
 const STORAGE_KEY = "haichuan.dynamic-template-drafts.v1";
 const REPOSITORY_VERSION = 1;
@@ -98,16 +101,23 @@ export function saveLocalDynamicTemplateDraft(
   const name = (options.name ?? next.definition.name).trim();
   if (!name) throw new Error("请先填写模板名称");
   next.definition.name = name;
+  const repository = readRepository();
+  const createsNewIdentity = options.asCopy === true
+    || !repository.drafts.some((item) => item.localDraftId === next.localDraftId);
   if (options.asCopy) {
     next.localDraftId = createDynamicTemplateStableId("tpl");
-    next.definition.templateId = next.localDraftId;
+  }
+  if (createsNewIdentity) {
+    next.definition = prepareDynamicTemplateDefinitionForNewIdentity(
+      next.definition,
+      next.localDraftId,
+    );
   }
   const validation = validateDynamicTemplateDefinition(next.definition);
   const firstError = validation.issues.find((issue) => issue.level === "error");
   if (!validation.valid || !validation.definition) {
     throw new Error(firstError?.message ?? "模板结构校验失败");
   }
-  const repository = readRepository();
   const savedAt = new Date().toISOString();
   const stored: StoredDynamicTemplateDraft = {
     localDraftId: next.localDraftId,
@@ -147,15 +157,17 @@ export function importDynamicTemplateDraftJson(source: string): TemplateEditorDr
     throw new Error(validation.issues.find((issue) => issue.level === "error")?.message ?? "模板结构校验失败");
   }
   const definition = structuredClone(validation.definition);
-  definition.templateId = createDynamicTemplateStableId("tpl");
-  definition.defaultContent = {};
-  definition.previewContent = {};
+  const templateId = createDynamicTemplateStableId("tpl");
+  const preparedDefinition = prepareDynamicTemplateDefinitionForNewIdentity(
+    definition,
+    templateId,
+  );
   return {
     format: "dynamic",
     sourceType: "local",
-    localDraftId: definition.templateId,
+    localDraftId: templateId,
     versionNote: "",
-    definition,
+    definition: preparedDefinition,
   };
 }
 

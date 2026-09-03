@@ -38,8 +38,8 @@ import { businessDateKey } from "../../common/time/business-date";
 import { runWithDocumentNumberRetry } from "../../common/trade/document-number-retry";
 import { ReliableNotificationIntentService } from "../../common/notifications/reliable-notification-intent.service";
 
-/** 订单状态机：定义合法状态转换 */
-const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+/** 订单状态机：定义合法状态转换（导出供行为级测试消费） */
+export const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   PENDING_PAYMENT: ["PENDING_SHIP", "CANCELLED"],
   PENDING_SHIP: ["SHIPPED"],
   SHIPPED: ["COMPLETED"],
@@ -997,11 +997,48 @@ export class OrdersService implements OnModuleInit {
   }
 
   async findForCustomer(customerId: number) {
+    // 客户订单字段白名单：internalNote（后台内部备注）、userId、salesConsultantId、
+    // source、paymentProof 属于后台事实，不得进入客户响应。新增 Order 标量字段时
+    // 必须先确认客户可见性，再显式加入本 select，避免随模型扩展自动外发。
     const orders = await this.prisma.order.findMany({
       where: { customerId },
       // 个人订单列表安全上限，防止极端账户全量加载；正常用户远不到此数
       take: 100,
-      include: {
+      select: {
+        id: true,
+        orderNo: true,
+        customerName: true,
+        customerId: true,
+        customerPhone: true,
+        customerEmail: true,
+        address: true,
+        totalAmount: true,
+        discountAmount: true,
+        finalAmount: true,
+        status: true,
+        paymentMethod: true,
+        logisticsCompany: true,
+        logisticsNo: true,
+        lockedGoldPrice: true,
+        reservedAt: true,
+        paymentConfirmedAt: true,
+        shippedAt: true,
+        completedAt: true,
+        cancelledAt: true,
+        createdAt: true,
+        updatedAt: true,
+        orderType: true,
+        adjustmentAmount: true,
+        depositAmount: true,
+        paidDeposit: true,
+        balanceAmount: true,
+        paidBalance: true,
+        paidAmount: true,
+        refundedAmount: true,
+        customStage: true,
+        deliveryStatus: true,
+        receivedAt: true,
+        couponId: true,
         items: {
           include: {
             product: { select: { id: true, name: true, code: true } },
@@ -1075,16 +1112,36 @@ export class OrdersService implements OnModuleInit {
       orderBy: { createdAt: "desc" },
     });
     // 客户订单接口不返回凭证真实路径、后台备注、操作者或渠道原始数据。
-    return orders.map(({ payments, tradeEvents, ...order }) => ({
-      ...order,
-      payments: payments.map(({ proofUrl, ...payment }) => ({
-        ...payment,
-        hasProof: Boolean(proofUrl),
-      })),
-      timeline: tradeEvents.filter((event) =>
-        CUSTOMER_VISIBLE_EVENT_TYPES.has(event.eventType),
-      ),
-    }));
+    // 下列五个后台字段不在 select 白名单内；此处按"可能存在"再剔除一次，
+    // 即使查询层未来回退为 include，内部事实也不会外发（由 customer-visibility spec 断言）。
+    return orders.map((order) => {
+      const {
+        payments,
+        tradeEvents,
+        internalNote: _internalNote,
+        userId: _userId,
+        salesConsultantId: _salesConsultantId,
+        source: _source,
+        paymentProof: _paymentProof,
+        ...safeOrder
+      } = order as typeof order & {
+        internalNote?: unknown;
+        userId?: unknown;
+        salesConsultantId?: unknown;
+        source?: unknown;
+        paymentProof?: unknown;
+      };
+      return {
+        ...safeOrder,
+        payments: payments.map(({ proofUrl, ...payment }) => ({
+          ...payment,
+          hasProof: Boolean(proofUrl),
+        })),
+        timeline: tradeEvents.filter((event) =>
+          CUSTOMER_VISIBLE_EVENT_TYPES.has(event.eventType),
+        ),
+      };
+    });
   }
 
   async create(data: {
@@ -1705,7 +1762,17 @@ export class OrdersService implements OnModuleInit {
     });
     if (!result.order)
       throw new BadRequestException("订单的库存保留已到期，请重新下单");
-    return result.payment;
+    // 凭证提交响应只返回安全支付字段：私有凭证路径、审核字段与渠道原始数据不外发
+    //（与 findForCustomer 的支付白名单同口径）。
+    const {
+      proofUrl,
+      gatewayTradeNo,
+      gatewayNotify,
+      reviewedBy,
+      reviewNote,
+      ...safePayment
+    } = result.payment;
+    return { ...safePayment, hasProof: Boolean(proofUrl) };
   }
 
   /**
@@ -2099,6 +2166,138 @@ export class OrdersService implements OnModuleInit {
     return shipped;
   }
 
+  /**
+   * 未付款取消的共享执行体（后台人工取消与客户自助取消复用）：
+   * 状态机校验 → 已收款/履约拦截 → 返券 → 释放库存 → 事件记录，全部在订单行锁后判定。
+   */
+  private async executeUnpaidCancellation(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    operator: OperatorContext,
+    reason: string | null,
+    options: { internalNote?: string } = {},
+  ) {
+    await this.lockOrderForTrade(tx, orderId);
+    const lockedOrder = await tx.order.findUnique({ where: { id: orderId } });
+    if (!lockedOrder) throw new NotFoundException("订单不存在");
+
+    const currentStatus = lockedOrder.status as OrderStatus;
+    const allowedNext = VALID_TRANSITIONS[currentStatus];
+    if (!allowedNext || !allowedNext.includes("CANCELLED")) {
+      throw new BadRequestException(
+        `订单状态不能从 ${currentStatus} 变更为 CANCELLED。允许的变更为: ${allowedNext?.join(", ") || "无"}`,
+      );
+    }
+
+    const confirmedPayment = await tx.payment.findFirst({
+      where: {
+        orderId,
+        status: { in: [...CONFIRMED_PAYMENT_STATUSES] },
+      },
+      select: { id: true },
+    });
+    if (Number(lockedOrder.paidAmount) > 0 || confirmedPayment) {
+      throw new ConflictException("订单已有确认收款，不能取消");
+    }
+
+    const fulfillment = await tx.fulfillment.findFirst({
+      where: { orderId },
+      select: { id: true },
+    });
+    if (fulfillment) {
+      throw new ConflictException("订单已生成履约单，不能取消");
+    }
+
+    await this.releaseCouponCapacityForUnpaidCancellation(
+      tx,
+      lockedOrder,
+      operator,
+      "MANUAL_CANCEL",
+    );
+    const cancelledAt = new Date();
+    const releasedCount = await this.releaseStockReservations(tx, orderId, cancelledAt);
+    const updated = await tx.order.updateMany({
+      where: {
+        id: orderId,
+        status: currentStatus,
+        paidAmount: 0,
+      },
+      data: {
+        status: "CANCELLED",
+        internalNote: options.internalNote,
+        cancelledAt,
+        reservedAt: null,
+      },
+    });
+    if (updated.count === 0) {
+      throw new ConflictException("订单状态或收款事实已变化，请刷新后重试");
+    }
+
+    if (releasedCount > 0) {
+      await this.tradeEvents.record(tx, {
+        orderId,
+        entityType: TRADE_ENTITY_TYPE.INVENTORY,
+        entityId: orderId,
+        eventType: TRADE_EVENT_TYPE.STOCK_RELEASED,
+        operator,
+        reason: `取消订单释放 ${releasedCount} 个预占`,
+      });
+    }
+    await this.tradeEvents.record(tx, {
+      orderId,
+      entityType: TRADE_ENTITY_TYPE.ORDER,
+      entityId: orderId,
+      eventType: TRADE_EVENT_TYPE.ORDER_CANCELLED,
+      fromStatus: currentStatus,
+      toStatus: "CANCELLED",
+      operator,
+      reason,
+    });
+    return tx.order.findUnique({ where: { id: orderId } });
+  }
+
+  /**
+   * 客户本人取消未付款订单：归属校验 + 待处理支付拦截后复用取消链路。
+   * 存在 PENDING 在线交易或待审凭证时拒绝——渠道可能正在扣款，须先查单/结束支付。
+   */
+  async cancelForCustomer(customerId: number, orderId: number) {
+    const owned = await this.prisma.order.findFirst({
+      where: { id: orderId, customerId },
+      select: { id: true },
+    });
+    if (!owned) throw new NotFoundException("订单不存在或无权操作");
+
+    const cancelled = await this.prisma.$transaction(async (tx) => {
+      const pendingPayment = await tx.payment.findFirst({
+        where: { orderId, status: "PENDING" },
+        select: { paymentNo: true },
+      });
+      if (pendingPayment) {
+        throw new ConflictException(
+          `订单存在待处理的支付交易 ${pendingPayment.paymentNo}，请先在订单中查询或结束支付后再取消`,
+        );
+      }
+      return this.executeUnpaidCancellation(
+        tx,
+        orderId,
+        { type: OPERATOR_TYPE.CUSTOMER, id: customerId },
+        "客户自助取消未付款订单",
+      );
+    });
+    if (!cancelled) return null;
+    this.notifyCustomerOrderStatus(cancelled, "已取消");
+    // 客户取消响应与列表接口同一白名单口径：后台内部字段不外发。
+    const {
+      internalNote,
+      userId,
+      salesConsultantId,
+      source,
+      paymentProof,
+      ...customerCancelled
+    } = cancelled;
+    return customerCancelled;
+  }
+
   async updateStatus(
     id: number,
     data: {
@@ -2122,89 +2321,11 @@ export class OrdersService implements OnModuleInit {
     // 取消与确认收款共用固定锁顺序：Order → Payment → Fulfillment → 库存预占。
     // 所有资格判断都在订单行锁之后重读，避免付款先提交后仍按旧状态取消。
     if (newStatus === "CANCELLED") {
-      const cancelledAt = new Date();
-      const cancelled = await this.prisma.$transaction(async (tx) => {
-        await this.lockOrderForTrade(tx, id);
-        const lockedOrder = await tx.order.findUnique({ where: { id } });
-        if (!lockedOrder) throw new NotFoundException("订单不存在");
-
-        const currentStatus = lockedOrder.status as OrderStatus;
-        const allowedNext = VALID_TRANSITIONS[currentStatus];
-        if (!allowedNext || !allowedNext.includes(newStatus)) {
-          throw new BadRequestException(
-            `订单状态不能从 ${currentStatus} 变更为 ${newStatus}。允许的变更为: ${allowedNext?.join(", ") || "无"}`,
-          );
-        }
-
-        const confirmedPayment = await tx.payment.findFirst({
-          where: {
-            orderId: id,
-            status: { in: [...CONFIRMED_PAYMENT_STATUSES] },
-          },
-          select: { id: true },
-        });
-        if (Number(lockedOrder.paidAmount) > 0 || confirmedPayment) {
-          throw new ConflictException("订单已有确认收款，不能取消");
-        }
-
-        const fulfillment = await tx.fulfillment.findFirst({
-          where: { orderId: id },
-          select: { id: true },
-        });
-        if (fulfillment) {
-          throw new ConflictException("订单已生成履约单，不能取消");
-        }
-
-        await this.releaseCouponCapacityForUnpaidCancellation(
-          tx,
-          lockedOrder,
-          operator,
-          'MANUAL_CANCEL',
-        );
-        const releasedCount = await this.releaseStockReservations(
-          tx,
-          id,
-          cancelledAt,
-        );
-        const updated = await tx.order.updateMany({
-          where: {
-            id,
-            status: currentStatus,
-            paidAmount: 0,
-          },
-          data: {
-            status: newStatus,
-            internalNote: data.internalNote || undefined,
-            cancelledAt,
-            reservedAt: null,
-          },
-        });
-        if (updated.count === 0) {
-          throw new ConflictException("订单状态或收款事实已变化，请刷新后重试");
-        }
-
-        if (releasedCount > 0) {
-          await this.tradeEvents.record(tx, {
-            orderId: id,
-            entityType: TRADE_ENTITY_TYPE.INVENTORY,
-            entityId: id,
-            eventType: TRADE_EVENT_TYPE.STOCK_RELEASED,
-            operator,
-            reason: `取消订单释放 ${releasedCount} 个预占`,
-          });
-        }
-        await this.tradeEvents.record(tx, {
-          orderId: id,
-          entityType: TRADE_ENTITY_TYPE.ORDER,
-          entityId: id,
-          eventType: TRADE_EVENT_TYPE.ORDER_CANCELLED,
-          fromStatus: currentStatus,
-          toStatus: newStatus,
-          operator,
-          reason: data.internalNote || null,
-        });
-        return tx.order.findUnique({ where: { id } });
-      });
+      const cancelled = await this.prisma.$transaction((tx) =>
+        this.executeUnpaidCancellation(tx, id, operator, data.internalNote || null, {
+          internalNote: data.internalNote || undefined,
+        }),
+      );
       if (!cancelled) throw new NotFoundException("订单不存在");
       this.logger.log(`订单 #${id} 状态变更为 ${newStatus}`);
       this.notifyCustomerOrderStatus(cancelled, "已取消");
@@ -2307,6 +2428,25 @@ export class OrdersService implements OnModuleInit {
 
     if (releasedCount > 0) {
       this.logger.log(`已释放 ${releasedCount} 笔超时未付款订单的库存预占`);
+    }
+
+    // 凭证 SLA 升级告警：超 72h 未审核的线下凭证汇总提示（驳回由人决定，系统不自动处置）
+    // 告警尽力而为：统计失败不得中断库存释放主任务
+    try {
+      const overdueProofs = await this.prisma.payment.count({
+        where: {
+          status: "PENDING",
+          proofUrl: { not: null },
+          createdAt: { lt: new Date(now.getTime() - 72 * 60 * 60 * 1000) },
+        },
+      });
+      if (overdueProofs > 0) {
+        this.logger.warn(
+          `付款凭证 SLA 升级：${overdueProofs} 笔线下凭证等待审核超过 72 小时，请优先核对到账并处置`,
+        );
+      }
+    } catch {
+      // 告警查询失败仅跳过本次提示
     }
   }
 
@@ -2678,11 +2818,21 @@ export class OrdersService implements OnModuleInit {
     const now = new Date();
     const h24 = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const h48 = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    const h72 = new Date(now.getTime() - 72 * 60 * 60 * 1000);
     const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    // 线下凭证待审核 SLA：24h 提示、72h 升级；驳回永远是人的决定，系统不自动处置资金
+    const pendingProofOlderThan = (cutoff: Date): Prisma.OrderWhereInput => ({
+      status: "PENDING_PAYMENT",
+      payments: {
+        some: { status: "PENDING", proofUrl: { not: null }, createdAt: { lt: cutoff } },
+      },
+    });
 
     const where: Prisma.OrderWhereInput = {
       OR: [
         { status: "PENDING_PAYMENT", createdAt: { lt: h24 } }, // 长时间未付款
+        pendingProofOlderThan(h24), // 凭证待审核超 24h
         { status: "PENDING_SHIP", paymentConfirmedAt: { lt: h48 } }, // 超时未发货
         {
           orderType: "CUSTOM",
@@ -2709,6 +2859,12 @@ export class OrdersService implements OnModuleInit {
               productCodeSnapshot: true,
             },
           },
+          payments: {
+            where: { status: "PENDING", proofUrl: { not: null } },
+            select: { createdAt: true },
+            orderBy: { createdAt: "asc" },
+            take: 1,
+          },
         },
         orderBy: { createdAt: "desc" },
         take: 200,
@@ -2720,6 +2876,11 @@ export class OrdersService implements OnModuleInit {
       const reasons: string[] = [];
       if (o.status === "PENDING_PAYMENT" && o.createdAt < h24)
         reasons.push("长时间未付款");
+      const proofSubmittedAt = o.payments[0]?.createdAt;
+      if (proofSubmittedAt) {
+        if (proofSubmittedAt < h72) reasons.push("付款凭证待审核超 72 小时（升级处理）");
+        else if (proofSubmittedAt < h24) reasons.push("付款凭证待审核超 24 小时");
+      }
       if (
         o.status === "PENDING_SHIP" &&
         o.paymentConfirmedAt &&
@@ -2734,7 +2895,9 @@ export class OrdersService implements OnModuleInit {
         reasons.push("定制超期");
       if (o.deliveryStatus === "ABNORMAL") reasons.push("物流异常");
       if (reasons.length === 0) reasons.push("退款处理中");
-      return { ...o, anomalyReasons: reasons };
+      // reasons 面向后台展示，剥离临时投影避免响应冗余
+      const { payments: _payments, ...order } = o;
+      return { ...order, anomalyReasons: reasons };
     });
 
     return { list: enriched, total };

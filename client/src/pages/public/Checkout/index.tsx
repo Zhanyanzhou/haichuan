@@ -25,6 +25,14 @@ type CartItem = {
 const getItemPrice = (item: CartItem) => Number(item.sku.price || 0);
 
 type CreatedOrder = { id: number; orderNo: string; finalAmount: number };
+type UsableCoupon = {
+  id: number;
+  name: string;
+  type: string;
+  value: number | string;
+  minAmount: number | string;
+  estimatedDiscount: number;
+};
 type CheckoutFormValues = {
   address: string;
   customerEmail?: string;
@@ -103,6 +111,34 @@ export default function Checkout() {
     (sum, item) => sum + getItemPrice(item) * item.quantity,
     0,
   );
+  // 可用券试算：失败静默（券功能不阻断结算）；折扣以服务端建单事务核销为准
+  const [coupons, setCoupons] = useState<UsableCoupon[]>([]);
+  const [selectedCouponId, setSelectedCouponId] = useState<number | null>(null);
+  const selectedCoupon = coupons.find((coupon) => coupon.id === selectedCouponId) ?? null;
+  const discountAmount = selectedCoupon ? Number(selectedCoupon.estimatedDiscount || 0) : 0;
+  const payableTotal = Math.max(0, total - discountAmount);
+
+  useEffect(() => {
+    if (!isSignedIn || total <= 0) {
+      setCoupons([]);
+      setSelectedCouponId(null);
+      return;
+    }
+    let cancelled = false;
+    customerApi
+      .usableCoupons(Math.round(total * 100))
+      .then((res: unknown) => {
+        const data = unwrapResponse<UsableCoupon[]>(res);
+        if (!cancelled) setCoupons(Array.isArray(data) ? data.filter((coupon) => coupon.estimatedDiscount > 0) : []);
+      })
+      .catch(() => {
+        if (!cancelled) setCoupons([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, total]);
+
   const hasUnverifiedCartItem = cartItems.some(
     (item) => item.availability?.available !== true,
   );
@@ -124,6 +160,7 @@ export default function Checkout() {
       const response = await customerApi.checkout({
         address: values.address,
         customerEmail: values.customerEmail || undefined,
+        couponId: selectedCouponId ?? undefined,
         items: cartItems.map((item) => ({ skuId: item.skuId, quantity: item.quantity })),
       });
       // P0-1 联动：后端 checkout 已改为要求登录态、不再签发 access token；返回仅含 order
@@ -265,6 +302,53 @@ export default function Checkout() {
             <div className="flex justify-between font-display text-lg mt-3 pt-3 border-t border-brand-line">
               <span>合计</span><span className="price">¥{total.toLocaleString()}</span>
             </div>
+            {coupons.length > 0 ? (
+              <div className="mt-4" role="group" aria-label="选择优惠券">
+                <p className="text-sm text-brand-muted mb-2">优惠券</p>
+                <div className="flex flex-col gap-2">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="coupon"
+                      checked={selectedCouponId === null}
+                      onChange={() => setSelectedCouponId(null)}
+                    />
+                    <span>不使用优惠券</span>
+                  </label>
+                  {coupons.map((coupon) => (
+                    <label key={coupon.id} className="flex items-center justify-between gap-2 text-sm cursor-pointer">
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="coupon"
+                          checked={selectedCouponId === coupon.id}
+                          onChange={() => setSelectedCouponId(coupon.id)}
+                        />
+                        <span>
+                          {coupon.name}
+                          <span className="text-brand-gold ml-2">
+                            −¥{Number(coupon.estimatedDiscount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </span>
+                        </span>
+                      </span>
+                      <span className="text-xs text-brand-muted">
+                        满 ¥{Number(coupon.minAmount).toLocaleString()} 可用
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {selectedCoupon ? (
+                  <div className="flex justify-between text-sm mt-3 pt-3 border-t border-brand-line">
+                    <span className="text-brand-muted">优惠</span>
+                    <span className="text-brand-gold">−¥{discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between font-display text-lg mt-2">
+                  <span>应付</span><span className="price">¥{payableTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <p className="text-xs text-brand-muted mt-2">最终折扣以下单时服务端核销结果为准；若券在提交瞬间失效将提示重新选择。</p>
+              </div>
+            ) : null}
           </div>
 
           <Form layout="vertical" onFinish={handleSubmit}>
@@ -298,7 +382,7 @@ export default function Checkout() {
               </p>
             </div>
             <button type="submit" className="btn btn-primary w-full" disabled={submitting}>
-              {submitting ? "提交中..." : `提交订单并支付 ¥${total.toLocaleString()}`}
+              {submitting ? "提交中..." : `提交订单并支付 ¥${payableTotal.toLocaleString()}`}
             </button>
           </Form>
         </div>

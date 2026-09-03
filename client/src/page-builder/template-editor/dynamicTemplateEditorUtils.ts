@@ -4,6 +4,50 @@ import {
   type DynamicTemplateNodeType,
 } from "../template-definition";
 
+const DYNAMIC_TEMPLATE_COMPATIBILITY_CONTENT_FIELDS = [
+  "defaultContent",
+  "previewContent",
+] as const;
+
+type DynamicTemplateCompatibilityContentField =
+  (typeof DYNAMIC_TEMPLATE_COMPATIBILITY_CONTENT_FIELDS)[number];
+
+function getDynamicTemplateCompatibilityContentFields(
+  definition: TemplateDefinitionV2,
+): DynamicTemplateCompatibilityContentField[] {
+  return DYNAMIC_TEMPLATE_COMPATIBILITY_CONTENT_FIELDS.filter(
+    (field) => Object.keys(definition[field] ?? {}).length > 0,
+  );
+}
+
+export function hasDynamicTemplateCompatibilityState(
+  definition: TemplateDefinitionV2,
+): boolean {
+  return getDynamicTemplateCompatibilityContentFields(definition).length > 0
+    || Object.values(definition.slots).some((slot) => slot.emptyPolicy === "use-default");
+}
+
+export function clearDynamicTemplateCompatibilityContent(
+  definition: TemplateDefinitionV2,
+): TemplateDefinitionV2 {
+  const next = structuredClone(definition);
+  next.defaultContent = {};
+  next.previewContent = {};
+  for (const slot of Object.values(next.slots)) {
+    if (slot.emptyPolicy === "use-default") slot.emptyPolicy = "hide";
+  }
+  return next;
+}
+
+export function prepareDynamicTemplateDefinitionForNewIdentity(
+  definition: TemplateDefinitionV2,
+  templateId: string,
+): TemplateDefinitionV2 {
+  const next = clearDynamicTemplateCompatibilityContent(definition);
+  next.templateId = templateId;
+  return next;
+}
+
 export function findDynamicTemplateParentId(
   definition: TemplateDefinitionV2,
   nodeId: string,
@@ -85,6 +129,15 @@ export function getDynamicTemplateAllowedParentIds(
     .map((candidate) => candidate.nodeId);
 }
 
-export function parseCommaSeparatedValues(value: string): string[] {
-  return [...new Set(value.split(/[,，]/).map((item) => item.trim()).filter(Boolean))];
+export function parseCommaSeparatedValues(
+  value: string,
+  limits?: { maxItems?: number; maxItemLength?: number },
+): string[] {
+  const maxItems = Math.max(0, limits?.maxItems ?? Number.POSITIVE_INFINITY);
+  const maxItemLength = Math.max(0, limits?.maxItemLength ?? Number.POSITIVE_INFINITY);
+  const normalized = value
+    .split(/[,，]/)
+    .map((item) => item.trim().slice(0, maxItemLength))
+    .filter(Boolean);
+  return [...new Set(normalized)].slice(0, maxItems);
 }

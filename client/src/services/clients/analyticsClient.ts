@@ -68,6 +68,10 @@ export const analyticsApi = {
     api.get("/analytics/overview", { params: { days } }),
   getVisitors: (days: number) =>
     api.get("/analytics/visitors", { params: { days } }),
-  getEvents: (params: { eventName?: string; hours: number; pageSize?: number }) =>
-    api.get("/analytics/events", { params }),
+  getEvents: (params: {
+    eventName?: string;
+    hours: number;
+    page?: number;
+    pageSize?: number;
+  }) => api.get("/analytics/events", { params }),
 };

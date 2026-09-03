@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import { customerApi } from "@/services/api";
+import { getRequestErrorMessage } from "@/services/httpClient";
 import type { CustomerPaymentOrder } from "@/components/commerce/CustomerPaymentDialog";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getRequestableAfterSalesItems } from "./CustomerAfterSalesDialog";
@@ -105,6 +106,7 @@ type CustomerOrdersPanelProps = {
   onCancelAfterSales: (caseRecord: CustomerAfterSalesCase) => void;
   onOpenProof: (orderId: number) => void;
   onOpenPayment: (order: CustomerPaymentOrder) => void;
+  onRefresh?: () => void;
 };
 
 export default function CustomerOrdersPanel({
@@ -117,9 +119,28 @@ export default function CustomerOrdersPanel({
   onCancelAfterSales,
   onOpenProof,
   onOpenPayment,
+  onRefresh,
 }: CustomerOrdersPanelProps) {
   const { message } = AntdApp.useApp();
   const [trackingOrderId, setTrackingOrderId] = useState<number | null>(null);
+  const [cancellingOrderId, setCancellingOrderId] = useState<number | null>(null);
+
+  // 客户自助取消未付款订单；存在待处理支付时服务端拒绝并给出明确指引
+  const handleCancelOrder = async (order: CustomerOrder) => {
+    if (!window.confirm(`确定取消订单 ${order.orderNo} 吗？取消后库存与优惠券将即时释放。`)) {
+      return;
+    }
+    setCancellingOrderId(order.id);
+    try {
+      await customerApi.cancelOrder(order.id);
+      message.success("订单已取消");
+      onRefresh?.();
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "订单取消未完成，请稍后重试。"));
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
 
   useEffect(() => {
     for (const order of orders) {
@@ -469,6 +490,17 @@ export default function CustomerOrdersPanel({
                         线上付款暂未开放·顾问将联系您
                       </span>
                     ))}
+                  {order.status === "PENDING_PAYMENT" && !hasPendingProof ? (
+                    <button
+                      type="button"
+                      className="my-account__summary-action"
+                      style={{ padding: "6px 12px", fontSize: 12, minHeight: 0 }}
+                      disabled={cancellingOrderId === order.id}
+                      onClick={() => void handleCancelOrder(order)}
+                    >
+                      {cancellingOrderId === order.id ? "取消中…" : "取消订单"}
+                    </button>
+                  ) : null}
                 </div>
               </article>
             );

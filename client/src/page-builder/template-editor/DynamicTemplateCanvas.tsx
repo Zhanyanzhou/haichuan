@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import {
+  compileDynamicTemplateRenderPlan,
   duplicateDynamicTemplateNode,
   DynamicTemplateRenderer,
+  editableTargetToVisualKind,
   formatTemplateRatio,
+  getExplicitContractRolePresentation,
   removeDynamicTemplateNode,
+  resolveEditableTargets,
   resolveTemplateDesignFrame,
   setTemplateDesignHeightMode,
   setTemplateDesignWidth,
@@ -11,22 +15,37 @@ import {
 } from "../template-definition";
 import type { TemplateDefinitionV2 } from "../template-definition";
 import {
+  findContentTemplateEditableObject,
   getContentTemplateContract,
   sanitizeContentTemplateLayoutData,
 } from "../generated/contentTemplates.generated";
 import {
   getContentTemplateModuleTypeForSlotType,
 } from "../template-definition/validateTemplateDefinition";
+import { setVisualOverridePath } from "../runtime/visualLayout";
 import {
   CANVAS_VISUAL_EDIT_MESSAGE,
   useVisualEditorSession,
   type CanvasVisualEditMessage,
-  type VisualNodeKind,
 } from "../visual-editor/visualEditorSession";
 import { useTemplateEditorSession } from "./templateEditorSession";
 import TemplateViewportFrame, {
   type TemplateDirectResizeValue,
 } from "./TemplateViewportFrame";
+import type {
+  OverlayPlacementGesture,
+  OverlayTargetDescriptor,
+} from "./EditableTargetOverlay";
+import {
+  moveFreePlacement,
+  resizeFreePlacement,
+} from "../template-definition/freePlacementGeometry";
+import {
+  alignNormalizedRect,
+  applyBoundedNormalizedRectGesture,
+  clampGeometryValue,
+  sourceDeltaToNormalized,
+} from "./editableTargetGeometry";
 import {
   createTemplatePreviewContentBySlotId,
   createTemplatePreviewScenarioContentBySlotId,
@@ -37,14 +56,6 @@ function createEditingContent(
   definition: TemplateDefinitionV2,
 ): Record<string, unknown> {
   return createTemplatePreviewContentBySlotId(definition);
-}
-
-function visualKindFromContractKind(kind: string): VisualNodeKind {
-  if (kind === "media" || kind === "video") return "media";
-  if (kind === "text") return "text";
-  if (kind === "action") return "action";
-  if (kind === "product") return "product";
-  return "structured";
 }
 
 export default function DynamicTemplateCanvas() {
@@ -91,8 +102,6 @@ export default function DynamicTemplateCanvas() {
       const slot = node?.slotId ? currentDraft?.definition.slots[node.slotId] : undefined;
       const contract = getContentTemplateContract(detail.moduleType);
       if (!currentDraft || !node || !slot || !contract) return;
-      if (node.props.contentTemplateDesignProps?.structureLocked === true) return;
-
       const sanitized = detail.overrides === undefined
         ? undefined
         : sanitizeContentTemplateLayoutData(detail.moduleType, detail.overrides);
@@ -131,16 +140,17 @@ export default function DynamicTemplateCanvas() {
     const moduleType = getContentTemplateModuleTypeForSlotType(slot.type);
     if (!moduleType) return;
     const contract = getContentTemplateContract(moduleType);
-    const object = contract?.editorCapabilities.editableObjects.find(
-      (candidate) => candidate.roleId === selectedContractRole.roleId
-        || candidate.nodeIds?.includes(selectedContractRole.roleId),
+    const presentation = getExplicitContractRolePresentation(
+      contract,
+      selectedContractRole.roleId,
     );
-    if (!object) return;
+    if (!presentation) return;
+    const object = presentation.object;
     useVisualEditorSession.getState().selectNode({
       blockId: `template-editor:${sessionId}:${selectedContractRole.nodeId}`,
       moduleType,
       nodeId: selectedContractRole.roleId,
-      kind: visualKindFromContractKind(object.kind),
+      kind: editableTargetToVisualKind(presentation.kind),
       canAdjustLayout: object.capabilities.includes("layout"),
       canAdjustMedia: object.capabilities.some((capability) =>
         capability === "focus" || capability === "fit" || capability === "zoom"),
@@ -165,6 +175,44 @@ export default function DynamicTemplateCanvas() {
   const previewContent = previewMode
     ? createTemplatePreviewScenarioContentBySlotId(dynamicDraft.definition, previewScenario)
     : createEditingContent(dynamicDraft.definition);
+  const editableTargets = (() => {
+    if (previewMode) return [];
+    const compiled = compileDynamicTemplateRenderPlan(dynamicDraft.definition, {
+      device,
+      contentBySlotId: previewContent,
+      showEmptySlots: true,
+    });
+    return compiled.ok
+      ? resolveEditableTargets(dynamicDraft.definition, compiled.plan, getContentTemplateContract)
+      : [];
+  })();
+  const selectedOverlayTargetId = selectedContractRole
+    ? `role:${selectedContractRole.nodeId}:${selectedContractRole.roleId}`
+    : selectedNodeId
+      ? `node:${selectedNodeId}`
+      : null;
+  const freePlacementTargetIds = new Set(editableTargets.flatMap((target) => {
+    if (target.source !== "definition-node" || !target.capabilities.includes("structure")) return [];
+    return dynamicDraft.definition.nodes[target.ownerNodeId]?.responsive[device].placement
+      ? [target.targetId]
+      : [];
+  }));
+  const contractLayoutTargetIds = new Set(editableTargets.flatMap((target) =>
+    target.source === "builtin-contract-role" && target.capabilities.includes("layout")
+      ? [target.targetId]
+      : [],
+  ));
+  const overlayPlacementTargetIds = new Set([
+    ...freePlacementTargetIds,
+    ...contractLayoutTargetIds,
+  ]);
+  const disabledNodeActions = new Map(editableTargets.flatMap((target) => {
+    const node = dynamicDraft.definition.nodes[target.ownerNodeId];
+    const slot = node?.slotId ? dynamicDraft.definition.slots[node.slotId] : undefined;
+    return target.source === "definition-node" && slot?.required
+      ? [[target.targetId, new Set(["hide", "delete"] as const)] as const]
+      : [];
+  }));
 
   const commitPlacement = (
     nodeId: string,
@@ -174,10 +222,92 @@ export default function DynamicTemplateCanvas() {
     const currentDraft = useTemplateEditorSession.getState().draft;
     const node = currentDraft?.definition.nodes[nodeId];
     if (!currentDraft || !node) return;
-    if (node.props.contentTemplateDesignProps?.structureLocked === true) return;
     const next = structuredClone(currentDraft.definition);
     next.nodes[nodeId].responsive[targetDevice].placement = placement;
     setDynamicDefinition(next);
+  };
+  const commitOverlayPlacementGesture = (gesture: OverlayPlacementGesture) => {
+    const currentDraft = useTemplateEditorSession.getState().draft;
+    const nodeId = gesture.target.ownerNodeId;
+    const node = currentDraft?.definition.nodes[nodeId];
+    if (
+      currentDraft
+      && node
+      && gesture.target.source === "builtin-contract-role"
+      && gesture.target.contractRoleId
+      && gesture.target.capabilities?.includes("layout")
+    ) {
+      const slot = node.slotId ? currentDraft.definition.slots[node.slotId] : undefined;
+      const moduleType = slot ? getContentTemplateModuleTypeForSlotType(slot.type) : undefined;
+      const contract = moduleType ? getContentTemplateContract(moduleType) : undefined;
+      const roleId = gesture.target.contractRoleId;
+      const defaultRect = contract?.defaultGeometryByViewport[device].zones
+        .find((zone) => zone.nodeId === roleId)?.rect;
+      if (!moduleType || !defaultRect) return;
+      const editableObject = findContentTemplateEditableObject(contract, roleId);
+      if (!editableObject) return;
+      const constraints = editableObject.constraints;
+      const bounds = constraints.safeAreaRequired
+        ? contract!.defaultGeometryByViewport[device].safeArea
+        : { x: 0, y: 0, width: 1, height: 1 };
+      const explicitRect = (node.props.contentTemplateLayoutData as {
+        nodes?: Record<string, { rectByViewport?: Partial<Record<typeof device, typeof defaultRect>> }>;
+      } | undefined)?.nodes?.[roleId]?.rectByViewport?.[device];
+      const currentRect = explicitRect ?? gesture.sourceRect ?? defaultRect;
+      const nextRect = applyBoundedNormalizedRectGesture({
+        rect: currentRect,
+        operation: gesture.operation,
+        direction: gesture.direction,
+        delta: sourceDeltaToNormalized(
+          gesture.deltaSourceX,
+          gesture.deltaSourceY,
+          gesture.parentSourceWidth,
+          gesture.parentSourceHeight,
+        ),
+        constraints,
+        bounds,
+      });
+      const next = structuredClone(currentDraft.definition);
+      const nextLayoutData = setVisualOverridePath(
+        node.props.contentTemplateLayoutData,
+        ["nodes", roleId, "rectByViewport", device],
+        nextRect,
+      );
+      const sanitized = sanitizeContentTemplateLayoutData(moduleType, nextLayoutData);
+      if (!sanitized) return;
+      next.nodes[nodeId].props.contentTemplateLayoutData = sanitized;
+      setDynamicDefinition(next);
+      return;
+    }
+    const placement = node?.responsive[device].placement;
+    if (!currentDraft || !node || !placement || !gesture.target.capabilities?.includes("structure")) {
+      return;
+    }
+    const parent = Object.values(currentDraft.definition.nodes)
+      .find((candidate) => candidate.childIds.includes(nodeId));
+    const siblings = parent?.childIds
+      .filter((childId) => childId !== nodeId)
+      .flatMap((childId) => {
+        const siblingPlacement = currentDraft.definition.nodes[childId]?.responsive[device].placement;
+        return siblingPlacement ? [siblingPlacement] : [];
+      }) ?? [];
+    const delta = sourceDeltaToNormalized(
+      gesture.deltaSourceX,
+      gesture.deltaSourceY,
+      gesture.parentSourceWidth,
+      gesture.parentSourceHeight,
+    );
+    const nextPlacement = gesture.operation === "resize" && gesture.direction
+      ? resizeFreePlacement(placement, gesture.direction, delta.x, delta.y, siblings)
+      : moveFreePlacement(placement, delta.x, delta.y, siblings);
+    commitPlacement(nodeId, device, nextPlacement);
+  };
+  const selectOverlayTarget = (target: OverlayTargetDescriptor) => {
+    if (target.source === "builtin-contract-role" && target.contractRoleId) {
+      selectContractRole(target.ownerNodeId, target.contractRoleId);
+      return;
+    }
+    selectObject(target.ownerNodeId);
   };
   const handleNodeAction = (
     nodeId: string,
@@ -187,7 +317,6 @@ export default function DynamicTemplateCanvas() {
     const currentDraft = useTemplateEditorSession.getState().draft;
     if (!currentDraft) return;
     const node = currentDraft.definition.nodes[nodeId];
-    if (node?.props.contentTemplateDesignProps?.structureLocked === true) return;
     const slot = node?.slotId ? currentDraft.definition.slots[node.slotId] : undefined;
     if ((action === "hide" || action === "delete") && slot?.required) return;
     if (action === "duplicate") {
@@ -211,15 +340,10 @@ export default function DynamicTemplateCanvas() {
     if (!placement) return;
     const next = structuredClone(currentDraft.definition);
     if (action === "align-horizontal" || action === "align-vertical") {
-      next.nodes[nodeId].responsive[device].placement = {
-        ...placement,
-        x: action === "align-horizontal"
-          ? Math.max(0, Math.min(1 - placement.width, (1 - placement.width) / 2))
-          : placement.x,
-        y: action === "align-vertical"
-          ? Math.max(0, Math.min(1 - placement.height, (1 - placement.height) / 2))
-          : placement.y,
-      };
+      next.nodes[nodeId].responsive[device].placement = alignNormalizedRect(
+        placement,
+        action === "align-horizontal" ? "horizontal" : "vertical",
+      );
       setDynamicDefinition(next);
       return;
     }
@@ -245,7 +369,7 @@ export default function DynamicTemplateCanvas() {
     }
     next.nodes[nodeId].responsive[device].placement = {
       ...placement,
-      zIndex: Math.max(-10, Math.min(10, placement.zIndex + (action === "forward" ? 1 : -1))),
+      zIndex: clampGeometryValue(placement.zIndex + (action === "forward" ? 1 : -1), -10, 10),
     };
     setDynamicDefinition(next);
   };
@@ -389,6 +513,17 @@ export default function DynamicTemplateCanvas() {
         onDirectResizeCommit={commitDirectResize}
         hasSelection={!previewMode && Boolean(selectedNodeId)}
         onSelectNode={previewMode ? undefined : selectObject}
+        overlayTargets={previewMode ? undefined : editableTargets}
+        selectedOverlayTargetId={selectedOverlayTargetId}
+        movableOverlayTargetIds={overlayPlacementTargetIds}
+        resizeOverlayTargetIds={overlayPlacementTargetIds}
+        disabledOverlayNodeActions={disabledNodeActions}
+        copyResponsiveDestinationLabel={device === "desktop" ? "移动端" : "桌面端"}
+        onOverlayTargetSelect={previewMode ? undefined : selectOverlayTarget}
+        onOverlayNodeAction={previewMode ? undefined : (target, action) => {
+          handleNodeAction(target.ownerNodeId, action);
+        }}
+        onOverlayPlacementGesture={previewMode ? undefined : commitOverlayPlacementGesture}
       >
         <div
           className="template-editor__canvas-renderer template-editor__dynamic-canvas-renderer"
@@ -407,6 +542,7 @@ export default function DynamicTemplateCanvas() {
             contentBySlotId={previewContent}
             mode={previewMode ? "preview" : "editor"}
             editorSurface={previewMode ? undefined : "template-definition"}
+            interactionOwner={previewMode ? undefined : "host-overlay"}
             templateEditorSessionId={previewMode ? undefined : sessionId ?? undefined}
             selectedNodeId={selectedNodeId}
             selectedContractRole={selectedContractRole}

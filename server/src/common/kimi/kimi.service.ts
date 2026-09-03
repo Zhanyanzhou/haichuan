@@ -78,10 +78,11 @@ export class KimiService implements OnModuleInit {
         usage: response.usage,
       };
     } catch (error: unknown) {
-      // P1-23：详细错误仅记日志，对外抛通用异常，避免泄露 baseURL/状态等内部信息
+      // P1-23：详细错误仅记日志，对外抛通用异常，避免泄露 baseURL/状态等内部信息；
+      // 栈可能含上游 baseURL 等细节，日志只记消息摘要
       this.logger.error(
         "Kimi API 调用失败",
-        error instanceof Error ? error.stack : String(error),
+        error instanceof Error ? error.message : String(error),
       );
       throw new ServiceUnavailableException("AI 服务暂时不可用，请稍后重试");
     }
@@ -133,7 +134,7 @@ export class KimiService implements OnModuleInit {
     } catch (error: unknown) {
       this.logger.error(
         "Kimi 图片识别失败",
-        error instanceof Error ? error.stack : String(error),
+        error instanceof Error ? error.message : String(error),
       );
       throw new ServiceUnavailableException("AI 图片识别服务暂时不可用，请稍后重试");
     }
@@ -169,7 +170,11 @@ export class KimiService implements OnModuleInit {
       }
       return JSON.parse(jsonStr.trim()) as T;
     } catch (error) {
-      this.logger.error("Kimi JSON 解析失败", result.content);
+      // 不记录 AI 原文（可能含业务语境）；只记长度与解析错误消息辅助定位
+      this.logger.error(
+        "Kimi JSON 解析失败",
+        `${error instanceof Error ? error.message : String(error)}（content ${result.content.length} 字符）`,
+      );
       throw new ServiceUnavailableException("AI 返回内容无法解析，请稍后重试");
     }
   }

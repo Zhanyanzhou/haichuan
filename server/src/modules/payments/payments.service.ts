@@ -370,12 +370,15 @@ export class PaymentsService {
       select: { id: true, orderNo: true, status: true },
     });
     if (!order) throw new NotFoundException('订单不存在或无权操作');
+    // 结构化白名单：不取 gatewayNotify/reviewNote/proofUrl 等内部字段，
+    // 防止未来调用点直接透传导致渠道原始数据或私有存储键外泄
     const payment = await this.prisma.payment.findFirst({
       where: {
         orderId,
         method: { in: ['wechat', 'alipay'] },
       },
       orderBy: { createdAt: 'desc' },
+      select: { id: true, paymentNo: true, method: true, status: true, amount: true },
     });
     return { order, payment };
   }

@@ -1,13 +1,13 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/template-definition.schema.json
- * SHA-256：75bfe99c3650448419728928abe4a39f119aaa16f4011155022a9fe587edef1b
+ * SHA-256：5db5bfdec251a5965349b08f7acfba6275488696b082a3783831fba91fe66a7f
  */
 
 export const DYNAMIC_TEMPLATE_SCHEMA_VERSION = 1;
 /** 统一模板产品模型版本；JSON Schema 自身仍独立按 schemaVersion 演进。 */
 export const TEMPLATE_DEFINITION_MODEL_VERSION = 2 as const;
-export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "75bfe99c3650448419728928abe4a39f119aaa16f4011155022a9fe587edef1b";
+export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "5db5bfdec251a5965349b08f7acfba6275488696b082a3783831fba91fe66a7f";
 export const DYNAMIC_TEMPLATE_NODE_TYPES = [
   "Section",
   "Container",
@@ -764,6 +764,11 @@ export interface DynamicTemplateNodeProps {
   contentTemplateDesignProps?: Record<string, string | number | boolean>;
 }
 
+/** 仅供母模板作者工作流使用；页面实例和公开 Renderer 必须忽略。 */
+export interface DynamicTemplateNodeAuthoring {
+  structureLocked?: boolean;
+}
+
 export interface DynamicTemplateInstanceEditPolicy {
   position: boolean;
   size: boolean;
@@ -787,6 +792,7 @@ export interface DynamicTemplateNode {
   slotId?: string;
   childIds: string[];
   props: DynamicTemplateNodeProps;
+  authoring?: DynamicTemplateNodeAuthoring;
   instanceEditPolicy?: DynamicTemplateInstanceEditPolicy;
   responsive: Record<DynamicTemplateDevice, DynamicTemplateResponsiveRules>;
   hidden: boolean;

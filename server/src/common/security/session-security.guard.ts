@@ -62,8 +62,10 @@ export class SessionSecurityGuard implements CanActivate {
     const path = (url || "").split("?", 1)[0];
     return [
       "/api/auth/login",
+      "/api/auth/logout",
       "/api/auth/session/logout",
       "/api/customers/login",
+      "/api/customers/logout",
       "/api/customers/register",
       "/api/customers/session/logout",
       "/api/customers/wechat/bind",

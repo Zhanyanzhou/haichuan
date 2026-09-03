@@ -1,9 +1,10 @@
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Result, Button, Spin } from 'antd';
 import { useAuthStore } from '@/store/authStore';
 import { useEffect } from 'react';
 import { authApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
+import { adminLandingRoute } from '@/config/adminRouteAccess';
 import type { User } from '@/types';
 
 interface ProtectedRouteProps {
@@ -15,6 +16,7 @@ interface ProtectedRouteProps {
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, roles }) => {
   const { status, isLoggedIn, user, setAuth, markAnonymous } = useAuthStore();
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (status !== 'unknown') return;
@@ -41,8 +43,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, roles }) => {
           title="403"
           subTitle="抱歉，您没有访问此页面的权限"
           extra={
-            <Button type="primary" onClick={() => window.history.back()}>
-              返回上一页
+            <Button type="primary" onClick={() => navigate(adminLandingRoute(user?.role), { replace: true })}>
+              返回工作首页
             </Button>
           }
         />

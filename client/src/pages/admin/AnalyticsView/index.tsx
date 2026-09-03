@@ -93,6 +93,7 @@ export default function AnalyticsView() {
   const [visitors, setVisitors] = useState<AnalyticsVisitor[]>([]);
   const [events, setEvents] = useState<AnalyticsEventRow[]>([]);
   const [eventTotal, setEventTotal] = useState(0);
+  const [eventPage, setEventPage] = useState(1);
   const [eventName, setEventName] = useState("");
   const [hours, setHours] = useState(24);
   const [reportLoading, setReportLoading] = useState(true);
@@ -127,7 +128,8 @@ export default function AnalyticsView() {
       const response = await analyticsApi.getEvents({
         eventName: eventName || undefined,
         hours,
-        pageSize: 100,
+        page: eventPage,
+        pageSize: 20,
       });
       const page = unwrapResponse<AnalyticsEventPage>(response);
       setEvents(page?.list ?? []);
@@ -139,7 +141,7 @@ export default function AnalyticsView() {
     } finally {
       setEventsLoading(false);
     }
-  }, [eventName, hours]);
+  }, [eventName, hours, eventPage]);
 
   useEffect(() => {
     void loadReport();
@@ -305,9 +307,9 @@ export default function AnalyticsView() {
                 <YAxis allowDecimals={false} />
                 <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="visitors" name="独立访客" stroke="#7a5c32" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="sessions" name="访问会话" stroke="#5f6f7a" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="pageViews" name="页面浏览" stroke="#1f2937" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="visitors" name="独立访客" stroke="#7A531A" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="sessions" name="访问会话" stroke="#335F7D" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="pageViews" name="页面浏览" stroke="#181A1B" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -401,7 +403,10 @@ export default function AnalyticsView() {
                 aria-label="事件类型"
                 placeholder="全部事件"
                 value={eventName || undefined}
-                onChange={(value) => setEventName(value || "")}
+                onChange={(value) => {
+                  setEventName(value || "");
+                  setEventPage(1);
+                }}
                 allowClear
                 style={{ width: 170 }}
                 options={Object.entries(EVENT_LABELS).map(([value, label]) => ({ value, label }))}
@@ -409,7 +414,10 @@ export default function AnalyticsView() {
               <Select
                 aria-label="事件时间范围"
                 value={hours}
-                onChange={setHours}
+                onChange={(value) => {
+                  setHours(value);
+                  setEventPage(1);
+                }}
                 style={{ width: 130 }}
                 options={[
                   { value: 1, label: "最近 1 小时" },
@@ -439,9 +447,12 @@ export default function AnalyticsView() {
             rowKey="id"
             loading={eventsLoading}
             pagination={{
+              current: eventPage,
               pageSize: 20,
+              total: eventTotal,
+              onChange: setEventPage,
               showSizeChanger: false,
-              showTotal: () => `最近共 ${eventTotal} 条`,
+              showTotal: () => `共 ${eventTotal} 条`,
             }}
             scroll={{ x: 900 }}
             size="small"

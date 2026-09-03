@@ -25,7 +25,9 @@ let lockCount = 0;
 
 const clone = (value) => structuredClone(value);
 const nextUpdatedAt = () => new Date(++clock);
-const image = "/images/system/product-placeholder.svg";
+// 有效页面基线必须使用已确认素材路径；系统占位图会被发布门禁拦截，只有专门的阻断用例才使用它。
+const image = "/images/editorial/publish-gate-test-hero.jpg";
+const placeholderImage = "/images/system/product-placeholder.svg";
 const validMetadata = (title = "海川珠宝正式页面") => ({
   seoTitle: title,
   seoDescription: `${title}的公开页面说明，仅用于页面搭建器发布门禁测试。`,
@@ -514,6 +516,24 @@ assert.equal(
   validProductsResult.valid,
   true,
   `作品页允许纯品牌展陈且不要求业务功能区：${JSON.stringify(validProductsResult.errors)}`,
+);
+
+const placeholderHeroData = validData("占位首屏");
+placeholderHeroData.content[0].props.desktopImage = placeholderImage;
+placeholderHeroData.content[0].props.mobileImage = placeholderImage;
+const placeholderHeroResult = await service.validatePageDocument(
+  "products",
+  placeholderHeroData,
+  validMetadata("占位首屏"),
+);
+assert.equal(
+  placeholderHeroResult.valid,
+  false,
+  "首屏主视觉仍使用系统占位图时必须阻断发布",
+);
+assert.ok(
+  placeholderHeroResult.errors.some((error) => error.includes("仍是系统占位图")),
+  `占位图拦截错误必须指向具体字段：${JSON.stringify(placeholderHeroResult.errors)}`,
 );
 
 const productsWithBusinessRegion = validData("珠宝作品");
@@ -1080,7 +1100,7 @@ collectionAltData.content.push(
   },
 );
 const missingCollectionAltResult = await service.validatePageDocument("home", collectionAltData, validMetadata("集合媒体测试页"));
-assert.equal(missingCollectionAltResult.valid, true, "集合媒体图片缺少替代文字时应保留提醒但允许发布");
+assert.equal(missingCollectionAltResult.valid, false, "集合媒体图片缺少替代文字时必须阻断发布");
 assert.deepEqual(
   missingCollectionAltResult.issues
     .filter((issue) => ["alt-carousel", "alt-gallery", "alt-scenes"].includes(issue.blockId))
@@ -1097,8 +1117,8 @@ assert.ok(
   missingCollectionAltResult.issues
     .filter((issue) => ["alt-carousel", "alt-gallery", "alt-scenes"].includes(issue.blockId))
     .filter((issue) => issue.path.endsWith(".alt") || issue.path.endsWith(".altText"))
-    .every((issue) => issue.severity === "warning"),
-  "集合媒体替代文字问题必须是非阻断提醒",
+    .every((issue) => issue.severity === "error"),
+  "集合媒体替代文字缺失必须是可定位的阻断问题",
 );
 const completeCollectionAltData = clone(collectionAltData);
 completeCollectionAltData.content[1].props.images[1].alt = "第二张轮播正式替代文字";
@@ -1270,18 +1290,18 @@ for (const derivedCase of [
   const missingDerivedAltResult = await service.validatePageDocument("custom", missingDerivedAltData, validMetadata("定制测试页"));
   assert.equal(
     missingDerivedAltResult.valid,
-    true,
-    `${derivedCase.blockId} 的图片替代文字派生来源缺失时应允许发布：${JSON.stringify(missingDerivedAltResult.issues)}`,
+    false,
+    `${derivedCase.blockId} 的图片替代文字派生来源缺失时必须阻断发布：${JSON.stringify(missingDerivedAltResult.issues)}`,
   );
   assert.ok(
     missingDerivedAltResult.issues.some((issue) =>
       issue.blockId === derivedCase.blockId
-        && issue.severity === "warning"
-        && issue.field === derivedCase.itemField
-        && issue.index === derivedCase.itemIndex
-        && issue.path.endsWith(`${derivedCase.itemField}[${derivedCase.itemIndex}].${derivedCase.sourceField}`),
+      && issue.severity === "error"
+      && issue.field === derivedCase.itemField
+      && issue.index === derivedCase.itemIndex
+      && issue.path.endsWith(`${derivedCase.itemField}[${derivedCase.itemIndex}].${derivedCase.sourceField}`),
     ),
-    `${derivedCase.blockId} 的派生替代文字提醒必须定位到具体条目名称字段`,
+    `${derivedCase.blockId} 的派生替代文字阻断必须定位到具体条目名称字段`,
   );
 }
 
@@ -1475,16 +1495,16 @@ const incompleteAltDraftValidation = await service.validatePageDocument(
 );
 assert.equal(
   incompleteAltDraftValidation.valid,
-  true,
-  `替代文字缺失应保留提醒但允许发布：${JSON.stringify(incompleteAltDraftValidation.issues)}`,
+  false,
+  `草稿保存不受发布门禁影响，但发布校验必须继续暴露缺失的替代文字：${JSON.stringify(incompleteAltDraftValidation.issues)}`,
 );
 assert.ok(
   incompleteAltDraftValidation.issues.some((issue) =>
     issue.blockId === "draft-carousel"
-      && issue.severity === "warning"
+      && issue.severity === "error"
       && issue.path.endsWith("images[1].alt"),
   ),
-  "集合媒体草稿的发布提醒必须定位到具体条目替代文字",
+  "集合媒体草稿的发布阻断必须定位到具体条目替代文字",
 );
 
 const saved = await service.savePageDocument(

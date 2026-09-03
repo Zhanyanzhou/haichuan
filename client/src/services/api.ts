@@ -1213,10 +1213,14 @@ export const quotationApi = {
 
 const CART_SESSION_STORAGE_KEY = "haichuan.cart-session-id";
 
+// 与服务端购物车会话校验同口径：只接受标准 UUID，杜绝自报可猜测标识读到他人购物车。
+const CART_SESSION_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function getCartSessionId() {
   let sessionId = localStorage.getItem(CART_SESSION_STORAGE_KEY);
-  if (!sessionId) {
-    sessionId = `cart_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  if (!sessionId || !CART_SESSION_UUID_PATTERN.test(sessionId)) {
+    sessionId = crypto.randomUUID();
     localStorage.setItem(CART_SESSION_STORAGE_KEY, sessionId);
   }
   return sessionId;
@@ -1240,6 +1244,7 @@ export const cartApi = {
 export type CustomerCheckoutRequest = {
   address: string;
   customerEmail?: string;
+  couponId?: number;
   items: Array<{ skuId: number; quantity: number }>;
 };
 
@@ -1264,7 +1269,13 @@ export const customerApi = {
   }) => api.post("/customers/register", data, {
     headers: { ...customerAuthHeaders(), "X-Session-Mode": "cookie" },
   }),
-  login: (data: { phone: string; password: string }) =>
+  login: (data: {
+    phone: string;
+    password: string;
+    captchaId?: string;
+    captchaCode?: string;
+    smsCode?: string;
+  }) =>
     api.post("/customers/login", data, {
       headers: { ...customerAuthHeaders(), "X-Session-Mode": "cookie" },
     }),
@@ -1278,12 +1289,22 @@ export const customerApi = {
     phone: string;
     password: string;
     name?: string;
+    smsCode?: string;
   }) => api.post("/customers/wechat/bind", data, {
     headers: { ...customerAuthHeaders(), "X-Session-Mode": "cookie" },
   }),
   smsRequirements: () => api.get("/customers/sms-requirements"),
+  // 结算可用券试算（只读；折扣与资格在订单事务内最终校验）
+  usableCoupons: (amountCents: number) =>
+    api.get("/customers/me/coupons/usable", { params: { amountCents } }),
   requestSmsCode: (data: { phone: string }) =>
     api.post("/customers/sms-code", data),
+  // 登录分级挑战：查询等级 / 图形验证码 / 登录短信验证码
+  loginChallenge: (phone: string) =>
+    api.get("/customers/login/challenge", { params: { phone } }),
+  loginCaptcha: () => api.get("/customers/login/captcha"),
+  requestLoginSmsCode: (data: { phone: string }) =>
+    api.post("/customers/login/sms-code", data),
   forgotPassword: (data: { email: string }) =>
     api.post("/customers/forgot-password", data),
   resetPassword: (data: { token: string; password: string }) =>
@@ -1309,6 +1330,13 @@ export const customerApi = {
   closeOrderPayment: (orderId: number) =>
     api.post(
       `/customers/me/orders/${orderId}/payment/close`,
+      {},
+      { headers: customerAuthHeaders() },
+    ),
+  // 客户自助取消未付款订单（存在待处理支付时被服务端拒绝）
+  cancelOrder: (orderId: number) =>
+    api.post(
+      `/customers/me/orders/${orderId}/cancel`,
       {},
       { headers: customerAuthHeaders() },
     ),
@@ -1498,6 +1526,8 @@ export const paymentApi = {
     api.put(`/payments/${id}/approve`, { reviewNote }),
   reject: (id: number, reviewNote?: string) =>
     api.put(`/payments/${id}/reject`, { reviewNote }),
+  // 主动向渠道查单并按回调同源管线核销（掉单与对账工具）。
+  queryChannel: (id: number) => api.post(`/payments/${id}/query-channel`),
   // 异常线下实收；微信/支付宝到账只由服务端验签回调确认。
   createReceipt: (data: {
     orderId: number;

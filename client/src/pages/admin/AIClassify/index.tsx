@@ -183,7 +183,7 @@ export default function AIClassify() {
         <Dragger customRequest={customUpload} showUploadList={false} accept="image/*" multiple className="!bg-transparent !border-dashed !border-brand-line hover:!border-brand-gold"
           disabled={uploading}>
           <p className="text-3xl text-brand-gold mb-2"><InboxOutlined /></p>
-          <p className="text-brand-text">{uploading ? '识别中...' : '点击或拖拽图片上传'}</p>
+          <p className="text-brand-text">{uploading ? '识别中…' : '点击或拖拽图片上传'}</p>
           <p className="text-xs text-brand-muted mt-1">支持批量，AI自动识别</p>
         </Dragger>
       </Card>

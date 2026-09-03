@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0
 
       - name: 校验备份恢复脚本语法
-        run: bash -n server/scripts/backup.sh server/scripts/restore.sh
+        run: bash -n server/scripts/backup.sh server/scripts/restore.sh server/scripts/check-backup-health.sh
 
       - name: 配置 Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020

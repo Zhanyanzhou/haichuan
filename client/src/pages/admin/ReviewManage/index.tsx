@@ -41,7 +41,8 @@ export default function ReviewManage() {
   const [loadError, setLoadError] = useState(false);
   const [replyTarget, setReplyTarget] = useState<ReviewRow | null>(null);
   const [replyText, setReplyText] = useState('');
-  const [handling, setHandling] = useState(false);
+  // 只锁当前操作中的行/弹窗，避免一行审核让整页按钮同时转圈
+  const [handlingId, setHandlingId] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -65,7 +66,7 @@ export default function ReviewManage() {
   }, [page, status]);
 
   const moderate = async (id: number, next: 'APPROVED' | 'REJECTED', reply?: string) => {
-    setHandling(true);
+    setHandlingId(id);
     try {
       await reviewApi.moderate(id, { status: next, reply });
       message.success(next === 'APPROVED' ? '已通过，评价将在作品页展示' : '已驳回');
@@ -75,7 +76,7 @@ export default function ReviewManage() {
     } catch (e: unknown) {
       message.error(getSafeAdminErrorMessage(e, '评价审核未完成，请重新加载后确认当前状态。'));
     } finally {
-      setHandling(false);
+      setHandlingId(null);
     }
   };
 
@@ -198,7 +199,7 @@ export default function ReviewManage() {
               }
               return r.status === 'PENDING' ? (
                 <Space>
-                  <Button size="small" type="primary" loading={handling} onClick={() => moderate(r.id, 'APPROVED')}>
+                  <Button size="small" type="primary" loading={handlingId === r.id} onClick={() => moderate(r.id, 'APPROVED')}>
                     通过
                   </Button>
                   <Button
@@ -247,14 +248,14 @@ export default function ReviewManage() {
               <Space>
                 <Button
                   type="primary"
-                  loading={handling}
+                  loading={handlingId !== null}
                   onClick={() => replyTarget && moderate(replyTarget.id, 'APPROVED', replyText.trim() || undefined)}
                 >
                   通过{replyText.trim() ? '并回复' : ''}
                 </Button>
                 <Button
                   danger
-                  loading={handling}
+                  loading={handlingId !== null}
                   onClick={() => replyTarget && moderate(replyTarget.id, 'REJECTED', replyText.trim() || undefined)}
                 >
                   驳回

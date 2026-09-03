@@ -13,6 +13,8 @@ interface SecureImageProps {
   tokenKind?: "auto" | "customer" | "staff";
   /** 进入或接近可视区后才请求受控媒体，适合长列表缩略图 */
   deferUntilVisible?: boolean;
+  /** 首屏主图（LCP 候选）：eager + fetchpriority=high，跳过懒加载延迟 */
+  priority?: boolean;
 }
 
 // Vite 会在构建和测试时注入类型化 env；未配置时安全降级到同源 /api。
@@ -43,6 +45,7 @@ export function SecureImage({
   fallback,
   tokenKind = "auto",
   deferUntilVisible = false,
+  priority = false,
 }: SecureImageProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "error" | "ready">(
@@ -193,7 +196,8 @@ export function SecureImage({
           ...style,
         } as CSSProperties
       }
-      loading="lazy"
+      loading={priority ? "eager" : "lazy"}
+      {...(priority ? { fetchpriority: "high" } : {})}
       draggable={false}
       onLoad={(event) => {
         if (event.currentTarget.naturalWidth === 0) setStatus("error");

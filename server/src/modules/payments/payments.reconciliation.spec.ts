@@ -69,8 +69,10 @@ test('掉单兜底单笔查单异常不阻断同批其余交易', async () => {
     {
       payment: {
         findMany: async () => payments,
-        findUnique: async ({ where }: { where: { id: number } }) =>
-          payments.find((candidate) => candidate.id === where.id),
+        findUnique: async ({ where }: { where: { id?: number; paymentNo?: string } }) => {
+          if (where.paymentNo) return payments.find((candidate) => candidate.paymentNo === where.paymentNo);
+          return payments.find((candidate) => candidate.id === where.id);
+        },
         updateMany: async () => ({ count: 1 }),
       },
     } as unknown as PrismaService,

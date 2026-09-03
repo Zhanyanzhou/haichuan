@@ -118,7 +118,7 @@ export default function MediaLibrary() {
 
   const columns: TableColumnsType<ProductMediaRow> = [
     { title: '缩略图', dataIndex: 'mediaUrl', width: 80, render: (v: string) => v ? <SecureImage src={v} tokenKind="staff" deferUntilVisible alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} /> : <FileImageOutlined style={{ fontSize: 24, color: 'var(--adm-subtle)' }} /> },
-    { title: '所属产品', render: (_, row) => <div><a href={`/admin/products`} style={{ color: 'var(--adm-action)' }}>{row.productName || '—'}</a><p style={{ fontSize: 13, lineHeight: '20px', color: 'var(--adm-text)', fontVariantNumeric: 'tabular-nums' }}>{row.productCode}</p></div> },
+    { title: '所属产品', render: (_, row) => <div><Button type="link" size="small" style={{ padding: 0, height: 'auto', color: 'var(--adm-action)' }} onClick={() => navigate(`/admin/products/${row.productId}/edit`)}>{row.productName || '—'}</Button><p style={{ fontSize: 13, lineHeight: '20px', color: 'var(--adm-text)', fontVariantNumeric: 'tabular-nums' }}>{row.productCode}</p></div> },
     { title: '类型', dataIndex: 'type', render: (v: string) => <Tag>{v || 'FRONT'}</Tag> },
     { title: '排序', dataIndex: 'sortOrder', width: 60 },
     { title: '操作', width: 100, render: (_, row) => (

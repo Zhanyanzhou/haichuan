@@ -229,6 +229,17 @@
         "maxSpacingPx": { "type": "number", "minimum": 0, "maximum": 200 }
       }
     },
+    "nodeAuthoring": {
+      "type": "object",
+      "description": "仅供母模板作者工作流使用的持久化属性；页面实例和公开 Renderer 必须忽略。",
+      "additionalProperties": false,
+      "properties": {
+        "structureLocked": {
+          "type": "boolean",
+          "description": "锁定当前节点及其后代的结构、位置、尺寸和层级；不影响公开渲染。"
+        }
+      }
+    },
     "node": {
       "type": "object",
       "additionalProperties": false,
@@ -245,6 +256,7 @@
           "items": { "$ref": "#/$defs/stableId" }
         },
         "props": { "$ref": "#/$defs/nodeProps" },
+        "authoring": { "$ref": "#/$defs/nodeAuthoring" },
         "instanceEditPolicy": { "$ref": "#/$defs/instanceEditPolicy" },
         "responsive": {
           "type": "object",

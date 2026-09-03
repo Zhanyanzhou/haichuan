@@ -11,10 +11,25 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import WorkspaceCanvasControls from "./WorkspaceCanvasControls";
+import EditableTargetOverlay, {
+  type OverlayNodeAction,
+  type OverlayPlacementGesture,
+  type OverlayTargetDescriptor,
+} from "./EditableTargetOverlay";
 import {
   formatTemplateRatio,
   type TemplateDesignHeightMode,
 } from "../template-definition";
+import {
+  calculateFitCanvasScale,
+  canvasPointAtViewportCenter,
+  clampCanvasScale,
+  clampRoundedGeometryValue as clampDimension,
+  findElementsByEditableTargetLocator,
+  rectCenter,
+  rectFromDomRect,
+  scrollPositionForCanvasPoint,
+} from "./editableTargetGeometry";
 
 export const AUTO_ARTBOARD_MIN_HEIGHT = 240;
 const DIRECT_RESIZE_MIN_HEIGHT = 40;
@@ -90,10 +105,6 @@ function fitLockedRatio(
   return { width, height: clampDimension(width / ratio, DIRECT_RESIZE_MIN_HEIGHT, DIRECT_RESIZE_MAX_HEIGHT) };
 }
 
-function clampDimension(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, Math.round(value)));
-}
-
 function createRulerMarks(length: number, step: number) {
   const markCount = Math.min(41, Math.floor(length / step) + 1);
   return Array.from({ length: markCount }, (_, index) => index * step);
@@ -156,6 +167,15 @@ export default function TemplateViewportFrame({
   onDirectResizeCommit,
   hasSelection,
   onSelectNode,
+  overlayTargets,
+  selectedOverlayTargetId,
+  movableOverlayTargetIds,
+  resizeOverlayTargetIds,
+  disabledOverlayNodeActions,
+  copyResponsiveDestinationLabel,
+  onOverlayTargetSelect,
+  onOverlayNodeAction,
+  onOverlayPlacementGesture,
 }: {
   children: ReactNode;
   fallbackHeight: number;
@@ -180,14 +200,24 @@ export default function TemplateViewportFrame({
   onDirectResizeCommit: (resize: TemplateDirectResizeValue) => void;
   hasSelection: boolean;
   onSelectNode?: (nodeId: string) => void;
+  overlayTargets?: readonly OverlayTargetDescriptor[];
+  selectedOverlayTargetId?: string | null;
+  movableOverlayTargetIds?: ReadonlySet<string>;
+  resizeOverlayTargetIds?: ReadonlySet<string>;
+  disabledOverlayNodeActions?: ReadonlyMap<string, ReadonlySet<OverlayNodeAction>>;
+  copyResponsiveDestinationLabel?: string;
+  onOverlayTargetSelect?: (target: OverlayTargetDescriptor) => void;
+  onOverlayNodeAction?: (target: OverlayTargetDescriptor, action: OverlayNodeAction) => void;
+  onOverlayPlacementGesture?: (gesture: OverlayPlacementGesture) => void;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
+  const documentRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
   const directResizeRef = useRef<TemplateDirectResizeSession | null>(null);
   const panSessionRef = useRef<TemplatePanSession | null>(null);
   const [frameDocument, setFrameDocument] = useState<Document | null>(null);
+  const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   const [styleRevision, setStyleRevision] = useState(0);
   const [isFitView, setIsFitView] = useState(true);
   const [manualScale, setManualScale] = useState(1);
@@ -218,15 +248,15 @@ export default function TemplateViewportFrame({
     const stage = stageRef.current;
     if (!stage) return undefined;
     const measureWidth = () => {
-      const availableWidth = Math.max(1, stage.clientWidth - 48);
-      const availableHeight = Math.max(1, stage.clientHeight - 48);
-      const fitScale = Math.min(
-        1,
-        Math.max(
-          MIN_CANVAS_SCALE,
-          Math.min(availableWidth / sourceWidth, availableHeight / measurement.naturalHeight),
-        ),
-      );
+      const fitScale = calculateFitCanvasScale({
+        viewportWidth: stage.clientWidth,
+        viewportHeight: stage.clientHeight,
+        contentWidth: sourceWidth,
+        contentHeight: measurement.naturalHeight,
+        inset: 24,
+        minimumScale: MIN_CANVAS_SCALE,
+        maximumScale: 1,
+      });
       setMeasurement((current) => Math.abs(current.fitScale - fitScale) < 0.001
         ? current
         : { ...current, fitScale });
@@ -272,7 +302,7 @@ export default function TemplateViewportFrame({
   }, [onScaleChange, scale]);
 
   useLayoutEffect(() => {
-    const content = contentRef.current;
+    const content = contentElement;
     if (!frameDocument || !content) return undefined;
     const ownerWindow = frameDocument.defaultView;
     let animationFrameId: number | null = null;
@@ -366,17 +396,22 @@ export default function TemplateViewportFrame({
         if (animationFrameId !== null) ownerWindow.cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [autoHeight, children, fallbackHeight, frameDocument, sourceWidth, styleRevision]);
+  }, [autoHeight, children, contentElement, fallbackHeight, frameDocument, sourceWidth, styleRevision]);
 
   const scaledHeight = measurement.naturalHeight * scale;
   const setCanvasScale = (nextScale: number) => {
-    const clampedScale = Math.min(MAX_CANVAS_SCALE, Math.max(MIN_CANVAS_SCALE, nextScale));
+    const clampedScale = clampCanvasScale(nextScale, MIN_CANVAS_SCALE, MAX_CANVAS_SCALE);
     const stage = stageRef.current;
     const board = boardRef.current;
-    const canvasCenter = stage && board ? {
-      x: (stage.scrollLeft + stage.clientWidth / 2 - board.offsetLeft) / Math.max(scale, 0.01),
-      y: (stage.scrollTop + stage.clientHeight / 2 - board.offsetTop) / Math.max(scale, 0.01),
-    } : null;
+    const canvasCenter = stage && board ? canvasPointAtViewportCenter({
+      scrollLeft: stage.scrollLeft,
+      scrollTop: stage.scrollTop,
+      viewportWidth: stage.clientWidth,
+      viewportHeight: stage.clientHeight,
+      boardLeft: board.offsetLeft,
+      boardTop: board.offsetTop,
+      scale,
+    }) : null;
     setManualScale(clampedScale);
     setIsFitView(false);
     if (stage && canvasCenter) {
@@ -384,10 +419,15 @@ export default function TemplateViewportFrame({
         window.requestAnimationFrame(() => {
           const nextBoard = boardRef.current;
           if (!nextBoard) return;
-          stage.scrollTo({
-            left: Math.max(0, nextBoard.offsetLeft + canvasCenter.x * clampedScale - stage.clientWidth / 2),
-            top: Math.max(0, nextBoard.offsetTop + canvasCenter.y * clampedScale - stage.clientHeight / 2),
+          const position = scrollPositionForCanvasPoint({
+            point: canvasCenter,
+            viewportWidth: stage.clientWidth,
+            viewportHeight: stage.clientHeight,
+            boardLeft: nextBoard.offsetLeft,
+            boardTop: nextBoard.offsetTop,
+            scale: clampedScale,
           });
+          stage.scrollTo({ left: position.x, top: position.y });
         });
       });
     }
@@ -403,6 +443,16 @@ export default function TemplateViewportFrame({
       ).find((node) => node.dataset.templateNodeId === nodeId);
       if (matchingNode) return matchingNode;
     }
+    const selectedDescriptor = overlayTargets?.find(
+      (target) => target.targetId === selectedOverlayTargetId,
+    );
+    if (selectedDescriptor && contentElement) {
+      const [matchingTarget] = findElementsByEditableTargetLocator(
+        contentElement,
+        selectedDescriptor.locator,
+      );
+      if (matchingTarget) return matchingTarget;
+    }
     return frameDocument.querySelector<HTMLElement>('[data-template-selected="true"]');
   };
   const centerFrameTarget = (targetScale: number, nodeId?: string, behavior: ScrollBehavior = "smooth") => {
@@ -412,11 +462,17 @@ export default function TemplateViewportFrame({
     if (!stage || !board || !target) return false;
     const rect = target.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return false;
-    const left = board.offsetLeft + (rect.left + rect.width / 2) * targetScale - stage.clientWidth / 2;
-    const top = board.offsetTop + (rect.top + rect.height / 2) * targetScale - stage.clientHeight / 2;
+    const position = scrollPositionForCanvasPoint({
+      point: rectCenter(rectFromDomRect(rect)),
+      viewportWidth: stage.clientWidth,
+      viewportHeight: stage.clientHeight,
+      boardLeft: board.offsetLeft,
+      boardTop: board.offsetTop,
+      scale: targetScale,
+    });
     stage.scrollTo({
-      left: Math.max(0, left),
-      top: Math.max(0, top),
+      left: position.x,
+      top: position.y,
       behavior,
     });
     return true;
@@ -435,12 +491,16 @@ export default function TemplateViewportFrame({
     if (!stage || !target) return;
     const rect = target.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    const availableWidth = Math.max(120, stage.clientWidth - 96);
-    const availableHeight = Math.max(120, stage.clientHeight - 96);
-    const nextScale = Math.min(
-      MAX_CANVAS_SCALE,
-      Math.max(MIN_CANVAS_SCALE, Math.min(availableWidth / rect.width, availableHeight / rect.height)),
-    );
+    const nextScale = calculateFitCanvasScale({
+      viewportWidth: stage.clientWidth,
+      viewportHeight: stage.clientHeight,
+      contentWidth: rect.width,
+      contentHeight: rect.height,
+      inset: 48,
+      minimumAvailableSize: 120,
+      minimumScale: MIN_CANVAS_SCALE,
+      maximumScale: MAX_CANVAS_SCALE,
+    });
     setCanvasScale(nextScale);
     scheduleCenterFrameTarget(nextScale);
   };
@@ -759,7 +819,10 @@ export default function TemplateViewportFrame({
               <span>安全区 5%</span>
             </div>
           ) : null}
-          <div className="homepage-editor__canvas-document template-editor__canvas-document">
+          <div
+            ref={documentRef}
+            className="homepage-editor__canvas-document template-editor__canvas-document"
+          >
             <span className="template-editor__artboard-boundary-label" aria-hidden="true">
               模板边界
             </span>
@@ -778,7 +841,7 @@ export default function TemplateViewportFrame({
             {frameDocument?.getElementById("template-viewport-root")
               ? createPortal(
                   <div
-                    ref={contentRef}
+                    ref={setContentElement}
                     className="template-editor__viewport-content"
                     style={{
                       "--homepage-editor-viewport-height": `${fallbackHeight}px`,
@@ -790,6 +853,24 @@ export default function TemplateViewportFrame({
                   frameDocument.getElementById("template-viewport-root")!,
                 )
               : null}
+            {overlayTargets && overlayTargets.length > 0 && !panMode ? (
+              <EditableTargetOverlay
+                sourceFrame={frameDocument ? frameRef.current : null}
+                sourceRoot={contentElement}
+                hostRoot={documentRef.current}
+                targets={overlayTargets}
+                surface="template-definition"
+                selectedTargetId={selectedOverlayTargetId}
+                interactive
+                movableTargetIds={movableOverlayTargetIds}
+                resizeTargetIds={resizeOverlayTargetIds}
+                disabledNodeActions={disabledOverlayNodeActions}
+                copyResponsiveDestinationLabel={copyResponsiveDestinationLabel}
+                onSelectTarget={onOverlayTargetSelect}
+                onNodeAction={onOverlayNodeAction}
+                onPlacementGesture={onOverlayPlacementGesture}
+              />
+            ) : null}
           </div>
           {resizable ? (
             <div className="template-editor__canvas-resize-handles" role="group" aria-label="直接调整模板整体比例">

@@ -271,7 +271,7 @@ async function mockCustomerWechatCheckout(
         payment: { id: 3, paymentNo: 'PAY-WX-9', amount: 8800 },
         ...(scene === 'native'
           ? { qrCode: 'weixin://wxpay/bizpayurl/up?pr=test' }
-          : { payUrl: `${new URL(request.url()).origin}/wechat-h5-stub` }),
+          : { payUrl: 'https://wx.tenpay.com/cgi-bin/mmpayweb-bin/checkmweb?stub=1' }),
       });
     }
     if (path.endsWith('/customers/me/orders/9/payment') && method === 'GET') {
@@ -279,7 +279,7 @@ async function mockCustomerWechatCheckout(
     }
     return data(null);
   });
-  await page.route('**/wechat-h5-stub', (route) => route.fulfill({
+  await page.route('**/cgi-bin/mmpayweb-bin/checkmweb*', (route) => route.fulfill({
     status: 200,
     headers: { 'content-type': 'text/html; charset=utf-8' },
     body: '<meta charset="utf-8"><main><h1>微信 H5 收银台跳转测试</h1></main>',
@@ -308,7 +308,7 @@ test.describe('客户标准零售使用微信在线支付主链', () => {
     await page.getByLabel('收货地址').fill('深圳市测试地址 2 号');
     await page.getByRole('button', { name: /提交订单并支付/ }).click();
 
-    await expect(page).toHaveURL(/\/wechat-h5-stub$/);
+    await expect(page).toHaveURL(/wx\.tenpay\.com\/cgi-bin\/mmpayweb-bin\/checkmweb/);
     await expect(page.getByRole('heading', { name: '微信 H5 收银台跳转测试' })).toBeVisible();
   });
 });
@@ -772,12 +772,47 @@ test.describe('后台售后登记关联合同', () => {
         });
       });
 
+      // 登记表单按订单搜索选择：搜索订单 → 自动带出客户 → 选择订单商品行，
+      // 提交合同（orderId/customerId/orderItemId 三元关联）与手填时代保持一致。
+      await page.route('**/api/orders**', async (route) => {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: 200,
+            message: 'ok',
+            data: {
+              list: [
+                {
+                  id: 101,
+                  orderNo: 'HC20260903000101',
+                  customerName: '测试客户',
+                  customerPhone: '13800000000',
+                  customerId: 7,
+                  items: [
+                    { id: 202, productNameSnapshot: '测试手镯', productCodeSnapshot: 'B-001' },
+                  ],
+                },
+              ],
+              total: 1,
+              page: 1,
+              pageSize: 10,
+            },
+          }),
+        });
+      });
+
       await page.goto('/admin/trade/after-sales');
       await page.getByRole('button', { name: '登记售后' }).click();
       const dialog = page.getByRole('dialog', { name: '登记售后工单' });
-      await dialog.getByLabel('订单 ID').fill('101');
-      await dialog.getByLabel('客户 ID').fill('7');
-      await dialog.getByLabel('订单商品 ID').fill('202');
+      await dialog.getByLabel('关联订单').fill('HC20260903000101');
+      await page.locator('.ant-select-dropdown:visible').getByText('HC20260903000101').click();
+      await dialog
+        .locator('.ant-form-item')
+        .filter({ hasText: '订单商品' })
+        .locator('.ant-select-selector')
+        .click();
+      await page.locator('.ant-select-dropdown:visible').getByText('测试手镯', { exact: true }).click();
       await dialog
         .locator('.ant-form-item')
         .filter({ hasText: '售后类型' })
@@ -801,4 +836,118 @@ test.describe('后台售后登记关联合同', () => {
       expect(hasHorizontalOverflow).toBe(false);
     });
   }
+});
+
+test.describe('客户自助取消未付款订单', () => {
+  type CancelCase = {
+    hasPendingProof?: boolean;
+    cancelStatus?: number;
+    cancelMessage?: string;
+  };
+
+  async function mockCustomerCancelPage(page: Page, options: CancelCase = {}) {
+    let orderStatus = 'PENDING_PAYMENT';
+    let cancelCalled = 0;
+    await page.route('**/api/**', (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const method = route.request().method();
+      const respond = (data: unknown) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 200, data, message: 'ok' }),
+      });
+      if (path === '/api/customers/me') {
+        return respond({ id: 7, phone: '13800000007', name: '取消测试会员', email: null });
+      }
+      if (path === '/api/customers/me/orders' && method === 'GET') {
+        return respond([{
+          id: 9,
+          orderNo: 'ORD-CANCEL-9',
+          orderType: 'SPOT',
+          finalAmount: 6600,
+          status: orderStatus,
+          paymentMethod: options.hasPendingProof ? 'bank_transfer' : 'wechat',
+          createdAt: '2026-09-02T08:00:00.000Z',
+          items: [{ id: 21, productId: 1, product: { name: '取消测试手镯' } }],
+          payments: options.hasPendingProof
+            ? [{ id: 1, status: 'PENDING', method: 'bank_transfer', hasProof: true }]
+            : [],
+          fulfillments: [],
+          refunds: [],
+          afterSalesCases: [],
+          timeline: [],
+        }]);
+      }
+      if (path === '/api/customers/me/orders/9/cancel' && method === 'POST') {
+        cancelCalled += 1;
+        if (options.cancelStatus && options.cancelStatus !== 200) {
+          return route.fulfill({
+            status: options.cancelStatus,
+            contentType: 'application/json',
+            body: JSON.stringify({ code: options.cancelStatus, message: options.cancelMessage || '取消失败' }),
+          });
+        }
+        orderStatus = 'CANCELLED';
+        return respond({ id: 9, orderNo: 'ORD-CANCEL-9', status: 'CANCELLED' });
+      }
+      if (
+        path === '/api/customers/me/addresses' ||
+        path === '/api/customers/me/selection-inquiries' ||
+        path === '/api/customers/me/inquiries' ||
+        path === '/api/customers/me/favorites'
+      ) return respond([]);
+      if (path === '/api/customers/me/notifications') {
+        return respond({ list: [], total: 0, unreadCount: 0, page: 1, pageSize: 20 });
+      }
+      if (path === '/api/partners/me') return respond(null);
+      if (path === '/api/recommendations/for-you') return respond([]);
+      if (path.endsWith('/settings/flags')) {
+        return respond({ commerceEnabled: true, cartEnabled: true, paymentEnabled: true });
+      }
+      if (path.endsWith('/settings/public')) return respond({ siteName: '海川珠宝' });
+      return respond({ list: [], total: 0 });
+    });
+    return { getCancelCalls: () => cancelCalled };
+  }
+
+  test('未付款且无待处理支付时确认后取消并刷新状态', async ({ page }) => {
+    const { getCancelCalls } = await mockCustomerCancelPage(page);
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.goto('/customer');
+
+    const cancelButton = page.getByRole('button', { name: '取消订单' });
+    await expect(cancelButton).toBeVisible();
+    await cancelButton.click();
+
+    await expect(page.getByText('订单已取消')).toBeVisible();
+    expect(getCancelCalls()).toBe(1);
+    // 刷新后订单状态显示已取消，且不再出现取消按钮
+    await expect(page.getByText('已取消').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: '取消订单' })).toHaveCount(0);
+  });
+
+  test('线下凭证待审核时不提供取消入口（防渠道扣款与取消竞态）', async ({ page }) => {
+    const { getCancelCalls } = await mockCustomerCancelPage(page, { hasPendingProof: true });
+    await page.goto('/customer');
+
+    await expect(page.getByText('特殊线下凭证已提交·待审核')).toBeVisible();
+    await expect(page.getByRole('button', { name: '取消订单' })).toHaveCount(0);
+    expect(getCancelCalls()).toBe(0);
+  });
+
+  test('取消被服务端拒绝时保留原状态并提示原因', async ({ page }) => {
+    const { getCancelCalls } = await mockCustomerCancelPage(page, {
+      cancelStatus: 409,
+      cancelMessage: '订单存在待处理的支付交易 PAY-1，请先在订单中查询或结束支付后再取消',
+    });
+    page.on('dialog', (dialog) => dialog.accept());
+    await page.goto('/customer');
+
+    await page.getByRole('button', { name: '取消订单' }).click();
+    await expect(page.getByText(/请先在订单中查询或结束支付/).first()).toBeVisible();
+    // 订单仍为待付款，按钮保留可重试
+    await expect(page.getByText('待付款').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: '取消订单' })).toBeVisible();
+    expect(getCancelCalls()).toBe(1);
+  });
 });

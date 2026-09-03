@@ -8,7 +8,10 @@ import {
 
 export class BindWechatDto {
   @IsString()
-  @Matches(/^[a-f0-9]{48}$/i, { message: "微信登录凭证格式错误" })
+  // 服务端签发的绑定令牌为 JWT 三段式（header.payload.signature）
+  @Matches(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, {
+    message: "微信登录凭证格式错误",
+  })
   bindToken!: string;
 
   @IsString()
@@ -17,9 +20,14 @@ export class BindWechatDto {
 
   @IsString()
   @IsNotEmpty({ message: "请输入登录密码" })
-  // 既有手机号需要原密码，新手机号的 6-18 位规则由 service 在确认不存在后执行。
+  // 既有手机号需要原密码，新手机号的密码长度规则由 service 在短信验真后执行。
   @MaxLength(128, { message: "密码输入过长" })
   password!: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: "短信验证码格式不正确" })
+  smsCode?: string;
 
   @IsOptional()
   @IsString()

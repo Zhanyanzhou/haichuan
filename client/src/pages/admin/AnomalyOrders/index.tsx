@@ -91,9 +91,10 @@ export default function AnomalyOrders() {
             loading={loading}
             size="middle"
             pagination={{
-              pageSize: 20,
+              // 服务端固定返回最近 200 条（total 为全量计数），单页展示避免翻到空页的假分页。
+              pageSize: 200,
               total,
-              showTotal: (t) => `共 ${t} 条异常`,
+              showTotal: (t) => `共 ${t} 条异常（展示最近 200 条）`,
             }}
             locale={{ emptyText: "暂无异常订单（所有订单正常流转中）" }}
             columns={[

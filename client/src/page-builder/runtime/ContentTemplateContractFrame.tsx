@@ -1,12 +1,5 @@
 import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react";
 import {
-  CheckOutlined,
-  DragOutlined,
-  MinusOutlined,
-  PictureOutlined,
-  PlusOutlined,
-} from "@ant-design/icons";
-import {
   contentTemplateObjectHasCapability,
   findContentTemplateEditableObject,
   getContentTemplateContract,
@@ -30,6 +23,10 @@ import {
   type VisualNodeKind,
 } from "../visual-editor/visualEditorSession";
 import { getTemplateContractNodeLabel } from "./contentTemplateRolePresentation";
+import {
+  editableTargetToVisualKind,
+  getExplicitContractRolePresentation,
+} from "../template-definition/editableTargets";
 
 interface ContentTemplateContractFrameProps {
   moduleType: string;
@@ -77,195 +74,6 @@ const EDITOR_SURFACE_CSS = `
 }
 @media (max-width: 767px) {
   .hc-contract-frame--editor { overflow-x: clip; }
-}
-.hc-contract-frame--editor [data-hc-editor-overlay] {
-  position: absolute;
-  inset: 0;
-  z-index: 2147483647;
-  pointer-events: none;
-  isolation: isolate;
-}
-.hc-contract-frame--editor [data-hc-layout-grid] {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border: calc(1px * var(--hc-editor-ui-scale, 1)) solid rgba(51,95,125,.2);
-  background-image:
-    linear-gradient(
-      to right,
-      rgba(51,95,125,.22) 0 calc(1px * var(--hc-editor-ui-scale, 1)),
-      transparent calc(1px * var(--hc-editor-ui-scale, 1))
-    ),
-    linear-gradient(
-      to bottom,
-      rgba(51,95,125,.18) 0 calc(1px * var(--hc-editor-ui-scale, 1)),
-      transparent calc(1px * var(--hc-editor-ui-scale, 1))
-    );
-  background-size:
-    calc(100% / 12) 100%,
-    100% calc(100% / var(--hc-layout-grid-rows, 8));
-  pointer-events: none;
-}
-.hc-contract-frame--editor [data-hc-selection-box] {
-  position: absolute;
-  border: 1px solid #335F7D;
-  box-shadow: 0 0 0 1px rgba(255,255,255,.82);
-  pointer-events: auto;
-  cursor: move;
-  background: transparent;
-  z-index: 2;
-}
-.hc-contract-frame--editor[data-visual-editor-mode="select"] [data-hc-selection-box] {
-  pointer-events: none;
-  cursor: pointer;
-}
-.hc-contract-frame--editor [data-hc-template-slot-box] {
-  position: absolute;
-  overflow: visible;
-  border: 1px dashed rgba(51, 95, 125, .68);
-  background: transparent;
-  color: #335F7D;
-  pointer-events: none;
-  z-index: 0;
-}
-.hc-contract-frame--editor [data-hc-template-slot-box][data-slot-kind="text"],
-.hc-contract-frame--editor [data-hc-template-slot-box][data-slot-kind="action"] {
-  border-color: rgba(95, 101, 104, .62);
-  color: #5F6568;
-}
-.hc-contract-frame--editor [data-hc-template-slot-box] > span {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  display: inline-flex;
-  min-height: 22px;
-  align-items: center;
-  padding: 3px 7px;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .9);
-  box-shadow: 0 1px 4px rgba(24, 26, 27, .08);
-  color: inherit;
-  font: 600 11px/1.3 var(--hc-font-sans, Arial, sans-serif);
-  letter-spacing: .04em;
-  white-space: nowrap;
-}
-.hc-contract-frame--editor [data-hc-node-hud] {
-  position: absolute;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  max-width: calc(100% - 8px);
-  padding: 4px;
-  border: 1px solid #DDE1E2;
-  border-radius: 5px;
-  background: #FFFFFF;
-  box-shadow: 0 6px 18px rgba(24,26,27,.12);
-  color: #181A1B;
-  pointer-events: auto;
-  z-index: 4;
-  white-space: nowrap;
-}
-.hc-contract-frame--editor [data-hc-node-hud][data-placement="above"] {
-  transform: translateY(-100%) scale(var(--hc-editor-ui-scale, 1));
-  transform-origin: left bottom;
-}
-.hc-contract-frame--editor [data-hc-node-hud]:not([data-placement="above"]) {
-  transform: scale(var(--hc-editor-ui-scale, 1));
-  transform-origin: left top;
-}
-.hc-contract-frame--editor [data-hc-node-hud] button {
-  display: inline-flex;
-  min-height: 30px;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  pointer-events: auto;
-}
-.hc-contract-frame--editor [data-hc-node-hud] button:hover,
-.hc-contract-frame--editor [data-hc-node-hud] button:focus-visible,
-.hc-contract-frame--editor [data-hc-node-hud] button[aria-pressed="true"] {
-  background: #EEF4F7;
-  color: #335F7D;
-  outline: none;
-}
-.hc-contract-frame--editor [data-hc-node-hud] button:focus-visible {
-  box-shadow: inset 0 0 0 1px #335F7D;
-}
-.hc-contract-frame--editor [data-hc-node-hud] button:disabled {
-  color: #B8BEC1;
-  cursor: not-allowed;
-}
-.hc-contract-frame--editor [data-hc-resize-handle] {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  padding: 0;
-  border: 1px solid #335F7D;
-  border-radius: 1px;
-  background: #FFFFFF;
-  box-shadow: 0 0 0 1px rgba(255,255,255,.78);
-  transform: translate(-50%,-50%) scale(var(--hc-editor-ui-scale, 1));
-  z-index: 3;
-  pointer-events: auto;
-}
-.hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="n"],
-.hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="s"] { cursor: ns-resize; }
-.hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="e"],
-.hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="w"] { cursor: ew-resize; }
-.hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="ne"],
-.hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="sw"] { cursor: nesw-resize; }
-.hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="nw"],
-.hc-contract-frame--editor [data-hc-resize-handle][data-resize-direction="se"] { cursor: nwse-resize; }
-.hc-contract-frame--editor [data-hc-snap-guide] {
-  position: absolute;
-  z-index: 4;
-  pointer-events: none;
-  background: #335F7D;
-}
-.hc-contract-frame--editor [data-hc-snap-guide][data-axis="x"] {
-  top: 0;
-  bottom: 0;
-  width: 1px;
-}
-.hc-contract-frame--editor [data-hc-snap-guide][data-axis="y"] {
-  left: 0;
-  right: 0;
-  height: 1px;
-}
-.hc-contract-frame--editor [data-hc-geometry-hint] {
-  position: absolute;
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  gap: 8px;
-  max-width: calc(100% - 8px);
-  padding: 3px 7px;
-  border: 1px solid rgba(51,95,125,.28);
-  border-radius: 3px;
-  background: rgba(255,255,255,.94);
-  box-shadow: 0 2px 8px rgba(24,26,27,.1);
-  color: #335F7D;
-  font: 600 11px/1.35 var(--hc-font-sans, Arial, sans-serif);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: .01em;
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 3;
-  transform: scale(var(--hc-editor-ui-scale, 1));
-  transform-origin: left top;
-}
-.hc-contract-frame--editor [data-hc-geometry-hint] b {
-  color: #181A1B;
-  font-weight: 600;
 }
 `;
 
@@ -325,39 +133,12 @@ type ActiveGuides = {
   y?: { position: number; kind: SnapKind };
 };
 
-type SelectionOverlayBox = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  frameLeft: number;
-  frameTop: number;
-  frameWidth: number;
-  frameHeight: number;
-  hudLeft: number;
-  hudTop: number;
-  hudPlacement: "above" | "below" | "inside";
-};
-
-type TemplateSlotOverlayBox = {
-  nodeId: string;
-  kind: VisualNodeKind;
-  label: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
-
 function getVisualNodeKind(
   contract: ContentTemplateContract | undefined,
   nodeId: string,
 ): VisualNodeKind | undefined {
-  const kind = findContentTemplateEditableObject(contract, nodeId)?.kind;
-  if (kind === "media" || kind === "video") return "media";
-  if (kind === "text" || kind === "action" || kind === "product") return kind;
-  if (kind === "collection") return "structured";
-  return undefined;
+  const presentation = getExplicitContractRolePresentation(contract, nodeId);
+  return presentation ? editableTargetToVisualKind(presentation.kind) : undefined;
 }
 
 function supportsCapabilityOnViewport(
@@ -370,34 +151,6 @@ function supportsCapabilityOnViewport(
   return !allowedViewports || allowedViewports.includes(viewport);
 }
 
-function getTemplateSlotLabel(kind: VisualNodeKind) {
-  if (kind === "media") return "图片槽位";
-  if (kind === "text") return "文字槽位";
-  if (kind === "action") return "行动槽位";
-  if (kind === "product") return "商品槽位";
-  return "内容槽位";
-}
-
-function templateSlotOverlaysEqual(
-  current: TemplateSlotOverlayBox[],
-  next: TemplateSlotOverlayBox[],
-) {
-  if (current.length !== next.length) return false;
-  return current.every((slot, index) => {
-    const candidate = next[index];
-    return Boolean(
-      candidate &&
-        slot.nodeId === candidate.nodeId &&
-        slot.kind === candidate.kind &&
-        slot.label === candidate.label &&
-        Math.abs(slot.left - candidate.left) < 0.25 &&
-        Math.abs(slot.top - candidate.top) < 0.25 &&
-        Math.abs(slot.width - candidate.width) < 0.25 &&
-        Math.abs(slot.height - candidate.height) < 0.25,
-    );
-  });
-}
-
 type GesturePreviewState = {
   overrides: InstanceValue | undefined;
   phase: "update" | "commit";
@@ -405,25 +158,6 @@ type GesturePreviewState = {
 
 const SNAP_THRESHOLD_PX = 6;
 const MIN_VISUAL_NODE_SIZE = 0.01;
-const HUD_ESTIMATED_WIDTH = 252;
-const HUD_ESTIMATED_HEIGHT = 40;
-
-const RESIZE_HANDLES: ReadonlyArray<{
-  direction: ResizeDirection;
-  label: string;
-  x: 0 | 0.5 | 1;
-  y: 0 | 0.5 | 1;
-}> = [
-  { direction: "nw", label: "左上角", x: 0, y: 0 },
-  { direction: "n", label: "上边", x: 0.5, y: 0 },
-  { direction: "ne", label: "右上角", x: 1, y: 0 },
-  { direction: "e", label: "右边", x: 1, y: 0.5 },
-  { direction: "se", label: "右下角", x: 1, y: 1 },
-  { direction: "s", label: "下边", x: 0.5, y: 1 },
-  { direction: "sw", label: "左下角", x: 0, y: 1 },
-  { direction: "w", label: "左边", x: 0, y: 0.5 },
-];
-
 function clampRect(
   rect: { x: number; y: number; width: number; height: number },
   constraints: ContentTemplateEditableConstraints,
@@ -1213,13 +947,10 @@ export default function ContentTemplateContractFrame({
   const dragRef = useRef<MediaDragState | null>(null);
   const layoutDragRef = useRef<LayoutDragState | null>(null);
   const suppressClickRef = useRef(false);
-  const hudFocusRequestRef = useRef(false);
   const gesturePreviewRef = useRef<GesturePreviewState | null>(null);
   const handledLayerCommandRef = useRef(0);
   const [liveMessage, setLiveMessage] = useState("");
   const [activeGuides, setActiveGuides] = useState<ActiveGuides>({});
-  const [selectionOverlay, setSelectionOverlay] = useState<SelectionOverlayBox | null>(null);
-  const [templateSlotOverlays, setTemplateSlotOverlays] = useState<TemplateSlotOverlayBox[]>([]);
   const [gesturePreview, setGesturePreview] = useState<GesturePreviewState | null>(null);
   const [sharedDesignPreview, setSharedDesignPreview] = useState<InstanceValue | undefined>();
   const [gesturePhase, setGesturePhase] = useState<GesturePhase>("idle");
@@ -1229,6 +960,11 @@ export default function ContentTemplateContractFrame({
   // 只有独立模板画布没有这层外部边界，需要由真实 Renderer 自己暴露节点标识。
   // 同一个页面模块出现两个相同 data-editor-block-id 会让滚动定位和选择命中不唯一。
   const ownsEditorBlockMarker = blockId.startsWith("template-editor:");
+  // 页面装修只选择整个模板实例；合同内部节点交互仅属于隔离的母模板会话。
+  // 预览、缩略图与公开 Renderer 同样不会建立监听器、tabindex 或会话标记。
+  const internalEditorEnabled = mode === "editor"
+    && ownsEditorBlockMarker
+    && props?.__interactionOwner !== "host-overlay";
   const forcedEditorViewport = props?.__editorViewport === "mobile"
     ? "mobile" as const
     : props?.__editorViewport === "desktop"
@@ -1239,11 +975,11 @@ export default function ContentTemplateContractFrame({
       forcedEditorViewport ?? (ownerWindow && ownerWindow.innerWidth <= 767 ? "mobile" : "desktop"),
     [forcedEditorViewport],
   );
-  const selectedHere = mode === "editor" && selection?.blockId === blockId
+  const selectedHere = internalEditorEnabled && selection?.blockId === blockId
     ? selection
     : null;
   const isCatalogTemplatePreview = props?.__templateCatalogPreview === true;
-  const panelModeHere = mode === "editor" && visualWorkspace === "template"
+  const panelModeHere = internalEditorEnabled && visualWorkspace === "template"
     ? "design"
     : selectedHere
       ? panelMode
@@ -1259,9 +995,6 @@ export default function ContentTemplateContractFrame({
   const selectedEditableObject = selectedHere
     ? findContentTemplateEditableObject(contract, selectedHere.nodeId)
     : undefined;
-  const selectedNodeLabel = selectedHere
-    ? getTemplateContractNodeLabel(selectedHere.nodeId, selectedEditableObject?.roleId)
-    : "";
   const canAdjustLayout = Boolean(
     (selectedSlot || selectedTextRole) &&
       supportsCapabilityOnViewport(selectedEditableObject, "layout", activeViewport),
@@ -1278,7 +1011,7 @@ export default function ContentTemplateContractFrame({
   propsRef.current = props;
 
   useEffect(() => {
-    if (mode !== "editor") return;
+    if (!internalEditorEnabled) return;
     const ownerWindow = rootRef.current?.ownerDocument.defaultView;
     if (!ownerWindow) return;
     const handleSharedPreview = (event: MessageEvent<CanvasSharedVisualPreviewMessage>) => {
@@ -1296,7 +1029,7 @@ export default function ContentTemplateContractFrame({
     };
     ownerWindow.addEventListener("message", handleSharedPreview);
     return () => ownerWindow.removeEventListener("message", handleSharedPreview);
-  }, [mode, moduleType]);
+  }, [internalEditorEnabled, mode, moduleType]);
 
   const previewGesture = useCallback((overrides: InstanceValue | undefined) => {
     const next: GesturePreviewState = { overrides, phase: "update" };
@@ -1364,7 +1097,7 @@ export default function ContentTemplateContractFrame({
 
   useEffect(() => {
     if (
-      mode !== "editor" ||
+      !internalEditorEnabled ||
       !contract ||
       !layerCommand ||
       layerCommand.blockId !== blockId ||
@@ -1396,96 +1129,7 @@ export default function ContentTemplateContractFrame({
     );
     sendCanvasVisualEdit({ blockId, moduleType, overrides: next }, sourceWindow);
     setLiveMessage(`对象层级已调整为 ${nextZIndex}`);
-  }, [blockId, contract, layerCommand, mode, moduleType, resolveEditorViewport]);
-
-  useEffect(() => {
-    const root = rootRef.current;
-    if (
-      mode !== "editor" ||
-      !selectedHere ||
-      !root ||
-      (!canAdjustLayout && !canAdjustMediaView)
-    ) {
-      setSelectionOverlay(null);
-      return;
-    }
-    const matchesNode = (element: HTMLElement) => {
-      const ids = [
-        element.dataset.contentRole,
-        element.dataset.contentRoleDesktop,
-        element.dataset.contentRoleMobile,
-        ...(element.dataset.editorField?.split(/\s+/) ?? []),
-      ];
-      return ids.includes(selectedHere.nodeId) && element.getClientRects().length > 0;
-    };
-    const target = Array.from(root.querySelectorAll<HTMLElement>(
-      "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
-    )).find(matchesNode);
-    if (!target) {
-      setSelectionOverlay(null);
-      return;
-    }
-    const updateOverlay = () => {
-      const rootBounds = root.getBoundingClientRect();
-      const targetBounds = target.getBoundingClientRect();
-      const frameBounds = findModuleFrameElement(target, root).getBoundingClientRect();
-      // 独立模板画布通过 transform 缩放真实 Renderer。DOMRect 是缩放后的
-      // 屏幕坐标，而选框仍位于 Renderer 内部坐标系；不还原比例会造成选框
-      // 二次缩放、控制点错位，表现为“能选中但无法直接拖拽/缩放”。
-      const scaleX = root.offsetWidth > 0 ? rootBounds.width / root.offsetWidth : 1;
-      const scaleY = root.offsetHeight > 0 ? rootBounds.height / root.offsetHeight : scaleX;
-      const safeScaleX = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1;
-      const safeScaleY = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : safeScaleX;
-      const rootWidth = root.offsetWidth || rootBounds.width / safeScaleX;
-      const rootHeight = root.offsetHeight || rootBounds.height / safeScaleY;
-      const left = (targetBounds.left - rootBounds.left) / safeScaleX;
-      const top = (targetBounds.top - rootBounds.top) / safeScaleY;
-      const width = targetBounds.width / safeScaleX;
-      const height = targetBounds.height / safeScaleY;
-      const belowTop = top + height + 8;
-      const hudPlacement = top >= HUD_ESTIMATED_HEIGHT + 8
-        ? "above" as const
-        : belowTop + HUD_ESTIMATED_HEIGHT <= rootHeight
-          ? "below" as const
-          : "inside" as const;
-      const hudTop = hudPlacement === "above"
-        ? top - 8
-        : hudPlacement === "below"
-          ? belowTop
-          : Math.max(4, Math.min(top + 8, rootHeight - HUD_ESTIMATED_HEIGHT - 4));
-      setSelectionOverlay({
-        left,
-        top,
-        width,
-        height,
-        frameLeft: (frameBounds.left - rootBounds.left) / safeScaleX,
-        frameTop: (frameBounds.top - rootBounds.top) / safeScaleY,
-        frameWidth: frameBounds.width / safeScaleX,
-        frameHeight: frameBounds.height / safeScaleY,
-        hudLeft: Math.max(
-          4,
-          Math.min(left, Math.max(4, rootWidth - HUD_ESTIMATED_WIDTH - 4)),
-        ),
-        hudTop,
-        hudPlacement,
-      });
-    };
-    const ownerWindow = root.ownerDocument.defaultView;
-    updateOverlay();
-    const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
-    const observer = ResizeObserverConstructor
-      ? new ResizeObserverConstructor(updateOverlay)
-      : undefined;
-    observer?.observe(root);
-    observer?.observe(target);
-    ownerWindow?.addEventListener("resize", updateOverlay);
-    ownerWindow?.addEventListener("scroll", updateOverlay, true);
-    return () => {
-      observer?.disconnect();
-      ownerWindow?.removeEventListener("resize", updateOverlay);
-      ownerWindow?.removeEventListener("scroll", updateOverlay, true);
-    };
-  }, [canAdjustLayout, canAdjustMediaView, gesturePreview, mode, props, selectedHere]);
+  }, [blockId, contract, internalEditorEnabled, layerCommand, mode, moduleType, resolveEditorViewport]);
 
   useEffect(() => {
     if (!selectedHere) return;
@@ -1495,7 +1139,7 @@ export default function ContentTemplateContractFrame({
 
   useEffect(() => {
     const root = rootRef.current;
-    if (mode !== "editor" || !root || !contract) return;
+    if (!internalEditorEnabled || !root || !contract) return;
     const allowedNodes = new Set(
       contract.editorCapabilities.editableObjects.flatMap((object) =>
         object.nodeIds ?? [object.roleId],
@@ -1583,104 +1227,12 @@ export default function ContentTemplateContractFrame({
       observer?.disconnect();
       touched.forEach(cleanupElement);
     };
-  }, [activeViewport, blockId, contract, mode]);
-
-  useEffect(() => {
-    const root = rootRef.current;
-    if (mode !== "editor" || panelModeHere !== "design" || !root) {
-      setTemplateSlotOverlays([]);
-      return;
-    }
-    const slotSelector = "[data-hc-template-slot-kind]";
-    const contentSelector =
-      "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]";
-    const ownerWindow = root.ownerDocument.defaultView;
-    let updateFrame = 0;
-    const updateOverlays = () => {
-      const nodes = Array.from(root.querySelectorAll<HTMLElement>(slotSelector));
-      const rootBounds = root.getBoundingClientRect();
-      const scaleX = root.offsetWidth > 0 ? rootBounds.width / root.offsetWidth : 1;
-      const scaleY = root.offsetHeight > 0 ? rootBounds.height / root.offsetHeight : scaleX;
-      const safeScaleX = Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1;
-      const safeScaleY = Number.isFinite(scaleY) && scaleY > 0 ? scaleY : safeScaleX;
-      const next = nodes.flatMap((element): TemplateSlotOverlayBox[] => {
-        const nodeId = element.dataset.hcKeyboardNode ||
-          element.dataset.contentRole ||
-          element.dataset.contentRoleDesktop ||
-          element.dataset.contentRoleMobile ||
-          element.dataset.editorField?.split(/\s+/).find(Boolean);
-        const kind = element.dataset.hcTemplateSlotKind as VisualNodeKind | undefined;
-        if (!nodeId || !kind) return [];
-        const bounds = element.getBoundingClientRect();
-        if (bounds.width <= 0 || bounds.height <= 0) return [];
-        return [{
-          nodeId,
-          kind,
-          label: element.dataset.hcTemplateSlotLabel || getTemplateSlotLabel(kind),
-          left: (bounds.left - rootBounds.left) / safeScaleX,
-          top: (bounds.top - rootBounds.top) / safeScaleY,
-          width: bounds.width / safeScaleX,
-          height: bounds.height / safeScaleY,
-        }];
-      });
-      setTemplateSlotOverlays((current) =>
-        templateSlotOverlaysEqual(current, next) ? current : next,
-      );
-      nodes.forEach((node) => resizeObserver?.observe(node));
-    };
-    const scheduleOverlayUpdate = () => {
-      if (!ownerWindow || updateFrame) return;
-      updateFrame = ownerWindow.requestAnimationFrame(() => {
-        updateFrame = 0;
-        updateOverlays();
-      });
-    };
-    const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
-    const resizeObserver = ResizeObserverConstructor
-      ? new ResizeObserverConstructor(scheduleOverlayUpdate)
-      : undefined;
-    resizeObserver?.observe(root);
-    const MutationObserverConstructor = ownerWindow?.MutationObserver;
-    const mutationObserver = MutationObserverConstructor
-      ? new MutationObserverConstructor((records) => {
-          const contentChanged = records.some((record) => {
-            if (record.type === "attributes") {
-              return isHtmlElement(record.target) &&
-                !record.target.closest("[data-hc-editor-overlay]");
-            }
-            return [...record.addedNodes, ...record.removedNodes].some((node) => {
-              if (!isHtmlElement(node)) return false;
-              if (node.matches("[data-hc-editor-overlay]") || node.closest("[data-hc-editor-overlay]")) {
-                return false;
-              }
-              return node.matches(contentSelector) || Boolean(node.querySelector(contentSelector));
-            });
-          });
-          if (contentChanged) scheduleOverlayUpdate();
-        })
-      : undefined;
-    mutationObserver?.observe(root, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["data-hc-template-slot-kind", "data-hc-template-slot-label"],
-    });
-    updateOverlays();
-    ownerWindow?.addEventListener("resize", scheduleOverlayUpdate);
-    ownerWindow?.addEventListener("scroll", scheduleOverlayUpdate, true);
-    return () => {
-      resizeObserver?.disconnect();
-      mutationObserver?.disconnect();
-      ownerWindow?.removeEventListener("resize", scheduleOverlayUpdate);
-      ownerWindow?.removeEventListener("scroll", scheduleOverlayUpdate, true);
-      if (updateFrame) ownerWindow?.cancelAnimationFrame(updateFrame);
-    };
-  }, [mode, panelModeHere]);
+  }, [activeViewport, blockId, contract, internalEditorEnabled, mode]);
 
   useEffect(() => {
     const root = rootRef.current;
     if (
-      mode !== "editor" ||
+      !internalEditorEnabled ||
       !root ||
       !selection ||
       selection.blockId !== blockId ||
@@ -1694,8 +1246,6 @@ export default function ContentTemplateContractFrame({
     const canvasOwnsFocus = frameElement
       ? frameElement.ownerDocument.activeElement === frameElement
       : root.contains(root.ownerDocument.activeElement);
-    const hudRequestedFocus = hudFocusRequestRef.current;
-    hudFocusRequestRef.current = false;
     setLiveMessage(
       editorMode === "adjust-media"
         ? canDragMediaFocus
@@ -1703,9 +1253,8 @@ export default function ContentTemplateContractFrame({
           : "已进入图片显示调整，可使用画布工具调整显示方式和缩放，按 Escape 退出"
         : "已进入对象位置调整，使用方向键移动，按 Alt 加方向键调整大小，按 Escape 退出",
     );
-    // 页签、属性面板等画布外控件切换设计模式时保留其键盘焦点；画布内 HUD
-    // 是显式操作入口，即使 pointerdown 被拦截，也要把键盘焦点交回当前对象。
-    if (!canvasOwnsFocus && !hudRequestedFocus) return;
+    // 页签、属性面板等画布外控件切换设计模式时保留其键盘焦点。
+    if (!canvasOwnsFocus) return;
     const frameId = ownerWindow.requestAnimationFrame(() => {
       const target = Array.from(
         root.querySelectorAll<HTMLElement>("[data-hc-keyboard-node]"),
@@ -1718,7 +1267,7 @@ export default function ContentTemplateContractFrame({
       target.focus({ preventScroll: true });
     });
     return () => ownerWindow.cancelAnimationFrame(frameId);
-  }, [blockId, canDragMediaFocus, editorMode, mode, selection]);
+  }, [blockId, canDragMediaFocus, editorMode, internalEditorEnabled, mode, selection]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1779,7 +1328,7 @@ export default function ContentTemplateContractFrame({
       appliedVariables.clear();
     };
     const reportMeasuredGeometry = () => {
-      if (mode !== "editor" || !blockId) return;
+      if (!internalEditorEnabled || !blockId) return;
       const viewport = resolveEditorViewport(ownerWindow);
       const candidates = Array.from(root.querySelectorAll<HTMLElement>(
         "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
@@ -1826,7 +1375,7 @@ export default function ContentTemplateContractFrame({
       });
     };
     const scheduleGeometryReport = () => {
-      if (!ownerWindow || mode !== "editor") return;
+      if (!ownerWindow || !internalEditorEnabled) return;
       ownerWindow.cancelAnimationFrame(geometryFrame);
       geometryFrame = ownerWindow.requestAnimationFrame(reportMeasuredGeometry);
     };
@@ -1914,7 +1463,7 @@ export default function ContentTemplateContractFrame({
       ownerWindow?.cancelAnimationFrame(geometryFrame);
       clearVariables();
     };
-  }, [blockId, contract, gesturePreview, layout, mode, moduleType, props, reportCanvasGeometry, resolveEditorViewport, sharedDesignPreview]);
+  }, [blockId, contract, gesturePreview, internalEditorEnabled, layout, mode, moduleType, props, reportCanvasGeometry, resolveEditorViewport, sharedDesignPreview]);
 
   if (!contract || !layout) return <>{children}</>;
   const scopeId = `hc-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
@@ -2170,102 +1719,12 @@ export default function ContentTemplateContractFrame({
     }
   };
 
-  const commitVisualPath = (path: string[], value: unknown, message: string) => {
-    const sourceWindow = rootRef.current?.ownerDocument.defaultView ?? window;
-    const next = setVisualOverridePath(
-      gesturePreviewRef.current?.overrides ?? propsRef.current?.__instanceOverrides,
-      path,
-      value,
-    );
-    sendCanvasVisualEdit({ blockId, moduleType, overrides: next }, sourceWindow);
-    setLiveMessage(message);
-  };
-
-  const handleHudMode = (nextMode: "adjust-layout" | "adjust-media") => {
-    cancelActiveGesture(false);
-    hudFocusRequestRef.current = true;
-    if (nextMode === "adjust-layout" && panelMode !== "design") {
-      setVisualPanelMode("design");
-    }
-    setEditorMode(nextMode);
-    if (nextMode === "adjust-layout" && selectedHere) {
-      const root = rootRef.current;
-      const selectedTarget = root
-        ? Array.from(root.querySelectorAll<HTMLElement>(
-            "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
-          )).find((element) => {
-            const ids = [
-              element.dataset.contentRole,
-              element.dataset.contentRoleDesktop,
-              element.dataset.contentRoleMobile,
-              ...(element.dataset.editorField?.split(/\s+/) ?? []),
-            ];
-            return ids.includes(selectedHere.nodeId) && element.getClientRects().length > 0;
-          })
-        : null;
-      selectedTarget?.ownerDocument.defaultView?.requestAnimationFrame(() => {
-        selectedTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
-      });
-    }
-    setLiveMessage(
-      nextMode === "adjust-layout"
-        ? "已进入对象位置与大小调整"
-        : canDragMediaFocus
-          ? "已进入图片构图调整，可拖动画面调整焦点"
-          : "已进入图片显示调整",
-    );
-  };
-
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (mode !== "editor" || !blockId || !isHtmlElement(event.target)) return;
+    if (!internalEditorEnabled || !blockId || !isHtmlElement(event.target)) return;
     if (event.currentTarget.closest('[data-editor-node-selection="module"]')) return;
-    const requestedHudMode = event.target
-      .closest<HTMLElement>("[data-hc-hud-mode]")
-      ?.dataset.hcHudMode;
-    if (requestedHudMode === "select") {
-      cancelActiveGesture(false);
-      setEditorMode("select");
-      setLiveMessage("已完成画布调整");
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-    if (requestedHudMode === "adjust-layout" || requestedHudMode === "adjust-media") {
-      handleHudMode(requestedHudMode);
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-    if (event.target.closest("[data-hc-node-hud]")) return;
     const sourceWindow = event.currentTarget.ownerDocument.defaultView ?? window;
     const activeViewport = resolveEditorViewport(sourceWindow);
-    const resizeHandleElement = event.target.closest<HTMLElement>("[data-hc-resize-handle]");
-    const selectionBoxElement = event.target.closest<HTMLElement>("[data-hc-selection-box]");
-    const resizeDirection = resizeHandleElement?.dataset.resizeDirection as ResizeDirection | undefined;
-    const forcedNodeId = resizeHandleElement?.dataset.nodeId ?? selectionBoxElement?.dataset.nodeId;
-    const forcedNodeElement = forcedNodeId
-      ? Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
-          "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
-        )).find((element) => {
-          const ids = [
-            element.dataset.contentRole,
-            element.dataset.contentRoleDesktop,
-            element.dataset.contentRoleMobile,
-            ...(element.dataset.editorField?.split(/\s+/) ?? []),
-          ];
-          return ids.includes(forcedNodeId) && element.getClientRects().length > 0;
-        })
-      : undefined;
-    const forcedVisualKind = forcedNodeId
-      ? getVisualNodeKind(contract, forcedNodeId)
-      : undefined;
-    const node = forcedNodeId && forcedNodeElement
-      ? {
-          nodeId: forcedNodeId,
-          kind: forcedVisualKind ?? "text",
-          element: forcedNodeElement,
-        }
-      : findVisualNode(event.target, activeViewport);
+    const node = findVisualNode(event.target, activeViewport);
     if (!node) return;
     const previousSelection = useVisualEditorSession.getState().selection;
     const isTemplateCanvasBlock = blockId.startsWith("template-editor:");
@@ -2274,13 +1733,9 @@ export default function ContentTemplateContractFrame({
       previousSelection
       && previousSelection.blockId !== blockId
       && !isTemplateCanvasBlock
-      && !selectionBoxElement
-      && !resizeHandleElement
     ) {
       // 跨模块第一击必须先让外层画布边界同步 Puck 模块选择；若立即进入
       // 拖动并停止冒泡，会出现“对象已换、属性面板仍属于旧模块”的分裂状态。
-      // 选中框和缩放把手只能属于当前 Renderer；一次取消手势引起组件重挂时，
-      // store 里可能短暂保留旧 blockId，此时不能把持续编辑误判为跨模块首击。
       setEditorMode("select");
       event.preventDefault();
       return;
@@ -2348,26 +1803,19 @@ export default function ContentTemplateContractFrame({
         width: Math.min(1, Math.max(MIN_VISUAL_NODE_SIZE, nodeBounds.width / Math.max(1, frameBounds.width))),
         height: Math.min(1, Math.max(MIN_VISUAL_NODE_SIZE, nodeBounds.height / Math.max(1, frameBounds.height))),
       };
-      const requestedResizeDirection = resizeDirection ?? "se";
-      const canResizeDirection = baseConstraints.allowedResize.includes(requestedResizeDirection);
-      const operation = (resizeHandleElement && canResizeDirection) ||
-        (!resizeHandleElement && baseConstraints.allowedResize.includes("se") && event.clientX >= nodeBounds.right - 20 && event.clientY >= nodeBounds.bottom - 20)
-        ? "resize" as const
-        : "move" as const;
       const rawStartRect = effective.rect ?? derivedRect;
       const constraints = interactionConstraints(
         baseConstraints,
         rawStartRect,
-        operation === "resize" && (requestedResizeDirection.includes("e") || requestedResizeDirection.includes("w")),
-        operation === "resize" && (requestedResizeDirection.includes("n") || requestedResizeDirection.includes("s")),
+        false,
+        false,
       );
       const startRect = clampRect(rawStartRect, constraints, bounds);
       layoutDragRef.current = {
         pointerId: event.pointerId,
         nodeId: node.nodeId,
         viewport: activeViewport,
-        operation,
-        resizeDirection: operation === "resize" ? requestedResizeDirection : undefined,
+        operation: "move",
         startClientX: event.clientX,
         startClientY: event.clientY,
         startRect,
@@ -2428,7 +1876,7 @@ export default function ContentTemplateContractFrame({
   };
 
   const handleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (mode !== "editor" || !blockId || !isHtmlElement(event.target)) return;
+    if (!internalEditorEnabled || !blockId || !isHtmlElement(event.target)) return;
     if (event.currentTarget.closest('[data-editor-node-selection="module"]')) return;
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
@@ -2436,7 +1884,6 @@ export default function ContentTemplateContractFrame({
       event.stopPropagation();
       return;
     }
-    if (event.target.closest("[data-hc-node-hud]")) return;
     if (event.target.closest("a,button,video")) {
       event.preventDefault();
       event.stopPropagation();
@@ -2463,7 +1910,7 @@ export default function ContentTemplateContractFrame({
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (mode !== "editor" || !blockId || !isHtmlElement(event.target)) return;
+    if (!internalEditorEnabled || !blockId || !isHtmlElement(event.target)) return;
     if (
       blockId.startsWith("template-editor:")
       && (event.ctrlKey || event.metaKey)
@@ -2485,7 +1932,6 @@ export default function ContentTemplateContractFrame({
       event.preventDefault();
       return;
     }
-    if (event.target.closest("[data-hc-node-hud]")) return;
     const activeViewport = resolveEditorViewport(event.currentTarget.ownerDocument.defaultView);
     const node = findVisualNode(event.target, activeViewport);
     if (!node || node.kind === "action") return;
@@ -2799,65 +2245,6 @@ export default function ContentTemplateContractFrame({
     cancelActiveGesture(true);
   };
 
-  const selectedVisualNode = selectedHere
-    ? resolveContractVisualNode(
-        contract,
-        gesturePreviewRef.current
-          ? { ...propsRef.current, __instanceOverrides: gesturePreviewRef.current.overrides }
-          : propsRef.current,
-        selectedHere.nodeId,
-        activeViewport,
-      )
-    : {};
-  const canAdjustFit = Boolean(
-    selectedSlot?.fit?.length &&
-      contentTemplateObjectHasCapability(selectedEditableObject, "fit"),
-  );
-  const canAdjustZoom = Boolean(
-    selectedSlot?.zoom &&
-      contentTemplateObjectHasCapability(selectedEditableObject, "zoom"),
-  );
-  const activeFit = selectedVisualNode.fit ?? (canAdjustFit ? selectedSlot?.fit?.[0] : undefined);
-  const activeZoom = selectedVisualNode.zoom ?? 1;
-  const geometryHint = selectionOverlay && editorMode === "adjust-layout"
-    ? {
-        left: Math.max(0, Math.round(selectionOverlay.left - selectionOverlay.frameLeft)),
-        top: Math.max(0, Math.round(selectionOverlay.top - selectionOverlay.frameTop)),
-        right: Math.max(0, Math.round(
-          selectionOverlay.frameLeft + selectionOverlay.frameWidth -
-            selectionOverlay.left - selectionOverlay.width,
-        )),
-        bottom: Math.max(0, Math.round(
-          selectionOverlay.frameTop + selectionOverlay.frameHeight -
-            selectionOverlay.top - selectionOverlay.height,
-        )),
-        width: Math.round(selectionOverlay.width),
-        height: Math.round(selectionOverlay.height),
-      }
-    : null;
-
-  const toggleMediaFit = () => {
-    if (!selectedHere || !canAdjustFit || !selectedSlot?.fit?.length) return;
-    const nextFit = selectedSlot.fit.find((fit) => fit !== activeFit) ?? selectedSlot.fit[0];
-    commitVisualPath(
-      ["nodes", selectedHere.nodeId, "mediaView", "fit"],
-      nextFit,
-      nextFit === "contain" ? "图片已完整显示" : "图片已填充区域",
-    );
-  };
-
-  const adjustMediaZoom = (direction: -1 | 1) => {
-    if (!selectedHere || !canAdjustZoom || !selectedSlot?.zoom) return;
-    const { min, max, step } = selectedSlot.zoom;
-    const nextZoom = Math.min(max, Math.max(min, Number((activeZoom + step * direction).toFixed(3))));
-    if (Math.abs(nextZoom - activeZoom) < 0.0001) return;
-    commitVisualPath(
-      ["nodes", selectedHere.nodeId, "mediaView", "zoom"],
-      nextZoom === 1 ? undefined : nextZoom,
-      `图片缩放已调整为 ${nextZoom.toFixed(2)} 倍`,
-    );
-  };
-
   const style: ContractFrameStyle = {
     ...templateLayoutVars(layout),
     "--hc-contract-container":
@@ -2867,7 +2254,7 @@ export default function ContentTemplateContractFrame({
     ? cloneElement(children as ReactElement<{
         editMode?: boolean;
       }>, {
-        ...(mode === "editor" ? { editMode: true } : {}),
+        ...(internalEditorEnabled ? { editMode: true } : {}),
       })
     : children;
 
@@ -2879,7 +2266,7 @@ export default function ContentTemplateContractFrame({
       data-content-template-contract={contract.key}
       data-content-template-module={moduleType}
       data-content-template-renderer="real"
-      data-editor-block-id={mode === "editor" && ownsEditorBlockMarker ? blockId : undefined}
+      data-editor-block-id={internalEditorEnabled ? blockId : undefined}
       data-contract-tone={contract.preview.desktop.tone}
       data-contract-visual-role={contract.visualRole}
       data-contract-height-desktop={contract.heightModeByViewport.desktop}
@@ -2898,238 +2285,39 @@ export default function ContentTemplateContractFrame({
         : typeof instanceLayout.compositionPreset === "string"
           ? instanceLayout.compositionPreset
           : undefined}
-      data-visual-editor-mode={mode === "editor" ? editorModeHere : undefined}
-      data-visual-panel-mode={mode === "editor" ? panelModeHere : undefined}
-      data-visual-editor-viewport={mode === "editor" ? activeViewport : undefined}
+      data-visual-editor-mode={internalEditorEnabled ? editorModeHere : undefined}
+      data-visual-panel-mode={internalEditorEnabled ? panelModeHere : undefined}
+      data-visual-editor-viewport={internalEditorEnabled ? activeViewport : undefined}
       data-visual-selected-node={selectedHere?.nodeId}
       data-hc-snap-active={activeGuides.x || activeGuides.y ? "true" : undefined}
-      data-hc-gesture-phase={mode === "editor" && gesturePhase !== "idle" ? gesturePhase : undefined}
+      data-hc-gesture-phase={internalEditorEnabled && gesturePhase !== "idle" ? gesturePhase : undefined}
       data-hc-media-focus-enabled={
         selectedHere && editorMode === "adjust-media" && canDragMediaFocus
           ? "true"
           : undefined
       }
-      onPointerDownCapture={handlePointerDown}
-      onClickCapture={handleClick}
-      onPointerMove={handlePointerMove}
-      onPointerUp={finishPointerDrag}
-      onPointerCancel={cancelPointerDrag}
-      onLostPointerCapture={handleLostPointerCapture}
-      onKeyDownCapture={handleKeyDown}
+      {...(internalEditorEnabled ? {
+        onPointerDownCapture: handlePointerDown,
+        onClickCapture: handleClick,
+        onPointerMove: handlePointerMove,
+        onPointerUp: finishPointerDrag,
+        onPointerCancel: cancelPointerDrag,
+        onLostPointerCapture: handleLostPointerCapture,
+        onKeyDownCapture: handleKeyDown,
+      } : {})}
     >
       <ContentTemplateLayoutStyles />
-      <style data-hc-contract-editor-surface={mode === "editor" ? "true" : undefined}>{EDITOR_SURFACE_CSS}</style>
+      {internalEditorEnabled ? (
+        <style data-hc-contract-editor-surface="true">{EDITOR_SURFACE_CSS}</style>
+      ) : null}
       {instanceCss ? <style data-hc-instance-overrides>{instanceCss}</style> : null}
       {selectedHere ? (
         <style data-hc-visual-selection>{`${nodeSelector(selectedHere.nodeId)}{outline:1px solid #335F7D!important;outline-offset:-1px;cursor:${editorMode === "adjust-layout" ? "move" : editorMode === "adjust-media" && (selectedHere.kind === "media" || selectedHere.kind === "product") && canDragMediaFocus ? "grab" : "pointer"}}`}</style>
       ) : null}
-      {mode === "editor" ? (
+      {internalEditorEnabled ? (
         <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{liveMessage}</span>
       ) : null}
       {renderedChild}
-      {((selectedHere && editorMode === "adjust-layout") || activeGuides.x || activeGuides.y || (selectedHere && selectionOverlay) || templateSlotOverlays.length > 0) ? (
-        <div data-hc-editor-overlay>
-          {selectedHere && editorMode === "adjust-layout" ? (
-            <span aria-hidden="true" data-hc-layout-grid />
-          ) : null}
-          {templateSlotOverlays.map((slot, index) => (
-            <div
-              key={`${slot.nodeId}-${slot.kind}-${index}`}
-              aria-hidden="true"
-              data-hc-template-slot-box
-              data-node-id={slot.nodeId}
-              data-slot-kind={slot.kind}
-              style={{
-                left: slot.left,
-                top: slot.top,
-                width: slot.width,
-                height: slot.height,
-              }}
-            >
-              <span>{slot.label}</span>
-            </div>
-          ))}
-          {activeGuides.x && layoutDragRef.current ? (
-            <span
-              aria-hidden="true"
-              data-hc-snap-guide
-              data-axis="x"
-              data-snap-kind={activeGuides.x.kind}
-              style={{
-                left: layoutDragRef.current.frameOffsetX +
-                  activeGuides.x.position * layoutDragRef.current.frameWidth,
-              }}
-            />
-          ) : null}
-          {activeGuides.y && layoutDragRef.current ? (
-            <span
-              aria-hidden="true"
-              data-hc-snap-guide
-              data-axis="y"
-              data-snap-kind={activeGuides.y.kind}
-              style={{
-                top: layoutDragRef.current.frameOffsetY +
-                  activeGuides.y.position * layoutDragRef.current.frameHeight,
-              }}
-            />
-          ) : null}
-          {selectedHere && selectionOverlay ? (
-            <>
-              <span
-                aria-hidden="true"
-                data-hc-selection-box
-                data-node-id={selectedHere.nodeId}
-                style={{
-                  left: selectionOverlay.left,
-                  top: selectionOverlay.top,
-                  width: selectionOverlay.width,
-                  height: selectionOverlay.height,
-                }}
-              />
-              {geometryHint ? (
-                <output
-                  aria-label={`对象边距：左 ${geometryHint.left} 像素，上 ${geometryHint.top} 像素，右 ${geometryHint.right} 像素，下 ${geometryHint.bottom} 像素；尺寸 ${geometryHint.width} 乘 ${geometryHint.height} 像素`}
-                  data-hc-geometry-hint
-                  data-hc-spacing-hint
-                  data-hc-gesture-state={gesturePhase}
-                  style={{
-                    left: Math.max(
-                      selectionOverlay.frameLeft + 4,
-                      Math.min(
-                        selectionOverlay.left,
-                        selectionOverlay.frameLeft + selectionOverlay.frameWidth - 300,
-                      ),
-                    ),
-                    top: Math.max(
-                      selectionOverlay.frameTop + 4,
-                      Math.min(
-                        selectionOverlay.top + selectionOverlay.height + 6,
-                        selectionOverlay.frameTop + selectionOverlay.frameHeight - 30,
-                      ),
-                    ),
-                  }}
-                >
-                  <span>间距 L {geometryHint.left} · T {geometryHint.top} · R {geometryHint.right} · B {geometryHint.bottom}</span>
-                  <b>{geometryHint.width} × {geometryHint.height}</b>
-                </output>
-              ) : null}
-              {panelModeHere === "design" ? (
-                <div
-                  role="toolbar"
-                  aria-label={`调整画布对象：${selectedNodeLabel}`}
-                  data-hc-node-hud
-                  data-node-id={selectedHere.nodeId}
-                  data-node-kind={selectedHere.kind}
-                  data-placement={selectionOverlay.hudPlacement}
-                  data-can-adjust-layout={canAdjustLayout ? "true" : "false"}
-                  data-can-adjust-focus={canDragMediaFocus ? "true" : "false"}
-                  data-can-adjust-fit={canAdjustFit ? "true" : "false"}
-                  data-can-adjust-zoom={canAdjustZoom ? "true" : "false"}
-                  style={{
-                    left: selectionOverlay.hudLeft,
-                    top: selectionOverlay.hudTop,
-                  }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                {canAdjustLayout ? (
-                  <button
-                    type="button"
-                    aria-label="调整对象区域"
-                    aria-pressed={editorMode === "adjust-layout"}
-                    data-hc-hud-mode="adjust-layout"
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      event.preventDefault();
-                      handleHudMode("adjust-layout");
-                    }}
-                    onClick={() => handleHudMode("adjust-layout")}
-                  >
-                    <DragOutlined aria-hidden="true" />
-                    区域
-                  </button>
-                ) : null}
-                {canAdjustMediaView ? (
-                  <button
-                    type="button"
-                    aria-label="调整图片构图"
-                    aria-pressed={editorMode === "adjust-media"}
-                    data-hc-hud-mode="adjust-media"
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      event.preventDefault();
-                      handleHudMode("adjust-media");
-                    }}
-                    onClick={() => handleHudMode("adjust-media")}
-                  >
-                    <PictureOutlined aria-hidden="true" />
-                    构图
-                  </button>
-                ) : null}
-                {editorMode === "adjust-media" && canAdjustFit && selectedSlot?.fit?.length ? (
-                  <button
-                    type="button"
-                    aria-label={activeFit === "contain" ? "切换图片为填充显示" : "切换图片为完整显示"}
-                    onClick={toggleMediaFit}
-                  >
-                    {activeFit === "contain" ? "填充" : "完整"}
-                  </button>
-                ) : null}
-                {editorMode === "adjust-media" && canAdjustZoom && selectedSlot?.zoom ? (
-                  <>
-                    <button
-                      type="button"
-                      aria-label="缩小图片"
-                      disabled={activeZoom <= selectedSlot.zoom.min}
-                      onClick={() => adjustMediaZoom(-1)}
-                    >
-                      <MinusOutlined aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="放大图片"
-                      disabled={activeZoom >= selectedSlot.zoom.max}
-                      onClick={() => adjustMediaZoom(1)}
-                    >
-                      <PlusOutlined aria-hidden="true" />
-                    </button>
-                  </>
-                ) : null}
-                  {editorMode !== "select" ? (
-                    <button
-                      type="button"
-                      aria-label="完成画布调整"
-                      data-hc-hud-mode="select"
-                      onClick={() => setEditorMode("select")}
-                    >
-                      <CheckOutlined aria-hidden="true" />
-                      完成
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-              {editorMode === "adjust-layout" && canAdjustLayout
-                ? RESIZE_HANDLES
-                    .filter((handle) => selectedEditableObject?.constraints.allowedResize.includes(handle.direction))
-                    .map((handle) => (
-                    <button
-                      key={handle.direction}
-                      type="button"
-                      aria-label={`调整对象大小：${handle.label}`}
-                      data-hc-resize-handle
-                      data-node-id={selectedHere.nodeId}
-                      data-resize-direction={handle.direction}
-                      style={{
-                        left: selectionOverlay.left + selectionOverlay.width * handle.x,
-                        top: selectionOverlay.top + selectionOverlay.height * handle.y,
-                      }}
-                    />
-                    ))
-                : null}
-            </>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -82,9 +82,9 @@ export default function About() {
           <SectionLabel number="02" label="A POINT OF VIEW" />
           <div className="grid grid-cols-12 gap-x-6 gap-y-12">
             <div className="col-span-12 md:col-start-2 md:col-span-7">
-              <p className="text-[clamp(36px,4.2vw,60px)] leading-[1.2] tracking-[.02em]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#181A1B' }}>
+              <h2 className="text-[clamp(36px,4.2vw,60px)] leading-[1.2] tracking-[.02em]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#181A1B' }}>
                 海川不是一种固定的风格，<br />而是一种观看珠宝的方式。
-              </p>
+              </h2>
             </div>
             <div className="col-span-12 md:col-start-9 md:col-span-4 md:pt-[120px]">
               <div className="max-w-[380px] text-[15px] leading-[1.95] space-y-3" style={{ color: '#5F6568' }}>
@@ -113,7 +113,7 @@ export default function About() {
           <SectionLabel number="03" label="PHILOSOPHY" />
           <div className="grid grid-cols-12 gap-x-6">
             <div className="col-span-12 md:col-start-3 md:col-span-8">
-              <p className="text-[clamp(32px,4.4vw,64px)] leading-[1.18] tracking-[.02em] max-w-[720px]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#F7F8F8' }}>一件珠宝，<br />不会在完成制作的那一刻结束。</p>
+              <h2 className="text-[clamp(32px,4.4vw,64px)] leading-[1.18] tracking-[.02em] max-w-[720px]" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#F7F8F8' }}>一件珠宝，<br />不会在完成制作的那一刻结束。</h2>
               <p className="text-[clamp(32px,4.4vw,64px)] leading-[1.18] tracking-[.02em] max-w-[720px] mt-4" style={{ fontFamily: '"Cormorant Garamond","Noto Serif SC",serif', color: '#F7F8F8' }}>它会在佩戴、触碰与时间里，<br />继续形成自己的样子。</p>
             </div>
           </div>

@@ -28,10 +28,13 @@ import {
   canNestDynamicTemplateNode,
   duplicateDynamicTemplateNode,
   getDynamicTemplateNodeRegistryEntry,
+  isDynamicTemplateStructureLocked,
+  isDynamicTemplateStructureProtected,
   moveDynamicTemplateNode,
   removeDynamicTemplateNode,
   reorderDynamicTemplateNode,
   setDynamicTemplateNodeHidden,
+  setDynamicTemplateNodeStructureLocked,
   type TemplateDefinitionV2,
 } from "../template-definition";
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
@@ -108,10 +111,6 @@ interface StructureRegion {
   locked: boolean;
   entries: StructureEntry[];
   slots: StructureSlot[];
-}
-
-function isStructureLocked(node: TemplateDefinitionV2["nodes"][string]) {
-  return node.props.contentTemplateDesignProps?.structureLocked === true;
 }
 
 function ContractRoleIcon({ kind }: { kind: ContractKind }) {
@@ -225,7 +224,7 @@ function buildContractSlots(
       hideable,
       removed,
       hidden: definition.nodes[nodeId].hidden,
-      locked: isStructureLocked(definition.nodes[nodeId]),
+      locked: isDynamicTemplateStructureProtected(definition, nodeId),
       depth,
     }];
   });
@@ -260,7 +259,7 @@ function collectRegionEntries(
         hideable: slot?.hideable ?? true,
         removed: node.hidden,
         hidden: node.hidden,
-        locked: isStructureLocked(node),
+        locked: isDynamicTemplateStructureProtected(definition, nodeId),
         depth,
       });
     }
@@ -273,7 +272,7 @@ function collectRegionEntries(
       nodeId,
       label: node.name,
       hidden: node.hidden,
-      locked: isStructureLocked(node),
+      locked: isDynamicTemplateStructureProtected(definition, nodeId),
       depth,
     });
   }
@@ -312,7 +311,7 @@ function buildStructureRegions(definition: TemplateDefinitionV2): StructureRegio
       label: getDynamicTemplateRegionDisplayName(definition, nodeId, contractLabel),
       contractBacked: slotNodeIds.some((slotNodeId) => Boolean(getSlotContract(definition, slotNodeId))),
       hidden: node.hidden,
-      locked: isStructureLocked(node),
+      locked: isDynamicTemplateStructureProtected(definition, nodeId),
       entries,
       slots,
     }];
@@ -667,12 +666,11 @@ export default function DynamicTemplateStructurePanel({
           return;
         }
         if (action === "lock") {
-          const next = structuredClone(currentDraft.definition);
-          next.nodes[nodeId].props.contentTemplateDesignProps = {
-            ...next.nodes[nodeId].props.contentTemplateDesignProps,
-            structureLocked: !isStructureLocked(node),
-          };
-          setDynamicDefinition(next);
+          setDynamicDefinition(setDynamicTemplateNodeStructureLocked(
+            currentDraft.definition,
+            nodeId,
+            !isDynamicTemplateStructureLocked(node),
+          ));
           return;
         }
         if (action === "delete") {
@@ -746,11 +744,21 @@ export default function DynamicTemplateStructurePanel({
     const siblingIndex = siblings.indexOf(nodeId);
     const node = definition.nodes[nodeId];
     const slot = node.slotId ? definition.slots[node.slotId] : undefined;
+    const selfLocked = isDynamicTemplateStructureLocked(node);
+    const locked = isDynamicTemplateStructureProtected(definition, nodeId);
+    const parentLocked = Boolean(
+      parentId && isDynamicTemplateStructureProtected(definition, parentId),
+    );
     const previousSibling = siblingIndex > 0 ? definition.nodes[siblings[siblingIndex - 1]] : undefined;
     const grandParentId = parentId ? findDynamicTemplateParentId(definition, parentId) : null;
-    const canIndent = Boolean(previousSibling && canNestDynamicTemplateNode(previousSibling.type, node.type));
+    const canIndent = Boolean(
+      previousSibling
+      && !isDynamicTemplateStructureProtected(definition, previousSibling.nodeId)
+      && canNestDynamicTemplateNode(previousSibling.type, node.type),
+    );
     const canOutdent = Boolean(
       grandParentId
+      && !isDynamicTemplateStructureProtected(definition, grandParentId)
       && canNestDynamicTemplateNode(definition.nodes[grandParentId].type, node.type),
     );
     const requiredSlotVisible = Boolean(slot?.required && !node.hidden);
@@ -763,13 +771,23 @@ export default function DynamicTemplateStructurePanel({
             {
               key: "rename",
               label: region ? "重命名区域" : layout ? "重命名容器" : "重命名槽位",
+              disabled: locked,
             },
-            { key: "up", icon: <ArrowUpOutlined />, label: "上移", disabled: siblingIndex <= 0 },
-            { key: "down", icon: <ArrowDownOutlined />, label: "下移", disabled: siblingIndex < 0 || siblingIndex >= siblings.length - 1 },
-            { key: "indent", label: "移入上一个容器", disabled: !canIndent },
-            { key: "outdent", label: "移出当前容器", disabled: !canOutdent },
-            { key: "duplicate", icon: <CopyOutlined />, label: region ? "复制区域" : layout ? "复制容器" : "复制槽位" },
-            { key: "lock", icon: isStructureLocked(node) ? <UnlockOutlined /> : <LockOutlined />, label: isStructureLocked(node) ? "解除锁定" : region ? "锁定区域" : layout ? "锁定容器" : "锁定槽位" },
+            { key: "up", icon: <ArrowUpOutlined />, label: "上移", disabled: locked || parentLocked || siblingIndex <= 0 },
+            { key: "down", icon: <ArrowDownOutlined />, label: "下移", disabled: locked || parentLocked || siblingIndex < 0 || siblingIndex >= siblings.length - 1 },
+            { key: "indent", label: "移入上一个容器", disabled: locked || parentLocked || !canIndent },
+            { key: "outdent", label: "移出当前容器", disabled: locked || parentLocked || !canOutdent },
+            { key: "duplicate", icon: <CopyOutlined />, label: region ? "复制区域" : layout ? "复制容器" : "复制槽位", disabled: locked || parentLocked },
+            {
+              key: "lock",
+              icon: selfLocked ? <UnlockOutlined /> : <LockOutlined />,
+              label: selfLocked
+                ? "解除锁定"
+                : locked
+                  ? "已由上级锁定"
+                  : region ? "锁定区域" : layout ? "锁定容器" : "锁定槽位",
+              disabled: locked && !selfLocked,
+            },
             {
               key: "toggle",
               icon: node.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />,
@@ -778,7 +796,7 @@ export default function DynamicTemplateStructurePanel({
                 : requiredSlotVisible
                   ? "隐藏（必填槽位不可用）"
                   : "隐藏",
-              disabled: requiredSlotVisible,
+              disabled: locked || requiredSlotVisible,
             },
             { type: "divider" },
             {
@@ -786,7 +804,7 @@ export default function DynamicTemplateStructurePanel({
               icon: <DeleteOutlined />,
               label: slot?.required ? `${deleteLabel}（必填槽位不可用）` : deleteLabel,
               danger: true,
-              disabled: slot?.required,
+              disabled: locked || parentLocked || slot?.required,
             },
           ],
           onClick: ({ key }) => {
@@ -927,14 +945,14 @@ export default function DynamicTemplateStructurePanel({
                       event.dataTransfer.setData("application/x-haichuan-template-region", region.nodeId);
                     }}
                     onDragOver={(event) => {
-                      if (region.contractBacked) return;
+                      if (region.contractBacked || region.locked) return;
                       if (!event.dataTransfer.types.includes("application/x-haichuan-template-region")) return;
                       event.preventDefault();
                       const rect = event.currentTarget.getBoundingClientRect();
                       setDragMarker({ nodeId: region.nodeId, placement: event.clientY < rect.top + rect.height / 2 ? "before" : "after" });
                     }}
                     onDrop={(event) => {
-                      if (region.contractBacked) return;
+                      if (region.contractBacked || region.locked) return;
                       event.preventDefault();
                       const draggedNodeId = event.dataTransfer.getData("application/x-haichuan-template-region");
                       if (draggedNodeId) performDrop(draggedNodeId, region.nodeId, dragMarker?.placement ?? "after");
@@ -961,6 +979,11 @@ export default function DynamicTemplateStructurePanel({
                   {region.entries.length ? region.entries.map((entry) => {
                     if (entry.entryType === "layout") {
                       const layoutSelected = selectedNodeId === entry.nodeId && !selectedContractRole;
+                      const layoutParentId = findDynamicTemplateParentId(definition, entry.nodeId);
+                      const layoutParentLocked = Boolean(
+                        layoutParentId
+                        && isDynamicTemplateStructureProtected(definition, layoutParentId),
+                      );
                       return (
                         <li
                           key={entry.key}
@@ -974,7 +997,7 @@ export default function DynamicTemplateStructurePanel({
                             aria-selected={layoutSelected}
                             aria-label={`${entry.label} 布局容器${entry.hidden ? " 已隐藏" : ""}${entry.locked ? " 已锁定" : ""}`}
                             style={{ paddingLeft: 5 + entry.depth * 12 }}
-                            draggable={!entry.locked}
+                            draggable={!entry.locked && !layoutParentLocked}
                             onClick={() => selectObject(entry.nodeId)}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
@@ -985,6 +1008,7 @@ export default function DynamicTemplateStructurePanel({
                               event.dataTransfer.setData("application/x-haichuan-template-node", entry.nodeId);
                             }}
                             onDragOver={(event) => {
+                              if (entry.locked || layoutParentLocked) return;
                               if (!event.dataTransfer.types.includes("application/x-haichuan-template-node")) return;
                               event.preventDefault();
                               const rect = event.currentTarget.getBoundingClientRect();
@@ -993,6 +1017,7 @@ export default function DynamicTemplateStructurePanel({
                               setDragMarker({ nodeId: entry.nodeId, placement });
                             }}
                             onDrop={(event) => {
+                              if (entry.locked || layoutParentLocked) return;
                               event.preventDefault();
                               const draggedNodeId = event.dataTransfer.getData("application/x-haichuan-template-node");
                               if (draggedNodeId) performDrop(draggedNodeId, entry.nodeId, dragMarker?.placement ?? "inside");
@@ -1018,7 +1043,10 @@ export default function DynamicTemplateStructurePanel({
                         && slot.responsiveOptions.some((option) => option.roleId === selectedContractRole.roleId)
                       : selectedNodeId === slot.nodeId && !selectedContractRole;
                     const parentId = findDynamicTemplateParentId(definition, slot.nodeId);
-                    const canReorder = !slot.virtual && Boolean(parentId);
+                    const canReorder = !slot.virtual
+                      && Boolean(parentId)
+                      && !slot.locked
+                      && !isDynamicTemplateStructureProtected(definition, parentId!);
                     return (
                       <li
                         key={slot.key}
