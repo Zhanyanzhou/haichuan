@@ -1,5 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
+import { promoteInstanceOverridesToTemplateDraft } from "../src/page-builder/dynamic-template-instance/promoteToTemplate";
+import {
+  DYNAMIC_TEMPLATE_BLOCK_TYPE,
+  DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
+  dynamicTemplateVersionKey,
+} from "../src/page-builder/dynamic-template-instance/types";
+import {
+  hasVisiblePrimaryStage,
+  isVisiblePrimaryStageBlockInDocument,
+} from "../src/page-builder/utils/primaryStagePolicy";
 
 const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
 
@@ -101,6 +111,43 @@ function definition(version: 1 | 2) {
     defaultContent: { slot_heading: `版本 ${version} 默认标题` },
   };
 }
+
+test("主首屏策略统一识别固定模板、动态母模板与隐藏状态", () => {
+  const primaryDefinition = definition(1);
+  primaryDefinition.metadata.visualRole = "primary-stage";
+  const resolvedKey = dynamicTemplateVersionKey(primaryDefinition.templateId, 1);
+  const dynamicPrimaryStage = {
+    type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
+    props: {
+      id: "dynamic-primary-stage",
+      templateId: primaryDefinition.templateId,
+      templateVersion: 1,
+      isVisible: true,
+    },
+  };
+  const dynamicDocument = {
+    content: [dynamicPrimaryStage],
+    [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: {
+      [resolvedKey]: {
+        templateId: primaryDefinition.templateId,
+        version: 1,
+        schemaVersion: primaryDefinition.schemaVersion,
+        definitionChecksum: "primary-stage-checksum",
+        definition: primaryDefinition,
+      },
+    },
+  };
+
+  expect(hasVisiblePrimaryStage(dynamicDocument)).toBe(true);
+  expect(isVisiblePrimaryStageBlockInDocument(dynamicPrimaryStage, dynamicDocument)).toBe(true);
+  expect(hasVisiblePrimaryStage({
+    ...dynamicDocument,
+    content: [{ ...dynamicPrimaryStage, props: { ...dynamicPrimaryStage.props, isVisible: false } }],
+  })).toBe(false);
+  expect(hasVisiblePrimaryStage({
+    content: [{ type: "首屏主视觉", props: { id: "fixed-primary-stage", isVisible: true } }],
+  })).toBe(true);
+});
 
 function lockedLayoutDefinition() {
   const result: any = definition(1);
@@ -247,7 +294,9 @@ function directBusinessDefinition() {
 
 function imageDefinition(version: 1 | 2) {
   const result: any = definition(version);
-  result.metadata.purpose = "品牌展示";
+  // 故意包含“行动”关键词，验证 Inspector 不会在没有行动槽位时误判任务。
+  result.metadata.purpose = "品牌行动引导";
+  result.metadata.category = "品牌展示";
   result.metadata.slotSummary = "1 个标题槽位，1 个图片槽位";
   result.nodes.node_container.childIds.push("node_image");
   result.nodes.node_image = {
@@ -335,7 +384,7 @@ function pageDocument(v1 = definition(1)) {
   };
 }
 
-async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; complex?: boolean; business?: boolean; directBusiness?: boolean; image?: boolean; duplicate?: boolean; legacyLayout?: boolean; lockedLayout?: boolean } = {}) {
+async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; complex?: boolean; business?: boolean; directBusiness?: boolean; image?: boolean; duplicate?: boolean; legacyLayout?: boolean; lockedLayout?: boolean; primaryStage?: boolean; templateConflict?: boolean; adminRole?: "SUPER_ADMIN" | "ADMIN" } = {}) {
   const sourceDefinition = options.image
     ? imageDefinition(1)
     : options.lockedLayout
@@ -347,6 +396,7 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
     : options.complex
       ? carouselDefinition()
       : definition(1);
+  if (options.primaryStage) sourceDefinition.metadata.visualRole = "primary-stage";
   const draft = pageDocument(sourceDefinition);
   if (options.legacyLayout) {
     draft.puckData.content[0].props.layoutOverridesByNodeId = {
@@ -373,8 +423,11 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
   }
   let savedPayload: Record<string, unknown> | null = null;
   let currentDocument = draft;
-  const templateWrites: Array<{ method: string; path: string }> = [];
+  let catalogReadCount = 0;
+  const templateWrites: Array<{ method: string; path: string; payload?: Record<string, unknown> }> = [];
+  let templateSavedPayload: Record<string, unknown> | null = null;
   const latestDefinition = options.image ? imageDefinition(2) : definition(2);
+  if (options.primaryStage) latestDefinition.metadata.visualRole = "primary-stage";
   const latestPublishedTemplate = {
     templateId: latestDefinition.templateId,
     name: latestDefinition.name,
@@ -392,11 +445,47 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
     versionNote: "调整桌面间距",
     publishedAt: "2026-08-28T13:00:00.000Z",
   };
+  const editableDraftDefinition = structuredClone(sourceDefinition);
+  if (options.templateConflict) {
+    editableDraftDefinition.slots.slot_heading.desktopRules.fontSize = { value: 32, unit: "px" };
+  }
+  let editableTemplate = {
+    id: 501,
+    templateId: sourceDefinition.templateId,
+    ownerId: null,
+    sourceType: "SYSTEM",
+    visibility: "STAFF",
+    status: "ACTIVE",
+    name: sourceDefinition.name,
+    category: sourceDefinition.metadata.category,
+    purpose: sourceDefinition.metadata.purpose,
+    layoutType: sourceDefinition.metadata.layoutType,
+    description: sourceDefinition.description,
+    slotSummary: sourceDefinition.metadata.slotSummary,
+    recommendedFor: sourceDefinition.metadata.recommendedFor,
+    tags: sourceDefinition.metadata.tags,
+    definitionSchemaVersion: 1,
+    publishedVersion: 1,
+    sourceReference: null,
+    archivedAt: null,
+    createdAt: "2026-08-28T10:00:00.000Z",
+    updatedAt: "2026-08-28T12:00:00.000Z",
+    draft: {
+      id: 601,
+      baseVersion: 1,
+      revision: 7,
+      definition: editableDraftDefinition,
+      definitionChecksum: "checksum-draft-7",
+      versionNote: null,
+      updatedAt: "2026-08-28T12:00:00.000Z",
+    },
+  };
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path.endsWith("/auth/profile")) return route.fallback();
     if (path.endsWith("/page-modules/dynamic-templates/catalog")) {
+      catalogReadCount += 1;
       if (options.failVersionCheck) return route.fulfill(json(null, 503));
       return route.fulfill(json({
         items: [{ kind: "published", template: latestPublishedTemplate }],
@@ -405,6 +494,26 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
     if (path.endsWith("/page-modules/dynamic-templates/published")) {
       if (options.failVersionCheck) return route.fulfill(json(null, 503));
       return route.fulfill(json([latestPublishedTemplate]));
+    }
+    if (path.endsWith(`/page-modules/dynamic-templates/${sourceDefinition.templateId}/draft`) && request.method() === "GET") {
+      return route.fulfill(json(editableTemplate));
+    }
+    if (path.endsWith(`/page-modules/dynamic-templates/${sourceDefinition.templateId}/draft`) && request.method() === "PATCH") {
+      templateSavedPayload = request.postDataJSON() as Record<string, unknown>;
+      templateWrites.push({ method: request.method(), path, payload: templateSavedPayload });
+      editableTemplate = {
+        ...editableTemplate,
+        updatedAt: "2026-08-28T12:02:00.000Z",
+        draft: {
+          ...editableTemplate.draft,
+          revision: editableTemplate.draft.revision + 1,
+          definition: structuredClone(templateSavedPayload.definition ?? editableTemplate.draft.definition),
+          definitionChecksum: "checksum-draft-8",
+          versionNote: typeof templateSavedPayload.versionNote === "string" ? templateSavedPayload.versionNote : null,
+          updatedAt: "2026-08-28T12:02:00.000Z",
+        },
+      } as typeof editableTemplate;
+      return route.fulfill(json(editableTemplate));
     }
     if (path.includes("/page-modules/dynamic-templates") && request.method() !== "GET") {
       templateWrites.push({ method: request.method(), path });
@@ -467,6 +576,7 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
   await installAdminSession(page, {
     username: "dynamic-template-page-test",
     realName: "动态模板页面测试管理员",
+    role: options.adminRole ?? "SUPER_ADMIN",
   });
   await page.goto("/admin/editor/products");
   await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
@@ -479,12 +589,69 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
     inspector,
     savedPayload: () => savedPayload,
     currentDocument: () => currentDocument,
+    templateSavedPayload: () => templateSavedPayload,
+    catalogReadCount: () => catalogReadCount,
     templateWrites,
   };
 }
 
 test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹具）", () => {
   test.skip(appMode === "mock", "development 模式拦截自有 API；不作为真实 API 写入证据");
+
+  test("页面设计覆盖只无损写入母模板设计字段，并对同字段草稿修改报冲突", () => {
+    const source = definition(1) as any;
+    const target = structuredClone(source);
+    const overrides = {
+      node_heading: {
+        desktop: {
+          offsetXPercent: 8,
+          offsetYPercent: -4,
+          widthPercent: 115,
+          zIndex: 3,
+          fontSizePx: 40,
+          textAlign: "center",
+          marginTopPx: 12,
+          marginBottomPx: 18,
+        },
+      },
+    } as any;
+
+    const promotion = promoteInstanceOverridesToTemplateDraft({
+      sourceDefinition: source,
+      targetDefinition: target,
+      layoutOverridesByNodeId: overrides,
+    });
+    expect(promotion.blockers).toEqual([]);
+    expect(promotion.conflicts).toEqual([]);
+    expect(promotion.promoted).toHaveLength(5);
+    expect(promotion.skipped.map((item) => item.field).sort()).toEqual([
+      "offsetXPercent",
+      "offsetYPercent",
+      "zIndex",
+    ]);
+    expect(promotion.definition.nodes.node_heading.responsive.desktop.width).toEqual({ value: 115, unit: "%" });
+    expect(promotion.definition.nodes.node_heading.responsive.desktop.margin).toMatchObject({
+      top: { value: 12, unit: "px" },
+      bottom: { value: 18, unit: "px" },
+    });
+    expect(promotion.definition.slots.slot_heading.desktopRules).toMatchObject({
+      fontSize: { value: 40, unit: "px" },
+      textAlign: "center",
+    });
+    expect(target.nodes.node_heading.responsive.desktop.width).toBe("fill");
+
+    const conflictingTarget = structuredClone(source);
+    conflictingTarget.slots.slot_heading.desktopRules.fontSize = { value: 32, unit: "px" };
+    const conflict = promoteInstanceOverridesToTemplateDraft({
+      sourceDefinition: source,
+      targetDefinition: conflictingTarget,
+      layoutOverridesByNodeId: { node_heading: { desktop: { fontSizePx: 40 } } },
+    });
+    expect(conflict.promoted).toEqual([]);
+    expect(conflict.conflicts).toHaveLength(1);
+    expect(conflict.conflicts[0]).toMatchObject({ nodeId: "node_heading", field: "fontSizePx" });
+    expect(conflictingTarget.slots.slot_heading.desktopRules.fontSize).toEqual({ value: 32, unit: "px" });
+  });
 
   test("页面装修按 Puck iframe 设备切换模板规则，不受后台宿主窗口宽度影响", async ({ page }) => {
     await prepareEditor(page);
@@ -505,6 +672,38 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
     await page.getByRole("button", { name: /桌面端布局/ }).click();
     await expect(renderer).toHaveAttribute("data-dynamic-template-device", "desktop");
+  });
+
+  test("浅色首屏在页面装修预览中使用透明深字页头", async ({ page }) => {
+    await prepareEditor(page);
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const frame = canvas.locator(".homepage-editor__storefront-frame");
+    const header = canvas.locator(".site-header");
+    const template = canvas.locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"]');
+
+    await expect(frame).toHaveAttribute("data-page-header-mode", "solid");
+    await expect(canvas.locator(".storefront-navigation")).toHaveAttribute("data-page-header-surface", "transparent");
+    await expect(header).toHaveClass(/is-transparent/);
+    await expect(header).not.toHaveClass(/is-overlay-light/);
+    await expect(header).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    const [headerBox, templateBox] = await Promise.all([
+      header.boundingBox(),
+      template.boundingBox(),
+    ]);
+    expect(headerBox).not.toBeNull();
+    expect(templateBox).not.toBeNull();
+    expect(templateBox!.y).toBeLessThan(headerBox!.y + headerBox!.height);
+  });
+
+  test("已有动态主首屏时模板库不再提供第二个，画布复制入口同步禁用", async ({ page }) => {
+    await prepareEditor(page, { primaryStage: true });
+    const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });
+    if (await expandLibrary.isVisible()) await expandLibrary.click();
+
+    await expect(
+      page.getByRole("button", { name: "添加内容展示｜版本升级版本2" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "首屏主舞台不能复制" })).toBeDisabled();
   });
 
   test("同一已发布母模板可连续拖入任意多个页面实例并保存", async ({ page }) => {
@@ -594,8 +793,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       offsetX: 18,
       offsetY: 18,
     });
-    expect(dragImageObservation?.text).toContain("内容展示｜版本升级");
-    expect(dragImageObservation?.text).toContain("点击添加");
+    expect(dragImageObservation?.text).toBe("内容展示｜版本升级");
     await dragTemplateToCanvas();
     await expect(layers).toHaveCount(3);
 
@@ -694,6 +892,10 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const heading = canvas.locator('[data-template-node-id="node_heading"]');
 
     await expect(renderer).toHaveAttribute("data-dynamic-template-editor-surface", "page-instance");
+    const propertyScope = inspector.getByRole("group", { name: "页面实例属性范围" });
+    await expect(propertyScope.getByRole("button", { name: "全部内容", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
+    await expect(inspector.getByRole("region", { name: "实例管理" })).toBeVisible();
     await expect(heading).not.toHaveAttribute("role", "group");
     await expect(heading).not.toHaveAttribute("tabindex", "0");
 
@@ -710,7 +912,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { legacyLayout: true });
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const heading = canvas.locator('[data-template-node-id="node_heading"]');
-    await inspector.getByRole("combobox", { name: "选择页面实例属性范围" }).selectOption("node_heading");
+    await inspector.getByRole("group", { name: "页面实例属性范围" })
+      .getByRole("button", { name: "标题", exact: true }).click();
     await expect(inspector).toContainText("当前选择：标题");
     await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
     await expect(heading).toHaveAttribute("style", /translate\(8%, -4%\)/);
@@ -752,8 +955,83 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
   });
 
+  test("页面来源清晰可见，安全设计覆盖经确认进入未保存母模板草稿且不夹带页面内容", async ({ page }) => {
+    const { inspector, templateSavedPayload, templateWrites } = await prepareEditor(page, { legacyLayout: true });
+    await expect(inspector.getByLabel("当前字段来源")).toContainText("模板基线 · 固定版本");
+    await expect(inspector.getByLabel("当前字段来源")).toContainText("页面内容覆盖 1");
+    await expect(inspector.getByLabel("当前字段来源")).toContainText("页面设计覆盖 8");
+    await expect(inspector.locator('[data-slot-id="slot_heading"]')).toContainText("页面内容");
+
+    const promote = inspector.getByRole("button", { name: "应用设计覆盖到母模板草稿" });
+    await expect(promote).toBeEnabled();
+    await promote.click();
+    expect(templateWrites).toEqual([]);
+
+    const confirm = page.getByRole("dialog", { name: "应用 5 项设计覆盖到母模板草稿？" });
+    await expect(confirm).toContainText("不会带入");
+    await expect(confirm).toContainText("不会自动保存、发布或更新其他页面");
+    await confirm.getByRole("button", { name: "打开模板草稿" }).click();
+
+    await expect(page.getByLabel("模板状态：有未保存修改")).toBeVisible();
+    await expect(page.getByRole("button", { name: "保存模板" })).toBeVisible();
+    expect(templateWrites).toEqual([]);
+
+    await page.getByRole("button", { name: "撤销" }).click();
+    await expect(page.getByLabel("模板状态：模板草稿已保存")).toBeVisible();
+    await page.getByRole("button", { name: "重做" }).click();
+    await expect(page.getByLabel("模板状态：有未保存修改")).toBeVisible();
+
+    await page.getByRole("button", { name: "保存模板" }).click();
+    await expect.poll(() => templateSavedPayload()).not.toBeNull();
+    const payload = templateSavedPayload() as {
+      expectedRevision: number;
+      definition: Record<string, any>;
+    };
+    expect(payload.expectedRevision).toBe(7);
+    expect(payload.definition.nodes.node_heading.responsive.desktop.width).toEqual({ value: 115, unit: "%" });
+    expect(payload.definition.nodes.node_heading.responsive.desktop.margin).toMatchObject({
+      top: { value: 12, unit: "px" },
+      bottom: { value: 18, unit: "px" },
+    });
+    expect(payload.definition.slots.slot_heading.desktopRules).toMatchObject({
+      fontSize: { value: 40, unit: "px" },
+      textAlign: "center",
+    });
+    expect(payload.definition.nodes.node_heading.responsive.desktop).not.toHaveProperty("placement");
+    expect(payload.definition).not.toHaveProperty("contentBySlotId");
+    expect(JSON.stringify(payload.definition)).not.toContain("页面实例填写内容");
+    expect(templateWrites).toHaveLength(1);
+    expect(templateWrites[0]).toMatchObject({
+      method: "PATCH",
+      path: "/api/page-modules/dynamic-templates/tpl_page_upgrade/draft",
+    });
+  });
+
+  test("页面设计覆盖回填只向超级管理员开放，并在母模板同字段变化时整次阻断", async ({ page }) => {
+    const admin = await prepareEditor(page, { legacyLayout: true, adminRole: "ADMIN" });
+    const restrictedAction = admin.inspector.getByRole("button", { name: "应用设计覆盖到母模板草稿" });
+    await expect(restrictedAction).toBeDisabled();
+    await expect(admin.inspector).toContainText("只有超级管理员可以把页面设计覆盖应用到母模板草稿");
+    expect(admin.templateWrites).toEqual([]);
+
+    await page.unrouteAll({ behavior: "wait" });
+    const superAdmin = await prepareEditor(page, { legacyLayout: true, templateConflict: true });
+    await superAdmin.inspector.getByRole("button", { name: "应用设计覆盖到母模板草稿" }).click();
+    const conflict = page.getByRole("dialog", { name: "未应用：母模板草稿存在安全冲突" });
+    await expect(conflict).toContainText("母模板草稿已修改同一字段");
+    await expect(conflict).toContainText("页面草稿未被修改");
+    expect(superAdmin.templateWrites).toEqual([]);
+    await conflict.getByRole("button", { name: "知道了" }).click();
+    await expect(page.getByRole("button", { name: "保存当前装修草稿" })).toBeVisible();
+  });
+
   test("普通图片槽位的适配、缩放和焦点按设备写入当前实例并在刷新后重放", async ({ page }) => {
     const { inspector, savedPayload } = await prepareEditor(page, { image: true });
+    await expect(inspector.getByText("优先填写 · 媒体与画面", { exact: true })).toBeVisible();
+    await expect(inspector.getByText("其他模板内容", { exact: false })).toHaveCount(0);
+    await expect(inspector.locator('[data-slot-id="slot_image"]')).toContainText("图片");
+    await expect(inspector.locator('[data-image-asset-guidance="slot_image"]'))
+      .toHaveText("建议素材：1200 × 900 像素 · 桌面端 4:3 · 移动端 4:5");
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const image = canvas.locator('[data-template-node-id="node_image"] img');
     await expect(image).toHaveCSS("object-fit", "cover");
@@ -797,7 +1075,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const { inspector, savedPayload } = await prepareEditor(page, { lockedLayout: true });
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const headingNode = canvas.locator('[data-template-node-id="node_heading"]');
-    await inspector.getByRole("combobox", { name: "选择页面实例属性范围" }).selectOption("node_heading");
+    await inspector.getByRole("group", { name: "页面实例属性范围" })
+      .getByRole("button", { name: "标题", exact: true }).click();
     await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
     await expect(inspector.getByRole("spinbutton", { name: "水平偏移" })).toHaveCount(0);
     await expect(inspector.getByRole("spinbutton", { name: "标题字号" })).toHaveCount(0);
@@ -848,14 +1127,22 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   });
 
   test("同模板多实例编辑保持隔离，并在预览、保存与刷新后重放同一结果", async ({ page }) => {
-    const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { duplicate: true });
+    const { inspector, savedPayload, templateWrites, catalogReadCount } = await prepareEditor(page, { duplicate: true });
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const headings = canvas.locator('[data-template-node-id="node_heading"]');
     await expect(headings).toHaveCount(2);
     await expect(headings.nth(0)).toContainText("页面实例填写内容");
     await expect(headings.nth(1)).toContainText("第二实例保持原值");
+    await expect.poll(catalogReadCount).toBeGreaterThan(0);
+    const initialCatalogReadCount = catalogReadCount();
+    const layerButtons = page.locator(".homepage-editor__layer-item .homepage-editor__layer-select");
+    await layerButtons.nth(1).click({ position: { x: 12, y: 18 } });
+    await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue("第二实例保持原值");
+    await expect.poll(catalogReadCount).toBe(initialCatalogReadCount);
+    await layerButtons.nth(0).click({ position: { x: 12, y: 18 } });
 
-    await inspector.getByRole("combobox", { name: "选择页面实例属性范围" }).selectOption("node_heading");
+    await inspector.getByRole("group", { name: "页面实例属性范围" })
+      .getByRole("button", { name: "标题", exact: true }).click();
     const firstInstanceOffset = inspector.getByRole("spinbutton", { name: "水平偏移" });
     await firstInstanceOffset.fill("6");
     await expect(headings.nth(0)).toHaveAttribute("style", /translate\(6%, 0%\)/);
@@ -869,7 +1156,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(headings.nth(1)).not.toHaveAttribute("style", /translate/);
 
     await page.getByRole("button", { name: "预览当前画布" }).click();
-    await expect(page.locator(".homepage-editor__preview-mode-bar")).toContainText("包含尚未保存的修改");
+    await expect(page.locator(".homepage-editor__preview-mode-bar")).toContainText("正在预览尚未保存的修改");
     await expect(canvas.getByText("只修改第一个页面实例", { exact: true })).toHaveCount(1);
     await expect(canvas.getByText("第二实例保持原值", { exact: true })).toHaveCount(1);
     await page.getByRole("button", { name: "退出当前画布预览" }).click();
@@ -936,11 +1223,11 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { directBusiness: true });
     await expect(inspector.getByText("优先填写 · 商品与分类", { exact: true })).toBeVisible();
     await expect(inspector.locator("fieldset:visible").first()).toHaveAttribute("data-slot-id", "slot_product");
-    const secondarySummary = inspector.getByText("其他模板内容（1）", { exact: true });
-    await expect(secondarySummary).toBeVisible();
-    await expect(inspector.getByRole("textbox", { name: "补充说明" })).toBeHidden();
-    await secondarySummary.click();
+    await expect(inspector.getByText("其他模板内容", { exact: false })).toHaveCount(0);
+    await expect(inspector.locator("fieldset:visible")).toHaveCount(5);
     await expect(inspector.getByRole("textbox", { name: "补充说明" })).toBeVisible();
+    await expect(inspector.locator('[data-slot-id="slot_product"]')).toContainText("商品");
+    await expect(inspector.locator('[data-slot-id="slot_action"]')).toContainText("按钮");
     await expect(inspector.locator('[data-slot-id="slot_heading"]')
       .getByRole("button", { name: "移除页面内容覆盖" })).toBeDisabled();
 

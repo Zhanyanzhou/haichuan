@@ -17,12 +17,9 @@ import { getModuleDisplayName } from "../editor-utils";
 import type { PuckProps } from "@/page-builder/types";
 import { getContentTemplateContract } from "@/page-builder/generated/contentTemplates.generated";
 import { resolveVisualNode } from "@/page-builder/runtime/visualLayout";
+import { getTemplateContractNodeLabel } from "@/page-builder/runtime/contentTemplateRolePresentation";
 import { useVisualEditorSession } from "@/page-builder/visual-editor/visualEditorSession";
 import WorkspaceTreeRow from "@/page-builder/workspace/WorkspaceTreeRow";
-import {
-  isPagePublishIssue,
-  type PublishValidationIssue,
-} from "@/page-builder/inspector/publishValidation";
 
 const INTERNAL_OBJECT_LABELS: Record<string, string> = {
   desktopImage: "桌面主图",
@@ -38,17 +35,53 @@ const INTERNAL_OBJECT_LABELS: Record<string, string> = {
   collection: "内容集合",
 };
 
+const LAYER_SUMMARY_KEYS = [
+  "title",
+  "heading",
+  "eyebrow",
+  "subtitle",
+  "description",
+  "text",
+] as const;
+
+function normalizeLayerSummary(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+  return normalized.length > 28 ? `${normalized.slice(0, 28)}…` : normalized;
+}
+
+function getLayerContentSummary(props: PuckProps) {
+  for (const key of LAYER_SUMMARY_KEYS) {
+    const summary = normalizeLayerSummary(props[key]);
+    if (summary) return summary;
+  }
+  const contentBySlotId = props.contentBySlotId;
+  if (!contentBySlotId || typeof contentBySlotId !== "object" || Array.isArray(contentBySlotId)) {
+    return null;
+  }
+  for (const value of Object.values(contentBySlotId)) {
+    const directSummary = normalizeLayerSummary(value);
+    if (directSummary) return directSummary;
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const record = value as Record<string, unknown>;
+    for (const key of ["title", "label", "alt", "description"] as const) {
+      const nestedSummary = normalizeLayerSummary(record[key]);
+      if (nestedSummary) return nestedSummary;
+    }
+  }
+  return null;
+}
+
 export default function LayerRail({
   navigationPreviewOpen,
   onToggleNavigationPreview,
   scrollSpyIndex,
-  publishIssues,
   readOnly = false,
 }: {
   navigationPreviewOpen: boolean;
   onToggleNavigationPreview: () => void;
   scrollSpyIndex: number | null;
-  publishIssues: PublishValidationIssue[];
   readOnly?: boolean;
 }) {
   const { message, modal } = AntdApp.useApp();
@@ -96,10 +129,6 @@ export default function LayerRail({
   const inspectorViewport = typeof currentViewport.width === "number" && currentViewport.width <= 767
     ? "mobile" as const
     : "desktop" as const;
-  const pageIssueCount = publishIssues.filter(
-    (issue) => issue.severity !== "info" && isPagePublishIssue(issue),
-  ).length;
-
   useEffect(() => {
     if (!showInternalLayers && wasShowingInternalLayersRef.current) {
       window.requestAnimationFrame(() => {
@@ -343,7 +372,7 @@ export default function LayerRail({
                 }}
               >
                 <span className="homepage-editor__layer-name">
-                  {INTERNAL_OBJECT_LABELS[object.roleId] ?? object.roleId}
+                  {INTERNAL_OBJECT_LABELS[object.roleId] ?? getTemplateContractNodeLabel(object.roleId)}
                 </span>
                 {!enabled ? <EyeInvisibleOutlined aria-label="当前隐藏" /> : null}
               </WorkspaceTreeRow>
@@ -374,14 +403,6 @@ export default function LayerRail({
             aria-label="预览页面导航"
           >
             <span>页面导航</span>
-            {pageIssueCount > 0 ? (
-              <span
-                className="homepage-editor__layer-issue-count"
-                aria-label={`页面设置有 ${pageIssueCount} 项发布问题`}
-              >
-                {pageIssueCount}
-              </span>
-            ) : null}
             <LockOutlined
               className="homepage-editor__layer-system-state"
               title="固定区域"
@@ -413,9 +434,7 @@ export default function LayerRail({
           const inView = scrollSpyIndex === index;
           const multiSelected = multiIndices.includes(index);
           const visible = item.props?.isVisible !== false;
-          const blockIssueCount = publishIssues.filter(
-            (issue) => issue.severity !== "info" && issue.blockId === String(item.props?.id ?? ""),
-          ).length;
+          const contentSummary = getLayerContentSummary(item.props);
           return (
             <WorkspaceTreeRow
               key={typeof item.props?.id === "string" || typeof item.props?.id === "number"
@@ -456,6 +475,7 @@ export default function LayerRail({
               buttonProps={{
                 onClick: (event) => handleLayerClick(index, event),
                 "aria-current": inView ? "location" : undefined,
+                "aria-label": numberedNames[index],
               }}
               actions={!readOnly && !item.props?.locked ? (
                 <div
@@ -485,17 +505,16 @@ export default function LayerRail({
                 </div>
               ) : null}
             >
-              <span className="homepage-editor__layer-name">
-                {numberedNames[index]}
-              </span>
-              {blockIssueCount > 0 ? (
-                <span
-                  className="homepage-editor__layer-issue-count"
-                  aria-label={`${numberedNames[index]}有 ${blockIssueCount} 项发布问题`}
-                >
-                  {blockIssueCount}
+              <span className="homepage-editor__layer-copy">
+                <span className="homepage-editor__layer-name">
+                  {numberedNames[index]}
                 </span>
-              ) : null}
+                {contentSummary ? (
+                  <small className="homepage-editor__layer-summary" aria-hidden="true">
+                    {contentSummary}
+                  </small>
+                ) : null}
+              </span>
               <HolderOutlined
                 className="homepage-editor__layer-grip"
                 title="拖动调整顺序"

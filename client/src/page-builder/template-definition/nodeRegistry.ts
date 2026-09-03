@@ -134,6 +134,12 @@ export function createDynamicTemplateSlotDefinition(
   label: string,
   key: string,
 ): DynamicTemplateSlotDefinition {
+  const defaultDesktopRules = type === "image"
+    ? { aspectRatio: "16:9", objectFit: "cover" as const, objectPosition: "center center" }
+    : {};
+  const defaultMobileRules = type === "image"
+    ? { aspectRatio: "4:5", objectFit: "cover" as const, objectPosition: "center center" }
+    : {};
   return {
     slotId: createDynamicTemplateStableId("slot"),
     key,
@@ -143,8 +149,8 @@ export function createDynamicTemplateSlotDefinition(
     editable: true,
     hideable: true,
     validation: {},
-    desktopRules: {},
-    mobileRules: {},
+    desktopRules: defaultDesktopRules,
+    mobileRules: defaultMobileRules,
   };
 }
 

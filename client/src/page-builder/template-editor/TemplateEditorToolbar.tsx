@@ -3,8 +3,9 @@ import {
   DesktopOutlined,
   DownloadOutlined,
   HistoryOutlined,
-  InboxOutlined,
+  DeleteOutlined,
   MobileOutlined,
+  RollbackOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
@@ -34,6 +35,7 @@ export default function TemplateEditorToolbar({
   onImport,
   onOpenVersionHistory,
   onArchive,
+  onDiscard,
   lifecycleBusy = false,
   onRequestReturn,
 }: {
@@ -46,6 +48,7 @@ export default function TemplateEditorToolbar({
   onImport?: () => void;
   onOpenVersionHistory?: () => void;
   onArchive?: () => void;
+  onDiscard?: () => void;
   lifecycleBusy?: boolean;
   onRequestReturn: () => void;
 }) {
@@ -109,7 +112,10 @@ export default function TemplateEditorToolbar({
         || message.workspace !== "template"
         || !state.sessionId
         || message.templateSessionId !== state.sessionId
-        || message.blockId !== `template-editor:${state.sessionId}`
+        || (
+          message.blockId !== `template-editor:${state.sessionId}`
+          && !message.blockId.startsWith(`template-editor:${state.sessionId}:`)
+        )
       ) return;
       navigateHistory(message.direction);
     };
@@ -123,7 +129,30 @@ export default function TemplateEditorToolbar({
   const mobilePreviewWidth = draft?.definition.metadata.previewMobileWidth
     ?? RESPONSIVE_CANVAS.mobile.width;
   const saving = saveStatus === "saving";
+  const saveFailed = saveStatus === "error";
+  const conflicted = saveStatus === "conflict";
+  const publishFailed = saveStatus === "publish-error";
+  const publishSucceeded = saveStatus === "publish-success";
   const busy = saving || publishing || lifecycleBusy;
+  const needsInitialSave = Boolean(
+    draft
+    && !localOnly
+    && draft.sourceType === "local"
+    && saveStatus !== "success",
+  );
+  const saveDisabledReason = saving
+    ? "正在保存模板"
+    : publishing
+      ? "正在发布模板"
+      : lifecycleBusy
+        ? "正在更新模板状态"
+        : !draft
+          ? "请先从模板目录选择一个模板"
+          : !draftName.trim()
+            ? "请先填写模板名称"
+            : !dirty && !needsInitialSave
+              ? "当前模板没有未保存修改"
+              : null;
   const compactActionItems = [
     ...(draft
       ? [{
@@ -139,6 +168,15 @@ export default function TemplateEditorToolbar({
           icon: <HistoryOutlined />,
           label: "版本历史",
           onClick: onOpenVersionHistory,
+        }]
+      : []),
+    ...(draft && dirty && onDiscard
+      ? [{
+          key: "discard",
+          icon: <RollbackOutlined />,
+          label: "放弃未保存修改",
+          danger: true,
+          onClick: onDiscard,
         }]
       : []),
     ...(draft && onExport
@@ -160,8 +198,8 @@ export default function TemplateEditorToolbar({
     ...(draft && onArchive
       ? [{
           key: "archive",
-          icon: <InboxOutlined />,
-          label: "归档模板",
+          icon: <DeleteOutlined />,
+          label: "移入回收站",
           danger: true,
           onClick: onArchive,
         }]
@@ -175,6 +213,8 @@ export default function TemplateEditorToolbar({
     ? "正在发布模板"
     : saving
       ? "正在保存模板"
+      : conflicted
+        ? "当前模板存在保存冲突，请先将修改另存为新模板"
       : !draft
     ? "请先从模板目录选择一个模板"
     : !onPublish
@@ -182,6 +222,14 @@ export default function TemplateEditorToolbar({
         : !draftName.trim()
           ? "请先填写模板名称"
           : null;
+  const publishWillSaveFirst = Boolean(
+    draft
+    && (
+      dirty
+      || draft.sourceType === "local"
+      || draft.requiresContractNormalization === true
+    ),
+  );
 
   const toolbar = (
     <header className="homepage-editor__toolbar template-editor__toolbar">
@@ -216,26 +264,71 @@ export default function TemplateEditorToolbar({
       <WorkspaceToolbarActions
         leading={(
           <WorkspaceStatusBadge
-            mode={busy ? "saving" : dirty ? "dirty" : draft ? "clean" : "readonly"}
+            mode={busy
+              ? "saving"
+              : saveFailed || publishFailed
+                ? "error"
+                : conflicted
+                  ? "conflict"
+                : dirty
+                  ? "dirty"
+                  : needsInitialSave
+                    ? "pending"
+                    : draft
+                      ? "clean"
+                      : "readonly"}
             label={lifecycleBusy
               ? "正在更新模板状态"
               : publishing
               ? "正在发布模板"
               : saving
               ? "正在保存模板"
+              : saveFailed
+                ? "保存失败"
+                : conflicted
+                  ? "保存冲突"
+                : publishFailed
+                  ? "发布失败"
               : dirty
                 ? "有未保存修改"
+                : needsInitialSave
+                  ? "尚未建立模板草稿"
+                  : publishSucceeded
+                    ? "已发布新版本"
                 : draft
-                  ? (localOnly ? "本机测试草稿已保存" : "模板草稿已保存")
+                  ? (localOnly ? "本机草稿已保存" : "模板草稿已保存")
                   : "未选择模板"}
+            detail={saveFailed
+              ? "修改仍在 · 可重试"
+              : conflicted
+                ? "修改仍在 · 请另存副本"
+              : publishFailed
+                ? "草稿仍在 · 可重试"
+                : publishSucceeded
+                  ? "已有页面保持原版本"
+                  : localOnly && draft
+                    ? "发布不可用"
+                    : needsInitialSave
+                      ? "首次保存后可管理"
+                      : null}
             ariaLabel={lifecycleBusy
               ? "模板状态：正在更新模板状态"
               : publishing
               ? "模板状态：正在发布模板"
               : saving
               ? "模板状态：正在保存模板"
+              : saveFailed
+                ? "模板状态：保存失败，修改仍在，可以重试"
+                : conflicted
+                  ? "模板状态：保存冲突，修改仍在，请另存为新模板"
+                : publishFailed
+                  ? "模板状态：发布失败，草稿仍在，可以重试"
               : dirty
                 ? "模板状态：有未保存修改"
+                : needsInitialSave
+                  ? "模板状态：尚未建立模板草稿"
+                  : publishSucceeded
+                    ? "模板状态：已发布新版本，已有页面保持原版本"
                 : draft
                   ? (localOnly ? "模板状态：本机测试草稿已保存" : "模板状态：模板草稿已保存")
                   : "模板状态：未选择模板"}
@@ -256,16 +349,26 @@ export default function TemplateEditorToolbar({
           title: previewMode ? "退出当前模板预览（Esc）" : "预览当前模板草稿，不会保存或发布",
         }}
         save={{
-          label: localOnly ? "保存本机草稿" : "保存模板",
+          label: conflicted ? "另存副本" : saveFailed ? "重试保存" : localOnly ? "保存本机草稿" : "保存模板",
           loading: saving,
-          disabled: !draft || !draftName.trim() || publishing || lifecycleBusy,
-          onClick: onSave,
-          ariaLabel: localOnly ? "保存本机测试草稿" : "保存模板",
-          title: !draft
-            ? "请先从模板目录选择一个模板"
+          disabled: conflicted ? false : Boolean(saveDisabledReason),
+          onClick: conflicted ? onOpenSaveCopy : onSave,
+          ariaLabel: conflicted
+            ? "另存当前冲突修改为新模板"
+            : saveFailed
+            ? "重试保存模板草稿"
             : localOnly
-                ? "只保存到当前浏览器本机存储，不写入服务端模板"
-                : "保存当前模板草稿，不会自动发布页面",
+              ? "保存本机测试草稿"
+              : "保存模板",
+          title: conflicted
+            ? "服务端已有其他人的新修改；另存为新模板可完整保留当前工作"
+            : saveDisabledReason ?? (saveFailed
+              ? "重新保存当前模板草稿；失败不会丢失修改"
+              : needsInitialSave
+                ? "首次保存后建立可管理的模板草稿，不会自动发布页面"
+                : localOnly
+                  ? "只保存到当前浏览器本机存储，不写入服务端模板"
+                  : "保存当前模板草稿，不会自动发布页面"),
         }}
         more={{
           items: menuItems,
@@ -275,14 +378,23 @@ export default function TemplateEditorToolbar({
           title: compactActionItems.length > 0 ? "更多模板操作" : "当前模板没有其他可用操作",
         }}
         publish={{
-          label: "发布",
+          label: localOnly && !onPublish ? "不可发布" : publishFailed ? "重试发布" : "发布",
           loading: publishing,
           disabled: Boolean(publishDisabledReason),
           onClick: () => onPublish?.(),
           ariaLabel: publishDisabledReason
             ? `发布模板新版本（${publishDisabledReason}）`
-            : "发布模板新版本",
-          title: publishDisabledReason ?? "发布当前模板的新版本",
+            : publishFailed
+              ? "重试发布模板新版本（当前草稿仍保留）"
+            : publishWillSaveFirst
+              ? "发布模板新版本（将先保存当前模板草稿）"
+              : "发布模板新版本",
+          title: publishDisabledReason
+            ?? (publishFailed
+              ? "重新发布当前模板的新版本；失败不会丢失模板草稿"
+              : publishWillSaveFirst
+                ? "将先保存当前模板草稿，再发布新版本；现有页面仍保持原版本"
+                : "发布当前模板的新版本；现有页面仍保持原版本"),
         }}
       />
     </header>

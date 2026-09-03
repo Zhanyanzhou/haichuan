@@ -8,7 +8,7 @@ import { Roles } from "../../common/decorators/roles.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { requirePublishedPublicContentLocale } from "../../common/content-locale";
-import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
+import { AuditLogQueryDto } from "./dto/audit-log-query.dto";
 import {
   isCustomerCommerceEnabled,
   isPartnerApplicationsWriteEnabled,
@@ -66,7 +66,7 @@ export class SettingsController {
 
   @ApiOperation({ summary: "获取系统日志" })
   @Get("logs")
-  getLogs(@Query() query: BoundedListQueryDto) {
+  getLogs(@Query() query: AuditLogQueryDto) {
     return this.settingsService.getLogs(query);
   }
 

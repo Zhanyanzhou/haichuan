@@ -2,6 +2,7 @@
 # 正版 Codex（OpenAI 模型）工具面放开，配全套 MCP。
 # 注意：Windows 上 stdio 命令需用 cmd /c 包装，否则 npx 无法直接 spawn。
 
+model_verbosity = "medium"
 [mcp_servers.playwright]
 command = "cmd"
 args = ["/c", "npx", "-y", "@playwright/mcp@0.0.79"]

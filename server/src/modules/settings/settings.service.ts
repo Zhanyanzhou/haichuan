@@ -359,10 +359,21 @@ export class SettingsService {
     }
   }
 
-  async getLogs(params: { page?: number; pageSize?: number; keyword?: string; module?: string }) {
-    const { page = 1, pageSize = 50, keyword, module } = params;
+  async getLogs(params: {
+    page?: number;
+    pageSize?: number;
+    keyword?: string;
+    module?: string;
+    action?: string;
+  }) {
+    const page = Math.max(1, Math.trunc(Number(params.page) || 1));
+    const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(params.pageSize) || 50)));
+    const keyword = params.keyword?.trim();
+    const module = params.module?.trim();
+    const action = params.action?.trim();
     const where: Prisma.OperationLogWhereInput = {};
     if (module) where.module = module;
+    if (action) where.action = action;
     if (keyword) {
       where.OR = [
         { action: { contains: keyword } },
@@ -374,13 +385,13 @@ export class SettingsService {
     const [list, total] = await Promise.all([
       this.prisma.operationLog.findMany({
         where,
-        skip: (+page - 1) * +pageSize,
-        take: +pageSize,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         orderBy: { createdAt: 'desc' },
         include: { user: { select: { username: true, realName: true } } },
       }),
       this.prisma.operationLog.count({ where }),
     ]);
-    return { list, total, page: +page, pageSize: +pageSize };
+    return { list, total, page, pageSize };
   }
 }

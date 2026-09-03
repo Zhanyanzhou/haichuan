@@ -42,6 +42,34 @@ export function findDynamicTemplateInsertionParentId(
   return root && canNestDynamicTemplateNode(root.type, childType) ? root.nodeId : null;
 }
 
+export function getDynamicTemplateRegionDisplayName(
+  definition: TemplateDefinitionV2,
+  nodeId: string,
+  semanticLabel?: string,
+): string {
+  const node = definition.nodes[nodeId];
+  const root = definition.nodes[definition.rootNodeId];
+  const regionIndex = Math.max(0, root?.childIds.indexOf(nodeId) ?? 0);
+  const fallback = `内容区域 ${regionIndex + 1}`;
+  const source = node?.name.trim() ?? "";
+  const numberedRegion = source.match(/^内容区域\s*0*(\d+)(?:区)?$/);
+  const semanticRegion = semanticLabel
+    ? /(?:区|区域)$/.test(semanticLabel)
+      ? semanticLabel
+      : `${semanticLabel.replace(/(?:内容)?容器$/, "")}区域`
+    : undefined;
+
+  if (numberedRegion) return `内容区域 ${Number(numberedRegion[1])}`;
+  if (source === "响应式内容容器" || source === "响应式区") return "响应式区域";
+  if (!source || source === "区" || source === "容器" || source === "Container" || source === "模板根节点") {
+    return semanticRegion ?? fallback;
+  }
+  if (source === "内容容器") {
+    return semanticRegion ?? fallback;
+  }
+  return source;
+}
+
 export function getDynamicTemplateAllowedParentIds(
   definition: TemplateDefinitionV2,
   nodeId: string,

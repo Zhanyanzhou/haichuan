@@ -25,8 +25,8 @@ export function definitionFixture(): TemplateDefinitionV2 {
       layoutType: "纵向内容",
       slotSummary: "1 个标题槽位",
       recommendedFor: ["home"],
-      desktopRatio: "16:9",
-      mobileRatio: "4:5",
+      desktopRatio: "auto",
+      mobileRatio: "auto",
       previewDesktopWidth: 1200,
       previewMobileWidth: 390,
       minViewportWidth: 320,
@@ -94,6 +94,6 @@ export function definitionFixture(): TemplateDefinitionV2 {
         mobileRules: { fontRole: "heading", maxLines: 3 },
       },
     },
-    defaultContent: { slot_heading: "光，沿线而生" },
+    defaultContent: {},
   };
 }

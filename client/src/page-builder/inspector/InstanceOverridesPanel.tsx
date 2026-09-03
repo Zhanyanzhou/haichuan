@@ -21,6 +21,7 @@ import {
   toVisualOverridesV2,
   type VisualViewport,
 } from "../runtime/visualLayout";
+import { getTemplateContractNodeLabel } from "../runtime/contentTemplateRolePresentation";
 import InspectorDisclosure from "./InspectorDisclosure";
 import type { PuckProps } from "../types";
 import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
@@ -136,6 +137,9 @@ const ROLE_LABELS: Record<string, string> = {
   buttonText: "主行动文字",
 };
 
+const getRoleLabel = (roleId: string) =>
+  ROLE_LABELS[roleId] ?? getTemplateContractNodeLabel(roleId);
+
 const NINE_POINT_POSITIONS = [
   { x: 0, y: 0, label: "左上" },
   { x: 50, y: 0, label: "顶部居中" },
@@ -150,6 +154,10 @@ const NINE_POINT_POSITIONS = [
 
 function isRecord(value: unknown): value is OverrideRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isVisualNodeEnabled(value: unknown) {
+  return !isRecord(value) || value.enabled !== false;
 }
 
 function supportsLayoutOnViewport(
@@ -316,11 +324,9 @@ export default function InstanceOverridesPanel({
       contract.defaultGeometryByViewport[viewport].frameAspectRatio,
   );
   const nodes = isRecord(overrides.nodes) ? overrides.nodes : {};
-  const visibleTextRoleCount = visibilityRoles.filter((role) => {
-    const rawNode = nodes[role.roleId];
-    const node: OverrideRecord = isRecord(rawNode) ? rawNode : {};
-    return node.enabled !== false;
-  }).length;
+  const visibleTextRoleCount = visibilityRoles.filter((role) =>
+    isVisualNodeEnabled(nodes[role.roleId]),
+  ).length;
   const allTextVisible = visibilityRoles.length > 0
     && visibleTextRoleCount === visibilityRoles.length;
   const someTextVisible = visibleTextRoleCount > 0 && !allTextVisible;
@@ -839,11 +845,11 @@ export default function InstanceOverridesPanel({
   const resetLabel = showSurface
     ? "恢复模块样式默认"
     : showAppearance && selectedNodeId
-      ? `恢复${ROLE_LABELS[selectedNodeId] ?? selectedNodeId}外观默认`
+      ? `恢复${getRoleLabel(selectedNodeId)}外观默认`
       : resetAllDesign
         ? "恢复整个模块设计默认"
       : selectedNodeId
-        ? `恢复${ROLE_LABELS[selectedNodeId] ?? selectedNodeId}${deviceLabel}设计默认`
+        ? `恢复${getRoleLabel(selectedNodeId)}${deviceLabel}设计默认`
         : "恢复整个模块设计默认";
 
   return (
@@ -964,7 +970,7 @@ export default function InstanceOverridesPanel({
           </div>
           {capabilities.frameRatioRange ||
           (viewport === "mobile" && frameAspectRatios.mobile !== undefined) ? (
-            <InspectorDisclosure label="高级设置">
+            <InspectorDisclosure label="自定义比例与移动端覆盖">
               <div className="homepage-editor__advanced-settings-grid">
                 {capabilities.frameRatioRange ? (
                   <CustomFrameRatioInput
@@ -1034,7 +1040,7 @@ export default function InstanceOverridesPanel({
           data-selected-object="true"
           data-object-appearance={selectedNodeId}
         >
-          <legend>{ROLE_LABELS[selectedNodeId] ?? selectedNodeId}外观</legend>
+          <legend>{getRoleLabel(selectedNodeId)}外观</legend>
           {renderVisualChoices(
             "对象圆角",
             ["nodes", selectedNodeId, "appearance", "radiusPreset"],
@@ -1063,9 +1069,9 @@ export default function InstanceOverridesPanel({
             className="homepage-editor__instance-group"
             data-selected-object={selectedNodeId ? "true" : "false"}
           >
-            <legend>{ROLE_LABELS[slot.roleId] ?? slot.roleId}</legend>
+            <legend>{getRoleLabel(slot.roleId)}</legend>
             {!contentMediaOnly && slot.ratioPresets?.length ? (
-              <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${ROLE_LABELS[slot.roleId] ?? slot.roleId}比例`} data-inspector-control="ratio">
+              <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${getRoleLabel(slot.roleId)}比例`} data-inspector-control="ratio">
                 <span>图片比例</span>
                 <div className="homepage-editor__ratio-cards">
                   <button type="button" className={!visualNode.ratio ? "is-active" : ""} aria-pressed={!visualNode.ratio} onClick={() => apply(["nodes", slot.roleId, "ratio"], undefined)}>
@@ -1092,7 +1098,7 @@ export default function InstanceOverridesPanel({
                 className="homepage-editor__visual-preset-group"
                 role="group"
                 data-inspector-control="focus"
-                aria-label={`${ROLE_LABELS[slot.roleId] ?? slot.roleId}画面焦点（${viewport === "mobile" ? "移动端" : "桌面端"}）`}
+                aria-label={`${getRoleLabel(slot.roleId)}画面焦点（${viewport === "mobile" ? "移动端" : "桌面端"}）`}
               >
                 <span>画面焦点</span>
                 <div className="homepage-editor__nine-point-grid">
@@ -1251,12 +1257,7 @@ export default function InstanceOverridesPanel({
         const typography = isRecord(value.typography) ? value.typography : {};
         const visualNode = resolveVisualNode(props, role.roleId, viewport);
         const editableTextObject = getContentTemplateEditableObject(moduleType, role.roleId);
-        const hasRenderableText = editableTextObject?.contentFieldKeys.some((fieldKey) =>
-          typeof props[fieldKey] === "string" && props[fieldKey].trim().length > 0,
-        ) ?? false;
-        const enabled = typeof value.enabled === "boolean"
-          ? value.enabled
-          : hasRenderableText;
+        const enabled = isVisualNodeEnabled(value);
         const usesManagedFlow = !supportsLayoutOnViewport(editableTextObject, viewport);
         const otherViewport = viewport === "mobile" ? "desktop" : "mobile";
         const supportsLayoutOnOtherViewport = supportsLayoutOnViewport(
@@ -1321,14 +1322,17 @@ export default function InstanceOverridesPanel({
             className="homepage-editor__instance-group"
             data-selected-object={selectedNodeId ? "true" : "false"}
           >
-            <legend>{ROLE_LABELS[role.roleId] ?? role.roleId}</legend>
+            <legend>{getRoleLabel(role.roleId)}</legend>
             <label className="homepage-editor__instance-toggle">
               <input
                 type="checkbox"
                 checked={enabled}
                 onChange={(event) => apply(
                   ["nodes", role.roleId, "enabled"],
-                  event.target.checked ? undefined : false,
+                  // 空内容在编辑态仍需要一个可配置的模板槽位。开启时必须
+                  // 显式保存 true；若清成 undefined，下一次渲染会因没有
+                  // 真实文案而再次判为未开启，表现为开关无法勾选。
+                  event.target.checked,
                 )}
               />
               <span>显示这段文字</span>
@@ -1336,7 +1340,7 @@ export default function InstanceOverridesPanel({
             {enabled ? (
               <>
                 {!usesManagedFlow && role.widthPresets?.length ? (
-                  <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${ROLE_LABELS[role.roleId] ?? role.roleId}宽度`}>
+                  <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${getRoleLabel(role.roleId)}宽度`}>
                     <span>文字宽度</span>
                     <div className="homepage-editor__text-width-cards">
                       {role.widthPresets.map((widthPreset) => {
@@ -1368,7 +1372,7 @@ export default function InstanceOverridesPanel({
                   className="homepage-editor__visual-preset-group"
                   role="group"
                   data-inspector-control="position"
-                  aria-label={`${ROLE_LABELS[role.roleId] ?? role.roleId}快速定位（${viewport === "mobile" ? "移动端" : "桌面端"}）`}
+                  aria-label={`${getRoleLabel(role.roleId)}快速定位（${viewport === "mobile" ? "移动端" : "桌面端"}）`}
                 >
                   <span>快速定位</span>
                   <div className="homepage-editor__nine-point-grid">
@@ -1439,7 +1443,7 @@ export default function InstanceOverridesPanel({
                   </div>
                 )}
                 {role.colorTokens?.length ? (
-                  <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${ROLE_LABELS[role.roleId] ?? role.roleId}颜色`}>
+                  <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${getRoleLabel(role.roleId)}颜色`}>
                     <span>文字颜色</span>
                     <div className="homepage-editor__color-cards">
                       {role.colorTokens.map((token) => (
@@ -1459,10 +1463,10 @@ export default function InstanceOverridesPanel({
                 ) : null}
                 {!usesManagedFlow ? renderSelectedNodeGeometry(role.roleId) : null}
                 {role.placementPresets?.length || role.maxLines || role.requiresSafeBand ? (
-                  <InspectorDisclosure label="高级设置">
+                  <InspectorDisclosure label="精确位置与文字限制">
                     <div className="homepage-editor__advanced-settings-grid">
                       {!usesManagedFlow && role.placementPresets?.length ? (
-                        <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${ROLE_LABELS[role.roleId] ?? role.roleId}位置`}>
+                        <div className="homepage-editor__visual-preset-group" role="group" aria-label={`${getRoleLabel(role.roleId)}位置`}>
                           <span>精确位置</span>
                           <div className="homepage-editor__position-cards">
                             {role.placementPresets.map((position) => (

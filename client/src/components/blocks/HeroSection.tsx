@@ -19,6 +19,18 @@ interface Props {
   module?: PageModule;
   editMode?: boolean;
   headingLevel?: 1 | 2;
+  priority?: boolean;
+}
+
+const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
+  "/images/system/product-placeholder.svg",
+  "/images/system/launch-short-page-desktop.svg",
+  "/images/system/launch-short-page-mobile.svg",
+]);
+
+function publicHeroMedia(value: unknown, editMode: boolean | undefined) {
+  const source = typeof value === "string" ? value.trim() : "";
+  return !editMode && NON_PUBLISHABLE_SYSTEM_MEDIA.has(source) ? "" : source;
 }
 
 /**
@@ -28,16 +40,20 @@ export default function HeroSection({
   module,
   editMode,
   headingLevel = 1,
+  priority = false,
 }: Props) {
   const rm = useReducedMotion();
+  const motionDisabled = Boolean(editMode || rm);
 
   const c = module?.content;
   const s = module?.styleConfig;
   const l = module?.layoutConfig;
 
   // 未上传某一端时复用另一端已配置图片，不再引入活动素材兜底。
-  const desktopImg = c?.desktopImage || c?.mobileImage || "";
-  const mobileImg = c?.mobileImage || c?.desktopImage || "";
+  const configuredDesktopImg = publicHeroMedia(c?.desktopImage, editMode);
+  const configuredMobileImg = publicHeroMedia(c?.mobileImage, editMode);
+  const desktopImg = configuredDesktopImg || configuredMobileImg;
+  const mobileImg = configuredMobileImg || configuredDesktopImg;
   const imageSourceKey = `${desktopImg}\u0000${mobileImg}`;
   const [failedImageSourceKey, setFailedImageSourceKey] = useState<string | null>(null);
   const imageFailed = failedImageSourceKey === imageSourceKey;
@@ -116,7 +132,8 @@ export default function HeroSection({
             <img
               src={desktopImg}
               alt={c?.altText || title}
-              loading="eager"
+              loading={editMode || priority ? "eager" : "lazy"}
+              {...(priority ? { fetchpriority: "high" } : {})}
               decoding="async"
               onLoad={(event) => {
                 const renderable = hasRenderableImageDimensions(event.currentTarget);
@@ -183,7 +200,7 @@ export default function HeroSection({
                   fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
                   opacity: 1,
                   transform: "none",
-                  animation: rm
+                  animation: motionDisabled
                     ? "none"
                     : "hcHeroFadeUp 0.7s 0.3s cubic-bezier(0.22,1,0.36,1) both",
                 }}
@@ -201,7 +218,7 @@ export default function HeroSection({
                   fontSize: "var(--hc-hero-title-size, clamp(42px, 4.4vw, 76px))",
                   opacity: 1,
                   transform: "none",
-                  animation: rm
+                  animation: motionDisabled
                     ? "none"
                     : "hcHeroFadeUp 0.7s 0.28s cubic-bezier(0.22,1,0.36,1) both",
                 }}
@@ -219,7 +236,7 @@ export default function HeroSection({
                   fontStyle: "italic",
                   opacity: 1,
                   transform: "none",
-                  animation: rm
+                  animation: motionDisabled
                     ? "none"
                     : "hcHeroFadeUp 0.7s 0.34s cubic-bezier(0.22,1,0.36,1) both",
                 }}
@@ -249,7 +266,7 @@ export default function HeroSection({
                   fontFamily: `var(--hc-font-sans, ${FONT_SANS})`,
                   opacity: 1,
                   transform: "none",
-                  animation: rm
+                  animation: motionDisabled
                     ? "none"
                     : "hcHeroFadeUp 0.7s 0.38s cubic-bezier(0.22,1,0.36,1) both",
                 }}

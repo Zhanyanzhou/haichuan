@@ -1,4 +1,14 @@
 import { useEffect, useRef, useState, type CSSProperties, type ElementType, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import {
+  AlignCenterOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  EyeInvisibleOutlined,
+  SwapOutlined,
+  VerticalAlignBottomOutlined,
+  VerticalAlignMiddleOutlined,
+  VerticalAlignTopOutlined,
+} from "@ant-design/icons";
 import type {
   TemplateDefinitionV2,
   DynamicTemplateLength,
@@ -30,14 +40,17 @@ export interface DynamicTemplateRendererProps {
    * 可以注册内部节点选择和直接布局手势；未声明时按无内部交互处理。
    */
   editorSurface?: "page-instance" | "template-definition";
+  /** 当前模板编辑会话；仅用于给隔离画布内的合同槽位建立可写回身份。 */
+  templateEditorSessionId?: string;
   selectedNodeId?: string | null;
   selectedContractRole?: { nodeId: string; roleId: string } | null;
   onSelectNode?: (nodeId: string) => void;
   onSelectContractRole?: (nodeId: string, roleId: string) => void;
-  onNodeAction?: (nodeId: string, action: "duplicate" | "hide" | "delete" | "forward" | "backward") => void;
-  onRequestMediaReplace?: (nodeId: string) => void;
-  editorContentLayer?: "default" | "preview";
-  onSlotContentCommit?: (slotId: string, content: unknown) => void;
+  onNodeAction?: (
+    nodeId: string,
+    action: "duplicate" | "hide" | "delete" | "forward" | "backward"
+      | "align-horizontal" | "align-vertical" | "copy-responsive",
+  ) => void;
   /** 公开页主舞台可把首个可见标题槽位提升为页面唯一 h1。 */
   primaryHeadingLevel?: 1 | 2;
   layoutEditMode?: boolean;
@@ -80,6 +93,12 @@ function spacingToCss(
     .join(" ");
 }
 
+function ratioToCss(ratio: string | undefined): string | undefined {
+  return ratio && /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(ratio)
+    ? ratio.replace(":", " / ")
+    : undefined;
+}
+
 function rulesToStyle(
   node: DynamicTemplateRenderPlanNode,
   previewOverride?: TemplateInstanceLayoutOverride,
@@ -87,6 +106,7 @@ function rulesToStyle(
   parentFree = false,
 ): CSSProperties {
   const { rules } = node;
+  const alignsOwnChildren = rules.display === "flex" || rules.display === "grid";
   const style: CSSProperties = {
     display: rules.display,
     order: rules.order,
@@ -99,7 +119,12 @@ function rulesToStyle(
     marginRight: lengthToCss(rules.margin?.right),
     marginBottom: lengthToCss(rules.margin?.bottom),
     marginLeft: lengthToCss(rules.margin?.left),
-    alignItems: rules.alignItems,
+    // 同一个“交叉方向对齐”控件需要兼顾容器和普通流节点：
+    // flex/grid 对齐自己的子项，block 节点则在父级交叉轴上对齐自身。
+    // 把 block 的值写成 align-items 虽然合法，但没有布局效果，会造成
+    // Inspector 显示“靠后”而画布仍停在左侧。
+    alignItems: alignsOwnChildren ? rules.alignItems : undefined,
+    alignSelf: alignsOwnChildren ? undefined : rules.alignItems,
     justifyContent: rules.justifyContent,
     borderRadius: lengthToCss(rules.radius),
     overflow: rules.overflow,
@@ -122,6 +147,13 @@ function rulesToStyle(
   if (height.mode === "aspect-ratio" && height.ratio) {
     style.aspectRatio = `${height.ratio.width} / ${height.ratio.height}`;
   }
+  const imageSlotAspectRatio = node.slot?.type === "image" && height.mode === "auto"
+    ? ratioToCss(node.slotRules?.aspectRatio)
+    : undefined;
+  if (imageSlotAspectRatio) {
+    style.aspectRatio = imageSlotAspectRatio;
+    if (!rules.overflow) style.overflow = "hidden";
+  }
   if (rules.layoutMode === "free") {
     style.position = "relative";
     style.display = "block";
@@ -134,7 +166,10 @@ function rulesToStyle(
     style.width = `${placement.width * 100}%`;
     style.height = `${placement.height * 100}%`;
     style.zIndex = placement.zIndex;
-    style.margin = 0;
+    style.marginTop = 0;
+    style.marginRight = 0;
+    style.marginBottom = 0;
+    style.marginLeft = 0;
   }
   const instance = previewOverride ?? node.layoutOverride;
   if (instance) {
@@ -194,91 +229,22 @@ function getSafeActionContent(content: unknown): { label: string; href?: string 
   return { label };
 }
 
-function InlineEditableText({
-  value,
-  placeholder,
-  style,
-  fontRole,
-  multiline = true,
-  onCommit,
-}: {
-  value: string;
-  placeholder: string;
-  style?: CSSProperties;
-  fontRole?: string;
-  multiline?: boolean;
-  onCommit: (value: string) => void;
-}) {
-  const editorRef = useRef<HTMLSpanElement>(null);
-  const cancelledRef = useRef(false);
-
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (editor && editor.ownerDocument.activeElement !== editor && editor.innerText !== value) {
-      editor.innerText = value;
-    }
-  }, [value]);
-
-  return (
-    <span
-      ref={editorRef}
-      role="textbox"
-      aria-label={`直接编辑${placeholder}`}
-      aria-multiline={multiline}
-      contentEditable
-      suppressContentEditableWarning
-      data-template-font-role={fontRole}
-      data-template-inline-editor="true"
-      data-template-inline-placeholder={value ? undefined : placeholder}
-      style={{ ...style, display: "block", minWidth: "1ch", minHeight: "1em" }}
-      onFocus={(event) => {
-        cancelledRef.current = false;
-        event.currentTarget.dataset.templateInlineEditing = "true";
-      }}
-      onBlur={(event) => {
-        delete event.currentTarget.dataset.templateInlineEditing;
-        if (cancelledRef.current) {
-          event.currentTarget.innerText = value;
-          cancelledRef.current = false;
-          return;
-        }
-        const nextValue = event.currentTarget.innerText.replace(/\r\n/g, "\n");
-        if (nextValue !== value) onCommit(nextValue);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          cancelledRef.current = true;
-          event.currentTarget.blur();
-          return;
-        }
-        if ((!multiline && event.key === "Enter") || (event.key === "Enter" && (event.ctrlKey || event.metaKey))) {
-          event.preventDefault();
-          event.stopPropagation();
-          event.currentTarget.blur();
-        }
-      }}
-    >
-      {value}
-    </span>
-  );
-}
-
 function renderSlotContent(
   node: DynamicTemplateRenderPlanNode,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
   headingLevel: 1 | 2 = 2,
-  inlineEdit?: {
-    enabled: boolean;
-    onCommit: NonNullable<DynamicTemplateRendererProps["onSlotContentCommit"]>;
-  },
+  editorBlockId?: string,
+  editorViewport?: "desktop" | "mobile",
 ): ReactNode {
   const { slot, content } = node;
   if (!slot) return null;
   const adapter = getDynamicTemplateNodeAdapter(slot.type);
   if (adapter) return adapter.render({
-    content,
+    content: editorBlockId && content && typeof content === "object" && !Array.isArray(content)
+      ? { ...content as Record<string, unknown>, id: editorBlockId, __editorViewport: editorViewport }
+      : editorBlockId
+        ? { id: editorBlockId, __editorViewport: editorViewport }
+        : content,
     mode,
     nodeProps: node.props,
     headingLevel,
@@ -330,18 +296,6 @@ function renderSlotContent(
   }
   if (["heading", "text", "richText", "badge", "icon"].includes(slot.type)) {
     const text = typeof content === "string" ? content : "";
-    if (inlineEdit?.enabled && node.slotId) {
-      return (
-        <InlineEditableText
-          value={text}
-          placeholder={slot.label}
-          style={textStyle}
-          fontRole={node.slotRules?.fontRole}
-          multiline={slot.type === "text" || slot.type === "richText"}
-          onCommit={(value) => inlineEdit.onCommit(node.slotId!, value)}
-        />
-      );
-    }
     if (!text) return <span className="hc-dynamic-template__empty-slot">{slot.label}待填写</span>;
     if (slot.type === "heading") {
       const Heading = headingLevel === 1 ? "h1" : "h2";
@@ -352,21 +306,6 @@ function renderSlotContent(
   }
   if (slot.type === "button" || slot.type === "link") {
     const action = getSafeActionContent(content);
-    if (inlineEdit?.enabled && node.slotId) {
-      const record = content && typeof content === "object" && !Array.isArray(content)
-        ? content as Record<string, unknown>
-        : {};
-      return (
-        <InlineEditableText
-          value={action.label}
-          placeholder="行动文案"
-          style={textStyle}
-          fontRole={node.slotRules?.fontRole}
-          multiline={false}
-          onCommit={(label) => inlineEdit.onCommit(node.slotId!, { ...record, label })}
-        />
-      );
-    }
     if (!action.label) return <span className="hc-dynamic-template__empty-slot">行动待填写</span>;
     return action.href
       ? <a href={action.href} data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{action.label}</a>
@@ -374,6 +313,13 @@ function renderSlotContent(
   }
   if (slot.type === "product") {
     const productCode = typeof content === "string" ? content.trim() : "";
+    const mockLabel = mode !== "public"
+      && content && typeof content === "object" && !Array.isArray(content)
+      && (content as Record<string, unknown>).mock === true
+      && typeof (content as Record<string, unknown>).label === "string"
+      ? String((content as Record<string, unknown>).label)
+      : "";
+    if (mockLabel) return <span data-template-mock-content="product">{mockLabel}</span>;
     return productCode
       ? <a href={`/products/${encodeURIComponent(productCode)}`}>{productCode}</a>
       : <span className="hc-dynamic-template__empty-slot">商品待选择</span>;
@@ -409,14 +355,13 @@ function RenderNode({
   onSelectNode,
   onSelectContractRole,
   onNodeAction,
-  onRequestMediaReplace,
   primaryHeadingSlotId,
   primaryHeadingLevel,
   device,
   layoutEditMode,
   onLayoutOverrideCommit,
   onTemplatePlacementCommit,
-  onSlotContentCommit,
+  templateEditorSessionId,
   parentFree = false,
   siblingPlacements = [],
 }: {
@@ -427,21 +372,22 @@ function RenderNode({
   onSelectNode?: (nodeId: string) => void;
   onSelectContractRole?: DynamicTemplateRendererProps["onSelectContractRole"];
   onNodeAction?: DynamicTemplateRendererProps["onNodeAction"];
-  onRequestMediaReplace?: DynamicTemplateRendererProps["onRequestMediaReplace"];
   primaryHeadingSlotId?: string;
   primaryHeadingLevel: 1 | 2;
   device: "desktop" | "mobile";
   layoutEditMode?: boolean;
   onLayoutOverrideCommit?: DynamicTemplateRendererProps["onLayoutOverrideCommit"];
   onTemplatePlacementCommit?: DynamicTemplateRendererProps["onTemplatePlacementCommit"];
-  onSlotContentCommit?: DynamicTemplateRendererProps["onSlotContentCommit"];
+  templateEditorSessionId?: string;
   parentFree?: boolean;
   siblingPlacements?: DynamicTemplatePlacement[];
 }) {
   const Element = nodeElementType(node);
   const interactive = mode === "editor" && Boolean(onSelectNode);
+  const structureLocked = node.props.contentTemplateDesignProps?.structureLocked === true;
   const layoutEditable = Boolean(
     interactive &&
+    !structureLocked &&
     layoutEditMode &&
     selectedNodeId === node.nodeId &&
     node.instanceEditPolicy &&
@@ -450,6 +396,7 @@ function RenderNode({
   );
   const freePlacementEditable = Boolean(
     interactive
+    && !structureLocked
     && parentFree
     && selectedNodeId === node.nodeId
     && node.rules.placement
@@ -623,20 +570,21 @@ function RenderNode({
     return <hr data-template-node-id={node.nodeId} style={{ borderStyle: node.props.dividerStyle ?? "solid" }} />;
   }
   const slotContent = node.slot
-      ? renderSlotContent(
-        node,
-        mode,
-        node.slotId === primaryHeadingSlotId ? primaryHeadingLevel : 2,
-        onSlotContentCommit ? {
-          enabled: selectedNodeId === node.nodeId,
-          onCommit: onSlotContentCommit,
-        } : undefined,
-      )
+    ? renderSlotContent(
+      node,
+      mode,
+      node.slotId === primaryHeadingSlotId ? primaryHeadingLevel : 2,
+      mode === "editor" && templateEditorSessionId
+        ? `template-editor:${templateEditorSessionId}:${node.nodeId}`
+        : undefined,
+      device,
+    )
     : null;
   return (
     <Element
       data-template-node-id={node.nodeId}
       data-template-node-type={node.type}
+      data-template-node-label={node.name}
       data-template-slot-id={node.slotId}
       data-template-selected={selectedNodeId === node.nodeId ? "true" : undefined}
       data-template-selected-contract-role={selectedContractRole?.nodeId === node.nodeId ? selectedContractRole.roleId : undefined}
@@ -742,14 +690,13 @@ function RenderNode({
           onSelectNode={onSelectNode}
           onSelectContractRole={onSelectContractRole}
           onNodeAction={onNodeAction}
-          onRequestMediaReplace={onRequestMediaReplace}
           primaryHeadingSlotId={primaryHeadingSlotId}
           primaryHeadingLevel={primaryHeadingLevel}
           device={device}
           layoutEditMode={layoutEditMode}
           onLayoutOverrideCommit={onLayoutOverrideCommit}
           onTemplatePlacementCommit={onTemplatePlacementCommit}
-          onSlotContentCommit={onSlotContentCommit}
+          templateEditorSessionId={templateEditorSessionId}
           parentFree={node.type === "Stack" && node.rules.layoutMode === "free"}
           siblingPlacements={node.children
             .filter((sibling) => sibling.nodeId !== child.nodeId)
@@ -775,16 +722,41 @@ function RenderNode({
             boxShadow: "0 2px 10px rgb(0 0 0 / 12%)",
           }}
         >
-          {node.slot?.type === "image" && onRequestMediaReplace ? (
-            <button type="button" aria-label="替换图片" title="替换图片" onClick={(event) => { event.stopPropagation(); onRequestMediaReplace(node.nodeId); }}>▧</button>
-          ) : null}
-          <button type="button" aria-label="复制节点" title="复制" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "duplicate"); }}>⧉</button>
+          <button type="button" aria-label="复制节点" title="复制" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "duplicate"); }}><CopyOutlined /></button>
           {node.rules.placement ? <>
-            <button type="button" aria-label="下移一层" title="下移一层" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "backward"); }}>↓</button>
-            <button type="button" aria-label="上移一层" title="上移一层" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "forward"); }}>↑</button>
+            <button type="button" aria-label="在父容器中水平居中" title="水平居中" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "align-horizontal"); }}><AlignCenterOutlined /></button>
+            <button type="button" aria-label="在父容器中垂直居中" title="垂直居中" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "align-vertical"); }}><VerticalAlignMiddleOutlined /></button>
+            <button
+              type="button"
+              aria-label={`复制当前自由布局到${device === "desktop" ? "移动端" : "桌面端"}`}
+              title={`把当前自由布局及同级节点构图复制到${device === "desktop" ? "移动端" : "桌面端"}`}
+              onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "copy-responsive"); }}
+            >
+              <SwapOutlined />
+            </button>
+            <button type="button" aria-label="下移一层" title="下移一层" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "backward"); }}><VerticalAlignBottomOutlined /></button>
+            <button type="button" aria-label="上移一层" title="上移一层" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "forward"); }}><VerticalAlignTopOutlined /></button>
           </> : null}
-          <button type="button" aria-label="隐藏节点" title="隐藏" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "hide"); }}>◉</button>
-          <button type="button" aria-label="删除节点" title="删除" onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "delete"); }}>×</button>
+          <button
+            type="button"
+            disabled={node.slot?.required === true}
+            aria-label={node.slot?.required ? "隐藏节点（必填槽位不可用）" : "隐藏节点"}
+            title={node.slot?.required ? "必填槽位不能隐藏" : "隐藏"}
+            style={node.slot?.required ? { cursor: "not-allowed", opacity: 0.42 } : undefined}
+            onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "hide"); }}
+          >
+            <EyeInvisibleOutlined />
+          </button>
+          <button
+            type="button"
+            disabled={node.slot?.required === true}
+            aria-label={node.slot?.required ? "删除节点（必填槽位不可用）" : "删除节点"}
+            title={node.slot?.required ? "必填槽位不能删除" : "删除"}
+            style={node.slot?.required ? { cursor: "not-allowed", opacity: 0.42 } : undefined}
+            onClick={(event) => { event.stopPropagation(); onNodeAction(node.nodeId, "delete"); }}
+          >
+            <DeleteOutlined />
+          </button>
         </div>
       ) : null}
       {freePlacementEditable ? (["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const).map((handle) => {
@@ -847,18 +819,16 @@ export default function DynamicTemplateRenderer({
   layoutOverridesByNodeId,
   mode = "public",
   editorSurface,
+  templateEditorSessionId,
   selectedNodeId,
   selectedContractRole,
   onSelectNode,
   onSelectContractRole,
   onNodeAction,
-  onRequestMediaReplace,
   primaryHeadingLevel = 2,
   layoutEditMode = false,
   onLayoutOverrideCommit,
   onTemplatePlacementCommit,
-  editorContentLayer,
-  onSlotContentCommit,
 }: DynamicTemplateRendererProps) {
   const allowsNodeInteraction = mode === "editor" && editorSurface === "template-definition";
   const result = compileDynamicTemplateRenderPlan(definition, {
@@ -909,7 +879,6 @@ export default function DynamicTemplateRenderer({
       data-dynamic-template-device={device}
       data-dynamic-template-mode={mode}
       data-dynamic-template-editor-surface={mode === "editor" ? editorSurface ?? "none" : undefined}
-      data-dynamic-template-content-layer={mode === "editor" ? editorContentLayer : undefined}
       data-template-default-background-token={result.plan.metadata.defaultBackgroundToken}
       style={{
         background: result.plan.metadata.defaultBackgroundToken
@@ -925,14 +894,13 @@ export default function DynamicTemplateRenderer({
         onSelectNode={allowsNodeInteraction ? onSelectNode : undefined}
         onSelectContractRole={allowsNodeInteraction ? onSelectContractRole : undefined}
         onNodeAction={allowsNodeInteraction ? onNodeAction : undefined}
-        onRequestMediaReplace={allowsNodeInteraction ? onRequestMediaReplace : undefined}
         primaryHeadingSlotId={primaryHeadingSlotId}
         primaryHeadingLevel={primaryHeadingLevel}
         device={device}
         layoutEditMode={allowsNodeInteraction && layoutEditMode}
         onLayoutOverrideCommit={allowsNodeInteraction ? onLayoutOverrideCommit : undefined}
         onTemplatePlacementCommit={allowsNodeInteraction ? onTemplatePlacementCommit : undefined}
-        onSlotContentCommit={allowsNodeInteraction ? onSlotContentCommit : undefined}
+        templateEditorSessionId={allowsNodeInteraction ? templateEditorSessionId : undefined}
       />
     </div>
   );

@@ -112,6 +112,12 @@ const PUCK_IMAGE_FIELDS = [
 
 const PUCK_LINK_FIELDS = ["linkUrl", "link", "mapUrl", "secondaryLinkUrl"];
 
+const NON_PUBLISHABLE_HERO_MEDIA = new Set([
+  "/images/system/product-placeholder.svg",
+  "/images/system/launch-short-page-desktop.svg",
+  "/images/system/launch-short-page-mobile.svg",
+]);
+
 /**
  * 发布校验：关键字段文本长度上限（字段名 → 最大字符数）。
  * 取值宽松以覆盖合理运营数据，超出视为异常输入（如把整篇文章误填进标题）。
@@ -854,9 +860,10 @@ export class PageModulesService {
   }
 
   /**
-   * “发布”保存一个立即供前台使用的版本。SEO、素材授权与非关键内容完整度
-   * 只提示；必填内容、可访问性文本、失效媒体、结构损坏、危险地址、
-   * 不可解析引用、权限与版本冲突保持阻断，避免公开破图或无语义素材。
+   * “发布”保存一个立即供前台使用的版本。SEO 与非关键内容完整度
+   * 只提示；缺少所有可渲染媒体、失效媒体、结构损坏、危险地址、
+   * 不可解析引用、替代文字、素材授权、权限与版本冲突保持阻断，
+   * 避免公开破图、不安全内容或无来源素材。
    */
   private toUsablePublicationIssue(
     issue: ContentTemplateIssue,
@@ -876,21 +883,16 @@ export class PageModulesService {
       && (message.includes("不能为空") || message.includes("仍是占位内容"));
     const isRequiredContentFailure = [
       " 图片不能为空",
-      " 内容不能为空",
       "视频地址不能为空",
       "轮播图片不能为空",
       "画廊图片不能为空",
-      "替代文字不能为空",
-      "替代文字来源",
-      "必须填写替代文字",
-      "必须填写视频说明",
-      "为必填内容",
       "图片地址无效",
     ].some((marker) => message.includes(marker));
     if (isRequiredContentFailure) return issue;
 
     const isContentCompletion = [
       "至少填写眉题、标题或副标题之一",
+      " 内容不能为空",
       "已启用眉题角色，请填写眉题内容",
       "已启用标题角色，请填写标题内容",
       "已启用副标题角色，请填写副标题内容",
@@ -905,15 +907,14 @@ export class PageModulesService {
       "必须选择有效分类",
       "站内页面跳转必须填写链接",
       "必须选择商品",
+      "必须填写视频说明",
+      "为必填内容",
     ].some((marker) => message.includes(marker));
     const isDynamicContentBudget =
       /(?:至少需要|最多允许) \d+ (?:个字符|项)/.test(message);
-    const isPublicationAudit = issue.path.startsWith("metadata.mediaRights");
-
     return isMetadataCompletion
       || isContentCompletion
       || isDynamicContentBudget
-      || isPublicationAudit
       ? { ...issue, severity: "warning" }
       : issue;
   }
@@ -1248,6 +1249,36 @@ export class PageModulesService {
         return;
       }
 
+      const explicitlyRequiredMediaFields = new Set<string>();
+      if (type === "首屏主视觉") {
+        for (const field of ["desktopImage", "mobileImage"] as const) {
+          const source = this.isNonEmptyString(props[field]) ? props[field].trim() : "";
+          const issueMessage = source
+            ? NON_PUBLISHABLE_HERO_MEDIA.has(source)
+              ? `${label}：${field} 仍是系统占位图，请更换为已确认的首屏素材`
+              : null
+            : `${label}：${field} 图片不能为空（首屏需分别提供桌面与手机素材）`;
+          if (!issueMessage) continue;
+          explicitlyRequiredMediaFields.add(field);
+          const errorIndex = errors.push(issueMessage) - 1;
+          errorContexts[errorIndex] = {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.${field}`,
+            field,
+          };
+        }
+        const hasHeroMedia = [props.desktopImage, props.mobileImage]
+          .some((value) => this.isNonEmptyString(value));
+        if (hasHeroMedia && !this.isNonEmptyString(props.altText)) {
+          const errorIndex = errors.push(`${label}：altText 替代文字不能为空`) - 1;
+          errorContexts[errorIndex] = {
+            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
+            path: `${path}.props.altText`,
+            field: "altText",
+          };
+        }
+      }
+
       if (type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
         const reference = readDynamicTemplateInstanceReference(props);
         if (!reference) {
@@ -1289,8 +1320,10 @@ export class PageModulesService {
       // 避免服务端直接读 props[coverImage] 读不到前端存的 posterUrl 而误报缺图。
       const completion = getContentTemplateCompletion(type, props);
       const requiredImageFields = completion
-        ? completion.material.missing
-        : (PUCK_REQUIRED_IMAGE_FIELDS[type] || []).filter((field) => !this.isNonEmptyString(props[field]));
+        ? completion.material.missing.filter((field) => !explicitlyRequiredMediaFields.has(field))
+        : (PUCK_REQUIRED_IMAGE_FIELDS[type] || []).filter((field) => (
+            !this.isNonEmptyString(props[field]) && !explicitlyRequiredMediaFields.has(field)
+          ));
       for (const field of requiredImageFields) {
         const errorIndex = errors.push(`${label}：${field} 图片不能为空`) - 1;
         errorContexts[errorIndex] = {
@@ -2239,6 +2272,9 @@ export class PageModulesService {
     const primaryStageIndexes = compositionByBlock
       .map((composition, index) => composition.visualRole === "primary-stage" ? index : -1)
       .filter((index) => index >= 0);
+    if (primaryStageIndexes.length > 1) {
+      errors.push(`页面只能有一个首屏主舞台（primary-stage），当前为 ${primaryStageIndexes.length} 个`);
+    }
     if (primaryStageIndexes.length > 0 && primaryStageIndexes[0] !== 0) {
       errors.push("首屏主舞台（primary-stage）必须是首个可见品牌内容区");
     }

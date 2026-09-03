@@ -40,6 +40,13 @@ import {
   createTemplateRenderProps,
 } from "../../src/page-builder/template-editor/templateDraftAdapter";
 import { adaptLegacyTemplateSource } from "../../src/page-builder/template-editor/legacyTemplateConversion";
+import TemplateCatalogViewportPreview from "../../src/page-builder/template-editor/TemplateCatalogViewportPreview";
+import {
+  createTemplateCatalogPreviewModel,
+  createTemplateCatalogPreviewContentBySlotId,
+  createTemplatePreviewScenarioContentBySlotId,
+} from "../../src/page-builder/template-editor/templatePreviewModel";
+import type { DynamicTemplatePreviewScenario } from "../../src/page-builder/template-editor/types";
 import { CONTENT_TEMPLATE_REGISTRY } from "../../src/page-builder/generated/contentTemplates.generated";
 import { MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE } from "../../src/page-builder/template-definition/validateTemplateDefinition";
 
@@ -494,7 +501,16 @@ function runLocalDraftScenario() {
   const loaded = loadLocalDynamicTemplateDraft(saved.localDraftId);
   const copied = saveLocalDynamicTemplateDraft(saved, { asCopy: true, name: "本地草稿测试副本" });
   const exported = exportDynamicTemplateDraftJson(saved);
-  const imported = importDynamicTemplateDraftJson(exported);
+  let importDefinition = createBlankDynamicTemplateDefinition("本地草稿测试");
+  const importContainer = addDynamicTemplateNode(importDefinition, importDefinition.rootNodeId, "Container");
+  importDefinition = importContainer.definition;
+  const importHeading = addDynamicTemplateNode(importDefinition, importContainer.nodeId, "HeadingSlot");
+  importDefinition = importHeading.definition;
+  const importSlotId = importHeading.slotId!;
+  importDefinition.defaultContent[importSlotId] = "不应进入新模板的历史默认内容";
+  importDefinition.previewContent ??= {};
+  importDefinition.previewContent[importSlotId] = "不应进入新模板的历史预览内容";
+  const imported = importDynamicTemplateDraftJson(JSON.stringify(importDefinition));
   const storedDrafts = listLocalDynamicTemplateDrafts();
   return {
     savedId: saved.localDraftId,
@@ -503,6 +519,8 @@ function runLocalDraftScenario() {
     copiedName: copied.definition.name,
     importedId: imported.localDraftId,
     importedName: imported.definition.name,
+    importedDefaultContentCount: Object.keys(imported.definition.defaultContent).length,
+    importedPreviewContentCount: Object.keys(imported.definition.previewContent ?? {}).length,
     savedCount: storedDrafts.length,
     netAdded: storedDrafts.filter((item) => !existingDraftIds.has(item.localDraftId)).length,
     savedPresent: storedDrafts.some((item) => item.localDraftId === saved.localDraftId),
@@ -651,6 +669,8 @@ function runAllLegacyConversionScenario() {
         nodeCount: Object.keys(report.draft.definition.nodes).length,
         slotCount: Object.keys(report.draft.definition.slots).length,
         skippedCount: report.skippedItems.length,
+        defaultContentCount: Object.keys(report.draft.definition.defaultContent).length,
+        previewContentCount: Object.keys(report.draft.definition.previewContent ?? {}).length,
         containsLegacyNumericProductReference: /"(?:secondary)?productIds?"\s*:/i.test(serializedDefaults),
       };
     } catch (error) {
@@ -662,6 +682,167 @@ function runAllLegacyConversionScenario() {
       };
     }
   });
+}
+
+function createCatalogPreviewDefinition(
+  templateId: string,
+  name: string,
+  desktopHeight: DynamicTemplateResponsiveRules["height"],
+  mobileHeight: DynamicTemplateResponsiveRules["height"],
+) {
+  const definition = createValidDefinition();
+  definition.templateId = templateId;
+  definition.name = name;
+  definition.metadata.previewDesktopWidth = 1920;
+  definition.metadata.previewMobileWidth = 390;
+  definition.metadata.desktopRatio = "auto";
+  definition.metadata.mobileRatio = "auto";
+  definition.nodes[definition.rootNodeId].responsive.desktop.height = desktopHeight;
+  definition.nodes[definition.rootNodeId].responsive.mobile.height = mobileHeight;
+  return definition;
+}
+
+function createCatalogPreviewCases() {
+  let dense = createCatalogPreviewDefinition(
+    "tpl_catalog_dense",
+    "密集媒体文字槽位",
+    { mode: "aspect-ratio", ratio: { width: 4, height: 3 } },
+    { mode: "aspect-ratio", ratio: { width: 1, height: 1 } },
+  );
+  dense = addDynamicTemplateNode(dense, "node_container", "ButtonSlot").definition;
+  dense = addDynamicTemplateNode(dense, "node_container", "ProductCard").definition;
+  const blank = createBlankDynamicTemplateDefinition("目录空白模板");
+  blank.metadata.previewDesktopWidth = 1920;
+  blank.metadata.previewMobileWidth = 390;
+  blank.metadata.desktopRatio = "auto";
+  blank.metadata.mobileRatio = "auto";
+  return [
+    {
+      key: "fixed-four-three",
+      definition: createCatalogPreviewDefinition(
+        "tpl_catalog_fixed_four_three",
+        "固定 4:3",
+        { mode: "fixed", value: { value: 1440, unit: "px" } },
+        { mode: "fixed", value: { value: 390, unit: "px" } },
+      ),
+    },
+    {
+      key: "square",
+      definition: createCatalogPreviewDefinition(
+        "tpl_catalog_square",
+        "正方形 1:1",
+        { mode: "aspect-ratio", ratio: { width: 1, height: 1 } },
+        { mode: "aspect-ratio", ratio: { width: 1, height: 1 } },
+      ),
+    },
+    {
+      key: "portrait",
+      definition: createCatalogPreviewDefinition(
+        "tpl_catalog_portrait",
+        "竖版 3:4",
+        { mode: "aspect-ratio", ratio: { width: 3, height: 4 } },
+        { mode: "aspect-ratio", ratio: { width: 3, height: 4 } },
+      ),
+    },
+    {
+      key: "auto",
+      definition: createCatalogPreviewDefinition(
+        "tpl_catalog_auto",
+        "自适应内容",
+        { mode: "auto" },
+        { mode: "auto" },
+      ),
+    },
+    {
+      key: "dense",
+      definition: dense,
+    },
+    { key: "blank", definition: blank },
+  ];
+}
+
+function CatalogPreviewExample({
+  definition,
+  device,
+  previewKey,
+  renderContent = true,
+  unavailable = false,
+}: {
+  definition: TemplateDefinitionV2;
+  device: "desktop" | "mobile";
+  previewKey: string;
+  renderContent?: boolean;
+  unavailable?: boolean;
+}) {
+  const model = createTemplateCatalogPreviewModel(definition, device);
+  return (
+    <article
+      className="unified-template-library__card is-compact"
+      data-catalog-preview-case={previewKey}
+      style={{ alignSelf: "start", minWidth: 0, width: 240 }}
+    >
+      <TemplateCatalogViewportPreview
+        fallbackHeight={model.fallbackHeight}
+        heightMode={model.heightMode}
+        ratioLabel={model.ratioLabel}
+        slots={model.slots}
+        sourceWidth={model.sourceWidth}
+        templateKey={previewKey}
+        title={definition.name}
+        unavailable={unavailable}
+        viewport={device}
+      >
+        {renderContent ? (
+          <DynamicTemplateRenderer
+            definition={definition}
+            device={device}
+            contentBySlotId={createTemplateCatalogPreviewContentBySlotId(definition)}
+            mode="thumbnail"
+          />
+        ) : null}
+      </TemplateCatalogViewportPreview>
+      <strong className="homepage-editor__template-name">{definition.name}</strong>
+    </article>
+  );
+}
+
+function CatalogPreviewMatrix() {
+  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  const [cases] = useState(createCatalogPreviewCases);
+  return (
+    <main className="admin-shell-v7" style={{ minHeight: "100vh", padding: 24 }}>
+      <header>
+        <button type="button" onClick={() => setDevice("desktop")}>目录桌面端</button>
+        <button type="button" onClick={() => setDevice("mobile")}>目录移动端</button>
+        <output aria-label="目录预览当前设备">{device}</output>
+      </header>
+      <section
+        aria-label="模板目录比例预览夹具"
+        style={{ display: "grid", gridTemplateColumns: "repeat(3, 240px)", gap: 20, alignItems: "start" }}
+      >
+        {cases.map((entry) => (
+          <CatalogPreviewExample
+            key={entry.key}
+            definition={entry.definition}
+            device={device}
+            previewKey={entry.key}
+          />
+        ))}
+        <CatalogPreviewExample
+          definition={cases[0].definition}
+          device={device}
+          previewKey="unavailable"
+          unavailable
+        />
+        <CatalogPreviewExample
+          definition={cases[0].definition}
+          device={device}
+          previewKey="missing-renderer"
+          renderContent={false}
+        />
+      </section>
+    </main>
+  );
 }
 
 function Fixture() {
@@ -1025,7 +1206,7 @@ function BusinessRendererParityMatrix() {
     const slotId = Object.keys(definition.slots)[0];
     const contentBySlotId = {
       [slotId]: {
-        ...(definition.previewContent?.[slotId] as Record<string, unknown> ?? {}),
+        ...currentProps,
         ...stableContent,
       },
     };
@@ -1060,12 +1241,69 @@ function BusinessRendererParityMatrix() {
   );
 }
 
+function TemplateScenarioRegressionMatrix() {
+  const searchParams = new URLSearchParams(window.location.search);
+  const requestedScenario = searchParams.get("scenario");
+  const scenario: DynamicTemplatePreviewScenario = requestedScenario === "empty"
+    || requestedScenario === "long-text"
+    || requestedScenario === "missing-image"
+    ? requestedScenario
+    : "default";
+  const device = searchParams.get("device") === "mobile" ? "mobile" : "desktop";
+  const entries = CONTENT_TEMPLATE_REGISTRY.map(({ key, moduleType }) => {
+    const source = createSystemTemplateDraft(moduleType);
+    if (!source) throw new Error(`${moduleType}异常场景来源不存在`);
+    const definition = adaptLegacyTemplateSource(source).draft.definition;
+    return {
+      key,
+      moduleType,
+      definition,
+      contentBySlotId: createTemplatePreviewScenarioContentBySlotId(definition, scenario),
+    };
+  });
+  return (
+    <main
+      data-testid="template-scenario-regression-matrix"
+      data-preview-scenario={scenario}
+      data-preview-device={device}
+      style={{ width: "100%", minWidth: 0 }}
+    >
+      {entries.map(({ key, moduleType, definition, contentBySlotId }) => (
+        <section
+          key={key}
+          data-scenario-template={key}
+          data-scenario-module={moduleType}
+          style={{ width: "100%", minWidth: 0, overflow: "clip" }}
+        >
+          <DynamicTemplateRenderer
+            definition={definition}
+            device={device}
+            mode="public"
+            contentBySlotId={contentBySlotId}
+            primaryHeadingLevel={moduleType === "首屏主视觉" ? 1 : 2}
+          />
+        </section>
+      ))}
+    </main>
+  );
+}
+
 const searchParams = new URLSearchParams(window.location.search);
 const parityMode = searchParams.has("rendererParity");
 const businessParityMode = searchParams.has("businessParity");
+const templateScenarioMode = searchParams.has("templateScenarios");
+const catalogPreviewMode = searchParams.has("catalogPreviews");
+if (catalogPreviewMode) {
+  void import("../../src/styles/adminLuxury.css");
+  void import("../../src/pages/admin/HomepageConfig/editor.css");
+}
 createRoot(document.getElementById("root")!).render(
   <MemoryRouter>
-    {businessParityMode
+    {catalogPreviewMode
+      ? <CatalogPreviewMatrix />
+      : templateScenarioMode
+      ? <TemplateScenarioRegressionMatrix />
+      : businessParityMode
       ? <BusinessRendererParityMatrix />
       : parityMode
         ? <MatureRendererParityMatrix />

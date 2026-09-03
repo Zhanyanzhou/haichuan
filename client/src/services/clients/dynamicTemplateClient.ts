@@ -5,7 +5,7 @@ import {
   sanitizeContentTemplateLayoutData,
 } from "@/page-builder/generated/contentTemplates.generated";
 import type { SystemContentTemplateCurrent } from "./systemContentTemplateClient";
-import api, { requestStatus } from "../httpClient";
+import api from "../httpClient";
 import { mockDelay, USE_MOCK } from "../mockData";
 import { mockResponse } from "../mockResponse";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -42,6 +42,11 @@ export interface DynamicTemplateResource {
   createdAt: string;
   updatedAt: string;
   draft: DynamicTemplateDraftResource | null;
+  canDelete?: boolean;
+  deleteBlockers?: Array<{
+    code: string;
+    message: string;
+  }>;
 }
 
 export interface PublishedDynamicTemplateResource {
@@ -102,7 +107,7 @@ export type TemplateCatalogItemResource =
 
 export interface TemplateCatalogResource {
   items: TemplateCatalogItemResource[];
-  source?: "unified" | "legacy-endpoints";
+  source?: "unified";
 }
 
 const mockTemplates: DynamicTemplateResource[] = [];
@@ -137,45 +142,6 @@ function unavailableMockWrite(): never {
   throw new Error("Mock 模式不模拟模板数据库写入；请使用测试内确定性接口夹具");
 }
 
-async function listLegacyCatalog(): Promise<TemplateCatalogResource> {
-  // 兼容尚未重启、还没有统一 catalog 路由的本地后端。数据仍来自真实服务端接口，
-  // 不使用客户端注册表补造目录；后端升级后会自动回到统一目录接口。
-  const [published, editable, systemCompatibility, personalCompatibility] = await Promise.all([
-    api.get("/page-modules/dynamic-templates/published", { suppressGlobalError: true })
-      .then((response) => unwrapResponse<PublishedDynamicTemplateResource[]>(response))
-      .catch(() => []),
-    api.get("/page-modules/dynamic-templates/mine", { suppressGlobalError: true })
-      .then((response) => unwrapResponse<DynamicTemplateResource[]>(response))
-      .catch(() => []),
-    api.get("/page-modules/system-content-templates", { suppressGlobalError: true })
-      .then((response) => unwrapResponse<SystemContentTemplateCurrent[]>(response)),
-    api.get("/page-modules/personal-content-templates", { suppressGlobalError: true })
-      .then((response) => unwrapResponse<TemplateCatalogPersonalCompatibilityResource[]>(response))
-      .catch(() => []),
-  ]);
-  return {
-    source: "legacy-endpoints",
-    items: [
-      ...(Array.isArray(published) ? published : []).map((template) => ({
-        kind: "published" as const,
-        template,
-      })),
-      ...(Array.isArray(editable) ? editable : []).map((template) => ({
-        kind: "editable" as const,
-        template,
-      })),
-      ...(Array.isArray(systemCompatibility) ? systemCompatibility : []).map((template) => ({
-        kind: "system-compatibility" as const,
-        template,
-      })),
-      ...(Array.isArray(personalCompatibility) ? personalCompatibility : []).map((template) => ({
-        kind: "personal-compatibility" as const,
-        template,
-      })),
-    ],
-  };
-}
-
 export const dynamicTemplateApi = {
   listCatalog: async (options: { dedupe?: boolean } = {}) => {
     if (USE_MOCK) {
@@ -187,15 +153,10 @@ export const dynamicTemplateApi = {
         ],
       } satisfies TemplateCatalogResource);
     }
-    try {
-      return await api.get("/page-modules/dynamic-templates/catalog", {
-        suppressGlobalError: true,
-        dedupe: options.dedupe,
-      });
-    } catch (error) {
-      if (requestStatus(error) !== 404) throw error;
-      return mockResponse(await listLegacyCatalog());
-    }
+    return api.get("/page-modules/dynamic-templates/catalog", {
+      suppressGlobalError: true,
+      dedupe: options.dedupe,
+    });
   },
   getPublishedVersion: async (templateId: string, version: number) => {
     if (USE_MOCK) {
@@ -267,6 +228,12 @@ export const dynamicTemplateApi = {
   restore: async (templateId: string) => {
     if (USE_MOCK) unavailableMockWrite();
     return api.post(`/page-modules/dynamic-templates/${encodeURIComponent(templateId)}/restore`, undefined, {
+      suppressGlobalError: true,
+    });
+  },
+  deleteDraft: async (templateId: string) => {
+    if (USE_MOCK) unavailableMockWrite();
+    return api.delete(`/page-modules/dynamic-templates/${encodeURIComponent(templateId)}`, {
       suppressGlobalError: true,
     });
   },

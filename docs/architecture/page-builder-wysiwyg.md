@@ -1,7 +1,7 @@
 # 【已废止】页面构建器所见即所得架构
 
 > [!CAUTION]
-> 本文是 2026-08-06 的旧 `PageModule/PageModuleVersion + iframe postMessage` 方案，仅保留历史参考，**不具执行力、不得按本文实施或恢复旧架构**。当前页面装修唯一采用 Puck `PageDocument/PageDocumentRevision`，现行边界见 `PROJECT_RULES.md` §7、`docs/architecture/page-builder-boundary.md` 与 `contracts/page-builder/content-templates.contract.json`；页面角色限制只认机器合同 `pageRules`。
+> 本文是 2026-08-06 的旧 `PageModule/PageModuleVersion + iframe postMessage` 方案，仅保留历史参考，**不具执行力、不得按本文实施或恢复旧架构**。当前页面装修唯一采用 Puck `PageDocument/PageDocumentRevision`，现行产品模型见 `docs/page-builder/template-design-framework.md`，实现边界见 `PROJECT_RULES.md` §7 与 `docs/architecture/page-builder-boundary.md`；结构合同、内置兼容合同、Template Repository 和页面实例按各自职责取证。
 
 > **HC-PAGE-BUILDER-WYSIWYG-21**
 > 版本：MVP Phase 2-3

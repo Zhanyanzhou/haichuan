@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   createMissingMediaHomeFixture,
+  createHiddenHeroCopyHomeFixture,
+  createLegacyDuplicateHeroHomeFixture,
   createNoHeroHomeFixture,
   createPublishedHomeFixture,
   createProductCountHomeFixture,
@@ -112,6 +114,8 @@ for (const viewport of [
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.goto("/");
 
+    await expect(page.locator(".site-header")).toHaveClass(/is-transparent/);
+    await expect(page.locator(".site-header")).toHaveClass(/is-overlay-light/);
     await expect(page.locator(".hc-public-document")).toHaveAttribute("data-home-surface", "true");
     await expect(page.locator('[data-content-template-module="产品展示行"]')).toContainText("中性测试作品一");
     await expect(page.locator("main h1")).toHaveCount(1);
@@ -256,19 +260,71 @@ test("Hero 标题为空时安全省略可选文案并保留唯一页面标题", 
   await expectNoHorizontalOverflow(page);
 });
 
-test("PageDocument 首块合同决定 overlay 与白底页头边界", async ({ page }) => {
+test("Hero 文案角色全部隐藏时移除空白带并补回唯一页面 H1", async ({ page }) => {
+  await installPublicApiFixture(page, createHiddenHeroCopyHomeFixture());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(page.locator("main h1")).toHaveCount(1);
+  await expect(page.locator("main h1")).toHaveClass(/sr-only/);
+  await expect(page.locator("main h1")).toHaveText("海川珠宝");
+  await expect(page.locator(".hc-phase1-hero__copy-band")).toHaveCSS("display", "none");
+  await expect(page.locator(".hc-phase1-hero__copy-shade")).toHaveCSS("display", "none");
+});
+
+test("历史重复首屏只渲染第一个，手机系统占位图回退桌面素材", async ({ page }) => {
+  await installPublicApiFixture(page, createLegacyDuplicateHeroHomeFixture());
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  const hero = page.locator('[data-content-template-module="首屏主视觉"]');
+  await expect(hero).toHaveCount(1);
+  await expect(page.getByText("不应重复渲染的历史首屏")).toHaveCount(0);
+  const image = hero.locator("img");
+  await expect(image).toHaveAttribute("loading", "eager");
+  await expect.poll(() => image.evaluate((node: HTMLImageElement) => node.currentSrc))
+    .toContain("home-hero-immersive-desktop-v2.png");
+  await expect.poll(() => image.evaluate((node: HTMLImageElement) => node.currentSrc))
+    .not.toContain("/images/system/");
+});
+
+test("PageDocument 首块合同决定透明页头的文字对比语境", async ({ page }) => {
   await installPublicApiFixture(page, createPublishedHomeFixture());
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await expect(page.locator(".editorial-shell")).toHaveAttribute("data-page-header-mode", "overlay-light");
+  await expect(page.locator(".editorial-shell")).toHaveAttribute("data-page-header-surface", "transparent");
   await expect(page.locator(".site-header")).toHaveClass(/is-transparent/);
+  await expect(page.locator(".site-header")).toHaveClass(/is-overlay-light/);
+  const overlayBounds = await page.evaluate(() => ({
+    headerBottom: document.querySelector(".site-header")?.getBoundingClientRect().bottom ?? -1,
+    firstContentTop: document.querySelector("main [data-content-template-module]")?.getBoundingClientRect().top ?? -1,
+  }));
+  expect(overlayBounds.firstContentTop).toBeLessThan(overlayBounds.headerBottom);
 
   await page.unroute("**/api/**");
   await installPublicApiFixture(page, createSolidHeaderHomeFixture());
   await page.reload();
   await expect(page.locator(".editorial-shell")).toHaveAttribute("data-page-header-mode", "solid");
-  await expect(page.locator(".site-header")).not.toHaveClass(/is-transparent/);
-  await expect(page.locator(".site-header")).toHaveCSS("background-color", "rgba(255, 255, 255, 0.92)");
+  await expect(page.locator(".editorial-shell")).toHaveAttribute("data-page-header-surface", "transparent");
+  await expect(page.locator(".site-header")).toHaveClass(/is-transparent/);
+  await expect(page.locator(".site-header")).not.toHaveClass(/is-overlay-light/);
+  await expect(page.locator(".site-header")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  const solidHeader = page.locator(".site-header");
+  const solidContent = page.locator("main [data-content-template-module]").first();
+  const solidHeading = solidContent.locator(":is(h1:not(.sr-only), h2)").first();
+  await expect(solidContent).toBeVisible();
+  await expect(solidHeading).toBeVisible();
+  const [solidHeaderBox, solidContentBox, solidHeadingBox] = await Promise.all([
+    solidHeader.boundingBox(),
+    solidContent.boundingBox(),
+    solidHeading.boundingBox(),
+  ]);
+  expect(solidHeaderBox).not.toBeNull();
+  expect(solidContentBox).not.toBeNull();
+  expect(solidHeadingBox).not.toBeNull();
+  expect(solidContentBox!.y).toBeLessThan(solidHeaderBox!.y + solidHeaderBox!.height);
+  expect(solidHeadingBox!.y).toBeGreaterThanOrEqual(solidHeaderBox!.y + solidHeaderBox!.height + 20);
 });
 
 test("移动菜单支持键盘关闭、焦点恢复与路由后主内容焦点", async ({ page }) => {

@@ -5,15 +5,13 @@ import type {
   PointerEventHandler,
   ReactNode,
 } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface TemplateCatalogCardProps {
   name: string;
-  description: string;
   preview: ReactNode;
-  actionHint: string;
   ariaLabel: string;
   active?: boolean;
-  badge?: ReactNode;
   className?: string;
   compact?: boolean;
   controlClassName?: string;
@@ -21,8 +19,6 @@ export interface TemplateCatalogCardProps {
   dataTemplateName?: string;
   disabled?: boolean;
   draggable?: boolean;
-  footer?: ReactNode;
-  title?: string;
   trailingAction?: ReactNode;
   onClick?: MouseEventHandler<HTMLDivElement>;
   onDragEnd?: DragEventHandler<HTMLDivElement>;
@@ -35,7 +31,7 @@ export interface TemplateCatalogCardProps {
   onPointerUp?: PointerEventHandler<HTMLDivElement>;
 }
 
-function createStaticDragImage(name: string, actionHint: string) {
+function createStaticDragImage(name: string) {
   const dragImage = document.createElement("div");
   dragImage.dataset.templateCatalogDragImage = "static";
   dragImage.setAttribute("aria-hidden", "true");
@@ -48,7 +44,7 @@ function createStaticDragImage(name: string, actionHint: string) {
     "width:220px",
     "max-width:220px",
     "padding:10px 12px",
-    "border:1px solid var(--adm-line, #d9dddf)",
+    "border:1px solid var(--adm-line, #dde1e2)",
     "border-radius:8px",
     "background:var(--adm-content-bg, #fff)",
     "color:var(--adm-text, #181a1b)",
@@ -61,11 +57,7 @@ function createStaticDragImage(name: string, actionHint: string) {
   nameElement.textContent = name;
   nameElement.style.cssText = "overflow:hidden;font-size:13px;line-height:18px;text-overflow:ellipsis;white-space:nowrap";
 
-  const actionElement = document.createElement("span");
-  actionElement.textContent = actionHint;
-  actionElement.style.cssText = "overflow:hidden;color:var(--adm-text-secondary, #687074);font-size:11px;line-height:16px;text-overflow:ellipsis;white-space:nowrap";
-
-  dragImage.append(nameElement, actionElement);
+  dragImage.append(nameElement);
   document.body.appendChild(dragImage);
   return dragImage;
 }
@@ -76,12 +68,9 @@ function createStaticDragImage(name: string, actionHint: string) {
  */
 export default function TemplateCatalogCard({
   name,
-  description,
   preview,
-  actionHint,
   ariaLabel,
   active,
-  badge,
   className,
   compact = false,
   controlClassName,
@@ -89,8 +78,6 @@ export default function TemplateCatalogCard({
   dataTemplateName,
   disabled = false,
   draggable = false,
-  footer,
-  title,
   trailingAction,
   onClick,
   onDragEnd,
@@ -102,6 +89,34 @@ export default function TemplateCatalogCard({
   onPointerMove,
   onPointerUp,
 }: TemplateCatalogCardProps) {
+  const previewHostRef = useRef<HTMLSpanElement>(null);
+  const [previewMounted, setPreviewMounted] = useState(Boolean(active));
+
+  useEffect(() => {
+    if (active) setPreviewMounted(true);
+  }, [active]);
+
+  useEffect(() => {
+    if (previewMounted) return undefined;
+    const target = previewHostRef.current;
+    if (!target || typeof IntersectionObserver === "undefined") {
+      setPreviewMounted(true);
+      return undefined;
+    }
+    const root = target.closest<HTMLElement>(".homepage-editor__template-scroll");
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setPreviewMounted(true);
+      observer.disconnect();
+    }, {
+      root,
+      rootMargin: "180px 0px",
+      threshold: 0.01,
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [previewMounted]);
+
   const handleKeyDown: KeyboardEventHandler<HTMLDivElement> = (event) => {
     onKeyDown?.(event);
     if (event.defaultPrevented || disabled || event.repeat) return;
@@ -116,9 +131,9 @@ export default function TemplateCatalogCard({
     if (event.defaultPrevented || disabled || !draggable) return;
 
     // 浏览器默认会把整个卡片（包括真实 Renderer、轮播和视频）作为拖拽影像，
-    // 看起来像预览图在画布上滑动。只截取静态名称和动作提示，业务 payload
+    // 看起来像预览图在画布上滑动。拖拽影像只保留模板名称，业务 payload
     // 仍由页面装修或模板设计各自的 onDragStart 写入。
-    const dragImage = createStaticDragImage(name, actionHint);
+    const dragImage = createStaticDragImage(name);
     try {
       event.dataTransfer.setDragImage(dragImage, 18, 18);
     } catch {
@@ -134,6 +149,8 @@ export default function TemplateCatalogCard({
       data-template-catalog-card="shared"
       data-template-identity={dataTemplateIdentity}
       data-template-name={dataTemplateName}
+      onMouseEnter={() => setPreviewMounted(true)}
+      onFocusCapture={() => setPreviewMounted(true)}
     >
       <div
         className={`homepage-editor__template-card-main${controlClassName ? ` ${controlClassName}` : ""}`}
@@ -143,7 +160,6 @@ export default function TemplateCatalogCard({
         aria-pressed={typeof active === "boolean" ? active : undefined}
         aria-label={ariaLabel}
         draggable={draggable && !disabled}
-        title={title}
         onClick={onClick}
         onDragStart={handleDragStart}
         onDragEnd={onDragEnd}
@@ -154,16 +170,22 @@ export default function TemplateCatalogCard({
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
       >
-        <span className="homepage-editor__template-preview-wrap">
-          {preview}
-          {badge ? <span className="homepage-editor__template-badge">{badge}</span> : null}
-          <span className="homepage-editor__template-add">{actionHint}</span>
+        <span ref={previewHostRef} className="homepage-editor__template-preview-wrap">
+          {previewMounted ? preview : (
+            <span
+              className="template-editor__catalog-preview-placeholder"
+              data-preview-status="deferred"
+              aria-hidden="true"
+            />
+          )}
         </span>
         <span className="homepage-editor__template-name">{name}</span>
-        <span className="homepage-editor__template-description">{description}</span>
-        {footer ? <div className="homepage-editor__template-footer">{footer}</div> : null}
       </div>
-      {trailingAction}
+      {trailingAction ? (
+        <span className="template-editor__catalog-card-action">
+          {trailingAction}
+        </span>
+      ) : null}
     </article>
   );
 }

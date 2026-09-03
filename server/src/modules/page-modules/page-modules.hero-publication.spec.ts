@@ -42,7 +42,7 @@ test("首屏具备真实标题、双端素材与替代文字时通过发布素�
   assert.deepEqual(result.errors, []);
 });
 
-test("同一页面允许发布多个首屏主舞台", async () => {
+test("同一页面存在多个首屏主舞台时阻断发布", async () => {
   const document = makeHero();
   document.content.push({
     type: "首屏主视觉",
@@ -58,11 +58,11 @@ test("同一页面允许发布多个首屏主舞台", async () => {
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, true, JSON.stringify(result.errors));
-  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.includes("页面只能有一个首屏主舞台（primary-stage），当前为 2 个"));
 });
 
-test("允许多个首屏后仍要求第一个首屏主舞台位于页面开头", async () => {
+test("首屏主舞台仍要求位于页面开头", async () => {
   const heroDocument = makeHero();
   const document = {
     ...heroDocument,
@@ -91,7 +91,7 @@ test("允许多个首屏后仍要求第一个首屏主舞台位于页面开头",
   assert.ok(result.errors.includes("首屏主舞台（primary-stage）必须是首个可见品牌内容区"));
 });
 
-test("首屏缺少标题、手机图或替代文字时按当前必填合同阻断发布", async () => {
+test("首屏缺少手机专图或替代文字时分别阻断并定位字段", async () => {
   const document = makeHero({ title: "", mobileImage: "", altText: "" });
   const result = await createService().validatePageDocument(
     "home",
@@ -100,12 +100,34 @@ test("首屏缺少标题、手机图或替代文字时按当前必填合同阻�
   );
 
   assert.equal(result.valid, false);
-  for (const field of ["title", "mobileImage", "altText"]) {
-    const issue = result.issues.find((item) => item.field === field);
-    assert.equal(issue?.blockId, "hero-publication-gate");
-    assert.equal(issue?.severity, "error");
-    assert.ok(result.errors.includes(issue.message));
-  }
+  const mobileIssue = result.issues.find((item) => item.field === "mobileImage");
+  assert.equal(mobileIssue?.blockId, "hero-publication-gate");
+  assert.equal(mobileIssue?.severity, "error");
+  assert.match(mobileIssue?.message || "", /桌面与手机素材/);
+  const titleIssue = result.issues.find((item) => item.field === "title");
+  assert.equal(titleIssue?.blockId, "hero-publication-gate");
+  assert.equal(titleIssue?.severity, "warning");
+  const altIssue = result.issues.find((item) => item.field === "altText");
+  assert.equal(altIssue?.blockId, "hero-publication-gate");
+  assert.equal(altIssue?.severity, "error");
+});
+
+test("首屏使用系统占位图时阻断发布并定位具体端", async () => {
+  const document = makeHero({
+    mobileImage: "/images/system/launch-short-page-mobile.svg",
+  });
+  const result = await createService().validatePageDocument(
+    "home",
+    document,
+    makeFormalPageMetadata(document),
+  );
+
+  assert.equal(result.valid, false);
+  const issue = result.issues.find((item) => item.field === "mobileImage");
+  assert.equal(issue?.severity, "error");
+  assert.equal(issue?.blockId, "hero-publication-gate");
+  assert.equal(issue?.path, "content[0].props.mobileImage");
+  assert.match(issue?.message || "", /系统占位图/);
 });
 
 test("首屏标题明确隐藏时不再把空标题作为发布阻断", async () => {

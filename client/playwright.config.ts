@@ -5,7 +5,10 @@ import { fileURLToPath } from "node:url";
 const appMode = process.env.PLAYWRIGHT_APP_MODE === "mock" ? "mock" : "development";
 // 旧测试只在 Node 侧读取该变量决定网络夹具/skip；envPrefix 白名单确保它不进入浏览器。
 process.env.VITE_USE_MOCK = appMode === "mock" ? "true" : "false";
-const port = Number(process.env.PLAYWRIGHT_PORT || (appMode === "mock" ? 5174 : 5173));
+// Playwright 的 webServer 随测试进程启停，必须与人工开发服务隔离，避免测试结束后
+// 把用户正在访问的 5173/5174 一并带走，或错误复用缺少真实后端的临时前端。
+const defaultTestPort = appMode === "mock" ? 5177 : 5176;
+const port = Number(process.env.PLAYWRIGHT_PORT || defaultTestPort);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${port}`;
 
 // 每个 spec 必须且只能属于一个确定性边界。混合文件按主要业务参与者归类；

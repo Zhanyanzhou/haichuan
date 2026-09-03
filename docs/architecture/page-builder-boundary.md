@@ -1,6 +1,6 @@
 # 海川珠宝 — 页面构建器边界 (Page Builder Boundary)
 
-> 最近更新：2026-08-31 | 本文只描述当前 Puck PageDocument 实现边界；页面装修与模板设计的共享编辑器产品规则见 `docs/page-builder/template-design-framework.md`，模板数量、结构、页面角色、比例和能力必须以机器合同及生成产物为准。
+> 最近更新：2026-09-03 | 本文只描述当前 Puck PageDocument 实现边界，不定义模板产品方向。模板结构能力、实际 Repository、内置兼容合同和页面实例按 `docs/page-builder/template-design-framework.md` 分工取证；当前数量只认 `docs/CURRENT_STATE.md`。
 
 ---
 
@@ -20,19 +20,19 @@
 | Puck 适配器 | `client/src/page-builder/adapters/*.puck.tsx` | 区块注册/默认值;旧专属 Inspector 已于 2026-08 R4b 退役(git 历史可查) |
 | 前台渲染块 | `client/src/components/blocks/` | 机器合同登记的活跃内容模板复用同一批真实区块组件，`editMode` 区分编辑/公开态 |
 | 公开渲染器 | `client/src/page-builder/runtime/` | PuckDocumentRenderer(含旧类型兼容分支)+ PublishedPageDecoration(业务页前置视觉区) |
-| 机器合同 | `contracts/page-builder/content-templates.contract.json` + 生成产物 | 模板注册、根角色、双端顺序/比例、实例能力、页面角色和发布限制的唯一事实来源 |
+| 机器合同 | `template-definition.schema.json`、`content-templates.contract.json` + 生成产物 | 前者定义统一母模板结构能力；后者登记内置起步/兼容模板和现有页面级规则，不能代替实际模板 Repository |
 | 元数据 | `client/src/page-builder/config/` | 编辑页声明、兼容映射和从机器合同派生的运行配置；不得复制 `pageRules` 建第二套页面门禁 |
 | 后端 API | `server/src/modules/page-modules/` | PageDocument CRUD、预检/发布、版本与服务端最终页面角色门禁 |
-| 数据库 | `page_documents` / `page_document_revisions` | 整页 Puck JSON + 50 条发布历史(旧 `page_modules`、`content_slots` 表均已删除) |
+| 数据库 | `page_documents` / `page_document_revisions`、`dynamic_templates` 相关表 | 前者保存页面实例与发布历史，后者保存实际母模板草稿和不可变版本；旧 `page_modules`、`content_slots` 表均已删除 |
 
 ---
 
-## 模板体系(2026-08 重构)
+## 模板体系（当前实现）
 
-- **页面合同**：Brand/Commerce 等 mode 只作页面定位和视觉语义；全部 active 母模板在六个可装修页面通用，`recommendedFor` 只作推荐。机器合同 `pageRules` 仍强制裁决固定业务区数量和位置、根内容位置及导航模式，通用模板不得绕过这些页面级约束。
+- **页面合同**：当前内置起步/兼容模板在六个可装修页面通用，`recommendedFor` 只作推荐；这只是当前实现，不限制以后通过统一 Repository 新增母模板。`pageRules` 继续裁决固定业务区数量和位置、根内容位置及导航模式，任何模板都不得绕过页面级约束。
 - **公开职责**：`products` 是 `brand-showcase`，只承担品牌作品展陈；`catalog` 是 `selection-tool`，唯一承担搜索、筛选、排序、选款和销售状态，并保留一个固定业务区。`/search` 只作兼容重定向到 `/catalog`。
-- **模板与母版**：当前运营模板及其母版关系以机器合同为准，不在本文复制易漂移数量或手写映射。
-- **规范比例**：允许值、默认值和双端差异只从机器合同派生；旧文档中的固定比例清单不得作为新增内容依据。
+- **模板与母版**：允许的结构能力以 `template-definition.schema.json` 为准，实际模板身份和版本以 `DynamicTemplate` Repository 为准；内置兼容模板的布局继续以 `content-templates.contract.json` 为准。
+- **比例与响应式**：统一母模板从其版本化定义读取；内置兼容模板从自身合同读取。旧文档中的固定比例清单不得作为新增模板依据。
 - **焦点**:desktopFocusX/Y + mobileFocusX/Y 双端独立(旧共享 focusX/Y 读取回退)。
 - **旧类型迁移**:分割面板/图文混排/礼赠指南已从注册表移除;编辑器载入经 `utils/migratePuckData` 自动转换;公开渲染器保留旧类型分支，但历史 revision 只有重新通过当前发布门禁并取得服务端验收印记后才能再次公开。
 
@@ -59,7 +59,7 @@ status          "DRAFT" | "PUBLISHED"
 
 站点名称、门店名称、电话、邮箱、地址、营业时间和地图链接只来自 `SiteSettings`，不得写入 PageDocument 作为正式资料回退。一次公开 `PublicLayout` 由一个 `PublicSiteSettingsResource` 统一供给导航、门店信息、预约区块和联系页固定业务区；一次编辑器 `EditorCanvasShell` 也由一个资源统一供给导航、页脚和画布区块。独立模块预览可以在没有壳层 Provider 时只读查询同一 API，但不得建立另一套默认业务事实。
 
-模板库中性样例只属于 `TEMPLATE_PREVIEW_CONTENT` 预览层，不得进入组件 `defaultProps`、推荐 PageDocument、正式草稿或业务 API。当前浏览器预览只加载 `neutral-template-preview-v1` 下不表达人物、商品、工艺、门店或品牌事实的 SVG，以及系统商品占位 SVG；不得加载真实摄影图片。正式页面媒体仍必须由内容负责人提供来源与授权记录，并通过上述发布门禁逐 URL 验证。
+模板库与模板设计画布的示例内容只属于内存预览层，不得进入组件 `defaultProps`、推荐 PageDocument、正式草稿或业务 API。两处通过同一 Renderer 消费同一份按槽位与机器合同派生的示例参数；目录不再读取独立占位缩略图。示例媒体只使用系统中性 SVG，并在真实结构内部呈现图片、文字、按钮和商品等槽位的位置与比例；不得加载真实摄影栅格图，也不得作为商品、工艺、门店、证书或品牌事实进入公开 Renderer。正式页面媒体仍必须由内容负责人提供来源与授权记录，并通过上述发布门禁逐 URL 验证。
 
 公开降级边界：`home`、`products`、`custom`、`about` 等纯品牌页只有取得满足当前页面合同且带当前服务端验收印记的已发布 PageDocument 才渲染正式品牌内容；未发布、读取失败或快照无效时只显示中性安全短页，不回退到另一套硬编码品牌长页。明确失效会清除客户端内存旧快照且不提供无效重试，临时读取失败才保留最后有效快照并允许恢复。`catalog` 与 `contact` 的搜索、商品结果、选款清单、咨询表单和联系资料属于固定业务区，装修内容不可用时仍保留，并继续实时读取各自业务事实源。
 

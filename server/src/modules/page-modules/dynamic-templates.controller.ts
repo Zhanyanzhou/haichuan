@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -10,6 +11,7 @@ import {
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { SkipGenericAudit } from "../../common/decorators/skip-generic-audit.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import type { StaffRequest } from "../../common/security/authenticated-principal";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -112,6 +114,7 @@ export class DynamicTemplatesController {
 
   @Roles("SUPER_ADMIN")
   @Post(":templateId/publish")
+  @SkipGenericAudit()
   @ApiOperation({ summary: "发布不可变模板版本；不升级任何页面实例" })
   publish(
     @Param("templateId") templateId: string,
@@ -130,15 +133,25 @@ export class DynamicTemplatesController {
 
   @Roles("SUPER_ADMIN")
   @Post(":templateId/archive")
-  @ApiOperation({ summary: "归档当前管理员拥有的母模板" })
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "将当前管理员可编辑的母模板移入回收站" })
   archive(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
     return this.service.archive(req.user.id, templateId);
   }
 
   @Roles("SUPER_ADMIN")
   @Post(":templateId/restore")
-  @ApiOperation({ summary: "恢复当前管理员拥有的母模板" })
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "从回收站恢复当前管理员可编辑的母模板" })
   restore(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
     return this.service.restore(req.user.id, templateId);
+  }
+
+  @Roles("SUPER_ADMIN")
+  @Delete(":templateId")
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "永久删除回收站中从未发布且未被引用的 CUSTOM 模板草稿" })
+  deleteDraft(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
+    return this.service.deleteDraft(req.user.id, templateId);
   }
 }

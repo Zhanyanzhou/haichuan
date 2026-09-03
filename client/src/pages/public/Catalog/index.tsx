@@ -496,7 +496,7 @@ export default function Catalog({
         .catalog-page__discovery-main {
           max-width: 1440px;
           margin-inline: auto;
-          padding: clamp(64px, 6vw, 88px) clamp(32px, 5.55vw, 80px) clamp(56px, 5vw, 72px);
+          padding: calc(clamp(64px, 6vw, 88px) + var(--site-header-height)) clamp(32px, 5.55vw, 80px) clamp(56px, 5vw, 72px);
           display: grid;
           grid-template-columns: minmax(300px, .8fr) minmax(440px, 1fr);
           align-items: end;
@@ -698,11 +698,13 @@ export default function Catalog({
           }
         }
         @media (max-width: 720px) {
-          .catalog-page__discovery-main,
-          .catalog-page__discovery.is-compact .catalog-page__discovery-main {
+          .catalog-page__discovery-main {
             grid-template-columns: minmax(0, 1fr);
-            padding: 44px 20px 40px;
+            padding: calc(44px + var(--site-header-height)) 20px 40px;
             gap: 40px;
+          }
+          .catalog-page__discovery.is-compact .catalog-page__discovery-main {
+            padding: 44px 20px 40px;
           }
           .catalog-page__intro h1 {
             font-size: 40px;

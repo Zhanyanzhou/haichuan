@@ -77,8 +77,8 @@ const MenuIcon = () => (
 
 const CloseIcon = () => (
   <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-    <line x1="7" y1="7" x2="23" y2="23" />
-    <line x1="23" y1="7" x2="7" y2="23" />
+    <line x1="4" y1="4" x2="26" y2="26" />
+    <line x1="26" y1="4" x2="4" y2="26" />
   </svg>
 );
 
@@ -306,7 +306,8 @@ export default function StorefrontNavigation({
   const resolvedSettings = siteSettings ?? sharedSettingsResource.settings;
   const siteName = resolvedSettings?.siteName || "海川珠宝";
   const logoUrl = resolveSiteLogo(resolvedSettings?.logo);
-  const isTransparent = headerMode === "overlay-light" && !scrolled && !isMenuOpen;
+  const isTransparent = !scrolled && !isMenuOpen;
+  const usesLightHeaderText = headerMode === "overlay-light" && isTransparent;
 
   const setMenuOpen = useCallback((open: boolean) => {
     if (!isControlled) setUncontrolledMenuOpen(open);
@@ -332,9 +333,14 @@ export default function StorefrontNavigation({
   };
 
   return (
-    <div ref={rootRef} className={`storefront-navigation${preview ? " storefront-navigation--preview" : ""}`}>
+    <div
+      ref={rootRef}
+      className={`storefront-navigation${preview ? " storefront-navigation--preview" : ""}`}
+      data-page-header-mode={headerMode}
+      data-page-header-surface={isTransparent ? "transparent" : "solid"}
+    >
       <header
-        className={`site-header${isTransparent ? " is-transparent" : ""}`}
+        className={`site-header${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
         style={{
           background: isTransparent ? "transparent" : "rgba(255,255,255,0.92)",
           borderBottomColor: isTransparent ? "transparent" : "rgba(24,26,27,0.06)",
@@ -360,18 +366,21 @@ export default function StorefrontNavigation({
           <div className="site-header__right">
             <Link to="/catalog" aria-label="选款中心" className="site-header__nav-item site-header__nav-item--catalog" onClick={handlePreviewLink}>
               <DiamondIcon />
+              <span className="site-header__nav-label hidden sm:inline">选款</span>
             </Link>
             <Link to="/contact" aria-label="预约咨询" className="site-header__nav-item" onClick={handlePreviewLink}>
               <CalendarIcon />
+              <span className="site-header__nav-label hidden sm:inline">预约</span>
             </Link>
             <Link to="/customer" aria-label="我的账户" className="site-header__nav-item" onClick={handlePreviewLink}>
               <AccountIcon />
+              <span className="site-header__nav-label hidden sm:inline">我的账户</span>
             </Link>
           </div>
         </div>
       </header>
 
-      <div className={`site-header__left-group${isTransparent ? " is-transparent" : ""}`}>
+      <div className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}>
         <button
           ref={menuToggleRef}
           type="button"

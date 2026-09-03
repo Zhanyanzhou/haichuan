@@ -6,6 +6,7 @@ import { getListingImage } from "@/utils/productImage";
 import { unwrapResponse } from "@/utils/unwrap";
 import { convertPuckProps } from "../utils/puckPropsToModule";
 import type { PuckProps } from "../types";
+import type { ProductRow } from "../data-sources/productSource";
 import { ProductRowState, usePublicProductRevision } from "./PublicProductRuntime";
 
 function textValue(value: unknown) {
@@ -23,6 +24,16 @@ function toProductRowItem(product: Product) {
   };
 }
 
+function toPreviewProductRowItem(product: ProductRow) {
+  return {
+    id: product.id,
+    name: product.name,
+    image: product.image,
+    price: product.priceLabel,
+    link: `/products/${encodeURIComponent(product.code || String(product.id))}`,
+  };
+}
+
 export interface ResolvedLookbookBlockProps {
   props: PuckProps;
   editMode?: boolean;
@@ -36,6 +47,12 @@ export default function ResolvedLookbookBlock({
   editMode = false,
   stableReferencesOnly = true,
 }: ResolvedLookbookBlockProps) {
+  const previewProducts = useMemo(
+    () => editMode && Array.isArray(props.__previewProducts)
+      ? (props.__previewProducts as ProductRow[])
+      : [],
+    [editMode, props.__previewProducts],
+  );
   const productIds = useMemo(
     () => !stableReferencesOnly && Array.isArray(props.productIds)
       ? props.productIds
@@ -52,7 +69,7 @@ export default function ResolvedLookbookBlock({
   );
   const idsKey = productIds.join(",");
   const codesKey = productCodes.join(",");
-  const hasReferences = Boolean(idsKey || codesKey);
+  const hasReferences = previewProducts.length === 0 && Boolean(idsKey || codesKey);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(hasReferences);
   const [error, setError] = useState(false);
@@ -124,6 +141,8 @@ export default function ResolvedLookbookBlock({
   }
   const module = convertPuckProps("佩戴灵感", props);
   if (!module) return null;
-  module.content.products = products.map(toProductRowItem);
+  module.content.products = previewProducts.length > 0
+    ? previewProducts.map(toPreviewProductRowItem)
+    : products.map(toProductRowItem);
   return <LookbookBlock module={module} editMode={editMode} />;
 }

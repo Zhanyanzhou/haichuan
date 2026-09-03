@@ -71,6 +71,7 @@ services:
       ANALYTICS_DATASET: "${ANALYTICS_DATASET:-test}"
       ANALYTICS_RETENTION_DAYS: "${ANALYTICS_RETENTION_DAYS:-90}"
       ANALYTICS_RETENTION_ENABLED: "${ANALYTICS_RETENTION_ENABLED:-false}"
+      ANALYTICS_TRUSTED_GEO_HEADERS: "${ANALYTICS_TRUSTED_GEO_HEADERS:-false}"
       ANALYTICS_DASHBOARD_ENABLED: "${ANALYTICS_DASHBOARD_ENABLED:-true}"
       GOLD_PRICE_API_URL: "${GOLD_PRICE_API_URL:-}"
       KIMI_API_KEY: "${KIMI_API_KEY:-}"
@@ -151,8 +152,15 @@ services:
         condition: service_healthy
     ports:
       - "80:8080"
+    volumes:
+      # 仅读共享 ACME HTTP-01 验证文件；证书私钥不进入客户端容器。
+      - acme_challenge_data:/var/www/certbot:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget --header='X-Forwarded-Proto: https' -q -O /dev/null http://127.0.0.1:8080/ || exit 1",
+        ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -232,6 +240,7 @@ volumes:
   uploads_data:
   private_media_data:
   kuma_data:
+  acme_challenge_data:
 
 networks:
   jewelry-network:

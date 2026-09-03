@@ -10,6 +10,7 @@ import { USE_MOCK } from '@/services/mockData';
 import { unwrapResponse } from '@/utils/unwrap';
 import { ADMIN_COLORS } from '@/styles/antdTheme';
 import { resolveAdminReturnPath } from '@/utils/adminReturnPath';
+import { adminLandingRoute, canAccessAdminRoute } from '@/config/adminRouteAccess';
 import type { User } from '@/types';
 
 /* ═══════ 局部视觉令牌 — 仅作用于登录页 ═══════ */
@@ -88,7 +89,13 @@ export default function Login() {
       }
 
       const stateFrom = (location.state as { from?: unknown } | null)?.from;
-      navigate(resolveAdminReturnPath(location.search, stateFrom), { replace: true });
+      const returnTo = resolveAdminReturnPath(location.search, stateFrom);
+      // returnTo 指向当前角色无权进入的页面时回退到该角色默认落点，避免登录即 403。
+      const target =
+        returnTo && canAccessAdminRoute(data.user.role, returnTo)
+          ? returnTo
+          : adminLandingRoute(data.user.role);
+      navigate(target, { replace: true });
     } catch (error: unknown) {
       setError(loginErrorMessage(error));
     } finally {

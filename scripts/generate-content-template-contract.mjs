@@ -1954,33 +1954,52 @@ function getCompatibilityRoleValue(
   moduleType: string,
   roleId: string,
   values: Record<string, unknown>,
+  visitedRoleIds: ReadonlySet<string> = new Set(),
 ): unknown {
+  if (visitedRoleIds.has(roleId)) return undefined;
+  const nextVisitedRoleIds = new Set(visitedRoleIds);
+  nextVisitedRoleIds.add(roleId);
+
   const directValue = values[roleId];
   if (hasNonEmptyText(directValue)) return directValue;
 
+  let compatibilityValue: unknown;
   switch (moduleType + ":" + roleId) {
     case "视频区块:coverImage":
-      return values.posterUrl;
+      compatibilityValue = values.posterUrl;
+      break;
     case "改款对比:before":
-      return values.beforeImage;
+      compatibilityValue = values.beforeImage;
+      break;
     case "改款对比:after":
-      return values.afterImage;
+      compatibilityValue = values.afterImage;
+      break;
     case "佩戴灵感:wearingImage":
     case "热区图:sceneImage":
     case "门店信息:store":
-      return values.image;
+      compatibilityValue = values.image;
+      break;
     case "预约入口:bgImage":
-      return values.backgroundImage;
+      compatibilityValue = values.backgroundImage;
+      break;
     case "限时活动:event":
-      return values.eventImage;
+      compatibilityValue = values.eventImage;
+      break;
     case "真实评价与实拍:authorizedPhoto": {
       const testimonials = values.testimonials;
       const first = Array.isArray(testimonials) ? testimonials[0] : undefined;
-      return isRecord(first) ? first.image : undefined;
+      compatibilityValue = isRecord(first) ? first.image : undefined;
+      break;
     }
-    default:
-      return directValue;
   }
+  if (hasNonEmptyText(compatibilityValue)) return compatibilityValue;
+
+  const fallbackRoleId = getContentTemplateContract(moduleType)?.roles.find(
+    (role) => role.id === roleId,
+  )?.fallbackRoleId;
+  return fallbackRoleId
+    ? getCompatibilityRoleValue(moduleType, fallbackRoleId, values, nextVisitedRoleIds)
+    : directValue;
 }
 
 function getQuantifiedCollectionValue(

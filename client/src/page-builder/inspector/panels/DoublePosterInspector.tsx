@@ -839,7 +839,7 @@ export default function DoublePosterInspector({
 
         {renderObjectGeometry(roleId)}
         {renderLayerOrder(roleId)}
-        <InspectorDisclosure label="高级设置">
+        <InspectorDisclosure label="重置当前图片设计">
           <div className="homepage-editor__advanced-settings-grid">
             <button
               type="button"
@@ -1046,7 +1046,7 @@ export default function DoublePosterInspector({
         ) : null}
 
         {renderLayerOrder("copy")}
-        <InspectorDisclosure label="高级设置">
+        <InspectorDisclosure label="重置文案设计">
           <div className="homepage-editor__advanced-settings-grid">
             <button
               type="button"
@@ -1093,7 +1093,7 @@ export default function DoublePosterInspector({
         moduleType={editor.moduleType}
       />
 
-      <InspectorDisclosure label="高级设置">
+      <InspectorDisclosure label="自定义背景与整体重置">
         <div className="homepage-editor__advanced-settings-grid">
           <FieldRenderer
             def={ADVANCED_BG_COLOR_FIELD}

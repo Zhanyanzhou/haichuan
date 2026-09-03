@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 const screenshotDir = path.resolve("test-results/visual-editor-hero");
 
 const fixtureSvg = `
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+  <svg xmlns="http://www.w3.org/2000/svg" width="3360" height="1890" viewBox="0 0 1600 900">
     <rect width="1600" height="900" fill="#d8d6d0"/>
     <circle cx="1120" cy="360" r="230" fill="#f7f5ef"/>
   </svg>
@@ -121,12 +121,14 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await expect(page.getByTestId("visual-state")).toContainText('"title"');
     await expect(page.getByTestId("visual-state")).not.toContainText('"safeBand"');
     const titleSlot = canvas.getByText("点击添加主标题");
-    await expect(titleSlot).toHaveCSS("background-color", "rgb(244, 245, 245)");
-    await expect.poll(() => titleSlot.evaluate((element) =>
-      getComputedStyle(element, "::after").content,
-    )).toContain("文字槽位");
+    const titleSlotOverlay = canvas.locator(
+      '[data-hc-template-slot-box][data-node-id="title"]',
+    );
+    await expect(titleSlotOverlay).toBeVisible();
+    await expect(titleSlotOverlay).toContainText("标题");
     await page.getByRole("tab", { name: "内容编辑" }).click();
     await expect(titleSlot).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(titleSlotOverlay).toHaveCount(0);
 
     await mkdir(screenshotDir, { recursive: true });
     await page.screenshot({
@@ -155,9 +157,10 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     const media = canvas.locator('[data-content-role-desktop="desktopImage"]');
     await media.click({ position: { x: 100, y: 100 } });
     await expect(page.getByText("正在调整：桌面主图")).toBeVisible();
-    await expect(media.locator("img")).toHaveCSS("opacity", "0");
+    // 构图调整必须保留画面，管理员才能判断焦点移动后的实际结果。
+    await expect(media.locator("img")).toHaveCSS("opacity", "1");
     const mediaHud = canvas.getByRole("toolbar", {
-      name: "调整画布对象 desktopImage",
+      name: "调整画布对象：桌面主图",
     });
     await mediaHud.getByRole("button", { name: "调整图片构图" }).click();
     await expect(mediaHud.getByRole("button", { name: "调整图片构图" })).toHaveAttribute("aria-pressed", "true");
@@ -191,5 +194,27 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await media.press("Shift+ArrowRight");
     await expect(page.getByTestId("visual-state")).toContainText('"focusByViewport":{"desktop":{"x":55,"y":50}}');
     await expect(liveStatus).toContainText("图片焦点已调整为 55%，50%");
+  });
+
+  test("隐藏全部文案后不保留空白带，也不生成不可见键盘焦点", async ({ page }) => {
+    await page.goto("/__visual-editor-hero?hiddenText=1");
+    const canvas = page.getByRole("region", { name: "中央画布测试区" });
+    await expect(canvas.locator(".hc-phase1-hero__copy-band")).toHaveCSS("display", "none");
+    await expect(canvas.locator(".hc-phase1-hero__copy-shade")).toHaveCSS("display", "none");
+    await expect(canvas.locator('picture[data-hc-keyboard-node]')).toHaveCount(0);
+    await expect(canvas.locator('[data-hc-keyboard-node="desktopImage"]')).toHaveCount(1);
+
+    const invalidFocusTargets = await canvas.locator('[data-hc-keyboard-node][tabindex="0"]').evaluateAll((nodes) =>
+      nodes.filter((node) => {
+        const element = node as HTMLElement;
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.display === "none"
+          || style.visibility === "hidden"
+          || rect.width <= 0
+          || rect.height <= 0;
+      }).map((node) => node.getAttribute("data-hc-keyboard-node")),
+    );
+    expect(invalidFocusTargets).toEqual([]);
   });
 });

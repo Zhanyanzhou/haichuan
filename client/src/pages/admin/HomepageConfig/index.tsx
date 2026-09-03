@@ -70,6 +70,7 @@ import {
 } from "@/page-builder/config/editorPages";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import {
+  CONTENT_TEMPLATE_BY_MODULE_TYPE,
   createContentTemplateMarker,
   extractContentTemplateLayoutData,
   getContentTemplateContract,
@@ -79,6 +80,7 @@ import {
   type ContentTemplateMediaRight,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisualRecord } from "@/page-builder/runtime/visualLayout";
+import { hasVisiblePrimaryStage } from "@/page-builder/utils/primaryStagePolicy";
 import {
   MissingMediaState,
   normalizeLegacyRenderColors,
@@ -94,6 +96,7 @@ import {
 } from "@/page-builder/visual-editor/visualEditorSession";
 import type { PersistTemplateOptions } from "@/page-builder/template-editor/TemplateWorkspace";
 import { UnifiedTemplateLibrary } from "@/page-builder/template-editor/TemplateEditorLibrary";
+import { createSystemCompatibilityRecoveryDefinition } from "@/page-builder/templates/unifiedTemplateCatalog";
 import { notifyDynamicTemplateCatalogChanged } from "@/page-builder/template-editor/templateCatalogEvents";
 import WorkspaceCanvasControls from "@/page-builder/template-editor/WorkspaceCanvasControls";
 import {
@@ -115,6 +118,8 @@ import { USE_MOCK } from "@/services/mockData";
 import {
   createDynamicTemplateStableId,
   getEffectiveDynamicTemplateInstanceEditPolicy,
+  normalizeTemplateDimensionContract,
+  validateDynamicTemplatePublishDefinition,
   type TemplateDefinitionV2,
 } from "@/page-builder/template-definition";
 import {
@@ -131,6 +136,10 @@ import {
   type ResolvedDynamicTemplateDefinitionMap,
 } from "@/page-builder/dynamic-template-instance";
 import DynamicTemplateInstanceInspector from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceInspector";
+import {
+  promoteInstanceOverridesToTemplateDraft,
+  type PromoteDynamicTemplateInstanceRequest,
+} from "@/page-builder/dynamic-template-instance/promoteToTemplate";
 import {
   dynamicTemplateApi,
   type DynamicTemplatePublishResultResource,
@@ -233,18 +242,26 @@ function createPersistedDynamicTemplateDraft(
   template: DynamicTemplateResource,
 ): TemplateEditorDraft | null {
   if (!template.draft) return null;
+  const definition = normalizeTemplateDimensionContract(template.draft.definition);
+  const requiresContractNormalization = JSON.stringify(definition)
+    !== JSON.stringify(template.draft.definition);
   return {
     format: "dynamic",
     sourceType: "persisted",
     localDraftId: template.templateId,
     versionNote: template.draft.versionNote ?? "",
     ...(template.sourceReference ? { sourceReference: template.sourceReference } : {}),
-    definition: structuredClone(template.draft.definition),
+    ...(requiresContractNormalization ? { requiresContractNormalization: true } : {}),
+    definition,
     remote: {
       databaseId: template.id,
       revision: template.draft.revision,
       publishedVersion: template.publishedVersion,
       baseVersion: template.draft.baseVersion,
+      sourceType: template.sourceType,
+      status: template.status,
+      canDelete: template.canDelete === true,
+      deleteBlockers: template.deleteBlockers ?? [],
     },
   };
 }
@@ -440,6 +457,7 @@ function EditorCanvasShell({
       ref={rootRef}
       className="homepage-editor__storefront-frame"
       data-canvas-editable={editable ? "true" : "false"}
+      data-page-header-mode={headerMode}
       style={
         {
           "--homepage-editor-preview-height": `${previewViewportHeight}px`,
@@ -768,11 +786,16 @@ function PageTemplateLibraryAdapter({
 }) {
   const { message, modal } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
+  const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
   const previewViewport = typeof currentViewport.width === "number" && currentViewport.width <= 480
     ? "mobile"
     : "desktop";
+  const pageHasPrimaryStage = hasVisiblePrimaryStage(
+    appData,
+    resolvedDynamicTemplateDefinitions,
+  );
 
   const upgradeSystemTemplateInPage = useCallback((current: SystemContentTemplateCurrent) => {
     const upgradeableCount = countUpgradeableSystemTemplateInstances(
@@ -805,6 +828,13 @@ function PageTemplateLibraryAdapter({
     template: PublishedDynamicTemplateResource,
     requestedInsertionIndex = appData.content?.length ?? 0,
   ) => {
+    if (
+      template.definition.metadata.visualRole === "primary-stage"
+      && hasVisiblePrimaryStage(appData, resolvedDynamicTemplateDefinitions)
+    ) {
+      message.warning("首屏主舞台全页只能有一个；请编辑现有首屏");
+      return;
+    }
     const resolved = {
       templateId: template.templateId,
       version: template.version,
@@ -853,7 +883,7 @@ function PageTemplateLibraryAdapter({
       ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
     });
     message.success(`已添加“${template.name}”v${template.version}，可在右侧填写页面内容`);
-  }, [appData, dispatch, message]);
+  }, [appData, dispatch, message, resolvedDynamicTemplateDefinitions]);
 
   return (
     <UnifiedTemplateLibrary
@@ -862,6 +892,10 @@ function PageTemplateLibraryAdapter({
       isSystemTemplateAllowed={(moduleType) => (
         isContentTemplateInsertable(moduleType)
         && isContentTemplateAllowedForPage(pageKey, moduleType)
+        && (
+          CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType]?.visualRole !== "primary-stage"
+          || !pageHasPrimaryStage
+        )
       )}
       onInsertSystem={onInsertTemplate}
       onSystemDragStart={(moduleType, current) => onTemplateDragStart(
@@ -869,6 +903,10 @@ function PageTemplateLibraryAdapter({
         (insertionIndex) => onInsertTemplate(moduleType, current, insertionIndex),
       )}
       onSystemDragEnd={onTemplateDragEnd}
+      isPublishedTemplateAllowed={(template) => (
+        template.definition.metadata.visualRole !== "primary-stage"
+        || !pageHasPrimaryStage
+      )}
       onInsertPublished={insertPublishedDynamicTemplate}
       onPublishedDragStart={(template) => onTemplateDragStart(
         template.name,
@@ -903,6 +941,8 @@ function InspectorPanel({
   validationStatus,
   onRetryValidation,
   onOpenPageSettings,
+  canPromoteToTemplate,
+  onPromoteToTemplate,
 }: {
   hasUnsavedChanges: boolean;
   saving: boolean;
@@ -911,6 +951,8 @@ function InspectorPanel({
   validationStatus: PublishValidationStatus;
   onRetryValidation: () => void;
   onOpenPageSettings: (field?: string) => void;
+  canPromoteToTemplate: boolean;
+  onPromoteToTemplate: (request: PromoteDynamicTemplateInstanceRequest) => void | Promise<void>;
 }) {
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const content = useHomepagePuck((state) => state.appState.data.content);
@@ -989,6 +1031,8 @@ function InspectorPanel({
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
         onOpenPageSettings={onOpenPageSettings}
+        canPromoteToTemplate={canPromoteToTemplate}
+        onPromoteToTemplate={onPromoteToTemplate}
       />
     );
   }
@@ -1127,6 +1171,8 @@ function EditorBody({
   validationStatus,
   onRetryValidation,
   onOpenPageSettings,
+  canPromoteToTemplate,
+  onPromoteToTemplate,
 }: {
   pageKey: EditorPageKey;
   contentReady: boolean;
@@ -1141,9 +1187,15 @@ function EditorBody({
   validationStatus: PublishValidationStatus;
   onRetryValidation: () => void;
   onOpenPageSettings: (field?: string) => void;
+  canPromoteToTemplate: boolean;
+  onPromoteToTemplate: (
+    request: PromoteDynamicTemplateInstanceRequest,
+    viewport: { width: number; height: number },
+  ) => void | Promise<void>;
 }) {
   const { message } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
+  const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const appDataRef = useRef(appData);
   const currentViewport = useHomepagePuck(
     (state) => state.appState.ui.viewports.current,
@@ -1679,6 +1731,14 @@ function EditorBody({
         clearDragState();
         return;
       }
+      if (
+        CONTENT_TEMPLATE_BY_MODULE_TYPE[templateName]?.visualRole === "primary-stage"
+        && hasVisiblePrimaryStage(appData, resolvedDynamicTemplateDefinitions)
+      ) {
+        message.warning("首屏主舞台全页只能有一个；请编辑现有首屏");
+        clearDragState();
+        return;
+      }
       const displayName = meta.name;
       const block = createBlockContent(templateName);
       const marker = createContentTemplateMarker(templateName);
@@ -1709,7 +1769,7 @@ function EditorBody({
       message.success(`已插入“${displayName}”，可在右侧继续编辑`);
       clearDragState();
     },
-    [clearDragState, dispatch, message, pageKey],
+    [appData, clearDragState, dispatch, message, pageKey, resolvedDynamicTemplateDefinitions],
   );
 
   const getCanvasDropIndex = useCallback(
@@ -1836,7 +1896,6 @@ function EditorBody({
               onToggleNavigationPreview={toggleNavigationPreview}
               scrollSpyIndex={scrollSpyIndex}
               readOnly={viewingPublished}
-              publishIssues={publishIssues}
             />
           </>
         )}
@@ -1849,7 +1908,11 @@ function EditorBody({
         {previewMode ? (
           <div className="homepage-editor__preview-mode-bar" role="status">
             <strong>当前画布预览 · {canvasViewportLabel}</strong>
-            <span>包含尚未保存的修改；预览本身不会保存或发布。</span>
+            <span>
+              {hasUnsavedChanges
+                ? "正在预览尚未保存的修改；预览本身不会保存或发布。"
+                : "正在预览已保存草稿；预览本身不会再次保存或发布。"}
+            </span>
           </div>
         ) : null}
         <WorkspaceCanvasControls
@@ -1946,6 +2009,15 @@ function EditorBody({
                 validationStatus={validationStatus}
                 onRetryValidation={onRetryValidation}
                 onOpenPageSettings={onOpenPageSettings}
+                canPromoteToTemplate={canPromoteToTemplate}
+                onPromoteToTemplate={(request) => onPromoteToTemplate(request, {
+                  width: typeof currentViewport.width === "number"
+                    ? currentViewport.width
+                    : RESPONSIVE_CANVAS.desktop.width,
+                  height: typeof currentViewport.height === "number"
+                    ? currentViewport.height
+                    : RESPONSIVE_CANVAS.desktop.height,
+                })}
               />
             )}
           </div>
@@ -1968,6 +2040,7 @@ export default function HomepageConfig({
   const canManageTemplates = adminRole === "SUPER_ADMIN";
   const [workspaceMode, setWorkspaceMode] = useState<EditorWorkspaceMode>("page");
   const [templatePublishing, setTemplatePublishing] = useState(false);
+  const templateSaveInFlightRef = useRef<Promise<boolean> | null>(null);
   const templatePublishInFlightRef = useRef(false);
   const pageViewportBeforeTemplateRef = useRef<{ width: number; height: number } | null>(null);
   const templateDraft = useTemplateEditorSession((state) => state.draft);
@@ -2125,11 +2198,36 @@ export default function HomepageConfig({
     void dynamicTemplateApi.listCatalog()
       .then((response) => {
         const catalog = unwrapResponse<TemplateCatalogResource>(response);
+        const session = useTemplateEditorSession.getState();
+        if (session.sessionId !== openedSessionId || session.dirty) return;
         const current = catalog?.items.find((item) => (
           item.kind === "system-compatibility" && item.template.contractKey === contractKey
         ));
         const systemCurrent = current?.kind === "system-compatibility" ? current.template : null;
-        const session = useTemplateEditorSession.getState();
+        const persisted = catalog?.items.find((item) => (
+          item.kind === "editable"
+          && item.template.sourceReference === session.draft?.sourceReference
+        ));
+        if (persisted?.kind === "editable") {
+          const persistedDraft = createPersistedDynamicTemplateDraft(persisted.template);
+          if (persistedDraft) {
+            const visualSession = useVisualEditorSession.getState();
+            visualSession.resetWorkspaceContext("template");
+            visualSession.activateWorkspace("template");
+            session.open(persistedDraft);
+            const recoveryDefinition = systemCurrent
+              ? createSystemCompatibilityRecoveryDefinition(persisted.template, systemCurrent)
+              : undefined;
+            if (recoveryDefinition) {
+              session.setDynamicDefinition(recoveryDefinition);
+              session.selectObject(recoveryDefinition.rootNodeId);
+              message.warning("服务端草稿缺少当前系统模板组件，已载入系统基线供修复；原草稿尚未覆盖，确认后再保存");
+            } else {
+              session.selectObject(persistedDraft.definition.rootNodeId);
+            }
+            return;
+          }
+        }
         if (
           !systemCurrent
           || systemCurrent.moduleType !== defaultModuleType
@@ -2234,7 +2332,7 @@ export default function HomepageConfig({
 
   const openPersistedTemplateDraft = useCallback((template: DynamicTemplateResource) => {
     if (template.status === "ARCHIVED") {
-      message.warning("已归档模板需先恢复后才能继续编辑");
+      message.warning("回收站中的模板需先恢复后才能继续编辑");
       return false;
     }
     const draft = createPersistedDynamicTemplateDraft(template);
@@ -2250,6 +2348,115 @@ export default function HomepageConfig({
     session.selectObject(draft.definition.rootNodeId);
     return true;
   }, [message]);
+
+  const promotePageInstanceDesignToTemplate = useCallback(async (
+    request: PromoteDynamicTemplateInstanceRequest,
+    pageViewport: { width: number; height: number },
+  ) => {
+    if (!canManageTemplates) {
+      message.warning("只有超级管理员可以把页面设计覆盖应用到母模板草稿");
+      return;
+    }
+    if (USE_MOCK) {
+      message.info("Mock 模式没有服务端母模板草稿，不能执行安全回填");
+      return;
+    }
+    if (viewingPublishedRef.current) {
+      message.warning("请先返回页面草稿，再应用设计覆盖");
+      return;
+    }
+    const existingTemplateSession = useTemplateEditorSession.getState();
+    if (existingTemplateSession.draft && existingTemplateSession.dirty) {
+      message.warning("已有未保存的模板修改，请先返回模板设计处理后再回填");
+      return;
+    }
+
+    try {
+      const response = await dynamicTemplateApi.getDraft(request.templateId);
+      const template = unwrapResponse<DynamicTemplateResource | null>(response);
+      if (!template) {
+        message.error("当前母模板不存在可编辑草稿");
+        return;
+      }
+      if (template.status === "ARCHIVED") {
+        message.warning("回收站中的模板不能接收页面设计覆盖");
+        return;
+      }
+      const persistedDraft = createPersistedDynamicTemplateDraft(template);
+      if (!persistedDraft) {
+        message.error("服务端模板缺少可编辑草稿");
+        return;
+      }
+      const promotion = promoteInstanceOverridesToTemplateDraft({
+        sourceDefinition: request.sourceDefinition,
+        targetDefinition: persistedDraft.definition,
+        layoutOverridesByNodeId: request.layoutOverridesByNodeId,
+      });
+      if (promotion.blockers.length > 0 || promotion.conflicts.length > 0) {
+        modal.error({
+          title: "未应用：母模板草稿存在安全冲突",
+          content: (
+            <div>
+              {promotion.blockers.map((blocker) => <p key={blocker}>{blocker}</p>)}
+              {promotion.conflicts.slice(0, 6).map((conflict) => (
+                <p key={`${conflict.nodeId}-${conflict.device}-${conflict.field}`}>
+                  <strong>{conflict.nodeName} · {conflict.label}：</strong>{conflict.reason}
+                </p>
+              ))}
+              {promotion.conflicts.length > 6 ? <p>另有 {promotion.conflicts.length - 6} 项冲突。</p> : null}
+              <p>请先在模板设计中合并同一字段，页面草稿未被修改。</p>
+            </div>
+          ),
+          okText: "知道了",
+        });
+        return;
+      }
+      if (promotion.promoted.length === 0) {
+        message.info(promotion.alreadyApplied.length > 0
+          ? "这些设计覆盖已存在于当前母模板草稿，无需重复应用"
+          : "当前页面没有可无损应用到母模板草稿的设计覆盖");
+        return;
+      }
+
+      modal.confirm({
+        title: `应用 ${promotion.promoted.length} 项设计覆盖到母模板草稿？`,
+        width: 560,
+        content: (
+          <div>
+            <p>将打开“{persistedDraft.definition.name}”的模板设计工作区，并形成一条可撤销、尚未保存的草稿修改。</p>
+            <ul>
+              {promotion.promoted.slice(0, 8).map((item) => (
+                <li key={`${item.nodeId}-${item.device}-${item.field}`}>{item.nodeName} · {item.label}</li>
+              ))}
+            </ul>
+            {promotion.promoted.length > 8 ? <p>另有 {promotion.promoted.length - 8} 项安全设计字段。</p> : null}
+            {promotion.skipped.length > 0 ? (
+              <p>{promotion.skipped.length} 项偏移、图片缩放或精确焦点不能无损转换，将保留在当前页面，需在模板设计中人工确认。</p>
+            ) : null}
+            <p><strong>不会带入</strong>页面文字、图片、视频、商品、链接、隐藏状态，也不会自动保存、发布或更新其他页面。</p>
+          </div>
+        ),
+        okText: "打开模板草稿",
+        cancelText: "取消",
+        onOk: () => {
+          pageViewportBeforeTemplateRef.current = { ...pageViewport };
+          const visualSession = useVisualEditorSession.getState();
+          visualSession.resetWorkspaceContext("template");
+          visualSession.activateWorkspace("template");
+          const session = useTemplateEditorSession.getState();
+          session.open(persistedDraft);
+          useTemplateEditorSession.getState().setDynamicDefinition(promotion.definition);
+          useTemplateEditorSession.getState().selectObject(
+            promotion.promoted[0]?.nodeId ?? promotion.definition.rootNodeId,
+          );
+          setWorkspaceMode("template");
+          message.success(`已应用 ${promotion.promoted.length} 项设计覆盖；尚未保存模板草稿`);
+        },
+      });
+    } catch (error) {
+      message.error(getEditorErrorMessage(error, "母模板草稿读取失败，页面修改仍完整保留"));
+    }
+  }, [canManageTemplates, message, modal]);
 
   const openPersistedDynamicTemplateWorkspace = useCallback((template: DynamicTemplateResource) => {
     if (workspaceMode !== "template") {
@@ -2269,80 +2476,127 @@ export default function HomepageConfig({
     setWorkspaceMode("page");
   }, []);
 
-  const persistTemplateDraft = useCallback(async (
+  const persistTemplateDraft = useCallback((
     options: PersistTemplateOptions = {},
   ): Promise<boolean> => {
+    if (templateSaveInFlightRef.current) return templateSaveInFlightRef.current;
     const session = useTemplateEditorSession.getState();
     const draft = session.draft;
-    if (!canManageTemplates || !draft) return false;
+    const sessionId = session.sessionId;
+    if (!canManageTemplates || !draft || !sessionId) return Promise.resolve(false);
+    const requestedDraft = structuredClone(draft);
     session.setSaveStatus("saving");
-    try {
-      if (USE_MOCK) {
-        const localBase = draft.sourceType === "local"
-          ? draft
-          : (() => {
-              const localDraftId = createDynamicTemplateStableId("tpl");
-              return {
-                format: "dynamic" as const,
-                sourceType: "local" as const,
-                localDraftId,
-                versionNote: draft.versionNote,
-                sourceReference: draft.definition.templateId,
-                definition: {
-                  ...structuredClone(draft.definition),
-                  templateId: localDraftId,
-                },
-              };
-            })();
-        const savedDraft = saveLocalDynamicTemplateDraft(localBase, {
-          asCopy: draft.sourceType === "local" && options.asCopy,
-          name: options.name,
-        });
-        useTemplateEditorSession.getState().markSaved(savedDraft);
-        window.dispatchEvent(new Event(DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT));
-        message.success(options.asCopy
-          ? `“${savedDraft.definition.name}”已另存为本机测试草稿`
-          : "已保存为本机测试草稿；未写入服务端模板");
-        return true;
-      }
-      let response: unknown;
-      if (options.asCopy && draft.sourceType === "persisted") {
-        response = await dynamicTemplateApi.saveAs(draft.definition.templateId, {
-          name: (options.name ?? `${draft.definition.name} 副本`).trim(),
-          versionNote: draft.versionNote,
-        });
-      } else {
-        const definition = structuredClone(draft.definition);
-        if (options.name?.trim()) definition.name = options.name.trim();
-        if (options.asCopy) definition.templateId = createDynamicTemplateStableId("tpl");
-        response = draft.sourceType === "persisted" && draft.remote && !options.asCopy
-          ? await dynamicTemplateApi.updateDraft(draft.definition.templateId, {
-              expectedRevision: draft.remote.revision,
-              definition,
-              versionNote: draft.versionNote,
-            })
-            : await dynamicTemplateApi.create({
-              definition,
-              versionNote: draft.versionNote,
-              ...((options.asCopy ? draft.definition.templateId : draft.sourceReference)
-                ? { sourceReference: options.asCopy ? draft.definition.templateId : draft.sourceReference }
-                : {}),
+    const savePromise = (async (): Promise<boolean> => {
+      try {
+        let savedDraft: TemplateEditorDraft;
+        if (USE_MOCK) {
+          const localBase = requestedDraft.sourceType === "local"
+            ? requestedDraft
+            : (() => {
+                const localDraftId = createDynamicTemplateStableId("tpl");
+                return {
+                  format: "dynamic" as const,
+                  sourceType: "local" as const,
+                  localDraftId,
+                  versionNote: requestedDraft.versionNote,
+                  sourceReference: requestedDraft.definition.templateId,
+                  definition: {
+                    ...structuredClone(requestedDraft.definition),
+                    templateId: localDraftId,
+                  },
+                };
+              })();
+          localBase.definition = normalizeTemplateDimensionContract(localBase.definition);
+          savedDraft = saveLocalDynamicTemplateDraft(localBase, {
+            asCopy: requestedDraft.sourceType === "local" && options.asCopy,
+            name: options.name,
+          });
+          window.dispatchEvent(new Event(DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT));
+        } else {
+          let response: unknown;
+          const copyNeedsCurrentDefinition = Boolean(
+            options.asCopy
+            && (
+              session.dirty
+              || session.saveStatus === "conflict"
+              || requestedDraft.requiresContractNormalization === true
+            )
+          );
+          if (options.asCopy && requestedDraft.sourceType === "persisted" && !copyNeedsCurrentDefinition) {
+            response = await dynamicTemplateApi.saveAs(requestedDraft.definition.templateId, {
+              name: (options.name ?? `${requestedDraft.definition.name} 副本`).trim(),
+              versionNote: requestedDraft.versionNote,
             });
+          } else {
+            const definition = normalizeTemplateDimensionContract(requestedDraft.definition);
+            if (options.name?.trim()) definition.name = options.name.trim();
+            if (options.asCopy) definition.templateId = createDynamicTemplateStableId("tpl");
+            response = requestedDraft.sourceType === "persisted" && requestedDraft.remote && !options.asCopy
+              ? await dynamicTemplateApi.updateDraft(requestedDraft.definition.templateId, {
+                expectedRevision: requestedDraft.remote.revision,
+                definition,
+                versionNote: requestedDraft.versionNote,
+              })
+              : await dynamicTemplateApi.create({
+                definition,
+                versionNote: requestedDraft.versionNote,
+                ...((options.asCopy ? requestedDraft.definition.templateId : requestedDraft.sourceReference)
+                  ? { sourceReference: options.asCopy ? requestedDraft.definition.templateId : requestedDraft.sourceReference }
+                  : {}),
+              });
+          }
+          const saved = unwrapResponse<DynamicTemplateResource>(response);
+          const persistedDraft = saved ? createPersistedDynamicTemplateDraft(saved) : null;
+          if (!persistedDraft) throw new Error("服务端没有返回可编辑模板草稿");
+          savedDraft = persistedDraft;
+          notifyDynamicTemplateCatalogChanged();
+        }
+
+        const reconciliation = useTemplateEditorSession.getState().reconcileSaveResult({
+          sessionId,
+          requestedDraft,
+          savedDraft,
+          asCopy: options.asCopy,
+        });
+        if (reconciliation === "stale-session") return true;
+        if (options.asCopy) {
+          message.success(USE_MOCK
+            ? `“${savedDraft.definition.name}”已另存为本机测试草稿`
+            : `“${savedDraft.definition.name}”副本已保存为新的账号模板`);
+        } else if (reconciliation === "newer-changes") {
+          message.success(USE_MOCK
+            ? "本机测试草稿已保存；你还有新的未保存修改"
+            : "模板草稿已保存；你还有新的未保存修改");
+        } else {
+          message.success(USE_MOCK
+            ? "已保存为本机测试草稿；未写入服务端模板"
+            : "模板草稿已保存，可继续设计或发布");
+        }
+        return true;
+      } catch (error) {
+        const current = useTemplateEditorSession.getState();
+        const conflicted = getEditorHttpStatus(error) === 409;
+        if (
+          current.sessionId === sessionId
+          && current.draft?.definition.templateId === requestedDraft.definition.templateId
+        ) {
+          current.setSaveStatus(conflicted ? "conflict" : "error");
+          if (conflicted) {
+            message.warning("其他人已经保存了这个模板的新修改；当前工作仍完整保留，请另存为新模板。");
+          } else {
+            message.error(getEditorErrorMessage(error, "模板保存失败，当前修改仍完整保留"));
+          }
+        }
+        return false;
       }
-      const saved = unwrapResponse<DynamicTemplateResource>(response);
-      const savedDraft = saved ? createPersistedDynamicTemplateDraft(saved) : null;
-      if (!savedDraft) throw new Error("服务端没有返回可编辑模板草稿");
-      useTemplateEditorSession.getState().markSaved(savedDraft);
-      notifyDynamicTemplateCatalogChanged();
-      message.success(options.asCopy
-        ? `“${savedDraft.definition.name}”副本已保存为新的账号模板`
-        : "模板草稿已保存，可继续设计或发布");
-      return true;
-    } catch (error) {
-      useTemplateEditorSession.getState().setSaveStatus("error");
-      message.error(getEditorErrorMessage(error, "模板保存失败，当前修改仍完整保留"));
-      return false;
-    }
+    })();
+    templateSaveInFlightRef.current = savePromise;
+    void savePromise.finally(() => {
+      if (templateSaveInFlightRef.current === savePromise) {
+        templateSaveInFlightRef.current = null;
+      }
+    });
+    return savePromise;
   }, [canManageTemplates, message]);
 
   const publishDynamicTemplateDraft = useCallback(async (): Promise<boolean> => {
@@ -2362,97 +2616,113 @@ export default function HomepageConfig({
       releasePublishing();
       return false;
     }
-    if (state.dirty || state.draft.sourceType === "local") {
+    const publishIntentSessionId = state.sessionId;
+    const publishIntentTemplateId = state.draft.definition.templateId;
+    if (!publishIntentSessionId) {
+      releasePublishing();
+      return false;
+    }
+    if (
+      state.dirty
+      || state.draft.sourceType === "local"
+      || state.draft.requiresContractNormalization === true
+    ) {
       const saved = await persistTemplateDraft();
       if (!saved) {
         releasePublishing();
         return false;
       }
       state = useTemplateEditorSession.getState();
+      if (
+        state.sessionId !== publishIntentSessionId
+        || state.draft?.definition.templateId !== publishIntentTemplateId
+      ) {
+        releasePublishing();
+        return false;
+      }
+      if (state.dirty) {
+        releasePublishing();
+        message.warning("保存期间产生了新的修改；当前修改已保留，请再次点击发布");
+        return false;
+      }
     }
     const draft = state.draft;
-    if (!draft || draft.sourceType !== "persisted" || !draft.remote) {
+    const publishSessionId = state.sessionId;
+    if (!draft || !publishSessionId || draft.sourceType !== "persisted" || !draft.remote) {
       releasePublishing();
       message.error("模板草稿尚未建立服务端版本，无法发布");
       return false;
     }
-    return await new Promise<boolean>((resolve) => {
-      let settled = false;
-      const settle = (result: boolean) => {
-        if (settled) return;
-        settled = true;
-        releasePublishing();
-        resolve(result);
-      };
-      modal.confirm({
-        title: `确认发布模板 v${draft.remote!.publishedVersion + 1}`,
-        width: 560,
-        okText: "确认发布模板",
-        cancelText: "取消",
-        maskClosable: false,
-        content: (
-          <div style={{ display: "grid", gap: 12 }}>
-            <p style={{ margin: 0 }}>
-              本次只创建不可变的模板新版本，不会修改任何页面草稿、线上页面或页面方案。
-            </p>
-            <p style={{ margin: 0 }}>
-              已有页面实例会继续锁定当前模板版本；如需使用新版，必须在页面装修中显式升级草稿并重新发布页面。
-            </p>
-          </div>
-        ),
-        onOk: async () => {
-          try {
-            const publishResponse = await dynamicTemplateApi.publish(
-              draft.definition.templateId,
-              {
-                expectedRevision: draft.remote!.revision,
-                ...(draft.versionNote ? { versionNote: draft.versionNote } : {}),
-              },
-            );
-            const published = unwrapResponse<DynamicTemplatePublishResultResource>(
-              publishResponse,
-            );
-            if (
-              !published
-              || published.templateId !== draft.definition.templateId
-              || published.version !== draft.remote!.publishedVersion + 1
-              || !Number.isInteger(published.draft?.revision)
-            ) {
-              throw new Error("服务端返回的模板发布结果与当前草稿不一致");
-            }
-            const current = useTemplateEditorSession.getState();
-            const currentDraft = current.draft;
-            if (
-              currentDraft?.sourceType === "persisted"
-              && currentDraft.remote
-              && currentDraft.definition.templateId === published.templateId
-              && currentDraft.remote.revision === draft.remote!.revision
-            ) {
-              const nextDraft = structuredClone(currentDraft);
-              nextDraft.versionNote = "";
-              nextDraft.remote = {
-                databaseId: currentDraft.remote.databaseId,
-                revision: published.draft.revision,
-                publishedVersion: published.version,
-                baseVersion: published.version,
-              };
-              current.markSaved(nextDraft);
-            }
-            notifyDynamicTemplateCatalogChanged();
-            message.success(`模板 v${published.version} 已发布；现有页面仍保持原版本`);
-            settle(true);
-          } catch (error) {
-            message.error(getEditorErrorMessage(
-              error,
-              "模板发布失败，当前模板草稿和页面会话仍保留",
-            ));
-            settle(false);
-          }
+    const publishCheck = validateDynamicTemplatePublishDefinition(draft.definition);
+    if (!publishCheck.valid) {
+      const firstIssue = publishCheck.issues.find((issue) => issue.level === "error");
+      useTemplateEditorSession.getState().selectObject(
+        firstIssue?.nodeId ?? draft.definition.rootNodeId,
+      );
+      releasePublishing();
+      message.error(firstIssue?.message ?? "模板发布检查未通过，请查看右侧“发布检查”");
+      return false;
+    }
+    try {
+      const publishResponse = await dynamicTemplateApi.publish(
+        draft.definition.templateId,
+        {
+          expectedRevision: draft.remote.revision,
+          ...(draft.versionNote ? { versionNote: draft.versionNote } : {}),
         },
-        onCancel: () => settle(false),
+      );
+      const published = unwrapResponse<DynamicTemplatePublishResultResource>(
+        publishResponse,
+      );
+      if (
+        !published
+        || published.templateId !== draft.definition.templateId
+        || published.version !== draft.remote.publishedVersion + 1
+        || !Number.isInteger(published.draft?.revision)
+      ) {
+        throw new Error("服务端返回的模板发布结果与当前草稿不一致");
+      }
+      const savedPublishedDraft = structuredClone(draft);
+      savedPublishedDraft.versionNote = "";
+      savedPublishedDraft.remote = {
+        ...draft.remote,
+        revision: published.draft.revision,
+        publishedVersion: published.version,
+        baseVersion: published.version,
+      };
+      const reconciliation = useTemplateEditorSession.getState().reconcileSaveResult({
+        sessionId: publishSessionId,
+        requestedDraft: draft,
+        savedDraft: savedPublishedDraft,
       });
-    });
-  }, [canManageTemplates, message, modal, persistTemplateDraft]);
+      if (reconciliation === "saved") {
+        useTemplateEditorSession.getState().setSaveStatus("publish-success");
+      }
+      notifyDynamicTemplateCatalogChanged();
+      message.success(reconciliation === "newer-changes"
+        ? `模板 v${published.version} 已发布；现有页面仍保持原版本，你还有新的未保存修改`
+        : `模板 v${published.version} 已发布；现有页面仍保持原版本`);
+      return true;
+    } catch (error) {
+      const current = useTemplateEditorSession.getState();
+      const conflicted = getEditorHttpStatus(error) === 409;
+      if (
+        current.sessionId === publishSessionId
+        && current.draft?.definition.templateId === draft.definition.templateId
+      ) current.setSaveStatus(conflicted ? "conflict" : "publish-error");
+      if (conflicted) {
+        message.warning("发布前发现这个模板已有其他人的新修改；当前草稿仍完整保留，请另存为新模板。");
+      } else {
+        message.error(getEditorErrorMessage(
+          error,
+          "模板发布失败，当前模板草稿和页面会话仍保留",
+        ));
+      }
+      return false;
+    } finally {
+      releasePublishing();
+    }
+  }, [canManageTemplates, message, persistTemplateDraft]);
 
   const editorConfig = useMemo(
     () =>
@@ -3818,7 +4088,7 @@ export default function HomepageConfig({
                   edit: false,
                   insert: false,
                 }
-              : { drag: false }
+              : { drag: false, duplicate: false }
           }
           iframe={{ enabled: true, waitForStyles: true, syncHostStyles: true }}
           onPublish={(nextData) => {
@@ -3887,6 +4157,8 @@ export default function HomepageConfig({
               validationStatus={publishValidationStatus}
               onRetryValidation={retryPublishValidation}
               onOpenPageSettings={openPageSettingsForEditing}
+              canPromoteToTemplate={canManageTemplates && !USE_MOCK}
+              onPromoteToTemplate={promotePageInstanceDesignToTemplate}
             />
           </div>
           {workspaceMode === "template" ? (

@@ -1,0 +1,115 @@
+.audit-logs__card {
+  border: 1px solid var(--adm-line);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(24, 26, 27, 0.035);
+}
+
+.audit-logs__filters {
+  display: flex;
+  min-height: 40px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-logs__search {
+  width: min(360px, 100%);
+}
+
+.audit-logs__filter {
+  width: 160px;
+}
+
+.audit-logs__action-filter {
+  width: 210px;
+}
+
+.audit-logs__result-count {
+  margin-bottom: 12px;
+  color: var(--adm-muted);
+  font-size: 13px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-logs__time {
+  color: var(--adm-muted);
+  font-size: 13px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.audit-logs__actor,
+.audit-logs__subject {
+  color: var(--adm-ink);
+  font-weight: 500;
+}
+
+.audit-logs__subject {
+  display: block;
+  max-width: 186px;
+}
+
+.audit-logs__mobile-event {
+  display: none;
+}
+
+.audit-logs__transition {
+  color: var(--adm-text);
+  white-space: nowrap;
+}
+
+.audit-logs__detail-button {
+  height: 32px;
+  padding-inline: 4px;
+}
+
+.audit-logs__drawer-content,
+.audit-logs__detail-section {
+  display: grid;
+  gap: 16px;
+}
+
+.audit-logs__detail-section h2 {
+  margin: 8px 0 0;
+  color: var(--adm-ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.audit-logs__structured-value,
+.audit-logs__plain-detail {
+  max-width: 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.audit-logs__structured-value {
+  max-height: 240px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+@media (max-width: 767px) {
+  .audit-logs__search,
+  .audit-logs__filter,
+  .audit-logs__action-filter,
+  .audit-logs__filters > .ant-btn {
+    width: 100%;
+  }
+
+  .audit-logs__mobile-event {
+    display: block;
+    margin-top: 2px;
+    color: var(--adm-muted);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+}

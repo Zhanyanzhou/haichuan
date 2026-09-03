@@ -1,5 +1,6 @@
 import { App as AntdApp, Alert, Button, Input, Modal, Spin } from "antd";
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import "./TemplateWorkspace.css";
 import DynamicTemplateCanvas from "./DynamicTemplateCanvas";
 import DynamicTemplateInspectorPanel from "./DynamicTemplateInspectorPanel";
 import DynamicTemplateStructurePanel from "./DynamicTemplateStructurePanel";
@@ -20,6 +21,7 @@ import { DynamicTemplateRenderer } from "../template-definition";
 import { unwrapResponse } from "@/utils/unwrap";
 import {
   dynamicTemplateApi,
+  type DynamicTemplateResource,
   type DynamicTemplateVersionResource,
 } from "@/services/clients/dynamicTemplateClient";
 
@@ -28,6 +30,8 @@ export interface PersistTemplateOptions {
   overwriteCurrent?: boolean;
   name?: string;
 }
+
+type TemplateTransitionDestination = "page" | "template";
 
 function getTemplateLifecycleErrorMessage(error: unknown, fallback: string) {
   if (!(error instanceof Error)) return fallback;
@@ -79,6 +83,22 @@ export default function TemplateWorkspace({
       return false;
     }
   });
+  const updateStructureCollapsed = useCallback((collapsed: boolean) => {
+    setStructureCollapsed(collapsed);
+    try {
+      sessionStorage.setItem("template-editor-structure-collapsed", collapsed ? "1" : "0");
+    } catch {
+      /* 工作区偏好不可用时不影响当前收放 */
+    }
+  }, []);
+  const updateInspectorCollapsed = useCallback((collapsed: boolean) => {
+    setInspectorCollapsed(collapsed);
+    try {
+      sessionStorage.setItem("template-editor-inspector-collapsed", collapsed ? "1" : "0");
+    } catch {
+      /* 工作区偏好不可用时不影响当前收放 */
+    }
+  }, []);
   useEffect(() => {
     try {
       sessionStorage.setItem(
@@ -109,22 +129,39 @@ export default function TemplateWorkspace({
   const [versions, setVersions] = useState<DynamicTemplateVersionResource[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
-  const [draggingTemplateTarget, setDraggingTemplateTarget] = useState<TemplateEditorLibraryTarget | null>(null);
   const transitionInFlightRef = useRef(false);
   const lifecycleInFlightRef = useRef(false);
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const draft = useTemplateEditorSession((state) => state.draft);
   const device = useTemplateEditorSession((state) => state.device);
   const previewMode = useTemplateEditorSession((state) => state.previewMode);
+  const previewScenario = useTemplateEditorSession((state) => state.previewScenario);
+  const setPreviewMode = useTemplateEditorSession((state) => state.setPreviewMode);
   const saveStatus = useTemplateEditorSession((state) => state.saveStatus);
+  const dirty = useTemplateEditorSession((state) => state.dirty);
 
   const openTemplateTarget = useCallback((target: TemplateEditorLibraryTarget) => {
     if (target.kind === "system-fixed") onOpenSystemTemplate(target.moduleType, target.current);
     else if (target.kind === "personal-fixed") onOpenPersonalTemplate(target.template);
-    else if (target.kind === "dynamic-persisted") onOpenPersistedDynamicTemplate(target.template);
+    else if (target.kind === "dynamic-persisted") {
+      onOpenPersistedDynamicTemplate(target.template);
+      if (target.recoveryDefinition) {
+        const session = useTemplateEditorSession.getState();
+        const openedDraft = session.draft;
+        if (
+          openedDraft?.sourceType === "persisted"
+          && openedDraft.definition.templateId === target.template.templateId
+        ) {
+          session.setDynamicDefinition(target.recoveryDefinition);
+          session.selectObject(target.recoveryDefinition.rootNodeId);
+          message.warning("服务端草稿缺少当前系统模板组件，已载入系统基线供修复；原草稿尚未覆盖，确认后再保存");
+        }
+      }
+    }
     else if (target.kind === "dynamic-local") onOpenDynamicTemplate(target.localDraftId);
     else onCreateDynamicTemplate();
   }, [
+    message,
     onCreateDynamicTemplate,
     onOpenDynamicTemplate,
     onOpenPersistedDynamicTemplate,
@@ -132,50 +169,184 @@ export default function TemplateWorkspace({
     onOpenSystemTemplate,
   ]);
 
-  const saveBeforeTransition = useCallback(async (next: () => void) => {
+  const requestTransition = useCallback((
+    next: () => void,
+    destination: TemplateTransitionDestination,
+  ) => {
     if (transitionInFlightRef.current) return;
+    if (saveStatus === "saving" || publishing || lifecycleBusy) {
+      message.info(
+        publishing
+          ? "正在发布模板，请等待完成后再切换"
+          : lifecycleBusy
+            ? "正在更新模板状态，请等待完成后再切换"
+            : "正在保存模板，请等待完成后再切换",
+      );
+      return;
+    }
     if (!hasUnpersistedTemplateDraft()) {
       next();
       return;
     }
     transitionInFlightRef.current = true;
-    const saved = await onPersist({ overwriteCurrent: true });
-    transitionInFlightRef.current = false;
-    if (saved) next();
-  }, [onPersist]);
+    const currentTemplateName = useTemplateEditorSession.getState().draft?.definition.name.trim()
+      || "当前模板";
+    const transitionCopy = destination === "page"
+      ? {
+          title: "返回页面装修？",
+          discardText: "放弃修改并返回",
+          saveText: "保存草稿并返回",
+        }
+      : {
+          title: "切换模板？",
+          discardText: "放弃修改并切换",
+          saveText: "保存草稿并切换",
+        };
+    let dialog: { destroy: () => void } | null = null;
+    const finish = (action: "discard" | "cancel") => {
+      dialog?.destroy();
+      transitionInFlightRef.current = false;
+      if (action === "discard") next();
+    };
+    dialog = modal.confirm({
+      className: "template-editor__transition-modal",
+      width: 520,
+      style: { maxWidth: "calc(100vw - 32px)" },
+      title: transitionCopy.title,
+      content: (
+        <div className="template-editor__transition-confirm">
+          <p className="template-editor__transition-summary">
+            模板“{currentTemplateName}”还有未保存修改。
+          </p>
+          <p className="template-editor__transition-note">
+            保存后将作为模板草稿；已发布模板和页面草稿不会受到影响。
+          </p>
+        </div>
+      ),
+      okText: transitionCopy.saveText,
+      cancelText: "继续编辑模板",
+      autoFocusButton: "cancel",
+      footer: (_, { OkBtn, CancelBtn }) => (
+        <div className="template-editor__transition-footer">
+          <Button danger onClick={() => finish("discard")}>
+            {transitionCopy.discardText}
+          </Button>
+          <div className="template-editor__transition-footer-actions">
+            <CancelBtn />
+            <OkBtn />
+          </div>
+        </div>
+      ),
+      onOk: async () => {
+        const saved = await onPersist({ overwriteCurrent: true });
+        transitionInFlightRef.current = false;
+        if (saved) next();
+      },
+      onCancel: () => finish("cancel"),
+      afterClose: () => {
+        transitionInFlightRef.current = false;
+      },
+    });
+  }, [lifecycleBusy, message, modal, onPersist, publishing, saveStatus]);
 
   const requestOpenTemplateTarget = useCallback((target: TemplateEditorLibraryTarget) => {
-    void saveBeforeTransition(() => openTemplateTarget(target));
-  }, [openTemplateTarget, saveBeforeTransition]);
+    requestTransition(() => openTemplateTarget(target), "template");
+  }, [openTemplateTarget, requestTransition]);
 
   const requestReturn = () => {
-    void saveBeforeTransition(onReturnPage);
+    requestTransition(onReturnPage, "page");
   };
 
-  const archiveCurrentTemplate = () => {
+  const moveTemplateToTrash = (template: Pick<DynamicTemplateResource, "templateId" | "name">) => {
     const current = useTemplateEditorSession.getState();
     const currentDraft = current.draft;
-    if (localOnly || currentDraft?.sourceType !== "persisted" || lifecycleInFlightRef.current) return;
+    if (localOnly || lifecycleInFlightRef.current) return;
+    const archivingCurrentTemplate = currentDraft?.sourceType === "persisted"
+      && currentDraft.definition.templateId === template.templateId;
+    if (archivingCurrentTemplate && current.dirty) {
+      message.warning("请先保存草稿或放弃未保存修改，再将当前模板移入回收站。");
+      return;
+    }
     let archiveDialog: { destroy: () => void } | null = null;
     archiveDialog = modal.confirm({
-      title: `归档模板“${currentDraft.definition.name}”？`,
-      content: current.dirty
-        ? "当前未保存的模板修改会被丢弃。归档不会删除已发布版本，也不会修改已经使用该模板的页面；页面装修将不能再新增此模板。"
-        : "归档不会删除已发布版本，也不会修改已经使用该模板的页面；页面装修将不能再新增此模板。",
-      okText: "归档模板",
+      title: `将模板“${template.name}”移入回收站？`,
+      content: "移入回收站后，模板将从组件库隐藏，页面装修不能再新增；已有页面和已发布版本保持不变，可在模板回收站恢复。",
+      okText: "移入回收站",
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
         lifecycleInFlightRef.current = true;
         setLifecycleBusy(true);
         try {
-          await dynamicTemplateApi.archive(currentDraft.definition.templateId);
+          await dynamicTemplateApi.archive(template.templateId);
           archiveDialog?.destroy();
-          useTemplateEditorSession.getState().close();
+          const latest = useTemplateEditorSession.getState();
+          if (
+            latest.draft?.sourceType === "persisted"
+            && latest.draft.definition.templateId === template.templateId
+          ) latest.close();
           notifyDynamicTemplateCatalogChanged();
-          message.success(`模板“${currentDraft.definition.name}”已归档；已有页面实例保持不变`);
+          message.success(`模板“${template.name}”已移入回收站`);
         } catch (error) {
-          message.error(getTemplateLifecycleErrorMessage(error, "模板归档失败，当前模板仍保留"));
+          message.error(getTemplateLifecycleErrorMessage(error, "移入回收站失败，当前模板仍保留"));
+        } finally {
+          lifecycleInFlightRef.current = false;
+          setLifecycleBusy(false);
+        }
+      },
+    });
+  };
+
+  const discardCurrentDraft = () => {
+    const current = useTemplateEditorSession.getState();
+    if (!current.draft || !current.dirty) return;
+    modal.confirm({
+      title: `放弃“${current.draft.definition.name}”的未保存修改？`,
+      content: current.baseline
+        ? "当前编辑会恢复到最近一次已保存草稿；正式版本和页面实例不会改变。"
+        : "这是尚未保存的新模板，放弃后只会清除当前本地编辑会话。",
+      okText: "放弃未保存修改",
+      okButtonProps: { danger: true },
+      cancelText: "继续编辑",
+      onOk: () => {
+        const latest = useTemplateEditorSession.getState();
+        if (latest.baseline) latest.open(latest.baseline);
+        else latest.close();
+        message.success("未保存的模板修改已放弃");
+      },
+    });
+  };
+
+  const permanentlyDeleteTemplate = (template: Pick<DynamicTemplateResource, "templateId" | "name">) => {
+    const current = useTemplateEditorSession.getState();
+    const currentDraft = current.draft;
+    if (localOnly || lifecycleInFlightRef.current) return;
+    const deletingCurrentTemplate = currentDraft?.sourceType === "persisted"
+      && currentDraft.definition.templateId === template.templateId;
+    if (deletingCurrentTemplate && current.dirty) {
+      message.warning("请先保存草稿或放弃未保存修改，再永久删除当前模板。");
+      return;
+    }
+    modal.confirm({
+      title: `永久删除模板“${template.name}”？`,
+      content: "永久删除后无法恢复。仅从未发布、没有版本历史且未被页面引用的自定义模板可以永久删除。",
+      okText: "永久删除模板",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        lifecycleInFlightRef.current = true;
+        setLifecycleBusy(true);
+        try {
+          await dynamicTemplateApi.deleteDraft(template.templateId);
+          const latest = useTemplateEditorSession.getState();
+          if (
+            latest.draft?.sourceType === "persisted"
+            && latest.draft.definition.templateId === template.templateId
+          ) latest.close();
+          notifyDynamicTemplateCatalogChanged();
+          message.success(`模板“${template.name}”已永久删除`);
+        } catch (error) {
+          message.error(getTemplateLifecycleErrorMessage(error, "永久删除失败；模板和页面数据均未改变"));
         } finally {
           lifecycleInFlightRef.current = false;
           setLifecycleBusy(false);
@@ -292,7 +463,7 @@ export default function TemplateWorkspace({
         const session = useTemplateEditorSession.getState();
         session.open(imported, { isNew: true });
         session.selectObject(imported.definition.rootNodeId);
-        message.success("已导入为新的本机模板草稿，原模板未被覆盖");
+        message.success("已导入模板结构；真实内容值未导入，请在页面装修中配置");
       };
       if (!hasUnpersistedTemplateDraft()) {
         replaceDraft();
@@ -311,23 +482,6 @@ export default function TemplateWorkspace({
     }
   };
 
-  const handleTemplateDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!draggingTemplateTarget) return;
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest(".template-editor__stage")) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "link";
-  };
-  const handleTemplateDrop = (event: DragEvent<HTMLDivElement>) => {
-    if (!draggingTemplateTarget) return;
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest(".template-editor__stage")) return;
-    event.preventDefault();
-    const nextTarget = draggingTemplateTarget;
-    setDraggingTemplateTarget(null);
-    requestOpenTemplateTarget(nextTarget);
-  };
-
   return (
     <>
       <TemplateEditorToolbar
@@ -342,7 +496,13 @@ export default function TemplateWorkspace({
           ? () => { void openVersionHistory(); }
           : undefined}
         onArchive={draft?.sourceType === "persisted" && !localOnly
-          ? archiveCurrentTemplate
+          ? () => moveTemplateToTrash({
+              templateId: draft.definition.templateId,
+              name: draft.definition.name,
+            })
+          : undefined}
+        onDiscard={draft && dirty
+          ? discardCurrentDraft
           : undefined}
         lifecycleBusy={lifecycleBusy}
         onRequestReturn={requestReturn}
@@ -362,14 +522,13 @@ export default function TemplateWorkspace({
         />
       ) : null}
       <div
-        className={`homepage-editor__body template-editor__body${previewMode ? " is-previewing" : ""}${draggingTemplateTarget ? " is-template-dragging" : ""}`}
-        onDragOver={handleTemplateDragOver}
-        onDrop={handleTemplateDrop}
+        className={`homepage-editor__body template-editor__body${previewMode ? " is-previewing" : ""}`}
       >
         <TemplateEditorLibrary
+          onArchive={moveTemplateToTrash}
+          onDelete={permanentlyDeleteTemplate}
           onOpen={requestOpenTemplateTarget}
           onRestore={restoreTemplate}
-          onDragTargetChange={setDraggingTemplateTarget}
           localOnly={localOnly}
         />
         {structureCollapsed ? (
@@ -381,7 +540,7 @@ export default function TemplateWorkspace({
               action="expand"
               panel="structure"
               panelLabel="模板结构面板"
-              onClick={() => setStructureCollapsed(false)}
+              onClick={() => updateStructureCollapsed(false)}
             />
           </aside>
         ) : draft ? (
@@ -396,7 +555,7 @@ export default function TemplateWorkspace({
                   action="collapse"
                   panel="structure"
                   panelLabel="模板结构面板"
-                  onClick={() => setStructureCollapsed(true)}
+                  onClick={() => updateStructureCollapsed(true)}
                 />
               )}
             />
@@ -407,7 +566,7 @@ export default function TemplateWorkspace({
           <section className="homepage-editor__stage template-editor__stage template-editor__empty-stage" aria-label="空模板画布">
             <div className="template-editor__empty-stage-card">
               <strong>从左侧选择模板进行设计</strong>
-              <span>点击模板卡片即可打开；拖入画布是辅助操作。模板会在隔离会话中编辑，不会写入当前页面草稿。</span>
+              <span>点击模板卡片打开设计，或新建空白模板。拖拽模板只发生在页面装修，不会在这里创建页面模块。</span>
             </div>
           </section>
         )}
@@ -420,7 +579,7 @@ export default function TemplateWorkspace({
               action="expand"
               panel="inspector"
               panelLabel="模板属性面板"
-              onClick={() => setInspectorCollapsed(false)}
+              onClick={() => updateInspectorCollapsed(false)}
             />
           ) : (
             <div className="homepage-editor__inspector-holder">
@@ -432,11 +591,31 @@ export default function TemplateWorkspace({
                     action="collapse"
                     panel="inspector"
                     panelLabel="模板属性面板"
-                    onClick={() => setInspectorCollapsed(true)}
+                    onClick={() => updateInspectorCollapsed(true)}
                   />
                 )}
               />
-              {draft ? <DynamicTemplateInspectorPanel /> : (
+              {draft && previewMode ? (
+                <div
+                  className="homepage-editor__inspector template-editor__inspector template-editor__empty-panel"
+                  aria-label="模板预览说明"
+                >
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="预览期间不可编辑"
+                    description="预览只验证公共 Renderer 的构图和内容边界，不会修改模板草稿。"
+                  />
+                  <p>当前场景：{{
+                    default: "正常模拟内容",
+                    empty: "全部空内容",
+                    "long-text": "超长文字",
+                    "missing-image": "缺失图片／商品",
+                  }[previewScenario]}</p>
+                  <p>如需修改尺寸、结构、样式或页面装修权限，请先退出预览。</p>
+                  <Button onClick={() => setPreviewMode(false)}>退出预览并继续编辑</Button>
+                </div>
+              ) : draft ? <DynamicTemplateInspectorPanel localOnly={localOnly} /> : (
                 <div className="homepage-editor__inspector template-editor__inspector template-editor__empty-panel" aria-label="模板属性">
                   <p>选择模板后，可在这里调整整体比例、设备规则以及当前槽位的精确位置和大小。</p>
                 </div>
@@ -513,7 +692,17 @@ export default function TemplateWorkspace({
       </Modal>
 
       <span className="sr-only" role="status" aria-live="polite">
-        {saveStatus === "saving" ? "正在保存模板" : saveStatus === "error" ? "模板保存失败，修改仍在" : ""}
+        {saveStatus === "saving"
+          ? "正在保存模板"
+          : saveStatus === "error"
+            ? "模板保存失败，修改仍在"
+            : saveStatus === "conflict"
+              ? "模板保存冲突，修改仍在，请另存为新模板"
+            : saveStatus === "publish-error"
+              ? "模板发布失败，草稿仍在"
+              : saveStatus === "publish-success"
+                ? "模板新版本已发布，已有页面保持原版本"
+                : ""}
       </span>
     </>
   );

@@ -28,6 +28,7 @@ interface SettingsLogQuery {
   pageSize?: number;
   keyword?: string;
   module?: string;
+  action?: string;
 }
 
 export const settingsApi = {

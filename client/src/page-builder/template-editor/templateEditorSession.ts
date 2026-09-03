@@ -7,6 +7,8 @@ import type {
   TemplateSaveStatus,
 } from "./types";
 import type { TemplateDefinitionV2 } from "../template-definition";
+import { getContentTemplateContract } from "../generated/contentTemplates.generated";
+import { getContentTemplateModuleTypeForSlotType } from "../template-definition/validateTemplateDefinition";
 
 const HISTORY_LIMIT = 50;
 
@@ -14,8 +16,35 @@ function cloneDraft(draft: TemplateEditorDraft): TemplateEditorDraft {
   return structuredClone(draft);
 }
 
+function rebaseDraftPersistence(
+  draft: TemplateEditorDraft,
+  persistenceSource: TemplateEditorDraft,
+): TemplateEditorDraft {
+  const rebased = cloneDraft(draft);
+  rebased.sourceType = persistenceSource.sourceType;
+  rebased.localDraftId = persistenceSource.localDraftId;
+  rebased.remote = persistenceSource.remote
+    ? structuredClone(persistenceSource.remote)
+    : undefined;
+  if (persistenceSource.sourceReference !== undefined) {
+    rebased.sourceReference = persistenceSource.sourceReference;
+  } else {
+    delete rebased.sourceReference;
+  }
+  if (persistenceSource.requiresContractNormalization === true) {
+    rebased.requiresContractNormalization = true;
+  } else {
+    delete rebased.requiresContractNormalization;
+  }
+  return rebased;
+}
+
 function sameDraft(left: TemplateEditorDraft | null, right: TemplateEditorDraft | null) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function statusAfterDraftChange(current: TemplateSaveStatus): TemplateSaveStatus {
+  return current === "conflict" ? "conflict" : "idle";
 }
 
 function createSessionId() {
@@ -24,6 +53,35 @@ function createSessionId() {
   }
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
+
+function resolveContractRoleForDevice(
+  definition: TemplateDefinitionV2,
+  selection: { nodeId: string; roleId: string },
+  device: TemplateEditorDevice,
+) {
+  const node = definition.nodes[selection.nodeId];
+  const slot = node?.slotId ? definition.slots[node.slotId] : undefined;
+  const moduleType = slot ? getContentTemplateModuleTypeForSlotType(slot.type) : undefined;
+  const contract = moduleType ? getContentTemplateContract(moduleType) : undefined;
+  const role = contract?.roles.find((candidate) => candidate.id === selection.roleId);
+  if (!role?.appliesTo?.length || role.appliesTo.includes(device)) return selection;
+  const fallbackRole = role.fallbackRoleId
+    ? contract?.roles.find((candidate) => candidate.id === role.fallbackRoleId)
+    : undefined;
+  const fallbackIsEditable = contract?.editorCapabilities.editableObjects.some(
+    (candidate) => candidate.roleId === fallbackRole?.id,
+  );
+  if (
+    !fallbackRole
+    || !fallbackIsEditable
+    || (fallbackRole.appliesTo?.length && !fallbackRole.appliesTo.includes(device))
+  ) {
+    return null;
+  }
+  return { nodeId: selection.nodeId, roleId: fallbackRole.id };
+}
+
+export type TemplateSaveReconcileResult = "saved" | "newer-changes" | "stale-session";
 
 interface TemplateEditorSessionState {
   sessionId: string | null;
@@ -56,6 +114,12 @@ interface TemplateEditorSessionState {
   undo: () => void;
   redo: () => void;
   markSaved: (draft: TemplateEditorDraft) => void;
+  reconcileSaveResult: (input: {
+    sessionId: string;
+    requestedDraft: TemplateEditorDraft;
+    savedDraft: TemplateEditorDraft;
+    asCopy?: boolean;
+  }) => TemplateSaveReconcileResult;
 }
 
 const EMPTY_STATE = {
@@ -77,13 +141,15 @@ const EMPTY_STATE = {
 export const useTemplateEditorSession = create<TemplateEditorSessionState>((set) => ({
   ...EMPTY_STATE,
   open: (draft, options) =>
-    set({
+    set((state) => ({
       ...EMPTY_STATE,
+      device: state.device,
       sessionId: createSessionId(),
       draft: cloneDraft(draft),
       baseline: options?.isNew ? null : cloneDraft(draft),
+      selectedObjectId: draft.definition.rootNodeId,
       dirty: options?.isNew === true,
-    }),
+    })),
   close: () => set({ ...EMPTY_STATE }),
   commitDraft: (draft, historyBaseline) =>
     set((state) => {
@@ -98,14 +164,14 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
           : [...state.historyPast, cloneDraft(previous)].slice(-HISTORY_LIMIT),
         historyFuture: [],
         dirty: !sameDraft(nextDraft, state.baseline),
-        saveStatus: "idle",
+        saveStatus: statusAfterDraftChange(state.saveStatus),
       };
     }),
   previewDraft: (draft) =>
     set((state) => state.draft ? {
       draft: cloneDraft(draft),
       dirty: !sameDraft(draft, state.baseline),
-      saveStatus: "idle",
+      saveStatus: statusAfterDraftChange(state.saveStatus),
     } : state),
   setName: (name) => {
     const state = useTemplateEditorSession.getState();
@@ -130,7 +196,17 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
     selectedObjectId: nodeId,
     selectedContractRole: { nodeId, roleId },
   }),
-  setDevice: (device) => set({ device }),
+  setDevice: (device) => set((state) => {
+    if (!state.draft || !state.selectedContractRole) return { device };
+    return {
+      device,
+      selectedContractRole: resolveContractRoleForDevice(
+        state.draft.definition,
+        state.selectedContractRole,
+        device,
+      ),
+    };
+  }),
   setContentLayer: (contentLayer) => set({ contentLayer }),
   setPreviewMode: (previewMode) => set({ previewMode }),
   setPreviewScenario: (previewScenario) => set({ previewScenario }),
@@ -138,25 +214,28 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
   undo: () =>
     set((state) => {
       if (!state.draft || state.historyPast.length === 0) return state;
-      const previous = state.historyPast[state.historyPast.length - 1];
+      const previous = rebaseDraftPersistence(
+        state.historyPast[state.historyPast.length - 1],
+        state.draft,
+      );
       return {
         draft: cloneDraft(previous),
         historyPast: state.historyPast.slice(0, -1),
         historyFuture: [cloneDraft(state.draft), ...state.historyFuture].slice(0, HISTORY_LIMIT),
         dirty: !sameDraft(previous, state.baseline),
-        saveStatus: "idle",
+        saveStatus: statusAfterDraftChange(state.saveStatus),
       };
     }),
   redo: () =>
     set((state) => {
       if (!state.draft || state.historyFuture.length === 0) return state;
-      const next = state.historyFuture[0];
+      const next = rebaseDraftPersistence(state.historyFuture[0], state.draft);
       return {
         draft: cloneDraft(next),
         historyPast: [...state.historyPast, cloneDraft(state.draft)].slice(-HISTORY_LIMIT),
         historyFuture: state.historyFuture.slice(1),
         dirty: !sameDraft(next, state.baseline),
-        saveStatus: "idle",
+        saveStatus: statusAfterDraftChange(state.saveStatus),
       };
     }),
   markSaved: (draft) =>
@@ -166,6 +245,39 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
       dirty: false,
       saveStatus: "success",
     }),
+  reconcileSaveResult: ({ sessionId, requestedDraft, savedDraft, asCopy = false }) => {
+    let result: TemplateSaveReconcileResult = "stale-session";
+    set((state) => {
+      if (
+        state.sessionId !== sessionId
+        || !state.draft
+        || state.draft.definition.templateId !== requestedDraft.definition.templateId
+      ) return state;
+
+      if (sameDraft(state.draft, requestedDraft)) {
+        result = "saved";
+        return {
+          draft: cloneDraft(savedDraft),
+          baseline: cloneDraft(savedDraft),
+          dirty: false,
+          saveStatus: "success",
+        };
+      }
+
+      result = "newer-changes";
+      if (asCopy || savedDraft.definition.templateId !== requestedDraft.definition.templateId) {
+        return { saveStatus: "idle" };
+      }
+      const rebasedDraft = rebaseDraftPersistence(state.draft, savedDraft);
+      return {
+        draft: rebasedDraft,
+        baseline: cloneDraft(savedDraft),
+        dirty: !sameDraft(rebasedDraft, savedDraft),
+        saveStatus: "idle",
+      };
+    });
+    return result;
+  },
 }));
 
 export function hasUnpersistedTemplateDraft(state = useTemplateEditorSession.getState()) {

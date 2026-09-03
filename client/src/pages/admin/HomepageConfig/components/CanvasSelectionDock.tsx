@@ -17,6 +17,8 @@ import { registerOverlayPortal } from "@puckeditor/core";
 import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
 import type { PuckProps } from "@/page-builder/types";
+import { useResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
+import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
 import { duplicatePageModule } from "./pageModuleActions";
 
 function findCanvasBlock(
@@ -49,6 +51,7 @@ export default function CanvasSelectionDock({
   const [dockHost, setDockHost] = useState<HTMLElement | null>(null);
   const [canvasReadyRevision, setCanvasReadyRevision] = useState(0);
   const appData = useHomepagePuck((state) => state.appState.data);
+  const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const componentId = String(selectedItem?.props?.id ?? "");
@@ -62,6 +65,12 @@ export default function CanvasSelectionDock({
   const selectedModule = selectedIndex >= 0 ? content[selectedIndex] : null;
   const componentType = selectedModule?.type ?? "";
   const selectedLocked = Boolean(selectedModule?.props?.locked);
+  const selectedIsUniquePrimaryStage = Boolean(
+    selectedModule && isVisiblePrimaryStageBlock(
+      selectedModule,
+      resolvedDynamicTemplateDefinitions,
+    ),
+  );
   const canMoveUp =
     Boolean(selectedModule) &&
     !selectedLocked &&
@@ -312,8 +321,10 @@ export default function CanvasSelectionDock({
   };
 
   const duplicateSelected = () => {
-    if (readOnly || !selectedModule || selectedLocked) return;
-    duplicatePageModule(dispatch, selectedModule, selectedIndex);
+    if (readOnly || !selectedModule || selectedLocked || selectedIsUniquePrimaryStage) return;
+    duplicatePageModule(dispatch, selectedModule, selectedIndex, {
+      preventDuplicate: selectedIsUniquePrimaryStage,
+    });
   };
 
   return selectedModule && dockHost && !readOnly
@@ -351,10 +362,18 @@ export default function CanvasSelectionDock({
           </button>
           <button
             type="button"
-            disabled={selectedLocked}
+            disabled={selectedLocked || selectedIsUniquePrimaryStage}
             onClick={duplicateSelected}
-            aria-label={selectedLocked ? "固定模块不能复制" : "复制当前模块"}
-            title={selectedLocked ? "固定模块不能复制" : "复制"}
+            aria-label={selectedLocked
+              ? "固定模块不能复制"
+              : selectedIsUniquePrimaryStage
+                ? "首屏主舞台不能复制"
+                : "复制当前模块"}
+            title={selectedLocked
+              ? "固定模块不能复制"
+              : selectedIsUniquePrimaryStage
+                ? "首屏主舞台全页只能有一个"
+                : "复制"}
           >
             <CopyOutlined aria-hidden="true" />
           </button>

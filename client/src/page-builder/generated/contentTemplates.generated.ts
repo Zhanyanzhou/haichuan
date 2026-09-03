@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：f2b65e2e9284e25448369c09606651af0e4512287903eeac7d037d0a30fcf56e
+ * SHA-256：9bbd4df94a1771299e325bd99e2d0268f0523761d12247d7c99ca5d426d3cbc2
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 18;
@@ -5512,8 +5512,9 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "businessRegionPosition": "after-first-brand-block",
     "contentPlacement": "root-only",
     "headerMode": {
-      "configured": "solid",
-      "fallback": "solid"
+      "configured": "overlay-light",
+      "fallback": "solid",
+      "overlayRequiresFirstTemplate": "hero"
     },
     "pageKey": "catalog",
     "pageRole": "selection-tool",
@@ -5550,7 +5551,7 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "businessRegionPosition": "after-first-brand-block",
     "contentPlacement": "root-only",
     "headerMode": {
-      "configured": "solid",
+      "configured": "overlay-light",
       "fallback": "solid",
       "overlayRequiresFirstTemplate": "hero"
     },
@@ -5664,7 +5665,7 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
     "businessRegionCount": 0,
     "contentPlacement": "root-only",
     "headerMode": {
-      "configured": "solid",
+      "configured": "overlay-light",
       "fallback": "solid",
       "overlayRequiresFirstTemplate": "hero"
     },
@@ -12187,6 +12188,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "defaultRatioByViewport": {
           "desktop": "21 / 6"
         },
+        "fallbackRoleId": "mobileImage",
         "id": "image",
         "kind": "media",
         "required": true,
@@ -13555,6 +13557,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "defaultRatioByViewport": {
           "desktop": "16 / 9"
         },
+        "fallbackRoleId": "mobileImage",
         "id": "desktopImage",
         "kind": "media",
         "required": true,
@@ -17318,6 +17321,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
         "defaultRatioByViewport": {
           "desktop": "4 / 5"
         },
+        "fallbackRoleId": "mobileImage",
         "id": "desktopImage",
         "kind": "media",
         "required": true,
@@ -24367,33 +24371,52 @@ function getCompatibilityRoleValue(
   moduleType: string,
   roleId: string,
   values: Record<string, unknown>,
+  visitedRoleIds: ReadonlySet<string> = new Set(),
 ): unknown {
+  if (visitedRoleIds.has(roleId)) return undefined;
+  const nextVisitedRoleIds = new Set(visitedRoleIds);
+  nextVisitedRoleIds.add(roleId);
+
   const directValue = values[roleId];
   if (hasNonEmptyText(directValue)) return directValue;
 
+  let compatibilityValue: unknown;
   switch (moduleType + ":" + roleId) {
     case "视频区块:coverImage":
-      return values.posterUrl;
+      compatibilityValue = values.posterUrl;
+      break;
     case "改款对比:before":
-      return values.beforeImage;
+      compatibilityValue = values.beforeImage;
+      break;
     case "改款对比:after":
-      return values.afterImage;
+      compatibilityValue = values.afterImage;
+      break;
     case "佩戴灵感:wearingImage":
     case "热区图:sceneImage":
     case "门店信息:store":
-      return values.image;
+      compatibilityValue = values.image;
+      break;
     case "预约入口:bgImage":
-      return values.backgroundImage;
+      compatibilityValue = values.backgroundImage;
+      break;
     case "限时活动:event":
-      return values.eventImage;
+      compatibilityValue = values.eventImage;
+      break;
     case "真实评价与实拍:authorizedPhoto": {
       const testimonials = values.testimonials;
       const first = Array.isArray(testimonials) ? testimonials[0] : undefined;
-      return isRecord(first) ? first.image : undefined;
+      compatibilityValue = isRecord(first) ? first.image : undefined;
+      break;
     }
-    default:
-      return directValue;
   }
+  if (hasNonEmptyText(compatibilityValue)) return compatibilityValue;
+
+  const fallbackRoleId = getContentTemplateContract(moduleType)?.roles.find(
+    (role) => role.id === roleId,
+  )?.fallbackRoleId;
+  return fallbackRoleId
+    ? getCompatibilityRoleValue(moduleType, fallbackRoleId, values, nextVisitedRoleIds)
+    : directValue;
 }
 
 function getQuantifiedCollectionValue(

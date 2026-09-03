@@ -1,9 +1,9 @@
 const media = {
   heroDesktop: "/images/editorial/home-hero-immersive/home-hero-immersive-desktop-v2.png",
   heroMobile: "/images/editorial/home-hero-immersive/home-hero-immersive-mobile-v2.png",
-  product: "/images/editorial/poster-gold-ring-v1.webp",
-  productTwo: "/images/editorial/poster-gold-pendant-v1.webp",
-  productThree: "/images/editorial/poster-gold-earrings-v1.webp",
+  product: "/images/system/product-placeholder.svg",
+  productTwo: "/images/system/launch-short-page-desktop.svg",
+  productThree: "/images/system/launch-short-page-mobile.svg",
   posterMain: "/images/錾刻.png",
   posterDetail: "/images/设计.png",
   booking: "/images/editorial/poster-gourd-v1.png",
@@ -174,5 +174,33 @@ export function createNoHeroHomeFixture() {
 export function createUntitledHeroHomeFixture() {
   const puckData = structuredClone(homePuckFixture);
   puckData.content[0].props.title = "";
+  return createPublishedHomeFixture(puckData);
+}
+
+export function createHiddenHeroCopyHomeFixture() {
+  const puckData = structuredClone(homePuckFixture) as any;
+  puckData.content[0].props.__instanceOverrides = {
+    version: 2,
+    nodes: {
+      eyebrow: { enabled: false },
+      title: { enabled: false },
+      subtitle: { enabled: false },
+      actionText: { enabled: false },
+    },
+  };
+  return createPublishedHomeFixture(puckData);
+}
+
+export function createLegacyDuplicateHeroHomeFixture() {
+  const puckData = structuredClone(homePuckFixture) as any;
+  puckData.content[0].props.mobileImage = "/images/system/launch-short-page-mobile.svg";
+  puckData.content.splice(1, 0, {
+    ...structuredClone(puckData.content[0]),
+    props: {
+      ...structuredClone(puckData.content[0].props),
+      id: "home-legacy-duplicate-hero",
+      title: "不应重复渲染的历史首屏",
+    },
+  });
   return createPublishedHomeFixture(puckData);
 }

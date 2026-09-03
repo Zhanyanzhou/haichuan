@@ -133,12 +133,25 @@ export default function Home() {
     );
   }
 
-  const hasVisibleHeroTitle = readiness.data.content?.some((block) =>
-    block.type === "首屏主视觉"
-    && block.props?.isVisible !== false
-    && typeof block.props?.title === "string"
-    && block.props.title.trim().length > 0,
-  );
+  const hasVisibleHeroTitle = readiness.data.content?.some((block) => {
+    if (
+      block.type !== "首屏主视觉"
+      || block.props?.isVisible === false
+      || typeof block.props?.title !== "string"
+      || block.props.title.trim().length === 0
+    ) return false;
+    const overrides = block.props.__instanceOverrides;
+    if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return true;
+    const record = overrides as Record<string, unknown>;
+    const nodes = record.nodes && typeof record.nodes === "object" && !Array.isArray(record.nodes)
+      ? record.nodes as Record<string, unknown>
+      : {};
+    const textRoles = record.textRoles && typeof record.textRoles === "object" && !Array.isArray(record.textRoles)
+      ? record.textRoles as Record<string, unknown>
+      : {};
+    const titleNode = (record.version === 2 ? nodes.title : textRoles.title) as Record<string, unknown> | undefined;
+    return titleNode?.enabled !== false;
+  });
 
   return (
     <div data-page-document-state="published" style={{ background: LG }}>

@@ -262,7 +262,7 @@ test.describe("公开页面导航一致性", () => {
     }
   });
 
-  test("六个品牌页面使用一致导航骨架与正确的首屏颜色语境", async ({ page }) => {
+  test("六个品牌页面使用一致透明导航骨架与正确的首屏颜色语境", async ({ page }) => {
     await mockPublishedHeaderDocuments(page);
     await page.goto("/");
     const homeBanner = page.getByRole("banner");
@@ -284,9 +284,105 @@ test.describe("公开页面导航一致性", () => {
     expect(contactHeader?.height).toBe(homeHeader?.height);
     expect(contactMenu?.y).toBe(homeMenu?.y);
     await expect(page.locator("[data-page-header-mode]")).toHaveAttribute("data-page-header-mode", "solid");
-    await expect(contactBanner).not.toHaveClass(/is-transparent/);
-    await expect(contactBanner).toHaveCSS("background-color", "rgba(255, 255, 255, 0.92)");
+    await expect(page.locator("[data-page-header-surface]")).toHaveAttribute("data-page-header-surface", "transparent");
+    await expect(contactBanner).toHaveClass(/is-transparent/);
+    await expect(contactBanner).not.toHaveClass(/is-overlay-light/);
+    await expect(contactBanner).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(contactMenuButton).toHaveCSS("color", "rgba(24, 26, 27, 0.68)");
+  });
+
+  test("1920px 页头左右工具组共用对称边界且品牌保持居中", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await mockPublishedHeaderDocuments(page);
+    await page.goto("/");
+    await expect(page.locator(".site-header__inner")).toBeVisible({ timeout: 15_000 });
+
+    const metrics = await page.evaluate(() => {
+      const rect = (selector: string) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element) throw new Error(`缺少页头节点: ${selector}`);
+        return element.getBoundingClientRect();
+      };
+      const inner = rect(".site-header__inner");
+      const left = rect(".site-header__left-group");
+      const brand = rect(".site-header__brand");
+      const right = rect(".site-header__right");
+      return {
+        innerLeft: inner.left,
+        innerRight: inner.right,
+        innerCenter: inner.left + inner.width / 2,
+        leftEdge: left.left,
+        brandCenter: brand.left + brand.width / 2,
+        rightEdge: right.right,
+      };
+    });
+
+    expect(Math.abs(metrics.leftEdge - metrics.innerLeft)).toBeLessThanOrEqual(1);
+    expect(Math.abs(metrics.rightEdge - metrics.innerRight)).toBeLessThanOrEqual(1);
+    expect(Math.abs(metrics.brandCenter - metrics.innerCenter)).toBeLessThanOrEqual(1);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("1920px 页头工具图标、文字与菜单关闭态使用同一标准", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await mockPublishedHeaderDocuments(page);
+    await page.goto("/");
+
+    const menuToggle = page.getByRole("button", { name: "打开菜单" });
+    const rightLabels = page.locator(".site-header__right .site-header__nav-label");
+    await expect(rightLabels).toHaveText(["选款", "预约", "我的账户"]);
+    for (const label of await rightLabels.all()) {
+      await expect(label).toBeVisible();
+    }
+
+    const readControlMetrics = (selector: string) => page.evaluate((controlSelector) => {
+      const toggle = document.querySelector<HTMLElement>(controlSelector);
+      const icon = toggle?.querySelector<SVGGraphicsElement>("svg");
+      const label = toggle?.querySelector<HTMLElement>("span");
+      const glyph = icon?.querySelector<SVGGraphicsElement>("line");
+      if (!toggle || !icon || !label || !glyph) throw new Error("菜单控件结构不完整");
+      const toggleRect = toggle.getBoundingClientRect();
+      const iconRect = icon.getBoundingClientRect();
+      const labelRect = label.getBoundingClientRect();
+      const glyphBox = glyph.getBBox();
+      const controlStyle = getComputedStyle(toggle);
+      return {
+        toggleLeft: toggleRect.left,
+        toggleTop: toggleRect.top,
+        iconLeft: iconRect.left,
+        iconTop: iconRect.top,
+        iconWidth: iconRect.width,
+        iconHeight: iconRect.height,
+        labelLeft: labelRect.left,
+        labelTop: labelRect.top,
+        glyphX: glyphBox.x,
+        glyphWidth: glyphBox.width,
+        fontFamily: controlStyle.fontFamily,
+        fontSize: controlStyle.fontSize,
+        lineHeight: controlStyle.lineHeight,
+        letterSpacing: controlStyle.letterSpacing,
+      };
+    }, selector);
+
+    const menuMetrics = await readControlMetrics(".site-menu-toggle");
+    const headerSearchMetrics = await readControlMetrics(
+      ".site-header__left-group > .site-header__nav-item",
+    );
+    const utilityIconSizes = await page.locator(".site-header__nav-item svg").evaluateAll((icons) =>
+      icons.map((icon) => {
+        const rect = icon.getBoundingClientRect();
+        return [rect.width, rect.height];
+      }),
+    );
+    expect(utilityIconSizes.every(([width, height]) => width === 30 && height === 30)).toBe(true);
+
+    await menuToggle.click();
+    await expect(page.getByRole("dialog", { name: "品牌菜单" })).toBeVisible();
+    await expect.poll(() => page.locator(".brand-menu__inner").evaluate((drawer) => drawer.getBoundingClientRect().left)).toBe(0);
+    const closeMetrics = await readControlMetrics("[data-menu-close]");
+    const drawerSearchMetrics = await readControlMetrics(".brand-menu__top > a");
+    expect(closeMetrics).toEqual(menuMetrics);
+    expect(drawerSearchMetrics).toEqual(headerSearchMetrics);
   });
 
   for (const path of ["/", "/about", "/custom"]) {
@@ -321,7 +417,10 @@ test.describe("公开页面导航一致性", () => {
     await page.goto("/");
     await expect(page.locator("[data-page-header-mode]"))
       .toHaveAttribute("data-page-header-mode", "solid");
-    await expect(page.getByRole("banner")).not.toHaveClass(/is-transparent/);
+    await expect(page.getByRole("banner")).toHaveClass(/is-transparent/);
+    await expect(page.getByRole("banner")).not.toHaveClass(/is-overlay-light/);
+    await expect(page.getByRole("button", { name: "打开菜单" }))
+      .toHaveCSS("color", "rgba(24, 26, 27, 0.68)");
   });
 
   test("390px 页头的菜单、品牌字标与账户入口互不碰撞且保留触控尺寸", async ({ page }) => {
@@ -330,6 +429,9 @@ test.describe("公开页面导航一致性", () => {
     const menu = page.getByRole("button", { name: "打开菜单" });
     const brand = page.getByRole("link", { name: "海川珠宝首页" });
     const account = page.getByRole("link", { name: "我的账户" });
+    await expect(page.getByRole("banner")).toHaveClass(/is-transparent/);
+    await expect(page.getByRole("banner")).not.toHaveClass(/is-overlay-light/);
+    await expect(menu).toHaveCSS("color", "rgba(24, 26, 27, 0.68)");
     const [menuBox, brandBox, accountBox] = await Promise.all([
       menu.boundingBox(),
       brand.boundingBox(),
@@ -348,16 +450,41 @@ test.describe("公开页面导航一致性", () => {
     await expectNoHorizontalOverflow(page);
   });
 
+  test("390px 浅色固定业务首屏避开透明页头", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    for (const { path, eyebrow } of [
+      { path: "/catalog", eyebrow: "SELECTION CENTER" },
+      { path: "/contact", eyebrow: "CONSULTATION REQUEST" },
+    ]) {
+      await page.goto(path);
+      const banner = page.getByRole("banner");
+      const eyebrowLabel = page.getByText(eyebrow, { exact: true });
+      await expect(banner).toBeVisible({ timeout: 15_000 });
+      await expect(eyebrowLabel).toBeVisible({ timeout: 15_000 });
+      const [headerBox, eyebrowBox] = await Promise.all([
+        banner.boundingBox(),
+        eyebrowLabel.boundingBox(),
+      ]);
+      expect(headerBox).not.toBeNull();
+      expect(eyebrowBox).not.toBeNull();
+      expect(eyebrowBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height + 20);
+      await expectNoHorizontalOverflow(page);
+    }
+  });
+
   for (const path of ["/products", "/catalog", "/contact"]) {
-    test(`${path} 在浅色业务首屏上使用实色深字导航`, async ({ page }) => {
+    test(`${path} 在浅色业务首屏上使用透明深字导航`, async ({ page }) => {
       await page.goto(path);
       const banner = page.getByRole("banner");
       const menuButton = page.getByRole("button", { name: "打开菜单" });
 
       await expect(banner).toBeVisible({ timeout: 15_000 });
       await expect(page.locator("[data-page-header-mode]")).toHaveAttribute("data-page-header-mode", "solid");
-      await expect(banner).not.toHaveClass(/is-transparent/);
-      await expect(banner).toHaveCSS("background-color", "rgba(255, 255, 255, 0.92)");
+      await expect(page.locator("[data-page-header-surface]")).toHaveAttribute("data-page-header-surface", "transparent");
+      await expect(banner).toHaveClass(/is-transparent/);
+      await expect(banner).not.toHaveClass(/is-overlay-light/);
+      await expect(banner).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       await expect(menuButton).toHaveCSS("color", "rgba(24, 26, 27, 0.68)");
     });
   }

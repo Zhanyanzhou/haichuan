@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import {
   createContentTemplateMarker,
   getContentTemplateContract,
@@ -9,11 +9,6 @@ import { getTemplatePreviewContent } from "./templatePreviewContent";
 import ContentTemplateSkeletonPreview from "./ContentTemplateSkeletonPreview";
 
 type PreviewViewport = "desktop" | "mobile";
-
-type PreviewMeasurement = {
-  height: number;
-  scale: number;
-};
 
 type ContentTemplateRendererPreviewProps = {
   moduleType: string;
@@ -82,11 +77,9 @@ function ContentTemplateRealRendererPreview({
   const frameRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<HTMLDivElement>(null);
   const sourceWidth = viewport === "mobile" ? 390 : 1200;
+  const sourceHeight = viewport === "mobile" ? 844 : 900;
   const fallbackRatio = contract?.defaultGeometryByViewport[viewport].frameAspectRatio ?? 1.6;
-  const [measurement, setMeasurement] = useState<PreviewMeasurement>(() => ({
-    height: 0,
-    scale: viewport === "mobile" ? 6 / 13 : 1 / 4,
-  }));
+  const fallbackScale = viewport === "mobile" ? 6 / 13 : 1 / 4;
 
   useLayoutEffect(() => {
     const frame = frameRef.current;
@@ -105,11 +98,12 @@ function ContentTemplateRealRendererPreview({
       lastObservedRendererHeight = naturalHeight;
       const scale = width / sourceWidth;
       const height = naturalHeight * scale;
-      setMeasurement((current) =>
-        Math.abs(current.height - height) < 0.5 && Math.abs(current.scale - scale) < 0.0001
-          ? current
-          : { height, scale },
-      );
+      // 直接在 layout effect 中同步落位，避免首帧先按桌面兜底比例放大，
+      // 下一任务再缩回卡片宽度所造成的预览闪动。这里不触发 React 状态更新，
+      // 因而几十张真实 Renderer 同时挂载时也不会形成 nested update。
+      frame.style.height = `${height}px`;
+      frame.style.aspectRatio = "auto";
+      renderer.style.transform = `scale(${scale})`;
     };
 
     const scheduleMeasure = () => {
@@ -124,10 +118,8 @@ function ContentTemplateRealRendererPreview({
     };
 
     lastObservedWidth = frame.clientWidth;
-    // 模板库会同时挂载数十个真实 Renderer。若每个预览都在 layout effect
-    // 内同步 setState，React 会把同一提交中的批量测量判定为嵌套更新循环。
-    // 首帧已有合同比例占位，真实高度延迟到后续任务即可保持稳定且避免整批同步更新。
-    scheduleMeasure();
+    // 首次测量必须在浏览器绘制前完成；后续异步素材、字体和容器变化再分散到任务中。
+    measure();
     const resizeObserver = new ownerWindow.ResizeObserver(() => {
       const width = frame.clientWidth;
       // frame 高度由本组件回写；只响应真实宽度变化，避免高度观察反馈环。
@@ -164,7 +156,7 @@ function ContentTemplateRealRendererPreview({
       mutationObserver.disconnect();
       renderer.removeEventListener("load", scheduleMeasure, true);
     };
-  }, [sourceWidth]);
+  }, [fallbackRatio, layoutData, moduleType, sourceWidth]);
 
   if (!profile || !contract || typeof component?.render !== "function") return null;
 
@@ -190,8 +182,7 @@ function ContentTemplateRealRendererPreview({
       style={{
         position: "relative",
         width: "100%",
-        height: measurement.height > 0 ? measurement.height : undefined,
-        aspectRatio: measurement.height > 0 ? undefined : String(fallbackRatio),
+        aspectRatio: String(fallbackRatio),
         overflow: "hidden",
         background: "#F4F5F5",
         pointerEvents: "none",
@@ -203,9 +194,10 @@ function ContentTemplateRealRendererPreview({
         {...({ inert: "" } as Record<string, string>)}
         style={{
           width: sourceWidth,
-          transform: `scale(${measurement.scale})`,
+          "--homepage-editor-viewport-height": `${sourceHeight}px`,
+          transform: `scale(${fallbackScale})`,
           transformOrigin: "top left",
-        }}
+        } as CSSProperties & Record<"--homepage-editor-viewport-height", string>}
       >
         {component.render(props)}
       </div>

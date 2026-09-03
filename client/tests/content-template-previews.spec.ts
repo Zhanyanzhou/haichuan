@@ -41,6 +41,75 @@ function gallery(viewport: "desktop" | "mobile", variant: "structure" | "rendere
     </html>`;
 }
 
+test("真实 Renderer 预览首个可观察帧即完成卡片缩放，不再二次闪动", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.addInitScript(() => {
+    type PreviewFrameSample = {
+      height: number;
+      transform: string;
+      heroAnimation: string;
+      doublePosterTransform: string;
+      doublePosterTransition: string;
+    };
+    const observedWindow = window as typeof window & { __previewFrameSamples?: PreviewFrameSample[] };
+    const samples: PreviewFrameSample[] = [];
+    observedWindow.__previewFrameSamples = samples;
+    const sample = () => {
+      const preview = document.querySelector<HTMLElement>('[data-content-template-preview="carousel"]');
+      const renderer = preview?.firstElementChild as HTMLElement | null;
+      const heroTitle = document.querySelector<HTMLElement>('[data-content-template-preview="hero"] .hc-hero__reveal');
+      const doublePosterMain = document.querySelector<HTMLElement>(
+        '[data-content-template-preview="doublePoster"] [data-content-role="mainImage"]',
+      );
+      if (preview && renderer && heroTitle && doublePosterMain) {
+        samples.push({
+          height: preview.getBoundingClientRect().height,
+          transform: renderer.style.transform,
+          heroAnimation: getComputedStyle(heroTitle).animationName,
+          doublePosterTransform: doublePosterMain.style.transform,
+          doublePosterTransition: getComputedStyle(doublePosterMain).transitionDuration,
+        });
+      }
+      if (samples.length < 12) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await page.route(/\/__content-template-preview-first-frame(?:\?.*)?$/, (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html; charset=utf-8",
+    body: gallery("desktop"),
+  }));
+  await page.route("**/api/products/catalog/stream**", (route) => route.abort());
+  await page.route("**/api/page-modules/document/stream**", (route) => route.abort());
+  await page.route("**/api/settings/public**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ code: 200, data: {} }),
+  }));
+  await page.goto("/__content-template-preview-first-frame");
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __previewFrameSamples?: unknown[] }
+  ).__previewFrameSamples?.length ?? 0)).toBe(12);
+
+  const samples = await page.evaluate(() => (
+    window as typeof window & {
+      __previewFrameSamples?: Array<{
+        height: number;
+        transform: string;
+        heroAnimation: string;
+        doublePosterTransform: string;
+        doublePosterTransition: string;
+      }>;
+    }
+  ).__previewFrameSamples ?? []);
+  expect(new Set(samples.map((sample) => sample.transform)).size).toBe(1);
+  expect(Math.max(...samples.map((sample) => sample.height)) - Math.min(...samples.map((sample) => sample.height)))
+    .toBeLessThanOrEqual(0.5);
+  expect(new Set(samples.map((sample) => sample.heroAnimation))).toEqual(new Set(["none"]));
+  expect(new Set(samples.map((sample) => sample.doublePosterTransform))).toEqual(new Set(["translateY(0px)"]));
+  expect(new Set(samples.map((sample) => sample.doublePosterTransition))).toEqual(new Set(["0s"]));
+});
+
 for (const viewport of ["desktop", "mobile"] as const) {
   test(`${viewport}：${templateCount} 张模板库缩略图使用中性合同结构并保持统一卡片画幅`, async ({ page }) => {
     await page.setViewportSize(viewport === "desktop"
@@ -242,6 +311,11 @@ for (const viewport of ["desktop", "mobile"] as const) {
       await expect.poll(() => preview.evaluate(
         (node) => node.getBoundingClientRect().height,
       )).toBeGreaterThan(20);
+      if (entry.key === "hero" && viewport === "desktop") {
+        await expect.poll(() => preview.evaluate(
+          (node) => node.getBoundingClientRect().height,
+        )).toBeCloseTo(900, 0);
+      }
       const images = preview.locator("img");
       if (await images.count()) {
         await expect.poll(() => images.evaluateAll((nodes) =>

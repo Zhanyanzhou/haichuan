@@ -5,6 +5,13 @@ import type {
   TemplateCatalogItemResource,
   TemplateCatalogPersonalCompatibilityResource,
 } from "@/services/clients/dynamicTemplateClient";
+import { adaptLegacyTemplateSource } from "../template-editor/legacyTemplateConversion";
+import { createSystemTemplateDraft } from "../template-editor/templateDraftAdapter";
+import type { TemplateDefinitionV2 } from "../template-definition";
+import {
+  getContentTemplateModuleTypeForSlotType,
+  validateDynamicTemplateDefinition,
+} from "../template-definition/validateTemplateDefinition";
 
 export interface UnifiedTemplateCatalogEntry {
   key: string;
@@ -55,6 +62,60 @@ function systemSourceReference(template: SystemContentTemplateCurrent) {
 
 function personalSourceReference(template: TemplateCatalogPersonalCompatibilityResource) {
   return `legacy_personal_${template.id}`;
+}
+
+function hasRenderableDraftStructure(definition: unknown) {
+  const validation = validateDynamicTemplateDefinition(definition);
+  if (!validation.valid || !validation.definition) return false;
+  const normalized = validation.definition;
+  const root = normalized.nodes[normalized.rootNodeId];
+  if (!root || root.childIds.length === 0 || Object.keys(normalized.slots).length === 0) return false;
+  return Object.values(normalized.nodes).some((node) => Boolean(
+    node.slotId && normalized.slots[node.slotId],
+  ));
+}
+
+function hasCompatibleSystemDraftStructure(
+  definition: unknown,
+  moduleType: string,
+) {
+  if (!hasRenderableDraftStructure(definition)) return false;
+  const validation = validateDynamicTemplateDefinition(definition);
+  if (!validation.valid || !validation.definition) return false;
+  const normalized = validation.definition;
+  return Object.values(normalized.nodes).some((node) => {
+    const slot = node.slotId ? normalized.slots[node.slotId] : undefined;
+    return slot
+      ? getContentTemplateModuleTypeForSlotType(slot.type) === moduleType
+      : false;
+  });
+}
+
+export function createSystemCompatibilityRecoveryDefinition(
+  template: DynamicTemplateResource,
+  current: SystemContentTemplateCurrent,
+): TemplateDefinitionV2 | undefined {
+  if (
+    !template.draft
+    || hasCompatibleSystemDraftStructure(template.draft.definition, current.moduleType)
+  ) return undefined;
+  try {
+    const source = createSystemTemplateDraft(current.moduleType, current);
+    if (!source) return undefined;
+    const definition = structuredClone(adaptLegacyTemplateSource(source).draft.definition);
+    definition.templateId = template.templateId;
+    definition.name = template.name;
+    if (template.description) definition.description = template.description;
+    else delete definition.description;
+    definition.metadata.category = template.category;
+    definition.metadata.purpose = template.purpose;
+    definition.metadata.layoutType = template.layoutType;
+    definition.metadata.recommendedFor = structuredClone(template.recommendedFor);
+    definition.metadata.tags = structuredClone(template.tags);
+    return definition;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -141,7 +202,16 @@ export function resolveUnifiedTemplateCatalogPresentation(
       published: entry.published,
     };
   }
-  if (entry.editable?.draft) {
+  if (
+    entry.editable?.draft
+    && (
+      !entry.systemCompatibility
+      || hasCompatibleSystemDraftStructure(
+        entry.editable.draft.definition,
+        entry.systemCompatibility.moduleType,
+      )
+    )
+  ) {
     return {
       source: "draft",
       templateId: entry.editable.templateId,

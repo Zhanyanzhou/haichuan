@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { App as AntdApp, Button, Input, Select, Tag } from "antd";
 import MediaPickerField from "../fields/MediaPickerField";
 import ProductReferencesField from "../fields/ProductReferencesField";
@@ -17,6 +17,10 @@ import { useVisualEditorSession, type VisualNodeKind } from "../visual-editor/vi
 import { useResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import DynamicTemplateUpgradePanel from "./DynamicTemplateUpgradePanel";
+import {
+  promoteInstanceOverridesToTemplateDraft,
+  type PromoteDynamicTemplateInstanceRequest,
+} from "./promoteToTemplate";
 import VideoContentFields from "../inspector/controls/VideoContentFields";
 import DynamicComplexContentFields, { isDynamicComplexSlotType } from "../inspector/controls/DynamicComplexContentFields";
 import ImageFocusField from "../inspector/controls/ImageFocusField";
@@ -38,6 +42,25 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function getImageAssetGuidance(slot: DynamicTemplateSlotDefinition) {
+  const parts: string[] = [];
+  const { recommendedWidth, recommendedHeight } = slot.validation;
+  if (recommendedWidth && recommendedHeight) {
+    parts.push(`建议素材：${recommendedWidth} × ${recommendedHeight} 像素`);
+  } else if (recommendedWidth) {
+    parts.push(`建议素材宽度：${recommendedWidth} 像素`);
+  } else if (recommendedHeight) {
+    parts.push(`建议素材高度：${recommendedHeight} 像素`);
+  }
+  if (slot.desktopRules.aspectRatio) {
+    parts.push(`桌面端 ${slot.desktopRules.aspectRatio}`);
+  }
+  if (slot.mobileRules.aspectRatio) {
+    parts.push(`移动端 ${slot.mobileRules.aspectRatio}`);
+  }
+  return parts.join(" · ");
 }
 
 function orderedSlots(definition: NonNullable<ReturnType<typeof useResolvedDynamicTemplate>>["definition"]) {
@@ -111,38 +134,62 @@ const TASK_LABEL: Record<InspectorTask, string> = {
   content: "文字内容",
 };
 
-function inferInspectorTask(
-  definition: NonNullable<ReturnType<typeof useResolvedDynamicTemplate>>["definition"],
-  slots: DynamicTemplateSlotDefinition[],
-): InspectorTask {
-  const keywordTasks: Array<[InspectorTask, RegExp]> = [
-    ["commerce", /商品|销售|选品|product|commerce|shopping/],
-    ["conversion", /活动|转化|预约|行动|event|conversion|booking|appointment/],
-    ["trust", /信任|服务|门店|资质|口碑|工艺|trust|service|store|certificate|testimonial|craft/],
-    ["content", /内容|文字|传播|故事|content|text|story|journey/],
-    ["media", /品牌|展示|视觉|首屏|影像|brand|visual|hero|media|gallery|lookbook/],
-  ];
-  const declaredPurpose = definition.metadata.purpose.toLowerCase();
-  const fallbackContext = [definition.metadata.category, ...definition.metadata.tags].join(" ").toLowerCase();
-  const keywordMatch = keywordTasks.find(([, pattern]) => pattern.test(declaredPurpose))
-    ?? keywordTasks.find(([, pattern]) => pattern.test(fallbackContext));
-  if (keywordMatch) return keywordMatch[0];
+const SLOT_TYPE_LABEL: Partial<Record<DynamicTemplateSlotDefinition["type"], string>> = {
+  image: "图片",
+  video: "视频",
+  carousel: "轮播",
+  hotspot: "热点",
+  beforeAfter: "对比图",
+  heading: "标题",
+  text: "正文",
+  richText: "富文本",
+  badge: "标签",
+  icon: "图标",
+  button: "按钮",
+  link: "链接",
+  appointment: "预约",
+  product: "商品",
+  collection: "商品集合",
+  productCard: "商品卡片",
+  productCollection: "商品集合",
+  categoryCollection: "分类集合",
+};
 
+const V1_CORE_SLOT_TYPES = new Set<DynamicTemplateSlotDefinition["type"]>([
+  "image",
+  "heading",
+  "text",
+  "product",
+  "button",
+]);
+
+function inferInspectorTask(
+  slots: DynamicTemplateSlotDefinition[],
+  selectedSlotId?: string,
+): InspectorTask {
+  const selectedSlot = slots.find((slot) => slot.slotId === selectedSlotId);
+  if (selectedSlot) return SLOT_TASK_BY_TYPE[selectedSlot.type] ?? "content";
   const counts = new Map<InspectorTask, number>();
   for (const slot of slots) {
     const task = SLOT_TASK_BY_TYPE[slot.type] ?? "content";
     counts.set(task, (counts.get(task) ?? 0) + 1);
   }
-  return (["commerce", "conversion", "trust", "media", "content"] as const)
-    .reduce((best, task) => (counts.get(task) ?? 0) > (counts.get(best) ?? 0) ? task : best, "commerce");
+  return (["commerce", "media", "conversion", "trust", "content"] as const)
+    .reduce((best, task) => (
+      (counts.get(task) ?? 0) > (counts.get(best) ?? 0) ? task : best
+    ), "commerce");
 }
 
 function groupInspectorSlots(
-  definition: NonNullable<ReturnType<typeof useResolvedDynamicTemplate>>["definition"],
   slots: DynamicTemplateSlotDefinition[],
   selectedSlotId?: string,
 ) {
-  const task = inferInspectorTask(definition, slots);
+  const task = inferInspectorTask(slots, selectedSlotId);
+  const isCompactCoreTemplate = slots.length <= 5
+    && slots.every((slot) => V1_CORE_SLOT_TYPES.has(slot.type));
+  if (isCompactCoreTemplate) {
+    return { task, primary: slots, secondary: [] };
+  }
   const relatedTasks: Record<InspectorTask, InspectorTask[]> = {
     media: ["media", "conversion"],
     commerce: ["commerce", "conversion"],
@@ -177,6 +224,8 @@ export default function DynamicTemplateInstanceInspector({
   validationStatus,
   onRetryValidation,
   onOpenPageSettings,
+  canPromoteToTemplate = false,
+  onPromoteToTemplate,
 }: {
   hasUnsavedChanges: boolean;
   saving: boolean;
@@ -184,6 +233,8 @@ export default function DynamicTemplateInstanceInspector({
   validationStatus?: PublishValidationStatus;
   onRetryValidation?: () => void;
   onOpenPageSettings?: (field?: string) => void;
+  canPromoteToTemplate?: boolean;
+  onPromoteToTemplate?: (request: PromoteDynamicTemplateInstanceRequest) => void | Promise<void>;
 }) {
   const editor = useInspectorModuleEditor();
   const props = (editor?.props ?? {}) as DynamicTemplateInstanceProps;
@@ -193,6 +244,7 @@ export default function DynamicTemplateInstanceInspector({
   const clearVisualNode = useVisualEditorSession((state) => state.clearNode);
   const { modal } = AntdApp.useApp();
   const propertyScrollRef = useRef<HTMLDivElement>(null);
+  const [promotingToTemplate, setPromotingToTemplate] = useState(false);
   if (!editor) return null;
   if (!resolved) {
     return (
@@ -221,8 +273,19 @@ export default function DynamicTemplateInstanceInspector({
   const selectedPolicy = selectedNode
     ? getEffectiveDynamicTemplateInstanceEditPolicy(selectedNode, selectedSlot)
     : null;
-  const slotGroups = groupInspectorSlots(definition, slots, selectedNode?.slotId);
+  const slotGroups = groupInspectorSlots(slots, selectedNode?.slotId);
   const layoutOverrides = props.layoutOverridesByNodeId ?? {};
+  const promotionPreview = promoteInstanceOverridesToTemplateDraft({
+    sourceDefinition: definition,
+    targetDefinition: definition,
+    layoutOverridesByNodeId: props.layoutOverridesByNodeId,
+  });
+  const contentOverrideCount = Object.keys(content).length + hidden.length + (props.isVisible === false ? 1 : 0);
+  const designOverrideCount = Object.values(layoutOverrides).reduce((total, devices) => (
+    total + Object.values(devices ?? {}).reduce((deviceTotal, override) => (
+      deviceTotal + Object.keys(override ?? {}).length
+    ), 0)
+  ), 0);
   const currentPublishIssues = getInspectorPublishIssues(publishIssues, props.instanceId);
   const currentPublishErrorCount = currentPublishIssues.filter(
     (issue) => issue.severity === "error",
@@ -241,6 +304,10 @@ export default function DynamicTemplateInstanceInspector({
     const candidateSlot = candidate.slotId ? definition.slots[candidate.slotId] : undefined;
     return Boolean(candidateSlot?.editable);
   });
+  const selectedPropertyNodeId = selectedNode
+    && instancePropertyNodes.some((candidate) => candidate.nodeId === selectedNode.nodeId)
+    ? selectedNode.nodeId
+    : "";
   const selectedLayout = selectedNode
     ? layoutOverrides[selectedNode.nodeId]?.[editor.device] ?? {}
     : {};
@@ -393,6 +460,20 @@ export default function DynamicTemplateInstanceInspector({
     });
   };
 
+  const promoteToTemplate = async () => {
+    if (!canPromoteToTemplate || !onPromoteToTemplate || promotionPreview.promoted.length === 0) return;
+    setPromotingToTemplate(true);
+    try {
+      await onPromoteToTemplate({
+        templateId: props.templateId,
+        sourceDefinition: definition,
+        layoutOverridesByNodeId: props.layoutOverridesByNodeId,
+      });
+    } finally {
+      setPromotingToTemplate(false);
+    }
+  };
+
   const renderSlotControl = (slot: DynamicTemplateSlotDefinition) => {
     const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
     const value = hasPageValue
@@ -447,6 +528,7 @@ export default function DynamicTemplateInstanceInspector({
         || imageLayout.imageScalePercent !== undefined
         || imageLayout.focusXPercent !== undefined
         || imageLayout.focusYPercent !== undefined;
+      const assetGuidance = getImageAssetGuidance(slot);
       return (
         <div style={{ display: "grid", gap: 10 }}>
           <MediaPickerField
@@ -458,6 +540,11 @@ export default function DynamicTemplateInstanceInspector({
             previewFocus={focus}
             onChange={(src) => updateContent(slot.slotId, { ...image, src })}
           />
+          {assetGuidance ? (
+            <p className="homepage-editor__properties-hint" data-image-asset-guidance={slot.slotId}>
+              {assetGuidance}
+            </p>
+          ) : null}
           <label>
             <span className="homepage-editor__properties-hint">替代文字</span>
             <Input
@@ -613,7 +700,9 @@ export default function DynamicTemplateInstanceInspector({
     return null;
   };
 
-  const renderSlotFieldset = (slot: DynamicTemplateSlotDefinition) => (
+  const renderSlotFieldset = (slot: DynamicTemplateSlotDefinition) => {
+    const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
+    return (
     <fieldset
       key={slot.slotId}
       data-slot-id={slot.slotId}
@@ -624,7 +713,13 @@ export default function DynamicTemplateInstanceInspector({
       <legend style={{ width: "100%", padding: 0, marginBottom: 10 }}>
         <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <strong>{slot.label}</strong>
-          <span>{slot.required ? <Tag color="red">必填</Tag> : null}<Tag>{slot.type}</Tag></span>
+          <span>
+            {slot.required ? <Tag color="red">必填</Tag> : null}
+            <Tag>{SLOT_TYPE_LABEL[slot.type] ?? "内容槽位"}</Tag>
+            <Tag color={hasPageValue ? "gold" : "default"}>
+              {hasPageValue ? "页面内容" : "模板内容"}
+            </Tag>
+          </span>
         </span>
       </legend>
       {renderSlotControl(slot)}
@@ -646,12 +741,13 @@ export default function DynamicTemplateInstanceInspector({
         ) : null}
       </div>
     </fieldset>
-  );
+    );
+  };
 
   return (
     <section className="homepage-editor__properties" aria-label="模板实例属性">
       <div className="homepage-editor__properties-scroll" ref={propertyScrollRef}>
-        <div style={{ display: "grid", gap: 8, padding: "12px 14px" }}>
+        <div className="homepage-editor__dynamic-instance-overview">
           <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <strong>{definition.name}</strong>
             <button
@@ -662,57 +758,51 @@ export default function DynamicTemplateInstanceInspector({
               页面覆盖
             </button>
           </span>
-          <span className="homepage-editor__properties-hint">固定版本 {props.templateId} v{props.templateVersion}</span>
-          <div className="homepage-editor__inspector-field">
-            <label htmlFor={`dynamic-instance-property-scope-${props.instanceId}`}>页面实例属性范围</label>
-            <select
-              id={`dynamic-instance-property-scope-${props.instanceId}`}
-              aria-label="选择页面实例属性范围"
-              value={selectedNode?.nodeId ?? ""}
-              onChange={(event) => selectInstancePropertyScope(event.target.value)}
-            >
-              <option value="">全部内容</option>
-              {instancePropertyNodes.map((candidate) => (
-                <option key={candidate.nodeId} value={candidate.nodeId}>{candidate.name}</option>
-              ))}
-            </select>
-            <span className="homepage-editor__properties-hint">点击画布只选择整个模板；需要调整某个实例属性时从这里明确选择。</span>
-          </div>
           <SwitchField
             label="在页面显示"
             value={props.isVisible !== false}
             onChange={(checked) => editor.update({ isVisible: checked })}
           />
-          <DynamicTemplateUpgradePanel
-            definition={definition}
-            instance={props}
-            onApply={(next) => editor.update({
-              templateVersion: next.templateVersion,
-              moduleName: next.moduleName,
-              contentBySlotId: next.contentBySlotId,
-              hiddenSlotIds: next.hiddenSlotIds,
-              layoutOverridesByNodeId: next.layoutOverridesByNodeId,
-            })}
-          />
-          <RestoreDefaultButton
-            label="恢复整个实例默认值"
-            disabled={!hasInstanceOverrides}
-            onClick={() => modal.confirm({
-              title: "恢复整个实例默认值？",
-              content: "将清除当前页面中这个实例的内容、构图、隐藏和显示状态覆盖；母模板、其他实例与其他页面不会改变，可立即使用页面撤销恢复。",
-              okText: "恢复默认",
-              cancelText: "取消",
-              onOk: () => editor.updateHistoryTransaction({
-                contentBySlotId: {},
-                layoutOverridesByNodeId: {},
-                hiddenSlotIds: [],
-                isVisible: true,
-              }),
-            })}
-          />
+          <div className="homepage-editor__inspector-field">
+            <span id={`dynamic-instance-property-scope-${props.instanceId}`}>页面实例属性范围</span>
+            <div
+              className="homepage-editor__dynamic-instance-scope-list"
+              role="group"
+              aria-labelledby={`dynamic-instance-property-scope-${props.instanceId}`}
+            >
+              <button
+                type="button"
+                className={selectedPropertyNodeId === "" ? "is-active" : ""}
+                aria-pressed={selectedPropertyNodeId === ""}
+                onClick={() => selectInstancePropertyScope("")}
+              >
+                全部内容
+              </button>
+              {instancePropertyNodes.map((candidate) => (
+                <button
+                  key={candidate.nodeId}
+                  type="button"
+                  className={selectedPropertyNodeId === candidate.nodeId ? "is-active" : ""}
+                  aria-pressed={selectedPropertyNodeId === candidate.nodeId}
+                  title={candidate.name}
+                  onClick={() => selectInstancePropertyScope(candidate.nodeId)}
+                >
+                  {candidate.name}
+                </button>
+              ))}
+            </div>
+            <span className="homepage-editor__properties-hint">点击画布只选择整个模板；需要调整某个实例属性时从这里明确选择。</span>
+          </div>
         </div>
         <div style={{ borderTop: "1px solid var(--adm-line)", padding: 14 }}>
-          <strong>{selectedNode ? `当前选择：${selectedNode.name}` : "页面实例编辑边界"}</strong>
+          <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <strong>{selectedNode ? `当前选择：${selectedNode.name}` : "页面实例编辑边界"}</strong>
+            {selectedNode ? (
+              <Tag color={Object.keys(selectedLayout).length > 0 ? "blue" : "default"}>
+                {Object.keys(selectedLayout).length > 0 ? "页面已覆盖" : "模板控制"}
+              </Tag>
+            ) : null}
+          </span>
           <p className="homepage-editor__properties-hint">
             {selectedPolicy
               ? "页面装修只修改当前实例。下方仅开放母模板授权的属性，并且只通过右侧输入调整；画布不会进入内部节点拖拽。"
@@ -828,13 +918,75 @@ export default function DynamicTemplateInstanceInspector({
           {slotGroups.primary.map(renderSlotFieldset)}
         </div>
         {slotGroups.secondary.length > 0 ? (
-          <details style={{ borderTop: "1px solid var(--adm-line)" }}>
-            <summary style={{ cursor: "pointer", padding: "12px 14px" }}>
-              其他模板内容（{slotGroups.secondary.length}）
-            </summary>
+          <div className="homepage-editor__dynamic-instance-secondary" aria-label="补充内容">
+            <p className="homepage-editor__properties-hint">
+              补充内容 · {slotGroups.secondary.length} 项
+            </p>
             {slotGroups.secondary.map(renderSlotFieldset)}
-          </details>
+          </div>
         ) : null}
+        <section className="homepage-editor__inspector-section homepage-editor__dynamic-instance-management" aria-label="实例管理">
+          <div className="homepage-editor__inspector-section-head">
+            <strong>实例管理</strong>
+            <span>版本、母模板同步与整体恢复</span>
+          </div>
+          <div className="homepage-editor__inspector-section-body">
+            <span className="homepage-editor__properties-hint">固定版本 {props.templateId} v{props.templateVersion}</span>
+            <div aria-label="当前字段来源" className="homepage-editor__dynamic-instance-sources">
+              <Tag>模板基线 · 固定版本</Tag>
+              <Tag color="gold">页面内容覆盖 {contentOverrideCount}</Tag>
+              <Tag color="blue">页面设计覆盖 {designOverrideCount}</Tag>
+            </div>
+            {designOverrideCount > 0 ? (
+              <div className="homepage-editor__dynamic-instance-promote">
+                <Button
+                  type="default"
+                  loading={promotingToTemplate}
+                  disabled={!canPromoteToTemplate || !onPromoteToTemplate || promotionPreview.promoted.length === 0}
+                  onClick={() => { void promoteToTemplate(); }}
+                >
+                  应用设计覆盖到母模板草稿
+                </Button>
+                <span className="homepage-editor__properties-hint">
+                  {!canPromoteToTemplate
+                    ? "只有超级管理员可以把页面设计覆盖应用到母模板草稿。"
+                    : (
+                      <>可安全应用 {promotionPreview.promoted.length} 项；{promotionPreview.skipped.length > 0
+                        ? `${promotionPreview.skipped.length} 项需在模板设计中确认。`
+                        : "不会带入文字、图片、商品或链接内容。"}</>
+                    )}
+                </span>
+              </div>
+            ) : null}
+            <DynamicTemplateUpgradePanel
+              definition={definition}
+              instance={props}
+              onApply={(next) => editor.update({
+                templateVersion: next.templateVersion,
+                moduleName: next.moduleName,
+                contentBySlotId: next.contentBySlotId,
+                hiddenSlotIds: next.hiddenSlotIds,
+                layoutOverridesByNodeId: next.layoutOverridesByNodeId,
+              })}
+            />
+            <RestoreDefaultButton
+              label="恢复整个实例默认值"
+              disabled={!hasInstanceOverrides}
+              onClick={() => modal.confirm({
+                title: "恢复整个实例默认值？",
+                content: "将清除当前页面中这个实例的内容、构图、隐藏和显示状态覆盖；母模板、其他实例与其他页面不会改变，可立即使用页面撤销恢复。",
+                okText: "恢复默认",
+                cancelText: "取消",
+                onOk: () => editor.updateHistoryTransaction({
+                  contentBySlotId: {},
+                  layoutOverridesByNodeId: {},
+                  hiddenSlotIds: [],
+                  isVisible: true,
+                }),
+              })}
+            />
+          </div>
+        </section>
       </div>
       <InspectorFooterBar
         hasUnsavedChanges={hasUnsavedChanges}

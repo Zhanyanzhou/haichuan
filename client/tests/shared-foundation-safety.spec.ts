@@ -41,9 +41,24 @@ test("分析必须显式配置并获得访客同意", () => {
   expect(analyticsSource).toContain("consentVersion: ANALYTICS_CONSENT_VERSION");
   expect(analyticsSource).toContain("hc_analytics_consent");
   expect(analyticsSource).toContain("sessionStorage");
-  expect(analyticsSource).not.toContain("localStorage");
+  expect(analyticsSource).toContain('const ANALYTICS_VISITOR_KEY = "hc.analytics-visitor"');
+  expect(analyticsSource).toContain("localStorage.removeItem(ANALYTICS_VISITOR_KEY)");
+  expect(analyticsSource.indexOf("hasAnalyticsConsent()")).toBeLessThan(
+    analyticsSource.indexOf("void send"),
+  );
   expect(analyticsBannerSource).toContain("撤回同意");
   expect(analyticsBannerSource).toContain("同意匿名分析");
+});
+
+test("分析使用匿名访客、30 分钟会话并排除敏感路径", () => {
+  expect(analyticsSource).toContain("ANALYTICS_SESSION_TIMEOUT_MS = 30 * 60 * 1000");
+  expect(analyticsSource).toContain('createAnalyticsId("v")');
+  expect(analyticsSource).toContain("visitorId: ensureVisitorId()");
+  expect(analyticsSource).toContain("isTrackableAnalyticsPath");
+  for (const path of ["admin", "preview", "customer", "cart", "checkout", "partner"]) {
+    expect(analyticsSource).toContain(path);
+  }
+  expect(analyticsBannerSource).toContain("location.pathname");
 });
 
 test("标准电商事件齐全且 purchase 不复用订单创建语义", () => {

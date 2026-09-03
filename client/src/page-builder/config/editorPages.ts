@@ -38,7 +38,7 @@ export type EditorPageDefinition = {
   label: string;
   description: string;
   publicPath: string;
-  /** 首屏导航语境：只有具备深色首屏画面的品牌页使用白字覆盖模式。 */
+  /** 首屏导航对比语境：深色 Hero 使用白字，其余浅色首屏使用深色字。 */
   headerMode: PageHeaderMode;
   /** 页面视觉模式:Brand=奢侈品牌体验 / Commerce=高端电商体验(选款中心)。 */
   mode: DesignMode;
@@ -93,7 +93,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "编辑式作品展陈；具体找款工具集中在选款中心",
     publicPath: CONTENT_TEMPLATE_PAGE_PATHS.products,
     mode: "brand",
-    headerMode: "solid",
+    headerMode: "overlay-light",
     publicFallback: {
       eyebrow: "CURATED EXHIBITION",
       title: "珠宝作品正在策展",
@@ -109,7 +109,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "视觉页头 + 固定选款工具；筛选数据来自商品配置",
     publicPath: CONTENT_TEMPLATE_PAGE_PATHS.catalog,
     mode: "commerce",
-    headerMode: "solid",
+    headerMode: "overlay-light",
     dynamic: true,
     businessRegion: {
       title: "选款工具与商品结果",
@@ -139,7 +139,7 @@ export const editorPages: EditorPageDefinition[] = [
     description: "视觉页头 + 固定预约表单与联系信息",
     publicPath: CONTENT_TEMPLATE_PAGE_PATHS.contact,
     mode: "brand",
-    headerMode: "solid",
+    headerMode: "overlay-light",
     dynamic: true,
     businessRegion: {
       title: "预约表单与联系信息",

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   getAnalyticsConsentDecision,
   isAnalyticsConfigured,
@@ -10,6 +11,7 @@ import {
 const CONSENT_EVENT = "haichuan:analytics-consent-changed";
 
 export default function AnalyticsConsentBanner() {
+  const location = useLocation();
   const [decision, setDecision] = useState<AnalyticsConsentDecision | null>(() =>
     getAnalyticsConsentDecision(),
   );
@@ -21,13 +23,17 @@ export default function AnalyticsConsentBanner() {
     return () => window.removeEventListener(CONSENT_EVENT, sync);
   }, []);
 
+  useEffect(() => {
+    if (decision !== "granted") return;
+    trackPageView();
+  }, [decision, location.pathname]);
+
   if (!isAnalyticsConfigured()) return null;
 
   const choose = (next: AnalyticsConsentDecision) => {
     setAnalyticsConsent(next);
     setDecision(next);
     setChoosing(false);
-    if (next === "granted") trackPageView();
   };
 
   if (!choosing && decision !== null) {

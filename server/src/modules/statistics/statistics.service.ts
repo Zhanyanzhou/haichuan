@@ -7,8 +7,7 @@ import {
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { getConfiguredAnalyticsDataset } from "../analytics/analytics-dataset";
 
-// 经营趋势支持的指标：订单数 / 成交额 / 咨询数 / 页面浏览量
-// 访客(UV)因缺少独立访客埋点(仅有 sessionId)暂不纳入
+// 首页经营趋势保留核心四指标；完整 UV、会话、回访与地域分析由 analytics 模块提供。
 export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews";
 
 @Injectable()
@@ -26,6 +25,25 @@ export class StatisticsService {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     // 统一口径：成交额/订单数均排除已取消订单（非 CANCELLED），与交易中心保持一致
     const notCancelled = { not: "CANCELLED" as OrderStatus };
+    const analyticsDataset = getConfiguredAnalyticsDataset();
+    const pageViewsTodayQuery = analyticsDataset
+      ? this.prisma.analyticsEvent.count({
+          where: {
+            dataset: analyticsDataset,
+            eventName: "page_view",
+            occurredAt: { gte: todayStart },
+          },
+        })
+      : Promise.resolve(0);
+    const pageViewsYesterdayQuery = analyticsDataset
+      ? this.prisma.analyticsEvent.count({
+          where: {
+            dataset: analyticsDataset,
+            eventName: "page_view",
+            occurredAt: yesterdayRange,
+          },
+        })
+      : Promise.resolve(0);
 
     const [
       productCount,
@@ -83,12 +101,8 @@ export class StatisticsService {
       this.prisma.product.count({ where: { status: "DRAFT" } }),
       this.prisma.order.count({ where: { status: "PENDING_SHIP" } }),
       this.prisma.inventory.count({ where: { quantity: { lte: 0 } } }),
-      this.prisma.analyticsEvent.count({
-        where: { eventName: "page_view", occurredAt: { gte: todayStart } },
-      }),
-      this.prisma.analyticsEvent.count({
-        where: { eventName: "page_view", occurredAt: yesterdayRange },
-      }),
+      pageViewsTodayQuery,
+      pageViewsYesterdayQuery,
       this.prisma.inquiry.count({ where: { createdAt: { gte: todayStart } } }),
       this.prisma.selectionInquiry.count({
         where: { createdAt: { gte: todayStart } },
@@ -145,7 +159,7 @@ export class StatisticsService {
 
   /**
    * 经营趋势：按日聚合指定指标，返回近 N 日序列(含 0 值日期，保证连续)。
-   * 访客(UV)因仅能基于 session 去重、缺少独立访客埋点，暂不纳入。
+   * UV、会话和回访使用 analytics/overview，避免首页接口承担完整分析查询。
    */
   async getTrend(days = 7, metric: TrendMetric = "orders") {
     const now = new Date();

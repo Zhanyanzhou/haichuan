@@ -1,0 +1,805 @@
+.template-editor__structure--reference {
+  --template-structure-row-radius: 6px;
+  --template-structure-accent: #2f6fe4;
+  --template-structure-accent-bg: #eef4ff;
+  --template-structure-hover: #f6f7f8;
+  --template-structure-line: #e5e7eb;
+  --template-structure-warning: #8a5a00;
+  --template-structure-warning-bg: #fff8e6;
+
+  height: 100%;
+  box-sizing: border-box;
+  color: var(--adm-text);
+  background: #fff;
+}
+
+.template-editor__structure--reference > .homepage-editor__panel-header {
+  flex: 0 0 48px;
+  height: 48px;
+  padding-inline: 10px;
+  background: #fff;
+}
+
+.template-editor__structure--reference
+  > .homepage-editor__panel-header
+  .homepage-editor__region-title {
+  color: var(--adm-ink);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.template-editor__structure--reference
+  > .homepage-editor__panel-header
+  .homepage-editor__region-title
+  .anticon {
+  color: var(--adm-muted);
+}
+
+.template-editor__structure--reference .template-editor__structure-help,
+.template-editor__structure--reference .template-editor__structure-note {
+  display: none;
+}
+
+.template-editor__structure--reference .template-editor__structure-scroll {
+  overflow-x: hidden;
+  padding: 0 12px;
+  background: #fff;
+  scrollbar-gutter: stable;
+}
+
+.template-editor__structure--reference .template-editor__template-summary {
+  width: 100%;
+  min-height: 64px;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 10px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--adm-line);
+  border-radius: 0;
+  color: var(--adm-ink);
+  background: transparent;
+}
+
+.template-editor__structure--reference .template-editor__template-summary:hover {
+  border-color: var(--adm-line);
+  background: transparent;
+}
+
+.template-editor__structure--reference .template-editor__template-summary:focus-visible {
+  border-radius: var(--template-structure-row-radius);
+  outline: 2px solid var(--adm-ink);
+  outline-offset: 2px;
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__structure--reference .template-editor__template-summary.is-active {
+  border-color: var(--adm-line);
+  background: transparent;
+}
+
+.template-editor__structure--reference .template-editor__template-summary-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.template-editor__structure--reference .template-editor__template-kicker {
+  display: none;
+}
+
+.template-editor__structure--reference .template-editor__template-summary strong {
+  color: var(--adm-ink);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 20px;
+}
+
+.template-editor__structure--reference .template-editor__template-summary small {
+  color: var(--adm-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.template-editor__structure--reference .template-editor__template-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.template-editor__structure--reference .template-editor__template-meta > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.template-editor__structure--reference .template-editor__template-complete {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #287a4b;
+  font-size: 10px;
+}
+
+.template-editor__structure--reference .template-editor__template-summary > .anticon {
+  display: none;
+}
+
+.template-editor__structure--reference .template-editor__structure-health {
+  margin: 8px 0;
+  border: 0;
+  border-left: 2px solid var(--template-structure-warning);
+  border-radius: 4px;
+  color: var(--template-structure-warning);
+  background: var(--template-structure-warning-bg);
+}
+
+.template-editor__structure--reference .template-editor__structure-health.has-errors {
+  border-left-color: #b42318;
+}
+
+.template-editor__structure--reference .template-editor__structure-health-summary {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 4px;
+}
+
+.template-editor__structure--reference .template-editor__structure-health-icon {
+  color: currentColor;
+  font-size: 13px;
+}
+
+.template-editor__structure--reference .template-editor__structure-health.has-errors .template-editor__structure-health-icon {
+  color: #b42318;
+}
+
+.template-editor__structure--reference .template-editor__structure-health-summary strong {
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.template-editor__structure--reference .template-editor__structure-issues {
+  padding: 0 6px 6px;
+}
+
+.template-editor__structure--reference .template-editor__structure-issues ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.template-editor__structure--reference .template-editor__structure-issues li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+}
+
+.template-editor__structure--reference .template-editor__structure-issues li > span {
+  min-width: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  padding: 4px 2px;
+  color: #6f4900;
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.template-editor__structure--reference .template-editor__structure-issues button {
+  min-width: 30px;
+  min-height: 26px;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 4px;
+  color: #6f4900;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.template-editor__structure--reference .template-editor__structure-issues button:hover,
+.template-editor__structure--reference .template-editor__structure-issues button:focus-visible {
+  background: rgba(138, 90, 0, 0.1);
+  outline: none;
+}
+
+.template-editor__structure--reference .template-editor__structure-issues-toggle {
+  width: 100%;
+  margin-top: 2px;
+  color: var(--template-structure-warning);
+  text-align: left;
+}
+
+.template-editor__structure--reference .template-editor__region-list {
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.template-editor__structure--reference .template-editor__region {
+  padding: 0;
+  border: 0;
+}
+
+.template-editor__structure--reference .template-editor__region:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.template-editor__structure--reference .template-editor__region-header {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  margin: 1px 0;
+  border-radius: var(--template-structure-row-radius);
+}
+
+.template-editor__structure--reference .template-editor__region-header:hover,
+.template-editor__structure--reference .template-editor__region-header:focus-within {
+  background: var(--template-structure-hover);
+}
+
+.template-editor__structure--reference .template-editor__region-header.is-active {
+  color: var(--template-structure-accent);
+  background: var(--template-structure-accent-bg);
+}
+
+.template-editor__structure--reference .template-editor__region-toggle {
+  width: 24px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--adm-muted);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.template-editor__structure--reference .template-editor__region-toggle:hover,
+.template-editor__structure--reference .template-editor__region-toggle:focus-visible {
+  color: var(--adm-ink);
+  background: rgba(0, 0, 0, 0.04);
+  outline: none;
+}
+
+.template-editor__structure--reference .template-editor__region-select {
+  min-width: 0;
+  min-height: 36px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  padding: 0 4px;
+  border-radius: 0;
+}
+
+.template-editor__structure--reference .template-editor__region-purpose-icon,
+.template-editor__structure--reference .template-editor__region-index {
+  display: none;
+}
+
+.template-editor__structure--reference .template-editor__region-select:has(.template-editor__drag-handle) {
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 4px;
+}
+
+.template-editor__structure--reference .template-editor__drag-handle {
+  color: var(--adm-muted);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.template-editor__structure--reference :is(.template-editor__region-header, .template-editor__layout-row):hover .template-editor__drag-handle,
+.template-editor__structure--reference :is(.template-editor__region-header, .template-editor__layout-row):focus-within .template-editor__drag-handle {
+  opacity: 1;
+}
+
+.template-editor__structure--reference .template-editor__region-select strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--adm-ink);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-editor__structure--reference .template-editor__region-header:focus-within {
+  outline: none;
+}
+
+.template-editor__structure--reference .template-editor__region-header.is-active {
+  box-shadow: none;
+}
+
+.template-editor__structure--reference .template-editor__region-header.is-active strong {
+  color: var(--template-structure-accent);
+}
+
+.template-editor__structure--reference .template-editor__slot-row {
+  min-height: 40px;
+  margin: 1px 0;
+  border-radius: var(--template-structure-row-radius);
+  color: var(--adm-text);
+}
+
+.template-editor__structure--reference .template-editor__layout-row {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  margin: 1px 0;
+  border-radius: var(--template-structure-row-radius);
+  position: relative;
+}
+
+.template-editor__structure--reference .template-editor__layout-row:hover,
+.template-editor__structure--reference .template-editor__layout-row:focus-within {
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__structure--reference .template-editor__layout-row.is-active {
+  color: var(--template-structure-accent);
+  background: var(--template-structure-accent-bg);
+}
+
+.template-editor__structure--reference .template-editor__layout-select {
+  min-width: 0;
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: 12px 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding-block: 3px;
+  padding-right: 3px;
+  border: 0;
+  border-radius: var(--template-structure-row-radius);
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.template-editor__structure--reference .template-editor__layout-select .template-editor__drag-handle {
+  display: inline-flex;
+  color: var(--adm-muted);
+  font-size: 11px;
+}
+
+.template-editor__structure--reference .template-editor__layout-icon {
+  color: var(--adm-muted);
+  font-size: 13px;
+}
+
+.template-editor__structure--reference .template-editor__layout-select strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-editor__structure--reference .template-editor__layout-row.is-drag-inside {
+  box-shadow: inset 0 0 0 2px var(--template-structure-accent);
+}
+
+.template-editor__structure--reference .template-editor__slot-row::before {
+  display: none;
+}
+
+.template-editor__structure--reference .template-editor__slot-row:hover,
+.template-editor__structure--reference .template-editor__slot-row:focus-within {
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__structure--reference .template-editor__slot-row.is-active {
+  color: var(--template-structure-accent);
+  background: var(--template-structure-accent-bg);
+}
+
+.template-editor__structure--reference .template-editor__slot-select {
+  min-height: 40px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: var(--template-structure-row-radius);
+}
+
+.template-editor__structure--reference .template-editor__slot-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.template-editor__structure--reference .template-editor__slot-copy small {
+  color: var(--adm-muted);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 12px;
+}
+
+.template-editor__structure--reference .template-editor__slot-row.is-active .template-editor__slot-copy small {
+  color: color-mix(in srgb, var(--template-structure-accent) 72%, white);
+}
+
+.template-editor__structure--reference .template-editor__slot-select:focus-visible {
+  outline: 2px solid var(--adm-ink);
+  outline-offset: 2px;
+}
+
+.template-editor__structure--reference .template-editor__slot-select strong {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-editor__structure--reference
+  .template-editor__slot-row
+  .template-editor__contract-role-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 0;
+  color: var(--adm-muted);
+  background: transparent;
+  font-size: 17px;
+}
+
+.template-editor__structure--reference
+  .template-editor__slot-row.is-active
+  .template-editor__contract-role-icon {
+  color: var(--template-structure-accent);
+  background: transparent;
+}
+
+.template-editor__structure--reference .template-editor__slot-devices {
+  position: static;
+  z-index: auto;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 0 4px 0 2px;
+  background: transparent;
+  opacity: 1;
+}
+
+.template-editor__structure--reference
+  .template-editor__slot-row.is-active:not(:has(.template-editor__slot-actions))
+  .template-editor__slot-devices {
+  background: var(--template-structure-accent-bg);
+}
+
+.template-editor__structure--reference .template-editor__slot-device {
+  min-width: 22px;
+  height: 24px;
+  padding: 0;
+  border-radius: 4px;
+  color: var(--adm-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.template-editor__structure--reference .template-editor__slot-device.is-current {
+  color: var(--template-structure-accent);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--adm-info-border);
+}
+
+.template-editor__structure--reference .template-editor__slot-actions {
+  padding-left: 6px;
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__structure--reference .template-editor__dynamic-node-palette {
+  position: relative;
+  z-index: 4;
+  bottom: auto;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+  padding: 12px;
+  border-top: 1px solid var(--adm-line);
+  background: #fff;
+}
+
+.template-editor__structure--reference .template-editor__node-palette-help {
+  display: none;
+}
+
+.template-editor__structure--reference .template-editor__add-trigger {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--template-structure-accent);
+  border-radius: 6px;
+  color: var(--template-structure-accent);
+  background: #fff;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.template-editor__structure--reference .template-editor__add-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-editor__structure--reference .template-editor__add-trigger:hover,
+.template-editor__structure--reference .template-editor__add-trigger:focus-visible,
+.template-editor__structure--reference .template-editor__add-trigger[aria-expanded="true"] {
+  color: #fff;
+  background: var(--template-structure-accent);
+  outline: none;
+}
+
+.template-editor__structure--reference
+  .template-editor__slot-row.is-active
+  .template-editor__slot-actions {
+  background: var(--template-structure-accent-bg);
+}
+
+.template-editor__structure--reference .template-editor__region-empty {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px 0 36px;
+  color: var(--adm-muted);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.template-editor__add-popover-overlay .ant-popover-inner {
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid #d9dfe5;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.template-editor__add-popover-overlay {
+  --adm-ink: #181a1b;
+  --adm-text-strong: #181a1b;
+  --adm-text: #5f6568;
+  --adm-muted: #6e7477;
+  --adm-line: #dde1e2;
+  --template-structure-accent: #2f6fe4;
+  --template-structure-accent-bg: #f2f5ff;
+}
+
+.template-editor__add-popover {
+  width: 360px;
+  max-height: min(560px, calc(100vh - 120px));
+  overflow-y: auto;
+  color: var(--adm-text);
+  background: #fff;
+}
+
+.template-editor__add-popover-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  padding: 13px 14px 12px;
+  border-bottom: 1px solid var(--adm-line);
+  background: #fff;
+}
+
+.template-editor__add-popover-header > span {
+  color: var(--adm-muted);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.template-editor__add-popover-header > strong {
+  overflow: hidden;
+  color: var(--adm-ink);
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-editor__add-popover-header > small {
+  grid-column: 1 / -1;
+  color: var(--adm-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.template-editor__add-popover .template-editor__region-tools .template-editor__add-region {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  color: var(--adm-text);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.template-editor__add-popover .template-editor__region-tools .template-editor__add-region > span {
+  display: grid;
+  gap: 1px;
+}
+
+.template-editor__add-popover .template-editor__region-tools .template-editor__add-region strong,
+.template-editor__add-popover .template-editor__region-tools .template-editor__add-region small {
+  display: block;
+}
+
+.template-editor__add-popover .template-editor__region-tools .template-editor__add-region strong {
+  color: var(--adm-ink);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.template-editor__add-popover .template-editor__region-tools .template-editor__add-region small {
+  color: var(--adm-muted);
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.template-editor__add-popover .template-editor__region-tools .template-editor__add-region:hover,
+.template-editor__add-popover .template-editor__region-tools .template-editor__add-region:focus-visible {
+  border-color: var(--template-structure-accent);
+  color: var(--template-structure-accent);
+  outline: none;
+}
+
+.template-editor__add-popover > section,
+.template-editor__add-popover > details {
+  padding: 12px;
+  border-top: 1px solid var(--adm-line);
+}
+
+.template-editor__add-popover > section > h3,
+.template-editor__add-popover .template-editor__node-palette-content h3 {
+  margin: 0 0 8px;
+  color: var(--adm-ink);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+}
+
+.template-editor__add-popover > details {
+  padding-block: 0;
+}
+
+.template-editor__add-popover > details > summary {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--adm-text-strong);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.template-editor__add-popover > details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.template-editor__add-popover > details > summary::after {
+  margin-left: auto;
+  color: var(--adm-muted);
+  content: "›";
+  font-size: 16px;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.template-editor__add-popover > details[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.template-editor__add-popover > details[open] > summary {
+  border-bottom: 1px solid var(--adm-line);
+}
+
+.template-editor__add-popover .template-editor__node-palette-content > section {
+  padding: 10px 0;
+}
+
+.template-editor__add-popover .template-editor__node-tools {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.template-editor__add-popover .template-editor__node-tools button {
+  min-height: 38px;
+}
+
+.template-editor__add-popover .template-editor__composition-tool {
+  width: 100%;
+}
+
+.template-editor__structure--reference .template-editor__structure-name-input {
+  height: 30px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.template-editor__structure--reference .template-editor__structure-name-input:focus-visible {
+  outline: 2px solid var(--adm-ink);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1199px) {
+  .template-editor__structure--reference .template-editor__structure-scroll {
+    padding-inline: 12px;
+  }
+
+  .template-editor__structure--reference .template-editor__slot-select {
+    gap: 8px;
+    padding-left: 4px;
+  }
+}
+
+/* 模板设计使用独立的结构栏宽度，不改变页面装修的共享 dock 规则。 */
+@media (min-width: 1200px) and (max-width: 1439px) {
+  .template-editor__body,
+  .template-editor__body.is-inspecting {
+    --editor-structure-dock-width: 220px;
+  }
+}
+
+@media (min-width: 1440px) and (max-width: 1599px) {
+  .template-editor__body,
+  .template-editor__body.is-inspecting {
+    --editor-structure-dock-width: 232px;
+  }
+}
+
+@media (min-width: 1600px) {
+  .template-editor__body,
+  .template-editor__body.is-inspecting {
+    --editor-structure-dock-width: 240px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .template-editor__structure--reference .template-editor__slot-devices {
+    transition: none;
+  }
+}

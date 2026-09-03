@@ -274,6 +274,10 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     page,
   }) => {
     const inspector = await openHeroInspector(page);
+    const firstLayer = page.locator(".homepage-editor__layer-item").first();
+    await expect(firstLayer.locator(".homepage-editor__layer-summary"))
+      .toHaveText("东方之形，自有光华");
+    await expect(firstLayer.getByRole("button", { name: "首屏", exact: true })).toBeVisible();
 
     await expect(
       inspector.getByRole("button", { name: "更多模块操作" }),
@@ -428,7 +432,12 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await scroll.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
     const scrollTop = await scroll.evaluate((element) => Math.round(element.scrollTop));
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
-    await canvas.locator('[data-editor-field~="title"]:visible').first().click();
+    const canvasTitle = canvas.locator('[data-editor-field~="title"]:visible').first();
+    await expect(canvasTitle).toHaveCSS("animation-name", "none");
+    const titleTop = await canvasTitle.evaluate((element) => element.getBoundingClientRect().top);
+    await canvasTitle.click();
+    await expect.poll(() => canvasTitle.evaluate((element) => element.getBoundingClientRect().top))
+      .toBeCloseTo(titleTop, 1);
     await expect(inspector.locator(".is-visual-selected")).toHaveCount(0);
     await expect(inspector.getByRole("region", { name: "当前编辑对象" }))
       .toContainText("全部内容");
@@ -454,6 +463,77 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await expect(field(inspector, "mobileImage")).toHaveCount(1);
     for (const key of allContentFields.filter((fieldKey) => fieldKey !== "desktopImage")) {
       await expect(field(inspector, key), `移动端仍应保留当前适用字段 ${key}`).toHaveCount(1);
+    }
+  });
+
+  test("页面画布点击可见模块时保持宿主画布纵向位置稳定", async ({ page }) => {
+    await openHeroInspector(page, { width: 1600, height: 900 }, makeScrollableLayerDraft());
+    const stage = page.locator(".homepage-editor__canvas-scroll");
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const target = canvas.locator('[data-editor-block-id="inspector-layer-banner-6"]');
+    await expect(target).toHaveCount(1);
+    await target.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(100);
+    const before = await stage.evaluate((element) => ({
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(before.scrollTop).toBeGreaterThan(0);
+
+    await stage.evaluate((element) => {
+      type CanvasSample = {
+        scrollTop: number;
+        canvasTop: number;
+        frameTop: number;
+        frameHeight: number;
+        targetTop: number;
+      };
+      const observedWindow = window as typeof window & { __canvasScrollSamples?: CanvasSample[] };
+      const samples: CanvasSample[] = [];
+      observedWindow.__canvasScrollSamples = samples;
+      const startedAt = performance.now();
+      const sample = () => {
+        const canvasDocument = document.querySelector<HTMLElement>(".homepage-editor__canvas-document");
+        const frame = document.querySelector<HTMLIFrameElement>(".homepage-editor__preview-frame iframe");
+        const targetBlock = frame?.contentDocument?.querySelector<HTMLElement>(
+          '[data-editor-block-id="inspector-layer-banner-6"]',
+        );
+        const frameRect = frame?.getBoundingClientRect();
+        const targetRect = targetBlock?.getBoundingClientRect();
+        const scale = frame && frameRect
+          ? frameRect.width / Math.max(1, frame.contentDocument?.documentElement.clientWidth ?? 1)
+          : 1;
+        samples.push({
+          scrollTop: element.scrollTop,
+          canvasTop: canvasDocument?.getBoundingClientRect().top ?? 0,
+          frameTop: frameRect?.top ?? 0,
+          frameHeight: frameRect?.height ?? 0,
+          targetTop: frameRect && targetRect ? frameRect.top + targetRect.top * scale : 0,
+        });
+        if (performance.now() - startedAt < 800) requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await target.click({ position: { x: 24, y: 24 } });
+    await page.waitForTimeout(900);
+    const after = await stage.evaluate((element) => ({
+        scrollTop: element.scrollTop,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+    }));
+    expect(after).toEqual(before);
+    const samples = await page.evaluate(() => (
+      window as typeof window & { __canvasScrollSamples?: Array<Record<string, number>> }
+    ).__canvasScrollSamples ?? []);
+    expect(samples.length).toBeGreaterThan(10);
+    const first = samples[0];
+    for (const sample of samples) {
+      expect(sample.scrollTop).toBeCloseTo(first.scrollTop, 1);
+      expect(sample.canvasTop).toBeCloseTo(first.canvasTop, 1);
+      expect(sample.frameTop).toBeCloseTo(first.frameTop, 1);
+      expect(sample.frameHeight).toBeCloseTo(first.frameHeight, 1);
+      expect(sample.targetTop).toBeCloseTo(first.targetTop, 1);
     }
   });
 
@@ -765,11 +845,20 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
     await expect(page.getByRole("region", { name: /模板设计画布/ })).toBeVisible();
     const templateInspector = page.getByRole("complementary", { name: "模板属性", exact: true });
-    await templateInspector.getByRole("tab", { name: "布局" }).click();
-    await expect(templateInspector.getByLabel("布局方式")).toBeVisible();
+    await templateInspector.getByRole("tab", { name: "模板尺寸", exact: true }).click();
+    const layoutChoices = templateInspector.getByRole("group", { name: "布局方式", exact: true });
+    await expect(layoutChoices).toBeVisible();
+    await expect(layoutChoices.getByRole("button", { name: "布局方式：自然" })).toHaveAttribute("aria-pressed", "true");
+    await layoutChoices.getByRole("button", { name: "布局方式：弹性" }).click();
+    await expect(layoutChoices.getByRole("button", { name: "布局方式：弹性" })).toHaveAttribute("aria-pressed", "true");
+    await layoutChoices.getByRole("button", { name: "布局方式：自然" }).click();
+    const backgroundChoices = templateInspector.getByRole("group", { name: "默认背景", exact: true });
+    await backgroundChoices.getByRole("button", { name: "默认背景：柔灰" }).click();
+    await expect(backgroundChoices.getByRole("button", { name: "默认背景：柔灰" })).toHaveAttribute("aria-pressed", "true");
+    await backgroundChoices.getByRole("button", { name: "默认背景：白色" }).click();
     await page.getByRole("button", { name: /移动端模板布局/ }).click();
     await expect(page.getByRole("button", { name: /移动端模板布局/ })).toHaveAttribute("aria-pressed", "true");
-    await expect(templateInspector.getByRole("tab", { name: "布局" })).toHaveAttribute("aria-selected", "true");
+    await expect(templateInspector.getByRole("tabpanel")).toBeVisible();
   });
 
   test("页面内不再开放母模板对象控件，独立模板属性按任务分区", async ({ page }) => {
@@ -781,11 +870,9 @@ test.describe("属性面板上下文（真实前端组件 + 拦截自有 API；�
 
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
     const templateInspector = page.getByRole("complementary", { name: "模板属性", exact: true });
-    await expect(templateInspector.getByRole("tab", { name: "内容" })).toBeVisible();
-    await expect(templateInspector.getByRole("tab", { name: "布局" })).toBeVisible();
-    await expect(templateInspector.getByRole("tab", { name: "高级" })).toBeVisible();
-    await templateInspector.getByRole("tab", { name: "高级" }).click();
     await expect(templateInspector.getByRole("tabpanel")).toBeVisible();
+    await expect(templateInspector.getByRole("tab")).toHaveCount(3);
+    await expect(templateInspector.locator("details, summary")).toHaveCount(0);
   });
 
   test("页面 Inspector 为单一实例内容面板，键盘从顶部模式按钮进入和退出模板工作区", async ({ page }) => {

@@ -18,6 +18,7 @@ const moduleType = "首屏主视觉";
 const blockId = "hero-visual-test";
 
 function VisualEditorHeroFixture() {
+  const hiddenText = new URLSearchParams(window.location.search).get("hiddenText") === "1";
   const [props, setProps] = useState<Record<string, any>>({
     id: blockId,
     desktopImage: "/svg/template-hero.svg",
@@ -27,6 +28,17 @@ function VisualEditorHeroFixture() {
     subtitle: "",
     actionText: "",
     targetType: "none",
+    ...(hiddenText ? {
+      __instanceOverrides: {
+        version: 2,
+        nodes: {
+          eyebrow: { enabled: false },
+          title: { enabled: false },
+          subtitle: { enabled: false },
+          actionText: { enabled: false },
+        },
+      },
+    } : {}),
   });
 
   useEffect(() => {

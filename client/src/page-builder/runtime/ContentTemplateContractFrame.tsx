@@ -29,6 +29,7 @@ import {
   type CanvasSharedVisualPreviewMessage,
   type VisualNodeKind,
 } from "../visual-editor/visualEditorSession";
+import { getTemplateContractNodeLabel } from "./contentTemplateRolePresentation";
 
 interface ContentTemplateContractFrameProps {
   moduleType: string;
@@ -52,93 +53,7 @@ const EDITOR_SURFACE_CSS = `
   isolation: isolate;
 }
 .hc-contract-frame--editor[data-visual-panel-mode="design"] {
-  color: var(--hc-contract-ink);
-  background: var(--hc-contract-canvas);
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"][data-contract-tone="dark"] {
-  --hc-contract-canvas: #181A1B;
-  --hc-contract-surface: rgba(95, 101, 104, 0.18);
-  --hc-contract-surface-strong: rgba(95, 101, 104, 0.34);
-  --hc-contract-ink: #F7F8F8;
-  --hc-contract-muted: #DDE1E2;
-  --hc-contract-line: #5F6568;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"]:not([data-content-template-module="视频区块"]) > :where(section, div),
-.hc-contract-frame--editor[data-visual-panel-mode="design"]:not([data-content-template-module="视频区块"]) :where(section.hc-section) {
-  background: var(--hc-contract-canvas) !important;
-  color: var(--hc-contract-ink) !important;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] :where([class*="empty"], [class*="placeholder"]) {
-  border-color: var(--hc-contract-line) !important;
-  background: var(--hc-contract-surface) !important;
-  box-shadow: none !important;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] :where([aria-current="true"], [class*="pagination"], [class*="handle"], [class*="hotspot"], [class*="action"], [class*="countdown"]) {
-  --hc-gold: var(--hc-contract-accent);
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] :where(article, figure, [class*="card"]) {
-  box-shadow: none !important;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind] {
-  outline: 2px dashed #5F6568 !important;
-  outline-offset: -2px;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="media"],
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="product"],
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"] {
-  background: #DDE1E2 !important;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="product"]:not([data-hc-keyboard-node]),
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"]:not([data-hc-keyboard-node]) {
-  position: relative;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="media"] :where(img, picture, video, canvas, iframe),
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="product"] > *,
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind="structured"] > * {
-  opacity: 0 !important;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] :is(
-  [data-hc-template-slot-kind="text"],
-  [data-hc-template-slot-kind="action"]
-) {
-  border-color: transparent !important;
-  min-height: 32px;
-  background: #F4F5F5 !important;
-  color: transparent !important;
-  text-shadow: none !important;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] :is(
-  [data-hc-template-slot-kind="text"],
-  [data-hc-template-slot-kind="action"]
-):not([data-hc-keyboard-node]) {
-  position: relative;
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"]
-  [data-hc-template-slot-kind="text"][data-hc-keyboard-node]:empty {
-  min-width: min(160px, 100%);
-}
-.hc-contract-frame--editor[data-visual-panel-mode="design"] [data-hc-template-slot-kind]::after {
-  content: attr(data-hc-template-slot-label);
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 2147483646;
-  display: inline-flex;
-  min-width: 76px;
-  min-height: 34px;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 12px;
-  transform: translate(-50%, -50%);
-  border: 1px solid #5F6568;
-  border-radius: 3px;
-  background: #FFFFFF;
-  color: #181A1B !important;
-  font: 600 16px/1.25 var(--hc-font-sans, Arial, sans-serif) !important;
-  letter-spacing: .08em !important;
-  text-align: center;
-  white-space: nowrap;
-  pointer-events: none;
+  background: transparent;
 }
 .hc-contract-frame--editor :is(
   [data-content-role],
@@ -151,6 +66,14 @@ const EDITOR_SURFACE_CSS = `
   [data-editor-field] *
 ) {
   pointer-events: auto !important;
+}
+.hc-contract-frame--editor :is(
+  [data-content-role],
+  [data-content-role-desktop],
+  [data-content-role-mobile],
+  [data-editor-field]
+) {
+  scroll-margin: 24px;
 }
 @media (max-width: 767px) {
   .hc-contract-frame--editor { overflow-x: clip; }
@@ -198,32 +121,33 @@ const EDITOR_SURFACE_CSS = `
 }
 .hc-contract-frame--editor [data-hc-template-slot-box] {
   position: absolute;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 2px dashed #5F6568;
-  background: #DDE1E2;
-  color: #181A1B;
+  overflow: visible;
+  border: 1px dashed rgba(51, 95, 125, .68);
+  background: transparent;
+  color: #335F7D;
   pointer-events: none;
   z-index: 0;
 }
 .hc-contract-frame--editor [data-hc-template-slot-box][data-slot-kind="text"],
 .hc-contract-frame--editor [data-hc-template-slot-box][data-slot-kind="action"] {
-  background: #F4F5F5;
+  border-color: rgba(95, 101, 104, .62);
+  color: #5F6568;
 }
 .hc-contract-frame--editor [data-hc-template-slot-box] > span {
+  position: absolute;
+  top: 6px;
+  left: 6px;
   display: inline-flex;
-  min-width: 76px;
-  min-height: 34px;
+  min-height: 22px;
   align-items: center;
-  justify-content: center;
-  padding: 7px 12px;
-  border: 1px solid #5F6568;
-  border-radius: 3px;
-  background: #FFFFFF;
-  color: #181A1B;
-  font: 600 16px/1.25 var(--hc-font-sans, Arial, sans-serif);
-  letter-spacing: .08em;
+  padding: 3px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 1px 4px rgba(24, 26, 27, .08);
+  color: inherit;
+  font: 600 11px/1.3 var(--hc-font-sans, Arial, sans-serif);
+  letter-spacing: .04em;
   white-space: nowrap;
 }
 .hc-contract-frame--editor [data-hc-node-hud] {
@@ -716,6 +640,7 @@ const EDITOR_FRAME_CSS: Record<string, string> = {
 function createInstanceCss(
   contract: ContentTemplateContract,
   overrides: Record<string, unknown> | undefined,
+  props: Record<string, unknown>,
   scopeId: string,
   mode: "editor" | "preview" | "public",
 ) {
@@ -723,6 +648,19 @@ function createInstanceCss(
   const capabilities = contract.editorCapabilities.layoutOverrides ?? {};
   const root = `[data-hc-instance="${scopeId}"]`;
   const rules: string[] = [];
+  if (contract.key === "hero") {
+    const visibilityNodes = overrides.version === 2
+      ? (isRecord(overrides.nodes) ? overrides.nodes : {})
+      : (isRecord(overrides.textRoles) ? overrides.textRoles : {});
+    const visibleCopyRoles = ["eyebrow", "title", "subtitle", "actionText"].some((roleId) => {
+      const node = isRecord(visibilityNodes[roleId]) ? visibilityNodes[roleId] : {};
+      if (node.enabled === false) return false;
+      return mode === "editor" || (typeof props[roleId] === "string" && props[roleId].trim().length > 0);
+    });
+    if (!visibleCopyRoles) {
+      rules.push(`${root} :is(.hc-phase1-hero__copy-band,.hc-phase1-hero__copy-shade){display:none!important}`);
+    }
+  }
   if (overrides.version === 2) {
     const frame = isRecord(overrides.frame) ? overrides.frame : {};
     const aspectRatios = isRecord(frame.aspectRatioByViewport)
@@ -1263,6 +1201,7 @@ export default function ContentTemplateContractFrame({
   const selection = useVisualEditorSession((state) => state.selection);
   const editorMode = useVisualEditorSession((state) => state.mode);
   const panelMode = useVisualEditorSession((state) => state.panelMode);
+  const visualWorkspace = useVisualEditorSession((state) => state.workspace);
   const layerCommand = useVisualEditorSession((state) => state.layerCommand);
   const selectNode = useVisualEditorSession((state) => state.selectNode);
   const setEditorMode = useVisualEditorSession((state) => state.setMode);
@@ -1286,6 +1225,10 @@ export default function ContentTemplateContractFrame({
   const [gesturePhase, setGesturePhase] = useState<GesturePhase>("idle");
   const [activeViewport, setActiveViewport] = useState<"desktop" | "mobile">("desktop");
   const blockId = typeof props?.id === "string" ? props.id : "";
+  // 页面装修已经由 CanvasBlockInteractionBoundary 持有模块级定位标识；
+  // 只有独立模板画布没有这层外部边界，需要由真实 Renderer 自己暴露节点标识。
+  // 同一个页面模块出现两个相同 data-editor-block-id 会让滚动定位和选择命中不唯一。
+  const ownsEditorBlockMarker = blockId.startsWith("template-editor:");
   const forcedEditorViewport = props?.__editorViewport === "mobile"
     ? "mobile" as const
     : props?.__editorViewport === "desktop"
@@ -1299,7 +1242,12 @@ export default function ContentTemplateContractFrame({
   const selectedHere = mode === "editor" && selection?.blockId === blockId
     ? selection
     : null;
-  const panelModeHere = selectedHere ? panelMode : "content";
+  const isCatalogTemplatePreview = props?.__templateCatalogPreview === true;
+  const panelModeHere = mode === "editor" && visualWorkspace === "template"
+    ? "design"
+    : selectedHere
+      ? panelMode
+      : "content";
   const editorModeHere = selectedHere ? editorMode : "select";
   const layoutCapabilities = contract?.editorCapabilities.layoutOverrides;
   const selectedSlot = selectedHere
@@ -1311,6 +1259,9 @@ export default function ContentTemplateContractFrame({
   const selectedEditableObject = selectedHere
     ? findContentTemplateEditableObject(contract, selectedHere.nodeId)
     : undefined;
+  const selectedNodeLabel = selectedHere
+    ? getTemplateContractNodeLabel(selectedHere.nodeId, selectedEditableObject?.roleId)
+    : "";
   const canAdjustLayout = Boolean(
     (selectedSlot || selectedTextRole) &&
       supportsCapabilityOnViewport(selectedEditableObject, "layout", activeViewport),
@@ -1395,14 +1346,21 @@ export default function ContentTemplateContractFrame({
 
   useEffect(() => {
     if (gesturePreview?.phase !== "commit") return;
-    const current = isRecord(props?.__instanceOverrides)
-      ? props.__instanceOverrides
-      : undefined;
-    if (JSON.stringify(current) !== JSON.stringify(gesturePreview.overrides)) return;
+    const current = sanitizeContentTemplateLayoutData(
+      moduleType,
+      isRecord(props?.__instanceOverrides) ? props.__instanceOverrides : undefined,
+    );
+    const committed = sanitizeContentTemplateLayoutData(
+      moduleType,
+      gesturePreview.overrides,
+    );
+    // 模板会话会在写回前按合同清洗几何；用同一清洗结果确认提交，避免
+    // 临时手势对象与持久化对象仅因规范化差异而永久停留在 commit 预览态。
+    if (!committed || JSON.stringify(current) !== JSON.stringify(committed)) return;
     gesturePreviewRef.current = null;
     setGesturePreview(null);
     setGesturePhase("idle");
-  }, [gesturePreview, props?.__instanceOverrides]);
+  }, [gesturePreview, moduleType, props?.__instanceOverrides]);
 
   useEffect(() => {
     if (
@@ -1543,51 +1501,87 @@ export default function ContentTemplateContractFrame({
         object.nodeIds ?? [object.roleId],
       ),
     );
-    const touched: HTMLElement[] = [];
-    root.querySelectorAll<HTMLElement>(
-      "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
-    ).forEach((element) => {
-      const nodeId = getVisualRoleIdForViewport(element, activeViewport) ||
-        element.dataset.editorField?.split(/\s+/).find(Boolean);
-      if (!nodeId || !allowedNodes.has(nodeId)) return;
-      const ancestor = element.parentElement?.closest<HTMLElement>(
-        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
-      );
-      const ancestorNodeId = getVisualRoleIdForViewport(ancestor, activeViewport);
-      if (ancestorNodeId === nodeId && allowedNodes.has(ancestorNodeId)) return;
-      const nodeKind = getVisualNodeKind(contract, nodeId);
-      if (!nodeKind) return;
-      element.dataset.hcTemplateSlotKind = nodeKind;
-      element.dataset.hcTemplateSlotLabel = getTemplateSlotLabel(nodeKind);
-      touched.push(element);
-      const isAction = nodeKind === "action";
-      if (isAction) return;
-      if (!element.hasAttribute("tabindex")) {
-        element.tabIndex = 0;
-        element.dataset.hcKeyboardTab = "true";
+    const touched = new Set<HTMLElement>();
+    const cleanupElement = (element: HTMLElement) => {
+      element.removeAttribute("data-hc-template-slot-kind");
+      element.removeAttribute("data-hc-template-slot-label");
+      if (element.dataset.hcKeyboardNode) {
+        element.removeAttribute("data-hc-keyboard-node");
       }
-      element.dataset.hcKeyboardNode = nodeId;
-      if (!element.hasAttribute("aria-label")) {
-        element.setAttribute("aria-label", `编辑画布对象 ${nodeId}`);
-        element.dataset.hcKeyboardAria = "true";
+      if (element.dataset.hcKeyboardTab === "true") {
+        element.removeAttribute("tabindex");
+        element.removeAttribute("data-hc-keyboard-tab");
       }
-    });
-    return () => {
-      touched.forEach((element) => {
-        element.removeAttribute("data-hc-template-slot-kind");
-        element.removeAttribute("data-hc-template-slot-label");
-        if (element.dataset.hcKeyboardNode) {
-          element.removeAttribute("data-hc-keyboard-node");
+      if (element.dataset.hcKeyboardAria === "true") {
+        element.removeAttribute("aria-label");
+        element.removeAttribute("data-hc-keyboard-aria");
+      }
+    };
+    const decorateSlots = () => {
+      const eligible = new Set<HTMLElement>();
+      root.querySelectorAll<HTMLElement>(
+        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
+      ).forEach((element) => {
+        const directNodeId = getVisualRoleIdForViewport(element, activeViewport);
+        const fieldNodeIds = element.dataset.editorField?.split(/\s+/).filter(Boolean) ?? [];
+        const ancestor = element.parentElement?.closest<HTMLElement>(
+          "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
+        );
+        const ancestorNodeId = getVisualRoleIdForViewport(ancestor, activeViewport);
+        const nodeId = directNodeId
+          || (ancestorNodeId && fieldNodeIds.includes(ancestorNodeId)
+            ? ancestorNodeId
+            : fieldNodeIds.find((candidate) => allowedNodes.has(candidate)));
+        if (!nodeId || !allowedNodes.has(nodeId)) return;
+        if (ancestorNodeId === nodeId && allowedNodes.has(ancestorNodeId)) return;
+        const ownerWindow = element.ownerDocument.defaultView;
+        const computed = ownerWindow?.getComputedStyle(element);
+        if (
+          element.getClientRects().length === 0
+          || computed?.display === "none"
+          || computed?.visibility === "hidden"
+          || element.closest('[aria-hidden="true"]')
+        ) return;
+        const nodeKind = getVisualNodeKind(contract, nodeId);
+        if (!nodeKind) return;
+        const editableObject = findContentTemplateEditableObject(contract, nodeId);
+        const nodeLabel = getTemplateContractNodeLabel(nodeId, editableObject?.roleId);
+        element.dataset.hcTemplateSlotKind = nodeKind;
+        element.dataset.hcTemplateSlotLabel = nodeLabel;
+        touched.add(element);
+        eligible.add(element);
+        const isAction = nodeKind === "action";
+        if (isAction) return;
+        if (!element.hasAttribute("tabindex")) {
+          element.tabIndex = 0;
+          element.dataset.hcKeyboardTab = "true";
         }
-        if (element.dataset.hcKeyboardTab === "true") {
-          element.removeAttribute("tabindex");
-          element.removeAttribute("data-hc-keyboard-tab");
-        }
-        if (element.dataset.hcKeyboardAria === "true") {
-          element.removeAttribute("aria-label");
-          element.removeAttribute("data-hc-keyboard-aria");
+        element.dataset.hcKeyboardNode = nodeId;
+        if (!element.hasAttribute("aria-label")) {
+          element.setAttribute("aria-label", `编辑画布对象：${nodeLabel}`);
+          element.dataset.hcKeyboardAria = "true";
         }
       });
+      touched.forEach((element) => {
+        if (eligible.has(element)) return;
+        cleanupElement(element);
+        touched.delete(element);
+      });
+    };
+    decorateSlots();
+    const MutationObserverConstructor = root.ownerDocument.defaultView?.MutationObserver;
+    const observer = MutationObserverConstructor
+      ? new MutationObserverConstructor(decorateSlots)
+      : undefined;
+    observer?.observe(root, {
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "aria-hidden"],
+      childList: true,
+      subtree: true,
+    });
+    return () => {
+      observer?.disconnect();
+      touched.forEach(cleanupElement);
     };
   }, [activeViewport, blockId, contract, mode]);
 
@@ -1597,8 +1591,13 @@ export default function ContentTemplateContractFrame({
       setTemplateSlotOverlays([]);
       return;
     }
-    const nodes = Array.from(root.querySelectorAll<HTMLElement>("[data-hc-template-slot-kind]"));
+    const slotSelector = "[data-hc-template-slot-kind]";
+    const contentSelector =
+      "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]";
+    const ownerWindow = root.ownerDocument.defaultView;
+    let updateFrame = 0;
     const updateOverlays = () => {
+      const nodes = Array.from(root.querySelectorAll<HTMLElement>(slotSelector));
       const rootBounds = root.getBoundingClientRect();
       const scaleX = root.offsetWidth > 0 ? rootBounds.width / root.offsetWidth : 1;
       const scaleY = root.offsetHeight > 0 ? rootBounds.height / root.offsetHeight : scaleX;
@@ -1627,23 +1626,56 @@ export default function ContentTemplateContractFrame({
       setTemplateSlotOverlays((current) =>
         templateSlotOverlaysEqual(current, next) ? current : next,
       );
+      nodes.forEach((node) => resizeObserver?.observe(node));
     };
-    updateOverlays();
-    const ownerWindow = root.ownerDocument.defaultView;
+    const scheduleOverlayUpdate = () => {
+      if (!ownerWindow || updateFrame) return;
+      updateFrame = ownerWindow.requestAnimationFrame(() => {
+        updateFrame = 0;
+        updateOverlays();
+      });
+    };
     const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
-    const observer = ResizeObserverConstructor
-      ? new ResizeObserverConstructor(updateOverlays)
+    const resizeObserver = ResizeObserverConstructor
+      ? new ResizeObserverConstructor(scheduleOverlayUpdate)
       : undefined;
-    observer?.observe(root);
-    nodes.forEach((node) => observer?.observe(node));
-    ownerWindow?.addEventListener("resize", updateOverlays);
-    ownerWindow?.addEventListener("scroll", updateOverlays, true);
+    resizeObserver?.observe(root);
+    const MutationObserverConstructor = ownerWindow?.MutationObserver;
+    const mutationObserver = MutationObserverConstructor
+      ? new MutationObserverConstructor((records) => {
+          const contentChanged = records.some((record) => {
+            if (record.type === "attributes") {
+              return isHtmlElement(record.target) &&
+                !record.target.closest("[data-hc-editor-overlay]");
+            }
+            return [...record.addedNodes, ...record.removedNodes].some((node) => {
+              if (!isHtmlElement(node)) return false;
+              if (node.matches("[data-hc-editor-overlay]") || node.closest("[data-hc-editor-overlay]")) {
+                return false;
+              }
+              return node.matches(contentSelector) || Boolean(node.querySelector(contentSelector));
+            });
+          });
+          if (contentChanged) scheduleOverlayUpdate();
+        })
+      : undefined;
+    mutationObserver?.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-hc-template-slot-kind", "data-hc-template-slot-label"],
+    });
+    updateOverlays();
+    ownerWindow?.addEventListener("resize", scheduleOverlayUpdate);
+    ownerWindow?.addEventListener("scroll", scheduleOverlayUpdate, true);
     return () => {
-      observer?.disconnect();
-      ownerWindow?.removeEventListener("resize", updateOverlays);
-      ownerWindow?.removeEventListener("scroll", updateOverlays, true);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      ownerWindow?.removeEventListener("resize", scheduleOverlayUpdate);
+      ownerWindow?.removeEventListener("scroll", scheduleOverlayUpdate, true);
+      if (updateFrame) ownerWindow?.cancelAnimationFrame(updateFrame);
     };
-  }, [contract, mode, panelModeHere, props]);
+  }, [mode, panelModeHere]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1888,10 +1920,16 @@ export default function ContentTemplateContractFrame({
   const scopeId = `hc-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const previewOverrides = gesturePreview?.overrides ?? sharedDesignPreview;
   const previewProps = previewOverrides
-    ? { ...props, __instanceOverrides: previewOverrides }
-    : props;
+    ? { ...(props ?? {}), __instanceOverrides: previewOverrides }
+    : (props ?? {});
   const instanceOverrides = resolveInstanceOverrides(contract, previewProps);
-  const instanceCss = createInstanceCss(contract, instanceOverrides, scopeId, mode);
+  const instanceCss = createInstanceCss(
+    contract,
+    instanceOverrides,
+    previewProps,
+    scopeId,
+    isCatalogTemplatePreview ? "editor" : mode,
+  );
   const instanceOverrideRecord: InstanceValue = isRecord(instanceOverrides)
     ? instanceOverrides as InstanceValue
     : {};
@@ -2008,10 +2046,27 @@ export default function ContentTemplateContractFrame({
     }
     const fieldElement = target.closest<HTMLElement>("[data-editor-field]");
     const fieldId = fieldElement?.dataset.editorField?.split(/\s+/).find(Boolean);
-    const fieldKind = fieldId ? getVisualNodeKind(contract, fieldId) : undefined;
-    if (fieldId && fieldElement && fieldKind) {
+    const fieldObject = fieldId
+      ? findContentTemplateEditableObject(contract, fieldId)
+      : undefined;
+    const fieldIsLayoutNode = Boolean(
+      fieldId && contract?.defaultGeometryByViewport[activeViewport].zones.some(
+        (zone) => zone.nodeId === fieldId,
+      ),
+    );
+    const selectionNodeId = fieldObject
+      ? fieldIsLayoutNode
+        ? fieldId
+        : fieldObject.roleId
+      : undefined;
+    const fieldKind = selectionNodeId
+      ? getVisualNodeKind(contract, selectionNodeId)
+      : undefined;
+    if (selectionNodeId && fieldElement && fieldKind) {
       const kind: VisualNodeKind = fieldKind;
-      return { nodeId: fieldId, kind, element: fieldElement };
+      // 标题等字段本身就是布局节点，必须保留精确 nodeId；actionText 等
+      // 仅是角色内容字段，结构树和实例覆盖则使用 action 这类合同角色。
+      return { nodeId: selectionNodeId, kind, element: fieldElement };
     }
     const roleElement = target.closest<HTMLElement>(
       "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
@@ -2133,6 +2188,25 @@ export default function ContentTemplateContractFrame({
       setVisualPanelMode("design");
     }
     setEditorMode(nextMode);
+    if (nextMode === "adjust-layout" && selectedHere) {
+      const root = rootRef.current;
+      const selectedTarget = root
+        ? Array.from(root.querySelectorAll<HTMLElement>(
+            "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
+          )).find((element) => {
+            const ids = [
+              element.dataset.contentRole,
+              element.dataset.contentRoleDesktop,
+              element.dataset.contentRoleMobile,
+              ...(element.dataset.editorField?.split(/\s+/) ?? []),
+            ];
+            return ids.includes(selectedHere.nodeId) && element.getClientRects().length > 0;
+          })
+        : null;
+      selectedTarget?.ownerDocument.defaultView?.requestAnimationFrame(() => {
+        selectedTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
+      });
+    }
     setLiveMessage(
       nextMode === "adjust-layout"
         ? "已进入对象位置与大小调整"
@@ -2194,10 +2268,19 @@ export default function ContentTemplateContractFrame({
       : findVisualNode(event.target, activeViewport);
     if (!node) return;
     const previousSelection = useVisualEditorSession.getState().selection;
+    const isTemplateCanvasBlock = blockId.startsWith("template-editor:");
     selectNode({ blockId, moduleType, nodeId: node.nodeId, kind: node.kind });
-    if (previousSelection && previousSelection.blockId !== blockId) {
+    if (
+      previousSelection
+      && previousSelection.blockId !== blockId
+      && !isTemplateCanvasBlock
+      && !selectionBoxElement
+      && !resizeHandleElement
+    ) {
       // 跨模块第一击必须先让外层画布边界同步 Puck 模块选择；若立即进入
       // 拖动并停止冒泡，会出现“对象已换、属性面板仍属于旧模块”的分裂状态。
+      // 选中框和缩放把手只能属于当前 Renderer；一次取消手势引起组件重挂时，
+      // store 里可能短暂保留旧 blockId，此时不能把持续编辑误判为跨模块首击。
       setEditorMode("select");
       event.preventDefault();
       return;
@@ -2217,8 +2300,18 @@ export default function ContentTemplateContractFrame({
         contentTemplateObjectHasCapability(editableObject, "focus") &&
         mediaSlot?.focusByViewport === true,
     );
-    if (activeMode === "adjust-layout") {
+    // 模板设计遵循 Canvas First / Mouse First：即使当前对象刚处于“完成”
+    // 选择态，按住可移动槽位主体的同一次手势也要直接重新进入布局调整。
+    // 页面装修仍保留“只选择实例、不拖动内部对象”的边界。
+    const directTemplateLayoutGesture =
+      isTemplateCanvasBlock && activeMode === "select" && layoutAllowed;
+    if (activeMode === "adjust-layout" || directTemplateLayoutGesture) {
       if (!layoutAllowed) return;
+      if (directTemplateLayoutGesture) {
+        setVisualPanelMode("design");
+        setEditorMode("adjust-layout");
+        setLiveMessage("已开始移动画布对象");
+      }
       const nodeBounds = node.element.getBoundingClientRect();
       // 根框架前面会插入合同样式节点，firstElementChild 因此可能是零尺寸
       // <style>。从当前槽位向上找到框架的直接内容子节点，才能按真实模板
@@ -2786,6 +2879,7 @@ export default function ContentTemplateContractFrame({
       data-content-template-contract={contract.key}
       data-content-template-module={moduleType}
       data-content-template-renderer="real"
+      data-editor-block-id={mode === "editor" && ownsEditorBlockMarker ? blockId : undefined}
       data-contract-tone={contract.preview.desktop.tone}
       data-contract-visual-role={contract.visualRole}
       data-contract-height-desktop={contract.heightModeByViewport.desktop}
@@ -2922,7 +3016,7 @@ export default function ContentTemplateContractFrame({
               {panelModeHere === "design" ? (
                 <div
                   role="toolbar"
-                  aria-label={`调整画布对象 ${selectedHere.nodeId}`}
+                  aria-label={`调整画布对象：${selectedNodeLabel}`}
                   data-hc-node-hud
                   data-node-id={selectedHere.nodeId}
                   data-node-kind={selectedHere.kind}

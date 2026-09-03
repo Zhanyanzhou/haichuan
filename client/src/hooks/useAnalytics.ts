@@ -9,8 +9,12 @@
 const ANALYTICS_CONFIGURED = import.meta.env.VITE_ANALYTICS_ENABLED === "true";
 const ANALYTICS_CONSENT_COOKIE = "hc_analytics_consent";
 const ANALYTICS_SESSION_KEY = "hc.analytics-session";
+const ANALYTICS_VISITOR_KEY = "hc.analytics-visitor";
+const ANALYTICS_SOURCE_KEY = "hc.analytics-source";
 const ANALYTICS_CONSENT_VERSION = "analytics-v1";
 const ANALYTICS_CONSENT_MAX_AGE_SECONDS = 60 * 60 * 24 * 180;
+const ANALYTICS_VISITOR_MAX_AGE_MS = ANALYTICS_CONSENT_MAX_AGE_SECONDS * 1000;
+const ANALYTICS_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type AnalyticsConsentDecision = "granted" | "denied" | "withdrawn";
 
@@ -47,10 +51,17 @@ export function setAnalyticsConsent(decision: AnalyticsConsentDecision) {
   if (decision !== "granted") {
     try {
       sessionStorage.removeItem(ANALYTICS_SESSION_KEY);
+      sessionStorage.removeItem(ANALYTICS_SOURCE_KEY);
     } catch {
-      // 存储不可用时仍以内存清空保证当前页面停止复用标识。
+      // sessionStorage 不可用时仍继续清理其他标识。
+    }
+    try {
+      localStorage.removeItem(ANALYTICS_VISITOR_KEY);
+    } catch {
+      // localStorage 不可用时仍以内存清空保证当前页面停止复用标识。
     }
     sessionId = "";
+    visitorId = "";
   }
   window.dispatchEvent(
     new CustomEvent("haichuan:analytics-consent-changed", {
@@ -59,23 +70,104 @@ export function setAnalyticsConsent(decision: AnalyticsConsentDecision) {
   );
 }
 
-// 匿名会话标识：仅用于区分会话，不关联任何个人信息
+interface TimedAnalyticsIdentifier {
+  id: string;
+  createdAt: number;
+  lastSeenAt?: number;
+}
+
+function createAnalyticsId(prefix: "s" | "v"): string {
+  const random =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  return `${prefix}_${random}`;
+}
+
+function parseTimedIdentifier(value: string | null): TimedAnalyticsIdentifier | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<TimedAnalyticsIdentifier>;
+    if (
+      typeof parsed.id !== "string"
+      || typeof parsed.createdAt !== "number"
+      || (parsed.lastSeenAt !== undefined && typeof parsed.lastSeenAt !== "number")
+    ) {
+      return null;
+    }
+    return parsed as TimedAnalyticsIdentifier;
+  } catch {
+    return null;
+  }
+}
+
+// 匿名访客标识仅在同意后创建，最多沿用 180 天；撤回同意时立即删除。
+let visitorId = "";
+function ensureVisitorId(): string {
+  if (visitorId) return visitorId;
+  if (typeof window === "undefined") return "";
+  const now = Date.now();
+  try {
+    const stored = parseTimedIdentifier(localStorage.getItem(ANALYTICS_VISITOR_KEY));
+    if (stored && now - stored.createdAt < ANALYTICS_VISITOR_MAX_AGE_MS) {
+      visitorId = stored.id;
+      return visitorId;
+    }
+    const next = { id: createAnalyticsId("v"), createdAt: now };
+    localStorage.setItem(ANALYTICS_VISITOR_KEY, JSON.stringify(next));
+    visitorId = next.id;
+  } catch {
+    visitorId = createAnalyticsId("v");
+  }
+  return visitorId;
+}
+
+// 30 分钟无活动后开始新会话；标识只用于匿名访问聚合。
 let sessionId = "";
 function ensureSessionId(): string {
-  if (sessionId) return sessionId;
   if (typeof window === "undefined") return "";
+  const now = Date.now();
   try {
-    sessionId = sessionStorage.getItem(ANALYTICS_SESSION_KEY) || "";
-    if (!sessionId) {
-      sessionId =
-        "s_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      sessionStorage.setItem(ANALYTICS_SESSION_KEY, sessionId);
+    const stored = parseTimedIdentifier(sessionStorage.getItem(ANALYTICS_SESSION_KEY));
+    if (
+      stored
+      && typeof stored.lastSeenAt === "number"
+      && now - stored.lastSeenAt < ANALYTICS_SESSION_TIMEOUT_MS
+    ) {
+      sessionId = stored.id;
+    } else {
+      sessionId = createAnalyticsId("s");
     }
+    const createdAt = stored?.id === sessionId ? stored.createdAt : now;
+    sessionStorage.setItem(
+      ANALYTICS_SESSION_KEY,
+      JSON.stringify({ id: sessionId, createdAt, lastSeenAt: now }),
+    );
   } catch {
     // sessionStorage 不可用（隐私模式等）时退化为内存会话 ID
-    sessionId = "s_" + Date.now().toString(36);
+    sessionId ||= createAnalyticsId("s");
   }
   return sessionId;
+}
+
+function trafficSource(): string {
+  try {
+    const saved = sessionStorage.getItem(ANALYTICS_SOURCE_KEY);
+    if (saved) return saved;
+    const campaign = new URLSearchParams(window.location.search)
+      .get("utm_source")
+      ?.trim()
+      .slice(0, 50);
+    let source = campaign || "direct";
+    if (!campaign && document.referrer) {
+      const referrer = new URL(document.referrer);
+      if (referrer.origin !== window.location.origin) source = referrer.hostname.slice(0, 50);
+    }
+    sessionStorage.setItem(ANALYTICS_SOURCE_KEY, source);
+    return source;
+  } catch {
+    return "direct";
+  }
 }
 
 const pending = new Map<string, number>();
@@ -101,13 +193,15 @@ async function send(event: Record<string, unknown>) {
         consentGranted: true,
         consentVersion: ANALYTICS_CONSENT_VERSION,
         sessionId: ensureSessionId(),
+        visitorId: ensureVisitorId(),
+        source: trafficSource(),
         deviceType:
           window.innerWidth < 768
             ? "mobile"
             : window.innerWidth < 1024
               ? "tablet"
               : "desktop",
-        pagePath: window.location.pathname,
+        pagePath: window.location.pathname.slice(0, 300),
       }),
     });
   } catch {
@@ -146,8 +240,17 @@ function fireOnce(
   }
 }
 
+export function isTrackableAnalyticsPath(pathname: string): boolean {
+  const normalized = pathname.replace(/^\/en(?=\/|$)/, "") || "/";
+  return !/^\/(?:admin|preview|customer|cart|checkout|partner)(?:\/|$)/.test(
+    normalized,
+  );
+}
+
 export function trackPageView() {
-  fire("page_view");
+  const pagePath = typeof window === "undefined" ? "/" : window.location.pathname;
+  if (!isTrackableAnalyticsPath(pagePath)) return;
+  fire("page_view", undefined, `page_view:${pagePath}`);
 }
 
 export function trackViewItem(productId: number) {

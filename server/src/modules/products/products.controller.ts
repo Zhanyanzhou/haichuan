@@ -44,6 +44,7 @@ import {
   ResolveProductReferencesDto,
   AddProductImageDto,
   UpdateProductImageDto,
+  CropListingImageDto,
 } from "./dto";
 import { join } from "path";
 import { stat } from "node:fs/promises";
@@ -369,7 +370,7 @@ export class ProductsController {
   async cropListingImage(
     @Param("id") id: string,
     @Param("sourceImageId") sourceImageId: string,
-    @Body() body: { x: number; y: number; width: number; height: number },
+    @Body() dto: CropListingImageDto,
   ) {
     const product = await this.productsService.findById(+id);
     if (!product) throw new NotFoundException("商品不存在");
@@ -389,10 +390,10 @@ export class ProductsController {
 
     // 归一化矩形转实际像素（正方形裁切）
     const cropPx = {
-      left: Math.round(body.x * imgW),
-      top: Math.round(body.y * imgH),
-      width: Math.round(body.width * imgW),
-      height: Math.round(body.height * imgH),
+      left: Math.round(dto.x * imgW),
+      top: Math.round(dto.y * imgH),
+      width: Math.round(dto.width * imgW),
+      height: Math.round(dto.height * imgH),
     };
 
     // 验证裁切范围

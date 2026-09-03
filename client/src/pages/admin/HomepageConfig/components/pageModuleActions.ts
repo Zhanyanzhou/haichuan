@@ -18,7 +18,9 @@ export function duplicatePageModule(
   dispatch: (action: PuckAction) => void,
   source: PageModuleData,
   sourceIndex: number,
+  options: { preventDuplicate?: boolean } = {},
 ) {
+  if (source.type === "首屏主视觉" || options.preventDuplicate) return sourceIndex;
   const duplicatedId = createCopyId("homepage-block");
   const duplicated = structuredClone(source);
   duplicated.props = {

@@ -56,6 +56,10 @@ function createStatefulService() {
     },
   };
   const dynamicTemplateVersion = {
+    count: async (args: any) => {
+      calls.push({ operation: "version.count", args: clone(args) });
+      return versions.filter((item) => item.dynamicTemplateId === args.where.dynamicTemplateId).length;
+    },
     findUnique: async (args: any) => {
       calls.push({ operation: "version.findUnique", args: clone(args) });
       const key = args.where.dynamicTemplateId_version;
@@ -148,11 +152,24 @@ function createStatefulService() {
       if (!template || template.id !== args.where.id) return null;
       return clone({ ...template, ...(args.include?.draft ? { draft } : {}) });
     },
+    deleteMany: async (args: any) => {
+      calls.push({ operation: "template.deleteMany", args: clone(args) });
+      if (!template || !matchesTemplateWhere(template, args.where)) return { count: 0 };
+      template = null;
+      draft = null;
+      return { count: 1 };
+    },
   };
   const prisma: any = {
     dynamicTemplate,
     dynamicTemplateDraft,
     dynamicTemplateVersion,
+    dynamicTemplateActivation: {
+      count: async (args: any) => {
+        calls.push({ operation: "activation.count", args: clone(args) });
+        return 0;
+      },
+    },
     pageDocument: {
       findMany: async (args: any) => {
         calls.push({ operation: "pageDocument.findMany", args: clone(args) });
@@ -195,6 +212,10 @@ function createStatefulService() {
       if (!target) throw new Error("version not created");
       target.definitionChecksum = "f".repeat(64);
     },
+    setDraftDefinition: (definition: unknown) => {
+      if (!draft) throw new Error("draft not created");
+      draft.definition = clone(definition);
+    },
     getState: () => ({ template: clone(template), draft: clone(draft), versions: clone(versions) }),
   };
 }
@@ -218,6 +239,7 @@ test("正式版本向 EDITOR 开放，设计操作只允许超级管理员且旧
     prototype.listVersions,
     prototype.archive,
     prototype.restore,
+    prototype.deleteDraft,
   ]) {
     assert.deepEqual(Reflect.getMetadata(ROLES_KEY, method), ["SUPER_ADMIN"]);
   }
@@ -507,7 +529,7 @@ test("发布模板 v2 不读取或修改 PageDocument、PageDocumentRevision、P
 });
 
 test("另存为创建全新 templateId，归档仅改变生命周期且不删除版本", async () => {
-  const { service, getState } = createStatefulService();
+  const { service, getState, calls } = createStatefulService();
   const definition = definitionFixture();
   await service.create(17, { definition });
   const copy = await service.saveAs(17, definition.templateId, {
@@ -530,6 +552,237 @@ test("另存为创建全新 templateId，归档仅改变生命周期且不删除
   assert.equal(archivedVersion.status, "ARCHIVED");
   await service.restore(17, copy.templateId);
   assert.equal(getState().template.status, "ACTIVE");
+  const lifecycleAudits = calls
+    .filter((call) => call.operation === "operationLog.create")
+    .filter((call) => ["TEMPLATE_ARCHIVED", "TEMPLATE_RESTORED"].includes(call.args.data.action));
+  assert.deepEqual(lifecycleAudits.map((call) => call.args.data.action), [
+    "TEMPLATE_ARCHIVED",
+    "TEMPLATE_RESTORED",
+  ]);
+  assert.deepEqual(
+    lifecycleAudits.map((call) => {
+      const detail = JSON.parse(call.args.data.detail);
+      return {
+        action: call.args.data.action,
+        module: call.args.data.module,
+        targetId: call.args.data.targetId,
+        actor: detail.actor,
+        event: detail.event,
+        templateId: detail.templateId,
+        fromStatus: detail.fromStatus,
+        toStatus: detail.toStatus,
+        publishedVersion: detail.publishedVersion,
+        result: detail.result,
+        hasTimestamp: typeof detail.timestamp === "string",
+      };
+    }),
+    [
+      {
+        action: "TEMPLATE_ARCHIVED",
+        module: "page-builder-template",
+        targetId: getState().template.id,
+        actor: 17,
+        event: "TEMPLATE_ARCHIVED",
+        templateId: copy.templateId,
+        fromStatus: "ACTIVE",
+        toStatus: "ARCHIVED",
+        publishedVersion: 1,
+        result: "succeeded",
+        hasTimestamp: true,
+      },
+      {
+        action: "TEMPLATE_RESTORED",
+        module: "page-builder-template",
+        targetId: getState().template.id,
+        actor: 17,
+        event: "TEMPLATE_RESTORED",
+        templateId: copy.templateId,
+        fromStatus: "ARCHIVED",
+        toStatus: "ACTIVE",
+        publishedVersion: 1,
+        result: "succeeded",
+        hasTimestamp: true,
+      },
+    ],
+  );
+});
+
+test("新母模板不持久化内容，历史内容只允许原样兼容或显式清空", async () => {
+  const direct = createStatefulService();
+  const withDefaultContent = definitionFixture();
+  withDefaultContent.defaultContent = { slot_heading: "历史默认标题" };
+  await assert.rejects(
+    () => direct.service.create(17, { definition: withDefaultContent }),
+    (error: unknown) => {
+      assert.ok(error instanceof BadRequestException);
+      assert.equal((error.getResponse() as any).code, "TEMPLATE_CONTENT_MUST_BE_EMPTY");
+      return true;
+    },
+  );
+  const withPreviewContent = definitionFixture();
+  withPreviewContent.previewContent = { slot_heading: "历史预览标题" };
+  await assert.rejects(
+    () => direct.service.create(17, { definition: withPreviewContent }),
+    (error: unknown) => {
+      assert.ok(error instanceof BadRequestException);
+      assert.equal((error.getResponse() as any).code, "TEMPLATE_CONTENT_MUST_BE_EMPTY");
+      return true;
+    },
+  );
+
+  const historical = createStatefulService();
+  const definition = definitionFixture();
+  await historical.service.create(17, { definition });
+  const historicalDefinition = definitionFixture();
+  historicalDefinition.defaultContent = { slot_heading: "历史默认标题" };
+  historicalDefinition.previewContent = { slot_heading: "历史预览标题" };
+  historical.setDraftDefinition(historicalDefinition);
+
+  const preserved = structuredClone(historicalDefinition);
+  preserved.name = "只修改模板名称";
+  await historical.service.updateDraft(17, definition.templateId, {
+    expectedRevision: 1,
+    definition: preserved,
+  });
+  assert.deepEqual(historical.getState().draft.definition.defaultContent, {
+    slot_heading: "历史默认标题",
+  });
+
+  const modified = structuredClone(preserved);
+  modified.defaultContent.slot_heading = "试图改写历史内容";
+  await assert.rejects(
+    () => historical.service.updateDraft(17, definition.templateId, {
+      expectedRevision: 2,
+      definition: modified,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof BadRequestException);
+      assert.equal((error.getResponse() as any).code, "TEMPLATE_CONTENT_IS_READ_ONLY");
+      return true;
+    },
+  );
+
+  const cleared = structuredClone(preserved);
+  cleared.defaultContent = {};
+  cleared.previewContent = {};
+  await historical.service.updateDraft(17, definition.templateId, {
+    expectedRevision: 2,
+    definition: cleared,
+  });
+  assert.deepEqual(historical.getState().draft.definition.defaultContent, {});
+  assert.deepEqual(historical.getState().draft.definition.previewContent, {});
+
+  const copied = createStatefulService();
+  await copied.service.create(17, { definition: definitionFixture() });
+  copied.setDraftDefinition(historicalDefinition);
+  const copy = await copied.service.saveAs(17, definition.templateId, {
+    name: "不携带历史内容的副本",
+  });
+  assert.ok(copy.draft);
+  assert.deepEqual((copy.draft.definition as any).defaultContent, {});
+  assert.deepEqual((copy.draft.definition as any).previewContent, {});
+});
+
+test("仅回收站中从未发布且未被页面引用的 CUSTOM 草稿可以永久删除", async () => {
+  const deletable = createStatefulService();
+  const definition = definitionFixture();
+  const created = await deletable.service.create(17, { definition });
+  assert.equal(created.canDelete, false);
+  assert.equal(created.deleteBlockers[0].code, "NOT_IN_TRASH");
+  const reopened = await deletable.service.getDraft(17, definition.templateId);
+  assert.equal(reopened.canDelete, false);
+  assert.equal(reopened.deleteBlockers[0].code, "NOT_IN_TRASH");
+  const catalog = await deletable.service.listMine(17);
+  assert.equal(catalog[0].canDelete, false);
+  assert.equal(catalog[0].deleteBlockers[0].code, "NOT_IN_TRASH");
+  await assert.rejects(
+    () => deletable.service.deleteDraft(17, definition.templateId),
+    ConflictException,
+  );
+  await deletable.service.archive(17, definition.templateId);
+  const trashCatalog = await deletable.service.listMine(17);
+  assert.equal(trashCatalog[0].canDelete, true);
+  assert.deepEqual(trashCatalog[0].deleteBlockers, []);
+  assert.deepEqual(await deletable.service.deleteDraft(17, definition.templateId), {
+    templateId: definition.templateId,
+    deleted: true,
+  });
+  const deleteAudit = deletable.calls.find((call) => (
+    call.operation === "operationLog.create"
+    && call.args.data.action === "TEMPLATE_DRAFT_DELETED"
+  ));
+  assert.equal(deleteAudit?.args.data.module, "page-builder-template");
+  assert.deepEqual({
+    ...JSON.parse(deleteAudit?.args.data.detail),
+    timestamp: "<timestamp>",
+  }, {
+    schemaVersion: 1,
+    event: "TEMPLATE_DRAFT_DELETED",
+    actor: 17,
+    timestamp: "<timestamp>",
+    templateId: definition.templateId,
+    fromStatus: "ARCHIVED",
+    toStatus: "DELETED",
+    publishedVersion: 0,
+    result: "succeeded",
+  });
+  assert.equal(deletable.getState().template, null);
+
+  const referenced = createStatefulService();
+  await referenced.service.create(17, { definition: definitionFixture() });
+  referenced.setPageDocuments([{
+    puckData: {
+      content: [{
+        type: "动态模板实例",
+        props: {
+          instanceId: "instance-blocking-delete",
+          templateId: definition.templateId,
+          templateVersion: 1,
+        },
+      }],
+      zones: {},
+    },
+    revisions: [],
+    localizations: [],
+  }]);
+  await referenced.service.archive(17, definition.templateId);
+  const referencedCatalog = await referenced.service.listMine(17);
+  assert.equal(referencedCatalog[0].canDelete, false);
+  assert.equal(referencedCatalog[0].deleteBlockers[0].code, "REFERENCED_BY_PAGE");
+  await assert.rejects(
+    () => referenced.service.deleteDraft(17, definition.templateId),
+    ConflictException,
+  );
+  assert.equal(referenced.calls.some((call) => (
+    call.operation === "operationLog.create"
+    && call.args.data.action === "TEMPLATE_DRAFT_DELETED"
+  )), false);
+
+  const system = createStatefulService();
+  await system.service.create(17, { definition: definitionFixture() });
+  system.setTemplateIdentity({ ownerId: null, sourceType: "SYSTEM" });
+  await system.service.archive(17, definition.templateId);
+  await assert.rejects(
+    () => system.service.deleteDraft(17, definition.templateId),
+    ConflictException,
+  );
+  assert.equal(system.calls.some((call) => (
+    call.operation === "operationLog.create"
+    && call.args.data.action === "TEMPLATE_DRAFT_DELETED"
+  )), false);
+
+  const published = createStatefulService();
+  await published.service.create(17, { definition: definitionFixture() });
+  await published.service.publish(17, definition.templateId, { expectedRevision: 1 });
+  await published.service.archive(17, definition.templateId);
+  await assert.rejects(
+    () => published.service.deleteDraft(17, definition.templateId),
+    ConflictException,
+  );
+  assert.equal(published.calls.some((call) => (
+    call.operation === "operationLog.create"
+    && call.args.data.action === "TEMPLATE_DRAFT_DELETED"
+  )), false);
 });
 
 test("母模板持久化拒绝无身份、非法 JSON 定义和越界版本说明", async () => {

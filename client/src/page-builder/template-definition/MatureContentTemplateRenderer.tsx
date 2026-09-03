@@ -69,6 +69,7 @@ export interface MatureContentTemplateRendererProps {
   designProps?: Record<string, string | number | boolean>;
   mode: "public" | "editor" | "preview" | "thumbnail";
   headingLevel?: 1 | 2;
+  priority?: boolean;
   homeSurface?: boolean;
   /** 历史 Puck 文档兼容数字 ID；母模板默认只解析稳定商品编码。 */
   stableReferencesOnly?: boolean;
@@ -88,6 +89,7 @@ export default function MatureContentTemplateRenderer({
   designProps,
   mode,
   headingLevel = 2,
+  priority = false,
   homeSurface = false,
   stableReferencesOnly = true,
 }: MatureContentTemplateRendererProps) {
@@ -105,7 +107,7 @@ export default function MatureContentTemplateRenderer({
   let node: ReactNode = null;
   switch (moduleType) {
     case "首屏主视觉":
-      node = <HeroSection module={module} editMode={editMode} headingLevel={headingLevel} />;
+      node = <HeroSection module={module} editMode={editMode} headingLevel={headingLevel} priority={priority} />;
       break;
     case "全屏出血图":
       node = <FullBleedBlock module={module} editMode={editMode} />;
@@ -175,7 +177,11 @@ export default function MatureContentTemplateRenderer({
   }
 
   return (
-    <ContentTemplateContractFrame moduleType={moduleType} mode="public" props={props}>
+    <ContentTemplateContractFrame
+      moduleType={moduleType}
+      mode={mode === "editor" ? "editor" : "public"}
+      props={props}
+    >
       {node}
     </ContentTemplateContractFrame>
   );

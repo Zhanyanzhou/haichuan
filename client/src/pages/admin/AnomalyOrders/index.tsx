@@ -6,6 +6,8 @@ import dayjs from "dayjs";
 import { orderApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import { canAccessAdminRoute } from "@/config/adminRouteAccess";
+import { useAuthStore } from "@/store/authStore";
 import type { Order } from "@/types";
 
 const STATUS_LABEL: Record<string, { c: string; t: string }> = {
@@ -27,6 +29,9 @@ type AnomalyOrder = Order & { anomalyReasons: string[] };
 
 export default function AnomalyOrders() {
   const navigate = useNavigate();
+  const role = useAuthStore((state) => state.user?.role);
+  // 订单中心仅 SUPER_ADMIN/ADMIN/CUSTOMER_SERVICE 可进；财务等角色不渲染跳转按钮，避免 403 死链。
+  const canViewOrders = canAccessAdminRoute(role, "/admin/orders");
   const [list, setList] = useState<AnomalyOrder[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -152,14 +157,17 @@ export default function AnomalyOrders() {
               {
                 title: "操作",
                 width: 90,
-                render: () => (
-                  <Button
-                    size="small"
-                    onClick={() => navigate("/admin/orders")}
-                  >
-                    查看
-                  </Button>
-                ),
+                render: () =>
+                  canViewOrders ? (
+                    <Button
+                      size="small"
+                      onClick={() => navigate("/admin/orders")}
+                    >
+                      查看
+                    </Button>
+                  ) : (
+                    <span className="text-brand-muted">—</span>
+                  ),
               },
             ]}
           />

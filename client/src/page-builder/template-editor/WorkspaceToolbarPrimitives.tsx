@@ -9,7 +9,14 @@ import {
 import { Button, Dropdown, type MenuProps } from "antd";
 import type { ReactNode } from "react";
 
-export type WorkspaceStatusMode = "saving" | "dirty" | "pending" | "clean" | "readonly";
+export type WorkspaceStatusMode =
+  | "saving"
+  | "dirty"
+  | "pending"
+  | "clean"
+  | "readonly"
+  | "error"
+  | "conflict";
 
 export function WorkspaceStatusBadge({
   mode,

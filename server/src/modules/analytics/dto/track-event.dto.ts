@@ -8,6 +8,7 @@ import {
   MaxLength,
   IsBoolean,
   Equals,
+  Matches,
 } from 'class-validator';
 
 export const PUBLIC_ANALYTICS_EVENT_NAMES = [
@@ -73,12 +74,20 @@ export class TrackEventDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
+  @IsIn(['mobile', 'tablet', 'desktop'])
   deviceType?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
+  @Matches(/^s_[A-Za-z0-9-]{12,96}$/)
   sessionId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^v_[A-Za-z0-9-]{12,96}$/)
+  visitorId?: string;
 
   @IsOptional()
   @IsObject()

@@ -1,7 +1,7 @@
 import {
   getContentTemplateContract,
   isContentTemplateAllowedForPage,
-  sanitizeContentTemplateDefaultContent,
+  sanitizeContentTemplateLayoutData,
   type ContentTemplateEditableObject,
   type RegisteredContentTemplateKey,
 } from "../generated/contentTemplates.generated";
@@ -9,7 +9,7 @@ import { getTemplatePreviewContent } from "../preview/templatePreviewContent";
 import {
   addDynamicTemplateNode,
   createBlankDynamicTemplateDefinition,
-  createDynamicTemplateStableId,
+  normalizeTemplateDimensionContract,
   sanitizeMatureContentTemplateDesignProps,
   validateDynamicTemplateDefinition,
   type TemplateDefinitionV2,
@@ -35,6 +35,63 @@ function stableKey(value: string, fallback: string) {
   return prefixed.slice(0, 128);
 }
 
+function assignDeterministicLegacyDefinitionIds(
+  definition: TemplateDefinitionV2,
+  sourceReference: string,
+) {
+  const sourceKey = stableKey(sourceReference, "legacy").slice(0, 48);
+  const createId = (
+    prefix: "tpl" | "node" | "slot",
+    semantic: string,
+    occurrence = 0,
+  ) => [
+    prefix,
+    sourceKey,
+    stableKey(semantic, prefix).slice(0, 48),
+    occurrence,
+  ].join("_");
+  const slotOccurrences = new Map<string, number>();
+  const slotIdMap = new Map<string, string>();
+  for (const [oldSlotId, slot] of Object.entries(definition.slots)) {
+    const semantic = slot.key;
+    const occurrence = slotOccurrences.get(semantic) ?? 0;
+    slotOccurrences.set(semantic, occurrence + 1);
+    slotIdMap.set(oldSlotId, createId("slot", semantic, occurrence));
+  }
+  const nodeOccurrences = new Map<string, number>();
+  const nodeIdMap = new Map<string, string>();
+  for (const [oldNodeId, node] of Object.entries(definition.nodes)) {
+    const slotKey = node.slotId ? definition.slots[node.slotId]?.key : undefined;
+    const semantic = slotKey ? `slot_${slotKey}` : `structure_${node.type}`;
+    const occurrence = nodeOccurrences.get(semantic) ?? 0;
+    nodeOccurrences.set(semantic, occurrence + 1);
+    nodeIdMap.set(oldNodeId, createId("node", semantic, occurrence));
+  }
+  const remapContent = (content: Record<string, unknown> | undefined) => content
+    ? Object.fromEntries(Object.entries(content).map(([slotId, value]) => [
+        slotIdMap.get(slotId) ?? slotId,
+        value,
+      ]))
+    : content;
+  definition.templateId = createId("tpl", "definition");
+  definition.rootNodeId = nodeIdMap.get(definition.rootNodeId) ?? definition.rootNodeId;
+  definition.nodes = Object.fromEntries(Object.entries(definition.nodes).map(([oldNodeId, node]) => {
+    const nodeId = nodeIdMap.get(oldNodeId) ?? oldNodeId;
+    return [nodeId, {
+      ...node,
+      nodeId,
+      childIds: node.childIds.map((childId) => nodeIdMap.get(childId) ?? childId),
+      ...(node.slotId ? { slotId: slotIdMap.get(node.slotId) ?? node.slotId } : {}),
+    }];
+  }));
+  definition.slots = Object.fromEntries(Object.entries(definition.slots).map(([oldSlotId, slot]) => {
+    const slotId = slotIdMap.get(oldSlotId) ?? oldSlotId;
+    return [slotId, { ...slot, slotId }];
+  }));
+  definition.previewContent = remapContent(definition.previewContent);
+  definition.defaultContent = remapContent(definition.defaultContent) ?? {};
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -52,63 +109,8 @@ function textNodeType(field: string): DynamicTemplateNodeType {
   return "TextSlot";
 }
 
-function defaultActionContent(defaults: Record<string, unknown>, fields: readonly string[]) {
-  const labelField = fields.find((field) => /(?:action|button|link).*text/i.test(field))
-    ?? fields.find((field) => /text|label/i.test(field));
-  const targetType = typeof defaults.targetType === "string" ? defaults.targetType : "none";
-  const result: Record<string, unknown> = {
-    label: labelField && typeof defaults[labelField] === "string" ? defaults[labelField] : "",
-    targetType,
-  };
-  if (targetType === "page" && typeof defaults.linkUrl === "string") result.pagePath = defaults.linkUrl;
-  if (targetType === "external" && typeof defaults.linkUrl === "string") result.url = defaults.linkUrl;
-  if (targetType === "product" && typeof defaults.productCode === "string") result.productCode = defaults.productCode;
-  if (targetType === "category" && typeof defaults.categorySlug === "string") result.categorySlug = defaults.categorySlug;
-  return result;
-}
-
-function defaultVideoContent(defaults: Record<string, unknown>) {
-  const stringValue = (key: string, fallback = "") => typeof defaults[key] === "string"
-    ? defaults[key] as string
-    : fallback;
-  const booleanValue = (key: string, fallback: boolean) => typeof defaults[key] === "boolean"
-    ? defaults[key] as boolean
-    : fallback;
-  const targetType = ["none", "page", "product", "category", "external"].includes(stringValue("targetType"))
-    ? stringValue("targetType")
-    : "none";
-  const stableTargetType = targetType === "product" && !isNonEmptyString(defaults.productCode)
-    ? "none"
-    : targetType;
-  return {
-    videoUrl: stringValue("videoUrl"),
-    posterUrl: stringValue("posterUrl"),
-    videoDescription: stringValue("videoDescription"),
-    title: stringValue("title"),
-    subtitle: stringValue("subtitle"),
-    actionText: stringValue("actionText"),
-    targetType: stableTargetType,
-    ...(typeof defaults.productCode === "string" ? { productCode: defaults.productCode } : {}),
-    ...(typeof defaults.categorySlug === "string" ? { categorySlug: defaults.categorySlug } : {}),
-    ...(typeof defaults.linkUrl === "string" ? { linkUrl: defaults.linkUrl } : {}),
-    autoPlay: booleanValue("autoPlay", false),
-    loop: booleanValue("loop", true),
-    muted: booleanValue("muted", true),
-    showControls: booleanValue("showControls", true),
-    aspectRatio: ["16:9", "21:6", "4:5", "9:16"].includes(stringValue("aspectRatio"))
-      ? stringValue("aspectRatio")
-      : "16:9",
-    videoWidth: ["standard", "full"].includes(stringValue("videoWidth"))
-      ? stringValue("videoWidth")
-      : "standard",
-    focusX: typeof defaults.focusX === "number" ? defaults.focusX : 50,
-    focusY: typeof defaults.focusY === "number" ? defaults.focusY : 50,
-    maxHeight: typeof defaults.maxHeight === "number" ? defaults.maxHeight : 720,
-    bgColor: stringValue("bgColor", "#FFFFFF"),
-  };
-}
-
 const COMPLEX_TEMPLATE_NODE_BY_MODULE = {
+  "视频区块": { nodeType: "Video", slotKey: "videoContent", label: "视频组件" },
   "轮播图": { nodeType: "Carousel", slotKey: "carouselContent", label: "轮播组件" },
   "热区图": { nodeType: "Hotspot", slotKey: "hotspotContent", label: "热区组件" },
   "改款对比": { nodeType: "BeforeAfter", slotKey: "beforeAfterContent", label: "前后对比组件" },
@@ -145,31 +147,6 @@ const MATURE_TEMPLATE_NODE_BY_MODULE = {
   label: string;
 }>;
 
-function removeLegacyNumericProductReferences(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(removeLegacyNumericProductReferences);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => !/productIds?$/i.test(key))
-      .map(([key, nested]) => [key, removeLegacyNumericProductReferences(nested)]),
-  );
-}
-
-function pickMatureTemplateContent(
-  moduleType: keyof typeof MATURE_TEMPLATE_NODE_BY_MODULE,
-  contractKey: RegisteredContentTemplateKey,
-  defaults: Record<string, unknown>,
-) {
-  const neutralPreview = getTemplatePreviewContent(contractKey);
-  return sanitizeContentTemplateDefaultContent(
-    moduleType,
-    removeLegacyNumericProductReferences({
-      ...neutralPreview,
-      ...defaults,
-    }),
-  ) ?? {};
-}
-
 function pickMatureTemplateDesignProps(
   contractKey: RegisteredContentTemplateKey,
   defaults: Record<string, unknown>,
@@ -178,66 +155,6 @@ function pickMatureTemplateDesignProps(
     ...getTemplatePreviewContent(contractKey),
     ...defaults,
   }) ?? {};
-}
-
-function pickLegacyComplexContent(
-  moduleType: keyof typeof COMPLEX_TEMPLATE_NODE_BY_MODULE,
-  contractKey: RegisteredContentTemplateKey,
-  defaults: Record<string, unknown>,
-) {
-  const allowedKeys = {
-    "轮播图": ["images", "autoPlay", "interval", "showDots", "showArrows", "desktopRatio", "mobileRatio"],
-    "热区图": ["image", "mobileImage", "altText", "hotspots", "mobileHotspots"],
-    "改款对比": [
-      "title", "subtitle", "beforeImage", "afterImage", "beforeLabel", "afterLabel",
-      "beforeAltText", "afterAltText", "beforeFocusX", "beforeFocusY", "afterFocusX", "afterFocusY",
-      "actionText", "targetType", "pagePath", "url", "productCode", "categorySlug",
-      "linkUrl", "aspectRatio", "bgColor",
-    ],
-    "预约入口": [
-      "backgroundImage", "title", "subtitle", "buttonText", "targetType", "pagePath", "url",
-      "productCode", "categorySlug", "linkUrl", "altText", "desktopFocusX",
-      "desktopFocusY", "mobileFocusX", "mobileFocusY", "tone", "bgColor",
-    ],
-    "单品焦点推荐": [
-      "eyebrow", "title", "summary", "productCode", "primaryText", "secondaryText",
-      "secondaryTargetType", "secondaryProductCode", "secondaryCategorySlug", "secondaryLinkUrl",
-      "layout", "showPrice", "bgColor", "imageRatio",
-    ],
-    "产品展示行": [
-      "title", "subtitle", "productCodes", "layout", "mobileColumns", "displayMode",
-      "actionStyle", "bgColor", "showPrice", "showButton", "buttonText", "imageRatio",
-    ],
-    "分类卡片": [
-      "title", "subtitle", "categorySlugs", "layout", "bgColor", "imageRatio",
-    ],
-  }[moduleType];
-  const source = removeLegacyNumericProductReferences({
-    ...getTemplatePreviewContent(contractKey),
-    ...defaults,
-  }) as Record<string, unknown>;
-  const result: Record<string, unknown> = {};
-  for (const key of allowedKeys) {
-    if (source[key] !== undefined) result[key] = structuredClone(source[key]);
-  }
-  if (moduleType === "轮播图" && !Array.isArray(result.images)) result.images = [];
-  if (moduleType === "热区图") {
-    if (!Array.isArray(result.hotspots)) result.hotspots = [];
-    if (!Array.isArray(result.mobileHotspots)) result.mobileHotspots = [];
-  }
-  if (moduleType === "产品展示行" && !Array.isArray(result.productCodes)) result.productCodes = [];
-  if (moduleType === "分类卡片" && !Array.isArray(result.categorySlugs)) result.categorySlugs = [];
-  if (moduleType === "单品焦点推荐"
-    && result.secondaryTargetType === "product"
-    && (typeof result.secondaryProductCode !== "string" || !result.secondaryProductCode.trim())) {
-    result.secondaryTargetType = "none";
-  }
-  if (["改款对比", "预约入口"].includes(moduleType)
-    && result.targetType === "product"
-    && (typeof result.productCode !== "string" || !result.productCode.trim())) {
-    result.targetType = "none";
-  }
-  return result;
 }
 
 function configureSlot(
@@ -249,7 +166,6 @@ function configureSlot(
     required: boolean;
     hideable: boolean;
     maxLength?: number;
-    defaultValue?: unknown;
     desktopRatio?: string;
     mobileRatio?: string;
   },
@@ -265,10 +181,7 @@ function configureSlot(
   const mobileRatio = ratioLabel(input.mobileRatio);
   if (desktopRatio) slot.desktopRules.aspectRatio = desktopRatio;
   if (mobileRatio) slot.mobileRules.aspectRatio = mobileRatio;
-  if (input.defaultValue !== undefined) {
-    definition.previewContent ??= {};
-    definition.previewContent[slotId] = structuredClone(input.defaultValue);
-  }
+  // 兼容来源的真实内容不写入母模板；目录和设计画布按槽位类型派生系统占位。
 }
 
 function addSlot(
@@ -289,8 +202,10 @@ export function adaptLegacyTemplateSource(
   const contract = getContentTemplateContract(source.moduleType);
   if (!contract) throw new Error("母模板合同不存在，不能安全载入");
   const defaults = source.contentDefaults ?? {};
+  const sourceReference = source.sourceType === "personal" && source.personalTemplateId
+    ? `legacy_personal_${source.personalTemplateId}`
+    : `legacy_system_${source.contractKey}`;
   const definition = createBlankDynamicTemplateDefinition(source.name);
-  definition.templateId = createDynamicTemplateStableId("tpl");
   definition.name = source.name.slice(0, 100);
   definition.description = `从母模板“${source.name}”载入统一设计草稿；既有模板记录和页面引用保持不变。`;
   definition.metadata = {
@@ -332,7 +247,6 @@ export function adaptLegacyTemplateSource(
     type: DynamicTemplateNodeType,
     field: string,
     label: string,
-    defaultValue?: unknown,
   ) => {
     const added = addSlot(next, container.nodeId, type, label);
     next = added.definition;
@@ -343,13 +257,18 @@ export function adaptLegacyTemplateSource(
       required: Boolean(role?.required || requiredText.has(field)),
       hideable: object.constraints.allowHide,
       maxLength: contract.contentBudget.limits[field],
-      defaultValue,
       desktopRatio: role?.defaultRatioByViewport?.desktop,
       mobileRatio: role?.defaultRatioByViewport?.mobile,
     });
     mappedSlotLabels.push(label);
     usedFields.add(field);
+    return added.nodeId;
   };
+
+  const sourceLayoutData = sanitizeContentTemplateLayoutData(
+    source.moduleType,
+    source.layoutData,
+  );
 
   const complexConfig = source.moduleType in COMPLEX_TEMPLATE_NODE_BY_MODULE
     ? COMPLEX_TEMPLATE_NODE_BY_MODULE[source.moduleType as keyof typeof COMPLEX_TEMPLATE_NODE_BY_MODULE]
@@ -362,7 +281,9 @@ export function adaptLegacyTemplateSource(
     if (!representativeObject) throw new Error("来源母模板缺少可编辑对象合同，不能安全载入");
     const added = addSlot(next, container.nodeId, matureConfig.nodeType, matureConfig.label);
     next = added.definition;
-    next.nodes[added.nodeId].props.contentTemplateLayoutData = structuredClone(source.layoutData);
+    if (sourceLayoutData) {
+      next.nodes[added.nodeId].props.contentTemplateLayoutData = structuredClone(sourceLayoutData);
+    }
     const designProps = pickMatureTemplateDesignProps(contract.key, defaults);
     if (Object.keys(designProps).length > 0) {
       next.nodes[added.nodeId].props.contentTemplateDesignProps = designProps;
@@ -372,27 +293,20 @@ export function adaptLegacyTemplateSource(
       label: matureConfig.label,
       required: false,
       hideable: representativeObject.constraints.allowHide,
-      defaultValue: pickMatureTemplateContent(
-        source.moduleType as keyof typeof MATURE_TEMPLATE_NODE_BY_MODULE,
-        contract.key,
-        defaults,
-      ),
     });
     mappedSlotLabels.push(matureConfig.label);
   } else if (complexConfig) {
     const representativeObject = contract.editorCapabilities.editableObjects[0];
     if (!representativeObject) throw new Error("来源母模板缺少可编辑对象合同，不能安全载入");
-    addConfiguredSlot(
+    const nodeId = addConfiguredSlot(
       representativeObject,
       complexConfig.nodeType,
       complexConfig.slotKey,
       complexConfig.label,
-      pickLegacyComplexContent(
-        source.moduleType as keyof typeof COMPLEX_TEMPLATE_NODE_BY_MODULE,
-        contract.key,
-        defaults,
-      ),
     );
+    if (sourceLayoutData) {
+      next.nodes[nodeId].props.contentTemplateLayoutData = structuredClone(sourceLayoutData);
+    }
     if (source.moduleType === "单品焦点推荐") {
       if (!isNonEmptyString(defaults.productCode) && Number(defaults.productId) > 0) {
         skippedItems.push("主推商品：来源中的数字商品 ID 不会写入母模板；请在页面实例中按商品编码重新选择。");
@@ -429,10 +343,6 @@ export function adaptLegacyTemplateSource(
         "Video",
         "videoContent",
         role?.id ?? "品牌影片",
-        defaultVideoContent({
-          ...getTemplatePreviewContent(contract.key),
-          ...defaults,
-        }),
       );
       contract.editorCapabilities.editableObjects
         .flatMap((editableObject) => editableObject.contentFieldKeys)
@@ -448,18 +358,13 @@ export function adaptLegacyTemplateSource(
       const mediaField = (object.mediaFieldKeys ?? object.contentFieldKeys)
         .find((field) => field !== object.altFieldKey && !usedFields.has(field));
       if (!mediaField) continue;
-      const src = typeof defaults[mediaField] === "string" ? defaults[mediaField] : "";
-      const alt = object.altFieldKey && typeof defaults[object.altFieldKey] === "string"
-        ? defaults[object.altFieldKey]
-        : "";
-      addConfiguredSlot(object, "ImageSlot", mediaField, role?.id ?? mediaField, { src, alt });
+      addConfiguredSlot(object, "ImageSlot", mediaField, role?.id ?? mediaField);
       continue;
     }
     if (object.kind === "text") {
       for (const field of object.contentFieldKeys) {
         if (usedFields.has(field)) continue;
-        const value = typeof defaults[field] === "string" ? defaults[field] : "";
-        addConfiguredSlot(object, textNodeType(field), field, field, value);
+        addConfiguredSlot(object, textNodeType(field), field, field);
       }
       continue;
     }
@@ -467,34 +372,29 @@ export function adaptLegacyTemplateSource(
       const field = object.contentFieldKeys.find((candidate) => /(?:action|button|link).*text/i.test(candidate))
         ?? `${object.roleId}Action`;
       if (!usedFields.has(field)) {
-        addConfiguredSlot(object, "ButtonSlot", field, object.roleId, defaultActionContent(defaults, object.contentFieldKeys));
+        addConfiguredSlot(object, "ButtonSlot", field, object.roleId);
       }
       continue;
     }
     if (object.kind === "product") {
       const field = object.referenceFieldKey ?? object.contentFieldKeys[0] ?? `${object.roleId}Product`;
-      if (!usedFields.has(field)) addConfiguredSlot(object, "ProductSlot", field, object.roleId, defaults[field] ?? "");
+      if (!usedFields.has(field)) addConfiguredSlot(object, "ProductSlot", field, object.roleId);
       continue;
     }
     if (object.kind === "collection") {
       const field = object.referenceFieldKey ?? object.collectionFieldKeys?.[0] ?? object.contentFieldKeys[0] ?? `${object.roleId}Collection`;
       if (!usedFields.has(field)) {
-        const value = Array.isArray(defaults[field])
-          ? defaults[field].filter((item): item is string => typeof item === "string")
-          : [];
-        addConfiguredSlot(object, "CollectionSlot", field, object.roleId, value);
+        addConfiguredSlot(object, "CollectionSlot", field, object.roleId);
       }
     }
   }
 
   next.metadata.slotSummary = `${mappedSlotLabels.length} 个已映射槽位`;
-  const validation = validateDynamicTemplateDefinition(next);
+  assignDeterministicLegacyDefinitionIds(next, sourceReference);
+  const validation = validateDynamicTemplateDefinition(normalizeTemplateDimensionContract(next));
   if (!validation.valid || !validation.definition) {
     throw new Error(validation.issues.find((issue) => issue.level === "error")?.message ?? "兼容来源适配结果未通过模板结构校验");
   }
-  const sourceReference = source.sourceType === "personal" && source.personalTemplateId
-    ? `legacy_personal_${source.personalTemplateId}`
-    : `legacy_system_${source.contractKey}`;
   const risks = [
     ...(matureConfig
       ? ["成熟模板的内部构图与响应式规则作为母模板节点锁定保留；页面实例只能修改合同授权的内容和节点外层几何。"]

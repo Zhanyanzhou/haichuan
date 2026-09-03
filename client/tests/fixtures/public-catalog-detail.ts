@@ -25,10 +25,10 @@ export type RouteBarrier = {
 };
 
 const images = [
-  "/images/editorial/poster-gold-ring-v1.png",
-  "/images/editorial/poster-gold-pendant-v1.png",
-  "/images/editorial/poster-gold-earrings-v1.png",
-  "/images/editorial/poster-dragon-bangle-v1.png",
+  "/images/system/product-placeholder.svg?fixture=one",
+  "/images/system/product-placeholder.svg?fixture=two",
+  "/images/system/product-placeholder.svg?fixture=three",
+  "/images/system/product-placeholder.svg?fixture=four",
   "/images/editorial/poster-floral-lock-v1.png",
 ];
 

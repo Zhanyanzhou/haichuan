@@ -61,6 +61,11 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     const main = canvas.locator('[data-content-role="mainImage"]');
     const detail = canvas.locator('[data-content-role="detailImage"]');
     const copy = canvas.locator('[data-content-role="copy"]');
+    const initialMainBox = await main.boundingBox();
+    const initialDetailBox = await detail.boundingBox();
+    if (!initialMainBox || !initialDetailBox) throw new Error("双图槽位没有布局尺寸");
+    expect(initialMainBox.width / initialMainBox.height).toBeCloseTo(3 / 2, 2);
+    expect(initialDetailBox.width / initialDetailBox.height).toBeCloseTo(4 / 5, 2);
     await page.getByRole("tab", { name: "模板编辑" }).click();
     await page.getByRole("group", { name: "版式" }).getByRole("button", { name: "细节图优先" }).click();
 
@@ -76,7 +81,7 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     await expect(state).toContainText('"zIndexByViewport":{"desktop":2}');
     const mainGroup = page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "主海报" }) });
     await mainGroup.getByRole("group", { name: "主海报比例" }).getByRole("button", { name: "4 / 5" }).click();
-    const mainHud = canvas.getByRole("toolbar", { name: "调整画布对象 mainImage" });
+    const mainHud = canvas.getByRole("toolbar", { name: "调整画布对象：主海报" });
     const mainLayoutButton = mainHud.getByRole("button", { name: "调整对象区域" });
     await mainLayoutButton.focus();
     await mainLayoutButton.press("Enter");
@@ -95,7 +100,7 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     await expect(page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "主海报" }) })).toHaveCount(0);
     const detailGroup = page.locator("fieldset").filter({ has: page.locator("legend", { hasText: "细节海报" }) });
     await detailGroup.getByRole("group", { name: "细节海报比例" }).getByRole("button", { name: "1 / 1" }).click();
-    const detailHud = canvas.getByRole("toolbar", { name: "调整画布对象 detailImage" });
+    const detailHud = canvas.getByRole("toolbar", { name: "调整画布对象：细节图" });
     const detailLayoutButton = detailHud.getByRole("button", { name: "调整对象区域" });
     await detailLayoutButton.focus();
     await detailLayoutButton.press("Enter");
@@ -154,7 +159,7 @@ test.describe("DoublePoster 双图实例编辑（确定性 UI）", () => {
     const roles = await canvas.locator(".hc-phase1-double > [data-content-role]").evaluateAll((nodes) =>
       nodes.map((node) => node.getAttribute("data-content-role")),
     );
-    expect(roles).toEqual(["mainImage", "copy", "detailImage"]);
+    expect(roles).toEqual(["mainImage", "copy", "detailImage", "action"]);
     expect(await canvas.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
   });
 });

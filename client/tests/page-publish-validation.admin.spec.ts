@@ -336,6 +336,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       const publishButton = page.locator(".homepage-editor__toolbar-publish");
       await expect(publishButton).toBeEnabled();
       await expect.poll(requests.validateCalls).toBe(1);
+      await expect(page.locator(".homepage-editor__layer-issue-count")).toHaveCount(0);
       const firstLayer = page.locator('[data-layer-index="0"] .homepage-editor__layer-select');
       const navigatedFromIssue = (await firstLayer.count()) > 0;
       if (navigatedFromIssue) {
@@ -384,6 +385,8 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
 
       await page.goto("/admin/editor/home");
       await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+      await expect.poll(requests.validateCalls).toBe(1);
+      await expect(page.locator(".homepage-editor__layer-issue-count")).toHaveCount(0);
       const layerSelect = page.locator(
         '[data-layer-index="0"] .homepage-editor__layer-select',
       );
@@ -476,9 +479,17 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     expect(requests.persistentWriteCalls()).toBe(2);
   });
 
-  test("多个首屏通过预检后发布按钮可用并完成发布", async ({ page }) => {
-    await mockEditorApis(page, {
-      valid: true,
+  test("多个首屏在任意当前区块都显示全页阻断且不能发布", async ({ page }) => {
+    const issueMessage = "页面只能有一个首屏主舞台（primary-stage），当前为 2 个";
+    const requests = await mockEditorApis(page, {
+      valid: false,
+      errors: [issueMessage],
+      issues: [{
+        message: issueMessage,
+        severity: "error",
+        blockId: "d3-hero-second-stage",
+        path: "content[1]",
+      }],
       draftDocument: multiHeroDraft(),
     });
 
@@ -488,28 +499,35 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     ).toHaveCount(0);
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 10000 });
+    await page.getByRole("button", { name: "1 项发布阻断" }).click();
+    await expect(page.getByRole("dialog", {
+      name: "当前模块与页面发布检查 · 1 项阻断",
+    })).toContainText(issueMessage);
+    await page.getByRole("button", { name: "知道了" }).click();
     await publishButton.click();
     await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
-    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+    await expect(page.getByRole("dialog", { name: "暂不能发布 · 1 项问题待处理" }))
+      .toContainText(issueMessage);
+    await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
+    expect(requests.persistentWriteCalls()).toBe(1);
   });
 
   test("内容提示进入属性面板但不阻断点击一次直接发布", async ({ page }) => {
-    const warning = "第 2 个区块「首屏主视觉」：标题仍是占位内容";
+    const warning = "第 1 个区块「首屏主视觉」：标题仍是占位内容";
     await mockEditorApis(page, {
       valid: true,
       errors: [],
       issues: [{
         message: warning,
         severity: "warning",
-        blockId: "d3-hero-second-stage",
-        path: "content[1].props.title",
+        blockId: "d3-hero",
+        path: "content[0].props.title",
         field: "title",
       }],
-      draftDocument: multiHeroDraft(),
     });
 
     await page.goto("/admin/editor/home");
-    await page.getByRole("button", { name: /首屏 2\/2/ }).click();
+    await expect(page.getByRole("button", { name: "首屏主舞台不能复制" })).toBeDisabled();
     await page.getByRole("button", { name: "1 项待检查" }).click();
     const warningDialog = page.getByRole("dialog", {
       name: "当前模块与页面发布检查 · 1 项待检查",

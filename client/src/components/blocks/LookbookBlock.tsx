@@ -40,7 +40,9 @@ export default function LookbookBlock({ module, editMode }: LookbookBlockProps) 
   const hasProducts = Array.isArray(products) && products.length > 0;
   const targetUrl = resolveLinkTargetUrl({ targetType, productCode: content.productCode, productId, categorySlug: content.categorySlug, linkUrl });
   // 纯氛围模式：无关联作品时，第 6 页「大片」只保留竖幅氛围影像，零文字零商品
-  const pureAtmosphere = !hasProducts;
+  // 设计/预览态必须保留完整构图，让文字与关联作品槽位可见；公开页面在确实
+  // 没有关联作品时才进入纯氛围模式，避免编辑画布与目录缩略图结构漂移。
+  const pureAtmosphere = !hasProducts && !editMode;
 
   if (!image && !hasProducts && !editMode) return null;
 

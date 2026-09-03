@@ -61,6 +61,7 @@ function buildMetricCards(stats: DashboardStats): MetricCard[] {
       icon: <EyeOutlined />,
       value: formatNumber(stats.pageViewsToday),
       change: buildChange(stats.pageViewsToday, stats.pageViewsYesterday),
+      route: "/admin/analytics",
     },
     {
       key: "product",

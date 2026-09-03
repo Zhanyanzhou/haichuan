@@ -36,11 +36,12 @@
       "additionalProperties": { "$ref": "#/$defs/slot" }
     },
     "defaultContent": {
+      "description": "仅兼容既有已发布模板版本的历史默认内容；新建母模板必须保持为空，模板设计不得新增、覆盖或提升真实内容。",
       "type": "object",
       "maxProperties": 250
     },
     "previewContent": {
-      "description": "仅供模板画布、缩略图和异常场景预览；不得进入页面实例或公开渲染。",
+      "description": "仅兼容既有模板定义中的历史预览数据；当前模板目录和设计画布使用系统派生占位，新建母模板必须保持为空。",
       "type": "object",
       "maxProperties": 250
     }

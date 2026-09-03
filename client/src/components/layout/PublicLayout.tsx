@@ -101,8 +101,8 @@ const CloseIcon = () => (
     strokeWidth="1.4"
     strokeLinecap="round"
   >
-    <line x1="7" y1="7" x2="23" y2="23" />
-    <line x1="23" y1="7" x2="7" y2="23" />
+    <line x1="4" y1="4" x2="26" y2="26" />
+    <line x1="26" y1="4" x2="4" y2="26" />
   </svg>
 );
 const SearchIcon = () => (
@@ -412,8 +412,9 @@ export default function PublicLayout() {
           publishedHeaderReadiness.data,
         )
       : "solid";
-  const isOverlayHeader = resolvedHeaderMode === "overlay-light";
-  const isTransparent = isOverlayHeader && !scrolled && !menuOpen;
+  const overlaysPageContent = Boolean(pageDefinition);
+  const isTransparent = !scrolled && !menuOpen;
+  const usesLightHeaderText = resolvedHeaderMode === "overlay-light" && isTransparent;
   const headerBg = isTransparent ? "transparent" : "rgba(255,255,255,0.92)";
   const headerBorder = isTransparent ? "transparent" : "rgba(24,26,27,0.06)";
 
@@ -428,8 +429,9 @@ export default function PublicLayout() {
   return (
     <PublicSiteSettingsProvider resource={siteSettingsResource}>
     <div
-      className={isHome ? "editorial-shell" : `site-shell${isOverlayHeader ? " site-shell--overlay" : ""}`}
+      className={isHome ? "editorial-shell" : `site-shell${overlaysPageContent ? " site-shell--overlay" : ""}`}
       data-page-header-mode={resolvedHeaderMode}
+      data-page-header-surface={isTransparent ? "transparent" : "solid"}
     >
       <a
         href="#main-content"
@@ -439,7 +441,7 @@ export default function PublicLayout() {
       </a>
       {/* ═══════ Header ═══════ */}
       <header
-        className={`site-header${isTransparent ? " is-transparent" : ""}`}
+        className={`site-header${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
         style={{
           background: headerBg,
           borderBottomColor: headerBorder,
@@ -508,7 +510,7 @@ export default function PublicLayout() {
 
       {/* ═══════ 左侧组合：菜单 + 搜索 ═══════ */}
       <div
-        className={`site-header__left-group${isTransparent ? " is-transparent" : ""}`}
+        className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
       >
         <button
           ref={menuToggleRef}
@@ -557,13 +559,15 @@ export default function PublicLayout() {
         id="main-content"
         tabIndex={-1}
         style={{ outline: "none" }}
-        className={isHome ? "editorial-main" : `site-main${isOverlayHeader ? " site-main--overlay" : ""}`}
+        className={isHome
+          ? `editorial-main site-main${overlaysPageContent ? " site-main--overlay" : ""}`
+          : `site-main${overlaysPageContent ? " site-main--overlay" : ""}`}
       >
         {USE_MOCK && (
           <aside
             aria-label="演示数据说明"
             className={`border-b border-[#DDE1E2] bg-[#F4F5F5] px-5 py-3 text-center text-[12px] leading-5 tracking-[0.06em] text-[#5F6568]${
-              isOverlayHeader ? " mt-16 md:mt-[72px] xl:mt-[108px]" : ""
+              overlaysPageContent ? " mt-16 md:mt-[72px] xl:mt-[108px]" : ""
             }`}
           >
             <strong className="font-medium text-[#181A1B]">演示数据</strong>

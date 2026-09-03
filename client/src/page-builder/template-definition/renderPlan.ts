@@ -12,6 +12,7 @@ import {
   type DynamicTemplateValidationIssue,
 } from "./validateTemplateDefinition";
 import { getEffectiveDynamicTemplateInstanceEditPolicy } from "./nodeRegistry";
+import { getEffectiveTemplateRootRules } from "./templateDimensions";
 
 export interface DynamicTemplateRenderPlanNode {
   nodeId: string;
@@ -147,7 +148,9 @@ export function compileDynamicTemplateRenderPlan(
         || Object.prototype.hasOwnProperty.call(definition.defaultContent, node.slotId))
         ? { content }
         : {}),
-      rules: node.responsive[options.device],
+      rules: nodeId === definition.rootNodeId
+        ? getEffectiveTemplateRootRules(definition, options.device)
+        : node.responsive[options.device],
       props: node.props,
       hidden: node.hidden || node.responsive[options.device].display === "none"
         || Boolean(node.slotId && hiddenSlotIds.has(node.slotId))

@@ -1,0 +1,1 @@
+export const TEMPLATE_NODE_NAME_MAX_LENGTH = 100;

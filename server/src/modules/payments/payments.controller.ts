@@ -107,6 +107,20 @@ export class PaymentsController {
     });
   }
 
+  // 客服/管理员的掉单与对账工具：主动查渠道状态并按回调同源管线核销。
+  @Post(':id/query-channel')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
+  queryChannel(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.paymentsService.queryChannelPayment(id, {
+      type: 'ADMIN' as const,
+      id: user?.id,
+      name: user?.realName || user?.username,
+    });
+  }
+
   @Get(':id/proof')
   async getProof(@Param('id', ParseIntPipe) id: number, @Res() response: Response) {
     const proof = await this.uploadService.getPaymentProofForStaff(id);

@@ -17,6 +17,7 @@ import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import { attributeApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
+import { AdminErrorState } from "@/components/common/AdminDataStates";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 interface AttrValue {
@@ -40,6 +41,7 @@ export default function AttributeManage() {
   const { message } = AntdApp.useApp();
   const [list, setList] = useState<Attr[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [editing, setEditing] = useState<Attr | null>(null);
   const [attrModalOpen, setAttrModalOpen] = useState(false);
   const [valueModalOpen, setValueModalOpen] = useState(false);
@@ -50,11 +52,13 @@ export default function AttributeManage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const res = await attributeApi.getAll();
       setList(unwrapResponse<Attr[]>(res) || []);
-    } catch {
-      message.error("属性加载失败");
+    } catch (e: unknown) {
+      setLoadError(true);
+      message.error(getSafeAdminErrorMessage(e, "属性加载失败，请稍后重试。"));
     } finally {
       setLoading(false);
     }
@@ -206,12 +210,16 @@ export default function AttributeManage() {
           </Space>
         }
       >
-        <Table
-          rowKey="id"
-          loading={loading}
-          dataSource={list}
-          columns={columns}
-          pagination={false}
+        {loadError ? (
+          <AdminErrorState subject="属性" onRetry={() => void load()} />
+        ) : (
+          <Table
+            rowKey="id"
+            loading={loading}
+            dataSource={list}
+            columns={columns}
+            pagination={false}
+            locale={{ emptyText: "暂无属性" }}
           expandable={{
             expandedRowRender: (attr: Attr) => (
               <div style={{ paddingLeft: 24 }}>
@@ -262,6 +270,7 @@ export default function AttributeManage() {
             ),
           }}
         />
+        )}
       </Card>
 
       <Modal

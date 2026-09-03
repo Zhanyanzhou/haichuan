@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnav
 import { ConfigService } from '@nestjs/config';
 import { PaymentStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 import {
@@ -12,6 +13,8 @@ import {
 import type { WechatPayScene } from '../../common/payment-gateway/wechat-pay.client';
 import type { OperatorContext } from '../trade-events/trade-events.constants';
 import { businessDateKey } from '../../common/time/business-date';
+
+const ONLINE_PAYMENT_METHODS = ['wechat', 'alipay'] as const;
 
 @Injectable()
 export class PaymentsService {
@@ -559,6 +562,73 @@ export class PaymentsService {
     }
     if (reconciled === 'FAILED') return { orderId: order.id, state: 'FAILED' as const };
     throw new BadRequestException('当前渠道状态需要对账，暂不能关闭支付');
+  }
+
+  /**
+   * 掉单兜底：回调延迟或丢失时，定期主动查单核销长时间 PENDING 的在线交易。
+   * 与异步回调、客户主动查单共用同一核销管线（settleVerifiedPayment），
+   * 金额校验与幂等边界完全一致；单笔失败只告警不中断整批。
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async reconcilePendingOnlinePayments() {
+    const cutoff = new Date(Date.now() - 5 * 60 * 1000);
+    const pendingPayments = await this.prisma.payment.findMany({
+      where: {
+        status: 'PENDING',
+        method: { in: [...ONLINE_PAYMENT_METHODS] },
+        createdAt: { lt: cutoff },
+      },
+      select: { id: true, paymentNo: true, method: true, status: true },
+      orderBy: { createdAt: 'asc' },
+      take: 50,
+    });
+    let reconciled = 0;
+    for (const payment of pendingPayments) {
+      // 支付宝主动查单尚未接入；其掉单依赖回调重试与人工对账
+      if (payment.method !== 'wechat') continue;
+      try {
+        const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
+        const state = await this.applyCustomerQuery(payment, query);
+        if (state !== 'PENDING') reconciled += 1;
+      } catch (error) {
+        this.logger.warn(
+          `掉单兜底查单失败 ${payment.paymentNo}：${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
+    if (pendingPayments.length > 0) {
+      this.logger.log(
+        `掉单兜底：检查 ${pendingPayments.length} 笔超时待支付在线交易，${reconciled} 笔进入终态`,
+      );
+    }
+  }
+
+  /**
+   * 后台主动查询渠道状态并按同一管线核销（客服处理掉单与对账的工具入口）。
+   * FAILED 状态也允许查询：预下单结果不确定被标 FAILED 的在线交易，
+   * 渠道 SUCCESS 事实可以经 confirmPaymentSettlement 恢复核销。
+   */
+  async queryChannelPayment(paymentId: number, operator?: OperatorContext) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: { id: true, paymentNo: true, method: true, status: true },
+    });
+    if (!payment) throw new NotFoundException('付款记录不存在');
+    if (!(ONLINE_PAYMENT_METHODS as readonly string[]).includes(payment.method)) {
+      throw new BadRequestException('线下付款没有渠道状态可查询');
+    }
+    if (payment.method !== 'wechat') {
+      throw new BadRequestException('支付宝主动查单尚未接入，请以回调与人工对账为准');
+    }
+    if (!['PENDING', 'FAILED'].includes(payment.status)) {
+      return { paymentId, state: this.customerPaymentState(payment.status), gatewayState: null };
+    }
+    const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
+    const state = await this.applyCustomerQuery(payment, query);
+    this.logger.log(
+      `付款 #${paymentId} 人工查单 ${payment.paymentNo}：渠道 ${query.state} / 本地 ${state}（操作者 ${operator?.type ?? 'ADMIN'}:${operator?.id ?? '-'}）`,
+    );
+    return { paymentId, state, gatewayState: query.state };
   }
 
   /**

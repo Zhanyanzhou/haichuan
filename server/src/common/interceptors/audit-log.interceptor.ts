@@ -1,6 +1,8 @@
 import { CallHandler, ExecutionContext, Injectable, Logger, NestInterceptor } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { SKIP_GENERIC_AUDIT_KEY } from '../decorators/skip-generic-audit.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
 type AuditRequest = {
@@ -21,10 +23,18 @@ const SAFE_PAGE_KEY = /^[a-z][a-z0-9-]{0,49}$/;
 export class AuditLogInterceptor implements NestInterceptor {
   private readonly logger = new Logger(AuditLogInterceptor.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly reflector: Reflector,
+  ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
+    const skipsGenericAudit = this.reflector.getAllAndOverride<boolean>(
+      SKIP_GENERIC_AUDIT_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (skipsGenericAudit) return next.handle();
     const request = context.switchToHttp().getRequest<AuditRequest>();
     if (!request.user?.id || !MUTATING_METHODS.has(request.method || '')) {
       return next.handle();

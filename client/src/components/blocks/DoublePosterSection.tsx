@@ -94,6 +94,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    if (editMode || rm) return;
     if (typeof IntersectionObserver !== "function") {
       setVisible(true);
       return;
@@ -101,7 +102,7 @@ export default function DoublePosterSection({ module, editMode }: Props) {
     const o = new IntersectionObserver(([e]) => { if (e.isIntersecting) setVisible(true); }, { threshold: 0.06 });
     o.observe(el);
     return () => o.disconnect();
-  }, []);
+  }, [editMode, rm]);
 
   useEffect(() => {
     const element = ref.current;
@@ -198,9 +199,9 @@ export default function DoublePosterSection({ module, editMode }: Props) {
       <div className="hc-content-template__container hc-phase1-double">
         <div data-content-role="mainImage" data-editor-field="mainImage" className="hc-content-template__media hc-phase1-double__main" style={{
             background: '#F4F5F5',
-            opacity: rm || visible ? 1 : 0,
-            transform: rm || visible ? 'translateY(0)' : 'translateY(18px)',
-            transition: 'opacity 0.9s 0.05s ease, transform 0.9s 0.05s ease',
+            opacity: editMode || rm || visible ? 1 : 0,
+            transform: editMode || rm || visible ? 'translateY(0)' : 'translateY(18px)',
+            transition: editMode || rm ? 'none' : 'opacity 0.9s 0.05s ease, transform 0.9s 0.05s ease',
           }}>
             {mainImg ? (
               <EditorialImage src={mainImg} alt={c?.mainAltText || ""} focusX={s?.mainFocusX ?? 50} focusY={s?.mainFocusY ?? 50} />

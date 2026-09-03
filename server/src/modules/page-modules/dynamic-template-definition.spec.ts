@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateDynamicTemplateDefinition } from "./generated/validateTemplateDefinition.generated";
+import {
+  sanitizeContentTemplateDesignProps,
+  validateDynamicTemplateDefinition,
+  validateDynamicTemplatePublishDefinition,
+} from "./generated/validateTemplateDefinition.generated";
 import { DYNAMIC_TEMPLATE_NODE_TYPES } from "./generated/templateDefinition.generated";
 import { definitionFixture } from "./dynamic-template-test-fixture";
 
@@ -8,6 +12,144 @@ test("服务端使用与客户端同源的动态模板语义校验器", () => {
   const result = validateDynamicTemplateDefinition(definitionFixture());
   assert.equal(result.valid, true);
   assert.equal(result.definition?.templateId, "tpl_server_validation");
+
+  const requiredReadOnly = definitionFixture();
+  requiredReadOnly.slots.slot_heading.required = true;
+  requiredReadOnly.slots.slot_heading.editable = false;
+  assert.ok(validateDynamicTemplateDefinition(requiredReadOnly).issues.some(
+    (issue) => issue.code === "REQUIRED_SLOT_MUST_BE_EDITABLE",
+  ));
+});
+
+test("双图海报主图与细节图比例属于可保存的模板设计字段", () => {
+  assert.deepEqual(
+    sanitizeContentTemplateDesignProps({
+      mainImageRatio: "3:2",
+      detailImageRatio: "4:5",
+    }),
+    {
+      mainImageRatio: "3:2",
+      detailImageRatio: "4:5",
+    },
+  );
+});
+
+test("发布门禁以根节点高度为唯一尺寸事实并禁止模板保存运营或 Mock 内容", () => {
+  const fixed = definitionFixture();
+  fixed.metadata.previewDesktopWidth = 1920;
+  fixed.metadata.desktopRatio = "8:1";
+  fixed.nodes.node_root.responsive.desktop.height = {
+    mode: "fixed",
+    value: { value: 240, unit: "px" },
+  };
+  assert.equal(validateDynamicTemplatePublishDefinition(fixed).valid, true);
+
+  const ratio = structuredClone(fixed);
+  ratio.nodes.node_root.responsive.desktop.height = {
+    mode: "aspect-ratio",
+    ratio: { width: 8, height: 1 },
+  };
+  assert.equal(validateDynamicTemplatePublishDefinition(ratio).valid, true);
+
+  const mismatched = structuredClone(fixed);
+  mismatched.metadata.desktopRatio = "16:9";
+  assert.ok(validateDynamicTemplatePublishDefinition(mismatched).issues.some(
+    (issue) => issue.code === "ROOT_RATIO_METADATA_MISMATCH",
+  ));
+
+  const contentLeak = structuredClone(fixed);
+  contentLeak.defaultContent.slot_heading = "正式运营标题";
+  contentLeak.previewContent = { slot_heading: "Mock 标题" };
+  const leakCodes = validateDynamicTemplatePublishDefinition(contentLeak).issues.map((issue) => issue.code);
+  assert.ok(leakCodes.includes("PUBLISH_FORBIDS_DEFAULT_CONTENT"));
+  assert.ok(leakCodes.includes("PUBLISH_FORBIDS_MOCK_CONTENT"));
+
+  const forbiddenPolicy = structuredClone(fixed);
+  forbiddenPolicy.slots.slot_heading.editable = false;
+  const policyCodes = validateDynamicTemplatePublishDefinition(forbiddenPolicy).issues.map((issue) => issue.code);
+  assert.ok(policyCodes.includes("NON_EDITABLE_SLOT_HAS_INSTANCE_PERMISSIONS"));
+});
+
+test("发布门禁拒绝固定高度区域中的自动高度图片槽位", () => {
+  const overflowing = definitionFixture();
+  overflowing.nodes.node_container.childIds.push("node_image");
+  overflowing.nodes.node_container.responsive.desktop.height = {
+    mode: "fixed",
+    value: { value: 240, unit: "px" },
+  };
+  overflowing.nodes.node_container.responsive.mobile.height = {
+    mode: "fixed",
+    value: { value: 280, unit: "px" },
+  };
+  overflowing.nodes.node_image = {
+    nodeId: "node_image",
+    type: "ImageSlot",
+    name: "主图",
+    slotId: "slot_image",
+    childIds: [],
+    props: {},
+    responsive: {
+      desktop: { display: "block", order: 1, width: "fill", height: { mode: "auto" } },
+      mobile: { display: "block", order: 1, width: "fill", height: { mode: "auto" } },
+    },
+    hidden: false,
+  };
+  overflowing.slots.slot_image = {
+    slotId: "slot_image",
+    key: "mainImage",
+    type: "image",
+    label: "主图",
+    required: false,
+    editable: true,
+    hideable: true,
+    validation: {},
+    desktopRules: { objectFit: "cover" },
+    mobileRules: { objectFit: "cover" },
+  };
+
+  const result = validateDynamicTemplatePublishDefinition(overflowing);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some(
+    (issue) => issue.code === "IMAGE_SLOT_AUTO_HEIGHT_OVERFLOWS_BOUNDED_PARENT",
+  ));
+
+  const contained = structuredClone(overflowing);
+  contained.nodes.node_image.responsive.desktop.height = {
+    mode: "fixed",
+    value: { value: 240, unit: "px" },
+  };
+  contained.nodes.node_image.responsive.mobile.height = {
+    mode: "fixed",
+    value: { value: 280, unit: "px" },
+  };
+  assert.equal(validateDynamicTemplatePublishDefinition(contained).valid, true);
+});
+
+test("发布门禁拒绝全局或按设备隐藏必填槽位", () => {
+  const globallyHidden = definitionFixture();
+  globallyHidden.slots.slot_heading.required = true;
+  globallyHidden.nodes.node_heading.hidden = true;
+  assert.ok(validateDynamicTemplatePublishDefinition(globallyHidden).issues.some(
+    (issue) => issue.code === "PUBLISH_REQUIRED_SLOT_HIDDEN",
+  ));
+
+  const desktopHidden = definitionFixture();
+  desktopHidden.slots.slot_heading.required = true;
+  desktopHidden.nodes.node_heading.responsive.desktop.display = "none";
+  const desktopResult = validateDynamicTemplatePublishDefinition(desktopHidden);
+  assert.equal(desktopResult.valid, false);
+  assert.ok(desktopResult.issues.some((issue) => (
+    issue.code === "PUBLISH_REQUIRED_SLOT_DEVICE_HIDDEN"
+    && issue.path === "nodes.node_heading.responsive.desktop.display"
+  )));
+
+  const pageHideConflict = definitionFixture();
+  pageHideConflict.slots.slot_heading.required = true;
+  pageHideConflict.slots.slot_heading.hideable = true;
+  assert.ok(validateDynamicTemplatePublishDefinition(pageHideConflict).issues.some((issue) => (
+    issue.code === "PUBLISH_REQUIRED_SLOT_PAGE_HIDE_CONFLICT"
+    && issue.path === "slots.slot_heading.hideable"
+  )));
 });
 
 test("服务端拒绝未声明属性、循环和非法视口高度", () => {

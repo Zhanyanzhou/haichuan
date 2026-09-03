@@ -76,7 +76,7 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
     ? content.videoDescription.trim()
     : "";
 
-  if (!videoUrl) {
+  if (!videoUrl && !posterUrl) {
     if (!editMode) return null;
     return <div className="hc-video-frame is-empty" data-content-role="coverImage" style={{ background: bgColor }}>
       <style>{`
@@ -162,43 +162,48 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
           }
         `}</style>
         <div className="hc-video__media" data-content-role="coverImage">
-          <video
-            data-content-role="playControl"
-            src={videoUrl}
-            autoPlay={autoPlay}
-            loop={loop}
-            muted={muted || autoPlay}
-            controls={showControls}
-            aria-label={videoDescription || (typeof title === "string" ? title : "") || "品牌影片"}
-            onLoadStart={() => setVideoFailed(false)}
-            onLoadedMetadata={() => setVideoFailed(false)}
-            onError={() => {
-              setPlaying(false);
-              setVideoFailed(true);
-            }}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onEnded={() => setPlaying(false)}
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              zIndex: 0,
-            }}
-          />
-          {posterUrl && !playing ? (
-            <div
-              aria-hidden
-              data-editor-field="posterUrl"
+          {videoUrl ? (
+            <video
+              data-content-role="playControl"
+              src={videoUrl}
+              autoPlay={autoPlay}
+              loop={loop}
+              muted={muted || autoPlay}
+              controls={showControls}
+              aria-label={videoDescription || (typeof title === "string" ? title : "") || "品牌影片"}
+              onLoadStart={() => setVideoFailed(false)}
+              onLoadedMetadata={() => setVideoFailed(false)}
+              onError={() => {
+                setPlaying(false);
+                setVideoFailed(true);
+              }}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => setPlaying(false)}
               style={{
                 position: "absolute",
                 inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                zIndex: 0,
+              }}
+            />
+          ) : null}
+          {posterUrl && !playing ? (
+            <img
+              aria-hidden
+              alt=""
+              data-editor-field="posterUrl"
+              src={posterUrl}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
                 zIndex: 1,
-                backgroundImage: `url(${posterUrl})`,
-                backgroundSize: "cover",
-                backgroundPosition: `${coverFocusX}% ${coverFocusY}%`,
+                objectFit: "cover",
+                objectPosition: `${coverFocusX}% ${coverFocusY}%`,
                 pointerEvents: "none",
               }}
             />

@@ -1,15 +1,16 @@
-# 模板设计 / 页面装修系统专项代码审计
+# 模板设计 / 页面装修系统专项代码审计（历史快照）
 
 > 审计日期：2026-08-31
 > 审计对象：当前 `G:\网站搭建2` 工作树快照
 > 审计方式：先完成只读代码、合同、测试与配置审计，随后按 2026-08-31“单一母模板”决议实施代码收敛；未运行数据库迁移，未连接目标数据库，未操作浏览器中可能存在的未保存草稿。
 > 证据边界：当前工作树包含大量未提交、已暂存和未跟踪修改，因此本文描述的是“当前工作树实现”，不是某个已提交版本，也不等于已部署生产状态。
+> 现行性声明：本文只保留 2026-08-31 的审计证据，不是当前规则或路线图。2026-09-03 的 D.26 已将固定模板重新定位为兼容与起步样例，并取代本文关于新母模板可编辑 `defaultContent` / `previewContent`、固定模板数量代表产品范围或一般框架变更必须全验固定集合的建议；当前规则只认 `docs/page-builder/template-design-framework.md`。
 
-## 2026-08-31 实施后结论
+## 2026-08-31 实施后结论（历史快照）
 
 - 产品与运行入口现在只有一套母模板：页面装修和模板设计都消费 `TemplateDefinitionV2` 与服务端统一目录，不再由前端分别拼接系统、个人、正式和草稿列表。
 - 模板保存保留“覆盖模板”和“另存为模板”两种身份语义；模板发布只创建不可变版本，既有页面继续锁定精确版本。
-- `defaultContent`、`previewContent` 与 `emptyPolicy` 已形成明确合同。模板设计可选择编辑默认内容或预览示例；公开端不读取示例；显式空内容按 `hide` / `use-default` 处理，复杂对象按嵌套真实内容判断空值。
+- 当时 `defaultContent`、`previewContent` 与 `emptyPolicy` 已形成合同，模板设计曾允许选择编辑默认内容或预览示例。该产品入口已由 D.26 的“系统只读示例、新母模板不保存默认内容”取代；字段只保留历史版本兼容读取。
 - 复杂节点的模板布局和样式写入节点设计属性，业务默认/示例内容写入内容层；页面实例不能反向覆盖母模板受控设计。
 - Activation 的控制器、服务、客户端调用和配置开关已删除；旧系统/个人模板的 HTTP 写路由、服务写方法和 DTO 也已删除。历史 migration、Prisma ledger 与 Gate B 纯内存规划器只为数据库兼容审计保留。
 - 仍未完成的独立后续项是复合组件内部 parts 模型、完整声明式 ComponentManifest、公开精确版本缺失的可观测性，以及精确目标数据库的只读审计/migration 决策。这些缺口不再阻碍本轮单一母模板产品收敛，但不能被表述为生产迁移完成。
@@ -825,7 +826,7 @@ stateDiagram-v2
 19. `BeforeAfterBlock.tsx` 的 divider、handle、copy 排版和 50% 初始分割位置目前是组件内部硬编码或本地状态。
 20. 项目已有旧页面模块的声明式 `ModuleInspectorSchema -> FieldDef -> FieldRenderer`，不能说完全没有 Property Schema。
 21. V2 Inspector 有 `node.type -> registry`，但属性控件仍以手写条件分支为主，没有完整 ComponentManifest。
-22. `defaultContent`、`previewContent` 与 Slot `emptyPolicy` 已进入合同、校验、Inspector 和 Renderer；模板设计可明确切换默认内容/预览示例，公开端不读取示例。
+22. 【历史实现】`defaultContent`、`previewContent` 与 Slot `emptyPolicy` 当时已进入合同、校验、Inspector 和 Renderer；其中模板设计编辑默认内容/预览示例的入口已由 D.26 取代，现行规则只允许系统生成的中性只读示例。
 23. 当前 responsive 是真实 desktop/mobile 节点级持久化，不只是画布预览；没有独立 tablet。
 24. 当前没有通用 Variant、Data Binding 或嵌套字段级 exposedProperties。
 25. 推荐保留交互复合组件封装，同时增加受控 part identity 和嵌套 exposed paths，不应把 slider 粗暴拆成松散 DOM nodes。

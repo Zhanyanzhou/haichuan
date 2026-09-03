@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Reflector } from '@nestjs/core';
+import { lastValueFrom, of } from 'rxjs';
+import {
+  SKIP_GENERIC_AUDIT_KEY,
+  SkipGenericAudit,
+} from '../decorators/skip-generic-audit.decorator';
+import { DynamicTemplatesController } from '../../modules/page-modules/dynamic-templates.controller';
+import { PageModulesController } from '../../modules/page-modules/page-modules.controller';
 import { AuditLogInterceptor } from './audit-log.interceptor';
 
 type CreatedOperationLog = {
@@ -20,7 +28,7 @@ test('操作审计保留主体和目标，但不复制任何请求体字段或�
       },
     },
   };
-  const interceptor = new AuditLogInterceptor(prisma as never);
+  const interceptor = new AuditLogInterceptor(prisma as never, new Reflector());
   const writeLog = (
     interceptor as unknown as {
       writeLog(request: Record<string, unknown>): Promise<void>;
@@ -80,7 +88,7 @@ test('页面装修审计只记录白名单 pageKey 与恢复版本，不复制�
       },
     },
   };
-  const interceptor = new AuditLogInterceptor(prisma as never);
+  const interceptor = new AuditLogInterceptor(prisma as never, new Reflector());
   const writeLog = (
     interceptor as unknown as {
       writeLog(request: Record<string, unknown>): Promise<void>;
@@ -120,5 +128,52 @@ test('页面装修审计只记录白名单 pageKey 与恢复版本，不复制�
   assert.doesNotMatch(
     created.map((entry) => entry.detail).join(' '),
     /expectedUpdatedAt|puckData|must-not-appear|secret/i,
+  );
+});
+
+test('已有事务级规范审计的入口跳过泛化重复记录', async () => {
+  let createCount = 0;
+  const prisma = {
+    operationLog: {
+      create: async () => {
+        createCount += 1;
+      },
+    },
+  };
+  class CanonicallyAuditedController {
+    @SkipGenericAudit()
+    publish() {}
+  }
+  const interceptor = new AuditLogInterceptor(prisma as never, new Reflector());
+  const context = {
+    getType: () => 'http',
+    getHandler: () => CanonicallyAuditedController.prototype.publish,
+    getClass: () => CanonicallyAuditedController,
+    switchToHttp: () => ({
+      getRequest: () => ({ method: 'POST', path: '/api/example/publish', user: { id: 7 } }),
+    }),
+  };
+
+  await lastValueFrom(interceptor.intercept(context as never, { handle: () => of({ ok: true }) }));
+
+  assert.equal(createCount, 0);
+});
+
+test('模板和页面的六个事务审计入口均跳过泛化重复记录', () => {
+  const handlers = [
+    DynamicTemplatesController.prototype.publish,
+    DynamicTemplatesController.prototype.archive,
+    DynamicTemplatesController.prototype.restore,
+    DynamicTemplatesController.prototype.deleteDraft,
+    PageModulesController.prototype.publishDocument,
+    PageModulesController.prototype.rollbackDocumentPublication,
+  ];
+
+  for (const handler of handlers) {
+    assert.equal(Reflect.getMetadata(SKIP_GENERIC_AUDIT_KEY, handler), true);
+  }
+  assert.equal(
+    Reflect.getMetadata(SKIP_GENERIC_AUDIT_KEY, DynamicTemplatesController.prototype.updateDraft),
+    undefined,
   );
 });

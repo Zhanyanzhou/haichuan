@@ -37,6 +37,16 @@
   background: var(--adm-info-bg);
 }
 
+/* 编辑器消息仅承担状态反馈，不应遮挡紧接着的画布或工具栏操作。 */
+body:has(.homepage-editor) .ant-message,
+body:has(.homepage-editor) .ant-message .ant-message-notice,
+body:has(.homepage-editor)
+  .ant-message
+  .ant-message-notice-wrapper
+  .ant-message-notice-content {
+  pointer-events: none;
+}
+
 /* 当前页面实例覆盖：使用现有后台中性表面，不引入自由画布式控制。 */
 .homepage-editor__instance-overrides {
   margin: 0 16px 20px;
@@ -1084,7 +1094,7 @@
   font-weight: 600;
 }
 .homepage-editor__region-title .anticon {
-  color: var(--adm-gold); /* 装饰性图标金(A.5 允许的非唯一装饰;§6.5) */
+  color: var(--adm-gold); /* 装饰性图标金(A.6 允许的非唯一装饰;§6.5) */
 }
 .homepage-editor__panel-header {
   position: relative;
@@ -1180,10 +1190,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.homepage-editor__template-card.is-compact
-  .homepage-editor__template-description {
-  display: none;
-}
 .homepage-editor__template-card.is-compact .homepage-editor__template-name {
   font-size: 12px;
 }
@@ -1193,7 +1199,7 @@
   gap: 5px;
   margin-top: 8px;
   padding: 0 12px;
-  color: var(--adm-muted); /* A.5 最低功能文字灰(白底 4.84:1) */
+  color: var(--adm-muted); /* A.6 最低功能文字灰(白底 4.84:1) */
   font-size: 12px;
   line-height: 18px;
 }
@@ -1270,14 +1276,12 @@
   background: var(--adm-content-bg);
   text-align: left;
   transition:
-    transform 0.16s ease,
     border-color 0.16s ease,
     box-shadow 0.16s ease;
 }
 .homepage-editor__template-card:not(.is-disabled):hover {
   border-color: var(--adm-gold);
   box-shadow: 0 8px 18px rgba(24, 26, 27, 0.13);
-  transform: translateY(-1px);
 }
 .homepage-editor__template-card.is-disabled {
   opacity: 0.56;
@@ -1323,36 +1327,6 @@
 .homepage-editor__template-preview-wrap {
   position: relative;
   display: block;
-}
-.homepage-editor__template-badge {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  padding: 3px 6px;
-  border-radius: 3px;
-  color: var(--ed-on-accent);
-  background: var(--adm-gold);
-  font-size: 12px;
-  line-height: 18px;
-}
-.homepage-editor__template-add {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  padding: 4px 7px;
-  border-radius: 3px;
-  color: var(--ed-on-accent);
-  background: rgba(24, 26, 27, 0.76);
-  font-size: 12px;
-  opacity: 0;
-  transform: translateY(3px);
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
-}
-.homepage-editor__template-card:hover .homepage-editor__template-add {
-  opacity: 1;
-  transform: translateY(0);
 }
 .homepage-editor__template-favorite {
   position: absolute;
@@ -1413,28 +1387,10 @@
 }
 .homepage-editor__template-name {
   display: block;
-  margin: 10px 11px 3px;
+  margin: 10px 11px 0;
   color: var(--adm-ink);
   font-size: 13px;
   font-weight: 600;
-}
-.homepage-editor__template-description {
-  display: -webkit-box;
-  min-height: 32px;
-  margin: 0 11px;
-  overflow: hidden;
-  color: var(--adm-muted);
-  font-size: 12px;
-  line-height: 18px;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-.homepage-editor__template-footer {
-  display: flex;
-  justify-content: space-between;
-  margin: 9px 11px 0;
-  color: var(--adm-muted);
-  font-size: 12px;
 }
 .homepage-editor__library-empty {
   padding: 40px 8px;
@@ -3914,8 +3870,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   --editor-inspector-width: 360px;
 }
 
-.template-editor__toolbox-scroll,
-.template-editor__structure-tree {
+.template-editor__toolbox-scroll {
   min-height: 0;
   overflow: auto;
 }
@@ -4015,50 +3970,6 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 .template-editor__toolbox-scroll dd {
   color: var(--adm-text-strong);
   text-align: right;
-}
-
-.template-editor__structure-tree {
-  flex: 1;
-  display: grid;
-  align-content: start;
-  padding: 12px 14px 4px;
-}
-
-.template-editor__structure-tree button {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  gap: 2px 7px;
-  padding: 9px 8px;
-  border: 0;
-  border-radius: 3px;
-  color: var(--adm-text);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.template-editor__structure-tree button strong {
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.template-editor__structure-tree button small {
-  grid-column: 2;
-  color: var(--adm-muted);
-  font-size: 10px;
-}
-
-.template-editor__structure-tree button.is-active {
-  color: var(--adm-action);
-  background: var(--ed-paper);
-}
-
-.template-editor__structure-tree button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .template-editor__structure-note {
@@ -4191,12 +4102,14 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   display: grid;
   justify-items: center;
   align-content: start;
-  padding: 24px;
+  padding: 32px;
 }
 
 .template-editor__canvas-document {
   position: relative;
   flex: 0 0 auto;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   border: 1px solid var(--adm-line);
   background: #fff;
@@ -4405,7 +4318,8 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 }
 
 .unified-template-library__card {
-  height: 100%;
+  align-self: start;
+  height: auto;
   margin: 0;
 }
 
@@ -4417,44 +4331,158 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 .unified-template-library__card .homepage-editor__template-preview-wrap {
   min-height: 0;
   max-height: none;
-  aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--adm-neutral-bg);
+  pointer-events: none;
 }
 
-.unified-template-library__card.is-mobile .homepage-editor__template-preview-wrap {
-  aspect-ratio: 4 / 5;
+.unified-template-library__card .homepage-editor__template-preview-img {
+  max-height: none;
 }
 
 .unified-template-library__card .homepage-editor__template-preview-wrap > :first-child {
   pointer-events: none;
 }
 
+.template-editor__catalog-preview-placeholder {
+  width: 100%;
+  min-height: 96px;
+  display: block;
+  aspect-ratio: 4 / 3;
+  border-bottom: 1px solid var(--adm-line);
+  background:
+    linear-gradient(105deg, transparent 38%, rgb(255 255 255 / 72%) 50%, transparent 62%)
+      0 0 / 220% 100%,
+    var(--adm-neutral-bg);
+  animation: template-catalog-preview-deferred 1.4s ease-in-out infinite;
+}
+
+@keyframes template-catalog-preview-deferred {
+  to { background-position: -220% 0, 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .template-editor__catalog-preview-placeholder { animation: none; }
+}
+
+.template-editor__catalog-preview-shell {
+  display: grid;
+  min-width: 0;
+  padding: 7px;
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__catalog-viewport-preview {
+  box-sizing: border-box;
+  min-width: 0;
+  border: 0;
+  background: var(--adm-content-bg);
+}
+
+.template-editor__catalog-viewport-frame {
+  display: block;
+  background: var(--adm-content-bg);
+}
+
+.template-editor__catalog-artboard-boundary,
+.template-editor__catalog-slot-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.template-editor__catalog-artboard-boundary {
+  z-index: 2;
+  box-shadow: inset 0 0 0 1px var(--adm-line-strong);
+}
+
+.template-editor__catalog-slot-overlay {
+  z-index: 3;
+  overflow: hidden;
+  visibility: hidden;
+  opacity: 0;
+  transition:
+    opacity 0.14s ease,
+    visibility 0s linear 0.14s;
+}
+
+.unified-template-library__card.is-active .template-editor__catalog-slot-overlay,
+.unified-template-library__card:not(.is-disabled):hover .template-editor__catalog-slot-overlay,
+.unified-template-library__card:focus-within .template-editor__catalog-slot-overlay {
+  visibility: visible;
+  opacity: 1;
+  transition-delay: 0s;
+}
+
+.template-editor__catalog-slot-box {
+  position: absolute;
+  box-sizing: border-box;
+  display: block;
+  pointer-events: none;
+}
+
+.template-editor__catalog-slot-box {
+  border: 1px solid color-mix(in srgb, var(--adm-info) 72%, transparent);
+  background: color-mix(in srgb, var(--adm-info-bg) 18%, transparent);
+  color: var(--adm-info);
+}
+
+.template-editor__catalog-slot-label {
+  position: absolute;
+  display: inline-flex;
+  min-height: 18px;
+  align-items: center;
+  overflow: hidden;
+  padding: 1px 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--adm-content-bg) 92%, var(--adm-info-bg));
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-editor__catalog-slot-label .is-compact {
+  display: none;
+}
+
+.unified-template-library__card.is-compact .template-editor__catalog-slot-label .is-full {
+  display: none;
+}
+
+.unified-template-library__card.is-compact .template-editor__catalog-slot-label .is-compact {
+  display: inline;
+}
+
+.template-editor__catalog-preview-state {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  color: var(--adm-muted);
+  background: color-mix(in srgb, var(--adm-neutral-bg) 88%, transparent);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.template-editor__catalog-preview-shell.is-unavailable
+  .template-editor__catalog-viewport-preview {
+  min-height: 72px;
+  outline: 1px dashed var(--adm-line-strong);
+  outline-offset: -1px;
+}
+
 .template-editor__structure-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-}
-
-.template-editor__structure-section-label {
-  display: grid;
-  gap: 2px;
-  margin: 10px 14px 0;
-  padding: 8px 10px;
-  border: 1px solid #DDE1E2;
-  border-radius: 6px;
-  color: var(--adm-muted);
-  background: #ECEEEF;
-  font-size: 10px;
-}
-
-.template-editor__structure-section-label strong {
-  color: var(--adm-text-strong);
-  font-size: 12px;
-}
-
-.template-editor__structure-scroll .template-editor__structure-tree {
-  overflow: visible;
+  background: #fff;
 }
 
 .template-editor__dynamic-node-palette {
@@ -4475,6 +4503,12 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   font-size: 12px;
   font-weight: 600;
   list-style: none;
+}
+
+.template-editor__dynamic-node-palette details > summary:hover,
+.template-editor__dynamic-node-palette details > summary:focus-visible {
+  color: var(--adm-action);
+  background: var(--adm-neutral-bg);
 }
 
 .template-editor__dynamic-node-palette details > summary::-webkit-details-marker {
@@ -4666,104 +4700,39 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   line-height: 1.5;
 }
 
-.template-editor__dynamic-tree {
-  display: block;
-}
-
-.template-editor__dynamic-tree ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.template-editor__dynamic-tree-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  min-height: 38px;
-  margin-bottom: 8px;
-  overflow: hidden;
-  border: 1px solid #DDE1E2;
-  border-radius: 6px;
-  color: var(--adm-ink);
-  background: #fff;
-  box-shadow: none;
-}
-
-.template-editor__dynamic-tree-row:hover,
-.template-editor__dynamic-tree-row:focus-within {
-  border-color: #C8CDCF;
-}
-
-.template-editor__dynamic-tree-row.is-active {
-  border-color: #181A1B;
-  color: var(--adm-action);
-  background: #ECEEEF;
-}
-
-.template-editor__dynamic-tree-row.is-hidden .template-editor__dynamic-tree-select {
-  opacity: 0.55;
-}
-
-.template-editor__structure-tree .template-editor__dynamic-tree-select {
-  width: 100%;
-  border: 0;
-  background: transparent;
-}
-
-.template-editor__structure-tree .template-editor__dynamic-tree-select[draggable="true"] {
-  cursor: grab;
-}
-
-.template-editor__structure-tree .template-editor__dynamic-tree-select[draggable="true"]:active {
-  cursor: grabbing;
-}
-
-.template-editor__dynamic-tree-select [data-template-tree-toggle] {
-  display: inline-grid;
-  width: 16px;
-  place-items: center;
-}
-
-.template-editor__dynamic-tree-actions {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  padding-right: 4px;
-}
-
-.template-editor__structure-tree .template-editor__dynamic-tree-menu {
+.template-editor__contract-role-icon,
+.template-editor__inspector-object-icon {
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  margin-right: 4px;
-  padding: 0;
-  color: var(--adm-muted);
-  background: transparent;
+  color: var(--adm-info);
 }
 
-.template-editor__structure-tree .template-editor__dynamic-tree-menu:hover,
-.template-editor__structure-tree .template-editor__dynamic-tree-menu:focus-visible {
-  color: var(--adm-action);
-  background: #fff;
+.template-editor__contract-role-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--adm-info-bg);
+  font-size: 12px;
 }
 
-.template-editor__structure-tree .template-editor__dynamic-tree-actions button {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  padding: 0;
-  color: var(--adm-muted);
+.template-editor__contract-role-icon.is-text,
+.template-editor__inspector-object-icon.is-text {
+  color: var(--adm-warning);
+  background: var(--adm-warning-bg);
 }
 
-.template-editor__structure-tree .template-editor__dynamic-tree-actions button:hover:not(:disabled),
-.template-editor__structure-tree .template-editor__dynamic-tree-actions button:focus-visible {
-  color: var(--adm-action);
-  background: #fff;
+.template-editor__contract-role-icon.is-action,
+.template-editor__inspector-object-icon.is-action {
+  color: var(--adm-info);
+  background: var(--adm-info-bg);
+}
+
+.template-editor__contract-role-icon.is-product,
+.template-editor__contract-role-icon.is-collection,
+.template-editor__inspector-object-icon.is-product,
+.template-editor__inspector-object-icon.is-collection {
+  color: var(--adm-success);
+  background: var(--adm-success-bg);
 }
 
 .template-editor__length-field {
@@ -4816,8 +4785,8 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   background: #fff;
 }
 
-.template-editor__dynamic-canvas-renderer .hc-dynamic-template > [data-template-node-id] {
-  min-height: 360px;
+.template-editor__dynamic-canvas-renderer .hc-dynamic-template > [data-template-node-id]:empty {
+  min-height: 240px;
 }
 
 .template-editor__dynamic-canvas-renderer [data-template-node-id] {
@@ -4901,24 +4870,26 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   cursor: pointer;
 }
 
-.homepage-editor__template-design-action {
-  width: calc(100% - 16px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  margin: 0 8px 8px;
-  padding: 6px 8px;
+.homepage-editor__template-upgrade-action {
+  position: absolute;
+  z-index: 3;
+  top: 6px;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 1px solid var(--adm-neutral-border);
-  border-radius: 3px;
+  border-radius: 50%;
   color: var(--adm-text-strong);
-  background: #fff;
-  font-size: 10px;
+  background: rgb(255 255 255 / 92%);
+  font-size: 13px;
   cursor: pointer;
 }
 
-.homepage-editor__template-design-action:hover,
-.homepage-editor__template-design-action:focus-visible {
+.homepage-editor__template-upgrade-action:hover,
+.homepage-editor__template-upgrade-action:focus-visible {
   border-color: var(--adm-action);
   color: var(--adm-action);
 }
@@ -5830,7 +5801,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 
 /* 中等工作区保留预览、保存、更多和发布四项能力，但收起文字，
  * 为固定在页面中心轴的设备切换器留出真实空间。 */
-@media (min-width: 521px) and (max-width: 1360px) {
+@media (min-width: 521px) and (max-width: 1439px) {
   .homepage-editor__toolbar-secondary-actions {
     display: flex;
   }
@@ -5907,7 +5878,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   height: 28px;
 }
 
-/* 四区保持原有职责；左右总宽严格相等，画布轴线因此落在工作区正中。 */
+/* 四区保持原有职责；桌面端优先给画布留出连续工作宽度，属性栏维持可读表单宽度。 */
 @media (min-width: 1200px) and (max-width: 1439px) {
   .homepage-editor__body {
     --editor-library-width: 220px;
@@ -6661,6 +6632,22 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   font-size: 12px;
 }
 
+.homepage-editor__inspector .homepage-editor__task-field.has-field-reset {
+  position: relative;
+  padding-inline-end: 36px;
+}
+
+.homepage-editor__inspector
+  .homepage-editor__task-field.has-field-reset > .homepage-editor__field-reset {
+  position: absolute;
+  top: -5px;
+  right: 0;
+  width: 30px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
 .homepage-editor__inspector .homepage-editor__field-reset:hover,
 .homepage-editor__inspector .homepage-editor__field-reset:focus-visible {
   border-color: var(--inspector-action);
@@ -7026,7 +7013,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   }
 }
 
-/* ═══ A.5 键盘焦点环(2026-08-19):2px 实色 --adm-focus(对比度 6.8:1)+2px 偏移;
+/* ═══ A.6 键盘焦点环(2026-08-19):2px 实色 --adm-focus(对比度 6.8:1)+2px 偏移;
  * 键盘导航与画布选中焦点态清晰可辨,纯功能不花哨,优先无障碍。 ═══ */
 .homepage-editor button:focus-visible,
 .homepage-editor input:focus-visible,
@@ -7059,6 +7046,8 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   margin-top: 6px;
 }
 .homepage-editor__media-alt-actions button {
+  position: relative;
+  z-index: 1;
   padding: 4px 10px;
   border: 1px solid var(--adm-line);
   border-radius: 3px;
@@ -7220,17 +7209,38 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   color: inherit;
   background: transparent;
 }
-.homepage-editor__layer-select > .homepage-editor__layer-name {
+.homepage-editor__layer-select > .homepage-editor__layer-name,
+.homepage-editor__layer-select > .homepage-editor__layer-copy {
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.homepage-editor__layer-copy {
+  display: grid;
+  gap: 1px;
+  text-align: left;
+}
+
+.homepage-editor__layer-select .homepage-editor__layer-name,
+.homepage-editor__layer-select .homepage-editor__layer-summary {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.homepage-editor__layer-select .homepage-editor__layer-name {
   color: inherit;
   font-size: 13px;
   font-weight: 500;
   line-height: 18px;
   letter-spacing: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.homepage-editor__layer-select .homepage-editor__layer-summary {
+  color: var(--adm-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15px;
 }
 .homepage-editor__layer-select > .homepage-editor__layer-grip {
   position: absolute !important;
@@ -7374,18 +7384,84 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   outline-offset: 2px;
 }
 
-.homepage-editor__layer-issue-count {
-  min-width: 18px;
-  height: 18px;
-  display: inline-grid;
-  place-items: center;
-  padding-inline: 5px;
-  border-radius: 999px;
-  color: #8f211d;
-  background: #fae8e6;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
+.homepage-editor__dynamic-instance-overview {
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px 16px;
+  border-bottom: 1px solid var(--inspector-line, #dde1e2);
+}
+
+.homepage-editor__dynamic-instance-overview
+  .homepage-editor__inspector-field > span:first-child {
+  color: var(--inspector-ink, #181a1b);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.homepage-editor__dynamic-instance-scope-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.homepage-editor__dynamic-instance-scope-list > button {
+  min-width: 0;
+  min-height: 34px;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid var(--inspector-line, #dde1e2);
+  border-radius: 4px;
+  color: var(--inspector-text, #454a4d);
+  background: var(--inspector-card, #fff);
+  font: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.homepage-editor__dynamic-instance-scope-list > button:hover,
+.homepage-editor__dynamic-instance-scope-list > button:focus-visible,
+.homepage-editor__dynamic-instance-scope-list > button.is-active {
+  border-color: var(--inspector-action, #181a1b);
+  color: var(--inspector-action, #181a1b);
+}
+
+.homepage-editor__dynamic-instance-scope-list > button.is-active {
+  background: var(--inspector-action-soft, #f4f5f5);
+  box-shadow: inset 0 0 0 1px rgba(24, 26, 27, 0.08);
+}
+
+.homepage-editor__dynamic-instance-scope-list > button:focus-visible {
+  outline: 2px solid var(--inspector-action, #181a1b);
+  outline-offset: 1px;
+}
+
+.homepage-editor__dynamic-instance-secondary {
+  border-top: 1px solid var(--inspector-line, #dde1e2);
+}
+
+.homepage-editor__dynamic-instance-secondary > .homepage-editor__properties-hint {
+  display: block;
+  margin: 12px 14px 4px;
+  font-weight: 600;
+}
+
+.homepage-editor__dynamic-instance-management {
+  margin-top: 8px;
+  border-top: 1px solid var(--inspector-line, #dde1e2);
+}
+
+.homepage-editor__dynamic-instance-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.homepage-editor__dynamic-instance-promote {
+  display: grid;
+  gap: 6px;
 }
 
 .homepage-editor__inspector-task-nav {
@@ -7437,8 +7513,8 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   place-items: center;
   padding-inline: 4px;
   border-radius: 999px;
-  color: #8f211d;
-  background: #fae8e6;
+  color: var(--adm-error);
+  background: var(--adm-error-bg);
   font-size: 9px;
 }
 
@@ -7464,7 +7540,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   width: max-content;
   padding: 0;
   border: 0;
-  color: var(--adm-action, #303537);
+  color: var(--adm-action, #181a1b);
   background: transparent;
   font-weight: 600;
   cursor: pointer;
@@ -7676,27 +7752,27 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 @media (min-width: 1200px) and (max-width: 1439px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
-    --editor-library-dock-width: 220px;
-    --editor-structure-dock-width: 140px;
-    --editor-inspector-dock-width: 440px;
+    --editor-library-dock-width: 212px;
+    --editor-structure-dock-width: 148px;
+    --editor-inspector-dock-width: 360px;
   }
 }
 
 @media (min-width: 1440px) and (max-width: 1599px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
-    --editor-library-dock-width: 236px;
-    --editor-structure-dock-width: 144px;
-    --editor-inspector-dock-width: 440px;
+    --editor-library-dock-width: 220px;
+    --editor-structure-dock-width: 160px;
+    --editor-inspector-dock-width: 360px;
   }
 }
 
 @media (min-width: 1600px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
-    --editor-library-dock-width: 272px;
-    --editor-structure-dock-width: 168px;
-    --editor-inspector-dock-width: 440px;
+    --editor-library-dock-width: 252px;
+    --editor-structure-dock-width: 188px;
+    --editor-inspector-dock-width: 360px;
   }
 }
 

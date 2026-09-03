@@ -70,7 +70,7 @@ const dynamicDefinition = {
     desktopRatio: "16:9",
     mobileRatio: "4:5",
     visualRole: "support-stage",
-    headerCompatibility: ["solid"],
+    headerCompatibility: ["solid", "overlay-light"],
     tags: ["publish-test"],
   },
   rootNodeId: "node_root",
@@ -373,7 +373,7 @@ assert.ok(
     issue.severity === "error"
       && issue.blockId === "brand-home-hero",
   ),
-  "首页首屏缺少双端图片或替代文字时必须定位到对应首屏并阻断发布",
+  "首页首屏两端都没有图片时必须定位到对应首屏并阻断发布",
 );
 
 const dynamicInstanceData = {
@@ -576,30 +576,17 @@ assert.ok(
   "作品页未选择真实公开商品引用时必须提示但不阻断发布",
 );
 
-const validCatalogFrame = {
-  content: [
-    {
-      type: "文字横幅",
-      props: {
-        id: "catalog-intro",
-        title: "选款中心",
-        body: "按关键词、货号与真实属性查找作品。",
-        targetType: "none",
-        linkUrl: "",
-      },
-    },
-    {
-      type: "业务功能区",
-      props: {
-        id: "catalog-business-region",
-        pageKey: "catalog",
-        title: "选款工具与商品结果",
-        locked: true,
-      },
-    },
-  ],
-  root: { props: {} },
-};
+const validCatalogFrame = validData("选款中心");
+validCatalogFrame.content[0].props.id = "catalog-intro";
+validCatalogFrame.content.push({
+  type: "业务功能区",
+  props: {
+    id: "catalog-business-region",
+    pageKey: "catalog",
+    title: "选款工具与商品结果",
+    locked: true,
+  },
+});
 const validCatalogFrameResult = await service.validatePageDocument("catalog", validCatalogFrame, validMetadata("选款中心"));
 assert.equal(
   validCatalogFrameResult.valid,
@@ -1028,12 +1015,16 @@ for (const testCase of requiredAltCases) {
   const pageData = validData(`${testCase.type}替代文字门禁`);
   pageData.content.push({ type: testCase.type, props: testCase.props });
   const missingAltResult = await service.validatePageDocument(testCase.pageKey, pageData, validMetadata(`${testCase.type}测试页`));
-  assert.equal(missingAltResult.valid, false, `${testCase.type} 配置公开媒体但缺少替代文字时必须阻断发布`);
+  assert.equal(
+    missingAltResult.valid,
+    true,
+    `${testCase.type} 配置公开媒体但缺少替代文字时应允许发布：${JSON.stringify(missingAltResult.errors)}`,
+  );
   assert.ok(
     missingAltResult.issues
       .filter((issue) => issue.blockId === testCase.props.id && testCase.altFields.includes(issue.field))
-      .every((issue) => issue.severity === "error"),
-    `${testCase.type} 替代文字问题必须是发布错误`,
+      .every((issue) => issue.severity === "warning"),
+    `${testCase.type} 替代文字问题必须是非阻断提醒`,
   );
   assert.deepEqual(
     missingAltResult.issues
@@ -1089,7 +1080,7 @@ collectionAltData.content.push(
   },
 );
 const missingCollectionAltResult = await service.validatePageDocument("home", collectionAltData, validMetadata("集合媒体测试页"));
-assert.equal(missingCollectionAltResult.valid, false, "集合媒体任一公开图片缺少替代文字时必须阻断发布");
+assert.equal(missingCollectionAltResult.valid, true, "集合媒体图片缺少替代文字时应保留提醒但允许发布");
 assert.deepEqual(
   missingCollectionAltResult.issues
     .filter((issue) => ["alt-carousel", "alt-gallery", "alt-scenes"].includes(issue.blockId))
@@ -1101,6 +1092,13 @@ assert.deepEqual(
     { blockId: "alt-scenes", field: "categories", index: 1, path: "content[3].props.categories[1].altText" },
   ],
   "集合媒体替代文字问题必须定位到区块、集合字段、数组下标和条目字段",
+);
+assert.ok(
+  missingCollectionAltResult.issues
+    .filter((issue) => ["alt-carousel", "alt-gallery", "alt-scenes"].includes(issue.blockId))
+    .filter((issue) => issue.path.endsWith(".alt") || issue.path.endsWith(".altText"))
+    .every((issue) => issue.severity === "warning"),
+  "集合媒体替代文字问题必须是非阻断提醒",
 );
 const completeCollectionAltData = clone(collectionAltData);
 completeCollectionAltData.content[1].props.images[1].alt = "第二张轮播正式替代文字";
@@ -1272,18 +1270,18 @@ for (const derivedCase of [
   const missingDerivedAltResult = await service.validatePageDocument("custom", missingDerivedAltData, validMetadata("定制测试页"));
   assert.equal(
     missingDerivedAltResult.valid,
-    false,
-    `${derivedCase.blockId} 的图片替代文字派生来源缺失时必须阻断发布：${JSON.stringify(missingDerivedAltResult.issues)}`,
+    true,
+    `${derivedCase.blockId} 的图片替代文字派生来源缺失时应允许发布：${JSON.stringify(missingDerivedAltResult.issues)}`,
   );
   assert.ok(
     missingDerivedAltResult.issues.some((issue) =>
       issue.blockId === derivedCase.blockId
-        && issue.severity === "error"
+        && issue.severity === "warning"
         && issue.field === derivedCase.itemField
         && issue.index === derivedCase.itemIndex
         && issue.path.endsWith(`${derivedCase.itemField}[${derivedCase.itemIndex}].${derivedCase.sourceField}`),
     ),
-    `${derivedCase.blockId} 的派生替代文字问题必须定位到具体条目名称字段`,
+    `${derivedCase.blockId} 的派生替代文字提醒必须定位到具体条目名称字段`,
   );
 }
 
@@ -1477,16 +1475,16 @@ const incompleteAltDraftValidation = await service.validatePageDocument(
 );
 assert.equal(
   incompleteAltDraftValidation.valid,
-  false,
-  `同一份草稿可以保存，但替代文字缺失必须阻断发布：${JSON.stringify(incompleteAltDraftValidation.issues)}`,
+  true,
+  `替代文字缺失应保留提醒但允许发布：${JSON.stringify(incompleteAltDraftValidation.issues)}`,
 );
 assert.ok(
   incompleteAltDraftValidation.issues.some((issue) =>
     issue.blockId === "draft-carousel"
-      && issue.severity === "error"
+      && issue.severity === "warning"
       && issue.path.endsWith("images[1].alt"),
   ),
-  "集合媒体草稿的发布问题必须定位到具体条目替代文字",
+  "集合媒体草稿的发布提醒必须定位到具体条目替代文字",
 );
 
 const saved = await service.savePageDocument(

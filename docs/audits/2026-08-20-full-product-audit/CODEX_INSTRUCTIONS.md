@@ -67,7 +67,7 @@
 - P2-01：后端发布校验输出结构化 blockId 错误清单，LayerRail 角标与发布定位统一消费它，废除正则解析错误文本（`HomepageConfig/index.tsx:3575-3592`、`LayerRail.tsx:93-106`）。
 - P2-02：图层栏角标升级为可点击的错误清单面板；发布失败提示加 role=alert。
 - 保留 LEGACY_RATIOS 旧数据兼容层不动。
-- 验收：`test:content-templates`、`test:page-builder-publish` 全绿 + 编辑器发布流浏览器实测（可用 `client/scripts/tmp-verify-publish.mjs` 同款流程）。
+- 验收：`test:content-templates`、`test:page-builder-publish` 全绿，并执行现行编辑器发布流 Playwright 浏览器验收。
 
 ### 批次 3：后台效率与防误操作
 - P2-05：ProductEditor 接 useBlocker（复用 `UnsavedChangesGuard` 模式）。

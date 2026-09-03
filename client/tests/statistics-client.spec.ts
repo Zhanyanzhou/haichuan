@@ -122,4 +122,128 @@ test.describe("后台统计客户端现有合同", () => {
     expect(trendRequests.every((request) => request.authorization === undefined))
       .toBe(true);
   });
+
+  test("访问分析展示匿名回访、地域与多周期指标并适配手机宽度", async ({
+    page,
+  }) => {
+    await authenticateDashboardAdmin(page);
+    const overview = {
+      collection: {
+        ingestionEnabled: true,
+        geoHeadersEnabled: true,
+        dataset: "PRODUCTION",
+        retentionDays: 90,
+        consentRequired: true,
+      },
+      period: { days: 30, startDate: "2026-08-05", endDate: "2026-09-03" },
+      totals: {
+        pageViews: 128,
+        visitors: 42,
+        sessions: 57,
+        newVisitors: 30,
+        returningVisitors: 12,
+        returnRate: 28.57,
+        pagesPerSession: 2.25,
+      },
+      trend: [
+        { date: "2026-09-01", pageViews: 25, visitors: 10, sessions: 12 },
+        { date: "2026-09-02", pageViews: 48, visitors: 18, sessions: 22 },
+        { date: "2026-09-03", pageViews: 55, visitors: 20, sessions: 23 },
+      ],
+      topPages: [
+        { pagePath: "/", pageViews: 70, visitors: 35 },
+        { pagePath: "/catalog", pageViews: 58, visitors: 22 },
+      ],
+      devices: [
+        { deviceType: "mobile", pageViews: 90, visitors: 31 },
+        { deviceType: "desktop", pageViews: 38, visitors: 11 },
+      ],
+      sources: [{ source: "direct", pageViews: 128, visitors: 42 }],
+      regions: [
+        {
+          countryCode: "CN",
+          region: "Guangdong",
+          city: "Shenzhen",
+          pageViews: 82,
+          visitors: 28,
+        },
+      ],
+    };
+
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
+      let data: unknown = [];
+      if (path === "/api/analytics/overview") data = overview;
+      if (path === "/api/analytics/visitors") {
+        data = {
+          total: 1,
+          days: 30,
+          list: [
+            {
+              visitorKey: "A1B2C3D4",
+              firstSeen: "2026-08-20T08:00:00.000Z",
+              lastSeen: "2026-09-03T02:00:00.000Z",
+              activeDays: 4,
+              sessions: 6,
+              pageViews: 18,
+              returning: true,
+              countryCode: "CN",
+              region: "Guangdong",
+              city: "Shenzhen",
+              deviceType: "mobile",
+            },
+          ],
+        };
+      }
+      if (path === "/api/analytics/events") {
+        data = {
+          total: 1,
+          page: 1,
+          pageSize: 100,
+          list: [
+            {
+              id: 1,
+              occurredAt: "2026-09-03T02:00:00.000Z",
+              eventName: "page_view",
+              pagePath: "/catalog",
+              source: "direct",
+              deviceType: "mobile",
+              visitorKey: "A1B2C3D4",
+            },
+          ],
+        };
+      }
+      if (path === "/api/settings/flags") {
+        data = { analyticsDashboardEnabled: true };
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "ok" }),
+      });
+    });
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/admin/analytics");
+    await expect(page.getByRole("heading", { name: "访问分析" })).toBeVisible();
+    await expect(
+      page.locator(".ant-statistic").filter({ hasText: "独立访客" }),
+    ).toContainText("42");
+    await expect(
+      page.locator(".ant-statistic").filter({ hasText: "回访访客" }),
+    ).toContainText("12");
+    await expect(page.getByText("CN · Guangdong · Shenzhen").first()).toBeVisible();
+    await expect(page.getByText("访客 A1B2C3D4").first()).toBeVisible();
+    await expect(page.getByText("回访", { exact: true }).first()).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(
+      page.locator(".ant-card").filter({ hasText: "访问概览" }).first(),
+    ).toBeVisible();
+    const hasHorizontalOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1,
+    );
+    expect(hasHorizontalOverflow).toBe(false);
+  });
 });

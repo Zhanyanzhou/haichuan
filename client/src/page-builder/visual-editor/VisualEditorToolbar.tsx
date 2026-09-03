@@ -1,4 +1,5 @@
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
+import { getTemplateContractNodeLabel } from "../runtime/contentTemplateRolePresentation";
 import { useVisualEditorSession } from "./visualEditorSession";
 
 const NODE_LABELS: Record<string, string> = {
@@ -65,7 +66,7 @@ export default function VisualEditorToolbar({
         <div>
           <strong>
             {current
-              ? `${mode === "select" ? "已选择" : "正在调整"}：${NODE_LABELS[current.nodeId] ?? current.nodeId}`
+              ? `${mode === "select" ? "已选择" : "正在调整"}：${NODE_LABELS[current.nodeId] ?? getTemplateContractNodeLabel(current.nodeId)}`
               : panelMode === "design"
                 ? "在画布中点选对象，再明确选择调整方式"
                 : "在画布点选对象，面板只显示它的内容"}

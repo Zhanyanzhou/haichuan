@@ -1,13 +1,13 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/template-definition.schema.json
- * SHA-256：04f1ad7fa3efdc38e8d6d740bf3671357343f67fee104b8e233087b2955255a0
+ * SHA-256：75bfe99c3650448419728928abe4a39f119aaa16f4011155022a9fe587edef1b
  */
 
 export const DYNAMIC_TEMPLATE_SCHEMA_VERSION = 1;
 /** 统一模板产品模型版本；JSON Schema 自身仍独立按 schemaVersion 演进。 */
 export const TEMPLATE_DEFINITION_MODEL_VERSION = 2 as const;
-export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "04f1ad7fa3efdc38e8d6d740bf3671357343f67fee104b8e233087b2955255a0";
+export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "75bfe99c3650448419728928abe4a39f119aaa16f4011155022a9fe587edef1b";
 export const DYNAMIC_TEMPLATE_NODE_TYPES = [
   "Section",
   "Container",

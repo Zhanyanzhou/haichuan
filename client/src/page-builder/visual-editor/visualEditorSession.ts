@@ -227,6 +227,20 @@ export const CANVAS_SHARED_VISUAL_PREVIEW_MESSAGE = "homepage-editor:shared-visu
 export const CANVAS_DYNAMIC_LAYOUT_EDIT_MESSAGE = "homepage-editor:dynamic-layout-edit";
 export const CANVAS_TEMPLATE_HISTORY_MESSAGE = "homepage-editor:template-history";
 
+const TEMPLATE_CANVAS_BLOCK_PREFIX = "template-editor:";
+
+/**
+ * 模板画布中的成熟组件会为每个 V2 节点生成独立 blockId：
+ * template-editor:<sessionId>:<nodeId>。旧调用方仍可只传 sessionId。
+ */
+export function getTemplateSessionIdFromCanvasBlockId(blockId: string) {
+  if (!blockId.startsWith(TEMPLATE_CANVAS_BLOCK_PREFIX)) return undefined;
+  const remainder = blockId.slice(TEMPLATE_CANVAS_BLOCK_PREFIX.length);
+  const separator = remainder.indexOf(":");
+  const sessionId = separator >= 0 ? remainder.slice(0, separator) : remainder;
+  return sessionId || undefined;
+}
+
 export interface CanvasSharedVisualPreviewMessage {
   type: typeof CANVAS_SHARED_VISUAL_PREVIEW_MESSAGE;
   moduleType: string;
@@ -272,7 +286,8 @@ export function sendCanvasTemplateHistory(
   message: Omit<CanvasTemplateHistoryMessage, "type" | "workspace" | "templateSessionId">,
   sourceWindow: Window = window,
 ) {
-  if (!message.blockId.startsWith("template-editor:")) return;
+  const templateSessionId = getTemplateSessionIdFromCanvasBlockId(message.blockId);
+  if (!templateSessionId) return;
   let targetOrigin = sourceWindow.location.origin;
   if (!targetOrigin || targetOrigin === "null") {
     try {
@@ -284,7 +299,7 @@ export function sendCanvasTemplateHistory(
   const data = {
     type: CANVAS_TEMPLATE_HISTORY_MESSAGE,
     workspace: "template",
-    templateSessionId: message.blockId.slice("template-editor:".length),
+    templateSessionId,
     ...message,
   } satisfies CanvasTemplateHistoryMessage;
   const parentWindow = sourceWindow.parent;
@@ -315,9 +330,7 @@ export function sendCanvasVisualEdit(
       return;
     }
   }
-  const templateSessionId = message.blockId.startsWith("template-editor:")
-    ? message.blockId.slice("template-editor:".length)
-    : undefined;
+  const templateSessionId = getTemplateSessionIdFromCanvasBlockId(message.blockId);
   const data = {
     type: CANVAS_VISUAL_EDIT_MESSAGE,
     workspace: templateSessionId ? "template" : "page",

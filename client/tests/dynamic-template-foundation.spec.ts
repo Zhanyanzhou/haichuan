@@ -109,6 +109,158 @@ test.describe("动态 TemplateDefinition 基础", () => {
     expect(await readNodeSignature("公开页面固定版本")).toEqual(editorSignature);
   });
 
+  test("目录预览按真实比例、内容高度和图片文字 DOM 槽位统一呈现", async ({ page }) => {
+    await page.addInitScript(() => {
+      if (window.top !== window) return;
+      const statuses: string[] = [];
+      (window as typeof window & { __catalogPreviewStatuses?: string[] }).__catalogPreviewStatuses = statuses;
+      const collect = () => {
+        document.querySelectorAll<HTMLElement>("[data-template-catalog-preview-shell]")
+          .forEach((element) => {
+            const status = element.dataset.previewStatus;
+            if (status && !statuses.includes(status)) statuses.push(status);
+          });
+      };
+      const observer = new MutationObserver(collect);
+      const install = () => {
+        if (!document.documentElement) {
+          window.setTimeout(install, 0);
+          return;
+        }
+        observer.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ["data-preview-status"],
+          childList: true,
+          subtree: true,
+        });
+      };
+      install();
+    });
+    await page.goto("/dynamic-template-foundation.html?catalogPreviews=1");
+    const matrix = page.getByRole("region", { name: "模板目录比例预览夹具" });
+    await expect(matrix).toBeVisible();
+    const previewCase = (key: string) => matrix.locator(`[data-catalog-preview-case="${key}"]`);
+    const artboard = (key: string) => previewCase(key).locator("[data-preview-natural-height]");
+
+    for (const key of ["fixed-four-three", "square", "portrait", "auto", "dense", "blank"]) {
+      await expect(previewCase(key).locator('[data-preview-status="ready"]')).toHaveCount(1);
+      await expect(previewCase(key).locator('[data-preview-renderer-ready="true"]')).toHaveCount(1);
+    }
+    await expect.poll(() => page.evaluate(() => (
+      (window as typeof window & { __catalogPreviewStatuses?: string[] }).__catalogPreviewStatuses ?? []
+    ))).toEqual(expect.arrayContaining(["loading", "ready", "unavailable"]));
+
+    await expect(matrix.locator("[data-template-catalog-dimension]")).toHaveCount(0);
+    await expect(artboard("fixed-four-three")).toHaveAttribute("data-preview-height-mode", "fixed");
+    await expect(artboard("fixed-four-three")).toHaveAttribute("data-preview-natural-height", "1440");
+
+    for (const [key, expectedRatio] of [
+      ["fixed-four-three", 4 / 3],
+      ["square", 1],
+      ["portrait", 3 / 4],
+    ] as const) {
+      await expect.poll(async () => {
+        const box = await artboard(key).boundingBox();
+        return box ? box.width / box.height : 0;
+      }).toBeGreaterThan(expectedRatio * 0.99);
+      await expect.poll(async () => {
+        const box = await artboard(key).boundingBox();
+        return box ? box.width / box.height : Number.POSITIVE_INFINITY;
+      }).toBeLessThan(expectedRatio * 1.01);
+    }
+
+    const fixedFrame = previewCase("fixed-four-three").frameLocator("iframe");
+    await fixedFrame.locator(".template-editor__catalog-canvas-renderer").evaluate((root) => {
+      const stress = document.createElement("div");
+      stress.dataset.previewStress = "fixed";
+      stress.style.height = "6000px";
+      root.appendChild(stress);
+    });
+    await expect(artboard("fixed-four-three")).toHaveAttribute("data-preview-natural-height", "1440");
+
+    const autoArtboard = artboard("auto");
+    const autoBefore = Number(await autoArtboard.getAttribute("data-preview-natural-height"));
+    expect(autoBefore).toBeGreaterThanOrEqual(240);
+    const autoFrame = previewCase("auto").frameLocator("iframe");
+    await autoFrame.locator(".template-editor__catalog-canvas-renderer").evaluate((root) => {
+      const stress = document.createElement("div");
+      stress.dataset.previewStress = "auto";
+      stress.style.height = "6000px";
+      root.appendChild(stress);
+    });
+    await expect.poll(async () => Number(
+      await autoArtboard.getAttribute("data-preview-natural-height"),
+    )).toBeGreaterThan(autoBefore + 1000);
+
+    await expect(artboard("blank")).toHaveAttribute("data-preview-height-mode", "auto");
+    await expect.poll(async () => Number(
+      await artboard("blank").getAttribute("data-preview-natural-height"),
+    )).toBeGreaterThanOrEqual(240);
+
+    const unavailable = previewCase("unavailable");
+    await expect(unavailable.locator('[data-preview-status="unavailable"]')).toHaveCount(1);
+    await expect(unavailable.getByText("预览不可用")).toBeVisible();
+
+    const missingRenderer = previewCase("missing-renderer");
+    await expect(missingRenderer.locator('[data-preview-status="ready"]')).toHaveCount(0);
+    await expect(missingRenderer.locator('[data-preview-status="unavailable"]')).toHaveCount(1);
+    await expect(missingRenderer.locator('[data-preview-renderer-ready="false"]')).toHaveCount(1);
+
+    const dense = previewCase("dense");
+    await dense.hover();
+    for (const kind of ["media", "text"] as const) {
+      const box = dense.locator(`[data-slot-kind="${kind}"]`).first();
+      await expect(box).toBeVisible();
+      await expect(box).toHaveCSS("border-top-style", "solid");
+      await expect(box).toHaveCSS("pointer-events", "none");
+    }
+    await expect(dense.locator('[data-slot-kind="action"], [data-slot-kind="structured"]'))
+      .toHaveCount(0);
+    const readableLabel = dense.locator(".template-editor__catalog-slot-label").first();
+    await expect(readableLabel).toHaveCSS("font-size", "12px");
+    await expect(dense.locator(".template-editor__catalog-slot-overlay"))
+      .toHaveCSS("pointer-events", "none");
+    await expect(dense.locator(".homepage-editor__template-slot-summary, .homepage-editor__template-description, .homepage-editor__template-add"))
+      .toHaveCount(0);
+    await expect(dense.locator(".homepage-editor__template-name"))
+      .toHaveText("密集媒体文字槽位");
+
+    const mediaGeometry = await dense.evaluate((card) => {
+      const host = card.querySelector<HTMLElement>("[data-preview-natural-height]");
+      const frame = card.querySelector<HTMLIFrameElement>("iframe");
+      const overlay = card.querySelector<HTMLElement>('[data-slot-kind="media"]');
+      const content = frame?.contentDocument?.querySelector<HTMLElement>(
+        ".template-editor__catalog-canvas-renderer",
+      );
+      const source = content?.querySelector<HTMLElement>(
+        '[data-hc-template-slot-kind="media"], [data-template-slot-id="slot_image"]',
+      );
+      if (!host || !frame || !overlay || !content || !source) return null;
+      const hostBounds = host.getBoundingClientRect();
+      const contentBounds = content.getBoundingClientRect();
+      const sourceBounds = source.getBoundingClientRect();
+      const overlayBounds = overlay.getBoundingClientRect();
+      const scale = host.clientWidth / Number(frame.style.width.replace("px", ""));
+      return {
+        expectedLeft: hostBounds.left + (sourceBounds.left - contentBounds.left) * scale,
+        expectedTop: hostBounds.top + (sourceBounds.top - contentBounds.top) * scale,
+        actualLeft: overlayBounds.left,
+        actualTop: overlayBounds.top,
+      };
+    });
+    expect(mediaGeometry).not.toBeNull();
+    expect(Math.abs(mediaGeometry!.expectedLeft - mediaGeometry!.actualLeft)).toBeLessThanOrEqual(2);
+    expect(Math.abs(mediaGeometry!.expectedTop - mediaGeometry!.actualTop)).toBeLessThanOrEqual(2);
+
+    await page.getByRole("button", { name: "目录移动端" }).click();
+    await expect(page.getByLabel("目录预览当前设备")).toHaveText("mobile");
+    await expect(matrix.locator("[data-template-catalog-dimension]")).toHaveCount(0);
+    await expect(artboard("fixed-four-three")).toHaveAttribute("data-preview-natural-height", "390");
+    await page.getByRole("button", { name: "目录桌面端" }).click();
+    await expect(matrix.locator("[data-template-catalog-dimension]")).toHaveCount(0);
+    await expect(artboard("fixed-four-three")).toHaveAttribute("data-preview-natural-height", "1440");
+  });
+
   test("母模板明确控制移动布局切换宽度，平板与中间宽度按规则选择构图", async ({ page }) => {
     const instance = page.getByRole("region", { name: "页面实例内容" })
       .locator('[data-dynamic-template-instance-id="instance_test_v3"]');
@@ -266,7 +418,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
     expect(result.cycleCode).toBe("MOVE_WOULD_CREATE_CYCLE");
   });
 
-  test("本机草稿保存、恢复、另存副本和 JSON 导入导出不改变原模板身份", async ({ page }) => {
+  test("本机草稿保存、恢复、另存副本和 JSON 导入保持结构身份并移除内容值", async ({ page }) => {
     const result = JSON.parse(await page.getByTestId("local-draft-result").textContent() || "{}") as {
       savedId: string;
       loadedId: string;
@@ -274,6 +426,8 @@ test.describe("动态 TemplateDefinition 基础", () => {
       copiedName: string;
       importedId: string;
       importedName: string;
+      importedDefaultContentCount: number;
+      importedPreviewContentCount: number;
       savedCount: number;
       netAdded: number;
       savedPresent: boolean;
@@ -285,6 +439,8 @@ test.describe("动态 TemplateDefinition 基础", () => {
     expect(result.importedId).not.toBe(result.savedId);
     expect(result.copiedName).toBe("本地草稿测试副本");
     expect(result.importedName).toBe("本地草稿测试");
+    expect(result.importedDefaultContentCount).toBe(0);
+    expect(result.importedPreviewContentCount).toBe(0);
     expect(result.savedCount).toBeGreaterThanOrEqual(2);
     expect(result.netAdded).toBe(2);
     expect(result.savedPresent).toBe(true);
@@ -353,6 +509,8 @@ test.describe("动态 TemplateDefinition 基础", () => {
       sourceUnchanged?: boolean;
       nodeCount?: number;
       slotCount?: number;
+      defaultContentCount?: number;
+      previewContentCount?: number;
       containsLegacyNumericProductReference?: boolean;
       error?: string;
     }>;
@@ -362,11 +520,13 @@ test.describe("动态 TemplateDefinition 基础", () => {
       expect(result.sourceUnchanged, result.moduleType).toBe(true);
       expect(result.nodeCount, result.moduleType).toBeGreaterThanOrEqual(3);
       expect(result.slotCount, result.moduleType).toBeGreaterThan(0);
+      expect(result.defaultContentCount, result.moduleType).toBe(0);
+      expect(result.previewContentCount, result.moduleType).toBe(0);
       expect(result.containsLegacyNumericProductReference, result.moduleType).toBe(false);
     }
   });
 
-  test("视频复杂节点复用成熟业务组件，并在兼容来源适配时保留播放配置", async ({ page }) => {
+  test("视频复杂节点复用成熟业务组件，兼容来源只迁移结构而不携带播放内容", async ({ page }) => {
     const videoRegion = page.getByRole("region", { name: "复杂视频节点" });
     await expect(videoRegion.locator('[data-template-node-type="Video"] video')).toHaveCount(1);
     await expect(videoRegion.getByLabel("中性品牌影片示例")).toBeVisible();
@@ -386,7 +546,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
     expect(result.videoSlotType).toBe("video");
     expect(result.mappedCount).toBeGreaterThan(0);
     expect(result.skippedVideo).toBe(false);
-    expect(result.previewVideoUrl).toBeDefined();
+    expect(result.previewVideoUrl).toBeUndefined();
     expect(result.defaultContainsVideo).toBe(false);
   });
 
@@ -464,6 +624,54 @@ test.describe("动态 TemplateDefinition 基础", () => {
       }).toEqual([]);
     }
   });
+
+  for (const device of ["desktop", "mobile"] as const) {
+    for (const scenario of ["empty", "long-text", "missing-image"] as const) {
+      test(`24 个正式模板在 ${device} 的 ${scenario} 场景保持公共 Renderer 稳定`, async ({ page }) => {
+        const runtimeErrors: string[] = [];
+        page.on("pageerror", (error) => runtimeErrors.push(error.message));
+        page.on("console", (message) => {
+          const text = message.text();
+          const isExpectedDevServerNoise = text.includes("WebSocket connection")
+            || text.includes("[vite] failed to connect to websocket")
+            || text.includes("Failed to send error to Vite server");
+          if (message.type() === "error" && !isExpectedDevServerNoise) runtimeErrors.push(text);
+        });
+        await page.setViewportSize(device === "desktop"
+          ? { width: 1440, height: 1000 }
+          : { width: 390, height: 844 });
+        await page.goto(`/dynamic-template-foundation.html?templateScenarios=1&device=${device}&scenario=${scenario}`);
+
+        const matrix = page.getByTestId("template-scenario-regression-matrix");
+        await expect(matrix).toHaveAttribute("data-preview-scenario", scenario);
+        await expect(matrix).toHaveAttribute("data-preview-device", device);
+        await expect(matrix.locator("[data-scenario-template]")).toHaveCount(24);
+        await expect(matrix.locator("[data-dynamic-template-id]")).toHaveCount(24);
+        await page.waitForTimeout(250);
+        expect(runtimeErrors, `${device}.${scenario} 不应出现 Renderer 运行时错误`).toEqual([]);
+        const overflow = await matrix.locator("[data-scenario-template]").evaluateAll((elements) => elements
+          .filter((element) => element.scrollWidth > element.clientWidth + 1)
+          .map((element) => ({
+            template: element.getAttribute("data-scenario-template"),
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth,
+          })));
+        expect(overflow, `${device}.${scenario} 不应产生模板级横向溢出`).toEqual([]);
+        await expect.poll(() => page.evaluate(() => (
+          document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1
+        ))).toBe(true);
+        if (scenario === "long-text") {
+          const runawayHeights = await matrix.locator("[data-scenario-template]").evaluateAll((elements) => elements
+            .filter((element) => element.scrollHeight > 12_000)
+            .map((element) => ({
+              template: element.getAttribute("data-scenario-template"),
+              scrollHeight: element.scrollHeight,
+            })));
+          expect(runawayHeights, `${device}.long-text 不应出现失控高度`).toEqual([]);
+        }
+      });
+    }
+  }
 
   test("3 个业务模板按稳定引用在当前公开 Renderer 与 V2 共用解析、空结果和响应式输出", async ({ page }) => {
     const products = [1, 2].map((id) => ({

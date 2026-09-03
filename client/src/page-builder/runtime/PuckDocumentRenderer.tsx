@@ -15,6 +15,7 @@ import {
   getContentTemplateIssues,
   sanitizeContentTemplateLayoutData,
 } from "@/page-builder/generated/contentTemplates.generated";
+import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
 import ContentTemplateContractFrame from "@/page-builder/runtime/ContentTemplateContractFrame";
 import {
   ResolvedCategoryCardsBlock,
@@ -188,6 +189,7 @@ function renderBlock(
   heroHeadingLevel: 1 | 2,
   homeSurface: boolean,
   allowHomePrimaryAction: boolean,
+  priority: boolean,
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
 ) {
   const normalized = normalizeLegacyRenderColors(block.props || {});
@@ -297,6 +299,7 @@ function renderBlock(
         layoutData={layoutData}
         mode={mode}
         headingLevel={block.type === "首屏主视觉" ? heroHeadingLevel : 2}
+        priority={priority}
         homeSurface={homeSurface}
         stableReferencesOnly={block.type !== "佩戴灵感"}
       />
@@ -344,6 +347,7 @@ function GuardedBlock({
   heroHeadingLevel,
   homeSurface,
   allowHomePrimaryAction,
+  priority,
   resolvedDynamicTemplates,
 }: {
   block: PuckBlock;
@@ -352,6 +356,7 @@ function GuardedBlock({
   heroHeadingLevel: 1 | 2;
   homeSurface: boolean;
   allowHomePrimaryAction: boolean;
+  priority: boolean;
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap;
 }) {
   const hasMissingAsset = useHasMissingAssets(block.props || {});
@@ -379,6 +384,7 @@ function GuardedBlock({
     heroHeadingLevel,
     homeSurface,
     allowHomePrimaryAction,
+    priority,
     resolvedDynamicTemplates,
   );
 }
@@ -408,18 +414,23 @@ export default function PuckDocumentRenderer({
   const resolvedDynamicTemplates = readResolvedDynamicTemplateDefinitions(
     data[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
   );
-  const allBlocks = [...data.content, ...zoneBlocks];
-  const isDynamicPrimaryStage = (block: PuckBlock) => {
-    if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || block.props?.isVisible === false) return false;
-    const templateId = typeof block.props?.templateId === "string" ? block.props.templateId : "";
-    const templateVersion = Number(block.props?.templateVersion);
-    const resolved = resolvedDynamicTemplates[
-      dynamicTemplateVersionKey(templateId, templateVersion)
-    ];
-    return resolved?.definition.metadata.visualRole === "primary-stage";
+  const isPrimaryStage = (block: PuckBlock) => (
+    isVisiblePrimaryStageBlock(block, resolvedDynamicTemplates)
+  );
+  // 已发布的历史文档可能早于“单一首屏”门禁。公开与只读预览只取第一个
+  // 可见主舞台，既不修改源文档，也避免异常数据把整页堆成连续首屏。
+  let primaryStageSeen = false;
+  const keepRenderableBlock = (block: PuckBlock) => {
+    if (!isPrimaryStage(block)) return true;
+    if (primaryStageSeen) return false;
+    primaryStageSeen = true;
+    return true;
   };
+  const renderableContent = data.content.filter(keepRenderableBlock);
+  const renderableZoneBlocks = zoneBlocks.filter(keepRenderableBlock);
+  const allBlocks = [...renderableContent, ...renderableZoneBlocks];
   const dynamicPrimaryStageHasHeading = (block: PuckBlock) => {
-    if (!isDynamicPrimaryStage(block)) return false;
+    if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isPrimaryStage(block)) return false;
     const templateId = String(block.props?.templateId ?? "");
     const templateVersion = Number(block.props?.templateVersion);
     const definition = resolvedDynamicTemplates[
@@ -451,11 +462,9 @@ export default function PuckDocumentRenderer({
       : dynamicPrimaryStageHasHeading(block)
   ));
   const homePrimaryHeroIndex = homeSurface
-    ? allBlocks.findIndex((block) =>
-        (block.type === "首屏主视觉" && block.props?.isVisible !== false)
-        || isDynamicPrimaryStage(block),
-      )
+    ? allBlocks.findIndex(isPrimaryStage)
     : -1;
+  const primaryStageIndex = allBlocks.findIndex(isPrimaryStage);
   // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
   const render = (block: PuckBlock, index: number) => {
     const blockHeroHeadingLevel = index === primaryHeroIndex
@@ -477,6 +486,7 @@ export default function PuckDocumentRenderer({
           heroHeadingLevel={blockHeroHeadingLevel}
           homeSurface={homeSurface}
           allowHomePrimaryAction={homeSurface && index === homePrimaryHeroIndex}
+          priority={index === primaryStageIndex}
           resolvedDynamicTemplates={resolvedDynamicTemplates}
         />
       </ErrorBoundary>
@@ -515,9 +525,9 @@ export default function PuckDocumentRenderer({
       {primaryHeading && (primaryHeroIndex < 0 || heroHeadingLevel !== 1) ? (
         <h1 className="sr-only">{primaryHeading}</h1>
       ) : null}
-      {data.content.map(render)}
-      {zoneBlocks.map((block, index) =>
-        render(block, data.content!.length + index),
+      {renderableContent.map(render)}
+      {renderableZoneBlocks.map((block, index) =>
+        render(block, renderableContent.length + index),
       )}
     </div>
   );

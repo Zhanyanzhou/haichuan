@@ -63,11 +63,11 @@ export const heroPuckConfig = {
     locked: false,
   } satisfies HeroPuckProps,
 
-  /** 模板锁定：locked 属性为 true 时禁止删除/拖动 */
+  /** 首屏主舞台全页唯一；锁定时进一步禁止删除与拖动。 */
   resolvePermissions: (data: { props?: HeroPuckProps }) => {
     if (data.props?.locked) {
       return { delete: false, drag: false, duplicate: false };
     }
-    return {};
+    return { duplicate: false };
   },
 };

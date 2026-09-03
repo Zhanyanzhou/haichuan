@@ -190,11 +190,20 @@ function adapterFallback(label: string, record: Record<string, unknown>) {
 
 function renderWithContentContract(
   moduleType: string,
+  mode: DynamicTemplateNodeAdapterContext["mode"],
   props: Record<string, unknown>,
+  nodeProps: DynamicTemplateNodeProps | undefined,
   child: ReactNode,
 ) {
+  const contractProps = nodeProps?.contentTemplateLayoutData
+    ? { ...props, __instanceOverrides: nodeProps.contentTemplateLayoutData }
+    : props;
   return (
-    <ContentTemplateContractFrame moduleType={moduleType} mode="public" props={props}>
+    <ContentTemplateContractFrame
+      moduleType={moduleType}
+      mode={mode === "editor" ? "editor" : "public"}
+      props={contractProps}
+    >
       {child}
     </ContentTemplateContractFrame>
   );
@@ -210,7 +219,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       const aspectRatio = typeof props.aspectRatio === "string" && /^\d+:\d+$/.test(props.aspectRatio)
         ? props.aspectRatio.replace(":", " / ")
         : "16 / 9";
-      return renderWithContentContract("视频区块", props, (
+      return renderWithContentContract("视频区块", mode, props, nodeProps, (
         <Suspense fallback={(
           <div
             className="hc-dynamic-template__adapter-loading"
@@ -231,7 +240,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       const { record, props } = withTemplateDesign(content, nodeProps, CAROUSEL_DEFAULTS);
       const module = convertPuckProps("轮播图", props);
       if (!module) return null;
-      return renderWithContentContract("轮播图", props, (
+      return renderWithContentContract("轮播图", mode, props, nodeProps, (
         <Suspense fallback={adapterFallback("轮播组件", record)}>
           <CarouselBlock module={module} editMode={mode !== "public"} />
         </Suspense>
@@ -243,7 +252,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       const { record, props } = withTemplateDesign(content, nodeProps, HOTSPOT_DEFAULTS);
       const module = convertPuckProps("热区图", props);
       if (!module) return null;
-      return renderWithContentContract("热区图", props, (
+      return renderWithContentContract("热区图", mode, props, nodeProps, (
         <Suspense fallback={adapterFallback("热区组件", record)}>
           <HotspotBlock module={module} editMode={mode !== "public"} />
         </Suspense>
@@ -255,7 +264,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       const { record, props } = withTemplateDesign(content, nodeProps, BEFORE_AFTER_DEFAULTS);
       const module = convertPuckProps("改款对比", props);
       if (!module) return null;
-      return renderWithContentContract("改款对比", props, (
+      return renderWithContentContract("改款对比", mode, props, nodeProps, (
         <Suspense fallback={adapterFallback("前后对比组件", record)}>
           <BeforeAfterBlock module={module} editMode={mode !== "public"} />
         </Suspense>
@@ -267,7 +276,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       const { record, props } = withTemplateDesign(content, nodeProps, APPOINTMENT_DEFAULTS);
       const module = convertPuckProps("预约入口", props);
       if (!module) return null;
-      return renderWithContentContract("预约入口", props, (
+      return renderWithContentContract("预约入口", mode, props, nodeProps, (
         <Suspense fallback={adapterFallback("预约入口组件", record)}>
           <AppointmentBlock module={module} editMode={mode !== "public"} />
         </Suspense>
@@ -277,7 +286,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
   productCard: {
     render: ({ content, mode, nodeProps }) => {
       const { record, design, props } = withTemplateDesign(content, nodeProps, PRODUCT_CARD_DEFAULTS);
-      return renderWithContentContract("单品焦点推荐", props, (
+      return renderWithContentContract("单品焦点推荐", mode, props, nodeProps, (
       <Suspense fallback={adapterFallback("单品展示组件", asRecord(content))}>
         {mode === "public" ? (
           <ResolvedFeaturedProductBlock props={props} stableReferencesOnly />
@@ -291,7 +300,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
   productCollection: {
     render: ({ content, mode, nodeProps }) => {
       const { record, design, props } = withTemplateDesign(content, nodeProps, PRODUCT_COLLECTION_DEFAULTS);
-      return renderWithContentContract("产品展示行", props, (
+      return renderWithContentContract("产品展示行", mode, props, nodeProps, (
       <Suspense fallback={adapterFallback("商品集合组件", asRecord(content))}>
         {mode === "public" ? (
           <ResolvedProductRowBlock props={props} stableReferencesOnly />
@@ -305,7 +314,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
   categoryCollection: {
     render: ({ content, mode, nodeProps }) => {
       const { record, design, props } = withTemplateDesign(content, nodeProps, CATEGORY_COLLECTION_DEFAULTS);
-      return renderWithContentContract("分类卡片", props, (
+      return renderWithContentContract("分类卡片", mode, props, nodeProps, (
       <Suspense fallback={adapterFallback("分类集合组件", asRecord(content))}>
         {mode === "public" ? (
           <ResolvedCategoryCardsBlock props={props} />

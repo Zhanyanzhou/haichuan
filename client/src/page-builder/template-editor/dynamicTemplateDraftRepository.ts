@@ -148,6 +148,8 @@ export function importDynamicTemplateDraftJson(source: string): TemplateEditorDr
   }
   const definition = structuredClone(validation.definition);
   definition.templateId = createDynamicTemplateStableId("tpl");
+  definition.defaultContent = {};
+  definition.previewContent = {};
   return {
     format: "dynamic",
     sourceType: "local",

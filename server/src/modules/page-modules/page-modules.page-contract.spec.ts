@@ -126,39 +126,53 @@ test("页面发布资料可留空并提示，但非法 metadata 结构仍阻断"
   assert.ok(invalidValidation.errors.some((message) => message.includes("contentOwner 必须是字符串")));
 });
 
-test("首屏必填图片与替代文字缺失时保持发布阻断", async () => {
+test("首屏发布要求桌面与手机专图齐全，并继续校验替代文字", async () => {
   const service = createService();
-  const missingImageDocument = makeHomeDocument();
-  missingImageDocument.content[0].props.mobileImage = "";
+  const desktopOnlyDocument = makeHomeDocument();
+  desktopOnlyDocument.content[0].props.mobileImage = "";
+  desktopOnlyDocument.content[0].props.altText = "";
 
-  const missingImage = await service.validatePageDocument(
+  const desktopOnly = await service.validatePageDocument(
     "home",
-    missingImageDocument,
+    desktopOnlyDocument,
     makeFormalMetadata(),
   );
-  assert.equal(missingImage.valid, false);
-  assert.ok(missingImage.issues.some(
-    (issue) => issue.path === "content[0].props.mobileImage"
-      && issue.severity === "error"
-      && issue.message.includes("图片不能为空"),
+  assert.equal(desktopOnly.valid, false);
+  assert.equal(desktopOnly.issues.some(
+    (issue) => issue.field === "mobileImage" && issue.message.includes("图片不能为空"),
+  ), true);
+  assert.ok(desktopOnly.issues.some(
+    (issue) => issue.field === "altText" && issue.severity === "error",
   ));
 
-  const missingAltDocument = makeHomeDocument();
-  missingAltDocument.content[0].props.altText = "";
-  const missingAlt = await service.validatePageDocument(
+  const mobileOnlyDocument = makeHomeDocument();
+  mobileOnlyDocument.content[0].props.desktopImage = "";
+  mobileOnlyDocument.content[0].props.altText = "";
+  const mobileOnly = await service.validatePageDocument(
     "home",
-    missingAltDocument,
+    mobileOnlyDocument,
     makeFormalMetadata(),
   );
-  assert.equal(missingAlt.valid, false);
-  assert.ok(missingAlt.issues.some(
-    (issue) => issue.path === "content[0].props.altText"
-      && issue.severity === "error"
-      && issue.message.includes("内容不能为空"),
+  assert.equal(mobileOnly.valid, false);
+  assert.equal(mobileOnly.issues.some(
+    (issue) => issue.field === "desktopImage" && issue.message.includes("图片不能为空"),
+  ), true);
+
+  const noImageDocument = makeHomeDocument();
+  noImageDocument.content[0].props.desktopImage = "";
+  noImageDocument.content[0].props.mobileImage = "";
+  const noImage = await service.validatePageDocument(
+    "home",
+    noImageDocument,
+    makeFormalMetadata(),
+  );
+  assert.equal(noImage.valid, false);
+  assert.ok(noImage.issues.some(
+    (issue) => issue.severity === "error" && issue.message.includes("图片不能为空"),
   ));
 });
 
-test("同一模板可按需重复添加且不会因页面模块数量阻断发布预检", async () => {
+test("首屏主舞台即使未触发模块总数限制也必须保持全页唯一", async () => {
   const document = makeHomeDocument();
   document.content = Array.from({ length: 61 }, (_, index) => ({
     ...document.content[0],
@@ -174,7 +188,8 @@ test("同一模板可按需重复添加且不会因页面模块数量阻断发�
     makeFormalMetadata(),
   );
 
-  assert.equal(result.valid, true, result.errors.join("\n"));
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.includes("页面只能有一个首屏主舞台（primary-stage），当前为 61 个"));
   assert.equal(
     result.errors.some((message) => message.includes("页面可见模块过多")),
     false,
@@ -324,7 +339,7 @@ test("页面分享图仍拒绝非 HTTP(S) 或站内绝对路径", async () => {
   assert.ok(result.errors.some((message) => message.includes("ogImage 分享图地址不合法")));
 });
 
-test("当前可见素材缺少来源与授权编号时提示但不阻断发布", async () => {
+test("当前可见素材缺少来源与授权编号时阻断发布", async () => {
   const metadata = makeFormalMetadata();
   metadata.mediaRights = metadata.mediaRights.filter(
     (item) => item.assetUrl !== "/images/hero-mobile.jpg",
@@ -335,16 +350,16 @@ test("当前可见素材缺少来源与授权编号时提示但不阻断发布",
     metadata,
   );
 
-  assert.equal(result.valid, true, result.errors.join("\n"));
+  assert.equal(result.valid, false);
   const issue = result.issues.find(
     (item) => item.field === "mediaRights" && item.message.includes("hero-mobile.jpg"),
   );
   assert.equal(issue?.path, "metadata.mediaRights");
-  assert.equal(issue?.severity, "warning");
+  assert.equal(issue?.severity, "error");
   assert.match(issue?.message || "", /缺少来源或授权编号/);
 });
 
-test("重复或不完整的素材授权记录提示但不阻断发布", async () => {
+test("重复或不完整的素材授权记录阻断发布", async () => {
   const metadata = makeFormalMetadata();
   metadata.mediaRights.push({
     assetUrl: "/images/hero-desktop.jpg",
@@ -362,15 +377,15 @@ test("重复或不完整的素材授权记录提示但不阻断发布", async ()
     metadata,
   );
 
-  assert.equal(result.valid, true, result.errors.join("\n"));
+  assert.equal(result.valid, false);
   assert.ok(result.issues.some(
     (item) => item.path === "metadata.mediaRights[2].assetUrl"
-      && item.severity === "warning"
+      && item.severity === "error"
       && item.message.includes("重复"),
   ));
   assert.ok(result.issues.some(
     (item) => item.path === "metadata.mediaRights[3].source"
-      && item.severity === "warning"
+      && item.severity === "error"
       && item.message.includes("素材来源不能为空"),
   ));
 });
@@ -691,12 +706,14 @@ function makeCatalogDocument() {
         },
       },
       {
-        type: "全屏出血图",
+        type: "首屏主视觉",
         props: {
           id: "catalog-brand-stage",
-          image: "/images/hero-desktop.jpg",
+          title: "选款中心",
+          desktopImage: "/images/hero-desktop.jpg",
+          mobileImage: "/images/hero-mobile.jpg",
           altText: "选款中心",
-          buttonText: "",
+          actionText: "",
           targetType: "none",
         },
       },

@@ -33,6 +33,8 @@ export interface DynamicTemplateValidationResult {
   definition?: TemplateDefinitionV2;
 }
 
+export type DynamicTemplatePublishValidationResult = DynamicTemplateValidationResult;
+
 const STABLE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 const SLOT_KEY_PATTERN = /^[a-z][A-Za-z0-9_]{0,63}$/;
 const RATIO_PATTERN = /^(auto|[1-9][0-9]{0,3}:[1-9][0-9]{0,3})$/;
@@ -67,6 +69,32 @@ export const MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE = {
   craftDetailsTemplate: "工艺细节",
 } as const satisfies Partial<Record<DynamicTemplateSlotType, string>>;
 
+export const COMPLEX_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE = {
+  video: "视频区块",
+  carousel: "轮播图",
+  hotspot: "热区图",
+  beforeAfter: "改款对比",
+  appointment: "预约入口",
+  productCard: "单品焦点推荐",
+  productCollection: "产品展示行",
+  categoryCollection: "分类卡片",
+} as const satisfies Partial<Record<DynamicTemplateSlotType, string>>;
+
+export const CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE = {
+  ...COMPLEX_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
+  ...MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
+} as const satisfies Partial<Record<DynamicTemplateSlotType, string>>;
+
+export function getContentTemplateModuleTypeForSlotType(
+  slotType: string,
+): string | undefined {
+  return Object.prototype.hasOwnProperty.call(CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE, slotType)
+    ? CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE[
+        slotType as keyof typeof CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE
+      ]
+    : undefined;
+}
+
 export const MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE = {
   HeroTemplate: "首屏主视觉",
   FullBleedTemplate: "全屏出血图",
@@ -84,6 +112,22 @@ export const MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE = {
   TestimonialsTemplate: "真实评价与实拍",
   LimitedEventTemplate: "限时活动",
   CraftDetailsTemplate: "工艺细节",
+} as const satisfies Partial<Record<DynamicTemplateNodeType, string>>;
+
+export const COMPLEX_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE = {
+  Video: "视频区块",
+  Carousel: "轮播图",
+  Hotspot: "热区图",
+  BeforeAfter: "改款对比",
+  Appointment: "预约入口",
+  ProductCard: "单品焦点推荐",
+  ProductCollection: "产品展示行",
+  CategoryCollection: "分类卡片",
+} as const satisfies Partial<Record<DynamicTemplateNodeType, string>>;
+
+export const CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE = {
+  ...COMPLEX_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE,
+  ...MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE,
 } as const satisfies Partial<Record<DynamicTemplateNodeType, string>>;
 
 export type MatureContentTemplateSlotType = keyof typeof MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE;
@@ -108,7 +152,7 @@ const CONTENT_TEMPLATE_DESIGN_KEYS = new Set([
   "bgColor", "tone", "aspectRatio", "imageRatio", "desktopRatio", "mobileRatio",
   "maxHeight", "videoWidth",
   "desktopFocusX", "desktopFocusY", "mobileFocusX", "mobileFocusY", "focusX", "focusY",
-  "mainFocusX", "mainFocusY", "detailFocusX", "detailFocusY",
+  "mainFocusX", "mainFocusY", "detailFocusX", "detailFocusY", "mainImageRatio", "detailImageRatio",
   "leadFocusX", "leadFocusY", "detailOneFocusX", "detailOneFocusY",
   "detailTwoFocusX", "detailTwoFocusY", "leadImageRatio", "detailOneRatio", "detailTwoRatio",
   "showPrice", "showButton", "displayMode", "actionStyle", "mobileColumns",
@@ -1099,19 +1143,21 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
       if (rawNode.props.spacerSize !== undefined) {
         validateLength(rawNode.props.spacerSize, `${path}.props.spacerSize`, issues, nodeKey);
       }
-      const matureModuleType = MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE[type as keyof typeof MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE];
+      const contentTemplateModuleType = CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE[
+        type as keyof typeof CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE
+      ];
       if (rawNode.props.contentTemplateLayoutData !== undefined) {
-        if (!matureModuleType) {
+        if (!contentTemplateModuleType) {
           addIssue(issues, {
             level: "error",
             code: "UNEXPECTED_CONTENT_TEMPLATE_LAYOUT",
             path: `${path}.props.contentTemplateLayoutData`,
             nodeId: nodeKey,
-            message: "只有成熟内容模板适配节点可以保存内部构图。",
+            message: "只有内容模板合同节点可以保存内部构图。",
           });
         } else {
           const sanitizedLayout = sanitizeContentTemplateLayoutData(
-            matureModuleType,
+            contentTemplateModuleType,
             rawNode.props.contentTemplateLayoutData,
           );
           if (!sanitizedLayout || canonicalJson(sanitizedLayout) !== canonicalJson(rawNode.props.contentTemplateLayoutData)) {
@@ -1120,7 +1166,7 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
               code: "INVALID_CONTENT_TEMPLATE_LAYOUT",
               path: `${path}.props.contentTemplateLayoutData`,
               nodeId: nodeKey,
-              message: "成熟内容模板内部构图不符合对应模板合同。",
+              message: "内容模板内部构图不符合对应模板合同。",
             });
           }
         }
@@ -1660,5 +1706,194 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
     valid,
     issues,
     ...(valid ? { definition: input as unknown as TemplateDefinitionV2 } : {}),
+  };
+}
+
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(Math.round(left));
+  let b = Math.abs(Math.round(right));
+  while (b > 0) [a, b] = [b, a % b];
+  return a || 1;
+}
+
+function publishRatioLabel(width: number, height: number): string {
+  const divisor = greatestCommonDivisor(width, height);
+  return `${Math.round(width) / divisor}:${Math.round(height) / divisor}`;
+}
+
+/** 发布门禁比草稿校验更严格：草稿允许不完整，正式版本必须形成可消费结构。 */
+export function validateDynamicTemplatePublishDefinition(
+  input: unknown,
+): DynamicTemplatePublishValidationResult {
+  const base = validateDynamicTemplateDefinition(input);
+  if (!base.valid || !base.definition) return base;
+  const definition = base.definition;
+  const issues = [...base.issues];
+  const root = definition.nodes[definition.rootNodeId];
+  const structureTypes = new Set(["Container", "Grid", "Row", "Column", "Stack"]);
+  const hasRegion = root.childIds.some((nodeId) => structureTypes.has(definition.nodes[nodeId]?.type));
+  if (!hasRegion) {
+    addIssue(issues, {
+      level: "error",
+      code: "PUBLISH_REQUIRES_REGION",
+      path: `nodes.${definition.rootNodeId}.childIds`,
+      nodeId: definition.rootNodeId,
+      message: "发布前至少需要一个区域或容器。",
+    });
+  }
+  if (Object.keys(definition.slots).length === 0) {
+    addIssue(issues, {
+      level: "error",
+      code: "PUBLISH_REQUIRES_SLOT",
+      path: "slots",
+      nodeId: definition.rootNodeId,
+      message: "发布前至少需要一个内容槽位。",
+    });
+  }
+  if (Object.keys(definition.defaultContent).length > 0) {
+    addIssue(issues, {
+      level: "error",
+      code: "PUBLISH_FORBIDS_DEFAULT_CONTENT",
+      path: "defaultContent",
+      message: "模板正式版本不能保存运营内容；默认展示请使用槽位样式和空值规则。",
+    });
+  }
+  if (Object.keys(definition.previewContent ?? {}).length > 0) {
+    addIssue(issues, {
+      level: "error",
+      code: "PUBLISH_FORBIDS_MOCK_CONTENT",
+      path: "previewContent",
+      message: "Mock Content 只存在于预览内存，不能写入模板正式版本。",
+    });
+  }
+
+  for (const device of ["desktop", "mobile"] as const) {
+    const width = device === "desktop"
+      ? definition.metadata.previewDesktopWidth ?? 1920
+      : definition.metadata.previewMobileWidth ?? 390;
+    const ratioField = device === "desktop" ? "desktopRatio" : "mobileRatio";
+    const height = root.responsive[device].height;
+    let expectedRatio = "auto";
+    if (height.mode === "fixed") {
+      if (height.value?.unit !== "px" || !Number.isFinite(height.value.value) || height.value.value <= 0) {
+        addIssue(issues, {
+          level: "error",
+          code: "ROOT_FIXED_HEIGHT_REQUIRES_PX",
+          path: `nodes.${definition.rootNodeId}.responsive.${device}.height`,
+          nodeId: definition.rootNodeId,
+          message: `${device === "desktop" ? "桌面" : "移动"}根节点固定高度必须使用有效像素值。`,
+        });
+      } else {
+        expectedRatio = publishRatioLabel(width, height.value.value);
+      }
+    } else if (height.mode === "aspect-ratio" && height.ratio) {
+      expectedRatio = publishRatioLabel(height.ratio.width, height.ratio.height);
+    }
+    if (definition.metadata[ratioField] !== expectedRatio) {
+      addIssue(issues, {
+        level: "error",
+        code: "ROOT_RATIO_METADATA_MISMATCH",
+        path: `metadata.${ratioField}`,
+        nodeId: definition.rootNodeId,
+        message: `${device === "desktop" ? "桌面" : "移动"}兼容比例必须由根节点高度规则派生，期望 ${expectedRatio}。`,
+      });
+    }
+  }
+
+  const parentByNodeId = new Map<string, string>();
+  for (const [parentId, parent] of Object.entries(definition.nodes)) {
+    for (const childId of parent.childIds) parentByNodeId.set(childId, parentId);
+  }
+  for (const [nodeId, node] of Object.entries(definition.nodes)) {
+    const slot = node.slotId ? definition.slots[node.slotId] : undefined;
+    if (!slot?.required) continue;
+    if (slot.hideable) {
+      addIssue(issues, {
+        level: "error",
+        code: "PUBLISH_REQUIRED_SLOT_PAGE_HIDE_CONFLICT",
+        path: `slots.${slot.slotId}.hideable`,
+        nodeId,
+        slotId: slot.slotId,
+        message: `必填槽位“${slot.label}”不能同时允许页面隐藏，关闭页面隐藏权限后才能发布模板。`,
+      });
+    }
+    if (node.hidden) {
+      addIssue(issues, {
+        level: "error",
+        code: "PUBLISH_REQUIRED_SLOT_HIDDEN",
+        path: `nodes.${nodeId}.hidden`,
+        nodeId,
+        slotId: slot.slotId,
+        message: `必填槽位“${slot.label}”已隐藏，恢复显示后才能发布模板。`,
+      });
+      continue;
+    }
+    for (const device of ["desktop", "mobile"] as const) {
+      if (node.responsive[device].display !== "none") continue;
+      addIssue(issues, {
+        level: "error",
+        code: "PUBLISH_REQUIRED_SLOT_DEVICE_HIDDEN",
+        path: `nodes.${nodeId}.responsive.${device}.display`,
+        nodeId,
+        slotId: slot.slotId,
+        message: `必填槽位“${slot.label}”在${device === "desktop" ? "桌面端" : "移动端"}布局中已隐藏，恢复显示后才能发布模板。`,
+      });
+    }
+  }
+  for (const [nodeId, node] of Object.entries(definition.nodes)) {
+    const slot = node.slotId ? definition.slots[node.slotId] : undefined;
+    if (slot?.type !== "image") continue;
+    const parentId = parentByNodeId.get(nodeId);
+    const parent = parentId ? definition.nodes[parentId] : undefined;
+    if (!parent) continue;
+    for (const device of ["desktop", "mobile"] as const) {
+      const rules = node.responsive[device];
+      const parentRules = parent.responsive[device];
+      const parentHasBoundedHeight = ["fixed", "aspect-ratio", "viewport"].includes(
+        parentRules.height.mode,
+      );
+      if (
+        rules.display !== "none"
+        && parentRules.display !== "none"
+        && rules.height.mode === "auto"
+        && parentHasBoundedHeight
+      ) {
+        addIssue(issues, {
+          level: "error",
+          code: "IMAGE_SLOT_AUTO_HEIGHT_OVERFLOWS_BOUNDED_PARENT",
+          path: `nodes.${nodeId}.responsive.${device}.height`,
+          nodeId,
+          slotId: slot.slotId,
+          message: `${device === "desktop" ? "桌面" : "移动"}图片槽位位于固定高度或比例区域中，必须为图片槽位设置固定高度、比例或视口高度，避免真实图片撑出模板边界。`,
+        });
+      }
+    }
+  }
+
+  for (const [nodeId, node] of Object.entries(definition.nodes)) {
+    if (!node.slotId) continue;
+    const slot = definition.slots[node.slotId];
+    const policy = node.instanceEditPolicy;
+    if (!slot || slot.editable || !policy) continue;
+    if (
+      policy.position || policy.size || policy.zIndex || policy.imageFit
+      || policy.imageFocus || policy.typography || policy.spacing
+    ) {
+      addIssue(issues, {
+        level: "error",
+        code: "NON_EDITABLE_SLOT_HAS_INSTANCE_PERMISSIONS",
+        path: `nodes.${nodeId}.instanceEditPolicy`,
+        nodeId,
+        slotId: slot.slotId,
+        message: `${slot.label} 已禁止内容编辑，不能继续开放页面实例布局或样式权限。`,
+      });
+    }
+  }
+
+  const valid = !issues.some((issue) => issue.level === "error");
+  return {
+    valid,
+    issues,
+    ...(valid ? { definition } : {}),
   };
 }

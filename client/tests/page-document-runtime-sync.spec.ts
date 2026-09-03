@@ -1380,8 +1380,11 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     expect(placeholderGeometry.heightRatio, "占位插画应占据图片槽的主要高度").toBeGreaterThan(0.55);
     await expect(
       canvas.getByRole("banner"),
-      "浅中性首屏占位上方应使用实色导航，避免浅色图标失去对比度",
-    ).not.toHaveClass(/is-transparent/);
+      "浅中性首屏占位上方应使用透明深字导航",
+    ).toHaveClass(/is-transparent/);
+    await expect(canvas.getByRole("banner")).not.toHaveClass(/is-overlay-light/);
+    await expect(canvas.getByRole("button", { name: "打开菜单" }))
+      .toHaveCSS("color", "rgba(24, 26, 27, 0.68)");
 
     await page.goto("/preview/home");
     const emptyPreview = page.locator('[data-page-document-state="preview-empty"]');

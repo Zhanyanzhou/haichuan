@@ -33,7 +33,14 @@ export default defineConfig(({ mode, command }) => {
         usePolling: true,
         interval: 1000,
         // 排除构建输出和图片目录，减少中文文件名监视负担
-        ignored: ["**/dist/**", "**/dist-*/**", "**/public/images/**"],
+        ignored: [
+          "**/dist/**",
+          "**/dist-*/**",
+          "**/public/images/**",
+          // Playwright 每次写报告都会修改 HTML；开发站不得因此整页刷新。
+          "**/playwright-report/**",
+          "**/test-results/**",
+        ],
       },
       // 统一代理本地 API 与上传路径
       proxy: {

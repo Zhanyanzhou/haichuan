@@ -30,6 +30,7 @@ import {
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import { AdminErrorState } from "@/components/common/AdminDataStates";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 
@@ -135,6 +136,7 @@ export default function MarketingManage() {
 function PromotionsTab() {
   const [list, setList] = useState<PromotionRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<PromotionRecord | null>(null);
   const [saving, setSaving] = useState(false);
@@ -142,11 +144,13 @@ function PromotionsTab() {
 
   const load = async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const res = await marketingApi.getPromotions();
       setList(unwrapResponse<PromotionRecord[]>(res) || []);
-    } catch {
-      setList([]);
+    } catch (e: unknown) {
+      setLoadError(true);
+      message.error(getSafeAdminErrorMessage(e, "促销活动加载失败，请稍后重试。"));
     } finally {
       setLoading(false);
     }
@@ -240,13 +244,16 @@ function PromotionsTab() {
           新建活动
         </Button>
       </div>
-      <Table
-        dataSource={list}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-        columns={[
-          { title: "名称", dataIndex: "name" },
+      {loadError ? (
+        <AdminErrorState subject="促销活动" onRetry={() => load()} />
+      ) : (
+        <Table
+          dataSource={list}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          columns={[
+            { title: "名称", dataIndex: "name" },
           {
             title: "类型",
             dataIndex: "type",
@@ -299,6 +306,7 @@ function PromotionsTab() {
           },
         ]}
       />
+      )}
       <Modal
         title={editing ? "编辑活动" : "新建活动"}
         open={modalOpen}
@@ -353,6 +361,7 @@ function PromotionsTab() {
 function CouponsTab() {
   const [list, setList] = useState<CouponRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CouponRecord | null>(null);
   const [form] = Form.useForm<CouponFormValues>();
@@ -363,6 +372,7 @@ function CouponsTab() {
 
   const load = async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const [cRes, sRes] = await Promise.all([
         marketingApi.getCoupons(),
@@ -370,8 +380,9 @@ function CouponsTab() {
       ]);
       setList(unwrapResponse<CouponRecord[]>(cRes) || []);
       setStats(unwrapResponse<CouponStats>(sRes) || {});
-    } catch {
-      setList([]);
+    } catch (e: unknown) {
+      setLoadError(true);
+      message.error(getSafeAdminErrorMessage(e, "优惠券数据加载失败，请稍后重试。"));
     } finally {
       setLoading(false);
     }
@@ -483,13 +494,16 @@ function CouponsTab() {
           新建优惠券
         </Button>
       </div>
-      <Table
-        dataSource={list}
-        rowKey="id"
-        loading={loading}
-        pagination={false}
-        columns={[
-          { title: "名称", dataIndex: "name" },
+      {loadError ? (
+        <AdminErrorState subject="优惠券" onRetry={() => load()} />
+      ) : (
+        <Table
+          dataSource={list}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          columns={[
+            { title: "名称", dataIndex: "name" },
           {
             title: "类型",
             dataIndex: "type",
@@ -544,6 +558,7 @@ function CouponsTab() {
           },
         ]}
       />
+      )}
       <Modal
         title={editing ? "编辑优惠券" : "新建优惠券"}
         open={modalOpen}

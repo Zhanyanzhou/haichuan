@@ -86,32 +86,34 @@ function removeLegacyBusinessReferences(
 
 export default function DynamicComplexContentFields({
   slotType,
-  value,
+  value = {},
   onChange,
   designValue = {},
   onDesignChange,
   scope,
   device,
+  fieldKeys,
 }: {
   slotType: DynamicComplexSlotType;
-  value: Record<string, unknown>;
-  onChange: (next: Record<string, unknown>) => void;
+  value?: Record<string, unknown>;
+  onChange?: (next: Record<string, unknown>) => void;
   designValue?: Record<string, unknown>;
   onDesignChange?: (next: Record<string, string | number | boolean>) => void;
   scope: "page" | "template";
   device: "desktop" | "mobile";
+  fieldKeys?: readonly string[];
 }) {
   const schema = SCHEMA_BY_SLOT_TYPE[slotType];
-  const effectiveValue = scope === "template" ? { ...value, ...designValue } : value;
+  const effectiveValue = scope === "template" ? designValue : value;
   const ctx = {
     props: effectiveValue as PuckProps,
     device,
     viewportWidth: device === "desktop" ? 1200 : 390,
   } as const;
-  const updateContent = (patch: PuckProps) => onChange(removeLegacyBusinessReferences(slotType, {
-      ...value,
-      ...patch,
-    }));
+  const updateContent = (patch: PuckProps) => onChange?.(removeLegacyBusinessReferences(slotType, {
+    ...value,
+    ...patch,
+  }));
   const updateDesign = (patch: PuckProps) => {
     if (!onDesignChange) return;
     const next = { ...designValue } as Record<string, string | number | boolean>;
@@ -132,10 +134,11 @@ export default function DynamicComplexContentFields({
       {schema.sections.map((section) => {
         const isTemplateDesignSection = section.layer === "layout" || section.layer === "style";
         if (scope === "page" && isTemplateDesignSection) return null;
+        if (scope === "template" && !isTemplateDesignSection) return null;
         if (section.visibleWhen && !section.visibleWhen(ctx)) return null;
         const fields = section.fields.filter((field) => (
           field.key !== "moduleName"
-          && !(scope === "template" && ["productReferences", "categoryReferences"].includes(field.control))
+          && (!fieldKeys || fieldKeys.includes(field.key))
           && (!field.device || field.device === "shared" || field.device === device)
           && isFieldVisible(field, ctx)
         ));
@@ -143,8 +146,8 @@ export default function DynamicComplexContentFields({
         return (
           <section key={section.id} className="homepage-editor__inspector-subsection">
             <div className="homepage-editor__inspector-section-head">
-              <strong>{section.title}</strong>
-              {section.description ? <span>{section.description}</span> : null}
+              <strong>{fieldKeys && section.layer === "media" ? "图片素材" : section.title}</strong>
+              {!fieldKeys && section.description ? <span>{section.description}</span> : null}
             </div>
             <div className="homepage-editor__inspector-section-body">
               {fields.map((field, index) => (
@@ -162,7 +165,7 @@ export default function DynamicComplexContentFields({
       })}
       <p className="homepage-editor__inspector-hint">
         {scope === "template"
-          ? "内容、媒体和交互写入所选内容用途；布局与样式锁定在母模板节点，页面实例不能覆盖。"
+          ? "这里只定义组件的布局与样式；实际内容、素材、交互目标和业务引用统一在页面装修中配置。"
           : "这里的内容只写入当前页面实例，不会修改母模板或其他实例。"}
       </p>
     </div>

@@ -45,6 +45,8 @@ npm run dev
 | 80   | 完整 Docker 栈入口（Nginx） |
 | 5173 | Vite 开发前端（`strictPort`） |
 | 5174 | 显式 Mock 前端（仅 `npm run dev:mock`） |
+| 5176 | Playwright development-mode 临时前端（随测试启停） |
+| 5177 | Playwright mock-mode 临时前端（随测试启停） |
 | 3000 | 宿主机 NestJS 后端（开发唯一归属） |
 | 3001 | Uptime Kuma 本机监控面板（Docker，仅绑定 `127.0.0.1`） |
 | 3002 | 容器后端映射（仅验收直连） |
@@ -97,6 +99,7 @@ Mock 只能通过 `npm run dev:mock` 显式启动，固定使用 `http://127.0.0
 
 - 本地 Docker 整站通过 `docker compose up -d` 启动，会自动合并仅供本地开发的 `docker-compose.override.yml`；前台入口为 `http://localhost/`，后台登录为 `http://localhost/admin/login`。生产必须按 `docs/DEPLOYMENT.md` 显式使用 `docker compose -f docker-compose.yml ...`，不得自动合并该 override。
 - 本地 Real 开发通过 `npm run dev` 启动，前台入口为 `http://127.0.0.1:5173/`，后台登录为 `http://127.0.0.1:5173/admin/login`。不要使用 `localhost` 或 IPv6 地址切换运行模式。
+- Playwright 默认只使用专属临时端口：development mode 为 `5176`，mock mode 为 `5177`；测试进程会管理这些端口的启停，不得把它们当作人工开发入口，也不得让测试默认占用或复用 `5173/5174`。
 - 宿主机后端运行当前编译产物，不提供后端热更新；修改服务端代码后需停止当前进程并重新执行 `npm run dev` 或 `npm run dev:server`。
 - 本地编译产物在模块导入阶段即校验 `JWT_SECRET`，因此开发命令使用 Node `--env-file=.env` 在导入前加载现有 `server/.env`；不得把真实值写入脚本、日志或仓库。
 - `server/scripts/start-local.cjs` 只为宿主机开发固定 `127.0.0.1:3000`；Docker/生产继续使用 `server/package.json` 的 `start:prod`，不复用本地绑定。

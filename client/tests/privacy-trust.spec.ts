@@ -183,6 +183,7 @@ test.describe("匿名行为分析", () => {
     await page.context().clearCookies();
     await page.addInitScript(() => {
       sessionStorage.removeItem("hc.analytics-session");
+      localStorage.removeItem("hc.analytics-visitor");
       localStorage.removeItem("_asid");
     });
     await page.route("**/api/analytics/track", async (route) => {
@@ -205,6 +206,9 @@ test.describe("匿名行为分析", () => {
     expect(
       await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
     ).toBeNull();
+    expect(
+      await page.evaluate(() => localStorage.getItem("hc.analytics-visitor")),
+    ).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem("_asid"))).toBeNull();
   });
 
@@ -214,6 +218,7 @@ test.describe("匿名行为分析", () => {
     await page.context().clearCookies();
     await page.addInitScript(() => {
       sessionStorage.removeItem("hc.analytics-session");
+      localStorage.removeItem("hc.analytics-visitor");
       localStorage.removeItem("_asid");
     });
     await page.route("**/api/analytics/track", async (route) => {
@@ -235,6 +240,9 @@ test.describe("匿名行为分析", () => {
     expect(
       await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
     ).toBeNull();
+    expect(
+      await page.evaluate(() => localStorage.getItem("hc.analytics-visitor")),
+    ).toBeNull();
 
     await page.getByRole("button", { name: "同意匿名分析" }).click();
     await expect.poll(() => analyticsRequests.length).toBe(1);
@@ -244,12 +252,24 @@ test.describe("匿名行为分析", () => {
       consentVersion: "analytics-v1",
       pagePath: "/catalog",
     });
-    expect(String(analyticsRequests[0].sessionId)).toMatch(/^s_[a-z0-9]+$/);
+    expect(String(analyticsRequests[0].sessionId)).toMatch(/^s_[a-z0-9-]+$/i);
+    expect(String(analyticsRequests[0].visitorId)).toMatch(/^v_[a-z0-9-]+$/i);
     await expect
       .poll(() =>
-        page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
+        page.evaluate(() => {
+          const stored = sessionStorage.getItem("hc.analytics-session");
+          return stored ? JSON.parse(stored).id : null;
+        }),
       )
-      .toMatch(/^s_[a-z0-9]+$/);
+      .toMatch(/^s_[a-z0-9-]+$/i);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const stored = localStorage.getItem("hc.analytics-visitor");
+          return stored ? JSON.parse(stored).id : null;
+        }),
+      )
+      .toMatch(/^v_[a-z0-9-]+$/i);
 
     await page
       .getByRole("button", { name: "打开分析数据偏好设置" })
@@ -258,14 +278,19 @@ test.describe("匿名行为分析", () => {
     expect(
       await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
     ).toBeNull();
+    expect(
+      await page.evaluate(() => localStorage.getItem("hc.analytics-visitor")),
+    ).toBeNull();
     await expect
       .poll(() => page.evaluate(() => decodeURIComponent(document.cookie)))
       .toContain("hc_analytics_consent=analytics-v1:withdrawn");
+    await page.waitForTimeout(100);
+    const requestCountAfterWithdrawal = analyticsRequests.length;
 
     await search.fill("项链");
     await page.getByRole("button", { name: "搜索" }).click();
     await page.waitForTimeout(250);
-    expect(analyticsRequests).toHaveLength(1);
+    expect(analyticsRequests).toHaveLength(requestCountAfterWithdrawal);
   });
 });
 

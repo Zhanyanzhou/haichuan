@@ -104,7 +104,7 @@ test.describe("Booking 黄金模板（独立属性面板与画布）", () => {
     const media = canvas.locator('[data-hc-keyboard-node="bgImage"]');
     await media.click({ position: { x: 80, y: 80 } });
     const mediaHud = canvas.getByRole("toolbar", {
-      name: "调整画布对象 bgImage",
+      name: "调整画布对象：背景图",
     });
     await mediaHud.getByRole("button", { name: "调整图片构图" }).click();
     await expect(media).toBeFocused();

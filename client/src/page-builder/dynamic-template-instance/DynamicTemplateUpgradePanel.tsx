@@ -10,6 +10,37 @@ import { DynamicTemplateRenderer, type TemplateDefinitionV2 } from "../template-
 import { registerResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import { analyzeDynamicTemplateUpgrade } from "./upgrade";
+import { DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT } from "../template-editor/templateCatalogEvents";
+
+const CATALOG_CACHE_TTL_MS = 30_000;
+let publishedTemplatesCache: PublishedDynamicTemplateResource[] | null = null;
+let publishedTemplatesCachedAt = 0;
+let publishedTemplatesRequest: Promise<PublishedDynamicTemplateResource[]> | null = null;
+
+async function loadPublishedTemplates(forceRefresh = false) {
+  if (publishedTemplatesRequest) return publishedTemplatesRequest;
+  if (
+    !forceRefresh
+    && publishedTemplatesCache
+    && Date.now() - publishedTemplatesCachedAt < CATALOG_CACHE_TTL_MS
+  ) {
+    return publishedTemplatesCache;
+  }
+  publishedTemplatesRequest = dynamicTemplateApi.listCatalog()
+    .then((response) => {
+      const catalog = unwrapResponse<TemplateCatalogResource>(response);
+      const templates = catalog?.items.flatMap((item) => (
+        item.kind === "published" ? [item.template] : []
+      )) ?? [];
+      publishedTemplatesCache = templates;
+      publishedTemplatesCachedAt = Date.now();
+      return templates;
+    })
+    .finally(() => {
+      publishedTemplatesRequest = null;
+    });
+  return publishedTemplatesRequest;
+}
 
 export default function DynamicTemplateUpgradePanel({
   definition,
@@ -28,24 +59,28 @@ export default function DynamicTemplateUpgradePanel({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    void dynamicTemplateApi.listCatalog()
-      .then((response) => {
-        if (cancelled) return;
-        const catalog = unwrapResponse<TemplateCatalogResource>(response);
-        const templates = catalog?.items.flatMap((item) => (
-          item.kind === "published" ? [item.template] : []
-        )) ?? [];
-        setLatest(templates.find((item) => item.templateId === instance.templateId) ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setError("暂时无法检查模板新版本，当前页面版本未改变");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => { cancelled = true; };
+    const refreshLatest = (forceRefresh = false) => {
+      setLoading(true);
+      setError(null);
+      void loadPublishedTemplates(forceRefresh)
+        .then((templates) => {
+          if (cancelled) return;
+          setLatest(templates.find((item) => item.templateId === instance.templateId) ?? null);
+        })
+        .catch(() => {
+          if (!cancelled) setError("暂时无法检查模板新版本，当前页面版本未改变");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+    refreshLatest();
+    const refreshAfterCatalogChange = () => refreshLatest(true);
+    window.addEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
+    };
   }, [instance.templateId, instance.templateVersion]);
 
   const upgrade = useMemo(() => (

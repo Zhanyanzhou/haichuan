@@ -292,6 +292,9 @@ const LAYOUT_CSS = `
 }
 .hc-phase1-double__main { grid-column: 1 / span 8; grid-row: 1 / span 3; aspect-ratio: var(--hc-template-media-desktop); }
 .hc-phase1-double__detail { grid-column: 9 / span 4; grid-row: 1; aspect-ratio: var(--hc-template-detail-desktop); margin-top: 12%; }
+/* 媒体脱离网格的固有尺寸计算，避免文字或 CTA 增高侧栏时反向拉伸图片比例。 */
+.hc-phase1-double__main > *,
+.hc-phase1-double__detail > * { position: absolute; inset: 0; width: 100%; height: 100%; }
 .hc-phase1-double__copy { grid-column: 9 / span 4; grid-row: 2; }
 .hc-phase1-double__action { grid-column: 9 / span 4; grid-row: 3; justify-self: start; }
 

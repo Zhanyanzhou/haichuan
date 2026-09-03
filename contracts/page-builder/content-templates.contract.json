@@ -97,7 +97,7 @@
       ],
       "businessRegionCount": 0,
       "headerMode": {
-        "configured": "solid",
+        "configured": "overlay-light",
         "overlayRequiresFirstTemplate": "hero",
         "fallback": "solid"
       }
@@ -136,7 +136,8 @@
       "businessRegionCount": 1,
       "businessRegionPosition": "after-first-brand-block",
       "headerMode": {
-        "configured": "solid",
+        "configured": "overlay-light",
+        "overlayRequiresFirstTemplate": "hero",
         "fallback": "solid"
       }
     },
@@ -250,7 +251,7 @@
       "businessRegionCount": 1,
       "businessRegionPosition": "after-first-brand-block",
       "headerMode": {
-        "configured": "solid",
+        "configured": "overlay-light",
         "overlayRequiresFirstTemplate": "hero",
         "fallback": "solid"
       }
@@ -802,7 +803,8 @@
           },
           "appliesTo": [
             "desktop"
-          ]
+          ],
+          "fallbackRoleId": "mobileImage"
         },
         {
           "id": "mobileImage",
@@ -1345,7 +1347,8 @@
           },
           "appliesTo": [
             "desktop"
-          ]
+          ],
+          "fallbackRoleId": "mobileImage"
         },
         {
           "id": "mobileImage",
@@ -2579,7 +2582,8 @@
           },
           "appliesTo": [
             "desktop"
-          ]
+          ],
+          "fallbackRoleId": "mobileImage"
         },
         {
           "id": "mobileImage",

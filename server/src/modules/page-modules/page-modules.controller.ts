@@ -19,6 +19,7 @@ import { PageModulesService } from "./page-modules.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { SkipGenericAudit } from "../../common/decorators/skip-generic-audit.decorator";
 import { Public } from "../../common/decorators/public.decorator";
 import { Observable } from "rxjs";
 import {
@@ -139,6 +140,7 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Roles("SUPER_ADMIN", "ADMIN")
   @Put("document/publish")
+  @SkipGenericAudit()
   @ApiOperation({ summary: "发布页面文档" })
   publishDocument(
     @Body() body: PublishPageDocumentDto,
@@ -204,6 +206,7 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Roles("SUPER_ADMIN", "ADMIN")
   @Put("document/revisions/:revisionId/rollback-publication")
+  @SkipGenericAudit()
   @ApiOperation({ summary: "把线上发布指针回滚到同一页面的历史 revision" })
   rollbackDocumentPublication(
     @Body() body: RollbackPagePublicationDto,

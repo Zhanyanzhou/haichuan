@@ -5,12 +5,10 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Link } from "react-router-dom";
-import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import {
   getContractFrameAspectRatio,
   resolveContractAspectRatio,
 } from "@/page-builder/config/blockContracts";
-import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DecorSection } from "@/page-builder/designSystem/sectionShell";
 import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
@@ -100,22 +98,7 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
     }
   };
 
-  if (!beforeImage && !afterImage) {
-    if (!editMode) return null;
-    return (
-      <DecorSection master="editorial-story" background={bgColor}>
-        <BlockEmptyPlaceholder
-          assetSlots={[
-            { templateKey: "comparison", roleId: "before" },
-            { templateKey: "comparison", roleId: "after" },
-          ]}
-          hint="改款前后对比"
-          spec={`请上传改款前/后两张同比例图 · ${IMAGE_SPECS.beforeAfter.image.label}`}
-          ratio={trackRatioDesktop}
-        />
-      </DecorSection>
-    );
-  }
+  if (!beforeImage && !afterImage && !editMode) return null;
 
   return (
     <DecorSection master="editorial-story" background={bgColor}>
@@ -234,11 +217,11 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
             alt={beforeAltText || beforeLabel || "改款前"}
             style={{ objectPosition: `${beforeFocusX}% ${beforeFocusY}%` }}
           />
-        ) : (
+        ) : editMode ? (
           <div data-content-role="before" className="hc-before-after__img" style={{ display: "grid", placeItems: "center", color: "#6E7477", fontSize: 13, background: "#F4F5F5" }}>
             改款前图片待上传
           </div>
-        )}
+        ) : null}
         {afterImage ? (
           <img
             data-content-role="after"
@@ -250,6 +233,21 @@ export default function BeforeAfterBlock({ module, editMode }: BeforeAfterBlockP
               clipPath: `inset(0 0 0 ${position}%)`,
             }}
           />
+        ) : editMode ? (
+          <div
+            data-content-role="after"
+            className="hc-before-after__img"
+            style={{
+              display: "grid",
+              placeItems: "center",
+              color: "#6E7477",
+              fontSize: 13,
+              background: "#F4F5F5",
+              clipPath: `inset(0 0 0 ${position}%)`,
+            }}
+          >
+            改款后图片待上传
+          </div>
         ) : null}
         <div className="hc-before-after__divider" style={{ left: `${position}%` }} />
         <div data-content-role="comparisonHandle" className="hc-before-after__handle" style={{ left: `${position}%` }} aria-hidden>

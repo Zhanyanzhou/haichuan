@@ -507,9 +507,9 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await expect(page.getByRole("button", { name: "正在编辑首屏模板" })).toBeVisible();
     const templateBefore = await frameBoxes(page);
     expect(templateBefore).toHaveLength(4);
-    const templateComponent = page.getByRole("treeitem", { name: /首屏主视觉组件/ });
-    await templateComponent.click();
-    await expect(templateComponent).toHaveAttribute("aria-selected", "true");
+    const templateRegion = page.getByRole("treeitem", { name: /首屏区/ });
+    await templateRegion.click();
+    await expect(templateRegion).toHaveAttribute("aria-selected", "true");
     expectBoxesStable(templateBefore, await frameBoxes(page));
     await attachViewport(page, testInfo, "source-aligned-1672x941");
     await page.locator(".template-editor__toolbar").getByRole("button", { name: /移动端/ }).click();
@@ -674,7 +674,7 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     expect(forbiddenWrites).toEqual([]);
   });
 
-  test("页面实例保持真实内容，模板内容层只在独立工作区切换", async ({ page }, testInfo) => {
+  test("页面实例持有真实内容，模板工作区只显示系统占位", async ({ page }, testInfo) => {
     const forbiddenWrites: string[] = [];
     const { frame, inspector } = await openEditor(page, {
       forbiddenWrites,
@@ -689,16 +689,15 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await attachViewport(page, testInfo, "page-instance-content-boundary-1920x1200");
 
     const workspace = await enterTemplateWorkspace(page);
-    await expect(workspace.inspector.getByRole("button", { name: "将全部样例设为默认" })).toBeVisible();
-    await expect(workspace.inspector.getByText("只有执行此操作，预览样例才会进入以后新建的页面实例。", { exact: true })).toBeVisible();
-    await expect(workspace.frame.locator(".hc-dynamic-template")).toHaveAttribute(
-      "data-dynamic-template-content-layer",
-      "preview",
-    );
+    await expect(workspace.inspector.getByRole("tabpanel")).toBeVisible();
+    await expect(workspace.inspector.locator("[data-media-field]")).toHaveCount(0);
+    await expect(workspace.inspector.getByRole("button", { name: /设为新实例默认|将全部样例设为默认/ })).toHaveCount(0);
+    await expect(workspace.frame.locator(".hc-dynamic-template"))
+      .not.toHaveAttribute("data-dynamic-template-content-layer", /.+/);
     expect(forbiddenWrites).toEqual([]);
   });
 
-  test("双图文页面实例不显示母模板辅助层，独立工作区只编辑当前母模板", async ({ page }) => {
+  test("双图文页面实例不显示母模板辅助层，独立工作区只编辑当前母模板", async ({ page }, testInfo) => {
     const forbiddenWrites: string[] = [];
     const { frame, inspector } = await openEditor(page, {
       forbiddenWrites,
@@ -716,15 +715,15 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
 
     const workspace = await enterTemplateWorkspace(page);
     await expect(workspace.frame.locator(".template-editor__dynamic-canvas-renderer")).toHaveCount(1);
-    const treeGroup = page.locator(".template-editor__structure-section-label");
-    await expect(treeGroup).toHaveCSS("border-top-width", "1px");
-    await expect(treeGroup).toHaveCSS("border-radius", "6px");
-    const templateTree = page.getByRole("tree", { name: "模板节点树" });
+    await expect(workspace.frame.locator(".hc-dynamic-template")).toBeVisible();
+    await expect(page.locator(".template-editor__structure-section-label")).toHaveCount(0);
+    const templateTree = page.getByRole("tree", { name: "模板区域与槽位" });
     await expect(templateTree).toBeVisible();
-    const firstTreeRow = templateTree.locator(".template-editor__dynamic-tree-row").first();
-    await expect(firstTreeRow).toHaveCSS("border-top-style", "solid");
-    await expect(firstTreeRow).toHaveCSS("border-top-width", "1px");
-    await expect(firstTreeRow).toHaveCSS("border-radius", "6px");
+    const templateSummary = page.locator(".template-editor__template-summary");
+    await expect(templateSummary).toBeVisible();
+    await expect(templateSummary).toHaveAttribute("aria-selected", "true");
+    await expect(templateSummary).toHaveAccessibleName(/首屏 模板 1920 × 随内容/);
+    await attachViewport(page, testInfo, "template-structure-layer-panel-1920x1200");
     expect(forbiddenWrites).toEqual([]);
   });
 
@@ -735,12 +734,11 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await expectPageInstanceBoundary(page, frame, inspector);
 
     const workspace = await enterTemplateWorkspace(page);
-    const component = page.getByRole("treeitem", { name: /首屏主视觉组件/ });
-    await component.click();
-    await expect(component).toHaveAttribute("aria-selected", "true");
-    await expect(workspace.inspector.getByRole("tab", { name: "内容" })).toBeVisible();
-    await expect(workspace.inspector.getByRole("tab", { name: "布局" })).toBeVisible();
-    await expect(workspace.inspector.getByRole("tab", { name: "高级" })).toBeVisible();
+    const region = page.getByRole("treeitem", { name: /首屏区/ });
+    await region.click();
+    await expect(region).toHaveAttribute("aria-selected", "true");
+    await expect(workspace.inspector.getByRole("tabpanel")).toBeVisible();
+    await expect(workspace.inspector.getByRole("tab")).toHaveCount(3);
     expect(forbiddenWrites).toEqual([]);
   });
 
@@ -750,9 +748,8 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await expectPageInstanceBoundary(page, frame, inspector);
 
     const workspace = await enterTemplateWorkspace(page);
-    const component = page.getByRole("treeitem", { name: /首屏主视觉组件/ });
-    await component.click();
-    await workspace.inspector.getByRole("tab", { name: "布局" }).click();
+    const region = page.getByRole("treeitem", { name: /首屏区/ });
+    await region.click();
     await expect(workspace.inspector.getByRole("tabpanel")).toBeVisible();
     await expect(page.getByRole("button", { name: /桌面端模板布局/ })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("button", { name: /移动端模板布局/ }).click();
@@ -780,7 +777,7 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     expect(forbiddenWrites).toEqual([]);
   });
 
-  test("页面画布不直接改写母模板媒体构图，独立模板属性提供媒体字段", async ({ page }) => {
+  test("页面画布不直接改写母模板媒体构图，模板工作区不提供真实媒体字段", async ({ page }) => {
     const forbiddenWrites: string[] = [];
     const { frame, inspector } = await openEditor(page, { forbiddenWrites });
     const root = frame.locator('[data-content-template-module="首屏主视觉"]').first();
@@ -796,9 +793,9 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await expect.poll(() => root.locator("style[data-hc-instance-overrides]").textContent()).toBe(beforeStyle);
 
     const workspace = await enterTemplateWorkspace(page);
-    await page.getByRole("treeitem", { name: /首屏主视觉组件/ }).click();
-    await workspace.inspector.getByRole("tab", { name: "内容" }).click();
-    await expect(workspace.inspector.locator("[data-media-field]").first()).toBeVisible();
+    await page.getByRole("treeitem", { name: /首屏区/ }).click();
+    await expect(workspace.inspector.locator("[data-media-field]")).toHaveCount(0);
+    await expect(workspace.inspector.getByText(/当前节点只负责模板结构/)).toBeVisible();
     expect(forbiddenWrites).toEqual([]);
   });
 
@@ -887,8 +884,7 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     const workspace = await enterTemplateWorkspace(page);
     await page.getByRole("button", { name: /移动端模板布局/ }).click();
     await expect(page.getByRole("button", { name: /移动端模板布局/ })).toHaveAttribute("aria-pressed", "true");
-    await workspace.inspector.getByRole("tab", { name: "布局" }).click();
-    await expect(workspace.inspector.getByText("移动端几何规则", { exact: false })).toBeVisible();
+    await expect(workspace.inspector.getByText("移动端布局", { exact: false })).toBeVisible();
     await attachViewport(page, testInfo, "template-mobile-context");
     expect(forbiddenWrites).toEqual([]);
   });
@@ -902,11 +898,38 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await expect(inspector.getByRole("group", { name: /对象圆角|对象阴影|快速定位/ })).toHaveCount(0);
 
     const workspace = await enterTemplateWorkspace(page);
-    await page.getByRole("treeitem", { name: /首屏主视觉组件/ }).click();
-    await expect(workspace.inspector.getByRole("tab", { name: "内容" })).toBeVisible();
-    await expect(workspace.inspector.getByRole("tab", { name: "布局" })).toBeVisible();
-    await expect(workspace.inspector.getByRole("tab", { name: "高级" })).toBeVisible();
-    await workspace.inspector.getByRole("tab", { name: "布局" }).click();
+    const structureTools = page.getByLabel("模板结构工具");
+    await expect(structureTools.locator(".template-editor__node-palette-target"))
+      .toContainText("快捷添加位置");
+    await expect(structureTools).toContainText("更多内容类型");
+    await expect(structureTools).toContainText("布局容器");
+    await expect(structureTools).not.toContainText(/Slot|技术布局节点|兼容组件/);
+    const clippedQuickSlotLabels = await structureTools
+      .locator(".template-editor__node-tools--core strong")
+      .evaluateAll((labels) => labels
+        .filter((label) => label.scrollWidth > label.clientWidth + 1)
+        .map((label) => label.textContent));
+    expect(clippedQuickSlotLabels).toEqual([]);
+    await attachViewport(page, testInfo, "template-structure-quick-add-target");
+    await page.getByRole("treeitem", { name: /首屏区/ }).click();
+    await expect(workspace.inspector.getByRole("tabpanel")).toBeVisible();
+    await expect(workspace.inspector.getByRole("tab")).toHaveCount(3);
+    await expect(workspace.inspector.getByRole("tab", { name: "结构" }))
+      .toHaveAttribute("aria-selected", "true");
+    const canvasControls = page.locator(".template-editor__canvas-controls--editable");
+    const sizeTrigger = canvasControls.getByRole("button", { name: /^模板尺寸：/ });
+    await expect(sizeTrigger).toContainText(/桌面端.*1920.*随内容/);
+    await expect(canvasControls.getByRole("button", { name: /^视图辅助/ })).toBeVisible();
+    const controlsOverflow = await canvasControls.evaluate(
+      (element) => Math.max(0, element.scrollWidth - element.clientWidth),
+    );
+    expect(controlsOverflow).toBeLessThanOrEqual(1);
+    await attachViewport(page, testInfo, "template-canvas-toolbar-compact");
+    await sizeTrigger.click();
+    await expect(page.getByRole("group", { name: "模板整体尺寸" })).toBeVisible();
+    await attachViewport(page, testInfo, "template-canvas-size-settings");
+    await page.keyboard.press("Escape");
+    await workspace.inspector.getByRole("tab", { name: "布局样式" }).click();
     await expect(workspace.inspector.locator('[data-workspace-field-control]').first()).toBeVisible();
     await attachViewport(page, testInfo, "template-property-task-partitions");
     expect(forbiddenWrites).toEqual([]);
@@ -926,7 +949,6 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await page.getByRole("button", { name: "打开单品展示模板" }).click();
     await expect(page.getByRole("button", { name: "正在编辑单品展示模板" })).toBeVisible();
     const templateInspector = page.getByRole("complementary", { name: "模板属性", exact: true });
-    await templateInspector.getByRole("tab", { name: "布局" }).click();
     await expect(templateInspector.getByRole("tabpanel")).toBeVisible();
     expect(forbiddenWrites).toEqual([]);
   });
@@ -945,7 +967,7 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
 
     await enterTemplateWorkspace(page);
     await page.getByRole("button", { name: "打开单品展示模板" }).click();
-    await expect(page.getByRole("tree", { name: "模板节点树" })).toBeVisible();
+    await expect(page.getByRole("tree", { name: "模板区域与槽位" })).toBeVisible();
     await expect(page.getByRole("complementary", { name: "模板属性", exact: true })).toBeVisible();
     expect(forbiddenWrites).toEqual([]);
   });
@@ -1067,7 +1089,6 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await enterTemplateWorkspace(page);
     await page.getByRole("button", { name: "打开双图文模板" }).click();
     const templateInspector = page.getByRole("complementary", { name: "模板属性", exact: true });
-    await templateInspector.getByRole("tab", { name: "高级" }).click();
     const versionNote = templateInspector.getByLabel("版本说明");
     const original = await versionNote.inputValue();
     await versionNote.fill("DoublePoster 独立历史 QA");
@@ -1085,15 +1106,14 @@ test.describe("图 1 视觉编辑器验收（真实前端 + 确定性自有 API�
     await expectPageInstanceBoundary(page, frame, inspector);
 
     const workspace = await enterTemplateWorkspace(page);
-    await page.getByRole("treeitem", { name: /首屏主视觉组件/ }).click();
-    await workspace.inspector.getByRole("tab", { name: "布局" }).click();
-    await expect(workspace.inspector.getByText("桌面端几何规则", { exact: false })).toBeVisible();
+    await page.getByRole("treeitem", { name: /首屏区/ }).click();
+    await expect(workspace.inspector.getByText("桌面端布局", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: /桌面端模板布局/ })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("button", { name: /移动端模板布局/ }).click();
-    await expect(workspace.inspector.getByText("移动端几何规则", { exact: false })).toBeVisible();
+    await expect(workspace.inspector.getByText("移动端布局", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: /移动端模板布局/ })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("button", { name: /桌面端模板布局/ }).click();
-    await expect(workspace.inspector.getByText("桌面端几何规则", { exact: false })).toBeVisible();
+    await expect(workspace.inspector.getByText("桌面端布局", { exact: false })).toBeVisible();
     expect(forbiddenWrites).toEqual([]);
   });
 

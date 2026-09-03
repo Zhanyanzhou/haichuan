@@ -487,7 +487,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
       {/* ═══ 标题区（紧凑） ═══ */}
       {!hasPageDecoration && <section
         style={{
-          padding: "clamp(32px,5vh,56px) 0 clamp(20px,3vh,32px)",
+          padding: "calc(clamp(32px,5vh,56px) + var(--site-header-height)) 0 clamp(20px,3vh,32px)",
           borderBottom: `1px solid ${T.line}`,
         }}
       >

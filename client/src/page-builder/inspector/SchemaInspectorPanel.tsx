@@ -6,6 +6,7 @@
  *       FooterBar（手动保存整页草稿）。
  * 与 InspectorPanel 的三级分派配合：仅在 registry 命中时渲染。
  */
+import { UndoOutlined } from "@ant-design/icons";
 import { App as AntdApp } from "antd";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -41,6 +42,7 @@ import {
   getContentTemplateEditableFieldKeys,
   getContentTemplateEditableObject,
 } from "../generated/contentTemplates.generated";
+import { getTemplateContractNodeLabel } from "../runtime/contentTemplateRolePresentation";
 import {
   applySharedTemplateDesignPatch,
   getSharedTemplateDesignSignatures,
@@ -887,7 +889,7 @@ export default function SchemaInspectorPanel({
                       </div>
                     ))}
                   {entries.some(({ field }) => field.control === "color") ? (
-                    <InspectorDisclosure label="高级设置">
+                    <InspectorDisclosure label="自定义颜色">
                       <div className="homepage-editor__advanced-settings-grid">
                         {entries
                           .filter(({ field }) => field.control === "color")
@@ -915,6 +917,11 @@ export default function SchemaInspectorPanel({
             <>
               {entries.map((entry, fieldIndex) => {
                 const isSelectedField = selectedContentFieldKeys.has(entry.field.key);
+                const fieldIsOverridden = Object.prototype.hasOwnProperty.call(
+                  schemaDefaults,
+                  entry.field.key,
+                ) && JSON.stringify(editor.props[entry.field.key]) !==
+                  JSON.stringify(schemaDefaults[entry.field.key]);
                 const isMediaControlField = entry.field.control === "media";
                 const isSelectedMediaControlField = Boolean(
                   isSelectedMediaTask && selectedMediaField?.key === entry.field.key,
@@ -930,7 +937,7 @@ export default function SchemaInspectorPanel({
                 return (
                   <div
                     key={`${entry.sectionId}-${entry.field.key}-${fieldIndex}`}
-                    className={`homepage-editor__task-field${isSelectedField ? " is-visual-selected" : ""}`}
+                    className={`homepage-editor__task-field${isSelectedField ? " is-visual-selected" : ""}${fieldIsOverridden ? " has-field-reset" : ""}`}
                     data-inspector-field={entry.field.key}
                     data-inspector-device={entry.field.device ?? "shared"}
                     data-selected-media-field={isSelectedMediaControlField || isSelectedMediaAltField ? "true" : undefined}
@@ -957,20 +964,19 @@ export default function SchemaInspectorPanel({
                       contentMediaOnly
                     />
                   ) : null}
-                  {Object.prototype.hasOwnProperty.call(schemaDefaults, entry.field.key) &&
-                  JSON.stringify(editor.props[entry.field.key]) !==
-                    JSON.stringify(schemaDefaults[entry.field.key]) ? (
+                  {fieldIsOverridden ? (
                     <button
                       type="button"
                       className="homepage-editor__field-reset"
                       aria-label={`恢复${entry.field.label}默认`}
+                      title={`恢复${entry.field.label}默认`}
                       onClick={() =>
                         editor.update({
                           [entry.field.key]: structuredClone(schemaDefaults[entry.field.key]),
                         })
                       }
                     >
-                      恢复此项默认
+                      <UndoOutlined aria-hidden="true" />
                     </button>
                   ) : null}
                   {isSelectedMediaAltField ? (
@@ -1083,7 +1089,7 @@ export default function SchemaInspectorPanel({
           selectedObjectId={selectedVisualObject?.nodeId ?? null}
           objects={visualObjects.map((item) => ({
             id: item.nodeId,
-            label: VISUAL_NODE_LABELS[item.nodeId] ?? item.nodeId,
+            label: VISUAL_NODE_LABELS[item.nodeId] ?? getTemplateContractNodeLabel(item.nodeId),
             kind: item.kind,
             thumbnailUrl: item.object.contentFieldKeys
               .map((fieldKey) => editor.props[fieldKey])
@@ -1150,7 +1156,7 @@ export default function SchemaInspectorPanel({
             blockId={String(editor.props.id ?? "")}
             objects={visualObjects.map((item) => ({
               id: item.nodeId,
-              label: VISUAL_NODE_LABELS[item.nodeId] ?? item.nodeId,
+              label: VISUAL_NODE_LABELS[item.nodeId] ?? getTemplateContractNodeLabel(item.nodeId),
               kind: item.kind,
               thumbnailUrl: item.object.contentFieldKeys
                 .map((fieldKey) => editor.props[fieldKey])

@@ -41,22 +41,14 @@ const SALES_CONSULTANT: readonly AdminRole[] = [
 ];
 // 财务：交易概览/异常订单（与服务端 orders.controller @Roles 同口径）
 const FINANCE: readonly AdminRole[] = ["SUPER_ADMIN", "ADMIN", "FINANCE"];
-// 全部后台角色（工作台对所有人可见）
-const ALL_STAFF: readonly AdminRole[] = [
-  "SUPER_ADMIN",
-  "ADMIN",
-  "EDITOR",
-  "CUSTOMER_SERVICE",
-  "WAREHOUSE",
-  "SALES_CONSULTANT",
-  "FINANCE",
-];
 
 // 路由、侧边栏共用此表；服务端 @Roles + RolesGuard 仍是最终授权边界。
 // 说明：此表控制的是“能否进入该后台页面”，写操作（审核/发货/退款等）由后端 @Roles 最终拦截。
 // 因此查看类页面对客服/仓储放开，但对应的后端写接口仍只允许 ADMIN。
 const ROUTE_RULES: RouteRule[] = [
-  { prefix: "/admin/dashboard", roles: ALL_STAFF },
+  // 工作台消费的 /statistics/dashboard、/statistics/trend 在服务端类级
+  // @Roles("SUPER_ADMIN", "ADMIN")（statistics.controller），其余角色的落点见 adminLandingRoute。
+  { prefix: "/admin/dashboard", roles: ADMIN_ONLY },
   { prefix: "/admin/users", roles: ADMIN_ONLY },
   { prefix: "/admin/settings", roles: ADMIN_ONLY },
   { prefix: "/admin/audit-logs", roles: ADMIN_ONLY },
@@ -108,4 +100,26 @@ export function canAccessAdminRoute(
 ): boolean {
   const roles = rolesForAdminRoute(route);
   return !roles || Boolean(role && roles.includes(role as AdminRole));
+}
+
+// 各角色登录后的默认落点：工作台统计仅管理员可读，其余角色进入各自职责首页。
+const ADMIN_LANDING: Readonly<Record<AdminRole, string>> = {
+  SUPER_ADMIN: "/admin/dashboard",
+  ADMIN: "/admin/dashboard",
+  EDITOR: "/admin/products",
+  WAREHOUSE: "/admin/inventory",
+  CUSTOMER_SERVICE: "/admin/leads",
+  SALES_CONSULTANT: "/admin/trade/quotations",
+  FINANCE: "/admin/trade/overview",
+};
+
+export function adminLandingRoute(role: string | undefined): string {
+  const typedRole = role as AdminRole | undefined;
+  const preferred = typedRole ? ADMIN_LANDING[typedRole] : undefined;
+  if (preferred && canAccessAdminRoute(typedRole, preferred)) return preferred;
+  // 防御映射漂移：回退到该角色第一个可访问路由，避免把无权限角色送进 403 页。
+  const fallback = ROUTE_RULES.find((rule) =>
+    typedRole ? rule.roles.includes(typedRole) : false,
+  );
+  return fallback?.prefix ?? "/admin/login";
 }

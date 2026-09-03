@@ -28,6 +28,10 @@ export function getInspectorPublishIssues(
   return issues.filter(
     (issue) =>
       issue.severity !== "info"
-      && (isPagePublishIssue(issue) || issue.blockId === normalizedBlockId),
+      && (
+        issue.severity === "error"
+        || isPagePublishIssue(issue)
+        || issue.blockId === normalizedBlockId
+      ),
   );
 }

@@ -3,6 +3,12 @@ import { App as AntdApp, Button, Input, Modal, Rate, Select, Space, Table, Tag }
 import { reviewApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+import { AdminErrorState } from '@/components/common/AdminDataStates';
+import { useAuthStore } from '@/store/authStore';
+
+// 评价审核（PUT /reviews/:id/moderate）在服务端限 SUPER_ADMIN/ADMIN；
+// 客服仅查看列表与只读详情（与 adminRouteAccess 中 reviews 页面口径注释一致）。
+const MODERATE_ROLES = ['SUPER_ADMIN', 'ADMIN'] as const;
 
 const STATUS_META: Record<string, { c: string; t: string }> = {
   PENDING: { c: 'gold', t: '待审核' },
@@ -25,24 +31,29 @@ interface ReviewRow {
 
 export default function ReviewManage() {
   const { message } = AntdApp.useApp();
+  const role = useAuthStore((state) => state.user?.role);
+  const canModerate = MODERATE_ROLES.includes(role as (typeof MODERATE_ROLES)[number]);
   const [list, setList] = useState<ReviewRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('PENDING');
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [replyTarget, setReplyTarget] = useState<ReviewRow | null>(null);
   const [replyText, setReplyText] = useState('');
   const [handling, setHandling] = useState(false);
 
   const load = async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const res = await reviewApi.adminList({ page, pageSize: 20, status });
       const data = unwrapResponse<{ list: ReviewRow[]; total: number }>(res);
       setList(data?.list || []);
       setTotal(data?.total || 0);
-    } catch {
-      setList([]);
+    } catch (e: unknown) {
+      setLoadError(true);
+      message.error(getSafeAdminErrorMessage(e, '评价列表加载失败，请稍后重试。'));
     } finally {
       setLoading(false);
     }
@@ -88,14 +99,19 @@ export default function ReviewManage() {
         />
       </div>
 
-      <Table
-        className="bg-white border border-brand-line"
-        dataSource={list}
-        rowKey="id"
-        loading={loading}
-        size="middle"
-        pagination={{ current: page, pageSize: 20, total, onChange: setPage, showSizeChanger: false }}
-        columns={[
+      {loadError ? (
+        <div className="bg-white border border-brand-line">
+          <AdminErrorState subject="评价列表" onRetry={() => void load()} />
+        </div>
+      ) : (
+        <Table
+          className="bg-white border border-brand-line"
+          dataSource={list}
+          rowKey="id"
+          loading={loading}
+          size="middle"
+          pagination={{ current: page, pageSize: 20, total, onChange: setPage, showSizeChanger: false }}
+          columns={[
           {
             title: '作品',
             width: 180,
@@ -167,8 +183,20 @@ export default function ReviewManage() {
           {
             title: '操作',
             width: 180,
-            render: (_: unknown, r: ReviewRow) =>
-              r.status === 'PENDING' ? (
+            render: (_: unknown, r: ReviewRow) => {
+              if (!canModerate) {
+                return r.status === 'PENDING' ? (
+                  <span className="text-xs text-brand-muted">待管理员审核</span>
+                ) : (
+                  <Button
+                    size="small"
+                    onClick={() => { setReplyTarget(r); setReplyText(r.reply || ''); }}
+                  >
+                    查看
+                  </Button>
+                );
+              }
+              return r.status === 'PENDING' ? (
                 <Space>
                   <Button size="small" type="primary" loading={handling} onClick={() => moderate(r.id, 'APPROVED')}>
                     通过
@@ -187,14 +215,16 @@ export default function ReviewManage() {
                 >
                   查看/回复
                 </Button>
-              ),
+              );
+            },
           },
         ]}
       />
+      )}
 
       <Modal
         open={replyTarget !== null}
-        title={`回复并审核 · ${replyTarget?.product?.name || ''}`}
+        title={`${canModerate ? '回复并审核' : '评价详情'} · ${replyTarget?.product?.name || ''}`}
         onCancel={() => setReplyTarget(null)}
         footer={null}
         destroyOnHidden
@@ -204,30 +234,38 @@ export default function ReviewManage() {
             <Rate disabled value={replyTarget?.rating || 0} className="text-sm" />
             <p className="mt-2">{replyTarget?.content}</p>
           </div>
-          <Input.TextArea
-            rows={3}
-            maxLength={500}
-            showCount
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
-            placeholder="顾问回复（随评价一并展示，可不填）"
-          />
-          <Space>
-            <Button
-              type="primary"
-              loading={handling}
-              onClick={() => replyTarget && moderate(replyTarget.id, 'APPROVED', replyText.trim() || undefined)}
-            >
-              通过{replyText.trim() ? '并回复' : ''}
-            </Button>
-            <Button
-              danger
-              loading={handling}
-              onClick={() => replyTarget && moderate(replyTarget.id, 'REJECTED', replyText.trim() || undefined)}
-            >
-              驳回
-            </Button>
-          </Space>
+          {canModerate ? (
+            <>
+              <Input.TextArea
+                rows={3}
+                maxLength={500}
+                showCount
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder="顾问回复（随评价一并展示，可不填）"
+              />
+              <Space>
+                <Button
+                  type="primary"
+                  loading={handling}
+                  onClick={() => replyTarget && moderate(replyTarget.id, 'APPROVED', replyText.trim() || undefined)}
+                >
+                  通过{replyText.trim() ? '并回复' : ''}
+                </Button>
+                <Button
+                  danger
+                  loading={handling}
+                  onClick={() => replyTarget && moderate(replyTarget.id, 'REJECTED', replyText.trim() || undefined)}
+                >
+                  驳回
+                </Button>
+              </Space>
+            </>
+          ) : (
+            replyTarget?.reply ? (
+              <p className="text-xs text-brand-gold">已回复：{replyTarget.reply}</p>
+            ) : null
+          )}
         </div>
       </Modal>
     </div>

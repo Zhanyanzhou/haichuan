@@ -187,7 +187,7 @@
   width: clamp(380px, 28vw, 420px);
   height: 100svh;
   max-height: 100svh;
-  padding: 0 36px 28px;
+  padding: 0 48px 28px;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -211,9 +211,9 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  min-height: 88px;
+  justify-content: flex-start;
+  gap: 44px;
+  min-height: 108px;
 }
 
 .brand-menu__top-action {
@@ -225,19 +225,30 @@
   color: #5f6568;
   border: 0;
   background: transparent;
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 13px;
+  font-family:
+    "Noto Serif SC",
+    "PingFang SC",
+    "Microsoft YaHei",
+    serif;
+  font-size: 16px;
   font-weight: 400;
-  letter-spacing: 0;
+  line-height: 1;
+  letter-spacing: 0.08em;
   text-decoration: none;
   cursor: pointer;
   transition: color 220ms ease;
 }
 
+.brand-menu__top-action[data-menu-close] {
+  box-sizing: border-box;
+  padding-bottom: 5px;
+}
+
 .brand-menu__top-action svg {
-  width: 26px;
-  height: 26px;
-  stroke-width: 1.25;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  stroke-width: 1.4;
 }
 
 .brand-menu__top-action:hover,
