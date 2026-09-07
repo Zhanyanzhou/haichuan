@@ -7,6 +7,7 @@ import { AppModule } from "./app.module";
 import { TransformInterceptor } from "./common/interceptors/transform.interceptor";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { resolveCorsOrigins } from "./common/config/cors-origins";
+import { configureProxyTrust } from "./common/config/proxy-trust";
 
 async function bootstrap() {
   // rawBody：保留请求体原始字节串——微信支付 APIv3 回调验签必须对原始报文（重新序列化会改变字段序/空白导致验签必败）。
@@ -18,12 +19,15 @@ async function bootstrap() {
   app.useLogger(app.get(PinoLogger));
   const logger = new Logger("Bootstrap");
 
+  // SIGTERM/SIGINT 先触发 beforeApplicationShutdown，使 readiness 进入 draining，
+  // 再由 Nest 关闭 HTTP server 并执行 Prisma 等 provider 的销毁钩子。
+  app.enableShutdownHooks(["SIGTERM", "SIGINT"]);
+
   app.setGlobalPrefix("api");
 
-  // 信任单层 nginx 反向代理：让 req.ip / ThrottlerGuard 拿到真实客户端 IP。
-  // express trust proxy=1 取 X-Forwarded-For 最右一项 = nginx 的 $remote_addr（真实客户端，不可被请求头伪造）；
-  // 否则所有请求 IP 退化为 nginx 容器内网 IP，全站共享一个限流桶（连 /auth/login 5/min 都会全站共享）。
-  (app.getHttpAdapter().getInstance() as { set: (k: string, v: unknown) => void }).set("trust proxy", 1);
+  // 只信任直接相连的 client nginx；边缘代理链由 nginx 的可信 8081 入口先规范化为单值。
+  // 不按公网链路猜测 hop 数，避免直连路径用伪造 X-Forwarded-For 控制限流和会话 IP。
+  configureProxyTrust(app.getHttpAdapter().getInstance());
 
   // 安全头
   app.use(helmet({ contentSecurityPolicy: false }));

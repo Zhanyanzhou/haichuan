@@ -204,3 +204,23 @@ test("负责人等非状态字段的并发覆盖也会被乐观锁拒绝", async
     },
   );
 });
+
+test("状态机拒绝未知状态与非法流转，合法流转写入目标状态", async () => {
+  const harness = createHarness();
+  await assert.rejects(
+    () => harness.service.updateLead("inquiry", 41, { status: "ARBITRARY" }),
+    UnprocessableEntityException,
+  );
+  await assert.rejects(
+    () => harness.service.updateLead("inquiry", 41, { status: "PENDING" }),
+    UnprocessableEntityException,
+  );
+  const terminal = createHarness({ lead: { status: "COMPLETED" } });
+  await assert.rejects(
+    () => terminal.service.updateLead("inquiry", 41, { status: "FOLLOWING" }),
+    UnprocessableEntityException,
+  );
+  await harness.service.updateLead("inquiry", 41, { status: "FOLLOWING" });
+  const update = harness.leadUpdates.at(-1) as { data: { status: string } };
+  assert.equal(update.data.status, "FOLLOWING");
+});

@@ -6,6 +6,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { TradeEventsService } from '../trade-events/trade-events.service';
 import { OrdersService } from './orders.service';
 import { RefundsService } from '../refunds/refunds.service';
+import { FulfillmentService } from '../fulfillment/fulfillment.service';
 
 const databaseUrl = process.env.TRADE_REAL_DB_URL;
 
@@ -21,12 +22,18 @@ test(
       renderShell: (value: string) => value,
       getSiteBaseUrl: () => '',
     };
+    const fulfillment = new FulfillmentService(
+      prisma as unknown as PrismaService,
+      tradeEvents,
+      { enqueueOrderLifecycle: async () => undefined } as never,
+    );
     const orders = new OrdersService(
       prisma as unknown as PrismaService,
       tradeEvents,
       mailer as never,
       {} as never,
       {} as never,
+      fulfillment,
     );
     const refunds = new RefundsService(
       prisma as unknown as PrismaService,
@@ -37,6 +44,28 @@ test(
 
     await prisma.$connect();
     try {
+      const warehouse = await prisma.warehouse.create({
+        data: { name: `${prefix}-WAREHOUSE`, type: 'STORE', isActive: true },
+      });
+      const orderSnapshot = {
+        shippingAddressSnapshot: {
+          version: 1,
+          recipientName: '隔离测试客户',
+          recipientPhone: '13800000000',
+          detail: '隔离测试地址',
+        },
+        pricingSnapshot: {
+          version: 1,
+          currency: 'CNY',
+          itemSubtotalCents: 10000,
+          discountCents: 0,
+          shippingCents: 0,
+          insuranceCents: 0,
+          taxCents: 0,
+          adjustmentCents: 0,
+          finalCents: 10000,
+        },
+      };
       const actors = await Promise.all([
         prisma.user.create({
           data: {
@@ -64,12 +93,14 @@ test(
           paidAmount: 100,
           status: 'SHIPPED',
           deliveryStatus: 'SHIPPED',
+          ...orderSnapshot,
         },
       });
       await prisma.fulfillment.create({
         data: {
           fulfillmentNo: `${prefix}-FUL`,
           orderId: shipped.id,
+          warehouseId: warehouse.id,
           status: 'SHIPPED',
           carrier: 'TEST',
           trackingNo: `${prefix}-TRACK`,
@@ -104,6 +135,7 @@ test(
           paidAmount: 100,
           status: 'PENDING_SHIP',
           deliveryStatus: 'PENDING_SHIP',
+          ...orderSnapshot,
         },
       });
       const payment = await prisma.payment.create({
@@ -147,6 +179,7 @@ test(
           totalAmount: 100,
           finalAmount: 100,
           status: 'PENDING_PAYMENT',
+          ...orderSnapshot,
         },
       });
       const failingOrders = new OrdersService(
@@ -169,6 +202,7 @@ test(
       assert.equal(Number(rolledBack.adjustmentAmount), 0);
     } finally {
       await prisma.order.deleteMany({ where: { orderNo: { startsWith: prefix } } });
+      await prisma.warehouse.deleteMany({ where: { name: { startsWith: prefix } } });
       await prisma.user.deleteMany({ where: { username: { startsWith: prefix } } });
       await prisma.$disconnect();
     }

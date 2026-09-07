@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Post, Param, Query, Body, UseGuards, ParseIntPipe } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { LeadsService } from './leads.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -7,10 +7,12 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
   CreateLeadFollowUpDto,
+  CreateLeadReplyDto,
   ReleaseLeadLegalHoldDto,
   SetLeadLegalHoldDto,
   UpdateLeadDto,
 } from './dto/lead.dto';
+import { IDEMPOTENCY_HEADER } from './lead-submission';
 import type {
   LeadListQuery,
   LeadNotificationFailureQuery,
@@ -108,6 +110,24 @@ export class LeadsController {
       ...body,
       createdBy: user?.id,
     });
+  }
+
+  @Post(':type/:id/reply')
+  @ApiOperation({ summary: '幂等回复已登录客户的咨询线索' })
+  replyToLead(
+    @Param('type') type: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: CreateLeadReplyDto,
+    @Headers(IDEMPOTENCY_HEADER) idempotencyKey: string | undefined,
+    @CurrentUser() user: { id?: number },
+  ) {
+    return this.service.replyToLead(
+      type,
+      id,
+      body,
+      idempotencyKey,
+      user?.id,
+    );
   }
 
   @Get(':type/:id/follow-ups')

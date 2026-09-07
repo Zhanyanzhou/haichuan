@@ -7,5 +7,6 @@ import { TradeEventsModule } from '../trade-events/trade-events.module';
   imports: [TradeEventsModule],
   controllers: [FulfillmentController],
   providers: [FulfillmentService],
+  exports: [FulfillmentService],
 })
 export class FulfillmentModule {}

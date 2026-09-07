@@ -1,8 +1,11 @@
 import {
+  useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
@@ -17,20 +20,23 @@ import {
   clampHostRect,
   createSourceToHostTransform,
   expandHostHitRect,
-  findElementsByEditableTargetLocator,
   getEditorHitSize,
+  hostDeltaToSource,
   placeHostLabel,
   projectSourceRectToHost,
-  rectFromDomRect,
+  rectFromBounds,
   sourceRectRelativeToParentNormalized,
   sourceRectRelativeToRoot,
   type GeometryRect,
   type SourceToHostTransform,
 } from "./editableTargetGeometry";
+import { findElementsByEditableTargetLocator } from "./editableTargetDomLocator";
 
 export interface OverlayTargetDescriptor {
   targetId: string;
   ownerNodeId: string;
+  parentTargetId?: string;
+  locked?: boolean;
   source?: "definition-node" | "builtin-contract-role";
   contractRoleId?: string;
   kind: string;
@@ -40,6 +46,8 @@ export interface OverlayTargetDescriptor {
     attributes: readonly EditableTargetLocatorAttribute[];
     value: string;
   };
+  persistedLayoutRect?: { x: number; y: number; width: number; height: number };
+  fallbackLayoutRect?: { x: number; y: number; width: number; height: number };
 }
 
 export type OverlayNodeAction =
@@ -85,7 +93,16 @@ interface OverlayGestureSession {
   direction?: FreePlacementResizeHandle;
   startClientX: number;
   startClientY: number;
+  captureTarget: HTMLButtonElement;
+  previewRect: GeometryRect;
 }
+
+interface OverlaySnapGuides {
+  vertical?: number;
+  horizontal?: number;
+}
+
+const HOST_SNAP_DISTANCE = 10;
 
 const RESIZE_HANDLES: readonly FreePlacementResizeHandle[] = [
   "nw", "n", "ne", "e", "se", "s", "sw", "w",
@@ -102,20 +119,226 @@ function measuredTargetsEqual(
     return (["left", "top", "width", "height"] as const).every((axis) =>
       Math.abs(box.hostRect[axis] - candidate.hostRect[axis]) < 0.25
       && Math.abs(box.hitRect[axis] - candidate.hitRect[axis]) < 0.25,
-    ) && box.labelVisible === candidate.labelVisible;
+    ) && box.labelVisible === candidate.labelVisible
+      && box.target.locked === candidate.target.locked
+      && box.target.parentTargetId === candidate.target.parentTargetId
+      && box.target.label === candidate.target.label
+      && box.parentSourceWidth === candidate.parentSourceWidth
+      && box.parentSourceHeight === candidate.parentSourceHeight
+      && (["x", "y", "width", "height"] as const).every((axis) =>
+        box.sourceRectInParent[axis] === candidate.sourceRectInParent[axis]);
   });
 }
 
 function isVisibleTarget(element: HTMLElement) {
   if (element.getClientRects().length === 0 || element.closest('[aria-hidden="true"]')) return false;
+  if (!element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
   const style = element.ownerDocument.defaultView?.getComputedStyle(element);
-  return style?.display !== "none" && style?.visibility !== "hidden";
+  return style?.display !== "none" && style?.visibility !== "hidden" && style?.opacity !== "0";
+}
+
+function unionElementBounds(elements: readonly HTMLElement[]): GeometryRect | undefined {
+  if (elements.length === 0) return undefined;
+  const bounds = elements.map((element) => rectFromBounds(element.getBoundingClientRect()));
+  const left = Math.min(...bounds.map((rect) => rect.left));
+  const top = Math.min(...bounds.map((rect) => rect.top));
+  const right = Math.max(...bounds.map((rect) => rect.left + rect.width));
+  const bottom = Math.max(...bounds.map((rect) => rect.top + rect.height));
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+function projectNormalizedRectToParent(
+  rect: { x: number; y: number; width: number; height: number },
+  parent: GeometryRect,
+): GeometryRect {
+  return {
+    left: parent.left + rect.x * parent.width,
+    top: parent.top + rect.y * parent.height,
+    width: rect.width * parent.width,
+    height: rect.height * parent.height,
+  };
+}
+
+function findOwnerNodeElement(root: HTMLElement, ownerNodeId: string) {
+  return Array.from(root.querySelectorAll<HTMLElement>("[data-template-node-id]"))
+    .find((element) => element.dataset.templateNodeId === ownerNodeId);
+}
+
+function findContractFrameElement(element: HTMLElement, contractRoot: HTMLElement) {
+  if (element.parentElement === contractRoot) return contractRoot;
+  let frameElement = element;
+  while (frameElement.parentElement && frameElement.parentElement !== contractRoot) {
+    frameElement = frameElement.parentElement;
+  }
+  return frameElement.parentElement === contractRoot ? frameElement : contractRoot;
 }
 
 function handlePosition(direction: FreePlacementResizeHandle) {
   const horizontal = direction.includes("w") ? "0%" : direction.includes("e") ? "100%" : "50%";
   const vertical = direction.includes("n") ? "0%" : direction.includes("s") ? "100%" : "50%";
   return { left: horizontal, top: vertical };
+}
+
+function placeMoveControl(
+  rect: GeometryRect,
+  hostWidth: number,
+  hostHeight: number,
+): { external: boolean; style: CSSProperties } {
+  const controlSize = 28;
+  const handleRadius = 14;
+  const gap = 4;
+  if (rect.width >= 72 && rect.height >= 40) {
+    return { external: false, style: { left: 4, top: 4 } };
+  }
+  const clearance = handleRadius + gap;
+  const centeredLeft = clampGeometryValue(
+    (rect.width - controlSize) / 2,
+    -rect.left,
+    Math.max(-rect.left, hostWidth - rect.left - controlSize),
+  );
+  if (rect.top >= controlSize + clearance) {
+    return {
+      external: true,
+      style: { left: centeredLeft, top: -controlSize - clearance },
+    };
+  }
+  if (hostHeight - rect.top - rect.height >= controlSize + clearance) {
+    return {
+      external: true,
+      style: { left: centeredLeft, top: rect.height + clearance },
+    };
+  }
+  const centeredTop = clampGeometryValue(
+    (rect.height - controlSize) / 2,
+    -rect.top,
+    Math.max(-rect.top, hostHeight - rect.top - controlSize),
+  );
+  if (hostWidth - rect.left - rect.width >= controlSize + clearance) {
+    return {
+      external: true,
+      style: { left: rect.width + clearance, top: centeredTop },
+    };
+  }
+  return {
+    external: true,
+    style: { left: -controlSize - clearance, top: centeredTop },
+  };
+}
+
+function nearestGuide(value: number, guides: readonly number[]) {
+  return guides.reduce<{ distance: number; guide?: number }>((nearest, guide) => {
+    const distance = Math.abs(value - guide);
+    return distance <= HOST_SNAP_DISTANCE && distance < nearest.distance
+      ? { distance, guide }
+      : nearest;
+  }, { distance: Number.POSITIVE_INFINITY });
+}
+
+function snapHostGestureRect({
+  start,
+  raw,
+  operation,
+  direction,
+  hostWidth,
+  hostHeight,
+  xGuides,
+  yGuides,
+}: {
+  start: GeometryRect;
+  raw: GeometryRect;
+  operation: OverlayGestureSession["operation"];
+  direction?: FreePlacementResizeHandle;
+  hostWidth: number;
+  hostHeight: number;
+  xGuides: readonly number[];
+  yGuides: readonly number[];
+}) {
+  let left = raw.left;
+  let top = raw.top;
+  let right = raw.left + raw.width;
+  let bottom = raw.top + raw.height;
+  const activeGuides: OverlaySnapGuides = {};
+
+  if (operation === "move") {
+    left = clampGeometryValue(left, 0, Math.max(0, hostWidth - start.width));
+    top = clampGeometryValue(top, 0, Math.max(0, hostHeight - start.height));
+    right = left + start.width;
+    bottom = top + start.height;
+    const xSnap = [left, left + start.width / 2, right]
+      .map((edge) => ({ edge, ...nearestGuide(edge, xGuides) }))
+      .reduce((nearest, candidate) => candidate.distance < nearest.distance ? candidate : nearest);
+    if (xSnap.guide !== undefined) {
+      left = clampGeometryValue(left + xSnap.guide - xSnap.edge, 0, Math.max(0, hostWidth - start.width));
+      right = left + start.width;
+      activeGuides.vertical = xSnap.guide;
+    }
+    const ySnap = [top, top + start.height / 2, bottom]
+      .map((edge) => ({ edge, ...nearestGuide(edge, yGuides) }))
+      .reduce((nearest, candidate) => candidate.distance < nearest.distance ? candidate : nearest);
+    if (ySnap.guide !== undefined) {
+      top = clampGeometryValue(top + ySnap.guide - ySnap.edge, 0, Math.max(0, hostHeight - start.height));
+      bottom = top + start.height;
+      activeGuides.horizontal = ySnap.guide;
+    }
+  } else {
+    if (direction?.includes("w")) {
+      left = clampGeometryValue(left, 0, right - 2);
+      const match = nearestGuide(left, xGuides);
+      if (match.guide !== undefined) {
+        left = clampGeometryValue(match.guide, 0, right - 2);
+        activeGuides.vertical = match.guide;
+      }
+    }
+    if (direction?.includes("e")) {
+      right = clampGeometryValue(right, left + 2, hostWidth);
+      const match = nearestGuide(right, xGuides);
+      if (match.guide !== undefined) {
+        right = clampGeometryValue(match.guide, left + 2, hostWidth);
+        activeGuides.vertical = match.guide;
+      }
+    }
+    if (direction?.includes("n")) {
+      top = clampGeometryValue(top, 0, bottom - 2);
+      const match = nearestGuide(top, yGuides);
+      if (match.guide !== undefined) {
+        top = clampGeometryValue(match.guide, 0, bottom - 2);
+        activeGuides.horizontal = match.guide;
+      }
+    }
+    if (direction?.includes("s")) {
+      bottom = clampGeometryValue(bottom, top + 2, hostHeight);
+      const match = nearestGuide(bottom, yGuides);
+      if (match.guide !== undefined) {
+        bottom = clampGeometryValue(match.guide, top + 2, hostHeight);
+        activeGuides.horizontal = match.guide;
+      }
+    }
+  }
+
+  return {
+    rect: { left, top, width: right - left, height: bottom - top },
+    guides: activeGuides,
+  };
+}
+
+function gestureDeltaFromPreview(session: OverlayGestureSession) {
+  const start = session.box.hostRect;
+  const preview = session.previewRect;
+  if (session.operation === "move") {
+    return { x: preview.left - start.left, y: preview.top - start.top };
+  }
+  return {
+    x: session.direction?.includes("w")
+      ? preview.left - start.left
+      : session.direction?.includes("e")
+        ? preview.left + preview.width - start.left - start.width
+        : 0,
+    y: session.direction?.includes("n")
+      ? preview.top - start.top
+      : session.direction?.includes("s")
+        ? preview.top + preview.height - start.top - start.height
+        : 0,
+  };
 }
 
 export default function EditableTargetOverlay({
@@ -127,6 +350,7 @@ export default function EditableTargetOverlay({
   selectedTargetId,
   annotations = false,
   interactive = false,
+  snapEnabled = true,
   movableTargetIds,
   resizeTargetIds,
   disabledNodeActions,
@@ -144,6 +368,7 @@ export default function EditableTargetOverlay({
   selectedTargetId?: string | null;
   annotations?: boolean;
   interactive?: boolean;
+  snapEnabled?: boolean;
   movableTargetIds?: ReadonlySet<string>;
   resizeTargetIds?: ReadonlySet<string>;
   disabledNodeActions?: ReadonlyMap<string, ReadonlySet<OverlayNodeAction>>;
@@ -155,13 +380,54 @@ export default function EditableTargetOverlay({
 }) {
   const [boxes, setBoxes] = useState<MeasuredOverlayTarget[]>([]);
   const [gesturePreview, setGesturePreview] = useState<GeometryRect | null>(null);
+  const [snapGuides, setSnapGuides] = useState<OverlaySnapGuides>({});
   const gestureRef = useRef<OverlayGestureSession | null>(null);
   const targetSignature = useMemo(() => targets.map((target) => [
     target.targetId,
     target.locator.value,
     target.locator.attributes.join(","),
     target.capabilities?.join(",") ?? "",
+    target.locked ? "locked" : "unlocked",
+    target.parentTargetId ?? "",
   ].join(":" )).join("|"), [targets]);
+
+  const cancelActiveGesture = useCallback(() => {
+    const gesture = gestureRef.current;
+    if (gesture?.captureTarget.isConnected) {
+      try {
+        if (gesture.captureTarget.hasPointerCapture(gesture.pointerId)) {
+          gesture.captureTarget.releasePointerCapture(gesture.pointerId);
+        }
+      } catch {
+        // 控件在工作区切换时可能先于清理卸载；此时浏览器已自行释放 capture。
+      }
+    }
+    gestureRef.current = null;
+    setGesturePreview(null);
+    setSnapGuides({});
+  }, []);
+
+  useEffect(() => {
+    const hostWindow = hostRoot?.ownerDocument.defaultView;
+    if (!hostWindow) return undefined;
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || !gestureRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelActiveGesture();
+    };
+    hostWindow.addEventListener("keydown", handleEscape, true);
+    return () => hostWindow.removeEventListener("keydown", handleEscape, true);
+  }, [cancelActiveGesture, hostRoot]);
+
+  useEffect(() => () => cancelActiveGesture(), [
+    cancelActiveGesture,
+    hostRoot,
+    selectedTargetId,
+    sourceFrame,
+    sourceRoot,
+    targetSignature,
+  ]);
 
   useLayoutEffect(() => {
     if (!sourceFrame || !sourceRoot || !hostRoot || !sourceRoot.isConnected) {
@@ -198,26 +464,87 @@ export default function EditableTargetOverlay({
 
     const measure = () => {
       if (cancelled || !sourceRoot.isConnected || !hostRoot.isConnected) return;
-      const sourceRootRect = rectFromDomRect(sourceRoot.getBoundingClientRect());
-      const sourceFrameRect = rectFromDomRect(sourceFrame.getBoundingClientRect());
-      const hostRect = rectFromDomRect(hostRoot.getBoundingClientRect());
+      const sourceRootRect = rectFromBounds(sourceRoot.getBoundingClientRect());
+      const sourceFrameRect = rectFromBounds(sourceFrame.getBoundingClientRect());
+      const hostRect = rectFromBounds(hostRoot.getBoundingClientRect());
       const transform = createSourceToHostTransform({
         sourceRootRect,
         sourceFrameRect,
         sourceFrameViewport: {
-          width: sourceFrame.clientWidth || sourceRoot.ownerDocument.documentElement.clientWidth,
-          height: sourceFrame.clientHeight || sourceRoot.ownerDocument.documentElement.clientHeight,
+          // DOMRect 是 transform 后的 border-box；用 offset 尺寸反推缩放，
+          // 避免 clientWidth/clientHeight 的滚动条或边框差异把 pointer delta
+          // 在提交时压缩约 1px，造成宿主预览与 Renderer 稳定态错位。
+          width: sourceFrame.offsetWidth || sourceRoot.ownerDocument.documentElement.clientWidth,
+          height: sourceFrame.offsetHeight || sourceRoot.ownerDocument.documentElement.clientHeight,
         },
-        hostRect,
+        // 绝对定位子元素以 padding box 为包含块；DOMRect 则从 border box
+        // 起算。扣除 client border，宿主选区才能与 iframe 内真实角色同点。
+        hostRect: {
+          ...hostRect,
+          left: hostRect.left + hostRoot.clientLeft,
+          top: hostRect.top + hostRoot.clientTop,
+        },
       });
       const hostWidth = hostRoot.clientWidth;
       const hostHeight = hostRoot.clientHeight;
       const measuredElements: HTMLElement[] = [];
-      const measured = targets.flatMap((target): MeasuredOverlayTarget[] =>
-        findElementsByEditableTargetLocator(sourceRoot, target.locator)
-          .flatMap((element, occurrence) => {
+      const measured = targets.flatMap((target): MeasuredOverlayTarget[] => {
+        const locatedElements = findElementsByEditableTargetLocator(sourceRoot, target.locator)
+          .filter(isVisibleTarget);
+        if (target.source === "builtin-contract-role") {
+          const roleLocator = {
+            ...target.locator,
+            attributes: target.locator.attributes.filter((attribute) => attribute !== "data-editor-field"),
+          };
+          const roleElements = findElementsByEditableTargetLocator(sourceRoot, roleLocator)
+            .filter(isVisibleTarget);
+          const ownerElement = findOwnerNodeElement(sourceRoot, target.ownerNodeId);
+          const anchor = roleElements[0] ?? locatedElements[0] ?? ownerElement;
+          const contractRoot = roleElements[0]?.closest<HTMLElement>("[data-content-template-contract]")
+            ?? locatedElements[0]?.closest<HTMLElement>("[data-content-template-contract]")
+            ?? ownerElement?.querySelector<HTMLElement>("[data-content-template-contract]")
+            ?? ownerElement;
+          if (!anchor || !contractRoot) return [];
+          const contractFrame = findContractFrameElement(anchor, contractRoot);
+          const parentRect = rectFromBounds(contractFrame.getBoundingClientRect());
+          const targetRect = target.persistedLayoutRect
+            ? projectNormalizedRectToParent(target.persistedLayoutRect, parentRect)
+            : unionElementBounds(roleElements)
+              ?? (target.fallbackLayoutRect
+                ? projectNormalizedRectToParent(target.fallbackLayoutRect, parentRect)
+                : undefined);
+          if (!targetRect || targetRect.width <= 0 || targetRect.height <= 0) return [];
+          measuredElements.push(anchor, contractFrame, ...roleElements);
+          const sourceRect = sourceRectRelativeToRoot(targetRect, sourceRootRect);
+          const hostTargetRect = clampHostRect(
+            projectSourceRectToHost(sourceRect, transform),
+            hostWidth,
+            hostHeight,
+          );
+          if (hostTargetRect.width <= 0 || hostTargetRect.height <= 0) return [];
+          return [{
+            key: target.targetId,
+            target,
+            element: anchor,
+            sourceRect,
+            hostRect: hostTargetRect,
+            hitRect: expandHostHitRect(
+              hostTargetRect,
+              hostWidth,
+              hostHeight,
+              getEditorHitSize(coarsePointer.matches),
+            ),
+            labelPoint: placeHostLabel(hostTargetRect, hostWidth, hostHeight),
+            labelVisible: true,
+            transform,
+            parentSourceWidth: Math.max(1, parentRect.width),
+            parentSourceHeight: Math.max(1, parentRect.height),
+            sourceRectInParent: sourceRectRelativeToParentNormalized(targetRect, parentRect),
+          }];
+        }
+        return locatedElements.flatMap((element, occurrence) => {
             if (!isVisibleTarget(element)) return [];
-            const targetRect = rectFromDomRect(element.getBoundingClientRect());
+            const targetRect = rectFromBounds(element.getBoundingClientRect());
             if (targetRect.width <= 0 || targetRect.height <= 0) return [];
             measuredElements.push(element);
             const sourceRect = sourceRectRelativeToRoot(targetRect, sourceRootRect);
@@ -228,7 +555,7 @@ export default function EditableTargetOverlay({
               ? element.closest<HTMLElement>("[data-content-template-contract]")
               : element.parentElement)?.getBoundingClientRect();
             const parentRect = parentDomRect
-              ? rectFromDomRect(parentDomRect)
+              ? rectFromBounds(parentDomRect)
               : targetRect;
             return [{
               key: `${target.targetId}:${occurrence}`,
@@ -249,8 +576,8 @@ export default function EditableTargetOverlay({
               parentSourceHeight: Math.max(1, parentRect?.height ?? targetRect.height),
               sourceRectInParent: sourceRectRelativeToParentNormalized(targetRect, parentRect),
             }];
-          }),
-      );
+          });
+      });
       const occupiedLabelRects: GeometryRect[] = [];
       const next = measured.map((box) => {
         const labelRect = {
@@ -322,6 +649,13 @@ export default function EditableTargetOverlay({
 
   const selectedBox = boxes.find((box) => box.target.targetId === selectedTargetId) ?? null;
   const renderedSelectionRect = gesturePreview ?? selectedBox?.hostRect;
+  const moveControlPlacement = renderedSelectionRect
+    ? placeMoveControl(
+        renderedSelectionRect,
+        hostRoot?.clientWidth ?? 0,
+        hostRoot?.clientHeight ?? 0,
+      )
+    : null;
 
   const beginGesture = (
     event: PointerEvent<HTMLButtonElement>,
@@ -339,8 +673,11 @@ export default function EditableTargetOverlay({
       direction,
       startClientX: event.clientX,
       startClientY: event.clientY,
+      captureTarget: event.currentTarget,
+      previewRect: box.hostRect,
     };
     setGesturePreview(box.hostRect);
+    setSnapGuides({});
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -348,13 +685,48 @@ export default function EditableTargetOverlay({
     const gesture = gestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     event.preventDefault();
-    setGesturePreview(applyHostRectGesture({
+    const raw = applyHostRectGesture({
       rect: gesture.box.hostRect,
       operation: gesture.operation,
       direction: gesture.direction,
       deltaX: event.clientX - gesture.startClientX,
       deltaY: event.clientY - gesture.startClientY,
-    }));
+    });
+    const canSnap = snapEnabled && !event.altKey;
+    const otherBoxes = canSnap
+      ? boxes.filter((box) => box.target.targetId !== gesture.box.target.targetId)
+      : [];
+    const snapped = snapHostGestureRect({
+      start: gesture.box.hostRect,
+      raw,
+      operation: gesture.operation,
+      direction: gesture.direction,
+      hostWidth: hostRoot?.clientWidth ?? 0,
+      hostHeight: hostRoot?.clientHeight ?? 0,
+      xGuides: canSnap ? [
+        0,
+        (hostRoot?.clientWidth ?? 0) / 2,
+        hostRoot?.clientWidth ?? 0,
+        ...otherBoxes.flatMap((box) => [
+          box.hostRect.left,
+          box.hostRect.left + box.hostRect.width / 2,
+          box.hostRect.left + box.hostRect.width,
+        ]),
+      ] : [],
+      yGuides: canSnap ? [
+        0,
+        (hostRoot?.clientHeight ?? 0) / 2,
+        hostRoot?.clientHeight ?? 0,
+        ...otherBoxes.flatMap((box) => [
+          box.hostRect.top,
+          box.hostRect.top + box.hostRect.height / 2,
+          box.hostRect.top + box.hostRect.height,
+        ]),
+      ] : [],
+    });
+    gesture.previewRect = snapped.rect;
+    setGesturePreview(snapped.rect);
+    setSnapGuides(snapped.guides);
   };
 
   const finishGesture = (event: PointerEvent<HTMLButtonElement>, commit: boolean) => {
@@ -362,18 +734,20 @@ export default function EditableTargetOverlay({
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    gestureRef.current = null;
-    setGesturePreview(null);
+    const hostDelta = gestureDeltaFromPreview(gesture);
+    cancelActiveGesture();
     if (!commit) return;
+    if (Math.abs(hostDelta.x) < 0.01 && Math.abs(hostDelta.y) < 0.01) return;
+    const sourceDelta = hostDeltaToSource(
+      hostDelta,
+      gesture.box.transform,
+    );
     onPlacementGesture?.({
       target: gesture.box.target,
       operation: gesture.operation,
       direction: gesture.direction,
-      deltaSourceX: (event.clientX - gesture.startClientX) / gesture.box.transform.scaleX,
-      deltaSourceY: (event.clientY - gesture.startClientY) / gesture.box.transform.scaleY,
+      deltaSourceX: sourceDelta.x,
+      deltaSourceY: sourceDelta.y,
       parentSourceWidth: gesture.box.parentSourceWidth,
       parentSourceHeight: gesture.box.parentSourceHeight,
       sourceRect: gesture.box.sourceRectInParent,
@@ -413,8 +787,25 @@ export default function EditableTargetOverlay({
       className={`template-editor__editable-overlay is-${surface}${interactive ? " is-interactive" : " is-read-only"}`}
       data-template-editor-overlay-root={surface}
       data-overlay-box-count={boxes.length}
+      data-overlay-gesture-active={gesturePreview ? "true" : undefined}
       aria-hidden={interactive ? undefined : "true"}
     >
+      {snapGuides.vertical !== undefined ? (
+        <span
+          className="template-editor__editable-overlay-snap-guide is-vertical"
+          data-overlay-snap-guide="vertical"
+          aria-hidden="true"
+          style={{ left: snapGuides.vertical }}
+        />
+      ) : null}
+      {snapGuides.horizontal !== undefined ? (
+        <span
+          className="template-editor__editable-overlay-snap-guide is-horizontal"
+          data-overlay-snap-guide="horizontal"
+          aria-hidden="true"
+          style={{ top: snapGuides.horizontal }}
+        />
+      ) : null}
       {boxes.map((box, index) => (
         <div
           key={box.key}
@@ -422,6 +813,10 @@ export default function EditableTargetOverlay({
           data-editable-target-id={box.target.targetId}
           data-editable-target-kind={box.target.kind}
           data-overlay-selected={box.target.targetId === selectedTargetId ? "true" : undefined}
+          data-overlay-parent={box.target.targetId === selectedBox?.target.parentTargetId ? "true" : undefined}
+          data-overlay-locked={box.target.locked ? "true" : undefined}
+          data-overlay-dragging={gesturePreview && box.target.targetId === selectedTargetId ? "true" : undefined}
+          data-overlay-out-of-bounds={box.sourceRectInParent.x < -0.001 || box.sourceRectInParent.y < -0.001 || box.sourceRectInParent.x + box.sourceRectInParent.width > 1.001 || box.sourceRectInParent.y + box.sourceRectInParent.height > 1.001 ? "true" : undefined}
           data-source-left={box.sourceRect.left.toFixed(3)}
           data-source-top={box.sourceRect.top.toFixed(3)}
           data-source-width={box.sourceRect.width.toFixed(3)}
@@ -465,15 +860,6 @@ export default function EditableTargetOverlay({
             width: box.hitRect.width,
             height: box.hitRect.height,
             zIndex: 100 + index,
-            pointerEvents: selectedBox && (
-              box.target.targetId === selectedBox.target.targetId
-              || (
-                selectedBox.hostRect.left + selectedBox.hostRect.width / 2 >= box.hostRect.left
-                && selectedBox.hostRect.left + selectedBox.hostRect.width / 2 <= box.hostRect.left + box.hostRect.width
-                && selectedBox.hostRect.top + selectedBox.hostRect.height / 2 >= box.hostRect.top
-                && selectedBox.hostRect.top + selectedBox.hostRect.height / 2 <= box.hostRect.top + box.hostRect.height
-              )
-            ) ? "none" : undefined,
           }}
           onClick={(event) => {
             event.stopPropagation();
@@ -500,6 +886,7 @@ export default function EditableTargetOverlay({
             }}
           >
             {selectedBox.target.label}
+            {selectedBox.target.locked ? " · 已锁定" : ""}
           </span>
           {movableTargetIds?.has(selectedBox.target.targetId) ? (
             <button
@@ -507,6 +894,8 @@ export default function EditableTargetOverlay({
               className="template-editor__editable-overlay-move"
               aria-label={`拖动移动${selectedBox.target.label}`}
               aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+              data-overlay-move-external={moveControlPlacement?.external ? "true" : undefined}
+              style={moveControlPlacement?.style}
               onPointerDown={(event) => beginGesture(event, selectedBox, "move")}
               onPointerMove={updateGesture}
               onPointerUp={(event) => finishGesture(event, true)}
@@ -518,12 +907,22 @@ export default function EditableTargetOverlay({
           ) : null}
           {selectedBox.target.source === "definition-node"
             && selectedBox.target.capabilities?.includes("structure")
+            && !selectedBox.target.locked
             && onNodeAction ? (
-              <div
+              <details
+                key={selectedBox.target.targetId}
                 className="template-editor__editable-overlay-actions"
-                role="toolbar"
                 aria-label={`${selectedBox.target.label}快捷操作`}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.currentTarget.open = false;
+                  event.currentTarget.querySelector("summary")?.focus();
+                }}
               >
+                <summary>对象操作</summary>
+                <div className="template-editor__editable-overlay-action-list">
                 {([
                   ["duplicate", "复制节点"],
                   ["hide", "隐藏节点"],
@@ -531,7 +930,7 @@ export default function EditableTargetOverlay({
                   ...(movableTargetIds?.has(selectedBox.target.targetId) ? [
                     ["align-horizontal", "在父容器中水平居中"],
                     ["align-vertical", "在父容器中垂直居中"],
-                    ["copy-responsive", `复制当前自由布局到${copyResponsiveDestinationLabel ?? "另一设备"}`],
+                    ["copy-responsive", `复制当前自由布局到${copyResponsiveDestinationLabel ?? "另一画布"}`],
                     ["backward", "下移一层"],
                     ["forward", "上移一层"],
                   ] as const : []),
@@ -551,10 +950,11 @@ export default function EditableTargetOverlay({
                       onNodeAction(selectedBox.target, action);
                     }}
                   >
-                    {label.slice(0, 1)}
+                    {label}{disabledNodeActions?.get(selectedBox.target.targetId)?.has(action) ? "（必填槽位不可用）" : ""}
                   </button>
                 ))}
-              </div>
+                </div>
+              </details>
             ) : null}
           {resizeTargetIds?.has(selectedBox.target.targetId) ? RESIZE_HANDLES.map((direction) => (
             <button

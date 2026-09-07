@@ -1,9 +1,11 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PassportStrategy } from "@nestjs/passport";
 import { ExtractJwt, Strategy } from "passport-jwt";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { extractSessionCookieToken } from "../../common/security/session-security";
 import type { AdminAccessTokenPayload } from "../../common/security/authenticated-principal";
+import { resolveJwtSecret } from "../../common/config/runtime-environment";
 
 function isAdminAccessTokenPayload(
   payload: unknown,
@@ -20,7 +22,10 @@ function isAdminAccessTokenPayload(
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    config: ConfigService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -28,11 +33,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           extractSessionCookieToken(request.headers?.cookie, "admin"),
       ]),
       ignoreExpiration: false,
-      secretOrKey:
-        process.env.JWT_SECRET ||
-        (() => {
-          throw new Error("JWT_SECRET 环境变量未设置");
-        })(),
+      secretOrKey: resolveJwtSecret(
+        config.get("JWT_SECRET"),
+        config.get("NODE_ENV"),
+      ),
     });
   }
 

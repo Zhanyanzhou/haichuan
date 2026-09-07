@@ -49,7 +49,11 @@ export function resolveCorsOrigins(
   }
 
   const origins = parseConfiguredOrigins(configuredOrigins);
-  if (!isProduction) {
+  if (isProduction) {
+    if (origins.some((origin) => new URL(origin).protocol !== "https:")) {
+      throw new Error("CORS_ORIGIN 在生产环境只允许 HTTPS 来源。");
+    }
+  } else {
     for (const origin of origins) {
       const hostname = new URL(origin).hostname;
       if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) {

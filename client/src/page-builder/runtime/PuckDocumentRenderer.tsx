@@ -13,7 +13,6 @@ import { convertPuckProps } from "@/page-builder/utils/puckPropsToModule";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import {
   getContentTemplateIssues,
-  sanitizeContentTemplateLayoutData,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
 import ContentTemplateContractFrame from "@/page-builder/runtime/ContentTemplateContractFrame";
@@ -239,18 +238,9 @@ function renderBlock(
     );
   }
 
-  const renderValidationProps = props.__instanceOverrides === undefined
-    ? props
-    : {
-        ...props,
-        __instanceOverrides: sanitizeContentTemplateLayoutData(
-          block.type || "",
-          props.__instanceOverrides,
-        ),
-      };
   const templateIssue = getContentTemplateIssues({
     moduleType: block.type,
-    props: renderValidationProps,
+    props,
     blockId: props.id,
     path: `content[${index}].props.__contentTemplate`,
   }).find((issue) => issue.severity === "error");

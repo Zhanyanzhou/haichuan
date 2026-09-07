@@ -437,3 +437,293 @@ test.describe("后台经营底座第一批状态", () => {
     await expect(page.getByRole("spinbutton")).toHaveValue("");
   });
 });
+
+test.describe("后台经营底座第二批状态", () => {
+  test("订单详情失败时保留抽屉并可就地重新加载", async ({ page }) => {
+    await authenticateAdmin(page);
+    let detailAttempts = 0;
+    const order = {
+      id: 501,
+      orderNo: "HC-ORDER-501",
+      customerName: "详情恢复测试客户",
+      customerPhone: "13800000501",
+      address: "测试地址",
+      totalAmount: 12800,
+      discountAmount: 0,
+      finalAmount: 12800,
+      paidAmount: 0,
+      status: "PENDING_PAYMENT",
+      orderType: "SPOT",
+      deliveryStatus: "PENDING_SHIP",
+      payments: [],
+      items: [],
+      createdAt: "2026-09-06T08:00:00.000Z",
+    };
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
+      if (path.endsWith("/api/orders/501")) {
+        detailAttempts += 1;
+        if (detailAttempts === 1) return fulfillJson(route, null, 503);
+        return fulfillJson(route, order);
+      }
+      if (path.endsWith("/api/orders")) {
+        return fulfillJson(route, { list: [order], total: 1 });
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto("/admin/orders");
+    await page.getByRole("row").filter({ hasText: "HC-ORDER-501" })
+      .getByRole("button", { name: "详情" }).click();
+
+    const drawer = page.getByRole("dialog", { name: "订单详情" });
+    await expect(drawer.getByText("订单详情加载失败", { exact: true })).toBeVisible();
+    await expect(drawer.getByText("HC-ORDER-501", { exact: true })).toHaveCount(0);
+    await drawer.getByRole("button", { name: "重新加载" }).click();
+    await expect(drawer.getByText("HC-ORDER-501", { exact: true }).first()).toBeVisible();
+    expect(detailAttempts).toBe(2);
+  });
+
+  test("报价单详情失败时保留抽屉并可就地重新加载", async ({ page }) => {
+    await authenticateAdmin(page);
+    let detailAttempts = 0;
+    const quotation = {
+      id: 601,
+      quoteNo: "HC-QUOTE-601",
+      customerName: "报价恢复测试客户",
+      customerPhone: "13800000601",
+      status: "DRAFT",
+      totalAmount: 16800,
+      discountAmount: 800,
+      finalAmount: 16000,
+      depositAmount: 2000,
+      items: [],
+      createdAt: "2026-09-06T08:00:00.000Z",
+    };
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
+      if (path.endsWith("/api/quotations/601")) {
+        detailAttempts += 1;
+        if (detailAttempts === 1) return fulfillJson(route, null, 503);
+        return fulfillJson(route, quotation);
+      }
+      if (path.endsWith("/api/quotations")) {
+        return fulfillJson(route, { list: [quotation], total: 1 });
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto("/admin/trade/quotations");
+    await page.getByRole("row").filter({ hasText: "HC-QUOTE-601" })
+      .getByRole("button", { name: "详情" }).click();
+
+    const drawer = page.getByRole("dialog", { name: "报价单详情" });
+    await expect(drawer.getByText("报价单详情加载失败", { exact: true })).toBeVisible();
+    await drawer.getByRole("button", { name: "重新加载" }).click();
+    await expect(drawer.getByText("HC-QUOTE-601", { exact: true }).first()).toBeVisible();
+    expect(detailAttempts).toBe(2);
+  });
+
+  test("备份状态查询失败不伪造未挂载状态，重试后显示真实结果", async ({ page }) => {
+    await authenticateAdmin(page);
+    let attempts = 0;
+
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
+      if (path.endsWith("/api/settings/backup")) {
+        attempts += 1;
+        if (attempts === 1) return fulfillJson(route, null, 503);
+        return fulfillJson(route, {
+          lastBackup: "2026-09-06T07:00:00.000Z",
+          autoBackup: true,
+          storageMounted: true,
+          backupSchedule: "每 24 小时执行一次",
+          totalBackups: 3,
+          executionStatus: "SUCCESS",
+          lastAttemptFinishedAt: "2026-09-06T07:05:00.000Z",
+          lastExitCode: 0,
+          message: "最近一次备份已完成。",
+          latestFiles: [],
+        });
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto("/admin/settings");
+    await expect(page.getByText("备份状态加载失败", { exact: true })).toBeVisible();
+    await expect(page.getByText("未挂载", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("自动备份", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "重新加载" }).click();
+    await expect(page.getByText("数据库与媒体备份", { exact: true })).toBeVisible();
+    await expect(page.getByText("已成功", { exact: true })).toBeVisible();
+    await expect(page.getByText("已配置", { exact: true })).toBeVisible();
+    expect(attempts).toBe(2);
+  });
+
+  test("未知备份执行状态安全降级而不让系统设置页崩溃", async ({ page }) => {
+    await authenticateAdmin(page);
+
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
+      if (path.endsWith("/api/settings/backup")) {
+        return fulfillJson(route, {
+          lastBackup: null,
+          autoBackup: false,
+          storageMounted: true,
+          backupSchedule: null,
+          totalBackups: 0,
+          executionStatus: "UPSTREAM_NEW_STATUS",
+          message: "上游返回了尚未识别的状态。",
+          latestFiles: [],
+        });
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto("/admin/settings");
+    await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+    await expect(page.getByText("状态未知", { exact: true })).toHaveCount(2);
+    await expect(page.getByText("上游返回了尚未识别的状态。", { exact: true })).toHaveCount(2);
+  });
+
+  test("商品批量操作部分失败后保留失败项选择", async ({ page }) => {
+    await authenticateAdmin(page);
+    const products = [
+      {
+        id: 701,
+        code: "HC-PRODUCT-701",
+        name: "批量成功商品",
+        categoryId: 1,
+        materialType: "GOLD",
+        status: "DRAFT",
+        price: 12800,
+        totalStock: 1,
+        salesCount: 0,
+        images: [],
+        skus: [],
+        createdAt: "2026-09-06T08:00:00.000Z",
+      },
+      {
+        id: 702,
+        code: "HC-PRODUCT-702",
+        name: "批量失败商品",
+        categoryId: 1,
+        materialType: "GOLD",
+        status: "DRAFT",
+        price: 16800,
+        totalStock: 1,
+        salesCount: 0,
+        images: [],
+        skus: [],
+        createdAt: "2026-09-06T08:00:00.000Z",
+      },
+    ];
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
+      if (path.endsWith("/api/products/counts")) {
+        return fulfillJson(route, { all: 2, DRAFT: 2, PUBLISHED: 0, OFFLINE: 0, ARCHIVED: 0 });
+      }
+      if (path.endsWith("/api/products/701/status") && request.method() === "PUT") {
+        return fulfillJson(route, { id: 701, status: "PUBLISHED" });
+      }
+      if (path.endsWith("/api/products/702/status") && request.method() === "PUT") {
+        return fulfillJson(route, null, 503);
+      }
+      if (path.endsWith("/api/products")) {
+        return fulfillJson(route, { list: products, total: 2 });
+      }
+      if (path.endsWith("/api/categories/admin/tree")) {
+        return fulfillJson(route, []);
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto("/admin/products");
+    const successRow = page.getByRole("row").filter({ hasText: "批量成功商品" });
+    const failedRow = page.getByRole("row").filter({ hasText: "批量失败商品" });
+    await successRow.getByRole("checkbox").check();
+    await failedRow.getByRole("checkbox").check();
+    await page.getByRole("button", { name: "更多批量操作" }).click();
+    await page.getByRole("menuitem", { name: "批量上架" }).click();
+
+    await expect(page.getByText(/已完成 1 项，共 2 项；未完成项请检查后重试/)).toBeVisible();
+    await expect(successRow.getByRole("checkbox")).not.toBeChecked();
+    await expect(failedRow.getByRole("checkbox")).toBeChecked();
+    await expect(page.getByText("已选 1 件", { exact: true })).toBeVisible();
+  });
+
+  test("390px 下高频运营页保留对象、主操作且不产生页面级横向滚动", async ({ page }) => {
+    await authenticateAdmin(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
+      if (path.endsWith("/api/products/counts")) {
+        return fulfillJson(route, { all: 0, DRAFT: 0, PUBLISHED: 0, OFFLINE: 0, ARCHIVED: 0 });
+      }
+      if (path.endsWith("/api/products")) {
+        return fulfillJson(route, { list: [], total: 0 });
+      }
+      if (path.endsWith("/api/categories/admin/tree")) {
+        return fulfillJson(route, []);
+      }
+      if (path.endsWith("/api/orders") || path.endsWith("/api/quotations")) {
+        return fulfillJson(route, { list: [], total: 0 });
+      }
+      if (path.endsWith("/api/customers/admin")) {
+        return fulfillJson(route, { list: [], total: 0 });
+      }
+      if (path.endsWith("/api/settings/backup")) {
+        return fulfillJson(route, {
+          lastBackup: null,
+          autoBackup: false,
+          storageMounted: false,
+          backupSchedule: null,
+          totalBackups: 0,
+          executionStatus: "UNKNOWN",
+          message: "本地环境未挂载备份目录。",
+          latestFiles: [],
+        });
+      }
+      await fulfillJson(route, {});
+    });
+
+    const pages = [
+      { path: "/admin/products", heading: "商品管理", action: "新建商品" },
+      { path: "/admin/orders", heading: "订单中心", action: "人工建单" },
+      { path: "/admin/trade/quotations", heading: "报价管理", action: "新建报价" },
+      { path: "/admin/customers", heading: "客户管理", action: "刷新" },
+      { path: "/admin/settings", heading: "系统设置", action: "刷新备份状态" },
+    ];
+
+    for (const target of pages) {
+      await page.goto(target.path);
+      await expect(page.getByRole("heading", { name: target.heading })).toBeVisible();
+      await expect(page.getByRole("button", { name: target.action })).toBeVisible();
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        `${target.path} 不应产生页面级横向滚动`,
+      ).toBe(true);
+    }
+
+    await page.goto("/admin/products");
+    const advanced = page.getByRole("button", { name: /展\s*开/ });
+    await advanced.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("button", { name: /收\s*起/ }))
+      .toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#product-advanced-filters")).toBeVisible();
+  });
+});

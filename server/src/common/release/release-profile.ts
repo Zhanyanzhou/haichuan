@@ -1,16 +1,19 @@
-export type ReleaseProfile = "lead-generation" | "commerce";
+export const RELEASE_PROFILES = ["lead-generation", "commerce"] as const;
+export type ReleaseProfile = (typeof RELEASE_PROFILES)[number];
+export const DEFAULT_RELEASE_PROFILE: ReleaseProfile = RELEASE_PROFILES[0];
+export const COMMERCE_RELEASE_PROFILE: ReleaseProfile = RELEASE_PROFILES[1];
 
 export function parseReleaseProfile(value?: string): ReleaseProfile {
-  const profile = value?.trim() || "lead-generation";
-  if (profile !== "lead-generation" && profile !== "commerce") {
+  const profile = value?.trim() || DEFAULT_RELEASE_PROFILE;
+  if (!RELEASE_PROFILES.includes(profile as ReleaseProfile)) {
     throw new Error("unsupported release profile");
   }
-  return profile;
+  return profile as ReleaseProfile;
 }
 
 /** 运行时采用安全默认：只有显式 commerce 才允许公开直购商品事实。 */
 export function isCommerceReleaseProfile(value = process.env.RELEASE_PROFILE) {
-  return value?.trim() === "commerce";
+  return value?.trim() === COMMERCE_RELEASE_PROFILE;
 }
 
 /**

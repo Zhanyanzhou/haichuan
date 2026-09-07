@@ -12,6 +12,10 @@ import {
   prepareLeadIdempotency,
 } from '../leads/lead-submission';
 import { LeadsService } from '../leads/leads.service';
+import {
+  CUSTOMER_INQUIRY_SUBMISSION_SELECT,
+  toCustomerInquirySubmission,
+} from './customer-inquiry.response';
 
 @Injectable()
 export class InquiriesService {
@@ -115,6 +119,7 @@ export class InquiriesService {
           }
           return transaction.inquiry.findUniqueOrThrow({
             where: { id: existing.inquiryId },
+            select: CUSTOMER_INQUIRY_SUBMISSION_SELECT,
           });
         }
       }
@@ -154,6 +159,7 @@ export class InquiriesService {
             },
           },
         },
+        select: CUSTOMER_INQUIRY_SUBMISSION_SELECT,
       });
       await transaction.consentRecord.create({
         data: {
@@ -170,7 +176,7 @@ export class InquiriesService {
     });
 
     try {
-      return await create();
+      return toCustomerInquirySubmission(await create());
     } catch (error) {
       if (!idempotency.idempotencyKeyHash || !isUniqueConstraintError(error)) {
         throw error;
@@ -190,9 +196,11 @@ export class InquiriesService {
         idempotency.submissionFingerprint,
       );
       if (!existing.inquiryId) throw error;
-      return this.prisma.inquiry.findUniqueOrThrow({
+      const inquiry = await this.prisma.inquiry.findUniqueOrThrow({
         where: { id: existing.inquiryId },
+        select: CUSTOMER_INQUIRY_SUBMISSION_SELECT,
       });
+      return toCustomerInquirySubmission(inquiry);
     }
   }
 

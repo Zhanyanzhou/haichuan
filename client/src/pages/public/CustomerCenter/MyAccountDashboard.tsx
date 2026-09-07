@@ -1,6 +1,6 @@
 // 客户中心登录态主面板：账户总览/心愿单/订单(可视化进度+物流轨迹+评价)/个人资料(导出与注销)/地址管理
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   App as AntdApp,
   Modal,
@@ -26,8 +26,11 @@ import CustomerOrdersPanel from "./CustomerOrdersPanel";
 import CustomerReviewDialog from "./CustomerReviewDialog";
 import ForYouRecommendations from "./ForYouRecommendations";
 import CustomerNotificationsPanel from "./CustomerNotificationsPanel";
+import { EXISTING_PASSWORD_MAX_LENGTH } from "@/config/accountPasswordPolicy";
 import type {
   CustomerAfterSalesCase,
+  CustomerConsultationDetail,
+  CustomerConsultationReply,
   CustomerNotificationPage,
   CustomerOrder,
   CustomerReviewOrder,
@@ -44,13 +47,24 @@ type AccountDashboardProps = {
   orders: CustomerOrder[];
   addresses: CustomerAddress[];
   selectionInquiries: CustomerSelectionInquiry[];
+  selectionInquiryLoading: boolean;
+  selectionInquiryError: string | null;
+  onRetrySelectionInquiries: () => Promise<void>;
+  selectedLeadId: number | null;
+  consultationDetail: CustomerConsultationDetail | null;
+  consultationLoading: boolean;
+  consultationError: "not-found" | "error" | null;
+  onRetryConsultation?: () => Promise<void>;
   inquiryPage: CustomerInquiryPage;
   inquiryLoading: boolean;
   inquiryError: string | null;
   onInquiryPageChange: (page: number) => Promise<void>;
   partner: CustomerPartnerState;
+  partnerError: string | null;
   notifications: CustomerNotificationPage;
+  notificationLoading: boolean;
   notificationError: string | null;
+  onRetryNotifications: () => Promise<void>;
   onReadNotification: (id: number) => Promise<void>;
   onReadAllNotifications: () => Promise<void>;
   onSignOut: () => void;
@@ -93,29 +107,159 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="my-account-empty">{children}</p>;
 }
 
+function ConsultationDetail({
+  detailId,
+  message,
+  reply,
+  selected,
+  children,
+}: {
+  detailId: string;
+  message?: string | null;
+  reply?: CustomerConsultationReply | null;
+  selected: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <details
+      id={detailId}
+      className="my-account__consultation-detail"
+      open={selected}
+      tabIndex={-1}
+    >
+      <summary>查看详情</summary>
+      <div className="my-account__consultation-body">
+        {children}
+        <div>
+          <h4>我的需求</h4>
+          <p>{message || "提交时未填写补充说明。"}</p>
+        </div>
+        <div className="my-account__consultation-reply">
+          <h4>顾问回复</h4>
+          {reply ? (
+            <>
+              <p>{reply.content}</p>
+              <small>
+                海川顾问 · {new Date(reply.createdAt).toLocaleString("zh-CN")}
+              </small>
+            </>
+          ) : (
+            <p>顾问尚未回复，请留意服务通知和当前处理状态。</p>
+          )}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ConsultationContext({ detail }: { detail: CustomerConsultationDetail }) {
+  if (detail.type === "selection") {
+    return (
+      <div>
+        <h4>所选作品</h4>
+        <p>
+          {detail.items.map((item) => item.productNameSnapshot).join("、")
+            || "历史记录未保留作品名称。"}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <h4>服务信息</h4>
+      <p>
+        {[
+          detail.preferredContact
+            ? `联系偏好：${detail.preferredContact}`
+            : null,
+          detail.preferredTime ? `方便时间：${detail.preferredTime}` : null,
+          detail.budgetRange ? `预算范围：${detail.budgetRange}` : null,
+        ].filter(Boolean).join("；") || "暂无补充服务信息。"}
+      </p>
+    </div>
+  );
+}
+
 export default function MyAccountDashboard({
   profile,
   partner,
   orders,
   addresses,
   selectionInquiries,
+  selectionInquiryLoading,
+  selectionInquiryError,
+  onRetrySelectionInquiries,
+  selectedLeadId,
+  consultationDetail,
+  consultationLoading,
+  consultationError,
+  onRetryConsultation,
   inquiryPage,
   inquiryLoading,
   inquiryError,
   onInquiryPageChange,
   notifications,
+  notificationLoading,
   notificationError,
+  onRetryNotifications,
   onReadNotification,
   onReadAllNotifications,
   onSignOut,
   onRefresh,
+  partnerError,
 }: AccountDashboardProps) {
   const { message, modal } = AntdApp.useApp();
+  const location = useLocation();
+  const navigate = useNavigate();
   const name = profile?.name || "海川贵宾";
   const commerceEnabled = useCommerceEnabled();
   const inquiries = inquiryPage.list;
   const partnerStatus = partner?.customer?.partnerStatus || "NONE";
   const partnerApprovedAt = partner?.customer?.partnerApprovedAt || null;
+  const [selectionPage, setSelectionPage] = useState(1);
+  const selectionPageSize = 3;
+  const selectionPageCount = Math.max(
+    1,
+    Math.ceil(selectionInquiries.length / selectionPageSize),
+  );
+  const visibleSelectionInquiries = selectionInquiries.slice(
+    (selectionPage - 1) * selectionPageSize,
+    selectionPage * selectionPageSize,
+  );
+
+  useEffect(() => {
+    if (selectionPage <= selectionPageCount) return;
+    setSelectionPage(selectionPageCount);
+  }, [selectionPage, selectionPageCount]);
+
+  useEffect(() => {
+    if (selectedLeadId === null) return;
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById("consultation-focus");
+      target?.scrollIntoView({ block: "center" });
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [consultationDetail, consultationError, consultationLoading, selectedLeadId]);
+
+  const clearConsultationUrl = (focusTargetId: string) => {
+    const params = new URLSearchParams(location.search);
+    params.delete("leadId");
+    if (params.get("section") === "consultations") params.delete("section");
+    const search = params.toString();
+    navigate(`${location.pathname}${search ? `?${search}` : ""}`, {
+      replace: true,
+    });
+    requestAnimationFrame(() => {
+      document.getElementById(focusTargetId)?.focus({ preventScroll: true });
+    });
+  };
+
+  const consultationTitle = consultationDetail?.type === "selection"
+    ? consultationDetail.items[0]?.productNameSnapshot || "选款咨询"
+    : consultationDetail?.product?.name
+      || consultationDetail?.consultationType
+      || "预约咨询";
 
   // 心愿单（组件自治拉取：CustomerCenter 无需为其扩展 props）
   const [favorites, setFavorites] = useState<
@@ -130,6 +274,20 @@ export default function MyAccountDashboard({
       favoritedAt: string;
     }>
   >([]);
+  const [favoriteStatus, setFavoriteStatus] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
+
+  const loadFavorites = useCallback(async () => {
+    setFavoriteStatus("loading");
+    try {
+      const response = await customerApi.getFavorites();
+      setFavorites(unwrapResponse<typeof favorites>(response) || []);
+      setFavoriteStatus("ready");
+    } catch {
+      setFavoriteStatus("error");
+    }
+  }, []);
 
   const removeFavorite = (productId: number) => {
     customerApi
@@ -141,15 +299,8 @@ export default function MyAccountDashboard({
   };
 
   useEffect(() => {
-    customerApi
-      .getFavorites()
-      .then((res) =>
-        setFavorites(
-          unwrapResponse<typeof favorites>(res) || [],
-        ),
-      )
-      .catch(() => setFavorites([]));
-  }, []);
+    void loadFavorites();
+  }, [loadFavorites]);
 
   // 特殊线下订单凭证兜底；标准零售主链使用客户本人发起的微信支付。
   const [proofOrderId, setProofOrderId] = useState<number | null>(null);
@@ -408,13 +559,93 @@ export default function MyAccountDashboard({
         </section>
 
         <div className="my-account__grid">
+          {selectedLeadId !== null ? (
+            <section
+              id="consultation-focus"
+              className="my-account__panel my-account__panel--wide"
+              aria-labelledby="consultation-focus-title"
+              tabIndex={-1}
+            >
+              <div className="my-account__panel-head">
+                <div>
+                  <p>CONSULTATION DETAIL</p>
+                  <h2 id="consultation-focus-title">咨询详情</h2>
+                </div>
+                <button
+                  type="button"
+                  className="my-account__sign-out"
+                  onClick={() => clearConsultationUrl(
+                    consultationDetail?.type === "selection"
+                      ? "my-selections"
+                      : "my-appointments",
+                  )}
+                >
+                  关闭详情
+                </button>
+              </div>
+              {consultationLoading ? (
+                <p className="my-account__records-state" role="status">
+                  正在加载咨询详情…
+                </p>
+              ) : consultationError === "not-found" ? (
+                <div className="my-account__records-state" role="alert">
+                  <p>未找到这条咨询，或者它不属于当前账户。</p>
+                  <button
+                    type="button"
+                    className="my-account__inline-retry"
+                    onClick={() => clearConsultationUrl("my-appointments")}
+                  >
+                    返回咨询列表
+                  </button>
+                </div>
+              ) : consultationError ? (
+                <div className="my-account__records-state" role="alert">
+                  <p>咨询详情暂时无法加载，已保留当前链接。</p>
+                  {onRetryConsultation ? (
+                    <button
+                      type="button"
+                      className="my-account__inline-retry"
+                      onClick={() => void onRetryConsultation()}
+                    >
+                      重新加载
+                    </button>
+                  ) : null}
+                </div>
+              ) : consultationDetail ? (
+                <article className="my-account__consultation-record">
+                  <div className="my-account__consultation-row">
+                    <div>
+                      <small>
+                        {new Date(consultationDetail.createdAt).toLocaleDateString("zh-CN")}
+                      </small>
+                      <h3>{consultationTitle}</h3>
+                    </div>
+                    <em>
+                      {inquiryStatus[consultationDetail.status]
+                        || consultationDetail.status}
+                    </em>
+                  </div>
+                  <ConsultationDetail
+                    detailId="consultation-focus-content"
+                    message={consultationDetail.message}
+                    reply={consultationDetail.reply}
+                    selected
+                  >
+                    <ConsultationContext detail={consultationDetail} />
+                  </ConsultationDetail>
+                </article>
+              ) : null}
+            </section>
+          ) : null}
           <CustomerNotificationsPanel
             resource={notifications}
+            loading={notificationLoading}
             error={notificationError}
+            onRetry={onRetryNotifications}
             onRead={onReadNotification}
             onReadAll={onReadAllNotifications}
           />
-          <section id="my-selections" className="my-account__panel">
+          <section id="my-selections" className="my-account__panel" tabIndex={-1}>
             <div className="my-account__panel-head">
               <div>
                 <p>PRIVATE SELECTION</p>
@@ -422,22 +653,72 @@ export default function MyAccountDashboard({
               </div>
               <Link to="/catalog">进入选款中心 →</Link>
             </div>
-            {selectionInquiries.length ? (
-              <div className="my-account__records">
-                {selectionInquiries.slice(0, 3).map((record) => (
-                  <article key={record.id}>
-                    <div>
-                      <small>
-                        {new Date(record.createdAt).toLocaleDateString("zh-CN")}
-                      </small>
-                      <h3>
-                        {record.items?.[0]?.productNameSnapshot || "选款咨询"}
-                      </h3>
-                    </div>
-                    <em>{inquiryStatus[record.status] || record.status}</em>
-                  </article>
-                ))}
-              </div>
+            {selectionInquiryError ? (
+              <p className="my-account__records-state" role="alert">
+                {selectionInquiryError}
+                <button
+                  type="button"
+                  className="my-account__inline-retry"
+                  onClick={() => void onRetrySelectionInquiries()}
+                >
+                  重新加载
+                </button>
+              </p>
+            ) : null}
+            {selectionInquiryLoading && selectionInquiries.length === 0 ? (
+              <p className="my-account__records-state" role="status">
+                正在加载选款咨询…
+              </p>
+            ) : selectionInquiryError && selectionInquiries.length === 0 ? (
+              null
+            ) : selectionInquiries.length ? (
+              <>
+                <div className="my-account__records" aria-busy={selectionInquiryLoading}>
+                  {visibleSelectionInquiries.map((record) => (
+                    <article key={record.id} className="my-account__consultation-record">
+                      <div className="my-account__consultation-row">
+                        <div>
+                          <small>
+                            {new Date(record.createdAt).toLocaleDateString("zh-CN")}
+                          </small>
+                          <h3>
+                            {record.items?.[0]?.productNameSnapshot || "选款咨询"}
+                          </h3>
+                        </div>
+                        <em>{inquiryStatus[record.status] || record.status}</em>
+                      </div>
+                      <ConsultationDetail
+                        detailId={`consultation-${record.leadId ?? `selection-${record.id}`}`}
+                        message={record.message}
+                        reply={record.reply}
+                        selected={false}
+                      >
+                        <div>
+                          <h4>所选作品</h4>
+                          <p>
+                            {record.items?.map((item) => item.productNameSnapshot).join("、")
+                              || "历史记录未保留作品名称。"}
+                          </p>
+                        </div>
+                      </ConsultationDetail>
+                    </article>
+                  ))}
+                </div>
+                <nav className="my-account__pagination" aria-label="选款咨询分页">
+                  <Pagination
+                    current={selectionPage}
+                    pageSize={selectionPageSize}
+                    total={selectionInquiries.length}
+                    showSizeChanger={false}
+                    hideOnSinglePage
+                    disabled={selectionInquiryLoading}
+                    onChange={(page) => {
+                      setSelectionPage(page);
+                      clearConsultationUrl("my-selections");
+                    }}
+                  />
+                </nav>
+              </>
             ) : (
               <Empty>
                 暂未提交选款咨询。<Link to="/catalog">去挑选心仪作品 →</Link>
@@ -445,7 +726,7 @@ export default function MyAccountDashboard({
             )}
           </section>
 
-          <section id="my-appointments" className="my-account__panel">
+          <section id="my-appointments" className="my-account__panel" tabIndex={-1}>
             <div className="my-account__panel-head">
               <div>
                 <p>PERSONAL SERVICE</p>
@@ -456,28 +737,62 @@ export default function MyAccountDashboard({
             {inquiryError && (
               <p className="my-account__records-state" role="alert">
                 {inquiryError}
+                <button
+                  type="button"
+                  className="my-account__inline-retry"
+                  onClick={() => void onInquiryPageChange(inquiryPage.page)}
+                >
+                  重新加载
+                </button>
               </p>
             )}
             {inquiryLoading && inquiries.length === 0 ? (
               <p className="my-account__records-state" role="status">
                 正在加载预约记录…
               </p>
+            ) : inquiryError && inquiries.length === 0 ? (
+              null
             ) : inquiries.length ? (
               <>
                 <div className="my-account__records" aria-busy={inquiryLoading}>
                   {inquiries.map((record) => (
-                    <article key={record.id}>
-                      <div>
-                        <small>
-                          {new Date(record.createdAt).toLocaleDateString("zh-CN")}
-                        </small>
-                        <h3>
-                          {record.product?.name ||
-                            record.consultationType ||
-                            "预约咨询"}
-                        </h3>
+                    <article key={record.id} className="my-account__consultation-record">
+                      <div className="my-account__consultation-row">
+                        <div>
+                          <small>
+                            {new Date(record.createdAt).toLocaleDateString("zh-CN")}
+                          </small>
+                          <h3>
+                            {record.product?.name ||
+                              record.consultationType ||
+                              "预约咨询"}
+                          </h3>
+                        </div>
+                        <em>{inquiryStatus[record.status] || record.status}</em>
                       </div>
-                      <em>{inquiryStatus[record.status] || record.status}</em>
+                      <ConsultationDetail
+                        detailId={`consultation-${record.leadId ?? `inquiry-${record.id}`}`}
+                        message={record.message}
+                        reply={record.reply}
+                        selected={false}
+                      >
+                        <div>
+                          <h4>服务信息</h4>
+                          <p>
+                            {[
+                              record.preferredContact
+                                ? `联系偏好：${record.preferredContact}`
+                                : null,
+                              record.preferredTime
+                                ? `方便时间：${record.preferredTime}`
+                                : null,
+                              record.budgetRange
+                                ? `预算范围：${record.budgetRange}`
+                                : null,
+                            ].filter(Boolean).join("；") || "暂无补充服务信息。"}
+                          </p>
+                        </div>
+                      </ConsultationDetail>
                     </article>
                   ))}
                 </div>
@@ -489,7 +804,10 @@ export default function MyAccountDashboard({
                     showSizeChanger={false}
                     hideOnSinglePage
                     disabled={inquiryLoading}
-                    onChange={(page) => void onInquiryPageChange(page)}
+                    onChange={(page) => {
+                      clearConsultationUrl("my-appointments");
+                      void onInquiryPageChange(page);
+                    }}
                   />
                 </nav>
               </>
@@ -504,15 +822,35 @@ export default function MyAccountDashboard({
           <section
             id="my-favorites"
             className="my-account__panel my-account__panel--wide"
+            aria-labelledby="my-favorites-title"
           >
             <div className="my-account__panel-head">
               <div>
                 <p>WISHLIST</p>
-                <h2>我的心愿单</h2>
+                <h2 id="my-favorites-title">我的心愿单</h2>
               </div>
-              <strong>{String(favorites.length).padStart(2, "0")}</strong>
+              <strong>
+                {favoriteStatus === "ready"
+                  ? String(favorites.length).padStart(2, "0")
+                  : "—"}
+              </strong>
             </div>
-            {favorites.length ? (
+            {favoriteStatus === "loading" ? (
+              <p className="my-account-empty" role="status">
+                正在加载心愿单…
+              </p>
+            ) : favoriteStatus === "error" ? (
+              <p className="my-account-empty" role="alert">
+                心愿单暂时无法加载。
+                <button
+                  type="button"
+                  className="my-account__summary-action"
+                  onClick={() => void loadFavorites()}
+                >
+                  重新加载
+                </button>
+              </p>
+            ) : favorites.length ? (
               <div className="my-account__records">
                 {favorites.map((fav) => (
                   <article
@@ -669,7 +1007,9 @@ export default function MyAccountDashboard({
               >
                 <div style={{ minWidth: 0 }}>
                   <span style={{ fontSize: 13, color: "#5f6568" }}>
-                    {partnerStatus === "APPROVED"
+                    {partnerError
+                      ? partnerError
+                      : partnerStatus === "APPROVED"
                       ? "✓ 已认证合作商家"
                       : PARTNER_STATUS_LABEL[partnerStatus] ||
                         "尚未申请合作商家身份"}
@@ -677,7 +1017,7 @@ export default function MyAccountDashboard({
                       ? ` · ${new Date(partnerApprovedAt).toLocaleDateString("zh-CN")}`
                       : ""}
                   </span>
-                  {partnerStatus !== "APPROVED" &&
+                  {!partnerError && partnerStatus !== "APPROVED" &&
                   partner?.latest?.reviewNote ? (
                     <p
                       style={{
@@ -690,12 +1030,22 @@ export default function MyAccountDashboard({
                     </p>
                   ) : null}
                 </div>
-                <Link
-                  to={PARTNER_ACTION[partnerStatus]?.to || "/customer?section=partner"}
-                  style={{ fontSize: 12, color: "#181a1b", flexShrink: 0 }}
-                >
-                  {PARTNER_ACTION[partnerStatus]?.label || "了解详情"} →
-                </Link>
+                {partnerError ? (
+                  <button
+                    type="button"
+                    className="my-account__summary-action"
+                    onClick={onRefresh}
+                  >
+                    重新加载
+                  </button>
+                ) : (
+                  <Link
+                    to={PARTNER_ACTION[partnerStatus]?.to || "/customer?section=partner"}
+                    style={{ fontSize: 12, color: "#181a1b", flexShrink: 0 }}
+                  >
+                    {PARTNER_ACTION[partnerStatus]?.label || "了解详情"} →
+                  </Link>
+                )}
               </div>
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -862,6 +1212,7 @@ export default function MyAccountDashboard({
           <Input.Password
             placeholder="输入登录密码确认注销"
             value={closePassword}
+            maxLength={EXISTING_PASSWORD_MAX_LENGTH}
             onChange={(e) => setClosePassword(e.target.value)}
           />
         </div>

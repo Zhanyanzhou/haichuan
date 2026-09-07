@@ -21,6 +21,7 @@ import {
 } from "react";
 import { BLOCK_META } from "../config/blockMeta";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
+import { CONTENT_TEMPLATE_BY_MODULE_TYPE } from "../generated/contentTemplates.generated";
 import { DynamicTemplateRenderer, type TemplateDefinitionV2 } from "../template-definition";
 import {
   createSystemCompatibilityRecoveryDefinition,
@@ -29,6 +30,7 @@ import {
   type UnifiedTemplateCatalogPresentation,
 } from "../templates/unifiedTemplateCatalog";
 import WorkspacePanelHeader from "../workspace/WorkspacePanelHeader";
+import useCompactWorkspaceOverlay from "../workspace/useCompactWorkspaceOverlay";
 import {
   DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT,
   listLocalDynamicTemplateDrafts,
@@ -40,6 +42,12 @@ import TemplateCatalogViewportPreview from "./TemplateCatalogViewportPreview";
 import TemplateCatalogControls, { type TemplateCatalogViewMode } from "./TemplateCatalogControls";
 import { groupTemplateCatalogEntries } from "./templateCatalogGrouping";
 import { DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT } from "./templateCatalogEvents";
+import {
+  getTemplatePublicationLabel,
+  matchesTemplatePublicationFilter,
+  resolveTemplatePublicationStatus,
+  type TemplatePublicationStatus,
+} from "./templatePublicationStatus";
 import {
   createPersonalTemplateDraft,
   createSystemTemplateDraft,
@@ -73,6 +81,7 @@ export type TemplateEditorLibraryTarget =
   | {
       kind: "dynamic-persisted";
       template: DynamicTemplateResource;
+      published?: PublishedDynamicTemplateResource;
       recoveryDefinition?: TemplateDefinitionV2;
     }
   | { kind: "dynamic-local"; localDraftId: string }
@@ -89,7 +98,7 @@ interface CatalogEntryBase {
 interface DesignCatalogEntry extends CatalogEntryBase {
   kind: "design";
   active: boolean;
-  lifecycle: "draft" | "published" | "archived";
+  lifecycle: TemplatePublicationStatus | null;
   target: TemplateEditorLibraryTarget;
 }
 
@@ -97,11 +106,13 @@ interface PageSystemCatalogEntry extends CatalogEntryBase {
   kind: "page-system";
   moduleType: string;
   current: SystemContentTemplateCurrent;
+  insertAllowed: boolean;
 }
 
 interface PagePublishedCatalogEntry extends CatalogEntryBase {
   kind: "page-published";
   template: PublishedDynamicTemplateResource;
+  insertAllowed: boolean;
 }
 
 interface PageDraftCatalogEntry extends CatalogEntryBase {
@@ -131,6 +142,7 @@ interface DesignModeProps {
 interface PageModeProps {
   mode: "page";
   device: "desktop" | "mobile";
+  pageHasPrimaryStage: boolean;
   isSystemTemplateAllowed: (moduleType: string) => boolean;
   onInsertSystem: (moduleType: string, current: SystemContentTemplateCurrent) => void;
   onSystemDragStart: (moduleType: string, current: SystemContentTemplateCurrent) => void;
@@ -139,6 +151,8 @@ interface PageModeProps {
   onInsertPublished: (template: PublishedDynamicTemplateResource) => void;
   onPublishedDragStart: (template: PublishedDynamicTemplateResource) => void;
   onPublishedDragEnd: () => void;
+  getPublishedUpgradeCount: (template: PublishedDynamicTemplateResource) => number;
+  onUpgradePublished: (template: PublishedDynamicTemplateResource) => void;
   getSystemUpgradeCount: (current: SystemContentTemplateCurrent) => number;
   onUpgradeSystem: (current: SystemContentTemplateCurrent) => void;
 }
@@ -149,6 +163,10 @@ function matchesKeyword(keyword: string, ...values: Array<string | undefined | n
   const normalized = keyword.trim().toLocaleLowerCase("zh-CN");
   if (!normalized) return true;
   return values.some((value) => value?.toLocaleLowerCase("zh-CN").includes(normalized));
+}
+
+function withTemplateSuffix(name: string) {
+  return name.endsWith("模板") ? name : `${name}模板`;
 }
 
 const DynamicTemplateCatalogPreview = memo(function DynamicTemplateCatalogPreview({
@@ -255,15 +273,16 @@ function renderUnifiedTemplatePreview(
 
 function readInitialViewMode(): TemplateCatalogViewMode {
   try {
-    return window.localStorage.getItem(VIEW_MODE_STORAGE_KEY) === "single" ? "single" : "double";
+    return window.localStorage.getItem(VIEW_MODE_STORAGE_KEY) === "double" ? "double" : "single";
   } catch {
-    return "double";
+    return "single";
   }
 }
 
 function readInitialCollapsed() {
   try {
-    return window.matchMedia("(max-width: 900px), (min-width: 1200px) and (max-width: 1439px)").matches
+    if (window.matchMedia("(min-width: 1200px)").matches) return false;
+    return window.matchMedia("(max-width: 900px)").matches
       || window.sessionStorage.getItem(COLLAPSED_STORAGE_KEY) === "1";
   } catch {
     return false;
@@ -308,6 +327,10 @@ function DesignTemplateCard({
   const persistedTemplate = entry.target.kind === "dynamic-persisted"
     ? entry.target.template
     : null;
+  const lifecycleLabel = getTemplatePublicationLabel(entry.lifecycle);
+  const formalVersion = persistedTemplate?.publishedVersion
+    ?? (entry.target.kind === "system-fixed" ? entry.target.current?.activeVersion : undefined);
+  const purpose = persistedTemplate?.draft?.definition.metadata.purpose;
   const requiresInitialSave = entry.target.kind === "system-fixed"
     || entry.target.kind === "personal-fixed";
   const deleteBlockedReason = persistedTemplate?.deleteBlockers?.[0]?.message
@@ -365,14 +388,23 @@ function DesignTemplateCard({
     <TemplateCatalogCard
       active={entry.active}
       ariaLabel={archivedTemplate
-        ? `回收站模板“${entry.name}”，恢复后才能设计`
-        : `${entry.active ? "正在编辑" : "打开"}${entry.name}模板`}
+        ? `回收站模板“${entry.name}”，恢复后才能设计，状态：${lifecycleLabel}`
+        : `${entry.active ? "正在编辑" : "打开"}${withTemplateSuffix(entry.name)}，状态：${lifecycleLabel.replace(" · ", "，")}`}
       className={`unified-template-library__card is-${device}${archivedTemplate ? " is-trash-template" : ""}`}
       compact={viewMode === "double"}
       dataTemplateIdentity={entry.identity}
       disabled={Boolean(archivedTemplate)}
       name={entry.name}
+      metadata={purpose && purpose !== entry.group && purpose !== entry.name ? purpose : undefined}
+      actionLabel={archivedTemplate ? "恢复后可编辑" : "编辑模板"}
+      disabledReason={archivedTemplate ? "请通过更多模板操作恢复模板" : undefined}
       preview={entry.preview}
+      statusLabel={(
+        <span data-template-publication-status={entry.lifecycle ?? "unverifiable"}>
+          {lifecycleLabel}
+          {formalVersion ? ` · v${formalVersion}` : ""}
+        </span>
+      )}
       onClick={archivedTemplate ? undefined : () => onOpen(entry.target)}
       trailingAction={(
         <Dropdown
@@ -416,23 +448,29 @@ function PageSystemTemplateCard({
   viewMode: TemplateCatalogViewMode;
 }) {
   const upgradeCount = getUpgradeCount(entry.current);
+  const insertAllowed = entry.insertAllowed;
   return (
     <TemplateCatalogCard
-      ariaLabel={`${entry.name}：点击添加到页面末尾，也可拖到画布指定位置`}
-      className={`unified-template-library__card is-${device}`}
+      ariaLabel={insertAllowed
+        ? `${entry.name}：点击添加到页面末尾，也可拖到画布指定位置`
+        : `${entry.name}已有主舞台实例，不能再次添加`}
+      className={`unified-template-library__card is-${device}${insertAllowed ? "" : " is-insert-blocked"}`}
       compact={viewMode === "double"}
       controlClassName="homepage-editor__template-card-activate"
       dataTemplateIdentity={entry.identity}
       dataTemplateName={entry.moduleType}
-      draggable
+      disabled={!insertAllowed}
+      draggable={insertAllowed}
       name={entry.name}
       preview={entry.preview}
-      onClick={() => onActivate(entry.moduleType, entry.current)}
-      onDragStart={(event) => {
+      metadata={entry.group}
+      statusLabel={entry.current.activeVersion > 0 ? `已发布 · v${entry.current.activeVersion}` : "内置模板"}
+      onClick={insertAllowed ? () => onActivate(entry.moduleType, entry.current) : undefined}
+      onDragStart={insertAllowed ? (event) => {
         event.dataTransfer.effectAllowed = "copy";
         event.dataTransfer.setData("application/x-haichuan-page-template", entry.moduleType);
         onDragStart(entry.moduleType, entry.current);
-      }}
+      } : undefined}
       onDragEnd={onDragEnd}
       trailingAction={upgradeCount > 0 ? (
         <button
@@ -441,6 +479,68 @@ function PageSystemTemplateCard({
           onClick={() => onUpgrade(entry.current)}
           aria-label={`升级页面中的${entry.name}模板，共 ${upgradeCount} 处`}
           title={`升级页面中的${entry.name}模板，共 ${upgradeCount} 处`}
+        >
+          <ExclamationCircleOutlined />
+        </button>
+      ) : null}
+    />
+  );
+}
+
+function PagePublishedTemplateCard({
+  device,
+  entry,
+  getUpgradeCount,
+  onActivate,
+  onDragEnd,
+  onDragStart,
+  onUpgrade,
+  viewMode,
+}: {
+  device: "desktop" | "mobile";
+  entry: PagePublishedCatalogEntry;
+  getUpgradeCount: PageModeProps["getPublishedUpgradeCount"];
+  onActivate: PageModeProps["onInsertPublished"];
+  onDragEnd: PageModeProps["onPublishedDragEnd"];
+  onDragStart: PageModeProps["onPublishedDragStart"];
+  onUpgrade: PageModeProps["onUpgradePublished"];
+  viewMode: TemplateCatalogViewMode;
+}) {
+  const upgradeCount = getUpgradeCount(entry.template);
+  const insertAllowed = entry.insertAllowed;
+  return (
+    <TemplateCatalogCard
+      ariaLabel={insertAllowed
+        ? `添加${entry.name}版本${entry.template.version}`
+        : `${entry.name}版本${entry.template.version}已添加为主舞台，不能再次添加`}
+      className={`unified-template-library__card is-${device}${insertAllowed ? "" : " is-insert-blocked"}`}
+      compact={viewMode === "double"}
+      controlClassName="homepage-editor__dynamic-template-card-main"
+      dataTemplateIdentity={entry.identity}
+      dataTemplateName={entry.template.templateId}
+      disabled={!insertAllowed}
+      draggable={insertAllowed}
+      name={entry.name}
+      preview={entry.preview}
+      metadata={[entry.group, entry.template.definition.metadata.purpose].filter(Boolean).join(" · ")}
+      statusLabel={`已发布 · v${entry.template.version}`}
+      onClick={insertAllowed ? () => onActivate(entry.template) : undefined}
+      onDragStart={insertAllowed ? (event) => {
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData(
+          "application/x-haichuan-published-template",
+          `${entry.template.templateId}@${entry.template.version}`,
+        );
+        onDragStart(entry.template);
+      } : undefined}
+      onDragEnd={onDragEnd}
+      trailingAction={upgradeCount > 0 ? (
+        <button
+          type="button"
+          className="homepage-editor__template-upgrade-action"
+          onClick={() => onUpgrade(entry.template)}
+          aria-label={`升级页面中的${entry.name}动态模板，共 ${upgradeCount} 处`}
+          title={`升级页面中的${entry.name}动态模板，共 ${upgradeCount} 处`}
         >
           <ExclamationCircleOutlined />
         </button>
@@ -465,6 +565,23 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const [localDrafts, setLocalDrafts] = useState<StoredDynamicTemplateDraft[]>(() => (
     localOnly ? listLocalDynamicTemplateDrafts() : []
   ));
+  const setLibraryCollapsed = useCallback((next: boolean) => {
+    setCollapsed(next);
+    try { window.sessionStorage.setItem(COLLAPSED_STORAGE_KEY, next ? "1" : "0"); } catch { /* 非关键偏好 */ }
+  }, []);
+  const libraryOverlay = useCompactWorkspaceOverlay({
+    open: props.mode === "design" && !collapsed,
+    onOpen: () => setLibraryCollapsed(false),
+    onClose: () => setLibraryCollapsed(true),
+  });
+
+  useEffect(() => {
+    if (!libraryOverlay.compact) {
+      setLibraryCollapsed(false);
+    } else if (props.mode === "design") {
+      setLibraryCollapsed(true);
+    }
+  }, [libraryOverlay.compact, props.mode, setLibraryCollapsed]);
 
   useEffect(() => {
     try { window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode); } catch { /* 非关键偏好 */ }
@@ -479,15 +596,11 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     return () => mobileWorkspace.removeEventListener("change", collapseForMobile);
   }, []);
 
-  const setLibraryCollapsed = (next: boolean) => {
-    setCollapsed(next);
-    try { window.sessionStorage.setItem(COLLAPSED_STORAGE_KEY, next ? "1" : "0"); } catch { /* 非关键偏好 */ }
-  };
   const openDesignTarget = (target: TemplateEditorLibraryTarget) => {
     if (props.mode !== "design") return;
     props.onOpen(target);
-    if (window.matchMedia("(min-width: 1280px) and (max-width: 1599px)").matches) {
-      setLibraryCollapsed(true);
+    if (libraryOverlay.compact) {
+      libraryOverlay.requestClose();
     }
   };
 
@@ -555,6 +668,8 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             ...presentation.published.tags,
           )
         ) {
+          const insertAllowed = presentation.published.definition.metadata.visualRole !== "primary-stage"
+            || !props.pageHasPrimaryStage;
           entries.push({
             kind: "page-published",
             key: entry.key,
@@ -563,13 +678,13 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             name: presentation.name,
             ...renderUnifiedTemplatePreview(presentation, props.device),
             template: presentation.published,
+            insertAllowed,
           });
           continue;
         }
         if (presentation.source === "draft") {
           // 回收站状态只影响新页面可选目录；历史页面继续按精确版本重放。
           if (presentation.editable.status === "ARCHIVED") continue;
-          if (current && !props.isSystemTemplateAllowed(current.moduleType)) continue;
           if (!matchesKeyword(
             keyword,
             presentation.name,
@@ -580,6 +695,9 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           )) continue;
           const currentMeta = current ? BLOCK_META[current.moduleType] : null;
           if (current && currentMeta) {
+            if (!props.isSystemTemplateAllowed(current.moduleType)) continue;
+            const insertAllowed = CONTENT_TEMPLATE_BY_MODULE_TYPE[current.moduleType]?.visualRole !== "primary-stage"
+              || !props.pageHasPrimaryStage;
             const currentPresentation: UnifiedTemplateCatalogPresentation = {
               source: "system-compatibility",
               name: current.displayName,
@@ -596,6 +714,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
               ...renderUnifiedTemplatePreview(currentPresentation, props.device),
               moduleType: current.moduleType,
               current,
+              insertAllowed,
             });
             continue;
           }
@@ -603,15 +722,18 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           continue;
         }
         if (presentation.source === "system-compatibility") {
-          if (!props.isSystemTemplateAllowed(presentation.current.moduleType)) continue;
           const meta = BLOCK_META[presentation.current.moduleType];
-          if (!meta || !matchesKeyword(
+          if (!meta
+            || !props.isSystemTemplateAllowed(presentation.current.moduleType)
+            || !matchesKeyword(
             keyword,
             presentation.current.moduleType,
             meta.name,
             meta.description,
             ...meta.tags,
           )) continue;
+          const insertAllowed = CONTENT_TEMPLATE_BY_MODULE_TYPE[presentation.current.moduleType]?.visualRole !== "primary-stage"
+            || !props.pageHasPrimaryStage;
           entries.push({
             kind: "page-system",
             key: entry.key,
@@ -621,6 +743,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             ...renderUnifiedTemplatePreview(presentation, props.device),
             moduleType: presentation.current.moduleType,
             current: presentation.current,
+            insertAllowed,
           });
         }
         continue;
@@ -645,6 +768,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         const target: TemplateEditorLibraryTarget = {
           kind: "dynamic-persisted",
           template: editable,
+          ...(entry.published ? { published: entry.published } : {}),
           recoveryDefinition,
         };
         const matchesActiveSource = Boolean(
@@ -657,11 +781,14 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           identity: identityForTarget(target),
           group: editable.category,
           active: props.activePersistedTemplateId === editable.templateId || matchesActiveSource,
-          lifecycle: editable.status === "ARCHIVED"
-            ? "archived"
-            : editable.publishedVersion > 0
-              ? "published"
-              : "draft",
+          lifecycle: resolveTemplatePublicationStatus({
+            status: editable.status,
+            publishedVersion: editable.publishedVersion,
+            draftDefinitionChecksum: editable.draft.definitionChecksum,
+            publishedDefinitionChecksum: entry.published?.version === editable.publishedVersion
+              ? entry.published.definitionChecksum
+              : null,
+          }),
           name: editable.name,
           target,
           ...renderUnifiedTemplatePreview(presentation, props.device),
@@ -678,7 +805,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           identity: identityForTarget(target),
           group: meta?.category ?? "其他用途",
           active: props.activeSourceReference === `legacy_system_${current.contractKey}`,
-          lifecycle: "published",
+          lifecycle: "published-current",
           name: meta?.name ?? current.displayName,
           target,
           ...renderUnifiedTemplatePreview(presentation, props.device),
@@ -726,7 +853,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       if (entry.kind !== "design") return true;
       if (designView === "trash") return entry.lifecycle === "archived";
       if (entry.lifecycle === "archived") return false;
-      return designStatus === "all" || entry.lifecycle === designStatus;
+      return matchesTemplatePublicationFilter(entry.lifecycle, designStatus);
     });
   }, [designStatus, designView, keyword, localDrafts, localOnly, props, unifiedCatalog]);
 
@@ -734,6 +861,16 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     () => groupTemplateCatalogEntries(catalogEntries, (entry) => entry.group),
     [catalogEntries],
   );
+  const visibleCatalogGroups = props.mode === "design"
+    ? [{ group: "模板", entries: catalogEntries }]
+    : groupedCatalogEntries;
+  const visibleEntryCount = visibleCatalogGroups.reduce((count, group) => count + group.entries.length, 0);
+  const hasFilters = Boolean(keyword.trim()) || (props.mode === "design" && (designStatus !== "all" || designView !== "library"));
+  const resetFilters = () => {
+    setKeyword("");
+    setDesignStatus("all");
+    setDesignView("library");
+  };
 
   if (collapsed) {
     return (
@@ -741,15 +878,18 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         className="homepage-editor__library homepage-editor__library--collapsed"
         aria-label="模板组件库（已收起）"
         data-unified-template-library={props.mode}
+        data-compact-overlay={libraryOverlay.compact ? "library-trigger" : undefined}
       >
         <button
+          ref={libraryOverlay.openButtonRef}
           type="button"
           className="homepage-editor__library-expand-btn admin-panel-collapse-toggle"
-          onClick={() => setLibraryCollapsed(false)}
+          onClick={libraryOverlay.requestOpen}
           title="展开模板组件库"
           aria-label="展开模板组件库"
         >
           <RightOutlined />
+          <span className="homepage-editor__compact-panel-label">模板目录</span>
         </button>
       </aside>
     );
@@ -757,29 +897,39 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
 
   return (
     <aside
+      ref={libraryOverlay.panelRef}
       className="homepage-editor__library template-editor__library"
-      aria-label="模板组件库"
+      aria-label={libraryOverlay.compact && props.mode === "design"
+        ? "模板设计模板目录"
+        : "模板组件库"}
       data-unified-template-library={props.mode}
+      role={libraryOverlay.compact && props.mode === "design" ? "dialog" : undefined}
+      aria-modal={libraryOverlay.compact && props.mode === "design" ? "true" : undefined}
+      tabIndex={libraryOverlay.compact && props.mode === "design" ? -1 : undefined}
+      data-compact-overlay={libraryOverlay.compact ? "library" : undefined}
+      data-compact-overlay-open={libraryOverlay.compact || undefined}
+      onKeyDown={libraryOverlay.onPanelKeyDown}
     >
       <div className="homepage-editor__library-tools">
         <WorkspacePanelHeader
           icon={<AppstoreOutlined />}
           title="模板组件库"
-          actions={(
+          actions={libraryOverlay.compact ? (
             <button
+              ref={libraryOverlay.closeButtonRef}
               type="button"
               className="homepage-editor__library-collapse-btn admin-panel-collapse-toggle"
-              onClick={() => setLibraryCollapsed(true)}
+              onClick={libraryOverlay.requestClose}
               title="收起模板组件库"
               aria-label="收起模板组件库"
             >
               <LeftOutlined />
             </button>
-          )}
-        />
-        <TemplateCatalogControls
-          keyword={keyword}
-          onKeywordChange={setKeyword}
+          ) : undefined}
+          />
+          <TemplateCatalogControls
+            keyword={keyword}
+            onKeywordChange={setKeyword}
           placeholder="搜索模板"
           searchAriaLabel="搜索模板"
           viewMode={viewMode}
@@ -789,8 +939,9 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
               ? "回收站中的模板只能恢复或永久删除"
               : "点击编辑模板；更多操作在卡片右侧"
             : "点击添加，也可拖到画布"}
-          countLabel={String(catalogEntries.length)}
-          countTitle={`当前显示 ${catalogEntries.length} 个模板`}
+          countLabel={String(visibleEntryCount)}
+          countTitle={`当前显示 ${visibleEntryCount} 个模板`}
+          singleViewToggle={props.mode === "design"}
         />
         {props.mode === "design" ? (
           <div
@@ -833,28 +984,15 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             )}
           </div>
         ) : null}
+        {hasFilters ? (
+          <div className="unified-template-library__filter-summary" role="status">
+            <span>{[keyword.trim() ? `搜索：${keyword.trim()}` : "", props.mode === "design" && designView === "trash" ? "回收站" : "", props.mode === "design" && designStatus !== "all" ? designStatus === "draft" ? "草稿" : "已发布" : ""].filter(Boolean).join(" · ")}</span>
+            <button type="button" onClick={resetFilters}>重置筛选</button>
+          </div>
+        ) : null}
       </div>
 
       <div className={`homepage-editor__template-scroll unified-template-library__scroll${viewMode === "double" ? " is-double" : ""}`}>
-        <div
-          className="homepage-editor__template-group homepage-editor__template-catalog-heading"
-          aria-labelledby="unified-template-catalog-heading"
-        >
-          <div className="homepage-editor__template-group-heading">
-            <h3 id="unified-template-catalog-heading">
-              {props.mode === "design" && designView === "trash" ? "模板回收站" : "模板目录"}
-            </h3>
-            {props.mode === "design" && designView === "library" ? (
-              <button
-                type="button"
-                className="homepage-editor__library-empty-action"
-                onClick={() => openDesignTarget({ kind: "dynamic-new" })}
-              >
-                <PlusOutlined /> 新建空白模板
-              </button>
-            ) : null}
-          </div>
-        </div>
         {catalogLoading ? (
           <div className="homepage-editor__library-empty" role="status">
             <Spin size="small" />
@@ -868,8 +1006,11 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           </div>
         ) : null}
         <section className="homepage-editor__template-group" aria-label="模板列表">
-          <div className="homepage-editor__template-group-grid">
-            {groupedCatalogEntries.flatMap(({ entries }) => entries).map((entry) => {
+          {visibleCatalogGroups.map(({ group, entries }) => {
+            // 设计模式的单一分组名就是“模板”，再拼接后缀会得到“模板模板”。
+            return <section key={group} aria-label={group.endsWith("模板") ? group : `${group}模板`}>
+            <div className="homepage-editor__template-group-grid">
+            {entries.map((entry) => {
                 if (entry.kind === "design" && props.mode === "design") {
                   return (
                     <DesignTemplateCard
@@ -886,26 +1027,16 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                 }
                 if (entry.kind === "page-published" && props.mode === "page") {
                   return (
-                    <TemplateCatalogCard
+                    <PagePublishedTemplateCard
                       key={entry.key}
-                      ariaLabel={`添加${entry.name}版本${entry.template.version}`}
-                      className={`unified-template-library__card is-${props.device}`}
-                      compact={viewMode === "double"}
-                      controlClassName="homepage-editor__dynamic-template-card-main"
-                      dataTemplateIdentity={entry.identity}
-                      draggable
-                      name={entry.name}
-                      preview={entry.preview}
-                      onClick={() => props.onInsertPublished(entry.template)}
-                      onDragStart={(event) => {
-                        event.dataTransfer.effectAllowed = "copy";
-                        event.dataTransfer.setData(
-                          "application/x-haichuan-published-template",
-                          `${entry.template.templateId}@${entry.template.version}`,
-                        );
-                        props.onPublishedDragStart(entry.template);
-                      }}
+                      device={props.device}
+                      entry={entry}
+                      getUpgradeCount={props.getPublishedUpgradeCount}
+                      onActivate={props.onInsertPublished}
+                      onDragStart={props.onPublishedDragStart}
                       onDragEnd={props.onPublishedDragEnd}
+                      onUpgrade={props.onUpgradePublished}
+                      viewMode={viewMode}
                     />
                   );
                 }
@@ -921,6 +1052,8 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       disabled
                       name={entry.name}
                       preview={entry.preview}
+                      metadata={entry.group}
+                      statusLabel="草稿 · 尚未首次发布"
                     />
                   );
                 }
@@ -942,16 +1075,30 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                 return null;
             })}
           </div>
+          </section>
+          })}
         </section>
-        {!catalogLoading && catalogEntries.length === 0 ? (
+        {!catalogLoading && !catalogError && visibleEntryCount === 0 ? (
           <div className="homepage-editor__library-empty">
             <p>{props.mode === "design" && designView === "trash"
               ? keyword ? "回收站中没有匹配的模板。" : "回收站为空。"
-              : "没有匹配的模板。"}</p>
-            {keyword ? <button type="button" onClick={() => setKeyword("")}>清除搜索</button> : null}
+              : hasFilters ? "没有符合当前筛选条件的模板。" : "模板库中还没有模板。"}</p>
+            {!hasFilters && props.mode === "design" ? <p>从新建空白模板开始设计。</p> : null}
           </div>
         ) : null}
       </div>
+      {props.mode === "design" && designView === "library" ? (
+        <footer className="template-editor__library-footer">
+          <button
+            type="button"
+            aria-label="新建模板"
+            onClick={() => openDesignTarget({ kind: "dynamic-new" })}
+          >
+            <PlusOutlined />
+            <span>新建模板</span>
+          </button>
+        </footer>
+      ) : null}
     </aside>
   );
 }

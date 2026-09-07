@@ -29,7 +29,7 @@ test("员工确认报价在读取或写入数据库前被拒绝", async () => {
   assert.equal(databaseCalls, 0);
 });
 
-test("客户确认状态机缺失时转单安全暂停且不创建订单", async () => {
+test("旧后台直接转单入口失败关闭且不创建订单", async () => {
   let databaseCalls = 0;
   const prisma = new Proxy(
     {},

@@ -3,7 +3,9 @@ import type { CustomerNotificationPage } from "./types";
 
 type Props = {
   resource: CustomerNotificationPage;
+  loading: boolean;
   error: string | null;
+  onRetry: () => Promise<void>;
   onRead: (id: number) => Promise<void>;
   onReadAll: () => Promise<void>;
 };
@@ -12,9 +14,17 @@ function safeActionUrl(value?: string | null) {
   return value?.startsWith("/customer") ? value : null;
 }
 
+function actionLabel(value: string) {
+  return value.includes("section=consultations")
+    ? "查看咨询详情 →"
+    : "查看详情 →";
+}
+
 export default function CustomerNotificationsPanel({
   resource,
+  loading,
   error,
+  onRetry,
   onRead,
   onReadAll,
 }: Props) {
@@ -42,9 +52,20 @@ export default function CustomerNotificationsPanel({
         )}
       </div>
 
-      {error ? (
+      {loading ? (
         <p className="my-account-empty" role="status">
+          正在加载服务通知…
+        </p>
+      ) : error ? (
+        <p className="my-account-empty" role="alert">
           {error}
+          <button
+            type="button"
+            className="my-account__summary-action"
+            onClick={() => void onRetry()}
+          >
+            重新加载
+          </button>
         </p>
       ) : resource.list.length ? (
         <div className="my-account__records">
@@ -75,7 +96,7 @@ export default function CustomerNotificationsPanel({
                   ) : null}
                   {actionUrl ? (
                     <Link to={actionUrl} onClick={() => void onRead(notification.id)}>
-                      查看订单 →
+                      {actionLabel(actionUrl)}
                     </Link>
                   ) : null}
                 </div>

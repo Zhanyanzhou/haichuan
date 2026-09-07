@@ -3,10 +3,8 @@ import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   BlockOutlined,
-  CheckCircleOutlined,
   CopyOutlined,
   DeleteOutlined,
-  DownOutlined,
   ExclamationCircleOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -16,7 +14,6 @@ import {
   LockOutlined,
   MoreOutlined,
   PictureOutlined,
-  RightOutlined,
   ShoppingOutlined,
   UnlockOutlined,
   VideoCameraOutlined,
@@ -46,6 +43,7 @@ import WorkspacePanelCollapseButton from "../workspace/WorkspacePanelCollapseBut
 import WorkspacePanelHeader from "../workspace/WorkspacePanelHeader";
 import {
   findDynamicTemplateParentId,
+  describeDynamicTemplateRemoval,
   getDynamicTemplateRegionDisplayName,
 } from "./dynamicTemplateEditorUtils";
 import { DynamicTemplateNodePalette } from "./DynamicTemplateToolbox";
@@ -53,7 +51,6 @@ import {
   getTemplateContractRoleLabel,
   TEMPLATE_CONTRACT_KIND_LABELS,
 } from "./contractRolePresentation";
-import { resolveTemplatePreviewViewport } from "./templatePreviewModel";
 import {
   buildTemplateStructureAudit,
   type TemplateStructureIssue,
@@ -66,6 +63,8 @@ type ContractKind = keyof typeof TEMPLATE_CONTRACT_KIND_LABELS;
 type StructureAction = "up" | "down" | "indent" | "outdent" | "duplicate" | "toggle" | "lock" | "delete";
 type DropPlacement = "before" | "inside" | "after";
 type DragMarker = { nodeId: string; placement: DropPlacement } | null;
+
+const STRUCTURE_COMMAND_FEEDBACK_KEY = "template-structure-command-feedback";
 
 interface ResponsiveRoleOption {
   device: "desktop" | "mobile" | "all";
@@ -331,50 +330,6 @@ function getStructureIssueDisplayMessage(
   return issue.message.replace(/[。]$/, "");
 }
 
-function ResponsiveSlotControls({
-  options,
-  activeDevice,
-  activeRoleId,
-  onSelect,
-}: {
-  options: readonly ResponsiveRoleOption[];
-  activeDevice: "desktop" | "mobile";
-  activeRoleId?: string;
-  onSelect: (option: ResponsiveRoleOption) => void;
-}) {
-  if (options.length === 1 && options[0].device === "all") {
-    return null;
-  }
-  return (
-    <div className="template-editor__slot-devices" role="group" aria-label="响应式版本">
-      {options.map((option) => {
-        const label = option.device === "desktop" ? "桌面" : option.device === "mobile" ? "移动" : "全端";
-        const selected = option.roleId
-          ? option.roleId === activeRoleId
-          : option.device === activeDevice;
-        return (
-          <button
-            key={`${option.device}:${option.roleId ?? "node"}`}
-            type="button"
-            className={`template-editor__slot-device${selected ? " is-current" : ""}`}
-            aria-label={`选择${label}端槽位`}
-            title={`${label}端槽位`}
-            aria-pressed={selected}
-            onClick={(event) => {
-              event.stopPropagation();
-              onSelect(option);
-            }}
-          >
-            <span aria-hidden="true">
-              {option.device === "desktop" ? "D" : option.device === "mobile" ? "M" : "全"}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function InlineStructureName({
   value,
   editing,
@@ -426,13 +381,10 @@ export default function DynamicTemplateStructurePanel({
   const device = useTemplateEditorSession((state) => state.device);
   const selectObject = useTemplateEditorSession((state) => state.selectObject);
   const selectContractRole = useTemplateEditorSession((state) => state.selectContractRole);
-  const setDevice = useTemplateEditorSession((state) => state.setDevice);
   const setDynamicDefinition = useTemplateEditorSession((state) => state.setDynamicDefinition);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [dragMarker, setDragMarker] = useState<DragMarker>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [collapsedRegionIds, setCollapsedRegionIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [showAllIssues, setShowAllIssues] = useState(false);
   const regions = useMemo(
     () => draft ? buildStructureRegions(draft.definition) : [],
     [draft],
@@ -444,10 +396,6 @@ export default function DynamicTemplateStructurePanel({
   if (!draft) return null;
 
   const definition = draft.definition;
-  const { sourceWidth, fallbackHeight, heightMode } = resolveTemplatePreviewViewport(definition, device);
-  const templateSizeLabel = heightMode === "auto"
-    ? `${sourceWidth} × 随内容`
-    : `${sourceWidth} × ${Math.round(fallbackHeight)}`;
   const isContractBackedTemplate = draft.sourceReference?.startsWith("legacy_") ?? false;
   const isSetupIncomplete = Boolean(
     structureAudit
@@ -459,40 +407,76 @@ export default function DynamicTemplateStructurePanel({
     )),
   );
   const visibleStructureIssues = structureAudit
-    ? showAllIssues ? structureAudit.issues : structureAudit.issues.slice(0, 2)
+    ? structureAudit.issues
     : [];
-  const toggleRegion = (nodeId: string) => {
-    setCollapsedRegionIds((current) => {
-      const next = new Set(current);
-      if (next.has(nodeId)) next.delete(nodeId);
-      else next.add(nodeId);
-      return next;
-    });
-  };
-  const selectSlot = (slot: StructureSlot, option?: ResponsiveRoleOption) => {
-    const target = option
-      ?? slot.responsiveOptions.find((candidate) => candidate.device === device)
+  const selectSlot = (slot: StructureSlot) => {
+    const target = slot.responsiveOptions.find((candidate) => candidate.device === device)
       ?? slot.responsiveOptions.find((candidate) => candidate.device === "all")
       ?? slot.responsiveOptions[0];
-    if (target.device !== "all" && target.device !== device) setDevice(target.device);
     const roleId = target.roleId ?? slot.roleId;
     if (roleId) selectContractRole(slot.nodeId, roleId);
     else selectObject(slot.nodeId);
   };
 
+  const showStructureCommandError = (content: string) => {
+    message.open({
+      key: STRUCTURE_COMMAND_FEEDBACK_KEY,
+      type: "error",
+      content,
+      duration: 0,
+    });
+  };
+
+  const applyStructureDefinition = (
+    next: TemplateDefinitionV2,
+    options: {
+      onSuccess?: () => void;
+      successMessage?: string;
+    } = {},
+  ) => {
+    const result = setDynamicDefinition(next);
+    if (!result.ok) {
+      showStructureCommandError(result.code === "STRUCTURE_LOCKED"
+        ? `${result.message} 请先解除提示中对象或其上级对象的结构锁定后重试。`
+        : `${result.message} 请检查当前模板结构后重试。`);
+      return false;
+    }
+    if (!result.changed) {
+      message.destroy(STRUCTURE_COMMAND_FEEDBACK_KEY);
+      return false;
+    }
+    options.onSuccess?.();
+    if (options.successMessage) {
+      message.open({
+        key: STRUCTURE_COMMAND_FEEDBACK_KEY,
+        type: "success",
+        content: options.successMessage,
+      });
+    } else {
+      message.destroy(STRUCTURE_COMMAND_FEEDBACK_KEY);
+    }
+    return true;
+  };
+
   const renameNode = (nodeId: string, name: string) => {
     const currentDraft = useTemplateEditorSession.getState().draft;
-    setEditingNodeId(null);
-    if (!currentDraft || currentDraft.definition.nodes[nodeId]?.name === name) return;
+    if (!currentDraft || currentDraft.definition.nodes[nodeId]?.name === name) {
+      setEditingNodeId(null);
+      return;
+    }
     const next = structuredClone(currentDraft.definition);
     next.nodes[nodeId].name = name.slice(0, TEMPLATE_NODE_NAME_MAX_LENGTH);
-    setDynamicDefinition(next);
+    const slotId = next.nodes[nodeId].slotId;
+    if (slotId) next.slots[slotId].label = next.nodes[nodeId].name;
+    applyStructureDefinition(next, { onSuccess: () => setEditingNodeId(null) });
   };
 
   const setContractRoleRemoved = (slot: StructureSlot, removed: boolean) => {
     if (!slot.virtual || !slot.roleIds.length) return;
     if (removed && (slot.required || !slot.hideable)) {
-      message.warning("必填内容和系统锁定内容不能移出模板。");
+      showStructureCommandError(slot.required
+        ? `“${slot.label}”是母模板合同必填内容，不能移出。请保留该内容，并在合同允许的范围内调整布局或样式。`
+        : `“${slot.label}”的母模板合同不允许移出。请保留该内容，并在合同允许的范围内调整布局或样式。`);
       return;
     }
     const currentDraft = useTemplateEditorSession.getState().draft;
@@ -510,9 +494,10 @@ export default function DynamicTemplateStructurePanel({
     }
     if (layoutData) target.props.contentTemplateLayoutData = layoutData;
     else delete target.props.contentTemplateLayoutData;
-    setDynamicDefinition(next);
-    selectSlot(slot);
-    message.success(removed ? `已将“${slot.label}”移出当前模板` : `已恢复“${slot.label}”`);
+    applyStructureDefinition(next, {
+      onSuccess: () => selectSlot(slot),
+      successMessage: removed ? `已将“${slot.label}”移出当前模板` : `已恢复“${slot.label}”`,
+    });
   };
 
   const selectIssue = (issue: TemplateStructureIssue) => {
@@ -539,9 +524,10 @@ export default function DynamicTemplateStructurePanel({
       if (!slotId || currentDraft.definition.slots[slotId]?.editable) return;
       const next = structuredClone(currentDraft.definition);
       next.slots[slotId].editable = true;
-      setDynamicDefinition(next);
-      selectObject(issue.nodeId);
-      message.success("已允许页面填写必填槽位。");
+      applyStructureDefinition(next, {
+        onSuccess: () => selectObject(issue.nodeId!),
+        successMessage: "已允许页面填写必填槽位。",
+      });
       return;
     }
     if (issue.repair === "disable-required-slot-page-hide" && issue.nodeId) {
@@ -550,9 +536,10 @@ export default function DynamicTemplateStructurePanel({
       if (!slotId || !currentDraft.definition.slots[slotId]?.hideable) return;
       const next = structuredClone(currentDraft.definition);
       next.slots[slotId].hideable = false;
-      setDynamicDefinition(next);
-      selectObject(issue.nodeId);
-      message.success("已关闭必填槽位的页面隐藏权限。");
+      applyStructureDefinition(next, {
+        onSuccess: () => selectObject(issue.nodeId!),
+        successMessage: "已关闭必填槽位的页面隐藏权限。",
+      });
       return;
     }
     if (issue.repair === "restore-required-slot-device" && issue.nodeId && issue.device) {
@@ -560,22 +547,22 @@ export default function DynamicTemplateStructurePanel({
       if (!target || target.responsive[issue.device].display !== "none") return;
       const next = structuredClone(currentDraft.definition);
       next.nodes[issue.nodeId].responsive[issue.device].display = "block";
-      setDynamicDefinition(next);
-      setDevice(issue.device);
-      selectObject(issue.nodeId);
-      message.success(`必填槽位已恢复为${issue.device === "desktop" ? "桌面端" : "移动端"}显示。`);
+      applyStructureDefinition(next, {
+        onSuccess: () => selectObject(issue.nodeId!),
+        successMessage: "必填槽位已恢复显示。",
+      });
       return;
     }
     if (issue.repair === "restore-required-slot" && issue.nodeId) {
       const target = currentDraft.definition.nodes[issue.nodeId];
       if (!target?.hidden) return;
-      setDynamicDefinition(setDynamicTemplateNodeHidden(
-        currentDraft.definition,
-        issue.nodeId,
-        false,
-      ));
-      selectObject(issue.nodeId);
-      message.success("必填槽位已恢复显示。");
+      applyStructureDefinition(
+        setDynamicTemplateNodeHidden(currentDraft.definition, issue.nodeId, false),
+        {
+          onSuccess: () => selectObject(issue.nodeId!),
+          successMessage: "必填槽位已恢复显示。",
+        },
+      );
       return;
     }
     try {
@@ -590,17 +577,15 @@ export default function DynamicTemplateStructurePanel({
         next.nodes[parentId].name = "内容区域 01";
       }
       if (issue.repair === "add-region") {
-        setDynamicDefinition(next);
-        selectObject(parentId);
+        applyStructureDefinition(next, { onSuccess: () => selectObject(parentId) });
         return;
       }
       if (issue.repair === "add-slot") {
         const result = addDynamicTemplateNode(next, parentId, "ImageSlot");
-        setDynamicDefinition(result.definition);
-        selectObject(result.nodeId);
+        applyStructureDefinition(result.definition, { onSuccess: () => selectObject(result.nodeId) });
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "结构修复失败");
+      showStructureCommandError(`${error instanceof Error ? error.message : "结构修复失败"} 请检查当前模板结构后重试。`);
     }
   };
 
@@ -636,10 +621,9 @@ export default function DynamicTemplateStructurePanel({
           insertionIndex,
         );
       }
-      setDynamicDefinition(nextDefinition);
-      selectObject(draggedNodeId);
+      applyStructureDefinition(nextDefinition, { onSuccess: () => selectObject(draggedNodeId) });
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "结构排序失败");
+      showStructureCommandError(`${error instanceof Error ? error.message : "结构排序失败"} 请检查目标层级后重试。`);
     }
   };
 
@@ -650,23 +634,24 @@ export default function DynamicTemplateStructurePanel({
     if (!node) return;
     const slot = node.slotId ? currentDraft.definition.slots[node.slotId] : undefined;
     if ((action === "delete" || (action === "toggle" && !node.hidden)) && slot?.required) {
-      message.warning(`“${slot.label}”是必填槽位，不能${action === "delete" ? "删除" : "隐藏"}。`);
+      showStructureCommandError(
+        `“${slot.label}”是母模板必填槽位，不能${action === "delete" ? "删除" : "隐藏"}。请保留该槽位，并调整允许的布局或样式。`,
+      );
       return;
     }
     const apply = () => {
       try {
         if (action === "duplicate") {
           const result = duplicateDynamicTemplateNode(currentDraft.definition, nodeId);
-          setDynamicDefinition(result.definition);
-          selectObject(result.nodeId);
+          applyStructureDefinition(result.definition, { onSuccess: () => selectObject(result.nodeId) });
           return;
         }
         if (action === "toggle") {
-          setDynamicDefinition(setDynamicTemplateNodeHidden(currentDraft.definition, nodeId, !node.hidden));
+          applyStructureDefinition(setDynamicTemplateNodeHidden(currentDraft.definition, nodeId, !node.hidden));
           return;
         }
         if (action === "lock") {
-          setDynamicDefinition(setDynamicTemplateNodeStructureLocked(
+          applyStructureDefinition(setDynamicTemplateNodeStructureLocked(
             currentDraft.definition,
             nodeId,
             !isDynamicTemplateStructureLocked(node),
@@ -674,8 +659,9 @@ export default function DynamicTemplateStructurePanel({
           return;
         }
         if (action === "delete") {
-          setDynamicDefinition(removeDynamicTemplateNode(currentDraft.definition, nodeId));
-          selectObject(findDynamicTemplateParentId(currentDraft.definition, nodeId));
+          applyStructureDefinition(removeDynamicTemplateNode(currentDraft.definition, nodeId), {
+            onSuccess: () => selectObject(findDynamicTemplateParentId(currentDraft.definition, nodeId)),
+          });
           return;
         }
         const parentId = findDynamicTemplateParentId(currentDraft.definition, nodeId);
@@ -685,7 +671,7 @@ export default function DynamicTemplateStructurePanel({
         if (action === "indent") {
           const previousSiblingId = siblings[currentIndex - 1];
           if (!previousSiblingId) return;
-          setDynamicDefinition(moveDynamicTemplateNode(
+          applyStructureDefinition(moveDynamicTemplateNode(
             currentDraft.definition,
             nodeId,
             previousSiblingId,
@@ -696,7 +682,7 @@ export default function DynamicTemplateStructurePanel({
           const grandParentId = findDynamicTemplateParentId(currentDraft.definition, parentId);
           if (!grandParentId) return;
           const parentIndex = currentDraft.definition.nodes[grandParentId].childIds.indexOf(parentId);
-          setDynamicDefinition(moveDynamicTemplateNode(
+          applyStructureDefinition(moveDynamicTemplateNode(
             currentDraft.definition,
             nodeId,
             grandParentId,
@@ -704,13 +690,13 @@ export default function DynamicTemplateStructurePanel({
           ));
           return;
         }
-        setDynamicDefinition(reorderDynamicTemplateNode(
+        applyStructureDefinition(reorderDynamicTemplateNode(
           currentDraft.definition,
           nodeId,
           action === "up" ? currentIndex - 1 : currentIndex + 1,
         ));
       } catch (error) {
-        message.error(error instanceof Error ? error.message : "结构操作失败");
+        showStructureCommandError(`${error instanceof Error ? error.message : "结构操作失败"} 请检查当前层级和锁定状态后重试。`);
       }
     };
     if (action !== "delete") {
@@ -718,19 +704,8 @@ export default function DynamicTemplateStructurePanel({
       return;
     }
     modal.confirm({
-      title: `删除“${node.name}”及其子节点？`,
-      content: (() => {
-        const countSlots = (targetId: string): number => {
-          const target = currentDraft.definition.nodes[targetId];
-          if (!target) return 0;
-          return (target.slotId ? 1 : 0)
-            + target.childIds.reduce((total, childId) => total + countSlots(childId), 0);
-        };
-        const affectedSlots = countSlots(nodeId);
-        return affectedSlots > 0
-          ? `将同时删除 ${affectedSlots} 个内容槽位。该操作只修改当前未保存草稿，可使用撤销完整恢复。`
-          : "该操作只修改当前未保存模板草稿，仍可使用模板撤销恢复。";
-      })(),
+      title: slot ? `删除“${node.name}”？` : `删除“${node.name}”及其内容？`,
+      content: slot ? "该槽位将从当前草稿移除，可以撤销。已保存的模板版本保持原样。" : describeDynamicTemplateRemoval(currentDraft.definition, nodeId),
       okText: "删除节点",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -773,14 +748,16 @@ export default function DynamicTemplateStructurePanel({
               label: region ? "重命名区域" : layout ? "重命名容器" : "重命名槽位",
               disabled: locked,
             },
-            { key: "up", icon: <ArrowUpOutlined />, label: "上移", disabled: locked || parentLocked || siblingIndex <= 0 },
-            { key: "down", icon: <ArrowDownOutlined />, label: "下移", disabled: locked || parentLocked || siblingIndex < 0 || siblingIndex >= siblings.length - 1 },
-            { key: "indent", label: "移入上一个容器", disabled: locked || parentLocked || !canIndent },
-            { key: "outdent", label: "移出当前容器", disabled: locked || parentLocked || !canOutdent },
-            { key: "duplicate", icon: <CopyOutlined />, label: region ? "复制区域" : layout ? "复制容器" : "复制槽位", disabled: locked || parentLocked },
+            { key: "up", icon: <ArrowUpOutlined aria-hidden="true" />, label: "上移", disabled: locked || parentLocked || siblingIndex <= 0 },
+            { key: "down", icon: <ArrowDownOutlined aria-hidden="true" />, label: "下移", disabled: locked || parentLocked || siblingIndex < 0 || siblingIndex >= siblings.length - 1 },
+            ...(!slot ? [
+              { key: "indent", label: "移入上一个容器", disabled: locked || parentLocked || !canIndent },
+              { key: "outdent", label: "移出当前容器", disabled: locked || parentLocked || !canOutdent },
+            ] : []),
+            { key: "duplicate", icon: <CopyOutlined aria-hidden="true" />, label: region ? "复制区域" : layout ? "复制容器" : "复制槽位", disabled: locked || parentLocked },
             {
               key: "lock",
-              icon: selfLocked ? <UnlockOutlined /> : <LockOutlined />,
+              icon: selfLocked ? <UnlockOutlined aria-hidden="true" /> : <LockOutlined aria-hidden="true" />,
               label: selfLocked
                 ? "解除锁定"
                 : locked
@@ -790,7 +767,7 @@ export default function DynamicTemplateStructurePanel({
             },
             {
               key: "toggle",
-              icon: node.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />,
+              icon: node.hidden ? <EyeOutlined aria-hidden="true" /> : <EyeInvisibleOutlined aria-hidden="true" />,
               label: node.hidden
                 ? "显示"
                 : requiredSlotVisible
@@ -801,7 +778,7 @@ export default function DynamicTemplateStructurePanel({
             { type: "divider" },
             {
               key: "delete",
-              icon: <DeleteOutlined />,
+              icon: <DeleteOutlined aria-hidden="true" />,
               label: slot?.required ? `${deleteLabel}（必填槽位不可用）` : deleteLabel,
               danger: true,
               disabled: locked || parentLocked || slot?.required,
@@ -844,34 +821,7 @@ export default function DynamicTemplateStructurePanel({
           />
         ) : undefined}
       />
-      <p className="template-editor__structure-help">
-        这里决定模板由哪些区域、容器和内容槽位组成；层级决定归属，顺序决定布局顺序。
-      </p>
       <div className="template-editor__structure-scroll">
-        <button
-          type="button"
-          className={`template-editor__template-summary${selectedNodeId === definition.rootNodeId ? " is-active" : ""}`}
-          role="treeitem"
-          aria-level={1}
-          aria-selected={selectedNodeId === definition.rootNodeId}
-          aria-label={`${definition.name} 模板 ${templateSizeLabel}`}
-          onClick={() => selectObject(definition.rootNodeId)}
-        >
-          <span className="template-editor__template-summary-copy">
-            <span className="template-editor__template-kicker">当前模板</span>
-            <strong>{definition.name}</strong>
-            <small className="template-editor__template-meta">
-              <span>{device === "desktop" ? "桌面端" : "移动端"} · {templateSizeLabel}</span>
-              {structureAudit?.issues.length === 0 ? (
-                <span className="template-editor__template-complete">
-                  <CheckCircleOutlined aria-hidden="true" /> 结构完整
-                </span>
-              ) : null}
-            </small>
-          </span>
-          <LockOutlined title="模板根层固定" />
-        </button>
-
         {structureAudit && structureAudit.issues.length > 0 ? (
           <section className={`template-editor__structure-health${isSetupIncomplete ? " is-incomplete" : structureAudit.errorCount > 0 ? " has-errors" : " has-warnings"}`} aria-label="模板结构问题">
             <div className="template-editor__structure-health-summary">
@@ -890,16 +840,7 @@ export default function DynamicTemplateStructurePanel({
                   </li>
                 ))}
               </ul>
-              {structureAudit.issues.length > 2 ? (
-                <button
-                  type="button"
-                  className="template-editor__structure-issues-toggle"
-                  aria-expanded={showAllIssues}
-                  onClick={() => setShowAllIssues((current) => !current)}
-                >
-                  {showAllIssues ? "收起问题" : `查看全部 ${structureAudit.issues.length} 项`}
-                </button>
-              ) : null}
+
             </div>
           </section>
         ) : null}
@@ -907,7 +848,7 @@ export default function DynamicTemplateStructurePanel({
         <ol className="template-editor__region-list" role="tree" aria-label="模板区域与槽位">
           {regions.map((region) => {
             const regionSelected = selectedNodeId === region.nodeId && !selectedContractRole;
-            const regionCollapsed = collapsedRegionIds.has(region.nodeId);
+            const regionLabel = regions.length === 1 && region.contractBacked ? "内容区域" : region.label;
             return (
               <li
                 key={region.nodeId}
@@ -921,21 +862,11 @@ export default function DynamicTemplateStructurePanel({
                 >
                   <button
                     type="button"
-                    className="template-editor__region-toggle"
-                    aria-label={`${region.label}${regionCollapsed ? "展开" : "收起"}`}
-                    aria-expanded={!regionCollapsed}
-                    onClick={() => toggleRegion(region.nodeId)}
-                  >
-                    {regionCollapsed ? <RightOutlined /> : <DownOutlined />}
-                  </button>
-                  <button
-                    type="button"
                     className="template-editor__region-select"
                     role="treeitem"
                     aria-level={2}
                     aria-selected={regionSelected}
-                    aria-expanded={!regionCollapsed}
-                    aria-label={`${region.label}${region.hidden ? " 已隐藏" : ""}${region.locked ? " 已锁定" : ""}`}
+                    aria-label={`${regionLabel}${region.hidden ? " 已隐藏" : ""}${region.locked ? " 已锁定" : ""}`}
                     draggable={!region.contractBacked && !region.locked}
                     onClick={() => selectObject(region.nodeId)}
                     onDragStart={(event) => {
@@ -960,7 +891,7 @@ export default function DynamicTemplateStructurePanel({
                     onDragEnd={() => setDragMarker(null)}
                   >
                     {region.contractBacked ? (
-                      <strong>{region.label}</strong>
+                      <strong>{regionLabel}</strong>
                     ) : (
                       <>
                         <HolderOutlined className="template-editor__drag-handle" aria-hidden="true" />
@@ -975,7 +906,7 @@ export default function DynamicTemplateStructurePanel({
                   </button>
                   {!region.contractBacked ? nodeMenu(region.nodeId, region.rawName, true) : null}
                 </div>
-                <ul role="group" aria-label={`${region.label}内容槽位`} hidden={regionCollapsed}>
+                <ul role="group" aria-label={`${regionLabel}内容槽位`}>
                   {region.entries.length ? region.entries.map((entry) => {
                     if (entry.entryType === "layout") {
                       const layoutSelected = selectedNodeId === entry.nodeId && !selectedContractRole;
@@ -1103,31 +1034,8 @@ export default function DynamicTemplateStructurePanel({
                             </span>
                           )}
                         </button>
-                        <ResponsiveSlotControls
-                          options={slot.responsiveOptions}
-                          activeDevice={device}
-                          activeRoleId={selectedContractRole?.nodeId === slot.nodeId ? selectedContractRole.roleId : undefined}
-                          onSelect={(option) => selectSlot(slot, option)}
-                        />
                         {!slot.virtual ? (
                           <div className="template-editor__slot-actions">
-                            <button
-                              type="button"
-                              aria-label={`${slot.label}${slot.locked ? "解除锁定" : "锁定"}`}
-                              title={slot.locked ? "解除槽位锁定" : "锁定槽位"}
-                              onClick={() => performAction("lock", slot.nodeId)}
-                            >
-                              {slot.locked ? <UnlockOutlined /> : <LockOutlined />}
-                            </button>
-                            <button
-                              type="button"
-                              disabled={slot.required && !slot.hidden}
-                              aria-label={`${slot.label}${slot.hidden ? "显示" : slot.required ? "隐藏（必填槽位不可用）" : "隐藏"}`}
-                              title={slot.hidden ? "显示槽位" : slot.required ? "必填槽位不能隐藏" : "隐藏槽位"}
-                              onClick={() => performAction("toggle", slot.nodeId)}
-                            >
-                              {slot.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />}
-                            </button>
                             {nodeMenu(slot.nodeId, slot.label, false)}
                           </div>
                         ) : slot.hideable ? (
@@ -1139,6 +1047,17 @@ export default function DynamicTemplateStructurePanel({
                               onClick={() => setContractRoleRemoved(slot, !slot.removed)}
                             >
                               {slot.removed ? <EyeOutlined /> : <DeleteOutlined />}
+                            </button>
+                          </div>
+                        ) : slot.virtual ? (
+                          <div className="template-editor__slot-actions">
+                            <button
+                              type="button"
+                              aria-label={`${slot.label}不能移出模板`}
+                              title={slot.required ? "母模板合同必填内容不能移出" : "母模板合同不允许移出"}
+                              onClick={() => setContractRoleRemoved(slot, true)}
+                            >
+                              <LockOutlined />
                             </button>
                           </div>
                         ) : null}

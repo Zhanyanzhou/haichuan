@@ -23,7 +23,7 @@ import {
   MailOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
-import api from "@/services/api";
+import api, { leadApi, type LeadReplyResult } from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
@@ -34,6 +34,7 @@ import {
 } from "@/components/common/AdminDataStates";
 import { SecureImage } from "@/components/common/SecureImage";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import { requestStatus } from "@/services/httpClient";
 import type { PaginatedResult } from "@/types";
 
 type LeadType = "inquiry" | "selection";
@@ -73,6 +74,7 @@ interface LeadFollowUp {
 
 interface LeadDetail extends Partial<LeadListRow> {
   id: number;
+  customerId?: number | null;
   leadType: LeadType;
   leadTypeLabel: string;
   customerName: string;
@@ -84,6 +86,8 @@ interface LeadDetail extends Partial<LeadListRow> {
   handler?: { realName?: string | null } | null;
   message?: string | null;
   reply?: string | null;
+  repliedAt?: string | null;
+  updatedAt?: string;
   internalNote?: string | null;
   closureReason?: string | null;
   items?: LeadItem[];
@@ -145,6 +149,11 @@ const LEGAL_HOLD_RELEASE_REASONS = [
   { value: "ENTERED_IN_ERROR", label: "原保留设置有误" },
 ] as const;
 
+function createReplyIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `lead-reply-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export default function LeadManage() {
   const { message } = AntdApp.useApp();
   const [searchParams] = useSearchParams();
@@ -180,6 +189,10 @@ export default function LeadManage() {
   >(null);
   const [legalHoldReason, setLegalHoldReason] = useState<string>();
   const [privacyUpdating, setPrivacyUpdating] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [replying, setReplying] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [replyIdempotencyKey, setReplyIdempotencyKey] = useState<string | null>(null);
   const role = useAuthStore((s) => s.user?.role);
   const isSuperAdmin = role === "SUPER_ADMIN";
   const canAssign =
@@ -256,6 +269,12 @@ export default function LeadManage() {
   }, [fetchNotificationFailures]);
 
   const openDetail = async (type: LeadType, id: number) => {
+    const isSameLead = detailId?.type === type && detailId.id === id;
+    if (!isSameLead) {
+      setReplyText("");
+      setReplyError(null);
+      setReplyIdempotencyKey(null);
+    }
     setDetailId({ type, id });
     setDetailError(false);
     setDetail(null);
@@ -267,6 +286,53 @@ export default function LeadManage() {
     } catch {
       // P1-39：详情加载失败标记错误态，避免抽屉永久 loading 无法区分加载中/失败
       setDetailError(true);
+    }
+  };
+
+  const submitReply = async () => {
+    if (!detailId || !detail?.updatedAt) return;
+    const reply = replyText.trim();
+    if (!reply) {
+      setReplyError("请输入客户可见的回复内容。");
+      return;
+    }
+    const idempotencyKey = replyIdempotencyKey ?? createReplyIdempotencyKey();
+    setReplyIdempotencyKey(idempotencyKey);
+    setReplying(true);
+    setReplyError(null);
+    try {
+      const response = await leadApi.reply(
+        detailId.type,
+        detailId.id,
+        { reply, expectedUpdatedAt: detail.updatedAt },
+        idempotencyKey,
+      );
+      const result = unwrapResponse<LeadReplyResult>(response);
+      setDetail((current) => current
+        ? {
+            ...current,
+            status: result.status,
+            updatedAt: result.updatedAt,
+            reply: result.reply.content,
+            repliedAt: result.reply.createdAt,
+          }
+        : current);
+      setReplyText("");
+      setReplyIdempotencyKey(null);
+      message.success("客户回复已提交，站内通知已生成");
+      await Promise.all([fetchList(), openDetail(detailId.type, detailId.id)]);
+    } catch (error) {
+      const safeMessage = getSafeAdminErrorMessage(
+        error,
+        "客户回复提交失败，内容已保留，请稍后重新提交。",
+      );
+      setReplyError(safeMessage);
+      if (requestStatus(error) === 409) {
+        setReplyIdempotencyKey(null);
+        await openDetail(detailId.type, detailId.id);
+      }
+    } finally {
+      setReplying(false);
     }
   };
 
@@ -705,6 +771,9 @@ export default function LeadManage() {
         onClose={() => {
           setDetailId(null);
           setDetail(null);
+          setReplyText("");
+          setReplyError(null);
+          setReplyIdempotencyKey(null);
         }}
         width={640}
       >
@@ -821,7 +890,7 @@ export default function LeadManage() {
                         ? "解除后，到期线索可再次进入匿名化预览。"
                         : "设置后，该线索会从到期匿名化候选中排除。"
                     }
-                    okText="确认"
+                    okText={detail.legalHoldAt ? "确认解除" : "确认设置"}
                     cancelText="取消"
                     onConfirm={() => updateLegalHold(Boolean(detail.legalHoldAt))}
                   >
@@ -869,6 +938,71 @@ export default function LeadManage() {
                 ))}
               </>
             )}
+
+            <Card size="small" title="回复客户" style={{ marginTop: 16 }}>
+              {detail.privacyDisposedAt ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="匿名化线索不能回复"
+                />
+              ) : !detail.customerId ? (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="该线索未关联已登录客户"
+                  description="请在原咨询管理入口处理游客咨询；本入口只向客户中心生成回复与站内通知。"
+                />
+              ) : detail.status === "COMPLETED" || detail.status === "INVALID" ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="当前状态不能回复"
+                  description="请先重新打开线索，再提交新的客户回复。"
+                />
+              ) : (
+                <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                  <Input.TextArea
+                    aria-label="客户可见回复"
+                    rows={4}
+                    value={replyText}
+                    maxLength={5000}
+                    showCount
+                    disabled={replying}
+                    placeholder="输入将展示在客户中心的回复内容"
+                    onChange={(event) => {
+                      setReplyText(event.target.value);
+                      setReplyError(null);
+                      setReplyIdempotencyKey(null);
+                    }}
+                  />
+                  {replyError ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message={replyError}
+                      action={
+                        <Button
+                          size="small"
+                          onClick={() => void submitReply()}
+                          loading={replying}
+                        >
+                          重新提交
+                        </Button>
+                      }
+                    />
+                  ) : null}
+                  <Button
+                    type="primary"
+                    onClick={() => void submitReply()}
+                    loading={replying}
+                    disabled={!replyText.trim() || !detail.updatedAt}
+                  >
+                    提交回复
+                  </Button>
+                </Space>
+              )}
+            </Card>
 
             <h4 style={{ marginTop: 16 }}>跟进记录</h4>
             {(detail.followUps?.length ?? 0) > 0 ? (

@@ -31,9 +31,9 @@ const placeholderImage = "/images/system/product-placeholder.svg";
 const validMetadata = (title = "海川珠宝正式页面") => ({
   seoTitle: title,
   seoDescription: `${title}的公开页面说明，仅用于页面搭建器发布门禁测试。`,
-  // 分享图留空表示使用页面默认策略；外部素材地址应由专门的阻断用例覆盖，
-  // 不能污染所有以 validMetadata 为基线的发布场景。
-  ogImage: "",
+  // ogImage 属于发布必填元数据并参与素材授权核对，基线直接使用已确认素材；
+  // 缺失与非法地址的阻断行为由专门的 incompleteSeo 用例覆盖，不污染其余发布场景。
+  ogImage: image,
   contentOwner: "品牌内容组",
   mediaRights: [{
     assetUrl: image,
@@ -167,9 +167,27 @@ const state = {
 
 const db = {
   siteSetting: {
+    // 发布门禁会核验全局站点就绪（品牌、联系、法务、SEO 与中文发布配置），
+    // 种子值取自 site-publication-readiness.spec 的正式就绪基线。
     findUnique: async () => ({
       key: "site",
-      value: { contactPhone: "400-111-2222" },
+      value: {
+        siteName: "海川珠宝",
+        brandPresentationMode: "text-only",
+        brandReviewReference: "BRAND-TEST-001",
+        contactPhone: "400-111-2222",
+        contactEmail: "service@example.invalid",
+        contactAddress: "已核验公开地址",
+        businessHours: "已核验公开时间",
+        legalEntityReviewReference: "LEGAL-TEST-001",
+        privacyPolicyReviewReference: "PRIVACY-TEST-001",
+        seoReviewReference: "SEO-TEST-001",
+        seoTitle: "海川珠宝",
+        seoDescription: "正式站点描述",
+        canonicalBaseUrl: "https://example.invalid",
+        defaultLocale: "zh-CN",
+        publishedLocales: ["zh-CN"],
+      },
     }),
   },
   pageDocument: {
@@ -586,14 +604,14 @@ const unfinishedProductsResult = await service.validatePageDocument(
   },
   validMetadata("珠宝作品"),
 );
-assert.equal(unfinishedProductsResult.valid, true);
+assert.equal(unfinishedProductsResult.valid, false, "作品页未选择真实公开商品引用时必须阻断发布");
 assert.ok(
   unfinishedProductsResult.issues.some((issue) =>
-    issue.severity === "warning"
+    issue.severity === "error"
       && issue.message.includes("代表作品")
-      && issue.message.includes("商品"),
+      && issue.message.includes("主推商品"),
   ),
-  "作品页未选择真实公开商品引用时必须提示但不阻断发布",
+  "作品页主推商品缺失的阻断错误必须定位到具体区块",
 );
 
 const validCatalogFrame = validData("选款中心");
@@ -659,8 +677,8 @@ for (const pageKey of ["custom", "about"]) {
   );
   assert.ok(
     unfinishedBrandPageResult.issues.some((issue) =>
-      issue.severity === "warning" && issue.message.includes("占位内容")),
-    `${pageKey} 未确认文案必须提示但不阻断发布`,
+      issue.severity === "error" && issue.message.includes("占位内容")),
+    `${pageKey} 未确认文案必须阻断发布`,
   );
 }
 
@@ -1037,14 +1055,14 @@ for (const testCase of requiredAltCases) {
   const missingAltResult = await service.validatePageDocument(testCase.pageKey, pageData, validMetadata(`${testCase.type}测试页`));
   assert.equal(
     missingAltResult.valid,
-    true,
-    `${testCase.type} 配置公开媒体但缺少替代文字时应允许发布：${JSON.stringify(missingAltResult.errors)}`,
+    false,
+    `${testCase.type} 配置公开媒体但缺少替代文字时必须阻断发布：${JSON.stringify(missingAltResult.errors)}`,
   );
   assert.ok(
     missingAltResult.issues
       .filter((issue) => issue.blockId === testCase.props.id && testCase.altFields.includes(issue.field))
-      .every((issue) => issue.severity === "warning"),
-    `${testCase.type} 替代文字问题必须是非阻断提醒`,
+      .every((issue) => issue.severity === "error"),
+    `${testCase.type} 替代文字缺失必须是阻断错误`,
   );
   assert.deepEqual(
     missingAltResult.issues
@@ -1254,7 +1272,7 @@ const incompleteCollectionData = {
   zones: {},
 };
 const incompleteCollectionResult = await service.validatePageDocument("custom", incompleteCollectionData, validMetadata("定制测试页"));
-assert.equal(incompleteCollectionResult.valid, true, "集合数量不足时必须由服务端提示但不阻止发布");
+assert.equal(incompleteCollectionResult.valid, false, "集合数量不足时必须阻断发布");
 assert.deepEqual(
   incompleteCollectionResult.issues
     .filter((issue) => ["steps", "certificates"].includes(issue.field))
@@ -1336,13 +1354,13 @@ assert.ok(
 const placeholderClaimData = clone(completeCollectionData);
 placeholderClaimData.content[2].props.title = "证书信息待确认";
 const placeholderClaimResult = await service.validatePageDocument("custom", placeholderClaimData, validMetadata("定制测试页"));
-assert.equal(placeholderClaimResult.valid, true, "带待确认标记的文案应提示但不阻断可用版本发布");
+assert.equal(placeholderClaimResult.valid, false, "带待确认标记的文案必须阻断可用版本发布");
 assert.ok(
   placeholderClaimResult.issues.some((issue) =>
     issue.blockId === "custom-certificates"
       && issue.field === "title"
-      && issue.severity === "warning"),
-  "占位文案提示必须定位到具体区块和字段",
+      && issue.severity === "error"),
+  "占位文案阻断必须定位到具体区块和字段",
 );
 
 const invalidCategoryData = {
@@ -1380,46 +1398,37 @@ const incompleteSeoResult = await service.validatePageDocument(
   validData("SEO 待完善页面"),
   { mediaRights: validMetadata("SEO 待完善页面").mediaRights },
 );
-assert.equal(incompleteSeoResult.valid, true, "正式页面缺少内容责任、SEO 标题、描述或分享图时必须提示但不阻止发布");
+assert.equal(incompleteSeoResult.valid, false, "正式页面缺少内容责任、SEO 标题、描述或分享图时必须阻断发布");
 assert.deepEqual(
   incompleteSeoResult.issues
     .filter((issue) => issue.path.startsWith("metadata."))
     .map((issue) => ({ field: issue.field, path: issue.path, severity: issue.severity })),
   [
-    { field: "seoTitle", path: "metadata.seoTitle", severity: "warning" },
-    { field: "seoDescription", path: "metadata.seoDescription", severity: "warning" },
-    { field: "ogImage", path: "metadata.ogImage", severity: "warning" },
-    { field: "contentOwner", path: "metadata.contentOwner", severity: "warning" },
+    { field: "seoTitle", path: "metadata.seoTitle", severity: "error" },
+    { field: "seoDescription", path: "metadata.seoDescription", severity: "error" },
+    { field: "ogImage", path: "metadata.ogImage", severity: "error" },
+    { field: "contentOwner", path: "metadata.contentOwner", severity: "error" },
   ],
-  "正式内容发布提示必须定位到页面设置的具体字段",
+  "正式内容发布阻断必须定位到页面设置的具体字段",
 );
 
 state.document.puckData = validData("SEO 待完善页面");
 state.document.metadata = { mediaRights: validMetadata("SEO 待完善页面").mediaRights };
-const revisionsBeforeSeoWarningPublish = state.revisions.length;
-const publicationBeforeSeoWarning = {
-  publishedRevisionId: state.document.publishedRevisionId,
-  publishedAt: state.document.publishedAt,
-  publishedBy: state.document.publishedBy,
-  status: state.document.status,
-};
-await service.publishPageDocument(
-  "home",
-  1,
-  state.document.updatedAt.toISOString(),
+const revisionsBeforeSeoBlockPublish = state.revisions.length;
+await assert.rejects(
+  () => service.publishPageDocument(
+    "home",
+    1,
+    state.document.updatedAt.toISOString(),
+  ),
+  /页面发布校验失败/,
+  "SEO 未完成的正式页面必须被服务端发布门禁阻止",
 );
 assert.equal(
   state.revisions.length,
-  revisionsBeforeSeoWarningPublish + 1,
-  "SEO 未完成时仍必须创建可回退的发布 revision",
+  revisionsBeforeSeoBlockPublish,
+  "SEO 未完成被拒绝发布时不得写入发布 revision",
 );
-assert.equal(
-  state.document.publishedRevisionId,
-  state.revisions.at(-1).id,
-  "SEO 未完成的可用版本发布后必须立即更新前台指针",
-);
-state.revisions.splice(revisionsBeforeSeoWarningPublish);
-Object.assign(state.document, publicationBeforeSeoWarning);
 state.document.metadata = validMetadata("当前草稿");
 
 state.document.puckData = mismatchedData;
@@ -1581,6 +1590,7 @@ assert.deepEqual(
   {
     seoTitle: "新版首页",
     seoDescription: "新版首页的公开页面说明，仅用于页面搭建器发布门禁测试。",
+    ogImage: image,
   },
   "公开页面快照只返回 SEO 白名单，不泄漏内部内容责任",
 );

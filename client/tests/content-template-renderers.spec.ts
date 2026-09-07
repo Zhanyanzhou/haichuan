@@ -5,6 +5,7 @@ import {
   CONTENT_TEMPLATE_CONTRACTS,
   CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX,
   CONTENT_TEMPLATE_REGISTRY,
+  CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
   createContentTemplateMarker,
   getContentTemplateIssues,
   sanitizeContentTemplateLayoutData,
@@ -290,7 +291,64 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     await page.emulateMedia({ reducedMotion: "reduce" });
   });
 
-  test("全部 24 模板在全空素材与空业务来源下保持双端安全输出", async ({ page }) => {
+  test("方案二视频分离构图在公开 Renderer 保持双端几何与背景对比度", async ({ page }) => {
+    for (const sample of [
+      { bgColor: "#FFFFFF", frame: undefined, color: "rgb(24, 26, 27)", background: "rgb(255, 255, 255)" },
+      { bgColor: "#181A1B", frame: undefined, color: "rgb(255, 255, 255)", background: "rgb(24, 26, 27)" },
+      { bgColor: "#181A1B", frame: { colorPreset: "canvas" }, color: "rgb(24, 26, 27)", background: "rgb(255, 255, 255)" },
+    ]) {
+      const block = createBlocks().find((item) => item.type === "视频区块")!;
+      block.props = { ...block.props, videoUrl: "", title: "构图验证标题", subtitle: "构图验证描述", actionText: "查看详情", targetType: "page", linkUrl: "/about", bgColor: sample.bgColor,
+        __instanceOverrides: { version: 2, ...(sample.frame ? { frame: sample.frame } : {}), nodes: {
+          coverImage: { rectByViewport: { desktop: { x: 0.48, y: 0.08, width: 0.48, height: 0.8 }, mobile: { x: 0.05, y: 0.04, width: 0.9, height: 0.5 } } },
+          copy: { rectByViewport: { desktop: { x: 0.08, y: 0.32, width: 0.34, height: 0.3 }, mobile: { x: 0.05, y: 0.68, width: 0.9, height: 0.25 } } },
+        } },
+      };
+      await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+      await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: rendererFixturePage([block]) }));
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      await page.goto("/__content-template-renderers");
+      const copy = page.locator('[data-content-role="copy"]').first();
+      const media = page.locator('[data-content-role="coverImage"]').first();
+      await expect(page.locator(".hc-video-frame")).toHaveCSS("background-color", sample.background);
+      await expect(copy).toHaveCSS("color", sample.color);
+      await expect(copy.locator("p")).toHaveCSS("color", sample.color);
+      await expect.poll(async () => {
+        const a = await copy.boundingBox(); const b = await media.boundingBox();
+        return Boolean(a && b && a.x + a.width < b.x && b.height > 100);
+      }).toBe(true);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(page.locator(".hc-video-frame")).toHaveCSS("background-color", sample.background);
+      await expect(copy).toHaveCSS("color", sample.color);
+      await expect.poll(async () => {
+        const a = await copy.boundingBox(); const b = await media.boundingBox();
+        return Boolean(a && b && b.y + b.height < a.y && a.width > 100);
+      }).toBe(true);
+      await expect(page.locator('[data-template-editor-overlay-root]')).toHaveCount(0);
+    }
+  });
+
+  test("方案二公开 Renderer 拒绝非法文档且 Frame 不恢复被清洗的几何", async ({ page }) => {
+    const block = createBlocks().find((item) => item.type === "视频区块")!;
+    block.props = { ...block.props, videoUrl: "", title: "原生构图", __instanceOverrides: { version: 2, nodes: {
+      copy: { rectByViewport: { desktop: { x: 0, y: 0, width: 0.99, height: 0.9 }, mobile: { x: 0.05, y: 0.6, width: 0.9, height: 0.3 } } },
+    } } };
+    await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: rendererFixturePage([block]) }));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/__content-template-renderers");
+    await expect(page.getByRole("alert")).toContainText("节点位置、尺寸或兼容状态超出允许范围");
+    // 单独挂载真实 Frame，验证绕过文档入口的调用也只消费清洗后的数据。
+    const fixture = rendererFixturePage([block]).replace('/tests/fixtures/content-template-renderers.tsx', '/tests/fixtures/template-composition-frame.tsx');
+    await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: fixture }));
+    await page.reload();
+    await expect(page.locator('[data-content-role="copy"]')).toHaveCSS("position", "static");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('[data-content-role="copy"]')).toHaveCSS("position", "absolute");
+  });
+
+  test(`全部 ${templateCount} 模板在全空素材与空业务来源下保持双端安全输出`, async ({ page }) => {
     const runtimeErrors: string[] = [];
     page.on("pageerror", (error) => runtimeErrors.push(error.message));
     await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
@@ -356,7 +414,7 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     expect(runtimeErrors).toEqual([]);
   });
 
-  test("全部 24 模板在坏媒体与超长内容下保持四档稳定边界", async ({ page }) => {
+  test(`全部 ${templateCount} 模板在坏媒体与超长内容下保持四档稳定边界`, async ({ page }) => {
     const runtimeErrors: string[] = [];
     page.on("pageerror", (error) => runtimeErrors.push(error.message));
     await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
@@ -435,6 +493,245 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     expect(sanitizedHero?.nodes?.title?.rectByViewport?.mobile).toBeDefined();
     expect(sanitizedHero?.nodes?.title?.zIndexByViewport?.desktop).toBe(3);
     expect(sanitizedHero?.nodes?.title?.zIndexByViewport?.mobile).toBe(4);
+  });
+
+  test("按轴尺寸兼容状态在 text、action、collection 间统一白名单、幂等并拒绝无标记越界", () => {
+    const representatives = (["text", "action", "collection"] as const).map((kind) => {
+      for (const matrix of CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX) {
+        const object = matrix.objects.find((candidate) =>
+          candidate.kind === kind && candidate.viewports.desktop.applicable);
+        if (!object) continue;
+        return { matrix, object };
+      }
+      throw new Error(`缺少 ${kind} 可编辑对象代表`);
+    });
+
+    for (const { matrix, object } of representatives) {
+      const nodeId = object.nodeIds[0];
+      const below = {
+        x: 0.05,
+        y: 0.05,
+        width: object.constraints.minSize.width / 2,
+        height: object.constraints.minSize.height / 2,
+      };
+      const compatible = {
+        version: 2 as const,
+        nodes: {
+          [nodeId]: {
+            rectByViewport: { desktop: below },
+            sizeCompatibilityByViewport: {
+              desktop: {
+                width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+                height: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+              },
+            },
+          },
+        },
+      };
+      const sanitized = sanitizeContentTemplateLayoutData(matrix.moduleType, compatible);
+      expect(sanitized?.nodes?.[nodeId]?.rectByViewport?.desktop).toEqual(below);
+      expect(sanitized?.nodes?.[nodeId]?.sizeCompatibilityByViewport?.desktop).toEqual(
+        compatible.nodes[nodeId].sizeCompatibilityByViewport.desktop,
+      );
+      expect(sanitizeContentTemplateLayoutData(matrix.moduleType, sanitized)).toEqual(sanitized);
+      expect(getContentTemplateIssues({
+        moduleType: matrix.moduleType,
+        props: {
+          __contentTemplate: createContentTemplateMarker(matrix.moduleType),
+          __instanceOverrides: compatible,
+        },
+      }).filter((issue) => issue.severity === "error")).toEqual([]);
+
+      const withoutCompatibility = {
+        version: 2 as const,
+        nodes: { [nodeId]: { rectByViewport: { desktop: below } } },
+      };
+      expect(getContentTemplateIssues({
+        moduleType: matrix.moduleType,
+        props: {
+          __contentTemplate: createContentTemplateMarker(matrix.moduleType),
+          __instanceOverrides: withoutCompatibility,
+        },
+      }).some((issue) => issue.severity === "error" && issue.path.includes("rectByViewport.desktop")))
+        .toBe(true);
+
+      const defaultRect = object.viewports.desktop.defaultRect;
+      if (!defaultRect) throw new Error(`${matrix.templateKey}.${nodeId} 缺少桌面默认矩形`);
+      const redundant = {
+        version: 2 as const,
+        nodes: {
+          [nodeId]: {
+            rectByViewport: { desktop: defaultRect },
+            sizeCompatibilityByViewport: {
+              desktop: { width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE },
+            },
+          },
+        },
+      };
+      expect(sanitizeContentTemplateLayoutData(matrix.moduleType, redundant)
+        ?.nodes?.[nodeId]?.sizeCompatibilityByViewport).toBeUndefined();
+      expect(getContentTemplateIssues({
+        moduleType: matrix.moduleType,
+        props: {
+          __contentTemplate: createContentTemplateMarker(matrix.moduleType),
+          __instanceOverrides: redundant,
+        },
+      }).some((issue) => issue.severity === "error" && issue.path.includes("sizeCompatibilityByViewport")))
+        .toBe(true);
+    }
+
+    const action = representatives.find((entry) => entry.object.kind === "action")!;
+    const actionNodeId = action.object.nodeIds[0];
+    const aboveWidth = Math.min(1, action.object.constraints.maxSize.width + 0.05);
+    const above = {
+      version: 2 as const,
+      nodes: {
+        [actionNodeId]: {
+          rectByViewport: {
+            desktop: { x: 0, y: 0.1, width: aboveWidth, height: action.object.constraints.minSize.height },
+          },
+          sizeCompatibilityByViewport: {
+            desktop: { width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE },
+          },
+        },
+      },
+    };
+    expect(sanitizeContentTemplateLayoutData(action.matrix.moduleType, above)
+      ?.nodes?.[actionNodeId]?.rectByViewport?.desktop.width).toBe(aboveWidth);
+  });
+
+  test("矩形四字段拒绝数字字符串、boolean 与非有限数，物理边界仍只接受合法 number", () => {
+    const baseRect = { x: 0.05, y: 0.8, width: 0.04, height: 0.03 };
+    const compatibility = {
+      desktop: {
+        width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+        height: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+      },
+    };
+    const rawLayout = (field: keyof typeof baseRect, value: unknown) => ({
+      version: 2 as const,
+      nodes: {
+        action: {
+          rectByViewport: { desktop: { ...baseRect, [field]: value } },
+          sizeCompatibilityByViewport: compatibility,
+        },
+      },
+    });
+    const expectLayoutRejected = (raw: Record<string, unknown>) => {
+      const errors = getContentTemplateIssues({
+        moduleType: "首屏主视觉",
+        props: {
+          __contentTemplate: createContentTemplateMarker("首屏主视觉"),
+          __instanceOverrides: raw,
+        },
+      }).filter((issue) => issue.severity === "error");
+      expect(errors.some((issue) => issue.path.includes("rectByViewport.desktop"))).toBe(true);
+      return sanitizeContentTemplateLayoutData("首屏主视觉", raw);
+    };
+    const expectRawRejected = (field: keyof typeof baseRect, value: unknown) =>
+      expectLayoutRejected(rawLayout(field, value));
+
+    for (const field of ["x", "y", "width", "height"] as const) {
+      for (const value of [String(baseRect[field]), true, false, Number.NaN, Infinity, -Infinity]) {
+        expect(expectRawRejected(field, value)?.nodes?.action).toBeUndefined();
+      }
+    }
+    for (const field of ["x", "y"] as const) {
+      expect(expectRawRejected(field, -0.01)?.nodes?.action).toBeUndefined();
+    }
+    for (const field of ["width", "height"] as const) {
+      for (const value of [0, -0.01]) {
+        expect(expectRawRejected(field, value)?.nodes?.action).toBeUndefined();
+      }
+    }
+    for (const raw of [
+      { x: 0.05, y: 0.05, width: 0.04, height: 0.1 },
+      { x: 0.05, y: 0.05, width: 0.8, height: 0.1 },
+      { x: 0.05, y: 0.05, width: 0.2, height: 0.03 },
+      { x: 0.05, y: 0.05, width: 0.2, height: 0.4 },
+    ]) {
+      expect(expectLayoutRejected({
+        version: 2,
+        nodes: { action: { rectByViewport: { desktop: raw } } },
+      })?.nodes?.action).toBeUndefined();
+    }
+    for (const [field, value] of [["x", 0.97], ["y", 0.98]] as const) {
+      expect(expectRawRejected(field, value)?.nodes?.action).toBeUndefined();
+    }
+    expect(expectLayoutRejected({
+      version: 2,
+      nodes: {
+        action: {
+          rectByViewport: { desktop: baseRect },
+          sizeCompatibilityByViewport: {
+            desktop: { width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE },
+          },
+        },
+      },
+    })?.nodes?.action).toBeUndefined();
+
+    const legal = {
+      version: 2 as const,
+      nodes: {
+        action: {
+          rectByViewport: { desktop: { ...baseRect, x: 0, y: 0 } },
+          sizeCompatibilityByViewport: compatibility,
+        },
+      },
+    };
+    const sanitized = sanitizeContentTemplateLayoutData("首屏主视觉", legal);
+    expect(sanitized?.nodes?.action?.rectByViewport?.desktop).toEqual(legal.nodes.action.rectByViewport.desktop);
+    expect(sanitizeContentTemplateLayoutData("首屏主视觉", sanitized)).toEqual(sanitized);
+    expect(getContentTemplateIssues({
+      moduleType: "首屏主视觉",
+      props: {
+        __contentTemplate: createContentTemplateMarker("首屏主视觉"),
+        __instanceOverrides: legal,
+      },
+    }).filter((issue) => issue.severity === "error")).toEqual([]);
+  });
+
+  for (const invalidRect of [
+    { label: "字符串", value: "0.05" },
+    { label: "boolean", value: true },
+  ] as const) test(`PuckDocumentRenderer 对原始${invalidRect.label}矩形 fail-closed 且不挂载编辑层`, async ({ page }) => {
+    const hero = createBlocks().find((block) => block.type === "首屏主视觉");
+    if (!hero) throw new Error("缺少首屏主视觉 Renderer 夹具");
+    hero.props.__instanceOverrides = {
+      version: 2,
+      nodes: {
+        action: {
+          rectByViewport: {
+            desktop: { x: invalidRect.value, y: 0.8, width: 0.04, height: 0.03 },
+          },
+          sizeCompatibilityByViewport: {
+            desktop: {
+              width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+              height: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+            },
+          },
+        },
+      },
+    };
+    await page.unroute(/\/__content-template-renderers(?:\?.*)?$/);
+    await page.route(/\/__content-template-renderers(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: rendererFixturePage([hero]),
+    }));
+    await page.goto("/__content-template-renderers");
+
+    await expect(page.getByRole("alert")).toContainText("模板版本无法渲染");
+    await expect(page.getByRole("alert")).toContainText("节点必须完整位于画面");
+    await expect(page.locator('[data-content-template-contract="hero"]')).toHaveCount(0);
+    await expect(page.locator("#root > *")).toHaveCount(1);
+    await expect(page.locator([
+      "[data-template-editor-overlay-root]",
+      "[data-hc-editor-overlay]",
+      "[data-hc-node-hud]",
+      "[data-hc-keyboard-node]",
+      "[data-visual-editor-mode]",
+    ].join(","))).toHaveCount(0);
   });
 
   test("浏览器缺少观察器 API 时双图海报仍显示核心媒体", async ({ page }) => {
@@ -948,7 +1245,10 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
     await expect(bookingRenderer.locator('[data-editor-field~="title"]')).toHaveCSS("background-color", "rgb(24, 26, 27)");
     await expect(bookingRenderer.locator('[data-content-role="primaryAction"]')).toHaveCount(1);
 
-    await page.evaluate(() => { document.body.style.zoom = "2"; });
+    // Playwright 不能直接驱动浏览器菜单缩放；把 1024 CSS px 视口减半，
+    // 等价验证 200% 缩放后的可用 CSS 宽度与响应式重排。CSS `zoom: 2`
+    // 只会把整份文档绘制宽度翻倍，必然制造滚动条，不能代表浏览器缩放。
+    await page.setViewportSize({ width: 512, height: 450 });
     await expect.poll(() => page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
     )).toBe(true);
@@ -971,6 +1271,23 @@ test.describe(`${templateCount} 个内容模板真实 Renderer（确定性 UI）
               (["desktop", "mobile"] as const)
                 .filter((viewport) => object.viewports[viewport].applicable)
                 .map((viewport) => [viewport, object.viewports[viewport].defaultRect]),
+            ),
+            sizeCompatibilityByViewport: Object.fromEntries(
+              (["desktop", "mobile"] as const).flatMap((viewport) => {
+                const rect = object.viewports[viewport].defaultRect;
+                if (!object.viewports[viewport].applicable || !rect) return [];
+                const compatibility = {
+                  ...(rect.width < object.constraints.minSize.width
+                    || rect.width > object.constraints.maxSize.width
+                    ? { width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE }
+                    : {}),
+                  ...(rect.height < object.constraints.minSize.height
+                    || rect.height > object.constraints.maxSize.height
+                    ? { height: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE }
+                    : {}),
+                };
+                return Object.keys(compatibility).length ? [[viewport, compatibility]] : [];
+              }),
             ),
             zIndexByViewport: Object.fromEntries(
               (["desktop", "mobile"] as const)

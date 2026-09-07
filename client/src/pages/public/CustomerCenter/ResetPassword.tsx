@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { message } from 'antd';
 import { customerApi } from '@/services/api';
 import { getRequestErrorMessage } from '@/services/httpClient';
@@ -11,16 +11,42 @@ import {
 } from '@/config/accountPasswordPolicy';
 
 /**
- * 重置密码（第二步）：从邮件链接进入（/customer/reset?token=...），设置新密码。
+ * 重置密码（第二步）：从邮件链接进入（/customer/reset#token=...），设置新密码。
  * 令牌一次性、30 分钟过期；成功后引导登录。忘记 token 的来源时提示重新发起找回。
  */
 export default function ResetPassword() {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token') || '';
+  const location = useLocation();
   const navigate = useNavigate();
+  // 新链接从 fragment 读取；query 仅用于兼容已经发出的旧邮件。
+  const token = useRef(
+    new URLSearchParams(location.hash.replace(/^#/, '')).get('token')
+      || new URLSearchParams(location.search).get('token')
+      || '',
+  ).current;
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useLayoutEffect(() => {
+    const query = new URLSearchParams(location.search);
+    const fragment = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const hadQueryToken = query.has('token');
+    const hadFragmentToken = fragment.has('token');
+    if (!hadQueryToken && !hadFragmentToken) return;
+
+    query.delete('token');
+    fragment.delete('token');
+    const queryString = query.toString();
+    const fragmentString = fragment.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: queryString ? `?${queryString}` : '',
+        hash: fragmentString ? `#${fragmentString}` : '',
+      },
+      { replace: true, state: location.state },
+    );
+  }, [location.hash, location.pathname, location.search, location.state, navigate]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();

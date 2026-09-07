@@ -12,6 +12,11 @@ services:
     container_name: jewelry-mysql
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${MYSQL_CPUS:-2.0}"
+    mem_limit: "${MYSQL_MEMORY_LIMIT:-2g}"
+    pids_limit: ${MYSQL_PIDS_LIMIT:-512}
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
       MYSQL_DATABASE: jewelry_db
@@ -37,17 +42,21 @@ services:
 
   # ===== 后端 NestJS 服务 =====
   server:
-    image: "${SERVER_IMAGE:-2-server:latest}"
-    build:
-      context: ./server
-      dockerfile: Dockerfile
-      args:
-        BUILD_REVISION: "${RELEASE_GIT_SHA:-local}"
-        BUILD_SOURCE: "${RELEASE_SOURCE:-local}"
-        MIGRATION_BUNDLE_SHA256: "${MIGRATION_BUNDLE_SHA256:-local}"
+    # 正式 Compose 只消费 Release Images 产出的 digest 引用，禁止源码构建和浮动 tag。
+    image: "${SERVER_IMAGE_NAME:?SERVER_IMAGE_NAME is required}@sha256:${SERVER_IMAGE_DIGEST:?SERVER_IMAGE_DIGEST is required}"
     container_name: jewelry-server
     restart: unless-stopped
     logging: *default-logging
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cpus: "${SERVER_CPUS:-1.5}"
+    mem_limit: "${SERVER_MEMORY_LIMIT:-1g}"
+    pids_limit: ${SERVER_PIDS_LIMIT:-256}
     depends_on:
       mysql:
         condition: service_healthy
@@ -106,8 +115,9 @@ services:
       SMS_VERIFICATION_REQUIRED: "${SMS_VERIFICATION_REQUIRED:-false}"
       PRODUCT_MEDIA_ROOT: /app/private-media/products
       BACKUP_DIR: /backups
-      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:-86400}"
-      BACKUP_HEALTH_GRACE_SECONDS: "${BACKUP_HEALTH_GRACE_SECONDS:-3600}"
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_RPO_SECONDS:?BACKUP_RPO_SECONDS is required}"
+      # 后台状态与 backup healthcheck 使用同一 RPO 边界，不额外放宽。
+      BACKUP_HEALTH_GRACE_SECONDS: "0"
     # P0-3：不对宿主机暴露 3000（仅 nginx 反代 /api 与 /uploads → server:3000，见 nginx.conf）
     expose:
       - "3000"
@@ -116,7 +126,12 @@ services:
       # 受控商品媒体和付款凭证必须跨容器重建持久化，禁止写回镜像层。
       - private_media_data:/app/private-media
       # 备份产物只读挂载：settings.getBackupStatus 据此向后台展示真实备份状态（OR-1 衔接）。
-      - ./backups:/backups:ro
+      - type: bind
+        source: "${BACKUP_HOST_DIR:?BACKUP_HOST_DIR must be an absolute host path}"
+        target: /backups
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test:
         [
@@ -132,26 +147,28 @@ services:
 
   # ===== 前端 Nginx 服务 =====
   client:
-    image: "${CLIENT_IMAGE:-2-client:latest}"
-    build:
-      context: ./client
-      dockerfile: Dockerfile
-      args:
-        BUILD_REVISION: "${RELEASE_GIT_SHA:-local}"
-        BUILD_SOURCE: "${RELEASE_SOURCE:-local}"
-        MIGRATION_BUNDLE_SHA256: "${MIGRATION_BUNDLE_SHA256:-local}"
-        # Vite 公开配置在构建时固化；不得把服务端密钥作为 build arg 传入。
-        VITE_API_BASE_URL: "${VITE_API_BASE_URL:-/api}"
-        VITE_PUBLIC_SITE_ORIGIN: "${VITE_PUBLIC_SITE_ORIGIN:-}"
-        VITE_ANALYTICS_ENABLED: "${VITE_ANALYTICS_ENABLED:-false}"
+    image: "${CLIENT_IMAGE_NAME:?CLIENT_IMAGE_NAME is required}@sha256:${CLIENT_IMAGE_DIGEST:?CLIENT_IMAGE_DIGEST is required}"
     container_name: jewelry-client
     restart: unless-stopped
     logging: *default-logging
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cpus: "${CLIENT_CPUS:-1.0}"
+    mem_limit: "${CLIENT_MEMORY_LIMIT:-384m}"
+    pids_limit: ${CLIENT_PIDS_LIMIT:-128}
     depends_on:
       server:
         condition: service_healthy
     ports:
+      # 公网只开放 HTTP 跳转/ACME；来访者转发头不能绕过 308。
       - "80:8080"
+      # TLS 边缘代理的可信回源口仅绑定宿主回环；同网络边缘容器可使用 client:8081。
+      - "127.0.0.1:8081:8081"
     volumes:
       # 仅读共享 ACME HTTP-01 验证文件；证书私钥不进入客户端容器。
       - acme_challenge_data:/var/www/certbot:ro
@@ -159,7 +176,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget --header='X-Forwarded-Proto: https' -q -O /dev/null http://127.0.0.1:8080/ || exit 1",
+          "wget -q -O /dev/null http://127.0.0.1:8081/ || exit 1",
         ]
       interval: 15s
       timeout: 5s
@@ -168,14 +185,24 @@ services:
       - jewelry-network
 
   # ===== 定时备份（OR-1：数据库 + 媒体卷，含付款凭证）=====
-  # 复用 mysql:8.0 镜像（自带 mysqldump/tar/bash），脚本挂载自仓库，改脚本无需重建镜像。
+  # 复用已签名 operations digest；备份脚本与数据库客户端均固化在镜像内，禁止从 checkout bind 可执行代码。
   # 启动即执行一轮备份（部署即可验证），此后每 BACKUP_INTERVAL_SECONDS 一轮，保留 7 天。
   # 产出在宿主机 ./backups（建议纳入宿主机异地同步，如 rsync/对象存储）。
   backup:
-    image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+    image: "${OPERATIONS_IMAGE_NAME:?OPERATIONS_IMAGE_NAME is required}@sha256:${OPERATIONS_IMAGE_DIGEST:?OPERATIONS_IMAGE_DIGEST is required}"
     container_name: jewelry-backup
     restart: unless-stopped
     logging: *default-logging
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cpus: "${BACKUP_CPUS:-1.0}"
+    mem_limit: "${BACKUP_MEMORY_LIMIT:-768m}"
+    pids_limit: ${BACKUP_PIDS_LIMIT:-128}
     depends_on:
       mysql:
         condition: service_healthy
@@ -188,28 +215,36 @@ services:
       BACKUP_DIR: /backups
       MEDIA_DIRS: /media/uploads:/media/private-media
       DISK_WARN_PCT: ${DISK_WARN_PCT:-85}
-      RETENTION_DAYS: "7"
-      BACKUP_DB_READY_TIMEOUT_SECONDS: ${BACKUP_DB_READY_TIMEOUT_SECONDS:-60}
-      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
-      BACKUP_HEALTH_GRACE_SECONDS: ${BACKUP_HEALTH_GRACE_SECONDS:-3600}
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:?BACKUP_RETENTION_DAYS is required}
+      BACKUP_DB_READY_TIMEOUT_SECONDS: ${BACKUP_DB_READY_TIMEOUT_SECONDS:?BACKUP_DB_READY_TIMEOUT_SECONDS is required}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:?BACKUP_INTERVAL_SECONDS is required}
+      BACKUP_RPO_SECONDS: ${BACKUP_RPO_SECONDS:?BACKUP_RPO_SECONDS is required}
+      BACKUP_CONSISTENCY_MODE: ${BACKUP_CONSISTENCY_MODE:-best-effort}
+      BACKUP_WRITE_QUIESCE_EVIDENCE_SHA256: ${BACKUP_WRITE_QUIESCE_EVIDENCE_SHA256:-NONE}
     volumes:
-      - ./server/scripts/backup.sh:/usr/local/bin/backup.sh:ro
-      - ./server/scripts/check-backup-health.sh:/usr/local/bin/check-backup-health.sh:ro
       - uploads_data:/media/uploads:ro
       - private_media_data:/media/private-media:ro
-      - ./backups:/backups
+      - type: bind
+        source: "${BACKUP_HOST_DIR:?BACKUP_HOST_DIR must be an absolute host path}"
+        target: /backups
+        bind:
+          create_host_path: false
     entrypoint:
       - /bin/bash
       - -c
       - |
         while true; do
+          attempt_started=$$(date +%s)
           /bin/bash /usr/local/bin/backup.sh || echo "🚨 ERROR: 备份执行失败，将在下个周期重试"
-          sleep "$${BACKUP_INTERVAL_SECONDS}"
+          elapsed=$$(($$(date +%s) - attempt_started))
+          remaining=$$((BACKUP_INTERVAL_SECONDS - elapsed))
+          [ "$$remaining" -gt 0 ] || remaining=1
+          sleep "$$remaining"
         done
     healthcheck:
       test: ["CMD-SHELL", "/bin/bash /usr/local/bin/check-backup-health.sh"]
-      interval: 60s
-      timeout: 5s
+      interval: 15m
+      timeout: 10m
       retries: 3
       start_period: 90s
     networks:
@@ -220,7 +255,7 @@ services:
   # 首次部署后在 UI 中手动添加监控项：
   #   http://server:3000/api/health  （后端进程存活，不检查数据库）
   #   http://server:3000/api/ready   （后端与数据库就绪）
-  #   http://client:8080/            （前台可达）
+  #   http://client:8081/            （受控网络内的可信前台回源）
   # 通知渠道在 UI 配置（邮件/企业微信/webhook 均可）。
   # 备份容器与磁盘水位无 HTTP 端点，由 backup.sh 输出告警日志（docker logs jewelry-backup 巡检）。
   uptime-kuma:
@@ -228,6 +263,11 @@ services:
     container_name: jewelry-uptime-kuma
     restart: unless-stopped
     logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cpus: "${MONITOR_CPUS:-0.5}"
+    mem_limit: "${MONITOR_MEMORY_LIMIT:-512m}"
+    pids_limit: ${MONITOR_PIDS_LIMIT:-256}
     volumes:
       - kuma_data:/app/data
     ports:
@@ -237,8 +277,14 @@ services:
 
 volumes:
   mysql_data:
+    external: true
+    name: "${MYSQL_VOLUME_NAME:?MYSQL_VOLUME_NAME is required}"
   uploads_data:
+    external: true
+    name: "${UPLOADS_VOLUME_NAME:?UPLOADS_VOLUME_NAME is required}"
   private_media_data:
+    external: true
+    name: "${PRIVATE_MEDIA_VOLUME_NAME:?PRIVATE_MEDIA_VOLUME_NAME is required}"
   kuma_data:
   acme_challenge_data:
 

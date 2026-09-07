@@ -230,20 +230,11 @@ export function createTemplatePreviewContentBySlotId(
   return contentBySlotId;
 }
 
-/**
- * 目录 Renderer 使用模板设计几何，但标记只存在于本次只读渲染参数中。
- * 它不会写回槽位默认值、模板定义或页面实例。
- */
+/** 目录 Renderer 使用与设计画布相同的中性示例内容；目录 surface 由宿主显式提供。 */
 export function createTemplateCatalogPreviewContentBySlotId(
   definition: TemplateDefinitionV2,
 ): Record<string, unknown> {
-  const contentBySlotId = createTemplatePreviewContentBySlotId(definition);
-  return Object.fromEntries(Object.entries(contentBySlotId).map(([slotId, content]) => [
-    slotId,
-    content && typeof content === "object" && !Array.isArray(content)
-      ? { ...content as Record<string, unknown>, __templateCatalogPreview: true }
-      : content,
-  ]));
+  return createTemplatePreviewContentBySlotId(definition);
 }
 
 /**
@@ -335,7 +326,7 @@ export function createTemplatePreviewScenarioContentBySlotId(
     if (scenario === "long-text") {
       if (["heading", "text", "richText", "badge", "icon"].includes(slot.type)) {
         content[slot.slotId] = slot.type === "heading"
-          ? "这是用于验证超长标题在桌面端与移动端换行、截断和布局稳定性的示例文本"
+          ? "这是用于验证超长标题在不同画布中换行、截断和布局稳定性的示例文本"
           : "这是一段用于验证超长内容、换行规则、最大行数和溢出处理的预览文字。".repeat(5);
       } else if (slot.type === "button" || slot.type === "link") {
         content[slot.slotId] = { label: "用于验证超长行动文案的预览按钮" };

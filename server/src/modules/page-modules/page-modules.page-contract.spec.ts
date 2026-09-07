@@ -74,7 +74,7 @@ test("未注册页面键不能通过预检或写入草稿", async () => {
   );
 });
 
-test("页面发布资料可留空并提示，但非法 metadata 结构仍阻断", async () => {
+test("页面发布资料留空或结构非法都阻断正式发布", async () => {
   const service = createService();
   const incompleteMetadata = {
     ...makeFormalMetadata(),
@@ -88,16 +88,16 @@ test("页面发布资料可留空并提示，但非法 metadata 结构仍阻断"
     makeHomeDocument(),
     incompleteMetadata,
   );
-  assert.equal(incompleteValidation.valid, true, incompleteValidation.errors.join("\n"));
+  assert.equal(incompleteValidation.valid, false);
   assert.deepEqual(
     incompleteValidation.issues
       .filter((issue) => issue.path.startsWith("metadata."))
       .map((issue) => ({ field: issue.field, path: issue.path, severity: issue.severity })),
     [
-      { field: "seoTitle", path: "metadata.seoTitle", severity: "warning" },
-      { field: "seoDescription", path: "metadata.seoDescription", severity: "warning" },
-      { field: "ogImage", path: "metadata.ogImage", severity: "warning" },
-      { field: "contentOwner", path: "metadata.contentOwner", severity: "warning" },
+      { field: "seoTitle", path: "metadata.seoTitle", severity: "error" },
+      { field: "seoDescription", path: "metadata.seoDescription", severity: "error" },
+      { field: "ogImage", path: "metadata.ogImage", severity: "error" },
+      { field: "contentOwner", path: "metadata.contentOwner", severity: "error" },
     ],
   );
 
@@ -196,7 +196,7 @@ test("首屏主舞台即使未触发模块总数限制也必须保持全页唯�
   );
 });
 
-test("发布预检把正在完善、内容建设中和即将上线等占位文案降为提示", async () => {
+test("发布预检把正在完善、内容建设中和即将上线等占位文案保持为阻断", async () => {
   const service = createService();
   const document = makeHomeDocument();
   document.content[0].props.title = "品牌内容建设中";
@@ -207,26 +207,26 @@ test("发布预检把正在完善、内容建设中和即将上线等占位文�
 
   const result = await service.validatePageDocument("home", document, metadata);
 
-  assert.equal(result.valid, true, result.errors.join("\n"));
+  assert.equal(result.valid, false);
   assert.ok(result.issues.some(
     (issue) => issue.path === "content[0].props.title"
       && issue.message.includes("占位内容")
-      && issue.severity === "warning",
+      && issue.severity === "error",
   ));
   assert.ok(result.issues.some(
     (issue) => issue.path === "metadata.seoDescription"
       && issue.message.includes("占位内容")
-      && issue.severity === "warning",
+      && issue.severity === "error",
   ));
 
   document.content[0].props.title = "珠宝作品";
   metadata.seoDescription = "品牌故事即将上线";
   const launchResult = await service.validatePageDocument("home", document, metadata);
-  assert.equal(launchResult.valid, true, launchResult.errors.join("\n"));
+  assert.equal(launchResult.valid, false);
   assert.ok(launchResult.issues.some(
     (issue) => issue.path === "metadata.seoDescription"
       && issue.message.includes("占位内容")
-      && issue.severity === "warning",
+      && issue.severity === "error",
   ));
 });
 
@@ -261,6 +261,7 @@ test("公开 PageDocument metadata 只返回 SEO 白名单，不泄漏内部内�
       }),
     },
   } as unknown as PrismaService);
+  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [];
 
   const published = await service.getPublishedPageDocument("home");
   assert.deepEqual(published?.metadata, {
@@ -532,7 +533,7 @@ test("机器合同提取顶层、次级行动和桌面/移动集合目标", () =
   );
 });
 
-test("可见行动文案没有去向时提示但不阻断可用版本发布", async () => {
+test("可见行动文案没有去向时阻断正式发布", async () => {
   const document: any = makeHomeDocument();
   document.content[0].props.actionText = "探索作品";
   document.content[0].props.targetType = "none";
@@ -542,12 +543,12 @@ test("可见行动文案没有去向时提示但不阻断可用版本发布", as
     makeFormalMetadata(),
   );
 
-  assert.equal(result.valid, true, result.errors.join("\n"));
+  assert.equal(result.valid, false);
   assert.ok(result.issues.some(
     (issue) =>
       issue.path === "content[0].props.targetType"
       && issue.message.includes("已填写行动文案")
-      && issue.severity === "warning",
+      && issue.severity === "error",
   ));
 });
 
@@ -597,7 +598,7 @@ test("未登记页面去向被服务端发布门禁拒绝，登记页面可携�
   assert.equal(valid.valid, true, valid.errors.join("\n"));
 });
 
-test("按场景选购条目缺少公开去向时提示但不阻断", async () => {
+test("按场景选购条目缺少公开去向时阻断正式发布", async () => {
   const document: any = makeHomeDocument();
   document.content.push({
     type: "按场景选购",
@@ -635,14 +636,14 @@ test("按场景选购条目缺少公开去向时提示但不阻断", async () =>
   );
 
   const result = await createService().validatePageDocument("home", document, metadata);
-  assert.equal(result.valid, true, result.errors.join("\n"));
+  assert.equal(result.valid, false);
   assert.ok(result.issues.some(
     (issue) =>
       issue.path === "content[1].props.categories[0].targetType"
       && issue.field === "categories"
       && issue.index === 0
       && issue.message.includes("必须设置有效去向")
-      && issue.severity === "warning",
+      && issue.severity === "error",
   ));
 
   document.content[1].props.categories[0].targetType = undefined;

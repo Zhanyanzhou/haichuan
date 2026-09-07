@@ -10,11 +10,13 @@ process.env.VITE_USE_MOCK = appMode === "mock" ? "true" : "false";
 const defaultTestPort = appMode === "mock" ? 5177 : 5176;
 const port = Number(process.env.PLAYWRIGHT_PORT || defaultTestPort);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${port}`;
+const forwardedProto = process.env.PLAYWRIGHT_FORWARDED_PROTO;
 
 // 每个 spec 必须且只能属于一个确定性边界。混合文件按主要业务参与者归类；
 // 真实环境会话与真实接口验收另行执行，不能用这些自有 API 夹具代替。
 const testBoundaryFiles = {
   public: [
+    "public-accessibility.spec.ts",
     "content-template-previews.spec.ts",
     "content-template-renderers.spec.ts",
     "content-template-skeletons.spec.ts",
@@ -33,6 +35,7 @@ const testBoundaryFiles = {
   ],
   customer: [
     "closure-locale-notifications.spec.ts",
+    "customer-consultation-reply.spec.ts",
     "public-access.spec.ts",
     "public-sales-mode.spec.ts",
     "recommendation-client.spec.ts",
@@ -48,14 +51,17 @@ const testBoundaryFiles = {
     "booking-editor.spec.ts",
     "category-manage.spec.ts",
     "category-references-field.spec.ts",
+    "content-template-editor-lifecycle.spec.ts",
     "customer-admin-client.spec.ts",
     "dynamic-template-foundation.spec.ts",
     "dynamic-template-page-instance.spec.ts",
     "editable-target-geometry.spec.ts",
     "editable-targets.spec.ts",
+    "editor-composition-boundaries.spec.ts",
     "editor-draft-recovery.admin.spec.ts",
     "editor-leave-guard.admin.spec.ts",
     "editor-visual-redesign-acceptance.spec.ts",
+    "four-zone-workspace-shell.spec.ts",
     "inquiry-context.admin.spec.ts",
     "inspector-context-panel.spec.ts",
     "lead-follow-up-contract.spec.ts",
@@ -80,6 +86,7 @@ const testBoundaryFiles = {
     "site-content-load-protection.spec.ts",
     "statistics-client.spec.ts",
     "template-internal-editor.spec.ts",
+    "template-design-authoring-core.spec.ts",
     "template-version-origin.spec.ts",
     "ui-color-standards.spec.ts",
     "visual-editor-double-poster.spec.ts",
@@ -124,6 +131,9 @@ export default defineConfig({
     : [["html", { open: "never" }]],
   use: {
     baseURL,
+    extraHTTPHeaders: forwardedProto
+      ? { "X-Forwarded-Proto": forwardedProto }
+      : undefined,
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
     trace: "on-first-retry",

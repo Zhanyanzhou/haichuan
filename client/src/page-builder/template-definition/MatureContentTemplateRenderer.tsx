@@ -33,6 +33,10 @@ import type { PuckProps } from "../types";
 import ContentTemplateContractFrame from "../runtime/ContentTemplateContractFrame";
 import ResolvedLookbookBlock from "../runtime/ResolvedLookbookBlock";
 import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  type ContentTemplateRenderMode,
+} from "../runtime/ContentTemplateRenderSurface";
+import {
   MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
   type MatureContentTemplateSlotType,
 } from "./validateTemplateDefinition";
@@ -67,7 +71,7 @@ export interface MatureContentTemplateRendererProps {
   content: unknown;
   layoutData?: Record<string, unknown>;
   designProps?: Record<string, string | number | boolean>;
-  mode: "public" | "editor" | "preview" | "thumbnail";
+  mode: ContentTemplateRenderMode;
   headingLevel?: 1 | 2;
   priority?: boolean;
   homeSurface?: boolean;
@@ -94,7 +98,8 @@ export default function MatureContentTemplateRenderer({
   stableReferencesOnly = true,
 }: MatureContentTemplateRendererProps) {
   const moduleType = MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE[slotType];
-  const editMode = mode !== "public";
+  const editMode = mode !== CONTENT_TEMPLATE_RENDER_SURFACE.PUBLIC
+    && mode !== CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW;
   const props: PuckProps = {
     ...DEFAULT_PROPS_BY_MODULE[moduleType],
     ...designProps,

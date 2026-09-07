@@ -14,3 +14,6 @@ args = ["/c", "npx", "-y", "chrome-devtools-mcp@1.8.0"]
 [mcp_servers.context7]
 command = "cmd"
 args = ["/c", "npx", "-y", "@upstash/context7-mcp@4.0.4"]
+
+[sandbox_workspace_write]
+network_access = true

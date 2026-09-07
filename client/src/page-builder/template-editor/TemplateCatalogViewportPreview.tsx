@@ -15,6 +15,10 @@ import {
   syncTemplateViewportStyles,
 } from "./TemplateViewportFrame";
 import EditableTargetOverlay from "./EditableTargetOverlay";
+import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  ContentTemplateRenderSurfaceProvider,
+} from "../runtime/ContentTemplateRenderSurface";
 import type {
   TemplateCatalogSlotDescriptor,
 } from "./templatePreviewModel";
@@ -323,7 +327,6 @@ export default function TemplateCatalogViewportPreview({
     isUnavailable,
   ]);
 
-  const deviceLabel = viewport === "desktop" ? "桌面" : "移动";
   const scaledHeight = measurement.naturalHeight * measurement.scale;
 
   return (
@@ -364,7 +367,7 @@ export default function TemplateCatalogViewportPreview({
               data-template-catalog-viewport={viewport}
               srcDoc="<!doctype html><html><head></head><body><div id='template-viewport-root'></div></body></html>"
               tabIndex={-1}
-              title={`${title}${deviceLabel}目录预览`}
+              title={`${title}目录预览`}
               style={{
                 border: 0,
                 height: measurement.naturalHeight,
@@ -406,6 +409,7 @@ export default function TemplateCatalogViewportPreview({
                   className="template-editor__canvas-renderer template-editor__dynamic-canvas-renderer template-editor__catalog-canvas-renderer"
                   style={{
                     "--homepage-editor-viewport-height": `${fallbackHeight}px`,
+                    minHeight: fallbackHeight,
                     width: sourceWidth,
                   } as CSSProperties}
                 >
@@ -426,7 +430,11 @@ export default function TemplateCatalogViewportPreview({
                       pointer-events: none !important;
                     }
                   `}</style>
-                  {children}
+                  <ContentTemplateRenderSurfaceProvider
+                    surface={CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW}
+                  >
+                    {children}
+                  </ContentTemplateRenderSurfaceProvider>
                 </div>
               </TemplateCatalogPreviewErrorBoundary>,
               frameDocument.getElementById("template-viewport-root")!,

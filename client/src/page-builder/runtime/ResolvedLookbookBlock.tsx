@@ -8,6 +8,10 @@ import { convertPuckProps } from "../utils/puckPropsToModule";
 import type { PuckProps } from "../types";
 import type { ProductRow } from "../data-sources/productSource";
 import { ProductRowState, usePublicProductRevision } from "./PublicProductRuntime";
+import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  useContentTemplateRenderSurface,
+} from "./ContentTemplateRenderSurface";
 
 function textValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -47,11 +51,13 @@ export default function ResolvedLookbookBlock({
   editMode = false,
   stableReferencesOnly = true,
 }: ResolvedLookbookBlockProps) {
+  const renderSurface = useContentTemplateRenderSurface();
   const previewProducts = useMemo(
-    () => editMode && Array.isArray(props.__previewProducts)
+    () => (editMode || renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW)
+      && Array.isArray(props.__previewProducts)
       ? (props.__previewProducts as ProductRow[])
       : [],
-    [editMode, props.__previewProducts],
+    [editMode, props.__previewProducts, renderSurface],
   );
   const productIds = useMemo(
     () => !stableReferencesOnly && Array.isArray(props.productIds)

@@ -10,7 +10,9 @@ const budgets = {
   initialJsGzip: 180 * 1024,
   initialCssGzip: 30 * 1024,
   reachableJsChunkGzip: 220 * 1024,
-  reachableCssChunkGzip: 40 * 1024,
+  // 编辑器外壳重设计（模板设计四区工作台）后 EditorWorkbench CSS 约 42 KiB；
+  // 预算留 44 KiB 上限并保留对其余可达块的约束，后续样式收敛应回落到 40 以下。
+  reachableCssChunkGzip: 44 * 1024,
 };
 
 if (!existsSync(indexPath)) {

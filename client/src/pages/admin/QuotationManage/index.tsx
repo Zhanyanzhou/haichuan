@@ -20,6 +20,12 @@ import { PlusOutlined, ReloadOutlined, EyeOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import type { FormInstance } from "antd";
+import AdminPageHeader from "@/components/common/AdminPageHeader";
+import {
+  AdminEmptyState,
+  AdminErrorState,
+  AdminLoadingState,
+} from "@/components/common/AdminDataStates";
 import { productApi, quotationApi, userApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
@@ -241,7 +247,7 @@ export default function QuotationManage() {
   const [list, setList] = useState<Quotation[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<unknown | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [statusFilter, setStatusFilter] = useState<"all" | QuotationStatus>("all");
@@ -249,7 +255,9 @@ export default function QuotationManage() {
   const [keywordInput, setKeywordInput] = useState("");
 
   const [detail, setDetail] = useState<QuotationDetail | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<unknown | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -283,7 +291,7 @@ export default function QuotationManage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setLoadError(false);
+    setLoadError(null);
     try {
       const res = await quotationApi.getList({
         page, pageSize,
@@ -293,9 +301,10 @@ export default function QuotationManage() {
       const data = unwrapResponse<PaginatedResult<Quotation>>(res);
       setList(data?.list || []);
       setTotal(data?.total || 0);
-    } catch {
-      setLoadError(true);
+    } catch (error: unknown) {
+      setLoadError(error);
       setList([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -304,13 +313,15 @@ export default function QuotationManage() {
   useEffect(() => { void load(); }, [load]);
 
   const openDetail = async (id: number) => {
+    setDetailId(id);
     setDetail(null);
     setDetailLoading(true);
+    setDetailError(null);
     try {
       const res = await quotationApi.getById(id);
       setDetail(unwrapResponse<QuotationDetail>(res));
     } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, "报价单详情加载失败，请稍后重新加载。"));
+      setDetailError(e);
     } finally {
       setDetailLoading(false);
     }
@@ -354,7 +365,11 @@ export default function QuotationManage() {
           await quotationApi.remove(record.id);
           message.success("报价单已删除");
           void load();
-          if (detail?.id === record.id) setDetail(null);
+          if (detail?.id === record.id) {
+            setDetail(null);
+            setDetailId(null);
+            setDetailError(null);
+          }
         } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, "报价单删除失败，请重新加载后确认当前状态。"));
         }
@@ -438,18 +453,20 @@ export default function QuotationManage() {
     }
   };
 
+  const hasQuotationFilters = statusFilter !== "all" || Boolean(keyword);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-semibold text-brand-text">报价管理</h1>
-          <p className="text-sm text-brand-muted mt-1">管理报价草稿、提交客户确认、取消和历史报价/订单关联</p>
-        </div>
-        <Space>
+      <AdminPageHeader
+        title="报价管理"
+        subtitle="管理报价草稿、客户确认提交、取消与历史订单关联。"
+        extra={(
+          <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); form.resetFields(); void loadConsultants(); setCreateOpen(true); }}>新建报价</Button>
-        </Space>
-      </div>
+          </Space>
+        )}
+      />
 
       <div className="flex gap-2 flex-wrap">
         {STATUS_TABS.map((s) => (
@@ -468,7 +485,13 @@ export default function QuotationManage() {
         <Input.Search
           placeholder="报价单号 / 客户姓名 / 手机号"
           value={keywordInput}
-          onChange={(e) => setKeywordInput(e.target.value)}
+          onChange={(e) => {
+            setKeywordInput(e.target.value);
+            if (e.target.value === "" && keyword) {
+              setKeyword("");
+              setPage(1);
+            }
+          }}
           onSearch={(v) => { setKeyword(v); setPage(1); }}
           className="w-72"
           allowClear
@@ -476,10 +499,13 @@ export default function QuotationManage() {
       </Card>
 
       {loadError ? (
-        <div className="text-center py-16">
-          <p className="text-brand-muted mb-4">报价数据暂时无法加载</p>
-          <Button type="primary" onClick={() => void load()}>重新加载</Button>
-        </div>
+        <AdminErrorState
+          subject="报价单"
+          error={loadError}
+          onRetry={() => void load()}
+        />
+      ) : loading && list.length === 0 ? (
+        <AdminLoadingState subject="报价单" />
       ) : (
         <Card className="!bg-white !border-brand-line">
           <Table
@@ -493,7 +519,11 @@ export default function QuotationManage() {
               showTotal: (t) => `共 ${t} 条`,
               onChange: (p, ps) => { setPage(p); setPageSize(ps); },
             }}
-            locale={{ emptyText: "暂无报价单；可新建报价草稿并提交客户确认" }}
+            locale={{
+              emptyText: hasQuotationFilters
+                ? "没有符合当前筛选条件的报价单"
+                : "暂无报价单；可新建报价草稿并提交客户确认",
+            }}
             columns={[
               { title: "报价单号", dataIndex: "quoteNo", render: (v: string) => <code className="text-xs text-brand-gold">{v}</code> },
               { title: "客户", dataIndex: "customerName", render: (v: string, r: Quotation) => <div><p>{v}</p><p className="text-xs text-brand-muted">{r.customerPhone}</p></div> },
@@ -525,13 +555,24 @@ export default function QuotationManage() {
 
       {/* 报价详情抽屉 */}
       <Drawer
-        open={!!detail || detailLoading}
-        onClose={() => setDetail(null)}
-        width={680}
+        open={detailId !== null}
+        onClose={() => {
+          setDetailId(null);
+          setDetail(null);
+          setDetailError(null);
+        }}
+        width="min(680px, calc(100vw - 16px))"
         title="报价单详情"
-        loading={detailLoading && !detail}
       >
-        {detail && (
+        {detailLoading && !detail ? (
+          <AdminLoadingState subject="报价单详情" compact />
+        ) : detailError ? (
+          <AdminErrorState
+            subject="报价单详情"
+            error={detailError}
+            onRetry={detailId === null ? undefined : () => void openDetail(detailId)}
+          />
+        ) : detail ? (
           <div className="space-y-6">
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -606,6 +647,8 @@ export default function QuotationManage() {
               )}
             </div>
           </div>
+        ) : (
+          <AdminEmptyState subject="报价单详情" />
         )}
       </Drawer>
 

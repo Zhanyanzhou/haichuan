@@ -163,8 +163,7 @@ export class ReliableNotificationDeliveryWorker {
       ? event.payload as Record<string, unknown>
       : {};
     const notificationId = asPositiveInteger(payload.notificationId);
-    const orderId = asPositiveInteger(payload.orderId);
-    if (!notificationId || !orderId) {
+    if (!notificationId) {
       await this.fail(event, "INVALID_EVENT_PAYLOAD", true);
       return;
     }
@@ -182,6 +181,11 @@ export class ReliableNotificationDeliveryWorker {
     );
     if (!emailDelivery || ["SENT", "DELIVERED", "CANCELLED", "SUPPRESSED"].includes(emailDelivery.status)) {
       await this.complete(event.id);
+      return;
+    }
+    const orderId = asPositiveInteger(payload.orderId);
+    if (!orderId) {
+      await this.fail(event, "INVALID_EVENT_PAYLOAD", true);
       return;
     }
     if (emailDelivery.status === "SENDING") {

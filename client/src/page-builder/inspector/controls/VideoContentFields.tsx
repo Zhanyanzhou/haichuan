@@ -1,4 +1,8 @@
 import MediaPickerField from "../../fields/MediaPickerField";
+import {
+  getContractRoleRatio,
+  getContractRoleRatioPresets,
+} from "../../config/blockContracts";
 import ImageFocusField from "./ImageFocusField";
 import SelectField from "./SelectField";
 import SwitchField from "./SwitchField";
@@ -15,6 +19,26 @@ export interface VideoContentFieldsProps {
 }
 
 const targetKeys = ["pagePath", "url", "productCode", "categorySlug", "linkUrl", "productId"] as const;
+const toEditorRatio = (ratio: string) => ratio.split("/").map((part) => part.trim()).join(":");
+const videoDefaultRatioByViewport = {
+  desktop: getContractRoleRatio("video", "coverImage", "desktop"),
+  mobile: getContractRoleRatio("video", "coverImage", "mobile"),
+} as const;
+const videoRatioPresetsByViewport = {
+  desktop: getContractRoleRatioPresets("video", "coverImage", "desktop"),
+  mobile: getContractRoleRatioPresets("video", "coverImage", "mobile"),
+} as const;
+const videoRatioOptions = [...new Set([
+  ...videoRatioPresetsByViewport.desktop,
+  ...videoRatioPresetsByViewport.mobile,
+])].map((ratio) => {
+  const desktop = videoRatioPresetsByViewport.desktop.includes(ratio);
+  const mobile = videoRatioPresetsByViewport.mobile.includes(ratio);
+  return {
+    value: toEditorRatio(ratio),
+    label: `${toEditorRatio(ratio)} · ${desktop && mobile ? "桌面/移动" : desktop ? "桌面" : "移动"}`,
+  };
+});
 
 export default function VideoContentFields({
   value,
@@ -59,7 +83,7 @@ export default function VideoContentFields({
         <MediaPickerField
           fieldKey="posterUrl"
           value={typeof effectiveValue.posterUrl === "string" ? effectiveValue.posterUrl : ""}
-          previewAspectRatio="16 / 9"
+          previewAspectRatio={videoDefaultRatioByViewport.desktop}
           onChange={(posterUrl) => update("posterUrl", posterUrl)}
         />
       </div>
@@ -98,12 +122,15 @@ export default function VideoContentFields({
         <SwitchField label="显示控制条" value={effectiveValue.showControls !== false} onChange={(showControls) => update("showControls", showControls)} />
       </div>
       {scope === "template" ? (
-        <SelectField label="母模板视频比例" hint="页面实例不能覆盖" value={typeof effectiveValue.aspectRatio === "string" ? effectiveValue.aspectRatio : "16:9"} options={[
-          { value: "16:9", label: "标准宽屏 16:9" },
-          { value: "21:6", label: "品牌宽幕 21:6" },
-          { value: "4:5", label: "移动端竖幅 4:5" },
-          { value: "9:16", label: "移动端全屏 9:16" },
-        ]} onChange={(aspectRatio) => updateDesign("aspectRatio", aspectRatio)} />
+        <SelectField
+          label="母模板视频比例"
+          hint="页面实例不能覆盖；未选择时按桌面与移动端合同分别取值"
+          value={typeof effectiveValue.aspectRatio === "string" ? effectiveValue.aspectRatio : ""}
+          options={videoRatioOptions}
+          allowEmpty
+          emptyLabel={`合同默认 · 桌面 ${toEditorRatio(videoDefaultRatioByViewport.desktop)} / 移动 ${toEditorRatio(videoDefaultRatioByViewport.mobile)}`}
+          onChange={(aspectRatio) => updateDesign("aspectRatio", aspectRatio)}
+        />
       ) : null}
       <ImageFocusField
         label="视频封面焦点"

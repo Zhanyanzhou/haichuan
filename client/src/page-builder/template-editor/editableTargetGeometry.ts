@@ -1,7 +1,3 @@
-import type {
-  EditableTargetLocatorAttribute,
-} from "../template-definition/editableTargets";
-
 export interface GeometryPoint {
   x: number;
   y: number;
@@ -19,11 +15,6 @@ export interface SourceToHostTransform {
   hostOrigin: GeometryPoint;
   scaleX: number;
   scaleY: number;
-}
-
-export interface ExplicitEditableTargetLocator {
-  attributes: readonly EditableTargetLocatorAttribute[];
-  value: string;
 }
 
 export const MIN_EDITOR_HIT_SIZE = 24;
@@ -59,6 +50,13 @@ export function clampGeometryValue(value: number, minimum: number, maximum: numb
 
 export function clampRoundedGeometryValue(value: number, minimum: number, maximum: number) {
   return clampGeometryValue(Math.round(value), minimum, maximum);
+}
+
+function clampGeometryDimension(value: number, minimum: number, maximum: number) {
+  const clamped = clampGeometryValue(value, minimum, maximum);
+  if (Math.abs(clamped - minimum) <= 1e-12) return minimum;
+  if (Math.abs(clamped - maximum) <= 1e-12) return maximum;
+  return clamped;
 }
 
 export function alignNormalizedRect<T extends NormalizedGeometryRect>(
@@ -158,10 +156,10 @@ export function applyBoundedNormalizedRectGesture({
   const boundBottom = bounds.y + bounds.height;
 
   if (operation === "move") {
-    if (constraints.movementAxes.includes("x")) {
+    if (constraints.movementAxes.includes("x") && rect.width <= bounds.width) {
       left = clampGeometryValue(left + delta.x, bounds.x, boundRight - rect.width);
     }
-    if (constraints.movementAxes.includes("y")) {
+    if (constraints.movementAxes.includes("y") && rect.height <= bounds.height) {
       top = clampGeometryValue(top + delta.y, bounds.y, boundBottom - rect.height);
     }
     return { x: left, y: top, width: rect.width, height: rect.height };
@@ -179,15 +177,29 @@ export function applyBoundedNormalizedRectGesture({
   if (direction?.includes("s")) {
     bottom = clampGeometryValue(bottom + delta.y, top + constraints.minSize.height, boundBottom);
   }
-  if (right - left > constraints.maxSize.width) {
-    if (direction?.includes("w")) left = right - constraints.maxSize.width;
-    else right = left + constraints.maxSize.width;
+  const changesWidth = Boolean(direction?.includes("w") || direction?.includes("e"));
+  const changesHeight = Boolean(direction?.includes("n") || direction?.includes("s"));
+  let width = rect.width;
+  let height = rect.height;
+  if (changesWidth) {
+    width = clampGeometryDimension(
+      right - left,
+      constraints.minSize.width,
+      constraints.maxSize.width,
+    );
+    if (direction?.includes("w")) left = right - width;
+    else right = left + width;
   }
-  if (bottom - top > constraints.maxSize.height) {
-    if (direction?.includes("n")) top = bottom - constraints.maxSize.height;
-    else bottom = top + constraints.maxSize.height;
+  if (changesHeight) {
+    height = clampGeometryDimension(
+      bottom - top,
+      constraints.minSize.height,
+      constraints.maxSize.height,
+    );
+    if (direction?.includes("n")) top = bottom - height;
+    else bottom = top + height;
   }
-  return { x: left, y: top, width: right - left, height: bottom - top };
+  return { x: left, y: top, width, height };
 }
 
 export function clampCanvasScale(value: number, minimum: number, maximum: number) {
@@ -271,7 +283,7 @@ export function rectCenter(rect: GeometryRect): GeometryPoint {
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
 
-export function rectFromDomRect(rect: Pick<DOMRectReadOnly, "left" | "top" | "width" | "height">): GeometryRect {
+export function rectFromBounds(rect: Readonly<GeometryRect>): GeometryRect {
   return {
     left: rect.left,
     top: rect.top,
@@ -353,6 +365,16 @@ export function projectSourceRectToHost(
   };
 }
 
+export function hostDeltaToSource(
+  delta: GeometryPoint,
+  transform: Pick<SourceToHostTransform, "scaleX" | "scaleY">,
+): GeometryPoint {
+  return {
+    x: delta.x / finitePositive(transform.scaleX),
+    y: delta.y / finitePositive(transform.scaleY),
+  };
+}
+
 export function clampHostRect(rect: GeometryRect, hostWidth: number, hostHeight: number): GeometryRect {
   const left = clampGeometryValue(rect.left, 0, Math.max(0, hostWidth));
   const top = clampGeometryValue(rect.top, 0, Math.max(0, hostHeight));
@@ -393,21 +415,4 @@ export function placeHostLabel(
       ? below
       : clampGeometryValue(rect.top + gap, 0, Math.max(0, hostHeight - labelSize.height));
   return { x: left, y: top };
-}
-
-export function findElementsByEditableTargetLocator(
-  root: HTMLElement,
-  locator: ExplicitEditableTargetLocator,
-): HTMLElement[] {
-  if (!locator.value || locator.attributes.length === 0) return [];
-  const selector = locator.attributes.map((attribute) => `[${attribute}]`).join(",");
-  return Array.from(root.querySelectorAll<HTMLElement>(selector)).filter((element) =>
-    locator.attributes.some((attribute) => {
-      const current = element.getAttribute(attribute);
-      if (!current) return false;
-      return attribute === "data-editor-field"
-        ? current.split(/\s+/).includes(locator.value)
-        : current === locator.value;
-    }),
-  );
 }

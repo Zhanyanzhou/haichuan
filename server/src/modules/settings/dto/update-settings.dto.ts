@@ -5,14 +5,22 @@ import {
   IsEmail,
   IsArray,
   ArrayMaxSize,
+  ArrayMinSize,
+  IsIn,
   Matches,
 } from "class-validator";
+import {
+  DEFAULT_PUBLIC_CONTENT_LOCALE,
+  PUBLIC_CONTENT_LOCALES,
+} from "../../../common/content-locale";
 
 /** 站点设置更新：仅允许 DEFAULT_SETTINGS 内的已知键，防止任意键污染统一设置。 */
 export class UpdateSettingsDto {
   @IsOptional() @IsString() @MaxLength(100) siteName?: string;
   @IsOptional() @IsString() @MaxLength(500) siteDescription?: string;
   @IsOptional() @IsString() @MaxLength(500) logo?: string;
+  @IsOptional() @IsIn(["logo", "text-only"]) brandPresentationMode?: string;
+  @IsOptional() @IsString() @MaxLength(200) brandReviewReference?: string;
   @IsOptional() @IsString() @MaxLength(200) seoTitle?: string;
   @IsOptional() @IsString() @MaxLength(500) seoDescription?: string;
   @IsOptional() @IsString() @MaxLength(500) seoKeywords?: string;
@@ -26,6 +34,28 @@ export class UpdateSettingsDto {
   @MaxLength(500)
   @Matches(/^$|^https?:\/\//i, { message: "门店地图链接必须以 http:// 或 https:// 开头" })
   storeMapUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @Matches(/^$|^https:\/\//i, { message: "正式站点地址必须以 https:// 开头" })
+  canonicalBaseUrl?: string;
+
+  @IsOptional() @IsString() @MaxLength(200) legalEntityReviewReference?: string;
+  @IsOptional() @IsString() @MaxLength(200) privacyPolicyReviewReference?: string;
+  @IsOptional() @IsString() @MaxLength(200) seoReviewReference?: string;
+
+  @IsOptional()
+  @IsIn([DEFAULT_PUBLIC_CONTENT_LOCALE])
+  defaultLocale?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(2)
+  @IsIn(PUBLIC_CONTENT_LOCALES, { each: true })
+  publishedLocales?: string[];
+
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(50, { message: "支付方式不能超过 50 项" })

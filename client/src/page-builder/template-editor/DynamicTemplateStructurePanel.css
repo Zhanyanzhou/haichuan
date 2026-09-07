@@ -14,8 +14,7 @@
 }
 
 .template-editor__structure--reference > .homepage-editor__panel-header {
-  flex: 0 0 48px;
-  height: 48px;
+  flex: 0 0 auto;
   padding-inline: 10px;
   background: #fff;
 }
@@ -43,7 +42,7 @@
 
 .template-editor__structure--reference .template-editor__structure-scroll {
   overflow-x: hidden;
-  padding: 0 12px;
+  padding: 10px 8px 24px;
   background: #fff;
   scrollbar-gutter: stable;
 }
@@ -132,25 +131,27 @@
 }
 
 .template-editor__structure--reference .template-editor__structure-health {
-  margin: 8px 0;
-  border: 0;
-  border-left: 2px solid var(--template-structure-warning);
-  border-radius: 4px;
+  margin: 0 0 12px;
+  overflow: hidden;
+  border: 1px solid #D4BD96;
+  border-radius: var(--template-structure-row-radius);
   color: var(--template-structure-warning);
   background: var(--template-structure-warning-bg);
 }
 
 .template-editor__structure--reference .template-editor__structure-health.has-errors {
-  border-left-color: #8C3F3B;
+  border-color: #D7B6B4;
+  color: #8C3F3B;
+  background: #FAF0EF;
 }
 
 .template-editor__structure--reference .template-editor__structure-health-summary {
-  min-height: 34px;
+  min-height: 36px;
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
-  padding: 6px 8px 4px;
+  padding: 7px 8px;
 }
 
 .template-editor__structure--reference .template-editor__structure-health-icon {
@@ -170,30 +171,32 @@
 
 .template-editor__structure--reference .template-editor__structure-issues {
   padding: 0 6px 6px;
+  border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent);
 }
 
 .template-editor__structure--reference .template-editor__structure-issues ul {
   display: grid;
-  gap: 2px;
+  gap: 6px;
   margin: 0;
-  padding: 0;
+  padding: 6px 0 0;
   list-style: none;
 }
 
 .template-editor__structure--reference .template-editor__structure-issues li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
-  gap: 4px;
+  gap: 3px 4px;
   min-height: 30px;
 }
 
 .template-editor__structure--reference .template-editor__structure-issues li > span {
+  grid-column: 1 / -1;
   min-width: 0;
   display: -webkit-box;
   overflow: hidden;
-  padding: 4px 2px;
-  color: #7A531A;
+  padding: 2px;
+  color: currentColor;
   font-size: 11px;
   line-height: 16px;
   overflow-wrap: break-word;
@@ -202,14 +205,15 @@
 }
 
 .template-editor__structure--reference .template-editor__structure-issues button {
-  min-width: 30px;
-  min-height: 26px;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
   padding: 3px 4px;
-  border: 0;
+  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
   border-radius: 4px;
-  color: #7A531A;
-  background: transparent;
-  font-size: 10px;
+  color: currentColor;
+  background: color-mix(in srgb, #fff 66%, transparent);
+  font-size: 11px;
   font-weight: 600;
   line-height: 15px;
   text-align: center;
@@ -219,8 +223,9 @@
 
 .template-editor__structure--reference .template-editor__structure-issues button:hover,
 .template-editor__structure--reference .template-editor__structure-issues button:focus-visible {
-  background: #FBF4E8;
-  outline: none;
+  background: #fff;
+  outline: 2px solid var(--adm-ink);
+  outline-offset: 1px;
 }
 
 .template-editor__structure--reference .template-editor__structure-issues-toggle {
@@ -231,13 +236,25 @@
 }
 
 .template-editor__structure--reference .template-editor__region-list {
-  margin: 8px 0 0;
+  display: grid;
+  gap: 12px;
+  margin: 0;
   padding: 0;
 }
 
 .template-editor__structure--reference .template-editor__region {
+  display: grid;
+  gap: 8px;
   padding: 0;
   border: 0;
+}
+
+.template-editor__structure--reference .template-editor__region > ul {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--template-structure-line);
 }
 
 .template-editor__structure--reference .template-editor__region:first-child {
@@ -246,44 +263,28 @@
 }
 
 .template-editor__structure--reference .template-editor__region-header {
-  min-height: 36px;
+  min-height: 38px;
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  grid-template-columns: minmax(0, 1fr) 24px;
   align-items: center;
-  margin: 1px 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--adm-line);
   border-radius: var(--template-structure-row-radius);
+  color: var(--adm-text-strong);
+  background: #ECEEEF;
 }
 
 .template-editor__structure--reference .template-editor__region-header:hover,
 .template-editor__structure--reference .template-editor__region-header:focus-within {
-  background: var(--template-structure-hover);
+  border-color: var(--adm-action);
+  background: #ECEEEF;
 }
 
 .template-editor__structure--reference .template-editor__region-header.is-active {
   color: var(--template-structure-accent);
-  background: var(--template-structure-accent-bg);
-}
-
-.template-editor__structure--reference .template-editor__region-toggle {
-  width: 24px;
-  height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  color: var(--adm-muted);
-  background: transparent;
-  font-size: 10px;
-  cursor: pointer;
-}
-
-.template-editor__structure--reference .template-editor__region-toggle:hover,
-.template-editor__structure--reference .template-editor__region-toggle:focus-visible {
-  color: var(--adm-ink);
-  background: rgba(0, 0, 0, 0.04);
-  outline: none;
+  border-color: var(--adm-ink);
+  background: #ECEEEF;
 }
 
 .template-editor__structure--reference .template-editor__region-select {
@@ -291,7 +292,7 @@
   min-height: 36px;
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
-  padding: 0 4px;
+  padding: 0 8px;
   border-radius: 0;
 }
 
@@ -302,7 +303,7 @@
 
 .template-editor__structure--reference .template-editor__region-select:has(.template-editor__drag-handle) {
   grid-template-columns: 12px minmax(0, 1fr);
-  gap: 4px;
+  gap: 6px;
 }
 
 .template-editor__structure--reference .template-editor__drag-handle {
@@ -340,30 +341,41 @@
 }
 
 .template-editor__structure--reference .template-editor__slot-row {
-  min-height: 40px;
-  margin: 1px 0;
+  min-width: 0;
+  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--adm-line);
   border-radius: var(--template-structure-row-radius);
   color: var(--adm-text);
+  background: #fff;
 }
 
 .template-editor__structure--reference .template-editor__layout-row {
-  min-height: 36px;
+  min-width: 0;
+  min-height: 38px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 24px;
   align-items: center;
-  margin: 1px 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--adm-line);
   border-radius: var(--template-structure-row-radius);
   position: relative;
+  background: #fff;
 }
 
 .template-editor__structure--reference .template-editor__layout-row:hover,
 .template-editor__structure--reference .template-editor__layout-row:focus-within {
-  background: var(--adm-neutral-bg);
+  border-color: var(--adm-action);
+  background: #fff;
 }
 
 .template-editor__structure--reference .template-editor__layout-row.is-active {
   color: var(--template-structure-accent);
-  background: var(--template-structure-accent-bg);
+  border-color: var(--adm-ink);
+  background: #ECEEEF;
 }
 
 .template-editor__structure--reference .template-editor__layout-select {
@@ -413,19 +425,23 @@
 
 .template-editor__structure--reference .template-editor__slot-row:hover,
 .template-editor__structure--reference .template-editor__slot-row:focus-within {
-  background: var(--adm-neutral-bg);
+  border-color: var(--adm-action);
+  background: #fff;
 }
 
 .template-editor__structure--reference .template-editor__slot-row.is-active {
   color: var(--template-structure-accent);
-  background: var(--template-structure-accent-bg);
+  border-color: var(--adm-ink);
+  background: #ECEEEF;
 }
 
 .template-editor__structure--reference .template-editor__slot-select {
-  min-height: 40px;
+  grid-column: 1;
+  min-width: 0;
+  min-height: 36px;
   grid-template-columns: 22px minmax(0, 1fr);
   gap: 6px;
-  padding: 3px 4px;
+  padding: 3px 4px 3px 8px;
   border-radius: var(--template-structure-row-radius);
 }
 
@@ -443,7 +459,7 @@
 }
 
 .template-editor__structure--reference .template-editor__slot-row.is-active .template-editor__slot-copy small {
-  color: color-mix(in srgb, var(--template-structure-accent) 72%, white);
+  color: var(--template-structure-accent);
 }
 
 .template-editor__structure--reference .template-editor__slot-select:focus-visible {
@@ -481,13 +497,21 @@
 }
 
 .template-editor__structure--reference .template-editor__slot-devices {
-  position: static;
-  z-index: auto;
+  z-index: 3;
+  grid-column: 1 / -1;
+  display: none;
   flex: 0 0 auto;
+  justify-content: center;
   gap: 2px;
-  padding: 0 4px 0 2px;
-  background: transparent;
+  padding: 4px 6px 6px;
+  border-top: 1px solid var(--adm-line);
+  background: #fff;
   opacity: 1;
+}
+
+.template-editor__structure--reference .template-editor__slot-row.is-active .template-editor__slot-devices,
+.template-editor__structure--reference .template-editor__slot-row:focus-within .template-editor__slot-devices {
+  display: inline-flex;
 }
 
 .template-editor__structure--reference
@@ -497,9 +521,9 @@
 }
 
 .template-editor__structure--reference .template-editor__slot-device {
-  min-width: 22px;
+  min-width: 28px;
   height: 24px;
-  padding: 0;
+  padding: 0 2px;
   border-radius: 4px;
   color: var(--adm-muted);
   font-size: 10px;
@@ -513,8 +537,19 @@
 }
 
 .template-editor__structure--reference .template-editor__slot-actions {
-  padding-left: 6px;
-  background: var(--adm-neutral-bg);
+  position: static;
+  grid-column: 2;
+  display: none;
+  justify-self: auto;
+  padding: 0 4px 0 2px;
+  background: transparent;
+  transform: none;
+}
+
+.template-editor__structure--reference .template-editor__slot-row:hover .template-editor__slot-actions,
+.template-editor__structure--reference .template-editor__slot-row:focus-within .template-editor__slot-actions,
+.template-editor__structure--reference .template-editor__slot-row.is-active .template-editor__slot-actions {
+  display: flex;
 }
 
 .template-editor__structure--reference .template-editor__dynamic-node-palette {
@@ -569,7 +604,7 @@
 .template-editor__structure--reference
   .template-editor__slot-row.is-active
   .template-editor__slot-actions {
-  background: var(--template-structure-accent-bg);
+  background: #ECEEEF;
 }
 
 .template-editor__structure--reference .template-editor__region-empty {
@@ -765,6 +800,30 @@
   outline-offset: 2px;
 }
 
+/* 模板设计共用 8% 结构栏；极窄栏中仍保留清晰的层级与真实可点区。 */
+@container editor-structure-dock (max-width: 128px) {
+  .template-editor__structure--reference > .homepage-editor__panel-header {
+    padding-inline: 4px;
+  }
+
+  .template-editor__structure--reference .template-editor__structure-scroll {
+    padding-inline: 4px;
+  }
+
+  .template-editor__structure--reference .template-editor__slot-select {
+    padding-left: 6px;
+  }
+
+  .template-editor__structure--reference .template-editor__region > ul {
+    padding-left: 4px;
+  }
+
+  .template-editor__structure--reference .template-editor__region-empty {
+    padding-inline: 4px;
+    white-space: normal;
+  }
+}
+
 @media (max-width: 1199px) {
   .template-editor__structure--reference .template-editor__structure-scroll {
     padding-inline: 12px;
@@ -773,28 +832,6 @@
   .template-editor__structure--reference .template-editor__slot-select {
     gap: 8px;
     padding-left: 4px;
-  }
-}
-
-/* 模板设计使用独立的结构栏宽度，不改变页面装修的共享 dock 规则。 */
-@media (min-width: 1200px) and (max-width: 1439px) {
-  .template-editor__body,
-  .template-editor__body.is-inspecting {
-    --editor-structure-dock-width: 220px;
-  }
-}
-
-@media (min-width: 1440px) and (max-width: 1599px) {
-  .template-editor__body,
-  .template-editor__body.is-inspecting {
-    --editor-structure-dock-width: 232px;
-  }
-}
-
-@media (min-width: 1600px) {
-  .template-editor__body,
-  .template-editor__body.is-inspecting {
-    --editor-structure-dock-width: 240px;
   }
 }
 

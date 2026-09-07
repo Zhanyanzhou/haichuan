@@ -14,11 +14,11 @@
 
 Use subagents to increase independent coverage and reduce blind spots, not to manufacture consensus or duplicate the same pass. The coordinator remains accountable for the final report.
 
-The first subagent is always an orchestration assessor. It performs risk decomposition, not the final code review.
+The coordinator performs the initial scope assessment. Use an independent orchestration assessor only when that assessment itself benefits materially from delegation and current instructions authorize it. A specialist review does not require a preceding assessor subagent.
 
 ## Assessment Subagent
 
-Launch the assessor after collecting only minimal scope metadata. Keep it read-only.
+When an assessor is justified, launch it after collecting minimal scope metadata and keep it read-only. Otherwise the coordinator makes the orchestration decision using the relevant criteria below; do not manufacture an assessor result.
 
 Give it:
 
@@ -93,7 +93,7 @@ Prefer `single-reviewer` when:
 
 Do not use changed-line count as the sole decision. A one-line authorization change can justify independent security review; a large generated-file change may not.
 
-A practical default is two to four specialist reviewers. Use more only when the assessor identifies disjoint ownership and the coordinator can synthesize them without losing context.
+Choose the smallest set of specialist reviewers that covers the independently reviewable risks within current tool limits. The coordinator must confirm disjoint ownership and its ability to synthesize the evidence; an assessor recommendation is optional input, not authorization or a required gate.
 
 ## Specialist Assignment
 
@@ -186,8 +186,8 @@ A specialist conclusion is input evidence, not an authority. The final report mu
 
 ## Fallbacks and Failure Handling
 
-- If subagents are unavailable, use the assessor output contract in the coordinator and record the fallback in the report.
+- If subagents are unavailable or add insufficient value, the coordinator performs the review and records any material coverage limitation. In an authorized formal report, include the relevant orchestration evidence without claiming an assessor ran.
 - If one specialist fails or returns incomplete output, retry once with a narrower assignment when practical. Otherwise mark its surfaces `Not covered`.
 - If specialists conflict on a high-severity claim, run an independent focused verifier when available. If uncertainty remains approval-affecting, classify it as `Question` or lower confidence rather than forcing certainty.
-- If a specialist edits files or Git state, stop using its result, inspect the mutation, restore only changes known to belong to that specialist without disturbing user state, and disclose the incident.
+- If a specialist edits files or Git state, stop the affected work, inspect and disclose the mutation, and preserve user state. Recovery is a separate action governed by `AGENTS.md` and current authorization; this review procedure grants no permission to restore files or mutate Git. Request only missing authorization before any recovery action, and continue unaffected read-only review where possible.
 - If new evidence changes the orchestration decision, update the plan and persist the reason; do not silently add agents.

@@ -1,4 +1,41 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { CONTENT_TEMPLATE_REGISTRY } from "../src/page-builder/generated/contentTemplates.generated";
+
+const activeTemplateCount = CONTENT_TEMPLATE_REGISTRY.length;
+
+type InspectorObserverStats = {
+  revision: number;
+  mutationInstances: number;
+  mutationObserveCalls: number;
+  mutationDisconnectCalls: number;
+  activeMutationObservers: number;
+  resizeInstances: number;
+  resizeObserveCalls: number;
+  resizeDisconnectCalls: number;
+  activeResizeObservers: number;
+};
+
+async function readInspectorObserverStats(page: Page) {
+  return page.evaluate(() => (
+    (window as typeof window & { __inspectorObserverDocuments?: InspectorObserverStats[] })
+      .__inspectorObserverDocuments ?? []
+  ));
+}
+
+function captureBrowserErrors(page: Page) {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(`console: ${message.text()}`);
+  });
+  return errors;
+}
+
+test.use({
+  launchOptions: {
+    args: ["--disable-features=LocalNetworkAccessChecks"],
+  },
+});
 
 const fixtureHtml = `<!doctype html>
   <html lang="zh-CN">
@@ -29,11 +66,115 @@ const fixtureHtml = `<!doctype html>
 
 test.beforeEach(async ({ page }) => {
   page.on("pageerror", (error) => console.error(`[dynamic-template-fixture] ${error.message}`));
+  await page.route("**/api/settings/public**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: {} }),
+    });
+  });
   await page.route("**/dynamic-template-foundation.html*", async (route) => {
     await route.fulfill({ status: 200, contentType: "text/html", body: fixtureHtml });
   });
   await page.goto("/dynamic-template-foundation.html");
   await expect(page.getByLabel("合法模板校验")).toHaveText("valid");
+});
+
+test.describe("模板 Inspector iframe observer 生命周期", () => {
+  test("body 延迟出现后才挂载且选择变化不重复保留 observer", async ({ page }) => {
+    const browserErrors = captureBrowserErrors(page);
+    await page.goto("/dynamic-template-foundation.html?inspectorObserver=1");
+
+    await expect(page.getByRole("complementary", { name: "模板属性" })).toBeVisible();
+    await expect(page.getByLabel("Inspector 当前选择")).toHaveText("node_heading");
+    await expect.poll(async () => {
+      const [stats] = await readInspectorObserverStats(page);
+      return stats && {
+        activeMutationObservers: stats.activeMutationObservers,
+        activeResizeObservers: stats.activeResizeObservers,
+      };
+    }).toEqual({ activeMutationObservers: 1, activeResizeObservers: 1 });
+
+    await page.getByRole("button", { name: "移除 body 并选择图片" }).click();
+    await expect(page.getByLabel("Inspector 当前选择")).toHaveText("node_image");
+    await expect.poll(async () => {
+      const [stats] = await readInspectorObserverStats(page);
+      return stats && {
+        activeMutationObservers: stats.activeMutationObservers,
+        activeResizeObservers: stats.activeResizeObservers,
+      };
+    }).toEqual({ activeMutationObservers: 1, activeResizeObservers: 0 });
+
+    await page.getByRole("button", { name: "恢复 body" }).click();
+    await expect(page.getByRole("complementary", { name: "模板属性" })
+      .getByText(/240 px/).first()).toBeVisible();
+    await expect.poll(async () => {
+      const [stats] = await readInspectorObserverStats(page);
+      return stats && {
+        activeMutationObservers: stats.activeMutationObservers,
+        activeResizeObservers: stats.activeResizeObservers,
+      };
+    }).toEqual({ activeMutationObservers: 1, activeResizeObservers: 1 });
+
+    for (const name of ["选择标题", "选择图片", "选择标题", "选择图片"]) {
+      await page.getByRole("button", { name, exact: true }).click();
+      await expect(page.getByLabel("Inspector 当前选择"))
+        .toHaveText(name === "选择标题" ? "node_heading" : "node_image");
+    }
+    await expect.poll(async () => {
+      const [stats] = await readInspectorObserverStats(page);
+      return stats && {
+        activeMutationObservers: stats.activeMutationObservers,
+        activeResizeObservers: stats.activeResizeObservers,
+      };
+    }).toEqual({ activeMutationObservers: 1, activeResizeObservers: 1 });
+    expect(browserErrors).toEqual([]);
+  });
+
+  test("iframe 文档替换与组件卸载会断开旧 observer", async ({ page }) => {
+    const browserErrors = captureBrowserErrors(page);
+    await page.goto("/dynamic-template-foundation.html?inspectorObserver=1");
+    await expect.poll(async () => (await readInspectorObserverStats(page))[0]?.activeMutationObservers)
+      .toBe(1);
+
+    await page.getByRole("button", { name: "重载 iframe 文档" }).click();
+    await expect.poll(async () => (await readInspectorObserverStats(page)).length).toBe(2);
+    await expect.poll(async () => {
+      const stats = await readInspectorObserverStats(page);
+      return stats.map((entry) => ({
+        revision: entry.revision,
+        activeMutationObservers: entry.activeMutationObservers,
+        activeResizeObservers: entry.activeResizeObservers,
+      }));
+    }).toEqual([
+      { revision: 1, activeMutationObservers: 0, activeResizeObservers: 0 },
+      { revision: 2, activeMutationObservers: 1, activeResizeObservers: 1 },
+    ]);
+
+    await page.getByRole("button", { name: "选择图片", exact: true }).click();
+    await page.getByRole("button", { name: "重载 iframe 文档" }).click();
+    await expect.poll(async () => (await readInspectorObserverStats(page)).length).toBe(3);
+    await expect.poll(async () => {
+      const stats = await readInspectorObserverStats(page);
+      return stats.map((entry) => [
+        entry.revision,
+        entry.activeMutationObservers,
+        entry.activeResizeObservers,
+      ]);
+    }).toEqual([[1, 0, 0], [2, 0, 0], [3, 1, 1]]);
+
+    await page.getByRole("button", { name: "卸载 Inspector" }).click();
+    await expect(page.getByRole("complementary", { name: "模板属性" })).toHaveCount(0);
+    await expect.poll(async () => {
+      const stats = await readInspectorObserverStats(page);
+      return stats.map((entry) => [
+        entry.revision,
+        entry.activeMutationObservers,
+        entry.activeResizeObservers,
+      ]);
+    }).toEqual([[1, 0, 0], [2, 0, 0], [3, 0, 0]]);
+    expect(browserErrors).toEqual([]);
+  });
 });
 
 test.describe("动态 TemplateDefinition 基础", () => {
@@ -50,7 +191,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
     await expect(image).toHaveCSS("object-fit", "cover");
     await expect(image).toHaveCSS("object-position", "50% 50%");
 
-    await page.getByRole("button", { name: "移动端" }).click();
+    await page.getByRole("button", { name: "移动端", exact: true }).click();
     await expect(page.getByLabel("当前设备")).toHaveText("mobile");
     await expect(heading).toHaveText("光，沿线而生");
     await expect(container).toHaveCSS("flex-direction", "column");
@@ -62,7 +203,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
 
   test("页面实例只覆盖槽位内容，公开渲染锁定精确正式版本", async ({ page }) => {
     await expect(
-      page.getByRole("region", { name: "页面实例内容" }).locator("h2"),
+      page.getByRole("region", { name: "编辑器预览" }).locator("h2"),
     ).toHaveText("页面实例填写的标题");
     const publicVersion = page.getByRole("region", { name: "公开页面固定版本" });
     await expect(publicVersion.locator("h1")).toHaveText("正式版本三");
@@ -84,29 +225,170 @@ test.describe("动态 TemplateDefinition 基础", () => {
     await expect(fallback.locator('[data-template-node-id="node_heading"] h2')).toHaveText("光，沿线而生");
   });
 
-  test("缩略图、模板画布、页面实例和公开页面共用同一 V2 节点结构", async ({ page }) => {
-    const readNodeSignature = async (label: string) => page
-      .getByRole("region", { name: label })
-      .locator("[data-template-node-id]")
-      .evaluateAll((nodes) => nodes.map((node) => ({
-        nodeId: node.getAttribute("data-template-node-id"),
-        nodeType: node.getAttribute("data-template-node-type"),
-      })));
+  test("五个真实消费宿主在桌面与移动端共用节点结构、视觉顺序和归一化几何", async ({ page }) => {
+    const surfaces = [
+      { label: "动态模板缩略图", mode: "thumbnail" },
+      { label: "动态模板画布", mode: "editor" },
+      { label: "页面模板实例", mode: "editor" },
+      { label: "编辑器预览", mode: "preview" },
+      { label: "公开页面固定版本", mode: "public" },
+    ] as const;
+    const getSurfaceRoot = (label: string) => {
+      const region = page.getByRole("region", { name: label });
+      return label === "动态模板缩略图"
+        ? region.frameLocator("iframe[data-template-catalog-viewport]")
+          .locator("[data-dynamic-template-id]")
+        : region.locator("[data-dynamic-template-id]");
+    };
+    const readSurfaceGeometry = async (label: string) => {
+      const root = getSurfaceRoot(label);
+      await expect(root).toBeVisible();
+      const nodes = await root.locator("[data-template-node-id]").evaluateAll((elements) => {
+        const round = (value: number) => Math.round(value * 10_000) / 10_000;
+        const rootElement = elements[0]?.closest<HTMLElement>("[data-dynamic-template-id]");
+        if (!rootElement) return [];
+        const rootRect = rootElement.getBoundingClientRect();
+        const snapshots = elements.map((element, documentIndex) => {
+          const rect = element.getBoundingClientRect();
+          const parentNodeId = element.parentElement?.closest("[data-template-node-id]")
+            ?.getAttribute("data-template-node-id") ?? null;
+          return {
+            nodeId: element.getAttribute("data-template-node-id"),
+            nodeType: element.getAttribute("data-template-node-type"),
+            slotId: element.getAttribute("data-template-slot-id"),
+            parentNodeId,
+            documentIndex,
+            cssOrder: getComputedStyle(element).order,
+            rect: {
+              x: round((rect.left - rootRect.left) / rootRect.width),
+              y: round((rect.top - rootRect.top) / rootRect.height),
+              width: round(rect.width / rootRect.width),
+              height: round(rect.height / rootRect.height),
+              aspectRatio: round(rect.width / rect.height),
+            },
+            absoluteRect: {
+              width: round(rect.width),
+              height: round(rect.height),
+            },
+          };
+        });
+        return snapshots.map((snapshot) => {
+          const siblings = snapshots.filter((candidate) => (
+            candidate.parentNodeId === snapshot.parentNodeId
+          ));
+          const domIndex = siblings.findIndex((candidate) => candidate.nodeId === snapshot.nodeId);
+          const visual = [...siblings].sort((left, right) => {
+            const topDelta = left.rect.y - right.rect.y;
+            if (Math.abs(topDelta) > 0.01) return topDelta;
+            const leftDelta = left.rect.x - right.rect.x;
+            if (Math.abs(leftDelta) > 0.01) return leftDelta;
+            return left.documentIndex - right.documentIndex;
+          });
+          return {
+            ...snapshot,
+            domIndex,
+            visualIndex: visual.findIndex((candidate) => candidate.nodeId === snapshot.nodeId),
+          };
+        });
+      });
+      const rootMetrics = await root.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          width: rect.width,
+          height: rect.height,
+          aspectRatio: rect.width / rect.height,
+          computedHeight: getComputedStyle(element).height,
+          overflow: element.scrollWidth > element.clientWidth + 1,
+        };
+      });
+      return { nodes, rootMetrics };
+    };
 
-    const editorSignature = await readNodeSignature("动态模板画布");
-    expect(editorSignature.length).toBeGreaterThan(0);
-    await expect(page.getByRole("region", { name: "动态模板画布" })
-      .locator('[data-dynamic-template-mode="editor"]')).toHaveCount(1);
-    await expect(page.getByRole("region", { name: "动态模板缩略图" })
-      .locator('[data-dynamic-template-mode="thumbnail"]')).toHaveCount(1);
-    await expect(page.getByRole("region", { name: "页面实例内容" })
-      .locator('[data-dynamic-template-mode="preview"]')).toHaveCount(1);
-    await expect(page.getByRole("region", { name: "公开页面固定版本" })
-      .locator('[data-dynamic-template-mode="public"]')).toHaveCount(1);
+    for (const viewport of [
+      { width: 1920, height: 1200, device: "desktop", button: "桌面端" },
+      { width: 390, height: 844, device: "mobile", button: "移动端" },
+    ] as const) {
+      await page.setViewportSize(viewport);
+      await page.getByRole("button", { name: viewport.button, exact: true }).click();
+      await expect(page.getByLabel("当前设备")).toHaveText(viewport.device);
+      const thumbnail = page.getByRole("region", { name: "动态模板缩略图" });
+      await expect(thumbnail.locator("[data-template-catalog-preview-shell]"))
+        .toHaveAttribute("data-preview-status", "ready");
+      await expect(thumbnail.locator("iframe[data-template-catalog-viewport]"))
+        .toHaveAttribute("data-template-catalog-viewport", viewport.device);
+      await expect(thumbnail.locator("[data-preview-height-mode]"))
+        .toHaveAttribute("data-preview-height-mode", "aspect-ratio");
 
-    expect(await readNodeSignature("动态模板缩略图")).toEqual(editorSignature);
-    expect(await readNodeSignature("页面实例内容")).toEqual(editorSignature);
-    expect(await readNodeSignature("公开页面固定版本")).toEqual(editorSignature);
+      const editorGeometry = await readSurfaceGeometry("动态模板画布");
+      expect(editorGeometry.nodes.length).toBeGreaterThan(0);
+      for (const surface of surfaces) {
+        const region = page.getByRole("region", { name: surface.label });
+        const root = getSurfaceRoot(surface.label);
+        await expect(root).toHaveAttribute("data-dynamic-template-mode", surface.mode);
+        const geometry = await readSurfaceGeometry(surface.label);
+        expect(geometry.rootMetrics.width, `${viewport.device}.${surface.label} 根宽度`).toBeGreaterThan(0);
+        expect(geometry.rootMetrics.height, `${viewport.device}.${surface.label} 根高度`).toBeGreaterThan(0);
+        expect(geometry.rootMetrics.overflow, `${viewport.device}.${surface.label} 不应横向溢出`).toBe(false);
+        expect(geometry.rootMetrics.computedHeight).not.toBe("0px");
+        const configuredAspectRatio = viewport.device === "desktop" ? 16 / 9 : 4 / 5;
+        // aspect-ratio 是最小画框语义；真实内容可以把自动高度撑高，但不能把画框压扁。
+        expect(geometry.rootMetrics.aspectRatio).toBeLessThanOrEqual(configuredAspectRatio + 0.05);
+        expect(
+          Math.abs(geometry.rootMetrics.aspectRatio - editorGeometry.rootMetrics.aspectRatio)
+            / Math.max(0.0001, editorGeometry.rootMetrics.aspectRatio),
+          `${viewport.device}.${surface.label} 根节点实际高度语义漂移`,
+        ).toBeLessThanOrEqual(0.05);
+
+        expect(geometry.nodes.map((node) => ({
+          nodeId: node.nodeId,
+          nodeType: node.nodeType,
+          slotId: node.slotId,
+          parentNodeId: node.parentNodeId,
+          documentIndex: node.documentIndex,
+          domIndex: node.domIndex,
+          cssOrder: node.cssOrder,
+          visualIndex: node.visualIndex,
+        })), `${viewport.device}.${surface.label} 节点、父子、DOM/CSS/视觉顺序`).toEqual(
+          editorGeometry.nodes.map((node) => ({
+            nodeId: node.nodeId,
+            nodeType: node.nodeType,
+            slotId: node.slotId,
+            parentNodeId: node.parentNodeId,
+            documentIndex: node.documentIndex,
+            domIndex: node.domIndex,
+            cssOrder: node.cssOrder,
+            visualIndex: node.visualIndex,
+          })),
+        );
+        for (const expected of editorGeometry.nodes) {
+          const actual = geometry.nodes.find((node) => node.nodeId === expected.nodeId);
+          expect(actual, `${viewport.device}.${surface.label}.${expected.nodeId} 缺少几何`).toBeTruthy();
+          expect(actual!.absoluteRect.width).toBeGreaterThan(0);
+          expect(actual!.absoluteRect.height).toBeGreaterThan(0);
+          for (const dimension of ["x", "y", "width", "height"] as const) {
+            expect(
+              Math.abs(actual!.rect[dimension] - expected.rect[dimension]),
+              `${viewport.device}.${surface.label}.${expected.nodeId}.${dimension} 归一化几何漂移`,
+            ).toBeLessThanOrEqual(0.03);
+          }
+          if (["node_root", "node_container", "node_image"].includes(expected.nodeId ?? "")) {
+            expect(
+              Math.abs(actual!.rect.aspectRatio - expected.rect.aspectRatio)
+                / Math.max(0.0001, expected.rect.aspectRatio),
+              `${viewport.device}.${surface.label}.${expected.nodeId} 宽高比漂移`,
+            ).toBeLessThanOrEqual(0.05);
+          }
+        }
+        await expect(region).toBeVisible();
+      }
+
+      for (const label of ["页面模板实例", "编辑器预览", "公开页面固定版本"]) {
+        const region = page.getByRole("region", { name: label });
+        await expect(region.locator(
+          '[data-editable-target-overlay-root], [data-template-selected], [data-template-node-label], [tabindex]',
+        )).toHaveCount(0);
+      }
+    }
   });
 
   test("目录预览按真实比例、内容高度和图片文字 DOM 槽位统一呈现", async ({ page }) => {
@@ -262,7 +544,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
   });
 
   test("母模板明确控制移动布局切换宽度，平板与中间宽度按规则选择构图", async ({ page }) => {
-    const instance = page.getByRole("region", { name: "页面实例内容" })
+    const instance = page.getByRole("region", { name: "编辑器预览" })
       .locator('[data-dynamic-template-instance-id="instance_test_v3"]');
     await page.setViewportSize({ width: 700, height: 900 });
     await expect(instance.locator('[data-dynamic-template-device="mobile"]')).toHaveCount(1);
@@ -289,18 +571,26 @@ test.describe("动态 TemplateDefinition 基础", () => {
     );
   });
 
-  test("编辑态节点可通过点击和键盘选择，公开内容节点身份保持稳定", async ({ page }) => {
-    const editorCanvas = page.getByRole("region", { name: "动态模板画布" });
-    const headingNode = editorCanvas.getByRole("group", { name: "选择模板节点 标题" });
-    await headingNode.click();
-    await expect(page.getByLabel("选中节点")).toHaveText("node_heading");
-    await expect(headingNode).toHaveAttribute("data-template-selected", "true");
+  test("模板画布仅由 host overlay 通过可访问名称、点击和键盘选择节点", async ({ page }) => {
+    const editorCanvas = page.getByRole("region", { name: "模板 host overlay 画布" });
+    const overlay = editorCanvas.locator('[data-template-editor-overlay-root="template-definition"]');
+    const headingTarget = editorCanvas.getByRole("button", { name: "选择模板目标 标题" });
+    const rendererFrame = editorCanvas.frameLocator("iframe");
 
-    const imageNode = editorCanvas.getByRole("group", { name: "选择模板节点 主视觉图片" });
-    await imageNode.focus();
-    await imageNode.press("Enter");
+    await expect(overlay).toHaveCount(1);
+    await expect(headingTarget).toHaveCount(1);
+    await expect(rendererFrame.getByRole("group", { name: "选择模板节点 标题" })).toHaveCount(0);
+    await headingTarget.click();
+    await expect(page.getByLabel("选中节点")).toHaveText("node_heading");
+    await expect(headingTarget).toHaveAttribute("data-overlay-hit-selected", "true");
+
+    const imageTarget = editorCanvas.getByRole("button", { name: "选择模板目标 主视觉图片" });
+    await expect(imageTarget).toHaveCount(1);
+    await imageTarget.focus();
+    await imageTarget.press("Enter");
     await expect(page.getByLabel("选中节点")).toHaveText("node_image");
-    await expect(imageNode).toHaveAttribute("data-template-slot-id", "slot_image");
+    await expect(imageTarget).toHaveAttribute("data-overlay-hit-selected", "true");
+    await expect(editorCanvas.locator('[data-overlay-hit-for="node:node_image"]')).toHaveCount(1);
   });
 
   test("Renderer 只在模板定义工作面接收节点拖动和键盘微调，不再挂载局部缩放层", async ({ page }) => {
@@ -457,7 +747,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
     expect(result.exportedSchemaVersion).toBe(1);
   });
 
-  test("版本升级只迁移兼容槽位，阻断尚未由页面填写的新必填槽位", async ({ page }) => {
+  test("版本升级把新增必填槽位列为待填写，并把非空内容丢失列为破坏性阻断", async ({ page }) => {
     const result = JSON.parse(await page.getByTestId("upgrade-result").textContent() || "{}") as {
       originalVersion: number;
       compatibleVersion: number;
@@ -466,6 +756,8 @@ test.describe("动态 TemplateDefinition 基础", () => {
       compatibleBlockers: string[];
       discarded: string[];
       blockingReasons: string[];
+      pendingRequiredSlots: Array<{ slotId: string; label: string }>;
+      destructiveBlockers: Array<{ slotId?: string; reason: string }>;
     };
     expect(result.originalVersion).toBe(3);
     expect(result.compatibleVersion).toBe(4);
@@ -473,7 +765,13 @@ test.describe("动态 TemplateDefinition 基础", () => {
     expect(result.preserved).toEqual(["slot_heading"]);
     expect(result.compatibleBlockers).toEqual([]);
     expect(result.discarded).toEqual(["slot_heading"]);
-    expect(result.blockingReasons.some((message) => message.includes("新增必填正文"))).toBe(true);
+    expect(result.blockingReasons.some((message) => message.includes("无法无损保留"))).toBe(true);
+    expect(result.pendingRequiredSlots).toEqual([
+      { slotId: "slot_required", label: "新增必填正文" },
+    ]);
+    expect(result.destructiveBlockers).toEqual([
+      expect.objectContaining({ slotId: "slot_heading" }),
+    ]);
   });
 
   test("旧兼容来源只适配为新身份，原合同引用保持不变", async ({ page }) => {
@@ -510,7 +808,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
     expect(result.layoutPreserved).toBe(true);
   });
 
-  test("24 个活动兼容来源适配 dry-run 全部生成合法定义且不污染来源或携带旧数字商品引用", async ({ page }) => {
+  test(`${activeTemplateCount} 个活动兼容来源适配 dry-run 全部生成合法定义且不污染来源或携带旧数字商品引用`, async ({ page }) => {
     const results = JSON.parse(await page.getByTestId("legacy-all-conversion-result").textContent() || "[]") as Array<{
       key: string;
       moduleType: string;
@@ -523,7 +821,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
       containsLegacyNumericProductReference?: boolean;
       error?: string;
     }>;
-    expect(results).toHaveLength(24);
+    expect(results).toHaveLength(activeTemplateCount);
     expect(results.filter((item) => !item.valid)).toEqual([]);
     for (const result of results) {
       expect(result.sourceUnchanged, result.moduleType).toBe(true);
@@ -570,7 +868,10 @@ test.describe("动态 TemplateDefinition 基础", () => {
   test("16 个成熟 V2 模板在 1920、1200、768、390 四档复用真实 Renderer 且不横向溢出", async ({ page }) => {
     for (const width of [1920, 1200, 768, 390]) {
       await page.setViewportSize({ width, height: Math.max(844, Math.round(width * 0.75)) });
-      await page.getByRole("button", { name: width === 390 ? "移动端" : "桌面端" }).click();
+      await page.getByRole("button", {
+        name: width === 390 ? "移动端" : "桌面端",
+        exact: true,
+      }).click();
       const matrix = page.getByTestId("mature-template-v2-matrix");
       await expect(matrix.locator("[data-mature-template-module]")).toHaveCount(16);
       await expect(matrix.locator('[data-content-template-renderer="real"]')).toHaveCount(16);
@@ -636,7 +937,7 @@ test.describe("动态 TemplateDefinition 基础", () => {
 
   for (const device of ["desktop", "mobile"] as const) {
     for (const scenario of ["empty", "long-text", "missing-image"] as const) {
-      test(`24 个正式模板在 ${device} 的 ${scenario} 场景保持公共 Renderer 稳定`, async ({ page }) => {
+      test(`${activeTemplateCount} 个正式模板在 ${device} 的 ${scenario} 场景保持公共 Renderer 稳定`, async ({ page }) => {
         const runtimeErrors: string[] = [];
         page.on("pageerror", (error) => runtimeErrors.push(error.message));
         page.on("console", (message) => {
@@ -654,8 +955,8 @@ test.describe("动态 TemplateDefinition 基础", () => {
         const matrix = page.getByTestId("template-scenario-regression-matrix");
         await expect(matrix).toHaveAttribute("data-preview-scenario", scenario);
         await expect(matrix).toHaveAttribute("data-preview-device", device);
-        await expect(matrix.locator("[data-scenario-template]")).toHaveCount(24);
-        await expect(matrix.locator("[data-dynamic-template-id]")).toHaveCount(24);
+        await expect(matrix.locator("[data-scenario-template]")).toHaveCount(activeTemplateCount);
+        await expect(matrix.locator("[data-dynamic-template-id]")).toHaveCount(activeTemplateCount);
         await page.waitForTimeout(250);
         expect(runtimeErrors, `${device}.${scenario} 不应出现 Renderer 运行时错误`).toEqual([]);
         const overflow = await matrix.locator("[data-scenario-template]").evaluateAll((elements) => elements

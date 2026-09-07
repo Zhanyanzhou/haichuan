@@ -1,8 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import {
+  evaluateSitePublicationReadiness,
+  normalizePublishedBrandLogo,
+} from './site-publication-readiness';
+import { DEFAULT_PUBLIC_CONTENT_LOCALE } from '../../common/content-locale';
 
 const SETTINGS_FILE = path.resolve(__dirname, '..', '..', '..', 'settings.json');
 const SETTINGS_KEY = 'site';
@@ -11,6 +21,8 @@ const DEFAULT_SETTINGS = {
   siteName: '海川珠宝',
   siteDescription: '珠宝作品与顾问服务',
   logo: '',
+  brandPresentationMode: '',
+  brandReviewReference: '',
   seoTitle: '海川珠宝',
   seoDescription: '浏览珠宝作品，了解定制与顾问服务。',
   seoKeywords: '珠宝,首饰,黄金,钻石,手镯,吊坠,戒指,耳饰',
@@ -20,14 +32,20 @@ const DEFAULT_SETTINGS = {
   storeName: '',
   businessHours: '',
   storeMapUrl: '',
+  canonicalBaseUrl: '',
+  legalEntityReviewReference: '',
+  privacyPolicyReviewReference: '',
+  seoReviewReference: '',
+  defaultLocale: DEFAULT_PUBLIC_CONTENT_LOCALE,
+  publishedLocales: [DEFAULT_PUBLIC_CONTENT_LOCALE],
   paymentMethods: ['transfer'],
   logisticsCompanies: ['顺丰速运', '京东物流', 'EMS'],
 };
 
-const LEGACY_PLACEHOLDER_LOGOS = new Set(['/favicon.svg', '/images/brand-logo.svg']);
 const MIN_DATABASE_BACKUP_BYTES = 1024;
 const DEFAULT_BACKUP_INTERVAL_SECONDS = 86400;
 const DEFAULT_BACKUP_HEALTH_GRACE_SECONDS = 3600;
+const SETTINGS_UPDATE_MAX_ATTEMPTS = 3;
 
 type BackupArtifact = { name: string; size: number; mtime: Date };
 
@@ -185,10 +203,9 @@ export function summarizeBackupArtifacts(
 
 function normalizeSettings(settings: unknown): Record<string, unknown> {
   const source = isRecord(settings) ? settings : {};
-  const logo = typeof source.logo === 'string' ? source.logo.trim() : '';
   return {
     ...source,
-    logo: LEGACY_PLACEHOLDER_LOGOS.has(logo.toLowerCase()) ? '' : logo,
+    logo: normalizePublishedBrandLogo(source.logo, source.canonicalBaseUrl) ?? '',
   };
 }
 
@@ -226,18 +243,82 @@ export class SettingsService {
   }
 
   async updateSettings(data: object, userId?: number) {
-    const current = await this.getSettings();
-    const updated = { ...current, ...data } as Prisma.InputJsonObject;
-    const saved = await this.prisma.siteSetting.upsert({
+    for (let attempt = 0; attempt < SETTINGS_UPDATE_MAX_ATTEMPTS; attempt += 1) {
+      const stored = await this.prisma.siteSetting.findUnique({
+        where: { key: SETTINGS_KEY },
+        select: { value: true, version: true },
+      });
+      const current = stored
+        ? normalizeSettings(stored.value)
+        : normalizeSettings(this.loadLegacyFile());
+      const updated = { ...current, ...data } as Prisma.InputJsonObject;
+
+      if (!stored) {
+        try {
+          const created = await this.prisma.siteSetting.create({
+            data: { key: SETTINGS_KEY, value: updated, updatedBy: userId },
+          });
+          return normalizeSettings(created.value) as Record<string, unknown>;
+        } catch (error) {
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError
+            && error.code === 'P2002'
+          ) {
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      const saved = await this.prisma.siteSetting.updateMany({
+        where: { key: SETTINGS_KEY, version: stored.version },
+        data: {
+          value: updated,
+          updatedBy: userId,
+          version: { increment: 1 },
+        },
+      });
+      if (saved.count === 1) {
+        return normalizeSettings(updated) as Record<string, unknown>;
+      }
+    }
+
+    throw new ConflictException('系统设置已被其他会话更新，请刷新后重试');
+  }
+
+  /**
+   * 发布准备度只读取已持久化的正式配置；默认回退值不能让门禁误判为已准备。
+   */
+  async getPublicationReadiness() {
+    const stored = await this.prisma.siteSetting.findUnique({
       where: { key: SETTINGS_KEY },
-      create: { key: SETTINGS_KEY, value: updated, updatedBy: userId },
-      update: {
-        value: updated,
-        updatedBy: userId,
-        version: { increment: 1 },
-      },
+      select: { value: true, version: true, updatedAt: true },
     });
-    return normalizeSettings(saved.value) as Record<string, unknown>;
+    return {
+      ...evaluateSitePublicationReadiness(stored?.value, {
+        persisted: Boolean(stored),
+      }),
+      settingsVersion: stored?.version ?? null,
+      settingsUpdatedAt: stored?.updatedAt ?? null,
+    };
+  }
+
+  /** 公开端不消费默认回退或部分资料；未通过正式准备度时整份设置失败关闭。 */
+  async getPublishedSettings(): Promise<Record<string, unknown>> {
+    const stored = await this.prisma.siteSetting.findUnique({
+      where: { key: SETTINGS_KEY },
+      select: { value: true },
+    });
+    const readiness = evaluateSitePublicationReadiness(stored?.value, {
+      persisted: Boolean(stored),
+    });
+    if (!readiness.ready) {
+      throw new ServiceUnavailableException('公开站点设置尚未准备完成');
+    }
+    const published = normalizeSettings(stored!.value) as Record<string, unknown>;
+    return published.brandPresentationMode === 'text-only'
+      ? { ...published, logo: '' }
+      : published;
   }
 
   async getBackupStatus() {

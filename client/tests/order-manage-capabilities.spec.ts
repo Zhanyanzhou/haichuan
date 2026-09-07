@@ -90,6 +90,26 @@ const orders = [
     items: [],
     createdAt: "2026-08-22T04:00:00.000Z",
   },
+  {
+    id: 105,
+    orderNo: "HC-MULTI-PENDING-SHIP",
+    customerName: "多包裹客户",
+    customerPhone: "13800000005",
+    address: "测试地址五",
+    totalAmount: 28000,
+    discountAmount: 0,
+    finalAmount: 28000,
+    paidAmount: 28000,
+    status: "PENDING_SHIP",
+    orderType: "SPOT",
+    deliveryStatus: "PENDING_SHIP",
+    fulfillments: [
+      { id: 205, status: "PENDING_SHIP" },
+      { id: 206, status: "PENDING_SHIP" },
+    ],
+    items: [],
+    createdAt: "2026-08-22T05:00:00.000Z",
+  },
 ] as const;
 
 async function authenticate(page: Page, role: TestedRole) {
@@ -113,7 +133,7 @@ async function authenticate(page: Page, role: TestedRole) {
   );
 }
 
-async function mockOrderApis(page: Page) {
+async function mockOrderApis(page: Page, options: { rejectMultiPackageShip?: boolean } = {}) {
   const prohibitedRequests: string[] = [];
 
   await page.route("**/api/**", async (route: Route) => {
@@ -130,6 +150,23 @@ async function mockOrderApis(page: Page) {
 
     if (isMutation || path.endsWith("/orders/export")) {
       prohibitedRequests.push(`${request.method()} ${path}`);
+    }
+
+    if (
+      options.rejectMultiPackageShip &&
+      request.method() === "PUT" &&
+      path.endsWith("/orders/105/ship")
+    ) {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          statusCode: 409,
+          message: "多包裹订单请前往履约中心逐包发货",
+          error: "Conflict",
+        }),
+      });
+      return;
     }
 
     if (request.method() === "GET" && path.endsWith("/orders")) {
@@ -244,6 +281,51 @@ test.describe("订单管理前端 capability 矩阵", () => {
     ).toBeVisible();
     expect(prohibitedRequests).toEqual([]);
     expect(antdConsoleProblems).toEqual([]);
+  });
+
+  test("多包裹发货冲突保留表单并引导至履约中心", async ({ page }) => {
+    await authenticate(page, "ADMIN");
+    const requests = await mockOrderApis(page, { rejectMultiPackageShip: true });
+    await page.goto("/admin/orders");
+
+    await rowFor(page, "HC-MULTI-PENDING-SHIP")
+      .getByRole("button", { name: "发货" })
+      .click();
+    const shipDialog = page.getByRole("dialog", { name: "登记发货物流" });
+    const carrierSelect = shipDialog.getByLabel("物流公司");
+    await carrierSelect.click();
+    await carrierSelect.press("Enter");
+    await shipDialog.getByLabel("物流单号").fill("SF-MULTI-105");
+    await shipDialog.getByRole("button", { name: "确认发货" }).click();
+
+    const guide = page.getByRole("dialog", { name: "多包裹订单请逐包发货" });
+    await expect(guide).toBeVisible();
+    await guide.getByRole("button", { name: "留在当前页面" }).click();
+    await expect(shipDialog).toBeVisible();
+    await expect(shipDialog).toContainText("顺丰速运");
+    await expect(shipDialog.getByLabel("物流单号")).toHaveValue("SF-MULTI-105");
+    expect(requests).toContain("PUT /api/orders/105/ship");
+  });
+
+  test("多包裹发货冲突可从引导弹窗进入履约中心真实路由", async ({ page }) => {
+    await authenticate(page, "ADMIN");
+    await mockOrderApis(page, { rejectMultiPackageShip: true });
+    await page.goto("/admin/orders");
+
+    await rowFor(page, "HC-MULTI-PENDING-SHIP")
+      .getByRole("button", { name: "发货" })
+      .click();
+    const shipDialog = page.getByRole("dialog", { name: "登记发货物流" });
+    const carrierSelect = shipDialog.getByLabel("物流公司");
+    await carrierSelect.click();
+    await carrierSelect.press("Enter");
+    await shipDialog.getByLabel("物流单号").fill("SF-MULTI-ROUTE-105");
+    await shipDialog.getByRole("button", { name: "确认发货" }).click();
+
+    const guide = page.getByRole("dialog", { name: "多包裹订单请逐包发货" });
+    await guide.getByRole("button", { name: "前往履约中心" }).click();
+    await expect(page).toHaveURL(/\/admin\/trade\/fulfillment$/);
+    expect(new URL(page.url()).pathname).toBe("/admin/trade/fulfillment");
   });
 
   test("WAREHOUSE 不能进入订单中心或读取通用订单投影", async ({ page }) => {

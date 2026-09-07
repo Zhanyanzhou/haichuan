@@ -185,7 +185,7 @@ export function Toolbar({
           }}
         >
           <span style={{ color: T.txt, fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>{path}</span>
-          <span style={{ color: T.light, whiteSpace: "nowrap", flexShrink: 0 }}>{total} 件作品</span>
+          <span style={{ color: T.sec, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}>{total} 件作品</span>
           <div className="catalog-toolbar__spacer" style={{ flex: 1 }} />
           <div className="catalog-toolbar__material" style={{ position: "relative" }}>
             <button
@@ -253,6 +253,7 @@ export function Toolbar({
             )}
           </div>
           <select
+            aria-label="作品排序方式"
             value={sort}
             onChange={(e) => onSort(e.target.value)}
             style={{

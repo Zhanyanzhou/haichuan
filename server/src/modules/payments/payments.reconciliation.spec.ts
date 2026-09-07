@@ -32,6 +32,7 @@ test('掉单兜底 cron 对超时 PENDING 微信交易主动查单并复用核�
       payment: {
         findMany: async () => [payment],
         findUnique: async () => payment,
+        findFirst: async () => null,
         updateMany: async () => ({ count: 1 }),
       },
     } as unknown as PrismaService,
@@ -69,6 +70,7 @@ test('掉单兜底单笔查单异常不阻断同批其余交易', async () => {
     {
       payment: {
         findMany: async () => payments,
+        findFirst: async () => null,
         findUnique: async ({ where }: { where: { id?: number; paymentNo?: string } }) => {
           if (where.paymentNo) return payments.find((candidate) => candidate.paymentNo === where.paymentNo);
           return payments.find((candidate) => candidate.id === where.id);
@@ -106,6 +108,7 @@ test('人工查单拒绝线下付款与支付宝，微信 FAILED 交易仍可查
   const service = new PaymentsService(
     {
       payment: {
+        findFirst: async () => null,
         findUnique: async ({ where }: { where: { id?: number; paymentNo?: string } }) => {
           if (where.id === 1) return buildPayment({ id: 1, method: 'bank_transfer' });
           if (where.id === 2) return buildPayment({ id: 2, method: 'alipay' });

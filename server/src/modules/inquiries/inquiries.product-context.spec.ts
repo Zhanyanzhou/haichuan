@@ -7,6 +7,7 @@ import { validate } from 'class-validator';
 import { CreateInquiryDto } from './dto/create-inquiry.dto';
 import { InquiriesService } from './inquiries.service';
 import { ApiError } from '../../common/errors/api-error';
+import { CUSTOMER_INQUIRY_SUBMISSION_SELECT } from './customer-inquiry.response';
 
 const validInquiry = {
   customerName: '测试访客',
@@ -161,14 +162,26 @@ test('相同幂等键与相同提交只创建一次来源记录和 Lead', async 
     inquiryId: number;
   } | null = null;
   let createCount = 0;
-  const source = { id: 77, status: 'PENDING' };
+  let createArgs: Record<string, unknown> | undefined;
+  let replayArgs: Record<string, unknown> | undefined;
+  const createdAt = new Date('2026-09-06T02:00:00.000Z');
+  const source = {
+    id: 77,
+    status: 'PENDING',
+    createdAt,
+    assignedTo: 9,
+    internalNote: '仅管理员可见',
+    nextFollowUpAt: new Date('2026-09-07T02:00:00.000Z'),
+  };
   const prisma = {
     $transaction: async (callback: (transaction: unknown) => unknown) => callback(prisma),
     lead: {
       findUnique: async () => existingLead,
     },
     inquiry: {
-      create: async ({ data }: { data: Record<string, any> }) => {
+      create: async (args: { data: Record<string, any>; select?: unknown }) => {
+        const { data } = args;
+        createArgs = args;
         createCount += 1;
         existingLead = {
           sourceType: data.lead.create.sourceType,
@@ -177,7 +190,10 @@ test('相同幂等键与相同提交只创建一次来源记录和 Lead', async 
         };
         return source;
       },
-      findUniqueOrThrow: async () => source,
+      findUniqueOrThrow: async (args: Record<string, unknown>) => {
+        replayArgs = args;
+        return source;
+      },
     },
     consentRecord: { create: async () => ({ id: 1 }) },
   };
@@ -196,8 +212,14 @@ test('相同幂等键与相同提交只创建一次来源记录和 Lead', async 
     idempotencyKey: 'same-intent-0001',
   });
 
-  assert.deepEqual(first, source);
-  assert.deepEqual(retry, source);
+  const expected = { id: 77, status: 'PENDING', createdAt };
+  assert.deepEqual(first, expected);
+  assert.deepEqual(retry, expected);
+  assert.deepEqual(createArgs?.select, CUSTOMER_INQUIRY_SUBMISSION_SELECT);
+  assert.deepEqual(replayArgs?.select, CUSTOMER_INQUIRY_SUBMISSION_SELECT);
+  assert.equal('internalNote' in first, false);
+  assert.equal('assignedTo' in retry, false);
+  assert.equal('nextFollowUpAt' in retry, false);
   assert.equal(createCount, 1);
 });
 

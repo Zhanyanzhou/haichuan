@@ -167,15 +167,255 @@ test.describe("游客公开浏览", () => {
     });
   }
 
-  test("会员密码重置页使用统一 6-18 位输入合同", async ({ page }) => {
-    await page.goto(`/customer/reset?token=${"a".repeat(64)}`);
+  test("微信回调同时校验 origin/source 与固定消息 Schema", async ({ page }) => {
+    await page.route("**/api/customers/me", (route) =>
+      route.fulfill({ status: 401, body: "{}" }),
+    );
+    await page.route("**/api/customers/sms-requirements", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: 200,
+          data: { registerRequired: false },
+          message: "success",
+        }),
+      }),
+    );
+    await page.route("**/api/customers/wechat/config**", (route) => {
+      const origin = new URL(route.request().url()).origin;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: 200,
+          data: {
+            enabled: true,
+            qrConnectUrl: `${origin}/wechat-oauth-frame`,
+            callbackOrigin: origin,
+          },
+          message: "success",
+        }),
+      });
+    });
+    await page.route("**/wechat-oauth-frame", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: "<!doctype html><title>wechat oauth frame</title>",
+      }),
+    );
+
+    await page.goto("/customer");
+    const iframe = page.locator('iframe[title="微信扫码登录"]');
+    await expect(iframe).toBeVisible();
+    await expect.poll(() => page.frames().length).toBeGreaterThan(1);
+
+    const validMessage = {
+      type: "wechat-login-result",
+      version: 1,
+      payload: {
+        kind: "need-bind",
+        bindToken: "header.payload.signature",
+      },
+    };
+    await page.evaluate((data) => {
+      window.postMessage(data, window.location.origin);
+    }, validMessage);
+    await expect(page.getByText("已通过微信验证身份")).toHaveCount(0);
+
+    await page.evaluate((data) => {
+      const source = document.querySelector<HTMLIFrameElement>(
+        'iframe[title="微信扫码登录"]',
+      )?.contentWindow;
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data,
+          origin: "https://attacker.example",
+          source,
+        }),
+      );
+    }, validMessage);
+    await expect(page.getByText("已通过微信验证身份")).toHaveCount(0);
+
+    await page.evaluate((data) => {
+      const source = document.querySelector<HTMLIFrameElement>(
+        'iframe[title="微信扫码登录"]',
+      )?.contentWindow;
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data: { ...data, unexpected: true },
+          origin: window.location.origin,
+          source,
+        }),
+      );
+    }, validMessage);
+    await expect(page.getByText("已通过微信验证身份")).toHaveCount(0);
+
+    const iframeHandle = await iframe.elementHandle();
+    const oauthFrame = await iframeHandle?.contentFrame();
+    expect(oauthFrame).not.toBeNull();
+    await oauthFrame!.evaluate((data) => {
+      window.parent.postMessage(data, window.location.origin);
+    }, validMessage);
+    await expect(page.getByText("已通过微信验证身份")).toBeVisible();
+  });
+
+  test("会员密码重置页兼容旧 query 并立即清除地址栏令牌", async ({ page }) => {
+    const resetToken = "a".repeat(64);
+    await page.goto(`/customer/reset?token=${resetToken}`);
     const password = page.getByLabel("新密码", { exact: true });
     const confirmation = page.getByLabel("确认新密码", { exact: true });
-    await expect(password).toHaveAttribute("minlength", "6");
-    await expect(password).toHaveAttribute("maxlength", "18");
-    await expect(confirmation).toHaveAttribute("minlength", "6");
-    await expect(confirmation).toHaveAttribute("maxlength", "18");
-    await expect(page.getByText("密码需为 6–18 位。", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/customer\/reset$/);
+    expect(page.url()).not.toContain(resetToken);
+    await expect(password).toHaveAttribute("minlength", "8");
+    await expect(password).toHaveAttribute("maxlength", "64");
+    await expect(confirmation).toHaveAttribute("minlength", "8");
+    await expect(confirmation).toHaveAttribute("maxlength", "64");
+    await expect(page.getByText("密码需为 8–64 位。", { exact: true })).toBeVisible();
+  });
+
+  test("会员密码重置页读取新 fragment 后清除地址栏且提交原令牌", async ({ page }) => {
+    const resetToken = "b".repeat(64);
+    let submittedToken = "";
+    await page.route("**/api/customers/reset-password", async (route) => {
+      submittedToken = String(route.request().postDataJSON()?.token || "");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: { message: "ok" }, message: "success" }),
+      });
+    });
+
+    await page.goto(`/customer/reset#token=${resetToken}`);
+    await expect(page).toHaveURL(/\/customer\/reset$/);
+    expect(page.url()).not.toContain(resetToken);
+    await page.getByLabel("新密码", { exact: true }).fill("safe-pass-123");
+    await page.getByLabel("确认新密码", { exact: true }).fill("safe-pass-123");
+    await page.getByRole("button", { name: "重置密码" }).click();
+    await expect.poll(() => submittedToken).toBe(resetToken);
+  });
+
+  test("客户中心首个核心快照失败时不把未知数据伪装成空记录", async ({ page }) => {
+    let ordersFail = true;
+    await installCustomerSession(page, { id: 7, name: "状态测试会员" });
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const respond = (data: unknown) => route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "success" }),
+      });
+      if (path === "/api/customers/me") return respond({ id: 7, name: "状态测试会员", phone: "13800000000" });
+      if (path === "/api/customers/me/orders" && ordersFail) {
+        return route.fulfill({ status: 503, json: { message: "暂不可用" } });
+      }
+      if (path === "/api/settings/flags") {
+        return respond({ commerceEnabled: false, cartEnabled: false, paymentEnabled: false, partnerApplicationsWriteEnabled: false });
+      }
+      if (path === "/api/customers/me/notifications") {
+        return respond({ list: [], total: 0, unreadCount: 0, page: 1, pageSize: 20 });
+      }
+      return respond(path === "/api/partner-applications/me" ? null : []);
+    });
+
+    await page.goto("/customer");
+    await expect(page.getByText("账户数据暂时无法加载，请稍后重试。"))
+      .toBeVisible();
+    await expect(page.getByText("历史订单")).toHaveCount(0);
+    await expect(page.getByText("暂未有订单记录")).toHaveCount(0);
+
+    ordersFail = false;
+    await page.getByRole("button", { name: "重新加载" }).click();
+    await expect(page.getByRole("heading", { name: "我的账号" })).toBeVisible();
+    await expect(page.getByText("历史订单")).toBeVisible();
+  });
+
+  test("客户中心辅助资源失败时不伪装成未申请或真实空态", async ({ page }) => {
+    let partnerFail = true;
+    let favoritesFail = true;
+    let notificationsFail = true;
+    await installCustomerSession(page, { id: 8, name: "辅助状态会员" });
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const respond = (data: unknown) => route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "success" }),
+      });
+      if (path === "/api/customers/me") return respond({ id: 8, name: "辅助状态会员", phone: "13800000000" });
+      if (path === "/api/settings/flags") {
+        return respond({ commerceEnabled: false, cartEnabled: false, paymentEnabled: false, partnerApplicationsWriteEnabled: false });
+      }
+      if (path === "/api/partner-applications/me") {
+        if (partnerFail) return route.fulfill({ status: 503, json: { message: "暂不可用" } });
+        return respond({ customer: { partnerStatus: "PENDING" }, latest: null });
+      }
+      if (path === "/api/customers/me/favorites") {
+        if (favoritesFail) return route.fulfill({ status: 503, json: { message: "暂不可用" } });
+        return respond([]);
+      }
+      if (path === "/api/customers/me/notifications") {
+        if (notificationsFail) return route.fulfill({ status: 503, json: { message: "暂不可用" } });
+        return respond({ list: [], total: 0, unreadCount: 0, page: 1, pageSize: 20 });
+      }
+      return respond([]);
+    });
+
+    await page.goto("/customer");
+    await expect(page.getByText("合作状态暂时无法确认，请重新加载后再继续。"))
+      .toBeVisible();
+    await expect(page.getByText("尚未申请合作商家身份")).toHaveCount(0);
+
+    const favorites = page.getByRole("region", { name: "我的心愿单" });
+    await expect(favorites.getByText("心愿单暂时无法加载。"))
+      .toBeVisible();
+    await expect(favorites.getByText("心愿单还是空的。"))
+      .toHaveCount(0);
+    favoritesFail = false;
+    await favorites.getByRole("button", { name: "重新加载" }).click();
+    await expect(favorites.getByText("心愿单还是空的。"))
+      .toBeVisible();
+
+    const notifications = page.getByRole("region", { name: "服务通知" });
+    await expect(notifications.getByText("服务通知暂时无法加载，订单和账户功能不受影响。"))
+      .toBeVisible();
+    await expect(notifications.getByText("暂时没有新的服务通知。"))
+      .toHaveCount(0);
+    notificationsFail = false;
+    await notifications.getByRole("button", { name: "重新加载" }).click();
+    await expect(notifications.getByText("暂时没有新的服务通知。"))
+      .toBeVisible();
+
+    partnerFail = false;
+    await page.getByRole("button", { name: "重新加载" }).click();
+    await expect(page.getByText("合作申请审核中")).toBeVisible();
+  });
+
+  test("合作状态读取失败时申请页不会开放重复申请表", async ({ page }) => {
+    await installCustomerSession(page, { id: 9, name: "合作状态测试会员" });
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const respond = (data: unknown) => route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "success" }),
+      });
+      if (path === "/api/customers/me") {
+        return respond({ id: 9, name: "合作状态测试会员", phone: "13800000000" });
+      }
+      if (path === "/api/partner-applications/me") {
+        return route.fulfill({ status: 503, json: { message: "暂不可用" } });
+      }
+      return respond([]);
+    });
+
+    await page.goto("/customer?section=partner");
+    await expect(page.getByText("合作状态暂时无法确认", { exact: true }))
+      .toBeVisible();
+    await expect(page.getByText("为避免重复申请，当前不会显示新的申请表。", { exact: false }))
+      .toBeVisible();
+    await expect(page.getByRole("button", { name: "提交申请" })).toHaveCount(0);
   });
 
   for (const path of ["/cart", "/checkout"]) {

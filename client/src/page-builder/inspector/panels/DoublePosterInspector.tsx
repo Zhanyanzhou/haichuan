@@ -77,6 +77,7 @@ interface DoublePosterInspectorProps {
   validationStatus?: PublishValidationStatus;
   onRetryValidation?: () => void;
   onOpenPageSettings?: (field?: string) => void;
+  onOpenPublishReview?: () => void;
 }
 
 /** 本面板专用对象命名（全局 VISUAL_NODE_LABELS 的「主海报/细节海报」不动） */
@@ -179,6 +180,7 @@ export default function DoublePosterInspector({
   validationStatus,
   onRetryValidation,
   onOpenPageSettings,
+  onOpenPublishReview,
 }: DoublePosterInspectorProps) {
   const { modal } = AntdApp.useApp();
   const editor = useInspectorModuleEditor();
@@ -503,30 +505,6 @@ export default function DoublePosterInspector({
     if (activePanelMode === "design" && objectId === "action") {
       activatePanelMode("content");
     }
-  };
-
-  const focusPublishIssue = (issue: PublishValidationIssue) => {
-    if (isPagePublishIssue(issue)) {
-      onOpenPageSettings?.(issue.path ?? issue.field);
-      return;
-    }
-    const rawFieldKey = issue.field ?? issue.path?.split(".").pop();
-    const fieldKey = rawFieldKey && [
-      "targetType", "productCode", "productId", "categorySlug", "linkUrl",
-    ].includes(rawFieldKey)
-      ? "targetType"
-      : rawFieldKey;
-    if (!fieldKey) return;
-    setActivePanelMode("content");
-    const focusField = () => {
-      const field = inspectorScrollRef.current?.querySelector<HTMLElement>(
-        `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
-      );
-      if (!field) return;
-      field.scrollIntoView({ block: "center", behavior: "smooth" });
-      field.querySelector<HTMLElement>("input, textarea, select, button, [tabindex]")?.focus();
-    };
-    window.requestAnimationFrame(() => window.requestAnimationFrame(focusField));
   };
 
   const updateImageRatio = (
@@ -1296,35 +1274,19 @@ export default function DoublePosterInspector({
         warningCount={currentPublishWarningCount}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
-        onReviewIssues={currentPublishIssues.length > 0 ? () => {
-          const showModal = currentPublishErrorCount > 0 ? modal.error : modal.warning;
-          const instance = showModal({
-            title: currentPublishErrorCount > 0
-              ? `当前模块与页面发布检查 · ${currentPublishErrorCount} 项阻断`
-              : `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
-            content: (
-              <div className="homepage-editor__publish-issue-list">
-                {currentPublishIssues.map((issue, index) => (
-                  <div key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                    <p>
-                      <strong>{issue.severity === "error" ? "阻断：" : "提醒："}</strong>
-                      {issue.message}
-                    </p>
-                    {(issue.field || isPagePublishIssue(issue)) ? (
-                      <button type="button" onClick={() => {
-                        instance.destroy();
-                        focusPublishIssue(issue);
-                      }}>
-                        {isPagePublishIssue(issue) ? "打开页面设置" : "定位到字段"}
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            ),
-            okText: "知道了",
-          });
-        } : undefined}
+        onReviewIssues={currentPublishErrorCount > 0
+          ? onOpenPublishReview
+          : currentPublishWarningCount > 0
+            ? () => modal.warning({
+                title: `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
+                content: currentPublishIssues.map((issue, index) => (
+                  <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                    <strong>提醒：</strong>{issue.message}
+                  </p>
+                )),
+                okText: "知道了",
+              })
+            : undefined}
       />
     </section>
   );

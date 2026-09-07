@@ -19,6 +19,9 @@ function createHarness() {
     depositAmount: new Prisma.Decimal(0),
     balanceAmount: new Prisma.Decimal(0),
     paidAmount: new Prisma.Decimal(0),
+    quotationVersionId: null,
+    quotationSource: null,
+    paymentPlans: [],
     updatedAt: new Date('2026-08-26T00:00:00.000Z'),
     customerEmail: null,
     customerName: '测试客户',
@@ -32,6 +35,9 @@ function createHarness() {
   const events: Array<Record<string, unknown>> = [];
   const operationLogs: Array<Record<string, unknown>> = [];
   let blockingPayment: { paymentNo: string; status: string } | null = null;
+  let amountUpdateCount = 0;
+  let quotationSourceChecks = 0;
+  const amountFlowSequence: string[] = [];
 
   const matches = (actual: string, expected: any) =>
     typeof expected === 'string'
@@ -40,10 +46,19 @@ function createHarness() {
         ? expected.in.includes(actual)
         : true;
   const tx: any = {
-    $queryRaw: async () => [{ id: order.id }],
+    $queryRaw: async () => {
+      amountFlowSequence.push('orderLock');
+      return [{ id: order.id }];
+    },
     order: {
       fields: { finalAmount: Symbol('finalAmount') },
-      findUnique: async () => order,
+      findUnique: async ({ include }: any = {}) => {
+        if (include?.quotationSource) {
+          quotationSourceChecks += 1;
+          amountFlowSequence.push('quotationSourceRead');
+        }
+        return order;
+      },
       findMany: async () => [{ orderNo: order.orderNo }],
       update: async ({ data }: any) => Object.assign(order, data),
       updateMany: async ({ where, data }: any) => {
@@ -52,6 +67,10 @@ function createHarness() {
           (where.deliveryStatus && !matches(order.deliveryStatus, where.deliveryStatus)) ||
           (where.updatedAt && where.updatedAt !== order.updatedAt)
         ) return { count: 0 };
+        if (data.finalAmount !== undefined) {
+          amountUpdateCount += 1;
+          amountFlowSequence.push('amountUpdate');
+        }
         Object.assign(order, data);
         return { count: 1 };
       },
@@ -88,7 +107,18 @@ function createHarness() {
     } as never,
     { send: async () => undefined, renderShell: (v: string) => v, getSiteBaseUrl: () => '' } as never,
     {} as never,
-    {} as never,
+    { enqueueOrderLifecycle: async () => undefined } as never,
+    {
+      updateStatus: async () => {
+        fulfillment.status = 'DELIVERED';
+        fulfillment.deliveredAt = new Date('2026-08-26T01:00:00.000Z');
+        order.deliveryStatus = 'RECEIVED';
+        order.receivedAt = fulfillment.deliveredAt;
+        events.push({ eventType: 'FULFILLMENT_DELIVERED' });
+        events.push({ eventType: 'ORDER_RECEIVED' });
+        return fulfillment;
+      },
+    } as never,
   );
   return {
     service,
@@ -96,6 +126,13 @@ function createHarness() {
     fulfillment,
     events,
     operationLogs,
+    get amountUpdateCount() {
+      return amountUpdateCount;
+    },
+    get quotationSourceChecks() {
+      return quotationSourceChecks;
+    },
+    amountFlowSequence,
     setBlockingPayment(value: typeof blockingPayment) {
       blockingPayment = value;
     },
@@ -126,6 +163,54 @@ test('订单金额只能在无待处理或已确认付款时修改，并保持�
     ),
     BadRequestException,
   );
+});
+
+test('报价或任意状态付款计划存在时订单中心不能独立改价', async () => {
+  for (const status of ['ACTIVE', 'COMPLETED', 'CANCELLED']) {
+    const harness = createHarness();
+    harness.order.paymentPlans = [{ id: 10, status }];
+
+    await assert.rejects(
+      () => harness.service.updateAmount(1, { finalAmount: 90, reason: '议价' }, admin),
+      /不能在订单中心独立改价/,
+    );
+    assert.equal(Number(harness.order.finalAmount), 100);
+    assert.equal(harness.amountUpdateCount, 0);
+  }
+
+  const quotationOrder = createHarness();
+  quotationOrder.order.quotationVersionId = 30;
+  await assert.rejects(
+    () => quotationOrder.service.updateAmount(1, { finalAmount: 90, reason: '议价' }, admin),
+    /不能在订单中心独立改价/,
+  );
+  assert.equal(quotationOrder.amountUpdateCount, 0);
+});
+
+test('存量订单存在反向报价来源时订单中心不能独立改价', async () => {
+  const harness = createHarness();
+  harness.order.quotationSource = { id: 20 };
+
+  await assert.rejects(
+    () => harness.service.updateAmount(1, { finalAmount: 90, reason: '议价' }, admin),
+    /不能在订单中心独立改价/,
+  );
+  assert.equal(Number(harness.order.finalAmount), 100);
+  assert.equal(harness.amountUpdateCount, 0);
+  assert.equal(harness.quotationSourceChecks, 1);
+  assert.deepEqual(harness.amountFlowSequence, ['orderLock', 'quotationSourceRead']);
+});
+
+test('已有失败付款历史也属于资金事实，订单中心不能改写应收', async () => {
+  const harness = createHarness();
+  harness.setBlockingPayment({ paymentNo: 'PAY-FAILED', status: 'FAILED' });
+
+  await assert.rejects(
+    () => harness.service.updateAmount(1, { finalAmount: 90, reason: '议价' }, admin),
+    /已有付款事实 PAY-FAILED/,
+  );
+  assert.equal(Number(harness.order.finalAmount), 100);
+  assert.equal(harness.amountUpdateCount, 0);
 });
 
 test('订单中心签收同步履约单，完成订单必须以送达事实为前置', async () => {

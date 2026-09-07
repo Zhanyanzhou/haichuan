@@ -15,6 +15,8 @@ export interface NumberFieldProps {
   onChange: (next: number) => void;
   onClear?: () => void;
   disabled?: boolean;
+  inspectorField?: string;
+  inspectorDevice?: "desktop" | "mobile" | "shared";
 }
 
 export default function NumberField({
@@ -28,6 +30,8 @@ export default function NumberField({
   onChange,
   onClear,
   disabled,
+  inspectorField,
+  inspectorDevice,
 }: NumberFieldProps) {
   const inputId = useId();
   const numeric = Number(value);
@@ -36,6 +40,8 @@ export default function NumberField({
       className="homepage-editor__inspector-field"
       data-workspace-field-control="number"
       data-workspace-field-shared="true"
+      data-inspector-field={inspectorField}
+      data-inspector-device={inspectorDevice}
     >
       <label htmlFor={inputId}>
         {label}

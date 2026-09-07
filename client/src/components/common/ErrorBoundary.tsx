@@ -19,6 +19,18 @@ export class ErrorBoundary extends Component<Props, State> {
       error.message,
       errorInfo.componentStack,
     );
+    if (this.props.fallback === undefined) {
+      let robots = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
+      if (!robots) {
+        robots = document.createElement("meta");
+        robots.name = "robots";
+        document.head.appendChild(robots);
+      }
+      robots.content = "noindex, nofollow";
+      document.head.querySelector('link[rel="canonical"]')?.remove();
+      document.head.querySelector('meta[property="og:url"]')?.remove();
+      document.title = "页面加载异常";
+    }
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -39,7 +51,7 @@ export class ErrorBoundary extends Component<Props, State> {
               页面加载异常
             </h2>
             <p className="text-sm text-brand-muted mb-6">
-              {this.state.error?.message || "发生了未知错误，请尝试刷新页面"}
+              当前页面暂时无法显示，请刷新后重试。
             </p>
             <button
               type="button"

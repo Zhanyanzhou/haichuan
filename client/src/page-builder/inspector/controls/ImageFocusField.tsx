@@ -11,12 +11,16 @@ export default function ImageFocusField({
   value,
   disabled,
   allowPreciseInput = true,
+  inspectorFieldKeys,
+  inspectorDevice,
   onChange,
 }: {
   label?: string;
   value: ImageFocusValue;
   disabled?: boolean;
   allowPreciseInput?: boolean;
+  inspectorFieldKeys?: { x: string; y: string };
+  inspectorDevice?: "desktop" | "mobile" | "shared";
   onChange: (next: ImageFocusValue) => void;
 }) {
   const normalized = {
@@ -58,8 +62,8 @@ export default function ImageFocusField({
       </div>
       {allowPreciseInput ? (
         <div className="template-editor__geometry-grid">
-          <NumberField label="水平焦点" unit="%" min={0} max={100} value={normalized.x} disabled={disabled} onChange={(x) => onChange({ ...normalized, x })} />
-          <NumberField label="垂直焦点" unit="%" min={0} max={100} value={normalized.y} disabled={disabled} onChange={(y) => onChange({ ...normalized, y })} />
+          <NumberField inspectorField={inspectorFieldKeys?.x} inspectorDevice={inspectorDevice} label="水平焦点" unit="%" min={0} max={100} value={normalized.x} disabled={disabled} onChange={(x) => onChange({ ...normalized, x })} />
+          <NumberField inspectorField={inspectorFieldKeys?.y} inspectorDevice={inspectorDevice} label="垂直焦点" unit="%" min={0} max={100} value={normalized.y} disabled={disabled} onChange={(y) => onChange({ ...normalized, y })} />
         </div>
       ) : null}
     </div>

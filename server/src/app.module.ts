@@ -41,7 +41,6 @@ import { SmsModule } from "./common/sms/sms.module";
 import { JwtAuthGuard } from "./modules/auth/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { AuditLogInterceptor } from "./common/interceptors/audit-log.interceptor";
-import { HealthController } from "./common/health/health.controller";
 import { LoggerModule } from "nestjs-pino";
 import { ShippingTemplatesModule } from "./modules/shipping-templates/shipping-templates.module";
 import { IdempotencyModule } from "./common/idempotency/idempotency.module";
@@ -49,53 +48,17 @@ import { OutboxModule } from "./common/outbox/outbox.module";
 import { ReliableNotificationsModule } from "./common/notifications/reliable-notifications.module";
 import { SessionSecurityGuard } from "./common/security/session-security.guard";
 import { SessionSecurityModule } from "./common/security/session-security.module";
-import { resolveRequestId } from "./common/observability/request-id";
+import { validateRuntimeEnvironment } from "./common/config/runtime-environment";
+import { createPinoHttpOptions } from "./common/observability/pino-http-options";
+import { HealthModule } from "./common/health/health.module";
 
 @Module({
-  controllers: [HealthController],
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateRuntimeEnvironment }),
     // 结构化日志（nestjs-pino）：生产环境 JSON 单行、开发环境彩色可读。
-    // 健康探针不计入访问日志；请求序列化只保留 method/url/remoteAddress，
+    // 健康探针不计入访问日志；请求序列化只保留 method 与去标识化 path，
     // 避免打印 Authorization / Cookie 等敏感请求头。
-    LoggerModule.forRoot({
-      pinoHttp: {
-        genReqId: (req, res) => {
-          const requestId = resolveRequestId(req.headers["x-request-id"]);
-          res.setHeader("X-Request-Id", requestId);
-          return requestId;
-        },
-        transport:
-          process.env.NODE_ENV !== "production"
-            ? {
-                target: "pino-pretty",
-                options: { colorize: true, translateTime: "SYS:HH:MM:ss.l" },
-              }
-            : undefined,
-        autoLogging: {
-          ignore: (req) => {
-            const url = (req as { url?: string }).url ?? "";
-            return (
-              url.startsWith("/api/health") || url.startsWith("/api/ready")
-            );
-          },
-        },
-        serializers: {
-          req: (req: {
-            id?: string;
-            method: string;
-            url: string;
-            remoteAddress?: string;
-          }) => ({
-            requestId: req.id,
-            method: req.method,
-            url: req.url,
-            remoteAddress: req.remoteAddress,
-          }),
-          res: () => undefined,
-        },
-      },
-    }),
+    LoggerModule.forRoot({ pinoHttp: createPinoHttpOptions() }),
     // 全局速率限制：默认 60次/分钟
     ThrottlerModule.forRoot([
       {
@@ -104,6 +67,7 @@ import { resolveRequestId } from "./common/observability/request-id";
       },
     ]),
     PrismaModule,
+    HealthModule,
     SessionSecurityModule,
     KimiModule,
     MailerModule,

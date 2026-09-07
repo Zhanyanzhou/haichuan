@@ -1,6 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { ProductQuery } from "@/hooks/useProductData";
-interface URLParams {
+export interface URLParams {
   category: string;
   subcategory: string;
   query: string;
@@ -12,77 +13,160 @@ interface URLParams {
   page: number;
 }
 
-function createURLParams(readLocation: boolean): URLParams {
-  const u = readLocation ? new URL(window.location.href) : null;
-  const rawPage = Number.parseInt(u?.searchParams.get("page") || "1", 10);
+export type URLParamKey =
+  | "category"
+  | "subcategory"
+  | "query"
+  | "material"
+  | "craft"
+  | "weight"
+  | "size"
+  | "sort"
+  | "page";
+
+type URLParamValue = string | string[];
+type UpdateOptions = { replace?: boolean };
+
+const SORT_VALUES = new Set(["recommended", "newest", "sku"]);
+
+function csvValues(value: string | null): string[] {
+  return Array.from(
+    new Set(
+      (value || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function createURLParams(search: string): URLParams {
+  const query = new URLSearchParams(search);
+  const rawPage = Number.parseInt(query.get("page") || "1", 10);
+  const rawSort = query.get("sort") || "recommended";
   return {
-    category: u?.searchParams.get("category") || "",
-    subcategory: u?.searchParams.get("subcategory") || "",
-    query: u?.searchParams.get("query") || "",
-    materials:
-      u?.searchParams.get("material")?.split(",").filter(Boolean) || [],
-    crafts: u?.searchParams.get("craft")?.split(",").filter(Boolean) || [],
-    weights: u?.searchParams.get("weight")?.split(",").filter(Boolean) || [],
-    sizes: u?.searchParams.get("size")?.split(",").filter(Boolean) || [],
-    sort: u?.searchParams.get("sort") || "recommended",
+    category: query.get("category")?.trim() || "",
+    subcategory: query.get("subcategory")?.trim() || "",
+    query: query.get("query")?.trim() || "",
+    materials: csvValues(query.get("material")),
+    crafts: csvValues(query.get("craft")),
+    weights: csvValues(query.get("weight")),
+    sizes: csvValues(query.get("size")),
+    sort: SORT_VALUES.has(rawSort) ? rawSort : "recommended",
     page: Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1,
   };
 }
 
+function writeURLParams(currentSearch: string, next: URLParams): string {
+  const query = new URLSearchParams(currentSearch);
+  const set = (key: string, value: string) => {
+    if (value) query.set(key, value);
+    else query.delete(key);
+  };
+  set("category", next.category);
+  set("subcategory", next.subcategory);
+  set("query", next.query);
+  set("material", next.materials.join(","));
+  set("craft", next.crafts.join(","));
+  set("weight", next.weights.join(","));
+  set("size", next.sizes.join(","));
+  set("sort", next.sort !== "recommended" ? next.sort : "");
+  set("page", next.page > 1 ? String(next.page) : "");
+  const serialized = query.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+function applyUpdates(
+  previous: URLParams,
+  changes: Partial<Record<URLParamKey, URLParamValue>>,
+): URLParams {
+  const next = { ...previous };
+  let resetPage = false;
+  for (const [key, value] of Object.entries(changes) as Array<
+    [URLParamKey, URLParamValue]
+  >) {
+    if (key === "category") {
+      next.category = String(value);
+      next.subcategory = "";
+      resetPage = true;
+    } else if (key === "page") {
+      const page = Number(value);
+      next.page = Number.isInteger(page) && page > 0 ? page : 1;
+    } else if (key === "material") {
+      next.materials = Array.isArray(value) ? value : [];
+      resetPage = true;
+    } else if (key === "craft") {
+      next.crafts = Array.isArray(value) ? value : [];
+      resetPage = true;
+    } else if (key === "weight") {
+      next.weights = Array.isArray(value) ? value : [];
+      resetPage = true;
+    } else if (key === "size") {
+      next.sizes = Array.isArray(value) ? value : [];
+      resetPage = true;
+    } else {
+      next[key] = String(value);
+      resetPage = true;
+    }
+  }
+  if (resetPage && !("page" in changes)) next.page = 1;
+  return next;
+}
+
 export function useURLParams(syncHistory = true) {
-  const [p, setP] = useState<URLParams>(() => {
-    return createURLParams(syncHistory);
-  });
-
-  const syncURL = useCallback((next: URLParams) => {
-    if (!syncHistory) return;
-    const u = new URL(window.location.href);
-    const s = (k: string, v: string) =>
-      v ? u.searchParams.set(k, v) : u.searchParams.delete(k);
-    s("category", next.category);
-    s("subcategory", next.subcategory);
-    s("query", next.query);
-    s("material", next.materials.join(","));
-    s("craft", next.crafts.join(","));
-    s("weight", next.weights.join(","));
-    s("size", next.sizes.join(","));
-    s("sort", next.sort !== "recommended" ? next.sort : "");
-    s("page", next.page > 1 ? String(next.page) : "");
-    window.history.replaceState(null, "", u.toString());
-  }, [syncHistory]);
-
-  const update = useCallback(
-    (key: string, val: string | string[]) => {
-      setP((prev) => {
-        const next = { ...prev } as Record<string, unknown>;
-        const stateKey =
-          ({
-            material: "materials",
-            craft: "crafts",
-            weight: "weights",
-            size: "sizes",
-          } as Record<string, string>)[key] || key;
-        if (key === "category") {
-          next.category = val;
-          next.subcategory = "";
-          next.page = 1;
-        } else if (key === "page") {
-          next.page = Number(val);
-        } else if (Array.isArray(val)) {
-          next[stateKey] = val;
-          next.page = 1;
-        } else {
-          next[stateKey] = val;
-          next.page = 1;
-        }
-        syncURL(next as unknown as URLParams);
-        return next as unknown as URLParams;
-      });
-    },
-    [syncURL],
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [previewParams, setPreviewParams] = useState<URLParams>(() =>
+    createURLParams(""),
+  );
+  const params = useMemo(
+    () => (syncHistory ? createURLParams(location.search) : previewParams),
+    [location.search, previewParams, syncHistory],
   );
 
-  return { params: p, update };
+  useEffect(() => {
+    if (!syncHistory) return;
+    const canonicalSearch = writeURLParams(location.search, params);
+    if (canonicalSearch === location.search) return;
+    navigate(
+      {
+        pathname: location.pathname,
+        search: canonicalSearch,
+        hash: location.hash,
+      },
+      { replace: true, state: location.state },
+    );
+  }, [location.hash, location.pathname, location.search, location.state, navigate, params, syncHistory]);
+
+  const updateMany = useCallback(
+    (
+      changes: Partial<Record<URLParamKey, URLParamValue>>,
+      options: UpdateOptions = {},
+    ) => {
+      const next = applyUpdates(params, changes);
+      if (!syncHistory) {
+        setPreviewParams(next);
+        return;
+      }
+      navigate(
+        {
+          pathname: location.pathname,
+          search: writeURLParams(location.search, next),
+          hash: location.hash,
+        },
+        { replace: options.replace === true, state: location.state },
+      );
+    },
+    [location.hash, location.pathname, location.search, location.state, navigate, params, syncHistory],
+  );
+
+  const update = useCallback(
+    (key: URLParamKey, value: URLParamValue, options?: UpdateOptions) =>
+      updateMany({ [key]: value }, options),
+    [updateMany],
+  );
+
+  return { params, update, updateMany };
 }
 
 export function serializeWeightRanges(ranges: string[]): string | undefined {

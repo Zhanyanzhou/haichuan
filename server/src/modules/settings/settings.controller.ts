@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Query, Body, UseGuards } from "@nestjs/common";
+import { Controller, Get, Header, Put, Query, Body, UseGuards } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
 import { SettingsService } from "./settings.service";
 import { UpdateSettingsDto } from "./dto/update-settings.dto";
@@ -25,11 +25,13 @@ export class SettingsController {
   @Public()
   @ApiOperation({ summary: "获取前台可见的店铺资料" })
   @Get("public")
+  @Header("Cache-Control", "no-store")
   async getPublicSettings(@Query("locale") locale?: string) {
     requirePublishedPublicContentLocale(locale);
-    const settings = await this.settingsService.getSettings();
+    const settings = await this.settingsService.getPublishedSettings();
     return {
       siteName: settings.siteName,
+      brandPresentationMode: settings.brandPresentationMode,
       logo: settings.logo,
       seoTitle: settings.seoTitle,
       seoDescription: settings.seoDescription,
@@ -56,6 +58,12 @@ export class SettingsController {
     @CurrentUser() user: { id: number },
   ) {
     return this.settingsService.updateSettings(dto, user.id);
+  }
+
+  @ApiOperation({ summary: "获取公开站点机器可读发布准备度" })
+  @Get("publication-readiness")
+  getPublicationReadiness() {
+    return this.settingsService.getPublicationReadiness();
   }
 
   @ApiOperation({ summary: "获取备份状态" })

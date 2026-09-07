@@ -93,6 +93,30 @@ test("服务层门禁在创建本地 Payment 前生效", async () => {
   assert.equal(databaseCalls, 0);
 });
 
+test("支付宝缺少主动查单和确定关单闭环时暂停新交易且不落本地 PENDING", async () => {
+  let databaseCalls = 0;
+  const service = new PaymentsService(
+    new Proxy({}, {
+      get: () => {
+        databaseCalls += 1;
+        throw new Error("不应访问数据库");
+      },
+    }) as unknown as PrismaService,
+    {} as never,
+    {
+      isTransactionCreationEnabled: () => true,
+      isAvailable: () => true,
+    } as never,
+    {} as ConfigService,
+  );
+
+  await assert.rejects(
+    () => service.createChannelPayment(1, "alipay", { type: "ADMIN", id: 1 }),
+    /主动查单与确定关单尚未接入/,
+  );
+  assert.equal(databaseCalls, 0);
+});
+
 test("总开关关闭期间仍处理关闭前已创建交易的有效回调", async () => {
   let approvedPaymentId: number | null = null;
   const service = new PaymentsService(
@@ -105,6 +129,7 @@ test("总开关关闭期间仍处理关闭前已创建交易的有效回调", as
           method: "alipay",
           status: "PENDING",
         }),
+        findFirst: async () => null,
       },
     } as unknown as PrismaService,
     {
@@ -144,6 +169,7 @@ test("已验签成功但本地核销失败时不确认通知，保留渠道重�
     {
       payment: {
         findUnique: async () => payment,
+        findFirst: async () => null,
       },
     } as unknown as PrismaService,
     {
@@ -180,7 +206,9 @@ test("已进入部分退款或全额退款的 Payment 收到重复支付回调�
           amount: 88,
           method: "wechat",
           status: "PARTIAL_REFUND",
+          gatewayTradeNo: "WX-REFUNDED",
         }),
+        findFirst: async () => null,
       },
     } as unknown as PrismaService,
     {
@@ -193,6 +221,7 @@ test("已进入部分退款或全额退款的 Payment 收到重复支付回调�
         verified: true,
         paid: true,
         paymentNo: "PAY-REFUNDED",
+        gatewayTradeNo: "WX-REFUNDED",
         amountYuan: "88.00",
       }),
     } as never,

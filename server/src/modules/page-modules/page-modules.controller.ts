@@ -176,6 +176,7 @@ export class PageModulesController {
       body?.pageKey || "home",
       body?.puckData,
       body?.metadata,
+      { includeGlobalSiteReadiness: true },
     );
   }
 
@@ -183,22 +184,45 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Get("document/revisions")
   @ApiOperation({ summary: "获取页面文档版本历史" })
-  getDocumentRevisions(@Query("pageKey") pageKey: string) {
-    return this.service.getPageDocumentRevisions(pageKey || "home");
+  getDocumentRevisions(
+    @Query("pageKey") pageKey: string,
+    @Query("beforeVersion") beforeVersion?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.service.getPageDocumentRevisions(
+      pageKey || "home",
+      beforeVersion === undefined ? undefined : Number(beforeVersion),
+      limit === undefined ? undefined : Number(limit),
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Get("document/revisions/:version")
+  @Header("Cache-Control", "no-store")
+  @ApiOperation({ summary: "获取可信页面文档单版本详情" })
+  getDocumentRevision(
+    @Query("pageKey") pageKey: string,
+    @Param("version") version: string,
+  ) {
+    return this.service.getPageDocumentRevision(pageKey || "home", Number(version));
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Put("document/revisions/:version/restore")
-  @ApiOperation({ summary: "恢复页面文档版本为草稿" })
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "复制历史版本内容为当前草稿" })
   restoreDocumentRevision(
     @Body() body: RestorePageDocumentRevisionDto,
     @Param("version") version: string,
+    @Req() req: StaffRequest,
   ) {
     return this.service.restorePageDocumentRevision(
       body.pageKey || "home",
-      +version,
+      Number(version),
       body.expectedUpdatedAt,
+      req.user.id,
     );
   }
 
@@ -207,7 +231,7 @@ export class PageModulesController {
   @Roles("SUPER_ADMIN", "ADMIN")
   @Put("document/revisions/:revisionId/rollback-publication")
   @SkipGenericAudit()
-  @ApiOperation({ summary: "把线上发布指针回滚到同一页面的历史 revision" })
+  @ApiOperation({ summary: "从同页历史快照创建新的线上 revision" })
   rollbackDocumentPublication(
     @Body() body: RollbackPagePublicationDto,
     @Param("revisionId") revisionId: string,
@@ -215,7 +239,7 @@ export class PageModulesController {
   ) {
     return this.service.rollbackPagePublication(
       body.pageKey || "home",
-      +revisionId,
+      Number(revisionId),
       body.expectedPublishedRevisionId,
       req.user.id,
     );

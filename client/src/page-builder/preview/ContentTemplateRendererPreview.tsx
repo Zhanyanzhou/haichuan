@@ -7,6 +7,10 @@ import {
 import { puckConfig } from "../config/puckConfig";
 import { getTemplatePreviewContent } from "./templatePreviewContent";
 import ContentTemplateSkeletonPreview from "./ContentTemplateSkeletonPreview";
+import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  ContentTemplateRenderSurfaceProvider,
+} from "../runtime/ContentTemplateRenderSurface";
 
 type PreviewViewport = "desktop" | "mobile";
 
@@ -199,7 +203,12 @@ function ContentTemplateRealRendererPreview({
           transformOrigin: "top left",
         } as CSSProperties & Record<"--homepage-editor-viewport-height", string>}
       >
-        {component.render(props)}
+        <ContentTemplateRenderSurfaceProvider
+          surface={CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW}
+        >
+          <style>{".hc-contract-frame *{animation:none!important;transition:none!important}"}</style>
+          {component.render(props)}
+        </ContentTemplateRenderSurfaceProvider>
       </div>
     </div>
   );

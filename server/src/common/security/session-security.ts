@@ -9,6 +9,8 @@ const COOKIE_NAMES = {
 const CSRF_COOKIE_NAME = "hc_csrf";
 const ACCESS_COOKIE_MAX_AGE_SECONDS = 15 * 60;
 const REFRESH_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+// 30m 签名有效期覆盖二维码 state(5m) + 回调后绑定令牌(10m)，并支持多标签页。
+const WECHAT_OAUTH_BINDING_MAX_AGE_SECONDS = 30 * 60;
 
 export function parseCookies(cookieHeader: unknown): Record<string, string> {
   if (typeof cookieHeader !== "string" || !cookieHeader.trim()) return {};
@@ -88,6 +90,42 @@ export function createCsrfToken(): string {
 
 export function sessionCookieNames(domain: SessionDomain) {
   return { ...COOKIE_NAMES[domain], csrf: CSRF_COOKIE_NAME };
+}
+
+function wechatOAuthBindingCookieName(production: boolean): string {
+  return production ? "__Host-hc_wechat_oauth" : "hc_wechat_oauth";
+}
+
+export function extractWechatOAuthBindingCookie(
+  cookieHeader: unknown,
+  production = process.env.NODE_ENV === "production",
+): string | null {
+  return (
+    parseCookies(cookieHeader)[wechatOAuthBindingCookieName(production)] || null
+  );
+}
+
+export function buildWechatOAuthBindingCookie(
+  token: string,
+  production = process.env.NODE_ENV === "production",
+): string {
+  return serializeCookie(wechatOAuthBindingCookieName(production), token, {
+    httpOnly: true,
+    maxAgeSeconds: WECHAT_OAUTH_BINDING_MAX_AGE_SECONDS,
+    production,
+    path: "/",
+  });
+}
+
+export function buildClearWechatOAuthBindingCookie(
+  production = process.env.NODE_ENV === "production",
+): string {
+  return serializeCookie(wechatOAuthBindingCookieName(production), "", {
+    httpOnly: true,
+    maxAgeSeconds: 0,
+    production,
+    path: "/",
+  });
 }
 
 export function requestSessionMetadata(request: {

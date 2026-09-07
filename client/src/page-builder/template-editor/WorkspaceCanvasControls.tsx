@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { FullscreenOutlined } from "@ant-design/icons";
 import type { TemplateDesignHeightMode } from "../template-definition";
 
 interface EditableCanvasSize {
@@ -6,7 +7,7 @@ interface EditableCanvasSize {
   height: number;
   heightMode: TemplateDesignHeightMode;
   ratioLabel: string;
-  deviceLabel: string;
+  device: "desktop" | "mobile";
   minWidth: number;
   maxWidth: number;
   canRestore: boolean;
@@ -24,7 +25,7 @@ const MOBILE_RATIO_PRESETS = ["1:1", "4:5", "3:4", "9:16"] as const;
 const DESKTOP_WIDTH_PRESETS = [1280, 1440, 1920, 2560] as const;
 const MOBILE_WIDTH_PRESETS = [320, 375, 390, 430] as const;
 
-function CanvasDimensionInput({
+export function CanvasDimensionInput({
   label,
   shortLabel,
   value,
@@ -32,6 +33,7 @@ function CanvasDimensionInput({
   max,
   onCommit,
   commitUnchanged = false,
+  allowDecimals = false,
 }: {
   label: string;
   shortLabel: string;
@@ -40,28 +42,30 @@ function CanvasDimensionInput({
   max: number;
   onCommit: (value: number) => void;
   commitUnchanged?: boolean;
+  allowDecimals?: boolean;
 }) {
-  const [draftValue, setDraftValue] = useState(String(Math.round(value)));
+  const displayValue = allowDecimals ? value : Math.round(value);
+  const [draftValue, setDraftValue] = useState(String(displayValue));
   const [edited, setEdited] = useState(false);
-  const previousValueRef = useRef(Math.round(value));
+  const previousValueRef = useRef(displayValue);
 
   useEffect(() => {
-    const nextValue = Math.round(value);
+    const nextValue = displayValue;
     if (previousValueRef.current === nextValue) return;
     previousValueRef.current = nextValue;
     setDraftValue(String(nextValue));
     setEdited(false);
-  }, [value]);
+  }, [displayValue]);
 
   const commit = () => {
     if (!edited) return;
-    const parsed = Number.parseInt(draftValue, 10);
+    const parsed = allowDecimals ? Number.parseFloat(draftValue) : Number.parseInt(draftValue, 10);
     const next = Number.isFinite(parsed)
       ? Math.min(max, Math.max(min, parsed))
-      : Math.round(value);
+      : displayValue;
     setDraftValue(String(next));
     setEdited(false);
-    if (commitUnchanged || next !== Math.round(value)) onCommit(next);
+    if (commitUnchanged || next !== displayValue) onCommit(next);
   };
 
   return (
@@ -71,6 +75,7 @@ function CanvasDimensionInput({
         type="number"
         inputMode="numeric"
         aria-label={label}
+        step={allowDecimals ? "any" : 1}
         min={min}
         max={max}
         value={draftValue}
@@ -82,7 +87,7 @@ function CanvasDimensionInput({
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
           if (event.key === "Escape") {
-            setDraftValue(String(Math.round(value)));
+            setDraftValue(String(displayValue));
             setEdited(false);
             event.currentTarget.blur();
           }
@@ -205,6 +210,7 @@ export default function WorkspaceCanvasControls({
   onSnapToGridChange,
   onLocateSelection,
   onFitSelection,
+  variant = "full",
 }: {
   isFitView: boolean;
   zoom: number;
@@ -228,6 +234,7 @@ export default function WorkspaceCanvasControls({
   onSnapToGridChange?: () => void;
   onLocateSelection?: () => void;
   onFitSelection?: () => void;
+  variant?: "full" | "minimal";
 }) {
   const [isSizeEditorOpen, setIsSizeEditorOpen] = useState(false);
   const [isViewToolsOpen, setIsViewToolsOpen] = useState(false);
@@ -236,10 +243,10 @@ export default function WorkspaceCanvasControls({
   const viewToolsTriggerRef = useRef<HTMLButtonElement>(null);
   const sizePanelId = useId();
   const viewToolsPanelId = useId();
-  const ratioPresets: readonly string[] = editableSize?.deviceLabel === "移动端"
+  const ratioPresets: readonly string[] = editableSize?.device === "mobile"
     ? MOBILE_RATIO_PRESETS
     : DESKTOP_RATIO_PRESETS;
-  const widthPresets: readonly number[] = editableSize?.deviceLabel === "移动端"
+  const widthPresets: readonly number[] = editableSize?.device === "mobile"
     ? MOBILE_WIDTH_PRESETS
     : DESKTOP_WIDTH_PRESETS;
   const selectedRatioPreset = editableSize?.heightMode === "aspect-ratio"
@@ -283,6 +290,21 @@ export default function WorkspaceCanvasControls({
     };
   }, [isSizeEditorOpen, isViewToolsOpen]);
 
+  if (variant === "minimal") {
+    return (
+      <div className="homepage-editor__canvas-controls template-editor__canvas-controls--minimal" aria-label="画布缩放">
+        <button type="button" onClick={onZoomOut} aria-label="缩小画布">−</button>
+        <output aria-label={`画布缩放 ${Math.round(zoom * 100)}%`} aria-live="polite">
+          {Math.round(zoom * 100)}%
+        </output>
+        <button type="button" onClick={onZoomIn} aria-label="放大画布">＋</button>
+        <button type="button" onClick={onFit} aria-label="适应画布" title="适应画布">
+          <FullscreenOutlined />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={controlsRef}
@@ -297,14 +319,14 @@ export default function WorkspaceCanvasControls({
             className="template-editor__canvas-size-trigger"
             aria-expanded={isSizeEditorOpen}
             aria-controls={sizePanelId}
-            aria-label={`模板尺寸：${editableSize.deviceLabel} ${sizeSummary}`}
+            aria-label={`模板尺寸：${sizeSummary}`}
             onClick={() => {
               setIsViewToolsOpen(false);
               setIsSizeEditorOpen((open) => !open);
             }}
           >
             <span>模板尺寸</span>
-            <strong>{editableSize.deviceLabel} · {sizeSummary}</strong>
+            <strong>{sizeSummary}</strong>
             <span className="template-editor__canvas-size-trigger-arrow" aria-hidden="true">⌄</span>
           </button>
           <div
@@ -315,8 +337,8 @@ export default function WorkspaceCanvasControls({
             hidden={!isSizeEditorOpen}
           >
             <div className="template-editor__canvas-size-panel-head">
-              <strong>{editableSize.deviceLabel}模板尺寸</strong>
-              <span>只影响当前设备，可撤销</span>
+              <strong>当前画布尺寸</strong>
+              <span>可撤销</span>
             </div>
             <div className="template-editor__canvas-size-control">
               <CanvasDimensionInput
@@ -388,8 +410,8 @@ export default function WorkspaceCanvasControls({
                 type="button"
                 disabled={!editableSize.canRestore}
                 title={editableSize.canRestore
-                  ? `恢复${editableSize.deviceLabel}已保存的尺寸，不影响另一设备`
-                  : `${editableSize.deviceLabel}尺寸与已保存版本一致`}
+                  ? "恢复当前画布已保存的尺寸"
+                  : "当前画布尺寸与已保存版本一致"}
                 onClick={editableSize.onRestore}
               >
                 恢复已保存尺寸
@@ -428,6 +450,8 @@ export default function WorkspaceCanvasControls({
       <button
         type="button"
         className={isFitView ? "is-active" : ""}
+        aria-label="适应画布"
+        title="适应画布"
         onClick={onFit}
       >
         适应画布

@@ -37,6 +37,7 @@ import {
   catalogSort,
   serializeWeightRanges,
   useURLParams,
+  type URLParamKey,
 } from "./catalogQuery";
 import { catalogTokens as T } from "./catalogTokens";
 
@@ -177,6 +178,7 @@ function StickyBar({
         <span style={{ fontSize: 11, color: T.sec }}>{total} 款</span>
         <div style={{ flex: 1 }} />
         <select
+          aria-label="作品排序方式"
           value={sort}
           onChange={(e) => onSort(e.target.value)}
           style={{
@@ -237,7 +239,7 @@ export default function Catalog({
     return () => clearPageMeta();
   }, [clearPageMeta, editorPreview, setPageMeta]);
 
-  const { params, update } = useURLParams(!editorPreview);
+  const { params, update, updateMany } = useURLParams(!editorPreview);
   const [filterOpen, setFilterOpen] = useState(false);
   const [quickView, setQuickView] = useState<CatalogProduct | null>(null);
   const filterTriggerRef = useRef<HTMLElement | null>(null);
@@ -263,6 +265,7 @@ export default function Catalog({
     categories,
     loading: categoriesLoading,
     error: categoriesError,
+    reload: reloadCategories,
   } = useProductCategories();
   const categoryTarget = params.subcategory || params.category;
   const categoryIds = useMemo(
@@ -320,12 +323,13 @@ export default function Catalog({
     facets,
     loading: productsLoading,
     error: productsError,
+    reload: reloadProducts,
     revision: catalogRevision,
   } = useProductData(catalogQuery, {
     loadCategories: false,
   });
   const apiLoading = productsLoading || (Boolean(categoryTarget) && categoriesLoading);
-  const apiError = productsError || categoriesError;
+  const apiError = productsError || (categoryTarget ? categoriesError : null);
   const tp = Math.ceil(total / PAGE_SIZE);
   const sizeOptions = facets.sizes;
 
@@ -435,12 +439,14 @@ export default function Catalog({
   }, [editorPreview]);
 
   const clearAll = () => {
-    update("category", "");
-    update("query", "");
-    update("material", []);
-    update("craft", []);
-    update("weight", []);
-    update("size", []);
+    updateMany({
+      category: "",
+      query: "",
+      material: [],
+      craft: [],
+      weight: [],
+      size: [],
+    });
   };
   const hasActiveFilters = Boolean(
     params.category ||
@@ -453,7 +459,7 @@ export default function Catalog({
   );
   const showCatalogTools =
     apiLoading || total > 0 || hasActiveFilters;
-  const toggleArray = (key: string, arr: string[], val: string) => {
+  const toggleArray = (key: URLParamKey, arr: string[], val: string) => {
     const newArr = arr.includes(val)
       ? arr.filter((x) => x !== val)
       : [...arr, val];
@@ -537,8 +543,8 @@ export default function Catalog({
         }
         .catalog-search__eyebrow {
           margin: 0 0 10px;
-          color: #6E7477;
-          font-size: 10px;
+          color: #5F6568;
+          font-size: 12px;
           line-height: 1;
           letter-spacing: .18em;
         }
@@ -616,8 +622,8 @@ export default function Catalog({
         }
         .catalog-search__hint {
           margin: 12px 0 0;
-          color: #6E7477;
-          font-size: 11px;
+          color: #5F6568;
+          font-size: 12px;
           line-height: 1.6;
         }
         .catalog-search__suggestions {
@@ -660,8 +666,12 @@ export default function Catalog({
         }
         .catalog-category-nav__item {
           position: relative;
+          min-width: 44px;
           min-height: 44px;
           padding: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
           border: 0;
           background: none;
           color: #5F6568;
@@ -854,6 +864,34 @@ export default function Catalog({
           />
         </>
       ) : null}
+      {categoriesError && !categoryTarget ? (
+        <div
+          role="status"
+          style={{
+            margin: "20px auto 0",
+            maxWidth: 1560,
+            paddingInline: "clamp(24px,5vw,80px)",
+            color: T.sec,
+            fontSize: 13,
+          }}
+        >
+          分类筛选暂时无法加载，作品列表仍可浏览。
+          <button
+            type="button"
+            onClick={reloadCategories}
+            style={{
+              marginLeft: 12,
+              border: 0,
+              borderBottom: `1px solid ${T.txt}`,
+              background: "none",
+              color: T.txt,
+              cursor: "pointer",
+            }}
+          >
+            重试分类
+          </button>
+        </div>
+      ) : null}
       {apiLoading ? (
         <div
           className="catalog-state"
@@ -865,7 +903,7 @@ export default function Catalog({
             paddingInline: "clamp(48px,5vw,80px)",
           }}
         >
-          <p style={{ fontSize: 14, color: T.light }}>正在加载珠宝作品…</p>
+          <p style={{ fontSize: 14, color: T.sec }}>正在加载珠宝作品…</p>
         </div>
       ) : apiError ? (
         <div
@@ -886,7 +924,11 @@ export default function Catalog({
           </p>
           <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
             <button
-              onClick={() => window.location.reload()}
+              type="button"
+              onClick={() => {
+                reloadProducts();
+                if (categoriesError) reloadCategories();
+              }}
               style={{
                 background: "none",
                 border: `1px solid ${T.line}`,
@@ -1013,12 +1055,12 @@ export default function Catalog({
           onCrafts={(c) => update("craft", c)}
           onWeights={(w) => update("weight", w)}
           onSizes={(s) => update("size", s)}
-          onClear={() => {
-            update("material", []);
-            update("craft", []);
-            update("weight", []);
-            update("size", []);
-          }}
+          onClear={() => updateMany({
+            material: [],
+            craft: [],
+            weight: [],
+            size: [],
+          })}
           onClose={closeFilter}
           total={total}
           returnFocusRef={filterTriggerRef}

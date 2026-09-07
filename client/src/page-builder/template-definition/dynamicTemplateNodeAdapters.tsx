@@ -9,6 +9,10 @@ import {
   MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
   type MatureContentTemplateSlotType,
 } from "./validateTemplateDefinition";
+import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  type ContentTemplateRenderMode,
+} from "../runtime/ContentTemplateRenderSurface";
 
 const VideoBlock = lazy(() => import("@/components/blocks/VideoBlock"));
 const CarouselBlock = lazy(() => import("@/components/blocks/CarouselBlock"));
@@ -25,7 +29,7 @@ const MatureContentTemplateRenderer = lazy(() => import("./MatureContentTemplate
 
 export interface DynamicTemplateNodeAdapterContext {
   content: unknown;
-  mode: "public" | "editor" | "preview" | "thumbnail";
+  mode: ContentTemplateRenderMode;
   nodeProps?: DynamicTemplateNodeProps;
   headingLevel?: 1 | 2;
 }
@@ -38,6 +42,11 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function usesContentEditMode(mode: DynamicTemplateNodeAdapterContext["mode"]) {
+  return mode !== CONTENT_TEMPLATE_RENDER_SURFACE.PUBLIC
+    && mode !== CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW;
 }
 
 function withTemplateDesign(
@@ -230,7 +239,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
             {posterUrl ? <img src={posterUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
           </div>
         )}>
-          <VideoBlock module={module} editMode={mode !== "public"} />
+          <VideoBlock module={module} editMode={usesContentEditMode(mode)} />
         </Suspense>
       ));
     },
@@ -242,7 +251,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       if (!module) return null;
       return renderWithContentContract("轮播图", mode, props, nodeProps, (
         <Suspense fallback={adapterFallback("轮播组件", record)}>
-          <CarouselBlock module={module} editMode={mode !== "public"} />
+          <CarouselBlock module={module} editMode={usesContentEditMode(mode)} />
         </Suspense>
       ));
     },
@@ -254,7 +263,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       if (!module) return null;
       return renderWithContentContract("热区图", mode, props, nodeProps, (
         <Suspense fallback={adapterFallback("热区组件", record)}>
-          <HotspotBlock module={module} editMode={mode !== "public"} />
+          <HotspotBlock module={module} editMode={usesContentEditMode(mode)} />
         </Suspense>
       ));
     },
@@ -266,7 +275,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       if (!module) return null;
       return renderWithContentContract("改款对比", mode, props, nodeProps, (
         <Suspense fallback={adapterFallback("前后对比组件", record)}>
-          <BeforeAfterBlock module={module} editMode={mode !== "public"} />
+          <BeforeAfterBlock module={module} editMode={usesContentEditMode(mode)} />
         </Suspense>
       ));
     },
@@ -278,7 +287,7 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       if (!module) return null;
       return renderWithContentContract("预约入口", mode, props, nodeProps, (
         <Suspense fallback={adapterFallback("预约入口组件", record)}>
-          <AppointmentBlock module={module} editMode={mode !== "public"} />
+          <AppointmentBlock module={module} editMode={usesContentEditMode(mode)} />
         </Suspense>
       ));
     },
@@ -288,10 +297,10 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       const { record, design, props } = withTemplateDesign(content, nodeProps, PRODUCT_CARD_DEFAULTS);
       return renderWithContentContract("单品焦点推荐", mode, props, nodeProps, (
       <Suspense fallback={adapterFallback("单品展示组件", asRecord(content))}>
-        {mode === "public" ? (
+        {mode === CONTENT_TEMPLATE_RENDER_SURFACE.PUBLIC ? (
           <ResolvedFeaturedProductBlock props={props} stableReferencesOnly />
         ) : (
-          <FeaturedProductPreview {...PRODUCT_CARD_DEFAULTS} {...record} {...design} editMode />
+          <FeaturedProductPreview {...PRODUCT_CARD_DEFAULTS} {...record} {...design} editMode={usesContentEditMode(mode)} />
         )}
       </Suspense>
       ));
@@ -302,10 +311,10 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       const { record, design, props } = withTemplateDesign(content, nodeProps, PRODUCT_COLLECTION_DEFAULTS);
       return renderWithContentContract("产品展示行", mode, props, nodeProps, (
       <Suspense fallback={adapterFallback("商品集合组件", asRecord(content))}>
-        {mode === "public" ? (
+        {mode === CONTENT_TEMPLATE_RENDER_SURFACE.PUBLIC ? (
           <ResolvedProductRowBlock props={props} stableReferencesOnly />
         ) : (
-          <ProductRowPreview {...PRODUCT_COLLECTION_DEFAULTS} {...record} {...design} editMode />
+          <ProductRowPreview {...PRODUCT_COLLECTION_DEFAULTS} {...record} {...design} editMode={usesContentEditMode(mode)} />
         )}
       </Suspense>
       ));
@@ -316,10 +325,10 @@ const DYNAMIC_TEMPLATE_NODE_ADAPTERS: Partial<Record<DynamicTemplateSlotType, Dy
       const { record, design, props } = withTemplateDesign(content, nodeProps, CATEGORY_COLLECTION_DEFAULTS);
       return renderWithContentContract("分类卡片", mode, props, nodeProps, (
       <Suspense fallback={adapterFallback("分类集合组件", asRecord(content))}>
-        {mode === "public" ? (
+        {mode === CONTENT_TEMPLATE_RENDER_SURFACE.PUBLIC ? (
           <ResolvedCategoryCardsBlock props={props} />
         ) : (
-          <CategoryCardsPreview {...CATEGORY_COLLECTION_DEFAULTS} {...record} {...design} templateKey="categoryCards" editMode />
+          <CategoryCardsPreview {...CATEGORY_COLLECTION_DEFAULTS} {...record} {...design} templateKey="categoryCards" editMode={usesContentEditMode(mode)} />
         )}
       </Suspense>
       ));

@@ -86,6 +86,99 @@ function multiHeroDraft() {
   return draft;
 }
 
+function locatablePublishDraft() {
+  const draft = validDraft();
+  draft.puckData.content.push(
+    {
+      type: "单图海报",
+      props: {
+        id: "poster-one",
+        title: "",
+        subtitle: "第一张海报",
+        desktopImage: "/svg/template-hero.svg",
+        mobileImage: "/svg/template-hero.svg",
+        altText: "第一张海报",
+        targetType: "none",
+        actionText: "",
+        linkUrl: "",
+        productId: 0,
+        template: "leftTextRightImage",
+        desktopFocusX: 50,
+        desktopFocusY: 50,
+        mobileFocusX: 50,
+        mobileFocusY: 50,
+      },
+    },
+    {
+      type: "单图海报",
+      props: {
+        id: "poster-two",
+        title: "",
+        subtitle: "第二张海报",
+        desktopImage: "/svg/template-hero.svg",
+        mobileImage: "/svg/template-hero.svg",
+        altText: "第二张海报",
+        targetType: "none",
+        actionText: "",
+        linkUrl: "",
+        productId: 0,
+        template: "leftTextRightImage",
+        desktopFocusX: 50,
+        desktopFocusY: 50,
+        mobileFocusX: 50,
+        mobileFocusY: 50,
+      },
+    },
+  );
+  draft.puckData.content[0].props.mobileImage = "";
+  return draft;
+}
+
+function locatableValidation(body: Record<string, unknown>) {
+  const puckData = body.puckData as {
+    content?: Array<{ props?: Record<string, unknown> }>;
+  } | undefined;
+  const blocks = puckData?.content ?? [];
+  const byId = (id: string) => blocks.find((block) => block.props?.id === id)?.props ?? {};
+  const issues = [] as Array<{
+    code: string;
+    message: string;
+    severity: "error";
+    blockId: string;
+    path: string;
+    field: string;
+  }>;
+  if (!byId("poster-one").title) issues.push({
+    code: "required-field",
+    message: "第一张海报必须填写标题",
+    severity: "error",
+    blockId: "poster-one",
+    path: "content[1].props.title",
+    field: "title",
+  });
+  if (!byId("poster-two").title) issues.push({
+    code: "required-field",
+    message: "第二张海报必须填写标题",
+    severity: "error",
+    blockId: "poster-two",
+    path: "content[2].props.title",
+    field: "title",
+  });
+  if (!byId("d3-hero").mobileImage) issues.push({
+    code: "required-mobile-media",
+    message: "首屏必须填写移动端主图",
+    severity: "error",
+    blockId: "d3-hero",
+    path: "content[0].props.mobileImage",
+    field: "mobileImage",
+  });
+  return {
+    valid: issues.length === 0,
+    errors: issues.map((issue) => issue.message),
+    issues,
+  };
+}
+
 async function mockEditorApis(
   page: Page,
   opts: {
@@ -98,18 +191,41 @@ async function mockEditorApis(
       path?: string;
       field?: string;
       index?: number;
+      code?: string;
     }>;
+    validationResult?: (body: Record<string, unknown>) => {
+      valid: boolean;
+      errors: string[];
+      issues: Array<{
+        message: string;
+        severity: "error" | "warning" | "info";
+        blockId?: string;
+        path?: string;
+        field?: string;
+        index?: number;
+        code?: string;
+      }>;
+    };
     publishedDocument?: Record<string, unknown> | null;
     saveFailure?: boolean;
+    saveFailureStatus?: number;
     publishFailure?: boolean;
+    publishFailureStatus?: number;
+    publishFailuresBeforeSuccess?: number;
+    remoteDraftAfterPublishConflict?: Record<string, unknown>;
+    publishDelayMs?: number;
     saveDelayMs?: number;
     validateFailuresBeforeSuccess?: number;
+    beforeValidateResponse?: (call: number) => Promise<void>;
     draftDocument?: Record<string, unknown>;
   },
 ) {
-  const draft = opts.draftDocument ?? validDraft();
+  let draft = structuredClone(opts.draftDocument ?? validDraft()) as Record<string, unknown>;
   let validateCalls = 0;
+  let validateResponses = 0;
   let persistentWriteCalls = 0;
+  let saveCalls = 0;
+  let publishCalls = 0;
   await page.route(`${API_PREFIX}*`, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
@@ -117,7 +233,9 @@ async function mockEditorApis(
 
     if (url.includes("/validate")) {
       validateCalls += 1;
+      await opts.beforeValidateResponse?.(validateCalls);
       if (validateCalls <= (opts.validateFailuresBeforeSuccess ?? 0)) {
+        validateResponses += 1;
         return route.fulfill({
           status: 503,
           contentType: "application/json",
@@ -127,11 +245,13 @@ async function mockEditorApis(
           }),
         });
       }
-      return route.fulfill(json({
-        valid: opts.valid,
-        errors: opts.errors ?? [],
-        issues: opts.issues ?? [],
-      }));
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      validateResponses += 1;
+      return route.fulfill(json(opts.validationResult?.(body) ?? {
+          valid: opts.valid,
+          errors: opts.errors ?? [],
+          issues: opts.issues ?? [],
+        }));
     }
     if (url.includes("/revisions")) {
       return route.fulfill(json([]));
@@ -142,13 +262,28 @@ async function mockEditorApis(
     if (url.includes("/publish")) {
       // 发布接口（PUT）：返回已发布快照
       persistentWriteCalls += 1;
-      if (opts.publishFailure) {
+      publishCalls += 1;
+      if (opts.publishDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, opts.publishDelayMs));
+      }
+      const publishFailureLimit = opts.publishFailure
+        ? Number.POSITIVE_INFINITY
+        : (opts.publishFailuresBeforeSuccess ?? 0);
+      if (publishCalls <= publishFailureLimit) {
+        const failureStatus = opts.publishFailureStatus ?? 409;
+        if (failureStatus === 409 && opts.remoteDraftAfterPublishConflict) {
+          draft = structuredClone(opts.remoteDraftAfterPublishConflict);
+        }
         return route.fulfill({
-          status: 409,
+          status: failureStatus,
           contentType: "application/json",
           body: JSON.stringify({
-            code: 409,
-            message: "该页面已被其他编辑者更新，请重新加载后再发布",
+            code: failureStatus,
+            message: failureStatus === 403
+              ? "forbidden publish detail must never reach the browser"
+              : failureStatus === 409
+                ? "该页面已被其他编辑者更新，请重新加载后再发布"
+                : "internal publish path must never reach the browser",
           }),
         });
       }
@@ -159,20 +294,31 @@ async function mockEditorApis(
     if (method === "PUT") {
       // 保存草稿
       persistentWriteCalls += 1;
+      saveCalls += 1;
       if (opts.saveDelayMs) {
         await new Promise((resolve) => setTimeout(resolve, opts.saveDelayMs));
       }
       if (opts.saveFailure) {
+        const failureStatus = opts.saveFailureStatus ?? 503;
         return route.fulfill({
-          status: 503,
+          status: failureStatus,
           contentType: "application/json",
           body: JSON.stringify({
-            code: 503,
-            message: "internal database path must never reach the browser",
+            code: failureStatus,
+            message: failureStatus === 403
+              ? "forbidden save detail must never reach the browser"
+              : "internal database path must never reach the browser",
           }),
         });
       }
-      return route.fulfill(json({ ...draft, updatedAt: "2026-08-14T00:00:01.000Z" }));
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      draft = {
+        ...draft,
+        ...(body.puckData ? { puckData: body.puckData } : {}),
+        ...(body.metadata ? { metadata: body.metadata } : {}),
+        updatedAt: "2026-08-14T00:00:01.000Z",
+      };
+      return route.fulfill(json(draft));
     }
     if (url.includes("/admin")) {
       return route.fulfill(json(draft));
@@ -181,7 +327,10 @@ async function mockEditorApis(
   });
   return {
     validateCalls: () => validateCalls,
+    validateResponses: () => validateResponses,
     persistentWriteCalls: () => persistentWriteCalls,
+    saveCalls: () => saveCalls,
+    publishCalls: () => publishCalls,
   };
 }
 
@@ -268,7 +417,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     );
     await publishButton.click();
     await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
-    const blockers = page.getByRole("dialog", { name: "暂不能发布 · 3 项问题待处理" });
+    const blockers = page.getByRole("region", { name: "本次发布检查" });
     await expect(blockers).toBeVisible({ timeout: 8000 });
     await expect(blockers).toContainText("title 文本过长");
     await expect(blockers).toContainText("desktopImage 图片不能为空");
@@ -277,6 +426,127 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     expect(requests.validateCalls()).toBe(2);
     expect(requests.persistentWriteCalls()).toBe(1);
   });
+
+  for (const viewport of [
+    { name: "1600", width: 1600, height: 1000 },
+    { name: "1280", width: 1280, height: 900 },
+    { name: "1024", width: 1024, height: 900 },
+    { name: "390", width: 390, height: 844 },
+  ]) {
+    test(`${viewport.name}px 发布错误可跨同名字段与移动端素材连续定位修复`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      const requests = await mockEditorApis(page, {
+        valid: false,
+        draftDocument: locatablePublishDraft(),
+        validationResult: locatableValidation,
+      });
+
+      await page.goto("/admin/editor/home");
+      await expect.poll(requests.validateCalls).toBe(1);
+      const publishButton = page.locator(".homepage-editor__toolbar-publish");
+      await publishButton.click();
+
+      const review = page.getByRole("region", { name: "本次发布检查" });
+      await expect(review).toBeVisible({ timeout: 8000 });
+      await expect(review).toContainText("3 项错误待处理");
+      await expect(review.locator('[data-page-publish-block="poster-one"]'))
+        .toContainText("单图文 / 文案 / 桌面端与移动端");
+      await expect(review.locator('[data-page-publish-block="poster-two"]'))
+        .toContainText("单图文 / 文案 / 桌面端与移动端");
+      await expect(review.locator('[data-page-publish-block="d3-hero"]'))
+        .toContainText("移动端");
+      await expect(review.locator('[data-page-publish-block="d3-hero"]'))
+        .toHaveAttribute("data-page-publish-field", "mobileImage");
+      const reviewScreenshot = testInfo.outputPath(`publish-review-${viewport.name}.png`);
+      await page.screenshot({ path: reviewScreenshot, animations: "disabled" });
+      await testInfo.attach(`publish-review-${viewport.name}`, {
+        path: reviewScreenshot,
+        contentType: "image/png",
+      });
+      expect(requests.publishCalls()).toBe(0);
+      expect(requests.persistentWriteCalls()).toBe(1);
+
+      await review.getByRole("button", { name: /下一个问题/ }).press("Space");
+      await expect(review).toContainText("当前 2 / 3");
+      await review.getByRole("button", { name: /上一个问题/ }).press("Enter");
+
+      const firstIssue = review.locator('[data-page-publish-block="poster-one"]');
+      await firstIssue.getByRole("button").first().focus();
+      await page.keyboard.press("Enter");
+      const firstTitle = page.locator('[data-inspector-field="title"][data-page-publish-located="true"]');
+      await expect(firstTitle).toBeVisible();
+      await firstTitle.getByRole("textbox").fill("第一张已修复");
+      await expect(review).toContainText("2 项错误待处理", { timeout: 8000 });
+
+      const secondIssue = review.locator('[data-page-publish-block="poster-two"]');
+      await secondIssue.getByRole("button").first().click();
+      const secondTitle = page.locator('[data-inspector-field="title"][data-page-publish-located="true"]');
+      await expect(secondTitle).toBeVisible();
+      await secondTitle.getByRole("textbox").fill("第二张已修复");
+      await expect(review).toContainText("1 项错误待处理", { timeout: 8000 });
+
+      const mobileIssue = review.locator('[data-page-publish-block="d3-hero"]');
+      await mobileIssue.getByRole("button").first().click();
+      await expect(page.getByRole("button", { name: /移动端布局/ })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      const mobileImage = page.locator('[data-inspector-field="mobileImage"][data-page-publish-located="true"]');
+      await expect(mobileImage).toBeVisible();
+      const enableMobileImage = mobileImage.getByRole("button", { name: "单独设置手机端" });
+      if (await enableMobileImage.count()) await enableMobileImage.click();
+      await mobileImage.getByRole("button", { name: /图片链接|粘贴图片链接/ }).click();
+      const imageUrl = mobileImage.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片");
+      await imageUrl.fill("/svg/template-hero.svg");
+      await imageUrl.press("Enter");
+
+      await expect(review).toContainText("当前问题已全部解决", { timeout: 8000 });
+      expect(requests.publishCalls()).toBe(0);
+      expect(requests.persistentWriteCalls()).toBe(1);
+
+      const stableEntry = page.getByRole("button", { name: "查看本次发布检查（0 项错误）" });
+      if (viewport.width <= 1024) {
+        const inspectorDialog = page.getByRole("dialog", { name: "属性面板" });
+        await expect(inspectorDialog).toBeVisible();
+        await inspectorDialog.getByRole("button", { name: "收起属性面板" }).focus();
+        await page.keyboard.press("Shift+Tab");
+        await expect.poll(() => inspectorDialog.evaluate(
+          (element) => element.contains(document.activeElement),
+        )).toBe(true);
+
+        await review.focus();
+        await page.keyboard.press("Escape");
+        await expect(review).toBeHidden();
+        await expect(inspectorDialog).toHaveCount(0);
+        await expect(stableEntry).toBeFocused();
+
+        await stableEntry.press("Space");
+        await expect(review).toBeVisible();
+        await expect(page.getByRole("dialog", { name: "属性面板" })).toBeVisible();
+        await review.getByRole("button", { name: "关闭本次发布检查" }).click();
+        await expect(review).toBeHidden();
+        await expect(page.getByRole("dialog", { name: "属性面板" })).toHaveCount(0);
+        await expect(stableEntry).toBeFocused();
+
+        await stableEntry.press("Space");
+        await expect(page.getByRole("dialog", { name: "属性面板" })).toBeVisible();
+      } else {
+        await review.focus();
+        await page.keyboard.press("Escape");
+        await expect(review).toBeHidden();
+        await expect(stableEntry).toBeVisible();
+        await stableEntry.press("Space");
+      }
+      await expect(review).toBeVisible();
+      await expect(review).toContainText("页面不会自动保存或发布");
+
+      await publishButton.click();
+      await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+      expect(requests.publishCalls()).toBe(1);
+      expect(requests.persistentWriteCalls()).toBe(3);
+      await expectNoHorizontalOverflow(page);
+    });
+  }
 
   for (const viewport of [
     { name: "桌面", width: 1440, height: 900 },
@@ -337,26 +607,13 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       await expect(publishButton).toBeEnabled();
       await expect.poll(requests.validateCalls).toBe(1);
       await expect(page.locator(".homepage-editor__layer-issue-count")).toHaveCount(0);
-      const firstLayer = page.locator('[data-layer-index="0"] .homepage-editor__layer-select');
-      const navigatedFromIssue = (await firstLayer.count()) > 0;
-      if (navigatedFromIssue) {
-        await firstLayer.click();
-        await page.getByRole("button", { name: "1 项发布阻断" }).click();
-        await page.getByRole("dialog", { name: "当前模块与页面发布检查 · 1 项阻断" })
-          .getByRole("button", { name: "打开页面设置" }).click();
-      } else {
-        await page.getByRole("button", { name: "更多编辑操作" }).click();
-        await page.getByRole("menuitem", { name: "页面设置" }).click();
-      }
+      await page.getByRole("button", { name: "更多编辑操作" }).click();
+      await page.getByRole("menuitem", { name: "页面设置" }).click();
       const pageSettings = page.getByRole("dialog", { name: "页面展示设置" });
       await expect(pageSettings).toContainText("seoTitle 过长");
-      if (navigatedFromIssue) {
-        await expect(pageSettings.getByPlaceholder("例：海川珠宝 · 足金匠心系列官方旗舰店"))
-          .toBeFocused();
-      }
       await page.keyboard.press("Escape");
       await publishButton.click();
-      const blockers = page.getByRole("dialog", { name: "暂不能发布 · 1 项问题待处理" });
+      const blockers = page.getByRole("region", { name: "本次发布检查" });
       await expect(blockers).toContainText("seoTitle 过长");
       await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
       expect(requests.persistentWriteCalls()).toBe(1);
@@ -397,16 +654,18 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       await expect(page.getByRole("alert", { name: "发布检查问题" })).toHaveCount(0);
       await expect(page.getByRole("alert", { name: "当前模块发布检查问题" })).toHaveCount(0);
       await expect(page.getByText("当前任务：修复发布阻断", { exact: true })).toHaveCount(0);
-      await page.getByRole("button", { name: "1 项发布阻断" }).click();
-      const issueDialog = page.getByRole("dialog", { name: "当前模块与页面发布检查 · 1 项阻断" });
-      await expect(issueDialog).toContainText(issueMessage);
-      await issueDialog.getByRole("button", { name: "定位到字段" }).click();
-      await expect(issueDialog).toBeHidden();
-      await expect(page.locator('[data-inspector-field="targetType"]')).toBeInViewport();
+      await page.getByRole("button", { name: "1 项发布阻断" }).press("Enter");
+      const issueReview = page.getByRole("region", { name: "本次发布检查" });
+      await expect(issueReview).toContainText(issueMessage);
+      await issueReview.getByRole("button", { name: "定位", exact: true }).click();
+      await expect(page.locator('[data-inspector-field="targetType"]')).toHaveAttribute(
+        "data-page-publish-located",
+        "true",
+      );
       const publishButton = page.locator(".homepage-editor__toolbar-publish");
       await expect(publishButton).toBeEnabled();
       await publishButton.click();
-      await expect(page.getByRole("dialog", { name: "暂不能发布 · 1 项问题待处理" }))
+      await expect(page.getByRole("region", { name: "本次发布检查" }))
         .toContainText(issueMessage);
       await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
       expect(requests.persistentWriteCalls()).toBe(1);
@@ -464,19 +723,256 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     expect(requests.persistentWriteCalls()).toBe(2);
   });
 
-  test("发布接口拒绝时保留明确错误且不误报成功", async ({ page }) => {
+  test("保存草稿实际收到 403 时保留本地编辑并持续显示权限失败", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      saveFailure: true,
+      saveFailureStatus: 403,
+    });
+    await page.goto("/admin/editor/home");
+    const titleInput = page.getByRole("region", { name: "属性面板" }).getByRole(
+      "textbox",
+      { name: "主标题", exact: true },
+    );
+    await titleInput.fill("403 后仍保留的本地草稿");
+
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+
+    const draftStatus = page.locator('.homepage-editor__draft-status[data-mode="error"]');
+    await expect(draftStatus).toContainText("保存失败");
+    await expect(page.locator(".ant-message-notice-content")).toContainText(
+      "权限可能已发生变化。请重新登录后再试，或联系管理员确认权限。",
+    );
+    await expect(titleInput).toHaveValue("403 后仍保留的本地草稿");
+    await expect(page.getByText("页面草稿已保存", { exact: true })).toHaveCount(0);
+    expect(requests.saveCalls()).toBe(1);
+    expect(requests.publishCalls()).toBe(0);
+    expect(requests.persistentWriteCalls()).toBe(1);
+  });
+
+  test("发布实际收到 403 时保留草稿、持续失败且不误报成功", async ({ page }) => {
     const requests = await mockEditorApis(page, {
       valid: true,
       publishFailure: true,
+      publishFailureStatus: 403,
+    });
+    await page.goto("/admin/editor/home");
+    const titleInput = page.getByRole("region", { name: "属性面板" }).getByRole(
+      "textbox",
+      { name: "主标题", exact: true },
+    );
+    await titleInput.fill("403 后仍保留的发布草稿");
+
+    await page.locator(".homepage-editor__toolbar-publish").click();
+
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await expect(review).toContainText("本次发布失败");
+    await expect(review).toContainText("权限可能已发生变化");
+    await expect(review).toContainText("请重新登录后再试，或联系管理员确认发布权限");
+    await expect(page.locator('.homepage-editor__workspace-status[data-mode="error"]'))
+      .toContainText("发布失败 · 可重试");
+    await expect(titleInput).toHaveValue("403 后仍保留的发布草稿");
+    await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
+    expect(requests.saveCalls()).toBe(1);
+    expect(requests.publishCalls()).toBe(1);
+    expect(requests.persistentWriteCalls()).toBe(2);
+  });
+
+  test("发布 409 后保留本地修改不发额外写请求且冲突状态持续可见", async ({ page }) => {
+    const remoteDraft = validDraft();
+    remoteDraft.puckData.content[0].props.title = "远端编辑者的新草稿";
+    remoteDraft.updatedAt = "2026-08-14T00:00:03.000Z";
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishFailure: true,
+      publishFailureStatus: 409,
+      remoteDraftAfterPublishConflict: remoteDraft,
+    });
+    await page.goto("/admin/editor/home");
+    const titleInput = page.getByRole("region", { name: "属性面板" }).getByRole(
+      "textbox",
+      { name: "主标题", exact: true },
+    );
+    await titleInput.fill("冲突后保留的本地修改");
+
+    await page.locator(".homepage-editor__toolbar-publish").click();
+
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await expect(review.getByRole("button", { name: "保留本地修改", exact: true })).toBeVisible();
+    await expect(review.getByRole("button", { name: /重新\s*加载远端草稿/ })).toBeVisible();
+    await review.getByRole("button", { name: "保留本地修改", exact: true }).click();
+
+    await expect(review).toBeHidden();
+    await expect(titleInput).toHaveValue("冲突后保留的本地修改");
+    await expect(page.locator('.homepage-editor__workspace-status[data-mode="error"]'))
+      .toContainText("发布失败 · 可重试");
+    await expect(page.getByRole("button", { name: "保存当前装修草稿" })).toBeEnabled();
+    await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
+    expect(requests.saveCalls()).toBe(1);
+    expect(requests.publishCalls()).toBe(1);
+    expect(requests.persistentWriteCalls()).toBe(2);
+  });
+
+  test("发布 409 后仅在确认后加载远端草稿并可继续发布", async ({ page }) => {
+    const remoteDraft = validDraft();
+    remoteDraft.puckData.content[0].props.title = "确认后加载的远端草稿";
+    remoteDraft.updatedAt = "2026-08-14T00:00:03.000Z";
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishFailuresBeforeSuccess: 1,
+      publishFailureStatus: 409,
+      remoteDraftAfterPublishConflict: remoteDraft,
+    });
+    await page.goto("/admin/editor/home");
+    const titleInput = page.getByRole("region", { name: "属性面板" }).getByRole(
+      "textbox",
+      { name: "主标题", exact: true },
+    );
+    await titleInput.fill("确认前不能丢失的本地修改");
+    await page.locator(".homepage-editor__toolbar-publish").click();
+
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await review.getByRole("button", { name: /重新\s*加载远端草稿/ }).click();
+    const confirm = page.getByRole("dialog", { name: "重新加载远端草稿？" });
+    await expect(confirm).toContainText("当前本地修改将被远端草稿替换");
+    await expect(confirm).toContainText("不会自动合并或覆盖任一侧");
+    await expect(titleInput).toHaveValue("确认前不能丢失的本地修改");
+    expect(requests.persistentWriteCalls()).toBe(2);
+
+    await confirm.getByRole("button", { name: "重新加载远端草稿", exact: true }).click();
+    await expect(titleInput).toHaveValue("确认后加载的远端草稿");
+    await expect(page.locator('.homepage-editor__workspace-status[data-mode="error"]')).toHaveCount(0);
+    expect(requests.persistentWriteCalls()).toBe(2);
+
+    await page.locator(".homepage-editor__toolbar-publish").click();
+    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+    expect(requests.saveCalls()).toBe(2);
+    expect(requests.publishCalls()).toBe(2);
+    expect(requests.persistentWriteCalls()).toBe(4);
+  });
+
+  test("发布失败在自动重验后仍保留，关闭重开后明确重试只发送一次请求", async ({ page }) => {
+    let releaseAutomaticValidation!: () => void;
+    const automaticValidationGate = new Promise<void>((resolve) => {
+      releaseAutomaticValidation = resolve;
+    });
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishFailuresBeforeSuccess: 1,
+      publishFailureStatus: 503,
+      publishDelayMs: 250,
+      beforeValidateResponse: async (call) => {
+        if (call === 3) await automaticValidationGate;
+      },
     });
 
     await page.goto("/admin/editor/home");
+    await expect.poll(requests.validateCalls).toBe(1);
     await page.locator(".homepage-editor__toolbar-publish").click();
 
-    await expect(page.getByText("数据已被其他操作更新，请重新加载后再试。"))
+    await expect(page.locator(".ant-message-notice-content").getByText(
+      "发布失败，请稍后重试",
+      { exact: true },
+    ))
       .toBeVisible({ timeout: 8000 });
     await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
+    const failureStatus = page.locator(
+      '.homepage-editor__workspace-status[data-mode="error"]',
+    );
+    await expect(failureStatus).toContainText("发布失败 · 可重试");
+    await expect(failureStatus).toContainText("草稿仍在");
+    await expect.poll(requests.publishCalls).toBe(1);
+    await expect.poll(requests.validateCalls).toBe(3);
+
+    releaseAutomaticValidation();
+    await expect.poll(requests.validateResponses).toBe(3);
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await expect(review).toContainText("本次发布失败");
+    await expect(review).toContainText("自动检查只更新发布资格，不会把本次失败改成成功");
+    await expect(failureStatus).toContainText("发布失败 · 可重试");
+
+    await review.getByRole("button", { name: "关闭本次发布检查" }).press("Enter");
+    await expect(review).toBeHidden();
+    await failureStatus.press("Enter");
+    await expect(review).toContainText("本次发布失败");
+
+    const retryPublish = review.locator(":scope > footer button");
+    await expect(retryPublish).toContainText("重新发布");
+    await retryPublish.evaluate((button) => {
+      button.click();
+      button.click();
+    });
+    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+    await expect.poll(requests.publishCalls).toBe(2);
+    await expect(page.locator('.homepage-editor__draft-status[data-mode="clean"]')).toHaveCount(0);
+    await expect(page.locator(".homepage-editor__toolbar")).not.toContainText("已保存");
+    expect(requests.persistentWriteCalls()).toBe(4);
+  });
+
+  test("发布失败后继续编辑会使旧结果失效并恢复真实草稿状态", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishFailure: true,
+      publishFailureStatus: 503,
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect.poll(requests.validateCalls).toBe(1);
+    await page.locator(".homepage-editor__toolbar-publish").click();
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await expect(review).toContainText("本次发布失败");
+    await review.getByRole("button", { name: "关闭本次发布检查" }).click();
+
+    const titleInput = page.getByRole("region", { name: "属性面板" }).getByRole(
+      "textbox",
+      { name: "主标题", exact: true },
+    );
+    await titleInput.fill("发布失败后继续编辑的新标题");
+
+    await expect(page.getByText("发布失败 · 可重试", { exact: true })).toHaveCount(0);
+    await expect(page.locator('.homepage-editor__draft-status[data-mode="dirty"]'))
+      .toContainText("有未保存修改");
+    expect(requests.publishCalls()).toBe(1);
     expect(requests.persistentWriteCalls()).toBe(2);
+  });
+
+  test("1600/1280/1024/390 发布失败提示持续可见且不遮断工作区操作", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishFailure: true,
+      publishFailureStatus: 503,
+    });
+    const viewports = [
+      { width: 1600, height: 1000 },
+      { width: 1280, height: 900 },
+      { width: 1024, height: 900 },
+      { width: 390, height: 844 },
+    ];
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.goto(`/admin/editor/home?publish-failure=${viewport.width}`);
+      const publishButton = page.locator(".homepage-editor__toolbar-publish");
+      await expect(publishButton).toBeEnabled();
+      await publishButton.press("Enter");
+
+      const failureStatus = page.locator(
+        '.homepage-editor__workspace-status[data-mode="error"]',
+      );
+      await expect(failureStatus).toContainText("发布失败 · 可重试");
+      await expect(failureStatus).toBeInViewport();
+      const review = page.getByRole("region", { name: "本次发布检查" });
+      await expect(review).toContainText("草稿仍完整保留，可明确重试");
+      await expect(review).toBeInViewport();
+      await expectNoHorizontalOverflow(page);
+
+      await review.press("Escape");
+      await expect(review).toBeHidden();
+      await expect(failureStatus).toBeFocused();
+    }
+
+    expect(requests.publishCalls()).toBe(viewports.length);
+    expect(requests.persistentWriteCalls()).toBe(viewports.length * 2);
   });
 
   test("多个首屏在任意当前区块都显示全页阻断且不能发布", async ({ page }) => {
@@ -499,14 +995,15 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     ).toHaveCount(0);
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 10000 });
-    await page.getByRole("button", { name: "1 项发布阻断" }).click();
-    await expect(page.getByRole("dialog", {
-      name: "当前模块与页面发布检查 · 1 项阻断",
-    })).toContainText(issueMessage);
-    await page.getByRole("button", { name: "知道了" }).click();
+    await page.getByRole("button", { name: "1 项发布阻断" }).press("Enter");
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await expect(review).toContainText(issueMessage);
+    await review.getByRole("button", { name: "定位", exact: true }).click();
+    await expect(page.locator('[data-layer-id="d3-hero-second-stage"]'))
+      .toHaveAttribute("data-page-publish-located", "true");
     await publishButton.click();
     await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
-    await expect(page.getByRole("dialog", { name: "暂不能发布 · 1 项问题待处理" }))
+    await expect(page.getByRole("region", { name: "本次发布检查" }))
       .toContainText(issueMessage);
     await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
     expect(requests.persistentWriteCalls()).toBe(1);
@@ -643,8 +1140,8 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       await expect(confirmDialog).toBeHidden();
 
       if (actor.width <= 390) {
-        await page.getByRole("button", { name: "收起属性面板" }).click();
-        await page.getByRole("button", { name: "展开图层面板" }).click();
+        await page.getByRole("button", { name: "收起属性面板" }).press("Enter");
+        await page.getByRole("button", { name: "展开图层面板" }).press("Enter");
       }
       await expect(page.locator("[data-layer-index]")).toHaveCount(2);
       await expect(page.locator("[data-layer-index]", { hasText: "首屏" })).toHaveCount(1);
@@ -948,7 +1445,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
   }
 
   test("页面设置可选保存媒体来源与授权编号，未完成 SEO 仍可作为草稿保存", async ({ page }) => {
-    await mockEditorApis(page, { valid: true });
+    const requests = await mockEditorApis(page, { valid: true });
     const publishedAdminRequest = page.waitForRequest((request) =>
       new URL(request.url()).pathname.endsWith(
         "/page-modules/document/published/admin",
@@ -971,14 +1468,18 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     );
     await drawer.getByRole("textbox", { name: "素材 1 来源" }).fill("品牌自有拍摄");
     await drawer.getByRole("textbox", { name: "素材 1 授权编号" }).fill("HC-OWN-2026-001");
+    await expect(drawer).toContainText("页面设置与画布修改会一起保存为整页草稿");
     const draftSaveRequest = page.waitForRequest((request) => {
       const pathname = new URL(request.url()).pathname;
       return request.method() === "PUT"
         && /\/page-modules\/document$/.test(pathname);
     });
-    await drawer.getByRole("button", { name: /保\s*存/ }).click();
+    await drawer.getByRole("button", { name: "保存整页草稿" }).click();
     const request = await draftSaveRequest;
     expect(request.postDataJSON()).toMatchObject({
+      puckData: {
+        content: [{ props: { id: "d3-hero" } }],
+      },
       metadata: {
         contentOwner: "品牌内容组",
         mediaRights: [{
@@ -989,6 +1490,38 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       },
     });
     await expect(drawer).toBeHidden();
+    await expect(page.getByText("整页草稿已保存，包含页面设置与画布修改", { exact: true }))
+      .toBeVisible();
+    expect(requests.persistentWriteCalls()).toBe(1);
+  });
+
+  test("1600/1280/1024/390 页面设置没有局部修改时仍可键盘执行整页保存", async ({ page }) => {
+    const requests = await mockEditorApis(page, { valid: true, saveDelayMs: 250 });
+    const viewports = [
+      { width: 1600, height: 1000 },
+      { width: 1280, height: 900 },
+      { width: 1024, height: 900 },
+      { width: 390, height: 844 },
+    ];
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await page.goto(`/admin/editor/home?save-scope=${viewport.width}`);
+      await page.getByRole("button", { name: "更多编辑操作" }).click();
+      await page.getByRole("menuitem", { name: "页面设置" }).click();
+
+      const drawer = page.getByRole("dialog", { name: "页面展示设置" });
+      const saveButton = drawer.getByRole("button", { name: "保存整页草稿" });
+      await expect(saveButton).toBeVisible();
+      await saveButton.focus();
+      await saveButton.press("Enter");
+      await expect(saveButton).toBeDisabled();
+      await expect(drawer).toBeHidden();
+      await expect(page.locator(".ant-message-notice-content")
+        .getByText("整页草稿已保存，包含页面设置与画布修改", { exact: true }).last())
+        .toBeVisible();
+      await expectNoHorizontalOverflow(page);
+    }
+    expect(requests.persistentWriteCalls()).toBe(viewports.length);
   });
 
   test("关闭有未保存输入的页面设置时先确认并允许继续编辑", async ({ page }) => {
@@ -1022,7 +1555,15 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     await mockEditorApis(page, { valid: true });
     await page.goto("/admin/editor/home");
 
+    const actions = page.getByRole("toolbar", { name: "编辑器主要操作" });
     await expect(page.getByRole("button", { name: "保存当前装修草稿" })).toBeVisible();
+    expect(await actions.locator("[data-workspace-action]").evaluateAll((controls) => (
+      controls.map((control) => control.getAttribute("data-workspace-action"))
+    ))).toEqual(["undo", "redo", "preview", "save", "publish", "more"]);
+    const actionsBox = await actions.boundingBox();
+    if (!actionsBox) throw new Error("移动端页面装修缺少操作栏尺寸");
+    expect(actionsBox.x).toBeGreaterThanOrEqual(0);
+    expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(390);
     await expectNoHorizontalOverflow(page);
   });
 
@@ -1043,7 +1584,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
 
       const drawer = page.getByRole("dialog", { name: "页面展示设置" });
       await drawer.getByPlaceholder("例：品牌内容组").fill("失败后仍保留的内容团队");
-      const saveButton = drawer.getByRole("button", { name: /保\s*存/ });
+      const saveButton = drawer.getByRole("button", { name: "保存整页草稿" });
       await saveButton.click();
       await expect(saveButton).toBeDisabled();
 
@@ -1052,9 +1593,10 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
         "失败后仍保留的内容团队",
       );
       await expect(saveButton).toBeEnabled();
+      await expect(page.getByText("整页草稿保存失败，请重试", { exact: true })).toBeVisible();
       await expect(page.getByText("internal database path must never reach the browser")).toHaveCount(0);
       if (viewport.width > 390) {
-        await expect(page.getByRole("status", { name: "草稿状态：有未保存修改" })).toBeVisible();
+        await expect(page.getByRole("status", { name: /草稿状态：保存失败.*请重试/ })).toBeVisible();
       }
       await expect.poll(() => page.evaluate(() => {
         const event = new Event("beforeunload", { cancelable: true });

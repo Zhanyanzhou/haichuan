@@ -5,6 +5,7 @@ import type {
 } from "../src/services/api";
 import {
   countUpgradeableSystemTemplateInstances,
+  countUpgradeablePersonalTemplateInstances,
   upgradePersonalTemplateInstances,
   upgradeSystemTemplateInstances,
 } from "../src/page-builder/templates/templateOrigin";
@@ -44,7 +45,7 @@ function systemTemplate(activeVersion: number): SystemContentTemplateCurrent {
   };
 }
 
-test("个人模板打开页面时只升级布局与 revision，保留真实内容", () => {
+test("个人模板打开页面时只提示可升级，原版本、布局与真实内容完全不变", () => {
   const document = {
     content: [{
       type: "首屏主视觉",
@@ -60,23 +61,19 @@ test("个人模板打开页面时只升级布局与 revision，保留真实内�
     }],
   };
 
-  const result = upgradePersonalTemplateInstances(document, [personalTemplate(3)]);
-  expect(result.upgradedCount).toBe(1);
-  const props = result.document.content[0].props;
+  const original = structuredClone(document);
+  const count = countUpgradeablePersonalTemplateInstances(document, [personalTemplate(3)]);
+  expect(count).toBe(1);
+  const props = document.content[0].props;
   expect(props.title).toBe("真实页面标题");
   expect(props.desktopImage).toBe("/uploads/real.jpg");
   expect(props.productCode).toBe("HC-001");
   expect(props.linkUrl).toBe("/catalog");
-  expect(props.__templateOrigin).toEqual({ kind: "personal", templateId: 7, revision: 3 });
+  expect(props.__templateOrigin).toEqual({ kind: "personal", templateId: 7, revision: 1 });
   expect(props.__instanceOverrides).toMatchObject({
     version: 2,
-    frame: { aspectRatioByViewport: { desktop: 0.5 } },
   });
-  expect(document.content[0].props.__templateOrigin).toEqual({
-    kind: "personal",
-    templateId: 7,
-    revision: 1,
-  });
+  expect(document).toEqual(original);
 });
 
 test("模板缺失、读取失败或旧页面没有来源标记时继续使用布局快照", () => {
@@ -132,4 +129,33 @@ test("系统模板只在运营确认后升级页面草稿，公开快照保持�
     contractKey: "hero",
     version: 1,
   });
+});
+
+test("系统模板新版布局非法或实例类型失配时不提供升级", () => {
+  const invalidLayout = {
+    ...systemTemplate(2),
+    layoutData: { version: 999 },
+  } as unknown as SystemContentTemplateCurrent;
+  const wrongModuleDocument = {
+    content: [{
+      type: "纯文字横幅",
+      props: {
+        id: "wrong-module",
+        __templateOrigin: { kind: "system", contractKey: "hero", version: 1 },
+      },
+    }],
+  };
+  const matchingDocument = {
+    content: [{
+      type: "首屏主视觉",
+      props: {
+        id: "invalid-layout",
+        __templateOrigin: { kind: "system", contractKey: "hero", version: 1 },
+      },
+    }],
+  };
+
+  expect(countUpgradeableSystemTemplateInstances(matchingDocument, invalidLayout)).toBe(0);
+  expect(upgradeSystemTemplateInstances(matchingDocument, invalidLayout).upgradedCount).toBe(0);
+  expect(countUpgradeableSystemTemplateInstances(wrongModuleDocument, systemTemplate(2))).toBe(0);
 });

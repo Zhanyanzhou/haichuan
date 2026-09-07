@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
+import AdminPageHeader from "@/components/common/AdminPageHeader";
+import {
+  AdminEmptyState,
+  AdminErrorState,
+  AdminLoadingState,
+} from "@/components/common/AdminDataStates";
 import {
   App as AntdApp,
   Button,
@@ -26,7 +32,6 @@ import {
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
-import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import {
   orderApi,
   userApi,
@@ -37,7 +42,11 @@ import {
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { csvRow } from "@/utils/csv";
-import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
+import {
+  ADMIN_COPY,
+  getAdminEmptyText,
+  getSafeAdminErrorMessage,
+} from "@/constants/adminCopy";
 import { useAuthStore } from "@/store/authStore";
 import type {
   Order,
@@ -62,6 +71,14 @@ import {
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
+
+function isMultiPackageShipConflict(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const { status, message } = error as { status?: unknown; message?: unknown };
+  return status === 409 &&
+    typeof message === "string" &&
+    message.includes("多包裹订单请前往履约中心");
+}
 
 // 订单状态映射（颜色 + 中文）
 const STATUS_META: Record<OrderStatus, { c: string; t: string }> = {
@@ -268,13 +285,14 @@ function getOrderCapabilities(role: User["role"] | undefined): OrderCapabilities
 
 export default function OrderManage() {
   const { message, modal } = AntdApp.useApp();
+  const navigate = useNavigate();
   const role = useAuthStore((state) => state.user?.role);
   const capabilities = getOrderCapabilities(role);
   const [searchParams, setSearchParams] = useSearchParams();
   const [list, setList] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<unknown | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -301,7 +319,9 @@ export default function OrderManage() {
     useState<"all" | DeliveryStatus>("all");
 
   const [detail, setDetail] = useState<OrderDetail | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<unknown | null>(null);
   const [shippingOrder, setShippingOrder] = useState<Order | null>(null);
   const detailHasBlockingPayment =
     detail?.payments?.some((payment) => payment.status !== "FAILED") ?? false;
@@ -319,8 +339,19 @@ export default function OrderManage() {
     capabilities.canReceive &&
       detail?.status === "SHIPPED" &&
       ["SHIPPED", "ABNORMAL"].includes(detail.deliveryStatus || "") &&
-      detail.fulfillments?.some((fulfillment) =>
+      detail.fulfillments?.length === 1 &&
+      detail.fulfillments.some((fulfillment) =>
         ["SHIPPED", "ABNORMAL"].includes(fulfillment.status),
+      ),
+  );
+  const requiresFulfillmentCenter = Boolean(
+    capabilities.canReceive &&
+      detail?.fulfillments &&
+      detail.fulfillments.length > 1 &&
+      detail.fulfillments.some((fulfillment) =>
+        ["PENDING_PICK", "PENDING_CHECK", "PENDING_SHIP", "SHIPPED", "ABNORMAL"].includes(
+          fulfillment.status,
+        ),
       ),
   );
   const [shipping, setShipping] = useState(false);
@@ -361,7 +392,7 @@ export default function OrderManage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setLoadError(false);
+    setLoadError(null);
     try {
       const params: OrderListQuery = {
         page,
@@ -383,9 +414,10 @@ export default function OrderManage() {
       const data = unwrapResponse<PaginatedResult<Order>>(res);
       setList(data?.list || []);
       setTotal(data?.total || 0);
-    } catch {
-      setLoadError(true);
+    } catch (error: unknown) {
+      setLoadError(error);
       setList([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -408,13 +440,15 @@ export default function OrderManage() {
   }, [load]);
 
   const openDetail = async (orderId: number) => {
+    setDetailId(orderId);
     setDetail(null);
     setDetailLoading(true);
+    setDetailError(null);
     try {
       const res = await orderApi.getById(orderId);
       setDetail(unwrapResponse<OrderDetail>(res));
     } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, "订单详情加载失败，请稍后重新加载。"));
+      setDetailError(e);
     } finally {
       setDetailLoading(false);
     }
@@ -437,7 +471,20 @@ export default function OrderManage() {
       void load();
       if (detail?.id === id) void openDetail(id);
     } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, "发货登记失败，请核对物流信息后重试。"));
+      const errorMessage = getSafeAdminErrorMessage(
+        e,
+        "发货登记失败，请核对物流信息后重试。",
+      );
+      message.error(errorMessage);
+      if (isMultiPackageShipConflict(e)) {
+        modal.confirm({
+          title: "多包裹订单请逐包发货",
+          content: "当前填写内容已保留。请前往履约中心，按履约单分别登记物流信息。",
+          okText: "前往履约中心",
+          cancelText: "留在当前页面",
+          onOk: () => navigate("/admin/trade/fulfillment"),
+        });
+      }
     } finally {
       setShipping(false);
     }
@@ -770,18 +817,25 @@ export default function OrderManage() {
     setPage(1);
   };
 
+  const hasOrderFilters = Boolean(
+    statusFilter !== "all" ||
+      keyword ||
+      productKeyword ||
+      dateRange ||
+      amountRange.min !== undefined ||
+      amountRange.max !== undefined ||
+      orderTypeFilter !== "all" ||
+      paymentStatusFilter !== "all" ||
+      deliveryStatusFilter !== "all",
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-semibold text-brand-text">
-            订单中心
-          </h1>
-          <p className="text-sm text-brand-muted mt-1">
-            订单全生命周期 · 快照 · 收款 · 库存 · 履约 · 事件时间线
-          </p>
-        </div>
-        <Space>
+      <AdminPageHeader
+        title="订单中心"
+        subtitle="查看订单、收款、库存占用、履约与交易事件。"
+        extra={(
+          <Space wrap>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>
             刷新
           </Button>
@@ -805,8 +859,9 @@ export default function OrderManage() {
               人工建单
             </Button>
           )}
-        </Space>
-      </div>
+          </Space>
+        )}
+      />
 
       {/* 状态标签 */}
       <div className="flex gap-2 flex-wrap">
@@ -932,12 +987,13 @@ export default function OrderManage() {
       </Card>
 
       {loadError ? (
-        <div className="text-center py-16">
-          <p className="text-brand-muted mb-4">订单数据暂时无法加载</p>
-          <Button type="primary" onClick={() => void load()}>
-            重新加载
-          </Button>
-        </div>
+        <AdminErrorState
+          subject="订单"
+          error={loadError}
+          onRetry={() => void load()}
+        />
+      ) : loading && list.length === 0 ? (
+        <AdminLoadingState subject="订单" />
       ) : (
         <Card className="!bg-white !border-brand-line">
           <Table
@@ -957,7 +1013,7 @@ export default function OrderManage() {
                 setPageSize(ps);
               },
             }}
-            locale={{ emptyText: getAdminEmptyText("订单") }}
+            locale={{ emptyText: getAdminEmptyText("订单", hasOrderFilters) }}
             columns={[
               {
                 title: "订单号",
@@ -1092,15 +1148,24 @@ export default function OrderManage() {
 
       {/* 订单详情抽屉 */}
       <Drawer
-        open={!!detail || detailLoading}
+        open={detailId !== null}
         onClose={() => {
+          setDetailId(null);
           setDetail(null);
+          setDetailError(null);
         }}
-        width={720}
+        width="min(720px, calc(100vw - 16px))"
         title="订单详情"
-        loading={detailLoading && !detail}
       >
-        {detail && (
+        {detailLoading && !detail ? (
+          <AdminLoadingState subject="订单详情" compact />
+        ) : detailError ? (
+          <AdminErrorState
+            subject="订单详情"
+            error={detailError}
+            onRetry={detailId === null ? undefined : () => void openDetail(detailId)}
+          />
+        ) : detail ? (
           <div className="space-y-6">
             {/* 基本信息 */}
             <div>
@@ -1462,7 +1527,8 @@ export default function OrderManage() {
               capabilities.canEditNote ||
               capabilities.canEditConsultant ||
               (capabilities.canAdvanceCustomStage && detail.orderType === "CUSTOM") ||
-              canReceiveDetail) && (
+              canReceiveDetail ||
+              requiresFulfillmentCenter) && (
               <div>
                 <h3 className="font-semibold mb-2">订单操作</h3>
                 <Space wrap>
@@ -1494,6 +1560,14 @@ export default function OrderManage() {
                   {canReceiveDetail && (
                     <Button size="small" type="primary" onClick={handleReceive}>
                       确认签收
+                    </Button>
+                  )}
+                  {requiresFulfillmentCenter && (
+                    <Button
+                      size="small"
+                      onClick={() => navigate("/admin/trade/fulfillment")}
+                    >
+                      前往履约中心逐包处理
                     </Button>
                   )}
                 </Space>
@@ -1548,6 +1622,8 @@ export default function OrderManage() {
               )}
             </div>
           </div>
+        ) : (
+          <AdminEmptyState subject="订单详情" />
         )}
       </Drawer>
 

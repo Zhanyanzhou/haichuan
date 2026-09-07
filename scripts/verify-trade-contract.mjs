@@ -5,11 +5,434 @@
 
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const readSrc = (rel) => readFile(path.join(root, rel), "utf8");
+
+function tokenizeNginx(source) {
+  const tokens = [];
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    if (/\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+    if (char === "#") {
+      while (index < source.length && source[index] !== "\n") index += 1;
+      continue;
+    }
+    if ("{};".includes(char)) {
+      tokens.push({
+        value: char,
+        quoted: false,
+        structural: true,
+        start: index,
+        end: index + 1,
+      });
+      index += 1;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      const start = index;
+      const quote = char;
+      let value = "";
+      let closed = false;
+      index += 1;
+      while (index < source.length) {
+        if (source[index] === "\\" && index + 1 < source.length) {
+          value += source[index + 1];
+          index += 2;
+          continue;
+        }
+        if (source[index] === quote) {
+          index += 1;
+          closed = true;
+          break;
+        }
+        value += source[index];
+        index += 1;
+      }
+      assert.ok(closed, "Nginx 配置含未闭合字符串");
+      tokens.push({ value, quoted: true, structural: false, start, end: index });
+      continue;
+    }
+
+    const start = index;
+    while (
+      index < source.length &&
+      !/\s/.test(source[index]) &&
+      !"{};#".includes(source[index])
+    ) {
+      index += 1;
+    }
+    tokens.push({
+      value: source.slice(start, index),
+      quoted: false,
+      structural: false,
+      start,
+      end: index,
+    });
+  }
+  return tokens;
+}
+
+function parseNginx(source) {
+  const tokens = tokenizeNginx(source);
+  let index = 0;
+
+  function parseNodes(expectClosingBrace) {
+    const nodes = [];
+    while (index < tokens.length) {
+      if (tokens[index].structural && tokens[index].value === "}") {
+        assert.ok(expectClosingBrace, "Nginx 配置含多余右花括号");
+        index += 1;
+        return nodes;
+      }
+
+      const head = [];
+      const start = tokens[index].start;
+      while (index < tokens.length && !tokens[index].structural) {
+        head.push(tokens[index]);
+        index += 1;
+      }
+      assert.ok(head.length > 0, "Nginx 配置含空指令");
+      assert.ok(index < tokens.length, `Nginx 指令 ${head[0].value} 未结束`);
+      const terminator = tokens[index];
+      index += 1;
+      assert.notEqual(terminator.value, "}", `Nginx 指令 ${head[0].value} 缺少结束符`);
+
+      if (terminator.value === ";") {
+        nodes.push({
+          name: head[0].value,
+          nameToken: head[0],
+          args: head.slice(1),
+          children: null,
+          start,
+          end: terminator.end,
+        });
+        continue;
+      }
+
+      assert.equal(terminator.value, "{", `Nginx 指令 ${head[0].value} 结构无效`);
+      const children = parseNodes(true);
+      nodes.push({
+        name: head[0].value,
+        nameToken: head[0],
+        args: head.slice(1),
+        children,
+        start,
+        end: tokens[index - 1].end,
+      });
+    }
+    assert.ok(!expectClosingBrace, "Nginx 配置缺少右花括号");
+    return nodes;
+  }
+
+  return parseNodes(false);
+}
+
+function parseCspDirectives(policy) {
+  const directives = new Map();
+  for (const segment of policy.split(";")) {
+    const parts = segment.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) continue;
+    const name = parts[0].toLowerCase();
+    assert.ok(!directives.has(name), `CSP 指令不可重复：${name}`);
+    directives.set(name, parts.slice(1));
+  }
+  return directives;
+}
+
+function collectNginxNodes(nodes, predicate, depth = 0, matches = [], parent = null) {
+  for (const node of nodes) {
+    if (predicate(node)) matches.push({ node, depth, parent });
+    if (node.children) {
+      collectNginxNodes(node.children, predicate, depth + 1, matches, node);
+    }
+  }
+  return matches;
+}
+
+function parseListenPort(value) {
+  if (!/^[0-9]+$/.test(value)) return null;
+  const port = Number(value);
+  return port >= 1 && port <= 65535 ? port : null;
+}
+
+function isValidIpv4(value) {
+  const parts = value.split(".");
+  return (
+    parts.length === 4 &&
+    parts.every(
+      (part) =>
+        /^[0-9]+$/.test(part) &&
+        Number(part) >= 0 &&
+        Number(part) <= 255,
+    )
+  );
+}
+
+function isValidHostname(value) {
+  if (value.length === 0) return false;
+  const hostname = value.endsWith(".") ? value.slice(0, -1) : value;
+  if (!hostname || hostname.length > 253) return false;
+  return hostname.split(".").every(
+    (label) =>
+      label.length >= 1 &&
+      label.length <= 63 &&
+      /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label),
+  );
+}
+
+function classifyNginxListenEndpoint(value) {
+  if (value !== value.trim()) {
+    return { kind: "invalid", reason: "surrounding-whitespace" };
+  }
+  const endpoint = value;
+  if (!endpoint) return { kind: "invalid", reason: "empty" };
+  if (endpoint.startsWith("unix:")) {
+    return { kind: "unix", path: endpoint.slice("unix:".length) };
+  }
+  if (endpoint.includes("://")) {
+    return { kind: "invalid", reason: "uri-scheme" };
+  }
+  const directPort = parseListenPort(endpoint);
+  if (directPort !== null) {
+    return { kind: "tcp", hostType: "port", host: null, port: directPort };
+  }
+  if (endpoint === "*") {
+    return { kind: "tcp", hostType: "wildcard", host: "*", port: 80 };
+  }
+  if (endpoint.startsWith("*:")) {
+    const port = parseListenPort(endpoint.slice(2));
+    return port === null
+      ? { kind: "invalid", reason: "wildcard-port" }
+      : { kind: "tcp", hostType: "wildcard", host: "*", port };
+  }
+  if (endpoint.startsWith("[")) {
+    const bracketEnd = endpoint.indexOf("]");
+    if (bracketEnd <= 1 || bracketEnd !== endpoint.lastIndexOf("]")) {
+      return { kind: "invalid", reason: "ipv6-brackets" };
+    }
+    const host = endpoint.slice(1, bracketEnd);
+    if (host.includes("%")) {
+      return { kind: "invalid", reason: "ipv6-zone" };
+    }
+    const suffix = endpoint.slice(bracketEnd + 1);
+    const port = suffix === "" ? 80 : suffix.startsWith(":") ? parseListenPort(suffix.slice(1)) : null;
+    return isIP(host) === 6 && port !== null
+      ? { kind: "tcp", hostType: "ipv6", host, port }
+      : { kind: "invalid", reason: "ipv6-or-port" };
+  }
+
+  const firstColon = endpoint.indexOf(":");
+  if (firstColon === -1) {
+    if (isValidIpv4(endpoint)) {
+      return { kind: "tcp", hostType: "ipv4", host: endpoint, port: 80 };
+    }
+    if (/^[0-9.]+$/.test(endpoint)) {
+      return { kind: "invalid", reason: "ipv4-or-port" };
+    }
+    return isValidHostname(endpoint)
+      ? { kind: "tcp", hostType: "hostname", host: endpoint, port: 80 }
+      : { kind: "invalid", reason: "hostname" };
+  }
+  if (firstColon <= 0 || firstColon !== endpoint.lastIndexOf(":")) {
+    return { kind: "invalid", reason: "host-port-shape" };
+  }
+  const host = endpoint.slice(0, firstColon);
+  const port = parseListenPort(endpoint.slice(firstColon + 1));
+  if (port === null) return { kind: "invalid", reason: "port" };
+  if (isValidIpv4(host)) return { kind: "tcp", hostType: "ipv4", host, port };
+  if (/^[0-9.]+$/.test(host)) return { kind: "invalid", reason: "ipv4" };
+  if (isValidHostname(host)) return { kind: "tcp", hostType: "hostname", host, port };
+  return { kind: "invalid", reason: "hostname" };
+}
+
+function validateNginxListen(node) {
+  assert.ok(node.args.length >= 1, "listen 必须声明 endpoint");
+  const endpoint = classifyNginxListenEndpoint(node.args[0].value);
+  assert.equal(endpoint.kind, "tcp", `listen 只允许合法 TCP endpoint：${node.args[0].value}`);
+
+  const allowedFlags = new Set([
+    "default_server",
+    "reuseport",
+    "ssl",
+    "http2",
+    "bind",
+  ]);
+  const seen = new Set();
+  for (const token of node.args.slice(1)) {
+    const parameter = token.value;
+    const separator = parameter.indexOf("=");
+    const parameterName = separator === -1 ? parameter : parameter.slice(0, separator);
+    assert.ok(parameterName, `listen 参数名不可为空：${parameter}`);
+    assert.ok(!seen.has(parameterName), `listen 参数不可重复：${parameterName}`);
+    seen.add(parameterName);
+    if (allowedFlags.has(parameter)) continue;
+    if (parameterName === "ipv6only" && separator !== -1) {
+      assert.equal(endpoint.hostType, "ipv6", "ipv6only 只能用于 IPv6 endpoint");
+      assert.ok(
+        parameter === "ipv6only=on" || parameter === "ipv6only=off",
+        "ipv6only 只允许 on 或 off",
+      );
+      continue;
+    }
+    assert.fail(`listen 参数不在当前 Nginx 1.27 合同 allowlist：${parameter}`);
+  }
+  return endpoint;
+}
+
+function resolveTrustedCsp(source) {
+  const nodes = parseNginx(source);
+  const servers = collectNginxNodes(nodes, (node) => node.name === "server");
+  const listeners = collectNginxNodes(nodes, (node) => node.name === "listen").map(
+    (entry) => {
+      assert.equal(entry.depth, 1, "listen 只能是配置顶层 server 的直属子节点");
+      assert.equal(entry.parent?.name, "server", "listen 的直属父节点必须是 server");
+      const serverEntry = servers.find(({ node }) => node === entry.parent);
+      assert.equal(serverEntry?.depth, 0, "listen 所属 server 必须位于配置顶层");
+      return {
+        endpoint: validateNginxListen(entry.node),
+        listener: entry.node,
+        server: entry.parent,
+      };
+    },
+  );
+  const trustedListeners = listeners.filter(({ endpoint }) => endpoint.port === 8081);
+  assert.equal(trustedListeners.length, 1, "全配置必须且只能声明一个 8081 监听端点");
+  const { listener, server: trustedServer } = trustedListeners[0];
+
+  const allHeaders = collectNginxNodes(
+    trustedServer.children,
+    (node) => node.name === "add_header",
+  );
+  assert.equal(
+    allHeaders.filter(({ depth }) => depth > 0).length,
+    0,
+    "可信 8081 server 的后代块不可声明 add_header，以免覆盖安全头继承",
+  );
+  const cspHeaders = allHeaders.filter(
+    ({ node }) => node.args[0]?.value.toLowerCase() === "content-security-policy",
+  );
+  assert.equal(cspHeaders.length, 1, "可信 8081 server 必须且只能绑定一个 CSP header");
+  const header = cspHeaders[0].node;
+  assert.equal(header.args.length, 3, "CSP header 必须包含值和 always");
+  assert.equal(header.args[2].value, "always", "CSP header 必须在所有响应上生效");
+
+  const valueToken = header.args[1];
+  if (!valueToken.value.startsWith("$")) {
+    assert.ok(valueToken.quoted, "字面量 CSP 必须使用引号包裹");
+    return {
+      policy: valueToken.value,
+      policyToken: valueToken,
+      header,
+      map: null,
+      policies: [{ selector: "literal", policy: valueToken.value, policyToken: valueToken }],
+      listener,
+      server: trustedServer,
+      source: "literal",
+    };
+  }
+
+  assert.equal(
+    valueToken.value,
+    "$hc_content_security_policy",
+    "可信 8081 server 必须绑定受控 CSP map 变量",
+  );
+  const maps = collectNginxNodes(
+    nodes,
+    (node) => node.name === "map" && node.args[1]?.value === valueToken.value,
+  );
+  assert.equal(maps.length, 1, "CSP 输出变量必须由唯一 map 定义");
+  assert.equal(maps[0].depth, 0, "CSP map 必须位于配置顶层");
+  const cspMap = maps[0].node;
+  assert.equal(cspMap.args.length, 2, "CSP map 参数数量无效");
+  assert.equal(cspMap.args[0].value, "$uri", "CSP map 输入变量必须为 $uri");
+  const defaults = cspMap.children.filter((node) => node.name === "default");
+  assert.equal(defaults.length, 1, "CSP map 必须有且仅有一个 default 分支");
+  const policies = cspMap.children.map((node) => {
+    assert.equal(node.children, null, `CSP map 分支不可嵌套：${node.name}`);
+    assert.equal(node.args.length, 1, `CSP map 分支结构无效：${node.name}`);
+    assert.ok(node.args[0].quoted, `CSP map 策略必须使用引号包裹：${node.name}`);
+    return {
+      selector: node.name,
+      selectorToken: node.nameToken,
+      policy: node.args[0].value,
+      policyToken: node.args[0],
+    };
+  });
+  return {
+    policy: defaults[0].args[0].value,
+    policyToken: defaults[0].args[0],
+    header,
+    listener,
+    map: cspMap,
+    policies,
+    server: trustedServer,
+    source: "map",
+  };
+}
+
+function validateControlledImageCsp(source) {
+  const resolved = resolveTrustedCsp(source);
+  for (const entry of resolved.policies) {
+    const directives = parseCspDirectives(entry.policy);
+    const blobOwners = [...directives]
+      .filter(([, values]) => values.includes("blob:"))
+      .map(([name]) => name)
+      .sort();
+    if (entry.selector === "default" || entry.selector === "literal") {
+      assert.ok(directives.has("img-src"), "通用 CSP 必须显式声明 img-src");
+      assert.deepEqual(blobOwners, ["img-src"], "通用 CSP 的 blob: 只能由 img-src 使用");
+    } else {
+      assert.ok(
+        blobOwners.every((name) => name === "img-src"),
+        `CSP 特例 ${entry.selector} 不可在 img-src 外使用 blob:`,
+      );
+    }
+  }
+  return resolved;
+}
+
+function replaceRange(source, tokenOrNode, replacement) {
+  return `${source.slice(0, tokenOrNode.start)}${replacement}${source.slice(tokenOrNode.end)}`;
+}
+
+function insertBeforeBlockClose(source, node, addition) {
+  assert.equal(source[node.end - 1], "}", `Nginx 块 ${node.name} 缺少结束位置`);
+  return `${source.slice(0, node.end - 1)}${addition}${source.slice(node.end - 1)}`;
+}
+
+function mutateCspDirective(policy, directiveName, mutateSources) {
+  let changed = false;
+  const next = policy
+    .split(";")
+    .map((segment) => {
+      const parts = segment.trim().split(/\s+/).filter(Boolean);
+      if (parts[0]?.toLowerCase() !== directiveName) return segment;
+      changed = true;
+      return [parts[0], ...mutateSources(parts.slice(1))].join(" ");
+    })
+    .join(";");
+  assert.ok(changed, `fixture 未找到 CSP 指令：${directiveName}`);
+  return next;
+}
+
+function addCspSource(policy, directiveName, source) {
+  if (parseCspDirectives(policy).has(directiveName)) {
+    return mutateCspDirective(policy, directiveName, (sources) => [
+      ...sources,
+      source,
+    ]);
+  }
+  const separator = policy.trimEnd().endsWith(";") ? " " : "; ";
+  return `${policy}${separator}${directiveName} ${source}`;
+}
 
 async function readExportedTypeSurface(entry, visited = new Set()) {
   const normalized = entry.replaceAll("\\", "/");
@@ -198,16 +621,311 @@ check("静态上传文件：缺失资源不触发 SPA 回退", () => {
 });
 
 check("受控图片：CSP 允许 Blob URL，且范围限定在 img-src", () => {
-  const csp = nginxConfig.match(/Content-Security-Policy\s+"([^"]+)"/);
-  assert.ok(csp, "未找到 Nginx CSP 配置");
-  const imgSource = csp[1].match(/img-src\s+([^;]+)/)?.[1] || "";
-  assert.ok(
-    /\bblob:/.test(imgSource),
-    "受控图片使用 Blob URL，img-src 必须允许 blob:",
-  );
-  assert.ok(
-    !/script-src\s+[^;]*\bblob:/.test(csp[1]),
-    "script-src 不可放宽 blob:",
+  const resolved = validateControlledImageCsp(nginxConfig);
+  const withListenEndpoint = (endpoint) =>
+    replaceRange(nginxConfig, resolved.listener.args[0], endpoint);
+  const withListenDirective = (directive) =>
+    replaceRange(nginxConfig, resolved.listener, directive);
+  const withAdditionalListenEndpoint = (endpoint) =>
+    insertBeforeBlockClose(
+      nginxConfig,
+      resolved.server,
+      `\n  listen ${endpoint};\n`,
+    );
+  const withDuplicateListenEndpoints = (first, second) => {
+    const duplicated = insertBeforeBlockClose(
+      nginxConfig,
+      resolved.server,
+      `\n  listen ${second};\n`,
+    );
+    return replaceRange(duplicated, resolved.listener.args[0], first);
+  };
+
+  const withPolicy = (policy) =>
+    replaceRange(nginxConfig, resolved.policyToken, JSON.stringify(policy));
+  const maxLengthHostname = [
+    "a".repeat(63),
+    "b".repeat(63),
+    "c".repeat(63),
+    "d".repeat(61),
+  ].join(".");
+  const overlongHostname = `${maxLengthHostname}d`;
+  assert.equal(maxLengthHostname.length, 253, "最大 hostname fixture 必须为 253 字符");
+  assert.equal(overlongHostname.length, 254, "超长 hostname fixture 必须为 254 字符");
+  const invalidFixtures = [
+    [
+      "删除 img-src blob:",
+      withPolicy(
+        mutateCspDirective(resolved.policy, "img-src", (sources) =>
+          sources.filter((source) => source !== "blob:"),
+        ),
+      ),
+    ],
+    ...["default-src", "script-src", "media-src"].map((directive) => [
+      `${directive} 增加 blob:`,
+      withPolicy(
+        mutateCspDirective(resolved.policy, directive, (sources) => [
+          ...sources,
+          "blob:",
+        ]),
+      ),
+    ]),
+    [
+      "绑定错误变量",
+      replaceRange(
+        nginxConfig,
+        resolved.header.args[1],
+        "$hc_wrong_content_security_policy",
+      ),
+    ],
+    ["移除 always", replaceRange(nginxConfig, resolved.header.args[2], "")],
+    ["移除 CSP header 绑定", replaceRange(nginxConfig, resolved.header, "")],
+    [
+      "注释伪装 CSP header",
+      replaceRange(
+        nginxConfig,
+        resolved.header,
+        "# add_header Content-Security-Policy $hc_content_security_policy always;",
+      ),
+    ],
+    [
+      "字符串伪装 CSP header",
+      replaceRange(
+        nginxConfig,
+        resolved.header,
+        'set $csp_decoy "add_header Content-Security-Policy $hc_content_security_policy always;";',
+      ),
+    ],
+  ];
+  if (resolved.map) {
+    const specialPolicy = resolved.policies.find(
+      (entry) => entry.selector !== "default",
+    );
+    assert.ok(specialPolicy, "当前 CSP map 必须保留路径特例 fixture");
+    for (const directive of ["default-src", "script-src", "media-src"]) {
+      invalidFixtures.push([
+        `路径特例 ${directive} 增加 blob:`,
+        replaceRange(
+          nginxConfig,
+          specialPolicy.policyToken,
+          JSON.stringify(addCspSource(specialPolicy.policy, directive, "blob:")),
+        ),
+      ]);
+    }
+
+    const mapSource = nginxConfig.slice(resolved.map.start, resolved.map.end);
+    const relativeInputToken = {
+      start: resolved.map.args[0].start - resolved.map.start,
+      end: resolved.map.args[0].end - resolved.map.start,
+    };
+    const secondMap = replaceRange(mapSource, relativeInputToken, "$request_uri");
+    invalidFixtures.push([
+      "第二个同输出变量 CSP map",
+      `${nginxConfig.slice(0, resolved.map.end)}\n${secondMap}${nginxConfig.slice(resolved.map.end)}`,
+    ]);
+    invalidFixtures.push([
+      "移除 CSP map",
+      replaceRange(nginxConfig, resolved.map, ""),
+    ]);
+    invalidFixtures.push([
+      "后代块内第二个同输出变量 CSP map",
+      insertBeforeBlockClose(
+        nginxConfig,
+        resolved.server,
+        `\n  location = /__csp_nested_map_fixture__ {\n${secondMap}\n  }\n`,
+      ),
+    ]);
+  }
+  invalidFixtures.push([
+    "location 嵌套 CSP header",
+    insertBeforeBlockClose(
+      nginxConfig,
+      resolved.server,
+      '\n  location = /__csp_nested_fixture__ {\n    add_header Content-Security-Policy $hc_content_security_policy always;\n  }\n',
+    ),
+  ]);
+  invalidFixtures.push([
+    "location 嵌套非 CSP add_header",
+    insertBeforeBlockClose(
+      nginxConfig,
+      resolved.server,
+      '\n  location = /__header_inheritance_fixture__ {\n    add_header X-QA-Probe "1" always;\n  }\n',
+    ),
+  ]);
+  for (const [first, second] of [
+    ["8081", "8081"],
+    ["8081", "0.0.0.0:8081"],
+    ["8081", "*:8081"],
+    ["8081", "[::]:8081"],
+    ["*:8081", "[::]:8081"],
+  ]) {
+    invalidFixtures.push([
+      `重复 8081 监听 ${first} + ${second}`,
+      withDuplicateListenEndpoints(first, second),
+    ]);
+  }
+  for (const endpoint of [
+    "unix:8081",
+    "http://localhost:8081",
+    "::8081",
+    "[not-ipv6]:8081",
+    "0.0.0.0:",
+    "[::8081",
+    ":8081",
+    "999.0.0.1:8081",
+    "-invalid.example:8081",
+    "0",
+    "65536",
+    "[fe80::1%eth0]:8081",
+    "[fe80::1%25eth0]:8081",
+    "unix:/tmp/nginx.sock",
+    "$listen_host",
+    "$listen_host:8081",
+    `${maxLengthHostname}..:8081`,
+    `${overlongHostname}:8081`,
+  ]) {
+    invalidFixtures.push([
+      `非法 listen endpoint ${endpoint}`,
+      withListenEndpoint(endpoint),
+    ]);
+  }
+  invalidFixtures.push(["listen 缺少 endpoint", withListenDirective("listen;")]);
+  invalidFixtures.push([
+    "未知 listen 参数",
+    withListenDirective("listen 8081 unknown_parameter;"),
+  ]);
+  invalidFixtures.push([
+    "非法 ipv6only 参数值",
+    withListenDirective("listen [::]:8081 ipv6only=maybe;"),
+  ]);
+  invalidFixtures.push([
+    "重复 ipv6only 参数键",
+    withListenDirective("listen [::]:8081 ipv6only=on ipv6only=off;"),
+  ]);
+  invalidFixtures.push([
+    "非 IPv6 endpoint 使用 ipv6only",
+    withListenDirective("listen 8081 ipv6only=on;"),
+  ]);
+  invalidFixtures.push([
+    "非 8081 非法 endpoint",
+    insertBeforeBlockClose(
+      nginxConfig,
+      resolved.server,
+      "\n  listen http://localhost:8080;\n",
+    ),
+  ]);
+  for (const endpoint of ["[fe80::1%eth0]:8080", "[fe80::1%25eth0]:8080"]) {
+    invalidFixtures.push([
+      `额外监听拒绝 IPv6 zone ${endpoint}`,
+      withAdditionalListenEndpoint(endpoint),
+    ]);
+  }
+  for (const endpoint of [" 8081 ", "localhost:8081 "]) {
+    invalidFixtures.push([
+      `引号内首尾空白 endpoint ${JSON.stringify(endpoint)}`,
+      withListenEndpoint(JSON.stringify(endpoint)),
+    ]);
+  }
+  invalidFixtures.push([
+    "引号内参数不可混入 endpoint",
+    withListenDirective('listen "localhost:8081 default_server";'),
+  ]);
+  invalidFixtures.push([
+    "location 内第二个 8081 监听",
+    insertBeforeBlockClose(
+      nginxConfig,
+      resolved.server,
+      "\n  location = /__nested_listen_fixture__ {\n    listen 8081;\n  }\n",
+    ),
+  ]);
+  invalidFixtures.push(["配置根级第二个 8081 监听", `${nginxConfig}\nlisten 8081;\n`]);
+  invalidFixtures.push(["外层块包裹唯一可信 server", `http {\n${nginxConfig}\n}\n`]);
+
+  for (const [name, fixture] of invalidFixtures) {
+    assert.notEqual(fixture, nginxConfig, `${name} fixture 必须真实改变配置`);
+    assert.throws(
+      () => validateControlledImageCsp(fixture),
+      undefined,
+      `${name} 必须被 CSP 合同拒绝`,
+    );
+  }
+
+  const positiveFixtures = [
+    ...[
+      "0.0.0.0:8081",
+      "127.0.0.1:8081",
+      "*:8081",
+      "localhost:8081",
+      "edge.example.com:8081",
+      "[::]:8081",
+      "[2001:db8::1]:8081",
+    ].map((endpoint) => [
+      `唯一等价监听 ${endpoint}`,
+      withListenEndpoint(endpoint),
+    ]),
+    ["引号 hostname 监听", withListenEndpoint(JSON.stringify("localhost:8081"))],
+    [
+      "引号 hostname 与独立参数",
+      withListenDirective('listen "localhost:8081" default_server;'),
+    ],
+    [
+      "允许的无值 listen 参数",
+      withListenDirective("listen 8081 default_server reuseport ssl http2 bind;"),
+    ],
+    [
+      "允许的 IPv6 ipv6only 参数",
+      withListenDirective("listen [::]:8081 ipv6only=on;"),
+    ],
+    ...["127.0.0.1", "localhost", "[2001:db8::1]", "*"].map((endpoint) => [
+      `额外 address-only 监听 ${endpoint} 默认端口 80`,
+      withAdditionalListenEndpoint(endpoint),
+    ]),
+    [
+      "253 字符 hostname 加单个尾点",
+      withListenEndpoint(`${maxLengthHostname}.:8081`),
+    ],
+  ];
+  if (resolved.map) {
+    const specialPolicy = resolved.policies.find(
+      (entry) => entry.selector !== "default",
+    );
+    assert.ok(specialPolicy, "当前 CSP map 必须保留路径特例正例");
+    positiveFixtures.push([
+      "selector 前置注释",
+      `${nginxConfig.slice(0, specialPolicy.selectorToken.start)}# selector fixture\n  ${nginxConfig.slice(specialPolicy.selectorToken.start)}`,
+    ]);
+    positiveFixtures.push([
+      "引号 selector",
+      replaceRange(
+        nginxConfig,
+        specialPolicy.selectorToken,
+        JSON.stringify(specialPolicy.selector),
+      ),
+    ]);
+    const escapedSelector = specialPolicy.selector.replace("/", "\\/");
+    assert.notEqual(escapedSelector, specialPolicy.selector, "转义 selector fixture 必须可构造");
+    positiveFixtures.push([
+      "转义 selector",
+      replaceRange(nginxConfig, specialPolicy.selectorToken, escapedSelector),
+    ]);
+
+    const literalHeader = replaceRange(
+      nginxConfig,
+      resolved.header.args[1],
+      JSON.stringify(resolved.policy),
+    );
+    const legacyLiteralFixture = replaceRange(literalHeader, resolved.map, "");
+    positiveFixtures.push(["旧字面量 CSP header", legacyLiteralFixture]);
+  }
+  for (const [name, fixture] of positiveFixtures) {
+    assert.notEqual(fixture, nginxConfig, `${name} fixture 必须真实改变配置`);
+    assert.doesNotThrow(
+      () => validateControlledImageCsp(fixture),
+      `${name} 必须被 CSP 合同接受`,
+    );
+  }
+  console.log(
+    `    ↳ ${invalidFixtures.length}/${invalidFixtures.length} 个负向变异被拒绝，${positiveFixtures.length}/${positiveFixtures.length} 个等价正例被接受；全部 changed=true`,
   );
 });
 

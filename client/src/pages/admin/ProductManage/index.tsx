@@ -7,7 +7,6 @@ import {
   Dropdown,
   Input,
   Pagination,
-  Result,
   Select,
   Space,
 } from "antd";
@@ -15,7 +14,6 @@ import {
   DownOutlined,
   InfoCircleOutlined,
   PlusOutlined,
-  ReloadOutlined,
 } from "@ant-design/icons";
 import {
   categoryApi,
@@ -28,6 +26,11 @@ import {
   ADMIN_COPY,
   getSafeAdminErrorMessage,
 } from "@/constants/adminCopy";
+import AdminPageHeader from "@/components/common/AdminPageHeader";
+import {
+  AdminErrorState,
+  AdminLoadingState,
+} from "@/components/common/AdminDataStates";
 import ProductManageTable from "./ProductManageTable";
 import {
   statusMeta,
@@ -67,7 +70,7 @@ function getProductActionErrorMessage(error: unknown, action: string): string {
   if (status && status >= 500) {
     return `${action}未完成：服务端暂时无法处理，请稍后重试；若持续失败，请联系管理员。`;
   }
-  return `${action}未完成：网络连接或服务发生异常，请检查网络后重试。`;
+  return `${action}未完成：发生未知异常，请稍后重试；若持续失败，请联系管理员。`;
 }
 
 export default function ProductManage() {
@@ -94,6 +97,7 @@ export default function ProductManage() {
   >([]);
   const [selectedIds, setSelectedIds] = useState<Key[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [countsAvailable, setCountsAvailable] = useState(false);
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
   const [pendingProductId, setPendingProductId] = useState<number | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
@@ -162,6 +166,7 @@ export default function ProductManage() {
       const response = await productApi.getCounts();
       const data = unwrapResponse<Record<string, number>>(response);
       setCounts(data || {});
+      setCountsAvailable(true);
     } catch (error: unknown) {
       reportUnexpectedProductActionError(error, "加载统计数量");
       message.error(
@@ -171,6 +176,7 @@ export default function ProductManage() {
         ),
       );
       setCounts({});
+      setCountsAvailable(false);
     }
   }, [message]);
 
@@ -211,7 +217,7 @@ export default function ProductManage() {
         setError(
           getSafeAdminErrorMessage(
             requestError,
-            "商品数据加载失败，请检查网络后重新加载。",
+            "商品数据加载失败，请稍后重新加载。",
           ),
         );
         setProducts([]);
@@ -358,9 +364,9 @@ export default function ProductManage() {
   // 危险/不可逆操作统一走 App 上下文 modal（Dropdown 嵌套 Popconfirm 会因 menu 关闭而失效）
   const confirmArchive = (product: Product) =>
     modal.confirm({
-      title: "移入回收站",
-      content: `将「${product.name}」移入回收站？之后可从回收站恢复。`,
-      okText: "移入",
+      title: `将“${product.name}”移入回收站？`,
+      content: "移入后客户将无法看到该商品，可稍后从回收站恢复。",
+      okText: "确认移入回收站",
       cancelText: "取消",
       onOk: () => archiveProduct(product),
     });
@@ -414,12 +420,14 @@ export default function ProductManage() {
       message.destroy("batch-status");
       if (failed.length === 0) {
         message.success(`已处理 ${succeeded.length} 件商品`);
+        setSelectedIds([]);
       } else if (succeeded.length > 0) {
-        message.warning(`成功 ${succeeded.length} 件，失败 ${failed.length} 件。${getProductActionErrorMessage(failed[0].error, "批量状态更新")}`);
+        setSelectedIds(failed.map(({ id }) => id));
+        message.warning(`${ADMIN_COPY.feedback.partialSuccess(succeeded.length, selectedIds.length)}${getProductActionErrorMessage(failed[0].error, "批量状态更新")}`);
       } else {
+        setSelectedIds(failed.map(({ id }) => id));
         message.error(getProductActionErrorMessage(failed[0]?.error, "批量状态更新"));
       }
-      setSelectedIds([]);
       await Promise.all([loadProducts(), loadCounts()]);
     } finally {
       message.destroy("batch-status");
@@ -460,7 +468,7 @@ export default function ProductManage() {
       if (failed.length === 0) {
         message.success(`已将 ${succeeded.length} 件商品移入回收站，可在回收站中恢复。`);
       } else if (succeeded.length > 0) {
-        message.warning(`成功 ${succeeded.length} 件，失败 ${failed.length} 件。${getProductActionErrorMessage(failed[0].error, "批量移入回收站")}`);
+        message.warning(`${ADMIN_COPY.feedback.partialSuccess(succeeded.length, succeeded.length + failed.length)}${getProductActionErrorMessage(failed[0].error, "批量移入回收站")}`);
       } else {
         message.error(getProductActionErrorMessage(failed[0]?.error, "批量移入回收站"));
       }
@@ -612,15 +620,19 @@ export default function ProductManage() {
   };
 
   const tabs = [
-    { key: "all", label: `全部（${counts.all ?? total}）` },
+    { key: "all", label: `全部（${countsAvailable ? counts.all ?? total : "—"}）` },
     ...statuses.map((status) => ({
       key: status,
-      label: `${statusMeta[status].label}（${counts[status] ?? 0}）`,
+      label: `${statusMeta[status].label}（${countsAvailable ? counts[status] ?? 0 : "—"}）`,
     })),
   ];
 
   return (
     <div className="product-manage">
+      <AdminPageHeader
+        title="商品管理"
+        subtitle="维护商品资料、销售方式、上架状态与回收站。"
+      />
       <div className="product-manage__tabs" role="tablist" aria-label="商品状态">
         {tabs.map((tab) => {
           const selected = (activeStatus || "all") === tab.key;
@@ -645,21 +657,21 @@ export default function ProductManage() {
         {/* 违规商品维度暂无真实数据来源，入口已移除；接入审核体系后再恢复，避免假计数误导运营 */}
       </div>
 
-      <div className="product-manage__quality-notice">
+      <div className="product-manage__quality-notice" role="status">
         当前页资料不完整商品（{qualityIssueCount}） <InfoCircleOutlined aria-hidden="true" />
       </div>
 
       <div className="product-manage__filters">
         <div className="product-manage__filter-fields">
           <Input
-            placeholder="商品标题"
+            placeholder="搜索商品标题"
             value={titleKeyword}
             allowClear
             onChange={(event) => setTitleKeyword(event.target.value)}
             onPressEnter={search}
           />
           <Input
-            placeholder="商品 ID，多个 ID 以逗号或空格分隔"
+            placeholder="搜索商品 ID，多个 ID 以逗号或空格分隔"
             value={codeKeyword}
             allowClear
             onChange={(event) => setCodeKeyword(event.target.value)}
@@ -699,6 +711,8 @@ export default function ProductManage() {
               type="text"
               className="product-manage__text-button"
               onClick={() => setIsAdvancedOpen((value) => !value)}
+              aria-expanded={isAdvancedOpen}
+              aria-controls="product-advanced-filters"
             >
               {isAdvancedOpen ? "收起" : "展开"} <DownOutlined rotate={isAdvancedOpen ? 180 : 0} />
             </Button>
@@ -707,7 +721,7 @@ export default function ProductManage() {
       </div>
 
       {isAdvancedOpen && (
-        <div className="product-manage__advanced-filters">
+        <div id="product-advanced-filters" className="product-manage__advanced-filters">
           <Select
             placeholder="店铺分类"
             value={categoryId}
@@ -771,19 +785,13 @@ export default function ProductManage() {
       </div>
 
       {error ? (
-        <Result
-          status="error"
-          title="商品加载失败"
-          subTitle={error}
-          extra={
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => void loadProducts()}
-            >
-              {ADMIN_COPY.actions.retry}
-            </Button>
-          }
+        <AdminErrorState
+          subject="商品"
+          message={error}
+          onRetry={() => void loadProducts()}
         />
+      ) : loading && products.length === 0 ? (
+        <AdminLoadingState subject="商品" />
       ) : (
         <ProductManageTable
           products={visibleProducts}

@@ -36,6 +36,17 @@ export class UpdateDynamicTemplateDraftDto {
   @IsString()
   @MaxLength(500)
   versionNote?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  restoreFromVersion?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  restoreFromChecksum?: string;
 }
 
 export class SaveDynamicTemplateAsDto {

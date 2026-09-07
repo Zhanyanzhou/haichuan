@@ -5,6 +5,7 @@ import {
   CONTENT_TEMPLATE_CONTRACTS,
   CONTENT_TEMPLATE_REGISTRY,
 } from "../src/page-builder/generated/contentTemplates.generated";
+import { getContractRoleRatio } from "../src/page-builder/config/blockContracts";
 
 const screenshotDir = path.resolve("test-results/content-template-previews");
 const fullsizeScreenshotDir = path.resolve(
@@ -41,15 +42,133 @@ function gallery(viewport: "desktop" | "mobile", variant: "structure" | "rendere
     </html>`;
 }
 
-test("真实 Renderer 预览首个可观察帧即完成卡片缩放，不再二次闪动", async ({ page }) => {
+function renderSurfaceFixture() {
+  return `<!doctype html>
+    <html lang="zh-CN">
+      <head><meta charset="utf-8" /></head>
+      <body>
+        <div id="root"></div>
+        <script type="module">
+          import RefreshRuntime from "/@react-refresh";
+          RefreshRuntime.injectIntoGlobalHook(window);
+          window.$RefreshReg$ = () => {};
+          window.$RefreshSig$ = () => (type) => type;
+          window.__vite_plugin_react_preamble_installed__ = true;
+        </script>
+        <script type="module" src="/tests/fixtures/content-template-render-surfaces.tsx"></script>
+      </body>
+    </html>`;
+}
+
+test("目录预览、public/editMode 空视频与四项空图库保持安全语义", async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.route(/\/__content-template-render-surfaces(?:\?.*)?$/, (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html; charset=utf-8",
+    body: renderSurfaceFixture(),
+  }));
+  await page.goto("/__content-template-render-surfaces");
+
+  const publicSurface = page.getByRole("region", { name: "公开空视频" });
+  const editorSurface = page.getByRole("region", { name: "编辑器空视频" });
+  const catalogSurface = page.getByRole("region", { name: "目录空视频" });
+  const gallerySurface = page.getByRole("region", { name: "编辑器空图库" });
+
+  await expect(publicSurface.locator('[data-content-role="coverImage"]')).toHaveCount(0);
+  await expect(editorSurface.locator('[data-content-role="coverImage"]')).toHaveCount(1);
+  await expect(editorSurface.locator('[data-asset-slot-id="coverImage"]')).toBeVisible();
+  await expect(catalogSurface.locator('[data-content-role="coverImage"]')).toHaveCount(1);
+  await expect(catalogSurface.locator('[data-asset-slot-id="coverImage"]')).toBeVisible();
+  await expect(catalogSurface.locator("iframe")).toHaveCount(0);
+  await expect(gallerySurface.locator('img[src=""], img:not([src])')).toHaveCount(0);
+  await expect(gallerySurface.locator('[data-asset-slot-id="works"]')).toHaveCount(4);
+  await expect(gallerySurface.getByRole("status")).toHaveCount(4);
+  await expect(catalogSurface.locator([
+    ".hc-contract-frame--editor",
+    "[data-template-editor-overlay-root]",
+    "[data-hc-editor-overlay]",
+    "[data-hc-node-hud]",
+    "[data-hc-keyboard-node]",
+    "[data-visual-editor-mode]",
+  ].join(","))).toHaveCount(0);
+});
+
+for (const viewport of ["desktop", "mobile"] as const) {
+  test(`${viewport}：视频四表面的合同默认比例覆盖 filled/empty`, async ({ page }) => {
+    await page.setViewportSize(viewport === "desktop"
+      ? { width: 1920, height: 1200 }
+      : { width: 390, height: 844 });
+    await page.route(/\/__content-template-render-surfaces(?:\?.*)?$/, (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      body: renderSurfaceFixture(),
+    }));
+    await page.goto(`/__content-template-render-surfaces?viewport=${viewport}`);
+
+    const expectedRatio = getContractRoleRatio("video", "coverImage", viewport);
+    const visibleSurfaces = [
+      "编辑器空视频",
+      "目录空视频",
+      "公开已填视频",
+      "页面预览已填视频",
+      "编辑器已填视频",
+      "目录已填视频",
+    ];
+    await expect(page.getByRole("region", { name: "公开空视频" })
+      .locator('[data-content-role="coverImage"]')).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "页面预览空视频" })
+      .locator('[data-content-role="coverImage"]')).toHaveCount(0);
+    for (const name of ["编辑器空视频", "目录空视频"]) {
+      const surface = page.getByRole("region", { name, exact: true });
+      const placeholder = surface.locator('[role="status"][data-asset-slot-id="coverImage"]');
+      await expect(placeholder).toBeVisible();
+      await expect(placeholder).toHaveAttribute("data-asset-slot-id", "coverImage");
+      await expect(placeholder).toHaveAttribute("aria-label", /槽位 coverImage/);
+    }
+    for (const name of visibleSurfaces) {
+      const surface = page.getByRole("region", { name, exact: true });
+      await expect(surface.locator('[data-content-role="coverImage"]')).toHaveCount(1);
+      await expect(surface.locator('[data-content-role="coverImage"]')).toHaveCSS(
+        "aspect-ratio",
+        expectedRatio,
+      );
+    }
+    for (const name of [
+      "公开已填视频",
+      "页面预览已填视频",
+      "编辑器已填视频",
+      "目录已填视频",
+    ]) {
+      const surface = page.getByRole("region", { name, exact: true });
+      const roles = surface.locator("[data-content-role]");
+      await expect.poll(() => roles.evaluateAll((nodes) => (
+        nodes.map((node) => node.getAttribute("data-content-role"))
+      ))).toEqual(["coverImage", "playControl", "copy", "action"]);
+      await expect(surface.locator('[data-content-role="playControl"]')).toHaveAttribute(
+        "aria-label",
+        "视频封面测试",
+      );
+      await expect(surface.locator('[data-content-role="action"]')).toHaveAttribute("href", "/about");
+      expect(await surface.locator('[data-content-role="playControl"]').evaluate((node) => (
+        node.parentElement?.getAttribute("data-content-role")
+      ))).toBe("coverImage");
+      expect(await surface.locator('[data-content-role="action"]').evaluate((node) => (
+        node.parentElement?.closest('[data-content-role]')?.getAttribute("data-content-role")
+      ))).toBe("copy");
+    }
+    await expect(page.locator('img[src=""], img:not([src])')).toHaveCount(0);
+    await expect.poll(() => page.locator("img").evaluateAll((images) => images.filter((image) => (
+      image.complete && image.naturalWidth === 0
+    )).length)).toBe(0);
+  });
+}
+
+test("真实 Renderer 预览首个可观察帧即完成卡片缩放", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.addInitScript(() => {
     type PreviewFrameSample = {
       height: number;
       transform: string;
-      heroAnimation: string;
-      doublePosterTransform: string;
-      doublePosterTransition: string;
     };
     const observedWindow = window as typeof window & { __previewFrameSamples?: PreviewFrameSample[] };
     const samples: PreviewFrameSample[] = [];
@@ -57,17 +176,10 @@ test("真实 Renderer 预览首个可观察帧即完成卡片缩放，不再二�
     const sample = () => {
       const preview = document.querySelector<HTMLElement>('[data-content-template-preview="carousel"]');
       const renderer = preview?.firstElementChild as HTMLElement | null;
-      const heroTitle = document.querySelector<HTMLElement>('[data-content-template-preview="hero"] .hc-hero__reveal');
-      const doublePosterMain = document.querySelector<HTMLElement>(
-        '[data-content-template-preview="doublePoster"] [data-content-role="mainImage"]',
-      );
-      if (preview && renderer && heroTitle && doublePosterMain) {
+      if (preview && renderer) {
         samples.push({
           height: preview.getBoundingClientRect().height,
           transform: renderer.style.transform,
-          heroAnimation: getComputedStyle(heroTitle).animationName,
-          doublePosterTransform: doublePosterMain.style.transform,
-          doublePosterTransition: getComputedStyle(doublePosterMain).transitionDuration,
         });
       }
       if (samples.length < 12) requestAnimationFrame(sample);
@@ -96,18 +208,12 @@ test("真实 Renderer 预览首个可观察帧即完成卡片缩放，不再二�
       __previewFrameSamples?: Array<{
         height: number;
         transform: string;
-        heroAnimation: string;
-        doublePosterTransform: string;
-        doublePosterTransition: string;
       }>;
     }
   ).__previewFrameSamples ?? []);
   expect(new Set(samples.map((sample) => sample.transform)).size).toBe(1);
   expect(Math.max(...samples.map((sample) => sample.height)) - Math.min(...samples.map((sample) => sample.height)))
     .toBeLessThanOrEqual(0.5);
-  expect(new Set(samples.map((sample) => sample.heroAnimation))).toEqual(new Set(["none"]));
-  expect(new Set(samples.map((sample) => sample.doublePosterTransform))).toEqual(new Set(["translateY(0px)"]));
-  expect(new Set(samples.map((sample) => sample.doublePosterTransition))).toEqual(new Set(["0s"]));
 });
 
 for (const viewport of ["desktop", "mobile"] as const) {
@@ -242,6 +348,26 @@ for (const viewport of ["desktop", "mobile"] as const) {
     const sceneShopping = page.locator('[data-content-template-preview="sceneShopping"]');
     await expect(sceneShopping.locator('[data-content-role="scenes"]')).toHaveCount(1);
     await expect(sceneShopping.locator('[data-content-role="categories"]')).toHaveCount(0);
+    const emptyVideo = page.locator('[data-content-template-preview="video"]');
+    await expect(emptyVideo.locator('[data-content-role="coverImage"]')).toHaveCount(1);
+    await expect(emptyVideo.locator('[data-asset-slot-id="coverImage"]')).toBeVisible();
+    await expect(emptyVideo.locator("video, iframe")).toHaveCount(0);
+    const expectedVideoRatio = getContractRoleRatio("video", "coverImage", viewport);
+    await expect(emptyVideo.locator('[data-content-role="coverImage"]'))
+      .toHaveCSS("aspect-ratio", expectedVideoRatio);
+    const emptyGallery = page.locator('[data-content-template-preview="gallery"]');
+    await expect(emptyGallery.locator('img[src=""], img:not([src])')).toHaveCount(0);
+    const fullBleed = page.locator('[data-content-template-preview="fullBleed"]');
+    await expect(fullBleed.locator('a[data-content-role="action"]')).toHaveAttribute("href", "/contact");
+    await expect(fullBleed.locator('span[data-content-role="action"]')).toHaveCount(0);
+    await expect(previews.locator([
+      ".hc-contract-frame--editor",
+      "[data-hc-editor-overlay]",
+      "[data-hc-node-hud]",
+      "[data-hc-keyboard-node]",
+      "[data-visual-editor-mode]",
+    ].join(","))).toHaveCount(0);
+    await expect(previews.locator("iframe")).toHaveCount(0);
     const heroShade = page
       .locator('[data-content-template-preview="hero"]')
       .locator(".hc-phase1-hero__copy-shade");

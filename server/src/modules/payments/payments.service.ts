@@ -191,11 +191,14 @@ export class PaymentsService {
         '在线资金交易当前已关闭，不能发起新的支付网关交易',
       );
     }
+    if (method === 'alipay') {
+      throw new ServiceUnavailableException(
+        '支付宝主动查单与确定关单尚未接入，为避免超时交易永久悬挂，当前暂停新建支付宝支付',
+      );
+    }
     if (!this.paymentGateway.isAvailable(method)) {
       throw new ServiceUnavailableException(
-        method === 'alipay'
-          ? '支付宝通道未配置（ALIPAY_APP_ID/ALIPAY_PRIVATE_KEY/ALIPAY_PUBLIC_KEY），请先由运维接入'
-          : '微信支付通道未配置（AppID、商户号、商户证书序列号、平台证书、商户私钥、APIv3 Key），请先由运维接入',
+        '微信支付通道未配置（AppID、商户号、商户证书序列号、平台证书、商户私钥、APIv3 Key），请先由运维接入',
       );
     }
     if (
@@ -219,7 +222,10 @@ export class PaymentsService {
       );
       if (locked.length === 0) throw new NotFoundException('订单不存在');
 
-      const order = await tx.order.findUnique({ where: { id: orderId } });
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { paymentPlans: { select: { id: true } } },
+      });
       if (!order) throw new NotFoundException('订单不存在');
       if (
         context.customerId !== undefined &&
@@ -230,52 +236,146 @@ export class PaymentsService {
       if (order.status !== 'PENDING_PAYMENT') {
         throw new BadRequestException('当前订单状态不支持发起在线收款');
       }
-
-      const pendingPayment = await tx.payment.findFirst({
-        where: {
-          orderId,
-          status: 'PENDING',
-        },
-        select: {
-          id: true,
-          paymentNo: true,
-          amount: true,
-          method: true,
-          status: true,
-        },
-      });
-
-      const confirmedPayments = await tx.payment.findMany({
-        where: {
-          orderId,
-          status: { in: ['PAID', 'PARTIAL_REFUND', 'REFUNDED'] },
-        },
-        select: { amount: true },
-      });
-      const paidCents = confirmedPayments.reduce(
-        (sum, payment) => sum + this.moneyToCents(payment.amount),
-        0,
-      );
-      const dueCents = this.moneyToCents(order.finalAmount) - paidCents;
-      if (dueCents <= 0) {
-        throw new BadRequestException('订单已收齐款项，无需再次收款');
-      }
-
-      if (pendingPayment && pendingPayment.method !== method) {
-        throw new BadRequestException(
-          `订单已有 ${pendingPayment.method} 待支付交易 ${pendingPayment.paymentNo}，请先查询或关闭该交易`,
+      const isPlanOrder =
+        order.quotationVersionId != null || (order.paymentPlans?.length ?? 0) > 0;
+      if (isPlanOrder) {
+        await tx.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM payment_plans WHERE order_id = ${orderId} FOR UPDATE`,
         );
       }
-      if (
-        pendingPayment &&
-        this.moneyToCents(pendingPayment.amount) !== dueCents
-      ) {
-        throw new BadRequestException(
-          `待支付交易 ${pendingPayment.paymentNo} 的金额与当前应收不一致，请先关闭并对账`,
-        );
-      }
+      let payment;
+      let dueCents: number;
+      let reused = false;
 
-      const payment = pendingPayment ?? (await tx.payment.create({
+      if (isPlanOrder) {
+        const plans = await tx.paymentPlan.findMany({
+          where: { orderId },
+          include: {
+            installments: {
+              orderBy: { sequence: 'asc' },
+              include: { payment: true },
+            },
+          },
+        });
+        if (plans.length !== 1 || plans[0].status !== 'ACTIVE') {
+          throw new BadRequestException('订单缺少唯一的生效付款计划，不能发起在线收款');
+        }
+        const plan = plans[0];
+        const installmentTotalCents = plan.installments.reduce(
+          (sum, installment) => sum + this.moneyToCents(installment.amount),
+          0,
+        );
+        if (
+          plan.currency !== order.currency ||
+          this.moneyToCents(plan.totalAmount) !== this.moneyToCents(order.finalAmount) ||
+          installmentTotalCents !== this.moneyToCents(plan.totalAmount) ||
+          plan.installments.some((installment) => installment.status === 'WAIVED') ||
+          (order.quotationVersionId != null &&
+            plan.quotationVersionId !== order.quotationVersionId)
+        ) {
+          throw new BadRequestException('付款计划金额或币种与订单不一致，不能发起在线收款');
+        }
+        const nextIndex = plan.installments.findIndex(
+          (installment) => installment.status === 'PENDING',
+        );
+        if (nextIndex < 0) {
+          throw new BadRequestException('付款计划没有可支付的下一期');
+        }
+        if (
+          plan.installments
+            .slice(0, nextIndex)
+            .some((installment) => installment.status !== 'PAID')
+        ) {
+          throw new BadRequestException('付款计划前序分期尚未完成，不能跳期支付');
+        }
+        const installment = plan.installments[nextIndex];
+        dueCents = this.moneyToCents(installment.amount);
+        if (dueCents <= 0) {
+          throw new BadRequestException('下一期付款金额无效');
+        }
+        const pendingPayments = await tx.payment.findMany({
+          where: { orderId, status: 'PENDING' },
+          take: 2,
+        });
+        if (installment.paymentId !== null) {
+          const boundPayment = installment.payment;
+          if (
+            !boundPayment ||
+            boundPayment.status !== 'PENDING' ||
+            boundPayment.orderId !== orderId ||
+            boundPayment.method !== method ||
+            this.moneyToCents(boundPayment.amount) !== dueCents ||
+            pendingPayments.length !== 1 ||
+            pendingPayments[0].id !== boundPayment.id
+          ) {
+            throw new BadRequestException('下一期已绑定不一致的付款记录，请先完成对账');
+          }
+          payment = boundPayment;
+          reused = true;
+        } else {
+          if (pendingPayments.length > 0) {
+            throw new BadRequestException(
+              `订单已有待处理付款 ${pendingPayments[0].paymentNo}，但未正确绑定下一期，请先完成对账`,
+            );
+          }
+          payment = await tx.payment.create({
+            data: {
+              paymentNo: this.createPaymentNo(),
+              orderId,
+              amount: installment.amount,
+              method,
+              type:
+                plan.installments.length === 1
+                  ? 'FULL'
+                  : installment.sequence === 1
+                    ? 'DEPOSIT'
+                    : 'BALANCE',
+              status: 'PENDING',
+            },
+          });
+          const bound = await tx.paymentPlanInstallment.updateMany({
+            where: {
+              id: installment.id,
+              paymentPlanId: plan.id,
+              status: 'PENDING',
+              paymentId: null,
+            },
+            data: { paymentId: payment.id },
+          });
+          if (bound.count !== 1) {
+            throw new BadRequestException('下一期付款状态已变化，请刷新后重试');
+          }
+        }
+      } else {
+        const pendingPayment = await tx.payment.findFirst({
+          where: { orderId, status: 'PENDING' },
+        });
+        const confirmedPayments = await tx.payment.findMany({
+          where: {
+            orderId,
+            status: { in: ['PAID', 'PARTIAL_REFUND', 'REFUNDED'] },
+          },
+          select: { amount: true },
+        });
+        const paidCents = confirmedPayments.reduce(
+          (sum, confirmed) => sum + this.moneyToCents(confirmed.amount),
+          0,
+        );
+        dueCents = this.moneyToCents(order.finalAmount) - paidCents;
+        if (dueCents <= 0) {
+          throw new BadRequestException('订单已收齐款项，无需再次收款');
+        }
+        if (pendingPayment && pendingPayment.method !== method) {
+          throw new BadRequestException(
+            `订单已有 ${pendingPayment.method} 待支付交易 ${pendingPayment.paymentNo}，请先查询或关闭该交易`,
+          );
+        }
+        if (pendingPayment && this.moneyToCents(pendingPayment.amount) !== dueCents) {
+          throw new BadRequestException(
+            `待支付交易 ${pendingPayment.paymentNo} 的金额与当前应收不一致，请先关闭并对账`,
+          );
+        }
+        payment = pendingPayment ?? (await tx.payment.create({
           data: {
             paymentNo: this.createPaymentNo(),
             orderId,
@@ -285,6 +385,8 @@ export class PaymentsService {
             status: 'PENDING',
           },
         }));
+        reused = Boolean(pendingPayment);
+      }
       await tx.order.update({
         where: { id: orderId },
         data: { paymentMethod: method },
@@ -306,7 +408,7 @@ export class PaymentsService {
         payment,
         dueCents,
         timeExpire: reservation.expiresAt.toISOString(),
-        reused: Boolean(pendingPayment),
+        reused,
       };
     });
 
@@ -419,9 +521,6 @@ export class PaymentsService {
       );
       return 'ATTENTION';
     }
-    if (['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(payment.status)) {
-      return 'PAID';
-    }
     if (
       !fact.amountYuan ||
       this.moneyToCents(fact.amountYuan) !== this.moneyToCents(payment.amount)
@@ -445,6 +544,46 @@ export class PaymentsService {
       );
       return 'ATTENTION';
     }
+    if (
+      payment.gatewayTradeNo &&
+      payment.gatewayTradeNo !== fact.gatewayTradeNo
+    ) {
+      this.logger.error(
+        `${provider} ${source} 渠道交易号与既存付款事实不一致：${payment.paymentNo}`,
+      );
+      await this.setAttentionReviewNoteIfEmpty(
+        payment.id,
+        "渠道交易号与既存付款事实不一致，请人工对账",
+      );
+      return "ATTENTION";
+    }
+    const reusedGatewayTrade = await this.prisma.payment.findFirst({
+      where: {
+        id: { not: payment.id },
+        gatewayTradeNo: fact.gatewayTradeNo,
+      },
+      select: { id: true, paymentNo: true },
+    });
+    if (reusedGatewayTrade) {
+      this.logger.error(
+        `${provider} ${source} 渠道交易号已绑定另一付款：${reusedGatewayTrade.paymentNo}`,
+      );
+      await this.setAttentionReviewNoteIfEmpty(
+        payment.id,
+        "渠道交易号已绑定另一付款，请人工对账",
+      );
+      return "ATTENTION";
+    }
+    if (['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(payment.status)) {
+      if (!payment.gatewayTradeNo) {
+        await this.setAttentionReviewNoteIfEmpty(
+          payment.id,
+          "已付款记录缺少渠道交易号，请人工对账",
+        );
+        return "ATTENTION";
+      }
+      return 'PAID';
+    }
 
     try {
       await this.ordersService.confirmPaymentSettlement(
@@ -462,10 +601,23 @@ export class PaymentsService {
     } catch (error) {
       const current = await this.prisma.payment.findUnique({
         where: { id: payment.id },
-        select: { status: true },
+        select: { status: true, gatewayTradeNo: true },
       });
-      if (current && ['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(current.status)) {
+      if (
+        current &&
+        ['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(current.status) &&
+        current.gatewayTradeNo === fact.gatewayTradeNo
+      ) {
         return 'PAID';
+      }
+      if (
+        current &&
+        ['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(current.status)
+      ) {
+        await this.setAttentionReviewNoteIfEmpty(
+          payment.id,
+          '并发核销后的渠道交易号与本次渠道事实不一致，请人工对账',
+        );
       }
       this.logger.error(
         `${provider} ${source} 核销异常（${payment.paymentNo}）：${error instanceof Error ? error.message : error}`,
@@ -492,14 +644,13 @@ export class PaymentsService {
       return state === 'PAID' ? 'PAID' as const : 'ATTENTION' as const;
     }
     if (['CLOSED', 'REVOKED', 'PAYERROR'].includes(query.state)) {
-      await this.prisma.payment.updateMany({
-        where: { id: payment.id, status: 'PENDING' },
-        data: {
-          status: 'FAILED',
-          reviewNote: `微信支付状态：${query.state}`,
-        },
-      });
-      return 'FAILED' as const;
+      const failed = await this.ordersService.failPendingPaymentAttempt(
+        payment.id,
+        `微信支付状态：${query.state}`,
+        { type: 'SYSTEM' },
+        { expectedMethod: 'wechat' },
+      );
+      return this.customerPaymentState(failed?.status ?? 'FAILED');
     }
     if (query.state === 'NOTPAY' || query.state === 'USERPAYING') {
       return 'PENDING' as const;
@@ -557,11 +708,16 @@ export class PaymentsService {
     }
     if (query.state === 'NOTPAY') {
       await this.paymentGateway.closePayment('wechat', payment.paymentNo);
-      await this.prisma.payment.updateMany({
-        where: { id: payment.id, status: 'PENDING' },
-        data: { status: 'FAILED', reviewNote: '客户结束本次微信支付，渠道关单成功' },
-      });
-      return { orderId: order.id, state: 'FAILED' as const };
+      const failed = await this.ordersService.failPendingPaymentAttempt(
+        payment.id,
+        '客户结束本次微信支付，渠道关单成功',
+        { type: 'CUSTOMER', id: customerId },
+        { expectedMethod: 'wechat' },
+      );
+      return {
+        orderId: order.id,
+        state: this.customerPaymentState(failed?.status ?? 'FAILED'),
+      };
     }
     if (reconciled === 'FAILED') return { orderId: order.id, state: 'FAILED' as const };
     throw new BadRequestException('当前渠道状态需要对账，暂不能关闭支付');
@@ -574,14 +730,30 @@ export class PaymentsService {
    */
   @Cron(CronExpression.EVERY_5_MINUTES)
   async reconcilePendingOnlinePayments() {
-    const cutoff = new Date(Date.now() - 5 * 60 * 1000);
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 5 * 60 * 1000);
     const pendingPayments = await this.prisma.payment.findMany({
       where: {
         status: 'PENDING',
         method: { in: [...ONLINE_PAYMENT_METHODS] },
         createdAt: { lt: cutoff },
       },
-      select: { id: true, paymentNo: true, method: true, status: true },
+      select: {
+        id: true,
+        paymentNo: true,
+        method: true,
+        status: true,
+        order: {
+          select: {
+            reservations: {
+              where: { consumedAt: null, releasedAt: null },
+              orderBy: { expiresAt: 'asc' },
+              take: 1,
+              select: { expiresAt: true },
+            },
+          },
+        },
+      },
       orderBy: { createdAt: 'asc' },
       take: 50,
     });
@@ -591,7 +763,24 @@ export class PaymentsService {
       if (payment.method !== 'wechat') continue;
       try {
         const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
-        const state = await this.applyCustomerQuery(payment, query);
+        let state;
+        const reservationExpiresAt = payment.order?.reservations?.[0]?.expiresAt;
+        if (
+          query.state === 'NOTPAY' &&
+          reservationExpiresAt &&
+          reservationExpiresAt.getTime() <= now.getTime()
+        ) {
+          await this.paymentGateway.closePayment('wechat', payment.paymentNo);
+          const failed = await this.ordersService.failPendingPaymentAttempt(
+            payment.id,
+            '库存保留到期且渠道确认未支付，系统关单成功',
+            { type: 'SYSTEM' },
+            { expectedMethod: 'wechat' },
+          );
+          state = this.customerPaymentState(failed?.status ?? 'FAILED');
+        } else {
+          state = await this.applyCustomerQuery(payment, query);
+        }
         if (state !== 'PENDING') reconciled += 1;
       } catch (error) {
         this.logger.warn(

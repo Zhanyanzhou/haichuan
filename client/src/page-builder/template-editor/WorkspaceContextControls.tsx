@@ -1,9 +1,4 @@
-import {
-  ArrowLeftOutlined,
-  ArrowRightOutlined,
-  AppstoreOutlined,
-  LayoutOutlined,
-} from "@ant-design/icons";
+import type { ReactNode } from "react";
 
 type WorkspaceMode = "page" | "template";
 
@@ -11,22 +6,25 @@ export default function WorkspaceContextControls({
   activeMode,
   canEnterTemplate = true,
   templateDisabledReason,
+  subjectLabel,
+  subjectValue,
+  status,
   onSelectPage,
   onSelectTemplate,
 }: {
   activeMode: WorkspaceMode;
   canEnterTemplate?: boolean;
   templateDisabledReason?: string;
+  subjectLabel?: string;
+  subjectValue?: string;
+  status?: ReactNode;
   onSelectPage?: () => void;
   onSelectTemplate?: () => void;
 }) {
   const currentLabel = activeMode === "page" ? "页面装修" : "模板设计";
-  const targetMode: WorkspaceMode = activeMode === "page" ? "template" : "page";
-  const targetLabel = targetMode === "template" ? "模板设计" : "页面装修";
-  const targetAction = targetMode === "template" ? "进入模板设计" : "返回页面装修";
-  const disabled = targetMode === "template" && !canEnterTemplate;
-  const onSelect = targetMode === "template" ? onSelectTemplate : onSelectPage;
-  const CurrentIcon = activeMode === "page" ? LayoutOutlined : AppstoreOutlined;
+  const subjectAriaLabel = subjectValue
+    ? `当前工作区：${currentLabel}，${subjectLabel ?? "当前对象"}：${subjectValue}`
+    : `当前工作区：${currentLabel}`;
 
   return (
     <div className="homepage-editor__toolbar-left-context">
@@ -35,36 +33,51 @@ export default function WorkspaceContextControls({
         role="group"
         aria-label="店铺装修工作模式切换"
         data-active-mode={activeMode}
+        data-current-label={currentLabel}
       >
         <div
-          className="template-editor__workspace-identity"
-          data-current-mode={activeMode}
-          aria-label={`当前工作区：${currentLabel}`}
+          className="template-editor__workspace-mode-switch"
+          aria-label={subjectAriaLabel}
         >
-          <span className="template-editor__workspace-identity-icon" aria-hidden="true">
-            <CurrentIcon />
-          </span>
-          <span className="template-editor__workspace-identity-copy">
-            <small>当前工作区</small>
-            <strong>{currentLabel}</strong>
-          </span>
+          <button
+            type="button"
+            className={`template-editor__workspace-navigation${activeMode === "page" ? " is-active" : ""}`}
+            data-mode="page"
+            aria-pressed={activeMode === "page"}
+            aria-current={activeMode === "page" ? "page" : undefined}
+            title={activeMode === "page" ? "当前界面：页面装修" : "返回页面装修"}
+            onClick={activeMode === "template" ? onSelectPage : undefined}
+          >
+            页面装修
+          </button>
+          <button
+            type="button"
+            className={`template-editor__workspace-navigation${activeMode === "template" ? " is-active" : ""}`}
+            data-mode="template"
+            aria-pressed={activeMode === "template"}
+            aria-current={activeMode === "template" ? "page" : undefined}
+            disabled={activeMode === "page" && !canEnterTemplate}
+            title={activeMode === "template"
+              ? "当前界面：模板设计"
+              : !canEnterTemplate
+                ? templateDisabledReason
+                : "进入模板设计"}
+            onClick={activeMode === "page" ? onSelectTemplate : undefined}
+          >
+            模板设计
+          </button>
         </div>
-
-        <span className="template-editor__workspace-context-divider" aria-hidden="true" />
-
-        <button
-          type="button"
-          className="template-editor__workspace-navigation"
-          data-target-mode={targetMode}
-          aria-label={targetLabel}
-          disabled={disabled}
-          title={disabled ? templateDisabledReason : `切换到${targetLabel}`}
-          onClick={onSelect}
-        >
-          {targetMode === "page" ? <ArrowLeftOutlined aria-hidden="true" /> : null}
-          <span>{targetAction}</span>
-          {targetMode === "template" ? <ArrowRightOutlined aria-hidden="true" /> : null}
-        </button>
+        {subjectValue ? (
+          <>
+            <span className="template-editor__workspace-context-divider" aria-hidden="true" />
+            <div className="template-editor__workspace-identity">
+              <span className="template-editor__workspace-identity-subject" title={subjectValue}>
+                {subjectValue}
+              </span>
+            </div>
+          </>
+        ) : null}
+        {status}
       </div>
     </div>
   );

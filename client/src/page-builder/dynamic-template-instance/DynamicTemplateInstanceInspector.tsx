@@ -15,7 +15,13 @@ import {
 import { objectPositionToPercent } from "../template-definition/imagePosition";
 import { useVisualEditorSession, type VisualNodeKind } from "../visual-editor/visualEditorSession";
 import { useResolvedDynamicTemplate } from "./registry";
-import type { DynamicTemplateInstanceProps } from "./types";
+import {
+  DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
+  dynamicTemplateVersionKey,
+  getDynamicTemplateInstanceEditorBlockId,
+  readResolvedDynamicTemplateDefinitions,
+  type DynamicTemplateInstanceProps,
+} from "./types";
 import DynamicTemplateUpgradePanel from "./DynamicTemplateUpgradePanel";
 import {
   promoteInstanceOverridesToTemplateDraft,
@@ -27,7 +33,6 @@ import ImageFocusField from "../inspector/controls/ImageFocusField";
 import InspectorFooterBar from "../inspector/InspectorFooterBar";
 import {
   getInspectorPublishIssues,
-  isPagePublishIssue,
   type PublishValidationIssue,
   type PublishValidationStatus,
 } from "../inspector/publishValidation";
@@ -224,6 +229,7 @@ export default function DynamicTemplateInstanceInspector({
   validationStatus,
   onRetryValidation,
   onOpenPageSettings,
+  onOpenPublishReview,
   canPromoteToTemplate = false,
   onPromoteToTemplate,
 }: {
@@ -233,6 +239,7 @@ export default function DynamicTemplateInstanceInspector({
   validationStatus?: PublishValidationStatus;
   onRetryValidation?: () => void;
   onOpenPageSettings?: (field?: string) => void;
+  onOpenPublishReview?: () => void;
   canPromoteToTemplate?: boolean;
   onPromoteToTemplate?: (request: PromoteDynamicTemplateInstanceRequest) => void | Promise<void>;
 }) {
@@ -259,12 +266,13 @@ export default function DynamicTemplateInstanceInspector({
     );
   }
   const definition = resolved.definition;
+  const editorBlockId = getDynamicTemplateInstanceEditorBlockId(props);
   const slots = orderedSlots(definition);
   const content = asRecord(props.contentBySlotId);
   const hidden = Array.isArray(props.hiddenSlotIds)
     ? props.hiddenSlotIds.filter((value): value is string => typeof value === "string")
     : [];
-  const selectedNode = selection?.blockId === props.instanceId
+  const selectedNode = selection?.blockId === editorBlockId
     ? definition.nodes[selection.nodeId]
     : undefined;
   const selectedSlot = selectedNode?.slotId
@@ -286,7 +294,11 @@ export default function DynamicTemplateInstanceInspector({
       deviceTotal + Object.keys(override ?? {}).length
     ), 0)
   ), 0);
-  const currentPublishIssues = getInspectorPublishIssues(publishIssues, props.instanceId);
+  const currentPublishIssues = getInspectorPublishIssues(
+    publishIssues,
+    editorBlockId,
+    [props.instanceId],
+  );
   const currentPublishErrorCount = currentPublishIssues.filter(
     (issue) => issue.severity === "error",
   ).length;
@@ -317,7 +329,7 @@ export default function DynamicTemplateInstanceInspector({
 
   const selectInstancePropertyScope = (nodeId: string) => {
     if (!nodeId) {
-      clearVisualNode(props.instanceId);
+      clearVisualNode(editorBlockId);
       return;
     }
     const nextNode = definition.nodes[nodeId];
@@ -325,7 +337,7 @@ export default function DynamicTemplateInstanceInspector({
     if (!nextNode || !nextSlot?.editable) return;
     const policy = getEffectiveDynamicTemplateInstanceEditPolicy(nextNode, nextSlot);
     selectVisualNode({
-      blockId: props.instanceId,
+      blockId: editorBlockId,
       moduleType: props.moduleName || definition.name,
       nodeId: nextNode.nodeId,
       kind: visualKindForSlot(nextSlot),
@@ -466,6 +478,8 @@ export default function DynamicTemplateInstanceInspector({
     try {
       await onPromoteToTemplate({
         templateId: props.templateId,
+        sourceVersion: resolved.version,
+        sourceDefinitionChecksum: resolved.definitionChecksum,
         sourceDefinition: definition,
         layoutOverridesByNodeId: props.layoutOverridesByNodeId,
       });
@@ -555,7 +569,11 @@ export default function DynamicTemplateInstanceInspector({
             />
           </label>
           {imageNode && imagePolicy?.imageFit ? (
-            <label>
+            <label
+              className="homepage-editor__inspector-field"
+              data-inspector-field="objectFit"
+              data-inspector-device={editor.device}
+            >
               <span className="homepage-editor__properties-hint">图片适配 · {editor.device === "desktop" ? "桌面端" : "移动端"}</span>
               <Select
                 aria-label={`${slot.label}图片适配`}
@@ -573,6 +591,8 @@ export default function DynamicTemplateInstanceInspector({
           ) : null}
           {imageNode && imagePolicy?.imageFit ? (
             <NumberField
+              inspectorField="imageScalePercent"
+              inspectorDevice={editor.device}
               label={`${slot.label}图片缩放`}
               unit="%"
               hint="只缩放图片内容，不改变母模板区域尺寸"
@@ -587,6 +607,8 @@ export default function DynamicTemplateInstanceInspector({
           ) : null}
           {imageNode && imagePolicy?.imageFocus ? (
             <ImageFocusField
+              inspectorFieldKeys={{ x: "focusXPercent", y: "focusYPercent" }}
+              inspectorDevice={editor.device}
               label={`${slot.label}画面焦点 · ${editor.device === "desktop" ? "桌面端" : "移动端"}`}
               value={focus}
               onChange={({ x, y }) => updateMediaPresentation(imageNode.nodeId, {
@@ -813,6 +835,8 @@ export default function DynamicTemplateInstanceInspector({
               {selectedPolicy.position ? (
                 <>
                   <NumberField
+                    inspectorField="offsetXPercent"
+                    inspectorDevice={editor.device}
                     label="水平偏移"
                     unit="%"
                     min={-selectedPolicy.maxOffsetPercent}
@@ -822,6 +846,8 @@ export default function DynamicTemplateInstanceInspector({
                     onClear={() => updateSelectedPresentation({ offsetXPercent: undefined })}
                   />
                   <NumberField
+                    inspectorField="offsetYPercent"
+                    inspectorDevice={editor.device}
                     label="垂直偏移"
                     unit="%"
                     min={-selectedPolicy.maxOffsetPercent}
@@ -834,6 +860,8 @@ export default function DynamicTemplateInstanceInspector({
               ) : null}
               {selectedPolicy.size ? (
                 <NumberField
+                  inspectorField="widthPercent"
+                  inspectorDevice={editor.device}
                   label="区域宽度"
                   unit="%"
                   min={selectedPolicy.minWidthPercent}
@@ -845,6 +873,8 @@ export default function DynamicTemplateInstanceInspector({
               ) : null}
               {selectedPolicy.zIndex ? (
                 <NumberField
+                  inspectorField="zIndex"
+                  inspectorDevice={editor.device}
                   label="层级"
                   min={-10}
                   max={10}
@@ -856,6 +886,8 @@ export default function DynamicTemplateInstanceInspector({
               {selectedPolicy.typography && selectedTextSlot ? (
                 <>
                   <NumberField
+                    inspectorField="fontSizePx"
+                    inspectorDevice={editor.device}
                     label={`${selectedNode.name}字号`}
                     unit="px"
                     min={selectedPolicy.minFontSizePx ?? 12}
@@ -864,7 +896,11 @@ export default function DynamicTemplateInstanceInspector({
                     onChange={(fontSizePx) => updateSelectedPresentation({ fontSizePx })}
                     onClear={() => updateSelectedPresentation({ fontSizePx: undefined })}
                   />
-                  <label>
+                  <label
+                    className="homepage-editor__inspector-field"
+                    data-inspector-field="textAlign"
+                    data-inspector-device={editor.device}
+                  >
                     <span className="homepage-editor__properties-hint">文字对齐</span>
                     <Select
                       aria-label={`${selectedNode.name}文字对齐`}
@@ -884,6 +920,8 @@ export default function DynamicTemplateInstanceInspector({
               {selectedPolicy.spacing && selectedTextSlot ? (
                 <>
                   <NumberField
+                    inspectorField="marginTopPx"
+                    inspectorDevice={editor.device}
                     label={`${selectedNode.name}上间距`}
                     unit="px"
                     min={0}
@@ -893,6 +931,8 @@ export default function DynamicTemplateInstanceInspector({
                     onClear={() => updateSelectedPresentation({ marginTopPx: undefined })}
                   />
                   <NumberField
+                    inspectorField="marginBottomPx"
+                    inspectorDevice={editor.device}
                     label={`${selectedNode.name}下间距`}
                     unit="px"
                     min={0}
@@ -961,13 +1001,40 @@ export default function DynamicTemplateInstanceInspector({
             <DynamicTemplateUpgradePanel
               definition={definition}
               instance={props}
-              onApply={(next) => editor.update({
-                templateVersion: next.templateVersion,
-                moduleName: next.moduleName,
-                contentBySlotId: next.contentBySlotId,
-                hiddenSlotIds: next.hiddenSlotIds,
-                layoutOverridesByNodeId: next.layoutOverridesByNodeId,
-              })}
+              onApply={(next, analysis, target) => {
+                editor.updateHistoryTransaction({
+                  templateVersion: next.templateVersion,
+                  moduleName: next.moduleName,
+                  contentBySlotId: next.contentBySlotId,
+                  hiddenSlotIds: next.hiddenSlotIds,
+                  layoutOverridesByNodeId: next.layoutOverridesByNodeId,
+                }, (document) => ({
+                  [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: {
+                    ...readResolvedDynamicTemplateDefinitions(
+                      document[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
+                    ),
+                    [dynamicTemplateVersionKey(target.templateId, target.version)]: {
+                      templateId: target.templateId,
+                      version: target.version,
+                      schemaVersion: target.schemaVersion,
+                      definitionChecksum: target.definitionChecksum,
+                      definition: target.definition,
+                    },
+                  },
+                }));
+                const firstPending = analysis.pendingRequiredSlots[0];
+                if (!firstPending) return;
+                requestAnimationFrame(() => requestAnimationFrame(() => {
+                  const field = document.querySelector<HTMLElement>(
+                    `[data-slot-id="${CSS.escape(firstPending.slotId)}"]`,
+                  );
+                  const focusTarget = field?.querySelector<HTMLElement>(
+                    "input, textarea, select, button, [tabindex]:not([tabindex='-1'])",
+                  );
+                  field?.scrollIntoView({ block: "center" });
+                  focusTarget?.focus();
+                }));
+              }}
             />
             <RestoreDefaultButton
               label="恢复整个实例默认值"
@@ -995,45 +1062,19 @@ export default function DynamicTemplateInstanceInspector({
         warningCount={currentPublishWarningCount}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
-        onReviewIssues={currentPublishIssues.length > 0 ? () => {
-          const showModal = currentPublishErrorCount > 0 ? modal.error : modal.warning;
-          const instance = showModal({
-            title: currentPublishErrorCount > 0
-              ? `当前模块与页面发布检查 · ${currentPublishErrorCount} 项阻断`
-              : `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
-            content: (
-              <div className="homepage-editor__publish-issue-list">
-                {currentPublishIssues.map((issue, index) => (
-                  <div key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                    <p>
-                      <strong>{issue.severity === "error" ? "阻断：" : "提醒："}</strong>
-                      {issue.message}
-                    </p>
-                    {(issue.field || isPagePublishIssue(issue)) ? (
-                      <button type="button" onClick={() => {
-                        instance.destroy();
-                        if (isPagePublishIssue(issue)) {
-                          onOpenPageSettings?.(issue.path ?? issue.field);
-                          return;
-                        }
-                        const fieldKey = issue.field ?? issue.path?.split(".").pop();
-                        if (!fieldKey) return;
-                        const field = propertyScrollRef.current?.querySelector<HTMLElement>(
-                          `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
-                        );
-                        field?.scrollIntoView({ block: "center", behavior: "smooth" });
-                        field?.querySelector<HTMLElement>("input, textarea, select, button, [tabindex]")?.focus();
-                      }}>
-                        {isPagePublishIssue(issue) ? "打开页面设置" : "定位到字段"}
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            ),
-            okText: "知道了",
-          });
-        } : undefined}
+        onReviewIssues={currentPublishErrorCount > 0
+          ? onOpenPublishReview
+          : currentPublishWarningCount > 0
+            ? () => modal.warning({
+                title: `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
+                content: currentPublishIssues.map((issue, index) => (
+                  <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                    <strong>提醒：</strong>{issue.message}
+                  </p>
+                )),
+                okText: "知道了",
+              })
+            : undefined}
       />
     </section>
   );

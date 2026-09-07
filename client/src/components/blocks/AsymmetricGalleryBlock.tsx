@@ -62,19 +62,29 @@ export default function AsymmetricGalleryBlock({ module, editMode }: GalleryBloc
       ? " is-sequence-final"
       : "";
     const itemClassName = `hc-gallery__item is-p${pattern}${sequencePosition}`;
+    const image = typeof item.image === "string" ? item.image.trim() : "";
     const body = (
       <>
         <div className="hc-gallery__frame">
-          <img
-            src={item.image}
-            alt={item.altText || item.caption || "作品图"}
-            loading="lazy"
-            decoding="async"
-            className="hc-gallery__img"
-            style={{
-              objectPosition: `${Number(item.focusX ?? 50)}% ${Number(item.focusY ?? 50)}%`,
-            }}
-          />
+          {image ? (
+            <img
+              src={image}
+              alt={item.altText || item.caption || "作品图"}
+              loading="lazy"
+              decoding="async"
+              className="hc-gallery__img"
+              style={{
+                objectPosition: `${Number(item.focusX ?? 50)}% ${Number(item.focusY ?? 50)}%`,
+              }}
+            />
+          ) : (
+            <BlockEmptyPlaceholder
+              assetSlot={{ templateKey: "gallery", roleId: "works" }}
+              hint={editMode ? `作品图 ${index + 1}` : "作品图片暂未提供"}
+              spec={editMode ? "请选择图片" : undefined}
+              height="100%"
+            />
+          )}
         </div>
         {item.caption ? (
           <p

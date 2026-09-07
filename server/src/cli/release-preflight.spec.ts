@@ -55,10 +55,20 @@ function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase
   const settings = options.settings === undefined
     ? {
         siteName: "海川珠宝",
+        brandPresentationMode: "text-only",
+        brandReviewReference: "BRAND-TEST-001",
         contactPhone: "test-present",
         contactEmail: "test@example.invalid",
         contactAddress: "test-present",
         businessHours: "test-present",
+        seoTitle: "海川珠宝测试站",
+        seoDescription: "仅用于发布准备度测试的正式站点描述。",
+        canonicalBaseUrl: "https://example.invalid",
+        legalEntityReviewReference: "LEGAL-TEST-001",
+        privacyPolicyReviewReference: "PRIVACY-TEST-001",
+        seoReviewReference: "SEO-TEST-001",
+        defaultLocale: "zh-CN",
+        publishedLocales: ["zh-CN"],
       }
     : options.settings;
 
@@ -112,6 +122,8 @@ test("线索型发布门禁在超管、店铺资料、页面、作品和非交�
     createFakeDatabase(),
     async () => ({ valid: true, errors: [], issues: [] }),
     passingMigrationIntegrityCheck,
+    "lead-generation",
+    { configuredClientPublicSiteOrigin: "https://example.invalid" },
   );
 
   assert.equal(result.technicalReady, true);
@@ -122,6 +134,63 @@ test("线索型发布门禁在超管、店铺资料、页面、作品和非交�
     RELEASE_PAGE_KEYS.length,
   );
   assert.ok(result.manualChecksRequired.length > 0);
+});
+
+test("预期客户端公开域名配置缺失或与 SiteSettings 不一致时阻断且不冒充制品证据", async () => {
+  const missing = await runReleasePreflight(
+    createFakeDatabase(),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    { requireConfiguredClientPublicSiteOrigin: true },
+  );
+  const mismatched = await runReleasePreflight(
+    createFakeDatabase(),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    {
+      requireConfiguredClientPublicSiteOrigin: true,
+      configuredClientPublicSiteOrigin: "https://www.example.invalid",
+    },
+  );
+  const matched = await runReleasePreflight(
+    createFakeDatabase(),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    {
+      requireConfiguredClientPublicSiteOrigin: true,
+      configuredClientPublicSiteOrigin: "https://example.invalid",
+    },
+  );
+  const pathBearingOrigin = await runReleasePreflight(
+    createFakeDatabase(),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    {
+      requireConfiguredClientPublicSiteOrigin: true,
+      configuredClientPublicSiteOrigin: "https://example.invalid/store",
+    },
+  );
+
+  for (const result of [missing, mismatched, pathBearingOrigin]) {
+    assert.ok(result.checks.some(
+      (check) => check.code === "site-settings-canonical-origin-configuration" && !check.ok,
+    ));
+    assert.equal(result.technicalReady, false);
+  }
+  const configurationCheck = matched.checks.find(
+    (check) => check.code === "site-settings-canonical-origin-configuration",
+  );
+  assert.equal(configurationCheck?.ok, true);
+  assert.equal(configurationCheck?.facts?.evidenceType, "runner-configuration");
+  assert.equal(configurationCheck?.facts?.artifactVerified, false);
+  assert.match(configurationCheck?.summary || "", /配置一致/);
+  assert.doesNotMatch(configurationCheck?.summary || "", /构建来源|制品一致/);
+  assert.ok(matched.manualChecksRequired.some((item) => /客户端制品/.test(item)));
+  assert.equal(matched.technicalReady, true);
 });
 
 test("发布前门禁同时报告缺失资料、正式商品、Demo 商品与失效发布签认", async () => {
@@ -148,6 +217,14 @@ test("发布前门禁同时报告缺失资料、正式商品、Demo 商品与失
   assert.ok(failedCodes.includes("governed-public-catalog-present"));
   assert.ok(failedCodes.includes("lead-generation-assortment-commerce-free"));
   assert.ok(failedCodes.includes("site-settings-required-fields"));
+  assert.ok(failedCodes.includes("site-settings-publication-readiness"));
+  const requiredSettingsCheck = result.checks.find(
+    (check) => check.code === "site-settings-required-fields",
+  );
+  assert.ok(Array.isArray(requiredSettingsCheck?.facts?.missingFields));
+  assert.ok((requiredSettingsCheck?.facts?.missingFields as string[]).includes(
+    "contactPhone",
+  ));
   assert.ok(failedCodes.includes("page-home-published-current"));
   assert.ok(failedCodes.includes("page-custom-published-current"));
 });
@@ -164,6 +241,7 @@ test("交易型发布档位继续要求正式直购商品，不被线索型规�
     async () => ({ valid: true, errors: [], issues: [] }),
     passingMigrationIntegrityCheck,
     "commerce",
+    { configuredClientPublicSiteOrigin: "https://example.invalid" },
   );
 
   assert.equal(blocked.technicalReady, false);
@@ -237,6 +315,8 @@ test("正式预检先验证只读账号和数据库范围，再执行内容门�
       expectedDatabase: "jewelry_staging",
       approvalReferenceHash: "a".repeat(64),
     },
+    "lead-generation",
+    { configuredClientPublicSiteOrigin: "https://example.invalid" },
   );
 
   assert.equal(result.technicalReady, true);
@@ -248,6 +328,8 @@ test("正式预检先验证只读账号和数据库范围，再执行内容门�
     grantsVerifiedLeastPrivilege: true,
     databaseScopeVerified: true,
   });
+  assert.match(result.evidenceBoundary, /runner 配置预检/);
+  assert.match(result.evidenceBoundary, /不读取或验证客户端制品构建参数/);
   assert.deepEqual(rawQueries, [
     "SELECT DATABASE() AS databaseName",
     "SHOW GRANTS FOR CURRENT_USER()",
@@ -357,16 +439,18 @@ test("发布前门禁与 Public 一致，只验证 publishedRevisionId 指向的
     database,
     async () => ({ valid: true, errors: [], issues: [] }),
     passingMigrationIntegrityCheck,
+    "lead-generation",
+    { configuredClientPublicSiteOrigin: "https://example.invalid" },
   );
 
   assert.equal(result.technicalReady, true);
   assert.equal(revisionQueries.length, RELEASE_PAGE_KEYS.length);
   assert.deepEqual(revisionQueries[0], {
-    where: { id: 101, documentId: 1 },
+    where: { id: 101, documentId: 1, status: "published" },
     select: { id: true, version: true, puckData: true, metadata: true },
   });
   assert.equal(
-    revisionQueries.some((query: any) => query.orderBy || query.where.status),
+    revisionQueries.some((query: any) => query.orderBy),
     false,
   );
   assert.deepEqual(

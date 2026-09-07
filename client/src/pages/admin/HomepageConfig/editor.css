@@ -4,9 +4,9 @@
  * ── 地层地图（改布局前必读，2026-08-19 勘定）──
  * 本文件是多轮改版的地层堆积，同属性可能有多处声明，生效规则=特异性优先、同特异性看源顺序。
  * 现行有效层只有三处，其余为历史地层（勿在其上"再补一条覆盖"，直接改对应有效层）：
- *   1. body grid 变量意图层：搜 `--editor-library-width`（三栏列宽唯一定义点，含 :has 收起态 40px）。
- *   2. 响应式覆盖层：≤1599 库抽屉化 / ≤1199 面板覆盖化 / ≤767 手机层（搜 `@media (max-width: 1599px)`）。
- *   3. 桌面收敛层：搜 `@media (min-width: 1200px)`（240/200/420 固定三栏，防选中抖动；含 is-inspecting 同值对偶）。
+ *   1. body grid 变量意图层：搜 `--editor-library-dock-width`（四区比例唯一定义点）。
+ *   2. 响应式覆盖层：≤1199 面板覆盖化 / ≤767 手机层。
+ *   3. 桌面收敛层：搜 `@media (min-width: 1200px)`（12%/8%/60%/20% 固定比例，含 is-inspecting 同值对偶）。
  * 历史教训：不要在 `.is-inspecting` 等更高特异性选择器下重复声明 body grid/宽度（会压过意图层引发整页抖动）；
  * 2026-08-19 已清 10 处 is-inspecting grid 残留与 inspector 440/520/480 三个被收敛层压死的旧值。 */
 .homepage-editor {
@@ -773,6 +773,11 @@ body:has(.homepage-editor)
   color: var(--adm-warning);
   background: var(--adm-warning-bg);
 }
+.homepage-editor__workspace-status[data-mode="error"] {
+  border-color: var(--adm-error-border);
+  color: var(--adm-error);
+  background: var(--adm-error-bg);
+}
 .homepage-editor__workspace-status[data-mode="clean"],
 .homepage-editor__workspace-status[data-mode="readonly"] {
   color: var(--adm-muted);
@@ -1036,6 +1041,87 @@ body:has(.homepage-editor)
   justify-items: stretch;
   gap: 6px;
 }
+.homepage-editor__revision-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 16px;
+}
+.homepage-editor__revision-select {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.homepage-editor__revision-select:focus-visible {
+  outline: 2px solid var(--adm-ink);
+  outline-offset: 3px;
+}
+.homepage-editor__revision-item.is-selected {
+  border-color: var(--adm-ink);
+  background: var(--adm-info-bg);
+}
+.homepage-editor__revision-detail {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.homepage-editor__revision-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.homepage-editor__revision-detail-header > div,
+.homepage-editor__revision-diff {
+  display: grid;
+  gap: 4px;
+}
+.homepage-editor__revision-detail-header span,
+.homepage-editor__revision-diff span {
+  color: var(--adm-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+.homepage-editor__revision-preview {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  background: #fff;
+}
+.homepage-editor__revision-preview > * {
+  pointer-events: none;
+}
+.homepage-editor__revision-differences {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.homepage-editor__revision-diff {
+  padding: 10px 12px;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  background: var(--adm-neutral-bg);
+}
+@media (max-width: 760px) {
+  .homepage-editor__revision-layout,
+  .homepage-editor__revision-differences {
+    grid-template-columns: 1fr;
+  }
+  .homepage-editor__revision-detail-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 .homepage-editor__body {
   flex: 1;
   min-height: 0;
@@ -1286,6 +1372,13 @@ body:has(.homepage-editor)
 .homepage-editor__template-card.is-disabled {
   opacity: 0.56;
 }
+.homepage-editor__template-card.is-disabled.is-insert-blocked {
+  opacity: 1;
+}
+.homepage-editor__template-card.is-insert-blocked
+  .homepage-editor__template-card-main[aria-disabled="true"] {
+  cursor: not-allowed;
+}
 .homepage-editor__template-card-main {
   display: block;
   width: 100%;
@@ -1391,6 +1484,14 @@ body:has(.homepage-editor)
   color: var(--adm-ink);
   font-size: 13px;
   font-weight: 600;
+}
+.homepage-editor__template-card-status {
+  display: block;
+  margin: 4px 11px 0;
+  color: var(--adm-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
 }
 .homepage-editor__library-empty {
   padding: 40px 8px;
@@ -3855,6 +3956,261 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   }
 }
 
+/* ═══ T1：窄屏运营可达性收口（共享工作台外壳） ═══ */
+.homepage-editor__compact-panel-label {
+  display: none;
+}
+
+.template-editor__workspace-subject {
+  min-width: 0;
+  max-width: 220px;
+  display: grid;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.template-editor__workspace-subject small {
+  color: var(--adm-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.template-editor__workspace-subject strong {
+  overflow: hidden;
+  color: var(--adm-text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1199px) {
+  .homepage-editor__workspace-status {
+    display: inline-flex !important;
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: 180px;
+  }
+
+  .homepage-editor__workspace-status small {
+    display: none;
+  }
+
+  .homepage-editor__body > [data-compact-overlay="library"] {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: min(360px, calc(100% - 24px));
+    max-width: 100%;
+    box-shadow: 12px 0 30px rgb(24 26 27 / 18%);
+  }
+
+  .homepage-editor__body > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 61;
+    width: min(480px, 100%);
+    max-width: 100%;
+    border-left: 1px solid var(--adm-line);
+    background: var(--adm-content-bg);
+    box-shadow: -14px 0 32px rgb(24 26 27 / 18%);
+  }
+
+  .homepage-editor__body > [data-compact-overlay="inspector"].is-inspector-collapsed {
+    width: 0 !important;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none !important;
+  }
+
+  .homepage-editor__body > [data-compact-overlay="library-trigger"] {
+    width: 0 !important;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  [data-compact-overlay="library-trigger"]
+    .homepage-editor__library-expand-btn.admin-panel-collapse-toggle,
+  [data-compact-overlay="inspector"].is-inspector-collapsed
+    .homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle {
+    position: absolute;
+    z-index: 2;
+    top: 12px;
+    width: auto;
+    min-width: 44px;
+    max-width: min(220px, calc(100vw - 24px));
+    height: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 0 10px;
+    overflow: hidden;
+    border: 1px solid var(--adm-line-strong);
+    border-radius: 5px;
+    color: var(--adm-text-strong);
+    background: rgb(255 255 255 / 96%);
+    box-shadow: 0 4px 14px rgb(24 26 27 / 12%);
+    writing-mode: horizontal-tb;
+  }
+
+  [data-compact-overlay="library-trigger"]
+    .homepage-editor__library-expand-btn.admin-panel-collapse-toggle {
+    left: 12px;
+  }
+
+  [data-compact-overlay="inspector"].is-inspector-collapsed
+    .homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle {
+    right: 12px;
+  }
+
+  .homepage-editor__compact-panel-label {
+    min-width: 0;
+    display: inline;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    writing-mode: horizontal-tb;
+  }
+
+  [data-compact-overlay="inspector"]
+    .homepage-editor__inspector-collapse-btn.admin-panel-collapse-toggle {
+    display: inline-flex !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .homepage-editor__toolbar-left-context {
+    position: fixed;
+    z-index: 72;
+    top: calc(var(--adm-header-h) + 8px);
+    left: 8px;
+    width: min(218px, calc(100vw - 172px));
+    min-width: 0;
+    display: flex !important;
+    overflow: visible;
+  }
+
+  .template-editor__workspace-context {
+    width: 100%;
+    min-width: 0;
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid var(--adm-line);
+    border-radius: 6px;
+    background: rgb(255 255 255 / 96%);
+    box-shadow: 0 4px 14px rgb(24 26 27 / 10%);
+  }
+
+  .template-editor__workspace-identity-icon,
+  .template-editor__workspace-identity-copy small {
+    display: none;
+  }
+
+  .template-editor__workspace-identity > strong,
+  .template-editor__workspace-identity-separator {
+    display: none;
+  }
+
+  .template-editor__workspace-identity {
+    flex: 0 1 auto;
+    gap: 0;
+  }
+
+  .template-editor__workspace-identity-copy strong {
+    max-width: 58px;
+    font-size: 11px;
+  }
+
+  .template-editor__workspace-identity-subject {
+    font-size: 11px;
+    line-height: 18px;
+  }
+
+  .template-editor__workspace-context-divider {
+    height: 22px;
+  }
+
+  .template-editor__workspace-navigation {
+    min-width: 0;
+    min-height: 34px;
+    flex: 1 1 auto;
+    justify-content: center;
+    padding-inline: 7px;
+    font-size: 11px;
+  }
+
+  .homepage-editor__page-tools {
+    width: 34px;
+    min-width: 34px;
+    padding-inline: 0;
+  }
+
+  .homepage-editor__page-tools > span:not(.ant-btn-icon) {
+    display: none;
+  }
+
+  .template-editor__workspace-subject {
+    position: fixed;
+    z-index: 72;
+    top: calc(var(--adm-header-h) + 54px);
+    left: 8px;
+    width: min(218px, calc(100vw - 172px));
+    max-width: none;
+    padding: 5px 9px;
+    border: 1px solid var(--adm-line);
+    border-radius: 5px;
+    background: rgb(255 255 255 / 96%);
+    box-shadow: 0 4px 14px rgb(24 26 27 / 10%);
+  }
+
+  .homepage-editor__workspace-status {
+    position: fixed;
+    z-index: 72;
+    top: calc(var(--adm-header-h) + 8px);
+    right: 8px;
+    width: 148px;
+    max-width: calc(100vw - 236px);
+    min-height: 42px;
+    justify-content: center;
+    padding-inline: 8px;
+    background-clip: padding-box;
+  }
+
+  .homepage-editor__workspace-status > span {
+    font-size: 11px;
+    text-overflow: ellipsis;
+  }
+
+  [data-compact-overlay="library-trigger"]
+    .homepage-editor__library-expand-btn.admin-panel-collapse-toggle,
+  [data-compact-overlay="inspector"].is-inspector-collapsed
+    .homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle {
+    top: 58px;
+    max-width: calc(50vw - 14px);
+  }
+
+  [data-compact-overlay="library-trigger"]
+    .homepage-editor__library-expand-btn.admin-panel-collapse-toggle {
+    left: 8px;
+  }
+
+  [data-compact-overlay="inspector"].is-inspector-collapsed
+    .homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle {
+    right: 8px;
+  }
+
+  .homepage-editor__body > [data-compact-overlay="library"],
+  .homepage-editor__body > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
+    inset: 0;
+    width: 100%;
+    max-width: none;
+  }
+}
+
 /* ═══ 阶段 1：页面 / 模板双工作空间 ═══ */
 .homepage-editor__page-workspace {
   display: contents;
@@ -4176,19 +4532,6 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   font-size: 11px;
 }
 
-/* 模板工具栏操作较多，使用自身网格列，避免居中设备开关覆盖保存或预览按钮。 */
-.admin-header__editor-slot .template-editor__toolbar .homepage-editor__toolbar-actions {
-  position: static;
-  grid-column: 3;
-  grid-row: 1;
-  justify-self: end;
-  min-width: 0;
-  max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  transform: none;
-}
-
 .template-editor__modal-field {
   display: grid;
   gap: 6px;
@@ -4198,51 +4541,38 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+
+.template-editor__workspace-mode-switch {
+  flex: 0 0 auto;
+  min-width: 168px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  background: var(--adm-neutral-bg);
 }
 
 .template-editor__workspace-identity {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 9px;
+  gap: 7px;
   color: var(--adm-text-strong);
-}
-
-.template-editor__workspace-identity-icon {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--adm-line);
-  border-radius: 5px;
-  color: var(--adm-action);
-  background: var(--adm-neutral-bg);
-  font-size: 15px;
-}
-
-.template-editor__workspace-identity-copy {
-  min-width: 0;
-  display: grid;
-  line-height: 1.2;
   white-space: nowrap;
 }
 
-.template-editor__workspace-identity-copy small {
-  grid-column: 1;
-  color: var(--adm-muted);
-  font-size: 10px;
-  font-weight: 500;
-}
-
-.template-editor__workspace-identity-copy strong {
-  grid-column: 1;
+.template-editor__workspace-identity-subject {
+  max-width: 152px;
   overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--adm-text-strong);
   font-size: 13px;
-  font-weight: 600;
-  text-overflow: ellipsis;
+  line-height: 22px;
+  font-weight: 500;
 }
 
 .template-editor__workspace-context-divider {
@@ -4253,27 +4583,35 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 }
 
 .template-editor__workspace-navigation {
-  flex: 0 0 auto;
-  min-height: 34px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 30px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 11px;
-  border: 1px solid var(--adm-line-strong);
+  justify-content: center;
+  padding: 0 10px;
+  border: 0;
   border-radius: 4px;
-  color: var(--adm-text-strong);
-  background: #fff;
+  color: var(--adm-muted);
+  background: transparent;
   box-shadow: none;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .template-editor__workspace-navigation:hover:not(:disabled) {
-  border-color: var(--adm-action);
-  color: var(--adm-action);
+  color: var(--adm-text-strong);
   background: var(--adm-content-bg);
+}
+
+.template-editor__workspace-navigation.is-active,
+.template-editor__workspace-navigation.is-active:hover {
+  color: var(--ed-on-accent, #fff);
+  background: var(--adm-action);
+  font-weight: 650;
+  cursor: default;
 }
 
 .template-editor__workspace-navigation:focus-visible {
@@ -4286,13 +4624,120 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   cursor: not-allowed;
 }
 
+.template-editor__workspace-context .template-editor__toolbar-state {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 180px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  color: var(--adm-muted);
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.template-editor__workspace-context .template-editor__toolbar-state > i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--adm-muted);
+}
+
+.template-editor__workspace-context .template-editor__toolbar-state > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.template-editor__workspace-context .template-editor__toolbar-state[data-mode="dirty"] > i {
+  background: var(--adm-warning);
+}
+
+.template-editor__workspace-context .template-editor__toolbar-state[data-mode="pending"] > i {
+  background: var(--adm-info);
+}
+
+.template-editor__workspace-context .template-editor__toolbar-state[data-mode="error"] {
+  color: var(--adm-error);
+}
+
+.template-editor__workspace-context .template-editor__toolbar-state[data-mode="error"] > i {
+  background: var(--adm-error);
+}
+
+button.template-editor__toolbar-state {
+  cursor: pointer;
+}
+
+button.template-editor__toolbar-state:hover,
+button.template-editor__toolbar-state:focus-visible {
+  color: var(--adm-action);
+  outline: 2px solid var(--adm-focus);
+  outline-offset: 2px;
+}
+
+.homepage-editor__page-tools {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border-color: transparent;
+  color: var(--adm-muted);
+  background: transparent;
+  box-shadow: none;
+}
+
+.homepage-editor__page-tools:hover:not(:disabled) {
+  border-color: var(--adm-line-strong);
+  color: var(--adm-text-strong);
+  background: var(--adm-neutral-bg);
+}
+
+.homepage-editor__page-tools:focus-visible {
+  outline: 2px solid var(--adm-action);
+  outline-offset: 2px;
+}
+
 @media (max-width: 1199px) {
   .template-editor__workspace-context {
-    gap: 8px;
+    gap: 6px;
   }
 
   .template-editor__workspace-navigation {
-    padding-inline: 9px;
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 767px) {
+  .template-editor__workspace-mode-switch {
+    flex: 1 1 132px;
+    min-width: 132px;
+  }
+
+  .template-editor__workspace-navigation {
+    min-height: 30px;
+    padding-inline: 5px;
+    font-size: 11px;
+  }
+
+  .template-editor__workspace-identity,
+  .template-editor__workspace-identity + .template-editor__workspace-context-divider {
+    display: none;
+  }
+
+  .template-editor__workspace-context .template-editor__toolbar-state {
+    max-width: 72px;
+    padding-inline: 2px;
+    font-size: 11px;
   }
 }
 
@@ -5765,7 +6210,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 }
 
 /* ═══ 工作台密度优化：保留现有五区骨架，仅收紧非编辑信息 ═══ */
-/* 顶栏只保留保存、预览、发布与更多；历史和页面设置已进入更多菜单。 */
+/* 顶栏只保留历史、预览、保存、主操作与更多；低频页面/模板工具统一进入更多菜单。 */
 .homepage-editor__toolbar {
   gap: 12px;
 }
@@ -7350,6 +7795,62 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   color: #8C3F3B;
   background: #FAF0EF;
 }
+
+/* 8% 图层栏在较窄桌面上改为上下两行，避免操作键覆盖选择区。 */
+@container editor-structure-dock (max-width: 128px) {
+  .homepage-editor__panel-header {
+    padding-inline: 4px;
+  }
+
+  .homepage-editor__panel-header .homepage-editor__region-title {
+    left: 4px;
+    max-width: calc(100% - 40px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    transform: none;
+  }
+
+  .homepage-editor__layer-scroll {
+    padding-inline: 4px;
+  }
+
+  .homepage-editor__layer-frame button {
+    justify-content: center;
+    padding-inline: 4px;
+    overflow: hidden;
+  }
+
+  .homepage-editor__layer-item {
+    display: grid;
+    overflow: hidden;
+  }
+
+  .homepage-editor__layer-select {
+    min-width: 0;
+    padding-inline: 6px;
+  }
+
+  .homepage-editor__layer-select .homepage-editor__layer-summary,
+  .homepage-editor__layer-select > .homepage-editor__layer-grip {
+    display: none !important;
+  }
+
+  .homepage-editor__layer-actions {
+    position: static;
+    width: 100%;
+    justify-content: center;
+    padding: 0;
+    border-top: 1px solid var(--adm-line);
+    background: transparent;
+    pointer-events: auto;
+    transform: none;
+  }
+
+  .homepage-editor__layer-item.is-active .homepage-editor__layer-actions {
+    background: transparent;
+  }
+}
 .homepage-editor__layer-item.is-multi-selected:not(.is-active),
 .homepage-editor__layer-item.is-multi-selected:not(.is-active)
   .homepage-editor__layer-select {
@@ -7576,9 +8077,9 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   }
 }
 
-/* 平板宽度保留图层入口在模板抽屉右侧；否则 40px 图层把手会被模板库完全盖住。 */
+/* 页面装修的平板图层入口保留在模板抽屉右侧；模板设计使用末尾独立的窄屏覆盖定位。 */
 @media (min-width: 768px) and (max-width: 1199px) {
-  .homepage-editor__body:not(.is-inspecting):has(
+  .homepage-editor__body:not(.is-inspecting, .template-editor__body):has(
       .homepage-editor__library:not(.homepage-editor__library--collapsed)
     )
     .homepage-editor__structure-workspace {
@@ -7587,7 +8088,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
     z-index: 31;
     width: 208px;
   }
-  .homepage-editor__body:not(.is-inspecting):has(
+  .homepage-editor__body:not(.is-inspecting, .template-editor__body):has(
       .homepage-editor__library:not(.homepage-editor__library--collapsed)
     )
     .homepage-editor__structure-workspace.is-collapsed {
@@ -7703,9 +8204,11 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 @media (min-width: 1200px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
-    --editor-library-dock-width: 256px;
-    --editor-structure-dock-width: 224px;
-    --editor-inspector-dock-width: 480px;
+    /* 桌面四区硬合同：页面装修与模板设计均为 12% / 8% / 60% / 20%。
+     * important 与唯一声明门禁共同防止模式样式或收起态覆盖。 */
+    --editor-library-dock-width: 12% !important;
+    --editor-structure-dock-width: 8% !important;
+    --editor-inspector-dock-width: 20% !important;
     display: grid;
     grid-template-columns: minmax(0, 1fr);
   }
@@ -7718,7 +8221,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
     transition: left 160ms ease;
   }
   .homepage-editor__body .homepage-editor__library--collapsed {
-    width: 40px;
+    width: var(--editor-library-dock-width);
   }
   .homepage-editor__body .homepage-editor__structure-workspace {
     position: absolute;
@@ -7726,12 +8229,14 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
     grid-column: auto;
     z-index: 29;
     width: var(--editor-structure-dock-width);
+    container-type: inline-size;
+    container-name: editor-structure-dock;
     transition:
       left 160ms ease,
       width 160ms ease;
   }
   .homepage-editor__body .homepage-editor__structure-workspace.is-collapsed {
-    width: 40px;
+    width: var(--editor-structure-dock-width);
   }
   .homepage-editor__body .homepage-editor__stage {
     grid-column: 1;
@@ -7754,7 +8259,15 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   .homepage-editor__body .homepage-editor__right-workspace.is-inspector-collapsed,
   .homepage-editor__body.is-inspecting
     .homepage-editor__right-workspace.is-inspector-collapsed {
-    width: 40px;
+    width: var(--editor-inspector-dock-width);
+  }
+  .homepage-editor__body .homepage-editor__library-collapse-btn,
+  .homepage-editor__body .homepage-editor__library-expand-btn,
+  .homepage-editor__body .homepage-editor__structure-collapse-btn,
+  .homepage-editor__body .homepage-editor__structure-expand-btn,
+  .homepage-editor__body .homepage-editor__inspector-collapse-btn,
+  .homepage-editor__body .homepage-editor__inspector-expand-btn {
+    display: none !important;
   }
   .admin-shell-v7.is-editor-navigation-open .homepage-editor__library {
     left: var(--adm-sidebar-w);
@@ -7766,81 +8279,6 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
     border-right: 0;
     visibility: hidden;
     pointer-events: none;
-  }
-}
-
-@media (min-width: 1200px) and (max-width: 1439px) {
-  .homepage-editor__body,
-  .homepage-editor__body.is-inspecting {
-    --editor-library-dock-width: 212px;
-    --editor-structure-dock-width: 148px;
-    --editor-inspector-dock-width: 360px;
-  }
-}
-
-@media (min-width: 1440px) and (max-width: 1599px) {
-  .homepage-editor__body,
-  .homepage-editor__body.is-inspecting {
-    --editor-library-dock-width: 220px;
-    --editor-structure-dock-width: 160px;
-    --editor-inspector-dock-width: 360px;
-  }
-}
-
-@media (min-width: 1600px) {
-  .homepage-editor__body,
-  .homepage-editor__body.is-inspecting {
-    --editor-library-dock-width: 252px;
-    --editor-structure-dock-width: 188px;
-    --editor-inspector-dock-width: 360px;
-  }
-}
-
-@media (min-width: 1200px) {
-  .homepage-editor__body:has(> .homepage-editor__library--collapsed),
-  .homepage-editor__body.is-inspecting:has(> .homepage-editor__library--collapsed) {
-    --editor-library-dock-width: 40px;
-  }
-  .homepage-editor__body:has(> .homepage-editor__structure-workspace.is-collapsed),
-  .homepage-editor__body.is-inspecting:has(> .homepage-editor__structure-workspace.is-collapsed) {
-    --editor-structure-dock-width: 40px;
-  }
-  .homepage-editor__body:has(> .homepage-editor__right-workspace.is-inspector-collapsed),
-  .homepage-editor__body.is-inspecting:has(> .homepage-editor__right-workspace.is-inspector-collapsed) {
-    --editor-inspector-dock-width: 40px;
-  }
-}
-
-@media (min-width: 1200px) {
-  /* 模板设计与页面装修共用上方同一组桌面 dock 宽度，避免四区外壳再次分叉。 */
-  .template-editor__body:has(> .homepage-editor__library--collapsed),
-  .template-editor__body.is-inspecting:has(> .homepage-editor__library--collapsed) {
-    --editor-library-dock-width: 40px;
-  }
-  .template-editor__body:has(> .homepage-editor__structure-workspace.is-collapsed),
-  .template-editor__body.is-inspecting:has(> .homepage-editor__structure-workspace.is-collapsed) {
-    --editor-structure-dock-width: 40px;
-  }
-  .template-editor__body:has(> .homepage-editor__right-workspace.is-inspector-collapsed),
-  .template-editor__body.is-inspecting:has(> .homepage-editor__right-workspace.is-inspector-collapsed) {
-    --editor-inspector-dock-width: 40px;
-  }
-
-  /* 一级导航收起后仍保留 40px 的收纳键轨道。模板库同时收起时，
-   * 把这段轨道计入 dock 宽度，避免两个 28px 收纳键重叠，也不让
-   * 80px 的可点击区盖住后面的图层面板。 */
-  .admin-shell-v7.is-sidebar-collapsed
-    .homepage-editor__body:has(> .homepage-editor__library--collapsed) {
-    --editor-library-dock-width: 80px;
-  }
-  .admin-shell-v7.is-sidebar-collapsed
-    .homepage-editor__body
-    .homepage-editor__library--collapsed {
-    width: 80px;
-  }
-  .admin-shell-v7.is-sidebar-collapsed
-    .homepage-editor__library-expand-btn.admin-panel-collapse-toggle {
-    margin-left: 46px;
   }
 }
 
@@ -9989,5 +10427,402 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   .homepage-editor__mode-slot .homepage-editor__panel-mode-tabs button[role="tab"] {
     padding-inline: 5px;
     font-size: 11px;
+  }
+}
+
+/* T1 最终级联：历史模板专属规则之后仍保持覆盖式属性区。 */
+@media (max-width: 1199px) {
+  .homepage-editor__body.template-editor__body
+    > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
+    position: absolute;
+    inset: 0 0 0 auto;
+    display: block;
+    z-index: 61;
+    width: min(480px, 100%);
+    max-width: 100%;
+    box-shadow: -14px 0 32px rgb(24 26 27 / 18%);
+  }
+
+  .homepage-editor__body.template-editor__body
+    > [data-compact-overlay="inspector"].is-inspector-collapsed {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: 0 !important;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 767px) {
+  .homepage-editor__body.template-editor__body
+    > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
+    inset: 0;
+    width: 100%;
+    max-width: none;
+  }
+}
+
+/* 页面发布失败后的持久恢复区。仅占用既有属性栏内部空间，不改变四栏宽度。 */
+.homepage-editor__page-publish-review {
+  flex: 0 1 min(42%, 330px);
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--adm-line);
+  background: color-mix(in srgb, var(--adm-content-bg) 94%, #FAF0EF);
+  outline: none;
+}
+
+.homepage-editor__page-publish-review:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--adm-action);
+}
+
+.homepage-editor__page-publish-review button {
+  border: 1px solid var(--adm-neutral-border);
+  border-radius: 4px;
+  background: var(--adm-content-bg);
+  color: var(--adm-text);
+  cursor: pointer;
+  font: inherit;
+}
+
+.homepage-editor__page-publish-review button:hover:not(:disabled),
+.homepage-editor__page-publish-review button:focus-visible {
+  border-color: var(--adm-gold);
+  color: var(--adm-action);
+  outline: none;
+}
+
+.homepage-editor__page-publish-review button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.homepage-editor__page-publish-review-head,
+.homepage-editor__page-publish-review-nav,
+.homepage-editor__page-publish-review > footer {
+  flex: none;
+  padding: 9px 10px;
+}
+
+.homepage-editor__page-publish-review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--adm-line);
+}
+
+.homepage-editor__page-publish-review-head > div {
+  display: grid;
+  gap: 2px;
+}
+
+.homepage-editor__page-publish-review-head strong {
+  font-size: 13px;
+}
+
+.homepage-editor__page-publish-review-head span,
+.homepage-editor__page-publish-review > footer > span,
+.homepage-editor__page-publish-review-clear span {
+  color: var(--adm-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.homepage-editor__page-publish-review-head > button {
+  width: 28px;
+  height: 28px;
+}
+
+.homepage-editor__page-publish-review-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-block: 7px;
+  font-size: 11px;
+}
+
+.homepage-editor__page-publish-review-nav > div {
+  display: flex;
+  gap: 4px;
+}
+
+.homepage-editor__page-publish-review-nav button,
+.homepage-editor__page-publish-review > footer button,
+.homepage-editor__page-publish-review-list > li > button:last-child {
+  min-height: 28px;
+  padding: 4px 7px;
+  font-size: 11px;
+}
+
+.homepage-editor__page-publish-review-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  margin: 0;
+  padding: 0 10px 8px;
+  list-style: none;
+}
+
+.homepage-editor__page-publish-review-list > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  border-left: 3px solid #8C3F3B;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--adm-content-bg) 92%, #8C3F3B);
+  padding: 6px;
+}
+
+.homepage-editor__page-publish-review-list > li[aria-current="step"] {
+  box-shadow: 0 0 0 1px #8C3F3B;
+}
+
+.homepage-editor__page-publish-review-issue {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  text-align: left;
+}
+
+.homepage-editor__page-publish-review-issue strong,
+.homepage-editor__page-publish-review-issue span,
+.homepage-editor__page-publish-review-issue small {
+  overflow-wrap: anywhere;
+}
+
+.homepage-editor__page-publish-review-issue strong {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.homepage-editor__page-publish-review-issue span,
+.homepage-editor__page-publish-review-issue small {
+  color: var(--adm-text-secondary);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.homepage-editor__page-publish-review-path {
+  color: #8C3F3B !important;
+  font-weight: 600;
+}
+
+.homepage-editor__page-publish-review-clear {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  padding: 18px;
+  text-align: center;
+}
+
+.homepage-editor__page-publish-review > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--adm-line);
+}
+
+[data-page-publish-located="true"] {
+  outline: 2px solid #8C3F3B !important;
+  outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  .homepage-editor__page-publish-review {
+    flex-basis: min(48%, 360px);
+  }
+
+  .homepage-editor__page-publish-review-nav,
+  .homepage-editor__page-publish-review > footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* T1 收纳入口必须处于画布之上，并保留可读的横排标签；旧桌面 dock 的 28px
+ * 图标尺寸不能重新压缩窄屏入口。父层不接管画布命中，只让真实按钮接管。 */
+@media (max-width: 1199px) {
+  .homepage-editor__body > [data-compact-overlay="library-trigger"],
+  .homepage-editor__body > [data-compact-overlay="inspector"].is-inspector-collapsed {
+    position: absolute;
+    z-index: 62;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .homepage-editor__body > [data-compact-overlay="library-trigger"] {
+    inset: 0 auto 0 0;
+  }
+
+  .homepage-editor__body > [data-compact-overlay="inspector"].is-inspector-collapsed {
+    inset: 0 0 0 auto;
+  }
+
+  [data-compact-overlay="library-trigger"]
+    .homepage-editor__library-expand-btn.admin-panel-collapse-toggle,
+  [data-compact-overlay="inspector"].is-inspector-collapsed
+    .homepage-editor__inspector-expand-btn.admin-panel-collapse-toggle {
+    width: auto !important;
+    min-width: 44px;
+    height: 36px !important;
+    margin: 0;
+    padding: 0 10px;
+    pointer-events: auto;
+  }
+}
+
+/* 模板窄屏结构覆盖层位于画布之上、目录/属性抽屉之下，避开顶部恢复入口。 */
+@media (max-width: 1199px) {
+  .homepage-editor__body.template-editor__body
+    > .homepage-editor__structure-workspace {
+    position: absolute;
+    inset: 60px auto 0 12px;
+    z-index: 59;
+    width: min(208px, calc(100% - 24px));
+    height: auto;
+  }
+
+  .homepage-editor__body.template-editor__body
+    > .homepage-editor__structure-workspace.is-collapsed {
+    width: 40px;
+  }
+}
+
+@media (max-width: 767px) {
+  .homepage-editor__body.template-editor__body
+    > .homepage-editor__structure-workspace {
+    top: 106px;
+    left: 8px;
+  }
+}
+
+/* 最终级联：页面窄屏属性覆盖层位于画布选区工具之上。 */
+@media (max-width: 1199px) {
+  .homepage-editor__body:not(.template-editor__body)
+    > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 1000;
+    width: min(480px, 100%);
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 767px) {
+  .homepage-editor__body:not(.template-editor__body)
+    > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
+    inset: 0;
+    width: 100%;
+  }
+}
+
+/* 模板目录抽屉避开移动端固定的工作区身份与长状态摘要。 */
+.unified-template-library__metadata,
+.unified-template-library__disabled-reason,
+.unified-template-library__primary-action {
+  display: block;
+  padding: 0 8px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.unified-template-library__metadata { color: var(--adm-muted); }
+.unified-template-library__primary-action { color: var(--adm-text); font-weight: 650; }
+.unified-template-library__disabled-reason { color: var(--adm-muted); }
+.unified-template-library__category { margin: 8px 0; font-size: 12px; color: var(--adm-muted); }
+.unified-template-library__filter-summary { display: flex; align-items: center; gap: 6px; font-size: 11px; padding-top: 6px; }
+.unified-template-library__filter-summary span { flex: 1; overflow-wrap: anywhere; }
+.unified-template-library__filter-summary button { flex: 0 0 auto; padding: 4px; border: 1px solid var(--adm-line); border-radius: 4px; background: var(--adm-content-bg); }
+
+@media (max-width: 767px) {
+  .homepage-editor__body.template-editor__body
+    > [data-compact-overlay="library"] {
+    inset: 106px 0 0;
+  }
+}
+
+/* 两种工作模式共享唯一操作栏；业务差异只体现在主操作文案与可用状态。 */
+.homepage-editor__toolbar .homepage-editor__toolbar-history .ant-btn {
+  width: 34px;
+  min-width: 34px;
+  padding-inline: 0;
+  border-color: transparent;
+  color: var(--adm-muted);
+  background: transparent;
+  box-shadow: none;
+}
+
+.homepage-editor__toolbar .homepage-editor__toolbar-history .ant-btn:hover:not(:disabled),
+.homepage-editor__toolbar .homepage-editor__toolbar-history .ant-btn:focus-visible:not(:disabled) {
+  border-color: var(--adm-line);
+  color: var(--adm-text-strong);
+  background: var(--adm-neutral-bg);
+}
+
+.homepage-editor__toolbar .homepage-editor__toolbar-preview[aria-pressed="true"] {
+  border-color: var(--adm-line-strong);
+  color: var(--adm-text-strong);
+  background: var(--adm-selected-bg, #eceeef);
+}
+
+.homepage-editor__toolbar .homepage-editor__toolbar-publish.ant-btn-primary:not(:disabled) {
+  border-color: var(--adm-action, #181a1b);
+  color: #fff;
+  background: var(--adm-action, #181a1b);
+}
+
+.homepage-editor__toolbar .homepage-editor__toolbar-publish.ant-btn-primary:disabled,
+.homepage-editor__toolbar .homepage-editor__toolbar-publish.ant-btn-primary:disabled:hover {
+  border-color: var(--adm-neutral-border);
+  color: var(--adm-muted);
+  background: var(--adm-neutral-bg);
+  box-shadow: none;
+}
+
+@media (min-width: 1440px) {
+  .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__toolbar-left-context {
+    overflow: visible;
+  }
+
+  .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .template-editor__workspace-identity,
+  .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .template-editor__workspace-identity-subject {
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__toolbar-actions {
+    overflow: visible;
+  }
+
+  .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__workspace-status {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    overflow: visible;
+  }
+
+  .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__workspace-status > span {
+    overflow: visible;
+    text-overflow: clip;
   }
 }

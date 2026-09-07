@@ -82,10 +82,27 @@ assert.match(
   /CONTENT_TEMPLATE_REGISTRY[\s\S]*isContentTemplateInsertable/,
   "模块元数据必须从生成合同读取模板实施状态",
 );
+const systemTemplateAllowedHelper = homepageConfigSource.match(
+  /const isSystemTemplateAllowedOnPage = useCallback\(\(\s*([A-Za-z_$][\w$]*)\s*:\s*string\s*\)\s*=>\s*\(([\s\S]*?)\)\s*,\s*\[\s*pageKey\s*\]\s*\);/,
+);
+assert.ok(
+  systemTemplateAllowedHelper,
+  "页面模板目录必须定义按页面过滤系统模板的 helper",
+);
+const systemTemplateModuleTypeParameter = systemTemplateAllowedHelper[1]
+  .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const systemTemplateAllowedHelperBody = systemTemplateAllowedHelper[2];
+assert.match(
+  systemTemplateAllowedHelperBody,
+  new RegExp(
+    `isContentTemplateInsertable\\(\\s*${systemTemplateModuleTypeParameter}\\s*\\)\\s*&&\\s*isContentTemplateAllowedForPage\\(\\s*pageKey\\s*,\\s*${systemTemplateModuleTypeParameter}\\s*\\)`,
+  ),
+  "系统模板 helper 必须用同一模块类型同时校验合同实施状态与页面范围",
+);
 assert.match(
   homepageConfigSource,
-  /isSystemTemplateAllowed=\{\(moduleType\) => \([\s\S]*isContentTemplateInsertable\(moduleType\)[\s\S]*isContentTemplateAllowedForPage\(pageKey, moduleType\)/,
-  "页面模板目录必须同时按合同实施状态与页面范围限制新增入口",
+  /<UnifiedTemplateLibrary\b[\s\S]*?\bisSystemTemplateAllowed=\{\s*isSystemTemplateAllowedOnPage\s*\}/,
+  "页面模板目录必须把系统模板 helper 传入统一模板库",
 );
 assert.match(
   homepageConfigSource,
@@ -104,8 +121,8 @@ assert.match(
 );
 assert.match(
   publishValidationSource,
-  /issue\.blockId === normalizedBlockId/,
-  "共享发布问题过滤器必须只保留当前模块 blockId 与页面级问题",
+  /const acceptedBlockIds = new Set\(\[[\s\S]*normalizedBlockId[\s\S]*\]\);[\s\S]*acceptedBlockIds\.has\(issue\.blockId\)/,
+  "共享发布问题过滤器必须通过当前模块身份集合保留对应问题",
 );
 
 const publishProductCheck = serverSource.match(

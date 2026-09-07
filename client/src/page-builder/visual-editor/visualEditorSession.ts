@@ -68,6 +68,7 @@ interface VisualEditorSessionState {
   requestContentAction: (selection: VisualNodeSelection) => void;
   reportCanvasGeometry: (snapshot: VisualCanvasGeometrySnapshot) => void;
   clearCanvasGeometry: (blockId: string) => void;
+  clearCanvasGeometryNamespace: (namespace: string) => void;
   activateWorkspace: (workspace: VisualEditorWorkspace) => void;
   resetWorkspaceContext: (workspace: VisualEditorWorkspace) => void;
 }
@@ -90,7 +91,31 @@ const TEMPLATE_VISUAL_WORKSPACE: VisualWorkspaceSnapshot = {
   panelMode: "design",
 };
 
-export const useVisualEditorSession = create<VisualEditorSessionState>((set) => ({
+let activeVisualEditorSessionSubscriberCount = 0;
+
+/**
+ * 只读生命周期诊断：用于证明公开 Renderer/目录预览没有订阅编辑会话。
+ * 返回整个共享 store 的当前订阅数，不暴露或修改任何业务状态。
+ */
+export function getVisualEditorSessionSubscriberCount() {
+  return activeVisualEditorSessionSubscriberCount;
+}
+
+export const useVisualEditorSession = create<VisualEditorSessionState>((set, _get, api) => {
+  const subscribe = api.subscribe;
+  api.subscribe = ((listener) => {
+    activeVisualEditorSessionSubscriberCount += 1;
+    const unsubscribe = subscribe(listener);
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      activeVisualEditorSessionSubscriberCount -= 1;
+      unsubscribe();
+    };
+  }) as typeof api.subscribe;
+
+  return ({
   workspace: "page",
   workspaceSnapshots: {
     page: PAGE_VISUAL_WORKSPACE,
@@ -181,6 +206,17 @@ export const useVisualEditorSession = create<VisualEditorSessionState>((set) => 
       delete nextGeometry[blockId];
       return { canvasGeometryByBlock: nextGeometry };
     }),
+  clearCanvasGeometryNamespace: (namespace) =>
+    set((state) => {
+      const childPrefix = `${namespace}:`;
+      const matchingKeys = Object.keys(state.canvasGeometryByBlock).filter(
+        (blockId) => blockId === namespace || blockId.startsWith(childPrefix),
+      );
+      if (matchingKeys.length === 0) return state;
+      const nextGeometry = { ...state.canvasGeometryByBlock };
+      for (const blockId of matchingKeys) delete nextGeometry[blockId];
+      return { canvasGeometryByBlock: nextGeometry };
+    }),
   activateWorkspace: (workspace) =>
     set((state) => {
       if (state.workspace === workspace) return state;
@@ -220,7 +256,8 @@ export const useVisualEditorSession = create<VisualEditorSessionState>((set) => 
         },
       };
     }),
-}));
+  });
+});
 
 export const CANVAS_VISUAL_EDIT_MESSAGE = "homepage-editor:visual-edit";
 export const CANVAS_SHARED_VISUAL_PREVIEW_MESSAGE = "homepage-editor:shared-visual-preview";

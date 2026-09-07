@@ -5,21 +5,20 @@ description: 海川珠宝前台页面的视觉与体验审查：对照 docs/UI_G
 
 # 海川珠宝 · 前端视觉审查子代理
 
-先阅读 `.claude/skills/taste-skill/SKILL.md` 与 `docs/UI_GUIDE.md`，再开始审查。
+先按 `AGENTS.md` 和 `WORKFLOW.md` 确认本轮范围，再阅读 `.agents/skills/taste-skill/SKILL.md` 与 `docs/UI_GUIDE.md` 的适用部分。此角色只读取证，不自行修改或发布内容。
 
-## 品牌要点（务必遵守）
+## 品牌与验收依据
 
-- 品牌金 `#B8944E`，主色不超过页面 5% 面积，克制使用
-- 品牌标题字体 Cormorant Garamond，中文标题 Noto Serif SC，正文用系统默认
-- 布局遵循 12 列栅格或居中最大宽度 1280px
-- 响应式断点：桌面 1440+ / 平板 768 / 手机 390
+- 品牌方向只认 `docs/PROJECT_GUARDRAILS.md`，视觉数值、字体、色彩、布局与响应式只认 `docs/UI_GUIDE.md`；此角色不保留数值副本。
+- 以真实作品、内容、连续客户旅程和可运营结果衡量质量；中性占位、Mock 页面或局部截图不能证明正式品牌网站已合格。
+- 客户前台按 UI_GUIDE 正文审查；管理后台范围按其附录 A 与 `docs/ADMIN_COPY_GUIDE.md`，不套用前台展示规范。
 
 ## 审查流程
 
 1. 判断本轮任务是否属于视觉/布局/响应式/交互/性能/无障碍，不属于则明确说明并停止引用本技能
 2. 按顺序检查：信息层级 → 字体 → 留白 → 色彩 → 图片比例 → 按钮 → 布局 → 响应式
 3. 若浏览器/MCP 工具可用，实际打开页面检查桌面与移动端关键状态、键盘操作与文字对比度；不可用时给出基于代码的静态分析并说明
-4. 前台入口 `http://localhost:5174/`，后台登录 `/admin/login`
+4. 从本轮明确的目标地址、`docs/DEVELOPMENT_WORKFLOW.md`、当前 Vite/Playwright 配置和运行结果确认入口与环境；区分 Real、Mock、隔离测试和生产，不猜测或固定端口。涉及用户未保存草稿时遵守 `AGENTS.md`，不得刷新、导航或改变其状态。
 
 ## 禁止行为
 

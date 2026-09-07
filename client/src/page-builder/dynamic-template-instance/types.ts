@@ -50,6 +50,42 @@ export function dynamicTemplateVersionKey(templateId: string, version: number) {
   return `${templateId}@${version}`;
 }
 
+/** 返回页面中实际引用的精确模板版本；解析缓存自身不能反向定义所需集合。 */
+export function getRequiredDynamicTemplateDefinitionKeys(document: unknown) {
+  if (!document || typeof document !== "object" || Array.isArray(document)) return [];
+  const record = document as Record<string, unknown>;
+  const keys = new Set<string>();
+  const visit = (blocks: unknown) => {
+    if (!Array.isArray(blocks)) return;
+    for (const block of blocks) {
+      if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+      const blockRecord = block as Record<string, unknown>;
+      if (blockRecord.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE) continue;
+      const props = blockRecord.props;
+      if (!props || typeof props !== "object" || Array.isArray(props)) continue;
+      const templateId = (props as Record<string, unknown>).templateId;
+      const version = (props as Record<string, unknown>).templateVersion;
+      if (typeof templateId === "string" && Number.isInteger(version)) {
+        keys.add(dynamicTemplateVersionKey(templateId, Number(version)));
+      }
+    }
+  };
+  visit(record.content);
+  if (record.zones && typeof record.zones === "object" && !Array.isArray(record.zones)) {
+    Object.values(record.zones as Record<string, unknown>).forEach(visit);
+  }
+  return [...keys].sort();
+}
+
+/** Puck 选择会话只认画布 block id；历史文档的业务 instanceId 可能与它不同。 */
+export function getDynamicTemplateInstanceEditorBlockId(
+  props: Pick<DynamicTemplateInstanceProps, "id" | "instanceId">,
+) {
+  return typeof props.id === "string" && props.id
+    ? props.id
+    : props.instanceId;
+}
+
 export function createDynamicTemplateInstanceProps(input: {
   templateId: string;
   version: number;

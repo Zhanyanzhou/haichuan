@@ -45,7 +45,8 @@ export const videoPuckConfig = {
     loop: true,
     muted: true,
     showControls: true,
-    aspectRatio: "16:9",
+    // 空值表示没有实例覆盖；真实双端默认比例由内容模板合同解析。
+    aspectRatio: "",
     maxHeight: 720,
     videoWidth: "standard",
     bgColor: "#FFFFFF",

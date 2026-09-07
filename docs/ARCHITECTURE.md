@@ -1,93 +1,49 @@
-# 海川珠宝 — 系统架构
+# 海川珠宝 — 系统架构边界
 
-> 最后更新：2026-09-01
+> 本页只描述稳定系统边界，不维护端口、模块数量、测试结果、Feature Flag 状态或完成度。运行方式见 `docs/DEVELOPMENT_WORKFLOW.md`，当前状态见 `docs/CURRENT_STATE.md`。
 
-## 整体架构
+## 系统组成
 
-```
-浏览器
-    │
-    ├─ Real 本地开发：Vite Dev Server (:5173)
-    │   ├─ React SPA 静态文件
-    │   └─ API 代理 → /api → 127.0.0.1:3000
-    │                  /uploads → 127.0.0.1:3000
-    │
-    ├─ 显式 Mock 开发：Vite Dev Server (:5174，不连接真实后端)
-    │
-    ├─ Docker 整站：Nginx (:80) → client 容器 → server:3000
-    │   └─ 容器后端宿主机映射：127.0.0.1:3002（仅验收直连）
-    │
-    └─ NestJS Server (:3000)
-        ├─ @nestjs/serve-static → /uploads 静态文件
-        ├─ Prisma Client → MySQL (:3306, Docker)
-        ├─ Bull Queue → Redis (:6379, Docker)
-        └─ /api/health（存活）与 /api/ready（数据库就绪）
+```text
+Browser
+  └─ React / TypeScript / Vite client
+       └─ shared HTTP transport + domain clients
+            └─ NestJS controllers
+                 └─ domain services
+                      └─ Prisma
+                           └─ MySQL
 ```
 
-## 前端分层
+- 根目录负责跨包脚本、合同、门禁和编排。
+- `client/` 负责客户前台、管理后台、页面编辑器和浏览器侧状态。
+- `server/` 负责身份、权限、业务规则、事务、持久化和外部服务边界。
+- `contracts/page-builder/` 是页面构建器跨端机器合同来源；生成物不得手改。
+- `docs/` 只解释方向、决定、状态和操作，不成为运行时代码或数据的第二事实源。
 
-```
-App.tsx (路由总表)
-  ├─ PublicLayout → 前台 12 页面
-  │   ├─ pages/public/*
-  │   ├─ components/blocks/* (首页内容块)
-  │   └─ hooks/usePageModules, useProductData
-  │
-  └─ AdminLayout → 后台 18 页面
-      ├─ pages/admin/*
-      ├─ components/common/*
-      └─ hooks/usePageModules
+## 请求与数据流
 
-共享层:
-  ├─ services/api.ts       — HTTP 封装 (26 文件依赖)
-  ├─ utils/unwrap.ts       — 响应解包 (25 文件依赖)
-  ├─ store/*               — Zustand 全局状态 (6 个 store)
-  └─ types/*               — TypeScript 类型定义
-```
+1. React 页面或组件调用领域客户端。
+2. 领域客户端复用 `client/src/services/httpClient.ts` 的传输、凭据、CSRF、错误与响应处理。
+3. NestJS Controller 负责路由、鉴权、参数接收和委托；Service 承担业务规则、事务与 Prisma 访问。
+4. 成功响应由全局 `TransformInterceptor` 包装，客户端通过共享解包工具消费。
+5. 数据模型、关系和数据库约束只认 `server/prisma/schema.prisma`；migration 是否应用必须对精确目标库核验。
 
-## 后端分层
+## 身份与信任边界
 
-```
-app.module.ts
-  ├─ common/
-  │   ├─ prisma/           — 数据库服务（全局）
-  │   ├─ guards/           — JWT + 角色守卫（全局默认拒绝，@Public 显式放行）
-  │   ├─ decorators/       — @Public, @Roles, @CurrentUser
-  │   ├─ interceptors/     — 统一响应格式与敏感写操作审计
-  │   ├─ filters/          — HTTP 异常过滤器
-  │   └─ kimi/             — Kimi AI 服务
-  │
-  └─ modules/ (21 个)
-      每个: *.controller.ts + *.service.ts + *.module.ts
+- 后台员工和前台客户使用独立身份域、独立会话与域标记。
+- 浏览器默认使用 `HttpOnly` 会话 Cookie；写请求同时通过精确 Origin 和 CSRF 校验。
+- Bearer access token 仅作受控兼容入口，不是浏览器 `localStorage` 持久化架构。
+- 前端路由和按钮只提供界面约束；服务端 Guard、角色声明和 Service 校验才是最终权限边界。
 
-队列: queue/queue.module.ts (Bull)
-```
+## 页面装修边界
 
-## 数据流
+- `PageDocument` 保存页面实例及发布快照；`TemplateDefinitionV2` 保存母模板结构和不可变版本。
+- 页面装修和模板设计复用 Shared Editor Core、Repository 与 Renderer，但选择、历史、脏状态、保存对象和发布结果相互隔离。
+- 内容模板兼容合同与模板结构合同各自承担明确职责，Renderer、Inspector、目录和测试只消费，不复制合同。
+- 详细产品语义见 `docs/page-builder/template-design-framework.md`，当前调用链见 `docs/architecture/page-builder-boundary.md`。
 
-1. 用户操作 → React 组件 → hook / Zustand store
-2. hook → `services/api.ts` (axios，自动附加 JWT)
-3. HTTP → Vite 代理 → NestJS Controller
-4. Controller → Service → Prisma Client → MySQL
-5. 响应 → TransformInterceptor 包装 → JSON
-6. JSON → `utils/unwrap.ts` 解包 → React state
+## 运行与发布边界
 
-## 认证流程
-
-```
-POST /api/auth/login → JWT Token
-    ↓
-localStorage('token')
-    ↓
-api.ts interceptor: Authorization: Bearer <token>
-    ↓
-JwtAuthGuard / RolesGuard → @CurrentUser
-```
-
-## 关键技术决策
-
-- **Zustand** 而非 Redux：轻量、无 Provider、selector 模式
-- **Feature Flags**：电商功能代码已完成，开关控制上线节奏
-- **Mock 模式**：仅由 Vite `mock` mode 显式开启（`npm run dev:mock`），默认走真实 API
-- **页面构建器**：iframe + postMessage 架构，编辑/预览完全隔离
-- **站点设置**：以 `site_settings` 数据表为唯一持久化来源；旧 `settings.json` 只在首次初始化时导入
+- 本地端口、启动命令和容器拓扑只在 `docs/DEVELOPMENT_WORKFLOW.md` 维护。
+- 部署参考见 `docs/DEPLOYMENT.md`；正式制品、证据、告警和回滚只认 `docs/PRODUCTION_RELEASE_RUNBOOK.md`。
+- 代码、路由、Feature Flag、Mock、构建或隔离测试存在，都不能单独证明真实业务闭环或生产可用。

@@ -1081,6 +1081,7 @@
   .site-menu-toggle,
   .site-menu-toggle::after,
   .brand-menu,
+  .brand-menu::before,
   .brand-menu__inner,
   .brand-menu__label,
   .brand-menu__arrow,

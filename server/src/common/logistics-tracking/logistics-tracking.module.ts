@@ -1,5 +1,8 @@
 import { Global, Module } from '@nestjs/common';
-import { LogisticsTrackingService } from './logistics-tracking.service';
+import {
+  LOGISTICS_TRACKING_PROVIDER,
+  LogisticsTrackingService,
+} from './logistics-tracking.service';
 
 /**
  * 物流轨迹查询（快递100）。
@@ -8,7 +11,10 @@ import { LogisticsTrackingService } from './logistics-tracking.service';
  */
 @Global()
 @Module({
-  providers: [LogisticsTrackingService],
-  exports: [LogisticsTrackingService],
+  providers: [
+    { provide: LOGISTICS_TRACKING_PROVIDER, useValue: null },
+    LogisticsTrackingService,
+  ],
+  exports: [LOGISTICS_TRACKING_PROVIDER, LogisticsTrackingService],
 })
 export class LogisticsTrackingModule {}

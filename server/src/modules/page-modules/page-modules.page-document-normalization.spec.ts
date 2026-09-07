@@ -26,6 +26,12 @@ function makeLegacyHeroDocument() {
                   mobile: { x: 0.2, y: 0.62, width: 0.6, height: 0.12 },
                 },
               },
+              action: {
+                rectByViewport: {
+                  desktop: { x: 0.2, y: 0.75, width: 0.3, height: 0.1 },
+                  mobile: { x: 0.1, y: 0.8, width: 0.6, height: 0.1 },
+                },
+              },
               mobileImage: {
                 rectByViewport: {
                   mobile: { x: -0.2, y: 0.7, width: 1.4, height: 0.5 },
@@ -53,25 +59,22 @@ function assertLegacyHeroWasNormalized(puckData: any) {
     width: 0.6,
     height: 0.12,
   });
-  assert.deepEqual(nodes.title.rectByViewport.desktop, {
-    x: 0,
-    y: 0.5,
-    width: 0.92,
-    height: 0.1,
+  assert.equal(nodes.title.rectByViewport.desktop, undefined);
+  assert.equal(nodes.mobileImage.rectByViewport?.mobile, undefined);
+  assert.deepEqual(nodes.action.rectByViewport, {
+    desktop: { x: 0.2, y: 0.75, width: 0.3, height: 0.1 },
+    mobile: { x: 0.1, y: 0.8, width: 0.6, height: 0.1 },
   });
-  assert.deepEqual(nodes.mobileImage.rectByViewport.mobile, {
-    x: 0,
-    y: 0.5,
-    width: 1,
-    height: 0.5,
-  });
+  assert.equal(props.title, "旧文档标题");
+  assert.equal(props.desktopImage, "/images/hero-desktop.jpg");
+  assert.equal(props.mobileImage, "/images/hero-mobile.jpg");
   assert.deepEqual(nodes.mobileImage.mediaView.focusByViewport.mobile, {
     x: 61,
     y: 48,
   });
 }
 
-test("保存旧 version=2 PageDocument 时将越界几何收敛到画框并保留合法双端覆盖", async () => {
+test("保存旧 version=2 PageDocument 时拒绝非法双端几何并保留合法覆盖", async () => {
   const writes: any[] = [];
   const existing = {
     id: 9,
@@ -214,7 +217,7 @@ test("发布页面时缺少 expectedUpdatedAt 在开启事务前即被拒绝", a
   assert.equal(transactions, 0);
 });
 
-test("直接发布旧 PageDocument 时校验、revision 与当前文档共用规范化内容", async () => {
+test("直接发布旧 PageDocument 时拒绝非法双端几何，revision 与当前文档共用规范化内容", async () => {
   const legacyPuckData = makeLegacyHeroDocument();
   const document = {
     id: 9,
@@ -266,6 +269,7 @@ test("直接发布旧 PageDocument 时校验、revision 与当前文档共用规
     calls.validationPuckData = puckData;
     return { errors: [], issues: [] };
   };
+  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [];
 
   await service.publishPageDocument(
     "custom",
@@ -276,6 +280,7 @@ test("直接发布旧 PageDocument 时校验、revision 与当前文档共用规
   assertLegacyHeroWasNormalized(calls.validationPuckData);
   assertLegacyHeroWasNormalized(calls.revision.data.puckData);
   assertLegacyHeroWasNormalized(calls.update.data.puckData);
+  assert.deepEqual(calls.validationPuckData, calls.revision.data.puckData);
   assert.deepEqual(calls.revision.data.puckData, calls.update.data.puckData);
   assert.equal(calls.revision.data.version, 1);
   assert.equal(calls.revision.data.publishedBy, 17);

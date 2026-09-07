@@ -44,9 +44,9 @@ The coordinating agent owns scope, final judgment, de-duplication, severity, and
 
 Skip this section for focused review. When formal orchestration is authorized:
 
-1. Give the assessment subagent the scope identity, diff inventory, change statistics, touched subsystems, known requirements, and environment limitations.
-2. Require a structured decision: `Single reviewer` or `Parallel specialists`, with rationale, risk dimensions, proposed partitions, overlap plan, and verification needs.
-3. Follow the decision unless concrete new evidence invalidates it. Record any override and reason.
+1. The coordinator assesses scope identity, diff inventory, change statistics, touched subsystems, known requirements, and environment limitations. Delegate this assessment only when independent assessment itself adds material value; an assessor is not a prerequisite for specialist review.
+2. Record the coordinator's decision: `Single reviewer` or `Parallel specialists`, with rationale, risk dimensions, proposed partitions, overlap plan, and verification needs. If an assessor was justified, use its recommendation as input evidence.
+3. The coordinator owns and may revise that decision when new evidence warrants it. Record material changes and reasons without treating a subagent recommendation as authority.
 4. For parallel review, assign bounded, non-identical ownership. Typical angles include:
    - correctness, state, data flow, and API contracts
    - security, privacy, auth, permissions, and trust boundaries
@@ -115,7 +115,7 @@ For every accepted finding:
 - state the expected-behavior basis and how the claim was verified
 - in formal report mode, additionally record reviewer origin, canonical issue key and verified semantic issue fingerprint
 
-Do not invent defects. A clean result still requires a full coverage ledger, strongest blind spot, and verification record.
+Do not invent defects. A clean focused review reports reviewed scope, verification and material blind spots concisely. A clean formal report additionally includes the full coverage ledger required by that mode; no finding does not waive evidence requirements.
 
 ## Severity and Recommendation
 

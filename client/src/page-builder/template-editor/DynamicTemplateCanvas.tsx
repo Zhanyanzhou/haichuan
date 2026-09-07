@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { App as AntdApp } from "antd";
 import {
   compileDynamicTemplateRenderPlan,
   duplicateDynamicTemplateNode,
@@ -6,6 +7,7 @@ import {
   editableTargetToVisualKind,
   formatTemplateRatio,
   getExplicitContractRolePresentation,
+  getDynamicTemplateStructureLockOwnerId,
   removeDynamicTemplateNode,
   resolveEditableTargets,
   resolveTemplateDesignFrame,
@@ -17,7 +19,12 @@ import type { TemplateDefinitionV2 } from "../template-definition";
 import {
   findContentTemplateEditableObject,
   getContentTemplateContract,
+  getContentTemplateDefaultRect,
   sanitizeContentTemplateLayoutData,
+} from "../generated/contentTemplates.generated";
+import type {
+  ContentTemplateSizeCompatibility,
+  ContentTemplateVisualRect,
 } from "../generated/contentTemplates.generated";
 import {
   getContentTemplateModuleTypeForSlotType,
@@ -51,6 +58,26 @@ import {
   createTemplatePreviewScenarioContentBySlotId,
   resolveTemplatePreviewViewport,
 } from "./templatePreviewModel";
+import { describeDynamicTemplateRemoval, findDynamicTemplateParentId } from "./dynamicTemplateEditorUtils";
+
+type ContentTemplateLayoutNodeState = {
+  rectByViewport?: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>>;
+  sizeCompatibilityByViewport?: Partial<Record<"desktop" | "mobile", ContentTemplateSizeCompatibility>>;
+};
+
+function compatibilityForMaterializedRect(
+  rect: ContentTemplateVisualRect,
+  constraints: { minSize: { width: number; height: number }; maxSize: { width: number; height: number } },
+) {
+  const compatibility: ContentTemplateSizeCompatibility = {};
+  if (rect.width < constraints.minSize.width || rect.width > constraints.maxSize.width) {
+    compatibility.width = "preserve-until-resize";
+  }
+  if (rect.height < constraints.minSize.height || rect.height > constraints.maxSize.height) {
+    compatibility.height = "preserve-until-resize";
+  }
+  return compatibility;
+}
 
 function createEditingContent(
   definition: TemplateDefinitionV2,
@@ -59,6 +86,7 @@ function createEditingContent(
 }
 
 export default function DynamicTemplateCanvas() {
+  const { modal } = AntdApp.useApp();
   const draft = useTemplateEditorSession((state) => state.draft);
   const baseline = useTemplateEditorSession((state) => state.baseline);
   const device = useTemplateEditorSession((state) => state.device);
@@ -70,7 +98,7 @@ export default function DynamicTemplateCanvas() {
   const selectObject = useTemplateEditorSession((state) => state.selectObject);
   const selectContractRole = useTemplateEditorSession((state) => state.selectContractRole);
   const setPreviewScenario = useTemplateEditorSession((state) => state.setPreviewScenario);
-  const setDynamicDefinition = useTemplateEditorSession((state) => state.setDynamicDefinition);
+  const executeCommand = useTemplateEditorSession((state) => state.executeCommand);
   const visualSelection = useVisualEditorSession((state) =>
     state.workspace === "template" ? state.selection : null,
   );
@@ -106,10 +134,14 @@ export default function DynamicTemplateCanvas() {
         ? undefined
         : sanitizeContentTemplateLayoutData(detail.moduleType, detail.overrides);
       if (detail.overrides !== undefined && !sanitized) return;
-      const next = structuredClone(currentDraft.definition);
-      if (sanitized) next.nodes[nodeId].props.contentTemplateLayoutData = sanitized;
-      else delete next.nodes[nodeId].props.contentTemplateLayoutData;
-      state.setDynamicDefinition(next);
+      state.executeCommand({
+        type: "update-definition",
+        label: "更新画布对象构图",
+        update: (next) => {
+          if (sanitized) next.nodes[nodeId].props.contentTemplateLayoutData = sanitized;
+          else delete next.nodes[nodeId].props.contentTemplateLayoutData;
+        },
+      });
     };
     window.addEventListener("message", handleTemplateVisualEdit);
     return () => window.removeEventListener("message", handleTemplateVisualEdit);
@@ -157,6 +189,7 @@ export default function DynamicTemplateCanvas() {
     });
   }, [dynamicDraft, selectedContractRole, sessionId]);
   if (!dynamicDraft) return null;
+  const canvasLocked = getDynamicTemplateStructureLockOwnerId(dynamicDraft.definition, dynamicDraft.definition.rootNodeId) !== null;
   const rootNode = dynamicDraft.definition.nodes[dynamicDraft.definition.rootNodeId];
   const isEmptyTemplate = !rootNode || rootNode.childIds.length === 0;
   const { sourceWidth, fallbackHeight, heightMode, ratioLabel } = resolveTemplatePreviewViewport(
@@ -175,16 +208,51 @@ export default function DynamicTemplateCanvas() {
   const previewContent = previewMode
     ? createTemplatePreviewScenarioContentBySlotId(dynamicDraft.definition, previewScenario)
     : createEditingContent(dynamicDraft.definition);
-  const editableTargets = (() => {
+  const editableTargets: OverlayTargetDescriptor[] = (() => {
     if (previewMode) return [];
     const compiled = compileDynamicTemplateRenderPlan(dynamicDraft.definition, {
       device,
       contentBySlotId: previewContent,
       showEmptySlots: true,
     });
-    return compiled.ok
-      ? resolveEditableTargets(dynamicDraft.definition, compiled.plan, getContentTemplateContract)
-      : [];
+    if (!compiled.ok) return [];
+    return resolveEditableTargets(
+      dynamicDraft.definition,
+      compiled.plan,
+      getContentTemplateContract,
+    ).filter((target) => {
+      if (target.source !== "builtin-contract-role" || !target.contractRoleId) return true;
+      const node = dynamicDraft.definition.nodes[target.ownerNodeId];
+      const slot = node?.slotId ? dynamicDraft.definition.slots[node.slotId] : undefined;
+      const moduleType = slot ? getContentTemplateModuleTypeForSlotType(slot.type) : undefined;
+      const contract = moduleType ? getContentTemplateContract(moduleType) : undefined;
+      return contract?.defaultGeometryByViewport[device].zones.some((zone) =>
+        zone.nodeId === target.contractRoleId || zone.roleId === target.contractRoleId,
+      ) ?? true;
+    }).map((target) => {
+      if (target.source !== "builtin-contract-role" || !target.contractRoleId) return target;
+      const node = dynamicDraft.definition.nodes[target.ownerNodeId];
+      const slot = node?.slotId ? dynamicDraft.definition.slots[node.slotId] : undefined;
+      const moduleType = slot ? getContentTemplateModuleTypeForSlotType(slot.type) : undefined;
+      const layoutNode = (node?.props.contentTemplateLayoutData as {
+        nodes?: Record<string, ContentTemplateLayoutNodeState>;
+      } | undefined)?.nodes?.[target.contractRoleId];
+      return {
+        ...target,
+        persistedLayoutRect: layoutNode?.rectByViewport?.[device],
+        fallbackLayoutRect: getContentTemplateDefaultRect(
+          moduleType ?? "",
+          target.contractRoleId,
+          device,
+        ),
+      };
+    }).map((target) => ({
+      ...target,
+      locked: Boolean(getDynamicTemplateStructureLockOwnerId(dynamicDraft.definition, target.ownerNodeId)),
+      parentTargetId: target.source === "builtin-contract-role"
+        ? `node:${target.ownerNodeId}`
+        : `node:${findDynamicTemplateParentId(dynamicDraft.definition, target.ownerNodeId) ?? ""}`,
+    }));
   })();
   const selectedOverlayTargetId = selectedContractRole
     ? `role:${selectedContractRole.nodeId}:${selectedContractRole.roleId}`
@@ -192,13 +260,13 @@ export default function DynamicTemplateCanvas() {
       ? `node:${selectedNodeId}`
       : null;
   const freePlacementTargetIds = new Set(editableTargets.flatMap((target) => {
-    if (target.source !== "definition-node" || !target.capabilities.includes("structure")) return [];
+    if (target.locked || target.source !== "definition-node" || !target.capabilities?.includes("structure")) return [];
     return dynamicDraft.definition.nodes[target.ownerNodeId]?.responsive[device].placement
       ? [target.targetId]
       : [];
   }));
   const contractLayoutTargetIds = new Set(editableTargets.flatMap((target) =>
-    target.source === "builtin-contract-role" && target.capabilities.includes("layout")
+    !target.locked && target.source === "builtin-contract-role" && target.capabilities?.includes("layout")
       ? [target.targetId]
       : [],
   ));
@@ -222,9 +290,13 @@ export default function DynamicTemplateCanvas() {
     const currentDraft = useTemplateEditorSession.getState().draft;
     const node = currentDraft?.definition.nodes[nodeId];
     if (!currentDraft || !node) return;
-    const next = structuredClone(currentDraft.definition);
-    next.nodes[nodeId].responsive[targetDevice].placement = placement;
-    setDynamicDefinition(next);
+    executeCommand({
+      type: "update-definition",
+      label: "更新自由布局位置",
+      update: (next) => {
+        next.nodes[nodeId].responsive[targetDevice].placement = placement;
+      },
+    });
   };
   const commitOverlayPlacementGesture = (gesture: OverlayPlacementGesture) => {
     const currentDraft = useTemplateEditorSession.getState().draft;
@@ -241,8 +313,7 @@ export default function DynamicTemplateCanvas() {
       const moduleType = slot ? getContentTemplateModuleTypeForSlotType(slot.type) : undefined;
       const contract = moduleType ? getContentTemplateContract(moduleType) : undefined;
       const roleId = gesture.target.contractRoleId;
-      const defaultRect = contract?.defaultGeometryByViewport[device].zones
-        .find((zone) => zone.nodeId === roleId)?.rect;
+      const defaultRect = getContentTemplateDefaultRect(moduleType ?? "", roleId, device);
       if (!moduleType || !defaultRect) return;
       const editableObject = findContentTemplateEditableObject(contract, roleId);
       if (!editableObject) return;
@@ -250,9 +321,10 @@ export default function DynamicTemplateCanvas() {
       const bounds = constraints.safeAreaRequired
         ? contract!.defaultGeometryByViewport[device].safeArea
         : { x: 0, y: 0, width: 1, height: 1 };
-      const explicitRect = (node.props.contentTemplateLayoutData as {
-        nodes?: Record<string, { rectByViewport?: Partial<Record<typeof device, typeof defaultRect>> }>;
-      } | undefined)?.nodes?.[roleId]?.rectByViewport?.[device];
+      const layoutNode = (node.props.contentTemplateLayoutData as {
+        nodes?: Record<string, ContentTemplateLayoutNodeState>;
+      } | undefined)?.nodes?.[roleId];
+      const explicitRect = layoutNode?.rectByViewport?.[device];
       const currentRect = explicitRect ?? gesture.sourceRect ?? defaultRect;
       const nextRect = applyBoundedNormalizedRectGesture({
         rect: currentRect,
@@ -267,16 +339,36 @@ export default function DynamicTemplateCanvas() {
         constraints,
         bounds,
       });
-      const next = structuredClone(currentDraft.definition);
-      const nextLayoutData = setVisualOverridePath(
+      let nextLayoutData = setVisualOverridePath(
         node.props.contentTemplateLayoutData,
         ["nodes", roleId, "rectByViewport", device],
         nextRect,
       );
+      const currentCompatibility = explicitRect
+        ? { ...(layoutNode?.sizeCompatibilityByViewport?.[device] ?? {}) }
+        : compatibilityForMaterializedRect(currentRect, constraints);
+      if (gesture.operation === "resize") {
+        if (gesture.direction?.includes("w") || gesture.direction?.includes("e")) {
+          delete currentCompatibility.width;
+        }
+        if (gesture.direction?.includes("n") || gesture.direction?.includes("s")) {
+          delete currentCompatibility.height;
+        }
+      }
+      nextLayoutData = setVisualOverridePath(
+        nextLayoutData,
+        ["nodes", roleId, "sizeCompatibilityByViewport", device],
+        Object.keys(currentCompatibility).length ? currentCompatibility : undefined,
+      );
       const sanitized = sanitizeContentTemplateLayoutData(moduleType, nextLayoutData);
       if (!sanitized) return;
-      next.nodes[nodeId].props.contentTemplateLayoutData = sanitized;
-      setDynamicDefinition(next);
+      executeCommand({
+        type: "update-definition",
+        label: "更新合同对象位置",
+        update: (next) => {
+          next.nodes[nodeId].props.contentTemplateLayoutData = sanitized;
+        },
+      });
       return;
     }
     const placement = node?.responsive[device].placement;
@@ -317,81 +409,121 @@ export default function DynamicTemplateCanvas() {
     const currentDraft = useTemplateEditorSession.getState().draft;
     if (!currentDraft) return;
     const node = currentDraft.definition.nodes[nodeId];
+    if (!node) return;
     const slot = node?.slotId ? currentDraft.definition.slots[node.slotId] : undefined;
     if ((action === "hide" || action === "delete") && slot?.required) return;
     if (action === "duplicate") {
-      const result = duplicateDynamicTemplateNode(currentDraft.definition, nodeId);
-      setDynamicDefinition(result.definition);
-      selectObject(result.nodeId);
+      let duplicatedNodeId: string | null = null;
+      const result = executeCommand({
+        type: "transform-definition",
+        label: "复制节点",
+        transform: (current) => {
+          const duplicated = duplicateDynamicTemplateNode(current, nodeId);
+          duplicatedNodeId = duplicated.nodeId;
+          return duplicated.definition;
+        },
+      });
+      if (result.ok && duplicatedNodeId) selectObject(duplicatedNodeId);
       return;
     }
     if (action === "delete") {
-      if (!window.confirm("删除当前节点及其子节点？可使用撤销恢复。")) return;
-      setDynamicDefinition(removeDynamicTemplateNode(currentDraft.definition, nodeId));
-      selectObject(currentDraft.definition.rootNodeId);
+      modal.confirm({
+        title: `删除“${node.name}”及其子节点？`,
+        content: describeDynamicTemplateRemoval(currentDraft.definition, nodeId),
+        okText: "删除节点",
+        cancelText: "取消",
+        okButtonProps: { danger: true },
+        onOk: () => {
+          const result = executeCommand({
+            type: "transform-definition",
+            label: "删除节点",
+            transform: (current) => removeDynamicTemplateNode(current, nodeId),
+          });
+          if (result.ok) selectObject(currentDraft.definition.rootNodeId);
+        },
+      });
       return;
     }
     if (action === "hide") {
-      setDynamicDefinition(setDynamicTemplateNodeHidden(currentDraft.definition, nodeId, true));
-      selectObject(currentDraft.definition.rootNodeId);
+      const result = executeCommand({
+        type: "transform-definition",
+        label: "隐藏节点",
+        transform: (current) => setDynamicTemplateNodeHidden(current, nodeId, true),
+      });
+      if (result.ok) selectObject(currentDraft.definition.rootNodeId);
       return;
     }
     const placement = currentDraft.definition.nodes[nodeId]?.responsive[device].placement;
     if (!placement) return;
-    const next = structuredClone(currentDraft.definition);
     if (action === "align-horizontal" || action === "align-vertical") {
-      next.nodes[nodeId].responsive[device].placement = alignNormalizedRect(
-        placement,
-        action === "align-horizontal" ? "horizontal" : "vertical",
-      );
-      setDynamicDefinition(next);
+      executeCommand({
+        type: "update-definition",
+        label: action === "align-horizontal" ? "水平居中节点" : "垂直居中节点",
+        update: (next) => {
+          next.nodes[nodeId].responsive[device].placement = alignNormalizedRect(
+            placement,
+            action === "align-horizontal" ? "horizontal" : "vertical",
+          );
+        },
+      });
       return;
     }
     if (action === "copy-responsive") {
       const targetDevice = device === "desktop" ? "mobile" : "desktop";
-      const parent = Object.values(next.nodes).find((candidate) => candidate.childIds.includes(nodeId));
+      const parent = Object.values(currentDraft.definition.nodes).find((candidate) => candidate.childIds.includes(nodeId));
       if (!parent || parent.type !== "Stack" || parent.responsive[device].layoutMode !== "free") return;
-      const sourceParentRules = parent.responsive[device];
-      const targetParentRules = parent.responsive[targetDevice];
-      targetParentRules.layoutMode = "free";
-      targetParentRules.display = "block";
-      if (targetParentRules.height.mode === "auto") {
-        targetParentRules.height = structuredClone(sourceParentRules.height);
-      }
-      parent.childIds.forEach((childId) => {
-        const sourcePlacement = next.nodes[childId]?.responsive[device].placement;
-        if (sourcePlacement) {
-          next.nodes[childId].responsive[targetDevice].placement = { ...sourcePlacement };
-        }
+      executeCommand({
+        type: "update-definition",
+        label: "复制自由布局到另一画布",
+        update: (next) => {
+          const nextParent = next.nodes[parent.nodeId];
+          const sourceParentRules = nextParent.responsive[device];
+          const targetParentRules = nextParent.responsive[targetDevice];
+          targetParentRules.layoutMode = "free";
+          targetParentRules.display = "block";
+          if (targetParentRules.height.mode === "auto") {
+            targetParentRules.height = structuredClone(sourceParentRules.height);
+          }
+          nextParent.childIds.forEach((childId) => {
+            const sourcePlacement = next.nodes[childId]?.responsive[device].placement;
+            if (sourcePlacement) {
+              next.nodes[childId].responsive[targetDevice].placement = { ...sourcePlacement };
+            }
+          });
+        },
       });
-      setDynamicDefinition(next);
       return;
     }
-    next.nodes[nodeId].responsive[device].placement = {
-      ...placement,
-      zIndex: clampGeometryValue(placement.zIndex + (action === "forward" ? 1 : -1), -10, 10),
-    };
-    setDynamicDefinition(next);
+    executeCommand({
+      type: "update-definition",
+      label: action === "forward" ? "节点上移一层" : "节点下移一层",
+      update: (next) => {
+        next.nodes[nodeId].responsive[device].placement = {
+          ...placement,
+          zIndex: clampGeometryValue(placement.zIndex + (action === "forward" ? 1 : -1), -10, 10),
+        };
+      },
+    });
   };
   const updateCanvasWidth = (width: number) => {
     const currentDraft = useTemplateEditorSession.getState().draft;
-    if (!currentDraft) return;
-    setDynamicDefinition(setTemplateDesignWidth(currentDraft.definition, device, width));
+    if (!currentDraft || getDynamicTemplateStructureLockOwnerId(currentDraft.definition, currentDraft.definition.rootNodeId)) return;
+    executeCommand({ type: "transform-definition", label: "更新模板宽度", transform: (current) => setTemplateDesignWidth(current, device, width) });
   };
   const updateCanvasHeight = (height: number) => {
     const currentDraft = useTemplateEditorSession.getState().draft;
-    if (!currentDraft) return;
-    setDynamicDefinition(setTemplateDesignHeightMode(currentDraft.definition, device, "fixed", height));
+    if (!currentDraft || getDynamicTemplateStructureLockOwnerId(currentDraft.definition, currentDraft.definition.rootNodeId)) return;
+    executeCommand({ type: "transform-definition", label: "更新模板高度", transform: (current) => setTemplateDesignHeightMode(current, device, "fixed", height) });
   };
   const updateCanvasHeightMode = (mode: "fixed" | "aspect-ratio" | "auto") => {
     const currentDraft = useTemplateEditorSession.getState().draft;
-    if (!currentDraft) return;
-    setDynamicDefinition(setTemplateDesignHeightMode(currentDraft.definition, device, mode));
+    if (!currentDraft || getDynamicTemplateStructureLockOwnerId(currentDraft.definition, currentDraft.definition.rootNodeId)) return;
+    executeCommand({ type: "transform-definition", label: "更新模板高度模式", transform: (current) => setTemplateDesignHeightMode(current, device, mode) });
   };
   const updateCanvasRatio = (ratio: { width: number; height: number }) => {
     const currentDraft = useTemplateEditorSession.getState().draft;
-    if (!currentDraft) return;
-    setDynamicDefinition(setTemplateDesignHeightMode(currentDraft.definition, device, "aspect-ratio", ratio));
+    if (!currentDraft || getDynamicTemplateStructureLockOwnerId(currentDraft.definition, currentDraft.definition.rootNodeId)) return;
+    executeCommand({ type: "transform-definition", label: "更新模板比例", transform: (current) => setTemplateDesignHeightMode(current, device, "aspect-ratio", ratio) });
   };
   const baselineFrame = baseline
     ? resolveTemplateDesignFrame(baseline.definition, device)
@@ -423,7 +555,7 @@ export default function DynamicTemplateCanvas() {
     } else {
       next = setTemplateDesignHeightMode(next, device, "auto");
     }
-    setDynamicDefinition(next);
+    executeCommand({ type: "replace-definition", label: "恢复已保存模板尺寸", definition: next });
   };
   const commitDirectResize = (resize: TemplateDirectResizeValue) => {
     const currentDraft = useTemplateEditorSession.getState().draft;
@@ -463,7 +595,7 @@ export default function DynamicTemplateCanvas() {
       changed = true;
     }
     setDirectResizePreview(null);
-    if (changed) setDynamicDefinition(next);
+    if (changed) executeCommand({ type: "replace-definition", label: "调整模板画布尺寸", definition: next });
   };
 
   return (
@@ -499,14 +631,14 @@ export default function DynamicTemplateCanvas() {
         ratioLabel={directResizePreview ? displayRatioLabel : ratioLabel}
         minWidth={device === "desktop" ? 768 : 280}
         maxWidth={device === "desktop" ? 2560 : 767}
-        resizable={!previewMode}
-        title={`${dynamicDraft.definition.name}${device === "desktop" ? "桌面" : "移动"}模板隔离画布`}
+        resizable={!previewMode && !canvasLocked}
+        title={`${dynamicDraft.definition.name}模板隔离画布`}
         onWidthChange={updateCanvasWidth}
         onHeightChange={updateCanvasHeight}
         onHeightModeChange={updateCanvasHeightMode}
         onRatioChange={updateCanvasRatio}
         canRestore={canRestoreCanvasSize}
-        deviceLabel={device === "desktop" ? "桌面端" : "移动端"}
+        device={device}
         onRestore={restoreCanvasSize}
         onDirectResizePreview={setDirectResizePreview}
         onDirectResizeCancel={() => setDirectResizePreview(null)}
@@ -518,11 +650,9 @@ export default function DynamicTemplateCanvas() {
         movableOverlayTargetIds={overlayPlacementTargetIds}
         resizeOverlayTargetIds={overlayPlacementTargetIds}
         disabledOverlayNodeActions={disabledNodeActions}
-        copyResponsiveDestinationLabel={device === "desktop" ? "移动端" : "桌面端"}
+        copyResponsiveDestinationLabel="另一画布"
         onOverlayTargetSelect={previewMode ? undefined : selectOverlayTarget}
-        onOverlayNodeAction={previewMode ? undefined : (target, action) => {
-          handleNodeAction(target.ownerNodeId, action);
-        }}
+        onOverlayNodeAction={undefined}
         onOverlayPlacementGesture={previewMode ? undefined : commitOverlayPlacementGesture}
       >
         <div
@@ -549,7 +679,9 @@ export default function DynamicTemplateCanvas() {
             onSelectNode={previewMode ? undefined : selectObject}
             onSelectContractRole={previewMode ? undefined : selectContractRole}
             onTemplatePlacementCommit={previewMode ? undefined : commitPlacement}
-            onNodeAction={previewMode ? undefined : handleNodeAction}
+            onNodeAction={previewMode || selectedNodeId === dynamicDraft.definition.rootNodeId
+              ? undefined
+              : handleNodeAction}
           />
           {!previewMode && isEmptyTemplate ? (
             <div className="template-editor__canvas-empty-state" role="status">

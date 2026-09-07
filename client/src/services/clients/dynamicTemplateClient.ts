@@ -79,6 +79,16 @@ export interface DynamicTemplateVersionResource {
   publishedAt: string;
 }
 
+export type DynamicTemplateVersionSummaryResource = Omit<
+  DynamicTemplateVersionResource,
+  "definition"
+>;
+
+export interface DynamicTemplateVersionPageResource {
+  items: DynamicTemplateVersionSummaryResource[];
+  nextBeforeVersion: number | null;
+}
+
 export interface DynamicTemplatePublishResultResource {
   templateId: string;
   version: number;
@@ -186,7 +196,13 @@ export const dynamicTemplateApi = {
   },
   updateDraft: async (
     templateId: string,
-    data: { expectedRevision: number; definition: TemplateDefinitionV2; versionNote?: string },
+    data: {
+      expectedRevision: number;
+      definition: TemplateDefinitionV2;
+      versionNote?: string;
+      restoreFromVersion?: number;
+      restoreFromChecksum?: string;
+    },
   ) => {
     if (USE_MOCK) unavailableMockWrite();
     return api.patch(`/page-modules/dynamic-templates/${encodeURIComponent(templateId)}/draft`, data, {
@@ -210,13 +226,17 @@ export const dynamicTemplateApi = {
       { suppressGlobalError: true },
     );
   },
-  listVersions: async (templateId: string) => {
+  listVersions: async (
+    templateId: string,
+    options: { beforeVersion?: number; limit?: number } = {},
+  ) => {
     if (USE_MOCK) {
       await mockDelay(80);
-      return mockResponse([] as DynamicTemplateVersionResource[]);
+      return mockResponse({ items: [], nextBeforeVersion: null } satisfies DynamicTemplateVersionPageResource);
     }
     return api.get(`/page-modules/dynamic-templates/${encodeURIComponent(templateId)}/versions`, {
       suppressGlobalError: true,
+      params: options,
     });
   },
   archive: async (templateId: string) => {

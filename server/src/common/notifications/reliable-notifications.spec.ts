@@ -109,6 +109,57 @@ test("可靠通知：每笔支付确认使用 paymentId 去重并记录累计与
   });
 });
 
+test("可靠通知：订单生命周期事件复用统一意图并按履约单去重", async () => {
+  const harness = createIntentHarness();
+  await harness.service.enqueueOrderLifecycle(harness.tx, {
+    id: 15,
+    orderNo: "ORD-15",
+    customerId: 9,
+    customerEmail: "customer@example.com",
+    finalAmount: 50,
+  }, {
+    event: "SHIPPED",
+    fulfillmentId: 31,
+    carrier: "TEST",
+    trackingNo: "TRACK-31",
+  });
+
+  assert.equal(harness.notifications[0].type, "SERVICE_ORDER_SHIPPED");
+  assert.match(harness.notifications[0].body, /TEST.*TRACK-31/);
+  assert.deepEqual(
+    harness.deliveries.map((delivery) => delivery.status),
+    ["DELIVERED", "PENDING"],
+  );
+  assert.equal(harness.outboxEvents[0].deduplicationKey, "order.shipped:31");
+  assert.deepEqual(harness.outboxEvents[0].payload, {
+    notificationId: 1,
+    orderId: 15,
+  });
+});
+
+test("可靠通知：退款完成意图包含退款事实并按 refundId 去重", async () => {
+  const harness = createIntentHarness();
+  await harness.service.enqueueRefundCompleted(harness.tx, {
+    id: 16,
+    orderNo: "ORD-16",
+    customerId: 9,
+    customerEmail: null,
+    finalAmount: 100,
+  }, {
+    id: 41,
+    refundNo: "REF-41",
+    amount: new Prisma.Decimal("18.80"),
+  });
+
+  assert.equal(harness.notifications[0].type, "SERVICE_REFUND_COMPLETED");
+  assert.match(harness.notifications[0].body, /REF-41.*¥18\.80/);
+  assert.equal(harness.outboxEvents[0].deduplicationKey, "refund.completed:41");
+  assert.deepEqual(harness.outboxEvents[0].payload, {
+    notificationId: 1,
+    orderId: 16,
+  });
+});
+
 test("可靠通知：Outbox 写入失败会向上抛出以回滚业务事务", async () => {
   const harness = createIntentHarness({ outboxFails: true });
   await assert.rejects(

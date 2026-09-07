@@ -1,24 +1,32 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { LeadSourceType, LeadStatus, Prisma } from "@prisma/client";
 import { OutboxService } from "../../common/outbox/outbox.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ReliableNotificationIntentService } from "../../common/notifications/reliable-notification-intent.service";
 import {
   isManuallyRetryableNotificationError,
   LEAD_PRIVACY_DISPOSITION_ERROR_CODE,
   LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
 } from "../../common/notifications/notification-delivery.constants";
 import { LEAD_TYPES, LEAD_STATUSES, type LeadType } from "./lead.constants";
-import { retentionForStatus } from "./lead-submission";
+import {
+  isUniqueConstraintError,
+  prepareRequiredLeadIdempotency,
+  retentionForStatus,
+} from "./lead-submission";
 import {
   anonymizeLeadInTransaction,
   type LeadPrivacyCandidate,
 } from "./lead-privacy-disposition";
+import { toLeadReplyMutationResult } from "./customer-lead-reply.response";
 
 export type LeadListQuery = {
   page?: number;
@@ -78,6 +86,8 @@ export class LeadsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxService,
+    @Optional()
+    private readonly reliableNotifications?: ReliableNotificationIntentService,
   ) {}
 
   private parseType(leadType: string): LeadType {
@@ -106,6 +116,46 @@ export class LeadsService {
       select: { id: true },
     });
     if (!actor) throw new ForbiddenException("仅启用中的超级管理员可以执行隐私处置");
+  }
+
+  private async findReplyReplay(
+    idempotencyKeyHash: string,
+    operationFingerprint: string,
+  ) {
+    const existing = await this.prisma.leadActivity.findUnique({
+      where: { idempotencyKeyHash },
+      select: {
+        id: true,
+        type: true,
+        content: true,
+        metadata: true,
+        createdAt: true,
+        lead: {
+          select: {
+            id: true,
+            status: true,
+            updatedAt: true,
+            privacyDisposedAt: true,
+          },
+        },
+      },
+    });
+    if (!existing) return null;
+    const metadata = existing.metadata
+      && typeof existing.metadata === "object"
+      && !Array.isArray(existing.metadata)
+      ? existing.metadata as Record<string, unknown>
+      : {};
+    if (
+      existing.type !== "REPLY"
+      || metadata.operationFingerprint !== operationFingerprint
+    ) {
+      throw new ConflictException("该幂等键已用于另一项操作，请重新提交");
+    }
+    if (existing.lead.privacyDisposedAt || existing.content === null) {
+      throw new ConflictException("线索已匿名化，原回复内容不可恢复");
+    }
+    return toLeadReplyMutationResult(existing.lead, existing);
   }
 
   private async resolveLead(leadType: string, leadId: number) {
@@ -406,9 +456,11 @@ export class LeadsService {
       include: { creator: { select: { id: true, realName: true } } },
     });
     const source = lead.inquiry ?? lead.selectionInquiry;
+    const latestReply = activities.find((activity) => activity.type === "REPLY");
     return {
       ...source,
       id: lead.id,
+      customerId: lead.customerId,
       sourceId: sourceIdOf(lead),
       leadType: API_TYPE_BY_SOURCE[lead.sourceType],
       leadTypeLabel:
@@ -428,6 +480,9 @@ export class LeadsService {
       legalHoldAt: lead.legalHoldAt,
       privacyDisposition: lead.privacyDisposition,
       privacyDisposedAt: lead.privacyDisposedAt,
+      reply: latestReply?.content ?? null,
+      repliedAt: latestReply?.createdAt ?? null,
+      updatedAt: lead.updatedAt,
       followUps: activities,
     };
   }
@@ -792,6 +847,9 @@ export class LeadsService {
   ) {
     const lead = await this.resolveLeadBySource("inquiry", sourceId);
     this.assertOperableLead(lead);
+    if (lead.customerId) {
+      throw new ConflictException("已登录客户的咨询必须从统一线索入口回复");
+    }
     if (!lead.inquiryId) throw new NotFoundException("咨询来源不存在");
     return this.prisma.$transaction(async (transaction) => {
       const inquiry = await transaction.inquiry.update({
@@ -827,6 +885,158 @@ export class LeadsService {
       }
       return inquiry;
     });
+  }
+
+  async replyToLead(
+    leadType: string,
+    leadId: number,
+    data: { reply: string; expectedUpdatedAt: string },
+    idempotencyKey: string | undefined,
+    actorId?: number,
+  ) {
+    if (!actorId) {
+      throw new ForbiddenException("无法确认当前后台员工身份");
+    }
+    this.parseId(actorId);
+    const apiType = this.parseType(leadType);
+    this.parseId(leadId);
+    if (typeof data.reply !== "string") {
+      throw new BadRequestException("回复内容必须是字符串");
+    }
+    const reply = data.reply.trim();
+    if (!reply) throw new BadRequestException("回复内容不能为空");
+    if (reply.length > 5000) {
+      throw new BadRequestException("回复内容不能超过 5000 个字符");
+    }
+    const expectedUpdatedAt = new Date(data.expectedUpdatedAt);
+    if (Number.isNaN(expectedUpdatedAt.getTime())) {
+      throw new BadRequestException("线索版本不合法");
+    }
+    const { idempotencyKeyHash, operationFingerprint } =
+      prepareRequiredLeadIdempotency(idempotencyKey, {
+        actorId,
+        expectedUpdatedAt: expectedUpdatedAt.toISOString(),
+        leadId,
+        leadType: apiType,
+        reply,
+      });
+    const replay = await this.findReplyReplay(
+      idempotencyKeyHash,
+      operationFingerprint,
+    );
+    if (replay) return replay;
+
+    const current = await this.resolveLead(apiType, leadId);
+    if (current.id !== leadId) throw new NotFoundException("线索不存在");
+    this.assertOperableLead(current);
+    if (!current.customerId) {
+      throw new UnprocessableEntityException("该线索未关联已登录客户");
+    }
+    if (current.status === "COMPLETED" || current.status === "INVALID") {
+      throw new ConflictException("线索已结束，请重新打开后再回复");
+    }
+    if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
+      throw new ConflictException("线索已被其他客服更新，请重新加载后再回复");
+    }
+    const sourceId = sourceIdOf(current);
+    if (!sourceId) throw new NotFoundException("线索来源不存在");
+    const reliableNotifications = this.reliableNotifications;
+    if (!reliableNotifications) {
+      throw new Error("ReliableNotificationIntentService is not configured");
+    }
+    const nextStatus: LeadStatus = current.status === "PENDING"
+      ? "CONTACTED"
+      : current.status;
+    const occurredAt = new Date();
+
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const changed = await transaction.lead.updateMany({
+          where: {
+            id: current.id,
+            status: current.status,
+            updatedAt: current.updatedAt,
+            privacyDisposedAt: null,
+          },
+          data: { status: nextStatus },
+        });
+        if (changed.count !== 1) {
+          throw new ConflictException(
+            "线索已被其他客服更新，请重新加载后再回复",
+          );
+        }
+
+        const activity = await transaction.leadActivity.create({
+          data: {
+            leadId: current.id,
+            type: "REPLY",
+            content: reply,
+            contactMethod: "other",
+            previousStatus: current.status,
+            currentStatus: nextStatus,
+            createdBy: actorId,
+            idempotencyKeyHash,
+            metadata: {
+              operation: "CUSTOMER_REPLY",
+              operationFingerprint,
+            },
+            createdAt: occurredAt,
+          },
+        });
+
+        await transaction.leadFollowUp.create({
+          data: {
+            leadType: apiType,
+            leadId: sourceId,
+            content: "已通过客户中心回复客户",
+            contactMethod: "other",
+            createdBy: actorId,
+            createdAt: occurredAt,
+          },
+        });
+
+        if (current.sourceType === "INQUIRY") {
+          await transaction.inquiry.update({
+            where: { id: sourceId },
+            data: {
+              reply,
+              repliedAt: occurredAt,
+              status: legacyStatus(current.sourceType, nextStatus),
+            },
+          });
+        } else {
+          await transaction.selectionInquiry.update({
+            where: { id: sourceId },
+            data: {
+              status: legacyStatus(current.sourceType, nextStatus),
+              handledBy: actorId,
+              handledAt: occurredAt,
+            },
+          });
+        }
+
+        await reliableNotifications.enqueueLeadReply(transaction, {
+          leadId: current.id,
+          activityId: activity.id,
+          customerId: current.customerId as number,
+          occurredAt,
+        });
+        const updated = await transaction.lead.findUniqueOrThrow({
+          where: { id: current.id },
+          select: { id: true, status: true, updatedAt: true },
+        });
+        return toLeadReplyMutationResult(updated, activity);
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error) || error instanceof ConflictException) {
+        const concurrentReplay = await this.findReplyReplay(
+          idempotencyKeyHash,
+          operationFingerprint,
+        );
+        if (concurrentReplay) return concurrentReplay;
+      }
+      throw error;
+    }
   }
 
   async addFollowUp(data: {

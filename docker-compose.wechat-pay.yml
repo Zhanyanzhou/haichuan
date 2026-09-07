@@ -1,0 +1,18 @@
+services:
+  server:
+    environment:
+      WECHAT_PLATFORM_CERT_PATH: /run/secrets/wechat-pay/platform-cert.pem
+      WECHAT_MCH_PRIVATE_KEY_PATH: /run/secrets/wechat-pay/mch-private-key.pem
+    volumes:
+      - type: bind
+        source: "${WECHAT_PLATFORM_CERT_HOST_PATH:?WECHAT_PLATFORM_CERT_HOST_PATH must be an absolute host file path}"
+        target: /run/secrets/wechat-pay/platform-cert.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${WECHAT_MCH_PRIVATE_KEY_HOST_PATH:?WECHAT_MCH_PRIVATE_KEY_HOST_PATH must be an absolute host file path}"
+        target: /run/secrets/wechat-pay/mch-private-key.pem
+        read_only: true
+        bind:
+          create_host_path: false

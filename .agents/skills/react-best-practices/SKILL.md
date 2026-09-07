@@ -28,7 +28,7 @@ metadata:
 
 - Next.js、RSC、SSR、Server Action、`next/dynamic`、`after()` 与 Next API Route 规则。
 - 当前 React 主版本未提供的 `<Activity>`、`useEffectEvent`、资源提示等 API。
-- SWR、`better-all`、`lru-cache` 或其他未安装依赖；安装或升级依赖必须先获批准。
+- SWR、`better-all`、`lru-cache` 或其他尚未安装的依赖；确需调整时按 `AGENTS.md` 核对当前授权、范围与风险，不另设审批，也不因上游示例自动引入依赖。
 - 当前 TypeScript `target/lib` 不支持的 `toSorted()` 等 API。
 - 违反当前 CSP 的内联脚本或以 `suppressHydrationWarning` 掩盖真实错误的方案。
 - 将 NestJS 服务端问题套用 React/Next 服务端缓存规则。

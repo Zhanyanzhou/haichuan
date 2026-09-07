@@ -2,15 +2,58 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { load as parseYaml } from "js-yaml";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const imageNamePattern = /^ghcr\.io\/[a-z0-9._/-]+$/;
 const digestReferencePattern = /^ghcr\.io\/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$/;
 const gitShaPattern = /^[a-f0-9]{40}$/;
+const operationsRuntimeExecutables = [
+  "/usr/local/bin/backup.sh",
+  "/usr/local/bin/check-backup-health.sh",
+  "/usr/local/bin/restore.sh",
+  "/usr/local/bin/restore-drill.sh",
+  "/usr/local/bin/prune-backups.sh",
+];
 
 function fail(code) {
   throw new Error(code);
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function findComposeBuildServices(source) {
+  let compose;
+  try {
+    compose = parseYaml(source, {
+      json: false,
+    });
+  } catch {
+    fail("COMPOSE_YAML_INVALID");
+  }
+  if (!isRecord(compose) || !isRecord(compose.services)) {
+    fail("COMPOSE_SERVICES_INVALID");
+  }
+
+  const buildServices = [];
+  for (const [serviceName, service] of Object.entries(compose.services)) {
+    if (!isRecord(service) || Object.keys(service).length === 0) {
+      fail(`COMPOSE_SERVICE_INVALID:${serviceName}`);
+    }
+    if (Object.hasOwn(service, "build")) buildServices.push(serviceName);
+  }
+  return buildServices;
+}
+
+export function validateComposeBuildPolicy(source) {
+  const buildServices = findComposeBuildServices(source);
+  if (buildServices.length > 0) {
+    fail(`COMPOSE_PRODUCTION_BUILD_FORBIDDEN:${buildServices[0]}`);
+  }
+  return { buildServiceCount: 0 };
 }
 
 function readProjectFile(path) {
@@ -41,13 +84,23 @@ function repositoryMigrationBundleSha256() {
 
 function assertPinnedDockerfile(path, component) {
   const source = readProjectFile(path);
-  const fromImages = [...source.matchAll(/^FROM\s+([^\s]+)(?:\s+AS\s+\S+)?\s*$/gim)]
-    .map((match) => match[1]);
-  if (fromImages.length === 0) fail(`DOCKERFILE_FROM_MISSING:${path}`);
-  for (const image of fromImages) {
+  if (/ARG\s+(?:BUILD_REVISION|BUILD_SOURCE|MIGRATION_BUNDLE_SHA256)=local/.test(source)) {
+    fail(`DOCKERFILE_LOCAL_RELEASE_IDENTITY_FALLBACK_FORBIDDEN:${path}`);
+  }
+  const fromInstructions = [...source.matchAll(/^FROM\s+([^\s]+)(?:\s+AS\s+(\S+))?\s*$/gim)];
+  if (fromInstructions.length === 0) fail(`DOCKERFILE_FROM_MISSING:${path}`);
+  const stageAliases = new Set();
+  const fromImages = [];
+  for (const [, image, alias] of fromInstructions) {
+    if (stageAliases.has(image)) {
+      if (alias) stageAliases.add(alias);
+      continue;
+    }
     if (!/@sha256:[a-f0-9]{64}$/.test(image)) {
       fail(`DOCKERFILE_BASE_NOT_PINNED:${path}:${image}`);
     }
+    fromImages.push(image);
+    if (alias) stageAliases.add(alias);
   }
   for (const label of [
     "org.opencontainers.image.source",
@@ -68,6 +121,41 @@ function assertPinnedDockerfile(path, component) {
   return fromImages;
 }
 
+function assertOperationsDockerStage() {
+  const path = "server/Dockerfile";
+  const source = readProjectFile(path);
+  const runtimeDependencies = /^FROM\s+node:22-alpine@sha256:[a-f0-9]{64}\s+AS\s+runtime-deps\s*$/im.exec(source);
+  if (!runtimeDependencies || !source.includes("npm ci --omit=dev --omit=optional")) {
+    fail("RUNTIME_DEPENDENCIES_STAGE_INVALID");
+  }
+  const match = /^FROM\s+runtime-deps\s+AS\s+operations\s*$/im.exec(source);
+  if (!match) fail("OPERATIONS_DOCKER_STAGE_PINNED_BASE_MISSING");
+  const stageStart = match.index;
+  const nextStage = source.slice(stageStart + match[0].length).search(/^FROM\s+/im);
+  const stage = nextStage < 0
+    ? source.slice(stageStart)
+    : source.slice(stageStart, stageStart + match[0].length + nextStage);
+  const normalizedStage = stage.replace(/\\\r?\n\s*/g, " ");
+  const executableNames = operationsRuntimeExecutables.map((path) => path.split("/").at(-1));
+  for (const required of [
+    "RUN apk add --no-cache bash mariadb-client openssl",
+    'io.haichuan.component="operations"',
+    "COPY --from=build /app/node_modules/prisma ./node_modules/prisma",
+    "COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma",
+    "ln -s ../prisma/build/index.js node_modules/.bin/prisma",
+    "COPY --from=build /app/dist ./dist",
+    `COPY ${executableNames.map((name) => `scripts/${name}`).join(" ")} /usr/local/bin/`,
+    `chmod 0555 ${operationsRuntimeExecutables.join(" ")}`,
+    'USER node',
+    'CMD ["./node_modules/.bin/prisma", "migrate", "status"]',
+    'test -n "$BUILD_REVISION"',
+  ]) {
+    if (!normalizedStage.includes(required)) fail(`OPERATIONS_DOCKER_STAGE_CONTRACT_MISSING:${required}`);
+  }
+  if (stage.includes("npm ci --include=dev")) fail("OPERATIONS_DOCKER_FULL_DEV_TREE_FORBIDDEN");
+  return { path, runtimeExecutables: operationsRuntimeExecutables };
+}
+
 function assertNodeAndClientRuntimeBaseline() {
   for (const path of ["package.json", "client/package.json", "server/package.json"]) {
     const manifest = JSON.parse(readProjectFile(path));
@@ -75,7 +163,7 @@ function assertNodeAndClientRuntimeBaseline() {
       fail(`NODE_ENGINE_BASELINE_INVALID:${path}`);
     }
   }
-  for (const path of [".github/workflows/ci.yml", ".github/workflows/quality.yml"]) {
+  for (const path of [".github/workflows/ci.yml", ".github/workflows/quality.yml", ".github/workflows/release-images.yml"]) {
     const source = readProjectFile(path);
     const versions = [...source.matchAll(/^\s+node-version:\s*["']?(\d+)["']?\s*$/gm)]
       .map((match) => Number(match[1]));
@@ -96,8 +184,11 @@ function assertNodeAndClientRuntimeBaseline() {
   const clientNginx = readProjectFile("client/nginx.conf");
   const clientMainNginx = readProjectFile("client/nginx-main.conf");
   if (!compose.includes('- "80:8080"') ||
-      !compose.includes("http://127.0.0.1:8080/") ||
-      !/^\s*listen\s+8080;\s*$/m.test(clientNginx)) {
+      !compose.includes('- "127.0.0.1:8081:8081"') ||
+      !compose.includes("http://127.0.0.1:8081/") ||
+      !/^\s*listen\s+8080;\s*$/m.test(clientNginx) ||
+      !/^\s*listen\s+8081;\s*$/m.test(clientNginx) ||
+      !/^EXPOSE\s+8080\s+8081\s*$/m.test(readProjectFile("client/Dockerfile"))) {
     fail("CLIENT_NON_ROOT_PORT_CONTRACT_INVALID");
   }
   for (const required of [
@@ -109,28 +200,68 @@ function assertNodeAndClientRuntimeBaseline() {
       fail(`CLIENT_NON_ROOT_NGINX_PATH_MISSING:${required}`);
     }
   }
-  return { packageCount: 3, workflowCount: 2, dockerfileCount: 2 };
+  return { packageCount: 3, workflowCount: 3, dockerfileCount: 2 };
 }
 
 function assertComposeImages() {
   const source = readProjectFile("docker-compose.yml");
-  if (!source.includes('image: "${SERVER_IMAGE:-2-server:latest}"')) {
+  if (!source.includes('image: "${SERVER_IMAGE_NAME:?SERVER_IMAGE_NAME is required}@sha256:${SERVER_IMAGE_DIGEST:?SERVER_IMAGE_DIGEST is required}"')) {
     fail("COMPOSE_SERVER_IMAGE_CONTRACT_MISSING");
   }
-  if (!source.includes('image: "${CLIENT_IMAGE:-2-client:latest}"')) {
+  if (!source.includes('image: "${CLIENT_IMAGE_NAME:?CLIENT_IMAGE_NAME is required}@sha256:${CLIENT_IMAGE_DIGEST:?CLIENT_IMAGE_DIGEST is required}"')) {
     fail("COMPOSE_CLIENT_IMAGE_CONTRACT_MISSING");
+  }
+  for (const path of [
+    "docker-compose.yml",
+    "docker-compose.operations.yml",
+    "docker-compose.wechat-pay.yml",
+  ]) {
+    validateComposeBuildPolicy(readProjectFile(path));
+  }
+  if (/(?:latest|:-local|:-2-(?:server|client))/i.test(source)) {
+    fail("COMPOSE_PRODUCTION_IMAGE_FALLBACK_FORBIDDEN");
   }
 
   const imageValues = [...source.matchAll(/^\s+image:\s*["']?([^"'\r\n]+)["']?\s*$/gm)]
     .map((match) => match[1].trim());
   for (const value of imageValues) {
-    if (value === "${SERVER_IMAGE:-2-server:latest}" ||
-        value === "${CLIENT_IMAGE:-2-client:latest}") {
+    if (value.startsWith("${SERVER_IMAGE_NAME:?") || value.startsWith("${CLIENT_IMAGE_NAME:?") ||
+        value.startsWith("${OPERATIONS_IMAGE_NAME:?")) {
       continue;
     }
     if (!/@sha256:[a-f0-9]{64}$/.test(value)) {
       fail(`COMPOSE_EXTERNAL_IMAGE_NOT_PINNED:${value}`);
     }
+  }
+  for (const required of [
+    "read_only: true",
+    "no-new-privileges:true",
+    "cap_drop:",
+    "BACKUP_RPO_SECONDS is required",
+    "BACKUP_RETENTION_DAYS is required",
+    "uploads_data:/app/uploads",
+    "private_media_data:/app/private-media",
+  ]) {
+    if (!source.includes(required)) fail(`COMPOSE_PRODUCTION_CONTRACT_MISSING:${required}`);
+  }
+  if (!/^  backup:\s*\r?\n\s{4}image:\s*"\$\{OPERATIONS_IMAGE_NAME:\?OPERATIONS_IMAGE_NAME is required\}@sha256:\$\{OPERATIONS_IMAGE_DIGEST:\?OPERATIONS_IMAGE_DIGEST is required\}"\s*$/m.test(source)) {
+    fail("COMPOSE_BACKUP_IMMUTABLE_OPERATIONS_IMAGE_REQUIRED");
+  }
+  if (/\.\/server\/scripts\/(?:backup|check-backup-health)\.sh/.test(source)) {
+    fail("COMPOSE_HOST_EXECUTABLE_BIND_FORBIDDEN");
+  }
+
+  const operations = readProjectFile("docker-compose.operations.yml");
+  for (const required of [
+    '${OPERATIONS_IMAGE_NAME:?OPERATIONS_IMAGE_NAME is required}@sha256:${OPERATIONS_IMAGE_DIGEST:?OPERATIONS_IMAGE_DIGEST is required}',
+    'profiles: ["operations"]',
+    "RELEASE_PREFLIGHT_DATABASE_URL:-",
+    "BOOTSTRAP_DATABASE_URL:-",
+    '["./node_modules/.bin/prisma", "migrate", "status"]',
+    '["node", "dist/cli/release-preflight.js"]',
+    '["node", "dist/cli/bootstrap-admin.js"]',
+  ]) {
+    if (!operations.includes(required)) fail(`OPERATIONS_COMPOSE_CONTRACT_MISSING:${required}`);
   }
   return imageValues;
 }
@@ -160,11 +291,11 @@ function assertReleaseWorkflow() {
   if (!source.includes("release-manifest.json")) {
     fail("RELEASE_WORKFLOW_MANIFEST_MISSING");
   }
-  if ((source.match(/^\s+push:\s+true\s*$/gm) ?? []).length !== 2) {
+  if ((source.match(/^\s+push:\s+true\s*$/gm) ?? []).length !== 3) {
     fail("RELEASE_WORKFLOW_PUSH_CONTRACT_INVALID");
   }
-  if ((source.match(/^\s+sbom:\s+true\s*$/gm) ?? []).length !== 2 ||
-      (source.match(/^\s+provenance:\s+mode=max\s*$/gm) ?? []).length !== 2) {
+  if ((source.match(/^\s+sbom:\s+true\s*$/gm) ?? []).length !== 3 ||
+      (source.match(/^\s+provenance:\s+mode=max\s*$/gm) ?? []).length !== 3) {
     fail("RELEASE_WORKFLOW_ATTESTATION_CONTRACT_INVALID");
   }
   if (!source.includes(":sha-${{ github.sha }}")) {
@@ -173,6 +304,7 @@ function assertReleaseWorkflow() {
   if (!/^\s{2}actions:\s*read\s*$/m.test(source)) {
     fail("RELEASE_WORKFLOW_ACTIONS_READ_PERMISSION_MISSING");
   }
+  if ((source.match(/create-storage-record: false/g) ?? []).length !== 3) fail("RELEASE_WORKFLOW_STORAGE_RECORD_POLICY_INVALID");
   if (!/^\s{2}quality-proof:\s*$/m.test(source) ||
       !/^\s{4}needs:\s*quality-proof\s*$/m.test(source)) {
     fail("RELEASE_WORKFLOW_QUALITY_PROOF_DEPENDENCY_MISSING");
@@ -183,8 +315,20 @@ function assertReleaseWorkflow() {
     'run.event === "push"',
     'run.conclusion === "success"',
     "QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND",
-    "schemaVersion:2",
+    "schemaVersion:3",
     "qualityGate:",
+    "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}-operations",
+    "target: operations",
+    "https://slsa.dev/provenance/v1",
+    "https://spdx.dev/Document/v2.3",
+    "gh attestation verify",
+    "--signer-workflow",
+    "--source-digest",
+    "--source-ref",
+    "--bundle",
+    "release-manifest.attestation.json",
+    "runtimeExecutables",
+    "OPERATIONS_RUNTIME_EXECUTABLE_INVALID",
   ]) {
     if (!source.includes(required)) {
       fail(`RELEASE_WORKFLOW_QUALITY_PROOF_CONTRACT_MISSING:${required}`);
@@ -222,7 +366,7 @@ function assertReleaseSupplyChainTests() {
       !rootTest.includes("npm run test:release-supply-chain")) {
     fail("RELEASE_SUPPLY_CHAIN_TEST_NOT_IN_QUALITY_SUITE");
   }
-  if (releaseTest !== "node --test scripts/verify-release-images.spec.mjs") {
+  if (releaseTest !== "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs") {
     fail("RELEASE_SUPPLY_CHAIN_TEST_COMMAND_INVALID");
   }
   return {
@@ -253,6 +397,7 @@ function assertSafeRuntimeInspection() {
 function verifyStaticContract() {
   const serverBases = assertPinnedDockerfile("server/Dockerfile", "server");
   const clientBases = assertPinnedDockerfile("client/Dockerfile", "client");
+  const operationsStage = assertOperationsDockerStage();
   const runtimeBaseline = assertNodeAndClientRuntimeBaseline();
   const composeImages = assertComposeImages();
   const workflow = assertReleaseWorkflow();
@@ -263,6 +408,7 @@ function verifyStaticContract() {
     ok: true,
     mode: "static",
     dockerfileBaseCount: serverBases.length + clientBases.length,
+    operationsStage,
     runtimeBaseline,
     composeImageCount: composeImages.length,
     workflow,
@@ -285,10 +431,16 @@ function validateImageEntry(name, entry) {
       entry.reference !== `${entry.image}@${entry.digest}`) {
     fail(`RELEASE_MANIFEST_${name.toUpperCase()}_REFERENCE_INVALID`);
   }
+  if (entry.provenancePredicateType !== "https://slsa.dev/provenance/v1") {
+    fail(`RELEASE_MANIFEST_${name.toUpperCase()}_PROVENANCE_POLICY_INVALID`);
+  }
+  if (entry.sbomPredicateType !== "https://spdx.dev/Document/v2.3") {
+    fail(`RELEASE_MANIFEST_${name.toUpperCase()}_SBOM_POLICY_INVALID`);
+  }
 }
 
 export function validateReleaseManifest(manifest, expected) {
-  if (manifest?.schemaVersion !== 2) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest?.schemaVersion !== 3) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
   if (!gitShaPattern.test(manifest.gitSha ?? "")) fail("RELEASE_MANIFEST_GIT_SHA_INVALID");
   if (manifest.gitSha !== expected.gitSha) fail("RELEASE_MANIFEST_GIT_SHA_MISMATCH");
   if (!/^[a-f0-9]{64}$/.test(manifest.migrationBundleSha256 ?? "")) {
@@ -297,7 +449,7 @@ export function validateReleaseManifest(manifest, expected) {
   if (manifest.migrationBundleSha256 !== expected.migrationBundleSha256) {
     fail("RELEASE_MANIFEST_MIGRATION_BUNDLE_MISMATCH");
   }
-  if (typeof manifest.source !== "string" || !/^https:\/\/[^\s]+$/.test(manifest.source)) {
+  if (typeof manifest.source !== "string" || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(manifest.source)) {
     fail("RELEASE_MANIFEST_SOURCE_INVALID");
   }
   const quality = manifest.qualityGate;
@@ -313,8 +465,36 @@ export function validateReleaseManifest(manifest, expected) {
   if (quality.runUrl !== `${manifest.source}/actions/runs/${quality.runId}`) {
     fail("RELEASE_MANIFEST_QUALITY_RUN_URL_INVALID");
   }
+  const policy = manifest.attestationPolicy;
+  if (!policy || typeof policy !== "object") fail("RELEASE_MANIFEST_ATTESTATION_POLICY_MISSING");
+  const sourceUrl = new URL(manifest.source);
+  const repositoryPath = sourceUrl.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
+  const expectedSigner = `github.com/${repositoryPath}/.github/workflows/release-images.yml`;
+  if (policy.signerWorkflow?.toLowerCase() !== expectedSigner) {
+    fail("RELEASE_MANIFEST_SIGNER_WORKFLOW_INVALID");
+  }
+  if (policy.sourceDigest !== manifest.gitSha) fail("RELEASE_MANIFEST_ATTESTATION_SHA_MISMATCH");
+  if (policy.imageAttestationsVerified !== true ||
+      policy.provenancePredicateType !== "https://slsa.dev/provenance/v1" ||
+      policy.sbomPredicateType !== "https://spdx.dev/Document/v2.3" ||
+      policy.manifestPredicateType !== "https://slsa.dev/provenance/v1") {
+    fail("RELEASE_MANIFEST_ATTESTATION_POLICY_INVALID");
+  }
   validateImageEntry("server", manifest.server);
   validateImageEntry("client", manifest.client);
+  validateImageEntry("operations", manifest.operations);
+  if (!Array.isArray(manifest.operations.runtimeExecutables) ||
+      manifest.operations.runtimeExecutables.length !== operationsRuntimeExecutables.length ||
+      manifest.operations.runtimeExecutables.some(
+        (path, index) => path !== operationsRuntimeExecutables[index],
+      )) {
+    fail("RELEASE_MANIFEST_OPERATIONS_EXECUTABLES_INVALID");
+  }
+  for (const component of ["server", "client", "operations"]) {
+    if (manifest[component].image !== `ghcr.io/${repositoryPath}-${component}`) {
+      fail(`RELEASE_MANIFEST_${component.toUpperCase()}_REPOSITORY_INVALID`);
+    }
+  }
   return manifest;
 }
 
@@ -380,11 +560,13 @@ function verifyRuntimeImage(component, reference, gitSha, migrationBundleSha256)
 }
 
 function verifyRuntimeContract() {
-  const serverImage = process.env.SERVER_IMAGE;
-  const clientImage = process.env.CLIENT_IMAGE;
+  const serverImage = imageReferenceFromEnvironment(process.env, "server");
+  const clientImage = imageReferenceFromEnvironment(process.env, "client");
+  const operationsImage = imageReferenceFromEnvironment(process.env, "operations");
   const gitSha = process.env.RELEASE_GIT_SHA;
+  const source = process.env.RELEASE_SOURCE;
   const migrationBundleSha256 = process.env.MIGRATION_BUNDLE_SHA256;
-  if (!serverImage || !clientImage || !gitSha || !migrationBundleSha256) {
+  if (!serverImage || !clientImage || !operationsImage || !source || !gitSha || !migrationBundleSha256) {
     fail("RUNTIME_RELEASE_ENVIRONMENT_INCOMPLETE");
   }
   if (!gitShaPattern.test(gitSha)) fail("RUNTIME_RELEASE_GIT_SHA_INVALID");
@@ -397,7 +579,39 @@ function verifyRuntimeContract() {
   }
   verifyRuntimeImage("server", serverImage, gitSha, migrationBundleSha256);
   verifyRuntimeImage("client", clientImage, gitSha, migrationBundleSha256);
+  verifyRuntimeImage("operations", operationsImage, gitSha, migrationBundleSha256);
   return { ok: true, mode: "runtime", gitSha, migrationBundleSha256 };
+}
+
+function imageReferenceFromEnvironment(env, component) {
+  const prefix = component.toUpperCase();
+  const name = env[`${prefix}_IMAGE_NAME`];
+  const digest = env[`${prefix}_IMAGE_DIGEST`];
+  if (!imageNamePattern.test(name ?? "") || !/^[a-f0-9]{64}$/.test(digest ?? "")) fail(`ENV_${prefix}_IMAGE_NOT_DIGEST_PINNED`);
+  return `${name}@sha256:${digest}`;
+}
+
+export function validateReleaseEnvironment(env, manifest) {
+  for (const component of ["server", "client", "operations"]) {
+    const reference = imageReferenceFromEnvironment(env, component);
+    if (reference !== manifest[component].reference) fail(`ENV_${component.toUpperCase()}_IMAGE_MANIFEST_MISMATCH`);
+  }
+  for (const [key, expected] of [["RELEASE_GIT_SHA", manifest.gitSha], ["RELEASE_SOURCE", manifest.source], ["MIGRATION_BUNDLE_SHA256", manifest.migrationBundleSha256]]) {
+    if (env[key] !== expected) fail(`ENV_${key}_MANIFEST_MISMATCH`);
+  }
+  for (const key of ["BACKUP_INTERVAL_SECONDS", "BACKUP_RPO_SECONDS", "RESTORE_RTO_SECONDS", "BACKUP_RETENTION_DAYS", "BACKUP_DB_READY_TIMEOUT_SECONDS"]) {
+    if (!/^[1-9][0-9]{0,8}$/.test(env[key] ?? "")) fail(`ENV_${key}_INVALID`);
+  }
+  if (Number(env.BACKUP_INTERVAL_SECONDS) > Number(env.BACKUP_RPO_SECONDS)) fail("ENV_BACKUP_RPO_UNACHIEVABLE");
+  const volumeNames = ["MYSQL_VOLUME_NAME", "UPLOADS_VOLUME_NAME", "PRIVATE_MEDIA_VOLUME_NAME"].map((key) => {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]+$/.test(env[key] ?? "")) fail(`ENV_${key}_INVALID`);
+    return env[key];
+  });
+  if (new Set(volumeNames).size !== 3) fail("ENV_VOLUME_IDENTITIES_MUST_BE_DISTINCT");
+  if (!/^(?:\/(?!\/)|[A-Za-z]:[\\/])/.test(env.BACKUP_HOST_DIR ?? "") || /^[A-Za-z]?:?[\\/]$/.test(env.BACKUP_HOST_DIR)) {
+    fail("ENV_BACKUP_HOST_DIR_NOT_ABSOLUTE_OR_TOO_BROAD");
+  }
+  return { ok: true, mode: "environment", gitSha: manifest.gitSha, migrationBundleSha256: manifest.migrationBundleSha256 };
 }
 
 function main() {
@@ -408,6 +622,7 @@ function main() {
     const path = args[manifestIndex + 1];
     if (!path) fail("RELEASE_MANIFEST_PATH_REQUIRED");
     const manifest = readAndValidateManifest(path);
+    if (args.includes("--environment")) return validateReleaseEnvironment(process.env, manifest);
     return {
       ok: true,
       mode: "manifest",
@@ -415,6 +630,7 @@ function main() {
       migrationBundleSha256: manifest.migrationBundleSha256,
       serverReference: manifest.server.reference,
       clientReference: manifest.client.reference,
+      operationsReference: manifest.operations.reference,
     };
   }
   if (args.includes("--runtime")) return verifyRuntimeContract();

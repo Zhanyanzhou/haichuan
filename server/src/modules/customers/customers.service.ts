@@ -14,6 +14,20 @@ import { anonymizeCustomerConsultations } from '../leads/lead-privacy-dispositio
 import { customerFacingProductWhere } from '../products/product-eligibility';
 import { assertAccountPassword } from '../users/staff-password-policy';
 import { consumeCustomerSmsCode } from '../../common/sms/consume-customer-sms-code';
+import {
+  CUSTOMER_INQUIRY_EXPORT_SELECT,
+  CUSTOMER_INQUIRY_LIST_SELECT,
+  toCustomerInquiryListItem,
+} from '../inquiries/customer-inquiry.response';
+import {
+  CUSTOMER_SELECTION_INQUIRY_EXPORT_SELECT,
+  CUSTOMER_SELECTION_INQUIRY_LIST_SELECT,
+  toCustomerSelectionInquiryListItem,
+} from '../selection-inquiry/customer-selection-inquiry.response';
+import {
+  CUSTOMER_CONSULTATION_DETAIL_SELECT,
+  toCustomerConsultationDetail,
+} from '../leads/customer-lead-reply.response';
 
 type AddressInput = {
   recipientName: string;
@@ -386,7 +400,8 @@ export class CustomersService {
       }),
     ]);
 
-    const resetUrl = `${this.mailer.getSiteBaseUrl()}/customer/reset?token=${token}`;
+    // fragment 不会随 HTTP 请求、访问日志或 Referer 发往服务端；前端读取后立即清除。
+    const resetUrl = `${this.mailer.getSiteBaseUrl()}/customer/reset#token=${token}`;
     const result = await this.mailer.send({
       to: trimmed,
       subject: '密码重置 - 海川珠宝',
@@ -520,11 +535,24 @@ export class CustomersService {
   }
 
   async getSelectionInquiries(customerId: number) {
-    return this.prisma.selectionInquiry.findMany({
+    const inquiries = await this.prisma.selectionInquiry.findMany({
       where: { customerId },
-      include: { items: true },
+      select: CUSTOMER_SELECTION_INQUIRY_LIST_SELECT,
       orderBy: { createdAt: 'desc' },
     });
+    return inquiries.map(toCustomerSelectionInquiryListItem);
+  }
+
+  async getConsultation(customerId: number, leadId: number) {
+    if (!Number.isInteger(leadId) || leadId <= 0) {
+      throw new NotFoundException('咨询记录不存在');
+    }
+    const lead = await this.prisma.lead.findFirst({
+      where: { id: leadId, customerId },
+      select: CUSTOMER_CONSULTATION_DETAIL_SELECT,
+    });
+    if (!lead) throw new NotFoundException('咨询记录不存在');
+    return toCustomerConsultationDetail(lead);
   }
 
   async getInquiries(
@@ -541,7 +569,7 @@ export class CustomersService {
     const [list, total] = await Promise.all([
       this.prisma.inquiry.findMany({
         where,
-        include: { product: { select: { name: true } } },
+        select: CUSTOMER_INQUIRY_LIST_SELECT,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -549,7 +577,12 @@ export class CustomersService {
       this.prisma.inquiry.count({ where }),
     ]);
 
-    return { list, total, page, pageSize };
+    return {
+      list: list.map(toCustomerInquiryListItem),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   // ===== 收藏（心愿单）=====
@@ -678,11 +711,11 @@ export class CustomersService {
         }),
         this.prisma.inquiry.findMany({
           where: { customerId },
-          select: { message: true, reply: true, status: true, createdAt: true },
+          select: CUSTOMER_INQUIRY_EXPORT_SELECT,
         }),
         this.prisma.selectionInquiry.findMany({
           where: { customerId },
-          select: { message: true, status: true, createdAt: true },
+          select: CUSTOMER_SELECTION_INQUIRY_EXPORT_SELECT,
         }),
         this.prisma.customerFavorite.findMany({
           where: { customerId },

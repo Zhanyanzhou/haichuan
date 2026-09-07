@@ -48,4 +48,8 @@ test("生产环境仍要求显式来源并允许已确认的 HTTPS 域名", () =
     resolveCorsOrigins("production", "https://confirmed.example.com"),
     ["https://confirmed.example.com"],
   );
+  assert.throws(
+    () => resolveCorsOrigins("production", "http://shop.example.test"),
+    /只允许 HTTPS 来源/,
+  );
 });

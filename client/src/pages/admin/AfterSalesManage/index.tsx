@@ -363,14 +363,15 @@ export default function AfterSalesManage() {
           <Form.Item name="customerId" hidden rules={[{ required: true, message: '所选订单缺少客户信息，请重新选择' }]}>
             <Input type="number" />
           </Form.Item>
-          <Form.Item label="关联订单" required>
+          <Form.Item label="关联订单" htmlFor="after-sales-order" required>
             <Select
+              id="after-sales-order"
               showSearch
               filterOption={false}
               onSearch={searchOrders}
               loading={orderSearching}
               placeholder="搜索订单号 / 客户姓名 / 手机号"
-              value={selectedOrder?.orderNo}
+              value={selectedOrder?.id}
               onSelect={(v) => selectOrder(Number(v))}
               onClear={clearSelectedOrder}
               options={orderOptions}

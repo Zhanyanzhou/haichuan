@@ -9,14 +9,53 @@ import {
 } from "./content-template-contract";
 import { PageModulesService } from "./page-modules.service";
 import { PageModulesController } from "./page-modules.controller";
+import { makeFormalPageMetadata } from "./page-modules.spec-fixtures";
 
 const DRAFT_UPDATED_AT = new Date("2026-08-30T08:00:00.000Z");
 
-function formalMetadata() {
+const readySiteSettings = {
+  siteName: "海川珠宝",
+  brandPresentationMode: "text-only",
+  brandReviewReference: "BRAND-TEST-001",
+  contactPhone: "400-123-4567",
+  contactEmail: "service@example.invalid",
+  contactAddress: "已核验公开地址",
+  businessHours: "已核验公开时间",
+  legalEntityReviewReference: "LEGAL-TEST-001",
+  privacyPolicyReviewReference: "PRIVACY-TEST-001",
+  seoReviewReference: "SEO-TEST-001",
+  seoTitle: "海川珠宝",
+  seoDescription: "正式站点描述",
+  canonicalBaseUrl: "https://example.invalid",
+  defaultLocale: "zh-CN",
+  publishedLocales: ["zh-CN"],
+};
+
+function formalMetadata(puckData: unknown = { content: [], root: { props: {} }, zones: {} }) {
   return {
-    seoTitle: "发布指针测试",
+    ...makeFormalPageMetadata(puckData),
     [CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY]:
       createContentTemplatePublicationAttestation(),
+  };
+}
+
+function formalHeroDocument(title: string) {
+  return {
+    content: [{
+      type: "首屏主视觉",
+      props: {
+        id: "publication-pointer-hero",
+        title,
+        desktopImage: "/images/pointer-desktop.jpg",
+        mobileImage: "/images/pointer-mobile.jpg",
+        altText: "发布指针测试主视觉",
+        actionText: "",
+        targetType: "none",
+        linkUrl: "",
+      },
+    }],
+    root: { props: {} },
+    zones: {},
   };
 }
 
@@ -82,6 +121,7 @@ test("Page publish 创建不可变 revision、更新 publishedRevisionId 并记�
     errors: [],
     issues: [],
   });
+  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [];
 
   const published = await service.publishPageDocument(
     "home",
@@ -112,12 +152,13 @@ test("Page publish 创建不可变 revision、更新 publishedRevisionId 并记�
 
 test("Public 严格读取 publishedRevisionId；更新的草稿和更高版本 revision 不会越过指针", async () => {
   let revisionLookup: any;
+  const publishedPuckData = formalHeroDocument("线上 37");
   const selectedRevision = {
     id: 37,
     documentId: 7,
     version: 37,
-    puckData: { content: [{ type: "文字横幅", props: { text: "线上 37" } }] },
-    metadata: formalMetadata(),
+    puckData: publishedPuckData,
+    metadata: formalMetadata(publishedPuckData),
     publishedAt: new Date("2026-08-30T07:00:00.000Z"),
     publishedBy: 17,
     createdAt: new Date("2026-08-30T07:00:00.000Z"),
@@ -139,16 +180,164 @@ test("Public 严格读取 publishedRevisionId；更新的草稿和更高版本 r
         return structuredClone(selectedRevision);
       },
     },
+    siteSetting: {
+      findUnique: async () => ({ value: readySiteSettings }),
+    },
   } as unknown as PrismaService;
   const service = new PageModulesService(prisma);
 
   const published = await service.getPublishedPageDocument("home");
 
   assert.deepEqual(revisionLookup, {
-    where: { id: 37, documentId: 7 },
+    where: { id: 37, documentId: 7, status: "published" },
   });
   assert.equal(published?.version, 37);
-  assert.equal((published?.puckData as any).content[0].props.text, "线上 37");
+  assert.equal((published?.puckData as any).content[0].props.title, "线上 37");
+});
+
+test("后续全站设置不完整不会撤销最后一次合格发布快照", async () => {
+  let settingsReads = 0;
+  const puckData = formalHeroDocument("已签认线上内容");
+  const service = new PageModulesService({
+    pageDocument: {
+      findUnique: async () => ({ id: 7, pageKey: "home", publishedRevisionId: 37 }),
+    },
+    pageDocumentRevision: {
+      findFirst: async () => ({
+        id: 37,
+        documentId: 7,
+        version: 37,
+        puckData,
+        metadata: formalMetadata(puckData),
+        publishedAt: new Date("2026-08-30T07:00:00.000Z"),
+        createdAt: new Date("2026-08-30T07:00:00.000Z"),
+      }),
+    },
+    siteSetting: {
+      findUnique: async () => {
+        settingsReads += 1;
+        return null;
+      },
+    },
+  } as unknown as PrismaService);
+
+  const result = await service.getPublishedPageDocument("home");
+
+  assert.equal(result?.status, "PUBLISHED");
+  assert.equal(result?.version, 37);
+  assert.equal((result?.puckData as any).content[0].props.title, "已签认线上内容");
+  assert.equal(settingsReads, 0);
+});
+
+test("Public 对旧规则签认但当前内容门禁失败的 revision 不下发正文", async () => {
+  const incomplete = formalHeroDocument("内容建设中");
+  const service = new PageModulesService({
+    pageDocument: {
+      findUnique: async () => ({
+        id: 7,
+        pageKey: "home",
+        publishedRevisionId: 37,
+      }),
+    },
+    pageDocumentRevision: {
+      findFirst: async () => ({
+        id: 37,
+        documentId: 7,
+        version: 37,
+        puckData: incomplete,
+        metadata: formalMetadata(incomplete),
+        publishedAt: new Date("2026-08-30T07:00:00.000Z"),
+        createdAt: new Date("2026-08-30T07:00:00.000Z"),
+      }),
+    },
+    siteSetting: {
+      findUnique: async () => ({ value: readySiteSettings }),
+    },
+  } as unknown as PrismaService);
+
+  const result = await service.getPublishedPageDocument("home");
+
+  assert.deepEqual(result, {
+    pageKey: "home",
+    status: "INVALID",
+    invalidReason: "publication-revalidation-required",
+    publishedAt: new Date("2026-08-30T07:00:00.000Z"),
+    updatedAt: new Date("2026-08-30T07:00:00.000Z"),
+    version: 37,
+  });
+});
+
+test("后台线上快照把缺失当前签认纳入机器可读 readiness", async () => {
+  const puckData = formalHeroDocument("待重新签认的线上内容");
+  const service = new PageModulesService({
+    pageDocument: {
+      findUnique: async () => ({ id: 7, pageKey: "home", publishedRevisionId: 37 }),
+    },
+    pageDocumentRevision: {
+      findFirst: async () => ({
+        id: 37,
+        documentId: 7,
+        version: 37,
+        puckData,
+        metadata: makeFormalPageMetadata(puckData),
+        publishedAt: new Date("2026-08-30T07:00:00.000Z"),
+        createdAt: new Date("2026-08-30T07:00:00.000Z"),
+      }),
+    },
+    siteSetting: { findUnique: async () => ({ value: readySiteSettings }) },
+  } as unknown as PrismaService);
+
+  const result = await service.getPublishedPageDocumentForAdmin("home");
+
+  assert.equal(result?.publicationAttested, false);
+  assert.equal(result?.publicationReadiness.valid, false);
+  assert.ok(result?.publicationReadiness.issues.some(
+    (issue: { code: string }) => issue.code === "page-validation-publication-attestation-stale",
+  ));
+});
+
+test("Page publish 在全站正式设置准备度失败时不创建 revision", async () => {
+  let revisionCreates = 0;
+  const tx: any = {
+    $queryRaw: async () => [{ id: 7 }],
+    pageDocument: {
+      findUnique: async () => ({
+        id: 7,
+        pageKey: "home",
+        puckData: formalHeroDocument("正式内容"),
+        metadata: formalMetadata(),
+        updatedAt: DRAFT_UPDATED_AT,
+      }),
+    },
+    pageDocumentRevision: {
+      create: async () => {
+        revisionCreates += 1;
+        return { id: 13 };
+      },
+    },
+  };
+  const service = new PageModulesService({
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  } as unknown as PrismaService);
+  (service as any).collectPageDocumentValidation = async () => ({
+    valid: true,
+    errors: [],
+    issues: [],
+  });
+  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [{
+    code: "page-validation-site-publication-seo-review-missing",
+    severity: "error",
+    layer: "page",
+    path: "siteSettings.seoReviewReference",
+    message: "SEO 正式复核凭据缺失",
+  }];
+
+  await assert.rejects(
+    () => service.publishPageDocument("home", 17, DRAFT_UPDATED_AT.toISOString()),
+    (error: unknown) => error instanceof BadRequestException
+      && error.message.includes("页面发布校验失败"),
+  );
+  assert.equal(revisionCreates, 0);
 });
 
 test("publishedRevisionId 为空时沿用现有未发布 fallback", async () => {
@@ -183,7 +372,7 @@ function createRollbackHarness(targetDocumentId = 7, pointerUpdateCount = 1) {
     $queryRaw: async () => [{ id: 7 }],
     pageDocument: {
       findUnique: async (args: any) => args.where.id
-        ? { ...structuredClone(document), publishedRevisionId: 37 }
+        ? { ...structuredClone(document), publishedRevisionId: 40 }
         : structuredClone(document),
       updateMany: async (args: any) => {
         writes.push({ operation: "pageDocument.updateMany", args: structuredClone(args) });
@@ -193,12 +382,18 @@ function createRollbackHarness(targetDocumentId = 7, pointerUpdateCount = 1) {
     pageDocumentRevision: {
       findFirst: async (args: any) => {
         writes.push({ operation: "pageDocumentRevision.findFirst", args: structuredClone(args) });
+        if (args.orderBy) return { version: 39 };
         return {
           id: 37,
           documentId: targetDocumentId,
           version: 37,
           puckData: { content: [{ type: "文字横幅", props: { text: "线上 37" } }] },
+          metadata: formalMetadata(),
         };
+      },
+      create: async (args: any) => {
+        writes.push({ operation: "pageDocumentRevision.create", args: structuredClone(args) });
+        return { id: 40, ...structuredClone(args.data) };
       },
     },
     operationLog: {
@@ -211,31 +406,45 @@ function createRollbackHarness(targetDocumentId = 7, pointerUpdateCount = 1) {
   const prisma = {
     $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
   } as unknown as PrismaService;
-  return { service: new PageModulesService(prisma), writes };
+  const service = new PageModulesService(prisma);
+  (service as any).collectPageDocumentValidation = async () => ({
+    valid: true,
+    errors: [],
+    issues: [],
+  });
+  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [];
+  return { service, writes };
 }
 
-test("Rollback Publication 只切换 publishedRevisionId，不创建、修改或删除 revision", async () => {
+test("Rollback Publication 创建新的不可变 revision 并原子切换 publishedRevisionId", async () => {
   const { service, writes } = createRollbackHarness();
 
   const result = await service.rollbackPagePublication("home", 37, 39, 17);
 
   const pointerWrite = writes.find((write) => write.operation === "pageDocument.updateMany");
-  const revisionRead = writes.find((write) => write.operation === "pageDocumentRevision.findFirst");
+  const revisionReads = writes.filter((write) => write.operation === "pageDocumentRevision.findFirst");
+  const revisionCreate = writes.find((write) => write.operation === "pageDocumentRevision.create");
+  const revisionRead = revisionReads[0];
   assert.deepEqual(revisionRead?.args.where, {
     id: 37,
     documentId: 7,
     status: "published",
   });
-  assert.deepEqual(pointerWrite?.args.data, { publishedRevisionId: 37 });
-  assert.equal(
-    writes.some((write) => /^pageDocumentRevision\.(?:create|update|delete)/.test(write.operation)),
-    false,
-  );
-  assert.equal(result?.publishedRevisionId, 37);
+  assert.equal(revisionReads[1]?.args.orderBy.version, "desc");
+  assert.equal(revisionCreate?.args.data.version, 40);
+  assert.equal(revisionCreate?.args.data.status, "published");
+  assert.equal(revisionCreate?.args.data.publishedBy, 17);
+  assert.equal(pointerWrite?.args.data.publishedRevisionId, 40);
+  assert.equal(pointerWrite?.args.data.publishedBy, 17);
+  assert.ok(pointerWrite?.args.data.publishedAt instanceof Date);
+  assert.equal(result?.publishedRevisionId, 40);
   const audit = writes.find((write) => write.operation === "operationLog.create");
   assert.equal(audit?.args.data.action, "PAGE_PUBLICATION_ROLLED_BACK");
   assert.equal(JSON.parse(audit?.args.data.detail).fromRevision, 39);
-  assert.equal(JSON.parse(audit?.args.data.detail).toRevision, 37);
+  assert.equal(JSON.parse(audit?.args.data.detail).sourceRevision, 37);
+  assert.equal(JSON.parse(audit?.args.data.detail).sourceRevisionVersion, 37);
+  assert.equal(JSON.parse(audit?.args.data.detail).toRevision, 40);
+  assert.equal(JSON.parse(audit?.args.data.detail).toRevisionVersion, 40);
 });
 
 test("Rollback Publication 拒绝把 Page A 指向 Page B 的 revision", async () => {
@@ -270,6 +479,35 @@ test("Rollback Publication 在原子指针更新失败时回滚且不写审计",
     () => service.rollbackPagePublication("home", 37, 39, 17),
     (error: unknown) => error instanceof ConflictException
       && error.message.includes("刚刚发生变化"),
+  );
+  assert.equal(
+    writes.some((write) => write.operation === "operationLog.create"),
+    false,
+  );
+});
+
+test("Rollback Publication 在历史版本当前准备度失败时保持线上指针不变", async () => {
+  const { service, writes } = createRollbackHarness();
+  (service as any).collectPageDocumentValidation = async () => ({
+    valid: false,
+    errors: ["正式媒体已失效"],
+    issues: [{
+      code: "page-validation-media",
+      severity: "error",
+      layer: "page",
+      path: "content[0].props.image",
+      message: "正式媒体已失效",
+    }],
+  });
+
+  await assert.rejects(
+    () => service.rollbackPagePublication("home", 37, 39, 17),
+    (error: unknown) => error instanceof BadRequestException
+      && error.message.includes("当前不可公开"),
+  );
+  assert.equal(
+    writes.some((write) => write.operation === "pageDocument.updateMany"),
+    false,
   );
   assert.equal(
     writes.some((write) => write.operation === "operationLog.create"),

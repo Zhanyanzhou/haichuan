@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -49,6 +49,9 @@ import {
 import type { DynamicTemplatePreviewScenario } from "../../src/page-builder/template-editor/types";
 import { CONTENT_TEMPLATE_REGISTRY } from "../../src/page-builder/generated/contentTemplates.generated";
 import { MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE } from "../../src/page-builder/template-definition/validateTemplateDefinition";
+import DynamicTemplateCanvas from "../../src/page-builder/template-editor/DynamicTemplateCanvas";
+import DynamicTemplateInspectorPanel from "../../src/page-builder/template-editor/DynamicTemplateInspectorPanel";
+import { useTemplateEditorSession } from "../../src/page-builder/template-editor/templateEditorSession";
 
 const autoRules = (
   display: DynamicTemplateResponsiveRules["display"] = "block",
@@ -611,6 +614,12 @@ function runUpgradeScenario() {
     compatibleBlockers: compatible.blockers,
     discarded: blocking.discardedContentSlotIds,
     blockingReasons: blocking.blockers,
+    pendingRequiredSlots: (
+      blocking as unknown as { pendingRequiredSlots?: Array<{ slotId: string; label: string }> }
+    ).pendingRequiredSlots ?? [],
+    destructiveBlockers: (
+      blocking as unknown as { destructiveBlockers?: Array<{ slotId?: string; reason: string }> }
+    ).destructiveBlockers ?? [],
   };
 }
 
@@ -876,15 +885,166 @@ function CatalogPreviewMatrix() {
   );
 }
 
+function createInspectorObserverDocument(revision: number) {
+  return `<!doctype html>
+    <html>
+      <head>
+        <style>
+          html, body { margin: 0; min-height: 100%; }
+          .template-editor__viewport-content { width: 640px; min-height: 320px; }
+          [data-template-node-id="node_container"] { display: flex; width: 600px; min-height: 280px; }
+          [data-template-node-id="node_image"] { width: 240px; min-height: 220px; }
+          [data-template-node-id="node_heading"] { width: 320px; min-height: 120px; }
+        </style>
+        <script>
+          (() => {
+            const stats = {
+              revision: ${revision},
+              mutationInstances: 0,
+              mutationObserveCalls: 0,
+              mutationDisconnectCalls: 0,
+              activeMutationObservers: 0,
+              resizeInstances: 0,
+              resizeObserveCalls: 0,
+              resizeDisconnectCalls: 0,
+              activeResizeObservers: 0,
+            };
+            const activeMutationObservers = new Set();
+            const activeResizeObservers = new Set();
+            const NativeMutationObserver = window.MutationObserver;
+            const NativeResizeObserver = window.ResizeObserver;
+            window.MutationObserver = class extends NativeMutationObserver {
+              constructor(callback) {
+                super(callback);
+                stats.mutationInstances += 1;
+              }
+              observe(target, options) {
+                stats.mutationObserveCalls += 1;
+                activeMutationObservers.add(this);
+                stats.activeMutationObservers = activeMutationObservers.size;
+                return super.observe(target, options);
+              }
+              disconnect() {
+                stats.mutationDisconnectCalls += 1;
+                activeMutationObservers.delete(this);
+                stats.activeMutationObservers = activeMutationObservers.size;
+                return super.disconnect();
+              }
+            };
+            window.ResizeObserver = class extends NativeResizeObserver {
+              constructor(callback) {
+                super(callback);
+                stats.resizeInstances += 1;
+              }
+              observe(target) {
+                stats.resizeObserveCalls += 1;
+                activeResizeObservers.add(this);
+                stats.activeResizeObservers = activeResizeObservers.size;
+                return super.observe(target);
+              }
+              disconnect() {
+                stats.resizeDisconnectCalls += 1;
+                activeResizeObservers.delete(this);
+                stats.activeResizeObservers = activeResizeObservers.size;
+                return super.disconnect();
+              }
+            };
+            parent.__inspectorObserverDocuments ??= [];
+            parent.__inspectorObserverDocuments.push(stats);
+          })();
+        </script>
+      </head>
+      <body data-observer-revision="${revision}">
+        <div class="template-editor__viewport-content">
+          <div data-template-node-id="node_container">
+            <div data-template-node-id="node_image"></div>
+            <div data-template-node-id="node_heading">观察器标题 ${revision}</div>
+          </div>
+        </div>
+      </body>
+    </html>`;
+}
+
+function InspectorObserverFixture() {
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const [definition] = useState(createValidDefinition);
+  const [revision, setRevision] = useState(1);
+  const [inspectorMounted, setInspectorMounted] = useState(true);
+  const selectedNodeId = useTemplateEditorSession((state) => state.selectedObjectId);
+
+  useEffect(() => {
+    const session = useTemplateEditorSession.getState();
+    session.open({
+      format: "dynamic",
+      sourceType: "local",
+      localDraftId: "dynamic-template-inspector-observer",
+      versionNote: "",
+      definition,
+    });
+    session.selectObject("node_heading");
+    return () => useTemplateEditorSession.getState().close();
+  }, [definition]);
+
+  const restoreBody = () => {
+    const frameDocument = frameRef.current?.contentDocument;
+    if (!frameDocument || frameDocument.body || !frameDocument.documentElement) return;
+    const body = frameDocument.createElement("body");
+    body.dataset.observerRevision = String(revision);
+    body.innerHTML = `
+      <div class="template-editor__viewport-content" style="width:640px;min-height:320px">
+        <div data-template-node-id="node_container" style="display:flex;width:600px;min-height:280px">
+          <div data-template-node-id="node_image" style="width:240px;min-height:220px"></div>
+          <div data-template-node-id="node_heading" style="width:320px;min-height:120px">恢复后的观察器标题</div>
+        </div>
+      </div>`;
+    frameDocument.documentElement.append(body);
+  };
+
+  return (
+    <main className="admin-shell-v7" style={{ minHeight: "100vh", padding: 24 }}>
+      <header>
+        <button type="button" onClick={() => useTemplateEditorSession.getState().selectObject("node_heading")}>选择标题</button>
+        <button type="button" onClick={() => useTemplateEditorSession.getState().selectObject("node_image")}>选择图片</button>
+        <button
+          type="button"
+          onClick={() => {
+            frameRef.current?.contentDocument?.body?.remove();
+            useTemplateEditorSession.getState().selectObject("node_image");
+          }}
+        >
+          移除 body 并选择图片
+        </button>
+        <button type="button" onClick={restoreBody}>恢复 body</button>
+        <button type="button" onClick={() => setRevision((value) => value + 1)}>重载 iframe 文档</button>
+        <button type="button" onClick={() => setInspectorMounted(false)}>卸载 Inspector</button>
+        <output aria-label="Inspector 当前选择">{selectedNodeId ?? "none"}</output>
+      </header>
+      <section
+        aria-label="Inspector observer 画布"
+        style={{ position: "relative", width: 640, height: 360 }}
+      >
+        <iframe
+          ref={frameRef}
+          className="template-editor__viewport-frame"
+          title="Inspector observer 隔离画布"
+          srcDoc={createInspectorObserverDocument(revision)}
+          style={{ width: 640, height: 360 }}
+        />
+      </section>
+      {inspectorMounted ? <DynamicTemplateInspectorPanel localOnly /> : null}
+    </main>
+  );
+}
+
 function Fixture() {
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const selectedNodeId = useTemplateEditorSession((state) => state.selectedObjectId);
   const [localDraftScenario] = useState(runLocalDraftScenario);
   const [layoutOverrides, setLayoutOverrides] = useState<DynamicTemplateInstanceProps["layoutOverridesByNodeId"]>({});
   const [layoutCommitCount, setLayoutCommitCount] = useState(0);
   const [freeDefinition, setFreeDefinition] = useState(createFreeLayoutDefinition);
   const [freeCommitCount, setFreeCommitCount] = useState(0);
-  const definition = createValidDefinition();
+  const [definition] = useState(createValidDefinition);
   const videoDefinition = createVideoDefinition();
   const complexDefinitions = createComplexDefinitions();
   const matureHeroSource = createSystemTemplateDraft("首屏主视觉");
@@ -906,6 +1066,18 @@ function Fixture() {
       return { moduleType, definition, contentBySlotId: { [slotId]: props } };
     });
   const validation = validateDynamicTemplateDefinition(definition);
+  useEffect(() => {
+    const session = useTemplateEditorSession.getState();
+    session.open({
+      format: "dynamic",
+      sourceType: "local",
+      localDraftId: "dynamic-template-foundation-host-overlay",
+      versionNote: "",
+      definition,
+    });
+    session.selectObject(null);
+    return () => useTemplateEditorSession.getState().close();
+  }, [definition]);
   const instanceProps: DynamicTemplateInstanceProps = {
     id: "instance_test_v3",
     instanceSchemaVersion: 1,
@@ -926,6 +1098,8 @@ function Fixture() {
   hideEmptyDefinition.slots.slot_heading.emptyPolicy = "hide";
   const useDefaultDefinition = structuredClone(definition);
   useDefaultDefinition.slots.slot_heading.emptyPolicy = "use-default";
+  const catalogPreviewModel = createTemplateCatalogPreviewModel(definition, device);
+  const catalogPreviewContent = createTemplateCatalogPreviewContentBySlotId(definition);
   const publishedDocument = {
     content: [{
       type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
@@ -1010,18 +1184,39 @@ function Fixture() {
           device={device}
           mode="editor"
           editorSurface="template-definition"
-          selectedNodeId={selectedNodeId}
-          onSelectNode={setSelectedNodeId}
+          interactionOwner="host-overlay"
         />
+      </section>
+      <section aria-label="模板 host overlay 画布">
+        <DynamicTemplateCanvas />
       </section>
       <section aria-label="动态模板缩略图">
-        <DynamicTemplateRenderer
+        <TemplateCatalogViewportPreview
+          fallbackHeight={catalogPreviewModel.fallbackHeight}
+          heightMode={catalogPreviewModel.heightMode}
+          ratioLabel={catalogPreviewModel.ratioLabel}
+          slots={catalogPreviewModel.slots}
+          sourceWidth={catalogPreviewModel.sourceWidth}
+          templateKey={`foundation-${device}`}
+          title={definition.name}
+          viewport={device}
+        >
+          <DynamicTemplateRenderer
+            definition={definition}
+            device={device}
+            contentBySlotId={catalogPreviewContent}
+            mode="thumbnail"
+          />
+        </TemplateCatalogViewportPreview>
+      </section>
+      <section aria-label="页面模板实例">
+        <DynamicTemplateInstanceView
+          props={instanceProps}
           definition={definition}
-          device={device}
-          mode="thumbnail"
+          mode="editor"
         />
       </section>
-      <section aria-label="页面实例内容">
+      <section aria-label="编辑器预览">
         <DynamicTemplateInstanceView
           props={instanceProps}
           definition={definition}
@@ -1324,14 +1519,21 @@ const parityMode = searchParams.has("rendererParity");
 const businessParityMode = searchParams.has("businessParity");
 const templateScenarioMode = searchParams.has("templateScenarios");
 const catalogPreviewMode = searchParams.has("catalogPreviews");
+const inspectorObserverMode = searchParams.has("inspectorObserver");
 if (catalogPreviewMode) {
+  void import("../../src/styles/adminLuxury.css");
+  void import("../../src/pages/admin/HomepageConfig/editor.css");
+  void import("../../src/page-builder/template-editor/TemplateWorkspace.css");
+} else if (!parityMode && !businessParityMode && !templateScenarioMode) {
   void import("../../src/styles/adminLuxury.css");
   void import("../../src/pages/admin/HomepageConfig/editor.css");
   void import("../../src/page-builder/template-editor/TemplateWorkspace.css");
 }
 createRoot(document.getElementById("root")!).render(
   <MemoryRouter>
-    {catalogPreviewMode
+    {inspectorObserverMode
+      ? <InspectorObserverFixture />
+      : catalogPreviewMode
       ? <CatalogPreviewMatrix />
       : templateScenarioMode
       ? <TemplateScenarioRegressionMatrix />

@@ -20,10 +20,10 @@ function ok(data: unknown) {
   };
 }
 
-test.describe("页面历史版本恢复乐观锁", () => {
+test.describe("页面历史版本载入与保存乐观锁", () => {
   test.skip(useMock, "该用例通过 HTTP 拦截验证真实 API payload 与 409 语义");
 
-  test("恢复请求携带当前 updatedAt，陈旧冲突明确提示且不覆盖画布", async ({
+  test("历史载入零写入，后续保存携带当前 updatedAt 且陈旧冲突不覆盖画布", async ({
     page,
   }) => {
     const consoleErrors: string[] = [];
@@ -62,7 +62,7 @@ test.describe("页面历史版本恢复乐观锁", () => {
       publishedAt: "2026-08-22T08:00:00.000Z",
       createdAt: "2026-08-22T08:00:00.000Z",
     };
-    const restorePayloads: Array<Record<string, unknown>> = [];
+    const savePayloads: Array<Record<string, unknown>> = [];
 
     await page.route("**/api/**", async (route) => {
       const request = route.request();
@@ -71,25 +71,29 @@ test.describe("页面历史版本恢复乐观锁", () => {
       if (path === "/api/page-modules/dynamic-templates/catalog") {
         return route.fulfill(ok(systemTemplateCatalog()));
       }
-      if (
-        path === "/api/page-modules/document/revisions/1/restore" &&
-        request.method() === "PUT"
-      ) {
-        restorePayloads.push(request.postDataJSON());
+      if (path === "/api/page-modules/document" && request.method() === "PUT") {
+        savePayloads.push(request.postDataJSON());
         return route.fulfill({
           status: 409,
           contentType: "application/json",
           body: JSON.stringify({
             code: 409,
             message:
-              "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
+              "该页面已被其他编辑者更新，请重新加载后再保存",
           }),
         });
       }
-      if (path === "/api/page-modules/document/revisions") {
-        return route.fulfill(ok([revision]));
+      if (path === "/api/page-modules/document/revisions/1") {
+        return route.fulfill(ok(revision));
       }
-      if (path === "/api/page-modules/document/published") {
+      if (path === "/api/page-modules/document/revisions") {
+        const { puckData: _puckData, metadata: _metadata, ...summary } = revision;
+        return route.fulfill(ok({ items: [summary], nextBeforeVersion: null }));
+      }
+      if (
+        path === "/api/page-modules/document/published"
+        || path === "/api/page-modules/document/published/admin"
+      ) {
         return route.fulfill(ok(currentDocument));
       }
       if (path === "/api/page-modules/document/admin") {
@@ -152,13 +156,16 @@ test.describe("页面历史版本恢复乐观锁", () => {
 
     await page.getByRole("button", { name: "更多编辑操作" }).click();
     await page.getByRole("menuitem", { name: "发布历史" }).click();
-    const drawer = page.getByRole("dialog", { name: "发布版本" });
+    const drawer = page.getByRole("dialog", { name: "页面发布历史" });
     await expect(drawer.getByText("版本 1", { exact: true })).toBeVisible();
-    await drawer.getByRole("button", { name: "恢复到草稿" }).click();
+    await drawer.getByRole("button", { name: /版本 1/ }).click();
+    await expect(drawer.getByRole("region", { name: "页面版本详情" }))
+      .toContainText("相对当前内存草稿");
+    await drawer.getByRole("button", { name: "载入当前草稿" }).click();
 
-    const confirm = page.getByRole("dialog", { name: "恢复版本 1？" });
+    const confirm = page.getByRole("dialog", { name: "载入版本 1 到当前草稿？" });
     await expect(confirm).toBeVisible();
-    expect(consoleErrors, "编辑器交互与恢复确认阶段 console error 应为 0").toEqual([]);
+    expect(consoleErrors, "编辑器交互与载入确认阶段 console error 应为 0").toEqual([]);
     expect(
       consoleWarnings.filter(
         (warning) => !warning.includes("setData") || !warning.includes("expensive"),
@@ -167,22 +174,23 @@ test.describe("页面历史版本恢复乐观锁", () => {
     ).toEqual([]);
     consoleErrors.length = 0;
     consoleWarnings.length = 0;
-    await confirm.getByRole("button", { name: "恢复到草稿" }).click();
+    await confirm.getByRole("button", { name: "载入当前草稿" }).click();
+    expect(savePayloads).toHaveLength(0);
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
 
-    await expect.poll(() => restorePayloads.length).toBe(1);
-    expect(restorePayloads[0]).toEqual({
+    await expect.poll(() => savePayloads.length).toBe(1);
+    expect(savePayloads[0]).toMatchObject({
       pageKey: "home",
       expectedUpdatedAt: CURRENT_UPDATED_AT,
+      metadata: { seoTitle: "历史版本" },
     });
-    await expect(
-      page.getByText(
-        "数据已被其他操作更新，请重新加载后再试。",
-      ),
-    ).toBeVisible();
+    const conflict = page.getByRole("dialog", { name: "检测到其他人更新了这份整页草稿" });
+    await expect(conflict).toContainText("当前页面设置与画布修改仍完整保留");
     await expect(page.getByText(
-      "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
+      "该页面已被其他编辑者更新，请重新加载后再保存",
     )).toHaveCount(0);
-    await expect(drawer).toBeVisible();
+    await expect(drawer).toHaveCount(0);
+    await conflict.getByRole("button", { name: "保留本地修改" }).click();
 
     expect(consoleErrors).toEqual([
       "Failed to load resource: the server responded with a status of 409 (Conflict)",
@@ -276,11 +284,21 @@ test.describe("页面历史版本恢复乐观锁", () => {
           updatedAt: "2026-08-23T08:01:00.000Z",
         }));
       }
+      if (path === "/api/page-modules/document/revisions/37") {
+        return route.fulfill(ok({ ...revision37, isPublished: publishedRevisionId === 37 }));
+      }
+      if (path === "/api/page-modules/document/revisions/39") {
+        return route.fulfill(ok({ ...revision39, isPublished: publishedRevisionId === 39 }));
+      }
       if (path === "/api/page-modules/document/revisions") {
-        return route.fulfill(ok([
-          { ...revision39, isPublished: publishedRevisionId === 39 },
-          { ...revision37, isPublished: publishedRevisionId === 37 },
-        ]));
+        const summary = (revision: typeof revision37) => {
+          const { puckData: _puckData, metadata: _metadata, ...item } = revision;
+          return { ...item, isPublished: publishedRevisionId === revision.id };
+        };
+        return route.fulfill(ok({
+          items: [summary(revision39), summary(revision37)],
+          nextBeforeVersion: null,
+        }));
       }
       if (path === "/api/page-modules/document/published/admin") {
         return route.fulfill(ok(publishedDocument()));
@@ -304,12 +322,12 @@ test.describe("页面历史版本恢复乐观锁", () => {
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
     await page.getByRole("button", { name: "更多编辑操作" }).click();
     await page.getByRole("menuitem", { name: "发布历史" }).click();
-    const drawer = page.getByRole("dialog", { name: "发布版本" });
+    const drawer = page.getByRole("dialog", { name: "页面发布历史" });
     const version37 = drawer.locator(".homepage-editor__revision-item", {
       hasText: "版本 37",
     });
     await expect(version37.getByText("当前线上版本")).toHaveCount(0);
-    await version37.getByRole("button", { name: "回滚线上到此版本" }).click();
+    await version37.getByRole("button", { name: "回滚线上" }).click();
     const confirmation = page.getByRole("dialog", { name: "回滚线上到版本 37？" });
     await expect(confirmation).toContainText("不会覆盖当前页面草稿");
     await confirmation.getByRole("button", { name: "确认回滚线上" }).click();

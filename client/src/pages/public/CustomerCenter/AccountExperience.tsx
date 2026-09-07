@@ -29,12 +29,89 @@ type AccountExperienceProps = {
   }) => void;
   onWechatAuth: (result: { customer: CustomerAccount }) => void;
 };
+
+type WechatLoginPayload =
+  | { kind: "success"; customer: CustomerAccount }
+  | { kind: "need-bind"; bindToken: string }
+  | { kind: "error"; message: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const keys = Object.keys(value).sort();
+  return (
+    keys.length === expected.length &&
+    keys.every((key, index) => key === [...expected].sort()[index])
+  );
+}
+
+export function parseWechatLoginMessage(value: unknown): WechatLoginPayload | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["payload", "type", "version"]) ||
+    value.type !== "wechat-login-result" ||
+    value.version !== 1 ||
+    !isRecord(value.payload)
+  ) {
+    return null;
+  }
+  const payload = value.payload;
+  if (payload.kind === "success") {
+    if (
+      !hasExactKeys(payload, ["customer", "kind"]) ||
+      !isRecord(payload.customer) ||
+      !hasExactKeys(payload.customer, ["email", "id", "name", "phone"]) ||
+      !Number.isInteger(payload.customer.id) ||
+      (payload.customer.id as number) <= 0 ||
+      typeof payload.customer.phone !== "string" ||
+      !/^1\d{10}$/.test(payload.customer.phone) ||
+      !(
+        typeof payload.customer.name === "string" ||
+        payload.customer.name === null
+      ) ||
+      !(
+        typeof payload.customer.email === "string" ||
+        payload.customer.email === null
+      )
+    ) {
+      return null;
+    }
+    return payload as WechatLoginPayload;
+  }
+  if (
+    payload.kind === "need-bind" &&
+    hasExactKeys(payload, ["bindToken", "kind"]) &&
+    typeof payload.bindToken === "string" &&
+    /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(
+      payload.bindToken,
+    )
+  ) {
+    return { kind: "need-bind", bindToken: payload.bindToken };
+  }
+  if (
+    payload.kind === "error" &&
+    hasExactKeys(payload, ["kind", "message"]) &&
+    typeof payload.message === "string" &&
+    payload.message.length > 0 &&
+    payload.message.length <= 200
+  ) {
+    return { kind: "error", message: payload.message };
+  }
+  return null;
+}
+
 function WechatLoginPanel({
   onAuthenticated,
 }: {
   onAuthenticated: (result: { customer: CustomerAccount }) => void;
 }) {
   const [qrConnectUrl, setQrConnectUrl] = useState<string | null>(null);
+  const [callbackOrigin, setCallbackOrigin] = useState<string | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
   const [bindToken, setBindToken] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
@@ -73,9 +150,21 @@ function WechatLoginPanel({
     customerApi
       .wechatConfig(window.location.origin)
       .then((res: unknown) => {
-        const data = unwrapResponse<{ enabled: boolean; qrConnectUrl?: string }>(res);
+        const data = unwrapResponse<{
+          enabled: boolean;
+          qrConnectUrl?: string;
+          callbackOrigin?: string;
+        }>(res);
         if (cancelled) return;
-        if (data?.enabled && data.qrConnectUrl) {
+        if (data?.enabled && data.qrConnectUrl && data.callbackOrigin) {
+          const parsedCallbackOrigin = new URL(data.callbackOrigin);
+          if (
+            !["http:", "https:"].includes(parsedCallbackOrigin.protocol) ||
+            parsedCallbackOrigin.origin !== data.callbackOrigin
+          ) {
+            throw new Error("微信回调来源配置无效");
+          }
+          setCallbackOrigin(parsedCallbackOrigin.origin);
           setQrConnectUrl(data.qrConnectUrl);
         } else {
           setNotConfigured(true);
@@ -92,18 +181,15 @@ function WechatLoginPanel({
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       // 只接受我们嵌入的扫码 iframe 发来的消息，拒绝任何其它窗口伪造的登录结果
-      if (event.source !== iframeRef.current?.contentWindow) return;
-      const data = event.data as {
-        type?: string;
-        payload?: {
-          kind?: "success" | "need-bind" | "error";
-          customer?: CustomerAccount;
-          bindToken?: string;
-          message?: string;
-        };
-      };
-      if (data?.type !== "wechat-login-result" || !data.payload) return;
-      const payload = data.payload;
+      if (
+        !callbackOrigin ||
+        event.origin !== callbackOrigin ||
+        event.source !== iframeRef.current?.contentWindow
+      ) {
+        return;
+      }
+      const payload = parseWechatLoginMessage(event.data);
+      if (!payload) return;
       if (payload.kind === "success" && payload.customer) {
         onAuthenticated({ customer: payload.customer });
       } else if (payload.kind === "need-bind" && payload.bindToken) {
@@ -114,7 +200,7 @@ function WechatLoginPanel({
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [onAuthenticated]);
+  }, [callbackOrigin, onAuthenticated]);
 
   const handleBind = async () => {
     if (!/^1\d{10}$/.test(phone)) {
@@ -225,6 +311,7 @@ function WechatLoginPanel({
         ref={iframeRef}
         title="微信扫码登录"
         src={qrConnectUrl}
+        referrerPolicy="no-referrer"
         style={{ width: 240, height: 240, border: "none", marginTop: 12 }}
       />
       <p className="text-xs">使用微信「扫一扫」，扫码后自动登录</p>

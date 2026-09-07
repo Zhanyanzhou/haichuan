@@ -20,7 +20,7 @@ export type InquirySubmitInput = {
   email?: string;
   consultationType: string;
   preferredContact: string;
-  preferredTime: string;
+  preferredTime?: string;
   budgetRange?: string;
   productId?: number;
   message: string;

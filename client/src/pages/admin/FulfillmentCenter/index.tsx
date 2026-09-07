@@ -120,7 +120,7 @@ export default function FulfillmentCenter() {
     setDispatching(true);
     try {
       await fulfillmentApi.dispatch(dispatchTarget.id, values);
-      message.success('发货成功，订单已进入已发货');
+      message.success('该包裹已发货，订单状态将按全部包裹聚合更新');
       setDispatchTarget(null);
       dispatchForm.resetFields();
       void load();

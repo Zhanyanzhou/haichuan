@@ -2,11 +2,11 @@ import { useState, type CSSProperties, type MouseEvent, type RefObject } from "r
 import { Link } from "react-router-dom";
 import type { CatalogProduct } from "@/data/catalogData";
 import { useSelectionStore } from "@/store/selectionStore";
-import { publicProductPath } from "@/utils/publicProductPath";
+import { publicProductInquiryPath, publicProductPath } from "@/utils/publicProductPath";
 import { getListingImage } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
 import { trackAddToSelection, trackRemoveFromSelection } from "@/hooks/useAnalytics";
-import { salesModeCta, salesModeRoute } from "@/store/featureFlags";
+import { salesModeCta } from "@/store/featureFlags";
 import { catalogTokens as T } from "./catalogTokens";
 import useCatalogDialog from "./useCatalogDialog";
 import { App as AntdApp } from "antd";
@@ -58,8 +58,9 @@ function CatalogProductAction({
   }
 
   if (product.salesMode === "APPOINTMENT" || product.salesMode === "CUSTOM_INQUIRY") {
+    const inquiryType = product.salesMode === "APPOINTMENT" ? "appointment" : "custom";
     return (
-      <Link to={salesModeRoute(product.salesMode)} style={commonStyle}>
+      <Link to={publicProductInquiryPath(product, inquiryType)} style={commonStyle}>
         {salesModeCta(product.salesMode)}
       </Link>
     );
@@ -239,8 +240,8 @@ function ProductCard({
         <p
           className="catalog-product-card__facts"
           style={{
-            fontSize: 11,
-            color: T.light,
+            fontSize: 12,
+            color: T.sec,
             margin: "0 0 8px",
             lineHeight: 1.5,
             overflow: "hidden",
@@ -338,6 +339,16 @@ export function ProductGrid({
         }
         .catalog-matrix[data-result-count="2"] {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        @media (max-width: 639px) {
+          .catalog-matrix,
+          .catalog-matrix[data-result-count="2"] {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .catalog-cell,
+          .catalog-cell:nth-child(2n) {
+            border-right: none;
+          }
         }
       `}</style>
       <div
@@ -530,7 +541,7 @@ export function QuickView({
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <span style={{ fontSize: 10, letterSpacing: "0.08em", color: T.light }}>
+      <span style={{ fontSize: 12, letterSpacing: "0.08em", color: T.sec }}>
         {label}
       </span>
       <p style={{ fontSize: 13, color: T.txt, margin: "2px 0 0" }}>{value}</p>

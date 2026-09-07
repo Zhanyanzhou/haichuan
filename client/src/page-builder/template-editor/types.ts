@@ -10,6 +10,7 @@ export type TemplateSaveStatus =
   | "saving"
   | "success"
   | "error"
+  | "permission-error"
   | "conflict"
   | "publish-error"
   | "publish-success";
@@ -42,12 +43,32 @@ export interface TemplateEditorDraft {
    * 即使操作者没有继续修改，发布前也必须先把该归一化草稿写回服务端。
    */
   requiresContractNormalization?: boolean;
+  /** 只在用户把可信历史版本载入当前草稿后保留，直到显式保存成功。 */
+  historyRestore?: {
+    sourceTemplateId: string;
+    sourceVersion: number;
+    sourceChecksum: string;
+  };
+  /**
+   * 系统兼容修复只属于当前模板编辑会话。原始定义必须原样保留，直到用户
+   * 明确取消、另存或覆盖保存；该状态随同一 History 快照撤销/重做，绝不
+   * 进入模板定义或服务端写入请求。
+   */
+  compatibilityRecovery?: {
+    status: "pending" | "source-invalid";
+    originalDefinition: unknown;
+    originalVersionNote: string;
+    sourceRevision: number;
+    sourceChecksum: string;
+  };
   definition: TemplateDefinitionV2;
   remote?: {
     databaseId: number;
     revision: number;
     publishedVersion: number;
     baseVersion: number | null;
+    draftDefinitionChecksum: string;
+    publishedDefinitionChecksum: string | null;
     sourceType: "SYSTEM" | "CUSTOM";
     status: "ACTIVE" | "ARCHIVED";
     canDelete: boolean;

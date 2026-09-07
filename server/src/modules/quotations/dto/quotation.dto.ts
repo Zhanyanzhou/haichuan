@@ -4,6 +4,7 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  IsNotEmpty,
   IsOptional,
   IsString,
   Max,
@@ -93,6 +94,10 @@ export class QuotationItemInputDto {
 /** 创建报价单 */
 export class CreateQuotationDto {
   @IsOptional()
+  @IsIn(['RETAIL', 'CUSTOM', 'PARTNER_WAX'])
+  channel?: 'RETAIL' | 'CUSTOM' | 'PARTNER_WAX';
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   customerId?: number;
@@ -138,6 +143,10 @@ export class CreateQuotationDto {
 /** 编辑报价单（仅草稿可改；字段全可选） */
 export class UpdateQuotationDto {
   @IsOptional()
+  @IsIn(['RETAIL', 'CUSTOM', 'PARTNER_WAX'])
+  channel?: 'RETAIL' | 'CUSTOM' | 'PARTNER_WAX';
+
+  @IsOptional()
   @IsString()
   @MaxLength(50)
   customerName?: string;
@@ -180,7 +189,9 @@ export class UpdateQuotationDto {
 
 /** 报价转订单 */
 export class ConvertQuotationDto {
+  @Transform(trimString)
   @IsString()
+  @IsNotEmpty()
   @MaxLength(500)
   address!: string;
 

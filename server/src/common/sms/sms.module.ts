@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { SmsService } from './sms.service';
+import { SMS_DELIVERY_PROVIDER, SmsService } from './sms.service';
 
 /**
  * 短信验证码通道（手机验真）。
@@ -9,7 +9,10 @@ import { SmsService } from './sms.service';
  */
 @Global()
 @Module({
-  providers: [SmsService],
-  exports: [SmsService],
+  providers: [
+    { provide: SMS_DELIVERY_PROVIDER, useValue: null },
+    SmsService,
+  ],
+  exports: [SMS_DELIVERY_PROVIDER, SmsService],
 })
 export class SmsModule {}

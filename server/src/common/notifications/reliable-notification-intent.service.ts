@@ -98,6 +98,93 @@ export class ReliableNotificationIntentService {
     });
   }
 
+  async enqueueOrderLifecycle(
+    tx: NotificationTransaction,
+    order: OrderNotificationSnapshot,
+    input: {
+      event: "SHIPPED" | "CANCELLED" | "COMPLETED";
+      fulfillmentId?: number;
+      carrier?: string;
+      trackingNo?: string;
+    },
+  ) {
+    if (!order.customerId) return null;
+    const content = input.event === "SHIPPED"
+      ? {
+          title: "包裹已发货",
+          body: `订单 ${order.orderNo} 的包裹已发货${input.carrier ? `，承运商 ${input.carrier}` : ""}${input.trackingNo ? `，运单号 ${input.trackingNo}` : ""}。`,
+        }
+      : input.event === "CANCELLED"
+        ? { title: "订单已取消", body: `订单 ${order.orderNo} 已取消。` }
+        : { title: "订单已完成", body: `订单 ${order.orderNo} 已完成。` };
+    const entityKey = input.fulfillmentId ?? order.id;
+    return this.createServiceIntent(tx, {
+      customerId: order.customerId,
+      type: `SERVICE_ORDER_${input.event}`,
+      title: content.title,
+      body: content.body,
+      actionUrl: "/customer?section=orders",
+      destinationEmail: order.customerEmail,
+      payload: {
+        orderId: order.id,
+        ...(input.fulfillmentId ? { fulfillmentId: input.fulfillmentId } : {}),
+      },
+      outboxPayload: { orderId: order.id },
+      deduplicationKey: `order.${input.event.toLowerCase()}:${entityKey}`,
+      occurredAt: new Date(),
+    });
+  }
+
+  async enqueueRefundCompleted(
+    tx: NotificationTransaction,
+    order: OrderNotificationSnapshot,
+    refund: { id: number; refundNo: string; amount: Prisma.Decimal | number | string },
+  ) {
+    if (!order.customerId) return null;
+    const amountCents = moneyToCents(refund.amount);
+    return this.createServiceIntent(tx, {
+      customerId: order.customerId,
+      type: "SERVICE_REFUND_COMPLETED",
+      title: "退款已完成",
+      body: `订单 ${order.orderNo} 的退款 ${refund.refundNo} 已完成，金额 ${moneyText(amountCents)}。`,
+      actionUrl: "/customer?section=orders",
+      destinationEmail: order.customerEmail,
+      payload: { orderId: order.id, refundId: refund.id },
+      outboxPayload: { orderId: order.id },
+      deduplicationKey: `refund.completed:${refund.id}`,
+      occurredAt: new Date(),
+    });
+  }
+
+  async enqueueLeadReply(
+    tx: NotificationTransaction,
+    input: {
+      leadId: number;
+      activityId: number;
+      customerId: number;
+      occurredAt: Date;
+    },
+  ) {
+    return this.createServiceIntent(tx, {
+      customerId: input.customerId,
+      type: "SERVICE_CONSULTATION_REPLIED",
+      title: "顾问已回复您的咨询",
+      body: "您的咨询已有新的顾问回复，请登录客户中心查看。",
+      actionUrl: `/customer?section=consultations&leadId=${input.leadId}`,
+      destinationEmail: null,
+      payload: {
+        leadId: input.leadId,
+        activityId: input.activityId,
+      },
+      outboxPayload: {
+        leadId: input.leadId,
+        activityId: input.activityId,
+      },
+      deduplicationKey: `lead.reply.in-app:${input.activityId}`,
+      occurredAt: input.occurredAt,
+    });
+  }
+
   private async createServiceIntent(
     tx: NotificationTransaction,
     input: {

@@ -34,6 +34,7 @@ export interface InspectorModuleEditor {
   /** 将一次恢复操作写成明确的 before/after 历史事务。 */
   updateHistoryTransaction: (
     patch: PuckProps | ((props: PuckProps) => PuckProps),
+    documentPatch?: Record<string, unknown> | ((document: Record<string, unknown>) => Record<string, unknown>),
   ) => void;
   /** 恢复事务闭合期间为 true，供恢复按钮阻止重复提交。 */
   historyTransactionPending: boolean;
@@ -162,6 +163,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
 
   const updateHistoryTransaction: InspectorModuleEditor["updateHistoryTransaction"] = (
     patchOrFactory,
+    documentPatchOrFactory,
   ) => {
     if (index < 0 || historyTransactionPending) return;
     const before = getPuck();
@@ -194,8 +196,12 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
     // 覆盖 Puck 尚未触发的 250ms 防抖记录：先让当前完整状态成为 before。
     dispatch({ type: "setData", data: beforeData, recordHistory: true });
     // reset 立即反映到画布；after 由下方 setHistories 原子追加。
+    const documentPatch = typeof documentPatchOrFactory === "function"
+      ? documentPatchOrFactory(beforeData as unknown as Record<string, unknown>)
+      : documentPatchOrFactory ?? {};
     const afterData = {
       ...beforeData,
+      ...documentPatch,
       content: afterContent as typeof beforeData.content,
     };
     dispatch({
@@ -223,7 +229,7 @@ export function useInspectorModuleEditor(): InspectorModuleEditor | null {
       // 只把本事务的最终内容写入 after，避免属性面板跳回旧选中项。
       const afterState = {
         ...latest.appState,
-        data: { ...latest.appState.data, content: afterContent },
+        data: afterData,
       };
       latest.history.setHistories([
         ...historyPrefix,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import { customerApi } from "@/services/api";
@@ -153,11 +153,14 @@ export default function CustomerOrdersPanel({
   }, [orders]);
   const [trackingData, setTrackingData] = useState<TrackingData | null>(null);
   const [trackingLoading, setTrackingLoading] = useState(false);
+  const trackingRequestRef = useRef(0);
 
   const toggleTracking = async (orderId: number) => {
+    const requestId = ++trackingRequestRef.current;
     if (trackingOrderId === orderId) {
       setTrackingOrderId(null);
       setTrackingData(null);
+      setTrackingLoading(false);
       return;
     }
     setTrackingOrderId(orderId);
@@ -165,8 +168,10 @@ export default function CustomerOrdersPanel({
     setTrackingLoading(true);
     try {
       const response = await customerApi.getOrderTracking(orderId);
+      if (trackingRequestRef.current !== requestId) return;
       setTrackingData(unwrapResponse<TrackingData>(response) || null);
     } catch (error) {
+      if (trackingRequestRef.current !== requestId) return;
       const candidate = error as {
         message?: string;
         response?: { data?: { message?: string } };
@@ -178,7 +183,7 @@ export default function CustomerOrdersPanel({
       setTrackingData({ carrier: "", trackingNo: "", state: "", events: [] });
       message.error(errorMessage);
     } finally {
-      setTrackingLoading(false);
+      if (trackingRequestRef.current === requestId) setTrackingLoading(false);
     }
   };
 

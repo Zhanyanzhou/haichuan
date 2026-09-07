@@ -173,7 +173,10 @@ test.describe("公开页面导航一致性", () => {
     await page.goto("/catalog");
     await brandHomeLink().click();
     await expect(page).toHaveURL(/\/$/);
-    await page.waitForLoadState("networkidle");
+    await expect(
+      page.locator('[data-page-document-state="published"] .hc-public-document[data-home-surface="true"]'),
+    ).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
     await expect.poll(() => page.evaluate(
       () => document.documentElement.scrollHeight - window.innerHeight,
     )).toBeGreaterThan(200);

@@ -12,6 +12,9 @@ import {
   HolderOutlined,
   LockOutlined,
 } from "@ant-design/icons";
+
+const PAGE_MODULE_DELETE_RECOVERY_COPY =
+  "确认后，当前编辑会话中可用顶部“撤销”恢复；刷新或离开编辑会话后，不能依靠撤销找回。发布历史只包含已发布快照；从未发布的模块内容无法从发布历史恢复。";
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
 import type { PuckProps } from "@/page-builder/types";
@@ -230,7 +233,7 @@ export default function LayerRail({
     }
     modal.confirm({
       title: `删除 ${deletable.length} 个模块？`,
-      content: "删除后可从模块库重新添加；尚未发布的修改可通过版本记录恢复。",
+      content: PAGE_MODULE_DELETE_RECOVERY_COPY,
       okText: "删除模块",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -306,7 +309,7 @@ export default function LayerRail({
     if (!target || target.props?.locked) return;
     modal.confirm({
       title: `删除“${numberedNames[index]}”？`,
-      content: "删除后可从模板组件库重新添加；保存草稿前也可通过顶部撤销恢复。",
+      content: PAGE_MODULE_DELETE_RECOVERY_COPY,
       okText: "删除模块",
       okButtonProps: { danger: true },
       cancelText: "取消",

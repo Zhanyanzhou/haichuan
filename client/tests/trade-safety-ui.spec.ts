@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installCustomerSession } from './fixtures/session-auth';
 
 test.describe('客户咨询完整分页', () => {
   test('显示服务端总数并可读取第二页，移动端不产生横向溢出', async ({ page }) => {
@@ -442,6 +443,72 @@ test.describe('客户中心展示真实履约、售后与退款状态', () => {
       page.getByText('暂无轨迹数据（物流查询服务可能未接入，请联系顾问）'),
     ).toBeVisible();
   });
+
+  test('快速切换订单时迟到的物流响应不会覆盖当前订单', async ({ page }) => {
+    let releaseFirstTracking!: () => void;
+    let firstTrackingCompleted = false;
+    const firstTrackingGate = new Promise<void>((resolve) => {
+      releaseFirstTracking = resolve;
+    });
+    await installCustomerSession(page, { id: 7, name: '物流竞态客户' });
+    await page.route('**/api/**', async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const respond = (data: unknown) => route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 200, message: 'ok', data }),
+      });
+      if (path.endsWith('/settings/public')) return respond({ siteName: '海川珠宝' });
+      if (path.endsWith('/settings/flags')) {
+        return respond({ commerceEnabled: false, cartEnabled: false, paymentEnabled: false });
+      }
+      if (path.endsWith('/customers/me')) {
+        return respond({ id: 7, name: '物流竞态客户', phone: '13800000000' });
+      }
+      if (path.endsWith('/customers/me/orders')) {
+        return respond([9, 10].map((id) => ({
+          id,
+          orderNo: `ORD-TRACK-${id}`,
+          finalAmount: 8800,
+          status: 'SHIPPED',
+          createdAt: '2026-08-25T08:00:00.000Z',
+          logisticsCompany: '顺丰速运',
+          logisticsNo: `SF${id}`,
+          items: [{ id: id * 10, productId: id, product: { name: `测试作品 ${id}` } }],
+        })));
+      }
+      if (path.endsWith('/customers/me/orders/9/tracking')) {
+        await firstTrackingGate;
+        firstTrackingCompleted = true;
+        return respond({ carrier: '顺丰速运', trackingNo: 'SF9', state: '2', events: [{ time: '09:00', context: '订单九轨迹' }] });
+      }
+      if (path.endsWith('/customers/me/orders/10/tracking')) {
+        return respond({ carrier: '顺丰速运', trackingNo: 'SF10', state: '3', events: [{ time: '10:00', context: '订单十轨迹' }] });
+      }
+      if (
+        path.endsWith('/customers/me/addresses') ||
+        path.endsWith('/customers/me/selection-inquiries') ||
+        path.endsWith('/customers/me/inquiries') ||
+        path.endsWith('/customers/me/favorites')
+      ) return respond([]);
+      if (path.endsWith('/customers/me/notifications')) {
+        return respond({ list: [], total: 0, unreadCount: 0, page: 1, pageSize: 20 });
+      }
+      if (path.endsWith('/partner-applications/me')) return respond(null);
+      return respond(null);
+    });
+
+    await page.goto('/customer');
+    const trackingButtons = page.getByRole('button', { name: '查看轨迹' });
+    await trackingButtons.nth(0).click();
+    await trackingButtons.nth(0).click();
+    await expect(page.getByText('订单十轨迹')).toBeVisible();
+
+    releaseFirstTracking();
+    await expect.poll(() => firstTrackingCompleted).toBe(true);
+    await expect(page.getByText('订单十轨迹')).toBeVisible();
+    await expect(page.getByText('订单九轨迹')).toHaveCount(0);
+  });
 });
 
 async function mockCustomerReview(
@@ -812,7 +879,7 @@ test.describe('后台售后登记关联合同', () => {
         .filter({ hasText: '订单商品' })
         .locator('.ant-select-selector')
         .click();
-      await page.locator('.ant-select-dropdown:visible').getByText('测试手镯', { exact: true }).click();
+      await page.locator('.ant-select-dropdown:visible').getByText('测试手镯 · B-001', { exact: true }).click();
       await dialog
         .locator('.ant-form-item')
         .filter({ hasText: '售后类型' })

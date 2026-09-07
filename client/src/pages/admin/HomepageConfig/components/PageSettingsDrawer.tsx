@@ -201,7 +201,7 @@ export default function PageSettingsDrawer({
           disabled={saving}
           onClick={() => void saveSettings()}
         >
-          保存
+          保存整页草稿
         </Button>
       }
     >
@@ -383,7 +383,7 @@ export default function PageSettingsDrawer({
           className="homepage-editor__page-settings-hint"
           style={{ marginTop: 12, color: "var(--adm-action)" }}
         >
-          保存后仅写入草稿，需点击顶部「发布」才会更新前台页面。
+          页面设置与画布修改会一起保存为整页草稿；不会更新前台，仍需点击顶部“发布”。
         </p>
         </div>
       </fieldset>

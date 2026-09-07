@@ -1,0 +1,185 @@
+# 正式发布、证据、告警与回滚 Runbook
+
+> 本文定义代码仓可提供的失败关闭接口，不表示任何环境已经验收或上线。执行目标库写入、部署、切流、恢复或备份删除前，仍需取得精确环境和动作的有效批准。真实域名、TLS、密钥、数据库连接串、监控端点与通知对象不得写入仓库证据。
+
+## 1. 发布硬门禁
+
+正式发布只接受 `.github/workflows/release-images.yml` 产出的 `release-output/`：
+
+- workflow dispatch 只允许仓库默认分支，或 GitHub 明确标记为 protected 且位于 `refs/heads/release/` 下的发布分支；其他 ref 在查找质量门禁和推送镜像前失败；
+- 同一 `gitSha` 的 `Quality Gate` 必须来自 `push` 且成功；
+- server、client、operations 三镜像都必须有不可变 digest、OCI revision、migration bundle label；
+- 三镜像的 SLSA provenance 与 SPDX 2.3 SBOM 必须由 `release-images.yml` 签名并在工作流内验证；
+- `release-manifest.json` 生成后单独签名，证明 bundle 作为 sidecar 上传；
+- `docker-compose.yml` 没有 `build`、`latest` 或 `local` 回退，镜像或关键恢复参数缺失时必须失败。
+
+本地代码合同验证：
+
+```powershell
+npm run test:release-supply-chain
+npm run verify:release-images
+```
+
+取得真实制品后，先验证 manifest 和 sidecar，再逐一验证 registry 中的镜像证明；`owner/repo`、SHA 与 digest 必须取自本次已批准清单，而不是从 manifest 反向复制为“预期值”：
+
+```bash
+gh attestation verify release-manifest.json \
+  --repo owner/repo \
+  --bundle release-manifest.attestation.json \
+  --signer-workflow github.com/owner/repo/.github/workflows/release-images.yml \
+  --source-digest "$RELEASE_GIT_SHA" \
+  --source-ref "$RELEASE_SOURCE_REF" \
+  --deny-self-hosted-runners
+
+gh attestation verify "oci://${SERVER_IMAGE_NAME}@sha256:${SERVER_IMAGE_DIGEST}" --repo owner/repo --bundle-from-oci \
+  --signer-workflow github.com/owner/repo/.github/workflows/release-images.yml \
+  --source-digest "$RELEASE_GIT_SHA" --source-ref "$RELEASE_SOURCE_REF" --deny-self-hosted-runners
+gh attestation verify "oci://${SERVER_IMAGE_NAME}@sha256:${SERVER_IMAGE_DIGEST}" --repo owner/repo --bundle-from-oci \
+  --predicate-type https://spdx.dev/Document/v2.3 \
+  --signer-workflow github.com/owner/repo/.github/workflows/release-images.yml \
+  --source-digest "$RELEASE_GIT_SHA" --source-ref "$RELEASE_SOURCE_REF" --deny-self-hosted-runners
+```
+
+client 与 operations 必须执行同样两项验证。随后在已拉取三镜像的受控主机执行：
+
+```powershell
+node scripts/verify-release-images.mjs --manifest release-manifest.json --environment
+node scripts/verify-release-images.mjs --runtime
+docker compose --env-file <受控环境文件> -f docker-compose.yml config --images
+```
+
+`config --images` 输出的每一项都必须带 `@sha256:`；基础 Compose 必须出现 server/client，operations 只在显式叠加 `docker-compose.operations.yml` 时出现。
+
+### 微信支付证书文件接口
+
+基础 `docker-compose.yml` 有意不挂载支付证书，`readyForRealWechatPayments=false` 是支付未接线档位的正确结果，且该档位不得要求任何证书路径。真实微信支付另用 `docker-compose.wechat-pay.yml` 显式接入，不能通过修改基础 Compose 或挂载整个 secrets 目录绕过：
+
+```bash
+export WECHAT_PLATFORM_CERT_HOST_PATH=/受控绝对路径/wechat-platform-cert.pem
+export WECHAT_MCH_PRIVATE_KEY_HOST_PATH=/受控绝对路径/wechat-mch-private-key.pem
+npm run verify:wechat-pay-certificate-files
+docker compose --env-file <受控环境文件> \
+  -f docker-compose.yml -f docker-compose.wechat-pay.yml config
+```
+
+机器合同要求两个互不相同的宿主绝对文件路径、两个精确的固定容器目标、long bind、`read_only: true` 和 `create_host_path: false`。缺任一路径、相同源、目录/过宽路径、可写挂载、自动创建宿主路径或容器目标漂移均失败关闭。文件预检只检查路径和文件元数据，不读取或打印 PEM 内容；Compose `config` 也只验证解析后的静态结构。实际证书链、商户号绑定、APIv3 密钥、网络、微信回调、成功/失败/退款/对账仍必须在获批环境真实验收。
+
+叠加 override 不会打开 `PAYMENT_GATEWAY_TRANSACTIONS_ENABLED`、`PAYMENT_GATEWAY_REFUNDS_ENABLED` 或客户交易能力。只有批准策略明确开放相应能力并通过交易与外部服务门禁，才可在同一组 `-f` 参数下启动；未启用支付的内容/线索档位始终只使用基础 Compose。
+
+## 2. 目标库与首管理员
+
+operations 镜像来自与 server 相同的 Node 22 锁文件和 build 产物，包含固定版本 Prisma CLI、bash、数据库客户端以及 `backup.sh`、`check-backup-health.sh`、`restore.sh`、`restore-drill.sh`、`prune-backups.sh`。五份脚本必须逐一为 root 所有、只读可执行，并在无网络、覆盖入口的检查中通过 `bash -n`；Release Images 对这一 digest 生成 provenance 与 SBOM，并把精确入口清单写入签名 manifest。基础 Compose 的 backup service 和 operations overlay 必须消费同一个已批准 digest，且禁止 bind checkout 中的可执行脚本。下列命令只是接口示例；本仓任务不执行它们：
+
+若这是由本 Compose 首次创建并管理的 MySQL，必须先只启动 `mysql` 并等待其健康；此时禁止启动 server、client、backup 或其他应用服务：
+
+```bash
+docker compose --env-file <受控环境文件> -f docker-compose.yml \
+  up -d --no-deps --wait mysql
+docker compose --env-file <受控环境文件> -f docker-compose.yml ps mysql
+```
+
+只有 `mysql` 显示 healthy 后，才能运行下列一次性 operations。若目标数据库由外部平台管理，则用平台证据证明目标实例 ready，不执行上面的本地 MySQL 命令。无论哪一种，都必须先完成 migration 状态核对、获批 migration 和只读 preflight，之后才能启动应用服务。
+
+```bash
+docker compose --env-file <受控环境文件> \
+  -f docker-compose.yml -f docker-compose.operations.yml \
+  --profile operations run --rm migration-status
+
+docker compose --env-file <受控环境文件> \
+  -f docker-compose.yml -f docker-compose.operations.yml \
+  --profile operations run --rm release-preflight
+```
+
+`RELEASE_PREFLIGHT_DATABASE_URL` 必须属于本次目标库、仅有 `USAGE/SELECT/SHOW VIEW`，且 `RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZED=1`、环境 ID、预期库名、审批引用全部到位。保存 CLI 报告的 SHA-256，不保存连接串或审批原文。
+
+`migration-status` 只读检查不授权 `migrate deploy`。实际 migration 必须另有目标库、待执行清单、备份回滚点、执行人与窗口批准；本 runbook 不把该批准隐含在命令中。
+
+若只读预检证明没有启用的 `SUPER_ADMIN`，才运行一次 `bootstrap-admin`。密码须 12–64 位，通过一次性环境注入，命令结束立即清除；证据只记录结果、启用超管数量、operations digest 和审批引用哈希。已有合格超管时不得重复初始化。
+
+## 3. 持久化、RPO 与恢复演练
+
+生产必须预先核对并显式填写 `MYSQL_VOLUME_NAME`、`UPLOADS_VOLUME_NAME`、`PRIVATE_MEDIA_VOLUME_NAME`；Compose 将其作为 external volume 使用，不会因目录或 project name 改变而静默创建空卷。`BACKUP_HOST_DIR` 必须是宿主绝对路径。
+
+环境负责人必须确定：
+
+- `BACKUP_INTERVAL_SECONDS <= BACKUP_RPO_SECONDS`；
+- `RESTORE_RTO_SECONDS` 覆盖“开始恢复”到候选服务 `/api/ready`、管理员登录和核心 smoke 全部通过；
+- `BACKUP_RETENTION_DAYS` 只定义保留目标，不授权删除；
+- 异地副本必须加密并具备不可变或版本化能力，且按清单复验 checksum。
+
+`backup.sh` 对数据库、uploads、private-media 和快照元数据形成同批清单；媒体读取期间发生变化时结果是 `WARNING`，不能作为发布回滚点。`check-backup-health.sh` 使用快照起点与 RPO 判定超龄，并复验整批摘要。`prune-backups.sh` 只输出保留期外候选及摘要，本仓不提供删除入口。
+
+完整恢复演练使用 `restore-drill.sh`，只允许：
+
+- `RESTORE_DRILL_AUTHORIZED=1`；
+- 精确匹配 `RESTORE_DRILL_EXPECTED_DATABASE` 的已存在空库；
+- `RESTORE_DRILL_TARGET_CLASS=isolated-empty`；
+- 位于 `RESTORE_DRILL_ROOT` 下的两个已存在空媒体目录；
+- 已有隔离环境与最小权限的外部证据哈希；
+- 受清单保护且年龄不超过 RPO 的备份批次。
+
+脚本从受清单保护的快照元数据读取恢复点，记录数据库与媒体恢复耗时、RPO/RTO 目标、表与 migration 数量及证据哈希。它明确写入 `BUSINESS_RTO_MET=UNVERIFIED`；最终 RTO 必须累加故障发现、目标准备、数据库与媒体恢复、服务 `/api/ready`/登录/smoke 和切流时间，再由生产证据验证器裁决。
+
+## 4. 边缘、告警与最终证据
+
+外部 TLS/域名验收至少包括：正式域名解析、证书链和有效期、HTTP 到 HTTPS 跳转、可信代理头、HSTS、CSP。只保存证据文件哈希；私钥、DNS/API token 和真实监控端点留在受控系统。
+
+监控必须覆盖 `/api/health`、`/api/ready`、可信前台回源和 backup 容器健康。backup unhealthy 必须进入真实通知渠道，不能以“看日志”代替。验收时安全触发一次模拟告警，记录监控身份哈希、事件哈希、触发/收到/确认时间和责任人；不在仓库保存 webhook、收件人或 token。
+
+将上述事实汇总为 schema v3 的 `production-evidence.json`。证据文件本身不能决定目标环境、目标版本、仓库、source ref 或 signer workflow；这些信任锚必须由发布负责人从已批准工单、冻结候选和审定的 workflow 独立写入 CLI 参数。所有 `path` 都必须位于同一个仓库内受控目录、必须是非符号链接普通文件，并给出小写 SHA-256。验证器会重新读取和计算每个 manifest、报告、runbook、claim receipt 与 manifest bundle 的哈希。
+
+JSON receipt 只是一条结构化 claim，不具备独立证明力。每个 receipt 仍只允许 `schemaVersion`、`kind`、`provider`、`outcome`、`observedAt`、`environmentIdSha256`、`approvalReferenceSha256`、`releaseGitSha`、`manifestSha256`、`subjectSha256`，但最终 `production-evidence.json` 必须由审定的外部 evidence workflow 生成并形成 GitHub Sigstore attestation bundle；该 workflow 必须实际重执行或通过受信 API 验证 runtime/Compose/database/admin/storage/recovery/edge/observability/feature/external-service/rollback 各项，不能接受操作者上传的自报 JSON 后直接签名。暂未建立这种 workflow 或缺少任一真实检查时，不能生成可通过验收的 bundle，必须失败关闭。
+
+验证器按固定顺序建立单向信任链：先做纯 schema、路径、哈希、RPO/RTO 与交叉绑定校验；再验证顶层 `production-evidence.json` bundle；随后用 `release-manifest.attestation.json` 验证本地 manifest；最后对清单中的 server/client/operations digest 分别从 OCI registry 重新验证 SLSA provenance 与 SPDX SBOM。所有 `gh` 调用都使用独立 argv，不经过 shell；任一命令缺失、退出非零、JSON 结果为空、predicate 或 subject digest 不匹配，整体验收失败。manifest bundle 由 `release-images.yml` 上传，OCI bundle 由同一工作流推送到 registry；普通 registry receipt 已从验收合同中移除。
+
+外部 evidence workflow 至少必须把下列命令或受信提供商 API 的原始结果绑定到 claim 哈希；不存在对应接线时必须拒绝签名：
+
+| claim 范围 | 必须由受信执行器实际产生的证据 |
+| --- | --- |
+| runtime identity | 在已拉取 digest 上执行 `node scripts/verify-release-images.mjs --runtime`；该脚本只读取 allowlist 中的 RepoDigest 与 OCI label |
+| Compose contract | 执行 `node scripts/verify-release-images.mjs --manifest <path> --environment` 与 `docker compose ... config --images`，确认全部是批准的 digest |
+| database / admin / feature gates | 使用已批准的 operations digest 实际执行 `migration-status`、只读 `release-preflight`，仅在需要时执行获批的一次性 `bootstrap-admin` |
+| storage | 对目标 Docker/编排 API 核对三个独立持久卷、实际挂载和重建后持久性；仓库目前没有可独立替代目标平台 API 的通用命令 |
+| recovery | 执行 `check-backup-health.sh`、获批的隔离 `restore-drill.sh`，并从监控/切流系统取得完整端到端 RTO 时间 |
+| edge / observability | 从独立网络观察点验证 DNS/TLS/重定向/安全头；通过监控提供商 API 触发并确认一次安全告警演练 |
+| external services | 对 email、sms、logistics、payment-gateway、wechat、object-storage 分别调用其受信健康/沙箱/回调验证接口；禁用或不适用必须来自批准策略 |
+| rollback | 对签名 runbook 与固定前后 digest 做实际 dry-run/演练记录；不得用“文档存在”替代可执行性 |
+
+这些外部结果的 JSON receipt 可以用于传递最小脱敏字段，但只有顶层 evidence bundle 验证通过后才是受信 claim；任何单独 receipt、截图或重新计算的 SHA-256 都不构成证明。
+
+`--release-profile` 只接受服务端权威合同 `RELEASE_PROFILES` 中的 `lead-generation` 或 `commerce`。两个 profile 都必须逐项且唯一列出 email、sms、logistics、payment-gateway、wechat、object-storage；每项只允许 `verified`、`disabled` 或由 `release-policy` receipt 证明的 `not-applicable`。`commerce` 的 payment-gateway 必须是 `verified`，不能静默禁用；旧值 `content-only`、`transactional` 和任何大小写变体均失败关闭。
+
+运行示例：
+
+```powershell
+npm run verify:production-evidence -- `
+  --evidence <受控目录/production-evidence.json> `
+  --evidence-root <仓库内受控目录> `
+  --evidence-bundle <受控目录/production-evidence.attestation.json> `
+  --environment-id-sha256 <从批准记录独立计算的环境标识哈希> `
+  --approval-reference-sha256 <从批准记录独立计算的审批引用哈希> `
+  --release-git-sha <已批准候选的 40 位 Git SHA> `
+  --migration-bundle-sha256 <已批准候选的 migration bundle 哈希> `
+  --release-source https://github.com/<owner>/<repo> `
+  --repo <owner>/<repo> `
+  --source-ref refs/heads/<受保护发布分支> `
+  --manifest-signer-workflow github.com/<owner>/<repo>/.github/workflows/release-images.yml `
+  --evidence-signer-workflow github.com/<owner>/<repo>/.github/workflows/<审定生产证据工作流>.yml `
+  --release-profile lead-generation
+```
+
+`--evidence-signer-workflow` 是信任策略输入，不得从 evidence 或 bundle 内容反向复制；它必须属于同一受控仓库且不能是 `release-images.yml`。验证器会拒绝未达 RPO/RTO、缺失媒体/异地副本/管理员/TLS/告警 claim、缺少 provider receipt、profile 与功能门禁不一致，以及规范化字段名中出现 password、secret、token、数据库连接串、私钥、API key、credential 或 auth。所有 evidence、descriptor 和 receipt 对象都拒绝未知字段。仓库不提供“全 true”样例，也不提供只签名上传 JSON 的伪 evidence workflow；真实 GitHub/registry/生产验收在相应受信 workflow 和环境接线完成前保持未验证。
+
+## 5. 发布与回滚判定树
+
+只有前述代码门禁与目标环境证据全部通过后，才允许按批准窗口启动固定 digest；生产命令必须包含 `--no-build`，且不得使用浮动 tag。上线后逐项验证 `/api/health`、`/api/ready`、前台、后台登录和批准业务路径，任一步失败就停止放量。
+
+回滚顺序：
+
+1. 隔离流量并记录故障起点、当前/上一版 manifest 与三个 digest。
+2. 若本次没有 migration，或已有证据证明上一版兼容当前 schema，切回上一版固定 digest，仍使用 `--no-build`，再做完整验收。
+3. 若已执行 migration 且缺少向后兼容证据，禁止自动降级数据库或盲目启动旧镜像；优先前向修复。
+4. 只有数据损坏或 schema 无法前向修复时，才从已验证批次恢复到新的隔离空库和空媒体目录；完成一致性、RPO/RTO、服务与业务验收后再切流。
+5. 永不原位覆盖生产库/媒体，不自动逆转 migration，不删除原库、原卷或备份。
+
+事故记录至少保存：原因、审批引用哈希、前后 manifest/digest、migration ledger 检查点、备份清单哈希、开始/完成时间、数据库恢复秒数、服务恢复秒数和最终验证结果。

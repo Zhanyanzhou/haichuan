@@ -106,7 +106,7 @@ test("首屏缺少手机专图或替代文字时分别阻断并定位字段", as
   assert.match(mobileIssue?.message || "", /桌面与手机素材/);
   const titleIssue = result.issues.find((item) => item.field === "title");
   assert.equal(titleIssue?.blockId, "hero-publication-gate");
-  assert.equal(titleIssue?.severity, "warning");
+  assert.equal(titleIssue?.severity, "error");
   const altIssue = result.issues.find((item) => item.field === "altText");
   assert.equal(altIssue?.blockId, "hero-publication-gate");
   assert.equal(altIssue?.severity, "error");
@@ -177,7 +177,7 @@ test("首屏外链图片只允许保留在草稿，发布校验精确定位到�
   assert.ok(result.errors.includes(issue?.message || ""));
 });
 
-test("发布资料未完善时作为提示但仍可保存可用版本", async () => {
+test("发布资料未完善时阻断正式发布", async () => {
   const document = makeHero();
   const metadata = {
     ...makeFormalPageMetadata(document),
@@ -192,10 +192,10 @@ test("发布资料未完善时作为提示但仍可保存可用版本", async ()
     metadata,
   );
 
-  assert.equal(result.valid, true, JSON.stringify(result.errors));
-  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, false);
   for (const field of ["seoTitle", "seoDescription", "ogImage", "contentOwner"]) {
     const issue = result.issues.find((item) => item.field === field);
-    assert.equal(issue?.severity, "warning");
+    assert.equal(issue?.severity, "error");
+    assert.ok(result.errors.includes(issue?.message || ""));
   }
 });

@@ -1,11 +1,11 @@
 {
-  "contractSchemaVersion": 8,
+  "contractSchemaVersion": 9,
   "registryVersion": 18,
   "expectedTemplateCount": 24,
   "activeTemplateCount": 24,
   "publicationGateVersion": 3,
   "editorPolicy": {
-    "version": 2,
+    "version": 3,
     "designScope": "template-definition",
     "designSurface": "template-workspace",
     "fixedObjects": true,
@@ -16,6 +16,16 @@
     "pageInstanceScope": "page-instance",
     "contentFieldsRemainInstanceScoped": true,
     "viewportGeometry": "independent",
+    "sizeCompatibilityPolicy": {
+      "version": 1,
+      "scope": "node-viewport-axis",
+      "axes": [
+        "width",
+        "height"
+      ],
+      "state": "preserve-until-resize",
+      "materializationSource": "mature-renderer-role-root"
+    },
     "linkTargetTypes": [
       "none",
       "product",
@@ -1589,10 +1599,12 @@
               "subtitle"
             ],
             "capabilities": [
-              "content"
+              "content",
+              "layout"
             ],
             "responsive": {
-              "content": "shared"
+              "content": "shared",
+              "layout": "viewport-specific"
             },
             "constraints": {
               "minSize": {
@@ -1603,8 +1615,8 @@
                 "width": 0.92,
                 "height": 0.7
               },
-              "movementAxes": [],
-              "allowedResize": [],
+              "movementAxes": ["x", "y"],
+              "allowedResize": ["n", "ne", "e", "se", "s", "sw", "w", "nw"],
               "layerRange": {
                 "min": 0,
                 "max": 0
@@ -1750,6 +1762,7 @@
         },
         {
           "id": "action",
+          "parentRole": "copy",
           "role": "action",
           "kind": "action",
           "required": false

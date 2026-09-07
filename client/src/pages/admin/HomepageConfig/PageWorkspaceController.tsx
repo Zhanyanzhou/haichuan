@@ -1,5 +1,5 @@
 import { App as AntdApp } from "antd";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   pageDocumentApi,
@@ -17,16 +17,20 @@ import {
 } from "@/page-builder/config/editorPages";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import {
-  DYNAMIC_TEMPLATE_BLOCK_TYPE,
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
-  dynamicTemplateVersionKey,
+  getRequiredDynamicTemplateDefinitionKeys,
+  inspectResolvedDynamicTemplateDefinitions,
   replaceResolvedDynamicTemplates,
   useResolvedDynamicTemplateDefinitions,
 } from "@/page-builder/dynamic-template-instance";
-import { upgradePersonalTemplateInstances } from "@/page-builder/templates/templateOrigin";
+import { countUpgradeablePersonalTemplateInstances } from "@/page-builder/templates/templateOrigin";
 import type {
   PublishValidationIssue,
   PublishValidationStatus,
+} from "@/page-builder/inspector/publishValidation";
+import {
+  getPagePublishIssueKey,
+  reconcilePagePublishIssueKey,
 } from "@/page-builder/inspector/publishValidation";
 import type { ContentTemplateMediaRight } from "@/page-builder/generated/contentTemplates.generated";
 import { USE_MOCK } from "@/services/mockData";
@@ -34,8 +38,12 @@ import type { PuckDocument, PuckProps } from "@/page-builder/types";
 import {
   CANVAS_PAGE_NAVIGATION_MESSAGE,
   type CanvasPageNavigationMessage,
-  type PageDocumentRevision,
+  type PageDocumentRevisionDetail,
+  type PageDocumentRevisionPage,
+  type PageDocumentRevisionSummary,
   type PageDraftSnapshot,
+  type PageEditorHistoryCommand,
+  type PageEditorHistorySnapshot,
   type PageSessionCache,
 } from "./editor-store";
 import {
@@ -63,40 +71,68 @@ export function usePageWorkspaceController({
   const [data, setData] = useState<PuckDocument>(() => createEditorPageDefault(pageKey));
   const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const resolvedDefinitionsPayload = data[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
-  const waitsForResolvedDynamicTemplates = Boolean(
-    resolvedDefinitionsPayload
-    && typeof resolvedDefinitionsPayload === "object"
-    && !Array.isArray(resolvedDefinitionsPayload)
-    && Object.keys(resolvedDefinitionsPayload).length > 0,
+  const inspectedResolvedDefinitions = useMemo(
+    () => inspectResolvedDynamicTemplateDefinitions(resolvedDefinitionsPayload),
+    [resolvedDefinitionsPayload],
   );
-  const resolvedDynamicTemplatesReady = !waitsForResolvedDynamicTemplates || (data.content ?? []).every((block) => {
-    if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE) return true;
-    const templateId = block.props?.templateId;
-    const templateVersion = block.props?.templateVersion;
-    return typeof templateId === "string"
-      && typeof templateVersion === "number"
-      && Boolean(resolvedDynamicTemplateDefinitions[dynamicTemplateVersionKey(templateId, templateVersion)]);
-  });
+  const requiredResolvedDefinitionKeys = useMemo(
+    () => getRequiredDynamicTemplateDefinitionKeys(data),
+    [data],
+  );
+  const rejectedResolvedDefinitionKeys = requiredResolvedDefinitionKeys.filter(
+    (key) => Boolean(inspectedResolvedDefinitions.rejected[key]),
+  );
+  const missingResolvedDefinitionKeys = requiredResolvedDefinitionKeys.filter((key) => (
+    !inspectedResolvedDefinitions.rejected[key]
+    && !inspectedResolvedDefinitions.definitions[key]
+    && !resolvedDynamicTemplateDefinitions[key]
+  ));
+  const resolvedDynamicTemplatesError = rejectedResolvedDefinitionKeys.length > 0
+    ? `页面锁定的模板版本解析失败：${rejectedResolvedDefinitionKeys.map((key) => (
+        `${key}（${inspectedResolvedDefinitions.rejected[key].reason}）`
+      )).join("；")}`
+    : missingResolvedDefinitionKeys.length > 0
+      ? `页面锁定的模板版本缺失：${missingResolvedDefinitionKeys.join("、")}`
+      : null;
+  const resolvedDynamicTemplatesReady = !resolvedDynamicTemplatesError
+    && requiredResolvedDefinitionKeys.every((key) => Boolean(resolvedDynamicTemplateDefinitions[key]));
   const [saving, setSaving] = useState(false);
+  const [draftSaveFailed, setDraftSaveFailed] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishIssues, setPublishIssues] = useState<PublishValidationIssue[]>(
     [],
   );
   const [publishValidationStatus, setPublishValidationStatus] =
     useState<PublishValidationStatus>("idle");
+  const [publishAttemptFailure, setPublishAttemptFailure] = useState<{
+    issue: PublishValidationIssue;
+    sourceSignature: string;
+  } | null>(null);
+  const [publishReviewActive, setPublishReviewActive] = useState(false);
+  const [publishReviewOpen, setPublishReviewOpen] = useState(false);
+  const [publishReviewIssueKey, setPublishReviewIssueKey] = useState<string | null>(null);
+  const previousPublishIssuesRef = useRef<PublishValidationIssue[]>([]);
   const [validationRevision, setValidationRevision] = useState(0);
   const validationRequestRef = useRef(0);
+  const publishOperationRef = useRef(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [personalTemplateUpgradeHintCount, setPersonalTemplateUpgradeHintCount] = useState(0);
   const [previewMode, setPreviewMode] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [revisionsLoading, setRevisionsLoading] = useState(false);
-  const [revisions, setRevisions] = useState<PageDocumentRevision[]>([]);
-  const [restoringVersion, setRestoringVersion] = useState<number | null>(null);
+  const [revisionsLoadingMore, setRevisionsLoadingMore] = useState(false);
+  const [revisions, setRevisions] = useState<PageDocumentRevisionSummary[]>([]);
+  const [revisionNextBeforeVersion, setRevisionNextBeforeVersion] = useState<number | null>(null);
+  const [selectedRevision, setSelectedRevision] = useState<PageDocumentRevisionDetail | null>(null);
+  const [selectedRevisionVersion, setSelectedRevisionVersion] = useState<number | null>(null);
+  const [revisionDetailLoading, setRevisionDetailLoading] = useState(false);
+  const [revisionDetailError, setRevisionDetailError] = useState<string | null>(null);
+  const revisionDetailRequestRef = useRef(0);
   const [rollingBackRevisionId, setRollingBackRevisionId] = useState<number | null>(null);
   const [revisionFailure, setRevisionFailure] = useState<{
     message: string;
-    revision?: PageDocumentRevision;
-    action?: "restore" | "rollback";
+    revision?: PageDocumentRevisionSummary;
+    action?: "rollback";
   } | null>(null);
   const [draftDiscardError, setDraftDiscardError] = useState<string | null>(
     null,
@@ -116,6 +152,9 @@ export function usePageWorkspaceController({
     baselineSignature: string | null;
   } | null>(null);
   const [canvasDataSyncVersion, setCanvasDataSyncVersion] = useState(0);
+  const [pendingPageHistoryCommand, setPendingPageHistoryCommand] = useState<PageEditorHistoryCommand | null>(null);
+  const pendingPageHistoryCommandRef = useRef<PageEditorHistoryCommand | null>(null);
+  const pageHistoryCommandsRef = useRef(new Map<number, PageEditorHistoryCommand>());
   const pageSessionCacheRef = useRef<Record<string, PageSessionCache>>({});
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const dataSignatureRef = useRef("");  const [metadata, setMetadata] = useState<PuckProps>({});
@@ -188,17 +227,32 @@ export function usePageWorkspaceController({
     let cancelled = false;
     (async () => {
       setLoadedPageKey(null);
+      setDraftSaveFailed(false);
       setHasUnsavedChanges(false);
       setHasPendingDraft(false);
+      setPersonalTemplateUpgradeHintCount(0);
       setPublishedNeedsRevalidation(false);
       setViewingPublished(false);
       setPublishIssues([]);
       setPublishValidationStatus("idle");
+      setPublishAttemptFailure(null);
+      setPublishReviewActive(false);
+      setPublishReviewOpen(false);
+      setPublishReviewIssueKey(null);
+      previousPublishIssuesRef.current = [];
       setRevisions([]);
+      setRevisionNextBeforeVersion(null);
+      setSelectedRevision(null);
+      setSelectedRevisionVersion(null);
+      setRevisionDetailError(null);
+      revisionDetailRequestRef.current += 1;
       setDraftSnapshot(null);
       setRevisionFailure(null);
       setDraftDiscardError(null);
       setRevisionsOpen(false);
+      setPendingPageHistoryCommand(null);
+      pendingPageHistoryCommandRef.current = null;
+      pageHistoryCommandsRef.current.clear();
       setPageSettingsOpen(false);
       pendingDraftRef.current = null;
       editingDraftSnapshotRef.current = null;
@@ -269,7 +323,6 @@ export function usePageWorkspaceController({
             pageKey,
             migratePuckData(displayPuck),
           );
-          const persistedServerData = serverData;
           const templateCatalog = templateCatalogResponse
             ? unwrapResponse<TemplateCatalogResource>(templateCatalogResponse)
             : null;
@@ -280,32 +333,20 @@ export function usePageWorkspaceController({
                   : []
               ))
             : [];
-          const personalUpgrade = upgradePersonalTemplateInstances(
+          const personalUpgradeCount = countUpgradeablePersonalTemplateInstances(
             serverData as unknown as Record<string, unknown>,
             Array.isArray(personalTemplates) ? personalTemplates : [],
           );
-          if (personalUpgrade.upgradedCount > 0) {
-            serverData = personalUpgrade.document as unknown as PuckDocument;
-            controlledCanvasStateRef.current = {
-              hasUnsavedChanges: true,
-              baselineSignature: dataSignature(persistedServerData),
-            };
-          }
+          setPersonalTemplateUpgradeHintCount(personalUpgradeCount);
           const displayMetadata = draftPuck
             ? normalizePuckMetadata(adminDoc?.metadata)
             : normalizePuckMetadata(publishedDoc?.metadata);
           setData(serverData);
           latestData.current = serverData;
-          dataSignatureRef.current = personalUpgrade.upgradedCount > 0
-            ? dataSignature(persistedServerData)
-            : dataSignature(serverData);
+          dataSignatureRef.current = dataSignature(serverData);
           setMetadata(displayMetadata);
           latestMetadata.current = displayMetadata;
           setViewingPublished(false);
-          if (personalUpgrade.upgradedCount > 0) {
-            setHasUnsavedChanges(true);
-            message.info(`已将 ${personalUpgrade.upgradedCount} 个历史模板实例布局升级到最新版本；真实内容保持不变，尚未保存或发布`);
-          }
           // 乐观锁与“上次保存时间”仍以草稿文档为准，保证后续保存/发布能正确串行。
           const draftUpdatedAt = adminDoc?.updatedAt || null;
           pageSessionCacheRef.current[pageKey] = {
@@ -457,7 +498,88 @@ export function usePageWorkspaceController({
   }, [initialLoading, loadError, loadedPageKey, metadata, pageKey, validationRevision]);
 
   const retryPublishValidation = useCallback(() => {
+    if (publishAttemptFailure?.issue.code === "publish-request-conflict") {
+      modal.confirm({
+        title: "重新加载远端草稿？",
+        content:
+          "当前本地修改将被远端草稿替换。系统不会自动合并或覆盖任一侧；请仅在确认放弃本地修改后继续。",
+        okText: "重新加载远端草稿",
+        cancelText: "保留本地修改",
+        okButtonProps: { danger: true },
+        onOk: () => setLoadAttempt((attempt) => attempt + 1),
+      });
+      return;
+    }
     setValidationRevision((revision) => revision + 1);
+  }, [modal, publishAttemptFailure]);
+
+  useEffect(() => {
+    if (!publishAttemptFailure) return;
+    const currentSignature = canonicalizePageContent(
+      latestData.current,
+      latestMetadata.current,
+    );
+    if (currentSignature === publishAttemptFailure.sourceSignature) return;
+
+    // 显式发布失败属于该次发布快照的操作结果。草稿一旦继续修改，旧失败
+    // 不再描述当前上下文；资格问题仍由自动重验独立维护。
+    setPublishAttemptFailure(null);
+    if (!publishIssues.some((issue) => issue.severity === "error")) {
+      setPublishReviewActive(false);
+      setPublishReviewOpen(false);
+      setPublishReviewIssueKey(null);
+    }
+  }, [metadata, publishAttemptFailure, publishIssues, validationRevision]);
+
+  const publishReviewIssues = useMemo(() => {
+    if (!publishAttemptFailure) return publishIssues;
+    const failureKey = getPagePublishIssueKey(publishAttemptFailure.issue);
+    return [
+      publishAttemptFailure.issue,
+      ...publishIssues.filter((issue) => getPagePublishIssueKey(issue) !== failureKey),
+    ];
+  }, [publishAttemptFailure, publishIssues]);
+
+  useEffect(() => {
+    if (publishReviewActive) {
+      setPublishReviewIssueKey((currentKey) => reconcilePagePublishIssueKey(
+        previousPublishIssuesRef.current,
+        currentKey,
+        publishReviewIssues.filter((issue) => issue.severity === "error"),
+      ));
+    }
+    previousPublishIssuesRef.current = publishReviewIssues;
+  }, [publishReviewActive, publishReviewIssues]);
+
+  const activatePublishReview = useCallback((issues: PublishValidationIssue[]) => {
+    const errors = issues.filter((issue) => issue.severity === "error");
+    setPublishReviewActive(true);
+    setPublishReviewOpen(true);
+    setPublishReviewIssueKey((currentKey) => (
+      currentKey && errors.some((issue) => getPagePublishIssueKey(issue) === currentKey)
+        ? currentKey
+        : errors[0] ? getPagePublishIssueKey(errors[0]) : null
+    ));
+  }, []);
+
+  const openPublishReview = useCallback(() => {
+    if (
+      !publishReviewActive
+      && publishReviewIssues.length === 0
+      && publishValidationStatus !== "unavailable"
+    ) return;
+    activatePublishReview(publishReviewIssues.length > 0
+      ? publishReviewIssues
+      : [{
+          code: "publish-validation-unavailable",
+          message: "暂时无法确认发布资格，请重新检查。",
+          severity: "error",
+          path: "lifecycle.validation",
+        }]);
+  }, [activatePublishReview, publishReviewActive, publishReviewIssues, publishValidationStatus]);
+
+  const closePublishReview = useCallback(() => {
+    setPublishReviewOpen(false);
   }, []);
 
   const saveDraft = useCallback(
@@ -471,7 +593,7 @@ export function usePageWorkspaceController({
         Boolean(loadError) ||
         loadedPageKey !== targetPageKey
       ) {
-        if (!options.silent) message.warning("页面内容仍在加载，请稍后再保存");
+        if (!options.silent) message.warning("页面仍在加载，请稍后再保存整页草稿");
         return false;
       }
       const requestedData = getPuckDocument(nextData) ?? latestData.current;
@@ -482,6 +604,7 @@ export function usePageWorkspaceController({
         // 顶栏手动保存才点亮按钮 loading 与成功提示；发布前、保存并离开等
         // 内部显式保存使用 silent，避免重复成功提示。
         if (isActivePage() && !options.silent) {
+          setDraftSaveFailed(false);
           setSaving(true);
         }
         try {
@@ -519,6 +642,7 @@ export function usePageWorkspaceController({
           };
 
           if (!isActivePage()) return true;
+          setDraftSaveFailed(false);
           const hasNewerLocalData =
             JSON.stringify(latestData.current) !== JSON.stringify(editableData);
           const hasNewerLocalMetadata =
@@ -552,19 +676,23 @@ export function usePageWorkspaceController({
           return true;
         } catch (error) {
           if (!isActivePage()) return false;
-          const isConflict = getEditorHttpStatus(error) === 409;
+          setDraftSaveFailed(true);
+          const status = getEditorHttpStatus(error);
+          const isConflict = status === 409;
           if (isConflict) {
             modal.confirm({
-              title: "检测到其他人更新了这份页面草稿",
+              title: "检测到其他人更新了这份整页草稿",
               content:
-                "当前画布修改仍完整保留。你可以继续留在本地核对，或明确放弃本地修改并重新加载远端草稿。",
+                "当前页面设置与画布修改仍完整保留。你可以继续留在本地核对，或明确放弃本地修改并重新加载远端整页草稿。",
               okText: "重新加载远端草稿",
               cancelText: "保留本地修改",
               okButtonProps: { danger: true },
               onOk: () => setLoadAttempt((attempt) => attempt + 1),
             });
           } else {
-            message.error(getEditorErrorMessage(error, "保存失败，请重试"));
+            message.error(status === 403
+              ? "当前账号已没有保存草稿的权限；权限可能已发生变化。请重新登录后再试，或联系管理员确认权限。"
+              : getEditorErrorMessage(error, "整页草稿保存失败，请重试"));
           }
           return false;
         } finally {
@@ -621,24 +749,38 @@ export function usePageWorkspaceController({
     setRevisionsLoading(true);
     setRevisionFailure(null);
     try {
-      // 同时拉取版本历史与后台草稿：存在与最新发布版本不同的草稿时，在抽屉顶部展示“编辑草稿”入口。
-      const [revisionsResponse, adminResponse] = await Promise.all([
-        pageDocumentApi.getRevisions(pageKey),
+      // 列表只承载摘要；当前草稿与当前线上版本从各自权威接口读取，
+      // 不能把某条历史列表记录冒充当前线上内容。
+      const [revisionsResponse, adminResponse, publishedResponse] = await Promise.all([
+        pageDocumentApi.getRevisions(pageKey, { limit: 20 }),
         pageDocumentApi.getAdmin(pageKey),
+        pageDocumentApi.getPublishedAdmin(pageKey),
       ]);
-      const revisionList =
-        unwrapResponse<PageDocumentRevision[]>(revisionsResponse) || [];
+      const revisionPage = unwrapResponse<PageDocumentRevisionPage>(revisionsResponse);
+      const revisionList = revisionPage?.items ?? [];
       setRevisions(revisionList);
+      setRevisionNextBeforeVersion(revisionPage?.nextBeforeVersion ?? null);
       const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
+      const publishedDoc = unwrapResponse<PageDocumentResource | null>(publishedResponse);
       const draftPuck = getPuckDocument(adminDoc?.puckData);
+      const publishedPuck = getPuckDocument(publishedDoc?.puckData);
       const hasDraft = Boolean(draftPuck);
-      const currentPublishedRevision = revisionList.find((revision) => revision.isPublished);
-      const currentPublishedPuck = currentPublishedRevision?.puckData ?? null;
-      const currentPublishedMetadata = currentPublishedRevision?.metadata ?? null;
-      const hasPublished = currentPublishedPuck != null;
+      const hasPublished = Boolean(publishedPuck);
+      if (publishedPuck) {
+        const structuredPublished = ensureEditorPageStructure(
+          pageKey,
+          migratePuckData(publishedPuck),
+        );
+        publishedDataRef.current = structuredPublished;
+        publishedMetadataRef.current = normalizePuckMetadata(publishedDoc?.metadata);
+        publishedBaselineRef.current = canonicalizePageContent(
+          structuredPublished,
+          publishedMetadataRef.current,
+        );
+      }
       const hasPendingDraft =
         canonicalizePageContent(draftPuck, adminDoc?.metadata) !==
-        canonicalizePageContent(currentPublishedPuck, currentPublishedMetadata);
+        canonicalizePageContent(publishedPuck, publishedDoc?.metadata);
       // 草稿条目：只要存在草稿就展示；已发布且草稿与线上一致（刚发布）时不再单独展示。
       const showDraftEntry = hasDraft && (!hasPublished || hasPendingDraft);
       setDraftSnapshot(
@@ -660,6 +802,56 @@ export function usePageWorkspaceController({
       });
     } finally {
       setRevisionsLoading(false);
+    }
+  }, [pageKey]);
+
+  const loadMoreRevisions = useCallback(async () => {
+    if (revisionNextBeforeVersion === null || revisionsLoadingMore) return;
+    setRevisionsLoadingMore(true);
+    setRevisionFailure(null);
+    try {
+      const response = await pageDocumentApi.getRevisions(pageKey, {
+        beforeVersion: revisionNextBeforeVersion,
+        limit: 20,
+      });
+      const page = unwrapResponse<PageDocumentRevisionPage>(response);
+      const incoming = page?.items ?? [];
+      setRevisions((current) => {
+        const existingIds = new Set(current.map((revision) => revision.id));
+        return [...current, ...incoming.filter((revision) => !existingIds.has(revision.id))];
+      });
+      setRevisionNextBeforeVersion(page?.nextBeforeVersion ?? null);
+    } catch (error) {
+      setRevisionFailure({
+        message: getEditorErrorMessage(error, "更早版本加载失败，请稍后重试"),
+      });
+    } finally {
+      setRevisionsLoadingMore(false);
+    }
+  }, [pageKey, revisionNextBeforeVersion, revisionsLoadingMore]);
+
+  const selectRevision = useCallback(async (revision: PageDocumentRevisionSummary) => {
+    const requestId = ++revisionDetailRequestRef.current;
+    setSelectedRevisionVersion(revision.version);
+    setSelectedRevision(null);
+    setRevisionDetailError(null);
+    setRevisionDetailLoading(true);
+    try {
+      const response = await pageDocumentApi.getRevision(pageKey, revision.version);
+      const detail = unwrapResponse<PageDocumentRevisionDetail>(response);
+      if (requestId !== revisionDetailRequestRef.current) return;
+      const document = getPuckDocument(detail?.puckData);
+      if (!detail || !document) throw new Error("历史版本正文无效，已拒绝加载");
+      setSelectedRevision({
+        ...detail,
+        puckData: ensureEditorPageStructure(pageKey, migratePuckData(document)),
+        metadata: normalizePuckMetadata(detail.metadata),
+      });
+    } catch (error) {
+      if (requestId !== revisionDetailRequestRef.current) return;
+      setRevisionDetailError(getEditorErrorMessage(error, "版本详情加载失败，请重试"));
+    } finally {
+      if (requestId === revisionDetailRequestRef.current) setRevisionDetailLoading(false);
     }
   }, [pageKey]);
 
@@ -833,7 +1025,13 @@ export function usePageWorkspaceController({
     void applyPublishedToCanvas();
   }, [hasUnsavedChanges, applyPublishedToCanvas, modal]);
 
+  const canDiscardDraft = hasPendingDraft && publishedDataRef.current !== null;
+
   const discardDraftToPublished = useCallback(() => {
+    if (!canDiscardDraft || !publishedDataRef.current) {
+      message.info("当前页面还没有线上版本，无法恢复到线上版本");
+      return;
+    }
     modal.confirm({
       title: "放弃当前草稿并恢复线上版本？",
       content:
@@ -842,7 +1040,11 @@ export function usePageWorkspaceController({
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
-        if (!publishedDataRef.current) return;
+        const publishedData = publishedDataRef.current;
+        if (!publishedData) {
+          message.info("当前页面还没有线上版本，无法恢复到线上版本");
+          return;
+        }
         setDraftDiscardError(null);
         // 排空在途保存(如页面设置触发的静默保存):
         // 否则 in-flight 保存会在丢弃完成后回写草稿,让被丢弃的修改"复活"。
@@ -867,9 +1069,9 @@ export function usePageWorkspaceController({
           hasUnsavedChanges: false,
           baselineSignature: null,
         };
-        setData(publishedDataRef.current);
-        latestData.current = publishedDataRef.current;
-        dataSignatureRef.current = dataSignature(publishedDataRef.current);
+        setData(publishedData);
+        latestData.current = publishedData;
+        dataSignatureRef.current = dataSignature(publishedData);
         setMetadata(publishedMetadataRef.current);
         latestMetadata.current = publishedMetadataRef.current;
         setHasUnsavedChanges(false);
@@ -884,7 +1086,7 @@ export function usePageWorkspaceController({
           const adminResponse = await pageDocumentApi.getAdmin(pageKey);
           const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
           pageSessionCacheRef.current[pageKey] = {
-            data: publishedDataRef.current,
+            data: publishedData,
             metadata: publishedMetadataRef.current,
             lastSaved: null,
             updatedAt: adminDoc?.updatedAt || null,
@@ -894,7 +1096,7 @@ export function usePageWorkspaceController({
         }
       },
     });
-  }, [message, modal, pageKey]);
+  }, [canDiscardDraft, message, modal, pageKey]);
 
   const openRevisions = useCallback(() => {
     setRevisionsOpen(true);
@@ -919,107 +1121,129 @@ export function usePageWorkspaceController({
       const saved = await saveDraft(latestData.current, { silent: true });
       if (saved) {
         setPageSettingsOpen(false);
-        message.success("页面设置已保存");
+        message.success("整页草稿已保存，包含页面设置与画布修改");
       }
       return saved;
     },
     [message, saveDraft],
   );
 
-  const restoreRevision = useCallback(
-    (revision: PageDocumentRevision) => {
+  const stageRevisionAsDraft = useCallback(
+    (revision: PageDocumentRevisionDetail) => {
       modal.confirm({
-        title: `恢复版本 ${revision.version}？`,
+        title: `载入版本 ${revision.version} 到当前草稿？`,
         content:
           hasProtectedUnsavedChanges
-            ? "当前画布的未保存修改和后台草稿都会被该历史版本覆盖；未保存修改无法恢复。此操作不会立即影响前台。"
-            : "恢复后会覆盖当前后台草稿，但不会立即影响前台首页。确认后可继续编辑或重新发布。",
-        okText: "恢复到草稿",
+            ? "当前未保存修改会被替换，但本次替换本身可以撤销。版本只载入编辑器，不会自动保存或发布。"
+            : "版本只载入编辑器并标记为未保存草稿，不会自动保存或发布。",
+        okText: "载入当前草稿",
         cancelText: "取消",
-        onOk: async () => {
-          setRestoringVersion(revision.version);
-          // 与放弃草稿一致，先排空已确认的在途保存，再读取最新乐观锁。
-          // 这样恢复不会与稍早发出的保存请求争用旧 expectedUpdatedAt。
-          await Promise.resolve(saveQueueRef.current).catch(() => {});
-          const expectedUpdatedAt =
-            pageSessionCacheRef.current[pageKey]?.updatedAt;
-          if (!expectedUpdatedAt) {
-            setRevisionFailure({
-              message: "当前页面版本标识缺失，请刷新页面后再恢复",
-              revision,
-              action: "restore",
-            });
-            setRestoringVersion(null);
+        onOk: () => {
+          const document = getPuckDocument(revision.puckData);
+          if (!document) {
+            setRevisionDetailError("历史版本正文无效，已拒绝载入");
             return;
           }
+          const restoredData = ensureEditorPageStructure(pageKey, migratePuckData(document));
+          const restoredMetadata = normalizePuckMetadata(revision.metadata);
+          const restoredHasPendingDraft =
+            publishedBaselineRef.current == null
+            || canonicalizePageContent(restoredData, restoredMetadata)
+              !== publishedBaselineRef.current;
+          const cloneHistorySnapshot = (
+            snapshot: PageEditorHistorySnapshot,
+          ): PageEditorHistorySnapshot => structuredClone(snapshot);
+          const before = cloneHistorySnapshot({
+            data: latestData.current,
+            metadata: latestMetadata.current,
+            hasUnsavedChanges,
+            hasPendingDraft,
+            pendingDraft: pendingDraftRef.current,
+            savedSignature: dataSignatureRef.current,
+          });
+          const after = cloneHistorySnapshot({
+            data: restoredData,
+            metadata: restoredMetadata,
+            hasUnsavedChanges: true,
+            hasPendingDraft: restoredHasPendingDraft,
+            pendingDraft: restoredData,
+            savedSignature: dataSignatureRef.current,
+          });
+          const command: PageEditorHistoryCommand = {
+            id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+              ? `page-history:${crypto.randomUUID()}`
+              : `page-history:${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            before,
+            after,
+          };
+          pendingPageHistoryCommandRef.current = command;
+          setPendingPageHistoryCommand(command);
+          controlledCanvasStateRef.current = {
+            hasUnsavedChanges: true,
+            baselineSignature: dataSignatureRef.current,
+          };
+          setData(restoredData);
+          latestData.current = restoredData;
+          setMetadata(restoredMetadata);
+          latestMetadata.current = restoredMetadata;
+          setHasUnsavedChanges(true);
+          setHasPendingDraft(restoredHasPendingDraft);
+          pendingDraftRef.current = restoredData;
+          editingDraftSnapshotRef.current = null;
+          viewingPublishedRef.current = false;
+          setViewingPublished(false);
           setRevisionFailure(null);
-          try {
-            const response = await pageDocumentApi.restoreRevision(
-              pageKey,
-              revision.version,
-              expectedUpdatedAt,
-            );
-            const document = unwrapResponse<PageDocumentResource | null>(response);
-            const restoredPuck = getPuckDocument(document?.puckData);
-            if (restoredPuck) {
-              const restoredData = ensureEditorPageStructure(
-                pageKey,
-                migratePuckData(restoredPuck),
-              );
-              controlledCanvasStateRef.current = {
-                hasUnsavedChanges: false,
-                baselineSignature: null,
-              };
-              setData(restoredData);
-              latestData.current = restoredData;
-              // 恢复接口已经把该版本写成服务端草稿；Puck 随后的 setData 回调
-              // 不应把这次受控整页替换误判为尚未保存的本地编辑。
-              dataSignatureRef.current = dataSignature(restoredData);
-              const restoredMetadata = normalizePuckMetadata(document?.metadata);
-              setMetadata(restoredMetadata);
-              latestMetadata.current = restoredMetadata;
-              setHasUnsavedChanges(false);
-              setHasPendingDraft(
-                publishedBaselineRef.current != null &&
-                  canonicalizePageContent(restoredData, restoredMetadata) !==
-                    publishedBaselineRef.current,
-              );
-              setViewingPublished(false);
-              pendingDraftRef.current = null;
-              editingDraftSnapshotRef.current = null;
-              viewingPublishedRef.current = false;
-              const restoredUpdatedAt =
-                document?.updatedAt || new Date().toISOString();
-              const restoredLastSaved = formatEditorTime(restoredUpdatedAt);
-              pageSessionCacheRef.current[pageKey] = {
-                data: restoredData,
-                metadata: restoredMetadata,
-                lastSaved: restoredLastSaved,
-                updatedAt: restoredUpdatedAt,
-              };
-            }
-            message.success(`已恢复版本 ${revision.version} 到草稿`);
-            setRevisionsOpen(false);
-          } catch (error) {
-            setRevisionFailure({
-              message: getEditorErrorMessage(
-                error,
-                "版本恢复失败，请稍后重试",
-              ),
-              revision,
-              action: "restore",
-            });
-          } finally {
-            setRestoringVersion(null);
-          }
+          message.success(`版本 ${revision.version} 已载入当前草稿，尚未保存或发布`);
+          setRevisionsOpen(false);
         },
       });
     },
-    [hasProtectedUnsavedChanges, message, modal, pageKey],
+    [hasPendingDraft, hasProtectedUnsavedChanges, hasUnsavedChanges, message, modal, pageKey],
   );
 
+  const commitPageHistoryCommand = useCallback((commandId: string, historyIndex: number) => {
+    const command = pendingPageHistoryCommandRef.current;
+    if (command?.id !== commandId) return;
+    for (const index of pageHistoryCommandsRef.current.keys()) {
+      if (index >= historyIndex) pageHistoryCommandsRef.current.delete(index);
+    }
+    pageHistoryCommandsRef.current.set(historyIndex, command);
+    pendingPageHistoryCommandRef.current = null;
+    setPendingPageHistoryCommand((current) => current?.id === commandId ? null : current);
+  }, []);
+
+  const navigatePageHistoryCommand = useCallback((input: {
+    direction: "back" | "forward";
+    currentHistoryIndex: number;
+    targetHistoryIndex: number;
+    data: PuckDocument;
+  }) => {
+    const commandIndex = input.direction === "back"
+      ? input.currentHistoryIndex
+      : input.targetHistoryIndex;
+    const command = pageHistoryCommandsRef.current.get(commandIndex);
+    if (!command) return false;
+    const snapshot = structuredClone(
+      input.direction === "back" ? command.before : command.after,
+    );
+    controlledCanvasStateRef.current = {
+      hasUnsavedChanges: snapshot.hasUnsavedChanges,
+      baselineSignature: snapshot.savedSignature,
+    };
+    setData(input.data);
+    latestData.current = input.data;
+    setMetadata(snapshot.metadata);
+    latestMetadata.current = snapshot.metadata;
+    dataSignatureRef.current = snapshot.savedSignature;
+    setHasUnsavedChanges(snapshot.hasUnsavedChanges);
+    setHasPendingDraft(snapshot.hasPendingDraft);
+    pendingDraftRef.current = snapshot.pendingDraft;
+    setValidationRevision((revision) => revision + 1);
+    return true;
+  }, []);
+
   const rollbackPublication = useCallback(
-    (revision: PageDocumentRevision) => {
+    (revision: PageDocumentRevisionSummary) => {
       const currentPublished = revisions.find((item) => item.isPublished);
       if (!currentPublished) {
         setRevisionFailure({ message: "当前线上版本指针缺失，不能执行回滚" });
@@ -1106,37 +1330,23 @@ export function usePageWorkspaceController({
       return;
     }
     if (
+      publishOperationRef.current ||
       publishing ||
       initialLoading ||
       Boolean(loadError) ||
       loadedPageKey !== pageKey
     ) {
-      if (!publishing) message.warning("页面内容仍在加载，请稍后再发布");
+      if (!publishOperationRef.current && !publishing) {
+        message.warning("页面内容仍在加载，请稍后再发布");
+      }
       return;
     }
     const editableData = nextData ?? latestData.current;
     const pageLabel = getEditorPage(pageKey).label;
 
-    const showBlockingIssues = (issues: PublishValidationIssue[]) => {
-      modal.error({
-        title: `暂不能发布 · ${issues.length} 项问题待处理`,
-        width: 620,
-        content: (
-          <div role="alert" aria-label="页面发布阻断清单">
-            <p>当前草稿已经安全保存；修复以下问题后再发布：</p>
-            <ol style={{ maxHeight: 320, overflowY: "auto", paddingInlineStart: 22 }}>
-              {issues.map((issue, index) => (
-                <li key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                  {issue.message}
-                </li>
-              ))}
-            </ol>
-          </div>
-        ),
-        okText: "返回修改",
-      });
-    };
-
+    publishOperationRef.current = true;
+    // 用户已明确发起新一次发布；旧操作结果到此失效。自动资格检查状态不受影响。
+    setPublishAttemptFailure(null);
     setPublishing(true);
     try {
       const saved = await saveDraft(editableData, { silent: true });
@@ -1181,14 +1391,20 @@ export function usePageWorkspaceController({
       const validationIssues = resolvePublishValidationIssues(validation ?? {});
       const blockingIssues = validationIssues.filter((issue) => issue.severity === "error");
       setPublishIssues(validationIssues);
+      setPublishValidationStatus(
+        blockingIssues.length > 0 || !validation?.valid ? "invalid" : "valid",
+      );
 
       if (!validation?.valid || blockingIssues.length > 0) {
-        showBlockingIssues(blockingIssues.length > 0
+        const resolvedBlockers = blockingIssues.length > 0
           ? blockingIssues
           : (validation?.errors ?? []).map((errorMessage) => ({
               message: errorMessage,
               severity: "error" as const,
-            })));
+            }));
+        setPublishIssues(resolvedBlockers);
+        setPublishValidationStatus("invalid");
+        activatePublishReview(resolvedBlockers);
         return;
       }
 
@@ -1268,6 +1484,12 @@ export function usePageWorkspaceController({
           publishedMetadataRef.current = { ...publishedMetadata };
           editingDraftSnapshotRef.current = null;
           setPublishedNeedsRevalidation(false);
+          setPublishAttemptFailure(null);
+          setPublishReviewActive(false);
+          setPublishReviewOpen(false);
+          setPublishReviewIssueKey(null);
+          setPublishIssues([]);
+          setPublishValidationStatus("valid");
           void loadRevisions();
           message.success(
             hasNewerLocalChanges
@@ -1295,14 +1517,37 @@ export function usePageWorkspaceController({
               );
               setPublishIssues(refreshedIssues);
               if (refreshedBlockers.length > 0) {
-                showBlockingIssues(refreshedBlockers);
+                setPublishValidationStatus("invalid");
+                activatePublishReview(refreshedBlockers);
                 return;
               }
             } catch {
               // 保留下面的安全通用错误；不把内部响应正文透传到后台页面。
             }
           }
-          message.error(getEditorErrorMessage(error, "发布失败，请稍后重试"));
+          const status = getEditorHttpStatus(error);
+          const failureMessage = status === 403
+            ? "当前账号已没有发布权限；权限可能已发生变化。请重新登录后再试，或联系管理员确认权限。"
+            : status === 409
+              ? "远端草稿已更新，发布未完成。请选择保留本地修改或重新加载远端草稿。"
+              : getEditorErrorMessage(error, "发布失败，请稍后重试");
+          const lifecycleIssue: PublishValidationIssue = {
+            code: status === 409
+              ? "publish-request-conflict"
+              : status === 403
+                ? "publish-permission-changed"
+                : "publish-validation-unavailable",
+            message: failureMessage,
+            severity: "error",
+            path: "lifecycle.publish",
+          };
+          if (pageKey !== activePageKeyRef.current) return;
+          setPublishAttemptFailure({
+            issue: lifecycleIssue,
+            sourceSignature: publishSourceSignature,
+          });
+          activatePublishReview([lifecycleIssue]);
+          message.error(failureMessage);
         } finally {
           setPublishing(false);
         }
@@ -1310,8 +1555,27 @@ export function usePageWorkspaceController({
 
       await publishPersistedDraft();
     } catch (error) {
-      message.error(getEditorErrorMessage(error, "发布前校验失败，请稍后重试"));
+      const failureMessage = getEditorErrorMessage(error, "发布前校验失败，请稍后重试");
+      const lifecycleIssue: PublishValidationIssue = {
+        code: "publish-validation-unavailable",
+        message: failureMessage,
+        severity: "error",
+        path: "lifecycle.validation",
+      };
+      if (pageKey !== activePageKeyRef.current) return;
+      setPublishAttemptFailure({
+        issue: lifecycleIssue,
+        sourceSignature: canonicalizePageContent(
+          latestData.current,
+          latestMetadata.current,
+        ),
+      });
+      setPublishIssues([]);
+      setPublishValidationStatus("unavailable");
+      activatePublishReview([lifecycleIssue]);
+      message.error(failureMessage);
     } finally {
+      publishOperationRef.current = false;
       setPublishing(false);
     }
   };
@@ -1335,6 +1599,8 @@ export function usePageWorkspaceController({
 
   const closeRevisions = useCallback(() => {
     setRevisionsOpen(false);
+    revisionDetailRequestRef.current += 1;
+    setRevisionDetailLoading(false);
   }, []);
 
   const closePageSettings = useCallback(() => {
@@ -1356,22 +1622,50 @@ export function usePageWorkspaceController({
     return Boolean(await saveDraft(latestData.current));
   }, [returnToEditingDraft, saveDraft]);
 
+  const revisionDraftComparison = viewingPublished && editingDraftSnapshotRef.current
+    ? {
+        puckData: editingDraftSnapshotRef.current.data,
+        metadata: editingDraftSnapshotRef.current.metadata,
+      }
+    : { puckData: data, metadata };
+  const revisionPublishedComparison = publishedDataRef.current
+    ? {
+        puckData: publishedDataRef.current,
+        metadata: publishedMetadataRef.current,
+      }
+    : null;
+
   return {
     data,
     metadata,
     resolvedDynamicTemplateDefinitions,
     resolvedDynamicTemplatesReady,
+    resolvedDynamicTemplatesError,
     saving,
+    draftSaveFailed,
     publishing,
     publishIssues,
+    publishAttemptFailure,
+    publishReviewIssues,
     publishValidationStatus,
+    publishReviewActive,
+    publishReviewOpen,
+    publishReviewIssueKey,
     hasUnsavedChanges,
+    personalTemplateUpgradeHintCount,
     hasProtectedUnsavedChanges,
     previewMode,
     revisionsOpen,
     revisionsLoading,
+    revisionsLoadingMore,
     revisions,
-    restoringVersion,
+    revisionNextBeforeVersion,
+    selectedRevision,
+    selectedRevisionVersion,
+    revisionDetailLoading,
+    revisionDetailError,
+    revisionDraftComparison,
+    revisionPublishedComparison,
     rollingBackRevisionId,
     revisionFailure,
     draftDiscardError,
@@ -1380,9 +1674,11 @@ export function usePageWorkspaceController({
     loadedPageKey,
     loadError,
     canvasDataSyncVersion,
+    pendingPageHistoryCommand,
     pageSettingsOpen,
     pageSettingsFocusField,
     hasPendingDraft,
+    canDiscardDraft,
     publishedNeedsRevalidation,
     viewingPublished,
     draftSavedAtLabel: pageSessionCacheRef.current[pageKey]?.lastSaved ?? null,
@@ -1394,9 +1690,14 @@ export function usePageWorkspaceController({
     dismissDraftDiscardError,
     setPreviewMode,
     retryPublishValidation,
+    openPublishReview,
+    closePublishReview,
+    setPublishReviewIssueKey,
     saveDraft,
     switchEditorPage,
     loadRevisions,
+    loadMoreRevisions,
+    selectRevision,
     editDraftFromRevisions,
     returnToEditingDraft,
     openPageSettingsForEditing,
@@ -1405,7 +1706,9 @@ export function usePageWorkspaceController({
     discardDraftToPublished,
     openRevisions,
     savePageSettings,
-    restoreRevision,
+    stageRevisionAsDraft,
+    commitPageHistoryCommand,
+    navigatePageHistoryCommand,
     rollbackPublication,
     publishHome,
     trackEditorData,

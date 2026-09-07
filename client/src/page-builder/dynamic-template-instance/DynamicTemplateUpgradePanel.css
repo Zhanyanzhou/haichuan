@@ -1,0 +1,90 @@
+.dynamic-template-upgrade-review .ant-modal-body {
+  max-height: min(76vh, 820px);
+  overflow: auto;
+}
+
+.dynamic-template-upgrade-review__instances {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.dynamic-template-upgrade-review__instances button {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--ant-color-text, #181A1B);
+  text-align: left;
+  background: var(--ant-color-bg-container, #fff);
+  border: 1px solid var(--ant-color-border, #DDE1E2);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.dynamic-template-upgrade-review__instances button.is-active,
+.dynamic-template-upgrade-review__instances button:focus-visible {
+  border-color: var(--ant-color-primary, #335F7D);
+  outline: 2px solid color-mix(in srgb, var(--ant-color-primary, #335F7D) 24%, transparent);
+  outline-offset: 1px;
+}
+
+.dynamic-template-upgrade-review__instances small {
+  color: var(--ant-color-text-secondary, #6E7477);
+}
+
+.dynamic-template-upgrade-review__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.dynamic-template-upgrade-review .ant-alert + .ant-alert {
+  margin-top: 8px;
+}
+
+.dynamic-template-upgrade-review__devices {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.dynamic-template-upgrade-review__devices h4 {
+  margin: 0 0 8px;
+}
+
+.dynamic-template-upgrade-review__comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dynamic-template-upgrade-review__preview {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary, #ECEEEF);
+  border-radius: 8px;
+}
+
+.dynamic-template-upgrade-review__preview > strong {
+  display: block;
+  padding: 8px 10px;
+}
+
+@media (max-width: 720px) {
+  .dynamic-template-upgrade-review__comparison {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dynamic-template-upgrade-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  color: var(--ant-color-warning-text, #7A531A);
+  background: var(--ant-color-warning-bg, #FBF4E8);
+  border-bottom: 1px solid var(--ant-color-warning-border, #D4BD96);
+}

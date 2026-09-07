@@ -8,6 +8,12 @@ import {
 } from "../modules/page-modules/content-template-contract";
 import { PageModulesService } from "../modules/page-modules/page-modules.service";
 import {
+  evaluateSitePublicationReadiness,
+  normalizeHttpsBaseUrl,
+} from "../modules/settings/site-publication-readiness";
+import {
+  COMMERCE_RELEASE_PROFILE,
+  DEFAULT_RELEASE_PROFILE,
   isPartnerApplicationsWriteEnabled,
   parseReleaseProfile,
   type ReleaseProfile,
@@ -19,7 +25,12 @@ import {
   type TargetDatabaseIdentity,
 } from "./target-database-audit";
 
-export { parseReleaseProfile, type ReleaseProfile } from "../common/release/release-profile";
+export {
+  COMMERCE_RELEASE_PROFILE,
+  DEFAULT_RELEASE_PROFILE,
+  parseReleaseProfile,
+  type ReleaseProfile,
+} from "../common/release/release-profile";
 
 export const RELEASE_PAGE_KEYS = [
   "home",
@@ -36,14 +47,6 @@ const DEMO_PRODUCT_CODES = [
   "HC-SZ-001",
   "HC-ES-001",
   "HC-ZD-002",
-] as const;
-
-const REQUIRED_SITE_SETTING_FIELDS = [
-  "siteName",
-  "contactPhone",
-  "contactEmail",
-  "contactAddress",
-  "businessHours",
 ] as const;
 
 type PageDocumentRow = {
@@ -165,10 +168,6 @@ export type MigrationIntegrityEvaluation = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function hasText(value: unknown) {
-  return typeof value === "string" && value.trim().length > 0;
 }
 
 function uniqueIssueCodes(result: PageValidationResult) {
@@ -388,8 +387,12 @@ export async function runReleasePreflight(
     metadata: Prisma.JsonValue,
   ) => Promise<PageValidationResult>,
   migrationIntegrityCheck: () => Promise<ReleasePreflightCheck>,
-  releaseProfile: ReleaseProfile = "lead-generation",
-  options: { partnerApplicationsWriteEnabled?: boolean } = {},
+  releaseProfile: ReleaseProfile = DEFAULT_RELEASE_PROFILE,
+  options: {
+    partnerApplicationsWriteEnabled?: boolean;
+    configuredClientPublicSiteOrigin?: string;
+    requireConfiguredClientPublicSiteOrigin?: boolean;
+  } = {},
 ) {
   const checks: ReleasePreflightCheck[] = [];
   const partnerApplicationsWriteEnabled =
@@ -481,7 +484,7 @@ export async function runReleasePreflight(
       salesMode: "DIRECT_PURCHASE",
     },
   });
-  checks.push(releaseProfile === "commerce"
+  checks.push(releaseProfile === COMMERCE_RELEASE_PROFILE
     ? {
         code: "direct-purchase-assortment-present",
         ok: directPurchaseProductCount > 0,
@@ -512,16 +515,73 @@ export async function runReleasePreflight(
   });
 
   const settings = isRecord(storedSettings?.value) ? storedSettings.value : {};
-  const missingSiteSettingFields = REQUIRED_SITE_SETTING_FIELDS.filter(
-    (field) => !hasText(settings[field]),
+  const siteReadiness = evaluateSitePublicationReadiness(settings, {
+    persisted: Boolean(storedSettings),
+  });
+  const contactBlockers = siteReadiness.blockers.filter(
+    (blocker) => blocker.area === "contact",
   );
   checks.push({
     code: "site-settings-required-fields",
-    ok: missingSiteSettingFields.length === 0,
-    summary: missingSiteSettingFields.length === 0
-      ? "店铺名称与四项公开联系资料均已填写"
+    ok: contactBlockers.length === 0,
+    summary: contactBlockers.length === 0
+      ? "四项公开联系资料均已填写"
       : "店铺资料缺少正式上线必需字段",
-    facts: { missingFields: missingSiteSettingFields },
+    facts: {
+      missingFields: contactBlockers.map((blocker) =>
+        blocker.field.replace(/^siteSettings\./, "")
+      ),
+      blockerCodes: contactBlockers.map((blocker) => blocker.code),
+      blockerFields: contactBlockers.map((blocker) => blocker.field),
+    },
+  });
+  const settingsOrigin = normalizeHttpsBaseUrl(settings.canonicalBaseUrl);
+  const configuredClientOrigin = normalizeHttpsBaseUrl(
+    options.configuredClientPublicSiteOrigin,
+  );
+  const requireConfiguredClientOrigin =
+    options.requireConfiguredClientPublicSiteOrigin !== false;
+  checks.push({
+    code: "site-settings-canonical-origin-configuration",
+    ok: !requireConfiguredClientOrigin
+      || Boolean(
+        settingsOrigin
+        && configuredClientOrigin
+        && settingsOrigin === configuredClientOrigin
+      ),
+    summary: !requireConfiguredClientOrigin
+      ? "当前调用未启用预期客户端公开域名配置核验"
+      : settingsOrigin
+          && configuredClientOrigin
+          && settingsOrigin === configuredClientOrigin
+        ? "SiteSettings 正式域名与预期客户端公开域名配置一致"
+        : "SiteSettings 正式域名与预期客户端公开域名配置缺失或不一致",
+    facts: {
+      evidenceType: "runner-configuration",
+      artifactVerified: false,
+      enforced: requireConfiguredClientOrigin,
+      settingsOriginConfigured: Boolean(settingsOrigin),
+      clientOriginConfigured: Boolean(configuredClientOrigin),
+      originsMatch: Boolean(
+        settingsOrigin
+        && configuredClientOrigin
+        && settingsOrigin === configuredClientOrigin
+      ),
+    },
+  });
+  checks.push({
+    code: "site-settings-publication-readiness",
+    ok: siteReadiness.ready,
+    summary: siteReadiness.ready
+      ? "品牌、联系、法律、SEO 与语言配置已满足公开站点准备度"
+      : "公开站点配置准备度未通过",
+    facts: {
+      schemaVersion: siteReadiness.schemaVersion,
+      status: siteReadiness.status,
+      areas: siteReadiness.areas,
+      blockerCodes: siteReadiness.blockers.map((blocker) => blocker.code),
+      blockerFields: siteReadiness.blockers.map((blocker) => blocker.field),
+    },
   });
 
   const documents = await database.pageDocument.findMany({
@@ -554,6 +614,7 @@ export async function runReleasePreflight(
       where: {
         id: document.publishedRevisionId,
         documentId: document.id,
+        status: "published",
       },
       select: { id: true, version: true, puckData: true, metadata: true },
     });
@@ -614,7 +675,8 @@ export async function runReleasePreflight(
       "公开联系方式与营业信息真实性签认",
       "品牌文案、法务文案与运营主体签认",
       "公开媒体商用权利与最终视觉签认",
-      releaseProfile === "commerce"
+      "已验证客户端制品中的 VITE_PUBLIC_SITE_ORIGIN 与正式域名一致",
+      releaseProfile === COMMERCE_RELEASE_PROFILE
         ? "首发商品组合、SKU、库存、价格、配送范围与媒体权利签认"
         : "首发作品组合、展示模式、作品事实与媒体权利签认",
       "正式域名、TLS、监控、异地备份与目标环境证据",
@@ -631,8 +693,12 @@ export async function runReleasePreflightTargetAudit(
   ) => Promise<PageValidationResult>,
   migrationIntegrityCheck: () => Promise<ReleasePreflightCheck>,
   config: ReleasePreflightTargetConfig,
-  releaseProfile: ReleaseProfile = "lead-generation",
-  options: { partnerApplicationsWriteEnabled?: boolean } = {},
+  releaseProfile: ReleaseProfile = DEFAULT_RELEASE_PROFILE,
+  options: {
+    partnerApplicationsWriteEnabled?: boolean;
+    configuredClientPublicSiteOrigin?: string;
+    requireConfiguredClientPublicSiteOrigin?: boolean;
+  } = {},
 ) {
   const access = await verifyTargetDatabaseAccess(
     database,
@@ -656,7 +722,7 @@ export async function runReleasePreflightTargetAudit(
     access,
     ...preflight,
     evidenceBoundary:
-      "只读账号的目标身份、migration、正式内容与 publishedRevisionId 快照预检；不执行 migration、回填、部署、页面发布或流量切换",
+      "只读账号的目标身份、migration、正式内容、publishedRevisionId 快照及 runner 配置预检；不读取或验证客户端制品构建参数，也不执行 migration、回填、部署、页面发布或流量切换",
   };
 }
 
@@ -680,6 +746,10 @@ async function main() {
       () => checkMigrationIntegrity(prisma as unknown as MigrationIntegrityDatabase),
       config,
       parseReleaseProfile(process.env.RELEASE_PROFILE),
+      {
+        configuredClientPublicSiteOrigin: process.env.VITE_PUBLIC_SITE_ORIGIN,
+        requireConfiguredClientPublicSiteOrigin: true,
+      },
     );
     console.log(JSON.stringify(result, null, 2));
     if (!result.technicalReady) process.exitCode = 1;

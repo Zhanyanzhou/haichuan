@@ -28,9 +28,11 @@ function createHarness(finalAmount = 100) {
       paidBalance: new Prisma.Decimal(0),
       paymentMethod: null as string | null,
       deliveryStatus: 'NONE',
+      logisticsCompany: null as string | null,
+      logisticsNo: null as string | null,
       customerEmail: null,
       customerName: '测试客户',
-      items: [{ productId: 10, skuId: 100, quantity: 1 }],
+      items: [{ id: 1000, productId: 10, skuId: 100, quantity: 1 }],
     },
     payments: [] as FakePayment[],
     fulfillments: [] as Array<{
@@ -41,11 +43,13 @@ function createHarness(finalAmount = 100) {
       internalNote: string | null;
       carrier?: string;
       trackingNo?: string;
+      warehouseId: number;
     }>,
     reservationConsumes: 0,
     transactionCalls: 0,
     events: [] as Array<Record<string, unknown>>,
     notifications: [] as Array<Record<string, unknown>>,
+    fulfillmentAuthorityCalls: [] as Array<Record<string, unknown>>,
   };
 
   const applyOrderData = (data: Record<string, any>) => {
@@ -102,6 +106,8 @@ function createHarness(finalAmount = 100) {
         ),
     },
     fulfillment: {
+      findMany: async ({ where }: any) =>
+        state.fulfillments.filter((item) => item.orderId === where.orderId),
       findFirst: async ({ where }: any) =>
         state.fulfillments.find((item) => item.orderId === where.orderId) ?? null,
       create: async ({ data }: any) => {
@@ -109,6 +115,7 @@ function createHarness(finalAmount = 100) {
           id: state.fulfillments.length + 1,
           fulfillmentNo: data.fulfillmentNo,
           orderId: data.orderId,
+          warehouseId: data.warehouseId,
           status: data.status,
           internalNote: null,
         };
@@ -121,8 +128,23 @@ function createHarness(finalAmount = 100) {
         Object.assign(fulfillment, data);
         return { count: 1 };
       },
+      count: async ({ where }: any) =>
+        state.fulfillments.filter(
+          (item) =>
+            item.orderId === where.orderId &&
+            item.id !== where.id?.not &&
+            !where.status.notIn.includes(item.status),
+        ).length,
     },
     inventoryReservation: {
+      findMany: async () => [
+        {
+          id: 501,
+          skuId: 100,
+          quantity: 1,
+          inventory: { warehouseId: 1 },
+        },
+      ],
       updateMany: async () => {
         state.reservationConsumes += 1;
         return { count: 1 };
@@ -130,6 +152,7 @@ function createHarness(finalAmount = 100) {
     },
   };
   const prisma = {
+    ...tx,
     $transaction: async (callback: (client: any) => Promise<unknown>) => {
       state.transactionCalls += 1;
       return callback(tx);
@@ -143,6 +166,29 @@ function createHarness(finalAmount = 100) {
     {
       enqueuePaymentConfirmed: async (_tx: unknown, input: Record<string, unknown>) => {
         state.notifications.push(input);
+      },
+      enqueueOrderLifecycle: async (_tx: unknown, input: Record<string, unknown>) => {
+        state.notifications.push(input);
+      },
+    } as never,
+    {
+      dispatch: async (
+        fulfillmentId: number,
+        data: { carrier: string; trackingNo: string; internalNote?: string },
+        operator: Record<string, unknown>,
+        options: Record<string, unknown>,
+      ) => {
+        state.fulfillmentAuthorityCalls.push({ fulfillmentId, data, operator, options });
+        const fulfillment = state.fulfillments.find((item) => item.id === fulfillmentId);
+        if (!fulfillment) throw new Error('履约单不存在');
+        Object.assign(fulfillment, {
+          status: 'SHIPPED',
+          carrier: data.carrier,
+          trackingNo: data.trackingNo,
+        });
+        state.order.status = 'SHIPPED';
+        state.order.deliveryStatus = 'SHIPPED';
+        return fulfillment;
       },
     } as never,
   );
@@ -302,6 +348,46 @@ test('订单中心发货复用付款时创建的履约单，不再新建第二�
   assert.equal(state.fulfillments[0].status, 'SHIPPED');
   assert.equal(state.order.status, 'SHIPPED');
   assert.equal(state.order.deliveryStatus, 'SHIPPED');
+  assert.equal(state.fulfillmentAuthorityCalls.length, 1);
+  assert.deepEqual(state.fulfillmentAuthorityCalls[0]?.options, { requireSingleOrderId: 1 });
+});
+
+test('订单中心兼容入口对多包裹始终 409，显式传 fulfillmentId 也不能绕过', async () => {
+  const { service, state } = createHarness(100);
+  await service.recordManualReceipt({
+    orderId: 1,
+    amount: 100,
+    method: 'bank_transfer',
+    type: 'FULL',
+  });
+  state.fulfillments.push({
+    id: 2,
+    fulfillmentNo: 'FUL-WH-2',
+    orderId: 1,
+    warehouseId: 2,
+    status: 'PENDING_PICK',
+    internalNote: null,
+  });
+
+  await assert.rejects(
+    () => service.ship(1, { logisticsCompany: '顺丰', logisticsNo: 'SF-MISSING' }),
+    /前往履约中心逐包发货/,
+  );
+
+  await assert.rejects(
+    () => service.ship(1, {
+      fulfillmentId: 1,
+      logisticsCompany: '顺丰',
+      logisticsNo: 'SF-WH-1',
+    }),
+    /前往履约中心逐包发货/,
+  );
+  assert.equal(state.fulfillments[0].status, 'PENDING_PICK');
+  assert.equal(state.fulfillments[1].status, 'PENDING_PICK');
+  assert.equal(state.order.status, 'PENDING_SHIP');
+  assert.equal(state.order.deliveryStatus, 'PENDING_SHIP');
+  assert.equal(state.order.logisticsNo, null);
+  assert.equal(state.fulfillmentAuthorityCalls.length, 0);
 });
 
 test('付款确认事务先锁订单再重读 Payment 和订单状态', async () => {
@@ -432,9 +518,10 @@ test('取消事务按 Order、Payment、Fulfillment、库存预占顺序处理',
   const result = await service.updateStatus(1, { status: 'CANCELLED' });
 
   assert.equal(result?.status, 'CANCELLED');
-  assert.deepEqual(sequence.slice(0, 6), [
+  assert.deepEqual(sequence.slice(0, 7), [
     'order-lock',
     'order-reread',
+    'payment-read',
     'payment-read',
     'fulfillment-read',
     'inventory-release',
@@ -473,4 +560,103 @@ test('取消拿到订单锁后发现确认付款会拒绝且不释放库存', as
     ConflictException,
   );
   assert.equal(released, false);
+});
+
+test('取消拿到订单锁后发现 PENDING 支付会拒绝且不释放库存', async () => {
+  let released = false;
+  const tx = {
+    $queryRaw: async () => [{ id: 1 }],
+    order: {
+      findUnique: async () => ({
+        id: 1,
+        orderNo: 'ORD-CANCEL-RACE',
+        status: 'PENDING_PAYMENT',
+        paidAmount: new Prisma.Decimal(0),
+      }),
+    },
+    payment: {
+      findFirst: async ({ where }: any) =>
+        where.status === 'PENDING' ? { paymentNo: 'PAY-RACE' } : null,
+    },
+  };
+  const service = new OrdersService(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    } as unknown as PrismaService,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  (service as any).releaseStockReservations = async () => {
+    released = true;
+    return 1;
+  };
+
+  await assert.rejects(
+    () => service.updateStatus(1, { status: 'CANCELLED' }),
+    /待处理的支付交易 PAY-RACE/,
+  );
+  assert.equal(released, false);
+});
+
+test('未付款报价订单取消时同步取消未绑定分期和 ACTIVE 付款计划', async () => {
+  const order = {
+    id: 1,
+    orderNo: 'ORD-CANCEL-PLAN',
+    status: 'PENDING_PAYMENT',
+    paidAmount: new Prisma.Decimal(0),
+    quotationVersionId: 30,
+    customerEmail: null,
+    customerName: '合成客户',
+  };
+  const plan = {
+    id: 60,
+    status: 'ACTIVE',
+    installments: [
+      { id: 61, status: 'PENDING', paymentId: null },
+      { id: 62, status: 'PENDING', paymentId: null },
+    ],
+  };
+  const tx = {
+    $queryRaw: async () => [{ id: 1 }],
+    order: {
+      findUnique: async () => order,
+      updateMany: async ({ data }: any) => {
+        Object.assign(order, data);
+        return { count: 1 };
+      },
+    },
+    payment: { findFirst: async () => null },
+    fulfillment: { findFirst: async () => null },
+    paymentPlan: {
+      findUnique: async () => plan,
+      updateMany: async () => {
+        plan.status = 'CANCELLED';
+        return { count: 1 };
+      },
+    },
+    paymentPlanInstallment: {
+      updateMany: async () => {
+        for (const installment of plan.installments) installment.status = 'CANCELLED';
+        return { count: 2 };
+      },
+    },
+  };
+  const service = new OrdersService(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    } as unknown as PrismaService,
+    { record: async () => undefined } as never,
+    {} as never,
+    {} as never,
+  );
+  (service as any).releaseStockReservations = async () => 0;
+
+  await service.updateStatus(1, { status: 'CANCELLED' });
+  assert.equal(order.status, 'CANCELLED');
+  assert.equal(plan.status, 'CANCELLED');
+  assert.deepEqual(plan.installments.map((item) => item.status), [
+    'CANCELLED',
+    'CANCELLED',
+  ]);
 });

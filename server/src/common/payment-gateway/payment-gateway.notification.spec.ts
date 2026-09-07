@@ -11,6 +11,7 @@ test('支付宝 urlencoded 回调保留已解码字段并通过真实 RSA2 验�
     publicKeyEncoding: { type: 'spki', format: 'pem' },
   });
   const notification: Record<string, string> = {
+    app_id: 'test-app-id',
     out_trade_no: 'PAY202608270001',
     trade_no: '2026082722000001',
     trade_status: 'TRADE_SUCCESS',

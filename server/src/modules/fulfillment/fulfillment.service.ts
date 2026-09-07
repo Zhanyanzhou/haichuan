@@ -3,6 +3,17 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { TradeEventsService } from '../trade-events/trade-events.service';
 import { TRADE_ENTITY_TYPE, TRADE_EVENT_TYPE, type OperatorContext } from '../trade-events/trade-events.constants';
 import { Prisma, type FulfillmentStatus } from '@prisma/client';
+import { ReliableNotificationIntentService } from '../../common/notifications/reliable-notification-intent.service';
+
+const PENDING_FULFILLMENT_STATUSES: FulfillmentStatus[] = ['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP'];
+const ACTIVE_REFUND_STATUSES = ['PENDING', 'APPROVED', 'PROCESSING'] as const;
+const ACTIVE_AFTER_SALES_STATUSES = [
+  'REQUESTED',
+  'APPROVED',
+  'RETURNING',
+  'QC_PASSED',
+  'QC_FAILED',
+] as const;
 
 const fulfillmentListSelect = {
   id: true,
@@ -60,15 +71,15 @@ function maskPhone(phone: string): string {
 /**
  * 履约服务：管理拣货→复核→发货→送达生命周期。
  *
- * MVP 一单一包裹：一个 Order 对应一个 Fulfillment。
- * 发货主路径为 OrdersService.ship()（创建并立即发货）；
- * 本服务提供履约中心的列表、详情、状态推进（送达/异常）能力。
+ * 包裹状态只允许由本服务写入；订单中心入口仅保留单包裹兼容委托。
+ * 所有包裹更新、订单聚合、审计事件和发货通知意图共享同一个订单行锁事务。
  */
 @Injectable()
 export class FulfillmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tradeEvents: TradeEventsService,
+    private readonly reliableNotifications: ReliableNotificationIntentService,
   ) {}
 
   private async lockOrder(tx: Prisma.TransactionClient, orderId: number) {
@@ -76,6 +87,106 @@ export class FulfillmentService {
       Prisma.sql`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`,
     );
     if (rows.length === 0) throw new NotFoundException('订单不存在');
+  }
+
+  private async assertDispatchIsNotBlocked(tx: Prisma.TransactionClient, orderId: number) {
+    const [activeRefund, activeAfterSales] = await Promise.all([
+      tx.refund.findFirst({
+        where: { orderId, status: { in: [...ACTIVE_REFUND_STATUSES] } },
+        select: { id: true },
+      }),
+      tx.afterSalesCase.findFirst({
+        where: { orderId, status: { in: [...ACTIVE_AFTER_SALES_STATUSES] } },
+        select: { id: true },
+      }),
+    ]);
+    if (activeRefund || activeAfterSales) {
+      throw new ConflictException('订单存在处理中的退款或售后，暂不可发货');
+    }
+  }
+
+  private async synchronizeOrderAggregate(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: number;
+      status: string;
+      deliveryStatus: string;
+      shippedAt: Date | null;
+      receivedAt: Date | null;
+    },
+    operator: OperatorContext,
+  ) {
+    const fulfillments = await tx.fulfillment.findMany({
+      where: { orderId: order.id },
+      orderBy: { id: 'asc' },
+      select: {
+        status: true,
+        carrier: true,
+        trackingNo: true,
+        shippedAt: true,
+        deliveredAt: true,
+      },
+    });
+    if (fulfillments.length === 0) {
+      throw new ConflictException('订单缺少履约单，不能同步履约状态');
+    }
+
+    const hasPending = fulfillments.some((item) =>
+      PENDING_FULFILLMENT_STATUSES.includes(item.status),
+    );
+    const hasAbnormal = fulfillments.some((item) => item.status === 'ABNORMAL');
+    const allDelivered = fulfillments.every((item) => item.status === 'DELIVERED');
+    const allDispatched = !hasPending;
+    const nextOrderStatus = order.status === 'PENDING_SHIP' && allDispatched
+      ? 'SHIPPED'
+      : order.status;
+    const nextDeliveryStatus = hasAbnormal
+      ? 'ABNORMAL'
+      : allDelivered
+        ? 'RECEIVED'
+        : allDispatched
+          ? 'SHIPPED'
+          : 'PENDING_SHIP';
+    const shippedTimes = fulfillments
+      .map((item) => item.shippedAt)
+      .filter((value): value is Date => Boolean(value));
+    const deliveredTimes = fulfillments
+      .map((item) => item.deliveredAt)
+      .filter((value): value is Date => Boolean(value));
+    const single = fulfillments.length === 1 ? fulfillments[0] : null;
+    const shippedAt = allDispatched && shippedTimes.length > 0
+      ? new Date(Math.max(...shippedTimes.map((value) => value.getTime())))
+      : null;
+    const receivedAt = allDelivered && deliveredTimes.length > 0
+      ? new Date(Math.max(...deliveredTimes.map((value) => value.getTime())))
+      : null;
+    const previousDeliveryStatus = order.deliveryStatus;
+
+    await tx.order.update({
+      where: { id: order.id },
+      data: {
+        status: nextOrderStatus as 'PENDING_SHIP' | 'SHIPPED',
+        deliveryStatus: nextDeliveryStatus,
+        shippedAt,
+        receivedAt,
+        logisticsCompany: single && !hasPending ? single.carrier : null,
+        logisticsNo: single && !hasPending ? single.trackingNo : null,
+      },
+    });
+
+    if (previousDeliveryStatus !== 'RECEIVED' && nextDeliveryStatus === 'RECEIVED') {
+      await this.tradeEvents.record(tx, {
+        orderId: order.id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: order.id,
+        eventType: TRADE_EVENT_TYPE.ORDER_RECEIVED,
+        fromStatus: previousDeliveryStatus,
+        toStatus: 'RECEIVED',
+        operator,
+      });
+    }
+
+    return { allDispatched, allDelivered, deliveryStatus: nextDeliveryStatus };
   }
 
   async findAll(params: { page?: number; pageSize?: number; status?: string; keyword?: string }) {
@@ -141,7 +252,12 @@ export class FulfillmentService {
    * 仅允许对 PENDING_PICK/PENDING_CHECK/PENDING_SHIP 的履约单操作；
    * 订单必须处于 PENDING_SHIP（已付款）。
    */
-  async dispatch(fulfillmentId: number, dto: { carrier: string; trackingNo: string; internalNote?: string }, operator: OperatorContext) {
+  async dispatch(
+    fulfillmentId: number,
+    dto: { carrier: string; trackingNo: string; internalNote?: string },
+    operator: OperatorContext,
+    options: { requireSingleOrderId?: number } = {},
+  ) {
     const carrier = dto.carrier?.trim();
     const trackingNo = dto.trackingNo?.trim();
     if (!carrier || !trackingNo) throw new BadRequestException('发货必须填写承运商和运单号');
@@ -158,39 +274,66 @@ export class FulfillmentService {
       if (!fulfillment || fulfillment.orderId !== fulfillmentRef.orderId) {
         throw new NotFoundException('履约单不存在');
       }
-      if (!['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP'].includes(fulfillment.status)) {
+      if (
+        options.requireSingleOrderId !== undefined &&
+        fulfillment.orderId !== options.requireSingleOrderId
+      ) {
+        throw new ConflictException('履约单与订单不匹配，请前往履约中心处理');
+      }
+      if (options.requireSingleOrderId !== undefined) {
+        const packageCount = await tx.fulfillment.count({
+          where: { orderId: fulfillment.orderId },
+        });
+        if (packageCount !== 1) {
+          throw new ConflictException('多包裹订单请前往履约中心逐包发货');
+        }
+      }
+
+      if (['SHIPPED', 'ABNORMAL', 'DELIVERED'].includes(fulfillment.status)) {
+        if (fulfillment.carrier === carrier && fulfillment.trackingNo === trackingNo) {
+          return tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
+        }
+        throw new ConflictException('履约单已发货，物流信息不一致，不能重复发货');
+      }
+      if (!PENDING_FULFILLMENT_STATUSES.includes(fulfillment.status)) {
         throw new BadRequestException('当前履约单状态不可发货');
       }
       if (fulfillment.order.status !== 'PENDING_SHIP') {
         throw new BadRequestException('订单未完成付款审核，不可发货');
       }
+      await this.assertDispatchIsNotBlocked(tx, fulfillment.orderId);
 
       // 乐观锁：防止并发发货
       const now = new Date();
       const updated = await tx.fulfillment.updateMany({
-        where: { id: fulfillmentId, status: { in: ['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP'] } },
+        where: { id: fulfillmentId, status: { in: PENDING_FULFILLMENT_STATUSES } },
         data: { status: 'SHIPPED', carrier, trackingNo, shippedAt: now, internalNote: dto.internalNote?.trim() || fulfillment.internalNote },
       });
       if (updated.count === 0) throw new BadRequestException('履约单状态已变化，请刷新后重试');
 
-      const orderUpdated = await tx.order.updateMany({
-        where: { id: fulfillment.orderId, status: 'PENDING_SHIP' },
-        data: {
-          status: 'SHIPPED',
-          deliveryStatus: 'SHIPPED',
-          logisticsCompany: carrier,
-          logisticsNo: trackingNo,
-          shippedAt: now,
-        },
-      });
-      if (orderUpdated.count === 0) {
-        throw new ConflictException('订单状态已变化，不能发货');
-      }
+      const aggregate = await this.synchronizeOrderAggregate(
+        tx,
+        fulfillment.order,
+        operator,
+      );
 
       await this.tradeEvents.record(tx, {
         orderId: fulfillment.orderId, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillmentId,
         eventType: TRADE_EVENT_TYPE.SHIPMENT_DISPATCHED, fromStatus: fulfillment.status, toStatus: 'SHIPPED',
-        operator, metadata: { carrier, trackingNo },
+        operator,
+        metadata: {
+          carrier,
+          trackingNo,
+          warehouseId: fulfillment.warehouseId,
+          allDispatched: aggregate.allDispatched,
+        },
+      });
+
+      await this.reliableNotifications.enqueueOrderLifecycle(tx, fulfillment.order, {
+        event: 'SHIPPED',
+        fulfillmentId,
+        carrier,
+        trackingNo,
       });
 
       return tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
@@ -202,6 +345,7 @@ export class FulfillmentService {
     fulfillmentId: number,
     dto: { status: string; abnormalReason?: string; internalNote?: string },
     operator: OperatorContext,
+    options: { requireSingleOrderId?: number } = {},
   ) {
     // 事务外只定位不可变 orderId，避免 MySQL 在订单锁前建立旧的一致性读快照。
     const fulfillmentRef = await this.prisma.fulfillment.findUnique({
@@ -219,6 +363,23 @@ export class FulfillmentService {
       if (!fulfillment || fulfillment.orderId !== fulfillmentRef.orderId) {
         throw new NotFoundException('履约单不存在');
       }
+      if (
+        options.requireSingleOrderId !== undefined &&
+        fulfillment.orderId !== options.requireSingleOrderId
+      ) {
+        throw new ConflictException('履约单与订单不匹配，请前往履约中心处理');
+      }
+      if (options.requireSingleOrderId !== undefined) {
+        const packageCount = await tx.fulfillment.count({
+          where: { orderId: fulfillment.orderId },
+        });
+        if (packageCount !== 1) {
+          throw new ConflictException('多包裹订单请前往履约中心逐包确认送达');
+        }
+      }
+      if (!['PENDING_SHIP', 'SHIPPED'].includes(fulfillment.order.status)) {
+        throw new ConflictException('订单状态已变化，不能更新物流状态');
+      }
 
       const newStatus = dto.status as FulfillmentStatus;
       const now = new Date();
@@ -226,20 +387,11 @@ export class FulfillmentService {
       if (newStatus === 'DELIVERED') {
         // 重复物流回调幂等：不重复推进、不重复记录事件；同时可修复历史上已送达但订单未同步的事实。
         if (fulfillment.status === 'DELIVERED') {
-          await tx.order.updateMany({
-            where: { id: fulfillment.orderId, status: 'SHIPPED' },
-            data: {
-              deliveryStatus: 'RECEIVED',
-              receivedAt: fulfillment.deliveredAt ?? now,
-            },
-          });
+          await this.synchronizeOrderAggregate(tx, fulfillment.order, operator);
           return tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
         }
         if (!['SHIPPED', 'ABNORMAL'].includes(fulfillment.status)) {
           throw new BadRequestException('只有已发货或物流异常的履约单可标记送达');
-        }
-        if (fulfillment.order.status !== 'SHIPPED') {
-          throw new ConflictException('订单状态已变化，不能标记送达');
         }
         const delivered = await tx.fulfillment.updateMany({
           where: { id: fulfillmentId, status: { in: ['SHIPPED', 'ABNORMAL'] } },
@@ -248,17 +400,6 @@ export class FulfillmentService {
         if (delivered.count === 0) {
           throw new ConflictException('履约单状态已变化，请刷新后重试');
         }
-        const orderSynced = await tx.order.updateMany({
-          where: {
-            id: fulfillment.orderId,
-            status: 'SHIPPED',
-            deliveryStatus: { in: ['SHIPPED', 'ABNORMAL'] },
-          },
-          data: { deliveryStatus: 'RECEIVED', receivedAt: now },
-        });
-        if (orderSynced.count === 0) {
-          throw new ConflictException('订单状态已变化，不能标记送达');
-        }
         await this.tradeEvents.record(tx, {
           orderId: fulfillment.orderId, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillmentId,
           eventType: TRADE_EVENT_TYPE.FULFMENT_DELIVERED, fromStatus: fulfillment.status, toStatus: 'DELIVERED', operator,
@@ -266,9 +407,10 @@ export class FulfillmentService {
       } else if (newStatus === 'ABNORMAL') {
         if (!dto.abnormalReason?.trim()) throw new BadRequestException('物流异常必须填写异常原因');
         if (fulfillment.status === 'ABNORMAL') {
+          await this.synchronizeOrderAggregate(tx, fulfillment.order, operator);
           return tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
         }
-        if (fulfillment.status !== 'SHIPPED' || fulfillment.order.status !== 'SHIPPED') {
+        if (fulfillment.status !== 'SHIPPED') {
           throw new BadRequestException('只有已发货且未送达的履约单可以标记物流异常');
         }
         const abnormal = await tx.fulfillment.updateMany({
@@ -278,19 +420,6 @@ export class FulfillmentService {
         if (abnormal.count === 0) {
           throw new ConflictException('履约单状态已变化，请刷新后重试');
         }
-        // 同步订单发货维度为异常：异常订单聚合 findAnomalies 依据 order.deliveryStatus 筛选，
-        // 缺此回写则仓储标记的物流异常永远进不了异常订单页。
-        const orderSynced = await tx.order.updateMany({
-          where: {
-            id: fulfillment.orderId,
-            status: 'SHIPPED',
-            deliveryStatus: 'SHIPPED',
-          },
-          data: { deliveryStatus: 'ABNORMAL' },
-        });
-        if (orderSynced.count === 0) {
-          throw new ConflictException('订单发货状态已变化，请刷新后重试');
-        }
         await this.tradeEvents.record(tx, {
           orderId: fulfillment.orderId, entityType: TRADE_ENTITY_TYPE.FULFILLMENT, entityId: fulfillmentId,
           eventType: TRADE_EVENT_TYPE.FULFILLMENT_ABNORMAL, fromStatus: fulfillment.status, toStatus: 'ABNORMAL',
@@ -299,6 +428,8 @@ export class FulfillmentService {
       } else {
         throw new BadRequestException('仅支持标记送达或物流异常');
       }
+
+      await this.synchronizeOrderAggregate(tx, fulfillment.order, operator);
 
       return tx.fulfillment.findUnique({ where: { id: fulfillmentId } });
     });

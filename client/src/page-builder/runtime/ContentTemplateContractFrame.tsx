@@ -1,4 +1,5 @@
-import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode } from "react";
+import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode, type Ref } from "react";
+import { resolveContractAspectRatio } from "../config/blockContracts";
 import {
   contentTemplateObjectHasCapability,
   findContentTemplateEditableObject,
@@ -27,12 +28,43 @@ import {
   editableTargetToVisualKind,
   getExplicitContractRolePresentation,
 } from "../template-definition/editableTargets";
+import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  useContentTemplateRenderSurface,
+} from "./ContentTemplateRenderSurface";
 
 interface ContentTemplateContractFrameProps {
   moduleType: string;
   mode: "editor" | "public";
   props?: Record<string, unknown>;
   children: ReactNode;
+}
+
+type ContentTemplateLayout = NonNullable<ReturnType<typeof getContentTemplateLayout>>;
+
+type ContractFrameHandlers = Pick<HTMLAttributes<HTMLDivElement>,
+  | "onPointerDownCapture"
+  | "onClickCapture"
+  | "onPointerMove"
+  | "onPointerUp"
+  | "onPointerCancel"
+  | "onLostPointerCapture"
+  | "onKeyDownCapture"
+>;
+
+interface ContractFrameEditorView {
+  rootRef: Ref<HTMLDivElement>;
+  blockId: string;
+  editorMode: string;
+  panelMode: string;
+  viewport: "desktop" | "mobile";
+  selectedNodeId?: string;
+  snapActive: boolean;
+  gesturePhase?: GesturePhase;
+  mediaFocusEnabled: boolean;
+  selectionCss?: string;
+  liveMessage: string;
+  handlers: ContractFrameHandlers;
 }
 
 type ContractFrameStyle = CSSProperties & Record<`--hc-contract-${string}`, string | number>;
@@ -520,8 +552,9 @@ function createInstanceCss(
         capability: Parameters<typeof contentTemplateObjectHasCapability>[1],
         viewport: "desktop" | "mobile",
       ) => supportsCapabilityOnViewport(editableObject, capability, viewport);
+      const layoutSelector = `${root} :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"])`;
       const selector = slotCapability
-        ? `${root} :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"])`
+        ? layoutSelector
         : `${root} :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"],[data-editor-field~="${nodeId}"])`;
       // copy 等文字角色在部分 Renderer 中也是行动按钮的布局父容器。
       // “隐藏内容文字”应只隐藏合同声明的文字字段，不能连带吞掉独立 CTA。
@@ -534,6 +567,16 @@ function createInstanceCss(
         rules.push(`${visibilitySelector}{display:none!important}`);
       }
       const rectByViewport = isRecord(rawNode.rectByViewport) ? rawNode.rectByViewport : {};
+      // 含行动入口的文案组保留原生默认构图；只有显式覆盖才启用新增几何能力。
+      const nativeCopyGroup = editableObject.kind === "text" && contract.roles.some((role) => role.kind === "action" && role.parentRole === editableObject.roleId);
+      const explicitRoot = isRecord(props.__instanceOverrides) ? props.__instanceOverrides : {};
+      const explicitNodes = isRecord(explicitRoot.nodes) ? explicitRoot.nodes : {};
+      const explicitNode = isRecord(explicitNodes[nodeId]) ? explicitNodes[nodeId] : {};
+      const explicitRects = isRecord(explicitNode.rectByViewport) ? explicitNode.rectByViewport : {};
+      const layoutRects = nativeCopyGroup ? {
+        desktop: explicitRects.desktop ? rectByViewport.desktop : undefined,
+        mobile: explicitRects.mobile ? rectByViewport.mobile : undefined,
+      } : rectByViewport;
       const zIndexByViewport = isRecord(rawNode.zIndexByViewport)
         ? rawNode.zIndexByViewport
         : {};
@@ -560,22 +603,46 @@ function createInstanceCss(
         const width = Number(rawRect.width);
         const height = Number(rawRect.height);
         if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) return "";
-        return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;max-width:none!important;max-height:none!important;z-index:${zIndex ?? 2}!important`;
+        return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;z-index:${zIndex ?? 2}!important`;
       };
       const desktopRect = hasCapabilityOnViewport("layout", "desktop")
-        ? rectRule(rectByViewport.desktop, desktopZIndex, "desktop")
+        ? rectRule(layoutRects.desktop, desktopZIndex, "desktop")
         : "";
       const mobileRect = hasCapabilityOnViewport("layout", "mobile")
-        ? rectRule(rectByViewport.mobile, mobileZIndex, "mobile")
+        ? rectRule(layoutRects.mobile, mobileZIndex, "mobile")
         : "";
       if (desktopRect || mobileRect) rules.push(`${root}>:where(section,div){position:relative}`);
-      if (desktopRect) rules.push(`@media (min-width:768px){${selector}{${desktopRect}}}`);
-      if (mobileRect) rules.push(`@media (max-width:767px){${selector}{${mobileRect}}}`);
+      if (desktopRect) rules.push(`@media (min-width:768px){${layoutSelector}{${desktopRect}}}`);
+      if (mobileRect) rules.push(`@media (max-width:767px){${layoutSelector}{${mobileRect}}}`);
+      if (nativeCopyGroup && contract.key === "video") {
+        const mediaNode = isRecord(nodes.coverImage) ? nodes.coverImage : {};
+        const mediaRects = isRecord(mediaNode.rectByViewport) ? mediaNode.rectByViewport : {};
+        const videoBackground = typeof props.bgColor === "string" && /^#[0-9a-f]{6}$/i.test(props.bgColor) ? props.bgColor : "#FFFFFF";
+        const visibleBackground = background ?? videoBackground;
+        const channels = [1, 3, 5].map((offset) => {
+          const channel = parseInt(visibleBackground.slice(offset, offset + 2), 16) / 255;
+          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+        });
+        const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+        const readableText = luminance > 0.2 ? "#181A1B" : "#FFFFFF";
+        for (const viewport of ["desktop", "mobile"] as const) {
+          const copy = layoutRects[viewport];
+          const media = mediaRects[viewport];
+          if (!isRecord(copy) || !isRecord(media)) continue;
+          const separated = Number(copy.x) + Number(copy.width) <= Number(media.x) + 0.001
+            || Number(media.x) + Number(media.width) <= Number(copy.x) + 0.001
+            || Number(copy.y) + Number(copy.height) <= Number(media.y) + 0.001
+            || Number(media.y) + Number(media.height) <= Number(copy.y) + 0.001;
+          const query = viewport === "desktop" ? "min-width:768px" : "max-width:767px";
+          const naturalRatio = resolveContractAspectRatio(contract.key, "coverImage", typeof props.aspectRatio === "string" ? props.aspectRatio : undefined, viewport);
+          rules.push(`@media (${query}){${root} .hc-video-frame{height:auto;aspect-ratio:${naturalRatio};background:var(--hc-instance-background,${videoBackground})!important}${layoutSelector}{padding:0!important;inset:auto;text-shadow:none}${separated ? `${layoutSelector},${layoutSelector} :is(h2,p,a,span){color:var(--hc-instance-text,${readableText})!important}` : ""}}`);
+        }
+      }
       if (!desktopRect && desktopZIndex !== undefined) {
-        rules.push(`@media (min-width:768px){${selector}{position:relative;z-index:${desktopZIndex}!important}}`);
+        rules.push(`@media (min-width:768px){${layoutSelector}{position:relative;z-index:${desktopZIndex}!important}}`);
       }
       if (!mobileRect && mobileZIndex !== undefined) {
-        rules.push(`@media (max-width:767px){${selector}{position:relative;z-index:${mobileZIndex}!important}}`);
+        rules.push(`@media (max-width:767px){${layoutSelector}{position:relative;z-index:${mobileZIndex}!important}}`);
       }
       const ratio = Number(rawNode.ratio);
       if (hasCapability("ratio") && Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4) {
@@ -917,13 +984,271 @@ function resolveExplicitVisualNode(
   );
 }
 
+interface ContentTemplateFrameViewProps extends ContentTemplateContractFrameProps {
+  contract: ContentTemplateContract;
+  layout: ContentTemplateLayout;
+  scopeId: string;
+  instanceCss: string;
+  instanceLayout: InstanceValue;
+  instanceFrame: InstanceValue;
+  childEditMode?: boolean;
+  rootRef?: Ref<HTMLDivElement>;
+  editor?: ContractFrameEditorView;
+}
+
+/**
+ * 公开、目录预览与模板编辑共用的纯渲染壳。编辑会话订阅、手势状态和
+ * 全局监听器只由上层的编辑边界提供，本层只把已经解析好的状态映射到 DOM。
+ */
+function ContentTemplateFrameView({
+  moduleType,
+  mode,
+  children,
+  contract,
+  layout,
+  scopeId,
+  instanceCss,
+  instanceLayout,
+  instanceFrame,
+  childEditMode,
+  rootRef,
+  editor,
+}: ContentTemplateFrameViewProps) {
+  const style: ContractFrameStyle = {
+    ...templateLayoutVars(layout),
+    "--hc-contract-container":
+      layout.width === "full" ? "100%" : layout.width === "wide" ? "1520px" : layout.width === "editorial" ? "1040px" : "1280px",
+  };
+  const renderedChild = isValidElement(children)
+    ? cloneElement(children as ReactElement<{ editMode?: boolean }>, {
+        ...(childEditMode === undefined ? {} : { editMode: childEditMode }),
+      })
+    : children;
+
+  return (
+    <div
+      ref={rootRef ?? editor?.rootRef}
+      className={`hc-contract-frame hc-contract-frame--${mode}`}
+      style={style}
+      data-content-template-contract={contract.key}
+      data-content-template-module={moduleType}
+      data-content-template-renderer="real"
+      data-editor-block-id={editor?.blockId}
+      data-contract-tone={contract.preview.desktop.tone}
+      data-contract-visual-role={contract.visualRole}
+      data-contract-height-desktop={contract.heightModeByViewport.desktop}
+      data-contract-height-mobile={contract.heightModeByViewport.mobile}
+      data-contract-order-desktop={contract.order.desktop.join(",")}
+      data-contract-order-mobile={contract.order.mobile.join(",")}
+      data-contract-role-count={contract.roles.length}
+      data-hc-instance={scopeId}
+      data-instance-frame={typeof instanceFrame.heightPreset === "string"
+        ? instanceFrame.heightPreset
+        : typeof instanceLayout.framePreset === "string"
+          ? instanceLayout.framePreset
+          : undefined}
+      data-instance-composition={typeof instanceFrame.compositionPreset === "string"
+        ? instanceFrame.compositionPreset
+        : typeof instanceLayout.compositionPreset === "string"
+          ? instanceLayout.compositionPreset
+          : undefined}
+      data-visual-editor-mode={editor?.editorMode}
+      data-visual-panel-mode={editor?.panelMode}
+      data-visual-editor-viewport={editor?.viewport}
+      data-visual-selected-node={editor?.selectedNodeId}
+      data-hc-snap-active={editor?.snapActive ? "true" : undefined}
+      data-hc-gesture-phase={editor?.gesturePhase}
+      data-hc-media-focus-enabled={editor?.mediaFocusEnabled ? "true" : undefined}
+      {...editor?.handlers}
+    >
+      <ContentTemplateLayoutStyles />
+      {editor ? <style data-hc-contract-editor-surface="true">{EDITOR_SURFACE_CSS}</style> : null}
+      {instanceCss ? <style data-hc-instance-overrides>{instanceCss}</style> : null}
+      {editor?.selectionCss ? <style data-hc-visual-selection>{editor.selectionCss}</style> : null}
+      {editor ? (
+        <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{editor.liveMessage}</span>
+      ) : null}
+      {renderedChild}
+    </div>
+  );
+}
+
+function ContentTemplateReadOnlyContractFrame({
+  moduleType,
+  mode,
+  props,
+  children,
+  renderSurface,
+}: ContentTemplateContractFrameProps & { renderSurface: ReturnType<typeof useContentTemplateRenderSurface> }) {
+  const contract = getContentTemplateContract(moduleType);
+  const layout = getContentTemplateLayout(moduleType);
+  const reactId = useId();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || !contract || !layout) return;
+    const ownerWindow = root.ownerDocument.defaultView;
+    const appliedVariables = new Set<string>();
+    let resizeFrame = 0;
+    const resolveViewport = () => props?.__editorViewport === "mobile"
+      ? "mobile" as const
+      : props?.__editorViewport === "desktop"
+        ? "desktop" as const
+        : ownerWindow && ownerWindow.innerWidth <= 767
+          ? "mobile" as const
+          : "desktop" as const;
+    const nodeIds = new Set(
+      contract.editorCapabilities.editableObjects.flatMap((object) =>
+        object.nodeIds ?? [object.roleId],
+      ),
+    );
+    const clearVariables = () => {
+      appliedVariables.forEach((name) => root.style.removeProperty(name));
+      appliedVariables.clear();
+    };
+    const syncLayoutVariables = () => {
+      clearVariables();
+      const viewport = resolveViewport();
+      root.style.setProperty(
+        "--hc-layout-grid-rows",
+        String(contract.defaultGeometryByViewport[viewport].rows),
+      );
+      appliedVariables.add("--hc-layout-grid-rows");
+      const candidates = Array.from(root.querySelectorAll<HTMLElement>(
+        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
+      ));
+      nodeIds.forEach((nodeId) => {
+        const rect = resolveContractVisualNode(contract, props, nodeId, viewport).rect;
+        if (!rect) return;
+        const target = candidates.find((element) => {
+          if (element.getClientRects().length === 0) return false;
+          const ids = [
+            viewport === "mobile"
+              ? element.dataset.contentRoleMobile
+              : element.dataset.contentRoleDesktop,
+            element.dataset.contentRole,
+          ];
+          return ids.includes(nodeId);
+        });
+        if (!target) return;
+        const frameElement = findModuleFrameElement(target, root);
+        const rawContainingBlock = target.offsetParent;
+        const containingBlock = isHtmlElement(rawContainingBlock) && (
+          rawContainingBlock === root || root.contains(rawContainingBlock)
+        )
+          ? rawContainingBlock
+          : frameElement;
+        const measuredFrameBounds = frameElement.getBoundingClientRect();
+        const rootBounds = root.getBoundingClientRect();
+        const frameBounds = measuredFrameBounds.width > 0 && measuredFrameBounds.height > 0
+          ? measuredFrameBounds
+          : rootBounds;
+        const containingBounds = containingBlock.getBoundingClientRect();
+        const containingScaleX = containingBlock.offsetWidth > 0
+          ? containingBounds.width / containingBlock.offsetWidth
+          : 1;
+        const containingScaleY = containingBlock.offsetHeight > 0
+          ? containingBounds.height / containingBlock.offsetHeight
+          : containingScaleX;
+        const values = {
+          left: (frameBounds.left - containingBounds.left + rect.x * frameBounds.width) /
+            Math.max(0.0001, containingScaleX),
+          top: (frameBounds.top - containingBounds.top + rect.y * frameBounds.height) /
+            Math.max(0.0001, containingScaleY),
+          width: rect.width * frameBounds.width / Math.max(0.0001, containingScaleX),
+          height: rect.height * frameBounds.height / Math.max(0.0001, containingScaleY),
+        };
+        (Object.entries(values) as Array<[keyof typeof values, number]>).forEach(
+          ([axis, value]) => {
+            const name = visualNodeLayoutVar(nodeId, viewport, axis);
+            root.style.setProperty(name, `${value}px`);
+            appliedVariables.add(name);
+          },
+        );
+      });
+    };
+
+    syncLayoutVariables();
+    const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
+    const observer = ResizeObserverConstructor
+      ? new ResizeObserverConstructor(() => {
+          if (!ownerWindow) return;
+          ownerWindow.cancelAnimationFrame(resizeFrame);
+          resizeFrame = ownerWindow.requestAnimationFrame(syncLayoutVariables);
+        })
+      : undefined;
+    observer?.observe(root);
+    return () => {
+      observer?.disconnect();
+      ownerWindow?.cancelAnimationFrame(resizeFrame);
+      clearVariables();
+    };
+  }, [contract, layout, mode, moduleType, props]);
+
+  if (!contract || !layout) return <>{children}</>;
+
+  const scopeId = `hc-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const previewProps = props ?? {};
+  const instanceOverrides = resolveInstanceOverrides(contract, previewProps);
+  const instanceCss = createInstanceCss(
+    contract,
+    instanceOverrides,
+    previewProps,
+    scopeId,
+    renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW ? "editor" : mode,
+  );
+  const instanceOverrideRecord: InstanceValue = isRecord(instanceOverrides)
+    ? instanceOverrides as InstanceValue
+    : {};
+  const instanceLayout = isRecord(instanceOverrideRecord.layout)
+    ? instanceOverrideRecord.layout
+    : {};
+  const instanceFrame = isRecord(instanceOverrideRecord.frame)
+    ? instanceOverrideRecord.frame
+    : {};
+
+  return (
+    <ContentTemplateFrameView
+      moduleType={moduleType}
+      mode={mode}
+      props={props}
+      contract={contract}
+      layout={layout}
+      scopeId={scopeId}
+      instanceCss={instanceCss}
+      instanceLayout={instanceLayout}
+      instanceFrame={instanceFrame}
+      childEditMode={renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW ? false : undefined}
+      rootRef={rootRef}
+    >
+      {children}
+    </ContentTemplateFrameView>
+  );
+}
+
+export default function ContentTemplateContractFrame(props: ContentTemplateContractFrameProps) {
+  const renderSurface = useContentTemplateRenderSurface();
+  const blockId = typeof props.props?.id === "string" ? props.props.id : "";
+  const internalEditorEnabled = renderSurface !== CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW
+    && props.mode === "editor"
+    && blockId.startsWith("template-editor:")
+    && props.props?.__interactionOwner !== "host-overlay";
+
+  return internalEditorEnabled ? (
+    <ContentTemplateEditorContractFrame {...props} />
+  ) : (
+    <ContentTemplateReadOnlyContractFrame {...props} renderSurface={renderSurface} />
+  );
+}
+
 /**
  * 三条真实渲染链路共用的 schema v5 根框架。
  * 默认状态保留语义 Renderer 的内容流；合同默认几何仅作为编辑器选区回退，
  * 只有合法的实例覆盖才会改变公开布局，从而统一驱动编辑器、
  * 缩略图与公开 Renderer。子节点仍由 adapter 输出语义 DOM，本层不复制内容结构。
  */
-export default function ContentTemplateContractFrame({
+function ContentTemplateEditorContractFrame({
   moduleType,
   mode,
   props,
@@ -978,7 +1303,6 @@ export default function ContentTemplateContractFrame({
   const selectedHere = internalEditorEnabled && selection?.blockId === blockId
     ? selection
     : null;
-  const isCatalogTemplatePreview = props?.__templateCatalogPreview === true;
   const panelModeHere = internalEditorEnabled && visualWorkspace === "template"
     ? "design"
     : selectedHere
@@ -1331,7 +1655,7 @@ export default function ContentTemplateContractFrame({
       if (!internalEditorEnabled || !blockId) return;
       const viewport = resolveEditorViewport(ownerWindow);
       const candidates = Array.from(root.querySelectorAll<HTMLElement>(
-        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
+        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
       ));
       const nodes: Record<string, { x: number; y: number; width: number; height: number }> = {};
       let sharedFrame: HTMLElement | null = null;
@@ -1344,7 +1668,6 @@ export default function ContentTemplateContractFrame({
               ? element.dataset.contentRoleMobile
               : element.dataset.contentRoleDesktop,
             element.dataset.contentRole,
-            ...(element.dataset.editorField?.split(/\s+/) ?? []),
           ];
           return ids.includes(nodeId);
         });
@@ -1388,7 +1711,7 @@ export default function ContentTemplateContractFrame({
       );
       appliedVariables.add("--hc-layout-grid-rows");
       const candidates = Array.from(root.querySelectorAll<HTMLElement>(
-        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
+        "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
       ));
       nodeIds.forEach((nodeId) => {
         const rect = resolveContractVisualNode(contract, visualProps, nodeId, viewport).rect;
@@ -1400,7 +1723,6 @@ export default function ContentTemplateContractFrame({
               ? element.dataset.contentRoleMobile
               : element.dataset.contentRoleDesktop,
             element.dataset.contentRole,
-            ...(element.dataset.editorField?.split(/\s+/) ?? []),
           ];
           return ids.includes(nodeId);
         });
@@ -1477,7 +1799,7 @@ export default function ContentTemplateContractFrame({
     instanceOverrides,
     previewProps,
     scopeId,
-    isCatalogTemplatePreview ? "editor" : mode,
+    mode,
   );
   const instanceOverrideRecord: InstanceValue = isRecord(instanceOverrides)
     ? instanceOverrides as InstanceValue
@@ -1515,7 +1837,7 @@ export default function ContentTemplateContractFrame({
     ];
     const seen = new Set<string>();
     root.querySelectorAll<HTMLElement>(
-      "[data-content-role],[data-content-role-desktop],[data-content-role-mobile],[data-editor-field]",
+      "[data-content-role],[data-content-role-desktop],[data-content-role-mobile]",
     ).forEach((element) => {
       if (
         element.getClientRects().length === 0
@@ -1527,8 +1849,7 @@ export default function ContentTemplateContractFrame({
           : element.dataset.contentRoleDesktop) ||
         element.dataset.contentRole ||
         element.dataset.contentRoleDesktop ||
-        element.dataset.contentRoleMobile ||
-        element.dataset.editorField?.split(/\s+/).find(Boolean);
+        element.dataset.contentRoleMobile;
       if (!nodeId || nodeId === selectedNodeId || !allowedNodeIds.has(nodeId) || seen.has(nodeId)) return;
       seen.add(nodeId);
       const bounds = element.getBoundingClientRect();
@@ -2245,79 +2566,46 @@ export default function ContentTemplateContractFrame({
     cancelActiveGesture(true);
   };
 
-  const style: ContractFrameStyle = {
-    ...templateLayoutVars(layout),
-    "--hc-contract-container":
-      layout.width === "full" ? "100%" : layout.width === "wide" ? "1520px" : layout.width === "editorial" ? "1040px" : "1280px",
-  };
-  const renderedChild = isValidElement(children)
-    ? cloneElement(children as ReactElement<{
-        editMode?: boolean;
-      }>, {
-        ...(internalEditorEnabled ? { editMode: true } : {}),
-      })
-    : children;
-
   return (
-    <div
-      ref={rootRef}
-      className={`hc-contract-frame hc-contract-frame--${mode}`}
-      style={style}
-      data-content-template-contract={contract.key}
-      data-content-template-module={moduleType}
-      data-content-template-renderer="real"
-      data-editor-block-id={internalEditorEnabled ? blockId : undefined}
-      data-contract-tone={contract.preview.desktop.tone}
-      data-contract-visual-role={contract.visualRole}
-      data-contract-height-desktop={contract.heightModeByViewport.desktop}
-      data-contract-height-mobile={contract.heightModeByViewport.mobile}
-      data-contract-order-desktop={contract.order.desktop.join(",")}
-      data-contract-order-mobile={contract.order.mobile.join(",")}
-      data-contract-role-count={contract.roles.length}
-      data-hc-instance={scopeId}
-      data-instance-frame={typeof instanceFrame.heightPreset === "string"
-        ? instanceFrame.heightPreset
-        : typeof instanceLayout.framePreset === "string"
-          ? instanceLayout.framePreset
-          : undefined}
-      data-instance-composition={typeof instanceFrame.compositionPreset === "string"
-        ? instanceFrame.compositionPreset
-        : typeof instanceLayout.compositionPreset === "string"
-          ? instanceLayout.compositionPreset
-          : undefined}
-      data-visual-editor-mode={internalEditorEnabled ? editorModeHere : undefined}
-      data-visual-panel-mode={internalEditorEnabled ? panelModeHere : undefined}
-      data-visual-editor-viewport={internalEditorEnabled ? activeViewport : undefined}
-      data-visual-selected-node={selectedHere?.nodeId}
-      data-hc-snap-active={activeGuides.x || activeGuides.y ? "true" : undefined}
-      data-hc-gesture-phase={internalEditorEnabled && gesturePhase !== "idle" ? gesturePhase : undefined}
-      data-hc-media-focus-enabled={
-        selectedHere && editorMode === "adjust-media" && canDragMediaFocus
-          ? "true"
-          : undefined
-      }
-      {...(internalEditorEnabled ? {
-        onPointerDownCapture: handlePointerDown,
-        onClickCapture: handleClick,
-        onPointerMove: handlePointerMove,
-        onPointerUp: finishPointerDrag,
-        onPointerCancel: cancelPointerDrag,
-        onLostPointerCapture: handleLostPointerCapture,
-        onKeyDownCapture: handleKeyDown,
-      } : {})}
+    <ContentTemplateFrameView
+      moduleType={moduleType}
+      mode={mode}
+      props={props}
+      contract={contract}
+      layout={layout}
+      scopeId={scopeId}
+      instanceCss={instanceCss}
+      instanceLayout={instanceLayout}
+      instanceFrame={instanceFrame}
+      childEditMode
+      editor={{
+        rootRef,
+        blockId,
+        editorMode: editorModeHere,
+        panelMode: panelModeHere,
+        viewport: activeViewport,
+        selectedNodeId: selectedHere?.nodeId,
+        snapActive: Boolean(activeGuides.x || activeGuides.y),
+        gesturePhase: gesturePhase !== "idle" ? gesturePhase : undefined,
+        mediaFocusEnabled: Boolean(
+          selectedHere && editorMode === "adjust-media" && canDragMediaFocus,
+        ),
+        selectionCss: selectedHere
+          ? `${nodeSelector(selectedHere.nodeId)}{outline:1px solid #335F7D!important;outline-offset:-1px;cursor:${editorMode === "adjust-layout" ? "move" : editorMode === "adjust-media" && (selectedHere.kind === "media" || selectedHere.kind === "product") && canDragMediaFocus ? "grab" : "pointer"}}`
+          : undefined,
+        liveMessage,
+        handlers: {
+          onPointerDownCapture: handlePointerDown,
+          onClickCapture: handleClick,
+          onPointerMove: handlePointerMove,
+          onPointerUp: finishPointerDrag,
+          onPointerCancel: cancelPointerDrag,
+          onLostPointerCapture: handleLostPointerCapture,
+          onKeyDownCapture: handleKeyDown,
+        },
+      }}
     >
-      <ContentTemplateLayoutStyles />
-      {internalEditorEnabled ? (
-        <style data-hc-contract-editor-surface="true">{EDITOR_SURFACE_CSS}</style>
-      ) : null}
-      {instanceCss ? <style data-hc-instance-overrides>{instanceCss}</style> : null}
-      {selectedHere ? (
-        <style data-hc-visual-selection>{`${nodeSelector(selectedHere.nodeId)}{outline:1px solid #335F7D!important;outline-offset:-1px;cursor:${editorMode === "adjust-layout" ? "move" : editorMode === "adjust-media" && (selectedHere.kind === "media" || selectedHere.kind === "product") && canDragMediaFocus ? "grab" : "pointer"}}`}</style>
-      ) : null}
-      {internalEditorEnabled ? (
-        <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>{liveMessage}</span>
-      ) : null}
-      {renderedChild}
-    </div>
+      {children}
+    </ContentTemplateFrameView>
   );
 }

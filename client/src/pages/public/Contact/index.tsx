@@ -16,7 +16,7 @@ const T = {
   bg: "#FFFFFF",
   txt: "#181A1B",
   sec: "rgba(24,26,27,0.62)",
-  light: "rgba(24,26,27,0.42)",
+  light: "#6E7477",
   line: "#DDE1E2",
   gold: "#6E7477",
   warmBg: "#F4F5F5",
@@ -69,7 +69,6 @@ const REQUIRED_FIELDS = [
   "name",
   "phone",
   "consultationType",
-  "preferredTime",
   "message",
   "privacyConsent",
 ] as const;
@@ -78,7 +77,6 @@ const FIELD_IDS: Record<RequiredField, string> = {
   name: "cf-name",
   phone: "cf-phone",
   consultationType: "cf-type",
-  preferredTime: "cf-time",
   message: "cf-message",
   privacyConsent: "cf-privacy-consent",
 };
@@ -86,7 +84,6 @@ const ERROR_IDS: Record<RequiredField, string> = {
   name: "cf-name-error",
   phone: "cf-phone-error",
   consultationType: "cf-type-error",
-  preferredTime: "cf-time-error",
   message: "cf-message-error",
   privacyConsent: "cf-privacy-consent-error",
 };
@@ -326,9 +323,8 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     if (!/^1[3-9]\d{9}$/.test(form.phone.trim()))
       e.phone = "请输入正确的手机号码";
     if (!form.consultationType) e.consultationType = "请选择咨询类型";
-    if (!form.preferredTime) e.preferredTime = "请选择方便联系的时间";
-    if (!form.message.trim() || form.message.trim().length < 10)
-      e.message = "请至少输入10个字描述您的需求";
+    if (!form.message.trim()) e.message = "请描述您的需求";
+    else if (form.message.trim().length > 2000) e.message = "需求描述不能超过2000个字符";
     if (!form.privacyConsent) e.privacyConsent = "请阅读并同意隐私说明";
     setErrors(e);
     const firstInvalidField = REQUIRED_FIELDS.find((field) => e[field]);
@@ -351,7 +347,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
           phone: form.phone.trim(),
           consultationType: form.consultationType,
           preferredContact: form.preferredContact,
-          preferredTime: form.preferredTime,
+          preferredTime: form.preferredTime || undefined,
           budgetRange: form.budgetRange || undefined,
           productId: sourceProduct?.id,
           message: form.message.trim(),
@@ -926,19 +922,11 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
               >
                 <div>
                   <label style={lblS} htmlFor="cf-time">
-                    方便联系的时间 <span style={{ color: T.gold }}>*</span>
+                    方便联系的时间（选填）
                   </label>
                   <select
                     id="cf-time"
-                    aria-required="true"
-                    aria-invalid={errors.preferredTime ? true : undefined}
-                    aria-describedby={
-                      errors.preferredTime ? ERROR_IDS.preferredTime : undefined
-                    }
-                    style={{
-                      ...selS,
-                      borderColor: errors.preferredTime ? "#8C3F3B" : T.line,
-                    }}
+                    style={selS}
                     value={form.preferredTime}
                     onChange={(e) => set("preferredTime", e.target.value)}
                   >
@@ -951,18 +939,6 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                       </option>
                     ))}
                   </select>
-                  {errors.preferredTime && (
-                    <p
-                      id={ERROR_IDS.preferredTime}
-                      style={{
-                        fontSize: 11,
-                        color: "#8C3F3B",
-                        margin: "2px 0 0",
-                      }}
-                    >
-                      {errors.preferredTime}
-                    </p>
-                  )}
                 </div>
                 <div>
                   <label style={lblS} htmlFor="cf-budget">
@@ -1000,6 +976,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   }}
                   value={form.message}
                   onChange={(e) => set("message", e.target.value)}
+                  maxLength={2000}
                   placeholder="请描述您的具体需求，例如：佩戴场合、偏好的材质和风格、特殊要求等…"
                 />
                 {errors.message && (
@@ -1184,7 +1161,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
           outline-offset: 2px;
         }
 
-        @media (max-width: 767px) {
+        @media (max-width: 900px) {
           .contact-grid { grid-template-columns: 1fr !important; }
           .contact-row { grid-template-columns: 1fr !important; }
         }

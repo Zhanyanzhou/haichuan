@@ -74,6 +74,7 @@ export default function PartnerApplication() {
   const [submitting, setSubmitting] = useState(false);
   const [agreementOpen, setAgreementOpen] = useState(false);
   const [state, setState] = useState<PartnerState>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const partnerStatus = state?.customer?.partnerStatus || "NONE";
   // 后台审核说明（驳回/要求补充/暂停时回显给客户）
@@ -82,6 +83,7 @@ export default function PartnerApplication() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await partnerApi.getMine();
       const data = unwrapResponse<PartnerState>(res);
@@ -101,7 +103,7 @@ export default function PartnerApplication() {
         });
       }
     } catch {
-      setState(null);
+      setLoadError("合作状态暂时无法确认，请稍后重试。");
     } finally {
       setLoading(false);
     }
@@ -140,6 +142,26 @@ export default function PartnerApplication() {
     return (
       <div className="min-h-[50vh] flex items-center justify-center">
         <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-8">
+        <Result
+          status="error"
+          title="合作状态暂时无法确认"
+          subTitle="为避免重复申请，当前不会显示新的申请表。请重新加载后再继续。"
+          extra={[
+            <Button key="retry" type="primary" size="large" onClick={() => void load()}>
+              重新加载
+            </Button>,
+            <Button key="home" size="large" onClick={() => navigate("/")}>
+              返回首页
+            </Button>,
+          ]}
+        />
       </div>
     );
   }

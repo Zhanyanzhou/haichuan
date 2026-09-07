@@ -48,6 +48,25 @@ export function prepareDynamicTemplateDefinitionForNewIdentity(
   return next;
 }
 
+export function prepareHistoricalTemplateDefinitionForCurrentDraft(
+  historical: TemplateDefinitionV2,
+  current: TemplateDefinitionV2,
+): TemplateDefinitionV2 {
+  const next = structuredClone(historical);
+  next.templateId = current.templateId;
+  next.defaultContent = structuredClone(current.defaultContent);
+  next.previewContent = structuredClone(current.previewContent);
+  for (const slot of Object.values(next.slots)) {
+    if (
+      slot.emptyPolicy === "use-default"
+      && current.slots[slot.slotId]?.emptyPolicy !== "use-default"
+    ) {
+      slot.emptyPolicy = "hide";
+    }
+  }
+  return next;
+}
+
 export function findDynamicTemplateParentId(
   definition: TemplateDefinitionV2,
   nodeId: string,
@@ -84,6 +103,16 @@ export function findDynamicTemplateInsertionParentId(
   }
   const root = definition.nodes[definition.rootNodeId];
   return root && canNestDynamicTemplateNode(root.type, childType) ? root.nodeId : null;
+}
+
+export function describeDynamicTemplateRemoval(definition: TemplateDefinitionV2, nodeId: string): string {
+  const ids = [...collectDynamicTemplateSubtreeIds(definition, nodeId)];
+  const slots = ids.flatMap((id) => {
+    const slotId = definition.nodes[id]?.slotId;
+    return slotId && definition.slots[slotId] ? [definition.slots[slotId]] : [];
+  });
+  const required = slots.filter((slot) => slot.required).length;
+  return `将删除 ${ids.length} 个节点，包含 ${slots.length} 个内容槽位${required ? `（${required} 个必填槽位，受现有结构保护规则约束）` : ""}。该操作只修改当前未保存草稿，可使用撤销完整恢复。`;
 }
 
 export function getDynamicTemplateRegionDisplayName(

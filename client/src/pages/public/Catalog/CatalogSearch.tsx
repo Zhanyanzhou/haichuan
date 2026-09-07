@@ -1,5 +1,4 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import type { CatalogProduct } from "@/data/catalogData";
 import type { RealCategory } from "@/hooks/useProductData";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
@@ -64,44 +63,70 @@ export default function CatalogSearch({
   onSearch,
 }: CatalogSearchProps) {
   const listboxId = useId();
+  const historyId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const blurTimerRef = useRef<number | null>(null);
   const [draft, setDraft] = useState(query);
-  const [focused, setFocused] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const { history, addToHistory, removeOne, clearAll } = useSearchHistory();
   const suggestions = useMemo(
     () => getCatalogSuggestions(draft, products, categories, materials),
     [categories, draft, materials, products],
   );
 
-  const cancelPendingBlur = () => {
-    if (blurTimerRef.current === null) return;
-    window.clearTimeout(blurTimerRef.current);
-    blurTimerRef.current = null;
-  };
-
   useEffect(() => setDraft(query), [query]);
-  useEffect(() => () => cancelPendingBlur(), []);
+  useEffect(() => setActiveIndex(-1), [draft, suggestions]);
 
   const submit = (value: string) => {
     const clean = value.trim();
-    cancelPendingBlur();
     setDraft(clean);
     onSearch(clean);
     if (clean) {
       addToHistory(clean);
       trackSearch(clean);
     }
-    setFocused(false);
+    inputRef.current?.focus({ preventScroll: true });
+    setActiveIndex(-1);
+    setOpen(false);
   };
-  const showSuggestions = focused && draft.trim() && suggestions.length > 0;
-  const showHistory = focused && !draft.trim() && history.length > 0;
+  const showSuggestions = open && Boolean(draft.trim()) && suggestions.length > 0;
+  const showHistory = open && !draft.trim() && history.length > 0;
+  const popupOpen = Boolean(showSuggestions || showHistory);
+
+  const closePopup = () => {
+    inputRef.current?.focus({ preventScroll: true });
+    setActiveIndex(-1);
+    setOpen(false);
+  };
+
+  const moveActiveSuggestion = (direction: 1 | -1) => {
+    if (!showSuggestions) return;
+    setActiveIndex((current) => {
+      if (current < 0) return direction === 1 ? 0 : suggestions.length - 1;
+      return (current + direction + suggestions.length) % suggestions.length;
+    });
+  };
 
   return (
     <div className="catalog-search" aria-label="选款搜索">
       <p className="catalog-search__eyebrow">SEARCH THE COLLECTION</p>
       <h2 className="catalog-search__title">查找作品</h2>
-      <div className="catalog-search__field">
+      <div
+        className="catalog-search__field"
+        onFocusCapture={() => setOpen(true)}
+        onBlurCapture={(event) => {
+          const nextTarget = event.relatedTarget;
+          if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+          setActiveIndex(-1);
+          setOpen(false);
+        }}
+        onKeyDownCapture={(event) => {
+          if (event.key !== "Escape" || !popupOpen) return;
+          event.preventDefault();
+          event.stopPropagation();
+          closePopup();
+        }}
+      >
         <form
           className="catalog-search__form"
           role="search"
@@ -117,24 +142,33 @@ export default function CatalogSearch({
             ref={inputRef}
             id="catalog-search-input"
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onFocus={() => {
-              cancelPendingBlur();
-              setFocused(true);
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setOpen(true);
             }}
-            onBlur={() => {
-              cancelPendingBlur();
-              blurTimerRef.current = window.setTimeout(() => {
-                blurTimerRef.current = null;
-                setFocused(false);
-              }, 120);
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" && showSuggestions) {
+                event.preventDefault();
+                moveActiveSuggestion(1);
+              } else if (event.key === "ArrowUp" && showSuggestions) {
+                event.preventDefault();
+                moveActiveSuggestion(-1);
+              } else if (event.key === "Enter" && showSuggestions && activeIndex >= 0) {
+                event.preventDefault();
+                submit(suggestions[activeIndex].value);
+              }
             }}
             placeholder="搜索作品名称或编号"
             autoComplete="off"
             role="combobox"
             aria-autocomplete="list"
-            aria-expanded={Boolean(showSuggestions || showHistory)}
-            aria-controls={showSuggestions || showHistory ? listboxId : undefined}
+            aria-expanded={Boolean(showSuggestions)}
+            aria-controls={showSuggestions ? listboxId : undefined}
+            aria-activedescendant={
+              showSuggestions && activeIndex >= 0
+                ? `${listboxId}-option-${activeIndex}`
+                : undefined
+            }
             className="catalog-search__input"
           />
           <div className="catalog-search__actions">
@@ -145,10 +179,10 @@ export default function CatalogSearch({
                 aria-label="清除关键词"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
-                  cancelPendingBlur();
                   setDraft("");
                   onSearch("");
-                  setFocused(true);
+                  setActiveIndex(-1);
+                  setOpen(true);
                   inputRef.current?.focus();
                 }}
               >
@@ -161,122 +195,127 @@ export default function CatalogSearch({
             </button>
           </div>
         </form>
-        <AnimatePresence>
-          {showSuggestions || showHistory ? (
-            <motion.div
-              id={listboxId}
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.15 }}
-              role="listbox"
-              className="catalog-search__suggestions"
+        {showSuggestions ? (
+          <div
+            id={listboxId}
+            role="listbox"
+            aria-label="搜索建议"
+            className="catalog-search__suggestions"
+          >
+            {suggestions.map((suggestion, index) => (
+              <button
+                key={`${suggestion.type}-${suggestion.value}`}
+                id={`${listboxId}-option-${index}`}
+                type="button"
+                role="option"
+                tabIndex={-1}
+                aria-selected={index === activeIndex}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => submit(suggestion.value)}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  gap: 14,
+                  padding: "12px 16px",
+                  border: 0,
+                  borderBottom: `1px solid ${T.line}`,
+                  background: index === activeIndex ? T.bgWarm : "none",
+                  color: T.txt,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ minWidth: 32, color: T.sec, fontSize: 12 }}>
+                  {suggestion.type}
+                </span>
+                <span style={{ fontSize: 13 }}>{suggestion.value}</span>
+              </button>
+            ))}
+          </div>
+        ) : showHistory ? (
+          <section
+            id={historyId}
+            aria-label="最近搜索"
+            className="catalog-search__suggestions"
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "10px 16px",
+                color: T.sec,
+                fontSize: 12,
+              }}
             >
-              {showSuggestions ? (
-                suggestions.map((suggestion) => (
+              <span>最近搜索</span>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  clearAll();
+                  inputRef.current?.focus({ preventScroll: true });
+                }}
+                style={{
+                  border: 0,
+                  background: "none",
+                  color: T.sec,
+                  cursor: "pointer",
+                  fontSize: 11,
+                }}
+              >
+                清除记录
+              </button>
+            </div>
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {history.slice(0, 5).map((item) => (
+                <li
+                  key={item}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 44px",
+                    borderTop: `1px solid ${T.line}`,
+                  }}
+                >
                   <button
-                    key={`${suggestion.type}-${suggestion.value}`}
                     type="button"
-                    role="option"
-                    aria-selected="false"
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => submit(suggestion.value)}
+                    onClick={() => submit(item)}
                     style={{
-                      display: "flex",
-                      width: "100%",
-                      gap: 14,
-                      padding: "12px 16px",
+                      minHeight: 44,
                       border: 0,
-                      borderBottom: `1px solid ${T.line}`,
                       background: "none",
+                      padding: "12px 16px",
                       color: T.txt,
                       cursor: "pointer",
                       textAlign: "left",
+                      fontSize: 13,
                     }}
                   >
-                    <span style={{ minWidth: 32, color: T.light, fontSize: 10 }}>
-                      {suggestion.type}
-                    </span>
-                    <span style={{ fontSize: 13 }}>{suggestion.value}</span>
+                    {item}
                   </button>
-                ))
-              ) : (
-                <>
-                  <div
+                  <button
+                    type="button"
+                    aria-label={`删除搜索记录 ${item}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      removeOne(item);
+                      inputRef.current?.focus({ preventScroll: true });
+                    }}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "10px 16px",
-                      color: T.light,
-                      fontSize: 10,
+                      border: 0,
+                      background: "none",
+                      color: T.sec,
+                      cursor: "pointer",
                     }}
                   >
-                    <span>最近搜索</span>
-                    <button
-                      type="button"
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={clearAll}
-                      style={{
-                        border: 0,
-                        background: "none",
-                        color: T.sec,
-                        cursor: "pointer",
-                        fontSize: 11,
-                      }}
-                    >
-                      清除记录
-                    </button>
-                  </div>
-                  {history.slice(0, 5).map((item) => (
-                    <div
-                      key={item}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 44px",
-                        borderTop: `1px solid ${T.line}`,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected="false"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => submit(item)}
-                        style={{
-                          minHeight: 44,
-                          border: 0,
-                          background: "none",
-                          padding: "12px 16px",
-                          color: T.txt,
-                          cursor: "pointer",
-                          textAlign: "left",
-                          fontSize: 13,
-                        }}
-                      >
-                        {item}
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`删除搜索记录 ${item}`}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => removeOne(item)}
-                        style={{
-                          border: 0,
-                          background: "none",
-                          color: T.light,
-                          cursor: "pointer",
-                        }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </>
-              )}
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
       </div>
       <p className="catalog-search__hint">支持作品名称、品类、材质或货号</p>
     </div>

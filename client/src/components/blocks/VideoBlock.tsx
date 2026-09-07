@@ -7,6 +7,10 @@ import { FONT_DISPLAY, FONT_SANS, type WidthToken } from "@/page-builder/designS
 import { resolveContractAspectRatio } from "@/page-builder/config/blockContracts";
 import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import type { RenderablePageModule } from "@/types/pageModule";
+import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  useContentTemplateRenderSurface,
+} from "@/page-builder/runtime/ContentTemplateRenderSurface";
 
 interface VideoBlockProps {
   module: RenderablePageModule;
@@ -33,6 +37,7 @@ const RATIO_MAP: Record<string, string> = {
 const LEGACY_RATIOS = new Set(["16 / 7", "3 / 4", "21 / 9", "4 / 3"]);
 
 export default function VideoBlock({ module, editMode }: VideoBlockProps) {
+  const renderSurface = useContentTemplateRenderSurface();
   const { content, layoutConfig, styleConfig } = module;
   const {
     videoUrl,
@@ -77,7 +82,7 @@ export default function VideoBlock({ module, editMode }: VideoBlockProps) {
     : "";
 
   if (!videoUrl && !posterUrl) {
-    if (!editMode) return null;
+    if (!editMode && renderSurface !== CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW) return null;
     return <div className="hc-video-frame is-empty" data-content-role="coverImage" style={{ background: bgColor }}>
       <style>{`
         .hc-video-frame { aspect-ratio: ${desktopRatio}; }

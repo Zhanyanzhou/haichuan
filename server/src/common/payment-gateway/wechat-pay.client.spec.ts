@@ -120,6 +120,30 @@ test('主动查单拒绝未通过微信平台签名验证的资金事实', async
   await assert.rejects(() => client.queryOrder('PAY123458'), /应答验签失败/);
 });
 
+test('交易对账单下载地址只接受微信签名后的 APIv3 应答', async () => {
+  let capturedUrl = '';
+  const client = createClient((async (input) => {
+    capturedUrl = String(input);
+    return signedResponse(
+      JSON.stringify({
+        hash_type: 'SHA1',
+        hash_value: 'abc',
+        download_url: 'https://api.mch.weixin.qq.com/v3/billdownload/file',
+      }),
+    );
+  }) as typeof fetch);
+
+  const result = await client.getTradeBill('2026-09-05');
+  assert.equal(
+    capturedUrl,
+    'https://api.mch.weixin.qq.com/v3/bill/tradebill?bill_date=2026-09-05&bill_type=ALL',
+  );
+  assert.equal(
+    result.downloadUrl,
+    'https://api.mch.weixin.qq.com/v3/billdownload/file',
+  );
+});
+
 test('退款申请复用商户退款单号并校验原交易、金额与渠道应答签名', async () => {
   let capturedUrl = '';
   let capturedBody: Record<string, any> | undefined;

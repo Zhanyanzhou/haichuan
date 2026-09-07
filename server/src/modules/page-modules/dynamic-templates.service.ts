@@ -462,7 +462,13 @@ export class DynamicTemplatesService {
   async updateDraft(
     ownerId: number | undefined,
     templateId: string,
-    input: { expectedRevision: number; definition: unknown; versionNote?: string },
+    input: {
+      expectedRevision: number;
+      definition: unknown;
+      versionNote?: string;
+      restoreFromVersion?: number;
+      restoreFromChecksum?: string;
+    },
   ) {
     const resolvedOwnerId = this.requireOwnerId(ownerId);
     if (!Number.isInteger(input.expectedRevision) || input.expectedRevision <= 0) {
@@ -478,9 +484,44 @@ export class DynamicTemplatesService {
     if (validated.definition.templateId !== existing.templateId) {
       throw new BadRequestException("草稿不能改变 templateId；请使用另存为");
     }
-    const existingDefinition = this.validateDefinition(existing.draft.definition).definition;
+    const hasRestoreVersion = input.restoreFromVersion !== undefined;
+    const hasRestoreChecksum = input.restoreFromChecksum !== undefined;
+    if (hasRestoreVersion !== hasRestoreChecksum) {
+      throw new BadRequestException("历史恢复来源必须同时包含版本号和校验值");
+    }
+    let structureBaseline = this.validateDefinition(existing.draft.definition).definition;
+    if (hasRestoreVersion && hasRestoreChecksum) {
+      if (!Number.isInteger(input.restoreFromVersion) || Number(input.restoreFromVersion) <= 0) {
+        throw new BadRequestException("历史恢复版本无效");
+      }
+      if (!/^[a-f0-9]{64}$/.test(input.restoreFromChecksum!)) {
+        throw new BadRequestException("历史恢复校验值无效");
+      }
+      const sourceVersion = await this.prisma.dynamicTemplateVersion.findUnique({
+        where: {
+          dynamicTemplateId_version: {
+            dynamicTemplateId: existing.id,
+            version: input.restoreFromVersion!,
+          },
+        },
+      });
+      if (!sourceVersion) throw new NotFoundException("历史恢复来源版本不存在");
+      const trustedSource = this.trustedPublishedDefinition({
+        templateId: existing.templateId,
+        schemaVersion: sourceVersion.schemaVersion,
+        definition: sourceVersion.definition,
+        definitionChecksum: sourceVersion.definitionChecksum,
+      });
+      if (!trustedSource) {
+        throw new ConflictException("历史恢复来源完整性校验失败，已拒绝保存");
+      }
+      if (sourceVersion.definitionChecksum !== input.restoreFromChecksum) {
+        throw new ConflictException("历史恢复来源已变化，请重新选择版本");
+      }
+      structureBaseline = trustedSource;
+    }
     const structureLockViolation = getDynamicTemplateStructureLockViolation(
-      existingDefinition,
+      structureBaseline,
       validated.definition,
       { mode: "persistenceSnapshot" },
     );
@@ -656,12 +697,42 @@ export class DynamicTemplatesService {
     });
   }
 
-  async listVersions(ownerId: number | undefined, templateId: string) {
+  async listVersions(
+    ownerId: number | undefined,
+    templateId: string,
+    beforeVersion?: number,
+    requestedLimit = 20,
+  ) {
     const template = await this.getOwnedTemplate(this.requireOwnerId(ownerId), templateId);
-    return this.prisma.dynamicTemplateVersion.findMany({
-      where: { dynamicTemplateId: template.id },
+    if (beforeVersion !== undefined && (!Number.isInteger(beforeVersion) || beforeVersion <= 0)) {
+      throw new BadRequestException("模板版本游标无效");
+    }
+    if (!Number.isInteger(requestedLimit) || requestedLimit <= 0) {
+      throw new BadRequestException("模板版本分页大小无效");
+    }
+    const limit = Math.min(requestedLimit, 50);
+    const rows = await this.prisma.dynamicTemplateVersion.findMany({
+      where: {
+        dynamicTemplateId: template.id,
+        ...(beforeVersion === undefined ? {} : { version: { lt: beforeVersion } }),
+      },
       orderBy: { version: "desc" },
+      take: limit + 1,
+      select: {
+        id: true,
+        dynamicTemplateId: true,
+        version: true,
+        schemaVersion: true,
+        definitionChecksum: true,
+        versionNote: true,
+        publishedAt: true,
+      },
     });
+    const items = rows.slice(0, limit);
+    return {
+      items,
+      nextBeforeVersion: rows.length > limit ? items.at(-1)?.version ?? null : null,
+    };
   }
 
   async getPublishedVersion(templateId: string, version: number) {

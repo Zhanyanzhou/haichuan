@@ -14,6 +14,9 @@ function matchesStatus(value: string, condition: any) {
 function createOnlineHarness(options?: {
   refundStatus?: string;
   refundEnabled?: boolean;
+  activePlan?: boolean;
+  independentPlan?: boolean;
+  quotationMarked?: boolean;
 }) {
   const payment = {
     id: 7,
@@ -41,6 +44,10 @@ function createOnlineHarness(options?: {
     payment,
     refund,
     order: { id: 9, refundedAmount: new Prisma.Decimal(0) },
+    paymentPlan: {
+      status: 'COMPLETED',
+      installments: [{ id: 61, status: 'PAID', paymentId: 7 }],
+    },
     events: [] as Array<Record<string, any>>,
     createCalls: [] as Array<Record<string, any>>,
   };
@@ -52,6 +59,7 @@ function createOnlineHarness(options?: {
   const tx: any = {
     $queryRaw: async () => [{ id: 9 }],
     refund: {
+      findFirst: async () => null,
       findUnique: async ({ where, include }: any) => {
         if (where.id !== undefined && where.id !== state.refund.id) return null;
         if (where.refundNo !== undefined && where.refundNo !== state.refund.refundNo) return null;
@@ -84,7 +92,34 @@ function createOnlineHarness(options?: {
           : [],
       findFirst: async ({ where }: any) =>
         where.id === state.payment.id && where.orderId === state.payment.orderId
-          ? { amount: state.payment.amount }
+          ? {
+              amount: state.payment.amount,
+              ...(options?.independentPlan ? {
+                order: {
+                  status: 'SHIPPED',
+                  paymentPlans: [{ id: 40 }],
+                },
+              } : {}),
+              ...(options?.quotationMarked ? {
+                order: {
+                  status: 'SHIPPED',
+                  quotationVersionId: 30,
+                  paymentPlans: [],
+                },
+              } : {}),
+              ...(options?.activePlan ? {
+                order: { status: 'PENDING_PAYMENT' },
+                installment: {
+                  paymentPlan: {
+                    status: 'ACTIVE',
+                    installments: [
+                      { id: 61, status: 'PAID' },
+                      { id: 62, status: 'PENDING' },
+                    ],
+                  },
+                },
+              } : {}),
+            }
           : null,
       update: async ({ data }: any) => {
         Object.assign(state.payment, data);
@@ -175,6 +210,39 @@ test('真实退款门禁关闭时审核保留 APPROVED，且不调用渠道', as
   );
 });
 
+test('未完成付款计划在已发货前禁止退款，避免净收不足却继续履约', async () => {
+  const { service, state } = createOnlineHarness({ activePlan: true });
+
+  await assert.rejects(
+    () => service.review(3, 'APPROVED', undefined, { type: 'ADMIN', id: 1 }),
+    /付款计划尚未全部实收/,
+  );
+  assert.equal(state.refund.status, 'PENDING');
+  assert.equal(state.payment.status, 'PAID');
+});
+
+test('付款计划订单的未绑定分期付款禁止退款', async () => {
+  const { service, state } = createOnlineHarness({ independentPlan: true });
+
+  await assert.rejects(
+    () => service.review(3, 'APPROVED', undefined, { type: 'ADMIN', id: 1 }),
+    /原付款未绑定分期/,
+  );
+  assert.equal(state.refund.status, 'PENDING');
+  assert.equal(state.payment.status, 'PAID');
+});
+
+test('报价标记存在但计划关系缺失时未绑定分期付款仍禁止退款', async () => {
+  const { service, state } = createOnlineHarness({ quotationMarked: true });
+
+  await assert.rejects(
+    () => service.review(3, 'APPROVED', undefined, { type: 'ADMIN', id: 1 }),
+    /原付款未绑定分期/,
+  );
+  assert.equal(state.refund.status, 'PENDING');
+  assert.equal(state.payment.status, 'PAID');
+});
+
 test('主动查询 SUCCESS 后才完成退款，并同步原 Payment 与订单累计退款额', async () => {
   const { service, state, gateway } = createOnlineHarness({ refundStatus: 'PROCESSING' });
   state.refund.gatewayRefundNo = 'WX-REFUND-3';
@@ -196,6 +264,12 @@ test('主动查询 SUCCESS 后才完成退款，并同步原 Payment 与订单�
   assert.equal(state.refund.status, 'COMPLETED');
   assert.equal(state.payment.status, 'PARTIAL_REFUND');
   assert.equal(Number(state.order.refundedAmount), 40);
+  // 当前模型没有“已退款”分期态；退款只推进 Payment/Refund/Order 退款事实，
+  // 绝不把已履约的分期重新打开为可支付，避免客户二次付款。
+  assert.equal(state.paymentPlan.status, 'COMPLETED');
+  assert.deepEqual(state.paymentPlan.installments, [
+    { id: 61, status: 'PAID', paymentId: 7 },
+  ]);
   assert.equal(state.events.filter((event) => event.eventType === 'REFUND_COMPLETED').length, 1);
 });
 

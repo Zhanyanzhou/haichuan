@@ -78,7 +78,7 @@ function appointmentDocument(props: Record<string, unknown> = {}) {
   };
 }
 
-test("门店资料缺失但有图片时允许发布并说明公开端仅展示图片", async () => {
+test("门店资料缺失但有图片时阻断发布并说明公开端仅展示图片", async () => {
   const document = storeDocument({ image: "/images/store.jpg" });
   const result = await createService(null).validatePageDocument(
     "about",
@@ -86,17 +86,17 @@ test("门店资料缺失但有图片时允许发布并说明公开端仅展示�
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, true);
-  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, false);
   const issue = result.issues.find(
-    (item) => item.code === "page-validation-site-settings-readiness",
+    (item) => item.code === "page-validation-site-settings-store-missing",
   );
-  assert.equal(issue?.severity, "warning");
+  assert.equal(issue?.severity, "error");
+  assert.ok(result.errors.includes(issue?.message || ""));
   assert.equal(issue?.blockId, "readiness-store");
   assert.match(issue?.message || "", /仅显示门店图片/);
 });
 
-test("门店资料与图片均缺失时允许发布并说明模块不会显示", async () => {
+test("门店资料与图片均缺失时阻断发布并说明模块不会显示", async () => {
   const document = storeDocument();
   const result = await createService({}).validatePageDocument(
     "about",
@@ -104,9 +104,9 @@ test("门店资料与图片均缺失时允许发布并说明模块不会显示",
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, true);
+  assert.equal(result.valid, false);
   const issue = result.issues.find(
-    (item) => item.code === "page-validation-site-settings-readiness",
+    (item) => item.code === "page-validation-site-settings-store-missing",
   );
   assert.equal(issue?.path, "content[1].props.image");
   assert.match(issue?.message || "", /公开端不会显示/);
@@ -122,12 +122,12 @@ test("已隐藏的门店模块不产生正式资料就绪提示", async () => {
 
   assert.equal(result.valid, true);
   assert.equal(
-    result.issues.some((item) => item.code === "page-validation-site-settings-readiness"),
+    result.issues.some((item) => item.code.startsWith("page-validation-site-settings-")),
     false,
   );
 });
 
-test("联系页无统一联系资料时允许发布并绑定业务功能区提示", async () => {
+test("联系页无统一联系资料时阻断发布并绑定业务功能区原因", async () => {
   const document = contactDocument();
   const result = await createService(null).validatePageDocument(
     "contact",
@@ -135,18 +135,18 @@ test("联系页无统一联系资料时允许发布并绑定业务功能区提�
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, true);
-  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, false);
   const issue = result.issues.find(
-    (item) => item.code === "page-validation-site-settings-readiness",
+    (item) => item.code === "page-validation-site-settings-contact-missing",
   );
-  assert.equal(issue?.severity, "warning");
+  assert.equal(issue?.severity, "error");
   assert.equal(issue?.blockId, "readiness-contact-region");
   assert.equal(issue?.path, "siteSettings.contact");
   assert.match(issue?.message || "", /仍可提交咨询/);
+  assert.ok(result.errors.includes(issue?.message || ""));
 });
 
-test("预约模块无统一联系电话时允许发布并说明只隐藏次级电话", async () => {
+test("预约模块无统一联系电话时阻断发布并说明只隐藏次级电话", async () => {
   const document = appointmentDocument();
   const result = await createService({}).validatePageDocument(
     "about",
@@ -154,12 +154,11 @@ test("预约模块无统一联系电话时允许发布并说明只隐藏次级�
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, true);
-  assert.deepEqual(result.errors, []);
+  assert.equal(result.valid, false);
   const issue = result.issues.find(
     (item) => item.path === "siteSettings.contactPhone",
   );
-  assert.equal(issue?.severity, "warning");
+  assert.equal(issue?.severity, "error");
   assert.equal(issue?.blockId, "readiness-appointment");
   assert.match(issue?.message || "", /主预约入口仍可使用/);
 });
@@ -193,8 +192,32 @@ test("统一资料已有可公开字段时不产生就绪提示", async () => {
   for (const result of [store, contact, appointment]) {
     assert.equal(result.valid, true);
     assert.equal(
-      result.issues.some((item) => item.code === "page-validation-site-settings-readiness"),
+      result.issues.some((item) => item.code.startsWith("page-validation-site-settings-")),
       false,
     );
   }
+});
+
+test("后台发布预检显式返回全站联系、法务、SEO 与语言准备度阻断", async () => {
+  const document = hero("global-readiness-hero");
+  const puckData = { content: [document], root: { props: {} }, zones: {} };
+  const result = await createService({
+    siteName: "海川珠宝",
+    contactPhone: "400-123-4567",
+  }).validatePageDocument(
+    "home",
+    puckData,
+    makeFormalPageMetadata(puckData),
+    { includeGlobalSiteReadiness: true },
+  );
+
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some(
+    (issue) => issue.code === "page-validation-site-publication-privacy-policy-review-missing"
+      && issue.path === "siteSettings.privacyPolicyReviewReference",
+  ));
+  assert.ok(result.issues.some(
+    (issue) => issue.code === "page-validation-site-publication-canonical-base-url-missing"
+      && issue.path === "siteSettings.canonicalBaseUrl",
+  ));
 });

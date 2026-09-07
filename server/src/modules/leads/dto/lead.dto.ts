@@ -72,6 +72,18 @@ export class CreateLeadFollowUpDto {
   nextFollowUpAt?: string | null;
 }
 
+export class CreateLeadReplyDto {
+  @Transform(trimString)
+  @IsString({ message: '回复内容必须是字符串' })
+  @IsNotEmpty({ message: '回复内容不能为空' })
+  @Matches(/\S/, { message: '回复内容不能为空' })
+  @MaxLength(5000, { message: '回复内容不能超过 5000 个字符' })
+  reply!: string;
+
+  @IsDateString({}, { message: '线索版本必须是 ISO 8601 时间' })
+  expectedUpdatedAt!: string;
+}
+
 export class SetLeadLegalHoldDto {
   @IsIn(LEAD_LEGAL_HOLD_REASONS, { message: '法律保留原因不合法' })
   reason!: string;

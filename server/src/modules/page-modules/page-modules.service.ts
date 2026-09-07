@@ -46,6 +46,7 @@ import {
   matchesDynamicTemplateDefinitionChecksum,
 } from "./dynamic-template-definition-integrity";
 import { validateDynamicTemplateDefinition } from "./generated/validateTemplateDefinition.generated";
+import { evaluateSitePublicationReadiness } from "../settings/site-publication-readiness";
 
 /**
  * 页面构建器区块类型契约 — 与前端 puckConfig MyComponents 严格一致,
@@ -553,6 +554,7 @@ export class PageModulesService {
       where: {
         id: document.publishedRevisionId,
         documentId: document.id,
+        status: "published",
       },
     });
     if (!revision) return null;
@@ -583,6 +585,23 @@ export class PageModulesService {
         version: snapshot.version,
       };
     }
+    const validation = await this.collectPageDocumentValidation(
+      this.prisma,
+      snapshot.puckData,
+      snapshot.metadata,
+      pageKey,
+    );
+    if (!validation.valid) {
+      return {
+        pageKey: snapshot.pageKey,
+        status: "INVALID",
+        // 与现有公开端契约保持一致；浏览器据此清除 lastValid，不能回显旧快照。
+        invalidReason: "publication-revalidation-required",
+        publishedAt: snapshot.publishedAt,
+        updatedAt: snapshot.updatedAt,
+        version: snapshot.version,
+      };
+    }
     return {
       pageKey: snapshot.pageKey,
       puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
@@ -599,12 +618,45 @@ export class PageModulesService {
   async getPublishedPageDocumentForAdmin(pageKey: string) {
     const snapshot = await this.getPublishedPageDocumentSnapshot(pageKey);
     if (!snapshot) return null;
+    const publicationAttested =
+      hasCurrentContentTemplatePublicationAttestation(snapshot.metadata);
+    const attestationIssues: ContentTemplateIssue[] = publicationAttested
+      ? []
+      : [{
+          code: "page-validation-publication-attestation-stale",
+          severity: "error",
+          layer: "page",
+          path: "metadata",
+          message: "线上版本缺少当前发布合同签认，必须重新校验并发布。",
+        }];
+    const [pageReadiness, globalReadinessIssues] = await Promise.all([
+      this.collectPageDocumentValidation(
+        this.prisma,
+        snapshot.puckData,
+        snapshot.metadata,
+        pageKey,
+      ),
+      this.collectGlobalSitePublicationReadinessIssues(this.prisma),
+    ]);
+    const publicationIssues = [
+      ...attestationIssues,
+      ...globalReadinessIssues,
+      ...pageReadiness.issues,
+    ];
+    const publicationErrors = publicationIssues
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => issue.message);
+    const publicationReadiness = {
+      valid: publicationErrors.length === 0,
+      errors: publicationErrors,
+      issues: publicationIssues,
+    };
     return {
       ...snapshot,
       puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
       metadata: withoutContentTemplatePublicationAttestation(snapshot.metadata),
-      publicationAttested:
-        hasCurrentContentTemplatePublicationAttestation(snapshot.metadata),
+      publicationAttested,
+      publicationReadiness,
     };
   }
 
@@ -729,7 +781,12 @@ export class PageModulesService {
         doc.metadata,
         pageKey,
       );
-      const errors = validation.errors;
+      const globalReadinessIssues =
+        await this.collectGlobalSitePublicationReadinessIssues(tx);
+      const issues = [...globalReadinessIssues, ...validation.issues];
+      const errors = issues
+        .filter((issue) => issue.severity === "error")
+        .map((issue) => issue.message);
       if (errors.length > 0) {
         const visibleErrors = errors.slice(0, 8).join("；");
         const suffix =
@@ -738,7 +795,7 @@ export class PageModulesService {
           message: `页面发布校验失败：${visibleErrors}${suffix}`,
           valid: false,
           errors,
-          issues: validation.issues,
+          issues,
         });
       }
 
@@ -814,6 +871,7 @@ export class PageModulesService {
     pageKey: string,
     puckDataOverride?: unknown,
     metadataOverride?: unknown,
+    options: { includeGlobalSiteReadiness?: boolean } = {},
   ) {
     let puckData = puckDataOverride;
     let metadata = metadataOverride;
@@ -836,7 +894,15 @@ export class PageModulesService {
       metadata,
       pageKey,
     );
-    return validation;
+    if (!options.includeGlobalSiteReadiness) return validation;
+
+    const globalReadinessIssues =
+      await this.collectGlobalSitePublicationReadinessIssues(this.prisma);
+    const issues = [...globalReadinessIssues, ...validation.issues];
+    const errors = issues
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => issue.message);
+    return { valid: errors.length === 0, errors, issues };
   }
 
   /** 模板原子激活在同一事务内复用页面发布的完整校验规则。 */
@@ -871,64 +937,41 @@ export class PageModulesService {
     return { valid: errors.length === 0, errors, issues: publicationIssues };
   }
 
+  private async collectGlobalSitePublicationReadinessIssues(
+    db: PageValidationDb,
+  ): Promise<ContentTemplateIssue[]> {
+    const repository = (db as unknown as {
+      siteSetting?: {
+        findUnique(args: unknown): Promise<{ value: unknown } | null>;
+      };
+    }).siteSetting;
+    const stored = repository
+      ? await repository.findUnique({ where: { key: "site" }, select: { value: true } })
+      : null;
+    const readiness = evaluateSitePublicationReadiness(stored?.value, {
+      persisted: Boolean(stored),
+    });
+    return readiness.blockers.map((blocker) => ({
+      code: `page-validation-site-publication-${blocker.code.toLowerCase().replace(/_/g, "-")}`,
+      severity: "error",
+      layer: "page",
+      field: blocker.field.split(".").at(-1),
+      path: blocker.field,
+      message: blocker.message,
+    }));
+  }
+
   /**
-   * “发布”保存一个立即供前台使用的版本。SEO 与非关键内容完整度
-   * 只提示；缺少所有可渲染媒体、失效媒体、结构损坏、危险地址、
-   * 不可解析引用、替代文字、素材授权、权限与版本冲突保持阻断，
-   * 避免公开破图、不安全内容或无来源素材。
+   * “发布”保存一个立即供前台使用的版本。正式内容、SEO、可渲染媒体、
+   * 替代文字与素材授权均失败关闭；结构损坏、危险地址、不可解析引用、
+   * 权限与版本冲突同样阻断，避免不完整或无来源内容进入公开端。
    */
   private toUsablePublicationIssue(
     issue: ContentTemplateIssue,
   ): ContentTemplateIssue {
-    if (issue.severity !== "error" || issue.layer !== "page") return issue;
-
-    const message = issue.message;
-    const metadataCompletionFields = new Set([
-      "seoTitle",
-      "seoDescription",
-      "ogImage",
-      "contentOwner",
-    ]);
-    const isMetadataCompletion =
-      issue.path.startsWith("metadata.")
-      && Boolean(issue.field && metadataCompletionFields.has(issue.field))
-      && (message.includes("不能为空") || message.includes("仍是占位内容"));
-    const isRequiredContentFailure = [
-      " 图片不能为空",
-      "视频地址不能为空",
-      "轮播图片不能为空",
-      "画廊图片不能为空",
-      "图片地址无效",
-    ].some((marker) => message.includes(marker));
-    if (isRequiredContentFailure) return issue;
-
-    const isContentCompletion = [
-      "至少填写眉题、标题或副标题之一",
-      " 内容不能为空",
-      "已启用眉题角色，请填写眉题内容",
-      "已启用标题角色，请填写标题内容",
-      "已启用副标题角色，请填写副标题内容",
-      "已启用行动文字角色，请填写行动文字内容",
-      "仍是占位内容",
-      " 数量应为 ",
-      "请选择 1 件有效的主推商品",
-      "关联商品必须是不重复的 1–4 件商品",
-      "必须填写行动文案",
-      "必须设置有效去向",
-      "必须选择有效商品",
-      "必须选择有效分类",
-      "站内页面跳转必须填写链接",
-      "必须选择商品",
-      "必须填写视频说明",
-      "为必填内容",
-    ].some((marker) => message.includes(marker));
-    const isDynamicContentBudget =
-      /(?:至少需要|最多允许) \d+ (?:个字符|项)/.test(message);
-    return isMetadataCompletion
-      || isContentCompletion
-      || isDynamicContentBudget
-      ? { ...issue, severity: "warning" }
-      : issue;
+    // 合同标记为 error 的正式内容、媒体、SEO 与来源问题必须保持阻断。
+    // 草稿保存不调用此门禁；只有显式预检和发布会失败关闭。
+    return issue;
   }
 
   private collectContentTemplateIssues(
@@ -998,7 +1041,7 @@ export class PageModulesService {
 
   /**
    * 正式联系与门店资料只读自 SiteSetting；PageDocument 只决定是否使用相关展示区块。
-   * 缺少可选资料不会改变既有发布资格，但必须把公开端的真实降级结果反馈给运营。
+   * 缺少当前页面实际依赖的正式资料会阻断发布，并把公开端降级结果精确反馈给运营。
    */
   private async collectSiteSettingsReadinessIssues(
     db: PageValidationDb,
@@ -1082,8 +1125,8 @@ export class PageModulesService {
 
     if (contactBusinessRegion && !hasContactSummary) {
       issues.push({
-        code: "page-validation-site-settings-readiness",
-        severity: "warning",
+        code: "page-validation-site-settings-contact-missing",
+        severity: "error",
         layer: "page",
         blockId: this.isNonEmptyString(contactBusinessRegion.props?.id)
           ? contactBusinessRegion.props.id
@@ -1103,8 +1146,8 @@ export class PageModulesService {
           : "门店信息";
         const hasImage = this.isNonEmptyString(props.image);
         issues.push({
-          code: "page-validation-site-settings-readiness",
-          severity: "warning",
+          code: "page-validation-site-settings-store-missing",
+          severity: "error",
           layer: "page",
           ...(blockId ? { blockId } : {}),
           path: `${block.path}.props.image`,
@@ -1123,8 +1166,8 @@ export class PageModulesService {
           ? props.moduleName.trim()
           : "预约入口";
         issues.push({
-          code: "page-validation-site-settings-readiness",
-          severity: "warning",
+          code: "page-validation-site-settings-contact-phone-missing",
+          severity: "error",
           layer: "page",
           ...(blockId ? { blockId } : {}),
           path: "siteSettings.contactPhone",
@@ -2546,6 +2589,16 @@ export class PageModulesService {
     };
   }
 
+  private normalizeStoredRevisionPuckData(puckData: unknown): PageDocumentRecord {
+    const normalized = this.normalizePageDocumentPuckData(puckData);
+    if (!isRecord(normalized) || !Array.isArray(normalized.content)) {
+      throw new BadRequestException(
+        "历史版本页面数据损坏，不能读取、恢复或重新发布",
+      );
+    }
+    return normalized;
+  }
+
   /**
    * 校验页面 SEO/OG 元数据（存于 doc.metadata，不在 puckData 内）。
    * 与 collectPuckDataErrors 并列，作为发布校验单一源的一部分；
@@ -2649,7 +2702,7 @@ export class PageModulesService {
 
   /**
    * 正式素材授权随 PageDocument 草稿保存，但不进入公开 metadata 白名单。
-   * 当前可见素材 URL 可记录精确匹配的来源与授权编号；缺失记录仅产生发布建议。
+   * 当前可见素材 URL 必须记录精确匹配的来源与授权编号；缺失记录阻断发布。
    */
   private collectMediaRightsIssues(
     puckData: unknown,
@@ -2842,71 +2895,162 @@ export class PageModulesService {
     }
   }
 
-  async getPageDocumentRevisions(pageKey: string) {
+  async getPageDocumentRevisions(
+    pageKey: string,
+    beforeVersion?: number,
+    requestedLimit = 20,
+  ) {
+    if (!getContentTemplatePageRule(pageKey)) {
+      throw new BadRequestException(`页面标识「${pageKey}」未在页面合同注册`);
+    }
+    if (
+      beforeVersion !== undefined
+      && (!Number.isInteger(beforeVersion) || beforeVersion <= 0)
+    ) {
+      throw new BadRequestException("历史版本游标无效");
+    }
+    if (!Number.isInteger(requestedLimit) || requestedLimit <= 0) {
+      throw new BadRequestException("历史版本分页数量无效");
+    }
+    const limit = Math.min(requestedLimit, 50);
     const doc = await this.prisma.pageDocument.findUnique({
       where: { pageKey },
+      select: { id: true, publishedRevisionId: true },
     });
-    if (!doc) return [];
+    if (!doc) return { items: [], nextBeforeVersion: null };
     const revisions = await this.prisma.pageDocumentRevision.findMany({
-      where: { documentId: doc.id },
+      where: {
+        documentId: doc.id,
+        status: "published",
+        ...(beforeVersion === undefined ? {} : { version: { lt: beforeVersion } }),
+      },
       orderBy: { version: "desc" },
-      take: 20,
+      take: limit + 1,
+      select: {
+        id: true,
+        version: true,
+        status: true,
+        publishedAt: true,
+        publishedBy: true,
+        createdAt: true,
+      },
     });
-    return revisions.map((revision) => ({
+    const hasMore = revisions.length > limit;
+    const items = revisions.slice(0, limit).map((revision) => ({
       ...revision,
       isPublished: revision.id === doc.publishedRevisionId,
     }));
+    return {
+      items,
+      nextBeforeVersion: hasMore ? items[items.length - 1]?.version ?? null : null,
+    };
   }
 
+  async getPageDocumentRevision(pageKey: string, version: number) {
+    if (!getContentTemplatePageRule(pageKey)) {
+      throw new BadRequestException(`页面标识「${pageKey}」未在页面合同注册`);
+    }
+    if (!Number.isInteger(version) || version <= 0) {
+      throw new BadRequestException("版本号不正确");
+    }
+    const doc = await this.prisma.pageDocument.findUnique({
+      where: { pageKey },
+      select: { id: true, publishedRevisionId: true },
+    });
+    if (!doc) throw new NotFoundException("页面文档不存在");
+    const revision = await this.prisma.pageDocumentRevision.findFirst({
+      where: { documentId: doc.id, version, status: "published" },
+    });
+    if (!revision) throw new NotFoundException("指定版本不存在");
+    const normalizedPuckData = this.normalizeStoredRevisionPuckData(revision.puckData);
+    return {
+      ...revision,
+      puckData: await this.hydrateDynamicTemplateDefinitions(normalizedPuckData),
+      metadata: withoutContentTemplatePublicationAttestation(revision.metadata),
+      isPublished: revision.id === doc.publishedRevisionId,
+    };
+  }
+
+  /**
+   * 历史 revision 始终只读；恢复操作仅把其规范化副本写回当前 PageDocument 草稿。
+   * publishedRevisionId 保持不变，公开端继续读取原线上不可变快照；恢复事件单独审计，
+   * 后续发布仍必须经过完整门禁并生成新的不可变发布 revision。
+   */
   async restorePageDocumentRevision(
     pageKey: string,
     version: number,
     expectedUpdatedAt: string,
+    userId: number,
   ) {
+    if (!getContentTemplatePageRule(pageKey)) {
+      throw new BadRequestException(`页面标识「${pageKey}」未在页面合同注册`);
+    }
     if (!Number.isInteger(version) || version <= 0) {
       throw new BadRequestException("版本号不正确");
     }
-
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
     if (!expected) {
       throw new BadRequestException("恢复版本时缺少页面版本标识");
     }
 
-    const doc = await this.prisma.pageDocument.findUnique({
-      where: { pageKey },
-    });
-    if (!doc) throw new BadRequestException("页面草稿不存在");
-    if (doc.updatedAt.getTime() !== expected.getTime()) {
-      throw new ConflictException(
-        "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
-      );
-    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE pageKey = ${pageKey} FOR UPDATE
+      `;
+      const document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      if (!document) throw new NotFoundException("页面文档不存在");
+      if (document.updatedAt.getTime() !== expected.getTime()) {
+        throw new ConflictException(
+          "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
+        );
+      }
 
-    const revision = await this.prisma.pageDocumentRevision.findFirst({
-      where: { documentId: doc.id, version },
-    });
-    if (!revision) throw new BadRequestException("指定版本不存在");
+      const revision = await tx.pageDocumentRevision.findFirst({
+        where: { documentId: document.id, version, status: "published" },
+      });
+      if (!revision) throw new NotFoundException("指定版本不存在");
 
-    // 查版本后仍可能发生并发保存；最终更新必须继续带上读取时的 updatedAt。
-    const updated = await this.prisma.pageDocument.updateMany({
-      where: { pageKey, updatedAt: doc.updatedAt },
-      data: {
-        puckData: toInputJsonValue(
-          this.removePageDocumentBusinessFactCopies(revision.puckData),
-        ),
-        metadata: toInputJsonValue(
-          withoutContentTemplatePublicationAttestation(revision.metadata),
-        ),
-        status: "DRAFT",
-        editorVersion: doc.editorVersion,
-      },
-    });
-    if (updated.count !== 1) {
-      throw new ConflictException(
-        "该页面刚刚被其他编辑者更新，请重新加载版本记录后再恢复",
-      );
-    }
-    return this.prisma.pageDocument.findUnique({ where: { pageKey } });
+      const updated = await tx.pageDocument.updateMany({
+        where: { id: document.id, updatedAt: document.updatedAt },
+        data: {
+          puckData: toInputJsonValue(
+            this.normalizeStoredRevisionPuckData(revision.puckData),
+          ),
+          metadata: toInputJsonValue(
+            withoutContentTemplatePublicationAttestation(revision.metadata),
+          ),
+          status: "DRAFT",
+        },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException(
+          "该页面刚刚被其他编辑者更新，请重新加载版本记录后再恢复",
+        );
+      }
+
+      const restoredAt = new Date();
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: "PAGE_REVISION_RESTORED_TO_DRAFT",
+          module: "page-builder",
+          targetId: document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_REVISION_RESTORED_TO_DRAFT",
+            actor: userId,
+            timestamp: restoredAt.toISOString(),
+            pageKey,
+            pageDocumentId: document.id,
+            sourceRevision: revision.id,
+            sourceRevisionVersion: revision.version,
+            publishedRevisionUnchanged: document.publishedRevisionId,
+            result: "succeeded",
+          }),
+        },
+      });
+      return tx.pageDocument.findUnique({ where: { id: document.id } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async rollbackPagePublication(
@@ -2945,17 +3089,83 @@ export class PageModulesService {
         throw new BadRequestException("该版本已经是当前线上版本");
       }
 
+      const attestationIssue: ContentTemplateIssue[] =
+        hasCurrentContentTemplatePublicationAttestation(revision.metadata)
+          ? []
+          : [{
+              code: "page-validation-publication-attestation-stale",
+              severity: "error",
+              layer: "page",
+              path: `revisions.${revision.version}.metadata`,
+              message: "指定历史版本缺少当前发布合同签认，不能切换为线上版本。",
+            }];
+      // 事务客户端上的查询顺序执行，避免并行 Promise 掩盖锁内失败来源。
+      const normalizedPuckData = this.normalizeStoredRevisionPuckData(
+        revision.puckData,
+      );
+      const pageReadiness = await this.collectPageDocumentValidation(
+        tx,
+        normalizedPuckData,
+        revision.metadata,
+        pageKey,
+      );
+      const globalReadinessIssues =
+        await this.collectGlobalSitePublicationReadinessIssues(tx);
+      const rollbackIssues = [
+        ...attestationIssue,
+        ...globalReadinessIssues,
+        ...pageReadiness.issues,
+      ];
+      const rollbackErrors = rollbackIssues
+        .filter((issue) => issue.severity === "error")
+        .map((issue) => issue.message);
+      if (rollbackErrors.length > 0) {
+        throw new BadRequestException({
+          message: `指定历史版本当前不可公开：${rollbackErrors.slice(0, 8).join("；")}`,
+          valid: false,
+          errors: rollbackErrors,
+          issues: rollbackIssues,
+        });
+      }
+
+      const lastRevision = await tx.pageDocumentRevision.findFirst({
+        where: { documentId: document.id },
+        orderBy: { version: "desc" },
+        select: { version: true },
+      });
+      const nextVersion = (lastRevision?.version ?? 0) + 1;
+      const restoredAt = new Date();
+      const restoredMetadata = {
+        ...withoutContentTemplatePublicationAttestation(revision.metadata),
+        [CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY]:
+          createContentTemplatePublicationAttestation(),
+      };
+      const restoredRevision = await tx.pageDocumentRevision.create({
+        data: {
+          documentId: document.id,
+          version: nextVersion,
+          puckData: toInputJsonValue(normalizedPuckData),
+          metadata: toInputJsonValue(restoredMetadata),
+          status: "published",
+          publishedBy: userId,
+          publishedAt: restoredAt,
+        },
+      });
+
       const updated = await tx.pageDocument.updateMany({
         where: {
           id: document.id,
           publishedRevisionId: expectedPublishedRevisionId,
         },
-        data: { publishedRevisionId: revision.id },
+        data: {
+          publishedRevisionId: restoredRevision.id,
+          publishedAt: restoredAt,
+          publishedBy: userId,
+        },
       });
       if (updated.count !== 1) {
         throw new ConflictException("线上版本刚刚发生变化，请重新加载后再回滚");
       }
-      const rolledBackAt = new Date();
       await tx.operationLog.create({
         data: {
           userId,
@@ -2966,18 +3176,20 @@ export class PageModulesService {
             schemaVersion: 1,
             event: "PAGE_PUBLICATION_ROLLED_BACK",
             actor: userId,
-            timestamp: rolledBackAt.toISOString(),
+            timestamp: restoredAt.toISOString(),
             pageKey,
             pageDocumentId: document.id,
             fromRevision: expectedPublishedRevisionId,
-            toRevision: revision.id,
-            toRevisionVersion: revision.version,
+            sourceRevision: revision.id,
+            sourceRevisionVersion: revision.version,
+            toRevision: restoredRevision.id,
+            toRevisionVersion: restoredRevision.version,
             result: "succeeded",
           }),
         },
       });
       const updatedDocument = await tx.pageDocument.findUnique({ where: { id: document.id } });
-      return { document: updatedDocument, revision };
+      return { document: updatedDocument, revision: restoredRevision };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     this.notifyPublicChange(pageKey, "page-document-published", result.revision.version);
@@ -3135,7 +3347,11 @@ export class PageModulesService {
     }
     const publishedRevision = doc.publishedRevisionId
       ? await this.prisma.pageDocumentRevision.findFirst({
-          where: { id: doc.publishedRevisionId, documentId: doc.id },
+          where: {
+            id: doc.publishedRevisionId,
+            documentId: doc.id,
+            status: "published",
+          },
         })
       : null;
     if (doc.publishedRevisionId && !publishedRevision) {
@@ -3145,7 +3361,9 @@ export class PageModulesService {
       const restored = await this.prisma.pageDocument.updateMany({
         where: { pageKey, updatedAt: doc.updatedAt },
         data: {
-          puckData: toInputJsonValue(publishedRevision.puckData),
+          puckData: toInputJsonValue(
+            this.normalizePageDocumentPuckData(publishedRevision.puckData),
+          ),
           metadata: toInputJsonValue(
             withoutContentTemplatePublicationAttestation(publishedRevision.metadata),
           ),

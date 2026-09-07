@@ -129,7 +129,7 @@ test('客户主动查单确认 SUCCESS 时复用回调核销管线', async () =>
         findFirst: async () => ({ id: 9, orderNo: 'ORD-9', status: 'PENDING_PAYMENT' }),
       },
       payment: {
-        findFirst: async () => payment,
+        findFirst: async ({ where }: any) => where?.id?.not ? null : payment,
         findUnique: async () => payment,
       },
     } as unknown as PrismaService,
@@ -174,13 +174,14 @@ test('客户关单会先查单，只有 NOTPAY 才关闭渠道并把本地交易
       },
       payment: {
         findFirst: async () => payment,
-        updateMany: async ({ where }: { where: { id: number } }) => {
-          failedPaymentId = where.id;
-          return { count: 1 };
-        },
       },
     } as unknown as PrismaService,
-    {} as OrdersService,
+    {
+      failPendingPaymentAttempt: async (paymentId: number) => {
+        failedPaymentId = paymentId;
+        return { ...payment, status: 'FAILED' };
+      },
+    } as unknown as OrdersService,
     {
       queryPayment: async () => ({
         provider: 'wechat',

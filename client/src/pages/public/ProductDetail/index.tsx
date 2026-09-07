@@ -54,6 +54,25 @@ const productSchemaOrigin = normalizePublicSiteOrigin(
   { allowHttp: import.meta.env.DEV },
 );
 
+const RESPONSIVE_PRODUCT_IMAGE_WIDTHS = [480, 800, 1200] as const;
+
+function buildProductImageSrcSet(src: string): string | undefined {
+  if (!src.includes("/media/")) return undefined;
+  try {
+    const absolute = /^[a-z][a-z\d+.-]*:/i.test(src);
+    const parsed = new URL(src, "https://public-media.local");
+    return RESPONSIVE_PRODUCT_IMAGE_WIDTHS.map((width) => {
+      parsed.searchParams.set("width", String(width));
+      const candidate = absolute
+        ? parsed.toString()
+        : `${parsed.pathname}${parsed.search}${parsed.hash}`;
+      return `${candidate} ${width}w`;
+    }).join(", ");
+  } catch {
+    return undefined;
+  }
+}
+
 /** 相似作品推荐（同分类/材质+热度加权；recommendations 模块首次接线启用） */
 type SimilarProduct = Pick<
   Product,
@@ -64,12 +83,19 @@ function SimilarProducts({ productId }: { productId: number }) {
   const [list, setList] = useState<SimilarProduct[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
+    setList([]);
     recommendationApi
       .getSimilar(productId, 8)
       .then((res: unknown) => {
-        setList(unwrapResponse<SimilarProduct[]>(res) || []);
+        if (!cancelled) setList(unwrapResponse<SimilarProduct[]>(res) || []);
       })
-      .catch(() => setList([]));
+      .catch(() => {
+        if (!cancelled) setList([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [productId]);
 
   if (list.length === 0) return null;
@@ -303,14 +329,21 @@ export default function ProductDetail() {
   // 初始收藏态：拉一次心愿单判断当前作品是否在列（心愿单量级小，整表判断成本可忽略）。
   // 登录墙 return 之前 hooks 已执行，必须显式判断登录态，避免游客每次必发一个注定 401 的请求。
   useEffect(() => {
-    if (!product?.id || !isSignedIn) return;
+    let cancelled = false;
+    setFavorited(false);
+    if (!product?.id || !isSignedIn) return undefined;
     customerApi
       .getFavorites()
       .then((res: unknown) => {
         const list = unwrapResponse<Array<{ productId: number }>>(res) || [];
-        setFavorited(list.some((f) => f.productId === product.id));
+        if (!cancelled) setFavorited(list.some((f) => f.productId === product.id));
       })
-      .catch(() => setFavorited(false));
+      .catch(() => {
+        if (!cancelled) setFavorited(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [product?.id, isSignedIn]);
 
   const handleToggleFavorite = async () => {
@@ -512,7 +545,7 @@ export default function ProductDetail() {
 
   if (loading)
     return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 bg-white" aria-live="polite" aria-busy="true">
+      <div className="product-detail-page__state flex flex-col items-center justify-center gap-4 bg-white" aria-live="polite" aria-busy="true">
         <Spin size="large" />
         <p className="text-xs tracking-[.12em] text-brand-muted">正在加载作品</p>
       </div>
@@ -520,7 +553,7 @@ export default function ProductDetail() {
   if (!product && loadFailure === "error")
     return (
       <div
-        className="min-h-[60vh] flex flex-col items-center justify-center gap-4 bg-white px-6 text-center"
+        className="product-detail-page__state flex flex-col items-center justify-center gap-4 bg-white px-6 text-center"
       >
         <h1 className="font-display text-3xl font-normal tracking-[.04em]">作品暂时无法加载</h1>
         <p className="max-w-md text-sm leading-7 text-brand-muted" role="alert">
@@ -545,7 +578,7 @@ export default function ProductDetail() {
     );
   if (!product)
     return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 bg-white px-6 text-center">
+      <div className="product-detail-page__state flex flex-col items-center justify-center gap-4 bg-white px-6 text-center">
         <h1 className="font-display text-3xl font-normal tracking-[.04em]">作品暂不可浏览</h1>
         <p className="text-brand-muted text-sm">该珠宝作品可能已下架，或尚未公开。</p>
         <Link
@@ -566,6 +599,7 @@ export default function ProductDetail() {
     thumbnails[mainImage]?.mediaUrl ||
     thumbnails[mainImage]?.url ||
     (thumbnails.length > 0 ? getPrimaryImage(product) : "");
+  const mainImageRecord = thumbnails[mainImage];
   const startingPrice = Number(product.price) || 0;
   const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
   const isDirectPurchase = product.salesMode === "DIRECT_PURCHASE";
@@ -699,6 +733,11 @@ export default function ProductDetail() {
                   src={mainImageUrl}
                   alt={product.name}
                   className="w-full h-full object-cover"
+                  srcSet={buildProductImageSrcSet(mainImageUrl)}
+                  sizes="(max-width: 900px) calc(100vw - 40px), (max-width: 1440px) 55vw, 700px"
+                  width={mainImageRecord?.width ?? undefined}
+                  height={mainImageRecord?.height ?? undefined}
+                  aspectRatio="4 / 5"
                   priority
                 />
               ) : (
@@ -741,8 +780,8 @@ export default function ProductDetail() {
           {/* Right: Info */}
           <motion.div
             className="product-detail-page__summary"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ y: 20 }}
+            animate={{ y: 0 }}
             transition={{ duration: reduceMotion ? 0 : 0.5, delay: reduceMotion ? 0 : 0.12 }}
           >
             <p className="text-[10px] tracking-[.2em] text-brand-muted mb-5 font-sans">JEWELRY WORK</p>
@@ -764,25 +803,25 @@ export default function ProductDetail() {
             (isDirectPurchase && displayPrice > 0) ? (
               <dl className="product-detail-page__commerce-facts">
                 {commerceOk && hasPublicFact(goldPrice?.price) ? (
-                  <div>
+                  <>
                     <dt>金价参考</dt>
                     <dd>¥{Number(goldPrice!.price).toFixed(2)} <span>/克</span></dd>
-                  </div>
+                  </>
                 ) : null}
                 {hasPublicFact(displayGoldWeight) ? (
-                  <div>
+                  <>
                     <dt>金重</dt>
                     <dd>{displayGoldWeight}g</dd>
-                  </div>
+                  </>
                 ) : null}
                 {isDirectPurchase && displayPrice > 0 ? (
-                  <div className="is-price">
-                    <dt>售价</dt>
-                    <dd>
+                  <>
+                    <dt className="is-price">售价</dt>
+                    <dd className="is-price">
                       ¥{displayPrice.toLocaleString()}
                       {!selectedSku && activeSkus.length > 1 ? <span>起</span> : null}
                     </dd>
-                  </div>
+                  </>
                 ) : null}
               </dl>
             ) : null}
@@ -796,9 +835,10 @@ export default function ProductDetail() {
                 <div className="flex gap-2 flex-wrap">
                   {activeSkus.map((sku) => (
                     <button
+                      type="button"
                       key={sku.id}
                       onClick={() => setSelectedSku(sku)}
-                      className={`px-5 py-2.5 text-sm border transition-colors font-sans ${selectedSku?.id === sku.id ? "border-brand-gold text-brand-gold" : "border-brand-line hover:border-brand-gold"}`}
+                      className={`product-detail-page__sku-option inline-flex min-h-11 min-w-11 items-center justify-center px-5 py-2.5 text-sm border transition-colors font-sans ${selectedSku?.id === sku.id ? "border-brand-gold text-brand-gold" : "border-brand-line hover:border-brand-gold"}`}
                     >
                       {[
                         getMaterialLabel(sku.material),
@@ -887,7 +927,7 @@ export default function ProductDetail() {
                     </span>
                   ),
                   children: (
-                    <dl className="product-detail-page__facts-grid">
+                    <div className="product-detail-page__facts-grid">
                       {publicFacts.map((fact, index) => (
                         <div key={`${fact.label}-${fact.value}-${index}`}>
                           <p className="text-[10px] text-brand-muted uppercase">
@@ -896,7 +936,7 @@ export default function ProductDetail() {
                           <p className="text-sm mt-1">{fact.value}</p>
                         </div>
                       ))}
-                    </dl>
+                    </div>
                   ),
                 }] : []),
                 ...(validCertificates.length > 0 ? [{
@@ -963,7 +1003,17 @@ export default function ProductDetail() {
               const image = product.images?.find((item) => item.id === block.imageId);
               const src = image?.mediaUrl || image?.url;
               return src ? (
-                <img key={`detail-image-${index}`} src={src} alt={block.alt || `${product.name} 详情图 ${index + 1}`} className="mx-auto block h-auto w-full" loading="lazy" />
+                <SecureImage
+                  key={`detail-image-${index}`}
+                  src={src}
+                  srcSet={buildProductImageSrcSet(src)}
+                  sizes="(max-width: 1000px) calc(100vw - 40px), 960px"
+                  width={image?.width ?? undefined}
+                  height={image?.height ?? undefined}
+                  alt={block.alt || `${product.name} 详情图 ${index + 1}`}
+                  className="mx-auto block h-auto w-full"
+                  deferUntilVisible
+                />
               ) : null;
             })}
           </section>

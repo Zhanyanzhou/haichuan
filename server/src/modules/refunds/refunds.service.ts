@@ -4,6 +4,7 @@ import {
   ConflictException,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -19,6 +20,7 @@ import {
   type OnlinePayProvider,
   type RefundGatewayResult,
 } from '../../common/payment-gateway/payment-gateway.service';
+import { ReliableNotificationIntentService } from '../../common/notifications/reliable-notification-intent.service';
 
 const CONFIRMED_PAYMENT_STATUSES = ['PAID', 'PARTIAL_REFUND', 'REFUNDED'] as const;
 const ACTIVE_REFUND_STATUSES = ['PENDING', 'APPROVED', 'PROCESSING', 'COMPLETED'] as const;
@@ -47,6 +49,8 @@ export class RefundsService {
     private readonly tradeEvents: TradeEventsService,
     private readonly paymentGateway: PaymentGatewayService,
     private readonly configService: ConfigService,
+    @Optional()
+    private readonly reliableNotifications?: ReliableNotificationIntentService,
   ) {}
 
   private createRefundNo(): string {
@@ -307,7 +311,21 @@ export class RefundsService {
             orderId: data.orderId,
             status: { in: [...CONFIRMED_PAYMENT_STATUSES] },
           },
-          select: { id: true, amount: true, method: true },
+          select: {
+            id: true,
+            amount: true,
+            method: true,
+            order: {
+              select: {
+                status: true,
+                quotationVersionId: true,
+                paymentPlans: { select: { id: true } },
+              },
+            },
+            installment: {
+              include: { paymentPlan: { include: { installments: true } } },
+            },
+          },
           orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
         });
         if (payments.length === 0) {
@@ -339,6 +357,7 @@ export class RefundsService {
         if (!payment) {
           throw new BadRequestException('单笔原支付可退额度不足，请按原付款记录拆分退款');
         }
+        this.assertPaymentPlanRefundEligible(payment);
 
         const paymentOccupied = await this.getPaymentActiveRefundCents(tx, payment.id);
         const paymentAvailable = this.moneyToCents(payment.amount) - paymentOccupied;
@@ -433,9 +452,22 @@ export class RefundsService {
             orderId: refund.orderId,
             status: { in: [...CONFIRMED_PAYMENT_STATUSES] },
           },
-          select: { amount: true },
+          select: {
+            amount: true,
+            order: {
+              select: {
+                status: true,
+                quotationVersionId: true,
+                paymentPlans: { select: { id: true } },
+              },
+            },
+            installment: {
+              include: { paymentPlan: { include: { installments: true } } },
+            },
+          },
         });
         if (!payment) throw new BadRequestException('原付款记录不存在或未确认');
+        this.assertPaymentPlanRefundEligible(payment);
         const paymentActive = await this.getPaymentActiveRefundCents(
           tx,
           refund.paymentId,
@@ -629,6 +661,24 @@ export class RefundsService {
       },
     });
     await this.completeLinkedAfterSalesIfSettled(tx, refund, operator);
+    if (!this.reliableNotifications) return;
+    const order = await tx.order.findUnique({
+      where: { id: refund.orderId },
+      select: {
+        id: true,
+        orderNo: true,
+        customerId: true,
+        customerEmail: true,
+        finalAmount: true,
+      },
+    });
+    if (order) {
+      await this.reliableNotifications?.enqueueRefundCompleted(tx, order, {
+        id: refund.id,
+        refundNo: refund.refundNo,
+        amount: refund.amount,
+      });
+    }
   }
 
   private async completeLinkedAfterSalesIfSettled(
@@ -808,6 +858,19 @@ export class RefundsService {
       if (!refund) throw new NotFoundException('退款记录不存在');
       this.assertOnlineRefundFact(refund, fact);
 
+      const reusedGatewayRefund = await tx.refund.findFirst({
+        where: {
+          id: { not: refund.id },
+          gatewayRefundNo: fact.gatewayRefundNo,
+        },
+        select: { id: true, refundNo: true },
+      });
+      if (reusedGatewayRefund) {
+        throw new ConflictException(
+          `渠道退款号已绑定另一退款记录 ${reusedGatewayRefund.refundNo}`,
+        );
+      }
+
       if (refund.status === 'COMPLETED') {
         if (
           refund.gatewayRefundNo &&
@@ -982,6 +1045,31 @@ export class RefundsService {
       refund.refundNo,
     );
     return this.applyOnlineRefundFact(refundId, fact, 'query');
+  }
+
+  private assertPaymentPlanRefundEligible(payment: any) {
+    const orderHasPlan =
+      payment.order?.quotationVersionId != null ||
+      (payment.order?.paymentPlans?.length ?? 0) > 0;
+    if (!payment.installment) {
+      if (orderHasPlan) {
+        throw new BadRequestException(
+          '付款计划订单的原付款未绑定分期，当前已暂停退款',
+        );
+      }
+      return;
+    }
+    const plan = payment.installment.paymentPlan;
+    if (
+      !plan ||
+      plan.status !== 'COMPLETED' ||
+      plan.installments.some((installment: any) => installment.status !== 'PAID') ||
+      !['SHIPPED', 'COMPLETED'].includes(payment.order?.status)
+    ) {
+      throw new BadRequestException(
+        '付款计划尚未全部实收并进入已发货阶段，退款会造成应收与履约不一致，当前已暂停',
+      );
+    }
   }
 
   /**

@@ -226,7 +226,7 @@ export default function Privacy() {
               style={{
                 fontSize: 11,
                 letterSpacing: "0.12em",
-                color: T.light,
+                color: T.sec,
                 margin: "0 0 10px",
               }}
             >

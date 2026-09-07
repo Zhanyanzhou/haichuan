@@ -64,6 +64,7 @@ interface SchemaInspectorPanelProps {
   validationStatus?: PublishValidationStatus;
   onRetryValidation?: () => void;
   onOpenPageSettings?: (field?: string) => void;
+  onOpenPublishReview?: () => void;
 }
 
 type InspectorTaskGroup =
@@ -319,6 +320,7 @@ export default function SchemaInspectorPanel({
   validationStatus,
   onRetryValidation,
   onOpenPageSettings,
+  onOpenPublishReview,
 }: SchemaInspectorPanelProps) {
   const { modal } = AntdApp.useApp();
   const editor = useInspectorModuleEditor();
@@ -725,25 +727,6 @@ export default function SchemaInspectorPanel({
     }
     setActivePanelMode(panelMode);
     setVisualPanelMode(panelMode);
-  };
-
-  const focusPublishIssue = (issue: PublishValidationIssue) => {
-    if (isPagePublishIssue(issue)) {
-      onOpenPageSettings?.(issue.path ?? issue.field);
-      return;
-    }
-    const fieldKey = resolveIssueFieldKey(issue);
-    if (!fieldKey) return;
-    commitPanelMode("content");
-    const focusField = () => {
-      const field = inspectorScrollRef.current?.querySelector<HTMLElement>(
-        `[data-inspector-field="${CSS.escape(fieldKey)}"]`,
-      );
-      if (!field) return;
-      field.scrollIntoView({ block: "center", behavior: "smooth" });
-      field.querySelector<HTMLElement>("input, textarea, select, button, [tabindex]")?.focus();
-    };
-    window.requestAnimationFrame(() => window.requestAnimationFrame(focusField));
   };
 
   const activatePanelMode = (panelMode: InspectorPrimaryMode) => {
@@ -1216,35 +1199,23 @@ export default function SchemaInspectorPanel({
         warningCount={currentPublishWarningCount}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
-        onReviewIssues={currentPublishIssues.length > 0 ? () => {
-          const showModal = currentPublishErrorCount > 0 ? modal.error : modal.warning;
-          const instance = showModal({
-            title: currentPublishErrorCount > 0
-              ? `当前模块与页面发布检查 · ${currentPublishErrorCount} 项阻断`
-              : `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
-            content: (
-              <div className="homepage-editor__publish-issue-list">
-                {currentPublishIssues.map((issue, index) => (
-                  <div key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                    <p>
-                      <strong>{issue.severity === "error" ? "阻断：" : "提醒："}</strong>
-                      {issue.message}
-                    </p>
-                    {(issue.field || isPagePublishIssue(issue)) ? (
-                      <button type="button" onClick={() => {
-                        instance.destroy();
-                        focusPublishIssue(issue);
-                      }}>
-                        {isPagePublishIssue(issue) ? "打开页面设置" : "定位到字段"}
-                      </button>
-                    ) : null}
+        onReviewIssues={currentPublishErrorCount > 0
+          ? onOpenPublishReview
+          : currentPublishWarningCount > 0
+            ? () => modal.warning({
+                title: `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
+                content: (
+                  <div className="homepage-editor__publish-issue-list">
+                    {currentPublishIssues.map((issue, index) => (
+                      <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
+                        <strong>提醒：</strong>{issue.message}
+                      </p>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ),
-            okText: "知道了",
-          });
-        } : undefined}
+                ),
+                okText: "知道了",
+              })
+            : undefined}
       />
     </section>
   );

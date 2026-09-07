@@ -64,7 +64,8 @@ test('真实退款门禁默认关闭，但不阻断既有退款查询', async ()
   } as unknown as ConfigService);
   let queryCalls = 0;
   (gateway as any).adapters.set('wechat', {
-    isAvailable: () => true,
+    providerId: 'wechat',
+    isConfigured: () => true,
     createPayment: async () => ({ provider: 'wechat', scene: 'native' }),
     verifyNotification: async () => ({ verified: false }),
     createRefund: async () => {

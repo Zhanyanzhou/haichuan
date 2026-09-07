@@ -1,11 +1,11 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：9bbd4df94a1771299e325bd99e2d0268f0523761d12247d7c99ca5d426d3cbc2
+ * SHA-256：699440107c872072f98980b3ee328bfd75b2c7ad35feae15d1775dbaa2a1d0ff
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 18;
-export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 8;
+export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 9;
 export const CONTENT_TEMPLATE_CONTRACT_VERSION = 7;
 export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = 3;
 export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
@@ -26,10 +26,21 @@ export const CONTENT_TEMPLATE_EDITOR_POLICY = {
   ],
   "pageInstanceScope": "page-instance",
   "pageLayerPanel": "module-only",
+  "sizeCompatibilityPolicy": {
+    "axes": [
+      "width",
+      "height"
+    ],
+    "materializationSource": "mature-renderer-role-root",
+    "scope": "node-viewport-axis",
+    "state": "preserve-until-resize",
+    "version": 1
+  },
   "templateStructurePanel": "select-only",
-  "version": 2,
+  "version": 3,
   "viewportGeometry": "independent"
 } as const;
+export const CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE = CONTENT_TEMPLATE_EDITOR_POLICY.sizeCompatibilityPolicy.state;
 export const CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX = [
   {
     "designScope": "template-definition",
@@ -5894,6 +5905,13 @@ export type ContentTemplateVisualRect = {
   height: number;
 };
 
+export type ContentTemplateSizeCompatibilityAxis = typeof CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE;
+
+export type ContentTemplateSizeCompatibility = {
+  width?: ContentTemplateSizeCompatibilityAxis;
+  height?: ContentTemplateSizeCompatibilityAxis;
+};
+
 export type ContentTemplateInstanceOverridesV2 = {
   version: 2;
   frame?: {
@@ -5914,6 +5932,7 @@ export type ContentTemplateInstanceOverridesV2 = {
   nodes?: Record<string, {
     enabled?: boolean;
     rectByViewport?: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>>;
+    sizeCompatibilityByViewport?: Partial<Record<"desktop" | "mobile", ContentTemplateSizeCompatibility>>;
     zIndexByViewport?: Partial<Record<"desktop" | "mobile", number>>;
     ratio?: number;
     sizePreset?: string;
@@ -19339,6 +19358,7 @@ export const CONTENT_TEMPLATE_CONTRACTS = {
       {
         "id": "action",
         "kind": "action",
+        "parentRole": "copy",
         "required": false,
         "role": "action"
       }
@@ -24118,21 +24138,52 @@ function sanitizePersonalTemplateRect(
   raw: unknown,
   constraints: ContentTemplateEditableConstraints,
   safeArea: ContentTemplateVisualRect,
+  rawCompatibility?: unknown,
 ) {
   if (!isRecord(raw)) return undefined;
-  const values = [raw.x, raw.y, raw.width, raw.height].map(Number);
-  if (!values.every(Number.isFinite)) return undefined;
-  let [x, y, width, height] = values;
-  width = Math.min(constraints.maxSize.width, Math.max(constraints.minSize.width, width));
-  height = Math.min(constraints.maxSize.height, Math.max(constraints.minSize.height, height));
+  if (
+    typeof raw.x !== "number" || !Number.isFinite(raw.x)
+    || typeof raw.y !== "number" || !Number.isFinite(raw.y)
+    || typeof raw.width !== "number" || !Number.isFinite(raw.width)
+    || typeof raw.height !== "number" || !Number.isFinite(raw.height)
+  ) return undefined;
+  const { x, y, width, height } = raw;
+  if (width <= 0 || height <= 0) return undefined;
+  const compatibility = isRecord(rawCompatibility) ? rawCompatibility : {};
+  const preserveWidth = compatibility.width === CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE
+    && (width < constraints.minSize.width || width > constraints.maxSize.width);
+  const preserveHeight = compatibility.height === CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE
+    && (height < constraints.minSize.height || height > constraints.maxSize.height);
+  if (!preserveWidth && (width < constraints.minSize.width || width > constraints.maxSize.width)) {
+    return undefined;
+  }
+  if (!preserveHeight && (height < constraints.minSize.height || height > constraints.maxSize.height)) {
+    return undefined;
+  }
   const bounds = constraints.safeAreaRequired
     ? safeArea
     : { x: 0, y: 0, width: 1, height: 1 };
-  width = Math.min(width, bounds.width);
-  height = Math.min(height, bounds.height);
-  x = Math.min(bounds.x + bounds.width - width, Math.max(bounds.x, x));
-  y = Math.min(bounds.y + bounds.height - height, Math.max(bounds.y, y));
-  return { x, y, width, height };
+  if (
+    x < bounds.x || y < bounds.y
+    || width > bounds.width || height > bounds.height
+    || x + width > bounds.x + bounds.width + 0.0001
+    || y + height > bounds.y + bounds.height + 0.0001
+  ) {
+    return undefined;
+  }
+  const normalizedCompatibility: ContentTemplateSizeCompatibility = {};
+  if (preserveWidth && (width < constraints.minSize.width || width > constraints.maxSize.width)) {
+    normalizedCompatibility.width = CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE;
+  }
+  if (preserveHeight && (height < constraints.minSize.height || height > constraints.maxSize.height)) {
+    normalizedCompatibility.height = CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE;
+  }
+  return {
+    rect: { x, y, width, height },
+    compatibility: Object.keys(normalizedCompatibility).length
+      ? normalizedCompatibility
+      : undefined,
+  };
 }
 
 /**
@@ -24200,13 +24251,29 @@ export function sanitizeContentTemplateLayoutData(
       if (constraints.allowHide && typeof rawNode.enabled === "boolean") node.enabled = rawNode.enabled;
       if (contentTemplateObjectHasCapability(editableObject, "layout") && isRecord(rawNode.rectByViewport)) {
         const rectByViewport: Partial<Record<"desktop" | "mobile", ContentTemplateVisualRect>> = {};
+        const sizeCompatibilityByViewport: Partial<Record<"desktop" | "mobile", ContentTemplateSizeCompatibility>> = {};
+        const rawCompatibilityByViewport = isRecord(rawNode.sizeCompatibilityByViewport)
+          ? rawNode.sizeCompatibilityByViewport
+          : {};
         for (const viewport of ["desktop", "mobile"] as const) {
           if (!supportsOnViewport("layout", viewport)) continue;
           const safeArea = contract.defaultGeometryByViewport[viewport].safeArea;
-          const rect = sanitizePersonalTemplateRect(rawNode.rectByViewport[viewport], constraints, safeArea);
-          if (rect) rectByViewport[viewport] = rect;
+          const sanitizedRect = sanitizePersonalTemplateRect(
+            rawNode.rectByViewport[viewport],
+            constraints,
+            safeArea,
+            rawCompatibilityByViewport[viewport],
+          );
+          if (!sanitizedRect) continue;
+          rectByViewport[viewport] = sanitizedRect.rect;
+          if (sanitizedRect.compatibility) {
+            sizeCompatibilityByViewport[viewport] = sanitizedRect.compatibility;
+          }
         }
         if (Object.keys(rectByViewport).length) node.rectByViewport = rectByViewport;
+        if (Object.keys(sizeCompatibilityByViewport).length) {
+          node.sizeCompatibilityByViewport = sizeCompatibilityByViewport;
+        }
       }
       if (contentTemplateObjectHasCapability(editableObject, "layer") && isRecord(rawNode.zIndexByViewport)) {
         const zIndexByViewport: Partial<Record<"desktop" | "mobile", number>> = {};
@@ -24772,6 +24839,28 @@ function getInstanceOverrideIssues(input: {
       if (rawNode.positionPreset !== undefined && (!slotCapability?.positionPresets?.includes(String(rawNode.positionPreset)) || !hasCapability("position"))) {
         issues.push(issue("当前节点不允许该位置预设。", path + ".positionPreset", nodeId));
       }
+      const sizeCompatibilityByViewport = isRecord(rawNode.sizeCompatibilityByViewport)
+        ? rawNode.sizeCompatibilityByViewport
+        : {};
+      if (rawNode.sizeCompatibilityByViewport !== undefined && !isRecord(rawNode.sizeCompatibilityByViewport)) {
+        issues.push(issue("节点尺寸兼容状态格式无效。", path + ".sizeCompatibilityByViewport", nodeId));
+      }
+      for (const [viewport, rawCompatibility] of Object.entries(sizeCompatibilityByViewport)) {
+        const compatibilityPath = path + ".sizeCompatibilityByViewport." + viewport;
+        if (!["desktop", "mobile"].includes(viewport) || !isRecord(rawCompatibility)) {
+          issues.push(issue("节点设备尺寸兼容状态格式无效。", compatibilityPath, nodeId));
+          continue;
+        }
+        for (const [axis, value] of Object.entries(rawCompatibility)) {
+          if (!["width", "height"].includes(axis) || value !== CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE) {
+            issues.push(issue("节点尺寸兼容状态只允许 preserve-until-resize 的宽高轴。", compatibilityPath + "." + axis, nodeId));
+          }
+        }
+        const viewportRects = isRecord(rawNode.rectByViewport) ? rawNode.rectByViewport : {};
+        if (!isRecord(viewportRects[viewport])) {
+          issues.push(issue("节点尺寸兼容状态必须与同设备矩形同时存在。", compatibilityPath, nodeId));
+        }
+      }
       if (rawNode.rectByViewport !== undefined) {
         if (!hasCapability("layout")) {
           issues.push(issue("当前节点不允许响应式位置覆盖。", path + ".rectByViewport", nodeId));
@@ -24785,22 +24874,37 @@ function getInstanceOverrideIssues(input: {
               issues.push(issue("节点设备位置格式无效。", rectPath, nodeId));
               continue;
             }
-            const x = Number(rawRect.x);
-            const y = Number(rawRect.y);
-            const width = Number(rawRect.width);
-            const height = Number(rawRect.height);
-            if (![x, y, width, height].every((value) => Number.isFinite(value)) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) {
+            const { x, y, width, height } = rawRect;
+            if (
+              typeof x !== "number" || !Number.isFinite(x)
+              || typeof y !== "number" || !Number.isFinite(y)
+              || typeof width !== "number" || !Number.isFinite(width)
+              || typeof height !== "number" || !Number.isFinite(height)
+              || x < 0 || y < 0 || width <= 0 || height <= 0
+              || x + width > 1.0001 || y + height > 1.0001
+            ) {
               issues.push(issue("节点必须完整位于画面 0–1 的归一化范围内。", rectPath, nodeId));
             } else {
               const constraints = editableObject.constraints;
               const safeArea = input.contract.defaultGeometryByViewport[viewport as "desktop" | "mobile"].safeArea;
               const bounds = constraints.safeAreaRequired ? safeArea : { x: 0, y: 0, width: 1, height: 1 };
+              const rawCompatibility = isRecord(sizeCompatibilityByViewport[viewport])
+                ? sizeCompatibilityByViewport[viewport]
+                : {};
+              const preserveWidth = rawCompatibility.width === CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE;
+              const preserveHeight = rawCompatibility.height === CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE;
+              if (preserveWidth && width >= constraints.minSize.width && width <= constraints.maxSize.width) {
+                issues.push(issue("宽度已满足当前约束，不应保留尺寸兼容状态。", path + ".sizeCompatibilityByViewport." + viewport + ".width", nodeId));
+              }
+              if (preserveHeight && height >= constraints.minSize.height && height <= constraints.maxSize.height) {
+                issues.push(issue("高度已满足当前约束，不应保留尺寸兼容状态。", path + ".sizeCompatibilityByViewport." + viewport + ".height", nodeId));
+              }
               if (
-                width < constraints.minSize.width || height < constraints.minSize.height ||
-                width > constraints.maxSize.width || height > constraints.maxSize.height ||
+                (!preserveWidth && (width < constraints.minSize.width || width > constraints.maxSize.width)) ||
+                (!preserveHeight && (height < constraints.minSize.height || height > constraints.maxSize.height)) ||
                 x < bounds.x || y < bounds.y || x + width > bounds.x + bounds.width + 0.0001 || y + height > bounds.y + bounds.height + 0.0001
               ) {
-                issues.push(issue("节点位置或尺寸超出新版安全区，渲染时将自动使用安全回退值。", rectPath, nodeId));
+                issues.push(issue("节点位置、尺寸或兼容状态超出允许范围。", rectPath, nodeId));
               }
             }
           }
@@ -24958,13 +25062,15 @@ function getInstanceOverrideIssues(input: {
         if (!isRecord(rawNode) || rawNode.enabled === false || !isRecord(rawNode.rectByViewport)) return [];
         const rawRect = rawNode.rectByViewport[viewport];
         if (!isRecord(rawRect)) return [];
-        const rect = {
-          x: Number(rawRect.x),
-          y: Number(rawRect.y),
-          width: Number(rawRect.width),
-          height: Number(rawRect.height),
-        };
-        if (!Object.values(rect).every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) return [];
+        const { x, y, width, height } = rawRect;
+        if (
+          typeof x !== "number" || !Number.isFinite(x)
+          || typeof y !== "number" || !Number.isFinite(y)
+          || typeof width !== "number" || !Number.isFinite(width)
+          || typeof height !== "number" || !Number.isFinite(height)
+          || width <= 0 || height <= 0
+        ) return [];
+        const rect = { x, y, width, height };
         const editableObject = findContentTemplateEditableObject(input.contract, nodeId);
         if (!editableObject) return [];
         const zByViewport = isRecord(rawNode.zIndexByViewport) ? rawNode.zIndexByViewport : {};

@@ -108,7 +108,7 @@ export function buildTemplateStructureAudit(
           issues.push({
             code: "REQUIRED_SLOT_DEVICE_HIDDEN",
             level: "error",
-            message: `必填槽位“${slot.label}”在${device === "desktop" ? "桌面端" : "移动端"}布局中已隐藏。`,
+            message: `必填槽位“${slot.label}”在对应画布布局中已隐藏。`,
             nodeId: node.nodeId,
             device,
             repair: "restore-required-slot-device",

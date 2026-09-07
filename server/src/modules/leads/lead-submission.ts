@@ -50,6 +50,20 @@ export function prepareLeadIdempotency(
   };
 }
 
+export function prepareRequiredLeadIdempotency(
+  rawKey: string | undefined,
+  fingerprintValue: unknown,
+) {
+  const prepared = prepareLeadIdempotency(rawKey, fingerprintValue);
+  if (!prepared.idempotencyKeyHash) {
+    throw new BadRequestException("缺少 Idempotency-Key 请求头");
+  }
+  return {
+    idempotencyKeyHash: prepared.idempotencyKeyHash,
+    operationFingerprint: prepared.submissionFingerprint,
+  };
+}
+
 export function assertMatchingSubmission(
   existing: {
     sourceType: string;

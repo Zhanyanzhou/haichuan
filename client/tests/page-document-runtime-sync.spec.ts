@@ -1,9 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installAdminSession as installMockAdminSession } from "./fixtures/session-auth";
-import { createContentTemplateMarker } from "../src/page-builder/generated/contentTemplates.generated";
+import {
+  CONTENT_TEMPLATE_REGISTRY,
+  createContentTemplateMarker,
+} from "../src/page-builder/generated/contentTemplates.generated";
 import { systemTemplateCatalog } from "./fixtures/template-catalog";
 
 const useMock = process.env.VITE_USE_MOCK === "true";
+const activeContentTemplateCount = CONTENT_TEMPLATE_REGISTRY.length;
 
 function apiResponse(data: unknown) {
   return JSON.stringify({ code: 200, data, message: "success" });
@@ -153,7 +157,8 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     for (const pageKey of ["home", "about", "products", "catalog", "custom", "contact"]) {
       await page.goto(`/admin/editor/${pageKey}`);
       await expect(page.getByRole("complementary", { name: "模板组件库" })).toBeVisible();
-      await expect(page.locator(".homepage-editor__template-card-activate")).toHaveCount(24);
+      await expect(page.locator(".homepage-editor__template-card-activate"))
+        .toHaveCount(activeContentTemplateCount);
     }
 
     await page.goto("/admin/editor/catalog");
@@ -1945,18 +1950,21 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
       page.locator(".homepage-editor__template-name").filter({ hasText: new RegExp(`^${name}$`) });
 
     await page.goto("/admin/editor/custom");
-    await expect(page.locator(".homepage-editor__template-card-activate")).toHaveCount(24);
+    await expect(page.locator(".homepage-editor__template-card-activate"))
+      .toHaveCount(activeContentTemplateCount);
     await expect(templateName("内容流程")).toBeVisible();
     await expect(templateName("商品列表")).toBeVisible();
     await expect(templateName("限时活动")).toBeVisible();
 
     await page.goto("/admin/editor/products");
-    await expect(page.locator(".homepage-editor__template-card-activate")).toHaveCount(24);
+    await expect(page.locator(".homepage-editor__template-card-activate"))
+      .toHaveCount(activeContentTemplateCount);
     await expect(templateName("商品列表")).toBeVisible();
     await expect(page.getByText("商品列表与筛选", { exact: true })).toHaveCount(0);
 
     await page.goto("/admin/editor/catalog");
-    await expect(page.locator(".homepage-editor__template-card-activate")).toHaveCount(24);
+    await expect(page.locator(".homepage-editor__template-card-activate"))
+      .toHaveCount(activeContentTemplateCount);
     await expect(templateName("纯文字")).toBeVisible();
     await expect(templateName("首屏")).toBeVisible();
     await expect(templateName("品类入口")).toBeVisible();
@@ -1964,7 +1972,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect
       .poll(() => page.locator(".homepage-editor__layer-name").allTextContents())
       .toEqual(["纯文字", "业务功能区", "预约入口"]);
-    const catalogCanvas = page.frameLocator("iframe");
+    const catalogCanvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     await expect(catalogCanvas.locator(".catalog-page.is-editor-preview")).toBeVisible();
     await expect(
       catalogCanvas.getByRole("heading", { name: "选款中心", level: 1 }),
@@ -1999,7 +2007,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     ).toBeLessThan(10_000);
 
     await page.goto("/admin/editor/contact");
-    const contactCanvas = page.frameLocator("iframe");
+    const contactCanvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
     const contactPreview = contactCanvas.locator(".contact-page.is-editor-preview");
     await expect(contactPreview).toBeVisible();
     await expect(contactCanvas.locator(".contact-form")).toBeVisible();
@@ -2567,7 +2575,7 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     await expect(inspector.locator(".homepage-editor__properties-actions")).toBeVisible();
   });
 
-  test("窄桌面保持左侧图层、中间画布和右侧属性面板的停靠方向", async ({ page }) => {
+  test("1024 窄桌面属性面板以可关闭抽屉打开并在关闭后保留选择与焦点", async ({ page }) => {
     await installAdminSession(page);
     await mockEmptyEditorApis(page);
     await page.setViewportSize({ width: 1024, height: 900 });
@@ -2596,11 +2604,18 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
       });
 
     const initial = await readGeometry();
-    await expect(page.getByRole("region", { name: "属性面板" })).toBeVisible();
+    const inspectorEntry = page.getByRole("button", { name: "展开属性面板" });
+    await expect(inspectorEntry).toBeVisible();
+    await expect(inspectorEntry).toContainText("属性");
     await expect(page.locator(".homepage-editor__structure-workspace")).toHaveClass(/is-collapsed/);
     await page.getByRole("button", { name: "展开图层面板" }).click();
     await expect(page.locator(".homepage-editor__layer-item").first()).toHaveClass(/is-active/);
     expect((await readGeometry()).stage).toEqual(initial.stage);
+    await inspectorEntry.focus();
+    await inspectorEntry.click();
+    const inspectorDrawer = page.getByRole("dialog", { name: "属性面板" });
+    await expect(inspectorDrawer).toHaveAttribute("aria-modal", "true");
+    await expect(inspectorDrawer.getByRole("button", { name: "收起属性面板" })).toBeFocused();
     const inspecting = await readGeometry();
     expect(inspecting.stage).toEqual(initial.stage);
     expect(inspecting.structure.x).toBeLessThan(inspecting.stage.width / 2);
@@ -2608,7 +2623,9 @@ test.describe("PageDocument 前台与画布单一运行时", () => {
     expect(inspecting.inspector.x).toBeGreaterThanOrEqual(inspecting.stage.width / 2);
     expect(inspecting.horizontalOverflow).toBe(false);
 
-    await page.getByRole("button", { name: "收起属性面板" }).click();
+    await page.keyboard.press("Escape");
+    await expect(inspectorEntry).toBeFocused();
+    await expect(page.locator(".homepage-editor__layer-item").first()).toHaveClass(/is-active/);
     const collapsedInspector = await readGeometry();
     expect(collapsedInspector.stage).toEqual(initial.stage);
     expect(collapsedInspector.inspector.right).toBe(1024);

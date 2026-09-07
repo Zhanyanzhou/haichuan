@@ -24,6 +24,8 @@ import StorefrontFooter from "./StorefrontFooter";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
 import {
+  DEFAULT_PUBLIC_CONTENT_LOCALE,
+  PUBLIC_ENGLISH_ROUTES_ENABLED,
   resolvePublicLocalePath,
   withPublicLocalePath,
 } from "@/i18n/publicLocale";
@@ -68,6 +70,60 @@ function syncLink(rel: string, href?: string | null) {
   link.rel = rel;
   link.href = href;
   if (!existing) document.head.appendChild(link);
+}
+
+function syncAlternateLinks(entries: Array<{ hrefLang: string; href: string }>) {
+  document.head
+    .querySelectorAll<HTMLLinkElement>('link[rel="alternate"][hreflang]')
+    .forEach((link) => link.remove());
+  entries.forEach(({ hrefLang, href }) => {
+    const link = document.createElement("link");
+    link.rel = "alternate";
+    link.hreflang = hrefLang;
+    link.href = href;
+    document.head.appendChild(link);
+  });
+}
+
+function normalizeMetadataText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized || undefined;
+}
+
+function resolvePublicSocialImage(
+  origin: string | null,
+  value: unknown,
+): string | undefined {
+  const source = normalizeMetadataText(value);
+  if (!origin || !source) return undefined;
+  try {
+    const url = new URL(source, `${origin}/`);
+    if (url.username || url.password) return undefined;
+    const validProtocol = url.protocol === "https:"
+      || (import.meta.env.DEV && url.protocol === "http:" && url.origin === origin);
+    return validProtocol ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const SOCIAL_META_KEYS = [
+  ["property", "og:type"],
+  ["property", "og:site_name"],
+  ["property", "og:title"],
+  ["property", "og:description"],
+  ["property", "og:image"],
+  ["property", "og:url"],
+  ["property", "og:locale"],
+  ["name", "twitter:card"],
+  ["name", "twitter:title"],
+  ["name", "twitter:description"],
+  ["name", "twitter:image"],
+] as const;
+
+function clearSocialMetadata() {
+  SOCIAL_META_KEYS.forEach(([attr, key]) => syncMeta(attr, key));
 }
 
 const publicSiteOrigin = normalizePublicSiteOrigin(
@@ -227,6 +283,16 @@ export default function PublicLayout() {
   const markCustomerAnonymous = useCustomerAuthStore((state) => state.markAnonymous);
   const needsCustomerIdentity =
     contentPathname === "/catalog" || /^\/products\/[^/]+$/.test(contentPathname);
+  const pageMeta = usePageMetaStore((state) => state.meta);
+  const nonIndexableRoute = isNonIndexablePublicRoute(location.pathname);
+  const publishedPageMeta = getPageDocumentMeta(
+    publishedHeaderDocument.status === "published" && publishedHeaderReadiness?.ready
+      ? publishedHeaderDocument.pageDocument?.metadata
+      : undefined,
+  );
+  const noIndex = Boolean(
+    nonIndexableRoute || previewPage || pageMeta.noIndex || pageDocumentUnavailable,
+  );
 
   const organizationLogo = (() => {
     const logo = siteSettings?.logo?.trim();
@@ -234,29 +300,33 @@ export default function PublicLayout() {
     if (/^https:\/\//i.test(logo)) return logo;
     return buildPublicUrl(publicSiteOrigin, logo) || undefined;
   })();
-  useStructuredData("organization", {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    name: siteSettings?.siteName || "海川珠宝",
-    legalName: LEGAL_ENTITY.name,
-    identifier: {
-      "@type": "PropertyValue",
-      propertyID: "统一社会信用代码",
-      value: LEGAL_ENTITY.unifiedSocialCreditCode,
-    },
-    foundingDate: LEGAL_ENTITY.establishedOnIso,
-    ...(publicSiteOrigin ? { url: publicSiteOrigin } : {}),
-    ...(organizationLogo ? { logo: organizationLogo } : {}),
-    ...(siteSettings?.contactPhone?.trim()
-      ? { telephone: siteSettings.contactPhone.trim() }
-      : {}),
-    ...(siteSettings?.contactEmail?.trim()
-      ? { email: siteSettings.contactEmail.trim() }
-      : {}),
-    ...(siteSettings?.contactAddress?.trim()
-      ? { address: siteSettings.contactAddress.trim() }
-      : {}),
-  });
+  const organizationStructuredData =
+    !noIndex && publicSiteOrigin && siteSettings && siteSettingsResource.status === "loaded"
+      ? {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          name: normalizeMetadataText(siteSettings?.siteName) || "海川珠宝",
+          legalName: LEGAL_ENTITY.name,
+          identifier: {
+            "@type": "PropertyValue",
+            propertyID: "统一社会信用代码",
+            value: LEGAL_ENTITY.unifiedSocialCreditCode,
+          },
+          foundingDate: LEGAL_ENTITY.establishedOnIso,
+          url: publicSiteOrigin,
+          ...(organizationLogo ? { logo: organizationLogo } : {}),
+          ...(siteSettings?.contactPhone?.trim()
+            ? { telephone: siteSettings.contactPhone.trim() }
+            : {}),
+          ...(siteSettings?.contactEmail?.trim()
+            ? { email: siteSettings.contactEmail.trim() }
+            : {}),
+          ...(siteSettings?.contactAddress?.trim()
+            ? { address: siteSettings.contactAddress.trim() }
+            : {}),
+        }
+      : null;
+  useStructuredData("organization", organizationStructuredData);
 
   // 选款和作品详情会根据客户身份选择公开/会员事实。HttpOnly Cookie 无法由
   // JavaScript 自行探测，因此刷新这两类页面时通过最小 profile 请求恢复会话。
@@ -280,14 +350,6 @@ export default function PublicLayout() {
     };
   }, [customerAuthStatus, markCustomerAnonymous, needsCustomerIdentity, setCustomerAuth]);
 
-  const pageMeta = usePageMetaStore((s) => s.meta);
-  const nonIndexableRoute = isNonIndexablePublicRoute(location.pathname);
-  const publishedPageMeta = getPageDocumentMeta(
-    publishedHeaderDocument.status === "published" && publishedHeaderReadiness?.ready
-      ? publishedHeaderDocument.pageDocument?.metadata
-      : undefined,
-  );
-
   useEffect(() => {
     const siteName = siteSettings?.siteName || "海川珠宝";
     const routeTitle = pageDefinition && !isHome
@@ -305,37 +367,31 @@ export default function PublicLayout() {
       siteSettings?.seoDescription ||
       siteSettings?.siteDescription;
     const keywords = siteSettings?.seoKeywords;
-    const noIndex = Boolean(
-      nonIndexableRoute || previewPage || pageMeta.noIndex || pageDocumentUnavailable,
-    );
     const canonicalPath =
-      nonIndexableRoute || previewPage || pageMeta.canonicalPath === null
+      noIndex || pageMeta.canonicalPath === null
         ? null
         : pageMeta.canonicalPath || location.pathname;
     const canonicalUrl = canonicalPath
       ? buildPublicUrl(publicSiteOrigin, canonicalPath)
       : null;
-    // og:image/twitter:image 相对路径绝对化，避免社交爬虫解析失败
-    let image: string | undefined;
-    const pageImage = publishedPageMeta.image || pageMeta.image;
-    if (pageImage) {
-      if (/^https?:\/\//i.test(pageImage)) {
-        image = pageImage;
-      } else {
-        try {
-          image = new URL(
-            pageImage,
-            publicSiteOrigin || window.location.origin,
-          ).href;
-        } catch {
-          image = pageImage;
-        }
-      }
-    }
+    const normalizedTitle = normalizeMetadataText(title);
+    const normalizedDescription = normalizeMetadataText(description);
+    const image = resolvePublicSocialImage(
+      publicSiteOrigin,
+      publishedPageMeta.image || pageMeta.image,
+    );
+    const socialMetadataReady = Boolean(
+      !noIndex
+      && canonicalUrl
+      && normalizedTitle
+      && normalizedDescription
+      && siteSettings
+      && siteSettingsResource.status === "loaded",
+    );
 
-    document.title = title || siteName;
-    syncMeta("name", "description", description);
-    syncMeta("name", "keywords", keywords);
+    document.title = normalizedTitle || siteName;
+    syncMeta("name", "description", normalizedDescription);
+    syncMeta("name", "keywords", normalizeMetadataText(keywords));
     upsertMeta(
       "name",
       "robots",
@@ -343,33 +399,77 @@ export default function PublicLayout() {
     );
     syncLink("canonical", canonicalUrl);
 
-    // 社交分享卡片（微信 / 微博 / Twitter / Facebook）—— 珠宝营销分享命脉
-    upsertMeta("property", "og:type", "website");
-    upsertMeta("property", "og:site_name", siteName);
-    upsertMeta("property", "og:title", title || siteName);
-    syncMeta("property", "og:description", description);
-    syncMeta("property", "og:image", image);
-    syncMeta("property", "og:url", canonicalUrl || undefined);
-    upsertMeta(
-      "name",
-      "twitter:card",
-      image ? "summary_large_image" : "summary",
+    if (socialMetadataReady && canonicalUrl && normalizedTitle && normalizedDescription) {
+      upsertMeta("property", "og:type", "website");
+      upsertMeta("property", "og:site_name", siteName);
+      upsertMeta("property", "og:title", normalizedTitle);
+      upsertMeta("property", "og:description", normalizedDescription);
+      syncMeta("property", "og:image", image);
+      upsertMeta("property", "og:url", canonicalUrl);
+      upsertMeta(
+        "property",
+        "og:locale",
+        localizedPath.locale === "en" ? "en_US" : "zh_CN",
+      );
+      upsertMeta("name", "twitter:card", image ? "summary_large_image" : "summary");
+      upsertMeta("name", "twitter:title", normalizedTitle);
+      upsertMeta("name", "twitter:description", normalizedDescription);
+      syncMeta("name", "twitter:image", image);
+    } else {
+      clearSocialMetadata();
+    }
+
+    if (!canonicalUrl || noIndex) {
+      syncAlternateLinks([]);
+      return () => {
+        syncLink("canonical", null);
+        syncAlternateLinks([]);
+        clearSocialMetadata();
+        upsertMeta("name", "robots", "noindex, nofollow");
+      };
+    }
+    const alternateBasePath = contentPathname;
+    const alternateLocales = [
+      {
+        locale: DEFAULT_PUBLIC_CONTENT_LOCALE,
+        hrefLang: "zh-CN",
+      },
+      ...(PUBLIC_ENGLISH_ROUTES_ENABLED
+        ? [{ locale: "en" as const, hrefLang: "en" }]
+        : []),
+    ];
+    const alternates = alternateLocales.flatMap(({ locale, hrefLang }) => {
+      const href = buildPublicUrl(
+        publicSiteOrigin,
+        withPublicLocalePath(alternateBasePath, locale),
+      );
+      return href ? [{ hrefLang, href }] : [];
+    });
+    const defaultHref = buildPublicUrl(
+      publicSiteOrigin,
+      withPublicLocalePath(alternateBasePath, DEFAULT_PUBLIC_CONTENT_LOCALE),
     );
-    syncMeta("name", "twitter:title", title || siteName);
-    syncMeta("name", "twitter:description", description);
-    syncMeta("name", "twitter:image", image);
+    if (defaultHref) alternates.push({ hrefLang: "x-default", href: defaultHref });
+    syncAlternateLinks(alternates);
+    return () => {
+      syncLink("canonical", null);
+      syncAlternateLinks([]);
+      clearSocialMetadata();
+      upsertMeta("name", "robots", "noindex, nofollow");
+    };
   }, [
     siteSettings,
+    siteSettingsResource.status,
     pageMeta,
     publishedPageMeta.title,
     publishedPageMeta.description,
     publishedPageMeta.image,
     location.pathname,
-    nonIndexableRoute,
-    previewPage,
-    pageDocumentUnavailable,
     pageDefinition,
     isHome,
+    noIndex,
+    contentPathname,
+    localizedPath.locale,
   ]);
 
   const siteName = siteSettings?.siteName || "海川珠宝";

@@ -103,6 +103,62 @@ export function canonicalizePageContent(
   return `${canonicalizePuckContent(puck)}||${metadataSig}`;
 }
 
+export type PageHistoryDiffSummary = {
+  unchanged: boolean;
+  contentChanged: boolean;
+  rootChanged: boolean;
+  blockCountBefore: number;
+  blockCountAfter: number;
+  changedMetadataKeys: string[];
+};
+
+/** 历史预览使用的只读摘要；保存与发布仍以服务端合同为准。 */
+export function summarizePageHistoryDiff(
+  before: { puckData: unknown; metadata?: unknown },
+  after: { puckData: unknown; metadata?: unknown },
+): PageHistoryDiffSummary {
+  const readDocument = (value: unknown) => (
+    value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {}
+  );
+  const countBlocks = (value: unknown) => {
+    const document = readDocument(value);
+    const rootCount = Array.isArray(document.content) ? document.content.length : 0;
+    const zoneCount = document.zones && typeof document.zones === "object" && !Array.isArray(document.zones)
+      ? Object.values(document.zones).reduce(
+          (total, blocks) => total + (Array.isArray(blocks) ? blocks.length : 0),
+          0,
+        )
+      : 0;
+    return rootCount + zoneCount;
+  };
+  const beforeDocument = readDocument(before.puckData);
+  const afterDocument = readDocument(after.puckData);
+  const beforeMetadata = readDocument(before.metadata);
+  const afterMetadata = readDocument(after.metadata);
+  const metadataKeys = [...new Set([
+    ...Object.keys(beforeMetadata),
+    ...Object.keys(afterMetadata),
+  ])].sort();
+  const changedMetadataKeys = metadataKeys.filter((key) => (
+    JSON.stringify(sortObjectKeys(beforeMetadata[key]))
+      !== JSON.stringify(sortObjectKeys(afterMetadata[key]))
+  ));
+  const unchanged = canonicalizePageContent(before.puckData, before.metadata)
+    === canonicalizePageContent(after.puckData, after.metadata);
+  return {
+    unchanged,
+    contentChanged: canonicalizePuckContent(before.puckData)
+      !== canonicalizePuckContent(after.puckData),
+    rootChanged: JSON.stringify(sortObjectKeys(beforeDocument.root ?? {}))
+      !== JSON.stringify(sortObjectKeys(afterDocument.root ?? {})),
+    blockCountBefore: countBlocks(before.puckData),
+    blockCountAfter: countBlocks(after.puckData),
+    changedMetadataKeys,
+  };
+}
+
 /** Puck 首帧归一化不会因此被误判为用户编辑。 */
 export function dataSignature(data: unknown): string {
   return canonicalizePuckContent(data);

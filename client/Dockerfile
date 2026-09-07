@@ -16,9 +16,12 @@ RUN npm run build
 
 FROM nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
 
-ARG BUILD_REVISION=local
-ARG BUILD_SOURCE=local
-ARG MIGRATION_BUNDLE_SHA256=local
+ARG BUILD_REVISION
+ARG BUILD_SOURCE
+ARG MIGRATION_BUNDLE_SHA256
+RUN test -n "$BUILD_REVISION" \
+    && test -n "$BUILD_SOURCE" \
+    && test -n "$MIGRATION_BUNDLE_SHA256"
 LABEL org.opencontainers.image.source="${BUILD_SOURCE}" \
       org.opencontainers.image.revision="${BUILD_REVISION}" \
       io.haichuan.component="client" \
@@ -30,4 +33,4 @@ COPY --from=build --chown=nginx:nginx /app/dist /usr/share/nginx/html
 
 USER nginx
 
-EXPOSE 8080
+EXPOSE 8080 8081

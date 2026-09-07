@@ -13,6 +13,8 @@ import {
 } from "../template-definition/imagePosition";
 export interface PromoteDynamicTemplateInstanceRequest {
   templateId: string;
+  sourceVersion: number;
+  sourceDefinitionChecksum: string;
   sourceDefinition: TemplateDefinitionV2;
   layoutOverridesByNodeId: TemplateInstanceLayoutOverridesByNodeId | undefined;
 }

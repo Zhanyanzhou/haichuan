@@ -1,5 +1,20 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
+import {
+  type ExternalProviderAdapter,
+  type ExternalProviderOperationContext,
+  runExternalProviderOperation,
+} from '../payment-gateway/external-provider.contract';
+
+export interface MailDeliveryProvider extends ExternalProviderAdapter {
+  send(
+    message: { from: string; to: string; subject: string; html: string },
+    context: ExternalProviderOperationContext,
+  ): Promise<void>;
+}
+
+export const MAIL_DELIVERY_PROVIDER = Symbol('MAIL_DELIVERY_PROVIDER');
 
 /**
  * SMTP 邮件服务（OR-2 触达最小版）。
@@ -12,18 +27,28 @@ import { ConfigService } from '@nestjs/config';
  * - 发送失败返回 { delivered:false, reason:'send_failed' }；日志不记录收件地址、主题或提供商原始错误。
  */
 @Injectable()
-export class MailerService {
+export class MailerService implements ExternalProviderAdapter {
+  readonly providerId = 'smtp';
   private readonly logger = new Logger(MailerService.name);
   private transporter: import('nodemailer').Transporter | null = null;
   private readonly fromAddress: string;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional()
+    @Inject(MAIL_DELIVERY_PROVIDER)
+    private readonly deliveryProvider: MailDeliveryProvider | null = null,
+  ) {
+    if (this.deliveryProvider) {
+      this.fromAddress = this.configService.get<string>('SMTP_FROM') || '';
+      return;
+    }
     const host = this.configService.get<string>('SMTP_HOST');
     const user = this.configService.get<string>('SMTP_USER');
     const pass = this.configService.get<string>('SMTP_PASS');
 
     if (!host || !user || !pass) {
-      this.logger.warn('SMTP_HOST/SMTP_USER/SMTP_PASS 未配置，邮件通知将降级为日志输出');
+      this.logger.warn('SMTP_HOST/SMTP_USER/SMTP_PASS 未配置，邮件通知不可用');
       this.fromAddress = '';
       return;
     }
@@ -31,25 +56,36 @@ export class MailerService {
     const port = Number(this.configService.get('SMTP_PORT', '465'));
     this.fromAddress =
       this.configService.get<string>('SMTP_FROM') || `"海川珠宝" <${user}>`;
+    if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+      this.logger.warn('SMTP_PORT 配置无效，邮件通知不可用');
+      return;
+    }
 
-    // 惰性 require：未安装 nodemailer 时（依赖声明已加入 package.json，用户 npm install 后可用）
-    // 服务仍可启动，仅邮件能力不可用，与"未配置"同等降级。
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const nodemailer = require('nodemailer');
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465, // 465 隐式 TLS；587/25 走 STARTTLS 由 nodemailer 自动协商
-      auth: { user, pass },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 60_000,
-    });
-    this.logger.log(`SMTP 邮件服务初始化成功: ${host}:${port}`);
+    try {
+      // 惰性 require：SDK 缺失或初始化异常时保持 fail-closed，不阻断服务启动。
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const nodemailer = require('nodemailer');
+      this.transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 60_000,
+      });
+      this.logger.log('SMTP 邮件服务初始化成功');
+    } catch {
+      this.logger.warn('SMTP 客户端初始化失败（配置详情已脱敏）');
+    }
   }
 
   isAvailable(): boolean {
-    return !!this.transporter;
+    return this.isConfigured();
+  }
+
+  isConfigured(): boolean {
+    return this.deliveryProvider?.isConfigured() ?? Boolean(this.transporter);
   }
 
   /**
@@ -61,7 +97,10 @@ export class MailerService {
       subject: string;
       html: string;
     },
-    options: { requireNotificationDeliveryEnabled?: boolean } = {},
+    options: {
+      requireNotificationDeliveryEnabled?: boolean;
+      idempotencyKey?: string;
+    } = {},
   ): Promise<{ delivered: boolean; reason?: string }> {
     if (
       options.requireNotificationDeliveryEnabled
@@ -73,17 +112,33 @@ export class MailerService {
       this.logger.warn('[业务通知未发送·外部投递门禁关闭]');
       return { delivered: false, reason: 'delivery_disabled' };
     }
-    if (!this.transporter) {
+    if (!this.isConfigured()) {
       this.logger.warn('[邮件未发送·SMTP 未配置]');
       return { delivered: false, reason: 'not_configured' };
     }
     try {
-      await this.transporter.sendMail({
-        from: this.fromAddress,
-        to: params.to,
-        subject: params.subject,
-        html: params.html,
-      });
+      await runExternalProviderOperation(
+        async (context) => {
+          const message = {
+            from: this.fromAddress,
+            to: params.to,
+            subject: params.subject,
+            html: params.html,
+          };
+          if (this.deliveryProvider) {
+            await this.deliveryProvider.send(message, context);
+            return;
+          }
+          await this.transporter!.sendMail(message);
+        },
+        {
+          idempotencyKey:
+            options.idempotencyKey ?? `mail:unkeyed:${randomUUID()}`,
+          timeoutMs: 10_000,
+          // SMTP 超时后可能已经被服务器接收；绝不在同一调用中盲目重试。
+          maxAttempts: 1,
+        },
+      );
       return { delivered: true };
     } catch {
       this.logger.error('邮件发送失败（收件地址、主题与提供商错误已脱敏）');

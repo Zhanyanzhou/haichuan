@@ -9,6 +9,7 @@ import {
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ApiError, type ApiErrorDetails } from '../errors/api-error';
+import { requestPathOnly } from '../observability/request-path';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -18,6 +19,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
+    const requestPath = requestPathOnly(request.url);
     const requestId = (request as Request & { id?: unknown }).id;
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = '服务器内部错误';
@@ -114,7 +116,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // 服务端错误记录日志
     if (status >= 500) {
       this.logger.error(
-        `${request.method} ${request.url} → ${status}`,
+        `${request.method} ${requestPath} → ${status}`,
         exception instanceof Error ? exception.stack : '',
       );
     }
@@ -125,7 +127,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       // class-validator 的 message 是数组（每个违规字段一条），合并展示
       message: Array.isArray(message) ? message.join("；") : message,
       timestamp: new Date().toISOString(),
-      path: request.url,
+      path: requestPath,
       ...(typeof requestId === 'string' ? { requestId } : {}),
       errorCode,
       ...(details ? { details } : {}),

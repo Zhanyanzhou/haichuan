@@ -18,6 +18,11 @@ import {
   moveFreePlacement,
 } from "./freePlacementGeometry";
 import { getDynamicTemplateStructureProtectedNodeIds } from "./validateTemplateDefinition";
+import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  useContentTemplateRenderSurface,
+  type ContentTemplateRenderMode,
+} from "../runtime/ContentTemplateRenderSurface";
 
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
@@ -25,7 +30,7 @@ export interface DynamicTemplateRendererProps {
   contentBySlotId?: Record<string, unknown>;
   hiddenSlotIds?: readonly string[];
   layoutOverridesByNodeId?: TemplateInstanceLayoutOverridesByNodeId;
-  mode?: "public" | "editor" | "preview" | "thumbnail";
+  mode?: ContentTemplateRenderMode;
   /**
    * 编辑态的交互边界。页面实例只负责整体预览，只有母模板定义工作面
    * 可以注册内部节点选择和直接布局手势；未声明时按无内部交互处理。
@@ -748,13 +753,15 @@ export default function DynamicTemplateRenderer({
   onLayoutOverrideCommit,
   onTemplatePlacementCommit,
 }: DynamicTemplateRendererProps) {
+  const renderSurface = useContentTemplateRenderSurface();
   const allowsNodeInteraction = mode === "editor"
     && editorSurface === "template-definition"
     && interactionOwner !== "host-overlay";
-  const contentRenderMode = mode === "editor"
-    && editorSurface !== "template-definition"
-    ? "preview"
-    : mode;
+  const contentRenderMode = renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW
+    ? CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW
+    : mode === "editor" && editorSurface !== "template-definition"
+      ? "preview"
+      : mode;
   const structureProtectedNodeIds = allowsNodeInteraction
     ? getDynamicTemplateStructureProtectedNodeIds(definition)
     : undefined;
@@ -816,6 +823,8 @@ export default function DynamicTemplateRenderer({
       data-dynamic-template-device={device}
       data-dynamic-template-mode={mode}
       data-dynamic-template-editor-surface={mode === "editor" ? editorSurface : undefined}
+      data-template-composition-authority="template-definition-v2"
+      data-template-root-node-id={result.plan.root.nodeId}
       data-template-default-background-token={result.plan.metadata.defaultBackgroundToken}
       style={{
         background: result.plan.metadata.defaultBackgroundToken

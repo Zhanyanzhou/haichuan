@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
@@ -127,8 +128,18 @@ export class DynamicTemplatesController {
   @Roles("SUPER_ADMIN")
   @Get(":templateId/versions")
   @ApiOperation({ summary: "获取当前管理员模板的版本历史" })
-  listVersions(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
-    return this.service.listVersions(req.user.id, templateId);
+  listVersions(
+    @Param("templateId") templateId: string,
+    @Req() req: StaffRequest,
+    @Query("beforeVersion") beforeVersion?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.service.listVersions(
+      req.user.id,
+      templateId,
+      beforeVersion === undefined ? undefined : Number(beforeVersion),
+      limit === undefined ? undefined : Number(limit),
+    );
   }
 
   @Roles("SUPER_ADMIN")

@@ -342,6 +342,10 @@ export function getDynamicTemplateStructureLockViolation(
     if (!lockOwnerId) continue;
     const lockOwner = previous.nodes[lockOwnerId];
     const lockLabel = `“${lockOwner?.name ?? previousNode.name}”已锁定`;
+    if (previousNode.nodeId === previous.rootNodeId && (
+      previous.metadata.previewDesktopWidth !== next.metadata.previewDesktopWidth
+      || previous.metadata.previewMobileWidth !== next.metadata.previewMobileWidth
+    )) return `${lockLabel}，不能修改模板设计宽度。`;
     const nextNode = next.nodes[previousNode.nodeId];
     if (!nextNode) return `${lockLabel}，不能删除其结构。`;
     const previousParentId = findDynamicTemplateParentIdForLock(previous, previousNode.nodeId);

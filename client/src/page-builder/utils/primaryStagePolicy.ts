@@ -25,6 +25,16 @@ function getDocumentResolvedDefinitions(value: unknown) {
   );
 }
 
+function getPageDocumentBlocks(document: Record<string, unknown>) {
+  const content = Array.isArray(document.content) ? document.content : [];
+  const zoneBlocks = document.zones && typeof document.zones === "object" && !Array.isArray(document.zones)
+    ? Object.values(document.zones as Record<string, unknown>).flatMap((blocks) => (
+        Array.isArray(blocks) ? blocks : []
+      ))
+    : [];
+  return [...content, ...zoneBlocks];
+}
+
 /** 固定模板与动态母模板共用的主首屏判定，供渲染、插入与复制入口复用。 */
 export function isVisiblePrimaryStageBlock(
   value: unknown,
@@ -59,15 +69,47 @@ export function hasVisiblePrimaryStage(
     return false;
   }
   const document = documentValue as Record<string, unknown>;
-  const content = Array.isArray(document.content) ? document.content : [];
-  const zoneBlocks = document.zones && typeof document.zones === "object" && !Array.isArray(document.zones)
-    ? Object.values(document.zones as Record<string, unknown>).flatMap((blocks) => (
-        Array.isArray(blocks) ? blocks : []
-      ))
-    : [];
-  const resolvedDefinitions = resolvedDefinitionsOverride
-    ?? getDocumentResolvedDefinitions(document);
-  return [...content, ...zoneBlocks].some((block) => (
+  const resolvedDefinitions = {
+    ...getDocumentResolvedDefinitions(document),
+    ...(resolvedDefinitionsOverride ?? {}),
+  };
+  return getPageDocumentBlocks(document).some((block) => (
     isVisiblePrimaryStageBlock(block, resolvedDefinitions)
   ));
+}
+
+/** 精确版本缺失时保守关闭新主舞台插入，避免未知旧实例形成双主舞台。 */
+export function hasVisibleUnresolvedDynamicTemplateInstance(
+  documentValue: unknown,
+  resolvedDefinitionsOverride?: ResolvedDynamicTemplateDefinitionMap,
+) {
+  if (!documentValue || typeof documentValue !== "object" || Array.isArray(documentValue)) {
+    return false;
+  }
+  const document = documentValue as Record<string, unknown>;
+  const resolvedDefinitions = {
+    ...getDocumentResolvedDefinitions(document),
+    ...(resolvedDefinitionsOverride ?? {}),
+  };
+  return getPageDocumentBlocks(document).some((value) => {
+    const block = asPageBlock(value);
+    if (
+      block?.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE
+      || block.props?.isVisible === false
+    ) return false;
+    const templateId = typeof block.props?.templateId === "string"
+      ? block.props.templateId
+      : "";
+    const templateVersion = Number(block.props?.templateVersion);
+    return !resolvedDefinitions[dynamicTemplateVersionKey(templateId, templateVersion)];
+  });
+}
+
+/** 主舞台插入的统一 fail-closed 判定；目录状态与最终写入边界必须共同复用。 */
+export function isPrimaryStageInsertionBlocked(
+  documentValue: unknown,
+  resolvedDefinitionsOverride?: ResolvedDynamicTemplateDefinitionMap,
+) {
+  return hasVisiblePrimaryStage(documentValue, resolvedDefinitionsOverride)
+    || hasVisibleUnresolvedDynamicTemplateInstance(documentValue, resolvedDefinitionsOverride);
 }

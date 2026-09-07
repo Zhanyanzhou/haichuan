@@ -161,7 +161,7 @@ test("客户档案列表失败只显示安全本地文案并保留重试入口",
 
   await page.goto("/admin/customers");
   await expect(page.getByText("客户档案加载失败，请稍后重新加载。", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /重\s*试/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
   await expect(page.getByText(internalMessage, { exact: true })).toHaveCount(0);
 });
 
@@ -190,6 +190,6 @@ test("客户档案详情失败不暴露服务端异常并可就地重试", async
   await page.getByRole("button", { name: "查看档案" }).click();
   const drawer = page.getByRole("dialog", { name: "客户档案 #" });
   await expect(drawer.getByText("客户详情加载失败，请稍后重新加载。", { exact: true })).toBeVisible();
-  await expect(drawer.getByRole("button", { name: /重\s*试/ })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "重新加载" })).toBeVisible();
   await expect(page.getByText(internalMessage, { exact: true })).toHaveCount(0);
 });

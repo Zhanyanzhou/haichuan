@@ -134,16 +134,24 @@ export function setCanvasNavigationPreview(open: boolean) {
 
 export type AutoSaveState = "idle" | "saved" | "error";
 
-export type PageDocumentRevision = {
+export type PageDocumentRevisionSummary = {
   id: number;
   version: number;
-  puckData: unknown;
-  metadata?: Record<string, unknown>;
   status?: string;
   publishedAt?: string | null;
   publishedBy?: number | null;
   createdAt?: string;
   isPublished?: boolean;
+};
+
+export type PageDocumentRevisionDetail = PageDocumentRevisionSummary & {
+  puckData: unknown;
+  metadata?: Record<string, unknown>;
+};
+
+export type PageDocumentRevisionPage = {
+  items: PageDocumentRevisionSummary[];
+  nextBeforeVersion: number | null;
 };
 
 /** 后台草稿快照：发布版本抽屉中用于展示与一键编辑的“未发布草稿”。 */
@@ -159,4 +167,20 @@ export type PageSessionCache = {
   metadata: Record<string, unknown>;
   lastSaved: string | null;
   updatedAt: string | null;
+};
+
+export type PageEditorHistorySnapshot = {
+  data: PuckDocument;
+  metadata: Record<string, unknown>;
+  hasUnsavedChanges: boolean;
+  hasPendingDraft: boolean;
+  pendingDraft: PuckDocument | null;
+  savedSignature: string;
+};
+
+/** 与一个 Puck History 项绑定的页面复合命令；正文与 metadata 必须一起回放。 */
+export type PageEditorHistoryCommand = {
+  id: string;
+  before: PageEditorHistorySnapshot;
+  after: PageEditorHistorySnapshot;
 };

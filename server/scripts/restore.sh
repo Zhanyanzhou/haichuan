@@ -46,16 +46,19 @@ mapfile -t ARTIFACTS < <(awk '{ print $2 }' "$MANIFEST_PATH")
 
 DB_DUMPS=()
 MEDIA_ARCHIVES=()
+METADATA_FILES=()
 for artifact in "${ARTIFACTS[@]}"; do
   [[ -f "$BACKUP_DIR/$artifact" ]] || fail "清单中的备份文件不存在: $artifact"
   case "$artifact" in
     *.sql.gz) DB_DUMPS+=("$BACKUP_DIR/$artifact") ;;
     *.tar.gz) MEDIA_ARCHIVES+=("$BACKUP_DIR/$artifact") ;;
+    *.metadata.env) METADATA_FILES+=("$BACKUP_DIR/$artifact") ;;
     *) fail "清单包含不支持的备份类型: $artifact" ;;
   esac
 done
 
 [[ "${#DB_DUMPS[@]}" -eq 1 ]] || fail "每个恢复批次必须且只能包含一个数据库备份"
+[[ "${#METADATA_FILES[@]}" -eq 1 ]] || fail "备份批次必须且只能包含一个快照元数据文件"
 
 (cd "$BACKUP_DIR" && sha256sum -c -- "$RESTORE_MANIFEST") ||
   fail "备份清单校验失败，未执行任何恢复"

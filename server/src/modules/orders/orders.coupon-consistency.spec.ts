@@ -47,6 +47,15 @@ function makeOrderHarness(
         return { count: 1 };
       },
     },
+    productSKU: {
+      findMany: async () => [{
+        id: 10,
+        productId: 1,
+        skuCode: 'SKU-10',
+        price: new Prisma.Decimal(100),
+        product: { inventoryPolicy: 'STANDARD' },
+      }],
+    },
     order: {
       findFirst: async () => null,
       create: async ({ data }: any) => {

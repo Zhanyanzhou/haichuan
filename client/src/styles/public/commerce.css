@@ -265,6 +265,10 @@
 }
 
 /* 统一作品详情：7/12 影像与 5/12 事实，业务状态仍由现有 API/flags 提供。 */
+.product-detail-page__state {
+  min-height: max(60vh, calc(100svh - var(--site-header-height, 88px)));
+}
+
 .product-detail-page :is(button, a, [role="button"]):focus-visible {
   outline: 2px solid #5f6568;
   outline-offset: 3px;
@@ -331,15 +335,17 @@
 .product-detail-page__commerce-facts {
   margin: 0 0 32px;
   padding-block: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 24px;
   border-block: 1px solid #dde1e2;
 }
 
-.product-detail-page__commerce-facts > div {
+.product-detail-page__commerce-facts > :is(dt, dd) {
   min-height: 36px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
   font-size: 14px;
 }
 
@@ -358,13 +364,13 @@
   font-size: 11px;
 }
 
-.product-detail-page__commerce-facts .is-price {
+.product-detail-page__commerce-facts > .is-price {
   margin-top: 4px;
   padding-top: 10px;
   border-top: 1px solid #dde1e2;
 }
 
-.product-detail-page__commerce-facts .is-price dd {
+.product-detail-page__commerce-facts > dd.is-price {
   font-size: 24px;
 }
 
@@ -504,6 +510,9 @@
     display: none !important;
   }
 
+}
+
+@media (max-width: 900px) {
   .product-detail-page__inner {
     width: calc(100% - 40px);
     padding-block: 32px 64px;

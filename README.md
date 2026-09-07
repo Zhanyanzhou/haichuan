@@ -4,7 +4,7 @@
 
 ## 安全启动边界
 
-本 README 只提供项目导航，不授予任何环境或数据操作权限。开始工作前必须先阅读 `AGENTS.md` 与 `WORKFLOW.md`，检查当前工作树，并以当前代码、配置和新鲜验证为准。
+本 README 只提供项目导航，不授予任何环境或数据操作权限。按 `AGENTS.md` 第 9 节和 `WORKFLOW.md` 的任务模式启动：纯问答与只读检查只取所需证据；实施任务读取执行流程，任务依赖工作树或准备修改时才检查状态与目标差异。
 
 - 读取代码、`git status`、`git diff` 和已批准的开发检查可直接进行。
 - 安装或升级依赖、修改 `package.json`、运行 Prisma migration 或 seed、启动或变更 Docker/数据库、修改环境变量、初始化管理员，以及任何部署或生产操作，都必须按 `AGENTS.md` 的对应审批要求执行。
@@ -27,9 +27,8 @@ npm run
 - `docs/CURRENT_STATE.md`：当前可验证实现、与现行方向或专项决定的实现差距及待真实验证项；
 - `docs/DEVELOPMENT_WORKFLOW.md`：当前开发运行方式；
 - `WORKFLOW.md` 第 5 节与当前 `package.json` 脚本：当前验证范围与命令选择；
-- `docs/PUBLIC_ACCESS_MATRIX.md`：身份、行动与字段访问边界。
-
-`docs/VERIFICATION_RUNBOOK.md` 只保留历史验证证据边界，不是当前 Runbook，也不作为默认执行入口。
+- `docs/PUBLIC_ACCESS_MATRIX.md`：身份、行动与字段访问边界；
+- [页面装修与模板设计文档导航](docs/page-builder/README.md)：按规则、实现、操作清单、计划和历史证据查阅。
 
 ## 项目结构
 

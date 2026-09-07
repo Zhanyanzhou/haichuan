@@ -116,7 +116,6 @@ interface MoreButtonConfig {
   onClick: NonNullable<MenuProps["onClick"]>;
   ariaLabel: string;
   title?: string;
-  danger?: boolean;
   disabled?: boolean;
 }
 
@@ -137,16 +136,51 @@ export function WorkspaceToolbarActions({
   };
   preview: PreviewButtonConfig;
   save: ToolbarButtonConfig;
-  more: MoreButtonConfig;
+  more?: MoreButtonConfig;
   publish: ToolbarButtonConfig;
 }) {
+  const moreControl = more ? (
+    <Dropdown
+      trigger={["click"]}
+      placement="bottomRight"
+      disabled={more.disabled}
+      menu={{ items: more.items, onClick: more.onClick }}
+    >
+      <Button
+        className="homepage-editor__toolbar-more"
+        size="small"
+        disabled={more.disabled}
+        icon={<MoreOutlined />}
+        data-workspace-action="more"
+        aria-label={more.ariaLabel}
+        title={more.title}
+      />
+    </Dropdown>
+  ) : null;
+  const publishControl = (
+    <Button
+      className="homepage-editor__toolbar-publish"
+      size="small"
+      type="primary"
+      icon={publish.icon ?? <SendOutlined />}
+      data-workspace-action="publish"
+      loading={publish.loading}
+      disabled={publish.disabled}
+      onClick={publish.onClick}
+      aria-label={publish.ariaLabel}
+      title={publish.title}
+    >
+      {publish.label}
+    </Button>
+  );
   return (
-    <div className="homepage-editor__toolbar-actions">
+    <div className="homepage-editor__toolbar-actions" role="toolbar" aria-label="编辑器主要操作">
       {leading}
       <div className="homepage-editor__toolbar-history" role="group" aria-label="撤销与重做">
         <Button
           size="small"
           icon={<UndoOutlined />}
+          data-workspace-action="undo"
           disabled={!history.canUndo}
           onClick={history.onUndo}
           aria-label="撤销"
@@ -155,6 +189,7 @@ export function WorkspaceToolbarActions({
         <Button
           size="small"
           icon={<RedoOutlined />}
+          data-workspace-action="redo"
           disabled={!history.canRedo}
           onClick={history.onRedo}
           aria-label="重做"
@@ -164,8 +199,9 @@ export function WorkspaceToolbarActions({
       <Button
         className="homepage-editor__toolbar-preview"
         size="small"
-        type={preview.active ? "primary" : "default"}
+        type="default"
         icon={preview.icon ?? <EyeOutlined />}
+        data-workspace-action="preview"
         loading={preview.loading}
         disabled={preview.disabled}
         onClick={preview.onClick}
@@ -177,8 +213,10 @@ export function WorkspaceToolbarActions({
       </Button>
       <div className="homepage-editor__toolbar-secondary-actions">
         <Button
+          className="homepage-editor__toolbar-save"
           size="small"
           icon={save.icon ?? <SaveOutlined />}
+          data-workspace-action="save"
           loading={save.loading}
           disabled={save.disabled}
           onClick={save.onClick}
@@ -188,37 +226,8 @@ export function WorkspaceToolbarActions({
           {save.label}
         </Button>
       </div>
-      <Dropdown
-        trigger={["click"]}
-        placement="bottomRight"
-        disabled={more.disabled}
-        menu={{ items: more.items, onClick: more.onClick }}
-      >
-        <Button
-          className="homepage-editor__toolbar-more"
-          size="small"
-          danger={more.danger}
-          disabled={more.disabled}
-          icon={<MoreOutlined />}
-          aria-label={more.ariaLabel}
-          title={more.title}
-        >
-          更多
-        </Button>
-      </Dropdown>
-      <Button
-        className="homepage-editor__toolbar-publish"
-        size="small"
-        type="primary"
-        icon={publish.icon ?? <SendOutlined />}
-        loading={publish.loading}
-        disabled={publish.disabled}
-        onClick={publish.onClick}
-        aria-label={publish.ariaLabel}
-        title={publish.title}
-      >
-        {publish.label}
-      </Button>
+      {publishControl}
+      {moreControl}
     </div>
   );
 }

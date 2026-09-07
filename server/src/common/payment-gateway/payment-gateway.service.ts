@@ -1,4 +1,10 @@
-import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { isCommerceFeatureEnabled } from '../release/release-profile';
 import { X509Certificate } from 'node:crypto';
@@ -10,32 +16,19 @@ import {
   type WechatPayScene,
   type WechatRefundState,
 } from './wechat-pay.client';
+import {
+  ExternalProviderError,
+  type ExternalProviderAdapter,
+  type ExternalProviderOperationContext,
+  runExternalProviderOperation,
+} from './external-provider.contract';
+import {
+  amountYuanToCents,
+  createAlipayPayAdapter,
+  type AlipaySdkConstructor,
+} from './alipay-pay.adapter';
 
 export type OnlinePayProvider = 'alipay' | 'wechat';
-
-type AlipayPrecreateResponse = {
-  code?: string;
-  qr_code?: string;
-  sub_msg?: string;
-  msg?: string;
-};
-
-type AlipaySdkClient = {
-  exec: (
-    method: string,
-    params: Record<string, unknown>,
-  ) => Promise<AlipayPrecreateResponse>;
-  checkNotifySignV2: (
-    postData: Record<string, string>,
-  ) => boolean | Promise<boolean>;
-};
-
-type AlipaySdkConstructor = new (config: {
-  appId: string;
-  privateKey: string;
-  alipayPublicKey: string;
-  gateway: string;
-}) => AlipaySdkClient;
 
 export interface CreatePayParams {
   /** 商户单号（Payment.paymentNo） */
@@ -115,6 +108,64 @@ export interface VerifyRefundNotificationResult {
   raw?: unknown;
 }
 
+export interface ReconciliationStatementResult {
+  provider: OnlinePayProvider;
+  billDate: string;
+  downloadUrl: string;
+  raw: Record<string, unknown>;
+}
+
+export type ReconciliationMismatch =
+  | 'PAYMENT_NOT_SUCCESSFUL'
+  | 'AMOUNT_MISMATCH'
+  | 'GATEWAY_TRADE_NO_MISMATCH';
+
+export interface PaymentReconciliationResult {
+  provider: OnlinePayProvider;
+  paymentNo: string;
+  matched: boolean;
+  mismatches: ReconciliationMismatch[];
+  channel: QueryPayResult;
+}
+
+export interface PaymentGatewayAdapter extends ExternalProviderAdapter {
+  createPayment: (
+    params: CreatePayParams,
+    context: ExternalProviderOperationContext,
+  ) => Promise<CreatePayResult>;
+  queryPayment?: (
+    paymentNo: string,
+    context: ExternalProviderOperationContext,
+  ) => Promise<QueryPayResult>;
+  closePayment?: (
+    paymentNo: string,
+    context: ExternalProviderOperationContext,
+  ) => Promise<void>;
+  createRefund?: (
+    params: CreateRefundParams,
+    context: ExternalProviderOperationContext,
+  ) => Promise<RefundGatewayResult>;
+  queryRefund?: (
+    refundNo: string,
+    expected: { paymentNo?: string; totalAmountYuan?: string },
+    context: ExternalProviderOperationContext,
+  ) => Promise<RefundGatewayResult>;
+  getReconciliationStatement?: (
+    billDate: string,
+    context: ExternalProviderOperationContext,
+  ) => Promise<ReconciliationStatementResult>;
+  verifyRefundNotification?: (
+    headers: Record<string, string>,
+    rawBody: string,
+  ) => Promise<VerifyRefundNotificationResult>;
+  verifyNotification: (
+    headers: Record<string, string>,
+    rawBody: string,
+  ) => Promise<VerifyNotificationResult>;
+}
+
+export const PAYMENT_GATEWAY_ADAPTERS = Symbol('PAYMENT_GATEWAY_ADAPTERS');
+
 export function mapWechatRefundNotification(
   notification: WechatNotificationResult,
   merchantId: string,
@@ -166,29 +217,22 @@ export function mapWechatRefundNotification(
 @Injectable()
 export class PaymentGatewayService {
   private readonly logger = new Logger(PaymentGatewayService.name);
-  private readonly adapters = new Map<
-    OnlinePayProvider,
-    {
-      isAvailable: () => boolean;
-      createPayment: (params: CreatePayParams) => Promise<CreatePayResult>;
-      queryPayment?: (paymentNo: string) => Promise<QueryPayResult>;
-      closePayment?: (paymentNo: string) => Promise<void>;
-      createRefund?: (params: CreateRefundParams) => Promise<RefundGatewayResult>;
-      queryRefund?: (refundNo: string) => Promise<RefundGatewayResult>;
-      verifyRefundNotification?: (
-        headers: Record<string, string>,
-        rawBody: string,
-      ) => Promise<VerifyRefundNotificationResult>;
-      verifyNotification: (
-        headers: Record<string, string>,
-        rawBody: string,
-      ) => Promise<VerifyNotificationResult>;
-    }
-  >();
+  private readonly adapters = new Map<OnlinePayProvider, PaymentGatewayAdapter>();
 
-  constructor(private readonly configService: ConfigService) {
-    this.initAlipay();
-    this.initWechatPay();
+  constructor(
+    private readonly configService: ConfigService,
+    @Optional()
+    @Inject(PAYMENT_GATEWAY_ADAPTERS)
+    adapterOverrides: Partial<
+      Record<OnlinePayProvider, PaymentGatewayAdapter>
+    > | null = null,
+  ) {
+    if (!adapterOverrides?.alipay) this.initAlipay();
+    if (!adapterOverrides?.wechat) this.initWechatPay();
+    for (const provider of ['alipay', 'wechat'] as const) {
+      const override = adapterOverrides?.[provider];
+      if (override) this.adapters.set(provider, override);
+    }
   }
 
   /**
@@ -228,47 +272,13 @@ export class PaymentGatewayService {
         privateKey,
         alipayPublicKey,
         gateway: this.configService.get<string>('ALIPAY_GATEWAY') || 'https://openapi.alipay.com/gateway.do',
+        timeout: 10_000,
+        camelcase: false,
       });
-      this.adapters.set('alipay', {
-        isAvailable: () => true,
-        // 当面付预下单（扫码）：适配"顾问生成二维码发给客户"的顾问转化模式
-        createPayment: async (params) => {
-          const result = await sdk.exec('alipay.trade.precreate', {
-            notify_url: params.notifyUrl,
-            bizContent: {
-              out_trade_no: params.paymentNo,
-              total_amount: params.amountYuan,
-              subject: params.subject,
-            },
-          });
-          if (result?.code !== '10000' || !result?.qr_code) {
-            throw new Error(`支付宝预下单失败: ${result?.sub_msg || result?.msg || '未知错误'}`);
-          }
-          return { provider: 'alipay', scene: 'native', qrCode: String(result.qr_code) };
-        },
-        verifyNotification: async (_headers, rawBody) => {
-          const parsed = Object.fromEntries(new URLSearchParams(rawBody));
-          // 应用身份交叉校验：签名证明来自支付宝，app_id 证明属于本商户应用
-          if (parsed.app_id && parsed.app_id !== appId) {
-            return { verified: false };
-          }
-          // 支付宝异步通知是 urlencoded 表单；URLSearchParams 已完成一次解码，
-          // V2 验签保持字段值原样，避免再次 decodeURIComponent 破坏 % 等合法内容。
-          const pass = await sdk.checkNotifySignV2(parsed);
-          if (!pass) return { verified: false };
-          return {
-            verified: true,
-            paymentNo: parsed.out_trade_no,
-            gatewayTradeNo: parsed.trade_no,
-            paid: parsed.trade_status === 'TRADE_SUCCESS' || parsed.trade_status === 'TRADE_FINISHED',
-            amountYuan: Number(parsed.total_amount || 0).toFixed(2),
-            raw: parsed,
-          };
-        },
-      });
+      this.adapters.set('alipay', createAlipayPayAdapter(sdk, appId));
       this.logger.log('支付宝通道初始化成功（当面付·扫码）');
-    } catch (error) {
-      this.logger.warn(`支付宝通道初始化失败（依赖未安装或配置非法）：${error instanceof Error ? error.message : error}`);
+    } catch {
+      this.logger.warn('支付宝通道初始化失败（配置详情已脱敏）');
     }
   }
 
@@ -304,10 +314,11 @@ export class PaymentGatewayService {
         apiV3Key,
       });
       this.adapters.set('wechat', {
-        isAvailable: () => true,
+        providerId: 'wechat',
+        isConfigured: () => true,
         // 桌面端 Native；普通手机浏览器 H5。微信内网页的 JSAPI 由客户入口显式门禁。
-        createPayment: async (params) => {
-          const totalCents = Math.round(Number(params.amountYuan) * 100);
+        createPayment: async (params, context) => {
+          const totalCents = amountYuanToCents(params.amountYuan, '支付金额');
           const scene = params.scene ?? 'native';
           const result = await pay.createPayment({
             paymentNo: params.paymentNo,
@@ -320,11 +331,11 @@ export class PaymentGatewayService {
             h5Type: params.h5Type,
             appName: params.appName,
             appUrl: params.appUrl,
-          });
+          }, context.signal);
           return { provider: 'wechat', ...result };
         },
-        queryPayment: async (paymentNo) => {
-          const result = await pay.queryOrder(paymentNo);
+        queryPayment: async (paymentNo, context) => {
+          const result = await pay.queryOrder(paymentNo, context.signal);
           return {
             provider: 'wechat',
             paymentNo,
@@ -337,17 +348,33 @@ export class PaymentGatewayService {
             raw: result.raw,
           };
         },
-        closePayment: (paymentNo) => pay.closeOrder(paymentNo),
-        createRefund: async (params) => {
+        closePayment: (paymentNo, context) =>
+          pay.closeOrder(paymentNo, context.signal),
+        createRefund: async (params, context) => {
+          const refundCents = amountYuanToCents(
+            params.refundAmountYuan,
+            '退款金额',
+          );
+          const totalCents = amountYuanToCents(
+            params.totalAmountYuan,
+            '原支付金额',
+          );
+          if (refundCents > totalCents) {
+            throw new ExternalProviderError(
+              'INVALID_REQUEST',
+              '退款金额不能超过原支付金额',
+              false,
+            );
+          }
           const result = await pay.createRefund({
             transactionId: params.gatewayTradeNo,
             paymentNo: params.paymentNo,
             refundNo: params.refundNo,
-            refundCents: Math.round(Number(params.refundAmountYuan) * 100),
-            totalCents: Math.round(Number(params.totalAmountYuan) * 100),
+            refundCents,
+            totalCents,
             reason: params.reason,
             notifyUrl: params.notifyUrl,
-          });
+          }, context.signal);
           return {
             provider: 'wechat',
             refundNo: result.refundNo,
@@ -360,8 +387,8 @@ export class PaymentGatewayService {
             raw: result.raw,
           };
         },
-        queryRefund: async (refundNo) => {
-          const result = await pay.queryRefund(refundNo);
+        queryRefund: async (refundNo, _expected, context) => {
+          const result = await pay.queryRefund(refundNo, context.signal);
           return {
             provider: 'wechat',
             refundNo: result.refundNo,
@@ -371,6 +398,15 @@ export class PaymentGatewayService {
             state: result.state,
             refundAmountYuan: (result.refundCents / 100).toFixed(2),
             totalAmountYuan: (result.totalCents / 100).toFixed(2),
+            raw: result.raw,
+          };
+        },
+        getReconciliationStatement: async (billDate, context) => {
+          const result = await pay.getTradeBill(billDate, context.signal);
+          return {
+            provider: 'wechat',
+            billDate,
+            downloadUrl: result.downloadUrl,
             raw: result.raw,
           };
         },
@@ -378,8 +414,8 @@ export class PaymentGatewayService {
           try {
             const notification = pay.verifyNotification(headers, rawBody);
             return mapWechatRefundNotification(notification, mchid);
-          } catch (error) {
-            this.logger.error(`微信退款回调验签或解密失败: ${error instanceof Error ? error.message : error}`);
+          } catch {
+            this.logger.error('微信退款回调验签或解密失败（详情已脱敏）');
             return { verified: false };
           }
         },
@@ -408,22 +444,22 @@ export class PaymentGatewayService {
                   : undefined,
               raw: notification.raw,
             };
-          } catch (error) {
-            this.logger.error(`微信回调验签或解密失败: ${error instanceof Error ? error.message : error}`);
+          } catch {
+            this.logger.error('微信回调验签或解密失败（详情已脱敏）');
             return { verified: false };
           }
         },
       });
       this.logger.log('微信支付通道初始化成功（Native + H5，APIv3 应答验签）');
-    } catch (error) {
-      this.logger.warn(`微信支付通道初始化失败（依赖未安装或配置非法）：${error instanceof Error ? error.message : error}`);
+    } catch {
+      this.logger.warn('微信支付通道初始化失败（配置详情已脱敏）');
     }
   }
 
   isAvailable(provider: OnlinePayProvider): boolean {
     return (
       this.isTransactionCreationEnabled() &&
-      (this.adapters.get(provider)?.isAvailable() ?? false)
+      (this.adapters.get(provider)?.isConfigured() ?? false)
     );
   }
 
@@ -437,6 +473,7 @@ export class PaymentGatewayService {
   isRefundAvailable(provider: OnlinePayProvider): boolean {
     return (
       this.isRefundCreationEnabled() &&
+      (this.adapters.get(provider)?.isConfigured() ?? false) &&
       Boolean(this.adapters.get(provider)?.createRefund)
     );
   }
@@ -448,14 +485,21 @@ export class PaymentGatewayService {
       );
     }
     const adapter = this.adapters.get(provider);
-    if (!adapter) {
+    if (!adapter?.isConfigured()) {
       throw new ServiceUnavailableException(
         provider === 'alipay'
           ? '支付宝通道未配置，请先设置 ALIPAY_* 环境变量并安装 alipay-sdk'
           : '微信支付通道未配置，请检查 WECHAT_* 环境变量、证书与私钥文件',
       );
     }
-    return adapter.createPayment(params);
+    return runExternalProviderOperation(
+      (context) => adapter.createPayment(params, context),
+      {
+        idempotencyKey: `payment:create:${provider}:${params.paymentNo}`,
+        // 创建超时后的渠道状态未知；由业务层复用原商户单号查单或显式重试。
+        maxAttempts: 1,
+      },
+    );
   }
 
   async queryPayment(
@@ -463,18 +507,31 @@ export class PaymentGatewayService {
     paymentNo: string,
   ): Promise<QueryPayResult> {
     const adapter = this.adapters.get(provider);
-    if (!adapter?.queryPayment) {
+    if (!adapter?.isConfigured() || !adapter.queryPayment) {
       throw new ServiceUnavailableException(`${provider} 主动查单尚未接入`);
     }
-    return adapter.queryPayment(paymentNo);
+    return runExternalProviderOperation(
+      (context) => adapter.queryPayment!(paymentNo, context),
+      {
+        idempotencyKey: `payment:query:${provider}:${paymentNo}`,
+        maxAttempts: 2,
+      },
+    );
   }
 
   async closePayment(provider: OnlinePayProvider, paymentNo: string) {
     const adapter = this.adapters.get(provider);
-    if (!adapter?.closePayment) {
+    if (!adapter?.isConfigured() || !adapter.closePayment) {
       throw new ServiceUnavailableException(`${provider} 关单尚未接入`);
     }
-    await adapter.closePayment(paymentNo);
+    await runExternalProviderOperation(
+      (context) => adapter.closePayment!(paymentNo, context),
+      {
+        idempotencyKey: `payment:close:${provider}:${paymentNo}`,
+        // 关单超时后状态未知，避免在同一调用内盲目重复写操作。
+        maxAttempts: 1,
+      },
+    );
   }
 
   async createRefund(
@@ -487,21 +544,93 @@ export class PaymentGatewayService {
       );
     }
     const adapter = this.adapters.get(provider);
-    if (!adapter?.createRefund) {
+    if (!adapter?.isConfigured() || !adapter.createRefund) {
       throw new ServiceUnavailableException(`${provider} 原路退款尚未接入`);
     }
-    return adapter.createRefund(params);
+    return runExternalProviderOperation(
+      (context) => adapter.createRefund!(params, context),
+      {
+        idempotencyKey: `refund:create:${provider}:${params.refundNo}`,
+        // 退款号是渠道幂等键，但超时后仍先查询，避免自动重复资金写入。
+        maxAttempts: 1,
+      },
+    );
   }
 
   async queryRefund(
     provider: OnlinePayProvider,
     refundNo: string,
+    expected: { paymentNo?: string; totalAmountYuan?: string } = {},
   ): Promise<RefundGatewayResult> {
     const adapter = this.adapters.get(provider);
-    if (!adapter?.queryRefund) {
+    if (!adapter?.isConfigured() || !adapter.queryRefund) {
       throw new ServiceUnavailableException(`${provider} 退款查询尚未接入`);
     }
-    return adapter.queryRefund(refundNo);
+    return runExternalProviderOperation(
+      (context) => adapter.queryRefund!(refundNo, expected, context),
+      {
+        idempotencyKey: `refund:query:${provider}:${refundNo}`,
+        maxAttempts: 2,
+      },
+    );
+  }
+
+  async getReconciliationStatement(
+    provider: OnlinePayProvider,
+    billDate: string,
+  ): Promise<ReconciliationStatementResult> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate)) {
+      throw new ExternalProviderError(
+        'INVALID_REQUEST',
+        '对账单日期格式无效',
+        false,
+      );
+    }
+    const adapter = this.adapters.get(provider);
+    if (!adapter?.isConfigured() || !adapter.getReconciliationStatement) {
+      throw new ServiceUnavailableException(`${provider} 对账单查询尚未接入`);
+    }
+    return runExternalProviderOperation(
+      (context) => adapter.getReconciliationStatement!(billDate, context),
+      {
+        idempotencyKey: `bill:query:${provider}:${billDate}`,
+        maxAttempts: 2,
+      },
+    );
+  }
+
+  async reconcilePayment(
+    provider: OnlinePayProvider,
+    expected: {
+      paymentNo: string;
+      amountYuan: string;
+      gatewayTradeNo?: string;
+    },
+  ): Promise<PaymentReconciliationResult> {
+    const expectedAmount = (
+      amountYuanToCents(expected.amountYuan, '本地支付金额') / 100
+    ).toFixed(2);
+    const channel = await this.queryPayment(provider, expected.paymentNo);
+    const mismatches: ReconciliationMismatch[] = [];
+    if (channel.state !== 'SUCCESS') {
+      mismatches.push('PAYMENT_NOT_SUCCESSFUL');
+    }
+    if (channel.amountYuan !== expectedAmount) {
+      mismatches.push('AMOUNT_MISMATCH');
+    }
+    if (
+      expected.gatewayTradeNo &&
+      channel.gatewayTradeNo !== expected.gatewayTradeNo
+    ) {
+      mismatches.push('GATEWAY_TRADE_NO_MISMATCH');
+    }
+    return {
+      provider,
+      paymentNo: expected.paymentNo,
+      matched: mismatches.length === 0,
+      mismatches,
+      channel,
+    };
   }
 
   async verifyRefundNotification(
@@ -510,11 +639,13 @@ export class PaymentGatewayService {
     rawBody: string,
   ): Promise<VerifyRefundNotificationResult> {
     const adapter = this.adapters.get(provider);
-    if (!adapter?.verifyRefundNotification) return { verified: false };
+    if (!adapter?.isConfigured() || !adapter.verifyRefundNotification) {
+      return { verified: false };
+    }
     try {
       return await adapter.verifyRefundNotification(headers, rawBody);
-    } catch (error) {
-      this.logger.error(`${provider} 退款回调验签异常: ${error instanceof Error ? error.message : error}`);
+    } catch {
+      this.logger.error(`${provider} 退款回调验签异常（详情已脱敏）`);
       return { verified: false };
     }
   }
@@ -525,11 +656,11 @@ export class PaymentGatewayService {
     rawBody: string,
   ): Promise<VerifyNotificationResult> {
     const adapter = this.adapters.get(provider);
-    if (!adapter) return { verified: false };
+    if (!adapter?.isConfigured()) return { verified: false };
     try {
       return await adapter.verifyNotification(headers, rawBody);
-    } catch (error) {
-      this.logger.error(`${provider} 回调验签异常: ${error instanceof Error ? error.message : error}`);
+    } catch {
+      this.logger.error(`${provider} 回调验签异常（详情已脱敏）`);
       return { verified: false };
     }
   }

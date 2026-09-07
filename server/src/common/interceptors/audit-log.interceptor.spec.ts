@@ -79,7 +79,7 @@ test('操作审计保留主体和目标，但不复制任何请求体字段或�
   );
 });
 
-test('页面装修审计只记录白名单 pageKey 与恢复版本，不复制装修正文', async () => {
+test('页面装修审计只记录白名单 pageKey，不复制装修正文', async () => {
   const created: CreatedOperationLog[] = [];
   const prisma = {
     operationLog: {
@@ -103,8 +103,7 @@ test('页面装修审计只记录白名单 pageKey 与恢复版本，不复制�
   });
   await writeLog({
     method: 'PUT',
-    path: '/api/page-modules/document/revisions/7/restore',
-    params: { version: '7' },
+    path: '/api/page-modules/document',
     body: {
       pageKey: 'home',
       expectedUpdatedAt: '2026-08-29T00:00:00.000Z',
@@ -122,8 +121,8 @@ test('页面装修审计只记录白名单 pageKey 与恢复版本，不复制�
   assert.deepEqual(JSON.parse(created[1].detail), {
     schemaVersion: 1,
     method: 'PUT',
-    path: '/api/page-modules/document/revisions/7/restore',
-    target: { pageKey: 'home', version: 7 },
+    path: '/api/page-modules/document',
+    target: { pageKey: 'home' },
   });
   assert.doesNotMatch(
     created.map((entry) => entry.detail).join(' '),
@@ -159,13 +158,14 @@ test('已有事务级规范审计的入口跳过泛化重复记录', async () =>
   assert.equal(createCount, 0);
 });
 
-test('模板和页面的六个事务审计入口均跳过泛化重复记录', () => {
+test('模板和页面的七个事务审计入口均跳过泛化重复记录', () => {
   const handlers = [
     DynamicTemplatesController.prototype.publish,
     DynamicTemplatesController.prototype.archive,
     DynamicTemplatesController.prototype.restore,
     DynamicTemplatesController.prototype.deleteDraft,
     PageModulesController.prototype.publishDocument,
+    PageModulesController.prototype.restoreDocumentRevision,
     PageModulesController.prototype.rollbackDocumentPublication,
   ];
 

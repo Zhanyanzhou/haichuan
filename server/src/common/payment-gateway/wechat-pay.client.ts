@@ -4,6 +4,10 @@ import {
   createVerify,
   randomBytes,
 } from 'node:crypto';
+import {
+  ExternalProviderError,
+  sanitizeProviderCode,
+} from './external-provider.contract';
 
 export type WechatPayScene = 'native' | 'h5';
 
@@ -83,6 +87,12 @@ export interface WechatRefundResult {
   raw: Record<string, unknown>;
 }
 
+export interface WechatTradeBillResult {
+  billDate: string;
+  downloadUrl: string;
+  raw: Record<string, unknown>;
+}
+
 const WECHAT_PAY_ORIGIN = 'https://api.mch.weixin.qq.com';
 
 function normalizeSerial(value: string) {
@@ -102,8 +112,9 @@ function parseJsonObject(rawBody: string): Record<string, unknown> {
  * 微信支付 APIv3 最小客户端。
  *
  * 项目原先使用的第三方 SDK 会丢失应答签名头，无法对主动查单结果验签；
- * 此客户端只实现 R2 所需的 Native/H5 下单、查单、关单与通知验签，
- * 并统一验证每个微信 API 应答，避免把 HTTPS 返回体直接当成资金事实。
+ * 此客户端只实现本项目所需的 Native/H5 下单、查单、关单、退款、交易账单
+ * 下载地址与通知验签，并统一验证每个微信 API 应答，避免把 HTTPS 返回体
+ * 直接当成资金事实。
  */
 export class WechatPayClient {
   private readonly fetchFn: FetchLike;
@@ -133,6 +144,13 @@ export class WechatPayClient {
     rawBody: string,
   ) {
     if (!timestamp || !nonce || !serial || !signature) return false;
+    const responseSeconds = Number(timestamp);
+    if (
+      !Number.isFinite(responseSeconds) ||
+      Math.abs(Math.floor(Date.now() / 1000) - responseSeconds) > 300
+    ) {
+      return false;
+    }
     if (
       normalizeSerial(serial) !==
       normalizeSerial(this.options.platformCertificateSerialNo)
@@ -152,6 +170,7 @@ export class WechatPayClient {
     method: 'GET' | 'POST',
     path: string,
     body?: Record<string, unknown>,
+    signal?: AbortSignal,
   ) {
     const bodyText = body ? JSON.stringify(body) : '';
     let response: Response;
@@ -165,10 +184,20 @@ export class WechatPayClient {
           'User-Agent': 'HaichuanJewelry/1.0',
         },
         body: body ? bodyText : undefined,
+        signal,
       });
     } catch (error) {
-      throw new Error(
-        `微信支付网络请求结果未知：${error instanceof Error ? error.message : '网络异常'}`,
+      if (signal?.aborted) {
+        throw new ExternalProviderError(
+          'TIMEOUT',
+          '微信支付请求超时，结果未确认',
+          true,
+        );
+      }
+      throw new ExternalProviderError(
+        'NETWORK',
+        '微信支付网络异常，结果未确认',
+        true,
       );
     }
 
@@ -181,20 +210,38 @@ export class WechatPayClient {
       rawBody,
     );
     if (!verified) {
-      throw new Error('微信支付应答验签失败');
+      throw new ExternalProviderError(
+        'SIGNATURE_INVALID',
+        '微信支付应答验签失败',
+        false,
+      );
     }
 
-    const data = parseJsonObject(rawBody);
+    let data: Record<string, unknown>;
+    try {
+      data = parseJsonObject(rawBody);
+    } catch {
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信支付返回格式无效',
+        false,
+      );
+    }
     if (!response.ok) {
       const code = typeof data.code === 'string' ? data.code : 'UNKNOWN';
-      const message =
-        typeof data.message === 'string' ? data.message : '渠道拒绝请求';
-      throw new Error(`微信支付请求失败（${code}）：${message}`);
+      throw new ExternalProviderError(
+        code === 'SIGN_ERROR' || code === 'INVALID_REQUEST'
+          ? 'AUTHENTICATION'
+          : 'PROVIDER_REJECTED',
+        '微信支付拒绝了请求',
+        response.status >= 500,
+        sanitizeProviderCode(code),
+      );
     }
     return data;
   }
 
-  async createPayment(params: WechatCreatePaymentParams) {
+  async createPayment(params: WechatCreatePaymentParams, signal?: AbortSignal) {
     const common: Record<string, unknown> = {
       appid: this.options.appId,
       mchid: this.options.merchantId,
@@ -206,7 +253,13 @@ export class WechatPayClient {
     };
 
     if (params.scene === 'h5') {
-      if (!params.clientIp) throw new Error('微信 H5 支付缺少客户终端 IP');
+      if (!params.clientIp) {
+        throw new ExternalProviderError(
+          'INVALID_REQUEST',
+          '微信 H5 支付缺少客户终端 IP',
+          false,
+        );
+      }
       const data = await this.request('POST', '/v3/pay/transactions/h5', {
         ...common,
         scene_info: {
@@ -217,9 +270,13 @@ export class WechatPayClient {
             ...(params.appUrl ? { app_url: params.appUrl } : {}),
           },
         },
-      });
+      }, signal);
       if (typeof data.h5_url !== 'string' || !data.h5_url) {
-        throw new Error('微信 H5 下单成功但未返回 h5_url');
+        throw new ExternalProviderError(
+          'RESPONSE_INVALID',
+          '微信 H5 下单应答缺少支付地址',
+          false,
+        );
       }
       return { scene: params.scene, payUrl: data.h5_url } as const;
     }
@@ -228,33 +285,53 @@ export class WechatPayClient {
       'POST',
       '/v3/pay/transactions/native',
       common,
+      signal,
     );
     if (typeof data.code_url !== 'string' || !data.code_url) {
-      throw new Error('微信 Native 下单成功但未返回 code_url');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信 Native 下单应答缺少二维码',
+        false,
+      );
     }
     return { scene: params.scene, qrCode: data.code_url } as const;
   }
 
-  async queryOrder(paymentNo: string): Promise<WechatOrderQueryResult> {
+  async queryOrder(
+    paymentNo: string,
+    signal?: AbortSignal,
+  ): Promise<WechatOrderQueryResult> {
     const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(paymentNo)}?mchid=${encodeURIComponent(this.options.merchantId)}`;
-    const data = await this.request('GET', path);
+    const data = await this.request('GET', path, undefined, signal);
     if (
       typeof data.out_trade_no !== 'string' ||
       data.out_trade_no !== paymentNo
     ) {
-      throw new Error('微信查单返回的商户单号不匹配');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信查单返回的商户单号不匹配',
+        false,
+      );
     }
     if (
       typeof data.appid === 'string' &&
       data.appid !== this.options.appId
     ) {
-      throw new Error('微信查单返回的 AppID 不匹配');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信查单返回的 AppID 不匹配',
+        false,
+      );
     }
     if (
       typeof data.mchid === 'string' &&
       data.mchid !== this.options.merchantId
     ) {
-      throw new Error('微信查单返回的商户号不匹配');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信查单返回的商户号不匹配',
+        false,
+      );
     }
     const amount = data.amount as { total?: unknown } | undefined;
     const knownStates = new Set([
@@ -282,11 +359,12 @@ export class WechatPayClient {
     };
   }
 
-  async closeOrder(paymentNo: string) {
+  async closeOrder(paymentNo: string, signal?: AbortSignal) {
     await this.request(
       'POST',
       `/v3/pay/transactions/out-trade-no/${encodeURIComponent(paymentNo)}/close`,
       { mchid: this.options.merchantId },
+      signal,
     );
   }
 
@@ -301,16 +379,28 @@ export class WechatPayClient {
     },
   ): WechatRefundResult {
     if (data.out_refund_no !== expected.refundNo) {
-      throw new Error('微信退款返回的商户退款单号不匹配');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信退款返回的商户退款单号不匹配',
+        false,
+      );
     }
     if (
       expected.transactionId &&
       data.transaction_id !== expected.transactionId
     ) {
-      throw new Error('微信退款返回的原交易号不匹配');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信退款返回的原交易号不匹配',
+        false,
+      );
     }
     if (expected.paymentNo && data.out_trade_no !== expected.paymentNo) {
-      throw new Error('微信退款返回的原商户单号不匹配');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信退款返回的原商户单号不匹配',
+        false,
+      );
     }
     const refundId = data.refund_id;
     const transactionId = data.transaction_id;
@@ -328,19 +418,31 @@ export class WechatPayClient {
       typeof amount?.refund !== 'number' ||
       typeof amount.total !== 'number'
     ) {
-      throw new Error('微信退款返回的关键字段不完整');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信退款返回的关键字段不完整',
+        false,
+      );
     }
     if (
       expected.refundCents !== undefined &&
       amount.refund !== expected.refundCents
     ) {
-      throw new Error('微信退款返回的退款金额不匹配');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信退款返回的退款金额不匹配',
+        false,
+      );
     }
     if (
       expected.totalCents !== undefined &&
       amount.total !== expected.totalCents
     ) {
-      throw new Error('微信退款返回的原支付金额不匹配');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信退款返回的原支付金额不匹配',
+        false,
+      );
     }
     const knownStates = new Set<WechatRefundState>([
       'SUCCESS',
@@ -352,7 +454,11 @@ export class WechatPayClient {
       typeof data.status !== 'string' ||
       !knownStates.has(data.status as WechatRefundState)
     ) {
-      throw new Error('微信退款返回了未知状态');
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信退款返回了未知状态',
+        false,
+      );
     }
     return {
       refundNo: expected.refundNo,
@@ -368,6 +474,7 @@ export class WechatPayClient {
 
   async createRefund(
     params: WechatCreateRefundParams,
+    signal?: AbortSignal,
   ): Promise<WechatRefundResult> {
     if (
       !Number.isSafeInteger(params.refundCents) ||
@@ -376,7 +483,11 @@ export class WechatPayClient {
       params.totalCents <= 0 ||
       params.refundCents > params.totalCents
     ) {
-      throw new Error('微信退款金额必须是有效整数分且不超过原支付金额');
+      throw new ExternalProviderError(
+        'INVALID_REQUEST',
+        '微信退款金额必须是有效整数分且不超过原支付金额',
+        false,
+      );
     }
     const data = await this.request('POST', '/v3/refund/domestic/refunds', {
       transaction_id: params.transactionId,
@@ -388,7 +499,7 @@ export class WechatPayClient {
         total: params.totalCents,
         currency: 'CNY',
       },
-    });
+    }, signal);
     return this.parseRefundResult(data, {
       refundNo: params.refundNo,
       transactionId: params.transactionId,
@@ -398,12 +509,40 @@ export class WechatPayClient {
     });
   }
 
-  async queryRefund(refundNo: string): Promise<WechatRefundResult> {
+  async queryRefund(
+    refundNo: string,
+    signal?: AbortSignal,
+  ): Promise<WechatRefundResult> {
     const data = await this.request(
       'GET',
       `/v3/refund/domestic/refunds/${encodeURIComponent(refundNo)}`,
+      undefined,
+      signal,
     );
     return this.parseRefundResult(data, { refundNo });
+  }
+
+  async getTradeBill(
+    billDate: string,
+    signal?: AbortSignal,
+  ): Promise<WechatTradeBillResult> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(billDate)) {
+      throw new ExternalProviderError(
+        'INVALID_REQUEST',
+        '微信支付账单日期格式无效',
+        false,
+      );
+    }
+    const path = `/v3/bill/tradebill?bill_date=${encodeURIComponent(billDate)}&bill_type=ALL`;
+    const data = await this.request('GET', path, undefined, signal);
+    if (typeof data.download_url !== 'string' || !data.download_url) {
+      throw new ExternalProviderError(
+        'RESPONSE_INVALID',
+        '微信支付账单应答缺少下载地址',
+        false,
+      );
+    }
+    return { billDate, downloadUrl: data.download_url, raw: data };
   }
 
   verifyNotification(

@@ -16,7 +16,11 @@ import {
 import { HeartOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { customerAdminApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
-import { AdminLoadingState } from "@/components/common/AdminDataStates";
+import AdminPageHeader from "@/components/common/AdminPageHeader";
+import {
+  AdminErrorState,
+  AdminLoadingState,
+} from "@/components/common/AdminDataStates";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 
 /**
@@ -265,17 +269,15 @@ export default function CustomerManage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="font-semibold text-brand-text">客户管理</h1>
-          <p className="text-sm text-brand-muted mt-1">
-            注册客户档案与消费全景（只读）；联系与跟进请前往订单中心 / 客户线索
-          </p>
-        </div>
-        <Button icon={<ReloadOutlined />} onClick={() => void fetchList()} loading={loading}>
-          刷新
-        </Button>
-      </div>
+      <AdminPageHeader
+        title="客户管理"
+        subtitle="只读查看注册客户档案与消费概览；联系与跟进请前往订单中心或客户线索。"
+        extra={(
+          <Button icon={<ReloadOutlined />} onClick={() => void fetchList()} loading={loading}>
+            刷新
+          </Button>
+        )}
+      />
 
       <Card size="small" className="border-brand-line">
         <Space wrap size="middle">
@@ -315,10 +317,13 @@ export default function CustomerManage() {
 
         <div className="mt-3">
           {error ? (
-            <div className="py-10 text-center">
-              <p className="text-brand-muted mb-3">{error}</p>
-              <Button onClick={() => void fetchList()}>重试</Button>
-            </div>
+            <AdminErrorState
+              subject="客户档案"
+              message={error}
+              onRetry={() => void fetchList()}
+            />
+          ) : loading && rows.length === 0 ? (
+            <AdminLoadingState subject="客户档案" compact />
           ) : (
             <Table
               rowKey="id"
@@ -332,7 +337,9 @@ export default function CustomerManage() {
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                     description={
-                      keyword || status !== "ALL" ? "没有符合条件的客户" : "暂无注册客户"
+                      keyword || status !== "ALL"
+                        ? "没有符合当前筛选条件的客户"
+                        : "暂无注册客户"
                     }
                   />
                 ),
@@ -361,7 +368,7 @@ export default function CustomerManage() {
       <Drawer
         title={`客户档案 #${detail?.customer.id ?? ""}`}
         placement="right"
-        width={640}
+        width="min(640px, calc(100vw - 16px))"
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
       >
@@ -370,17 +377,16 @@ export default function CustomerManage() {
             <AdminLoadingState subject="客户详情" compact />
           </div>
         ) : detailError ? (
-          <div className="py-10 text-center">
-            <p className="text-brand-muted mb-3">{detailError}</p>
-            {detailId != null && (
-              <Button onClick={() => void openDetail(detailId)}>重试</Button>
-            )}
-          </div>
+          <AdminErrorState
+            subject="客户详情"
+            message={detailError}
+            onRetry={detailId == null ? undefined : () => void openDetail(detailId)}
+          />
         ) : detail ? (
           <div className="space-y-6">
             <Descriptions
               size="small"
-              column={2}
+              column={{ xs: 1, sm: 2 }}
               bordered
               items={[
                 {
@@ -439,7 +445,7 @@ export default function CustomerManage() {
               <Typography.Text strong className="block mb-2">
                 消费概览
               </Typography.Text>
-              <div className="grid grid-cols-4 gap-2 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                 {[
                   { label: "有效订单", value: `${detail.stats.orderCount}` },
                   { label: "累计成交", value: formatAmount(detail.stats.totalSpent) },
@@ -470,6 +476,7 @@ export default function CustomerManage() {
                   rowKey="id"
                   size="small"
                   pagination={false}
+                  scroll={{ x: 560 }}
                   dataSource={detail.recentOrders}
                   columns={[
                     { title: "订单号", dataIndex: "orderNo", width: 150 },

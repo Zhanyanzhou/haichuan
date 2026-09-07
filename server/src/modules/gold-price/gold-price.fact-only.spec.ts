@@ -96,3 +96,24 @@ test("行情响应只从受支持的直接、嵌套或数组价格字段提取�
   assert.equal(internals.extractPrice({ data: { price: "invalid" } }), null);
   assert.equal(internals.extractPrice(null), null);
 });
+
+test("自动化状态只在配置行情地址后开启", () => {
+  const original = process.env.GOLD_PRICE_API_URL;
+  const service = new GoldPriceService(
+    {} as PrismaService,
+    {} as ProductsService,
+  );
+  try {
+    delete process.env.GOLD_PRICE_API_URL;
+    assert.deepEqual(service.getAutomationStatus(), {
+      autoFetchConfigured: false,
+    });
+    process.env.GOLD_PRICE_API_URL = "https://example.test/gold-price";
+    assert.deepEqual(service.getAutomationStatus(), {
+      autoFetchConfigured: true,
+    });
+  } finally {
+    if (original === undefined) delete process.env.GOLD_PRICE_API_URL;
+    else process.env.GOLD_PRICE_API_URL = original;
+  }
+});

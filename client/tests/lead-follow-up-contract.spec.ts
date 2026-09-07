@@ -111,6 +111,215 @@ test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ pa
   });
 });
 
+test('后台回复在响应失败后复用幂等键并恢复成功结果', async ({ page }) => {
+  await authenticateCustomerService(page);
+  const writes: Array<{
+    headers: Record<string, string>;
+    body: Record<string, unknown>;
+  }> = [];
+  let reply: string | null = null;
+  let updatedAt = '2026-09-07T01:00:00.000Z';
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/auth/profile') return route.fallback();
+    if (path === '/api/leads/inquiry/41/reply' && request.method() === 'POST') {
+      writes.push({ headers: request.headers(), body: request.postDataJSON() });
+      if (writes.length === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'temporary failure' }),
+        });
+        return;
+      }
+      reply = String(writes.at(-1)?.body.reply);
+      updatedAt = '2026-09-07T01:00:01.000Z';
+      await route.fulfill({
+        contentType: 'application/json',
+        body: wrapped({
+          leadId: 41,
+          status: 'CONTACTED',
+          updatedAt,
+          reply: { id: 91, content: reply, createdAt: updatedAt },
+        }),
+      });
+      return;
+    }
+    if (path === '/api/leads/inquiry/41') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: wrapped({
+          id: 41,
+          customerId: 7,
+          leadType: 'inquiry',
+          leadTypeLabel: '预约咨询',
+          customerName: '测试会员',
+          phone: '13800000007',
+          status: reply ? 'CONTACTED' : 'PENDING',
+          message: '希望预约到店鉴赏。',
+          reply,
+          createdAt: '2026-09-07T00:00:00.000Z',
+          updatedAt,
+          followUps: [],
+        }),
+      });
+      return;
+    }
+    if (path === '/api/leads/notification-failures') {
+      await route.fulfill({ contentType: 'application/json', body: wrapped({ list: [], total: 0 }) });
+      return;
+    }
+    if (path === '/api/leads') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: wrapped({
+          list: [{
+            id: 41,
+            leadType: 'inquiry',
+            leadTypeLabel: '预约咨询',
+            customerName: '测试会员',
+            phone: '13800000007',
+            relatedProducts: 0,
+            status: reply ? 'CONTACTED' : 'PENDING',
+            createdAt: '2026-09-07T00:00:00.000Z',
+          }],
+          total: 1,
+        }),
+      });
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: wrapped({}) });
+  });
+
+  await page.goto('/admin/leads');
+  await page.getByRole('button', { name: '查看' }).click();
+  const drawer = page.getByRole('dialog', { name: '线索详情' });
+  await drawer.getByLabel('客户可见回复').fill('已为您安排本周六到店鉴赏。');
+  await page.evaluate(() => {
+    document.cookie = 'hc_csrf=lead-reply-csrf; path=/';
+  });
+  await drawer.getByRole('button', { name: '提交回复' }).click();
+  await expect(drawer.getByText(/客户回复提交失败/)).toBeVisible();
+  await drawer.getByRole('button', { name: '重新提交' }).click();
+
+  await expect(drawer.getByText('已为您安排本周六到店鉴赏。', { exact: true })).toBeVisible();
+  expect(writes).toHaveLength(2);
+  expect(writes[0].headers['idempotency-key']).toBeTruthy();
+  expect(writes[1].headers['idempotency-key']).toBe(writes[0].headers['idempotency-key']);
+  expect(writes[1].headers['x-csrf-token']).toBe('lead-reply-csrf');
+  expect(writes[1].headers.authorization).toBeUndefined();
+  expect(writes[1].body).toEqual({
+    reply: '已为您安排本周六到店鉴赏。',
+    expectedUpdatedAt: '2026-09-07T01:00:00.000Z',
+  });
+});
+
+test('后台回复遇到版本冲突会保留正文并用刷新后的版本重新提交', async ({ page }) => {
+  await authenticateCustomerService(page);
+  const keys: string[] = [];
+  const versions: string[] = [];
+  let attempts = 0;
+  let updatedAt = '2026-09-07T02:00:00.000Z';
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/auth/profile') return route.fallback();
+    if (path === '/api/leads/selection/42/reply' && request.method() === 'POST') {
+      attempts += 1;
+      keys.push(request.headers()['idempotency-key']);
+      versions.push(String(request.postDataJSON().expectedUpdatedAt));
+      if (attempts === 1) {
+        updatedAt = '2026-09-07T02:00:01.000Z';
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'stale lead version' }),
+        });
+        return;
+      }
+      await route.fulfill({
+        contentType: 'application/json',
+        body: wrapped({
+          leadId: 42,
+          status: 'FOLLOWING',
+          updatedAt: '2026-09-07T02:00:02.000Z',
+          reply: {
+            id: 92,
+            content: '三件作品可在到店时逐一试戴。',
+            createdAt: '2026-09-07T02:00:02.000Z',
+          },
+        }),
+      });
+      return;
+    }
+    if (path === '/api/leads/selection/42') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: wrapped({
+          id: 42,
+          customerId: 7,
+          leadType: 'selection',
+          leadTypeLabel: '选款咨询',
+          customerName: '测试会员',
+          status: 'FOLLOWING',
+          message: '希望比较三件作品。',
+          items: [],
+          reply: attempts > 1 ? '三件作品可在到店时逐一试戴。' : null,
+          repliedAt: attempts > 1 ? '2026-09-07T02:00:02.000Z' : null,
+          createdAt: '2026-09-07T01:00:00.000Z',
+          updatedAt,
+          followUps: [],
+        }),
+      });
+      return;
+    }
+    if (path === '/api/leads/notification-failures') {
+      await route.fulfill({ contentType: 'application/json', body: wrapped({ list: [], total: 0 }) });
+      return;
+    }
+    if (path === '/api/leads') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: wrapped({
+          list: [{
+            id: 42,
+            leadType: 'selection',
+            leadTypeLabel: '选款咨询',
+            customerName: '测试会员',
+            relatedProducts: 3,
+            status: 'FOLLOWING',
+            createdAt: '2026-09-07T01:00:00.000Z',
+          }],
+          total: 1,
+        }),
+      });
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: wrapped({}) });
+  });
+
+  await page.goto('/admin/leads');
+  await page.getByRole('button', { name: '查看' }).click();
+  const drawer = page.getByRole('dialog', { name: '线索详情' });
+  const editor = drawer.getByLabel('客户可见回复');
+  await editor.fill('三件作品可在到店时逐一试戴。');
+  await drawer.getByRole('button', { name: '提交回复' }).click();
+  await expect(drawer.getByText('数据已被其他操作更新，请重新加载后再试。')).toBeVisible();
+  await expect(editor).toHaveValue('三件作品可在到店时逐一试戴。');
+  await drawer.getByRole('button', { name: '重新提交' }).click();
+
+  await expect(drawer.getByText('三件作品可在到店时逐一试戴。', { exact: true })).toBeVisible();
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).not.toBe(keys[0]);
+  expect(versions).toEqual([
+    '2026-09-07T02:00:00.000Z',
+    '2026-09-07T02:00:01.000Z',
+  ]);
+});
+
 test('通知失败可发现且只允许安全失败进入人工重投队列', async ({ page }) => {
   await authenticateCustomerService(page);
   await page.setViewportSize({ width: 390, height: 844 });

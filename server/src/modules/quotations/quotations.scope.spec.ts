@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   BadRequestException,
+  ConflictException,
   NotFoundException,
   ValidationPipe,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { QuotationListQueryDto } from './dto/quotation.dto';
+import { ConvertQuotationDto, QuotationListQueryDto } from './dto/quotation.dto';
 import { QuotationsService } from './quotations.service';
 
 const salesActor = { id: 17, role: 'SALES_CONSULTANT' as const };
@@ -102,13 +103,20 @@ test('销售创建与更新报价时负责人由服务端强制为本人', async
   let createData: any;
   let updateData: any;
   let updateWhere: any;
+  let rawCalls = 0;
   const tx = {
-    $queryRaw: async () => [{ max_sequence: 0n }],
+    $queryRaw: async () =>
+      ++rawCalls === 1 ? [{ max_sequence: 0n }] : [{ id: 1 }],
     quotation: {
-      findFirst: async () => null,
+      findFirst: async () => ({ id: 1, status: 'DRAFT', customerId: null }),
       create: async ({ data }: any) => {
         createData = data;
         return { id: 1, ...data, items: [] };
+      },
+      update: async ({ where, data }: any) => {
+        updateWhere = where;
+        updateData = data;
+        return { id: 1, ...data };
       },
     },
   };
@@ -119,11 +127,11 @@ test('销售创建与更新报价时负责人由服务端强制为本人', async
       },
     },
     quotation: {
-      findFirst: async () => ({ id: 1, status: 'DRAFT', salesConsultantId: salesActor.id }),
-      update: async ({ where, data }: any) => {
-        updateWhere = where;
-        updateData = data;
-        return { id: 1, ...data };
+      findFirst: async () => {
+        throw new Error('更新不得在事务外读取报价状态');
+      },
+      update: async () => {
+        throw new Error('更新不得在事务外写入报价');
       },
     },
     $transaction: async (callback: (client: any) => Promise<any>) => callback(tx),
@@ -146,7 +154,129 @@ test('销售创建与更新报价时负责人由服务端强制为本人', async
   await service.update(1, { salesConsultantId: 999, remark: '本人跟进' }, salesActor);
   assert.equal(Object.prototype.hasOwnProperty.call(updateData, 'salesConsultantId'), false);
   assert.equal(updateData.remark, '本人跟进');
-  assert.deepEqual(updateWhere, { id: 1, salesConsultantId: salesActor.id });
+  assert.deepEqual(updateWhere, {
+    id: 1,
+    status: 'DRAFT',
+    salesConsultantId: salesActor.id,
+  });
+});
+
+test('报价更新在同一事务锁后重读，状态已提交时不写入', async () => {
+  const sequence: string[] = [];
+  const tx = {
+    $queryRaw: async () => {
+      sequence.push('lock');
+      return [{ id: 1 }];
+    },
+    quotation: {
+      findFirst: async () => {
+        sequence.push('reread');
+        return { id: 1, status: 'PENDING_CONFIRM', customerId: null };
+      },
+      update: async () => {
+        sequence.push('update');
+      },
+    },
+  };
+  const service = new QuotationsService({
+    quotation: {
+      findFirst: async () => {
+        throw new Error('不得事务外读取');
+      },
+    },
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => {
+      sequence.push('transaction');
+      return callback(tx);
+    },
+  } as unknown as PrismaService);
+
+  await assert.rejects(
+    () => service.update(1, { remark: '竞态写入' }, salesActor),
+    ConflictException,
+  );
+  assert.deepEqual(sequence, ['transaction', 'lock', 'reread']);
+});
+
+test('报价创建和更新在数据库写入前拒绝重复 SKU', async () => {
+  let transactions = 0;
+  const service = new QuotationsService({
+    $transaction: async () => {
+      transactions += 1;
+    },
+  } as unknown as PrismaService);
+  const duplicateItems = [
+    { skuId: 9, productName: '甲', quantity: 1, unitPrice: 100, quotedPrice: 90 },
+    { skuId: 9, productName: '乙', quantity: 1, unitPrice: 100, quotedPrice: 90 },
+  ];
+
+  await assert.rejects(
+    () => service.create({
+      customerName: '合成客户',
+      customerPhone: '13800000000',
+      items: duplicateItems,
+    }, salesActor),
+    BadRequestException,
+  );
+  await assert.rejects(
+    () => service.update(1, { items: duplicateItems }, salesActor),
+    BadRequestException,
+  );
+  assert.equal(transactions, 0);
+});
+
+test('提交版本在创建快照前拒绝存量重复 SKU', async () => {
+  let versionCreates = 0;
+  const tx = {
+    $queryRaw: async () => [{ id: 1 }],
+    quotation: {
+      findFirst: async () => ({
+        id: 1,
+        status: 'DRAFT',
+        items: [{ skuId: 9 }, { skuId: 9 }],
+      }),
+    },
+    quotationVersion: {
+      create: async () => {
+        versionCreates += 1;
+      },
+    },
+  };
+  const service = new QuotationsService({
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  } as unknown as PrismaService);
+
+  await assert.rejects(
+    () => service.changeStatus(1, 'PENDING_CONFIRM', salesActor),
+    BadRequestException,
+  );
+  assert.equal(versionCreates, 0);
+});
+
+test('报价转单地址 DTO 修剪并拒绝纯空白，服务层绕过 DTO 时也失败关闭', async () => {
+  const pipe = new ValidationPipe({ whitelist: true, transform: true });
+  const normalized = await pipe.transform(
+    { address: '  上海市测试路 1 号  ' },
+    { type: 'body', metatype: ConvertQuotationDto },
+  );
+  assert.equal(normalized.address, '上海市测试路 1 号');
+  await assert.rejects(
+    pipe.transform(
+      { address: '   ' },
+      { type: 'body', metatype: ConvertQuotationDto },
+    ),
+  );
+
+  let transactionCalls = 0;
+  const service = new QuotationsService({
+    $transaction: async () => {
+      transactionCalls += 1;
+    },
+  } as unknown as PrismaService);
+  await assert.rejects(
+    () => service.convertAcceptedVersion(7, 1, { address: '   ' }),
+    BadRequestException,
+  );
+  assert.equal(transactionCalls, 0);
 });
 
 test('管理员只能把报价分配给启用中的销售顾问', async () => {

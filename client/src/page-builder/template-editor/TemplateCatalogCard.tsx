@@ -19,6 +19,10 @@ export interface TemplateCatalogCardProps {
   dataTemplateName?: string;
   disabled?: boolean;
   draggable?: boolean;
+  statusLabel?: ReactNode;
+  metadata?: ReactNode;
+  actionLabel?: string;
+  disabledReason?: string;
   trailingAction?: ReactNode;
   onClick?: MouseEventHandler<HTMLDivElement>;
   onDragEnd?: DragEventHandler<HTMLDivElement>;
@@ -78,6 +82,10 @@ export default function TemplateCatalogCard({
   dataTemplateName,
   disabled = false,
   draggable = false,
+  statusLabel,
+  metadata,
+  actionLabel,
+  disabledReason,
   trailingAction,
   onClick,
   onDragEnd,
@@ -155,12 +163,12 @@ export default function TemplateCatalogCard({
       <div
         className={`homepage-editor__template-card-main${controlClassName ? ` ${controlClassName}` : ""}`}
         role="button"
-        tabIndex={disabled ? -1 : 0}
+        tabIndex={0}
         aria-disabled={disabled || undefined}
         aria-pressed={typeof active === "boolean" ? active : undefined}
-        aria-label={ariaLabel}
+        aria-label={disabledReason ? `${ariaLabel}，${disabledReason}` : ariaLabel}
         draggable={draggable && !disabled}
-        onClick={onClick}
+        onClick={disabled ? undefined : onClick}
         onDragStart={handleDragStart}
         onDragEnd={onDragEnd}
         onKeyDown={handleKeyDown}
@@ -180,6 +188,12 @@ export default function TemplateCatalogCard({
           )}
         </span>
         <span className="homepage-editor__template-name">{name}</span>
+        {metadata ? <span className="unified-template-library__metadata">{metadata}</span> : null}
+        {statusLabel ? (
+          <span className="homepage-editor__template-card-status">{statusLabel}</span>
+        ) : null}
+        {actionLabel ? <span className="unified-template-library__primary-action">{actionLabel}</span> : null}
+        {disabledReason ? <span className="unified-template-library__disabled-reason">{disabledReason}</span> : null}
       </div>
       {trailingAction ? (
         <span className="template-editor__catalog-card-action">

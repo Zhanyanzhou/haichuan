@@ -19,11 +19,11 @@ const categories = ["视觉展示", "图文内容", "商品展示", "导航入�
 const commercialPurposes = ["品牌展示", "商品销售", "活动转化", "内容传播", "信任建立"];
 const devices = ["desktop", "mobile"];
 
-assert.equal(contract.contractSchemaVersion, 8, "必须使用模板定义与页面实例分离的合同 schema v8");
+assert.equal(contract.contractSchemaVersion, 9, "必须使用带按轴尺寸兼容语义的合同 schema v9");
 assert.deepEqual(
   contract.editorPolicy,
   {
-    version: 2,
+    version: 3,
     designScope: "template-definition",
     designSurface: "template-workspace",
     fixedObjects: true,
@@ -34,6 +34,13 @@ assert.deepEqual(
     pageInstanceScope: "page-instance",
     contentFieldsRemainInstanceScoped: true,
     viewportGeometry: "independent",
+    sizeCompatibilityPolicy: {
+      version: 1,
+      scope: "node-viewport-axis",
+      axes: ["width", "height"],
+      state: "preserve-until-resize",
+      materializationSource: "mature-renderer-role-root",
+    },
     linkTargetTypes: ["none", "product", "category", "page", "external"],
     externalLinkProtocol: "https-only",
   },

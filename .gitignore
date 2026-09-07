@@ -92,3 +92,15 @@ client/scripts/tmp-*.mjs
 # Codex 本地工作树快照（仅用于当前机器恢复，不属于项目交付物）
 /.codex-tmp/
 client/.codex-tmp/
+
+# 模板设计评审构建产物与一次性只读探查脚本（正式验收记录入 docs/acceptance 与 docs/audits）
+client/dist-option-two-review/
+client/template-audit-probe.mjs
+client/template-design-walkthrough.mjs
+
+# vite.config.ts 的编译副产物（tsc 本机输出，勿入库）
+client/vite.config.js
+client/vite.config.d.ts
+
+# 根目录设计 QA 工作笔记（引用本机临时路径；正式结论沉淀进 docs/）
+/design-qa.md

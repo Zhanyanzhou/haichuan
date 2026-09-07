@@ -31,7 +31,9 @@ test.describe("店铺装修双工作区控制器边界", () => {
     expect(controller).toContain("saveQueueRef");
     expect(controller).toContain("validationRequestRef");
     expect(controller).toContain("expectedUpdatedAt");
-    expect(controller).toContain("pageDocumentApi.restoreRevision");
+    expect(controller).toContain("pageDocumentApi.getRevision");
+    expect(controller).toContain("stageRevisionAsDraft");
+    expect(controller).not.toContain("pageDocumentApi.restoreRevision");
     expect(controller).toContain("pageDocumentApi.rollbackPublication");
     expect(controller).not.toContain("useTemplateEditorSession");
   });
@@ -51,5 +53,47 @@ test.describe("店铺装修双工作区控制器边界", () => {
     expect(workspace).not.toMatch(/dynamicTemplateApi\./);
     expect(workspace).not.toContain("useTemplateEditorSession");
     expect(controller).not.toMatch(/pageDocumentApi\./);
+  });
+
+  test("临时返回只切换工作区，显式关闭才清理模板会话", () => {
+    const controller = readClientSource(
+      "src/page-builder/template-editor/TemplateWorkspaceController.tsx",
+    );
+    const returnStart = controller.indexOf("const returnToPage");
+    const returnEnd = controller.indexOf("return {", returnStart);
+    const returnImplementation = controller.slice(returnStart, returnEnd);
+
+    expect(returnStart).toBeGreaterThan(-1);
+    expect(returnImplementation).toContain('activateWorkspace("page")');
+    expect(returnImplementation).not.toContain(".close()");
+    expect(controller).toContain("closeSession");
+
+    const storeCloseCalls = controller.match(/\.close\(\)/g) ?? [];
+    const closeCommandStart = controller.indexOf("const closeTemplateSession");
+    const closeCommandEnd = controller.indexOf("const requestDirtySessionAction", closeCommandStart);
+    const closeCommand = controller.slice(closeCommandStart, closeCommandEnd);
+    const activateStart = controller.indexOf("const activateTemplateSession");
+    const activateEnd = controller.indexOf("const openSystemDraft", activateStart);
+    const activateImplementation = controller.slice(activateStart, activateEnd);
+    const discardStart = controller.indexOf("const discardChanges");
+    const discardEnd = controller.indexOf("const openImportedDraft", discardStart);
+    const discardImplementation = controller.slice(discardStart, discardEnd);
+
+    expect(storeCloseCalls).toHaveLength(1);
+    expect(activateImplementation).toContain("clearTemplateSessionGeometry(sessionId)");
+    expect(closeCommand).toContain("useTemplateEditorSession.getState().close()");
+    expect(closeCommand).toContain("clearTemplateSessionGeometry(sessionId)");
+    expect(discardImplementation).not.toContain(".close()");
+    expect(discardImplementation).not.toContain(".open(");
+    expect(discardImplementation).toContain("restoreBaseline()");
+    expect(discardImplementation).toContain("clearTemplateSessionGeometry(sessionId)");
+    expect(controller).toContain("clearCanvasGeometryNamespace");
+    expect(controller).not.toContain("clearCanvasGeometry(`template-editor:");
+
+    const toolbar = readClientSource(
+      "src/page-builder/template-editor/TemplateEditorToolbar.tsx",
+    );
+    expect(toolbar.match(/clearCanvasGeometryNamespace/g) ?? []).toHaveLength(2);
+    expect(toolbar).not.toContain("clearCanvasGeometry(`template-editor:");
   });
 });

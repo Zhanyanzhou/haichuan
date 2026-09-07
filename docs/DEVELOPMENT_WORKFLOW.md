@@ -14,7 +14,7 @@
 ### 首次启动
 
 ```bash
-# 1. 首次按三份锁文件分别安装依赖（人工执行，或 AI 获明确批准后执行）
+# 1. 首次按三份锁文件分别安装依赖（授权按 AGENTS.md 判断，不另设审批）
 npm ci
 cd client && npm ci
 cd ../server && npm ci

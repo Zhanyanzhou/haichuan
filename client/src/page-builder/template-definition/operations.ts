@@ -29,8 +29,121 @@ export class DynamicTemplateOperationError extends Error {
   }
 }
 
+export type DynamicTemplateDefinitionCommand =
+  | {
+      type: "replace-definition";
+      label: string;
+      definition: TemplateDefinitionV2;
+    }
+  | {
+      type: "update-definition";
+      label: string;
+      update: (definition: TemplateDefinitionV2) => void;
+    }
+  | {
+      type: "transform-definition";
+      label: string;
+      transform: (definition: TemplateDefinitionV2) => TemplateDefinitionV2;
+    }
+  | {
+      type: "copy-responsive";
+      label: string;
+      nodeId: string;
+      sourceDevice: DynamicTemplateDevice;
+      targetDevice: DynamicTemplateDevice;
+      includeSlotRules?: boolean;
+    };
+
+export type DynamicTemplateCommandResult =
+  | {
+      ok: true;
+      changed: boolean;
+      code: "APPLIED" | "NO_CHANGE";
+      label: string;
+      message: string;
+      definition: TemplateDefinitionV2;
+    }
+  | {
+      ok: false;
+      changed: false;
+      code: string;
+      label: string;
+      message: string;
+    };
+
 function cloneDefinition(definition: TemplateDefinitionV2): TemplateDefinitionV2 {
   return structuredClone(definition);
+}
+
+function sameDefinition(left: TemplateDefinitionV2, right: TemplateDefinitionV2) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * 模板设计的唯一命令执行入口。字段编辑、结构变换和响应式复制都先在克隆上完成，
+ * 再统一检查结构锁；调用方只需根据 result 决定是否写入一次 history 事务。
+ */
+export function executeDynamicTemplateDefinitionCommand(
+  definition: TemplateDefinitionV2,
+  command: DynamicTemplateDefinitionCommand,
+): DynamicTemplateCommandResult {
+  try {
+    let next: TemplateDefinitionV2;
+    if (command.type === "replace-definition") {
+      next = cloneDefinition(command.definition);
+    } else if (command.type === "update-definition") {
+      next = cloneDefinition(definition);
+      command.update(next);
+    } else if (command.type === "transform-definition") {
+      next = command.transform(cloneDefinition(definition));
+    } else {
+      const node = definition.nodes[command.nodeId];
+      if (!node) {
+        throw new DynamicTemplateOperationError("NODE_NOT_FOUND", "要复制响应式设置的节点不存在。");
+      }
+      next = cloneDefinition(definition);
+      next.nodes[command.nodeId].responsive[command.targetDevice] = structuredClone(
+        node.responsive[command.sourceDevice],
+      );
+      if (command.includeSlotRules && node.slotId) {
+        const slot = next.slots[node.slotId];
+        if (!slot) {
+          throw new DynamicTemplateOperationError("SLOT_NOT_FOUND", "节点对应的槽位不存在。");
+        }
+        const sourceKey = command.sourceDevice === "desktop" ? "desktopRules" : "mobileRules";
+        const targetKey = command.targetDevice === "desktop" ? "desktopRules" : "mobileRules";
+        slot[targetKey] = structuredClone(slot[sourceKey]);
+      }
+    }
+
+    const lockViolation = getDynamicTemplateStructureLockViolation(definition, next);
+    if (lockViolation) {
+      return {
+        ok: false,
+        changed: false,
+        code: "STRUCTURE_LOCKED",
+        label: command.label,
+        message: lockViolation,
+      };
+    }
+    const changed = !sameDefinition(definition, next);
+    return {
+      ok: true,
+      changed,
+      code: changed ? "APPLIED" : "NO_CHANGE",
+      label: command.label,
+      message: changed ? `${command.label}已应用。` : `${command.label}没有产生变化。`,
+      definition: next,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      changed: false,
+      code: error instanceof DynamicTemplateOperationError ? error.code : "COMMAND_FAILED",
+      label: command.label,
+      message: error instanceof Error ? error.message : `${command.label}失败。`,
+    };
+  }
 }
 
 function findParentId(definition: TemplateDefinitionV2, nodeId: string): string | null {
@@ -333,6 +446,11 @@ export function removeDynamicTemplateNode(
   }
   const next = cloneDefinition(definition);
   const subtree = collectSubtreeNodeIds(next, nodeId);
+  const requiredSlot = [...subtree].map((id) => next.nodes[id]?.slotId)
+    .map((id) => id ? next.slots[id] : undefined).find((slot) => slot?.required);
+  if (requiredSlot) {
+    throw new DynamicTemplateOperationError("REQUIRED_SLOT_CANNOT_DELETE", `“${requiredSlot.label}”是必填槽位，不能删除该槽位或其所属区域。请先取消必填设置。`);
+  }
   next.nodes[parentId].childIds = next.nodes[parentId].childIds.filter((id) => id !== nodeId);
   for (const childId of subtree) {
     const slotId = next.nodes[childId]?.slotId;

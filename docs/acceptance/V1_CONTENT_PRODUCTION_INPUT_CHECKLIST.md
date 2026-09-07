@@ -4,7 +4,7 @@
 >
 > 填写原则：只提供已确认的业务事实。不要在本文件写入密码、Token、私钥、数据库连接串或客户个人数据；真实凭据只进入获批目标环境的安全配置。
 >
-> 当前只读证据与具体阻塞见 `V1_CONTENT_PRODUCTION_CURRENT_EVIDENCE_2026-08-27.md`。
+> 当前状态与具体阻塞只查 `../CURRENT_STATE.md` 和 `../AI_PROGRAM_LEDGER.md`。2026-08-27 的只读证据已移入 `../archived/2026-09-08-acceptance-history/V1_CONTENT_PRODUCTION_CURRENT_EVIDENCE_2026-08-27.md`，仅用于追溯，不是当前操作手册。
 
 ## 1. 当前分层状态
 

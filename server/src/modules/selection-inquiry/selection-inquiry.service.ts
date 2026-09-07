@@ -12,6 +12,11 @@ import {
 } from "../leads/lead-submission";
 import { LeadsService } from "../leads/leads.service";
 import { UpdateSelectionInquiryDto } from "./dto/update-selection-inquiry.dto";
+import {
+  CUSTOMER_SELECTION_INQUIRY_DEDUPE_SELECT,
+  CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
+  toCustomerSelectionInquirySubmission,
+} from "./customer-selection-inquiry.response";
 
 @Injectable()
 export class SelectionInquiryService {
@@ -187,13 +192,13 @@ export class SelectionInquiryService {
             }
             return transaction.selectionInquiry.findUniqueOrThrow({
               where: { id: existing.selectionInquiryId },
-              include: { items: true },
+              select: CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
             });
           }
         } else {
           const recentInquiries = await transaction.selectionInquiry.findMany({
             where: { phone, createdAt: { gte: recentSince } },
-            include: { items: true },
+            select: CUSTOMER_SELECTION_INQUIRY_DEDUPE_SELECT,
             orderBy: { createdAt: "desc" },
           });
           const existingInquiry = recentInquiries.find((inquiry) =>
@@ -238,7 +243,7 @@ export class SelectionInquiryService {
               },
             },
           },
-          include: { items: true },
+          select: CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
         });
         await transaction.consentRecord.create({
           data: {
@@ -257,7 +262,7 @@ export class SelectionInquiryService {
     );
 
     try {
-      return await create();
+      return toCustomerSelectionInquirySubmission(await create());
     } catch (error) {
       if (!idempotency.idempotencyKeyHash || !isUniqueConstraintError(error)) {
         throw error;
@@ -277,10 +282,11 @@ export class SelectionInquiryService {
         idempotency.submissionFingerprint,
       );
       if (!existing.selectionInquiryId) throw error;
-      return this.prisma.selectionInquiry.findUniqueOrThrow({
+      const inquiry = await this.prisma.selectionInquiry.findUniqueOrThrow({
         where: { id: existing.selectionInquiryId },
-        include: { items: true },
+        select: CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
       });
+      return toCustomerSelectionInquirySubmission(inquiry);
     }
   }
 

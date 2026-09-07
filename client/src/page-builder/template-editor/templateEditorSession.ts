@@ -7,7 +7,11 @@ import type {
   TemplateSaveStatus,
 } from "./types";
 import {
-  getDynamicTemplateStructureLockViolation,
+  executeDynamicTemplateDefinitionCommand,
+  validateDynamicTemplateDefinition,
+  type DynamicTemplateCommandResult,
+  type DynamicTemplateValidationIssue,
+  type DynamicTemplateDefinitionCommand,
   type TemplateDefinitionV2,
 } from "../template-definition";
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
@@ -22,6 +26,9 @@ function cloneDraft(draft: TemplateEditorDraft): TemplateEditorDraft {
 function rebaseDraftPersistence(
   draft: TemplateEditorDraft,
   persistenceSource: TemplateEditorDraft,
+  options: { historyRestore: "preserve-target" | "from-source" } = {
+    historyRestore: "preserve-target",
+  },
 ): TemplateEditorDraft {
   const rebased = cloneDraft(draft);
   rebased.sourceType = persistenceSource.sourceType;
@@ -39,6 +46,13 @@ function rebaseDraftPersistence(
   } else {
     delete rebased.requiresContractNormalization;
   }
+  if (options.historyRestore === "from-source") {
+    if (persistenceSource.historyRestore) {
+      rebased.historyRestore = structuredClone(persistenceSource.historyRestore);
+    } else {
+      delete rebased.historyRestore;
+    }
+  }
   return rebased;
 }
 
@@ -47,7 +61,7 @@ function sameDraft(left: TemplateEditorDraft | null, right: TemplateEditorDraft 
 }
 
 function statusAfterDraftChange(current: TemplateSaveStatus): TemplateSaveStatus {
-  return current === "conflict" ? "conflict" : "idle";
+  return current === "conflict" || current === "permission-error" ? current : "idle";
 }
 
 function createSessionId() {
@@ -57,7 +71,7 @@ function createSessionId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function resolveContractRoleForDevice(
+export function resolveContractRoleForDevice(
   definition: TemplateDefinitionV2,
   selection: { nodeId: string; roleId: string },
   device: TemplateEditorDevice,
@@ -117,7 +131,32 @@ function repairTemplateEditorSelection(
   };
 }
 
+function findNearestBaselineNodeId(
+  currentDefinition: TemplateDefinitionV2,
+  baselineDefinition: TemplateDefinitionV2,
+  selectedNodeId: string | null,
+) {
+  if (!selectedNodeId) return baselineDefinition.rootNodeId;
+  const parentByNodeId = new Map<string, string>();
+  for (const [parentId, node] of Object.entries(currentDefinition.nodes)) {
+    for (const childId of node.childIds) parentByNodeId.set(childId, parentId);
+  }
+  const visited = new Set<string>();
+  let candidate: string | undefined = selectedNodeId;
+  while (candidate && !visited.has(candidate)) {
+    if (baselineDefinition.nodes[candidate]) return candidate;
+    visited.add(candidate);
+    candidate = parentByNodeId.get(candidate);
+  }
+  return baselineDefinition.rootNodeId;
+}
+
 export type TemplateSaveReconcileResult = "saved" | "newer-changes" | "stale-session";
+
+export type TemplateCompatibilityRecoveryCancelResult =
+  | { status: "restored" }
+  | { status: "source-invalid"; issues: DynamicTemplateValidationIssue[] }
+  | { status: "unavailable" };
 
 interface TemplateEditorSessionState {
   sessionId: string | null;
@@ -132,13 +171,26 @@ interface TemplateEditorSessionState {
   dirty: boolean;
   previewMode: boolean;
   previewScenario: DynamicTemplatePreviewScenario;
+  canvasZoom: number | null;
   saveStatus: TemplateSaveStatus;
+  lastCommandResult: DynamicTemplateCommandResult | null;
   open: (draft: TemplateEditorDraft, options?: { isNew?: boolean }) => void;
   close: () => void;
+  restoreBaseline: () => boolean;
   commitDraft: (draft: TemplateEditorDraft, historyBaseline?: TemplateEditorDraft) => void;
   previewDraft: (draft: TemplateEditorDraft) => void;
   setName: (name: string) => void;
-  setDynamicDefinition: (definition: TemplateDefinitionV2) => void;
+  executeCommand: (command: DynamicTemplateDefinitionCommand) => DynamicTemplateCommandResult;
+  setDynamicDefinition: (definition: TemplateDefinitionV2) => DynamicTemplateCommandResult;
+  stageCompatibilityRecovery: (input: {
+    definition: TemplateDefinitionV2;
+    originalDefinition: unknown;
+    sourceRevision: number;
+    sourceChecksum: string;
+  }) => DynamicTemplateCommandResult;
+  cancelCompatibilityRecovery: () => TemplateCompatibilityRecoveryCancelResult;
+  resumeCompatibilityRecovery: () => boolean;
+  clearLastCommandResult: () => void;
   setDynamicVersionNote: (versionNote: string) => void;
   selectObject: (objectId: string | null) => void;
   selectContractRole: (nodeId: string, roleId: string) => void;
@@ -146,6 +198,7 @@ interface TemplateEditorSessionState {
   setContentLayer: (contentLayer: TemplateEditorContentLayer) => void;
   setPreviewMode: (previewMode: boolean) => void;
   setPreviewScenario: (previewScenario: DynamicTemplatePreviewScenario) => void;
+  setCanvasZoom: (canvasZoom: number | null) => void;
   setSaveStatus: (saveStatus: TemplateSaveStatus) => void;
   undo: () => void;
   redo: () => void;
@@ -171,10 +224,12 @@ const EMPTY_STATE = {
   dirty: false,
   previewMode: false,
   previewScenario: "default" as const,
+  canvasZoom: null as number | null,
   saveStatus: "idle" as const,
+  lastCommandResult: null as DynamicTemplateCommandResult | null,
 };
 
-export const useTemplateEditorSession = create<TemplateEditorSessionState>((set) => ({
+export const useTemplateEditorSession = create<TemplateEditorSessionState>((set, get) => ({
   ...EMPTY_STATE,
   open: (draft, options) =>
     set((state) => ({
@@ -187,6 +242,39 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
       dirty: options?.isNew === true,
     })),
   close: () => set({ ...EMPTY_STATE }),
+  restoreBaseline: () => {
+    const state = get();
+    if (!state.draft || !state.baseline) return false;
+    const selectedNodeId = state.selectedContractRole?.nodeId ?? state.selectedObjectId;
+    const nearestNodeId = findNearestBaselineNodeId(
+      state.draft.definition,
+      state.baseline.definition,
+      selectedNodeId,
+    );
+    const selectedContractRole = nearestNodeId === state.selectedContractRole?.nodeId
+      ? state.selectedContractRole
+      : null;
+    const baseline = cloneDraft(state.baseline);
+    set({
+      draft: cloneDraft(baseline),
+      baseline,
+      ...repairTemplateEditorSelection(
+        baseline.definition,
+        nearestNodeId,
+        selectedContractRole,
+        state.device,
+      ),
+      contentLayer: "preview",
+      historyPast: [],
+      historyFuture: [],
+      dirty: false,
+      previewMode: false,
+      previewScenario: "default",
+      saveStatus: "idle",
+      lastCommandResult: null,
+    });
+    return true;
+  },
   commitDraft: (draft, historyBaseline) =>
     set((state) => {
       if (!state.draft) return state;
@@ -234,12 +322,117 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
       definition: { ...state.draft.definition, name },
     });
   },
-  setDynamicDefinition: (definition) => {
-    const state = useTemplateEditorSession.getState();
-    if (!state.draft) return;
-    if (getDynamicTemplateStructureLockViolation(state.draft.definition, definition)) return;
-    state.commitDraft({ ...state.draft, definition: structuredClone(definition) });
+  executeCommand: (command) => {
+    const state = get();
+    if (!state.draft) {
+      const result: DynamicTemplateCommandResult = {
+        ok: false,
+        changed: false,
+        code: "NO_ACTIVE_DRAFT",
+        label: command.label,
+        message: "当前没有可编辑的模板草稿。",
+      };
+      set({ lastCommandResult: result });
+      return result;
+    }
+    const result = executeDynamicTemplateDefinitionCommand(state.draft.definition, command);
+    set({ lastCommandResult: result });
+    if (result.ok && result.changed) {
+      state.commitDraft({ ...state.draft, definition: result.definition });
+    }
+    return result;
   },
+  setDynamicDefinition: (definition) => get().executeCommand({
+    type: "replace-definition",
+    label: "更新模板",
+    definition,
+  }),
+  stageCompatibilityRecovery: ({
+    definition,
+    originalDefinition,
+    sourceRevision,
+    sourceChecksum,
+  }) => {
+    const state = get();
+    if (!state.draft) {
+      const result: DynamicTemplateCommandResult = {
+        ok: false,
+        changed: false,
+        code: "NO_ACTIVE_DRAFT",
+        label: "载入系统修复方案",
+        message: "当前没有可编辑的模板草稿。",
+      };
+      set({ lastCommandResult: result });
+      return result;
+    }
+    const result = executeDynamicTemplateDefinitionCommand(state.draft.definition, {
+      type: "replace-definition",
+      label: "载入系统修复方案",
+      definition,
+    });
+    set({ lastCommandResult: result });
+    if (!result.ok) return result;
+    state.commitDraft({
+      ...state.draft,
+      definition: result.definition,
+      compatibilityRecovery: {
+        status: "pending",
+        originalDefinition: structuredClone(originalDefinition),
+        originalVersionNote: state.draft.versionNote,
+        sourceRevision,
+        sourceChecksum,
+      },
+    });
+    return result;
+  },
+  cancelCompatibilityRecovery: () => {
+    const state = get();
+    const recovery = state.draft?.compatibilityRecovery;
+    if (!state.draft || !recovery) return { status: "unavailable" };
+    const validation = validateDynamicTemplateDefinition(recovery.originalDefinition);
+    if (!validation.valid || !validation.definition) {
+      state.commitDraft({
+        ...state.draft,
+        compatibilityRecovery: { ...recovery, status: "source-invalid" },
+      });
+      return { status: "source-invalid", issues: validation.issues };
+    }
+    const draftBeforeRestore = cloneDraft(state.draft);
+    const restoredDefinition = validation.definition;
+    const restored = cloneDraft(draftBeforeRestore);
+    restored.definition = restoredDefinition;
+    restored.versionNote = recovery.originalVersionNote;
+    delete restored.compatibilityRecovery;
+    // 取消修复即回到原草稿本身：把恢复结果设为干净基线，避免把“恢复原状”
+    // 当作未保存修改去拦截后续切换或关闭；撤销历史保留，仍可回到修复方案。
+    set((state) => ({
+      draft: cloneDraft(restored),
+      baseline: cloneDraft(restored),
+      ...repairTemplateEditorSelection(
+        restoredDefinition,
+        state.selectedObjectId,
+        state.selectedContractRole,
+        state.device,
+      ),
+      historyPast: [...state.historyPast, draftBeforeRestore].slice(-HISTORY_LIMIT),
+      historyFuture: [],
+      dirty: false,
+      saveStatus: "idle",
+      lastCommandResult: null,
+    }));
+    return { status: "restored" };
+  },
+  resumeCompatibilityRecovery: () => {
+    const state = get();
+    const recovery = state.draft?.compatibilityRecovery;
+    if (!state.draft || !recovery || recovery.status === "pending") return false;
+    state.commitDraft({
+      ...state.draft,
+      compatibilityRecovery: { ...recovery, status: "pending" },
+    });
+    return true;
+  },
+  clearLastCommandResult: () => set({ lastCommandResult: null }),
   setDynamicVersionNote: (versionNote) => {
     const state = useTemplateEditorSession.getState();
     if (!state.draft) return;
@@ -264,6 +457,7 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
   setContentLayer: (contentLayer) => set({ contentLayer }),
   setPreviewMode: (previewMode) => set({ previewMode }),
   setPreviewScenario: (previewScenario) => set({ previewScenario }),
+  setCanvasZoom: (canvasZoom) => set({ canvasZoom }),
   setSaveStatus: (saveStatus) => set({ saveStatus }),
   undo: () =>
     set((state) => {
@@ -331,6 +525,12 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
         || state.draft.definition.templateId !== requestedDraft.definition.templateId
       ) return state;
 
+      const completedRecoveryOverwrite = Boolean(
+        !asCopy && requestedDraft.compatibilityRecovery,
+      );
+      const createsNewIdentity = asCopy
+        || savedDraft.definition.templateId !== requestedDraft.definition.templateId;
+
       if (sameDraft(state.draft, requestedDraft)) {
         result = "saved";
         const nextDraft = cloneDraft(savedDraft);
@@ -345,14 +545,23 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
           ),
           dirty: false,
           saveStatus: "success",
+          // 新身份只继承已保存内容；来源身份的历史不能与副本持久化信息混用。
+          ...(createsNewIdentity || completedRecoveryOverwrite
+            ? { historyPast: [], historyFuture: [] }
+            : {}),
         };
       }
 
       result = "newer-changes";
-      if (asCopy || savedDraft.definition.templateId !== requestedDraft.definition.templateId) {
+      if (createsNewIdentity) {
         return { saveStatus: "idle" };
       }
-      const rebasedDraft = rebaseDraftPersistence(state.draft, savedDraft);
+      const rebasedDraft = rebaseDraftPersistence(state.draft, savedDraft, {
+        historyRestore: "from-source",
+      });
+      if (completedRecoveryOverwrite) {
+        delete rebasedDraft.compatibilityRecovery;
+      }
       return {
         draft: rebasedDraft,
         baseline: cloneDraft(savedDraft),
@@ -364,6 +573,9 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set)
         ),
         dirty: !sameDraft(rebasedDraft, savedDraft),
         saveStatus: "idle",
+        ...(completedRecoveryOverwrite
+          ? { historyPast: [], historyFuture: [] }
+          : {}),
       };
     });
     return result;

@@ -15,6 +15,7 @@ import {
 import { definitionFixture } from "./dynamic-template-test-fixture";
 import { calculateDynamicTemplateDefinitionChecksum } from "./dynamic-template-definition-integrity";
 import { PageModulesService } from "./page-modules.service";
+import { makeFormalPageMetadata } from "./page-modules.spec-fixtures";
 import type {
   DynamicTemplateNodeType,
   DynamicTemplateSlotType,
@@ -457,6 +458,8 @@ test("成熟内容模板页面实例提取素材与稳定业务引用，且不�
 
 test("页面读取只水合实例引用的正式精确版本且不会持久化水合缓存", async () => {
   const definition = definitionFixture();
+  definition.metadata.visualRole = "primary-stage";
+  definition.metadata.headerCompatibility = ["overlay-light"];
   const storedPuckData = {
     content: [{ type: DYNAMIC_TEMPLATE_BLOCK_TYPE, props: instanceProps() }],
     root: { props: {} },
@@ -481,10 +484,7 @@ test("页面读取只水合实例引用的正式精确版本且不会持久化�
         documentId: 9,
         puckData: storedPuckData,
         metadata: {
-          seoTitle: "动态模板页面",
-          seoDescription: "动态模板精确版本水合测试。",
-          ogImage: "/images/og.jpg",
-          contentOwner: "测试",
+          ...makeFormalPageMetadata(storedPuckData),
           [CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY]:
             createContentTemplatePublicationAttestation(),
         },
@@ -522,8 +522,9 @@ test("页面读取只水合实例引用的正式精确版本且不会持久化�
 
   storedDefinitionChecksum = "0".repeat(64);
   const corrupted = await service.getPublishedPageDocument("home");
-  const corruptedPuckData = corrupted?.puckData as Record<string, unknown>;
-  assert.deepEqual(corruptedPuckData[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY], {});
+  assert.equal(corrupted?.status, "INVALID");
+  assert.equal(corrupted?.invalidReason, "publication-revalidation-required");
+  assert.equal("puckData" in (corrupted ?? {}), false);
 
   const normalize = (service as unknown as {
     normalizePageDocumentPuckData(value: unknown): Record<string, unknown>;

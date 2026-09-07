@@ -37,6 +37,30 @@ jobs:
       run_url: ${{ steps.quality.outputs.run_url }}
       head_sha: ${{ steps.quality.outputs.head_sha }}
     steps:
+      - name: 配置 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: 拒绝未受保护的发布来源
+        shell: bash
+        env:
+          DEFAULT_BRANCH_REF: refs/heads/${{ github.event.repository.default_branch }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          if [ "$RELEASE_REF" = "$DEFAULT_BRANCH_REF" ]; then
+            exit 0
+          fi
+          case "$RELEASE_REF" in
+            refs/heads/release/*) ;;
+            *) echo "RELEASE_REF_NOT_DEFAULT_OR_RELEASE_BRANCH" >&2; exit 1 ;;
+          esac
+          if [ "$RELEASE_REF_PROTECTED" != "true" ]; then
+            echo "RELEASE_REF_NOT_PROTECTED" >&2
+            exit 1
+          fi
+
       - name: 查找同一 SHA 的成功质量门禁
         id: quality
         shell: bash
@@ -82,6 +106,11 @@ jobs:
       - name: 配置 Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
+      - name: 配置 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
       - name: 登录 GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
@@ -96,6 +125,7 @@ jobs:
           echo "migration_sha=$(node scripts/verify-migration-integrity.mjs --print-bundle-sha)" >> "$GITHUB_OUTPUT"
           echo "server_image=ghcr.io/${GITHUB_REPOSITORY,,}-server" >> "$GITHUB_OUTPUT"
           echo "client_image=ghcr.io/${GITHUB_REPOSITORY,,}-client" >> "$GITHUB_OUTPUT"
+          echo "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}-operations" >> "$GITHUB_OUTPUT"
 
       - name: 构建并推送服务端镜像
         id: server
@@ -132,7 +162,62 @@ jobs:
             VITE_PUBLIC_SITE_ORIGIN=${{ inputs.public_site_origin }}
             VITE_ANALYTICS_ENABLED=${{ inputs.analytics_enabled }}
 
+      - name: 构建并推送运维与备份镜像
+        id: operations
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: server
+          file: server/Dockerfile
+          target: operations
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.release.outputs.operations_image }}:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
+            BUILD_SOURCE=${{ github.server_url }}/${{ github.repository }}
+            MIGRATION_BUNDLE_SHA256=${{ steps.release.outputs.migration_sha }}
+
+      - name: 离线核对运维镜像恢复入口
+        shell: bash
+        env:
+          OPERATIONS_REFERENCE: ${{ steps.release.outputs.operations_image }}@${{ steps.operations.outputs.digest }}
+          MIGRATION_SHA: ${{ steps.release.outputs.migration_sha }}
+        run: |
+          fail() {
+            echo "::error::$1" >&2
+            exit 1
+          }
+          docker pull "$OPERATIONS_REFERENCE"
+          docker run --rm --network none --entrypoint /bin/bash "$OPERATIONS_REFERENCE" -lc '
+            set -eu
+            fail() {
+              echo "$1" >&2
+              exit 1
+            }
+            for executable in \
+              /usr/local/bin/backup.sh \
+              /usr/local/bin/check-backup-health.sh \
+              /usr/local/bin/restore.sh \
+              /usr/local/bin/restore-drill.sh \
+              /usr/local/bin/prune-backups.sh
+            do
+              test -f "$executable" || fail "OPERATIONS_RUNTIME_EXECUTABLE_INVALID:$executable:file"
+              test -x "$executable" || fail "OPERATIONS_RUNTIME_EXECUTABLE_INVALID:$executable:executable"
+              test "$(stat -c "%U:%G:%a" "$executable")" = "root:root:555" || fail "OPERATIONS_RUNTIME_EXECUTABLE_INVALID:$executable:permissions"
+              bash -n "$executable" || fail "OPERATIONS_RUNTIME_EXECUTABLE_INVALID:$executable:syntax"
+            done
+            command -v mariadb >/dev/null || fail "OPERATIONS_RUNTIME_TOOL_MISSING:mariadb"
+            command -v mysqladmin >/dev/null || fail "OPERATIONS_RUNTIME_TOOL_MISSING:mysqladmin"
+            ./node_modules/.bin/prisma --version >/dev/null || fail "OPERATIONS_RUNTIME_TOOL_MISSING:prisma"
+          '
+          test "$(docker image inspect "$OPERATIONS_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.component"}}{{end}}')" = "operations" || fail "OPERATIONS_RUNTIME_LABEL_INVALID:component"
+          test "$(docker image inspect "$OPERATIONS_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.migration-bundle-sha256"}}{{end}}')" = "$MIGRATION_SHA" || fail "OPERATIONS_RUNTIME_LABEL_INVALID:migration"
+          test "$(docker image inspect "$OPERATIONS_REFERENCE" --format '{{with .Config.Labels}}{{index . "org.opencontainers.image.revision"}}{{end}}')" = "$GITHUB_SHA" || fail "OPERATIONS_RUNTIME_LABEL_INVALID:revision"
+
       - name: 为服务端制品生成签名证明
+        id: server-provenance
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
         with:
           subject-name: ${{ steps.release.outputs.server_image }}
@@ -140,11 +225,114 @@ jobs:
           push-to-registry: true
 
       - name: 为客户端制品生成签名证明
+        id: client-provenance
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
         with:
           subject-name: ${{ steps.release.outputs.client_image }}
           subject-digest: ${{ steps.client.outputs.digest }}
           push-to-registry: true
+
+      - name: 为运维与备份制品生成签名证明
+        id: operations-provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-name: ${{ steps.release.outputs.operations_image }}
+          subject-digest: ${{ steps.operations.outputs.digest }}
+          push-to-registry: true
+
+      - name: 从 registry 提取并校验三镜像 SPDX SBOM
+        shell: bash
+        env:
+          SERVER_REFERENCE: ${{ steps.release.outputs.server_image }}@${{ steps.server.outputs.digest }}
+          CLIENT_REFERENCE: ${{ steps.release.outputs.client_image }}@${{ steps.client.outputs.digest }}
+          OPERATIONS_REFERENCE: ${{ steps.release.outputs.operations_image }}@${{ steps.operations.outputs.digest }}
+        run: |
+          mkdir -p release-output/sbom
+          docker buildx imagetools inspect "$SERVER_REFERENCE" --format '{{ json .SBOM }}' > release-output/sbom/server.raw.json
+          docker buildx imagetools inspect "$CLIENT_REFERENCE" --format '{{ json .SBOM }}' > release-output/sbom/client.raw.json
+          docker buildx imagetools inspect "$OPERATIONS_REFERENCE" --format '{{ json .SBOM }}' > release-output/sbom/operations.raw.json
+          node - <<'NODE'
+          const fs = require("node:fs");
+          for (const component of ["server", "client", "operations"]) {
+            const rawPath = `release-output/sbom/${component}.raw.json`;
+            const raw = JSON.parse(fs.readFileSync(rawPath, "utf8"));
+            const sbom = raw?.SPDX ?? raw?.["linux/amd64"]?.SPDX;
+            if (sbom?.spdxVersion !== "SPDX-2.3" || sbom?.SPDXID !== "SPDXRef-DOCUMENT") {
+              throw new Error(`RELEASE_SBOM_INVALID:${component}`);
+            }
+            fs.writeFileSync(`release-output/sbom/${component}.spdx.json`, `${JSON.stringify(sbom)}\n`);
+            fs.rmSync(rawPath);
+          }
+          NODE
+
+      - name: 为服务端 SBOM 生成签名证明
+        id: server-sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-name: ${{ steps.release.outputs.server_image }}
+          subject-digest: ${{ steps.server.outputs.digest }}
+          sbom-path: release-output/sbom/server.spdx.json
+          create-storage-record: false
+          push-to-registry: true
+
+      - name: 为客户端 SBOM 生成签名证明
+        id: client-sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-name: ${{ steps.release.outputs.client_image }}
+          subject-digest: ${{ steps.client.outputs.digest }}
+          sbom-path: release-output/sbom/client.spdx.json
+          create-storage-record: false
+          push-to-registry: true
+
+      - name: 为运维与备份 SBOM 生成签名证明
+        id: operations-sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-name: ${{ steps.release.outputs.operations_image }}
+          subject-digest: ${{ steps.operations.outputs.digest }}
+          sbom-path: release-output/sbom/operations.spdx.json
+          create-storage-record: false
+          push-to-registry: true
+
+      - name: 验证三镜像 provenance 与 SBOM 签名身份
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVER_REFERENCE: ${{ steps.release.outputs.server_image }}@${{ steps.server.outputs.digest }}
+          CLIENT_REFERENCE: ${{ steps.release.outputs.client_image }}@${{ steps.client.outputs.digest }}
+          OPERATIONS_REFERENCE: ${{ steps.release.outputs.operations_image }}@${{ steps.operations.outputs.digest }}
+          SERVER_PROVENANCE_BUNDLE: ${{ steps.server-provenance.outputs.bundle-path }}
+          CLIENT_PROVENANCE_BUNDLE: ${{ steps.client-provenance.outputs.bundle-path }}
+          OPERATIONS_PROVENANCE_BUNDLE: ${{ steps.operations-provenance.outputs.bundle-path }}
+          SERVER_SBOM_BUNDLE: ${{ steps.server-sbom.outputs.bundle-path }}
+          CLIENT_SBOM_BUNDLE: ${{ steps.client-sbom.outputs.bundle-path }}
+          OPERATIONS_SBOM_BUNDLE: ${{ steps.operations-sbom.outputs.bundle-path }}
+        run: |
+          signer_workflow="github.com/${GITHUB_REPOSITORY,,}/.github/workflows/release-images.yml"
+          verify_image() {
+            reference="$1"
+            provenance_bundle="$2"
+            sbom_bundle="$3"
+            gh attestation verify "oci://$reference" \
+              --repo "$GITHUB_REPOSITORY" \
+              --bundle "$provenance_bundle" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" \
+              --deny-self-hosted-runners
+            gh attestation verify "oci://$reference" \
+              --repo "$GITHUB_REPOSITORY" \
+              --bundle "$sbom_bundle" \
+              --signer-workflow "$signer_workflow" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" \
+              --deny-self-hosted-runners \
+              --predicate-type "https://spdx.dev/Document/v2.3"
+          }
+          verify_image "$SERVER_REFERENCE" "$SERVER_PROVENANCE_BUNDLE" "$SERVER_SBOM_BUNDLE"
+          verify_image "$CLIENT_REFERENCE" "$CLIENT_PROVENANCE_BUNDLE" "$CLIENT_SBOM_BUNDLE"
+          verify_image "$OPERATIONS_REFERENCE" "$OPERATIONS_PROVENANCE_BUNDLE" "$OPERATIONS_SBOM_BUNDLE"
 
       - name: 生成不可变发布清单
         shell: bash
@@ -153,19 +341,45 @@ jobs:
           SERVER_IMAGE_DIGEST: ${{ steps.server.outputs.digest }}
           CLIENT_IMAGE_NAME: ${{ steps.release.outputs.client_image }}
           CLIENT_IMAGE_DIGEST: ${{ steps.client.outputs.digest }}
+          OPERATIONS_IMAGE_NAME: ${{ steps.release.outputs.operations_image }}
+          OPERATIONS_IMAGE_DIGEST: ${{ steps.operations.outputs.digest }}
           MIGRATION_SHA: ${{ steps.release.outputs.migration_sha }}
           QUALITY_RUN_ID: ${{ needs.quality-proof.outputs.run_id }}
           QUALITY_RUN_URL: ${{ needs.quality-proof.outputs.run_url }}
           QUALITY_HEAD_SHA: ${{ needs.quality-proof.outputs.head_sha }}
         run: |
           mkdir -p release-output
-          node -e 'const fs=require("node:fs"); const manifest={schemaVersion:2,gitSha:process.env.GITHUB_SHA,migrationBundleSha256:process.env.MIGRATION_SHA,source:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`,qualityGate:{workflow:"quality.yml",runId:Number(process.env.QUALITY_RUN_ID),runUrl:process.env.QUALITY_RUN_URL,headSha:process.env.QUALITY_HEAD_SHA,event:"push",conclusion:"success"},server:{image:process.env.SERVER_IMAGE_NAME,digest:process.env.SERVER_IMAGE_DIGEST,reference:`${process.env.SERVER_IMAGE_NAME}@${process.env.SERVER_IMAGE_DIGEST}`},client:{image:process.env.CLIENT_IMAGE_NAME,digest:process.env.CLIENT_IMAGE_DIGEST,reference:`${process.env.CLIENT_IMAGE_NAME}@${process.env.CLIENT_IMAGE_DIGEST}`}}; fs.writeFileSync("release-output/release-manifest.json",`${JSON.stringify(manifest,null,2)}\n`);'
+          node -e 'const fs=require("node:fs"); const image=(name,digest)=>({image:name,digest,reference:`${name}@${digest}`,provenancePredicateType:"https://slsa.dev/provenance/v1",sbomPredicateType:"https://spdx.dev/Document/v2.3"}); const repository=process.env.GITHUB_REPOSITORY.toLowerCase(); const operations={...image(process.env.OPERATIONS_IMAGE_NAME,process.env.OPERATIONS_IMAGE_DIGEST),runtimeExecutables:["/usr/local/bin/backup.sh","/usr/local/bin/check-backup-health.sh","/usr/local/bin/restore.sh","/usr/local/bin/restore-drill.sh","/usr/local/bin/prune-backups.sh"]}; const manifest={schemaVersion:3,gitSha:process.env.GITHUB_SHA,migrationBundleSha256:process.env.MIGRATION_SHA,source:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`,qualityGate:{workflow:"quality.yml",runId:Number(process.env.QUALITY_RUN_ID),runUrl:process.env.QUALITY_RUN_URL,headSha:process.env.QUALITY_HEAD_SHA,event:"push",conclusion:"success"},attestationPolicy:{signerWorkflow:`github.com/${repository}/.github/workflows/release-images.yml`,sourceDigest:process.env.GITHUB_SHA,imageAttestationsVerified:true,provenancePredicateType:"https://slsa.dev/provenance/v1",sbomPredicateType:"https://spdx.dev/Document/v2.3",manifestPredicateType:"https://slsa.dev/provenance/v1"},server:image(process.env.SERVER_IMAGE_NAME,process.env.SERVER_IMAGE_DIGEST),client:image(process.env.CLIENT_IMAGE_NAME,process.env.CLIENT_IMAGE_DIGEST),operations}; fs.writeFileSync("release-output/release-manifest.json",`${JSON.stringify(manifest,null,2)}\n`);'
           node scripts/verify-release-images.mjs --manifest release-output/release-manifest.json
+
+      - name: 为发布清单生成签名证明
+        id: manifest-attestation
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: release-output/release-manifest.json
+
+      - name: 验证发布清单签名身份并保存离线 bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_BUNDLE: ${{ steps.manifest-attestation.outputs.bundle-path }}
+        run: |
+          signer_workflow="github.com/${GITHUB_REPOSITORY,,}/.github/workflows/release-images.yml"
+          gh attestation verify release-output/release-manifest.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --bundle "$MANIFEST_BUNDLE" \
+            --signer-workflow "$signer_workflow" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners
+          cp "$MANIFEST_BUNDLE" release-output/release-manifest.attestation.json
 
       - name: 上传发布清单
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: release-manifest-${{ github.sha }}
-          path: release-output/release-manifest.json
+          path: |
+            release-output/release-manifest.json
+            release-output/release-manifest.attestation.json
           if-no-files-found: error
           retention-days: 90

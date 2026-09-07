@@ -61,7 +61,9 @@ function Wait-Http([string]$url, [string]$label, [int]$timeoutSeconds = 180) {
   $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
   while ([DateTime]::UtcNow -lt $deadline) {
     try {
-      $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3
+      # 生产 Nginx 只在 TLS 代理已经声明 https 时提供页面；隔离 QA 没有额外启动
+      # TLS 终止层，因此显式模拟代理头，避免把预期的 308 误判为服务未就绪。
+      $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3 -Headers @{ "X-Forwarded-Proto" = "https" }
       if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 400) {
         Write-Output "$label status=$($response.StatusCode)"
         return
@@ -230,6 +232,7 @@ try {
   $env:PAGE_BUILDER_REAL_QA = "true"
   $env:PAGE_BUILDER_REAL_API_BASE_URL = "http://127.0.0.1:3101/api"
   $env:PLAYWRIGHT_BASE_URL = "http://127.0.0.1:5175"
+  $env:PLAYWRIGHT_FORWARDED_PROTO = "https"
   $env:PAGE_BUILDER_QA_USERNAME = $qaUsername
   $env:PAGE_BUILDER_QA_PASSWORD = $qaPassword
 

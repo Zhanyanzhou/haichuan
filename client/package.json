@@ -12,7 +12,8 @@
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:a11y": "playwright test public-accessibility.spec.ts --project=public-chromium"
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.6",
@@ -33,6 +34,7 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.62.1",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",

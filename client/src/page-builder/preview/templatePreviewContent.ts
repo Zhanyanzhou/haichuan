@@ -87,6 +87,8 @@ export const TEMPLATE_PREVIEW_CONTENT: Record<RegisteredContentTemplateKey, Prev
     title: "线条的秩序",
     subtitle: "一幅完整影像之后，只留下必要的说明。",
     buttonText: "查看系列",
+    targetType: "page",
+    linkUrl: "/contact",
     template: "captionBelow",
     overlayPreset: "none",
     desktopFocusX: 50,

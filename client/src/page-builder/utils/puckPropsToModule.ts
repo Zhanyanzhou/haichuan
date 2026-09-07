@@ -547,7 +547,10 @@ export function convertPuckProps<T extends object>(
           loop: props.loop,
           muted: props.muted,
           showControls: props.showControls,
-          aspectRatio: props.aspectRatio || "16:9",
+          // 空值保留为“未覆盖”，由 Renderer 按当前端读取合同默认比例。
+          aspectRatio: typeof props.aspectRatio === "string" && props.aspectRatio.trim()
+            ? props.aspectRatio
+            : undefined,
           focusX: props.focusX ?? 50,
           focusY: props.focusY ?? 50,
         },

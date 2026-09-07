@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Tag, message } from "antd";
+import { App as AntdApp, Button, Tag } from "antd";
 import { DatabaseOutlined, LoadingOutlined } from "@ant-design/icons";
 import { unwrapResponse } from "@/utils/unwrap";
-import { AdminLoadingState } from "@/components/common/AdminDataStates";
+import AdminPageHeader from "@/components/common/AdminPageHeader";
+import {
+  AdminEmptyState,
+  AdminErrorState,
+  AdminLoadingState,
+} from "@/components/common/AdminDataStates";
 import { settingsApi } from "@/services/api";
 
 /** 服务端 /settings/backup 真实返回（读 backup 容器产物目录） */
+type BackupExecutionStatus = "SUCCESS" | "WARNING" | "FAILED" | "UNKNOWN" | "INVALID";
+
 interface BackupStatus {
   lastBackup: string | null;
   autoBackup: boolean;
@@ -17,7 +24,7 @@ interface BackupStatus {
   markerPresent?: boolean;
   markerValid?: boolean;
   markerMatchesLatest?: boolean;
-  executionStatus?: "SUCCESS" | "WARNING" | "FAILED" | "UNKNOWN" | "INVALID";
+  executionStatus?: string | null;
   lastAttemptFinishedAt?: string | null;
   lastExitCode?: number | null;
   errorCode?: string | null;
@@ -37,33 +44,53 @@ function formatTime(value: string): string {
   return d.toLocaleString("zh-CN", { hour12: false });
 }
 
+const EXECUTION_STATUS_META: Record<
+  BackupExecutionStatus,
+  { label: string; color: string }
+> = {
+  SUCCESS: { label: "已成功", color: "green" },
+  WARNING: { label: "需检查", color: "gold" },
+  FAILED: { label: "已失败", color: "red" },
+  UNKNOWN: { label: "状态未知", color: "default" },
+  INVALID: { label: "状态无效", color: "red" },
+};
+
+function getExecutionStatusMeta(value: unknown) {
+  if (
+    typeof value === "string"
+    && Object.prototype.hasOwnProperty.call(EXECUTION_STATUS_META, value)
+  ) {
+    return EXECUTION_STATUS_META[value as BackupExecutionStatus];
+  }
+  return EXECUTION_STATUS_META.UNKNOWN;
+}
+
 export default function Settings() {
+  const { message } = AntdApp.useApp();
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<BackupStatus | null>(null);
   // 区分"确认无备份"与"查询失败"：失败时不得回落成"暂无备份产物"的安全假象
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadError, setLoadError] = useState<unknown | null>(null);
+  const executionStatusMeta = getExecutionStatusMeta(status?.executionStatus);
 
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = useCallback(async (announce = false) => {
     setChecking(true);
-    setLoadFailed(false);
+    setLoadError(null);
     try {
       const res = await settingsApi.getBackupStatus();
       // 展示服务端真实状态：读 backup 容器产物目录，不假报成功
       const payload = unwrapResponse<BackupStatus>(res) ?? null;
       setStatus(payload);
-      if (payload?.lastBackup) {
-        message.success(`最近备份：${formatTime(payload.lastBackup)}`);
-      } else {
-        message.warning(payload?.message || "暂无备份产物");
+      if (announce) {
+        message.success("备份状态已更新");
       }
-    } catch {
+    } catch (error: unknown) {
       setStatus(null);
-      setLoadFailed(true);
-      message.error("查询备份状态失败，请检查后端服务");
+      setLoadError(error);
     } finally {
       setChecking(false);
     }
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     void fetchStatus();
@@ -71,22 +98,41 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-semibold text-brand-text">
-          系统设置
-        </h1>
-        <p className="text-sm text-brand-muted mt-1">备份恢复</p>
-      </div>
-      <div className="bg-white border border-brand-line p-8 max-w-xl space-y-4">
+      <AdminPageHeader
+        title="系统设置"
+        subtitle="查看数据库与媒体备份状态。"
+        extra={(
+          <Button
+            icon={checking ? <LoadingOutlined /> : <DatabaseOutlined />}
+            loading={checking}
+            onClick={() => void fetchStatus(true)}
+          >
+            {checking ? "正在查询备份状态…" : "刷新备份状态"}
+          </Button>
+        )}
+      />
+      <div className="bg-white border border-brand-line p-4 sm:p-6 max-w-xl space-y-4">
+        {checking && !status ? (
+          <AdminLoadingState subject="备份状态" compact />
+        ) : loadError ? (
+          <AdminErrorState
+            subject="备份状态"
+            error={loadError}
+            onRetry={() => void fetchStatus()}
+          />
+        ) : !status ? (
+          <AdminEmptyState
+            subject="备份状态"
+            kind="unconfigured"
+            description="尚未取得备份状态。请检查备份服务配置后重新加载。"
+          />
+        ) : (
+          <>
         <div className="flex items-center justify-between p-4 bg-brand-bg">
           <div>
             <p className="font-medium text-brand-text">数据库与媒体备份</p>
             <p className="text-xs text-brand-muted">
-              {checking && !status ? (
-                "查询备份产物中…"
-              ) : loadFailed ? (
-                "备份状态查询失败，无法确认最近备份时间"
-              ) : status?.lastBackup ? (
+              {status.lastBackup ? (
                 <>
                   最近备份 {formatTime(status.lastBackup)}
                   {status.totalBackups ? ` · 共 ${status.totalBackups} 组完整备份` : ""}
@@ -96,41 +142,30 @@ export default function Settings() {
               )}
             </p>
           </div>
-          <Button
-            icon={checking ? <LoadingOutlined /> : <DatabaseOutlined />}
-            loading={checking}
-            onClick={() => void fetchStatus()}
-          >
-            {checking ? "查询中…" : "刷新备份状态"}
-          </Button>
+          <Tag color={executionStatusMeta.color}>
+            {executionStatusMeta.label}
+          </Tag>
         </div>
 
-        {checking && !status ? (
-          <div className="flex justify-center p-6">
-            <AdminLoadingState subject="服务状态" compact />
-          </div>
-        ) : (
-          <>
             <div className="flex items-center justify-between p-4 bg-brand-bg">
               <div>
                 <p className="font-medium text-brand-text">自动备份</p>
                 <p className="text-xs text-brand-muted">
-                  {status?.autoBackup
+                  {status.autoBackup
                     ? status.backupSchedule || "backup 容器定时执行"
-                    : status?.message || "备份目录未挂载，自动备份状态未知"}
+                    : status.message || "尚未配置自动备份"}
                 </p>
               </div>
-              <Tag color={status?.autoBackup ? "green" : status?.storageMounted ? "orange" : "default"}>
-                {status?.autoBackup ? "最近成功" : status?.storageMounted ? "需检查" : "未挂载"}
+              <Tag color={status.autoBackup ? "green" : status.storageMounted ? "gold" : "default"}>
+                {status.autoBackup ? "已配置" : status.storageMounted ? "待启用" : "未挂载"}
               </Tag>
             </div>
 
-            {status && (
-              <div className="p-4 bg-brand-bg text-xs space-y-1">
+            <div className="p-4 bg-brand-bg text-xs space-y-1">
                 <div className="flex justify-between gap-4">
                   <span className="text-brand-muted">最近执行结果</span>
                   <span className="text-brand-text">
-                    {status.executionStatus || "UNKNOWN"}
+                    {executionStatusMeta.label}
                     {status.lastExitCode !== null && status.lastExitCode !== undefined
                       ? ` · exit ${status.lastExitCode}`
                       : ""}
@@ -150,9 +185,8 @@ export default function Settings() {
                 )}
                 <p className="text-brand-muted pt-1">{status.message}</p>
               </div>
-            )}
 
-            {status?.latestFiles && status.latestFiles.length > 0 && (
+            {status.latestFiles && status.latestFiles.length > 0 && (
               <div className="p-4 bg-brand-bg">
                 <p className="text-xs text-brand-muted mb-2">最近备份产物</p>
                 <ul className="space-y-1">

@@ -24,6 +24,17 @@ test("客户订单在 Serializable 事务内复核并清空同一购物车", asy
         customerUpdated = true;
       },
     },
+    productSKU: {
+      findMany: async () => [
+        {
+          id: 10,
+          productId: 1,
+          skuCode: "READY-001",
+          price: new Prisma.Decimal(100),
+          product: { inventoryPolicy: "STANDARD" },
+        },
+      ],
+    },
     order: {
       findFirst: async () => null,
       create: async ({ data }: any) => ({

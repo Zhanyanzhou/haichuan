@@ -272,6 +272,16 @@ export class CustomersController {
 
   @Public()
   @UseGuards(CustomerAuthGuard)
+  @Get('me/consultations/:leadId')
+  getConsultation(
+    @Req() request: CustomerRequest,
+    @Param('leadId', ParseIntPipe) leadId: number,
+  ) {
+    return this.customersService.getConsultation(request.customer.id, leadId);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
   @Get('me/inquiries')
   getInquiries(@Req() request: CustomerRequest, @Query() query: CustomerInquiryQueryDto) {
     return this.customersService.getInquiries(request.customer.id, query);

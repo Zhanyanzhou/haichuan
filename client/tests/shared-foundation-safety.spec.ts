@@ -21,6 +21,18 @@ const publicLayoutSource = readFileSync(
   "src/components/layout/PublicLayout.tsx",
   "utf8",
 );
+const errorBoundarySource = readFileSync(
+  "src/components/common/ErrorBoundary.tsx",
+  "utf8",
+);
+
+test("共享错误边界使用中性降级并阻止异常页面进入索引", () => {
+  expect(errorBoundarySource).toContain('robots.content = "noindex, nofollow"');
+  expect(errorBoundarySource).toContain('document.title = "页面加载异常"');
+  expect(errorBoundarySource).toContain("当前页面暂时无法显示，请刷新后重试。");
+  expect(errorBoundarySource).not.toContain("可通过联系页面提交需求");
+  expect(errorBoundarySource).not.toContain("页面加载异常｜海川珠宝");
+});
 
 test("生产构建关闭开发画廊、mock mode 与静态首页 fallback", () => {
   expect(appSource).toContain("const TemplateGallery = import.meta.env.DEV");

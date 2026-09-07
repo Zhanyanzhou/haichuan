@@ -1259,6 +1259,34 @@ export type CustomerAddressInput = {
   isDefault?: boolean;
 };
 
+export type LeadReplyRequest = {
+  reply: string;
+  expectedUpdatedAt: string;
+};
+
+export type LeadReplyResult = {
+  leadId: number;
+  status: string;
+  updatedAt: string;
+  reply: {
+    id: number;
+    content: string;
+    createdAt: string;
+  };
+};
+
+export const leadApi = {
+  reply: (
+    type: "inquiry" | "selection",
+    leadId: number,
+    data: LeadReplyRequest,
+    idempotencyKey: string,
+  ) => api.post(`/leads/${type}/${leadId}/reply`, data, {
+    headers: { "Idempotency-Key": idempotencyKey },
+    suppressGlobalError: true,
+  }),
+};
+
 export const customerApi = {
   register: (data: {
     phone: string;
@@ -1394,11 +1422,18 @@ export const customerApi = {
   getSelectionInquiries: () =>
     api.get("/customers/me/selection-inquiries", {
       headers: customerAuthHeaders(),
+      suppressGlobalError: true,
+    }),
+  getConsultation: (leadId: number) =>
+    api.get(`/customers/me/consultations/${leadId}`, {
+      headers: customerAuthHeaders(),
+      suppressGlobalError: true,
     }),
   getInquiries: (params?: { page?: number; pageSize?: number }) =>
     api.get("/customers/me/inquiries", {
       params,
       headers: customerAuthHeaders(),
+      suppressGlobalError: true,
     }),
   getAddresses: () =>
     api.get("/customers/me/addresses", { headers: customerAuthHeaders() }),
@@ -2079,60 +2114,57 @@ export const pageDocumentApi = {
       { signal, suppressGlobalError: true },
     );
   },
-  getRevisions: async (pageKey = "home") => {
+  getRevisions: async (
+    pageKey = "home",
+    options: { beforeVersion?: number; limit?: number } = {},
+  ) => {
     if (USE_MOCK) {
       await mockDelay(120);
       const store = loadMockPageDocuments();
       const pointer = store.published[pageKey]?.publishedRevisionId;
-      return mockRes(cloneMockDocument((store.revisions[pageKey] || []).map((revision) => ({
-        ...revision,
-        isPublished: revision.id === pointer,
-      }))));
+      const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
+      const eligible = (store.revisions[pageKey] || [])
+        .filter((revision) => options.beforeVersion === undefined || revision.version < options.beforeVersion)
+        .sort((left, right) => right.version - left.version);
+      const page = eligible.slice(0, limit);
+      return mockRes(cloneMockDocument({
+        items: page.map((revision) => ({
+          id: revision.id,
+          version: revision.version,
+          status: revision.status,
+          publishedAt: revision.publishedAt,
+          publishedBy: revision.publishedBy,
+          createdAt: revision.createdAt,
+          isPublished: revision.id === pointer,
+        })),
+        nextBeforeVersion: eligible.length > limit ? page[page.length - 1]?.version ?? null : null,
+      }));
     }
     return api.get("/page-modules/document/revisions", {
-      params: { pageKey },
+      params: { pageKey, ...options },
       suppressGlobalError: true,
     });
   },
-  restoreRevision: async (
+  getRevision: async (
     pageKey: string,
     version: number,
-    expectedUpdatedAt: string,
+    signal?: AbortSignal,
   ) => {
     if (USE_MOCK) {
-      await mockDelay(160);
+      await mockDelay(120);
       const store = loadMockPageDocuments();
-      const current = store.drafts[pageKey] || store.published[pageKey];
-      if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
-        throw mockRequestError("恢复版本时缺少页面版本标识", 400);
-      }
-      if (!current || current.updatedAt !== expectedUpdatedAt) {
-        throw mockRequestError(
-          "该页面已被其他编辑者更新，请重新加载版本记录后再恢复",
-          409,
-        );
-      }
       const revision = (store.revisions[pageKey] || []).find(
         (item) => item.version === version,
       );
-      if (!revision) throw new Error("版本不存在或已被清理");
-      const restored = createMockPageDocument({
-        pageKey,
-        puckData: revision.puckData,
-        metadata: revision.metadata,
-        editorVersion: revision.editorVersion,
-      });
-      restored.updatedAt = new Date(
-        Math.max(Date.now(), Date.parse(current.updatedAt) + 1),
-      ).toISOString();
-      store.drafts[pageKey] = restored;
-      persistMockPageDocuments();
-      return mockRes(cloneMockDocument(restored));
+      if (!revision) throw mockRequestError("指定版本不存在", 404);
+      return mockRes(cloneMockDocument({
+        ...revision,
+        isPublished: revision.id === store.published[pageKey]?.publishedRevisionId,
+      }));
     }
-    return api.put(`/page-modules/document/revisions/${version}/restore`, {
-      pageKey,
-      expectedUpdatedAt,
-    }, {
+    return api.get(`/page-modules/document/revisions/${version}`, {
+      params: { pageKey },
+      signal,
       suppressGlobalError: true,
     });
   },

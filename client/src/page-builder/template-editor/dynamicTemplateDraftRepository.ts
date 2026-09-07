@@ -1,4 +1,5 @@
 import {
+  addDynamicTemplateNode,
   createBlankDynamicTemplateDefinition,
   createDynamicTemplateStableId,
   validateDynamicTemplateDefinition,
@@ -67,7 +68,29 @@ function writeRepository(repository: StoredDynamicTemplateRepository) {
 }
 
 export function createNewDynamicTemplateDraft(name = "未命名模板"): TemplateEditorDraft {
-  const definition = createBlankDynamicTemplateDefinition(name);
+  let definition = createBlankDynamicTemplateDefinition(name);
+  // 新建即提供最小可发布骨架（内容区域 + 图片/标题/正文），与“添加区域/添加槽位”
+  // 的产出同构；避免运营者从裸根节点和发布错误开始。defaultContent 保持为空。
+  const region = addDynamicTemplateNode(definition, definition.rootNodeId, "Container");
+  definition = region.definition;
+  definition.nodes[region.nodeId].name = "内容区域 1";
+  for (const [type, label, typography] of [
+    ["ImageSlot", "图片槽位", null],
+    ["HeadingSlot", "标题槽位", { weight: 600, desktop: 48, mobile: 28 } as const],
+    ["TextSlot", "正文槽位", { weight: 400, desktop: 28, mobile: 16 } as const],
+  ] as const) {
+    const added = addDynamicTemplateNode(definition, region.nodeId, type);
+    definition = added.definition;
+    definition.nodes[added.nodeId].name = label;
+    const slot = definition.slots[added.slotId!];
+    slot.label = label;
+    if (typography) {
+      slot.desktopRules.fontWeight = typography.weight;
+      slot.mobileRules.fontWeight = typography.weight;
+      slot.desktopRules.fontSize = { value: typography.desktop, unit: "px" };
+      slot.mobileRules.fontSize = { value: typography.mobile, unit: "px" };
+    }
+  }
   return {
     format: "dynamic",
     sourceType: "local",

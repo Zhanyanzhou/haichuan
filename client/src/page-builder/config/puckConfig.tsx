@@ -62,6 +62,10 @@ import { testimonialPuckConfig } from "../adapters/testimonial.puck";
 import type { TestimonialPuckProps } from "../adapters/testimonial.puck";
 import ContentTemplateContractFrame from "../runtime/ContentTemplateContractFrame";
 import {
+  CONTENT_TEMPLATE_RENDER_SURFACE,
+  useContentTemplateRenderSurface,
+} from "../runtime/ContentTemplateRenderSurface";
+import {
   DYNAMIC_TEMPLATE_BLOCK_TYPE,
   DYNAMIC_TEMPLATE_INSTANCE_SCHEMA_VERSION,
   DynamicTemplateInstanceView,
@@ -102,6 +106,27 @@ type RenderableConfig<Props> = {
   render: (props: Props) => ReactNode;
 } & Record<string, unknown>;
 
+function ContractRenderer<Props>({
+  moduleType,
+  props,
+  render,
+}: {
+  moduleType: string;
+  props: Props;
+  render: (props: Props) => ReactNode;
+}) {
+  const renderSurface = useContentTemplateRenderSurface();
+  return (
+    <ContentTemplateContractFrame
+      moduleType={moduleType}
+      mode={renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW ? "public" : "editor"}
+      props={props as Record<string, unknown>}
+    >
+      {render(props)}
+    </ContentTemplateContractFrame>
+  );
+}
+
 /** 保留 adapter 的真实 render 与 props，只在外层附加当前机器合同的根包装。 */
 function withContractRenderer<Props>(
   moduleType: string,
@@ -111,13 +136,7 @@ function withContractRenderer<Props>(
   return {
     ...config,
     render: (props: Props) => (
-      <ContentTemplateContractFrame
-        moduleType={moduleType}
-        mode="editor"
-        props={props as Record<string, unknown>}
-      >
-        {render(props)}
-      </ContentTemplateContractFrame>
+      <ContractRenderer moduleType={moduleType} props={props} render={render} />
     ),
   };
 }

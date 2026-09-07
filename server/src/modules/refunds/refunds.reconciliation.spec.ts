@@ -52,6 +52,7 @@ function buildService(
         callback({
           $queryRaw: async () => [{ id: 9 }],
           refund: {
+            findFirst: async () => null,
             findUnique: async ({ where }: { where: { id: number } }) =>
               refunds.find((candidate) => candidate.id === where.id),
             updateMany: async ({ where, data }: { where: { id: number }; data: Record<string, unknown> }) => {

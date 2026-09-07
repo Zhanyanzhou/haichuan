@@ -38,6 +38,59 @@ const sources = new Map(
 );
 const failures = [];
 
+// 页面装修与模板设计的桌面四区是产品级不变量，不是可调主题值。
+// 只允许 editor.css 声明一次，防止任一模式用更高特异性覆盖。
+const fixedEditorLayout = [
+  ["--editor-library-dock-width", 12],
+  ["--editor-structure-dock-width", 8],
+  ["--editor-inspector-dock-width", 20],
+];
+const editorLayoutCssFiles = collectAdminFiles(
+  resolve(root, "client/src"),
+  "client/src",
+).filter((file) => file.endsWith(".css"));
+const editorLayoutSources = new Map(
+  editorLayoutCssFiles.map((file) => [file, readFileSync(resolve(root, file), "utf8")]),
+);
+const editorLayoutRuleSource = readFileSync(resolve(root, "PROJECT_RULES.md"), "utf8");
+
+for (const [property, ratio] of fixedEditorLayout) {
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const declarations = editorLayoutCssFiles.flatMap((file) => (
+    [...editorLayoutSources.get(file).matchAll(new RegExp(`${escapedProperty}\\s*:\\s*([^;]+);`, "g"))]
+      .map((match) => ({ file, value: match[1].trim() }))
+  ));
+  if (
+    declarations.length !== 1
+    || declarations[0].file !== "client/src/pages/admin/HomepageConfig/editor.css"
+    || declarations[0].value !== `${ratio}% !important`
+  ) {
+    failures.push(
+      `${property}: 必须仅在 editor.css 声明一次且固定为 ${ratio}% !important（当前 ${JSON.stringify(declarations)}）`,
+    );
+  }
+}
+
+if (fixedEditorLayout.reduce((sum, [, ratio]) => sum + ratio, 0) !== 40) {
+  failures.push("桌面编辑器三个 dock 必须合计 40%，为居中画布保留 60%");
+}
+
+if (
+  !editorLayoutRuleSource.includes(
+    "模板组件库 `12%`、图层/结构面板 `8%`、居中画布 `60%`、属性面板 `20%`",
+  )
+) {
+  failures.push("PROJECT_RULES.md: 缺少桌面编辑器 12% / 8% / 60% / 20% 硬规则");
+}
+
+if (
+  !editorLayoutRuleSource.includes(
+    "除非用户再次明确批准修改本条硬规则",
+  )
+) {
+  failures.push("PROJECT_RULES.md: 四区比例硬规则必须保留用户明确批准边界");
+}
+
 const rules = {
   loading: {
     pattern: /(?:>|["'`])(?:加载中|正在加载)(?:\.\.\.|…)(?:<|["'`])/g,

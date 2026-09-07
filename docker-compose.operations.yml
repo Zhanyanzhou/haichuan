@@ -1,0 +1,39 @@
+services:
+  migration-status:
+    image: "${OPERATIONS_IMAGE_NAME:?OPERATIONS_IMAGE_NAME is required}@sha256:${OPERATIONS_IMAGE_DIGEST:?OPERATIONS_IMAGE_DIGEST is required}"
+    profiles: ["operations"]
+    restart: "no"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cpus: "${OPERATIONS_CPUS:-1.0}"
+    mem_limit: "${OPERATIONS_MEMORY_LIMIT:-768m}"
+    pids_limit: ${OPERATIONS_PIDS_LIMIT:-128}
+    environment:
+      # 允许 overlay 在不加载其他一次性凭据时解析；Prisma 在连接前对空值失败关闭。
+      DATABASE_URL: ${OPERATIONS_DATABASE_URL:-}
+    command: ["./node_modules/.bin/prisma", "migrate", "status"]
+    networks: ["jewelry-network"]
+
+  release-preflight:
+    extends: migration-status
+    environment:
+      DATABASE_URL: ${RELEASE_PREFLIGHT_DATABASE_URL:-}
+      RELEASE_PROFILE: ${RELEASE_PROFILE:-}
+      RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZED: ${RELEASE_PREFLIGHT_READ_ONLY_AUTHORIZED:-0}
+      RELEASE_PREFLIGHT_ENVIRONMENT_ID: ${RELEASE_PREFLIGHT_ENVIRONMENT_ID:-}
+      RELEASE_PREFLIGHT_EXPECTED_DATABASE: ${RELEASE_PREFLIGHT_EXPECTED_DATABASE:-}
+      RELEASE_PREFLIGHT_APPROVAL_REFERENCE: ${RELEASE_PREFLIGHT_APPROVAL_REFERENCE:-}
+    command: ["node", "dist/cli/release-preflight.js"]
+
+  bootstrap-admin:
+    extends: migration-status
+    environment:
+      DATABASE_URL: ${BOOTSTRAP_DATABASE_URL:-}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_REAL_NAME: ${BOOTSTRAP_ADMIN_REAL_NAME:-}
+    command: ["node", "dist/cli/bootstrap-admin.js"]
+

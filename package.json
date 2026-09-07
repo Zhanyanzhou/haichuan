@@ -27,7 +27,8 @@
     "audit:template-v2-gate-a": "node scripts/audit-template-v2-gate-a-readiness.mjs",
     "audit:template-v2-gate-b:readonly": "cd server && npm run audit:template-v2-gate-b:readonly",
     "audit:template-v2-gate-d:static": "node scripts/audit-template-v2-gate-d-readiness.mjs",
-    "test": "npm run test:contracts && npm run test:content-templates && npm run test:server && npm run test:public-assets && npm run test:runtime-ownership && npm run test:release-supply-chain",
+    "test": "npm run test:contracts && npm run test:content-templates && npm run test:server && npm run test:public-assets && npm run test:runtime-ownership && npm run test:release-supply-chain && npm run test:admin-ui-standards",
+    "test:admin-ui-standards": "node scripts/verify-admin-ui-standards.mjs",
     "test:contracts": "node scripts/verify-page-builder-contract.mjs && node scripts/verify-wechat-callback-origin.mjs && node scripts/verify-inquiry-privacy-consent.mjs",
     "test:server": "cd server && npm test",
     "test:content-templates": "npm run contracts:check && node scripts/verify-content-template-contract.mjs && node scripts/verify-content-template-skeletons.mjs && node scripts/verify-content-template-image-specs.mjs && node scripts/verify-inspector-schema.mjs",
@@ -38,9 +39,11 @@
     "test:trade-concurrency": "node scripts/verify-trade-concurrency.mjs",
     "test:trade-contract": "node scripts/verify-trade-contract.mjs",
     "verify:environment-contract": "node scripts/verify-environment-contract.mjs",
+    "verify:wechat-pay-certificate-files": "node scripts/verify-environment-contract.mjs --wechat-pay-host-files",
     "verify:migration-integrity": "node scripts/verify-migration-integrity.mjs",
     "verify:release-images": "node scripts/verify-release-images.mjs --static",
-    "test:release-supply-chain": "node --test scripts/verify-release-images.spec.mjs",
+    "test:release-supply-chain": "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs",
+    "verify:production-evidence": "node scripts/verify-production-evidence.mjs",
     "audit:public-assets": "node scripts/audit-public-assets.mjs",
     "verify:public-asset-audit": "node scripts/audit-public-assets.mjs --check artifacts/public-asset-audit/current.json",
     "audit:runtime-ownership": "node scripts/audit-runtime-ownership.mjs",
@@ -62,6 +65,7 @@
     "@commitlint/cli": "^21.2.2",
     "@commitlint/config-conventional": "^21.2.2",
     "concurrently": "^8.2.2",
-    "husky": "^9.1.7"
+    "husky": "^9.1.7",
+    "js-yaml": "4.3.1"
   }
 }

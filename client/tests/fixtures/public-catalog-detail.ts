@@ -167,6 +167,7 @@ export async function mockCatalogDetail(
     flags?: { commerceEnabled: boolean; cartEnabled: boolean; paymentEnabled: boolean };
     flagsStatus?: number;
     flagsBarrier?: RouteBarrier;
+    categoriesStatus?: number;
     productsStatus?: number;
     productsBarrier?: RouteBarrier;
     detailBarriers?: Record<string, RouteBarrier>;
@@ -245,6 +246,13 @@ export async function mockCatalogDetail(
       );
     }
     if (path.endsWith("/categories/tree")) {
+      if (options.categoriesStatus && options.categoriesStatus !== 200) {
+        return fulfill(
+          route,
+          { statusCode: options.categoriesStatus, message: "categories unavailable" },
+          options.categoriesStatus,
+        );
+      }
       return fulfill(route, [{ id: 1, name: "戒指", slug: "rings", level: 1, parentId: null, children: [] }]);
     }
     if (path.endsWith("/attributes")) return fulfill(route, []);

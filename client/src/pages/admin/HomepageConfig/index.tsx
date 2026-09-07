@@ -22,7 +22,7 @@ import {
   EyeOutlined,
   ExclamationCircleOutlined,
 } from "@ant-design/icons";
-import { Puck, type Data, type PuckAction, type UiState } from "@puckeditor/core";
+import { Puck, useGetPuck, type Data, type PuckAction, type UiState } from "@puckeditor/core";
 import { useAuthStore } from "@/store/authStore";
 import "@puckeditor/core/no-external.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
@@ -47,8 +47,13 @@ import SchemaInspectorPanel from "@/page-builder/inspector/SchemaInspectorPanel"
 import DoublePosterInspector from "@/page-builder/inspector/panels/DoublePosterInspector";
 import InspectorFooterBar from "@/page-builder/inspector/InspectorFooterBar";
 import type {
+  PagePublishIssueTarget,
   PublishValidationIssue,
   PublishValidationStatus,
+} from "@/page-builder/inspector/publishValidation";
+import {
+  getPagePublishIssueKey,
+  resolvePagePublishIssueTarget,
 } from "@/page-builder/inspector/publishValidation";
 import { getInspectorSchema } from "@/page-builder/inspector/schema/registry";
 import {
@@ -59,11 +64,15 @@ import {
 import {
   CONTENT_TEMPLATE_BY_MODULE_TYPE,
   createContentTemplateMarker,
+  getContentTemplatePageRule,
   isContentTemplateAllowedForPage,
   sanitizeContentTemplateLayoutData,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisualRecord } from "@/page-builder/runtime/visualLayout";
-import { hasVisiblePrimaryStage } from "@/page-builder/utils/primaryStagePolicy";
+import {
+  isPrimaryStageInsertionBlocked,
+  isVisiblePrimaryStageBlockInDocument,
+} from "@/page-builder/utils/primaryStagePolicy";
 import {
   MissingMediaState,
   normalizeLegacyRenderColors,
@@ -91,13 +100,17 @@ import {
   DynamicTemplateInstanceView,
   createDynamicTemplateInstanceProps,
   dynamicTemplateVersionKey,
+  getResolvedDynamicTemplateDefinitions,
+  planDynamicTemplateDocumentUpgrade,
   readResolvedDynamicTemplateDefinitions,
   registerResolvedDynamicTemplate,
   useResolvedDynamicTemplateDefinitions,
   type DynamicTemplateInstanceProps,
+  type DynamicTemplateDocumentUpgradePlan,
   type ResolvedDynamicTemplateDefinitionMap,
 } from "@/page-builder/dynamic-template-instance";
 import DynamicTemplateInstanceInspector from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceInspector";
+import { DynamicTemplateUpgradeReviewModal } from "@/page-builder/dynamic-template-instance/DynamicTemplateUpgradePanel";
 import type { PromoteDynamicTemplateInstanceRequest } from "@/page-builder/dynamic-template-instance/promoteToTemplate";
 import type { PublishedDynamicTemplateResource } from "@/services/clients/dynamicTemplateClient";
 import type { EditorWorkspaceMode } from "@/page-builder/template-editor/types";
@@ -107,6 +120,7 @@ import {
 } from "@/page-builder/templates/templateOrigin";
 import WorkspacePanelHeader from "@/page-builder/workspace/WorkspacePanelHeader";
 import WorkspacePanelCollapseButton from "@/page-builder/workspace/WorkspacePanelCollapseButton";
+import useCompactWorkspaceOverlay from "@/page-builder/workspace/useCompactWorkspaceOverlay";
 import "./editor.css";
 import EditorToolbar, { VIEWPORT_PRESETS } from "./components/EditorToolbar";
 import UnsavedChangesGuard from "./components/UnsavedChangesGuard";
@@ -118,6 +132,7 @@ import CanvasSelectionDock, {
 import RevisionDrawer from "./components/RevisionDrawer";
 import PageSettingsDrawer from "./components/PageSettingsDrawer";
 import CanvasBlockInteractionBoundary from "./components/CanvasBlockInteractionBoundary";
+import PagePublishCheckPanel from "./components/PagePublishCheckPanel";
 import {
   ROOT_ZONE,
   useHomepagePuck,
@@ -133,6 +148,7 @@ import {
   type CanvasNavigationMessage,
   type CanvasNavigationStateMessage,
   type CanvasPageNavigationMessage,
+  type PageEditorHistoryCommand,
 } from "./editor-store";
 
 // 模板编辑器只在运营者主动切换到模板模式后下载；页面编辑首开不承担其结构树、
@@ -607,16 +623,22 @@ function CanvasPageDataSynchronizer({
   data,
   pageKey,
   canvasDataSyncVersion,
+  historyCommand,
+  onHistoryCommandCommitted,
 }: {
   data: PuckDocument;
   pageKey: EditorPageKey;
   canvasDataSyncVersion: number;
+  historyCommand: PageEditorHistoryCommand | null;
+  onHistoryCommandCommitted: (commandId: string, historyIndex: number) => void;
 }) {
+  const getPuck = useGetPuck();
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentData = useHomepagePuck((state) => state.appState.data);
   const appliedSignatureRef = useRef<string | null>(null);
   const mountedWithInitialDataRef = useRef(false);
   const consumedCanvasDataSyncVersionRef = useRef(canvasDataSyncVersion);
+  const consumedHistoryCommandIdRef = useRef<string | null>(null);
   const dataSignature = useMemo(() => JSON.stringify(data), [data]);
   const currentDataSignature = useMemo(
     () => JSON.stringify(currentData),
@@ -634,6 +656,30 @@ function CanvasPageDataSynchronizer({
       appliedSignatureRef.current = signature;
       return;
     }
+    if (
+      historyCommand
+      && consumedHistoryCommandIdRef.current !== historyCommand.id
+    ) {
+      consumedHistoryCommandIdRef.current = historyCommand.id;
+      const puck = getPuck();
+      const historyIndex = puck.history.histories.slice(0, puck.history.index + 1).length;
+      const historyData = {
+        ...puck.appState.data,
+        ...data,
+        content: data.content ?? [],
+        zones: data.zones ?? {},
+        root: data.root ?? puck.appState.data.root,
+      } as Data;
+      dispatch({
+        type: "setData",
+        data: (currentData) => ({ ...currentData, ...historyData }),
+        recordHistory: true,
+      });
+      dispatch({ type: "setUi", ui: { itemSelector: null }, recordHistory: false });
+      appliedSignatureRef.current = signature;
+      onHistoryCommandCommitted(historyCommand.id, historyIndex);
+      return;
+    }
     // 工具栏已经先把同一整页数据写入 Puck store，再同步父层 data prop。
     // 该版本只用于确认这次父层变化已由内部 action 消费，避免重复 setData。
     if (consumedCanvasDataSyncVersionRef.current !== canvasDataSyncVersion) {
@@ -646,9 +692,9 @@ function CanvasPageDataSynchronizer({
     // Puck 已以同一份数据挂载时不重复执行昂贵的整页替换；页面切换时
     // currentDataSignature 与目标签名不同，仍会走 setData 完成必要同步。
     if (currentDataSignature === dataSignature) return;
-    dispatch({ type: "setData", data: data as Partial<Data> });
+    dispatch({ type: "setData", data: data as Partial<Data>, recordHistory: false });
     dispatch({ type: "setUi", ui: { itemSelector: null } });
-  }, [canvasDataSyncVersion, currentDataSignature, data, dataSignature, dispatch, pageKey]);
+  }, [canvasDataSyncVersion, currentDataSignature, data, dataSignature, dispatch, getPuck, historyCommand, onHistoryCommandCommitted, pageKey]);
 
   return null;
 }
@@ -657,6 +703,81 @@ function CanvasPageDataSynchronizer({
  * 模块卡片不使用真实商品素材，而用“布局微缩图”展示该区块插入后的结构。
  * 这让用户先理解版式和内容层级，再决定是否添加。
  */
+function getPageTemplateUpgradeRuleBlockers(
+  pageKey: EditorPageKey,
+  document: Record<string, unknown>,
+  resolvedDefinitions?: ResolvedDynamicTemplateDefinitionMap,
+) {
+  const blockers: string[] = [];
+  const rule = getContentTemplatePageRule(pageKey);
+  if (!rule) return ["当前页面缺少页面规则。"];
+  if (
+    rule.contentPlacement === "root-only"
+    && document.zones
+    && typeof document.zones === "object"
+    && !Array.isArray(document.zones)
+    && Object.values(document.zones as Record<string, unknown>)
+      .some((blocks) => Array.isArray(blocks) && blocks.length > 0)
+  ) {
+    blockers.push("当前页面不符合根内容位置规则。");
+  }
+  const availableDefinitions = {
+    ...(resolvedDefinitions ?? {}),
+    ...readResolvedDynamicTemplateDefinitions(
+      document[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
+    ),
+  };
+  const documentForPolicies = {
+    ...document,
+    [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: availableDefinitions,
+  };
+  const visibleContent = (Array.isArray(document.content) ? document.content : [])
+    .filter((block) => {
+      if (!block || typeof block !== "object" || Array.isArray(block)) return false;
+      const props = (block as Record<string, unknown>).props;
+      return !props
+        || typeof props !== "object"
+        || Array.isArray(props)
+        || (props as Record<string, unknown>).isVisible !== false;
+    });
+  const primaryStageIndexes = visibleContent
+    .map((block, index) => (
+      isVisiblePrimaryStageBlockInDocument(block, documentForPolicies) ? index : -1
+    ))
+    .filter((index) => index >= 0);
+  if (primaryStageIndexes.length > 1) {
+    blockers.push("升级后会产生多个主舞台实例。");
+  }
+  if (primaryStageIndexes.length > 0 && primaryStageIndexes[0] !== 0) {
+    blockers.push("主舞台实例必须是首个可见品牌内容区。");
+  }
+  if (rule.headerMode.configured === "overlay-light") {
+    const first = visibleContent[0];
+    const firstRecord = first && typeof first === "object" && !Array.isArray(first)
+      ? first as Record<string, unknown>
+      : undefined;
+    const fixed = typeof firstRecord?.type === "string"
+      ? CONTENT_TEMPLATE_BY_MODULE_TYPE[firstRecord.type]
+      : undefined;
+    let overlayLightCompatible = fixed?.key === rule.headerMode.overlayRequiresFirstTemplate;
+    if (firstRecord?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+      const props = firstRecord.props && typeof firstRecord.props === "object" && !Array.isArray(firstRecord.props)
+        ? firstRecord.props as Record<string, unknown>
+        : undefined;
+      const templateId = typeof props?.templateId === "string" ? props.templateId : "";
+      const templateVersion = Number(props?.templateVersion);
+      const resolved = availableDefinitions[dynamicTemplateVersionKey(templateId, templateVersion)];
+      overlayLightCompatible = Boolean(
+        resolved?.definition.metadata.headerCompatibility?.includes("overlay-light"),
+      );
+    }
+    if (!overlayLightCompatible) {
+      blockers.push("首个可见品牌模块不兼容当前页面的浅色覆盖导航。");
+    }
+  }
+  return blockers;
+}
+
 function PageTemplateLibraryAdapter({
   pageKey,
   onInsertTemplate,
@@ -674,22 +795,94 @@ function PageTemplateLibraryAdapter({
 }) {
   const { message, modal } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
+  const appDataRef = useRef(appData);
+  appDataRef.current = appData;
   const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const dispatch = useHomepagePuck((state) => state.dispatch);
+  const [dynamicUpgradeReview, setDynamicUpgradeReview] = useState<{
+    template: PublishedDynamicTemplateResource;
+    plan: DynamicTemplateDocumentUpgradePlan<Record<string, unknown>>;
+  } | null>(null);
   const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
   const previewViewport = typeof currentViewport.width === "number" && currentViewport.width <= 480
     ? "mobile"
     : "desktop";
-  const pageHasPrimaryStage = hasVisiblePrimaryStage(
+  const pageHasPrimaryStage = isPrimaryStageInsertionBlocked(
     appData,
     resolvedDynamicTemplateDefinitions,
   );
 
-  const upgradeSystemTemplateInPage = useCallback((current: SystemContentTemplateCurrent) => {
-    const upgradeableCount = countUpgradeableSystemTemplateInstances(
+  const isSystemTemplateAllowedOnPage = useCallback((moduleType: string) => (
+    isContentTemplateInsertable(moduleType)
+    && isContentTemplateAllowedForPage(pageKey, moduleType)
+  ), [pageKey]);
+
+  const getSystemUpgradeCount = useCallback((current: SystemContentTemplateCurrent) => (
+    getPageTemplateUpgradeRuleBlockers(
+      pageKey,
       appData as unknown as Record<string, unknown>,
-      current,
+      resolvedDynamicTemplateDefinitions,
+    ).length === 0
+    &&
+    isSystemTemplateAllowedOnPage(current.moduleType)
+    && sanitizeContentTemplateLayoutData(current.moduleType, current.layoutData)
+      ? countUpgradeableSystemTemplateInstances(
+          appData as unknown as Record<string, unknown>,
+          current,
+        )
+      : 0
+  ), [appData, isSystemTemplateAllowedOnPage, pageKey, resolvedDynamicTemplateDefinitions]);
+
+  const getPublishedUpgradePlan = useCallback((template: PublishedDynamicTemplateResource) => {
+    const currentRuleBlockers = getPageTemplateUpgradeRuleBlockers(
+      pageKey,
+      appData as unknown as Record<string, unknown>,
+      resolvedDynamicTemplateDefinitions,
     );
+    if (currentRuleBlockers.length > 0) {
+      return {
+        document: appData as unknown as Record<string, unknown>,
+        upgradedCount: 0,
+        blockers: currentRuleBlockers,
+        instancePlans: [],
+        pendingRequiredSlots: [],
+        destructiveBlockers: [],
+      };
+    }
+    const plan = planDynamicTemplateDocumentUpgrade({
+      document: appData as unknown as Record<string, unknown>,
+      resolvedDefinitions: resolvedDynamicTemplateDefinitions,
+      target: {
+        templateId: template.templateId,
+        version: template.version,
+        schemaVersion: template.schemaVersion,
+        definitionChecksum: template.definitionChecksum,
+        definition: template.definition,
+        name: template.name,
+      },
+    });
+    const nextRuleBlockers = plan.upgradedCount > 0
+      ? getPageTemplateUpgradeRuleBlockers(
+          pageKey,
+          plan.document,
+          resolvedDynamicTemplateDefinitions,
+        )
+      : [];
+    if (nextRuleBlockers.length > 0) {
+      return {
+        document: appData as unknown as Record<string, unknown>,
+        upgradedCount: 0,
+        blockers: nextRuleBlockers,
+        instancePlans: [],
+        pendingRequiredSlots: [],
+        destructiveBlockers: [],
+      };
+    }
+    return plan;
+  }, [appData, pageKey, resolvedDynamicTemplateDefinitions]);
+
+  const upgradeSystemTemplateInPage = useCallback((current: SystemContentTemplateCurrent) => {
+    const upgradeableCount = getSystemUpgradeCount(current);
     if (upgradeableCount === 0) return;
     modal.confirm({
       title: `升级“${current.displayName}”页面实例？`,
@@ -710,15 +903,68 @@ function PageTemplateLibraryAdapter({
         message.success(`已升级 ${result.upgradedCount} 个实例；保存页面草稿后才会持久化`);
       },
     });
-  }, [appData, dispatch, message, modal]);
+  }, [appData, dispatch, getSystemUpgradeCount, message, modal]);
+
+  const upgradePublishedDynamicTemplateInPage = useCallback((
+    template: PublishedDynamicTemplateResource,
+  ) => {
+    const plan = getPublishedUpgradePlan(template);
+    if (plan.instancePlans.length === 0) return;
+    setDynamicUpgradeReview({ template, plan });
+  }, [getPublishedUpgradePlan]);
+
+  const confirmPublishedDynamicTemplateUpgrade = useCallback(() => {
+    if (!dynamicUpgradeReview || dynamicUpgradeReview.plan.upgradedCount === 0) return;
+    const { template, plan } = dynamicUpgradeReview;
+    registerResolvedDynamicTemplate({
+      templateId: template.templateId,
+      version: template.version,
+      schemaVersion: template.schemaVersion,
+      definitionChecksum: template.definitionChecksum,
+      definition: template.definition,
+    });
+    dispatch({
+      type: "setData",
+      data: plan.document as typeof appData,
+      recordHistory: true,
+    });
+    const firstPendingPlan = plan.instancePlans.find((item) => item.analysis.pendingRequiredSlots.length > 0);
+    if (firstPendingPlan) {
+      const content = Array.isArray(plan.document.content) ? plan.document.content : [];
+      const index = content.findIndex((block) => {
+        if (!block || typeof block !== "object" || Array.isArray(block)) return false;
+        const props = (block as Record<string, unknown>).props;
+        return Boolean(props && typeof props === "object" && !Array.isArray(props)
+          && (props as Record<string, unknown>).id === firstPendingPlan.blockId);
+      });
+      if (index >= 0) {
+        dispatch({ type: "setUi", ui: { itemSelector: { index, zone: ROOT_ZONE } } });
+      }
+      const firstPending = firstPendingPlan.analysis.pendingRequiredSlots[0];
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const field = document.querySelector<HTMLElement>(
+          `[data-slot-id="${CSS.escape(firstPending.slotId)}"]`,
+        );
+        const focusTarget = field?.querySelector<HTMLElement>(
+          "input, textarea, select, button, [tabindex]:not([tabindex='-1'])",
+        );
+        field?.scrollIntoView({ block: "center" });
+        focusTarget?.focus();
+      }));
+    }
+    setDynamicUpgradeReview(null);
+    message.success(`已升级 ${plan.upgradedCount} 个动态模板实例；保存页面草稿后才会持久化`);
+  }, [dispatch, dynamicUpgradeReview, message]);
 
   const insertPublishedDynamicTemplate = useCallback((
     template: PublishedDynamicTemplateResource,
-    requestedInsertionIndex = appData.content?.length ?? 0,
+    requestedInsertionIndex?: number,
   ) => {
+    const currentDocument = appDataRef.current;
+    const currentResolvedDefinitions = getResolvedDynamicTemplateDefinitions();
     if (
       template.definition.metadata.visualRole === "primary-stage"
-      && hasVisiblePrimaryStage(appData, resolvedDynamicTemplateDefinitions)
+      && isPrimaryStageInsertionBlocked(currentDocument, currentResolvedDefinitions)
     ) {
       message.warning("首屏主舞台全页只能有一个；请编辑现有首屏");
       return;
@@ -732,15 +978,15 @@ function PageTemplateLibraryAdapter({
     };
     registerResolvedDynamicTemplate(resolved);
     const key = dynamicTemplateVersionKey(template.templateId, template.version);
-    const document = appData as unknown as PuckDocument;
+    const document = currentDocument as unknown as PuckDocument;
     const existingResolved = document[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
     const resolvedMap = existingResolved && typeof existingResolved === "object" && !Array.isArray(existingResolved)
       ? existingResolved as ResolvedDynamicTemplateDefinitionMap
       : {};
-    const content = appData.content ?? [];
+    const content = currentDocument.content ?? [];
     const insertionIndex = Math.min(
       content.length,
-      Math.max(0, requestedInsertionIndex),
+      Math.max(0, requestedInsertionIndex ?? content.length),
     );
     const instance = {
       type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
@@ -753,7 +999,7 @@ function PageTemplateLibraryAdapter({
     dispatch({
       type: "setData",
       data: {
-        ...appData,
+        ...currentDocument,
         [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: {
           ...resolvedMap,
           [key]: resolved,
@@ -763,7 +1009,7 @@ function PageTemplateLibraryAdapter({
           instance,
           ...content.slice(insertionIndex),
         ],
-      } as typeof appData,
+      } as typeof currentDocument,
       recordHistory: true,
     });
     dispatch({
@@ -771,42 +1017,43 @@ function PageTemplateLibraryAdapter({
       ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
     });
     message.success(`已添加“${template.name}”v${template.version}，可在右侧填写页面内容`);
-  }, [appData, dispatch, message, resolvedDynamicTemplateDefinitions]);
+  }, [dispatch, message]);
 
   return (
+    <>
     <UnifiedTemplateLibrary
       mode="page"
       device={previewViewport}
-      isSystemTemplateAllowed={(moduleType) => (
-        isContentTemplateInsertable(moduleType)
-        && isContentTemplateAllowedForPage(pageKey, moduleType)
-        && (
-          CONTENT_TEMPLATE_BY_MODULE_TYPE[moduleType]?.visualRole !== "primary-stage"
-          || !pageHasPrimaryStage
-        )
-      )}
+      pageHasPrimaryStage={pageHasPrimaryStage}
+      isSystemTemplateAllowed={isSystemTemplateAllowedOnPage}
       onInsertSystem={onInsertTemplate}
       onSystemDragStart={(moduleType, current) => onTemplateDragStart(
         moduleType,
         (insertionIndex) => onInsertTemplate(moduleType, current, insertionIndex),
       )}
       onSystemDragEnd={onTemplateDragEnd}
-      isPublishedTemplateAllowed={(template) => (
-        template.definition.metadata.visualRole !== "primary-stage"
-        || !pageHasPrimaryStage
-      )}
+      isPublishedTemplateAllowed={() => true}
       onInsertPublished={insertPublishedDynamicTemplate}
       onPublishedDragStart={(template) => onTemplateDragStart(
         template.name,
         (insertionIndex) => insertPublishedDynamicTemplate(template, insertionIndex),
       )}
       onPublishedDragEnd={onTemplateDragEnd}
-      getSystemUpgradeCount={(current) => countUpgradeableSystemTemplateInstances(
-        appData as unknown as Record<string, unknown>,
-        current,
-      )}
+      getPublishedUpgradeCount={(template) => getPublishedUpgradePlan(template).instancePlans.length}
+      onUpgradePublished={upgradePublishedDynamicTemplateInPage}
+      getSystemUpgradeCount={getSystemUpgradeCount}
       onUpgradeSystem={upgradeSystemTemplateInPage}
     />
+    {dynamicUpgradeReview ? (
+      <DynamicTemplateUpgradeReviewModal
+        open
+        title={`升级“${dynamicUpgradeReview.template.name}”动态模板实例`}
+        plans={dynamicUpgradeReview.plan.instancePlans}
+        onConfirm={confirmPublishedDynamicTemplateUpgrade}
+        onCancel={() => setDynamicUpgradeReview(null)}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -828,6 +1075,7 @@ function InspectorPanel({
   publishIssues,
   validationStatus,
   onRetryValidation,
+  onOpenPublishReview,
   onOpenPageSettings,
   canPromoteToTemplate,
   onPromoteToTemplate,
@@ -838,6 +1086,7 @@ function InspectorPanel({
   publishIssues: PublishValidationIssue[];
   validationStatus: PublishValidationStatus;
   onRetryValidation: () => void;
+  onOpenPublishReview: () => void;
   onOpenPageSettings: (field?: string) => void;
   canPromoteToTemplate: boolean;
   onPromoteToTemplate: (request: PromoteDynamicTemplateInstanceRequest) => void | Promise<void>;
@@ -889,6 +1138,7 @@ function InspectorPanel({
           warningCount={publishIssues.filter((issue) => issue.severity === "warning").length}
           validationStatus={validationStatus}
           onRetryValidation={onRetryValidation}
+          onReviewIssues={publishIssues.length > 0 ? onOpenPublishReview : undefined}
         />
       </section>
     );
@@ -906,6 +1156,7 @@ function InspectorPanel({
         publishIssues={publishIssues}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
+        onOpenPublishReview={onOpenPublishReview}
         onOpenPageSettings={onOpenPageSettings}
       />
     );
@@ -918,6 +1169,7 @@ function InspectorPanel({
         publishIssues={publishIssues}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
+        onOpenPublishReview={onOpenPublishReview}
         onOpenPageSettings={onOpenPageSettings}
         canPromoteToTemplate={canPromoteToTemplate}
         onPromoteToTemplate={onPromoteToTemplate}
@@ -936,6 +1188,7 @@ function InspectorPanel({
         publishIssues={publishIssues}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
+        onOpenPublishReview={onOpenPublishReview}
         onOpenPageSettings={onOpenPageSettings}
       />
     );
@@ -1028,8 +1281,18 @@ function EditorBody({
   viewingPublished,
   onSaveDraft,
   publishIssues,
+  publishReviewIssues,
+  publishAttemptFailed,
   validationStatus,
   onRetryValidation,
+  onRetryPublish,
+  publishReviewActive,
+  publishReviewOpen,
+  publishReviewIssueKey,
+  onOpenPublishReview,
+  onClosePublishReview,
+  onSelectPublishReviewIssue,
+  onExitPreview,
   onOpenPageSettings,
   canPromoteToTemplate,
   onPromoteToTemplate,
@@ -1044,8 +1307,18 @@ function EditorBody({
   viewingPublished: boolean;
   onSaveDraft: (data: unknown) => void;
   publishIssues: PublishValidationIssue[];
+  publishReviewIssues: PublishValidationIssue[];
+  publishAttemptFailed: boolean;
   validationStatus: PublishValidationStatus;
   onRetryValidation: () => void;
+  onRetryPublish: (data: unknown) => void;
+  publishReviewActive: boolean;
+  publishReviewOpen: boolean;
+  publishReviewIssueKey: string | null;
+  onOpenPublishReview: () => void;
+  onClosePublishReview: () => void;
+  onSelectPublishReviewIssue: (key: string | null) => void;
+  onExitPreview: () => void;
   onOpenPageSettings: (field?: string) => void;
   canPromoteToTemplate: boolean;
   onPromoteToTemplate: (
@@ -1057,9 +1330,11 @@ function EditorBody({
   const appData = useHomepagePuck((state) => state.appState.data);
   const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const appDataRef = useRef(appData);
+  appDataRef.current = appData;
   const currentViewport = useHomepagePuck(
     (state) => state.appState.ui.viewports.current,
   );
+  const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const isInspecting = Boolean(selectedItem);
@@ -1077,6 +1352,7 @@ function EditorBody({
   // 右侧属性面板手动收起（2026-08-16）：点选模块仍自动弹出(is-inspecting)，手动收起后保持收起
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => {
     try {
+      if (window.matchMedia("(min-width: 1200px)").matches) return false;
       return (
         sessionStorage.getItem("homepage-editor-inspector-collapsed") === "1"
       );
@@ -1084,6 +1360,175 @@ function EditorBody({
       return false;
     }
   });
+  const updateInspectorCollapsed = useCallback((collapsed: boolean) => {
+    setInspectorCollapsed(collapsed);
+    try {
+      sessionStorage.setItem(
+        "homepage-editor-inspector-collapsed",
+        collapsed ? "1" : "0",
+      );
+    } catch {
+      /* 偏好记忆失败不阻断收放 */
+    }
+  }, []);
+  const openInspector = useCallback(() => updateInspectorCollapsed(false), [updateInspectorCollapsed]);
+  const closeInspector = useCallback(() => updateInspectorCollapsed(true), [updateInspectorCollapsed]);
+  const selectedItemLabel = selectedItem
+    ? BLOCK_META[selectedItem.type]?.name ?? selectedItem.type
+    : null;
+  const inspectorOverlay = useCompactWorkspaceOverlay({
+    open: !inspectorCollapsed,
+    onOpen: openInspector,
+    onClose: closeInspector,
+  });
+  const requestInspectorOpen = inspectorOverlay.requestOpen;
+  const publishReviewRef = useRef<HTMLElement>(null);
+  const publishReviewTargets = useMemo(() => publishReviewIssues
+    .filter((issue) => issue.severity === "error")
+    .map((issue) => resolvePagePublishIssueTarget(
+      issue,
+      appData,
+      resolvedDynamicTemplateDefinitions,
+    )), [appData, publishReviewIssues, resolvedDynamicTemplateDefinitions]);
+
+  const focusReviewPanel = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      publishReviewRef.current?.scrollIntoView({ block: "nearest" });
+      publishReviewRef.current?.focus();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!publishReviewActive || !publishReviewOpen) return;
+    if (previewMode) onExitPreview();
+    requestInspectorOpen();
+    focusReviewPanel();
+  }, [focusReviewPanel, onExitPreview, previewMode, publishReviewActive, publishReviewOpen, requestInspectorOpen]);
+
+  const closePublishReview = useCallback(() => {
+    onClosePublishReview();
+    if (inspectorOverlay.compact) closeInspector();
+    window.requestAnimationFrame(() => {
+      document.getElementById("homepage-page-publish-review-entry")?.focus();
+    });
+  }, [closeInspector, inspectorOverlay.compact, onClosePublishReview]);
+
+  const locatePublishIssue = useCallback((target: PagePublishIssueTarget) => {
+    onSelectPublishReviewIssue(target.key);
+    document.querySelectorAll<HTMLElement>("[data-page-publish-located]").forEach((element) => {
+      delete element.dataset.pagePublishLocated;
+    });
+    if (target.destination === "page-settings") {
+      onOpenPageSettings(target.field);
+      return;
+    }
+    if (target.destination === "retry-validation" || target.destination === "unavailable") {
+      onRetryValidation();
+      focusReviewPanel();
+      return;
+    }
+    if (target.blockIndex === undefined) {
+      focusReviewPanel();
+      return;
+    }
+
+    if (previewMode) onExitPreview();
+    dispatch({
+      type: "setUi",
+      ui: { itemSelector: { index: target.blockIndex, zone: target.zone } },
+      recordHistory: false,
+    });
+    if (target.blockId) focusCanvasBlock(target.blockId);
+
+    if (target.destination === "structure") {
+      if (inspectorOverlay.compact) inspectorOverlay.requestClose();
+      window.requestAnimationFrame(() => {
+        setStructureCollapsed(false);
+        window.requestAnimationFrame(() => {
+          const layer = target.blockId
+            ? document.querySelector<HTMLElement>(`[data-layer-id="${CSS.escape(target.blockId)}"]`)
+            : null;
+          const focusTarget = layer?.querySelector<HTMLElement>(".homepage-editor__layer-select") ?? layer;
+          if (layer) layer.dataset.pagePublishLocated = "true";
+          focusTarget?.scrollIntoView({ block: "nearest" });
+          focusTarget?.focus();
+        });
+      });
+      return;
+    }
+
+    if (target.device !== "shared") {
+      const preset = VIEWPORT_PRESETS.find((candidate) => (
+        target.device === "mobile"
+          ? candidate.width === RESPONSIVE_CANVAS.mobile.width
+          : candidate.width === RESPONSIVE_CANVAS.desktop.width
+      ));
+      if (preset) {
+        dispatch({
+          type: "setUi",
+          ui: {
+            viewports: {
+              ...viewports,
+              current: { width: preset.width, height: preset.height },
+            },
+          },
+          recordHistory: false,
+        });
+      }
+    }
+    if (target.blockId && target.moduleType && target.objectId && target.objectKind) {
+      const visualKind = target.objectKind === "video"
+        ? "media"
+        : target.objectKind === "collection"
+          ? "structured"
+          : target.objectKind;
+      useVisualEditorSession.getState().selectNode({
+        blockId: target.blockId,
+        moduleType: target.moduleType,
+        nodeId: target.objectId,
+        kind: visualKind,
+      });
+      useVisualEditorSession.getState().setPanelMode("content");
+    }
+    inspectorOverlay.requestOpen();
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const holder = publishReviewRef.current?.closest(".homepage-editor__inspector-holder");
+      const candidates = target.field
+        ? Array.from(holder?.querySelectorAll<HTMLElement>(
+            `[data-inspector-field="${CSS.escape(target.field)}"]`,
+          ) ?? [])
+        : [];
+      const field = candidates.find((candidate) => (
+        target.device === "shared"
+        || candidate.dataset.inspectorDevice === target.device
+      )) ?? candidates[0];
+      if (!field) {
+        focusReviewPanel();
+        return;
+      }
+      let details = field.closest("details");
+      while (details) {
+        details.open = true;
+        details = details.parentElement?.closest("details") ?? null;
+      }
+      field.dataset.pagePublishLocated = "true";
+      field.scrollIntoView({ block: "center" });
+      const control = Array.from(field.querySelectorAll<HTMLElement>(
+        "input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]",
+      )).find((candidate) => (
+        candidate.getAttribute("aria-disabled") !== "true"
+        && candidate.getClientRects().length > 0
+      ));
+      if (control) control.focus();
+      else {
+        field.tabIndex = -1;
+        field.focus();
+      }
+    }));
+  }, [dispatch, focusReviewPanel, inspectorOverlay, onExitPreview, onOpenPageSettings, onRetryValidation, onSelectPublishReviewIssue, previewMode, viewports]);
+  useEffect(() => {
+    updateInspectorCollapsed(inspectorOverlay.compact);
+  }, [inspectorOverlay.compact, updateInspectorCollapsed]);
   useEffect(() => {
     try {
       sessionStorage.setItem(
@@ -1162,9 +1607,6 @@ function EditorBody({
   const visualEditFrameRef = useRef(new Map<string, number>());
   const visualEditPendingRef = useRef(new Map<string, CanvasVisualEditMessage>());
   const visualEditSourceRef = useRef(new Map<string, Window>());
-  useEffect(() => {
-    appDataRef.current = appData;
-  }, [appData]);
   useEffect(() => {
     visualEditStartRef.current.clear();
     visualEditPendingRef.current.clear();
@@ -1533,9 +1975,8 @@ function EditorBody({
         )
       : canvasZoom;
 
-    setCanvasZoom((current) =>
-      Math.abs(current - nextZoom) < 0.005 ? current : nextZoom,
-    );
+    // dock 动画的最后一次测量也必须落地；比例阈值会丢掉最终数像素的变化。
+    setCanvasZoom(nextZoom);
     setCanvasHeight(contentHeight * nextZoom);
   }, [canvasBaseWidth, canvasZoom, isFitView]);
 
@@ -1591,9 +2032,11 @@ function EditorBody({
         clearDragState();
         return;
       }
+      const currentDocument = appDataRef.current;
+      const currentResolvedDefinitions = getResolvedDynamicTemplateDefinitions();
       if (
         CONTENT_TEMPLATE_BY_MODULE_TYPE[templateName]?.visualRole === "primary-stage"
-        && hasVisiblePrimaryStage(appData, resolvedDynamicTemplateDefinitions)
+        && isPrimaryStageInsertionBlocked(currentDocument, currentResolvedDefinitions)
       ) {
         message.warning("首屏主舞台全页只能有一个；请编辑现有首屏");
         clearDragState();
@@ -1629,7 +2072,7 @@ function EditorBody({
       message.success(`已插入“${displayName}”，可在右侧继续编辑`);
       clearDragState();
     },
-    [appData, clearDragState, dispatch, message, pageKey, resolvedDynamicTemplateDefinitions],
+    [clearDragState, dispatch, message, pageKey],
   );
 
   const getCanvasDropIndex = useCallback(
@@ -1704,7 +2147,7 @@ function EditorBody({
 
   return (
     <main
-      className={`homepage-editor__body${isInspecting ? " is-inspecting" : ""}${previewMode ? " is-previewing" : ""}${viewingPublished ? " is-viewing-published" : ""}`}
+      className={`homepage-editor__body${isInspecting ? " is-inspecting" : ""}${previewMode ? " is-previewing" : ""}${viewingPublished ? " is-viewing-published" : ""}${publishReviewOpen ? " is-reviewing-publish" : ""}`}
     >
       {viewingPublished ? (
         <aside
@@ -1742,14 +2185,14 @@ function EditorBody({
             <WorkspacePanelHeader
               icon={<BlockOutlined />}
               title="图层面板"
-              actions={(
+              actions={inspectorOverlay.compact ? (
                 <WorkspacePanelCollapseButton
                   action="collapse"
                   panel="structure"
                   panelLabel="图层面板"
                   onClick={() => setStructureCollapsed(true)}
                 />
-              )}
+              ) : undefined}
             />
             <LayerRail
               navigationPreviewOpen={navigationPreviewOpen}
@@ -1827,15 +2270,24 @@ function EditorBody({
       </section>
 
       <div
+        ref={inspectorOverlay.panelRef as RefObject<HTMLDivElement>}
         className={`homepage-editor__right-workspace${inspectorCollapsed ? " is-inspector-collapsed" : ""}`}
         aria-label="属性面板"
+        role={inspectorOverlay.compact && !inspectorCollapsed ? "dialog" : undefined}
+        aria-modal={inspectorOverlay.compact && !inspectorCollapsed ? "true" : undefined}
+        tabIndex={inspectorOverlay.compact && !inspectorCollapsed ? -1 : undefined}
+        data-compact-overlay={inspectorOverlay.compact ? "inspector" : undefined}
+        data-compact-overlay-open={!inspectorCollapsed || undefined}
+        onKeyDown={inspectorOverlay.onPanelKeyDown}
       >
-        {inspectorCollapsed ? (
+        {inspectorCollapsed && selectedItem ? (
           <WorkspacePanelCollapseButton
+            ref={inspectorOverlay.openButtonRef}
             action="expand"
             panel="inspector"
             panelLabel="属性面板"
-            onClick={() => setInspectorCollapsed(false)}
+            compactLabel={selectedItemLabel ? `属性 · ${selectedItemLabel}` : "属性"}
+            onClick={inspectorOverlay.requestOpen}
           />
         ) : null}
           <div
@@ -1845,15 +2297,31 @@ function EditorBody({
             <WorkspacePanelHeader
               icon={<ControlOutlined />}
               title="属性面板"
-              actions={(
+              actions={inspectorOverlay.compact ? (
                 <WorkspacePanelCollapseButton
+                  ref={inspectorOverlay.closeButtonRef}
                   action="collapse"
                   panel="inspector"
                   panelLabel="属性面板"
-                  onClick={() => setInspectorCollapsed(true)}
+                  compactLabel="关闭"
+                  onClick={inspectorOverlay.requestClose}
                 />
-              )}
+              ) : undefined}
             />
+            {publishReviewActive && publishReviewOpen ? (
+              <PagePublishCheckPanel
+                issues={publishReviewIssues.filter((issue) => issue.severity === "error")}
+                targets={publishReviewTargets}
+                currentKey={publishReviewIssueKey}
+                validationStatus={validationStatus}
+                publishAttemptFailed={publishAttemptFailed}
+                reviewRef={publishReviewRef}
+                onLocate={locatePublishIssue}
+                onClose={closePublishReview}
+                onRetry={onRetryValidation}
+                onRetryPublish={() => onRetryPublish(appData)}
+              />
+            ) : null}
             {viewingPublished ? (
               <div className="homepage-editor__properties-empty-state homepage-editor__readonly-panel">
                 <EyeOutlined />
@@ -1868,6 +2336,7 @@ function EditorBody({
                 publishIssues={publishIssues}
                 validationStatus={validationStatus}
                 onRetryValidation={onRetryValidation}
+                onOpenPublishReview={onOpenPublishReview}
                 onOpenPageSettings={onOpenPageSettings}
                 canPromoteToTemplate={canPromoteToTemplate}
                 onPromoteToTemplate={(request) => onPromoteToTemplate(request, {
@@ -1907,17 +2376,32 @@ export default function StoreDecorationWorkbench({
     metadata,
     resolvedDynamicTemplateDefinitions,
     resolvedDynamicTemplatesReady,
+    resolvedDynamicTemplatesError,
     saving,
+    draftSaveFailed,
     publishing,
     publishIssues,
+    publishAttemptFailure,
+    publishReviewIssues,
     publishValidationStatus,
+    publishReviewActive,
+    publishReviewOpen,
+    publishReviewIssueKey,
     hasUnsavedChanges,
+    personalTemplateUpgradeHintCount,
     hasProtectedUnsavedChanges,
     previewMode,
     revisionsOpen,
     revisionsLoading,
+    revisionsLoadingMore,
     revisions,
-    restoringVersion,
+    revisionNextBeforeVersion,
+    selectedRevision,
+    selectedRevisionVersion,
+    revisionDetailLoading,
+    revisionDetailError,
+    revisionDraftComparison,
+    revisionPublishedComparison,
     rollingBackRevisionId,
     revisionFailure,
     draftDiscardError,
@@ -1926,9 +2410,11 @@ export default function StoreDecorationWorkbench({
     loadedPageKey,
     loadError,
     canvasDataSyncVersion,
+    pendingPageHistoryCommand,
     pageSettingsOpen,
     pageSettingsFocusField,
     hasPendingDraft,
+    canDiscardDraft,
     publishedNeedsRevalidation,
     viewingPublished,
     draftSavedAtLabel,
@@ -1939,8 +2425,13 @@ export default function StoreDecorationWorkbench({
     dismissDraftDiscardError,
     setPreviewMode,
     retryPublishValidation,
+    openPublishReview,
+    closePublishReview,
+    setPublishReviewIssueKey,
     saveDraft,
     loadRevisions,
+    loadMoreRevisions,
+    selectRevision,
     editDraftFromRevisions,
     returnToEditingDraft,
     openPageSettingsForEditing,
@@ -1949,7 +2440,9 @@ export default function StoreDecorationWorkbench({
     discardDraftToPublished,
     openRevisions,
     savePageSettings,
-    restoreRevision,
+    stageRevisionAsDraft,
+    commitPageHistoryCommand,
+    navigatePageHistoryCommand,
     rollbackPublication,
     publishHome,
     trackEditorData,
@@ -1974,8 +2467,7 @@ export default function StoreDecorationWorkbench({
     onReturnPage: returnToPageWorkspace,
   });
   const hasProtectedTemplateChanges = Boolean(
-    workspaceMode === "template"
-    && templateWorkspaceController.draft
+    templateWorkspaceController.draft
     && templateWorkspaceController.dirty,
   );
   const hasAnyProtectedChanges =
@@ -2075,31 +2567,29 @@ export default function StoreDecorationWorkbench({
         open={revisionsOpen}
         revisions={revisions}
         loading={revisionsLoading}
-        restoringVersion={restoringVersion}
+        loadingMore={revisionsLoadingMore}
+        nextBeforeVersion={revisionNextBeforeVersion}
+        selectedVersion={selectedRevisionVersion}
+        selectedRevision={selectedRevision}
+        detailLoading={revisionDetailLoading}
+        detailError={revisionDetailError}
         rollingBackRevisionId={rollingBackRevisionId}
         canRollback={canPublish}
         draft={draftSnapshot}
+        draftComparison={revisionDraftComparison}
+        publishedComparison={revisionPublishedComparison}
         error={revisionFailure?.message ?? null}
-        retryLabel={
-          revisionFailure?.revision
-            ? revisionFailure.action === "rollback"
-              ? `重新回滚到版本 ${revisionFailure.revision.version}`
-              : `重新恢复版本 ${revisionFailure.revision.version}`
-            : "重新加载"
-        }
         onClose={closeRevisions}
         onRetry={() => {
-          if (revisionFailure?.revision) {
-            if (revisionFailure.action === "rollback") {
-              rollbackPublication(revisionFailure.revision);
-            } else {
-              restoreRevision(revisionFailure.revision);
-            }
+          if (revisionFailure?.revision && revisionFailure.action === "rollback") {
+            rollbackPublication(revisionFailure.revision);
             return;
           }
           void loadRevisions();
         }}
-        onRestore={restoreRevision}
+        onLoadMore={() => { void loadMoreRevisions(); }}
+        onSelect={(revision) => { void selectRevision(revision); }}
+        onStageRestore={stageRevisionAsDraft}
         onRollback={rollbackPublication}
         onEditDraft={editDraftFromRevisions}
       />
@@ -2139,6 +2629,13 @@ export default function StoreDecorationWorkbench({
         </div>
       ) : null}
 
+      {personalTemplateUpgradeHintCount > 0 ? (
+        <div className="dynamic-template-upgrade-hint" role="status">
+          <ExclamationCircleOutlined aria-hidden="true" />
+          <span>{personalTemplateUpgradeHintCount} 个历史个人模板实例可升级；当前页面仍保持原版本与原草稿，打开页面不会自动改写。</span>
+        </div>
+      ) : null}
+
       {loadError ? (
         <div className="homepage-editor__load-error" role="alert">
           <ExclamationCircleOutlined />
@@ -2149,6 +2646,15 @@ export default function StoreDecorationWorkbench({
             onClick={retryLoad}
           >
             重新加载
+          </Button>
+        </div>
+      ) : !initialLoading && loadedPageKey === pageKey && resolvedDynamicTemplatesError ? (
+        <div className="homepage-editor__load-error" role="alert">
+          <ExclamationCircleOutlined />
+          <strong>模板版本解析失败</strong>
+          <span>{resolvedDynamicTemplatesError}。页面草稿未修改，请重新加载后重试。</span>
+          <Button type="primary" onClick={retryLoad}>
+            重新加载模板版本
           </Button>
         </div>
       ) : initialLoading || loadedPageKey !== pageKey || !resolvedDynamicTemplatesReady ? (
@@ -2191,6 +2697,8 @@ export default function StoreDecorationWorkbench({
             data={data}
             pageKey={pageKey}
             canvasDataSyncVersion={canvasDataSyncVersion}
+            historyCommand={pendingPageHistoryCommand}
+            onHistoryCommandCommitted={commitPageHistoryCommand}
           />
           {workspaceMode === "page" ? (
             <CanvasSelectionDock readOnly={viewingPublished} />
@@ -2200,7 +2708,9 @@ export default function StoreDecorationWorkbench({
             pageKey={pageKey}
             publishing={publishing}
             saving={saving}
+            draftSaveFailed={draftSaveFailed}
             hasPendingDraft={hasPendingDraft}
+            canDiscardDraft={canDiscardDraft}
             publishedNeedsRevalidation={publishedNeedsRevalidation}
             viewingPublished={viewingPublished}
             previewMode={previewMode}
@@ -2209,6 +2719,10 @@ export default function StoreDecorationWorkbench({
             canManageTemplates={canManageTemplates}
             draftSavedAtLabel={draftSavedAtLabel}
             publishValidationStatus={publishValidationStatus}
+            publishAttemptFailed={Boolean(publishAttemptFailure)}
+            publishReviewActive={publishReviewActive}
+            publishReviewErrorCount={publishReviewIssues.filter((issue) => issue.severity === "error").length}
+            onOpenPublishReview={openPublishReview}
             onPublish={publishHome}
             onSaveDraft={(nextData) => {
               void saveDraft(nextData);
@@ -2222,6 +2736,7 @@ export default function StoreDecorationWorkbench({
             onPreviewModeChange={setPreviewMode}
             onDataChange={trackEditorData}
             onCanvasDataSync={syncCanvasDataWithoutAdvancingSavedBaseline}
+            onPageHistoryNavigation={navigatePageHistoryCommand}
             onExitViewing={returnToEditingDraft}
             onEnterTemplateMode={templateWorkspaceController.enter}
             restoreViewport={pageViewportBeforeTemplateRef.current}
@@ -2244,8 +2759,18 @@ export default function StoreDecorationWorkbench({
                 void saveDraft(nextData);
               }}
               publishIssues={publishIssues}
+              publishReviewIssues={publishReviewIssues}
+              publishAttemptFailed={Boolean(publishAttemptFailure)}
               validationStatus={publishValidationStatus}
               onRetryValidation={retryPublishValidation}
+              onRetryPublish={publishHome}
+              publishReviewActive={publishReviewActive}
+              publishReviewOpen={publishReviewOpen}
+              publishReviewIssueKey={publishReviewIssueKey}
+              onOpenPublishReview={openPublishReview}
+              onClosePublishReview={closePublishReview}
+              onSelectPublishReviewIssue={setPublishReviewIssueKey}
+              onExitPreview={() => setPreviewMode(false)}
               onOpenPageSettings={openPageSettingsForEditing}
               canPromoteToTemplate={canManageTemplates && !USE_MOCK}
               onPromoteToTemplate={templateWorkspaceController.promoteFromPage}

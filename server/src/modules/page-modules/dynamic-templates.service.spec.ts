@@ -11,6 +11,7 @@ import { ROLES_KEY } from "../../common/decorators/roles.decorator";
 import { DynamicTemplatesController } from "./dynamic-templates.controller";
 import { DynamicTemplatesService } from "./dynamic-templates.service";
 import { definitionFixture } from "./dynamic-template-test-fixture";
+import { CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE } from "./generated/contentTemplates.generated";
 import { PageModulesModule } from "./page-modules.module";
 import { PageModulesService } from "./page-modules.service";
 
@@ -79,8 +80,19 @@ function createStatefulService() {
     },
     findMany: async (args: any) => {
       calls.push({ operation: "version.findMany", args: clone(args) });
-      return clone(versions.filter((item) => item.dynamicTemplateId === args.where.dynamicTemplateId)
-        .sort((left, right) => right.version - left.version));
+      let rows = versions.filter((item) => (
+        item.dynamicTemplateId === args.where.dynamicTemplateId
+        && (args.where.version?.lt === undefined || item.version < args.where.version.lt)
+      )).sort((left, right) => right.version - left.version);
+      if (typeof args.take === "number") rows = rows.slice(0, args.take);
+      if (args.select) {
+        rows = rows.map((item) => Object.fromEntries(
+          Object.entries(args.select)
+            .filter(([, selected]) => selected)
+            .map(([key]) => [key, item[key]]),
+        ));
+      }
+      return clone(rows);
     },
   };
   const matchesTemplateWhere = (candidate: any, where: any): boolean => {
@@ -572,6 +584,108 @@ test("发布生成不可变正式版本、开放 STAFF 读取并保留下一版�
   assert.equal((published[0].definition as any).name, changed.name);
 });
 
+test("模板版本列表分页只返回摘要，详情仍通过可信正式版本读取", async () => {
+  const { service, calls } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const changed = structuredClone(definition);
+  changed.name = "分页摘要第二版";
+  await service.updateDraft(17, definition.templateId, { expectedRevision: 2, definition: changed });
+  await service.publish(17, definition.templateId, { expectedRevision: 3 });
+
+  const firstPage = await service.listVersions(17, definition.templateId, undefined, 1);
+  assert.equal(firstPage.items.length, 1);
+  assert.equal(firstPage.items[0].version, 2);
+  assert.equal("definition" in firstPage.items[0], false);
+  assert.equal(firstPage.nextBeforeVersion, 2);
+  const secondPage = await service.listVersions(17, definition.templateId, firstPage.nextBeforeVersion!, 1);
+  assert.equal(secondPage.items[0].version, 1);
+  assert.equal(secondPage.nextBeforeVersion, null);
+  const query = [...calls].reverse().find((call) => call.operation === "version.findMany");
+  assert.deepEqual(query?.args.where.version, { lt: 2 });
+  assert.equal(query?.args.select.definition, undefined);
+
+  const detail = await service.getPublishedVersion(definition.templateId, 1);
+  assert.equal(detail.version, 1);
+  assert.equal(detail.definition.templateId, definition.templateId);
+});
+
+test("历史版本只在显式保存时以同模板可信来源越过结构锁，校验失败保持零写入", async () => {
+  const { service, calls, getState, corruptVersionChecksum } = createStatefulService();
+  const first = definitionFixture();
+  first.nodes.node_container.authoring = { structureLocked: true };
+  await service.create(17, { definition: first });
+  const publishedFirst = await service.publish(17, first.templateId, { expectedRevision: 1 });
+
+  const unlocked = structuredClone(first);
+  delete unlocked.nodes.node_container.authoring;
+  unlocked.nodes.node_heading.responsive.desktop.order = 4;
+  await service.updateDraft(17, first.templateId, { expectedRevision: 2, definition: unlocked });
+  const second = structuredClone(unlocked);
+  second.nodes.node_container.authoring = { structureLocked: true };
+  await service.updateDraft(17, first.templateId, { expectedRevision: 3, definition: second });
+  await service.publish(17, first.templateId, { expectedRevision: 4 });
+
+  await assert.rejects(
+    () => service.updateDraft(17, first.templateId, {
+      expectedRevision: 5,
+      definition: first,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof BadRequestException);
+      assert.equal((error.getResponse() as any).code, "TEMPLATE_STRUCTURE_LOCKED");
+      return true;
+    },
+  );
+  const writesBeforeInvalidSource = calls.filter((call) => (
+    call.operation === "draft.updateMany" || call.operation === "template.update"
+  )).length;
+  await assert.rejects(
+    () => service.updateDraft(17, first.templateId, {
+      expectedRevision: 5,
+      definition: first,
+      restoreFromVersion: 1,
+      restoreFromChecksum: "0".repeat(64),
+    }),
+    ConflictException,
+  );
+  assert.equal(calls.filter((call) => (
+    call.operation === "draft.updateMany" || call.operation === "template.update"
+  )).length, writesBeforeInvalidSource);
+
+  const restored = await service.updateDraft(17, first.templateId, {
+    expectedRevision: 5,
+    definition: first,
+    restoreFromVersion: 1,
+    restoreFromChecksum: publishedFirst.published.definitionChecksum,
+  });
+  assert.equal(restored?.draft?.revision, 6);
+  assert.equal(getState().draft.definition.nodes.node_heading.responsive.desktop.order, 0);
+  assert.equal(getState().versions.length, 2);
+
+  corruptVersionChecksum(1);
+  await assert.rejects(
+    () => service.getPublishedVersion(first.templateId, 1),
+    ConflictException,
+  );
+  const writesBeforeRestore = calls.filter((call) => (
+    call.operation === "draft.updateMany" || call.operation === "template.update"
+  )).length;
+  await assert.rejects(
+    () => service.updateDraft(17, first.templateId, {
+      expectedRevision: 6,
+      definition: first,
+      restoreFromVersion: 1,
+      restoreFromChecksum: publishedFirst.published.definitionChecksum,
+    }),
+    ConflictException,
+  );
+  assert.equal(calls.filter((call) => (
+    call.operation === "draft.updateMany" || call.operation === "template.update"
+  )).length, writesBeforeRestore);
+});
+
 test("发布模板 v2 不读取或修改 PageDocument、PageDocumentRevision、PageScheme，旧实例继续引用 v1", async () => {
   const { service, calls, setPageDocuments, getState } = createStatefulService();
   const definition = definitionFixture();
@@ -615,9 +729,52 @@ test("发布模板 v2 不读取或修改 PageDocument、PageDocumentRevision、P
   assert.equal(pageDocument.updatedAt, "2026-08-30T08:00:00.000Z");
 });
 
-test("另存为创建全新 templateId，归档仅改变生命周期且不删除版本", async () => {
+test("另存、发布版本与归档生命周期保留按轴尺寸兼容状态", async () => {
   const { service, getState, calls } = createStatefulService();
   const definition = definitionFixture();
+  definition.nodes.node_hero_template = {
+    nodeId: "node_hero_template",
+    type: "HeroTemplate",
+    name: "首屏主视觉组件",
+    slotId: "slot_hero_template",
+    childIds: [],
+    props: {
+      contentTemplateLayoutData: {
+        version: 2,
+        nodes: {
+          action: {
+            rectByViewport: {
+              desktop: { x: 0.05, y: 0.8, width: 0.04, height: 0.03 },
+            },
+            sizeCompatibilityByViewport: {
+              desktop: {
+                width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+                height: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+              },
+            },
+          },
+        },
+      },
+    },
+    responsive: {
+      desktop: { display: "block", order: 2, width: "fill", height: { mode: "auto" } },
+      mobile: { display: "block", order: 2, width: "fill", height: { mode: "auto" } },
+    },
+    hidden: false,
+  };
+  definition.nodes.node_container.childIds.push("node_hero_template");
+  definition.slots.slot_hero_template = {
+    slotId: "slot_hero_template",
+    key: "heroTemplateContent",
+    type: "heroTemplate",
+    label: "首屏主视觉组件",
+    required: false,
+    editable: true,
+    hideable: true,
+    validation: {},
+    desktopRules: {},
+    mobileRules: {},
+  };
   await service.create(17, { definition });
   const copy = await service.saveAs(17, definition.templateId, {
     name: "服务端母模板校验｜副本",
@@ -628,8 +785,18 @@ test("另存为创建全新 templateId，归档仅改变生命周期且不删除
   assert.equal(copy.sourceReference, definition.templateId);
   assert.ok(copy.draft);
   assert.equal((copy.draft.definition as any).templateId, copy.templateId);
+  const copiedCompatibility = (copy.draft.definition as any).nodes.node_hero_template
+    .props.contentTemplateLayoutData.nodes.action.sizeCompatibilityByViewport.desktop;
+  assert.deepEqual(copiedCompatibility, {
+    width: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+    height: CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE,
+  });
 
   await service.publish(17, copy.templateId, { expectedRevision: 1 });
+  const publishedCompatibility = (await service.getPublishedVersion(copy.templateId, 1)
+    .then((version) => version.definition as any)).nodes.node_hero_template
+    .props.contentTemplateLayoutData.nodes.action.sizeCompatibilityByViewport.desktop;
+  assert.deepEqual(publishedCompatibility, copiedCompatibility);
   await service.archive(17, copy.templateId);
   assert.equal(getState().template.status, "ARCHIVED");
   assert.equal(getState().versions.length, 1);

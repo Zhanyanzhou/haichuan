@@ -112,17 +112,51 @@ export type CustomerAddress = {
 
 export type CustomerSelectionInquiry = {
   id: number;
+  leadId?: number | null;
   status: string;
+  message?: string | null;
   createdAt: string;
+  updatedAt?: string;
   items?: Array<{ productNameSnapshot: string }>;
+  reply?: CustomerConsultationReply | null;
 };
 
 export type CustomerInquiry = {
   id: number;
+  leadId?: number | null;
   status: string;
+  message?: string;
   createdAt: string;
+  updatedAt?: string;
   consultationType?: string | null;
+  preferredContact?: string | null;
+  preferredTime?: string | null;
+  budgetRange?: string | null;
   product?: { name?: string | null } | null;
+  reply?: CustomerConsultationReply | null;
+};
+
+export type CustomerConsultationReply = {
+  id: number;
+  content: string;
+  createdAt: string;
+};
+
+export type CustomerConsultationDetail = {
+  leadId: number;
+  sourceId: number;
+  type: "inquiry" | "selection";
+  status: string;
+  message?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  consultationType?: string | null;
+  preferredContact?: string | null;
+  preferredTime?: string | null;
+  budgetRange?: string | null;
+  product?: { name: string } | null;
+  items: Array<{ productNameSnapshot: string }>;
+  reply?: CustomerConsultationReply | null;
 };
 
 export type CustomerInquiryPage = {

@@ -25,11 +25,12 @@ import {
   canvasPointAtViewportCenter,
   clampCanvasScale,
   clampRoundedGeometryValue as clampDimension,
-  findElementsByEditableTargetLocator,
   rectCenter,
-  rectFromDomRect,
+  rectFromBounds,
   scrollPositionForCanvasPoint,
 } from "./editableTargetGeometry";
+import { findElementsByEditableTargetLocator } from "./editableTargetDomLocator";
+import { useTemplateEditorSession } from "./templateEditorSession";
 
 export const AUTO_ARTBOARD_MIN_HEIGHT = 240;
 const DIRECT_RESIZE_MIN_HEIGHT = 40;
@@ -73,6 +74,18 @@ interface TemplateViewportMeasurement {
   contentWidth: number;
   contentHeight: number;
   overflowNodeId?: string;
+}
+
+function readCanvasContentBox(stage: HTMLElement) {
+  const styles = window.getComputedStyle(stage);
+  const horizontalPadding = Number.parseFloat(styles.paddingLeft)
+    + Number.parseFloat(styles.paddingRight);
+  const verticalPadding = Number.parseFloat(styles.paddingTop)
+    + Number.parseFloat(styles.paddingBottom);
+  return {
+    width: Math.max(1, stage.clientWidth - horizontalPadding),
+    height: Math.max(1, stage.clientHeight - verticalPadding),
+  };
 }
 
 function fitLockedRatio(
@@ -160,7 +173,7 @@ export default function TemplateViewportFrame({
   onHeightModeChange,
   onRatioChange,
   canRestore,
-  deviceLabel,
+  device,
   onRestore,
   onDirectResizePreview,
   onDirectResizeCancel,
@@ -193,7 +206,7 @@ export default function TemplateViewportFrame({
   onHeightModeChange: (mode: TemplateDesignHeightMode) => void;
   onRatioChange: (ratio: { width: number; height: number }) => void;
   canRestore: boolean;
-  deviceLabel: string;
+  device: "desktop" | "mobile";
   onRestore: () => void;
   onDirectResizePreview: (resize: TemplateDirectResizeValue) => void;
   onDirectResizeCancel: () => void;
@@ -219,14 +232,17 @@ export default function TemplateViewportFrame({
   const [frameDocument, setFrameDocument] = useState<Document | null>(null);
   const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   const [styleRevision, setStyleRevision] = useState(0);
-  const [isFitView, setIsFitView] = useState(true);
-  const [manualScale, setManualScale] = useState(1);
+  const canvasZoom = useTemplateEditorSession((state) => state.canvasZoom);
+  const setCanvasZoom = useTemplateEditorSession((state) => state.setCanvasZoom);
+  const isFitView = canvasZoom === null;
+  const manualScale = canvasZoom ?? 1;
   const [panMode, setPanMode] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [showGrid, setShowGrid] = useState(false);
   const [showCenterGuides, setShowCenterGuides] = useState(false);
   const [showSafeArea, setShowSafeArea] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(true);
+  const canvasContractRef = useRef(`${sourceWidth}:${fallbackHeight}:${autoHeight}`);
   const [measurement, setMeasurement] = useState<TemplateViewportMeasurement>({
     fitScale: 1,
     // 自动高度仍有当前设备的合同基线。首帧先使用该基线，避免真实
@@ -248,16 +264,18 @@ export default function TemplateViewportFrame({
     const stage = stageRef.current;
     if (!stage) return undefined;
     const measureWidth = () => {
+      const viewport = readCanvasContentBox(stage);
       const fitScale = calculateFitCanvasScale({
-        viewportWidth: stage.clientWidth,
-        viewportHeight: stage.clientHeight,
+        viewportWidth: viewport.width,
+        viewportHeight: viewport.height,
         contentWidth: sourceWidth,
         contentHeight: measurement.naturalHeight,
-        inset: 24,
+        inset: 0,
         minimumScale: MIN_CANVAS_SCALE,
         maximumScale: 1,
       });
-      setMeasurement((current) => Math.abs(current.fitScale - fitScale) < 0.001
+      // 只跳过完全相同的测量，保留 dock 动画收尾时不足 0.001 的比例变化。
+      setMeasurement((current) => current.fitScale === fitScale
         ? current
         : { ...current, fitScale });
     };
@@ -269,8 +287,11 @@ export default function TemplateViewportFrame({
 
   useEffect(() => {
     if (directResizeRef.current) return;
-    setIsFitView(true);
-  }, [autoHeight, fallbackHeight, sourceWidth]);
+    const nextContract = `${sourceWidth}:${fallbackHeight}:${autoHeight}`;
+    if (canvasContractRef.current === nextContract) return;
+    canvasContractRef.current = nextContract;
+    setCanvasZoom(null);
+  }, [autoHeight, fallbackHeight, setCanvasZoom, sourceWidth]);
 
   useLayoutEffect(() => {
     if (directResizeRef.current) return;
@@ -412,8 +433,7 @@ export default function TemplateViewportFrame({
       boardTop: board.offsetTop,
       scale,
     }) : null;
-    setManualScale(clampedScale);
-    setIsFitView(false);
+    setCanvasZoom(clampedScale);
     if (stage && canvasCenter) {
       window.requestAnimationFrame(() => {
         window.requestAnimationFrame(() => {
@@ -463,7 +483,7 @@ export default function TemplateViewportFrame({
     const rect = target.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return false;
     const position = scrollPositionForCanvasPoint({
-      point: rectCenter(rectFromDomRect(rect)),
+      point: rectCenter(rectFromBounds(rect)),
       viewportWidth: stage.clientWidth,
       viewportHeight: stage.clientHeight,
       boardLeft: board.offsetLeft,
@@ -737,7 +757,7 @@ export default function TemplateViewportFrame({
           height: Math.round(measurement.naturalHeight),
           heightMode,
           ratioLabel,
-          deviceLabel,
+          device,
           minWidth,
           maxWidth,
           canRestore,
@@ -749,10 +769,9 @@ export default function TemplateViewportFrame({
           onRestore,
           onLocateOverflow: locateOverflow,
         }}
-        onFit={() => setIsFitView(true)}
+        onFit={() => setCanvasZoom(null)}
         onActualSize={() => {
-          setManualScale(1);
-          setIsFitView(false);
+          setCanvasZoom(1);
         }}
         onZoomChange={setCanvasScale}
         onZoomOut={() => adjustScale(-0.1)}
@@ -862,6 +881,7 @@ export default function TemplateViewportFrame({
                 surface="template-definition"
                 selectedTargetId={selectedOverlayTargetId}
                 interactive
+                snapEnabled={snapToGrid}
                 movableTargetIds={movableOverlayTargetIds}
                 resizeTargetIds={resizeOverlayTargetIds}
                 disabledNodeActions={disabledOverlayNodeActions}

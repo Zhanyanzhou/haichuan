@@ -11,6 +11,11 @@ import { registerResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import { analyzeDynamicTemplateUpgrade } from "./upgrade";
 import { DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT } from "../template-editor/templateCatalogEvents";
+import type {
+  DynamicTemplateUpgradeAnalysis,
+  DynamicTemplateUpgradeInstancePlan,
+} from "./upgrade";
+import "./DynamicTemplateUpgradePanel.css";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
 let publishedTemplatesCache: PublishedDynamicTemplateResource[] | null = null;
@@ -49,7 +54,11 @@ export default function DynamicTemplateUpgradePanel({
 }: {
   definition: TemplateDefinitionV2;
   instance: DynamicTemplateInstanceProps;
-  onApply: (next: DynamicTemplateInstanceProps) => void;
+  onApply: (
+    next: DynamicTemplateInstanceProps,
+    analysis: DynamicTemplateUpgradeAnalysis,
+    target: PublishedDynamicTemplateResource,
+  ) => void;
 }) {
   const { message } = AntdApp.useApp();
   const [loading, setLoading] = useState(true);
@@ -111,7 +120,7 @@ export default function DynamicTemplateUpgradePanel({
       definitionChecksum: latest.definitionChecksum,
       definition: latest.definition,
     });
-    onApply(upgrade.nextProps);
+    onApply(upgrade.nextProps, upgrade, latest);
     setPreviewOpen(false);
     message.success(`页面实例已升级到 v${latest.version}；尚未保存页面草稿，可使用页面撤销回退`);
   };
@@ -125,52 +134,150 @@ export default function DynamicTemplateUpgradePanel({
         description={`当前页面继续使用 v${instance.templateVersion}，只有确认升级才会修改页面草稿。`}
         action={<Button size="small" onClick={() => setPreviewOpen(true)}>查看差异</Button>}
       />
-      <Modal
-        title={`模板版本升级：v${instance.templateVersion} → v${latest.version}`}
+      <DynamicTemplateUpgradeReviewModal
         open={previewOpen}
-        width={980}
-        okText={upgrade.warnings.length > 0 ? "确认升级并处理差异" : "确认升级"}
-        cancelText="保留当前版本"
-        okButtonProps={{ disabled: upgrade.blockers.length > 0, danger: upgrade.warnings.length > 0 }}
-        onOk={applyUpgrade}
+        title={`模板版本升级：v${instance.templateVersion} → v${latest.version}`}
+        plans={[{
+          blockId: instance.id,
+          instanceId: instance.instanceId,
+          currentProps: instance,
+          currentDefinition: definition,
+          targetDefinition: latest.definition,
+          analysis: upgrade,
+        }]}
+        onConfirm={applyUpgrade}
         onCancel={() => setPreviewOpen(false)}
-      >
-        <p>升级只修改当前页面实例的版本引用和兼容槽位内容；模板本身、其他页面和已保存页面均不受影响。</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-          <Tag>新增节点 {upgrade.diff.addedNodeIds.length}</Tag>
-          <Tag>删除节点 {upgrade.diff.removedNodeIds.length}</Tag>
-          <Tag>变化节点 {upgrade.diff.changedNodeIds.length}</Tag>
-          <Tag>新增槽位 {upgrade.diff.addedSlotIds.length}</Tag>
-          <Tag>删除槽位 {upgrade.diff.removedSlotIds.length}</Tag>
-          <Tag>变化槽位 {upgrade.diff.changedSlotIds.length}</Tag>
-        </div>
-        {upgrade.blockers.map((blocker) => <Alert key={blocker} type="error" showIcon message={blocker} style={{ marginBottom: 8 }} />)}
-        {upgrade.warnings.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} style={{ marginBottom: 8 }} />)}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, marginTop: 16 }}>
-          <section aria-label={`当前模板版本 ${instance.templateVersion}`}>
-            <strong>当前 v{instance.templateVersion}</strong>
-            <DynamicTemplateRenderer
-              definition={definition}
-              device="desktop"
-              contentBySlotId={instance.contentBySlotId}
-              hiddenSlotIds={instance.hiddenSlotIds}
-              layoutOverridesByNodeId={instance.layoutOverridesByNodeId}
-              mode="thumbnail"
-            />
-          </section>
-          <section aria-label={`目标模板版本 ${latest.version}`}>
-            <strong>目标 v{latest.version}</strong>
-            <DynamicTemplateRenderer
-              definition={latest.definition}
-              device="desktop"
-              contentBySlotId={upgrade.nextProps.contentBySlotId}
-              hiddenSlotIds={upgrade.nextProps.hiddenSlotIds}
-              layoutOverridesByNodeId={upgrade.nextProps.layoutOverridesByNodeId}
-              mode="thumbnail"
-            />
-          </section>
-        </div>
-      </Modal>
+      />
     </>
+  );
+}
+
+export function DynamicTemplateUpgradeReviewModal({
+  open,
+  title,
+  plans,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  plans: DynamicTemplateUpgradeInstancePlan[];
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  useEffect(() => {
+    if (open) setSelectedIndex(0);
+  }, [open, plans]);
+  const selected = plans[Math.min(selectedIndex, Math.max(0, plans.length - 1))];
+  const blocked = plans.some((plan) => plan.analysis.blockers.length > 0);
+  return (
+    <Modal
+      className="dynamic-template-upgrade-review"
+      title={title}
+      open={open}
+      width={1120}
+      okText="确认升级页面草稿"
+      cancelText="保留当前版本"
+      okButtonProps={{ disabled: blocked || plans.length === 0 }}
+      onOk={onConfirm}
+      onCancel={onCancel}
+    >
+      <p>确认后只修改当前内存草稿并增加一条页面历史；不会自动保存、发布或回写母模板。</p>
+      <div className="dynamic-template-upgrade-review__instances" aria-label="实例升级审查列表">
+        {plans.map((plan, index) => (
+          <button
+            type="button"
+            key={plan.blockId}
+            className={index === selectedIndex ? "is-active" : undefined}
+            aria-label={`审查实例 ${plan.instanceId}：保留 ${plan.analysis.preservedChanges.length}，待填 ${plan.analysis.pendingRequiredSlots.length}，阻断 ${plan.analysis.blockers.length}`}
+            onClick={() => setSelectedIndex(index)}
+          >
+            <span>{plan.analysis.nextProps.moduleName || "动态模板实例"} · {plan.instanceId}</span>
+            <small>
+              保留 {plan.analysis.preservedChanges.length} · 待填 {plan.analysis.pendingRequiredSlots.length} · 阻断 {plan.analysis.blockers.length}
+            </small>
+          </button>
+        ))}
+      </div>
+      {selected ? (
+        <>
+          <div className="dynamic-template-upgrade-review__tags">
+            <Tag>新增节点 {selected.analysis.diff.addedNodeIds.length}</Tag>
+            <Tag>删除节点 {selected.analysis.diff.removedNodeIds.length}</Tag>
+            <Tag>变化节点 {selected.analysis.diff.changedNodeIds.length}</Tag>
+            <Tag color={selected.analysis.pendingRequiredSlots.length > 0 ? "gold" : undefined}>待填写 {selected.analysis.pendingRequiredSlots.length}</Tag>
+            <Tag color={selected.analysis.blockers.length > 0 ? "red" : undefined}>阻断 {selected.analysis.blockers.length}</Tag>
+          </div>
+          {selected.analysis.blockers.map((reason, index) => (
+            <Alert key={`${selected.instanceId}-blocker-${index}`} type="error" showIcon message={reason} />
+          ))}
+          {selected.analysis.pendingRequiredSlots.map((item) => (
+            <Alert key={item.slotId} type="warning" showIcon message={`升级后待填写：${item.label}`} />
+          ))}
+          <div className="dynamic-template-upgrade-review__devices">
+            {(["desktop", "mobile"] as const).map((device) => (
+              <section key={device} aria-label={device === "desktop" ? "桌面端升级对比" : "移动端升级对比"}>
+                <h4>{device === "desktop" ? "桌面端" : "移动端"}</h4>
+                <div className="dynamic-template-upgrade-review__comparison">
+                  {selected.currentDefinition ? (
+                    <Preview
+                      label={`当前 v${selected.analysis.fromVersion}`}
+                      definition={selected.currentDefinition}
+                      instance={selected.currentProps}
+                      contentBySlotId={selected.currentProps.contentBySlotId}
+                      device={device}
+                    />
+                  ) : (
+                    <div
+                      className="dynamic-template-upgrade-review__preview"
+                      aria-label={`${device === "desktop" ? "桌面端" : "移动端"}当前 v${selected.analysis.fromVersion}`}
+                    >
+                      <strong>当前 v{selected.analysis.fromVersion}</strong>
+                      <Alert type="error" showIcon message="当前精确模板版本不可用，无法生成可靠预览" />
+                    </div>
+                  )}
+                  <Preview
+                    label={`目标 v${selected.analysis.toVersion}`}
+                    definition={selected.targetDefinition}
+                    instance={selected.analysis.nextProps}
+                    contentBySlotId={selected.analysis.nextProps.contentBySlotId}
+                    device={device}
+                  />
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </Modal>
+  );
+}
+
+function Preview({
+  label,
+  definition,
+  instance,
+  contentBySlotId,
+  device,
+}: {
+  label: string;
+  definition: TemplateDefinitionV2;
+  instance: DynamicTemplateInstanceProps;
+  contentBySlotId: Record<string, unknown>;
+  device: "desktop" | "mobile";
+}) {
+  return (
+    <div className="dynamic-template-upgrade-review__preview" aria-label={`${device === "desktop" ? "桌面端" : "移动端"}${label}`}>
+      <strong>{label}</strong>
+      <DynamicTemplateRenderer
+        definition={definition}
+        device={device}
+        contentBySlotId={contentBySlotId}
+        hiddenSlotIds={instance.hiddenSlotIds}
+        layoutOverridesByNodeId={instance.layoutOverridesByNodeId}
+        mode="thumbnail"
+      />
+    </div>
   );
 }

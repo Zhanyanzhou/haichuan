@@ -1,5 +1,11 @@
+# Generated from client/seo/published-routes.json; use the generator for production.
 User-agent: *
 Allow: /
-Disallow: /admin/
-# 上线前待正式域名确认后，填写可验证的绝对 Sitemap 地址。
-# 当前不声明 Sitemap，以避免搜索引擎爬取未确认的站点地址。
+Disallow: /admin
+Disallow: /cart
+Disallow: /checkout
+Disallow: /customer
+Disallow: /partner
+Disallow: /preview
+Disallow: /__templates
+Disallow: /en

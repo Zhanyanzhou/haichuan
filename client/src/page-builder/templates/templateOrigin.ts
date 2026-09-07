@@ -107,13 +107,42 @@ export function upgradePersonalTemplateInstances<T extends Record<string, unknow
   return { document: nextDocument, upgradedCount };
 }
 
+/** 只读统计个人兼容模板的新 revision；打开页面时不得据此改写草稿。 */
+export function countUpgradeablePersonalTemplateInstances(
+  document: Record<string, unknown>,
+  templates: readonly PersonalContentTemplate[],
+): number {
+  const templatesById = new Map(templates.map((template) => [template.id, template]));
+  let count = 0;
+  mapDocumentBlocks(document, (block) => {
+    if (typeof block.type !== "string" || !block.props || typeof block.props !== "object" || Array.isArray(block.props)) return block;
+    const origin = readTemplateOrigin((block.props as Record<string, unknown>).__templateOrigin);
+    if (!origin || origin.kind !== "personal") return block;
+    const template = templatesById.get(origin.templateId);
+    if (
+      template
+      && template.moduleType === block.type
+      && template.revision > origin.revision
+      && sanitizeContentTemplateLayoutData(template.moduleType, template.layoutData)
+    ) count += 1;
+    return block;
+  });
+  return count;
+}
+
 export function countUpgradeableSystemTemplateInstances(
   document: Record<string, unknown>,
   current: SystemContentTemplateCurrent,
 ): number {
+  if (!sanitizeContentTemplateLayoutData(current.moduleType, current.layoutData)) return 0;
   let count = 0;
   mapDocumentBlocks(document, (block) => {
-    if (typeof block.type !== "string" || !block.props || typeof block.props !== "object" || Array.isArray(block.props)) return block;
+    if (
+      block.type !== current.moduleType
+      || !block.props
+      || typeof block.props !== "object"
+      || Array.isArray(block.props)
+    ) return block;
     const origin = readTemplateOrigin((block.props as Record<string, unknown>).__templateOrigin);
     if (
       origin?.kind === "system"
