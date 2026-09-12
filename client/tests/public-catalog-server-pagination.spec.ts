@@ -370,6 +370,70 @@ test("Catalog 校验持久化选款时区分 loading 与 error 且不误删", as
     .toBe(true);
 });
 
+test("选款咨询失败保留填写内容，重试复用幂等键且阻止同刻重复请求", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const writes: Array<{ idempotencyKey?: string; body: Record<string, unknown> }> = [];
+  let releaseRetry: (() => void) | undefined;
+  const retryBlocked = new Promise<void>((resolve) => {
+    releaseRetry = resolve;
+  });
+  await page.route("**/api/selection-inquiries", async (route) => {
+    const request = route.request();
+    writes.push({
+      idempotencyKey: request.headers()["idempotency-key"],
+      body: request.postDataJSON(),
+    });
+    if (writes.length === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 503, message: "temporary unavailable" }),
+      });
+      return;
+    }
+    await retryBlocked;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped({ id: 71, leadId: 91, status: "PENDING" })),
+    });
+  });
+  await seedSelection(page, [1]);
+  await page.goto("/catalog");
+  await page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }).click();
+  const dialog = page.getByRole("dialog", { name: "提交选款咨询" });
+  await dialog.getByPlaceholder("您的称呼").fill("测试访客");
+  await dialog.getByPlaceholder("方便我们联系您").fill("13800138000");
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "提交选款咨询（1 款）" }).click();
+
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "提交失败，已保留本次选款与填写内容，请重新提交。",
+  );
+  await expect(dialog.getByPlaceholder("您的称呼")).toHaveValue("测试访客");
+  await expect(dialog.getByPlaceholder("方便我们联系您")).toHaveValue("13800138000");
+  const retry = dialog.getByRole("button", { name: "重新提交选款咨询（1 款）" });
+  await retry.evaluate((button: HTMLButtonElement) => {
+    button.click();
+    button.click();
+  });
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[0].idempotencyKey).toBeTruthy();
+  expect(writes[1].idempotencyKey).toBe(writes[0].idempotencyKey);
+  expect(writes[1].body).toMatchObject({
+    customerName: "测试访客",
+    phone: "13800138000",
+    privacyConsent: true,
+  });
+  await expect.poll(() => page.evaluate(() =>
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+  )).toBe(true);
+
+  releaseRetry?.();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("已选 1 款")).toHaveCount(0);
+});
+
 test("Catalog 在 390px 保持 4:5 媒体、可用对话框宽度并恢复触发焦点", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/catalog");

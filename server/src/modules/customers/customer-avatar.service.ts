@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promi
 import { join, relative, resolve, sep } from 'node:path';
 import { ApiError } from '../../common/errors/api-error';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type { SessionMetadata } from '../../common/security/refresh-session.service';
 
 const sharp = require('sharp');
 
@@ -23,6 +24,11 @@ type PendingAvatarRemoval = {
   queuedAt: string;
 };
 
+function optionalHash(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? createHash('sha256').update(normalized).digest('hex') : null;
+}
+
 @Injectable()
 export class CustomerAvatarService implements OnModuleInit {
   private readonly logger = new Logger(CustomerAvatarService.name);
@@ -34,7 +40,11 @@ export class CustomerAvatarService implements OnModuleInit {
     await this.retryPendingRemovals();
   }
 
-  async replace(customerId: number, file: Express.Multer.File) {
+  async replace(
+    customerId: number,
+    file: Express.Multer.File,
+    metadata: SessionMetadata = {},
+  ) {
     if (!file) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'AVATAR_FILE_REQUIRED', '请选择头像图片');
     }
@@ -49,9 +59,9 @@ export class CustomerAvatarService implements OnModuleInit {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'AVATAR_TYPE_INVALID', '头像仅支持 JPG、PNG 或 WebP 格式');
     }
 
-    let metadata: { format?: string; width?: number; height?: number };
+    let imageMetadata: { format?: string; width?: number; height?: number };
     try {
-      metadata = await sharp(file.buffer, {
+      imageMetadata = await sharp(file.buffer, {
         failOn: 'warning',
         limitInputPixels: AVATAR_MAX_PIXELS,
       }).metadata();
@@ -59,10 +69,10 @@ export class CustomerAvatarService implements OnModuleInit {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'AVATAR_CONTENT_INVALID', '图片内容无效或尺寸过大');
     }
     if (
-      metadata.format !== declaredFormat
-      || !metadata.width
-      || !metadata.height
-      || metadata.width * metadata.height > AVATAR_MAX_PIXELS
+      imageMetadata.format !== declaredFormat
+      || !imageMetadata.width
+      || !imageMetadata.height
+      || imageMetadata.width * imageMetadata.height > AVATAR_MAX_PIXELS
     ) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'AVATAR_CONTENT_INVALID', '图片内容与声明格式不一致或尺寸过大');
     }
@@ -94,43 +104,107 @@ export class CustomerAvatarService implements OnModuleInit {
     if (!previous) {
       throw new ApiError(HttpStatus.NOT_FOUND, 'CUSTOMER_NOT_FOUND', '客户不存在');
     }
+    const previousOwnedStorageKey = previous.avatarStorageKey
+      && this.resolveStorageKey(previous.avatarStorageKey, customerId)
+      ? previous.avatarStorageKey
+      : null;
     let previousRemovalPrepared = false;
     let newRemovalPrepared = false;
     try {
-      if (previous.avatarStorageKey && previous.avatarStorageKey !== storageKey) {
-        previousRemovalPrepared = await this.prepareRemoval(previous.avatarStorageKey);
+      if (previousOwnedStorageKey && previousOwnedStorageKey !== storageKey) {
+        previousRemovalPrepared = await this.prepareRemoval(previousOwnedStorageKey, customerId);
       }
       newRemovalPrepared = await this.prepareRemoval(storageKey);
       await mkdir(directory, { recursive: true });
       await writeFile(outputPath, output, { flag: 'wx' });
     } catch {
-      if (previousRemovalPrepared && previous.avatarStorageKey) {
-        await this.cancelPreparedRemoval(previous.avatarStorageKey);
+      if (previousRemovalPrepared && previousOwnedStorageKey) {
+        await this.cancelPreparedRemoval(previousOwnedStorageKey);
       }
       if (newRemovalPrepared) await this.completePreparedRemoval(storageKey);
       throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'AVATAR_STORAGE_ERROR', '头像保存失败，请稍后重试');
     }
 
     try {
-      const claimed = await this.prisma.customer.updateMany({
-        where: { id: customerId, avatarStorageKey: previous.avatarStorageKey },
-        data: { avatarStorageKey: storageKey },
+      await this.prisma.$transaction(async (tx) => {
+        const claimed = await tx.customer.updateMany({
+          where: { id: customerId, avatarStorageKey: previous.avatarStorageKey },
+          data: { avatarStorageKey: storageKey },
+        });
+        if (claimed.count !== 1) {
+          throw new ApiError(HttpStatus.CONFLICT, 'AVATAR_UPDATE_CONFLICT', '头像已发生变化，请重新选择后再试');
+        }
+        await tx.customerSecurityEvent.create({
+          data: {
+            customerId,
+            eventType: 'AVATAR_REPLACED',
+            ipHash: optionalHash(metadata.ip),
+            userAgentHash: optionalHash(metadata.userAgent),
+          },
+        });
       });
-      if (claimed.count !== 1) {
-        throw new ApiError(HttpStatus.CONFLICT, 'AVATAR_UPDATE_CONFLICT', '头像已发生变化，请重新选择后再试');
-      }
     } catch (error) {
       await this.completePreparedRemoval(storageKey);
-      if (previousRemovalPrepared && previous.avatarStorageKey) {
-        await this.cancelPreparedRemoval(previous.avatarStorageKey);
+      if (previousRemovalPrepared && previousOwnedStorageKey) {
+        await this.cancelPreparedRemoval(previousOwnedStorageKey);
       }
       throw error;
     }
     await this.cancelPreparedRemoval(storageKey);
-    if (previous.avatarStorageKey && previous.avatarStorageKey !== storageKey) {
-      await this.completePreparedRemoval(previous.avatarStorageKey);
+    if (previousOwnedStorageKey && previousOwnedStorageKey !== storageKey) {
+      await this.completePreparedRemoval(previousOwnedStorageKey);
     }
     return { avatarUrl: '/api/customers/me/avatar', updatedAt: new Date() };
+  }
+
+  async delete(customerId: number, metadata: SessionMetadata) {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { avatarStorageKey: true },
+    });
+    if (!customer) {
+      throw new ApiError(HttpStatus.NOT_FOUND, 'CUSTOMER_NOT_FOUND', '客户不存在');
+    }
+    if (!customer.avatarStorageKey) {
+      return { avatarUrl: null, updatedAt: new Date() };
+    }
+
+    // 数据库若意外引用到其他客户的 key，只清除本客户引用，绝不排队或删除他人文件。
+    const ownedStorageKey = this.resolveStorageKey(customer.avatarStorageKey, customerId)
+      ? customer.avatarStorageKey
+      : null;
+    const removalPrepared = ownedStorageKey
+      ? await this.prepareRemoval(ownedStorageKey, customerId)
+      : false;
+    const now = new Date();
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const claimed = await tx.customer.updateMany({
+          where: { id: customerId, avatarStorageKey: customer.avatarStorageKey },
+          data: { avatarStorageKey: null },
+        });
+        if (claimed.count !== 1) {
+          throw new ApiError(HttpStatus.CONFLICT, 'AVATAR_UPDATE_CONFLICT', '头像已发生变化，请刷新后再试');
+        }
+        await tx.customerSecurityEvent.create({
+          data: {
+            customerId,
+            eventType: 'AVATAR_REMOVED',
+            ipHash: optionalHash(metadata.ip),
+            userAgentHash: optionalHash(metadata.userAgent),
+          },
+        });
+      });
+    } catch (error) {
+      if (removalPrepared && ownedStorageKey) {
+        await this.cancelPreparedRemoval(ownedStorageKey);
+      }
+      throw error;
+    }
+    if (removalPrepared && ownedStorageKey) {
+      await this.completePreparedRemoval(ownedStorageKey);
+    }
+    return { avatarUrl: null, updatedAt: now };
   }
 
   async read(customerId: number): Promise<Buffer> {
@@ -153,18 +227,28 @@ export class CustomerAvatarService implements OnModuleInit {
     }
   }
 
-  async remove(storageKey: string | null | undefined): Promise<void> {
+  async remove(
+    storageKey: string | null | undefined,
+    expectedCustomerId?: number,
+  ): Promise<void> {
     if (!storageKey) return;
-    const prepared = await this.prepareRemoval(storageKey);
+    const prepared = await this.prepareRemoval(storageKey, expectedCustomerId);
     if (!prepared) return;
     await this.completePreparedRemoval(storageKey);
   }
 
   /** 在数据库或文件引用切换前持久化删除意图，供崩溃恢复按当前引用状态判定。 */
-  async prepareRemoval(storageKey: string | null | undefined): Promise<boolean> {
+  async prepareRemoval(
+    storageKey: string | null | undefined,
+    expectedCustomerId?: number,
+  ): Promise<boolean> {
     if (!storageKey) return false;
     const customerId = this.storageKeyCustomerId(storageKey);
-    if (customerId === null || !this.resolveStorageKey(storageKey, customerId)) {
+    if (
+      customerId === null
+      || (expectedCustomerId !== undefined && customerId !== expectedCustomerId)
+      || !this.resolveStorageKey(storageKey, customerId)
+    ) {
       this.logger.error('头像删除引用格式无效，无法定位文件');
       return false;
     }

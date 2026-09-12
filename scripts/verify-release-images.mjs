@@ -3,6 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { load as parseYaml } from "js-yaml";
+import {
+  collectContentReadiness,
+  verifyContentReadinessArtifact,
+  writeContentReadinessEvidence,
+} from "./verify-release-images-content-readiness.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
@@ -19,6 +24,7 @@ const operationsRuntimeExecutables = [
 export const releaseStaticWorkflowPaths = Object.freeze([
   ".github/workflows/quality.yml",
   ".github/workflows/release-images.yml",
+  ".github/workflows/verify-production-evidence.yml",
 ]);
 
 function fail(code) {
@@ -345,6 +351,82 @@ function assertReleaseWorkflow() {
   return path;
 }
 
+export function validateProductionEvidenceVerificationWorkflow(source) {
+  let workflow;
+  try {
+    workflow = parseYaml(source, { json: false });
+  } catch {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_YAML_INVALID");
+  }
+  if (!isRecord(workflow) || !isRecord(workflow.permissions) || !isRecord(workflow.jobs)) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_SCHEMA_INVALID");
+  }
+  const expectedPermissions = ["actions", "attestations", "contents", "packages"];
+  const actualPermissions = Object.keys(workflow.permissions).sort();
+  if (JSON.stringify(actualPermissions) !== JSON.stringify(expectedPermissions) ||
+      expectedPermissions.some((name) => workflow.permissions[name] !== "read")) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_PERMISSIONS_INVALID");
+  }
+  if (Object.values(workflow.jobs).some((job) => isRecord(job) && Object.hasOwn(job, "permissions"))) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_JOB_PERMISSIONS_FORBIDDEN");
+  }
+  const header = source.split(/^jobs:/m, 1)[0];
+  if (!/^on:\s*\r?\n\s{2}workflow_dispatch:/m.test(header)) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_NOT_MANUAL_ONLY");
+  }
+  if (/^\s{2}(push|pull_request|schedule):/m.test(header)) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_AUTOMATIC_TRIGGER_FORBIDDEN");
+  }
+  for (const required of [
+    "actions: read",
+    "attestations: read",
+    "contents: read",
+    "packages: read",
+    "拒绝未受保护的验证来源",
+    "RELEASE_REF_NOT_PROTECTED",
+    "actions/download-artifact@",
+    "run-id: ${{ inputs.evidence_run_id }}",
+    "repository: ${{ github.repository }}",
+    "persist-credentials: false",
+    "npm ci --ignore-scripts",
+    "GH_TOKEN: ${{ github.token }}",
+    "node scripts/verify-production-evidence.mjs",
+    "--evidence .codex-tmp/production-evidence/production-evidence.json",
+    "--evidence-root .codex-tmp/production-evidence",
+    "--evidence-bundle .codex-tmp/production-evidence/production-evidence.attestation.json",
+    "--environment-id-sha256 \"$ENVIRONMENT_ID_SHA256\"",
+    "--approval-reference-sha256 \"$APPROVAL_REFERENCE_SHA256\"",
+    "--release-git-sha \"$RELEASE_GIT_SHA\"",
+    "--migration-bundle-sha256 \"$MIGRATION_BUNDLE_SHA256\"",
+    "--release-source \"$RELEASE_SOURCE\"",
+    "--release-profile \"$RELEASE_PROFILE\"",
+    "--repo \"$GITHUB_REPOSITORY\"",
+    "--source-ref \"$SOURCE_REF\"",
+    "--manifest-signer-workflow \"$MANIFEST_SIGNER_WORKFLOW\"",
+    "--evidence-signer-workflow \"$EVIDENCE_SIGNER_WORKFLOW\"",
+    "EVIDENCE_SIGNER_WORKFLOW: ${{ vars.PRODUCTION_EVIDENCE_SIGNER_WORKFLOW }}",
+    "PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_NOT_CONFIGURED",
+    "PRODUCTION_EVIDENCE_VERIFIED",
+  ]) {
+    if (!source.includes(required)) {
+      fail(`PRODUCTION_EVIDENCE_WORKFLOW_CONTRACT_MISSING:${required}`);
+    }
+  }
+  if (/actions\/(?:attest|attest-build-provenance)@/.test(source)) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_MUST_NOT_SIGN_EVIDENCE");
+  }
+  if (/inputs\.evidence_signer_workflow/.test(source)) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_SIGNER_INPUT_FORBIDDEN");
+  }
+  return { ok: true };
+}
+
+function assertProductionEvidenceVerificationWorkflow() {
+  const path = ".github/workflows/verify-production-evidence.yml";
+  validateProductionEvidenceVerificationWorkflow(readProjectFile(path));
+  return path;
+}
+
 function assertWorkflowActionsPinned() {
   let actionCount = 0;
   for (const path of releaseStaticWorkflowPaths) {
@@ -397,6 +479,23 @@ function assertSafeRuntimeInspection() {
   return 4;
 }
 
+function assertReverseProxyStaticLimitations() {
+  const source = readProjectFile("scripts/verify-reverse-proxy-security.mjs");
+  const limitations = [
+    "TARGET_EDGE_CANONICAL_HOST_ALLOWLIST_UNVERIFIED",
+    "TARGET_EDGE_REAL_IP_TRUST_BOUNDARY_UNVERIFIED",
+  ];
+  for (const limitation of limitations) {
+    if (!source.includes(limitation)) {
+      fail(`REVERSE_PROXY_STATIC_LIMITATION_MISSING:${limitation}`);
+    }
+  }
+  if (!source.includes('productionReady: false')) {
+    fail("REVERSE_PROXY_STATIC_SCOPE_OVERCLAIMS_PRODUCTION");
+  }
+  return limitations;
+}
+
 function verifyStaticContract() {
   const serverBases = assertPinnedDockerfile("server/Dockerfile", "server");
   const clientBases = assertPinnedDockerfile("client/Dockerfile", "client");
@@ -404,9 +503,11 @@ function verifyStaticContract() {
   const runtimeBaseline = assertNodeAndClientRuntimeBaseline();
   const composeImages = assertComposeImages();
   const workflow = assertReleaseWorkflow();
+  const productionEvidenceWorkflow = assertProductionEvidenceVerificationWorkflow();
   const workflowActions = assertWorkflowActionsPinned();
   const supplyChainTests = assertReleaseSupplyChainTests();
   const runtimeInspectionFieldCount = assertSafeRuntimeInspection();
+  const reverseProxyStaticLimitations = assertReverseProxyStaticLimitations();
   return {
     ok: true,
     mode: "static",
@@ -415,10 +516,12 @@ function verifyStaticContract() {
     runtimeBaseline,
     composeImageCount: composeImages.length,
     workflow,
+    productionEvidenceWorkflow,
     workflowCount: workflowActions.workflowCount,
     workflowActionCount: workflowActions.actionCount,
     supplyChainTests,
     runtimeInspectionFieldCount,
+    reverseProxyStaticLimitations,
   };
 }
 
@@ -617,8 +720,35 @@ export function validateReleaseEnvironment(env, manifest) {
   return { ok: true, mode: "environment", gitSha: manifest.gitSha, migrationBundleSha256: manifest.migrationBundleSha256 };
 }
 
+export function runContentReadinessMode(args, root = projectRoot) {
+  const evidence = collectContentReadiness(root);
+  const outputIndex = args.indexOf("--output");
+  if (outputIndex >= 0 && !args[outputIndex + 1]) fail("CONTENT_READINESS_OUTPUT_REQUIRED");
+  const outputPath = resolve(
+    root,
+    outputIndex >= 0
+      ? args[outputIndex + 1]
+      : "artifacts/content-readiness/current.json",
+  );
+  let output = relative(root, outputPath).split("\\").join("/");
+  if (args.includes("--write")) {
+    output = writeContentReadinessEvidence(evidence, outputPath, root);
+  }
+  if (args.includes("--check")) verifyContentReadinessArtifact(evidence, outputPath);
+  return {
+    ok: evidence.ready,
+    mode: "content-readiness",
+    status: evidence.status,
+    enforced: args.includes("--enforce"),
+    output,
+    summary: evidence.summary,
+    blockers: evidence.blockers,
+  };
+}
+
 function main() {
   const args = process.argv.slice(2);
+  if (args.includes("--content-readiness")) return runContentReadinessMode(args);
   if (args.includes("--static")) return verifyStaticContract();
   const manifestIndex = args.indexOf("--manifest");
   if (manifestIndex >= 0) {
@@ -645,7 +775,9 @@ const isDirectExecution = process.argv[1] &&
 
 if (isDirectExecution) {
   try {
-    console.log(JSON.stringify(main(), null, 2));
+    const result = main();
+    console.log(JSON.stringify(result, null, 2));
+    if (result?.enforced && result?.status === "BLOCKED") process.exitCode = 1;
   } catch (error) {
     console.error(JSON.stringify({
       ok: false,

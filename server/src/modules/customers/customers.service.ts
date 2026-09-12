@@ -791,7 +791,7 @@ export class CustomersService {
     const closedIdentity = `closed-${customerId}`;
     const randomPasswordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 12);
     const avatarRemovalPrepared = customer.avatarStorageKey && this.customerAvatars
-      ? await this.customerAvatars.prepareRemoval(customer.avatarStorageKey)
+      ? await this.customerAvatars.prepareRemoval(customer.avatarStorageKey, customerId)
       : false;
     let consultationDisposition: Awaited<ReturnType<typeof anonymizeCustomerConsultations>>;
     try {
@@ -879,7 +879,7 @@ export class CustomersService {
     if (avatarRemovalPrepared) {
       await this.customerAvatars?.completePreparedRemoval(customer.avatarStorageKey);
     } else {
-      await this.customerAvatars?.remove(customer.avatarStorageKey);
+      await this.customerAvatars?.remove(customer.avatarStorageKey, customerId);
     }
     return {
       message: '账户已注销，感谢您曾经的信任与陪伴',

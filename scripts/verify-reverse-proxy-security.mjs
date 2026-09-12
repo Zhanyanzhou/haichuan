@@ -16,7 +16,7 @@ const [nginx, nginxMain, compose, dockerfile, serverMain, wechatController] = aw
 ]);
 
 const checks = [
-  ["公网 8080 只承担 ACME 与 HTTPS 重定向", () => {
+  ["公网 8080 仅包含 ACME 与动态 Host HTTPS 重定向结构", () => {
     assert.match(nginx, /server\s*\{\s*listen 8080;[\s\S]*?location \^~ \/\.well-known\/acme-challenge\/[\s\S]*?location \/\s*\{\s*return 308 https:\/\/\$host\$request_uri;/);
   }],
   ["可信 TLS 回源使用独立 8081 且不公开绑定", () => {
@@ -31,7 +31,7 @@ const checks = [
     assert.match(nginx, /proxy_set_header X-Forwarded-For \$remote_addr;/);
     assert.match(nginx, /proxy_set_header Forwarded "";/);
   }],
-  ["可信入口使用 Nginx 内建 real-IP 解析并让非法值回退直接对端", () => {
+  ["8081 使用 Nginx real-IP 解析接口并让非法值回退直接对端", () => {
     assert.doesNotMatch(nginx, /map\s+\$http_x_real_ip/);
     assert.match(nginx, /server\s*\{\s*listen 8081;[\s\S]*?set_real_ip_from 0\.0\.0\.0\/0;[\s\S]*?set_real_ip_from ::\/0;[\s\S]*?real_ip_header X-Real-IP;[\s\S]*?real_ip_recursive off;/);
     assert.match(nginx, /proxy_set_header X-Real-IP \$remote_addr;/);
@@ -70,4 +70,19 @@ for (const [name, run] of checks) {
   }
 }
 if (failed) process.exit(1);
-console.log(`\n${checks.length} 项反向代理安全合同通过。`);
+console.log(`\n${checks.length} 项反向代理仓库结构合同通过；目标边缘安全仍未验证。`);
+console.log(JSON.stringify({
+  ok: true,
+  scope: "STATIC_REVERSE_PROXY_CONTRACT",
+  productionReady: false,
+  limitations: [
+    {
+      code: "TARGET_EDGE_CANONICAL_HOST_ALLOWLIST_UNVERIFIED",
+      reason: "8080 当前按请求 Host 生成 HTTPS Location；正式域名或上游 Host allowlist 未在仓库内确定。",
+    },
+    {
+      code: "TARGET_EDGE_REAL_IP_TRUST_BOUNDARY_UNVERIFIED",
+      reason: "8081 当前接受任意直接对端提供的 X-Real-IP；必须由目标 edge 网络隔离或精确 trusted CIDR 证明约束。",
+    },
+  ],
+}, null, 2));

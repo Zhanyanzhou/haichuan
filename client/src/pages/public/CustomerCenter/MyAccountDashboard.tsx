@@ -343,6 +343,7 @@ export default function MyAccountDashboard({
   const [sendingSecurityCode, setSendingSecurityCode] = useState(false);
   const [securityCodeCooldown, setSecurityCodeCooldown] = useState(0);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [deletingAvatar, setDeletingAvatar] = useState(false);
   // 地址管理
   const [addressOpen, setAddressOpen] = useState(false);
   const [addressForm] = Form.useForm();
@@ -594,6 +595,28 @@ export default function MyAccountDashboard({
       setUploadingAvatar(false);
     }
     return Upload.LIST_IGNORE;
+  };
+
+  const deleteAvatar = () => {
+    modal.confirm({
+      title: "删除当前头像？",
+      content: "删除后将改为显示称呼首字；您仍可随时重新上传头像。",
+      okText: "删除头像",
+      cancelText: "保留头像",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setDeletingAvatar(true);
+        try {
+          await customerProfileApi.deleteAvatar();
+          message.success("头像已删除");
+          onRefresh?.();
+        } catch {
+          message.error("头像删除失败，当前头像已保留，请重试");
+        } finally {
+          setDeletingAvatar(false);
+        }
+      },
+    });
   };
 
   const cooldownLabel = (value?: string | null) => {
@@ -1141,10 +1164,21 @@ export default function MyAccountDashboard({
                     accept="image/jpeg,image/png,image/webp"
                     showUploadList={false}
                     beforeUpload={uploadAvatar}
-                    disabled={uploadingAvatar}
+                    disabled={uploadingAvatar || deletingAvatar}
                   >
                     <Button size="small" loading={uploadingAvatar}>更换头像</Button>
                   </Upload>
+                  {profile?.avatarUrl ? (
+                    <Button
+                      size="small"
+                      danger
+                      loading={deletingAvatar}
+                      disabled={uploadingAvatar}
+                      onClick={deleteAvatar}
+                    >
+                      删除头像
+                    </Button>
+                  ) : null}
                 </div>
                 <small>JPG、PNG 或 WebP，最大 5MB；上传后由服务端裁切压缩。</small>
               </div>

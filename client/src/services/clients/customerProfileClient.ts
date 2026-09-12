@@ -52,4 +52,7 @@ export const customerProfileApi = {
       headers: customerAuthHeaders(),
     });
   },
+
+  deleteAvatar: () =>
+    api.delete('/customers/me/avatar', { headers: customerAuthHeaders() }),
 };

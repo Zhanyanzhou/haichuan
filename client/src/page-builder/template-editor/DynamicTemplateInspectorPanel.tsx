@@ -2157,7 +2157,7 @@ export default function DynamicTemplateInspectorPanel({
       })} /></div>
       <p className="homepage-editor__inspector-hint">
         {definition.metadata.visualRole === "primary-stage"
-          ? "主舞台用于页面的主要首屏。同一页面只能有一个可见主舞台；页面已有主舞台时不能重复添加。"
+          ? "主舞台用于页面的主要首屏。同一页面可按运营需要重复添加；首个可见主舞台承担页面级标题、首图优先级和页头语境。"
           : definition.metadata.visualRole === "feature-stage"
             ? "重点区用于突出系列、工艺或专题内容，不占用页面的主舞台名额。"
             : "辅助区用于说明、补充图文或配套内容，不占用页面的主舞台名额。"}

@@ -35,7 +35,7 @@ test("确定性 UI：空白模板先显示整体尺寸与比例，模板设置�
     return { role: state.draft!.definition.metadata.visualRole, history: state.historyPast.length };
   });
   await usage.getByRole("button", { name: "页面视觉职责：主舞台", exact: true }).click();
-  await expect(usage.getByText(/同一页面只能有一个可见主舞台/)).toBeVisible();
+  await expect(usage.getByText(/同一页面可按运营需要重复添加/)).toBeVisible();
   expect(await page.evaluate(() => window.__templateScopeSession.getState().historyPast.length)).toBe(before.history + 1);
   await page.evaluate(() => window.__templateScopeSession.getState().undo());
   expect(await page.evaluate(() => window.__templateScopeSession.getState().draft!.definition.metadata.visualRole)).toBe(before.role);

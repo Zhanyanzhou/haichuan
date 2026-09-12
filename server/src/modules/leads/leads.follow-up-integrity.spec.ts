@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { OutboxService } from '../../common/outbox/outbox.service';
 import { LeadsService } from './leads.service';
 import { LeadsController } from './leads.controller';
@@ -44,7 +49,10 @@ test('跟进记录只为现存线索写入并使用服务端提供的员工 ID',
         sourceType: 'INQUIRY',
         inquiryId: 17,
         selectionInquiryId: null,
+        updatedAt: new Date('2026-09-12T00:00:00.000Z'),
+        privacyDisposedAt: null,
       }),
+      updateMany: async () => ({ count: 1 }),
     },
     leadActivity: {
       create: async (args: unknown) => {
@@ -69,30 +77,28 @@ test('跟进记录只为现存线索写入并使用服务端提供的员工 ID',
     createdBy: 7,
   });
 
-  assert.deepEqual(activityWrites, [
-    {
-      data: {
-        leadId: 41,
-        type: 'FOLLOW_UP',
-        content: '已电话确认',
-        contactMethod: 'phone',
-        nextFollowUpAt: null,
-        createdBy: 7,
-      },
-    },
-  ]);
-  assert.deepEqual(legacyWrites, [
-    {
-      data: {
-        leadType: 'inquiry',
-        leadId: 17,
-        content: '已电话确认',
-        contactMethod: 'phone',
-        nextFollowUpAt: null,
-        createdBy: 7,
-      },
-    },
-  ]);
+  const activityData = (activityWrites[0] as { data: Record<string, unknown> }).data;
+  assert.ok(activityData.createdAt instanceof Date);
+  assert.deepEqual({ ...activityData, createdAt: undefined }, {
+    leadId: 41,
+    type: 'FOLLOW_UP',
+    content: '已电话确认',
+    contactMethod: 'phone',
+    nextFollowUpAt: null,
+    createdBy: 7,
+    createdAt: undefined,
+  });
+  const legacyData = (legacyWrites[0] as { data: Record<string, unknown> }).data;
+  assert.equal(legacyData.createdAt, activityData.createdAt);
+  assert.deepEqual({ ...legacyData, createdAt: undefined }, {
+    leadType: 'inquiry',
+    leadId: 17,
+    content: '已电话确认',
+    contactMethod: 'phone',
+    nextFollowUpAt: null,
+    createdBy: 7,
+    createdAt: undefined,
+  });
 });
 
 test('跟进记录拒绝不存在的线索且不会形成孤立写入', async () => {
@@ -112,6 +118,7 @@ test('跟进记录拒绝不存在的线索且不会形成孤立写入', async ()
       leadType: 'selection',
       leadId: 88,
       content: '不应写入',
+      createdBy: 7,
     }),
     NotFoundException,
   );
@@ -122,13 +129,52 @@ test('跟进记录拒绝未知类型和非正整数编号', async () => {
   const service = new LeadsService({} as never, {} as never);
 
   await assert.rejects(
-    service.addFollowUp({ leadType: 'partner', leadId: 1, content: 'x' }),
+    service.addFollowUp({ leadType: 'partner', leadId: 1, content: 'x', createdBy: 7 }),
     UnprocessableEntityException,
   );
   await assert.rejects(
-    service.addFollowUp({ leadType: 'inquiry', leadId: 0, content: 'x' }),
+    service.addFollowUp({ leadType: 'inquiry', leadId: 0, content: 'x', createdBy: 7 }),
     UnprocessableEntityException,
   );
+});
+
+test('跟进缺失认证员工或事务内 CAS 失败时不写入活动和兼容记录', async () => {
+  const anonymous = new LeadsService({} as never, {} as never);
+  await assert.rejects(
+    anonymous.addFollowUp({ leadType: 'inquiry', leadId: 1, content: 'x' }),
+    ForbiddenException,
+  );
+
+  const activities: unknown[] = [];
+  const legacyWrites: unknown[] = [];
+  const prisma = {
+    lead: {
+      findFirst: async () => ({
+        id: 41,
+        sourceType: 'INQUIRY',
+        inquiryId: 17,
+        selectionInquiryId: null,
+        updatedAt: new Date('2026-09-12T00:00:00.000Z'),
+        privacyDisposedAt: null,
+      }),
+      updateMany: async () => ({ count: 0 }),
+    },
+    leadActivity: { create: async (args: unknown) => activities.push(args) },
+    leadFollowUp: { create: async (args: unknown) => legacyWrites.push(args) },
+    $transaction: async (callback: (transaction: unknown) => unknown) => callback(prisma),
+  };
+  const service = new LeadsService(prisma as never, {} as never);
+  await assert.rejects(
+    service.addFollowUp({
+      leadType: 'inquiry',
+      leadId: 41,
+      content: '并发期间不应写入',
+      createdBy: 7,
+    }),
+    ConflictException,
+  );
+  assert.equal(activities.length, 0);
+  assert.equal(legacyWrites.length, 0);
 });
 
 test('顾问回复与无 PII 通知意图在同一事务写入', async () => {
@@ -140,7 +186,10 @@ test('顾问回复与无 PII 通知意图在同一事务写入', async () => {
         sourceType: 'INQUIRY',
         inquiryId: 17,
         selectionInquiryId: null,
+        updatedAt: new Date('2026-09-12T00:00:00.000Z'),
+        privacyDisposedAt: null,
       }),
+      updateMany: async () => ({ count: 1 }),
     },
     inquiry: {
       update: async () => ({
@@ -186,7 +235,10 @@ test('顾问回复的通知意图写入失败时不静默成功', async () => {
         sourceType: 'INQUIRY',
         inquiryId: 17,
         selectionInquiryId: null,
+        updatedAt: new Date('2026-09-12T00:00:00.000Z'),
+        privacyDisposedAt: null,
       }),
+      updateMany: async () => ({ count: 1 }),
     },
     inquiry: {
       update: async () => ({
@@ -209,4 +261,42 @@ test('顾问回复的通知意图写入失败时不静默成功', async () => {
     service.recordInquiryReply(17, '不应形成半完成回复', 7),
     /outbox unavailable/,
   );
+});
+
+test('旧咨询回复缺失认证员工或事务内 CAS 失败时不写正文和通知意图', async () => {
+  const anonymous = new LeadsService({} as never, new OutboxService());
+  await assert.rejects(
+    anonymous.recordInquiryReply(17, '不应匿名回复'),
+    ForbiddenException,
+  );
+
+  let inquiryWrites = 0;
+  let activityWrites = 0;
+  let outboxWrites = 0;
+  const prisma = {
+    lead: {
+      findFirst: async () => ({
+        id: 41,
+        sourceType: 'INQUIRY',
+        inquiryId: 17,
+        selectionInquiryId: null,
+        customerId: null,
+        updatedAt: new Date('2026-09-12T00:00:00.000Z'),
+        privacyDisposedAt: null,
+      }),
+      updateMany: async () => ({ count: 0 }),
+    },
+    inquiry: { update: async () => { inquiryWrites += 1; } },
+    leadActivity: { create: async () => { activityWrites += 1; } },
+    outboxEvent: { create: async () => { outboxWrites += 1; } },
+    $transaction: async (callback: (transaction: unknown) => unknown) => callback(prisma),
+  };
+  const service = new LeadsService(prisma as never, new OutboxService());
+  await assert.rejects(
+    service.recordInquiryReply(17, '并发处置时不应写入', 7),
+    ConflictException,
+  );
+  assert.equal(inquiryWrites, 0);
+  assert.equal(activityWrites, 0);
+  assert.equal(outboxWrites, 0);
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ConflictException,
+  ForbiddenException,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { LeadsService } from "./leads.service";
@@ -133,6 +134,17 @@ test("原始回复记录缺失时禁止重投", async () => {
     UnprocessableEntityException,
   );
   assert.equal(harness.outboxUpdates.length, 0);
+});
+
+test("通知重试缺失认证员工时拒绝且不写入状态或审计", async () => {
+  const harness = createHarness();
+
+  await assert.rejects(
+    harness.service.retryNotificationFailure(81),
+    ForbiddenException,
+  );
+  assert.equal(harness.outboxUpdates.length, 0);
+  assert.equal(harness.activityWrites.length, 0);
 });
 
 test("留存到期筛选只命中已完成或无效且到期的 Lead", async () => {

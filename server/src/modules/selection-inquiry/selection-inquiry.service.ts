@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
@@ -18,6 +22,17 @@ import {
   toCustomerSelectionInquirySubmission,
 } from "./customer-selection-inquiry.response";
 
+const MAX_IDEMPOTENT_TRANSACTION_ATTEMPTS = 3;
+
+function isSerializableTransactionConflict(error: unknown) {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: string }).code === "P2034",
+  );
+}
+
 @Injectable()
 export class SelectionInquiryService {
   constructor(
@@ -25,6 +40,35 @@ export class SelectionInquiryService {
     private productsService: ProductsService,
     private leadsService: LeadsService,
   ) {}
+
+  private async findIdempotentSubmission(
+    client: Pick<Prisma.TransactionClient, "lead" | "selectionInquiry">,
+    idempotencyKeyHash: string,
+    submissionFingerprint: string,
+  ) {
+    const existing = await client.lead.findUnique({
+      where: { idempotencyKeyHash },
+      select: {
+        sourceType: true,
+        submissionFingerprint: true,
+        selectionInquiryId: true,
+      },
+    });
+    if (!existing) return null;
+
+    assertMatchingSubmission(
+      existing,
+      "SELECTION_INQUIRY",
+      submissionFingerprint,
+    );
+    if (!existing.selectionInquiryId) {
+      throw new BadRequestException("幂等提交记录不完整");
+    }
+    return client.selectionInquiry.findUniqueOrThrow({
+      where: { id: existing.selectionInquiryId },
+      select: CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
+    });
+  }
 
   private hasSameProductSet(
     items: Array<{ productId: number | null }>,
@@ -173,28 +217,12 @@ export class SelectionInquiryService {
     const create = async () => this.prisma.$transaction(
       async (transaction) => {
         if (idempotency.idempotencyKeyHash) {
-          const existing = await transaction.lead.findUnique({
-            where: { idempotencyKeyHash: idempotency.idempotencyKeyHash },
-            select: {
-              sourceType: true,
-              submissionFingerprint: true,
-              selectionInquiryId: true,
-            },
-          });
-          if (existing) {
-            assertMatchingSubmission(
-              existing,
-              "SELECTION_INQUIRY",
-              idempotency.submissionFingerprint,
-            );
-            if (!existing.selectionInquiryId) {
-              throw new BadRequestException("幂等提交记录不完整");
-            }
-            return transaction.selectionInquiry.findUniqueOrThrow({
-              where: { id: existing.selectionInquiryId },
-              select: CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
-            });
-          }
+          const existing = await this.findIdempotentSubmission(
+            transaction,
+            idempotency.idempotencyKeyHash,
+            idempotency.submissionFingerprint,
+          );
+          if (existing) return existing;
         } else {
           const recentInquiries = await transaction.selectionInquiry.findMany({
             where: { phone, createdAt: { gte: recentSince } },
@@ -261,32 +289,55 @@ export class SelectionInquiryService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
+    const createWithRetry = async () => {
+      const attempts = idempotency.idempotencyKeyHash
+        ? MAX_IDEMPOTENT_TRANSACTION_ATTEMPTS
+        : 1;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+          return await create();
+        } catch (error) {
+          if (
+            !idempotency.idempotencyKeyHash ||
+            !isSerializableTransactionConflict(error)
+          ) {
+            throw error;
+          }
+
+          // P2034 表示整段 Serializable 事务已经回滚。该路径有显式唯一幂等键，
+          // 所以可安全重放完整短事务；先读赢家可避免重复进入下一轮竞争。
+          const existing = await this.findIdempotentSubmission(
+            this.prisma,
+            idempotency.idempotencyKeyHash,
+            idempotency.submissionFingerprint,
+          );
+          if (existing) return existing;
+          if (attempt === attempts - 1) {
+            throw new ServiceUnavailableException(
+              "请求繁忙，请使用同一幂等键稍后重试",
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5 * (attempt + 1)));
+        }
+      }
+      throw new ServiceUnavailableException(
+        "请求繁忙，请使用同一幂等键稍后重试",
+      );
+    };
+
     try {
-      return toCustomerSelectionInquirySubmission(await create());
+      return toCustomerSelectionInquirySubmission(await createWithRetry());
     } catch (error) {
       if (!idempotency.idempotencyKeyHash || !isUniqueConstraintError(error)) {
         throw error;
       }
-      const existing = await this.prisma.lead.findUnique({
-        where: { idempotencyKeyHash: idempotency.idempotencyKeyHash },
-        select: {
-          sourceType: true,
-          submissionFingerprint: true,
-          selectionInquiryId: true,
-        },
-      });
-      if (!existing) throw error;
-      assertMatchingSubmission(
-        existing,
-        "SELECTION_INQUIRY",
+      const existing = await this.findIdempotentSubmission(
+        this.prisma,
+        idempotency.idempotencyKeyHash,
         idempotency.submissionFingerprint,
       );
-      if (!existing.selectionInquiryId) throw error;
-      const inquiry = await this.prisma.selectionInquiry.findUniqueOrThrow({
-        where: { id: existing.selectionInquiryId },
-        select: CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
-      });
-      return toCustomerSelectionInquirySubmission(inquiry);
+      if (!existing) throw error;
+      return toCustomerSelectionInquirySubmission(existing);
     }
   }
 

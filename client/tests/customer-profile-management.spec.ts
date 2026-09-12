@@ -19,8 +19,13 @@ function success(route: Route, data: unknown) {
 async function installProfileRoutes(
   page: Page,
   observe: (request: ObservedRequest) => void,
-  profileOptions: { hasPassword?: boolean } = {},
+  profileOptions: {
+    hasPassword?: boolean;
+    avatarUrl?: string | null;
+    failAvatarDelete?: boolean;
+  } = {},
 ) {
+  let avatarDeleted = false;
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -38,7 +43,7 @@ async function installProfileRoutes(
         phone: '13800138000',
         email: 'member@example.com',
         hasPassword: profileOptions.hasPassword ?? true,
-        avatarUrl: null,
+        avatarUrl: avatarDeleted ? null : profileOptions.avatarUrl ?? null,
         phoneChangeAvailableAt: null,
         emailChangeAvailableAt: null,
         updatedAt: '2026-09-11T00:00:00.000Z',
@@ -66,6 +71,17 @@ async function installProfileRoutes(
     }
     if (path === '/api/customers/me/avatar' && method === 'PUT') {
       return success(route, { avatarUrl: '/api/customers/me/avatar', updatedAt: new Date().toISOString() });
+    }
+    if (path === '/api/customers/me/avatar' && method === 'DELETE') {
+      if (profileOptions.failAvatarDelete) {
+        return route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 503, message: 'private storage unavailable' }),
+        });
+      }
+      avatarDeleted = true;
+      return success(route, { avatarUrl: null, updatedAt: new Date().toISOString() });
     }
     if (path === '/api/customers/session/logout') return success(route, { success: true });
     if (path === '/api/settings/flags') {
@@ -140,6 +156,52 @@ test.describe('客户个人资料管理', () => {
     });
   });
 
+  test('已有头像可确认删除，成功后刷新为称呼首字', async ({ page }) => {
+    const requests: ObservedRequest[] = [];
+    await installProfileRoutes(page, (request) => requests.push(request), {
+      avatarUrl: '/api/customers/me/avatar',
+    });
+    await page.goto('/customer');
+    await page.locator('#my-profile').scrollIntoViewIfNeeded();
+    await expect(page.getByRole('img', { name: '海川会员的头像' })).toBeVisible();
+
+    await page.getByRole('button', { name: '删除头像' }).click();
+    const confirm = page.getByRole('dialog', { name: '删除当前头像？' });
+    await expect(confirm.getByText('删除后将改为显示称呼首字；您仍可随时重新上传头像。')).toBeVisible();
+    await confirm.getByRole('button', { name: '删除头像' }).click();
+
+    await expect.poll(() => requests.some((item) =>
+      item.path === '/api/customers/me/avatar' && item.method === 'DELETE',
+    )).toBe(true);
+    await expect(page.getByRole('img', { name: '海川会员的头像' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '删除头像' })).toHaveCount(0);
+    await expect(page.locator('.my-account__avatar')).toContainText('海');
+  });
+
+  test('头像删除失败保留当前头像并允许从原动作重试', async ({ page }) => {
+    const requests: ObservedRequest[] = [];
+    await installProfileRoutes(page, (request) => requests.push(request), {
+      avatarUrl: '/api/customers/me/avatar',
+      failAvatarDelete: true,
+    });
+    await page.goto('/customer');
+    await page.locator('#my-profile').scrollIntoViewIfNeeded();
+    await page.getByRole('button', { name: '删除头像' }).click();
+    const confirm = page.getByRole('dialog', { name: '删除当前头像？' });
+    await confirm.getByRole('button', { name: '删除头像' }).click();
+
+    await expect.poll(() => requests.filter((item) =>
+      item.path === '/api/customers/me/avatar' && item.method === 'DELETE',
+    ).length).toBe(1);
+    await expect(page.getByText('头像删除失败，当前头像已保留，请重试')).toBeVisible();
+    await expect(confirm).toBeHidden();
+    await expect(page.getByRole('img', { name: '海川会员的头像' })).toBeVisible();
+    await page.getByRole('button', { name: '删除头像' }).click();
+    const retryConfirm = page.getByRole('dialog', { name: '删除当前头像？' });
+    await expect(retryConfirm).toBeVisible();
+    await retryConfirm.getByRole('button', { name: '保留头像' }).click();
+  });
+
   test('邮箱换绑必须完成旧身份和新邮箱两阶段验证', async ({ page }) => {
     const requests: ObservedRequest[] = [];
     await installProfileRoutes(page, (request) => requests.push(request));
@@ -184,10 +246,13 @@ test.describe('客户个人资料管理', () => {
 
   test('手机宽度下资料区无水平溢出', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await installProfileRoutes(page, () => undefined);
+    await installProfileRoutes(page, () => undefined, {
+      avatarUrl: '/api/customers/me/avatar',
+    });
     await page.goto('/customer');
     await page.locator('#my-profile').scrollIntoViewIfNeeded();
     await expect(page.getByRole('button', { name: '修改密码' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '删除头像' })).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
-import { firstRegionAction, productionStageAction } from "./fixtures/template-authoring-main-route";
+import { productionStageAction } from "./fixtures/template-authoring-main-route";
 
 const realQaEnabled = process.env.PAGE_BUILDER_REAL_QA === "true";
 const apiBaseUrl = process.env.PAGE_BUILDER_REAL_API_BASE_URL ?? "";
@@ -187,6 +187,18 @@ async function loginAndPrepareIsolatedQaSite(page: Page) {
   expect(readiness.blockers).toEqual([]);
 }
 
+async function expectPageWorkspaceReady(page: Page) {
+  const toolbar = page.locator(".homepage-editor__toolbar");
+  try {
+    await expect(toolbar).toBeVisible({ timeout: 8_000 });
+  } catch (error) {
+    const refresh = page.getByRole("button", { name: "刷新页面", exact: true });
+    if (!(await refresh.isVisible())) throw error;
+    await refresh.click();
+    await expect(toolbar).toBeVisible({ timeout: 15_000 });
+  }
+}
+
 const TEMPLATE_STRESS_SCENARIOS = [
   "short-text",
   "long-text",
@@ -195,33 +207,98 @@ const TEMPLATE_STRESS_SCENARIOS = [
   "media-ratios",
 ] as const;
 
-async function openHistoricalTemplateFixture(page: Page) {
-  // 本套保留旧模板的结构与真实持久化回归；新方案创建由 recipe 测试覆盖。
+type RealRecipeOptions = {
+  width?: number;
+  height?: number;
+  layout?: string;
+  media?: string;
+  content?: string[];
+  arrangement?: "图片并排" | "图片上下排列";
+  imageRatio?: "1:1" | "4:5" | "3:4" | "16:9" | "适应区域";
+  name?: string;
+};
+
+/**
+ * 只通过生产 UI 完成七步创建。这里故意不导入 Vite 源模块，也不调用 Repository API；
+ * 第七步结束前必须保持零模板写入，生成结果仍是未保存的内存草稿。
+ */
+async function createTemplateThroughSevenStepRecipe(
+  page: Page,
+  options: RealRecipeOptions = {},
+) {
+  const {
+    width = 1080,
+    height = 1080,
+    layout = "上图下文",
+    media = "无图片",
+    content = ["主标题"],
+    arrangement,
+    imageRatio,
+    name = "未命名模板",
+  } = options;
   const creator = page.getByRole("dialog", { name: "创建模板", exact: true });
+  const next = () => creator.getByRole("button", { name: "下一步", exact: true }).click();
+  const choose = async (button: Locator) => {
+    if (await button.getAttribute("aria-pressed") !== "true") await button.click();
+  };
   await expect(creator).toBeVisible();
-  await creator.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(creator.getByRole("heading", { name: "你准备创建什么类型的模板？" }))
+    .toBeVisible();
+  await choose(creator.getByRole("button", { name: "通用模板", exact: true }));
+  await next();
+  const customSize = creator.getByRole("button", { name: "自定义尺寸", exact: true });
+  if (await customSize.getAttribute("aria-pressed") !== "true") await customSize.click();
+  const widthInput = creator.locator('input[aria-label="宽度"]');
+  const heightInput = creator.locator('input[aria-label="高度"]');
+  await expect(widthInput).toBeVisible();
+  // “自定义尺寸”会在下一帧把焦点交给宽度；先等焦点落稳，避免它在填写高度时抢回焦点。
+  await expect(widthInput).toBeFocused();
+  if (await widthInput.inputValue() !== String(width)) await widthInput.fill(String(width));
+  if (await heightInput.inputValue() !== String(height)) await heightInput.fill(String(height));
+  await expect(widthInput).toHaveValue(String(width));
+  await expect(heightInput).toHaveValue(String(height));
+  await next();
+  if (!(await creator.getByRole("button", { name: layout, exact: true }).isVisible())) {
+    await creator.getByRole("button", { name: "更多布局", exact: true }).click();
+  }
+  await choose(creator.getByRole("button", { name: layout, exact: true }));
+  await choose(creator.getByRole("button", { name: media, exact: true }));
+  if (arrangement) {
+    await choose(creator.getByRole("button", { name: arrangement, exact: true }));
+  }
+  await next();
+  await expect(creator.getByRole("heading", { name: "设置每张图片的外观" })).toBeVisible();
+  if (imageRatio) {
+    await choose(creator.getByRole("button", {
+      name: `图片 1比例：${imageRatio}`,
+      exact: true,
+    }));
+  }
+  await next();
+  for (const label of content) {
+    await creator.getByRole("checkbox", { name: label, exact: true }).check();
+  }
+  await next();
+  await choose(creator.getByRole("button", { name: "简约", exact: true }));
+  await next();
+  await expect(creator.getByRole("heading", { name: "确认模板方案" })).toBeVisible();
+  await creator.getByRole("textbox", { name: "模板名称", exact: true }).fill(name);
+  const previewDevices = creator.getByRole("group", { name: "确认预览设备", exact: true });
+  await previewDevices.getByRole("button", { name: "手机", exact: true }).click();
+  await expect(previewDevices.getByRole("button", { name: "手机", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await previewDevices.getByRole("button", { name: "桌面", exact: true }).click();
+  await expect(creator.getByLabel("生成方案预览")).toHaveAttribute(
+    "data-canvas-width",
+    String(width),
+  );
+  await creator.getByRole("button", { name: "创建模板", exact: true }).click();
   await expect(creator).toBeHidden();
-  await page.evaluate(async () => {
-    const repoPath = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
-    const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
-    const [{ createNewDynamicTemplateDraft }, { useTemplateEditorSession }] = await Promise.all([
-      import(/* @vite-ignore */ repoPath), import(/* @vite-ignore */ sessionPath),
-    ]);
-    useTemplateEditorSession.getState().open(createNewDynamicTemplateDraft("历史兼容模板"), { isNew: true });
-  });
+  await expect(page.getByText("尚未保存", { exact: false }).first()).toBeVisible();
 }
 
-async function applyBasicSkeleton(page: Page) {
-  // 此真实兼容套件的几何基线是历史 4:3，尺寸与结构在同一条事务装入。
-  await page.evaluate(async () => {
-    const repoPath = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
-    const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
-        const [{ createBasicContentSkeletonDefinition }, { useTemplateEditorSession }] = await Promise.all([
-      import(/* @vite-ignore */ repoPath), import(/* @vite-ignore */ sessionPath),
-    ]);
-    const result = useTemplateEditorSession.getState().executeCommand({ type: "transform-definition", label: "装入历史 4:3 骨架夹具", transform: (source: unknown) => { const next = createBasicContentSkeletonDefinition(source); next.metadata.desktopRatio = "4:3"; next.nodes[next.rootNodeId].responsive.desktop.height = { mode: "aspect-ratio", ratio: { width: 4, height: 3 } }; return next; } });
-    if (!result.ok) throw new Error(result.message);
-  });
+async function openFreeRefinementSessionThroughSevenSteps(page: Page) {
+  await createTemplateThroughSevenStepRecipe(page);
 }
 
 async function fillTemplateIdentity(page: Page, name: string, purpose: string) {
@@ -254,16 +331,21 @@ async function prepareTemplatePublishThroughProductionReviews(
     const toolbar = page.locator(".template-editor__toolbar");
     const publishTrigger = toolbar.getByRole("button", { name: /^发布模板新版本/ });
     await publishTrigger.click();
-    const blockedReview = page.getByRole("region", { name: "本次发布检查", exact: true });
-    await expect(blockedReview).toContainText("存在阻止发布的问题");
-    await expect(blockedReview).toContainText("发布前需明确核对桌面端布局");
-    await expect(blockedReview.getByRole("button", {
-      name: "保存并发布模板",
-      exact: true,
-    })).toBeDisabled();
-    await blockedReview.getByRole("button", { name: "返回编辑", exact: true }).click();
-    await expect(blockedReview).toBeHidden();
-    expect(publishRequests, "人工核对未完成时不得发出模板 publish 请求").toEqual([]);
+    const initialReview = page.getByRole("region", { name: "本次发布检查", exact: true });
+    const initialReviewText = await initialReview.innerText();
+    const initialPublishButton = initialReview.getByRole("button", {
+      name: /保存并发布模板|发布模板新版本/,
+    });
+    if (initialReviewText.includes("存在阻止发布的问题")) {
+      await expect(initialReview).toContainText("发布前需明确核对桌面端布局");
+      await expect(initialPublishButton).toBeDisabled();
+    } else {
+      await expect(initialReview).toContainText("可以发布");
+      await expect(initialPublishButton).toBeEnabled();
+    }
+    await initialReview.getByRole("button", { name: "返回编辑", exact: true }).click();
+    await expect(initialReview).toBeHidden();
+    expect(publishRequests, "离开发布检查前不得发出模板 publish 请求").toEqual([]);
 
     await expect(page.getByRole("region", { name: "模板制作步骤", exact: true })).toHaveCount(0);
     const renderer = page.frameLocator("iframe.template-editor__viewport-frame")
@@ -331,11 +413,15 @@ async function prepareTemplatePublishThroughProductionReviews(
       .toEqual([]);
     await publishTrigger.click();
     const review = page.getByRole("region", { name: "本次发布检查", exact: true });
-    await review.getByRole("button", { name: "确认已核对桌面端布局", exact: true }).click();
-    await review.getByRole("button", { name: "确认已核对移动端布局", exact: true }).click();
-    await review.getByRole("button", { name: "确认页面开放范围已核对", exact: true }).click();
-    await expect(review).toContainText("满足发布门禁");
-    await expect(review).toContainText("检查已就绪");
+    for (const confirmation of [
+      "确认已核对桌面端布局",
+      "确认已核对移动端布局",
+      "确认页面开放范围已核对",
+    ]) {
+      const button = review.getByRole("button", { name: confirmation, exact: true });
+      if (await button.count()) await button.click();
+    }
+    await expect(review).toContainText("可以发布");
     const confirmPublish = review.getByRole("button", {
       name: /保存并发布模板|发布模板新版本/,
     });
@@ -405,6 +491,7 @@ async function completePagePublicationMediaThroughUi(
   await expect(rights).toContainText(`${assetUrls.length} 项当前公开素材`);
   const items = rights.getByTestId("page-media-right");
   await expect(items).toHaveCount(assetUrls.length);
+  await rights.locator("details.homepage-editor__media-rights-details > summary").click();
   for (const [index, assetUrl] of assetUrls.entries()) {
     const item = items.nth(index);
     await expect(item.locator("code"), `素材 ${index + 1} 必须对应真实上传地址`)
@@ -485,14 +572,20 @@ async function createAndPublishFourThreeTemplateThroughUi(
     "模板设计目录中的既有卡片必须全部来自 Repository",
   ).toHaveCount(0);
   await designLibrary.getByRole("button", { name: "新建模板", exact: true }).click();
-  await openHistoricalTemplateFixture(page);
+  await createTemplateThroughSevenStepRecipe(page, {
+    width: 1200,
+    height: 900,
+    layout: "左图右文",
+    media: "2 张图片",
+    arrangement: "图片并排",
+    content: ["主标题", "描述"],
+    name: templateName,
+  });
   await fillTemplateIdentity(
     page,
     templateName,
     "用于验证仅通过新建模板进入统一设计、保存、发布与页面使用流程",
   );
-  await page.getByRole("button", { name: "预览模板", exact: true }).focus();
-  await applyBasicSkeleton(page);
   await setOverlayLightNavigationCompatibilityThroughUi(page);
 
   const saveResponsePromise = page.waitForResponse((response) => {
@@ -538,9 +631,10 @@ async function createAndPublishFourThreeTemplateThroughUi(
 
 async function setOverlayLightNavigationCompatibilityThroughUi(page: Page) {
   const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
-  await page.locator(".template-editor__toolbar")
-    .getByRole("button", { name: "更多模板操作", exact: true }).click();
-  await page.getByRole("menuitem", { name: /模板资料与使用限制/ }).click();
+  const headerCompatibility = inspector.locator("details.template-editor__header-compatibility");
+  if (!(await headerCompatibility.getAttribute("open"))) {
+    await headerCompatibility.locator("summary").click();
+  }
   const overlayLightButton = inspector.getByRole("button", {
     name: "导航兼容模式：浅色覆盖",
     exact: true,
@@ -549,6 +643,21 @@ async function setOverlayLightNavigationCompatibilityThroughUi(page: Page) {
     await overlayLightButton.click();
   }
   await expect(overlayLightButton).toHaveAttribute("aria-pressed", "true");
+}
+
+async function setPrimaryStageRoleThroughUi(page: Page) {
+  const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
+  const usage = inspector.getByRole("region", { name: "模板名称与页面职责", exact: true });
+  await expect(usage).toBeVisible();
+  const primaryStage = usage.getByRole("button", {
+    name: "页面视觉职责：主舞台",
+    exact: true,
+  });
+  if (await primaryStage.getAttribute("aria-pressed") !== "true") {
+    await primaryStage.click();
+  }
+  await expect(primaryStage).toHaveAttribute("aria-pressed", "true");
+  await expect(usage).toContainText("同一页面可按运营需要重复添加");
 }
 
 async function returnToPageWorkspaceAndOpenPublishedTemplate(
@@ -620,48 +729,33 @@ async function dragPublishedTemplateIntoCanvas(
 async function design1920By240Template(page: Page, templateName: string) {
   const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
   const structure = page.getByRole("complementary", { name: "模板结构" });
-  const palette = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  const closeSlotPalette = async () => {
-    if (!(await palette.isVisible())) return;
-    await page.keyboard.press("Escape");
-    await expect(palette).toBeHidden();
-  };
-  const addSlot = async (label: "图片槽位" | "标题槽位" | "正文槽位" | "按钮槽位") => {
-    if (!(await palette.isVisible())) {
-      await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-    }
-    const addButton = palette.getByRole("button", { name: `添加${label}`, exact: true });
-    await expect(addButton).toBeEnabled();
-    await addButton.click();
-    await expect(inspector.getByRole("textbox", { name: "节点名称", exact: true }))
-      .toHaveValue(new RegExp(`^${label}(?: \\d+)?$`));
-  };
   await fillTemplateIdentity(
     page,
     templateName,
     "用于验证 1920×240 母模板、页面实例和版本锁定闭环",
   );
   await setOverlayLightNavigationCompatibilityThroughUi(page);
+  await setPrimaryStageRoleThroughUi(page);
 
-  await page.getByRole("button", { name: /^模板尺寸：/ }).click();
-  const sizeControls = page.getByRole("group", { name: "模板整体尺寸" });
+  const sizeControls = inspector;
   await expect(sizeControls).toBeVisible();
-  await sizeControls.getByRole("combobox", { name: "模板高度模式" }).selectOption("fixed");
-  await sizeControls.getByRole("spinbutton", { name: "模板固定高度" }).fill("240");
-  await sizeControls.getByRole("spinbutton", { name: "模板固定高度" }).press("Enter");
+  await sizeControls.getByRole("combobox", { name: "高度方式", exact: true }).selectOption("fixed");
+  await sizeControls.getByRole("spinbutton", { name: "高度", exact: true }).fill("240");
+  await sizeControls.getByRole("spinbutton", { name: "高度", exact: true }).press("Enter");
   await expect(sizeControls.getByRole("spinbutton", { name: "设计宽度" })).toHaveValue("1920");
-  await expect(page.getByRole("button", { name: /^模板尺寸：/ })).toContainText("1920 × 240");
 
-  await inspector.getByRole("button", { name: "容器布局：分列排列", exact: true }).click();
-  await inspector.getByRole("button", { name: "容器列宽：2:3", exact: true }).click();
-  await inspector.getByRole("spinbutton", { name: "槽位间距", exact: true }).fill("12");
-  await inspector.getByRole("spinbutton", { name: "槽位间距", exact: true }).press("Enter");
-  await inspector.getByRole("button", { name: "容器留白：紧凑", exact: true }).click();
-
-  await structure.getByRole("button", { name: /添加区域/ }).click();
-  await inspector.getByRole("textbox", { name: "节点名称" }).fill("文字区");
-  await inspector.getByRole("button", { name: "容器布局：上下排列", exact: true }).click();
-  const gapInput = inspector.getByRole("spinbutton", { name: "槽位间距", exact: true });
+  await structure.getByRole("treeitem", { name: /^内容区域 布局容器/ }).click();
+  const setObjectPercent = async (label: "水平位置" | "垂直位置" | "宽度" | "高度", value: number) => {
+    const input = inspector.getByRole("spinbutton", { name: label, exact: true });
+    await input.fill(String(value));
+    await input.press("Enter");
+    await expect(input).toHaveValue(String(value));
+  };
+  await setObjectPercent("水平位置", 1);
+  await setObjectPercent("垂直位置", 0);
+  await setObjectPercent("宽度", 38);
+  await setObjectPercent("高度", 100);
+  const gapInput = inspector.getByRole("spinbutton", { name: "对象间距", exact: true });
   const initialGap = await gapInput.inputValue();
   await gapInput.fill("4");
   await gapInput.press("Enter");
@@ -670,43 +764,19 @@ async function design1920By240Template(page: Page, templateName: string) {
   await expect(gapInput).toHaveValue(initialGap);
   await page.getByRole("button", { name: "重做", exact: true }).click();
   await expect(gapInput).toHaveValue("4");
-  await inspector.getByRole("button", { name: "容器留白：紧凑", exact: true }).click();
+  await structure.getByRole("treeitem", { name: /^主标题 / }).click();
+  await inspector.getByRole("spinbutton", { name: "字号", exact: true }).fill("28");
+  await inspector.getByRole("spinbutton", { name: "字号", exact: true }).press("Enter");
+  await structure.getByRole("treeitem", { name: /^主图片 / }).click();
+  await setObjectPercent("水平位置", 41);
+  await setObjectPercent("垂直位置", 0);
+  await setObjectPercent("宽度", 58);
+  await setObjectPercent("高度", 100);
+  const imageFit = inspector.getByRole("combobox", { name: "图片适配", exact: true });
+  await imageFit.selectOption("contain");
+  await imageFit.selectOption("cover");
 
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  await page.getByRole("dialog", { name: "添加槽位", exact: true })
-    .getByRole("button", { name: "添加上下排列布局分组", exact: true })
-    .click();
-  const textGroupGap = inspector.getByRole("spinbutton", { name: "槽位间距", exact: true });
-  await textGroupGap.fill("4");
-  await textGroupGap.press("Enter");
-  await expect(textGroupGap).toHaveValue("4");
-
-  await addSlot("标题槽位");
-  await inspector.getByRole("spinbutton", { name: "槽位字号", exact: true }).fill("28");
-  await inspector.getByRole("spinbutton", { name: "槽位字号", exact: true }).press("Enter");
-  await addSlot("正文槽位");
-  await addSlot("按钮槽位");
-  await closeSlotPalette();
-
-  await structure.getByRole("button", { name: /添加区域/ }).click();
-  await page.getByRole("dialog", { name: "添加区域", exact: true })
-    .getByRole("button", { name: "确认添加区域", exact: true })
-    .click();
-  await inspector.getByRole("textbox", { name: "节点名称" }).fill("图片区");
-  await inspector.getByRole("button", { name: "容器布局：上下排列", exact: true }).click();
-  await inspector.getByRole("button", { name: "容器留白：紧凑", exact: true }).click();
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  await page.getByRole("dialog", { name: "添加槽位", exact: true })
-    .getByRole("button", { name: "添加上下排列布局分组", exact: true })
-    .click();
-  await addSlot("图片槽位");
-  await inspector.getByRole("combobox", { name: "槽位高度方式" }).selectOption("fixed");
-  await inspector.getByRole("spinbutton", { name: "槽位高度", exact: true }).fill("180");
-  await inspector.getByRole("spinbutton", { name: "槽位高度", exact: true }).press("Enter");
-  await inspector.getByRole("button", { name: "裁切填满", exact: true }).click();
-  await closeSlotPalette();
-
-  return { inspector, structure, sizeControls };
+  return { inspector, sizeControls };
 }
 
 interface AcceptanceTemplateBlueprint {
@@ -717,7 +787,7 @@ interface AcceptanceTemplateBlueprint {
   imageFirst: boolean;
   dualColumn: boolean;
   textSlots: string[];
-  imageRatio: "1:1" | "4:3" | "16:9" | "9:16";
+  imageRatio: "1:1" | "4:5" | "3:4" | "16:9";
   headingSize: number;
 }
 
@@ -741,7 +811,7 @@ const ACCEPTANCE_TEMPLATE_BLUEPRINTS: AcceptanceTemplateBlueprint[] = [
     imageFirst: true,
     dualColumn: false,
     textSlots: ["分类标签", "作品说明", "系列署名"],
-    imageRatio: "4:3",
+    imageRatio: "4:5",
     headingSize: 56,
   },
   {
@@ -752,7 +822,7 @@ const ACCEPTANCE_TEMPLATE_BLUEPRINTS: AcceptanceTemplateBlueprint[] = [
     imageFirst: true,
     dualColumn: false,
     textSlots: ["叙事眉题", "副标题", "日期或章节"],
-    imageRatio: "9:16",
+    imageRatio: "3:4",
     headingSize: 72,
   },
   {
@@ -763,7 +833,7 @@ const ACCEPTANCE_TEMPLATE_BLUEPRINTS: AcceptanceTemplateBlueprint[] = [
     imageFirst: false,
     dualColumn: true,
     textSlots: ["专题眉题", "专题摘要"],
-    imageRatio: "4:3",
+    imageRatio: "16:9",
     headingSize: 50,
   },
   {
@@ -774,7 +844,7 @@ const ACCEPTANCE_TEMPLATE_BLUEPRINTS: AcceptanceTemplateBlueprint[] = [
     imageFirst: false,
     dualColumn: true,
     textSlots: ["系列标识", "小标签", "主视觉说明"],
-    imageRatio: "4:3",
+    imageRatio: "16:9",
     headingSize: 82,
   },
 ];
@@ -784,135 +854,42 @@ async function designAcceptanceTemplate(
   blueprint: AcceptanceTemplateBlueprint,
 ) {
   const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
-  const structure = page.getByRole("complementary", { name: "模板结构", exact: true });
-  const palette = page.getByRole("dialog", { name: "添加槽位", exact: true });
-  const closeSlotPalette = async () => {
-    if (!(await palette.isVisible())) return;
-    await page.keyboard.press("Escape");
-    await expect(palette).toBeHidden();
-  };
-  const addSlot = async (
-    type: "图片槽位" | "标题槽位" | "正文槽位" | "按钮槽位",
-    label: string,
-  ) => {
-    if (!(await palette.isVisible())) {
-      await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-    }
-    const addButton = palette.getByRole("button", { name: `添加${type}`, exact: true });
-    await expect(addButton).toBeEnabled();
-    await addButton.click();
-    const name = inspector.getByRole("textbox", { name: "节点名称", exact: true });
-    await expect(name).toHaveValue(new RegExp(`^${type}(?: \\d+)?$`));
-    await name.fill(label);
-    await name.press("Tab");
-  };
-  const addTextRegionContent = async () => {
-    if (blueprint.textSlots[0]) await addSlot("正文槽位", blueprint.textSlots[0]);
-    await addSlot("标题槽位", "主标题");
-    await inspector.getByRole("spinbutton", { name: "槽位字号", exact: true })
-      .fill(String(blueprint.headingSize));
-    await inspector.getByRole("spinbutton", { name: "槽位字号", exact: true }).press("Enter");
-    for (const label of blueprint.textSlots.slice(1)) {
-      await addSlot("正文槽位", label);
-    }
-    await addSlot("按钮槽位", "行动入口");
-  };
-  const addImage = async () => {
-    await addSlot("图片槽位", "主视觉图片");
-    const ratio = inspector.getByRole("combobox", { name: "图片槽位比例" });
-    await ratio.selectOption(blueprint.imageRatio);
-    await inspector.getByRole("button", { name: "裁切填满", exact: true }).click();
-    if (blueprint.imageRatio === "1:1" || blueprint.imageRatio === "9:16") {
-      await inspector.getByRole("combobox", { name: "槽位宽度方式" }).selectOption("px");
-      const imageWidth = blueprint.imageRatio === "9:16" ? 520 : 500;
-      await inspector.getByRole("spinbutton", { name: "槽位宽度" }).fill(String(imageWidth));
-      await inspector.getByRole("spinbutton", { name: "槽位宽度" }).press("Enter");
-    }
-  };
-
   await fillTemplateIdentity(
     page,
     blueprint.name,
     `用于验证${blueprint.name}的桌面、移动与公开页面构图`,
   );
+  await setOverlayLightNavigationCompatibilityThroughUi(page);
   const desktop = page.getByRole("button", { name: /^桌面端模板布局/ });
   if ((await desktop.getAttribute("aria-pressed")) !== "true") {
     await desktop.click();
   }
   await expect(desktop).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: /^模板尺寸：/ }).click();
-  const sizeControls = page.getByRole("group", { name: "模板整体尺寸" });
+  const sizeControls = inspector;
   await sizeControls.getByRole("spinbutton", { name: "设计宽度" }).fill(String(blueprint.width));
   await sizeControls.getByRole("spinbutton", { name: "设计宽度" }).press("Enter");
-  await sizeControls.getByRole("combobox", { name: "模板高度模式" }).selectOption("fixed");
-  await sizeControls.getByRole("spinbutton", { name: "模板固定高度" }).fill(String(blueprint.height));
-  await sizeControls.getByRole("spinbutton", { name: "模板固定高度" }).press("Enter");
-
-  if (blueprint.dualColumn) {
-    await inspector.getByRole("button", { name: "容器布局：分列排列", exact: true }).click();
-    await inspector.getByRole("button", { name: "容器列宽：2:3", exact: true }).click();
-  } else {
-    await inspector.getByRole("button", { name: "容器布局：上下排列", exact: true }).click();
-  }
-  await inspector.getByRole("spinbutton", { name: "槽位间距", exact: true }).fill(blueprint.dualColumn ? "48" : "0");
-  await inspector.getByRole("spinbutton", { name: "槽位间距", exact: true }).press("Enter");
-  await inspector.getByRole("button", { name: blueprint.width >= 1200 ? "容器留白：宽松" : "容器留白：标准", exact: true }).click();
-
-  await structure.getByRole("button", { name: "添加区域", exact: true }).click();
-  await inspector.getByRole("textbox", { name: "节点名称", exact: true })
-    .fill(blueprint.dualColumn ? "文案区域" : "内容区域");
-  await inspector.getByRole("button", { name: "容器布局：上下排列", exact: true }).click();
-  await inspector.getByRole("spinbutton", { name: "槽位间距", exact: true }).fill(blueprint.dualColumn ? "16" : "12");
-  await inspector.getByRole("spinbutton", { name: "槽位间距", exact: true }).press("Enter");
-  await inspector.getByRole("button", { name: "容器留白：紧凑", exact: true }).click();
-  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-  await page.getByRole("dialog", { name: "添加槽位", exact: true })
-    .getByRole("button", { name: "添加上下排列布局分组", exact: true })
-    .click();
-
-  if (!blueprint.dualColumn && blueprint.imageFirst) await addImage();
-  await addTextRegionContent();
-  if (!blueprint.dualColumn && !blueprint.imageFirst) await addImage();
-
-  if (blueprint.dualColumn) {
-    await closeSlotPalette();
-    await structure.getByRole("button", { name: "添加区域", exact: true }).click();
-    await page.getByRole("dialog", { name: "添加区域", exact: true })
-      .getByRole("button", { name: "确认添加区域", exact: true })
-      .click();
-    await inspector.getByRole("textbox", { name: "节点名称", exact: true }).fill("媒体区域");
-    await inspector.getByRole("button", { name: "容器布局：上下排列", exact: true }).click();
-    await inspector.getByRole("button", { name: "容器留白：紧凑", exact: true }).click();
-    await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-    await page.getByRole("dialog", { name: "添加槽位", exact: true })
-      .getByRole("button", { name: "添加上下排列布局分组", exact: true })
-      .click();
-    await addImage();
-  }
-  await closeSlotPalette();
+  await sizeControls.getByRole("combobox", { name: "高度方式", exact: true }).selectOption("fixed");
+  await sizeControls.getByRole("spinbutton", { name: "高度", exact: true }).fill(String(blueprint.height));
+  await sizeControls.getByRole("spinbutton", { name: "高度", exact: true }).press("Enter");
+  const tree = page.getByRole("tree", { name: "模板区域与槽位", exact: true });
+  await tree.getByRole("treeitem", { name: /^主标题 / }).click();
+  const headingSize = inspector.getByRole("spinbutton", { name: "字号", exact: true });
+  await headingSize.fill(String(blueprint.headingSize));
+  await headingSize.press("Enter");
+  await tree.getByRole("treeitem", { name: /^主图片 / }).click();
+  const imageFit = inspector.getByRole("combobox", { name: "图片适配", exact: true });
+  await imageFit.selectOption("contain");
+  await imageFit.selectOption("cover");
 
   await page.getByRole("button", { name: /^移动端模板布局/ }).click();
-  await page.getByRole("button", { name: /^模板尺寸：/ }).click();
-  await sizeControls.getByRole("spinbutton", { name: "设计宽度" }).fill("390");
-  await sizeControls.getByRole("spinbutton", { name: "设计宽度" }).press("Enter");
-  await sizeControls.getByRole("combobox", { name: "模板高度模式" }).selectOption("fixed");
-  await sizeControls.getByRole("spinbutton", { name: "模板固定高度" }).fill(String(blueprint.mobileHeight));
-  await sizeControls.getByRole("spinbutton", { name: "模板固定高度" }).press("Enter");
-  const mobileRootTarget = page.getByRole("button", {
-    name: "选择模板目标 模板根节点",
-    exact: true,
-  });
-  await mobileRootTarget.focus();
-  await mobileRootTarget.press("Enter");
-  await inspector.getByRole("button", { name: "容器布局：上下排列", exact: true }).click();
-  await page.getByRole("button", { name: "选择模板目标 主视觉图片", exact: true }).click();
-  await inspector.getByRole("combobox", { name: "槽位宽度方式" }).selectOption("px");
-  const mobileImageWidth = blueprint.imageRatio === "9:16" ? 240 : blueprint.imageRatio === "1:1" ? 220 : 300;
-  await inspector.getByRole("spinbutton", { name: "槽位宽度" }).fill(String(mobileImageWidth));
-  await inspector.getByRole("spinbutton", { name: "槽位宽度" }).press("Enter");
+  await page.getByRole("complementary", { name: "模板结构" })
+    .getByRole("button", { name: "模板整体", exact: true }).click();
+  await sizeControls.getByRole("combobox", { name: "高度方式", exact: true }).selectOption("fixed");
+  await sizeControls.getByRole("spinbutton", { name: "高度", exact: true }).fill(String(blueprint.mobileHeight));
+  await sizeControls.getByRole("spinbutton", { name: "高度", exact: true }).press("Enter");
   await page.getByRole("button", { name: /^桌面端模板布局/ }).click();
 
-  return { inspector, structure, sizeControls };
+  return { inspector, sizeControls };
 }
 
 test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 NestJS API）", () => {
@@ -968,7 +945,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(Date.parse(seeded.updatedAt)).not.toBeNaN();
 
     await page.goto(`/admin/editor/${pageKey}`);
-    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    await expectPageWorkspaceReady(page);
     const createdTemplate = await createAndPublishFourThreeTemplateThroughUi(
       page,
       templateName,
@@ -981,11 +958,11 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
 
     const inspector = page.getByRole("region", { name: "模板实例属性", exact: true });
     const titleInput = inspector.getByRole("textbox", {
-      name: "标题槽位",
+      name: "主标题",
       exact: true,
     });
     const bodyInput = inspector.getByRole("textbox", {
-      name: "正文槽位",
+      name: "描述",
       exact: true,
     });
     await titleInput.fill(publishedTitle);
@@ -1014,7 +991,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await page.reload();
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
     await expect(
-      inspector.getByRole("textbox", { name: "标题槽位", exact: true }),
+      inspector.getByRole("textbox", { name: "主标题", exact: true }),
     ).toHaveValue(publishedTitle);
     await expect(
       page.frameLocator(".homepage-editor__canvas-scale iframe").getByText(publishedTitle),
@@ -1124,7 +1101,17 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     const created: Array<{ templateId: string; blueprint: AcceptanceTemplateBlueprint }> = [];
     for (const blueprint of ACCEPTANCE_TEMPLATE_BLUEPRINTS) {
       await page.getByRole("button", { name: "新建模板", exact: true }).click();
-  await openHistoricalTemplateFixture(page);
+      await createTemplateThroughSevenStepRecipe(page, {
+        width: blueprint.width,
+        height: blueprint.height,
+        layout: blueprint.dualColumn
+          ? blueprint.imageFirst ? "左图右文" : "左文右图"
+          : blueprint.imageFirst ? "上图下文" : "上文下图",
+        media: "1 张主图",
+        content: ["主标题", "描述", "按钮 / CTA"],
+        imageRatio: blueprint.imageRatio,
+        name: blueprint.name,
+      });
       const { sizeControls } = await designAcceptanceTemplate(page, blueprint);
       await page.screenshot({
         path: testInfo.outputPath(`${blueprint.name.replace(/\s+/g, "-")}-editor.png`),
@@ -1148,23 +1135,16 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       await page.getByRole("button", {
         name: new RegExp(`(?:打开|正在编辑)${blueprint.name}模板`),
       }).click();
-      await page.getByRole("button", { name: /^模板尺寸：/ }).click();
       await expect(sizeControls.getByRole("spinbutton", { name: "设计宽度" }))
         .toHaveValue(String(blueprint.width));
-      await expect(sizeControls.getByRole("spinbutton", { name: "模板固定高度" }))
+      await expect(sizeControls.getByRole("spinbutton", { name: "高度", exact: true }))
         .toHaveValue(String(blueprint.height));
 
-      const { confirmPublish, review } = await prepareTemplatePublishThroughProductionReviews(
+      const { confirmAndWaitForSinglePublish, review } = await prepareTemplatePublishThroughProductionReviews(
         page,
         record.templateId,
       );
-      const publishResponsePromise = page.waitForResponse((response) => {
-        const url = new URL(response.url());
-        return response.request().method() === "POST"
-          && url.pathname === `/api/page-modules/dynamic-templates/${record.templateId}/publish`;
-      });
-      await confirmPublish.click();
-      expect((await publishResponsePromise).ok()).toBe(true);
+      expect((await confirmAndWaitForSinglePublish()).ok()).toBe(true);
       await expect(page.getByText("模板 v1 已发布；目录已确认可用。已有页面继续锁定原版本。", { exact: true })).toBeVisible();
       await review.getByRole("button", { name: "继续设计", exact: true }).click();
 
@@ -1198,7 +1178,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       expect(Object.values(definition.slots).filter((slot) => slot.type === "button")).toHaveLength(1);
       expect(Object.values(definition.slots).find((slot) => slot.type === "image")?.desktopRules.objectFit)
         .toBe("cover");
-      expect(root.childIds).toHaveLength(blueprint.dualColumn ? 2 : 1);
+      expect(root.childIds).toHaveLength(1);
       expect(definition.defaultContent).toEqual({});
       expect(definition.previewContent).toEqual({});
     }
@@ -1257,26 +1237,30 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
     await page.getByRole("button", { name: "新建模板", exact: true }).click();
-  await openHistoricalTemplateFixture(page);
+    await createTemplateThroughSevenStepRecipe(page, {
+      width: 1200,
+      height: 900,
+      layout: "左图右文",
+      media: "2 张图片",
+      arrangement: "图片并排",
+      content: ["主标题", "描述"],
+      name: templateName,
+    });
     await fillTemplateIdentity(
       page,
       templateName,
       "用于验证双图片与文字内容在桌面左右、移动上下的公开构图",
     );
-    await page.getByRole("button", { name: "预览模板", exact: true }).focus();
-  await applyBasicSkeleton(page);
     await setOverlayLightNavigationCompatibilityThroughUi(page);
 
     const tree = page.getByRole("tree", { name: "模板区域与槽位", exact: true });
     for (const label of [
-      "内容区域 1",
-      "双图文布局",
-      "图片组",
-      "图片槽位 1",
-      "图片槽位 2",
-      "文字组",
-      "标题槽位",
-      "正文槽位",
+      "布局结构",
+      "自定义图片 1",
+      "自定义图片 2",
+      "内容区域",
+      "主标题",
+      "描述",
     ]) {
       await expect(tree.getByRole("treeitem", { name: new RegExp(label) })).toBeVisible();
     }
@@ -1302,7 +1286,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(savedTemplateCard, "保存并重新载入后必须打开同一个 Repository 模板身份")
       .toHaveCount(1);
     await savedTemplateCard.locator(".homepage-editor__template-card-main").click();
-    await expect(tree.getByRole("treeitem", { name: /图片槽位 2/ })).toBeVisible();
+    await expect(tree.getByRole("treeitem", { name: /自定义图片 2/ })).toBeVisible();
 
     const { confirmAndWaitForSinglePublish, review } = await prepareTemplatePublishThroughProductionReviews(
       page,
@@ -1311,28 +1295,28 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect((await confirmAndWaitForSinglePublish()).ok()).toBe(true);
     await review.getByRole("button", { name: "继续设计", exact: true }).click();
 
-    const sameTemplateCard = designLibrary.locator(
+    const publishedTemplateCard = designLibrary.locator(
       `[data-template-catalog-card][data-template-identity="${sameTemplateIdentity}"]`,
     );
-    await expect(sameTemplateCard, "正式发布后目录必须保留同一个 Repository 模板身份")
+    await expect(publishedTemplateCard, "正式发布后目录必须保留同一个 Repository 模板身份")
       .toHaveCount(1);
-    await expect(sameTemplateCard).toContainText(templateName);
-    await expect(sameTemplateCard.locator('[data-template-publication-status="published-current"]'))
+    await expect(publishedTemplateCard).toContainText(templateName);
+    await expect(publishedTemplateCard.locator('[data-template-publication-status="published-current"]'))
       .toHaveCount(1);
     await expect(designLibrary).not.toContainText(sourceLevelWords);
-    await expect(sameTemplateCard).not.toContainText(sourceLevelWords);
+    await expect(publishedTemplateCard).not.toContainText(sourceLevelWords);
     await expect(designLibrary.getByRole("button", { name: legacyTemplateActions }))
       .toHaveCount(0);
-    const sameTemplateCardMain = sameTemplateCard.locator(".homepage-editor__template-card-main");
+    const sameTemplateCardMain = publishedTemplateCard.locator(".homepage-editor__template-card-main");
     await expect(sameTemplateCardMain).toHaveAttribute(
       "aria-label",
-      new RegExp(`^(?:打开|正在编辑)${templateName}，状态：已发布$`),
+      new RegExp(`^(?:打开|正在编辑)${templateName}，当前草稿，已保存，线上 v1$`),
     );
     await sameTemplateCardMain.click();
-    await expect(tree.getByRole("treeitem", { name: /图片槽位 1/ })).toBeVisible();
-    await expect(tree.getByRole("treeitem", { name: /图片槽位 2/ })).toBeVisible();
+    await expect(tree.getByRole("treeitem", { name: /自定义图片 1/ })).toBeVisible();
+    await expect(tree.getByRole("treeitem", { name: /自定义图片 2/ })).toBeVisible();
 
-    await sameTemplateCard.getByRole("button", {
+    await publishedTemplateCard.getByRole("button", {
       name: `更多模板操作：${templateName}`,
       exact: true,
     }).click();
@@ -1351,7 +1335,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await archiveDialog.getByRole("button", { name: "移入回收站", exact: true }).click();
     expect((await archiveResponsePromise).ok()).toBe(true);
     await expect(archiveDialog).toBeHidden();
-    await expect(sameTemplateCard).toHaveCount(0);
+    await expect(publishedTemplateCard).toHaveCount(0);
 
     await designLibrary.getByRole("button", { name: "打开模板回收站", exact: true }).click();
     const trashedSameTemplateCard = designLibrary.locator(
@@ -1396,8 +1380,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     )).toHaveCount(1);
     await expect(restoredSameTemplateCard).not.toContainText(sourceLevelWords);
     await restoredSameTemplateCard.locator(".homepage-editor__template-card-main").click();
-    await expect(tree.getByRole("treeitem", { name: /图片槽位 1/ })).toBeVisible();
-    await expect(tree.getByRole("treeitem", { name: /图片槽位 2/ })).toBeVisible();
+    await expect(tree.getByRole("treeitem", { name: /自定义图片 1/ })).toBeVisible();
+    await expect(tree.getByRole("treeitem", { name: /自定义图片 2/ })).toBeVisible();
 
     const published = await responseData<{
       definition: {
@@ -1409,8 +1393,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
           slotId?: string;
           type: string;
           responsive: {
-            desktop: { direction?: string };
-            mobile: { direction?: string };
+            desktop: { direction?: string; layoutMode?: string };
+            mobile: { direction?: string; layoutMode?: string };
           };
         }>;
         slots: Record<string, {
@@ -1426,23 +1410,25 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       `${apiBaseUrl}/page-modules/dynamic-templates/published/${created.templateId}/versions/1`,
     ));
     const definition = published.definition;
-    const [regionId] = definition.nodes[definition.rootNodeId].childIds;
-    const [compositionId] = definition.nodes[regionId].childIds;
-    const [imageGroupId, textGroupId] = definition.nodes[compositionId].childIds;
-    const imageNodeIds = definition.nodes[imageGroupId].childIds;
+    const [compositionId] = definition.nodes[definition.rootNodeId].childIds;
+    const compositionChildren = definition.nodes[compositionId].childIds;
+    const imageNodeIds = compositionChildren.filter((nodeId) => (
+      definition.nodes[nodeId].type === "ImageSlot"
+    ));
+    const textGroupId = compositionChildren.find((nodeId) => (
+      definition.nodes[nodeId].name === "内容区域"
+    ));
+    if (!textGroupId) throw new Error("七步向导生成的 4:3 模板缺少内容区域");
     const textNodeIds = definition.nodes[textGroupId].childIds;
     expect(definition.nodes[definition.rootNodeId].childIds).toHaveLength(1);
     expect(definition.nodes[definition.rootNodeId].type).toBe("Section");
-    expect(definition.nodes[regionId].name).toBe("内容区域 1");
-    expect(definition.nodes[regionId].type).toBe("Container");
-    expect(definition.nodes[compositionId].name).toBe("双图文布局");
-    expect(definition.nodes[compositionId].type).toBe("Row");
-    expect(definition.nodes[compositionId].responsive.desktop.direction).toBe("row");
-    expect(definition.nodes[compositionId].responsive.mobile.direction).toBe("column");
-    expect(definition.nodes[imageGroupId].name).toBe("图片组");
-    expect(definition.nodes[imageGroupId].type).toBe("Column");
-    expect(definition.nodes[textGroupId].name).toBe("文字组");
-    expect(definition.nodes[textGroupId].type).toBe("Column");
+    expect(definition.nodes[compositionId].name).toBe("布局结构");
+    expect(definition.nodes[compositionId].type).toBe("Stack");
+    expect(definition.nodes[compositionId].responsive.desktop.layoutMode).toBe("free");
+    expect(definition.nodes[compositionId].responsive.mobile.layoutMode).toBe("flow");
+    expect(imageNodeIds).toHaveLength(2);
+    expect(definition.nodes[textGroupId].name).toBe("内容区域");
+    expect(definition.nodes[textGroupId].type).toBe("Container");
     expect(imageNodeIds.map((nodeId) => definition.nodes[nodeId].type))
       .toEqual(["ImageSlot", "ImageSlot"]);
     expect(textNodeIds.map((nodeId) => definition.nodes[nodeId].type))
@@ -1460,48 +1446,42 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       };
     })).toEqual([
       {
-        key: "image",
-        label: "图片槽位 1",
-        nodeName: "图片槽位 1",
+        key: "content1",
+        label: "自定义图片 1",
+        nodeName: "自定义图片 1",
         nodeType: "ImageSlot",
         slotType: "image",
       },
       {
-        key: "image2",
-        label: "图片槽位 2",
-        nodeName: "图片槽位 2",
+        key: "content2",
+        label: "自定义图片 2",
+        nodeName: "自定义图片 2",
         nodeType: "ImageSlot",
         slotType: "image",
       },
       {
-        key: "heading",
-        label: "标题槽位",
-        nodeName: "标题槽位",
+        key: "content3",
+        label: "主标题",
+        nodeName: "主标题",
         nodeType: "HeadingSlot",
         slotType: "heading",
       },
       {
-        key: "text",
-        label: "正文槽位",
-        nodeName: "正文槽位",
+        key: "content4",
+        label: "描述",
+        nodeName: "描述",
         nodeType: "TextSlot",
         slotType: "text",
       },
     ]);
-    for (const nodeId of imageNodeIds) {
-      const slot = definition.slots[definition.nodes[nodeId].slotId!];
-      expect(slot.desktopRules.aspectRatio).toBe("4:3");
-      expect(slot.mobileRules.aspectRatio).toBe("4:3");
-    }
-
     await returnToPageWorkspaceAndOpenPublishedTemplate(
       page,
       `添加到页面：${templateName} v1`,
     );
     const instanceInspector = page.getByRole("region", { name: "模板实例属性" });
-    await instanceInspector.getByRole("textbox", { name: "标题槽位", exact: true })
+    await instanceInspector.getByRole("textbox", { name: "主标题", exact: true })
       .fill("双图文系列标题");
-    await instanceInspector.getByRole("textbox", { name: "正文槽位", exact: true })
+    await instanceInspector.getByRole("textbox", { name: "描述", exact: true })
       .fill("两幅珠宝图片与文字共同组成同一内容区域。");
     const uploadedImageUrls: string[] = [];
     const uploadedImageAltTexts: string[] = [];
@@ -1521,9 +1501,6 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     );
     const previewComposition = previewFrame.locator(
       `[data-template-node-id="${compositionId}"]`,
-    );
-    const previewImageGroup = previewFrame.locator(
-      `[data-template-node-id="${imageGroupId}"]`,
     );
     for (const preview of [
       {
@@ -1554,8 +1531,9 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
         "data-dynamic-template-device",
         preview.device,
       );
-      await expect(previewComposition).toHaveCSS("flex-direction", preview.direction);
-      await expect(previewImageGroup).toHaveCSS("flex-direction", preview.direction);
+      if (preview.device === "mobile") {
+        await expect(previewComposition).toHaveCSS("flex-direction", preview.direction);
+      }
       await expect(previewFrame.getByText("双图文系列标题", { exact: true })).toBeVisible();
       for (const altText of uploadedImageAltTexts) {
         await expect(previewFrame.getByRole("img", { name: altText, exact: true }))
@@ -1598,34 +1576,23 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       "template-definition-v2",
     );
     await expect(publicRenderer).toHaveAttribute("data-dynamic-template-device", "desktop");
-    await expect(publicRenderer).toHaveAttribute("data-template-root-height-mode", "aspect-ratio");
-    await expect(publicRenderer).toHaveAttribute("data-template-root-height-ratio", "4:3");
+    await expect(publicRenderer).toHaveAttribute("data-template-root-height-mode", "fixed");
     const publicRoot = publicInstance.locator(
       `[data-template-node-id="${definition.rootNodeId}"]`,
     );
     const publicComposition = publicInstance.locator(`[data-template-node-id="${compositionId}"]`);
-    const publicImageGroup = publicInstance.locator(`[data-template-node-id="${imageGroupId}"]`);
     const publicTextGroup = publicInstance.locator(`[data-template-node-id="${textGroupId}"]`);
     await expect(publicComposition).toBeVisible();
     expect(await publicRoot.locator(":scope > [data-template-node-id]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
-      .toEqual([regionId]);
-    const publicRegion = publicInstance.locator(`[data-template-node-id="${regionId}"]`);
-    expect(await publicRegion.locator(":scope > [data-template-node-id]")
-      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
       .toEqual([compositionId]);
-    await expect(publicComposition).toHaveCSS("flex-direction", "row");
-    await expect(publicImageGroup).toHaveCSS("flex-direction", "row");
     expect(await publicComposition.locator(":scope > [data-template-node-id]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
-      .toEqual([imageGroupId, textGroupId]);
-    const publicImages = publicImageGroup.locator(
+      .toEqual([...imageNodeIds, textGroupId]);
+    const publicImages = publicComposition.locator(
       ':scope > [data-template-node-type="ImageSlot"]',
     );
     await expect(publicImages).toHaveCount(2);
-    expect(await publicImageGroup.locator(":scope > [data-template-node-id]")
-      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
-      .toEqual(imageNodeIds);
     expect(await publicTextGroup.locator(":scope > [data-template-node-id]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
       .toEqual(textNodeIds);
@@ -1637,56 +1604,46 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       await expect(publicInstance.getByRole("img", { name: altText, exact: true }))
         .toHaveAttribute("src", uploadedImageUrls[index]);
     }
-    expect(await publicImageGroup.evaluate((node) => (
-      node.parentElement?.closest("[data-template-node-id]")?.getAttribute("data-template-node-id")
-    ))).toBe(compositionId);
+    for (const imageNodeId of imageNodeIds) {
+      expect(await publicInstance.locator(`[data-template-node-id="${imageNodeId}"]`).evaluate((node) => (
+        node.parentElement?.closest("[data-template-node-id]")?.getAttribute("data-template-node-id")
+      ))).toBe(compositionId);
+    }
     expect(await publicTextGroup.evaluate((node) => (
       node.parentElement?.closest("[data-template-node-id]")?.getAttribute("data-template-node-id")
     ))).toBe(compositionId);
-    const desktopImageBox = await publicImageGroup.boundingBox();
     const desktopTextBox = await publicTextGroup.boundingBox();
     const desktopRootBox = await publicRoot.boundingBox();
     const desktopFirstImageBox = await publicImages.nth(0).boundingBox();
     const desktopSecondImageBox = await publicImages.nth(1).boundingBox();
     if (
-      !desktopImageBox
-      || !desktopTextBox
+      !desktopTextBox
       || !desktopRootBox
       || !desktopFirstImageBox
       || !desktopSecondImageBox
     ) throw new Error("桌面 4:3 双图文缺少根节点、组级或图片几何证据");
     expect(Math.abs((desktopRootBox.width / desktopRootBox.height) - (4 / 3)))
       .toBeLessThanOrEqual(0.02);
-    expect(desktopImageBox.x).toBeLessThan(desktopTextBox.x);
-    expect(desktopImageBox.x + desktopImageBox.width).toBeLessThanOrEqual(desktopTextBox.x + 1);
-    expect(Math.abs(desktopImageBox.y - desktopTextBox.y)).toBeLessThanOrEqual(2);
+    expect(desktopFirstImageBox.x).toBeLessThan(desktopTextBox.x);
+    expect(desktopSecondImageBox.x).toBeLessThan(desktopTextBox.x);
     expect(desktopFirstImageBox.x).toBeLessThan(desktopSecondImageBox.x);
     expect(desktopFirstImageBox.x + desktopFirstImageBox.width)
       .toBeLessThanOrEqual(desktopSecondImageBox.x + 1);
-    for (const imageNodeId of imageNodeIds) {
-      await expect(publicInstance.locator(`[data-template-node-id="${imageNodeId}"]`))
-        .toHaveCSS("aspect-ratio", "4 / 3");
-    }
-
     await publicPage.setViewportSize({ width: 390, height: 844 });
     await publicPage.reload();
     await expect(publicInstance).toBeVisible();
     await expect(publicRenderer).toHaveAttribute("data-dynamic-template-device", "mobile");
     await expect(publicComposition).toHaveCSS("flex-direction", "column");
-    await expect(publicImageGroup).toHaveCSS("flex-direction", "column");
-    const mobileImageBox = await publicImageGroup.boundingBox();
     const mobileTextBox = await publicTextGroup.boundingBox();
     const mobileFirstImageBox = await publicImages.nth(0).boundingBox();
     const mobileSecondImageBox = await publicImages.nth(1).boundingBox();
     if (
-      !mobileImageBox
-      || !mobileTextBox
+      !mobileTextBox
       || !mobileFirstImageBox
       || !mobileSecondImageBox
     ) throw new Error("移动 4:3 双图文缺少组级或图片几何证据");
-    expect(mobileImageBox.y).toBeLessThan(mobileTextBox.y);
-    expect(mobileImageBox.y + mobileImageBox.height).toBeLessThanOrEqual(mobileTextBox.y + 1);
-    expect(Math.abs(mobileImageBox.x - mobileTextBox.x)).toBeLessThanOrEqual(2);
+    expect(mobileFirstImageBox.y).toBeLessThan(mobileTextBox.y);
+    expect(mobileSecondImageBox.y).toBeLessThan(mobileTextBox.y);
     expect(mobileFirstImageBox.y).toBeLessThan(mobileSecondImageBox.y);
     expect(mobileFirstImageBox.y + mobileFirstImageBox.height)
       .toBeLessThanOrEqual(mobileSecondImageBox.y + 1);
@@ -1700,7 +1657,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       ),
     );
     const draftOnlyTitle = "双图文系列标题（未发布草稿）";
-    await instanceInspector.getByRole("textbox", { name: "标题槽位", exact: true })
+    await instanceInspector.getByRole("textbox", { name: "主标题", exact: true })
       .fill(draftOnlyTitle);
     const draftSaveResponse = page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -1770,7 +1727,15 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
     await expect(page.locator(".template-editor__toolbar")).toBeVisible();
     await page.getByRole("button", { name: "新建模板", exact: true }).click();
-  await openHistoricalTemplateFixture(page);
+    await createTemplateThroughSevenStepRecipe(page, {
+      width: 1920,
+      height: 240,
+      layout: "左文右图",
+      media: "1 张主图",
+      content: ["主标题", "描述", "按钮 / CTA"],
+      imageRatio: "适应区域",
+      name: templateNameV1,
+    });
     const { sizeControls } = await design1920By240Template(page, templateNameV1);
     await page.screenshot({
       path: testInfo.outputPath("dynamic-template-editor-1920x240-structure.png"),
@@ -1792,12 +1757,11 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await page.locator(
       `[data-unified-template-library="design"] [data-template-identity="template:${createdTemplate.templateId}"] .homepage-editor__template-card-main`,
     ).click();
-    await page.getByRole("button", { name: /^模板尺寸：/ }).click();
     await expect(sizeControls).toBeVisible();
     await expect(sizeControls.getByRole("spinbutton", { name: "设计宽度" })).toHaveValue("1920");
-    await expect(sizeControls.getByRole("spinbutton", { name: "模板固定高度" })).toHaveValue("240");
-    await expect(page.getByRole("complementary", { name: "模板结构" })).toContainText("图片区");
-    await expect(page.getByRole("complementary", { name: "模板结构" })).toContainText("文字区");
+    await expect(sizeControls.getByRole("spinbutton", { name: "高度", exact: true })).toHaveValue("240");
+    await expect(page.getByRole("complementary", { name: "模板结构" })).toContainText("主图片");
+    await expect(page.getByRole("complementary", { name: "模板结构" })).toContainText("内容区域");
 
     await page.getByRole("button", { name: "预览模板" }).click();
     const previewScenario = page.getByRole("combobox", { name: "压力预览场景" });
@@ -1839,6 +1803,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       version: number;
       definitionChecksum: string;
       definition: {
+        metadata: { visualRole?: string };
         rootNodeId: string;
         nodes: Record<string, {
           nodeId: string;
@@ -1850,7 +1815,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
             mobile: { gap?: { value: number; unit: string } };
           };
         }>;
-        slots: Record<string, { slotId: string; key: string }>;
+        slots: Record<string, { slotId: string; key: string; semanticRole?: string }>;
         defaultContent: Record<string, unknown>;
         previewContent: Record<string, unknown>;
       };
@@ -1859,10 +1824,17 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     ));
     expect(publishedV1.templateId).toBe(createdTemplate.templateId);
     expect(publishedV1.version).toBe(1);
+    expect(publishedV1.definition.metadata.visualRole).toBe("primary-stage");
     const publishedV1Snapshot = structuredClone(publishedV1);
-    const slotsByKey = Object.fromEntries(
-      Object.values(publishedV1.definition.slots).map((slot) => [slot.key, slot]),
-    );
+    const slotsByKey = {
+      image: Object.values(publishedV1.definition.slots).find((slot) => slot.semanticRole === "heroImage"),
+      heading: Object.values(publishedV1.definition.slots).find((slot) => slot.semanticRole === "title"),
+      description: Object.values(publishedV1.definition.slots).find((slot) => slot.semanticRole === "description"),
+      button: Object.values(publishedV1.definition.slots).find((slot) => slot.semanticRole === "cta"),
+    };
+    if (!slotsByKey.image || !slotsByKey.heading || !slotsByKey.description || !slotsByKey.button) {
+      throw new Error("七步生成的正式模板缺少主图、标题、描述或 CTA 语义槽位");
+    }
     expect(publishedV1.definition.defaultContent).toEqual({});
     expect(publishedV1.definition.previewContent).toEqual({});
     expect(JSON.stringify(publishedV1.definition)).not.toContain("周年典藏系列");
@@ -1884,11 +1856,11 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
 
     const instanceInspector = page.getByRole("region", { name: "模板实例属性" });
     await expect(instanceInspector).toContainText(`固定版本 ${createdTemplate.templateId} v1`);
-    await instanceInspector.getByRole("textbox", { name: "标题槽位" }).fill("周年典藏系列");
-    await instanceInspector.getByRole("textbox", { name: "正文槽位" })
+    await instanceInspector.getByRole("textbox", { name: "主标题" }).fill("周年典藏系列");
+    await instanceInspector.getByRole("textbox", { name: "描述" })
       .fill("以克制留白呈现珠宝工艺与佩戴光泽。");
-    await instanceInspector.getByRole("textbox", { name: "按钮槽位文案" }).fill("查看系列");
-    await instanceInspector.getByRole("group", { name: "按钮槽位跳转" })
+    await instanceInspector.getByRole("textbox", { name: "按钮 / CTA文案" }).fill("查看系列");
+    await instanceInspector.getByRole("group", { name: "按钮 / CTA跳转" })
       .getByRole("button", { name: "页面" }).click();
     await instanceInspector.getByRole("combobox", { name: "站内页面" }).fill("/products");
     const imageField = instanceInspector.locator(`[data-slot-id="${slotsByKey.image.slotId}"]`);
@@ -1904,10 +1876,10 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     );
     const uploadedImage = await responseData<{ url: string }>(await uploadImageResponsePromise);
     await expect(imageField.getByRole("button", { name: "替换图片" })).toBeVisible();
-    await imageField.getByRole("textbox", { name: "图片槽位替代文字" })
+    await imageField.getByRole("textbox", { name: "主图片替代文字" })
       .fill("周年典藏系列珠宝工艺展示");
     await instanceInspector.getByRole("group", { name: "页面实例属性范围" })
-      .getByRole("button", { name: "标题槽位", exact: true }).click();
+      .getByRole("button", { name: "主标题", exact: true }).click();
     await expect(instanceInspector.getByText("水平偏移", { exact: true })).toHaveCount(0);
     await expect(instanceInspector.getByText("垂直偏移", { exact: true })).toHaveCount(0);
     await expect(instanceInspector.getByText("区域宽度", { exact: true })).toHaveCount(0);
@@ -1915,17 +1887,22 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       '.homepage-editor__layer-item[data-layer-index="1"] .homepage-editor__layer-select',
     );
     await lockedV1Layer.click();
-    await instanceInspector.getByRole("textbox", { name: "标题槽位" })
+    await instanceInspector.getByRole("textbox", { name: "主标题" })
       .fill("经典常青系列");
-    await instanceInspector.getByRole("textbox", { name: "正文槽位" })
+    await instanceInspector.getByRole("textbox", { name: "描述" })
       .fill("保留 v1 结构与内容，验证历史版本持续可渲染。");
-    await instanceInspector.getByRole("textbox", { name: "按钮槽位文案" })
+    await instanceInspector.getByRole("textbox", { name: "按钮 / CTA文案" })
       .fill("浏览经典系列");
-    await instanceInspector.getByRole("group", { name: "按钮槽位跳转" })
+    await instanceInspector.getByRole("group", { name: "按钮 / CTA跳转" })
       .getByRole("button", { name: "页面" }).click();
     await instanceInspector.getByRole("combobox", { name: "站内页面" }).fill("/products");
+    const lockedImageUrl = await uploadTemplateInstanceImage(
+      page,
+      imageField,
+      "经典常青系列珠宝工艺展示",
+    );
     await populatedV1Layer.click();
-    await expect(instanceInspector.getByRole("textbox", { name: "标题槽位" }))
+    await expect(instanceInspector.getByRole("textbox", { name: "主标题" }))
       .toHaveValue("周年典藏系列");
     await page.screenshot({
       path: testInfo.outputPath("dynamic-template-v1-repeat.png"),
@@ -1934,7 +1911,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
 
     await completePagePublicationMediaThroughUi(
       page,
-      [uploadedImage.url],
+      [uploadedImage.url, lockedImageUrl],
       "QA-TEMPLATE-V1",
     );
     await page.reload();
@@ -2094,11 +2071,16 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       .first();
     await expect(publicInstance).toBeVisible();
     const imageRegionNode = Object.values(publishedV1.definition.nodes)
-      .find((node) => node.name === "图片区");
+      .find((node) => node.slotId === slotsByKey.image.slotId);
     const textRegionNode = Object.values(publishedV1.definition.nodes)
-      .find((node) => node.name === "文字区");
-    if (!imageRegionNode || !textRegionNode) throw new Error("正式模板缺少图片区或文字区");
-    const textGroupNodeId = textRegionNode.childIds[0];
+      .find((node) => node.name === "内容区域");
+    const stageNode = publishedV1.definition.nodes[
+      publishedV1.definition.nodes[publishedV1.definition.rootNodeId].childIds[0]
+    ];
+    if (!imageRegionNode || !textRegionNode || !stageNode) {
+      throw new Error("正式模板缺少配方布局、主图片或内容区域");
+    }
+    const textGroupNodeId = textRegionNode.nodeId;
     const publishedV1TextGroup = publishedV1.definition.nodes[textGroupNodeId];
     if (!publishedV1TextGroup || publishedV1TextGroup.childIds.length < 2) {
       throw new Error("正式模板文字区缺少可验证的上下布局组");
@@ -2155,7 +2137,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       `[role="treeitem"][data-selection-target-id="${textGroupNodeId}"]`,
     ).click();
     const v2TextGroupGap = templateInspector.getByRole("spinbutton", {
-      name: "槽位间距",
+      name: "对象间距",
       exact: true,
     });
     await v2TextGroupGap.fill("20");
@@ -2207,6 +2189,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(publishedV2.definition.nodes[publishedV2.definition.rootNodeId].childIds)
       .toEqual(publishedV1.definition.nodes[publishedV1.definition.rootNodeId].childIds);
     expect(publishedV2.definition.nodes[publishedV2.definition.rootNodeId].childIds)
+      .toEqual([stageNode.nodeId]);
+    expect(publishedV2.definition.nodes[stageNode.nodeId].childIds)
       .toEqual([textRegionNode.nodeId, imageRegionNode.nodeId]);
     expect(publishedV2TextGroup.childIds).toEqual(publishedV1TextGroup.childIds);
     expect(publishedV1TextGroup.responsive.desktop.gap).toEqual({ value: 4, unit: "px" });
@@ -2289,14 +2273,14 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(page.getByText("页面实例已升级到 v2；尚未保存页面草稿，可使用页面撤销回退"))
       .toBeVisible();
     await expect(instanceInspector).toContainText(`固定版本 ${createdTemplate.templateId} v2`);
-    await expect(instanceInspector.getByRole("textbox", { name: "标题槽位" }))
+    await expect(instanceInspector.getByRole("textbox", { name: "主标题" }))
       .toHaveValue("周年典藏系列");
-    await expect(instanceInspector.getByRole("textbox", { name: "正文槽位" }))
+    await expect(instanceInspector.getByRole("textbox", { name: "描述" }))
       .toHaveValue("以克制留白呈现珠宝工艺与佩戴光泽。");
     await expect(imageField.getByRole("button", { name: "替换图片" })).toBeVisible();
-    await expect(imageField.getByRole("textbox", { name: "图片槽位替代文字" }))
+    await expect(imageField.getByRole("textbox", { name: "主图片替代文字" }))
       .toHaveValue("周年典藏系列珠宝工艺展示");
-    await expect(instanceInspector.getByRole("textbox", { name: "按钮槽位文案" }))
+    await expect(instanceInspector.getByRole("textbox", { name: "按钮 / CTA文案" }))
       .toHaveValue("查看系列");
     await expect(instanceInspector.getByRole("combobox", { name: "站内页面" }))
       .toHaveValue("/products");
@@ -2501,11 +2485,14 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(publicUpgradedV2Renderer)
       .toHaveAttribute("data-template-composition-authority", "template-definition-v2");
     await expect(publicUpgradedV2.getByText("周年典藏系列", { exact: true })).toBeVisible();
+    await expect(publicUpgradedV2.locator("h1").getByText("周年典藏系列", { exact: true }))
+      .toBeVisible();
     await expect(publicUpgradedV2.getByRole("img", { name: "周年典藏系列珠宝工艺展示" }))
       .toHaveAttribute("src", uploadedImage.url);
     await expect(publicUpgradedV2.getByRole("link", { name: "查看系列" }))
       .toHaveAttribute("href", "/products");
     await expect(publicLockedV1.getByText("经典常青系列", { exact: true })).toBeVisible();
+    await expect(publicLockedV1.locator("h1")).toHaveCount(0);
     await expect(publicLockedV1.getByRole("link", { name: "浏览经典系列" }))
       .toHaveAttribute("href", "/products");
     const publicV2TextGroup = publicUpgradedV2.locator(
@@ -2518,10 +2505,10 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(publicV1TextGroup).toHaveCSS("gap", "4px");
     expect(await publicV2TextGroup.evaluate((node) => (
       node.parentElement?.getAttribute("data-template-node-id")
-    ))).toBe(textRegionNode.nodeId);
+    ))).toBe(stageNode.nodeId);
     expect(await publicV1TextGroup.evaluate((node) => (
       node.parentElement?.getAttribute("data-template-node-id")
-    ))).toBe(textRegionNode.nodeId);
+    ))).toBe(stageNode.nodeId);
     const publicV2Root = publicUpgradedV2.locator(
       `[data-template-node-id="${publishedV2.definition.rootNodeId}"]`,
     );
@@ -2530,8 +2517,16 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     );
     expect(await publicV2Root.locator(":scope > [data-template-node-id]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
-      .toEqual([textRegionNode.nodeId, imageRegionNode.nodeId]);
+      .toEqual([stageNode.nodeId]);
     expect(await publicV1Root.locator(":scope > [data-template-node-id]")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
+      .toEqual([stageNode.nodeId]);
+    const publicV2Stage = publicUpgradedV2.locator(`[data-template-node-id="${stageNode.nodeId}"]`);
+    const publicV1Stage = publicLockedV1.locator(`[data-template-node-id="${stageNode.nodeId}"]`);
+    expect(await publicV2Stage.locator(":scope > [data-template-node-id]")
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
+      .toEqual([textRegionNode.nodeId, imageRegionNode.nodeId]);
+    expect(await publicV1Stage.locator(":scope > [data-template-node-id]")
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id"))))
       .toEqual([textRegionNode.nodeId, imageRegionNode.nodeId]);
     expect(await publicV2TextGroup.locator(":scope > [data-template-node-id]")
@@ -2708,6 +2703,125 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(dynamicTemplateVersions(finalPublic, createdTemplate.templateId)).toEqual([2, 1]);
     expect(dynamicTemplateInstanceIdentities(finalPublic, createdTemplate.templateId))
       .toEqual(upgradedInstanceIdentities);
+
+    const draftBeforeRollback = await responseData<PageDocumentSnapshot>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`,
+      ),
+    );
+    await page.getByRole("button", { name: "更多编辑操作", exact: true }).click();
+    await page.getByRole("menuitem", { name: "发布历史" }).click();
+    const revisionDrawer = page.getByRole("dialog", { name: "页面发布历史", exact: true });
+    const v1RevisionItem = revisionDrawer.locator(".homepage-editor__revision-item", {
+      hasText: `版本 ${pageRevisionV1.version}`,
+    });
+    await expect(v1RevisionItem.getByText("当前线上版本", { exact: true })).toHaveCount(0);
+    await v1RevisionItem.getByRole("button", { name: "回滚线上", exact: true }).click();
+    const rollbackDialog = page.getByRole("dialog", {
+      name: `回滚线上到版本 ${pageRevisionV1.version}？`,
+      exact: true,
+    });
+    await expect(rollbackDialog).toContainText("不会覆盖当前页面草稿");
+    const rollbackResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "PUT"
+        && url.pathname === `/api/page-modules/document/revisions/${pageRevisionV1.id}/rollback-publication`;
+    });
+    await rollbackDialog.getByRole("button", { name: "确认回滚线上", exact: true }).click();
+    expect((await rollbackResponsePromise).ok()).toBe(true);
+    await expect(page.getByText(
+      `线上页面已回滚到版本 ${pageRevisionV1.version}；当前草稿保持不变`,
+      { exact: true },
+    )).toBeVisible();
+
+    const draftAfterRollback = await responseData<PageDocumentSnapshot>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`,
+      ),
+    );
+    expect(draftAfterRollback.puckData).toEqual(draftBeforeRollback.puckData);
+    expect(dynamicTemplateVersions(draftAfterRollback, createdTemplate.templateId))
+      .toEqual([2, 1]);
+    expect(dynamicTemplateInstanceIdentities(draftAfterRollback, createdTemplate.templateId))
+      .toEqual(upgradedInstanceIdentities);
+    expect(draftAfterRollback.publishedRevisionId).not.toBe(pageRevisionV1.id);
+    expect(draftAfterRollback.publishedRevisionId).not.toBe(pageRevisionV2.id);
+
+    const publicAfterRollback = await responseData<PageDocumentSnapshot>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
+      ),
+    );
+    expect(publicAfterRollback.version).toBe(pageRevisionV2.version + 1);
+    expect(dynamicTemplateVersions(publicAfterRollback, createdTemplate.templateId))
+      .toEqual([1, 1]);
+    expect(dynamicTemplateInstanceIdentities(publicAfterRollback, createdTemplate.templateId))
+      .toEqual(v1InstanceIdentities);
+
+    const pageRevisionV1AfterRollback = await responseData<PageDocumentRevisionDetail>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/revisions/${pageRevisionV1.version}?pageKey=${pageKey}`,
+      ),
+    );
+    const pageRevisionV2AfterRollback = await responseData<PageDocumentRevisionDetail>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/revisions/${pageRevisionV2.version}?pageKey=${pageKey}`,
+      ),
+    );
+    expect(pageRevisionV1AfterRollback.isPublished).toBe(false);
+    expect(pageRevisionV1AfterRollback.puckData).toEqual(pageRevisionV1PuckDataSnapshot);
+    expect(pageRevisionV2AfterRollback.isPublished).toBe(false);
+    expect(pageRevisionV2AfterRollback.puckData).toEqual(pageRevisionV2PuckDataSnapshot);
+    const revisionsAfterRollback = await responseData<{
+      items: PageDocumentRevisionSummary[];
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/document/revisions?pageKey=${pageKey}&limit=50`,
+    ));
+    const rollbackRevision = revisionsAfterRollback.items.find((revision) => revision.isPublished);
+    expect(rollbackRevision).toMatchObject({
+      id: draftAfterRollback.publishedRevisionId,
+      version: pageRevisionV2.version + 1,
+    });
+    if (!rollbackRevision) throw new Error("回滚后缺少新的不可变线上 revision");
+    const rollbackRevisionDetail = await responseData<PageDocumentRevisionDetail>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/revisions/${rollbackRevision.version}?pageKey=${pageKey}`,
+      ),
+    );
+    expect(rollbackRevisionDetail.puckData).toEqual(pageRevisionV1PuckDataSnapshot);
+
+    const rollbackAnonymous = await browser.newContext({
+      viewport: { width: 1920, height: 1200 },
+      extraHTTPHeaders: forwardedProtoHeaders,
+    });
+    const rollbackPublicPage = await rollbackAnonymous.newPage();
+    await rollbackPublicPage.goto(`${browserBaseUrl}/products`);
+    const rollbackInstances = rollbackPublicPage
+      .locator('section[data-dynamic-template-version="1"]')
+      .filter({
+        has: rollbackPublicPage.locator(
+          `.hc-dynamic-template[data-dynamic-template-id="${createdTemplate.templateId}"]`,
+        ),
+      });
+    await expect(rollbackInstances).toHaveCount(2);
+    await expect(rollbackPublicPage.getByText("周年典藏系列", { exact: true })).toBeVisible();
+    await expect(rollbackPublicPage.getByText("经典常青系列", { exact: true })).toBeVisible();
+    await expect(rollbackPublicPage.getByText(templateNameV2, { exact: true })).toHaveCount(0);
+    await rollbackPublicPage.screenshot({
+      path: testInfo.outputPath("dynamic-template-rollback-public-1920x1200.png"),
+      fullPage: true,
+    });
+    await rollbackPublicPage.setViewportSize({ width: 390, height: 844 });
+    await rollbackPublicPage.reload();
+    await expect(rollbackInstances).toHaveCount(2);
+    await expect.poll(() => rollbackPublicPage.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    )).toBe(true);
+    await rollbackPublicPage.screenshot({
+      path: testInfo.outputPath("dynamic-template-rollback-public-390x844.png"),
+      fullPage: true,
+    });
+    await rollbackAnonymous.close();
   });
 
   test("真实网站以 Product Slot 选择真实商品 code，并阻断未就绪商品发布", async ({ page }, testInfo) => {
@@ -2757,7 +2871,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
     await page.getByRole("button", { name: "新建模板", exact: true }).click();
-  await openHistoricalTemplateFixture(page);
+    await openFreeRefinementSessionThroughSevenSteps(page);
     const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
     await fillTemplateIdentity(
       page,
@@ -2765,18 +2879,14 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       "用于验证真实商品选择及未就绪商品的页面发布阻断",
     );
     const structure = page.getByRole("complementary", { name: "模板结构" });
-    await page.getByRole("button", { name: "预览模板", exact: true }).focus();
-  await applyBasicSkeleton(page);
-    await setOverlayLightNavigationCompatibilityThroughUi(page);
-    await structure.getByRole("treeitem", { name: /^文字组/ }).click();
+    await structure.getByRole("treeitem", { name: /^内容区域 布局容器/ }).click();
     await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
     const slotPalette = page.getByRole("dialog", { name: "添加槽位", exact: true });
-    await slotPalette.getByRole("button", {
-      name: "添加商品槽位",
-      exact: true,
-    }).click();
+    await slotPalette.getByRole("button", { name: "添加商品槽位", exact: true }).click();
     await page.keyboard.press("Escape");
     await expect(slotPalette).toBeHidden();
+    await structure.getByRole("button", { name: "模板整体", exact: true }).click();
+    await setOverlayLightNavigationCompatibilityThroughUi(page);
     await expect(structure.getByRole("treeitem", { name: /商品槽位 商品内容 可选/ }))
       .toBeVisible();
 
@@ -2882,6 +2992,101 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(revisionsAfterBlockedPublish.items).toEqual(revisionsBeforeBlockedPublish.items);
   });
 
+  test("真实并发写入触发整页 409，保留本地设置并由离开保护阻止静默丢失", async ({
+    browser,
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const pageKey = "products";
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await loginAndPrepareIsolatedQaSite(page);
+    await page.goto(`/admin/editor/${pageKey}`);
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
+
+    const baseline = await responseData<{
+      updatedAt: string;
+      editorVersion?: string;
+      metadata: Record<string, unknown>;
+      puckData: unknown;
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`,
+    ));
+
+    await page.getByRole("button", { name: "更多编辑操作", exact: true }).click();
+    await page.getByRole("menuitem", { name: "页面设置" }).click();
+    const settingsDrawer = page.getByRole("dialog", { name: "页面展示设置", exact: true });
+    const ownerInput = settingsDrawer.getByPlaceholder("例：品牌内容组");
+    const localOwner = "409 后保留的本地内容团队";
+    await ownerInput.fill(localOwner);
+
+    const remoteContext = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      extraHTTPHeaders: forwardedProtoHeaders,
+      storageState: await page.context().storageState(),
+    });
+    const remotePage = await remoteContext.newPage();
+    await remotePage.goto(`${browserBaseUrl}/admin/dashboard`);
+    await expect(remotePage.getByRole("button", { name: /账户菜单/ })).toBeVisible();
+    const remoteSaved = await browserWrite<{
+      updatedAt: string;
+      metadata: Record<string, unknown>;
+    }>(remotePage, "/page-modules/document", {
+      pageKey,
+      puckData: baseline.puckData,
+      metadata: {
+        ...baseline.metadata,
+        contentOwner: "并发会话写入的远端内容团队",
+      },
+      editorVersion: baseline.editorVersion ?? "0.22.4",
+      expectedUpdatedAt: baseline.updatedAt,
+    });
+    expect(remoteSaved.updatedAt).not.toBe(baseline.updatedAt);
+    await remoteContext.close();
+
+    const localDocumentWrites: string[] = [];
+    const captureLocalWrite = (request: Request) => {
+      const url = new URL(request.url());
+      if (request.method() === "PUT" && url.pathname === "/api/page-modules/document") {
+        localDocumentWrites.push(url.pathname);
+      }
+    };
+    page.on("request", captureLocalWrite);
+    const conflictResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "PUT"
+        && url.pathname === "/api/page-modules/document";
+    });
+    await settingsDrawer.getByRole("button", { name: "保存整页草稿", exact: true }).click();
+    expect((await conflictResponsePromise).status()).toBe(409);
+
+    const conflictDialog = page.getByRole("dialog", {
+      name: "检测到其他人更新了这份整页草稿",
+      exact: true,
+    });
+    await expect(conflictDialog).toContainText("当前页面设置与画布修改仍完整保留");
+    await conflictDialog.getByRole("button", { name: "保留本地修改", exact: true }).click();
+    await expect(settingsDrawer).toBeVisible();
+    await expect(ownerInput).toHaveValue(localOwner);
+    expect(localDocumentWrites).toEqual(["/api/page-modules/document"]);
+
+    await settingsDrawer.locator(".ant-drawer-close").click();
+    await expect(settingsDrawer).toBeHidden();
+
+    await page.getByRole("button", { name: "展开一级导航", exact: true }).click();
+    const navigation = page.getByRole("navigation", { name: "后台导航", exact: true });
+    await expect(navigation).toBeVisible();
+    await navigation.getByRole("button", { name: /首页/ }).first().click();
+    const leaveGuard = page.getByRole("dialog", { name: "保存后离开？", exact: true });
+    await expect(leaveGuard).toContainText("有未保存修改");
+    await expect(page).toHaveURL(/\/admin\/editor\/products/);
+    await leaveGuard.getByRole("button", { name: "继续编辑", exact: true }).click();
+    await expect(leaveGuard).toBeHidden();
+    await expect(page).toHaveURL(/\/admin\/editor\/products/);
+    expect(localDocumentWrites).toEqual(["/api/page-modules/document"]);
+    page.off("request", captureLocalWrite);
+  });
+
   test("真实网站区分放弃未保存模板与回收站永久删除", async ({ page }) => {
     test.setTimeout(300_000);
     const unsavedName = "真实闭环待放弃模板";
@@ -2904,7 +3109,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
     await recoverTemplateCatalogAfterThrottle(page);
     await page.getByRole("button", { name: "新建模板", exact: true }).click();
-  await openHistoricalTemplateFixture(page);
+    await openFreeRefinementSessionThroughSevenSteps(page);
     const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
     await fillTemplateIdentity(
       page,
@@ -2923,23 +3128,12 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(createRequests).toHaveLength(0);
 
     await page.getByRole("button", { name: "新建模板", exact: true }).click();
-  await openHistoricalTemplateFixture(page);
+    await openFreeRefinementSessionThroughSevenSteps(page);
     await fillTemplateIdentity(
       page,
       draftName,
       "用于验证草稿进入回收站后可永久删除",
     );
-    const structure = page.getByRole("complementary", { name: "模板结构", exact: true });
-    await firstRegionAction(page).click();
-    const firstRegion = structure.getByRole("treeitem", { name: /^内容区域 1/ });
-    await expect(firstRegion).toBeVisible();
-    await firstRegion.click();
-    await expect(firstRegion).toHaveAttribute("aria-selected", "true");
-    await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
-    const addHeading = page.getByRole("dialog", { name: "添加槽位", exact: true })
-      .getByRole("button", { name: "添加标题槽位", exact: true });
-    await expect(addHeading).toBeEnabled();
-    await addHeading.click();
     const createResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "POST"

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   ConflictException,
+  ForbiddenException,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { LeadsService } from "./leads.service";
@@ -93,10 +94,14 @@ test("分配线索前必须确认负责人存在且仍为启用状态", async ()
     harness.service.updateLead("inquiry", 41, { assignedTo: 99 }, 9),
     (error: unknown) =>
       error instanceof UnprocessableEntityException
-      && error.message === "负责人不存在或已停用",
+      && error.message === "负责人不存在、已停用或无权处理线索",
   );
   assert.deepEqual(harness.assigneeQueries, [{
-    where: { id: 99, status: "ACTIVE" },
+    where: {
+      id: 99,
+      status: "ACTIVE",
+      role: { in: ["SUPER_ADMIN", "ADMIN", "CUSTOMER_SERVICE"] },
+    },
     select: { id: true },
   }]);
   assert.equal(harness.leadUpdates.length, 0);
@@ -220,7 +225,32 @@ test("状态机拒绝未知状态与非法流转，合法流转写入目标状�
     () => terminal.service.updateLead("inquiry", 41, { status: "FOLLOWING" }),
     UnprocessableEntityException,
   );
-  await harness.service.updateLead("inquiry", 41, { status: "FOLLOWING" });
+  await harness.service.updateLead("inquiry", 41, { status: "FOLLOWING" }, 9);
   const update = harness.leadUpdates.at(-1) as { data: { status: string } };
   assert.equal(update.data.status, "FOLLOWING");
+});
+
+test("单独变更下次跟进时间也写入可归因审计", async () => {
+  const harness = createHarness();
+  await harness.service.updateLead(
+    "inquiry",
+    41,
+    { nextFollowUpAt: "2026-09-15T03:00:00.000Z" },
+    9,
+  );
+
+  assert.match(JSON.stringify(harness.activityWrites), /NEXT_FOLLOW_UP_CHANGED/);
+  assert.match(JSON.stringify(harness.activityWrites), /2026-09-15T03:00:00.000Z/);
+  assert.match(JSON.stringify(harness.activityWrites), /"createdBy":9/);
+});
+
+test("会产生写入的线索更新缺失认证员工时拒绝且不写审计", async () => {
+  const harness = createHarness();
+
+  await assert.rejects(
+    harness.service.updateLead("inquiry", 41, { internalNote: "不可匿名写入" }),
+    ForbiddenException,
+  );
+  assert.equal(harness.leadUpdates.length, 0);
+  assert.equal(harness.activityWrites.length, 0);
 });

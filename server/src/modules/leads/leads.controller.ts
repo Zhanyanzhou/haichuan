@@ -72,6 +72,16 @@ export class LeadsController {
     return this.service.updateLead(type, id, body, user?.id);
   }
 
+  @Post(':type/:id/claim')
+  @ApiOperation({ summary: '领取当前未分配线索' })
+  claimLead(
+    @Param('type') type: string,
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: { id?: number },
+  ) {
+    return this.service.claimLead(type, id, user?.id);
+  }
+
   @Post(':type/:id/legal-hold')
   @Roles('SUPER_ADMIN')
   @ApiOperation({ summary: '为线索设置法律保留' })

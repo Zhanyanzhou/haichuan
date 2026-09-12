@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Table,
@@ -23,7 +23,11 @@ import {
   MailOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
-import api, { leadApi, type LeadReplyResult } from "@/services/api";
+import api, {
+  leadApi,
+  type LeadClaimResult,
+  type LeadReplyResult,
+} from "@/services/api";
 import { useAuthStore } from "@/store/authStore";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
@@ -48,6 +52,7 @@ interface LeadListRow {
   email?: string | null;
   relatedProducts: number;
   status: string;
+  assignedTo?: number | null;
   assigneeName?: string | null;
   nextFollowUpAt?: string | null;
   retentionUntil?: string | null;
@@ -82,6 +87,7 @@ interface LeadDetail extends Partial<LeadListRow> {
   customerPhone?: string | null;
   customerEmail?: string | null;
   product?: { id: number; name: string; code?: string | null } | null;
+  assignedTo?: number | null;
   assignee?: { realName?: string | null } | null;
   handler?: { realName?: string | null } | null;
   message?: string | null;
@@ -108,6 +114,14 @@ interface LeadNotificationFailure {
   lastErrorCode?: string | null;
   retryable: boolean;
   updatedAt: string;
+}
+
+interface LeadClaimFeedback {
+  key: string;
+  type: "success" | "warning" | "error";
+  message: string;
+  leadType: LeadType;
+  leadId: number;
 }
 
 const NOTIFICATION_ERROR_LABELS: Record<string, string> = {
@@ -154,6 +168,27 @@ function createReplyIdempotencyKey() {
     ?? `lead-reply-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function leadKey(type: LeadType, id: number) {
+  return `${type}:${id}`;
+}
+
+function isClaimableLead(lead: {
+  status: string;
+  assignedTo?: number | null;
+  assigneeName?: string | null;
+  assignee?: { realName?: string | null } | null;
+  handler?: { realName?: string | null } | null;
+  privacyDisposedAt?: string | null;
+}) {
+  return lead.assignedTo == null
+    && !lead.assigneeName
+    && !lead.assignee?.realName
+    && !lead.handler?.realName
+    && !lead.privacyDisposedAt
+    && lead.status !== "COMPLETED"
+    && lead.status !== "INVALID";
+}
+
 export default function LeadManage() {
   const { message } = AntdApp.useApp();
   const [searchParams] = useSearchParams();
@@ -178,6 +213,12 @@ export default function LeadManage() {
   const [staffLoading, setStaffLoading] = useState(false);
   const [assignTo, setAssignTo] = useState<number | undefined>(undefined);
   const [assigning, setAssigning] = useState(false);
+  const [claimingLeadKey, setClaimingLeadKey] = useState<string | null>(null);
+  const [claimFeedback, setClaimFeedback] = useState<LeadClaimFeedback | null>(
+    null,
+  );
+  const claimInFlightRef = useRef<string | null>(null);
+  const detailIdRef = useRef<{ type: LeadType; id: number } | null>(null);
   const [notificationFailures, setNotificationFailures] = useState<
     LeadNotificationFailure[]
   >([]);
@@ -275,6 +316,7 @@ export default function LeadManage() {
       setReplyError(null);
       setReplyIdempotencyKey(null);
     }
+    detailIdRef.current = { type, id };
     setDetailId({ type, id });
     setDetailError(false);
     setDetail(null);
@@ -487,6 +529,79 @@ export default function LeadManage() {
     }
   };
 
+  const refreshLeadViews = async (type: LeadType, id: number) => {
+    const activeDetail = detailIdRef.current;
+    await Promise.all([
+      fetchList(),
+      activeDetail?.type === type && activeDetail.id === id
+        ? openDetail(type, id)
+        : Promise.resolve(),
+    ]);
+  };
+
+  const handleClaim = async (type: LeadType, id: number) => {
+    const key = leadKey(type, id);
+    if (claimInFlightRef.current) return;
+
+    claimInFlightRef.current = key;
+    setClaimingLeadKey(key);
+    setClaimFeedback(null);
+    try {
+      const response = await leadApi.claim(type, id);
+      unwrapResponse<LeadClaimResult>(response);
+      setClaimFeedback({
+        key,
+        type: "success",
+        message: "线索已领取。",
+        leadType: type,
+        leadId: id,
+      });
+      message.success("线索已领取");
+      await refreshLeadViews(type, id);
+    } catch (error) {
+      const isConflict = requestStatus(error) === 409;
+      const feedbackMessage = isConflict
+        ? "线索已被其他员工领取。请重新加载后确认负责人。"
+        : getSafeAdminErrorMessage(
+            error,
+            "线索领取失败，请重新加载后重试。",
+          );
+      setClaimFeedback({
+        key,
+        type: isConflict ? "warning" : "error",
+        message: feedbackMessage,
+        leadType: type,
+        leadId: id,
+      });
+      if (isConflict) {
+        message.warning(feedbackMessage);
+      } else {
+        message.error(feedbackMessage);
+      }
+    } finally {
+      claimInFlightRef.current = null;
+      setClaimingLeadKey(null);
+    }
+  };
+
+  const renderClaimFeedback = (feedback: LeadClaimFeedback) => (
+    <Alert
+      type={feedback.type}
+      showIcon
+      closable
+      message={feedback.message}
+      action={feedback.type === "success" ? undefined : (
+        <Button
+          size="small"
+          onClick={() => void refreshLeadViews(feedback.leadType, feedback.leadId)}
+        >
+          重新加载
+        </Button>
+      )}
+      onClose={() => setClaimFeedback(null)}
+    />
+  );
+
   const columns: TableColumnsType<LeadListRow> = [
     { title: "客户", dataIndex: "customerName", width: 100 },
     {
@@ -565,17 +680,33 @@ export default function LeadManage() {
     },
     {
       title: "操作",
-      width: 60,
-      render: (_, row) => (
-        <Button
-          type="link"
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={() => openDetail(row.leadType, row.id)}
-        >
-          查看
-        </Button>
-      ),
+      width: 140,
+      render: (_, row) => {
+        const key = leadKey(row.leadType, row.id);
+        return (
+          <Space size={4}>
+            <Button
+              type="link"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => openDetail(row.leadType, row.id)}
+            >
+              查看
+            </Button>
+            {canAssign && isClaimableLead(row) && (
+              <Button
+                type="link"
+                size="small"
+                loading={claimingLeadKey === key}
+                disabled={claimingLeadKey !== null && claimingLeadKey !== key}
+                onClick={() => void handleClaim(row.leadType, row.id)}
+              >
+                领取线索
+              </Button>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -585,6 +716,13 @@ export default function LeadManage() {
         title="客户线索"
         subtitle="统一管理预约咨询、选款咨询与定制咨询"
       />
+      {claimFeedback
+        && (!detailId || claimFeedback.key !== leadKey(detailId.type, detailId.id))
+        && (
+          <div style={{ marginBottom: 16 }}>
+            {renderClaimFeedback(claimFeedback)}
+          </div>
+        )}
       {requestedRetentionDue && (
         <Alert
           style={{ marginBottom: 16 }}
@@ -769,6 +907,7 @@ export default function LeadManage() {
         title={`线索详情`}
         open={detailId !== null}
         onClose={() => {
+          detailIdRef.current = null;
           setDetailId(null);
           setDetail(null);
           setReplyText("");
@@ -779,6 +918,14 @@ export default function LeadManage() {
       >
         {detail ? (
           <>
+            {claimFeedback
+              && detailId
+              && claimFeedback.key === leadKey(detailId.type, detailId.id)
+              && (
+                <div style={{ marginBottom: 16 }}>
+                  {renderClaimFeedback(claimFeedback)}
+                </div>
+              )}
             <Descriptions column={1} size="small" bordered>
               <Descriptions.Item label="客户">
                 {detail.customerName}
@@ -1048,7 +1195,22 @@ export default function LeadManage() {
 
             {canAssign && detailId && (
               <div style={{ marginTop: 16 }}>
-                <Space>
+                <Space wrap>
+                  {isClaimableLead(detail) && (
+                    <Button
+                      type="primary"
+                      onClick={() => void handleClaim(detailId.type, detailId.id)}
+                      loading={
+                        claimingLeadKey === leadKey(detailId.type, detailId.id)
+                      }
+                      disabled={
+                        claimingLeadKey !== null
+                        && claimingLeadKey !== leadKey(detailId.type, detailId.id)
+                      }
+                    >
+                      领取线索
+                    </Button>
+                  )}
                   <span>指派负责人：</span>
                   <Select
                     style={{ minWidth: 180 }}

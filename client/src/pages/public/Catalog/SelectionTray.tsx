@@ -36,6 +36,8 @@ export default function SelectionTray({
     resolveTrayButton,
   );
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const submitPendingRef = useRef(false);
   const idempotencyKeyRef = useRef(createIdempotencyKey());
   const [form, setForm] = useState({
     customerName: "",
@@ -107,6 +109,7 @@ export default function SelectionTray({
   const thumbs = selected.slice(0, 4);
 
   const handleSubmit = async () => {
+    if (submitPendingRef.current || submitting) return;
     if (!isSignedIn && !form.customerName.trim()) {
       message.warning("请填写您的称呼");
       return;
@@ -123,7 +126,9 @@ export default function SelectionTray({
       message.warning("请阅读并同意隐私说明");
       return;
     }
+    submitPendingRef.current = true;
     setSubmitting(true);
+    setSubmitError("");
     try {
       await selectionInquiryApi.submit(
         {
@@ -149,6 +154,7 @@ export default function SelectionTray({
       );
       clear();
       closeDialog();
+      setSubmitError("");
       setForm({
         customerName: "",
         phone: "",
@@ -158,8 +164,10 @@ export default function SelectionTray({
         privacyConsent: false,
       });
     } catch {
-      message.error("提交失败，请稍后重试");
+      setSubmitError("提交失败，已保留本次选款与填写内容，请重新提交。");
+      message.error("选款咨询提交失败，内容已保留");
     } finally {
+      submitPendingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -528,6 +536,23 @@ export default function SelectionTray({
               </span>
             </label>
 
+            {submitError ? (
+              <div
+                role="alert"
+                style={{
+                  marginTop: 16,
+                  border: "1px solid #D7B6B4",
+                  background: "#FAF0EF",
+                  color: "#8C3F3B",
+                  padding: "10px 12px",
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                }}
+              >
+                {submitError}
+              </div>
+            ) : null}
+
             <button
               type="button"
               onClick={handleSubmit}
@@ -544,7 +569,9 @@ export default function SelectionTray({
                 letterSpacing: "0.04em",
               }}
             >
-              {submitting ? "提交中…" : `提交选款咨询（${selected.length} 款）`}
+              {submitting
+                ? "提交中…"
+                : `${submitError ? "重新" : ""}提交选款咨询（${selected.length} 款）`}
             </button>
           </div>
         </>

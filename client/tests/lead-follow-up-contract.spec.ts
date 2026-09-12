@@ -22,6 +22,71 @@ async function authenticateSuperAdmin(page: Page) {
 const wrapped = (data: unknown) =>
   JSON.stringify({ code: 200, data, message: 'ok' });
 
+test('领取服务合同使用当前员工会话，冲突后可原动作重试', async ({ page }) => {
+  await authenticateCustomerService(page);
+  const writes: Array<{
+    headers: Record<string, string>;
+    body: string | null;
+  }> = [];
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === '/api/auth/profile') return route.fallback();
+    if (path === '/api/leads/inquiry/17/claim' && request.method() === 'POST') {
+      writes.push({ headers: request.headers(), body: request.postData() });
+      if (writes.length === 1) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 409, message: '线索已被其他员工领取，请刷新后确认' }),
+        });
+      } else {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: wrapped({
+            id: 17,
+            assignedTo: 7,
+            status: 'PENDING',
+            updatedAt: '2026-09-12T01:00:00.000Z',
+          }),
+        });
+      }
+      return;
+    }
+    await route.fulfill({ contentType: 'application/json', body: wrapped({}) });
+  });
+
+  await page.goto('/');
+  await page.evaluate(() => {
+    document.cookie = 'hc_csrf=lead-claim-csrf; path=/';
+  });
+  const firstStatus = await page.evaluate(async () => {
+    const [{ leadApi }, { requestStatus }] = await Promise.all([
+      import('/src/services/api.ts'),
+      import('/src/services/httpClient.ts'),
+    ]);
+    try {
+      await leadApi.claim('inquiry', 17);
+      return 200;
+    } catch (error) {
+      return requestStatus(error);
+    }
+  });
+  expect(firstStatus).toBe(409);
+
+  const claimedBy = await page.evaluate(async () => {
+    const { leadApi } = await import('/src/services/api.ts');
+    const response = await leadApi.claim('inquiry', 17);
+    return response.data.data.assignedTo;
+  });
+  expect(claimedBy).toBe(7);
+  expect(writes).toHaveLength(2);
+  expect(writes.every((write) => write.headers.authorization === undefined)).toBe(true);
+  expect(writes.every((write) => write.headers['x-csrf-token'] === 'lead-claim-csrf')).toBe(true);
+  expect(writes.every((write) => write.body === null)).toBe(true);
+});
+
 test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ page }) => {
   await authenticateCustomerService(page);
   const writes: Array<{

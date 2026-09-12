@@ -415,7 +415,18 @@ export type LeadReplyResult = {
   };
 };
 
+export type LeadClaimResult = {
+  id: number;
+  assignedTo: number;
+  status: string;
+  updatedAt: string;
+};
+
 export const leadApi = {
+  claim: (type: "inquiry" | "selection", leadId: number) =>
+    api.post(`/leads/${type}/${leadId}/claim`, undefined, {
+      suppressGlobalError: true,
+    }),
   reply: (
     type: "inquiry" | "selection",
     leadId: number,

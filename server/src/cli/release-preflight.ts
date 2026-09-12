@@ -12,10 +12,12 @@ import {
   normalizeHttpsBaseUrl,
 } from "../modules/settings/site-publication-readiness";
 import {
+  COMMERCE_CODE_READINESS,
   COMMERCE_RELEASE_PROFILE,
-  DEFAULT_RELEASE_PROFILE,
+  evaluateReleaseRuntimeGates,
   isPartnerApplicationsWriteEnabled,
   parseReleaseProfile,
+  type ReleaseRuntimeGateEnvironment,
   type ReleaseProfile,
 } from "../common/release/release-profile";
 import {
@@ -92,6 +94,13 @@ export type ReleasePreflightCheck = {
   facts?: Record<string, unknown>;
 };
 
+export type ReleasePreflightOptions = {
+  partnerApplicationsWriteEnabled?: boolean;
+  configuredClientPublicSiteOrigin?: string;
+  requireConfiguredClientPublicSiteOrigin?: boolean;
+  releaseRuntimeEnvironment?: ReleaseRuntimeGateEnvironment;
+};
+
 export interface ReleasePreflightTargetConfig extends TargetDatabaseIdentity {}
 
 export function createReleasePreflightTargetConfig(
@@ -107,6 +116,21 @@ export function createReleasePreflightTargetConfig(
     databaseUrl: environment.DATABASE_URL,
     errorPrefix: "RELEASE_PREFLIGHT",
   });
+}
+
+/** 发布候选必须显式选择档位；runtime 的安全默认不能替代业务范围批准。 */
+export function parseReleasePreflightProfile(
+  environment: NodeJS.ProcessEnv,
+): ReleaseProfile {
+  const value = environment.RELEASE_PROFILE?.trim();
+  if (!value) {
+    throw new Error("RELEASE_PREFLIGHT_RELEASE_PROFILE_REQUIRED");
+  }
+  try {
+    return parseReleaseProfile(value);
+  } catch {
+    throw new Error("RELEASE_PREFLIGHT_RELEASE_PROFILE_UNSUPPORTED");
+  }
 }
 
 type MigrationLedgerRow = {
@@ -387,14 +411,49 @@ export async function runReleasePreflight(
     metadata: Prisma.JsonValue,
   ) => Promise<PageValidationResult>,
   migrationIntegrityCheck: () => Promise<ReleasePreflightCheck>,
-  releaseProfile: ReleaseProfile = DEFAULT_RELEASE_PROFILE,
-  options: {
-    partnerApplicationsWriteEnabled?: boolean;
-    configuredClientPublicSiteOrigin?: string;
-    requireConfiguredClientPublicSiteOrigin?: boolean;
-  } = {},
+  releaseProfile: ReleaseProfile,
+  options: ReleasePreflightOptions = {},
 ) {
   const checks: ReleasePreflightCheck[] = [];
+  const releaseRuntimeGates = evaluateReleaseRuntimeGates(
+    releaseProfile,
+    options.releaseRuntimeEnvironment ?? {},
+  );
+  for (const gate of releaseRuntimeGates) {
+    checks.push({
+      code: `release-profile-${gate.capability}-gate`,
+      ok: gate.ready,
+      summary: gate.ready
+        ? gate.requiredEnabled
+          ? `${gate.capability} 已按 commerce 档位显式开启`
+          : `${gate.capability} 已按 lead-generation 档位保持关闭`
+        : gate.requiredEnabled
+          ? `${gate.capability} 未按 commerce 档位显式开启`
+          : `${gate.capability} 在 lead-generation 档位仍被显式开启`,
+      facts: {
+        environmentVariable: gate.environmentVariable,
+        configuredEnabled: gate.configuredEnabled,
+        effectiveEnabled: gate.effectiveEnabled,
+        requiredEnabled: gate.requiredEnabled,
+      },
+    });
+  }
+  if (releaseProfile === COMMERCE_RELEASE_PROFILE) {
+    for (const capability of COMMERCE_CODE_READINESS) {
+      checks.push({
+        code: `commerce-${capability.capability}`,
+        ok: capability.ready,
+        summary: capability.summary,
+        facts: {
+          evidenceLevel: "repository-code-contract",
+          implementationState: capability.ready
+            ? "code-ready-target-evidence-required"
+            : "blocked",
+          productionEvidenceVerified: false,
+        },
+      });
+    }
+  }
   const partnerApplicationsWriteEnabled =
     options.partnerApplicationsWriteEnabled ??
     isPartnerApplicationsWriteEnabled();
@@ -694,12 +753,8 @@ export async function runReleasePreflightTargetAudit(
   ) => Promise<PageValidationResult>,
   migrationIntegrityCheck: () => Promise<ReleasePreflightCheck>,
   config: ReleasePreflightTargetConfig,
-  releaseProfile: ReleaseProfile = DEFAULT_RELEASE_PROFILE,
-  options: {
-    partnerApplicationsWriteEnabled?: boolean;
-    configuredClientPublicSiteOrigin?: string;
-    requireConfiguredClientPublicSiteOrigin?: boolean;
-  } = {},
+  releaseProfile: ReleaseProfile,
+  options: ReleasePreflightOptions = {},
 ) {
   const access = await verifyTargetDatabaseAccess(
     database,
@@ -722,8 +777,13 @@ export async function runReleasePreflightTargetAudit(
     approvalReferenceHash: config.approvalReferenceHash,
     access,
     ...preflight,
+    candidateBoundary: {
+      releaseProfileExplicitlySelected: true,
+      businessScopeApprovalVerified: false,
+      productionEnvironmentVerified: false,
+    },
     evidenceBoundary:
-      "只读账号的目标身份、migration、正式内容、publishedRevisionId 快照及 runner 配置预检；不读取或验证客户端制品构建参数，也不执行 migration、回填、部署、页面发布或流量切换",
+      "只读账号的目标身份、migration、正式内容、publishedRevisionId 快照及 runner 配置预检；档位选择不代表业务范围批准，不读取或验证客户端制品构建参数，也不执行 migration、回填、部署、页面发布或流量切换",
   };
 }
 
@@ -736,6 +796,7 @@ function safeReleasePreflightErrorCode(error: unknown): string {
 
 async function main() {
   const config = createReleasePreflightTargetConfig(process.env);
+  const releaseProfile = parseReleasePreflightProfile(process.env);
   const prisma = new PrismaService();
   await prisma.$connect();
   try {
@@ -746,10 +807,11 @@ async function main() {
         pageModules.validatePageDocument(pageKey, puckData, metadata),
       () => checkMigrationIntegrity(prisma as unknown as MigrationIntegrityDatabase),
       config,
-      parseReleaseProfile(process.env.RELEASE_PROFILE),
+      releaseProfile,
       {
         configuredClientPublicSiteOrigin: process.env.VITE_PUBLIC_SITE_ORIGIN,
         requireConfiguredClientPublicSiteOrigin: true,
+        releaseRuntimeEnvironment: process.env,
       },
     );
     console.log(JSON.stringify(result, null, 2));

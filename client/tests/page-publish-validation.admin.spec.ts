@@ -105,7 +105,7 @@ function locatablePublishDraft() {
     ...draft,
     puckData: {
       ...draft.puckData,
-      // 两个辅助内容实例承载同名字段；不能用三个首屏绕过单主舞台门禁。
+      // 两个辅助内容实例承载同名字段，用于确认错误定位不会混淆重复槽位。
       content: [...draft.puckData.content, ...["poster-one", "poster-two"].map((id) => ({
         type: "动态模板实例",
         props: {

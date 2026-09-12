@@ -5,15 +5,18 @@ import test from "node:test";
 import {
   releaseStaticWorkflowPaths,
   validateComposeBuildPolicy,
+  validateProductionEvidenceVerificationWorkflow,
   validateReleaseEnvironment,
   validateReleaseManifest,
 } from "./verify-release-images.mjs";
 
 const releaseWorkflow = readFileSync(new URL("../.github/workflows/release-images.yml", import.meta.url), "utf8");
+const productionEvidenceWorkflow = readFileSync(new URL("../.github/workflows/verify-production-evidence.yml", import.meta.url), "utf8");
 const baseCompose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8");
 const operationsCompose = readFileSync(new URL("../docker-compose.operations.yml", import.meta.url), "utf8");
 const wechatPayCompose = readFileSync(new URL("../docker-compose.wechat-pay.yml", import.meta.url), "utf8");
 const serverDockerfile = readFileSync(new URL("../server/Dockerfile", import.meta.url), "utf8");
+const reverseProxyVerifier = readFileSync(new URL("./verify-reverse-proxy-security.mjs", import.meta.url), "utf8");
 
 const gitSha = "a".repeat(40);
 const migrationBundleSha256 = "b".repeat(64);
@@ -21,11 +24,54 @@ const serverDigest = `sha256:${"c".repeat(64)}`;
 const clientDigest = `sha256:${"d".repeat(64)}`;
 const operationsDigest = `sha256:${"e".repeat(64)}`;
 
-test("static release checks follow the two active workflows after ci retirement", () => {
+test("static release checks follow all active release workflows", () => {
   assert.deepEqual(releaseStaticWorkflowPaths, [
     ".github/workflows/quality.yml",
     ".github/workflows/release-images.yml",
+    ".github/workflows/verify-production-evidence.yml",
   ]);
+});
+
+test("production evidence workflow verifies but never signs operator artifacts", () => {
+  assert.match(productionEvidenceWorkflow, /^on:\s*\r?\n\s{2}workflow_dispatch:/m);
+  assert.doesNotMatch(productionEvidenceWorkflow, /^\s{2}(?:push|pull_request|schedule):/m);
+  assert.match(productionEvidenceWorkflow, /actions\/download-artifact@[a-f0-9]{40}/);
+  assert.match(productionEvidenceWorkflow, /persist-credentials: false/);
+  assert.match(productionEvidenceWorkflow, /npm ci --ignore-scripts/);
+  assert.match(productionEvidenceWorkflow, /run-id: \$\{\{ inputs\.evidence_run_id \}\}/);
+  assert.match(productionEvidenceWorkflow, /node scripts\/verify-production-evidence\.mjs/);
+  assert.match(productionEvidenceWorkflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(productionEvidenceWorkflow, /--evidence-signer-workflow "\$EVIDENCE_SIGNER_WORKFLOW"/);
+  assert.match(productionEvidenceWorkflow, /EVIDENCE_SIGNER_WORKFLOW: \$\{\{ vars\.PRODUCTION_EVIDENCE_SIGNER_WORKFLOW \}\}/);
+  assert.match(productionEvidenceWorkflow, /PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_NOT_CONFIGURED/);
+  assert.doesNotMatch(productionEvidenceWorkflow, /inputs\.evidence_signer_workflow/);
+  assert.match(productionEvidenceWorkflow, /--manifest-signer-workflow "\$MANIFEST_SIGNER_WORKFLOW"/);
+  assert.match(productionEvidenceWorkflow, /--environment-id-sha256 "\$ENVIRONMENT_ID_SHA256"/);
+  assert.match(productionEvidenceWorkflow, /--approval-reference-sha256 "\$APPROVAL_REFERENCE_SHA256"/);
+  assert.doesNotMatch(productionEvidenceWorkflow, /actions\/(?:attest|attest-build-provenance)@/);
+  assert.equal(validateProductionEvidenceVerificationWorkflow(productionEvidenceWorkflow).ok, true);
+  assert.throws(
+    () => validateProductionEvidenceVerificationWorkflow(
+      productionEvidenceWorkflow.replace("attestations: read", "attestations: write"),
+    ),
+    { message: "PRODUCTION_EVIDENCE_WORKFLOW_PERMISSIONS_INVALID" },
+  );
+  assert.throws(
+    () => validateProductionEvidenceVerificationWorkflow(
+      productionEvidenceWorkflow.replace(
+        "  verify:\n",
+        "  verify:\n    permissions:\n      contents: write\n",
+      ),
+    ),
+    { message: "PRODUCTION_EVIDENCE_WORKFLOW_JOB_PERMISSIONS_FORBIDDEN" },
+  );
+});
+
+test("reverse proxy static verification cannot claim target edge readiness", () => {
+  assert.match(reverseProxyVerifier, /productionReady: false/);
+  assert.match(reverseProxyVerifier, /TARGET_EDGE_CANONICAL_HOST_ALLOWLIST_UNVERIFIED/);
+  assert.match(reverseProxyVerifier, /TARGET_EDGE_REAL_IP_TRUST_BOUNDARY_UNVERIFIED/);
+  assert.doesNotMatch(reverseProxyVerifier, /项反向代理安全合同通过/);
 });
 
 test("release workflow rejects non-default or unprotected release refs before quality lookup", () => {

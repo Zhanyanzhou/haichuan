@@ -295,7 +295,21 @@ export class CustomersController {
     @Req() request: CustomerRequest,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    return this.customerAvatars.replace(request.customer.id, file);
+    return this.customerAvatars.replace(
+      request.customer.id,
+      file,
+      requestSessionMetadata(request),
+    );
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Delete('me/avatar')
+  deleteAvatar(@Req() request: CustomerRequest) {
+    return this.customerAvatars.delete(
+      request.customer.id,
+      requestSessionMetadata(request),
+    );
   }
 
   @Public()

@@ -1,0 +1,143 @@
+name: Verify Production Evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_run_id:
+        description: "生成受信生产证据 bundle 的 GitHub Actions run ID"
+        required: true
+        type: string
+      evidence_artifact_name:
+        description: "包含 production-evidence.json、attestation bundle 与全部引用文件的 artifact 名称"
+        required: true
+        type: string
+      environment_id_sha256:
+        description: "从批准记录独立取得的目标环境标识 SHA-256"
+        required: true
+        type: string
+      approval_reference_sha256:
+        description: "从批准记录独立取得的审批引用 SHA-256"
+        required: true
+        type: string
+      release_git_sha:
+        description: "冻结候选的 40 位 Git SHA"
+        required: true
+        type: string
+      migration_bundle_sha256:
+        description: "冻结候选的 migration bundle SHA-256"
+        required: true
+        type: string
+      source_ref:
+        description: "冻结候选的受保护 source ref"
+        required: true
+        type: string
+      release_profile:
+        description: "本次批准的发布档位"
+        required: true
+        default: lead-generation
+        type: choice
+        options:
+          - lead-generation
+          - commerce
+
+permissions:
+  actions: read
+  attestations: read
+  contents: read
+  packages: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 拒绝未受保护的验证来源
+        shell: bash
+        env:
+          DEFAULT_BRANCH_REF: refs/heads/${{ github.event.repository.default_branch }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          if [ "$RELEASE_REF" = "$DEFAULT_BRANCH_REF" ]; then
+            exit 0
+          fi
+          case "$RELEASE_REF" in
+            refs/heads/release/*) ;;
+            *) echo "RELEASE_REF_NOT_DEFAULT_OR_RELEASE_BRANCH" >&2; exit 1 ;;
+          esac
+          if [ "$RELEASE_REF_PROTECTED" != "true" ]; then
+            echo "RELEASE_REF_NOT_PROTECTED" >&2
+            exit 1
+          fi
+
+      - name: 检出验证器
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: 安装验证器依赖
+        run: npm ci --ignore-scripts
+
+      - name: 下载受信 evidence artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ inputs.evidence_artifact_name }}
+          path: .codex-tmp/production-evidence
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.evidence_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: 重验 production evidence 与完整签名链
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENVIRONMENT_ID_SHA256: ${{ inputs.environment_id_sha256 }}
+          APPROVAL_REFERENCE_SHA256: ${{ inputs.approval_reference_sha256 }}
+          RELEASE_GIT_SHA: ${{ inputs.release_git_sha }}
+          MIGRATION_BUNDLE_SHA256: ${{ inputs.migration_bundle_sha256 }}
+          RELEASE_SOURCE: https://github.com/${{ github.repository }}
+          RELEASE_PROFILE: ${{ inputs.release_profile }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          MANIFEST_SIGNER_WORKFLOW: github.com/${{ github.repository }}/.github/workflows/release-images.yml
+          # 由仓库管理员预先绑定；调度者不能从 artifact 或本次输入中选择 signer。
+          EVIDENCE_SIGNER_WORKFLOW: ${{ vars.PRODUCTION_EVIDENCE_SIGNER_WORKFLOW }}
+        run: |
+          set -euo pipefail
+          if [ -z "$EVIDENCE_SIGNER_WORKFLOW" ]; then
+            echo "PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_NOT_CONFIGURED" >&2
+            exit 1
+          fi
+          mkdir -p .codex-tmp/production-evidence-verification
+          node scripts/verify-production-evidence.mjs \
+            --evidence .codex-tmp/production-evidence/production-evidence.json \
+            --evidence-root .codex-tmp/production-evidence \
+            --evidence-bundle .codex-tmp/production-evidence/production-evidence.attestation.json \
+            --environment-id-sha256 "$ENVIRONMENT_ID_SHA256" \
+            --approval-reference-sha256 "$APPROVAL_REFERENCE_SHA256" \
+            --release-git-sha "$RELEASE_GIT_SHA" \
+            --migration-bundle-sha256 "$MIGRATION_BUNDLE_SHA256" \
+            --release-source "$RELEASE_SOURCE" \
+            --release-profile "$RELEASE_PROFILE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --source-ref "$SOURCE_REF" \
+            --manifest-signer-workflow "$MANIFEST_SIGNER_WORKFLOW" \
+            --evidence-signer-workflow "$EVIDENCE_SIGNER_WORKFLOW" \
+            2>&1 | tee .codex-tmp/production-evidence-verification/result.json
+          echo "PRODUCTION_EVIDENCE_VERIFIED"
+
+      - name: 保存脱敏验证结果
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-evidence-verification-${{ github.run_id }}
+          path: .codex-tmp/production-evidence-verification/result.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -8,6 +8,7 @@ import {
 import {
   createReleasePreflightTargetConfig,
   evaluateMigrationIntegrity,
+  parseReleasePreflightProfile,
   parseReleaseProfile,
   RELEASE_PAGE_KEYS,
   runReleasePreflight,
@@ -206,6 +207,7 @@ test("发布前门禁同时报告缺失资料、正式商品、Demo 商品与失
     }),
     async () => ({ valid: true, errors: [], issues: [] }),
     passingMigrationIntegrityCheck,
+    "lead-generation",
   );
 
   assert.equal(result.technicalReady, false);
@@ -229,7 +231,7 @@ test("发布前门禁同时报告缺失资料、正式商品、Demo 商品与失
   assert.ok(failedCodes.includes("page-custom-published-current"));
 });
 
-test("交易型发布档位继续要求正式直购商品，不被线索型规则削弱", async () => {
+test("交易型发布档位要求运行门禁和已知代码闭环，不能只凭直购商品误判 ready", async () => {
   const blocked = await runReleasePreflight(
     createFakeDatabase({ directPurchaseProductCount: 0 }),
     async () => ({ valid: true, errors: [], issues: [] }),
@@ -241,21 +243,87 @@ test("交易型发布档位继续要求正式直购商品，不被线索型规�
     async () => ({ valid: true, errors: [], issues: [] }),
     passingMigrationIntegrityCheck,
     "commerce",
-    { configuredClientPublicSiteOrigin: "https://example.invalid" },
+    {
+      configuredClientPublicSiteOrigin: "https://example.invalid",
+      releaseRuntimeEnvironment: {
+        CUSTOMER_COMMERCE_ENABLED: "true",
+        PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "true",
+        PAYMENT_GATEWAY_REFUNDS_ENABLED: "true",
+      },
+    },
   );
 
   assert.equal(blocked.technicalReady, false);
   assert.ok(blocked.checks.some(
     (check) => check.code === "direct-purchase-assortment-present" && !check.ok,
   ));
-  assert.equal(ready.technicalReady, true);
+  assert.ok(blocked.checks.some(
+    (check) => check.code === "release-profile-customer-commerce-gate" && !check.ok,
+  ));
+  assert.ok(blocked.checks.some(
+    (check) => check.code === "release-profile-payment-gateway-transactions-gate" && !check.ok,
+  ));
+  assert.ok(blocked.checks.some(
+    (check) => check.code === "release-profile-payment-gateway-refunds-gate" && !check.ok,
+  ));
+  assert.equal(ready.technicalReady, false);
   assert.equal(ready.releaseProfile, "commerce");
+  assert.ok(ready.checks.some(
+    (check) => check.code === "release-profile-customer-commerce-gate" && check.ok,
+  ));
+  assert.ok(ready.checks.some(
+    (check) => check.code === "commerce-payment-refund-reconciliation-code" && check.ok,
+  ));
+  assert.ok(ready.checks.some(
+    (check) => check.code === "commerce-frontend-payment-visibility-contract" && !check.ok,
+  ));
+  assert.ok(ready.checks.some(
+    (check) => check.code === "commerce-three-quotation-channels" && !check.ok,
+  ));
+  assert.ok(ready.checks.some(
+    (check) => check.code === "commerce-customer-self-confirmation-entry" && !check.ok,
+  ));
 });
 
-test("发布档位默认安全选择线索型并拒绝未知值", () => {
+test("runtime 默认安全选择线索型，但发布候选要求显式且受支持的档位", () => {
   assert.equal(parseReleaseProfile(), "lead-generation");
   assert.equal(parseReleaseProfile("commerce"), "commerce");
   assert.throws(() => parseReleaseProfile("hybrid"), /unsupported release profile/);
+  assert.equal(parseReleasePreflightProfile({ RELEASE_PROFILE: "commerce" }), "commerce");
+  assert.throws(
+    () => parseReleasePreflightProfile({}),
+    /RELEASE_PREFLIGHT_RELEASE_PROFILE_REQUIRED/,
+  );
+  assert.throws(
+    () => parseReleasePreflightProfile({ RELEASE_PROFILE: "Commerce" }),
+    /RELEASE_PREFLIGHT_RELEASE_PROFILE_UNSUPPORTED/,
+  );
+});
+
+test("lead-generation 携带任一交易危险开关时阻断，且运行态仍保持关闭", async () => {
+  const result = await runReleasePreflight(
+    createFakeDatabase(),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    {
+      configuredClientPublicSiteOrigin: "https://example.invalid",
+      releaseRuntimeEnvironment: {
+        CUSTOMER_COMMERCE_ENABLED: "true",
+        PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "TRUE",
+        PAYMENT_GATEWAY_REFUNDS_ENABLED: " true ",
+      },
+    },
+  );
+
+  assert.equal(result.technicalReady, false);
+  const runtimeChecks = result.checks.filter((check) =>
+    check.code.startsWith("release-profile-") && check.code.endsWith("-gate")
+  );
+  assert.equal(runtimeChecks.length, 3);
+  assert.ok(runtimeChecks.every((check) => !check.ok));
+  assert.ok(runtimeChecks.every((check) => check.facts?.configuredEnabled === true));
+  assert.ok(runtimeChecks.every((check) => check.facts?.effectiveEnabled === false));
 });
 
 test("正式预检在连接前要求只读授权、环境身份、数据库名和审批引用", () => {
@@ -329,7 +397,13 @@ test("正式预检先验证只读账号和数据库范围，再执行内容门�
     databaseScopeVerified: true,
   });
   assert.match(result.evidenceBoundary, /runner 配置预检/);
+  assert.match(result.evidenceBoundary, /档位选择不代表业务范围批准/);
   assert.match(result.evidenceBoundary, /不读取或验证客户端制品构建参数/);
+  assert.deepEqual(result.candidateBoundary, {
+    releaseProfileExplicitlySelected: true,
+    businessScopeApprovalVerified: false,
+    productionEnvironmentVerified: false,
+  });
   assert.deepEqual(rawQueries, [
     "SELECT DATABASE() AS databaseName",
     "SHOW GRANTS FOR CURRENT_USER()",
@@ -367,6 +441,7 @@ test("正式预检拒绝跨数据库只读授权且不进入业务查询", async
         expectedDatabase: "jewelry_staging",
         approvalReferenceHash: "a".repeat(64),
       },
+      "lead-generation",
     ),
     /RELEASE_PREFLIGHT_DATABASE_ACCOUNT_NOT_READ_ONLY:CROSS_DATABASE_SCOPE/,
   );
@@ -410,6 +485,7 @@ test("发布前门禁把当前服务端重新验证失败视为阻断", async ()
         }
       : { valid: true, errors: [], issues: [] },
     passingMigrationIntegrityCheck,
+    "lead-generation",
   );
 
   assert.equal(result.technicalReady, false);
@@ -471,6 +547,7 @@ test("发布前门禁失败关闭空指针与跨页面或悬空指针", async ()
       return { valid: true, errors: [], issues: [] };
     },
     passingMigrationIntegrityCheck,
+    "lead-generation",
   );
 
   assert.equal(result.technicalReady, false);

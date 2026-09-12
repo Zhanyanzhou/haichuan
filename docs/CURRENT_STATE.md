@@ -49,7 +49,7 @@
 | --- | --- | --- |
 | 正式内容与品牌 | 正式主体、联系资料、作品、媒体权利、六页内容和 SEO 尚未形成完整签认证据 | 完成输入清单、页面发布和桌面/移动公开验收 |
 | 页面装修 | 本地代码与历史专项证据存在，但不能继承旧模板数量、旧 PASS 或旧数据库状态 | 按当前合同在获批环境复核保存、发布、公开渲染和受保护草稿 |
-| 数据库 | 2026-09-12 在 Node 22.23.2 与独立 MySQL 8 空测试库执行 53 个迁移全部成功，三个真实 MySQL 持久化/并发/模板生命周期测试全部通过。新增的前向准备迁移先将 `payment_plans` 两条来源外键收紧为 `ON UPDATE RESTRICT`，随后原交易成熟度迁移成功添加两个 CHECK；客户邮箱唯一索引在空白与归一化重复值守卫之后创建。目标生产库 ledger 与存量数据仍未核验 | 上线前按获批目标库核对备份、migration ledger、邮箱守卫与既有数据升级；不得用本地空库证据替代生产迁移和回退验收 |
+| 数据库 | 以 `d446e09466dfaffdb5f9cdcfad4ce73f0046a9e8` 为基线的集成候选于 2026-09-12 在 Node 22.23.2 与独立 MySQL 8 空测试库执行 53 个迁移全部成功，六个真实 MySQL 持久化、并发、模板、客户、线索与选款测试全部通过；合成既有库的 51→53 升级、失败阻断与备份恢复演练也通过。任何精确目标库（含生产库）的 migration ledger、存量数据升级与真实回退仍未核验 | 上线前按获批目标库核对备份、migration ledger、数据守卫与既有数据升级，并完成真实回退验收；不得用本地隔离或合成证据替代目标库与生产证据 |
 | 密码策略 | 2026-09-11 用户重新确认业务账号新密码统一 `6–18` 位；前后端共享政策已同步，保留现行员工弱口令拒绝和旧密码登录兼容，见下方本地验收 | 本地输入/服务桩与浏览器夹具已验证；真实 API、数据库持久化与生产账号未在本轮验证，不据此改变其他上线阻断 |
 | 报价与交易 | D.18–D.20 的业务方向已批准；三报价、客户本人确认、分通道资源门禁、事务转单和完整不可变订单快照尚未形成统一真实闭环 | 补齐未决业务细节并取得 Schema/权限变更授权，再完成真实数据库、权限、失败和并发验收 |
 | 外部投递 | 本地通知与 Outbox 资产不能证明 SMTP/SMS/渠道真实送达 | 获批测试对象、目标配置、送达/退信/重试和隐私证据 |
@@ -83,11 +83,13 @@
 
 ## 数据库安装验证（2026-09-12）
 
-- 环境：Node.js `22.23.2`；一次性 MySQL 8 镜像摘要 `sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b`；空库 `haichuan_ci_real_tests`，仅绑定本机回环随机端口，与业务容器和数据卷隔离。
+- 候选与环境：集成候选基线 `d446e09466dfaffdb5f9cdcfad4ce73f0046a9e8`；Node.js `22.23.2`；一次性 MySQL 8 镜像摘要 `sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b`；空库 `haichuan_ci_real_tests`，仅绑定本机回环随机端口，与业务容器和数据卷隔离。
 - 原问题为 [交易成熟度 CHECK](../server/prisma/migrations/20260906160000_close_trade_maturity_invariants/migration.sql) 引用仍受 `ON UPDATE CASCADE` 外键控制的列，MySQL 8 返回 P3018 / 3823。修复未改写该历史迁移，而是新增排序在其之前的 [前向准备迁移](../server/prisma/migrations/20260906150000_prepare_payment_plan_check_constraints/migration.sql)，先删除并以 `ON UPDATE RESTRICT` 重建两条来源外键；Schema 同步显式声明 `onUpdate: Restrict`。
 - 在不含 `.env`、依赖独立安装并独立生成 Prisma Client 的副本中设置 `REAL_MYSQL_TEST_ISOLATED=1` 与显式测试库 URL，运行 `server/scripts/run-real-mysql-tests.cjs`：53 个迁移全部成功，`prisma migrate status` 报告最新；隐私处置、交易并发、模板版本/页面保存发布回读三项真实 MySQL 测试通过，0 失败、0 跳过。
+- 在同一基线的集成工作树中以显式隔离 URL 覆盖本地配置，再次对一次性空库执行 53 个 migration，并串行运行上述三项以及客户身份隔离、线索工作流、选款咨询幂等三项真实 MySQL 测试：共六项通过，0 失败、0 跳过；测试容器随后按精确名称删除。
+- `server/scripts/database-upgrade-rehearsal.mjs` 在 tmpfs MySQL 8 中验证合成既有库的 51→53 健康升级、数据保留与备份恢复，并验证非法支付计划、空白/重复邮箱、SKU 重复/索引漂移及 migration checksum 篡改均在预期边界失败关闭；容器和临时目录均已删除。该演练不覆盖目标库数据量、并发写入、锁等待、生产时长或真实回退时长。
 - 数据库实查确认 `payment_plans_order_id_fkey` 与 `payment_plans_quotation_version_id_fkey` 的更新和删除动作均为 `RESTRICT`，`payment_plans_source_check`、`payment_plans_total_amount_check` 与 `customers_email_key` 均已落库。客户资料迁移在首个持久 DDL 前以临时表 CHECK 拒绝空白邮箱和 `LOWER(TRIM(email))` 后的重复值，不自动合并或覆盖存量资料。
-- 上述结果只证明一次性空测试库与三个已登记真实测试；目标生产库 migration ledger、备份、存量邮箱、回退、域名、外部服务和公开流量均未核验，不能据此宣布生产迁移或上线完成。
+- 上述结果只证明该集成候选在一次性空测试库的安装、六个已登记真实测试及合成既有库演练；任何精确目标库（含生产库）的 migration ledger、备份、存量数据、升级和真实回退，以及域名、外部服务与公开流量均未核验，不能据此宣布目标库迁移、生产迁移或上线完成。
 
 ## 密码长度统一验证（2026-09-11）
 

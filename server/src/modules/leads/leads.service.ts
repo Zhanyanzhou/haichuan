@@ -64,6 +64,12 @@ const API_TYPE_BY_SOURCE: Record<LeadSourceType, LeadType> = {
   SELECTION_INQUIRY: "selection",
 };
 
+const LEAD_ASSIGNEE_ROLES = [
+  "SUPER_ADMIN",
+  "ADMIN",
+  "CUSTOMER_SERVICE",
+] as const;
+
 const sourceIdOf = (lead: {
   sourceType: LeadSourceType;
   inquiryId: number | null;
@@ -101,6 +107,12 @@ export class LeadsService {
     if (!Number.isInteger(leadId) || leadId <= 0) {
       throw new UnprocessableEntityException("线索编号不合法");
     }
+  }
+
+  private requireActorId(actorId: number | undefined, message: string) {
+    if (!actorId) throw new ForbiddenException(message);
+    this.parseId(actorId);
+    return actorId;
   }
 
   private assertOperableLead(lead: { privacyDisposedAt: Date | null }) {
@@ -366,6 +378,10 @@ export class LeadsService {
 
   async retryNotificationFailure(eventId: number, createdBy?: number) {
     this.parseId(eventId);
+    const actorId = this.requireActorId(
+      createdBy,
+      "无法确认通知重试操作人",
+    );
     return this.prisma.$transaction(async (transaction) => {
       const event = await transaction.outboxEvent.findUnique({
         where: { id: eventId },
@@ -441,7 +457,12 @@ export class LeadsService {
           leadId,
           type: "NOTE",
           content: `已申请重新投递回复通知（事件 #${event.id}，原失败码：${previousErrorCode}）`,
-          createdBy: createdBy ?? null,
+          createdBy: actorId,
+          metadata: {
+            action: "LEAD_REPLY_NOTIFICATION_RETRY_REQUESTED",
+            eventId: event.id,
+            previousErrorCode,
+          },
         },
       });
       return { id: event.id, leadId, status: "PENDING" as const };
@@ -685,11 +706,15 @@ export class LeadsService {
 
     if (data.assignedTo !== undefined) {
       const assignee = await this.prisma.user.findFirst({
-        where: { id: data.assignedTo, status: "ACTIVE" },
+        where: {
+          id: data.assignedTo,
+          status: "ACTIVE",
+          role: { in: [...LEAD_ASSIGNEE_ROLES] },
+        },
         select: { id: true },
       });
       if (!assignee) {
-        throw new UnprocessableEntityException("负责人不存在或已停用");
+        throw new UnprocessableEntityException("负责人不存在、已停用或无权处理线索");
       }
     }
 
@@ -765,9 +790,23 @@ export class LeadsService {
       : data.nextFollowUpAt === null
         ? null
         : undefined;
-    if (nextFollowUpAt !== undefined) update.nextFollowUpAt = nextFollowUpAt;
+    if (nextFollowUpAt !== undefined) {
+      update.nextFollowUpAt = nextFollowUpAt;
+      activities.push({
+        leadId: current.id,
+        type: "NOTE",
+        content: nextFollowUpAt
+          ? `下次跟进时间已设置为 ${nextFollowUpAt.toISOString()}`
+          : "已清除下次跟进时间",
+        nextFollowUpAt,
+        createdBy: createdBy ?? null,
+        metadata: { action: "NEXT_FOLLOW_UP_CHANGED" },
+      });
+    }
 
     if (Object.keys(update).length === 0) return current;
+    const actorId = this.requireActorId(createdBy, "无法确认线索操作人");
+    for (const activity of activities) activity.createdBy = actorId;
 
     return this.prisma.$transaction(async (transaction) => {
       const changed = await transaction.lead.updateMany({
@@ -823,6 +862,71 @@ export class LeadsService {
     });
   }
 
+  async claimLead(leadType: string, leadId: number, actorId?: number) {
+    const claimantId = this.requireActorId(actorId, "无法确认线索领取人");
+    const claimant = await this.prisma.user.findFirst({
+      where: {
+        id: claimantId,
+        status: "ACTIVE",
+        role: { in: [...LEAD_ASSIGNEE_ROLES] },
+      },
+      select: { id: true },
+    });
+    if (!claimant) {
+      throw new ForbiddenException("当前员工已停用或无权处理线索");
+    }
+
+    const current = await this.resolveLead(leadType, leadId);
+    this.assertOperableLead(current);
+    if (current.status === "COMPLETED" || current.status === "INVALID") {
+      throw new ConflictException("线索已结束，不能领取");
+    }
+    if (current.assignedTo === claimantId) return current;
+    if (current.assignedTo !== null) {
+      throw new ConflictException("线索已由其他员工领取");
+    }
+
+    const occurredAt = new Date();
+    const sourceId = sourceIdOf(current);
+    if (!sourceId) throw new NotFoundException("线索来源不存在");
+    return this.prisma.$transaction(async (transaction) => {
+      const changed = await transaction.lead.updateMany({
+        where: {
+          id: current.id,
+          assignedTo: null,
+          updatedAt: current.updatedAt,
+          privacyDisposedAt: null,
+        },
+        data: { assignedTo: claimantId },
+      });
+      if (changed.count !== 1) {
+        throw new ConflictException("线索已被其他员工领取，请刷新后确认");
+      }
+      await transaction.leadActivity.create({
+        data: {
+          leadId: current.id,
+          type: "ASSIGNED",
+          content: `线索已由员工 #${claimantId} 领取`,
+          createdBy: claimantId,
+          metadata: { action: "LEAD_CLAIMED" },
+          createdAt: occurredAt,
+        },
+      });
+      if (current.sourceType === "INQUIRY") {
+        await transaction.inquiry.update({
+          where: { id: sourceId },
+          data: { assignedTo: claimantId },
+        });
+      } else {
+        await transaction.selectionInquiry.update({
+          where: { id: sourceId },
+          data: { handledBy: claimantId, handledAt: occurredAt },
+        });
+      }
+      return transaction.lead.findUniqueOrThrow({ where: { id: current.id } });
+    });
+  }
+
   async updateBySource(
     leadType: string,
     sourceId: number,
@@ -845,33 +949,55 @@ export class LeadsService {
     reply: string,
     createdBy?: number,
   ) {
+    const actorId = this.requireActorId(createdBy, "无法确认咨询回复操作人");
+    if (typeof reply !== "string" || !reply.trim()) {
+      throw new BadRequestException("回复内容不能为空");
+    }
+    const normalizedReply = reply.trim();
+    if (normalizedReply.length > 5000) {
+      throw new BadRequestException("回复内容不能超过 5000 个字符");
+    }
     const lead = await this.resolveLeadBySource("inquiry", sourceId);
     this.assertOperableLead(lead);
     if (lead.customerId) {
       throw new ConflictException("已登录客户的咨询必须从统一线索入口回复");
     }
     if (!lead.inquiryId) throw new NotFoundException("咨询来源不存在");
+    const occurredAt = new Date();
     return this.prisma.$transaction(async (transaction) => {
+      const changed = await transaction.lead.updateMany({
+        where: {
+          id: lead.id,
+          updatedAt: lead.updatedAt,
+          privacyDisposedAt: null,
+        },
+        data: { updatedAt: occurredAt },
+      });
+      if (changed.count !== 1) {
+        throw new ConflictException("线索已被更新或匿名化，请重新加载后再回复");
+      }
       const inquiry = await transaction.inquiry.update({
         where: { id: lead.inquiryId as number },
-        data: { reply, repliedAt: new Date() },
+        data: { reply: normalizedReply, repliedAt: occurredAt },
       });
       const activity = await transaction.leadActivity.create({
         data: {
           leadId: lead.id,
           type: "REPLY",
-          content: reply,
+          content: normalizedReply,
           contactMethod: inquiry.customerEmail ? "email" : "other",
-          createdBy: createdBy ?? null,
+          createdBy: actorId,
+          createdAt: occurredAt,
         },
       });
       await transaction.leadFollowUp.create({
         data: {
           leadType: "inquiry",
           leadId: lead.inquiryId as number,
-          content: reply,
+          content: normalizedReply,
           contactMethod: inquiry.customerEmail ? "email" : "other",
-          createdBy: createdBy ?? null,
+          createdBy: actorId,
+          createdAt: occurredAt,
         },
       });
       if (inquiry.customerEmail) {
@@ -1047,6 +1173,13 @@ export class LeadsService {
     nextFollowUpAt?: string | null;
     createdBy?: number;
   }) {
+    const actorId = this.requireActorId(data.createdBy, "无法确认跟进操作人");
+    if (typeof data.content !== "string" || !data.content.trim()) {
+      throw new BadRequestException("跟进内容不能为空");
+    }
+    if (data.content.length > 1000) {
+      throw new BadRequestException("跟进内容不能超过 1000 个字符");
+    }
     const lead = await this.resolveLead(data.leadType, data.leadId);
     this.assertOperableLead(lead);
     const sourceId = sourceIdOf(lead);
@@ -1055,32 +1188,45 @@ export class LeadsService {
       ? new Date(data.nextFollowUpAt)
       : null;
 
+    const occurredAt = new Date();
     return this.prisma.$transaction(async (transaction) => {
+      const changed = await transaction.lead.updateMany({
+        where: {
+          id: lead.id,
+          updatedAt: lead.updatedAt,
+          privacyDisposedAt: null,
+        },
+        data: {
+          updatedAt: occurredAt,
+          ...(data.nextFollowUpAt !== undefined ? { nextFollowUpAt } : {}),
+        },
+      });
+      if (changed.count !== 1) {
+        throw new ConflictException("线索已被更新或匿名化，请重新加载后再跟进");
+      }
       const activity = await transaction.leadActivity.create({
         data: {
           leadId: lead.id,
           type: "FOLLOW_UP",
-          content: data.content,
+          content: data.content.trim(),
           contactMethod: data.contactMethod || null,
           nextFollowUpAt,
-          createdBy: data.createdBy ?? null,
+          createdBy: actorId,
+          createdAt: occurredAt,
         },
       });
       await transaction.leadFollowUp.create({
         data: {
           leadType: API_TYPE_BY_SOURCE[lead.sourceType],
           leadId: sourceId,
-          content: data.content,
+          content: data.content.trim(),
           contactMethod: data.contactMethod || null,
           nextFollowUpAt,
-          createdBy: data.createdBy ?? null,
+          createdBy: actorId,
+          createdAt: occurredAt,
         },
       });
       if (data.nextFollowUpAt !== undefined) {
-        await transaction.lead.update({
-          where: { id: lead.id },
-          data: { nextFollowUpAt },
-        });
         if (lead.sourceType === "INQUIRY") {
           await transaction.inquiry.update({
             where: { id: sourceId },

@@ -63,7 +63,7 @@ export const heroPuckConfig = {
     locked: false,
   } satisfies HeroPuckProps,
 
-  /** 首屏主舞台全页唯一；锁定时进一步禁止删除与拖动。 */
+  /** hero 测试样例不提供复制命令；锁定时进一步禁止删除与拖动。 */
   resolvePermissions: (data: { props?: HeroPuckProps }) => {
     if (data.props?.locked) {
       return { delete: false, drag: false, duplicate: false };
