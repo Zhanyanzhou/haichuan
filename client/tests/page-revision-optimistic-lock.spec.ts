@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalog } from "./fixtures/template-catalog";
+import {
+  PAGE_TEMPLATE_FIXTURE_ID,
+  PAGE_TEMPLATE_FIXTURE_NAME,
+  PAGE_TEMPLATE_FIXTURE_VERSION,
+  publishedPageTemplateCatalog,
+} from "./fixtures/template-catalog";
 
 const useMock = process.env.VITE_USE_MOCK === "true";
 const CURRENT_UPDATED_AT = "2026-08-23T08:00:00.000Z";
@@ -63,13 +68,14 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
       createdAt: "2026-08-22T08:00:00.000Z",
     };
     const savePayloads: Array<Record<string, unknown>> = [];
+    const catalog = publishedPageTemplateCatalog();
 
     await page.route("**/api/**", async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
       if (path === "/api/auth/profile") return route.fallback();
       if (path === "/api/page-modules/dynamic-templates/catalog") {
-        return route.fulfill(ok(systemTemplateCatalog()));
+        return route.fulfill(ok(catalog));
       }
       if (path === "/api/page-modules/document" && request.method() === "PUT") {
         savePayloads.push(request.postDataJSON());
@@ -112,47 +118,25 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
     if (await expandLibrary.isVisible()) await expandLibrary.click();
 
     const appointmentCard = page.locator(
-      '.homepage-editor__template-card[data-template-name="预约入口"]',
+      `.homepage-editor__template-card[data-template-name="${PAGE_TEMPLATE_FIXTURE_ID}"]`,
     );
     await expect(appointmentCard.evaluate((element) => element.tagName)).resolves.toBe(
       "ARTICLE",
     );
-    await expect(
-      appointmentCard.locator('[data-content-template-preview="booking"]'),
-    ).toHaveCount(1);
-    const appointmentAddButton = appointmentCard.getByRole("button", {
-      name: "预约入口：点击添加到页面末尾，也可拖到画布指定位置",
+    const appointmentPreviewButton = appointmentCard.getByRole("button", {
+      name: `预览${PAGE_TEMPLATE_FIXTURE_NAME}版本${PAGE_TEMPLATE_FIXTURE_VERSION}`,
     });
-    await expect(appointmentCard.getByRole("button")).toHaveCount(1);
-    await expect(appointmentAddButton).toHaveAttribute("role", "button");
-    await expect(appointmentAddButton).toHaveAttribute("tabindex", "0");
-    await expect(
-      appointmentAddButton.evaluate((element) => element.tagName),
-    ).resolves.toBe("DIV");
-
-    await appointmentAddButton.focus();
-    await page.keyboard.press("Shift+Tab");
-    await page.keyboard.press("Tab");
-    await expect(appointmentAddButton).toBeFocused();
-    await expect
-      .poll(() =>
-        appointmentAddButton.evaluate((element) => getComputedStyle(element).outlineStyle),
-      )
-      .not.toBe("none");
-
-    const canvas = page.locator(".homepage-editor__canvas-document");
-    const cardBox = await appointmentAddButton.boundingBox();
-    const canvasBox = await canvas.boundingBox();
-    if (!cardBox || !canvasBox) throw new Error("模板卡片或页面画布没有可用尺寸");
-    await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + 120, { steps: 14 });
-    await page.mouse.up();
-    await expect(page.getByText("已插入“预约入口”，可在右侧继续编辑")).toBeVisible();
+    const appointmentAddButton = appointmentCard.getByRole("button", {
+      name: `添加到页面：${PAGE_TEMPLATE_FIXTURE_NAME} v${PAGE_TEMPLATE_FIXTURE_VERSION}`,
+    });
+    await expect(appointmentPreviewButton).toHaveAttribute("draggable", "true");
+    await expect(appointmentAddButton).toBeEnabled();
+    await appointmentAddButton.click();
+    await expect(page.getByText(
+      `已添加“${PAGE_TEMPLATE_FIXTURE_NAME}”v${PAGE_TEMPLATE_FIXTURE_VERSION}，可在右侧填写页面内容`,
+    )).toBeVisible();
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(1);
     await expect(appointmentCard.locator(".homepage-editor__template-footer")).toHaveCount(0);
-    await expect(appointmentAddButton).not.toHaveAttribute("aria-disabled", "true");
-    await expect(appointmentAddButton).toHaveAttribute("tabindex", "0");
 
     await page.getByRole("button", { name: "更多编辑操作" }).click();
     await page.getByRole("menuitem", { name: "发布历史" }).click();
@@ -205,8 +189,9 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
 
   test("线上回滚只发送 revision 指针切换，草稿与历史快照保持不变", async ({ page }) => {
     await authenticateAdmin(page);
+    const catalog = publishedPageTemplateCatalog();
     const draftPuckData = {
-      content: [{ type: "文字横幅", props: { id: "draft", text: "未发布草稿" } }],
+      content: [{ type: "首屏主视觉", props: { id: "draft", title: "未发布草稿" } }],
       root: { props: {} },
     };
     const revision37 = {
@@ -214,7 +199,7 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
       documentId: 7,
       version: 37,
       puckData: {
-        content: [{ type: "文字横幅", props: { id: "v37", text: "线上版本 37" } }],
+        content: [{ type: "首屏主视觉", props: { id: "v37", title: "线上版本 37" } }],
         root: { props: {} },
       },
       metadata: { seoTitle: "版本 37" },
@@ -228,7 +213,7 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
       documentId: 7,
       version: 39,
       puckData: {
-        content: [{ type: "文字横幅", props: { id: "v39", text: "线上版本 39" } }],
+        content: [{ type: "首屏主视觉", props: { id: "v39", title: "线上版本 39" } }],
         root: { props: {} },
       },
       metadata: { seoTitle: "版本 39" },
@@ -270,7 +255,7 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
       const path = new URL(request.url()).pathname;
       if (path === "/api/auth/profile") return route.fallback();
       if (path === "/api/page-modules/dynamic-templates/catalog") {
-        return route.fulfill(ok(systemTemplateCatalog()));
+        return route.fulfill(ok(catalog));
       }
       if (
         path === "/api/page-modules/document/revisions/37/rollback-publication"
@@ -340,6 +325,6 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
     }]);
     expect(unexpectedWrites).toEqual([]);
     expect(draftDocument.puckData).toEqual(draftPuckData);
-    expect(revision39.puckData.content[0].props.text).toBe("线上版本 39");
+    expect(revision39.puckData.content[0].props.title).toBe("线上版本 39");
   });
 });

@@ -86,7 +86,6 @@ test("旧个人模板只保留按账号读取，控制器与服务不再暴露�
   assert.equal((PageModulesService.prototype as any).updatePersonalContentTemplate, undefined);
   assert.equal((PageModulesService.prototype as any).deletePersonalContentTemplate, undefined);
 });
-
 test("个人模板只读列表始终绑定当前账号", async () => {
   const { service, calls } = createService();
   await service.getPersonalContentTemplates(23);
@@ -336,95 +335,4 @@ test("服务端按轴尺寸兼容状态与客户端合同同源且规范化幂�
       __instanceOverrides: legalAtOrigin,
     },
   }).some((issue) => issue.severity === "error"), false);
-});
-
-test("账号私有模板只保留合同允许的模块表面与对象外观预设", () => {
-  const sanitized = sanitizeContentTemplateLayoutData("单品焦点推荐", {
-    version: 2,
-    frame: {
-      colorPreset: "mist",
-      paddingPreset: "spacious",
-      radiusPreset: "rounded",
-      shadowPreset: "lifted",
-      arbitraryCss: "display:none",
-    },
-    nodes: {
-      product: {
-        appearance: {
-          radiusPreset: "soft",
-          shadowPreset: "lifted",
-          arbitraryCss: "position:fixed",
-        },
-      },
-    },
-  });
-
-  assert.deepEqual(sanitized?.frame, {
-    colorPreset: "mist",
-    paddingPreset: "spacious",
-    radiusPreset: "rounded",
-    shadowPreset: "lifted",
-  });
-  assert.deepEqual(sanitized?.nodes?.product?.appearance, {
-    radiusPreset: "soft",
-    shadowPreset: "lifted",
-  });
-});
-
-test("默认槽位内容只提取合同声明字段并遵守文本、数量和 URL 边界", () => {
-  const defaults = extractContentTemplateDefaultContent("首屏主视觉", {
-    id: "not-content",
-    desktopImage: "/uploads/hero.jpg",
-    mobileImage: "https://cdn.example.com/hero-mobile.jpg",
-    altText: "珠宝主视觉",
-    eyebrow: "COLLECTION",
-    title: "光影系列",
-    subtitle: "克制留白中的珠宝光泽",
-    actionText: "查看系列",
-    targetType: "page",
-    productId: 0,
-    linkUrl: "/catalog",
-    __instanceOverrides: { version: 2 },
-  });
-
-  assert.deepEqual(defaults, {
-    desktopImage: "/uploads/hero.jpg",
-    altText: "珠宝主视觉",
-    mobileImage: "https://cdn.example.com/hero-mobile.jpg",
-    eyebrow: "COLLECTION",
-    title: "光影系列",
-    subtitle: "克制留白中的珠宝光泽",
-    actionText: "查看系列",
-    targetType: "page",
-    productId: 0,
-    linkUrl: "/catalog",
-  });
-
-  assert.deepEqual(sanitizeContentTemplateDefaultContent("首屏主视觉", {
-    title: "超".repeat(25),
-    desktopImage: "data:text/html,<script>alert(1)</script>",
-    linkUrl: "javascript:alert(1)",
-    actionText: "安全文案",
-    unknownField: "不得保存",
-  }), { actionText: "安全文案" });
-
-  assert.deepEqual(sanitizeContentTemplateDefaultContent("产品展示行", {
-    productCodes: Array.from({ length: 9 }, (_, index) => `HC-${index + 1}`),
-    title: "商品系列",
-  }), { title: "商品系列" });
-});
-
-test("结构化默认内容拒绝危险嵌套 URL、原型键和超出合同数量的集合", () => {
-  const unsafeItem = JSON.parse('{"title":"危险项","linkUrl":"javascript:alert(1)","__proto__":{"polluted":true}}');
-  assert.deepEqual(sanitizeContentTemplateDefaultContent("作品画廊", {
-    title: "作品画廊",
-    items: [unsafeItem],
-  }), { title: "作品画廊" });
-
-  assert.deepEqual(sanitizeContentTemplateDefaultContent("作品画廊", {
-    items: Array.from({ length: 8 }, (_, index) => ({
-      image: `/uploads/work-${index + 1}.jpg`,
-      title: `作品 ${index + 1}`,
-    })),
-  }), {});
 });

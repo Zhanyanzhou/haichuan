@@ -14,7 +14,7 @@ import "../../src/styles/globals.css";
 import "../../src/pages/admin/HomepageConfig/editor.css";
 
 const moduleType = "首屏主视觉";
-const blockId = "puck-hero-visual-test";
+const blockId = "template-editor:puck-hero-visual-test";
 const data = {
   content: [
     {
@@ -31,29 +31,27 @@ const data = {
       },
     },
     {
-      type: "文字横幅",
+      type: moduleType,
       props: {
-        id: "puck-text-banner-order-test",
+        id: "template-editor:puck-text-banner-order-test",
+        desktopImage: "/svg/template-hero.svg",
+        mobileImage: "/svg/template-hero.svg",
         title: "顺序保护测试",
         subtitle: "槽位调整不得改变模块顺序",
+        actionText: "",
+        targetType: "none",
       },
     },
     {
-      type: "产品展示行",
+      type: moduleType,
       props: {
-        id: "puck-product-row-visual-test",
+        id: "template-editor:puck-product-row-visual-test",
+        desktopImage: "/svg/template-hero.svg",
+        mobileImage: "/svg/template-hero.svg",
         title: "精选作品",
         subtitle: "",
-        productIds: [],
-        productCodes: [],
-        layout: "grid-3",
-        mobileColumns: 2,
-        displayMode: "standard",
-        actionStyle: "text",
-        bgColor: "#FFFFFF",
-        showPrice: true,
-        showButton: false,
-        buttonText: "查看详情",
+        actionText: "",
+        targetType: "none",
       },
     },
   ],

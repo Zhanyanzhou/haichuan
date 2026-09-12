@@ -7,7 +7,7 @@ import {
   UndoOutlined,
 } from "@ant-design/icons";
 import { Button, Dropdown, type MenuProps } from "antd";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 export type WorkspaceStatusMode =
   | "saving"
@@ -109,6 +109,7 @@ interface ToolbarButtonConfig {
 
 interface PreviewButtonConfig extends ToolbarButtonConfig {
   active: boolean;
+  buttonRef?: Ref<HTMLButtonElement>;
 }
 
 interface MoreButtonConfig {
@@ -197,6 +198,7 @@ export function WorkspaceToolbarActions({
         />
       </div>
       <Button
+        ref={preview.buttonRef}
         className="homepage-editor__toolbar-preview"
         size="small"
         type="default"

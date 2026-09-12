@@ -90,7 +90,7 @@ async function mockPublishedHeaderDocuments(
         },
       },
       ...Array.from({ length: 3 }, (_, index) => ({
-        type: "文字横幅",
+        type: "首屏主视觉",
         props: {
           id: `published-header-support-${index}`,
           isVisible: true,
@@ -410,11 +410,19 @@ test.describe("公开页面导航一致性", () => {
     });
   }
 
-  test("公开页头只由已发布文档的首个可见模板决定覆盖模式", async ({ page }) => {
+  test("公开页头只由已发布文档的首个可见受支持模板决定覆盖模式", async ({ page }) => {
     await mockPublishedHeaderDocuments(page, () => [
       { type: "业务功能区", props: { id: "business-region", isVisible: true } },
       { type: "首屏主视觉", props: { id: "hidden-hero", isVisible: false } },
-      { type: "文字横幅", props: { id: "first-visible", isVisible: true, title: "公开信息" } },
+      {
+        type: "动态模板实例",
+        props: {
+          id: "first-visible",
+          isVisible: true,
+          templateId: "solid-header-template",
+          templateVersion: 1,
+        },
+      },
       { type: "首屏主视觉", props: { id: "late-hero", isVisible: true, title: "后置影像" } },
     ]);
     await page.goto("/");
@@ -559,7 +567,7 @@ test.describe("公开页面业务区顺序", () => {
             puckData: {
               content: [
                 {
-                  type: "文字横幅",
+                  type: "首屏主视觉",
                   props: {
                     id: "catalog-test-intro",
                     eyebrow: "SELECTION CENTER",
@@ -579,7 +587,7 @@ test.describe("公开页面业务区顺序", () => {
                   props: { id: "catalog-test-business-region" },
                 },
                 {
-                  type: "预约入口",
+                  type: "首屏主视觉",
                   props: {
                     id: "catalog-test-appointment",
                     title: "需要顾问协助选款？",

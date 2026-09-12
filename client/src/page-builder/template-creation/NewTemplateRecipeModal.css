@@ -1,0 +1,117 @@
+.template-recipe-modal .ant-modal-content { padding: 24px; height: min(800px, calc(100dvh - 48px)); display: flex; flex-direction: column; }
+.template-recipe-modal .ant-modal-header, .template-recipe-modal .ant-modal-footer { flex: none; }
+.template-recipe-modal .ant-modal-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.template-recipe__steps { display: flex; justify-content: space-between; gap: 8px; list-style: none; margin: 20px 0; padding: 0; color: var(--recipe-muted); }
+.template-recipe__steps li { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.template-recipe__steps li span { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--recipe-border); border-radius: 50%; font-size: 12px; }
+.template-recipe__steps li[aria-current] { color: var(--recipe-primary); font-weight: 600; }
+.template-recipe__steps li[aria-current] span { border-color: currentColor; }
+.template-recipe__workspace { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 24px; flex: 1; min-height: 0; }
+.template-recipe__body { min-height: 0; min-width: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-padding-top: 64px; padding: 2px 4px 16px; }
+.template-recipe__live-preview { border-left: 1px solid var(--recipe-border); padding: 4px 0 12px 24px; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.template-recipe__preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.template-recipe__preview-heading span, .template-recipe__live-preview p { font-size: 12px; color: var(--recipe-muted); }
+.template-recipe__preview-stage { display: grid; place-items: center; height: min(480px, 48dvh); min-width: 0; margin: 20px auto; }
+.template-recipe__live-preview .template-recipe__preview { margin: 0 auto; }
+.template-recipe__preview-toggle { display: none; }
+.template-recipe__selection-summary { font-size: 13px; line-height: 1.6; }
+.template-recipe__announcement { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.template-recipe__colors { margin-top: 24px; }
+.template-recipe__colors summary { cursor: pointer; color: var(--recipe-muted); }
+.template-recipe__body h3 { position: sticky; top: -2px; z-index: 1; background: var(--recipe-bg); font-size: 18px; margin: 0; padding: 2px 0 12px; outline: none; }
+.template-recipe__body p { color: var(--recipe-muted); }
+.template-recipe__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.template-recipe__grid--four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.template-recipe__card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px 8px; border: 1px solid var(--recipe-border); border-radius: 6px; color: var(--recipe-ink); background: var(--recipe-bg); cursor: pointer; min-height: 76px; }
+.template-recipe__card strong { font-size: 13px; font-weight: 500; text-align: center; }
+.template-recipe__card[aria-pressed=true] { border-color: var(--recipe-primary); box-shadow: inset 0 0 0 1px var(--recipe-primary); }
+.template-recipe__card:focus-visible { outline: 2px solid var(--recipe-primary); outline-offset: 3px; }
+.template-recipe__card .ant-tag { margin: 0; }
+.template-recipe__ratio { display: grid; place-items: center; height: 68px; }
+.template-recipe__ratio i { display: block; border: 1px solid var(--recipe-muted); background: var(--recipe-fill); }
+.template-recipe__layout-thumb { width: 104px; max-width: 100%; height: 82px; }
+.template-recipe__media-thumb { width: 72px; max-width: 100%; height: 36px; }
+.template-recipe__media-diagram { display: grid; place-items: center; width: 72px; max-width: 100%; height: 36px; }
+.template-recipe__media-diagram svg { overflow: visible; stroke: var(--recipe-muted); stroke-width: 1; }
+.template-recipe__media-diagram svg * { vector-effect: non-scaling-stroke; }
+.template-recipe__media-diagram .template-recipe__diagram-frame { stroke: var(--recipe-border); }
+.template-recipe__media-grid .template-recipe__card { position: relative; padding: 8px; gap: 6px; }
+.template-recipe__media-grid .template-recipe__card strong { font-size: 14px; }
+.template-recipe__media-grid .template-recipe__card .ant-tag { position: absolute; top: 5px; right: 5px; }
+.template-recipe__media-help { font-size: 13px; line-height: 1.6; }
+.template-recipe__composition-grid .template-recipe__card { justify-content: flex-start; padding: 12px 8px; }
+.template-recipe__composition-grid .template-recipe__card .ant-tag { position: static; margin: 0; }
+.template-recipe__option-viewport { display: flex; align-items: center; justify-content: center; width: 100%; height: 132px; min-width: 0; pointer-events: none; }
+.template-recipe__arrangements { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.template-recipe__structure-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.template-recipe__structure-summary > span { min-width: 0; font-size: 14px; }
+.template-recipe__preview [data-recipe-highlight]::after { content: ""; position: absolute; inset: 0; z-index: 2; border: 5px solid var(--recipe-primary); border-radius: inherit; box-sizing: border-box; pointer-events: none; }
+.template-recipe__active-image { font-weight: 600; }
+.template-recipe__preview.template-recipe__preview--option { flex: none; margin: 0; pointer-events: none; }
+.template-recipe__option-empty { display: grid; place-items: center; max-width: 100%; border: 1px dashed var(--recipe-border); color: var(--recipe-muted); font-size: 12px; }
+.template-recipe__option-error { color: var(--recipe-muted); font-size: 12px; line-height: 1.5; text-align: left; }
+.template-recipe__media-settings { border-top: 1px solid var(--recipe-border); margin-top: 16px; padding-top: 12px; }
+.template-recipe__media-settings summary { cursor: pointer; font-weight: 500; min-height: 32px; }
+.template-recipe__media-settings summary:focus-visible { outline: 2px solid var(--recipe-primary); outline-offset: 2px; }
+.template-recipe__media-settings > p { font-size: 13px; line-height: 1.6; }
+.template-recipe__row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 16px; }
+.template-recipe__row label { display: flex; gap: 8px; align-items: center; }
+.template-recipe__row small { flex-basis: 100%; }
+.template-recipe__slot-list { margin: 20px 0; display: grid; gap: 12px; }
+.template-recipe__slot-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px auto; gap: 8px; }
+.template-recipe__content-row { display: flex; align-items: end; gap: 8px; }
+.template-recipe__content-row label { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.template-recipe__style-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 24px; }
+.template-recipe__style-fields label, .template-recipe__field { display: grid; gap: 8px; min-width: 0; }
+.template-recipe__image-options { min-width: 0; border: 1px solid var(--recipe-border); margin: 16px 0; padding: 12px; border-radius: 6px; }
+.template-recipe__image-options legend { width: auto; padding: 0 6px; font-size: 14px; }
+.template-recipe__image-options .template-recipe__style-fields { margin-top: 0; gap: 12px; }
+.template-recipe__style-fields .ant-select { min-width: 0; }
+.template-recipe__style-fields input[type=color] { width: 100%; min-height: 36px; border: 1px solid var(--recipe-border); background: var(--recipe-bg); cursor: pointer; }
+.template-recipe__confirmation { min-width: 0; }
+.template-recipe__confirmation dl { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 12px; margin: 24px 0; }
+.template-recipe__confirmation dt { color: var(--recipe-muted); }
+.template-recipe__confirmation dt .ant-btn { display: block; height: 28px; padding: 0; }
+.template-recipe__recommendations { border-top: 1px solid var(--recipe-border); margin-top: 20px; padding-top: 12px; }
+.template-recipe__recommendations summary { cursor: pointer; }
+.template-recipe__recommendation-list { display: grid; gap: 12px; margin: 16px 0; }
+.template-recipe__recommendation-list > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 12px; align-items: start; }
+.template-recipe__recommendation-list > div > span { color: var(--recipe-muted); font-size: 12px; overflow-wrap: anywhere; }
+.template-recipe__error { margin-top: 16px; }
+.template-recipe__error-actions, .template-recipe__preview-devices { display: flex; gap: 8px; flex-wrap: wrap; }
+.template-recipe__preview.template-recipe__preview--mobile { pointer-events: auto; overflow-y: auto; overscroll-behavior: contain; }
+.template-recipe__preview--mobile [data-template-node-type="ImageSlot"] { position: relative; }
+.template-recipe__preview-render { pointer-events: none; }
+.template-recipe__confirmation dd { margin: 0; overflow-wrap: anywhere; }
+.template-recipe__palette-summary dd { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.template-recipe__color-value { display: inline-flex; align-items: center; gap: 6px; }
+.template-recipe__color-value i { width: 16px; height: 16px; border: 1px solid var(--recipe-border); border-radius: 3px; flex: none; }
+.template-recipe__preview { position: relative; overflow: hidden; width: 100%; border: 1px solid var(--recipe-border); pointer-events: none; }
+.template-recipe__empty-preview { display: grid; place-items: center; padding: 16px; color: #5F6568; text-align: center; box-sizing: border-box; }
+.template-recipe__preview [data-template-node-type="ImageSlot"] > .hc-dynamic-template__empty-slot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #ECEEEF; border: 2px dashed #B8BEC1; color: #5F6568; font-size: 32px; }
+.template-recipe__footer { display: flex; gap: 8px; padding-top: 8px; align-items: center; }
+.template-recipe__footer .ant-btn { min-height: 44px; margin: 0 !important; }
+.template-recipe__footer-spacer { flex: 1; }
+@media (max-width: 760px) {
+  .template-recipe-modal .ant-modal-content { padding: 16px 12px; height: calc(100dvh - 48px); }
+  .template-recipe__steps { gap: 8px; font-size: 12px; overflow-x: auto; }
+  .template-recipe__steps li { flex-direction: column; gap: 4px; }
+  .template-recipe__grid, .template-recipe__grid--four { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .template-recipe__workspace { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .template-recipe__preview-toggle { display: block; flex: none; min-height: 44px; align-self: flex-start; border: 0; color: var(--recipe-primary); background: transparent; padding: 0 4px; margin-bottom: 8px; cursor: pointer; }
+  .template-recipe__preview-toggle:focus-visible { outline: 2px solid var(--recipe-primary); outline-offset: 2px; }
+  .template-recipe__live-preview { display: none; border: 0; padding: 4px; }
+  .template-recipe__workspace[data-preview-open=true] .template-recipe__body { display: none; }
+  .template-recipe__workspace[data-preview-open=true] .template-recipe__live-preview { display: block; }
+  .template-recipe__slot-row { grid-template-columns: minmax(0, 1fr) 105px; }
+  .template-recipe__slot-row button { grid-column: 2; }
+  .template-recipe__style-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .template-recipe__confirmation { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .template-recipe__footer-spacer { display: none; }
+  .template-recipe__footer { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: 44px 44px; }
+  .template-recipe__footer .ant-btn { padding-inline: 8px; }
+  .template-recipe__cancel { grid-column: 1; grid-row: 1; }
+  .template-recipe__previous { grid-column: 2; grid-row: 1; }
+  .template-recipe__continue { grid-column: 3; grid-row: 1; }
+  .template-recipe__skip { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
+}

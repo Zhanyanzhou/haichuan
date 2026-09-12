@@ -17,13 +17,13 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import type { StaffRequest } from "../../common/security/authenticated-principal";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import {
+  ArchiveDynamicTemplateDto,
   CreateDynamicTemplateDto,
   PublishDynamicTemplateDto,
-  SaveDynamicTemplateAsDto,
+  RebuildDynamicTemplateDraftFromPublishedDto,
   UpdateDynamicTemplateDraftDto,
 } from "./dto";
 import { DynamicTemplatesService } from "./dynamic-templates.service";
-import { PageModulesService } from "./page-modules.service";
 
 @ApiTags("母模板")
 @ApiBearerAuth()
@@ -31,26 +31,19 @@ import { PageModulesService } from "./page-modules.service";
 @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
 @Controller("page-modules/dynamic-templates")
 export class DynamicTemplatesController {
-  constructor(
-    private readonly service: DynamicTemplatesService,
-    private readonly pageModules: PageModulesService,
-  ) {}
+  constructor(private readonly service: DynamicTemplatesService) {}
 
   @Get("catalog")
-  @ApiOperation({ summary: "获取统一母模板目录（正式版本、可编辑草稿与只读兼容来源）" })
+  @ApiOperation({ summary: "获取统一母模板目录（正式版本与可编辑草稿）" })
   async listCatalog(@Req() req: StaffRequest) {
-    const [published, systemCompatibility, personalCompatibility, editable] = await Promise.all([
+    const [published, editable] = await Promise.all([
       this.service.listPublished(),
-      this.pageModules.getSystemContentTemplates(),
-      this.pageModules.getPersonalContentTemplates(req.user.id),
       req.user.role === "SUPER_ADMIN" ? this.service.listMine(req.user.id) : Promise.resolve([]),
     ]);
     return {
       items: [
         ...published.map((template) => ({ kind: "published" as const, template })),
         ...editable.map((template) => ({ kind: "editable" as const, template })),
-        ...systemCompatibility.map((template) => ({ kind: "system-compatibility" as const, template })),
-        ...personalCompatibility.map((template) => ({ kind: "personal-compatibility" as const, template })),
       ],
     };
   }
@@ -79,7 +72,7 @@ export class DynamicTemplatesController {
 
   @Roles("SUPER_ADMIN")
   @Post()
-  @ApiOperation({ summary: "创建母模板草稿；旧系统来源保持全局 SYSTEM 身份" })
+  @ApiOperation({ summary: "通过统一的新建模板流程创建母模板草稿" })
   create(@Body() body: CreateDynamicTemplateDto, @Req() req: StaffRequest) {
     return this.service.create(req.user.id, body);
   }
@@ -103,14 +96,15 @@ export class DynamicTemplatesController {
   }
 
   @Roles("SUPER_ADMIN")
-  @Post(":templateId/save-as")
-  @ApiOperation({ summary: "把当前母模板另存为新 templateId" })
-  saveAs(
+  @Post(":templateId/draft/from-published")
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "从当前精确正式版本重建缺失的可编辑草稿" })
+  rebuildDraftFromPublished(
     @Param("templateId") templateId: string,
-    @Body() body: SaveDynamicTemplateAsDto,
+    @Body() body: RebuildDynamicTemplateDraftFromPublishedDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.saveAs(req.user.id, templateId, body);
+    return this.service.rebuildDraftFromPublished(req.user.id, templateId, body);
   }
 
   @Roles("SUPER_ADMIN")
@@ -146,8 +140,12 @@ export class DynamicTemplatesController {
   @Post(":templateId/archive")
   @SkipGenericAudit()
   @ApiOperation({ summary: "将当前管理员可编辑的母模板移入回收站" })
-  archive(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
-    return this.service.archive(req.user.id, templateId);
+  archive(
+    @Param("templateId") templateId: string,
+    @Body() body: ArchiveDynamicTemplateDto,
+    @Req() req: StaffRequest,
+  ) {
+    return this.service.archive(req.user.id, templateId, body);
   }
 
   @Roles("SUPER_ADMIN")

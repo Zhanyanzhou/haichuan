@@ -5,6 +5,7 @@ export type CustomerAccount = {
   phone: string;
   name: string | null;
   email: string | null;
+  avatarUrl?: string | null;
 };
 
 interface CustomerAuthState {

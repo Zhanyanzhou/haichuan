@@ -6,8 +6,6 @@
  * 路由 /__templates 仅本地开发使用,不属于公开页面。
  */
 import HeroSection from "@/components/blocks/HeroSection";
-import TextBannerBlock from "@/components/blocks/TextBannerBlock";
-import SinglePosterSection from "@/components/blocks/SinglePosterSection";
 import ContentTemplateSkeletonPreview from "@/page-builder/preview/ContentTemplateSkeletonPreview";
 import type { PageModule } from "@/types/pageModule";
 
@@ -75,18 +73,12 @@ export default function TemplateGallery() {
           flexWrap: "wrap",
         }}
       >
-        {[
-          { moduleType: "首屏主视觉", name: "首屏" },
-          { moduleType: "文字横幅", name: "宣言" },
-          { moduleType: "单图海报", name: "单图文" },
-        ].map((t) => (
-          <div key={t.moduleType} style={{ width: 300 }}>
-            <div style={{ fontSize: 12, color: "#F7F8F8", letterSpacing: "0.18em", marginBottom: 8 }}>
-              {t.name} · 编辑器缩略图
-            </div>
-            <ContentTemplateSkeletonPreview moduleType={t.moduleType} viewport="desktop" density="overview" />
+        <div style={{ width: 300 }}>
+          <div style={{ fontSize: 12, color: "#F7F8F8", letterSpacing: "0.18em", marginBottom: 8 }}>
+            首屏 · 编辑器缩略图
           </div>
-        ))}
+          <ContentTemplateSkeletonPreview moduleType="首屏主视觉" viewport="desktop" density="overview" />
+        </div>
       </div>
 
       <Label no="01" name="首屏 hero" note="Primary · 21:9 · 居中束 · 占位状态" />
@@ -99,29 +91,6 @@ export default function TemplateGallery() {
             subtitle: "以金与光，写一首安静的诗。",
             actionText: "Discover the Collection",
           }, { alignment: "center" }, { textTone: "dark" })}
-        />
-      </div>
-
-      <Label no="02" name="宣言 textBanner" note="Support · 双细线仪式 · grand 留白" />
-      <TextBannerBlock
-        editMode
-        module={mk("文字横幅", {
-          eyebrow: "Manifesto",
-          title: "珠宝不必喧哗，\n时间自会说话。",
-        }, { template: "center" }, { spacing: "grand" })}
-      />
-
-      <Label no="03" name="单图文 singlePoster" note="Feature · 画廊海报式 P1 · 4:5" />
-      <div style={{ maxWidth: 1800, marginInline: "auto", background: "#fff" }}>
-        <SinglePosterSection
-          editMode
-          module={mk("单图海报", {
-            number: "N°01",
-            label: "Collection",
-            title: "初雪系列",
-            subtitle: "First Snow · 九件作品 · 2026 冬",
-            actionText: "Discover",
-          })}
         />
       </div>
     </div>

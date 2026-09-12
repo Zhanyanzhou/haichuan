@@ -1,5 +1,7 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, Res, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { memoryStorage } from 'multer';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -18,7 +20,6 @@ import {
   ForgotPasswordDto,
   RequestSmsCodeDto,
   ResetPasswordDto,
-  UpdateCustomerProfileDto,
 } from './dto/customer-auth.dto';
 import {
   buildClearSessionCookieHeaders,
@@ -32,6 +33,14 @@ import { MarketingService } from '../marketing/marketing.service';
 import { CustomerNotificationQueryDto } from './dto/customer-notification-query.dto';
 import { CustomerInquiryQueryDto } from './dto/customer-inquiry-query.dto';
 import type { CustomerRequest } from '../../common/security/authenticated-principal';
+import { CustomerAvatarService } from './customer-avatar.service';
+import { CustomerProfileService } from './customer-profile.service';
+import {
+  ChangeCustomerPasswordDto,
+  ConfirmCustomerContactChangeDto,
+  StartCustomerContactChangeDto,
+  UpdateCustomerNameDto,
+} from './dto/customer-profile.dto';
 
 // 交易域认证说明（P0 修复）：
 // JwtAuthGuard 已被注册为全局守卫（见 app.module.ts APP_GUARD），
@@ -48,6 +57,8 @@ export class CustomersController {
     private readonly customerNotifications: CustomerNotificationsService,
     private readonly refreshSessions: RefreshSessionService,
     private readonly marketingService: MarketingService,
+    private readonly customerProfile: CustomerProfileService,
+    private readonly customerAvatars: CustomerAvatarService,
   ) {}
 
   // 游客下单已关闭（DECISIONS D.7）：checkout 必须先 login/register，不再签发 access token
@@ -87,11 +98,12 @@ export class CustomersController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
   async login(@Req() request: Request, @Res({ passthrough: true }) response: Response, @Body() dto: CustomerLoginDto) {
-    const result = await this.customersService.login(dto);
+    const { sessionAuthVersion, ...result } = await this.customersService.login(dto);
     if (request.headers?.['x-session-mode'] === 'cookie') {
       const session = await this.refreshSessions.issueCustomer(
         result.customer.id,
         requestSessionMetadata(request),
+        sessionAuthVersion,
       );
       response.setHeader(
         'Set-Cookie',
@@ -204,14 +216,97 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard)
   @Get('me')
   getProfile(@Req() request: CustomerRequest) {
-    return this.customersService.getProfile(request.customer.id);
+    return this.customerProfile.getProfile(request.customer.id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me')
-  updateProfile(@Req() request: CustomerRequest, @Body() dto: UpdateCustomerProfileDto) {
-    return this.customersService.updateProfile(request.customer.id, dto);
+  updateProfile(@Req() request: CustomerRequest, @Body() dto: UpdateCustomerNameDto) {
+    return this.customerProfile.updateName(request.customer.id, dto.name);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('me/security/sms-code')
+  requestProfileSecuritySms(@Req() request: CustomerRequest) {
+    return this.customerProfile.requestCurrentPhoneCode(request.customer.id);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Put('me/password')
+  async changePassword(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Body() dto: ChangeCustomerPasswordDto,
+  ) {
+    const result = await this.customerProfile.changePassword(
+      request.customer.id,
+      dto,
+      requestSessionMetadata(request),
+    );
+    response.setHeader('Set-Cookie', buildClearSessionCookieHeaders('customer'));
+    return result;
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('me/contact-changes')
+  startContactChange(
+    @Req() request: CustomerRequest,
+    @Body() dto: StartCustomerContactChangeDto,
+  ) {
+    return this.customerProfile.startContactChange(request.customer.id, dto);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Put('me/contact-changes/:changeId')
+  async confirmContactChange(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Param('changeId') changeId: string,
+    @Body() dto: ConfirmCustomerContactChangeDto,
+  ) {
+    const result = await this.customerProfile.confirmContactChange(
+      request.customer.id,
+      changeId,
+      dto.verificationCode,
+      requestSessionMetadata(request),
+    );
+    response.setHeader('Set-Cookie', buildClearSessionCookieHeaders('customer'));
+    return result;
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  }))
+  @Put('me/avatar')
+  updateAvatar(
+    @Req() request: CustomerRequest,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.customerAvatars.replace(request.customer.id, file);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Get('me/avatar')
+  async getAvatar(
+    @Req() request: CustomerRequest,
+    @Res() response: Response,
+  ) {
+    const image = await this.customerAvatars.read(request.customer.id);
+    response.type('image/webp').set('Cache-Control', 'private, no-store').send(image);
   }
 
   @Public()

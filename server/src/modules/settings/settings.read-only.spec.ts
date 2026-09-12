@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, ServiceUnavailableException, ValidationPipe } from "@nestjs/common";
 import { SettingsController } from "./settings.controller";
 import { SettingsService } from "./settings.service";
+import { UpdateSettingsDto } from "./dto/update-settings.dto";
 
 test("读取缺失的 SiteSettings 返回安全默认值且不写数据库", async () => {
   let upsertCalls = 0;
@@ -158,4 +159,48 @@ test("公开设置响应公开品牌模式但不泄漏品牌签认编号", async
   assert.equal(result.brandPresentationMode, "text-only");
   assert.equal(result.logo, "");
   assert.equal("brandReviewReference" in result, false);
+});
+
+test("必要资料通过后公开设置可读取，未选择品牌模式安全使用网站名称", async () => {
+  const value = {
+    siteName: "海川珠宝",
+    canonicalBaseUrl: "https://example.invalid",
+    defaultLocale: "zh-CN",
+    publishedLocales: ["zh-CN"],
+    logo: "/uploads/legacy-logo.svg",
+  };
+  const service = new SettingsService({
+    siteSetting: { findUnique: async () => ({ value }) },
+  } as any);
+  assert.equal((await service.getPublicationReadiness()).ready, true);
+  const result = await service.getPublishedSettings();
+  assert.equal(result.siteName, value.siteName);
+  assert.equal(result.brandPresentationMode, "text-only");
+  assert.equal(result.logo, "");
+  assert.equal(value.logo, "/uploads/legacy-logo.svg");
+  assert.equal("brandPresentationMode" in value, false);
+});
+
+test("联系邮箱可清空保存，非空无效邮箱仍被写接口校验拒绝", async () => {
+  const pipe = new ValidationPipe({ whitelist: true, transform: true });
+  const metadata = { type: "body" as const, metatype: UpdateSettingsDto };
+  for (const contactEmail of ["", "   ", "service@example.invalid"]) {
+    const dto = await pipe.transform({ contactEmail }, metadata);
+    let saved: Record<string, unknown> | undefined;
+    const service = new SettingsService({
+      siteSetting: {
+        findUnique: async () => ({ value: { contactEmail: "previous@example.invalid" }, version: 1 }),
+        updateMany: async (args: { data: Record<string, unknown> }) => {
+          saved = args.data;
+          return { count: 1 };
+        },
+      },
+    } as any);
+    const result = await service.updateSettings(dto, 9);
+    assert.ok(saved);
+    assert.equal(result.contactEmail, contactEmail.trim());
+  }
+  for (const contactEmail of ["invalid", 42, {}, "x".repeat(101) + "@example.invalid"]) {
+    await assert.rejects(() => pipe.transform({ contactEmail }, metadata), BadRequestException);
+  }
 });

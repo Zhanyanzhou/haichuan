@@ -1,5 +1,4 @@
-import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode, type Ref } from "react";
-import { resolveContractAspectRatio } from "../config/blockContracts";
+import { Children, cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactElement, type ReactNode, type Ref } from "react";
 import {
   contentTemplateObjectHasCapability,
   findContentTemplateEditableObject,
@@ -353,6 +352,69 @@ function findModuleFrameElement(element: HTMLElement, root: HTMLElement) {
   return frameElement.parentElement === root ? frameElement : root;
 }
 
+function hasRepeatedPreviewCollectionRole(
+  contract: ContentTemplateContract,
+  viewport: "desktop" | "mobile",
+) {
+  const collectionRoles = new Set(
+    contract.roles
+      .filter((role) => role.kind === "collection" || role.kind === "business")
+      .map((role) => role.id),
+  );
+  const roleCounts = new Map<string, number>();
+  for (const zone of contract.defaultGeometryByViewport[viewport].zones) {
+    if (!collectionRoles.has(zone.roleId)) continue;
+    roleCounts.set(zone.roleId, (roleCounts.get(zone.roleId) ?? 0) + 1);
+  }
+  return [...roleCounts.values()].some((count) => count > 1);
+}
+
+function createContractFrameHeightSync(
+  root: HTMLElement,
+  contract: ContentTemplateContract,
+) {
+  let managed = false;
+  let lastWidth = -1;
+  let lastViewport: "desktop" | "mobile" | undefined;
+
+  const clear = () => {
+    if (!managed) return;
+    root.style.removeProperty("height");
+    root.style.removeProperty("min-height");
+    managed = false;
+    lastWidth = -1;
+    lastViewport = undefined;
+  };
+
+  const sync = (viewport: "desktop" | "mobile") => {
+    if (contract.heightModeByViewport[viewport] !== "content") {
+      clear();
+      return;
+    }
+    if (hasRepeatedPreviewCollectionRole(contract, viewport)) {
+      // 重复集合已经由真实 Renderer 的文档流撑开，不需要 preview 画框提供基线。
+      clear();
+      return;
+    }
+    const width = root.clientWidth;
+    const ratio = contract.defaultGeometryByViewport[viewport].frameAspectRatio;
+    if (width <= 0 || !Number.isFinite(ratio) || ratio <= 0) return;
+    if (lastViewport !== viewport || Math.abs(lastWidth - width) > 1) {
+      root.style.removeProperty("height");
+      root.style.removeProperty("min-height");
+    }
+    managed = true;
+    lastWidth = width;
+    lastViewport = viewport;
+    const baselineHeight = Math.ceil(width / ratio);
+    root.style.minHeight = `${baselineHeight}px`;
+    // 唯一 zone 的绝对定位需要确定的 containing block。
+    root.style.height = `${baselineHeight}px`;
+  };
+
+  return { clear, sync };
+}
+
 function visualNodeLayoutVar(
   nodeId: string,
   viewport: "desktop" | "mobile",
@@ -459,6 +521,8 @@ function createInstanceCss(
       : "";
     const desktopFrameAspect = frameAspectRule(desktopAspectRatio);
     const mobileFrameAspect = frameAspectRule(mobileAspectRatio);
+    const contractFrameSelector = `${root}>:where(section,div):not([data-content-role]):not([data-content-role-desktop]):not([data-content-role-mobile])`;
+    rules.push(`${contractFrameSelector}{box-sizing:border-box!important;position:relative!important;width:100%!important;max-width:none!important;margin-inline:0!important}`);
     // 画布比例属于合同根框架。若把比例写在恰好也是可编辑槽位的根
     // section 上（轮播、热区），该槽位再按百分比绝对定位时会形成
     // “父高度依赖自身高度”的循环并收缩为 0。
@@ -466,6 +530,13 @@ function createInstanceCss(
     if (mobileFrameAspect) rules.push(`@media (max-width:767px){${root}{${mobileFrameAspect}}}`);
     if (desktopFrameAspect || mobileFrameAspect) {
       rules.push(`${root}>:where(section,div):not([data-content-role]):not([data-content-role-desktop]):not([data-content-role-mobile]){height:100%!important;min-height:0!important;max-height:100%!important;overflow:hidden!important}`);
+    }
+    const contentFrameSelector = contractFrameSelector;
+    if (contract.heightModeByViewport.desktop === "content") {
+      rules.push(`@media (min-width:768px){${contentFrameSelector}{box-sizing:border-box!important;height:100%!important;min-height:0!important;max-height:none!important;position:relative!important}}`);
+    }
+    if (contract.heightModeByViewport.mobile === "content") {
+      rules.push(`@media (max-width:767px){${contentFrameSelector}{box-sizing:border-box!important;height:100%!important;min-height:0!important;max-height:none!important;position:relative!important}}`);
     }
     const customColors = isRecord(frame.customColors) ? frame.customColors : {};
     const colorPresets: Record<string, { background: string; text: string; accent: string }> = {
@@ -542,10 +613,10 @@ function createInstanceCss(
     const nodes = isRecord(overrides.nodes) ? overrides.nodes : {};
     for (const [nodeId, rawNode] of Object.entries(nodes)) {
       if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(nodeId) || !isRecord(rawNode)) continue;
+      const contractRole = contract.roles.find((role) => role.id === nodeId);
       const slotCapability = capabilities.slots?.find((slot) => slot.roleId === nodeId);
       const textCapability = capabilities.textRoles?.find((role) => role.roleId === nodeId);
       const editableObject = findContentTemplateEditableObject(contract, nodeId);
-      if (!editableObject || (!slotCapability && !textCapability)) continue;
       const hasCapability = (capability: Parameters<typeof contentTemplateObjectHasCapability>[1]) =>
         contentTemplateObjectHasCapability(editableObject, capability);
       const hasCapabilityOnViewport = (
@@ -558,8 +629,9 @@ function createInstanceCss(
         : `${root} :is([data-content-role="${nodeId}"],[data-content-role-desktop="${nodeId}"],[data-content-role-mobile="${nodeId}"],[data-editor-field~="${nodeId}"])`;
       // copy 等文字角色在部分 Renderer 中也是行动按钮的布局父容器。
       // “隐藏内容文字”应只隐藏合同声明的文字字段，不能连带吞掉独立 CTA。
-      const visibilitySelector = editableObject.kind === "text" && editableObject.contentFieldKeys.length > 0
-        ? `${root} :is(${editableObject.contentFieldKeys
+      const contentFieldKeys = editableObject?.contentFieldKeys ?? [];
+      const visibilitySelector = editableObject?.kind === "text" && contentFieldKeys.length > 0
+        ? `${root} :is(${contentFieldKeys
             .map((field) => `[data-editor-field~="${field}"]`)
             .join(",")})`
         : selector;
@@ -567,16 +639,7 @@ function createInstanceCss(
         rules.push(`${visibilitySelector}{display:none!important}`);
       }
       const rectByViewport = isRecord(rawNode.rectByViewport) ? rawNode.rectByViewport : {};
-      // 含行动入口的文案组保留原生默认构图；只有显式覆盖才启用新增几何能力。
-      const nativeCopyGroup = editableObject.kind === "text" && contract.roles.some((role) => role.kind === "action" && role.parentRole === editableObject.roleId);
-      const explicitRoot = isRecord(props.__instanceOverrides) ? props.__instanceOverrides : {};
-      const explicitNodes = isRecord(explicitRoot.nodes) ? explicitRoot.nodes : {};
-      const explicitNode = isRecord(explicitNodes[nodeId]) ? explicitNodes[nodeId] : {};
-      const explicitRects = isRecord(explicitNode.rectByViewport) ? explicitNode.rectByViewport : {};
-      const layoutRects = nativeCopyGroup ? {
-        desktop: explicitRects.desktop ? rectByViewport.desktop : undefined,
-        mobile: explicitRects.mobile ? rectByViewport.mobile : undefined,
-      } : rectByViewport;
+      const layoutRects = rectByViewport;
       const zIndexByViewport = isRecord(rawNode.zIndexByViewport)
         ? rawNode.zIndexByViewport
         : {};
@@ -586,10 +649,10 @@ function createInstanceCss(
           ? numeric
           : undefined;
       };
-      const desktopZIndex = hasCapabilityOnViewport("layer", "desktop")
+      const desktopZIndex = (contractRole || hasCapabilityOnViewport("layer", "desktop"))
         ? safeZIndex(zIndexByViewport.desktop)
         : undefined;
-      const mobileZIndex = hasCapabilityOnViewport("layer", "mobile")
+      const mobileZIndex = (contractRole || hasCapabilityOnViewport("layer", "mobile"))
         ? safeZIndex(zIndexByViewport.mobile)
         : undefined;
       const rectRule = (
@@ -603,47 +666,24 @@ function createInstanceCss(
         const width = Number(rawRect.width);
         const height = Number(rawRect.height);
         if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.0001 || y + height > 1.0001) return "";
-        return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;z-index:${zIndex ?? 2}!important`;
+        return `position:absolute!important;box-sizing:border-box!important;left:var(${visualNodeLayoutVar(nodeId, viewport, "left")},${x * 100}%)!important;top:var(${visualNodeLayoutVar(nodeId, viewport, "top")},${y * 100}%)!important;width:var(${visualNodeLayoutVar(nodeId, viewport, "width")},${width * 100}%)!important;height:var(${visualNodeLayoutVar(nodeId, viewport, "height")},${height * 100}%)!important;margin:0!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;transform:none!important;overflow:hidden!important;z-index:${zIndex ?? 2}!important`;
       };
-      const desktopRect = hasCapabilityOnViewport("layout", "desktop")
+      const desktopRect = (contractRole || hasCapabilityOnViewport("layout", "desktop"))
         ? rectRule(layoutRects.desktop, desktopZIndex, "desktop")
         : "";
-      const mobileRect = hasCapabilityOnViewport("layout", "mobile")
+      const mobileRect = (contractRole || hasCapabilityOnViewport("layout", "mobile"))
         ? rectRule(layoutRects.mobile, mobileZIndex, "mobile")
         : "";
       if (desktopRect || mobileRect) rules.push(`${root}>:where(section,div){position:relative}`);
       if (desktopRect) rules.push(`@media (min-width:768px){${layoutSelector}{${desktopRect}}}`);
       if (mobileRect) rules.push(`@media (max-width:767px){${layoutSelector}{${mobileRect}}}`);
-      if (nativeCopyGroup && contract.key === "video") {
-        const mediaNode = isRecord(nodes.coverImage) ? nodes.coverImage : {};
-        const mediaRects = isRecord(mediaNode.rectByViewport) ? mediaNode.rectByViewport : {};
-        const videoBackground = typeof props.bgColor === "string" && /^#[0-9a-f]{6}$/i.test(props.bgColor) ? props.bgColor : "#FFFFFF";
-        const visibleBackground = background ?? videoBackground;
-        const channels = [1, 3, 5].map((offset) => {
-          const channel = parseInt(visibleBackground.slice(offset, offset + 2), 16) / 255;
-          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-        });
-        const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
-        const readableText = luminance > 0.2 ? "#181A1B" : "#FFFFFF";
-        for (const viewport of ["desktop", "mobile"] as const) {
-          const copy = layoutRects[viewport];
-          const media = mediaRects[viewport];
-          if (!isRecord(copy) || !isRecord(media)) continue;
-          const separated = Number(copy.x) + Number(copy.width) <= Number(media.x) + 0.001
-            || Number(media.x) + Number(media.width) <= Number(copy.x) + 0.001
-            || Number(copy.y) + Number(copy.height) <= Number(media.y) + 0.001
-            || Number(media.y) + Number(media.height) <= Number(copy.y) + 0.001;
-          const query = viewport === "desktop" ? "min-width:768px" : "max-width:767px";
-          const naturalRatio = resolveContractAspectRatio(contract.key, "coverImage", typeof props.aspectRatio === "string" ? props.aspectRatio : undefined, viewport);
-          rules.push(`@media (${query}){${root} .hc-video-frame{height:auto;aspect-ratio:${naturalRatio};background:var(--hc-instance-background,${videoBackground})!important}${layoutSelector}{padding:0!important;inset:auto;text-shadow:none}${separated ? `${layoutSelector},${layoutSelector} :is(h2,p,a,span){color:var(--hc-instance-text,${readableText})!important}` : ""}}`);
-        }
-      }
       if (!desktopRect && desktopZIndex !== undefined) {
         rules.push(`@media (min-width:768px){${layoutSelector}{position:relative;z-index:${desktopZIndex}!important}}`);
       }
       if (!mobileRect && mobileZIndex !== undefined) {
         rules.push(`@media (max-width:767px){${layoutSelector}{position:relative;z-index:${mobileZIndex}!important}}`);
       }
+      if (!editableObject || (!slotCapability && !textCapability)) continue;
       const ratio = Number(rawNode.ratio);
       if (hasCapability("ratio") && Number.isFinite(ratio) && ratio >= 0.25 && ratio <= 4) {
         rules.push(`${selector}{aspect-ratio:${ratio};overflow:hidden}`);
@@ -852,12 +892,6 @@ function createInstanceCss(
       if (["left", "center", "right"].includes(placement)) {
         declarations.push(`margin-inline:${placement === "center" ? "auto" : placement === "right" ? "auto 0" : "0 auto"}`);
       }
-      if (placement === "overlay" && contract.key === "fullBleed") {
-        rules.push(`${root} > section{position:relative}${root} .hc-phase1-full-bleed__caption{position:absolute;z-index:2;inset:auto 0 0}`);
-      }
-      if (placement === "overlay" && contract.key === "limitedEvent") {
-        rules.push(`${root} .hc-limited-event{position:relative}${selector}{position:absolute;z-index:2;inset:auto clamp(16px,3vw,40px) clamp(16px,3vw,40px)!important}`);
-      }
     }
     if (declarations.length) rules.push(`${selector}{${declarations.join(";")}}`);
     if (capability.maxLines) {
@@ -884,36 +918,97 @@ function mergeInstanceValue(
 
 function createDefaultGeometryOverrides(contract: ContentTemplateContract): InstanceValue {
   const nodes: InstanceValue = {};
-  for (const editableObject of contract.editorCapabilities.editableObjects) {
-    for (const nodeId of editableObject.nodeIds ?? [editableObject.roleId]) {
-      const rectByViewport: InstanceValue = {};
-      const zIndexByViewport: InstanceValue = {};
-      for (const viewport of ["desktop", "mobile"] as const) {
-        const geometry = contract.defaultGeometryByViewport[viewport];
-        const matchingZones = geometry.zones.filter((candidate) => candidate.nodeId === nodeId);
-        // 同一 nodeId 的多个区域只用于缩略图表达重复卡片/列表项，不能
-        // 被误当成一个真实 DOM 容器的默认绝对定位，否则整个列表会收缩
-        // 到第一张卡片并与标题重叠。没有唯一映射时以真实 Renderer 布局为准。
-        const zone = matchingZones.length === 1 ? matchingZones[0] : undefined;
-        if (!zone) continue;
-        rectByViewport[viewport] = zone.rect;
-        zIndexByViewport[viewport] = zone.overlay ? 4 : 2;
-      }
-      if (Object.keys(rectByViewport).length > 0) {
-        nodes[nodeId] = { rectByViewport, zIndexByViewport };
-      }
+  for (const role of contract.roles) {
+    const rectByViewport: InstanceValue = {};
+    const zIndexByViewport: InstanceValue = {};
+    for (const viewport of ["desktop", "mobile"] as const) {
+      // 一旦同一角色由多个 preview zone 表达，该视口就是集合式自然流。
+      // 不混用“标题绝对定位 + 集合自然流”，否则集合会从标题下方失去占位。
+      if (hasRepeatedPreviewCollectionRole(contract, viewport)) continue;
+      const matchingZones = contract.defaultGeometryByViewport[viewport].zones
+        .filter((candidate) => candidate.roleId === role.id);
+      // 重复 zone 表示集合里的多张预览卡片，不是集合容器自身的绝对定位框。
+      // 只有角色与单一 zone 一一对应时，才把合同默认几何下沉为实例 rect。
+      if (matchingZones.length !== 1) continue;
+      const [matchingZone] = matchingZones;
+      rectByViewport[viewport] = matchingZone.rect;
+      zIndexByViewport[viewport] = matchingZone.overlay ? 4 : 2;
+    }
+    if (Object.keys(rectByViewport).length > 0) {
+      nodes[role.id] = { rectByViewport, zIndexByViewport };
+    }
+  }
+  const aspectRatioByViewport: InstanceValue = {};
+  for (const viewport of ["desktop", "mobile"] as const) {
+    if (contract.heightModeByViewport[viewport] === "ratio") {
+      aspectRatioByViewport[viewport] = contract.defaultGeometryByViewport[viewport].frameAspectRatio;
     }
   }
   return {
     version: 2,
     frame: {
-      aspectRatioByViewport: {
-        desktop: contract.defaultGeometryByViewport.desktop.frameAspectRatio,
-        mobile: contract.defaultGeometryByViewport.mobile.frameAspectRatio,
-      },
+      aspectRatioByViewport,
     },
     nodes,
   };
+}
+
+function resolveEffectiveInstanceOverrides(
+  contract: ContentTemplateContract,
+  props: Record<string, unknown> | undefined,
+) {
+  const explicit: InstanceValue = resolveInstanceOverrides(contract, props) ?? {};
+  const merged = mergeInstanceValue(createDefaultGeometryOverrides(contract), explicit);
+  const raw = isRecord(props?.__instanceOverrides) && props.__instanceOverrides.version === 2
+    ? props.__instanceOverrides
+    : undefined;
+  if (!raw) return merged;
+
+  // 显式传入但被合同清洗拒绝的设备值必须保持 fail-closed；否则默认几何
+  // 会在清洗之后悄悄把非法值“复活”为一个看似有效的定位。
+  const rawNodes = isRecord(raw.nodes) ? raw.nodes : {};
+  const explicitNodes = isRecord(explicit.nodes) ? explicit.nodes : {};
+  const mergedNodes = isRecord(merged.nodes) ? merged.nodes : {};
+  for (const [nodeId, rawNodeValue] of Object.entries(rawNodes)) {
+    if (!isRecord(rawNodeValue)) continue;
+    const explicitNode = isRecord(explicitNodes[nodeId]) ? explicitNodes[nodeId] : {};
+    const mergedNode = isRecord(mergedNodes[nodeId]) ? mergedNodes[nodeId] : undefined;
+    if (!mergedNode) continue;
+    for (const field of ["rectByViewport", "zIndexByViewport"] as const) {
+      const rawByViewport = isRecord(rawNodeValue[field]) ? rawNodeValue[field] : undefined;
+      if (!rawByViewport) continue;
+      const explicitByViewport = isRecord(explicitNode[field]) ? explicitNode[field] : {};
+      const mergedByViewport = isRecord(mergedNode[field]) ? mergedNode[field] : undefined;
+      if (!mergedByViewport) continue;
+      for (const viewport of ["desktop", "mobile"] as const) {
+        const wasSupplied = Object.prototype.hasOwnProperty.call(rawByViewport, viewport);
+        const wasAccepted = Object.prototype.hasOwnProperty.call(explicitByViewport, viewport);
+        if (wasSupplied && !wasAccepted) {
+          delete mergedByViewport[viewport];
+          if (field === "rectByViewport") {
+            const mergedLayers = isRecord(mergedNode.zIndexByViewport)
+              ? mergedNode.zIndexByViewport
+              : undefined;
+            if (mergedLayers) delete mergedLayers[viewport];
+          }
+        }
+      }
+    }
+  }
+  const rawFrame = isRecord(raw.frame) ? raw.frame : {};
+  const rawRatios = isRecord(rawFrame.aspectRatioByViewport) ? rawFrame.aspectRatioByViewport : undefined;
+  const explicitFrame = isRecord(explicit.frame) ? explicit.frame : {};
+  const explicitRatios = isRecord(explicitFrame.aspectRatioByViewport) ? explicitFrame.aspectRatioByViewport : {};
+  const mergedFrame = isRecord(merged.frame) ? merged.frame : {};
+  const mergedRatios = isRecord(mergedFrame.aspectRatioByViewport) ? mergedFrame.aspectRatioByViewport : undefined;
+  if (rawRatios && mergedRatios) {
+    for (const viewport of ["desktop", "mobile"] as const) {
+      const wasSupplied = Object.prototype.hasOwnProperty.call(rawRatios, viewport);
+      const wasAccepted = Object.prototype.hasOwnProperty.call(explicitRatios, viewport);
+      if (wasSupplied && !wasAccepted) delete mergedRatios[viewport];
+    }
+  }
+  return merged;
 }
 
 function resolveInstanceOverrides(
@@ -923,27 +1018,11 @@ function resolveInstanceOverrides(
   const source = isRecord(props?.__instanceOverrides)
     ? props.__instanceOverrides
     : undefined;
-  const legacyComposition = contract.key === "featuredProduct"
-    ? props?.layout === "imageRight"
-      ? "image-right"
-      : props?.layout === "imageLeft"
-        ? "image-left"
-        : undefined
-    : undefined;
   const normalizedSource = source?.version === 1
     ? toVisualOverridesV2(source)
     : source;
-  const normalizedFrame = isRecord(normalizedSource?.frame)
-    ? normalizedSource.frame
-    : {};
-  const withLegacyComposition = legacyComposition && typeof normalizedFrame.compositionPreset !== "string"
-    ? {
-        ...(normalizedSource ?? { version: 2 }),
-        frame: { ...normalizedFrame, compositionPreset: legacyComposition },
-      }
-    : normalizedSource;
-  const sanitized = withLegacyComposition?.version === 2
-    ? sanitizeContentTemplateLayoutData(contract.moduleType, withLegacyComposition)
+  const sanitized = normalizedSource?.version === 2
+    ? sanitizeContentTemplateLayoutData(contract.moduleType, normalizedSource)
     : undefined;
   return isRecord(sanitized) ? sanitized : undefined;
 }
@@ -992,6 +1071,7 @@ interface ContentTemplateFrameViewProps extends ContentTemplateContractFrameProp
   instanceLayout: InstanceValue;
   instanceFrame: InstanceValue;
   childEditMode?: boolean;
+  ensureContractActions?: boolean;
   rootRef?: Ref<HTMLDivElement>;
   editor?: ContractFrameEditorView;
 }
@@ -1003,6 +1083,7 @@ interface ContentTemplateFrameViewProps extends ContentTemplateContractFrameProp
 function ContentTemplateFrameView({
   moduleType,
   mode,
+  props,
   children,
   contract,
   layout,
@@ -1011,19 +1092,69 @@ function ContentTemplateFrameView({
   instanceLayout,
   instanceFrame,
   childEditMode,
+  ensureContractActions,
   rootRef,
   editor,
 }: ContentTemplateFrameViewProps) {
   const style: ContractFrameStyle = {
     ...templateLayoutVars(layout),
+    width: "100%",
+    minWidth: 0,
+    position: "relative",
+    boxSizing: "border-box",
     "--hc-contract-container":
       layout.width === "full" ? "100%" : layout.width === "wide" ? "1520px" : layout.width === "editorial" ? "1040px" : "1280px",
   };
-  const renderedChild = isValidElement(children)
-    ? cloneElement(children as ReactElement<{ editMode?: boolean }>, {
-        ...(childEditMode === undefined ? {} : { editMode: childEditMode }),
-      })
-    : children;
+  const renderContractChild = (node: ReactNode): ReactNode => {
+    if (!isValidElement(node)) return node;
+    const child = node as ReactElement<{
+      children?: ReactNode;
+      editMode?: boolean;
+      module?: Record<string, unknown>;
+    }>;
+    const childProps: {
+      children?: ReactNode;
+      editMode?: boolean;
+      module?: Record<string, unknown>;
+    } = {};
+    const flatProps = child.props as Record<string, unknown>;
+    if (childEditMode !== undefined && (child.props.module || "editMode" in flatProps)) {
+      childProps.editMode = childEditMode;
+    }
+    if (child.props.children !== undefined) {
+      childProps.children = Children.map(child.props.children, renderContractChild);
+    }
+    if (ensureContractActions && (
+      contract.order.desktop.includes("action") || contract.order.mobile.includes("action")
+    )) {
+      const module = isRecord(child.props.module) ? child.props.module : undefined;
+      const content = isRecord(module?.content) ? module.content : undefined;
+      if (module && content) {
+        const hasTarget = [content.linkUrl, content.productId, content.productCode, content.categorySlug]
+          .some((value) => typeof value === "string" && value.trim().length > 0);
+        childProps.module = {
+          ...module,
+          content: {
+            ...content,
+            ...(hasTarget ? {} : { targetType: "link", linkUrl: "/contact" }),
+            ...("buttonText" in content
+              ? { buttonText: typeof content.buttonText === "string" && content.buttonText.trim() ? content.buttonText : "查看详情" }
+              : { actionText: typeof content.actionText === "string" && content.actionText.trim() ? content.actionText : "查看详情" }),
+          },
+        };
+      } else if ("buttonText" in flatProps || "actionText" in flatProps || "targetType" in flatProps) {
+        Object.assign(childProps as Record<string, unknown>, {
+          targetType: "link",
+          linkUrl: "/contact",
+          ...("buttonText" in flatProps
+            ? { buttonText: typeof flatProps.buttonText === "string" && flatProps.buttonText.trim() ? flatProps.buttonText : "查看详情" }
+            : { actionText: typeof flatProps.actionText === "string" && flatProps.actionText.trim() ? flatProps.actionText : "查看详情" }),
+        });
+      }
+    }
+    return cloneElement(child, childProps);
+  };
+  const renderedChild = renderContractChild(children);
 
   return (
     <div
@@ -1090,6 +1221,7 @@ function ContentTemplateReadOnlyContractFrame({
     if (!root || !contract || !layout) return;
     const ownerWindow = root.ownerDocument.defaultView;
     const appliedVariables = new Set<string>();
+    const frameHeight = createContractFrameHeightSync(root, contract);
     let resizeFrame = 0;
     const resolveViewport = () => props?.__editorViewport === "mobile"
       ? "mobile" as const
@@ -1098,11 +1230,12 @@ function ContentTemplateReadOnlyContractFrame({
         : ownerWindow && ownerWindow.innerWidth <= 767
           ? "mobile" as const
           : "desktop" as const;
-    const nodeIds = new Set(
-      contract.editorCapabilities.editableObjects.flatMap((object) =>
+    const nodeIds = new Set([
+      ...contract.roles.map((role) => role.id),
+      ...contract.editorCapabilities.editableObjects.flatMap((object) =>
         object.nodeIds ?? [object.roleId],
       ),
-    );
+    ]);
     const clearVariables = () => {
       appliedVariables.forEach((name) => root.style.removeProperty(name));
       appliedVariables.clear();
@@ -1110,6 +1243,7 @@ function ContentTemplateReadOnlyContractFrame({
     const syncLayoutVariables = () => {
       clearVariables();
       const viewport = resolveViewport();
+      frameHeight.sync(viewport);
       root.style.setProperty(
         "--hc-layout-grid-rows",
         String(contract.defaultGeometryByViewport[viewport].rows),
@@ -1167,6 +1301,7 @@ function ContentTemplateReadOnlyContractFrame({
           },
         );
       });
+      frameHeight.sync(viewport);
     };
 
     syncLayoutVariables();
@@ -1179,10 +1314,19 @@ function ContentTemplateReadOnlyContractFrame({
         })
       : undefined;
     observer?.observe(root);
+    const mutationObserver = ownerWindow
+      ? new ownerWindow.MutationObserver(() => {
+          ownerWindow.cancelAnimationFrame(resizeFrame);
+          resizeFrame = ownerWindow.requestAnimationFrame(syncLayoutVariables);
+        })
+      : undefined;
+    mutationObserver?.observe(root, { childList: true, subtree: true });
     return () => {
       observer?.disconnect();
+      mutationObserver?.disconnect();
       ownerWindow?.cancelAnimationFrame(resizeFrame);
       clearVariables();
+      frameHeight.clear();
     };
   }, [contract, layout, mode, moduleType, props]);
 
@@ -1190,7 +1334,8 @@ function ContentTemplateReadOnlyContractFrame({
 
   const scopeId = `hc-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const previewProps = props ?? {};
-  const instanceOverrides = resolveInstanceOverrides(contract, previewProps);
+  const explicitInstanceOverrides = resolveInstanceOverrides(contract, previewProps);
+  const instanceOverrides = resolveEffectiveInstanceOverrides(contract, previewProps);
   const instanceCss = createInstanceCss(
     contract,
     instanceOverrides,
@@ -1198,8 +1343,8 @@ function ContentTemplateReadOnlyContractFrame({
     scopeId,
     renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW ? "editor" : mode,
   );
-  const instanceOverrideRecord: InstanceValue = isRecord(instanceOverrides)
-    ? instanceOverrides as InstanceValue
+  const instanceOverrideRecord: InstanceValue = isRecord(explicitInstanceOverrides)
+    ? explicitInstanceOverrides as InstanceValue
     : {};
   const instanceLayout = isRecord(instanceOverrideRecord.layout)
     ? instanceOverrideRecord.layout
@@ -1220,6 +1365,7 @@ function ContentTemplateReadOnlyContractFrame({
       instanceLayout={instanceLayout}
       instanceFrame={instanceFrame}
       childEditMode={renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW ? false : undefined}
+      ensureContractActions={mode === "editor" || renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW}
       rootRef={rootRef}
     >
       {children}
@@ -1636,16 +1782,18 @@ function ContentTemplateEditorContractFrame({
     if (!root || !contract || !layout) return;
     const ownerWindow = root.ownerDocument.defaultView;
     const appliedVariables = new Set<string>();
+    const frameHeight = createContractFrameHeightSync(root, contract);
     let geometryFrame = 0;
     const previewOverrides = gesturePreview?.overrides ?? sharedDesignPreview;
     const visualProps = previewOverrides
       ? { ...props, __instanceOverrides: previewOverrides }
       : props;
-    const nodeIds = new Set(
-      contract.editorCapabilities.editableObjects.flatMap((object) =>
+    const nodeIds = new Set([
+      ...contract.roles.map((role) => role.id),
+      ...contract.editorCapabilities.editableObjects.flatMap((object) =>
         object.nodeIds ?? [object.roleId],
       ),
-    );
+    ]);
 
     const clearVariables = () => {
       appliedVariables.forEach((name) => root.style.removeProperty(name));
@@ -1705,6 +1853,7 @@ function ContentTemplateEditorContractFrame({
     const syncLayoutVariables = () => {
       clearVariables();
       const viewport = resolveEditorViewport(ownerWindow);
+      frameHeight.sync(viewport);
       root.style.setProperty(
         "--hc-layout-grid-rows",
         String(contract.defaultGeometryByViewport[viewport].rows),
@@ -1769,6 +1918,7 @@ function ContentTemplateEditorContractFrame({
           },
         );
       });
+      frameHeight.sync(viewport);
       scheduleGeometryReport();
     };
 
@@ -1784,6 +1934,7 @@ function ContentTemplateEditorContractFrame({
       ownerWindow?.removeEventListener("resize", syncLayoutVariables);
       ownerWindow?.cancelAnimationFrame(geometryFrame);
       clearVariables();
+      frameHeight.clear();
     };
   }, [blockId, contract, gesturePreview, internalEditorEnabled, layout, mode, moduleType, props, reportCanvasGeometry, resolveEditorViewport, sharedDesignPreview]);
 
@@ -1793,7 +1944,8 @@ function ContentTemplateEditorContractFrame({
   const previewProps = previewOverrides
     ? { ...(props ?? {}), __instanceOverrides: previewOverrides }
     : (props ?? {});
-  const instanceOverrides = resolveInstanceOverrides(contract, previewProps);
+  const explicitInstanceOverrides = resolveInstanceOverrides(contract, previewProps);
+  const instanceOverrides = resolveEffectiveInstanceOverrides(contract, previewProps);
   const instanceCss = createInstanceCss(
     contract,
     instanceOverrides,
@@ -1801,8 +1953,8 @@ function ContentTemplateEditorContractFrame({
     scopeId,
     mode,
   );
-  const instanceOverrideRecord: InstanceValue = isRecord(instanceOverrides)
-    ? instanceOverrides as InstanceValue
+  const instanceOverrideRecord: InstanceValue = isRecord(explicitInstanceOverrides)
+    ? explicitInstanceOverrides as InstanceValue
     : {};
   const instanceLayout = isRecord(instanceOverrideRecord.layout)
     ? instanceOverrideRecord.layout
@@ -2578,6 +2730,7 @@ function ContentTemplateEditorContractFrame({
       instanceLayout={instanceLayout}
       instanceFrame={instanceFrame}
       childEditMode
+      ensureContractActions
       editor={{
         rootRef,
         blockId,

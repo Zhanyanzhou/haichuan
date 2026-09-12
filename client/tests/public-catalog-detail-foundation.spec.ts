@@ -310,7 +310,7 @@ for (const viewport of [
     await expectWriteContract(writes);
   });
 
-  test(`ProductDetail ${viewport.name} 7/5 或单列顺序、唯一行动与空事实省略`, async ({ page }) => {
+  test(`ProductDetail ${viewport.name} 7/5 或单列顺序、唯一行动与空事实省略`, async ({ page, baseURL }) => {
     const product = publicProduct(11, "DIRECT_PURCHASE", {
       available: true,
       goldWeight: 0,
@@ -328,7 +328,8 @@ for (const viewport of [
     const writes = await mockCatalogDetail(page, { products: [product], signedIn: false });
     await page.route("**/api/products/public/11/media/1011**", (route) => route.fulfill({
       status: 302,
-      headers: { location: "/images/system/product-placeholder.svg" },
+      // API 使用不可达隔离源时，相对 Location 会继续落到 API 源；显式回到当前测试前端。
+      headers: { location: new URL("/images/system/product-placeholder.svg", baseURL!).href },
     }));
     await page.goto("/products/11");
 

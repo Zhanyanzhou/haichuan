@@ -250,7 +250,7 @@ export type WechatCallbackResult =
 export type WechatCallbackOutcome = {
   result: WechatCallbackResult;
   parentOrigin: string | null;
-  session?: { accessToken: string; customerId: number };
+  session?: { accessToken: string; customerId: number; authVersion: number };
 };
 
 @Injectable()
@@ -273,9 +273,9 @@ export class WechatAuthService {
     }
   }
 
-  private issueAccessToken(customerId: number) {
+  private issueAccessToken(customerId: number, authVersion = 1) {
     return this.jwtService.sign(
-      { sub: customerId, type: "customer", tokenUse: "access" },
+      { sub: customerId, type: "customer", tokenUse: "access", authVersion },
       { expiresIn: "15m" },
     );
   }
@@ -285,9 +285,10 @@ export class WechatAuthService {
     phone: string;
     name: string | null;
     email: string | null;
+    authVersion?: number;
   }) {
     return {
-      accessToken: this.issueAccessToken(customer.id),
+      accessToken: this.issueAccessToken(customer.id, customer.authVersion ?? 1),
       customer: {
         id: customer.id,
         phone: customer.phone,
@@ -404,7 +405,11 @@ export class WechatAuthService {
         return {
           result: { kind: "success", customer: account.customer },
           parentOrigin,
-          session: { accessToken: account.accessToken, customerId: existing.id },
+          session: {
+            accessToken: account.accessToken,
+            customerId: existing.id,
+            authVersion: existing.authVersion ?? 1,
+          },
         };
       }
       const bindToken = this.jwtService.sign(
@@ -480,6 +485,7 @@ export class WechatAuthService {
       phone: string;
       name: string | null;
       email: string | null;
+      authVersion?: number;
     };
     if (existing) {
       if (existing.status === "DISABLED") {
@@ -526,6 +532,7 @@ export class WechatAuthService {
           phone: existing.phone,
           name: existing.name,
           email: existing.email,
+          authVersion: existing.authVersion,
         };
       } else {
         customer = await this.prisma.customer.update({
@@ -572,7 +579,10 @@ export class WechatAuthService {
         throw error;
       }
     }
-    return this.accountResponse(customer);
+    return {
+      ...this.accountResponse(customer),
+      sessionAuthVersion: customer.authVersion ?? 1,
+    };
   }
 
   /** 客户本人解除微信绑定；重复调用保持成功且不影响其它账户。 */

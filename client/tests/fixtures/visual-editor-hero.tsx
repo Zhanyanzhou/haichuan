@@ -15,7 +15,7 @@ import "../../src/styles/globals.css";
 import "../../src/pages/admin/HomepageConfig/editor.css";
 
 const moduleType = "首屏主视觉";
-const blockId = "hero-visual-test";
+const blockId = "template-editor:hero-visual-test";
 
 function VisualEditorHeroFixture() {
   const hiddenText = new URLSearchParams(window.location.search).get("hiddenText") === "1";

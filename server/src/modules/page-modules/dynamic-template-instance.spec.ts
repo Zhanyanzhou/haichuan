@@ -73,13 +73,54 @@ function addComplexSlot(
   };
 }
 
+function dynamicTemplatePage(props: unknown) {
+  return {
+    content: [{ type: DYNAMIC_TEMPLATE_BLOCK_TYPE, props }],
+    zones: {},
+  };
+}
+
+function createDraftSaveHarness(
+  definition: TemplateDefinitionV2,
+  versionRows: Array<Record<string, unknown>> = [{
+    version: 3,
+    schemaVersion: definition.schemaVersion,
+    definition,
+    definitionChecksum: calculateDynamicTemplateDefinitionChecksum(definition),
+    template: { templateId: definition.templateId },
+  }],
+) {
+  const writes = { create: 0, updateMany: 0, transaction: 0 };
+  const db = {
+    dynamicTemplateVersion: {
+      findMany: async () => versionRows,
+    },
+    pageDocument: {
+      findUnique: async () => null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        writes.create += 1;
+        return data;
+      },
+      updateMany: async () => {
+        writes.updateMany += 1;
+        return { count: 1 };
+      },
+    },
+    $transaction: async () => {
+      writes.transaction += 1;
+      throw new Error("草稿保存不应开启事务");
+    },
+  } as unknown as PrismaService;
+  return { service: new PageModulesService(db), writes };
+}
+
 test("动态页面实例只按 templateId + templateVersion 收集一次精确版本引用", () => {
   const referenceBlock = {
     type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
     props: instanceProps(),
   };
   const references = collectDynamicTemplateInstanceReferences({
-    content: [referenceBlock, referenceBlock, { type: "文字横幅", props: {} }],
+    content: [referenceBlock, referenceBlock, { type: "网站全局设置", props: {} }],
     zones: {
       secondary: [{
         type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
@@ -120,6 +161,34 @@ test("必填槽位必须由页面实例提供，母模板正式默认内容只�
   assert.equal(populated.issues.length, 0);
 });
 
+test("可选图片兼容保留 alt 的旧清空值，必填图片仍明确阻断", () => {
+  const definition = definitionFixture();
+  addComplexSlot(definition, "image", "ImageSlot", "image");
+  definition.slots.slot_image.label = "主图";
+  const contentBySlotId = {
+    slot_heading: "页面实例已填写标题",
+    slot_image: { src: "", alt: "旧数据仍保留的说明" },
+  };
+
+  const optional = validateDynamicTemplateInstance(
+    instanceProps({ contentBySlotId }),
+    definition,
+  );
+  assert.deepEqual(optional.issues, []);
+  assert.deepEqual(optional.assets, []);
+
+  definition.slots.slot_image.required = true;
+  definition.slots.slot_image.hideable = false;
+  const required = validateDynamicTemplateInstance(
+    instanceProps({ contentBySlotId }),
+    definition,
+  );
+  assert.ok(required.issues.some((issue) => (
+    issue.field === "slot_image" && issue.message.includes("主图为必填内容")
+  )));
+  assert.equal(required.issues.some((issue) => issue.message.includes("图片地址无效")), false);
+});
+
 test("页面实例稳定身份与整体显隐状态遵循 V2 合同", () => {
   const result = validateDynamicTemplateInstance(instanceProps({
     instanceId: "包含空格的实例",
@@ -133,13 +202,23 @@ test("页面实例稳定身份与整体显隐状态遵循 V2 合同", () => {
   assert.equal(messages.filter((message) => message.includes("隐藏槽位必须使用合法 slotId")).length, 2);
 });
 
+test("页面实例写入身份不接受兼容读取使用的字符串版本或首尾空格", () => {
+  const result = validateDynamicTemplateInstance(instanceProps({
+    templateId: " tpl_server_validation ",
+    templateVersion: "3",
+  }), definitionFixture());
+
+  assert.ok(result.issues.some((issue) => issue.pathSuffix === ".templateId"));
+  assert.ok(result.issues.some((issue) => issue.pathSuffix === ".templateVersion"));
+});
+
 test("动态页面实例拒绝未知槽位、超长文字、非法隐藏和结构覆盖", () => {
   const result = validateDynamicTemplateInstance(instanceProps({
     contentBySlotId: {
       slot_heading: "超".repeat(61),
       slot_unknown: "不应写入",
     },
-    hiddenSlotIds: ["slot_heading", "slot_heading"],
+    hiddenSlotIds: ["slot_unknown", "slot_unknown"],
     overrides: { layout: "page-owned" },
   }), definitionFixture());
   const messages = result.issues.map((issue) => issue.message);
@@ -201,10 +280,11 @@ test("页面实例构图覆盖只允许母模板授权节点与安全范围", ()
   assert.ok(messages.some((message) => message.includes("上下间距")));
 });
 
-test("页面保存按精确模板版本允许授权几何并在写入前拒绝越界值", async () => {
+test("页面草稿允许缺少 required 内容，并按精确模板版本保存授权实例", async () => {
   const definition = definitionFixture();
-  let pageDocumentWrites = 0;
+  definition.slots.slot_heading.required = true;
   const changedProps = instanceProps({
+    contentBySlotId: {},
     layoutOverridesByNodeId: {
       node_heading: {
         desktop: {
@@ -218,62 +298,138 @@ test("页面保存按精确模板版本允许授权几何并在写入前拒绝�
       },
     },
   });
-  const changed = validateDynamicTemplateInstance(changedProps, definition);
-  assert.equal(changed.issues.length, 0);
+  const validation = validateDynamicTemplateInstance(changedProps, definition);
+  assert.ok(validation.issues.some((issue) => issue.message.includes("必填内容")));
 
-  const outOfBoundsProps = instanceProps({
-    layoutOverridesByNodeId: {
-      node_heading: { desktop: { offsetXPercent: 99, fontSizePx: 400 } },
-    },
+  const { service, writes } = createDraftSaveHarness(definition);
+  await assert.doesNotReject(
+    service.savePageDocument("home", dynamicTemplatePage(changedProps), {}),
+  );
+  assert.deepEqual(writes, { create: 1, updateMany: 0, transaction: 0 });
+});
+
+test("页面草稿实例授权问题全部在任何数据库写入前失败关闭", async (t) => {
+  const assertDraftRejected = async (
+    definition: TemplateDefinitionV2,
+    props: unknown,
+    expected: RegExp,
+    versionRows?: Array<Record<string, unknown>>,
+  ) => {
+    const { service, writes } = createDraftSaveHarness(definition, versionRows);
+    await assert.rejects(
+      service.savePageDocument("home", dynamicTemplatePage(props), {}),
+      expected,
+    );
+    assert.deepEqual(writes, { create: 0, updateMany: 0, transaction: 0 });
+  };
+
+  await t.test("拒绝身份无效的实例", async () => {
+    const definition = definitionFixture();
+    await assertDraftRejected(
+      definition,
+      instanceProps({ templateId: "" }),
+      /页面草稿实例授权无效.*身份无效/,
+    );
+    await assertDraftRejected(
+      definition,
+      null,
+      /页面草稿实例授权无效.*身份无效/,
+    );
   });
-  const outOfBounds = validateDynamicTemplateInstance(outOfBoundsProps, definition);
-  assert.ok(outOfBounds.issues.some((issue) => issue.message.includes("位置偏移超出")));
-  assert.ok(outOfBounds.issues.some((issue) => issue.message.includes("字号超出")));
 
-  const db = {
-    dynamicTemplateVersion: {
-      findMany: async () => [{
+  await t.test("拒绝兼容读取可归一化但不符合写入合同的原始身份", async () => {
+    const definition = definitionFixture();
+    await assertDraftRejected(
+      definition,
+      instanceProps({ templateVersion: "3" }),
+      /页面草稿实例授权无效.*模板版本必须是正整数/,
+    );
+    await assertDraftRejected(
+      definition,
+      instanceProps({ templateId: " tpl_server_validation " }),
+      /页面草稿实例授权无效.*模板身份不一致/,
+    );
+  });
+
+  await t.test("拒绝未知实例字段", async () => {
+    const definition = definitionFixture();
+    await assertDraftRejected(
+      definition,
+      instanceProps({ nodeDefinitions: { unsafe: true } }),
+      /页面草稿实例授权无效.*未授权字段 nodeDefinitions/,
+    );
+  });
+
+  await t.test("拒绝未声明内容槽位", async () => {
+    const definition = definitionFixture();
+    await assertDraftRejected(
+      definition,
+      instanceProps({
+        contentBySlotId: {
+          slot_heading: "页面填写的标题",
+          slot_unknown: "不应写入",
+        },
+      }),
+      /页面草稿实例授权无效.*未声明槽位 slot_unknown/,
+    );
+  });
+
+  await t.test("拒绝不可编辑内容槽位", async () => {
+    const definition = definitionFixture();
+    definition.slots.slot_heading.editable = false;
+    await assertDraftRejected(
+      definition,
+      instanceProps(),
+      /页面草稿实例授权无效.*不允许在页面中修改/,
+    );
+  });
+
+  await t.test("拒绝非法隐藏槽位", async () => {
+    const definition = definitionFixture();
+    await assertDraftRejected(
+      definition,
+      instanceProps({ hiddenSlotIds: ["slot_unknown"] }),
+      /页面草稿实例授权无效.*隐藏槽位 slot_unknown 未在模板中声明/,
+    );
+  });
+
+  await t.test("拒绝未授权或越界构图覆盖", async () => {
+    const definition = definitionFixture();
+    await assertDraftRejected(
+      definition,
+      instanceProps({
+        layoutOverridesByNodeId: {
+          node_heading: { desktop: { offsetXPercent: 99, fontSizePx: 400 } },
+        },
+      }),
+      /页面草稿实例授权无效.*位置偏移超出/,
+    );
+  });
+
+  await t.test("拒绝缺失的精确模板版本", async () => {
+    const definition = definitionFixture();
+    await assertDraftRejected(
+      definition,
+      instanceProps({ templateVersion: 4 }),
+      /页面草稿实例授权无效.*精确模板版本不可用或校验和损坏/,
+    );
+  });
+
+  await t.test("拒绝校验和损坏的精确模板版本", async () => {
+    const definition = definitionFixture();
+    await assertDraftRejected(
+      definition,
+      instanceProps(),
+      /页面草稿实例授权无效.*精确模板版本不可用或校验和损坏/,
+      [{
         version: 3,
-        schemaVersion: 1,
+        schemaVersion: definition.schemaVersion,
         definition,
-        definitionChecksum: calculateDynamicTemplateDefinitionChecksum(definition),
+        definitionChecksum: "0".repeat(64),
         template: { templateId: definition.templateId },
       }],
-    },
-    pageDocument: {
-      findUnique: async () => null,
-      create: async ({ data }: { data: Record<string, unknown> }) => {
-        pageDocumentWrites += 1;
-        return data;
-      },
-    },
-  } as unknown as PrismaService;
-  const service = new PageModulesService(db);
-  const assertLayout = (service as unknown as {
-    assertDynamicTemplateLayoutOverridesValid(value: unknown): Promise<void>;
-  }).assertDynamicTemplateLayoutOverridesValid.bind(service);
-  const page = (props: Record<string, unknown>) => ({
-    content: [{ type: DYNAMIC_TEMPLATE_BLOCK_TYPE, props }],
-    zones: {},
+    );
   });
-  await assert.doesNotReject(assertLayout(page(changedProps)));
-  await assert.rejects(
-    assertLayout(page(outOfBoundsProps)),
-    /页面实例构图覆盖无效.*位置偏移超出/,
-  );
-  await assert.rejects(
-    assertLayout(page({ ...changedProps, templateId: "" })),
-    /页面实例构图覆盖无效.*身份无效的模板实例不能保存构图覆盖/,
-  );
-  await assert.doesNotReject(
-    service.savePageDocument("home", page(changedProps), {}),
-  );
-  assert.equal(pageDocumentWrites, 1);
-  await assert.rejects(
-    service.savePageDocument("home", page(outOfBoundsProps), {}),
-    /页面实例构图覆盖无效.*位置偏移超出/,
-  );
-  assert.equal(pageDocumentWrites, 1);
 });
 
 test("普通图片槽位的设备级适配与焦点只写入母模板授权的稀疏覆盖", () => {
@@ -306,131 +462,16 @@ test("普通图片槽位的设备级适配与焦点只写入母模板授权的�
   assert.ok(messages.some((message) => message.includes("image") && message.includes("图片焦点")));
 });
 
-test("复杂页面实例复用同源槽位校验并提取媒体与行动引用", () => {
-  const definition = definitionFixture();
-  addComplexSlot(definition, "video", "Video", "video");
-  addComplexSlot(definition, "carousel", "Carousel", "carousel");
-  addComplexSlot(definition, "hotspot", "Hotspot", "hotspot");
-  addComplexSlot(definition, "beforeAfter", "BeforeAfter", "beforeAfter");
-  addComplexSlot(definition, "appointment", "Appointment", "appointment");
-  addComplexSlot(definition, "productCard", "ProductCard", "productCard");
-  addComplexSlot(definition, "productCollection", "ProductCollection", "productCollection");
-  addComplexSlot(definition, "categoryCollection", "CategoryCollection", "categoryCollection");
-  definition.slots.slot_productCollection.validation = { minItems: 2, maxItems: 8 };
-  definition.slots.slot_categoryCollection.validation = { minItems: 2, maxItems: 4 };
-  const contentBySlotId = {
-    slot_heading: "页面填写的标题",
-    slot_video: {
-      videoUrl: "https://example.com/video.mp4",
-      posterUrl: "https://example.com/poster.jpg",
-      videoDescription: "品牌影片说明",
-      targetType: "none",
-    },
-    slot_carousel: {
-      images: [{
-        url: "https://example.com/banner.jpg",
-        mobileUrl: "https://example.com/banner-mobile.jpg",
-        alt: "系列轮播",
-        targetType: "product",
-        productCode: "P-100",
-      }],
-      interval: 4000,
-    },
-    slot_hotspot: {
-      image: "https://example.com/scene.jpg",
-      mobileImage: "https://example.com/scene-mobile.jpg",
-      altText: "场景导购",
-      hotspots: [{ x: 20, y: 20, width: 30, height: 20, targetType: "category", categorySlug: "rings" }],
-      mobileHotspots: [],
-    },
-    slot_beforeAfter: {
-      beforeImage: "https://example.com/before.jpg",
-      afterImage: "https://example.com/after.jpg",
-      beforeAltText: "改款前",
-      afterAltText: "改款后",
-      targetType: "external",
-      linkUrl: "https://example.com/service",
-    },
-    slot_appointment: {
-      title: "预约鉴赏",
-      buttonText: "立即预约",
-      backgroundImage: "https://example.com/appointment.jpg",
-      altText: "预约背景",
-      targetType: "page",
-      linkUrl: "/contact",
-    },
-    slot_productCard: {
-      title: "代表作品",
-      productCode: "P-200",
-      secondaryTargetType: "category",
-      secondaryCategorySlug: "bracelets",
-      layout: "imageLeft",
-      showPrice: false,
-    },
-    slot_productCollection: {
-      title: "本季精选",
-      productCodes: ["P-300", "P-400"],
-      layout: "grid-2",
-      mobileColumns: 1,
-      displayMode: "standard",
-      actionStyle: "text",
-    },
-    slot_categoryCollection: {
-      title: "探索分类",
-      categorySlugs: ["rings", "necklaces"],
-      layout: "grid-2",
-    },
-  };
-  const result = validateDynamicTemplateInstance(instanceProps({ contentBySlotId }), definition);
-  assert.deepEqual(result.issues, []);
-  assert.equal(result.assets.length, 9);
-  assert.deepEqual(result.actions, [
-    { slotId: "slot_carousel", targetType: "product", value: "P-100", index: 0 },
-    { slotId: "slot_hotspot", targetType: "category", value: "rings", index: 0 },
-    { slotId: "slot_beforeAfter", targetType: "external", value: "https://example.com/service" },
-    { slotId: "slot_appointment", targetType: "page", value: "/contact" },
-    { slotId: "slot_productCard", targetType: "category", value: "bracelets" },
-  ]);
-  assert.deepEqual(result.productCodes, [
-    { slotId: "slot_productCard", value: "P-200" },
-    { slotId: "slot_productCollection", value: "P-300", index: 0 },
-    { slotId: "slot_productCollection", value: "P-400", index: 1 },
-  ]);
-  assert.deepEqual(result.categorySlugs, [
-    { slotId: "slot_categoryCollection", value: "rings", index: 0 },
-    { slotId: "slot_categoryCollection", value: "necklaces", index: 1 },
-  ]);
-
-  const invalid = validateDynamicTemplateInstance(instanceProps({
-    contentBySlotId: {
-      ...contentBySlotId,
-      slot_carousel: { images: [{ url: "https://example.com/banner.jpg" }], interval: 25 },
-    },
-  }), definition);
-  assert.ok(invalid.issues.some((issue) => issue.message.includes("内容结构与母模板槽位不匹配")));
-
-  definition.slots.slot_carousel.required = true;
-  const emptyRequired = validateDynamicTemplateInstance(instanceProps({
-    contentBySlotId: { ...contentBySlotId, slot_carousel: { images: [] } },
-  }), definition);
-  assert.ok(emptyRequired.issues.some((issue) => issue.message.includes("carousel为必填内容")));
-
-  definition.slots.slot_productCollection.required = true;
-  const emptyProducts = validateDynamicTemplateInstance(instanceProps({
-    contentBySlotId: { ...contentBySlotId, slot_productCollection: { productCodes: [] } },
-  }), definition);
-  assert.ok(emptyProducts.issues.some((issue) => issue.message.includes("productCollection为必填内容")));
-});
-
 test("成熟内容模板页面实例提取素材与稳定业务引用，且不接受数字商品 ID", () => {
   const definition = definitionFixture();
   addComplexSlot(definition, "heroTemplate", "HeroTemplate", "heroTemplate");
   const contentBySlotId = {
     slot_heading: "页面填写的标题",
-    slot_heroTemplate: {
-      desktopImage: "https://example.com/hero.jpg",
-      mobileImage: "https://example.com/hero-mobile.jpg",
-      title: "代表作品",
+      slot_heroTemplate: {
+        desktopImage: "https://example.com/hero.jpg",
+        mobileImage: "https://example.com/hero-mobile.jpg",
+        altText: "代表作品首屏",
+        title: "代表作品",
       targetType: "product",
       productCode: "P-900",
     },

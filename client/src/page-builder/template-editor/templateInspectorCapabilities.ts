@@ -1,8 +1,10 @@
 import {
+  createDynamicTemplateResponsivePlan,
   getDynamicTemplateNodeRegistryEntry,
   type DynamicTemplateDevice,
   type DynamicTemplateNode,
   type DynamicTemplateNodeType,
+  type DynamicTemplateResponsiveGroup,
   type DynamicTemplateSlotDefinition,
   type DynamicTemplateSlotType,
   type DynamicTemplateValidationIssue,
@@ -12,6 +14,8 @@ import {
 export type TemplateInspectorGroup = "definition" | "layout" | "rules";
 export type TemplateInspectorFieldAccess = "editable" | "managed" | "read-only";
 export type TemplateInspectorObjectScope = "root" | "node" | "slot" | "role";
+export { resolveTemplateInspectorDesignFields, TEMPLATE_INSPECTOR_DESIGN_FIELDS } from "../template-definition/operations";
+export type { TemplateInspectorResolverInput, TemplateInspectorDesignFieldContext, TemplateInspectorDesignFieldDescriptor, TemplateInspectorValueScope } from "../template-definition/operations";
 
 /** 重验后按问题身份续接：保留当前，否则继续处理原列表中下一条仍存在的问题。 */
 export function reconcileTemplatePublishIssueIndex(
@@ -58,7 +62,7 @@ const ROLE_SCOPE = ["role"] as const;
 const SEMANTIC_NODE_TYPES = ["Section", "Container", "Grid", "Row", "Column", "Stack"] as const;
 const TEXT_SLOT_TYPES = ["heading", "text", "richText", "button", "link", "badge"] as const;
 const ACTION_SLOT_TYPES = ["button", "link"] as const;
-const MEDIA_SLOT_TYPES = ["image", "video"] as const;
+const MEDIA_SLOT_TYPES = ["image"] as const;
 const ITEM_SLOT_TYPES = ["collection"] as const;
 
 const RESPONSIVE_FIELDS = [
@@ -82,7 +86,7 @@ const INSTANCE_POLICY_FIELDS = [
  */
 export const TEMPLATE_INSPECTOR_CAPABILITIES: readonly TemplateInspectorCapability[] = [
   { field: "schemaVersion", label: "Schema 版本", group: "definition", access: "read-only", scopes: ROOT_SCOPE, reason: "由合同版本固定，不能在 Inspector 中改写。" },
-  { field: "templateId", label: "模板标识", group: "definition", access: "read-only", scopes: ROOT_SCOPE, reason: "模板身份只由新建或另存为流程生成。" },
+  { field: "templateId", label: "模板标识", group: "definition", access: "read-only", scopes: ROOT_SCOPE, reason: "模板身份只由“新建模板”流程生成。" },
   { field: "name", label: "模板名称", group: "definition", access: "editable", scopes: ROOT_SCOPE },
   { field: "description", label: "模板说明", group: "definition", access: "editable", scopes: ROOT_SCOPE },
   { field: "metadata.category", label: "分类", group: "definition", access: "editable", scopes: ROOT_SCOPE },
@@ -265,19 +269,13 @@ export function getTemplateResponsiveCopyChanges(
   nodeId: string,
   sourceDevice: DynamicTemplateDevice,
   targetDevice: DynamicTemplateDevice,
+  groups: readonly DynamicTemplateResponsiveGroup[],
+  roleId?: string,
 ) {
-  const node = definition.nodes[nodeId];
-  if (!node) return [];
-  const slot = node.slotId ? definition.slots[node.slotId] : undefined;
-  const pairs = [{ label: "布局", before: node.responsive[targetDevice], after: node.responsive[sourceDevice] },
-    ...(slot ? [{ label: "槽位样式", before: slot[targetDevice === "desktop" ? "desktopRules" : "mobileRules"], after: slot[sourceDevice === "desktop" ? "desktopRules" : "mobileRules"] }] : [])];
-  return pairs.flatMap(({ label, before, after }) => {
-    const oldValues = before as Record<string, unknown>;
-    const newValues = after as Record<string, unknown>;
-    return [...new Set([...Object.keys(oldValues), ...Object.keys(newValues)])]
-      .filter((key) => JSON.stringify(oldValues[key]) !== JSON.stringify(newValues[key]))
-      .map((key) => ({ field: `${label} · ${RESPONSIVE_VALUE_LABELS[key] ?? key}`, before: responsiveValueLabel(oldValues[key]), after: responsiveValueLabel(newValues[key]) }));
-  });
+  return createDynamicTemplateResponsivePlan(definition, nodeId, sourceDevice, targetDevice, groups, roleId).changes.map((change) => ({
+    group: change.group, field: change.label,
+    before: responsiveValueLabel(change.before), after: responsiveValueLabel(change.after),
+  }));
 }
 
 export type TemplateResponsiveSource = "shared" | "device-override";
@@ -306,6 +304,8 @@ export interface TemplateInspectorIssueTarget {
   group: TemplateInspectorGroup;
   field: string;
   device?: DynamicTemplateDevice;
+  task: "design" | "page-scope";
+  view: "context" | "page-fields";
   destination: "inspector-field" | "structure-region" | "structure-slot" | "unavailable";
   access: TemplateInspectorFieldAccess;
   reason?: string;
@@ -344,7 +344,7 @@ function canonicalFieldForIssuePath(path: string): string | null {
         ? propField
         : null;
     }
-    const responsiveMatch = nodePath.match(/^responsive\.(desktop|mobile)(?:\.(.+))?$/);
+    const responsiveMatch = nodePath.match(/^responsive\.(desktop|tablet|mobile)(?:\.(.+))?$/);
     if (responsiveMatch) {
       if (!responsiveMatch[2]) return "responsive.*.display";
       const responsiveField = responsiveMatch[2].split(".")[0];
@@ -394,6 +394,8 @@ export function resolveTemplateInspectorIssueTarget(
       objectId: definition.rootNodeId,
       group: "definition",
       field: "structure.create.region",
+      task: "design",
+      view: "context",
       destination: "structure-region",
       access: "managed",
       reason: "需要在结构工具中由用户创建区域并决定后续层级。",
@@ -404,6 +406,8 @@ export function resolveTemplateInspectorIssueTarget(
       objectId: definition.rootNodeId,
       group: "definition",
       field: "structure.create.slot",
+      task: "design",
+      view: "context",
       destination: "structure-slot",
       access: "managed",
       reason: "需要在结构工具中由用户选择父节点和内容槽位类型。",
@@ -428,7 +432,7 @@ export function resolveTemplateInspectorIssueTarget(
     : issue.nodeId
     ?? (issue.slotId ? nodeIdBySlotId.get(issue.slotId) : undefined)
     ?? definition.rootNodeId;
-  const responsiveMatch = issue.path.match(/\.responsive\.(desktop|mobile)\./);
+  const responsiveMatch = issue.path.match(/\.responsive\.(desktop|tablet|mobile)\./);
   const slotRulesMatch = issue.path.match(/\.(desktopRules|mobileRules)\./);
   const device = responsiveMatch?.[1] === "desktop" || responsiveMatch?.[1] === "mobile"
     ? responsiveMatch[1]
@@ -448,6 +452,8 @@ export function resolveTemplateInspectorIssueTarget(
       group: "definition",
       field: "unavailable",
       ...(device ? { device } : {}),
+      task: "design",
+      view: "context",
       destination: "unavailable",
       access: "managed",
       reason: `当前问题路径 ${issue.path || "(definition)"} 没有可安全直接编辑的 Inspector 字段。`,
@@ -458,6 +464,10 @@ export function resolveTemplateInspectorIssueTarget(
     group: capability.group,
     field,
     ...(device ? { device } : {}),
+    task: /^(slot\.(?:label|required|editable|hideable|validation(?:\.|$)))/.test(field)
+      ? "page-scope"
+      : "design",
+    view: "context",
     destination: "inspector-field",
     access: capability.access,
     ...(capability.reason ? { reason: capability.reason } : {}),

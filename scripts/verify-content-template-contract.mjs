@@ -15,7 +15,6 @@ const [text, client, server, previewSource, blockMetaSource] = await Promise.all
 ]);
 const contract = JSON.parse(text);
 const byKey = Object.fromEntries(contract.templates.map((template) => [template.key, template]));
-const categories = ["视觉展示", "图文内容", "商品展示", "导航入口", "服务信息", "活动内容"];
 const commercialPurposes = ["品牌展示", "商品销售", "活动转化", "内容传播", "信任建立"];
 const devices = ["desktop", "mobile"];
 
@@ -48,8 +47,8 @@ assert.deepEqual(
 );
 assert.match(client, /CONTENT_TEMPLATE_EDITOR_POLICY/, "客户端生成物必须携带编辑策略");
 assert.match(server, /CONTENT_TEMPLATE_EDITOR_POLICY/, "服务端生成物必须携带编辑策略");
-assert.match(client, /CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX/, "客户端生成物必须携带全模板机器验收矩阵");
-assert.match(server, /CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX/, "服务端生成物必须携带全模板机器验收矩阵");
+assert.match(client, /CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX/, "客户端生成物必须携带活动模板机器验收矩阵");
+assert.match(server, /CONTENT_TEMPLATE_EDITOR_ACCEPTANCE_MATRIX/, "服务端生成物必须携带活动模板机器验收矩阵");
 assert.equal(
   contract.templates.length,
   contract.expectedTemplateCount,
@@ -60,15 +59,11 @@ assert.equal(
   contract.activeTemplateCount,
   "active 模板数必须与机器合同 activeTemplateCount 一致",
 );
-assert.deepEqual(
-  [...new Set(contract.templates.map((template) => template.category))].sort(),
-  [...categories].sort(),
-  "机器合同必须覆盖六类运营模板，不得在验证脚本复制各类数量",
-);
 const reachableTemplateKeys = new Set(contract.pageRules.flatMap((rule) => rule.allowedTemplateKeys));
 const activeTemplateKeys = contract.templates
   .filter((template) => template.implementationStatus === "active")
   .map((template) => template.key);
+assert.deepEqual(activeTemplateKeys, ["hero"], "活动内置目录只保留 hero 首屏测试模板");
 for (const rule of contract.pageRules) {
   assert.deepEqual(
     [...rule.allowedTemplateKeys].sort(),
@@ -79,7 +74,7 @@ for (const rule of contract.pageRules) {
 assert.deepEqual(
   [...new Set(contract.pageRules.map((rule) => rule.contentPlacement))],
   ["root-only"],
-  "六个装修页面只能把正式内容放在公开 Renderer 实际消费的根 content",
+  "装修页面只能把正式内容放在公开 Renderer 实际消费的根 content",
 );
 assert.deepEqual(
   contract.pageMetadata,
@@ -92,7 +87,7 @@ assert.deepEqual(
       fieldLimits: { assetUrl: 2048, source: 120, authorizationId: 120 },
     },
   },
-  "六个装修页面必须共享一份内容责任、公开 SEO 与素材记录建议合同",
+  "装修页面必须共享一份内容责任、公开 SEO 与素材记录建议合同",
 );
 assert.match(client, /getPageDocumentMediaReferences/, "客户端生成产物必须提供 PageDocument 媒体引用提取器");
 assert.match(server, /getPageDocumentMediaReferences/, "服务端生成产物必须提供 PageDocument 媒体引用提取器");
@@ -246,26 +241,6 @@ for (const template of contract.templates) {
   }
 }
 
-const cover = byKey.video.roles.find((role) => role.id === "coverImage");
-// 2026-08-19 比例调色板收敛:8→5(1/1、4/5、3/2、16/9、21/6);视频横屏仅保留已批准的常规与超宽两档。
-assert.equal(cover.defaultRatioByViewport.desktop, "16 / 9", "视频桌面默认比例必须为 16:9");
-assert.deepEqual(cover.allowedRatioPresetsByViewport.desktop, ["16 / 9", "21 / 6"], "视频桌面比例预设不正确");
-// 2026-08-19 移动端补 9:16 全屏竖版(手机竖屏素材的物理形态),桌面保持横屏两档;平板按桌面档回落渲染
-assert.deepEqual(cover.allowedRatioPresetsByViewport.mobile, ["4 / 5", "16 / 9", "9 / 16"], "视频移动端比例预设不正确");
-assert.deepEqual(byKey.video.allowedControls, ["videoWidth"], "视频宽度必须由合同显式声明；背景色仍是共享样式能力");
-assert.equal(byKey.productRow.presetValues.columns.defaultByViewport.desktop, 3, "商品列表桌面默认必须为三列");
-assert.ok(byKey.hotspot.roles.some((role) => role.id === "hotspots" && role.parentRole === "sceneImage" && role.positioning === "relative-to-media"), "热点必须从属于媒体槽");
-assert.deepEqual(byKey.testimonials.roles.map((role) => role.id).sort(), ["attribution", "authorizedPhoto", "mainQuote"].sort(), "顾客分享只能保留授权实拍、主引语和署名角色");
-assert.deepEqual(getGeometryOrder(byKey.testimonials, "desktop"), ["authorizedPhoto", "mainQuote", "attribution"], "顾客分享几何顺序必须与批准结构一致");
-// 2026-08-18 构图评审修订:预约入口补可选氛围背景(bgImage,不承载内容/行动,
-// 仍维持一个主行动与禁 form 的尾章语义)
-assert.deepEqual(byKey.booking.roles.map((role) => role.id).sort(), ["bgImage", "copy", "primaryAction", "secondaryContact"].sort(), "预约入口只能保留可选背景、文案、一个主行动和可选联系方式");
-assert.equal(byKey.booking.roles.filter((role) => role.kind === "action").length, 1, "预约入口必须且只能有一个行动角色");
-assert.equal(byKey.booking.roles.some((role) => role.kind === "form" || role.role === "form"), false, "预约入口禁止 form 角色");
-assert.equal(byKey.booking.roles.find((role) => role.id === "bgImage")?.required, false, "预约入口背景必须是可选角色");
-for (const device of ["desktop", "mobile"]) assert.deepEqual(getGeometryOrder(byKey.booking, device), ["copy", "primaryAction", "secondaryContact"], `预约入口 ${device} 几何顺序不一致(背景不进结构预览)`);
-assert.deepEqual(byKey.productRow.editorCapabilities.referenceFields, [{ kind: "product", key: "productCodes", legacyKey: "productIds", min: 2, max: 8 }], "商品列表必须保存稳定 code 并双读旧 numeric id");
-assert.deepEqual(byKey.categoryCards.editorCapabilities.referenceFields, [{ kind: "category", key: "categorySlugs", legacyKey: "categories", min: 2, max: 4 }], "分类卡必须保存真实 Category.slug");
 assert.deepEqual(
   byKey.hero.contentBudget.requiredText,
   ["title"],
@@ -276,33 +251,6 @@ assert.equal(
   "required",
   "公开 Hero 图片替代文字必须由媒体对象发布策略强制要求",
 );
-assert.deepEqual(
-  byKey.carousel.editorCapabilities.editableObjects.find((object) => object.roleId === "frames")?.collectionMediaPolicies,
-  [{ collectionFieldKey: "images", mediaFieldKeys: ["url", "mobileUrl"], altPolicy: "required", altFieldKey: "alt" }],
-  "轮播图必须逐项填写替代文字，桌面图与手机图共用同一语义",
-);
-assert.deepEqual(
-  byKey.gallery.editorCapabilities.editableObjects.find((object) => object.roleId === "works")?.collectionMediaPolicies,
-  [{ collectionFieldKey: "items", mediaFieldKeys: ["image"], altPolicy: "required", altFieldKey: "altText" }],
-  "作品画廊必须逐项填写替代文字",
-);
-assert.deepEqual(
-  byKey.sceneShopping.editorCapabilities.editableObjects.find((object) => object.roleId === "scenes")?.collectionMediaPolicies,
-  [{ collectionFieldKey: "categories", mediaFieldKeys: ["image"], altPolicy: "required", altFieldKey: "altText" }],
-  "手工场景入口必须逐项填写替代文字",
-);
-for (const [templateKey, roleId, collectionFieldKey, mediaFieldKey, derivedAltFieldKey] of [
-  ["journey", "steps", "steps", "image", "name"],
-  ["categoryCards", "categories", "categories", "image", "name"],
-  ["certificates", "certificates", "certificates", "imageUrl", "name"],
-  ["testimonials", "authorizedPhoto", "testimonials", "image", "name"],
-]) {
-  assert.deepEqual(
-    byKey[templateKey].editorCapabilities.editableObjects.find((object) => object.roleId === roleId)?.collectionMediaPolicies,
-    [{ collectionFieldKey, mediaFieldKeys: [mediaFieldKey], altPolicy: "derived", derivedAltFieldKey }],
-    `${templateKey}: 条目图片必须从同一条目业务名称派生替代文字`,
-  );
-}
 assert.equal(
   byKey.hero.roles.find((role) => role.id === "mobileImage")?.required,
   true,
@@ -320,12 +268,6 @@ assert.deepEqual(heroCopy.contentFieldKeys, ["eyebrow", "title", "subtitle"], "H
 const heroMedia = byKey.hero.editorCapabilities.editableObjects.find((object) => object.roleId === "desktopImage");
 assert.equal(heroMedia.fieldScopes.altText, "shared", "图片 Alt 必须保持跨设备共享");
 assert.equal(heroMedia.fieldScopes.desktopImage, "viewport-specific", "桌面图片素材必须显式声明设备策略");
-assert.equal(byKey.video.editorCapabilities.editableObjects.find((object) => object.roleId === "coverImage")?.kind, "video", "视频对象类型不得退化为普通 media 推断");
-assert.ok(byKey.video.editorCapabilities.editableObjects.find((object) => object.roleId === "coverImage")?.capabilities.includes("playback"), "视频必须显式声明 playback 能力");
-assert.equal(byKey.featuredProduct.editorCapabilities.editableObjects.find((object) => object.roleId === "product")?.referenceFieldKey, "productCode", "单品对象必须绑定稳定商品引用字段");
-assert.deepEqual(byKey.carousel.editorCapabilities.editableObjects.find((object) => object.roleId === "frames")?.collectionFieldKeys, ["images"], "集合字段 API 必须统一使用 collectionFieldKeys 复数");
-assert.deepEqual(byKey.comparison.editorCapabilities.editableObjects.find((object) => object.roleId === "action")?.nodeIds, ["action", "actionText"], "无独立画布角色的行动字段必须作为 content-only 虚拟对象显式绑定");
-
 const sortReplacer = (_key, value) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? Object.fromEntries(Object.keys(value).sort().map((k) => [k, value[k]]))
@@ -343,4 +285,4 @@ for (const generated of [client, server]) {
 }
 assert.doesNotMatch(blockMetaSource, /category:\s*"(?:品牌展示|商品销售|活动转化|内容传播|信任建立)"/, "BLOCK_META 商业分类必须从机器合同派生，不得手写第二份事实");
 assert.doesNotMatch(previewSource, /<img\b|https?:\/\//, "中性预览不得引入外部图片");
-console.log(`内容模板统一合同验证通过：${contract.templates.length} 个模板的商业目的、双端归一化几何、直接操作约束、语义角色和 CTA 门禁一致。`);
+console.log(`内容模板统一合同验证通过：${activeTemplateKeys.length} 个活动模板通过目录门禁，未保留历史模板合同。`);

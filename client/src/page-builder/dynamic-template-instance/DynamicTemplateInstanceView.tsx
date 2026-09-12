@@ -1,33 +1,36 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   DynamicTemplateRenderer,
   type TemplateDefinitionV2,
 } from "../template-definition";
 import { useResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
+import { hasExplicitDynamicTemplateInstanceImage } from "./mediaReferences";
+import { resolveTemplateBreakpoint, type TemplateBreakpoint } from "../template-definition/responsive";
 
 function useDynamicTemplateDevice(
   mobileBreakpoint = 767,
   enabled = true,
-): "desktop" | "mobile" {
+  schemaVersion: TemplateDefinitionV2["schemaVersion"] = 1,
+): TemplateBreakpoint {
   const breakpoint = Number.isFinite(mobileBreakpoint)
     ? Math.min(1024, Math.max(480, Math.round(mobileBreakpoint)))
     : 767;
-  const [device, setDevice] = useState<"desktop" | "mobile">(() => (
-    enabled
-      && typeof window !== "undefined"
-      && window.matchMedia(`(max-width: ${breakpoint}px)`).matches
-      ? "mobile"
-      : "desktop"
-  ));
+  const current = useCallback((): TemplateBreakpoint => {
+    if (!enabled || typeof window === "undefined") return "desktop";
+    return resolveTemplateBreakpoint({ schemaVersion, metadata: { mobileBreakpoint: breakpoint } as TemplateDefinitionV2["metadata"] }, window.innerWidth);
+  }, [breakpoint, enabled, schemaVersion]);
+  const [device, setDevice] = useState<TemplateBreakpoint>(current);
   useEffect(() => {
     if (!enabled) return undefined;
     const media = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const update = () => setDevice(media.matches ? "mobile" : "desktop");
+    const tablet = window.matchMedia("(max-width: 1023px)");
+    const update = () => setDevice(current());
     update();
     media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [breakpoint, enabled]);
+    tablet.addEventListener("change", update);
+    return () => { media.removeEventListener("change", update); tablet.removeEventListener("change", update); };
+  }, [breakpoint, current, enabled]);
   return device;
 }
 
@@ -41,7 +44,7 @@ export default function DynamicTemplateInstanceView({
   props: DynamicTemplateInstanceProps;
   definition?: TemplateDefinitionV2;
   /** 编辑器画布已有明确设备状态时优先使用，避免 iframe Portal 误读宿主窗口宽度。 */
-  deviceOverride?: "desktop" | "mobile";
+  deviceOverride?: TemplateBreakpoint;
   mode?: "public" | "editor" | "preview";
   primaryHeadingLevel?: 1 | 2;
 }) {
@@ -50,6 +53,7 @@ export default function DynamicTemplateInstanceView({
   const responsiveDevice = useDynamicTemplateDevice(
     resolvedDefinition?.metadata.mobileBreakpoint,
     deviceOverride === undefined,
+    resolvedDefinition?.schemaVersion,
   );
   const device = deviceOverride ?? responsiveDevice;
   if (props.isVisible === false) {
@@ -80,6 +84,16 @@ export default function DynamicTemplateInstanceView({
     if (mode === "public") return null;
     return <section className="hc-dynamic-template__invalid" role="alert">模板身份不匹配</section>;
   }
+  if (
+    mode === "public"
+    && !hasExplicitDynamicTemplateInstanceImage(
+      resolvedDefinition,
+      props.contentBySlotId,
+      props.hiddenSlotIds,
+    )
+  ) {
+    return null;
+  }
   return (
     <section
       data-dynamic-template-instance-id={props.instanceId}
@@ -88,7 +102,8 @@ export default function DynamicTemplateInstanceView({
     >
       <DynamicTemplateRenderer
         definition={resolvedDefinition}
-        device={device}
+        device={device === "tablet" ? "desktop" : device}
+        breakpoint={device}
         contentBySlotId={props.contentBySlotId}
         hiddenSlotIds={props.hiddenSlotIds}
         layoutOverridesByNodeId={props.layoutOverridesByNodeId}

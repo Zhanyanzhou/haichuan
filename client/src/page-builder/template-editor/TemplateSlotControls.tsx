@@ -1,7 +1,13 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { getDynamicTemplateStructureLockOwnerId, type TemplateDefinitionV2 } from "../template-definition";
+import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
+import { type TemplateDefinitionV2 } from "../template-definition";
+import { type ResolvedTemplateDefinition } from "../template-definition/responsive";
+import {
+  registerPendingCommittedInput,
+  unregisterPendingCommittedInput,
+} from "../inspector/controls/NumberField";
 import TextField from "../inspector/controls/TextField";
 import { CanvasDimensionInput } from "./WorkspaceCanvasControls";
+import { resolveTemplateInspectorDesignFields } from "./templateInspectorCapabilities";
 
 export const SIMPLE_SLOT_TYPES = new Set(["ImageSlot", "HeadingSlot", "TextSlot", "ButtonSlot", "ProductSlot"]);
 
@@ -29,74 +35,158 @@ const FOCUS_GRID_CELLS = [
   { value: "right bottom", label: "右下" },
 ] as const;
 
-/** 自定义比例输入：仅当值通过 N:M 合同校验时提交，非法输入失焦还原。 */
+const BUTTON_BACKGROUND_OPTIONS = [
+  { value: "transparent", label: "透明" },
+  { value: "surface", label: "白色" },
+  { value: "surface-muted", label: "柔灰" },
+  { value: "brand-ink", label: "深色" },
+  { value: "brand-soft", label: "浅色" },
+] as const;
+
+const BUTTON_BORDER_OPTIONS = [
+  { value: "none", label: "无" },
+  { value: "subtle", label: "轻" },
+  { value: "strong", label: "强调" },
+  { value: "accent", label: "品牌" },
+] as const;
+
+/** 自定义比例输入：草稿与已提交值分离，并接入检查器的切换门禁。 */
 function CustomRatioInput({ value, disabled, onCommit }: {
   value: string | undefined;
   disabled?: boolean;
   onCommit: (ratio: string) => void;
 }) {
   const inputId = useId();
+  const errorId = `${inputId}-error`;
   const [draft, setDraft] = useState(value ?? "");
-  const previousValueRef = useRef<string | undefined>(value);
+  const [error, setError] = useState<string | null>(null);
+  const editingRef = useRef(false);
+  const skipNextBlurRef = useRef(false);
+  const committedRef = useRef(value);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const commitRef = useRef<() => boolean>(() => true);
+  const attachInput = useCallback((input: HTMLInputElement | null) => {
+    if (inputRef.current) unregisterPendingCommittedInput(inputRef.current);
+    inputRef.current = input;
+    if (input) registerPendingCommittedInput(input, () => commitRef.current());
+  }, []);
+
   useEffect(() => {
-    if (previousValueRef.current === value) return;
-    previousValueRef.current = value;
+    committedRef.current = value;
+    if (editingRef.current || error) return;
     setDraft(value ?? "");
-  }, [value]);
-  const commit = () => {
-    const trimmed = draft.trim();
-    if (RATIO_PATTERN.test(trimmed) && trimmed !== value) onCommit(trimmed);
-    else setDraft(value ?? "");
+  }, [error, value]);
+
+  const restore = () => {
+    editingRef.current = false;
+    setDraft(committedRef.current ?? "");
+    setError(null);
+    inputRef.current?.removeAttribute("aria-invalid");
   };
+  const commit = () => {
+    if (!editingRef.current) return true;
+    const trimmed = draft.trim();
+    if (!RATIO_PATTERN.test(trimmed)) {
+      setError("请输入有效图片比例，例如 12:5。");
+      return false;
+    }
+    const committed = committedRef.current;
+    editingRef.current = false;
+    committedRef.current = trimmed;
+    setDraft(trimmed);
+    setError(null);
+    inputRef.current?.removeAttribute("aria-invalid");
+    if (trimmed !== committed) onCommit(trimmed);
+    return true;
+  };
+  commitRef.current = commit;
+
+  const handleBlur = (_event: FocusEvent<HTMLInputElement>) => {
+    if (skipNextBlurRef.current) {
+      skipNextBlurRef.current = false;
+      return;
+    }
+    commit();
+  };
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (commit()) {
+        skipNextBlurRef.current = true;
+        event.currentTarget.blur();
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      restore();
+      skipNextBlurRef.current = true;
+      event.currentTarget.blur();
+    }
+  };
+
   return (
     <label className="template-editor__simple-select" htmlFor={inputId}>自定义比例
       <input
         id={inputId}
+        ref={attachInput}
         type="text"
+        data-committed-number-input="true"
         value={draft}
         disabled={disabled}
         placeholder="如 21:9"
         aria-label="自定义图片比例"
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") { event.preventDefault(); (event.target as HTMLInputElement).blur(); }
+        aria-invalid={error ? "true" : undefined}
+        aria-describedby={error ? errorId : undefined}
+        onChange={(event) => {
+          editingRef.current = true;
+          setDraft(event.target.value);
+          setError(null);
         }}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
       />
+      {error ? <span id={errorId} className="homepage-editor__field-error" role="alert">{error}</span> : null}
     </label>
   );
 }
 
 /** 常用槽位直接编辑正式响应式规则，页面内容仍由页面装修负责。 */
 export default function TemplateSlotControls({ definition, nodeId, device, onChange }: {
-  definition: TemplateDefinitionV2; nodeId: string; device: "desktop" | "mobile";
-  onChange: (update: (next: TemplateDefinitionV2) => void, label: string) => unknown;
+  definition: ResolvedTemplateDefinition; nodeId: string; device: "desktop" | "mobile";
+  onChange: (update: (next: ResolvedTemplateDefinition) => void, label: string) => unknown;
 }) {
   const node = definition.nodes[nodeId];
   const slot = definition.slots[node.slotId!];
   const rules = node.responsive[device];
   const slotRulesKey = device === "desktop" ? "desktopRules" : "mobileRules";
   const slotRules = slot[slotRulesKey];
-  const locked = getDynamicTemplateStructureLockOwnerId(definition, nodeId) !== null;
+  const resolvedFields = resolveTemplateInspectorDesignFields({ definition, device, targetId: nodeId }).fields;
+  const hasField = (field: string) => resolvedFields.some((candidate) => candidate.field === field);
+  const locked = Boolean(resolvedFields.find((candidate) => candidate.field === "node.name")?.disabledReason);
   const updateRules = (mutate: (next: typeof rules) => void, label: string) => onChange((next) => mutate(next.nodes[nodeId].responsive[device]), label);
   const updateSlot = (mutate: (next: typeof slotRules) => void, label: string) => onChange((next) => mutate(next.slots[slot.slotId][slotRulesKey]), label);
   const widthUnit = typeof rules.width === "object" ? rules.width.unit : rules.width;
-  const image = node.type === "ImageSlot";
+  const image = hasField("slotRules.objectFit");
   const product = node.type === "ProductSlot";
+  const button = node.type === "ButtonSlot";
   const defaultFontWeight = node.type === "HeadingSlot" ? 600 : 400;
   const currentFocus = slotRules.objectPosition ?? "center center";
-  return <section className="template-editor__composition template-editor__simple-slot" aria-label="槽位设置">
-    <TextField label="槽位名称" value={node.name} readOnly={locked} maxLength={60} onChange={(name) => {
-      if (!name.trim()) return;
-      onChange((next) => { next.nodes[nodeId].name = name; next.slots[slot.slotId].label = name; }, "重命名槽位");
+  const paddingSides = rules.padding ? Object.values(rules.padding) : [];
+  const uniformPadding = paddingSides.length === 4 && paddingSides.every((side) => (
+    side.unit === paddingSides[0].unit && side.value === paddingSides[0].value
+  )) ? paddingSides[0] : undefined;
+  return <section
+    className="template-editor__composition template-editor__simple-slot"
+    aria-label="槽位设计设置"
+  >
+    <TextField transactional validate={(name) => name.trim() ? null : "节点名称不能为空。"} label="节点名称" value={node.name} readOnly={locked} maxLength={60} onChange={(name) => {
+      onChange((next) => { next.nodes[nodeId].name = name; }, "重命名节点");
     }} />
-    <p className="homepage-editor__inspector-hint">{image ? "图片" : product ? "商品" : node.type === "ButtonSlot" ? "按钮文字和链接" : "文字内容"}在页面装修中填写。</p>
     {locked ? <p role="status">此槽位已锁定，可从槽位列表解锁。</p> : null}
     <div data-template-inspector-field="responsive.*.display">
       <span>显示状态</span>
       <div className="template-editor__composition-segments" role="group" aria-label="显示状态">
         <button type="button" aria-pressed={rules.display !== "none"} disabled={locked} onClick={() => updateRules((next) => { next.display = "block"; }, "显示当前槽位")}>显示</button>
-        <button type="button" aria-pressed={rules.display === "none"} disabled={locked || slot.required} title={slot.required ? "必填槽位不能隐藏" : undefined} onClick={() => updateRules((next) => { next.display = "none"; }, "隐藏当前槽位")}>隐藏</button>
+        <button type="button" aria-pressed={rules.display === "none"} disabled={locked} onClick={() => updateRules((next) => { next.display = "none"; }, "隐藏当前槽位")}>隐藏</button>
       </div>
     </div>
     <fieldset disabled={locked}><legend>槽位尺寸</legend>
@@ -120,6 +210,54 @@ export default function TemplateSlotControls({ definition, nodeId, device, onCha
       </label>
       {rules.height.mode === "fixed" ? <CanvasDimensionInput allowDecimals label="槽位高度" shortLabel={rules.height.value?.unit ?? "px"} value={rules.height.value?.value ?? 64} min={1} max={10000} onCommit={(value) => updateRules((next) => { next.height = { mode: "fixed", value: { value, unit: next.height.value?.unit ?? "px" } }; }, "调整槽位高度")} /> : null}
     </fieldset>
+    {button ? <fieldset disabled={locked}><legend>按钮外观</legend>
+      <div className="template-editor__composition-segments" role="group" aria-label="按钮背景">
+        {BUTTON_BACKGROUND_OPTIONS.map((item) => <button
+          key={item.value}
+          type="button"
+          aria-label={`按钮背景：${item.label}`}
+          aria-pressed={(rules.backgroundToken ?? "transparent") === item.value}
+          onClick={() => updateRules((next) => {
+            next.backgroundToken = item.value === "transparent" ? undefined : item.value;
+          }, "调整按钮背景")}
+        >{item.label}</button>)}
+      </div>
+      <div className="template-editor__composition-segments" role="group" aria-label="按钮边框">
+        {BUTTON_BORDER_OPTIONS.map((item) => <button
+          key={item.value}
+          type="button"
+          aria-label={`按钮边框：${item.label}`}
+          aria-pressed={(rules.borderToken ?? "none") === item.value}
+          onClick={() => updateRules((next) => {
+            next.borderToken = item.value === "none" ? undefined : item.value;
+          }, "调整按钮边框")}
+        >{item.label}</button>)}
+      </div>
+      <CanvasDimensionInput
+        allowDecimals
+        label="按钮圆角"
+        shortLabel={rules.radius?.unit ?? "px"}
+        value={rules.radius?.value ?? 0}
+        min={0}
+        max={1000}
+        onCommit={(value) => updateRules((next) => {
+          next.radius = { value, unit: next.radius?.unit ?? "px" };
+        }, "调整按钮圆角")}
+      />
+      <CanvasDimensionInput
+        allowDecimals
+        label="按钮内边距"
+        shortLabel={uniformPadding?.unit ?? "px"}
+        value={uniformPadding?.value ?? rules.padding?.top.value ?? 0}
+        min={0}
+        max={1000}
+        onCommit={(value) => updateRules((next) => {
+          const side = { value, unit: uniformPadding?.unit ?? "px" as const };
+          next.padding = { top: side, right: side, bottom: side, left: side };
+        }, "调整按钮内边距")}
+      />
+      {!uniformPadding && rules.padding ? <small>当前四边内边距不同；输入新值会统一四边。</small> : null}
+    </fieldset> : null}
     {image ? <fieldset disabled={locked}><legend>图片显示</legend>
       <div className="template-editor__composition-segments">
         {([{ value: "cover", label: "裁切填满" }, { value: "contain", label: "完整显示" }, { value: "fill", label: "拉伸填满" }] as const).map((item) => <button key={item.value} type="button" aria-pressed={slotRules.objectFit === item.value} onClick={() => updateSlot((next) => { next.objectFit = item.value; }, "调整图片显示")}>{item.label}</button>)}
@@ -140,13 +278,13 @@ export default function TemplateSlotControls({ definition, nodeId, device, onCha
           next.nodes[nodeId].responsive[device].height = { mode: "auto" };
         }, "自定义图片比例")}
       />
-      <div data-template-inspector-field={`slot.${slotRulesKey}.objectPosition`}>
+      {hasField("slotRules.objectPosition") ? <div data-template-inspector-field={`slot.${slotRulesKey}.objectPosition`}>
         <span>图片焦点</span>
         <div className="template-editor__focus-grid" role="group" aria-label="图片焦点">
           {FOCUS_GRID_CELLS.map((cell) => <button key={cell.value} type="button" title={cell.label} aria-label={`焦点${cell.label}`} aria-pressed={currentFocus === cell.value} onClick={() => updateSlot((next) => { next.objectPosition = cell.value; }, "调整图片焦点")}>{cell.label}</button>)}
         </div>
-      </div>
-    </fieldset> : product ? null : <fieldset disabled={locked}><legend>文字样式</legend>
+      </div> : null}
+    </fieldset> : !hasField("slotRules.fontSize") ? null : <fieldset disabled={locked}><legend>文字样式</legend>
       <CanvasDimensionInput allowDecimals commitUnchanged label="槽位字号" shortLabel={`字号（${slotRules.fontSize?.unit ?? "px"}）`} value={slotRules.fontSize?.value ?? (node.type === "HeadingSlot" ? 32 : 16)} min={1} max={240} onCommit={(value) => updateSlot((next) => { next.fontSize = { value, unit: next.fontSize?.unit ?? "px" }; }, "调整槽位字号")} />
       <div className="template-editor__composition-segments" role="group" aria-label="文字对齐">
         {([{ value: "left", label: "左对齐" }, { value: "center", label: "居中" }, { value: "right", label: "右对齐" }] as const).map((item) => <button key={item.value} type="button" aria-pressed={(slotRules.textAlign ?? "left") === item.value} onClick={() => updateSlot((next) => { next.textAlign = item.value; }, "调整文字对齐")}>{item.label}</button>)}

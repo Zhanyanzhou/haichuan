@@ -77,15 +77,15 @@ const STRUCTURE_LOCKED_CAPABILITIES = new Set<EditableTargetCapability>([
 
 function slotKind(slot: DynamicTemplateSlotDefinition | undefined): EditableTargetKind {
   if (!slot) return "structured";
-  if (["image", "video", "carousel", "hotspot", "beforeAfter"].includes(slot.type)) {
+  if (slot.type === "image") {
     return "media";
   }
   if (slot.type === "heading") return "title";
   if (["text", "richText"].includes(slot.type)) return "description";
   if (["badge", "icon"].includes(slot.type)) return "text";
-  if (["button", "link", "appointment"].includes(slot.type)) return "action";
-  if (["product", "productCard", "productCollection"].includes(slot.type)) return "product";
-  if (["collection", "categoryCollection"].includes(slot.type)) return "collection";
+  if (["button", "link"].includes(slot.type)) return "action";
+  if (slot.type === "product") return "product";
+  if (slot.type === "collection") return "collection";
   return "structured";
 }
 

@@ -1,6 +1,6 @@
 # Third-Party Integrations
 
-> **When to use**: Testing your application's interaction with external services -- OAuth providers, payment gateways, analytics, chat widgets, maps, social login, and CAPTCHAs. The core principle: mock the third-party boundary, not your own application code.
+> **When to use**: Testing your application's interaction with external services -- OAuth providers, payment gateways, analytics, chat widgets, maps, social login, and CAPTCHAs. The mocking patterns below target routine CI and deterministic UI; released capabilities also need approved real integration coverage under [when-to-mock.md](when-to-mock.md).
 > **Prerequisites**: [core/network-mocking.md](network-mocking.md), [core/when-to-mock.md](when-to-mock.md), [core/authentication.md](authentication.md)
 
 ## Quick Reference
@@ -24,7 +24,7 @@ await page.route('**/api.stripe.com/**', (route) => {
 });
 ```
 
-**Core principle**: In E2E tests, mock the external service, not your own application. Your code should run as-is; only the third-party responses are faked.
+**Core principle**: In routine CI, default to mocking the external boundary while exercising your application code. These patterns verify behavior under simulated provider responses; they do not prove real provider integration. Verify released capabilities separately in provider sandboxes or approved test environments, including applicable callbacks, persistence and delivery. Existing authorization under `AGENTS.md` must cover the target and side effects; these examples do not authorize payments, messages or production changes.
 
 ## Patterns
 

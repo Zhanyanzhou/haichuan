@@ -19,6 +19,66 @@
   background: #fff;
 }
 
+.template-editor__structure-header-actions {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.template-editor__structure--reference .template-editor__root-select {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 6px 0;
+  padding: 8px;
+  border: 1px solid var(--adm-line);
+  border-radius: var(--template-structure-row-radius);
+  color: var(--adm-ink);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.template-editor__structure--reference .template-editor__root-select > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.template-editor__structure--reference .template-editor__root-select strong {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.template-editor__structure--reference .template-editor__root-select > span:last-child > span {
+  color: var(--adm-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.template-editor__structure--reference .template-editor__root-select:hover {
+  background: var(--template-structure-hover);
+}
+
+.template-editor__structure--reference .template-editor__root-select[aria-pressed="true"] {
+  border-color: var(--template-structure-accent);
+  background: var(--template-structure-accent-bg);
+}
+
+.template-editor__structure--reference .template-editor__root-select:focus-visible {
+  outline: 2px solid var(--adm-ink);
+  outline-offset: 2px;
+}
+
+.template-editor__structure-header-actions .ant-btn-link {
+  height: auto;
+  padding-inline: 2px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
 .template-editor__structure--reference
   > .homepage-editor__panel-header
   .homepage-editor__region-title {
@@ -93,6 +153,7 @@
   font-size: 14px;
   font-weight: 650;
   line-height: 20px;
+  overflow-wrap: anywhere;
 }
 
 .template-editor__structure--reference .template-editor__template-summary small {
@@ -143,6 +204,17 @@
   border-color: #D7B6B4;
   color: #8C3F3B;
   background: #FAF0EF;
+}
+
+.template-editor__structure--reference .template-editor__selection-exclusion {
+  margin: 8px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--template-structure-warning);
+  border-radius: var(--template-structure-row-radius);
+  color: var(--template-structure-warning);
+  background: var(--template-structure-warning-bg);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .template-editor__structure--reference .template-editor__structure-health-summary {
@@ -265,7 +337,7 @@
 .template-editor__structure--reference .template-editor__region-header {
   min-height: 38px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 24px;
+  grid-template-columns: 20px minmax(0, 1fr) 24px;
   align-items: center;
   margin: 0;
   overflow: hidden;
@@ -318,14 +390,15 @@
 }
 
 .template-editor__structure--reference .template-editor__region-select strong {
+  overflow-wrap: anywhere;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   color: var(--adm-ink);
   font-size: 13px;
   font-weight: 650;
   line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .template-editor__structure--reference .template-editor__region-header:focus-within {
@@ -356,7 +429,7 @@
   min-width: 0;
   min-height: 38px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 24px;
+  grid-template-columns: 20px minmax(0, 1fr) 24px;
   align-items: center;
   margin: 0;
   overflow: hidden;
@@ -407,12 +480,13 @@
 }
 
 .template-editor__structure--reference .template-editor__layout-select strong {
+  overflow-wrap: anywhere;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   font-size: 12px;
   line-height: 17px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .template-editor__structure--reference .template-editor__layout-row.is-drag-inside {
@@ -468,14 +542,15 @@
 }
 
 .template-editor__structure--reference .template-editor__slot-select strong {
+  overflow-wrap: anywhere;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   color: inherit;
   font-size: 12px;
   font-weight: 500;
   line-height: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .template-editor__structure--reference
@@ -548,7 +623,10 @@
 
 .template-editor__structure--reference .template-editor__slot-row:hover .template-editor__slot-actions,
 .template-editor__structure--reference .template-editor__slot-row:focus-within .template-editor__slot-actions,
-.template-editor__structure--reference .template-editor__slot-row.is-active .template-editor__slot-actions {
+.template-editor__structure--reference .template-editor__slot-row.is-active .template-editor__slot-actions,
+.template-editor__structure--reference .template-editor__layout-row:hover .template-editor__slot-actions,
+.template-editor__structure--reference .template-editor__layout-row:focus-within .template-editor__slot-actions,
+.template-editor__structure--reference .template-editor__layout-row.is-active .template-editor__slot-actions {
   display: flex;
 }
 
@@ -785,6 +863,57 @@
   min-height: 38px;
 }
 
+.template-editor__add-popover .template-editor__add-field,
+.template-editor__move-field {
+  display: grid;
+  gap: 5px;
+  margin: 10px 12px;
+  color: var(--adm-text);
+  font-size: 12px;
+}
+
+.template-editor__add-popover .template-editor__add-field select,
+.template-editor__move-field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  color: var(--adm-ink);
+  background: #fff;
+}
+
+.template-editor__add-popover > h3,
+.template-editor__add-popover > h4,
+.template-editor__add-popover > p {
+  margin: 10px 12px;
+}
+
+.template-editor__add-popover .template-editor__add-target-note {
+  padding: 7px 8px;
+  border-left: 2px solid var(--template-structure-accent);
+  background: var(--template-structure-accent-bg);
+}
+
+.template-editor__add-popover .template-editor__add-primary {
+  width: calc(100% - 24px);
+  min-height: 36px;
+  margin: 0 12px 12px;
+  border: 1px solid var(--template-structure-accent);
+  border-radius: 4px;
+  color: #fff;
+  background: var(--template-structure-accent);
+  cursor: pointer;
+}
+
+@media (max-width: 480px) {
+  .template-editor__add-popover {
+    width: min(300px, calc(100vw - 24px));
+    max-height: min(560px, calc(100vh - 84px));
+  }
+}
+
 .template-editor__add-popover .template-editor__composition-tool {
   width: 100%;
 }
@@ -800,27 +929,152 @@
   outline-offset: 2px;
 }
 
-/* 模板设计共用 8% 结构栏；极窄栏中仍保留清晰的层级与真实可点区。 */
-@container editor-structure-dock (max-width: 128px) {
+/* 模板设计共用 8% 结构栏；结构树按栏宽收敛，而不是按整个视口猜测可用空间。 */
+@container editor-structure-dock (max-width: 176px) {
   .template-editor__structure--reference > .homepage-editor__panel-header {
     padding-inline: 4px;
   }
 
-  .template-editor__structure--reference .template-editor__structure-scroll {
+  .template-editor__structure--reference.template-editor__structure .template-editor__structure-scroll {
+    padding: 6px 4px 16px;
+    scrollbar-gutter: auto;
+  }
+
+  .template-editor__structure--reference.template-editor__structure .template-editor__region-list {
+    gap: 6px;
+    padding-inline: 2px;
+  }
+
+  .template-editor__structure--reference.template-editor__structure .template-editor__region {
+    gap: 4px;
+    padding-top: 0;
+  }
+
+  .template-editor__structure--reference.template-editor__structure .template-editor__region > ul {
+    gap: 4px;
+    padding-left: 2px;
+  }
+
+  .template-editor__structure--reference.template-editor__structure :is(
+    .template-editor__region-header,
+    .template-editor__layout-row,
+    .template-editor__slot-row
+  ) {
+    min-height: 36px;
+    grid-template-columns: minmax(0, 1fr) 20px;
+    margin-bottom: 0;
+  }
+
+  .template-editor__structure--reference.template-editor__structure :is(
+    .template-editor__region-select,
+    .template-editor__layout-select,
+    .template-editor__slot-select
+  ) {
+    min-height: 34px;
+  }
+
+  .template-editor__structure--reference.template-editor__structure .template-editor__region-select {
     padding-inline: 4px;
   }
 
-  .template-editor__structure--reference .template-editor__slot-select {
-    padding-left: 6px;
+  .template-editor__structure--reference .template-editor__region-select:has(.template-editor__drag-handle) {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .template-editor__structure--reference .template-editor__region > ul {
-    padding-left: 4px;
+  .template-editor__structure--reference :is(
+    .template-editor__region-select,
+    .template-editor__layout-select
+  ) .template-editor__drag-handle,
+  .template-editor__structure--reference .template-editor__layout-icon,
+  .template-editor__structure--reference .template-editor__contract-role-icon {
+    display: none;
+  }
+
+  .template-editor__structure--reference .template-editor__layout-select {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding-right: 2px;
+  }
+
+  .template-editor__structure--reference .template-editor__slot-select {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding-right: 2px;
+  }
+
+  .template-editor__structure--reference :is(
+    .template-editor__region-header,
+    .template-editor__layout-row,
+    .template-editor__slot-row
+  ) > :is(.template-editor__structure-more, .template-editor__slot-actions) {
+    position: static;
+    grid-column: 2;
+    padding: 0;
+    background: transparent;
+    transform: none;
+  }
+
+  .template-editor__structure--reference :is(
+    .template-editor__structure-more,
+    .template-editor__slot-actions > button
+  ) {
+    width: 20px;
+    min-width: 20px;
+  }
+
+  .template-editor__structure--reference :is(
+    .template-editor__region-select strong,
+    .template-editor__layout-select strong,
+    .template-editor__slot-select strong
+  ) {
+    min-width: 0;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: normal;
+    writing-mode: horizontal-tb;
+  }
+
+  .template-editor__structure--reference .template-editor__region-select strong {
+    font-size: 12px;
   }
 
   .template-editor__structure--reference .template-editor__region-empty {
     padding-inline: 4px;
     white-space: normal;
+  }
+}
+
+@container editor-structure-dock (max-width: 112px) {
+  .template-editor__structure--reference .template-editor__structure-scroll {
+    /* 96px 栏仍保留真实层级，同时为槽位名称与独立操作按钮留出空间。 */
+    --template-structure-indent-step: 8px;
+  }
+
+  .template-editor__structure--reference.template-editor__structure :is(
+    .template-editor__region-header,
+    .template-editor__layout-row,
+    .template-editor__slot-row
+  ) {
+    grid-template-columns: minmax(0, 1fr) 18px;
+  }
+
+  .template-editor__structure--reference :is(
+    .template-editor__structure-more,
+    .template-editor__slot-actions > button
+  ) {
+    width: 18px;
+    min-width: 18px;
+  }
+
+  .template-editor__structure--reference .template-editor__dynamic-node-palette {
+    padding: 8px 6px;
+  }
+
+  .template-editor__structure--reference .template-editor__add-trigger {
+    min-height: 36px;
+    padding-inline: 4px;
   }
 }
 
@@ -839,4 +1093,61 @@
   .template-editor__structure--reference .template-editor__slot-devices {
     transition: none;
   }
+}
+
+.template-editor__tree-toggle { width: 20px; min-height: 28px; padding: 0; border: 0; background: transparent; color: var(--adm-muted); cursor: pointer; }
+.template-editor__tree-toggle:focus-visible { outline: 2px solid var(--adm-focus); outline-offset: -2px; }
+.template-editor__tree-visibility { grid-column: 2 / -1; color: var(--adm-muted); font-size: 11px; }
+
+.template-editor__structure--reference .template-editor__layout-row > .template-editor__slot-actions {
+  grid-column: 3;
+}
+.template-editor__structure--reference.template-editor__structure .template-editor__slot-row.is-hidden .template-editor__slot-copy small {
+  display: block;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container editor-structure-dock (max-width: 176px) {
+  .template-editor__structure--reference.template-editor__structure :is(.template-editor__region-header, .template-editor__layout-row) {
+    grid-template-columns: 16px minmax(0, 1fr) 20px;
+  }
+  .template-editor__structure--reference.template-editor__structure :is(.template-editor__region-header, .template-editor__layout-row) > :is(.template-editor__structure-more, .template-editor__slot-actions) {
+    grid-column: 3;
+  }
+  .template-editor__tree-toggle { width: 16px; }
+}
+
+/* 每行由一个可聚焦 treeitem 包含名称、折叠指示与独立操作，避免树内孤立按钮。 */
+.template-editor__structure--reference.template-editor__structure :is(.template-editor__region-header, .template-editor__layout-row, .template-editor__slot-row) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.template-editor__structure--reference.template-editor__structure [role="treeitem"] {
+  display: flex;
+  align-items: center;
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.template-editor__structure--reference [role="treeitem"] > :is(strong, .template-editor__slot-copy) {
+  flex: 1 1 auto;
+}
+.template-editor__structure--reference [role="treeitem"] > :is(.template-editor__tree-toggle, .template-editor__slot-actions, .template-editor__structure-more) {
+  flex: 0 0 auto;
+}
+.template-editor__structure--reference [role="treeitem"] > :is(.template-editor__slot-actions, .template-editor__structure-more) {
+  margin-left: auto;
+}
+.template-editor__structure--reference .template-editor__region-header:is(:hover, :focus-within, .is-active) .template-editor__structure-more {
+  visibility: visible;
+}
+.template-editor__structure--reference.template-editor__structure [role="treeitem"][draggable="true"] {
+  cursor: grab;
+}
+.template-editor__structure--reference.template-editor__structure [role="treeitem"][draggable="true"]:active {
+  cursor: grabbing;
 }

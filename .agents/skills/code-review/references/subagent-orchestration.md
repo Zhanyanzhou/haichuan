@@ -23,7 +23,7 @@ When an assessor is justified, launch it after collecting minimal scope metadata
 Give it:
 
 - requested scope type and user intent
-- review chain ID, generation, trigger, scope mode, and parent resolution for generation `1`
+- review chain ID, generation, trigger, scope mode, and complete parent resolution for every incremental generation
 - baseline and target identifiers
 - changed paths, additions/deletions, and diff statistics
 - touched languages, frameworks, subsystems, and generated files
@@ -173,7 +173,7 @@ The coordinator must:
 2. Re-open the relevant code for every candidate that could affect approval.
 3. Reject claims that rely on stale paths, misunderstood intent, duplicate failure modes, or unsupported assumptions.
 4. Convert a disputed product choice without authoritative expected-behavior evidence into an approval-affecting `Question`; do not preserve a defect severity by substituting current code, tests, or history for product authority.
-5. For generation `1`, compare each semantic key with the parent resolution. Keep settled `Intentional`, `Disproved`, `Stale`, and `Duplicate` claims closed unless relevant code, the governing contract, or material evidence changed.
+5. For every incremental generation, compare each semantic key with the parent resolution, including relevant dispositions carried forward from earlier iterations. Keep settled `Intentional`, `Disproved`, `Stale`, and `Duplicate` claims closed unless relevant code, the governing contract, or material evidence changed.
 6. Merge candidates that describe the same failure mode.
 7. Split candidates whose impacts cross different contracts, users, security boundaries, or persisted data.
 8. Resolve conflicts with stronger evidence, not majority vote.

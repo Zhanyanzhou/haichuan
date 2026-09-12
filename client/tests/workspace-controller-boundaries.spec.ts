@@ -45,14 +45,58 @@ test.describe("店铺装修双工作区控制器边界", () => {
     const workspace = readClientSource(
       "src/page-builder/template-editor/TemplateWorkspace.tsx",
     );
+    const inspector = readClientSource(
+      "src/page-builder/template-editor/DynamicTemplateInspectorPanel.tsx",
+    );
 
     expect(controller).toContain("useTemplateEditorSession");
     expect(controller).toContain("expectedRevision");
     expect(controller).toContain("reconcileSaveResult");
     expect(controller).toContain("dynamicTemplateApi.publish");
     expect(workspace).not.toMatch(/dynamicTemplateApi\./);
-    expect(workspace).not.toContain("useTemplateEditorSession");
     expect(controller).not.toMatch(/pageDocumentApi\./);
+    expect(controller).not.toContain("document.activeElement");
+    expect(controller).not.toContain("querySelector");
+    expect(controller).not.toContain("scrollIntoView");
+    expect(controller).not.toMatch(/\.focus\s*\(/);
+    expect(controller).not.toMatch(/\.click\s*\(/);
+    expect(workspace).toContain("useTemplateEditorSession.getState()");
+    expect(workspace).toContain("publishReviewFocusRef");
+    expect(workspace).toContain("capturePublishReviewFocus");
+    expect(workspace).toContain("document.activeElement instanceof HTMLElement");
+    expect(workspace).toContain("publishReviewVisibleRef.current");
+    expect(workspace).toContain("isCurrentTemplateWorkspaceOwner(snapshot)");
+    expect(workspace).toContain("snapshot.focusElement?.isConnected");
+    expect(workspace).not.toContain("useState<PublishWorkflowState");
+    expect(workspace).not.toContain("setPublishWorkflow");
+    expect(inspector).toContain("publishReviewRef.current?.focus()");
+  });
+
+  test("TD-5C3 模板发布只接入冻结工作流且没有旧直写、第二 checksum 或页面写入", () => {
+    const controller = readClientSource(
+      "src/page-builder/template-editor/TemplateWorkspaceController.tsx",
+    );
+    const workflow = readClientSource(
+      "src/page-builder/template-editor/templatePublishWorkflow.ts",
+    );
+    const workspace = readClientSource(
+      "src/page-builder/template-editor/TemplateWorkspace.tsx",
+    );
+
+    expect(controller).toContain("createPublishReview");
+    expect(controller).toContain("beginReviewedSnapshotSave");
+    expect(controller).toContain("beginReviewedSnapshotPublish");
+    expect(controller).toContain("publishReviewedSnapshotSucceeded");
+    expect(controller).toContain("publishedVersionVerificationMatched");
+    expect(controller).toContain("catalogRefreshSucceeded");
+    expect(controller).not.toContain("setPublishing");
+    expect(controller).not.toContain("publishInFlightRef");
+    expect(controller).not.toMatch(/createHash|subtle\.digest|crypto\.subtle/);
+    expect(workspace).not.toMatch(/dynamicTemplateApi\.|pageDocumentApi\./);
+    expect(workflow).toContain("export type PublishWorkflowState");
+    expect(controller.match(/useState<PublishWorkflowState/g) ?? []).toHaveLength(1);
+    expect(controller.match(/dynamicTemplateApi\.publish/g) ?? []).toHaveLength(1);
+    expect(controller).not.toContain("PageDocument");
   });
 
   test("临时返回只切换工作区，显式关闭才清理模板会话", () => {

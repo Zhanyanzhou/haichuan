@@ -121,8 +121,6 @@ test("Page publish 创建不可变 revision、更新 publishedRevisionId 并记�
     errors: [],
     issues: [],
   });
-  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [];
-
   const published = await service.publishPageDocument(
     "home",
     17,
@@ -169,7 +167,7 @@ test("Public 严格读取 publishedRevisionId；更新的草稿和更高版本 r
         id: 7,
         pageKey: "home",
         publishedRevisionId: 37,
-        puckData: { content: [{ type: "文字横幅", props: { text: "更新草稿" } }] },
+        puckData: { content: [{ type: "首屏主视觉", props: { text: "更新草稿" } }] },
         metadata: { seoTitle: "更新草稿" },
         updatedAt: new Date("2026-08-30T09:00:00.000Z"),
       }),
@@ -229,7 +227,7 @@ test("后续全站设置不完整不会撤销最后一次合格发布快照", as
   assert.equal(settingsReads, 0);
 });
 
-test("Public 对旧规则签认但当前内容门禁失败的 revision 不下发正文", async () => {
+test("Public 对已签认 revision 的内容提醒不再撤销正文", async () => {
   const incomplete = formalHeroDocument("内容建设中");
   const service = new PageModulesService({
     pageDocument: {
@@ -257,17 +255,13 @@ test("Public 对旧规则签认但当前内容门禁失败的 revision 不下发
 
   const result = await service.getPublishedPageDocument("home");
 
-  assert.deepEqual(result, {
-    pageKey: "home",
-    status: "INVALID",
-    invalidReason: "publication-revalidation-required",
-    publishedAt: new Date("2026-08-30T07:00:00.000Z"),
-    updatedAt: new Date("2026-08-30T07:00:00.000Z"),
-    version: 37,
-  });
+  assert.equal(result?.status, "PUBLISHED");
+  assert.equal(result?.version, 37);
+  assert.equal((result?.puckData as any).content[0].props.title, "内容建设中");
 });
 
 test("后台线上快照把缺失当前签认纳入机器可读 readiness", async () => {
+  let settingsReads = 0;
   const puckData = formalHeroDocument("待重新签认的线上内容");
   const service = new PageModulesService({
     pageDocument: {
@@ -284,7 +278,12 @@ test("后台线上快照把缺失当前签认纳入机器可读 readiness", asyn
         createdAt: new Date("2026-08-30T07:00:00.000Z"),
       }),
     },
-    siteSetting: { findUnique: async () => ({ value: readySiteSettings }) },
+    siteSetting: {
+      findUnique: async () => {
+        settingsReads += 1;
+        return { value: readySiteSettings };
+      },
+    },
   } as unknown as PrismaService);
 
   const result = await service.getPublishedPageDocumentForAdmin("home");
@@ -294,10 +293,12 @@ test("后台线上快照把缺失当前签认纳入机器可读 readiness", asyn
   assert.ok(result?.publicationReadiness.issues.some(
     (issue: { code: string }) => issue.code === "page-validation-publication-attestation-stale",
   ));
+  assert.equal(settingsReads, 0);
 });
 
-test("Page publish 在全站正式设置准备度失败时不创建 revision", async () => {
+test("Page publish 不读取全站上线准备度并照常创建 revision", async () => {
   let revisionCreates = 0;
+  let siteSettingsReads = 0;
   const tx: any = {
     $queryRaw: async () => [{ id: 7 }],
     pageDocument: {
@@ -308,13 +309,29 @@ test("Page publish 在全站正式设置准备度失败时不创建 revision", a
         metadata: formalMetadata(),
         updatedAt: DRAFT_UPDATED_AT,
       }),
+      update: async (args: any) => ({
+        id: 7,
+        pageKey: "home",
+        puckData: formalHeroDocument("正式内容"),
+        metadata: formalMetadata(),
+        updatedAt: DRAFT_UPDATED_AT,
+        ...args.data,
+      }),
     },
     pageDocumentRevision: {
+      findFirst: async () => null,
       create: async () => {
         revisionCreates += 1;
         return { id: 13 };
       },
     },
+    siteSetting: {
+      findUnique: async () => {
+        siteSettingsReads += 1;
+        return null;
+      },
+    },
+    operationLog: { create: async () => ({ id: 1 }) },
   };
   const service = new PageModulesService({
     $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
@@ -324,20 +341,9 @@ test("Page publish 在全站正式设置准备度失败时不创建 revision", a
     errors: [],
     issues: [],
   });
-  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [{
-    code: "page-validation-site-publication-seo-review-missing",
-    severity: "error",
-    layer: "page",
-    path: "siteSettings.seoReviewReference",
-    message: "SEO 正式复核凭据缺失",
-  }];
-
-  await assert.rejects(
-    () => service.publishPageDocument("home", 17, DRAFT_UPDATED_AT.toISOString()),
-    (error: unknown) => error instanceof BadRequestException
-      && error.message.includes("页面发布校验失败"),
-  );
-  assert.equal(revisionCreates, 0);
+  await service.publishPageDocument("home", 17, DRAFT_UPDATED_AT.toISOString());
+  assert.equal(revisionCreates, 1);
+  assert.equal(siteSettingsReads, 0);
 });
 
 test("publishedRevisionId 为空时沿用现有未发布 fallback", async () => {
@@ -365,7 +371,7 @@ function createRollbackHarness(targetDocumentId = 7, pointerUpdateCount = 1) {
     id: 7,
     pageKey: "home",
     publishedRevisionId: 39,
-    puckData: { content: [{ type: "文字横幅", props: { text: "草稿保持" } }] },
+    puckData: { content: [{ type: "首屏主视觉", props: { text: "草稿保持" } }] },
     metadata: { seoTitle: "草稿保持" },
   };
   const tx: any = {
@@ -387,7 +393,7 @@ function createRollbackHarness(targetDocumentId = 7, pointerUpdateCount = 1) {
           id: 37,
           documentId: targetDocumentId,
           version: 37,
-          puckData: { content: [{ type: "文字横幅", props: { text: "线上 37" } }] },
+          puckData: { content: [{ type: "首屏主视觉", props: { text: "线上 37" } }] },
           metadata: formalMetadata(),
         };
       },
@@ -412,7 +418,6 @@ function createRollbackHarness(targetDocumentId = 7, pointerUpdateCount = 1) {
     errors: [],
     issues: [],
   });
-  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [];
   return { service, writes };
 }
 

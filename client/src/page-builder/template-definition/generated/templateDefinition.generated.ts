@@ -1,13 +1,392 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/template-definition.schema.json
- * SHA-256：5db5bfdec251a5965349b08f7acfba6275488696b082a3783831fba91fe66a7f
+ * SHA-256：7866f528ebea4b32659659dbbe765ec0d9ceb545f9776bf52f7496811d2813bd
  */
 
-export const DYNAMIC_TEMPLATE_SCHEMA_VERSION = 1;
+export const DYNAMIC_TEMPLATE_SCHEMA_VERSION = 3;
+export const DYNAMIC_TEMPLATE_SUPPORTED_SCHEMA_VERSIONS = [
+  1,
+  2,
+  3
+] as const;
 /** 统一模板产品模型版本；JSON Schema 自身仍独立按 schemaVersion 演进。 */
 export const TEMPLATE_DEFINITION_MODEL_VERSION = 2 as const;
-export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "5db5bfdec251a5965349b08f7acfba6275488696b082a3783831fba91fe66a7f";
+export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "7866f528ebea4b32659659dbbe765ec0d9ceb545f9776bf52f7496811d2813bd";
+export const TEMPLATE_RECIPE_SCHEMA = {
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "recipeVersion",
+    "presetVersion",
+    "purpose",
+    "canvas",
+    "layout",
+    "media",
+    "content",
+    "style",
+    "rules"
+  ],
+  "properties": {
+    "recipeVersion": {
+      "const": 1
+    },
+    "presetVersion": {
+      "enum": [
+        1,
+        2
+      ]
+    },
+    "purpose": {
+      "enum": [
+        "productPromotion",
+        "newProduct",
+        "event",
+        "brand",
+        "social",
+        "news",
+        "profile",
+        "general",
+        "custom"
+      ]
+    },
+    "customPurpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "aspectRatio"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "aspectRatio": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 4096
+        }
+      }
+    },
+    "layout": {
+      "enum": [
+        "topImageBottomContent",
+        "topContentBottomImage",
+        "leftImageRightContent",
+        "leftContentRightImage",
+        "fullImageOverlay",
+        "centerSubject",
+        "headerSubjectFooter",
+        "splitColumns",
+        "cards",
+        "free"
+      ]
+    },
+    "media": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "role",
+          "name",
+          "aspectRatio",
+          "fitMode",
+          "borderRadius",
+          "replaceable",
+          "allowCrop"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+          },
+          "role": {
+            "enum": [
+              "heroImage",
+              "logo",
+              "backgroundImage",
+              "secondaryImage",
+              "custom"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "aspectRatio": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 4096
+          },
+          "fitMode": {
+            "enum": [
+              "cover",
+              "contain",
+              "fill"
+            ]
+          },
+          "borderRadius": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 256
+          },
+          "replaceable": {
+            "type": "boolean"
+          },
+          "allowCrop": {
+            "type": "boolean"
+          },
+          "defaultImage": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "shape": {
+            "enum": [
+              "rectangle",
+              "circle"
+            ]
+          },
+          "freeRatio": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "content": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "role",
+          "name",
+          "defaultContent",
+          "maxLength",
+          "editable"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+          },
+          "role": {
+            "enum": [
+              "title",
+              "subtitle",
+              "description",
+              "brandName",
+              "tag",
+              "date",
+              "price",
+              "originalPrice",
+              "offer",
+              "cta",
+              "contact",
+              "customText",
+              "time",
+              "location",
+              "productName",
+              "sellingPoint",
+              "discount",
+              "personName",
+              "position",
+              "biography",
+              "socialInfo"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "defaultContent": {
+            "type": "string",
+            "maxLength": 10000
+          },
+          "maxLength": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "editable": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "style": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "variant",
+        "background",
+        "primaryColor",
+        "backgroundColor",
+        "textColor",
+        "radius",
+        "spacing"
+      ],
+      "properties": {
+        "variant": {
+          "enum": [
+            "minimal",
+            "business",
+            "premium",
+            "vibrant",
+            "tech",
+            "warm",
+            "custom",
+            "ultraMinimal"
+          ]
+        },
+        "background": {
+          "enum": [
+            "light",
+            "dark",
+            "brand",
+            "custom",
+            "softLight"
+          ]
+        },
+        "primaryColor": {
+          "type": "string",
+          "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+        },
+        "backgroundColor": {
+          "type": "string",
+          "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+        },
+        "textColor": {
+          "type": "string",
+          "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+        },
+        "radius": {
+          "enum": [
+            "none",
+            "small",
+            "medium",
+            "large",
+            "extraLarge"
+          ]
+        },
+        "spacing": {
+          "enum": [
+            "compact",
+            "standard",
+            "relaxed",
+            "extraRelaxed"
+          ]
+        },
+        "margin": {
+          "enum": [
+            "compact",
+            "standard",
+            "relaxed"
+          ]
+        },
+        "alignment": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "secondaryTextColor": {
+          "type": "string",
+          "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aspectLocked"
+      ],
+      "properties": {
+        "aspectLocked": {
+          "type": "boolean"
+        },
+        "mediaArrangement": {
+          "description": "图片区排列方向；省略或 auto 保留历史自动排布，row/column 固定主轴，不随单张图片比例改变。",
+          "enum": [
+            "auto",
+            "row",
+            "column"
+          ]
+        }
+      }
+    }
+  }
+} as const;
+export interface TemplateRecipe {
+  recipeVersion: 1;
+  presetVersion: 1 | 2;
+  purpose: "productPromotion" | "newProduct" | "event" | "brand" | "social" | "news" | "profile" | "general" | "custom";
+  customPurpose?: string;
+  canvas: {
+  width: number;
+  height: number;
+  aspectRatio: number;
+};
+  layout: "topImageBottomContent" | "topContentBottomImage" | "leftImageRightContent" | "leftContentRightImage" | "fullImageOverlay" | "centerSubject" | "headerSubjectFooter" | "splitColumns" | "cards" | "free";
+  media: Array<{
+  id: string;
+  role: "heroImage" | "logo" | "backgroundImage" | "secondaryImage" | "custom";
+  name: string;
+  aspectRatio: number;
+  fitMode: "cover" | "contain" | "fill";
+  borderRadius: number;
+  replaceable: boolean;
+  allowCrop: boolean;
+  defaultImage?: string;
+  shape?: "rectangle" | "circle";
+  freeRatio?: boolean;
+}>;
+  content: Array<{
+  id: string;
+  role: "title" | "subtitle" | "description" | "brandName" | "tag" | "date" | "price" | "originalPrice" | "offer" | "cta" | "contact" | "customText" | "time" | "location" | "productName" | "sellingPoint" | "discount" | "personName" | "position" | "biography" | "socialInfo";
+  name: string;
+  defaultContent: string;
+  maxLength: number;
+  editable: boolean;
+}>;
+  style: {
+  variant: "minimal" | "business" | "premium" | "vibrant" | "tech" | "warm" | "custom" | "ultraMinimal";
+  background: "light" | "dark" | "brand" | "custom" | "softLight";
+  primaryColor: string;
+  backgroundColor: string;
+  textColor: string;
+  radius: "none" | "small" | "medium" | "large" | "extraLarge";
+  spacing: "compact" | "standard" | "relaxed" | "extraRelaxed";
+  margin?: "compact" | "standard" | "relaxed";
+  alignment?: "left" | "center" | "right";
+  secondaryTextColor?: string;
+};
+  rules: {
+  aspectLocked: boolean;
+  mediaArrangement?: "auto" | "row" | "column";
+};
+}
 export const DYNAMIC_TEMPLATE_NODE_TYPES = [
   "Section",
   "Container",
@@ -27,30 +406,7 @@ export const DYNAMIC_TEMPLATE_NODE_TYPES = [
   "IconSlot",
   "ProductSlot",
   "CollectionSlot",
-  "Video",
-  "Carousel",
-  "Hotspot",
-  "BeforeAfter",
-  "Appointment",
-  "ProductCard",
-  "ProductCollection",
-  "CategoryCollection",
-  "HeroTemplate",
-  "FullBleedTemplate",
-  "SinglePosterTemplate",
-  "DoublePosterTemplate",
-  "TextBannerTemplate",
-  "JourneyTemplate",
-  "GalleryTemplate",
-  "LookbookTemplate",
-  "SceneShoppingTemplate",
-  "BrandPointsTemplate",
-  "ServicePromisesTemplate",
-  "CertificatesTemplate",
-  "StoreInfoTemplate",
-  "TestimonialsTemplate",
-  "LimitedEventTemplate",
-  "CraftDetailsTemplate"
+  "HeroTemplate"
 ] as const;
 export const DYNAMIC_TEMPLATE_SLOT_TYPES = [
   "image",
@@ -63,30 +419,7 @@ export const DYNAMIC_TEMPLATE_SLOT_TYPES = [
   "icon",
   "product",
   "collection",
-  "video",
-  "carousel",
-  "hotspot",
-  "beforeAfter",
-  "appointment",
-  "productCard",
-  "productCollection",
-  "categoryCollection",
-  "heroTemplate",
-  "fullBleedTemplate",
-  "singlePosterTemplate",
-  "doublePosterTemplate",
-  "textBannerTemplate",
-  "journeyTemplate",
-  "galleryTemplate",
-  "lookbookTemplate",
-  "sceneShoppingTemplate",
-  "brandPointsTemplate",
-  "servicePromisesTemplate",
-  "certificatesTemplate",
-  "storeInfoTemplate",
-  "testimonialsTemplate",
-  "limitedEventTemplate",
-  "craftDetailsTemplate"
+  "heroTemplate"
 ] as const;
 export const DYNAMIC_TEMPLATE_NODE_REGISTRY = {
   "Section": {
@@ -320,332 +653,10 @@ export const DYNAMIC_TEMPLATE_NODE_REGISTRY = {
     ],
     "canHaveChildren": false
   },
-  "Video": {
-    "label": "视频组件",
-    "kind": "slot",
-    "slotType": "video",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "Carousel": {
-    "label": "轮播组件",
-    "kind": "slot",
-    "slotType": "carousel",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "Hotspot": {
-    "label": "热区组件",
-    "kind": "slot",
-    "slotType": "hotspot",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "BeforeAfter": {
-    "label": "前后对比组件",
-    "kind": "slot",
-    "slotType": "beforeAfter",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "Appointment": {
-    "label": "预约入口组件",
-    "kind": "slot",
-    "slotType": "appointment",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "ProductCard": {
-    "label": "单品展示组件",
-    "kind": "slot",
-    "slotType": "productCard",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "ProductCollection": {
-    "label": "商品集合组件",
-    "kind": "slot",
-    "slotType": "productCollection",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "CategoryCollection": {
-    "label": "分类集合组件",
-    "kind": "slot",
-    "slotType": "categoryCollection",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
   "HeroTemplate": {
     "label": "首屏主视觉组件",
     "kind": "slot",
     "slotType": "heroTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "FullBleedTemplate": {
-    "label": "全屏出血图组件",
-    "kind": "slot",
-    "slotType": "fullBleedTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "SinglePosterTemplate": {
-    "label": "单图海报组件",
-    "kind": "slot",
-    "slotType": "singlePosterTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "DoublePosterTemplate": {
-    "label": "双图海报组件",
-    "kind": "slot",
-    "slotType": "doublePosterTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "TextBannerTemplate": {
-    "label": "文字横幅组件",
-    "kind": "slot",
-    "slotType": "textBannerTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "JourneyTemplate": {
-    "label": "定制流程组件",
-    "kind": "slot",
-    "slotType": "journeyTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "GalleryTemplate": {
-    "label": "作品画廊组件",
-    "kind": "slot",
-    "slotType": "galleryTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "LookbookTemplate": {
-    "label": "佩戴灵感组件",
-    "kind": "slot",
-    "slotType": "lookbookTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "SceneShoppingTemplate": {
-    "label": "场景选购组件",
-    "kind": "slot",
-    "slotType": "sceneShoppingTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "BrandPointsTemplate": {
-    "label": "品牌要点组件",
-    "kind": "slot",
-    "slotType": "brandPointsTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "ServicePromisesTemplate": {
-    "label": "服务承诺组件",
-    "kind": "slot",
-    "slotType": "servicePromisesTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "CertificatesTemplate": {
-    "label": "资质证书组件",
-    "kind": "slot",
-    "slotType": "certificatesTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "StoreInfoTemplate": {
-    "label": "门店信息组件",
-    "kind": "slot",
-    "slotType": "storeInfoTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "TestimonialsTemplate": {
-    "label": "评价实拍组件",
-    "kind": "slot",
-    "slotType": "testimonialsTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "LimitedEventTemplate": {
-    "label": "限时活动组件",
-    "kind": "slot",
-    "slotType": "limitedEventTemplate",
-    "rootOnly": false,
-    "allowedParents": [
-      "Container",
-      "Grid",
-      "Row",
-      "Column",
-      "Stack"
-    ],
-    "canHaveChildren": false
-  },
-  "CraftDetailsTemplate": {
-    "label": "工艺细节组件",
-    "kind": "slot",
-    "slotType": "craftDetailsTemplate",
     "rootOnly": false,
     "allowedParents": [
       "Container",
@@ -665,8 +676,10 @@ export const DYNAMIC_TEMPLATE_METADATA_FIELDS = [
   "recommendedFor",
   "desktopRatio",
   "mobileRatio",
+  "canvasSize",
   "previewDesktopWidth",
   "previewMobileWidth",
+  "previewTabletWidth",
   "mobileBreakpoint",
   "minViewportWidth",
   "maxViewportWidth",
@@ -683,6 +696,10 @@ export const DYNAMIC_TEMPLATE_METADATA_INTEGER_BOUNDS = {
   "previewMobileWidth": {
     "minimum": 280,
     "maximum": 767
+  },
+  "previewTabletWidth": {
+    "minimum": 768,
+    "maximum": 1023
   },
   "mobileBreakpoint": {
     "minimum": 480,
@@ -701,9 +718,10 @@ export const DYNAMIC_TEMPLATE_METADATA_INTEGER_BOUNDS = {
 export type DynamicTemplateNodeType = typeof DYNAMIC_TEMPLATE_NODE_TYPES[number];
 export type DynamicTemplateSlotType = typeof DYNAMIC_TEMPLATE_SLOT_TYPES[number];
 export type DynamicTemplateDevice = "desktop" | "mobile";
+export type TemplateBreakpoint = "desktop" | "tablet" | "mobile";
 export type DynamicTemplateLengthUnit = "px" | "%" | "rem" | "vw" | "vh";
 export type DynamicTemplateDisplay = "block" | "flex" | "grid" | "none";
-export type DynamicTemplateHeightMode = "auto" | "min-height" | "aspect-ratio" | "fixed" | "viewport";
+export type DynamicTemplateHeightMode = "auto" | "fit" | "fill" | "min-height" | "aspect-ratio" | "fixed" | "viewport";
 export type DynamicTemplateLayoutMode = "flow" | "free";
 
 export interface DynamicTemplateLength {
@@ -736,12 +754,16 @@ export interface DynamicTemplatePlacement {
 
 export interface DynamicTemplateResponsiveRules {
   display: DynamicTemplateDisplay;
+  hidden?: boolean;
   direction?: "row" | "column";
+  wrap?: "nowrap" | "wrap";
   order: number;
   width: DynamicTemplateSize;
   height: DynamicTemplateHeightRule;
   maxWidth?: DynamicTemplateLength;
+  minWidth?: DynamicTemplateLength;
   minHeight?: DynamicTemplateLength;
+  maxHeight?: DynamicTemplateLength;
   gap?: DynamicTemplateLength;
   padding?: DynamicTemplateBoxSpacing;
   margin?: DynamicTemplateBoxSpacing;
@@ -749,11 +771,40 @@ export interface DynamicTemplateResponsiveRules {
   justifyContent?: "start" | "center" | "end" | "space-between" | "space-around";
   columns?: number[];
   backgroundToken?: string;
+  backgroundColor?: string;
+  backgroundImage?: string;
+  backgroundGradient?: { from: string; to: string; angle: number } | null;
+  opacity?: number;
   borderToken?: string;
   radius?: DynamicTemplateLength;
   overflow?: "visible" | "hidden" | "clip";
   layoutMode?: DynamicTemplateLayoutMode;
   placement?: DynamicTemplatePlacement;
+  anchor?: DynamicTemplateAnchor;
+}
+
+export interface DynamicTemplateAnchor {
+  horizontal: "left" | "center" | "right";
+  vertical: "top" | "center" | "bottom";
+  offsetX: { value: number; unit: "px" | "%" };
+  offsetY: { value: number; unit: "px" | "%" };
+}
+
+/** 长度、高度与锚点原子覆盖；间距和自由矩形按成员继承。 */
+export type DynamicTemplateResponsiveOverride = Partial<Omit<
+  DynamicTemplateResponsiveRules, "padding" | "margin" | "placement" | "anchor"
+>> & {
+  padding?: Partial<DynamicTemplateBoxSpacing>;
+  margin?: Partial<DynamicTemplateBoxSpacing>;
+  placement?: Partial<DynamicTemplatePlacement> | null;
+  anchor?: DynamicTemplateAnchor | null;
+};
+
+export interface DynamicTemplateResponsiveMap {
+  desktop: DynamicTemplateResponsiveRules;
+  /** schema1 必须是完整规则，schema2 是有意修改的属性；读取必须经过 resolver。 */
+  mobile: DynamicTemplateResponsiveOverride;
+  tablet?: DynamicTemplateResponsiveOverride;
 }
 
 export interface DynamicTemplateNodeProps {
@@ -794,7 +845,7 @@ export interface DynamicTemplateNode {
   props: DynamicTemplateNodeProps;
   authoring?: DynamicTemplateNodeAuthoring;
   instanceEditPolicy?: DynamicTemplateInstanceEditPolicy;
-  responsive: Record<DynamicTemplateDevice, DynamicTemplateResponsiveRules>;
+  responsive: DynamicTemplateResponsiveMap;
   hidden: boolean;
 }
 
@@ -809,6 +860,9 @@ export interface DynamicTemplateSlotValidation {
 }
 
 export interface DynamicTemplateSlotRules {
+  fontFamily?: "system" | "serif" | "sans";
+  color?: string;
+  letterSpacing?: number;
   aspectRatio?: string;
   objectFit?: "cover" | "contain" | "fill";
   objectPosition?: string;
@@ -822,6 +876,7 @@ export interface DynamicTemplateSlotRules {
 }
 
 export interface DynamicTemplateSlotDefinition {
+  semanticRole?: string;
   slotId: string;
   key: string;
   type: DynamicTemplateSlotType;
@@ -833,7 +888,14 @@ export interface DynamicTemplateSlotDefinition {
   emptyPolicy?: "hide" | "use-default";
   validation: DynamicTemplateSlotValidation;
   desktopRules: DynamicTemplateSlotRules;
+  tabletRules?: DynamicTemplateSlotRules;
   mobileRules: DynamicTemplateSlotRules;
+}
+
+export interface DynamicTemplateCanvasSize {
+  width: number;
+  height: number;
+  aspectRatio: number;
 }
 
 export interface DynamicTemplateMetadata {
@@ -844,8 +906,10 @@ export interface DynamicTemplateMetadata {
   recommendedFor: string[];
   desktopRatio: string;
   mobileRatio: string;
+  canvasSize?: DynamicTemplateCanvasSize;
   previewDesktopWidth?: number;
   previewMobileWidth?: number;
+  previewTabletWidth?: number;
   mobileBreakpoint?: number;
   minViewportWidth?: number;
   maxViewportWidth?: number;
@@ -857,7 +921,9 @@ export interface DynamicTemplateMetadata {
 
 /** 统一母模板的正式产品合同。 */
 export interface TemplateDefinitionV2 {
-  schemaVersion: typeof DYNAMIC_TEMPLATE_SCHEMA_VERSION;
+  /** 创建来源快照；重新打开时不能用它覆盖人工精修后的节点树。 */
+  templateRecipe?: TemplateRecipe;
+  schemaVersion: typeof DYNAMIC_TEMPLATE_SUPPORTED_SCHEMA_VERSIONS[number];
   templateId: string;
   name: string;
   description?: string;

@@ -3,7 +3,7 @@
 > 本文件是 4000+ 商品正式导入、后台编辑与 AI 开发**共同遵守的商品数据标准**。
 > 规定每个字段的含义、类型、必填、来源、当前多写法；明确 Product / SKU / Inventory / 价格 / 分类 / 图片之间的标准关系。
 > 与其他治理文件的关系：硬规则见根目录 `PROJECT_RULES.md`；双客群、三报价、客户确认与订单冻结的产品业务决定源见 `docs/DECISIONS.md` D.19；其他架构决策与【待决策】仍见 `docs/DECISIONS.md`；执行流程见 `WORKFLOW.md`。本文件只把已批准决定落实为商品字段语义和必要校验数值，不建立第二份业务决定源。
-> 最近核对：2026-08-23（基于当前工作区代码与 `server/prisma/schema.prisma`；数据库迁移执行状态未核验）。
+> 基础字段核对：2026-08-23；分类消费链于 2026-09-11 按当前源码修正。未重新核验本文全部字段或目标数据库状态。
 
 ## 阅读约定
 
@@ -123,11 +123,9 @@
 
 - `Product.categoryId` **必填、单分类、强校验**（分类不存在 → 400，不自动建分类）。
 - 🟡 **服务层只支持创建 1/2/3 级**（`categories.service.ts` 校验 `parent.level ∈ [1,2]`），**第 4 级代码无法创建**（schema 注释写"1-4"）——若主数据规划 4 级，属【待产品决策】。
-- 现有种子分类（`seed.ts`）：4 个一级（手镯 bracelet / 吊坠 pendant / 戒指 ring / 耳饰 earring）+ 若干二三级。
-- ⚠️ **三套分类体系并存且互不对应**（必先统一）：
-  1. `seed.ts` 真实分类（int id，3 级，吊坠下 6 个二类）；
-  2. `client/src/data/catalogData.ts` **mock 分类**（string id 如 `'pendant'`/`'pingan-kou'`，2 级，吊坠下 15 个二类）——仅 Catalog 页客户端 filter，**不连后端**；
-  3. `client/src/data/homeCampaign.ts` 硬编码 `categoryId=6/17`。
+- 分类事实以目标数据库的 `Category` 记录为准；`seed.ts` 是开发初始化输入，不能代替正式分类主数据和商品映射的签认。
+- [Catalog](../client/src/pages/public/Catalog/index.tsx)通过 [useProductData / useProductCategories](../client/src/hooks/useProductData.ts)读取商品与分类；分类请求进入 [categoryClient](../client/src/services/clients/categoryClient.ts)。默认开发和生产使用真实 API，显式 Mock 模式使用测试夹具。
+- Catalog 对 `catalogData.ts` 的引用仅用于 `CatalogProduct` 类型。正式导入仍须核验目标分类树与每个商品的 `categoryId` 映射。
 - ⚠️ **AI 分类（`ai-classify`）不回写 `Product.categoryId`**：`confirmClassification` 只更新 `AIClassifyRecord`，且记录本身不带 `productId`。AI 预测与商品正式分类当前无自动衔接。
 
 ---
@@ -333,7 +331,7 @@ Inventory (skuId+warehouseId 唯一) → Warehouse (SHOWROOM/FACTORY/STORE)
 4. **背面图 type 丢失**：枚举无 `BACK`；BACK → `DETAIL`（或脚本硬编码 `FRONT`），视角语义丢失。
 5. **type 默认值不一致**：schema `FRONT` vs `addImage` `SIDE`。
 6. **type 语义双关**：`setPrimaryImage` 设主图时改写 `FRONT↔SIDE`，破坏原始视角。
-7. **分类三套并存**：seed.ts 真实 / catalogData.ts mock / homeCampaign 硬编码，id/slug 互不对应 → 前台筛选与后台编辑错位。
+7. **分类映射需按目标库核验**：当前 Catalog 使用商品与分类 API；正式导入必须映射到目标 `Category` 记录，不能沿用测试夹具或历史硬编码 ID。
 8. **categoryId 硬编码**：脚本用 `1`/`9`，4000+ 全堆 1-2 个分类。
 9. **AI 分类不回写**：`confirmClassification` 不改 `Product.categoryId`，记录不带 `productId`。
 10. **历史发布门禁缺口已收敛**：所有进入 `PUBLISHED` 的路径必须经过统一、按 `SalesMode` 分支的门禁；旧脚本仍不得执行。
@@ -385,7 +383,7 @@ Inventory (skuId+warehouseId 唯一) → Warehouse (SHOWROOM/FACTORY/STORE)
 
 1. **每条商品的 salesMode**（13.1）——决定是否必须提供直购 SKU、成交价与 Inventory；模式语义本身不再待决。
 2. **SKU、Inventory 与仓库输入**（13.2 / 13.3）——可售库存固定写 Inventory；只需确定是否导入直购商品及其精确仓库数据。
-3. **分类主数据与映射表**（13.4）——预建分类树 + 每个商品 code → categoryId 的权威映射；统一三套分类体系。
+3. **分类主数据与映射表**（13.4）——确认目标分类树 + 每个商品 code → categoryId 的权威映射，逐项核验分类存在性与归属。
 4. **图片角度方案**（13.5）——决定背面图如何入库与展示。
 5. **同款聚合策略**（13.11）——避免 `ATP####` 被拆成多商品、避免不同实物混入。
 6. **SKU 价格数据源**（13.10 / 13.14）——直购 SKU 的成交价、金重和工费从哪里获得；Product 最低价由系统派生。

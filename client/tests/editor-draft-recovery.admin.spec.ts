@@ -59,6 +59,168 @@ const heroBlock = {
   },
 };
 
+const versionedMediaTemplateId = "tpl_draft_media";
+
+function createVersionedMediaDefinition(version: 1 | 2) {
+  return {
+    schemaVersion: 1,
+    templateId: versionedMediaTemplateId,
+    name: `草稿媒体模板 v${version}`,
+    description: `用于验证页面设置恢复精确模板版本 ${version}`,
+    metadata: {
+      category: "品牌展示",
+      purpose: "草稿媒体授权回归",
+      layoutType: "单图展示",
+      slotSummary: "1 个图片槽位",
+      recommendedFor: ["home"],
+      desktopRatio: "4:3",
+      mobileRatio: "4:3",
+      visualRole: "support-stage",
+      headerCompatibility: ["solid"],
+      tags: ["draft-recovery"],
+    },
+    rootNodeId: "node_root",
+    nodes: {
+      node_root: {
+        nodeId: "node_root",
+        type: "Section",
+        name: "模板根节点",
+        childIds: ["node_container"],
+        props: { semanticTag: "section" },
+        responsive: {
+          desktop: {
+            display: "block",
+            order: 0,
+            width: "fill",
+            height: { mode: "auto" },
+          },
+          mobile: {
+            display: "block",
+            order: 0,
+            width: "fill",
+            height: { mode: "auto" },
+          },
+        },
+        hidden: false,
+      },
+      node_container: {
+        nodeId: "node_container",
+        type: "Container",
+        name: "图片容器",
+        childIds: ["node_image"],
+        props: {},
+        responsive: {
+          desktop: {
+            display: "block",
+            order: 0,
+            width: "fill",
+            height: { mode: "auto" },
+          },
+          mobile: {
+            display: "block",
+            order: 0,
+            width: "fill",
+            height: { mode: "auto" },
+          },
+        },
+        hidden: false,
+      },
+      node_image: {
+        nodeId: "node_image",
+        type: "ImageSlot",
+        name: "主图",
+        slotId: "slot_image",
+        childIds: [],
+        props: {},
+        instanceEditPolicy: {
+          position: true,
+          size: true,
+          zIndex: true,
+          imageFit: true,
+          imageFocus: true,
+          minWidthPercent: 50,
+          maxWidthPercent: 120,
+          maxOffsetPercent: 20,
+        },
+        responsive: {
+          desktop: {
+            display: "block",
+            order: 0,
+            width: "fill",
+            height: { mode: "aspect-ratio", ratio: { width: 4, height: 3 } },
+          },
+          mobile: {
+            display: "block",
+            order: 0,
+            width: "fill",
+            height: { mode: "aspect-ratio", ratio: { width: 4, height: 3 } },
+          },
+        },
+        hidden: false,
+      },
+    },
+    slots: {
+      slot_image: {
+        slotId: "slot_image",
+        key: "mainImage",
+        type: "image",
+        label: "主图",
+        required: true,
+        editable: true,
+        hideable: false,
+        validation: { recommendedWidth: 1200, recommendedHeight: 900 },
+        desktopRules: {
+          aspectRatio: "4:3",
+          objectFit: "cover",
+          objectPosition: "center center",
+        },
+        mobileRules: {
+          aspectRatio: "4:3",
+          objectFit: "cover",
+          objectPosition: "center center",
+        },
+      },
+    },
+    defaultContent: {
+      slot_image: { src: `/uploads/template-v${version}.jpg`, alt: `模板版本 ${version}` },
+    },
+  };
+}
+
+function createVersionedMediaPuckData(version: 1 | 2, assetUrl: string) {
+  const definition = createVersionedMediaDefinition(version);
+  return {
+    content: [{
+      type: "动态模板实例",
+      props: {
+        id: `dynamic-media-block-v${version}`,
+        instanceSchemaVersion: 1,
+        instanceId: `dynamic-media-instance-v${version}`,
+        templateId: versionedMediaTemplateId,
+        templateVersion: version,
+        moduleName: definition.name,
+        contentBySlotId: {
+          slot_image: { src: assetUrl, alt: `页面版本 ${version} 主图` },
+        },
+        layoutOverridesByNodeId: {},
+        hiddenSlotIds: [],
+        isVisible: true,
+      },
+    }],
+    zones: {},
+    root: { props: {} },
+    resolvedDynamicTemplates: {
+      [`${versionedMediaTemplateId}@${version}`]: {
+        templateId: versionedMediaTemplateId,
+        version,
+        schemaVersion: definition.schemaVersion,
+        definitionChecksum: `checksum-v${version}`,
+        definition,
+      },
+    },
+  };
+}
+
 const publishedDoc = {
   id: 9001,
   pageKey: "home",
@@ -450,7 +612,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       .click();
     await expect(page.getByRole("group", { name: /首屏.*图层操作/ })).toHaveCount(0);
     await page.getByRole("button", { name: "更多编辑操作" }).click();
-    await expect(page.getByRole("menuitem", { name: "套用推荐结构" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "套用首屏测试结构" })).toHaveCount(0);
     await expect(page.getByRole("menuitem", { name: "页面设置" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "导入方案 JSON" })).toHaveCount(0);
     await page.keyboard.press("Escape");
@@ -477,6 +639,106 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     expect(savePayloads[0].puckData.content[0].props.title).toBe(
       "返回后仍需保留的未保存标题",
     );
+  });
+
+  test("从线上 v1 打开页面设置时恢复草稿 v2 定义并保留媒体授权", async ({ page }) => {
+    const publishedAssetUrl = "/svg/template-hero.svg?fixture=published-v1";
+    const draftAssetUrl = "/svg/template-hero.svg?fixture=draft-v2";
+    const draftMediaRight = {
+      assetUrl: draftAssetUrl,
+      source: "品牌自有拍摄",
+      authorizationId: "HC-DRAFT-V2-001",
+    };
+    const savePayloads: any[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "PUT"
+        && new URL(request.url()).pathname.endsWith("/page-modules/document")
+      ) {
+        savePayloads.push(request.postDataJSON());
+      }
+    });
+    await page.unroute(`${API_PREFIX}*`);
+    await mockEditorApis(page, {
+      published: {
+        ...publishedDoc,
+        puckData: createVersionedMediaPuckData(1, publishedAssetUrl),
+        metadata: {
+          seoTitle: "线上 v1",
+          mediaRights: [{
+            assetUrl: publishedAssetUrl,
+            source: "线上素材来源",
+            authorizationId: "HC-ONLINE-V1-001",
+          }],
+        },
+      },
+      draft: {
+        ...draftDoc,
+        puckData: createVersionedMediaPuckData(2, draftAssetUrl),
+        metadata: {
+          seoTitle: "草稿 v2",
+          mediaRights: [draftMediaRight],
+        },
+      },
+    });
+
+    await page.goto("/admin/editor/home");
+    const status = page.locator(".homepage-editor__draft-status");
+    await expect(status).toContainText("有未发布更改", { timeout: 10_000 });
+    await expect(
+      page.getByRole("region", { name: "模板实例属性" })
+        .getByText("草稿媒体模板 v2", { exact: true }),
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "查看线上版本" }).click();
+    await expect(status).toHaveAttribute("data-mode", "readonly");
+    await expect(
+      page.getByText("线上版本仅供查看", { exact: true }),
+    ).toHaveCount(2);
+
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "页面设置" }).click();
+
+    const drawer = page.getByRole("dialog", { name: "页面展示设置" });
+    await expect(drawer).toBeVisible();
+    await expect(status).not.toHaveAttribute("data-mode", "readonly");
+    await expect(
+      page.getByText("已返回未发布草稿", { exact: true }),
+    ).toBeVisible();
+
+    const rights = drawer.getByRole("region", { name: "媒体来源与授权" });
+    await expect(rights).toContainText("1 项当前公开素材");
+    await expect(rights.getByTestId("page-media-right")).toHaveCount(1);
+    await expect(rights.locator("code")).toHaveText(draftAssetUrl);
+    await expect(rights).not.toContainText(publishedAssetUrl);
+    await rights.getByText("按需编辑 1 项素材来源记录", { exact: true }).click();
+    await expect(
+      rights.getByRole("textbox", { name: "素材 1 来源" }),
+    ).toHaveValue(draftMediaRight.source);
+    await expect(
+      rights.getByRole("textbox", { name: "素材 1 授权编号" }),
+    ).toHaveValue(draftMediaRight.authorizationId);
+
+    await drawer.getByRole("button", { name: "保存整页草稿" }).click();
+    await expect.poll(() => savePayloads.length).toBe(1);
+    expect(savePayloads[0]).toMatchObject({
+      puckData: {
+        content: [{
+          props: {
+            templateId: versionedMediaTemplateId,
+            templateVersion: 2,
+            contentBySlotId: {
+              slot_image: { src: draftAssetUrl },
+            },
+          },
+        }],
+      },
+      metadata: {
+        seoTitle: "草稿 v2",
+        mediaRights: [draftMediaRight],
+      },
+    });
   });
 
   test("移动窄屏查看线上版本后仍可恢复未保存画布", async ({ page }) => {
@@ -1130,119 +1392,6 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     expect(saveRequests).toBe(1);
   });
 
-  test("保存并发布后采用服务端清洗结果，不在当前会话回写废弃字段", async ({
-    page,
-  }) => {
-    const legacyAppointment = {
-      type: "预约入口",
-      props: {
-        id: "legacy-appointment",
-        title: "预约鉴赏",
-        subtitle: "旧版预约说明",
-        buttonText: "立即预约",
-        linkUrl: "/contact",
-        phone: "400-legacy-copy",
-      },
-    };
-    const savePayloads: any[] = [];
-    page.on("request", (request) => {
-      if (
-        request.method() === "PUT" &&
-        new URL(request.url()).pathname.endsWith("/page-modules/document")
-      ) {
-        savePayloads.push(request.postDataJSON());
-      }
-    });
-
-    await page.unroute(`${API_PREFIX}*`);
-    await mockEditorApis(page, {
-      draft: {
-        ...draftDoc,
-        puckData: {
-          content: [heroBlock, legacyAppointment],
-          zones: {
-            secondary: [
-              {
-                ...legacyAppointment,
-                props: { ...legacyAppointment.props, id: "legacy-zone-appointment" },
-              },
-            ],
-          },
-          root: { props: {} },
-        },
-        metadata: {
-          seoTitle: "草稿版本",
-          contentTemplateContract: { schemaVersion: 2 },
-        },
-      },
-      normalizeSavedPuckData: (puckData) => {
-        const normalizeBlock = (block: any) => {
-          if (block.type === "预约入口") {
-            const { phone: _legacyPhone, ...props } = block.props;
-            return { ...block, props };
-          }
-          return block.type === "首屏主视觉"
-            ? {
-                ...block,
-                props: { ...block.props, title: "服务端规范后的标题" },
-              }
-            : block;
-        };
-        return {
-          ...puckData,
-          content: puckData.content.map(normalizeBlock),
-          zones: Object.fromEntries(
-            Object.entries(puckData.zones ?? {}).map(([zone, blocks]) => [
-              zone,
-              Array.isArray(blocks) ? blocks.map(normalizeBlock) : blocks,
-            ]),
-          ),
-        };
-      },
-      normalizeSavedMetadata: (metadata) => {
-        const { contentTemplateContract: _legacyContract, ...rest } = metadata;
-        return rest;
-      },
-    });
-
-    await page.goto("/admin/editor/home");
-    let heroTitleInput = await selectHeroTitleInput(page);
-    await expect(heroTitleInput).toHaveValue("草稿标题");
-
-    await page.locator(".homepage-editor__toolbar-publish").click();
-    await expect(page.getByText("店铺首页已发布")).toBeVisible();
-    await page
-      .locator(".homepage-editor__layer-item")
-      .filter({ hasText: "首屏" })
-      .click();
-    heroTitleInput = await selectHeroTitleInput(page);
-    await expect(heroTitleInput).toHaveValue("服务端规范后的标题");
-
-    const saveAfterPublish = page.waitForResponse(
-      (response) =>
-        response.request().method() === "PUT" &&
-        new URL(response.url()).pathname.endsWith("/page-modules/document"),
-    );
-    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
-    await saveAfterPublish;
-
-    expect(savePayloads).toHaveLength(2);
-    expect(
-      savePayloads[0].puckData.content.find(
-        (block: any) => block.type === "首屏主视觉",
-      ).props.title,
-    ).toBe("草稿标题");
-    expect(
-      savePayloads[1].puckData.content.find(
-        (block: any) => block.type === "首屏主视觉",
-      ).props.title,
-    ).toBe("服务端规范后的标题");
-    expect(savePayloads[0].metadata).toHaveProperty("contentTemplateContract");
-    expect(savePayloads[1].metadata).not.toHaveProperty(
-      "contentTemplateContract",
-    );
-  });
-
   test("发布前保存等待期间出现新修改时中止发布并保留本地画布", async ({
     page,
   }) => {
@@ -1368,7 +1517,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
                   puckData: {
                     content: [
                       {
-                        type: "文字横幅",
+                        type: "首屏主视觉",
                         props: { id: "custom-copy", title: "定制页草稿" },
                       },
                     ],

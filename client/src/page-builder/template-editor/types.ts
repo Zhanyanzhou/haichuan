@@ -38,6 +38,10 @@ export interface TemplateEditorDraft {
   localDraftId: string;
   versionNote: string;
   sourceReference?: string;
+  /** 旧格式原样复制的可信草稿快照；仅首次创建请求使用，不进入定义或版本。 */
+  copySource?: { templateId: string; revision: number; definitionChecksum: string };
+  /** 延迟首次保存的可信复制初稿；后续精修仍保存在 definition。 */
+  copySourceDefinition?: TemplateDefinitionV2;
   /**
    * 旧草稿被读取时，客户端已按当前根尺寸合同做了无损归一化。
    * 即使操作者没有继续修改，发布前也必须先把该归一化草稿写回服务端。
@@ -51,7 +55,7 @@ export interface TemplateEditorDraft {
   };
   /**
    * 系统兼容修复只属于当前模板编辑会话。原始定义必须原样保留，直到用户
-   * 明确取消、另存或覆盖保存；该状态随同一 History 快照撤销/重做，绝不
+   * 明确取消或覆盖当前草稿；该状态随同一 History 快照撤销/重做，绝不
    * 进入模板定义或服务端写入请求。
    */
   compatibilityRecovery?: {

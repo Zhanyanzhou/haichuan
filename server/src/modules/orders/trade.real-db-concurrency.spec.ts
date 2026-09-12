@@ -7,6 +7,7 @@ import { TradeEventsService } from '../trade-events/trade-events.service';
 import { OrdersService } from './orders.service';
 import { RefundsService } from '../refunds/refunds.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
+const { validateTarget } = require('../../../scripts/run-real-mysql-tests.cjs');
 
 const databaseUrl = process.env.TRADE_REAL_DB_URL;
 
@@ -14,6 +15,7 @@ test(
   '真实 MySQL：行锁串行化签收与退款额度，审计失败回滚金额修改',
   { skip: !databaseUrl },
   async () => {
+    assert.equal(databaseUrl, validateTarget(process.env), '交易测试必须使用显式隔离库');
     const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
     const prefix = `TRADE-${randomUUID().slice(0, 8)}`;
     const tradeEvents = new TradeEventsService(prisma as unknown as PrismaService);

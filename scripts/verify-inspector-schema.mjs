@@ -26,8 +26,8 @@ const LAYER_ORDER = [
   "feature",
 ];
 
-const EXPECTED_SCHEMA_FILE_COUNT = 24;
-const EXPECTED_REGISTRY_ENTRY_COUNT = 26;
+const EXPECTED_SCHEMA_FILE_COUNT = 3;
+const EXPECTED_REGISTRY_ENTRY_COUNT = 3;
 
 const files = (await readdir(schemaDir)).filter((file) => /\.tsx?$/.test(file));
 const registryPath = path.join(

@@ -9,6 +9,7 @@ import {
   ResetPasswordDto,
 } from "./dto/customer-auth.dto";
 import { WechatAuthService } from "../wechat-auth/wechat-auth.service";
+import { CustomersService } from "./customers.service";
 
 const pipe = new ValidationPipe({ whitelist: true, transform: true });
 
@@ -19,8 +20,8 @@ function validateBody<T>(metatype: Type<T>, value: unknown): Promise<T> {
   } as ArgumentMetadata) as Promise<T>;
 }
 
-test("会员注册与密码重置只接受 8-64 位新密码", async () => {
-  for (const password of ["12345678", "x".repeat(64)]) {
+test("会员注册与密码重置只接受 6-18 位新密码", async () => {
+  for (const password of ["123456", "x".repeat(18)]) {
     await assert.doesNotReject(
       validateBody(CustomerRegisterDto, {
         phone: "13800138000",
@@ -36,7 +37,7 @@ test("会员注册与密码重置只接受 8-64 位新密码", async () => {
     );
   }
 
-  for (const password of ["1234567", "x".repeat(65)]) {
+  for (const password of ["12345", "x".repeat(19)]) {
     await assert.rejects(
       validateBody(CustomerRegisterDto, {
         phone: "13800138000",
@@ -78,7 +79,74 @@ test("会员登录保留历史密码兼容，但拒绝空值和异常超长输�
   );
 });
 
-test("微信绑定创建新会员需短信验真并强制 8-64 位新密码", async () => {
+test("会员注册和重置服务接受 6/18 位字母数字组合，拒绝越界和弱组合且不写入", async () => {
+  const createdHashes: string[] = [];
+  const updatedHashes: string[] = [];
+  let claimedTokens = 0;
+  let revokedSessions = 0;
+  const transaction = {
+    customer: {
+      findUnique: async () => null,
+      create: async ({ data }: { data: { passwordHash: string } }) => {
+        createdHashes.push(data.passwordHash);
+        return { id: 9, phone: "13800138000", name: "测试会员", email: null };
+      },
+      update: async ({ data }: { data: { passwordHash: string } }) => {
+        updatedHashes.push(data.passwordHash);
+        return { id: 9 };
+      },
+    },
+    customerPasswordResetToken: {
+      updateMany: async () => { claimedTokens += 1; return { count: 1 }; },
+    },
+    customerRefreshSession: {
+      updateMany: async () => { revokedSessions += 1; return { count: 1 }; },
+    },
+  };
+  const service = new CustomersService(
+    {
+      customerPasswordResetToken: {
+        findUnique: async () => ({ id: 1, customerId: 9, usedAt: null, expiresAt: new Date(Date.now() + 60_000) }),
+      },
+      $transaction: async (action: (tx: typeof transaction) => Promise<unknown>) => action(transaction),
+    } as never,
+    {} as never,
+    { sign: () => "test-access-token" } as never,
+    {} as never,
+    { isRegisterVerificationRequired: () => false } as never,
+    {} as never,
+  );
+  for (const password of ["x".repeat(5), "x".repeat(19), "123456", "abcdef"] ) {
+    await assert.rejects(service.register({ phone: "13800138000", name: "测试会员", password }), BadRequestException);
+    await assert.rejects(service.resetPassword("a".repeat(64), password), BadRequestException);
+  }
+  assert.equal(createdHashes.length + updatedHashes.length + claimedTokens + revokedSessions, 0);
+  for (const password of ["a1b2c3", `a1${"x".repeat(16)}`]) {
+    await service.register({ phone: "13800138000", name: "测试会员", password });
+    await service.resetPassword("a".repeat(64), password);
+    assert.equal(await bcrypt.compare(password, createdHashes.at(-1)!), true);
+    assert.equal(await bcrypt.compare(password, updatedHashes.at(-1)!), true);
+  }
+  assert.equal(claimedTokens, 2);
+  assert.equal(revokedSessions, 2);
+});
+
+test("会员历史长密码仍能按原哈希登录", async () => {
+  const password = "historical-valid-password";
+  const service = new CustomersService(
+    { customer: { findUnique: async () => ({ id: 9, phone: "13800138000", name: "测试会员", email: null, status: "ACTIVE", passwordHash: await bcrypt.hash(password, 4) }) } } as never,
+    {} as never,
+    { sign: () => "test-access-token" } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  const result = await service.login({ phone: "13800138000", password });
+  assert.equal(result.customer.id, 9);
+  assert.equal("passwordHash" in result.customer, false);
+});
+
+test("微信绑定创建新会员需短信验真并强制 6-18 位新密码", async () => {
   const createdPasswords: string[] = [];
   const service = new WechatAuthService(
     {
@@ -121,26 +189,31 @@ test("微信绑定创建新会员需短信验真并强制 8-64 位新密码", as
     BadRequestException,
   );
 
-  // 密码长度不足：短信验真通过后仍被长度合同拒绝
-  await assert.rejects(
-    service.bindWechat({
+  // 短于或长于合同的输入均不得写入账户。
+  for (const password of ["12345", "x".repeat(19)]) {
+    await assert.rejects(
+      service.bindWechat({
+        bindToken: "header.payload.signature",
+        phone: "13800138000",
+        password,
+        smsCode: "123456",
+      }),
+      BadRequestException,
+    );
+  }
+  assert.equal(createdPasswords.length, 0);
+
+  for (const password of ["a1b2c3", `a1${"x".repeat(16)}`]) {
+    const result = await service.bindWechat({
       bindToken: "header.payload.signature",
       phone: "13800138000",
-      password: "1234567",
+      password,
       smsCode: "123456",
-    }),
-    BadRequestException,
-  );
-
-  const result = await service.bindWechat({
-    bindToken: "header.payload.signature",
-    phone: "13800138000",
-    password: "12345678",
-    smsCode: "123456",
-  });
-  assert.equal(result.customer.id, 9);
-  assert.equal(createdPasswords.length, 1);
-  assert.notEqual(createdPasswords[0], "12345678");
+    });
+    assert.equal(result.customer.id, 9);
+    assert.equal(await bcrypt.compare(password, createdPasswords.at(-1)!), true);
+  }
+  assert.equal(createdPasswords.length, 2);
 });
 
 test("短信通道未配置时微信绑定拒绝新建账户（不建无主权号）", async () => {

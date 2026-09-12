@@ -32,13 +32,13 @@ test("站点准备度在品牌、联系、法律、SEO 与中文发布配置完�
   assert.ok(Object.values(result.areas).every((area) => area.ready));
 });
 
-test("默认回退、缺正式资料与无效 HTTPS 地址返回稳定阻断码和字段", () => {
+test("正式上线预检仍要求完整审核和运营资料", () => {
   const result = evaluateSitePublicationReadiness({
     siteName: "海川珠宝",
     canonicalBaseUrl: "http://example.invalid",
     defaultLocale: "zh-CN",
     publishedLocales: ["zh-CN"],
-  }, { persisted: false });
+  }, { persisted: false, requireLaunchDetails: true });
 
   assert.equal(result.status, "BLOCKED");
   assert.equal(result.ready, false);
@@ -56,13 +56,13 @@ test("默认回退、缺正式资料与无效 HTTPS 地址返回稳定阻断码�
   assert.equal(result.areas.seo.ready, false);
 });
 
-test("品牌准备度要求品牌签认，并要求正式 Logo 或显式纯文字模式", () => {
+test("正式上线品牌预检要求签认，并要求正式 Logo 或显式纯文字模式", () => {
   const missingEvidence = evaluateSitePublicationReadiness({
     ...readySettings,
     brandReviewReference: "",
     brandPresentationMode: "logo",
     logo: "/favicon.svg",
-  }, { persisted: true });
+  }, { persisted: true, requireLaunchDetails: true });
   assert.deepEqual(missingEvidence.areas.brand.blockerCodes, [
     "BRAND_REVIEW_MISSING",
     "BRAND_LOGO_MISSING",
@@ -74,6 +74,54 @@ test("品牌准备度要求品牌签认，并要求正式 Logo 或显式纯文�
     brandPresentationMode: "text-only",
   }, { persisted: true });
   assert.equal(textOnly.areas.brand.ready, true);
+});
+
+const essentialSettings = {
+  siteName: "海川珠宝",
+  canonicalBaseUrl: "https://example.invalid",
+  defaultLocale: "zh-CN",
+  publishedLocales: ["zh-CN"],
+};
+
+test("日常页面发布只需必要资料，审核编号、联系扩展、默认 SEO 与品牌模式可留空", () => {
+  for (const brandPresentationMode of [undefined, "", "text-only"]) {
+    const result = evaluateSitePublicationReadiness({
+      ...essentialSettings,
+      brandPresentationMode,
+      brandReviewReference: "",
+      legalEntityReviewReference: "",
+      privacyPolicyReviewReference: "",
+      seoReviewReference: "",
+      contactPhone: "",
+      contactEmail: "",
+      contactAddress: "",
+      businessHours: "",
+      seoTitle: "",
+      seoDescription: "",
+    }, { persisted: true });
+    assert.equal(result.ready, true);
+    assert.deepEqual(result.blockers, []);
+  }
+});
+
+test("日常发布仍校验必填资料、显式 Logo 和已填写字段的有效性", () => {
+  for (const [patch, code] of [
+    [{ siteName: " " }, "SITE_NAME_MISSING"],
+    [{ canonicalBaseUrl: "" }, "CANONICAL_BASE_URL_MISSING"],
+    [{ contactEmail: "invalid-email" }, "SITE_CONTACT_EMAIL_INVALID"],
+    [{ contactEmail: {} }, "SITE_CONTACT_EMAIL_INVALID"],
+    [{ contactPhone: 42 }, "SITE_CONTACT_PHONE_INVALID"],
+    [{ seoTitle: [] }, "SITE_SEO_TITLE_INVALID"],
+    [{ brandPresentationMode: "logo", logo: "" }, "BRAND_LOGO_MISSING"],
+    [{ brandPresentationMode: "unsupported" }, "BRAND_PRESENTATION_MODE_INVALID"],
+    [{ brandPresentationMode: 42 }, "BRAND_PRESENTATION_MODE_INVALID"],
+  ] as const) {
+    const result = evaluateSitePublicationReadiness({ ...essentialSettings, ...patch }, { persisted: true });
+    assert.equal(result.ready, false);
+    assert.deepEqual(result.blockers.map((blocker) => blocker.code), [code]);
+  }
+  assert.ok(evaluateSitePublicationReadiness(essentialSettings, { persisted: false })
+    .blockers.some((blocker) => blocker.code === "SITE_SETTINGS_NOT_PERSISTED"));
 });
 
 test("占位 Logo 不能用 query、hash、编码或同站绝对地址绕过，真实 Logo 不被误拒", () => {
@@ -166,4 +214,3 @@ test("已发布语言拒绝重复项且中文主站必须存在", () => {
     "PRIMARY_LOCALE_NOT_PUBLISHED",
   ));
 });
-

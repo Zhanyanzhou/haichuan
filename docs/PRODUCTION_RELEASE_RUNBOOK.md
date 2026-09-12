@@ -64,7 +64,7 @@ docker compose --env-file <受控环境文件> \
 
 机器合同要求两个互不相同的宿主绝对文件路径、两个精确的固定容器目标、long bind、`read_only: true` 和 `create_host_path: false`。缺任一路径、相同源、目录/过宽路径、可写挂载、自动创建宿主路径或容器目标漂移均失败关闭。文件预检只检查路径和文件元数据，不读取或打印 PEM 内容；Compose `config` 也只验证解析后的静态结构。实际证书链、商户号绑定、APIv3 密钥、网络、微信回调、成功/失败/退款/对账仍必须在获批环境真实验收。
 
-叠加 override 不会打开 `PAYMENT_GATEWAY_TRANSACTIONS_ENABLED`、`PAYMENT_GATEWAY_REFUNDS_ENABLED` 或客户交易能力。只有批准策略明确开放相应能力并通过交易与外部服务门禁，才可在同一组 `-f` 参数下启动；未启用支付的内容/线索档位始终只使用基础 Compose。
+叠加 override 不会打开 `PAYMENT_GATEWAY_TRANSACTIONS_ENABLED`、`PAYMENT_GATEWAY_REFUNDS_ENABLED` 或客户交易能力。获批沙箱或受控取证启动按第 5 节在同一组 `-f` 参数下执行，凭据挂载和启动不自行授权资金操作；真实渠道测试中的付款、退款等动作须有精确测试范围授权。正式开放真实资金能力和公开放量仍须批准策略明确开放相应能力，并通过交易及外部服务门禁；未启用支付的内容/线索档位始终只使用基础 Compose。
 
 ## 2. 目标库与首管理员
 
@@ -94,7 +94,22 @@ docker compose --env-file <受控环境文件> \
 
 `migration-status` 只读检查不授权 `migrate deploy`。实际 migration 必须另有目标库、待执行清单、备份回滚点、执行人与窗口批准；本 runbook 不把该批准隐含在命令中。
 
-若只读预检证明没有启用的 `SUPER_ADMIN`，才运行一次 `bootstrap-admin`。密码须 12–64 位，通过一次性环境注入，命令结束立即清除；证据只记录结果、启用超管数量、operations digest 和审批引用哈希。已有合格超管时不得重复初始化。
+若只读预检证明没有启用的 `SUPER_ADMIN`，才运行一次 `bootstrap-admin`。新密码须符合 D.25 的 6–18 位校验，通过一次性环境注入，命令结束立即清除；证据只记录结果、启用超管数量、operations digest 和审批引用哈希。已有合格超管时不得重复初始化。
+
+在获批的目标环境中，首管理员使用 operations 入口，不运行 Demo Seed：
+
+```bash
+read -r -p "首管理员用户名: " BOOTSTRAP_ADMIN_USERNAME
+read -r -s -p "首管理员密码: " BOOTSTRAP_ADMIN_PASSWORD
+echo
+export BOOTSTRAP_ADMIN_USERNAME BOOTSTRAP_ADMIN_PASSWORD
+docker compose --env-file <受控环境文件> \
+  -f docker-compose.yml -f docker-compose.operations.yml \
+  --profile operations run --rm bootstrap-admin
+unset BOOTSTRAP_ADMIN_USERNAME BOOTSTRAP_ADMIN_PASSWORD
+```
+
+非零退出时停止初始化，核对脱敏错误和目标库状态，不用 Seed 或手工 SQL 覆盖账号。首次登录后通过后台维护正式 SiteSettings 和页面内容，并分别保存、预检和发布。
 
 ## 3. 持久化、RPO 与恢复演练
 
@@ -123,6 +138,8 @@ docker compose --env-file <受控环境文件> \
 ## 4. 边缘、告警与最终证据
 
 外部 TLS/域名验收至少包括：正式域名解析、证书链和有效期、HTTP 到 HTTPS 跳转、可信代理头、HSTS、CSP。只保存证据文件哈希；私钥、DNS/API token 和真实监控端点留在受控系统。
+
+当前 `client/nginx.conf` 的 `8080` 只提供 ACME 挑战，其余请求返回 HTTPS 跳转；TLS 边缘回源使用宿主 `127.0.0.1:8081` 或受控容器网络的 `client:8081`。边缘必须覆盖 `X-Real-IP` 为实际客户端的单个 IP，并由 HTTPS 终结层下发 HSTS。证书签发、续期和可信回源均须在目标环境验证，不以能访问 HTTP 页面替代。生产 Compose 必须显式指定 `-f docker-compose.yml`，禁止自动合并本地开发 override。
 
 监控必须覆盖 `/api/health`、`/api/ready`、可信前台回源和 backup 容器健康。backup unhealthy 必须进入真实通知渠道，不能以“看日志”代替。验收时安全触发一次模拟告警，记录监控身份哈希、事件哈希、触发/收到/确认时间和责任人；不在仓库保存 webhook、收件人或 token。
 
@@ -172,7 +189,14 @@ npm run verify:production-evidence -- `
 
 ## 5. 发布与回滚判定树
 
-只有前述代码门禁与目标环境证据全部通过后，才允许按批准窗口启动固定 digest；生产命令必须包含 `--no-build`，且不得使用浮动 tag。上线后逐项验证 `/api/health`、`/api/ready`、前台、后台登录和批准业务路径，任一步失败就停止放量。
+首次上线与升级均区分“受控部署取证”和“公开放量”。按以下顺序推进，目标环境证据不作为其自身采集动作的前置条件：
+
+1. **冻结候选与生成制品**：先按第 1 节完成同一 SHA 的质量门禁、镜像构建、签名 manifest 与证明验证。manifest 是目标环境取证的输入，不等待 PRODUCTION_READY 才生成。
+2. **部署前预检与授权核对**：确认批准的环境、开放能力、固定 digest、配置、受控网络、数据库迁移方案、适用备份和回退点，以及取证步骤和责任人。已有授权精确覆盖的动作直接执行；未覆盖的部署、写库、外部发送和放量动作需取得相应批准。空库首次初始化与既有数据升级分别说明恢复方案，不假造部署前备份或数据迁移成功。
+3. **受控部署，尚未放量**：在批准窗口按第 2 节执行适用的数据库与管理员步骤，再启动已验证的固定 digest。通过已批准的隔离网络、访问限制或维护入口限制访问，既有线上流量仍按升级方案处理；无可靠隔离条件时停止受影响部署。命令使用 `--no-build`，不使用浮动 tag，不自动开启真实资金或第三方发送。新环境缺少运行证据不禁止获批的取证启动，但不能因此开放公众流量。
+4. **环境和业务验收**：在该候选的受控运行环境采集第 3、4 节要求的持久化、恢复、边缘、告警、外部渠道和回退证据，完成批准业务范围的真实旅程。生成并验证受信 production evidence；失败时保持不放量，按授权修复并重验受影响证据，不改写 PASS 或绕过签名验证。
+5. **Go/No-Go 与公开放量**：同一候选的代码、正式内容和目标环境证据全部成立后，由发布负责人绑定环境、版本、开放能力、时间和批准记录作出判定。只有 Go 且对应放量动作已获批准，才按计划切流；较小发布档位不代表总体产品目标已完成。
+6. **上线后验收与观察**：逐项验证 `/api/health`、`/api/ready`、前台、后台登录和批准业务路径，并确认告警接收与回退可用。检查严格遵守批准的账号、数据和操作范围；任一步失败就停止继续放量并按下列回滚顺序处理。
 
 回滚顺序：
 

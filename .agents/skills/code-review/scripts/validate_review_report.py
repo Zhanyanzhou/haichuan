@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the canonical code-review report, including bounded lineage."""
+"""Validate the canonical code-review report and evidence-linked review iterations."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ AUTHORITATIVE_KINDS = {
 }
 INFERRED_KINDS = {"test-evidence", "code-history", "product-intent"}
 LOCAL_IDENTITY = re.compile(
-    r"\b(?:F|T|A|I|C|R|V|D|EC)\d+\b|\bgeneration\s+[01]\b|#L\d+|"
+    r"\b(?:F|T|A|I|C|R|V|D|EC)\d+\b|\bgeneration\s+\d+\b|#L\d+|"
     r"\bline\s+\d+\b|\b[\w./\\-]+:\d+\b",
     re.IGNORECASE,
 )
@@ -251,9 +251,13 @@ def validate_lineage(
         errors.append("Review chain ID must match rc-YYYYMMDD-<6-32 lowercase letters/digits>")
 
     generation_raw = field(text, "Review generation")
-    generation = int(generation_raw) if generation_raw in {"0", "1"} else None
+    generation = (
+        int(generation_raw)
+        if generation_raw and re.fullmatch(r"0|[1-9][0-9]*", generation_raw)
+        else None
+    )
     if generation is None:
-        errors.append("Review generation must be 0 or 1")
+        errors.append("Review generation must be a non-negative integer")
 
     trigger = field(text, "Review trigger")
     parent_review_id = field(text, "Parent review report ID")
@@ -264,6 +268,38 @@ def validate_lineage(
     prior_resolution = field(text, "Prior resolution consulted")
     handoff = field(text, "Handoff status")
     automatic_receiving = field(text, "Automatic receiving permitted")
+
+    # Legacy states remain readable; none of these strings confers execution authority.
+    legacy_states = {
+        "Ready for receiving-code-review": "Yes",
+        "Regenerate before implementation": "No",
+        "Terminal post-review - return to user/owner": "No",
+    }
+    current_states = {
+        "Continue within existing authorization": "Yes",
+        "Review scope complete": "No",
+        "Acceptance complete": "No",
+        "Blocked - awaiting input or authorization": "No",
+    }
+    legacy_valid = (
+        generation == 0 and handoff in {"Ready for receiving-code-review", "Regenerate before implementation"}
+    ) or (generation == 1 and handoff == "Terminal post-review - return to user/owner")
+    if legacy_valid:
+        expected_receiving = legacy_states[handoff]
+    elif handoff in current_states:
+        expected_receiving = current_states[handoff]
+        evidence = field(text, "Handoff evidence")
+        if not evidence or is_placeholder(evidence):
+            errors.append("Handoff evidence must identify acceptance, next action or a concrete blocker")
+        if handoff == "Continue within existing authorization":
+            authority = field(text, "Continuation authority")
+            if not authority or is_placeholder(authority):
+                errors.append("Continuation requires concrete existing authorization")
+    else:
+        expected_receiving = None
+        errors.append("Handoff status must use a current state (legacy states only for generation 0/1)")
+    if expected_receiving and automatic_receiving != expected_receiving:
+        errors.append(f"Automatic receiving permitted must be {expected_receiving} for its handoff")
 
     if generation == 0:
         if trigger != "initial":
@@ -281,45 +317,34 @@ def validate_lineage(
             errors.append("generation 0 Scope mode must be full frozen scope")
         if prior_resolution != "None":
             errors.append("generation 0 Prior resolution consulted must be None")
-        if handoff not in {"Ready for receiving-code-review", "Regenerate before implementation"}:
-            errors.append("generation 0 must use a non-terminal receiving handoff")
-        expected_receiving = "Yes" if handoff == "Ready for receiving-code-review" else "No"
-        if automatic_receiving != expected_receiving:
-            errors.append(
-                f"generation 0 Automatic receiving permitted must be {expected_receiving} for its handoff"
-            )
-    elif generation == 1:
+    elif generation is not None and generation > 0:
         if trigger != "post-implementation":
-            errors.append("generation 1 Review trigger must be post-implementation")
+            errors.append("incremental Review trigger must be post-implementation")
         if not parent_review_id or not REPORT_ID.fullmatch(parent_review_id):
-            errors.append("generation 1 must link a valid Parent review report ID")
+            errors.append("incremental review must link a valid Parent review report ID")
         if not parent_review_field_path or parent_review_field_path == "None":
-            errors.append("generation 1 must link a Parent review report path")
+            errors.append("incremental review must link a Parent review report path")
         if not parent_id or not RESOLUTION_ID.fullmatch(parent_id):
-            errors.append("generation 1 must link a valid Parent resolution ID")
+            errors.append("incremental review must link a valid Parent resolution ID")
         if not parent_path or parent_path == "None":
-            errors.append("generation 1 must link a Parent resolution path")
+            errors.append("incremental review must link a Parent resolution path")
         if scope_mode != "implementation delta plus affected execution chains":
             errors.append(
-                "generation 1 Scope mode must be implementation delta plus affected execution chains"
+                "incremental Scope mode must be implementation delta plus affected execution chains"
             )
         if not prior_resolution or prior_resolution == "None":
-            errors.append("generation 1 must record the Prior resolution consulted")
-        if handoff != "Terminal post-review - return to user/owner":
-            errors.append("generation 1 must use the terminal post-review handoff")
-        if automatic_receiving != "No":
-            errors.append("generation 1 must set Automatic receiving permitted to No")
+            errors.append("incremental review must record the Prior resolution consulted")
         reconciliation = section(text, "Prior Resolution Reconciliation", "Receiving Handoff").strip()
         if not reconciliation or reconciliation.lower() == "none":
-            errors.append("generation 1 must record prior-resolution reconciliation")
+            errors.append("incremental review must record prior-resolution reconciliation")
         if not parent_report_path or not parent_report_path.is_file():
-            errors.append("generation 1 validation requires --parent-report with an existing file")
+            errors.append("incremental validation requires --parent-report with an existing file")
         if not parent_resolution_path or not parent_resolution_path.is_file():
-            errors.append("generation 1 validation requires --parent-resolution with an existing file")
+            errors.append("incremental validation requires --parent-resolution with an existing file")
 
     parent_report_text = None
     parent_resolution_text = None
-    if generation == 1 and parent_report_path and parent_report_path.is_file():
+    if generation is not None and generation > 0 and parent_report_path and parent_report_path.is_file():
         declared_parent_report = resolve_declared_path(parent_review_field_path, report_path)
         if declared_parent_report != parent_report_path.resolve():
             errors.append("Parent review report path does not match --parent-report")
@@ -330,9 +355,11 @@ def validate_lineage(
             errors.append("Parent review report ID does not match --parent-report")
         if field(parent_report_text, "Review chain ID") != chain_id:
             errors.append("Parent review report must use the same Review chain ID")
-        if field(parent_report_text, "Review generation") != "0":
-            errors.append("Parent review report must be generation 0")
-    if generation == 1 and parent_resolution_path and parent_resolution_path.is_file():
+        if field(parent_report_text, "Review generation") != str(generation - 1):
+            errors.append("Parent review report must be the immediately preceding generation")
+        if parent_review_id == field(text, "Report ID") or parent_report_path.resolve() == report_path.resolve():
+            errors.append("Parent review report must be distinct from the current report")
+    if generation is not None and generation > 0 and parent_resolution_path and parent_resolution_path.is_file():
         declared_parent_resolution = resolve_declared_path(parent_path, report_path)
         if declared_parent_resolution != parent_resolution_path.resolve():
             errors.append("Parent resolution path does not match --parent-resolution")
@@ -499,13 +526,13 @@ def main() -> int:
     current_identities = {
         item["issue_key"]: item["fingerprint"] for item in list(indexed.values()) + list(tests.values())
     }
-    if generation == 1 and parent_report_text:
+    if generation is not None and generation > 0 and parent_report_text:
         for issue_key, fingerprint in current_identities.items():
             parent_fingerprint = issue_map(parent_report_text).get(issue_key)
             if parent_fingerprint and parent_fingerprint != fingerprint:
-                errors.append(f"generation 1 changed the fingerprint for inherited Issue key: {issue_key}")
+                errors.append(f"incremental review changed the fingerprint for inherited Issue key: {issue_key}")
 
-    if generation == 1 and parent_resolution_text:
+    if generation is not None and generation > 0 and parent_resolution_text:
         protected = protected_fingerprints(parent_resolution_text)
         reconciliation_rows = markdown_rows(
             section(text, "Prior Resolution Reconciliation", "Receiving Handoff")
@@ -623,6 +650,12 @@ def main() -> int:
         errors.append("Receiving Handoff Source report ID must match Report ID")
     if field(text, "Scope fingerprint to recheck") != field(text, "Scope fingerprint"):
         errors.append("Receiving Handoff scope fingerprint must match Report Contract")
+
+    if field(text, "Handoff status") == "Acceptance complete" and (
+        actionable_findings or actionable_tests or open_questions or open_areas or incomplete
+        or recommendation not in {"Pass", "Pass with caveat"}
+    ):
+        errors.append("Acceptance complete cannot retain actionable items, open questions or incomplete coverage")
 
     if re.search(r"^- `no` ", section(text, "Report Self-Check"), re.MULTILINE):
         errors.append("Report Self-Check contains a no result")

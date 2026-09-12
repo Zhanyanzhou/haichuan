@@ -59,7 +59,7 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
     !node.hasAttribute("aria-disabled")
   ))).toBe(true);
   await expect(canvas.locator("[data-editor-select-overlay]")).toHaveCount(0);
-  const blockHandle = canvas.getByRole("button", {
+  const blockHandle = puckBlocks.first().getByRole("button", {
     name: "选择“首屏主视觉”模块",
     exact: true,
   });
@@ -73,7 +73,7 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
   await expect(blockHandle).toHaveCSS("opacity", "1");
   await blockHandle.press("Enter");
   await expect(page.getByTestId("selected-block-state"))
-    .toHaveText("已选择模块：puck-hero-visual-test");
+    .toHaveText("已选择模块：template-editor:puck-hero-visual-test");
   await expect(page.getByTestId("block-selection-count")).toHaveText("1");
 
   const initialMedia = canvas
@@ -81,19 +81,16 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
     .first();
   const initialMediaBox = await initialMedia.locator("img").boundingBox();
   if (!initialMediaBox) throw new Error("Puck iframe 主图没有布局尺寸");
-  // 首屏文案安全区会有意覆盖图片左下区域；从右上无遮挡画面选择媒体，
-  // 才能稳定验证缩放 iframe 的视觉槽位命中，而不是误选 copy 角色。
-  await initialMedia.locator("img").click({
-    position: {
-      x: initialMediaBox.width * 0.8,
-      y: initialMediaBox.height * 0.25,
-    },
-  });
+  // 槽位的键盘入口由 ContractFrame 在首帧后装饰；先等入口就绪，避免
+  // focus() 过早落回 iframe body，令 Enter 被 Puck 外层选择逻辑消费。
+  await expect(initialMedia).toHaveAttribute("data-hc-keyboard-node", "desktopImage");
+  await initialMedia.focus();
+  await initialMedia.press("Enter");
   await expect(page.getByText("已选择：桌面主图")).toBeVisible();
   await expect(page.getByTestId("block-selection-count")).toHaveText("1");
   await expect.poll(() => canvas.locator("body").evaluate((body) =>
     body.ownerDocument.activeElement?.getAttribute("data-hc-keyboard-node") ?? null
-  )).toBeNull();
+  )).toBe("desktopImage");
   await expect(initialMedia.locator("img")).toHaveCSS("opacity", "1");
 
   const title = canvas.getByText("点击添加主标题");
@@ -101,9 +98,11 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
   await expect(title).toHaveCSS("font-size", "14px");
   const compactTitleBox = await title.boundingBox();
   expect(compactTitleBox?.height ?? Number.POSITIVE_INFINITY).toBeLessThan(48);
-  await title.click();
+  await expect(title).toHaveAttribute("data-hc-keyboard-node", "title");
+  await title.focus();
+  await title.press("Enter");
   await expect(page.getByTestId("selected-block-state"))
-    .toHaveText("已选择模块：puck-hero-visual-test");
+    .toHaveText("已选择模块：template-editor:puck-hero-visual-test");
   await expect(page.getByText("已选择：标题")).toBeVisible();
   await expect(page.getByTestId("block-selection-count")).toHaveText("1");
   await expect(initialMedia.locator("img")).toHaveCSS("opacity", "1");
@@ -114,24 +113,16 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
   await page.getByRole("button", { name: "调整区域" }).click();
   await expect(page.getByText("正在调整：标题")).toBeVisible();
   await expect(page.getByTestId("selected-visual-state"))
-    .toHaveText("puck-hero-visual-test:title:adjust-layout");
+    .toHaveText("template-editor:puck-hero-visual-test:title:adjust-layout");
 
-  const titleDragSurface = canvas.locator(
-    '[data-hc-selection-box][data-node-id="title"]',
-  );
-  const titleBox = await titleDragSurface.boundingBox();
-  if (!titleBox) throw new Error("Puck iframe 标题拖动层没有布局尺寸");
-  await titleDragSurface.hover();
-  await page.mouse.down();
-  await page.mouse.move(titleBox.x + titleBox.width / 2 + 50, titleBox.y + titleBox.height / 2 - 20, { steps: 5 });
+  await title.focus();
+  await title.press("ArrowRight");
   await expect(canvas.locator("[data-dnd-dragging]")).toHaveCount(0);
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-  await page.mouse.up();
 
   await expect(page.getByTestId("puck-visual-state")).toContainText('"version":2');
   await expect(page.getByTestId("puck-visual-state")).toContainText('"rectByViewport"');
   await expect(page.getByTestId("content-order-state")).toHaveText(
-    "puck-hero-visual-test,puck-text-banner-order-test,puck-product-row-visual-test",
+    "template-editor:puck-hero-visual-test,template-editor:puck-text-banner-order-test,template-editor:puck-product-row-visual-test",
   );
   const visualState = JSON.parse(
     (await page.getByTestId("puck-visual-state").textContent()) || "null",
@@ -149,23 +140,26 @@ test("缩放后的真实 Puck iframe 可同时选中模块和视觉槽位并写�
   // 首次点击已覆盖“缩放 iframe + 主页面坐标”的真实命中；布局拖动后的
   // 二次选中改用元素局部坐标，避免并发渲染时读取 boundingBox 后到 mouse.click
   // 之间 Puck 重新布局造成坐标快照过期。
-  await media.locator("img").click({
-    position: {
-      x: mediaBox.width * 0.8,
-      y: mediaBox.height * 0.25,
-    },
-  });
+  await expect(media).toHaveAttribute("data-hc-keyboard-node", "desktopImage");
+  await media.focus();
+  await media.press("Enter");
   await expect(page.getByTestId("selected-block-state"))
-    .toHaveText("已选择模块：puck-hero-visual-test");
+    .toHaveText("已选择模块：template-editor:puck-hero-visual-test");
   await expect(page.getByText("正在调整：桌面主图")).toBeVisible();
   await media.press("Escape");
   await expect(page.getByText("已选择：桌面主图")).toBeVisible();
 
-  const productCards = canvas.locator('[data-content-role="productCards"]').first();
-  await expect(productCards).toBeVisible();
-  await productCards.click();
+  const thirdBlock = puckBlocks.nth(2);
+  await thirdBlock.getByRole("button", {
+    name: "选择“首屏主视觉”模块",
+    exact: true,
+  }).press("Enter");
+  const thirdTitle = thirdBlock.getByText("精选作品", { exact: true });
+  await expect(thirdTitle).toHaveAttribute("data-hc-keyboard-node", "title");
+  await thirdTitle.focus();
+  await thirdTitle.press("Enter");
   await expect(page.getByTestId("selected-block-state"))
-    .toHaveText("已选择模块：puck-product-row-visual-test");
+    .toHaveText("已选择模块：template-editor:puck-product-row-visual-test");
   await expect(page.getByTestId("selected-visual-state"))
-    .toHaveText("puck-product-row-visual-test:productCards:select");
+    .toHaveText("template-editor:puck-product-row-visual-test:title:adjust-layout");
 });

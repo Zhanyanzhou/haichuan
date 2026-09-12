@@ -180,9 +180,10 @@ test("宿主覆盖层在缩放、滚动、设备与源节点变化后保持两�
   for (const zoom of [39, 52, 100, 200]) {
     await setZoom(page, zoom);
     await expectAligned(source, overlay);
-    const label = overlay.locator(".template-editor__editable-overlay-selection-label");
-    await expect(label).toHaveCSS("font-size", "12px");
-    await expect.poll(async () => (await label.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(24);
+    const toolbar = overlay.locator("[data-canvas-selection-toolbar]");
+    await expect(toolbar).toContainText("主视觉图片");
+    await expect(toolbar.locator("strong")).toHaveCSS("font-size", "12px");
+    await expect.poll(async () => (await toolbar.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(34);
   }
 
   await page.locator(".template-editor__canvas-scroll").evaluate((element) => {
@@ -248,8 +249,9 @@ test("定义节点和锁定结构角色都可选择，锁定角色不暴露结�
     '[data-overlay-selection-for="role:node_heading:locked-title"]',
   );
   await expect(lockedSelection).toBeVisible();
-  await expect(lockedSelection.locator("[role=toolbar], .template-editor__editable-overlay-move, .template-editor__editable-overlay-resize"))
+  await expect(lockedSelection.locator(".template-editor__editable-overlay-move, .template-editor__editable-overlay-resize"))
     .toHaveCount(0);
+  await expect(lockedSelection.getByRole("button")).toHaveCount(0);
 
   await page.locator('[data-overlay-hit-for="node:node_image"]').focus();
   await expect(page.locator('[data-overlay-hit-for="node:node_image"]')).toBeFocused();

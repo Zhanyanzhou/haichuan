@@ -2,6 +2,8 @@
 
 本目录保存文档收敛前的完整原文，只用于追溯。其中的 Git HEAD、数量、测试、migration、运行容器、端口和完成状态均可能失效，不得作为当前执行或批准依据。
 
+模板设计一律执行[唯一标准](../../page-builder/template-creation-rules.md)。快照中的旧模板产品决定、空白创建、内容只读限制和固定数量要求不具有规则效力；历史原文不是第二套标准。
+
 | 快照 | 现行入口 |
 | --- | --- |
 | `AI_PROGRAM_LEDGER.md` | `../../AI_PROGRAM_LEDGER.md` |

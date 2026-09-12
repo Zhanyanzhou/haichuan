@@ -96,6 +96,7 @@ export function usePublishedPageDocument(
   });
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
+  const activeRefreshRef = useRef<{ key: string; pending: boolean } | null>(null);
   const lastValidRef = useRef<{
     pageKey: string;
     pageDocument: PublishedPageDocument;
@@ -108,8 +109,10 @@ export function usePublishedPageDocument(
     };
   }, []);
 
-  const refresh = useCallback(async (showLoading = false) => {
+  const refresh = useCallback(async (showLoading = false): Promise<void> => {
     if (!pageKey) {
+      requestIdRef.current += 1;
+      activeRefreshRef.current = null;
       lastValidRef.current = null;
       setState({
         pageKey: undefined,
@@ -120,6 +123,15 @@ export function usePublishedPageDocument(
       return;
     }
 
+    const key = `${locale}:${pageKey}`;
+    if (activeRefreshRef.current?.key === key) {
+      // 首次订阅、重连或连续发布可能在 GET 期间到达；合并为读取后的补拉，
+      // 避免新请求作废初次成功快照，而补拉失败又无可保留的内容。
+      activeRefreshRef.current.pending = true;
+      return;
+    }
+    const operation = { key, pending: false };
+    activeRefreshRef.current = operation;
     const requestId = ++requestIdRef.current;
     const lastValid = lastValidRef.current?.pageKey === pageKey
       ? lastValidRef.current.pageDocument
@@ -213,6 +225,11 @@ export function usePublishedPageDocument(
           status: "error",
           stale: false,
         });
+      }
+    } finally {
+      if (activeRefreshRef.current === operation) {
+        activeRefreshRef.current = null;
+        if (operation.pending && mountedRef.current) void refresh(false);
       }
     }
   }, [locale, pageKey]);

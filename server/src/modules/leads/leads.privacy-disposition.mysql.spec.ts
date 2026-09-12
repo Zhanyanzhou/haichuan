@@ -5,6 +5,7 @@ import * as bcrypt from "bcrypt";
 import { OutboxService } from "../../common/outbox/outbox.service";
 import { CustomersService } from "../customers/customers.service";
 import { LeadsService } from "./leads.service";
+const { validateTarget } = require("../../../scripts/run-real-mysql-tests.cjs");
 
 const databaseUrl = process.env.PRIVACY_TEST_DATABASE_URL;
 
@@ -12,6 +13,7 @@ test(
   "真实 MySQL：到期匿名化、法律保留、并发 CAS 与账户注销保持隐私边界",
   { skip: databaseUrl ? false : "需要显式提供一次性 PRIVACY_TEST_DATABASE_URL" },
   async () => {
+    assert.equal(databaseUrl, validateTarget(process.env), "隐私测试必须使用显式隔离库");
     const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await prisma.$connect();
     try {

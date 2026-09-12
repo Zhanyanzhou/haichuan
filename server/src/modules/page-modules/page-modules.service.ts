@@ -27,6 +27,7 @@ import {
   hasCurrentContentTemplatePublicationAttestation,
   isContentTemplatePageTarget,
   isContentTemplateAllowedForPage,
+  isContentTemplateContentFieldHidden,
   sanitizeContentTemplateLayoutData,
   withoutContentTemplatePublicationAttestation,
   type ContentTemplateIssue,
@@ -38,6 +39,7 @@ import {
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   collectDynamicTemplateInstanceReferences,
   dynamicTemplateVersionKey,
+  getDynamicTemplateDocumentMediaReferences,
   readDynamicTemplateInstanceReference,
   validateDynamicTemplateInstance,
 } from "./dynamic-template-instance";
@@ -46,42 +48,17 @@ import {
   matchesDynamicTemplateDefinitionChecksum,
 } from "./dynamic-template-definition-integrity";
 import { validateDynamicTemplateDefinition } from "./generated/validateTemplateDefinition.generated";
-import { evaluateSitePublicationReadiness } from "../settings/site-publication-readiness";
 
 /**
  * 页面构建器区块类型契约 — 与前端 puckConfig MyComponents 严格一致,
  * 由 scripts/verify-page-builder-contract.mjs 双向校验,变更任一侧必须同步另一侧。
- * 旧类型(图文混排/分割面板/礼赠指南)已由前端 migratePuckData 在载入时转换,
- * 新保存的草稿不再包含,故不列入本契约。
+ * 当前只接收动态模板实例、首屏测试模板和两个编辑器系统区块。
  */
 const PUCK_COMPONENT_LABELS = [
   "动态模板实例",
   "首屏主视觉",
-  "单图海报",
-  "双图海报",
-  "全屏出血图",
-  "文字横幅",
-  "作品画廊",
-  "改款对比",
-  "产品展示行",
-  "分类卡片",
-  "卡片网格",
-  "轮播图",
-  "视频区块",
-  "热区图",
   "网站全局设置",
   "业务功能区",
-  "预约入口",
-  "资质证书",
-  "定制流程",
-  "服务承诺",
-  "门店信息",
-  "单品焦点推荐",
-  "佩戴灵感",
-  "限时活动",
-  "真实评价与实拍",
-  "按场景选购",
-  "工艺细节",
 ] as const;
 
 const PUCK_COMPONENT_SET = new Set<string>(PUCK_COMPONENT_LABELS);
@@ -93,29 +70,7 @@ const MAX_PAGE_DOCUMENT_BYTES = 1024 * 1024;
 
 const PUCK_REQUIRED_IMAGE_FIELDS: Record<string, string[]> = {
   首屏主视觉: ["desktopImage"],
-  单图海报: ["desktopImage"],
-  双图海报: ["mainImage", "detailImage"],
-  全屏出血图: ["image"],
-  热区图: ["image"],
-  改款对比: ["beforeImage", "afterImage"],
 };
-
-const PUCK_IMAGE_FIELDS = [
-  "desktopImage",
-  "mobileImage",
-  "mainImage",
-  "detailImage",
-  "image",
-  "posterUrl",
-  "url",
-  "backgroundImage",
-  // 文字横幅背景图(与 appointment 的 backgroundImage 是不同键)
-  "bgImage",
-  "beforeImage",
-  "afterImage",
-];
-
-const PUCK_LINK_FIELDS = ["linkUrl", "link", "mapUrl", "secondaryLinkUrl"];
 
 const NON_PUBLISHABLE_HERO_MEDIA = new Set([
   "/images/system/product-placeholder.svg",
@@ -173,34 +128,6 @@ const PLACEHOLDER_MARKERS = [
   CONTENT_TEMPLATE_ASSET_POLICY.placeholder.status,
 ];
 
-/**
- * 这些字段表达会随经营系统变化、需要权限裁决或可能包含个人信息的事实，
- * 不能被复制进账号私有模板。模块级清单用于保留普通营销文案与展示配置，
- * 同时阻断门店、评价、资质、活动权益等结构化事实快照。
- */
-const STORE_INFO_PAGE_DOCUMENT_FACT_FIELDS: ReadonlySet<string> = new Set([
-  "useSiteSettings",
-  "storeName",
-  "address",
-  "hours",
-  "phone",
-  "mapUrl",
-  "storeMapUrl",
-]);
-
-const APPOINTMENT_PAGE_DOCUMENT_FACT_FIELDS: ReadonlySet<string> = new Set([
-  "phone",
-]);
-
-const PAGE_DOCUMENT_FACT_FIELDS_BY_MODULE: Readonly<Record<string, ReadonlySet<string>>> = {
-  门店信息: STORE_INFO_PAGE_DOCUMENT_FACT_FIELDS,
-  预约入口: APPOINTMENT_PAGE_DOCUMENT_FACT_FIELDS,
-};
-
-const PAGE_DOCUMENT_FACT_SOURCE_LABEL_BY_MODULE: Readonly<Record<string, string>> = {
-  门店信息: "统一门店资料",
-  预约入口: "统一联系电话",
-};
 
 type PageDocumentRecord = Record<string, unknown> & {
   content?: unknown;
@@ -407,13 +334,16 @@ export class PageModulesService {
     );
   }
 
-  private async hydrateDynamicTemplateDefinitions(puckData: unknown) {
+  private async hydrateDynamicTemplateDefinitions(
+    puckData: unknown,
+    db: PageValidationDb = this.prisma,
+  ) {
     if (!isRecord(puckData)) return puckData;
     const references = collectDynamicTemplateInstanceReferences(puckData);
     const persistableDocument = { ...puckData };
     delete persistableDocument[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
     if (references.length === 0) return persistableDocument;
-    const versions = await this.prisma.dynamicTemplateVersion.findMany({
+    const versions = await db.dynamicTemplateVersion.findMany({
       where: {
         OR: references.map((reference) => ({
           version: reference.templateVersion,
@@ -461,10 +391,10 @@ export class PageModulesService {
   }
 
   /**
-   * 草稿允许内容未填完，但所有实例构图必须在保存前通过页面所绑定精确版本的
-   * instanceEditPolicy。只检查构图路径，完整内容与业务引用仍由发布预检处理。
+   * 草稿允许内容未填完，但实例身份、槽位授权、隐藏状态与构图覆盖必须在保存前
+   * 通过页面绑定的精确模板版本。内容完整性与业务引用仍由发布预检处理。
    */
-  private async assertDynamicTemplateLayoutOverridesValid(puckData: unknown) {
+  private async assertDynamicTemplateDraftInstancesAuthorized(puckData: unknown) {
     if (!isRecord(puckData)) return;
     const blocks = [
       ...(Array.isArray(puckData.content) ? puckData.content : []),
@@ -474,10 +404,10 @@ export class PageModulesService {
     ];
     const instances: Array<{
       reference: ReturnType<typeof readDynamicTemplateInstanceReference>;
-      props: Record<string, unknown>;
+      props: unknown;
     }> = [];
     for (const block of blocks) {
-      if (!isRecord(block) || block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isRecord(block.props)) continue;
+      if (!isRecord(block) || block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE) continue;
       instances.push({
         reference: readDynamicTemplateInstanceReference(block.props),
         props: block.props,
@@ -489,12 +419,21 @@ export class PageModulesService {
     const resolved = isRecord(hydrated[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY])
       ? hydrated[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]
       : {};
+    const draftEnvelopePaths = new Set([
+      ".instanceSchemaVersion",
+      ".templateId",
+      ".templateVersion",
+      ".instanceId",
+      ".isVisible",
+      ".contentBySlotId",
+      ".hiddenSlotIds",
+      ".overrides",
+      ".layoutOverridesByNodeId",
+    ]);
     const issues: string[] = [];
     for (const { reference, props } of instances) {
-      if (!reference) {
-        if (Object.prototype.hasOwnProperty.call(props, "layoutOverridesByNodeId")) {
-          issues.push("身份无效的模板实例不能保存构图覆盖");
-        }
+      if (!reference || !isRecord(props)) {
+        issues.push("身份无效的模板实例不能保存草稿");
         continue;
       }
       const versionKey = dynamicTemplateVersionKey(reference.templateId, reference.templateVersion);
@@ -506,13 +445,32 @@ export class PageModulesService {
       }
       const validation = validateDynamicTemplateInstance(props, definition);
       for (const issue of validation.issues) {
-        if (issue.pathSuffix.startsWith(".layoutOverridesByNodeId")) {
+        const directInstanceFieldIssue = Boolean(
+          issue.field
+          && issue.pathSuffix === `.${issue.field}`
+          && Object.prototype.hasOwnProperty.call(props, issue.field),
+        );
+        const contentSlot = issue.pathSuffix.startsWith(".contentBySlotId.") && issue.field
+          ? validation.definition?.slots[issue.field]
+          : undefined;
+        const contentAuthorizationIssue = Boolean(
+          issue.pathSuffix.startsWith(".contentBySlotId.")
+          && issue.field
+          && (!contentSlot || !contentSlot.editable),
+        );
+        if (
+          draftEnvelopePaths.has(issue.pathSuffix)
+          || directInstanceFieldIssue
+          || contentAuthorizationIssue
+          || issue.pathSuffix.startsWith(".hiddenSlotIds")
+          || issue.pathSuffix.startsWith(".layoutOverridesByNodeId")
+        ) {
           issues.push(`${reference.instanceId ?? reference.templateId}：${issue.message}`);
         }
       }
     }
     if (issues.length > 0) {
-      throw new BadRequestException(`页面实例构图覆盖无效：${issues.slice(0, 5).join("；")}`);
+      throw new BadRequestException(`页面草稿实例授权无效：${issues.slice(0, 5).join("；")}`);
     }
   }
 
@@ -629,18 +587,14 @@ export class PageModulesService {
           path: "metadata",
           message: "线上版本缺少当前发布合同签认，必须重新校验并发布。",
         }];
-    const [pageReadiness, globalReadinessIssues] = await Promise.all([
-      this.collectPageDocumentValidation(
-        this.prisma,
-        snapshot.puckData,
-        snapshot.metadata,
-        pageKey,
-      ),
-      this.collectGlobalSitePublicationReadinessIssues(this.prisma),
-    ]);
+    const pageReadiness = await this.collectPageDocumentValidation(
+      this.prisma,
+      snapshot.puckData,
+      snapshot.metadata,
+      pageKey,
+    );
     const publicationIssues = [
       ...attestationIssues,
-      ...globalReadinessIssues,
       ...pageReadiness.issues,
     ];
     const publicationErrors = publicationIssues
@@ -696,7 +650,7 @@ export class PageModulesService {
       );
     }
     const normalizedPuckData = this.normalizePageDocumentPuckData(puckData);
-    await this.assertDynamicTemplateLayoutOverridesValid(normalizedPuckData);
+    await this.assertDynamicTemplateDraftInstancesAuthorized(normalizedPuckData);
     // 区块合同版本只存在于 puckData.props.__contentTemplate。页面级摘要仅兼容旧数据读取，
     // 普通保存不得重新写入，更不能借用 schemaVersion/templateVersion 标记区块合同。
     const metadataWithoutPublicationAttestation =
@@ -781,9 +735,7 @@ export class PageModulesService {
         doc.metadata,
         pageKey,
       );
-      const globalReadinessIssues =
-        await this.collectGlobalSitePublicationReadinessIssues(tx);
-      const issues = [...globalReadinessIssues, ...validation.issues];
+      const issues = validation.issues;
       const errors = issues
         .filter((issue) => issue.severity === "error")
         .map((issue) => issue.message);
@@ -871,7 +823,6 @@ export class PageModulesService {
     pageKey: string,
     puckDataOverride?: unknown,
     metadataOverride?: unknown,
-    options: { includeGlobalSiteReadiness?: boolean } = {},
   ) {
     let puckData = puckDataOverride;
     let metadata = metadataOverride;
@@ -888,21 +839,12 @@ export class PageModulesService {
       if (puckData === undefined) puckData = doc.puckData;
       if (metadata === undefined) metadata = doc.metadata;
     }
-    const validation = await this.collectPageDocumentValidation(
+    return this.collectPageDocumentValidation(
       this.prisma,
       puckData,
       metadata,
       pageKey,
     );
-    if (!options.includeGlobalSiteReadiness) return validation;
-
-    const globalReadinessIssues =
-      await this.collectGlobalSitePublicationReadinessIssues(this.prisma);
-    const issues = [...globalReadinessIssues, ...validation.issues];
-    const errors = issues
-      .filter((issue) => issue.severity === "error")
-      .map((issue) => issue.message);
-    return { valid: errors.length === 0, errors, issues };
   }
 
   /** 模板原子激活在同一事务内复用页面发布的完整校验规则。 */
@@ -926,7 +868,7 @@ export class PageModulesService {
       ...(await this.collectPuckDataErrors(db, puckData, pageKey)),
       ...(await this.collectSiteSettingsReadinessIssues(db, puckData, pageKey)),
       ...this.collectMetadataIssues(metadata),
-      ...this.collectMediaRightsIssues(puckData, metadata, pageKey),
+      ...(await this.collectMediaRightsIssues(db, puckData, metadata, pageKey)),
     ];
     const publicationIssues = issues.map((issue) =>
       this.toUsablePublicationIssue(issue),
@@ -937,41 +879,53 @@ export class PageModulesService {
     return { valid: errors.length === 0, errors, issues: publicationIssues };
   }
 
-  private async collectGlobalSitePublicationReadinessIssues(
-    db: PageValidationDb,
-  ): Promise<ContentTemplateIssue[]> {
-    const repository = (db as unknown as {
-      siteSetting?: {
-        findUnique(args: unknown): Promise<{ value: unknown } | null>;
-      };
-    }).siteSetting;
-    const stored = repository
-      ? await repository.findUnique({ where: { key: "site" }, select: { value: true } })
-      : null;
-    const readiness = evaluateSitePublicationReadiness(stored?.value, {
-      persisted: Boolean(stored),
-    });
-    return readiness.blockers.map((blocker) => ({
-      code: `page-validation-site-publication-${blocker.code.toLowerCase().replace(/_/g, "-")}`,
-      severity: "error",
-      layer: "page",
-      field: blocker.field.split(".").at(-1),
-      path: blocker.field,
-      message: blocker.message,
-    }));
-  }
-
   /**
-   * “发布”保存一个立即供前台使用的版本。正式内容、SEO、可渲染媒体、
-   * 替代文字与素材授权均失败关闭；结构损坏、危险地址、不可解析引用、
-   * 权限与版本冲突同样阻断，避免不完整或无来源内容进入公开端。
+   * “发布页面”是草稿进入客户前台的唯一入口。内容完整度只作运营提醒；
+   * 未上传图片的模板由公开 Renderer 自动隐藏。结构损坏、危险地址、
+   * 不可解析引用、权限与版本冲突仍然阻断，不能用“少规则”绕过安全边界。
    */
   private toUsablePublicationIssue(
     issue: ContentTemplateIssue,
   ): ContentTemplateIssue {
-    // 合同标记为 error 的正式内容、媒体、SEO 与来源问题必须保持阻断。
-    // 草稿保存不调用此门禁；只有显式预检和发布会失败关闭。
+    if (issue.severity === "error" && this.isContentCompletionAdvisory(issue)) {
+      return { ...issue, severity: "warning" };
+    }
     return issue;
+  }
+
+  /**
+   * 这些问题影响内容质量但不会造成不可信数据或无法渲染；前台会折叠空内容。
+   * 地址安全、上传文件存在性、合同结构、业务引用与页面组成规则不在此列。
+   */
+  private isContentCompletionAdvisory(issue: ContentTemplateIssue): boolean {
+    if (issue.layer !== "page") return false;
+    return [
+      /图片不能为空/,
+      /仍是系统占位图/,
+      /图片地址无效/,
+      /内容不能为空/,
+      /替代文字.*不能为空/,
+      /仍是占位内容/,
+      /文本过长/,
+      /至少需要 \d+ (?:个字符|项)/,
+      /最多允许 \d+ (?:个字符|项)/,
+      /数量应为 \d+–\d+ 项/,
+      /发布前必须确认/,
+      /为必填内容/,
+      /未满足公开内容合同/,
+      /已启用.*(?:角色|文字角色).*填写/,
+      /必须填写行动文案/,
+      /已填写行动文案，必须设置有效去向/,
+      /已设置行动去向，必须填写行动文案/,
+      /该公开条目必须设置有效去向/,
+      /必须选择商品/,
+      /商品跳转必须选择有效商品/,
+      /分类跳转必须选择有效分类/,
+      /站内页面跳转必须填写链接/,
+      /seoTitle 过长/,
+      /seoDescription 过长/,
+      /contentOwner 过长/,
+    ].some((pattern) => pattern.test(issue.message));
   }
 
   private collectContentTemplateIssues(
@@ -1039,10 +993,7 @@ export class PageModulesService {
     };
   }
 
-  /**
-   * 正式联系与门店资料只读自 SiteSetting；PageDocument 只决定是否使用相关展示区块。
-   * 缺少当前页面实际依赖的正式资料会阻断发布，并把公开端降级结果精确反馈给运营。
-   */
+  /** 联系页的正式联系资料只读自 SiteSetting；缺失时允许安全降级并只作提醒。 */
   private async collectSiteSettingsReadinessIssues(
     db: PageValidationDb,
     puckData: unknown,
@@ -1084,12 +1035,6 @@ export class PageModulesService {
       }
     }
 
-    const visibleStoreBlocks = blocks.filter(
-      (block) => block.type === "门店信息" && block.props?.isVisible !== false,
-    );
-    const visibleAppointmentBlocks = blocks.filter(
-      (block) => block.type === "预约入口" && block.props?.isVisible !== false,
-    );
     const contactBusinessRegion = pageKey === "contact"
       ? blocks.find(
           (block) =>
@@ -1097,24 +1042,13 @@ export class PageModulesService {
             && block.props?.pageKey === "contact",
         )
       : undefined;
-    if (
-      visibleStoreBlocks.length === 0
-      && visibleAppointmentBlocks.length === 0
-      && !contactBusinessRegion
-    ) return [];
+    if (!contactBusinessRegion) return [];
 
     const stored = await db.siteSetting.findUnique({ where: { key: "site" } });
     const settings = stored?.value && typeof stored.value === "object" && !Array.isArray(stored.value)
       ? stored.value as Record<string, unknown>
       : {};
     const hasText = (field: string) => this.isNonEmptyString(settings[field]);
-    const mapUrl = hasText("storeMapUrl") ? String(settings.storeMapUrl).trim() : "";
-    const hasStoreFacts = [
-      "storeName",
-      "contactAddress",
-      "businessHours",
-      "contactPhone",
-    ].some(hasText) || /^https?:\/\//i.test(mapUrl);
     const hasContactSummary = [
       "contactPhone",
       "contactEmail",
@@ -1126,7 +1060,7 @@ export class PageModulesService {
     if (contactBusinessRegion && !hasContactSummary) {
       issues.push({
         code: "page-validation-site-settings-contact-missing",
-        severity: "error",
+        severity: "warning",
         layer: "page",
         blockId: this.isNonEmptyString(contactBusinessRegion.props?.id)
           ? contactBusinessRegion.props.id
@@ -1135,45 +1069,6 @@ export class PageModulesService {
         message:
           "统一联系资料尚未配置；公开联系页仍可提交咨询，但不会显示服务热线、邮箱、地址或服务时间。请先到「店铺资料」维护。",
       });
-    }
-
-    if (!hasStoreFacts) {
-      for (const block of visibleStoreBlocks) {
-        const props = block.props ?? {};
-        const blockId = this.isNonEmptyString(props.id) ? props.id : undefined;
-        const displayName = this.isNonEmptyString(props.moduleName)
-          ? props.moduleName.trim()
-          : "门店信息";
-        const hasImage = this.isNonEmptyString(props.image);
-        issues.push({
-          code: "page-validation-site-settings-store-missing",
-          severity: "error",
-          layer: "page",
-          ...(blockId ? { blockId } : {}),
-          path: `${block.path}.props.image`,
-          message: hasImage
-            ? `「${displayName}」尚未配置统一门店资料；公开端将仅显示门店图片。请先到「店铺资料」维护门店名称、地址、营业时间、电话或地图链接。`
-            : `「${displayName}」的统一门店资料与门店图片均未配置；该模块在公开端不会显示。请补充门店图片，或到「店铺资料」维护正式门店资料。`,
-        });
-      }
-    }
-
-    if (!hasText("contactPhone")) {
-      for (const block of visibleAppointmentBlocks) {
-        const props = block.props ?? {};
-        const blockId = this.isNonEmptyString(props.id) ? props.id : undefined;
-        const displayName = this.isNonEmptyString(props.moduleName)
-          ? props.moduleName.trim()
-          : "预约入口";
-        issues.push({
-          code: "page-validation-site-settings-contact-phone-missing",
-          severity: "error",
-          layer: "page",
-          ...(blockId ? { blockId } : {}),
-          path: "siteSettings.contactPhone",
-          message: `「${displayName}」的统一联系电话尚未配置；公开端将不显示次级电话，主预约入口仍可使用。请先到「店铺资料」维护联系电话。`,
-        });
-      }
     }
 
     return issues;
@@ -1282,22 +1177,6 @@ export class PageModulesService {
         errors.push(`${label}：区块 ID 不能为空`);
       }
 
-      const prohibitedFactFields = PAGE_DOCUMENT_FACT_FIELDS_BY_MODULE[type];
-      if (prohibitedFactFields) {
-        const sourceLabel = PAGE_DOCUMENT_FACT_SOURCE_LABEL_BY_MODULE[type] || "统一业务资料";
-        for (const field of prohibitedFactFields) {
-          if (!Object.prototype.hasOwnProperty.call(props, field)) continue;
-          const errorIndex = errors.push(
-            `${label}：${field} 属于${sourceLabel}，PageDocument 不得保存业务事实副本`,
-          ) - 1;
-          errorContexts[errorIndex] = {
-            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-            path: `${path}.props.${field}`,
-            field,
-          };
-        }
-      }
-
       // 编辑器说明区不会进入前台；隐藏区块也不应因未完成内容阻断其他模块发布。
       if (EDITOR_ONLY_COMPONENTS.has(type) || props.isVisible === false) {
         attachBlockContext(props);
@@ -1320,16 +1199,6 @@ export class PageModulesService {
             blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
             path: `${path}.props.${field}`,
             field,
-          };
-        }
-        const hasHeroMedia = [props.desktopImage, props.mobileImage]
-          .some((value) => this.isNonEmptyString(value));
-        if (hasHeroMedia && !this.isNonEmptyString(props.altText)) {
-          const errorIndex = errors.push(`${label}：altText 替代文字不能为空`) - 1;
-          errorContexts[errorIndex] = {
-            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-            path: `${path}.props.altText`,
-            field: "altText",
           };
         }
       }
@@ -1369,10 +1238,7 @@ export class PageModulesService {
         }
       }
 
-      // 必填媒体检查统一走生成文件的权威实现：
-      // getContentTemplateCompletion 内部用 getCompatibilityRoleValue 做
-      // 合同 role id → Puck props 字段名的兼容映射（如 视频区块 coverImage→posterUrl），
-      // 避免服务端直接读 props[coverImage] 读不到前端存的 posterUrl 而误报缺图。
+      // 首屏必填媒体与内容检查统一走生成文件的权威实现。
       const completion = getContentTemplateCompletion(type, props);
       const requiredImageFields = completion
         ? completion.material.missing.filter((field) => !explicitlyRequiredMediaFields.has(field))
@@ -1472,27 +1338,6 @@ export class PageModulesService {
             field: reference.field,
             ...(reference.index === undefined ? {} : { index: reference.index }),
           });
-        }
-      } else {
-        // 非模板兼容分支才使用旧字段表；正式内容模板统一由机器合同派生。
-        for (const field of PUCK_IMAGE_FIELDS) {
-          validateAsset(props[field], `${label}：${field} 图片`, {
-            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-            path: `${path}.props.${field}`,
-            field,
-          });
-        }
-        validateAsset(props.videoUrl, `${label}：videoUrl 视频`, {
-          blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-          path: `${path}.props.videoUrl`,
-          field: "videoUrl",
-        });
-      }
-
-      for (const field of contentTemplate ? ["mapUrl"] : PUCK_LINK_FIELDS) {
-        const value = props[field];
-        if (this.isNonEmptyString(value) && !this.isSafeLink(value)) {
-          errors.push(`${label}：${field} 链接不合法`);
         }
       }
 
@@ -1668,10 +1513,6 @@ export class PageModulesService {
         }
       }
 
-      if (type === "视频区块" && !this.isNonEmptyString(props.videoUrl)) {
-        errors.push(`${label}：videoUrl 视频地址不能为空`);
-      }
-
       if (type === "首屏主视觉") {
         const instanceOverrides = isRecord(props.__instanceOverrides)
           ? props.__instanceOverrides
@@ -1728,15 +1569,6 @@ export class PageModulesService {
         }
       }
 
-      // 图文混排的“纯文字”布局无需配图；其余布局必须提供图片。
-      if (
-        type === "图文混排" &&
-        props.template !== "textOnly" &&
-        !this.isNonEmptyString(props.image)
-      ) {
-        errors.push(`${label}：image 图片不能为空`);
-      }
-
       const rejectPlaceholderText = (
         value: unknown,
         fieldLabel: string,
@@ -1769,6 +1601,8 @@ export class PageModulesService {
         field?: string,
         itemIndex?: number,
       ) => {
+        // 仅跳过合同允许且已隐藏的内容角色；媒体、结构和其他可见字段继续检查。
+        if (field && isContentTemplateContentFieldHidden(type, field, props)) return;
         if (typeof value === "string") {
           rejectPlaceholderText(value, displayValuePath, valuePath, field, itemIndex);
           return;
@@ -1799,212 +1633,6 @@ export class PageModulesService {
       };
       scanPlaceholderValues(props, "配置", `${path}.props`);
 
-      if (type === "产品展示行") {
-        const codes = Array.isArray(props.productCodes)
-          ? props.productCodes.map((code: unknown) => String(code).trim()).filter(Boolean)
-          : [];
-        if (codes.length > 0) {
-          if (new Set(codes).size !== codes.length) {
-            const errorIndex = errors.push(`${label}：商品引用不能重复`) - 1;
-            errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCodes`, field: "productCodes" };
-          }
-          codes.forEach((code: string, index: number) => {
-            productCodes.add(code);
-            const references = productCodeReferences.get(code) ?? [];
-            references.push({ blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCodes[${index}]`, label, field: "productCodes", index });
-            productCodeReferences.set(code, references);
-          });
-        } else if (!Array.isArray(props.productIds)) {
-          errors.push(`${label}：productCodes 或兼容 productIds 必须是商品引用数组`);
-        } else {
-          if (new Set(props.productIds.map(Number)).size !== props.productIds.length) {
-            const errorIndex = errors.push(`${label}：商品引用不能重复`) - 1;
-            errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productIds`, field: "productIds" };
-          }
-          for (const [index, id] of props.productIds.entries()) {
-            const numericId = Number(id);
-            if (!Number.isInteger(numericId) || numericId <= 0) {
-              errors.push(`${label}：商品 ID「${id}」格式不正确`);
-            } else {
-              productIds.add(numericId);
-              const references = productReferences.get(numericId) ?? [];
-              references.push({
-                blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-                path: `${path}.props.productIds[${index}]`,
-                label,
-                field: "productIds",
-                index,
-              });
-              productReferences.set(numericId, references);
-            }
-          }
-        }
-      }
-
-      if (type === "单品焦点推荐") {
-        const productCode = this.isNonEmptyString(props.productCode) ? props.productCode.trim() : "";
-        if (productCode) {
-          productCodes.add(productCode);
-          productCodeReferences.set(productCode, [{ blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCode`, label, field: "productCode" }]);
-        } else {
-        const productId = Number(props.productId);
-        if (!Number.isInteger(productId) || productId <= 0) {
-          errors.push(`${label}：请选择 1 件有效的主推商品`);
-        } else {
-          productIds.add(productId);
-          const references = productReferences.get(productId) ?? [];
-          references.push({
-            blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-            path: `${path}.props.productId`,
-            label,
-            field: "productId",
-          });
-          productReferences.set(productId, references);
-        }
-        }
-      }
-
-      if (type === "佩戴灵感") {
-        const codes = Array.isArray(props.productCodes)
-          ? props.productCodes.map((code: unknown) => String(code).trim()).filter(Boolean)
-          : [];
-        if (codes.length > 0) {
-          if (codes.length > 4 || new Set(codes).size !== codes.length) {
-            const errorIndex = errors.push(`${label}：关联商品必须是不重复的 1–4 件商品`) - 1;
-            errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCodes`, field: "productCodes" };
-          }
-          codes.forEach((code: string, index: number) => {
-            productCodes.add(code);
-            const references = productCodeReferences.get(code) ?? [];
-            references.push({ blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productCodes[${index}]`, label, field: "productCodes", index });
-            productCodeReferences.set(code, references);
-          });
-        } else if (!Array.isArray(props.productIds)) {
-          errors.push(`${label}：productCodes 或兼容 productIds 必须是商品引用数组`);
-        } else {
-          if (props.productIds.length < 1 || props.productIds.length > 4 || new Set(props.productIds.map(Number)).size !== props.productIds.length) {
-            const errorIndex = errors.push(`${label}：关联商品必须是不重复的 1–4 件商品`) - 1;
-            errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.productIds`, field: "productIds" };
-          }
-          for (const [index, id] of props.productIds.entries()) {
-            const numericId = Number(id);
-            if (!Number.isInteger(numericId) || numericId <= 0) {
-              errors.push(`${label}：商品 ID「${id}」格式不正确`);
-            } else {
-              productIds.add(numericId);
-              const references = productReferences.get(numericId) ?? [];
-              references.push({
-                blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-                path: `${path}.props.productIds[${index}]`,
-                label,
-                field: "productIds",
-                index,
-              });
-              productReferences.set(numericId, references);
-            }
-          }
-        }
-      }
-
-      if (
-        type === "限时活动" &&
-        !Number.isFinite(new Date(String(props.targetDate)).getTime())
-      ) {
-        errors.push(`${label}：结束时间必须是有效的 ISO 日期时间`);
-      }
-
-      if (type === "轮播图") {
-        if (Array.isArray(props.images)) {
-          props.images.forEach((item: unknown, index: number) => {
-            if (!isRecord(item) || !this.isNonEmptyString(item.url)) {
-              errors.push(`${label}：第 ${index + 1} 张轮播图片不能为空`);
-            }
-          });
-        }
-      }
-
-      const validateNestedAssets = (
-        items: unknown,
-        collectionField: string,
-        itemLabel: string,
-        fields: string[],
-      ) => {
-        if (!Array.isArray(items)) return;
-        items.forEach((item: unknown, index) => {
-          fields.forEach((field) => {
-            validateAsset(
-              isRecord(item) ? item[field] : undefined,
-              `${label}：第 ${index + 1} 个${itemLabel}${field}`,
-              {
-                blockId: this.isNonEmptyString(props.id) ? props.id : undefined,
-                path: `${path}.props.${collectionField}[${index}].${field}`,
-                field: collectionField,
-                index,
-              },
-            );
-          });
-        });
-      };
-
-      const categorySlugValues = Array.isArray(props.categorySlugs)
-        ? props.categorySlugs
-        : [];
-      const usesCategoryReferences =
-        type === "分类卡片" && categorySlugValues.length > 0;
-      if (!contentTemplate) {
-        if (!usesCategoryReferences) {
-          validateNestedAssets(props.categories, "categories", "分类卡片的", ["image"]);
-        }
-        validateNestedAssets(props.items, "items", "画廊图片的", ["image"]);
-        validateNestedAssets(props.certificates, "certificates", "证书的", ["imageUrl"]);
-        validateNestedAssets(props.steps, "steps", "定制步骤的", ["image"]);
-        validateNestedAssets(props.testimonials, "testimonials", "评价的", ["image"]);
-      }
-
-      // 作品画廊:每张图片必填(与画廊契约一致)
-      if (type === "作品画廊" && Array.isArray(props.items)) {
-        props.items.forEach((item: unknown, index: number) => {
-          if (!isRecord(item) || !this.isNonEmptyString(item.image)) {
-            errors.push(`${label}：第 ${index + 1} 张画廊图片不能为空`);
-          }
-        });
-      }
-
-      // 分类卡片的正式形态使用 categorySlugs；这里只保留旧手填分类入口的安全兜底。
-      if (
-        type === "分类卡片" && !usesCategoryReferences &&
-        Array.isArray(props.categories)
-      ) {
-        props.categories.forEach((item: unknown, index: number) => {
-          if (!isRecord(item)) return;
-          for (const itemLinkField of ["link", "linkUrl"]) {
-            if (
-              this.isNonEmptyString(item[itemLinkField]) &&
-              !this.isSafeLink(item[itemLinkField])
-            ) {
-              errors.push(
-                `${label}：第 ${index + 1} 个分类入口链接不合法`,
-              );
-              break;
-            }
-          }
-        });
-      }
-      if (usesCategoryReferences) {
-        const slugs = categorySlugValues
-          .map((slug: unknown) => String(slug).trim())
-          .filter(Boolean);
-        if (new Set(slugs).size !== slugs.length) {
-          const errorIndex = errors.push(`${label}：分类引用不能重复`) - 1;
-          errorContexts[errorIndex] = { blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.categorySlugs`, field: "categorySlugs" };
-        }
-        slugs.forEach((slug: string, index: number) => {
-          categorySlugs.add(slug);
-          const references = categoryReferences.get(slug) ?? [];
-          references.push({ blockId: this.isNonEmptyString(props.id) ? props.id : undefined, path: `${path}.props.categorySlugs[${index}]`, label, field: "categorySlugs", index });
-          categoryReferences.set(slug, references);
-        });
-      }
       attachBlockContext(props);
     };
 
@@ -2327,9 +1955,6 @@ export class PageModulesService {
     const primaryStageIndexes = compositionByBlock
       .map((composition, index) => composition.visualRole === "primary-stage" ? index : -1)
       .filter((index) => index >= 0);
-    if (primaryStageIndexes.length > 1) {
-      errors.push(`页面只能有一个首屏主舞台（primary-stage），当前为 ${primaryStageIndexes.length} 个`);
-    }
     if (primaryStageIndexes.length > 0 && primaryStageIndexes[0] !== 0) {
       errors.push("首屏主舞台（primary-stage）必须是首个可见品牌内容区");
     }
@@ -2473,57 +2098,10 @@ export class PageModulesService {
   }
 
   /**
-   * 草稿允许内容未完成，但不允许重新持久化已废弃的经营事实副本。
-   * 只清理已登记模块的明确遗留键；媒体、布局、样式与历史发布快照均不受影响。
-   */
-  private removePageDocumentBusinessFactCopies(puckData: unknown): unknown {
-    if (!puckData || typeof puckData !== "object" || Array.isArray(puckData)) {
-      return puckData;
-    }
-    const document = puckData as Record<string, unknown>;
-    const sanitizeBlock = (block: unknown): unknown => {
-      if (!block || typeof block !== "object" || Array.isArray(block)) return block;
-      const value = block as Record<string, unknown>;
-      const fields = typeof value.type === "string"
-        ? PAGE_DOCUMENT_FACT_FIELDS_BY_MODULE[value.type]
-        : undefined;
-      if (!fields || !value.props || typeof value.props !== "object") {
-        return block;
-      }
-      const props = { ...(value.props as Record<string, unknown>) };
-      let touched = false;
-      for (const field of fields) {
-        if (!Object.prototype.hasOwnProperty.call(props, field)) continue;
-        delete props[field];
-        touched = true;
-      }
-      return touched ? { ...value, props } : block;
-    };
-
-    return {
-      ...document,
-      ...(Array.isArray(document.content)
-        ? { content: document.content.map(sanitizeBlock) }
-        : {}),
-      ...(document.zones && typeof document.zones === "object" && !Array.isArray(document.zones)
-        ? {
-            zones: Object.fromEntries(
-              Object.entries(document.zones).map(([zoneKey, blocks]) => [
-                zoneKey,
-                Array.isArray(blocks) ? blocks.map(sanitizeBlock) : blocks,
-              ]),
-            ),
-          }
-        : {}),
-    };
-  }
-
-  /**
-   * PageDocument 写入口共用的当前合同规范化。业务事实副本先按既有规则剥离，
-   * 实例覆盖再交给机器合同白名单清洗；旧版本印记仍保留，历史 revision 不回写。
+   * PageDocument 写入口共用的当前合同规范化。
    */
   private normalizePageDocumentPuckData(puckData: unknown): unknown {
-    const withoutBusinessFacts = this.removePageDocumentBusinessFactCopies(puckData);
+    const withoutBusinessFacts = puckData;
     if (
       !withoutBusinessFacts ||
       typeof withoutBusinessFacts !== "object" ||
@@ -2610,22 +2188,12 @@ export class PageModulesService {
       return [this.createServerValidationIssue("页面设置：metadata 格式不正确", "metadata")];
     }
     const m = (metadata ?? {}) as Record<string, unknown>;
-    const recommendedFields = new Set<string>(
-      CONTENT_TEMPLATE_PAGE_METADATA.recommendedForPublication,
-    );
     for (const field of CONTENT_TEMPLATE_PAGE_METADATA.recommendedForPublication) {
       const limit = CONTENT_TEMPLATE_PAGE_METADATA.limits[field];
       const value = m[field];
       const label = PAGE_METADATA_FIELD_LABELS[field] || field;
       if (value === undefined || value === null || (typeof value === "string" && !value.trim())) {
-        if (recommendedFields.has(field)) {
-          issues.push(this.createServerValidationIssue(
-            `页面设置：${label}（${field}）不能为空`,
-            `metadata.${field}`,
-            undefined,
-            field,
-          ));
-        }
+        // 推荐资料允许留空；提供值后仍执行格式、长度及资源门禁。
         continue;
       }
       if (typeof value !== "string") {
@@ -2701,123 +2269,105 @@ export class PageModulesService {
   }
 
   /**
-   * 正式素材授权随 PageDocument 草稿保存，但不进入公开 metadata 白名单。
-   * 当前可见素材 URL 必须记录精确匹配的来源与授权编号；缺失记录阻断发布。
+   * 素材权利记录随 PageDocument 草稿保存，但不进入公开 metadata 白名单。
+   * 当前页面只负责资源地址与文件安全；逐素材来源记录是可选审计资料，
+   * 缺失或不完整时合并为一条提醒，不冻结日常页面发布。
    */
-  private collectMediaRightsIssues(
+  private async collectMediaRightsIssues(
+    db: PageValidationDb,
     puckData: unknown,
     metadata: unknown,
     pageKey: string,
-  ): ContentTemplateIssue[] {
-    const references = getPageDocumentMediaReferences(puckData, metadata, pageKey);
+  ): Promise<ContentTemplateIssue[]> {
+    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData, db);
+    const pageRule = getContentTemplatePageRule(pageKey);
+    const seenUrls = new Set<string>();
+    const references = [
+      ...getPageDocumentMediaReferences(puckData, metadata, pageKey),
+      ...getDynamicTemplateDocumentMediaReferences(hydrated, {
+        includeZones: pageRule?.contentPlacement !== "root-only",
+      }),
+    ].filter((reference) => {
+      if (seenUrls.has(reference.url)) return false;
+      seenUrls.add(reference.url);
+      return true;
+    });
     if (references.length === 0) return [];
     const issues: ContentTemplateIssue[] = [];
+    const checkedBackgroundUrls = new Set<string>();
+    for (const reference of references) {
+      // 背景引用由模板节点遍历明确生成；槽位素材已在内容校验中检查。
+      if (reference.moduleType !== DYNAMIC_TEMPLATE_BLOCK_TYPE
+        || !reference.field.endsWith(".backgroundImage")) continue;
+      const errors: string[] = [];
+      if (!this.isSafeAssetUrl(reference.url)) {
+        errors.push("模板背景图片地址不合法");
+      } else if (!this.isManagedAssetUrl(reference.url)) {
+        errors.push("模板背景图片使用了外部素材地址；请先上传到本站后再发布");
+      } else {
+        this.collectMissingUploadError(reference.url, "模板背景图片", checkedBackgroundUrls, errors);
+      }
+      issues.push(...errors.map((message) => this.createServerValidationIssue(
+        message,
+        reference.path,
+        reference.blockId,
+        reference.field,
+      )));
+    }
     const source = metadata && typeof metadata === "object" && !Array.isArray(metadata)
       ? metadata as Record<string, unknown>
       : {};
     const rights = source.mediaRights;
-    if (!Array.isArray(rights)) {
-      return [this.createServerValidationIssue(
-        "页面设置：请为当前公开素材补齐来源与授权编号",
-        "metadata.mediaRights",
-        undefined,
-        "mediaRights",
-      )];
-    }
-
     const contract = CONTENT_TEMPLATE_PAGE_METADATA.mediaRights;
-    if (rights.length > contract.maxItems) {
-      issues.push(this.createServerValidationIssue(
-        `页面设置：素材授权记录过多（${rights.length}/${contract.maxItems} 条）`,
-        "metadata.mediaRights",
-        undefined,
-        "mediaRights",
-      ));
+    const validRights = new Set<string>();
+    let malformedRecordCount = 0;
+
+    if (Array.isArray(rights)) {
+      if (rights.length > contract.maxItems) malformedRecordCount += 1;
+      rights.slice(0, contract.maxItems).forEach((raw) => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          malformedRecordCount += 1;
+          return;
+        }
+        const record = raw as Record<string, unknown>;
+        const assetUrl = typeof record.assetUrl === "string" ? record.assetUrl.trim() : "";
+        const complete = (["assetUrl", "source", "authorizationId"] as const).every((field) => {
+          const value = record[field];
+          return typeof value === "string"
+            && Boolean(value.trim())
+            && value.length <= contract.fieldLimits[field];
+        }) && this.isSafeAssetUrl(assetUrl);
+        if (!complete || validRights.has(assetUrl)) {
+          malformedRecordCount += 1;
+          return;
+        }
+        validRights.add(assetUrl);
+      });
     }
 
-    const validRights = new Map<string, number>();
-    rights.slice(0, contract.maxItems).forEach((raw, index) => {
-      const basePath = `metadata.mediaRights[${index}]`;
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-        issues.push(this.createServerValidationIssue(
-          `页面设置：第 ${index + 1} 条素材授权记录格式不正确`,
-          basePath,
+    const missingReferenceCount = references.reduce(
+      (count, reference) => count + (validRights.has(reference.url) ? 0 : 1),
+      0,
+    );
+    if (missingReferenceCount > 0 || malformedRecordCount > 0) {
+      const summary = [
+        missingReferenceCount > 0
+          ? `${missingReferenceCount} 项当前公开素材尚无完整来源记录`
+          : "",
+        malformedRecordCount > 0
+          ? `${malformedRecordCount} 条已保存记录不完整或重复`
+          : "",
+      ].filter(Boolean).join("；");
+      issues.push({
+        ...this.createServerValidationIssue(
+          `页面设置：${summary}。不影响本次页面发布，可在后续素材治理中补充。`,
+          "metadata.mediaRights",
           undefined,
           "mediaRights",
-          index,
-        ));
-        return;
-      }
-      const record = raw as Record<string, unknown>;
-      let complete = true;
-      for (const field of ["assetUrl", "source", "authorizationId"] as const) {
-        const value = record[field];
-        const limit = contract.fieldLimits[field];
-        const label = field === "assetUrl"
-          ? "素材地址"
-          : field === "source"
-            ? "素材来源"
-            : "授权编号";
-        if (typeof value !== "string" || !value.trim()) {
-          complete = false;
-          issues.push(this.createServerValidationIssue(
-            `页面设置：第 ${index + 1} 条${label}不能为空`,
-            `${basePath}.${field}`,
-            undefined,
-            field,
-            index,
-          ));
-        } else if (value.length > limit) {
-          complete = false;
-          issues.push(this.createServerValidationIssue(
-            `页面设置：第 ${index + 1} 条${label}过长（${value.length}/${limit} 字）`,
-            `${basePath}.${field}`,
-            undefined,
-            field,
-            index,
-          ));
-        }
-      }
-      const assetUrl = typeof record.assetUrl === "string"
-        ? record.assetUrl.trim()
-        : "";
-      if (assetUrl && !this.isSafeAssetUrl(assetUrl)) {
-        complete = false;
-        issues.push(this.createServerValidationIssue(
-          `页面设置：第 ${index + 1} 条素材地址不合法`,
-          `${basePath}.assetUrl`,
-          undefined,
-          "assetUrl",
-          index,
-        ));
-      }
-      if (!complete || !assetUrl) return;
-      const previousIndex = validRights.get(assetUrl);
-      if (previousIndex !== undefined) {
-        issues.push(this.createServerValidationIssue(
-          `页面设置：第 ${index + 1} 条素材授权与第 ${previousIndex + 1} 条重复`,
-          `${basePath}.assetUrl`,
-          undefined,
-          "assetUrl",
-          index,
-        ));
-        return;
-      }
-      validRights.set(assetUrl, index);
-    });
-
-    for (const reference of references) {
-      if (validRights.has(reference.url)) continue;
-      const displayUrl = reference.url.length > 80
-        ? `${reference.url.slice(0, 77)}…`
-        : reference.url;
-      issues.push(this.createServerValidationIssue(
-        `页面设置：素材「${displayUrl}」缺少来源或授权编号`,
-        "metadata.mediaRights",
-        reference.blockId,
-        "mediaRights",
-        reference.index,
-      ));
+        ),
+        code: "page-validation-media-rights-advisory",
+        severity: "warning",
+      });
     }
     return issues;
   }
@@ -3109,11 +2659,8 @@ export class PageModulesService {
         revision.metadata,
         pageKey,
       );
-      const globalReadinessIssues =
-        await this.collectGlobalSitePublicationReadinessIssues(tx);
       const rollbackIssues = [
         ...attestationIssue,
-        ...globalReadinessIssues,
         ...pageReadiness.issues,
       ];
       const rollbackErrors = rollbackIssues

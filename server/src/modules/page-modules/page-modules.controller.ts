@@ -176,7 +176,6 @@ export class PageModulesController {
       body?.pageKey || "home",
       body?.puckData,
       body?.metadata,
-      { includeGlobalSiteReadiness: true },
     );
   }
 

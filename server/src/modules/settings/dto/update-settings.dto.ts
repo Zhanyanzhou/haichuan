@@ -8,7 +8,9 @@ import {
   ArrayMinSize,
   IsIn,
   Matches,
+  ValidateIf,
 } from "class-validator";
+import { Transform } from "class-transformer";
 import {
   DEFAULT_PUBLIC_CONTENT_LOCALE,
   PUBLIC_CONTENT_LOCALES,
@@ -25,7 +27,12 @@ export class UpdateSettingsDto {
   @IsOptional() @IsString() @MaxLength(500) seoDescription?: string;
   @IsOptional() @IsString() @MaxLength(500) seoKeywords?: string;
   @IsOptional() @IsString() @MaxLength(30) contactPhone?: string;
-  @IsOptional() @IsEmail() @MaxLength(100) contactEmail?: string;
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => typeof value === "string" ? value.trim() : value)
+  @ValidateIf((_object: UpdateSettingsDto, value: unknown) => value !== "")
+  @IsEmail()
+  @MaxLength(100)
+  contactEmail?: string;
   @IsOptional() @IsString() @MaxLength(300) contactAddress?: string;
   @IsOptional() @IsString() @MaxLength(100) storeName?: string;
   @IsOptional() @IsString() @MaxLength(100) businessHours?: string;

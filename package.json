@@ -23,9 +23,8 @@
     "contracts:check": "node scripts/generate-content-template-contract.mjs --check && node scripts/generate-template-definition-contract.mjs --check",
     "dynamic-templates:generate": "node scripts/generate-template-definition-contract.mjs",
     "dynamic-templates:check": "node scripts/generate-template-definition-contract.mjs --check",
-    "verify:template-acceptance": "node scripts/verify-template-acceptance-evidence.mjs",
+    "test:real-mysql": "node server/scripts/run-real-mysql-tests.cjs",
     "audit:template-v2-gate-a": "node scripts/audit-template-v2-gate-a-readiness.mjs",
-    "audit:template-v2-gate-b:readonly": "cd server && npm run audit:template-v2-gate-b:readonly",
     "audit:template-v2-gate-d:static": "node scripts/audit-template-v2-gate-d-readiness.mjs",
     "test": "npm run test:contracts && npm run test:content-templates && npm run test:server && npm run test:public-assets && npm run test:runtime-ownership && npm run test:release-supply-chain && npm run test:admin-ui-standards",
     "test:admin-ui-standards": "node scripts/verify-admin-ui-standards.mjs",
@@ -66,6 +65,6 @@
     "@commitlint/config-conventional": "^21.2.2",
     "concurrently": "^8.2.2",
     "husky": "^9.1.7",
-    "js-yaml": "4.3.1"
+    "js-yaml": "^4.3.2"
   }
 }

@@ -1,5 +1,5 @@
 // 客户域服务：注册登录/资料地址/密码找回(邮件)/收藏/短信验证码/合规(导出与注销)
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -13,7 +13,7 @@ import { RefreshSessionService, type SessionMetadata } from '../../common/securi
 import { anonymizeCustomerConsultations } from '../leads/lead-privacy-disposition';
 import { customerFacingProductWhere } from '../products/product-eligibility';
 import { assertAccountPassword } from '../users/staff-password-policy';
-import { consumeCustomerSmsCode } from '../../common/sms/consume-customer-sms-code';
+import { consumeCustomerSmsCode, type CustomerSmsPurpose } from '../../common/sms/consume-customer-sms-code';
 import {
   CUSTOMER_INQUIRY_EXPORT_SELECT,
   CUSTOMER_INQUIRY_LIST_SELECT,
@@ -28,6 +28,7 @@ import {
   CUSTOMER_CONSULTATION_DETAIL_SELECT,
   toCustomerConsultationDetail,
 } from '../leads/customer-lead-reply.response';
+import { CustomerAvatarService } from './customer-avatar.service';
 
 type AddressInput = {
   recipientName: string;
@@ -85,6 +86,7 @@ export class CustomersService {
     private readonly mailer: MailerService,
     private readonly sms: SmsService,
     private readonly refreshSessions: RefreshSessionService,
+    @Optional() private readonly customerAvatars?: CustomerAvatarService,
   ) {}
 
   private normalizePhone(phone: string) {
@@ -93,9 +95,9 @@ export class CustomersService {
     return value;
   }
 
-  private issueAccessToken(customerId: number) {
+  private issueAccessToken(customerId: number, authVersion: number) {
     return this.jwtService.sign(
-      { sub: customerId, type: 'customer', tokenUse: 'access' },
+      { sub: customerId, type: 'customer', tokenUse: 'access', authVersion },
       { expiresIn: '15m' },
     );
   }
@@ -179,10 +181,23 @@ export class CustomersService {
     return password;
   }
 
-  private accountResponse(customer: { id: number; phone: string; name: string | null; email: string | null }) {
+  private accountResponse(customer: {
+    id: number;
+    phone: string;
+    name: string | null;
+    email: string | null;
+    authVersion: number;
+    avatarStorageKey?: string | null;
+  }) {
     return {
-      accessToken: this.issueAccessToken(customer.id),
-      customer: { id: customer.id, phone: customer.phone, name: customer.name, email: customer.email },
+      accessToken: this.issueAccessToken(customer.id, customer.authVersion),
+      customer: {
+        id: customer.id,
+        phone: customer.phone,
+        name: customer.name,
+        email: customer.email,
+        avatarUrl: customer.avatarStorageKey ? '/api/customers/me/avatar' : null,
+      },
     };
   }
 
@@ -197,7 +212,7 @@ export class CustomersService {
    * 发送验证码：60s 冷却 + 每日每号 ≤10 条 + SHA-256(phone:code) 哈希落库（5 分钟时效）。
    * purpose 区分注册验真与登录挑战；SMS 可用性前置到写库之前，杜绝"提示已发送但通道未配置"。
    */
-  async requestSmsCode(phoneInput: string, purpose: 'REGISTER' | 'LOGIN' = 'REGISTER') {
+  async requestSmsCode(phoneInput: string, purpose: CustomerSmsPurpose = 'REGISTER') {
     const phone = phoneInput?.trim();
     if (!/^1\d{10}$/.test(phone || '')) {
       throw new BadRequestException('请提供有效的手机号码');
@@ -248,7 +263,7 @@ export class CustomersService {
     phone: string,
     smsCode: string,
     now: Date,
-    purpose: 'REGISTER' | 'LOGIN' = 'REGISTER',
+    purpose: CustomerSmsPurpose = 'REGISTER',
   ) {
     await consumeCustomerSmsCode(tx, phone, smsCode, now, purpose);
   }
@@ -282,7 +297,7 @@ export class CustomersService {
     const smsRequired = this.sms.isRegisterVerificationRequired();
     if (smsRequired && !data.smsCode?.trim()) throw new BadRequestException('请输入短信验证码');
     const name = data.name?.trim();
-    const email = data.email?.trim();
+    const email = data.email?.trim().toLowerCase();
     if (!name || name.length > 50) throw new BadRequestException('请填写有效的称呼');
     if (email && (email.length > 100 || !/^\S+@\S+\.\S+$/.test(email))) {
       throw new BadRequestException('请填写正确的邮箱地址');
@@ -302,10 +317,11 @@ export class CustomersService {
         data: { phone, name, email: email || null, passwordHash },
       });
       const refreshSession = sessionMetadata
-        ? await this.refreshSessions.issueCustomerInTransaction(
+          ? await this.refreshSessions.issueCustomerInTransaction(
             tx,
             resolvedCustomer.id,
             sessionMetadata,
+            resolvedCustomer.authVersion,
           )
         : undefined;
       return { customer: resolvedCustomer, refreshSession };
@@ -354,13 +370,13 @@ export class CustomersService {
     }
     if (customer.status === 'DISABLED') throw new UnauthorizedException('该账户已被停用');
     this.loginFailures.delete(phone);
-    return this.accountResponse(customer);
+    return { ...this.accountResponse(customer), sessionAuthVersion: customer.authVersion };
   }
 
   async resume(customerId: number) {
     const customer = await this.prisma.customer.findFirst({
       where: { id: customerId, status: 'ACTIVE' },
-      select: { id: true, phone: true, name: true, email: true },
+      select: { id: true, phone: true, name: true, email: true, authVersion: true, avatarStorageKey: true },
     });
     if (!customer) throw new UnauthorizedException('客户登录已失效');
     return this.accountResponse(customer);
@@ -441,7 +457,10 @@ export class CustomersService {
       if (claimed.count !== 1) {
         throw new BadRequestException('重置链接无效或已过期，请重新发起找回');
       }
-      await tx.customer.update({ where: { id: record.customerId }, data: { passwordHash } });
+      await tx.customer.update({
+        where: { id: record.customerId },
+        data: { passwordHash, authVersion: { increment: 1 } },
+      });
       await tx.customerRefreshSession.updateMany({
         where: { customerId: record.customerId, revokedAt: null },
         data: { revokedAt: now },
@@ -771,7 +790,12 @@ export class CustomersService {
     const now = new Date();
     const closedIdentity = `closed-${customerId}`;
     const randomPasswordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 12);
-    const consultationDisposition = await this.prisma.$transaction(async (transaction) => {
+    const avatarRemovalPrepared = customer.avatarStorageKey && this.customerAvatars
+      ? await this.customerAvatars.prepareRemoval(customer.avatarStorageKey)
+      : false;
+    let consultationDisposition: Awaited<ReturnType<typeof anonymizeCustomerConsultations>>;
+    try {
+      consultationDisposition = await this.prisma.$transaction(async (transaction) => {
       const disposition = await anonymizeCustomerConsultations(
         transaction,
         customerId,
@@ -786,6 +810,25 @@ export class CustomersService {
       await transaction.customerSmsCode.updateMany({
         where: { phone: customer.phone },
         data: { phone: closedIdentity, usedAt: now },
+      });
+      // 换绑历史只保留类型、状态、次数和时间等最小审计事实；移除完整目标联系方式及可复用验证码哈希。
+      await transaction.customerContactChange.updateMany({
+        where: { customerId },
+        data: {
+          targetValue: closedIdentity,
+          verificationHash: createHash('sha256')
+            .update(randomBytes(32))
+            .digest('hex'),
+        },
+      });
+      await transaction.customerContactChange.updateMany({
+        where: { customerId, completedAt: null, cancelledAt: null },
+        data: { cancelledAt: now },
+      });
+      // 安全事件保留事件类型与时间用于最小审计，但注销后不再保留可关联网络标识。
+      await transaction.customerSecurityEvent.updateMany({
+        where: { customerId },
+        data: { ipHash: null, userAgentHash: null },
       });
       await transaction.customerAddress.deleteMany({ where: { customerId } });
       await transaction.customerFavorite.deleteMany({ where: { customerId } });
@@ -821,11 +864,23 @@ export class CustomersService {
           wechatOpenId: null,
           wechatUnionId: null,
           passwordHash: randomPasswordHash,
+          avatarStorageKey: null,
           status: 'DISABLED',
         },
       });
-      return disposition;
-    });
+        return disposition;
+      });
+    } catch (error) {
+      if (avatarRemovalPrepared) {
+        await this.customerAvatars?.cancelPreparedRemoval(customer.avatarStorageKey);
+      }
+      throw error;
+    }
+    if (avatarRemovalPrepared) {
+      await this.customerAvatars?.completePreparedRemoval(customer.avatarStorageKey);
+    } else {
+      await this.customerAvatars?.remove(customer.avatarStorageKey);
+    }
     return {
       message: '账户已注销，感谢您曾经的信任与陪伴',
       retainedUnderLegalHold: consultationDisposition.retainedUnderLegalHold,
@@ -834,7 +889,7 @@ export class CustomersService {
 
   async updateProfile(customerId: number, data: { name?: string; email?: string }) {
     const name = data.name?.trim();
-    const email = data.email?.trim();
+    const email = data.email?.trim().toLowerCase();
     if (name !== undefined && (!name || name.length > 50)) throw new BadRequestException('姓名格式不正确');
     if (email !== undefined && (email.length > 100 || (email.length > 0 && !/^\S+@\S+\.\S+$/.test(email)))) {
       throw new BadRequestException('请填写正确的邮箱地址');

@@ -138,7 +138,7 @@ test("系统模板新版布局非法或实例类型失配时不提供升级", ()
   } as unknown as SystemContentTemplateCurrent;
   const wrongModuleDocument = {
     content: [{
-      type: "纯文字横幅",
+      type: "已删除模板",
       props: {
         id: "wrong-module",
         __templateOrigin: { kind: "system", contractKey: "hero", version: 1 },

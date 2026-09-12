@@ -29,10 +29,12 @@ export default function useCompactWorkspaceOverlay({
   open,
   onOpen,
   onClose,
+  modal = true,
 }: {
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
+  modal?: boolean;
 }) {
   const [compact, setCompact] = useState(readCompactWorkspace);
   const panelRef = useRef<HTMLElement>(null);
@@ -83,7 +85,7 @@ export default function useCompactWorkspaceOverlay({
       requestClose();
       return;
     }
-    if (event.key !== "Tab" || !panelRef.current) return;
+    if (!modal || event.key !== "Tab" || !panelRef.current) return;
     const focusable = Array.from(
       panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
     ).filter((element) => (
@@ -105,7 +107,7 @@ export default function useCompactWorkspaceOverlay({
       event.preventDefault();
       first.focus();
     }
-  }, [compact, open, requestClose]);
+  }, [compact, modal, open, requestClose]);
 
   return {
     compact,

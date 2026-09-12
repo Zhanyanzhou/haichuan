@@ -2,13 +2,12 @@ import { useRef, useState } from "react";
 import { App as AntdApp, Button, Input, Select, Tag } from "antd";
 import MediaPickerField from "../fields/MediaPickerField";
 import ProductReferencesField from "../fields/ProductReferencesField";
-import NumberField from "../inspector/controls/NumberField";
+import NumberField, { focusFirstInvalidNumberField } from "../inspector/controls/NumberField";
 import RestoreDefaultButton from "../inspector/controls/RestoreDefaultButton";
 import SwitchField from "../inspector/controls/SwitchField";
 import LinkTargetField from "../inspector/LinkTargetField";
 import { useInspectorModuleEditor } from "../inspector/useInspectorModuleEditor";
 import {
-  getEffectiveDynamicTemplateInstanceEditPolicy,
   type DynamicTemplateSlotDefinition,
   type TemplateInstanceLayoutOverride,
 } from "../template-definition";
@@ -27,8 +26,6 @@ import {
   promoteInstanceOverridesToTemplateDraft,
   type PromoteDynamicTemplateInstanceRequest,
 } from "./promoteToTemplate";
-import VideoContentFields from "../inspector/controls/VideoContentFields";
-import DynamicComplexContentFields, { isDynamicComplexSlotType } from "../inspector/controls/DynamicComplexContentFields";
 import ImageFocusField from "../inspector/controls/ImageFocusField";
 import InspectorFooterBar from "../inspector/InspectorFooterBar";
 import {
@@ -36,6 +33,14 @@ import {
   type PublishValidationIssue,
   type PublishValidationStatus,
 } from "../inspector/publishValidation";
+import {
+  getDynamicTemplatePageFieldDataAttributes,
+  getDynamicTemplatePageFieldDescriptors,
+  groupDynamicTemplatePageFields,
+  PAGE_FIELD_TASK_LABELS,
+  type DynamicTemplatePageFieldDescriptor,
+} from "./pageFieldDescriptors";
+import { hasExplicitDynamicTemplateInstanceImage } from "./mediaReferences";
 
 const { TextArea } = Input;
 
@@ -49,9 +54,12 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function getImageAssetGuidance(slot: DynamicTemplateSlotDefinition) {
+function getImageAssetGuidance(
+  slot: DynamicTemplateSlotDefinition,
+  validation: DynamicTemplatePageFieldDescriptor["validation"],
+) {
   const parts: string[] = [];
-  const { recommendedWidth, recommendedHeight } = slot.validation;
+  const { recommendedWidth, recommendedHeight } = validation;
   if (recommendedWidth && recommendedHeight) {
     parts.push(`建议素材：${recommendedWidth} × ${recommendedHeight} 像素`);
   } else if (recommendedWidth) {
@@ -68,159 +76,14 @@ function getImageAssetGuidance(slot: DynamicTemplateSlotDefinition) {
   return parts.join(" · ");
 }
 
-function orderedSlots(definition: NonNullable<ReturnType<typeof useResolvedDynamicTemplate>>["definition"]) {
-  const result: DynamicTemplateSlotDefinition[] = [];
-  const seen = new Set<string>();
-  const visit = (nodeId: string) => {
-    const node = definition.nodes[nodeId];
-    if (!node) return;
-    if (node.slotId && !seen.has(node.slotId) && definition.slots[node.slotId]) {
-      seen.add(node.slotId);
-      result.push(definition.slots[node.slotId]);
-    }
-    node.childIds.forEach(visit);
-  };
-  visit(definition.rootNodeId);
-  return result;
-}
-
-function visualKindForSlot(slot: DynamicTemplateSlotDefinition): VisualNodeKind {
-  if (["image", "video", "carousel", "hotspot", "beforeAfter"].includes(slot.type)) return "media";
-  if (["heading", "text", "richText", "badge", "icon"].includes(slot.type)) return "text";
-  if (["button", "link", "appointment"].includes(slot.type)) return "action";
-  if (["product", "collection", "productCard", "productCollection", "categoryCollection"].includes(slot.type)) return "product";
+function visualKindForField(field: DynamicTemplatePageFieldDescriptor): VisualNodeKind {
+  if (field.controlKind === "image") return "media";
+  if (field.controlKind === "text") return "text";
+  if (field.controlKind === "link") return "action";
+  if (field.controlKind === "product") return "product";
   return "structured";
 }
 
-type InspectorTask = "media" | "commerce" | "conversion" | "trust" | "content";
-
-const SLOT_TASK_BY_TYPE: Partial<Record<DynamicTemplateSlotDefinition["type"], InspectorTask>> = {
-  image: "media",
-  video: "media",
-  carousel: "media",
-  hotspot: "media",
-  beforeAfter: "media",
-  heroTemplate: "media",
-  fullBleedTemplate: "media",
-  singlePosterTemplate: "media",
-  doublePosterTemplate: "media",
-  galleryTemplate: "media",
-  lookbookTemplate: "media",
-  product: "commerce",
-  collection: "commerce",
-  productCard: "commerce",
-  productCollection: "commerce",
-  categoryCollection: "commerce",
-  sceneShoppingTemplate: "commerce",
-  button: "conversion",
-  link: "conversion",
-  appointment: "conversion",
-  limitedEventTemplate: "conversion",
-  storeInfoTemplate: "trust",
-  servicePromisesTemplate: "trust",
-  certificatesTemplate: "trust",
-  testimonialsTemplate: "trust",
-  craftDetailsTemplate: "trust",
-  brandPointsTemplate: "trust",
-  heading: "content",
-  text: "content",
-  richText: "content",
-  badge: "content",
-  icon: "content",
-  textBannerTemplate: "content",
-  journeyTemplate: "content",
-};
-
-const TASK_LABEL: Record<InspectorTask, string> = {
-  media: "媒体与画面",
-  commerce: "商品与分类",
-  conversion: "行动与转化",
-  trust: "服务与信任",
-  content: "文字内容",
-};
-
-const SLOT_TYPE_LABEL: Partial<Record<DynamicTemplateSlotDefinition["type"], string>> = {
-  image: "图片",
-  video: "视频",
-  carousel: "轮播",
-  hotspot: "热点",
-  beforeAfter: "对比图",
-  heading: "标题",
-  text: "正文",
-  richText: "富文本",
-  badge: "标签",
-  icon: "图标",
-  button: "按钮",
-  link: "链接",
-  appointment: "预约",
-  product: "商品",
-  collection: "商品集合",
-  productCard: "商品卡片",
-  productCollection: "商品集合",
-  categoryCollection: "分类集合",
-};
-
-const V1_CORE_SLOT_TYPES = new Set<DynamicTemplateSlotDefinition["type"]>([
-  "image",
-  "heading",
-  "text",
-  "product",
-  "button",
-]);
-
-function inferInspectorTask(
-  slots: DynamicTemplateSlotDefinition[],
-  selectedSlotId?: string,
-): InspectorTask {
-  const selectedSlot = slots.find((slot) => slot.slotId === selectedSlotId);
-  if (selectedSlot) return SLOT_TASK_BY_TYPE[selectedSlot.type] ?? "content";
-  const counts = new Map<InspectorTask, number>();
-  for (const slot of slots) {
-    const task = SLOT_TASK_BY_TYPE[slot.type] ?? "content";
-    counts.set(task, (counts.get(task) ?? 0) + 1);
-  }
-  return (["commerce", "media", "conversion", "trust", "content"] as const)
-    .reduce((best, task) => (
-      (counts.get(task) ?? 0) > (counts.get(best) ?? 0) ? task : best
-    ), "commerce");
-}
-
-function groupInspectorSlots(
-  slots: DynamicTemplateSlotDefinition[],
-  selectedSlotId?: string,
-) {
-  const task = inferInspectorTask(slots, selectedSlotId);
-  const isCompactCoreTemplate = slots.length <= 5
-    && slots.every((slot) => V1_CORE_SLOT_TYPES.has(slot.type));
-  if (isCompactCoreTemplate) {
-    return { task, primary: slots, secondary: [] };
-  }
-  const relatedTasks: Record<InspectorTask, InspectorTask[]> = {
-    media: ["media", "conversion"],
-    commerce: ["commerce", "conversion"],
-    conversion: ["conversion", "commerce"],
-    trust: ["trust", "conversion"],
-    content: ["content", "conversion"],
-  };
-  const taskRank = new Map(relatedTasks[task].map((candidate, index) => [candidate, index]));
-  const indexed = slots.map((slot, index) => ({ slot, index, slotTask: SLOT_TASK_BY_TYPE[slot.type] ?? "content" }));
-  const primary = indexed
-    .filter(({ slot, slotTask }) => slot.slotId === selectedSlotId || slot.required || taskRank.has(slotTask))
-    .sort((left, right) => {
-      if (left.slot.slotId === selectedSlotId) return -1;
-      if (right.slot.slotId === selectedSlotId) return 1;
-      const leftRank = taskRank.get(left.slotTask) ?? relatedTasks[task].length;
-      const rightRank = taskRank.get(right.slotTask) ?? relatedTasks[task].length;
-      return leftRank - rightRank || left.index - right.index;
-    })
-    .map(({ slot }) => slot);
-  const primaryIds = new Set(primary.map((slot) => slot.slotId));
-  return {
-    task,
-    primary,
-    secondary: slots.filter((slot) => !primaryIds.has(slot.slotId)),
-  };
-}
 
 export default function DynamicTemplateInstanceInspector({
   hasUnsavedChanges,
@@ -267,7 +130,8 @@ export default function DynamicTemplateInstanceInspector({
   }
   const definition = resolved.definition;
   const editorBlockId = getDynamicTemplateInstanceEditorBlockId(props);
-  const slots = orderedSlots(definition);
+  const pageFields = getDynamicTemplatePageFieldDescriptors(definition);
+  const pageFieldBySlotId = new Map(pageFields.map((field) => [field.slotId, field]));
   const content = asRecord(props.contentBySlotId);
   const hidden = Array.isArray(props.hiddenSlotIds)
     ? props.hiddenSlotIds.filter((value): value is string => typeof value === "string")
@@ -278,10 +142,9 @@ export default function DynamicTemplateInstanceInspector({
   const selectedSlot = selectedNode?.slotId
     ? definition.slots[selectedNode.slotId]
     : undefined;
-  const selectedPolicy = selectedNode
-    ? getEffectiveDynamicTemplateInstanceEditPolicy(selectedNode, selectedSlot)
-    : null;
-  const slotGroups = groupInspectorSlots(slots, selectedNode?.slotId);
+  const selectedPageField = selectedSlot ? pageFieldBySlotId.get(selectedSlot.slotId) : undefined;
+  const selectedPolicy = selectedPageField?.effectiveDesignOverrideCapabilities ?? null;
+  const slotGroups = groupDynamicTemplatePageFields(pageFields, selectedNode?.slotId);
   const layoutOverrides = props.layoutOverridesByNodeId ?? {};
   const promotionPreview = promoteInstanceOverridesToTemplateDraft({
     sourceDefinition: definition,
@@ -289,6 +152,16 @@ export default function DynamicTemplateInstanceInspector({
     layoutOverridesByNodeId: props.layoutOverridesByNodeId,
   });
   const contentOverrideCount = Object.keys(content).length + hidden.length + (props.isVisible === false ? 1 : 0);
+  const hasPublicImage = hasExplicitDynamicTemplateInstanceImage(
+    definition,
+    content,
+    hidden,
+  );
+  const publicVisibilityState = props.isVisible === false
+    ? "hidden"
+    : hasPublicImage
+      ? "ready"
+      : "empty";
   const designOverrideCount = Object.values(layoutOverrides).reduce((total, devices) => (
     total + Object.values(devices ?? {}).reduce((deviceTotal, override) => (
       deviceTotal + Object.keys(override ?? {}).length
@@ -305,16 +178,15 @@ export default function DynamicTemplateInstanceInspector({
   const currentPublishWarningCount = currentPublishIssues.filter(
     (issue) => issue.severity === "warning",
   ).length;
-  const hasInstanceOverrides = Object.keys(content).length > 0
-    || Object.keys(layoutOverrides).length > 0
+  const hasTemplateValueOverrides = designOverrideCount > 0
     || hidden.length > 0
     || props.isVisible === false;
   const nodeBySlotId = new Map(
     Object.values(definition.nodes).flatMap((candidate) => candidate.slotId ? [[candidate.slotId, candidate] as const] : []),
   );
   const instancePropertyNodes = Object.values(definition.nodes).filter((candidate) => {
-    const candidateSlot = candidate.slotId ? definition.slots[candidate.slotId] : undefined;
-    return Boolean(candidateSlot?.editable);
+    const candidateField = candidate.slotId ? pageFieldBySlotId.get(candidate.slotId) : undefined;
+    return Boolean(candidateField?.editable);
   });
   const selectedPropertyNodeId = selectedNode
     && instancePropertyNodes.some((candidate) => candidate.nodeId === selectedNode.nodeId)
@@ -328,19 +200,21 @@ export default function DynamicTemplateInstanceInspector({
   );
 
   const selectInstancePropertyScope = (nodeId: string) => {
+    if (focusFirstInvalidNumberField()) return;
     if (!nodeId) {
       clearVisualNode(editorBlockId);
       return;
     }
     const nextNode = definition.nodes[nodeId];
     const nextSlot = nextNode?.slotId ? definition.slots[nextNode.slotId] : undefined;
-    if (!nextNode || !nextSlot?.editable) return;
-    const policy = getEffectiveDynamicTemplateInstanceEditPolicy(nextNode, nextSlot);
+    const nextField = nextSlot ? pageFieldBySlotId.get(nextSlot.slotId) : undefined;
+    if (!nextNode || !nextSlot?.editable || !nextField) return;
+    const policy = nextField.effectiveDesignOverrideCapabilities;
     selectVisualNode({
       blockId: editorBlockId,
       moduleType: props.moduleName || definition.name,
       nodeId: nextNode.nodeId,
-      kind: visualKindForSlot(nextSlot),
+      kind: visualKindForField(nextField),
       canAdjustLayout: Boolean(policy && (policy.position || policy.size)),
       canAdjustMedia: Boolean(nextSlot.type === "image" && policy && (policy.imageFit || policy.imageFocus)),
     });
@@ -488,46 +362,45 @@ export default function DynamicTemplateInstanceInspector({
     }
   };
 
-  const renderSlotControl = (slot: DynamicTemplateSlotDefinition) => {
+  const renderSlotControl = (field: DynamicTemplatePageFieldDescriptor) => {
+    const slot = definition.slots[field.slotId];
     const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
     const value = hasPageValue
       ? content[slot.slotId]
-      : slot.required
+      : field.required
         ? undefined
         : definition.defaultContent[slot.slotId];
-    if (!slot.editable) {
+    if (!field.editable) {
       return <p className="homepage-editor__properties-hint">此内容由模板锁定，页面不能修改。</p>;
     }
-    if (["heading", "badge", "icon"].includes(slot.type)) {
+    if (field.controlKind === "text" && ["heading", "badge", "icon"].includes(field.slotType)) {
       return (
         <Input
-          aria-label={slot.label}
+          aria-label={field.label}
           value={typeof value === "string" ? value : ""}
-          maxLength={slot.validation.maxLength}
+          maxLength={field.validation.maxLength}
           onChange={(event) => updateContent(slot.slotId, event.target.value)}
         />
       );
     }
-    if (["text", "richText"].includes(slot.type)) {
+    if (field.controlKind === "text" && ["text", "richText"].includes(field.slotType)) {
       return (
         <TextArea
-          aria-label={slot.label}
+          aria-label={field.label}
           value={typeof value === "string" ? value : ""}
-          rows={slot.type === "richText" ? 6 : 3}
-          maxLength={slot.validation.maxLength}
-          showCount={Boolean(slot.validation.maxLength)}
+          rows={field.slotType === "richText" ? 6 : 3}
+          maxLength={field.validation.maxLength}
+          showCount={Boolean(field.validation.maxLength)}
           onChange={(event) => updateContent(slot.slotId, event.target.value)}
         />
       );
     }
-    if (slot.type === "image") {
+    if (field.controlKind === "image") {
       const image = typeof value === "string"
         ? { src: value, alt: "" }
         : asRecord(value);
       const imageNode = nodeBySlotId.get(slot.slotId);
-      const imagePolicy = imageNode
-        ? getEffectiveDynamicTemplateInstanceEditPolicy(imageNode, slot)
-        : null;
+      const imagePolicy = field.effectiveDesignOverrideCapabilities;
       const slotRules = editor.device === "desktop" ? slot.desktopRules : slot.mobileRules;
       const imageLayout = imageNode
         ? layoutOverrides[imageNode.nodeId]?.[editor.device] ?? {}
@@ -542,17 +415,21 @@ export default function DynamicTemplateInstanceInspector({
         || imageLayout.imageScalePercent !== undefined
         || imageLayout.focusXPercent !== undefined
         || imageLayout.focusYPercent !== undefined;
-      const assetGuidance = getImageAssetGuidance(slot);
+      const assetGuidance = getImageAssetGuidance(slot, field.validation);
       return (
         <div style={{ display: "grid", gap: 10 }}>
           <MediaPickerField
             fieldKey={slot.slotId}
             value={typeof image.src === "string" ? image.src : ""}
-            required={slot.required}
+            required={field.required}
             previewAspectRatio={slotRules.aspectRatio?.replace(":", " / ")}
             previewFit={objectFit}
             previewFocus={focus}
-            onChange={(src) => updateContent(slot.slotId, { ...image, src })}
+            previewZoom={(imageLayout.imageScalePercent ?? 100) / 100}
+            onChange={(src) => updateContent(
+              slot.slotId,
+              src.trim() ? { ...image, src } : "",
+            )}
           />
           {assetGuidance ? (
             <p className="homepage-editor__properties-hint" data-image-asset-guidance={slot.slotId}>
@@ -562,7 +439,7 @@ export default function DynamicTemplateInstanceInspector({
           <label>
             <span className="homepage-editor__properties-hint">替代文字</span>
             <Input
-              aria-label={`${slot.label}替代文字`}
+              aria-label={`${field.label}替代文字`}
               value={typeof image.alt === "string" ? image.alt : ""}
               placeholder="描述图片内容，供无障碍与图片缺失时使用"
               onChange={(event) => updateContent(slot.slotId, { ...image, alt: event.target.value })}
@@ -576,7 +453,7 @@ export default function DynamicTemplateInstanceInspector({
             >
               <span className="homepage-editor__properties-hint">图片适配 · {editor.device === "desktop" ? "桌面端" : "移动端"}</span>
               <Select
-                aria-label={`${slot.label}图片适配`}
+                aria-label={`${field.label}图片适配`}
                 value={objectFit}
                 options={[
                   { value: "cover", label: "填满并裁切" },
@@ -593,7 +470,7 @@ export default function DynamicTemplateInstanceInspector({
             <NumberField
               inspectorField="imageScalePercent"
               inspectorDevice={editor.device}
-              label={`${slot.label}图片缩放`}
+              label={`${field.label}图片缩放`}
               unit="%"
               hint="只缩放图片内容，不改变母模板区域尺寸"
               min={100}
@@ -609,7 +486,7 @@ export default function DynamicTemplateInstanceInspector({
             <ImageFocusField
               inspectorFieldKeys={{ x: "focusXPercent", y: "focusYPercent" }}
               inspectorDevice={editor.device}
-              label={`${slot.label}画面焦点 · ${editor.device === "desktop" ? "桌面端" : "移动端"}`}
+              label={`${field.label}画面焦点 · ${editor.device === "desktop" ? "桌面端" : "移动端"}`}
               value={focus}
               onChange={({ x, y }) => updateMediaPresentation(imageNode.nodeId, {
                 focusXPercent: x === defaultFocus.x ? undefined : x,
@@ -632,7 +509,7 @@ export default function DynamicTemplateInstanceInspector({
         </div>
       );
     }
-    if (slot.type === "button" || slot.type === "link") {
+    if (field.controlKind === "link" && (field.slotType === "button" || field.slotType === "link")) {
       const action = asRecord(value);
       const targetType = typeof action.targetType === "string" ? action.targetType : "none";
       const linkUrl = targetType === "page"
@@ -643,7 +520,7 @@ export default function DynamicTemplateInstanceInspector({
       return (
         <div style={{ display: "grid", gap: 10 }}>
           <Input
-            aria-label={`${slot.label}文案`}
+            aria-label={`${field.label}文案`}
             value={typeof action.label === "string" ? action.label : ""}
             placeholder="行动文案"
             onChange={(event) => updateContent(slot.slotId, { ...action, label: event.target.value })}
@@ -651,7 +528,7 @@ export default function DynamicTemplateInstanceInspector({
           <LinkTargetField
             id={`dynamic-template-${props.instanceId}-${slot.slotId}`}
             compact
-            label={`${slot.label}跳转`}
+            label={`${field.label}跳转`}
             targetType={targetType}
             productCode={typeof action.productCode === "string" ? action.productCode : ""}
             categorySlug={typeof action.categorySlug === "string" ? action.categorySlug : ""}
@@ -675,17 +552,17 @@ export default function DynamicTemplateInstanceInspector({
         </div>
       );
     }
-    if (slot.type === "product") {
+    if (field.controlKind === "product" && field.slotType === "product") {
       return (
         <ProductReferencesField
           value={typeof value === "string" && value ? [value] : []}
           onChange={(codes) => updateContent(slot.slotId, codes[0] ?? "")}
-          minProducts={slot.required ? 1 : 0}
+          minProducts={field.required ? 1 : 0}
           maxProducts={1}
         />
       );
     }
-    if (slot.type === "collection") {
+    if (field.controlKind === "product" && field.slotType === "collection") {
       const values = Array.isArray(value)
         ? value.filter((item): item is string => typeof item === "string")
         : [];
@@ -693,70 +570,51 @@ export default function DynamicTemplateInstanceInspector({
         <ProductReferencesField
           value={values}
           onChange={(codes) => updateContent(slot.slotId, codes)}
-          minProducts={slot.required ? Math.max(1, slot.validation.minItems ?? 1) : (slot.validation.minItems ?? 0)}
-          maxProducts={slot.validation.maxItems ?? 8}
-        />
-      );
-    }
-    if (slot.type === "video") {
-      return (
-        <VideoContentFields
-          scope="page"
-          required={slot.required}
-          value={asRecord(value)}
-          onChange={(next) => updateContent(slot.slotId, next)}
-        />
-      );
-    }
-    if (isDynamicComplexSlotType(slot.type)) {
-      return (
-        <DynamicComplexContentFields
-          scope="page"
-          device={editor.device}
-          slotType={slot.type}
-          value={asRecord(value)}
-          onChange={(next) => updateContent(slot.slotId, next)}
+          minProducts={field.required ? Math.max(1, field.validation.minItems ?? 1) : (field.validation.minItems ?? 0)}
+          maxProducts={field.validation.maxItems ?? 8}
         />
       );
     }
     return null;
   };
 
-  const renderSlotFieldset = (slot: DynamicTemplateSlotDefinition) => {
+  const renderSlotFieldset = (field: DynamicTemplatePageFieldDescriptor) => {
+    const slot = definition.slots[field.slotId];
     const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
     return (
     <fieldset
       key={slot.slotId}
       data-slot-id={slot.slotId}
-      data-slot-task={SLOT_TASK_BY_TYPE[slot.type] ?? "content"}
+      data-slot-task={field.task}
       data-inspector-field={slot.slotId}
+      {...getDynamicTemplatePageFieldDataAttributes(field, "page")}
       style={{ border: 0, borderTop: "1px solid var(--adm-line)", margin: 0, padding: "14px" }}
     >
       <legend style={{ width: "100%", padding: 0, marginBottom: 10 }}>
         <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <strong>{slot.label}</strong>
+          <strong>{field.label}</strong>
           <span>
-            {slot.required ? <Tag color="red">必填</Tag> : null}
-            <Tag>{SLOT_TYPE_LABEL[slot.type] ?? "内容槽位"}</Tag>
+            {field.required ? <Tag color="red">必填</Tag> : null}
+            <Tag>{field.slotTypeLabel}</Tag>
             <Tag color={hasPageValue ? "gold" : "default"}>
               {hasPageValue ? "页面内容" : "模板内容"}
             </Tag>
           </span>
         </span>
       </legend>
-      {renderSlotControl(slot)}
+      {renderSlotControl(field)}
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
         <Button
           size="small"
-          disabled={slot.required || !Object.prototype.hasOwnProperty.call(content, slot.slotId)}
-          title={slot.required ? "必填内容必须由页面实例提供" : undefined}
+          disabled={field.required || !Object.prototype.hasOwnProperty.call(content, slot.slotId)}
+          title={field.required ? "必填内容必须由页面实例提供" : undefined}
           onClick={() => resetContent(slot.slotId)}
         >
           移除页面内容覆盖
         </Button>
-        {slot.hideable && !slot.required ? (
+        {field.hideable && !field.required ? (
           <SwitchField
-            label={visualKindForSlot(slot) === "text" ? "显示这段文字" : "显示此内容"}
+            label={visualKindForField(field) === "text" ? "显示这段文字" : "显示此内容"}
             value={!hidden.includes(slot.slotId)}
             onChange={(checked) => toggleHidden(slot.slotId, !checked)}
           />
@@ -783,8 +641,27 @@ export default function DynamicTemplateInstanceInspector({
           <SwitchField
             label="在页面显示"
             value={props.isVisible !== false}
-            onChange={(checked) => editor.update({ isVisible: checked })}
+            disabled={editor.historyTransactionPending}
+            hint={editor.historyTransactionPending ? "正在记录本次显隐操作，完成后可继续修改或撤销。" : undefined}
+            onChange={(checked) => editor.updateHistoryTransaction({ isVisible: checked })}
           />
+          <div
+            className="homepage-editor__dynamic-instance-public-status"
+            data-state={publicVisibilityState}
+            role="status"
+            aria-label="前台展示状态"
+          >
+            <strong>{publicVisibilityState === "hidden"
+              ? "前台已关闭"
+              : publicVisibilityState === "ready"
+                ? "图片已添加"
+                : "前台自动隐藏"}</strong>
+            <span>{publicVisibilityState === "hidden"
+              ? "重新开启后仍需点击页面“发布”，前台才会更新。"
+              : publicVisibilityState === "ready"
+                ? "保存只保留草稿；点击页面“发布”后，前台才会显示或更新。"
+                : "尚未上传页面图片。保存只保留草稿；上传图片并点击页面“发布”后才会显示。"}</span>
+          </div>
           <div className="homepage-editor__inspector-field">
             <span id={`dynamic-instance-property-scope-${props.instanceId}`}>页面实例属性范围</span>
             <div
@@ -951,9 +828,9 @@ export default function DynamicTemplateInstanceInspector({
             </div>
           ) : null}
         </div>
-        <div aria-label={`优先填写：${TASK_LABEL[slotGroups.task]}`}>
+        <div aria-label={`优先填写：${PAGE_FIELD_TASK_LABELS[slotGroups.task]}`}>
           <p className="homepage-editor__properties-hint" style={{ margin: "12px 14px 4px" }}>
-            优先填写 · {TASK_LABEL[slotGroups.task]}
+            优先填写 · {PAGE_FIELD_TASK_LABELS[slotGroups.task]}
           </p>
           {slotGroups.primary.map(renderSlotFieldset)}
         </div>
@@ -1037,15 +914,14 @@ export default function DynamicTemplateInstanceInspector({
               }}
             />
             <RestoreDefaultButton
-              label="恢复整个实例默认值"
-              disabled={!hasInstanceOverrides}
+              label="恢复模板值"
+              disabled={!hasTemplateValueOverrides}
               onClick={() => modal.confirm({
-                title: "恢复整个实例默认值？",
-                content: "将清除当前页面中这个实例的内容、构图、隐藏和显示状态覆盖；母模板、其他实例与其他页面不会改变，可立即使用页面撤销恢复。",
-                okText: "恢复默认",
+                title: "恢复当前实例的模板值？",
+                content: `将清除当前实例的构图、隐藏和显示状态覆盖，并继续读取锁定版本 ${props.templateId} v${props.templateVersion}。文字、图片、商品、链接等页面内容会完整保留；母模板、其他实例与其他页面不会改变，可立即使用页面撤销恢复。`,
+                okText: "恢复模板值",
                 cancelText: "取消",
                 onOk: () => editor.updateHistoryTransaction({
-                  contentBySlotId: {},
                   layoutOverridesByNodeId: {},
                   hiddenSlotIds: [],
                   isVisible: true,

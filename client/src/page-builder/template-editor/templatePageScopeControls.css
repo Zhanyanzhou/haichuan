@@ -1,0 +1,191 @@
+.template-editor__inspector .template-editor__page-scope {
+  container-type: inline-size;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.template-editor__page-scope .template-editor__page-rule-group {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  margin: 0;
+  padding: 20px 0;
+  border-top: 1px solid var(--adm-line);
+}
+
+.template-editor__page-rule-group h3 {
+  margin: 0;
+  color: var(--adm-text);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.template-editor__page-rule-group p,
+.template-editor__page-form-preview p {
+  margin: 0;
+}
+
+.template-editor__page-scope .template-editor__page-scope-intro > p,
+.template-editor__page-scope .homepage-editor__inspector-hint,
+.template-editor__page-scope .template-editor__page-field-list > button > span {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.template-editor__page-scope .template-editor__page-rule-switches {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.template-editor__page-field-type,
+.template-editor__page-field-identity,
+.template-editor__object-lock-status {
+  color: var(--adm-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.template-editor__page-field-identity summary,
+.template-editor__page-form-preview summary {
+  min-height: 32px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.template-editor__page-field-identity dl {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+}
+
+.template-editor__page-field-identity dd {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.template-editor__page-scope .template-editor__page-form-preview {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+}
+
+.template-editor__page-form-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--adm-muted);
+  overflow-wrap: anywhere;
+}
+
+.template-editor__page-form-field .template-editor__page-form-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  min-height: 36px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--adm-text);
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.template-editor__page-form-label span {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.template-editor__page-form-order {
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.template-editor__root-usage {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--adm-line);
+}
+
+.template-editor__root-usage p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.template-editor__header-compatibility summary {
+  min-height: 32px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.template-editor__header-compatibility > div {
+  margin: 8px 0;
+}
+
+.template-editor__root-usage > .ant-btn {
+  width: fit-content;
+  max-width: 100%;
+  height: auto;
+  min-height: 32px;
+  white-space: normal;
+}
+
+.template-editor__page-form-field input,
+.template-editor__page-form-placeholder {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  color: var(--adm-muted);
+  background: var(--adm-content-bg);
+  font: inherit;
+}
+
+.template-editor__page-field-conflict {
+  color: var(--adm-error);
+  font-size: 13px;
+}
+
+.template-editor__page-scope .ant-btn {
+  max-width: 100%;
+  min-height: 32px;
+  height: auto;
+  white-space: normal;
+}
+
+.template-editor__page-scope .ant-btn > span {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.template-editor__page-scope .template-editor__page-field-list > button {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 300px) {
+  .template-editor__page-scope .template-editor__geometry-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .template-editor__page-scope .homepage-editor__inspector-section-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+}

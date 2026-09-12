@@ -19,13 +19,21 @@ export class OptionalCustomerAuthGuard implements CanActivate {
     if (!token) return true;
 
     try {
-      const payload = await this.jwtService.verifyAsync<{ sub: number; type?: string; tokenUse?: string }>(token);
+      const payload = await this.jwtService.verifyAsync<{
+        sub: number;
+        type?: string;
+        tokenUse?: string;
+        authVersion?: number;
+      }>(token);
       if (payload.type !== 'customer' || payload.tokenUse !== 'access' || !Number.isInteger(payload.sub)) {
         throw new UnauthorizedException('客户登录状态无效');
       }
       const customer = await this.prisma.customer.findUnique({ where: { id: payload.sub } });
       if (!customer || customer.status === 'DISABLED') {
         throw new UnauthorizedException('客户登录状态无效');
+      }
+      if ((payload.authVersion ?? 1) !== (customer.authVersion ?? 1)) {
+        throw new UnauthorizedException('客户登录已失效，请重新登录');
       }
       // partnerStatus=SUSPENDED 不在此处拒绝：暂停的是合作商品访问权而非整个账户。
       // 每次请求实时读取 customer，SUSPENDED 在 catalog 可见范围过滤层立即降级为 MEMBER。

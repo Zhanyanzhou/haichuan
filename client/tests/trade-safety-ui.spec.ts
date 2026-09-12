@@ -986,7 +986,7 @@ test.describe('客户自助取消未付款订单', () => {
     await expect(cancelButton).toBeVisible();
     await cancelButton.click();
 
-    await expect(page.getByText('订单已取消')).toBeVisible();
+    await expect(page.getByText('订单已取消', { exact: true })).toBeVisible();
     expect(getCancelCalls()).toBe(1);
     // 刷新后订单状态显示已取消，且不再出现取消按钮
     await expect(page.getByText('已取消').first()).toBeVisible();

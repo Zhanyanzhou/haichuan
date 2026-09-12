@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression tests for the bounded code-review report contract."""
+"""Regression tests for review lineage, authorization records and evidence gates."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import unittest
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 VALIDATOR = SCRIPT_DIR / "validate_review_report.py"
+TEMP_ROOT = SCRIPT_DIR.parents[3] / ".codex-tmp"
 CHAIN_ID = "rc-20260710-abcdef12"
 REPORT_ID = "cr-20260710-abcdef12"
 RESOLUTION_ID = "rr-20260710-abcdef12"
@@ -31,6 +32,9 @@ def review_report(
     parent_report_path: str = "None",
     parent_resolution_id: str = "None",
     parent_resolution_path: str = "None",
+    handoff: str | None = None,
+    continuation_authority: str = "None",
+    handoff_evidence: str = "Requested read-only review delivered; implementation is not authorized.",
 ) -> str:
     issue_fingerprint = fingerprint(issue_key)
     trigger = "initial" if generation == 0 else "post-implementation"
@@ -40,12 +44,14 @@ def review_report(
         else "implementation delta plus affected execution chains"
     )
     prior_resolution = "None" if generation == 0 else f"{parent_resolution_id} at {parent_resolution_path}"
-    handoff = (
+    handoff = handoff or (
         "Ready for receiving-code-review"
         if generation == 0
         else "Terminal post-review - return to user/owner"
     )
-    automatic_receiving = "Yes" if generation == 0 else "No"
+    automatic_receiving = "Yes" if handoff in {
+        "Ready for receiving-code-review", "Continue within existing authorization"
+    } else "No"
     reconciliation = (
         "None - initial review generation."
         if generation == 0
@@ -181,6 +187,8 @@ Static trace recorded.
 
 - Handoff status: `{handoff}`
 - Automatic receiving permitted: `{automatic_receiving}`
+- Continuation authority: `{continuation_authority}`
+- Handoff evidence: `{handoff_evidence}`
 - Source report ID: `{report_id}`
 - Scope fingerprint to recheck: `sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`
 - Actionable finding IDs: `F1`
@@ -192,7 +200,7 @@ Static trace recorded.
 - Highest-risk verification to repeat: `checkout contract trace`
 - Suggested implementation boundaries: `checkout.py`
 - Re-review note: `Treat every finding as a claim to verify.`
-- Chain rule: `Generation 1 is terminal.`
+- Chain rule: `Continue authorized work until acceptance or a real blocker; review stays read-only.`
 
 ## Report Self-Check
 
@@ -233,7 +241,8 @@ class ValidateReviewReportTests(unittest.TestCase):
         parent_report: str | None = None,
         parent_resolution_text: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        with tempfile.TemporaryDirectory() as tmp:
+        TEMP_ROOT.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="code-review-validator-", dir=TEMP_ROOT) as tmp:
             root = Path(tmp)
             report_path = root / "report.md"
             report_path.write_text(report, encoding="utf-8")
@@ -298,7 +307,7 @@ class ValidateReviewReportTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("does not match sha256(Issue key)", result.stderr)
 
-    def test_valid_terminal_generation_one(self) -> None:
+    def test_legacy_terminal_generation_one_remains_readable(self) -> None:
         parent = review_report()
         current = review_report(
             generation=1,
@@ -344,7 +353,7 @@ class ValidateReviewReportTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires changed code/contract/evidence", result.stderr)
 
-    def test_generation_one_cannot_allow_automatic_receiving(self) -> None:
+    def test_legacy_terminal_handoff_cannot_allow_automatic_receiving(self) -> None:
         current = review_report(
             generation=1,
             report_id="cr-20260710-fedcba98",
@@ -360,7 +369,164 @@ class ValidateReviewReportTests(unittest.TestCase):
             parent_resolution_text=parent_resolution(),
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Automatic receiving permitted to No", result.stderr)
+        self.assertIn("Automatic receiving permitted must be No", result.stderr)
+
+    def incremental_report(self, generation: int = 1, **kwargs: str) -> str:
+        return review_report(
+            generation=generation,
+            report_id="cr-20260710-fedcba98",
+            parent_report_id=REPORT_ID,
+            parent_report_path="parent-review.md",
+            parent_resolution_id=RESOLUTION_ID,
+            parent_resolution_path="parent-resolution.md",
+            handoff="Continue within existing authorization",
+            continuation_authority="User requested repair and verification of checkout in this task.",
+            handoff_evidence="Repair the confirmed checkout guard and rerun its integration check.",
+            **kwargs,
+        )
+
+    def test_authorized_repair_continues_after_first_review(self) -> None:
+        result = self.run_validator(
+            self.incremental_report(), parent_report=review_report(),
+            parent_resolution_text=parent_resolution(),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def previous_incremental_report(self) -> str:
+        return self.incremental_report().replace(
+            "cr-20260710-fedcba98", REPORT_ID,
+        ).replace(
+            f"- Parent review report ID: `{REPORT_ID}`",
+            "- Parent review report ID: `cr-20260710-earlier1`",
+        )
+
+    def test_review_only_can_finish_without_repair_authority(self) -> None:
+        result = self.run_validator(review_report(handoff="Review scope complete"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_continuation_requires_recorded_existing_authority(self) -> None:
+        report = review_report(handoff="Continue within existing authorization")
+        result = self.run_validator(report)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires concrete existing authorization", result.stderr)
+
+    def test_blocker_requires_evidence_and_cannot_auto_continue(self) -> None:
+        for evidence, automatic in (("None", "No"), ("User must provide the test tenant.", "Yes")):
+            with self.subTest(evidence=evidence, automatic=automatic):
+                report = review_report(
+                    handoff="Blocked - awaiting input or authorization", handoff_evidence=evidence,
+                ).replace("- Automatic receiving permitted: `No`", f"- Automatic receiving permitted: `{automatic}`")
+                result = self.run_validator(report)
+                self.assertNotEqual(result.returncode, 0)
+        result = self.run_validator(review_report(
+            handoff="Blocked - awaiting input or authorization",
+            handoff_evidence="Checkout test tenant is unavailable; restore that tenant to verify persistence.",
+        ))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_generation_two_accepts_immediate_parent_and_resolution(self) -> None:
+        parent = self.previous_incremental_report()
+        result = self.run_validator(
+            self.incremental_report(2), parent_report=parent,
+            parent_resolution_text=parent_resolution(),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_generation_two_still_requires_provenance(self) -> None:
+        parent = self.previous_incremental_report()
+        cases = (
+            (None, parent_resolution(), "requires --parent-report"),
+            (parent, None, "requires --parent-resolution"),
+            (review_report(), parent_resolution(), "immediately preceding generation"),
+            (parent, parent_resolution("cr-20260710-other123"), "must consume the linked parent"),
+            (parent.replace(CHAIN_ID, "rc-20260710-other123"), parent_resolution(), "same Review chain ID"),
+        )
+        for parent_text, resolution, message in cases:
+            with self.subTest(message=message):
+                result = self.run_validator(
+                    self.incremental_report(2), parent_report=parent_text,
+                    parent_resolution_text=resolution,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+
+    def test_rejects_invalid_generations_and_self_parent(self) -> None:
+        for value in ("-1", "1.5", "unknown", "02"):
+            with self.subTest(generation=value):
+                result = self.run_validator(review_report().replace(
+                    "- Review generation: `0`", f"- Review generation: `{value}`",
+                ))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("non-negative integer", result.stderr)
+        result = self.run_validator(
+            self.incremental_report().replace("cr-20260710-fedcba98", REPORT_ID),
+            parent_report=review_report(), parent_resolution_text=parent_resolution(),
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("distinct from the current report", result.stderr)
+
+    def test_generation_two_protects_carried_forward_dispositions(self) -> None:
+        issue_key = "behavior; entry=checkout; contract=authenticated payment; effect=charge bypass"
+        issue_fp = fingerprint(issue_key)
+        parent = self.previous_incremental_report()
+        resolution = parent_resolution().replace(
+            "| `F1` | `N/A` | `EC1` | `Major` | `Confirmed` |",
+            f"| `F1` | `{issue_fp}` | `EC1` | `Major` | `Intentional` |",
+        )
+        result = self.run_validator(
+            self.incremental_report(2), parent_report=parent, parent_resolution_text=resolution,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("explicit reopened reconciliation", result.stderr)
+        reconciliation = f"""| Issue key | Issue fingerprint | Parent item/verdict | Relevant change or new evidence | Decision |
+| --- | --- | --- | --- | --- |
+| `{issue_key}` | `{issue_fp}` | `F1 Intentional` | `kind:code; ref:checkout.py; change:guard now bypasses the authenticated handler` | `reopened as F1 due to changed execution path` |"""
+        report = self.incremental_report(2).replace(
+            "None - no overlapping parent terminal dispositions.", reconciliation,
+        )
+        result = self.run_validator(report, parent_report=parent, parent_resolution_text=resolution)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_acceptance_cannot_close_unresolved_major(self) -> None:
+        result = self.run_validator(review_report(
+            handoff="Acceptance complete", handoff_evidence="Checkout checks passed.",
+        ))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Acceptance complete cannot retain", result.stderr)
+
+    def test_acceptance_can_close_verified_scope(self) -> None:
+        report = review_report(
+            handoff="Acceptance complete", handoff_evidence="Checkout integration check passed on the isolated test stack.",
+        )
+        # Model a report with no remaining findings while retaining its reviewed coverage.
+        start = report.index("## Complete Findings Index")
+        end = report.index("## Test Gaps")
+        report = report[:start] + """## Complete Findings Index
+
+None.
+
+## Blocker
+
+None.
+
+## Major
+
+None.
+
+## Minor
+
+None.
+
+## Questions
+
+None.
+
+""" + report[end:]
+        report = report.replace("`Changes requested`", "`Pass`")
+        report = report.replace("`Finding F1`", "`Reviewed - no issue found`")
+        report = report.replace("- Actionable finding IDs: `F1`", "- Actionable finding IDs: `None`")
+        result = self.run_validator(report)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_major_finding_omitted_from_handoff(self) -> None:
         report = review_report().replace(

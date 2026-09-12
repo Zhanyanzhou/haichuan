@@ -22,6 +22,7 @@ const checkOnly = process.argv.includes("--check");
 const sourceText = await readFile(sourcePath, "utf8");
 const source = JSON.parse(sourceText);
 const semanticValidatorSource = await readFile(semanticValidatorSourcePath, "utf8");
+const responsiveSource = await readFile(path.join(root, "client/src/page-builder/template-definition/responsive.ts"), "utf8");
 
 function invariant(condition, message) {
   if (!condition) throw new Error(`动态模板合同无效：${message}`);
@@ -34,7 +35,8 @@ function stableReplacer(_key, value) {
   return value;
 }
 
-const schemaVersion = source?.properties?.schemaVersion?.const;
+const schemaVersions = source?.properties?.schemaVersion?.enum;
+const schemaVersion = source?.["x-currentSchemaVersion"];
 const nodeTypes = source?.$defs?.nodeType?.enum;
 const slotTypes = source?.$defs?.slotType?.enum;
 const nodeRegistry = source?.["x-nodeRegistry"];
@@ -44,6 +46,7 @@ const nodeAuthoringSchema = source?.$defs?.nodeAuthoring;
 
 invariant(source?.$schema === "https://json-schema.org/draft/2020-12/schema", "必须使用 JSON Schema 2020-12");
 invariant(Number.isInteger(schemaVersion) && schemaVersion > 0, "schemaVersion 必须是正整数");
+invariant(Array.isArray(schemaVersions) && schemaVersions.includes(1) && schemaVersions.includes(schemaVersion), "必须保留历史 schema1 和当前版本读取");
 invariant(Array.isArray(nodeTypes) && nodeTypes.length > 0, "nodeType 枚举不能为空");
 invariant(Array.isArray(slotTypes) && slotTypes.length > 0, "slotType 枚举不能为空");
 invariant(nodeRegistry && typeof nodeRegistry === "object" && !Array.isArray(nodeRegistry), "x-nodeRegistry 缺失");
@@ -97,6 +100,14 @@ const canonical = JSON.stringify(source, stableReplacer);
 const hash = createHash("sha256").update(canonical).digest("hex");
 const literal = (value) => JSON.stringify(value, null, 2);
 const metadataFields = Object.keys(metadataProperties);
+// Recipe 类型与运行时验证数据都从同一份 JSON Schema 派生。
+function recipeType(schema) {
+  if (schema.const !== undefined) return JSON.stringify(schema.const);
+  if (schema.enum) return schema.enum.map((value) => JSON.stringify(value)).join(" | ");
+  if (schema.type === "object") return `{\n${Object.entries(schema.properties).map(([key, value]) => `  ${key}${schema.required?.includes(key) ? "" : "?"}: ${recipeType(value)};`).join("\n")}\n}`;
+  if (schema.type === "array") return `Array<${recipeType(schema.items)}>`;
+  return schema.type === "integer" ? "number" : schema.type;
+}
 const metadataIntegerBounds = Object.fromEntries(
   Object.entries(metadataProperties)
     .filter(([, definition]) => definition?.type === "integer"
@@ -115,9 +126,12 @@ const generated = `/**
  */
 
 export const DYNAMIC_TEMPLATE_SCHEMA_VERSION = ${schemaVersion};
+export const DYNAMIC_TEMPLATE_SUPPORTED_SCHEMA_VERSIONS = ${literal(schemaVersions)} as const;
 /** 统一模板产品模型版本；JSON Schema 自身仍独立按 schemaVersion 演进。 */
 export const TEMPLATE_DEFINITION_MODEL_VERSION = 2 as const;
 export const DYNAMIC_TEMPLATE_SCHEMA_HASH = ${JSON.stringify(hash)};
+export const TEMPLATE_RECIPE_SCHEMA = ${literal(source.$defs.templateRecipe)} as const;
+export interface TemplateRecipe ${recipeType(source.$defs.templateRecipe)}
 export const DYNAMIC_TEMPLATE_NODE_TYPES = ${literal(nodeTypes)} as const;
 export const DYNAMIC_TEMPLATE_SLOT_TYPES = ${literal(slotTypes)} as const;
 export const DYNAMIC_TEMPLATE_NODE_REGISTRY = ${literal(nodeRegistry)} as const;
@@ -127,9 +141,10 @@ export const DYNAMIC_TEMPLATE_METADATA_INTEGER_BOUNDS = ${literal(metadataIntege
 export type DynamicTemplateNodeType = typeof DYNAMIC_TEMPLATE_NODE_TYPES[number];
 export type DynamicTemplateSlotType = typeof DYNAMIC_TEMPLATE_SLOT_TYPES[number];
 export type DynamicTemplateDevice = "desktop" | "mobile";
+export type TemplateBreakpoint = "desktop" | "tablet" | "mobile";
 export type DynamicTemplateLengthUnit = "px" | "%" | "rem" | "vw" | "vh";
 export type DynamicTemplateDisplay = "block" | "flex" | "grid" | "none";
-export type DynamicTemplateHeightMode = "auto" | "min-height" | "aspect-ratio" | "fixed" | "viewport";
+export type DynamicTemplateHeightMode = "auto" | "fit" | "fill" | "min-height" | "aspect-ratio" | "fixed" | "viewport";
 export type DynamicTemplateLayoutMode = "flow" | "free";
 
 export interface DynamicTemplateLength {
@@ -162,12 +177,16 @@ export interface DynamicTemplatePlacement {
 
 export interface DynamicTemplateResponsiveRules {
   display: DynamicTemplateDisplay;
+  hidden?: boolean;
   direction?: "row" | "column";
+  wrap?: "nowrap" | "wrap";
   order: number;
   width: DynamicTemplateSize;
   height: DynamicTemplateHeightRule;
   maxWidth?: DynamicTemplateLength;
+  minWidth?: DynamicTemplateLength;
   minHeight?: DynamicTemplateLength;
+  maxHeight?: DynamicTemplateLength;
   gap?: DynamicTemplateLength;
   padding?: DynamicTemplateBoxSpacing;
   margin?: DynamicTemplateBoxSpacing;
@@ -175,11 +194,40 @@ export interface DynamicTemplateResponsiveRules {
   justifyContent?: "start" | "center" | "end" | "space-between" | "space-around";
   columns?: number[];
   backgroundToken?: string;
+  backgroundColor?: string;
+  backgroundImage?: string;
+  backgroundGradient?: { from: string; to: string; angle: number } | null;
+  opacity?: number;
   borderToken?: string;
   radius?: DynamicTemplateLength;
   overflow?: "visible" | "hidden" | "clip";
   layoutMode?: DynamicTemplateLayoutMode;
   placement?: DynamicTemplatePlacement;
+  anchor?: DynamicTemplateAnchor;
+}
+
+export interface DynamicTemplateAnchor {
+  horizontal: "left" | "center" | "right";
+  vertical: "top" | "center" | "bottom";
+  offsetX: { value: number; unit: "px" | "%" };
+  offsetY: { value: number; unit: "px" | "%" };
+}
+
+/** 长度、高度与锚点原子覆盖；间距和自由矩形按成员继承。 */
+export type DynamicTemplateResponsiveOverride = Partial<Omit<
+  DynamicTemplateResponsiveRules, "padding" | "margin" | "placement" | "anchor"
+>> & {
+  padding?: Partial<DynamicTemplateBoxSpacing>;
+  margin?: Partial<DynamicTemplateBoxSpacing>;
+  placement?: Partial<DynamicTemplatePlacement> | null;
+  anchor?: DynamicTemplateAnchor | null;
+};
+
+export interface DynamicTemplateResponsiveMap {
+  desktop: DynamicTemplateResponsiveRules;
+  /** schema1 必须是完整规则，schema2 是有意修改的属性；读取必须经过 resolver。 */
+  mobile: DynamicTemplateResponsiveOverride;
+  tablet?: DynamicTemplateResponsiveOverride;
 }
 
 export interface DynamicTemplateNodeProps {
@@ -220,7 +268,7 @@ export interface DynamicTemplateNode {
   props: DynamicTemplateNodeProps;
   authoring?: DynamicTemplateNodeAuthoring;
   instanceEditPolicy?: DynamicTemplateInstanceEditPolicy;
-  responsive: Record<DynamicTemplateDevice, DynamicTemplateResponsiveRules>;
+  responsive: DynamicTemplateResponsiveMap;
   hidden: boolean;
 }
 
@@ -235,6 +283,9 @@ export interface DynamicTemplateSlotValidation {
 }
 
 export interface DynamicTemplateSlotRules {
+  fontFamily?: "system" | "serif" | "sans";
+  color?: string;
+  letterSpacing?: number;
   aspectRatio?: string;
   objectFit?: "cover" | "contain" | "fill";
   objectPosition?: string;
@@ -248,6 +299,7 @@ export interface DynamicTemplateSlotRules {
 }
 
 export interface DynamicTemplateSlotDefinition {
+  semanticRole?: string;
   slotId: string;
   key: string;
   type: DynamicTemplateSlotType;
@@ -259,7 +311,14 @@ export interface DynamicTemplateSlotDefinition {
   emptyPolicy?: "hide" | "use-default";
   validation: DynamicTemplateSlotValidation;
   desktopRules: DynamicTemplateSlotRules;
+  tabletRules?: DynamicTemplateSlotRules;
   mobileRules: DynamicTemplateSlotRules;
+}
+
+export interface DynamicTemplateCanvasSize {
+  width: number;
+  height: number;
+  aspectRatio: number;
 }
 
 export interface DynamicTemplateMetadata {
@@ -270,8 +329,10 @@ export interface DynamicTemplateMetadata {
   recommendedFor: string[];
   desktopRatio: string;
   mobileRatio: string;
+  canvasSize?: DynamicTemplateCanvasSize;
   previewDesktopWidth?: number;
   previewMobileWidth?: number;
+  previewTabletWidth?: number;
   mobileBreakpoint?: number;
   minViewportWidth?: number;
   maxViewportWidth?: number;
@@ -283,7 +344,9 @@ export interface DynamicTemplateMetadata {
 
 /** 统一母模板的正式产品合同。 */
 export interface TemplateDefinitionV2 {
-  schemaVersion: typeof DYNAMIC_TEMPLATE_SCHEMA_VERSION;
+  /** 创建来源快照；重新打开时不能用它覆盖人工精修后的节点树。 */
+  templateRecipe?: TemplateRecipe;
+  schemaVersion: typeof DYNAMIC_TEMPLATE_SUPPORTED_SCHEMA_VERSIONS[number];
   templateId: string;
   name: string;
   description?: string;
@@ -365,6 +428,10 @@ ${semanticValidatorSource
   .replace(
     'from "../generated/contentTemplates.generated";',
     'from "./contentTemplates.generated";',
+  )
+  .replace(
+    'from "./responsive";',
+    'from "./templateResponsive.generated";',
   )}`;
 
 invariant(
@@ -376,7 +443,15 @@ invariant(
   "服务端语义校验器未正确改写内容模板合同导入",
 );
 
+const responsiveOutputPath = path.join(root, "server/src/modules/page-modules/generated/templateResponsive.generated.ts");
+const responsiveGenerated = `/** 自动生成，禁止手改。来源：client/src/page-builder/template-definition/responsive.ts */\n${responsiveSource.replaceAll('from "./generated/templateDefinition.generated";', 'from "./templateDefinition.generated";')}`;
 let mismatched = false;
+if (checkOnly) {
+  if (await readFile(responsiveOutputPath, "utf8").catch(() => "") !== responsiveGenerated) {
+    console.error("动态模板响应式解析生成物不一致");
+    mismatched = true;
+  }
+} else await writeFile(responsiveOutputPath, responsiveGenerated, "utf8");
 for (const outputPath of typeOutputPaths) {
   await mkdir(path.dirname(outputPath), { recursive: true });
   if (checkOnly) {

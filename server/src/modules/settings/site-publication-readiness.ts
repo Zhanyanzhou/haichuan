@@ -99,9 +99,11 @@ export function normalizePublishedBrandLogo(
 
 export function evaluateSitePublicationReadiness(
   input: unknown,
-  options: { persisted: boolean },
+  options: { persisted: boolean; requireLaunchDetails?: boolean },
 ): SitePublicationReadinessResult {
   const settings = isRecord(input) ? input : {};
+  // 日常内容发布只校验必要资料；正式上线预检另行核对完整审核与运营记录。
+  const requireLaunchDetails = options.requireLaunchDetails === true;
   const blockers: SitePublicationReadinessBlocker[] = [];
   const add = (
     area: SitePublicationReadinessArea,
@@ -127,7 +129,7 @@ export function evaluateSitePublicationReadiness(
       "站点名称缺失；请填写经品牌负责人确认的正式名称。",
     );
   }
-  if (!hasText(settings.brandReviewReference)) {
+  if (requireLaunchDetails && !hasText(settings.brandReviewReference)) {
     add(
       "brand",
       "BRAND_REVIEW_MISSING",
@@ -136,7 +138,8 @@ export function evaluateSitePublicationReadiness(
     );
   }
   if (
-    settings.brandPresentationMode !== "logo"
+    (requireLaunchDetails || (settings.brandPresentationMode != null && settings.brandPresentationMode !== ""))
+    && settings.brandPresentationMode !== "logo"
     && settings.brandPresentationMode !== "text-only"
   ) {
     add(
@@ -163,7 +166,14 @@ export function evaluateSitePublicationReadiness(
     ["contactAddress", "联系地址"],
     ["businessHours", "营业时间"],
   ] as const) {
-    if (!hasText(settings[field])) {
+    if (settings[field] != null && typeof settings[field] !== "string") {
+      add(
+        "contact",
+        `SITE_${field.replace(/[A-Z]/g, (match) => `_${match}`).toUpperCase()}_INVALID`,
+        `siteSettings.${field}`,
+        `${label}格式无效；请填写文字或留空。`,
+      );
+    } else if (requireLaunchDetails && !hasText(settings[field])) {
       add(
         "contact",
         `SITE_${field.replace(/[A-Z]/g, (match) => `_${match}`).toUpperCase()}_MISSING`,
@@ -181,7 +191,7 @@ export function evaluateSitePublicationReadiness(
     );
   }
 
-  if (!hasText(settings.legalEntityReviewReference)) {
+  if (requireLaunchDetails && !hasText(settings.legalEntityReviewReference)) {
     add(
       "legal",
       "LEGAL_ENTITY_REVIEW_MISSING",
@@ -189,7 +199,7 @@ export function evaluateSitePublicationReadiness(
       "经营主体公开信息尚无复核凭据；请记录法务或内容负责人的复核编号。",
     );
   }
-  if (!hasText(settings.privacyPolicyReviewReference)) {
+  if (requireLaunchDetails && !hasText(settings.privacyPolicyReviewReference)) {
     add(
       "legal",
       "PRIVACY_POLICY_REVIEW_MISSING",
@@ -202,7 +212,14 @@ export function evaluateSitePublicationReadiness(
     ["seoTitle", "默认 SEO 标题"],
     ["seoDescription", "默认 SEO 描述"],
   ] as const) {
-    if (!hasText(settings[field])) {
+    if (settings[field] != null && typeof settings[field] !== "string") {
+      add(
+        "seo",
+        `SITE_${field.replace(/[A-Z]/g, (match) => `_${match}`).toUpperCase()}_INVALID`,
+        `siteSettings.${field}`,
+        `${label}格式无效；请填写文字或留空。`,
+      );
+    } else if (requireLaunchDetails && !hasText(settings[field])) {
       add(
         "seo",
         `SITE_${field.replace(/[A-Z]/g, (match) => `_${match}`).toUpperCase()}_MISSING`,
@@ -211,7 +228,7 @@ export function evaluateSitePublicationReadiness(
       );
     }
   }
-  if (!hasText(settings.seoReviewReference)) {
+  if (requireLaunchDetails && !hasText(settings.seoReviewReference)) {
     add(
       "seo",
       "SEO_REVIEW_MISSING",
@@ -304,4 +321,3 @@ export function evaluateSitePublicationReadiness(
     blockers,
   };
 }
-

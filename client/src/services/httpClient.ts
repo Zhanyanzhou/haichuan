@@ -121,6 +121,11 @@ export function publicPageDocumentStreamUrl(
 
 api.interceptors.request.use((config) => {
   const method = (config.method || "get").toLowerCase();
+  // axios 实例默认使用 application/json；FormData 必须移除该默认值，
+  // 由浏览器写入包含随机 boundary 的 multipart Content-Type。
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    config.headers.delete("Content-Type");
+  }
   if (
     !["get", "head", "options"].includes(method) &&
     !config.headers["X-CSRF-Token"]

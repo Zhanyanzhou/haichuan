@@ -1,35 +1,33 @@
-import { App as AntdApp, Button } from "antd";
+import { App as AntdApp, Button, type ModalFuncProps } from "antd";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import type { PersonalContentTemplate, SystemContentTemplateCurrent } from "@/services/api";
 import {
   dynamicTemplateApi,
+  type DynamicTemplateArchiveRequest,
   type PublishedDynamicTemplateResource,
   type DynamicTemplatePublishResultResource,
   type DynamicTemplateResource,
   type DynamicTemplateVersionPageResource,
   type DynamicTemplateVersionResource,
+  type PublishedDynamicTemplateVersionResource,
   type TemplateCatalogResource,
 } from "@/services/clients/dynamicTemplateClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getEditorErrorMessage, getEditorHttpStatus } from "@/page-builder/workspace/editorLifecycleErrors";
-import { getContentTemplateContract } from "@/page-builder/generated/contentTemplates.generated";
 import {
   createDynamicTemplateStableId,
   normalizeTemplateDimensionContract,
   validateDynamicTemplateDefinition,
   validateDynamicTemplatePublishDefinition,
+  type TemplateDefinitionV2,
 } from "../template-definition";
 import {
   promoteInstanceOverridesToTemplateDraft,
   type PromoteDynamicTemplateInstanceRequest,
 } from "../dynamic-template-instance/promoteToTemplate";
-import {
-  createSystemCompatibilityRecoveryDefinition,
-} from "../templates/unifiedTemplateCatalog";
 import { useVisualEditorSession } from "../visual-editor/visualEditorSession";
+import { focusFirstInvalidNumberField } from "../inspector/controls/NumberField";
 import {
   DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT,
-  createNewDynamicTemplateDraft,
   loadLocalDynamicTemplateDraft,
   saveLocalDynamicTemplateDraft,
 } from "./dynamicTemplateDraftRepository";
@@ -37,22 +35,118 @@ import {
   prepareDynamicTemplateDefinitionForNewIdentity,
   prepareHistoricalTemplateDefinitionForCurrentDraft,
 } from "./dynamicTemplateEditorUtils";
-import type { TemplateEditorLibraryTarget } from "./TemplateEditorLibrary";
+import { copyTemplateDefinition } from "./templateCopy";
+import type {
+  ArchivableTemplateEditorLibraryTarget,
+  PublishedDraftCreationState,
+  TemplateEditorLibraryTarget,
+} from "./TemplateEditorLibrary";
 import { notifyDynamicTemplateCatalogChanged } from "./templateCatalogEvents";
-import { createPersonalTemplateDraft, createSystemTemplateDraft } from "./templateDraftAdapter";
-import { adaptLegacyTemplateSource } from "./legacyTemplateConversion";
-import { useTemplateEditorSession } from "./templateEditorSession";
-import { reconcileTemplatePublishIssueIndex } from "./templateInspectorCapabilities";
+import {
+  useTemplateEditorSession,
+  type TemplateWorkspaceScrollState,
+} from "./templateEditorSession";
+import {
+  projectTemplateEditorSelectionSnapshot,
+  type TemplateEditorSelectionSnapshot,
+} from "./templateEditorSelection";
+import {
+  reconcileTemplatePublishIssueIndex,
+  type TemplateInspectorIssueTarget,
+} from "./templateInspectorCapabilities";
 import type { TemplateEditorDraft } from "./types";
+import {
+  asDefinitionChecksum,
+  beginReviewedSnapshotPublish,
+  beginReviewedSnapshotSave,
+  catalogRefreshFailed,
+  catalogRefreshSucceeded,
+  deriveTemplateProductionReadiness,
+  markPublishReviewChanged,
+  markPublishReviewStale,
+  matchesReviewedVersionNote,
+  openPublishReview as createPublishReview,
+  publishedVersionVerificationMatched,
+  publishedVersionVerificationMismatched,
+  publishedVersionVerificationNotFound,
+  publishReviewedSnapshotFailed,
+  publishReviewedSnapshotSucceeded,
+  retryCatalogRefresh,
+  retryVerification,
+  saveReviewedSnapshotFailed,
+  saveVerificationMatched,
+  saveVerificationMismatched,
+  saveVerificationNotFound,
+  verificationFailed,
+  type EditingPublishState,
+  type LivePublishContext,
+  type OperationIdentity,
+  type PublishFailure,
+  type PublishWorkflowEffect,
+  type PublishWorkflowState,
+  type PublishWorkflowTransition,
+  type SavingReviewedSnapshotState,
+} from "./templatePublishWorkflow";
 
 export interface PersistTemplateOptions {
-  asCopy?: boolean;
   overwriteCurrent?: boolean;
-  name?: string;
-  compatibilityRecoveryDecision?: "overwrite" | "copy";
 }
 
 type TemplateLifecycleTarget = Pick<DynamicTemplateResource, "templateId" | "name">;
+type TemplateArchiveRequest = ArchivableTemplateEditorLibraryTarget | TemplateLifecycleTarget;
+
+interface ResolvedTemplateArchiveTarget extends TemplateLifecycleTarget {
+  sourceReference: string | null;
+  request?: DynamicTemplateArchiveRequest;
+}
+
+function draftMatchesPersistedIdentity(
+  draft: TemplateEditorDraft,
+  templateId: string,
+) {
+  return draft.definition.templateId === templateId;
+}
+
+function targetMatchesDraft(target: TemplateEditorLibraryTarget, draft: TemplateEditorDraft) {
+  if (target.kind === "dynamic-persisted") {
+    return draftMatchesPersistedIdentity(
+      draft,
+      target.template.templateId,
+    );
+  }
+  if (target.kind === "dynamic-local") return draft.localDraftId === target.localDraftId;
+  return false;
+}
+
+function resolveTemplateArchiveTarget(
+  target: TemplateArchiveRequest,
+): ResolvedTemplateArchiveTarget | null {
+  if ("templateId" in target) {
+    return {
+      templateId: target.templateId,
+      name: target.name,
+      sourceReference: null,
+    };
+  }
+  if (target.kind === "dynamic-persisted") {
+    const draft = target.template.draft;
+    return {
+      templateId: target.template.templateId,
+      name: target.template.name,
+      sourceReference: target.template.sourceReference,
+      ...(draft && Number.isInteger(draft.revision) && draft.revision > 0
+        && isDefinitionChecksum(draft.definitionChecksum)
+        ? {
+            request: {
+              expectedRevision: draft.revision,
+              expectedChecksum: draft.definitionChecksum,
+            },
+          }
+        : {}),
+    };
+  }
+  return null;
+}
 
 function clearTemplateSessionGeometry(sessionId: string | null) {
   if (!sessionId) return;
@@ -64,20 +158,31 @@ function clearTemplateSessionGeometry(sessionId: string | null) {
 export interface TemplatePublishReview {
   sessionId: string;
   templateId: string;
-  baseline: TemplateEditorDraft["definition"];
+  workflow: Exclude<PublishWorkflowState<TemplateDefinitionV2>, EditingPublishState>;
   issues: ReturnType<typeof validateDynamicTemplatePublishDefinition>["issues"];
   currentIndex: number;
   requestId: number;
+  selectionSnapshot: TemplateEditorSelectionSnapshot;
 }
+
+export type PublishedDraftAvailability =
+  | { status: "checking"; templateId: string }
+  | { status: "available"; templateId: string }
+  | { status: "unavailable"; templateId: string; failure?: PublishFailure };
 
 export interface TemplateWorkspaceController {
   active: boolean;
   canManageTemplates: boolean;
   localOnly: boolean;
   publishing: boolean;
+  publishWorkflow: PublishWorkflowState<TemplateDefinitionV2>;
   publishReview: TemplatePublishReview | null;
+  publishIssueEditing: boolean;
+  publishedDraftAvailability: PublishedDraftAvailability | null;
+  publishedDraftCreation: PublishedDraftCreationState | null;
   openPublishReview: () => void;
   selectPublishIssue: (index: number) => void;
+  editPublishIssue: (target: TemplateInspectorIssueTarget) => boolean;
   lifecycleBusy: boolean;
   draft: TemplateEditorDraft | null;
   selectedObjectLabel: string | null;
@@ -88,26 +193,51 @@ export interface TemplateWorkspaceController {
   previewScenario: ReturnType<typeof useTemplateEditorSession.getState>["previewScenario"];
   saveStatus: ReturnType<typeof useTemplateEditorSession.getState>["saveStatus"];
   setPreviewMode: (previewMode: boolean) => void;
+  sessionId: string | null;
+  readWorkspaceScroll: () => TemplateWorkspaceScrollState;
+  updateWorkspaceScroll: (
+    sessionId: string,
+    updates: Partial<TemplateWorkspaceScrollState>,
+  ) => void;
   enter: (pageViewport: { width: number; height: number }) => void;
   returnToPage: () => void;
   closeSession: () => void;
-  openTarget: (target: TemplateEditorLibraryTarget) => void;
+  openTarget: (
+    target: TemplateEditorLibraryTarget,
+    onOpened?: (draft: TemplateEditorDraft) => void,
+  ) => void;
+  copyTarget: (
+    target: TemplateEditorLibraryTarget,
+    source: "copy" | "copy-published",
+  ) => Promise<boolean>;
   persist: (options?: PersistTemplateOptions) => Promise<boolean>;
+  persistForExit: () => Promise<boolean>;
   publish: () => Promise<boolean>;
+  confirmPublish: () => void;
+  cancelPublishReview: () => void;
+  recheckPublishReview: () => void;
+  retryPublishVerification: () => void;
+  retryFailedPublish: () => void;
+  retryCatalogRefresh: () => void;
+  reloadPublishedDraft: () => void;
+  createDraftFromPublished: (
+    template: DynamicTemplateResource,
+    published: PublishedDynamicTemplateResource,
+  ) => Promise<boolean>;
+  usePublishedTemplateInPage: () => void;
   promoteFromPage: (
     request: PromoteDynamicTemplateInstanceRequest,
     pageViewport: { width: number; height: number },
   ) => Promise<void>;
-  archive: (template: TemplateLifecycleTarget) => Promise<boolean>;
+  archive: (target: TemplateArchiveRequest) => Promise<boolean>;
   restore: (template: TemplateLifecycleTarget) => Promise<boolean>;
   deleteDraft: (template: TemplateLifecycleTarget) => Promise<boolean>;
   listVersions: (options?: { beforeVersion?: number; limit?: number }) => Promise<DynamicTemplateVersionPageResource>;
   getVersion: (version: number) => Promise<DynamicTemplateVersionResource>;
-  stageVersion: (version: DynamicTemplateVersionResource, target: "current" | "new") => boolean;
+  stageVersion: (version: DynamicTemplateVersionResource) => boolean;
   cancelCompatibilityRecovery: () => void;
   resumeCompatibilityRecovery: () => void;
   discardChanges: () => void;
-  openImportedDraft: (draft: TemplateEditorDraft) => void;
 }
 
 function currentPublishedChecksum(
@@ -156,6 +286,194 @@ function createPersistedDraft(
   };
 }
 
+interface PublishOperationMeta {
+  requestedDraft: TemplateEditorDraft;
+  savedDraft?: TemplateEditorDraft;
+  savedResource?: DynamicTemplateResource;
+}
+
+function sameTemplateDefinition(left: TemplateDefinitionV2, right: TemplateDefinitionV2) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function saveDraftWithVerification(
+  requestedDraft: TemplateEditorDraft,
+  definition: TemplateDefinitionV2,
+  request: () => Promise<unknown>,
+): Promise<DynamicTemplateResource> {
+  try {
+    return unwrapResponse<DynamicTemplateResource>(await request());
+  } catch (error) {
+    const failure = classifyPublishFailure(error);
+    if (!["network", "timeout", "server", "conflict"].includes(failure.category)) throw error;
+    const verificationFailure = (result: "missing" | "mismatch" | "unavailable") => Object.assign(
+      error instanceof Error ? error : new Error("模板保存失败"),
+      { status: getEditorHttpStatus(error), templateSaveVerification: result },
+    );
+    // 写入可能已经完成；只读核验本次快照，不自动重发或采用其他会话的修改。
+    let resource: DynamicTemplateResource | null;
+    try {
+      resource = unwrapResponse<DynamicTemplateResource | null>(
+        await dynamicTemplateApi.getDraft(definition.templateId),
+      );
+    } catch (verificationError) {
+      throw verificationFailure(getEditorHttpStatus(verificationError) === 404 ? "missing" : "unavailable");
+    }
+    const baseline = requestedDraft.sourceType === "persisted" ? requestedDraft.remote : undefined;
+    const draft = resource?.draft;
+    if (
+      !resource || !draft
+      || !Number.isInteger(resource.id) || resource.id <= 0
+      || !Number.isInteger(draft.id) || draft.id <= 0
+      || resource.templateId !== definition.templateId
+      || resource.status !== "ACTIVE"
+      || draft.revision !== (baseline ? baseline.revision + 1 : 1)
+      || (baseline && (resource.id !== baseline.databaseId
+        || resource.publishedVersion !== baseline.publishedVersion
+        || draft.baseVersion !== baseline.baseVersion))
+      || (!baseline && (resource.publishedVersion !== 0 || draft.baseVersion !== null))
+      || !isDefinitionChecksum(draft.definitionChecksum)
+      || draft.definition?.templateId !== definition.templateId
+      || !sameTemplateDefinition(draft.definition, definition)
+      || !matchesReviewedVersionNote(draft.versionNote, requestedDraft.versionNote)
+    ) throw verificationFailure("mismatch");
+    return resource;
+  }
+}
+
+function createTrustedDraftFromPublished(
+  resource: DynamicTemplateResource,
+  published: PublishedDynamicTemplateResource,
+) {
+  const validation = validateDynamicTemplateDefinition(published.definition);
+  if (
+    !Number.isInteger(published.version)
+    || published.version <= 0
+    || !isDefinitionChecksum(published.definitionChecksum)
+    || !validation.valid
+    || !validation.definition
+    || validation.definition.templateId !== published.templateId
+    || !Number.isInteger(resource.id)
+    || resource.id <= 0
+    || resource.templateId !== published.templateId
+    || resource.status !== "ACTIVE"
+    || resource.publishedVersion !== published.version
+    || !resource.draft
+    || !Number.isInteger(resource.draft.id)
+    || resource.draft.id <= 0
+    || resource.draft.baseVersion !== published.version
+    || resource.draft.revision !== 1
+    || resource.draft.definitionChecksum !== published.definitionChecksum
+    || resource.draft.definition.templateId !== published.templateId
+    || !sameTemplateDefinition(resource.draft.definition, published.definition)
+  ) return null;
+  return createPersistedDraft(resource, published.definitionChecksum);
+}
+
+function isDefinitionChecksum(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function notifyEditableTemplateCatalogChanged(resource: DynamicTemplateResource) {
+  if (!resource.draft) return;
+  notifyDynamicTemplateCatalogChanged({
+    kind: "editable-upsert",
+    identity: {
+      templateId: resource.templateId,
+      revision: resource.draft.revision,
+      definitionChecksum: resource.draft.definitionChecksum,
+    },
+    template: resource,
+  });
+}
+
+function matchesPublishedDraftResource(
+  resource: DynamicTemplateResource,
+  operation: OperationIdentity,
+  savedResource: DynamicTemplateResource,
+  reviewedDefinition: TemplateDefinitionV2,
+  publishedChecksum: string,
+) {
+  const draft = resource.draft;
+  const savedRevision = savedResource.draft?.revision;
+  if (!draft || !Number.isInteger(savedRevision) || !Number.isInteger(draft.revision)) return false;
+  return resource.id === savedResource.id
+    && resource.templateId === operation.templateId
+    && resource.publishedVersion === operation.targetVersion
+    && draft.revision === (savedRevision as number) + 1
+    && draft.baseVersion === operation.targetVersion
+    && draft.definitionChecksum === publishedChecksum
+    && draft.definition.templateId === operation.templateId
+    && sameTemplateDefinition(draft.definition, reviewedDefinition)
+    && matchesReviewedVersionNote(draft.versionNote, "");
+}
+
+function classifyPublishFailure(error: unknown): PublishFailure {
+  const workflowFailure = (error as { workflowFailure?: unknown })?.workflowFailure;
+  if (workflowFailure && typeof workflowFailure === "object" && "category" in workflowFailure) {
+    return workflowFailure as PublishFailure;
+  }
+  const status = getEditorHttpStatus(error);
+  const code = typeof (error as { code?: unknown })?.code === "string"
+    ? (error as { code: string }).code
+    : undefined;
+  if (status === 403) return { category: "permission", status, ...(code ? { code } : {}) };
+  if (status === 409) return { category: "conflict", status, ...(code ? { code } : {}) };
+  if (status && status >= 500) return { category: "server", status, ...(code ? { code } : {}) };
+  if (code === "ECONNABORTED" || code === "ETIMEDOUT") return { category: "timeout", ...(code ? { code } : {}) };
+  if (!status) return { category: "network", ...(code ? { code } : {}) };
+  return { category: "rejected", status, ...(code ? { code } : {}) };
+}
+
+function throwMalformedPublishResponse(code: string): never {
+  throw Object.assign(new Error(code), {
+    workflowFailure: { category: "malformed-response", code } satisfies PublishFailure,
+  });
+}
+
+function currentLivePublishContext(): LivePublishContext {
+  const state = useTemplateEditorSession.getState();
+  return {
+    sessionId: state.sessionId ?? "",
+    templateId: state.draft?.definition.templateId ?? "",
+    semanticGeneration: state.semanticGeneration,
+    targetVersion: (state.draft?.remote?.publishedVersion ?? 0) + 1,
+  };
+}
+
+function isCurrentPublishOperation(
+  state: PublishWorkflowState<TemplateDefinitionV2>,
+  expected: OperationIdentity,
+) {
+  if (!("operation" in state)) return false;
+  const operation = state.operation;
+  const snapshot = state.snapshot;
+  const live = currentLivePublishContext();
+  return operation.operationId === expected.operationId
+    && operation.sessionId === expected.sessionId
+    && operation.templateId === expected.templateId
+    && operation.semanticGeneration === expected.semanticGeneration
+    && operation.targetVersion === expected.targetVersion
+    && operation.baselineRevision === expected.baselineRevision
+    && operation.baselineChecksum === expected.baselineChecksum
+    && operation.versionNote === expected.versionNote
+    && snapshot.sessionId === expected.sessionId
+    && snapshot.templateId === expected.templateId
+    && snapshot.semanticGeneration === expected.semanticGeneration
+    && snapshot.targetVersion === expected.targetVersion
+    && live.sessionId === expected.sessionId
+    && live.templateId === expected.templateId;
+}
+
+function resetDefinitionPublishWorkflow(
+  context: LivePublishContext,
+): PublishWorkflowTransition<TemplateDefinitionV2> {
+  return {
+    state: { status: "editing", context },
+    effects: [],
+  };
+}
+
 export function useTemplateWorkspaceController({
   active,
   canManageTemplates,
@@ -172,53 +490,104 @@ export function useTemplateWorkspaceController({
   onReturnPage: () => void;
 }): TemplateWorkspaceController {
   const { message, modal } = AntdApp.useApp();
-  const [publishing, setPublishing] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const saveInFlightRef = useRef<Promise<boolean> | null>(null);
-  const publishInFlightRef = useRef(false);
   const lifecycleInFlightRef = useRef(false);
+  const publishedDraftCreationRequestRef = useRef(0);
   const transitionInFlightRef = useRef(false);
+  const openRequestRef = useRef(0);
+  const copyRequestRef = useRef(0);
+  const activeRef = useRef(active);
+  const canManageTemplatesRef = useRef(canManageTemplates);
+  activeRef.current = active;
+  canManageTemplatesRef.current = canManageTemplates;
   const draft = useTemplateEditorSession((state) => state.draft);
   const sessionId = useTemplateEditorSession((state) => state.sessionId);
-  const [review, setReview] = useState<TemplatePublishReview | null>(null);
+  const semanticGeneration = useTemplateEditorSession((state) => state.semanticGeneration);
+  const [publishWorkflow, setPublishWorkflow] = useState<PublishWorkflowState<TemplateDefinitionV2>>(
+    () => resetDefinitionPublishWorkflow(currentLivePublishContext()).state,
+  );
+  const publishWorkflowRef = useRef(publishWorkflow);
+  const publishEffectChainRef = useRef<Promise<void>>(Promise.resolve());
+  const publishEffectRunnerRef = useRef<((effect: PublishWorkflowEffect<TemplateDefinitionV2>) => Promise<void>) | null>(null);
+  const publishOperationMetaRef = useRef<{
+    operationId: string;
+    meta: PublishOperationMeta;
+  } | null>(null);
+  const [publishedDraftAvailability, setPublishedDraftAvailability] = useState<PublishedDraftAvailability | null>(null);
+  const [publishedDraftCreation, setPublishedDraftCreation] = useState<PublishedDraftCreationState | null>(null);
+  const [review, setReview] = useState<Omit<TemplatePublishReview, "workflow"> | null>(null);
+  const [publishIssueEditing, setPublishIssueEditing] = useState(false);
   const reviewRequestRef = useRef(0);
+  const publishReviewReturnRef = useRef<{
+    sessionId: string;
+    selectionSnapshot: TemplateEditorSelectionSnapshot;
+    device: ReturnType<typeof useTemplateEditorSession.getState>["device"];
+    canvasZoom: number | null;
+    previewMode: boolean;
+    previewScenario: ReturnType<typeof useTemplateEditorSession.getState>["previewScenario"];
+    workspaceScroll: TemplateWorkspaceScrollState;
+  } | null>(null);
+  useEffect(() => () => {
+    openRequestRef.current += 1;
+    copyRequestRef.current += 1;
+    publishedDraftCreationRequestRef.current += 1;
+  }, []);
+  const applyPublishTransition = useCallback((transition: PublishWorkflowTransition<TemplateDefinitionV2>) => {
+    const operationMeta = publishOperationMetaRef.current;
+    if (
+      operationMeta
+      && (!("operation" in transition.state)
+        || transition.state.operation.operationId !== operationMeta.operationId)
+    ) {
+      publishOperationMetaRef.current = null;
+    }
+    publishWorkflowRef.current = transition.state;
+    setPublishWorkflow(transition.state);
+    for (const effect of transition.effects) {
+      publishEffectChainRef.current = publishEffectChainRef.current
+        .then(async () => publishEffectRunnerRef.current?.(effect))
+        .catch(() => undefined);
+    }
+  }, []);
   const publishReview = review?.sessionId === sessionId
-    && review.templateId === draft?.definition.templateId ? review : null;
-  useEffect(() => {
-    setReview((current) => {
-      if (!current) return current;
-      if (current.sessionId !== sessionId || current.templateId !== draft?.definition.templateId) return null;
-      if (current.baseline === draft.definition) return current;
-      const issues = validateDynamicTemplatePublishDefinition(draft.definition).issues;
-      return {
-        ...current,
-        baseline: draft.definition,
-        issues,
-        currentIndex: reconcileTemplatePublishIssueIndex(current.issues, current.currentIndex, issues),
-      };
-    });
-  }, [draft?.definition, sessionId]);
+    && review.templateId === draft?.definition.templateId
+    && publishWorkflow.status !== "editing"
+    ? { ...review, workflow: publishWorkflow }
+    : null;
+  const publishing = ["saving-reviewed-snapshot", "publishing", "verifying-uncertain"].includes(
+    publishWorkflow.status,
+  );
   const openPublishReview = useCallback(() => {
+    setPublishIssueEditing(false);
+    const session = useTemplateEditorSession.getState();
+    session.setInspectorTask("design");
+    session.setInspectorView("context");
     const requestId = ++reviewRequestRef.current;
     setReview((current) => current ? { ...current, requestId } : current);
   }, []);
   const selectPublishIssue = useCallback((currentIndex: number) => {
     setReview((current) => current ? { ...current, currentIndex } : current);
   }, []);
-  const checkPublishDraft = useCallback((current: ReturnType<typeof useTemplateEditorSession.getState>) => {
-    if (!current.draft || !current.sessionId) return false;
-    const result = validateDynamicTemplatePublishDefinition(current.draft.definition);
-    if (result.valid) return true;
-    setReview({
-      sessionId: current.sessionId,
-      templateId: current.draft.definition.templateId,
-      baseline: current.draft.definition,
-      issues: result.issues,
-      currentIndex: Math.max(0, result.issues.findIndex((issue) => issue.level === "error")),
-      requestId: ++reviewRequestRef.current,
-    });
-    return false;
-  }, []);
+  const editPublishIssue = useCallback((target: TemplateInspectorIssueTarget) => {
+    const current = publishWorkflowRef.current;
+    if (
+      target.destination === "unavailable"
+      || (target.destination === "inspector-field" && target.access !== "editable")
+      || (current.status !== "review-blocked" && current.status !== "review-ready")
+    ) return false;
+    const session = useTemplateEditorSession.getState();
+    if (
+      !session.sessionId
+      || !session.draft
+      || session.sessionId !== current.snapshot.sessionId
+      || session.draft.definition.templateId !== current.snapshot.templateId
+    ) return false;
+
+    applyPublishTransition(markPublishReviewStale(current, "issue-edit"));
+    setPublishIssueEditing(true);
+    return true;
+  }, [applyPublishTransition]);
   const selectedObjectId = useTemplateEditorSession((state) => state.selectedObjectId);
   const selectedContractRole = useTemplateEditorSession((state) => state.selectedContractRole);
   const selectedObjectLabel = draft
@@ -233,6 +602,45 @@ export function useTemplateWorkspaceController({
   const previewScenario = useTemplateEditorSession((state) => state.previewScenario);
   const saveStatus = useTemplateEditorSession((state) => state.saveStatus);
   const setPreviewMode = useTemplateEditorSession((state) => state.setPreviewMode);
+  useEffect(() => {
+    const current = publishWorkflowRef.current;
+    const live = currentLivePublishContext();
+    if (
+      current.status !== "editing"
+      && (
+        current.snapshot.sessionId !== live.sessionId
+        || current.snapshot.templateId !== live.templateId
+      )
+    ) {
+      publishOperationMetaRef.current = null;
+      publishReviewReturnRef.current = null;
+      setPublishIssueEditing(false);
+      setReview(null);
+      setPublishedDraftAvailability(null);
+      applyPublishTransition(resetDefinitionPublishWorkflow(live));
+      return;
+    }
+    if (current.status === "editing") applyPublishTransition(resetDefinitionPublishWorkflow(live));
+  }, [applyPublishTransition, draft?.definition.templateId, sessionId]);
+  useEffect(() => {
+    const current = publishWorkflowRef.current;
+    if (current.status === "editing" || current.snapshot.semanticGeneration === semanticGeneration) return;
+    applyPublishTransition(markPublishReviewChanged(current, { kind: "semantic-generation" }));
+  }, [applyPublishTransition, semanticGeneration]);
+  const readWorkspaceScroll = useCallback(
+    () => useTemplateEditorSession.getState().workspaceScroll,
+    [],
+  );
+  const updateWorkspaceScroll = useCallback((
+    expectedSessionId: string,
+    updates: Partial<TemplateWorkspaceScrollState>,
+  ) => {
+    const current = useTemplateEditorSession.getState();
+    current.setWorkspaceScroll(expectedSessionId, {
+      ...current.workspaceScroll,
+      ...updates,
+    });
+  }, []);
 
   const activateTemplateSession = useCallback((reset = true) => {
     const visualSession = useVisualEditorSession.getState();
@@ -243,32 +651,6 @@ export function useTemplateWorkspaceController({
     }
     visualSession.activateWorkspace("template");
   }, []);
-
-  const openSystemDraft = useCallback((
-    moduleType: string,
-    current: SystemContentTemplateCurrent | undefined,
-    markAsNew: boolean,
-  ) => {
-    const sourceDraft = createSystemTemplateDraft(moduleType, current);
-    if (!sourceDraft) {
-      message.error("当前母模板缺少可编辑合同，暂时无法打开");
-      return null;
-    }
-    try {
-      const loaded = adaptLegacyTemplateSource(sourceDraft);
-      activateTemplateSession();
-      const session = useTemplateEditorSession.getState();
-      session.open(loaded.draft, { isNew: markAsNew });
-      session.selectObject(loaded.draft.definition.rootNodeId);
-      if (loaded.skippedItems.length > 0) {
-        message.warning(`母模板已打开；有 ${loaded.skippedItems.length} 项旧引用需在发布前重新确认`);
-      }
-      return useTemplateEditorSession.getState().sessionId;
-    } catch (error) {
-      message.error(getEditorErrorMessage(error, "当前母模板暂时无法在统一编辑器中打开"));
-      return null;
-    }
-  }, [activateTemplateSession, message]);
 
   const openPersistedDraft = useCallback((
     template: DynamicTemplateResource,
@@ -295,27 +677,6 @@ export function useTemplateWorkspaceController({
     return true;
   }, [activateTemplateSession, message]);
 
-  const stageSystemCompatibilityRecovery = useCallback((
-    template: DynamicTemplateResource,
-    recoveryDefinition: TemplateEditorDraft["definition"],
-  ) => {
-    if (!template.draft) return false;
-    const session = useTemplateEditorSession.getState();
-    const result = session.stageCompatibilityRecovery({
-      definition: recoveryDefinition,
-      originalDefinition: template.draft.definition,
-      sourceRevision: template.draft.revision,
-      sourceChecksum: template.draft.definitionChecksum,
-    });
-    if (!result.ok) {
-      message.error(result.message);
-      return false;
-    }
-    session.selectObject(recoveryDefinition.rootNodeId);
-    message.warning("修复方案尚未保存，原草稿未覆盖");
-    return true;
-  }, [message]);
-
   const enter = useCallback((pageViewport: { width: number; height: number }) => {
     if (!canManageTemplates) {
       message.warning("只有超级管理员可以设计模板");
@@ -331,76 +692,10 @@ export function useTemplateWorkspaceController({
       activateTemplateSession(false);
       return;
     }
-    const defaultModuleType = "首屏主视觉";
-    const openedSessionId = openSystemDraft(defaultModuleType, undefined, false);
-    const contractKey = getContentTemplateContract(defaultModuleType)?.key;
-    if (!openedSessionId || !contractKey) return;
-
-    void dynamicTemplateApi.listCatalog()
-      .then((response) => {
-        const catalog = unwrapResponse<TemplateCatalogResource>(response);
-        const session = useTemplateEditorSession.getState();
-        if (session.sessionId !== openedSessionId || session.dirty) return;
-        const systemCurrentItem = catalog?.items.find((item) => (
-          item.kind === "system-compatibility" && item.template.contractKey === contractKey
-        ));
-        const systemCurrent = systemCurrentItem?.kind === "system-compatibility"
-          ? systemCurrentItem.template
-          : null;
-        const persisted = catalog?.items.find((item) => (
-          item.kind === "editable"
-          && item.template.sourceReference === session.draft?.sourceReference
-        ));
-        if (persisted?.kind === "editable") {
-          const published = catalog?.items.find((item) => (
-            item.kind === "published"
-            && item.template.templateId === persisted.template.templateId
-            && item.template.version === persisted.template.publishedVersion
-          ));
-          const recoveryDefinition = systemCurrent
-            ? createSystemCompatibilityRecoveryDefinition(persisted.template, systemCurrent)
-            : undefined;
-          const persistedDraft = createPersistedDraft(
-            persisted.template,
-            currentPublishedChecksum(
-              persisted.template,
-              published?.kind === "published" ? published.template : null,
-            ),
-          ) ?? (recoveryDefinition ? createPersistedDraft(
-            persisted.template,
-            currentPublishedChecksum(
-              persisted.template,
-              published?.kind === "published" ? published.template : null,
-            ),
-            recoveryDefinition,
-          ) : null);
-          if (persistedDraft) {
-            activateTemplateSession();
-            session.open(persistedDraft);
-            if (recoveryDefinition) {
-              stageSystemCompatibilityRecovery(persisted.template, recoveryDefinition);
-            } else {
-              session.selectObject(persistedDraft.definition.rootNodeId);
-            }
-            return;
-          }
-        }
-        if (
-          !systemCurrent
-          || systemCurrent.moduleType !== defaultModuleType
-          || systemCurrent.activeVersion <= 0
-          || useTemplateEditorSession.getState().sessionId !== openedSessionId
-          || useTemplateEditorSession.getState().dirty
-        ) return;
-        openSystemDraft(defaultModuleType, systemCurrent, false);
-      })
-      .catch(() => {
-        const session = useTemplateEditorSession.getState();
-        if (session.sessionId === openedSessionId && !session.dirty) {
-          message.warning("首屏当前版本暂时无法读取，已打开代码合同基线");
-        }
-      });
-  }, [activateTemplateSession, canManageTemplates, isViewingPublished, message, onEnterWorkspace, openSystemDraft, stageSystemCompatibilityRecovery]);
+    // 首次进入只切换工作区，不猜测运营要编辑哪个历史模板。
+    // 目录与顶部“新建模板”由用户配置方案后建立新会话。
+    activateTemplateSession(false);
+  }, [activateTemplateSession, canManageTemplates, isViewingPublished, message, onEnterWorkspace]);
 
   const requireActive = useCallback(() => {
     if (!active) {
@@ -414,83 +709,103 @@ export function useTemplateWorkspaceController({
     return true;
   }, [active, canManageTemplates, message]);
 
-  const openTargetImmediately = useCallback((target: TemplateEditorLibraryTarget) => {
-    if (!requireActive()) return;
-    if (target.kind === "system-fixed") {
-      openSystemDraft(target.moduleType, target.current, false);
-      return;
-    }
-    if (target.kind === "personal-fixed") {
-      const sourceDraft = createPersonalTemplateDraft(target.template as PersonalContentTemplate);
-      if (!sourceDraft) {
-        message.error("此模板与当前合同不兼容，原记录未被修改");
-        return;
-      }
-      try {
-        const loaded = adaptLegacyTemplateSource(sourceDraft);
-        activateTemplateSession();
-        const session = useTemplateEditorSession.getState();
-        session.open(loaded.draft, { isNew: false });
-        session.selectObject(loaded.draft.definition.rootNodeId);
-        if (loaded.skippedItems.length > 0) {
-          message.warning(`母模板已打开；有 ${loaded.skippedItems.length} 项旧引用需在发布前重新确认`);
-        }
-      } catch (error) {
-        message.error(getEditorErrorMessage(error, "当前母模板暂时无法在统一编辑器中打开"));
-      }
-      return;
-    }
+  const openTargetImmediately = useCallback(async (target: TemplateEditorLibraryTarget) => {
+    if (!requireActive()) return null;
+    const requestId = ++openRequestRef.current;
+    const sourceSession = useTemplateEditorSession.getState();
+    const sourceSessionId = sourceSession.sessionId;
+    const sourceTemplateId = sourceSession.draft?.definition.templateId ?? null;
+    const sourceSemanticGeneration = sourceSession.semanticGeneration;
+    const isCurrentRequest = () => {
+      const currentSession = useTemplateEditorSession.getState();
+      return openRequestRef.current === requestId
+        && activeRef.current
+        && canManageTemplatesRef.current
+        && useVisualEditorSession.getState().workspace === "template"
+        && currentSession.sessionId === sourceSessionId
+        && (currentSession.draft?.definition.templateId ?? null) === sourceTemplateId
+        && currentSession.semanticGeneration === sourceSemanticGeneration;
+    };
     if (target.kind === "dynamic-local") {
       const localDraft = loadLocalDynamicTemplateDraft(target.localDraftId);
       if (!localDraft) {
         message.error("该本机模板草稿不存在或未通过当前结构校验");
-        return;
+        return null;
       }
       activateTemplateSession();
       const session = useTemplateEditorSession.getState();
       session.open(localDraft);
       session.selectObject(localDraft.definition.rootNodeId);
-      return;
+      return useTemplateEditorSession.getState().draft;
     }
     if (target.kind === "dynamic-new") {
-      const newDraft = createNewDynamicTemplateDraft("未命名模板");
+      const generated = target.definition ? validateDynamicTemplateDefinition(target.definition) : null;
+      if (!generated?.valid || !generated.definition) {
+        message.error("模板方案未通过结构校验，请返回配置修改。当前草稿未改变。");
+        return null;
+      }
+      const newDraft = {
+        format: "dynamic" as const,
+        sourceType: "local" as const,
+        localDraftId: generated.definition.templateId,
+        versionNote: "",
+        definition: structuredClone(generated.definition),
+        ...(target.copySource ? { copySource: target.copySource, copySourceDefinition: structuredClone(target.copySourceDefinition ?? generated.definition) } : {}),
+      };
       activateTemplateSession();
       const session = useTemplateEditorSession.getState();
       session.open(newDraft, { isNew: true });
+      if (target.canvasSize || target.definition) useTemplateEditorSession.getState().setDevice("desktop");
       session.selectObject(newDraft.definition.rootNodeId);
-      return;
+      return useTemplateEditorSession.getState().draft;
     }
-    if (!openPersistedDraft(target.template, target.published, target.recoveryDefinition)) return;
-    if (target.recoveryDefinition) {
-      const session = useTemplateEditorSession.getState();
-      if (
-        session.draft?.sourceType === "persisted"
-        && session.draft.definition.templateId === target.template.templateId
-      ) {
-        stageSystemCompatibilityRecovery(target.template, target.recoveryDefinition);
+    const templateId = target.template.templateId;
+    try {
+      const response = await dynamicTemplateApi.getDraft(templateId);
+      if (!isCurrentRequest()) return null;
+      const resource = unwrapResponse<DynamicTemplateResource | null>(response);
+      if (!resource) {
+        message.error("服务端模板草稿不存在，当前编辑会话未改变");
+        return null;
       }
+      const freshDraft = resource.draft;
+      const validation = freshDraft
+        ? validateDynamicTemplateDefinition(freshDraft.definition)
+        : null;
+      if (
+        resource.templateId !== templateId
+        || !freshDraft
+        || !Number.isInteger(freshDraft.revision)
+        || freshDraft.revision <= 0
+        || !isDefinitionChecksum(freshDraft.definitionChecksum)
+        || freshDraft.definition?.templateId !== templateId
+        || !validation?.valid
+        || !validation.definition
+      ) {
+        message.error("服务端返回的模板草稿身份或内容无效，当前编辑会话未改变");
+        return null;
+      }
+      if (!openPersistedDraft(resource, target.published)) return null;
+      return useTemplateEditorSession.getState().draft;
+    } catch (error) {
+      if (!isCurrentRequest()) return null;
+      message.error(getEditorErrorMessage(error, "读取模板草稿失败，当前编辑会话未改变"));
+      return null;
     }
-  }, [activateTemplateSession, message, openPersistedDraft, openSystemDraft, requireActive, stageSystemCompatibilityRecovery]);
+  }, [activateTemplateSession, message, openPersistedDraft, requireActive]);
 
   const persist = useCallback((options: PersistTemplateOptions = {}): Promise<boolean> => {
     if (saveInFlightRef.current) return saveInFlightRef.current;
+    if (focusFirstInvalidNumberField()) return Promise.resolve(false);
     const session = useTemplateEditorSession.getState();
+    if (session.activeInteraction) {
+      message.warning("请先确认或取消当前画布／属性操作，再保存模板");
+      return Promise.resolve(false);
+    }
     const currentDraft = session.draft;
     const sessionId = session.sessionId;
     if (!canManageTemplates || !currentDraft || !sessionId) return Promise.resolve(false);
-    const recoveryDecision = options.compatibilityRecoveryDecision;
-    if (
-      currentDraft.compatibilityRecovery
-      && (
-        !recoveryDecision
-        || (recoveryDecision === "copy" && !options.asCopy)
-        || (recoveryDecision === "overwrite" && options.asCopy)
-      )
-    ) {
-      message.warning("请先在修复提示中选择取消、另存为新模板或明确保存修复草稿");
-      return Promise.resolve(false);
-    }
-    const requestedDraft = structuredClone(currentDraft);
+    let requestedDraft = structuredClone(currentDraft);
     session.setSaveStatus("saving");
     const savePromise = (async (): Promise<boolean> => {
       try {
@@ -520,58 +835,52 @@ export function useTemplateWorkspaceController({
             );
           }
           delete localBase.compatibilityRecovery;
-          savedDraft = saveLocalDynamicTemplateDraft(localBase, {
-            asCopy: requestedDraft.sourceType === "local" && options.asCopy,
-            name: options.name,
-          });
+          savedDraft = saveLocalDynamicTemplateDraft(localBase);
           window.dispatchEvent(new Event(DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT));
         } else {
-          let response: unknown;
-          const copyNeedsCurrentDefinition = Boolean(
-            options.asCopy
-            && (
-              session.dirty
-              || session.saveStatus === "conflict"
-              || requestedDraft.requiresContractNormalization === true
-              || Boolean(requestedDraft.compatibilityRecovery)
-            ),
-          );
-          if (options.asCopy && requestedDraft.sourceType === "persisted" && !copyNeedsCurrentDefinition) {
-            response = await dynamicTemplateApi.saveAs(requestedDraft.definition.templateId, {
-              name: (options.name ?? `${requestedDraft.definition.name} 副本`).trim(),
-              versionNote: requestedDraft.versionNote,
-            });
-          } else {
-            let definition = normalizeTemplateDimensionContract(requestedDraft.definition);
-            if (options.name?.trim()) definition.name = options.name.trim();
-            const updatesPersistedDraft = requestedDraft.sourceType === "persisted"
-              && requestedDraft.remote
-              && !options.asCopy;
-            if (!updatesPersistedDraft) {
-              definition = prepareDynamicTemplateDefinitionForNewIdentity(
-                definition,
-                options.asCopy ? createDynamicTemplateStableId("tpl") : definition.templateId,
-              );
+          if (requestedDraft.copySource && requestedDraft.sourceType !== "persisted") {
+            const original = structuredClone(requestedDraft.copySourceDefinition ?? requestedDraft.definition);
+            original.name = requestedDraft.definition.name;
+            const resource = await saveDraftWithVerification(requestedDraft, original, () => dynamicTemplateApi.create({ definition: original, copySource: requestedDraft.copySource, versionNote: requestedDraft.versionNote }));
+            const initialSaved = resource ? createPersistedDraft(resource, null) : null;
+            if (!initialSaved) throw new Error("服务端没有返回有效的副本草稿");
+            notifyEditableTemplateCatalogChanged(resource);
+            const initialRequest = { ...requestedDraft, definition: original };
+            const initialResult = useTemplateEditorSession.getState().reconcileSaveResult({ sessionId, requestedDraft: initialRequest, savedDraft: initialSaved });
+            if (initialResult === "stale-session") return true;
+            // 首次创建已落地：立即保留真实 revision，后续精修保存失败只重试 update。
+            const current = useTemplateEditorSession.getState();
+            if (JSON.stringify(requestedDraft.definition) === JSON.stringify(original)) {
+              message.success(initialResult === "newer-changes" ? "模板副本已保存；你还有新的未保存修改。" : "模板副本已保存，可继续编辑。");
+              return true;
             }
-            response = updatesPersistedDraft
-                ? await dynamicTemplateApi.updateDraft(requestedDraft.definition.templateId, {
-                  expectedRevision: requestedDraft.remote!.revision,
-                  definition,
-                  versionNote: requestedDraft.versionNote,
-                  ...(requestedDraft.historyRestore ? {
-                    restoreFromVersion: requestedDraft.historyRestore.sourceVersion,
-                    restoreFromChecksum: requestedDraft.historyRestore.sourceChecksum,
-                  } : {}),
-                })
-              : await dynamicTemplateApi.create({
-                  definition,
-                  versionNote: requestedDraft.versionNote,
-                  ...((options.asCopy ? requestedDraft.definition.templateId : requestedDraft.sourceReference)
-                    ? { sourceReference: options.asCopy ? requestedDraft.definition.templateId : requestedDraft.sourceReference }
-                    : {}),
-                });
+            requestedDraft = { ...initialSaved, definition: requestedDraft.definition, versionNote: requestedDraft.versionNote };
+            current.setSaveStatus("saving");
           }
-          const saved = unwrapResponse<DynamicTemplateResource>(response);
+          let definition = requestedDraft.copySource ? structuredClone(requestedDraft.definition) : normalizeTemplateDimensionContract(requestedDraft.definition);
+          const updatesPersistedDraft = requestedDraft.sourceType === "persisted"
+            && Boolean(requestedDraft.remote);
+          if (!updatesPersistedDraft && !requestedDraft.copySource) {
+            definition = prepareDynamicTemplateDefinitionForNewIdentity(
+              definition,
+              definition.templateId,
+            );
+          }
+          const saved = await saveDraftWithVerification(requestedDraft, definition, () => updatesPersistedDraft
+            ? dynamicTemplateApi.updateDraft(requestedDraft.definition.templateId, {
+                expectedRevision: requestedDraft.remote!.revision,
+                definition,
+                versionNote: requestedDraft.versionNote,
+                ...(requestedDraft.historyRestore ? {
+                  restoreFromVersion: requestedDraft.historyRestore.sourceVersion,
+                  restoreFromChecksum: requestedDraft.historyRestore.sourceChecksum,
+                } : {}),
+              })
+            : dynamicTemplateApi.create({
+                definition,
+                versionNote: requestedDraft.versionNote,
+                ...(requestedDraft.copySource ? { copySource: requestedDraft.copySource } : {}),
+              }));
           const persistedDraft = saved ? createPersistedDraft(
             saved,
             saved.publishedVersion > 0
@@ -580,24 +889,16 @@ export function useTemplateWorkspaceController({
           ) : null;
           if (!persistedDraft) throw new Error("服务端没有返回可编辑模板草稿");
           savedDraft = persistedDraft;
-          notifyDynamicTemplateCatalogChanged();
+          notifyEditableTemplateCatalogChanged(saved);
         }
 
         const reconciliation = useTemplateEditorSession.getState().reconcileSaveResult({
           sessionId,
           requestedDraft,
           savedDraft,
-          asCopy: options.asCopy,
         });
         if (reconciliation === "stale-session") return true;
-        if (options.asCopy || savedDraft.definition.templateId !== requestedDraft.definition.templateId) {
-          const copyMessage = localOnly
-            ? `“${savedDraft.definition.name}”已另存为本机测试草稿`
-            : `“${savedDraft.definition.name}”副本已保存为新的账号模板`;
-          message.success(reconciliation === "newer-changes"
-            ? `${copyMessage}；当前仍在编辑来源模板，新的修改尚未保存`
-            : copyMessage);
-        } else if (reconciliation === "newer-changes") {
+        if (reconciliation === "newer-changes") {
           message.success(localOnly
             ? "本机测试草稿已保存；你还有新的未保存修改"
             : "模板草稿已保存；你还有新的未保存修改");
@@ -611,16 +912,29 @@ export function useTemplateWorkspaceController({
         const current = useTemplateEditorSession.getState();
         const status = getEditorHttpStatus(error);
         const conflicted = status === 409;
+        const serverMessage = error instanceof Error ? error.message : "";
+        const verification = (error as { templateSaveVerification?: string })?.templateSaveVerification;
+        const nameConflict = conflicted && (
+          serverMessage === "当前账号已存在同名模板"
+          || (serverMessage === "当前账号已存在同名模板，或模板 ID 已被使用" && verification === "missing")
+        );
+        const conflictMessage = nameConflict
+          ? serverMessage
+          : verification === "mismatch"
+            ? "服务端模板身份或版本与本次保存不一致"
+            : "模板保存发生冲突，暂时无法确认服务端保存结果";
         const permissionDenied = status === 403;
         if (
           current.sessionId === sessionId
           && current.draft?.definition.templateId === requestedDraft.definition.templateId
         ) {
           current.setSaveStatus(
-            conflicted ? "conflict" : permissionDenied ? "permission-error" : "error",
+            conflicted && !nameConflict ? "conflict" : permissionDenied ? "permission-error" : "error",
           );
-          if (conflicted) {
-            message.warning("其他人已经保存了这个模板的新修改；当前工作仍完整保留，请另存为新模板。");
+          if (nameConflict) {
+            message.warning(`${conflictMessage}；当前修改仍完整保留，请打开模板设置，修改模板名称后重新保存。`);
+          } else if (conflicted) {
+            message.warning(`${conflictMessage}；当前工作仍完整保留，请重新打开目录中的同一模板处理冲突。`);
           } else if (permissionDenied) {
             message.error("服务端拒绝保存模板：当前账号没有模板管理权限；修改仍完整保留。");
           } else {
@@ -636,6 +950,18 @@ export function useTemplateWorkspaceController({
     });
     return savePromise;
   }, [canManageTemplates, localOnly, message]);
+
+  const persistForExit = useCallback(async () => {
+    const source = useTemplateEditorSession.getState();
+    const sourceSessionId = source.sessionId;
+    const sourceTemplateId = source.draft?.definition.templateId;
+    if (!sourceSessionId || !sourceTemplateId) return false;
+    if (!await persist()) return false;
+    const current = useTemplateEditorSession.getState();
+    return current.sessionId === sourceSessionId
+      && current.draft?.definition.templateId === sourceTemplateId
+      && !current.dirty;
+  }, [persist]);
 
   const closeTemplateSession = useCallback(() => {
     const sessionId = useTemplateEditorSession.getState().sessionId;
@@ -664,11 +990,36 @@ export function useTemplateWorkspaceController({
   }) => {
     if (transitionInFlightRef.current) return;
     transitionInFlightRef.current = true;
-    let dialog: { destroy: () => void } | null = null;
+    const sourceSessionId = useTemplateEditorSession.getState().sessionId;
+    let saveActionInFlight = false;
+    let dialog: { destroy: () => void; update: (config: ModalFuncProps) => void } | null = null;
     const finish = (action: "discard" | "cancel") => {
+      if (saveActionInFlight) return;
       dialog?.destroy();
       transitionInFlightRef.current = false;
       if (action === "discard") onDiscard();
+    };
+    const renderFooter = (saving: boolean): ModalFuncProps["footer"] => (
+      (_, { OkBtn, CancelBtn }) => (
+        <div className="template-editor__transition-footer">
+          <Button danger disabled={saving} onClick={() => finish("discard")}>
+            {discardText}
+          </Button>
+          <div className="template-editor__transition-footer-actions">
+            <CancelBtn />
+            {allowSave ? <OkBtn /> : null}
+          </div>
+        </div>
+      )
+    );
+    const setSaveActionInFlight = (saving: boolean) => {
+      saveActionInFlight = saving;
+      dialog?.update({
+        cancelButtonProps: { disabled: saving },
+        keyboard: !saving,
+        maskClosable: !saving,
+        footer: renderFooter(saving),
+      });
     };
     dialog = modal.confirm({
       className: "template-editor__transition-modal",
@@ -679,32 +1030,40 @@ export function useTemplateWorkspaceController({
       okText: saveText,
       cancelText: "继续编辑",
       autoFocusButton: "cancel",
-      footer: (_, { OkBtn, CancelBtn }) => (
-        <div className="template-editor__transition-footer">
-          <Button danger onClick={() => finish("discard")}>
-            {discardText}
-          </Button>
-          <div className="template-editor__transition-footer-actions">
-            <CancelBtn />
-            {allowSave ? <OkBtn /> : null}
-          </div>
-        </div>
-      ),
+      footer: renderFooter(false),
       onOk: async (close) => {
-        const saved = await persist({ overwriteCurrent: true });
-        if (!saved) return;
-        transitionInFlightRef.current = false;
-        onSaved();
-        close();
+        if (saveActionInFlight) return;
+        setSaveActionInFlight(true);
+        let shouldOpenSavedTarget = false;
+        try {
+          const saved = await persist({ overwriteCurrent: true });
+          if (!saved) return;
+          const current = useTemplateEditorSession.getState();
+          if (current.sessionId !== sourceSessionId || current.dirty) {
+            message.warning("保存请求期间又有新的修改，已留在当前模板继续编辑");
+            return;
+          }
+          shouldOpenSavedTarget = true;
+        } finally {
+          setSaveActionInFlight(false);
+          transitionInFlightRef.current = false;
+        }
+        if (shouldOpenSavedTarget) {
+          onSaved();
+          close();
+        }
       },
       onCancel: () => finish("cancel"),
       afterClose: () => {
-        transitionInFlightRef.current = false;
+        if (!saveActionInFlight) transitionInFlightRef.current = false;
       },
     });
-  }, [modal, persist]);
+  }, [message, modal, persist]);
 
-  const openTarget = useCallback((target: TemplateEditorLibraryTarget) => {
+  const openTarget = useCallback((
+    target: TemplateEditorLibraryTarget,
+    onOpened?: (draft: TemplateEditorDraft) => void,
+  ) => {
     const current = useTemplateEditorSession.getState();
     if (current.saveStatus === "saving" || publishing || lifecycleBusy) {
       message.info(
@@ -716,16 +1075,28 @@ export function useTemplateWorkspaceController({
       );
       return;
     }
+    if (onOpened && current.draft && targetMatchesDraft(target, current.draft)) {
+      onOpened(current.draft);
+      return;
+    }
+    const completeOpen = () => {
+      void openTargetImmediately(target).then((openedDraft) => {
+        if (openedDraft) onOpened?.(openedDraft);
+      });
+    };
     if (!current.draft || !current.dirty) {
-      openTargetImmediately(target);
+      completeOpen();
       return;
     }
     const templateName = current.draft.definition.name.trim() || "当前模板";
     const recoveryPending = Boolean(current.draft.compatibilityRecovery);
+    const startsNewTemplate = target.kind === "dynamic-new";
     requestDirtySessionAction({
-      title: "切换模板？",
-      discardText: recoveryPending ? "放弃修复并切换" : "放弃修改并切换",
-      saveText: "保存草稿并切换",
+      title: startsNewTemplate ? "新建模板？" : "切换模板？",
+      discardText: recoveryPending
+        ? startsNewTemplate ? "放弃修复并新建" : "放弃修复并切换"
+        : startsNewTemplate ? "放弃修改并新建" : "放弃修改并切换",
+      saveText: startsNewTemplate ? "保存草稿并新建" : "保存草稿并切换",
       allowSave: canManageTemplates
         && current.saveStatus !== "conflict"
         && current.saveStatus !== "permission-error"
@@ -743,15 +1114,98 @@ export function useTemplateWorkspaceController({
               : current.saveStatus === "permission-error"
               ? "服务端已拒绝当前账号保存这个模板；只能继续编辑，或明确放弃修改后切换。"
               : current.saveStatus === "conflict"
-                ? "当前模板存在保存冲突；请继续编辑并另存为新模板，或明确放弃修改后切换。"
+                ? "当前模板存在保存冲突；请留在当前会话核对修改，或明确放弃修改后重新打开同一模板。"
                 : "保存后将作为模板草稿；已发布模板和页面草稿不会受到影响。"}
           </p>
         </div>
       ),
-      onDiscard: () => openTargetImmediately(target),
-      onSaved: () => openTargetImmediately(target),
+      onDiscard: completeOpen,
+      onSaved: completeOpen,
     });
   }, [canManageTemplates, lifecycleBusy, message, openTargetImmediately, publishing, requestDirtySessionAction]);
+
+  const copyTarget = useCallback(async (
+    target: TemplateEditorLibraryTarget,
+    action: "copy" | "copy-published",
+  ) => {
+    if (!requireActive() || lifecycleBusy || publishing) return false;
+    const sourceSession = useTemplateEditorSession.getState();
+    if (sourceSession.saveStatus === "saving") return false;
+    const requestId = ++copyRequestRef.current;
+    const sourceSessionId = sourceSession.sessionId;
+    const sourceGeneration = sourceSession.semanticGeneration;
+    try {
+      let source: TemplateDefinitionV2 | undefined;
+      let copySource: { templateId: string; revision: number; definitionChecksum: string } | undefined;
+      let originalCopy: TemplateDefinitionV2 | undefined;
+      if (
+        action === "copy-published"
+        && (target.kind !== "dynamic-persisted" || !target.published || target.published.schemaVersion === 1)
+      ) {
+        message.info("此正式版本暂不能直接复制，请先建立对应编辑草稿。");
+        return false;
+      }
+      if (target.kind === "dynamic-persisted") {
+        source = action === "copy-published" || !target.template.draft
+          ? target.published?.definition
+          : sourceSession.draft?.definition.templateId === target.template.templateId
+            ? sourceSession.draft.definition
+            : undefined;
+        if (!source) {
+          const response = await dynamicTemplateApi.getDraft(target.template.templateId);
+          source = unwrapResponse<DynamicTemplateResource | null>(response)?.draft?.definition;
+        }
+      } else if (target.kind === "dynamic-local") {
+        source = sourceSession.draft?.localDraftId === target.localDraftId
+          ? sourceSession.draft.definition
+          : loadLocalDynamicTemplateDraft(target.localDraftId)?.definition;
+      }
+      if (source?.schemaVersion === 1) {
+        if (target.kind !== "dynamic-persisted") {
+          message.info("请先保存旧模板草稿，再复制完整设计。");
+          return false;
+        }
+        const response = await dynamicTemplateApi.getDraft(target.template.templateId);
+        const resource = unwrapResponse<DynamicTemplateResource | null>(response);
+        if (!resource?.draft) {
+          message.info("此旧模板尚无编辑草稿，请先从正式版本建立草稿再复制。");
+          return false;
+        }
+        originalCopy = resource.draft.definition;
+        copySource = {
+          templateId: resource.templateId,
+          revision: resource.draft.revision,
+          definitionChecksum: resource.draft.definitionChecksum,
+        };
+      }
+      const current = useTemplateEditorSession.getState();
+      if (
+        requestId !== copyRequestRef.current
+        || !activeRef.current
+        || !canManageTemplatesRef.current
+        || useVisualEditorSession.getState().workspace !== "template"
+        || current.sessionId !== sourceSessionId
+        || current.semanticGeneration !== sourceGeneration
+      ) return false;
+      if (!source) {
+        message.error("无法读取要复制的模板，请重新打开后再试。");
+        return false;
+      }
+      const definition = copyTemplateDefinition(source);
+      const copySourceDefinition = originalCopy
+        ? { ...structuredClone(originalCopy), templateId: definition.templateId, name: definition.name }
+        : undefined;
+      openTarget({
+        kind: "dynamic-new",
+        definition,
+        ...(copySource ? { copySource, copySourceDefinition } : {}),
+      });
+      return true;
+    } catch {
+      message.error("复制模板失败，当前草稿未改变。");
+      return false;
+    }
+  }, [lifecycleBusy, message, openTarget, publishing, requireActive]);
 
   const closeSession = useCallback(() => {
     const current = useTemplateEditorSession.getState();
@@ -796,7 +1250,7 @@ export function useTemplateWorkspaceController({
               ? "保存只会更新模板草稿，不会发布模板或修改页面。"
               : current.saveStatus === "permission-error"
                 ? "服务端已拒绝当前账号保存这个模板。请继续编辑并联系管理员，或明确不保存并关闭。"
-                : "当前模板存在保存冲突。请继续编辑并另存为新模板，或明确不保存并关闭。"}
+                : "当前模板存在保存冲突。请继续核对修改，或明确不保存并关闭后重新打开同一模板。"}
           </p>
         </div>
       ),
@@ -805,112 +1259,667 @@ export function useTemplateWorkspaceController({
     });
   }, [canManageTemplates, closeTemplateSession, lifecycleBusy, message, publishing, requestDirtySessionAction]);
 
+  const reconcilePublishedDraft = useCallback((
+    operation: OperationIdentity,
+    resource: DynamicTemplateResource,
+    publishedChecksum: string,
+  ) => {
+    const current = publishWorkflowRef.current;
+    if (!isCurrentPublishOperation(current, operation) || !("snapshot" in current)) return false;
+    const operationMeta = publishOperationMetaRef.current;
+    const meta = operationMeta?.operationId === operation.operationId
+      ? operationMeta.meta
+      : null;
+    if (
+      !meta
+      || !meta.savedResource
+      || !matchesPublishedDraftResource(
+        resource,
+        operation,
+        meta.savedResource,
+        current.snapshot.reviewedDefinition,
+        publishedChecksum,
+      )
+    ) return false;
+    const savedDraft = createPersistedDraft(resource, publishedChecksum);
+    if (!savedDraft) return false;
+    useTemplateEditorSession.getState().reconcileSaveResult({
+      sessionId: meta.requestedDraft.definition.templateId === resource.templateId
+        ? operation.sessionId
+        : "",
+      requestedDraft: meta.savedDraft ?? meta.requestedDraft,
+      savedDraft,
+    });
+    meta.savedDraft = savedDraft;
+    meta.savedResource = resource;
+    return true;
+  }, []);
+
+  const recoverPublishedDraft = useCallback(async (
+    operation: OperationIdentity,
+    templateId: string,
+    publishedChecksum: string,
+  ) => {
+    if (!isCurrentPublishOperation(publishWorkflowRef.current, operation)) return;
+    setPublishedDraftAvailability({ status: "checking", templateId });
+    try {
+      const response = await dynamicTemplateApi.getDraft(templateId);
+      const resource = unwrapResponse<DynamicTemplateResource | null>(response);
+      if (!isCurrentPublishOperation(publishWorkflowRef.current, operation)) return;
+      if (!resource) {
+        setPublishedDraftAvailability({ status: "unavailable", templateId });
+        return;
+      }
+      if (
+        resource.templateId !== templateId
+        || !resource.draft
+        || !Number.isInteger(resource.draft.revision)
+        || resource.draft.revision <= 0
+        || !isDefinitionChecksum(resource.draft.definitionChecksum)
+        || resource.draft.definition.templateId !== templateId
+      ) throwMalformedPublishResponse("MALFORMED_DRAFT_RECOVERY");
+      if (reconcilePublishedDraft(operation, resource, publishedChecksum)) {
+        setPublishedDraftAvailability({ status: "available", templateId });
+      } else {
+        setPublishedDraftAvailability({
+          status: "unavailable",
+          templateId,
+          failure: { category: "malformed-response", code: "PUBLISHED_DRAFT_IDENTITY_MISMATCH" },
+        });
+      }
+    } catch (error) {
+      if (!isCurrentPublishOperation(publishWorkflowRef.current, operation)) return;
+      setPublishedDraftAvailability({
+        status: "unavailable",
+        templateId,
+        failure: classifyPublishFailure(error),
+      });
+    }
+  }, [reconcilePublishedDraft]);
+
+  publishEffectRunnerRef.current = async (effect) => {
+    const operationId = effect.operation.operationId;
+    const operationMeta = publishOperationMetaRef.current;
+    const meta = operationMeta?.operationId === operationId
+      ? operationMeta.meta
+      : null;
+    if (!meta) return;
+    if (effect.kind === "save-reviewed-snapshot") {
+      try {
+        const response = effect.mode === "create"
+          ? await dynamicTemplateApi.create({
+              definition: effect.definition,
+              ...(meta.requestedDraft?.copySource ? { copySource: meta.requestedDraft.copySource } : {}),
+              ...(effect.versionNote ? { versionNote: effect.versionNote } : {}),
+            })
+          : await dynamicTemplateApi.updateDraft(effect.templateId, {
+              expectedRevision: effect.expectedRevision as number,
+              definition: effect.definition,
+              ...(effect.versionNote ? { versionNote: effect.versionNote } : {}),
+            });
+        const resource = unwrapResponse<DynamicTemplateResource>(response);
+        if (
+          !resource
+          || resource.templateId !== effect.templateId
+          || !resource.draft
+          || !Number.isInteger(resource.draft.revision)
+          || resource.draft.revision <= 0
+          || !isDefinitionChecksum(resource.draft.definitionChecksum)
+          || !resource.draft.definition
+          || resource.draft.definition.templateId !== effect.templateId
+          || !sameTemplateDefinition(resource.draft.definition, effect.definition)
+          || !matchesReviewedVersionNote(resource.draft.versionNote, effect.operation.versionNote)
+        ) throwMalformedPublishResponse("MALFORMED_SAVED_DRAFT");
+        const savedDraft = createPersistedDraft(
+          resource,
+          meta.requestedDraft.remote?.publishedDefinitionChecksum ?? null,
+        );
+        if (!savedDraft) throwMalformedPublishResponse("INVALID_SAVED_DRAFT_DEFINITION");
+        const current = publishWorkflowRef.current;
+        if (
+          current.status !== "saving-reviewed-snapshot"
+          || !isCurrentPublishOperation(current, effect.operation)
+        ) return;
+        meta.savedResource = resource;
+        meta.savedDraft = savedDraft;
+        useTemplateEditorSession.getState().reconcileSaveResult({
+          sessionId: effect.operation.sessionId,
+          requestedDraft: meta.requestedDraft,
+          savedDraft,
+        });
+        notifyEditableTemplateCatalogChanged(resource);
+        applyPublishTransition(beginReviewedSnapshotPublish(current, {
+          operation: effect.operation,
+          savedRevision: resource.draft.revision,
+          savedChecksum: resource.draft.definitionChecksum,
+          live: currentLivePublishContext(),
+        }));
+      } catch (error) {
+        const current = publishWorkflowRef.current;
+        if (
+          current.status !== "saving-reviewed-snapshot"
+          || !isCurrentPublishOperation(current, effect.operation)
+        ) return;
+        applyPublishTransition(saveReviewedSnapshotFailed(current, {
+          operation: effect.operation,
+          failure: classifyPublishFailure(error),
+          live: currentLivePublishContext(),
+        }));
+      }
+      return;
+    }
+
+    if (effect.kind === "verify-saved-draft") {
+      const current = publishWorkflowRef.current;
+      if (
+        current.status !== "verifying-uncertain"
+        || current.scope !== "save"
+        || !isCurrentPublishOperation(current, effect.operation)
+      ) return;
+      try {
+        const response = await dynamicTemplateApi.getDraft(effect.templateId);
+        const resource = unwrapResponse<DynamicTemplateResource | null>(response);
+        const latest = publishWorkflowRef.current;
+        if (
+          latest.status !== "verifying-uncertain"
+          || latest.scope !== "save"
+          || !isCurrentPublishOperation(latest, effect.operation)
+        ) return;
+        if (!resource) {
+          applyPublishTransition(saveVerificationNotFound(latest, {
+            operation: effect.operation,
+            live: currentLivePublishContext(),
+          }));
+          return;
+        }
+        if (
+          resource.templateId !== effect.templateId
+          || !resource.draft
+          || !Number.isInteger(resource.draft.revision)
+          || resource.draft.revision <= 0
+          || !isDefinitionChecksum(resource.draft.definitionChecksum)
+          || !resource.draft.definition
+        ) throwMalformedPublishResponse("MALFORMED_SAVE_VERIFICATION");
+        if (
+          effect.baselineRevision !== null
+          && resource.draft.revision === effect.baselineRevision
+          && resource.draft.definitionChecksum === effect.baselineChecksum
+        ) {
+          applyPublishTransition(saveVerificationNotFound(latest, {
+            operation: effect.operation,
+            live: currentLivePublishContext(),
+          }));
+          return;
+        }
+        if (
+          !sameTemplateDefinition(resource.draft.definition, latest.snapshot.reviewedDefinition)
+          || !matchesReviewedVersionNote(resource.draft.versionNote, effect.operation.versionNote)
+        ) {
+          applyPublishTransition(saveVerificationMismatched(latest, {
+            operation: effect.operation,
+            observedRevision: resource.draft.revision,
+            observedChecksum: resource.draft.definitionChecksum,
+            live: currentLivePublishContext(),
+          }));
+          return;
+        }
+        const savedDraft = createPersistedDraft(
+          resource,
+          meta.requestedDraft.remote?.publishedDefinitionChecksum ?? null,
+        );
+        if (!savedDraft) throwMalformedPublishResponse("INVALID_VERIFIED_DRAFT");
+        meta.savedResource = resource;
+        meta.savedDraft = savedDraft;
+        useTemplateEditorSession.getState().reconcileSaveResult({
+          sessionId: effect.operation.sessionId,
+          requestedDraft: meta.requestedDraft,
+          savedDraft,
+        });
+        notifyEditableTemplateCatalogChanged(resource);
+        applyPublishTransition(saveVerificationMatched(latest, {
+          operation: effect.operation,
+          savedRevision: resource.draft.revision,
+          savedChecksum: resource.draft.definitionChecksum,
+          live: currentLivePublishContext(),
+        }));
+      } catch (error) {
+        const latest = publishWorkflowRef.current;
+        if (
+          latest.status !== "verifying-uncertain"
+          || latest.scope !== "save"
+          || !isCurrentPublishOperation(latest, effect.operation)
+        ) return;
+        if (getEditorHttpStatus(error) === 404) {
+          applyPublishTransition(saveVerificationNotFound(latest, {
+            operation: effect.operation,
+            live: currentLivePublishContext(),
+          }));
+        } else {
+          applyPublishTransition(verificationFailed(latest, {
+            operation: effect.operation,
+            failure: classifyPublishFailure(error),
+            live: currentLivePublishContext(),
+          }));
+        }
+      }
+      return;
+    }
+
+    if (effect.kind === "publish-reviewed-snapshot") {
+      const current = publishWorkflowRef.current;
+      if (
+        current.status !== "publishing"
+        || !meta.savedResource
+        || !isCurrentPublishOperation(current, effect.operation)
+      ) return;
+      try {
+        const response = await dynamicTemplateApi.publish(effect.templateId, effect.payload);
+        const result = unwrapResponse<DynamicTemplatePublishResultResource>(response);
+        if (
+          !result
+          || !result.published
+          || result.templateId !== effect.templateId
+          || result.version !== effect.operation.targetVersion
+          || (result.outcome !== "published" && result.outcome !== "already-published")
+          || result.published.dynamicTemplateId !== meta.savedResource.id
+          || result.published.version !== effect.operation.targetVersion
+          || result.published.definitionChecksum !== effect.payload.expectedChecksum
+          || !result.published.definition
+          || result.published.definition.templateId !== effect.templateId
+          || !sameTemplateDefinition(result.published.definition, current.snapshot.reviewedDefinition)
+          || !matchesReviewedVersionNote(result.published.versionNote, effect.operation.versionNote)
+        ) throwMalformedPublishResponse("MALFORMED_PUBLISH_RESULT");
+        const returnedDraftResource: DynamicTemplateResource | null = result.draft
+          ? {
+              ...meta.savedResource,
+              publishedVersion: result.version,
+              visibility: "STAFF",
+              draft: result.draft,
+            }
+          : null;
+        if (
+          returnedDraftResource
+          && !matchesPublishedDraftResource(
+            returnedDraftResource,
+            effect.operation,
+            meta.savedResource,
+            current.snapshot.reviewedDefinition,
+            result.published.definitionChecksum,
+          )
+        ) throwMalformedPublishResponse("MALFORMED_PUBLISHED_DRAFT");
+        const latest = publishWorkflowRef.current;
+        if (
+          latest.status !== "publishing"
+          || !isCurrentPublishOperation(latest, effect.operation)
+        ) return;
+        const liveAtResponse = currentLivePublishContext();
+        applyPublishTransition(publishReviewedSnapshotSucceeded(latest, {
+          operation: effect.operation,
+          templateId: result.templateId,
+          version: result.version,
+          checksum: asDefinitionChecksum(result.published.definitionChecksum),
+          outcome: result.outcome,
+          live: liveAtResponse,
+        }));
+        if (returnedDraftResource) {
+          if (reconcilePublishedDraft(effect.operation, returnedDraftResource, result.published.definitionChecksum)) {
+            setPublishedDraftAvailability({ status: "available", templateId: effect.templateId });
+          } else {
+            setPublishedDraftAvailability({
+              status: "unavailable",
+              templateId: effect.templateId,
+              failure: { category: "malformed-response", code: "PUBLISHED_DRAFT_IDENTITY_MISMATCH" },
+            });
+          }
+        } else {
+          void recoverPublishedDraft(effect.operation, effect.templateId, result.published.definitionChecksum);
+        }
+      } catch (error) {
+        const latest = publishWorkflowRef.current;
+        if (
+          latest.status !== "publishing"
+          || !isCurrentPublishOperation(latest, effect.operation)
+        ) return;
+        applyPublishTransition(publishReviewedSnapshotFailed(latest, {
+          operation: effect.operation,
+          failure: classifyPublishFailure(error),
+          live: currentLivePublishContext(),
+        }));
+      }
+      return;
+    }
+
+    if (effect.kind === "verify-published-version") {
+      const current = publishWorkflowRef.current;
+      if (
+        current.status !== "verifying-uncertain"
+        || current.scope !== "publish"
+        || !meta.savedResource
+        || !isCurrentPublishOperation(current, effect.operation)
+      ) return;
+      try {
+        const response = await dynamicTemplateApi.getPublishedVersion(effect.templateId, effect.targetVersion);
+        const version = unwrapResponse<PublishedDynamicTemplateVersionResource | null>(response);
+        const latest = publishWorkflowRef.current;
+        if (
+          latest.status !== "verifying-uncertain"
+          || latest.scope !== "publish"
+          || !isCurrentPublishOperation(latest, effect.operation)
+        ) return;
+        if (!version) {
+          applyPublishTransition(publishedVersionVerificationNotFound(latest, {
+            operation: effect.operation,
+            live: currentLivePublishContext(),
+          }));
+          return;
+        }
+        if (
+          !Number.isInteger(version.version)
+          || !Number.isInteger(version.dynamicTemplateId)
+          || !version.definition
+          || !isDefinitionChecksum(version.definitionChecksum)
+        ) throwMalformedPublishResponse("MALFORMED_PUBLISHED_VERSION");
+        if (
+          version.templateId !== effect.templateId
+          || version.version !== effect.targetVersion
+          || version.dynamicTemplateId !== meta.savedResource.id
+          || version.definition.templateId !== effect.templateId
+          || version.definitionChecksum !== effect.expectedChecksum
+          || !sameTemplateDefinition(version.definition, latest.snapshot.reviewedDefinition)
+          || !matchesReviewedVersionNote(version.versionNote, effect.operation.versionNote)
+        ) {
+          applyPublishTransition(publishedVersionVerificationMismatched(latest, {
+            operation: effect.operation,
+            observedChecksum: version.definitionChecksum,
+            live: currentLivePublishContext(),
+          }));
+          return;
+        }
+        applyPublishTransition(publishedVersionVerificationMatched(latest, {
+          operation: effect.operation,
+          templateId: version.templateId,
+          version: version.version,
+          checksum: asDefinitionChecksum(version.definitionChecksum),
+          outcome: "already-published",
+          live: currentLivePublishContext(),
+        }));
+        void recoverPublishedDraft(effect.operation, effect.templateId, version.definitionChecksum);
+      } catch (error) {
+        const latest = publishWorkflowRef.current;
+        if (
+          latest.status !== "verifying-uncertain"
+          || latest.scope !== "publish"
+          || !isCurrentPublishOperation(latest, effect.operation)
+        ) return;
+        if (getEditorHttpStatus(error) === 404) {
+          applyPublishTransition(publishedVersionVerificationNotFound(latest, {
+            operation: effect.operation,
+            live: currentLivePublishContext(),
+          }));
+        } else {
+          applyPublishTransition(verificationFailed(latest, {
+            operation: effect.operation,
+            failure: classifyPublishFailure(error),
+            live: currentLivePublishContext(),
+          }));
+        }
+      }
+      return;
+    }
+
+    const current = publishWorkflowRef.current;
+    if (effect.kind !== "refresh-template-catalog") return;
+    if (!isCurrentPublishOperation(current, effect.operation)) return;
+    const catalogState = current.status === "published"
+      ? current
+      : current.status === "partial-failure"
+        && current.reason === "template-published-catalog-stale"
+        && current.saved
+        && current.published
+        ? {
+            ...current,
+            status: "published" as const,
+            saved: current.saved,
+            published: current.published,
+            catalogStatus: "refreshing" as const,
+          }
+        : null;
+    if (!catalogState) return;
+    if (catalogState !== current) {
+      publishWorkflowRef.current = catalogState;
+      setPublishWorkflow(catalogState);
+    }
+    try {
+      const response = await dynamicTemplateApi.listCatalog({ dedupe: false });
+      const catalog = unwrapResponse<TemplateCatalogResource>(response);
+      if (!catalog || !Array.isArray(catalog.items)) throwMalformedPublishResponse("MALFORMED_TEMPLATE_CATALOG");
+      const latest = publishWorkflowRef.current;
+      if (
+        latest.status !== "published"
+        || !isCurrentPublishOperation(latest, effect.operation)
+      ) return;
+      const exact = catalog.items.some((item) => item.kind === "published"
+        && item.template.templateId === effect.templateId
+        && item.template.version === effect.version
+        && item.template.definitionChecksum === effect.checksum
+        && sameTemplateDefinition(item.template.definition, latest.snapshot.reviewedDefinition)
+        && matchesReviewedVersionNote(item.template.versionNote, effect.operation.versionNote));
+      if (!exact) {
+        applyPublishTransition(catalogRefreshFailed(latest, {
+          operation: effect.operation,
+          failure: { category: "rejected", code: "CATALOG_VERSION_MISSING" },
+          live: { ...currentLivePublishContext(), targetVersion: effect.operation.targetVersion },
+        }));
+        return;
+      }
+      notifyDynamicTemplateCatalogChanged({
+        kind: "verified-catalog",
+        identity: {
+          templateId: effect.templateId,
+          version: effect.version,
+          definitionChecksum: effect.checksum,
+        },
+        catalog,
+      });
+      applyPublishTransition(catalogRefreshSucceeded(latest, {
+        operation: effect.operation,
+        live: { ...currentLivePublishContext(), targetVersion: effect.operation.targetVersion },
+      }));
+    } catch (error) {
+      const latest = publishWorkflowRef.current;
+      if (
+        latest.status !== "published"
+        || !isCurrentPublishOperation(latest, effect.operation)
+      ) return;
+      applyPublishTransition(catalogRefreshFailed(latest, {
+        operation: effect.operation,
+        failure: classifyPublishFailure(error),
+        live: { ...currentLivePublishContext(), targetVersion: effect.operation.targetVersion },
+      }));
+    }
+  };
+
   const publish = useCallback(async (): Promise<boolean> => {
     if (localOnly) {
       message.info("Mock 模式只保存本机测试草稿，不支持服务端发布");
       return false;
     }
-    if (!canManageTemplates || publishInFlightRef.current) return false;
-    publishInFlightRef.current = true;
-    setPublishing(true);
-    const release = () => {
-      publishInFlightRef.current = false;
-      setPublishing(false);
+    if (!canManageTemplates) return false;
+    const current = useTemplateEditorSession.getState();
+    if (!current.draft || !current.sessionId) return false;
+    if (current.draft.copySource) { message.info("请先保存模板副本，再打开发布检查。"); return false; }
+    const existing = publishWorkflowRef.current;
+    if (
+      existing.status !== "editing"
+      && existing.snapshot.sessionId === current.sessionId
+      && existing.snapshot.templateId === current.draft.definition.templateId
+    ) {
+      openPublishReview();
+      return false;
+    }
+    const readiness = deriveTemplateProductionReadiness({
+      definition: current.draft.definition,
+      reviewFacts: current.productionReviewFacts,
+      hasBaseline: Boolean(current.baseline),
+      dirty: current.dirty,
+      saveStatus: current.saveStatus,
+    });
+    const validation = readiness.validation;
+    const reviewIssues = [
+      ...validation.issues.filter((issue) => issue.level === "error"),
+      ...validation.issues.filter((issue) => issue.level !== "error"),
+    ];
+    const baselineIsStrict = current.draft.sourceType === "persisted"
+      && current.draft.remote
+      && Number.isInteger(current.draft.remote.revision)
+      && current.draft.remote.revision > 0
+      && isDefinitionChecksum(current.draft.remote.draftDefinitionChecksum);
+    const machineIssues = reviewIssues.map((issue) => ({
+      code: `${issue.code}:${issue.path}`,
+      blocking: issue.level === "error",
+    }));
+    if (!readiness.machineReady) {
+      machineIssues.push({
+        code: "production-machine-readiness",
+        blocking: true,
+      });
+    }
+    if (current.draft.compatibilityRecovery) {
+      machineIssues.push({ code: "compatibility-recovery", blocking: true });
+    }
+    if (current.draft.sourceType === "persisted" && !baselineIsStrict) {
+      machineIssues.push({ code: "invalid-saved-identity", blocking: true });
+    }
+    publishReviewReturnRef.current = {
+      sessionId: current.sessionId,
+      selectionSnapshot: structuredClone(current.selectionSnapshot),
+      device: current.device,
+      canvasZoom: current.canvasZoom,
+      previewMode: current.previewMode,
+      previewScenario: current.previewScenario,
+      workspaceScroll: structuredClone(current.workspaceScroll),
     };
-    let state = useTemplateEditorSession.getState();
-    if (!state.draft || !state.sessionId) {
-      release();
-      return false;
-    }
-    if (state.draft.compatibilityRecovery) {
-      message.warning("请先明确保存修复草稿或另存为新模板，再发布模板新版本");
-      release();
-      return false;
-    }
-    const intentSessionId = state.sessionId;
-    const intentTemplateId = state.draft.definition.templateId;
-    if (!checkPublishDraft(state)) {
-      release();
-      return false;
-    }
-    if (state.dirty || state.draft.sourceType === "local" || state.draft.requiresContractNormalization) {
-      const saved = await persist();
-      if (!saved) {
-        release();
-        return false;
-      }
-      state = useTemplateEditorSession.getState();
-      if (state.sessionId !== intentSessionId || state.draft?.definition.templateId !== intentTemplateId) {
-        release();
-        return false;
-      }
-      if (state.dirty) {
-        release();
-        message.warning("保存期间产生了新的修改；当前修改已保留，请再次点击发布");
-        return false;
-      }
-    }
-    const publishDraft = state.draft;
-    if (!publishDraft || publishDraft.sourceType !== "persisted" || !publishDraft.remote) {
-      release();
-      message.error("模板草稿尚未建立服务端版本，无法发布");
-      return false;
-    }
-    if (!checkPublishDraft(state)) {
-      release();
-      return false;
-    }
-    try {
-      const response = await dynamicTemplateApi.publish(publishDraft.definition.templateId, {
-        expectedRevision: publishDraft.remote.revision,
-        ...(publishDraft.versionNote ? { versionNote: publishDraft.versionNote } : {}),
+    current.setPreviewMode(false);
+    current.setInspectorTask("design");
+    current.setInspectorView("context");
+    setPublishIssueEditing(false);
+    setPublishedDraftAvailability(null);
+    setReview({
+      sessionId: current.sessionId,
+      templateId: current.draft.definition.templateId,
+      issues: reviewIssues,
+      currentIndex: Math.max(0, reviewIssues.findIndex((issue) => issue.level === "error")),
+      requestId: ++reviewRequestRef.current,
+      selectionSnapshot: structuredClone(current.selectionSnapshot),
+    });
+    applyPublishTransition(createPublishReview({
+      sessionId: current.sessionId,
+      templateId: current.draft.definition.templateId,
+      semanticGeneration: current.semanticGeneration,
+      targetVersion: (current.draft.remote?.publishedVersion ?? 0) + 1,
+      reviewedDefinition: current.draft.definition,
+      reviewedVersionNote: current.draft.versionNote,
+      baseline: baselineIsStrict && current.draft.remote
+        ? {
+            revision: current.draft.remote.revision,
+            checksum: asDefinitionChecksum(current.draft.remote.draftDefinitionChecksum),
+          }
+        : null,
+      issues: machineIssues,
+    }));
+    return true;
+  }, [applyPublishTransition, canManageTemplates, localOnly, message, openPublishReview]);
+
+  const confirmPublish = useCallback(() => {
+    const current = publishWorkflowRef.current;
+    const session = useTemplateEditorSession.getState();
+    if (current.status !== "review-ready" || !session.draft || !session.sessionId) return;
+    const operationId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `publish-${Date.now()}`;
+    publishOperationMetaRef.current = {
+      operationId,
+      meta: { requestedDraft: structuredClone(session.draft) },
+    };
+    applyPublishTransition(beginReviewedSnapshotSave(current, operationId));
+  }, [applyPublishTransition]);
+
+  const cancelPublishReview = useCallback(() => {
+    const context = publishReviewReturnRef.current;
+    const session = useTemplateEditorSession.getState();
+    if (context && session.sessionId === context.sessionId) {
+      useTemplateEditorSession.setState({
+        selectionSnapshot: context.selectionSnapshot,
+        ...projectTemplateEditorSelectionSnapshot(context.selectionSnapshot),
+        device: context.device,
+        canvasZoom: context.canvasZoom,
+        previewScenario: context.previewScenario,
+        previewMode: context.previewMode,
+        workspaceScroll: context.workspaceScroll,
       });
-      const published = unwrapResponse<DynamicTemplatePublishResultResource>(response);
-      if (
-        !published
-        || published.templateId !== publishDraft.definition.templateId
-        || published.version !== publishDraft.remote.publishedVersion + 1
-        || !Number.isInteger(published.draft?.revision)
-      ) throw new Error("服务端返回的模板发布结果与当前草稿不一致");
-      const savedPublishedDraft = structuredClone(publishDraft);
-      savedPublishedDraft.versionNote = "";
-      savedPublishedDraft.remote = {
-        ...publishDraft.remote,
-        revision: published.draft.revision,
-        publishedVersion: published.version,
-        baseVersion: published.version,
-        draftDefinitionChecksum: published.draft.definitionChecksum,
-        publishedDefinitionChecksum: published.published.definitionChecksum,
-      };
-      const reconciliation = useTemplateEditorSession.getState().reconcileSaveResult({
-        sessionId: intentSessionId,
-        requestedDraft: publishDraft,
-        savedDraft: savedPublishedDraft,
-      });
-      if (reconciliation === "saved") useTemplateEditorSession.getState().setSaveStatus("publish-success");
-      setReview((current) => current?.sessionId === intentSessionId
-        && current.templateId === publishDraft.definition.templateId ? null : current);
-      notifyDynamicTemplateCatalogChanged();
-      message.success(reconciliation === "newer-changes"
-        ? `模板 v${published.version} 已发布；现有页面仍保持原版本，你还有新的未保存修改`
-        : `模板 v${published.version} 已发布；现有页面仍保持原版本`);
-      return true;
-    } catch (error) {
-      const current = useTemplateEditorSession.getState();
-      const conflicted = getEditorHttpStatus(error) === 409;
-      if (current.sessionId === intentSessionId && current.draft?.definition.templateId === publishDraft.definition.templateId) {
-        current.setSaveStatus(conflicted ? "conflict" : "publish-error");
-      }
-      if (conflicted) {
-        message.warning("发布前发现这个模板已有其他人的新修改；当前草稿仍完整保留，请另存为新模板。");
-      } else {
-        message.error(getEditorErrorMessage(error, "模板发布失败，当前模板草稿和页面会话仍保留"));
-      }
-      return false;
-    } finally {
-      release();
     }
-  }, [canManageTemplates, checkPublishDraft, localOnly, message, persist]);
+    publishReviewReturnRef.current = null;
+    publishOperationMetaRef.current = null;
+    setPublishIssueEditing(false);
+    setReview(null);
+    setPublishedDraftAvailability(null);
+    applyPublishTransition(resetDefinitionPublishWorkflow(currentLivePublishContext()));
+  }, [applyPublishTransition]);
+
+  const recheckPublishReview = useCallback(() => {
+    publishOperationMetaRef.current = null;
+    setPublishIssueEditing(false);
+    setReview(null);
+    setPublishedDraftAvailability(null);
+    applyPublishTransition(resetDefinitionPublishWorkflow(currentLivePublishContext()));
+    window.queueMicrotask(() => { void publish(); });
+  }, [applyPublishTransition, publish]);
+
+  const retryPublishVerification = useCallback(() => {
+    applyPublishTransition(retryVerification(publishWorkflowRef.current));
+  }, [applyPublishTransition]);
+  const retryFailedPublish = useCallback(() => {
+    const current = publishWorkflowRef.current;
+    if (
+      current.status !== "partial-failure"
+      || current.reason !== "draft-saved-template-unpublished"
+      || !current.saved
+      || current.currentInputChanged
+    ) return;
+    const saving: SavingReviewedSnapshotState<TemplateDefinitionV2> = {
+      status: "saving-reviewed-snapshot",
+      snapshot: current.snapshot,
+      issues: current.issues,
+      operation: current.operation,
+      currentInputChanged: false,
+      ...(current.staleReason ? { staleReason: current.staleReason } : {}),
+    };
+    applyPublishTransition(beginReviewedSnapshotPublish(saving, {
+      operation: current.operation,
+      savedRevision: current.saved.revision,
+      savedChecksum: current.saved.checksum,
+      live: currentLivePublishContext(),
+    }));
+  }, [applyPublishTransition]);
+  const retryPublishCatalog = useCallback(() => {
+    applyPublishTransition(retryCatalogRefresh(publishWorkflowRef.current));
+  }, [applyPublishTransition]);
+  const reloadPublishedDraft = useCallback(() => {
+    const current = publishWorkflowRef.current;
+    if (current.status === "editing" || !("published" in current) || !current.published) return;
+    void recoverPublishedDraft(
+      current.operation,
+      current.published.templateId,
+      current.published.checksum,
+    );
+  }, [recoverPublishedDraft]);
+  const usePublishedTemplateInPage = useCallback(() => {
+    const current = publishWorkflowRef.current;
+    if (current.status !== "published" || current.catalogStatus !== "fresh") return;
+    useVisualEditorSession.getState().activateWorkspace("page");
+    notifyDynamicTemplateCatalogChanged();
+    onReturnPage();
+  }, [onReturnPage]);
 
   const promoteFromPage = useCallback(async (
     request: PromoteDynamicTemplateInstanceRequest,
@@ -1011,6 +2020,117 @@ export function useTemplateWorkspaceController({
     }
   }, [activateTemplateSession, canManageTemplates, isViewingPublished, localOnly, message, modal, onEnterWorkspace]);
 
+  const createDraftFromPublished = useCallback(async (
+    template: DynamicTemplateResource,
+    published: PublishedDynamicTemplateResource,
+  ) => {
+    if (!requireActive()) return false;
+    if (localOnly) {
+      message.info("Mock 模式不能从服务端正式版本建立编辑草稿");
+      return false;
+    }
+    const publishedValidation = validateDynamicTemplateDefinition(published.definition);
+    if (
+      template.status !== "ACTIVE"
+      || template.draft !== null
+      || template.templateId !== published.templateId
+      || template.publishedVersion !== published.version
+      || !Number.isInteger(published.version)
+      || published.version <= 0
+      || !isDefinitionChecksum(published.definitionChecksum)
+      || !publishedValidation.valid
+      || publishedValidation.definition?.templateId !== template.templateId
+    ) {
+      message.error("目录中的正式版本身份不完整，未建立编辑草稿；请重新读取目录后重试");
+      return false;
+    }
+    if (lifecycleInFlightRef.current) {
+      message.info("正在更新模板状态，请等待完成后再重试");
+      return false;
+    }
+    const sourceSession = useTemplateEditorSession.getState();
+    if (sourceSession.dirty) {
+      message.warning("当前模板还有未保存修改，请先保存或放弃修改，再建立并打开其他模板草稿");
+      return false;
+    }
+    const requestId = ++publishedDraftCreationRequestRef.current;
+    const expectedVersion = published.version;
+    const expectedChecksum = published.definitionChecksum;
+    const sourceIdentity = {
+      sessionId: sourceSession.sessionId,
+      templateId: sourceSession.draft?.definition.templateId ?? null,
+      semanticGeneration: sourceSession.semanticGeneration,
+    };
+    const requestState = {
+      templateId: template.templateId,
+      expectedVersion,
+      expectedChecksum,
+    };
+    const isOriginalOperation = () => {
+      const latest = useTemplateEditorSession.getState();
+      return publishedDraftCreationRequestRef.current === requestId
+        && activeRef.current
+        && canManageTemplatesRef.current
+        && useVisualEditorSession.getState().workspace === "template"
+        && latest.sessionId === sourceIdentity.sessionId
+        && (latest.draft?.definition.templateId ?? null) === sourceIdentity.templateId
+        && latest.semanticGeneration === sourceIdentity.semanticGeneration
+        && !latest.dirty;
+    };
+
+    lifecycleInFlightRef.current = true;
+    setLifecycleBusy(true);
+    setPublishedDraftCreation({ ...requestState, status: "creating" });
+    try {
+      const response = await dynamicTemplateApi.createDraftFromPublished(template.templateId, {
+        expectedVersion,
+        expectedChecksum,
+      });
+      const resource = unwrapResponse<DynamicTemplateResource | null>(response);
+      const persistedDraft = resource
+        ? createTrustedDraftFromPublished(resource, published)
+        : null;
+      if (!resource || !persistedDraft) {
+        const reason = "服务端返回的编辑草稿不完整或身份不一致，当前会话未改变；请重新读取目录后重试";
+        if (publishedDraftCreationRequestRef.current === requestId) {
+          setPublishedDraftCreation({ ...requestState, status: "failed", reason });
+        }
+        message.error(reason);
+        return false;
+      }
+      if (!isOriginalOperation()) {
+        const reason = "编辑草稿已建立，但当前会话已有后续变化；未自动打开，请重新读取目录";
+        if (publishedDraftCreationRequestRef.current === requestId) {
+          setPublishedDraftCreation({ ...requestState, status: "detached", reason });
+        }
+        if (activeRef.current && useVisualEditorSession.getState().workspace === "template") {
+          message.warning(reason);
+        }
+        return false;
+      }
+      activateTemplateSession();
+      const session = useTemplateEditorSession.getState();
+      session.open(persistedDraft);
+      session.selectObject(persistedDraft.definition.rootNodeId);
+      setPublishedDraftCreation(null);
+      notifyEditableTemplateCatalogChanged(resource);
+      message.success(`已从正式版本 v${expectedVersion} 建立编辑草稿；未发布模板，也未修改任何页面`);
+      return true;
+    } catch (error) {
+      const reason = getEditorHttpStatus(error) === 409
+        ? "正式版本已变化，未建立编辑草稿；请重新读取目录后重试"
+        : getEditorErrorMessage(error, "从正式版本建立编辑草稿失败，当前会话未改变；可以重试");
+      if (publishedDraftCreationRequestRef.current === requestId) {
+        setPublishedDraftCreation({ ...requestState, status: "failed", reason });
+      }
+      message.error(reason);
+      return false;
+    } finally {
+      lifecycleInFlightRef.current = false;
+      setLifecycleBusy(false);
+    }
+  }, [activateTemplateSession, localOnly, message, requireActive]);
+
   const runLifecycle = useCallback(async (operation: () => Promise<unknown>) => {
     if (localOnly || lifecycleInFlightRef.current) return false;
     lifecycleInFlightRef.current = true;
@@ -1024,23 +2144,64 @@ export function useTemplateWorkspaceController({
     }
   }, [localOnly]);
 
-  const archive = useCallback(async (template: TemplateLifecycleTarget) => {
-    const current = useTemplateEditorSession.getState();
-    if (current.draft?.sourceType === "persisted"
-      && current.draft.definition.templateId === template.templateId
-      && current.dirty) {
-      message.warning("请先保存草稿或放弃未保存修改，再将当前模板移入回收站。");
-      return false;
-    }
+  const archive = useCallback(async (target: TemplateArchiveRequest) => {
     try {
-      const ok = await runLifecycle(() => dynamicTemplateApi.archive(template.templateId));
+      const template = resolveTemplateArchiveTarget(target);
+      if (!template) {
+        message.error("当前模板缺少可归档的有效定义，原记录未被修改");
+        return false;
+      }
+      const current = useTemplateEditorSession.getState();
+      const matchesCurrent = current.draft && (
+        "templateId" in target
+          ? current.draft.definition.templateId === target.templateId
+          : targetMatchesDraft(target, current.draft)
+      );
+      if (matchesCurrent && current.dirty) {
+        message.warning("请先保存草稿或放弃未保存修改，再将当前模板移入回收站。");
+        return false;
+      }
+      const sourceSession = matchesCurrent
+        ? {
+            sessionId: current.sessionId,
+            semanticGeneration: current.semanticGeneration,
+          }
+        : null;
+      const currentIdentity = matchesCurrent
+        && current.draft?.remote
+        && Number.isInteger(current.draft.remote.revision)
+        && current.draft.remote.revision > 0
+        && isDefinitionChecksum(current.draft.remote.draftDefinitionChecksum)
+        ? {
+            expectedRevision: current.draft.remote.revision,
+            expectedChecksum: current.draft.remote.draftDefinitionChecksum,
+          }
+        : null;
+      const archiveRequest = currentIdentity ?? template.request;
+      if (!archiveRequest) {
+        message.error("当前模板缺少可核对的草稿版本，请重新读取后再移入回收站");
+        return false;
+      }
+      const ok = await runLifecycle(() => dynamicTemplateApi.archive(template.templateId, archiveRequest));
       if (!ok) return false;
       const latest = useTemplateEditorSession.getState();
-      if (latest.draft?.sourceType === "persisted" && latest.draft.definition.templateId === template.templateId) {
+      const latestMatches = latest.draft && draftMatchesPersistedIdentity(
+        latest.draft,
+        template.templateId,
+      );
+      const sourceSessionUnchanged = sourceSession
+        && latest.sessionId === sourceSession.sessionId
+        && latest.semanticGeneration === sourceSession.semanticGeneration
+        && !latest.dirty;
+      if (latestMatches && sourceSessionUnchanged) {
         closeTemplateSession();
       }
       notifyDynamicTemplateCatalogChanged();
-      message.success(`模板“${template.name}”已移入回收站`);
+      if (latestMatches && !sourceSessionUnchanged) {
+        message.warning(`模板“${template.name}”已移入回收站；当前会话有后续修改，未自动关闭`);
+      } else {
+        message.success(`模板“${template.name}”已移入回收站`);
+      }
       return true;
     } catch (error) {
       message.error(getEditorErrorMessage(error, "移入回收站失败，当前模板仍保留"));
@@ -1063,21 +2224,37 @@ export function useTemplateWorkspaceController({
 
   const deleteDraft = useCallback(async (template: TemplateLifecycleTarget) => {
     const current = useTemplateEditorSession.getState();
-    if (current.draft?.sourceType === "persisted"
-      && current.draft.definition.templateId === template.templateId
-      && current.dirty) {
+    const matchesCurrent = current.draft?.sourceType === "persisted"
+      && current.draft.definition.templateId === template.templateId;
+    if (matchesCurrent && current.dirty) {
       message.warning("请先保存草稿或放弃未保存修改，再永久删除当前模板。");
       return false;
     }
+    const sourceSession = matchesCurrent
+      ? {
+          sessionId: current.sessionId,
+          semanticGeneration: current.semanticGeneration,
+        }
+      : null;
     try {
       const ok = await runLifecycle(() => dynamicTemplateApi.deleteDraft(template.templateId));
       if (!ok) return false;
       const latest = useTemplateEditorSession.getState();
-      if (latest.draft?.sourceType === "persisted" && latest.draft.definition.templateId === template.templateId) {
+      const latestMatches = latest.draft?.sourceType === "persisted"
+        && latest.draft.definition.templateId === template.templateId;
+      const sourceSessionUnchanged = sourceSession
+        && latest.sessionId === sourceSession.sessionId
+        && latest.semanticGeneration === sourceSession.semanticGeneration
+        && !latest.dirty;
+      if (latestMatches && sourceSessionUnchanged) {
         closeTemplateSession();
       }
       notifyDynamicTemplateCatalogChanged();
-      message.success(`模板“${template.name}”已永久删除`);
+      if (latestMatches && !sourceSessionUnchanged) {
+        message.warning(`模板“${template.name}”已永久删除；当前会话有后续修改，未自动关闭`);
+      } else {
+        message.success(`模板“${template.name}”已永久删除`);
+      }
       return true;
     } catch (error) {
       message.error(getEditorErrorMessage(error, "永久删除失败；模板和页面数据均未改变"));
@@ -1109,36 +2286,23 @@ export function useTemplateWorkspaceController({
     return detail;
   }, []);
 
-  const stageVersion = useCallback((version: DynamicTemplateVersionResource, target: "current" | "new") => {
+  const stageVersion = useCallback((version: DynamicTemplateVersionResource) => {
     const session = useTemplateEditorSession.getState();
     const currentDraft = session.draft;
     if (!currentDraft || currentDraft.sourceType !== "persisted") return false;
-    if (target === "current") {
-      const nextDraft = structuredClone(currentDraft);
-      nextDraft.definition = prepareHistoricalTemplateDefinitionForCurrentDraft(
-        version.definition,
-        currentDraft.definition,
-      );
-      nextDraft.historyRestore = {
-        sourceTemplateId: currentDraft.definition.templateId,
-        sourceVersion: version.version,
-        sourceChecksum: version.definitionChecksum,
-      };
-      session.commitDraft(nextDraft);
-      session.selectObject(nextDraft.definition.rootNodeId);
-      message.success(`已将 v${version.version} 载入当前内存草稿，尚未保存或发布`);
-      return true;
-    }
-    const nextDraft = createNewDynamicTemplateDraft(`${version.definition.name} 历史副本`);
-    nextDraft.definition = prepareDynamicTemplateDefinitionForNewIdentity(
+    const nextDraft = structuredClone(currentDraft);
+    nextDraft.definition = prepareHistoricalTemplateDefinitionForCurrentDraft(
       version.definition,
-      nextDraft.localDraftId,
+      currentDraft.definition,
     );
-    nextDraft.definition.name = `${version.definition.name} 历史副本`;
-    nextDraft.sourceReference = currentDraft.definition.templateId;
-    session.open(nextDraft, { isNew: true });
+    nextDraft.historyRestore = {
+      sourceTemplateId: currentDraft.definition.templateId,
+      sourceVersion: version.version,
+      sourceChecksum: version.definitionChecksum,
+    };
+    session.commitDraft(nextDraft);
     session.selectObject(nextDraft.definition.rootNodeId);
-    message.success(`已从 v${version.version} 创建新的内存草稿，尚未保存或发布`);
+    message.success(`已将 v${version.version} 载入当前内存草稿，尚未保存或发布`);
     return true;
   }, [message]);
 
@@ -1155,7 +2319,7 @@ export function useTemplateWorkspaceController({
 
   const resumeCompatibilityRecovery = useCallback(() => {
     if (useTemplateEditorSession.getState().resumeCompatibilityRecovery()) {
-      message.info("已返回修复方案，仍需明确保存或另存为新模板");
+      message.info("已返回修复方案，仍需明确是否覆盖当前模板草稿");
     }
   }, [message]);
 
@@ -1171,13 +2335,6 @@ export function useTemplateWorkspaceController({
     setReview(null);
     clearTemplateSessionGeometry(sessionId);
   }, [message]);
-
-  const openImportedDraft = useCallback((importedDraft: TemplateEditorDraft) => {
-    activateTemplateSession();
-    const session = useTemplateEditorSession.getState();
-    session.open(importedDraft, { isNew: true });
-    session.selectObject(importedDraft.definition.rootNodeId);
-  }, [activateTemplateSession]);
 
   const returnToPage = useCallback(() => {
     const current = useTemplateEditorSession.getState();
@@ -1200,9 +2357,14 @@ export function useTemplateWorkspaceController({
     canManageTemplates,
     localOnly,
     publishing,
+    publishWorkflow,
     publishReview,
+    publishIssueEditing,
+    publishedDraftAvailability,
+    publishedDraftCreation,
     openPublishReview,
     selectPublishIssue,
+    editPublishIssue,
     lifecycleBusy,
     draft,
     selectedObjectLabel,
@@ -1213,12 +2375,26 @@ export function useTemplateWorkspaceController({
     previewScenario,
     saveStatus,
     setPreviewMode,
+    sessionId,
+    readWorkspaceScroll,
+    updateWorkspaceScroll,
     enter,
     returnToPage,
     closeSession,
     openTarget,
+    copyTarget,
     persist,
+    persistForExit,
     publish,
+    confirmPublish,
+    cancelPublishReview,
+    recheckPublishReview,
+    retryPublishVerification,
+    retryFailedPublish,
+    retryCatalogRefresh: retryPublishCatalog,
+    reloadPublishedDraft,
+    createDraftFromPublished,
+    usePublishedTemplateInPage,
     promoteFromPage,
     archive,
     restore,
@@ -1229,6 +2405,5 @@ export function useTemplateWorkspaceController({
     cancelCompatibilityRecovery,
     resumeCompatibilityRecovery,
     discardChanges,
-    openImportedDraft,
   };
 }

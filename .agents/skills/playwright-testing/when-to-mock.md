@@ -5,45 +5,46 @@
 
 ## Quick Answer
 
-**Use layered confidence.** Mock third-party side effects and paid or unstable services. Test critical frontend-to-backend contracts with the real local/test stack. You may Mock your own API to create deterministic UI, visual, loading, empty, error, permission and boundary states, but label those tests as mocked and never count them as proof of real integration.
+**Use layered confidence.** Mock third-party boundaries by default in routine CI. Separately verify third-party capabilities included in the release against provider sandboxes or approved test environments. Test critical frontend-to-backend flows with the real local/test API and relevant persistence, read-back, roles and consumer results; static or mocked contract checks are supplementary. You may Mock your own API to create deterministic UI, visual, loading, empty, error, permission and boundary states, but label those tests as mocked and never count them as proof of real integration.
+
+Real-service tests require the environment, test identities/data and any external side effects to be covered by current authorization under `AGENTS.md`. A sandbox, nightly schedule or example below does not authorize payment, message delivery or production access. Production defaults to authorized read-only smoke; precisely authorized controlled acceptance follows `AGENTS.md` without requesting the same permission again. Disabled or out-of-scope release capabilities need an explicit applicability record, not a fabricated integration PASS.
 
 ## Decision Flowchart
 
 ```
 Is this service part of YOUR codebase (your API, your backend)?
 ├── YES → What confidence does this test need?
-│   ├── Contract / critical business integration → use the real local or test API.
+│   ├── Critical business integration → use the real local/test API and relevant persistence/read-back.
+│   ├── Static or mocked contract checks → supplementary evidence; not a substitute for real integration.
 │   ├── Deterministic UI / visual / failure state → Mock is allowed; label it and keep separate real coverage.
 │   └── Service is slow or flaky → investigate the service; do not hide the only integration path behind mocks.
 └── NO → It's a third-party service.
-    ├── Is it free, fast, and reliable? (rare)
-    │   └── Consider real in CI. Mock if rate-limited.
-    ├── Is it paid per call? (Stripe, Twilio, SendGrid)
-    │   └── ALWAYS mock.
-    ├── Is it rate-limited? (OAuth, social APIs)
-    │   └── ALWAYS mock.
-    ├── Is it slow or unreliable?
-    │   └── ALWAYS mock.
-    └── Is it a complex multi-step flow? (OAuth redirect dance)
-        └── Mock with HAR recording. Update periodically.
+    ├── Routine CI / deterministic UI / failure states
+    │   └── Default to Mock; use sanitized HAR for complex sequences.
+    ├── Capability included in the release
+    │   └── Also verify real integration in a provider sandbox or approved test environment.
+    │       Cover success, actual failure/retry and callback/delivery/persistence where applicable.
+    │       Respect authorized side effects, rate limits and cost; missing access remains unverified.
+    └── Capability disabled or outside the approved release scope
+        └── Record why it is disabled/not applicable; do not claim real integration from Mock results.
 ```
 
 ## Decision Matrix
 
 | Scenario | Mock? | Why | Strategy |
 |---|---|---|---|
-| Your own REST/GraphQL API | Depends on test layer | Real for contracts and critical flows; Mock allowed for deterministic UI/error/visual states | Keep mocked suites clearly named and retain separate real API coverage |
+| Your own REST/GraphQL API | Depends on test layer | Real API and relevant persistence for critical flows; static/mocked contracts are supplementary | Keep mocked suites clearly named and retain separate real integration coverage |
 | Your database (through your API) | Real for persistence/integration | Data round-trips require the real stack; UI-only suites may replace the API boundary | Seed isolated test data for integration; never claim a UI mock validates persistence |
 | Authentication (your auth system) | Mostly no | Auth bugs are critical; test the real flow | Use `storageState` to skip login in most tests, but keep a few real login tests |
-| Stripe / payment gateway | Always | Costs money, rate-limited, flaky in CI | `route.fulfill()` with expected responses |
-| SendGrid / email service | Always | Side effects (real emails), no UI to assert | Mock the API call, verify request payload |
-| OAuth providers (Google, GitHub) | Always | Redirect-heavy, rate-limited, CAPTCHAs | Mock token exchange, test your callback handler |
-| Analytics (Segment, Mixpanel) | Always | Fire-and-forget, no UI impact, slows tests | `route.abort()` or `route.fulfill()` |
-| Maps / geocoding APIs | Always | Rate-limited, paid, slow | Mock with static responses |
+| Stripe / payment gateway | Routine CI: default Mock | Bound cost and side effects in CI | `route.fulfill()` for UI; approved provider test mode for released payment flows and applicable callbacks/refunds/reconciliation |
+| SendGrid / email service | Routine CI: default Mock | Avoid unintended delivery | Verify mocked payloads; separately verify approved test recipients or provider sandbox delivery, failure and retry evidence |
+| OAuth providers (Google, GitHub) | Routine CI: default Mock | Redirect-heavy, rate-limited, CAPTCHAs | Mock token exchange for UI; verify released login/callback flows with approved provider test accounts |
+| Analytics (Segment, Mixpanel) | Routine CI: default Mock | Avoid polluting analytics | `route.abort()` or `route.fulfill()`; verify released integration against an approved test property |
+| Maps / geocoding APIs | Routine CI: default Mock | Bound rate limits and cost | Static responses for UI; approved real integration checks when included in the release |
 | Feature flags (LaunchDarkly, etc.) | Usually | Control test conditions deterministically | Mock to force specific flag states |
 | CDN / static assets | Never | Already fast, part of your infra | Let them load normally |
-| Flaky external dependency | CI: mock, local: real | Keeps CI green, catches real issues locally | Conditional mocking based on environment |
-| Slow external dependency | Dev: mock, nightly: real | Fast feedback in dev, full integration in nightly | Separate test projects in config |
+| Flaky external dependency | Routine CI: Mock; approved integration: real | Separate deterministic feedback from release evidence | Explicit test tier and approved environment; do not hide a release integration failure |
+| Slow external dependency | Dev/CI: Mock; approved integration: real | Fast feedback plus bounded integration checks | Separate projects; a nightly schedule alone does not authorize external actions |
 
 ## Mocking Strategies
 
@@ -541,7 +542,7 @@ module.exports = function globalTeardown() {
 
 ## Hybrid Approach
 
-The strongest test suites combine real and mocked services. The principle: **run critical contracts you own, Mock external side effects, and use labeled mocks for deterministic UI states.**
+The strongest test suites combine real and mocked services. The principle: **verify critical flows through your real API and persistence, default to mocked external boundaries in routine CI, and separately verify released third-party capabilities in approved environments.** Static/mocked contracts and deterministic UI states remain supplementary evidence.
 
 ### Fixture-Based Mock Control
 
@@ -688,7 +689,7 @@ test.describe('nightly integration', () => {
 
 ### Environment-Based Mocking
 
-Split test projects by environment to run mocked tests in every CI push and full-integration tests nightly.
+Split test projects by environment to run mocked tests in every CI push and real-integration tests on an approved schedule. The nightly examples below require approved test endpoints, identities, data and side effects; their frequency does not authorize those actions.
 
 **TypeScript**
 ```typescript
@@ -809,9 +810,9 @@ test.describe('mock contract validation', () => {
 
 | Don't Do This | Problem | Do This Instead |
 |---|---|---|
-| Mock your own API and report the test as E2E integration | The frontend and backend may be incompatible even though the UI test passes. | Label it as mocked UI/visual/failure-state coverage and keep a separate real contract or integration test. |
+| Mock your own API and report the test as E2E integration | The frontend and backend may be incompatible even though the UI test passes. | Label it as mocked UI/visual/failure-state coverage and separately verify the real API and relevant persistence/read-back. |
 | Mock everything for speed | Tests pass, app breaks. You have zero integration coverage. | Mock only external boundaries. Optimize your own services for test speed. |
-| Never mock anything | Tests are slow, flaky, and fail when Stripe has an outage. You test third-party uptime, not your code. | Mock third-party services. Your CI should not depend on someone else's infrastructure. |
+| Never mock anything | Routine tests become slow and fail on unrelated provider outages. | Default to mocked third-party boundaries in routine CI; retain separate approved real integration checks for released capabilities. |
 | Use outdated mocks that do not match the real API | Mock returns `{ status: "ok" }` but real API returns `{ status: "success", data: {...} }`. Tests pass, production breaks. | Run contract validation tests periodically. Re-record HAR files monthly. |
 | Mock at the wrong layer (intercepting your own frontend HTTP client) | Bypasses request/response serialization, headers, error handling. | Mock at the network level with `page.route()`. This tests your full HTTP client code. |
 | Copy-paste mock responses across dozens of test files | One API change requires updating 40 files. Mocks diverge. | Centralize mocks in fixtures or helper files. Single source of truth. |

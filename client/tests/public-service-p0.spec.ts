@@ -114,10 +114,11 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
       expect(errorBox!.y).toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height);
       expect(errorBox!.y + errorBox!.height).toBeLessThanOrEqual(viewport.height);
 
-      for (const id of ["cf-phone", "cf-type", "cf-time", "cf-message", "cf-privacy-consent"]) {
+      for (const id of ["cf-phone", "cf-type", "cf-message", "cf-privacy-consent"]) {
         await expect(page.locator(`#${id}`)).toHaveAttribute("aria-invalid", "true");
         await expect(page.locator(`#${id}`)).toHaveAttribute("aria-describedby", /-error$/);
       }
+      await expect(page.locator("#cf-time")).not.toHaveAttribute("aria-invalid", "true");
       await expectNoHorizontalOverflow(page);
       expect(inquiryRequests).toBe(0);
     });

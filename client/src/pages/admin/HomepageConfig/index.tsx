@@ -44,7 +44,6 @@ import {
   usePublicSiteSettingsResource,
 } from "@/hooks/usePublicSiteSettings";
 import SchemaInspectorPanel from "@/page-builder/inspector/SchemaInspectorPanel";
-import DoublePosterInspector from "@/page-builder/inspector/panels/DoublePosterInspector";
 import InspectorFooterBar from "@/page-builder/inspector/InspectorFooterBar";
 import type {
   PagePublishIssueTarget,
@@ -69,10 +68,7 @@ import {
   sanitizeContentTemplateLayoutData,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisualRecord } from "@/page-builder/runtime/visualLayout";
-import {
-  isPrimaryStageInsertionBlocked,
-  isVisiblePrimaryStageBlockInDocument,
-} from "@/page-builder/utils/primaryStagePolicy";
+import { isVisiblePrimaryStageBlockInDocument } from "@/page-builder/utils/primaryStagePolicy";
 import {
   MissingMediaState,
   normalizeLegacyRenderColors,
@@ -87,6 +83,7 @@ import {
   useVisualEditorSession,
 } from "@/page-builder/visual-editor/visualEditorSession";
 import { UnifiedTemplateLibrary } from "@/page-builder/template-editor/TemplateEditorLibrary";
+import { getSystemTemplatePublicationBlockReason } from "@/page-builder/template-editor/templatePublicationStatus";
 import WorkspaceCanvasControls from "@/page-builder/template-editor/WorkspaceCanvasControls";
 import { useTemplateWorkspaceController } from "@/page-builder/template-editor/TemplateWorkspaceController";
 import { USE_MOCK } from "@/services/mockData";
@@ -100,7 +97,6 @@ import {
   DynamicTemplateInstanceView,
   createDynamicTemplateInstanceProps,
   dynamicTemplateVersionKey,
-  getResolvedDynamicTemplateDefinitions,
   planDynamicTemplateDocumentUpgrade,
   readResolvedDynamicTemplateDefinitions,
   registerResolvedDynamicTemplate,
@@ -636,6 +632,7 @@ function CanvasPageDataSynchronizer({
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const currentData = useHomepagePuck((state) => state.appState.data);
   const appliedSignatureRef = useRef<string | null>(null);
+  const appliedPageKeyRef = useRef(pageKey);
   const mountedWithInitialDataRef = useRef(false);
   const consumedCanvasDataSyncVersionRef = useRef(canvasDataSyncVersion);
   const consumedHistoryCommandIdRef = useRef<string | null>(null);
@@ -647,6 +644,8 @@ function CanvasPageDataSynchronizer({
 
   useEffect(() => {
     const signature = `${pageKey}:${dataSignature}`;
+    const isSamePage = appliedPageKeyRef.current === pageKey;
+    appliedPageKeyRef.current = pageKey;
     // Puck 0.22.4 在 Provider 挂载时已经读取 data 并完成 walkAppState 归一化。
     // 归一化后的 store 与原始 data JSON 不同并不代表页面发生了外部切换；
     // 首帧再次 setData 只会重复整树遍历。后续切页、恢复版本等 data 变化
@@ -691,9 +690,33 @@ function CanvasPageDataSynchronizer({
     appliedSignatureRef.current = signature;
     // Puck 已以同一份数据挂载时不重复执行昂贵的整页替换；页面切换时
     // currentDataSignature 与目标签名不同，仍会走 setData 完成必要同步。
-    if (currentDataSignature === dataSignature) return;
+    if (currentDataSignature === dataSignature) {
+      if (!isSamePage) {
+        dispatch({ type: "setUi", ui: { itemSelector: null }, recordHistory: false });
+      }
+      return;
+    }
+    const puck = getPuck();
+    const currentSelector = puck.appState.ui.itemSelector;
+    const selectedBlock = currentSelector
+      ? puck.appState.data.content[currentSelector.index]
+      : undefined;
+    const selectedBlockId = typeof selectedBlock?.props?.id === "string"
+      ? selectedBlock.props.id
+      : null;
+    const stableIndex = isSamePage && selectedBlockId
+      ? (data.content ?? []).findIndex((block) => block.props?.id === selectedBlockId)
+      : -1;
     dispatch({ type: "setData", data: data as Partial<Data>, recordHistory: false });
-    dispatch({ type: "setUi", ui: { itemSelector: null } });
+    dispatch({
+      type: "setUi",
+      ui: {
+        itemSelector: stableIndex >= 0
+          ? { index: stableIndex, zone: currentSelector?.zone ?? ROOT_ZONE }
+          : null,
+      },
+      recordHistory: false,
+    });
   }, [canvasDataSyncVersion, currentDataSignature, data, dataSignature, dispatch, getPuck, historyCommand, onHistoryCommandCommitted, pageKey]);
 
   return null;
@@ -745,9 +768,6 @@ function getPageTemplateUpgradeRuleBlockers(
       isVisiblePrimaryStageBlockInDocument(block, documentForPolicies) ? index : -1
     ))
     .filter((index) => index >= 0);
-  if (primaryStageIndexes.length > 1) {
-    blockers.push("升级后会产生多个主舞台实例。");
-  }
   if (primaryStageIndexes.length > 0 && primaryStageIndexes[0] !== 0) {
     blockers.push("主舞台实例必须是首个可见品牌内容区。");
   }
@@ -779,17 +799,13 @@ function getPageTemplateUpgradeRuleBlockers(
 }
 
 function PageTemplateLibraryAdapter({
+  active,
   pageKey,
-  onInsertTemplate,
   onTemplateDragStart,
   onTemplateDragEnd,
 }: {
+  active: boolean;
   pageKey: EditorPageKey;
-  onInsertTemplate: (
-    name: string,
-    current?: SystemContentTemplateCurrent,
-    insertionIndex?: number,
-  ) => void;
   onTemplateDragStart: (label: string, insertAt: (insertionIndex: number) => void) => void;
   onTemplateDragEnd: () => void;
 }) {
@@ -807,32 +823,6 @@ function PageTemplateLibraryAdapter({
   const previewViewport = typeof currentViewport.width === "number" && currentViewport.width <= 480
     ? "mobile"
     : "desktop";
-  const pageHasPrimaryStage = isPrimaryStageInsertionBlocked(
-    appData,
-    resolvedDynamicTemplateDefinitions,
-  );
-
-  const isSystemTemplateAllowedOnPage = useCallback((moduleType: string) => (
-    isContentTemplateInsertable(moduleType)
-    && isContentTemplateAllowedForPage(pageKey, moduleType)
-  ), [pageKey]);
-
-  const getSystemUpgradeCount = useCallback((current: SystemContentTemplateCurrent) => (
-    getPageTemplateUpgradeRuleBlockers(
-      pageKey,
-      appData as unknown as Record<string, unknown>,
-      resolvedDynamicTemplateDefinitions,
-    ).length === 0
-    &&
-    isSystemTemplateAllowedOnPage(current.moduleType)
-    && sanitizeContentTemplateLayoutData(current.moduleType, current.layoutData)
-      ? countUpgradeableSystemTemplateInstances(
-          appData as unknown as Record<string, unknown>,
-          current,
-        )
-      : 0
-  ), [appData, isSystemTemplateAllowedOnPage, pageKey, resolvedDynamicTemplateDefinitions]);
-
   const getPublishedUpgradePlan = useCallback((template: PublishedDynamicTemplateResource) => {
     const currentRuleBlockers = getPageTemplateUpgradeRuleBlockers(
       pageKey,
@@ -880,30 +870,6 @@ function PageTemplateLibraryAdapter({
     }
     return plan;
   }, [appData, pageKey, resolvedDynamicTemplateDefinitions]);
-
-  const upgradeSystemTemplateInPage = useCallback((current: SystemContentTemplateCurrent) => {
-    const upgradeableCount = getSystemUpgradeCount(current);
-    if (upgradeableCount === 0) return;
-    modal.confirm({
-      title: `升级“${current.displayName}”页面实例？`,
-      content: `将 ${upgradeableCount} 个页面实例的布局升级到系统版本 ${current.activeVersion}。图片、文字、商品和链接保持不变；只修改当前页面草稿，不会自动发布。`,
-      okText: "升级当前页面草稿",
-      cancelText: "取消",
-      onOk: () => {
-        const result = upgradeSystemTemplateInstances(
-          appData as unknown as Record<string, unknown>,
-          current,
-        );
-        if (result.upgradedCount === 0) return;
-        dispatch({
-          type: "setData",
-          data: result.document as unknown as typeof appData,
-          recordHistory: true,
-        });
-        message.success(`已升级 ${result.upgradedCount} 个实例；保存页面草稿后才会持久化`);
-      },
-    });
-  }, [appData, dispatch, getSystemUpgradeCount, message, modal]);
 
   const upgradePublishedDynamicTemplateInPage = useCallback((
     template: PublishedDynamicTemplateResource,
@@ -953,7 +919,7 @@ function PageTemplateLibraryAdapter({
       }));
     }
     setDynamicUpgradeReview(null);
-    message.success(`已升级 ${plan.upgradedCount} 个动态模板实例；保存页面草稿后才会持久化`);
+    message.success(`已升级 ${plan.upgradedCount} 个模板实例；保存页面草稿后才会持久化`);
   }, [dispatch, dynamicUpgradeReview, message]);
 
   const insertPublishedDynamicTemplate = useCallback((
@@ -961,14 +927,6 @@ function PageTemplateLibraryAdapter({
     requestedInsertionIndex?: number,
   ) => {
     const currentDocument = appDataRef.current;
-    const currentResolvedDefinitions = getResolvedDynamicTemplateDefinitions();
-    if (
-      template.definition.metadata.visualRole === "primary-stage"
-      && isPrimaryStageInsertionBlocked(currentDocument, currentResolvedDefinitions)
-    ) {
-      message.warning("首屏主舞台全页只能有一个；请编辑现有首屏");
-      return;
-    }
     const resolved = {
       templateId: template.templateId,
       version: template.version,
@@ -1023,15 +981,8 @@ function PageTemplateLibraryAdapter({
     <>
     <UnifiedTemplateLibrary
       mode="page"
+      active={active}
       device={previewViewport}
-      pageHasPrimaryStage={pageHasPrimaryStage}
-      isSystemTemplateAllowed={isSystemTemplateAllowedOnPage}
-      onInsertSystem={onInsertTemplate}
-      onSystemDragStart={(moduleType, current) => onTemplateDragStart(
-        moduleType,
-        (insertionIndex) => onInsertTemplate(moduleType, current, insertionIndex),
-      )}
-      onSystemDragEnd={onTemplateDragEnd}
       isPublishedTemplateAllowed={() => true}
       onInsertPublished={insertPublishedDynamicTemplate}
       onPublishedDragStart={(template) => onTemplateDragStart(
@@ -1041,13 +992,11 @@ function PageTemplateLibraryAdapter({
       onPublishedDragEnd={onTemplateDragEnd}
       getPublishedUpgradeCount={(template) => getPublishedUpgradePlan(template).instancePlans.length}
       onUpgradePublished={upgradePublishedDynamicTemplateInPage}
-      getSystemUpgradeCount={getSystemUpgradeCount}
-      onUpgradeSystem={upgradeSystemTemplateInPage}
     />
     {dynamicUpgradeReview ? (
       <DynamicTemplateUpgradeReviewModal
         open
-        title={`升级“${dynamicUpgradeReview.template.name}”动态模板实例`}
+        title={`升级“${dynamicUpgradeReview.template.name}”模板实例`}
         plans={dynamicUpgradeReview.plan.instancePlans}
         onConfirm={confirmPublishedDynamicTemplateUpgrade}
         onCancel={() => setDynamicUpgradeReview(null)}
@@ -1144,23 +1093,7 @@ function InspectorPanel({
     );
   }
 
-  // 分派：双图文走对象化专用面板(实验,验证交互后再考虑推广);
-  // 其余 25 个组件(24 内容模板 + 网站全局设置/业务功能区)走 Schema 注册表。
-  if (selectedItem.type === "双图海报") {
-    return (
-      <DoublePosterInspector
-        hasUnsavedChanges={hasUnsavedChanges}
-        saving={saving}
-        onSaveDraft={onSaveDraft}
-        templateDesignEnabled={false}
-        publishIssues={publishIssues}
-        validationStatus={validationStatus}
-        onRetryValidation={onRetryValidation}
-        onOpenPublishReview={onOpenPublishReview}
-        onOpenPageSettings={onOpenPageSettings}
-      />
-    );
-  }
+  // 内容组件与网站全局设置/业务功能区走统一 Schema 注册表。
   if (selectedItem.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
     return (
       <DynamicTemplateInstanceInspector
@@ -1271,6 +1204,7 @@ function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
 }
 
 function EditorBody({
+  workspaceActive,
   pageKey,
   contentReady,
   pageLabel,
@@ -1297,6 +1231,7 @@ function EditorBody({
   canPromoteToTemplate,
   onPromoteToTemplate,
 }: {
+  workspaceActive: boolean;
   pageKey: EditorPageKey;
   contentReady: boolean;
   pageLabel: string;
@@ -1398,9 +1333,16 @@ function EditorBody({
     });
   }, []);
 
+  const publishReviewOpenedRef = useRef(false);
   useEffect(() => {
-    if (!publishReviewActive || !publishReviewOpen) return;
+    if (!publishReviewActive || !publishReviewOpen) {
+      publishReviewOpenedRef.current = false;
+      return;
+    }
     if (previewMode) onExitPreview();
+    // 只在检查面板本次开启时主动聚焦；父级回调更新不能抢走已定位字段的焦点。
+    if (publishReviewOpenedRef.current) return;
+    publishReviewOpenedRef.current = true;
     requestInspectorOpen();
     focusReviewPanel();
   }, [focusReviewPanel, onExitPreview, previewMode, publishReviewActive, publishReviewOpen, requestInspectorOpen]);
@@ -2019,62 +1961,6 @@ function EditorBody({
     setCanvasZoom((current) => Math.min(1, Math.max(0.16, current + delta)));
   };
 
-  const insertTemplate = useCallback(
-    (
-      templateName: string,
-      insertionIndex: number,
-      current?: SystemContentTemplateCurrent,
-    ) => {
-      const meta = BLOCK_META[templateName];
-      if (!meta) return;
-      if (!isContentTemplateAllowedForPage(pageKey, templateName)) {
-        message.warning("当前页面角色不允许添加此模板");
-        clearDragState();
-        return;
-      }
-      const currentDocument = appDataRef.current;
-      const currentResolvedDefinitions = getResolvedDynamicTemplateDefinitions();
-      if (
-        CONTENT_TEMPLATE_BY_MODULE_TYPE[templateName]?.visualRole === "primary-stage"
-        && isPrimaryStageInsertionBlocked(currentDocument, currentResolvedDefinitions)
-      ) {
-        message.warning("首屏主舞台全页只能有一个；请编辑现有首屏");
-        clearDragState();
-        return;
-      }
-      const displayName = meta.name;
-      const block = createBlockContent(templateName);
-      const marker = createContentTemplateMarker(templateName);
-      const layoutData = sanitizeContentTemplateLayoutData(
-        templateName,
-        current?.moduleType === templateName ? current.layoutData : { version: 2 },
-      );
-      if (marker && layoutData) {
-        block.props = {
-          ...block.props,
-          __instanceOverrides: layoutData,
-          __templateOrigin: {
-            kind: "system",
-            contractKey: current?.moduleType === templateName
-              ? current.contractKey
-              : marker.key,
-            version: current?.moduleType === templateName
-              ? current.activeVersion
-              : 0,
-          },
-        };
-      }
-      insertPreparedBlock(dispatch, block, insertionIndex);
-      dispatch({
-        type: "setUi",
-        ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
-      });
-      message.success(`已插入“${displayName}”，可在右侧继续编辑`);
-      clearDragState();
-    },
-    [clearDragState, dispatch, message, pageKey],
-  );
-
   const getCanvasDropIndex = useCallback(
     (clientX: number, clientY: number) => {
       const rect = canvasRef.current?.getBoundingClientRect();
@@ -2133,13 +2019,6 @@ function EditorBody({
     [clearDragState, getCanvasDropIndex, handleTemplateDragEnd],
   );
 
-  const handleTemplateActivate = useCallback(
-    (name: string, current?: SystemContentTemplateCurrent, insertionIndex?: number) => (
-      insertTemplate(name, insertionIndex ?? appData.content.length, current)
-    ),
-    [appData.content.length, insertTemplate],
-  );
-
   const dropPosition =
     appData.content.length === 0 || dropIndex === null
       ? 50
@@ -2162,8 +2041,8 @@ function EditorBody({
         </aside>
       ) : (
         <PageTemplateLibraryAdapter
+          active={workspaceActive}
           pageKey={pageKey}
-          onInsertTemplate={handleTemplateActivate}
           onTemplateDragStart={handleTemplateDragStart}
           onTemplateDragEnd={handleTemplateDragEnd}
         />
@@ -2388,7 +2267,6 @@ export default function StoreDecorationWorkbench({
     publishReviewOpen,
     publishReviewIssueKey,
     hasUnsavedChanges,
-    personalTemplateUpgradeHintCount,
     hasProtectedUnsavedChanges,
     previewMode,
     revisionsOpen,
@@ -2412,6 +2290,7 @@ export default function StoreDecorationWorkbench({
     canvasDataSyncVersion,
     pendingPageHistoryCommand,
     pageSettingsOpen,
+    pageSettingsData,
     pageSettingsFocusField,
     hasPendingDraft,
     canDiscardDraft,
@@ -2497,11 +2376,13 @@ export default function StoreDecorationWorkbench({
               render: (props: PuckProps) => {
                 if (props.isVisible === false) {
                   if (previewMode) return null;
-                  return (
-                    <div className="homepage-editor__hidden-block">
-                      此模块已隐藏，不会发布到前台
-                    </div>
-                  );
+                  if (type !== DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+                    return (
+                      <div className="homepage-editor__hidden-block">
+                        此模块已隐藏，不会发布到前台
+                      </div>
+                    );
+                  }
                 }
                 // 与公开端同一套渲染规则（2026-08-21 对齐）：
                 // 旧色值规范化此前只在公开端生效，老数据两端颜色可能不同；
@@ -2598,7 +2479,7 @@ export default function StoreDecorationWorkbench({
         open={pageSettingsOpen}
         pageKey={pageKey}
         metadata={metadata}
-        puckData={data}
+        puckData={pageSettingsData}
         publishIssues={publishIssues}
         validationStatus={publishValidationStatus}
         focusField={pageSettingsFocusField}
@@ -2626,13 +2507,6 @@ export default function StoreDecorationWorkbench({
           >
             关闭
           </Button>
-        </div>
-      ) : null}
-
-      {personalTemplateUpgradeHintCount > 0 ? (
-        <div className="dynamic-template-upgrade-hint" role="status">
-          <ExclamationCircleOutlined aria-hidden="true" />
-          <span>{personalTemplateUpgradeHintCount} 个历史个人模板实例可升级；当前页面仍保持原版本与原草稿，打开页面不会自动改写。</span>
         </div>
       ) : null}
 
@@ -2747,6 +2621,7 @@ export default function StoreDecorationWorkbench({
             aria-hidden={workspaceMode === "template" || undefined}
           >
             <EditorBody
+              workspaceActive={workspaceMode === "page"}
               pageKey={pageKey}
               contentReady={loadedPageKey === pageKey}
               pageLabel={getEditorPage(pageKey).label}
@@ -2808,7 +2683,7 @@ export default function StoreDecorationWorkbench({
         }
         onSaveAndLeave={async () => {
           if (hasProtectedTemplateChanges) {
-            const savedTemplate = await templateWorkspaceController.persist();
+            const savedTemplate = await templateWorkspaceController.persistForExit();
             if (!savedTemplate) return false;
           }
           if (!hasProtectedUnsavedChanges) return true;

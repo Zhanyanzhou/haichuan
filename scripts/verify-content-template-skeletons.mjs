@@ -26,6 +26,7 @@ assert.doesNotMatch(puckConfig, /ContentTemplateSkeletonCanvas|render:\s*\(\)\s*
 for (const template of contract.templates) {
   assert.match(puckConfig, new RegExp(`withContractRenderer\\(\\"${template.moduleType}\\"`), `${template.moduleType} 未注册真实合同 Renderer`);
 }
-assert.match(runtime, /ContentTemplateContractFrame[\s\S]*mode="public"/, "公开 Renderer 未接入统一合同根框架");
+assert.match(runtime, /MatureContentTemplateRenderer/, "公开 Renderer 未接入首屏模板渲染器");
 assert.match(frame, /data-content-template-renderer="real"/, "统一合同根框架缺少真实 Renderer 标记");
-console.log(`内容模板根构图、缩略图与 ${contract.templates.length} 个真实 Renderer 注册一致。`);
+const activeCount = contract.templates.filter((template) => template.implementationStatus === "active").length;
+console.log(`内容模板根构图与 Renderer 一致：目录 ${activeCount} 个。`);

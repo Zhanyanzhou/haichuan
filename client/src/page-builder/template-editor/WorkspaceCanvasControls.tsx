@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { FullscreenOutlined } from "@ant-design/icons";
 import type { TemplateDesignHeightMode } from "../template-definition";
+import { useCommittedNumberInput } from "../inspector/controls/NumberField";
 
 interface EditableCanvasSize {
   width: number;
@@ -11,12 +12,13 @@ interface EditableCanvasSize {
   minWidth: number;
   maxWidth: number;
   canRestore: boolean;
+  previewWidthOnly?: boolean;
   overflow?: { horizontal: number; vertical: number; nodeId?: string };
   onWidthChange: (width: number) => void;
-  onHeightChange: (height: number) => void;
-  onHeightModeChange: (mode: TemplateDesignHeightMode) => void;
-  onRatioChange: (ratio: { width: number; height: number }) => void;
-  onRestore: () => void;
+  onHeightChange?: (height: number) => void;
+  onHeightModeChange?: (mode: TemplateDesignHeightMode) => void;
+  onRatioChange?: (ratio: { width: number; height: number }) => void;
+  onRestore?: () => void;
   onLocateOverflow: () => void;
 }
 
@@ -45,54 +47,40 @@ export function CanvasDimensionInput({
   allowDecimals?: boolean;
 }) {
   const displayValue = allowDecimals ? value : Math.round(value);
-  const [draftValue, setDraftValue] = useState(String(displayValue));
-  const [edited, setEdited] = useState(false);
-  const previousValueRef = useRef(displayValue);
-
-  useEffect(() => {
-    const nextValue = displayValue;
-    if (previousValueRef.current === nextValue) return;
-    previousValueRef.current = nextValue;
-    setDraftValue(String(nextValue));
-    setEdited(false);
-  }, [displayValue]);
-
-  const commit = () => {
-    if (!edited) return;
-    const parsed = allowDecimals ? Number.parseFloat(draftValue) : Number.parseInt(draftValue, 10);
-    const next = Number.isFinite(parsed)
-      ? Math.min(max, Math.max(min, parsed))
-      : displayValue;
-    setDraftValue(String(next));
-    setEdited(false);
-    if (commitUnchanged || next !== displayValue) onCommit(next);
-  };
+  const errorId = `${useId()}-error`;
+  const transaction = useCommittedNumberInput({
+    label,
+    value: displayValue,
+    min,
+    max,
+    onCommit,
+    commitUnchanged,
+  });
 
   return (
     <label className="template-editor__canvas-size-field">
       <span aria-hidden="true">{shortLabel}</span>
       <input
-        type="number"
-        inputMode="numeric"
+        ref={transaction.inputRef}
+        type="text"
+        role="spinbutton"
+        inputMode={allowDecimals ? "decimal" : "numeric"}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={transaction.draft.trim() && Number.isFinite(Number(transaction.draft)) ? Number(transaction.draft) : undefined}
         aria-label={label}
-        step={allowDecimals ? "any" : 1}
+        data-number-step={allowDecimals ? "any" : 1}
         min={min}
         max={max}
-        value={draftValue}
-        onChange={(event) => {
-          setDraftValue(event.target.value);
-          setEdited(true);
-        }}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-          if (event.key === "Escape") {
-            setDraftValue(String(displayValue));
-            setEdited(false);
-            event.currentTarget.blur();
-          }
-        }}
+        data-committed-number-input="true"
+        value={transaction.draft}
+        aria-invalid={transaction.error ? "true" : undefined}
+        aria-describedby={transaction.error ? errorId : undefined}
+        onChange={(event) => transaction.setDraft(event.target.value)}
+        onBlur={transaction.onBlur}
+        onKeyDown={transaction.onKeyDown}
       />
+      {transaction.error ? <span id={errorId} className="homepage-editor__field-error" role="alert">{transaction.error}</span> : null}
     </label>
   );
 }
@@ -210,6 +198,7 @@ export default function WorkspaceCanvasControls({
   onSnapToGridChange,
   onLocateSelection,
   onFitSelection,
+  viewActions,
   variant = "full",
 }: {
   isFitView: boolean;
@@ -234,6 +223,7 @@ export default function WorkspaceCanvasControls({
   onSnapToGridChange?: () => void;
   onLocateSelection?: () => void;
   onFitSelection?: () => void;
+  viewActions?: ReactNode;
   variant?: "full" | "minimal";
 }) {
   const [isSizeEditorOpen, setIsSizeEditorOpen] = useState(false);
@@ -254,7 +244,7 @@ export default function WorkspaceCanvasControls({
     ? editableSize.ratioLabel
     : "";
   const sizeSummary = editableSize
-    ? editableSize.heightMode === "fixed"
+    ? editableSize.previewWidthOnly ? `${Math.round(editableSize.width)} px` : editableSize.heightMode === "fixed"
       ? `${Math.round(editableSize.width)} × ${Math.round(editableSize.height)}`
       : editableSize.heightMode === "aspect-ratio"
         ? `${Math.round(editableSize.width)} · ${editableSize.ratioLabel}`
@@ -274,19 +264,9 @@ export default function WorkspaceCanvasControls({
       setIsSizeEditorOpen(false);
       setIsViewToolsOpen(false);
     };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      const trigger = isSizeEditorOpen ? sizeTriggerRef.current : viewToolsTriggerRef.current;
-      setIsSizeEditorOpen(false);
-      setIsViewToolsOpen(false);
-      trigger?.focus();
-    };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
-    document.addEventListener("keydown", closeOnEscape);
     return () => {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      document.removeEventListener("keydown", closeOnEscape);
     };
   }, [isSizeEditorOpen, isViewToolsOpen]);
 
@@ -308,8 +288,18 @@ export default function WorkspaceCanvasControls({
   return (
     <div
       ref={controlsRef}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || event.defaultPrevented || event.nativeEvent.isComposing
+          || (!isSizeEditorOpen && !isViewToolsOpen)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const trigger = isSizeEditorOpen ? sizeTriggerRef.current : viewToolsTriggerRef.current;
+        setIsSizeEditorOpen(false);
+        setIsViewToolsOpen(false);
+        trigger?.focus();
+      }}
       className={`homepage-editor__canvas-controls${editableSize ? " template-editor__canvas-controls--editable" : ""}`}
-      aria-label={editableSize ? "画布缩放与模板尺寸" : "画布缩放"}
+      aria-label={editableSize ? editableSize.previewWidthOnly ? "画布缩放与预览宽度" : "画布缩放与模板尺寸" : "画布缩放"}
     >
       {editableSize ? (
         <div className="template-editor__canvas-size-disclosure">
@@ -319,13 +309,13 @@ export default function WorkspaceCanvasControls({
             className="template-editor__canvas-size-trigger"
             aria-expanded={isSizeEditorOpen}
             aria-controls={sizePanelId}
-            aria-label={`模板尺寸：${sizeSummary}`}
+            aria-label={`${editableSize.previewWidthOnly ? "预览宽度" : "模板尺寸"}：${sizeSummary}`}
             onClick={() => {
               setIsViewToolsOpen(false);
               setIsSizeEditorOpen((open) => !open);
             }}
           >
-            <span>模板尺寸</span>
+            <span>{editableSize.previewWidthOnly ? "预览宽度" : "模板尺寸"}</span>
             <strong>{sizeSummary}</strong>
             <span className="template-editor__canvas-size-trigger-arrow" aria-hidden="true">⌄</span>
           </button>
@@ -333,16 +323,17 @@ export default function WorkspaceCanvasControls({
             id={sizePanelId}
             className="template-editor__canvas-size-panel"
             role="group"
-            aria-label="模板整体尺寸"
+            aria-label={editableSize.previewWidthOnly ? "画布观察宽度" : "模板整体尺寸"}
             hidden={!isSizeEditorOpen}
           >
             <div className="template-editor__canvas-size-panel-head">
-              <strong>当前画布尺寸</strong>
-              <span>可撤销</span>
+              <strong>{editableSize.previewWidthOnly ? "当前预览宽度" : "当前画布尺寸"}</strong>
+              <span>{editableSize.previewWidthOnly ? "仅预览，不保存" : "可撤销"}</span>
             </div>
+            {editableSize.previewWidthOnly ? <p>拖动或输入宽度连续预览响应式，不修改模板根尺寸，也不进入撤销历史。根高度和比例请在右侧属性面板修改。</p> : null}
             <div className="template-editor__canvas-size-control">
               <CanvasDimensionInput
-                label="设计宽度"
+                label={editableSize.previewWidthOnly ? "预览宽度" : "设计宽度"}
                 shortLabel="宽"
                 value={editableSize.width}
                 min={editableSize.minWidth}
@@ -350,9 +341,9 @@ export default function WorkspaceCanvasControls({
                 onCommit={editableSize.onWidthChange}
               />
               <label className="template-editor__canvas-width-preset">
-                <span className="sr-only">常用模板宽度</span>
+                <span className="sr-only">{editableSize.previewWidthOnly ? "常用预览宽度" : "常用模板宽度"}</span>
                 <select
-                  aria-label="常用模板宽度"
+                  aria-label={editableSize.previewWidthOnly ? "常用预览宽度" : "常用模板宽度"}
                   value={widthPresets.includes(editableSize.width) ? String(editableSize.width) : ""}
                   onChange={(event) => {
                     const width = Number(event.target.value);
@@ -365,19 +356,19 @@ export default function WorkspaceCanvasControls({
                   ))}
                 </select>
               </label>
-              <label className="template-editor__canvas-height-mode">
+              {editableSize.onHeightModeChange ? <label className="template-editor__canvas-height-mode">
                 <span>高度</span>
                 <select
                   aria-label="模板高度模式"
                   value={editableSize.heightMode}
-                  onChange={(event) => editableSize.onHeightModeChange(event.target.value as TemplateDesignHeightMode)}
+                  onChange={(event) => editableSize.onHeightModeChange?.(event.target.value as TemplateDesignHeightMode)}
                 >
                   <option value="fixed">固定高度</option>
                   <option value="aspect-ratio">固定比例</option>
                   <option value="auto">随内容</option>
                 </select>
-              </label>
-              {editableSize.heightMode === "fixed" ? (
+              </label> : null}
+              {editableSize.heightMode === "fixed" && editableSize.onHeightChange ? (
                 <CanvasDimensionInput
                   label="模板固定高度"
                   shortLabel="高"
@@ -387,17 +378,17 @@ export default function WorkspaceCanvasControls({
                   onCommit={editableSize.onHeightChange}
                 />
               ) : null}
-              {editableSize.heightMode === "aspect-ratio" ? (
+              {editableSize.heightMode === "aspect-ratio" && editableSize.onRatioChange ? (
                 <CanvasRatioInput value={editableSize.ratioLabel} onCommit={editableSize.onRatioChange} />
               ) : null}
-              <label className="template-editor__canvas-ratio-preset">
+              {editableSize.onRatioChange ? <label className="template-editor__canvas-ratio-preset">
                 <span className="sr-only">常用模板比例</span>
                 <select
                   aria-label="常用模板比例"
                   value={selectedRatioPreset}
                   onChange={(event) => {
                     const [width, height] = event.target.value.split(":").map(Number);
-                    if (width > 0 && height > 0) editableSize.onRatioChange({ width, height });
+                    if (width > 0 && height > 0) editableSize.onRatioChange?.({ width, height });
                   }}
                 >
                   <option value="">比例预设</option>
@@ -405,8 +396,8 @@ export default function WorkspaceCanvasControls({
                     <option key={preset} value={preset}>{preset}</option>
                   ))}
                 </select>
-              </label>
-              <button
+              </label> : null}
+              {editableSize.onRestore ? <button
                 type="button"
                 disabled={!editableSize.canRestore}
                 title={editableSize.canRestore
@@ -415,7 +406,7 @@ export default function WorkspaceCanvasControls({
                 onClick={editableSize.onRestore}
               >
                 恢复已保存尺寸
-              </button>
+              </button> : null}
             </div>
           </div>
         </div>
@@ -463,7 +454,7 @@ export default function WorkspaceCanvasControls({
             aria-label={`画布尺寸 ${viewportLabel}，缩放 ${Math.round(zoom * 100)}%`}
             aria-live="polite"
           >
-            {viewportLabel}
+            {editableSize.previewWidthOnly ? "视口 " : ""}{viewportLabel}
           </output>
           <CanvasZoomInput value={zoom} onCommit={onZoomChange} />
         </>
@@ -578,6 +569,7 @@ export default function WorkspaceCanvasControls({
               >
                 适应选中
               </button>
+              {viewActions}
             </div>
           </div>
         </>

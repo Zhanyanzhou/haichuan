@@ -98,6 +98,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message = '数据库连接失败，请稍后重试';
       errorCode = 'DATABASE_UNAVAILABLE';
     }
+    // Multer 在进入 Controller 前抛错；在统一异常层映射，避免文件过大被误报为 500。
+    else if (
+      exception instanceof Error
+      && 'code' in exception
+      && typeof exception.code === 'string'
+      && exception.code.startsWith('LIMIT_')
+    ) {
+      const isAvatar = requestPath === '/api/customers/me/avatar';
+      status = exception.code === 'LIMIT_FILE_SIZE'
+        ? HttpStatus.PAYLOAD_TOO_LARGE
+        : HttpStatus.BAD_REQUEST;
+      message = exception.code === 'LIMIT_FILE_SIZE'
+        ? (isAvatar ? '头像图片不能超过 5MB' : '上传文件过大')
+        : '上传文件不符合要求';
+      errorCode = exception.code === 'LIMIT_FILE_SIZE' && isAvatar
+        ? 'AVATAR_FILE_TOO_LARGE'
+        : 'UPLOAD_FILE_INVALID';
+    }
     // ServeStaticModule 使用的 Express NotFoundError 不是 Nest HttpException，
     // 但会携带 status/statusCode。保留 4xx，避免缺失静态文件被误记为 500。
     else if (exception instanceof Error) {

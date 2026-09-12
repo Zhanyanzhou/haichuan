@@ -46,22 +46,14 @@ assert.deepEqual(missingOnServer, [], `服务端缺少前端区块类型：${mis
 assert.deepEqual(staleOnServer, [], `服务端存在前端未注册区块类型：${staleOnServer.join("、")}`);
 
 const editorOnlyTypes = ["网站全局设置", "业务功能区"];
-const rendererDirectTypes = ["动态模板实例", "产品展示行", "单品焦点推荐", "佩戴灵感"];
+const rendererDirectTypes = ["动态模板实例"];
 const rendererTypes = [...rendererSource.matchAll(/case "([^"]+)":/g)].map((match) => match[1]);
 const matureTypes = objectStringValues(
   matureRegistrySource,
   "MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE",
 );
-const matureRendererTypes = [...matureRendererSource.matchAll(/case "([^"]+)":/g)]
-  .map((match) => match[1]);
-const missingOnMatureRenderer = matureTypes.filter(
-  (type) => !matureRendererTypes.includes(type),
-);
-assert.deepEqual(
-  missingOnMatureRenderer,
-  [],
-  `成熟模板渲染器缺少区块类型：${missingOnMatureRenderer.join("、")}`,
-);
+assert.deepEqual(matureTypes, ["首屏主视觉"], "成熟模板注册表只能保留首屏测试模板");
+assert.match(matureRendererSource, /const moduleType = "首屏主视觉"/, "成熟模板渲染器必须只处理首屏测试模板");
 assert.match(
   rendererSource,
   /getMatureContentTemplateSlotType\(block\.type \|\| ""\)[\s\S]*<MatureContentTemplateRenderer/,
@@ -75,35 +67,22 @@ const missingOnRenderer = clientTypes.filter(
 );
 assert.deepEqual(missingOnRenderer, [], `前台渲染器缺少区块类型：${missingOnRenderer.join("、")}`);
 
-// 生命周期只限制“新增入口”，不能影响存量 Renderer。模板库必须消费生成合同的状态，
-// 不能再把所有已注册组件直接暴露给运营人员。
+// 模板库必须消费生成合同的状态，不能重新暴露已删除模板。
 assert.match(
   blockMetaSource,
   /CONTENT_TEMPLATE_REGISTRY[\s\S]*isContentTemplateInsertable/,
   "模块元数据必须从生成合同读取模板实施状态",
 );
-const systemTemplateAllowedHelper = homepageConfigSource.match(
-  /const isSystemTemplateAllowedOnPage = useCallback\(\(\s*([A-Za-z_$][\w$]*)\s*:\s*string\s*\)\s*=>\s*\(([\s\S]*?)\)\s*,\s*\[\s*pageKey\s*\]\s*\);/,
-);
-assert.ok(
-  systemTemplateAllowedHelper,
-  "页面模板目录必须定义按页面过滤系统模板的 helper",
-);
-const systemTemplateModuleTypeParameter = systemTemplateAllowedHelper[1]
-  .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const systemTemplateAllowedHelperBody = systemTemplateAllowedHelper[2];
-assert.match(
-  systemTemplateAllowedHelperBody,
-  new RegExp(
-    `isContentTemplateInsertable\\(\\s*${systemTemplateModuleTypeParameter}\\s*\\)\\s*&&\\s*isContentTemplateAllowedForPage\\(\\s*pageKey\\s*,\\s*${systemTemplateModuleTypeParameter}\\s*\\)`,
-  ),
-  "系统模板 helper 必须用同一模块类型同时校验合同实施状态与页面范围",
-);
-assert.match(
-  homepageConfigSource,
-  /<UnifiedTemplateLibrary\b[\s\S]*?\bisSystemTemplateAllowed=\{\s*isSystemTemplateAllowedOnPage\s*\}/,
-  "页面模板目录必须把系统模板 helper 传入统一模板库",
-);
+// 页面制作已经统一为已发布动态模板；守护当前精确版本链，不依赖退役 helper 名称。
+const pageLibrarySource = await readFile(path.join(root, "client/src/page-builder/template-editor/TemplateEditorLibrary.tsx"), "utf8");
+const pageLibraryEntry = homepageConfigSource.match(/<UnifiedTemplateLibrary\b[^>]*mode="page"[\s\S]*?\/>/);
+assert.ok(pageLibraryEntry, "页面必须使用统一模板库的 page 模式");
+assert.match(pageLibraryEntry[0], /onInsertPublished=\{insertPublishedDynamicTemplate\}/, "页面必须走已发布版本插入链");
+assert.doesNotMatch(pageLibraryEntry[0], /onInsertSystem|onInsertPersonal|onInsertDraft/, "页面不得提供系统旁路、个人模板或草稿插入入口");
+assert.match(pageLibrarySource, /props\.mode === "page"[\s\S]*presentation\.source === "published"[\s\S]*props\.isPublishedTemplateAllowed\(presentation\.published\)/, "页面可插入目录必须过滤已发布版本");
+assert.doesNotMatch(pageLibrarySource, /pageHasPrimaryStage|当前页面已有主舞台|不能重复添加此主舞台模板/, "页面模板目录不得按已有首屏数量禁用模板");
+assert.doesNotMatch(homepageConfigSource, /isPrimaryStageInsertionBlocked|首屏主舞台全页只能有一个/, "页面插入命令不得限制首屏数量");
+assert.match(homepageConfigSource, /createDynamicTemplateInstanceProps\(\{\s*templateId: template\.templateId,\s*version: template\.version,/, "页面实例必须钉住所选模板的精确版本");
 assert.match(
   homepageConfigSource,
   /<SchemaInspectorPanel[\s\S]*publishIssues=\{publishIssues\}/,

@@ -85,3 +85,64 @@ test('重复使用已轮换 refresh token 会撤销整个 family', async () => {
   );
   assert.equal(fixture.rows.every((row) => row.revokedAt instanceof Date), true);
 });
+
+test('客户认证版本变化后旧 refresh family 立即失效且不能轮换', async () => {
+  let currentAuthVersion = 1;
+  const rows: Array<Record<string, any>> = [];
+  const delegate = {
+    create: async ({ data }: any) => {
+      const row = {
+        id: rows.length + 1,
+        revokedAt: null,
+        replacedByHash: null,
+        lastUsedAt: null,
+        ...data,
+      };
+      rows.push(row);
+      return row;
+    },
+    findUnique: async ({ where }: any) => {
+      const row = rows.find((candidate) => candidate.tokenHash === where.tokenHash);
+      return row ? {
+        id: row.id,
+        customerId: row.customerId,
+        familyId: row.familyId,
+        authVersion: row.authVersion,
+        customer: { status: 'ACTIVE', authVersion: currentAuthVersion },
+      } : null;
+    },
+    updateMany: async ({ where, data }: any) => {
+      const matched = rows.filter((row) => {
+        if (where.familyId !== undefined && row.familyId !== where.familyId) return false;
+        if (where.revokedAt === null && row.revokedAt !== null) return false;
+        return true;
+      });
+      for (const row of matched) Object.assign(row, data);
+      return { count: matched.length };
+    },
+  };
+  const service = new RefreshSessionService({
+    customer: {
+      findFirst: async ({ where }: any) => where.authVersion === currentAuthVersion
+        ? { id: where.id }
+        : null,
+    },
+    customerRefreshSession: delegate,
+    $transaction: async (callback: (tx: any) => Promise<any>) => callback({ customerRefreshSession: delegate }),
+  } as any);
+
+  const issued = await service.issueCustomer(11, {}, 1);
+  assert.equal(rows[0].authVersion, 1);
+  currentAuthVersion = 2;
+  await assert.rejects(
+    service.rotateCustomer(issued.refreshToken, {}),
+    UnauthorizedException,
+  );
+  assert.equal(rows[0].revokedAt instanceof Date, true);
+
+  await assert.rejects(
+    service.issueCustomer(11, {}, 1),
+    UnauthorizedException,
+  );
+  assert.equal(rows.length, 1);
+});

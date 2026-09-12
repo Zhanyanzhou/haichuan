@@ -158,8 +158,9 @@ export function createBlankDynamicTemplateDefinition(
   name = "未命名模板",
 ): TemplateDefinitionV2 {
   const root = createDynamicTemplateNode("Section", "模板根节点");
+  root.responsive.mobile = {};
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     templateId: createDynamicTemplateStableId("tpl"),
     name,
     description: "",
@@ -173,6 +174,7 @@ export function createBlankDynamicTemplateDefinition(
       mobileRatio: "auto",
       previewDesktopWidth: RESPONSIVE_CANVAS.desktop.width,
       previewMobileWidth: RESPONSIVE_CANVAS.mobile.width,
+      previewTabletWidth: 834,
       mobileBreakpoint: 767,
       minViewportWidth: 320,
       maxViewportWidth: 1920,

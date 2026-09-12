@@ -24,7 +24,7 @@
 - Report type: `code-review`
 - Report ID: `cr-YYYYMMDD-<random-id>`
 - Review chain ID: `rc-YYYYMMDD-<random-id>`
-- Review generation: `[0 | 1]`
+- Review generation: `[non-negative integer; initial=0, each incremental review=parent+1]`
 - Review trigger: `[initial | post-implementation]`
 - Parent review report ID: `[None | cr-YYYYMMDD-<id>]`
 - Parent review report path: `[None | absolute or repository-relative path]`
@@ -37,7 +37,7 @@
 - Git mutation during review: `None`
 - Scope fingerprint: `[sha256:<digest> | Unavailable - reason]`
 
-Treat this completed report as the fixed review input for downstream work. Do not rewrite it during receiving or implementation; record dispositions, challenges, code changes, and verification in a separate `receiving-code-review` resolution report that references this Report ID.
+Treat this completed report as the fixed review input for downstream work. Do not rewrite it during implementation; record dispositions, challenges, code changes, and verification in a separate resolution record referencing this Report ID. Keep the `receiving-code-review` report type for compatibility; it does not require another Skill or user-visible task. Carry relevant settled dispositions forward into each resolution so later reviews preserve prior evidence.
 
 ## Scope
 
@@ -290,7 +290,7 @@ Record every meaningful accepted, merged, dismissed, contradicted, or unresolved
 
 For generation `0`, write `None - initial review generation.`
 
-For generation `1`, include every parent-resolution item whose semantic issue fingerprint could overlap the implementation delta or affected execution chains. Do not reopen a terminal decision without changed code, contract, or material evidence.
+For every generation after `0`, include every parent-resolution item whose semantic issue fingerprint could overlap the implementation delta or affected execution chains, including carried-forward dispositions. Do not reopen a settled decision without changed code, contract, or material evidence.
 Both `ref` and `change` in a reopen delta must identify concrete evidence; `None`, `unknown`, template markers, and other placeholders are invalid.
 
 | Issue key | Issue fingerprint | Parent item/verdict | Relevant change or new evidence | Decision |
@@ -299,8 +299,10 @@ Both `ref` and `change` in a reopen delta must identify concrete evidence; `None
 
 ## Receiving Handoff
 
-- Handoff status: `[Ready for receiving-code-review | Regenerate before implementation | Terminal post-review - return to user/owner]`
+- Handoff status: `[Continue within existing authorization | Review scope complete | Acceptance complete | Blocked - awaiting input or authorization]`
 - Automatic receiving permitted: `[Yes | No]`
+- Continuation authority: `[specific existing user instruction and in-scope ordinary actions | None]`
+- Handoff evidence: `[review scope delivered, acceptance evidence, next authorized repair/verification, or concrete blocker and condition to resume]`
 - Source report ID: `[same Report ID]`
 - Scope fingerprint to recheck: `[same fingerprint]`
 - Actionable finding IDs: `[F1, F2 | None]`
@@ -312,7 +314,11 @@ Both `ref` and `change` in a reopen delta must identify concrete evidence; `None
 - Highest-risk verification to repeat: `[specific check]`
 - Suggested implementation boundaries: `[narrow surfaces or None]`
 - Re-review note: `Treat every finding as a claim to verify. Challenges require a counterclaim, argument, evidence, limits, and settlement criterion.`
-- Chain rule: `Generation 1 is terminal. Do not automatically invoke receiving-code-review; return remaining findings to the user or product owner.`
+- Chain rule: `Continue the same authorized result through repair and incremental verification; stop on requested acceptance or a real blocker, not on a generation number. Review-only completion does not authorize repairs or imply release readiness.`
+
+`Continue within existing authorization` requires `Yes`, a concrete existing instruction and next action; all other statuses require `No`. `Acceptance complete` requires acceptance evidence and no actionable findings/test gaps or open questions/coverage areas. `Review scope complete` finishes only the requested review phase; an implementation coordinator must still pursue any already authorized repairs. For a blocker, record the affected action and condition to resume, and continue independent authorized work. These fields record workflow intent, never grant Git, production, real-data or external permissions.
+
+Historical generation `0`/`1` reports using `Ready for receiving-code-review`, `Regenerate before implementation` or `Terminal post-review - return to user/owner` remain readable. Their legacy handoff flags are not current authorization; choose the statuses above in new reports.
 
 ## Report Self-Check
 
@@ -322,11 +328,11 @@ Both `ref` and `change` in a reopen delta must identify concrete evidence; `None
 - `[yes | no]` Every `Finding F#` area references an existing finding.
 - `[yes | no]` Every standalone test gap has a stable ID and severity.
 - `[yes | no]` Every `F#` and `T#` has a unique semantic issue fingerprint and an authoritative expected basis, or the item is an explicit `Question` for unconfirmed intent.
-- `[yes | no]` Generation, trigger, parent resolution, scope mode, and receiving handoff satisfy the bounded chain contract.
-- `[yes | no]` Generation `1` reconciles relevant parent terminal dispositions and records a reason for every reopened issue fingerprint.
+- `[yes | no]` Generation, trigger, parent resolution, scope mode, and receiving handoff satisfy the evidence-linked chain contract.
+- `[yes | no]` Every incremental generation reconciles relevant settled parent dispositions and records a reason for every reopened issue fingerprint.
 - `[yes | no]` Every non-Question finding and standalone test gap appears exactly once in actionable or deferred handoff IDs; every Question and Not-covered area appears in its matching open list.
 - `[yes | no]` Every meaningful subagent candidate has an adjudication.
 - `[yes | no]` Every `Not covered` area has a reason and next step.
 - `[yes | no]` Recommendation follows the skill mapping.
-- `[yes | no]` The validator passes; generation `1` includes `--parent-report <generation-0-report> --parent-resolution <resolution-report>`.
+- `[yes | no]` The validator passes; every incremental generation includes `--parent-report <immediately-previous-report> --parent-resolution <its-resolution-record>`.
 - `[yes | no]` Git state was not mutated.

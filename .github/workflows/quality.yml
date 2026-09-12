@@ -44,7 +44,7 @@ jobs:
 
       # 依赖安全审计（P1：OR 盘点 2026-08-15）。镜像 registry 不支持 audit 端点，须指定官方源。
       # --package-lock-only：仅审 lockfile，不要求 node_modules。
-      # 级别 high：nodemailer 已升 9.0.5（2026-08-15），生产依赖当前 0 漏洞，high 及以上挡 CI。
+      # 级别 high：生产依赖的 high 及以上漏洞阻断 CI；具体版本以当前清单和 lockfile 为准。
       - name: 依赖安全审计（client）
         working-directory: client
         run: npm audit --omit=dev --package-lock-only --audit-level=high --registry=https://registry.npmjs.org
@@ -126,3 +126,45 @@ jobs:
           --project=customer-chromium
           --project=admin-chromium
           --workers=1
+
+  real-mysql:
+    name: Real MySQL - migrations and persistence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ROOT_PASSWORD: isolated-ci-root-only
+          MYSQL_DATABASE: haichuan_ci_real_tests
+          MYSQL_USER: isolated_ci
+          MYSQL_PASSWORD: isolated-ci-test-only
+        ports:
+          - 3306/tcp
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: 配置 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: 安装服务端依赖
+        working-directory: server
+        run: npm ci
+      - name: 生成 Prisma Client
+        working-directory: server
+        run: npx prisma generate
+      - name: 验证一次性数据库入口保护
+        run: node --test server/scripts/run-real-mysql-tests.spec.cjs
+      - name: 空库迁移与三个真实 MySQL 闭环（禁止跳过）
+        env:
+          REAL_MYSQL_TEST_ISOLATED: "1"
+          REAL_MYSQL_TEST_DATABASE_URL: mysql://isolated_ci:isolated-ci-test-only@127.0.0.1:${{ job.services.mysql.ports[3306] }}/haichuan_ci_real_tests
+        run: node server/scripts/run-real-mysql-tests.cjs

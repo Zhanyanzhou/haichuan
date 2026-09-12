@@ -11,3 +11,4 @@ export {
 } from "./registry";
 export * from "./types";
 export * from "./upgrade";
+export * from "./mediaReferences";

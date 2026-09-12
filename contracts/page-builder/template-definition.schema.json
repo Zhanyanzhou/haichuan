@@ -16,27 +16,57 @@
     "defaultContent"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
-    "templateId": { "$ref": "#/$defs/stableId" },
-    "name": { "type": "string", "minLength": 1, "maxLength": 100 },
-    "description": { "type": "string", "maxLength": 500 },
-    "metadata": { "$ref": "#/$defs/metadata" },
-    "rootNodeId": { "$ref": "#/$defs/stableId" },
+    "schemaVersion": {
+      "enum": [
+        1,
+        2,
+        3
+      ]
+    },
+    "templateRecipe": {
+      "$ref": "#/$defs/templateRecipe"
+    },
+    "templateId": {
+      "$ref": "#/$defs/stableId"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    },
+    "rootNodeId": {
+      "$ref": "#/$defs/stableId"
+    },
     "nodes": {
       "type": "object",
       "minProperties": 1,
       "maxProperties": 500,
-      "propertyNames": { "$ref": "#/$defs/stableId" },
-      "additionalProperties": { "$ref": "#/$defs/node" }
+      "propertyNames": {
+        "$ref": "#/$defs/stableId"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/node"
+      }
     },
     "slots": {
       "type": "object",
       "maxProperties": 250,
-      "propertyNames": { "$ref": "#/$defs/stableId" },
-      "additionalProperties": { "$ref": "#/$defs/slot" }
+      "propertyNames": {
+        "$ref": "#/$defs/stableId"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/slot"
+      }
     },
     "defaultContent": {
-      "description": "仅兼容既有已发布模板版本的历史默认内容；新建母模板必须保持为空，模板设计不得新增、覆盖或提升真实内容。",
+      "description": "schema1 保留历史默认内容，schema2 必须为空；schema3 保存按槽位编辑的默认内容，页面实例内容仍单独保存。",
       "type": "object",
       "maxProperties": 250
     },
@@ -46,7 +76,470 @@
       "maxProperties": 250
     }
   },
+  "x-currentSchemaVersion": 3,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": 1
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "metadata": {
+            "properties": {
+              "previewTabletWidth": false
+            }
+          },
+          "nodes": {
+            "additionalProperties": {
+              "properties": {
+                "responsive": {
+                  "properties": {
+                    "tablet": false,
+                    "desktop": {
+                      "$ref": "#/$defs/legacyResponsiveRules"
+                    },
+                    "mobile": {
+                      "$ref": "#/$defs/legacyResponsiveRules"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "slots": {
+            "additionalProperties": {
+              "properties": {
+                "tabletRules": false,
+                "desktopRules": {
+                  "$ref": "#/$defs/legacySlotRules"
+                },
+                "mobileRules": {
+                  "$ref": "#/$defs/legacySlotRules"
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "metadata": {
+            "properties": {
+              "mobileBreakpoint": {
+                "const": 767
+              }
+            }
+          },
+          "previewContent": {
+            "maxProperties": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "enum": [
+              1,
+              2
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "templateRecipe": false,
+          "nodes": {
+            "additionalProperties": {
+              "properties": {
+                "responsive": {
+                  "additionalProperties": {
+                    "properties": {
+                      "backgroundColor": false,
+                      "backgroundImage": false,
+                      "backgroundGradient": false,
+                      "opacity": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "slots": {
+            "additionalProperties": {
+              "properties": {
+                "semanticRole": false,
+                "desktopRules": {
+                  "properties": {
+                    "fontFamily": false,
+                    "color": false,
+                    "letterSpacing": false
+                  }
+                },
+                "tabletRules": {
+                  "properties": {
+                    "fontFamily": false,
+                    "color": false,
+                    "letterSpacing": false
+                  }
+                },
+                "mobileRules": {
+                  "properties": {
+                    "fontFamily": false,
+                    "color": false,
+                    "letterSpacing": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schemaVersion": {
+            "const": 2
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "defaultContent": {
+            "maxProperties": 0
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
+    "templateRecipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recipeVersion",
+        "presetVersion",
+        "purpose",
+        "canvas",
+        "layout",
+        "media",
+        "content",
+        "style",
+        "rules"
+      ],
+      "properties": {
+        "recipeVersion": {
+          "const": 1
+        },
+        "presetVersion": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "purpose": {
+          "enum": [
+            "productPromotion",
+            "newProduct",
+            "event",
+            "brand",
+            "social",
+            "news",
+            "profile",
+            "general",
+            "custom"
+          ]
+        },
+        "customPurpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "canvas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "width",
+            "height",
+            "aspectRatio"
+          ],
+          "properties": {
+            "width": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            },
+            "aspectRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 4096
+            }
+          }
+        },
+        "layout": {
+          "enum": [
+            "topImageBottomContent",
+            "topContentBottomImage",
+            "leftImageRightContent",
+            "leftContentRightImage",
+            "fullImageOverlay",
+            "centerSubject",
+            "headerSubjectFooter",
+            "splitColumns",
+            "cards",
+            "free"
+          ]
+        },
+        "media": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "role",
+              "name",
+              "aspectRatio",
+              "fitMode",
+              "borderRadius",
+              "replaceable",
+              "allowCrop"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+              },
+              "role": {
+                "enum": [
+                  "heroImage",
+                  "logo",
+                  "backgroundImage",
+                  "secondaryImage",
+                  "custom"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "aspectRatio": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 4096
+              },
+              "fitMode": {
+                "enum": [
+                  "cover",
+                  "contain",
+                  "fill"
+                ]
+              },
+              "borderRadius": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 256
+              },
+              "replaceable": {
+                "type": "boolean"
+              },
+              "allowCrop": {
+                "type": "boolean"
+              },
+              "defaultImage": {
+                "type": "string",
+                "maxLength": 2048
+              },
+              "shape": {
+                "enum": [
+                  "rectangle",
+                  "circle"
+                ]
+              },
+              "freeRatio": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "content": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "role",
+              "name",
+              "defaultContent",
+              "maxLength",
+              "editable"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
+              },
+              "role": {
+                "enum": [
+                  "title",
+                  "subtitle",
+                  "description",
+                  "brandName",
+                  "tag",
+                  "date",
+                  "price",
+                  "originalPrice",
+                  "offer",
+                  "cta",
+                  "contact",
+                  "customText",
+                  "time",
+                  "location",
+                  "productName",
+                  "sellingPoint",
+                  "discount",
+                  "personName",
+                  "position",
+                  "biography",
+                  "socialInfo"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "defaultContent": {
+                "type": "string",
+                "maxLength": 10000
+              },
+              "maxLength": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "editable": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "variant",
+            "background",
+            "primaryColor",
+            "backgroundColor",
+            "textColor",
+            "radius",
+            "spacing"
+          ],
+          "properties": {
+            "variant": {
+              "enum": [
+                "minimal",
+                "business",
+                "premium",
+                "vibrant",
+                "tech",
+                "warm",
+                "custom",
+                "ultraMinimal"
+              ]
+            },
+            "background": {
+              "enum": [
+                "light",
+                "dark",
+                "brand",
+                "custom",
+                "softLight"
+              ]
+            },
+            "primaryColor": {
+              "type": "string",
+              "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+            },
+            "backgroundColor": {
+              "type": "string",
+              "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+            },
+            "textColor": {
+              "type": "string",
+              "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+            },
+            "radius": {
+              "enum": [
+                "none",
+                "small",
+                "medium",
+                "large",
+                "extraLarge"
+              ]
+            },
+            "spacing": {
+              "enum": [
+                "compact",
+                "standard",
+                "relaxed",
+                "extraRelaxed"
+              ]
+            },
+            "margin": {
+              "enum": [
+                "compact",
+                "standard",
+                "relaxed"
+              ]
+            },
+            "alignment": {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "secondaryTextColor": {
+              "type": "string",
+              "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+            }
+          }
+        },
+        "rules": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "aspectLocked"
+          ],
+          "properties": {
+            "aspectLocked": {
+              "type": "boolean"
+            },
+            "mediaArrangement": {
+              "description": "图片区排列方向；省略或 auto 保留历史自动排布，row/column 固定主轴，不随单张图片比例改变。",
+              "enum": ["auto", "row", "column"]
+            }
+          }
+        }
+      }
+    },
     "stableId": {
       "type": "string",
       "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$"
@@ -65,37 +558,134 @@
         "tags"
       ],
       "properties": {
-        "category": { "type": "string", "minLength": 1, "maxLength": 50 },
-        "purpose": { "type": "string", "minLength": 1, "maxLength": 100 },
-        "layoutType": { "type": "string", "minLength": 1, "maxLength": 50 },
-        "slotSummary": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "layoutType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "slotSummary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
         "recommendedFor": {
           "type": "array",
           "maxItems": 20,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1, "maxLength": 50 }
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
         },
-        "desktopRatio": { "$ref": "#/$defs/ratioLabel" },
-        "mobileRatio": { "$ref": "#/$defs/ratioLabel" },
-        "previewDesktopWidth": { "type": "integer", "minimum": 768, "maximum": 2560 },
-        "previewMobileWidth": { "type": "integer", "minimum": 280, "maximum": 767 },
-        "mobileBreakpoint": { "type": "integer", "minimum": 480, "maximum": 1024 },
-        "minViewportWidth": { "type": "integer", "minimum": 280, "maximum": 3840 },
-        "maxViewportWidth": { "type": "integer", "minimum": 280, "maximum": 3840 },
-        "defaultBackgroundToken": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$" },
-        "visualRole": { "enum": ["primary-stage", "feature-stage", "support-stage"] },
+        "desktopRatio": {
+          "$ref": "#/$defs/ratioLabel"
+        },
+        "mobileRatio": {
+          "$ref": "#/$defs/ratioLabel"
+        },
+        "canvasSize": {
+          "$ref": "#/$defs/canvasSize"
+        },
+        "previewDesktopWidth": {
+          "type": "integer",
+          "minimum": 768,
+          "maximum": 2560
+        },
+        "previewMobileWidth": {
+          "type": "integer",
+          "minimum": 280,
+          "maximum": 767
+        },
+        "previewTabletWidth": {
+          "type": "integer",
+          "minimum": 768,
+          "maximum": 1023
+        },
+        "mobileBreakpoint": {
+          "type": "integer",
+          "minimum": 480,
+          "maximum": 1024
+        },
+        "minViewportWidth": {
+          "type": "integer",
+          "minimum": 280,
+          "maximum": 3840
+        },
+        "maxViewportWidth": {
+          "type": "integer",
+          "minimum": 280,
+          "maximum": 3840
+        },
+        "defaultBackgroundToken": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]{0,63}$"
+        },
+        "visualRole": {
+          "enum": [
+            "primary-stage",
+            "feature-stage",
+            "support-stage"
+          ]
+        },
         "headerCompatibility": {
           "type": "array",
           "minItems": 1,
           "maxItems": 2,
           "uniqueItems": true,
-          "items": { "enum": ["solid", "overlay-light"] }
+          "items": {
+            "enum": [
+              "solid",
+              "overlay-light"
+            ]
+          }
         },
         "tags": {
           "type": "array",
           "maxItems": 20,
           "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1, "maxLength": 30 }
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30
+          }
+        }
+      }
+    },
+    "canvasSize": {
+      "description": "用户选择的模板逻辑画布尺寸；根节点高度规则仍负责运行时高度。",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "aspectRatio"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "aspectRatio": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 4096
         }
       }
     },
@@ -106,43 +696,104 @@
     "length": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["value", "unit"],
+      "required": [
+        "value",
+        "unit"
+      ],
       "properties": {
-        "value": { "type": "number", "minimum": 0, "maximum": 10000 },
-        "unit": { "enum": ["px", "%", "rem", "vw", "vh"] }
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "unit": {
+          "enum": [
+            "px",
+            "%",
+            "rem",
+            "vw",
+            "vh"
+          ]
+        }
       }
     },
     "size": {
       "oneOf": [
-        { "enum": ["auto", "fill", "fit"] },
-        { "$ref": "#/$defs/length" }
+        {
+          "enum": [
+            "auto",
+            "fill",
+            "fit"
+          ]
+        },
+        {
+          "$ref": "#/$defs/length"
+        }
       ]
     },
     "boxSpacing": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["top", "right", "bottom", "left"],
+      "required": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ],
       "properties": {
-        "top": { "$ref": "#/$defs/length" },
-        "right": { "$ref": "#/$defs/length" },
-        "bottom": { "$ref": "#/$defs/length" },
-        "left": { "$ref": "#/$defs/length" }
+        "top": {
+          "$ref": "#/$defs/length"
+        },
+        "right": {
+          "$ref": "#/$defs/length"
+        },
+        "bottom": {
+          "$ref": "#/$defs/length"
+        },
+        "left": {
+          "$ref": "#/$defs/length"
+        }
       }
     },
     "heightRule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "properties": {
-        "mode": { "enum": ["auto", "min-height", "aspect-ratio", "fixed", "viewport"] },
-        "value": { "$ref": "#/$defs/length" },
+        "mode": {
+          "enum": [
+            "auto",
+            "fit",
+            "fill",
+            "min-height",
+            "aspect-ratio",
+            "fixed",
+            "viewport"
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/length"
+        },
         "ratio": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["width", "height"],
+          "required": [
+            "width",
+            "height"
+          ],
           "properties": {
-            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 },
-            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000 }
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000
+            }
           }
         }
       }
@@ -150,53 +801,466 @@
     "placement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["x", "y", "width", "height", "zIndex"],
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height",
+        "zIndex"
+      ],
       "properties": {
-        "x": { "type": "number", "minimum": 0, "maximum": 1 },
-        "y": { "type": "number", "minimum": 0, "maximum": 1 },
-        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
-        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
-        "zIndex": { "type": "integer", "minimum": -10, "maximum": 10 }
+        "x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "zIndex": {
+          "type": "integer",
+          "minimum": -10,
+          "maximum": 10
+        }
+      }
+    },
+    "anchorOffset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit"
+      ],
+      "properties": {
+        "value": {
+          "type": "number",
+          "minimum": -10000,
+          "maximum": 10000
+        },
+        "unit": {
+          "enum": [
+            "px",
+            "%"
+          ]
+        }
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "horizontal",
+        "vertical",
+        "offsetX",
+        "offsetY"
+      ],
+      "properties": {
+        "horizontal": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "vertical": {
+          "enum": [
+            "top",
+            "center",
+            "bottom"
+          ]
+        },
+        "offsetX": {
+          "$ref": "#/$defs/anchorOffset"
+        },
+        "offsetY": {
+          "$ref": "#/$defs/anchorOffset"
+        }
+      }
+    },
+    "legacyResponsiveRules": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/responsiveRules"
+        },
+        {
+          "properties": {
+            "wrap": false,
+            "minWidth": false,
+            "maxHeight": false,
+            "anchor": false,
+            "hidden": false,
+            "height": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "auto",
+                    "min-height",
+                    "aspect-ratio",
+                    "fixed",
+                    "viewport"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "legacySlotRules": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/slotRules"
+        },
+        {
+          "properties": {
+            "objectPosition": {
+              "pattern": "^(left|center|right) (top|center|bottom)$"
+            }
+          }
+        }
+      ]
+    },
+    "responsiveOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "schema2 有意修改的属性；缺失字段向上继承。长度和高度规则原子替换，四边间距和 placement 按成员继承。",
+      "properties": {
+        "hidden": {
+          "type": "boolean"
+        },
+        "display": {
+          "$ref": "#/$defs/responsiveRules/properties/display"
+        },
+        "direction": {
+          "$ref": "#/$defs/responsiveRules/properties/direction"
+        },
+        "order": {
+          "$ref": "#/$defs/responsiveRules/properties/order"
+        },
+        "width": {
+          "$ref": "#/$defs/size"
+        },
+        "height": {
+          "$ref": "#/$defs/heightRule"
+        },
+        "minWidth": {
+          "$ref": "#/$defs/length"
+        },
+        "maxWidth": {
+          "$ref": "#/$defs/length"
+        },
+        "minHeight": {
+          "$ref": "#/$defs/length"
+        },
+        "maxHeight": {
+          "$ref": "#/$defs/length"
+        },
+        "gap": {
+          "$ref": "#/$defs/length"
+        },
+        "radius": {
+          "$ref": "#/$defs/length"
+        },
+        "padding": {
+          "$ref": "#/$defs/boxSpacingOverride"
+        },
+        "margin": {
+          "$ref": "#/$defs/boxSpacingOverride"
+        },
+        "alignItems": {
+          "$ref": "#/$defs/responsiveRules/properties/alignItems"
+        },
+        "justifyContent": {
+          "$ref": "#/$defs/responsiveRules/properties/justifyContent"
+        },
+        "columns": {
+          "$ref": "#/$defs/responsiveRules/properties/columns"
+        },
+        "backgroundToken": {
+          "$ref": "#/$defs/responsiveRules/properties/backgroundToken"
+        },
+        "backgroundColor": {
+          "$ref": "#/$defs/responsiveRules/properties/backgroundColor"
+        },
+        "backgroundImage": {
+          "$ref": "#/$defs/responsiveRules/properties/backgroundImage"
+        },
+        "backgroundGradient": {
+          "$ref": "#/$defs/responsiveRules/properties/backgroundGradient"
+        },
+        "opacity": {
+          "$ref": "#/$defs/responsiveRules/properties/opacity"
+        },
+        "borderToken": {
+          "$ref": "#/$defs/responsiveRules/properties/borderToken"
+        },
+        "overflow": {
+          "$ref": "#/$defs/responsiveRules/properties/overflow"
+        },
+        "layoutMode": {
+          "$ref": "#/$defs/responsiveRules/properties/layoutMode"
+        },
+        "wrap": {
+          "$ref": "#/$defs/responsiveRules/properties/wrap"
+        },
+        "anchor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/anchor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "placement": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "x": {
+                  "$ref": "#/$defs/placement/properties/x"
+                },
+                "y": {
+                  "$ref": "#/$defs/placement/properties/y"
+                },
+                "width": {
+                  "$ref": "#/$defs/placement/properties/width"
+                },
+                "height": {
+                  "$ref": "#/$defs/placement/properties/height"
+                },
+                "zIndex": {
+                  "$ref": "#/$defs/placement/properties/zIndex"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "boxSpacingOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "top": {
+          "$ref": "#/$defs/length"
+        },
+        "right": {
+          "$ref": "#/$defs/length"
+        },
+        "bottom": {
+          "$ref": "#/$defs/length"
+        },
+        "left": {
+          "$ref": "#/$defs/length"
+        }
       }
     },
     "responsiveRules": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["display", "order", "width", "height"],
+      "required": [
+        "display",
+        "order",
+        "width",
+        "height"
+      ],
       "properties": {
-        "display": { "enum": ["block", "flex", "grid", "none"] },
-        "direction": { "enum": ["row", "column"] },
-        "order": { "type": "integer", "minimum": -100, "maximum": 100 },
-        "width": { "$ref": "#/$defs/size" },
-        "height": { "$ref": "#/$defs/heightRule" },
-        "maxWidth": { "$ref": "#/$defs/length" },
-        "minHeight": { "$ref": "#/$defs/length" },
-        "gap": { "$ref": "#/$defs/length" },
-        "padding": { "$ref": "#/$defs/boxSpacing" },
-        "margin": { "$ref": "#/$defs/boxSpacing" },
-        "alignItems": { "enum": ["start", "center", "end", "stretch"] },
-        "justifyContent": { "enum": ["start", "center", "end", "space-between", "space-around"] },
+        "hidden": {
+          "type": "boolean"
+        },
+        "display": {
+          "enum": [
+            "block",
+            "flex",
+            "grid",
+            "none"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "row",
+            "column"
+          ]
+        },
+        "wrap": {
+          "enum": [
+            "nowrap",
+            "wrap"
+          ]
+        },
+        "order": {
+          "type": "integer",
+          "minimum": -100,
+          "maximum": 100
+        },
+        "width": {
+          "$ref": "#/$defs/size"
+        },
+        "height": {
+          "$ref": "#/$defs/heightRule"
+        },
+        "maxWidth": {
+          "$ref": "#/$defs/length"
+        },
+        "minWidth": {
+          "$ref": "#/$defs/length"
+        },
+        "minHeight": {
+          "$ref": "#/$defs/length"
+        },
+        "maxHeight": {
+          "$ref": "#/$defs/length"
+        },
+        "gap": {
+          "$ref": "#/$defs/length"
+        },
+        "padding": {
+          "$ref": "#/$defs/boxSpacing"
+        },
+        "margin": {
+          "$ref": "#/$defs/boxSpacing"
+        },
+        "alignItems": {
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "stretch"
+          ]
+        },
+        "justifyContent": {
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "space-between",
+            "space-around"
+          ]
+        },
         "columns": {
           "type": "array",
           "minItems": 1,
           "maxItems": 12,
-          "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 }
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 100
+          }
         },
-        "backgroundToken": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$" },
-        "borderToken": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{0,63}$" },
-        "radius": { "$ref": "#/$defs/length" },
-        "overflow": { "enum": ["visible", "hidden", "clip"] },
-        "layoutMode": { "enum": ["flow", "free"] },
-        "placement": { "$ref": "#/$defs/placement" }
+        "backgroundToken": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]{0,63}$"
+        },
+        "backgroundColor": {
+          "type": "string",
+          "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+        },
+        "backgroundImage": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "backgroundGradient": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "from",
+            "to",
+            "angle"
+          ],
+          "properties": {
+            "from": {
+              "type": "string",
+              "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+            },
+            "to": {
+              "type": "string",
+              "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+            },
+            "angle": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 360
+            }
+          }
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "borderToken": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9.-]{0,63}$"
+        },
+        "radius": {
+          "$ref": "#/$defs/length"
+        },
+        "overflow": {
+          "enum": [
+            "visible",
+            "hidden",
+            "clip"
+          ]
+        },
+        "layoutMode": {
+          "enum": [
+            "flow",
+            "free"
+          ]
+        },
+        "placement": {
+          "$ref": "#/$defs/placement"
+        },
+        "anchor": {
+          "$ref": "#/$defs/anchor"
+        }
       }
     },
     "nodeProps": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "semanticTag": { "enum": ["section", "div", "header", "article", "aside", "nav"] },
-        "dividerStyle": { "enum": ["solid", "dashed", "dotted"] },
-        "spacerSize": { "$ref": "#/$defs/length" },
+        "semanticTag": {
+          "enum": [
+            "section",
+            "div",
+            "header",
+            "article",
+            "aside",
+            "nav"
+          ]
+        },
+        "dividerStyle": {
+          "enum": [
+            "solid",
+            "dashed",
+            "dotted"
+          ]
+        },
+        "spacerSize": {
+          "$ref": "#/$defs/length"
+        },
         "contentTemplateLayoutData": {
           "type": "object",
           "description": "成熟内容模板适配节点所锁定的母模板内部构图；页面实例不能覆盖。",
@@ -212,21 +1276,66 @@
     "instanceEditPolicy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["position", "size", "zIndex", "minWidthPercent", "maxWidthPercent", "maxOffsetPercent"],
+      "required": [
+        "position",
+        "size",
+        "zIndex",
+        "minWidthPercent",
+        "maxWidthPercent",
+        "maxOffsetPercent"
+      ],
       "properties": {
-        "position": { "type": "boolean" },
-        "size": { "type": "boolean" },
-        "zIndex": { "type": "boolean" },
-        "imageFit": { "type": "boolean" },
-        "imageFocus": { "type": "boolean" },
-        "typography": { "type": "boolean" },
-        "spacing": { "type": "boolean" },
-        "minWidthPercent": { "type": "number", "minimum": 10, "maximum": 100 },
-        "maxWidthPercent": { "type": "number", "minimum": 100, "maximum": 200 },
-        "maxOffsetPercent": { "type": "number", "minimum": 0, "maximum": 50 },
-        "minFontSizePx": { "type": "number", "minimum": 8, "maximum": 72 },
-        "maxFontSizePx": { "type": "number", "minimum": 12, "maximum": 200 },
-        "maxSpacingPx": { "type": "number", "minimum": 0, "maximum": 200 }
+        "position": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "boolean"
+        },
+        "zIndex": {
+          "type": "boolean"
+        },
+        "imageFit": {
+          "type": "boolean"
+        },
+        "imageFocus": {
+          "type": "boolean"
+        },
+        "typography": {
+          "type": "boolean"
+        },
+        "spacing": {
+          "type": "boolean"
+        },
+        "minWidthPercent": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 100
+        },
+        "maxWidthPercent": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 200
+        },
+        "maxOffsetPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "minFontSizePx": {
+          "type": "number",
+          "minimum": 8,
+          "maximum": 72
+        },
+        "maxFontSizePx": {
+          "type": "number",
+          "minimum": 12,
+          "maximum": 200
+        },
+        "maxSpacingPx": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200
+        }
       }
     },
     "nodeAuthoring": {
@@ -243,47 +1352,117 @@
     "node": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["nodeId", "type", "name", "childIds", "props", "responsive", "hidden"],
+      "required": [
+        "nodeId",
+        "type",
+        "name",
+        "childIds",
+        "props",
+        "responsive",
+        "hidden"
+      ],
       "properties": {
-        "nodeId": { "$ref": "#/$defs/stableId" },
-        "type": { "$ref": "#/$defs/nodeType" },
-        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
-        "slotId": { "$ref": "#/$defs/stableId" },
+        "nodeId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "type": {
+          "$ref": "#/$defs/nodeType"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "slotId": {
+          "$ref": "#/$defs/stableId"
+        },
         "childIds": {
           "type": "array",
           "maxItems": 100,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/stableId" }
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
         },
-        "props": { "$ref": "#/$defs/nodeProps" },
-        "authoring": { "$ref": "#/$defs/nodeAuthoring" },
-        "instanceEditPolicy": { "$ref": "#/$defs/instanceEditPolicy" },
+        "props": {
+          "$ref": "#/$defs/nodeProps"
+        },
+        "authoring": {
+          "$ref": "#/$defs/nodeAuthoring"
+        },
+        "instanceEditPolicy": {
+          "$ref": "#/$defs/instanceEditPolicy"
+        },
         "responsive": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["desktop", "mobile"],
+          "required": [
+            "desktop",
+            "mobile"
+          ],
           "properties": {
-            "desktop": { "$ref": "#/$defs/responsiveRules" },
-            "mobile": { "$ref": "#/$defs/responsiveRules" }
+            "desktop": {
+              "$ref": "#/$defs/responsiveRules"
+            },
+            "tablet": {
+              "$ref": "#/$defs/responsiveOverride"
+            },
+            "mobile": {
+              "$ref": "#/$defs/responsiveOverride"
+            }
           }
         },
-        "hidden": { "type": "boolean" }
+        "hidden": {
+          "type": "boolean"
+        }
       }
     },
     "slotValidation": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "minLength": { "type": "integer", "minimum": 0, "maximum": 100000 },
-        "maxLength": { "type": "integer", "minimum": 1, "maximum": 100000 },
-        "minItems": { "type": "integer", "minimum": 0, "maximum": 100 },
-        "maxItems": { "type": "integer", "minimum": 1, "maximum": 100 },
-        "recommendedWidth": { "type": "integer", "minimum": 1, "maximum": 20000 },
-        "recommendedHeight": { "type": "integer", "minimum": 1, "maximum": 20000 },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "minItems": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "recommendedWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000
+        },
+        "recommendedHeight": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20000
+        },
         "allowedProtocols": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "enum": ["https", "page", "product", "category", "none"] }
+          "items": {
+            "enum": [
+              "https",
+              "page",
+              "product",
+              "category",
+              "none"
+            ]
+          }
         }
       }
     },
@@ -291,16 +1470,78 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "aspectRatio": { "$ref": "#/$defs/ratioLabel" },
-        "objectFit": { "enum": ["cover", "contain", "fill"] },
-        "objectPosition": { "type": "string", "pattern": "^(left|center|right) (top|center|bottom)$" },
-        "fontRole": { "enum": ["display", "heading", "body", "caption", "action"] },
-        "fontSize": { "$ref": "#/$defs/length" },
-        "fontWeight": { "type": "integer", "minimum": 100, "maximum": 900, "multipleOf": 100 },
-        "lineHeight": { "type": "number", "minimum": 0.8, "maximum": 3 },
-        "textAlign": { "enum": ["left", "center", "right"] },
-        "maxLines": { "type": "integer", "minimum": 1, "maximum": 20 },
-        "overflow": { "enum": ["clip", "ellipsis", "wrap"] }
+        "fontFamily": {
+          "enum": [
+            "system",
+            "serif",
+            "sans"
+          ]
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$"
+        },
+        "letterSpacing": {
+          "type": "number",
+          "minimum": -10,
+          "maximum": 100
+        },
+        "aspectRatio": {
+          "$ref": "#/$defs/ratioLabel"
+        },
+        "objectFit": {
+          "enum": [
+            "cover",
+            "contain",
+            "fill"
+          ]
+        },
+        "objectPosition": {
+          "type": "string",
+          "pattern": "^((left|center|right) (top|center|bottom)|((100(\\.0+)?|[0-9]{1,2}(\\.[0-9]+)?)%) ((100(\\.0+)?|[0-9]{1,2}(\\.[0-9]+)?)%))$"
+        },
+        "fontRole": {
+          "enum": [
+            "display",
+            "heading",
+            "body",
+            "caption",
+            "action"
+          ]
+        },
+        "fontSize": {
+          "$ref": "#/$defs/length"
+        },
+        "fontWeight": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 900,
+          "multipleOf": 100
+        },
+        "lineHeight": {
+          "type": "number",
+          "minimum": 0.8,
+          "maximum": 3
+        },
+        "textAlign": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "maxLines": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "overflow": {
+          "enum": [
+            "clip",
+            "ellipsis",
+            "wrap"
+          ]
+        }
       }
     },
     "slot": {
@@ -319,50 +1560,142 @@
         "mobileRules"
       ],
       "properties": {
-        "slotId": { "$ref": "#/$defs/stableId" },
-        "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9_]{0,63}$" },
-        "type": { "$ref": "#/$defs/slotType" },
-        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
-        "required": { "type": "boolean" },
-        "editable": { "type": "boolean" },
-        "hideable": { "type": "boolean" },
+        "slotId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][A-Za-z0-9_]{0,63}$"
+        },
+        "type": {
+          "$ref": "#/$defs/slotType"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "semanticRole": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "editable": {
+          "type": "boolean"
+        },
+        "hideable": {
+          "type": "boolean"
+        },
         "emptyPolicy": {
           "description": "页面实例显式清空内容时的公开渲染策略；hide 隐藏槽位，use-default 回退母模板默认内容。未声明时按 hide 处理。",
-          "enum": ["hide", "use-default"]
+          "enum": [
+            "hide",
+            "use-default"
+          ]
         },
-        "validation": { "$ref": "#/$defs/slotValidation" },
-        "desktopRules": { "$ref": "#/$defs/slotRules" },
-        "mobileRules": { "$ref": "#/$defs/slotRules" }
+        "validation": {
+          "$ref": "#/$defs/slotValidation"
+        },
+        "desktopRules": {
+          "$ref": "#/$defs/slotRules"
+        },
+        "tabletRules": {
+          "$ref": "#/$defs/slotRules"
+        },
+        "mobileRules": {
+          "$ref": "#/$defs/slotRules"
+        }
       }
     },
     "templateInstanceLayoutOverride": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "offsetXPercent": { "type": "number", "minimum": -50, "maximum": 50 },
-        "offsetYPercent": { "type": "number", "minimum": -50, "maximum": 50 },
-        "widthPercent": { "type": "number", "minimum": 10, "maximum": 200 },
-        "zIndex": { "type": "integer", "minimum": -10, "maximum": 10 },
-        "objectFit": { "enum": ["cover", "contain", "fill"] },
-        "imageScalePercent": { "type": "number", "minimum": 100, "maximum": 200 },
-        "focusXPercent": { "type": "number", "minimum": 0, "maximum": 100 },
-        "focusYPercent": { "type": "number", "minimum": 0, "maximum": 100 },
-        "fontSizePx": { "type": "number", "minimum": 8, "maximum": 200 },
-        "textAlign": { "enum": ["left", "center", "right"] },
-        "marginTopPx": { "type": "number", "minimum": 0, "maximum": 200 },
-        "marginBottomPx": { "type": "number", "minimum": 0, "maximum": 200 }
+        "offsetXPercent": {
+          "type": "number",
+          "minimum": -50,
+          "maximum": 50
+        },
+        "offsetYPercent": {
+          "type": "number",
+          "minimum": -50,
+          "maximum": 50
+        },
+        "widthPercent": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 200
+        },
+        "zIndex": {
+          "type": "integer",
+          "minimum": -10,
+          "maximum": 10
+        },
+        "objectFit": {
+          "enum": [
+            "cover",
+            "contain",
+            "fill"
+          ]
+        },
+        "imageScalePercent": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 200
+        },
+        "focusXPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "focusYPercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "fontSizePx": {
+          "type": "number",
+          "minimum": 8,
+          "maximum": 200
+        },
+        "textAlign": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "marginTopPx": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "marginBottomPx": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200
+        }
       }
     },
     "templateInstanceLayoutOverridesByNodeId": {
       "type": "object",
       "maxProperties": 100,
-      "propertyNames": { "$ref": "#/$defs/stableId" },
+      "propertyNames": {
+        "$ref": "#/$defs/stableId"
+      },
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "desktop": { "$ref": "#/$defs/templateInstanceLayoutOverride" },
-          "mobile": { "$ref": "#/$defs/templateInstanceLayoutOverride" }
+          "desktop": {
+            "$ref": "#/$defs/templateInstanceLayoutOverride"
+          },
+          "mobile": {
+            "$ref": "#/$defs/templateInstanceLayoutOverride"
+          }
         }
       }
     },
@@ -379,22 +1712,37 @@
         "isVisible"
       ],
       "properties": {
-        "instanceId": { "$ref": "#/$defs/stableId" },
-        "templateId": { "$ref": "#/$defs/stableId" },
-        "templateVersion": { "type": "integer", "minimum": 1 },
+        "instanceId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "templateId": {
+          "$ref": "#/$defs/stableId"
+        },
+        "templateVersion": {
+          "type": "integer",
+          "minimum": 1
+        },
         "contentBySlotId": {
           "type": "object",
           "maxProperties": 250,
-          "propertyNames": { "$ref": "#/$defs/stableId" }
+          "propertyNames": {
+            "$ref": "#/$defs/stableId"
+          }
         },
-        "layoutOverridesByNodeId": { "$ref": "#/$defs/templateInstanceLayoutOverridesByNodeId" },
+        "layoutOverridesByNodeId": {
+          "$ref": "#/$defs/templateInstanceLayoutOverridesByNodeId"
+        },
         "hiddenSlotIds": {
           "type": "array",
           "maxItems": 250,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/stableId" }
+          "items": {
+            "$ref": "#/$defs/stableId"
+          }
         },
-        "isVisible": { "type": "boolean" }
+        "isVisible": {
+          "type": "boolean"
+        }
       }
     },
     "nodeType": {
@@ -417,30 +1765,7 @@
         "IconSlot",
         "ProductSlot",
         "CollectionSlot",
-        "Video",
-        "Carousel",
-        "Hotspot",
-        "BeforeAfter",
-        "Appointment",
-        "ProductCard",
-        "ProductCollection",
-        "CategoryCollection",
-        "HeroTemplate",
-        "FullBleedTemplate",
-        "SinglePosterTemplate",
-        "DoublePosterTemplate",
-        "TextBannerTemplate",
-        "JourneyTemplate",
-        "GalleryTemplate",
-        "LookbookTemplate",
-        "SceneShoppingTemplate",
-        "BrandPointsTemplate",
-        "ServicePromisesTemplate",
-        "CertificatesTemplate",
-        "StoreInfoTemplate",
-        "TestimonialsTemplate",
-        "LimitedEventTemplate",
-        "CraftDetailsTemplate"
+        "HeroTemplate"
       ]
     },
     "slotType": {
@@ -455,75 +1780,255 @@
         "icon",
         "product",
         "collection",
-        "video",
-        "carousel",
-        "hotspot",
-        "beforeAfter",
-        "appointment",
-        "productCard",
-        "productCollection",
-        "categoryCollection",
-        "heroTemplate",
-        "fullBleedTemplate",
-        "singlePosterTemplate",
-        "doublePosterTemplate",
-        "textBannerTemplate",
-        "journeyTemplate",
-        "galleryTemplate",
-        "lookbookTemplate",
-        "sceneShoppingTemplate",
-        "brandPointsTemplate",
-        "servicePromisesTemplate",
-        "certificatesTemplate",
-        "storeInfoTemplate",
-        "testimonialsTemplate",
-        "limitedEventTemplate",
-        "craftDetailsTemplate"
+        "heroTemplate"
       ]
     }
   },
   "x-nodeRegistry": {
-    "Section": { "label": "页面区段", "kind": "structure", "rootOnly": true, "allowedParents": [], "canHaveChildren": true },
-    "Container": { "label": "内容容器", "kind": "structure", "rootOnly": false, "allowedParents": ["Section", "Column", "Stack", "Grid"], "canHaveChildren": true },
-    "Grid": { "label": "网格", "kind": "structure", "rootOnly": false, "allowedParents": ["Section", "Container", "Column", "Stack"], "canHaveChildren": true },
-    "Row": { "label": "横向行", "kind": "structure", "rootOnly": false, "allowedParents": ["Section", "Container", "Column", "Stack"], "canHaveChildren": true },
-    "Column": { "label": "纵向列", "kind": "structure", "rootOnly": false, "allowedParents": ["Row", "Grid"], "canHaveChildren": true },
-    "Stack": { "label": "堆叠容器", "kind": "structure", "rootOnly": false, "allowedParents": ["Section", "Container", "Column", "Grid"], "canHaveChildren": true },
-    "Spacer": { "label": "留白间距", "kind": "structure", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "Divider": { "label": "分隔线", "kind": "structure", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "ImageSlot": { "label": "图片槽位", "kind": "slot", "slotType": "image", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "HeadingSlot": { "label": "标题槽位", "kind": "slot", "slotType": "heading", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "TextSlot": { "label": "文字槽位", "kind": "slot", "slotType": "text", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "RichTextSlot": { "label": "富文本槽位", "kind": "slot", "slotType": "richText", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "ButtonSlot": { "label": "按钮槽位", "kind": "slot", "slotType": "button", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "LinkSlot": { "label": "链接槽位", "kind": "slot", "slotType": "link", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "BadgeSlot": { "label": "徽标槽位", "kind": "slot", "slotType": "badge", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "IconSlot": { "label": "图标槽位", "kind": "slot", "slotType": "icon", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "ProductSlot": { "label": "商品槽位", "kind": "slot", "slotType": "product", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "CollectionSlot": { "label": "集合槽位", "kind": "slot", "slotType": "collection", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "Video": { "label": "视频组件", "kind": "slot", "slotType": "video", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "Carousel": { "label": "轮播组件", "kind": "slot", "slotType": "carousel", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "Hotspot": { "label": "热区组件", "kind": "slot", "slotType": "hotspot", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "BeforeAfter": { "label": "前后对比组件", "kind": "slot", "slotType": "beforeAfter", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "Appointment": { "label": "预约入口组件", "kind": "slot", "slotType": "appointment", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "ProductCard": { "label": "单品展示组件", "kind": "slot", "slotType": "productCard", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "ProductCollection": { "label": "商品集合组件", "kind": "slot", "slotType": "productCollection", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "CategoryCollection": { "label": "分类集合组件", "kind": "slot", "slotType": "categoryCollection", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "HeroTemplate": { "label": "首屏主视觉组件", "kind": "slot", "slotType": "heroTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "FullBleedTemplate": { "label": "全屏出血图组件", "kind": "slot", "slotType": "fullBleedTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "SinglePosterTemplate": { "label": "单图海报组件", "kind": "slot", "slotType": "singlePosterTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "DoublePosterTemplate": { "label": "双图海报组件", "kind": "slot", "slotType": "doublePosterTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "TextBannerTemplate": { "label": "文字横幅组件", "kind": "slot", "slotType": "textBannerTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "JourneyTemplate": { "label": "定制流程组件", "kind": "slot", "slotType": "journeyTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "GalleryTemplate": { "label": "作品画廊组件", "kind": "slot", "slotType": "galleryTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "LookbookTemplate": { "label": "佩戴灵感组件", "kind": "slot", "slotType": "lookbookTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "SceneShoppingTemplate": { "label": "场景选购组件", "kind": "slot", "slotType": "sceneShoppingTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "BrandPointsTemplate": { "label": "品牌要点组件", "kind": "slot", "slotType": "brandPointsTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "ServicePromisesTemplate": { "label": "服务承诺组件", "kind": "slot", "slotType": "servicePromisesTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "CertificatesTemplate": { "label": "资质证书组件", "kind": "slot", "slotType": "certificatesTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "StoreInfoTemplate": { "label": "门店信息组件", "kind": "slot", "slotType": "storeInfoTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "TestimonialsTemplate": { "label": "评价实拍组件", "kind": "slot", "slotType": "testimonialsTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "LimitedEventTemplate": { "label": "限时活动组件", "kind": "slot", "slotType": "limitedEventTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false },
-    "CraftDetailsTemplate": { "label": "工艺细节组件", "kind": "slot", "slotType": "craftDetailsTemplate", "rootOnly": false, "allowedParents": ["Container", "Grid", "Row", "Column", "Stack"], "canHaveChildren": false }
+    "Section": {
+      "label": "页面区段",
+      "kind": "structure",
+      "rootOnly": true,
+      "allowedParents": [],
+      "canHaveChildren": true
+    },
+    "Container": {
+      "label": "内容容器",
+      "kind": "structure",
+      "rootOnly": false,
+      "allowedParents": [
+        "Section",
+        "Column",
+        "Stack",
+        "Grid"
+      ],
+      "canHaveChildren": true
+    },
+    "Grid": {
+      "label": "网格",
+      "kind": "structure",
+      "rootOnly": false,
+      "allowedParents": [
+        "Section",
+        "Container",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": true
+    },
+    "Row": {
+      "label": "横向行",
+      "kind": "structure",
+      "rootOnly": false,
+      "allowedParents": [
+        "Section",
+        "Container",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": true
+    },
+    "Column": {
+      "label": "纵向列",
+      "kind": "structure",
+      "rootOnly": false,
+      "allowedParents": [
+        "Row",
+        "Grid"
+      ],
+      "canHaveChildren": true
+    },
+    "Stack": {
+      "label": "堆叠容器",
+      "kind": "structure",
+      "rootOnly": false,
+      "allowedParents": [
+        "Section",
+        "Container",
+        "Column",
+        "Grid"
+      ],
+      "canHaveChildren": true
+    },
+    "Spacer": {
+      "label": "留白间距",
+      "kind": "structure",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "Divider": {
+      "label": "分隔线",
+      "kind": "structure",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "ImageSlot": {
+      "label": "图片槽位",
+      "kind": "slot",
+      "slotType": "image",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "HeadingSlot": {
+      "label": "标题槽位",
+      "kind": "slot",
+      "slotType": "heading",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "TextSlot": {
+      "label": "文字槽位",
+      "kind": "slot",
+      "slotType": "text",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "RichTextSlot": {
+      "label": "富文本槽位",
+      "kind": "slot",
+      "slotType": "richText",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "ButtonSlot": {
+      "label": "按钮槽位",
+      "kind": "slot",
+      "slotType": "button",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "LinkSlot": {
+      "label": "链接槽位",
+      "kind": "slot",
+      "slotType": "link",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "BadgeSlot": {
+      "label": "徽标槽位",
+      "kind": "slot",
+      "slotType": "badge",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "IconSlot": {
+      "label": "图标槽位",
+      "kind": "slot",
+      "slotType": "icon",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "ProductSlot": {
+      "label": "商品槽位",
+      "kind": "slot",
+      "slotType": "product",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "CollectionSlot": {
+      "label": "集合槽位",
+      "kind": "slot",
+      "slotType": "collection",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    },
+    "HeroTemplate": {
+      "label": "首屏主视觉组件",
+      "kind": "slot",
+      "slotType": "heroTemplate",
+      "rootOnly": false,
+      "allowedParents": [
+        "Container",
+        "Grid",
+        "Row",
+        "Column",
+        "Stack"
+      ],
+      "canHaveChildren": false
+    }
   }
 }

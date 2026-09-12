@@ -22,6 +22,13 @@ let publishedTemplatesCache: PublishedDynamicTemplateResource[] | null = null;
 let publishedTemplatesCachedAt = 0;
 let publishedTemplatesRequest: Promise<PublishedDynamicTemplateResource[]> | null = null;
 
+type TemplateVersionCheckState =
+  | { status: "loading" }
+  | { status: "catalog-error"; message: string }
+  | { status: "catalog-missing" }
+  | { status: "current"; latest: PublishedDynamicTemplateResource }
+  | { status: "upgrade-available"; latest: PublishedDynamicTemplateResource };
+
 async function loadPublishedTemplates(forceRefresh = false) {
   if (publishedTemplatesRequest) return publishedTemplatesRequest;
   if (
@@ -61,39 +68,51 @@ export default function DynamicTemplateUpgradePanel({
   ) => void;
 }) {
   const { message } = AntdApp.useApp();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [latest, setLatest] = useState<PublishedDynamicTemplateResource | null>(null);
+  const [versionCheck, setVersionCheck] = useState<TemplateVersionCheckState>({ status: "loading" });
+  const [reloadRequest, setReloadRequest] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const refreshLatest = (forceRefresh = false) => {
-      setLoading(true);
-      setError(null);
+      setVersionCheck({ status: "loading" });
       void loadPublishedTemplates(forceRefresh)
         .then((templates) => {
           if (cancelled) return;
-          setLatest(templates.find((item) => item.templateId === instance.templateId) ?? null);
+          const latest = templates.find((item) => item.templateId === instance.templateId);
+          if (!latest) {
+            setVersionCheck({ status: "catalog-missing" });
+            return;
+          }
+          setVersionCheck({
+            status: latest.version > instance.templateVersion ? "upgrade-available" : "current",
+            latest,
+          });
         })
         .catch(() => {
-          if (!cancelled) setError("暂时无法检查模板新版本，当前页面版本未改变");
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) {
+            setVersionCheck({
+              status: "catalog-error",
+              message: "暂时无法检查模板新版本，当前页面版本未改变",
+            });
+          }
         });
     };
-    refreshLatest();
+    refreshLatest(reloadRequest > 0);
     const refreshAfterCatalogChange = () => refreshLatest(true);
     window.addEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
     return () => {
       cancelled = true;
       window.removeEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
     };
-  }, [instance.templateId, instance.templateVersion]);
+  }, [instance.templateId, instance.templateVersion, reloadRequest]);
+
+  const latest = versionCheck.status === "current" || versionCheck.status === "upgrade-available"
+    ? versionCheck.latest
+    : null;
 
   const upgrade = useMemo(() => (
-    latest && latest.version > instance.templateVersion
+    versionCheck.status === "upgrade-available" && latest
       ? analyzeDynamicTemplateUpgrade({
           currentDefinition: definition,
           targetDefinition: latest.definition,
@@ -101,14 +120,43 @@ export default function DynamicTemplateUpgradePanel({
           instance,
         })
       : null
-  ), [definition, instance, latest]);
+  ), [definition, instance, latest, versionCheck.status]);
 
-  if (loading) {
+  if (versionCheck.status === "loading") {
     return <div className="homepage-editor__properties-hint" role="status"><Spin size="small" /> 正在检查模板版本…</div>;
   }
-  if (error) return <Alert type="warning" showIcon message={error} />;
+  if (versionCheck.status === "catalog-error") {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message={versionCheck.message}
+        action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
+      />
+    );
+  }
+  if (versionCheck.status === "catalog-missing") {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message="目录未找到当前模板，无法判断是否最新"
+        description={`当前页面继续锁定 ${instance.templateId} v${instance.templateVersion}，页面草稿未修改。`}
+        action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
+      />
+    );
+  }
+  if (versionCheck.status === "current") {
+    return (
+      <div className="homepage-editor__properties-hint" role="status">
+        {versionCheck.latest.version === instance.templateVersion
+          ? `当前已锁定最新可用版本 v${instance.templateVersion}。`
+          : `当前页面锁定 v${instance.templateVersion}，目录最新可用版本为 v${versionCheck.latest.version}；无需升级。`}
+      </div>
+    );
+  }
   if (!upgrade || !latest) {
-    return <div className="homepage-editor__properties-hint" role="status">当前已锁定最新可用版本。</div>;
+    return null;
   }
 
   const applyUpgrade = () => {
@@ -193,7 +241,7 @@ export function DynamicTemplateUpgradeReviewModal({
             aria-label={`审查实例 ${plan.instanceId}：保留 ${plan.analysis.preservedChanges.length}，待填 ${plan.analysis.pendingRequiredSlots.length}，阻断 ${plan.analysis.blockers.length}`}
             onClick={() => setSelectedIndex(index)}
           >
-            <span>{plan.analysis.nextProps.moduleName || "动态模板实例"} · {plan.instanceId}</span>
+            <span>{plan.analysis.nextProps.moduleName || "模板实例"} · {plan.instanceId}</span>
             <small>
               保留 {plan.analysis.preservedChanges.length} · 待填 {plan.analysis.pendingRequiredSlots.length} · 阻断 {plan.analysis.blockers.length}
             </small>

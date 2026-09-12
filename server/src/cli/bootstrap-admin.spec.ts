@@ -55,17 +55,19 @@ async function expectBootstrapError(
   );
 }
 
-test("首管理员输入保留用户名限制，但密码只校验 12-64 位长度", () => {
+test("首管理员输入保留用户名限制，但密码只校验 6-18 位长度", () => {
   assert.throws(
     () => validateFirstAdminInput({ username: "admin", password: "Strong!Pass123" }),
     (error: unknown) =>
       error instanceof FirstAdminBootstrapError
       && error.code === "bootstrap-username-invalid",
   );
-  assert.deepEqual(
-    validateFirstAdminInput({ username: "owner", password: "123456789012" }),
-    { username: "owner", password: "123456789012", realName: undefined },
-  );
+  for (const password of ["aB3!xy", "x".repeat(18)]) {
+    assert.deepEqual(
+      validateFirstAdminInput({ username: "owner", password }),
+      { username: "owner", password, realName: undefined },
+    );
+  }
   assert.deepEqual(
     validateFirstAdminInput({ username: "owner", password: "owner1owner1" }),
     { username: "owner", password: "owner1owner1", realName: undefined },
@@ -77,7 +79,7 @@ test("首管理员输入保留用户名限制，但密码只校验 12-64 位长�
       && error.code === "bootstrap-password-invalid",
   );
   assert.throws(
-    () => validateFirstAdminInput({ username: "owner", password: "1".repeat(65) }),
+    () => validateFirstAdminInput({ username: "owner", password: "1".repeat(19) }),
     (error: unknown) =>
       error instanceof FirstAdminBootstrapError
       && error.code === "bootstrap-password-invalid",

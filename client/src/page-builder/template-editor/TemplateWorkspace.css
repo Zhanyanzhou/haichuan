@@ -903,6 +903,37 @@
   outline-offset: 2px;
 }
 
+/* 空结构仍保留真实 auto 高度；这里只扩大模板设计画布中的操作面。
+   根节点由独立空白起步区承接，因此仅处理根节点内部的空区域/分组。 */
+.hc-dynamic-template[data-dynamic-template-mode="editor"][data-dynamic-template-editor-surface="template-definition"]
+  [data-template-node-id]
+  [data-template-empty-structure="true"] {
+  position: relative;
+  min-height: clamp(120px, 14vw, 240px);
+  outline: 1px dashed rgb(51 95 125 / 45%);
+  outline-offset: -1px;
+  background: rgb(238 244 247 / 28%);
+}
+
+.hc-dynamic-template[data-dynamic-template-mode="editor"][data-dynamic-template-editor-surface="template-definition"]
+  [data-template-node-id]
+  [data-template-empty-structure="true"]::before {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  max-width: calc(100% - 32px);
+  padding: 5px 8px;
+  border-radius: 3px;
+  color: #5f6568;
+  background: rgb(255 255 255 / 88%);
+  content: "空内容区域 · 使用上方“＋ 添加对象”继续";
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
 .template-editor__editable-overlay-selection {
   z-index: 1000;
   border: 2px solid #335f7d;
@@ -910,8 +941,7 @@
   outline-offset: 0;
 }
 
-.template-editor__editable-overlay-label,
-.template-editor__editable-overlay-selection-label {
+.template-editor__editable-overlay-label {
   min-height: 24px;
   max-width: min(220px, 72vw);
   display: inline-flex;
@@ -929,28 +959,6 @@
   white-space: nowrap;
 }
 
-.template-editor__editable-overlay-selection-label {
-  position: absolute;
-  right: auto;
-  bottom: auto;
-}
-
-.template-editor__editable-overlay-actions {
-  position: absolute;
-  z-index: 2;
-  top: 4px;
-  right: 4px;
-  display: inline-flex;
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid rgb(24 26 27 / 18%);
-  border-radius: 4px;
-  background: rgb(255 255 255 / 96%);
-  box-shadow: 0 2px 8px rgb(24 26 27 / 12%);
-  pointer-events: auto;
-}
-
-.template-editor__editable-overlay-actions button,
 .template-editor__editable-overlay-move,
 .template-editor__editable-overlay-resize {
   box-sizing: border-box;
@@ -965,8 +973,6 @@
   pointer-events: auto;
 }
 
-.template-editor__editable-overlay-actions button:hover,
-.template-editor__editable-overlay-actions button:focus-visible,
 .template-editor__editable-overlay-move:hover,
 .template-editor__editable-overlay-move:focus-visible,
 .template-editor__editable-overlay-resize:hover,
@@ -992,10 +998,33 @@
   position: absolute;
   z-index: 4;
   margin: -14px 0 0 -14px;
-  border-color: #335f7d;
-  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
   cursor: nwse-resize;
   touch-action: none;
+}
+
+/* 可见标记保持克制，命中区域仍为 28px，不随画布倍率缩小。 */
+.template-editor__editable-overlay-resize::before {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--adm-text, #181a1b);
+  border-radius: 2px;
+  background: var(--adm-content-bg, #fff);
+  content: "";
+}
+
+.template-editor__editable-overlay-resize:hover,
+.template-editor__editable-overlay-resize:focus-visible {
+  background: transparent;
+}
+
+.template-editor__editable-overlay-resize:hover::before,
+.template-editor__editable-overlay-resize:focus-visible::before {
+  background: var(--adm-text, #181a1b);
 }
 
 .template-editor__editable-overlay-resize[data-resize-direction="n"],
@@ -1015,14 +1044,12 @@
 
 @media (pointer: coarse) {
   .template-editor__editable-overlay-hit,
-  .template-editor__editable-overlay-actions button,
   .template-editor__editable-overlay-move,
   .template-editor__editable-overlay-resize {
     min-width: 45px;
     min-height: 45px;
   }
 
-  .template-editor__editable-overlay-actions button,
   .template-editor__editable-overlay-move,
   .template-editor__editable-overlay-resize {
     width: 45px;
@@ -1672,11 +1699,11 @@
   color: #181A1B;
   background: #FFFFFF;
   text-align: center;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .template-editor__canvas-empty-state > strong {
-  font-size: clamp(30px, 3.75vw, 72px);
+  font-size: clamp(18px, 2vw, 28px);
   font-weight: 600;
   line-height: 1.25;
 }
@@ -1685,8 +1712,90 @@
   max-width: min(1040px, 84vw);
   margin: 0;
   color: #6E7477;
-  font-size: clamp(18px, 1.67vw, 32px);
+  font-size: clamp(13px, 1.2vw, 18px);
   line-height: 1.45;
+}
+
+.template-editor__canvas-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.template-editor__canvas-empty-actions .ant-btn {
+  min-height: 40px;
+}
+
+.template-editor__layout-starters {
+  display: grid;
+  gap: 10px;
+  width: min(340px, calc(100vw - 56px));
+  color: var(--adm-text);
+}
+
+.template-editor__layout-starters p {
+  margin: 0;
+  color: var(--adm-muted);
+}
+
+.template-editor__layout-starters > button:not(.ant-btn) {
+  display: grid;
+  gap: 4px;
+  min-height: 56px;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--adm-text);
+  background: var(--adm-surface, #FFFFFF);
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.template-editor__layout-starters button:focus-visible {
+  outline: 2px solid var(--adm-text);
+  outline-offset: 2px;
+}
+
+.template-editor__layout-starters > button > span {
+  color: var(--adm-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+@media (max-width: 520px) {
+  .template-editor__toolbar-new {
+    display: none;
+  }
+}
+
+.template-editor__mobile-settings {
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.template-editor__mobile-settings:focus-visible {
+  outline: 2px solid var(--adm-text-strong);
+  outline-offset: 2px;
+}
+
+.template-editor__mobile-settings small {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+@media (max-width: 767px) {
+  .template-editor__toolbar-settings {
+    display: none;
+  }
+}
+
+@media (min-width: 521px) {
+  .template-editor__toolbar-new-menu-item {
+    display: none !important;
+  }
 }
 
 .template-editor__inspector .homepage-editor__inspector-header {
@@ -2487,6 +2596,26 @@
   padding: 16px 0 0;
 }
 
+/* 媒体上传区与链接各占一行，避免 Upload 的百分比高度挤出后续字段。 */
+.template-editor__inspector .homepage-editor__media-picker {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.template-editor__inspector .homepage-editor__media-picker > .ant-upload-wrapper {
+  display: block;
+  min-width: 0;
+}
+
+.template-editor__inspector .homepage-editor__media-picker .ant-upload-drag {
+  height: auto;
+}
+
+.template-editor__inspector .homepage-editor__media-alt-actions {
+  align-items: center;
+}
+
 .template-editor__responsive-source-actions {
   display: grid;
   gap: 10px;
@@ -2509,6 +2638,18 @@
   gap: 8px;
 }
 
+.template-editor__responsive-group-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.template-editor__responsive-group-picker label { display: flex; gap: 6px; align-items: center; }
+
 .template-editor__validation-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2519,6 +2660,43 @@
   height: auto;
   padding: 0;
   font-size: 11px;
+}
+
+.template-editor__publish-review-summary {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.template-editor__publish-review-summary > div {
+  display: grid;
+  grid-template-columns: minmax(68px, 0.35fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.template-editor__publish-review-summary dt {
+  color: #5f6568;
+}
+
+.template-editor__publish-review-summary dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.template-editor__publish-review-actions {
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.template-editor__publish-review-actions .ant-btn {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.template-editor__publish-failure-copy {
+  color: #8c3f3b;
 }
 
 .template-editor__inspector .homepage-editor__inspector-field {
@@ -2884,23 +3062,138 @@
 .template-editor__editable-overlay-box[data-overlay-locked="true"] { border-style: dashed; opacity: 0.65; }
 .template-editor__editable-overlay-box[data-overlay-out-of-bounds="true"] { outline: 2px solid #7A531A; }
 .template-editor__editable-overlay-box[data-overlay-dragging="true"] { background: rgb(51 95 125 / 10%); }
-.template-editor__editable-overlay-actions { display: block; max-width: 220px; }
-.template-editor__editable-overlay-actions summary { padding: 5px 7px; cursor: pointer; white-space: nowrap; font-size: 12px; }
-.template-editor__editable-overlay-action-list { display: grid; gap: 3px; max-height: 260px; overflow: auto; }
-.template-editor__editable-overlay-actions .template-editor__editable-overlay-action-list button {
-  width: auto;
-  height: auto;
-  min-height: 30px;
-  padding: 5px 8px;
-  text-align: left;
-  font-size: 12px;
-  white-space: normal;
+
+.template-editor__batch-inspector {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
 }
 
+.template-editor__batch-targets {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.template-editor__batch-targets > div,
+.template-editor__publish-selection > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__batch-targets span,
+.template-editor__batch-field-state span {
+  color: var(--adm-muted);
+  font-size: 12px;
+}
+
+.template-editor__batch-field {
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--adm-line);
+  border-radius: 8px;
+}
+
+.template-editor__batch-field-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.template-editor__batch-field input,
+.template-editor__batch-field select {
+  width: 100%;
+}
+
+.template-editor__batch-field-exclusion,
+.template-editor__selection-exclusion,
+.template-editor__batch-inspector .template-editor__command-error {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  color: var(--adm-text);
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__batch-inspector .template-editor__command-error {
+  display: grid;
+  gap: 4px;
+  border-color: #8C3F3B;
+  color: #8C3F3B;
+  background: #FAF0EF;
+}
+
+.template-editor__publish-selection {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
 /* 可视化构图工作台：仅调整模板设计，不影响页面装修的目录与属性面板。 */
 .template-editor__body > aside, .template-editor__body > aside :is(button, input, select, textarea), .template-editor__toolbar { font-family: var(--puck-font-family, "Microsoft YaHei", Arial, sans-serif); }
 @media (min-width: 1200px) {
   .template-editor__canvas-scroll.homepage-editor__canvas-scroll { padding-top: 48px; }
+}
+[data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-preview-wrap {
+  aspect-ratio: auto;
+  min-height: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+[data-unified-template-library="design"] .template-editor__catalog-preview-shell {
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: 112px auto;
+  gap: 6px;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+}
+[data-unified-template-library="design"] .template-editor__catalog-artboard-stage {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  background: var(--adm-neutral-bg);
+}
+[data-unified-template-library="design"] .template-editor__catalog-preview-placeholder {
+  min-height: 0;
+  height: 136px;
+}
+.template-editor__catalog-dimensions {
+  position: static;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  color: var(--adm-muted);
+  background: transparent;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+[data-unified-template-library="design"] .unified-template-library__scroll.is-double .template-editor__catalog-preview-shell {
+  grid-template-rows: 72px auto;
 }
 [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-card {
   padding-bottom: 0;
@@ -2918,14 +3211,9 @@
   grid-column: 1;
   grid-row: 1 / span 4;
   width: 96px;
-  height: 58px;
-  min-height: 0;
-  overflow: hidden;
+  height: auto;
   align-self: center;
-  border: 1px solid var(--adm-line);
-  border-radius: 4px;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .template-editor__catalog-preview-placeholder { min-height: 58px; }
 [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-name {
   grid-column: 2;
   padding: 0 20px 0 0;
@@ -2938,7 +3226,83 @@
   font-size: 12px;
   line-height: 18px;
 }
+[data-unified-template-library="design"] .template-editor__catalog-version-state {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+[data-unified-template-library="design"] .template-editor__catalog-draft-state {
+  color: var(--adm-text);
+  font-weight: 600;
+}
+[data-unified-template-library="design"] .template-editor__catalog-published-state {
+  color: var(--adm-muted);
+  font-weight: 500;
+}
 [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .unified-template-library__primary-action { display: none; }
+@container template-library (max-width: 235px) {
+  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-card-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    gap: 6px;
+    align-content: start;
+  }
+
+  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-preview-wrap {
+    grid-column: 1;
+    grid-row: 1;
+    width: 100%;
+    height: auto;
+  }
+
+  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-name,
+  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
+    grid-column: 1;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  [data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  [data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-card-status {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  [data-unified-template-library="design"] .unified-template-library__scroll :is(.unified-template-library__metadata, .unified-template-library__disabled-reason) {
+    display: -webkit-box;
+    max-height: 36px;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  [data-unified-template-library="design"] .unified-template-library__scroll .template-editor__catalog-card-action {
+    top: 14px;
+    right: 14px;
+    width: 32px;
+    height: 32px;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  [data-unified-template-library="design"] .unified-template-library__scroll .template-editor__catalog-card-action > .template-editor__template-more {
+    opacity: 0.96;
+  }
+}
 .template-editor__inspector .homepage-editor__inspector-header {
   grid-template-columns: 36px minmax(0, 1fr) auto;
   min-height: 72px;
@@ -2969,6 +3333,13 @@
 .template-editor__composition-icon { display: grid; place-items: center; height: 30px; font-size: 28px; }
 .template-editor__composition-segments button { display: flex; align-items: center; justify-content: center; gap: 4px; }
 .template-editor__composition small { display: block; margin-top: 8px; color: var(--adm-muted); font-size: 12px; line-height: 18px; }
+.template-editor__composition-child-widths { display: grid; gap: 12px; }
+.template-editor__composition-child-widths > h4 { margin: 0; color: var(--adm-text); font-size: 14px; line-height: 20px; }
+.template-editor__composition-child-widths > h4 + small { margin-top: -8px; }
+.template-editor__composition-child-widths > fieldset { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--adm-line); }
+.template-editor__composition-child-widths > fieldset > legend { margin: 0; padding-right: 6px; font-size: 12px; line-height: 18px; }
+.template-editor__composition [role="group"][aria-label="按钮背景"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.template-editor__composition [role="group"][aria-label="按钮边框"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .template-editor__composition-ratio { display: flex; min-height: 50px; margin-bottom: 8px; border: 1px solid var(--adm-line); border-radius: 4px; overflow: hidden; }
 .template-editor__composition-ratio > span { display: grid; align-content: center; justify-items: center; font-size: 12px; }
 .template-editor__composition-ratio > span + span { border-left: 1px solid var(--adm-line); background: var(--adm-neutral-bg); }
@@ -3065,6 +3436,16 @@ button.template-editor__toolbar-state {
 .template-editor__toolbar-state[data-mode="error"] { color: var(--adm-error); }
 .template-editor__toolbar-state[data-mode="error"] > i { background: var(--adm-error); }
 .template-editor__toolbar-state[data-mode="pending"] > i { background: var(--adm-info); }
+
+@media (max-width: 520px) {
+  .admin-header__editor-slot .template-editor__toolbar {
+    padding-inline: 6px;
+  }
+
+  .template-editor__toolbar .homepage-editor__toolbar-actions {
+    gap: 2px;
+  }
+}
 
 .template-editor__library .homepage-editor__library-tools {
   padding-bottom: 8px;
@@ -3163,7 +3544,7 @@ button.template-editor__toolbar-state {
 .template-editor__structure .template-editor__structure-note { display: none; }
 
 .template-editor__canvas-scroll.homepage-editor__canvas-scroll {
-  align-content: safe center;
+  align-content: start;
   padding: 24px;
   overflow: hidden;
   overscroll-behavior: none;
@@ -3184,9 +3565,6 @@ button.template-editor__toolbar-state {
 
 .template-editor__canvas-ruler,
 .template-editor__canvas-board::before { display: none; }
-
-/* 节点操作统一留在结构栏，避免画布上出现第二套复制、隐藏和删除入口。 */
-.template-editor__editable-overlay-actions { display: none; }
 
 .template-editor__canvas-controls--minimal {
   position: absolute;
@@ -3328,6 +3706,98 @@ button.template-editor__toolbar-state {
   }
 }
 
+/* 1200px 桌面窗口下第四区仅 240px：只收紧属性区内部排版，
+ * 不改动 editor.css 统一维护的 12% / 8% / 60% / 20% 四区合同。 */
+@container (max-width: 260px) {
+  .template-editor__inspector .homepage-editor__inspector-header {
+    grid-template-columns: 34px minmax(0, 1fr);
+    padding-inline: 12px;
+  }
+
+  .template-editor__inspector .homepage-editor__inspector-device {
+    grid-column: 1 / -1;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: normal;
+  }
+
+  .template-editor__inspector-context {
+    padding-inline: 12px;
+  }
+
+  .template-editor__inspector .homepage-editor__inspector-scroll {
+    padding-inline: 12px;
+  }
+
+  .template-editor__task-tabs > button {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+
+  .template-editor__publish-review-summary > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .template-editor__publish-review-summary dt {
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+  }
+
+  .template-editor__publish-review-summary dd {
+    line-height: 18px;
+    overflow-wrap: break-word;
+    word-break: normal;
+  }
+
+  .template-editor__responsive-group-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .template-editor__batch-targets > div,
+  .template-editor__publish-selection > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: initial;
+  }
+}
+
+/* 画布工具栏：保留编辑工具，不再叠加创建任务链。 */
+.template-editor__canvas-header {
+  position: relative;
+  z-index: 25;
+  order: 0;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.template-editor__view-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px 4px;
+  min-width: 0;
+}
+.template-editor__view-toolbar > .template-editor__canvas-controls--editable {
+  position: relative;
+  inset: auto;
+  margin: 0 0 0 auto;
+  max-width: 100%;
+}
+@media (max-width: 767px) {
+  .template-editor__canvas-header > .template-editor__view-toolbar { padding-top: 106px; padding-left: 48px; }
+  .template-editor__canvas-header > .template-editor__scope-breadcrumb { margin-left: 48px; }
+}
+
 /* 简单模板：尺寸常驻画布上方，槽位设置使用与布局一致的控件。 */
 .template-editor__preview-header { gap: 16px; justify-content: space-between; flex-wrap: wrap; min-height: 58px; }
 .template-editor__simple-size { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
@@ -3354,3 +3824,155 @@ button.template-editor__toolbar-state {
 
 .template-editor__settings-section { margin: 16px 0; padding: 16px 0; border-top: 1px solid var(--adm-line); }
 .template-editor__settings-section > h3 { margin: 0 0 14px; color: var(--adm-text); font-size: 13px; font-weight: 600; }
+
+/* 第四区任务切换只改变内容职责，不改变四区宽度或桌面/抽屉合同。 */
+.template-editor__task-tabs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--adm-line);
+  background: var(--adm-content-bg);
+}
+
+.template-editor__task-tabs > button {
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 8px;
+  overflow-wrap: anywhere;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--adm-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.template-editor__task-tabs > button[aria-selected="true"] {
+  border-color: var(--adm-line);
+  color: var(--adm-text);
+  background: var(--adm-neutral-bg);
+  font-weight: 600;
+}
+
+.template-editor__task-tabs > button:focus-visible,
+.template-editor__page-field-list > button:focus-visible,
+.template-editor__stress-preview-select select:focus-visible {
+  outline: 2px solid var(--adm-focus);
+  outline-offset: 2px;
+}
+
+.template-editor__task-tabs > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.template-editor__page-scope {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.template-editor__page-scope-intro,
+.template-editor__page-field-editor,
+.template-editor__page-field-list {
+  display: grid;
+  gap: 12px;
+}
+
+.template-editor__page-scope-intro > p {
+  margin: 0;
+  color: var(--adm-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.template-editor__page-field-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.template-editor__page-field-list > button {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid var(--adm-line);
+  border-radius: 5px;
+  color: var(--adm-text);
+  background: var(--adm-content-bg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.template-editor__page-field-list > button:hover {
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__page-field-list > button > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.template-editor__page-field-list > button > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.template-editor__page-field-list small {
+  color: var(--adm-muted);
+  overflow-wrap: anywhere;
+}
+
+.template-editor__stress-preview-select {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  color: var(--adm-text);
+  font-size: 13px;
+}
+
+.template-editor__stress-preview-select select {
+  width: 100%;
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  color: var(--adm-text);
+  background: var(--adm-content-bg);
+  font: inherit;
+}
+
+/* 压力预览只替换四区内部内容。桌面 dock 的 12% / 8% / 60% / 20%
+ * 几何继续由 editor.css 唯一合同控制；这里仅撤销旧公开预览的隐藏侧栏，
+ * 并让中央画布继续消费同一组 dock 变量，不另建模式宽度。 */
+@media (min-width: 1200px) {
+  .homepage-editor__body.template-editor__body.is-previewing
+    > .homepage-editor__library.template-editor__library,
+  .homepage-editor__body.template-editor__body.is-previewing
+    > .homepage-editor__structure-workspace.template-editor__structure {
+    display: flex;
+  }
+
+  .homepage-editor__body.template-editor__body.is-previewing
+    > .homepage-editor__right-workspace.template-editor__right-workspace {
+    display: grid;
+  }
+
+  .homepage-editor__body.template-editor__body.is-previewing
+    > .homepage-editor__stage {
+    grid-column: 1;
+    padding-left: calc(
+      var(--editor-library-dock-width) + var(--editor-structure-dock-width)
+    );
+    padding-right: var(--editor-inspector-dock-width);
+  }
+}
+.template-editor__catalog-preview-shell[data-preview-annotations="false"] .template-editor__editable-overlay.is-catalog {
+  visibility: hidden;
+}

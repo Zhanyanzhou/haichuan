@@ -1,30 +1,10 @@
-import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
-import AppointmentBlock from "@/components/blocks/AppointmentBlock";
-import CarouselBlock from "@/components/blocks/CarouselBlock";
-import CategoryCardsBlock from "@/components/blocks/CategoryCardsBlock";
-import BeforeAfterBlock from "@/components/blocks/BeforeAfterBlock";
-import HotspotBlock from "@/components/blocks/HotspotBlock";
-import ImageTextBlock from "@/components/blocks/ImageTextBlock";
-import SplitPanelBlock from "@/components/blocks/SplitPanelBlock";
-import VideoBlock from "@/components/blocks/VideoBlock";
-import { convertPuckProps } from "@/page-builder/utils/puckPropsToModule";
-import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import {
   getContentTemplateIssues,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
-import ContentTemplateContractFrame from "@/page-builder/runtime/ContentTemplateContractFrame";
-import {
-  ResolvedCategoryCardsBlock,
-  ResolvedFeaturedProductBlock,
-  ResolvedProductRowBlock,
-} from "@/page-builder/runtime/ResolvedBusinessTemplateBlocks";
 import MatureContentTemplateRenderer from "@/page-builder/template-definition/MatureContentTemplateRenderer";
 import { getMatureContentTemplateSlotType } from "@/page-builder/template-definition/validateTemplateDefinition";
-import { DecorSection } from "@/page-builder/designSystem/sectionShell";
-import { FONT_DISPLAY, FONT_SANS } from "@/page-builder/designSystem/tokens";
 import {
   normalizeLegacyRenderColors,
   useHasMissingAssets,
@@ -77,106 +57,14 @@ function textValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function PublicMediaFallback({
-  type,
-  props,
-  headingLevel,
-}: {
-  type?: string;
-  props: PuckProps;
-  headingLevel: 1 | 2;
-}) {
-  const eyebrow = [props.number, props.label, props.eyebrow]
-    .map(textValue)
-    .filter(Boolean)
-    .join(" / ");
-  const title = textValue(props.title);
-  const body = textValue(
-    props.body || props.subtitle || props.description || props.summary,
-  );
-  const actionText = textValue(
-    props.actionText || props.buttonText || props.primaryText,
-  );
-  const targetUrl = resolveLinkTargetUrl({
-    targetType: typeof props.targetType === "string" ? props.targetType : undefined,
-    productCode: typeof props.productCode === "string" ? props.productCode : undefined,
-    productId: typeof props.productId === "string" || typeof props.productId === "number" ? props.productId : undefined,
-    categorySlug: typeof props.categorySlug === "string" ? props.categorySlug : undefined,
-    linkUrl: typeof props.linkUrl === "string" ? props.linkUrl : undefined,
-  });
-  const Heading = headingLevel === 1 ? "h1" : "h2";
-  const isHero = type === "首屏主视觉";
-  const background = isHero ? "#111315" : textValue(props.bgColor) || "#FFFFFF";
-  const ink = isHero ? "#F7F8F8" : "#181A1B";
-  const muted = isHero ? "rgba(247,248,248,.76)" : "#5F6568";
-
-  if (!eyebrow && !title && !body && !(actionText && targetUrl)) return null;
-
-  return (
-    <DecorSection
-      master="editorial-text"
-      width="narrow"
-      background={background}
-      className="hc-public-media-fallback"
-      data-media-fallback-for={type || "unknown"}
-      style={isHero ? { minHeight: "max(520px, 100svh)", display: "grid", alignItems: "center" } : undefined}
-    >
-      <div style={{ maxWidth: 720, marginInline: "auto", textAlign: "center" }}>
-        {eyebrow ? (
-          <p style={{ margin: "0 0 18px", color: muted, fontFamily: FONT_SANS, fontSize: 11, letterSpacing: ".18em" }}>
-            {eyebrow}
-          </p>
-        ) : null}
-        {title ? (
-          <Heading style={{ margin: 0, color: ink, fontFamily: FONT_DISPLAY, fontSize: "clamp(28px,3.2vw,48px)", fontWeight: 500, lineHeight: 1.25 }}>
-            {title}
-          </Heading>
-        ) : null}
-        {body ? (
-          <p style={{ maxWidth: 720, margin: title ? "22px auto 0" : 0, color: muted, fontSize: 15, lineHeight: 1.9 }}>
-            {body}
-          </p>
-        ) : null}
-        {actionText && targetUrl ? (
-          <Link
-            to={targetUrl}
-            style={{ display: "inline-flex", minHeight: 44, alignItems: "center", marginTop: 28, color: ink, fontFamily: FONT_SANS, fontSize: 13, letterSpacing: ".08em", textDecoration: "none", borderBottom: "1px solid currentColor" }}
-          >
-            {actionText}
-          </Link>
-        ) : null}
-      </div>
-    </DecorSection>
-  );
-}
-
 function hasRequiredPublicMedia(block: PuckBlock) {
   const props = block.props || {};
   switch (block.type) {
     case "首屏主视觉":
       return Boolean(textValue(props.desktopImage) || textValue(props.mobileImage));
-    case "全屏出血图":
-      return Boolean(textValue(props.image) || textValue(props.mobileImage));
-    case "单图海报":
-      return Boolean(textValue(props.desktopImage) || textValue(props.mobileImage));
-    case "双图海报":
-      return Boolean(textValue(props.mainImage));
-    case "作品画廊":
-      return Array.isArray(props.items)
-        && props.items.some((item: unknown) => Boolean(textValue((item as Record<string, unknown>)?.image)));
     default:
       return true;
   }
-}
-
-function suppressHomeSecondaryActions(props: PuckProps): PuckProps {
-  return {
-    ...props,
-    actionText: "",
-    buttonText: "",
-    primaryText: "",
-    secondaryText: "",
-  };
 }
 
 export type PuckDocumentRenderMode = "public" | "preview";
@@ -187,30 +75,15 @@ function renderBlock(
   mode: PuckDocumentRenderMode,
   heroHeadingLevel: 1 | 2,
   homeSurface: boolean,
-  allowHomePrimaryAction: boolean,
   priority: boolean,
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
 ) {
   const normalized = normalizeLegacyRenderColors(block.props || {});
-  const contractProps: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
+  const props: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
     ? normalized as PuckProps
     : {};
-  const props = homeSurface && !allowHomePrimaryAction
-    ? suppressHomeSecondaryActions(contractProps)
-    : contractProps;
   const key = textValue(props.id) || `${block.type || "block"}-${index}`;
   const preview = mode === "preview";
-  const wrap = (node: ReactNode) => (
-    <ContentTemplateContractFrame
-      key={key}
-      moduleType={block.type || ""}
-      mode="public"
-      props={contractProps}
-    >
-      {node}
-    </ContentTemplateContractFrame>
-  );
-
   if (props.isVisible === false) return null;
 
   if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
@@ -254,24 +127,8 @@ function renderBlock(
     );
   }
 
-  if (block.type === "产品展示行") {
-    return wrap(<ResolvedProductRowBlock props={props} codeOnly={homeSurface} stableReferencesOnly={false} />);
-  }
-  if (block.type === "单品焦点推荐") {
-    return wrap(<ResolvedFeaturedProductBlock props={props} editMode={preview} codeOnly={homeSurface} stableReferencesOnly={false} />);
-  }
-  if (block.type === "分类卡片") {
-    return wrap(<ResolvedCategoryCardsBlock props={props} allowInlineCategories />);
-  }
-
   if (!preview && !hasRequiredPublicMedia({ ...block, props })) {
-    return wrap(
-      <PublicMediaFallback
-        type={block.type}
-        props={props}
-        headingLevel={block.type === "首屏主视觉" ? heroHeadingLevel : 2}
-      />,
-    );
+    return null;
   }
 
   const matureSlotType = getMatureContentTemplateSlotType(block.type || "");
@@ -291,43 +148,11 @@ function renderBlock(
         headingLevel={block.type === "首屏主视觉" ? heroHeadingLevel : 2}
         priority={priority}
         homeSurface={homeSurface}
-        stableReferencesOnly={block.type !== "佩戴灵感"}
       />
     );
   }
 
-  const module = convertPuckProps(block.type || "", props);
-  if (!module) return null;
-  switch (block.type) {
-    // 旧类型(分割面板/图文混排/礼赠指南)分支保留:
-    // 已发布历史版本(revision)仍含这些类型,公开渲染永久兼容;
-    // 编辑器侧已由 migratePuckData 转为新类型,模板库不再提供添加。
-    case "图文混排":
-      return <ImageTextBlock key={key} module={module} />;
-    case "改款对比":
-      return wrap(<BeforeAfterBlock module={module} />);
-    case "分类卡片":
-    case "礼赠指南":
-      return block.type === "礼赠指南"
-        ? <CategoryCardsBlock key={key} module={module} />
-        : wrap(<CategoryCardsBlock module={module} />);
-    case "分割面板":
-      return <SplitPanelBlock key={key} module={module} />;
-    case "轮播图":
-      return wrap(<CarouselBlock module={module} />);
-    case "视频区块":
-      return wrap(<VideoBlock module={module} />);
-    case "热区图":
-      return wrap(<HotspotBlock module={module} />);
-    case "预约入口":
-      return wrap(homeSurface ? (
-        <div className="hc-home-booking">
-          <AppointmentBlock module={module} editMode={preview} />
-        </div>
-      ) : <AppointmentBlock module={module} editMode={preview} />);
-    default:
-      return null;
-  }
+  return null;
 }
 
 function GuardedBlock({
@@ -336,7 +161,6 @@ function GuardedBlock({
   mode,
   heroHeadingLevel,
   homeSurface,
-  allowHomePrimaryAction,
   priority,
   resolvedDynamicTemplates,
 }: {
@@ -345,27 +169,13 @@ function GuardedBlock({
   mode: PuckDocumentRenderMode;
   heroHeadingLevel: 1 | 2;
   homeSurface: boolean;
-  allowHomePrimaryAction: boolean;
   priority: boolean;
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap;
 }) {
   const hasMissingAsset = useHasMissingAssets(block.props || {});
 
   if (hasMissingAsset && mode === "public") {
-    const normalized = normalizeLegacyRenderColors(block.props || {});
-    const normalizedProps: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
-      ? normalized as PuckProps
-      : {};
-    const fallbackProps = homeSurface && !allowHomePrimaryAction
-      ? suppressHomeSecondaryActions(normalizedProps)
-      : normalizedProps;
-    return (
-      <PublicMediaFallback
-        type={block.type}
-        props={fallbackProps}
-        headingLevel={block.type === "首屏主视觉" ? heroHeadingLevel : 2}
-      />
-    );
+    return null;
   }
   return renderBlock(
     block,
@@ -373,7 +183,6 @@ function GuardedBlock({
     mode,
     heroHeadingLevel,
     homeSurface,
-    allowHomePrimaryAction,
     priority,
     resolvedDynamicTemplates,
   );
@@ -394,6 +203,7 @@ export default function PuckDocumentRenderer({
   surface?: "home";
 }) {
   if (!Array.isArray(data?.content)) return null;
+  const content = data.content;
   const zoneBlocks =
     data?.zones && typeof data.zones === "object"
       ? Object.entries(data.zones).flatMap(([, blocks]) =>
@@ -407,18 +217,7 @@ export default function PuckDocumentRenderer({
   const isPrimaryStage = (block: PuckBlock) => (
     isVisiblePrimaryStageBlock(block, resolvedDynamicTemplates)
   );
-  // 已发布的历史文档可能早于“单一首屏”门禁。公开与只读预览只取第一个
-  // 可见主舞台，既不修改源文档，也避免异常数据把整页堆成连续首屏。
-  let primaryStageSeen = false;
-  const keepRenderableBlock = (block: PuckBlock) => {
-    if (!isPrimaryStage(block)) return true;
-    if (primaryStageSeen) return false;
-    primaryStageSeen = true;
-    return true;
-  };
-  const renderableContent = data.content.filter(keepRenderableBlock);
-  const renderableZoneBlocks = zoneBlocks.filter(keepRenderableBlock);
-  const allBlocks = [...renderableContent, ...renderableZoneBlocks];
+  const allBlocks = [...content, ...zoneBlocks];
   const dynamicPrimaryStageHasHeading = (block: PuckBlock) => {
     if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isPrimaryStage(block)) return false;
     const templateId = String(block.props?.templateId ?? "");
@@ -451,9 +250,6 @@ export default function PuckDocumentRenderer({
         && block.props.title.trim().length > 0
       : dynamicPrimaryStageHasHeading(block)
   ));
-  const homePrimaryHeroIndex = homeSurface
-    ? allBlocks.findIndex(isPrimaryStage)
-    : -1;
   const primaryStageIndex = allBlocks.findIndex(isPrimaryStage);
   // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
   const render = (block: PuckBlock, index: number) => {
@@ -475,7 +271,6 @@ export default function PuckDocumentRenderer({
           mode={mode}
           heroHeadingLevel={blockHeroHeadingLevel}
           homeSurface={homeSurface}
-          allowHomePrimaryAction={homeSurface && index === homePrimaryHeroIndex}
           priority={index === primaryStageIndex}
           resolvedDynamicTemplates={resolvedDynamicTemplates}
         />
@@ -515,9 +310,9 @@ export default function PuckDocumentRenderer({
       {primaryHeading && (primaryHeroIndex < 0 || heroHeadingLevel !== 1) ? (
         <h1 className="sr-only">{primaryHeading}</h1>
       ) : null}
-      {renderableContent.map(render)}
-      {renderableZoneBlocks.map((block, index) =>
-        render(block, renderableContent.length + index),
+      {content.map(render)}
+      {zoneBlocks.map((block, index) =>
+        render(block, content.length + index),
       )}
     </div>
   );

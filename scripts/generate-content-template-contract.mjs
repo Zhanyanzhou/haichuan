@@ -345,16 +345,11 @@ function validateUnifiedRoot(template) {
     );
     viewport.order = derivedOrder;
   }
-  if (template.key === "booking") {
-    invariant(!template.roles.some((role) => role.kind === "form" || role.role === "form"), "booking 禁止 form 角色");
-    invariant(actionCount === 1, "booking 必须且只能声明一个行动角色");
-  }
 }
 
 /**
- * 固定合同模板的结构编辑能力由合同顶层统一声明，再在生成前展开到
- * 24 个模板的每个固定语义节点。能力只在独立模板工作空间消费；
- * 源 JSON 仍是唯一事实来源，生成物不维护第二份手写能力清单。
+ * 首屏测试模板的结构编辑能力由合同顶层统一声明，再在生成前展开到
+ * 固定语义节点。其他历史模板已经从合同与生成链删除。
  */
 function applyTemplateWorkspaceFixedObjectPolicy(contractSource) {
   const policy = contractSource.editorPolicy;
@@ -921,12 +916,13 @@ for (const template of source.templates) {
 const activeTemplates = source.templates.filter((item) => item.implementationStatus === "active");
 const plannedTemplates = source.templates.filter((item) => item.implementationStatus === "planned");
 invariant(activeTemplates.length === source.activeTemplateCount, `活跃合同数应为 ${source.activeTemplateCount}，实际为 ${activeTemplates.length}`);
-invariant(plannedTemplates.length === source.expectedTemplateCount - source.activeTemplateCount, `计划合同数应为 ${source.expectedTemplateCount - source.activeTemplateCount}，实际为 ${plannedTemplates.length}`);
+invariant(plannedTemplates.length === 0, "已删除的历史模板不得以 planned 合同继续保留");
 
 const union = (values) => [...new Set(values)].sort().map((value) => JSON.stringify(value)).join(" | ");
 const masters = union(source.templates.map((item) => item.master));
 
-const registry = source.templates.map(({ key, moduleType, displayName, category, commercialPurpose, implementationStatus }) => ({
+// 内置目录只暴露当前 active 首屏测试模板。
+const registry = activeTemplates.map(({ key, moduleType, displayName, category, commercialPurpose, implementationStatus }) => ({
   key,
   moduleType,
   displayName,
@@ -1529,10 +1525,10 @@ export type ContentTemplateLinkTargetReference = {
 
 export const CONTENT_TEMPLATE_REGISTRY = ${JSON.stringify(registry, sortReplacer, 2)} as const;
 
-/** 所有真实 Renderer 的完整 schema v5 合同；implementationStatus 不再决定可否渲染。 */
+/** 当前活动首屏测试模板的完整合同。 */
 export const CONTENT_TEMPLATE_CONTRACTS = ${JSON.stringify(contractMap, sortReplacer, 2)} as const satisfies Record<ContentTemplateKey, ContentTemplateContract>;
 
-/** 全部活跃模板的中性结构预览；不承担业务、发布或 Inspector 完整合同。 */
+/** 当前活动首屏测试模板的中性结构预览；不承担业务、发布或 Inspector 完整合同。 */
 export const CONTENT_TEMPLATE_SKELETONS = ${JSON.stringify(templateSkeletonMap, sortReplacer, 2)} as const satisfies Record<string, ContentTemplateSkeleton>;
 
 /** 所有活跃模板的中性结构预览源；缩略图与总览不得另建坐标台账。 */
@@ -1895,6 +1891,10 @@ export function sanitizeContentTemplateLayoutData(
         const maxLines = Number(rawNode.typography.maxLines);
         if (Number.isInteger(maxLines) && maxLines >= 1 && maxLines <= (textRole?.maxLines ?? 6)) typography.maxLines = maxLines;
         if (["none", "light", "dark"].includes(String(rawNode.typography.safeBand))) typography.safeBand = rawNode.typography.safeBand as "none" | "light" | "dark";
+        const lineHeight = Number(rawNode.typography.lineHeight);
+        if (Number.isFinite(lineHeight) && lineHeight >= 1 && lineHeight <= 2.5) typography.lineHeight = lineHeight;
+        const letterSpacing = Number(rawNode.typography.letterSpacing);
+        if (Number.isFinite(letterSpacing) && letterSpacing >= -0.05 && letterSpacing <= 0.5) typography.letterSpacing = letterSpacing;
         if (Object.keys(typography).length) node.typography = typography;
       }
       if (["media", "video", "product", "collection"].includes(editableObject.kind) && isRecord(rawNode.appearance)) {
@@ -2011,7 +2011,7 @@ function hasNonEmptyText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function getCompatibilityRoleValue(
+function getRoleValue(
   moduleType: string,
   roleId: string,
   values: Record<string, unknown>,
@@ -2024,42 +2024,11 @@ function getCompatibilityRoleValue(
   const directValue = values[roleId];
   if (hasNonEmptyText(directValue)) return directValue;
 
-  let compatibilityValue: unknown;
-  switch (moduleType + ":" + roleId) {
-    case "视频区块:coverImage":
-      compatibilityValue = values.posterUrl;
-      break;
-    case "改款对比:before":
-      compatibilityValue = values.beforeImage;
-      break;
-    case "改款对比:after":
-      compatibilityValue = values.afterImage;
-      break;
-    case "佩戴灵感:wearingImage":
-    case "热区图:sceneImage":
-    case "门店信息:store":
-      compatibilityValue = values.image;
-      break;
-    case "预约入口:bgImage":
-      compatibilityValue = values.backgroundImage;
-      break;
-    case "限时活动:event":
-      compatibilityValue = values.eventImage;
-      break;
-    case "真实评价与实拍:authorizedPhoto": {
-      const testimonials = values.testimonials;
-      const first = Array.isArray(testimonials) ? testimonials[0] : undefined;
-      compatibilityValue = isRecord(first) ? first.image : undefined;
-      break;
-    }
-  }
-  if (hasNonEmptyText(compatibilityValue)) return compatibilityValue;
-
   const fallbackRoleId = getContentTemplateContract(moduleType)?.roles.find(
     (role) => role.id === roleId,
   )?.fallbackRoleId;
   return fallbackRoleId
-    ? getCompatibilityRoleValue(moduleType, fallbackRoleId, values, nextVisitedRoleIds)
+    ? getRoleValue(moduleType, fallbackRoleId, values, nextVisitedRoleIds)
     : directValue;
 }
 
@@ -2209,7 +2178,7 @@ export function getContentTemplateLinkTargetReferences(
           : object.contentFieldKeys.find(
               (field) => field === "actionText" || field === "buttonText",
             );
-        if (actionTextFieldKey) {
+        if (actionTextFieldKey && !isContentTemplateContentFieldHidden(moduleType, actionTextFieldKey, props)) {
           append(
             props,
             basePath,
@@ -2881,6 +2850,46 @@ export function getContentTemplateIssues(input: {
   return overrideIssues;
 }
 
+export function isContentTemplateContentFieldHidden(
+  moduleType: string,
+  fieldKey: string,
+  props: unknown,
+): boolean {
+  const contract = getContentTemplateContract(moduleType);
+  if (!contract) return false;
+  const values = isRecord(props) ? props : {};
+  const editableObjects = contract.editorCapabilities.editableObjects.filter((object) =>
+    object.contentFieldKeys.includes(fieldKey),
+  );
+  if (editableObjects.length === 0) return false;
+  const overrides = isRecord(values.__instanceOverrides)
+    ? values.__instanceOverrides
+    : {};
+  return editableObjects.every((object) => {
+    if (!object.capabilities.includes("visibility") || !object.constraints.allowHide) {
+      return false;
+    }
+    const leafNodeIds = (object.nodeIds ?? []).filter((nodeId) => nodeId !== object.roleId);
+    const overrideNodeIds = leafNodeIds.includes(fieldKey)
+      ? [fieldKey]
+      : leafNodeIds.length > 0
+        ? leafNodeIds
+        : [object.roleId];
+    if (overrides.version === 2) {
+      const nodes = isRecord(overrides.nodes) ? overrides.nodes : {};
+      return overrideNodeIds.every((nodeId) => {
+        const node = isRecord(nodes[nodeId]) ? nodes[nodeId] : {};
+        return node.enabled === false;
+      });
+    }
+    const textRoles = isRecord(overrides.textRoles) ? overrides.textRoles : {};
+    return overrideNodeIds.every((nodeId) => {
+      const textRole = isRecord(textRoles[nodeId]) ? textRoles[nodeId] : {};
+      return textRole.enabled === false;
+    });
+  });
+}
+
 export function getContentTemplateCompletion(
   moduleType: string,
   props: unknown,
@@ -2888,53 +2897,21 @@ export function getContentTemplateCompletion(
   const contract = getContentTemplateContract(moduleType);
   if (!contract) return undefined;
   const values = isRecord(props) ? props : {};
-  const isRequiredContentHidden = (fieldKey: string) => {
-    const editableObjects = contract.editorCapabilities.editableObjects.filter((object) =>
-      object.contentFieldKeys.includes(fieldKey),
-    );
-    if (editableObjects.length === 0) return false;
-    const overrides = isRecord(values.__instanceOverrides)
-      ? values.__instanceOverrides
-      : {};
-    return editableObjects.every((object) => {
-      if (!object.capabilities.includes("visibility") || !object.constraints.allowHide) {
-        return false;
-      }
-      const leafNodeIds = (object.nodeIds ?? []).filter((nodeId) => nodeId !== object.roleId);
-      const overrideNodeIds = leafNodeIds.includes(fieldKey)
-        ? [fieldKey]
-        : leafNodeIds.length > 0
-          ? leafNodeIds
-          : [object.roleId];
-      if (overrides.version === 2) {
-        const nodes = isRecord(overrides.nodes) ? overrides.nodes : {};
-        return overrideNodeIds.every((nodeId) => {
-          const node = isRecord(nodes[nodeId]) ? nodes[nodeId] : {};
-          return node.enabled === false;
-        });
-      }
-      const textRoles = isRecord(overrides.textRoles) ? overrides.textRoles : {};
-      return overrideNodeIds.every((nodeId) => {
-        const textRole = isRecord(textRoles[nodeId]) ? textRoles[nodeId] : {};
-        return textRole.enabled === false;
-      });
-    });
-  };
   const missingMedia = contract.media
     .filter((slot) =>
       slot.required &&
-      !hasNonEmptyText(getCompatibilityRoleValue(moduleType, slot.key, values)))
+      !hasNonEmptyText(getRoleValue(moduleType, slot.key, values)))
     .map((slot) => slot.key);
   const missingRequiredAltText = contract.editorCapabilities.editableObjects.flatMap((object) => {
     if (object.altPolicy !== "required" || !object.altFieldKey) return [];
-    const mediaValue = getCompatibilityRoleValue(moduleType, object.roleId, values);
+    const mediaValue = getRoleValue(moduleType, object.roleId, values);
     return hasNonEmptyText(mediaValue) && !hasNonEmptyText(values[object.altFieldKey])
       ? [object.altFieldKey]
       : [];
   });
   const missingText = [...new Set([
     ...contract.contentBudget.requiredText.filter((key) =>
-      !hasNonEmptyText(values[key]) && !isRequiredContentHidden(key),
+      !hasNonEmptyText(values[key]) && !isContentTemplateContentFieldHidden(moduleType, key, values),
     ),
     ...missingRequiredAltText,
   ])];
@@ -3033,11 +3010,11 @@ if (checkOnly) {
     }
   }
   invariant(stale.length === 0, `生成产物缺失或已漂移：${stale.join("、")}`);
-  console.log(`内容模板合同一致：注册 ${source.templates.length} 个，活跃 ${activeTemplates.length} 个，权威 SHA-256 ${hash.slice(0, 12)}（客户端/服务端产物一致）。`);
+  console.log(`内容模板合同一致：目录 ${activeTemplates.length} 个，权威 SHA-256 ${hash.slice(0, 12)}（客户端/服务端产物一致）。`);
 } else {
   for (const outputPath of outputPaths) {
     await mkdir(path.dirname(outputPath), { recursive: true });
     await writeFile(outputPath, generated, "utf8");
   }
-  console.log(`内容模板合同已生成：注册 ${source.templates.length} 个，活跃 ${activeTemplates.length} 个。`);
+  console.log(`内容模板合同已生成：目录 ${activeTemplates.length} 个。`);
 }

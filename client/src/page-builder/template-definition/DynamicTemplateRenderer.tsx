@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ElementType, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ElementType, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import type {
   TemplateDefinitionV2,
   DynamicTemplateLength,
@@ -14,10 +14,12 @@ import { getContentTemplateContract } from "../generated/contentTemplates.genera
 import { resolveEditableTargets } from "./editableTargets";
 import { getDynamicTemplateNodeAdapter } from "./dynamicTemplateNodeAdapters";
 import { objectPositionToPercent } from "./imagePosition";
+import type { TemplateBreakpoint } from "./responsive";
+import { TEMPLATE_MEDIA_DEFAULTS, TEMPLATE_TEXT_DEFAULTS } from "./designPropertySemantics";
 import {
   moveFreePlacement,
 } from "./freePlacementGeometry";
-import { getDynamicTemplateStructureProtectedNodeIds } from "./validateTemplateDefinition";
+import { getDynamicTemplateStructureProtectedNodeIds, isSafeTemplateMediaUrl } from "./validateTemplateDefinition";
 import {
   CONTENT_TEMPLATE_RENDER_SURFACE,
   useContentTemplateRenderSurface,
@@ -27,10 +29,16 @@ import {
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
   device: "desktop" | "mobile";
+  breakpoint?: TemplateBreakpoint;
   contentBySlotId?: Record<string, unknown>;
   hiddenSlotIds?: readonly string[];
   layoutOverridesByNodeId?: TemplateInstanceLayoutOverridesByNodeId;
   mode?: ContentTemplateRenderMode;
+  /**
+   * 是否保留空槽位的编辑占位。只有真正的结构编辑默认保留；
+   * 只读预览、目录缩略图和公开页默认都按公开折叠语义处理空内容。
+   */
+  showEmptySlots?: boolean;
   /**
    * 编辑态的交互边界。页面实例只负责整体预览，只有母模板定义工作面
    * 可以注册内部节点选择和直接布局手势；未声明时按无内部交互处理。
@@ -71,7 +79,29 @@ const DYNAMIC_TEMPLATE_BACKGROUND_TOKENS: Record<string, string> = {
   "brand-soft": "#ECEEEF",
 };
 
+function safeColor(value: string | undefined): string | undefined {
+  return value && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value) ? value : undefined;
+}
+
+function backgroundImageToCss(rules: DynamicTemplateRenderPlanNode["rules"]): string | undefined {
+  const layers: string[] = [];
+  const gradient = rules.backgroundGradient;
+  if (gradient && safeColor(gradient.from) && safeColor(gradient.to)
+    && Number.isFinite(gradient.angle) && gradient.angle >= 0 && gradient.angle <= 360) {
+    layers.push(`linear-gradient(${gradient.angle}deg, ${gradient.from}, ${gradient.to})`);
+  }
+  if (rules.backgroundImage && isSafeTemplateMediaUrl(rules.backgroundImage)) {
+    layers.push(`url(${JSON.stringify(rules.backgroundImage)})`);
+  }
+  return layers.length ? layers.join(", ") : undefined;
+}
+
 function lengthToCss(length: DynamicTemplateLength | undefined): string | undefined {
+  // 编辑视口会随内容调整 iframe 高度，vh 不能再以这个测量结果作为计算依据。
+  // 复用宿主的稳定模拟视口；公开页面未提供该变量时仍保持原生 vh 语义。
+  if (length?.unit === "vh") {
+    return `calc(var(--homepage-editor-viewport-height, 100vh) * ${length.value / 100})`;
+  }
   return length ? `${length.value}${length.unit}` : undefined;
 }
 
@@ -102,6 +132,8 @@ function rulesToStyle(
   previewOverride?: TemplateInstanceLayoutOverride,
   placementPreview?: DynamicTemplatePlacement,
   parentFree = false,
+  parentRules?: DynamicTemplateRenderPlanNode["rules"],
+  relationalLayout = false,
 ): CSSProperties {
   const { rules } = node;
   const alignsOwnChildren = rules.display === "flex" || rules.display === "grid";
@@ -126,9 +158,13 @@ function rulesToStyle(
     justifyContent: rules.justifyContent,
     borderRadius: lengthToCss(rules.radius),
     overflow: rules.overflow,
-    background: rules.backgroundToken
+    backgroundColor: safeColor(rules.backgroundColor) ?? (rules.backgroundToken
       ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[rules.backgroundToken]
-      : undefined,
+      : undefined),
+    backgroundImage: backgroundImageToCss(rules),
+    backgroundSize: rules.backgroundImage ? "cover" : undefined,
+    backgroundPosition: rules.backgroundImage ? "center" : undefined,
+    opacity: Number.isFinite(rules.opacity) ? Math.max(0, Math.min(1, rules.opacity!)) : undefined,
     border: rules.borderToken ? {
       subtle: "1px solid #DDE1E2",
       strong: "1px solid #6E7477",
@@ -137,7 +173,28 @@ function rulesToStyle(
   };
   if (rules.display === "flex") style.flexDirection = rules.direction ?? "row";
   if (rules.display === "grid" && rules.columns?.length) {
-    style.gridTemplateColumns = rules.columns.map((column) => `${column}fr`).join(" ");
+    style.gridTemplateColumns = rules.columns.map((column) => relationalLayout ? `minmax(0, ${column}fr)` : `${column}fr`).join(" ");
+  }
+  if (relationalLayout) {
+    if (rules.display === "grid" && ["start", "center", "end"].includes(rules.justifyContent ?? "")) style.justifyItems = rules.justifyContent as "start" | "center" | "end";
+    style.minWidth = lengthToCss(rules.minWidth) ?? 0;
+    style.maxHeight = lengthToCss(rules.maxHeight);
+    if (node.children.length) style.position = "relative";
+    if (rules.display === "flex") style.flexWrap = rules.wrap ?? "nowrap";
+    if (parentRules?.display === "flex" && parentRules.layoutMode !== "free") {
+      if ((parentRules.direction ?? "row") === "row") {
+        if (rules.width === "fill") {
+          style.width = 0;
+          style.flex = "1 1 0px";
+        } else style.flex = "0 0 auto";
+        if (rules.height.mode === "fill") { style.alignSelf = "stretch"; style.height = "auto"; }
+      } else if (rules.height.mode === "fill") {
+        style.flex = "1 1 0px";
+        style.minHeight = lengthToCss(rules.minHeight) ?? 0;
+      }
+    }
+    if (rules.height.mode === "fit") style.height = "fit-content";
+    if (rules.height.mode === "fill" && parentRules?.display !== "flex") style.height = "100%";
   }
   const height = rules.height;
   if (height.mode === "min-height") style.minHeight = lengthToCss(height.value);
@@ -168,14 +225,41 @@ function rulesToStyle(
     style.marginRight = 0;
     style.marginBottom = 0;
     style.marginLeft = 0;
+    if (relationalLayout) {
+      style.left = `calc(${placement.x * 100}% + var(--template-content-pad-left, 0px) * ${1 - placement.x} - var(--template-content-pad-right, 0px) * ${placement.x})`;
+      style.top = `calc(${placement.y * 100}% + var(--template-content-pad-top, 0px) * ${1 - placement.y} - var(--template-content-pad-bottom, 0px) * ${placement.y})`;
+      style.width = `calc(${placement.width * 100}% - (var(--template-content-pad-left, 0px) + var(--template-content-pad-right, 0px)) * ${placement.width})`;
+      style.height = `calc(${placement.height * 100}% - (var(--template-content-pad-top, 0px) + var(--template-content-pad-bottom, 0px)) * ${placement.height})`;
+    }
+  }
+  if (relationalLayout && rules.anchor) {
+    const anchor = rules.anchor;
+    style.position = "absolute";
+    const horizontal = anchor.horizontal === "left" ? 0 : anchor.horizontal === "center" ? 50 : 100;
+    const vertical = anchor.vertical === "top" ? 0 : anchor.vertical === "center" ? 50 : 100;
+    const offsetX = anchor.offsetX.unit === "%" ? `(${100}% - var(--template-content-pad-left, 0px) - var(--template-content-pad-right, 0px)) * ${anchor.offsetX.value / 100}` : lengthToCss(anchor.offsetX);
+    const offsetY = anchor.offsetY.unit === "%" ? `(${100}% - var(--template-content-pad-top, 0px) - var(--template-content-pad-bottom, 0px)) * ${anchor.offsetY.value / 100}` : lengthToCss(anchor.offsetY);
+    style.left = `calc(${horizontal}% + ${offsetX} + var(--template-content-pad-left, 0px) * ${1 - horizontal / 100} - var(--template-content-pad-right, 0px) * ${horizontal / 100})`;
+    style.top = `calc(${vertical}% + ${offsetY} + var(--template-content-pad-top, 0px) * ${1 - vertical / 100} - var(--template-content-pad-bottom, 0px) * ${vertical / 100})`;
+    style.transform = `translate(-${horizontal}%, -${vertical}%)`;
+    if (placement) {
+      style.width = `calc(${placement.width * 100}% - (var(--template-content-pad-left, 0px) + var(--template-content-pad-right, 0px)) * ${placement.width})`;
+      style.height = `calc(${placement.height * 100}% - (var(--template-content-pad-top, 0px) + var(--template-content-pad-bottom, 0px)) * ${placement.height})`;
+      style.zIndex = placement.zIndex;
+    }
+    style.margin = 0;
   }
   const instance = previewOverride ?? node.layoutOverride;
   if (instance) {
-    style.position = "relative";
+    if (!relationalLayout || style.position !== "absolute") style.position = "relative";
     if (instance.offsetXPercent || instance.offsetYPercent) {
-      style.transform = `translate(${instance.offsetXPercent ?? 0}%, ${instance.offsetYPercent ?? 0}%)`;
+      const offset = `translate(${instance.offsetXPercent ?? 0}%, ${instance.offsetYPercent ?? 0}%)`;
+      style.transform = relationalLayout && style.transform ? `${style.transform} ${offset}` : offset;
     }
-    if (instance.widthPercent !== undefined) style.width = `${instance.widthPercent}%`;
+    if (instance.widthPercent !== undefined) {
+      style.width = `${instance.widthPercent}%`;
+      if (relationalLayout && parentRules?.display === "flex") style.flex = "0 0 auto";
+    }
     if (instance.zIndex !== undefined) style.zIndex = instance.zIndex;
     if (instance.marginTopPx !== undefined) style.marginTop = instance.marginTopPx;
     if (instance.marginBottomPx !== undefined) style.marginBottom = instance.marginBottomPx;
@@ -241,6 +325,7 @@ function renderSlotContent(
   editorBlockId?: string,
   editorViewport?: "desktop" | "mobile",
   interactionOwner?: DynamicTemplateRendererProps["interactionOwner"],
+  relationalLayout = false,
 ): ReactNode {
   const { slot, content } = node;
   if (!slot) return null;
@@ -259,34 +344,48 @@ function renderSlotContent(
     nodeProps: node.props,
     headingLevel,
   });
+  const textOverflow = node.slotRules?.overflow ?? TEMPLATE_TEXT_DEFAULTS.overflow;
   const textStyle: CSSProperties = {
     margin: 0,
     fontSize: node.layoutOverride?.fontSizePx !== undefined
       ? `${node.layoutOverride.fontSizePx}px`
       : lengthToCss(node.slotRules?.fontSize),
     fontWeight: node.slotRules?.fontWeight,
+    fontFamily: node.slotRules?.fontFamily
+      ? ({ system: "system-ui, sans-serif", serif: '"Noto Serif SC", "Source Han Serif CN", serif', sans: "Inter, system-ui, sans-serif" } as const)[node.slotRules.fontFamily]
+      : undefined,
+    color: safeColor(node.slotRules?.color),
+    letterSpacing: Number.isFinite(node.slotRules?.letterSpacing) ? `${node.slotRules!.letterSpacing}px` : undefined,
     lineHeight: node.slotRules?.lineHeight,
     textAlign: node.layoutOverride?.textAlign ?? node.slotRules?.textAlign,
+    ...(relationalLayout ? {
+      whiteSpace: "pre-wrap" as const,
+      overflowWrap: "anywhere" as const,
+      ...(textOverflow === "clip" ? { overflow: "hidden" } : {}),
+    } : {}),
     ...(node.slotRules?.maxLines ? {
       display: "-webkit-box",
       WebkitBoxOrient: "vertical",
       WebkitLineClamp: node.slotRules.maxLines,
       overflow: "hidden",
     } : {}),
-    ...(node.slotRules?.overflow === "ellipsis" && !node.slotRules?.maxLines ? {
+    ...(textOverflow === "ellipsis" && !node.slotRules?.maxLines ? {
       overflow: "hidden",
       textOverflow: "ellipsis",
       whiteSpace: "nowrap",
     } : {}),
   };
+  const fontClass = relationalLayout && node.slotRules?.fontRole
+    ? ({ display: "font-display", heading: "font-body", body: "font-body", caption: "font-sans", action: "font-sans" } as const)[node.slotRules.fontRole]
+    : undefined;
   if (slot.type === "image") {
     const record = content && typeof content === "object" && !Array.isArray(content)
       ? content as Record<string, unknown>
       : null;
     const src = typeof content === "string" ? content : typeof record?.src === "string" ? record.src : "";
     const alt = typeof record?.alt === "string" ? record.alt : "";
-    const defaultFocus = objectPositionToPercent(node.slotRules?.objectPosition);
-    if (!src) return <span className="hc-dynamic-template__empty-slot">图片待填写</span>;
+    const defaultFocus = objectPositionToPercent(node.slotRules?.objectPosition ?? TEMPLATE_MEDIA_DEFAULTS.objectPosition);
+    if (!src) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">图片待填写</span>;
     return (
       <img
         src={src}
@@ -294,7 +393,7 @@ function renderSlotContent(
         style={{
           width: "100%",
           height: "100%",
-          objectFit: node.layoutOverride?.objectFit ?? node.slotRules?.objectFit ?? "cover",
+          objectFit: node.layoutOverride?.objectFit ?? node.slotRules?.objectFit ?? TEMPLATE_MEDIA_DEFAULTS.objectFit,
           objectPosition: `${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`,
           transform: node.layoutOverride?.imageScalePercent && node.layoutOverride.imageScalePercent !== 100
             ? `scale(${node.layoutOverride.imageScalePercent / 100})`
@@ -306,20 +405,21 @@ function renderSlotContent(
   }
   if (["heading", "text", "richText", "badge", "icon"].includes(slot.type)) {
     const text = typeof content === "string" ? content : "";
-    if (!text) return <span className="hc-dynamic-template__empty-slot">{slot.label}待填写</span>;
+    if (!text) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">{slot.label}待填写</span>;
     if (slot.type === "heading") {
       const Heading = headingLevel === 1 ? "h1" : "h2";
-      return <Heading data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{text}</Heading>;
+      return <Heading className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{text}</Heading>;
     }
-    if (slot.type === "badge") return <span data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{text}</span>;
-    return <p data-template-font-role={node.slotRules?.fontRole} style={{ ...textStyle, whiteSpace: "pre-wrap" }}>{text}</p>;
+    if (slot.type === "badge") return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{text}</span>;
+    return <p className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={relationalLayout ? textStyle : { ...textStyle, whiteSpace: "pre-wrap" }}>{text}</p>;
   }
   if (slot.type === "button" || slot.type === "link") {
     const action = getSafeActionContent(content);
-    if (!action.label) return <span className="hc-dynamic-template__empty-slot">行动待填写</span>;
-    return action.href
-      ? <a href={action.href} data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{action.label}</a>
-      : <span data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{action.label}</span>;
+    if (!action.label) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">行动待填写</span>;
+    // 行动槽位的可点击语义由承载全部布局/背景/边框的节点外壳负责。
+    // 这里始终只输出文案，避免形成“外层视觉盒子 + 内层文字链接”的双重命中区域。
+    // 对齐作用于行动槽位的可用宽度；行内 span 不会响应 text-align。
+    return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={{ display: "block", ...textStyle }}>{action.label}</span>;
   }
   if (slot.type === "product") {
     const productCode = typeof content === "string" ? content.trim() : "";
@@ -332,7 +432,7 @@ function renderSlotContent(
     if (mockLabel) return <span data-template-mock-content="product">{mockLabel}</span>;
     return productCode
       ? <a href={`/products/${encodeURIComponent(productCode)}`}>{productCode}</a>
-      : <span className="hc-dynamic-template__empty-slot">商品待选择</span>;
+      : mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">商品待选择</span>;
   }
   if (slot.type === "collection") {
     const refs = Array.isArray(content) ? content.filter((item): item is string => typeof item === "string") : [];
@@ -344,7 +444,7 @@ function renderSlotContent(
           </li>
         ))}
       </ul>
-    ) : <span className="hc-dynamic-template__empty-slot">集合待选择</span>;
+    ) : mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">集合待选择</span>;
   }
   return null;
 }
@@ -376,8 +476,12 @@ function RenderNode({
   contentRenderMode,
   structureProtectedNodeIds,
   editableContractRoleIdsByNode,
+  showEmptyStructure,
   parentFree = false,
   siblingPlacements = [],
+  siblingIndex = 0,
+  parentRules,
+  relationalLayout = false,
 }: {
   node: DynamicTemplateRenderPlanNode;
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>;
@@ -397,10 +501,43 @@ function RenderNode({
   contentRenderMode: NonNullable<DynamicTemplateRendererProps["mode"]>;
   structureProtectedNodeIds?: ReadonlySet<string>;
   editableContractRoleIdsByNode?: ReadonlyMap<string, ReadonlySet<string>>;
+  showEmptyStructure: boolean;
   parentFree?: boolean;
+  parentRules?: DynamicTemplateRenderPlanNode["rules"];
+  relationalLayout?: boolean;
   siblingPlacements?: DynamicTemplatePlacement[];
+  siblingIndex?: number;
 }) {
-  const Element = nodeElementType(node);
+  const layoutElement = useRef<HTMLElement | null>(null);
+  const hasPositionedChildren = relationalLayout && node.children.some((child) => child.rules.anchor || child.rules.placement);
+  useLayoutEffect(() => {
+    const element = layoutElement.current;
+    const ownerWindow = element?.ownerDocument.defaultView;
+    if (!element || !ownerWindow || !element.isConnected || !hasPositionedChildren) return;
+    // 只测量具有叠放子项的容器，统一处理 px、rem 及百分比 padding；不写模板状态。
+    const measure = () => {
+      if (!element.isConnected || !element.ownerDocument.defaultView) return;
+      const computed = element.ownerDocument.defaultView.getComputedStyle(element);
+      for (const side of ["top", "right", "bottom", "left"] as const) {
+        const value = computed.getPropertyValue(`padding-${side}`);
+        const property = `--template-content-pad-${side}`;
+        if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
+      }
+    };
+    measure();
+    const observer = new ownerWindow.ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasPositionedChildren, node.rules.padding]);
+  const safeAction = node.slot && (node.slot.type === "button" || node.slot.type === "link")
+    ? getSafeActionContent(node.content)
+    : undefined;
+  const actionHref = mode !== "editor"
+    && (contentRenderMode === "preview" || contentRenderMode === "public")
+    && safeAction?.label
+    ? safeAction.href
+    : undefined;
+  const Element: ElementType = actionHref ? "a" : nodeElementType(node);
   const interactive = mode === "editor" && Boolean(onSelectNode);
   const structureLocked = structureProtectedNodeIds?.has(node.nodeId) === true;
   const layoutEditable = Boolean(
@@ -592,20 +729,26 @@ function RenderNode({
         : undefined,
       device,
       interactionOwner,
+      relationalLayout,
     )
     : null;
   return (
     <Element
+      ref={layoutElement}
+      {...(actionHref ? { href: actionHref } : {})}
       data-template-node-id={node.nodeId}
       data-template-node-type={node.type}
       data-template-node-label={interactive ? node.name : undefined}
+      data-template-empty-structure={showEmptyStructure && !node.slot && node.children.length === 0 ? "true" : undefined}
       data-template-slot-id={node.slotId}
       data-template-selected={selectedNodeId === node.nodeId ? "true" : undefined}
       data-template-selected-contract-role={selectedContractRole?.nodeId === node.nodeId ? selectedContractRole.roleId : undefined}
       data-template-background-token={node.rules.backgroundToken}
       data-template-border-token={node.rules.borderToken}
       style={{
-        ...rulesToStyle(node, layoutPreview, placementPreview, parentFree),
+        ...rulesToStyle(node, layoutPreview, placementPreview, parentFree, parentRules, relationalLayout),
+        // 新合同的阅读顺序与叠放层序共用 childIds，断点不维护第二套排序。
+        ...(relationalLayout ? { order: siblingIndex, zIndex: layoutPreview?.zIndex ?? node.layoutOverride?.zIndex ?? siblingIndex } : {}),
         ...(layoutEditable || freePlacementEditable ? {
           ...(layoutEditable ? { position: "relative" as const } : {}),
           cursor: freePlacementEditable || node.instanceEditPolicy?.position ? "move" : undefined,
@@ -702,7 +845,7 @@ function RenderNode({
       } : {})}
     >
       {slotContent}
-      {node.children.map((child) => (
+      {node.children.map((child, childIndex) => (
         <RenderNode
           key={child.nodeId}
           node={child}
@@ -723,7 +866,11 @@ function RenderNode({
           contentRenderMode={contentRenderMode}
           structureProtectedNodeIds={structureProtectedNodeIds}
           editableContractRoleIdsByNode={editableContractRoleIdsByNode}
+          showEmptyStructure={showEmptyStructure}
           parentFree={node.type === "Stack" && node.rules.layoutMode === "free"}
+          parentRules={node.rules}
+          relationalLayout={relationalLayout}
+          siblingIndex={childIndex}
           siblingPlacements={node.children
             .filter((sibling) => sibling.nodeId !== child.nodeId)
             .flatMap((sibling) => sibling.rules.placement ? [sibling.rules.placement] : [])}
@@ -736,10 +883,12 @@ function RenderNode({
 export default function DynamicTemplateRenderer({
   definition,
   device,
+  breakpoint,
   contentBySlotId,
   hiddenSlotIds,
   layoutOverridesByNodeId,
   mode = "public",
+  showEmptySlots,
   editorSurface,
   interactionOwner,
   templateEditorSessionId,
@@ -767,10 +916,11 @@ export default function DynamicTemplateRenderer({
     : undefined;
   const result = compileDynamicTemplateRenderPlan(definition, {
     device,
+    breakpoint,
     contentBySlotId,
     hiddenSlotIds,
     layoutOverridesByNodeId,
-    showEmptySlots: mode !== "public",
+    showEmptySlots: showEmptySlots ?? mode === "editor",
   });
   if (!result.ok) {
     if (mode === "public") return null;
@@ -825,6 +975,11 @@ export default function DynamicTemplateRenderer({
       data-dynamic-template-editor-surface={mode === "editor" ? editorSurface : undefined}
       data-template-composition-authority="template-definition-v2"
       data-template-root-node-id={result.plan.root.nodeId}
+      data-template-root-height-mode={result.plan.root.rules.height.mode}
+      data-template-root-height-ratio={result.plan.root.rules.height.mode === "aspect-ratio"
+        && result.plan.root.rules.height.ratio
+        ? `${result.plan.root.rules.height.ratio.width}:${result.plan.root.rules.height.ratio.height}`
+        : undefined}
       data-template-default-background-token={result.plan.metadata.defaultBackgroundToken}
       style={{
         background: result.plan.metadata.defaultBackgroundToken
@@ -834,6 +989,7 @@ export default function DynamicTemplateRenderer({
     >
       <RenderNode
         node={result.plan.root}
+        relationalLayout={Number(definition.schemaVersion) >= 2}
         mode={mode}
         selectedNodeId={allowsNodeInteraction ? selectedNodeId : null}
         selectedContractRole={allowsNodeInteraction ? selectedContractRole : null}
@@ -851,6 +1007,7 @@ export default function DynamicTemplateRenderer({
         contentRenderMode={contentRenderMode}
         structureProtectedNodeIds={structureProtectedNodeIds}
         editableContractRoleIdsByNode={editableContractRoleIdsByNode}
+        showEmptyStructure={mode === "editor" && editorSurface === "template-definition"}
       />
     </div>
   );

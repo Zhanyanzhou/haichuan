@@ -22,23 +22,12 @@ export type PublishedPageReadiness = {
   ready: boolean;
 };
 
-/**
- * 纯品牌页至少需要一个真正会输出内容的品牌区块。
- * 空商品行可以保留在动态业务页的旧快照中，但不能单独把作品展陈判为可公开。
- */
+/** 纯品牌页至少需要一个真正会输出内容的品牌区块。 */
 export function isRenderablePublishedBrandBlock(block: PublicPuckBlock) {
   if (!block?.type || block.props?.isVisible === false || block.type === "业务功能区") {
     return false;
   }
-  if (block.type !== "产品展示行") return true;
-
-  const productIds = Array.isArray(block.props?.productIds)
-    ? block.props.productIds
-    : [];
-  const productCodes = Array.isArray(block.props?.productCodes)
-    ? block.props.productCodes
-    : [];
-  return productIds.length > 0 || productCodes.length > 0;
+  return true;
 }
 
 /**

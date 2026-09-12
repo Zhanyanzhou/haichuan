@@ -3,7 +3,7 @@ import test from "node:test";
 import * as bcrypt from "bcrypt";
 import { CustomersService } from "./customers.service";
 
-test("账户注销在同一事务清除手机号、微信身份、会话哈希和同意关联", async () => {
+test("账户注销在同一事务清除联系方式、换绑目标、安全事件关联和会话哈希", async () => {
   const passwordHash = await bcrypt.hash("member123", 4);
   const writes: Array<{ model: string; args: any }> = [];
   const capture = (model: string, result: unknown) => async (args: any) => {
@@ -16,6 +16,7 @@ test("账户注销在同一事务清除手机号、微信身份、会话哈希�
         id: 9,
         phone: "13800000009",
         passwordHash,
+        avatarStorageKey: "9/123e4567-e89b-42d3-a456-426614174000.webp",
         wechatOpenId: "openid-private",
         wechatUnionId: "unionid-private",
       }),
@@ -29,6 +30,12 @@ test("账户注销在同一事务清除手机号、微信身份、会话哈希�
     },
     customerSmsCode: {
       updateMany: capture("customerSmsCode.updateMany", { count: 2 }),
+    },
+    customerContactChange: {
+      updateMany: capture("customerContactChange.updateMany", { count: 2 }),
+    },
+    customerSecurityEvent: {
+      updateMany: capture("customerSecurityEvent.updateMany", { count: 3 }),
     },
     customerAddress: {
       deleteMany: capture("customerAddress.deleteMany", { count: 1 }),
@@ -50,6 +57,7 @@ test("账户注销在同一事务清除手机号、微信身份、会话哈希�
     },
     $transaction: async (callback: (transaction: any) => unknown) => callback(prisma),
   };
+  const avatarRemovalSteps: string[] = [];
   const service = new CustomersService(
     prisma,
     {} as never,
@@ -57,6 +65,21 @@ test("账户注销在同一事务清除手机号、微信身份、会话哈希�
     {} as never,
     {} as never,
     {} as never,
+    {
+      prepareRemoval: async (storageKey: string) => {
+        avatarRemovalSteps.push(`prepare:${storageKey}`);
+        return true;
+      },
+      completePreparedRemoval: async (storageKey: string) => {
+        avatarRemovalSteps.push(`complete:${storageKey}`);
+      },
+      cancelPreparedRemoval: async (storageKey: string) => {
+        avatarRemovalSteps.push(`cancel:${storageKey}`);
+      },
+      remove: async (storageKey: string) => {
+        avatarRemovalSteps.push(`remove:${storageKey}`);
+      },
+    } as never,
   );
 
   const result = await service.closeAccount(9, "member123");
@@ -69,6 +92,7 @@ test("账户注销在同一事务清除手机号、微信身份、会话哈希�
   assert.equal(customerWrite?.args.data.wechatOpenId, null);
   assert.equal(customerWrite?.args.data.wechatUnionId, null);
   assert.equal(customerWrite?.args.data.status, "DISABLED");
+  assert.equal(customerWrite?.args.data.avatarStorageKey, null);
   assert.notEqual(customerWrite?.args.data.passwordHash, passwordHash);
 
   const smsWrite = writes.find((write) => write.model === "customerSmsCode.updateMany");
@@ -83,4 +107,22 @@ test("账户注销在同一事务清除手机号、微信身份、会话哈希�
   const consentWrite = writes.find((write) => write.model === "consentRecord.updateMany");
   assert.equal(consentWrite?.args.data.customerId, null);
   assert.equal(consentWrite?.args.data.anonymousIdHash, null);
+
+  const contactWrites = writes.filter((write) => write.model === "customerContactChange.updateMany");
+  assert.equal(contactWrites.length, 2);
+  assert.equal(contactWrites[0].args.where.customerId, 9);
+  assert.equal(contactWrites[0].args.data.targetValue, "closed-9");
+  assert.match(contactWrites[0].args.data.verificationHash, /^[0-9a-f]{64}$/);
+  assert.equal(contactWrites[1].args.where.completedAt, null);
+  assert.equal(contactWrites[1].args.where.cancelledAt, null);
+  assert.ok(contactWrites[1].args.data.cancelledAt instanceof Date);
+
+  const securityWrite = writes.find((write) => write.model === "customerSecurityEvent.updateMany");
+  assert.equal(securityWrite?.args.where.customerId, 9);
+  assert.equal(securityWrite?.args.data.ipHash, null);
+  assert.equal(securityWrite?.args.data.userAgentHash, null);
+  assert.deepEqual(avatarRemovalSteps, [
+    "prepare:9/123e4567-e89b-42d3-a456-426614174000.webp",
+    "complete:9/123e4567-e89b-42d3-a456-426614174000.webp",
+  ]);
 });

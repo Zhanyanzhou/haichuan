@@ -85,7 +85,7 @@ test.describe("商品管理列表查询契约", () => {
     });
 
     await page.goto("/admin/products");
-    await expect(page.getByText("商品数据加载失败，请检查网络后重新加载。")).toBeVisible();
+    await expect(page.getByText("商品数据加载失败，请稍后重新加载。")).toBeVisible();
     await expect(page.getByText(rawServerMessage)).toHaveCount(0);
   });
 });

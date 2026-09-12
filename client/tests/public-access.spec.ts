@@ -162,12 +162,12 @@ test.describe("游客公开浏览", () => {
       const registerPassword = page.getByLabel("密码");
       await expect(registerPassword).toHaveAttribute("minlength", "6");
       await expect(registerPassword).toHaveAttribute("maxlength", "18");
-      await expect(page.getByText("密码需为 6–18 位", { exact: true })).toBeVisible();
+      await expect(page.getByText("密码需为 6–18 位，并同时包含字母和数字", { exact: true })).toBeVisible();
       await expectNoHorizontalOverflow(page);
     });
   }
 
-  test("微信回调同时校验 origin/source 与固定消息 Schema", async ({ page }) => {
+  test("微信回调同时校验 origin/source 与固定消息 Schema", async ({ page, baseURL }) => {
     await page.route("**/api/customers/me", (route) =>
       route.fulfill({ status: 401, body: "{}" }),
     );
@@ -255,9 +255,9 @@ test.describe("游客公开浏览", () => {
     const iframeHandle = await iframe.elementHandle();
     const oauthFrame = await iframeHandle?.contentFrame();
     expect(oauthFrame).not.toBeNull();
-    await oauthFrame!.evaluate((data) => {
-      window.parent.postMessage(data, window.location.origin);
-    }, validMessage);
+    await oauthFrame!.evaluate(({ data, parentOrigin }) => {
+      window.parent.postMessage(data, parentOrigin);
+    }, { data: validMessage, parentOrigin: new URL(baseURL!).origin });
     await expect(page.getByText("已通过微信验证身份")).toBeVisible();
   });
 
@@ -268,11 +268,11 @@ test.describe("游客公开浏览", () => {
     const confirmation = page.getByLabel("确认新密码", { exact: true });
     await expect(page).toHaveURL(/\/customer\/reset$/);
     expect(page.url()).not.toContain(resetToken);
-    await expect(password).toHaveAttribute("minlength", "8");
-    await expect(password).toHaveAttribute("maxlength", "64");
-    await expect(confirmation).toHaveAttribute("minlength", "8");
-    await expect(confirmation).toHaveAttribute("maxlength", "64");
-    await expect(page.getByText("密码需为 8–64 位。", { exact: true })).toBeVisible();
+    await expect(password).toHaveAttribute("minlength", "6");
+    await expect(password).toHaveAttribute("maxlength", "18");
+    await expect(confirmation).toHaveAttribute("minlength", "6");
+    await expect(confirmation).toHaveAttribute("maxlength", "18");
+    await expect(page.getByText("密码需为 6–18 位，并同时包含字母和数字。", { exact: true })).toBeVisible();
   });
 
   test("会员密码重置页读取新 fragment 后清除地址栏且提交原令牌", async ({ page }) => {

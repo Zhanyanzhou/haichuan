@@ -4,7 +4,7 @@ import type { ArgumentsHost } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { HttpExceptionFilter } from "./http-exception.filter";
 
-function capture(exception: unknown) {
+function capture(exception: unknown, url = "/api/cart") {
   let statusCode = 0;
   let body: Record<string, unknown> = {};
   const response = {
@@ -23,7 +23,7 @@ function capture(exception: unknown) {
       getRequest: () => ({
         id: "public-write-security-01",
         method: "POST",
-        url: "/api/cart",
+        url,
       }),
     }),
   } as unknown as ArgumentsHost;
@@ -60,4 +60,16 @@ test("未知内部异常始终返回稳定安全合同", () => {
   assert.equal(result.body.message, "服务器内部错误");
   assert.equal(result.body.requestId, "public-write-security-01");
   assert.equal(JSON.stringify(result.body).includes("node_modules"), false);
+});
+
+test("头像文件超过 Multer 限制时返回统一 413 业务错误而不是 500", () => {
+  const error = Object.assign(new Error("File too large"), {
+    name: "MulterError",
+    code: "LIMIT_FILE_SIZE",
+  });
+  const result = capture(error, "/api/customers/me/avatar");
+
+  assert.equal(result.statusCode, 413);
+  assert.equal(result.body.errorCode, "AVATAR_FILE_TOO_LARGE");
+  assert.equal(result.body.message, "头像图片不能超过 5MB");
 });

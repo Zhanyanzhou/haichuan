@@ -280,7 +280,6 @@ function GeometryFixture() {
           movableOverlayTargetIds={movableTargetIds}
           resizeOverlayTargetIds={movableTargetIds}
           onOverlayTargetSelect={(target) => setSelectedTargetId(target.targetId)}
-          onOverlayNodeAction={() => undefined}
         >
           <DynamicTemplateRenderer
             definition={definition}

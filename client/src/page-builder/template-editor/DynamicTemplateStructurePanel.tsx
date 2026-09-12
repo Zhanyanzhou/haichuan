@@ -4,6 +4,8 @@ import {
   ArrowUpOutlined,
   BlockOutlined,
   CopyOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined,
   DeleteOutlined,
   ExclamationCircleOutlined,
   EyeInvisibleOutlined,
@@ -18,22 +20,37 @@ import {
   UnlockOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
-import { App as AntdApp, Dropdown } from "antd";
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { App as AntdApp, Button, Dropdown, type MenuProps } from "antd";
 import {
-  addDynamicTemplateNode,
-  canNestDynamicTemplateNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type Ref,
+} from "react";
+import {
+  createDefaultDynamicTemplateResponsiveRules,
   duplicateDynamicTemplateNode,
+  getDynamicTemplateGroupDisabledReason,
+  getDynamicTemplateMoveLandings,
   getDynamicTemplateNodeRegistryEntry,
+  getDynamicTemplateStructureLockOwnerId,
+  getDynamicTemplateUngroupDisabledReason,
+  groupDynamicTemplateNodes,
   isDynamicTemplateStructureLocked,
   isDynamicTemplateStructureProtected,
-  moveDynamicTemplateNode,
+  moveDynamicTemplateNodeToLanding,
   removeDynamicTemplateNode,
-  reorderDynamicTemplateNode,
+  resolveDynamicTemplateMoveLanding,
+  resolveDynamicTemplateMoveShortcutLanding,
   setDynamicTemplateNodeHidden,
   setDynamicTemplateNodeStructureLocked,
+  ungroupDynamicTemplateNode,
+  type DynamicTemplateLayoutGroupKind,
   type TemplateDefinitionV2,
 } from "../template-definition";
+import { resolveTemplateNodeRules, setTemplateNodeRule, type TemplateBreakpoint } from "../template-definition/responsive";
 import { getContentTemplateContract } from "../generated/contentTemplates.generated";
 import {
   getContentTemplateModuleTypeForSlotType,
@@ -46,6 +63,7 @@ import {
   describeDynamicTemplateRemoval,
   getDynamicTemplateRegionDisplayName,
 } from "./dynamicTemplateEditorUtils";
+import { addConfiguredTemplateRegion } from "./dynamicTemplateDraftRepository";
 import { DynamicTemplateNodePalette } from "./DynamicTemplateToolbox";
 import {
   getTemplateContractRoleLabel,
@@ -56,6 +74,11 @@ import {
   type TemplateStructureIssue,
 } from "./templateStructureAudit";
 import { useTemplateEditorSession } from "./templateEditorSession";
+import {
+  isSameTemplateEditorSelectionTarget,
+  type TemplateEditorSelectionExclusion,
+  type TemplateEditorSelectionTarget,
+} from "./templateEditorSelection";
 import { TEMPLATE_NODE_NAME_MAX_LENGTH } from "./templateEditorLimits";
 import "./DynamicTemplateStructurePanel.css";
 
@@ -63,6 +86,15 @@ type ContractKind = keyof typeof TEMPLATE_CONTRACT_KIND_LABELS;
 type StructureAction = "up" | "down" | "indent" | "outdent" | "duplicate" | "toggle" | "lock" | "delete";
 type DropPlacement = "before" | "inside" | "after";
 type DragMarker = { nodeId: string; placement: DropPlacement } | null;
+
+const GROUP_MENU_KINDS = [
+  { kind: "vertical", label: "上下布局组" },
+  { kind: "horizontal", label: "左右布局组" },
+  { kind: "columns", label: "分列布局组" },
+] as const satisfies ReadonlyArray<{
+  kind: Exclude<DynamicTemplateLayoutGroupKind, "empty">;
+  label: string;
+}>;
 
 const STRUCTURE_COMMAND_FEEDBACK_KEY = "template-structure-command-feedback";
 
@@ -80,11 +112,14 @@ interface StructureSlot {
   kind: ContractKind;
   responsiveOptions: ResponsiveRoleOption[];
   roleIds: string[];
+  selectionLabel: string;
+  applicableDevices: readonly ("desktop" | "mobile")[];
   virtual: boolean;
   required: boolean;
   hideable: boolean;
   removed: boolean;
   hidden: boolean;
+  visibilityReason?: string;
   locked: boolean;
   depth: number;
 }
@@ -95,6 +130,7 @@ interface StructureLayout {
   nodeId: string;
   label: string;
   hidden: boolean;
+  visibilityReason?: string;
   locked: boolean;
   depth: number;
 }
@@ -107,9 +143,70 @@ interface StructureRegion {
   label: string;
   contractBacked: boolean;
   hidden: boolean;
+  visibilityReason?: string;
   locked: boolean;
   entries: StructureEntry[];
   slots: StructureSlot[];
+}
+
+/** 结构状态与当前断点/祖先可见性保持一致；全局隐藏操作仍独立处理。 */
+export function resolveStructureVisibility(definition: TemplateDefinitionV2, nodeId: string, breakpoint: TemplateBreakpoint) {
+  let currentId: string | null = nodeId;
+  const visited = new Set<string>();
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const node = definition.nodes[currentId];
+    if (!node) break;
+    const rules = resolveTemplateNodeRules(definition, currentId, breakpoint);
+    if (node.hidden || rules.hidden || rules.display === "none") {
+      return { hidden: true, visibilityReason: currentId !== nodeId ? "上级隐藏：" + node.name : node.hidden ? "全局隐藏" : "本端隐藏" };
+    }
+    currentId = findDynamicTemplateParentId(definition, currentId);
+  }
+  return { hidden: false, visibilityReason: undefined };
+}
+
+function getRegionTreeItemKey(region: Pick<StructureRegion, "nodeId">) {
+  return `region:${region.nodeId}`;
+}
+
+function getEntryTreeItemKey(entry: Pick<StructureEntry, "key">) {
+  return `entry:${entry.key}`;
+}
+
+function isStructureSlotApplicable(
+  slot: StructureSlot,
+  device?: "desktop" | "mobile",
+) {
+  return !device
+    || slot.applicableDevices.length === 0
+    || slot.applicableDevices.includes(device);
+}
+
+function getVisibleTreeItemKeys(
+  regions: readonly StructureRegion[],
+  device?: "desktop" | "mobile",
+) {
+  return regions.flatMap((region) => [
+    getRegionTreeItemKey(region),
+    ...region.entries
+      .filter((entry) => entry.entryType === "layout" || isStructureSlotApplicable(entry, device))
+      .map(getEntryTreeItemKey),
+  ]);
+}
+
+function resolveRovingTreeItemKey(
+  visibleTreeItemKeys: readonly string[],
+  focusedTreeItemKey: string | null,
+  selectedTreeItemKey: string | null,
+) {
+  if (focusedTreeItemKey && visibleTreeItemKeys.includes(focusedTreeItemKey)) {
+    return focusedTreeItemKey;
+  }
+  if (selectedTreeItemKey && visibleTreeItemKeys.includes(selectedTreeItemKey)) {
+    return selectedTreeItemKey;
+  }
+  return visibleTreeItemKeys[0] ?? null;
 }
 
 function ContractRoleIcon({ kind }: { kind: ContractKind }) {
@@ -148,9 +245,8 @@ function collectSlotNodeIds(
 function getSimpleSlotKind(definition: TemplateDefinitionV2, nodeId: string): ContractKind {
   const node = definition.nodes[nodeId];
   const label = getDynamicTemplateNodeRegistryEntry(node.type).label;
-  if (node.type === "Video") return "video";
-  if (/图片|图标|轮播|海报|对比|热区/.test(label)) return "media";
-  if (/按钮|链接|行动|预约/.test(label)) return "action";
+  if (/图片|图标/.test(label)) return "media";
+  if (/按钮|链接|行动/.test(label)) return "action";
   if (/商品/.test(label)) return "product";
   if (/文字|标题|文本|徽章/.test(label)) return "text";
   return "collection";
@@ -181,7 +277,14 @@ function buildContractSlots(
   return objects.flatMap((object): StructureSlot[] => {
     if (visited.has(object.roleId)) return [];
     const role = contract.roles.find((candidate) => candidate.id === object.roleId);
-    const pairedRoleId = role?.fallbackRoleId && objectByRoleId.has(role.fallbackRoleId)
+    const fallbackRole = role?.fallbackRoleId
+      ? contract.roles.find((candidate) => candidate.id === role.fallbackRoleId)
+      : undefined;
+    const roleDevices = [...(role?.appliesTo ?? [])].sort().join(",");
+    const fallbackDevices = [...(fallbackRole?.appliesTo ?? [])].sort().join(",");
+    const pairedRoleId = role?.fallbackRoleId
+      && objectByRoleId.has(role.fallbackRoleId)
+      && roleDevices === fallbackDevices
       ? role.fallbackRoleId
       : undefined;
     const pair = pairedRoleId ? objectByRoleId.get(pairedRoleId) : undefined;
@@ -218,6 +321,8 @@ function buildContractSlots(
       kind: object.kind,
       responsiveOptions,
       roleIds,
+      selectionLabel: baseLabel,
+      applicableDevices: role?.appliesTo ?? [],
       virtual: true,
       required,
       hideable,
@@ -253,6 +358,8 @@ function collectRegionEntries(
         kind: getSimpleSlotKind(definition, nodeId),
         responsiveOptions: [{ device: "desktop" }, { device: "mobile" }],
         roleIds: [],
+        selectionLabel: label,
+        applicableDevices: [],
         virtual: false,
         required: slot?.required ?? false,
         hideable: slot?.hideable ?? true,
@@ -317,6 +424,53 @@ function buildStructureRegions(definition: TemplateDefinitionV2): StructureRegio
   });
 }
 
+function getStructureEntrySelectionTarget(entry: StructureEntry): TemplateEditorSelectionTarget {
+  return entry.entryType === "slot" && entry.roleId
+    ? { targetId: entry.nodeId, roleId: entry.roleId }
+    : { targetId: entry.nodeId };
+}
+
+export function buildTemplateStructureSelectionTargets(
+  definition: TemplateDefinitionV2,
+  device?: "desktop" | "mobile",
+): TemplateEditorSelectionTarget[] {
+  return buildStructureRegions(definition).flatMap((region) => [
+    { targetId: region.nodeId },
+    ...region.entries
+      .filter((entry) => entry.entryType === "layout" || isStructureSlotApplicable(entry, device))
+      .map(getStructureEntrySelectionTarget),
+  ]);
+}
+
+export function resolveTemplateStructureSelectionCompatibility(
+  definition: TemplateDefinitionV2,
+  device: "desktop" | "mobile",
+  target: TemplateEditorSelectionTarget,
+) {
+  if (target.roleId === undefined) return { compatible: true } as const;
+  const node = definition.nodes[target.targetId];
+  const slot = node?.slotId ? definition.slots[node.slotId] : undefined;
+  const moduleType = slot ? getContentTemplateModuleTypeForSlotType(slot.type) : undefined;
+  const contract = moduleType ? getContentTemplateContract(moduleType) : undefined;
+  const role = contract?.roles.find((candidate) => candidate.id === target.roleId);
+  const editable = contract?.editorCapabilities.editableObjects.some(
+    (candidate) => candidate.roleId === target.roleId,
+  );
+  if (!role || !editable) {
+    return { compatible: false, reason: `角色“${target.roleId}”不在当前模板的可编辑对象中，未加入多选。` } as const;
+  }
+  if (!role.appliesTo?.length || role.appliesTo.includes(device)) {
+    return { compatible: true } as const;
+  }
+  const roleLabel = getTemplateContractRoleLabel(target.roleId, role.semantic);
+  const appliesTo = role.appliesTo.map((candidate) => candidate === "desktop" ? "桌面端" : "移动端").join("、");
+  const current = device === "desktop" ? "桌面端" : "移动端";
+  return {
+    compatible: false,
+    reason: `“${roleLabel}”仅适用于${appliesTo}，当前${current}不能加入多选。`,
+  } as const;
+}
+
 function getStructureIssueDisplayMessage(
   issue: TemplateStructureIssue,
   regions: readonly StructureRegion[],
@@ -370,33 +524,132 @@ function InlineStructureName({
 }
 
 export default function DynamicTemplateStructurePanel({
+  panelRef,
+  closeButtonRef,
+  compactOverlay = false,
+  modalOverlay = compactOverlay,
+  publishIssueEditing = false,
+  onOpenPublishReview,
+  onPanelKeyDown,
   onCollapse,
 }: {
+  panelRef?: Ref<HTMLElement>;
+  closeButtonRef?: Ref<HTMLButtonElement>;
+  compactOverlay?: boolean;
+  modalOverlay?: boolean;
+  publishIssueEditing?: boolean;
+  onOpenPublishReview?: () => void;
+  onPanelKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
   onCollapse?: () => void;
 }) {
   const { message, modal } = AntdApp.useApp();
   const draft = useTemplateEditorSession((state) => state.draft);
   const selectedNodeId = useTemplateEditorSession((state) => state.selectedObjectId);
   const selectedContractRole = useTemplateEditorSession((state) => state.selectedContractRole);
+  const selectionSnapshot = useTemplateEditorSession((state) => state.selectionSnapshot);
   const device = useTemplateEditorSession((state) => state.device);
+  const breakpoint = useTemplateEditorSession((state) => state.breakpoint);
+  const [collapsedNodeIds, setCollapsedNodeIds] = useState<Set<string>>(() => new Set());
   const selectObject = useTemplateEditorSession((state) => state.selectObject);
   const selectContractRole = useTemplateEditorSession((state) => state.selectContractRole);
+  const transitionSelection = useTemplateEditorSession((state) => state.transitionSelection);
   const setDynamicDefinition = useTemplateEditorSession((state) => state.setDynamicDefinition);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [openedMenuNodeId, setOpenedMenuNodeId] = useState<string | null>(null);
   const [dragMarker, setDragMarker] = useState<DragMarker>(null);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const paletteToolsRef = useRef<HTMLDivElement>(null);
+  const [focusedTreeItemKey, setFocusedTreeItemKey] = useState<string | null>(null);
+  const [selectionExclusion, setSelectionExclusion] = useState<TemplateEditorSelectionExclusion | null>(null);
+  const treeItemElements = useRef(new Map<string, HTMLDivElement>());
   const regions = useMemo(
-    () => draft ? buildStructureRegions(draft.definition) : [],
-    [draft],
+    () => draft ? buildStructureRegions(draft.definition).map((region) => ({ ...region, ...resolveStructureVisibility(draft.definition, region.nodeId, breakpoint), entries: region.entries.map((entry) => ({ ...entry, ...resolveStructureVisibility(draft.definition, entry.nodeId, breakpoint), hidden: entry.hidden || resolveStructureVisibility(draft.definition, entry.nodeId, breakpoint).hidden })) })) : [],
+    [draft, breakpoint],
+  );
+  const displayedRegions = useMemo(() => regions.map((region) => ({
+    ...region,
+    entries: collapsedNodeIds.has(region.nodeId) ? [] : region.entries.filter((entry) => {
+      let parentId = draft ? findDynamicTemplateParentId(draft.definition, entry.nodeId) : null;
+      while (parentId && draft) {
+        if (collapsedNodeIds.has(parentId)) return false;
+        parentId = findDynamicTemplateParentId(draft.definition, parentId);
+      }
+      return true;
+    }),
+  })), [regions, collapsedNodeIds, draft]);
+  const toggleNodeExpanded = (nodeId: string) => setCollapsedNodeIds((current) => {
+    const next = new Set(current);
+    if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
+    return next;
+  });
+  useEffect(() => { setCollapsedNodeIds(new Set()); }, [draft?.definition.templateId]);
+  useEffect(() => { setOpenedMenuNodeId(null); }, [draft?.definition.templateId, selectedNodeId]);
+  useEffect(() => {
+    if (!draft || !selectedNodeId) return;
+    setCollapsedNodeIds((current) => {
+      const next = new Set(current);
+      let parentId = findDynamicTemplateParentId(draft.definition, selectedNodeId);
+      while (parentId) { next.delete(parentId); parentId = findDynamicTemplateParentId(draft.definition, parentId); }
+      return next.size === current.size ? current : next;
+    });
+  }, [draft, selectedNodeId]);
+  const visibleTreeItemKeys = useMemo(
+    () => getVisibleTreeItemKeys(displayedRegions, device),
+    [device, displayedRegions],
+  );
+  const visibleSelectionTargets = useMemo(
+    () => displayedRegions.flatMap((region) => [{ targetId: region.nodeId }, ...region.entries.filter((entry) => entry.entryType === "layout" || isStructureSlotApplicable(entry, device)).map(getStructureEntrySelectionTarget)]),
+    [device, displayedRegions],
+  );
+  const selectedTreeItemKey = useMemo(() => {
+    for (const region of regions) {
+      if (selectedNodeId === region.nodeId && !selectedContractRole) {
+        return getRegionTreeItemKey(region);
+      }
+      for (const entry of region.entries) {
+        if (entry.entryType === "layout") {
+          if (selectedNodeId === entry.nodeId && !selectedContractRole) {
+            return getEntryTreeItemKey(entry);
+          }
+          continue;
+        }
+        const selected = entry.roleId
+          ? selectedContractRole?.nodeId === entry.nodeId
+            && entry.responsiveOptions.some((option) => option.roleId === selectedContractRole.roleId)
+          : selectedNodeId === entry.nodeId && !selectedContractRole;
+        if (selected) return getEntryTreeItemKey(entry);
+      }
+    }
+    return null;
+  }, [regions, selectedContractRole, selectedNodeId]);
+  useEffect(() => {
+    if (!selectedTreeItemKey) return;
+    const frame = requestAnimationFrame(() => treeItemElements.current.get(selectedTreeItemKey)?.scrollIntoView({ block: "nearest", inline: "nearest" }));
+    return () => cancelAnimationFrame(frame);
+  }, [selectedTreeItemKey, collapsedNodeIds]);
+  const rovingTreeItemKey = resolveRovingTreeItemKey(
+    visibleTreeItemKeys,
+    focusedTreeItemKey,
+    selectedTreeItemKey,
   );
   const structureAudit = useMemo(
     () => draft ? buildTemplateStructureAudit(draft.definition) : null,
     [draft],
   );
+  useEffect(() => {
+    setFocusedTreeItemKey((current) => resolveRovingTreeItemKey(
+      visibleTreeItemKeys,
+      current,
+      selectedTreeItemKey,
+    ));
+  }, [selectedTreeItemKey, visibleTreeItemKeys]);
+  useEffect(() => {
+    setSelectionExclusion(null);
+  }, [draft?.definition.templateId, device]);
   if (!draft) return null;
 
   const definition = draft.definition;
-  const isContractBackedTemplate = draft.sourceReference?.startsWith("legacy_") ?? false;
   const isSetupIncomplete = Boolean(
     structureAudit
     && structureAudit.errorCount > 0
@@ -409,14 +662,117 @@ export default function DynamicTemplateStructurePanel({
   const visibleStructureIssues = structureAudit
     ? structureAudit.issues
     : [];
-  const selectSlot = (slot: StructureSlot) => {
-    const target = slot.responsiveOptions.find((candidate) => candidate.device === device)
-      ?? slot.responsiveOptions.find((candidate) => candidate.device === "all")
-      ?? slot.responsiveOptions[0];
-    const roleId = target.roleId ?? slot.roleId;
-    if (roleId) selectContractRole(slot.nodeId, roleId);
-    else selectObject(slot.nodeId);
+  const selectTreeTarget = (
+    target: TemplateEditorSelectionTarget,
+    modifiers: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {},
+  ) => {
+    const result = transitionSelection({
+      target,
+      visibleTargets: visibleSelectionTargets,
+      ctrlKey: modifiers.ctrlKey,
+      metaKey: modifiers.metaKey,
+      shiftKey: modifiers.shiftKey,
+      resolveCompatibility: (candidate) => (
+        resolveTemplateStructureSelectionCompatibility(definition, device, candidate)
+      ),
+    });
+    if (!result) return;
+    if (result.ok) {
+      setSelectionExclusion(null);
+      return;
+    }
+    setSelectionExclusion(result.exclusions[0] ?? null);
   };
+  const selectSlot = (
+    slot: StructureSlot,
+    modifiers: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {},
+  ) => {
+    selectTreeTarget(getStructureEntrySelectionTarget(slot), modifiers);
+  };
+  const setTreeItemElement = (key: string, element: HTMLDivElement | null) => {
+    if (element) treeItemElements.current.set(key, element);
+    else treeItemElements.current.delete(key);
+  };
+  const handleTreeItemKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    treeItemKey: string,
+    selectionTarget: TemplateEditorSelectionTarget,
+  ) => {
+    if (event.target !== event.currentTarget) return;
+    if (
+      !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      && (event.key === "ArrowLeft" || event.key === "ArrowRight")
+      && event.currentTarget.hasAttribute("aria-expanded")
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      setCollapsedNodeIds((current) => {
+        const shouldCollapse = event.key === "ArrowLeft";
+        if (current.has(selectionTarget.targetId) === shouldCollapse) return current;
+        const next = new Set(current);
+        if (shouldCollapse) next.add(selectionTarget.targetId);
+        else next.delete(selectionTarget.targetId);
+        return next;
+      });
+      setFocusedTreeItemKey(treeItemKey);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      selectTreeTarget(
+        selectionTarget,
+        event.key === "Enter" ? {} : event,
+      );
+      return;
+    }
+    const currentIndex = visibleTreeItemKeys.indexOf(treeItemKey);
+    if (currentIndex < 0 || visibleTreeItemKeys.length === 0) return;
+    let targetIndex: number;
+    if (event.key === "ArrowDown") {
+      targetIndex = Math.min(currentIndex + 1, visibleTreeItemKeys.length - 1);
+    } else if (event.key === "ArrowUp") {
+      targetIndex = Math.max(currentIndex - 1, 0);
+    } else if (event.key === "Home") {
+      targetIndex = 0;
+    } else if (event.key === "End") {
+      targetIndex = visibleTreeItemKeys.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    const targetKey = visibleTreeItemKeys[targetIndex];
+    setFocusedTreeItemKey(targetKey);
+    treeItemElements.current.get(targetKey)?.focus();
+  };
+
+  const isSelectionTargetSelected = (target: TemplateEditorSelectionTarget) => (
+    selectionSnapshot.targets.some((candidate) => (
+      isSameTemplateEditorSelectionTarget(candidate, target)
+    ))
+  );
+  const selectionDataAttributes = (target: TemplateEditorSelectionTarget) => ({
+    "data-selection-target-id": target.targetId,
+    ...(target.roleId !== undefined ? { "data-selection-role-id": target.roleId } : {}),
+    "data-selection-primary": isSameTemplateEditorSelectionTarget(
+      selectionSnapshot.primaryTarget,
+      target,
+    ) ? "true" : undefined,
+    "data-selection-anchor": isSameTemplateEditorSelectionTarget(
+      selectionSnapshot.anchorTarget,
+      target,
+    ) ? "true" : undefined,
+  });
+  const selectionExclusionMessage = selectionExclusion?.code === "TARGET_LOCKED"
+    ? (() => {
+        const targetName = definition.nodes[selectionExclusion.target.targetId]?.name ?? selectionExclusion.target.targetId;
+        const ownerName = selectionExclusion.lockOwnerId
+          ? definition.nodes[selectionExclusion.lockOwnerId]?.name ?? selectionExclusion.lockOwnerId
+          : null;
+        return ownerName && selectionExclusion.lockOwnerId !== selectionExclusion.target.targetId
+          ? `“${targetName}”位于已锁定的“${ownerName}”内，未加入多选。`
+          : `“${targetName}”已锁定，未加入多选。`;
+      })()
+    : selectionExclusion?.reason ?? null;
 
   const showStructureCommandError = (content: string) => {
     message.open({
@@ -458,6 +814,39 @@ export default function DynamicTemplateStructurePanel({
     return true;
   };
 
+  const executeStructureTransform = (
+    label: string,
+    transform: (current: TemplateDefinitionV2) => TemplateDefinitionV2,
+    options: {
+      onSuccess?: () => void;
+      successMessage?: string;
+    } = {},
+  ) => {
+    const result = useTemplateEditorSession.getState().executeCommand({
+      type: "transform-definition",
+      label,
+      transform,
+    });
+    if (!result.ok) {
+      showStructureCommandError(result.code === "STRUCTURE_LOCKED"
+        ? `${result.message} 请先解除提示中对象或其上级对象的结构锁定后重试。`
+        : `${result.message} 请检查当前模板结构后重试。`);
+      return false;
+    }
+    if (!result.changed) return false;
+    options.onSuccess?.();
+    if (options.successMessage) {
+      message.open({
+        key: STRUCTURE_COMMAND_FEEDBACK_KEY,
+        type: "success",
+        content: options.successMessage,
+      });
+    } else {
+      message.destroy(STRUCTURE_COMMAND_FEEDBACK_KEY);
+    }
+    return true;
+  };
+
   const renameNode = (nodeId: string, name: string) => {
     const currentDraft = useTemplateEditorSession.getState().draft;
     if (!currentDraft || currentDraft.definition.nodes[nodeId]?.name === name) {
@@ -466,8 +855,6 @@ export default function DynamicTemplateStructurePanel({
     }
     const next = structuredClone(currentDraft.definition);
     next.nodes[nodeId].name = name.slice(0, TEMPLATE_NODE_NAME_MAX_LENGTH);
-    const slotId = next.nodes[nodeId].slotId;
-    if (slotId) next.slots[slotId].label = next.nodes[nodeId].name;
     applyStructureDefinition(next, { onSuccess: () => setEditingNodeId(null) });
   };
 
@@ -501,6 +888,7 @@ export default function DynamicTemplateStructurePanel({
   };
 
   const selectIssue = (issue: TemplateStructureIssue) => {
+    if (issue.device) useTemplateEditorSession.getState().setBreakpoint(issue.device);
     const nodeId = issue.nodeId && definition.nodes[issue.nodeId]
       ? issue.nodeId
       : definition.rootNodeId;
@@ -509,6 +897,11 @@ export default function DynamicTemplateStructurePanel({
   };
 
   const repairIssue = (issue: TemplateStructureIssue) => {
+    if (issue.repair === "add-slot") {
+      // 复用添加入口的当前选择、合法落点和焦点恢复；打开流程不写入结构。
+      paletteToolsRef.current?.querySelector<HTMLButtonElement>('button[aria-label="添加槽位"]')?.click();
+      return;
+    }
     if (issue.repair === "restore-required-role" && issue.nodeId && issue.roleId) {
       const slot = regions.flatMap((region) => region.slots).find((candidate) => (
         candidate.nodeId === issue.nodeId && candidate.roleIds.includes(issue.roleId!)
@@ -544,12 +937,20 @@ export default function DynamicTemplateStructurePanel({
     }
     if (issue.repair === "restore-required-slot-device" && issue.nodeId && issue.device) {
       const target = currentDraft.definition.nodes[issue.nodeId];
-      if (!target || target.responsive[issue.device].display !== "none") return;
+      if (!target) return;
+      const rules = resolveTemplateNodeRules(currentDraft.definition, issue.nodeId, issue.device);
+      if (rules.display !== "none" && !rules.hidden) return;
       const next = structuredClone(currentDraft.definition);
-      next.nodes[issue.nodeId].responsive[issue.device].display = "block";
+      setTemplateNodeRule(next, issue.nodeId, issue.device, "hidden", false);
+      if (rules.display === "none") {
+        const upstream: TemplateBreakpoint[] = issue.device === "mobile" ? ["tablet", "desktop"] : issue.device === "tablet" ? ["desktop"] : [];
+        const display = upstream.map((breakpoint) => resolveTemplateNodeRules(next, issue.nodeId!, breakpoint).display)
+          .find((value) => value !== "none") ?? createDefaultDynamicTemplateResponsiveRules(target.type).display;
+        setTemplateNodeRule(next, issue.nodeId, issue.device, "display", display);
+      }
       applyStructureDefinition(next, {
-        onSuccess: () => selectObject(issue.nodeId!),
-        successMessage: "必填槽位已恢复显示。",
+        onSuccess: () => selectIssue(issue),
+        successMessage: "已取消此来源的断点隐藏；请核对其余上级与子内容的显隐设置。",
       });
       return;
     }
@@ -560,7 +961,7 @@ export default function DynamicTemplateStructurePanel({
         setDynamicTemplateNodeHidden(currentDraft.definition, issue.nodeId, false),
         {
           onSuccess: () => selectObject(issue.nodeId!),
-          successMessage: "必填槽位已恢复显示。",
+          successMessage: "已取消此来源的全局隐藏；各断点及其余上级的显隐设置保持不变。",
         },
       );
       return;
@@ -571,18 +972,13 @@ export default function DynamicTemplateStructurePanel({
         getDynamicTemplateNodeRegistryEntry(next.nodes[nodeId].type).kind === "structure"
       ));
       if (!parentId) {
-        const region = addDynamicTemplateNode(next, next.rootNodeId, "Container");
-        next = structuredClone(region.definition);
+        const region = addConfiguredTemplateRegion(next);
+        next = region.definition;
         parentId = region.nodeId;
-        next.nodes[parentId].name = "内容区域 01";
       }
       if (issue.repair === "add-region") {
         applyStructureDefinition(next, { onSuccess: () => selectObject(parentId) });
         return;
-      }
-      if (issue.repair === "add-slot") {
-        const result = addDynamicTemplateNode(next, parentId, "ImageSlot");
-        applyStructureDefinition(result.definition, { onSuccess: () => selectObject(result.nodeId) });
       }
     } catch (error) {
       showStructureCommandError(`${error instanceof Error ? error.message : "结构修复失败"} 请检查当前模板结构后重试。`);
@@ -595,36 +991,104 @@ export default function DynamicTemplateStructurePanel({
     placement: DropPlacement,
   ) => {
     setDragMarker(null);
+    setDraggingNodeId(null);
     const currentDraft = useTemplateEditorSession.getState().draft;
     if (!currentDraft) return;
     const currentDefinition = currentDraft.definition;
     if (draggedNodeId === currentDefinition.rootNodeId || draggedNodeId === targetNodeId) return;
     try {
-      let nextDefinition: TemplateDefinitionV2;
-      if (placement === "inside") {
-        nextDefinition = moveDynamicTemplateNode(currentDefinition, draggedNodeId, targetNodeId);
-      } else {
-        const targetParentId = findDynamicTemplateParentId(currentDefinition, targetNodeId);
-        const currentParentId = findDynamicTemplateParentId(currentDefinition, draggedNodeId);
-        if (!targetParentId) return;
-        const targetSiblings = currentDefinition.nodes[targetParentId]?.childIds ?? [];
-        const targetIndex = targetSiblings.indexOf(targetNodeId);
-        const currentIndex = currentParentId
-          ? currentDefinition.nodes[currentParentId]?.childIds.indexOf(draggedNodeId) ?? -1
-          : -1;
-        let insertionIndex = targetIndex + (placement === "after" ? 1 : 0);
-        if (currentParentId === targetParentId && currentIndex >= 0 && currentIndex < insertionIndex) insertionIndex -= 1;
-        nextDefinition = moveDynamicTemplateNode(
-          currentDefinition,
-          draggedNodeId,
-          targetParentId,
-          insertionIndex,
-        );
-      }
+      const landing = resolveDynamicTemplateMoveLanding(currentDefinition, draggedNodeId, {
+        targetNodeId,
+        placement,
+      });
+      if (!landing) return;
+      const nextDefinition = moveDynamicTemplateNodeToLanding(currentDefinition, draggedNodeId, landing);
       applyStructureDefinition(nextDefinition, { onSuccess: () => selectObject(draggedNodeId) });
     } catch (error) {
       showStructureCommandError(`${error instanceof Error ? error.message : "结构排序失败"} 请检查目标层级后重试。`);
     }
+  };
+
+  const canPreviewDrop = (targetNodeId: string, placement: DropPlacement) => {
+    if (!draggingNodeId) return false;
+    const currentDefinition = useTemplateEditorSession.getState().draft?.definition;
+    if (!currentDefinition) return false;
+    const landing = resolveDynamicTemplateMoveLanding(currentDefinition, draggingNodeId, {
+      targetNodeId,
+      placement,
+    });
+    return Boolean(landing && !landing.disabledReason);
+  };
+
+  const openMoveDialog = (nodeId: string) => {
+    const current = useTemplateEditorSession.getState().draft?.definition;
+    if (!current) return;
+    const landings = getDynamicTemplateMoveLandings(current, nodeId)
+      .filter((landing) => !landing.disabledReason);
+    if (!landings.length) {
+      showStructureCommandError("当前对象没有可用的移动目标。请先解除目标锁定或调整结构。");
+      return;
+    }
+    let selectedLandingId = landings[0].landingId;
+    modal.confirm({
+      title: `移动“${current.nodes[nodeId].name}”到…`,
+      content: (
+        <label className="template-editor__move-field">
+          <span>合法目标与落点</span>
+          <select
+            aria-label="移动目标与落点"
+            defaultValue={selectedLandingId}
+            onChange={(event) => { selectedLandingId = event.target.value; }}
+          >
+            {landings.map((landing) => (
+              <option key={landing.landingId} value={landing.landingId}>{landing.pathLabel}</option>
+            ))}
+          </select>
+        </label>
+      ),
+      okText: "确认移动",
+      cancelText: "取消",
+      onOk: () => {
+        const landing = landings.find((candidate) => candidate.landingId === selectedLandingId);
+        if (!landing) return;
+        executeStructureTransform(
+          "移动模板对象",
+          (definition) => moveDynamicTemplateNodeToLanding(definition, nodeId, landing),
+          { onSuccess: () => selectObject(nodeId) },
+        );
+      },
+    });
+  };
+
+  const groupNode = (
+    nodeId: string,
+    kind: Exclude<DynamicTemplateLayoutGroupKind, "empty">,
+    includeNext: boolean,
+  ) => {
+    const current = useTemplateEditorSession.getState().draft?.definition;
+    if (!current) return;
+    const parentId = findDynamicTemplateParentId(current, nodeId);
+    if (!parentId) return;
+    const siblings = current.nodes[parentId].childIds;
+    const nodeIndex = siblings.indexOf(nodeId);
+    const nodeIds = includeNext && siblings[nodeIndex + 1]
+      ? [nodeId, siblings[nodeIndex + 1]]
+      : [nodeId];
+    let groupId = "";
+    executeStructureTransform(`组合为${GROUP_MENU_KINDS.find((item) => item.kind === kind)?.label ?? "布局组"}`, (definition) => {
+      const result = groupDynamicTemplateNodes(definition, nodeIds, kind);
+      groupId = result.nodeId;
+      return result.definition;
+    }, { onSuccess: () => selectObject(groupId) });
+  };
+
+  const ungroupNode = (nodeId: string) => {
+    const parentId = findDynamicTemplateParentId(definition, nodeId);
+    executeStructureTransform(
+      "解除布局分组",
+      (current) => ungroupDynamicTemplateNode(current, nodeId),
+      { onSuccess: () => selectObject(parentId) },
+    );
   };
 
   const performAction = (action: StructureAction, nodeId: string) => {
@@ -633,10 +1097,27 @@ export default function DynamicTemplateStructurePanel({
     const node = currentDraft.definition.nodes[nodeId];
     if (!node) return;
     const slot = node.slotId ? currentDraft.definition.slots[node.slotId] : undefined;
-    if ((action === "delete" || (action === "toggle" && !node.hidden)) && slot?.required) {
+    if (action === "toggle" && !node.hidden && slot?.required) {
       showStructureCommandError(
-        `“${slot.label}”是母模板必填槽位，不能${action === "delete" ? "删除" : "隐藏"}。请保留该槽位，并调整允许的布局或样式。`,
+        `“${slot.label}”是母模板必填槽位，不能隐藏。请保留该槽位，并调整允许的布局或样式。`,
       );
+      return;
+    }
+    if (action === "delete" && slot?.required) {
+      modal.confirm({
+        title: `删除必填槽位“${slot.label}”？`,
+        content: "该动作会先取消页面必填要求，再删除当前槽位；两步作为一次操作，可一次撤销恢复。",
+        okText: "取消必填并删除",
+        okButtonProps: { danger: true },
+        cancelText: "继续保留",
+        onOk: () => executeStructureTransform("取消必填并删除槽位", (definition) => {
+          const next = structuredClone(definition);
+          const currentSlotId = next.nodes[nodeId]?.slotId;
+          if (!currentSlotId || !next.slots[currentSlotId]) return definition;
+          next.slots[currentSlotId].required = false;
+          return removeDynamicTemplateNode(next, nodeId);
+        }, { onSuccess: () => selectObject(findDynamicTemplateParentId(currentDraft.definition, nodeId)) }),
+      });
       return;
     }
     const apply = () => {
@@ -664,37 +1145,16 @@ export default function DynamicTemplateStructurePanel({
           });
           return;
         }
-        const parentId = findDynamicTemplateParentId(currentDraft.definition, nodeId);
-        if (!parentId) return;
-        const siblings = currentDraft.definition.nodes[parentId].childIds;
-        const currentIndex = siblings.indexOf(nodeId);
-        if (action === "indent") {
-          const previousSiblingId = siblings[currentIndex - 1];
-          if (!previousSiblingId) return;
-          applyStructureDefinition(moveDynamicTemplateNode(
-            currentDraft.definition,
-            nodeId,
-            previousSiblingId,
-          ));
-          return;
-        }
-        if (action === "outdent") {
-          const grandParentId = findDynamicTemplateParentId(currentDraft.definition, parentId);
-          if (!grandParentId) return;
-          const parentIndex = currentDraft.definition.nodes[grandParentId].childIds.indexOf(parentId);
-          applyStructureDefinition(moveDynamicTemplateNode(
-            currentDraft.definition,
-            nodeId,
-            grandParentId,
-            parentIndex + 1,
-          ));
-          return;
-        }
-        applyStructureDefinition(reorderDynamicTemplateNode(
+        const landing = resolveDynamicTemplateMoveShortcutLanding(
           currentDraft.definition,
           nodeId,
-          action === "up" ? currentIndex - 1 : currentIndex + 1,
-        ));
+          action,
+        );
+        if (!landing) return;
+        applyStructureDefinition(
+          moveDynamicTemplateNodeToLanding(currentDraft.definition, nodeId, landing),
+          { onSuccess: () => selectObject(nodeId) },
+        );
       } catch (error) {
         showStructureCommandError(`${error instanceof Error ? error.message : "结构操作失败"} 请检查当前层级和锁定状态后重试。`);
       }
@@ -713,7 +1173,8 @@ export default function DynamicTemplateStructurePanel({
     });
   };
 
-  const nodeMenu = (nodeId: string, rawName: string, region: boolean, layout = false) => {
+  // 落点校验会模拟移动整个模板，只在打开对应菜单时计算，避免每行渲染都重复克隆。
+  const buildNodeMenu = (nodeId: string, region: boolean, layout: boolean): MenuProps => {
     const parentId = findDynamicTemplateParentId(definition, nodeId);
     const siblings = parentId ? definition.nodes[parentId]?.childIds ?? [] : [];
     const siblingIndex = siblings.indexOf(nodeId);
@@ -721,39 +1182,71 @@ export default function DynamicTemplateStructurePanel({
     const slot = node.slotId ? definition.slots[node.slotId] : undefined;
     const selfLocked = isDynamicTemplateStructureLocked(node);
     const locked = isDynamicTemplateStructureProtected(definition, nodeId);
+    const lockOwnerId = getDynamicTemplateStructureLockOwnerId(definition, nodeId);
     const parentLocked = Boolean(
       parentId && isDynamicTemplateStructureProtected(definition, parentId),
     );
-    const previousSibling = siblingIndex > 0 ? definition.nodes[siblings[siblingIndex - 1]] : undefined;
-    const grandParentId = parentId ? findDynamicTemplateParentId(definition, parentId) : null;
-    const canIndent = Boolean(
-      previousSibling
-      && !isDynamicTemplateStructureProtected(definition, previousSibling.nodeId)
-      && canNestDynamicTemplateNode(previousSibling.type, node.type),
-    );
-    const canOutdent = Boolean(
-      grandParentId
-      && !isDynamicTemplateStructureProtected(definition, grandParentId)
-      && canNestDynamicTemplateNode(definition.nodes[grandParentId].type, node.type),
+    const shortcutLandings = {
+      up: resolveDynamicTemplateMoveShortcutLanding(definition, nodeId, "up"),
+      down: resolveDynamicTemplateMoveShortcutLanding(definition, nodeId, "down"),
+      indent: resolveDynamicTemplateMoveShortcutLanding(definition, nodeId, "indent"),
+      outdent: resolveDynamicTemplateMoveShortcutLanding(definition, nodeId, "outdent"),
+    };
+    const groupDisabledReasons = Object.fromEntries(GROUP_MENU_KINDS.map((item) => [
+      item.kind,
+      getDynamicTemplateGroupDisabledReason(definition, [nodeId], item.kind),
+    ])) as Record<Exclude<DynamicTemplateLayoutGroupKind, "empty">, string | null>;
+    const groupWithNextDisabledReasons = Object.fromEntries(GROUP_MENU_KINDS.map((item) => [
+      item.kind,
+      siblingIndex >= 0 && siblings[siblingIndex + 1]
+        ? getDynamicTemplateGroupDisabledReason(definition, [nodeId, siblings[siblingIndex + 1]], item.kind)
+        : "没有下一对象",
+    ])) as Record<Exclude<DynamicTemplateLayoutGroupKind, "empty">, string | null>;
+    const ungroupDisabledReason = layout
+      ? getDynamicTemplateUngroupDisabledReason(definition, nodeId)
+      : null;
+    const protectedActionReason = locked
+      ? selfLocked ? "当前对象已锁定" : "上级对象已锁定"
+      : parentLocked ? "上级对象已锁定" : null;
+    const disabledActionLabel = (label: string, reason: string | null | undefined) => (
+      reason ? `${label}（不可用：${reason}）` : label
     );
     const requiredSlotVisible = Boolean(slot?.required && !node.hidden);
     const deleteLabel = region ? "删除区域" : layout ? "删除容器" : "删除槽位";
-    return (
-      <Dropdown
-        trigger={["click"]}
-        menu={{
+    return {
           items: [
             {
               key: "rename",
               label: region ? "重命名区域" : layout ? "重命名容器" : "重命名槽位",
               disabled: locked,
             },
-            { key: "up", icon: <ArrowUpOutlined aria-hidden="true" />, label: "上移", disabled: locked || parentLocked || siblingIndex <= 0 },
-            { key: "down", icon: <ArrowDownOutlined aria-hidden="true" />, label: "下移", disabled: locked || parentLocked || siblingIndex < 0 || siblingIndex >= siblings.length - 1 },
+            { key: "up", icon: <ArrowUpOutlined aria-hidden="true" />, label: "上移", disabled: !shortcutLandings.up || Boolean(shortcutLandings.up.disabledReason) },
+            { key: "down", icon: <ArrowDownOutlined aria-hidden="true" />, label: "下移", disabled: !shortcutLandings.down || Boolean(shortcutLandings.down.disabledReason) },
+            { key: "move", label: "移动到…", disabled: locked || parentLocked },
             ...(!slot ? [
-              { key: "indent", label: "移入上一个容器", disabled: locked || parentLocked || !canIndent },
-              { key: "outdent", label: "移出当前容器", disabled: locked || parentLocked || !canOutdent },
+              { key: "indent", label: "移入上一个容器", disabled: !shortcutLandings.indent || Boolean(shortcutLandings.indent.disabledReason) },
+              { key: "outdent", label: "移出当前容器", disabled: !shortcutLandings.outdent || Boolean(shortcutLandings.outdent.disabledReason) },
             ] : []),
+            ...(!region ? [{ key: "grouping", label: "排列与分组", children: [
+            ...(!region ? GROUP_MENU_KINDS.map((item) => ({
+              key: `group:${item.kind}`,
+              label: disabledActionLabel(`组合为${item.label}`, protectedActionReason ?? groupDisabledReasons[item.kind]),
+              title: protectedActionReason ?? groupDisabledReasons[item.kind] ?? undefined,
+              disabled: locked || parentLocked || Boolean(groupDisabledReasons[item.kind]),
+            })) : []),
+            ...(!region && siblingIndex >= 0 && siblingIndex < siblings.length - 1 ? GROUP_MENU_KINDS.map((item) => ({
+              key: `group-next:${item.kind}`,
+              label: disabledActionLabel(`与下一对象组合为${item.label}`, protectedActionReason ?? groupWithNextDisabledReasons[item.kind]),
+              title: protectedActionReason ?? groupWithNextDisabledReasons[item.kind] ?? undefined,
+              disabled: locked || parentLocked || Boolean(groupWithNextDisabledReasons[item.kind]),
+            })) : []),
+            ...(layout ? [{
+              key: "ungroup",
+              label: disabledActionLabel("解除布局分组", protectedActionReason ?? ungroupDisabledReason),
+              title: protectedActionReason ?? ungroupDisabledReason ?? undefined,
+              disabled: locked || parentLocked || Boolean(ungroupDisabledReason),
+            }] : []),
+            ] }] : []),
             { key: "duplicate", icon: <CopyOutlined aria-hidden="true" />, label: region ? "复制区域" : layout ? "复制容器" : "复制槽位", disabled: locked || parentLocked },
             {
               key: "lock",
@@ -765,35 +1258,74 @@ export default function DynamicTemplateStructurePanel({
                   : region ? "锁定区域" : layout ? "锁定容器" : "锁定槽位",
               disabled: locked && !selfLocked,
             },
+            ...(locked && !selfLocked && lockOwnerId ? [{
+              key: "locate-lock-owner",
+              label: "定位并选择上级",
+            }] : []),
             {
               key: "toggle",
               icon: node.hidden ? <EyeOutlined aria-hidden="true" /> : <EyeInvisibleOutlined aria-hidden="true" />,
               label: node.hidden
-                ? "显示"
+                ? "取消全局隐藏（所有设备）"
                 : requiredSlotVisible
-                  ? "隐藏（必填槽位不可用）"
-                  : "隐藏",
+                  ? "全局隐藏（必填槽位不可用）"
+                  : node.childIds.length > 0 ? "全局隐藏（所有设备及子内容）" : "全局隐藏（所有设备）",
+              title: node.hidden
+                ? "取消此对象的全局隐藏；对象及子内容仍受上级和各断点显隐设置影响，不保证立即可见。"
+                : "影响所有设备；隐藏容器时，其内部内容一起不可见。各断点显隐设置保持不变。",
               disabled: locked || requiredSlotVisible,
             },
             { type: "divider" },
             {
               key: "delete",
               icon: <DeleteOutlined aria-hidden="true" />,
-              label: slot?.required ? `${deleteLabel}（必填槽位不可用）` : deleteLabel,
+              label: slot?.required ? `${deleteLabel}…` : deleteLabel,
               danger: true,
-              disabled: locked || parentLocked || slot?.required,
+              disabled: locked || parentLocked,
             },
           ],
-          onClick: ({ key }) => {
+          onClick: ({ key, domEvent }) => {
+            domEvent.stopPropagation();
+            setOpenedMenuNodeId(null);
             if (key === "rename") {
               setEditingNodeId(nodeId);
+              return;
+            }
+            if (key === "move") {
+              openMoveDialog(nodeId);
+              return;
+            }
+            if (key === "ungroup") {
+              ungroupNode(nodeId);
+              return;
+            }
+            if (key === "locate-lock-owner" && lockOwnerId) {
+              selectObject(lockOwnerId);
+              return;
+            }
+            if (key.startsWith("group:")) {
+              groupNode(nodeId, key.slice("group:".length) as Exclude<DynamicTemplateLayoutGroupKind, "empty">, false);
+              return;
+            }
+            if (key.startsWith("group-next:")) {
+              groupNode(nodeId, key.slice("group-next:".length) as Exclude<DynamicTemplateLayoutGroupKind, "empty">, true);
               return;
             }
             if (key === "up" || key === "down" || key === "indent" || key === "outdent" || key === "duplicate" || key === "toggle" || key === "lock" || key === "delete") {
               performAction(key, nodeId);
             }
           },
-        }}
+    };
+  };
+
+  const nodeMenu = (nodeId: string, rawName: string, region: boolean, layout = false) => {
+    const open = openedMenuNodeId === nodeId;
+    return (
+      <Dropdown
+        trigger={["click"]}
+        open={open}
+        onOpenChange={(nextOpen) => setOpenedMenuNodeId((current) => nextOpen ? nodeId : current === nodeId ? null : current)}
+        menu={open ? buildNodeMenu(nodeId, region, layout) : { items: [] }}
       >
         <button
           type="button"
@@ -808,19 +1340,58 @@ export default function DynamicTemplateStructurePanel({
   };
 
   return (
-    <aside className="homepage-editor__structure-workspace template-editor__structure template-editor__structure--reference" aria-label="模板结构">
+    <aside
+      ref={panelRef}
+      className="homepage-editor__structure-workspace template-editor__structure template-editor__structure--reference"
+      aria-label="模板结构"
+      role={modalOverlay ? "dialog" : undefined}
+      aria-modal={modalOverlay ? "true" : undefined}
+      tabIndex={modalOverlay ? -1 : undefined}
+      data-compact-overlay={compactOverlay ? "structure" : undefined}
+      data-compact-overlay-open={compactOverlay || undefined}
+      onKeyDown={onPanelKeyDown}
+    >
       <WorkspacePanelHeader
         icon={<BlockOutlined />}
         title="模板结构"
-        actions={onCollapse ? (
-          <WorkspacePanelCollapseButton
-            action="collapse"
-            panel="structure"
-            panelLabel="模板结构面板"
-            onClick={onCollapse}
-          />
+        actions={onCollapse || publishIssueEditing ? (
+          <span className="template-editor__structure-header-actions">
+            {publishIssueEditing ? (
+              <Button
+                size="small"
+                type="link"
+                aria-label="返回已过期发布检查"
+                onClick={onOpenPublishReview}
+              >返回过期检查</Button>
+            ) : null}
+            {onCollapse ? (
+              <WorkspacePanelCollapseButton
+                ref={closeButtonRef}
+                action="collapse"
+                panel="structure"
+                panelLabel="模板结构面板"
+                onClick={onCollapse}
+              />
+            ) : null}
+          </span>
         ) : undefined}
       />
+      <button
+        type="button"
+        className="template-editor__root-select"
+        aria-label="模板整体"
+        aria-pressed={selectedNodeId === definition.rootNodeId && !selectedContractRole}
+        onClick={() => {
+          selectObject(definition.rootNodeId);
+          setSelectionExclusion(null);
+        }}
+      >
+        <BlockOutlined aria-hidden="true" />
+        <span>
+          <strong>模板整体</strong>
+          <span>名称、尺寸与样式</span>
+        </span>
+      </button>
       <div className="template-editor__structure-scroll">
         {structureAudit && structureAudit.issues.length > 0 ? (
           <section className={`template-editor__structure-health${isSetupIncomplete ? " is-incomplete" : structureAudit.errorCount > 0 ? " has-errors" : " has-warnings"}`} aria-label="模板结构问题">
@@ -836,7 +1407,7 @@ export default function DynamicTemplateStructurePanel({
                   <li key={`${issue.code}:${issue.nodeId ?? "root"}:${issue.roleId ?? index}`} className={`is-${issue.level}`}>
                     <span title={issue.message}>{getStructureIssueDisplayMessage(issue, regions)}</span>
                     <button type="button" onClick={() => selectIssue(issue)}>定位</button>
-                    {issue.repair ? <button type="button" onClick={() => repairIssue(issue)}>修复</button> : null}
+                    {issue.repair ? <button type="button" onClick={() => repairIssue(issue)}>{issue.repair === "add-slot" ? "选择内容" : "修复"}</button> : null}
                   </li>
                 ))}
               </ul>
@@ -845,13 +1416,30 @@ export default function DynamicTemplateStructurePanel({
           </section>
         ) : null}
 
+        {selectionExclusion && selectionExclusionMessage ? (
+          <div
+            className="template-editor__selection-exclusion"
+            role="status"
+            aria-label="多选目标已排除"
+            data-selection-exclusion-code={selectionExclusion.code}
+            data-selection-exclusion-target-id={selectionExclusion.target.targetId}
+            data-selection-exclusion-role-id={selectionExclusion.target.roleId}
+            data-selection-exclusion-reason={selectionExclusionMessage}
+          >
+            {selectionExclusionMessage}
+          </div>
+        ) : null}
+
         <ol className="template-editor__region-list" role="tree" aria-label="模板区域与槽位">
-          {regions.map((region) => {
-            const regionSelected = selectedNodeId === region.nodeId && !selectedContractRole;
+          {displayedRegions.map((region) => {
+            const regionSelectionTarget = { targetId: region.nodeId };
+            const regionSelected = isSelectionTargetSelected(regionSelectionTarget);
             const regionLabel = regions.length === 1 && region.contractBacked ? "内容区域" : region.label;
+            const regionTreeItemKey = getRegionTreeItemKey(region);
             return (
               <li
                 key={region.nodeId}
+                role="none"
                 className={`template-editor__region${region.hidden ? " is-hidden" : ""}${region.locked ? " is-locked" : ""}`}
                 onDragLeave={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragMarker(null);
@@ -860,17 +1448,25 @@ export default function DynamicTemplateStructurePanel({
                 <div
                   className={`template-editor__region-header${regionSelected ? " is-active" : ""}${dragMarker?.nodeId === region.nodeId ? ` is-drag-${dragMarker.placement}` : ""}`}
                 >
-                  <button
-                    type="button"
+                  <div
                     className="template-editor__region-select"
                     role="treeitem"
                     aria-level={2}
+                    aria-expanded={!collapsedNodeIds.has(region.nodeId)}
                     aria-selected={regionSelected}
-                    aria-label={`${regionLabel}${region.hidden ? " 已隐藏" : ""}${region.locked ? " 已锁定" : ""}`}
+                    aria-label={`${regionLabel}${region.hidden ? " " + (region.visibilityReason ?? "已隐藏") : ""}${region.locked ? " 已锁定" : ""}`}
+                    ref={(element) => setTreeItemElement(regionTreeItemKey, element)}
+                    tabIndex={rovingTreeItemKey === regionTreeItemKey ? 0 : -1}
+                    {...selectionDataAttributes(regionSelectionTarget)}
                     draggable={!region.contractBacked && !region.locked}
-                    onClick={() => selectObject(region.nodeId)}
+                    onClick={(event) => selectTreeTarget(regionSelectionTarget, event)}
+                    onFocus={(event) => {
+                      if (event.target === event.currentTarget) setFocusedTreeItemKey(regionTreeItemKey);
+                    }}
+                    onKeyDown={(event) => handleTreeItemKeyDown(event, regionTreeItemKey, regionSelectionTarget)}
                     onDragStart={(event) => {
                       if (region.contractBacked) return;
+                      setDraggingNodeId(region.nodeId);
                       event.dataTransfer.effectAllowed = "move";
                       event.dataTransfer.setData("application/x-haichuan-template-node", region.nodeId);
                       event.dataTransfer.setData("application/x-haichuan-template-region", region.nodeId);
@@ -878,9 +1474,11 @@ export default function DynamicTemplateStructurePanel({
                     onDragOver={(event) => {
                       if (region.contractBacked || region.locked) return;
                       if (!event.dataTransfer.types.includes("application/x-haichuan-template-region")) return;
-                      event.preventDefault();
                       const rect = event.currentTarget.getBoundingClientRect();
-                      setDragMarker({ nodeId: region.nodeId, placement: event.clientY < rect.top + rect.height / 2 ? "before" : "after" });
+                      const placement: DropPlacement = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                      if (!canPreviewDrop(region.nodeId, placement)) return;
+                      event.preventDefault();
+                      setDragMarker({ nodeId: region.nodeId, placement });
                     }}
                     onDrop={(event) => {
                       if (region.contractBacked || region.locked) return;
@@ -888,8 +1486,20 @@ export default function DynamicTemplateStructurePanel({
                       const draggedNodeId = event.dataTransfer.getData("application/x-haichuan-template-region");
                       if (draggedNodeId) performDrop(draggedNodeId, region.nodeId, dragMarker?.placement ?? "after");
                     }}
-                    onDragEnd={() => setDragMarker(null)}
+                    onDragEnd={() => { setDragMarker(null); setDraggingNodeId(null); }}
                   >
+                    <span
+                      className="template-editor__tree-toggle"
+                      aria-hidden="true"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        event.currentTarget.closest<HTMLElement>('[role="treeitem"]')?.focus();
+                        toggleNodeExpanded(region.nodeId);
+                      }}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    >
+                      {collapsedNodeIds.has(region.nodeId) ? <CaretRightOutlined /> : <CaretDownOutlined />}
+                    </span>
                     {region.contractBacked ? (
                       <strong>{regionLabel}</strong>
                     ) : (
@@ -903,13 +1513,15 @@ export default function DynamicTemplateStructurePanel({
                         />
                       </>
                     )}
-                  </button>
-                  {!region.contractBacked ? nodeMenu(region.nodeId, region.rawName, true) : null}
+                    {!region.contractBacked ? nodeMenu(region.nodeId, region.rawName, true) : null}
+                  </div>
                 </div>
-                <ul role="group" aria-label={`${regionLabel}内容槽位`}>
+                <ul role="group" hidden={collapsedNodeIds.has(region.nodeId)} aria-label={`${regionLabel}内容槽位`}>
                   {region.entries.length ? region.entries.map((entry) => {
                     if (entry.entryType === "layout") {
-                      const layoutSelected = selectedNodeId === entry.nodeId && !selectedContractRole;
+                      const layoutSelectionTarget = getStructureEntrySelectionTarget(entry);
+                      const layoutSelected = isSelectionTargetSelected(layoutSelectionTarget);
+                      const layoutTreeItemKey = getEntryTreeItemKey(entry);
                       const layoutParentId = findDynamicTemplateParentId(definition, entry.nodeId);
                       const layoutParentLocked = Boolean(
                         layoutParentId
@@ -918,33 +1530,43 @@ export default function DynamicTemplateStructurePanel({
                       return (
                         <li
                           key={entry.key}
+                          role="none"
                           className={`template-editor__layout-row${layoutSelected ? " is-active" : ""}${entry.hidden ? " is-hidden" : ""}${entry.locked ? " is-locked" : ""}${dragMarker?.nodeId === entry.nodeId ? ` is-drag-${dragMarker.placement}` : ""}`}
                         >
-                          <button
-                            type="button"
+                          <div
                             className="template-editor__layout-select"
                             role="treeitem"
                             aria-level={3 + entry.depth}
+                            aria-expanded={!collapsedNodeIds.has(entry.nodeId)}
                             aria-selected={layoutSelected}
-                            aria-label={`${entry.label} 布局容器${entry.hidden ? " 已隐藏" : ""}${entry.locked ? " 已锁定" : ""}`}
-                            style={{ paddingLeft: 5 + entry.depth * 12 }}
+                            aria-label={`${entry.label} 布局容器${entry.hidden ? " " + (entry.visibilityReason ?? "已隐藏") : ""}${entry.locked ? " 已锁定" : ""}`}
+                            ref={(element) => setTreeItemElement(layoutTreeItemKey, element)}
+                            tabIndex={rovingTreeItemKey === layoutTreeItemKey ? 0 : -1}
+                            {...selectionDataAttributes(layoutSelectionTarget)}
+                            style={{ paddingLeft: `calc(4px + ${entry.depth} * var(--template-structure-indent-step, 12px))` }}
                             draggable={!entry.locked && !layoutParentLocked}
-                            onClick={() => selectObject(entry.nodeId)}
+                            onClick={(event) => selectTreeTarget(layoutSelectionTarget, event)}
+                            onFocus={(event) => {
+                              if (event.target === event.currentTarget) setFocusedTreeItemKey(layoutTreeItemKey);
+                            }}
+                            onKeyDown={(event) => handleTreeItemKeyDown(event, layoutTreeItemKey, layoutSelectionTarget)}
                             onDoubleClick={(event) => {
                               event.stopPropagation();
                               if (!entry.locked) setEditingNodeId(entry.nodeId);
                             }}
                             onDragStart={(event) => {
+                              setDraggingNodeId(entry.nodeId);
                               event.dataTransfer.effectAllowed = "move";
                               event.dataTransfer.setData("application/x-haichuan-template-node", entry.nodeId);
                             }}
                             onDragOver={(event) => {
                               if (entry.locked || layoutParentLocked) return;
                               if (!event.dataTransfer.types.includes("application/x-haichuan-template-node")) return;
-                              event.preventDefault();
                               const rect = event.currentTarget.getBoundingClientRect();
                               const offset = (event.clientY - rect.top) / rect.height;
                               const placement: DropPlacement = offset < 0.28 ? "before" : offset > 0.72 ? "after" : "inside";
+                              if (!canPreviewDrop(entry.nodeId, placement)) return;
+                              event.preventDefault();
                               setDragMarker({ nodeId: entry.nodeId, placement });
                             }}
                             onDrop={(event) => {
@@ -953,8 +1575,20 @@ export default function DynamicTemplateStructurePanel({
                               const draggedNodeId = event.dataTransfer.getData("application/x-haichuan-template-node");
                               if (draggedNodeId) performDrop(draggedNodeId, entry.nodeId, dragMarker?.placement ?? "inside");
                             }}
-                            onDragEnd={() => setDragMarker(null)}
+                            onDragEnd={() => { setDragMarker(null); setDraggingNodeId(null); }}
                           >
+                            <span
+                              className="template-editor__tree-toggle"
+                              aria-hidden="true"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                event.currentTarget.closest<HTMLElement>('[role="treeitem"]')?.focus();
+                                toggleNodeExpanded(entry.nodeId);
+                              }}
+                              onDoubleClick={(event) => event.stopPropagation()}
+                            >
+                              {collapsedNodeIds.has(entry.nodeId) ? <CaretRightOutlined /> : <CaretDownOutlined />}
+                            </span>
                             <HolderOutlined className="template-editor__drag-handle" aria-hidden="true" />
                             <BlockOutlined className="template-editor__layout-icon" aria-hidden="true" />
                             <InlineStructureName
@@ -963,16 +1597,22 @@ export default function DynamicTemplateStructurePanel({
                               onBegin={() => { if (!entry.locked) setEditingNodeId(entry.nodeId); }}
                               onCommit={(value) => renameNode(entry.nodeId, value)}
                             />
-                          </button>
-                          {nodeMenu(entry.nodeId, entry.label, false, true)}
+                            <div className="template-editor__slot-actions">
+                              {nodeMenu(entry.nodeId, entry.label, false, true)}
+                            </div>
+                          </div>
                         </li>
                       );
                     }
                     const slot = entry;
-                    const slotSelected = slot.roleId
-                      ? selectedContractRole?.nodeId === slot.nodeId
-                        && slot.responsiveOptions.some((option) => option.roleId === selectedContractRole.roleId)
-                      : selectedNodeId === slot.nodeId && !selectedContractRole;
+                    const slotTreeItemKey = getEntryTreeItemKey(slot);
+                    const slotSelectionTarget = getStructureEntrySelectionTarget(slot);
+                    const slotSelected = isSelectionTargetSelected(slotSelectionTarget);
+                    const slotApplicable = slot.applicableDevices.length === 0
+                      || slot.applicableDevices.includes(device);
+                    const slotAccessibleLabel = slot.roleId && !slotApplicable
+                      ? `${slot.selectionLabel}（仅${slot.applicableDevices.map((candidate) => candidate === "desktop" ? "桌面端" : "移动端").join("、")}）`
+                      : `${slot.label} ${TEMPLATE_CONTRACT_KIND_LABELS[slot.kind]} ${slot.required ? "必填" : "可选"}${slot.virtual && slot.removed ? " 已移出模板" : slot.hidden ? " " + (slot.visibilityReason ?? "已隐藏") : ""}${slot.locked ? " 已锁定" : ""}`;
                     const parentId = findDynamicTemplateParentId(definition, slot.nodeId);
                     const canReorder = !slot.virtual
                       && Boolean(parentId)
@@ -981,18 +1621,25 @@ export default function DynamicTemplateStructurePanel({
                     return (
                       <li
                         key={slot.key}
+                        role="none"
                         className={`template-editor__slot-row${slotSelected ? " is-active" : ""}${slot.hidden || slot.removed ? " is-hidden" : ""}${slot.locked ? " is-locked" : ""}${dragMarker?.nodeId === slot.nodeId ? ` is-drag-${dragMarker.placement}` : ""}`}
                       >
-                        <button
-                          type="button"
+                        <div
                           className="template-editor__slot-select"
                           role="treeitem"
                           aria-level={3 + slot.depth}
                           aria-selected={slotSelected}
-                          aria-label={`${slot.label} ${TEMPLATE_CONTRACT_KIND_LABELS[slot.kind]} ${slot.required ? "必填" : "可选"}${slot.virtual && slot.removed ? " 已移出模板" : slot.hidden ? " 已隐藏" : ""}${slot.locked ? " 已锁定" : ""}`}
-                          style={{ paddingLeft: 4 + slot.depth * 12 }}
+                          aria-label={slotAccessibleLabel}
+                          ref={(element) => setTreeItemElement(slotTreeItemKey, element)}
+                          tabIndex={rovingTreeItemKey === slotTreeItemKey ? 0 : -1}
+                          {...selectionDataAttributes(slotSelectionTarget)}
+                          style={{ paddingLeft: `calc(4px + ${slot.depth} * var(--template-structure-indent-step, 12px))` }}
                           draggable={canReorder && !slot.locked}
-                          onClick={() => selectSlot(slot)}
+                          onClick={(event) => selectSlot(slot, event)}
+                          onFocus={(event) => {
+                            if (event.target === event.currentTarget) setFocusedTreeItemKey(slotTreeItemKey);
+                          }}
+                          onKeyDown={(event) => handleTreeItemKeyDown(event, slotTreeItemKey, slotSelectionTarget)}
                           onDoubleClick={(event) => {
                             if (slot.virtual) return;
                             event.stopPropagation();
@@ -1000,14 +1647,17 @@ export default function DynamicTemplateStructurePanel({
                           }}
                           onDragStart={(event) => {
                             if (!canReorder) return;
+                            setDraggingNodeId(slot.nodeId);
                             event.dataTransfer.effectAllowed = "move";
                             event.dataTransfer.setData("application/x-haichuan-template-node", slot.nodeId);
                           }}
                           onDragOver={(event) => {
                             if (!canReorder || !event.dataTransfer.types.includes("application/x-haichuan-template-node")) return;
-                            event.preventDefault();
                             const rect = event.currentTarget.getBoundingClientRect();
-                            setDragMarker({ nodeId: slot.nodeId, placement: event.clientY < rect.top + rect.height / 2 ? "before" : "after" });
+                            const placement: DropPlacement = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+                            if (!canPreviewDrop(slot.nodeId, placement)) return;
+                            event.preventDefault();
+                            setDragMarker({ nodeId: slot.nodeId, placement });
                           }}
                           onDrop={(event) => {
                             if (!canReorder) return;
@@ -1015,7 +1665,7 @@ export default function DynamicTemplateStructurePanel({
                             const draggedNodeId = event.dataTransfer.getData("application/x-haichuan-template-node");
                             if (draggedNodeId) performDrop(draggedNodeId, slot.nodeId, dragMarker?.placement ?? "after");
                           }}
-                          onDragEnd={() => setDragMarker(null)}
+                          onDragEnd={() => { setDragMarker(null); setDraggingNodeId(null); }}
                         >
                           <span className={`template-editor__contract-role-icon is-${slot.kind}`} aria-hidden="true">
                             <ContractRoleIcon kind={slot.kind} />
@@ -1030,10 +1680,9 @@ export default function DynamicTemplateStructurePanel({
                           ) : (
                             <span className="template-editor__slot-copy">
                               <strong title={slot.label}>{slot.label}</strong>
-                              <small>{slot.virtual && slot.removed ? "已移出" : slot.hidden ? "已隐藏" : slot.required ? "必填" : "可选"}</small>
+                              <small>{slot.virtual && slot.removed ? "已移出" : slot.hidden ? slot.visibilityReason ?? "已隐藏" : slot.required ? "必填" : "可选"}</small>
                             </span>
                           )}
-                        </button>
                         {!slot.virtual ? (
                           <div className="template-editor__slot-actions">
                             {nodeMenu(slot.nodeId, slot.label, false)}
@@ -1044,7 +1693,7 @@ export default function DynamicTemplateStructurePanel({
                               type="button"
                               aria-label={`${slot.label}${slot.removed ? "恢复到模板" : "移出模板"}`}
                               title={slot.removed ? "恢复可选内容" : "移出可选内容（可撤销）"}
-                              onClick={() => setContractRoleRemoved(slot, !slot.removed)}
+                              onClick={(event) => { event.stopPropagation(); setContractRoleRemoved(slot, !slot.removed); }}
                             >
                               {slot.removed ? <EyeOutlined /> : <DeleteOutlined />}
                             </button>
@@ -1055,16 +1704,17 @@ export default function DynamicTemplateStructurePanel({
                               type="button"
                               aria-label={`${slot.label}不能移出模板`}
                               title={slot.required ? "母模板合同必填内容不能移出" : "母模板合同不允许移出"}
-                              onClick={() => setContractRoleRemoved(slot, true)}
+                              onClick={(event) => { event.stopPropagation(); setContractRoleRemoved(slot, true); }}
                             >
                               <LockOutlined />
                             </button>
                           </div>
                         ) : null}
+                        </div>
                       </li>
                     );
                   }) : (
-                    <li className="template-editor__region-empty">
+                    <li className="template-editor__region-empty" role="none">
                       <span>暂无内容</span>
                     </li>
                   )}
@@ -1074,12 +1724,10 @@ export default function DynamicTemplateStructurePanel({
           })}
         </ol>
       </div>
-      <DynamicTemplateNodePalette open={paletteOpen} onOpenChange={setPaletteOpen} />
-      <p className="template-editor__structure-note">
-        {isContractBackedTemplate
-          ? "系统必填内容受保护 · 可新增区域和槽位"
-          : "拖动调整顺序 · 右侧设置属性"}
-      </p>
+      <div ref={paletteToolsRef}>
+        <DynamicTemplateNodePalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      </div>
+      <p className="template-editor__structure-note">拖动调整顺序 · 右侧设置属性</p>
     </aside>
   );
 }

@@ -269,8 +269,6 @@ test("直接发布旧 PageDocument 时拒绝非法双端几何，revision 与当
     calls.validationPuckData = puckData;
     return { errors: [], issues: [] };
   };
-  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [];
-
   await service.publishPageDocument(
     "custom",
     17,

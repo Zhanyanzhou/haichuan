@@ -12,7 +12,7 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 ## 零、海川项目边界
 
 - **客户前台**：只负责艺术方向、视觉层级、图文关系、影像与品牌气质；功能、内容真实性、无障碍和性能仍受项目规则约束。
-- **Puck/CMS 内容模板**：稳定边界先读 `../../../docs/page-builder/template-design-framework.md`；具体模板事实只认 `../../../contracts/page-builder/content-templates.contract.json`，再由当前 Schema、适配器和 Renderer 核验实现。本 Skill 只能补充公开页面的艺术判断，不能把摄影海报比例当成技术合同。
+- **Puck/CMS 内容模板**：产品执行标准先读 `../../../docs/page-builder/template-creation-rules.md`，编辑与页面交接按需读从属 `template-design-framework.md`。结构能力由 `../../../contracts/page-builder/template-definition.schema.json` 定义，实际模板与版本从 Repository 核对；`content-templates.contract.json` 只负责首屏测试样例及页面规则，不是所有母模板的固定目录。本 Skill 只补充公开内容的艺术判断，不另设模板创建流程、预设值或数量门禁。
 - **模板缩略图与空状态**：默认使用中性几何图片占位和真实文字层级，清楚展示图片框、比例与文字位置；不得用生成摄影图掩盖结构问题。
 - **管理后台**：编辑器壳层、表格、表单、状态和操作不触发本 Skill；仅嵌入的公开内容预览按前台规则审查。
 - **AI 图片**：只有用户明确要求时才进入生成流程。生成结果只能作为内部概念稿，不能冒充真实珠宝、材质、证书、工艺、佩戴效果或可发布商品素材；公开使用前必须完成人工真实性、版权和品牌审核。
@@ -36,7 +36,7 @@ description: 海川珠宝客户前台的奢侈品艺术指导与视觉审查—�
 | --- | --- | --- | --- |
 | 流程 | `process/` | 视觉诊断清单 + 设计决策链 + 强制看图 | **任何视觉任务第一步必读** |
 | 规则 | `rules/` | 排印色彩 / 版式图片 / 文案禁忌 | 任何视觉任务必读 |
-| 知识库 | `knowledge/` + `../../../design-library/` | AI 提示词库 / 实测与原则指针；通用理论、量化基线与品牌证据全库在 `../../../design-library/` | 需要证据、提示词或方法论依据时读 `../../../design-library/` 对应文件；模板稳定边界读 `../../../docs/page-builder/template-design-framework.md`，具体事实读机器合同 |
+| 知识库 | `knowledge/` + `../../../design-library/` | AI 提示词库 / 实测与原则指针；通用理论、量化基线与品牌证据全库在 `../../../design-library/` | 按需取证；模板执行只认 `../../../docs/page-builder/template-creation-rules.md`，历史研究不构成另一套模板标准 |
 
 ### process/（1 份，任何视觉任务第一步必读）
 - `diagnosis.md` — 视觉诊断清单 + 设计决策链 + 强制看图动作

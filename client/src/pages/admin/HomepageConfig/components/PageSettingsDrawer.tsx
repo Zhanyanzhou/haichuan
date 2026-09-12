@@ -1,7 +1,7 @@
 /**
  * PageSettingsDrawer.tsx — 页面展示设置抽屉。
- * 编辑可选的内部内容责任、公开 SEO 与素材记录，写入页面 metadata；
- * 这些资料用于展示和追溯，不决定运营者能否发布页面。
+ * 编辑可选的内部内容责任、公开 SEO，以及发布前必需的素材记录。
+ * 未完成的资料可以保存为草稿；正式发布由服务端统一校验。
  */
 import { useEffect, useMemo, useState } from "react";
 import { App as AntdApp, Button, Drawer, Input } from "antd";
@@ -11,6 +11,7 @@ import {
   getPageDocumentMediaReferences,
   type ContentTemplateMediaRight,
 } from "@/page-builder/generated/contentTemplates.generated";
+import { getDynamicTemplateDocumentMediaReferences } from "@/page-builder/dynamic-template-instance";
 import type { PuckProps } from "@/page-builder/types";
 import {
   isPagePublishIssue,
@@ -112,14 +113,25 @@ export default function PageSettingsDrawer({
     return () => window.cancelAnimationFrame(frame);
   }, [focusField, open]);
 
-  const mediaReferences = useMemo(
-    () => getPageDocumentMediaReferences(puckData, { ogImage }, pageKey),
-    [ogImage, pageKey, puckData],
-  );
+  const mediaReferences = useMemo(() => {
+    const seenUrls = new Set<string>();
+    return [
+      ...getPageDocumentMediaReferences(puckData, { ogImage }, pageKey),
+      ...getDynamicTemplateDocumentMediaReferences(puckData, pageKey),
+    ].filter((reference) => {
+      if (seenUrls.has(reference.url)) return false;
+      seenUrls.add(reference.url);
+      return true;
+    });
+  }, [ogImage, pageKey, puckData]);
   const mediaRightsByUrl = useMemo(
     () => new Map(mediaRights.map((item) => [item.assetUrl, item])),
     [mediaRights],
   );
+  const completedMediaRightsCount = mediaReferences.filter((reference) => {
+    const right = mediaRightsByUrl.get(reference.url);
+    return Boolean(right?.source.trim() && right?.authorizationId.trim());
+  }).length;
   const currentSignature = useMemo(() => JSON.stringify({
     seoTitle,
     seoDescription,
@@ -246,11 +258,11 @@ export default function PageSettingsDrawer({
           aria-label="当前页面可选展示资料说明"
         >
           <div className="homepage-editor__media-rights-heading">
-            <strong>以下资料均为可选</strong>
-            <span>不填写也可以直接发布</span>
+            <strong>页面标题、描述、分享图与责任团队均为可选</strong>
+            <span>素材来源记录可后续补充，不阻断本次页面发布</span>
           </div>
           <p className="homepage-editor__page-settings-hint">
-            留空不会阻断发布；填写后会校验长度、格式与素材是否已上传到本站。
+            可选展示资料留空不会阻断发布；填写后会校验长度、格式与素材是否已上传到本站。资料未完成时仍可保存草稿。
           </p>
         </section>
         <div data-page-settings-field="contentOwner">
@@ -318,7 +330,7 @@ export default function PageSettingsDrawer({
           style={{ marginTop: 6 }}
         >
           分享到微信 / 微博 / Twitter 等平台时显示的封面图，建议
-          1200×630；素材记录可按内部管理需要补充，不影响发布。
+          1200×630；使用分享图时，也需在下方补齐素材来源与授权记录。
         </p>
         <section
           className="homepage-editor__media-rights"
@@ -326,58 +338,69 @@ export default function PageSettingsDrawer({
           data-page-settings-field="mediaRights"
         >
           <div className="homepage-editor__media-rights-heading">
-            <strong>媒体来源与授权（可选）</strong>
+            <strong>媒体来源与授权（可选审计记录）</strong>
             <span>{mediaReferences.length} 项当前公开素材</span>
           </div>
           <p className="homepage-editor__page-settings-hint">
-            可按内部管理需要记录素材来源与授权编号；同一地址在页面内重复使用时只记录一次。记录仅供后台追溯，不随公开页面接口返回，也不影响发布。
+            页面发布只检查素材地址和文件是否安全可用；逐项来源记录不影响本次发布。记录仅用于内部审计，不随公开页面接口返回。
           </p>
+          {mediaReferences.length > 0 ? (
+            <p role="status" aria-live="polite">
+              已填写 {completedMediaRightsCount} / {mediaReferences.length} 项
+              {completedMediaRightsCount < mediaReferences.length ? "，可在后续素材治理中补充。" : "。"}
+            </p>
+          ) : null}
           {mediaReferences.length === 0 ? (
             <p className="homepage-editor__media-rights-empty">当前页面尚未引用公开素材。</p>
-          ) : mediaReferences.map((reference, index) => {
-            const right = mediaRightsByUrl.get(reference.url);
-            return (
-              <div
-                className="homepage-editor__media-rights-item"
-                key={reference.url}
-                data-testid="page-media-right"
-              >
-                <div className="homepage-editor__media-rights-asset">
-                  <strong>素材 {index + 1}</strong>
-                  <code title={reference.url}>{reference.url}</code>
-                  <span>{reference.moduleType || "社交分享图"} · {reference.path}</span>
-                </div>
-                <label htmlFor={`media-right-source-${index}`}>
-                  素材来源（可选）
-                </label>
-                <Input
-                  id={`media-right-source-${index}`}
-                  aria-label={`素材 ${index + 1} 来源`}
-                  value={right?.source ?? ""}
-                  onChange={(event) =>
-                    updateMediaRight(reference.url, "source", event.target.value)
-                  }
-                  placeholder="例：品牌自有拍摄 / 已授权供应商"
-                  maxLength={CONTENT_TEMPLATE_PAGE_METADATA.mediaRights.fieldLimits.source}
-                  showCount
-                />
-                <label htmlFor={`media-right-authorization-${index}`}>
-                  授权编号 / 存档编号（可选）
-                </label>
-                <Input
-                  id={`media-right-authorization-${index}`}
-                  aria-label={`素材 ${index + 1} 授权编号`}
-                  value={right?.authorizationId ?? ""}
-                  onChange={(event) =>
-                    updateMediaRight(reference.url, "authorizationId", event.target.value)
-                  }
-                  placeholder="例：HC-OWN-2026-001"
-                  maxLength={CONTENT_TEMPLATE_PAGE_METADATA.mediaRights.fieldLimits.authorizationId}
-                  showCount
-                />
-              </div>
-            );
-          })}
+          ) : (
+            <details className="homepage-editor__media-rights-details">
+              <summary>按需编辑 {mediaReferences.length} 项素材来源记录</summary>
+              {mediaReferences.map((reference, index) => {
+                const right = mediaRightsByUrl.get(reference.url);
+                return (
+                  <div
+                    className="homepage-editor__media-rights-item"
+                    key={reference.url}
+                    data-testid="page-media-right"
+                  >
+                    <div className="homepage-editor__media-rights-asset">
+                      <strong>素材 {index + 1}</strong>
+                      <code title={reference.url}>{reference.url}</code>
+                      <span>{reference.moduleType || "社交分享图"} · {reference.path}</span>
+                    </div>
+                    <label htmlFor={`media-right-source-${index}`}>
+                      素材来源（可选）
+                    </label>
+                    <Input
+                      id={`media-right-source-${index}`}
+                      aria-label={`素材 ${index + 1} 来源`}
+                      value={right?.source ?? ""}
+                      onChange={(event) =>
+                        updateMediaRight(reference.url, "source", event.target.value)
+                      }
+                      placeholder="例：品牌自有拍摄 / 已授权供应商"
+                      maxLength={CONTENT_TEMPLATE_PAGE_METADATA.mediaRights.fieldLimits.source}
+                      showCount
+                    />
+                    <label htmlFor={`media-right-authorization-${index}`}>
+                      授权编号 / 存档编号（可选）
+                    </label>
+                    <Input
+                      id={`media-right-authorization-${index}`}
+                      aria-label={`素材 ${index + 1} 授权编号`}
+                      value={right?.authorizationId ?? ""}
+                      onChange={(event) =>
+                        updateMediaRight(reference.url, "authorizationId", event.target.value)
+                      }
+                      placeholder="例：HC-OWN-2026-001"
+                      maxLength={CONTENT_TEMPLATE_PAGE_METADATA.mediaRights.fieldLimits.authorizationId}
+                      showCount
+                    />
+                  </div>
+                );
+              })}
+            </details>
+          )}
         </section>
         <p
           className="homepage-editor__page-settings-hint"

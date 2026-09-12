@@ -4,9 +4,86 @@ import {
   sanitizeContentTemplateDesignProps,
   validateDynamicTemplateDefinition,
   validateDynamicTemplatePublishDefinition,
+  validateTemplateRecipe,
+  isSafeTemplateMediaUrl,
+  getDynamicTemplateStructureLockViolation,
 } from "./generated/validateTemplateDefinition.generated";
 import { DYNAMIC_TEMPLATE_NODE_TYPES } from "./generated/templateDefinition.generated";
 import { definitionFixture } from "./dynamic-template-test-fixture";
+import type { TemplateRecipe } from "./generated/templateDefinition.generated";
+
+function recipeFixture(): TemplateRecipe {
+  return {
+    recipeVersion: 1, presetVersion: 1, purpose: "productPromotion",
+    canvas: { width: 1080, height: 1350, aspectRatio: 0.8 }, layout: "topImageBottomContent",
+    media: [{ id: "hero", role: "heroImage", name: "主图", aspectRatio: 1, fitMode: "contain", borderRadius: 8, replaceable: true, allowCrop: true }],
+    content: [{ id: "title", role: "title", name: "标题", defaultContent: "新品", maxLength: 60, editable: true }],
+    style: { variant: "minimal", background: "light", primaryColor: "#b69b68", backgroundColor: "#fff", textColor: "#222", radius: "medium", spacing: "standard" },
+    rules: { aspectLocked: true },
+  };
+}
+
+test("Recipe 严格验证选项、未知字段、槽位标识、尺寸及默认素材", () => {
+  assert.equal(validateTemplateRecipe(recipeFixture()).valid, true);
+  const mutations: Array<(recipe: any) => void> = [
+    (recipe) => { recipe.purpose = "unknown"; },
+    (recipe) => { recipe.recipeVersion = 2; },
+    (recipe) => { recipe.style.extra = true; },
+    (recipe) => { recipe.content[0].id = "hero"; },
+    (recipe) => { recipe.content[0].maxLength = 1; },
+    (recipe) => { recipe.canvas.aspectRatio = 1; },
+    (recipe) => { recipe.media[0].defaultImage = "javascript:alert(1)"; },
+    (recipe) => { recipe.purpose = "custom"; },
+  ];
+  for (const mutate of mutations) {
+    const recipe = recipeFixture(); mutate(recipe);
+    assert.equal(validateTemplateRecipe(recipe).valid, false);
+  }
+  for (const url of ["https://example.com/a.jpg", "/uploads/a.jpg"]) assert.equal(isSafeTemplateMediaUrl(url), true);
+  for (const url of ["//example.com/a.jpg", "https://user:pass@example.com/a.jpg", "data:image/png;base64,a", "/\\example.com/a", "javascript:alert(1)", "/a b.jpg", "/a\u0000.jpg", "/a\u007f.jpg"]) assert.equal(isSafeTemplateMediaUrl(url), false);
+});
+
+test("schema3 保存 Recipe 与默认文案，旧 schema 保持原有空值语义", () => {
+  const current = definitionFixture();
+  current.schemaVersion = 3;
+  current.templateRecipe = recipeFixture();
+  current.defaultContent.slot_heading = "新品";
+  current.slots.slot_heading.semanticRole = "title";
+  current.slots.slot_heading.desktopRules = { ...current.slots.slot_heading.desktopRules, color: "#222", fontFamily: "serif", letterSpacing: 1 };
+  current.nodes.node_container.responsive.desktop.backgroundColor = "#fff";
+  current.nodes.node_container.responsive.desktop.backgroundGradient = { from: "#fff", to: "#eee", angle: 90 };
+  current.nodes.node_container.responsive.mobile.backgroundGradient = null;
+  current.nodes.node_container.responsive.mobile.backgroundImage = "";
+  assert.equal(validateDynamicTemplateDefinition(current).valid, true);
+  assert.equal(validateDynamicTemplatePublishDefinition(current).valid, true);
+  const preview = structuredClone(current); preview.previewContent = { slot_heading: "临时预览" };
+  assert.equal(validateDynamicTemplateDefinition(preview).valid, false);
+  const longText = structuredClone(current); longText.defaultContent.slot_heading = "长".repeat(61);
+  assert.equal(validateDynamicTemplateDefinition(longText).valid, false);
+  const legacy = definitionFixture(); legacy.schemaVersion = 2; legacy.defaultContent.slot_heading = "旧模板不能新增默认值";
+  assert.equal(validateDynamicTemplateDefinition(legacy).valid, false);
+  const unknown = structuredClone(current) as any; unknown.templateRecipe.style.padding = 10;
+  assert.equal(validateDynamicTemplateDefinition(unknown).valid, false);
+  const locked = structuredClone(current); locked.nodes.node_container.authoring = { structureLocked: true };
+  const changed = structuredClone(locked); changed.defaultContent.slot_heading = "修改";
+  assert.match(getDynamicTemplateStructureLockViolation(locked, changed) ?? "", /默认内容/);
+});
+
+test("schema3 默认媒体与 CTA 使用原生内容结构并拒绝不安全地址", () => {
+  const definition = definitionFixture(); definition.schemaVersion = 3;
+  definition.nodes.node_heading.type = "ImageSlot";
+  delete definition.nodes.node_heading.instanceEditPolicy;
+  definition.slots.slot_heading.type = "image";
+  definition.defaultContent.slot_heading = { src: "/uploads/product.jpg", alt: "商品" };
+  assert.equal(validateDynamicTemplateDefinition(definition).valid, true);
+  definition.defaultContent.slot_heading = { src: "javascript:alert(1)", alt: "商品" };
+  assert.equal(validateDynamicTemplateDefinition(definition).valid, false);
+  definition.nodes.node_heading.type = "ButtonSlot"; definition.slots.slot_heading.type = "button";
+  definition.defaultContent.slot_heading = { label: "了解详情" };
+  assert.equal(validateDynamicTemplateDefinition(definition).valid, true);
+  definition.defaultContent.slot_heading = { label: "了解详情", url: "javascript:alert(1)" };
+  assert.equal(validateDynamicTemplateDefinition(definition).valid, false);
+});
 
 test("服务端使用与客户端同源的动态模板语义校验器", () => {
   const result = validateDynamicTemplateDefinition(definitionFixture());
@@ -36,7 +113,7 @@ test("服务端使用与客户端同源的动态模板语义校验器", () => {
   ));
 });
 
-test("双图海报主图与细节图比例属于可保存的模板设计字段", () => {
+test("双图片槽位比例属于可保存的通用模板设计字段", () => {
   assert.deepEqual(
     sanitizeContentTemplateDesignProps({
       mainImageRatio: "3:2",
@@ -91,7 +168,16 @@ test("发布门禁以根节点高度为唯一尺寸事实并禁止模板保存�
   assert.ok(policyCodes.includes("NON_EDITABLE_SLOT_HAS_INSTANCE_PERMISSIONS"));
 });
 
-test("发布门禁拒绝固定高度区域中的自动高度图片槽位", () => {
+test("发布必须填写名称，合法未命名草稿仍可保存", () => {
+  const unnamed = definitionFixture();
+  unnamed.name = "未命名模板";
+  assert.equal(validateDynamicTemplateDefinition(unnamed).valid, true);
+  const result = validateDynamicTemplatePublishDefinition(unnamed);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((issue) => issue.code === "PUBLISH_REQUIRES_TEMPLATE_NAME" && issue.path === "name"));
+});
+
+test("固定高度区域的自动高度图片只建议检查，不阻断发布", () => {
   const overflowing = definitionFixture();
   overflowing.nodes.node_container.childIds.push("node_image");
   overflowing.nodes.node_container.responsive.desktop.height = {
@@ -129,9 +215,9 @@ test("发布门禁拒绝固定高度区域中的自动高度图片槽位", () =>
   };
 
   const result = validateDynamicTemplatePublishDefinition(overflowing);
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true);
   assert.ok(result.issues.some(
-    (issue) => issue.code === "IMAGE_SLOT_AUTO_HEIGHT_OVERFLOWS_BOUNDED_PARENT",
+    (issue) => issue.code === "IMAGE_SLOT_AUTO_HEIGHT_OVERFLOWS_BOUNDED_PARENT" && issue.level === "warning",
   ));
 
   const contained = structuredClone(overflowing);
@@ -224,205 +310,6 @@ test("模板页面职责与导航兼容性使用受控元数据", () => {
   const codes = validateDynamicTemplateDefinition(invalid).issues.map((issue) => issue.code);
   assert.ok(codes.includes("INVALID_VISUAL_ROLE"));
   assert.ok(codes.includes("INVALID_HEADER_COMPATIBILITY"));
-});
-
-test("服务端接受注册的视频复杂节点并拒绝非法播放配置", () => {
-  assert.ok((DYNAMIC_TEMPLATE_NODE_TYPES as readonly string[]).includes("Video"));
-  const valid = definitionFixture();
-  valid.nodes.node_video = {
-    nodeId: "node_video",
-    type: "Video",
-    name: "品牌影片",
-    slotId: "slot_video",
-    childIds: [],
-    props: {},
-    responsive: {
-      desktop: { display: "block", order: 2, width: "fill", height: { mode: "auto" } },
-      mobile: { display: "block", order: 2, width: "fill", height: { mode: "auto" } },
-    },
-    hidden: false,
-  };
-  valid.nodes.node_container.childIds.push("node_video");
-  valid.slots.slot_video = {
-    slotId: "slot_video",
-    key: "brandVideo",
-    type: "video",
-    label: "品牌影片",
-    required: true,
-    editable: true,
-    hideable: false,
-    validation: {},
-    desktopRules: {},
-    mobileRules: {},
-  };
-  valid.defaultContent.slot_video = {
-    videoUrl: "https://example.com/video.mp4",
-    posterUrl: "https://example.com/poster.jpg",
-    videoDescription: "品牌影片",
-    autoPlay: false,
-    loop: true,
-    muted: true,
-    showControls: true,
-    aspectRatio: "16:9",
-  };
-  assert.equal(validateDynamicTemplateDefinition(valid).valid, true);
-
-  const invalid = structuredClone(valid);
-  invalid.defaultContent.slot_video = { videoUrl: "https://example.com/video.mp4", autoPlay: "yes" };
-  const codes = validateDynamicTemplateDefinition(invalid).issues.map((issue) => issue.code);
-  assert.ok(codes.includes("DEFAULT_CONTENT_TYPE_MISMATCH"));
-});
-
-test("服务端接受轮播、热区、前后对比和预约复杂节点并校验结构化内容", () => {
-  for (const nodeType of ["Carousel", "Hotspot", "BeforeAfter", "Appointment"]) {
-    assert.ok((DYNAMIC_TEMPLATE_NODE_TYPES as readonly string[]).includes(nodeType));
-  }
-  const valid = definitionFixture();
-  const entries = [
-    ["carousel", "Carousel", {
-      images: [{ url: "https://example.com/banner.jpg", alt: "轮播图片", targetType: "none" }],
-      autoPlay: false,
-      interval: 4000,
-      showDots: true,
-      showArrows: true,
-      desktopRatio: "wide",
-      mobileRatio: "portrait",
-    }],
-    ["hotspot", "Hotspot", {
-      image: "https://example.com/scene.jpg",
-      hotspots: [{ x: 20, y: 20, width: 30, height: 20, targetType: "none" }],
-      mobileHotspots: [],
-    }],
-    ["before_after", "BeforeAfter", {
-      title: "珠宝改款",
-      beforeImage: "https://example.com/before.jpg",
-      afterImage: "https://example.com/after.jpg",
-      beforeFocusX: 50,
-      beforeFocusY: 50,
-      afterFocusX: 50,
-      afterFocusY: 50,
-      targetType: "none",
-      aspectRatio: "4:5",
-    }],
-    ["appointment", "Appointment", {
-      title: "预约鉴赏",
-      buttonText: "立即预约",
-      targetType: "page",
-      linkUrl: "/contact",
-      tone: "ivory",
-    }],
-  ] as const;
-  entries.forEach(([key, nodeType, content], index) => {
-    const nodeId = `node_${key}`;
-    const slotId = `slot_${key}`;
-    valid.nodes[nodeId] = {
-      nodeId,
-      type: nodeType,
-      name: nodeType,
-      slotId,
-      childIds: [],
-      props: {},
-      responsive: {
-        desktop: { display: "block", order: index + 2, width: "fill", height: { mode: "auto" } },
-        mobile: { display: "block", order: index + 2, width: "fill", height: { mode: "auto" } },
-      },
-      hidden: false,
-    };
-    valid.nodes.node_container.childIds.push(nodeId);
-    valid.slots[slotId] = {
-      slotId,
-      key: `${key}Content`,
-      type: key === "before_after" ? "beforeAfter" : key,
-      label: nodeType,
-      required: false,
-      editable: true,
-      hideable: true,
-      validation: {},
-      desktopRules: {},
-      mobileRules: {},
-    };
-    valid.defaultContent[slotId] = content;
-  });
-  assert.equal(validateDynamicTemplateDefinition(valid).valid, true);
-
-  const invalid = structuredClone(valid);
-  invalid.defaultContent.slot_hotspot = {
-    image: "https://example.com/scene.jpg",
-    hotspots: [{ x: 90, y: 10, width: 20, height: 20 }],
-    mobileHotspots: [],
-  };
-  const codes = validateDynamicTemplateDefinition(invalid).issues.map((issue) => issue.code);
-  assert.ok(codes.includes("DEFAULT_CONTENT_TYPE_MISMATCH"));
-});
-
-test("服务端接受业务节点的稳定引用并拒绝旧数字 ID 快照", () => {
-  for (const nodeType of ["ProductCard", "ProductCollection", "CategoryCollection"]) {
-    assert.ok((DYNAMIC_TEMPLATE_NODE_TYPES as readonly string[]).includes(nodeType));
-  }
-  const valid = definitionFixture();
-  const entries = [
-    ["product_card", "ProductCard", "productCard", {
-      title: "代表作品",
-      productCode: "P-100",
-      secondaryTargetType: "category",
-      secondaryCategorySlug: "rings",
-      layout: "imageLeft",
-      showPrice: false,
-    }],
-    ["product_collection", "ProductCollection", "productCollection", {
-      title: "精选商品",
-      productCodes: ["P-100", "P-200"],
-      layout: "grid-3",
-      mobileColumns: "2",
-      displayMode: "standard",
-      actionStyle: "text",
-    }],
-    ["category_collection", "CategoryCollection", "categoryCollection", {
-      title: "探索分类",
-      categorySlugs: ["rings", "bracelets"],
-      layout: "grid-2",
-    }],
-  ] as const;
-  entries.forEach(([key, nodeType, slotType, content], index) => {
-    const nodeId = `node_${key}`;
-    const slotId = `slot_${key}`;
-    valid.nodes[nodeId] = {
-      nodeId,
-      type: nodeType,
-      name: nodeType,
-      slotId,
-      childIds: [],
-      props: {},
-      responsive: {
-        desktop: { display: "block", order: index + 2, width: "fill", height: { mode: "auto" } },
-        mobile: { display: "block", order: index + 2, width: "fill", height: { mode: "auto" } },
-      },
-      hidden: false,
-    };
-    valid.nodes.node_container.childIds.push(nodeId);
-    valid.slots[slotId] = {
-      slotId,
-      key: `${key}Content`,
-      type: slotType,
-      label: nodeType,
-      required: false,
-      editable: true,
-      hideable: true,
-      validation: {},
-      desktopRules: {},
-      mobileRules: {},
-    };
-    valid.defaultContent[slotId] = content;
-  });
-  assert.equal(validateDynamicTemplateDefinition(valid).valid, true);
-
-  const invalid = structuredClone(valid);
-  invalid.defaultContent.slot_product_collection = {
-    productIds: [12, 34],
-    productCodes: ["P-100"],
-  };
-  const codes = validateDynamicTemplateDefinition(invalid).issues.map((issue) => issue.code);
-  assert.ok(codes.includes("DEFAULT_CONTENT_TYPE_MISMATCH"));
 });
 
 test("服务端接受成熟首屏 V2 适配节点并拒绝未清洗字段和旧数字商品引用", () => {

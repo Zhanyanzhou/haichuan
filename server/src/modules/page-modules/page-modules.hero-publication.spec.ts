@@ -42,7 +42,7 @@ test("首屏具备真实标题、双端素材与替代文字时通过发布素�
   assert.deepEqual(result.errors, []);
 });
 
-test("同一页面存在多个首屏主舞台时阻断发布", async () => {
+test("同一页面允许按顺序发布多个首屏主舞台", async () => {
   const document = makeHero();
   document.content.push({
     type: "首屏主视觉",
@@ -58,40 +58,11 @@ test("同一页面存在多个首屏主舞台时阻断发布", async () => {
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, false);
-  assert.ok(result.errors.includes("页面只能有一个首屏主舞台（primary-stage），当前为 2 个"));
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.errors, []);
 });
 
-test("首屏主舞台仍要求位于页面开头", async () => {
-  const heroDocument = makeHero();
-  const document = {
-    ...heroDocument,
-    content: [
-      {
-        type: "文字横幅",
-        props: {
-          id: "hero-publication-preface",
-          title: "品牌序言",
-          body: "先展示普通内容，再展示首屏主舞台。",
-          buttonText: "",
-          targetType: "none",
-          linkUrl: "",
-        },
-      },
-      ...heroDocument.content,
-    ],
-  };
-  const result = await createService().validatePageDocument(
-    "home",
-    document,
-    makeFormalPageMetadata(document),
-  );
-
-  assert.equal(result.valid, false);
-  assert.ok(result.errors.includes("首屏主舞台（primary-stage）必须是首个可见品牌内容区"));
-});
-
-test("首屏缺少手机专图或替代文字时分别阻断并定位字段", async () => {
+test("首屏缺少手机专图、标题或替代文字时提醒并允许发布", async () => {
   const document = makeHero({ title: "", mobileImage: "", altText: "" });
   const result = await createService().validatePageDocument(
     "home",
@@ -99,20 +70,21 @@ test("首屏缺少手机专图或替代文字时分别阻断并定位字段", as
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true);
   const mobileIssue = result.issues.find((item) => item.field === "mobileImage");
   assert.equal(mobileIssue?.blockId, "hero-publication-gate");
-  assert.equal(mobileIssue?.severity, "error");
+  assert.equal(mobileIssue?.severity, "warning");
   assert.match(mobileIssue?.message || "", /桌面与手机素材/);
   const titleIssue = result.issues.find((item) => item.field === "title");
   assert.equal(titleIssue?.blockId, "hero-publication-gate");
-  assert.equal(titleIssue?.severity, "error");
+  assert.equal(titleIssue?.severity, "warning");
   const altIssue = result.issues.find((item) => item.field === "altText");
   assert.equal(altIssue?.blockId, "hero-publication-gate");
-  assert.equal(altIssue?.severity, "error");
+  assert.equal(altIssue?.severity, "warning");
+  assert.equal(result.issues.filter((item) => item.field === "altText").length, 1);
 });
 
-test("首屏使用系统占位图时阻断发布并定位具体端", async () => {
+test("首屏使用系统占位图时提醒并定位具体端", async () => {
   const document = makeHero({
     mobileImage: "/images/system/launch-short-page-mobile.svg",
   });
@@ -122,9 +94,9 @@ test("首屏使用系统占位图时阻断发布并定位具体端", async () =>
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true);
   const issue = result.issues.find((item) => item.field === "mobileImage");
-  assert.equal(issue?.severity, "error");
+  assert.equal(issue?.severity, "warning");
   assert.equal(issue?.blockId, "hero-publication-gate");
   assert.equal(issue?.path, "content[0].props.mobileImage");
   assert.match(issue?.message || "", /系统占位图/);
@@ -146,6 +118,48 @@ test("首屏标题明确隐藏时不再把空标题作为发布阻断", async ()
 
   assert.equal(result.valid, true, JSON.stringify(result.errors));
   assert.equal(result.issues.some((issue) => issue.field === "title"), false);
+});
+
+test("隐藏首屏副标题与按钮不因残留文案或不完整去向阻断，恢复显示后重新校验", async () => {
+  for (const version of [1, 2]) {
+    const hiddenNodes = { subtitle: { enabled: false }, actionText: { enabled: false } };
+    const document = makeHero({
+      subtitle: "网站内容正在完善。",
+      actionText: "即将上线",
+      targetType: "none",
+      linkUrl: "",
+      __instanceOverrides: version === 2
+        ? { version: 2, nodes: hiddenNodes }
+        : { version: 1, textRoles: hiddenNodes },
+    });
+    const hidden = await createService().validatePageDocument("home", document, makeFormalPageMetadata(document));
+    assert.equal(hidden.valid, true, JSON.stringify(hidden.issues));
+
+    const shownDocument = makeHero({ ...document.content[0].props, __instanceOverrides: {} });
+    const shown = await createService().validatePageDocument("home", shownDocument, makeFormalPageMetadata(shownDocument));
+    assert.equal(shown.valid, true);
+    assert.ok(shown.issues.some((issue) => issue.field === "subtitle" && /占位内容/.test(issue.message)));
+    assert.ok(shown.issues.some((issue) => issue.field === "actionText" || issue.field === "targetType"));
+  }
+});
+
+test("隐藏副标题不会吞掉可见主标题或替代文字提醒", async () => {
+  const document = makeHero({
+    title: "内容正在完善",
+    subtitle: "网站内容正在完善。",
+    altText: "",
+    __instanceOverrides: { version: 2, nodes: { subtitle: { enabled: false }, altText: { enabled: false } } },
+  });
+  const result = await createService().validatePageDocument("home", document, makeFormalPageMetadata(document));
+  // 未授权的实例覆盖仍是合同错误；内容本身只作为提醒。
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some((issue) => issue.field === "title"));
+  assert.equal(result.issues.some((issue) => issue.field === "subtitle"), false);
+  assert.equal(result.issues.filter(
+    (issue) => issue.field === "altText"
+      && /内容不能为空/.test(issue.message)
+      && issue.severity === "warning",
+  ).length, 1);
 });
 
 test("首屏危险素材地址仍然阻断发布", async () => {
@@ -177,7 +191,7 @@ test("首屏外链图片只允许保留在草稿，发布校验精确定位到�
   assert.ok(result.errors.includes(issue?.message || ""));
 });
 
-test("发布资料未完善时阻断正式发布", async () => {
+test("首屏必要内容完整时，推荐发布资料留空不阻断发布", async () => {
   const document = makeHero();
   const metadata = {
     ...makeFormalPageMetadata(document),
@@ -192,10 +206,8 @@ test("发布资料未完善时阻断正式发布", async () => {
     metadata,
   );
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true);
   for (const field of ["seoTitle", "seoDescription", "ogImage", "contentOwner"]) {
-    const issue = result.issues.find((item) => item.field === field);
-    assert.equal(issue?.severity, "error");
-    assert.ok(result.errors.includes(issue?.message || ""));
+    assert.equal(result.issues.some((item) => item.field === field), false);
   }
 });

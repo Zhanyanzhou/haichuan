@@ -6,6 +6,7 @@ import type {
   DynamicTemplateSlotDefinition,
   TemplateInstanceLayoutOverride,
   TemplateInstanceLayoutOverridesByNodeId,
+  TemplateBreakpoint,
 } from "./generated/templateDefinition.generated";
 import {
   validateDynamicTemplateDefinition,
@@ -13,6 +14,7 @@ import {
 } from "./validateTemplateDefinition";
 import { getEffectiveDynamicTemplateInstanceEditPolicy } from "./nodeRegistry";
 import { getEffectiveTemplateRootRules } from "./templateDimensions";
+import { resolveTemplateNodeRules, resolveTemplateSlotRules } from "./responsive";
 
 export interface DynamicTemplateRenderPlanNode {
   nodeId: string;
@@ -36,6 +38,7 @@ export interface DynamicTemplateRenderPlan {
   name: string;
   metadata: TemplateDefinitionV2["metadata"];
   device: DynamicTemplateDevice;
+  breakpoint: TemplateBreakpoint;
   root: DynamicTemplateRenderPlanNode;
 }
 
@@ -45,6 +48,7 @@ export type CompileDynamicTemplateRenderPlanResult =
 
 export interface CompileDynamicTemplateRenderPlanOptions {
   device: DynamicTemplateDevice;
+  breakpoint?: TemplateBreakpoint;
   contentBySlotId?: Record<string, unknown>;
   hiddenSlotIds?: readonly string[];
   layoutOverridesByNodeId?: TemplateInstanceLayoutOverridesByNodeId;
@@ -62,6 +66,17 @@ function hasMeaningfulTemplateContent(value: unknown): boolean {
   return false;
 }
 
+function hasMeaningfulSlotContent(
+  slot: DynamicTemplateSlotDefinition,
+  value: unknown,
+): boolean {
+  if (slot.type !== "image") return hasMeaningfulTemplateContent(value);
+  if (typeof value === "string") return value.trim().length > 0;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const src = (value as Record<string, unknown>).src;
+  return typeof src === "string" && src.trim().length > 0;
+}
+
 export function compileDynamicTemplateRenderPlan(
   input: unknown,
   options: CompileDynamicTemplateRenderPlanOptions,
@@ -71,11 +86,15 @@ export function compileDynamicTemplateRenderPlan(
     return { ok: false, issues: validation.issues };
   }
   const definition = validation.definition;
+  const breakpoint = options.breakpoint ?? options.device;
   const hiddenSlotIds = new Set(options.hiddenSlotIds ?? []);
   const instanceContent = options.contentBySlotId ?? {};
 
   const compileNode = (nodeId: string): DynamicTemplateRenderPlanNode => {
     const node = definition.nodes[nodeId];
+    const rules = nodeId === definition.rootNodeId
+      ? getEffectiveTemplateRootRules(definition, breakpoint)
+      : resolveTemplateNodeRules(definition, nodeId, breakpoint);
     const slot = node.slotId ? definition.slots[node.slotId] : undefined;
     const hasInstanceContent = Boolean(node.slotId
       && Object.prototype.hasOwnProperty.call(instanceContent, node.slotId));
@@ -85,16 +104,19 @@ export function compileDynamicTemplateRenderPlan(
     const defaultValue = node.slotId ? definition.defaultContent[node.slotId] : undefined;
     const content = slot && hasInstanceContent
       && slot.emptyPolicy === "use-default"
-      && !hasMeaningfulTemplateContent(instanceValue)
+      && !hasMeaningfulSlotContent(slot, instanceValue)
       ? defaultValue
       : hasInstanceContent
         ? instanceValue
         : defaultValue;
     const emptySlotHidden = Boolean(slot
       && !options.showEmptySlots
-      && !hasMeaningfulTemplateContent(content));
+      && !hasMeaningfulSlotContent(slot, content));
     const policy = getEffectiveDynamicTemplateInstanceEditPolicy(node, slot);
-    const rawLayoutOverride = options.layoutOverridesByNodeId?.[nodeId]?.[options.device];
+    const instanceOverrides = options.layoutOverridesByNodeId?.[nodeId];
+    const rawLayoutOverride = definition.schemaVersion >= 2
+      ? { ...instanceOverrides?.desktop, ...(breakpoint === "mobile" ? instanceOverrides?.mobile : {}) }
+      : instanceOverrides?.[options.device];
     const layoutOverride = policy && rawLayoutOverride ? {
       ...(policy.position && typeof rawLayoutOverride.offsetXPercent === "number" && Number.isFinite(rawLayoutOverride.offsetXPercent)
         ? { offsetXPercent: Math.max(-policy.maxOffsetPercent, Math.min(policy.maxOffsetPercent, rawLayoutOverride.offsetXPercent)) }
@@ -143,16 +165,14 @@ export function compileDynamicTemplateRenderPlan(
       name: node.name,
       ...(node.slotId ? { slotId: node.slotId } : {}),
       ...(slot ? { slot } : {}),
-      ...(slot ? { slotRules: options.device === "desktop" ? slot.desktopRules : slot.mobileRules } : {}),
+      ...(slot ? { slotRules: resolveTemplateSlotRules(definition, slot.slotId, breakpoint) } : {}),
       ...(node.slotId && (hasInstanceContent
         || Object.prototype.hasOwnProperty.call(definition.defaultContent, node.slotId))
         ? { content }
         : {}),
-      rules: nodeId === definition.rootNodeId
-        ? getEffectiveTemplateRootRules(definition, options.device)
-        : node.responsive[options.device],
+      rules,
       props: node.props,
-      hidden: node.hidden || node.responsive[options.device].display === "none"
+      hidden: node.hidden || Boolean(rules.hidden) || rules.display === "none"
         || Boolean(node.slotId && hiddenSlotIds.has(node.slotId))
         || emptySlotHidden,
       ...(layoutOverride && Object.keys(layoutOverride).length > 0 ? { layoutOverride } : {}),
@@ -170,6 +190,7 @@ export function compileDynamicTemplateRenderPlan(
       name: definition.name,
       metadata: definition.metadata,
       device: options.device,
+      breakpoint,
       root: compileNode(definition.rootNodeId),
     },
   };

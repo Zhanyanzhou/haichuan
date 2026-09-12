@@ -17,6 +17,7 @@ const legacyCompatibilityFiles = new Set([
   "client/src/page-builder/generated/contentTemplates.generated.ts",
   "client/src/page-builder/runtime/ContentTemplateContractFrame.tsx",
   "client/src/page-builder/runtime/PuckDocumentRenderer.tsx",
+  "client/src/page-builder/template-definition/operations.ts",
   "scripts/generate-content-template-contract.mjs",
 ]);
 const storefrontPalette = new Set([

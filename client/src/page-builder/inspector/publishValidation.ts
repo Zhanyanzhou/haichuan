@@ -1,4 +1,5 @@
 import { BLOCK_META } from "../config/blockMeta";
+import { getSitePublicationField, SITE_PUBLICATION_FIELD_LABELS } from "@/constants/sitePublicationFields";
 import {
   DYNAMIC_TEMPLATE_BLOCK_TYPE,
   dynamicTemplateVersionKey,
@@ -40,6 +41,7 @@ export type PagePublishIssueDevice = "desktop" | "mobile" | "shared";
 export type PagePublishIssueDestination =
   | "inspector-field"
   | "page-settings"
+  | "site-settings"
   | "structure"
   | "retry-validation"
   | "unavailable";
@@ -242,15 +244,13 @@ function dynamicObjectForIssue(
   const slotType = slot?.type;
   const objectKind: ContentTemplateEditableObjectKind = slotType === "image"
     ? "media"
-    : slotType === "video"
-      ? "video"
-      : slotType === "button" || slotType === "link"
-        ? "action"
-        : slotType === "product"
-          ? "product"
-          : slotType === "collection"
-            ? "collection"
-            : "text";
+    : slotType === "button" || slotType === "link"
+      ? "action"
+      : slotType === "product"
+        ? "product"
+        : slotType === "collection"
+          ? "collection"
+          : "text";
   if (layout) {
     const editable = layout.field
       ? isDynamicLayoutFieldEditable(layout.field, node, slot)
@@ -331,6 +331,23 @@ export function resolvePagePublishIssueTarget(
   resolvedDefinitions?: ResolvedDynamicTemplateDefinitionMap,
 ): PagePublishIssueTarget {
   const key = getPagePublishIssueKey(issue);
+  if (isSitePublishIssue(issue)) {
+    const field = getSitePublicationField(issue.path ?? null);
+    return {
+      key,
+      zone: "site",
+      blockLabel: "全站",
+      objectLabel: "店铺资料",
+      device: "shared",
+      group: "site-settings",
+      groupLabel: "发布准备",
+      ...(field ? { field } : {}),
+      fieldLabel: field ? SITE_PUBLICATION_FIELD_LABELS[field] : "店铺发布资料",
+      destination: "site-settings",
+      access: field ? "editable" : "managed",
+      reason: "请在店铺资料中处理，保存后返回装修页面重新检查。",
+    };
+  }
   if (issue.path?.startsWith("metadata.")) {
     const field = issue.field ?? issue.path.slice("metadata.".length).split(".")[0];
     return {
@@ -464,7 +481,12 @@ export function resolvePagePublishIssueTarget(
 }
 
 export function isPagePublishIssue(issue: PublishValidationIssue): boolean {
-  return !issue.blockId || issue.path?.startsWith("metadata.") === true;
+  return !isSitePublishIssue(issue)
+    && (!issue.blockId || issue.path?.startsWith("metadata.") === true);
+}
+
+export function isSitePublishIssue(issue: PublishValidationIssue): boolean {
+  return issue.path === "siteSettings" || issue.path?.startsWith("siteSettings.") === true;
 }
 
 export function getInspectorPublishIssues(

@@ -9,8 +9,14 @@ import {
   Input,
   Button,
   Pagination,
+  Radio,
 } from "antd";
 import { customerApi } from "@/services/api";
+import {
+  customerProfileApi,
+  type ContactChangeChallenge,
+  type ContactChangeType,
+} from "@/services/clients/customerProfileClient";
 import { getRequestErrorMessage } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useCommerceEnabled } from "@/store/featureFlags";
@@ -26,7 +32,12 @@ import CustomerOrdersPanel from "./CustomerOrdersPanel";
 import CustomerReviewDialog from "./CustomerReviewDialog";
 import ForYouRecommendations from "./ForYouRecommendations";
 import CustomerNotificationsPanel from "./CustomerNotificationsPanel";
-import { EXISTING_PASSWORD_MAX_LENGTH } from "@/config/accountPasswordPolicy";
+import {
+  ACCOUNT_PASSWORD_HINT,
+  ACCOUNT_PASSWORD_MAX_LENGTH,
+  EXISTING_PASSWORD_MAX_LENGTH,
+  isAccountPasswordValid,
+} from "@/config/accountPasswordPolicy";
 import type {
   CustomerAfterSalesCase,
   CustomerConsultationDetail,
@@ -319,6 +330,19 @@ export default function MyAccountDashboard({
   const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [profileForm] = Form.useForm();
   const [savingProfile, setSavingProfile] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordForm] = Form.useForm();
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordProof, setPasswordProof] = useState<"PASSWORD" | "SMS">("PASSWORD");
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactForm] = Form.useForm();
+  const [contactType, setContactType] = useState<ContactChangeType>("PHONE");
+  const [contactProof, setContactProof] = useState<"PASSWORD" | "SMS">("PASSWORD");
+  const [contactChallenge, setContactChallenge] = useState<ContactChangeChallenge | null>(null);
+  const [savingContact, setSavingContact] = useState(false);
+  const [sendingSecurityCode, setSendingSecurityCode] = useState(false);
+  const [securityCodeCooldown, setSecurityCodeCooldown] = useState(0);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   // 地址管理
   const [addressOpen, setAddressOpen] = useState(false);
   const [addressForm] = Form.useForm();
@@ -444,13 +468,11 @@ export default function MyAccountDashboard({
   };
 
   const saveProfile = async () => {
-    const values = await profileForm.validateFields();
+    const values = await profileForm.validateFields().catch(() => null);
+    if (!values) return;
     setSavingProfile(true);
     try {
-      await customerApi.updateProfile({
-        name: values.name,
-        email: values.email,
-      });
+      await customerProfileApi.updateName(values.name);
       message.success("资料已更新");
       setProfileEditOpen(false);
       onRefresh?.();
@@ -459,6 +481,130 @@ export default function MyAccountDashboard({
     } finally {
       setSavingProfile(false);
     }
+  };
+
+  useEffect(() => {
+    if (securityCodeCooldown <= 0) return;
+    const timer = window.setTimeout(
+      () => setSecurityCodeCooldown((current) => Math.max(0, current - 1)),
+      1000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [securityCodeCooldown]);
+
+  const sendCurrentPhoneCode = async () => {
+    setSendingSecurityCode(true);
+    try {
+      await customerProfileApi.requestCurrentPhoneCode();
+      setSecurityCodeCooldown(60);
+      message.success("验证码已发送至当前绑定手机号");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "验证码发送失败"));
+    } finally {
+      setSendingSecurityCode(false);
+    }
+  };
+
+  const savePassword = async () => {
+    const values = await passwordForm.validateFields().catch(() => null);
+    if (!values) return;
+    setSavingPassword(true);
+    try {
+      const verification = passwordProof === "PASSWORD"
+        ? { currentPassword: values.currentPassword as string }
+        : { currentSmsCode: values.currentSmsCode as string };
+      await customerProfileApi.changePassword(verification, values.newPassword);
+      message.success("密码已修改，请重新登录");
+      passwordForm.resetFields();
+      setPasswordOpen(false);
+      onSignOut();
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "密码修改失败"));
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  const openPasswordChange = () => {
+    passwordForm.resetFields();
+    setPasswordProof(profile?.hasPassword === false ? "SMS" : "PASSWORD");
+    setPasswordOpen(true);
+  };
+
+  const openContactChange = (type: ContactChangeType) => {
+    setContactType(type);
+    setContactProof(profile?.hasPassword === false ? "SMS" : "PASSWORD");
+    setContactChallenge(null);
+    contactForm.resetFields();
+    setContactOpen(true);
+  };
+
+  const submitContactChange = async () => {
+    const values = await contactForm.validateFields().catch(() => null);
+    if (!values) return;
+    setSavingContact(true);
+    try {
+      if (!contactChallenge) {
+        const verification = contactProof === "PASSWORD"
+          ? { currentPassword: values.currentPassword as string }
+          : { currentSmsCode: values.currentSmsCode as string };
+        const response = await customerProfileApi.startContactChange(
+          contactType,
+          values.newValue,
+          verification,
+        );
+        setContactChallenge(unwrapResponse<ContactChangeChallenge>(response));
+        contactForm.setFieldsValue({ verificationCode: "" });
+        message.success("新绑定验证码已发送");
+        return;
+      }
+      await customerProfileApi.confirmContactChange(
+        contactChallenge.changeId,
+        values.verificationCode,
+      );
+      message.success("绑定信息已更新，请重新登录");
+      contactForm.resetFields();
+      setContactOpen(false);
+      onSignOut();
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "换绑失败"));
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
+  const uploadAvatar = async (file: File) => {
+    const allowed = ["image/jpeg", "image/png", "image/webp"].includes(file.type);
+    if (!allowed) {
+      message.error("头像仅支持 JPG、PNG 或 WebP 格式");
+      return Upload.LIST_IGNORE;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      message.error("头像图片不能超过 5MB");
+      return Upload.LIST_IGNORE;
+    }
+    setUploadingAvatar(true);
+    try {
+      await customerProfileApi.uploadAvatar(file);
+      message.success("头像已更新");
+      onRefresh?.();
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "头像上传失败"));
+    } finally {
+      setUploadingAvatar(false);
+    }
+    return Upload.LIST_IGNORE;
+  };
+
+  const cooldownLabel = (value?: string | null) => {
+    if (!value || Date.parse(value) <= Date.now()) return null;
+    return `可于 ${new Date(value).toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })} 再次修改`;
   };
 
   const openAddressCreate = () => {
@@ -967,7 +1113,7 @@ export default function MyAccountDashboard({
 
           <section
             id="my-profile"
-            className="my-account__panel my-account__panel--profile"
+            className="my-account__panel my-account__panel--profile my-account__panel--wide"
           >
             <div className="my-account__panel-head">
               <div>
@@ -975,20 +1121,34 @@ export default function MyAccountDashboard({
                 <h2>个人资料</h2>
               </div>
             </div>
-            <dl>
-              <div>
-                <dt>称呼</dt>
-                <dd>{name}</dd>
+            <div className="my-account__profile-identity">
+              <div className="my-account__avatar" aria-label="当前头像">
+                {profile?.avatarUrl ? (
+                  <img
+                    src={`${profile.avatarUrl}?v=${encodeURIComponent(profile.updatedAt || "current")}`}
+                    alt={`${name}的头像`}
+                  />
+                ) : (
+                  <span aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
+                )}
               </div>
               <div>
-                <dt>手机号</dt>
-                <dd>{profile?.phone || "—"}</dd>
+                <strong>{name}</strong>
+                <p>{profile?.phone || "—"}</p>
+                <div className="my-account__profile-actions">
+                  <Button size="small" onClick={openProfileEdit}>修改称呼</Button>
+                  <Upload
+                    accept="image/jpeg,image/png,image/webp"
+                    showUploadList={false}
+                    beforeUpload={uploadAvatar}
+                    disabled={uploadingAvatar}
+                  >
+                    <Button size="small" loading={uploadingAvatar}>更换头像</Button>
+                  </Upload>
+                </div>
+                <small>JPG、PNG 或 WebP，最大 5MB；上传后由服务端裁切压缩。</small>
               </div>
-              <div>
-                <dt>邮箱</dt>
-                <dd>{profile?.email || "暂未填写"}</dd>
-              </div>
-            </dl>
+            </div>
             {/* 申请合作：申请入口 + 当前状态（协议未落地前，入口指向说明页，不开放表单提交） */}
             <div style={{ marginBottom: 12 }}>
               <p style={{ fontSize: 12, color: "#5f6568", margin: "0 0 8px" }}>
@@ -1048,17 +1208,48 @@ export default function MyAccountDashboard({
                 )}
               </div>
             </div>
-            <div style={{ marginBottom: 12 }}>
-              <Button
-                size="small"
-                onClick={openProfileEdit}
-                style={{ marginRight: 8 }}
-              >
-                编辑资料
-              </Button>
-              <Button size="small" onClick={openAddressCreate}>
-                新增地址
-              </Button>
+            <div className="my-account__security-settings">
+              <div className="my-account__security-row">
+                <div>
+                  <strong>绑定手机号</strong>
+                  <span>{profile?.phone || "—"}</span>
+                  {cooldownLabel(profile?.phoneChangeAvailableAt) ? (
+                    <small>{cooldownLabel(profile?.phoneChangeAvailableAt)}</small>
+                  ) : null}
+                </div>
+                <Button
+                  size="small"
+                  disabled={Boolean(cooldownLabel(profile?.phoneChangeAvailableAt))}
+                  onClick={() => openContactChange("PHONE")}
+                >
+                  更换手机号
+                </Button>
+              </div>
+              <div className="my-account__security-row">
+                <div>
+                  <strong>绑定邮箱</strong>
+                  <span>{profile?.email || "暂未绑定"}</span>
+                  {cooldownLabel(profile?.emailChangeAvailableAt) ? (
+                    <small>{cooldownLabel(profile?.emailChangeAvailableAt)}</small>
+                  ) : null}
+                </div>
+                <Button
+                  size="small"
+                  disabled={Boolean(cooldownLabel(profile?.emailChangeAvailableAt))}
+                  onClick={() => openContactChange("EMAIL")}
+                >
+                  {profile?.email ? "更换邮箱" : "绑定邮箱"}
+                </Button>
+              </div>
+              <div className="my-account__security-row">
+                <div>
+                  <strong>登录密码</strong>
+                  <span>修改后所有设备都需要重新登录</span>
+                </div>
+                <Button size="small" onClick={openPasswordChange}>
+                  {profile?.hasPassword === false ? "设置密码" : "修改密码"}
+                </Button>
+              </div>
             </div>
             {/* 合规（个保法）：数据导出 + 账户注销 */}
             <div
@@ -1088,7 +1279,7 @@ export default function MyAccountDashboard({
               </span>
             </div>
             <div className="my-account__address">
-              <p>收货地址</p>
+              <p>收货地址 <Button size="small" onClick={openAddressCreate}>新增地址</Button></p>
               {addresses.length > 0 ? (
                 addresses.map((addr) => (
                   <div key={addr.id} style={{ marginBottom: 10 }}>
@@ -1220,7 +1411,7 @@ export default function MyAccountDashboard({
 
       <Modal
         open={profileEditOpen}
-        title="编辑个人资料"
+        title="修改称呼"
         onCancel={() => setProfileEditOpen(false)}
         onOk={saveProfile}
         confirmLoading={savingProfile}
@@ -1230,7 +1421,6 @@ export default function MyAccountDashboard({
           if (open) {
             profileForm.setFieldsValue({
               name: profile?.name,
-              email: profile?.email,
             });
           }
         }}
@@ -1239,13 +1429,177 @@ export default function MyAccountDashboard({
           <Form.Item
             name="name"
             label="称呼"
-            rules={[{ required: true, message: "请填写称呼" }]}
+            rules={[
+              { required: true, message: "请填写称呼" },
+              { min: 1, max: 50, message: "称呼长度必须为 1–50 个字符" },
+              {
+                pattern: /^[\p{L}\p{N}_·.\- ]+$/u,
+                message: "称呼只能包含文字、数字、空格、下划线、中点和短横线",
+              },
+            ]}
           >
-            <Input placeholder="您的称呼" />
+            <Input placeholder="您的称呼" maxLength={50} showCount />
           </Form.Item>
-          <Form.Item name="email" label="邮箱">
-            <Input placeholder="name@example.com" />
+        </Form>
+      </Modal>
+
+      <Modal
+        open={passwordOpen}
+        title="修改登录密码"
+        onCancel={() => {
+          passwordForm.resetFields();
+          setPasswordOpen(false);
+        }}
+        onOk={savePassword}
+        confirmLoading={savingPassword}
+        okText="确认修改"
+        cancelText="取消"
+        forceRender
+      >
+        <p className="my-account__security-note">
+          {profile?.hasPassword === false
+            ? "当前账户尚未设置密码，请先验证绑定手机号。设置成功后将退出所有设备。"
+            : "修改成功后将退出所有设备上的登录会话，请使用新密码重新登录。"}
+        </p>
+        <Form form={passwordForm} layout="vertical">
+          <Form.Item label="验证当前身份">
+            <Radio.Group
+              value={passwordProof}
+              onChange={(event) => {
+                setPasswordProof(event.target.value);
+                passwordForm.setFieldsValue({ currentPassword: undefined, currentSmsCode: undefined });
+              }}
+            >
+              <Radio.Button value="PASSWORD" disabled={profile?.hasPassword === false}>当前密码</Radio.Button>
+              <Radio.Button value="SMS">手机验证码</Radio.Button>
+            </Radio.Group>
           </Form.Item>
+          {passwordProof === "PASSWORD" ? (
+            <Form.Item name="currentPassword" label="当前密码" rules={[{ required: true, message: "请输入当前密码" }]}>
+              <Input.Password maxLength={EXISTING_PASSWORD_MAX_LENGTH} autoComplete="current-password" />
+            </Form.Item>
+          ) : (
+            <Form.Item label="当前手机号验证码" required>
+              <div className="my-account__code-row">
+                <Form.Item name="currentSmsCode" noStyle rules={[{ required: true, pattern: /^\d{6}$/, message: "请输入 6 位验证码" }]}>
+                  <Input inputMode="numeric" maxLength={6} placeholder="6 位验证码" />
+                </Form.Item>
+                <Button
+                  onClick={sendCurrentPhoneCode}
+                  loading={sendingSecurityCode}
+                  disabled={securityCodeCooldown > 0}
+                >
+                  {securityCodeCooldown > 0 ? `${securityCodeCooldown}s` : "发送验证码"}
+                </Button>
+              </div>
+            </Form.Item>
+          )}
+          <Form.Item
+            name="newPassword"
+            label="新密码"
+            rules={[
+              { required: true, message: "请输入新密码" },
+              { validator: (_, value) => !value || isAccountPasswordValid(value) ? Promise.resolve() : Promise.reject(new Error(ACCOUNT_PASSWORD_HINT)) },
+            ]}
+            extra={ACCOUNT_PASSWORD_HINT}
+          >
+            <Input.Password maxLength={ACCOUNT_PASSWORD_MAX_LENGTH} autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item
+            name="confirmPassword"
+            label="确认新密码"
+            dependencies={["newPassword"]}
+            rules={[
+              { required: true, message: "请再次输入新密码" },
+              ({ getFieldValue }) => ({
+                validator: (_, value) => !value || value === getFieldValue("newPassword")
+                  ? Promise.resolve()
+                  : Promise.reject(new Error("两次输入的密码不一致")),
+              }),
+            ]}
+          >
+            <Input.Password maxLength={ACCOUNT_PASSWORD_MAX_LENGTH} autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={contactOpen}
+        title={`${profile?.[contactType === "PHONE" ? "phone" : "email"] ? "更换" : "绑定"}${contactType === "PHONE" ? "手机号" : "邮箱"}`}
+        onCancel={() => {
+          contactForm.resetFields();
+          setContactOpen(false);
+          setContactChallenge(null);
+        }}
+        onOk={submitContactChange}
+        confirmLoading={savingContact}
+        okText={contactChallenge ? "完成换绑" : "验证并发送新验证码"}
+        cancelText="取消"
+        forceRender
+      >
+        <p className="my-account__security-note">
+          {contactChallenge
+            ? `验证码已发送至 ${contactChallenge.maskedTarget}，10 分钟内有效。`
+            : "先验证当前身份，再验证新的联系方式。换绑成功后 7 天内不能再次修改，并会退出所有设备。"}
+        </p>
+        <Form form={contactForm} layout="vertical">
+          {!contactChallenge ? (
+            <>
+              <Form.Item
+                name="newValue"
+                label={contactType === "PHONE" ? "新手机号" : "新邮箱"}
+                rules={contactType === "PHONE"
+                  ? [{ required: true, pattern: /^1[3-9]\d{9}$/, message: "请填写正确的手机号" }]
+                  : [{ required: true, type: "email", message: "请填写正确的邮箱地址" }]}
+              >
+                <Input
+                  inputMode={contactType === "PHONE" ? "tel" : "email"}
+                  maxLength={contactType === "PHONE" ? 11 : 100}
+                  autoComplete={contactType === "PHONE" ? "tel" : "email"}
+                />
+              </Form.Item>
+              <Form.Item label="验证当前身份">
+                <Radio.Group
+                  value={contactProof}
+                  onChange={(event) => {
+                    setContactProof(event.target.value);
+                    contactForm.setFieldsValue({ currentPassword: undefined, currentSmsCode: undefined });
+                  }}
+                >
+                  <Radio.Button value="PASSWORD" disabled={profile?.hasPassword === false}>当前密码</Radio.Button>
+                  <Radio.Button value="SMS">当前手机验证码</Radio.Button>
+                </Radio.Group>
+              </Form.Item>
+              {contactProof === "PASSWORD" ? (
+                <Form.Item name="currentPassword" label="当前密码" rules={[{ required: true, message: "请输入当前密码" }]}>
+                  <Input.Password maxLength={EXISTING_PASSWORD_MAX_LENGTH} autoComplete="current-password" />
+                </Form.Item>
+              ) : (
+                <Form.Item label="当前手机号验证码" required>
+                  <div className="my-account__code-row">
+                    <Form.Item name="currentSmsCode" noStyle rules={[{ required: true, pattern: /^\d{6}$/, message: "请输入 6 位验证码" }]}>
+                      <Input inputMode="numeric" maxLength={6} placeholder="6 位验证码" />
+                    </Form.Item>
+                    <Button
+                      onClick={sendCurrentPhoneCode}
+                      loading={sendingSecurityCode}
+                      disabled={securityCodeCooldown > 0}
+                    >
+                      {securityCodeCooldown > 0 ? `${securityCodeCooldown}s` : "发送验证码"}
+                    </Button>
+                  </div>
+                </Form.Item>
+              )}
+            </>
+          ) : (
+            <Form.Item
+              name="verificationCode"
+              label={`新${contactType === "PHONE" ? "手机号" : "邮箱"}验证码`}
+              rules={[{ required: true, pattern: /^\d{6}$/, message: "请输入 6 位验证码" }]}
+            >
+              <Input inputMode="numeric" maxLength={6} autoFocus placeholder="6 位验证码" />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 

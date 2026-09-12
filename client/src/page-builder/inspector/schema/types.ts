@@ -225,7 +225,7 @@ export interface SectionDef {
 /* ═══════ 模块 Schema ═══════ */
 
 export interface ModuleInspectorSchema {
-  /** Puck 组件类型中文名（与 puckConfig.components 的 key 一致），如 "文字横幅" */
+  /** Puck 组件类型中文名（与 puckConfig.components 的 key 一致），如 "首屏主视觉" */
   moduleType: string;
   /** 业务展示名（BLOCK_META.name），如 "引导横幅" */
   displayName: string;

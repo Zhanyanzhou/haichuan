@@ -10,6 +10,14 @@ interface SettingsUpdateInput {
   siteName?: string;
   siteDescription?: string;
   logo?: string;
+  brandPresentationMode?: "logo" | "text-only";
+  brandReviewReference?: string;
+  legalEntityReviewReference?: string;
+  privacyPolicyReviewReference?: string;
+  seoReviewReference?: string;
+  canonicalBaseUrl?: string;
+  defaultLocale?: string;
+  publishedLocales?: string[];
   seoTitle?: string;
   seoDescription?: string;
   seoKeywords?: string;
@@ -21,6 +29,14 @@ interface SettingsUpdateInput {
   storeMapUrl?: string;
   paymentMethods?: string[];
   logisticsCompanies?: string[];
+}
+
+export interface SitePublicationReadiness {
+  schemaVersion: number;
+  status: "READY" | "BLOCKED";
+  ready: boolean;
+  persisted: boolean;
+  blockers: Array<{ code: string; area: string; field: string; message: string }>;
 }
 
 interface SettingsLogQuery {
@@ -79,6 +95,7 @@ export const settingsApi = {
     }
     return api.put("/settings", data);
   },
+  getPublicationReadiness: () => api.get("/settings/publication-readiness", { suppressGlobalError: true }),
   getLogs: async (params?: SettingsLogQuery) => {
     if (USE_MOCK) {
       await mockDelay();

@@ -517,6 +517,7 @@ export async function runReleasePreflight(
   const settings = isRecord(storedSettings?.value) ? storedSettings.value : {};
   const siteReadiness = evaluateSitePublicationReadiness(settings, {
     persisted: Boolean(storedSettings),
+    requireLaunchDetails: true,
   });
   const contactBlockers = siteReadiness.blockers.filter(
     (blocker) => blocker.area === "contact",

@@ -34,12 +34,12 @@ test("Demo Seed 默认关闭，缺少显式开关时拒绝", () => {
   );
 });
 
-test("Demo Seed 管理员密码与统一 8-64 位账号密码合同一致", () => {
+test("Demo Seed 管理员密码与统一 6-18 位账号密码合同一致", () => {
   assertPolicyError(
     {
       NODE_ENV: "development",
       ALLOW_DEMO_SEED: "true",
-      DEMO_ADMIN_PASSWORD: "1234567",
+      DEMO_ADMIN_PASSWORD: "12345",
     },
     "demo-seed-password-invalid",
   );
@@ -47,17 +47,19 @@ test("Demo Seed 管理员密码与统一 8-64 位账号密码合同一致", () =
     {
       NODE_ENV: "development",
       ALLOW_DEMO_SEED: "true",
-      DEMO_ADMIN_PASSWORD: "1".repeat(65),
+      DEMO_ADMIN_PASSWORD: "1".repeat(19),
     },
     "demo-seed-password-invalid",
   );
 
-  assert.deepEqual(
-    resolveDemoSeedConfig({
-      NODE_ENV: "development",
-      ALLOW_DEMO_SEED: "true",
-      DEMO_ADMIN_PASSWORD: "12345678",
-    }),
-    { adminPassword: "12345678" },
-  );
+  for (const password of ["123456", "x".repeat(18)]) {
+    assert.deepEqual(
+      resolveDemoSeedConfig({
+        NODE_ENV: "development",
+        ALLOW_DEMO_SEED: "true",
+        DEMO_ADMIN_PASSWORD: password,
+      }),
+      { adminPassword: password },
+    );
+  }
 });

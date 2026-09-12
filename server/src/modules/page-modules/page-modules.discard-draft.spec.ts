@@ -21,7 +21,7 @@ function createHarness(options: {
     updatedAt: UPDATED_AT,
     status: "DRAFT",
     publishedRevisionId: options.revision === null ? null : 33,
-    puckData: { content: [{ type: "文字横幅", props: { id: "draft" } }] },
+    puckData: { content: [{ type: "首屏主视觉", props: { id: "draft" } }] },
     metadata: {},
   };
   const restored = { ...document, status: "PUBLISHED" };
@@ -48,7 +48,7 @@ function createHarness(options: {
               id: 33,
               documentId: 17,
               version: 3,
-              puckData: { content: [{ type: "文字横幅", props: { id: "live" } }] },
+              puckData: { content: [{ type: "首屏主视觉", props: { id: "live" } }] },
               metadata: { seoTitle: "线上版本" },
             }
           : options.revision,

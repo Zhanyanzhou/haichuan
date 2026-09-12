@@ -8,7 +8,7 @@
 - 动态工作包与闭环状态：[`docs/AI_PROGRAM_LEDGER.md`](../../AI_PROGRAM_LEDGER.md)
 - 已批准决策：[`docs/DECISIONS.md`](../../DECISIONS.md)
 - 生产输入清单：[`docs/acceptance/V1_CONTENT_PRODUCTION_INPUT_CHECKLIST.md`](../../acceptance/V1_CONTENT_PRODUCTION_INPUT_CHECKLIST.md)
-- 部署与生产门禁：[`docs/DEPLOYMENT.md`](../../DEPLOYMENT.md) 与 [`docs/PRODUCTION_RELEASE_RUNBOOK.md`](../../PRODUCTION_RELEASE_RUNBOOK.md)
+- 部署与生产门禁：[`docs/PRODUCTION_RELEASE_RUNBOOK.md`](../../PRODUCTION_RELEASE_RUNBOOK.md)
 
 ## 原路径映射
 
@@ -34,4 +34,3 @@
 | 当时未跟踪 spec 的具体数量与 Git 分组 | 仅属旧工作树证据，不迁入现行台账 |
 
 `V1_CONTENT_PRODUCTION_INPUT_CHECKLIST.md` 已在本次整理中改为指向现行状态入口，并把本目录中的 V1 证据明确标注为历史快照。
-

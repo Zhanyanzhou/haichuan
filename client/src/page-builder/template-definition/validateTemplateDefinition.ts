@@ -1,5 +1,7 @@
 import {
-  DYNAMIC_TEMPLATE_SCHEMA_VERSION,
+  DYNAMIC_TEMPLATE_SUPPORTED_SCHEMA_VERSIONS,
+  TEMPLATE_RECIPE_SCHEMA,
+  type TemplateRecipe,
   DYNAMIC_TEMPLATE_METADATA_FIELDS,
   DYNAMIC_TEMPLATE_METADATA_INTEGER_BOUNDS,
   getDynamicTemplateNodeRegistryEntry,
@@ -15,6 +17,7 @@ import {
   sanitizeContentTemplateDefaultContent,
   sanitizeContentTemplateLayoutData,
 } from "../generated/contentTemplates.generated";
+import { mergeTemplateResponsiveRecord, resolveTemplateNodeRules } from "./responsive";
 
 export type DynamicTemplateValidationLevel = "error" | "warning" | "info";
 
@@ -49,12 +52,82 @@ export const DYNAMIC_TEMPLATE_METADATA_LIST_LIMITS = {
 
 export const DYNAMIC_TEMPLATE_SLOT_RULE_MAX_LINES = 20;
 
+const TEMPLATE_COLOR_PATTERN = /^#(?:[A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/;
+
+/** 默认媒体只接收 HTTPS 或本站绝对路径；禁止脚本、内联数据及协议相对地址。 */
+export function isSafeTemplateMediaUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > 2048 || value.includes("\\")) return false;
+  if ([...value].some((character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127)) return false;
+  if (value.startsWith("/") && !value.startsWith("//")) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password;
+  } catch { return false; }
+}
+
+function validateRecipeShape(value: unknown, schema: Record<string, unknown>, path: string, issues: DynamicTemplateValidationIssue[]) {
+  const invalid = (message: string) => addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_RECIPE", path, message });
+  if (schema.const !== undefined && value !== schema.const) invalid("模板方案版本无效。");
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) invalid("模板方案选项无效。");
+  if (schema.type === "object") {
+    if (!isRecord(value)) { invalid("模板方案字段必须是对象。"); return; }
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
+    validateKnownKeys(value, Object.keys(properties), path, issues);
+    for (const key of schema.required as string[]) {
+      if (value[key] === undefined) invalid(`模板方案缺少 ${key}。`);
+    }
+    for (const [key, child] of Object.entries(properties)) {
+      if (value[key] !== undefined) validateRecipeShape(value[key], child, `${path}.${key}`, issues);
+    }
+  } else if (schema.type === "array") {
+    if (!Array.isArray(value)) { invalid("模板方案字段必须是数组。"); return; }
+    if (value.length > Number(schema.maxItems)) invalid("模板方案槽位数量超出限制。");
+    value.forEach((item, index) => validateRecipeShape(item, schema.items as Record<string, unknown>, `${path}.${index}`, issues));
+  } else if (schema.type === "string") {
+    if (typeof value !== "string") { invalid("模板方案字段必须是文字。"); return; }
+    if ((schema.minLength !== undefined && value.trim().length < Number(schema.minLength))
+      || (schema.maxLength !== undefined && value.length > Number(schema.maxLength))
+      || (schema.pattern && !new RegExp(String(schema.pattern)).test(value))) invalid("模板方案文字格式或长度无效。");
+  } else if (schema.type === "number" || schema.type === "integer") {
+    if (!isFiniteNumber(value) || (schema.type === "integer" && !Number.isInteger(value))
+      || (schema.minimum !== undefined && Number(value) < Number(schema.minimum))
+      || (schema.maximum !== undefined && Number(value) > Number(schema.maximum))
+      || (schema.exclusiveMinimum !== undefined && Number(value) <= Number(schema.exclusiveMinimum))) invalid("模板方案数值超出范围。");
+  } else if (schema.type === "boolean" && typeof value !== "boolean") invalid("模板方案选项必须是布尔值。");
+}
+
+export function validateTemplateRecipe(input: unknown): { valid: boolean; issues: DynamicTemplateValidationIssue[]; recipe?: TemplateRecipe } {
+  const issues: DynamicTemplateValidationIssue[] = [];
+  validateRecipeShape(input, TEMPLATE_RECIPE_SCHEMA, "templateRecipe", issues);
+  if (!issues.some((issue) => issue.level === "error")) {
+    const recipe = input as TemplateRecipe;
+    const invalid = (path: string, message: string) => addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_RECIPE", path: `templateRecipe.${path}`, message });
+    if (recipe.purpose === "custom" && !recipe.customPurpose?.trim()) invalid("customPurpose", "请输入自定义用途。");
+    if (Math.abs(recipe.canvas.width / recipe.canvas.height - recipe.canvas.aspectRatio) > 0.000001) invalid("canvas.aspectRatio", "画布比例必须与宽高一致。");
+    const ids = new Set<string>();
+    for (const [kind, slots] of [["media", recipe.media], ["content", recipe.content]] as const) {
+      slots.forEach((slot, index) => {
+        if (ids.has(slot.id)) invalid(`${kind}.${index}.id`, "方案槽位标识不能重复。");
+        ids.add(slot.id);
+      });
+    }
+    recipe.media.forEach((slot, index) => {
+      if (slot.defaultImage && !isSafeTemplateMediaUrl(slot.defaultImage)) invalid(`media.${index}.defaultImage`, "默认图片地址无效。");
+    });
+    recipe.content.forEach((slot, index) => {
+      if (slot.defaultContent.length > slot.maxLength) invalid(`content.${index}.defaultContent`, "默认文字超过最大字数。");
+    });
+  }
+  const valid = !issues.some((issue) => issue.level === "error");
+  return { valid, issues, ...(valid ? { recipe: input as TemplateRecipe } : {}) };
+}
+
 const STABLE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 const SLOT_KEY_PATTERN = /^[a-z][A-Za-z0-9_]{0,63}$/;
 const RATIO_PATTERN = /^(auto|[1-9][0-9]{0,3}:[1-9][0-9]{0,3})$/;
 const LENGTH_UNITS = new Set(["px", "%", "rem", "vw", "vh"]);
 const DISPLAY_VALUES = new Set(["block", "flex", "grid", "none"]);
-const HEIGHT_MODES = new Set(["auto", "min-height", "aspect-ratio", "fixed", "viewport"]);
+const HEIGHT_MODES = new Set(["auto", "fit", "fill", "min-height", "aspect-ratio", "fixed", "viewport"]);
 const SLOT_PROTOCOLS = new Set(["https", "page", "product", "category", "none"]);
 const TOKEN_PATTERN = /^[a-z][a-z0-9.-]{0,63}$/;
 const SEMANTIC_TAGS = new Set(["section", "div", "header", "article", "aside", "nav"]);
@@ -66,33 +139,9 @@ const SLOT_OVERFLOWS = new Set(["clip", "ellipsis", "wrap"]);
 
 export const MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE = {
   heroTemplate: "首屏主视觉",
-  fullBleedTemplate: "全屏出血图",
-  singlePosterTemplate: "单图海报",
-  doublePosterTemplate: "双图海报",
-  textBannerTemplate: "文字横幅",
-  journeyTemplate: "定制流程",
-  galleryTemplate: "作品画廊",
-  lookbookTemplate: "佩戴灵感",
-  sceneShoppingTemplate: "按场景选购",
-  brandPointsTemplate: "卡片网格",
-  servicePromisesTemplate: "服务承诺",
-  certificatesTemplate: "资质证书",
-  storeInfoTemplate: "门店信息",
-  testimonialsTemplate: "真实评价与实拍",
-  limitedEventTemplate: "限时活动",
-  craftDetailsTemplate: "工艺细节",
 } as const satisfies Partial<Record<DynamicTemplateSlotType, string>>;
 
-export const COMPLEX_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE = {
-  video: "视频区块",
-  carousel: "轮播图",
-  hotspot: "热区图",
-  beforeAfter: "改款对比",
-  appointment: "预约入口",
-  productCard: "单品焦点推荐",
-  productCollection: "产品展示行",
-  categoryCollection: "分类卡片",
-} as const satisfies Partial<Record<DynamicTemplateSlotType, string>>;
+export const COMPLEX_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE = {} as const satisfies Partial<Record<DynamicTemplateSlotType, string>>;
 
 export const CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE = {
   ...COMPLEX_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
@@ -111,33 +160,9 @@ export function getContentTemplateModuleTypeForSlotType(
 
 export const MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE = {
   HeroTemplate: "首屏主视觉",
-  FullBleedTemplate: "全屏出血图",
-  SinglePosterTemplate: "单图海报",
-  DoublePosterTemplate: "双图海报",
-  TextBannerTemplate: "文字横幅",
-  JourneyTemplate: "定制流程",
-  GalleryTemplate: "作品画廊",
-  LookbookTemplate: "佩戴灵感",
-  SceneShoppingTemplate: "按场景选购",
-  BrandPointsTemplate: "卡片网格",
-  ServicePromisesTemplate: "服务承诺",
-  CertificatesTemplate: "资质证书",
-  StoreInfoTemplate: "门店信息",
-  TestimonialsTemplate: "真实评价与实拍",
-  LimitedEventTemplate: "限时活动",
-  CraftDetailsTemplate: "工艺细节",
 } as const satisfies Partial<Record<DynamicTemplateNodeType, string>>;
 
-export const COMPLEX_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE = {
-  Video: "视频区块",
-  Carousel: "轮播图",
-  Hotspot: "热区图",
-  BeforeAfter: "改款对比",
-  Appointment: "预约入口",
-  ProductCard: "单品焦点推荐",
-  ProductCollection: "产品展示行",
-  CategoryCollection: "分类卡片",
-} as const satisfies Partial<Record<DynamicTemplateNodeType, string>>;
+export const COMPLEX_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE = {} as const satisfies Partial<Record<DynamicTemplateNodeType, string>>;
 
 export const CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE = {
   ...COMPLEX_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE,
@@ -201,8 +226,6 @@ export function sanitizeContentTemplateDesignProps(
 export const sanitizeMatureContentTemplateDesignProps = sanitizeContentTemplateDesignProps;
 
 const CONTENT_TEMPLATE_DESIGN_NODE_TYPES = new Set<DynamicTemplateNodeType>([
-  "Video", "Carousel", "Hotspot", "BeforeAfter", "Appointment",
-  "ProductCard", "ProductCollection", "CategoryCollection",
   ...Object.keys(MATURE_CONTENT_TEMPLATE_MODULE_BY_NODE_TYPE) as DynamicTemplateNodeType[],
 ]);
 
@@ -353,10 +376,14 @@ export function getDynamicTemplateStructureLockViolation(
     if (previousParentId !== nextParentId) {
       return `${lockLabel}，不能改变其内部节点的父级。`;
     }
-    if (previousParentId && nextParentId
-      && previous.nodes[previousParentId].childIds.indexOf(previousNode.nodeId)
-        !== next.nodes[nextParentId].childIds.indexOf(previousNode.nodeId)) {
-      return `${lockLabel}，不能改变其内部节点的同级顺序。`;
+    if (previousParentId && nextParentId) {
+      const before = previous.nodes[previousParentId].childIds;
+      const after = next.nodes[nextParentId].childIds;
+      // 新增或删除未锁定兄弟会自然回流；锁保护的是存续兄弟之间的相对顺序。
+      const shared = new Set(before.filter((id) => after.includes(id)));
+      const beforeLocked = before.slice(0, before.indexOf(previousNode.nodeId)).filter((id) => shared.has(id));
+      const afterLocked = after.slice(0, after.indexOf(previousNode.nodeId)).filter((id) => shared.has(id));
+      if (canonicalJson(beforeLocked.sort()) !== canonicalJson(afterLocked.sort())) return `${lockLabel}，不能改变其内部节点的同级顺序。`;
     }
     if (canonicalJson(previousNode.childIds) !== canonicalJson(nextNode.childIds)) {
       return `${lockLabel}，不能改变子节点结构。`;
@@ -377,6 +404,9 @@ export function getDynamicTemplateStructureLockViolation(
       const previousSlot = previous.slots[previousNode.slotId];
       const nextSlot = next.slots[previousNode.slotId];
       if (!nextSlot) return `${lockLabel}，不能删除内容槽位。`;
+      if (canonicalJson(previous.defaultContent[previousNode.slotId]) !== canonicalJson(next.defaultContent[previousNode.slotId])) {
+        return `${lockLabel}，不能修改默认内容。`;
+      }
       if (canonicalJson(previousSlot.desktopRules) !== canonicalJson(nextSlot.desktopRules)
         || canonicalJson(previousSlot.mobileRules) !== canonicalJson(nextSlot.mobileRules)) {
         return `${lockLabel}，不能改变其内部槽位布局。`;
@@ -628,6 +658,7 @@ function validateResponsiveRules(
   path: string,
   issues: DynamicTemplateValidationIssue[],
   nodeId: string,
+  schemaVersion = 1,
 ): value is DynamicTemplateResponsiveRules {
   if (!isRecord(value)) {
     addIssue(issues, {
@@ -643,7 +674,54 @@ function validateResponsiveRules(
     "display", "direction", "order", "width", "height", "maxWidth", "minHeight", "gap",
     "padding", "margin", "alignItems", "justifyContent", "columns", "backgroundToken",
     "borderToken", "radius", "overflow", "layoutMode", "placement",
+    ...(schemaVersion >= 2 ? ["wrap", "minWidth", "maxHeight", "anchor", "hidden"] : []),
+    ...(schemaVersion >= 3 ? ["backgroundColor", "backgroundImage", "backgroundGradient", "opacity"] : []),
   ], path, issues, { nodeId });
+  for (const key of ["backgroundColor"] as const) {
+    if (value[key] !== undefined && (typeof value[key] !== "string" || !TEMPLATE_COLOR_PATTERN.test(value[key]))) {
+      addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_COLOR", path: `${path}.${key}`, nodeId, message: "颜色必须是十六进制颜色。" });
+    }
+  }
+  if (value.backgroundImage !== undefined && value.backgroundImage !== "" && !isSafeTemplateMediaUrl(value.backgroundImage)) {
+    addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_MEDIA", path: `${path}.backgroundImage`, nodeId, message: "背景图片地址无效。" });
+  }
+  if (value.opacity !== undefined && (!isFiniteNumber(value.opacity) || value.opacity < 0 || value.opacity > 1)) {
+    addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_OPACITY", path: `${path}.opacity`, nodeId, message: "透明度必须在 0–1 之间。" });
+  }
+  if (value.backgroundGradient !== undefined && value.backgroundGradient !== null) {
+    const gradient = value.backgroundGradient;
+    if (!isRecord(gradient) || ![gradient.from, gradient.to].every((color) => typeof color === "string" && TEMPLATE_COLOR_PATTERN.test(color))
+      || !isFiniteNumber(gradient.angle) || gradient.angle < 0 || gradient.angle > 360) {
+      addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_GRADIENT", path: `${path}.backgroundGradient`, nodeId, message: "渐变需要有效颜色和 0–360 度角度。" });
+    } else validateKnownKeys(gradient, ["from", "to", "angle"], `${path}.backgroundGradient`, issues, { nodeId });
+  }
+  if (value.hidden !== undefined && typeof value.hidden !== "boolean") {
+    addIssue(issues, { level: "error", code: "INVALID_BREAKPOINT_HIDDEN", path: `${path}.hidden`, nodeId, message: "断点隐藏必须是布尔值。" });
+  }
+  if (schemaVersion === 1 && isRecord(value.height) && ["fit", "fill"].includes(String(value.height.mode))) {
+    addIssue(issues, { level: "error", code: "UNSUPPORTED_HEIGHT_MODE", path: `${path}.height.mode`, nodeId, message: "旧模板不支持此高度策略。" });
+  }
+  if (value.wrap !== undefined && !["nowrap", "wrap"].includes(String(value.wrap))) {
+    addIssue(issues, { level: "error", code: "INVALID_WRAP", path: `${path}.wrap`, nodeId, message: "换行规则必须是 nowrap 或 wrap。" });
+  }
+  if (value.anchor !== undefined) {
+    const anchor = value.anchor;
+    if (!isRecord(anchor)) {
+      addIssue(issues, { level: "error", code: "INVALID_ANCHOR", path: `${path}.anchor`, nodeId, message: "锚点必须是完整定位规则。" });
+    } else {
+      validateKnownKeys(anchor, ["horizontal", "vertical", "offsetX", "offsetY"], `${path}.anchor`, issues, { nodeId });
+      if (!["left", "center", "right"].includes(String(anchor.horizontal)) || !["top", "center", "bottom"].includes(String(anchor.vertical))) {
+        addIssue(issues, { level: "error", code: "INVALID_ANCHOR", path: `${path}.anchor`, nodeId, message: "锚点方向无效。" });
+      }
+      for (const axis of ["offsetX", "offsetY"] as const) {
+        const offset = anchor[axis];
+        if (isRecord(offset)) validateKnownKeys(offset, ["value", "unit"], `${path}.anchor.${axis}`, issues, { nodeId });
+        if (!isRecord(offset) || !isFiniteNumber(offset.value) || Math.abs(offset.value) > 10000 || !["px", "%"].includes(String(offset.unit))) {
+          addIssue(issues, { level: "error", code: "INVALID_ANCHOR_OFFSET", path: `${path}.anchor.${axis}`, nodeId, message: "锚点偏移须为 -10000–10000 的 px 或百分比数值。" });
+        }
+      }
+    }
+  }
   if (typeof value.display !== "string" || !DISPLAY_VALUES.has(value.display)) {
     addIssue(issues, {
       level: "error",
@@ -723,8 +801,17 @@ function validateResponsiveRules(
     validateLength(value.width, `${path}.width`, issues, nodeId);
   }
   validateHeightRule(value.height, `${path}.height`, issues, nodeId);
-  for (const key of ["maxWidth", "minHeight", "gap", "radius"] as const) {
+  for (const key of ["minWidth", "maxWidth", "minHeight", "maxHeight", "gap", "radius"] as const) {
     if (value[key] !== undefined) validateLength(value[key], `${path}.${key}`, issues, nodeId);
+  }
+  if (schemaVersion >= 2) {
+    for (const [minimum, maximum] of [["minWidth", "maxWidth"], ["minHeight", "maxHeight"]] as const) {
+      const min = value[minimum];
+      const max = value[maximum];
+      if (isRecord(min) && isRecord(max) && min.unit === max.unit && isFiniteNumber(min.value) && isFiniteNumber(max.value) && min.value > max.value) {
+        addIssue(issues, { level: "error", code: "CONFLICTING_SIZE_LIMITS", path: `${path}.${minimum}`, nodeId, message: "相同单位的最小尺寸不能大于最大尺寸。" });
+      }
+    }
   }
   for (const key of ["padding", "margin"] as const) {
     const spacing = value[key];
@@ -780,6 +867,24 @@ function validateMetadata(value: unknown, issues: DynamicTemplateValidationIssue
     return;
   }
   validateKnownKeys(value, DYNAMIC_TEMPLATE_METADATA_FIELDS, "metadata", issues);
+  if (value.canvasSize !== undefined) {
+    const size = value.canvasSize;
+    if (!isRecord(size)) {
+      addIssue(issues, { level: "error", code: "INVALID_CANVAS_SIZE", path: "metadata.canvasSize", message: "画布尺寸必须包含宽度、高度和比例。" });
+    } else {
+      validateKnownKeys(size, ["width", "height", "aspectRatio"], "metadata.canvasSize", issues);
+      for (const key of ["width", "height"] as const) {
+        if (typeof size[key] !== "number" || !Number.isInteger(size[key]) || size[key] < 1 || size[key] > 4096) {
+          addIssue(issues, { level: "error", code: "INVALID_CANVAS_SIZE", path: `metadata.canvasSize.${key}`, message: "画布宽高必须是 1–4096 之间的整数像素值。" });
+        }
+      }
+      if (typeof size.aspectRatio !== "number" || !Number.isFinite(size.aspectRatio) || size.aspectRatio <= 0
+        || typeof size.width !== "number" || typeof size.height !== "number"
+        || Math.abs(size.aspectRatio - size.width / size.height) > 1e-10) {
+        addIssue(issues, { level: "error", code: "INVALID_CANVAS_ASPECT_RATIO", path: "metadata.canvasSize.aspectRatio", message: "画布比例必须与宽度和高度一致。" });
+      }
+    }
+  }
   for (const [key, maxLength] of [
     ["category", DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH.category],
     ["purpose", DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH.purpose],
@@ -895,6 +1000,7 @@ function validateSlotRules(
   path: string,
   issues: DynamicTemplateValidationIssue[],
   slotId: string,
+  schemaVersion = 1,
 ) {
   if (!isRecord(value)) {
     addIssue(issues, {
@@ -909,7 +1015,17 @@ function validateSlotRules(
   validateKnownKeys(value, [
     "aspectRatio", "objectFit", "objectPosition", "fontRole", "fontSize", "fontWeight",
     "lineHeight", "textAlign", "maxLines", "overflow",
+    ...(schemaVersion >= 3 ? ["fontFamily", "color", "letterSpacing"] : []),
   ], path, issues, { slotId });
+  if (value.fontFamily !== undefined && !["system", "serif", "sans"].includes(String(value.fontFamily))) {
+    addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_FONT", path: `${path}.fontFamily`, slotId, message: "字体选项无效。" });
+  }
+  if (value.color !== undefined && (typeof value.color !== "string" || !TEMPLATE_COLOR_PATTERN.test(value.color))) {
+    addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_COLOR", path: `${path}.color`, slotId, message: "颜色必须是十六进制颜色。" });
+  }
+  if (value.letterSpacing !== undefined && (!isFiniteNumber(value.letterSpacing) || value.letterSpacing < -10 || value.letterSpacing > 100)) {
+    addIssue(issues, { level: "error", code: "INVALID_TEMPLATE_LETTER_SPACING", path: `${path}.letterSpacing`, slotId, message: "字间距必须在 -10–100 之间。" });
+  }
   if (value.aspectRatio !== undefined
     && (typeof value.aspectRatio !== "string" || !RATIO_PATTERN.test(value.aspectRatio))) {
     addIssue(issues, {
@@ -922,13 +1038,14 @@ function validateSlotRules(
   }
   if (value.objectPosition !== undefined
     && (typeof value.objectPosition !== "string"
-      || !/^(left|center|right) (top|center|bottom)$/.test(value.objectPosition))) {
+      || (!/^(left|center|right) (top|center|bottom)$/.test(value.objectPosition)
+        && !(schemaVersion >= 2 && /^(100(?:\.0+)?|[0-9]{1,2}(?:\.[0-9]+)?)% (100(?:\.0+)?|[0-9]{1,2}(?:\.[0-9]+)?)%$/.test(value.objectPosition))))) {
     addIssue(issues, {
       level: "error",
       code: "INVALID_OBJECT_POSITION",
       path: `${path}.objectPosition`,
       slotId,
-      message: "图片位置必须使用水平和垂直安全枚举。",
+      message: "图片位置必须是水平/垂直预设，或 schema2 的 0–100% 精确焦点。",
     });
   }
   if (value.objectFit !== undefined && !OBJECT_FITS.has(String(value.objectFit))) {
@@ -1022,124 +1139,6 @@ export function validateDynamicTemplateSlotContent(
   if (slotType === "collection") {
     return Array.isArray(value) && value.every((item) => typeof item === "string");
   }
-  if (slotType === "video") {
-    if (!isRecord(value)) return false;
-    const allowedKeys = new Set([
-      "videoUrl", "posterUrl", "videoDescription", "title", "subtitle", "actionText",
-      "targetType", "pagePath", "url", "productCode", "categorySlug", "linkUrl",
-      "autoPlay", "loop", "muted", "showControls", "aspectRatio", "videoWidth",
-      "bgColor", "focusX", "focusY", "maxHeight",
-    ]);
-    if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
-    const stringKeys = [
-      "videoUrl", "posterUrl", "videoDescription", "title", "subtitle", "actionText",
-      "pagePath", "url", "productCode", "categorySlug", "linkUrl", "bgColor",
-    ];
-    if (stringKeys.some((key) => value[key] !== undefined && typeof value[key] !== "string")) return false;
-    const booleanKeys = ["autoPlay", "loop", "muted", "showControls"];
-    if (booleanKeys.some((key) => value[key] !== undefined && typeof value[key] !== "boolean")) return false;
-    if (value.targetType !== undefined && !["none", "page", "product", "category", "external"].includes(String(value.targetType))) return false;
-    if (value.aspectRatio !== undefined && !["16:9", "21:6", "4:5", "9:16"].includes(String(value.aspectRatio))) return false;
-    if (value.videoWidth !== undefined && !["standard", "full"].includes(String(value.videoWidth))) return false;
-    if (["focusX", "focusY"].some((key) => value[key] !== undefined && (!isFiniteNumber(value[key]) || Number(value[key]) < 0 || Number(value[key]) > 100))) return false;
-    if (value.maxHeight !== undefined && (!isFiniteNumber(value.maxHeight) || Number(value.maxHeight) < 240 || Number(value.maxHeight) > 1600)) return false;
-    return true;
-  }
-  if (slotType === "carousel") {
-    if (!isRecord(value) || !hasOnlyKnownKeys(value, [
-      "images", "autoPlay", "interval", "showDots", "showArrows", "desktopRatio", "mobileRatio",
-    ])) return false;
-    const images = value.images ?? [];
-    if (!Array.isArray(images) || images.length > 10) return false;
-    if (!images.every((item) => isRecord(item)
-      && hasOnlyKnownKeys(item, ["url", "mobileUrl", "alt", "link", ...ACTION_CONTENT_KEYS])
-      && hasValidOptionalStrings(item, ["url", "mobileUrl", "alt", "link"])
-      && hasValidActionContent(item))) return false;
-    if (["autoPlay", "showDots", "showArrows"].some((key) => value[key] !== undefined && typeof value[key] !== "boolean")) return false;
-    const interval = Number(value.interval ?? 4000);
-    if (![3000, 4000, 6000, 8000].includes(interval)) return false;
-    if (value.desktopRatio !== undefined && !["wide", "standard"].includes(String(value.desktopRatio))) return false;
-    if (value.mobileRatio !== undefined && !["portrait", "standard"].includes(String(value.mobileRatio))) return false;
-    return true;
-  }
-  if (slotType === "hotspot") {
-    if (!isRecord(value) || !hasOnlyKnownKeys(value, [
-      "image", "mobileImage", "altText", "hotspots", "mobileHotspots",
-    ])) return false;
-    return hasValidOptionalStrings(value, ["image", "mobileImage", "altText"])
-      && hasValidHotspotItems(value.hotspots ?? [])
-      && hasValidHotspotItems(value.mobileHotspots ?? []);
-  }
-  if (slotType === "beforeAfter") {
-    if (!isRecord(value) || !hasOnlyKnownKeys(value, [
-      "title", "subtitle", "beforeImage", "afterImage", "beforeLabel", "afterLabel",
-      "beforeAltText", "afterAltText", "actionText", ...ACTION_CONTENT_KEYS,
-      "beforeFocusX", "beforeFocusY", "afterFocusX", "afterFocusY", "aspectRatio", "bgColor",
-    ])) return false;
-    if (!hasValidOptionalStrings(value, [
-      "title", "subtitle", "beforeImage", "afterImage", "beforeLabel", "afterLabel",
-      "beforeAltText", "afterAltText", "actionText", "bgColor",
-    ])) return false;
-    if (!["beforeFocusX", "beforeFocusY", "afterFocusX", "afterFocusY"]
-      .every((key) => value[key] === undefined || hasValidPercent(value[key]))) return false;
-    if (value.aspectRatio !== undefined && !["1:1", "4:5", "3:4", "16:9"].includes(String(value.aspectRatio))) return false;
-    return hasValidActionContent(value);
-  }
-  if (slotType === "appointment") {
-    if (!isRecord(value) || !hasOnlyKnownKeys(value, [
-      "backgroundImage", "title", "subtitle", "buttonText", "altText", ...ACTION_CONTENT_KEYS,
-      "desktopFocusX", "desktopFocusY", "mobileFocusX", "mobileFocusY", "tone", "bgColor",
-    ])) return false;
-    if (!hasValidOptionalStrings(value, [
-      "backgroundImage", "title", "subtitle", "buttonText", "altText", "bgColor",
-    ])) return false;
-    if (!["desktopFocusX", "desktopFocusY", "mobileFocusX", "mobileFocusY"]
-      .every((key) => value[key] === undefined || hasValidPercent(value[key]))) return false;
-    if (value.tone !== undefined && !["dark", "ivory"].includes(String(value.tone))) return false;
-    return hasValidActionContent(value);
-  }
-  if (slotType === "productCard") {
-    if (!isRecord(value) || !hasOnlyKnownKeys(value, [
-      "eyebrow", "title", "summary", "productCode", "primaryText", "secondaryText",
-      "secondaryTargetType", "secondaryProductCode", "secondaryCategorySlug", "secondaryLinkUrl",
-      "layout", "showPrice", "bgColor", "imageRatio",
-    ])) return false;
-    if (!hasValidOptionalStrings(value, [
-      "eyebrow", "title", "summary", "productCode", "primaryText", "secondaryText",
-      "secondaryProductCode", "secondaryCategorySlug", "secondaryLinkUrl", "bgColor", "imageRatio",
-    ])) return false;
-    if (value.secondaryTargetType !== undefined
-      && !["none", "page", "product", "category", "external"].includes(String(value.secondaryTargetType))) return false;
-    if (value.layout !== undefined && !["imageLeft", "imageRight"].includes(String(value.layout))) return false;
-    if (value.showPrice !== undefined && typeof value.showPrice !== "boolean") return false;
-    if (value.imageRatio !== undefined && !RATIO_PATTERN.test(String(value.imageRatio))) return false;
-    return true;
-  }
-  if (slotType === "productCollection") {
-    if (!isRecord(value) || !hasOnlyKnownKeys(value, [
-      "title", "subtitle", "productCodes", "layout", "mobileColumns", "displayMode",
-      "actionStyle", "bgColor", "showPrice", "showButton", "buttonText", "imageRatio",
-    ])) return false;
-    if (!hasValidOptionalStrings(value, ["title", "subtitle", "bgColor", "buttonText", "imageRatio"])) return false;
-    if (value.productCodes !== undefined && !hasValidStableReferenceList(value.productCodes, 8)) return false;
-    if (value.layout !== undefined && !["grid-2", "grid-3", "grid-4"].includes(String(value.layout))) return false;
-    if (value.mobileColumns !== undefined && !["1", "2", 1, 2].includes(value.mobileColumns as string | number)) return false;
-    if (value.displayMode !== undefined && !["standard", "album"].includes(String(value.displayMode))) return false;
-    if (value.actionStyle !== undefined && !["none", "text", "button"].includes(String(value.actionStyle))) return false;
-    if (["showPrice", "showButton"].some((key) => value[key] !== undefined && typeof value[key] !== "boolean")) return false;
-    if (value.imageRatio !== undefined && !RATIO_PATTERN.test(String(value.imageRatio))) return false;
-    return true;
-  }
-  if (slotType === "categoryCollection") {
-    if (!isRecord(value) || !hasOnlyKnownKeys(value, [
-      "title", "subtitle", "categorySlugs", "layout", "bgColor", "imageRatio",
-    ])) return false;
-    if (!hasValidOptionalStrings(value, ["title", "subtitle", "bgColor", "imageRatio"])) return false;
-    if (value.categorySlugs !== undefined && !hasValidStableReferenceList(value.categorySlugs, 4)) return false;
-    if (value.layout !== undefined && !["grid-2", "grid-3", "grid-4"].includes(String(value.layout))) return false;
-    if (value.imageRatio !== undefined && !RATIO_PATTERN.test(String(value.imageRatio))) return false;
-    return true;
-  }
   if (isMatureContentTemplateSlotType(slotType)) {
     if (!isRecord(value) || containsLegacyNumericProductReference(value)) return false;
     const moduleType = MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE[slotType];
@@ -1165,14 +1164,17 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
   validateKnownKeys(input, [
     "schemaVersion", "templateId", "name", "description", "metadata",
     "rootNodeId", "nodes", "slots", "defaultContent", "previewContent",
+    ...(input.schemaVersion === 3 ? ["templateRecipe"] : []),
   ], "", issues);
 
-  if (input.schemaVersion !== DYNAMIC_TEMPLATE_SCHEMA_VERSION) {
+  const schemaVersion = input.schemaVersion === 3 ? 3 : input.schemaVersion === 2 ? 2 : 1;
+  if (input.templateRecipe !== undefined) issues.push(...validateTemplateRecipe(input.templateRecipe).issues);
+  if (!(DYNAMIC_TEMPLATE_SUPPORTED_SCHEMA_VERSIONS as readonly unknown[]).includes(input.schemaVersion)) {
     addIssue(issues, {
       level: "error",
       code: "UNSUPPORTED_SCHEMA_VERSION",
       path: "schemaVersion",
-      message: `当前仅支持母模板 schema v${DYNAMIC_TEMPLATE_SCHEMA_VERSION}。`,
+      message: "当前仅支持母模板 schema v1 和 v2。",
     });
   }
   if (!isStableId(input.templateId)) {
@@ -1200,6 +1202,14 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
     });
   }
   validateMetadata(input.metadata, issues);
+  if (isRecord(input.metadata)) {
+    if (schemaVersion === 1 && input.metadata.previewTabletWidth !== undefined) {
+      addIssue(issues, { level: "error", code: "UNSUPPORTED_TABLET_METADATA", path: "metadata.previewTabletWidth", message: "旧模板没有平板断点。" });
+    }
+    if (schemaVersion >= 2 && input.metadata.mobileBreakpoint !== undefined && input.metadata.mobileBreakpoint !== 767) {
+      addIssue(issues, { level: "error", code: "INVALID_V2_BREAKPOINT", path: "metadata.mobileBreakpoint", message: "新模板使用 767/1023 固定断点边界。" });
+    }
+  }
 
   if (!isStableId(input.rootNodeId)) {
     addIssue(issues, {
@@ -1237,6 +1247,9 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
     });
   }
   const previewContent = isRecord(input.previewContent) ? input.previewContent : {};
+  if ((schemaVersion === 2 && Object.keys(defaultContent).length > 0) || (schemaVersion >= 2 && Object.keys(previewContent).length > 0)) {
+    addIssue(issues, { level: "error", code: "TEMPLATE_TRIAL_CONTENT_NOT_PERSISTABLE", path: "defaultContent", message: "新模板不保存试排文字、图片或页面内容。" });
+  }
   if (input.previewContent !== undefined
     && (!isRecord(input.previewContent) || Object.keys(previewContent).length > 250)) {
     addIssue(issues, {
@@ -1458,9 +1471,23 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
         message: "节点必须分别声明 desktop 和 mobile 几何。",
       });
     } else {
-      validateKnownKeys(rawNode.responsive, ["desktop", "mobile"], `${path}.responsive`, issues, { nodeId: nodeKey });
-      validateResponsiveRules(rawNode.responsive.desktop, `${path}.responsive.desktop`, issues, nodeKey);
-      validateResponsiveRules(rawNode.responsive.mobile, `${path}.responsive.mobile`, issues, nodeKey);
+      validateKnownKeys(rawNode.responsive, schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"], `${path}.responsive`, issues, { nodeId: nodeKey });
+      validateResponsiveRules(rawNode.responsive.desktop, `${path}.responsive.desktop`, issues, nodeKey, schemaVersion);
+      if (schemaVersion === 1) {
+        validateResponsiveRules(rawNode.responsive.mobile, `${path}.responsive.mobile`, issues, nodeKey);
+      } else {
+        let effective = isRecord(rawNode.responsive.desktop) ? rawNode.responsive.desktop : {};
+        for (const breakpoint of ["tablet", "mobile"] as const) {
+          const override = rawNode.responsive[breakpoint];
+          if (breakpoint === "tablet" && override === undefined) continue;
+          if (!isRecord(override)) {
+            addIssue(issues, { level: "error", code: "INVALID_RESPONSIVE_OVERRIDE", path: `${path}.responsive.${breakpoint}`, nodeId: nodeKey, message: "断点覆盖必须是属性对象。" });
+            continue;
+          }
+          effective = mergeTemplateResponsiveRecord(effective, override);
+          validateResponsiveRules(effective, `${path}.responsive.${breakpoint}`, issues, nodeKey, schemaVersion);
+        }
+      }
     }
     if (registry.kind === "slot") {
       if (!isStableId(rawNode.slotId)) {
@@ -1501,7 +1528,12 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
     validateKnownKeys(rawSlot, [
       "slotId", "key", "type", "label", "required", "editable", "hideable",
       "emptyPolicy", "validation", "desktopRules", "mobileRules",
+      ...(schemaVersion >= 2 ? ["tabletRules"] : []),
+      ...(schemaVersion >= 3 ? ["semanticRole"] : []),
     ], path, issues, { slotId: slotKey });
+    if (rawSlot.semanticRole !== undefined && !isNonEmptyString(rawSlot.semanticRole, 64)) {
+      addIssue(issues, { level: "error", code: "INVALID_SLOT_ROLE", path: `${path}.semanticRole`, slotId: slotKey, message: "槽位语义名称最多 64 个字符。" });
+    }
     if (rawSlot.slotId !== slotKey) {
       addIssue(issues, {
         level: "error",
@@ -1644,8 +1676,9 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
         });
       }
     }
-    validateSlotRules(rawSlot.desktopRules, `${path}.desktopRules`, issues, slotKey);
-    validateSlotRules(rawSlot.mobileRules, `${path}.mobileRules`, issues, slotKey);
+    validateSlotRules(rawSlot.desktopRules, `${path}.desktopRules`, issues, slotKey, schemaVersion);
+    validateSlotRules(rawSlot.mobileRules, `${path}.mobileRules`, issues, slotKey, schemaVersion);
+    if (rawSlot.tabletRules !== undefined) validateSlotRules(rawSlot.tabletRules, `${path}.tabletRules`, issues, slotKey, schemaVersion);
   }
 
   const rootNodeId = typeof input.rootNodeId === "string" ? input.rootNodeId : "";
@@ -1680,15 +1713,25 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
     }
   }
 
+  const readRules = (rawNode: Record<string, unknown>, breakpoint: "desktop" | "tablet" | "mobile") => {
+    if (!isRecord(rawNode.responsive)) return undefined;
+    if (schemaVersion === 1) return isRecord(rawNode.responsive[breakpoint]) ? rawNode.responsive[breakpoint] : undefined;
+    if (!isRecord(rawNode.responsive.desktop)) return undefined;
+    let result = rawNode.responsive.desktop;
+    if (breakpoint !== "desktop" && isRecord(rawNode.responsive.tablet)) result = mergeTemplateResponsiveRecord(result, rawNode.responsive.tablet);
+    if (breakpoint === "mobile" && isRecord(rawNode.responsive.mobile)) result = mergeTemplateResponsiveRecord(result, rawNode.responsive.mobile);
+    return result;
+  };
   for (const [nodeId, rawNode] of Object.entries(nodes)) {
     if (!isRecord(rawNode) || !isDynamicTemplateNodeType(rawNode.type)) continue;
     const parents = parentIds.get(nodeId) ?? [];
     const registry = getDynamicTemplateNodeRegistryEntry(rawNode.type);
-    for (const device of ["desktop", "mobile"] as const) {
-      const responsive = isRecord(rawNode.responsive) && isRecord(rawNode.responsive[device])
-        ? rawNode.responsive[device]
-        : undefined;
+    for (const device of (schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"]) as Array<"desktop" | "tablet" | "mobile">) {
+      const responsive = readRules(rawNode, device);
       if (!responsive) continue;
+      if (schemaVersion >= 2 && nodeId === rootNodeId && isRecord(responsive.height) && responsive.height.mode === "fill") {
+        addIssue(issues, { level: "error", code: "ROOT_HEIGHT_CANNOT_FILL", path: `nodes.${nodeId}.responsive.${device}.height`, nodeId, message: "模板根节点没有可分配高度的父容器，请选择固定、最小、比例或适应内容高度。" });
+      }
       if (responsive.layoutMode === "free") {
         if (rawNode.type !== "Stack") {
           addIssue(issues, {
@@ -1699,7 +1742,7 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
             message: "只有 Stack 容器可以启用自由叠放。",
           });
         }
-        if (isRecord(responsive.height) && responsive.height.mode === "auto") {
+        if (isRecord(responsive.height) && ["auto", "fit", "fill"].includes(String(responsive.height.mode))) {
           addIssue(issues, {
             level: "error",
             code: "FREE_LAYOUT_REQUIRES_FIXED_HEIGHT",
@@ -1711,15 +1754,20 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
       }
       const parentId = parents.length === 1 ? parents[0] : undefined;
       const parent = parentId ? nodes[parentId] : undefined;
-      const parentRules = isRecord(parent)
-        && isRecord(parent.responsive)
-        && isRecord(parent.responsive[device])
-        ? parent.responsive[device]
-        : undefined;
+      const parentRules = isRecord(parent) ? readRules(parent, device) : undefined;
       const parentIsFreeStack = isRecord(parent)
         && parent.type === "Stack"
         && parentRules?.layoutMode === "free";
-      if (responsive.placement !== undefined && !parentIsFreeStack) {
+      if (responsive.anchor !== undefined) {
+        const parentHeight = parentRules?.height;
+        const hasHeight = isRecord(parentHeight) && (parentHeight.mode === "aspect-ratio"
+          || ["fixed", "min-height", "viewport"].includes(String(parentHeight.mode)) && isRecord(parentHeight.value) && Number(parentHeight.value.value) > 0);
+        const hasMinHeight = isRecord(parentRules?.minHeight) && Number(parentRules.minHeight.value) > 0;
+        if (!isRecord(parent) || !hasHeight && !hasMinHeight) {
+          addIssue(issues, { level: "error", code: "ANCHOR_REQUIRES_SIZED_PARENT", path: `nodes.${nodeId}.responsive.${device}.anchor`, nodeId, message: "局部叠放须有合法父容器及明确高度、最小高度或比例。" });
+        }
+      }
+      if (responsive.placement !== undefined && !parentIsFreeStack && responsive.anchor === undefined) {
         addIssue(issues, {
           level: "error",
           code: "PLACEMENT_REQUIRES_FREE_STACK_PARENT",
@@ -1728,7 +1776,7 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
           message: "placement 只允许用于同设备自由 Stack 的直接子节点。",
         });
       }
-      if (parentIsFreeStack && responsive.placement === undefined) {
+      if (parentIsFreeStack && responsive.placement === undefined && responsive.anchor === undefined) {
         addIssue(issues, {
           level: "error",
           code: "FREE_STACK_CHILD_REQUIRES_PLACEMENT",
@@ -1889,6 +1937,27 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
         message: `默认内容与 ${rawSlot.type} 槽位类型不匹配。`,
       });
     }
+    if (schemaVersion >= 3 && value !== null) {
+      const path = `defaultContent.${slotId}`;
+      const fail = (message: string) => addIssue(issues, { level: "error", code: "INVALID_DEFAULT_CONTENT", path, slotId, message });
+      const text = typeof value === "string" ? value : isRecord(value) && typeof value.label === "string" ? value.label : undefined;
+      if (text !== undefined && rawSlot.type !== "image") {
+        const maxLength = isRecord(rawSlot.validation) && typeof rawSlot.validation.maxLength === "number" ? rawSlot.validation.maxLength : 10000;
+        if (text.length > maxLength) fail("默认文字超过槽位最大字数。");
+      }
+      if (rawSlot.type === "image") {
+        const src = typeof value === "string" ? value : isRecord(value) ? value.src : undefined;
+        if (src !== "" && !isSafeTemplateMediaUrl(src)) fail("默认图片地址无效。");
+        if (isRecord(value)) validateKnownKeys(value, ["src", "alt"], path, issues, { slotId });
+      }
+      if (["button", "link"].includes(rawSlot.type) && isRecord(value)) {
+        validateKnownKeys(value, ["label", "targetType", "pagePath", "url", "productCode", "categorySlug", "linkUrl"], path, issues, { slotId });
+        if (!hasValidActionContent(value)) fail("默认操作类型或链接字段无效。");
+        for (const key of ["url", "linkUrl", "pagePath"]) {
+          if (value[key] !== undefined && value[key] !== "" && !isSafeTemplateMediaUrl(value[key])) fail("默认操作链接地址无效。");
+        }
+      }
+    }
   }
   for (const [slotId, value] of Object.entries(previewContent)) {
     const rawSlot = slots[slotId];
@@ -1941,6 +2010,14 @@ export function validateDynamicTemplatePublishDefinition(
   const definition = base.definition;
   const issues = [...base.issues];
   const root = definition.nodes[definition.rootNodeId];
+  if (definition.name.trim() === "未命名模板") {
+    addIssue(issues, {
+      level: "error",
+      code: "PUBLISH_REQUIRES_TEMPLATE_NAME",
+      path: "name",
+      message: "请打开“模板设置”，填写模板名称后再发布。",
+    });
+  }
   const structureTypes = new Set(["Container", "Grid", "Row", "Column", "Stack"]);
   const hasRegion = root.childIds.some((nodeId) => structureTypes.has(definition.nodes[nodeId]?.type));
   if (!hasRegion) {
@@ -1961,7 +2038,7 @@ export function validateDynamicTemplatePublishDefinition(
       message: "发布前至少需要一个内容槽位。",
     });
   }
-  if (Object.keys(definition.defaultContent).length > 0) {
+  if (definition.schemaVersion < 3 && Object.keys(definition.defaultContent).length > 0) {
     addIssue(issues, {
       level: "error",
       code: "PUBLISH_FORBIDS_DEFAULT_CONTENT",
@@ -1979,7 +2056,7 @@ export function validateDynamicTemplatePublishDefinition(
   }
 
   for (const slot of Object.values(definition.slots)) {
-    if (slot.emptyPolicy !== "use-default") continue;
+    if (definition.schemaVersion >= 3 || slot.emptyPolicy !== "use-default") continue;
     addIssue(issues, {
       level: "error",
       code: "PUBLISH_FORBIDS_LEGACY_EMPTY_POLICY",
@@ -1994,7 +2071,7 @@ export function validateDynamicTemplatePublishDefinition(
       ? definition.metadata.previewDesktopWidth ?? 1920
       : definition.metadata.previewMobileWidth ?? 390;
     const ratioField = device === "desktop" ? "desktopRatio" : "mobileRatio";
-    const height = root.responsive[device].height;
+    const height = resolveTemplateNodeRules(definition, root.nodeId, device).height;
     let expectedRatio = "auto";
     if (height.mode === "fixed") {
       if (height.value?.unit !== "px" || !Number.isFinite(height.value.value) || height.value.value <= 0) {
@@ -2011,7 +2088,7 @@ export function validateDynamicTemplatePublishDefinition(
     } else if (height.mode === "aspect-ratio" && height.ratio) {
       expectedRatio = publishRatioLabel(height.ratio.width, height.ratio.height);
     }
-    if (definition.metadata[ratioField] !== expectedRatio) {
+    if (definition.schemaVersion === 1 && definition.metadata[ratioField] !== expectedRatio) {
       addIssue(issues, {
         level: "error",
         code: "ROOT_RATIO_METADATA_MISMATCH",
@@ -2026,6 +2103,17 @@ export function validateDynamicTemplatePublishDefinition(
   for (const [parentId, parent] of Object.entries(definition.nodes)) {
     for (const childId of parent.childIds) parentByNodeId.set(childId, parentId);
   }
+  const ancestorNodeIds = (nodeId: string) => {
+    const result: string[] = [];
+    const visited = new Set<string>();
+    let current: string | undefined = nodeId;
+    while (current && definition.nodes[current] && !visited.has(current)) {
+      visited.add(current);
+      result.unshift(current);
+      current = parentByNodeId.get(current);
+    }
+    return result;
+  };
   for (const [nodeId, node] of Object.entries(definition.nodes)) {
     const slot = node.slotId ? definition.slots[node.slotId] : undefined;
     if (!slot?.required) continue;
@@ -2039,28 +2127,37 @@ export function validateDynamicTemplatePublishDefinition(
         message: `必填槽位“${slot.label}”不能同时允许页面隐藏，关闭页面隐藏权限后才能发布模板。`,
       });
     }
-    if (node.hidden) {
+    const requiredAncestors = ancestorNodeIds(nodeId);
+    const globallyHiddenNodeId = requiredAncestors.find((candidateId) => definition.nodes[candidateId].hidden);
+    if (globallyHiddenNodeId) {
       addIssue(issues, {
         level: "error",
         code: "PUBLISH_REQUIRED_SLOT_HIDDEN",
-        path: `nodes.${nodeId}.hidden`,
-        nodeId,
+        path: `nodes.${globallyHiddenNodeId}.hidden`,
+        nodeId: globallyHiddenNodeId,
         slotId: slot.slotId,
-        message: `必填槽位“${slot.label}”已隐藏，恢复显示后才能发布模板。`,
+        message: globallyHiddenNodeId === nodeId
+          ? `必填槽位“${slot.label}”已隐藏，恢复显示后才能发布模板。`
+          : `必填槽位“${slot.label}”因上级“${definition.nodes[globallyHiddenNodeId].name}”全局隐藏而不可见，恢复该上级后才能发布模板。`,
       });
       continue;
     }
-    for (const device of ["desktop", "mobile"] as const) {
-      if (node.responsive[device].display !== "none") continue;
+    for (const device of (definition.schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"]) as Array<"desktop" | "tablet" | "mobile">) {
+      const hiddenNodeId = requiredAncestors.find((candidateId) => {
+        const requiredRules = resolveTemplateNodeRules(definition, candidateId, device);
+        return requiredRules.display === "none" || requiredRules.hidden;
+      });
+      if (!hiddenNodeId) continue;
       addIssue(issues, {
         level: "error",
         code: "PUBLISH_REQUIRED_SLOT_DEVICE_HIDDEN",
-        path: `nodes.${nodeId}.responsive.${device}.display`,
-        nodeId,
+        path: `nodes.${hiddenNodeId}.responsive.${device}.display`,
+        nodeId: hiddenNodeId,
         slotId: slot.slotId,
-        message: `必填槽位“${slot.label}”在${device === "desktop" ? "桌面端" : "移动端"}布局中已隐藏，恢复显示后才能发布模板。`,
+        message: `必填槽位“${slot.label}”在${device === "desktop" ? "桌面端" : device === "tablet" ? "平板端" : "移动端"}布局中${hiddenNodeId === nodeId ? "已隐藏" : `因上级“${definition.nodes[hiddenNodeId].name}”隐藏而不可见`}，恢复显示后才能发布模板。`,
       });
     }
+
   }
   for (const [nodeId, node] of Object.entries(definition.nodes)) {
     const slot = node.slotId ? definition.slots[node.slotId] : undefined;
@@ -2068,9 +2165,9 @@ export function validateDynamicTemplatePublishDefinition(
     const parentId = parentByNodeId.get(nodeId);
     const parent = parentId ? definition.nodes[parentId] : undefined;
     if (!parent) continue;
-    for (const device of ["desktop", "mobile"] as const) {
-      const rules = node.responsive[device];
-      const parentRules = parent.responsive[device];
+    for (const device of (definition.schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"]) as Array<"desktop" | "tablet" | "mobile">) {
+      const rules = resolveTemplateNodeRules(definition, nodeId, device);
+      const parentRules = resolveTemplateNodeRules(definition, parent.nodeId, device);
       const parentHasBoundedHeight = ["fixed", "aspect-ratio", "viewport"].includes(
         parentRules.height.mode,
       );
@@ -2079,14 +2176,15 @@ export function validateDynamicTemplatePublishDefinition(
         && parentRules.display !== "none"
         && rules.height.mode === "auto"
         && parentHasBoundedHeight
+        && !(parent.type === "Stack" && parentRules.layoutMode === "free" && rules.placement)
       ) {
         addIssue(issues, {
-          level: "error",
+          level: "warning",
           code: "IMAGE_SLOT_AUTO_HEIGHT_OVERFLOWS_BOUNDED_PARENT",
           path: `nodes.${nodeId}.responsive.${device}.height`,
           nodeId,
           slotId: slot.slotId,
-          message: `${device === "desktop" ? "桌面" : "移动"}图片槽位位于固定高度或比例区域中，必须为图片槽位设置固定高度、比例或视口高度，避免真实图片撑出模板边界。`,
+          message: `“${slot.label}”在${device === "desktop" ? "桌面" : device === "tablet" ? "平板" : "手机"}端随图片比例自动调整高度。若预览超出区域，可在“尺寸与位置”设置图片高度或比例；此建议不影响发布。`,
         });
       }
     }

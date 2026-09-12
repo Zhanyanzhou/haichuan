@@ -5,6 +5,7 @@ import {
   RightOutlined,
 } from "@ant-design/icons";
 import type { RefObject } from "react";
+import { useNavigate } from "react-router-dom";
 import type {
   PagePublishIssueTarget,
   PublishValidationIssue,
@@ -40,6 +41,7 @@ export default function PagePublishCheckPanel({
   onRetry: () => void;
   onRetryPublish: () => void;
 }) {
+  const navigate = useNavigate();
   const currentIndex = Math.max(0, targets.findIndex((target) => target.key === currentKey));
   const currentTarget = targets[currentIndex];
   const errorCount = issues.filter((issue) => issue.severity === "error").length;
@@ -110,6 +112,16 @@ export default function PagePublishCheckPanel({
               const issue = issues[index];
               const selected = target.key === currentTarget?.key;
               const retriesPublish = issue?.path === "lifecycle.publish";
+              const locate = () => {
+                if (target.destination === "site-settings") {
+                  // 使用既有路由离开保护，不能为跳转偷偷保存或丢弃当前草稿。
+                  navigate(`/admin/site-content${target.field ? `?field=${encodeURIComponent(target.field)}` : ""}`);
+                } else if (retriesPublish) {
+                  onRetryPublish();
+                } else {
+                  onLocate(target);
+                }
+              };
               return (
                 <li
                   key={target.key}
@@ -125,10 +137,10 @@ export default function PagePublishCheckPanel({
                   <button
                     type="button"
                     className="homepage-editor__page-publish-review-issue"
-                    onClick={() => retriesPublish ? onRetryPublish() : onLocate(target)}
+                    onClick={locate}
                   >
                     <span className="homepage-editor__page-publish-review-path">
-                      {target.blockLabel} / {target.objectLabel} / {DEVICE_LABEL[target.device]}
+                      {target.blockLabel} / {target.objectLabel} / {target.destination === "site-settings" ? "全站共用" : DEVICE_LABEL[target.device]}
                     </span>
                     <strong>{issue?.message ?? target.fieldLabel}</strong>
                     <span>{target.groupLabel} / {target.fieldLabel}</span>
@@ -136,13 +148,15 @@ export default function PagePublishCheckPanel({
                   </button>
                   <button
                     type="button"
-                    onClick={() => retriesPublish ? onRetryPublish() : onLocate(target)}
+                    onClick={locate}
                   >
                     {retriesPublish
                       ? "重新发布"
                       : target.destination === "retry-validation"
                         ? "重新检查"
-                        : "定位"}
+                        : target.destination === "site-settings"
+                          ? "去店铺资料填写"
+                          : "定位"}
                   </button>
                 </li>
               );

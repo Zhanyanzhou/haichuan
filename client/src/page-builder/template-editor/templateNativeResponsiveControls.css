@@ -1,0 +1,12 @@
+.template-native-responsive { margin: 12px 0; min-width: 0; font-size: 13px; }
+.template-native-responsive p { margin: 8px 0; color: var(--adm-muted); overflow-wrap: anywhere; }
+.template-native-responsive__actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.template-native-responsive fieldset { display: grid; gap: 4px; min-width: 0; border: 0; padding: 8px 0; }
+.template-native-responsive legend { font-weight: 500; }
+.template-native-responsive fieldset label { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.template-native-responsive input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--adm-action); }
+.template-native-responsive input:focus-visible { outline: 2px solid var(--adm-focus); outline-offset: 2px; }
+.template-native-responsive__review { max-height: 60vh; overflow: auto; overflow-wrap: anywhere; }
+.template-native-responsive__review ul { list-style: none; padding: 0; margin: 12px 0; }
+.template-native-responsive__review li { display: grid; gap: 4px; padding: 12px 0; border-bottom: 1px solid var(--adm-line); }
+.template-native-responsive__review li span { font-variant-numeric: tabular-nums; }

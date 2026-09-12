@@ -1,7 +1,7 @@
 # 页面装修实现边界
 
 > 2026-09-08 文档整理与局部源码复核；本轮未重跑界面、真实 API 或数据库验收。
-> 本文描述页面数据与运行链路。产品模型、事实分工、示例内容、模板生命周期只维护在[专项框架](../page-builder/template-design-framework.md)；相关资料见[文档导航](../page-builder/README.md)。
+> 本文只描述页面数据与运行链路。模板产品行为、内容与版本边界服从[模板设计唯一标准](../page-builder/template-creation-rules.md)，具体编辑和页面消费操作见[从属交接细则](../page-builder/template-design-framework.md)；本文不得用当前实现反向定义产品规则。
 
 ## 1. 实现入口
 
@@ -27,27 +27,29 @@
 
 - 旧类型由 `migratePuckData` 在载入副本中适配，公开 Renderer 保留兼容分支；读取兼容不等于自动重写历史 revision。
 - 兼容页面媒体使用 `desktopFocusX/Y`、`mobileFocusX/Y`，旧 `focusX/Y` 仅作回退；统一母模板的响应式规则由锁定定义解释。
-- 模板身份、版本锁定、实例覆盖、系统示例和业务内容分层见[专项框架](../page-builder/template-design-framework.md)第 2–5 节，本文不重复维护。
+- 模板身份、实例内容与系统示例按总标准并参照[从属编辑细则](../page-builder/template-design-framework.md)的“编辑对象与事实来源”“模板设计”“页面装修”章节；版本锁定和升级见其“模板版本交接与升级”章节，本文不重复维护。
 
 ## 3. 保存、发布与公开读取
 
 服务端 `PageModulesService` 是预检与发布校验的共同入口：
 
 1. 保存草稿使用乐观锁；已有页面的写入携带当前 `expectedUpdatedAt`。
-2. 预检检查页面合同、结构、内容、链接、业务引用、metadata 和媒体授权；发布时再次校验。
-3. 发布创建不可变 revision，写入当前 `publicationGateVersion` 验收印记并推进发布指针；公开读取按 `publishedRevisionId + documentId` 取得对应快照，再通知前台刷新。
+2. 预检检查页面合同、结构、内容、链接、业务引用、metadata 和媒体安全；内容完整度返回 warning，发布时再次校验当前草稿。
+3. “发布页面”是公开更新的唯一入口：它创建不可变 revision，写入当前 `publicationGateVersion` 验收印记并推进发布指针；公开读取按 `publishedRevisionId + documentId` 取得对应快照，再通知前台刷新。上传、编辑、保存、预览和母模板发布均不得推进此指针。
 4. 公开读取继续校验快照和验收印记；不合格时返回无正文的 `INVALID / publication-revalidation-required`，不能将“历史版本可回放”解释成永久可公开。
 
-可见区块中的顶层、视频和集合媒体 URL 连同 `ogImage` 去重后，须在 `metadata.mediaRights[]` 中逐 URL 提供 `source` 与 `authorizationId`；隐藏区块不计入本次范围。草稿可以暂时缺项，历史文档不自动补齐。验收印记只能由服务端生成，不能由客户端保存、历史恢复、放弃草稿或方案导入写入、沿用。
+同一页面允许按根内容顺序保存和发布多个 `primary-stage`。编辑器目录、复制、升级和发布链路不得按已有数量禁用，公开 Renderer 也不得只保留第一个；首个可见主舞台继续用于唯一页面级 `h1`、首图加载优先级和页头语境，后续主舞台按内容层级渲染而不是被隐藏。
+
+页面素材来源记录可随草稿保存在 `metadata.mediaRights[]`，缺失、重复或不完整只合并为内部审计 warning；隐藏区块不计入本次范围。验收印记只能由服务端生成，不能由客户端保存、历史恢复、放弃草稿或方案导入写入、沿用。
 
 公开 metadata 只返回 `seoTitle`、`seoDescription`、`ogImage`；内部主键、发布账号、编辑器版本、验收印记、负责人和授权资料不得进入公开响应。
 
-当前发布校验与界面“可选”提示存在的差异记录在 [CURRENT_STATE](../CURRENT_STATE.md) 页面装修章节；不能用界面提示替代服务端结果。前端角色能力必须与控制器一致：页面发布仅开放给 `ADMIN / SUPER_ADMIN`，`EDITOR` 的发布动作禁用。
+页面预检、正式发布、线上版本读取和线上回滚只合并当前 `PageDocument` 的可公开性问题，不读取整站上线准备度。缺图、缺文案、替代文字、占位内容和 SEO 完整度只返回 warning；动态模板页面实例没有明确上传且当前断点可达的图片时，公开 Renderer 返回 `null`，不会输出文字兜底或空外壳。危险地址、未纳管外链、缺失文件、结构和引用错误仍失败关闭。站点名称、正式域名、Logo、语言、默认 SEO、联系资料与审核记录由 `/admin/site-content` 和独立 Release Preflight 维护。前端角色能力必须与控制器一致：页面发布仅开放给 `ADMIN / SUPER_ADMIN`，`EDITOR` 的发布动作禁用。
 
 ## 4. 行动、内容位置与业务事实
 
 - 页面型行动只使用 `pageRules[].publicPath` 生成的正式路径，可保留查询参数；未登记路径、片段、尾斜杠和商品详情不是页面目标。商品详情使用商品型目标并解析实时公开资格。Inspector、路由、预览、公开 Renderer 和服务端消费同源合同。
-- 顶层、次级 CTA 和集合链接按合同解析；有文案的行动及必需条目必须有唯一合法目标。当前页面合同为 `root-only`，非空 `zones` 被草稿写入和预检拒绝；旧公开副本中的 zones 只清空、不迁入根内容，避免原先未公开内容突然曝光。
+- 顶层、次级 CTA 和集合链接按合同解析；缺文案或缺去向只作内容提醒，冲突去向、危险地址、未登记页面及不存在的业务引用仍阻断。当前页面合同为 `root-only`，非空 `zones` 被草稿写入和预检拒绝；旧公开副本中的 zones 只清空、不迁入根内容，避免原先未公开内容突然曝光。
 - 固定业务区只在根内容计数，按首个可见合同模块确定位置；隐藏备选和编辑器说明不参与公开顺序。
 - 商品型区块仅保存稳定引用，公开 Renderer 实时读取游客商品接口；`产品展示行`、`单品焦点推荐`、`佩戴灵感` 共享商品变更流，事件后重新核对资格，失效商品不得沿用旧组件快照。
 - 正式店铺名称、电话、邮箱、地址、营业时间和地图链接只来自 `SiteSettings`。公开 `PublicLayout` 与编辑器 `EditorCanvasShell` 各自持有一个 `PublicSiteSettingsResource`，供壳层和区块共享；脱离壳层的独立预览只读查询同一 API，不建立默认业务资料。
@@ -62,7 +64,7 @@
 
 当前历史版本的本地载入只改变内存状态，显式保存才写入草稿，独立线上回滚只切换已发布指针；不要把旧“恢复版本”按钮流程套用到新界面。兼容恢复 API 仍以 `expectedUpdatedAt` 原子更新草稿并拒绝陈旧请求，不直接发布。
 
-正式业务资料 warning 的维护目标是 `/admin/site-content`。有权限管理员可进入店铺资料；未保存画布仍经过同一 `UnsavedChangesGuard`。
+正式业务资料 warning 的维护目标是 `/admin/site-content`，不计入当前页面发布错误数量。有权限管理员可进入店铺资料；未保存画布仍经过同一 `UnsavedChangesGuard`。整站上线与生产发布继续由独立发布准备度和 Runbook 失败关闭。
 
 ### 线上版本只读比较
 

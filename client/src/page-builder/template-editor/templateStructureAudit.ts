@@ -8,6 +8,7 @@ import {
   validateDynamicTemplateDefinition,
 } from "../template-definition/validateTemplateDefinition";
 import { resolveVisualNode } from "../runtime/visualLayout";
+import { resolveTemplateNodeRules, type TemplateBreakpoint } from "../template-definition/responsive";
 
 export type TemplateStructureIssueLevel = "error" | "warning";
 
@@ -17,7 +18,7 @@ export interface TemplateStructureIssue {
   message: string;
   nodeId?: string;
   roleId?: string;
-  device?: "desktop" | "mobile";
+  device?: TemplateBreakpoint;
   repair?: "add-region" | "add-slot" | "restore-required-slot" | "restore-required-slot-device" | "disable-required-slot-page-hide" | "enable-required-slot-page-edit" | "restore-required-role";
 }
 
@@ -60,6 +61,22 @@ export function buildTemplateStructureAudit(
     }];
   });
   const root = definition.nodes[definition.rootNodeId];
+  const breakpoints: TemplateBreakpoint[] = definition.schemaVersion === 1
+    ? ["desktop", "mobile"] : ["desktop", "tablet", "mobile"];
+  const parentByNodeId = new Map(Object.values(definition.nodes).flatMap((node) => (
+    node.childIds.map((childId) => [childId, node.nodeId] as const)
+  )));
+  const ancestorChain = (nodeId: string) => {
+    const result: string[] = [];
+    const visited = new Set<string>();
+    let current: string | undefined = nodeId;
+    while (current && definition.nodes[current] && !visited.has(current)) {
+      visited.add(current);
+      result.unshift(current);
+      current = parentByNodeId.get(current);
+    }
+    return result;
+  };
   let requiredComplete = 0;
   let requiredTotal = 0;
   let slotCount = 0;
@@ -79,7 +96,7 @@ export function buildTemplateStructureAudit(
     const slot = node.slotId ? definition.slots[node.slotId] : undefined;
     if (slot?.required) {
       requiredTotal += 1;
-      let requiredSlotComplete = true;
+      let requiredSlotComplete = slot.editable;
       if (slot.hideable) {
         requiredSlotComplete = false;
         issues.push({
@@ -90,26 +107,31 @@ export function buildTemplateStructureAudit(
           repair: "disable-required-slot-page-hide",
         });
       }
-      if (node.hidden) {
+      const ancestors = ancestorChain(node.nodeId);
+      const globallyHiddenId = ancestors.find((id) => definition.nodes[id].hidden);
+      if (globallyHiddenId) {
         requiredSlotComplete = false;
         issues.push({
           code: "REQUIRED_SLOT_HIDDEN",
           level: "error",
-          message: `必填槽位“${slot.label}”已隐藏。`,
-          nodeId: node.nodeId,
+          message: globallyHiddenId === node.nodeId ? `必填槽位“${slot.label}”已隐藏。`
+            : `必填槽位“${slot.label}”因上级“${definition.nodes[globallyHiddenId].name}”全局隐藏而不可见。`,
+          nodeId: globallyHiddenId,
           repair: "restore-required-slot",
         });
       } else {
-        const hiddenDevices = (["desktop", "mobile"] as const).filter(
-          (device) => node.responsive[device].display === "none",
-        );
-        if (hiddenDevices.length > 0) requiredSlotComplete = false;
-        for (const device of hiddenDevices) {
+        for (const device of breakpoints) {
+          const hiddenNodeId = ancestors.find((id) => {
+            const rules = resolveTemplateNodeRules(definition, id, device);
+            return rules.hidden || rules.display === "none";
+          });
+          if (!hiddenNodeId) continue;
+          requiredSlotComplete = false;
           issues.push({
             code: "REQUIRED_SLOT_DEVICE_HIDDEN",
             level: "error",
-            message: `必填槽位“${slot.label}”在对应画布布局中已隐藏。`,
-            nodeId: node.nodeId,
+            message: `必填槽位“${slot.label}”在${({ desktop: "桌面", tablet: "平板", mobile: "手机" })[device]}不可见${hiddenNodeId === node.nodeId ? "" : `，隐藏来源为上级“${definition.nodes[hiddenNodeId].name}”`}。`,
+            nodeId: hiddenNodeId,
             device,
             repair: "restore-required-slot-device",
           });

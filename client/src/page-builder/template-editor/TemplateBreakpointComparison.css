@@ -1,0 +1,8 @@
+.template-breakpoint-comparison { display: grid; grid-template-columns: repeat(3, minmax(280px, 1fr)); align-items: start; gap: 16px; padding: 16px; overflow: auto; min-width: 0; max-width: 100%; height: 100%; background: #f4f5f5; }
+.template-breakpoint-comparison__card { min-width: 0; background: #FFFFFF; border: 1px solid #DDE1E2; border-radius: 4px; overflow: hidden; }
+.template-breakpoint-comparison__card > header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; color: #181A1B; font-size: 14px; line-height: 22px; }
+.template-breakpoint-comparison__card > header > span { color: #5F6568; font-size: 13px; }
+.template-breakpoint-comparison__card button { margin-left: auto; padding: 4px 8px; min-height: 32px; border: 1px solid #B8BEC1; border-radius: 4px; background: #FFFFFF; color: #181A1B; font-size: 14px; cursor: pointer; }
+.template-breakpoint-comparison__card button:focus-visible { outline: 2px solid #181A1B; outline-offset: 2px; }
+.template-breakpoint-comparison__selection { min-height: 40px; margin: 0; padding: 0 12px 8px; color: #5F6568; font-size: 13px; line-height: 20px; }
+.template-breakpoint-comparison__viewport { width: 100%; overflow: hidden; background: #fff; }

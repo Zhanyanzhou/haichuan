@@ -4,9 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   pageDocumentApi,
   type PageDocumentResource,
-  type PersonalContentTemplate,
 } from "@/services/api";
-import { dynamicTemplateApi, type TemplateCatalogResource } from "@/services/clients/dynamicTemplateClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import {
   createEditorPageDefault,
@@ -21,9 +19,9 @@ import {
   getRequiredDynamicTemplateDefinitionKeys,
   inspectResolvedDynamicTemplateDefinitions,
   replaceResolvedDynamicTemplates,
+  type ResolvedDynamicTemplateDefinitionMap,
   useResolvedDynamicTemplateDefinitions,
 } from "@/page-builder/dynamic-template-instance";
-import { countUpgradeablePersonalTemplateInstances } from "@/page-builder/templates/templateOrigin";
 import type {
   PublishValidationIssue,
   PublishValidationStatus,
@@ -116,7 +114,6 @@ export function usePageWorkspaceController({
   const validationRequestRef = useRef(0);
   const publishOperationRef = useRef(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [personalTemplateUpgradeHintCount, setPersonalTemplateUpgradeHintCount] = useState(0);
   const [previewMode, setPreviewMode] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [revisionsLoading, setRevisionsLoading] = useState(false);
@@ -160,6 +157,7 @@ export function usePageWorkspaceController({
   const dataSignatureRef = useRef("");  const [metadata, setMetadata] = useState<PuckProps>({});
   const latestMetadata = useRef<PuckProps>({});
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
+  const [pageSettingsData, setPageSettingsData] = useState<PuckDocument | null>(null);
   const [pageSettingsFocusField, setPageSettingsFocusField] = useState<string | null>(null);
   // 是否存在尚未发布的草稿修改。
   const [hasPendingDraft, setHasPendingDraft] = useState(false);
@@ -168,6 +166,7 @@ export function usePageWorkspaceController({
   const editingDraftSnapshotRef = useRef<{
     data: PuckDocument;
     metadata: PuckProps;
+    resolvedDynamicTemplateDefinitions: ResolvedDynamicTemplateDefinitionMap;
     hasUnsavedChanges: boolean;
     hasPendingDraft: boolean;
     savedSignature: string;
@@ -230,7 +229,6 @@ export function usePageWorkspaceController({
       setDraftSaveFailed(false);
       setHasUnsavedChanges(false);
       setHasPendingDraft(false);
-      setPersonalTemplateUpgradeHintCount(0);
       setPublishedNeedsRevalidation(false);
       setViewingPublished(false);
       setPublishIssues([]);
@@ -254,6 +252,7 @@ export function usePageWorkspaceController({
       pendingPageHistoryCommandRef.current = null;
       pageHistoryCommandsRef.current.clear();
       setPageSettingsOpen(false);
+      setPageSettingsData(null);
       pendingDraftRef.current = null;
       editingDraftSnapshotRef.current = null;
       publishedBaselineRef.current = null;
@@ -286,10 +285,9 @@ export function usePageWorkspaceController({
       try {
         // 同时拉取线上已发布版本与后台草稿。店铺装修入口始终进入可编辑状态：
         // 有后台草稿时加载草稿；仅有线上版本时以线上内容作为新草稿的编辑基线。
-        const [publishedResponse, adminResponse, templateCatalogResponse] = await Promise.all([
+        const [publishedResponse, adminResponse] = await Promise.all([
           pageDocumentApi.getPublishedAdmin(pageKey),
           pageDocumentApi.getAdmin(pageKey),
-          dynamicTemplateApi.listCatalog().catch(() => null),
         ]);
         if (cancelled) return;
         const publishedDoc = unwrapResponse<PageDocumentResource | null>(publishedResponse);
@@ -323,21 +321,6 @@ export function usePageWorkspaceController({
             pageKey,
             migratePuckData(displayPuck),
           );
-          const templateCatalog = templateCatalogResponse
-            ? unwrapResponse<TemplateCatalogResource>(templateCatalogResponse)
-            : null;
-          const personalTemplates = Array.isArray(templateCatalog?.items)
-            ? templateCatalog.items.flatMap((item) => (
-                item.kind === "personal-compatibility"
-                  ? [item.template as PersonalContentTemplate]
-                  : []
-              ))
-            : [];
-          const personalUpgradeCount = countUpgradeablePersonalTemplateInstances(
-            serverData as unknown as Record<string, unknown>,
-            Array.isArray(personalTemplates) ? personalTemplates : [],
-          );
-          setPersonalTemplateUpgradeHintCount(personalUpgradeCount);
           const displayMetadata = draftPuck
             ? normalizePuckMetadata(adminDoc?.metadata)
             : normalizePuckMetadata(publishedDoc?.metadata);
@@ -924,6 +907,7 @@ export function usePageWorkspaceController({
     };
     setData(snapshot.data);
     latestData.current = snapshot.data;
+    replaceResolvedDynamicTemplates(snapshot.resolvedDynamicTemplateDefinitions);
     setMetadata(snapshot.metadata);
     latestMetadata.current = snapshot.metadata;
     dataSignatureRef.current = snapshot.savedSignature;
@@ -940,8 +924,11 @@ export function usePageWorkspaceController({
   }, [message]);
 
   const openPageSettingsForEditing = useCallback((focusField?: string) => {
+    const protectedDraft = viewingPublishedRef.current
+      ? editingDraftSnapshotRef.current
+      : null;
     if (viewingPublishedRef.current) {
-      if (editingDraftSnapshotRef.current) {
+      if (protectedDraft) {
         returnToEditingDraft();
       } else {
         // 首次打开且没有独立草稿时，当前线上内容就是新草稿的编辑基线。
@@ -949,9 +936,15 @@ export function usePageWorkspaceController({
         setViewingPublished(false);
       }
     }
+    setPageSettingsData({
+      ...latestData.current,
+      [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: protectedDraft
+        ? protectedDraft.resolvedDynamicTemplateDefinitions
+        : resolvedDynamicTemplateDefinitions,
+    });
     setPageSettingsFocusField(focusField ?? null);
     setPageSettingsOpen(true);
-  }, [returnToEditingDraft]);
+  }, [resolvedDynamicTemplateDefinitions, returnToEditingDraft]);
 
   const editPendingDraft = useCallback(() => {
     if (viewingPublishedRef.current && editingDraftSnapshotRef.current) {
@@ -992,6 +985,9 @@ export function usePageWorkspaceController({
     editingDraftSnapshotRef.current = {
       data: latestData.current,
       metadata: latestMetadata.current,
+      resolvedDynamicTemplateDefinitions: {
+        ...resolvedDynamicTemplateDefinitions,
+      },
       hasUnsavedChanges: currentHasUnsavedChanges,
       hasPendingDraft: currentHasPendingDraft,
       savedSignature: dataSignatureRef.current,
@@ -1008,7 +1004,7 @@ export function usePageWorkspaceController({
     setHasUnsavedChanges(false);
     viewingPublishedRef.current = true;
     setViewingPublished(true);
-  }, [hasUnsavedChanges, pageKey]);
+  }, [hasUnsavedChanges, pageKey, resolvedDynamicTemplateDefinitions]);
 
   const viewPublishedVersion = useCallback(() => {
     if (hasUnsavedChanges) {
@@ -1121,6 +1117,7 @@ export function usePageWorkspaceController({
       const saved = await saveDraft(latestData.current, { silent: true });
       if (saved) {
         setPageSettingsOpen(false);
+        setPageSettingsData(null);
         message.success("整页草稿已保存，包含页面设置与画布修改");
       }
       return saved;
@@ -1605,6 +1602,7 @@ export function usePageWorkspaceController({
 
   const closePageSettings = useCallback(() => {
     setPageSettingsOpen(false);
+    setPageSettingsData(null);
     setPageSettingsFocusField(null);
   }, []);
 
@@ -1652,7 +1650,6 @@ export function usePageWorkspaceController({
     publishReviewOpen,
     publishReviewIssueKey,
     hasUnsavedChanges,
-    personalTemplateUpgradeHintCount,
     hasProtectedUnsavedChanges,
     previewMode,
     revisionsOpen,
@@ -1676,6 +1673,7 @@ export function usePageWorkspaceController({
     canvasDataSyncVersion,
     pendingPageHistoryCommand,
     pageSettingsOpen,
+    pageSettingsData: pageSettingsData ?? data,
     pageSettingsFocusField,
     hasPendingDraft,
     canDiscardDraft,

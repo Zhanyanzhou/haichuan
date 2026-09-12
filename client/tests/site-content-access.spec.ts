@@ -19,6 +19,23 @@ async function authenticate(page: Page, role: TestedRole) {
 }
 
 async function mockSettings(page: Page, onRequest?: () => void) {
+  await page.route("**/api/settings/publication-readiness", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: 200,
+        data: {
+          schemaVersion: 2,
+          ready: true,
+          status: "READY",
+          persisted: true,
+          blockers: [],
+        },
+        message: "ok",
+      }),
+    }),
+  );
   await page.route("**/api/settings", (route) => {
     onRequest?.();
     return route.fulfill({

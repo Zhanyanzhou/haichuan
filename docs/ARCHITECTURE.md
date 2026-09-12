@@ -45,5 +45,5 @@ Browser
 ## 运行与发布边界
 
 - 本地端口、启动命令和容器拓扑只在 `docs/DEVELOPMENT_WORKFLOW.md` 维护。
-- 部署参考见 `docs/DEPLOYMENT.md`；正式制品、证据、告警和回滚只认 `docs/PRODUCTION_RELEASE_RUNBOOK.md`。
+- 部署准备、正式制品、证据、告警和回滚统一见 `docs/PRODUCTION_RELEASE_RUNBOOK.md`。
 - 代码、路由、Feature Flag、Mock、构建或隔离测试存在，都不能单独证明真实业务闭环或生产可用。

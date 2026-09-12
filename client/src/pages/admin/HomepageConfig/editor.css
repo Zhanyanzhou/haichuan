@@ -898,6 +898,23 @@ body:has(.homepage-editor)
   border-radius: 6px;
   background: var(--adm-neutral-bg);
 }
+.homepage-editor__media-rights-details {
+  display: grid;
+  gap: 10px;
+}
+.homepage-editor__media-rights-details > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--adm-action);
+  font-size: 12px;
+  font-weight: 600;
+}
+.homepage-editor__media-rights-details[open] > summary {
+  margin-bottom: 10px;
+}
+.homepage-editor__media-rights-details > .homepage-editor__media-rights-item + .homepage-editor__media-rights-item {
+  margin-top: 10px;
+}
 .homepage-editor__media-rights-item label {
   color: var(--adm-text-strong);
   font-size: 12px;
@@ -2304,26 +2321,12 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   [class*="PuckFields-field"]:has([data-editor-device="desktop"]) {
   display: none;
 }
-.homepage-editor__properties:is(
-    [data-module-type="首屏主视觉"],
-    [data-module-type="单图海报"],
-    [data-module-type="双图海报"],
-    [data-module-type="图文混排"],
-    [data-module-type="全屏出血图"],
-    [data-module-type="分割面板"],
-    [data-module-type="轮播图"],
-    [data-module-type="热区图"],
-    [data-module-type="视频区块"]
-  )
+.homepage-editor__properties[data-module-type="首屏主视觉"]
   [class*="PuckFields-field"]:has(.homepage-editor__media-picker) {
   display: none;
 }
-.homepage-editor__properties[data-module-type="轮播图"]
-  form[class*="PuckFields"]
-  > [class*="PuckFields-field"]:first-child {
-  display: none;
-}
 .homepage-editor__media-preview-img {
+  position: relative;
   min-height: 168px;
   display: grid;
   place-items: center;
@@ -4480,6 +4483,12 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 
 .template-editor__canvas-renderer[data-preview-mode="true"] {
   pointer-events: none;
+}
+
+/* 压力预览冻结结构编辑和业务组件交互，但安全行动链接仍需按公开语义验收。 */
+.template-editor__canvas-renderer[data-preview-mode="true"]
+  :is([data-template-node-type="ButtonSlot"], [data-template-node-type="LinkSlot"])[href] {
+  pointer-events: auto;
 }
 
 .template-editor__viewport-frame {
@@ -7912,6 +7921,33 @@ button.template-editor__toolbar-state:focus-visible {
   border-bottom: 1px solid var(--inspector-line, #dde1e2);
 }
 
+.homepage-editor__dynamic-instance-public-status {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--inspector-line, #dde1e2);
+  border-radius: 4px;
+  color: var(--inspector-text, #5f6568);
+  background: var(--inspector-soft, #f7f8f8);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.homepage-editor__dynamic-instance-public-status strong {
+  color: var(--inspector-ink, #181a1b);
+  font-size: 12px;
+}
+
+.homepage-editor__dynamic-instance-public-status[data-state="ready"] {
+  border-color: rgb(53 99 72 / 28%);
+  background: rgb(53 99 72 / 6%);
+}
+
+.homepage-editor__dynamic-instance-public-status[data-state="empty"] {
+  border-color: color-mix(in srgb, #7A531A 28%, transparent);
+  background: color-mix(in srgb, #7A531A 6%, transparent);
+}
+
 .homepage-editor__dynamic-instance-overview
   .homepage-editor__inspector-field > span:first-child {
   color: var(--inspector-ink, #181a1b);
@@ -10751,6 +10787,70 @@ button.template-editor__toolbar-state:focus-visible {
   .homepage-editor__body.template-editor__body
     > [data-compact-overlay="library"] {
     inset: 106px 0 0;
+  }
+}
+
+/* 1025-1199px 已有固定后台导航，模板侧栏改为非模态窄桌面 dock。
+ * 打开的次要面板占用自己的边缘带，画布和悬浮主操作使用剩余矩形；
+ * 这样可见按钮不会继续显示在面板下方，也无需用 inert 阻断顶部历史操作。 */
+@media (min-width: 1025px) and (max-width: 1199px) {
+  .homepage-editor__body.template-editor__body {
+    --template-editor-compact-inspector-width: clamp(360px, 38vw, 420px);
+    --template-editor-compact-structure-width: 208px;
+  }
+
+  .homepage-editor__body.template-editor__body
+    > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
+    width: var(--template-editor-compact-inspector-width);
+  }
+
+  .homepage-editor__body.template-editor__body:has(
+      > [data-compact-overlay="inspector"][data-compact-overlay-open="true"]
+    )
+    > .homepage-editor__stage {
+    right: var(--template-editor-compact-inspector-width);
+    width: auto;
+  }
+
+  .homepage-editor__body.template-editor__body:has(
+      > .homepage-editor__structure-workspace:not(.is-collapsed)
+    )
+    > .homepage-editor__stage {
+    left: var(--template-editor-compact-structure-width);
+    width: auto;
+  }
+
+  .homepage-editor__body.template-editor__body:has(
+      > [data-compact-overlay="inspector"][data-compact-overlay-open="true"]
+    )
+    > :is(.template-editor__production-guide, .template-editor__new-template-empty-start) {
+    right: calc(var(--template-editor-compact-inspector-width) + 12px);
+    left: 12px;
+  }
+
+  .homepage-editor__body.template-editor__body:has(
+      > .homepage-editor__structure-workspace:not(.is-collapsed)
+    )
+    > :is(.template-editor__production-guide, .template-editor__new-template-empty-start) {
+    right: 12px;
+    left: calc(var(--template-editor-compact-structure-width) + 12px);
+  }
+
+  .homepage-editor__body.template-editor__body:has(
+      > [data-compact-overlay="inspector"][data-compact-overlay-open="true"]
+    )
+    .template-editor__canvas-controls--minimal {
+    left: calc((100% - var(--template-editor-compact-inspector-width)) / 2);
+  }
+
+  .homepage-editor__body.template-editor__body:has(
+      > .homepage-editor__structure-workspace:not(.is-collapsed)
+    )
+    .template-editor__canvas-controls--minimal {
+    left: calc(
+      var(--template-editor-compact-structure-width)
+      + (100% - var(--template-editor-compact-structure-width)) / 2
+    );
   }
 }
 

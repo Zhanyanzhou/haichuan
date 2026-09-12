@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useGetPuck, type UiState } from "@puckeditor/core";
+import { useGetPuck, type Data, type UiState } from "@puckeditor/core";
 import { App as AntdApp } from "antd";
 import {
   DeleteOutlined,
@@ -484,25 +484,25 @@ export default function EditorToolbar({
     [dispatch, message, modal, onCanvasDataSync, pageKey],
   );
 
-  /* ── 套用推荐结构:整页替换为该页面的预置结构(模块全部可编辑,不锁定) ── */
+  /* ── 套用首屏测试结构：整页替换为唯一保留的可编辑首屏种子。 ── */
 
   const applyRecommendedStructure = useCallback(() => {
     const recommended = createEditorPageDefault(pageKey);
     modal.confirm({
-      title: "套用推荐结构？",
+      title: "套用首屏测试结构？",
       content:
-        "当前画布将被该页面的推荐结构整体替换；尚未保存的修改会丢失，发布前不影响线上页面。",
+        "当前画布将被统一的首屏测试结构整体替换；尚未保存的修改会丢失，发布前不影响线上页面。",
       okText: "套用并替换画布",
       cancelText: "取消",
       onOk: () => {
         dispatch({
           type: "setData",
-          data: recommended,
+          data: recommended as Partial<Data>,
           recordHistory: true,
         });
         onCanvasDataSync(recommended);
         dispatch({ type: "setUi", ui: { itemSelector: null } });
-        message.success("推荐结构已套用，模块可自由调整，请检查后保存草稿");
+        message.success("首屏测试结构已套用，可继续调整并保存草稿");
       },
     });
   }, [dispatch, message, modal, onCanvasDataSync, pageKey]);
@@ -566,7 +566,7 @@ export default function EditorToolbar({
       ? [{
           key: "recommended",
           icon: <LayoutOutlined />,
-          label: "套用推荐结构",
+          label: "套用首屏测试结构",
           onClick: applyRecommendedStructure,
         }]
       : []),
@@ -758,7 +758,7 @@ export default function EditorToolbar({
           loading: saving,
           onClick: () => onSaveDraft(getPuck().appState.data),
           ariaLabel: saving ? "正在保存当前装修草稿" : "保存当前装修草稿",
-          title: saving ? "正在保存当前装修草稿" : "保存当前装修草稿",
+          title: saving ? "正在保存当前装修草稿" : "仅保存草稿，不更新客户前台",
         }}
         more={{
           items: menuItems,
@@ -776,7 +776,8 @@ export default function EditorToolbar({
           disabled: Boolean(publishUnavailableReason),
           onClick: publishCurrentPage,
           ariaLabel: publishActionLabel,
-          title: publishUnavailableReason ?? publishActionLabel,
+          title: publishUnavailableReason
+            ?? "保存当前草稿并发布页面；只有此操作会更新客户前台，无图片模板会自动隐藏",
         }}
       />
     </header>

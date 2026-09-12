@@ -14,10 +14,12 @@ import {
   MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
 } from "../template-definition/validateTemplateDefinition";
 import type { DynamicTemplateSlotType } from "../template-definition/generated/templateDefinition.generated";
-import previewPortrait from "../preview-assets/neutral-template-preview-v1/template-preview-portrait.svg";
-import previewSquare from "../preview-assets/neutral-template-preview-v1/template-preview-square.svg";
-import previewWide from "../preview-assets/neutral-template-preview-v1/template-preview-wide.svg";
+import { createTemplateRecipePreviewContent } from "../template-creation/previewContent";
 import type { DynamicTemplatePreviewScenario } from "./types";
+
+const previewPortrait = new URL("../preview-assets/neutral-template-preview-v1/template-preview-portrait.svg", import.meta.url).href;
+const previewSquare = new URL("../preview-assets/neutral-template-preview-v1/template-preview-square.svg", import.meta.url).href;
+const previewWide = new URL("../preview-assets/neutral-template-preview-v1/template-preview-wide.svg", import.meta.url).href;
 
 export type TemplateCatalogSlotKind =
   | "media"
@@ -87,7 +89,7 @@ function resolveTemplateDesignSampleMedia(path: string[], sequence: number) {
   if (/(?:mobile|portrait|wearing)/.test(context)) {
     return TEMPLATE_DESIGN_SAMPLE_MEDIA.portrait;
   }
-  if (/(?:craft|journey|steps|posterurl|process)/.test(context)) {
+  if (/(?:steps|process)/.test(context)) {
     return TEMPLATE_DESIGN_SAMPLE_MEDIA.process;
   }
   if (/(?:fullbleed|background|store|event|salon|hotspot)/.test(context)) {
@@ -214,12 +216,13 @@ function getGenericSlotExample(slotType: string): unknown {
 
 /**
  * 模板目录、设计画布与只读预览共用的系统示例内容。
- * 模板设计不读取或编辑具体页面内容；历史 defaultContent / previewContent
- * 仅为版本兼容保留，不进入这里的设计工作面。
+ * 新方案模板展示持久默认内容；旧版本继续使用中性示例。
+ * 页面实例内容与仅本次试排仍由调用方单独覆盖。
  */
 export function createTemplatePreviewContentBySlotId(
   definition: TemplateDefinitionV2,
 ): Record<string, unknown> {
+  if (Number(definition.schemaVersion) >= 3) return structuredClone(definition.defaultContent);
   const contentBySlotId: Record<string, unknown> = {};
   for (const [slotId, slot] of Object.entries(definition.slots)) {
     const exampleContent = getExamplePreviewContentForSlot(slot.type);
@@ -230,11 +233,19 @@ export function createTemplatePreviewContentBySlotId(
   return contentBySlotId;
 }
 
-/** 目录 Renderer 使用与设计画布相同的中性示例内容；目录 surface 由宿主显式提供。 */
+/**
+ * 目录里的新方案用临时样例补齐空槽位，已保存的显式默认值优先；
+ * 返回值只传给缩略图 Renderer，不写回模板定义。
+ */
 export function createTemplateCatalogPreviewContentBySlotId(
   definition: TemplateDefinitionV2,
 ): Record<string, unknown> {
-  return createTemplatePreviewContentBySlotId(definition);
+  const persisted = createTemplatePreviewContentBySlotId(definition);
+  if (Number(definition.schemaVersion) < 3 || !definition.templateRecipe) return persisted;
+  return {
+    ...createTemplateRecipePreviewContent(definition),
+    ...persisted,
+  };
 }
 
 /**
@@ -253,39 +264,15 @@ export function createTemplatePreviewScenarioContentBySlotId(
     ? structuredClone(configuredPreview)
     : {};
   for (const slot of Object.values(definition.slots)) {
-    const complexTypes = [
-      "video", "carousel", "hotspot", "beforeAfter", "appointment",
-      "productCard", "productCollection", "categoryCollection",
-    ];
-    if (complexTypes.includes(slot.type) || isMatureContentTemplateSlotType(slot.type)) {
+    if (isMatureContentTemplateSlotType(slot.type)) {
       const source = configuredPreview[slot.slotId];
       const base = source && typeof source === "object" && !Array.isArray(source)
         ? structuredClone(source) as Record<string, unknown>
         : {};
       if (scenario === "missing-image") {
-        if (isMatureContentTemplateSlotType(slot.type)) {
-          for (const key of Object.keys(base)) {
-            if (/(?:image|poster|cover)$/i.test(key) && typeof base[key] === "string") base[key] = "";
-          }
+        for (const key of Object.keys(base)) {
+          if (/(?:image|poster|cover)$/i.test(key) && typeof base[key] === "string") base[key] = "";
         }
-        if (slot.type === "video") base.posterUrl = "";
-        if (slot.type === "carousel") {
-          base.images = Array.isArray(base.images)
-            ? base.images.map((item) => item && typeof item === "object" ? { ...item, url: "", mobileUrl: "" } : item)
-            : [];
-        }
-        if (slot.type === "hotspot") {
-          base.image = "";
-          base.mobileImage = "";
-        }
-        if (slot.type === "beforeAfter") {
-          base.beforeImage = "";
-          base.afterImage = "";
-        }
-        if (slot.type === "appointment") base.backgroundImage = "";
-        if (slot.type === "productCard") base.productCode = "";
-        if (slot.type === "productCollection") base.productCodes = [];
-        if (slot.type === "categoryCollection") base.categorySlugs = [];
         content[slot.slotId] = base;
       } else if (scenario === "long-text") {
         const longHeading = "这是用于验证复杂组件超长标题换行、截断与布局稳定性的示例文字";
@@ -298,23 +285,7 @@ export function createTemplatePreviewScenarioContentBySlotId(
         }
         content[slot.slotId] = base;
       } else {
-        content[slot.slotId] = isMatureContentTemplateSlotType(slot.type)
-          ? {}
-          : slot.type === "carousel"
-            ? { images: [] }
-            : slot.type === "hotspot"
-              ? { image: "", mobileImage: "", altText: "", hotspots: [], mobileHotspots: [] }
-              : slot.type === "beforeAfter"
-                ? { title: "", subtitle: "", beforeImage: "", afterImage: "", beforeLabel: "", afterLabel: "", actionText: "" }
-                : slot.type === "appointment"
-                  ? { backgroundImage: "", title: "", subtitle: "", buttonText: "", altText: "" }
-                  : slot.type === "productCard"
-                    ? { productCode: "", title: "", summary: "" }
-                    : slot.type === "productCollection"
-                      ? { productCodes: [], title: "", subtitle: "" }
-                      : slot.type === "categoryCollection"
-                        ? { categorySlugs: [], title: "", subtitle: "" }
-                        : { videoUrl: "", posterUrl: "", videoDescription: "", title: "", subtitle: "", actionText: "" };
+        content[slot.slotId] = {};
       }
       continue;
     }

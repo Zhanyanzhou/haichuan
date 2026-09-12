@@ -5,6 +5,19 @@ import * as bcrypt from 'bcrypt';
 import { ApiError } from '../../common/errors/api-error';
 import { AuthService } from './auth.service';
 
+test('员工历史密码长于 18 位仍能按原哈希登录，响应不包含哈希', async () => {
+  const password = 'historical-valid-password';
+  const passwordHash = await bcrypt.hash(password, 4);
+  const service = new AuthService(
+    { user: { findUnique: async () => ({ id: 7, username: 'legacy-staff', status: 'ACTIVE', password: passwordHash }) } } as never,
+    {} as never,
+    {} as never,
+  );
+  const staff = await service.validateUser('legacy-staff', password);
+  assert.equal(staff.id, 7);
+  assert.equal('password' in staff, false);
+});
+
 test('后台员工连续登录失败后返回稳定且不泄露账号存在性的锁定错误码', async () => {
   const existingPasswordHash = await bcrypt.hash('historical-valid-password', 4);
   const scenarios = [

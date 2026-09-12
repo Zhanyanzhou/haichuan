@@ -158,9 +158,10 @@ test('已有事务级规范审计的入口跳过泛化重复记录', async () =>
   assert.equal(createCount, 0);
 });
 
-test('模板和页面的七个事务审计入口均跳过泛化重复记录', () => {
+test('模板和页面的八个事务审计入口均跳过泛化重复记录', () => {
   const handlers = [
     DynamicTemplatesController.prototype.publish,
+    DynamicTemplatesController.prototype.rebuildDraftFromPublished,
     DynamicTemplatesController.prototype.archive,
     DynamicTemplatesController.prototype.restore,
     DynamicTemplatesController.prototype.deleteDraft,

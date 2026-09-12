@@ -5,8 +5,6 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import {
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
   createContentTemplatePublicationAttestation,
-  getContentTemplateLinkTargetReferences,
-  getPageDocumentMediaReferences,
   normalizeContentTemplatePageTarget,
 } from "./content-template-contract";
 import { PageModulesService } from "./page-modules.service";
@@ -74,7 +72,7 @@ test("未注册页面键不能通过预检或写入草稿", async () => {
   );
 });
 
-test("页面发布资料留空或结构非法都阻断正式发布", async () => {
+test("推荐发布资料允许留空，填写后仍拒绝非法结构", async () => {
   const service = createService();
   const incompleteMetadata = {
     ...makeFormalMetadata(),
@@ -88,18 +86,20 @@ test("页面发布资料留空或结构非法都阻断正式发布", async () =>
     makeHomeDocument(),
     incompleteMetadata,
   );
-  assert.equal(incompleteValidation.valid, false);
+  assert.equal(incompleteValidation.valid, true);
   assert.deepEqual(
     incompleteValidation.issues
       .filter((issue) => issue.path.startsWith("metadata."))
       .map((issue) => ({ field: issue.field, path: issue.path, severity: issue.severity })),
-    [
-      { field: "seoTitle", path: "metadata.seoTitle", severity: "error" },
-      { field: "seoDescription", path: "metadata.seoDescription", severity: "error" },
-      { field: "ogImage", path: "metadata.ogImage", severity: "error" },
-      { field: "contentOwner", path: "metadata.contentOwner", severity: "error" },
-    ],
+    [],
   );
+  for (const metadata of [
+    { mediaRights: makeFormalMetadata().mediaRights },
+    { ...incompleteMetadata, seoTitle: null, seoDescription: null, ogImage: null, contentOwner: null },
+    { ...incompleteMetadata, seoTitle: "  ", seoDescription: "  ", ogImage: "  ", contentOwner: "  " },
+  ]) {
+    assert.equal((await service.validatePageDocument("home", makeHomeDocument(), metadata)).valid, true);
+  }
 
   const completeValidation = await service.validatePageDocument(
     "home",
@@ -124,9 +124,16 @@ test("页面发布资料留空或结构非法都阻断正式发布", async () =>
   assert.ok(invalidValidation.errors.some((message) => message.includes("seoDescription 必须是字符串")));
   assert.ok(invalidValidation.errors.some((message) => message.includes("ogImage 必须是字符串")));
   assert.ok(invalidValidation.errors.some((message) => message.includes("contentOwner 必须是字符串")));
+  const overlong = await service.validatePageDocument("home", makeHomeDocument(), {
+    ...makeFormalMetadata(), seoTitle: "长".repeat(1000),
+  });
+  assert.equal(overlong.valid, true);
+  assert.ok(overlong.issues.some(
+    (issue) => issue.severity === "warning" && issue.message.includes("seoTitle 过长"),
+  ));
 });
 
-test("首屏发布要求桌面与手机专图齐全，并继续校验替代文字", async () => {
+test("首屏缺图与替代文字作为提醒，不再冻结页面发布", async () => {
   const service = createService();
   const desktopOnlyDocument = makeHomeDocument();
   desktopOnlyDocument.content[0].props.mobileImage = "";
@@ -137,12 +144,12 @@ test("首屏发布要求桌面与手机专图齐全，并继续校验替代文�
     desktopOnlyDocument,
     makeFormalMetadata(),
   );
-  assert.equal(desktopOnly.valid, false);
+  assert.equal(desktopOnly.valid, true);
   assert.equal(desktopOnly.issues.some(
     (issue) => issue.field === "mobileImage" && issue.message.includes("图片不能为空"),
   ), true);
   assert.ok(desktopOnly.issues.some(
-    (issue) => issue.field === "altText" && issue.severity === "error",
+    (issue) => issue.field === "altText" && issue.severity === "warning",
   ));
 
   const mobileOnlyDocument = makeHomeDocument();
@@ -153,7 +160,7 @@ test("首屏发布要求桌面与手机专图齐全，并继续校验替代文�
     mobileOnlyDocument,
     makeFormalMetadata(),
   );
-  assert.equal(mobileOnly.valid, false);
+  assert.equal(mobileOnly.valid, true);
   assert.equal(mobileOnly.issues.some(
     (issue) => issue.field === "desktopImage" && issue.message.includes("图片不能为空"),
   ), true);
@@ -166,13 +173,13 @@ test("首屏发布要求桌面与手机专图齐全，并继续校验替代文�
     noImageDocument,
     makeFormalMetadata(),
   );
-  assert.equal(noImage.valid, false);
+  assert.equal(noImage.valid, true);
   assert.ok(noImage.issues.some(
-    (issue) => issue.severity === "error" && issue.message.includes("图片不能为空"),
+    (issue) => issue.severity === "warning" && issue.message.includes("图片不能为空"),
   ));
 });
 
-test("首屏主舞台即使未触发模块总数限制也必须保持全页唯一", async () => {
+test("多个首屏主舞台不因数量被发布校验阻断", async () => {
   const document = makeHomeDocument();
   document.content = Array.from({ length: 61 }, (_, index) => ({
     ...document.content[0],
@@ -188,15 +195,18 @@ test("首屏主舞台即使未触发模块总数限制也必须保持全页唯�
     makeFormalMetadata(),
   );
 
-  assert.equal(result.valid, false);
-  assert.ok(result.errors.includes("页面只能有一个首屏主舞台（primary-stage），当前为 61 个"));
+  assert.equal(result.valid, true);
+  assert.equal(
+    result.errors.some((message) => message.includes("页面只能有一个首屏主舞台")),
+    false,
+  );
   assert.equal(
     result.errors.some((message) => message.includes("页面可见模块过多")),
     false,
   );
 });
 
-test("发布预检把正在完善、内容建设中和即将上线等占位文案保持为阻断", async () => {
+test("发布预检把正在完善、内容建设中和即将上线等占位文案保留为提醒", async () => {
   const service = createService();
   const document = makeHomeDocument();
   document.content[0].props.title = "品牌内容建设中";
@@ -207,26 +217,26 @@ test("发布预检把正在完善、内容建设中和即将上线等占位文�
 
   const result = await service.validatePageDocument("home", document, metadata);
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true);
   assert.ok(result.issues.some(
     (issue) => issue.path === "content[0].props.title"
       && issue.message.includes("占位内容")
-      && issue.severity === "error",
+      && issue.severity === "warning",
   ));
   assert.ok(result.issues.some(
     (issue) => issue.path === "metadata.seoDescription"
       && issue.message.includes("占位内容")
-      && issue.severity === "error",
+      && issue.severity === "warning",
   ));
 
   document.content[0].props.title = "珠宝作品";
   metadata.seoDescription = "品牌故事即将上线";
   const launchResult = await service.validatePageDocument("home", document, metadata);
-  assert.equal(launchResult.valid, false);
+  assert.equal(launchResult.valid, true);
   assert.ok(launchResult.issues.some(
     (issue) => issue.path === "metadata.seoDescription"
       && issue.message.includes("占位内容")
-      && issue.severity === "error",
+      && issue.severity === "warning",
   ));
 });
 
@@ -261,8 +271,6 @@ test("公开 PageDocument metadata 只返回 SEO 白名单，不泄漏内部内�
       }),
     },
   } as unknown as PrismaService);
-  (service as any).collectGlobalSitePublicationReadinessIssues = async () => [];
-
   const published = await service.getPublishedPageDocument("home");
   assert.deepEqual(published?.metadata, {
     seoTitle: metadata.seoTitle,
@@ -340,7 +348,7 @@ test("页面分享图仍拒绝非 HTTP(S) 或站内绝对路径", async () => {
   assert.ok(result.errors.some((message) => message.includes("ogImage 分享图地址不合法")));
 });
 
-test("当前可见素材缺少来源与授权编号时阻断发布", async () => {
+test("当前可见素材缺少来源记录时合并提醒但不阻断页面发布", async () => {
   const metadata = makeFormalMetadata();
   metadata.mediaRights = metadata.mediaRights.filter(
     (item) => item.assetUrl !== "/images/hero-mobile.jpg",
@@ -351,16 +359,17 @@ test("当前可见素材缺少来源与授权编号时阻断发布", async () =>
     metadata,
   );
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true);
   const issue = result.issues.find(
-    (item) => item.field === "mediaRights" && item.message.includes("hero-mobile.jpg"),
+    (item) => item.field === "mediaRights",
   );
   assert.equal(issue?.path, "metadata.mediaRights");
-  assert.equal(issue?.severity, "error");
-  assert.match(issue?.message || "", /缺少来源或授权编号/);
+  assert.equal(issue?.severity, "warning");
+  assert.match(issue?.message || "", /1 项当前公开素材尚无完整来源记录/);
+  assert.match(issue?.message || "", /不影响本次页面发布/);
 });
 
-test("重复或不完整的素材授权记录阻断发布", async () => {
+test("重复或不完整的素材来源记录合并为非阻断提醒", async () => {
   const metadata = makeFormalMetadata();
   metadata.mediaRights.push({
     assetUrl: "/images/hero-desktop.jpg",
@@ -378,28 +387,27 @@ test("重复或不完整的素材授权记录阻断发布", async () => {
     metadata,
   );
 
-  assert.equal(result.valid, false);
-  assert.ok(result.issues.some(
-    (item) => item.path === "metadata.mediaRights[2].assetUrl"
-      && item.severity === "error"
-      && item.message.includes("重复"),
-  ));
-  assert.ok(result.issues.some(
-    (item) => item.path === "metadata.mediaRights[3].source"
-      && item.severity === "error"
-      && item.message.includes("素材来源不能为空"),
-  ));
+  assert.equal(result.valid, true);
+  const rightsIssues = result.issues.filter(
+    (item) => item.code === "page-validation-media-rights-advisory",
+  );
+  assert.equal(rightsIssues.length, 1);
+  assert.equal(rightsIssues[0]?.severity, "warning");
+  assert.match(rightsIssues[0]?.message || "", /2 条已保存记录不完整或重复/);
 });
 
 test("隐藏区块的媒体不会扩大当前发布授权范围", async () => {
   const document: any = makeHomeDocument();
   document.content.push({
-    type: "全屏出血图",
+    type: "首屏主视觉",
     props: {
       id: "hidden-media",
       isVisible: false,
-      image: "/images/hidden-editorial.jpg",
+      desktopImage: "/images/hidden-editorial.jpg",
+      mobileImage: "/images/hidden-editorial.jpg",
       altText: "不公开的内部备选图",
+      actionText: "",
+      targetType: "none",
     },
   });
   const result = await createService().validatePageDocument(
@@ -413,49 +421,6 @@ test("隐藏区块的媒体不会扩大当前发布授权范围", async () => {
     result.issues.some((item) => item.message.includes("hidden-editorial.jpg")),
     false,
   );
-});
-
-test("机器合同统一提取顶层、视频与集合媒体并按 URL 去重", () => {
-  const references = getPageDocumentMediaReferences(
-    {
-      content: [
-        {
-          type: "视频区块",
-          props: {
-            id: "video-reference",
-            videoUrl: "https://cdn.example.com/craft.mp4",
-            posterUrl: "/images/craft-poster.jpg",
-          },
-        },
-        {
-          type: "轮播图",
-          props: {
-            id: "carousel-reference",
-            images: [
-              {
-                url: "/images/craft-poster.jpg",
-                mobileUrl: "/images/craft-mobile.jpg",
-              },
-            ],
-          },
-        },
-      ],
-      zones: {},
-    },
-    { ogImage: "/images/craft-poster.jpg" },
-  );
-
-  assert.deepEqual(
-    references.map((item) => item.url),
-    [
-      "/images/craft-poster.jpg",
-      "https://cdn.example.com/craft.mp4",
-      "/images/craft-mobile.jpg",
-    ],
-  );
-  assert.equal(references[0].path, "metadata.ogImage");
-  assert.equal(references[1].path, "content[0].props.videoUrl");
-  assert.equal(references[2].path, "content[1].props.images[0].mobileUrl");
 });
 
 test("页面分享图引用不存在的本地上传文件时阻止发布", async () => {
@@ -491,49 +456,7 @@ test("页面分享图使用外链时阻止发布并保留页面设置字段定�
   assert.match(issue?.message || "", /外部素材地址/);
 });
 
-test("机器合同提取顶层、次级行动和桌面/移动集合目标", () => {
-  const featured = getContentTemplateLinkTargetReferences(
-    "单品焦点推荐",
-    {
-      id: "featured-link-contract",
-      secondaryText: "预约顾问",
-      secondaryTargetType: "product",
-      secondaryProductCode: "HC-RING-001",
-    },
-    "content[0].props",
-  );
-  assert.equal(featured.length, 1);
-  assert.equal(featured[0].actionTextFieldKey, "secondaryText");
-  assert.equal(featured[0].productCodeFieldKey, "secondaryProductCode");
-  assert.equal(featured[0].productCode, "HC-RING-001");
-
-  const hotspot = getContentTemplateLinkTargetReferences(
-    "热区图",
-    {
-      id: "hotspot-link-contract",
-      hotspots: [{ targetType: "page", linkUrl: "/catalog" }],
-      mobileHotspots: [{ targetType: "product", productId: 7 }],
-    },
-    "content[1].props",
-  );
-  assert.deepEqual(
-    hotspot.map((item) => ({ path: item.path, field: item.field, required: item.required })),
-    [
-      {
-        path: "content[1].props.hotspots[0]",
-        field: "hotspots",
-        required: true,
-      },
-      {
-        path: "content[1].props.mobileHotspots[0]",
-        field: "mobileHotspots",
-        required: true,
-      },
-    ],
-  );
-});
-
-test("可见行动文案没有去向时阻断正式发布", async () => {
+test("可见行动文案没有去向时只提醒，不冻结正式发布", async () => {
   const document: any = makeHomeDocument();
   document.content[0].props.actionText = "探索作品";
   document.content[0].props.targetType = "none";
@@ -543,12 +466,12 @@ test("可见行动文案没有去向时阻断正式发布", async () => {
     makeFormalMetadata(),
   );
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true);
   assert.ok(result.issues.some(
     (issue) =>
       issue.path === "content[0].props.targetType"
       && issue.message.includes("已填写行动文案")
-      && issue.severity === "error",
+      && issue.severity === "warning",
   ));
 });
 
@@ -598,112 +521,19 @@ test("未登记页面去向被服务端发布门禁拒绝，登记页面可携�
   assert.equal(valid.valid, true, valid.errors.join("\n"));
 });
 
-test("按场景选购条目缺少公开去向时阻断正式发布", async () => {
-  const document: any = makeHomeDocument();
-  document.content.push({
-    type: "按场景选购",
-    props: {
-      id: "scene-shopping-links",
-      categories: [
-        {
-          name: "日常佩戴",
-          image: "/images/scene-daily.jpg",
-          altText: "日常佩戴珠宝",
-          targetType: "none",
-        },
-        {
-          name: "重要时刻",
-          image: "/images/scene-event.jpg",
-          altText: "重要时刻珠宝",
-          targetType: "page",
-          linkUrl: "/catalog",
-        },
-      ],
-    },
-  });
-  const metadata = makeFormalMetadata();
-  metadata.mediaRights.push(
-    {
-      assetUrl: "/images/scene-daily.jpg",
-      source: "品牌自有拍摄",
-      authorizationId: "HC-OWN-2026-003",
-    },
-    {
-      assetUrl: "/images/scene-event.jpg",
-      source: "品牌自有拍摄",
-      authorizationId: "HC-OWN-2026-004",
-    },
-  );
-
-  const result = await createService().validatePageDocument("home", document, metadata);
-  assert.equal(result.valid, false);
-  assert.ok(result.issues.some(
-    (issue) =>
-      issue.path === "content[1].props.categories[0].targetType"
-      && issue.field === "categories"
-      && issue.index === 0
-      && issue.message.includes("必须设置有效去向")
-      && issue.severity === "error",
-  ));
-
-  document.content[1].props.categories[0].targetType = undefined;
-  document.content[1].props.categories[0].link = "/products";
-  const legacyResult = await createService().validatePageDocument(
-    "home",
-    document,
-    metadata,
-  );
-  assert.equal(legacyResult.valid, true, legacyResult.errors.join("\n"));
-});
-
-test("次级 CTA 的商品目标也必须满足游客公开商品资格", async () => {
-  const service = new PageModulesService({
-    product: {
-      findMany: async () => [{
-        id: 1,
-        code: "HC-PUBLIC-001",
-        listingImageId: 11,
-        primaryImageId: null,
-        images: [],
-      }],
-    },
-  } as unknown as PrismaService);
-  const document: any = makeHomeDocument();
-  document.content.push({
-    type: "单品焦点推荐",
-    props: {
-      id: "featured-secondary-product",
-      productCode: "HC-PUBLIC-001",
-      primaryText: "查看作品",
-      secondaryText: "查看另一件作品",
-      secondaryTargetType: "product",
-      secondaryProductCode: "HC-NOT-PUBLIC",
-    },
-  });
-
-  const result = await service.validatePageDocument(
-    "home",
-    document,
-    makeFormalMetadata(),
-  );
-  assert.equal(result.valid, false);
-  assert.ok(result.issues.some(
-    (issue) =>
-      issue.path === "content[1].props.secondaryProductCode"
-      && issue.message.includes("未满足公开发布条件"),
-  ));
-});
-
 function makeCatalogDocument() {
   return {
     content: [
       {
-        type: "全屏出血图",
+        type: "首屏主视觉",
         props: {
           id: "catalog-hidden-backup",
           isVisible: false,
-          image: "/images/catalog-hidden.jpg",
+          desktopImage: "/images/catalog-hidden.jpg",
+          mobileImage: "/images/catalog-hidden.jpg",
           altText: "隐藏备选",
+          actionText: "",
+          targetType: "none",
         },
       },
       {
@@ -769,11 +599,16 @@ test("普通 zones 内容不能被计为可发布内容或绕过公开 Renderer 
   document.zones = {
     sidebar: [
       {
-        type: "文字横幅",
+        type: "首屏主视觉",
         props: {
-          id: "unreachable-zone-banner",
-          title: "预检通过但公开页不可见的内容",
-          body: "当前公开 Renderer 没有对应 DropZone 消费者。",
+          id: "unreachable-zone-hero",
+          title: "插槽中的首屏",
+          desktopImage: "/images/hero-desktop.jpg",
+          mobileImage: "/images/hero-mobile.jpg",
+          altText: "插槽中的首屏",
+          actionText: "",
+          targetType: "none",
+          linkUrl: "",
         },
       },
     ],

@@ -35,7 +35,7 @@ function getPageDocumentBlocks(document: Record<string, unknown>) {
   return [...content, ...zoneBlocks];
 }
 
-/** 固定模板与动态母模板共用的主首屏判定，供渲染、插入与复制入口复用。 */
+/** 固定模板与动态母模板共用的主舞台角色判定，用于标题、加载优先级和导航兼容。 */
 export function isVisiblePrimaryStageBlock(
   value: unknown,
   resolvedDefinitions: ResolvedDynamicTemplateDefinitionMap,
@@ -76,40 +76,4 @@ export function hasVisiblePrimaryStage(
   return getPageDocumentBlocks(document).some((block) => (
     isVisiblePrimaryStageBlock(block, resolvedDefinitions)
   ));
-}
-
-/** 精确版本缺失时保守关闭新主舞台插入，避免未知旧实例形成双主舞台。 */
-export function hasVisibleUnresolvedDynamicTemplateInstance(
-  documentValue: unknown,
-  resolvedDefinitionsOverride?: ResolvedDynamicTemplateDefinitionMap,
-) {
-  if (!documentValue || typeof documentValue !== "object" || Array.isArray(documentValue)) {
-    return false;
-  }
-  const document = documentValue as Record<string, unknown>;
-  const resolvedDefinitions = {
-    ...getDocumentResolvedDefinitions(document),
-    ...(resolvedDefinitionsOverride ?? {}),
-  };
-  return getPageDocumentBlocks(document).some((value) => {
-    const block = asPageBlock(value);
-    if (
-      block?.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE
-      || block.props?.isVisible === false
-    ) return false;
-    const templateId = typeof block.props?.templateId === "string"
-      ? block.props.templateId
-      : "";
-    const templateVersion = Number(block.props?.templateVersion);
-    return !resolvedDefinitions[dynamicTemplateVersionKey(templateId, templateVersion)];
-  });
-}
-
-/** 主舞台插入的统一 fail-closed 判定；目录状态与最终写入边界必须共同复用。 */
-export function isPrimaryStageInsertionBlocked(
-  documentValue: unknown,
-  resolvedDefinitionsOverride?: ResolvedDynamicTemplateDefinitionMap,
-) {
-  return hasVisiblePrimaryStage(documentValue, resolvedDefinitionsOverride)
-    || hasVisibleUnresolvedDynamicTemplateInstance(documentValue, resolvedDefinitionsOverride);
 }

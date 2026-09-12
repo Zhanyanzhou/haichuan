@@ -1,5 +1,8 @@
 import { expect, test, type Download, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
+import { generateTemplateFromRecipe } from "../src/page-builder/template-creation/generateTemplateFromRecipe";
+import { createContentSlot, createRecommendedRecipe } from "../src/page-builder/template-creation/presets";
+import { createDynamicTemplateInstanceProps } from "../src/page-builder/dynamic-template-instance/types";
 
 /**
  * 店铺装修 —— 发布资格与安全边界回归测试
@@ -86,52 +89,38 @@ function multiHeroDraft() {
   return draft;
 }
 
+const supportRecipe = createRecommendedRecipe("general");
+supportRecipe.content = [createContentSlot("title")];
+const supportDefinition = generateTemplateFromRecipe(supportRecipe, {
+  templateId: "tpl_publish_support", name: "内容说明",
+});
+supportDefinition.metadata.visualRole = "support-stage";
+const supportTitleSlot = Object.values(supportDefinition.slots).find((slot) => slot.type === "heading")!;
+supportTitleSlot.required = true;
+
 function locatablePublishDraft() {
   const draft = validDraft();
-  draft.puckData.content.push(
-    {
-      type: "单图海报",
-      props: {
-        id: "poster-one",
-        title: "",
-        subtitle: "第一张海报",
-        desktopImage: "/svg/template-hero.svg",
-        mobileImage: "/svg/template-hero.svg",
-        altText: "第一张海报",
-        targetType: "none",
-        actionText: "",
-        linkUrl: "",
-        productId: 0,
-        template: "leftTextRightImage",
-        desktopFocusX: 50,
-        desktopFocusY: 50,
-        mobileFocusX: 50,
-        mobileFocusY: 50,
-      },
-    },
-    {
-      type: "单图海报",
-      props: {
-        id: "poster-two",
-        title: "",
-        subtitle: "第二张海报",
-        desktopImage: "/svg/template-hero.svg",
-        mobileImage: "/svg/template-hero.svg",
-        altText: "第二张海报",
-        targetType: "none",
-        actionText: "",
-        linkUrl: "",
-        productId: 0,
-        template: "leftTextRightImage",
-        desktopFocusX: 50,
-        desktopFocusY: 50,
-        mobileFocusX: 50,
-        mobileFocusY: 50,
-      },
-    },
-  );
   draft.puckData.content[0].props.mobileImage = "";
-  return draft;
+  return {
+    ...draft,
+    puckData: {
+      ...draft.puckData,
+      // 两个辅助内容实例承载同名字段；不能用三个首屏绕过单主舞台门禁。
+      content: [...draft.puckData.content, ...["poster-one", "poster-two"].map((id) => ({
+        type: "动态模板实例",
+        props: {
+          ...createDynamicTemplateInstanceProps({ templateId: supportDefinition.templateId, version: 1, name: "内容说明" }),
+          id, instanceId: id, contentBySlotId: { [supportTitleSlot.slotId]: "" },
+        },
+      }))],
+      resolvedDynamicTemplates: {
+        [`${supportDefinition.templateId}@1`]: {
+          templateId: supportDefinition.templateId, version: 1, schemaVersion: supportDefinition.schemaVersion,
+          definitionChecksum: "a".repeat(64), definition: supportDefinition,
+        },
+      },
+    },
+  };
 }
 
 function locatableValidation(body: Record<string, unknown>) {
@@ -148,21 +137,22 @@ function locatableValidation(body: Record<string, unknown>) {
     path: string;
     field: string;
   }>;
-  if (!byId("poster-one").title) issues.push({
+  const titleOf = (id: string) => (byId(id).contentBySlotId as Record<string, unknown> | undefined)?.[supportTitleSlot.slotId];
+  if (!titleOf("poster-one")) issues.push({
     code: "required-field",
     message: "第一张海报必须填写标题",
     severity: "error",
     blockId: "poster-one",
-    path: "content[1].props.title",
-    field: "title",
+    path: `content[1].props.contentBySlotId.${supportTitleSlot.slotId}`,
+    field: supportTitleSlot.slotId,
   });
-  if (!byId("poster-two").title) issues.push({
+  if (!titleOf("poster-two")) issues.push({
     code: "required-field",
     message: "第二张海报必须填写标题",
     severity: "error",
     blockId: "poster-two",
-    path: "content[2].props.title",
-    field: "title",
+    path: `content[2].props.contentBySlotId.${supportTitleSlot.slotId}`,
+    field: supportTitleSlot.slotId,
   });
   if (!byId("d3-hero").mobileImage) issues.push({
     code: "required-mobile-media",
@@ -370,6 +360,10 @@ test.describe("店铺装修 —— Mock 发布边界", () => {
       "Mock 模式 · 发布资格未验证",
     );
     await expect(page.getByRole("button", { name: "保存当前装修草稿" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "保存当前装修草稿" })).toHaveAttribute(
+      "title",
+      "仅保存草稿，不更新客户前台",
+    );
     await expect(page.locator(".homepage-editor__toolbar-publish")).toBeDisabled();
     await expect(page.locator(".homepage-editor__toolbar-publish")).toHaveAttribute(
       "title",
@@ -413,7 +407,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     );
     await expect(publishButton).toHaveAttribute(
       "title",
-      "发布到前台网站",
+      "保存当前草稿并发布页面；只有此操作会更新客户前台，无图片模板会自动隐藏",
     );
     await publishButton.click();
     await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
@@ -450,9 +444,9 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       await expect(review).toBeVisible({ timeout: 8000 });
       await expect(review).toContainText("3 项错误待处理");
       await expect(review.locator('[data-page-publish-block="poster-one"]'))
-        .toContainText("单图文 / 文案 / 桌面端与移动端");
+        .toContainText(`动态模板实例 / ${supportTitleSlot.label} / 桌面端与移动端`);
       await expect(review.locator('[data-page-publish-block="poster-two"]'))
-        .toContainText("单图文 / 文案 / 桌面端与移动端");
+        .toContainText(`动态模板实例 / ${supportTitleSlot.label} / 桌面端与移动端`);
       await expect(review.locator('[data-page-publish-block="d3-hero"]'))
         .toContainText("移动端");
       await expect(review.locator('[data-page-publish-block="d3-hero"]'))
@@ -473,14 +467,14 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       const firstIssue = review.locator('[data-page-publish-block="poster-one"]');
       await firstIssue.getByRole("button").first().focus();
       await page.keyboard.press("Enter");
-      const firstTitle = page.locator('[data-inspector-field="title"][data-page-publish-located="true"]');
+      const firstTitle = page.locator(`[data-inspector-field="${supportTitleSlot.slotId}"][data-page-publish-located="true"]`);
       await expect(firstTitle).toBeVisible();
       await firstTitle.getByRole("textbox").fill("第一张已修复");
       await expect(review).toContainText("2 项错误待处理", { timeout: 8000 });
 
       const secondIssue = review.locator('[data-page-publish-block="poster-two"]');
       await secondIssue.getByRole("button").first().click();
-      const secondTitle = page.locator('[data-inspector-field="title"][data-page-publish-located="true"]');
+      const secondTitle = page.locator(`[data-inspector-field="${supportTitleSlot.slotId}"][data-page-publish-located="true"]`);
       await expect(secondTitle).toBeVisible();
       await secondTitle.getByRole("textbox").fill("第二张已修复");
       await expect(review).toContainText("1 项错误待处理", { timeout: 8000 });
@@ -563,7 +557,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       const publishButton = page.locator(".homepage-editor__toolbar-publish");
       await expect(publishButton).toHaveAttribute(
         "title",
-        "发布到前台网站",
+        "保存当前草稿并发布页面；只有此操作会更新客户前台，无图片模板会自动隐藏",
       );
       await expect(publishButton).toBeEnabled();
       await expect(page.getByText("internal validation service path must never reach the browser"))
@@ -705,11 +699,50 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       const drawer = page.getByRole("dialog", { name: "页面展示设置" });
       await expect(drawer).toBeVisible();
       await expect(drawer.getByRole("status", { name: "当前页面可选展示资料说明" })).toContainText(
-        "不填写也可以直接发布",
+        "素材来源记录可后续补充，不阻断本次页面发布",
       );
       await expect(drawer).toContainText("填写后会校验长度、格式与素材是否已上传到本站");
     });
   }
+
+  test("店铺资料提醒不混入页面发布错误且不打断一键发布", async ({ page }) => {
+    const issueMessage = "品牌名称与公开呈现方式尚无正式签认凭据。";
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      errors: [],
+      issues: [{ message: issueMessage, severity: "warning", path: "siteSettings.brandReviewReference", field: "brandReviewReference" }],
+    });
+    await page.goto("/admin/editor/home");
+    await expect.poll(requests.validateCalls).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "页面设置" }).click();
+    await expect(page.getByRole("dialog", { name: "页面展示设置" })).not.toContainText(issueMessage);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "发布到前台网站" }).click();
+    await expect(page.getByRole("region", { name: "本次发布检查" })).toHaveCount(0);
+    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+    expect(requests.persistentWriteCalls()).toBe(2);
+  });
+
+  test("素材来源审计提醒不打开问题面板且不打断一键发布", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      errors: [],
+      issues: [{
+        code: "page-validation-media-rights-advisory",
+        message: "页面设置：1 项当前公开素材尚无完整来源记录。不影响本次页面发布，可在后续素材治理中补充。",
+        severity: "warning",
+        path: "metadata.mediaRights",
+        field: "mediaRights",
+      }],
+    });
+    await page.goto("/admin/editor/home");
+    await expect.poll(requests.validateCalls).toBeGreaterThan(0);
+    await page.getByRole("button", { name: "发布到前台网站" }).click();
+    await expect(page.getByRole("region", { name: "本次发布检查" })).toHaveCount(0);
+    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+    expect(requests.persistentWriteCalls()).toBe(2);
+  });
 
   test("合法数据点击一次即完成发布", async ({ page }) => {
     const requests = await mockEditorApis(page, { valid: true });
@@ -975,17 +1008,11 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     expect(requests.persistentWriteCalls()).toBe(viewports.length * 2);
   });
 
-  test("多个首屏在任意当前区块都显示全页阻断且不能发布", async ({ page }) => {
-    const issueMessage = "页面只能有一个首屏主舞台（primary-stage），当前为 2 个";
+  test("多个首屏不产生数量阻断且点击一次即可发布", async ({ page }) => {
     const requests = await mockEditorApis(page, {
-      valid: false,
-      errors: [issueMessage],
-      issues: [{
-        message: issueMessage,
-        severity: "error",
-        blockId: "d3-hero-second-stage",
-        path: "content[1]",
-      }],
+      valid: true,
+      errors: [],
+      issues: [],
       draftDocument: multiHeroDraft(),
     });
 
@@ -995,18 +1022,12 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     ).toHaveCount(0);
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 10000 });
-    await page.getByRole("button", { name: "1 项发布阻断" }).press("Enter");
-    const review = page.getByRole("region", { name: "本次发布检查" });
-    await expect(review).toContainText(issueMessage);
-    await review.getByRole("button", { name: "定位", exact: true }).click();
-    await expect(page.locator('[data-layer-id="d3-hero-second-stage"]'))
-      .toHaveAttribute("data-page-publish-located", "true");
+    await expect(page.getByRole("status", { name: /发布阻断/ })).toHaveCount(0);
     await publishButton.click();
     await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "本次发布检查" }))
-      .toContainText(issueMessage);
-    await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
-    expect(requests.persistentWriteCalls()).toBe(1);
+    await expect(page.getByRole("region", { name: "本次发布检查" })).toHaveCount(0);
+    await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
+    expect(requests.persistentWriteCalls()).toBe(2);
   });
 
   test("内容提示进入属性面板但不阻断点击一次直接发布", async ({ page }) => {
@@ -1024,7 +1045,6 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     });
 
     await page.goto("/admin/editor/home");
-    await expect(page.getByRole("button", { name: "首屏主舞台不能复制" })).toBeDisabled();
     await page.getByRole("button", { name: "1 项待检查" }).click();
     const warningDialog = page.getByRole("dialog", {
       name: "当前模块与页面发布检查 · 1 项待检查",
@@ -1079,7 +1099,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     { role: "SUPER_ADMIN" as const, name: "管理员桌面", width: 1440, height: 900 },
     { role: "EDITOR" as const, name: "编辑移动端", width: 390, height: 844 },
   ]) {
-    test(`${actor.name}导入方案时立即执行当前页面能力归一化`, async ({ page }) => {
+    test(`${actor.name}导入拒绝退役模板并按当前能力归一化已知系统区块`, async ({ page }) => {
       await authenticateAdmin(page, actor.role);
       await page.setViewportSize({ width: actor.width, height: actor.height });
       const requests = await mockEditorApis(page, { valid: true });
@@ -1088,6 +1108,21 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       await expect(
         page.frameLocator("iframe").getByText("海川典藏", { exact: true }),
       ).toBeVisible();
+
+      await page.locator("#homepage-editor-import-file").setInputFiles({
+        name: "retired-template.json", mimeType: "application/json",
+        buffer: Buffer.from(JSON.stringify({
+          kind: "haichuan-page-decoration", version: 1, pageKey: "home",
+          puckData: { ...validDraft().puckData, content: [
+            ...validDraft().puckData.content,
+            { type: "已删除模板", props: { id: "retired-block", title: "保留原画布" } },
+          ] },
+        })),
+      });
+      await expect(page.getByText("导入失败：包含未知模块类型（已删除模板），可能来自其他版本", { exact: true })).toBeVisible();
+      await expect(page.getByRole("dialog", { name: "导入装修方案？" })).toHaveCount(0);
+      await expect(page.frameLocator("iframe").getByText("海川典藏", { exact: true })).toBeVisible();
+      expect(requests.persistentWriteCalls()).toBe(0);
 
       const importedDocument = {
         kind: "haichuan-page-decoration",
@@ -1100,12 +1135,10 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
               props: { id: "imported-site-config", visible: true },
             },
             {
-              type: "改款对比",
+              type: "业务功能区",
               props: {
-                id: "imported-disallowed-before-after",
-                title: "不适用于首页的改款对比",
-                beforeImage: "/svg/template-before.svg",
-                afterImage: "/svg/template-after.svg",
+                id: "imported-business-region",
+                pageKey: "home",
               },
             },
             {
@@ -1118,9 +1151,10 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
           ],
           zones: {
             legacy: [{
-              type: "文字横幅",
+              type: "业务功能区",
               props: {
                 id: "imported-unreachable-zone-banner",
+                pageKey: "home",
                 title: "不会被公开 Renderer 消费的 zones 内容",
                 body: "导入时必须按根内容唯一位置合同移除。",
               },
@@ -1135,7 +1169,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
         buffer: Buffer.from(JSON.stringify(importedDocument)),
       });
       const confirmDialog = page.getByRole("dialog", { name: "导入装修方案？" });
-      await expect(confirmDialog).toContainText("将移除 2 个不适用于店铺首页的系统或模板区块");
+      await expect(confirmDialog).toContainText("将移除 3 个不适用于店铺首页的系统或模板区块");
       await confirmDialog.getByRole("button", { name: "导入并替换画布" }).click();
       await expect(confirmDialog).toBeHidden();
 
@@ -1143,7 +1177,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
         await page.getByRole("button", { name: "收起属性面板" }).press("Enter");
         await page.getByRole("button", { name: "展开图层面板" }).press("Enter");
       }
-      await expect(page.locator("[data-layer-index]")).toHaveCount(2);
+      await expect(page.locator("[data-layer-index]")).toHaveCount(1);
       await expect(page.locator("[data-layer-index]", { hasText: "首屏" })).toHaveCount(1);
       await expect(page.getByRole("button", { name: "编辑店铺资料" })).toHaveCount(0);
       await expect(
@@ -1249,7 +1283,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
               legacy: [
                 importedBusinessRegion("unexpected-zone-business"),
                 {
-                  type: "文字横幅",
+                  type: "已删除模板",
                   props: {
                     id: `${pageCase.pageKey}-unreachable-zone-banner`,
                     title: "不会被公开 Renderer 消费的 zones 内容",
@@ -1300,7 +1334,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       width: 1440,
       height: 900,
       brandBlock: {
-        type: "文字横幅",
+        type: "首屏主视觉",
         props: {
           id: "catalog-imported-intro",
           eyebrow: "SELECTION CENTER",
@@ -1391,7 +1425,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
               legacy: [
                 legacyBusinessRegion("legacy-zone-business"),
                 {
-                  type: "文字横幅",
+                  type: "已删除模板",
                   props: {
                     id: `${pageCase.pageKey}-unreachable-zone-banner`,
                     title: "不会被公开 Renderer 消费的 zones 内容",
@@ -1444,7 +1478,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     });
   }
 
-  test("页面设置可选保存媒体来源与授权编号，未完成 SEO 仍可作为草稿保存", async ({ page }) => {
+  test("页面素材来源记录默认收起且不阻断发布，仍可按需保存审计资料", async ({ page }) => {
     const requests = await mockEditorApis(page, { valid: true });
     const publishedAdminRequest = page.waitForRequest((request) =>
       new URL(request.url()).pathname.endsWith(
@@ -1466,8 +1500,15 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     await expect(drawer.getByRole("region", { name: "媒体来源与授权" })).toContainText(
       "1 项当前公开素材",
     );
+    await expect(drawer.getByRole("region", { name: "媒体来源与授权" })).toContainText("可选审计记录");
+    await expect(drawer.getByRole("region", { name: "媒体来源与授权" })).toContainText("不影响本次发布");
+    await expect(drawer).toContainText("已填写 0 / 1 项");
+    await expect(drawer.getByRole("textbox", { name: "素材 1 来源" })).toBeHidden();
+    await drawer.getByText("按需编辑 1 项素材来源记录").click();
+    await expect(drawer.getByRole("textbox", { name: "素材 1 来源" })).toBeVisible();
     await drawer.getByRole("textbox", { name: "素材 1 来源" }).fill("品牌自有拍摄");
     await drawer.getByRole("textbox", { name: "素材 1 授权编号" }).fill("HC-OWN-2026-001");
+    await expect(drawer).toContainText("已填写 1 / 1 项");
     await expect(drawer).toContainText("页面设置与画布修改会一起保存为整页草稿");
     const draftSaveRequest = page.waitForRequest((request) => {
       const pathname = new URL(request.url()).pathname;
@@ -1619,6 +1660,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     expect(drawerBox).not.toBeNull();
     expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
     expect(drawerBox!.width).toBeLessThanOrEqual(390.5);
+    await drawer.getByText("按需编辑 1 项素材来源记录").click();
     await drawer.getByRole("textbox", { name: "素材 1 来源" }).fill("品牌自有拍摄");
     await expect(drawer.getByRole("textbox", { name: "素材 1 来源" })).toHaveValue(
       "品牌自有拍摄",

@@ -62,6 +62,8 @@ interface MediaPickerFieldProps {
   pageMediaOpen?: boolean;
   /** 参考图对应的媒体任务布局：保留真实上传链路，只改变信息层级。 */
   taskPresentation?: boolean;
+  /** 仅把本地图片读入当前内存会话，不上传、不登记到页面素材库。 */
+  sessionOnly?: boolean;
 }
 
 export default function MediaPickerField({
@@ -80,6 +82,7 @@ export default function MediaPickerField({
   onOpenPageMedia,
   pageMediaOpen = false,
   taskPresentation = false,
+  sessionOnly = false,
 }: MediaPickerFieldProps) {
   const { message, modal } = AntdApp.useApp();
   /** 上传区比例后缀：一律由规格派生,schema 的 placeholder 只写人话不写比例 */
@@ -136,6 +139,19 @@ export default function MediaPickerField({
 
     setUploading(true);
     try {
+      if (sessionOnly) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.addEventListener("load", () => (
+            typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("invalid result"))
+          ));
+          reader.addEventListener("error", () => reject(reader.error ?? new Error("read failed")));
+          reader.readAsDataURL(file);
+        });
+        onChange?.(dataUrl);
+        message.success("图片已载入本次试排");
+        return false;
+      }
       const result = await uploadApi.uploadImage(file);
       const data = unwrapResponse<{ url: string }>(result);
       const finalUrl = data?.url;
@@ -154,7 +170,7 @@ export default function MediaPickerField({
         message.error("上传返回结果异常");
       }
     } catch {
-      message.error("上传失败，请重试");
+      message.error(sessionOnly ? "图片读取失败，请重试" : "上传失败，请重试");
     } finally {
       setUploading(false);
     }
@@ -195,7 +211,9 @@ export default function MediaPickerField({
     }
     onChange?.(trimmed);
     if (isHttpsUrl) {
-      message.warning("外链图片仅用于草稿预览；发布前请使用“更换图片”上传到本站");
+      message.warning(sessionOnly
+        ? "外链图片只用于本次试排，刷新或重开后消失"
+        : "外链图片仅用于草稿预览；发布前请使用“更换图片”上传到本站");
     }
   };
 
@@ -227,6 +245,7 @@ export default function MediaPickerField({
       data-media-device={device}
       data-workspace-field-control="media-picker"
       data-workspace-field-shared="true"
+      data-media-session-only={sessionOnly ? "true" : undefined}
       tabIndex={fieldKey ? -1 : undefined}
     >
       {!readOnly ? (
@@ -265,9 +284,8 @@ export default function MediaPickerField({
                   width: "100%",
                   height: "100%",
                   background: "#F4F5F5",
-                }}
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
+                  // 复用素材探测状态，替换成功后恢复；不遗留 DOM 上的隐藏样式。
+                  display: imgSize.error ? "none" : undefined,
                 }}
               />
               {imgSize.error ? (
@@ -376,7 +394,9 @@ export default function MediaPickerField({
             allowClear
           />
           <small className="homepage-editor__media-url-hint">
-            HTTPS 外链可用于草稿预览；正式发布前需上传到本站，避免失效或被第三方撤回。
+            {sessionOnly
+              ? "图片链接只用于本次编辑，刷新或重开模板后消失。"
+              : "HTTPS 外链可用于草稿预览；正式发布前需上传到本站，避免失效或被第三方撤回。"}
           </small>
           <div style={{ display: "flex", gap: 6 }}>
             <Button size="small" type="primary" ghost onClick={confirmUrl}>
@@ -417,7 +437,7 @@ export default function MediaPickerField({
             <InboxOutlined style={{ color: "var(--adm-action, #5F6568)", fontSize: 22 }} />
             <div style={{ marginTop: 8, color: "#181A1B", fontSize: 13 }}>
               {uploading
-                ? "图片上传中…"
+                  ? sessionOnly ? "图片读取中…" : "图片上传中…"
                 : taskPresentation
                   ? "拖入图片，或点击选择文件"
                   : `${placeholder || "拖入图片或点击上传"}${ratioSuffix}`}

@@ -16,6 +16,10 @@ const operationsRuntimeExecutables = [
   "/usr/local/bin/restore-drill.sh",
   "/usr/local/bin/prune-backups.sh",
 ];
+export const releaseStaticWorkflowPaths = Object.freeze([
+  ".github/workflows/quality.yml",
+  ".github/workflows/release-images.yml",
+]);
 
 function fail(code) {
   throw new Error(code);
@@ -163,7 +167,7 @@ function assertNodeAndClientRuntimeBaseline() {
       fail(`NODE_ENGINE_BASELINE_INVALID:${path}`);
     }
   }
-  for (const path of [".github/workflows/ci.yml", ".github/workflows/quality.yml", ".github/workflows/release-images.yml"]) {
+  for (const path of releaseStaticWorkflowPaths) {
     const source = readProjectFile(path);
     const versions = [...source.matchAll(/^\s+node-version:\s*["']?(\d+)["']?\s*$/gm)]
       .map((match) => Number(match[1]));
@@ -200,7 +204,11 @@ function assertNodeAndClientRuntimeBaseline() {
       fail(`CLIENT_NON_ROOT_NGINX_PATH_MISSING:${required}`);
     }
   }
-  return { packageCount: 3, workflowCount: 3, dockerfileCount: 2 };
+  return {
+    packageCount: 3,
+    workflowCount: releaseStaticWorkflowPaths.length,
+    dockerfileCount: 2,
+  };
 }
 
 function assertComposeImages() {
@@ -338,13 +346,8 @@ function assertReleaseWorkflow() {
 }
 
 function assertWorkflowActionsPinned() {
-  const workflowPaths = [
-    ".github/workflows/ci.yml",
-    ".github/workflows/quality.yml",
-    ".github/workflows/release-images.yml",
-  ];
   let actionCount = 0;
-  for (const path of workflowPaths) {
+  for (const path of releaseStaticWorkflowPaths) {
     const source = readProjectFile(path);
     for (const match of source.matchAll(/^\s+(?:-\s+)?uses:\s+([^\s]+)\s*$/gm)) {
       actionCount += 1;
@@ -355,7 +358,7 @@ function assertWorkflowActionsPinned() {
     }
   }
   if (actionCount === 0) fail("WORKFLOW_ACTION_REFERENCE_MISSING");
-  return { workflowCount: workflowPaths.length, actionCount };
+  return { workflowCount: releaseStaticWorkflowPaths.length, actionCount };
 }
 
 function assertReleaseSupplyChainTests() {

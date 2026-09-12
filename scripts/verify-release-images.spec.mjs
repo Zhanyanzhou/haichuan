@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  releaseStaticWorkflowPaths,
   validateComposeBuildPolicy,
   validateReleaseEnvironment,
   validateReleaseManifest,
@@ -19,6 +20,13 @@ const migrationBundleSha256 = "b".repeat(64);
 const serverDigest = `sha256:${"c".repeat(64)}`;
 const clientDigest = `sha256:${"d".repeat(64)}`;
 const operationsDigest = `sha256:${"e".repeat(64)}`;
+
+test("static release checks follow the two active workflows after ci retirement", () => {
+  assert.deepEqual(releaseStaticWorkflowPaths, [
+    ".github/workflows/quality.yml",
+    ".github/workflows/release-images.yml",
+  ]);
+});
 
 test("release workflow rejects non-default or unprotected release refs before quality lookup", () => {
   const policyIndex = releaseWorkflow.indexOf("拒绝未受保护的发布来源");

@@ -179,7 +179,7 @@
 - [发布校验与商品公开范围校验](../../server/src/modules/page-modules/page-modules.service.ts)：校验区块类型、必要图片、资源/链接格式、活动日期和商品的公开发布条件。
 - [页面文档发布、草稿与版本恢复接口](../../server/src/modules/page-modules/page-modules.controller.ts)：后台“保存草稿/发布/恢复版本”流程的服务端入口。
 - [公开访问矩阵](../PUBLIC_ACCESS_MATRIX.md)：访客公开商品范围及前台能力边界。
-- [页面装修与模板设计专项框架](../page-builder/template-design-framework.md)：现行模板模型、实例边界与生命周期；视觉、响应式和交互见 [UI_GUIDE](../UI_GUIDE.md)，验证范围见 [WORKFLOW](../../WORKFLOW.md) 第 5 节。历史设计卡不作为本操作清单的验收规则。
+- [模板设计唯一标准](../page-builder/template-creation-rules.md)：模板产品行为与验收的统一入口；具体页面实例和版本操作见[从属交接细则](../page-builder/template-design-framework.md)，视觉与交互见 [UI_GUIDE](../UI_GUIDE.md)，验证层级见 [WORKFLOW](../../WORKFLOW.md) 第 5 节。历史设计卡不作为本操作清单的验收规则。
 
 上述系统限制只保证后续操作满足相应技术校验，并不证明历史数据库中已有文案、素材、商品引用或业务承诺真实、有效、可公开或已经下线。
 

@@ -20,7 +20,8 @@ cd client && npm ci
 cd ../server && npm ci
 cd ..
 
-# 2. 仅启动当前容器拓扑中的本地开发数据库
+# 2. 已准备 Compose 所需镜像引用、卷和配置后，仅启动获批的本地开发数据库
+# Compose 会先解析整份配置，不能因只启动 mysql 就省略其他服务的必需变量。
 docker compose up -d mysql
 
 # 3. 本地开发数据库迁移（仅限已确认的本地目标，并获批准后）
@@ -42,7 +43,8 @@ npm run dev
 
 | 端口 | 服务           |
 | ---- | -------------- |
-| 80   | 完整 Docker 栈入口（Nginx） |
+| 80   | Docker HTTP 入口：ACME 挑战与 HTTPS 跳转，非独立整站入口 |
+| 8081 | Nginx 可信 TLS 回源（仅宿主回环或受控容器网络） |
 | 5173 | Vite 开发前端（`strictPort`） |
 | 5174 | 显式 Mock 前端（仅 `npm run dev:mock`） |
 | 5176 | Playwright development-mode 临时前端（随测试启停） |
@@ -76,7 +78,7 @@ npm run dev
 2. **修改 schema.prisma 后**：先获批准，再运行 `prisma migrate dev` → `prisma generate`；仅生成或验证不等于可迁移目标数据库
 3. **修改 HTTP 传输层**：检查所有领域服务、拦截器、解包与错误路径；不依赖固定消费者数量
 4. **Feature Flags**：从当前代码和 `docs/CURRENT_STATE.md` 复核入口，不凭旧路径推断
-5. **Demo Seed 不是生产初始化**：它会写入固定演示管理员、仓库、分类和 5 条演示商品；候选/生产首管理员必须使用 `docs/DEPLOYMENT.md` 中的一次性 CLI，正式 PageDocument 与 SiteSettings 必须通过后台维护和发布。
+5. **Demo Seed 不是生产初始化**：它会写入固定演示管理员、仓库、分类和 5 条演示商品；候选/生产首管理员必须使用 `docs/PRODUCTION_RELEASE_RUNBOOK.md` 第 2 节的一次性 CLI，正式 PageDocument 与 SiteSettings 必须通过后台维护和发布。
 6. **备份容器没有 HTTP 端口**：`backup` 在 Docker 内按计划写入宿主机 `./backups`，并通过本地状态标记健康检查暴露最近一次执行结果；容器健康、后台状态、完整产物与隔离恢复演练是四层不同证据，不得用任一层替代恢复验收。
 
 ## Mock 模式
@@ -87,7 +89,7 @@ Mock 只能通过 `npm run dev:mock` 显式启动，固定使用 `http://127.0.0
 
 `npx prisma migrate dev` 只用于已确认且获批准的本地开发数据库，不得用于生产。生产 migration 必须先建立数据库与媒体回滚点，再由获批的独立 migration runner 按 `server/package-lock.json` 锁定依赖，核验目标库 migration 状态和待应用清单，最后执行批准范围内的 migration。
 
-当前运行时镜像通过 `npm ci --omit=dev` 排除了位于 `devDependencies` 的 Prisma CLI。禁止使用 `docker compose exec server npx prisma migrate deploy`：该顺序会在新服务启动后才迁移，并可能由 `npx` 临时下载未锁定 CLI。独立 runner 尚未获批前，不得以旧命令执行生产 migration；完整生产顺序见 `docs/DEPLOYMENT.md`“第六步”。
+当前运行时镜像通过 `npm ci --omit=dev` 排除了位于 `devDependencies` 的 Prisma CLI。生产迁移使用同批签名的 operations 镜像；禁止使用 `docker compose exec server npx prisma migrate deploy`，避免在新服务启动后才迁移或由 `npx` 临时下载未锁定 CLI。目标数据库写入仍需精确授权，完整顺序见 `docs/PRODUCTION_RELEASE_RUNBOOK.md` 第 2 节。
 
 ## 健康检查
 
@@ -97,12 +99,12 @@ Mock 只能通过 `npm run dev:mock` 显式启动，固定使用 `http://127.0.0
 
 ## 端口与启动说明
 
-- 本地 Docker 整站通过 `docker compose up -d` 启动，会自动合并仅供本地开发的 `docker-compose.override.yml`；前台入口为 `http://localhost/`，后台登录为 `http://localhost/admin/login`。生产必须按 `docs/DEPLOYMENT.md` 显式使用 `docker compose -f docker-compose.yml ...`，不得自动合并该 override。
+- 本地 Docker 启动会自动合并仅供本地开发的 `docker-compose.override.yml`，启动前须准备当前 Compose 要求的镜像引用、卷和配置；它不自动提供 TLS。`http://localhost/` 的普通请求会跳转 HTTPS，不能作为未经 TLS 配置的完整验收入口。宿主 `127.0.0.1:8081` 仅供受控回源检查，不代表 HTTPS、Cookie 或登录闭环已通过；整栈浏览器验收需先配置获批 TLS 边缘，并按 [正式发布手册](PRODUCTION_RELEASE_RUNBOOK.md) 核对可信回源与实际访问地址。生产显式使用 `docker compose -f docker-compose.yml ...`，不得自动合并开发 override。
 - 本地 Real 开发通过 `npm run dev` 启动，前台入口为 `http://127.0.0.1:5173/`，后台登录为 `http://127.0.0.1:5173/admin/login`。不要使用 `localhost` 或 IPv6 地址切换运行模式。
 - Playwright 默认只使用专属临时端口：development mode 为 `5176`，mock mode 为 `5177`；测试进程会管理这些端口的启停，不得把它们当作人工开发入口，也不得让测试默认占用或复用 `5173/5174`。
 - 宿主机后端运行当前编译产物，不提供后端热更新；修改服务端代码后需停止当前进程并重新执行 `npm run dev` 或 `npm run dev:server`。
 - 本地编译产物在模块导入阶段即校验 `JWT_SECRET`，因此开发命令使用 Node `--env-file=.env` 在导入前加载现有 `server/.env`；不得把真实值写入脚本、日志或仓库。
 - `server/scripts/start-local.cjs` 只为宿主机开发固定 `127.0.0.1:3000`；Docker/生产继续使用 `server/package.json` 的 `start:prod`，不复用本地绑定。
-- 整套 Docker 与宿主机开发可以同时存在：宿主机后端固定占用 `3000`，容器后端通过 override 映射 `127.0.0.1:3002`，完整容器栈经 `:80` 自包含访问。不得改回容器抢占宿主机 `3000`。
+- 整套 Docker 与宿主机开发可在端口和数据资源已核对隔离后同时存在：宿主机后端使用 `3000`，容器后端通过 override 映射 `127.0.0.1:3002`；容器公开访问依赖 TLS 边缘，`:80` 仅负责挑战和跳转。不得让容器抢占宿主机 `3000`，也不把端口不同当作数据库已隔离的证据。
 - PowerShell 若阻止 `npm.ps1`，请使用 `npm.cmd run dev` 或 `npm.cmd run dev:client`。
 - 后端默认使用 `3000`。若该端口已被不明进程占用，先识别并停止错误实例；不要通过临时改端口掩盖 API 所有权冲突。需要改变端口拓扑时按基础设施决策处理。

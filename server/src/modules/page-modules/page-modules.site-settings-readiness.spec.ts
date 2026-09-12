@@ -28,19 +28,6 @@ function hero(id: string) {
   };
 }
 
-function storeDocument(props: Record<string, unknown> = {}) {
-  return {
-    content: [
-      hero("readiness-about-hero"),
-      {
-        type: "门店信息",
-        props: { id: "readiness-store", ...props },
-      },
-    ],
-    root: { props: {} },
-  };
-}
-
 function contactDocument() {
   return {
     content: [
@@ -58,67 +45,29 @@ function contactDocument() {
   };
 }
 
-function appointmentDocument(props: Record<string, unknown> = {}) {
-  return {
-    content: [
-      hero("readiness-appointment-hero"),
-      {
-        type: "预约入口",
-        props: {
-          id: "readiness-appointment",
-          title: "预约鉴赏",
-          buttonText: "立即预约",
-          targetType: "page",
-          linkUrl: "/contact",
-          ...props,
-        },
-      },
-    ],
-    root: { props: {} },
-  };
-}
-
-test("门店资料缺失但有图片时阻断发布并说明公开端仅展示图片", async () => {
-  const document = storeDocument({ image: "/images/store.jpg" });
+test("联系页无统一联系资料时给出非阻断提醒并绑定业务功能区原因", async () => {
+  const document = contactDocument();
   const result = await createService(null).validatePageDocument(
-    "about",
+    "contact",
     document,
     makeFormalPageMetadata(document),
   );
 
-  assert.equal(result.valid, false);
+  assert.equal(result.valid, true);
   const issue = result.issues.find(
-    (item) => item.code === "page-validation-site-settings-store-missing",
+    (item) => item.code === "page-validation-site-settings-contact-missing",
   );
-  assert.equal(issue?.severity, "error");
-  assert.ok(result.errors.includes(issue?.message || ""));
-  assert.equal(issue?.blockId, "readiness-store");
-  assert.match(issue?.message || "", /仅显示门店图片/);
+  assert.equal(issue?.severity, "warning");
+  assert.equal(issue?.blockId, "readiness-contact-region");
+  assert.equal(issue?.path, "siteSettings.contact");
+  assert.match(issue?.message || "", /仍可提交咨询/);
+  assert.equal(result.errors.includes(issue?.message || ""), false);
 });
 
-test("门店资料与图片均缺失时阻断发布并说明模块不会显示", async () => {
-  const document = storeDocument();
-  const result = await createService({}).validatePageDocument(
-    "about",
-    document,
-    makeFormalPageMetadata(document),
-  );
-
-  assert.equal(result.valid, false);
-  const issue = result.issues.find(
-    (item) => item.code === "page-validation-site-settings-store-missing",
-  );
-  assert.equal(issue?.path, "content[1].props.image");
-  assert.match(issue?.message || "", /公开端不会显示/);
-});
-
-test("已隐藏的门店模块不产生正式资料就绪提示", async () => {
-  const document = storeDocument({ isVisible: false });
-  const result = await createService({}).validatePageDocument(
-    "about",
-    document,
-    makeFormalPageMetadata(document),
-  );
+test("统一联系资料已有可公开字段时不产生就绪提示", async () => {
+  const document = contactDocument();
+  const result = await createService({ contactEmail: "service@example.com" })
+    .validatePageDocument("contact", document, makeFormalPageMetadata(document));
 
   assert.equal(result.valid, true);
   assert.equal(
@@ -127,97 +76,15 @@ test("已隐藏的门店模块不产生正式资料就绪提示", async () => {
   );
 });
 
-test("联系页无统一联系资料时阻断发布并绑定业务功能区原因", async () => {
-  const document = contactDocument();
-  const result = await createService(null).validatePageDocument(
-    "contact",
-    document,
-    makeFormalPageMetadata(document),
-  );
-
-  assert.equal(result.valid, false);
-  const issue = result.issues.find(
-    (item) => item.code === "page-validation-site-settings-contact-missing",
-  );
-  assert.equal(issue?.severity, "error");
-  assert.equal(issue?.blockId, "readiness-contact-region");
-  assert.equal(issue?.path, "siteSettings.contact");
-  assert.match(issue?.message || "", /仍可提交咨询/);
-  assert.ok(result.errors.includes(issue?.message || ""));
-});
-
-test("预约模块无统一联系电话时阻断发布并说明只隐藏次级电话", async () => {
-  const document = appointmentDocument();
-  const result = await createService({}).validatePageDocument(
-    "about",
-    document,
-    makeFormalPageMetadata(document),
-  );
-
-  assert.equal(result.valid, false);
-  const issue = result.issues.find(
-    (item) => item.path === "siteSettings.contactPhone",
-  );
-  assert.equal(issue?.severity, "error");
-  assert.equal(issue?.blockId, "readiness-appointment");
-  assert.match(issue?.message || "", /主预约入口仍可使用/);
-});
-
-test("已隐藏的预约模块不产生联系电话就绪提示", async () => {
-  const document = appointmentDocument({ isVisible: false });
-  const result = await createService({}).validatePageDocument(
-    "about",
-    document,
-    makeFormalPageMetadata(document),
-  );
-
-  assert.equal(result.valid, true);
-  assert.equal(
-    result.issues.some((item) => item.path === "siteSettings.contactPhone"),
-    false,
-  );
-});
-
-test("统一资料已有可公开字段时不产生就绪提示", async () => {
-  const storeDocumentValue = storeDocument();
-  const contactDocumentValue = contactDocument();
-  const appointmentDocumentValue = appointmentDocument();
-  const store = await createService({ contactAddress: "上海市静安区" })
-    .validatePageDocument("about", storeDocumentValue, makeFormalPageMetadata(storeDocumentValue));
-  const contact = await createService({ contactEmail: "service@example.com" })
-    .validatePageDocument("contact", contactDocumentValue, makeFormalPageMetadata(contactDocumentValue));
-  const appointment = await createService({ contactPhone: "400-111-2222" })
-    .validatePageDocument("about", appointmentDocumentValue, makeFormalPageMetadata(appointmentDocumentValue));
-
-  for (const result of [store, contact, appointment]) {
-    assert.equal(result.valid, true);
-    assert.equal(
-      result.issues.some((item) => item.code.startsWith("page-validation-site-settings-")),
-      false,
-    );
-  }
-});
-
-test("后台发布预检显式返回全站联系、法务、SEO 与语言准备度阻断", async () => {
+test("日常页面预检不合并整站上线准备度", async () => {
   const document = hero("global-readiness-hero");
   const puckData = { content: [document], root: { props: {} }, zones: {} };
-  const result = await createService({
-    siteName: "海川珠宝",
-    contactPhone: "400-123-4567",
-  }).validatePageDocument(
+  const result = await createService(null).validatePageDocument(
     "home",
     puckData,
     makeFormalPageMetadata(puckData),
-    { includeGlobalSiteReadiness: true },
   );
 
-  assert.equal(result.valid, false);
-  assert.ok(result.issues.some(
-    (issue) => issue.code === "page-validation-site-publication-privacy-policy-review-missing"
-      && issue.path === "siteSettings.privacyPolicyReviewReference",
-  ));
-  assert.ok(result.issues.some(
-    (issue) => issue.code === "page-validation-site-publication-canonical-base-url-missing"
-      && issue.path === "siteSettings.canonicalBaseUrl",
-  ));
+  assert.equal(result.valid, true, JSON.stringify(result.issues));
+  assert.equal(result.issues.some((issue) => issue.code.startsWith("page-validation-site-publication-")), false);
 });

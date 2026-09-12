@@ -1,12 +1,20 @@
 import {
   isMatureContentTemplateSlotType,
+  MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
   validateDynamicTemplateSlotContent,
   validateDynamicTemplateDefinition,
 } from "./generated/validateTemplateDefinition.generated";
+import {
+  getContentTemplateCompletion,
+  sanitizeContentTemplateDefaultContent,
+  type ContentTemplateMediaReference,
+} from "./generated/contentTemplates.generated";
 import type {
   DynamicTemplateSlotDefinition,
+  TemplateBreakpoint,
   TemplateDefinitionV2,
 } from "./generated/templateDefinition.generated";
+import { resolveTemplateNodeRules } from "./generated/templateResponsive.generated";
 export type { TemplateInstanceV2 } from "./generated/templateDefinition.generated";
 
 export const DYNAMIC_TEMPLATE_BLOCK_TYPE = "动态模板实例";
@@ -56,6 +64,126 @@ export interface DynamicTemplateInstanceValidation {
   actions: DynamicTemplateActionReference[];
 }
 
+function getPubliclyReachableDynamicTemplateSlotIds(
+  definition: TemplateDefinitionV2,
+  hiddenSlotIds: ReadonlySet<string>,
+  contentBySlotId: Record<string, unknown>,
+  onBackground?: (nodeId: string, url: string) => void,
+) {
+  const visibleSlotIds = new Set<string>();
+  const visitedStates = new Set<string>();
+  const visit = (
+    nodeId: string,
+    breakpoint: TemplateBreakpoint,
+    ancestorIds: ReadonlySet<string>,
+  ) => {
+    if (ancestorIds.has(nodeId)) return;
+    const node = definition.nodes[nodeId];
+    if (!node) return;
+    const rules = resolveTemplateNodeRules(definition, nodeId, breakpoint);
+    if (node.hidden || rules.hidden || rules.display === "none") return;
+    if (node.slotId && hiddenSlotIds.has(node.slotId)) return;
+    const stateKey = `${nodeId}:${breakpoint}`;
+    if (visitedStates.has(stateKey)) return;
+    visitedStates.add(stateKey);
+    // 空槽位在公开 Renderer 中整体隐藏，它的背景也不构成可达素材。
+    const slot = node.slotId ? definition.slots[node.slotId] : undefined;
+    const hasInstanceValue = Boolean(node.slotId && Object.prototype.hasOwnProperty.call(contentBySlotId, node.slotId));
+    const instanceValue = node.slotId ? contentBySlotId[node.slotId] : undefined;
+    const defaultValue = node.slotId ? definition.defaultContent[node.slotId] : undefined;
+    const value = hasInstanceValue && !(slot?.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue)) ? instanceValue : defaultValue;
+    if ((!slot || hasRenderableSlotContent(slot, value)) && isNonEmptyString(rules.backgroundImage)) {
+      onBackground?.(nodeId, rules.backgroundImage);
+    }
+    if (node.slotId && !hiddenSlotIds.has(node.slotId)) {
+      visibleSlotIds.add(node.slotId);
+    }
+    const nextAncestors = new Set(ancestorIds);
+    nextAncestors.add(nodeId);
+    node.childIds.forEach((childId) => {
+      visit(childId, breakpoint, nextAncestors);
+    });
+  };
+  const breakpoints: TemplateBreakpoint[] = definition.schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"];
+  for (const breakpoint of breakpoints) visit(definition.rootNodeId, breakpoint, new Set());
+  return visibleSlotIds;
+}
+
+/**
+ * 从已注入精确正式模板版本的 PageDocument 中提取模板实例媒体。
+ * 定义必须先由 Repository 校验并写入 resolvedDynamicTemplates，避免按任意字段名猜测素材。
+ */
+export function getDynamicTemplateDocumentMediaReferences(
+  puckData: unknown,
+  options: { includeZones?: boolean } = {},
+): ContentTemplateMediaReference[] {
+  if (!isRecord(puckData)) return [];
+  const resolved = isRecord(puckData[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY])
+    ? puckData[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]
+    : {};
+  const references: ContentTemplateMediaReference[] = [];
+  const collectBlocks = (blocks: unknown, basePath: string) => {
+    if (!Array.isArray(blocks)) return;
+    blocks.forEach((block, blockIndex) => {
+      if (!isRecord(block) || block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isRecord(block.props)) {
+        return;
+      }
+      const props = block.props;
+      if (props.isVisible === false) return;
+      const reference = readDynamicTemplateInstanceReference(props);
+      if (!reference) return;
+      const resolvedVersion = resolved[
+        dynamicTemplateVersionKey(reference.templateId, reference.templateVersion)
+      ];
+      if (!isRecord(resolvedVersion)) return;
+      const definitionValidation = validateDynamicTemplateDefinition(resolvedVersion.definition);
+      if (!definitionValidation.valid || !definitionValidation.definition) return;
+      const validation = validateDynamicTemplateInstance(props, definitionValidation.definition);
+      const hiddenSlotIds = new Set(
+        Array.isArray(props.hiddenSlotIds)
+          ? props.hiddenSlotIds.filter((item): item is string => typeof item === "string")
+          : [],
+      );
+      const visibleSlotIds = getPubliclyReachableDynamicTemplateSlotIds(
+        definitionValidation.definition,
+        hiddenSlotIds,
+        isRecord(props.contentBySlotId) ? props.contentBySlotId : {},
+        (nodeId, url) => references.push({
+          url,
+          path: `${basePath}[${blockIndex}].props.templateDefinition.nodes.${nodeId}.backgroundImage`,
+          field: `${nodeId}.backgroundImage`,
+          ...(isNonEmptyString(props.id) ? { blockId: props.id.trim() } : {}),
+          moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
+        }),
+      );
+      const blockId = isNonEmptyString(props.id) ? props.id.trim() : undefined;
+      validation.assets.forEach((asset) => {
+        if (!visibleSlotIds.has(asset.slotId)) return;
+        references.push({
+          url: asset.url,
+          path: `${basePath}[${blockIndex}].props.contentBySlotId.${asset.slotId}`,
+          field: asset.slotId,
+          ...(blockId ? { blockId } : {}),
+          moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
+        });
+      });
+    });
+  };
+
+  collectBlocks(puckData.content, "content");
+  if (options.includeZones !== false && isRecord(puckData.zones)) {
+    Object.entries(puckData.zones).forEach(([zoneKey, blocks]) => {
+      collectBlocks(blocks, `zones.${zoneKey}`);
+    });
+  }
+  const seenUrls = new Set<string>();
+  return references.filter((reference) => {
+    if (seenUrls.has(reference.url)) return false;
+    seenUrls.add(reference.url);
+    return true;
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -75,25 +203,64 @@ function isEmptyContent(value: unknown): boolean {
   return false;
 }
 
+function hasRenderableSlotContent(slot: DynamicTemplateSlotDefinition, value: unknown): boolean {
+  if (slot.type === "image") return typeof value === "string" ? value.trim().length > 0 : isRecord(value) && isNonEmptyString(value.src);
+  const meaningful = (item: unknown): boolean => typeof item === "string" ? item.trim().length > 0
+    : Array.isArray(item) ? item.some(meaningful) : isRecord(item) ? Object.values(item).some(meaningful) : false;
+  return meaningful(value);
+}
+
 function isEmptyComplexContent(slotType: string, value: unknown) {
-  // 标量槽位已经由 isEmptyContent 与各自类型校验处理；这里仅检查对象型复杂槽位。
   if (!isRecord(value)) return false;
-  if (slotType === "video") return !isNonEmptyString(value.videoUrl);
-  if (slotType === "carousel") {
-    return !Array.isArray(value.images)
-      || !value.images.some((item) => isRecord(item) && isNonEmptyString(item.url));
-  }
-  if (slotType === "hotspot") return !isNonEmptyString(value.image) && !isNonEmptyString(value.mobileImage);
-  if (slotType === "beforeAfter") return !isNonEmptyString(value.beforeImage) || !isNonEmptyString(value.afterImage);
-  if (slotType === "appointment") return !isNonEmptyString(value.title) || !isNonEmptyString(value.buttonText);
-  if (slotType === "productCard") return !isNonEmptyString(value.productCode);
-  if (slotType === "productCollection") {
-    return !Array.isArray(value.productCodes) || !value.productCodes.some(isNonEmptyString);
-  }
-  if (slotType === "categoryCollection") {
-    return !Array.isArray(value.categorySlugs) || !value.categorySlugs.some(isNonEmptyString);
+  if (isMatureContentTemplateSlotType(slotType)) {
+    const moduleType = MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE[slotType];
+    const content = sanitizeContentTemplateDefaultContent(moduleType, value);
+    return !content || !hasMeaningfulBusinessContent(content);
   }
   return false;
+}
+
+function hasMeaningfulBusinessContent(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some(hasMeaningfulBusinessContent);
+  if (isRecord(value)) return Object.values(value).some(hasMeaningfulBusinessContent);
+  // 数值和布尔值是布局、显示或真实性确认参数，不能单独构成公开业务内容。
+  return false;
+}
+
+function matureContentCompletionMessage(moduleType: string, value: unknown): string | undefined {
+  const completion = getContentTemplateCompletion(moduleType, value);
+  if (!completion) return "成熟内容模板合同不可用";
+  const problems: string[] = [];
+  if (!completion.material.complete) {
+    problems.push(`缺少必填素材 ${completion.material.missing.join("、")}`);
+  }
+  if (!completion.content.complete) {
+    const missing = [
+      ...completion.content.missing,
+      ...completion.content.missingCollectionAltText.map((item) => (
+        `${item.collectionFieldKey}[${item.index}].${item.altFieldKey}`
+      )),
+    ];
+    problems.push(`缺少必填内容 ${missing.join("、")}`);
+  }
+  if (!completion.collections.complete) {
+    problems.push(completion.collections.invalid.map((item) => (
+      `${item.fieldKey} 需要 ${item.min}–${item.max} 项`
+    )).join("；"));
+  }
+  if (!completion.attestations.complete) {
+    problems.push(completion.attestations.missing.map((item) => (
+      `${item.collectionFieldKey}[${item.index}] 未确认“${item.label}”`
+    )).join("；"));
+  }
+  if (!completion.publish.complete) {
+    problems.push(completion.publish.issues
+      .filter((issue) => issue.severity === "error")
+      .map((issue) => issue.message)
+      .join("；"));
+  }
+  return problems.filter(Boolean).join("；") || undefined;
 }
 
 function readStructuredAction(value: Record<string, unknown>, prefix = "") {
@@ -373,12 +540,25 @@ export function validateDynamicTemplateInstance(
       pathSuffix: ".instanceSchemaVersion",
     });
   }
-  const reference = readDynamicTemplateInstanceReference(props);
-  if (!reference || reference.templateId !== definition.templateId) {
+  const hasStrictTemplateId = typeof props.templateId === "string"
+    && props.templateId === props.templateId.trim()
+    && STABLE_ID_PATTERN.test(props.templateId);
+  if (!hasStrictTemplateId || props.templateId !== definition.templateId) {
     issues.push({
       message: "页面实例与正式模板身份不一致",
       field: "templateId",
       pathSuffix: ".templateId",
+    });
+  }
+  if (
+    typeof props.templateVersion !== "number"
+    || !Number.isInteger(props.templateVersion)
+    || props.templateVersion <= 0
+  ) {
+    issues.push({
+      message: "页面实例模板版本必须是正整数",
+      field: "templateVersion",
+      pathSuffix: ".templateVersion",
     });
   }
   if (!isNonEmptyString(props.instanceId)) {
@@ -438,6 +618,11 @@ export function validateDynamicTemplateInstance(
     }
   }
 
+  const visibleSlotIds = getPubliclyReachableDynamicTemplateSlotIds(
+    definition,
+    new Set(hiddenSlotIds),
+    contentBySlotId,
+  );
   for (const slot of Object.values(definition.slots)) {
     const hasInstanceValue = Object.prototype.hasOwnProperty.call(contentBySlotId, slot.slotId);
     if (hasInstanceValue && !slot.editable) {
@@ -448,7 +633,9 @@ export function validateDynamicTemplateInstance(
       });
       continue;
     }
-    const value = hasInstanceValue ? contentBySlotId[slot.slotId] : definition.defaultContent[slot.slotId];
+    const instanceValue = contentBySlotId[slot.slotId];
+    const useDefault = definition.schemaVersion >= 3 && slot.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue);
+    const value = hasInstanceValue && !useDefault ? instanceValue : definition.defaultContent[slot.slotId];
     if (slot.required && (hiddenSlotIds.includes(slot.slotId)
       || !hasInstanceValue
       || isEmptyContent(contentBySlotId[slot.slotId]))) {
@@ -460,6 +647,8 @@ export function validateDynamicTemplateInstance(
       continue;
     }
     if (value === undefined || value === null || value === "") continue;
+    // 兼容旧实例清空图片后仍保留 alt 的对象；必填槽位已在上方明确阻断。
+    if (slot.type === "image" && isEmptyContent(value)) continue;
     if (!validateDynamicTemplateSlotContent(slot.type, value)) {
       issues.push({
         message: `${slot.label}内容结构与母模板槽位不匹配`,
@@ -468,6 +657,8 @@ export function validateDynamicTemplateInstance(
       });
       continue;
     }
+    // 隐藏只跳过公开内容门禁；实例字段、槽位结构、编辑授权与必填约束仍需验证。
+    if (!slot.required && !visibleSlotIds.has(slot.slotId)) continue;
     if (slot.required && isEmptyComplexContent(slot.type, value)) {
       issues.push({
         message: `${slot.label}为必填内容`,
@@ -547,6 +738,16 @@ export function validateDynamicTemplateInstance(
     }
     if (isMatureContentTemplateSlotType(slot.type)) {
       const content = value as Record<string, unknown>;
+      if (!hasMeaningfulBusinessContent(content)) continue;
+      const moduleType = MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE[slot.type];
+      const completionMessage = matureContentCompletionMessage(moduleType, content);
+      if (completionMessage) {
+        issues.push({
+          message: `${slot.label}未满足公开内容合同：${completionMessage}`,
+          field: slot.slotId,
+          pathSuffix: `.contentBySlotId.${slot.slotId}`,
+        });
+      }
       let referenceIndex = 0;
       const visit = (candidate: unknown, key = "") => {
         if (Array.isArray(candidate)) {
@@ -594,100 +795,6 @@ export function validateDynamicTemplateInstance(
       };
       visit(content);
       continue;
-    }
-    if ([
-      "video", "carousel", "hotspot", "beforeAfter", "appointment",
-      "productCard", "productCollection", "categoryCollection",
-    ].includes(slot.type)) {
-      const content = value as Record<string, unknown>;
-      const addAsset = (url: unknown) => {
-        if (isNonEmptyString(url)) assets.push({ slotId: slot.slotId, url: url.trim() });
-      };
-      const addAction = (action: unknown, index?: number, prefix = "") => {
-        if (!isRecord(action)) return;
-        const { targetType, targetValue } = readStructuredAction(action, prefix);
-        if (!["none", "page", "external", "product", "category"].includes(targetType)) {
-          issues.push({ message: `${slot.label}行动类型无效`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}` });
-        } else if (targetType !== "none" && !isNonEmptyString(targetValue)) {
-          issues.push({ message: `${slot.label}必须设置有效去向`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}` });
-        } else if (targetType !== "none" && isNonEmptyString(targetValue)) {
-          actions.push({
-            slotId: slot.slotId,
-            targetType: targetType as DynamicTemplateActionReference["targetType"],
-            value: targetValue.trim(),
-            ...(index === undefined ? {} : { index }),
-          });
-        }
-      };
-      if (slot.type === "video") {
-        addAsset(content.videoUrl);
-        addAsset(content.posterUrl);
-        if (isNonEmptyString(content.videoUrl) && !isNonEmptyString(content.videoDescription)) {
-          issues.push({ message: `${slot.label}必须填写视频说明`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.videoDescription` });
-        }
-        addAction(content);
-      } else if (slot.type === "carousel") {
-        (content.images as unknown[] ?? []).forEach((item, index) => {
-          if (!isRecord(item)) return;
-          addAsset(item.url);
-          addAsset(item.mobileUrl);
-          if (isNonEmptyString(item.url) && !isNonEmptyString(item.alt)) {
-            issues.push({ message: `${slot.label}第 ${index + 1} 张图片必须填写替代文字`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.images[${index}].alt`, index });
-          }
-          addAction(item, index);
-        });
-      } else if (slot.type === "hotspot") {
-        addAsset(content.image);
-        addAsset(content.mobileImage);
-        if ((isNonEmptyString(content.image) || isNonEmptyString(content.mobileImage)) && !isNonEmptyString(content.altText)) {
-          issues.push({ message: `${slot.label}底图必须填写替代文字`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.altText` });
-        }
-        [...(content.hotspots as unknown[] ?? []), ...(content.mobileHotspots as unknown[] ?? [])]
-          .forEach((item, index) => addAction(item, index));
-      } else if (slot.type === "beforeAfter") {
-        addAsset(content.beforeImage);
-        addAsset(content.afterImage);
-        if (isNonEmptyString(content.beforeImage) && !isNonEmptyString(content.beforeAltText)) {
-          issues.push({ message: `${slot.label}改款前图片必须填写替代文字`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.beforeAltText` });
-        }
-        if (isNonEmptyString(content.afterImage) && !isNonEmptyString(content.afterAltText)) {
-          issues.push({ message: `${slot.label}改款后图片必须填写替代文字`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.afterAltText` });
-        }
-        addAction(content);
-      } else if (slot.type === "appointment") {
-        addAsset(content.backgroundImage);
-        if (isNonEmptyString(content.backgroundImage) && !isNonEmptyString(content.altText)) {
-          issues.push({ message: `${slot.label}背景图必须填写替代文字`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.altText` });
-        }
-        addAction(content);
-      } else if (slot.type === "productCard") {
-        if (isNonEmptyString(content.productCode)) {
-          productCodes.push({ slotId: slot.slotId, value: content.productCode.trim() });
-        }
-        addAction(content, undefined, "secondary");
-      } else if (slot.type === "productCollection") {
-        const values = Array.isArray(content.productCodes)
-          ? content.productCodes.filter(isNonEmptyString).map((item) => item.trim())
-          : [];
-        if (slot.validation.minItems !== undefined && values.length < slot.validation.minItems) {
-          issues.push({ message: `${slot.label}至少需要 ${slot.validation.minItems} 项`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.productCodes` });
-        }
-        if (slot.validation.maxItems !== undefined && values.length > slot.validation.maxItems) {
-          issues.push({ message: `${slot.label}最多允许 ${slot.validation.maxItems} 项`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.productCodes` });
-        }
-        values.forEach((item, index) => productCodes.push({ slotId: slot.slotId, value: item, index }));
-      } else {
-        const values = Array.isArray(content.categorySlugs)
-          ? content.categorySlugs.filter(isNonEmptyString).map((item) => item.trim())
-          : [];
-        if (slot.validation.minItems !== undefined && values.length < slot.validation.minItems) {
-          issues.push({ message: `${slot.label}至少需要 ${slot.validation.minItems} 项`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.categorySlugs` });
-        }
-        if (slot.validation.maxItems !== undefined && values.length > slot.validation.maxItems) {
-          issues.push({ message: `${slot.label}最多允许 ${slot.validation.maxItems} 项`, field: slot.slotId, pathSuffix: `.contentBySlotId.${slot.slotId}.categorySlugs` });
-        }
-        values.forEach((item, index) => categorySlugs.push({ slotId: slot.slotId, value: item, index }));
-      }
     }
   }
 

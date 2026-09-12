@@ -205,6 +205,7 @@ function normalizeSettings(settings: unknown): Record<string, unknown> {
   const source = isRecord(settings) ? settings : {};
   return {
     ...source,
+    brandPresentationMode: source.brandPresentationMode || 'text-only',
     logo: normalizePublishedBrandLogo(source.logo, source.canonicalBaseUrl) ?? '',
   };
 }

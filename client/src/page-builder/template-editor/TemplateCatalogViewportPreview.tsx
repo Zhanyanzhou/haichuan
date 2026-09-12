@@ -37,6 +37,7 @@ interface TemplateCatalogViewportPreviewProps {
   templateKey: string;
   title: string;
   unavailable?: boolean;
+  showSlotAnnotations?: boolean;
   viewport: "desktop" | "mobile";
 }
 
@@ -69,9 +70,11 @@ export default function TemplateCatalogViewportPreview({
   templateKey,
   title,
   unavailable = false,
+  showSlotAnnotations = false,
   viewport,
 }: TemplateCatalogViewportPreviewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   const portalStyleSyncDocumentRef = useRef<Document | null>(null);
@@ -193,10 +196,16 @@ export default function TemplateCatalogViewportPreview({
 
   useLayoutEffect(() => {
     const host = hostRef.current;
-    if (!host || isUnavailable) return undefined;
+    const stage = stageRef.current;
+    if (!host || !stage || isUnavailable) return undefined;
     let animationFrameId: number | null = null;
-    const measureWidth = () => {
-      const scale = host.clientWidth > 0 ? host.clientWidth / sourceWidth : 0;
+    const measureScale = () => {
+      const availableWidth = stage.clientWidth;
+      let scale = availableWidth > 0 ? availableWidth / sourceWidth : 0;
+      // 外层相框保持统一尺寸，真正的画布按自身宽高完整缩放并居中。
+      const designStage = stage.closest('[data-unified-template-library="design"]');
+      const availableHeight = designStage ? stage.clientHeight : 0;
+      if (availableHeight > 0) scale = Math.min(scale, availableHeight / measurement.naturalHeight);
       if (scale <= 0) return;
       setMeasurement((current) => Math.abs(current.scale - scale) < 0.0001
         ? current
@@ -206,17 +215,21 @@ export default function TemplateCatalogViewportPreview({
       if (animationFrameId !== null) return;
       animationFrameId = window.requestAnimationFrame(() => {
         animationFrameId = null;
-        measureWidth();
+        measureScale();
       });
     };
     const observer = new ResizeObserver(scheduleWidthMeasurement);
-    observer.observe(host);
+    observer.observe(stage);
+    const list = host.closest(".unified-template-library__scroll");
+    const listObserver = new MutationObserver(scheduleWidthMeasurement);
+    if (list) listObserver.observe(list, { attributes: true, attributeFilter: ["class"] });
     scheduleWidthMeasurement();
     return () => {
       observer.disconnect();
+      listObserver.disconnect();
       if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
     };
-  }, [isUnavailable, sourceWidth]);
+  }, [isUnavailable, sourceWidth, measurement.naturalHeight]);
 
   useLayoutEffect(() => {
     const content = contentElement;
@@ -256,8 +269,8 @@ export default function TemplateCatalogViewportPreview({
         : { ...current, naturalHeight });
       const nextRendererReady = hasRenderedPreviewRoot();
       setRendererReady(nextRendererReady);
-      const genericSlotsReady = slots.length === 0 || slotBoxCount > 0;
-      lastMeasurementReady = nextRendererReady && genericSlotsReady;
+      // 槽位标注只是编辑辅助层，不能决定缩略图是否已经成功渲染。
+      lastMeasurementReady = nextRendererReady;
       if (lastMeasurementReady) previewTimedOutRef.current = false;
       setPreviewStatus(lastMeasurementReady
         ? "ready"
@@ -328,33 +341,36 @@ export default function TemplateCatalogViewportPreview({
   ]);
 
   const scaledHeight = measurement.naturalHeight * measurement.scale;
+  const dimensionLabel = `${viewport === "desktop" ? "桌面" : "手机"} · ${Math.round(sourceWidth)} × ${Math.round(measurement.naturalHeight)} · ${heightMode === "auto" ? "随内容变化" : heightMode === "fixed" ? "固定高度" : ratioLabel}`;
 
   return (
     <div
       className={`template-editor__catalog-preview-shell is-${viewport}${isUnavailable || previewStatus === "unavailable" ? " is-unavailable" : ""}`}
       data-template-catalog-preview-shell
+      data-preview-annotations={showSlotAnnotations ? "true" : "false"}
       data-preview-status={previewStatus}
       data-preview-renderer-ready={rendererReady ? "true" : "false"}
       data-preview-styles-ready={stylesReady ? "true" : "false"}
       data-preview-slot-box-count={slotBoxCount}
+      data-preview-source-size={`${Math.round(sourceWidth)}x${Math.round(measurement.naturalHeight)}`}
     >
-      <div
-        ref={hostRef}
-        className={`homepage-editor__template-preview-img template-editor__catalog-viewport-preview is-${viewport}`}
-        data-content-template-preview={templateKey}
-        data-preview-art-direction="neutral-template-preview-v1"
-        data-preview-height-mode={heightMode}
-        data-preview-natural-height={Math.round(measurement.naturalHeight)}
-        data-preview-ratio={heightMode === "auto" ? "auto" : ratioLabel}
-        data-preview-viewport={viewport}
-        style={{
-          height: isUnavailable ? undefined : scaledHeight,
-          minHeight: previewStatus === "loading" ? 56 : undefined,
-          overflow: "hidden",
-          position: "relative",
-          width: "100%",
-        }}
-      >
+      <div ref={stageRef} className="template-editor__catalog-artboard-stage">
+        <div
+          ref={hostRef}
+          className={`homepage-editor__template-preview-img template-editor__catalog-viewport-preview is-${viewport}`}
+          data-content-template-preview={templateKey}
+          data-preview-art-direction="neutral-template-preview-v1"
+          data-preview-height-mode={heightMode}
+          data-preview-natural-height={Math.round(measurement.naturalHeight)}
+          data-preview-ratio={heightMode === "auto" ? "auto" : ratioLabel}
+          data-preview-viewport={viewport}
+          style={{
+            height: isUnavailable ? undefined : scaledHeight,
+            overflow: "hidden",
+            position: "relative",
+            width: "100%",
+          }}
+        >
         {isUnavailable ? (
           <span className="template-editor__catalog-preview-state" role="status">预览不可用</span>
         ) : (
@@ -371,7 +387,7 @@ export default function TemplateCatalogViewportPreview({
               style={{
                 border: 0,
                 height: measurement.naturalHeight,
-                left: 0,
+                left: `calc(50% - ${sourceWidth * measurement.scale / 2}px)`,
                 pointerEvents: "none",
                 position: "absolute",
                 top: 0,
@@ -382,15 +398,17 @@ export default function TemplateCatalogViewportPreview({
               onLoad={connectFrame}
             />
             <span className="template-editor__catalog-artboard-boundary" aria-hidden="true" />
-            <EditableTargetOverlay
-              sourceFrame={frameDocument ? frameRef.current : null}
-              sourceRoot={contentElement}
-              hostRoot={hostRef.current}
-              targets={overlayTargets}
-              surface="catalog"
-              annotations
-              onMeasurementChange={setSlotBoxCount}
-            />
+            {showSlotAnnotations ? (
+              <EditableTargetOverlay
+                sourceFrame={frameDocument ? frameRef.current : null}
+                sourceRoot={contentElement}
+                hostRoot={hostRef.current}
+                targets={overlayTargets}
+                surface="catalog"
+                annotations
+                onMeasurementChange={setSlotBoxCount}
+              />
+            ) : null}
             {previewStatus !== "ready" ? (
               <span className="template-editor__catalog-preview-state" role="status">
                 {previewStatus === "unavailable" ? "预览不可用" : "正在生成预览"}
@@ -409,6 +427,10 @@ export default function TemplateCatalogViewportPreview({
                   className="template-editor__canvas-renderer template-editor__dynamic-canvas-renderer template-editor__catalog-canvas-renderer"
                   style={{
                     "--homepage-editor-viewport-height": `${fallbackHeight}px`,
+                    // 目录直接挂载此层；不能继承编辑画布的 absolute，否则 body 塌为 1px 并裁掉正文。
+                    position: "relative",
+                    inset: "auto",
+                    transform: "none",
                     minHeight: fallbackHeight,
                     width: sourceWidth,
                   } as CSSProperties}
@@ -440,7 +462,11 @@ export default function TemplateCatalogViewportPreview({
               frameDocument.getElementById("template-viewport-root")!,
             )
           : null}
+        </div>
       </div>
+      <span className="template-editor__catalog-dimensions">
+        {dimensionLabel}
+      </span>
     </div>
   );
 }

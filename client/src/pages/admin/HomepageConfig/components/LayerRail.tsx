@@ -5,6 +5,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { App as AntdApp } from "antd";
+import { useGetPuck } from "@puckeditor/core";
 import {
   DeleteOutlined,
   EyeInvisibleOutlined,
@@ -23,6 +24,12 @@ import { resolveVisualNode } from "@/page-builder/runtime/visualLayout";
 import { getTemplateContractNodeLabel } from "@/page-builder/runtime/contentTemplateRolePresentation";
 import { useVisualEditorSession } from "@/page-builder/visual-editor/visualEditorSession";
 import WorkspaceTreeRow from "@/page-builder/workspace/WorkspaceTreeRow";
+import {
+  commitPageModuleStructureTransaction,
+  deletePageModules,
+  reorderPageModules,
+  type PageModuleData,
+} from "./pageModuleActions";
 
 const INTERNAL_OBJECT_LABELS: Record<string, string> = {
   desktopImage: "桌面主图",
@@ -88,6 +95,7 @@ export default function LayerRail({
   readOnly?: boolean;
 }) {
   const { message, modal } = AntdApp.useApp();
+  const getPuck = useGetPuck();
   const appData = useHomepagePuck((state) => state.appState.data);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
@@ -96,10 +104,7 @@ export default function LayerRail({
   const panelMode = useVisualEditorSession((state) => state.panelMode);
   const visualSelection = useVisualEditorSession((state) => state.selection);
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
-  const content = appData.content as Array<{
-    type: string;
-    props: PuckProps;
-  }>;
+  const content = appData.content as PageModuleData[];
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   /** 多选下标集合（仅未锁定模块） */
@@ -215,11 +220,10 @@ export default function LayerRail({
       moved = true;
     }
     if (moved) {
-      dispatch({
-        type: "setData",
-        data: { ...appData, content: next },
-        recordHistory: true,
-      });
+      commitPageModuleStructureTransaction(
+        getPuck,
+        (data) => ({ ...data, content: next }),
+      );
       setMultiIndices((prev) => prev.map((i) => i + direction));
     }
   };
@@ -238,14 +242,7 @@ export default function LayerRail({
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: () => {
-        const removeSet = new Set(deletable);
-        const nextContent = content.filter((_, index) => !removeSet.has(index));
-        dispatch({
-          type: "setData",
-          data: { ...appData, content: nextContent },
-          recordHistory: true,
-        });
-        dispatch({ type: "setUi", ui: { itemSelector: null } });
+        deletePageModules(getPuck, deletable);
         setMultiIndices([]);
         anchorRef.current = null;
       },
@@ -267,17 +264,7 @@ export default function LayerRail({
       return;
     }
     const movedBlockId = content[from]?.props?.id;
-    dispatch({
-      type: "reorder",
-      sourceIndex: from,
-      destinationIndex: to,
-      destinationZone: ROOT_ZONE,
-      recordHistory: true,
-    });
-    dispatch({
-      type: "setUi",
-      ui: { itemSelector: { index: to, zone: ROOT_ZONE } },
-    });
+    reorderPageModules(getPuck, from, to);
     focusCanvasBlock(typeof movedBlockId === "string" ? movedBlockId : undefined);
   };
 
@@ -314,15 +301,7 @@ export default function LayerRail({
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: () => {
-        dispatch({
-          type: "remove",
-          index,
-          zone: ROOT_ZONE,
-          recordHistory: true,
-        });
-        if (target.props?.id === selectedId) {
-          dispatch({ type: "setUi", ui: { itemSelector: null } });
-        }
+        deletePageModules(getPuck, [index]);
       },
     });
   };

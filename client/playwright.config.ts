@@ -11,6 +11,9 @@ const defaultTestPort = appMode === "mock" ? 5177 : 5176;
 const port = Number(process.env.PLAYWRIGHT_PORT || defaultTestPort);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${port}`;
 const forwardedProto = process.env.PLAYWRIGHT_FORWARDED_PROTO;
+const browserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL === "chrome"
+  ? "chrome" as const
+  : undefined;
 
 // 每个 spec 必须且只能属于一个确定性边界。混合文件按主要业务参与者归类；
 // 真实环境会话与真实接口验收另行执行，不能用这些自有 API 夹具代替。
@@ -19,13 +22,10 @@ const testBoundaryFiles = {
     "public-accessibility.spec.ts",
     "content-template-previews.spec.ts",
     "content-template-renderers.spec.ts",
-    "content-template-skeletons.spec.ts",
-    "core-template-homepage.spec.ts",
     "mock-product-query.spec.ts",
     "privacy-trust.spec.ts",
     "public-catalog-detail-foundation.spec.ts",
     "public-catalog-server-pagination.spec.ts",
-    "public-home-foundation.spec.ts",
     "public-service-p0.spec.ts",
     "public-service-third-batch.spec.ts",
     "responsive-public.spec.ts",
@@ -36,37 +36,50 @@ const testBoundaryFiles = {
   customer: [
     "closure-locale-notifications.spec.ts",
     "customer-consultation-reply.spec.ts",
+    "customer-profile-management.spec.ts",
     "public-access.spec.ts",
     "public-sales-mode.spec.ts",
     "recommendation-client.spec.ts",
     "trade-safety-ui.spec.ts",
   ],
   admin: [
+    "recipe-radius-input.test.ts",
+    "template-inline-text-guard.unit.ts",
+    "template-layout-diagram.unit.ts",
+    "template-media-arrangement.unit.ts",
+    "template-media-history.unit.ts",
+    "template-purpose-media-inheritance.unit.ts",
+    "template-stress-preview-engine.unit.ts",
+    "template-editor-refinement.admin.spec.ts",
+    "template-management-structure.admin.spec.ts",
+    "template-property-reliability.admin.spec.ts",
+    "template-default-content-layout.admin.spec.ts",
+    "template-recipe-media-references.spec.ts",
+    "template-recipe-editor.admin.spec.ts",
+    "template-recipe-renderer.spec.ts",
+    "template-recipe-generator.spec.ts",
+    "template-design-width.spec.ts",
+    "template-recipe-wizard.admin.spec.ts",
+    "number-field-transactions.admin.spec.ts",
+    "template-properties-page-scope.admin.spec.ts",
+    "template-native-responsive.admin.spec.ts",
+    "template-breakpoint-comparison.admin.spec.ts",
     "admin-auth-store-capabilities.spec.ts",
     "admin-header-toolbar.spec.ts",
     "admin-operating-foundation-states.spec.ts",
     "admin-role-route-consistency.spec.ts",
-    "array-field.spec.ts",
     "attribute-manage.spec.ts",
-    "booking-editor.spec.ts",
     "category-manage.spec.ts",
     "category-references-field.spec.ts",
-    "content-template-editor-lifecycle.spec.ts",
     "customer-admin-client.spec.ts",
-    "dynamic-template-foundation.spec.ts",
     "dynamic-template-page-instance.spec.ts",
     "editable-target-geometry.spec.ts",
     "editable-targets.spec.ts",
-    "editor-composition-boundaries.spec.ts",
     "editor-draft-recovery.admin.spec.ts",
     "editor-leave-guard.admin.spec.ts",
-    "editor-visual-redesign-acceptance.spec.ts",
-    "four-zone-workspace-shell.spec.ts",
     "inquiry-context.admin.spec.ts",
-    "inspector-context-panel.spec.ts",
     "lead-follow-up-contract.spec.ts",
     "order-manage-capabilities.spec.ts",
-    "page-document-runtime-sync.spec.ts",
     "page-builder-real-closure.spec.ts",
     "page-publish-validation.admin.spec.ts",
     "page-revision-optimistic-lock.spec.ts",
@@ -85,11 +98,27 @@ const testBoundaryFiles = {
     "site-content-access.spec.ts",
     "site-content-load-protection.spec.ts",
     "statistics-client.spec.ts",
-    "template-internal-editor.spec.ts",
+    "template-lifecycle-unification.admin.spec.ts",
+    "template-editor-selection-core.spec.ts",
+    "template-canvas-interaction.admin.spec.ts",
+    "template-canvas-intuitive-controls.admin.spec.ts",
+    "template-responsive-contract.spec.ts",
+    "template-native-design.admin.spec.ts",
+    "template-layout-conversion.admin.spec.ts",
+    "template-canvas-golden-closure.admin.spec.ts",
+    "template-page-scope-separation.spec.ts",
+    "template-persisted-draft-boundaries.admin.spec.ts",
+    "template-trial-content.admin.spec.ts",
+    "template-new-template-flow.admin.spec.ts",
+    "template-production-guide.admin.spec.ts",
+    "template-inspector-usage.admin.spec.ts",
+    "template-layout-starters.admin.spec.ts",
     "template-design-authoring-core.spec.ts",
+    "template-design-integrated-flow.admin.spec.ts",
+    "template-structure-keyboard.spec.ts",
+    "template-publish-workflow.spec.ts",
     "template-version-origin.spec.ts",
     "ui-color-standards.spec.ts",
-    "visual-editor-double-poster.spec.ts",
     "visual-editor-hero.spec.ts",
     "warehouse-manage.spec.ts",
     "workspace-controller-boundaries.spec.ts",
@@ -103,7 +132,7 @@ const duplicateFiles = boundaryEntries
   .filter(({ file }, index, entries) => entries.findIndex((entry) => entry.file === file) !== index)
   .map(({ file }) => file);
 const discoveredSpecFiles = readdirSync(fileURLToPath(new URL("./tests", import.meta.url)))
-  .filter((file) => file.endsWith(".spec.ts"))
+  .filter((file) => /\.(?:spec|test|unit)\.ts$/.test(file))
   .sort();
 const classifiedFiles = new Set(boundaryEntries.map(({ file }) => file));
 const unclassifiedFiles = discoveredSpecFiles.filter((file) => !classifiedFiles.has(file));
@@ -153,7 +182,7 @@ export default defineConfig({
     {
       name: "admin-chromium",
       testMatch: testMatch(testBoundaryFiles.admin),
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], ...(browserChannel ? { channel: browserChannel } : {}) },
     },
   ],
   webServer: process.env.PLAYWRIGHT_BASE_URL

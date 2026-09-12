@@ -98,6 +98,11 @@ export type CustomerProfile = {
   name: string | null;
   phone: string;
   email: string | null;
+  hasPassword?: boolean;
+  avatarUrl?: string | null;
+  phoneChangeAvailableAt?: string | null;
+  emailChangeAvailableAt?: string | null;
+  updatedAt?: string;
 };
 
 export type CustomerAddress = {

@@ -13,13 +13,16 @@ import {
   CopyOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
-import { registerOverlayPortal } from "@puckeditor/core";
+import { registerOverlayPortal, useGetPuck } from "@puckeditor/core";
 import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
 import type { PuckProps } from "@/page-builder/types";
-import { useResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
-import { isVisiblePrimaryStageBlock } from "@/page-builder/utils/primaryStagePolicy";
-import { duplicatePageModule } from "./pageModuleActions";
+import {
+  deletePageModules,
+  duplicatePageModule,
+  reorderPageModules,
+  usePageModuleStructureHistoryGuard,
+} from "./pageModuleActions";
 
 function findCanvasBlock(
   frameDocument: Document | null | undefined,
@@ -42,6 +45,8 @@ export default function CanvasSelectionDock({
   readOnly?: boolean;
 }) {
   const { modal } = AntdApp.useApp();
+  const getPuck = useGetPuck();
+  usePageModuleStructureHistoryGuard();
   const portalRef = useRef<HTMLDivElement>(null);
   const lastDockPositionRef = useRef<{ left: number; top: number } | null>(null);
   const [dockPosition, setDockPosition] = useState<{
@@ -51,8 +56,6 @@ export default function CanvasSelectionDock({
   const [dockHost, setDockHost] = useState<HTMLElement | null>(null);
   const [canvasReadyRevision, setCanvasReadyRevision] = useState(0);
   const appData = useHomepagePuck((state) => state.appState.data);
-  const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
-  const dispatch = useHomepagePuck((state) => state.dispatch);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const componentId = String(selectedItem?.props?.id ?? "");
   const content = appData.content as Array<{
@@ -65,12 +68,6 @@ export default function CanvasSelectionDock({
   const selectedModule = selectedIndex >= 0 ? content[selectedIndex] : null;
   const componentType = selectedModule?.type ?? "";
   const selectedLocked = Boolean(selectedModule?.props?.locked);
-  const selectedIsUniquePrimaryStage = Boolean(
-    selectedModule && isVisiblePrimaryStageBlock(
-      selectedModule,
-      resolvedDynamicTemplateDefinitions,
-    ),
-  );
   const canMoveUp =
     Boolean(selectedModule) &&
     !selectedLocked &&
@@ -282,17 +279,7 @@ export default function CanvasSelectionDock({
       return;
     }
 
-    dispatch({
-      type: "reorder",
-      sourceIndex: selectedIndex,
-      destinationIndex: targetIndex,
-      destinationZone: ROOT_ZONE,
-      recordHistory: true,
-    });
-    dispatch({
-      type: "setUi",
-      ui: { itemSelector: { index: targetIndex, zone: ROOT_ZONE } },
-    });
+    reorderPageModules(getPuck, selectedIndex, targetIndex);
   };
 
   const deleteSelected = () => {
@@ -304,27 +291,20 @@ export default function CanvasSelectionDock({
     );
     modal.confirm({
       title: `删除“${displayName}”？`,
-      content: "删除后可从模板组件库重新添加；尚未发布的修改可通过版本记录恢复。",
+      content: "删除后可在本次编辑中撤销；保存页面草稿不会立即更新公开页面。",
       okText: "删除模块",
       okButtonProps: { danger: true },
+      autoFocusButton: "cancel",
       cancelText: "取消",
       onOk: () => {
-        dispatch({
-          type: "remove",
-          index: selectedIndex,
-          zone: ROOT_ZONE,
-          recordHistory: true,
-        });
-        dispatch({ type: "setUi", ui: { itemSelector: null } });
+        deletePageModules(getPuck, [selectedIndex]);
       },
     });
   };
 
   const duplicateSelected = () => {
-    if (readOnly || !selectedModule || selectedLocked || selectedIsUniquePrimaryStage) return;
-    duplicatePageModule(dispatch, selectedModule, selectedIndex, {
-      preventDuplicate: selectedIsUniquePrimaryStage,
-    });
+    if (readOnly || !selectedModule || selectedLocked) return;
+    duplicatePageModule(getPuck, selectedIndex);
   };
 
   return selectedModule && dockHost && !readOnly
@@ -362,18 +342,10 @@ export default function CanvasSelectionDock({
           </button>
           <button
             type="button"
-            disabled={selectedLocked || selectedIsUniquePrimaryStage}
+            disabled={selectedLocked}
             onClick={duplicateSelected}
-            aria-label={selectedLocked
-              ? "固定模块不能复制"
-              : selectedIsUniquePrimaryStage
-                ? "首屏主舞台不能复制"
-                : "复制当前模块"}
-            title={selectedLocked
-              ? "固定模块不能复制"
-              : selectedIsUniquePrimaryStage
-                ? "首屏主舞台全页只能有一个"
-                : "复制"}
+            aria-label={selectedLocked ? "固定模块不能复制" : "复制当前模块"}
+            title={selectedLocked ? "固定模块不能复制" : "复制"}
           >
             <CopyOutlined aria-hidden="true" />
           </button>

@@ -73,7 +73,9 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
 
     await contentPanel.getByRole("button", { name: "在画布中调整构图" }).click();
     await expect(page.getByRole("tab", { name: "模板编辑" })).toHaveAttribute("aria-selected", "true");
-    await expect(page.locator("[data-hc-node-hud]").getByRole("button", { name: "调整图片构图" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("group", { name: "当前对象调整方式" })
+      .getByRole("button", { name: "调整图片构图" }))
+      .toHaveAttribute("aria-pressed", "true");
   });
 
   test("图片异常时只出现一条可操作警告，技术信息按需展开", async ({ page }) => {
@@ -97,7 +99,7 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await expect(canvas.getByText("点击添加眉题")).toBeVisible();
     await expect(canvas.getByText("点击添加主标题")).toBeVisible();
     await expect(canvas.getByText("点击添加副标题")).toBeVisible();
-    await expect(canvas.getByText("点击添加行动文字")).toBeVisible();
+    await expect(canvas.getByText("点击添加行动文字")).toHaveCount(0);
 
     await page.getByRole("tab", { name: "模板编辑" }).click();
     const frameRatio = page.getByRole("group", { name: "画面比例" });
@@ -121,14 +123,10 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     await expect(page.getByTestId("visual-state")).toContainText('"title"');
     await expect(page.getByTestId("visual-state")).not.toContainText('"safeBand"');
     const titleSlot = canvas.getByText("点击添加主标题");
-    const titleSlotOverlay = canvas.locator(
-      '[data-hc-template-slot-box][data-node-id="title"]',
-    );
-    await expect(titleSlotOverlay).toBeVisible();
-    await expect(titleSlotOverlay).toContainText("标题");
+    await expect(titleSlot).toHaveAttribute("data-hc-keyboard-node", "title");
+    await expect(page.getByText("正在调整：标题")).toBeVisible();
     await page.getByRole("tab", { name: "内容编辑" }).click();
     await expect(titleSlot).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-    await expect(titleSlotOverlay).toHaveCount(0);
 
     await mkdir(screenshotDir, { recursive: true });
     await page.screenshot({
@@ -137,31 +135,22 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     });
   });
 
-  test("画布可直接拖动文字槽位并调整图片焦点", async ({ page }) => {
+  test("画布可选择文字槽位并直接调整图片焦点", async ({ page }) => {
     const canvas = page.getByRole("region", { name: "中央画布测试区" });
     const title = canvas.getByText("点击添加主标题");
-    await title.click();
+    await expect(title).toHaveAttribute("data-hc-keyboard-node", "title");
+    await title.focus();
+    await title.press("Enter");
     await page.getByRole("tab", { name: "模板编辑" }).click();
     await expect(page.getByRole("button", { name: "调整布局" })).toHaveCount(0);
     await expect(page.getByText("正在调整：标题")).toBeVisible();
-    await page.getByRole("button", { name: "调整区域" }).click();
-    await expect(page.getByText("正在调整：标题")).toBeVisible();
-    const titleBox = await title.boundingBox();
-    if (!titleBox) throw new Error("标题槽位没有布局尺寸");
-    await page.mouse.move(titleBox.x + titleBox.width / 2, titleBox.y + titleBox.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(titleBox.x + titleBox.width / 2 + 60, titleBox.y + titleBox.height / 2 - 24, { steps: 5 });
-    await page.mouse.up();
-    await expect(page.getByTestId("visual-state")).toContainText('"rectByViewport"');
 
     const media = canvas.locator('[data-content-role-desktop="desktopImage"]');
     await media.click({ position: { x: 100, y: 100 } });
     await expect(page.getByText("正在调整：桌面主图")).toBeVisible();
     // 构图调整必须保留画面，管理员才能判断焦点移动后的实际结果。
     await expect(media.locator("img")).toHaveCSS("opacity", "1");
-    const mediaHud = canvas.getByRole("toolbar", {
-      name: "调整画布对象：桌面主图",
-    });
+    const mediaHud = page.getByRole("group", { name: "当前对象调整方式" });
     await mediaHud.getByRole("button", { name: "调整图片构图" }).click();
     await expect(mediaHud.getByRole("button", { name: "调整图片构图" })).toHaveAttribute("aria-pressed", "true");
     const mediaBox = await media.boundingBox();

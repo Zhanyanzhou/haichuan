@@ -60,14 +60,26 @@ export class RefreshSessionService {
   async issueCustomer(
     customerId: number,
     metadata: SessionMetadata,
+    expectedAuthVersion: number,
   ): Promise<IssuedRefreshSession> {
-    return this.issueCustomerInTransaction(this.prisma, customerId, metadata);
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: customerId, status: "ACTIVE", authVersion: expectedAuthVersion },
+      select: { id: true },
+    });
+    if (!customer) throw new UnauthorizedException("客户访问身份无效");
+    return this.issueCustomerInTransaction(
+      this.prisma,
+      customerId,
+      metadata,
+      expectedAuthVersion,
+    );
   }
 
   async issueCustomerInTransaction(
     client: Pick<Prisma.TransactionClient, "customerRefreshSession">,
     customerId: number,
     metadata: SessionMetadata,
+    authVersion = 1,
   ): Promise<IssuedRefreshSession> {
     const refreshToken = createOpaqueToken();
     const expiresAt = new Date(Date.now() + REFRESH_SESSION_TTL_MS);
@@ -77,6 +89,7 @@ export class RefreshSessionService {
         tokenHash: sha256(refreshToken),
         familyId: randomUUID(),
         expiresAt,
+        authVersion,
         ...sessionMetadata(metadata),
       },
     });
@@ -156,13 +169,18 @@ export class RefreshSessionService {
         id: true,
         customerId: true,
         familyId: true,
-        customer: { select: { status: true } },
+        authVersion: true,
+        customer: { select: { status: true, authVersion: true } },
       },
     });
     if (!current) throw new UnauthorizedException("刷新会话无效");
     if (current.customer.status === "DISABLED") {
       await this.revokeCustomerFamily(current.familyId, new Date());
       throw new UnauthorizedException("客户访问身份无效");
+    }
+    if (current.authVersion !== current.customer.authVersion) {
+      await this.revokeCustomerFamily(current.familyId, new Date());
+      throw new UnauthorizedException("刷新会话已失效，请重新登录");
     }
 
     const nextToken = createOpaqueToken();
@@ -192,6 +210,7 @@ export class RefreshSessionService {
             tokenHash: nextHash,
             familyId: current.familyId,
             expiresAt,
+            authVersion: current.customer.authVersion,
             ...sessionMetadata(metadata),
           },
         });

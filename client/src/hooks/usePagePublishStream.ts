@@ -121,9 +121,11 @@ export function usePagePublishStream(
         payload = { type: "unknown" };
       }
 
-      if (payload.type === "ready" || payload.type === "heartbeat") return;
+      if (payload.type === "heartbeat") return;
       if (payload.pageKey && payload.pageKey !== pageKey) return;
 
+      // ready 表示订阅已建立。此时补拉快照，覆盖断线期间错过的发布，
+      // 也封闭首次读取页面与建立订阅之间的空窗；心跳不触发重复读取。
       callbackRef.current(payload);
     };
 

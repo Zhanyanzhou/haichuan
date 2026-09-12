@@ -1,7 +1,4 @@
-import {
-  createPageDocumentSeed,
-  jewelryHomeTemplate,
-} from "@/page-builder/templates/templates";
+import { createHeroTestPageSeed } from "@/page-builder/templates/templates";
 import type { DesignMode } from "@/page-builder/designSystem/masters";
 import {
   CONTENT_TEMPLATE_PAGE_PATHS,
@@ -150,16 +147,6 @@ export const editorPages: EditorPageDefinition[] = [
   },
 ];
 
-/** 每个页面的推荐结构模板 id（templates.ts 单一来源）。 */
-const templateIdByPage: Record<EditorPageKey, string> = {
-  home: "jewelry-home-v2",
-  about: "jewelry-about-v1",
-  products: "jewelry-products-v1",
-  catalog: "jewelry-catalog-v1",
-  custom: "jewelry-custom-v1",
-  contact: "jewelry-contact-v1",
-};
-
 const LEGACY_ABOUT_VISUALS: Record<string, string> = {
   "/uploads/2026/08/12/021a4e7e-5533-4f69-b232-bda3827c55fc.png": "/images/镶嵌.png",
   "/uploads/2026/08/12/762c29cb-9b9c-4d5f-90ab-e7f9d77f12e5.png": "/images/设计.png",
@@ -261,11 +248,9 @@ export function resolvePageHeaderMode(
     : rule.headerMode.fallback;
 }
 
-/** 为尚未保存的页面提供可立即编辑、且彼此可区分的中性初始结构。 */
+/** 为尚未保存的页面提供同一套可立即编辑的中性首屏测试结构。 */
 export function createEditorPageDefault(key: EditorPageKey) {
-  const data = createPageDocumentSeed(templateIdByPage[key]) ?? JSON.parse(
-    JSON.stringify(jewelryHomeTemplate.puckData),
-  );
+  const data = createHeroTestPageSeed(key);
   // 仅新建整页方案时写入印记；已有草稿、导入内容和历史 revision 保持 legacy-0，
   // 普通读取与保存均不会借此补写或升级。
   data.content = (data.content ?? []).map((block: { type?: string; props?: Record<string, unknown> }) => {

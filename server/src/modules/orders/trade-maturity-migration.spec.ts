@@ -4,8 +4,43 @@ import test from "node:test";
 
 const migrationPath =
   "prisma/migrations/20260906160000_close_trade_maturity_invariants/migration.sql";
+const paymentPlanPreparationMigrationPath =
+  "prisma/migrations/20260906150000_prepare_payment_plan_check_constraints/migration.sql";
 const sql = readFileSync(migrationPath, "utf8");
+const paymentPlanPreparationSql = readFileSync(paymentPlanPreparationMigrationPath, "utf8");
 const schema = readFileSync("prisma/schema.prisma", "utf8");
+
+test("付款计划来源外键先收紧为 RESTRICT，再由交易成熟度迁移添加 CHECK", () => {
+  assert.ok(paymentPlanPreparationMigrationPath < migrationPath);
+  for (const relation of ["quotation_version_id", "order_id"]) {
+    assert.match(
+      paymentPlanPreparationSql,
+      new RegExp(
+        "FOREIGN KEY \\(`" + relation
+          + "`\\)[\\s\\S]*?ON DELETE RESTRICT ON UPDATE RESTRICT",
+      ),
+    );
+  }
+  assert.match(
+    paymentPlanPreparationSql,
+    /DROP FOREIGN KEY `payment_plans_quotation_version_id_fkey`/,
+  );
+  assert.match(
+    paymentPlanPreparationSql,
+    /DROP FOREIGN KEY `payment_plans_order_id_fkey`/,
+  );
+  assert.match(sql, /ADD CONSTRAINT `payment_plans_source_check`[\s\S]*?CHECK/);
+
+  const paymentPlanModel = schema.match(/model PaymentPlan \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(
+    paymentPlanModel,
+    /quotationVersion[\s\S]*?onDelete: Restrict, onUpdate: Restrict/,
+  );
+  assert.match(
+    paymentPlanModel,
+    /order\s+[\s\S]*?onDelete: Restrict, onUpdate: Restrict/,
+  );
+});
 
 test("交易成熟度迁移在首个持久 DDL 前失败关闭所有不可可靠回填的存量数据", () => {
   const firstPersistentDdl = sql.indexOf(
@@ -123,4 +158,3 @@ test("数据库约束覆盖渠道幂等、交易关系和报价版本指针", ()
     /SET `q`\.`current_version` = COALESCE\(`latest`\.`current_version`, 0\)/,
   );
 });
-

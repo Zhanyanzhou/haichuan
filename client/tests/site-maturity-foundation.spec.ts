@@ -56,22 +56,15 @@ test("账户、交易、受控预览和开发页统一使用非索引路由策�
   }
 });
 
-test("Docker 构建只传递公开 Vite 配置且 Nginx 二次隔离非公开页面", () => {
+test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜像且 Nginx 二次隔离非公开页面", () => {
   const dockerfile = readFileSync(resolve("Dockerfile"), "utf8");
   const compose = readFileSync(resolve("../docker-compose.yml"), "utf8");
   const nginx = readFileSync(resolve("nginx.conf"), "utf8");
 
   expect(dockerfile).toContain('ARG VITE_PUBLIC_SITE_ORIGIN=""');
   expect(dockerfile).toContain('ARG VITE_ANALYTICS_ENABLED="false"');
-  expect(compose).toContain("VITE_PUBLIC_SITE_ORIGIN:");
-  const buildArgumentBlocks = Array.from(
-    compose.matchAll(/^\s{6}args:\r?\n((?:^\s{8}.+(?:\r?\n|$))*)/gm),
-    (match) => match[1],
-  );
-  expect(buildArgumentBlocks.length).toBeGreaterThan(0);
-  for (const buildArguments of buildArgumentBlocks) {
-    expect(buildArguments).not.toMatch(/JWT_SECRET|DATABASE_URL/);
-  }
+  expect(compose).not.toMatch(/^\s+build\s*:/m);
+  expect(compose).not.toContain("VITE_PUBLIC_SITE_ORIGIN:");
   expect(nginx).toContain("location = /__templates");
   expect(nginx).toContain("TemplateGallery-");
   expect(nginx).toContain("location ~* ^/en(/|$)");
@@ -100,6 +93,113 @@ test("公开 SSE URL 显式携带内容语言，英文不会缺省订阅中文�
   expect(publicPageDocumentStreamUrl("zh-CN")).toContain("locale=zh-CN");
   expect(publicPageDocumentStreamUrl("en")).toContain("locale=en");
 });
+
+for (const scenario of ["首次订阅与断线重连", "首次订阅重叠且补拉失败"] as const) {
+test(`公开页面${scenario}保留安全快照并正确补拉（自有 API Mock）`, async ({ page }) => {
+  test.skip(process.env.PLAYWRIGHT_APP_MODE === "mock", "需要 development HTTP 夹具覆盖真实发布读取 hook");
+  let revision = 1;
+  let reads = 0;
+  let finishFirstRead!: () => void;
+  const firstReadGate = new Promise<void>((resolve) => { finishFirstRead = resolve; });
+  await page.clock.install();
+  await page.addInitScript(() => {
+    const streams: Array<{
+      onmessage: ((event: { data: string }) => void) | null;
+      onerror: (() => void) | null;
+    }> = [];
+    Object.assign(window, { publicationTestStreams: streams });
+    class PublicationTestStream {
+      onmessage = null;
+      onerror = null;
+      constructor() { streams.push(this); }
+      close() {}
+    }
+    Object.assign(window, { EventSource: PublicationTestStream });
+  });
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (!url.pathname.endsWith("/page-modules/document/published")) return route.abort();
+    reads += 1;
+    const requestedRevision = revision;
+    if (scenario === "首次订阅重叠且补拉失败") {
+      if (reads === 1) await firstReadGate;
+      else if (reads === 2) return route.fulfill({ status: 503, json: { code: 503, message: "fixture unavailable" } });
+    }
+    return route.fulfill({ json: { code: 200, data: {
+      pageKey: "home", status: "PUBLISHED", version: requestedRevision,
+      puckData: { content: [{ type: "首屏主视觉", props: { title: `发布版本 ${requestedRevision}` } }] },
+    } } });
+  });
+  await page.route("**/__publication-reconnect", (route) => route.fulfill({
+    contentType: "text/html",
+    body: `<!doctype html><html><head><meta charset="utf-8"><script type="module">
+      import RefreshRuntime from '/@react-refresh';
+      RefreshRuntime.injectIntoGlobalHook(window);
+      window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+      window.__vite_plugin_react_preamble_installed__ = true;
+    </script></head><body><div id="root"></div><script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { usePublishedPageDocument } from '/src/page-builder/runtime/usePublishedPageDocument.ts';
+      function App() {
+        const resource = usePublishedPageDocument('home');
+        return React.createElement('output', { 'data-stale': resource.stale }, resource.pageDocument?.puckData.content[0].props.title ?? resource.status);
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    </script></body></html>`,
+  }));
+  await page.goto("/__publication-reconnect");
+  const emit = (index: number, type: string, pageKey?: string) => page.evaluate(({ index, type, pageKey }) => {
+    const { publicationTestStreams } = window as typeof window & {
+      publicationTestStreams: Array<{ onmessage: (event: { data: string }) => void; onerror: () => void }>;
+    };
+    if (type === "disconnect") publicationTestStreams[index].onerror();
+    else publicationTestStreams[index].onmessage({ data: JSON.stringify({ type, ...(pageKey ? { pageKey } : {}) }) });
+  }, { index, type, pageKey });
+
+  if (scenario === "首次订阅重叠且补拉失败") {
+    await expect.poll(() => reads).toBe(1);
+    await expect.poll(() => page.evaluate(() => (
+      window as typeof window & { publicationTestStreams: unknown[] }
+    ).publicationTestStreams.length)).toBe(1);
+    await emit(0, "ready");
+    await emit(0, "page-document-published", "home");
+    expect(reads).toBe(1);
+    finishFirstRead();
+    await expect(page.locator("output")).toHaveText("发布版本 1");
+    await expect(page.locator("output")).toHaveAttribute("data-stale", "true");
+    expect(reads).toBe(2);
+    revision = 3;
+    await emit(0, "page-document-published", "home");
+    await expect(page.locator("output")).toHaveText("发布版本 3");
+    await expect(page.locator("output")).toHaveAttribute("data-stale", "false");
+    expect(reads).toBe(3);
+    return;
+  }
+  await expect(page.locator("output")).toHaveText("发布版本 1");
+  expect(reads).toBe(1);
+
+  // 首次 GET 后、订阅建立前恰好发布，也必须读取新版本。
+  revision = 2;
+  await emit(0, "ready");
+  await expect(page.locator("output")).toHaveText("发布版本 2");
+  expect(reads).toBe(2);
+  await emit(0, "disconnect");
+  revision = 3;
+  await page.clock.runFor(1000);
+  await emit(1, "ready");
+  await expect(page.locator("output")).toHaveText("发布版本 3");
+  expect(reads).toBe(3);
+  await emit(1, "heartbeat");
+  await emit(1, "page-document-published", "about");
+  await page.clock.runFor(1000);
+  expect(reads).toBe(3);
+  revision = 4;
+  await emit(1, "page-document-published", "home");
+  await expect(page.locator("output")).toHaveText("发布版本 4");
+  expect(reads).toBe(4);
+});
+}
 
 test("未知公开路径呈现可恢复的品牌 404 且禁止索引", async ({ page }) => {
   await page.goto("/this-page-does-not-exist");
@@ -145,12 +245,12 @@ test("失效作品页禁止索引且不输出 Product 结构化数据", async ({
   ).toHaveCount(0);
 });
 
-test("联系页输出事实型 Organization 与 FAQ Schema 并标记必填语义", async ({ page }) => {
+test("未配置公开 Origin 时联系页只输出 FAQ Schema，并准确标记必填语义", async ({ page }) => {
   await page.goto("/contact");
 
   await expect(
     page.locator('script[data-structured-data="organization"]'),
-  ).toHaveCount(1);
+  ).toHaveCount(0);
   await expect(
     page.locator('script[data-structured-data="contact-faq"]'),
   ).toHaveCount(1);
@@ -161,31 +261,18 @@ test("联系页输出事实型 Organization 与 FAQ Schema 并标记必填语义
       const value = JSON.parse(script.textContent || "{}") as { "@type"?: string };
       return value["@type"];
     }));
-  expect(schemaTypes).toEqual(expect.arrayContaining(["Organization", "FAQPage"]));
-
-  const organization = await page
-    .locator('script[data-structured-data="organization"]')
-    .evaluate((script) => JSON.parse(script.textContent || "{}"));
-  expect(organization).toMatchObject({
-    "@type": "Organization",
-    legalName: "深圳市海川文化创意设计有限公司",
-    identifier: {
-      propertyID: "统一社会信用代码",
-      value: "91440300MA5HH1J83Y",
-    },
-    foundingDate: "2022-09-22",
-  });
+  expect(schemaTypes).toEqual(["FAQPage"]);
 
   for (const id of [
     "cf-name",
     "cf-phone",
     "cf-type",
-    "cf-time",
     "cf-message",
     "cf-privacy-consent",
   ]) {
     await expect(page.locator(`#${id}`)).toHaveAttribute("aria-required", "true");
   }
+  await expect(page.locator("#cf-time")).not.toHaveAttribute("aria-required", "true");
 });
 
 test("经营主体与隐私页使用同一法定事实并如实说明分析同意边界", async ({ page }) => {

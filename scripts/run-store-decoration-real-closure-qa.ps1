@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
   [ValidatePattern("^[0-9]{8}-[0-9]{2}$")]
-  [string]$QaRunId = "20260901-05"
+  [string]$QaRunId = "20260901-05",
+
+  [ValidateSet("Migrate", "SchemaPush")]
+  [string]$DatabaseBootstrap = "Migrate"
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +22,9 @@ $serverBuildImage = "$qaPrefix-server-build:local"
 $serverImage = "$qaPrefix-server:local"
 $clientImage = "$qaPrefix-client:local"
 $mysqlImage = "mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b"
+$playwrightOutputDirectory = [IO.Path]::GetFullPath(
+  (Join-Path $PSScriptRoot "..\acceptance-artifacts\$qaPrefix-real-closure")
+)
 
 function Assert-ExternalSuccess([string]$label) {
   if ($LASTEXITCODE -ne 0) {
@@ -104,6 +110,9 @@ Assert-ResourceAbsent "volume" $volumeName
 foreach ($name in @($serverBuildImage, $serverImage, $clientImage)) {
   Assert-ResourceAbsent "image" $name
 }
+if (Test-Path -LiteralPath $playwrightOutputDirectory) {
+  throw "拒绝覆盖已有 Playwright 验收证据：$playwrightOutputDirectory"
+}
 
 $mysqlRootPassword = "r" + (New-RandomHex 16)
 $mysqlPassword = "m" + (New-RandomHex 16)
@@ -111,6 +120,14 @@ $jwtSecret = New-RandomHex 32
 $qaUsername = "qa_store_" + (New-RandomHex 4)
 $qaPassword = "Qa" + (New-RandomHex 7)
 $databaseUrl = "mysql://jewelry_user:$mysqlPassword@mysql:3306/jewelry_db"
+$buildRevision = (& git rev-parse HEAD).Trim()
+Assert-ExternalSuccess "读取当前 Git revision"
+$buildSource = "local-qa://$qaPrefix"
+$migrationBundleSha256 = (& node scripts/verify-migration-integrity.mjs --print-bundle-sha).Trim()
+Assert-ExternalSuccess "核对 migration bundle"
+if ($migrationBundleSha256 -notmatch "^[0-9a-f]{64}$") {
+  throw "migration bundle SHA256 格式无效"
+}
 $failed = $false
 $failureMessage = ""
 
@@ -121,7 +138,13 @@ try {
   & docker build --target build --tag $serverBuildImage --label "io.haichuan.qa-scope=$qaPrefix" server
   Assert-ExternalSuccess "构建 Node 22 server migration 镜像"
 
-  & docker build --tag $serverImage --label "io.haichuan.qa-scope=$qaPrefix" server
+  & docker build `
+    --tag $serverImage `
+    --label "io.haichuan.qa-scope=$qaPrefix" `
+    --build-arg "BUILD_REVISION=$buildRevision" `
+    --build-arg "BUILD_SOURCE=$buildSource" `
+    --build-arg "MIGRATION_BUNDLE_SHA256=$migrationBundleSha256" `
+    server
   Assert-ExternalSuccess "构建 Node 22 server 运行镜像"
 
   & docker build `
@@ -130,6 +153,9 @@ try {
     --build-arg "VITE_API_BASE_URL=/api" `
     --build-arg "VITE_PUBLIC_SITE_ORIGIN=http://127.0.0.1:5175" `
     --build-arg "VITE_ANALYTICS_ENABLED=false" `
+    --build-arg "BUILD_REVISION=$buildRevision" `
+    --build-arg "BUILD_SOURCE=$buildSource" `
+    --build-arg "MIGRATION_BUNDLE_SHA256=$migrationBundleSha256" `
     client
   Assert-ExternalSuccess "构建 Node 22 client 镜像"
 
@@ -157,27 +183,43 @@ try {
   Assert-ExternalSuccess "启动隔离 MySQL"
   Wait-MySqlReady $mysqlContainer
 
-  & docker run --rm `
-    --name $migrationContainer `
-    --network $networkName `
-    --label "io.haichuan.qa-scope=$qaPrefix" `
-    -e "DATABASE_URL=$databaseUrl" `
-    $serverBuildImage `
-    npx prisma migrate deploy
-  Assert-ExternalSuccess "对隔离库执行 prisma migrate deploy"
+  if ($DatabaseBootstrap -eq "Migrate") {
+    & docker run --rm `
+      --name $migrationContainer `
+      --network $networkName `
+      --label "io.haichuan.qa-scope=$qaPrefix" `
+      -e "DATABASE_URL=$databaseUrl" `
+      $serverBuildImage `
+      npx prisma migrate deploy
+    Assert-ExternalSuccess "对隔离库执行 prisma migrate deploy"
 
-  & docker run --rm `
-    --name $migrationContainer `
-    --network $networkName `
-    --label "io.haichuan.qa-scope=$qaPrefix" `
-    -e "DATABASE_URL=$databaseUrl" `
-    $serverBuildImage `
-    npx prisma migrate status
-  Assert-ExternalSuccess "核对隔离库 migration 状态"
+    & docker run --rm `
+      --name $migrationContainer `
+      --network $networkName `
+      --label "io.haichuan.qa-scope=$qaPrefix" `
+      -e "DATABASE_URL=$databaseUrl" `
+      $serverBuildImage `
+      npx prisma migrate status
+    Assert-ExternalSuccess "核对隔离库 migration 状态"
 
-  $appliedMigrations = (& docker exec $mysqlContainer sh -c 'mysql -N -uroot -p"$MYSQL_ROOT_PASSWORD" jewelry_db -e "SELECT COUNT(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;"')
-  Assert-ExternalSuccess "读取隔离库 migration 计数"
-  Write-Output "applied_migrations=$appliedMigrations"
+    $appliedMigrations = (& docker exec $mysqlContainer sh -c 'mysql -N -uroot -p"$MYSQL_ROOT_PASSWORD" jewelry_db -e "SELECT COUNT(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;"')
+    Assert-ExternalSuccess "读取隔离库 migration 计数"
+    Write-Output "database_bootstrap=migrate"
+    Write-Output "applied_migrations=$appliedMigrations"
+  } else {
+    # 仅用于空白、一次性的隔离 QA 数据库。它验证真实 Nest/API/MySQL 写链路，
+    # 不替代、掩盖或宣称通过 prisma migrate deploy 的生产迁移门禁。
+    & docker run --rm `
+      --name $migrationContainer `
+      --network $networkName `
+      --label "io.haichuan.qa-scope=$qaPrefix" `
+      -e "DATABASE_URL=$databaseUrl" `
+      $serverBuildImage `
+      npx prisma db push --skip-generate --accept-data-loss
+    Assert-ExternalSuccess "为一次性隔离 QA 库同步 Prisma schema"
+    Write-Output "database_bootstrap=schema-push-non-production"
+    Write-Output "migration_gate=NOT_RUN"
+  }
 
   & docker run --rm `
     --name $bootstrapContainer `
@@ -223,7 +265,7 @@ try {
     --network $networkName `
     --restart no `
     --label "io.haichuan.qa-scope=$qaPrefix" `
-    -p "127.0.0.1:5175:8080" `
+    -p "127.0.0.1:5175:8081" `
     $clientImage
   Assert-ExternalSuccess "启动隔离 React/Nginx"
   Wait-Http "http://127.0.0.1:5175/" "web_root"
@@ -233,18 +275,23 @@ try {
   $env:PAGE_BUILDER_REAL_API_BASE_URL = "http://127.0.0.1:3101/api"
   $env:PLAYWRIGHT_BASE_URL = "http://127.0.0.1:5175"
   $env:PLAYWRIGHT_FORWARDED_PROTO = "https"
+  $env:PLAYWRIGHT_BROWSER_CHANNEL = "chrome"
   $env:PAGE_BUILDER_QA_USERNAME = $qaUsername
   $env:PAGE_BUILDER_QA_PASSWORD = $qaPassword
 
   Push-Location client
   try {
-    & npx playwright test tests/page-builder-real-closure.spec.ts --workers=1 --reporter=line
+    & npx playwright test tests/page-builder-real-closure.spec.ts `
+      --workers=1 `
+      --reporter=line `
+      --output $playwrightOutputDirectory
     Assert-ExternalSuccess "运行真实店铺装修 Playwright 闭环"
   } finally {
     Pop-Location
   }
 
   Write-Output "REAL_CLOSURE_RESULT=PASS"
+  Write-Output "playwright_output=$playwrightOutputDirectory"
 } catch {
   $failed = $true
   $failureMessage = $_.Exception.Message
@@ -260,6 +307,8 @@ try {
   Remove-Item Env:PAGE_BUILDER_REAL_QA -ErrorAction SilentlyContinue
   Remove-Item Env:PAGE_BUILDER_REAL_API_BASE_URL -ErrorAction SilentlyContinue
   Remove-Item Env:PLAYWRIGHT_BASE_URL -ErrorAction SilentlyContinue
+  Remove-Item Env:PLAYWRIGHT_FORWARDED_PROTO -ErrorAction SilentlyContinue
+  Remove-Item Env:PLAYWRIGHT_BROWSER_CHANNEL -ErrorAction SilentlyContinue
   Remove-Item Env:PAGE_BUILDER_QA_USERNAME -ErrorAction SilentlyContinue
   Remove-Item Env:PAGE_BUILDER_QA_PASSWORD -ErrorAction SilentlyContinue
 

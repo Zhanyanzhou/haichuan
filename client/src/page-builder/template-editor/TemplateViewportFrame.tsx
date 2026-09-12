@@ -12,9 +12,10 @@ import {
 import { createPortal } from "react-dom";
 import WorkspaceCanvasControls from "./WorkspaceCanvasControls";
 import EditableTargetOverlay, {
-  type OverlayNodeAction,
   type OverlayPlacementGesture,
   type OverlayTargetDescriptor,
+  type OverlayPropertyControl,
+  type OverlayInlineTextEditor,
 } from "./EditableTargetOverlay";
 import {
   formatTemplateRatio,
@@ -31,6 +32,10 @@ import {
 } from "./editableTargetGeometry";
 import { findElementsByEditableTargetLocator } from "./editableTargetDomLocator";
 import { useTemplateEditorSession } from "./templateEditorSession";
+import {
+  parseFiniteCanvasPadding,
+  resolveFiniteCanvasScale,
+} from "./templateViewportMath";
 
 export const AUTO_ARTBOARD_MIN_HEIGHT = 240;
 const DIRECT_RESIZE_MIN_HEIGHT = 40;
@@ -78,10 +83,10 @@ interface TemplateViewportMeasurement {
 
 function readCanvasContentBox(stage: HTMLElement) {
   const styles = window.getComputedStyle(stage);
-  const horizontalPadding = Number.parseFloat(styles.paddingLeft)
-    + Number.parseFloat(styles.paddingRight);
-  const verticalPadding = Number.parseFloat(styles.paddingTop)
-    + Number.parseFloat(styles.paddingBottom);
+  const horizontalPadding = parseFiniteCanvasPadding(styles.paddingLeft)
+    + parseFiniteCanvasPadding(styles.paddingRight);
+  const verticalPadding = parseFiniteCanvasPadding(styles.paddingTop)
+    + parseFiniteCanvasPadding(styles.paddingBottom);
   return {
     width: Math.max(1, stage.clientWidth - horizontalPadding),
     height: Math.max(1, stage.clientHeight - verticalPadding),
@@ -141,7 +146,10 @@ export function syncTemplateViewportStyles(targetDocument: Document, onStylesCha
     html, body { width: 100%; min-height: 0; margin: 0; padding: 0; overflow: hidden; }
     body { background: #fff; }
     #template-viewport-root { width: 100%; min-height: 1px; }
-    #template-viewport-root > .template-editor__canvas-renderer {
+    /* Portal 会先插入 viewport-content 包装层；若仍按直接子节点匹配，
+       canvas-renderer 会保留宿主的 absolute + 100% 高度，并把 iframe
+       当前高度重新报告为内容高度，形成自动高度的正反馈。 */
+    #template-viewport-root > .template-editor__viewport-content > .template-editor__canvas-renderer {
       position: relative !important;
       inset: auto !important;
       transform: none !important;
@@ -158,6 +166,9 @@ export function syncTemplateViewportStyles(targetDocument: Document, onStylesCha
 
 export default function TemplateViewportFrame({
   children,
+  toolbarStart,
+  navigation,
+  viewActions,
   fallbackHeight,
   sourceWidth,
   autoHeight,
@@ -184,13 +195,29 @@ export default function TemplateViewportFrame({
   selectedOverlayTargetId,
   movableOverlayTargetIds,
   resizeOverlayTargetIds,
-  disabledOverlayNodeActions,
-  copyResponsiveDestinationLabel,
   onOverlayTargetSelect,
-  onOverlayNodeAction,
   onOverlayPlacementGesture,
+  onOverlayPlacementGestureBegin,
+  onOverlayPlacementGesturePreview,
+  onOverlayPlacementGestureCancel,
+  editingScopeId,
+  onOverlayEnterTarget,
+  onOverlaySelectTargets,
+  onOverlaySelectBackground,
+  viewportWidthOnly = false,
+  minimumFitScale = MIN_CANVAS_SCALE,
+  propertyControls,
+  spacingEditing,
+  onSpacingEditingChange,
+  onPropertyPreview,
+  onPropertyCommit,
+  flowDropLabel,
+  inlineTextEditor,
 }: {
   children: ReactNode;
+  toolbarStart?: ReactNode;
+  navigation?: ReactNode;
+  viewActions?: ReactNode;
   fallbackHeight: number;
   sourceWidth: number;
   autoHeight: boolean;
@@ -202,12 +229,12 @@ export default function TemplateViewportFrame({
   title: string;
   onScaleChange?: (scale: number) => void;
   onWidthChange: (width: number) => void;
-  onHeightChange: (height: number) => void;
-  onHeightModeChange: (mode: TemplateDesignHeightMode) => void;
-  onRatioChange: (ratio: { width: number; height: number }) => void;
+  onHeightChange?: (height: number) => void;
+  onHeightModeChange?: (mode: TemplateDesignHeightMode) => void;
+  onRatioChange?: (ratio: { width: number; height: number }) => void;
   canRestore: boolean;
   device: "desktop" | "mobile";
-  onRestore: () => void;
+  onRestore?: () => void;
   onDirectResizePreview: (resize: TemplateDirectResizeValue) => void;
   onDirectResizeCancel: () => void;
   onDirectResizeCommit: (resize: TemplateDirectResizeValue) => void;
@@ -217,11 +244,24 @@ export default function TemplateViewportFrame({
   selectedOverlayTargetId?: string | null;
   movableOverlayTargetIds?: ReadonlySet<string>;
   resizeOverlayTargetIds?: ReadonlySet<string>;
-  disabledOverlayNodeActions?: ReadonlyMap<string, ReadonlySet<OverlayNodeAction>>;
-  copyResponsiveDestinationLabel?: string;
-  onOverlayTargetSelect?: (target: OverlayTargetDescriptor) => void;
-  onOverlayNodeAction?: (target: OverlayTargetDescriptor, action: OverlayNodeAction) => void;
+  onOverlayTargetSelect?: (target: OverlayTargetDescriptor, modifiers?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => void;
   onOverlayPlacementGesture?: (gesture: OverlayPlacementGesture) => void;
+  onOverlayPlacementGestureBegin?: () => void;
+  onOverlayPlacementGesturePreview?: (gesture: OverlayPlacementGesture) => void;
+  onOverlayPlacementGestureCancel?: () => void;
+  editingScopeId?: string | null;
+  onOverlayEnterTarget?: (target: OverlayTargetDescriptor) => void;
+  onOverlaySelectTargets?: (targets: readonly OverlayTargetDescriptor[], additive: boolean) => void;
+  onOverlaySelectBackground?: () => void;
+  viewportWidthOnly?: boolean;
+  minimumFitScale?: number;
+  propertyControls?: readonly OverlayPropertyControl[];
+  spacingEditing?: boolean;
+  onSpacingEditingChange?: (editing: boolean) => void;
+  onPropertyPreview?: (key: string, value: number) => void;
+  onPropertyCommit?: (key: string, value: number) => void;
+  flowDropLabel?: string | null;
+  inlineTextEditor?: OverlayInlineTextEditor | null;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -235,9 +275,34 @@ export default function TemplateViewportFrame({
   const canvasZoom = useTemplateEditorSession((state) => state.canvasZoom);
   const setCanvasZoom = useTemplateEditorSession((state) => state.setCanvasZoom);
   const isFitView = canvasZoom === null;
-  const manualScale = canvasZoom ?? 1;
+  const manualScale = resolveFiniteCanvasScale(canvasZoom);
   const [panMode, setPanMode] = useState(false);
+  const [spacePan, setSpacePan] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const panEnabled = panMode || spacePan;
+  const cancelPan = useCallback(() => {
+    const stage = stageRef.current;
+    const current = panSessionRef.current;
+    panSessionRef.current = null;
+    if (stage && current) {
+      stage.scrollLeft = current.startScrollLeft;
+      stage.scrollTop = current.startScrollTop;
+      if (stage.hasPointerCapture(current.pointerId)) stage.releasePointerCapture(current.pointerId);
+    }
+    setIsPanning(false);
+  }, []);
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && panSessionRef.current) { event.preventDefault(); event.stopPropagation(); cancelPan(); return; }
+      const target = event.target as HTMLElement | null;
+      if (event.code !== "Space" || event.isComposing || target?.closest('input, textarea, select, [contenteditable="true"]') || !stageRef.current?.closest(".template-editor__stage")?.contains(target)) return;
+      event.preventDefault(); setSpacePan(true);
+    };
+    const keyup = (event: KeyboardEvent) => { if (event.code === "Space") setSpacePan(false); };
+    const blur = () => { setSpacePan(false); cancelPan(); };
+    window.addEventListener("keydown", keydown, true); window.addEventListener("keyup", keyup); window.addEventListener("blur", blur);
+    return () => { window.removeEventListener("keydown", keydown, true); window.removeEventListener("keyup", keyup); window.removeEventListener("blur", blur); };
+  }, [cancelPan]);
   const [showGrid, setShowGrid] = useState(false);
   const [showCenterGuides, setShowCenterGuides] = useState(false);
   const [showSafeArea, setShowSafeArea] = useState(false);
@@ -265,15 +330,15 @@ export default function TemplateViewportFrame({
     if (!stage) return undefined;
     const measureWidth = () => {
       const viewport = readCanvasContentBox(stage);
-      const fitScale = calculateFitCanvasScale({
+      const fitScale = resolveFiniteCanvasScale(calculateFitCanvasScale({
         viewportWidth: viewport.width,
         viewportHeight: viewport.height,
         contentWidth: sourceWidth,
         contentHeight: measurement.naturalHeight,
         inset: 0,
-        minimumScale: MIN_CANVAS_SCALE,
+        minimumScale: minimumFitScale,
         maximumScale: 1,
-      });
+      }));
       // 只跳过完全相同的测量，保留 dock 动画收尾时不足 0.001 的比例变化。
       setMeasurement((current) => current.fitScale === fitScale
         ? current
@@ -283,7 +348,7 @@ export default function TemplateViewportFrame({
     observer.observe(stage);
     measureWidth();
     return () => observer.disconnect();
-  }, [measurement.naturalHeight, sourceWidth]);
+  }, [measurement.naturalHeight, minimumFitScale, sourceWidth]);
 
   useEffect(() => {
     if (directResizeRef.current) return;
@@ -312,8 +377,8 @@ export default function TemplateViewportFrame({
     });
   }, [autoHeight, fallbackHeight, sourceWidth]);
 
-  const baseScale = isFitView ? measurement.fitScale : manualScale;
-  const scale = directResizeRef.current?.scale ?? baseScale;
+  const baseScale = resolveFiniteCanvasScale(isFitView ? measurement.fitScale : manualScale);
+  const scale = resolveFiniteCanvasScale(directResizeRef.current?.scale, baseScale);
   const rulerStep = sourceWidth <= 480 ? 100 : 200;
   const horizontalRulerMarks = createRulerMarks(sourceWidth, rulerStep);
   const verticalRulerMarks = createRulerMarks(measurement.naturalHeight, rulerStep);
@@ -326,8 +391,10 @@ export default function TemplateViewportFrame({
     const content = contentElement;
     if (!frameDocument || !content) return undefined;
     const ownerWindow = frameDocument.defaultView;
+    if (!ownerWindow || !content.isConnected || content.ownerDocument !== frameDocument) return undefined;
     let animationFrameId: number | null = null;
     const commitMeasuredHeight = () => {
+      if (!content.isConnected || frameRef.current?.contentDocument !== frameDocument) return;
       const contentRect = content.getBoundingClientRect();
       const measurableNodes = Array.from(new Set([
         ...Array.from(content.children),
@@ -342,6 +409,26 @@ export default function TemplateViewportFrame({
           bottom: Math.max(current.bottom, rect.bottom - contentRect.top),
         };
       }, { left: 0, right: contentRect.width, top: 0, bottom: 0 });
+      const measuredContentHeight = Math.max(
+        1,
+        Math.ceil(contentRect.height),
+        content.scrollHeight,
+        Math.ceil(bounds.bottom - Math.min(0, bounds.top)),
+      );
+      const rootNodeId = content.querySelector<HTMLElement>("[data-template-root-node-id]")
+        ?.dataset.templateRootNodeId;
+      const templateRoot = rootNodeId
+        ? measurableNodes.find((node) => node.getAttribute("data-template-node-id") === rootNodeId)
+        : undefined;
+      // aspect-ratio 是首选比例，内容和最大尺寸约束都可能改变实际高度。
+      // 测到根以后以其边界为准；越界子项只参与提示，不能扩张根边界。
+      const naturalHeight = autoHeight
+        ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, measuredContentHeight)
+        : heightMode === "aspect-ratio"
+          ? templateRoot
+            ? Math.max(1, Math.ceil(templateRoot.getBoundingClientRect().height))
+            : fallbackHeight
+          : fallbackHeight;
       let overflowNodeId: string | undefined;
       let largestOverflow = 0;
       if (!autoHeight) {
@@ -352,25 +439,18 @@ export default function TemplateViewportFrame({
           const top = rect.top - contentRect.top;
           const bottom = rect.bottom - contentRect.top;
           const overflowAmount = Math.max(0, -left, right - sourceWidth)
-            + Math.max(0, -top, bottom - fallbackHeight);
+            + Math.max(0, -top, bottom - naturalHeight);
           if (overflowAmount > largestOverflow) {
             largestOverflow = overflowAmount;
             overflowNodeId = node.dataset.templateNodeId;
           }
         });
       }
-      const measuredContentHeight = Math.max(
-        AUTO_ARTBOARD_MIN_HEIGHT,
-        Math.ceil(contentRect.height),
-        content.scrollHeight,
-        Math.ceil(bounds.bottom - Math.min(0, bounds.top)),
-      );
       const measuredContentWidth = Math.max(
         sourceWidth,
         content.scrollWidth,
         Math.ceil(bounds.right - Math.min(0, bounds.left)),
       );
-      const naturalHeight = autoHeight ? measuredContentHeight : fallbackHeight;
       setMeasurement((current) => (
         Math.abs(current.naturalHeight - naturalHeight) < 1
         && Math.abs(current.contentHeight - measuredContentHeight) < 1
@@ -398,7 +478,8 @@ export default function TemplateViewportFrame({
         commitMeasuredHeight();
       });
     };
-    const observer = new ResizeObserver(measureHeight);
+    // 内容属于 iframe，与 Overlay / 目录预览一致，使用源文档的观察器。
+    const observer = new ownerWindow.ResizeObserver(measureHeight);
     observer.observe(content);
     // iframe 文档本身至少与当前 viewport 等高，读取 body/documentElement.scrollHeight
     // 会让随内容画布只能增高、无法在比例或内容缩短后回落。只测量真实渲染子树，
@@ -417,11 +498,15 @@ export default function TemplateViewportFrame({
         if (animationFrameId !== null) ownerWindow.cancelAnimationFrame(animationFrameId);
       }
     };
-  }, [autoHeight, children, contentElement, fallbackHeight, frameDocument, sourceWidth, styleRevision]);
+  }, [autoHeight, children, contentElement, fallbackHeight, frameDocument, heightMode, sourceWidth, styleRevision]);
 
   const scaledHeight = measurement.naturalHeight * scale;
   const setCanvasScale = (nextScale: number) => {
-    const clampedScale = clampCanvasScale(nextScale, MIN_CANVAS_SCALE, MAX_CANVAS_SCALE);
+    const clampedScale = clampCanvasScale(
+      resolveFiniteCanvasScale(nextScale, scale),
+      MIN_CANVAS_SCALE,
+      MAX_CANVAS_SCALE,
+    );
     const stage = stageRef.current;
     const board = boardRef.current;
     const canvasCenter = stage && board ? canvasPointAtViewportCenter({
@@ -511,7 +596,7 @@ export default function TemplateViewportFrame({
     if (!stage || !target) return;
     const rect = target.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    const nextScale = calculateFitCanvasScale({
+    const nextScale = resolveFiniteCanvasScale(calculateFitCanvasScale({
       viewportWidth: stage.clientWidth,
       viewportHeight: stage.clientHeight,
       contentWidth: rect.width,
@@ -520,7 +605,7 @@ export default function TemplateViewportFrame({
       minimumAvailableSize: 120,
       minimumScale: MIN_CANVAS_SCALE,
       maximumScale: MAX_CANVAS_SCALE,
-    });
+    }), scale);
     setCanvasScale(nextScale);
     scheduleCenterFrameTarget(nextScale);
   };
@@ -532,8 +617,9 @@ export default function TemplateViewportFrame({
   };
   const beginPan = (event: ReactPointerEvent<HTMLDivElement>) => {
     const stage = stageRef.current;
-    if (!panMode || !stage || event.button !== 0) return;
+    if (!stage || (event.button !== 1 && (!panEnabled || event.button !== 0))) return;
     event.preventDefault();
+    event.stopPropagation();
     stage.focus({ preventScroll: true });
     panSessionRef.current = {
       pointerId: event.pointerId,
@@ -557,13 +643,13 @@ export default function TemplateViewportFrame({
     const stage = stageRef.current;
     const session = panSessionRef.current;
     if (!stage || !session || event.pointerId !== session.pointerId) return;
-    if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
     panSessionRef.current = null;
+    if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
     setIsPanning(false);
   };
   const panWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const stage = stageRef.current;
-    if (!panMode || !stage) return;
+    if (!panEnabled || !stage) return;
     const distance = event.shiftKey ? 80 : 24;
     const delta = {
       ArrowLeft: [-distance, 0],
@@ -613,7 +699,7 @@ export default function TemplateViewportFrame({
     const requestedHeight = session.direction === "horizontal"
       ? session.startHeight
       : session.startHeight + verticalDelta;
-    const ratioLocked = session.startHeightMode === "aspect-ratio" || event.shiftKey;
+    const ratioLocked = !viewportWidthOnly && (session.startHeightMode === "aspect-ratio" || event.shiftKey);
     const shouldSnap = snapToGrid && !event.altKey;
     const snappedWidth = shouldSnap && session.direction !== "vertical"
       ? Math.round(requestedWidth / 10) * 10
@@ -748,6 +834,9 @@ export default function TemplateViewportFrame({
   };
   return (
     <>
+      <div className="template-editor__canvas-header">
+      <div className="template-editor__view-toolbar">
+      {toolbarStart}
       <WorkspaceCanvasControls
         isFitView={isFitView}
         zoom={scale}
@@ -761,6 +850,7 @@ export default function TemplateViewportFrame({
           minWidth,
           maxWidth,
           canRestore,
+          previewWidthOnly: !onHeightChange && !onHeightModeChange && !onRatioChange,
           overflow,
           onWidthChange,
           onHeightChange,
@@ -789,16 +879,21 @@ export default function TemplateViewportFrame({
         onSnapToGridChange={() => setSnapToGrid((current) => !current)}
         onLocateSelection={locateSelection}
         onFitSelection={fitSelection}
+        viewActions={viewActions}
       />
+      </div>
+      {navigation}
+      </div>
       <div
         ref={stageRef}
-        className={`homepage-editor__canvas-scroll template-editor__canvas-scroll${panMode ? " is-pan-mode" : ""}${isPanning ? " is-panning" : ""}`}
-        tabIndex={panMode ? 0 : -1}
-        aria-label={panMode ? "模板画布平移区域；使用方向键平移" : undefined}
-        onPointerDown={beginPan}
+        className={`homepage-editor__canvas-scroll template-editor__canvas-scroll${panEnabled ? " is-pan-mode" : ""}${isPanning ? " is-panning" : ""}`}
+        tabIndex={panEnabled ? 0 : -1}
+        aria-label={panEnabled ? "模板画布平移区域；使用方向键平移" : undefined}
+        onPointerDownCapture={beginPan}
         onPointerMove={movePan}
         onPointerUp={finishPan}
-        onPointerCancel={finishPan}
+        onPointerCancel={cancelPan}
+        onLostPointerCapture={cancelPan}
         onKeyDown={panWithKeyboard}
       >
         <div
@@ -872,7 +967,7 @@ export default function TemplateViewportFrame({
                   frameDocument.getElementById("template-viewport-root")!,
                 )
               : null}
-            {overlayTargets && overlayTargets.length > 0 && !panMode ? (
+            {overlayTargets && overlayTargets.length > 0 && !panEnabled ? (
               <EditableTargetOverlay
                 sourceFrame={frameDocument ? frameRef.current : null}
                 sourceRoot={contentElement}
@@ -884,11 +979,22 @@ export default function TemplateViewportFrame({
                 snapEnabled={snapToGrid}
                 movableTargetIds={movableOverlayTargetIds}
                 resizeTargetIds={resizeOverlayTargetIds}
-                disabledNodeActions={disabledOverlayNodeActions}
-                copyResponsiveDestinationLabel={copyResponsiveDestinationLabel}
                 onSelectTarget={onOverlayTargetSelect}
-                onNodeAction={onOverlayNodeAction}
                 onPlacementGesture={onOverlayPlacementGesture}
+                onPlacementGestureBegin={onOverlayPlacementGestureBegin}
+                onPlacementGesturePreview={onOverlayPlacementGesturePreview}
+                onPlacementGestureCancel={onOverlayPlacementGestureCancel}
+                editingScopeId={editingScopeId}
+                onEnterTarget={onOverlayEnterTarget}
+                onSelectTargets={onOverlaySelectTargets}
+                onSelectBackground={onOverlaySelectBackground}
+                propertyControls={propertyControls}
+                spacingEditing={spacingEditing}
+                onSpacingEditingChange={onSpacingEditingChange}
+                onPropertyPreview={onPropertyPreview}
+                onPropertyCommit={onPropertyCommit}
+                flowDropLabel={flowDropLabel}
+                inlineTextEditor={inlineTextEditor}
               />
             ) : null}
           </div>
@@ -898,12 +1004,12 @@ export default function TemplateViewportFrame({
                 ["horizontal", "拖动调整模板宽度"],
                 ["vertical", "拖动调整模板高度与整体比例"],
                 ["both", "拖动调整模板整体比例"],
-              ] as const).map(([direction, label]) => (
+              ] as const).filter(([direction]) => !viewportWidthOnly || direction === "horizontal").map(([direction, label]) => (
                 <button
                   key={direction}
                   type="button"
                   className={`template-editor__canvas-resize-handle template-editor__canvas-resize-handle--${direction}`}
-                  aria-label={`${label}，当前 ${sourceWidth} × ${Math.round(measurement.naturalHeight)}`}
+                  aria-label={viewportWidthOnly ? `拖动预览宽度，当前 ${sourceWidth} 像素` : `${label}，当前 ${sourceWidth} × ${Math.round(measurement.naturalHeight)}`}
                   aria-keyshortcuts={direction === "horizontal"
                     ? "ArrowLeft ArrowRight"
                     : direction === "vertical"

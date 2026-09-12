@@ -1,6 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalog } from "./fixtures/template-catalog";
+import {
+  PAGE_TEMPLATE_FIXTURE_ID,
+  PAGE_TEMPLATE_FIXTURE_NAME,
+  PAGE_TEMPLATE_FIXTURE_VERSION,
+  publishedPageTemplateCatalog,
+} from "./fixtures/template-catalog";
 
 /**
  * 店铺装修编辑器 —— 未保存内容保护（D1）回归测试
@@ -15,8 +20,8 @@ import { systemTemplateCatalog } from "./fixtures/template-catalog";
  * 说明：
  * - 通过 page.route 注入确定性草稿数据（与非 mock 模式一致，参考 core-template-homepage.spec.ts）；
  *   mock 模式下客户端会绕过 HTTP 拦截，故跳过。
- * - 管理员点击系统模板卡会直接进入模板编辑，因此这里按当前产品交互拖入页面；
- *   本文件只验证脏状态与离开保护，不重复断言拖拽细节。
+ * - 页面装修只消费已发布动态模板；本文件通过卡片的“添加到页面”入口制造脏状态，
+ *   不重复验证模板预览与拖拽细节。
  */
 const useMock = process.env.VITE_USE_MOCK === "true";
 
@@ -40,13 +45,32 @@ function makeDraft() {
 
 async function mockEditorApis(page: Page, { failSaves = false } = {}) {
   let saved: ReturnType<typeof makeDraft> = makeDraft();
+  const catalog = publishedPageTemplateCatalog();
+  const publishedTemplate = catalog.items[0].template;
+  const readSavedWithResolvedTemplate = () => ({
+    ...saved,
+    puckData: {
+      ...saved.puckData,
+      ...(saved.puckData.content.length > 0 ? {
+        resolvedDynamicTemplates: {
+          [`${publishedTemplate.templateId}@${publishedTemplate.version}`]: {
+            templateId: publishedTemplate.templateId,
+            version: publishedTemplate.version,
+            schemaVersion: publishedTemplate.schemaVersion,
+            definitionChecksum: publishedTemplate.definitionChecksum,
+            definition: publishedTemplate.definition,
+          },
+        },
+      } : {}),
+    },
+  });
   await page.route(`${API_PREFIX}*`, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
     if (url.includes("/auth/profile")) return route.fallback();
 
     if (url.includes("/page-modules/dynamic-templates/catalog")) {
-      return route.fulfill(json(systemTemplateCatalog()));
+      return route.fulfill(json(catalog));
     }
 
     if (url.includes("/validate")) {
@@ -84,7 +108,7 @@ async function mockEditorApis(page: Page, { failSaves = false } = {}) {
 
     // GET /document/admin —— 后台读取（含草稿）
     if (url.includes("/admin")) {
-      return route.fulfill(json(saved));
+      return route.fulfill(json(readSavedWithResolvedTemplate()));
     }
 
     return route.fulfill(json({}));
@@ -103,19 +127,11 @@ function json(data: unknown) {
 async function addModuleToCanvas(page: Page) {
   const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });
   if (await expandLibrary.isVisible()) await expandLibrary.click();
-  const card = page.getByRole("button", {
-    name: "首屏：点击添加到页面末尾，也可拖到画布指定位置",
+  const addButton = page.getByRole("button", {
+    name: `添加到页面：${PAGE_TEMPLATE_FIXTURE_NAME} v${PAGE_TEMPLATE_FIXTURE_VERSION}`,
   });
-  const canvas = page.locator(".homepage-editor__canvas-document");
-  await expect(card).toBeVisible();
-  await card.scrollIntoViewIfNeeded();
-  const cardBox = await card.boundingBox();
-  const canvasBox = await canvas.boundingBox();
-  if (!cardBox || !canvasBox) throw new Error("模板卡片或页面画布没有可用尺寸");
-  await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + 120, { steps: 14 });
-  await page.mouse.up();
+  await expect(addButton).toBeVisible();
+  await addButton.click();
   await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(1);
 }
 
@@ -181,11 +197,12 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
 
     await expect(page).toHaveURL(/\/admin\/editor\/home/);
     await expect(page.getByText("修改未保存，已留在当前页面")).toBeVisible();
-    await expect(page.locator(".homepage-editor__draft-status")).toContainText("有未保存修改");
+    await expect(page.locator('.homepage-editor__draft-status[data-mode="error"]'))
+      .toContainText("保存失败");
     await expect(
       page
         .frameLocator(".homepage-editor__canvas-scale iframe")
-        .locator('[data-content-template-module="首屏主视觉"]'),
+        .locator(`[data-dynamic-template-id="${PAGE_TEMPLATE_FIXTURE_ID}"]`),
     ).toHaveCount(1);
   });
 
@@ -197,7 +214,10 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
     // 工具栏「保存」入口
     const saveBtn = page.getByRole("button", { name: "保存当前装修草稿" });
     await saveBtn.click();
-    await expect(page.getByText("页面草稿已保存")).toBeVisible({ timeout: 8000 });
+    await expect(
+      page.locator(".ant-message-notice-content")
+        .getByText("页面草稿已保存", { exact: true }),
+    ).toBeVisible({ timeout: 8000 });
 
     // 刷新后重新加载，校验已保存内容回显（admin 接口返回 saved）
     await page.reload();

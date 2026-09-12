@@ -7,11 +7,20 @@ import { OptionalCustomerAuthGuard } from './optional-customer-auth.guard';
 import { CustomersController } from './customers.controller';
 import { CustomersService } from './customers.service';
 import { CustomerNotificationsService } from './customer-notifications.service';
+import { CustomerAvatarService } from './customer-avatar.service';
+import { CustomerProfileService } from './customer-profile.service';
 
 @Module({
   imports: [AuthModule, OrdersModule, MarketingModule],
   controllers: [CustomersController],
-  providers: [CustomersService, CustomerNotificationsService, CustomerAuthGuard, OptionalCustomerAuthGuard],
+  providers: [
+    CustomersService,
+    CustomerNotificationsService,
+    CustomerProfileService,
+    CustomerAvatarService,
+    CustomerAuthGuard,
+    OptionalCustomerAuthGuard,
+  ],
   exports: [CustomerAuthGuard, OptionalCustomerAuthGuard],
 })
 export class CustomersModule {}

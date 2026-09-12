@@ -23,6 +23,7 @@ function getDynamicTemplateCompatibilityContentFields(
 export function hasDynamicTemplateCompatibilityState(
   definition: TemplateDefinitionV2,
 ): boolean {
+  if (Number(definition.schemaVersion) >= 3) return false;
   return getDynamicTemplateCompatibilityContentFields(definition).length > 0
     || Object.values(definition.slots).some((slot) => slot.emptyPolicy === "use-default");
 }
@@ -43,7 +44,10 @@ export function prepareDynamicTemplateDefinitionForNewIdentity(
   definition: TemplateDefinitionV2,
   templateId: string,
 ): TemplateDefinitionV2 {
-  const next = clearDynamicTemplateCompatibilityContent(definition);
+  const next = Number(definition.schemaVersion) >= 3
+    ? structuredClone(definition)
+    : clearDynamicTemplateCompatibilityContent(definition);
+  if (Number(next.schemaVersion) >= 3) next.previewContent = {};
   next.templateId = templateId;
   return next;
 }
@@ -54,6 +58,7 @@ export function prepareHistoricalTemplateDefinitionForCurrentDraft(
 ): TemplateDefinitionV2 {
   const next = structuredClone(historical);
   next.templateId = current.templateId;
+  if (Number(historical.schemaVersion) >= 3 || Number(current.schemaVersion) >= 3) return next;
   next.defaultContent = structuredClone(current.defaultContent);
   next.previewContent = structuredClone(current.previewContent);
   for (const slot of Object.values(next.slots)) {

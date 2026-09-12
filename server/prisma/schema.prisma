@@ -614,8 +614,12 @@ model Customer {
   id                  Int                          @id @default(autoincrement())
   phone               String                       @unique @db.VarChar(20)
   name                String?                      @db.VarChar(50)
-  email               String?                      @db.VarChar(100)
+  email               String?                      @unique @db.VarChar(100)
   passwordHash        String?                      @map("password_hash") @db.VarChar(255)
+  avatarStorageKey    String?                      @map("avatar_storage_key") @db.VarChar(300)
+  phoneChangedAt      DateTime?                    @map("phone_changed_at")
+  emailChangedAt      DateTime?                    @map("email_changed_at")
+  authVersion         Int                          @default(1) @map("auth_version")
   status              Status                       @default(ACTIVE)
   // 微信开放平台扫码登录：openid 唯一绑定；unionid 同开放平台账号跨应用一致（未扫码绑定前为 NULL）
   wechatOpenId        String?                      @unique @map("wechat_open_id") @db.VarChar(64)
@@ -642,6 +646,8 @@ model Customer {
   productAccessLogs         ProductAccessLog[]
   quotations                Quotation[]
   customerRefreshSessions   CustomerRefreshSession[]
+  contactChanges            CustomerContactChange[]
+  securityEvents            CustomerSecurityEvent[]
   consentRecords            ConsentRecord[]
   notifications             Notification[]
   notificationPreferences   NotificationPreference[]
@@ -653,6 +659,44 @@ model Customer {
 
   @@index([partnerStatus])
   @@map("customers")
+}
+
+enum CustomerContactChangeType {
+  PHONE
+  EMAIL
+}
+
+model CustomerContactChange {
+  id               String                    @id @default(uuid()) @db.Char(36)
+  customerId       Int                       @map("customer_id")
+  type             CustomerContactChangeType
+  targetValue      String                    @map("target_value") @db.VarChar(100)
+  verificationHash String                    @map("verification_hash") @db.Char(64)
+  attemptCount     Int                       @default(0) @map("attempt_count")
+  expiresAt        DateTime                  @map("expires_at")
+  completedAt      DateTime?                 @map("completed_at")
+  cancelledAt      DateTime?                 @map("cancelled_at")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, type, completedAt, expiresAt], map: "customer_contact_changes_lookup_idx")
+  @@map("customer_contact_changes")
+}
+
+model CustomerSecurityEvent {
+  id            Int      @id @default(autoincrement())
+  customerId    Int      @map("customer_id")
+  eventType     String   @map("event_type") @db.VarChar(50)
+  ipHash        String?  @map("ip_hash") @db.Char(64)
+  userAgentHash String?  @map("user_agent_hash") @db.Char(64)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("customer_security_events")
 }
 
 // 客户密码重置令牌：只存 SHA-256 哈希（库泄露不泄露令牌本身），一次性使用，30 分钟过期
@@ -2018,6 +2062,7 @@ model CustomerRefreshSession {
   replacedByHash String?   @map("replaced_by_hash") @db.Char(64)
   userAgentHash  String?   @map("user_agent_hash") @db.Char(64)
   ipHash         String?   @map("ip_hash") @db.Char(64)
+  authVersion    Int       @default(1) @map("auth_version")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -2315,8 +2360,8 @@ model PaymentPlan {
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
 
-  quotationVersion QuotationVersion?        @relation(fields: [quotationVersionId], references: [id], onDelete: Restrict)
-  order            Order?                   @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  quotationVersion QuotationVersion?        @relation(fields: [quotationVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  order            Order?                   @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   installments     PaymentPlanInstallment[]
 
   @@index([quotationVersionId])

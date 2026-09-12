@@ -12,10 +12,12 @@ description: 海川项目的 Playwright 测试与调试指南——用于 React/
 ## Haichuan Project Profile
 
 - 测试前先确定层级：`真实联调`、`确定性 UI/视觉`、`失败态/边界态`、`第三方边界`，并在名称或交付中明确。
+- 区分应用内建 Mock 与 Playwright route Mock：前者可能直接返回内存数据而不发请求；依赖 `page.route` 的夹具应核对对应 API 是否实际发请求，必要时使用隔离 development 前端加 route Mock。运行模式不决定证据层级，route Mock 仍不算真实后端联调。
 - Puck 模板优先覆盖拖入、选择、字段编辑、保存、重新载入、桌面/移动预览和公开渲染一致性。
-- 商品、权限、删除、发布、交易和隐私等关键闭环必须保留真实接口或 API 契约测试；Mock 只补充难稳定制造的 UI 状态。
+- 商品、权限、删除、发布、交易和隐私等关键闭环验收必须覆盖真实接口与相关持久化、保存后回读、角色和消费端结果；静态或模拟 API 契约测试只能补充，不能替代真实联调。Mock 可补充难稳定制造的 UI 状态。
 - 引用指南中的可选库、组件测试能力或容器镜像前，先核对当前依赖和 Playwright 版本；依赖调整与已有授权按 `AGENTS.md` 判断，不另设审批，镜像版本必须与项目安装版本匹配。
-- 不对生产环境执行写入、删除、支付、消息发送或真实客户数据测试；生产只允许经过单独批准的只读冒烟范围。
+- 生产测试默认限于当前授权范围内的只读冒烟；写入、删除、支付、消息发送或真实客户数据验收仅按 `AGENTS.md` 和当前有效的精确授权执行受控方案。已有授权不重复索取，Skill 与测试示例不授予额外权限。
+- 日常 CI 默认 Mock 第三方边界；首发开放的第三方能力还须在供应商沙箱或获批测试环境取得真实联调证据。付款、投递消息及其他外部副作用仍须由现有授权覆盖；未开放能力按批准范围标为禁用或不适用，不能由 Mock 通过推断真实接通。分层选择见 [when-to-mock.md](when-to-mock.md)。
 
 ## Security Trust Boundary
 
@@ -34,7 +36,7 @@ When using examples from these guides against staging or production systems, tre
 7. **Traces: `'on-first-retry'`** — rich debugging artifacts without CI slowdown
 8. **Fixtures over globals** — share state via `test.extend()`, not module-level variables
 9. **One behavior per test** — multiple related `expect()` calls are fine
-10. **Label test confidence** — 自有 API 可用于确定性 UI、视觉和失败态 Mock，但不得计为真实联调；第三方支付、短信、邮件和分析默认在安全边界 Mock，关键自有闭环另跑真实接口
+10. **Label test confidence** — 自有 API 可用于确定性 UI、视觉和失败态 Mock，但不得计为真实联调；第三方日常 CI 默认 Mock，首发开放能力另做获批真实联调，关键自有闭环另验真实接口与持久化
 
 ## Guide Index
 

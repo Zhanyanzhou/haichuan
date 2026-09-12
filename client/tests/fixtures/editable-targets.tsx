@@ -5,6 +5,7 @@ import {
   createBlankDynamicTemplateDefinition,
   DynamicTemplateRenderer,
 } from "../../src/page-builder/template-definition";
+import "../../src/page-builder/template-editor/TemplateWorkspace.css";
 
 let definition = createBlankDynamicTemplateDefinition("Renderer 身份边界测试");
 const container = addDynamicTemplateNode(
@@ -15,6 +16,8 @@ const container = addDynamicTemplateNode(
 definition = container.definition;
 const heading = addDynamicTemplateNode(definition, container.nodeId, "HeadingSlot");
 definition = heading.definition;
+const emptyRegion = addDynamicTemplateNode(definition, definition.rootNodeId, "Container");
+definition = emptyRegion.definition;
 
 const sharedProps = {
   definition,
