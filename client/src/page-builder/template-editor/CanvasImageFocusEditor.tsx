@@ -80,8 +80,8 @@ export default function CanvasImageFocusEditor({ nodeId, sourceElement, editing,
       onPointerCancel={() => close(false)} onLostPointerCapture={(event) => {
         const current = drag.current;
         if (!current || current.id !== event.pointerId || current.element !== event.currentTarget) return;
-        // 上一轮释放的丢失事件可能晚于下一轮按下到达；当前指针已重新持有 capture 时不能取消新事务。
-        if (!event.currentTarget.hasPointerCapture(event.pointerId)) close(false);
+        // capture 丢失不等于 pointercancel：尚未跨过阈值时没有取景变更，不应关闭整个编辑事务。
+        if (current.active) close(false);
       }}>
       <span aria-hidden="true" style={{ position: "absolute", left: `${focus.x}%`, top: `${focus.y}%`, transform: "translate(-50%, -50%)", border: "2px solid white", outline: "1px solid #181A1B", borderRadius: "50%", width: 18, height: 18 }}>+</span>
     </div>

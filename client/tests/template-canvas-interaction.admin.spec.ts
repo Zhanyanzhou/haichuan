@@ -722,15 +722,31 @@ test("隔离画布新增：鼠标取景遵守屏幕阈值，松手保留预览�
   const slider = page.getByRole("slider", { name: "图片焦点", exact: true });
   const bounds = await slider.boundingBox(); if (!bounds) throw new Error("缺少图片取景拖动区域");
   const point = { x: bounds.x + bounds.width * .3, y: bounds.y + bounds.height * .3 };
-  await page.mouse.move(point.x, point.y); await page.mouse.down(); await page.mouse.move(point.x + 2, point.y); await page.mouse.up();
+  const sliderPoint = { x: bounds.width * .3, y: bounds.height * .3 };
+  await slider.hover({ position: sliderPoint }); await page.mouse.down(); await page.mouse.move(point.x + 2, point.y); await page.mouse.up();
   await expect(image).toHaveCSS("object-position", original); expect((await snapshot(page)).preview).toBe(false);
-  await page.mouse.move(point.x, point.y); await page.mouse.down();
-  // 上一次正常释放的 lostpointercapture 可能晚于下一次 pointerdown 到达；
-  // 新一轮已经重新持有 capture 时，不得被旧事件取消。
-  await slider.dispatchEvent("lostpointercapture", { pointerId: 1 });
+  await slider.evaluate((element) => element.addEventListener("pointerdown", (event) => element.setAttribute("data-test-pointer-id", String(event.pointerId)), { once: true }));
+  await slider.hover({ position: sliderPoint }); await page.mouse.down();
+  await expect(slider).toHaveAttribute("data-test-pointer-id", /^\d+$/);
+  const pointerId = Number(await slider.getAttribute("data-test-pointer-id"));
+  // capture 丢失只恢复普通命中；指针仍在 slider 内且尚未跨阈值时，不得取消取景事务。
+  await slider.dispatchEvent("lostpointercapture", { pointerId });
   await page.mouse.move(point.x + 18, point.y + 12, { steps: 5 });
   await expect.poll(() => image.evaluate((element) => getComputedStyle(element).objectPosition)).not.toBe(original);
   await page.mouse.up(); await expect(slider).toBeVisible(); expect((await snapshot(page)).history).toBe(0); expect((await snapshot(page)).preview).toBe(true);
   await page.keyboard.press("Escape"); await expect(slider).toHaveCount(0); await expect(image).toHaveCSS("object-position", original);
+  await page.getByRole("button", { name: "调整画面", exact: true }).click();
+  const activeSlider = page.getByRole("slider", { name: "图片焦点", exact: true });
+  const activeBounds = await activeSlider.boundingBox(); if (!activeBounds) throw new Error("缺少图片取景拖动区域");
+  const activePoint = { x: activeBounds.x + activeBounds.width * .3, y: activeBounds.y + activeBounds.height * .3 };
+  const activeSliderPoint = { x: activeBounds.width * .3, y: activeBounds.height * .3 };
+  await activeSlider.evaluate((element) => element.addEventListener("pointerdown", (event) => element.setAttribute("data-test-pointer-id", String(event.pointerId)), { once: true }));
+  await activeSlider.hover({ position: activeSliderPoint }); await page.mouse.down();
+  await expect(activeSlider).toHaveAttribute("data-test-pointer-id", /^\d+$/);
+  const activePointerId = Number(await activeSlider.getAttribute("data-test-pointer-id"));
+  await page.mouse.move(activePoint.x + 18, activePoint.y + 12, { steps: 5 });
+  await expect.poll(() => image.evaluate((element) => getComputedStyle(element).objectPosition)).not.toBe(original);
+  await activeSlider.dispatchEvent("lostpointercapture", { pointerId: activePointerId });
+  await expect(activeSlider).toHaveCount(0); await page.mouse.up(); await expect(image).toHaveCSS("object-position", original);
   expect((await snapshot(page)).firstSlotRules).toEqual(before.firstSlotRules); expect((await snapshot(page)).dirty).toBe(false);
 });
