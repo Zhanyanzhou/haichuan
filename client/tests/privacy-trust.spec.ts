@@ -347,12 +347,12 @@ test.describe("SEO 与索引", () => {
     await expect(page).toHaveTitle(/提交咨询需求/);
   });
 
-  test("前台公开页 robots meta 不阻止索引（无 noindex）", async ({ page }) => {
+  test("未绑定严格预渲染证据的公开 SPA 壳保持 noindex", async ({ page }) => {
     await page.goto("/privacy");
-    const robotsMeta = await page
-      .locator('meta[name="robots"]')
-      .getAttribute("content");
-    // 前台不应设 noindex（admin 离开后恢复为 index,follow）
-    expect(robotsMeta || "index, follow").not.toContain("noindex");
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+      "content",
+      /noindex,\s*nofollow/,
+    );
+    await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
   });
 });

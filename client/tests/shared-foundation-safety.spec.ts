@@ -28,7 +28,10 @@ const errorBoundarySource = readFileSync(
 
 test("共享错误边界使用中性降级并阻止异常页面进入索引", () => {
   expect(errorBoundarySource).toContain('robots.content = "noindex, nofollow"');
-  expect(errorBoundarySource).toContain('document.title = "页面加载异常"');
+  expect(errorBoundarySource).toContain(
+    'document.title = english ? "Page unavailable" : "页面加载异常";',
+  );
+  expect(errorBoundarySource).toContain("This page cannot be displayed right now. Refresh and try again.");
   expect(errorBoundarySource).toContain("当前页面暂时无法显示，请刷新后重试。");
   expect(errorBoundarySource).not.toContain("可通过联系页面提交需求");
   expect(errorBoundarySource).not.toContain("页面加载异常｜海川珠宝");
@@ -42,7 +45,10 @@ test("生产构建关闭开发画廊、mock mode 与静态首页 fallback", () =
     'data-production-fallback={content ? "safe-status" : "disabled"}',
   );
   expect(publicLayoutSource).toContain("{USE_MOCK && (");
-  expect(publicLayoutSource).toContain('aria-label="演示数据说明"');
+  expect(publicLayoutSource).toContain(
+    'aria-label={english ? "Synthetic data notice" : "演示数据说明"}',
+  );
+  expect(publicLayoutSource).toContain("Local verification only; this is not real inventory, pricing, or a service promise.");
   expect(publicLayoutSource).toContain("不代表真实库存、价格或服务承诺");
 });
 

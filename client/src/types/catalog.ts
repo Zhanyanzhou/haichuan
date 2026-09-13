@@ -56,6 +56,8 @@ export interface Product {
   craftTechnique?: string[];
   detailContent?: ProductDetailBlock[];
   status: ProductStatus;
+  /** 后台审核流状态；IN_REVIEW 时商品事实被冻结，须由管理员发布或退回草稿。 */
+  reviewStatus?: "DRAFT" | "IN_REVIEW";
   visibility?: "PUBLIC" | "MEMBER" | "PARTNER" | "INTERNAL";
   purchaseRegion?: "MAINLAND" | "CROSS_BORDER";
   publishMode?: "IMMEDIATE" | "SCHEDULED" | "WAREHOUSE";

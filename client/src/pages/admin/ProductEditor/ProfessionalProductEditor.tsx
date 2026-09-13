@@ -39,6 +39,7 @@ import type {
   ShippingTemplateCreateInput,
 } from "@/services/api";
 import { useCommerceEnabled } from "@/store/featureFlags";
+import { useAuthStore } from "@/store/authStore";
 import type {
   Category,
   InventoryPolicy,
@@ -142,6 +143,7 @@ type ProductEditorFormValues = {
 };
 
 type UploadedProductMedia = {
+  mediaAssetId: number;
   storageKey: string;
   url?: string;
   width?: number;
@@ -267,6 +269,8 @@ export default function ProfessionalProductEditor() {
   const editingId = id && Number.isInteger(parsedEditingId) && parsedEditingId > 0 ? parsedEditingId : null;
   const navigate = useNavigate();
   const commerceEnabled = useCommerceEnabled();
+  const role = useAuthStore((state) => state.user?.role);
+  const canGovernPublic = role === "SUPER_ADMIN" || role === "ADMIN";
   const [form] = Form.useForm<ProductEditorFormValues>();
   const [active, setActive] = useState("media");
   const [requiredOnly, setRequiredOnly] = useState(true);
@@ -279,6 +283,7 @@ export default function ProfessionalProductEditor() {
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState<string>();
   const [currentStatus, setCurrentStatus] = useState<ProductStatus>("DRAFT");
+  const [currentReviewStatus, setCurrentReviewStatus] = useState<"DRAFT" | "IN_REVIEW">("DRAFT");
   const [categories, setCategories] = useState<{ value: number; label: string }[]>([]);
   const [images, setImages] = useState<ProductImage[]>([]);
   const [primaryImageId, setPrimaryImageId] = useState<number | null>(null);
@@ -314,6 +319,8 @@ export default function ProfessionalProductEditor() {
   const selectedPublishMode = Form.useWatch("publishMode", form) || "WAREHOUSE";
   const selectedSalesMode = (Form.useWatch("salesMode", form) || "DISPLAY_ONLY") as SalesMode;
   const selectedInventoryPolicy = (Form.useWatch("inventoryPolicy", form) || "STANDARD") as InventoryPolicy;
+  const isReviewLocked = currentReviewStatus === "IN_REVIEW";
+  const isRoleReadOnly = isReviewLocked || (!canGovernPublic && currentStatus !== "DRAFT");
   const selectedCategoryLabel = categories.find((item) => item.value === selectedCategoryId)?.label;
 
   useEffect(() => {
@@ -323,6 +330,7 @@ export default function ProfessionalProductEditor() {
     setSubmitError(undefined);
     setCurrentProductId(editingId);
     setCurrentStatus("DRAFT");
+    setCurrentReviewStatus("DRAFT");
     setPrimaryImageId(null);
     setSkus([]);
     setSavedAt(undefined);
@@ -347,6 +355,7 @@ export default function ProfessionalProductEditor() {
           const product = unwrapResponse<ProductEditorRecord>(productRes);
           const loadedStatus = (product.status || "DRAFT") as ProductStatus;
           setCurrentStatus(loadedStatus);
+          setCurrentReviewStatus(product.reviewStatus || "DRAFT");
           setImages(product.images || []);
           setPrimaryImageId(product.primaryImageId ?? product.primaryImage?.id ?? null);
           setSkus(product.skus || []);
@@ -448,8 +457,9 @@ export default function ProfessionalProductEditor() {
     for (let index = 0; index < mediaToUpload.length; index += 1) {
       const media = mediaToUpload[index];
       const uploaded = unwrapResponse<UploadedProductMedia[]>(await uploadApi.uploadProductImage(media.file))[0];
-      if (!uploaded?.storageKey) throw new EditorUserError("图片上传失败，请重新选择图片后重试");
+      if (!uploaded?.storageKey || !uploaded.mediaAssetId) throw new EditorUserError("图片上传失败，请重新选择图片后重试");
       const created = unwrapResponse<ProductImage>(await productApi.addImage(productId, {
+        mediaAssetId: uploaded.mediaAssetId,
         storageKey: uploaded.storageKey,
         url: uploaded.url,
         type: index === 0 && images.length === 0 ? "FRONT" : "DETAIL",
@@ -515,6 +525,7 @@ export default function ProfessionalProductEditor() {
   const refreshProduct = async (productId: number) => {
     const refreshed = unwrapResponse<ProductEditorRecord>(await productApi.getById(productId));
     setCurrentStatus((refreshed.status || "DRAFT") as ProductStatus);
+    setCurrentReviewStatus(refreshed.reviewStatus || "DRAFT");
     setImages(refreshed.images || []);
     setPrimaryImageId(refreshed.primaryImageId ?? refreshed.primaryImage?.id ?? null);
     setSkus(refreshed.skus || []);
@@ -584,6 +595,12 @@ export default function ProfessionalProductEditor() {
 
   const save = async (intent: "draft" | "primary" = "draft") => {
     if (savingRef.current) return false;
+    if (isRoleReadOnly) {
+      messageApi.warning(isReviewLocked
+        ? "作品正在审核中；管理员须先通过上架或退回修改"
+        : "编辑角色只能维护草稿；该作品须由管理员处理");
+      return false;
+    }
     savingRef.current = true;
     let productId = currentProductId;
     const requiresFullValidation = intent === "primary" || currentStatus === "PUBLISHED";
@@ -626,7 +643,9 @@ export default function ProfessionalProductEditor() {
       })).filter((block) => block.type === "TEXT" ? Boolean(block.text?.trim()) : Boolean(block.imageId));
       const { code: _code, ...updatePayload } = { ...contentPayload, detailContent };
       await productApi.update(productId, updatePayload);
-      if (currentStatus === "PUBLISHED") {
+      if (!canGovernPublic && intent === "primary") {
+        await productApi.submitForReview(productId);
+      } else if (currentStatus === "PUBLISHED") {
         // 对已上架商品重新执行发布门禁，但不改变其业务状态。
         await productApi.updateStatus(productId, "PUBLISHED");
       } else if (intent === "primary" && values.publishMode === "IMMEDIATE") {
@@ -643,7 +662,9 @@ export default function ProfessionalProductEditor() {
       const refreshed = await refreshProduct(productId);
       setDirty(false);
       setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
-      const successMessage = intent === "draft"
+      const successMessage = !canGovernPublic && intent === "primary"
+        ? "商品草稿已保存并提交审核"
+        : intent === "draft"
         ? currentStatus === "PUBLISHED" ? "已保存商品更改" : "草稿已保存"
         : refreshed.status === "PUBLISHED"
           ? currentStatus === "PUBLISHED" ? "已保存商品更改" : "商品已上架"
@@ -740,6 +761,48 @@ export default function ProfessionalProductEditor() {
     }
   };
 
+  const approveReviewedProduct = async () => {
+    if (!currentProductId || savingRef.current || !canGovernPublic || !isReviewLocked) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      setSubmitError(undefined);
+      await productApi.updateStatus(currentProductId, "PUBLISHED");
+      await refreshProduct(currentProductId);
+      setDirty(false);
+      setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
+      messageApi.success("审核版本已通过并上架");
+    } catch (error: unknown) {
+      const failure = getProductSubmitFailure(error);
+      setSubmitError(failure.message);
+      messageApi.error(failure.message);
+    } finally {
+      setSaving(false);
+      savingRef.current = false;
+    }
+  };
+
+  const returnReviewedProduct = async () => {
+    if (!currentProductId || savingRef.current || !canGovernPublic || !isReviewLocked) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      setSubmitError(undefined);
+      await productApi.updateStatus(currentProductId, "DRAFT");
+      await refreshProduct(currentProductId);
+      setDirty(false);
+      setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
+      messageApi.success("作品已退回草稿，可继续修改后重新提交");
+    } catch (error: unknown) {
+      const failure = getProductSubmitFailure(error);
+      setSubmitError(failure.message);
+      messageApi.error(failure.message);
+    } finally {
+      setSaving(false);
+      savingRef.current = false;
+    }
+  };
+
   const confirmOffline = () => {
     if (!currentProductId) return;
     if (dirty) {
@@ -808,7 +871,11 @@ export default function ProfessionalProductEditor() {
   const tabs = [
     ["media", "图文描述"], ["basic", "基础信息"], ["sales", "销售信息"], ["delivery", "物流服务"],
   ];
-  const primaryActionLabel = currentStatus === "PUBLISHED"
+  const primaryActionLabel = isReviewLocked && canGovernPublic
+    ? "通过并上架"
+    : !canGovernPublic
+    ? currentStatus === "DRAFT" ? "保存并提交审核" : "仅管理员可处理"
+    : currentStatus === "PUBLISHED"
     ? "保存更改"
     : selectedPublishMode === "IMMEDIATE"
       ? currentStatus === "OFFLINE" ? "重新上架" : "上架商品"
@@ -852,7 +919,8 @@ export default function ProfessionalProductEditor() {
         <label className="pro-editor__required"><Switch checked={requiredOnly} onChange={setRequiredOnly} /> 只看核心字段</label>
       </header>
 
-      <Form name="product-editor-main" form={form} initialValues={defaultValues} layout="vertical" disabled={saving} onValuesChange={() => { markDirty(); setSubmitError(undefined); }} className="pro-editor__form">
+      {isReviewLocked ? <Alert type="info" showIcon message={canGovernPublic ? "这是编辑提交的审核版本，内容、SKU、图片、标签、属性与证书均已冻结；请直接通过上架或退回修改。" : "作品已提交审核，审核完成或管理员退回前不可继续修改。"} /> : isRoleReadOnly ? <Alert type="info" showIcon message="当前作品为已发布或已下架状态，编辑角色仅可查看；修改、下架与归档请交由管理员处理。" /> : null}
+      <Form name="product-editor-main" form={form} initialValues={defaultValues} layout="vertical" disabled={saving || isRoleReadOnly} onValuesChange={() => { markDirty(); setSubmitError(undefined); }} className="pro-editor__form">
         <Alert className="pro-editor__notice" type="info" showIcon message="完整、准确的珠宝信息有助于提升客户信任与商品转化；库存统一按下单预占、确认收款后扣减。" />
         {submitError && <Alert className="pro-editor__submit-error" type="error" showIcon message="商品保存未完成" description={submitError} closable onClose={() => setSubmitError(undefined)} />}
         <div className="pro-editor__category"><strong>当前类目 <i>*</i></strong><span>{selectedCategoryLabel || "珠宝 / 请选择具体类目"}</span><Tag color={statusMeta[currentStatus].color}>{statusMeta[currentStatus].label}</Tag><button type="button" onClick={() => { setActive("basic"); document.getElementById("basic")?.scrollIntoView({ behavior: "smooth" }); }}>切换类目</button></div>
@@ -955,7 +1023,7 @@ export default function ProfessionalProductEditor() {
             <Form.Item label="库存扣减方式"><Radio checked>下单预占库存，确认收款后扣减</Radio><span className="pro-editor__hint">库存事实由库存模块统一管理，不在商品资料中直接修改。</span></Form.Item>
             <Alert className="pro-editor__inventory-alert" type={selectedSalesMode === "DIRECT_PURCHASE" ? "warning" : "info"} showIcon message={salesModeMessage} action={selectedSalesMode === "DIRECT_PURCHASE" ? <Button size="small" onClick={() => navigate("/admin/inventory")}>前往库存管理</Button> : undefined} />
             {selectedInventoryPolicy === "SINGLE_UNIT" && currentProductId && activeSkuCount !== 1 && <Alert className="pro-editor__inventory-alert" type="error" showIcon message={`当前有 ${activeSkuCount} 个有效 SKU；一物一件必须且只能保留 1 个。保存时以服务端 409 校验结果为准。`} />}
-            <Form.Item name="publishMode" label="上架时间"><Radio.Group><Radio value="IMMEDIATE">立刻上架</Radio><Radio value="SCHEDULED">定时上架</Radio><Radio value="WAREHOUSE">放入仓库</Radio></Radio.Group></Form.Item>
+            <Form.Item name="publishMode" label={canGovernPublic ? "上架时间" : "发布流程"}><Radio.Group disabled={!canGovernPublic}><Radio value="IMMEDIATE">立刻上架</Radio><Radio value="SCHEDULED">定时上架</Radio><Radio value="WAREHOUSE">提交审核前保留草稿</Radio></Radio.Group></Form.Item>
             <Form.Item noStyle shouldUpdate={(prev, next) => prev.publishMode !== next.publishMode}>{({ getFieldValue }) => getFieldValue("publishMode") === "SCHEDULED" ? <Form.Item name="scheduledPublishAt" label="定时上架时间" rules={[{ required: true }]}><DatePicker showTime disabledDate={(date) => date.isBefore(dayjs(), "day")} /></Form.Item> : null}</Form.Item>
             <Form.Item name="visibility" label="可见范围"><Select options={[{ value: "PUBLIC", label: "公开宣传款（游客可见）" }, { value: "MEMBER", label: "登录会员可见" }, { value: "PARTNER", label: "合作商家专属" }, { value: "INTERNAL", label: "仅内部可见" }]} /></Form.Item>
             {!requiredOnly && <Form.Item label="商品标识"><Space wrap><Form.Item name="isHot" valuePropName="checked" noStyle><Checkbox>热卖</Checkbox></Form.Item><Form.Item name="isNew" valuePropName="checked" noStyle><Checkbox>新品</Checkbox></Form.Item><Form.Item name="isRecommended" valuePropName="checked" noStyle><Checkbox>推荐</Checkbox></Form.Item><Form.Item name="isLimited" valuePropName="checked" noStyle><Checkbox>限量</Checkbox></Form.Item><Form.Item name="isCustom" valuePropName="checked" noStyle><Checkbox>支持定制</Checkbox></Form.Item></Space></Form.Item>}
@@ -1005,7 +1073,7 @@ export default function ProfessionalProductEditor() {
         </section>
       </Form>
 
-      <footer className="pro-editor__footer"><div><Button type="primary" loading={saving} onClick={() => void save("primary")}>{primaryActionLabel}</Button>{currentStatus === "PUBLISHED" ? <Button danger disabled={saving} onClick={confirmOffline}>下架</Button> : (currentStatus !== "OFFLINE" || selectedPublishMode !== "WAREHOUSE") ? <Button icon={<SaveOutlined />} loading={saving} onClick={() => void save("draft")}>{currentStatus === "OFFLINE" ? "保存内容" : "保存草稿"}</Button> : null}<Button icon={<EyeOutlined />} disabled={saving} onClick={() => { setPreviewValues(form.getFieldsValue(true)); setPreviewOpen(true); }}>预览</Button><span role="status" aria-live="polite" className={dirty ? "is-dirty" : ""}>{savedStatusText}</span></div></footer>
+      <footer className="pro-editor__footer"><div>{isReviewLocked && canGovernPublic ? <><Button type="primary" loading={saving} onClick={() => void approveReviewedProduct()}>{primaryActionLabel}</Button><Button disabled={saving} onClick={() => void returnReviewedProduct()}>退回修改</Button></> : !isRoleReadOnly ? <Button type="primary" loading={saving} onClick={() => void save("primary")}>{primaryActionLabel}</Button> : null}{!isReviewLocked && canGovernPublic && currentStatus === "PUBLISHED" ? <Button danger disabled={saving} onClick={confirmOffline}>下架</Button> : !isReviewLocked && !isRoleReadOnly && (currentStatus !== "OFFLINE" || selectedPublishMode !== "WAREHOUSE") ? <Button icon={<SaveOutlined />} loading={saving} onClick={() => void save("draft")}>{currentStatus === "OFFLINE" ? "保存内容" : "保存草稿"}</Button> : null}<Button icon={<EyeOutlined />} disabled={saving} onClick={() => { setPreviewValues(form.getFieldsValue(true)); setPreviewOpen(true); }}>预览</Button><span role="status" aria-live="polite" className={dirty ? "is-dirty" : ""}>{savedStatusText}</span></div></footer>
 
       <Modal rootClassName="pro-editor-modal" title="新建运费模板" open={templateOpen} forceRender confirmLoading={templateSaving} onCancel={() => setTemplateOpen(false)} onOk={() => void saveTemplate()} okText="保存模板" cancelText="取消">
         <Form name="shipping-template-form" form={templateForm} layout="vertical" initialValues={{ feeMode: "FREE", baseFee: 0, remoteSurcharge: 0, insured: true, signatureRequired: true }}>

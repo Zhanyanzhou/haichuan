@@ -16,7 +16,12 @@ function isAdminAccessTokenPayload(
     candidate.type === "admin" &&
     candidate.tokenUse === "access" &&
     Number.isInteger(candidate.sub) &&
-    Number(candidate.sub) > 0
+    Number(candidate.sub) > 0 &&
+    (candidate.sessionFamilyId === undefined ||
+      (typeof candidate.sessionFamilyId === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          candidate.sessionFamilyId,
+        )))
   );
 }
 
@@ -45,13 +50,40 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!isAdminAccessTokenPayload(payload)) {
       throw new UnauthorizedException('令牌类型无效');
     }
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: payload.sub,
+        status: { not: "DISABLED" },
+        ...(payload.sessionFamilyId
+          ? {
+              adminRefreshSessions: {
+                some: {
+                  familyId: payload.sessionFamilyId,
+                  revokedAt: null,
+                  expiresAt: { gt: new Date() },
+                },
+              },
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        username: true,
+        realName: true,
+        phone: true,
+        email: true,
+        avatar: true,
+        role: true,
+        status: true,
+        lastLoginIp: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
-    if (!user || user.status === "DISABLED") {
+    if (!user) {
       throw new UnauthorizedException("账号无效或已被禁用");
     }
-    const { password: _, ...result } = user;
-    return result;
+    return user;
   }
 }

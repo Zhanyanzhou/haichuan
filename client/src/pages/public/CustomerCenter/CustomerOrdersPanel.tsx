@@ -99,6 +99,7 @@ type TrackingData = {
 type CustomerOrdersPanelProps = {
   orders: CustomerOrder[];
   commerceEnabled: boolean;
+  paymentEnabled: boolean;
   uploadingProof: boolean;
   cancellingAfterSalesId: number | null;
   onOpenReview: (order: CustomerReviewOrder) => void;
@@ -112,6 +113,7 @@ type CustomerOrdersPanelProps = {
 export default function CustomerOrdersPanel({
   orders,
   commerceEnabled,
+  paymentEnabled,
   uploadingProof,
   cancellingAfterSalesId,
   onOpenReview,
@@ -226,7 +228,12 @@ export default function CustomerOrdersPanel({
                     {order.orderNo} ·{" "}
                     {new Date(order.createdAt).toLocaleDateString("zh-CN")}
                   </small>
-                  <h3>{order.items?.[0]?.product?.name || "珠宝作品"}</h3>
+                  <h3>{order.items?.[0]?.product?.name || order.quotedLines?.[0]?.description || "珠宝作品"}</h3>
+                  {order.quoteChannel ? (
+                    <small>
+                      报价渠道：{{ RETAIL: "标准零售", CUSTOM: "高级定制", PARTNER_WAX: "合作蜡模" }[order.quoteChannel]}
+                    </small>
+                  ) : null}
                   {(latestFulfillment ||
                     latestRefund ||
                     visibleAfterSales.length > 0) && (
@@ -449,8 +456,7 @@ export default function CustomerOrdersPanel({
                     </button>
                   ) : null}
                   {order.status === "PENDING_PAYMENT" &&
-                    (commerceEnabled ? (
-                      order.paymentMethod === "bank_transfer" ? (
+                    (order.paymentMethod === "bank_transfer" && commerceEnabled ? (
                         hasPendingProof ? (
                           <span style={{ fontSize: 11, color: "#7a531a" }}>
                             特殊线下凭证已提交·待审核
@@ -470,7 +476,7 @@ export default function CustomerOrdersPanel({
                             上传线下付款凭证
                           </button>
                         )
-                      ) : (
+                      ) : paymentEnabled ? (
                         <button
                           type="button"
                           className="my-account__summary-action"
@@ -489,12 +495,11 @@ export default function CustomerOrdersPanel({
                         >
                           继续微信支付
                         </button>
-                      )
-                    ) : (
-                      <span style={{ fontSize: 11, color: "#5f6568" }}>
-                        线上付款暂未开放·顾问将联系您
-                      </span>
-                    ))}
+                      ) : (
+                        <span style={{ fontSize: 11, color: "#5f6568" }}>
+                          线上付款暂未开放·顾问将联系您
+                        </span>
+                      ))}
                   {order.status === "PENDING_PAYMENT" && !hasPendingProof ? (
                     <button
                       type="button"

@@ -6,6 +6,7 @@ import {
   Logger,
   OnModuleInit,
   Optional,
+  HttpStatus,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import {
@@ -14,6 +15,7 @@ import {
   DeliveryStatus,
   CustomStage,
   PaymentStatus,
+  QuoteChannel,
   Coupon,
   Prisma,
 } from "@prisma/client";
@@ -38,6 +40,8 @@ import { businessDateKey } from "../../common/time/business-date";
 import { runWithDocumentNumberRetry } from "../../common/trade/document-number-retry";
 import { ReliableNotificationIntentService } from "../../common/notifications/reliable-notification-intent.service";
 import { FulfillmentService } from "../fulfillment/fulfillment.service";
+import { hashBusinessSnapshot } from "../quotations/quotation-snapshot";
+import { ApiError } from "../../common/errors/api-error";
 
 /** 订单状态机：定义合法状态转换（导出供行为级测试消费） */
 export const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -73,6 +77,10 @@ const CUSTOMER_VISIBLE_EVENT_TYPES: ReadonlySet<string> = new Set([
   TRADE_EVENT_TYPE.REFUND_COMPLETED,
   TRADE_EVENT_TYPE.REFUND_EXECUTE_FAILED,
 ]);
+
+function usesTradeResourceReservations(channel: QuoteChannel | null | undefined) {
+  return channel === 'CUSTOM' || channel === 'PARTNER_WAX';
+}
 
 function hasSameCouponEconomicTerms(left: Coupon, right: Coupon): boolean {
   return (
@@ -411,14 +419,16 @@ export class OrdersService implements OnModuleInit {
   }
 
   /**
-   * 一笔 Payment 确认后统一刷新订单实收；只有累计毛收款精确达到应收才消费库存、
-   * 推进待发货并创建唯一待拣货履约单。少收不提前发货，超收整笔事务回滚。
+   * 一笔 Payment 确认后统一刷新订单实收。零售订单全额到账后消费 Inventory
+   * 并创建仓库履约单；非零售订单在专属生产/交付履约尚无权威模型时失败关闭，
+   * 不能把资源桶强行映射为零售仓库与 InventoryReservation。
    */
   private async applyConfirmedPaymentToOrder(
     tx: Prisma.TransactionClient,
     order: {
       id: number;
       status: OrderStatus;
+      quoteChannel?: QuoteChannel | null;
       finalAmount: Prisma.Decimal;
       items: Array<{
         id: number;
@@ -455,8 +465,16 @@ export class OrdersService implements OnModuleInit {
       return { fullyPaid: false, paidCents };
     }
 
+    if (usesTradeResourceReservations(order.quoteChannel)) {
+      throw new ApiError(
+        HttpStatus.CONFLICT,
+        "NON_RETAIL_FULFILLMENT_MODEL_REQUIRED",
+        "定制与合作订单的生产交付履约尚未配置，已拒绝确认全额收款",
+      );
+    }
+
     const consumed = await this.consumeStockReservations(tx, order.id, now);
-    if (consumed.count === 0) {
+    if (consumed.count === 0 && order.items.length > 0) {
       const expiresAt = this.getReservationExpiry(now);
       for (const item of [...order.items].sort(
         (a, b) => a.productId - b.productId || a.skuId - b.skuId,
@@ -745,6 +763,80 @@ export class OrdersService implements OnModuleInit {
     });
   }
 
+  private async releaseTradeResourceReservations(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    releasedAt: Date,
+  ) {
+    const reservations = await tx.orderResourceReservation.findMany({
+      where: { orderId, status: "RESERVED" },
+      select: { id: true, resourceBucketId: true, quantity: true },
+      orderBy: [{ resourceBucketId: "asc" }, { id: "asc" }],
+    });
+    let releasedCount = 0;
+    for (const reservation of reservations) {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM trade_resource_buckets WHERE id = ${reservation.resourceBucketId} FOR UPDATE`,
+      );
+      const claimed = await tx.orderResourceReservation.updateMany({
+        where: { id: reservation.id, status: "RESERVED" },
+        data: { status: "RELEASED", releasedAt },
+      });
+      if (claimed.count !== 1) continue;
+      const bucket = await tx.tradeResourceBucket.updateMany({
+        where: {
+          id: reservation.resourceBucketId,
+          reservedQuantity: { gte: reservation.quantity },
+        },
+        data: {
+          reservedQuantity: { decrement: reservation.quantity },
+          version: { increment: 1 },
+        },
+      });
+      if (bucket.count !== 1) throw new ConflictException("资源预占数据不一致，不能释放");
+      releasedCount += 1;
+    }
+    return releasedCount;
+  }
+
+  private async consumeTradeResourceReservations(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    consumedAt: Date,
+  ) {
+    const reservations = await tx.orderResourceReservation.findMany({
+      where: { orderId, status: "RESERVED" },
+      select: { id: true, resourceBucketId: true, quantity: true },
+      orderBy: [{ resourceBucketId: "asc" }, { id: "asc" }],
+    });
+    let consumedCount = 0;
+    for (const reservation of reservations) {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM trade_resource_buckets WHERE id = ${reservation.resourceBucketId} FOR UPDATE`,
+      );
+      const claimed = await tx.orderResourceReservation.updateMany({
+        where: { id: reservation.id, status: "RESERVED" },
+        data: { status: "CONSUMED", consumedAt },
+      });
+      if (claimed.count !== 1) continue;
+      const bucket = await tx.tradeResourceBucket.updateMany({
+        where: {
+          id: reservation.resourceBucketId,
+          availableQuantity: { gte: reservation.quantity },
+          reservedQuantity: { gte: reservation.quantity },
+        },
+        data: {
+          availableQuantity: { decrement: reservation.quantity },
+          reservedQuantity: { decrement: reservation.quantity },
+          version: { increment: 1 },
+        },
+      });
+      if (bucket.count !== 1) throw new ConflictException("资源预占数据不一致，不能核销");
+      consumedCount += 1;
+    }
+    return consumedCount;
+  }
+
   private async cancelActivePaymentPlanInTx(
     tx: Prisma.TransactionClient,
     orderId: number,
@@ -839,6 +931,9 @@ export class OrdersService implements OnModuleInit {
       'PAYMENT_TIMEOUT',
     );
     const releasedCount = await this.releaseStockReservations(tx, order.id, now);
+    if (usesTradeResourceReservations(order.quoteChannel)) {
+      await this.releaseTradeResourceReservations(tx, order.id, now);
+    }
     if (
       order.quotationVersionId != null ||
       (order.paymentPlans?.length ?? 0) > 0
@@ -1083,6 +1178,39 @@ export class OrdersService implements OnModuleInit {
         payments: { orderBy: { createdAt: "desc" } },
         refunds: { orderBy: { createdAt: "desc" } },
         reservations: { orderBy: { createdAt: "asc" } },
+        quotedLines: { orderBy: { id: "asc" } },
+        resourceReservations: {
+          orderBy: { id: "asc" },
+          include: {
+            resourceBucket: {
+              select: {
+                id: true,
+                channel: true,
+                kind: true,
+                code: true,
+                bucketKey: true,
+                displayName: true,
+                unit: true,
+              },
+            },
+          },
+        },
+        quotationVersion: {
+          select: {
+            id: true,
+            quotationId: true,
+            version: true,
+            status: true,
+            snapshotSchemaVersion: true,
+            contentHash: true,
+          },
+        },
+        quotationSource: {
+          select: { id: true, quoteNo: true, channel: true, status: true },
+        },
+        quotationConversion: {
+          select: { id: true, quotationVersionId: true, customerId: true, createdAt: true },
+        },
         fulfillments: { orderBy: { createdAt: "desc" } },
         afterSalesCases: { orderBy: { createdAt: "desc" } },
         tradeEvents: { orderBy: { createdAt: "asc" } },
@@ -1092,6 +1220,16 @@ export class OrdersService implements OnModuleInit {
       },
     });
     if (!order) throw new NotFoundException("订单不存在");
+    if (
+      order.transactionSnapshot != null
+      && (
+        order.snapshotSchemaVersion !== 2
+        || !order.transactionSnapshotHash
+        || hashBusinessSnapshot(order.transactionSnapshot) !== order.transactionSnapshotHash
+      )
+    ) {
+      throw new ConflictException("订单交易快照完整性校验失败");
+    }
     return order;
   }
 
@@ -1159,11 +1297,24 @@ export class OrdersService implements OnModuleInit {
         customStage: true,
         deliveryStatus: true,
         receivedAt: true,
+        quoteChannel: true,
         couponId: true,
         items: {
           include: {
             product: { select: { id: true, name: true, code: true } },
             sku: { select: { skuCode: true, material: true, size: true } },
+          },
+        },
+        quotedLines: {
+          select: {
+            id: true,
+            productId: true,
+            skuId: true,
+            waxType: true,
+            description: true,
+            quantity: true,
+            unitAmount: true,
+            lineAmount: true,
           },
         },
         payments: {
@@ -1699,7 +1850,10 @@ export class OrdersService implements OnModuleInit {
     data: {
       quotationId: number;
       quotationVersionId?: number;
+      channel?: "RETAIL" | "CUSTOM" | "PARTNER_WAX";
       customerId?: number;
+      customerAccountTypeSnapshot?: "MEMBER" | "PARTNER";
+      confirmedAt?: Date;
       customerName: string;
       customerPhone: string;
       customerEmail?: string;
@@ -1708,11 +1862,16 @@ export class OrdersService implements OnModuleInit {
       orderType?: OrderType;
       totalAmount: number | string;
       discountAmount?: number | string;
+      feeAmount?: number | string;
       finalAmount: number | string;
       depositAmount?: number | string;
+      transactionSnapshot?: Prisma.JsonObject;
+      transactionSnapshotHash?: string;
       items: Array<{
-        skuId: number;
-        productId: number;
+        quotationVersionItemId?: number;
+        skuId?: number | null;
+        productId?: number | null;
+        waxType?: "RED" | "PURPLE" | null;
         productName: string;
         productImage?: string | null;
         productCode?: string | null;
@@ -1720,6 +1879,14 @@ export class OrdersService implements OnModuleInit {
         quantity: number;
         unitPrice: number | string;
         subtotal: number | string;
+        description?: string;
+        pricingSnapshot?: Prisma.JsonValue;
+      }>;
+      resourceRequirements?: Array<{
+        quotationRequirementId: number;
+        resourceBucketId: number;
+        resourceBucketVersion: number;
+        quantity: number | string;
       }>;
     },
     context: {
@@ -1739,19 +1906,27 @@ export class OrdersService implements OnModuleInit {
     if (!data.items?.length)
       throw new BadRequestException("报价单无商品，不可转订单");
 
-    const quoteSkuIds = [...new Set(data.items.map((item) => item.skuId))];
-    if (quoteSkuIds.length !== data.items.length) {
+    const channel = data.channel ?? "RETAIL";
+    const retailItems = data.items.filter(
+      (item): item is typeof item & { skuId: number; productId: number } =>
+        item.skuId != null && item.productId != null,
+    );
+    if (channel === "RETAIL" && retailItems.length !== data.items.length) {
+      throw new BadRequestException("零售报价单每一行都必须关联商品规格");
+    }
+    const quoteSkuIds = [...new Set(retailItems.map((item) => item.skuId))];
+    if (channel === "RETAIL" && quoteSkuIds.length !== retailItems.length) {
       throw new BadRequestException("报价单不能包含重复的商品规格");
     }
-    const quoteSkus = await tx.productSKU.findMany({
+    const quoteSkus = channel === "RETAIL" ? await tx.productSKU.findMany({
       where: { id: { in: quoteSkuIds } },
       select: {
         id: true,
         productId: true,
         product: { select: { inventoryPolicy: true } },
       },
-    });
-    if (quoteSkus.length !== quoteSkuIds.length) {
+    }) : [];
+    if (channel === "RETAIL" && quoteSkus.length !== quoteSkuIds.length) {
       throw new BadRequestException("报价单包含不存在的商品规格");
     }
     const quoteSkuFacts = new Map(
@@ -1761,7 +1936,7 @@ export class OrdersService implements OnModuleInit {
       ]),
     );
     const singleUnitQuoteQuantities = new Map<number, number>();
-    for (const item of data.items) {
+    for (const item of retailItems) {
       const skuFacts = quoteSkuFacts.get(item.skuId)!;
       if (skuFacts.productId !== item.productId) {
         throw new BadRequestException("报价单商品与规格不匹配");
@@ -1785,7 +1960,7 @@ export class OrdersService implements OnModuleInit {
     );
 
     const orderItems: Prisma.OrderItemUncheckedCreateWithoutOrderInput[] =
-      data.items.map((it) => ({
+      channel === "RETAIL" ? retailItems.map((it) => ({
         skuId: it.skuId,
         productId: it.productId,
         quantity: it.quantity,
@@ -1795,7 +1970,25 @@ export class OrdersService implements OnModuleInit {
         productImageSnapshot: it.productImage ?? null,
         productCodeSnapshot: it.productCode ?? null,
         skuSnapshot: it.skuSnapshot ?? null,
-      }));
+      })) : [];
+
+    const quotedLines: Prisma.QuotedOrderLineUncheckedCreateWithoutOrderInput[] =
+      channel === "RETAIL" ? [] : data.items.map((item) => {
+        if (!item.quotationVersionItemId) {
+          throw new BadRequestException("定制报价行缺少不可变版本标识");
+        }
+        return {
+          quotationVersionItemId: item.quotationVersionItemId,
+          productId: item.productId ?? null,
+          skuId: item.skuId ?? null,
+          waxType: item.waxType ?? null,
+          description: item.description ?? item.productName,
+          quantity: item.quantity,
+          unitAmount: toDecimal(item.unitPrice),
+          lineAmount: toDecimal(item.subtotal),
+          pricingSnapshot: item.pricingSnapshot ?? {},
+        };
+      });
 
     const order = await tx.order.create({
       data: {
@@ -1807,6 +2000,7 @@ export class OrdersService implements OnModuleInit {
         address: customer.address,
         totalAmount: toDecimal(data.totalAmount),
         discountAmount: toDecimal(data.discountAmount || 0),
+        feeAmount: toDecimal(data.feeAmount || 0),
         finalAmount: toDecimal(data.finalAmount),
         shippingAmount: new Prisma.Decimal(0),
         insuranceAmount: new Prisma.Decimal(0),
@@ -1829,34 +2023,102 @@ export class OrdersService implements OnModuleInit {
           taxCents: 0,
           adjustmentCents: 0,
           finalCents: Math.round(Number(data.finalAmount) * 100),
+          feeCents: Math.round(Number(data.feeAmount || 0) * 100),
           quotationId: data.quotationId,
           quotationVersionId: data.quotationVersionId ?? null,
         },
         depositAmount: toDecimal(data.depositAmount || 0),
         balanceAmount: new Prisma.Decimal(balanceCents).div(100),
         lockedGoldPrice: latestGoldPrice?.price || null,
-        paymentMethod: "bank_transfer",
+        paymentMethod: null,
         status: "PENDING_PAYMENT",
         orderType: data.orderType ?? "SPOT",
         salesConsultantId: data.salesConsultantId ?? null,
         source: "quotation",
         quotationVersionId: data.quotationVersionId ?? null,
+        ...(data.transactionSnapshot
+          ? {
+              quoteChannel: data.channel ?? null,
+              customerAccountTypeSnapshot: data.customerAccountTypeSnapshot ?? null,
+              confirmedByCustomerId: data.customerId ?? null,
+              confirmedAt: data.confirmedAt ?? null,
+              snapshotSchemaVersion: 2,
+              transactionSnapshot: data.transactionSnapshot,
+              transactionSnapshotHash: data.transactionSnapshotHash ?? null,
+            }
+          : {}),
         reservedAt,
-        items: { create: orderItems },
+        ...(orderItems.length ? { items: { create: orderItems } } : {}),
+        ...(quotedLines.length ? { quotedLines: { create: quotedLines } } : {}),
       },
-      include: { items: true },
+      include: { items: true, quotedLines: true },
     });
 
-    for (const item of [...order.items].sort(
-      (a, b) => a.productId - b.productId || a.skuId - b.skuId,
-    )) {
-      await this.reserveStock(
-        tx,
-        order.id,
-        item.skuId,
-        item.quantity,
-        expiresAt,
-      );
+    if (channel === "RETAIL") {
+      for (const item of [...order.items].sort(
+        (a, b) => a.productId - b.productId || a.skuId - b.skuId,
+      )) {
+        await this.reserveStock(
+          tx,
+          order.id,
+          item.skuId,
+          item.quantity,
+          expiresAt,
+        );
+      }
+    } else {
+      for (const requirement of [...(data.resourceRequirements ?? [])].sort(
+        (left, right) => left.resourceBucketId - right.resourceBucketId,
+      )) {
+        const quantity = new Prisma.Decimal(requirement.quantity).toDecimalPlaces(3);
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM trade_resource_buckets WHERE id = ${requirement.resourceBucketId} FOR UPDATE`,
+        );
+        const currentBucket = await tx.tradeResourceBucket.findUnique({
+          where: { id: requirement.resourceBucketId },
+          select: {
+            channel: true,
+            isActive: true,
+            availableQuantity: true,
+            reservedQuantity: true,
+            version: true,
+          },
+        });
+        if (
+          !currentBucket ||
+          !currentBucket.isActive ||
+          currentBucket.channel !== channel ||
+          currentBucket.version !== requirement.resourceBucketVersion ||
+          currentBucket.availableQuantity.minus(currentBucket.reservedQuantity).lt(quantity)
+        ) {
+          throw new ConflictException("RESOURCE_INSUFFICIENT");
+        }
+        const reserved = await tx.tradeResourceBucket.updateMany({
+          where: {
+            id: requirement.resourceBucketId,
+            isActive: true,
+            channel,
+            version: requirement.resourceBucketVersion,
+          },
+          data: {
+            reservedQuantity: { increment: quantity },
+            version: { increment: 1 },
+          },
+        });
+        if (reserved.count !== 1) {
+          throw new ConflictException("RESOURCE_INSUFFICIENT");
+        }
+        await tx.orderResourceReservation.create({
+          data: {
+            orderId: order.id,
+            quotationRequirementId: requirement.quotationRequirementId,
+            resourceBucketId: requirement.resourceBucketId,
+            quantity,
+            status: "RESERVED",
+            reservedAt,
+          },
+        });
+      }
     }
 
     await this.tradeEvents.record(tx, {
@@ -1868,19 +2130,21 @@ export class OrdersService implements OnModuleInit {
       operator,
       metadata: {
         totalAmount: order.totalAmount.toString(),
-        itemCount: order.items.length,
+        itemCount: order.items.length + order.quotedLines.length,
         fromQuotationId: data.quotationId,
       },
     });
-    await this.tradeEvents.record(tx, {
-      orderId: order.id,
-      entityType: TRADE_ENTITY_TYPE.INVENTORY,
-      entityId: order.id,
-      eventType: TRADE_EVENT_TYPE.STOCK_RESERVED,
-      toStatus: "PENDING_PAYMENT",
-      operator,
-      reason: `报价单 #${data.quotationId} 转订单预占 ${order.items.length} 个商品行`,
-    });
+    if (channel === "RETAIL") {
+      await this.tradeEvents.record(tx, {
+        orderId: order.id,
+        entityType: TRADE_ENTITY_TYPE.INVENTORY,
+        entityId: order.id,
+        eventType: TRADE_EVENT_TYPE.STOCK_RESERVED,
+        toStatus: "PENDING_PAYMENT",
+        operator,
+        reason: `报价单 #${data.quotationId} 转订单预占 ${order.items.length} 个商品行`,
+      });
+    }
     return order;
   }
 
@@ -2686,6 +2950,9 @@ export class OrdersService implements OnModuleInit {
     );
     const cancelledAt = new Date();
     const releasedCount = await this.releaseStockReservations(tx, orderId, cancelledAt);
+    if (usesTradeResourceReservations(lockedOrder.quoteChannel)) {
+      await this.releaseTradeResourceReservations(tx, orderId, cancelledAt);
+    }
     if (
       lockedOrder.quotationVersionId != null ||
       (lockedOrder.paymentPlans?.length ?? 0) > 0

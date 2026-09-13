@@ -549,6 +549,8 @@ function createMultiPackageHarness(
       outboxEvents.push(input);
       return input;
     },
+  } as never, {
+    evaluate: async () => ({ allowed: true, topic: 'SERVICE_ORDER_SHIPPED' }),
   } as never);
   const service = new FulfillmentService(
     prisma,

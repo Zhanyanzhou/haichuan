@@ -17,6 +17,8 @@ import { MarketingService } from '../marketing/marketing.service';
 import { CustomerAuthGuard } from './customer-auth.guard';
 import { CustomerAvatarService } from './customer-avatar.service';
 import { CustomerNotificationsService } from './customer-notifications.service';
+import { ReliableNotificationDeliveryWorker } from '../../common/notifications/reliable-notification-delivery.worker';
+import { NotificationDeliveryPolicyService } from '../../common/notifications/notification-delivery-policy.service';
 import { CustomerProfileService } from './customer-profile.service';
 import { CustomersController } from './customers.controller';
 import { CustomersService } from './customers.service';
@@ -52,7 +54,12 @@ test(
       {} as never,
       {} as never,
     );
-    const avatars = { replace: async () => undefined, read: async () => undefined, delete: async () => undefined };
+    const avatars = {
+      replace: async () => undefined,
+      read: async () => undefined,
+      delete: async () => undefined,
+      remove: async () => undefined,
+    };
     const customers = new CustomersService(
       prismaService,
       orders,
@@ -61,7 +68,6 @@ test(
       sms as never,
       refreshSessions,
     );
-    const notifications = new CustomerNotificationsService(prismaService);
     const profile = new CustomerProfileService(prismaService, sms as never, mailer as never);
     @Module({
       controllers: [CustomersController],
@@ -70,7 +76,7 @@ test(
         { provide: PrismaService, useValue: prismaService },
         { provide: CustomersService, useValue: customers },
         { provide: OrdersService, useValue: orders },
-        { provide: CustomerNotificationsService, useValue: notifications },
+        CustomerNotificationsService,
         { provide: RefreshSessionService, useValue: refreshSessions },
         { provide: MarketingService, useValue: { listUsableCoupons: async () => [] } },
         { provide: CustomerProfileService, useValue: profile },
@@ -83,18 +89,29 @@ test(
     })
     class CustomerIsolationTestModule {}
 
-    const app = await NestFactory.create(CustomerIsolationTestModule, {
-      abortOnError: false,
-      logger: ['error'],
-    });
-    app.setGlobalPrefix('api');
-    app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+    const createTestApp = async () => {
+      const instance = await NestFactory.create(CustomerIsolationTestModule, {
+        abortOnError: false,
+        logger: ['error'],
+      });
+      instance.setGlobalPrefix('api');
+      instance.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+      return instance;
+    };
+    let app = await createTestApp();
 
     const marker = randomUUID().replaceAll('-', '').slice(0, 10);
     const phoneBase = randomInt(10_000_000, 99_999_998);
     const createdCustomerIds: number[] = [];
     let categoryId: number | undefined;
     let appStarted = false;
+    let baseUrl = '';
+    const startApp = async () => {
+      await app.listen(0, '127.0.0.1');
+      appStarted = true;
+      const port = (app.getHttpServer().address() as AddressInfo).port;
+      baseUrl = `http://127.0.0.1:${port}/api/customers`;
+    };
     await prisma.$connect();
     try {
       const passwordHash = await bcrypt.hash('Oldpass1', 4);
@@ -141,7 +158,7 @@ test(
           data: { customerId: customerB.id, recipientName: '地址B', recipientPhone: customerB.phone, detail: '客户B私有地址' },
         }),
       ]);
-      await Promise.all([
+      const [, , notificationA, notificationB] = await Promise.all([
         prisma.customerFavorite.create({ data: { customerId: customerA.id, productId: productA.id } }),
         prisma.customerFavorite.create({ data: { customerId: customerB.id, productId: productB.id } }),
         prisma.notification.create({
@@ -149,6 +166,25 @@ test(
         }),
         prisma.notification.create({
           data: { customerId: customerB.id, type: 'TEST', locale: 'ZH_CN', title: '通知B', body: '客户B私有通知', status: 'AVAILABLE' },
+        }),
+      ]);
+      await Promise.all([
+        prisma.notification.create({
+          data: { customerId: customerA.id, type: 'TEST', locale: 'ZH_CN', title: '待发布通知', body: '不可见', status: 'PENDING' },
+        }),
+        prisma.notification.create({
+          data: {
+            customerId: customerA.id,
+            type: 'TEST',
+            locale: 'ZH_CN',
+            title: '未来通知',
+            body: '不可见',
+            status: 'AVAILABLE',
+            availableAt: new Date(Date.now() + 60_000),
+          },
+        }),
+        prisma.notification.create({
+          data: { customerId: customerA.id, type: 'TEST', locale: 'ZH_CN', title: '归档通知', body: '不可见', status: 'ARCHIVED' },
         }),
       ]);
       const orderSnapshot = {
@@ -185,10 +221,7 @@ test(
       const staffAccess = jwt.sign({ sub: 1, type: 'admin', tokenUse: 'access', role: 'ADMIN' });
       const oldRefreshA = await refreshSessions.issueCustomer(customerA.id, {}, customerA.authVersion);
 
-      await app.listen(0, '127.0.0.1');
-      appStarted = true;
-      const port = (app.getHttpServer().address() as AddressInfo).port;
-      const baseUrl = `http://127.0.0.1:${port}/api/customers`;
+      await startApp();
       const call = async (
         path: string,
         token?: string,
@@ -217,6 +250,117 @@ test(
       assert.deepEqual(ordersResult.body.map((row: { customerId: number }) => row.customerId), [customerA.id]);
       assert.deepEqual(notificationsResult.body.list.map((row: { title: string }) => row.title), ['通知A']);
       assert.deepEqual(inquiries.body.list.map((row: { message: string }) => row.message), ['客户A私有咨询']);
+
+      const foreignNotificationWrite = await call(`/me/notifications/${notificationA.id}/read`, accessB, {
+        method: 'PUT',
+      });
+      assert.equal(foreignNotificationWrite.response.status, 404);
+      assert.equal(
+        (await prisma.notification.findUniqueOrThrow({ where: { id: notificationA.id } })).status,
+        'AVAILABLE',
+      );
+      const readAllA = await call('/me/notifications/read-all', oldAccessA, { method: 'PUT' });
+      assert.equal(readAllA.response.status, 200);
+      assert.equal(
+        (await prisma.notification.findUniqueOrThrow({ where: { id: notificationA.id } })).status,
+        'READ',
+      );
+      assert.equal(
+        (await prisma.notification.findUniqueOrThrow({ where: { id: notificationB.id } })).status,
+        'AVAILABLE',
+      );
+
+      const defaultPreferencesA = await call('/me/notification-preferences', oldAccessA);
+      const defaultPreferencesB = await call('/me/notification-preferences', accessB);
+      assert.equal(defaultPreferencesA.response.status, 200);
+      assert.equal(defaultPreferencesB.response.status, 200);
+      const defaultOrderEmail = defaultPreferencesA.body.list.find(
+        (item: { channel: string; topic: string }) =>
+          item.channel === 'EMAIL' && item.topic === 'SERVICE_ORDER_CREATED',
+      );
+      const defaultMarketingEmail = defaultPreferencesA.body.list.find(
+        (item: { channel: string; topic: string }) =>
+          item.channel === 'EMAIL' && item.topic === 'MARKETING_GENERAL',
+      );
+      assert.equal(defaultOrderEmail.enabled, true);
+      assert.equal(defaultOrderEmail.defaulted, true);
+      assert.equal(defaultMarketingEmail.enabled, false);
+      assert.equal(defaultPreferencesA.body.marketingConsentGranted, false);
+
+      const firstPreferenceWrite = await call('/me/notification-preferences', oldAccessA, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          channel: 'EMAIL',
+          topic: 'SERVICE_ORDER_CREATED',
+          enabled: false,
+          expectedUpdatedAt: null,
+        }),
+      });
+      assert.equal(firstPreferenceWrite.response.status, 200);
+      assert.equal(firstPreferenceWrite.body.enabled, false);
+      assert.equal(
+        await prisma.notificationPreference.count({
+          where: { customerId: customerB.id, topic: 'SERVICE_ORDER_CREATED' },
+        }),
+        0,
+      );
+      await app.close();
+      appStarted = false;
+      app = await createTestApp();
+      await startApp();
+      const persistedPreferences = await call('/me/notification-preferences', oldAccessA);
+      const persistedOrderEmail = persistedPreferences.body.list.find(
+        (item: { channel: string; topic: string }) =>
+          item.channel === 'EMAIL' && item.topic === 'SERVICE_ORDER_CREATED',
+      );
+      assert.equal(persistedPreferences.response.status, 200);
+      assert.equal(persistedOrderEmail.enabled, false);
+      assert.equal(persistedOrderEmail.updatedAt, firstPreferenceWrite.body.updatedAt);
+      const preferenceVersion = firstPreferenceWrite.body.updatedAt;
+      const concurrentPreferences = await Promise.all([
+        call('/me/notification-preferences', oldAccessA, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            channel: 'EMAIL',
+            topic: 'SERVICE_ORDER_CREATED',
+            enabled: true,
+            expectedUpdatedAt: preferenceVersion,
+          }),
+        }),
+        call('/me/notification-preferences', oldAccessA, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            channel: 'EMAIL',
+            topic: 'SERVICE_ORDER_CREATED',
+            enabled: true,
+            expectedUpdatedAt: preferenceVersion,
+          }),
+        }),
+      ]);
+      assert.deepEqual(
+        concurrentPreferences.map(({ response }) => response.status).sort(),
+        [200, 409],
+      );
+      assert.equal(
+        await prisma.customerSecurityEvent.count({
+          where: {
+            customerId: customerA.id,
+            eventType: 'NOTIFY_PREF_EMAIL_SERVICE_ORDER_CREATED_ON',
+          },
+        }),
+        1,
+      );
+      assert.equal(
+        await prisma.customerSecurityEvent.count({
+          where: {
+            customerId: customerA.id,
+            eventType: 'NOTIFY_PREF_EMAIL_SERVICE_ORDER_CREATED_OFF',
+          },
+        }),
+        1,
+      );
+      const staffPreferenceAttempt = await call('/me/notification-preferences', staffAccess);
+      assert.equal(staffPreferenceAttempt.response.status, 401);
 
       const foreignConsultation = await call(`/me/consultations/${leadA.id}`, accessB);
       assert.equal(foreignConsultation.response.status, 404);
@@ -247,6 +391,63 @@ test(
       assert.equal(await prisma.customerSecurityEvent.count({ where: { customerId: customerA.id, eventType: 'PASSWORD_CHANGED' } }), 1);
       assert.equal(await prisma.customerRefreshSession.count({ where: { customerId: customerA.id, revokedAt: null } }), 0);
       assert.equal(addressB.customerId, customerB.id);
+
+      const delivery = await prisma.notificationDelivery.create({
+        data: {
+          notificationId: notificationB.id,
+          channel: 'EMAIL',
+          status: 'PENDING',
+          destinationHash: 'a'.repeat(64),
+        },
+      });
+      const outboxEvent = await prisma.outboxEvent.create({
+        data: {
+          aggregateType: 'Notification',
+          aggregateId: String(notificationB.id),
+          eventType: 'notification.delivery.requested',
+          payload: { notificationId: notificationB.id, orderId: 1 },
+          deduplicationKey: `customer-close-${marker}`,
+        },
+      });
+      await prisma.notificationPreference.create({
+        data: {
+          customerId: customerB.id,
+          channel: 'EMAIL',
+          topic: 'SERVICE_ORDER_CREATED',
+          enabled: false,
+        },
+      });
+      await customers.closeAccount(customerB.id, 'Oldpass1');
+      const cancelled = await prisma.notificationDelivery.findUniqueOrThrow({ where: { id: delivery.id } });
+      assert.equal(cancelled.status, 'CANCELLED');
+      assert.equal(cancelled.destinationHash, null);
+      assert.equal(
+        await prisma.notificationPreference.count({ where: { customerId: customerB.id } }),
+        0,
+      );
+      assert.equal(
+        (await prisma.notification.findUniqueOrThrow({ where: { id: notificationB.id } })).status,
+        'ARCHIVED',
+      );
+      let externalSends = 0;
+      const worker = new ReliableNotificationDeliveryWorker(
+        prismaService,
+        { get: () => 'true' } as never,
+        {
+          send: async () => {
+            externalSends += 1;
+            return { delivered: true };
+          },
+        } as never,
+        new NotificationDeliveryPolicyService(),
+      );
+      assert.equal(await worker.drainOnce(1), 1);
+      assert.equal(externalSends, 0);
+      assert.equal(
+        (await prisma.outboxEvent.findUniqueOrThrow({ where: { id: outboxEvent.id } })).status,
+        'PROCESSED',
+      );
+      await prisma.outboxEvent.delete({ where: { id: outboxEvent.id } });
     } finally {
       if (appStarted) await app.close();
       await prisma.lead.deleteMany({ where: { customerId: { in: createdCustomerIds } } });

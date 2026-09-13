@@ -24,42 +24,50 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  operationLogs             OperationLog[]
-  aiClassifyRecords         AIClassifyRecord[]             @relation("Operator")
-  inquiries                 Inquiry[]                      @relation("AssignedTo")
-  Order                     Order[]
-  selectionInquiries        SelectionInquiry[]             @relation("Handler")
-  leadFollowUps             LeadFollowUp[]                 @relation("Creator")
-  assignedLeads             Lead[]                         @relation("LeadAssignee")
-  leadActivities            LeadActivity[]                 @relation("LeadActivityCreator")
-  leadLegalHolds            Lead[]                         @relation("LeadLegalHoldActor")
-  leadPrivacyDispositions   Lead[]                         @relation("LeadPrivacyDispositionActor")
+  operationLogs                OperationLog[]
+  aiClassifyRecords            AIClassifyRecord[]             @relation("Operator")
+  inquiries                    Inquiry[]                      @relation("AssignedTo")
+  Order                        Order[]
+  selectionInquiries           SelectionInquiry[]             @relation("Handler")
+  leadFollowUps                LeadFollowUp[]                 @relation("Creator")
+  assignedLeads                Lead[]                         @relation("LeadAssignee")
+  leadActivities               LeadActivity[]                 @relation("LeadActivityCreator")
+  leadLegalHolds               Lead[]                         @relation("LeadLegalHoldActor")
+  leadPrivacyDispositions      Lead[]                         @relation("LeadPrivacyDispositionActor")
   // 交易域审核/执行人关联（命名关系，避免与既有 User 关系冲突）
-  paymentReviews            Payment[]                      @relation("PaymentReviewer")
-  refundRequests            Refund[]                       @relation("RefundRequester")
-  refundReviews             Refund[]                       @relation("RefundReviewer")
-  refundProcessings         Refund[]                       @relation("RefundProcessor")
-  fulfillmentCreators       Fulfillment[]                  @relation("FulfillmentCreator")
-  afterSalesHandlers        AfterSalesCase[]               @relation("AfterSalesHandler")
+  paymentReviews               Payment[]                      @relation("PaymentReviewer")
+  refundRequests               Refund[]                       @relation("RefundRequester")
+  refundReviews                Refund[]                       @relation("RefundReviewer")
+  refundProcessings            Refund[]                       @relation("RefundProcessor")
+  fulfillmentCreators          Fulfillment[]                  @relation("FulfillmentCreator")
+  afterSalesHandlers           AfterSalesCase[]               @relation("AfterSalesHandler")
   // 合作申请审核人关联（命名关系，避免与既有 User 关系冲突）
-  partnerApplicationReviews PartnerApplication[]           @relation("PartnerApplicationReviewer")
+  partnerApplicationReviews    PartnerApplication[]           @relation("PartnerApplicationReviewer")
   // 交易中心：销售顾问关联的订单与报价单
-  salesConsultantOrders     Order[]                        @relation("OrderSalesConsultant")
-  quotationsAsConsultant    Quotation[]                    @relation("QuotationSalesConsultant")
-  adminRefreshSessions      AdminRefreshSession[]
-  uploadedMediaAssets       MediaAsset[]                   @relation("MediaAssetUploader")
-  submittedPageLocales      PageDocumentLocalization[]     @relation("PageLocaleSubmitter")
-  reviewedPageLocales       PageDocumentLocalization[]     @relation("PageLocaleReviewer")
-  publishedPageLocales      PageDocumentLocalization[]     @relation("PageLocalePublisher")
-  reviewedPriceApplications PartnerPriceApplication[]      @relation("PartnerPriceApplicationReviewer")
-  createdPriceAgreements    PartnerPriceAgreement[]        @relation("PartnerPriceAgreementCreator")
-  createdQuotationVersions  QuotationVersion[]             @relation("QuotationVersionCreator")
-  createdDesignFileVersions CooperationDesignFileVersion[] @relation("DesignFileVersionCreator")
-  personalContentTemplates  PersonalContentTemplate[]
-  ownedDynamicTemplates     DynamicTemplate[]              @relation("DynamicTemplateOwner")
-  updatedDynamicDrafts      DynamicTemplateDraft[]         @relation("DynamicTemplateDraftUpdater")
-  publishedDynamicVersions  DynamicTemplateVersion[]       @relation("DynamicTemplateVersionPublisher")
-  activatedDynamicTemplates DynamicTemplateActivation[]    @relation("DynamicTemplateActivationActor")
+  salesConsultantOrders        Order[]                        @relation("OrderSalesConsultant")
+  quotationsAsConsultant       Quotation[]                    @relation("QuotationSalesConsultant")
+  adminRefreshSessions         AdminRefreshSession[]
+  uploadedMediaAssets          MediaAsset[]                   @relation("MediaAssetUploader")
+  preparedMediaAuthorizations  MediaAssetAuthorization[]      @relation("MediaAuthorizationPreparer")
+  submittedMediaAuthorizations MediaAssetAuthorization[]      @relation("MediaAuthorizationSubmitter")
+  reviewedMediaAuthorizations  MediaAssetAuthorization[]      @relation("MediaAuthorizationReviewer")
+  revokedMediaAuthorizations   MediaAssetAuthorization[]      @relation("MediaAuthorizationRevoker")
+  mediaAuthorizationEvents     MediaAssetAuthorizationEvent[] @relation("MediaAuthorizationEventActor")
+  submittedPageLocales         PageDocumentLocalization[]     @relation("PageLocaleSubmitter")
+  reviewedPageLocales          PageDocumentLocalization[]     @relation("PageLocaleReviewer")
+  publishedPageLocales         PageDocumentLocalization[]     @relation("PageLocalePublisher")
+  reviewedPriceApplications    PartnerPriceApplication[]      @relation("PartnerPriceApplicationReviewer")
+  createdPriceAgreements       PartnerPriceAgreement[]        @relation("PartnerPriceAgreementCreator")
+  createdQuotationVersions     QuotationVersion[]             @relation("QuotationVersionCreator")
+  createdDesignFileVersions    CooperationDesignFileVersion[] @relation("DesignFileVersionCreator")
+  createdQuotationFeeRules     QuotationFeeRule[]             @relation("QuotationFeeRuleCreator")
+  createdTradeResourceBuckets  TradeResourceBucket[]          @relation("TradeResourceBucketCreator")
+  updatedTradeResourceBuckets  TradeResourceBucket[]          @relation("TradeResourceBucketUpdater")
+  personalContentTemplates     PersonalContentTemplate[]
+  ownedDynamicTemplates        DynamicTemplate[]              @relation("DynamicTemplateOwner")
+  updatedDynamicDrafts         DynamicTemplateDraft[]         @relation("DynamicTemplateDraftUpdater")
+  publishedDynamicVersions     DynamicTemplateVersion[]       @relation("DynamicTemplateVersionPublisher")
+  activatedDynamicTemplates    DynamicTemplateActivation[]    @relation("DynamicTemplateActivationActor")
 
   @@map("users")
 }
@@ -186,6 +194,7 @@ model Product {
   cooperationDesignFiles CooperationDesignFile[]
   seoSnapshots           SeoSnapshot[]
   quotationVersionItems  QuotationVersionItem[]
+  quotedOrderLines       QuotedOrderLine[]
 
   @@index([categoryId])
   @@index([status])
@@ -363,6 +372,7 @@ model ProductSKU {
   reservations          InventoryReservation[]
   quotationItems        QuotationItem[]
   quotationVersionItems QuotationVersionItem[]
+  quotedOrderLines      QuotedOrderLine[]
 
   @@map("product_skus")
 }
@@ -542,6 +552,7 @@ model Order {
   shippingAmount          Decimal     @default(0) @map("shipping_amount") @db.Decimal(10, 2)
   insuranceAmount         Decimal     @default(0) @map("insurance_amount") @db.Decimal(10, 2)
   taxAmount               Decimal     @default(0) @map("tax_amount") @db.Decimal(10, 2)
+  feeAmount               Decimal     @default(0) @map("fee_amount") @db.Decimal(12, 2)
   finalAmount             Decimal     @map("final_amount") @db.Decimal(12, 2)
   currency                String      @default("CNY") @db.Char(3)
   shippingAddressSnapshot Json        @map("shipping_address_snapshot")
@@ -562,39 +573,51 @@ model Order {
   updatedAt               DateTime    @updatedAt @map("updated_at")
 
   // 交易中心扩展字段（订单类型 / 销售顾问 / 来源 / 定金尾款 / 已收已退 / 定制阶段 / 发货维度）
-  orderType         OrderType      @default(SPOT) @map("order_type")
-  salesConsultantId Int?           @map("sales_consultant_id")
-  source            String?        @db.VarChar(50) // 来源渠道：website/store/wechat/referral/offline
-  adjustmentAmount  Decimal        @default(0) @map("adjustment_amount") @db.Decimal(10, 2) // 订单调整（手工调价/抹零）
-  depositAmount     Decimal        @default(0) @map("deposit_amount") @db.Decimal(10, 2) // 应付定金
-  paidDeposit       Decimal        @default(0) @map("paid_deposit") @db.Decimal(10, 2) // 已付定金
-  balanceAmount     Decimal        @default(0) @map("balance_amount") @db.Decimal(10, 2) // 应付尾款
-  paidBalance       Decimal        @default(0) @map("paid_balance") @db.Decimal(10, 2) // 已付尾款
-  paidAmount        Decimal        @default(0) @map("paid_amount") @db.Decimal(12, 2) // 已收总额（审核通过时同步）
-  refundedAmount    Decimal        @default(0) @map("refunded_amount") @db.Decimal(12, 2) // 已退款总额
-  customStage       CustomStage?   @map("custom_stage") // 定制订单专属阶段（仅 orderType=CUSTOM 使用）
-  deliveryStatus    DeliveryStatus @default(NONE) @map("delivery_status") // 发货维度独立状态
-  receivedAt        DateTime?      @map("received_at") // 签收时间
+  orderType                   OrderType            @default(SPOT) @map("order_type")
+  salesConsultantId           Int?                 @map("sales_consultant_id")
+  source                      String?              @db.VarChar(50) // 来源渠道：website/store/wechat/referral/offline
+  adjustmentAmount            Decimal              @default(0) @map("adjustment_amount") @db.Decimal(10, 2) // 订单调整（手工调价/抹零）
+  depositAmount               Decimal              @default(0) @map("deposit_amount") @db.Decimal(10, 2) // 应付定金
+  paidDeposit                 Decimal              @default(0) @map("paid_deposit") @db.Decimal(10, 2) // 已付定金
+  balanceAmount               Decimal              @default(0) @map("balance_amount") @db.Decimal(10, 2) // 应付尾款
+  paidBalance                 Decimal              @default(0) @map("paid_balance") @db.Decimal(10, 2) // 已付尾款
+  paidAmount                  Decimal              @default(0) @map("paid_amount") @db.Decimal(12, 2) // 已收总额（审核通过时同步）
+  refundedAmount              Decimal              @default(0) @map("refunded_amount") @db.Decimal(12, 2) // 已退款总额
+  customStage                 CustomStage?         @map("custom_stage") // 定制订单专属阶段（仅 orderType=CUSTOM 使用）
+  deliveryStatus              DeliveryStatus       @default(NONE) @map("delivery_status") // 发货维度独立状态
+  receivedAt                  DateTime?            @map("received_at") // 签收时间
+  // 报价成交快照；旧订单保持 NULL，只有 v2 报价事务写入。
+  quoteChannel                QuoteChannel?        @map("quote_channel")
+  customerAccountTypeSnapshot CustomerAccountType? @map("customer_account_type_snapshot")
+  confirmedByCustomerId       Int?                 @map("confirmed_by_customer_id")
+  confirmedAt                 DateTime?            @map("confirmed_at")
+  snapshotSchemaVersion       Int?                 @map("snapshot_schema_version")
+  transactionSnapshot         Json?                @map("transaction_snapshot")
+  transactionSnapshotHash     String?              @map("transaction_snapshot_hash") @db.Char(64)
 
-  items              OrderItem[]
-  payments           Payment[]
-  refunds            Refund[]
-  reviews            ProductReview[]
-  reservations       InventoryReservation[]
+  items                OrderItem[]
+  payments             Payment[]
+  refunds              Refund[]
+  reviews              ProductReview[]
+  reservations         InventoryReservation[]
   // 交易域扩展：履约、售后、不可变事件时间线
-  fulfillments       Fulfillment[]
-  afterSalesCases    AfterSalesCase[]
-  tradeEvents        TradeEvent[]
-  paymentPlans       PaymentPlan[]
-  logisticsEvents    LogisticsEvent[]
-  quotationVersionId Int?                   @unique @map("quotation_version_id")
-  user               User?                  @relation(fields: [userId], references: [id])
-  customer           Customer?              @relation(fields: [customerId], references: [id])
-  couponId           Int?                   @map("coupon_id")
+  fulfillments         Fulfillment[]
+  afterSalesCases      AfterSalesCase[]
+  tradeEvents          TradeEvent[]
+  paymentPlans         PaymentPlan[]
+  logisticsEvents      LogisticsEvent[]
+  quotationVersionId   Int?                       @unique @map("quotation_version_id")
+  user                 User?                      @relation(fields: [userId], references: [id])
+  customer             Customer?                  @relation(fields: [customerId], references: [id])
+  couponId             Int?                       @map("coupon_id")
   // 交易中心关系
-  salesConsultant    User?                  @relation("OrderSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
-  quotationSource    Quotation?             @relation("QuotationConvertedOrder") // 该订单由哪张报价单转出（一对一，外键在 Quotation.convertedOrderId）
-  quotationVersion   QuotationVersion?      @relation("QuotationVersionConvertedOrder", fields: [quotationVersionId], references: [id], onDelete: Restrict)
+  salesConsultant      User?                      @relation("OrderSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
+  quotationSource      Quotation?                 @relation("QuotationConvertedOrder") // 该订单由哪张报价单转出（一对一，外键在 Quotation.convertedOrderId）
+  quotationVersion     QuotationVersion?          @relation("QuotationVersionConvertedOrder", fields: [quotationVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  confirmedByCustomer  Customer?                  @relation("OrderConfirmedByCustomer", fields: [confirmedByCustomerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotedLines          QuotedOrderLine[]
+  resourceReservations OrderResourceReservation[]
+  quotationConversion  QuotationConversion?
 
   @@index([orderNo])
   @@index([status])
@@ -607,6 +630,8 @@ model Order {
   @@index([orderType])
   @@index([salesConsultantId])
   @@index([deliveryStatus])
+  @@index([quoteChannel, createdAt])
+  @@index([confirmedByCustomerId, confirmedAt])
   @@map("orders")
 }
 
@@ -656,6 +681,8 @@ model Customer {
   cooperationDesignFiles    CooperationDesignFile[]
   confirmedDesignVersions   CooperationDesignFileVersion[] @relation("DesignFileVersionConfirmedByCustomer")
   acceptedQuotationVersions QuotationVersion[]             @relation("QuotationVersionAcceptedByCustomer")
+  confirmedOrders           Order[]                        @relation("OrderConfirmedByCustomer")
+  quotationConversions      QuotationConversion[]
 
   @@index([partnerStatus])
   @@map("customers")
@@ -1296,9 +1323,10 @@ model PageDocumentRevision {
   publishedAt DateTime? @map("published_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  document         PageDocument               @relation("PageDocumentRevisions", fields: [documentId], references: [id], onDelete: Cascade)
-  publishedByPages PageDocument[]             @relation("PagePublishedRevision")
-  publishedLocales PageDocumentLocalization[] @relation("PageLocalePublishedRevision")
+  document         PageDocument                     @relation("PageDocumentRevisions", fields: [documentId], references: [id], onDelete: Cascade)
+  publishedByPages PageDocument[]                   @relation("PagePublishedRevision")
+  publishedLocales PageDocumentLocalization[]       @relation("PageLocalePublishedRevision")
+  mediaAssets      PageDocumentRevisionMediaAsset[]
 
   @@unique([documentId, version])
   @@map("page_document_revisions")
@@ -1424,8 +1452,10 @@ model DynamicTemplateVersion {
   publishedById      Int?     @map("published_by_id")
   publishedAt        DateTime @default(now()) @map("published_at")
 
-  template    DynamicTemplate @relation(fields: [dynamicTemplateId], references: [id], onDelete: Restrict)
-  publishedBy User?           @relation("DynamicTemplateVersionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+  template                DynamicTemplate                    @relation(fields: [dynamicTemplateId], references: [id], onDelete: Restrict)
+  publishedBy             User?                              @relation("DynamicTemplateVersionPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+  mediaAssets             DynamicTemplateVersionMediaAsset[]
+  pageRevisionMediaAssets PageDocumentRevisionMediaAsset[]
 
   @@unique([dynamicTemplateId, version])
   @@index([dynamicTemplateId, publishedAt])
@@ -1590,6 +1620,7 @@ model Lead {
   legalHoldActor   User?             @relation("LeadLegalHoldActor", fields: [legalHoldBy], references: [id], onDelete: SetNull)
   dispositionActor User?             @relation("LeadPrivacyDispositionActor", fields: [privacyDisposedBy], references: [id], onDelete: SetNull)
   activities       LeadActivity[]
+  quotations       Quotation[]
 
   @@index([sourceType, createdAt])
   @@index([status, createdAt])
@@ -1757,6 +1788,7 @@ model Quotation {
   id                Int             @id @default(autoincrement())
   quoteNo           String          @unique @map("quote_no") @db.VarChar(30)
   customerId        Int?            @map("customer_id")
+  leadId            Int?            @map("lead_id")
   customerName      String          @map("customer_name") @db.VarChar(50)
   customerPhone     String          @map("customer_phone") @db.VarChar(20)
   customerEmail     String?         @map("customer_email") @db.VarChar(100)
@@ -1777,6 +1809,7 @@ model Quotation {
 
   items           QuotationItem[]
   customer        Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  lead            Lead?              @relation(fields: [leadId], references: [id], onDelete: SetNull)
   salesConsultant User?              @relation("QuotationSalesConsultant", fields: [salesConsultantId], references: [id], onDelete: SetNull)
   convertedOrder  Order?             @relation("QuotationConvertedOrder", fields: [convertedOrderId], references: [id], onDelete: SetNull)
   versions        QuotationVersion[]
@@ -1785,6 +1818,7 @@ model Quotation {
   @@index([customerPhone])
   @@index([customerId])
   @@index([salesConsultantId])
+  @@index([leadId])
   @@map("quotations")
 }
 
@@ -1846,6 +1880,48 @@ enum MediaAccessLevel {
   CUSTOMER
   STAFF
   PRIVATE
+}
+
+enum MediaAssetSourceType {
+  BRAND_OWNED
+  COMMISSIONED
+  LICENSED_THIRD_PARTY
+  PUBLIC_DOMAIN
+  CUSTOMER_SUPPLIED
+  AI_GENERATED
+  LEGACY_UNVERIFIED
+  OTHER
+}
+
+enum MediaAuthorizationReviewStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum MediaAuthorizationRevocationStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum MediaAuthorizationEventType {
+  CREATED
+  UPDATED
+  SUBMITTED
+  APPROVED
+  REJECTED
+  REVOKED
+  RENEWED
+  IMPORTED_LEGACY
+}
+
+enum MediaReferenceOrigin {
+  PAGE_INSTANCE
+  PAGE_METADATA
+  TEMPLATE_DEFAULT
+  TEMPLATE_BACKGROUND
+  LEGACY_URL
 }
 
 enum ConsentPurpose {
@@ -1918,6 +1994,23 @@ enum QuoteVersionStatus {
   CANCELLED
 }
 
+enum FeeCalculationMethod {
+  FIXED
+  PER_GRAM
+  PER_ORDER
+}
+
+enum TradeResourceKind {
+  CAPACITY
+  MATERIAL
+}
+
+enum ResourceReservationStatus {
+  RESERVED
+  CONSUMED
+  RELEASED
+}
+
 enum PaymentPlanStatus {
   DRAFT
   ACTIVE
@@ -1985,32 +2078,138 @@ model CategoryTranslation {
 }
 
 model MediaAsset {
-  id             Int              @id @default(autoincrement())
-  storageKey     String           @unique @map("storage_key") @db.VarChar(300)
-  originalName   String?          @map("original_name") @db.VarChar(255)
-  mimeType       String           @map("mime_type") @db.VarChar(100)
-  byteSize       Int              @map("byte_size")
-  checksumSha256 String           @map("checksum_sha256") @db.Char(64)
-  width          Int?
-  height         Int?
-  durationMs     Int?             @map("duration_ms")
-  altText        String?          @map("alt_text") @db.VarChar(500)
-  locale         ContentLocale?
-  accessLevel    MediaAccessLevel @default(PRIVATE) @map("access_level")
-  status         MediaAssetStatus @default(PENDING)
-  uploadedBy     Int?             @map("uploaded_by")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @updatedAt @map("updated_at")
+  id                 Int              @id @default(autoincrement())
+  storageKey         String           @unique @map("storage_key") @db.VarChar(300)
+  originalName       String?          @map("original_name") @db.VarChar(255)
+  mimeType           String           @map("mime_type") @db.VarChar(100)
+  byteSize           Int              @map("byte_size")
+  checksumSha256     String           @map("checksum_sha256") @db.Char(64)
+  width              Int?
+  height             Int?
+  durationMs         Int?             @map("duration_ms")
+  altText            String?          @map("alt_text") @db.VarChar(500)
+  locale             ContentLocale?
+  accessLevel        MediaAccessLevel @default(PRIVATE) @map("access_level")
+  status             MediaAssetStatus @default(PENDING)
+  lifecycleRevision  Int              @default(1) @map("lifecycle_revision")
+  integrityCheckedAt DateTime?        @map("integrity_checked_at")
+  quarantineReason   String?          @map("quarantine_reason") @db.VarChar(1000)
+  uploadedBy         Int?             @map("uploaded_by")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
 
-  uploader           User?                          @relation("MediaAssetUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
-  variants           MediaVariant[]
-  productImages      ProductImage[]
-  designFileVersions CooperationDesignFileVersion[]
+  uploader                     User?                              @relation("MediaAssetUploader", fields: [uploadedBy], references: [id], onDelete: SetNull)
+  authorization                MediaAssetAuthorization?
+  authorizationEvents          MediaAssetAuthorizationEvent[]
+  variants                     MediaVariant[]
+  productImages                ProductImage[]
+  designFileVersions           CooperationDesignFileVersion[]
+  dynamicTemplateVersionUsages DynamicTemplateVersionMediaAsset[]
+  pageDocumentRevisionUsages   PageDocumentRevisionMediaAsset[]
 
   @@index([status, accessLevel])
   @@index([checksumSha256])
   @@index([uploadedBy])
   @@map("media_assets")
+}
+
+model MediaAssetAuthorization {
+  assetId             Int                                @id @map("asset_id")
+  revision            Int                                @default(1)
+  publicUseEpoch      Int                                @default(0) @map("public_use_epoch")
+  sourceType          MediaAssetSourceType               @default(LEGACY_UNVERIFIED) @map("source_type")
+  authorizationBasis  String?                            @map("authorization_basis") @db.Text
+  evidenceReference   String?                            @map("evidence_reference") @db.VarChar(1000)
+  publicWebUseAllowed Boolean                            @default(false) @map("public_web_use_allowed")
+  reviewStatus        MediaAuthorizationReviewStatus     @default(DRAFT) @map("review_status")
+  preparedById        Int?                               @map("prepared_by")
+  submittedById       Int?                               @map("submitted_by")
+  submittedAt         DateTime?                          @map("submitted_at")
+  reviewedById        Int?                               @map("reviewed_by")
+  reviewedAt          DateTime?                          @map("reviewed_at")
+  reviewNote          String?                            @map("review_note") @db.Text
+  validFrom           DateTime?                          @map("valid_from")
+  validUntil          DateTime?                          @map("valid_until")
+  revocationStatus    MediaAuthorizationRevocationStatus @default(ACTIVE) @map("revocation_status")
+  revokedById         Int?                               @map("revoked_by")
+  revokedAt           DateTime?                          @map("revoked_at")
+  revocationReason    String?                            @map("revocation_reason") @db.Text
+  createdAt           DateTime                           @default(now()) @map("created_at")
+  updatedAt           DateTime                           @updatedAt @map("updated_at")
+
+  asset       MediaAsset @relation(fields: [assetId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  preparedBy  User?      @relation("MediaAuthorizationPreparer", fields: [preparedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  submittedBy User?      @relation("MediaAuthorizationSubmitter", fields: [submittedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  reviewedBy  User?      @relation("MediaAuthorizationReviewer", fields: [reviewedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  revokedBy   User?      @relation("MediaAuthorizationRevoker", fields: [revokedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([reviewStatus, revocationStatus, publicWebUseAllowed, validUntil], map: "media_asset_authorizations_public_eligibility_idx")
+  @@index([sourceType, reviewStatus], map: "media_asset_authorizations_source_review_idx")
+  @@map("media_asset_authorizations")
+}
+
+model MediaAssetAuthorizationEvent {
+  id                    BigInt                      @id @default(autoincrement())
+  assetId               Int                         @map("asset_id")
+  authorizationRevision Int                         @map("authorization_revision")
+  publicUseEpoch        Int                         @map("public_use_epoch")
+  eventType             MediaAuthorizationEventType @map("event_type")
+  actorId               Int?                        @map("actor_id")
+  snapshot              Json
+  previousEventHash     String?                     @map("previous_event_hash") @db.Char(64)
+  eventHash             String                      @unique @map("event_hash") @db.Char(64)
+  occurredAt            DateTime                    @default(now()) @map("occurred_at")
+
+  asset MediaAsset @relation(fields: [assetId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  actor User?      @relation("MediaAuthorizationEventActor", fields: [actorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([assetId, authorizationRevision], map: "media_auth_events_asset_revision_key")
+  @@index([assetId, occurredAt], map: "media_auth_events_asset_occurred_idx")
+  @@index([actorId, occurredAt], map: "media_auth_events_actor_occurred_idx")
+  @@map("media_asset_authorization_events")
+}
+
+model DynamicTemplateVersionMediaAsset {
+  id                       BigInt               @id @default(autoincrement())
+  dynamicTemplateVersionId Int                  @map("dynamic_template_version_id")
+  assetId                  Int                  @map("asset_id")
+  referenceKey             String               @map("reference_key") @db.Char(64)
+  referencePath            String               @map("reference_path") @db.VarChar(1000)
+  origin                   MediaReferenceOrigin
+  assetLifecycleRevision   Int                  @map("asset_lifecycle_revision")
+  authorizationRevision    Int                  @map("authorization_revision")
+  publicUseEpoch           Int                  @map("public_use_epoch")
+  createdAt                DateTime             @default(now()) @map("created_at")
+
+  templateVersion DynamicTemplateVersion @relation(fields: [dynamicTemplateVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "dtv_media_assets_version_fkey")
+  asset           MediaAsset             @relation(fields: [assetId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "dtv_media_assets_asset_fkey")
+
+  @@unique([dynamicTemplateVersionId, referenceKey], map: "dynamic_template_version_media_reference_key")
+  @@index([assetId], map: "dynamic_template_version_media_asset_idx")
+  @@map("dynamic_template_version_media_assets")
+}
+
+model PageDocumentRevisionMediaAsset {
+  id                       BigInt               @id @default(autoincrement())
+  pageDocumentRevisionId   Int                  @map("page_document_revision_id")
+  dynamicTemplateVersionId Int?                 @map("dynamic_template_version_id")
+  assetId                  Int                  @map("asset_id")
+  referenceKey             String               @map("reference_key") @db.Char(64)
+  referencePath            String               @map("reference_path") @db.VarChar(1000)
+  origin                   MediaReferenceOrigin
+  assetLifecycleRevision   Int                  @map("asset_lifecycle_revision")
+  authorizationRevision    Int                  @map("authorization_revision")
+  publicUseEpoch           Int                  @map("public_use_epoch")
+  createdAt                DateTime             @default(now()) @map("created_at")
+
+  pageRevision    PageDocumentRevision    @relation(fields: [pageDocumentRevisionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "pdr_media_assets_revision_fkey")
+  templateVersion DynamicTemplateVersion? @relation(fields: [dynamicTemplateVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "pdr_media_assets_template_version_fkey")
+  asset           MediaAsset              @relation(fields: [assetId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "pdr_media_assets_asset_fkey")
+
+  @@unique([pageDocumentRevisionId, referenceKey], map: "page_document_revision_media_reference_key")
+  @@index([assetId], map: "page_document_revision_media_asset_idx")
+  @@index([dynamicTemplateVersionId], map: "page_revision_media_template_version_idx")
+  @@map("page_document_revision_media_assets")
 }
 
 model MediaVariant {
@@ -2230,21 +2429,24 @@ model PartnerPriceApplication {
 }
 
 model PartnerPriceAgreement {
-  id             Int       @id @default(autoincrement())
-  customerId     Int       @map("customer_id")
-  version        Int
-  currency       String    @default("CNY") @db.Char(3)
-  redWaxRate     Decimal   @map("red_wax_rate") @db.Decimal(10, 2)
-  purpleWaxRate  Decimal   @map("purple_wax_rate") @db.Decimal(10, 2)
-  effectiveFrom  DateTime  @map("effective_from")
-  effectiveUntil DateTime? @map("effective_until")
-  reason         String?   @db.Text
-  createdBy      Int?      @map("created_by")
-  createdAt      DateTime  @default(now()) @map("created_at")
+  id                  Int       @id @default(autoincrement())
+  customerId          Int       @map("customer_id")
+  previousAgreementId Int?      @unique @map("previous_agreement_id")
+  version             Int
+  currency            String    @default("CNY") @db.Char(3)
+  redWaxRate          Decimal   @map("red_wax_rate") @db.Decimal(10, 2)
+  purpleWaxRate       Decimal   @map("purple_wax_rate") @db.Decimal(10, 2)
+  effectiveFrom       DateTime  @map("effective_from")
+  effectiveUntil      DateTime? @map("effective_until")
+  reason              String?   @db.Text
+  createdBy           Int?      @map("created_by")
+  createdAt           DateTime  @default(now()) @map("created_at")
 
-  customer          Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  creator           User?              @relation("PartnerPriceAgreementCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  customer          Customer               @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  creator           User?                  @relation("PartnerPriceAgreementCreator", fields: [createdBy], references: [id], onDelete: SetNull)
   quotationVersions QuotationVersion[]
+  previousAgreement PartnerPriceAgreement? @relation("PartnerPriceAgreementRevision", fields: [previousAgreementId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  nextAgreement     PartnerPriceAgreement? @relation("PartnerPriceAgreementRevision")
 
   @@unique([customerId, version])
   @@index([customerId, effectiveFrom, effectiveUntil], map: "partner_price_agreements_customer_effective_idx")
@@ -2283,10 +2485,10 @@ model CooperationDesignFileVersion {
   confirmedByCustomerId Int?                  @map("confirmed_by_customer_id")
   createdAt             DateTime              @default(now()) @map("created_at")
 
-  designFile          CooperationDesignFile @relation(fields: [designFileId], references: [id], onDelete: Cascade)
+  designFile          CooperationDesignFile @relation(fields: [designFileId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   mediaAsset          MediaAsset            @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
   creator             User?                 @relation("DesignFileVersionCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  confirmedByCustomer Customer?             @relation("DesignFileVersionConfirmedByCustomer", fields: [confirmedByCustomerId], references: [id], onDelete: SetNull)
+  confirmedByCustomer Customer?             @relation("DesignFileVersionConfirmedByCustomer", fields: [confirmedByCustomerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   quotationVersions   QuotationVersion[]
 
   @@unique([designFileId, version])
@@ -2307,6 +2509,8 @@ model QuotationVersion {
   validUntil              DateTime?          @map("valid_until")
   contentHash             String             @map("content_hash") @db.Char(64)
   customerSnapshot        Json?              @map("customer_snapshot")
+  snapshotSchemaVersion   Int                @default(1) @map("snapshot_schema_version")
+  businessSnapshot        Json?              @map("business_snapshot")
   designFileVersionId     Int?               @map("design_file_version_id")
   partnerPriceAgreementId Int?               @map("partner_price_agreement_id")
   createdBy               Int?               @map("created_by")
@@ -2315,14 +2519,17 @@ model QuotationVersion {
   acceptedAt              DateTime?          @map("accepted_at")
   createdAt               DateTime           @default(now()) @map("created_at")
 
-  quotation             Quotation                     @relation(fields: [quotationId], references: [id], onDelete: Cascade)
-  designFileVersion     CooperationDesignFileVersion? @relation(fields: [designFileVersionId], references: [id], onDelete: Restrict)
-  partnerPriceAgreement PartnerPriceAgreement?        @relation(fields: [partnerPriceAgreementId], references: [id], onDelete: Restrict)
-  creator               User?                         @relation("QuotationVersionCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-  acceptedByCustomer    Customer?                     @relation("QuotationVersionAcceptedByCustomer", fields: [acceptedByCustomerId], references: [id], onDelete: SetNull)
+  quotation             Quotation                             @relation(fields: [quotationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  designFileVersion     CooperationDesignFileVersion?         @relation(fields: [designFileVersionId], references: [id], onDelete: Restrict)
+  partnerPriceAgreement PartnerPriceAgreement?                @relation(fields: [partnerPriceAgreementId], references: [id], onDelete: Restrict)
+  creator               User?                                 @relation("QuotationVersionCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  acceptedByCustomer    Customer?                             @relation("QuotationVersionAcceptedByCustomer", fields: [acceptedByCustomerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   items                 QuotationVersionItem[]
+  feeLines              QuotationVersionFeeLine[]
+  resourceRequirements  QuotationVersionResourceRequirement[]
   paymentPlans          PaymentPlan[]
-  convertedOrder        Order?                        @relation("QuotationVersionConvertedOrder")
+  convertedOrder        Order?                                @relation("QuotationVersionConvertedOrder")
+  conversion            QuotationConversion?
 
   @@unique([quotationId, version])
   @@index([status, validUntil])
@@ -2342,12 +2549,164 @@ model QuotationVersionItem {
   subtotal           Decimal  @db.Decimal(12, 2)
   pricingSnapshot    Json     @map("pricing_snapshot")
 
-  quotationVersion QuotationVersion @relation(fields: [quotationVersionId], references: [id], onDelete: Cascade)
+  quotationVersion QuotationVersion @relation(fields: [quotationVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   product          Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
   sku              ProductSKU?      @relation(fields: [skuId], references: [id], onDelete: SetNull)
+  quotedOrderLine  QuotedOrderLine?
 
   @@index([quotationVersionId])
   @@map("quotation_version_items")
+}
+
+model QuotationFeeRule {
+  id                Int                  @id @default(autoincrement())
+  code              String               @db.VarChar(80)
+  version           Int
+  channel           QuoteChannel
+  waxType           WaxType?             @map("wax_type")
+  calculationMethod FeeCalculationMethod @map("calculation_method")
+  unitAmount        Decimal              @map("unit_amount") @db.Decimal(12, 2)
+  currency          String               @default("CNY") @db.Char(3)
+  enabled           Boolean              @default(true)
+  effectiveFrom     DateTime             @map("effective_from")
+  effectiveUntil    DateTime?            @map("effective_until")
+  displayText       String               @map("display_text") @db.VarChar(200)
+  reason            String?              @db.Text
+  createdBy         Int?                 @map("created_by")
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  creator  User?                     @relation("QuotationFeeRuleCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  feeLines QuotationVersionFeeLine[]
+
+  @@unique([code, version, channel])
+  @@index([channel, enabled, effectiveFrom, effectiveUntil], map: "quotation_fee_rules_effective_idx")
+  @@map("quotation_fee_rules")
+}
+
+model QuotationVersionFeeLine {
+  id                 Int                  @id @default(autoincrement())
+  quotationVersionId Int                  @map("quotation_version_id")
+  feeRuleId          Int?                 @map("fee_rule_id")
+  code               String               @db.VarChar(80)
+  displayText        String               @map("display_text") @db.VarChar(200)
+  calculationMethod  FeeCalculationMethod @map("calculation_method")
+  rate               Decimal              @db.Decimal(12, 2)
+  basisQuantity      Decimal?             @map("basis_quantity") @db.Decimal(14, 3)
+  amount             Decimal              @db.Decimal(12, 2)
+  currency           String               @default("CNY") @db.Char(3)
+
+  quotationVersion QuotationVersion  @relation(fields: [quotationVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  feeRule          QuotationFeeRule? @relation(fields: [feeRuleId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([quotationVersionId, code])
+  @@index([feeRuleId])
+  @@map("quotation_version_fee_lines")
+}
+
+model TradeResourceBucket {
+  id                Int               @id @default(autoincrement())
+  channel           QuoteChannel
+  kind              TradeResourceKind
+  code              String            @db.VarChar(80)
+  bucketKey         String            @map("bucket_key") @db.VarChar(80)
+  displayName       String            @map("display_name") @db.VarChar(120)
+  unit              String            @db.VarChar(30)
+  bucketStart       DateTime?         @map("bucket_start")
+  bucketEnd         DateTime?         @map("bucket_end")
+  availableQuantity Decimal           @map("available_quantity") @db.Decimal(14, 3)
+  reservedQuantity  Decimal           @default(0) @map("reserved_quantity") @db.Decimal(14, 3)
+  version           Int               @default(1)
+  isActive          Boolean           @default(true) @map("is_active")
+  createdBy         Int?              @map("created_by")
+  updatedBy         Int?              @map("updated_by")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  creator               User?                                 @relation("TradeResourceBucketCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  updater               User?                                 @relation("TradeResourceBucketUpdater", fields: [updatedBy], references: [id], onDelete: SetNull)
+  quotationRequirements QuotationVersionResourceRequirement[]
+  orderReservations     OrderResourceReservation[]
+
+  @@unique([channel, kind, code, bucketKey])
+  @@index([channel, kind, isActive, bucketStart, bucketEnd], map: "trade_resource_buckets_availability_idx")
+  @@map("trade_resource_buckets")
+}
+
+model QuotationVersionResourceRequirement {
+  id                 Int     @id @default(autoincrement())
+  quotationVersionId Int     @map("quotation_version_id")
+  resourceBucketId   Int     @map("resource_bucket_id")
+  requiredQuantity   Decimal @map("required_quantity") @db.Decimal(14, 3)
+  resourceSnapshot   Json    @map("resource_snapshot")
+
+  quotationVersion QuotationVersion          @relation(fields: [quotationVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "qv_resource_requirements_version_fkey")
+  resourceBucket   TradeResourceBucket       @relation(fields: [resourceBucketId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "qv_resource_requirements_bucket_fkey")
+  orderReservation OrderResourceReservation?
+
+  @@unique([quotationVersionId, resourceBucketId], map: "qv_resource_requirements_version_bucket_key")
+  @@index([resourceBucketId], map: "qv_resource_requirements_bucket_idx")
+  @@map("quotation_version_resource_requirements")
+}
+
+model OrderResourceReservation {
+  id                     Int                       @id @default(autoincrement())
+  orderId                Int                       @map("order_id")
+  quotationRequirementId Int                       @unique @map("quotation_requirement_id")
+  resourceBucketId       Int                       @map("resource_bucket_id")
+  quantity               Decimal                   @db.Decimal(14, 3)
+  status                 ResourceReservationStatus @default(RESERVED)
+  reservedAt             DateTime                  @default(now()) @map("reserved_at")
+  consumedAt             DateTime?                 @map("consumed_at")
+  releasedAt             DateTime?                 @map("released_at")
+
+  order                Order                               @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotationRequirement QuotationVersionResourceRequirement @relation(fields: [quotationRequirementId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resourceBucket       TradeResourceBucket                 @relation(fields: [resourceBucketId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([orderId, status])
+  @@index([resourceBucketId, status])
+  @@map("order_resource_reservations")
+}
+
+model QuotationConversion {
+  id                 Int      @id @default(autoincrement())
+  quotationVersionId Int      @unique @map("quotation_version_id")
+  orderId            Int      @unique @map("order_id")
+  customerId         Int      @map("customer_id")
+  idempotencyKeyHash String   @unique @map("idempotency_key_hash") @db.Char(64)
+  requestHash        String   @map("request_hash") @db.Char(64)
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  quotationVersion QuotationVersion @relation(fields: [quotationVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  order            Order            @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  customer         Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([customerId, createdAt])
+  @@map("quotation_conversions")
+}
+
+model QuotedOrderLine {
+  id                     Int      @id @default(autoincrement())
+  orderId                Int      @map("order_id")
+  quotationVersionItemId Int      @unique @map("quotation_version_item_id")
+  productId              Int?     @map("product_id")
+  skuId                  Int?     @map("sku_id")
+  waxType                WaxType? @map("wax_type")
+  description            String   @db.VarChar(500)
+  quantity               Int      @default(1)
+  unitAmount             Decimal  @map("unit_amount") @db.Decimal(12, 2)
+  lineAmount             Decimal  @map("line_amount") @db.Decimal(12, 2)
+  pricingSnapshot        Json     @map("pricing_snapshot")
+
+  order                Order                @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  quotationVersionItem QuotationVersionItem @relation(fields: [quotationVersionItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  product              Product?             @relation(fields: [productId], references: [id], onDelete: SetNull)
+  sku                  ProductSKU?          @relation(fields: [skuId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([skuId])
+  @@map("quoted_order_lines")
 }
 
 model PaymentPlan {

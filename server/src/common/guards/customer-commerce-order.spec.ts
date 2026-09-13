@@ -73,22 +73,33 @@ test('公开功能开关与服务端交易守卫使用同一双重门禁', () =>
   const previousProfile = process.env.RELEASE_PROFILE;
   const previousAnalytics = process.env.ANALYTICS_DASHBOARD_ENABLED;
   const previousPartnerWrite = process.env.PARTNER_APPLICATIONS_WRITE_ENABLED;
+  const previousQuotationOrdering = process.env.CUSTOMER_QUOTATION_ORDERING_ENABLED;
+  const previousPaymentTransactions = process.env.PAYMENT_GATEWAY_TRANSACTIONS_ENABLED;
   const controller = new SettingsController(undefined as never);
   try {
     process.env.CUSTOMER_COMMERCE_ENABLED = 'true';
     process.env.RELEASE_PROFILE = 'lead-generation';
     delete process.env.ANALYTICS_DASHBOARD_ENABLED;
     delete process.env.PARTNER_APPLICATIONS_WRITE_ENABLED;
+    delete process.env.CUSTOMER_QUOTATION_ORDERING_ENABLED;
+    delete process.env.PAYMENT_GATEWAY_TRANSACTIONS_ENABLED;
     assert.deepEqual(controller.getFlags(), {
       commerceEnabled: false,
       cartEnabled: false,
       paymentEnabled: false,
+      quotationOrderingEnabled: false,
       partnerApplicationsWriteEnabled: false,
       analyticsDashboardEnabled: true,
     });
 
     process.env.RELEASE_PROFILE = 'commerce';
     assert.equal(controller.getFlags().commerceEnabled, true);
+    assert.equal(controller.getFlags().quotationOrderingEnabled, false);
+    assert.equal(controller.getFlags().paymentEnabled, false);
+    process.env.CUSTOMER_QUOTATION_ORDERING_ENABLED = 'true';
+    process.env.PAYMENT_GATEWAY_TRANSACTIONS_ENABLED = 'true';
+    assert.equal(controller.getFlags().quotationOrderingEnabled, true);
+    assert.equal(controller.getFlags().paymentEnabled, true);
     process.env.PARTNER_APPLICATIONS_WRITE_ENABLED = 'true';
     assert.equal(controller.getFlags().partnerApplicationsWriteEnabled, true);
   } finally {
@@ -100,6 +111,10 @@ test('公开功能开关与服务端交易守卫使用同一双重门禁', () =>
     else process.env.ANALYTICS_DASHBOARD_ENABLED = previousAnalytics;
     if (previousPartnerWrite === undefined) delete process.env.PARTNER_APPLICATIONS_WRITE_ENABLED;
     else process.env.PARTNER_APPLICATIONS_WRITE_ENABLED = previousPartnerWrite;
+    if (previousQuotationOrdering === undefined) delete process.env.CUSTOMER_QUOTATION_ORDERING_ENABLED;
+    else process.env.CUSTOMER_QUOTATION_ORDERING_ENABLED = previousQuotationOrdering;
+    if (previousPaymentTransactions === undefined) delete process.env.PAYMENT_GATEWAY_TRANSACTIONS_ENABLED;
+    else process.env.PAYMENT_GATEWAY_TRANSACTIONS_ENABLED = previousPaymentTransactions;
   }
 });
 
@@ -113,6 +128,11 @@ test('Compose 与示例配置默认关闭交易', () => {
     /CUSTOMER_COMMERCE_ENABLED:\s*"\$\{CUSTOMER_COMMERCE_ENABLED:-false\}"/,
   );
   assert.match(exampleEnv, /^CUSTOMER_COMMERCE_ENABLED=false$/m);
+  assert.match(
+    compose,
+    /CUSTOMER_QUOTATION_ORDERING_ENABLED:\s*"\$\{CUSTOMER_QUOTATION_ORDERING_ENABLED:-false\}"/,
+  );
+  assert.match(exampleEnv, /^CUSTOMER_QUOTATION_ORDERING_ENABLED=false$/m);
   assert.match(
     compose,
     /PARTNER_APPLICATIONS_WRITE_ENABLED:\s*"\$\{PARTNER_APPLICATIONS_WRITE_ENABLED:-false\}"/,

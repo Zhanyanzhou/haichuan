@@ -160,23 +160,24 @@ test("报价列表与详情不提供员工确认或转单入口，历史状态�
   await expect(rowFor(page, "HC-Q-CONFIRMED")).toContainText("已确认");
   await expect(rowFor(page, "HC-Q-CONVERTED")).toContainText("已转订单");
   await expect(rowFor(page, "HC-Q-PENDING")).toContainText(
-    "员工不能代确认或转单；相关流程待完成",
+    "员工不能代确认或转单；请等待客户操作",
   );
   await expect(rowFor(page, "HC-Q-CONFIRMED")).toContainText(
-    "员工不能代确认或转单；相关流程待完成",
+    "历史版本只读；员工不能代转单",
   );
   await expect(page.getByRole("button", { name: "客户已确认" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /转(为)?订单/ })).toHaveCount(0);
 
   const draftDialog = await openDetail(page, "HC-Q-DRAFT");
   await expect(
-    draftDialog.getByRole("button", { name: "提交客户确认" }),
+    draftDialog.getByRole("button", { name: "发出报价" }),
   ).toBeVisible();
   await closeDetail(page);
 
   const pendingDialog = await openDetail(page, "HC-Q-PENDING");
   await expect(pendingDialog.getByText("客户确认与转单暂不可由员工操作")).toBeVisible();
-  await expect(pendingDialog.getByText(/当前后台员工不能代客户确认报价或将报价转为订单/)).toBeVisible();
+  await expect(pendingDialog.getByText(/报价只能由所属客户在账户中心确认/)).toBeVisible();
+  await expect(pendingDialog.getByRole("button", { name: "创建修订版" })).toBeVisible();
   await expect(pendingDialog.getByRole("button", { name: "取消报价" })).toBeVisible();
   await expect(pendingDialog.getByRole("button", { name: "客户已确认" })).toHaveCount(0);
   await expect(pendingDialog.getByRole("button", { name: /转(为)?订单/ })).toHaveCount(0);
@@ -184,7 +185,7 @@ test("报价列表与详情不提供员工确认或转单入口，历史状态�
 
   const confirmedDialog = await openDetail(page, "HC-Q-CONFIRMED");
   await expect(confirmedDialog.getByText("客户确认与转单暂不可由员工操作")).toBeVisible();
-  await expect(confirmedDialog.getByRole("button", { name: "取消报价" })).toBeVisible();
+  await expect(confirmedDialog.getByRole("button", { name: "取消报价" })).toHaveCount(0);
   await expect(confirmedDialog.getByRole("button", { name: "客户已确认" })).toHaveCount(0);
   await expect(confirmedDialog.getByRole("button", { name: /转(为)?订单/ })).toHaveCount(0);
   await closeDetail(page);

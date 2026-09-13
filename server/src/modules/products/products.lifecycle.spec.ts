@@ -63,6 +63,9 @@ function createService(initial: LifecycleRecord[]) {
         return { ...record };
       },
     },
+    $queryRaw: async () => [{ id: 1 }],
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback(prisma),
   };
   const service = new ProductsService(
     prisma as unknown as PrismaService,

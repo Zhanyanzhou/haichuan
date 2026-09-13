@@ -24,12 +24,14 @@ import { Public } from "../../common/decorators/public.decorator";
 import { Observable } from "rxjs";
 import {
   PublishPageDocumentDto,
+  ReviewPageDocumentDto,
   RestorePageDocumentRevisionDto,
   RollbackPagePublicationDto,
   SavePageDocumentDto,
+  SubmitPageDocumentReviewDto,
   ValidatePageDocumentDto,
 } from "./dto";
-import { requirePublishedPublicContentLocale } from "../../common/content-locale";
+import { parsePublicContentLocale } from "../../common/content-locale";
 import type { StaffRequest } from "../../common/security/authenticated-principal";
 
 @ApiTags("页面模块")
@@ -88,8 +90,10 @@ export class PageModulesController {
     @Query("pageKey") pageKey: string,
     @Query("locale") locale?: string,
   ) {
-    requirePublishedPublicContentLocale(locale);
-    return this.service.getPublishedPageDocument(pageKey || "home");
+    return this.service.getLocalizedPublishedPageDocument(
+      pageKey || "home",
+      parsePublicContentLocale(locale),
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -97,8 +101,14 @@ export class PageModulesController {
   @Get("document/published/admin")
   @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "获取已发布页面文档（后台完整快照）" })
-  getPublishedAdminDocument(@Query("pageKey") pageKey: string) {
-    return this.service.getPublishedPageDocumentForAdmin(pageKey || "home");
+  getPublishedAdminDocument(
+    @Query("pageKey") pageKey: string,
+    @Query("locale") locale?: string,
+  ) {
+    return this.service.getLocalizedPublishedPageDocumentForAdmin(
+      pageKey || "home",
+      parsePublicContentLocale(locale),
+    );
   }
 
   @Public()
@@ -106,7 +116,7 @@ export class PageModulesController {
   pageDocumentChangeStream(
     @Query("locale") locale?: string,
   ): Observable<MessageEvent> {
-    requirePublishedPublicContentLocale(locale);
+    parsePublicContentLocale(locale);
     return this.service.publicChangeStream();
   }
 
@@ -116,8 +126,14 @@ export class PageModulesController {
   // 草稿回读同样禁止缓存，编辑器重开必须看到最新草稿。
   @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "获取页面文档（后台，含草稿）" })
-  getAdminDocument(@Query("pageKey") pageKey: string) {
-    return this.service.getPageDocument(pageKey || "home");
+  getAdminDocument(
+    @Query("pageKey") pageKey: string,
+    @Query("locale") locale?: string,
+  ) {
+    return this.service.getLocalizedPageDocument(
+      pageKey || "home",
+      parsePublicContentLocale(locale),
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -127,8 +143,9 @@ export class PageModulesController {
   saveDocument(
     @Body() body: SavePageDocumentDto,
   ) {
-    return this.service.savePageDocument(
+    return this.service.saveLocalizedPageDocument(
       body.pageKey,
+      parsePublicContentLocale(body.locale),
       body.puckData,
       body.metadata,
       body.editorVersion,
@@ -146,10 +163,12 @@ export class PageModulesController {
     @Body() body: PublishPageDocumentDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.publishPageDocument(
+    return this.service.publishLocalizedPageDocument(
       body?.pageKey || "home",
+      parsePublicContentLocale(body.locale),
       req.user.id,
       body.expectedUpdatedAt,
+      body.expectedContentHash,
     );
   }
 
@@ -160,9 +179,11 @@ export class PageModulesController {
   discardDocumentDraft(
     @Query("pageKey") pageKey: string,
     @Query("expectedUpdatedAt") expectedUpdatedAt: string,
+    @Query("locale") locale?: string,
   ) {
-    return this.service.discardPageDocumentDraft(
+    return this.service.discardLocalizedPageDocumentDraft(
       pageKey || "home",
+      parsePublicContentLocale(locale),
       expectedUpdatedAt,
     );
   }
@@ -172,8 +193,9 @@ export class PageModulesController {
   @Post("document/validate")
   @ApiOperation({ summary: "预检页面文档是否可发布（发布前校验）" })
   validateDocument(@Body() body: ValidatePageDocumentDto) {
-    return this.service.validatePageDocument(
+    return this.service.validateLocalizedPageDocument(
       body?.pageKey || "home",
+      parsePublicContentLocale(body.locale),
       body?.puckData,
       body?.metadata,
     );
@@ -187,11 +209,18 @@ export class PageModulesController {
     @Query("pageKey") pageKey: string,
     @Query("beforeVersion") beforeVersion?: string,
     @Query("limit") limit?: string,
+    @Query("locale") locale?: string,
   ) {
-    return this.service.getPageDocumentRevisions(
+    const args = [
       pageKey || "home",
       beforeVersion === undefined ? undefined : Number(beforeVersion),
       limit === undefined ? undefined : Number(limit),
+    ] as const;
+    return this.service.getLocalizedPageDocumentRevisions(
+      pageKey || "home",
+      parsePublicContentLocale(locale),
+      args[1],
+      args[2],
     );
   }
 
@@ -202,9 +231,14 @@ export class PageModulesController {
   @ApiOperation({ summary: "获取可信页面文档单版本详情" })
   getDocumentRevision(
     @Query("pageKey") pageKey: string,
+    @Query("locale") locale: string | undefined,
     @Param("version") version: string,
   ) {
-    return this.service.getPageDocumentRevision(pageKey || "home", Number(version));
+    return this.service.getLocalizedPageDocumentRevision(
+      pageKey || "home",
+      parsePublicContentLocale(locale),
+      Number(version),
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -217,8 +251,9 @@ export class PageModulesController {
     @Param("version") version: string,
     @Req() req: StaffRequest,
   ) {
-    return this.service.restorePageDocumentRevision(
+    return this.service.restoreLocalizedPageDocumentRevision(
       body.pageKey || "home",
+      parsePublicContentLocale(body.locale),
       Number(version),
       body.expectedUpdatedAt,
       req.user.id,
@@ -236,11 +271,51 @@ export class PageModulesController {
     @Param("revisionId") revisionId: string,
     @Req() req: StaffRequest,
   ) {
-    return this.service.rollbackPagePublication(
+    return this.service.rollbackLocalizedPagePublication(
       body.pageKey || "home",
+      parsePublicContentLocale(body.locale),
       Number(revisionId),
       body.expectedPublishedRevisionId,
       req.user.id,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Post("document/review/submit")
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "提交当前语言页面草稿审核" })
+  submitDocumentReview(
+    @Body() body: SubmitPageDocumentReviewDto,
+    @Req() req: StaffRequest,
+  ) {
+    return this.service.submitLocalizedPageDocumentReview(
+      body.pageKey || "home",
+      parsePublicContentLocale(body.locale),
+      body.expectedUpdatedAt,
+      body.expectedContentHash,
+      req.user.id,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth()
+  @Roles("SUPER_ADMIN", "ADMIN")
+  @Put("document/review")
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "复核当前语言页面草稿" })
+  reviewDocument(
+    @Body() body: ReviewPageDocumentDto,
+    @Req() req: StaffRequest,
+  ) {
+    return this.service.reviewLocalizedPageDocument(
+      body.pageKey || "home",
+      parsePublicContentLocale(body.locale),
+      body.action,
+      body.expectedUpdatedAt,
+      body.expectedContentHash,
+      req.user.id,
+      body.reviewNote,
     );
   }
 }

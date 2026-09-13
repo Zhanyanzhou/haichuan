@@ -39,13 +39,17 @@ for manifest_path in "${candidates[@]}"; do
   manifest_name=$(basename "$manifest_path")
   [[ "$manifest_name" = "$latest_manifest" ]] && continue
   awk '
-    NF != 2 || $1 !~ /^[0-9a-fA-F]{64}$/ || $2 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ { invalid = 1 }
-    END { exit invalid ? 1 : 0 }
+    NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-fA-F]+$/ || $2 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ { invalid = 1 }
+    $2 ~ /\.sql\.gz$/ { database += 1 }
+    $2 ~ /_uploads\.tar\.gz$/ { uploads += 1 }
+    $2 ~ /_private-media\.tar\.gz$/ { private_media += 1 }
+    $2 ~ /\.metadata\.env$/ { metadata += 1 }
+    END { exit invalid || NR != 4 || database != 1 || uploads != 1 || private_media != 1 || metadata != 1 }
   ' "$manifest_path" || fail "候选清单格式不安全: $manifest_name"
   prunable+=("$manifest_path")
   echo "PRUNE_CANDIDATE=$manifest_name"
+  echo "PRUNE_CANDIDATE_MANIFEST_SHA256=$(sha256sum "$manifest_path" | awk '{ print $1 }')"
 done
 
 echo "PRUNE_CANDIDATE_COUNT=${#prunable[@]}"
 echo "PRUNE_RESULT=READ_ONLY_CANDIDATES_REQUIRE_OFFSITE_AND_RETENTION_REVIEW"
-

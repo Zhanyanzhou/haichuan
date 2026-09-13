@@ -64,11 +64,25 @@ export class ProductMediaService {
     url?: string | null;
     isVideo?: boolean;
     mimeType?: string | null;
+    mediaAsset?: {
+      status?: string;
+      checksumSha256?: string | null;
+    } | null;
   }): Promise<ReadResult> {
     const mediaPath = this.resolveProductMediaPath(image);
     if (mediaPath) {
+      if (image.mediaAsset && image.mediaAsset.status !== 'READY') {
+        throw new NotFoundException('媒体文件暂不可用');
+      }
+      const buffer = await readFile(mediaPath);
+      if (
+        image.mediaAsset?.checksumSha256 &&
+        createHash('sha256').update(buffer).digest('hex') !== image.mediaAsset.checksumSha256
+      ) {
+        throw new NotFoundException('媒体文件暂不可用');
+      }
       return {
-        buffer: await readFile(mediaPath),
+        buffer,
         mimeType: image.mimeType || this.guessMime(mediaPath),
         isVideo: !!image.isVideo,
       };

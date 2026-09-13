@@ -11,7 +11,9 @@ import { requirePublishedPublicContentLocale } from "../../common/content-locale
 import { AuditLogQueryDto } from "./dto/audit-log-query.dto";
 import {
   isCustomerCommerceEnabled,
+  isCustomerQuotationOrderingEnabled,
   isPartnerApplicationsWriteEnabled,
+  isPaymentGatewayTransactionsEnabled,
 } from "../../common/release/release-profile";
 
 @ApiTags("系统设置")
@@ -91,7 +93,8 @@ export class SettingsController {
     return {
       commerceEnabled,
       cartEnabled: commerceEnabled,
-      paymentEnabled: commerceEnabled,
+      paymentEnabled: isPaymentGatewayTransactionsEnabled(),
+      quotationOrderingEnabled: isCustomerQuotationOrderingEnabled(),
       partnerApplicationsWriteEnabled: isPartnerApplicationsWriteEnabled(),
       analyticsDashboardEnabled,
     };

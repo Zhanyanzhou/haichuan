@@ -1,4 +1,5 @@
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 import {
   getContentTemplateIssues,
 } from "@/page-builder/generated/contentTemplates.generated";
@@ -29,6 +30,7 @@ function UnsupportedContentTemplateState({
   type?: string;
   message: string;
 }) {
+  const english = getBrowserPublicContentLocale() === "en";
   return (
     <section
       role="alert"
@@ -44,9 +46,13 @@ function UnsupportedContentTemplateState({
       }}
     >
       <div>
-        <p style={{ margin: "0 0 8px", fontSize: 15 }}>模板版本无法渲染</p>
+        <p style={{ margin: "0 0 8px", fontSize: 15 }}>
+          {english ? "Template version unavailable" : "模板版本无法渲染"}
+        </p>
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7 }}>
-          {type ? `「${type}」` : "该区块"}{message}
+          {english
+            ? "This content block cannot be displayed."
+            : <>{type ? `「${type}」` : "该区块"}{message}</>}
         </p>
       </div>
     </section>
@@ -203,6 +209,7 @@ export default function PuckDocumentRenderer({
   surface?: "home";
 }) {
   if (!Array.isArray(data?.content)) return null;
+  const english = getBrowserPublicContentLocale() === "en";
   const content = data.content;
   const zoneBlocks =
     data?.zones && typeof data.zones === "object"
@@ -261,7 +268,7 @@ export default function PuckDocumentRenderer({
         key={`eb-${block.props?.id || index}`}
         fallback={
           <section role="status" style={{ padding: "48px 24px", textAlign: "center", color: "#5F6568" }}>
-            该内容暂不可展示
+            {english ? "This content is temporarily unavailable" : "该内容暂不可展示"}
           </section>
         }
       >

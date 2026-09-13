@@ -122,6 +122,35 @@ function validateAssetPolicy(policy) {
   }
 }
 
+function validateManagedMediaAuthorizationPolicy(policy) {
+  invariant(policy && typeof policy === "object", "managedMediaAuthorizationPolicy 缺失");
+  invariant(policy.authority === "MediaAssetAuthorization", "managedMediaAuthorizationPolicy.authority 必须指向 MediaAssetAuthorization");
+  invariant(policy.identity === "MediaAsset.storageKey", "managedMediaAuthorizationPolicy.identity 必须使用 MediaAsset.storageKey");
+  invariant(policy.draftBehavior === "warn", "managedMediaAuthorizationPolicy.draftBehavior 必须保持 warn");
+  invariant(policy.templatePublishBehavior === "block-ineligible", "managedMediaAuthorizationPolicy.templatePublishBehavior 无效");
+  invariant(policy.pagePublishBehavior === "block-visible-ineligible", "managedMediaAuthorizationPolicy.pagePublishBehavior 无效");
+  invariant(policy.publicReadBehavior === "fail-closed", "managedMediaAuthorizationPolicy.publicReadBehavior 必须 fail-closed");
+  invariant(policy.revocationPropagation === "live", "managedMediaAuthorizationPolicy.revocationPropagation 必须 live");
+  invariant(policy.restoreBehavior === "requires-republish", "managedMediaAuthorizationPolicy.restoreBehavior 必须 requires-republish");
+  invariant(policy.legacyPageMediaRights === "advisory-only", "managedMediaAuthorizationPolicy.legacyPageMediaRights 必须 advisory-only");
+  invariant(
+    Array.isArray(policy.supportedPublicationGateVersions)
+      && policy.supportedPublicationGateVersions.length === 2
+      && policy.supportedPublicationGateVersions[0] === 3
+      && policy.supportedPublicationGateVersions[1] === 4,
+    "managedMediaAuthorizationPolicy.supportedPublicationGateVersions 必须声明 v3/v4 双读",
+  );
+  invariant(
+    policy.enforcementPublicationGateVersion === source.publicationGateVersion
+      && policy.enforcementPublicationGateVersion === 3,
+    "managedMediaAuthorizationPolicy 实际 enforcement 必须保持 publication gate v3",
+  );
+  invariant(
+    policy.shadowPublicationGateVersion === 4,
+    "managedMediaAuthorizationPolicy.shadowPublicationGateVersion 必须保持 v4",
+  );
+}
+
 function validatePageRules(rules) {
   invariant(Array.isArray(rules) && rules.length === 6, "pageRules 必须覆盖 6 个装修页面");
   const pageKeys = rules.map((rule) => rule.pageKey);
@@ -465,6 +494,7 @@ function applyTemplateWorkspaceFixedObjectPolicy(contractSource) {
 
 applyTemplateWorkspaceFixedObjectPolicy(source);
 validateAssetPolicy(source.assetPolicy);
+validateManagedMediaAuthorizationPolicy(source.managedMediaAuthorizationPolicy);
 for (const template of source.templates) {
   validateDefaultGeometry(template);
   template.preview = {
@@ -566,6 +596,8 @@ function invariant(condition, message) {
 
 invariant(Number.isInteger(source.contractSchemaVersion) && source.contractSchemaVersion > 0, "contractSchemaVersion 必须是正整数");
 invariant(Number.isInteger(source.registryVersion) && source.registryVersion > 0, "registryVersion 必须是正整数");
+invariant(source.contractSchemaVersion === 10, "managed media authorization 合同必须使用 schema v10");
+invariant(source.registryVersion === 19, "本次合同演进不得改变 registryVersion 19");
 invariant(
   source.editorPolicy?.version === 3
     && source.editorPolicy.designScope === "template-definition"
@@ -999,6 +1031,7 @@ export const CONTENT_TEMPLATE_REGISTRY_VERSION = ${source.registryVersion};
 export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = ${source.contractSchemaVersion};
 export const CONTENT_TEMPLATE_CONTRACT_VERSION = ${contractVersion};
 export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = ${source.publicationGateVersion};
+export const CONTENT_TEMPLATE_MANAGED_MEDIA_AUTHORIZATION_POLICY = ${JSON.stringify(source.managedMediaAuthorizationPolicy, sortReplacer, 2)} as const;
 export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
 export const CONTENT_TEMPLATE_EDITOR_POLICY = ${JSON.stringify(source.editorPolicy, sortReplacer, 2)} as const;
 export const CONTENT_TEMPLATE_SIZE_COMPATIBILITY_STATE = CONTENT_TEMPLATE_EDITOR_POLICY.sizeCompatibilityPolicy.state;
@@ -2216,6 +2249,7 @@ export function getPageDocumentMediaReferences(
   puckData: unknown,
   metadata?: unknown,
   pageKey?: string,
+  options: { preserveReferencePaths?: boolean } = {},
 ): ContentTemplateMediaReference[] {
   const references: ContentTemplateMediaReference[] = [];
   if (isRecord(metadata) && hasNonEmptyText(metadata.ogImage)) {
@@ -2248,10 +2282,13 @@ export function getPageDocumentMediaReferences(
     }
   }
 
-  const seenUrls = new Set<string>();
+  const seen = new Set<string>();
   return references.filter((reference) => {
-    if (seenUrls.has(reference.url)) return false;
-    seenUrls.add(reference.url);
+    const key = options.preserveReferencePaths
+      ? reference.path + "\\u0000" + reference.url
+      : reference.url;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }

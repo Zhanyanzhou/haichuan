@@ -43,6 +43,7 @@ import {
   type VisualNodeSelection,
 } from "@/page-builder/visual-editor/visualEditorSession";
 import type { PublishValidationStatus } from "@/page-builder/inspector/publishValidation";
+import type { PublicContentLocale } from "@/i18n/publicLocale";
 import { formatViewportSize, type ViewportPreset } from "../editor-utils";
 import WorkspaceContextControls from "@/page-builder/template-editor/WorkspaceContextControls";
 import useWorkspaceHistoryShortcuts from "@/page-builder/template-editor/useWorkspaceHistoryShortcuts";
@@ -60,6 +61,8 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
 
 export default function EditorToolbar({
   pageKey,
+  locale,
+  reviewStatus,
   publishing,
   saving,
   hasPendingDraft,
@@ -77,6 +80,11 @@ export default function EditorToolbar({
   publishReviewActive,
   publishReviewErrorCount,
   onOpenPublishReview,
+  onLocaleChange,
+  localeSwitchDisabled,
+  onSubmitReview,
+  onApproveReview,
+  onRequestChanges,
   onPublish,
   onSaveDraft,
   onExitViewing,
@@ -94,6 +102,8 @@ export default function EditorToolbar({
   restoreViewport,
 }: {
   pageKey: EditorPageKey;
+  locale: PublicContentLocale;
+  reviewStatus: "DRAFT" | "IN_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
   publishing: boolean;
   saving: boolean;
   hasPendingDraft: boolean;
@@ -111,6 +121,11 @@ export default function EditorToolbar({
   publishReviewActive: boolean;
   publishReviewErrorCount: number;
   onOpenPublishReview: () => void;
+  onLocaleChange: (locale: PublicContentLocale) => void;
+  localeSwitchDisabled: boolean;
+  onSubmitReview: () => void;
+  onApproveReview: () => void;
+  onRequestChanges: (note: string) => void;
   onPublish: (data: unknown) => void;
   onSaveDraft: (data: unknown) => void;
   onExitViewing: () => void;
@@ -151,12 +166,14 @@ export default function EditorToolbar({
   } | null>(null);
   const wasPreviewModeRef = useRef(previewMode);
   const currentViewport = viewports.current;
-  const publishUnavailableReason = !canPublish
-    ? "当前账号只能编辑草稿，需由管理员发布"
-    : USE_MOCK
+  const publishUnavailableReason = USE_MOCK
       ? "Mock 模式未连接真实发布服务"
     : viewingPublished
       ? "正在查看线上版本，无需重复发布"
+    : !canPublish
+      ? "当前账号可提交审核，发布需由管理员完成"
+    : reviewStatus !== "APPROVED"
+      ? "当前语言版本需先通过审核"
       : null;
   const publishActionLabel = publishUnavailableReason
     ? `发布到前台网站（${publishUnavailableReason}）`
@@ -726,17 +743,66 @@ export default function EditorToolbar({
           onUndo: () => { navigateHistory("back"); },
           onRedo: () => { navigateHistory("forward"); },
         }}
-        leading={USE_MOCK ? (
-          <span
-            className="homepage-editor__mock-mode-badge"
-            data-testid="homepage-editor-mock-mode"
-            role="status"
-            aria-label="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
-            title="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
-          >
-            Mock <span>模式</span>
-          </span>
-        ) : undefined}
+        leading={(
+          <>
+            {USE_MOCK ? (
+              <span
+                className="homepage-editor__mock-mode-badge"
+                data-testid="homepage-editor-mock-mode"
+                role="status"
+                aria-label="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
+                title="当前为 Mock 模式，数据仅保存在本机，不连接真实接口"
+              >
+                Mock <span>模式</span>
+              </span>
+            ) : null}
+            <div className="homepage-editor__locale-review-controls" aria-label="内容语言与审核状态">
+              <label>
+                <span className="sr-only">内容语言</span>
+                <select
+                  value={locale}
+                  disabled={localeSwitchDisabled}
+                  onChange={(event) => onLocaleChange(event.target.value as PublicContentLocale)}
+                  title={localeSwitchDisabled ? "请先保存当前修改再切换语言" : "切换独立的中文或英文页面草稿"}
+                  aria-label="内容语言"
+                >
+                  <option value="zh-CN">中文</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <span role="status" data-testid="page-review-status">
+                {reviewStatus === "DRAFT" ? "草稿"
+                  : reviewStatus === "IN_REVIEW" ? "待审核"
+                    : reviewStatus === "CHANGES_REQUESTED" ? "已退回"
+                      : reviewStatus === "APPROVED" ? "已批准"
+                        : reviewStatus === "PUBLISHED" ? "已发布"
+                          : "已归档"}
+              </span>
+              {(reviewStatus === "DRAFT" || reviewStatus === "CHANGES_REQUESTED") && !viewingPublished ? (
+                <button type="button" onClick={onSubmitReview} disabled={saving || publishing}>
+                  提交审核
+                </button>
+              ) : null}
+              {canPublish && reviewStatus === "IN_REVIEW" ? (
+                <>
+                  <button type="button" onClick={onApproveReview} disabled={saving || publishing}>
+                    批准
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const note = window.prompt("请输入退回修改原因");
+                      if (note?.trim()) onRequestChanges(note.trim());
+                    }}
+                    disabled={saving || publishing}
+                  >
+                    退回修改
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </>
+        )}
         preview={{
           active: previewMode,
           label: previewMode ? "退出预览" : "预览",

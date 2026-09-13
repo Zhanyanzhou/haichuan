@@ -31,6 +31,7 @@ import {
 } from "react";
 import {
   createDefaultDynamicTemplateResponsiveRules,
+  DynamicTemplateOperationError,
   duplicateDynamicTemplateNode,
   getDynamicTemplateGroupDisabledReason,
   getDynamicTemplateMoveLandings,
@@ -97,6 +98,19 @@ const GROUP_MENU_KINDS = [
 }>;
 
 const STRUCTURE_COMMAND_FEEDBACK_KEY = "template-structure-command-feedback";
+
+function findRequiredSlotInSubtree(definition: TemplateDefinitionV2, nodeId: string) {
+  const pending = [nodeId];
+  while (pending.length) {
+    const currentId = pending.shift()!;
+    const node = definition.nodes[currentId];
+    if (!node) continue;
+    const slot = node.slotId ? definition.slots[node.slotId] : undefined;
+    if (slot?.required) return { nodeId: currentId, slot };
+    pending.unshift(...node.childIds);
+  }
+  return null;
+}
 
 interface ResponsiveRoleOption {
   device: "desktop" | "mobile" | "all";
@@ -1097,6 +1111,9 @@ export default function DynamicTemplateStructurePanel({
     const node = currentDraft.definition.nodes[nodeId];
     if (!node) return;
     const slot = node.slotId ? currentDraft.definition.slots[node.slotId] : undefined;
+    const requiredDescendant = !slot
+      ? findRequiredSlotInSubtree(currentDraft.definition, nodeId)
+      : null;
     if (action === "toggle" && !node.hidden && slot?.required) {
       showStructureCommandError(
         `“${slot.label}”是母模板必填槽位，不能隐藏。请保留该槽位，并调整允许的布局或样式。`,
@@ -1156,6 +1173,36 @@ export default function DynamicTemplateStructurePanel({
           { onSuccess: () => selectObject(nodeId) },
         );
       } catch (error) {
+        if (
+          error instanceof DynamicTemplateOperationError
+          && error.code === "REQUIRED_SLOT_CANNOT_DELETE"
+          && requiredDescendant
+        ) {
+          const lockOwnerId = getDynamicTemplateStructureLockOwnerId(
+            currentDraft.definition,
+            requiredDescendant.nodeId,
+          );
+          modal.confirm({
+            title: `无法删除“${node.name}”`,
+            content: error.message,
+            okText: lockOwnerId ? "定位锁定来源" : "定位并取消必填",
+            cancelText: "继续保留",
+            onOk: () => {
+              const session = useTemplateEditorSession.getState();
+              session.selectObject(lockOwnerId ?? requiredDescendant.nodeId);
+              session.setInspectorTask(lockOwnerId ? "design" : "page-scope");
+              session.setInspectorView("context");
+              window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+                const field = document.querySelector<HTMLElement>(lockOwnerId
+                  ? '[data-template-inspector-field="authoring.structureLocked"]'
+                  : '[data-template-inspector-field="slot.required"]');
+                field?.scrollIntoView({ block: "nearest" });
+                field?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+              }));
+            },
+          });
+          return;
+        }
         showStructureCommandError(`${error instanceof Error ? error.message : "结构操作失败"} 请检查当前层级和锁定状态后重试。`);
       }
     };

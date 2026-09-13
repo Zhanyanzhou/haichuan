@@ -23,6 +23,7 @@ const operationsRuntimeExecutables = [
 ];
 export const releaseStaticWorkflowPaths = Object.freeze([
   ".github/workflows/quality.yml",
+  ".github/workflows/export-public-seo-snapshot.yml",
   ".github/workflows/release-images.yml",
   ".github/workflows/verify-production-evidence.yml",
 ]);
@@ -33,6 +34,11 @@ function fail(code) {
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasExactKeys(value, expectedKeys) {
+  return isRecord(value) &&
+    Object.keys(value).sort().join("\0") === [...expectedKeys].sort().join("\0");
 }
 
 export function findComposeBuildServices(source) {
@@ -134,8 +140,12 @@ function assertPinnedDockerfile(path, component) {
 function assertOperationsDockerStage() {
   const path = "server/Dockerfile";
   const source = readProjectFile(path);
-  const runtimeDependencies = /^FROM\s+node:22-alpine@sha256:[a-f0-9]{64}\s+AS\s+runtime-deps\s*$/im.exec(source);
-  if (!runtimeDependencies || !source.includes("npm ci --omit=dev --omit=optional")) {
+  const runtimeDependencies = /^FROM\s+node:22-bookworm-slim@sha256:[a-f0-9]{64}\s+AS\s+runtime-deps\s*$/im.exec(source);
+  if (
+    !runtimeDependencies
+    || !source.includes("npm ci --omit=dev --include=optional --legacy-peer-deps")
+    || !source.includes("rm -rf node_modules/prisma node_modules/.bin/prisma")
+  ) {
     fail("RUNTIME_DEPENDENCIES_STAGE_INVALID");
   }
   const match = /^FROM\s+runtime-deps\s+AS\s+operations\s*$/im.exec(source);
@@ -148,11 +158,11 @@ function assertOperationsDockerStage() {
   const normalizedStage = stage.replace(/\\\r?\n\s*/g, " ");
   const executableNames = operationsRuntimeExecutables.map((path) => path.split("/").at(-1));
   for (const required of [
-    "RUN apk add --no-cache bash mariadb-client openssl",
+    "apt-get install -y --no-install-recommends default-mysql-client openssl",
     'io.haichuan.component="operations"',
     "COPY --from=build /app/node_modules/prisma ./node_modules/prisma",
     "COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma",
-    "ln -s ../prisma/build/index.js node_modules/.bin/prisma",
+    "ln -sf ../prisma/build/index.js node_modules/.bin/prisma",
     "COPY --from=build /app/dist ./dist",
     `COPY ${executableNames.map((name) => `scripts/${name}`).join(" ")} /usr/local/bin/`,
     `chmod 0555 ${operationsRuntimeExecutables.join(" ")}`,
@@ -163,6 +173,18 @@ function assertOperationsDockerStage() {
     if (!normalizedStage.includes(required)) fail(`OPERATIONS_DOCKER_STAGE_CONTRACT_MISSING:${required}`);
   }
   if (stage.includes("npm ci --include=dev")) fail("OPERATIONS_DOCKER_FULL_DEV_TREE_FORBIDDEN");
+  for (const scriptPath of [
+    "server/scripts/check-backup-health.sh",
+    "server/scripts/restore.sh",
+    "server/scripts/restore-drill.sh",
+    "server/scripts/prune-backups.sh",
+  ]) {
+    const script = readProjectFile(scriptPath);
+    if (/\$1\s*!~\s*\/\^\[0-9a-fA-F\]\{64\}\$\//.test(script)
+        || !script.includes("length($1) != 64")) {
+      fail(`OPERATIONS_SHA256_AWK_PORTABILITY_INVALID:${scriptPath}`);
+    }
+  }
   return { path, runtimeExecutables: operationsRuntimeExecutables };
 }
 
@@ -181,11 +203,14 @@ function assertNodeAndClientRuntimeBaseline() {
       fail(`WORKFLOW_NODE_BASELINE_INVALID:${path}`);
     }
   }
-  for (const path of ["server/Dockerfile", "client/Dockerfile"]) {
+  for (const [path, expectedBase] of [
+    ["server/Dockerfile", /^node:22-bookworm-slim@sha256:/],
+    ["client/Dockerfile", /^node:22-alpine@sha256:/],
+  ]) {
     const source = readProjectFile(path);
     const nodeBases = [...source.matchAll(/^FROM\s+(node:[^\s]+)(?:\s+AS\s+\S+)?\s*$/gim)]
       .map((match) => match[1]);
-    if (nodeBases.length === 0 || nodeBases.some((image) => !/^node:22-alpine@sha256:/.test(image))) {
+    if (nodeBases.length === 0 || nodeBases.some((image) => !expectedBase.test(image))) {
       fail(`DOCKERFILE_NODE_BASELINE_INVALID:${path}`);
     }
   }
@@ -271,6 +296,10 @@ function assertComposeImages() {
     'profiles: ["operations"]',
     "RELEASE_PREFLIGHT_DATABASE_URL:-",
     "BOOTSTRAP_DATABASE_URL:-",
+    "BOOTSTRAP_ADMIN_TARGET_CLASS:-",
+    "BOOTSTRAP_ADMIN_ENVIRONMENT_ID:-",
+    "BOOTSTRAP_ADMIN_EXPECTED_DATABASE:-",
+    "BOOTSTRAP_ADMIN_APPROVAL_REFERENCE:-",
     '["./node_modules/.bin/prisma", "migrate", "status"]',
     '["node", "dist/cli/release-preflight.js"]',
     '["node", "dist/cli/bootstrap-admin.js"]',
@@ -343,6 +372,7 @@ function assertReleaseWorkflow() {
     "release-manifest.attestation.json",
     "runtimeExecutables",
     "OPERATIONS_RUNTIME_EXECUTABLE_INVALID",
+    "SERVER_RUNTIME_NATIVE_DEPENDENCY_INVALID:sharp",
   ]) {
     if (!source.includes(required)) {
       fail(`RELEASE_WORKFLOW_QUALITY_PROOF_CONTRACT_MISSING:${required}`);
@@ -585,6 +615,22 @@ export function validateReleaseManifest(manifest, expected) {
       policy.sbomPredicateType !== "https://spdx.dev/Document/v2.3" ||
       policy.manifestPredicateType !== "https://slsa.dev/provenance/v1") {
     fail("RELEASE_MANIFEST_ATTESTATION_POLICY_INVALID");
+  }
+  const publicSeo = manifest.publicSeo;
+  if (!hasExactKeys(publicSeo, [
+    "snapshotHash",
+    "prerenderManifestSha256",
+    "sourceArtifactId",
+    "sourceArtifactDigest",
+  ])) {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
+  }
+  if (!/^[a-f0-9]{64}$/.test(publicSeo.snapshotHash) ||
+      !/^[a-f0-9]{64}$/.test(publicSeo.prerenderManifestSha256) ||
+      !Number.isSafeInteger(publicSeo.sourceArtifactId) ||
+      publicSeo.sourceArtifactId <= 0 ||
+      !digestPattern.test(publicSeo.sourceArtifactDigest)) {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_INVALID");
   }
   validateImageEntry("server", manifest.server);
   validateImageEntry("client", manifest.client);

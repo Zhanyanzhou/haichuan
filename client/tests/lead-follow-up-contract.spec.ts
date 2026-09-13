@@ -93,6 +93,13 @@ test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ pa
     headers: Record<string, string>;
     body: Record<string, unknown>;
   }> = [];
+  const initialNextFollowUpAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const savedNextFollowUpAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const localNextFollowUpAt = new Date(
+    new Date(savedNextFollowUpAt).getTime()
+      - new Date(savedNextFollowUpAt).getTimezoneOffset() * 60_000,
+  ).toISOString().slice(0, 16);
+  let savedFollowUp: Record<string, unknown> | null = null;
 
   await page.route('**/api/**', async (route) => {
     const request = route.request();
@@ -106,6 +113,15 @@ test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ pa
         headers: request.headers(),
         body: request.postDataJSON(),
       });
+      if (writes.length === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'temporary failure' }),
+        });
+        return;
+      }
+      savedFollowUp = writes.at(-1)?.body ?? null;
       await route.fulfill({
         contentType: 'application/json',
         body: wrapped({ id: 1 }),
@@ -122,9 +138,18 @@ test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ pa
           customerName: '测试访客',
           phone: '13800000000',
           status: 'PENDING',
+          nextFollowUpAt: savedFollowUp ? savedNextFollowUpAt : initialNextFollowUpAt,
           message: '希望预约看款。',
           createdAt: '2026-08-26T00:00:00.000Z',
-          followUps: [],
+          followUps: savedFollowUp ? [{
+            id: 91,
+            type: 'FOLLOW_UP',
+            content: savedFollowUp.content,
+            contactMethod: savedFollowUp.contactMethod,
+            nextFollowUpAt: savedNextFollowUpAt,
+            createdAt: new Date().toISOString(),
+            creator: { realName: '客服七号' },
+          }] : [],
         }),
       });
       return;
@@ -142,6 +167,7 @@ test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ pa
               phone: '13800000000',
               relatedProducts: 0,
               status: 'PENDING',
+              nextFollowUpAt: savedFollowUp ? savedNextFollowUpAt : initialNextFollowUpAt,
               createdAt: '2026-08-26T00:00:00.000Z',
             },
           ],
@@ -159,21 +185,43 @@ test('线索跟进请求保持员工鉴权和最小请求体合同', async ({ pa
   await page.goto('/admin/leads');
   await page.getByRole('button', { name: '查看' }).click();
   const drawer = page.getByRole('dialog', { name: '线索详情' });
+  await expect(page.getByText('已逾期', { exact: true })).toBeVisible();
+  await expect(drawer).toContainText(
+    '游客咨询无法生成客户中心站内回复；请根据其电话或邮箱，在下方记录实际联系渠道与跟进结果。',
+  );
+  await expect(drawer).not.toContainText('原咨询管理入口');
   await drawer
     .getByPlaceholder('添加内部备注或跟进记录...')
     .fill('已电话确认到店时间');
+  const channelSelect = drawer.locator(
+    '.ant-select:has(input[aria-label="跟进渠道"])',
+  );
+  await channelSelect.locator('.ant-select-selector').click();
+  await page.locator('.ant-select-item-option-content', { hasText: '电子邮件' }).click();
+  await drawer.getByLabel('下次跟进时间').fill(localNextFollowUpAt);
   await page.evaluate(() => {
     document.cookie = 'hc_csrf=lead-csrf-token; path=/';
   });
   await drawer.getByRole('button', { name: '添加跟进' }).click();
 
-  await expect.poll(() => writes.length).toBe(1);
+  await expect(page.getByText(/跟进记录添加失败/)).toBeVisible();
+  await expect(drawer.getByLabel('内部备注或跟进内容'))
+    .toHaveValue('已电话确认到店时间');
+  await expect(channelSelect).toContainText('电子邮件');
+  await expect(drawer.getByLabel('下次跟进时间')).toHaveValue(localNextFollowUpAt);
+  await drawer.getByRole('button', { name: '添加跟进' }).click();
+
+  await expect.poll(() => writes.length).toBe(2);
   expect(writes[0].headers.authorization).toBeUndefined();
   expect(writes[0].headers['x-csrf-token']).toBe('lead-csrf-token');
-  expect(writes[0].body).toEqual({
+  expect(writes[1].body).toEqual({
     content: '已电话确认到店时间',
-    contactMethod: 'other',
+    contactMethod: 'email',
+    nextFollowUpAt: new Date(localNextFollowUpAt).toISOString(),
   });
+  await expect(drawer.getByText('已电话确认到店时间', { exact: true })).toBeVisible();
+  await expect(drawer.locator('ol .ant-tag', { hasText: '电子邮件' })).toBeVisible();
+  await expect(drawer.getByLabel('下次跟进时间')).toHaveValue(localNextFollowUpAt);
 });
 
 test('后台回复在响应失败后复用幂等键并恢复成功结果', async ({ page }) => {

@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
   ValidationPipe,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -26,6 +27,7 @@ test('报价列表查询 DTO 白名单化并转换分页与负责人 ID', async 
       status: 'DRAFT',
       keyword: '  王女士  ',
       salesConsultantId: '17',
+      channel: 'PARTNER_WAX',
       customerPhone: '13800000000',
     },
     { type: 'query', metatype: QuotationListQueryDto },
@@ -36,6 +38,7 @@ test('报价列表查询 DTO 白名单化并转换分页与负责人 ID', async 
     status: 'DRAFT',
     keyword: '王女士',
     salesConsultantId: 17,
+    channel: 'PARTNER_WAX',
   });
 
   await assert.rejects(
@@ -80,8 +83,196 @@ test('管理员保留全局访问并可显式筛选销售顾问', async () => {
     },
   };
   const service = new QuotationsService(prisma as unknown as PrismaService);
-  await service.findAll({ salesConsultantId: 22 }, adminActor);
+  await service.findAll({ salesConsultantId: 22, channel: 'CUSTOM' }, adminActor);
   assert.equal(where.salesConsultantId, 22);
+  assert.equal(where.channel, 'CUSTOM');
+});
+
+test('销售读取发出选项必须命中本人报价且设计文件固定为该报价客户', async () => {
+  let quotationWhere: Record<string, unknown> | undefined;
+  let designWhere: Record<string, unknown> | undefined;
+  const prisma = {
+    quotation: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        quotationWhere = where;
+        return { id: 8, channel: 'PARTNER_WAX', customerId: 31 };
+      },
+    },
+    quotationFeeRule: { findMany: async () => [] },
+    tradeResourceBucket: { findMany: async () => [] },
+    cooperationDesignFile: {
+      findMany: async ({ where }: { where: Record<string, unknown> }) => {
+        designWhere = where;
+        return [];
+      },
+    },
+  };
+  const options = await new QuotationsService(prisma as unknown as PrismaService)
+    .getIssueOptions(8, salesActor);
+
+  assert.deepEqual(quotationWhere, { id: 8, salesConsultantId: salesActor.id });
+  assert.deepEqual(designWhere, { customerId: 31 });
+  assert.deepEqual(options, { feeRules: [], resourceBuckets: [], designFiles: [] });
+});
+
+test('发出选项每个费用代码只认当前版本，停用新版本会遮蔽旧启用版本', async () => {
+  const feeBase = {
+    channel: 'CUSTOM',
+    waxType: null,
+    calculationMethod: 'FIXED',
+    unitAmount: 5,
+    currency: 'CNY',
+    displayText: '服务费',
+  };
+  const prisma = {
+    quotation: {
+      findFirst: async () => ({ id: 8, channel: 'CUSTOM', customerId: 31 }),
+    },
+    quotationFeeRule: {
+      findMany: async () => [
+        { ...feeBase, id: 2, code: 'SERVICE', version: 2, enabled: false },
+        { ...feeBase, id: 1, code: 'SERVICE', version: 1, enabled: true },
+        { ...feeBase, id: 3, code: 'PACKING', version: 1, enabled: true },
+      ],
+    },
+    tradeResourceBucket: { findMany: async () => [] },
+  };
+  const options = await new QuotationsService(prisma as unknown as PrismaService)
+    .getIssueOptions(8, salesActor);
+
+  assert.deepEqual(options.feeRules.map((rule) => rule.code), ['PACKING']);
+  assert.equal('enabled' in options.feeRules[0], false);
+});
+
+test('报价域客户搜索仅返回绑定所需最小字段并限制条数', async () => {
+  let query: Record<string, unknown> | undefined;
+  const prisma = {
+    customer: {
+      findMany: async (args: Record<string, unknown>) => {
+        query = args;
+        return [{
+          id: 3,
+          name: '测试客户',
+          phone: '13800000000',
+          email: null,
+          accountType: 'PARTNER',
+          partnerStatus: 'APPROVED',
+          status: 'ACTIVE',
+        }];
+      },
+    },
+  };
+  const result = await new QuotationsService(prisma as unknown as PrismaService)
+    .searchIssueCustomers({ keyword: '测试', pageSize: 999 });
+
+  assert.equal(query?.take, 50);
+  assert.deepEqual(query?.select, {
+    id: true,
+    name: true,
+    phone: true,
+    email: true,
+    accountType: true,
+    partnerStatus: true,
+    status: true,
+  });
+  assert.deepEqual(Object.keys(result.list[0]).sort(), [
+    'accountType', 'email', 'id', 'name', 'partnerStatus', 'phone', 'status',
+  ].sort());
+});
+
+test('客户报价列表与详情显式返回 v2/v1 快照版本供前端失败关闭', async () => {
+  let listVersionSelect: Record<string, unknown> | undefined;
+  let detailVersionSelect: Record<string, unknown> | undefined;
+  const baseVersion = {
+    id: 21,
+    version: 2,
+    channel: 'CUSTOM',
+    status: 'ISSUED',
+    snapshotSchemaVersion: 2,
+    currency: 'CNY',
+    subtotalAmount: 80,
+    discountAmount: 0,
+    feeAmount: 0,
+    totalAmount: 80,
+    validUntil: null,
+    issuedAt: new Date(),
+    acceptedAt: null,
+    items: [],
+    feeLines: [],
+    resourceRequirements: [],
+    designFileVersion: null,
+    paymentPlans: [],
+  };
+  const prisma = {
+    quotation: {
+      findMany: async ({ select }: { select: { versions: { select: Record<string, unknown> } } }) => {
+        listVersionSelect = select.versions.select;
+        return [{
+          id: 8,
+          quoteNo: 'QT1',
+          channel: 'CUSTOM',
+          status: 'PENDING_CONFIRM',
+          currentVersion: 2,
+          finalAmount: 80,
+          validUntil: null,
+          convertedOrderId: null,
+          versions: [{
+            id: 21,
+            version: 2,
+            status: 'ISSUED',
+            snapshotSchemaVersion: 2,
+            currency: 'CNY',
+            totalAmount: 80,
+            validUntil: null,
+            issuedAt: new Date(),
+            acceptedAt: null,
+          }],
+        }];
+      },
+      findFirst: async ({ select }: { select: { versions: { select: Record<string, unknown> } } }) => {
+        detailVersionSelect = select.versions.select;
+        return {
+          id: 9,
+          quoteNo: 'QT2',
+          channel: 'CUSTOM',
+          status: 'PENDING_CONFIRM',
+          currentVersion: 1,
+          finalAmount: 80,
+          validUntil: null,
+          convertedOrderId: null,
+          convertedOrder: null,
+          versions: [{ ...baseVersion, id: 22, version: 1, snapshotSchemaVersion: 1 }],
+        };
+      },
+    },
+  };
+  const service = new QuotationsService(prisma as unknown as PrismaService);
+  const [listed] = await service.findForCustomer(7);
+  const detail = await service.findForCustomerById(7, 9);
+
+  assert.equal(listVersionSelect?.snapshotSchemaVersion, true);
+  assert.equal(detailVersionSelect?.snapshotSchemaVersion, true);
+  assert.equal(listed.currentVersionRecord?.snapshotSchemaVersion, 2);
+  assert.equal(detail.currentVersionRecord?.snapshotSchemaVersion, 1);
+});
+
+test('员工报价详情显式加载版本、费用、资源和设计版本供修订预览', async () => {
+  let include: Record<string, unknown> | undefined;
+  const prisma = {
+    quotation: {
+      findFirst: async (args: { include: Record<string, unknown> }) => {
+        include = args.include;
+        return { id: 1, currentVersion: 2, versions: [{ id: 5, version: 2 }] };
+      },
+    },
+  };
+  const result = await new QuotationsService(prisma as unknown as PrismaService).findById(1, adminActor);
+  assert.ok(include?.versions);
+  const versionSelect = (include?.versions as { select: Record<string, unknown> }).select;
+  assert.ok(versionSelect.feeLines);
+  assert.ok(versionSelect.resourceRequirements);
+  assert.ok(versionSelect.designFileVersion);
+  assert.equal(result.currentVersionRecord?.id, 5);
 });
 
 test('跨销售详情读取按本人范围返回不存在且不暴露客户信息', async () => {
@@ -274,7 +465,7 @@ test('报价转单地址 DTO 修剪并拒绝纯空白，服务层绕过 DTO 时�
   } as unknown as PrismaService);
   await assert.rejects(
     () => service.convertAcceptedVersion(7, 1, { address: '   ' }),
-    BadRequestException,
+    ServiceUnavailableException,
   );
   assert.equal(transactionCalls, 0);
 });

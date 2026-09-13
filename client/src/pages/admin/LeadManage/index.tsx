@@ -73,6 +73,8 @@ interface LeadFollowUp {
   id: number;
   type?: string;
   content?: string | null;
+  contactMethod?: string | null;
+  nextFollowUpAt?: string | null;
   createdAt: string;
   creator?: { realName?: string | null } | null;
 }
@@ -141,6 +143,45 @@ const STATUS_MAP: Record<string, { color: string; label: string }> = {
   INVALID: { color: "default", label: "无效" },
 };
 
+const CONTACT_METHOD_OPTIONS = [
+  { value: "phone", label: "电话" },
+  { value: "wechat", label: "微信" },
+  { value: "email", label: "电子邮件" },
+  { value: "store", label: "到店" },
+  { value: "other", label: "其他" },
+] as const;
+
+const CONTACT_METHOD_LABELS = Object.fromEntries(
+  CONTACT_METHOD_OPTIONS.map((option) => [option.value, option.label]),
+) as Record<string, string>;
+
+function toLocalDateTimeInput(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
+}
+
+function followUpSchedule(value?: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const now = new Date();
+  if (date.getTime() < now.getTime()) {
+    return { color: "error", label: "已逾期", date };
+  }
+  if (
+    date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate()
+  ) {
+    return { color: "warning", label: "今日到期", date };
+  }
+  return { color: "default", label: "待跟进", date };
+}
+
 const STATUS_TRANSITIONS: Record<string, string[]> = {
   PENDING: ["CONTACTED", "INVALID"],
   CONTACTED: ["FOLLOWING", "COMPLETED", "INVALID"],
@@ -207,6 +248,8 @@ export default function LeadManage() {
   const [detail, setDetail] = useState<LeadDetail | null>(null);
   const [detailError, setDetailError] = useState(false);
   const [noteText, setNoteText] = useState("");
+  const [followUpContactMethod, setFollowUpContactMethod] = useState("phone");
+  const [followUpNextAt, setFollowUpNextAt] = useState("");
   const [saving, setSaving] = useState(false);
   const [statusReason, setStatusReason] = useState("");
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
@@ -324,7 +367,13 @@ export default function LeadManage() {
     setLegalHoldReason(undefined);
     try {
       const res = await api.get(`/leads/${type}/${id}`);
-      setDetail(unwrapResponse<LeadDetail>(res));
+      const loaded = unwrapResponse<LeadDetail>(res);
+      setDetail(loaded);
+      setFollowUpNextAt(toLocalDateTimeInput(loaded.nextFollowUpAt));
+      const latestRecordedMethod = loaded.followUps?.find(
+        (followUp) => followUp.type === "FOLLOW_UP" && followUp.contactMethod,
+      )?.contactMethod;
+      setFollowUpContactMethod(latestRecordedMethod || "phone");
     } catch {
       // P1-39：详情加载失败标记错误态，避免抽屉永久 loading 无法区分加载中/失败
       setDetailError(true);
@@ -482,11 +531,15 @@ export default function LeadManage() {
 
   const addFollowUp = async () => {
     if (!detailId || !noteText) return;
+    const nextFollowUpAt = followUpNextAt
+      ? new Date(followUpNextAt).toISOString()
+      : null;
     setSaving(true);
     try {
       await api.post(`/leads/${detailId.type}/${detailId.id}/follow-up`, {
         content: noteText,
-        contactMethod: "other",
+        contactMethod: followUpContactMethod,
+        nextFollowUpAt,
       });
       message.success("跟进已添加");
       setNoteText("");
@@ -652,9 +705,17 @@ export default function LeadManage() {
     {
       title: "下次跟进",
       dataIndex: "nextFollowUpAt",
-      width: 100,
-      render: (v: string) =>
-        v ? new Date(v).toLocaleDateString("zh-CN") : "—",
+      width: 180,
+      render: (v: string) => {
+        const schedule = followUpSchedule(v);
+        if (!schedule) return "—";
+        return (
+          <Space size={4} wrap>
+            <Tag color={schedule.color}>{schedule.label}</Tag>
+            <span>{schedule.date.toLocaleString("zh-CN")}</span>
+          </Space>
+        );
+      },
     },
     {
       title: "留存复核",
@@ -954,6 +1015,11 @@ export default function LeadManage() {
                   {STATUS_MAP[detail.status]?.label || detail.status}
                 </Tag>
               </Descriptions.Item>
+              <Descriptions.Item label="下次跟进">
+                {detail.nextFollowUpAt
+                  ? new Date(detail.nextFollowUpAt).toLocaleString("zh-CN")
+                  : "—"}
+              </Descriptions.Item>
               <Descriptions.Item label="隐私处置">
                 {detail.privacyDisposedAt ? (
                   <Tag>已匿名化</Tag>
@@ -1098,7 +1164,7 @@ export default function LeadManage() {
                   type="info"
                   showIcon
                   message="该线索未关联已登录客户"
-                  description="请在原咨询管理入口处理游客咨询；本入口只向客户中心生成回复与站内通知。"
+                  description="游客咨询无法生成客户中心站内回复；请根据其电话或邮箱，在下方记录实际联系渠道与跟进结果。"
                 />
               ) : detail.status === "COMPLETED" || detail.status === "INVALID" ? (
                 <Alert
@@ -1162,6 +1228,20 @@ export default function LeadManage() {
                         {followUp.creator?.realName || "系统"} ·{" "}
                         {new Date(followUp.createdAt).toLocaleString("zh-CN")}
                       </small>
+                      {(followUp.contactMethod || followUp.nextFollowUpAt) && (
+                        <div style={{ marginTop: 4 }}>
+                          <Space size={4} wrap>
+                            {followUp.contactMethod && (
+                              <Tag>{CONTACT_METHOD_LABELS[followUp.contactMethod] || followUp.contactMethod}</Tag>
+                            )}
+                            {followUp.nextFollowUpAt && (
+                              <span style={{ color: "var(--adm-muted)", fontSize: 12 }}>
+                                下次：{new Date(followUp.nextFollowUpAt).toLocaleString("zh-CN")}
+                              </span>
+                            )}
+                          </Space>
+                        </div>
+                      )}
                     </div>
                   ),
                 }))}
@@ -1174,12 +1254,27 @@ export default function LeadManage() {
               <>
             <div style={{ marginTop: 16 }}>
               <Input.TextArea
+                aria-label="内部备注或跟进内容"
                 rows={3}
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
                 placeholder="添加内部备注或跟进记录..."
               />
-              <Space style={{ marginTop: 8 }}>
+              <Space wrap style={{ marginTop: 8, width: "100%" }}>
+                <Select
+                  aria-label="跟进渠道"
+                  value={followUpContactMethod}
+                  onChange={setFollowUpContactMethod}
+                  options={CONTACT_METHOD_OPTIONS.map((option) => ({ ...option }))}
+                  style={{ width: 140 }}
+                />
+                <Input
+                  aria-label="下次跟进时间"
+                  type="datetime-local"
+                  value={followUpNextAt}
+                  onChange={(event) => setFollowUpNextAt(event.target.value)}
+                  style={{ width: 210 }}
+                />
                 <Button onClick={saveNote} loading={saving}>
                   保存备注
                 </Button>

@@ -23,6 +23,7 @@ import {
   buildClearSessionCookieHeaders,
   buildSessionCookieHeaders,
   extractRefreshCookieToken,
+  extractBearerToken,
   requestSessionMetadata,
 } from "../../common/security/session-security";
 import { RefreshSessionService } from "../../common/security/refresh-session.service";
@@ -53,12 +54,18 @@ export class AuthController {
     },
   })
   async login(@Request() req: StaffRequest, @Res({ passthrough: true }) response: Response) {
-    const result = await this.authService.login(req.user);
+    const session = await this.refreshSessions.issueAdmin(
+      req.user.id,
+      requestSessionMetadata(req),
+    );
+    let result;
+    try {
+      result = await this.authService.login(req.user, session.familyId);
+    } catch (error) {
+      await this.refreshSessions.revokeAdmin(session.refreshToken);
+      throw error;
+    }
     if (req.headers?.["x-session-mode"] === "cookie") {
-      const session = await this.refreshSessions.issueAdmin(
-        result.user.id,
-        requestSessionMetadata(req),
-      );
       const cookie = buildSessionCookieHeaders(
         "admin",
         result.accessToken,
@@ -85,7 +92,10 @@ export class AuthController {
       refreshToken,
       requestSessionMetadata(request),
     );
-    const result = await this.authService.resume(rotated.userId);
+    const result = await this.authService.resume(
+      rotated.userId,
+      rotated.familyId,
+    );
     response.setHeader(
       "Set-Cookie",
       buildSessionCookieHeaders(
@@ -103,9 +113,22 @@ export class AuthController {
     @Req() request: ExpressRequest,
     @Res({ passthrough: true }) response: Response,
   ) {
-    await this.refreshSessions.revokeAdmin(
-      extractRefreshCookieToken(request.headers?.cookie, "admin"),
+    const refreshToken = extractRefreshCookieToken(
+      request.headers?.cookie,
+      "admin",
     );
+    await this.refreshSessions.revokeAdmin(refreshToken);
+    const bearerToken = extractBearerToken(request.headers?.authorization);
+    if (bearerToken) {
+      const accessSession =
+        await this.authService.resolveRevocableAccessSession(bearerToken);
+      if (accessSession) {
+        await this.refreshSessions.revokeAdminFamilyForUser(
+          accessSession.userId,
+          accessSession.familyId,
+        );
+      }
+    }
     response.setHeader("Set-Cookie", buildClearSessionCookieHeaders("admin"));
     return { success: true };
   }

@@ -1443,6 +1443,9 @@ export default function DynamicTemplateInspectorPanel({
   if (!dynamicDraft || !validation) return null;
 
   const definition = dynamicDraft.definition;
+  // 当前断点投影会把旧合同的 desktop/mobile 都替换为同一份有效值；
+  // 跨画布复制与来源判断必须读取会话原始定义，否则真实差异会被误判为无差异。
+  const responsiveDefinition = draft!.definition;
   if (selectionSnapshot.targets.length > 1 && !publishReview) {
     if (Number(definition.schemaVersion) >= 2) return <aside className="homepage-editor__inspector template-editor__inspector" aria-label="模板属性"><div className="homepage-editor__inspector-scroll"><TemplateNativeDesignControls nodeIds={selectionSnapshot.targets.filter((target) => !target.roleId).map((target) => target.targetId)} /></div></aside>;
     return (
@@ -1538,7 +1541,7 @@ export default function DynamicTemplateInspectorPanel({
     ...(selectedRoleObject ? { roleId: selectedRoleObject.roleId } : {}),
   });
   const hasDesignField = (field: string) => designFieldResolution.fields.some((candidate) => candidate.field === field);
-  const applicableResponsiveGroups = getDynamicTemplateApplicableResponsiveGroups(definition, activeNodeId, device, selectedRoleObject?.roleId);
+  const applicableResponsiveGroups = getDynamicTemplateApplicableResponsiveGroups(responsiveDefinition, activeNodeId, device, selectedRoleObject?.roleId);
   const activeSelectedResponsiveGroups = selectedResponsiveGroups.filter((group) => applicableResponsiveGroups.includes(group));
   const toggleResponsiveGroup = (group: DynamicTemplateResponsiveGroup, checked: boolean) => setSelectedResponsiveGroups((current) => (
     checked ? [...new Set([...current, group])] : current.filter((candidate) => candidate !== group)
@@ -1677,14 +1680,14 @@ export default function DynamicTemplateInspectorPanel({
 
   const responsiveSource = selectedRoleObject && applicableResponsiveGroups.length
     ? (otherToCurrentRoleMapping && createDynamicTemplateResponsivePlan(
-        definition,
+        responsiveDefinition,
         activeNodeId,
         otherDevice,
         device,
         applicableResponsiveGroups,
         otherToCurrentRoleMapping,
       ).changes.length ? "device" : "shared")
-    : getTemplateResponsiveSource(definition, activeNodeId, device);
+    : getTemplateResponsiveSource(responsiveDefinition, activeNodeId, device);
   const copyResponsive = (sourceDevice: typeof device, targetDevice: typeof device, label: string) => {
     const roleMapping = selectedRoleObject
       ? (sourceDevice === device ? currentToOtherRoleMapping : otherToCurrentRoleMapping)
@@ -1697,7 +1700,7 @@ export default function DynamicTemplateInspectorPanel({
       return;
     }
     const reviewedPlan = createDynamicTemplateResponsivePlan(
-      definition,
+      responsiveDefinition,
       activeNodeId,
       sourceDevice,
       targetDevice,

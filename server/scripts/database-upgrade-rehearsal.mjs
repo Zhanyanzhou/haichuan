@@ -16,9 +16,27 @@ const prismaDirectory = path.join(serverDirectory, 'prisma');
 const migrationsDirectory = path.join(prismaDirectory, 'migrations');
 const prismaCli = path.join(serverDirectory, 'node_modules', 'prisma', 'build', 'index.js');
 
-export const EXPECTED_MIGRATION_COUNT = 53;
+export const MYSQL_IMAGE = 'mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b';
+export const EXPECTED_MIGRATION_COUNT = 56;
+export const CHECKPOINT_MIGRATION_COUNT = 51;
+export const MIGRATION_PRIVILEGES = Object.freeze([
+  'SELECT',
+  'INSERT',
+  'UPDATE',
+  'CREATE',
+  'ALTER',
+  'DROP',
+  'INDEX',
+  'REFERENCES',
+  'CREATE TEMPORARY TABLES',
+  'TRIGGER',
+]);
 export const TRADE_MIGRATION = '20260906160000_close_trade_maturity_invariants';
 export const PROFILE_MIGRATION = '20260911220000_add_customer_profile_security';
+export const QUOTATION_EXPANSION_MIGRATION = '20260913120000_expand_quotation_conversion_contract';
+export const QUOTATION_INVARIANTS_MIGRATION = '20260913121000_enforce_quotation_conversion_invariants';
+export const MEDIA_AUTHORIZATION_MIGRATION = '20260913122000_add_media_authorization_inheritance';
+export const EXPECTED_TRIGGER_COUNT = 14;
 
 export const PREFLIGHT_SQL = `
 SELECT 'blank_customer_email' AS issue
@@ -189,8 +207,8 @@ function parseRows(output) {
   return trimmed.split(/\r?\n/).map((line) => line.split('\t'));
 }
 
-function buildDatabaseUrl(password, port, databaseName) {
-  return `mysql://root:${encodeURIComponent(password)}@127.0.0.1:${port}/${databaseName}`;
+function buildDatabaseUrl(username, password, port, databaseName) {
+  return `mysql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@127.0.0.1:${port}/${databaseName}`;
 }
 
 function prepareMigrationStage(tempDirectory, migrationNames, count) {
@@ -249,6 +267,9 @@ export async function main() {
   assert.equal(migrationNames.length, EXPECTED_MIGRATION_COUNT, 'Unexpected migration inventory size');
   assert.equal(migrationNames[51], TRADE_MIGRATION);
   assert.equal(migrationNames[52], PROFILE_MIGRATION);
+  assert.equal(migrationNames[53], QUOTATION_EXPANSION_MIGRATION);
+  assert.equal(migrationNames[54], QUOTATION_INVARIANTS_MIGRATION);
+  assert.equal(migrationNames[55], MEDIA_AUTHORIZATION_MIGRATION);
   assert.ok(fs.existsSync(prismaCli), 'Run npm install in server before this rehearsal');
   verifyStaticMigrationGuards();
 
@@ -260,17 +281,21 @@ export async function main() {
   assert.ok(tempDirectory.startsWith(`${expectedTempParent}${path.sep}`));
   fs.mkdirSync(tempDirectory, { recursive: true });
 
-  const password = `test-${crypto.randomBytes(18).toString('hex')}`;
+  const rootPassword = `test-root-${crypto.randomBytes(18).toString('hex')}`;
+  const migrationPassword = `test-migration-${crypto.randomBytes(18).toString('hex')}`;
+  const migrationUser = `hc_migrator_${runId}`;
+  assert.match(migrationUser, /^[a-z0-9_]{1,32}$/);
   const port = await reservePort();
   const report = {
-    mysqlImage: 'mysql:8.0',
+    mysqlImage: MYSQL_IMAGE,
     migrationCount: migrationNames.length,
-    checkpointMigrationCount: 51,
+    checkpointMigrationCount: CHECKPOINT_MIGRATION_COUNT,
     scope: {
       appliesTo: [
-        'local Docker mysql:8.0',
-        'synthetic existing database produced by the current first 51 migrations',
-        'current 51-to-53 forward upgrade',
+        'local Docker MySQL 8 at the repository-controlled digest',
+        `synthetic existing database produced by the current first ${CHECKPOINT_MIGRATION_COUNT} migrations`,
+        `current ${CHECKPOINT_MIGRATION_COUNT}-to-${EXPECTED_MIGRATION_COUNT} forward upgrade`,
+        'ordinary non-root migration account with the recorded schema-scoped privileges',
       ],
       doesNotProve: [
         'production data volume or migration duration',
@@ -280,25 +305,39 @@ export async function main() {
         'production rollback duration',
       ],
     },
+    migrationAccount: {
+      identity: `${migrationUser}@%`,
+      connectionRole: 'non-root',
+      schemaPrivileges: [...MIGRATION_PRIVILEGES].sort(),
+      globalSuper: false,
+    },
     resources: { containerName, databasePrefix: resourcePrefix },
     scenarios: [],
   };
   let containerCreated = false;
   const progress = (stage) => process.stderr.write(`[db-upgrade-rehearsal] ${stage}${os.EOL}`);
 
-  const docker = (args, options = {}) => run('docker', args, { ...options, secrets: [password] });
+  const secrets = [rootPassword, migrationPassword];
+  const docker = (args, options = {}) => run('docker', args, { ...options, secrets });
 
-  const mysql = (databaseName, sql, options = {}) => {
+  const mysqlAs = (username, password, databaseName, sql, options = {}) => {
     if (databaseName) validateDatabaseName(databaseName, resourcePrefix);
-    const args = ['exec', '-i', '-e', `MYSQL_PWD=${password}`, containerName, 'mysql', '-uroot'];
+    const args = ['exec', '-i', '-e', `MYSQL_PWD=${password}`, containerName, 'mysql', `-u${username}`];
     if (options.batch !== false) args.push('--batch', '--raw', '--skip-column-names');
     if (databaseName) args.push(databaseName);
     return docker(args, { input: sql, allowFailure: options.allowFailure });
   };
 
+  const mysql = (databaseName, sql, options = {}) =>
+    mysqlAs('root', rootPassword, databaseName, sql, options);
+
+  const migrationMysql = (databaseName, sql, options = {}) =>
+    mysqlAs(migrationUser, migrationPassword, databaseName, sql, options);
+
   const createDatabase = (databaseName) => {
     validateDatabaseName(databaseName, resourcePrefix);
     mysql(null, `CREATE DATABASE \`${databaseName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
+    mysql(null, `GRANT ${MIGRATION_PRIVILEGES.join(', ')} ON \`${databaseName}\`.* TO \`${migrationUser}\`@'%';`);
   };
 
   const replaceDatabaseFromDump = (databaseName, dump) => {
@@ -310,7 +349,7 @@ export async function main() {
   const dumpDatabase = (databaseName, { ignoreLedger = false } = {}) => {
     validateDatabaseName(databaseName, resourcePrefix);
     const args = [
-      'exec', '-e', `MYSQL_PWD=${password}`, containerName,
+      'exec', '-e', `MYSQL_PWD=${rootPassword}`, containerName,
       'mysqldump', '-uroot', '--single-transaction', '--routines', '--triggers', '--events',
       '--set-gtid-purged=OFF', '--no-tablespaces', '--skip-comments',
     ];
@@ -327,7 +366,7 @@ export async function main() {
     { allowFailure = false, appendSchema = true } = {},
   ) => {
     validateDatabaseName(databaseName, resourcePrefix);
-    const databaseUrl = buildDatabaseUrl(password, port, databaseName);
+    const databaseUrl = buildDatabaseUrl(migrationUser, migrationPassword, port, databaseName);
     const args = appendSchema ? [...commandArgs, `--schema=${schemaPath}`] : commandArgs;
     const isolatedEnvironment = {
       DATABASE_URL: databaseUrl,
@@ -344,7 +383,7 @@ export async function main() {
       cwd: path.dirname(schemaPath),
       env: Object.fromEntries(Object.entries(isolatedEnvironment).filter(([, value]) => value !== undefined)),
       allowFailure,
-      secrets: [password, databaseUrl],
+      secrets: [...secrets, databaseUrl],
     });
   };
 
@@ -445,13 +484,16 @@ export async function main() {
   };
 
   try {
-    progress('starting isolated MySQL 8 container');
+    progress('starting isolated MySQL 8 container at the controlled digest');
     const createResult = docker([
       'run', '--detach', '--rm', '--name', containerName,
-      '-e', `MYSQL_ROOT_PASSWORD=${password}`,
+      '-e', `MYSQL_ROOT_PASSWORD=${rootPassword}`,
       '-p', `127.0.0.1:${port}:3306`,
       '--tmpfs', '/var/lib/mysql:rw,nosuid,nodev',
-      'mysql:8.0',
+      MYSQL_IMAGE,
+      '--server-id=1',
+      '--log-bin=mysql-bin',
+      '--log-bin-trust-function-creators=ON',
     ]);
     containerCreated = createResult.status === 0;
 
@@ -459,7 +501,7 @@ export async function main() {
     let consecutiveReadyChecks = 0;
     while (Date.now() < readyDeadline) {
       const probe = docker(
-        ['exec', '-e', `MYSQL_PWD=${password}`, containerName, 'mysql', '-uroot', '--batch', '--skip-column-names', '-e', 'SELECT 1'],
+        ['exec', '-e', `MYSQL_PWD=${rootPassword}`, containerName, 'mysql', '-uroot', '--batch', '--skip-column-names', '-e', 'SELECT 1'],
         { allowFailure: true },
       );
       consecutiveReadyChecks = probe.status === 0 ? consecutiveReadyChecks + 1 : 0;
@@ -472,13 +514,48 @@ export async function main() {
     ]).stdout;
     assert.match(dataMount, /^rw,nosuid,nodev\|/m, 'MySQL data directory is not isolated on tmpfs');
     assert.doesNotMatch(dataMount, /\/var\/lib\/mysql volume\b/m, 'MySQL data directory uses a persistent volume');
-    progress('isolated MySQL 8 container is ready');
+    const [[mysqlVersion, logBin, logBinTrustFunctionCreators]] = parseRows(mysql(null, `
+      SELECT VERSION(), @@GLOBAL.log_bin, @@GLOBAL.log_bin_trust_function_creators;
+    `).stdout);
+    assert.match(mysqlVersion, /^8\.0\./, 'Controlled image did not start MySQL 8.0');
+    assert.equal(logBin, '1', 'Rehearsal must exercise trigger creation with binary logging enabled');
+    assert.equal(
+      logBinTrustFunctionCreators,
+      '1',
+      'Ordinary migration account requires the approved trigger-creator policy when binary logging is enabled',
+    );
+    report.mysqlRuntime = {
+      version: mysqlVersion,
+      logBin: 'ON',
+      logBinTrustFunctionCreators: 'ON',
+    };
+    mysql(null, `CREATE USER \`${migrationUser}\`@'%' IDENTIFIED BY '${migrationPassword}';`);
+    progress('isolated MySQL 8 container and ordinary migration account are ready');
 
-    const stage51 = prepareMigrationStage(tempDirectory, migrationNames, 51);
+    const stage51 = prepareMigrationStage(tempDirectory, migrationNames, CHECKPOINT_MIGRATION_COUNT);
     const stage52 = prepareMigrationStage(tempDirectory, migrationNames, 52);
     const stage53 = prepareMigrationStage(tempDirectory, migrationNames, 53);
+    const stage56 = prepareMigrationStage(tempDirectory, migrationNames, EXPECTED_MIGRATION_COUNT);
     const base51 = `${resourcePrefix}_base51`;
     createDatabase(base51);
+    const connectedIdentity = migrationMysql(base51, 'SELECT CURRENT_USER();').stdout.trim();
+    assert.equal(connectedIdentity, `${migrationUser}@%`, 'Prisma migration identity is not the ordinary migration account');
+    const grantee = `'${migrationUser}'@'%'`;
+    const escapedGrantee = grantee.replaceAll("'", "''");
+    const grantedPrivileges = parseRows(mysql(null, `
+      SELECT privilege_type
+      FROM information_schema.schema_privileges
+      WHERE grantee = '${escapedGrantee}'
+        AND table_schema = '${base51}'
+      ORDER BY privilege_type;
+    `).stdout).map(([privilege]) => privilege);
+    assert.deepEqual(grantedPrivileges, [...MIGRATION_PRIVILEGES].sort());
+    const [[globalSuperCount]] = parseRows(mysql(null, `
+      SELECT COUNT(*)
+      FROM information_schema.user_privileges
+      WHERE grantee = '${escapedGrantee}' AND privilege_type = 'SUPER';
+    `).stdout);
+    assert.equal(globalSuperCount, '0', 'Ordinary migration account must not receive SUPER');
     progress('building 51-migration existing-database checkpoint');
     deploy(base51, stage51);
     validateLedger(base51, 51);
@@ -579,21 +656,42 @@ export async function main() {
     const base51Dump = dumpDatabase(base51);
 
     const healthy = `${resourcePrefix}_healthy`;
-    progress('running healthy 51-to-53 upgrade and restore');
+    progress(`running healthy ${CHECKPOINT_MIGRATION_COUNT}-to-${EXPECTED_MIGRATION_COUNT} upgrade and restore`);
     cloneDatabase(healthy, base51Dump);
     const healthyBackup = dumpDatabase(healthy);
     preflight(healthy, 51);
-    deploy(healthy, stage53);
-    validateLedger(healthy, 53);
-    const status = runPrisma(healthy, stage53, ['migrate', 'status']);
+    deploy(healthy, stage56);
+    validateLedger(healthy, EXPECTED_MIGRATION_COUNT);
+    const triggerDefiners = parseRows(mysql(healthy, `
+      SELECT trigger_name, definer
+      FROM information_schema.triggers
+      WHERE trigger_schema = DATABASE()
+      ORDER BY trigger_name;
+    `).stdout);
+    assert.equal(triggerDefiners.length, EXPECTED_TRIGGER_COUNT, 'Current migration bundle trigger count changed');
+    assert.ok(
+      triggerDefiners.every(([, definer]) => definer === `${migrationUser}@%`),
+      'Every current trigger must retain the ordinary migration account as definer',
+    );
+    report.migrationAccount.createdTriggerCount = triggerDefiners.length;
+    report.migrationAccount.triggerDefinerIdentity = `${migrationUser}@%`;
+    const status = runPrisma(healthy, stage56, ['migrate', 'status']);
     assert.match(status.stdout, /Database schema is up to date!/);
     const diff = runPrisma(
       healthy,
-      stage53,
-      ['migrate', 'diff', '--from-url', buildDatabaseUrl(password, port, healthy), '--to-schema-datamodel', stage53, '--exit-code'],
+      stage56,
+      ['migrate', 'diff', '--from-url', buildDatabaseUrl(migrationUser, migrationPassword, port, healthy), '--to-schema-datamodel', stage56, '--exit-code'],
       { allowFailure: true, appendSchema: false },
     );
-    assert.equal(diff.status, 0, `Prisma schema drift after upgrade: ${sanitize(diff.stdout + diff.stderr, [password])}`);
+    if (diff.status !== 0) {
+      throw new RehearsalError('Prisma schema drift after the current migration bundle', {
+        migrationCount: report.migrationCount,
+        mysqlImage: report.mysqlImage,
+        mysqlRuntime: report.mysqlRuntime,
+        migrationAccount: report.migrationAccount,
+        drift: sanitize(diff.stdout + diff.stderr, secrets).trim(),
+      });
+    }
 
     const uniqueIndexes = new Map(parseRows(mysql(healthy, `
       SELECT table_name, index_name, CAST(non_unique AS CHAR),
@@ -695,7 +793,7 @@ export async function main() {
     `).stdout).map(([name, clause]) => [name, normalizeCheck(clause)]));
     const expectedCheckFragments = new Map([
       ['warehouses_default_key_check', "is_default = true and default_key = 'primary' or is_default = false and default_key is null"],
-      ['orders_amount_formula_check', 'final_amount = total_amount - discount_amount + adjustment_amount + shipping_amount + insurance_amount + tax_amount'],
+      ['orders_amount_formula_check', 'fee_amount >= 0 and final_amount = total_amount - discount_amount + adjustment_amount + shipping_amount + insurance_amount + tax_amount + fee_amount'],
       ['fulfillment_items_quantity_check', 'quantity > 0'],
       ['payment_plans_source_check', 'quotation_version_id is not null or order_id is not null'],
       ['payment_plans_total_amount_check', 'total_amount > 0'],
@@ -787,7 +885,14 @@ export async function main() {
     report.scenarios.push({
       name: 'healthy-existing-database-upgrade',
       result: 'passed',
-      evidence: ['51-to-53', '53-ledger-checksums', 'prisma-no-drift', 'data-preserved', 'backup-restored'],
+      evidence: [
+        `${CHECKPOINT_MIGRATION_COUNT}-to-${EXPECTED_MIGRATION_COUNT}`,
+        `${EXPECTED_MIGRATION_COUNT}-ledger-checksums`,
+        'ordinary-migration-account',
+        'prisma-no-drift',
+        'data-preserved',
+        'backup-restored',
+      ],
     });
 
     const invalidPlan = `${resourcePrefix}_invalid_plan`;
@@ -919,6 +1024,42 @@ export async function main() {
     report.scenarios.push({
       name: 'migration-ledger-checksum-tamper', result: 'passed',
       evidence: ['checksum-rejected', 'deploy-not-invoked', 'schema-and-data-unchanged'],
+    });
+
+    mysql(null, `
+      REVOKE INSERT, UPDATE, CREATE, ALTER, DROP, INDEX, REFERENCES, CREATE TEMPORARY TABLES
+        ON \`${healthy}\`.* FROM \`${migrationUser}\`@'%';
+      ALTER USER \`${migrationUser}\`@'%' ACCOUNT LOCK;
+    `);
+    const lockedLogin = migrationMysql(healthy, 'SELECT 1;', { allowFailure: true });
+    assert.notEqual(lockedLogin.status, 0, 'Locked migration account unexpectedly accepted a new connection');
+    const triggerAfterLock = mysql(healthy, `
+      UPDATE orders
+      SET confirmed_at = CURRENT_TIMESTAMP(3)
+      WHERE order_no = 'REHEARSAL-ORDER-001';
+    `, { allowFailure: true });
+    assert.notEqual(triggerAfterLock.status, 0, 'Trigger enforcement failed after locking the definer account');
+    assert.match(triggerAfterLock.stderr, /order customer confirmation facts must be paired/);
+    const retainedPrivileges = parseRows(mysql(null, `
+      SELECT privilege_type
+      FROM information_schema.schema_privileges
+      WHERE grantee = '${escapedGrantee}'
+        AND table_schema = '${healthy}'
+      ORDER BY privilege_type;
+    `).stdout).map(([privilege]) => privilege);
+    assert.deepEqual(retainedPrivileges, ['SELECT', 'TRIGGER']);
+    report.scenarios.push({
+      name: 'ordinary-migration-account-and-trigger-definer-lifecycle',
+      result: 'passed',
+      triggerCount: triggerDefiners.length,
+      evidence: [
+        'non-root-migrate-deploy',
+        'schema-scoped-minimum-grants',
+        'no-super',
+        'binary-log-trigger-policy',
+        'locked-definer-retained',
+        'trigger-enforced-after-account-lock',
+      ],
     });
 
     report.result = 'passed';

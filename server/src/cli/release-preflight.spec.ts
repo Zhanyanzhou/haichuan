@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Prisma } from "@prisma/client";
+import { RELEASE_RUNTIME_GATE_KEYS } from "../common/release/release-profile";
 import {
   createContentTemplatePublicationAttestation,
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
@@ -247,6 +248,7 @@ test("交易型发布档位要求运行门禁和已知代码闭环，不能只�
       configuredClientPublicSiteOrigin: "https://example.invalid",
       releaseRuntimeEnvironment: {
         CUSTOMER_COMMERCE_ENABLED: "true",
+        CUSTOMER_QUOTATION_ORDERING_ENABLED: "true",
         PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "true",
         PAYMENT_GATEWAY_REFUNDS_ENABLED: "true",
       },
@@ -283,6 +285,12 @@ test("交易型发布档位要求运行门禁和已知代码闭环，不能只�
   assert.ok(ready.checks.some(
     (check) => check.code === "commerce-customer-self-confirmation-entry" && !check.ok,
   ));
+  assert.ok(ready.checks.some(
+    (check) => check.code === "commerce-transactional-quotation-conversion-entry" && !check.ok,
+  ));
+  assert.ok(ready.checks.some(
+    (check) => check.code === "commerce-inventory-and-price-snapshots" && !check.ok,
+  ));
 });
 
 test("runtime 默认安全选择线索型，但发布候选要求显式且受支持的档位", () => {
@@ -310,6 +318,7 @@ test("lead-generation 携带任一交易危险开关时阻断，且运行态仍�
       configuredClientPublicSiteOrigin: "https://example.invalid",
       releaseRuntimeEnvironment: {
         CUSTOMER_COMMERCE_ENABLED: "true",
+        CUSTOMER_QUOTATION_ORDERING_ENABLED: "true",
         PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "TRUE",
         PAYMENT_GATEWAY_REFUNDS_ENABLED: " true ",
       },
@@ -320,7 +329,11 @@ test("lead-generation 携带任一交易危险开关时阻断，且运行态仍�
   const runtimeChecks = result.checks.filter((check) =>
     check.code.startsWith("release-profile-") && check.code.endsWith("-gate")
   );
-  assert.equal(runtimeChecks.length, 3);
+  assert.equal(runtimeChecks.length, RELEASE_RUNTIME_GATE_KEYS.length);
+  assert.deepEqual(
+    runtimeChecks.map((check) => check.code).sort(),
+    RELEASE_RUNTIME_GATE_KEYS.map((capability) => `release-profile-${capability}-gate`).sort(),
+  );
   assert.ok(runtimeChecks.every((check) => !check.ok));
   assert.ok(runtimeChecks.every((check) => check.facts?.configuredEnabled === true));
   assert.ok(runtimeChecks.every((check) => check.facts?.effectiveEnabled === false));

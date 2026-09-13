@@ -24,6 +24,7 @@ import {
 } from "@ant-design/icons";
 import { Puck, useGetPuck, type Data, type PuckAction, type UiState } from "@puckeditor/core";
 import { useAuthStore } from "@/store/authStore";
+import type { PublicContentLocale } from "@/i18n/publicLocale";
 import "@puckeditor/core/no-external.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
 import { BusinessRegionCanvasProvider } from "@/page-builder/adapters/businessRegion.puck";
@@ -2244,10 +2245,12 @@ export default function StoreDecorationWorkbench({
   // 页面装修可由编辑与管理员完成；母模板设计是全站级结构权限，
   // 前后端统一只向 SUPER_ADMIN 开放。
   const canManageTemplates = adminRole === "SUPER_ADMIN";
+  const [contentLocale, setContentLocale] = useState<PublicContentLocale>("zh-CN");
   const [workspaceMode, setWorkspaceMode] = useState<EditorWorkspaceMode>("page");
   const pageViewportBeforeTemplateRef = useRef<{ width: number; height: number } | null>(null);
   const pageWorkspaceController = usePageWorkspaceController({
     pageKey,
+    locale: contentLocale,
     canPublish,
   });
   const {
@@ -2293,6 +2296,7 @@ export default function StoreDecorationWorkbench({
     pageSettingsData,
     pageSettingsFocusField,
     hasPendingDraft,
+    reviewStatus,
     canDiscardDraft,
     publishedNeedsRevalidation,
     viewingPublished,
@@ -2323,6 +2327,8 @@ export default function StoreDecorationWorkbench({
     commitPageHistoryCommand,
     navigatePageHistoryCommand,
     rollbackPublication,
+    submitForReview,
+    reviewDraft,
     publishHome,
     trackEditorData,
     syncCanvasDataWithoutAdvancingSavedBaseline,
@@ -2580,6 +2586,8 @@ export default function StoreDecorationWorkbench({
           {workspaceMode === "page" ? (
             <EditorToolbar
             pageKey={pageKey}
+            locale={contentLocale}
+            reviewStatus={reviewStatus ?? "DRAFT"}
             publishing={publishing}
             saving={saving}
             draftSaveFailed={draftSaveFailed}
@@ -2597,6 +2605,11 @@ export default function StoreDecorationWorkbench({
             publishReviewActive={publishReviewActive}
             publishReviewErrorCount={publishReviewIssues.filter((issue) => issue.severity === "error").length}
             onOpenPublishReview={openPublishReview}
+            onLocaleChange={setContentLocale}
+            localeSwitchDisabled={hasProtectedUnsavedChanges || saving || publishing}
+            onSubmitReview={() => { void submitForReview(); }}
+            onApproveReview={() => { void reviewDraft("APPROVE"); }}
+            onRequestChanges={(note) => { void reviewDraft("REQUEST_CHANGES", note); }}
             onPublish={publishHome}
             onSaveDraft={(nextData) => {
               void saveDraft(nextData);

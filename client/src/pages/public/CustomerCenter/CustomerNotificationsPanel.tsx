@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { CustomerNotificationPage } from "./types";
+import CustomerNotificationPreferences from "./CustomerNotificationPreferences";
 
 type Props = {
   resource: CustomerNotificationPage;
@@ -107,6 +108,7 @@ export default function CustomerNotificationsPanel({
       ) : (
         <p className="my-account-empty">暂时没有新的服务通知。</p>
       )}
+      <CustomerNotificationPreferences />
     </section>
   );
 }

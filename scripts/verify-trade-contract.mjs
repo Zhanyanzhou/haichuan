@@ -489,6 +489,12 @@ const uploadController = await readSrc(
 const uploadService = await readSrc(
   "server/src/modules/upload/upload.service.ts",
 );
+const mediaStoragePaths = await readSrc(
+  "server/src/modules/upload/media-storage-paths.ts",
+);
+const publicUploadsGateway = await readSrc(
+  "server/src/modules/upload/public-uploads.gateway.ts",
+);
 const uploadModule = await readSrc(
   "server/src/modules/upload/upload.module.ts",
 );
@@ -602,7 +608,9 @@ check("付款凭证：新上传文件使用私有存储且读取需要鉴权", (
     "客户读取付款凭证必须经过受保护接口",
   );
   assert.ok(
-    uploadService.includes("private-media', 'payment-proofs"),
+    mediaStoragePaths.includes(
+      "paymentProofRoot: resolve(process.env.PAYMENT_PROOF_MEDIA_ROOT || resolve(cwd, 'private-media', 'payment-proofs'))",
+    ) && uploadService.includes("this.paymentProofRoot"),
     "付款凭证不可保存到公开 uploads 目录",
   );
   assert.ok(
@@ -613,10 +621,11 @@ check("付款凭证：新上传文件使用私有存储且读取需要鉴权", (
 
 check("静态上传文件：缺失资源不触发 SPA 回退", () => {
   assert.ok(
-    uploadModule.includes(
-      "renderPath: '/__uploads_static_fallback_disabled__'",
-    ),
-    "uploads 静态映射必须禁用默认 index.html 回退",
+    uploadModule.includes("PublicUploadsGateway")
+      && publicUploadsGateway.includes("app.use('/uploads'")
+      && publicUploadsGateway.includes("index: false")
+      && !uploadModule.includes("ServeStaticModule"),
+    "uploads 必须由禁用目录 index 的专用网关处理，不能挂入 SPA ServeStaticModule",
   );
 });
 

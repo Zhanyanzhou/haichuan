@@ -9,9 +9,11 @@
 export default function StaleDocumentNotice({
   visible,
   onRefresh,
+  locale = "zh-CN",
 }: {
   visible: boolean;
   onRefresh: () => void;
+  locale?: "zh-CN" | "en";
 }) {
   if (!visible) return null;
   return (
@@ -35,7 +37,7 @@ export default function StaleDocumentNotice({
         cursor: "pointer",
       }}
     >
-      内容可能不是最新，点击刷新
+      {locale === "en" ? "Content may be outdated. Refresh" : "内容可能不是最新，点击刷新"}
     </button>
   );
 }

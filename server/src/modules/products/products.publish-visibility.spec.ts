@@ -22,6 +22,45 @@ interface ImageRecord {
   storageKey?: string | null;
   isVideo?: boolean;
   mimeType?: string | null;
+  mediaAssetId?: number | null;
+  mediaAsset?: {
+    id: number;
+    status: "READY" | "ARCHIVED";
+    accessLevel: "PUBLIC" | "PRIVATE";
+    lifecycleRevision: number;
+    authorization: {
+      revision: number;
+      publicUseEpoch: number;
+      reviewStatus: "APPROVED" | "DRAFT";
+      revocationStatus: "ACTIVE" | "REVOKED";
+      publicWebUseAllowed: boolean;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    } | null;
+  } | null;
+}
+
+function authorizedImage(image: ImageRecord): ImageRecord {
+  const mediaAssetId = image.mediaAssetId ?? image.id;
+  return {
+    ...image,
+    mediaAssetId,
+    mediaAsset: image.mediaAsset === undefined ? {
+      id: mediaAssetId,
+      status: "READY",
+      accessLevel: "PUBLIC",
+      lifecycleRevision: 1,
+      authorization: {
+        revision: 1,
+        publicUseEpoch: 1,
+        reviewStatus: "APPROVED",
+        revocationStatus: "ACTIVE",
+        publicWebUseAllowed: true,
+        validFrom: null,
+        validUntil: null,
+      },
+    } : image.mediaAsset,
+  };
 }
 
 interface ProductRecord {
@@ -135,18 +174,19 @@ function product(
     ...partial,
   };
   if (record.primaryImageId && record.images.length === 0) {
-    record.images = [{ id: record.primaryImageId, url: "https://example.test/product.jpg", isVideo: false }];
+    record.images = [authorizedImage({ id: record.primaryImageId, url: "https://example.test/product.jpg", isVideo: false })];
   }
   if (
     record.listingImageId &&
     !record.images.some((image) => image.id === record.listingImageId)
   ) {
-    record.images.push({
+    record.images.push(authorizedImage({
       id: record.listingImageId,
       url: "https://example.test/product-listing.jpg",
       isVideo: false,
-    });
+    }));
   }
+  record.images = record.images.map(authorizedImage);
   record.primaryImage =
     record.images.find((image) => image.id === record.primaryImageId) || null;
   record.listingImage =
@@ -416,6 +456,52 @@ test("canPublish：价格、图片、有价启用 SKU 齐备时允许发布", as
   await assert.doesNotReject(() => service.canPublish(1));
   assert.equal(records[0].publicationQualityStatus, "READY");
   assert.match(records[0].publicationQualityHash || "", /^[a-f0-9]{64}$/);
+});
+
+test("canPublish：媒体缺少授权、撤权、未生效、过期或普通附图失效时一律拒绝发布", async () => {
+  const scenarios: Array<[string, (record: ProductRecord) => void]> = [
+    ["缺少授权", (record) => {
+      record.images[0].mediaAsset = null;
+      record.primaryImage = record.images[0];
+      record.listingImage = record.images[0];
+    }],
+    ["已撤权", (record) => {
+      record.images[0].mediaAsset!.authorization!.revocationStatus = "REVOKED";
+    }],
+    ["尚未生效", (record) => {
+      record.images[0].mediaAsset!.authorization!.validFrom = new Date("2999-01-01T00:00:00.000Z");
+    }],
+    ["已经过期", (record) => {
+      record.images[0].mediaAsset!.authorization!.validUntil = new Date("2000-01-01T00:00:00.000Z");
+    }],
+    ["普通附图失效", (record) => {
+      record.images.push(authorizedImage({
+        id: 99,
+        storageKey: "readable-extra.jpg",
+        isVideo: false,
+        mediaAsset: null,
+      }));
+    }],
+  ];
+
+  for (const [name, mutate] of scenarios) {
+    const record = product({
+      id: 1,
+      status: "DRAFT",
+      price: 100,
+      primaryImageId: 1,
+      listingImageId: 1,
+      skus: [{ id: 1, isActive: true, price: 100 }],
+    });
+    mutate(record);
+    const { service } = createService([record]);
+    await assert.rejects(
+      () => service.canPublish(1),
+      (error: unknown) =>
+        error instanceof BadRequestException && /授权有效|全部商品附图/.test(error.message),
+      name,
+    );
+  }
 });
 
 test("存量质量报告复用发布门禁并保持严格只读", async () => {

@@ -24,6 +24,7 @@ import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecorati
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
+import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 
 // 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
 const PuckDocumentRenderer = lazy(
@@ -32,28 +33,35 @@ const PuckDocumentRenderer = lazy(
 
 const LG = "#F4F5F5";
 
-function HomeDocumentLoading() {
+function HomeDocumentLoading({ english = false }: { english?: boolean }) {
   return (
     <div aria-busy="true" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center" }}>
-      <h1 className="sr-only">海川珠宝</h1>
-      <span style={{ color: "#5F6568", fontSize: 12, letterSpacing: ".16em" }}>正在载入首页</span>
+      <h1 className="sr-only">{english ? "Haichuan Jewelry" : "海川珠宝"}</h1>
+      <span style={{ color: "#5F6568", fontSize: 12, letterSpacing: ".16em" }}>{english ? "Loading home" : "正在载入首页"}</span>
     </div>
   );
 }
 
-function PuckDocumentLoading() {
+function PuckDocumentLoading({ english = false }: { english?: boolean }) {
   return (
     <div
       role="status"
       aria-live="polite"
       style={{ minHeight: 180, display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12, letterSpacing: ".12em" }}
     >
-      正在渲染首页内容
+      {english ? "Rendering home content" : "正在渲染首页内容"}
     </div>
   );
 }
 
 export default function Home() {
+  const english = getBrowserPublicContentLocale() === "en";
+  const homeFallback = english ? {
+    eyebrow: "HAICHUAN JEWELRY",
+    title: "English home is not published",
+    description: "This language version is unavailable until an approved English page is published.",
+    primaryAction: { label: "Try again later", href: "/en" },
+  } : getEditorPage("home").publicFallback;
   const layoutDocumentResource = useOutletContext<PublishedPageDocumentResource | null>();
   // 正常公开路由消费 PublicLayout 的单一资源；独立挂载 Home 时保留安全读取能力。
   const standaloneDocumentResource = usePublishedPageDocument(
@@ -71,25 +79,26 @@ export default function Home() {
   }, []);
 
   if (documentStatus === "idle" || documentStatus === "loading") {
-    return <HomeDocumentLoading />;
+    return <HomeDocumentLoading english={english} />;
   }
 
   if (documentStatus === "error" || documentStatus === "invalid") {
-    const fallback = getEditorPage("home").publicFallback;
+    const fallback = homeFallback;
     const isReadFailure = documentStatus === "error";
     return (
       <PublicPageFallback
         pageKey="home"
-        pageLabel="店铺首页"
+        pageLabel={english ? "Home" : "店铺首页"}
         status={documentStatus}
         content={fallback ? {
           ...fallback,
-          title: isReadFailure ? "首页暂不可用" : "首页正在完善",
+          title: english ? (isReadFailure ? "English home is temporarily unavailable" : "English home is being prepared") : (isReadFailure ? "首页暂不可用" : "首页正在完善"),
           description: isReadFailure
-            ? "首页内容暂时无法载入。您可以重新载入，或先进入选款中心浏览当前公开款式。"
-            : "首页现有内容需要重新审核后才能公开。您可以先进入选款中心，或了解珠宝定制服务。",
+            ? (english ? "The English page could not be loaded. Please try again." : "首页内容暂时无法载入。您可以重新载入，或先进入选款中心浏览当前公开款式。")
+            : (english ? "This English page must pass review before it can be shown." : "首页现有内容需要重新审核后才能公开。您可以先进入选款中心，或了解珠宝定制服务。"),
         } : undefined}
         onRetry={isReadFailure ? () => void refreshDocument(true) : undefined}
+        locale={english ? "en" : "zh-CN"}
       />
     );
   }
@@ -98,9 +107,10 @@ export default function Home() {
     return (
       <PublicPageFallback
         pageKey="home"
-        pageLabel="店铺首页"
+        pageLabel={english ? "Home" : "店铺首页"}
         status="unpublished"
-        content={getEditorPage("home").publicFallback}
+        content={homeFallback}
+        locale={english ? "en" : "zh-CN"}
       />
     );
   }
@@ -109,26 +119,28 @@ export default function Home() {
     return (
       <PublicPageFallback
         pageKey="home"
-        pageLabel="店铺首页"
+        pageLabel={english ? "Home" : "店铺首页"}
         status="invalid"
-        content={getEditorPage("home").publicFallback}
+        content={homeFallback}
+        locale={english ? "en" : "zh-CN"}
       />
     );
   }
 
   const readiness = getPublishedPageReadiness("home", pageDocument.puckData);
   if (!readiness?.ready) {
-    const fallback = getEditorPage("home").publicFallback;
+    const fallback = homeFallback;
     return (
       <PublicPageFallback
         pageKey="home"
-        pageLabel="店铺首页"
+        pageLabel={english ? "Home" : "店铺首页"}
         status="invalid"
         content={fallback ? {
           ...fallback,
-          title: "首页正在完善",
-          description: "首页内容尚未满足公开展示要求。您可以先进入选款中心，或了解珠宝定制服务。",
+          title: english ? "English home is being prepared" : "首页正在完善",
+          description: english ? "This English page has not passed the publication checks." : "首页内容尚未满足公开展示要求。您可以先进入选款中心，或了解珠宝定制服务。",
         } : undefined}
+        locale={english ? "en" : "zh-CN"}
       />
     );
   }
@@ -155,8 +167,8 @@ export default function Home() {
 
   return (
     <div data-page-document-state="published" style={{ background: LG }}>
-      {!hasVisibleHeroTitle ? <h1 className="sr-only">海川珠宝</h1> : null}
-      <Suspense fallback={<PuckDocumentLoading />}>
+      {!hasVisibleHeroTitle ? <h1 className="sr-only">{english ? "Haichuan Jewelry" : "海川珠宝"}</h1> : null}
+      <Suspense fallback={<PuckDocumentLoading english={english} />}>
         <PuckDocumentRenderer
           data={readiness.data as PuckDocument}
           surface="home"
@@ -166,6 +178,7 @@ export default function Home() {
       <StaleDocumentNotice
         visible={documentStale}
         onRefresh={() => void refreshDocument(false)}
+        locale={english ? "en" : "zh-CN"}
       />
     </div>
   );

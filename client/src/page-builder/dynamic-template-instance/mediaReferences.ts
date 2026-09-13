@@ -120,6 +120,7 @@ export function hasExplicitDynamicTemplateInstanceImage(
 export function getDynamicTemplateDocumentMediaReferences(
   puckData: unknown,
   pageKey?: string,
+  options: { preserveReferencePaths?: boolean } = {},
 ): ContentTemplateMediaReference[] {
   if (!isRecord(puckData)) return [];
   const definitions = readResolvedDynamicTemplateDefinitions(
@@ -147,24 +148,29 @@ export function getDynamicTemplateDocumentMediaReferences(
         : [];
       const breakpoints: TemplateBreakpoint[] = resolved.definition.schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"];
       const plans = breakpoints
-        .map((breakpoint) => compileDynamicTemplateRenderPlan(resolved.definition, {
-          device: breakpoint === "mobile" ? "mobile" : "desktop",
+        .map((breakpoint) => ({
           breakpoint,
-          contentBySlotId,
-          hiddenSlotIds,
-          showEmptySlots: false,
+          result: compileDynamicTemplateRenderPlan(resolved.definition, {
+            device: breakpoint === "mobile" ? "mobile" : "desktop",
+            breakpoint,
+            contentBySlotId,
+            hiddenSlotIds,
+            showEmptySlots: false,
+          }),
         }))
-        .filter((result) => result.ok);
+        .filter((entry) => entry.result.ok);
       if (plans.length === 0) return;
       const blockPath = `${basePath}[${blockIndex}].props`;
       const blockId = nonEmptyText(props.id) ? props.id.trim() : undefined;
 
-      const visit = (node: DynamicTemplateRenderPlanNode) => {
+      const visit = (node: DynamicTemplateRenderPlanNode, breakpoint: TemplateBreakpoint) => {
         if (node.hidden) return;
         if (nonEmptyText(node.rules.backgroundImage)) {
           references.push({
             url: node.rules.backgroundImage,
-            path: `${blockPath}.templateDefinition.nodes.${node.nodeId}.backgroundImage`,
+            path: options.preserveReferencePaths
+              ? `${blockPath}.templateDefinition.nodes.${node.nodeId}.responsive.${breakpoint}.backgroundImage`
+              : `${blockPath}.templateDefinition.nodes.${node.nodeId}.backgroundImage`,
             field: `${node.nodeId}.backgroundImage`,
             ...(blockId ? { blockId } : {}),
             moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
@@ -192,9 +198,11 @@ export function getDynamicTemplateDocumentMediaReferences(
             ));
           }
         }
-        node.children.forEach(visit);
+        node.children.forEach((child) => visit(child, breakpoint));
       };
-      plans.forEach((plan) => visit(plan.plan.root));
+      plans.forEach(({ breakpoint, result }) => {
+        if (result.ok) visit(result.plan.root, breakpoint);
+      });
     });
   };
 
@@ -206,10 +214,13 @@ export function getDynamicTemplateDocumentMediaReferences(
     });
   }
 
-  const seenUrls = new Set<string>();
+  const seen = new Set<string>();
   return references.filter((reference) => {
-    if (seenUrls.has(reference.url)) return false;
-    seenUrls.add(reference.url);
+    const key = options.preserveReferencePaths
+      ? `${reference.path}\u0000${reference.url}`
+      : reference.url;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }

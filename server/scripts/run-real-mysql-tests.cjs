@@ -8,6 +8,7 @@ const testFiles = [
   "src/modules/page-modules/dynamic-template-page-instance.real.spec.ts",
   "src/modules/orders/trade.real-db-concurrency.spec.ts",
   "src/modules/leads/leads.privacy-disposition.mysql.spec.ts",
+  "src/modules/upload/media-immutability.mysql.spec.ts",
 ];
 
 function validateTarget(env) {
@@ -112,7 +113,7 @@ async function main() {
     "--test", "--test-concurrency=1", "--test-reporter=tap", "-r", "ts-node/register", ...testFiles,
   ]);
   assertCompleteTap(output);
-  console.log("REAL_MYSQL_GATE_PASS: 3 real tests, 0 skipped; migrated disposable database");
+  console.log(`REAL_MYSQL_GATE_PASS: ${testFiles.length} real tests, 0 skipped; migrated disposable database`);
 }
 
 module.exports = { validateTarget, assertCompleteTap, assertLocalDependencies, buildTestEnvironment, redactMysqlUrls };

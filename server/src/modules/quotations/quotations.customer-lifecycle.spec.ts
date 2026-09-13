@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import { ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import { OrdersService } from "../orders/orders.service";
 import { QuotationsService } from "./quotations.service";
 
 function acceptancePlan(status = "DRAFT", id = 60) {
@@ -335,267 +334,142 @@ test("取消计划中途状态竞争时事务回滚全部取消写入", async ()
   assert.deepEqual(harness.state.installmentStatuses, ["PENDING", "DUE"]);
 });
 
-test("客户只能接受属于自己的当前报价版本并激活付款计划", async () => {
-  const harness = acceptanceHarness();
-  const result = await harness.service.acceptCurrentVersion(7, 8);
-
-  assert.equal(result?.status, "ACCEPTED");
-  assert.deepEqual(harness.state(), {
-    acceptedWrites: 1,
-    planActivations: 1,
-    quotationAdvances: 1,
-  });
-});
-
-test("其他客户不能探测或接受报价", async () => {
-  const harness = acceptanceHarness({ ownerId: 7 });
-  await assert.rejects(
-    () => harness.service.acceptCurrentVersion(9, 8),
-    NotFoundException,
-  );
-  assert.equal(harness.state().acceptedWrites, 0);
-});
-
-test("同一客户重复接受已接受版本是幂等读取", async () => {
-  const version = acceptedVersion({
-    status: "ACCEPTED",
-    acceptedByCustomerId: 7,
-    paymentPlans: [acceptancePlan("ACTIVE")],
-  });
-  const harness = acceptanceHarness({ version });
-  const result = await harness.service.acceptCurrentVersion(7, 8);
-
-  assert.ok(result);
-  assert.equal(result.status, "ACCEPTED");
-  assert.deepEqual(harness.state(), {
-    acceptedWrites: 0,
-    planActivations: 0,
-    quotationAdvances: 0,
-  });
-});
-
-test("过期报价拒绝接受且事务内不写入伪失效事实", async () => {
-  const harness = acceptanceHarness({
-    version: acceptedVersion({ validUntil: new Date("2020-01-01T00:00:00.000Z") }),
-  });
-  await assert.rejects(
-    () => harness.service.acceptCurrentVersion(7, 8),
-    ConflictException,
-  );
-  assert.equal(harness.state().acceptedWrites, 0);
-});
-
-test("缺少可信快照或唯一 DRAFT 计划的报价版本不能被客户接受", async () => {
-  for (const version of [
-    acceptedVersion({ customerSnapshot: null }),
-    acceptedVersion({ paymentPlans: [] }),
-    acceptedVersion({
-      paymentPlans: [
-        acceptancePlan("DRAFT", 60),
-        acceptancePlan("DRAFT", 70),
-      ],
-    }),
-  ]) {
-    const harness = acceptanceHarness({ version });
-    await assert.rejects(
-      () => harness.service.acceptCurrentVersion(7, 8),
-      ConflictException,
-    );
-    assert.deepEqual(harness.state(), {
-      acceptedWrites: 0,
-      planActivations: 0,
-      quotationAdvances: 0,
-    });
-  }
-});
-
-test("报价版本内容或哈希被改写后不能接受", async () => {
-  const harness = acceptanceHarness({
-    version: acceptedVersion({ contentHash: "0".repeat(64) }),
-  });
-  await assert.rejects(
-    () => harness.service.acceptCurrentVersion(7, 8),
-    /内容校验失败/,
-  );
-  assert.equal(harness.state().acceptedWrites, 0);
-});
-
-function conversionVersion(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 30,
-    quotationId: 8,
-    version: 2,
-    channel: "RETAIL",
-    status: "ACCEPTED",
-    acceptedByCustomerId: 7,
-    acceptedAt: new Date("2026-09-01T00:00:00.000Z"),
-    currency: "CNY",
-    subtotalAmount: new Prisma.Decimal(100),
-    discountAmount: new Prisma.Decimal(0),
-    feeAmount: new Prisma.Decimal(0),
-    totalAmount: new Prisma.Decimal(100),
-    customerSnapshot: {
-      version: 1,
-      legacy: false,
-      customerId: 7,
-      customerName: "版本客户",
-      customerPhone: "13800000000",
-      customerEmail: "snapshot@example.test",
-      salesConsultantId: 18,
-      depositAmount: "30",
-    },
-    items: [
-      {
-        id: 41,
-        productId: 5,
-        skuId: 11,
-        description: "版本商品",
-        quantity: 1,
-        unitPrice: new Prisma.Decimal(100),
-        subtotal: new Prisma.Decimal(100),
-        pricingSnapshot: {
-          version: 1,
-          originalUnitPrice: "100",
-          quotedUnitPrice: "100",
-          productName: "版本商品",
-          productImage: "snapshot.jpg",
-          spec: "版本规格",
-        },
-      },
-    ],
-    paymentPlans: [
-      {
-        id: 60,
-        status: "ACTIVE",
-        currency: "CNY",
-        totalAmount: new Prisma.Decimal(100),
-        installments: [
-          { id: 61, sequence: 1, amount: new Prisma.Decimal(30), status: "PENDING" },
-          { id: 62, sequence: 2, amount: new Prisma.Decimal(70), status: "PENDING" },
-        ],
-      },
-    ],
-    ...overrides,
-  };
-}
-
-function conversionHarness(version = conversionVersion()) {
-  let captured: Record<string, any> | null = null;
-  let orderCreates = 0;
+test("待客户确认报价取消时同步取消 ISSUED 版本、DRAFT 计划和未付分期", async () => {
+  const writes: string[] = [];
+  let quotationStatus = "PENDING_CONFIRM";
   const tx = {
     $queryRaw: async () => [{ id: 8 }],
     quotation: {
-      findFirst: async () => ({
-        id: 8,
-        customerId: 7,
-        status: "CONFIRMED",
-        convertedOrder: null,
-        // 根记录故意与版本快照相反，证明转单不读取可变根字段。
-        customerName: "已被修改的根客户",
-        customerPhone: "00000000000",
-        customerEmail: "drift@example.test",
-        salesConsultantId: 999,
-        depositAmount: new Prisma.Decimal(99),
-        channel: "PARTNER_WAX",
-      }),
-      updateMany: async () => ({ count: 1 }),
+      findFirst: async () => quotationStatus === "PENDING_CONFIRM"
+        ? {
+            id: 8,
+            status: quotationStatus,
+            currentVersion: 2,
+            convertedOrderId: null,
+            versions: [{
+              id: 30,
+              version: 2,
+              status: "ISSUED",
+              paymentPlans: [{
+                id: 60,
+                status: "DRAFT",
+                orderId: null,
+                installments: [
+                  { id: 61, status: "PENDING", paymentId: null },
+                  { id: 62, status: "DUE", paymentId: null },
+                ],
+              }],
+            }],
+          }
+        : { id: 8, status: quotationStatus },
+      updateMany: async () => {
+        writes.push("quotation:CANCELLED");
+        quotationStatus = "CANCELLED";
+        return { count: 1 };
+      },
     },
     quotationVersion: {
-      findMany: async () => [version],
-    },
-    goldPrice: {
-      findFirst: async () => ({ id: 1, price: new Prisma.Decimal(500) }),
+      updateMany: async () => {
+        writes.push("version:CANCELLED");
+        return { count: 1 };
+      },
     },
     paymentPlan: {
-      update: async () => undefined,
+      updateMany: async () => {
+        writes.push("plan:CANCELLED");
+        return { count: 1 };
+      },
+    },
+    paymentPlanInstallment: {
+      updateMany: async () => {
+        writes.push("installments:CANCELLED");
+        return { count: 2 };
+      },
     },
   };
-  const orders = {
-    createOrderFromQuotationInTx: async (
-      _client: unknown,
-      data: Record<string, any>,
-      context: Record<string, any>,
-    ) => {
-      orderCreates += 1;
-      captured = { data, context };
-      return { id: 91, ...data };
+  const service = new QuotationsService({
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  } as unknown as PrismaService);
+
+  const result = await service.changeStatus(8, "CANCELLED", { id: 1, role: "ADMIN" });
+  assert.equal(result?.status, "CANCELLED");
+  assert.deepEqual(writes, [
+    "installments:CANCELLED",
+    "plan:CANCELLED",
+    "version:CANCELLED",
+    "quotation:CANCELLED",
+  ]);
+});
+
+test("修订待确认报价时先作废版本并取消所有未付分期，再重新开放草稿", async () => {
+  const writes: string[] = [];
+  const tx = {
+    $queryRaw: async () => [{ id: 8 }],
+    quotation: {
+      findFirst: async () => ({ id: 8, status: "PENDING_CONFIRM", currentVersion: 2 }),
+      updateMany: async () => {
+        writes.push("quotation:DRAFT");
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async () => ({ id: 8, status: "DRAFT", items: [] }),
+    },
+    quotationVersion: {
+      findUnique: async () => ({
+        id: 30,
+        status: "ISSUED",
+        conversion: null,
+        paymentPlans: [{
+          id: 60,
+          status: "DRAFT",
+          orderId: null,
+          installments: [
+            { id: 61, status: "PENDING", paymentId: null },
+            { id: 62, status: "DUE", paymentId: null },
+          ],
+        }],
+      }),
+      updateMany: async () => {
+        writes.push("version:SUPERSEDED");
+        return { count: 1 };
+      },
+    },
+    paymentPlanInstallment: {
+      updateMany: async () => {
+        writes.push("installments:CANCELLED");
+        return { count: 2 };
+      },
+    },
+    paymentPlan: {
+      updateMany: async () => {
+        writes.push("plan:CANCELLED");
+        return { count: 1 };
+      },
     },
   };
-  const service = new QuotationsService(
-    {
-      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
-    } as unknown as PrismaService,
-    orders as unknown as OrdersService,
-  );
-  if ((version as any).contentHash === undefined && version.customerSnapshot) {
-    (version as any).contentHash = createHash("sha256")
-      .update(JSON.stringify((service as any).canonicalVersionContent(version)))
-      .digest("hex");
-  }
-  return { service, captured: () => captured, orderCreates: () => orderCreates };
-}
+  const service = new QuotationsService({
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  } as unknown as PrismaService);
 
-test("报价转单只消费客户已接受版本的不可变快照和版本行", async () => {
-  const harness = conversionHarness();
-  await harness.service.convertAcceptedVersion(7, 8, { address: "  上海市合成路 1 号  " });
-
-  const captured = harness.captured();
-  assert.ok(captured);
-  assert.equal(captured.data.customerName, "版本客户");
-  assert.equal(captured.data.customerPhone, "13800000000");
-  assert.equal(captured.data.customerEmail, "snapshot@example.test");
-  assert.equal(captured.data.salesConsultantId, 18);
-  assert.equal(captured.data.depositAmount, "30");
-  assert.equal(captured.data.orderType, "SPOT");
-  assert.equal(captured.data.items[0].productName, "版本商品");
-  assert.equal(captured.data.address, "上海市合成路 1 号");
-  assert.equal(captured.context.customer.customerName, "版本客户");
+  const result = await service.revise(8, { id: 1, role: "ADMIN" });
+  assert.equal(result.status, "DRAFT");
+  assert.deepEqual(writes, [
+    "version:SUPERSEDED",
+    "installments:CANCELLED",
+    "plan:CANCELLED",
+    "quotation:DRAFT",
+  ]);
 });
 
-test("旧版本缺少可信客户快照时转单失败关闭", async () => {
-  const harness = conversionHarness(conversionVersion({ customerSnapshot: null }));
-  await assert.rejects(
-    () => harness.service.convertAcceptedVersion(7, 8, { address: "上海市合成路 1 号" }),
-    /缺少可信客户快照/,
-  );
-  assert.equal(harness.orderCreates(), 0);
-});
 
-test("已接受报价版本哈希不匹配时转单失败关闭", async () => {
-  const harness = conversionHarness(conversionVersion({ contentHash: "f".repeat(64) }));
-  await assert.rejects(
-    () => harness.service.convertAcceptedVersion(7, 8, { address: "上海市合成路 1 号" }),
-    /内容校验失败/,
-  );
-  assert.equal(harness.orderCreates(), 0);
-});
+test("旧分步接受与分步转单入口永久失败关闭", async () => {
+  const service = new QuotationsService({} as PrismaService);
 
-test("报价快照定金与生效付款计划不一致时转单失败关闭", async () => {
-  const harness = conversionHarness(conversionVersion({
-    customerSnapshot: {
-      version: 1,
-      legacy: false,
-      customerId: 7,
-      customerName: "版本客户",
-      customerPhone: "13800000000",
-      depositAmount: "40",
-    },
-  }));
   await assert.rejects(
-    () => harness.service.convertAcceptedVersion(7, 8, { address: "上海市合成路 1 号" }),
-    /定金不一致/,
+    service.acceptCurrentVersion(7, 8),
+    ServiceUnavailableException,
   );
-  assert.equal(harness.orderCreates(), 0);
-});
-
-test("已接受版本包含重复 SKU 时转单失败关闭", async () => {
-  const first = conversionVersion().items[0];
-  const harness = conversionHarness(conversionVersion({
-    items: [first, { ...first, id: 42 }],
-  }));
   await assert.rejects(
-    () => harness.service.convertAcceptedVersion(7, 8, { address: "上海市合成路 1 号" }),
-    /重复商品规格/,
+    service.convertAcceptedVersion(7, 8, { address: "上海市合成路 1 号" }),
+    ServiceUnavailableException,
   );
-  assert.equal(harness.orderCreates(), 0);
 });

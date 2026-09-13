@@ -68,7 +68,7 @@ function getPubliclyReachableDynamicTemplateSlotIds(
   definition: TemplateDefinitionV2,
   hiddenSlotIds: ReadonlySet<string>,
   contentBySlotId: Record<string, unknown>,
-  onBackground?: (nodeId: string, url: string) => void,
+  onBackground?: (nodeId: string, url: string, breakpoint: TemplateBreakpoint) => void,
 ) {
   const visibleSlotIds = new Set<string>();
   const visitedStates = new Set<string>();
@@ -93,7 +93,7 @@ function getPubliclyReachableDynamicTemplateSlotIds(
     const defaultValue = node.slotId ? definition.defaultContent[node.slotId] : undefined;
     const value = hasInstanceValue && !(slot?.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue)) ? instanceValue : defaultValue;
     if ((!slot || hasRenderableSlotContent(slot, value)) && isNonEmptyString(rules.backgroundImage)) {
-      onBackground?.(nodeId, rules.backgroundImage);
+      onBackground?.(nodeId, rules.backgroundImage, breakpoint);
     }
     if (node.slotId && !hiddenSlotIds.has(node.slotId)) {
       visibleSlotIds.add(node.slotId);
@@ -115,7 +115,11 @@ function getPubliclyReachableDynamicTemplateSlotIds(
  */
 export function getDynamicTemplateDocumentMediaReferences(
   puckData: unknown,
-  options: { includeZones?: boolean } = {},
+  options: {
+    includeZones?: boolean;
+    canonicalResponsivePaths?: boolean;
+    preserveReferencePaths?: boolean;
+  } = {},
 ): ContentTemplateMediaReference[] {
   if (!isRecord(puckData)) return [];
   const resolved = isRecord(puckData[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY])
@@ -148,9 +152,11 @@ export function getDynamicTemplateDocumentMediaReferences(
         definitionValidation.definition,
         hiddenSlotIds,
         isRecord(props.contentBySlotId) ? props.contentBySlotId : {},
-        (nodeId, url) => references.push({
+        (nodeId, url, breakpoint) => references.push({
           url,
-          path: `${basePath}[${blockIndex}].props.templateDefinition.nodes.${nodeId}.backgroundImage`,
+          path: options.canonicalResponsivePaths
+            ? `${basePath}[${blockIndex}].props.templateDefinition.nodes.${nodeId}.responsive.${breakpoint}.backgroundImage`
+            : `${basePath}[${blockIndex}].props.templateDefinition.nodes.${nodeId}.backgroundImage`,
           field: `${nodeId}.backgroundImage`,
           ...(isNonEmptyString(props.id) ? { blockId: props.id.trim() } : {}),
           moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
@@ -176,10 +182,63 @@ export function getDynamicTemplateDocumentMediaReferences(
       collectBlocks(blocks, `zones.${zoneKey}`);
     });
   }
-  const seenUrls = new Set<string>();
+  const seen = new Set<string>();
   return references.filter((reference) => {
-    if (seenUrls.has(reference.url)) return false;
-    seenUrls.add(reference.url);
+    const key = options.preserveReferencePaths
+      ? `${reference.path}\u0000${reference.url}`
+      : reference.url;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * 从母模板正式定义中提取发布后真实可达的默认素材。
+ * 复用与页面实例相同的节点/断点可达性与槽位校验，不递归猜测任意字符串字段。
+ */
+export function getDynamicTemplateDefinitionMediaReferences(
+  definitionInput: unknown,
+  options: { preserveReferencePaths?: boolean } = {},
+): ContentTemplateMediaReference[] {
+  const validation = validateDynamicTemplateDefinition(definitionInput);
+  if (!validation.valid || !validation.definition) return [];
+  const definition = validation.definition;
+  const references: ContentTemplateMediaReference[] = [];
+  getPubliclyReachableDynamicTemplateSlotIds(
+    definition,
+    new Set(),
+    {},
+    (nodeId, url, breakpoint) => references.push({
+      url,
+      path: `nodes.${nodeId}.responsive.${breakpoint}.backgroundImage`,
+      field: `${nodeId}.backgroundImage`,
+      moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
+    }),
+  );
+  const instance = validateDynamicTemplateInstance({
+    instanceSchemaVersion: DYNAMIC_TEMPLATE_INSTANCE_SCHEMA_VERSION,
+    instanceId: "publication_manifest",
+    templateId: definition.templateId,
+    templateVersion: 1,
+    contentBySlotId: {},
+    layoutOverridesByNodeId: {},
+    hiddenSlotIds: [],
+    isVisible: true,
+  }, definition);
+  instance.assets.forEach((asset) => references.push({
+    url: asset.url,
+    path: `defaultContent.${asset.slotId}`,
+    field: asset.slotId,
+    moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
+  }));
+  const seen = new Set<string>();
+  return references.filter((reference) => {
+    const key = options.preserveReferencePaths
+      ? `${reference.path}\u0000${reference.url}`
+      : reference.url;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }

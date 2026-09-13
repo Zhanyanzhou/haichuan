@@ -25,6 +25,7 @@ export type CustomerOrder = {
   status: string;
   orderType?: string;
   paymentMethod?: string | null;
+  quoteChannel?: "RETAIL" | "CUSTOM" | "PARTNER_WAX" | null;
   createdAt: string;
   paymentConfirmedAt?: string | null;
   shippedAt?: string | null;
@@ -32,6 +33,14 @@ export type CustomerOrder = {
   logisticsCompany?: string | null;
   logisticsNo?: string | null;
   items?: CustomerOrderItem[];
+  quotedLines?: Array<{
+    id: number;
+    description: string;
+    quantity: number;
+    unitAmount: number | string;
+    lineAmount: number | string;
+    waxType?: "RED" | "PURPLE" | null;
+  }>;
   payments?: Array<{
     id: number;
     status: string;
@@ -91,6 +100,28 @@ export type CustomerNotificationPage = {
   unreadCount: number;
   page: number;
   pageSize: number;
+};
+
+export type CustomerNotificationPreference = {
+  channel: "EMAIL" | "SMS";
+  topic:
+    | "SERVICE_ORDER_CREATED"
+    | "SERVICE_PAYMENT_CONFIRMED"
+    | "SERVICE_ORDER_SHIPPED"
+    | "SERVICE_ORDER_CANCELLED"
+    | "SERVICE_ORDER_COMPLETED"
+    | "SERVICE_REFUND_COMPLETED"
+    | "SERVICE_CONSULTATION_REPLIED"
+    | "MARKETING_GENERAL";
+  enabled: boolean;
+  defaulted: boolean;
+  updatedAt: string | null;
+  requiresMarketingConsent: boolean;
+};
+
+export type CustomerNotificationPreferenceResource = {
+  list: CustomerNotificationPreference[];
+  marketingConsentGranted: boolean;
 };
 
 export type CustomerProfile = {

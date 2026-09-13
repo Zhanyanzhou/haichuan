@@ -131,7 +131,7 @@ test("structured data serializes safe facts and drops an invalid root atomically
   await expect(page.locator('script[data-structured-data="fixture-invalid"]')).toHaveCount(0);
 });
 
-test("public SEO authority stays closed without an origin and emits only real locale alternates with one", async ({ page }) => {
+test("public SEO authority stays closed without immutable pre-render evidence", async ({ page }) => {
   await page.route("**/api/settings/public**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -145,7 +145,7 @@ test("public SEO authority stays closed without an origin and emits only real lo
     }),
   }));
   await page.goto("/privacy");
-  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "index, follow");
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex, nofollow");
 
   const configuredOrigin = process.env.VITE_PUBLIC_SITE_ORIGIN;
   if (!configuredOrigin) {
@@ -161,20 +161,9 @@ test("public SEO authority stays closed without an origin and emits only real lo
     "href",
     `${configuredOrigin}/privacy`,
   );
-  await expect(page.locator('meta[property="og:url"]')).toHaveAttribute(
-    "content",
-    `${configuredOrigin}/privacy`,
-  );
-  await expect(page.locator('link[rel="alternate"][hreflang="zh-CN"]')).toHaveAttribute(
-    "href",
-    `${configuredOrigin}/privacy`,
-  );
-  await expect(page.locator('link[rel="alternate"][hreflang="x-default"]')).toHaveAttribute(
-    "href",
-    `${configuredOrigin}/privacy`,
-  );
+  await expect(page.locator('meta[property="og:url"]')).toHaveCount(0);
+  await expect(page.locator('meta[name="twitter:title"]')).toHaveCount(0);
+  await expect(page.locator('link[rel="alternate"][hreflang]')).toHaveCount(0);
   await expect(page.locator('link[rel="alternate"][hreflang="en"]')).toHaveCount(0);
   await expect(page.locator('script[data-structured-data="organization"]')).toHaveCount(1);
 });
-
-

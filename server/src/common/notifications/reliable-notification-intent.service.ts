@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { OutboxService } from "../outbox/outbox.service";
+import { NotificationDeliveryPolicyService } from "./notification-delivery-policy.service";
+import type { NotificationTopic } from "./notification-delivery.constants";
 
 type NotificationTransaction = Prisma.TransactionClient;
 
@@ -43,7 +45,10 @@ function moneyText(cents: number): string {
 
 @Injectable()
 export class ReliableNotificationIntentService {
-  constructor(private readonly outbox: OutboxService) {}
+  constructor(
+    private readonly outbox: OutboxService,
+    private readonly deliveryPolicy: NotificationDeliveryPolicyService,
+  ) {}
 
   async enqueueOrderCreated(
     tx: NotificationTransaction,
@@ -165,13 +170,17 @@ export class ReliableNotificationIntentService {
       occurredAt: Date;
     },
   ) {
+    const customer = await tx.customer.findUnique({
+      where: { id: input.customerId },
+      select: { email: true, status: true },
+    });
     return this.createServiceIntent(tx, {
       customerId: input.customerId,
       type: "SERVICE_CONSULTATION_REPLIED",
       title: "顾问已回复您的咨询",
       body: "您的咨询已有新的顾问回复，请登录客户中心查看。",
       actionUrl: `/customer?section=consultations&leadId=${input.leadId}`,
-      destinationEmail: null,
+      destinationEmail: customer?.status === "ACTIVE" ? customer.email : null,
       payload: {
         leadId: input.leadId,
         activityId: input.activityId,
@@ -189,7 +198,7 @@ export class ReliableNotificationIntentService {
     tx: NotificationTransaction,
     input: {
       customerId: number;
-      type: string;
+      type: NotificationTopic;
       title: string;
       body: string;
       actionUrl: string;
@@ -227,12 +236,24 @@ export class ReliableNotificationIntentService {
 
     const email = normalizedEmail(input.destinationEmail);
     if (email) {
+      const policy = await this.deliveryPolicy.evaluate(tx, {
+        customerId: input.customerId,
+        channel: "EMAIL",
+        topic: input.type,
+        at: input.occurredAt,
+      });
       await tx.notificationDelivery.create({
         data: {
           notificationId: notification.id,
           channel: "EMAIL",
-          status: "PENDING",
-          destinationHash: destinationHash(email),
+          status: policy.allowed ? "PENDING" : "SUPPRESSED",
+          destinationHash: policy.allowed ? destinationHash(email) : null,
+          ...(!policy.allowed
+            ? {
+                failedAt: input.occurredAt,
+                lastErrorCode: policy.reason,
+              }
+            : {}),
         },
       });
     }

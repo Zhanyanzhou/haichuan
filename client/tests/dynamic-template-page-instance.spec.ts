@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
 import {
+  getDynamicTemplatePageFieldDescriptors,
   groupDynamicTemplatePageFields,
   type DynamicTemplatePageFieldDescriptor,
 } from "../src/page-builder/dynamic-template-instance/pageFieldDescriptors";
@@ -545,6 +546,8 @@ function pageDocument(v1 = definition(1)) {
     metadata: {},
     editorVersion: "0.22.4",
     status: "DRAFT",
+    reviewStatus: "APPROVED",
+    contentHash: "a".repeat(64),
     version: 0,
     publishedRevisionId: 91,
     publishedAt: null,
@@ -668,6 +671,7 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
   let savedPayload: Record<string, unknown> | null = null;
   let currentDocument = draft;
   let catalogReadCount = 0;
+  let versionCheckFailureActive = Boolean(options.failVersionCheck);
   let validationRequestCount = 0;
   const pageWrites: Array<{ method: string; path: string }> = [];
   const templateWrites: Array<{ method: string; path: string; payload?: Record<string, unknown> }> = [];
@@ -801,7 +805,7 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
     if (path.endsWith("/auth/profile")) return route.fallback();
     if (path.endsWith("/page-modules/dynamic-templates/catalog")) {
       catalogReadCount += 1;
-      if (options.failVersionCheck) return route.fulfill(json(null, 503));
+      if (versionCheckFailureActive) return route.fulfill(json(null, 503));
       return route.fulfill(json({
         items: [
           ...(options.catalogMissing ? [] : [{ kind: "published", template: latestPublishedTemplate }]),
@@ -824,7 +828,7 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
       }));
     }
     if (path.endsWith("/page-modules/dynamic-templates/published")) {
-      if (options.failVersionCheck) return route.fulfill(json(null, 503));
+      if (versionCheckFailureActive) return route.fulfill(json(null, 503));
       return route.fulfill(json(options.catalogMissing ? [] : [latestPublishedTemplate]));
     }
     if (path.endsWith(`/page-modules/dynamic-templates/${sourceDefinition.templateId}/draft`) && request.method() === "GET") {
@@ -959,6 +963,9 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
       },
       templateSavedPayload: () => templateSavedPayload,
       catalogReadCount: () => catalogReadCount,
+      recoverVersionCheck: () => {
+        versionCheckFailureActive = false;
+      },
       validationRequestCount: () => validationRequestCount,
       pageWrites,
       templateWrites,
@@ -979,6 +986,9 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
     restoreCurrentVersion: () => undefined,
     templateSavedPayload: () => templateSavedPayload,
     catalogReadCount: () => catalogReadCount,
+    recoverVersionCheck: () => {
+      versionCheckFailureActive = false;
+    },
     validationRequestCount: () => validationRequestCount,
     pageWrites,
     templateWrites,
@@ -1706,9 +1716,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       .getByRole("button", { name: "确认升级页面草稿" }).click();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
-    const publish = page.getByRole("button", { name: /当前账号只能编辑草稿/ });
+    const publish = page.getByRole("button", { name: /当前账号可提交审核，发布需由管理员完成/ });
     await expect(publish).toBeDisabled();
-    await expect(publish).toHaveAttribute("aria-label", /当前账号只能编辑草稿/);
+    await expect(publish).toHaveAttribute("aria-label", /当前账号可提交审核，发布需由管理员完成/);
     expect(pageWrites.map(({ method, path }) => `${method} ${path}`)).toEqual([
       "PUT /api/page-modules/document",
     ]);
@@ -1812,6 +1822,47 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(inspector.getByRole("status", { name: /页面草稿已保存/ })).toBeVisible();
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
+  });
+
+  test("版本检查失败后重新检查可恢复升级，并在保存重载后回读目标版本", async ({ page }) => {
+    const {
+      inspector,
+      catalogReadCount,
+      recoverVersionCheck,
+      currentDocument,
+      pageWrites,
+      templateWrites,
+    } = await prepareEditor(page, {
+      failVersionCheck: true,
+    });
+    await expect(inspector).toContainText("暂时无法检查模板新版本，当前页面版本未改变");
+    recoverVersionCheck();
+    await inspector.getByRole("button", { name: "重新检查" }).click();
+    await expect.poll(() => catalogReadCount()).toBeGreaterThan(1);
+    await expect(inspector).toContainText("发现新版本 v2");
+    expect(pageWrites).toEqual([]);
+
+    await inspector.getByRole("button", { name: "查看差异" }).click();
+    await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
+      .getByRole("button", { name: "确认升级页面草稿" })
+      .click();
+    await expect(inspector).toContainText("固定版本 tpl_page_upgrade v2");
+    expect(pageWrites).toEqual([]);
+
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(() => currentDocument().puckData.content[0].props.templateVersion).toBe(2);
+    expect(pageWrites.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      "PUT /api/page-modules/document",
+    ]);
+    expect(templateWrites).toEqual([]);
+
+    await page.reload();
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    await page.locator(
+      '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
+    ).click({ position: { x: 12, y: 18 } });
+    await expect(page.getByRole("region", { name: "模板实例属性" }))
+      .toContainText("固定版本 tpl_page_upgrade v2");
   });
 
   test("页面运营通过真实 UI 原子复制、排序、显隐和删除实例，并在保存重载后保持稳定身份", async ({ page }) => {
@@ -2244,14 +2295,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       noNewVersion: true,
     });
     const initialInstanceProps = structuredClone(currentDocument().puckData.content[0].props);
-    const descriptors = await page.evaluate(async () => {
-      const [registry, descriptorApi] = await Promise.all([
-        import("/src/page-builder/dynamic-template-instance/registry.ts"),
-        import("/src/page-builder/dynamic-template-instance/pageFieldDescriptors.ts"),
-      ]);
-      const resolved = registry.getResolvedDynamicTemplateDefinitions()["tpl_page_upgrade@1"];
-      return descriptorApi.getDynamicTemplatePageFieldDescriptors(resolved.definition);
-    });
+    const resolved = currentDocument().puckData.resolvedDynamicTemplates["tpl_page_upgrade@1"];
+    expect(resolved).toBeDefined();
+    const descriptors = getDynamicTemplatePageFieldDescriptors(resolved.definition);
     const descriptorBySlotId = Object.fromEntries(descriptors.map((field) => [field.slotId, field]));
     expect(descriptorBySlotId.slot_heading.effectiveDesignOverrideCapabilities).toMatchObject({
       position: false,
@@ -2276,15 +2322,6 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const propertyScope = inspector.getByRole("group", { name: "页面实例属性范围" });
     await expect(propertyScope.getByRole("button", { name: "只读说明", exact: true })).toHaveCount(0);
 
-    await page.evaluate(async () => {
-      const registry = await import("/src/page-builder/dynamic-template-instance/registry.ts");
-      const definition = registry.getResolvedDynamicTemplateDefinitions()["tpl_page_upgrade@1"].definition;
-      Object.assign(definition.nodes.node_heading.instanceEditPolicy!, {
-        position: true,
-        size: true,
-        typography: false,
-      });
-    });
     await propertyScope.getByRole("button", { name: "标题", exact: true }).click();
     const headingSelection = await page.evaluate(async () => {
       const { useVisualEditorSession } = await import("/src/page-builder/visual-editor/visualEditorSession.ts");
@@ -2296,14 +2333,6 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       };
     });
 
-    await page.evaluate(async () => {
-      const registry = await import("/src/page-builder/dynamic-template-instance/registry.ts");
-      const definition = registry.getResolvedDynamicTemplateDefinitions()["tpl_page_upgrade@1"].definition;
-      Object.assign(definition.nodes.node_image.instanceEditPolicy!, {
-        imageFit: false,
-        imageFocus: false,
-      });
-    });
     await propertyScope.getByRole("button", { name: "主图", exact: true }).click();
     const imageSelection = await page.evaluate(async () => {
       const { useVisualEditorSession } = await import("/src/page-builder/visual-editor/visualEditorSession.ts");

@@ -42,6 +42,7 @@ test.describe('客户咨询完整分页', () => {
       if (
         path === '/api/customers/me/orders' ||
         path === '/api/customers/me/addresses' ||
+        path === '/api/customers/me/cooperation-design-files' ||
         path === '/api/customers/me/selection-inquiries' ||
         path === '/api/customers/me/favorites'
       ) {

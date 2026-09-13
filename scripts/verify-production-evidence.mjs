@@ -176,7 +176,7 @@ function validateTrustedContext(trusted) {
 function assertStrictManifestSchema(manifest) {
   assertExactKeys(manifest, [
     "schemaVersion", "gitSha", "migrationBundleSha256", "source", "qualityGate",
-    "attestationPolicy", "server", "client", "operations",
+    "attestationPolicy", "publicSeo", "server", "client", "operations",
   ], "PRODUCTION_EVIDENCE_MANIFEST_SCHEMA_INVALID");
   assertExactKeys(manifest.qualityGate, [
     "workflow", "runId", "runUrl", "headSha", "event", "conclusion",
@@ -185,6 +185,9 @@ function assertStrictManifestSchema(manifest) {
     "signerWorkflow", "sourceDigest", "imageAttestationsVerified", "provenancePredicateType",
     "sbomPredicateType", "manifestPredicateType",
   ], "PRODUCTION_EVIDENCE_MANIFEST_ATTESTATION_SCHEMA_INVALID");
+  assertExactKeys(manifest.publicSeo, [
+    "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest",
+  ], "PRODUCTION_EVIDENCE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
   for (const component of ["server", "client", "operations"]) {
     const allowedImageKeys = [
       "image", "digest", "reference", "provenancePredicateType", "sbomPredicateType",

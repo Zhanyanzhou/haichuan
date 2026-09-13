@@ -116,6 +116,171 @@ async function mockPublishedHeaderDocuments(
   });
 }
 
+type ProductsHeroMediaState = "absent" | "failed" | "loaded";
+
+async function mockProductsHero(
+  page: import("@playwright/test").Page,
+  mediaState: ProductsHeroMediaState,
+) {
+  const desktopImage = mediaState === "absent"
+    ? "/images/system/launch-short-page-desktop.svg"
+    : mediaState === "failed"
+      ? "/images/hc-pub-01-missing.svg"
+      : "/images/hc-pub-01-valid.svg";
+  const mobileImage = mediaState === "absent"
+    ? "/images/system/launch-short-page-mobile.svg"
+    : desktopImage;
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/page-modules/document/published") {
+      if (
+        url.searchParams.get("pageKey") === "products"
+        && url.searchParams.get("locale") !== "en"
+      ) {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: apiResponse({
+            pageKey: "products",
+            status: "PUBLISHED",
+            version: 7,
+            puckData: {
+              content: [{
+                type: "首屏主视觉",
+                props: {
+                  id: `hc-pub-01-${mediaState}`,
+                  isVisible: true,
+                  eyebrow: "CURATED EXHIBITION",
+                  title: "珠宝作品",
+                  subtitle: "真实 Chrome 媒体状态验证",
+                  desktopImage,
+                  mobileImage,
+                  altText: "珠宝作品主视觉",
+                  actionText: "进入选款中心",
+                  targetType: "page",
+                  linkUrl: "/catalog",
+                  alignment: "left",
+                },
+              }],
+              root: { props: {} },
+            },
+          }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse(null),
+      });
+    }
+    if (url.pathname === "/api/settings/public") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse({ siteName: "海川珠宝" }),
+      });
+    }
+    if (url.pathname === "/api/settings/flags") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: apiResponse({ commerceEnabled: false, cartEnabled: false, paymentEnabled: false }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: apiResponse(null),
+    });
+  });
+  await page.route("**/images/hc-pub-01-missing.svg", (route) => route.fulfill({
+    status: 404,
+    contentType: "image/svg+xml",
+    body: "",
+  }));
+  await page.route("**/images/hc-pub-01-valid.svg", (route) => route.fulfill({
+    status: 200,
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9"><rect width="16" height="9" fill="#34383a"/><circle cx="11" cy="4" r="2" fill="#dedede"/></svg>',
+  }));
+}
+
+test.describe("HC-PUB-01 /products Hero 媒体状态与层叠", () => {
+  for (const viewport of [
+    { name: "1920x1200", width: 1920, height: 1200 },
+    { name: "1440x900", width: 1440, height: 900 },
+    { name: "390x844", width: 390, height: 844 },
+  ]) {
+    for (const mediaState of ["absent", "failed", "loaded"] as const) {
+      test(`${viewport.name} ${mediaState} 保持安全状态且主要内容不被导航遮挡`, async ({ page }, testInfo) => {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        await mockProductsHero(page, mediaState);
+        await page.goto("/products");
+        await page.evaluate(() => document.fonts.ready);
+
+        const header = page.getByRole("banner");
+        await expect(header).toBeVisible();
+        const contentTarget = mediaState === "absent"
+          ? page.getByRole("heading", { level: 1, name: "珠宝作品正在策展" })
+          : page.getByRole("heading", { level: 1, name: "珠宝作品" });
+        await expect(contentTarget).toBeVisible();
+        if (mediaState !== "absent") {
+          await expect.poll(() => contentTarget.evaluate(
+            (element) => window.getComputedStyle(element).opacity,
+          )).toBe("1");
+        }
+        if (mediaState === "failed") {
+          await expect(page.getByRole("img", { name: "珠宝作品主视觉" })).toContainText(
+            "主视觉图片暂不可用",
+          );
+        } else if (mediaState === "loaded") {
+          await expect(page.getByRole("img", { name: "珠宝作品主视觉" })).toBeVisible();
+        } else {
+          await expect(page.locator('[data-production-fallback="safe-status"]')).toBeVisible();
+          await expect(page.locator("main img")).toHaveCount(0);
+        }
+
+        const [headerBox, contentBox] = await Promise.all([
+          header.boundingBox(),
+          contentTarget.boundingBox(),
+        ]);
+        expect(headerBox).not.toBeNull();
+        expect(contentBox).not.toBeNull();
+        expect(contentBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height);
+
+        const interactionTarget = page.getByRole("link", { name: "进入选款中心" }).first();
+        await expect(interactionTarget).toBeVisible();
+        if (viewport.width <= 767 && mediaState !== "absent") {
+          await expect(page.getByRole("button", { name: "打开菜单" })).toHaveCSS(
+            "color",
+            "rgb(24, 26, 27)",
+          );
+          await expect(page.getByRole("link", { name: "我的账户" })).toHaveCSS(
+            "color",
+            "rgb(24, 26, 27)",
+          );
+        }
+        const targetIsTopmost = await interactionTarget.evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          const owner = document.elementFromPoint(
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+          );
+          return owner === element || element.contains(owner);
+        });
+        expect(targetIsTopmost).toBe(true);
+        await expectNoHorizontalOverflow(page);
+        await page.screenshot({
+          path: testInfo.outputPath(`hc-pub-01-${mediaState}-${viewport.name}.png`),
+          fullPage: true,
+        });
+      });
+    }
+  }
+});
+
 test.describe("公开页面响应式边界", () => {
   for (const width of responsiveBoundaryWidths) {
     test(`首页在 ${width}px 没有边界裁切`, async ({ page }) => {

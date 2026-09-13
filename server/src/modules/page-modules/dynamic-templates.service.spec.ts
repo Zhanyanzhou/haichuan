@@ -85,7 +85,9 @@ async function assertApiConflict(
   });
 }
 
-function createStatefulService() {
+function createStatefulService(mediaAuthorizationResolver?: {
+  resolveReferences(references: unknown[], options: unknown): Promise<unknown>;
+}) {
   const calls: Array<{ operation: string; args: any }> = [];
   let template: any = null;
   let draft: any = null;
@@ -488,7 +490,10 @@ function createStatefulService() {
     }
   };
   return {
-    service: new DynamicTemplatesService(prisma as unknown as PrismaService),
+    service: new DynamicTemplatesService(
+      prisma as unknown as PrismaService,
+      mediaAuthorizationResolver as never,
+    ),
     calls,
     setPageDocuments: (documents: any[]) => {
       pageDocuments = clone(documents);
@@ -718,6 +723,45 @@ test("发布 DTO 保持 legacy 可用，并要求严格发布身份成对且格�
     invalid.map((error) => error.property).sort(),
     ["expectedChecksum", "targetVersion"],
   );
+});
+
+test("母模板发布对无有效集中授权的受管素材失败关闭且回滚事务", async () => {
+  let resolverMode = "";
+  const harness = createStatefulService({
+    async resolveReferences(references: unknown[], options: unknown) {
+      resolverMode = (options as { mode: string }).mode;
+      const reference = references[0] as { url?: string; path?: string } | undefined;
+      return {
+        mode: resolverMode,
+        eligible: false,
+        issues: [{
+          url: reference?.url ?? "",
+          path: reference?.path,
+          code: "AUTHORIZATION_MISSING",
+          severity: "ERROR",
+          message: "素材缺少集中授权记录",
+        }],
+        items: [],
+      };
+    },
+  });
+  const definition = definitionFixture();
+  definition.schemaVersion = 3;
+  definition.nodes.node_root.responsive.desktop.backgroundImage =
+    "/uploads/page-assets/unapproved-template.jpg";
+  const created = await harness.service.create(17, { definition });
+  assert.ok(created.draft);
+
+  await assert.rejects(
+    () => harness.service.publish(17, definition.templateId, {
+      expectedRevision: created.draft!.revision,
+    }),
+    (error: unknown) => error instanceof BadRequestException
+      && JSON.stringify(error.getResponse()).includes("DYNAMIC_TEMPLATE_MEDIA_INELIGIBLE"),
+  );
+  assert.equal(resolverMode, "ENFORCE");
+  assert.equal(harness.getState().versions.length, 0);
+  assert.equal(harness.getState().draft?.revision, created.draft.revision);
 });
 
 test("归档 DTO 强制绑定草稿身份且生产端不再提供另存 DTO", async () => {
@@ -1419,6 +1463,13 @@ test("正式目录资料只随发布推进，保存下一版草稿不改变正�
   assert.equal(editable.purpose, changed.metadata.purpose);
   assert.deepEqual(editable.draft!.definition, changed);
   assert.deepEqual(await service.listPublished(), beforeDraftEdit);
+  const historicalBeforePublish = await service.getPublishedVersion(original.templateId, 1);
+  assert.equal(historicalBeforePublish.name, original.name);
+  assert.equal(historicalBeforePublish.category, original.metadata.category);
+  assert.equal(historicalBeforePublish.purpose, original.metadata.purpose);
+  assert.equal(historicalBeforePublish.layoutType, original.metadata.layoutType);
+  assert.equal(historicalBeforePublish.description, original.description);
+  assert.deepEqual(historicalBeforePublish.definition, original);
 
   await service.publish(17, original.templateId, {
     expectedRevision: updated.draft!.revision,

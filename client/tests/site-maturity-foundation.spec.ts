@@ -7,6 +7,10 @@ import {
 } from "../src/utils/publicSiteUrl";
 import { isNonIndexablePublicRoute } from "../src/utils/publicSeoPolicy";
 import {
+  resolvePublicLocalePath,
+  withPublicLocalePath,
+} from "../src/i18n/publicLocale";
+import {
   publicPageDocumentStreamUrl,
   publicProductStreamUrl,
 } from "../src/services/httpClient";
@@ -35,8 +39,6 @@ test("账户、交易、受控预览和开发页统一使用非索引路由策�
     "/cart",
     "/checkout/confirm",
     "/partner",
-    "/en",
-    "/en/catalog",
     "/preview/home",
     "/__templates",
   ]) {
@@ -51,33 +53,51 @@ test("账户、交易、受控预览和开发页统一使用非索引路由策�
     "/contact",
     "/privacy",
     "/business-info",
+    "/en",
+    "/en/about",
   ]) {
     expect(isNonIndexablePublicRoute(pathname), pathname).toBe(false);
   }
+});
+
+test("英文公开路由大小写输入统一解析到规范的小写内容路径", () => {
+  expect(resolvePublicLocalePath("/EN/about")).toEqual({
+    locale: "en",
+    pathname: "/about",
+  });
+  expect(withPublicLocalePath("/ABOUT", "en")).toBe("/en/ABOUT");
+  expect(withPublicLocalePath("/about", "en")).toBe("/en/about");
 });
 
 test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜像且 Nginx 二次隔离非公开页面", () => {
   const dockerfile = readFileSync(resolve("Dockerfile"), "utf8");
   const compose = readFileSync(resolve("../docker-compose.yml"), "utf8");
   const nginx = readFileSync(resolve("nginx.conf"), "utf8");
+  const spaShell = readFileSync(resolve("index.html"), "utf8");
 
-  expect(dockerfile).toContain('ARG VITE_PUBLIC_SITE_ORIGIN=""');
+  expect(dockerfile).toContain("ARG VITE_PUBLIC_SITE_ORIGIN");
+  expect(dockerfile).not.toContain('ARG VITE_PUBLIC_SITE_ORIGIN=""');
+  expect(dockerfile).toContain('test -n "$VITE_PUBLIC_SITE_ORIGIN"');
   expect(dockerfile).toContain('ARG VITE_ANALYTICS_ENABLED="false"');
   expect(compose).not.toMatch(/^\s+build\s*:/m);
   expect(compose).not.toContain("VITE_PUBLIC_SITE_ORIGIN:");
   expect(nginx).toContain("location = /__templates");
   expect(nginx).toContain("TemplateGallery-");
-  expect(nginx).toContain("location ~* ^/en(/|$)");
+  expect(nginx).toContain("include /etc/nginx/public-seo-routes.conf;");
+  expect(nginx).toContain("location ~* ^/en(?:/|$)");
+  expect(spaShell).toContain('<meta name="robots" content="noindex, nofollow" />');
   expect(nginx).toMatch(
-    /location ~\* \^\/en\(\/\|\$\) \{\s*return 404;/,
+    /location ~\* \^\/en\(\?:\/\|\$\) \{\s*error_page 404 =404 \/404-en\.html;\s*return 404;/,
   );
   expect(nginx).toContain("error_page 404 /404.html;");
   expect(nginx).toContain("location = /404.html");
+  expect(nginx).toContain("error_page 404 =404 /404-en.html;");
+  expect(nginx).toContain("location = /404-en.html");
   expect(nginx).toContain(
     "location ~* ^/(admin|preview|customer|cart|checkout|partner)(/|$)",
   );
   expect(nginx).toContain("map $request_uri $hc_robots_tag");
-  expect(nginx).toContain('~*^/en(/|$) "noindex, nofollow"');
+  expect(nginx).not.toContain('~*^/en(/|$) "noindex, nofollow"');
   expect(nginx).toContain(
     'add_header X-Robots-Tag $hc_robots_tag always',
   );
@@ -311,7 +331,7 @@ for (const viewport of [
   { label: "desktop", width: 1440, height: 900 },
   { label: "mobile", width: 390, height: 844 },
 ]) {
-  test(`账户旅程禁止索引，离开后恢复公开页面索引状态 · ${viewport.label}`, async ({ page }) => {
+  test(`账户旅程与无预渲染证据的公开 SPA 壳均禁止索引 · ${viewport.label}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/customer/forgot");
 
@@ -324,13 +344,15 @@ for (const viewport of [
     await page.goto("/privacy");
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
       "content",
-      /index,\s*follow/,
+      /noindex,\s*nofollow/,
     );
     if (process.env.VITE_PUBLIC_SITE_ORIGIN) {
       await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
         "href",
-        new URL("/privacy", page.url()).href,
+        new URL("/privacy", process.env.VITE_PUBLIC_SITE_ORIGIN).href,
       );
+    } else {
+      await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
     }
   });
 }

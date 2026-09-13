@@ -619,6 +619,35 @@ body:has(.homepage-editor)
   border-bottom: 1px solid var(--adm-line);
 }
 
+.homepage-editor__locale-review-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.homepage-editor__locale-review-controls select,
+.homepage-editor__locale-review-controls button,
+.homepage-editor__locale-review-controls [role="status"] {
+  min-height: 30px;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+  padding: 4px 8px;
+  font: inherit;
+}
+
+.homepage-editor__locale-review-controls [role="status"] {
+  display: inline-flex;
+  align-items: center;
+  background: var(--adm-neutral-bg);
+}
+
+.homepage-editor__locale-review-controls button:not(:disabled) {
+  cursor: pointer;
+}
+
 /* 店铺装修专注模式：将装修工具栏挂入后台顶栏。 */
 .admin-header--editor {
   height: var(--adm-header-h);
@@ -10924,5 +10953,114 @@ button.template-editor__toolbar-state:focus-visible {
     .homepage-editor__workspace-status > span {
     overflow: visible;
     text-overflow: clip;
+  }
+}
+
+/* 页面工作台把语言/审核与主要操作放在同一条命中流中，避免绝对定位操作区
+ * 与固定居中的设备切换器形成不可见覆盖。窄桌面按 UI 规范折成两行。 */
+.homepage-editor__toolbar:not(.template-editor__toolbar)
+  .homepage-editor__locale-review-controls {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.homepage-editor__toolbar:not(.template-editor__toolbar)
+  .homepage-editor__locale-review-controls > * {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1199px) {
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 28px 28px;
+    align-content: center;
+    column-gap: 8px;
+    row-gap: 2px;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__viewport-switcher {
+    position: static;
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+    min-height: 26px;
+    transform: none;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__viewport-switcher button {
+    min-height: 24px;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__toolbar-left-context {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__toolbar-actions {
+    position: absolute;
+    inset: 2px 10px 2px auto;
+    display: grid;
+    grid-template-columns: auto auto auto auto auto;
+    grid-template-rows: 26px 26px;
+    align-content: center;
+    align-items: center;
+    justify-items: end;
+    gap: 2px 4px;
+    min-width: 0;
+    transform: none;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__locale-review-controls {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    justify-self: end;
+    gap: 4px;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__locale-review-controls select,
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__locale-review-controls button,
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__locale-review-controls [role="status"] {
+    min-height: 26px;
+    padding: 2px 6px;
+    font-size: 11px;
+    line-height: 18px;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__mock-mode-badge {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    justify-content: stretch;
+  }
+
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__toolbar-actions {
+    right: 6px;
   }
 }

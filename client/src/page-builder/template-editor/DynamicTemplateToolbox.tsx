@@ -336,7 +336,12 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
     if (!selectedTargetValid || !sessionId) return;
     let addedNodeId = "";
     runCommand(`添加${tool.label}布局分组`, (current) => {
-      const landing = resolveContentLanding(current, getDynamicTemplateLayoutGroupNodeType(tool.kind));
+      const targetParentId = selectedContentLanding?.parentId;
+      const targetParentType = targetParentId ? current.nodes[targetParentId]?.type : undefined;
+      const landing = resolveContentLanding(
+        current,
+        getDynamicTemplateLayoutGroupNodeType(tool.kind, targetParentType),
+      );
       if (!landing) throw new Error("当前添加目标不接受这种布局分组。");
       const result = addDynamicTemplateLayoutGroup(current, landing.parentId, tool.kind, landing.index);
       placeInsertedTemplateNode(result.definition, landing.parentId, result.nodeId);
@@ -484,9 +489,12 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
     <h4>布局分组</h4>
     <div className="template-editor__node-tools template-editor__node-tools--layout" role="region" aria-label="布局分组">
       {LAYOUT_TOOLS.map((tool) => {
+        const targetParentType = selectedContentLanding
+          ? definition.nodes[selectedContentLanding.parentId]?.type
+          : undefined;
         const allowed = Boolean(selectedContentLanding && getDynamicTemplateInsertionLandings(
           definition,
-          getDynamicTemplateLayoutGroupNodeType(tool.kind),
+          getDynamicTemplateLayoutGroupNodeType(tool.kind, targetParentType),
           contentAnchorNodeId,
         ).some((landing) => landing.landingId === selectedContentLanding.landingId && !landing.disabledReason));
         return <button key={tool.kind} type="button" disabled={!allowed} aria-label={`添加${tool.label}布局分组`} onClick={() => addLayout(tool)}>

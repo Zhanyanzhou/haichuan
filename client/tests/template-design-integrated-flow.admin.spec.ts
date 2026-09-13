@@ -1168,6 +1168,222 @@ test("结构选择默认在当前容器末尾新增，undo/redo 恢复命令前�
     .toEqual(networkBeforeInsert);
 });
 
+test("自建单区域图文组可跨组移动、双端重排，并原子取消必填删除后保存重开", async ({ page }) => {
+  const server = await installTemplateServer(page);
+  await openBlankTemplate(page);
+  await page.getByRole("textbox", { name: "模板名称", exact: true }).fill("单区域自建图文模板");
+  await page.getByRole("textbox", { name: "模板名称", exact: true }).press("Tab");
+
+  const structure = page.getByRole("complementary", { name: "模板结构", exact: true });
+  const tree = structure.getByRole("tree", { name: "模板区域与槽位" });
+  await structure.getByRole("button", { name: "添加区域", exact: true }).click();
+  const regionItem = tree.getByRole("treeitem", { name: /内容区域 1/ });
+  await expect(regionItem).toBeVisible();
+
+  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
+  await page.getByRole("button", { name: "添加左右排列布局分组", exact: true }).click();
+  await page.keyboard.press("Escape");
+  const compositionItem = tree.getByRole("treeitem", { name: /左右布局组 布局容器/ });
+  const compositionId = await compositionItem.getAttribute("data-selection-target-id");
+  if (!compositionId) throw new Error("自建左右主组缺少稳定节点身份");
+  await page.getByLabel("节点名称").first().fill("工艺图文组");
+  await page.getByLabel("节点名称").first().press("Tab");
+
+  const addVerticalGroup = async (name: string) => {
+    await tree.locator(`[role="treeitem"][data-selection-target-id="${compositionId}"]`).click();
+    await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
+    const addDialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
+    const vertical = addDialog.getByRole("button", { name: "添加上下排列布局分组", exact: true });
+    await expect(vertical, "左右主组内必须能继续建立合法的纵向图片/文字组").toBeEnabled();
+    await vertical.click();
+    await page.keyboard.press("Escape");
+    await page.getByLabel("节点名称").first().fill(name);
+    await page.getByLabel("节点名称").first().press("Tab");
+    const item = tree.getByRole("treeitem", { name: new RegExp(`${name} 布局容器`) });
+    const nodeId = await item.getAttribute("data-selection-target-id");
+    if (!nodeId) throw new Error(`${name}缺少稳定节点身份`);
+    return nodeId;
+  };
+
+  const imageGroupId = await addVerticalGroup("图片组");
+  await tree.locator(`[role="treeitem"][data-selection-target-id="${imageGroupId}"]`).click();
+  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
+  const imageDialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
+  await imageDialog.getByRole("button", { name: "添加图片槽位", exact: true }).click();
+  await imageDialog.getByRole("button", { name: "添加标题槽位", exact: true }).click();
+  await page.keyboard.press("Escape");
+
+  const textGroupId = await addVerticalGroup("文字组");
+  await tree.locator(`[role="treeitem"][data-selection-target-id="${textGroupId}"]`).click();
+  await structure.getByRole("button", { name: "添加槽位", exact: true }).click();
+  const textDialog = page.getByRole("dialog", { name: "添加槽位", exact: true });
+  await textDialog.getByRole("button", { name: "添加正文槽位", exact: true }).click();
+  await textDialog.getByRole("button", { name: "添加按钮槽位", exact: true }).click();
+  await page.keyboard.press("Escape");
+
+  const beforeMove = await readSessionSnapshot(page);
+  if (!beforeMove.definition) throw new Error("自建图文组后缺少模板定义");
+  const headingNode = Object.values(beforeMove.definition.nodes).find((node) => node.type === "HeadingSlot");
+  if (!headingNode?.slotId) throw new Error("自建图片组缺少待跨组移动的标题槽位");
+  expect(beforeMove.definition.nodes[imageGroupId].childIds).toContain(headingNode.nodeId);
+
+  const headingItem = tree.locator(`[role="treeitem"][data-selection-target-id="${headingNode.nodeId}"]`);
+  const headingRow = headingItem.locator("..");
+  await headingRow.hover();
+  await headingRow.locator(".template-editor__structure-more").click();
+  await page.getByRole("menuitem", { name: "移动到…", exact: true }).click();
+  const moveDialog = page.getByRole("dialog", { name: /移动“标题槽位”到/ });
+  const moveTarget = moveDialog.getByLabel("移动目标与落点");
+  const textGroupLanding = await moveTarget.getByRole("option").filter({ hasText: /文字组.*移入容器末尾/ }).getAttribute("value");
+  if (!textGroupLanding) throw new Error("跨组移动缺少文字组末尾落点");
+  await moveTarget.selectOption(textGroupLanding);
+  await moveDialog.getByRole("button", { name: "确认移动", exact: true }).click();
+
+  const moved = await readSessionSnapshot(page);
+  if (!moved.definition) throw new Error("跨组移动后缺少模板定义");
+  expect(moved.definition.nodes[imageGroupId].childIds).not.toContain(headingNode.nodeId);
+  expect(moved.definition.nodes[textGroupId].childIds).toContain(headingNode.nodeId);
+  expect(moved.definition.nodes[headingNode.nodeId].slotId, "跨组移动必须保留字段身份").toBe(headingNode.slotId);
+
+  await tree.locator(`[role="treeitem"][data-selection-target-id="${compositionId}"]`).click();
+  await page.getByRole("tab", { name: "设计", exact: true }).click();
+  await page.getByRole("button", { name: /桌面端模板布局/ }).click();
+  await page.getByRole("button", { name: "预览左右排列", exact: true }).click();
+  await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
+  await page.getByRole("button", { name: /移动端模板布局/ }).click();
+  await page.getByRole("button", { name: "预览上下排列", exact: true }).click();
+  await page.getByRole("button", { name: "确认排列转换", exact: true }).click();
+
+  const arranged = await readSessionSnapshot(page);
+  if (!arranged.definition) throw new Error("双端排列后缺少模板定义");
+  expect(arranged.definition.nodes[compositionId].childIds).toEqual([imageGroupId, textGroupId]);
+  expect(arranged.definition.nodes[compositionId].responsive.desktop.direction).toBe("row");
+  expect(arranged.definition.nodes[compositionId].responsive.mobile.direction).toBe("column");
+  const renderedComposition = page.frameLocator("iframe.template-editor__viewport-frame")
+    .locator(`[data-template-node-id="${compositionId}"]`);
+  await expect(renderedComposition).toHaveCSS("flex-direction", "column");
+  const mobileOrder = await renderedComposition.locator("[data-template-node-id]")
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id")));
+  expect(mobileOrder.indexOf(imageGroupId)).toBeLessThan(mobileOrder.indexOf(textGroupId));
+  await page.setViewportSize({ width: 1200, height: 900 });
+  await page.locator(".template-editor__toolbar").getByRole("button", { name: /桌面端模板布局/ }).click();
+  await expect(renderedComposition).toHaveCSS("flex-direction", "row");
+  const desktopOrder = await renderedComposition.locator("[data-template-node-id]")
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-template-node-id")));
+  expect(desktopOrder.indexOf(imageGroupId)).toBeLessThan(desktopOrder.indexOf(textGroupId));
+  await expectNoHorizontalOverflow(page);
+
+  await openPageField(page, /标题槽位/, "工艺标题");
+  await page.getByLabel("页面可隐藏").uncheck();
+  await page.getByLabel("页面必须填写").check();
+  const requiredBaseline = await readSessionSnapshot(page);
+  if (!requiredBaseline.definition) throw new Error("设置必填后缺少模板定义");
+  const requiredHistoryCount = requiredBaseline.historyPast.length;
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const requiredItem = tree.locator(`[role="treeitem"][data-selection-target-id="${headingNode.nodeId}"]`);
+  const requiredRow = requiredItem.locator("..");
+  await requiredRow.hover();
+  await requiredRow.locator(".template-editor__structure-more").click();
+  await page.getByRole("menuitem", { name: "删除槽位…", exact: true }).click();
+  const deleteDialog = page.getByRole("dialog", { name: /删除必填槽位“工艺标题”/ });
+  await expect(deleteDialog).toContainText("两步作为一次操作，可一次撤销恢复");
+  const requiredDeleteNetwork = readServerCounters(server);
+  await deleteDialog.getByRole("button", { name: "继续保留", exact: true }).click();
+  expect(await readSessionSnapshot(page), "取消删除必填槽位必须零提交").toEqual(requiredBaseline);
+  expect(readServerCounters(server), "取消删除必填槽位不得发出请求").toEqual(requiredDeleteNetwork);
+
+  await requiredRow.hover();
+  await requiredRow.locator(".template-editor__structure-more").click();
+  await page.getByRole("menuitem", { name: "删除槽位…", exact: true }).click();
+  await page.getByRole("dialog", { name: /删除必填槽位“工艺标题”/ })
+    .getByRole("button", { name: "取消必填并删除", exact: true }).click();
+  const deleted = await readSessionSnapshot(page);
+  expect(deleted.definition?.nodes[headingNode.nodeId]).toBeUndefined();
+  expect(deleted.definition?.slots[headingNode.slotId]).toBeUndefined();
+  expect(deleted.historyPast).toHaveLength(requiredHistoryCount + 1);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  const restored = await readSessionSnapshot(page);
+  expect(restored.definition?.nodes[headingNode.nodeId].slotId).toBe(headingNode.slotId);
+  expect(restored.definition?.slots[headingNode.slotId].required).toBe(true);
+  expect(restored.definition?.nodes[textGroupId].childIds).toEqual(
+    requiredBaseline.definition.nodes[textGroupId].childIds,
+  );
+
+  await page.getByRole("tab", { name: "设计", exact: true }).click();
+  await setSwitch(page, "锁定位置、尺寸和层级", true);
+  await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
+  await page.getByRole("button", { name: "返回当前结构全部字段", exact: true }).click();
+  const lockedRequiredBaseline = await readSessionSnapshot(page);
+
+  const textGroupItem = tree.locator(`[role="treeitem"][data-selection-target-id="${textGroupId}"]`);
+  const textGroupRow = textGroupItem.locator("..");
+  const containerDeleteNetwork = readServerCounters(server);
+  await textGroupRow.hover();
+  await textGroupRow.locator(".template-editor__structure-more").click();
+  await page.getByRole("menuitem", { name: "删除容器", exact: true }).click();
+  await page.getByRole("dialog", { name: /删除“文字组”及其内容/ })
+    .getByRole("button", { name: "删除节点", exact: true }).click();
+  const recoveryDialog = page.getByRole("dialog", { name: "无法删除“文字组”", exact: true });
+  const locateLockOwner = recoveryDialog.getByRole("button", { name: "定位锁定来源", exact: true });
+  await expect(locateLockOwner).toBeVisible();
+  await expect(recoveryDialog).toContainText(/“工艺标题”是必填槽位/);
+  expect(await readSessionSnapshot(page), "锁定必填后代时删除容器必须零提交")
+    .toEqual(lockedRequiredBaseline);
+  expect(readServerCounters(server), "删除拒绝与锁定恢复指引不得发出请求").toEqual(containerDeleteNetwork);
+  await locateLockOwner.click();
+  await expect(requiredItem).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "设计", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("switch", { name: "锁定位置、尺寸和层级", exact: true })).toBeFocused();
+  expect(readServerCounters(server), "定位锁定来源不得发出请求").toEqual(containerDeleteNetwork);
+  await setSwitch(page, "锁定位置、尺寸和层级", false);
+
+  await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
+  await page.getByRole("button", { name: "返回当前结构全部字段", exact: true }).click();
+  await textGroupRow.hover();
+  await textGroupRow.locator(".template-editor__structure-more").click();
+  await page.getByRole("menuitem", { name: "删除容器", exact: true }).click();
+  await page.getByRole("dialog", { name: /删除“文字组”及其内容/ })
+    .getByRole("button", { name: "删除节点", exact: true }).click();
+  const requiredRecoveryDialog = page.getByRole("dialog", { name: "无法删除“文字组”", exact: true });
+  const blockedContainerDelete = requiredRecoveryDialog.getByRole("button", { name: "定位并取消必填", exact: true });
+  await expect(blockedContainerDelete).toBeVisible();
+  await blockedContainerDelete.click();
+  await expect(requiredItem).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "页面开放范围", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("页面必须填写")).toBeFocused();
+  expect(readServerCounters(server), "从字段总览定位必填设置不得发出请求").toEqual(containerDeleteNetwork);
+  await page.getByLabel("页面必须填写").uncheck();
+
+  await textGroupRow.hover();
+  await textGroupRow.locator(".template-editor__structure-more").click();
+  await page.getByRole("menuitem", { name: "删除容器", exact: true }).click();
+  await page.getByRole("dialog", { name: /删除“文字组”及其内容/ })
+    .getByRole("button", { name: "删除节点", exact: true }).click();
+  expect((await readSessionSnapshot(page)).definition?.nodes[textGroupId]).toBeUndefined();
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  expect((await readSessionSnapshot(page)).definition?.slots[headingNode.slotId].required).toBe(false);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  const recovered = await readSessionSnapshot(page);
+  expect(recovered.definition).toEqual(restored.definition);
+  expect(readServerCounters(server), "完成恢复、重试删除与两次撤销前不得发出请求").toEqual(containerDeleteNetwork);
+
+  await saveDraft(page);
+  const savedDefinition = server.resource?.draft?.definition;
+  if (!savedDefinition) throw new Error("自建图文模板保存后缺少服务端定义");
+  expect(savedDefinition.nodes[compositionId].childIds).toEqual([imageGroupId, textGroupId]);
+  expect(savedDefinition.nodes[textGroupId].childIds).toContain(headingNode.nodeId);
+  expect(savedDefinition.slots[headingNode.slotId].required).toBe(true);
+  expect(server.pageWrites, "模板设计保存不得写入页面").toEqual([]);
+
+  await page.reload();
+  await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+  await page.getByRole("button", { name: "模板设计", exact: true }).click();
+  await page.getByRole("button", { name: /打开单区域自建图文模板/ }).click();
+  const reopened = await readSessionSnapshot(page);
+  expect(reopened.definition).toEqual(savedDefinition);
+  expect(reopened.dirty).toBe(false);
+});
+
 test("模板文本字段逐字编辑只提交一次历史，Escape 恢复且允许临时清空", async ({ page }) => {
   const server = await installTemplateServer(page);
   await openBlankTemplate(page);

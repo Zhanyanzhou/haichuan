@@ -16,6 +16,7 @@ import {
   type PublishedPageDocumentStatus,
 } from "./usePublishedPageDocument";
 import type { PuckBlock } from "./PuckDocumentRenderer";
+import type { PublicContentLocale } from "@/i18n/publicLocale";
 
 // 页面装修器及其编辑器依赖仅在确有已发布内容时加载，避免进入纯展示页首屏。
 const PuckDocumentRenderer = lazy(() => import("./PuckDocumentRenderer"));
@@ -33,6 +34,7 @@ type PublishedPageDecorationProps = {
   pageKey?: string;
   pageLabel?: string;
   documentResource: PublishedPageDocumentResource;
+  locale?: PublicContentLocale;
   children?: ReactNode;
   /** 关于与定制等纯品牌页：只有有效发布内容才能替换安全短页。 */
   replaceChildren?: boolean;
@@ -62,14 +64,17 @@ export function PublicPageFallback({
   status,
   content,
   onRetry,
+  locale = "zh-CN",
 }: {
   pageKey: string;
   pageLabel?: string;
   status: PublishedPageDocumentStatus;
   content?: PublicPageFallbackContent;
   onRetry?: () => void;
+  locale?: PublicContentLocale;
 }) {
   const fallbackTitleId = `${pageKey}-public-fallback-title`;
+  const english = locale === "en";
   // 未发布或合同无效需要运营补齐内容；重复请求不会改变结果。
   // 只有真实读取失败才向访客提供可恢复动作。
   const canRetry = Boolean(onRetry && status === "error");
@@ -92,7 +97,7 @@ export function PublicPageFallback({
     >
       <div style={{ width: "min(100%, 680px)" }}>
         {content?.eyebrow ? (
-          <p style={{ margin: "0 0 22px", color: "#6E7477", fontSize: 10, letterSpacing: "0.2em" }}>
+          <p style={{ margin: "0 0 22px", color: "#5F6568", fontSize: 10, letterSpacing: "0.2em" }}>
             {content.eyebrow}
           </p>
         ) : null}
@@ -107,10 +112,10 @@ export function PublicPageFallback({
             lineHeight: 1.16,
           }}
         >
-          {content?.title || pageLabel || "页面内容"}
+          {content?.title || pageLabel || (english ? "Page content" : "页面内容")}
         </h1>
         <p style={{ maxWidth: 560, margin: "24px auto 0", color: "#5F6568", fontSize: 14, lineHeight: 1.9 }}>
-          {content?.description || "内容暂不可用，请稍后再试。"}
+          {content?.description || (english ? "Content is temporarily unavailable. Please try again later." : "内容暂不可用，请稍后再试。")}
         </p>
         {content ? (
           <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 12, marginTop: 34 }}>
@@ -172,7 +177,7 @@ export function PublicPageFallback({
               cursor: "pointer",
             }}
           >
-            重新载入内容
+            {english ? "Reload content" : "重新载入内容"}
           </button>
         ) : null}
       </div>
@@ -189,10 +194,12 @@ export default function PublishedPageDecoration({
   pageKey,
   pageLabel,
   documentResource,
+  locale = "zh-CN",
   children,
   replaceChildren = false,
   publicFallback,
 }: PublishedPageDecorationProps) {
+  const english = locale === "en";
   const { pageDocument, status, stale, refresh } = documentResource;
 
   const hasPublishedDocument = Boolean(
@@ -258,7 +265,7 @@ export default function PublishedPageDecoration({
         aria-live="polite"
         style={{ minHeight: "60vh", display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12 }}
       >
-        正在载入{pageLabel || "页面"}
+        {english ? `Loading ${pageLabel || "page"}` : `正在载入${pageLabel || "页面"}`}
       </div>,
     );
   }
@@ -281,6 +288,7 @@ export default function PublishedPageDecoration({
         status={effectiveStatus}
         content={publicFallback}
         onRetry={() => void refresh(true)}
+        locale={locale}
       />,
     );
   }
@@ -289,7 +297,9 @@ export default function PublishedPageDecoration({
     if (!sectionContent.length || !effectiveData) return null;
     const data = { ...effectiveData, content: sectionContent };
     return (
-      <section aria-label={`${pageLabel || "页面"}装修内容${position === "after" ? "补充" : ""}`}>
+      <section aria-label={english
+        ? `${pageLabel || "Page"} ${position === "after" ? "additional " : ""}content`
+        : `${pageLabel || "页面"}装修内容${position === "after" ? "补充" : ""}`}>
         <Suspense
           fallback={
             <div
@@ -297,7 +307,7 @@ export default function PublishedPageDecoration({
               aria-live="polite"
               style={{ minHeight: 120, display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12 }}
             >
-              正在渲染页面内容
+              {english ? "Rendering page content" : "正在渲染页面内容"}
             </div>
           }
         >
@@ -319,7 +329,7 @@ export default function PublishedPageDecoration({
           content.filter((block: { type?: string }) => block?.type !== "业务功能区"),
           "before",
         )}
-        <StaleDocumentNotice visible={stale} onRefresh={() => void refresh()} />
+        <StaleDocumentNotice visible={stale} onRefresh={() => void refresh()} locale={locale} />
       </>
     );
     return withDecorationState(
@@ -334,7 +344,7 @@ export default function PublishedPageDecoration({
       {renderDecoration(beforeContent, "before")}
       {children}
       {renderDecoration(afterContent, "after")}
-      <StaleDocumentNotice visible={stale} onRefresh={() => void refresh()} />
+      <StaleDocumentNotice visible={stale} onRefresh={() => void refresh()} locale={locale} />
     </>,
   );
 }

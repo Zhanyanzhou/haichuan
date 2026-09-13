@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Alert, Button, Spin, message } from "antd";
+import { App as AntdApp, Alert, Button, Spin } from "antd";
 import { customerApi, partnerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AccountExperience from "./AccountExperience";
@@ -69,6 +69,7 @@ function getRequestStatus(error: unknown): number | undefined {
 }
 
 export default function CustomerCenter() {
+  const { message } = AntdApp.useApp();
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [selectionInquiries, setSelectionInquiries] = useState<CustomerSelectionInquiry[]>([]);
   const [selectionInquiryLoading, setSelectionInquiryLoading] = useState(false);

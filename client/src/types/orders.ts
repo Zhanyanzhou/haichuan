@@ -50,6 +50,24 @@ export interface Order {
   } | null;
   salesConsultant?: { id: number; realName?: string; username: string } | null;
   quotationSource?: Quotation | null;
+  /** 报价成交订单的渠道快照；历史零售订单可能为空。 */
+  quoteChannel?: QuoteChannel | null;
+  quotedLines?: QuotedOrderLine[];
+  resourceReservations?: OrderResourceReservation[];
+  quotationVersion?: {
+    id: number;
+    quotationId: number;
+    version: number;
+    status: string;
+    snapshotSchemaVersion?: number | null;
+    contentHash?: string | null;
+  } | null;
+  quotationConversion?: {
+    id: number;
+    quotationVersionId: number;
+    customerId: number;
+    createdAt: string;
+  } | null;
 }
 
 export type OrderStatus =
@@ -97,6 +115,50 @@ export interface OrderItem {
   certNumber?: string;
 }
 
+/** 非标准 SKU 报价成交行。客户响应不包含内部目标金重或重量推导值。 */
+export interface QuotedOrderLine {
+  id: number;
+  productId?: number | null;
+  skuId?: number | null;
+  description: string;
+  quantity: number | string;
+  unitAmount: number | string;
+  lineAmount: number | string;
+  pricingSnapshot?: Record<string, unknown> | null;
+}
+
+export interface OrderResourceReservation {
+  id: number;
+  quotationRequirementId: number;
+  resourceBucketId: number;
+  quantity: number | string;
+  status: "RESERVED" | "CONSUMED" | "RELEASED";
+  reservedAt: string;
+  consumedAt?: string | null;
+  releasedAt?: string | null;
+  resourceBucket?: {
+    id: number;
+    channel: "CUSTOM" | "PARTNER_WAX";
+    kind: "CAPACITY" | "MATERIAL";
+    code: string;
+    bucketKey: string;
+    displayName: string;
+    unit: string;
+  };
+}
+
+export type QuoteChannel = "RETAIL" | "CUSTOM" | "PARTNER_WAX";
+
+export type QuoteVersionStatus =
+  | "DRAFT"
+  | "ISSUED"
+  | "ACCEPTED"
+  | "SUPERSEDED"
+  | "EXPIRED"
+  | "CANCELLED";
+
+export type WaxType = "RED" | "PURPLE";
+
 export type QuotationStatus =
   | "DRAFT"
   | "PENDING_CONFIRM"
@@ -111,12 +173,112 @@ export interface QuotationItem {
   productId?: number | null;
   skuId?: number | null;
   productName: string;
+  /** 不绑定商品的定制/蜡模版本行使用 description。 */
+  description?: string;
   productImage?: string | null;
   spec?: string;
   quantity: number;
   unitPrice: number;
   quotedPrice: number;
   subtotal: number;
+  waxType?: WaxType | null;
+  confirmedWaxWeight?: number | string | null;
+  pricingSnapshot?: {
+    source?: "SKU_FIXED_PRICE" | "CUSTOM_QUOTE" | "CUSTOMER_AGREEMENT" | "SYSTEM_DEFAULT_D19_V1";
+    rate?: number | string | null;
+    rateSourceLabel?: string | null;
+    confirmedWaxWeight?: number | string | null;
+    [key: string]: unknown;
+  } | null;
+}
+
+export interface QuotationVersionFeeLine {
+  id?: number;
+  code: string;
+  displayText: string;
+  calculationMethod: "FIXED" | "PER_GRAM" | "PER_ORDER";
+  rate: number | string;
+  basisQuantity?: number | string | null;
+  amount: number | string;
+  currency: string;
+}
+
+export interface QuotationVersionResourceRequirement {
+  id?: number;
+  kind?: "CAPACITY" | "MATERIAL";
+  code?: string;
+  displayName?: string | null;
+  requiredQuantity: number | string;
+  unit?: string;
+  readiness?: "READY" | "INSUFFICIENT" | "UNAVAILABLE";
+  resourceBucket?: {
+    kind: "CAPACITY" | "MATERIAL";
+    code?: string;
+    displayName: string;
+    unit: string;
+  };
+}
+
+/** 客户可见的协作设计文件版本摘要；刻意不包含内部目标金重。 */
+export interface CooperationDesignFileVersionSummary {
+  id?: number;
+  fileId?: number;
+  designFileId?: number;
+  version: number;
+  fileName?: string | null;
+  originalName?: string | null;
+  byteSize?: number;
+  checksumSha256?: string;
+  downloadUrl?: string;
+  status: "DRAFT" | "SUBMITTED" | "CONFIRMED" | "SUPERSEDED" | "REJECTED";
+  waxType?: WaxType | null;
+  confirmedWaxWeight?: number | string | null;
+  redWaxWeight?: number | string | null;
+  purpleWaxWeight?: number | string | null;
+  confirmedAt?: string | null;
+  confirmedByCustomerId?: number | null;
+}
+
+export interface QuotationVersion {
+  id: number;
+  version: number;
+  status: QuoteVersionStatus;
+  currency: string;
+  subtotal: number | string;
+  discountAmount: number | string;
+  feeAmount: number | string;
+  totalAmount: number | string;
+  validUntil?: string | null;
+  issuedAt?: string | null;
+  acceptedAt?: string | null;
+  snapshotSchemaVersion?: number;
+  items?: Array<{
+    id: number;
+    productId?: number | null;
+    skuId?: number | null;
+    waxType?: WaxType | null;
+    description: string;
+    quantity: number;
+    unitPrice: number | string;
+    subtotal: number | string;
+    pricingSnapshot?: {
+      source?: "SKU_FIXED_PRICE" | "CUSTOM_QUOTE" | "CUSTOMER_AGREEMENT" | "SYSTEM_DEFAULT_D19_V1";
+      rate?: number | string | null;
+      confirmedWaxWeight?: number | string | null;
+      rateSourceLabel?: string | null;
+      [key: string]: unknown;
+    } | null;
+    pricingSource?: string | null;
+    rate?: number | string | null;
+    confirmedWaxWeight?: number | string | null;
+  }>;
+  feeLines?: QuotationVersionFeeLine[];
+  resourceRequirements?: QuotationVersionResourceRequirement[];
+  designFileVersion?: CooperationDesignFileVersionSummary | null;
+  pricingSource?: {
+    code: "SKU_FIXED_PRICE" | "CUSTOM_QUOTE" | "CUSTOMER_AGREEMENT" | "SYSTEM_DEFAULT_D19_V1";
+    label: string;
+  } | null;
 }
 
 export interface Quotation {
@@ -128,6 +290,8 @@ export interface Quotation {
   customerEmail?: string;
   salesConsultantId?: number | null;
   status: QuotationStatus;
+  channel?: QuoteChannel;
+  currentVersion?: number;
   totalAmount: number;
   discountAmount: number;
   finalAmount: number;
@@ -139,6 +303,8 @@ export interface Quotation {
   createdAt: string;
   updatedAt?: string;
   items?: QuotationItem[];
+  versions?: QuotationVersion[];
+  currentVersionRecord?: QuotationVersion | null;
   customer?: { id: number; name?: string; phone: string } | null;
   salesConsultant?: { id: number; realName?: string; username: string } | null;
   convertedOrder?: Order | null;

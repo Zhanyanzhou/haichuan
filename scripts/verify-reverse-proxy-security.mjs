@@ -40,6 +40,12 @@ const checks = [
     assert.match(compose, /http:\/\/127\.0\.0\.1:8081\//);
     assert.doesNotMatch(compose, /wget[^\n]*X-Forwarded-Proto/);
   }],
+  ["旧搜索入口只返回保留查询串的同源相对重定向", () => {
+    const searchLocation = nginx.match(/location = \/search\s*\{([\s\S]*?)\n\s*\}/)?.[1] ?? "";
+    assert.match(searchLocation, /return 308 \/catalog\$is_args\$args;/);
+    assert.match(searchLocation, /absolute_redirect off;/);
+    assert.doesNotMatch(searchLocation, /\$host|\$scheme|\$http_|\$arg_/);
+  }],
   ["Nest 只信直接 Nginx 一跳", () => {
     assert.match(serverMain, /configureProxyTrust\(app\.getHttpAdapter\(\)\.getInstance\(\)\)/);
   }],

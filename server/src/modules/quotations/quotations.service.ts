@@ -7,12 +7,26 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { Prisma, QuotationStatus, Role } from '@prisma/client';
+import { Prisma, QuotationStatus, Role, type QuoteChannel, type WaxType } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { businessDateKey } from '../../common/time/business-date';
 import { runWithDocumentNumberRetry } from '../../common/trade/document-number-retry';
 import { OrdersService } from '../orders/orders.service';
+import type { IssueQuotationDto } from './dto/quotation-commerce.dto';
+import {
+  DEFAULT_WAX_RATES,
+  computeFinalQuoteAmounts,
+  hashBusinessSnapshot,
+  resolveWaxRate,
+  roundMoney,
+  roundWeight,
+  snapshotFeeSortKey,
+  snapshotItemSortKey,
+  snapshotResourceSortKey,
+  sortSnapshotRows,
+} from './quotation-snapshot';
+import { UploadService } from '../upload/upload.service';
 
 export interface QuotationActor {
   id: number;
@@ -38,9 +52,18 @@ export class QuotationsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Optional()
-    private readonly orders?: OrdersService,
+    @Optional() private readonly uploadService?: UploadService,
   ) {}
+
+  private designMediaAuthority() {
+    if (!this.uploadService) throw new Error('UploadService is not configured');
+    return this.uploadService;
+  }
+
+  /** 仅为不可达的旧分步转单实现保留类型锚点；正式服务由 QuotationTransactionService 注入订单服务。 */
+  private get orders(): OrdersService {
+    throw new ServiceUnavailableException('旧分步转单服务已关闭');
+  }
 
   private isAdministrator(actor: QuotationActor) {
     return actor?.role === 'SUPER_ADMIN' || actor?.role === 'ADMIN';
@@ -138,13 +161,14 @@ export class QuotationsService {
   }
 
   async findAll(
-    params: { page?: number; pageSize?: number; status?: string; keyword?: string; salesConsultantId?: number },
+    params: { page?: number; pageSize?: number; status?: string; keyword?: string; salesConsultantId?: number; channel?: QuoteChannel },
     actor: QuotationActor,
   ) {
     const page = Math.max(Number(params.page) || 1, 1);
     const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
     const where: Prisma.QuotationWhereInput = {};
     if (params.status && params.status !== 'all') where.status = params.status as QuotationStatus;
+    if (params.channel) where.channel = params.channel;
     if (this.isAdministrator(actor)) {
       if (params.salesConsultantId) where.salesConsultantId = Number(params.salesConsultantId);
     } else {
@@ -187,10 +211,167 @@ export class QuotationsService {
         customer: { select: { id: true, name: true, phone: true, email: true } },
         salesConsultant: { select: { id: true, realName: true, username: true } },
         convertedOrder: { select: { id: true, orderNo: true, status: true } },
+        versions: {
+          orderBy: { version: 'desc' },
+          select: {
+            id: true,
+            version: true,
+            channel: true,
+            status: true,
+            snapshotSchemaVersion: true,
+            currency: true,
+            subtotalAmount: true,
+            discountAmount: true,
+            feeAmount: true,
+            totalAmount: true,
+            validUntil: true,
+            issuedAt: true,
+            acceptedAt: true,
+            items: true,
+            feeLines: true,
+            resourceRequirements: {
+              include: { resourceBucket: true },
+            },
+            designFileVersion: {
+              select: {
+                id: true,
+                designFileId: true,
+                version: true,
+                status: true,
+                targetGoldWeight: true,
+                redWaxWeight: true,
+                purpleWaxWeight: true,
+                checksumSha256: true,
+                confirmedAt: true,
+              },
+            },
+          },
+        },
       },
     });
     if (!quotation) throw new NotFoundException('报价单不存在');
-    return quotation;
+    return {
+      ...quotation,
+      currentVersionRecord:
+        quotation.versions.find((version) => version.version === quotation.currentVersion) ?? null,
+    };
+  }
+
+  async searchIssueCustomers(params: { keyword?: string; pageSize?: number }) {
+    const keyword = params.keyword?.trim();
+    const list = await this.prisma.customer.findMany({
+      where: {
+        status: 'ACTIVE',
+        ...(keyword
+          ? { OR: [
+              { name: { contains: keyword } },
+              { phone: { contains: keyword } },
+              { email: { contains: keyword } },
+            ] }
+          : {}),
+      },
+      take: Math.min(Math.max(params.pageSize ?? 20, 1), 50),
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        accountType: true,
+        partnerStatus: true,
+        status: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return { list };
+  }
+
+  async getIssueOptions(id: number, actor: QuotationActor) {
+    const quotation = await this.prisma.quotation.findFirst({
+      where: { id, ...this.accessScope(actor) },
+      select: { id: true, channel: true, customerId: true },
+    });
+    if (!quotation) throw new NotFoundException('报价单不存在');
+    const now = new Date();
+    const [feeRuleCandidates, resourceBuckets, designFiles] = await Promise.all([
+      this.prisma.quotationFeeRule.findMany({
+        where: {
+          channel: quotation.channel,
+          effectiveFrom: { lte: now },
+          OR: [{ effectiveUntil: null }, { effectiveUntil: { gt: now } }],
+        },
+        select: {
+          id: true,
+          code: true,
+          version: true,
+          channel: true,
+          waxType: true,
+          calculationMethod: true,
+          unitAmount: true,
+          currency: true,
+          enabled: true,
+          displayText: true,
+        },
+        orderBy: [{ code: 'asc' }, { version: 'desc' }],
+      }),
+      quotation.channel === 'RETAIL'
+        ? Promise.resolve([])
+        : this.prisma.tradeResourceBucket.findMany({
+            where: {
+              channel: quotation.channel,
+              isActive: true,
+              OR: [{ bucketStart: null }, { bucketStart: { lte: now } }],
+              AND: [{ OR: [{ bucketEnd: null }, { bucketEnd: { gt: now } }] }],
+            },
+            select: {
+              id: true,
+              channel: true,
+              kind: true,
+              code: true,
+              bucketKey: true,
+              displayName: true,
+              unit: true,
+              availableQuantity: true,
+              reservedQuantity: true,
+              version: true,
+              bucketStart: true,
+              bucketEnd: true,
+            },
+            orderBy: [{ kind: 'asc' }, { code: 'asc' }, { bucketKey: 'asc' }],
+          }),
+      quotation.channel === 'PARTNER_WAX' && quotation.customerId
+        ? this.prisma.cooperationDesignFile.findMany({
+            where: { customerId: quotation.customerId },
+            select: {
+              id: true,
+              referenceNo: true,
+              currentVersion: true,
+              versions: {
+                where: { status: 'CONFIRMED' },
+                select: {
+                  id: true,
+                  designFileId: true,
+                  version: true,
+                  status: true,
+                  redWaxWeight: true,
+                  purpleWaxWeight: true,
+                  confirmedAt: true,
+                },
+                orderBy: { version: 'desc' },
+              },
+            },
+            orderBy: { updatedAt: 'desc' },
+          })
+        : Promise.resolve([]),
+    ]);
+    const seenFeeCodes = new Set<string>();
+    const feeRules = feeRuleCandidates
+      .filter((rule) => {
+        if (seenFeeCodes.has(rule.code)) return false;
+        seenFeeCodes.add(rule.code);
+        return rule.enabled;
+      })
+      .map(({ enabled: _enabled, ...rule }) => rule);
+    return { feeRules, resourceBuckets, designFiles };
   }
 
   async create(data: {
@@ -341,7 +522,7 @@ export class QuotationsService {
       );
     }
     if (newStatus === 'PENDING_CONFIRM') {
-      return this.issueVersion(id, actor);
+      return this.issueVersion(id, {}, actor);
     }
     if (newStatus === 'CANCELLED') {
       return this.cancelQuotation(id, actor);
@@ -362,6 +543,64 @@ export class QuotationsService {
     return this.prisma.quotation.findFirst({
       where: { id, ...this.accessScope(actor) },
     });
+  }
+
+  issue(id: number, dto: IssueQuotationDto, actor: QuotationActor) {
+    return this.issueVersion(id, dto, actor);
+  }
+
+  async revise(id: number, actor: QuotationActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`);
+      const quotation = await tx.quotation.findFirst({
+        where: { id, ...this.accessScope(actor) },
+      });
+      if (!quotation) throw new NotFoundException('报价单不存在');
+      if (quotation.status !== 'PENDING_CONFIRM') {
+        throw new ConflictException('只有待客户确认的报价可以创建修订版');
+      }
+      const version = await tx.quotationVersion.findUnique({
+        where: { quotationId_version: { quotationId: id, version: quotation.currentVersion } },
+        include: { paymentPlans: { include: { installments: true } }, conversion: true },
+      });
+      const plan = version?.paymentPlans[0];
+      if (
+        !version ||
+        version.status !== 'ISSUED' ||
+        version.conversion != null ||
+        version.paymentPlans.length !== 1 ||
+        !plan ||
+        plan.status !== 'DRAFT' ||
+        plan.orderId != null ||
+        plan.installments.some((installment) =>
+          installment.paymentId != null || !['PENDING', 'DUE'].includes(installment.status),
+        )
+      ) {
+        throw new ConflictException('当前报价版本不可修订');
+      }
+      const superseded = await tx.quotationVersion.updateMany({
+        where: { id: version.id, status: 'ISSUED', acceptedByCustomerId: null },
+        data: { status: 'SUPERSEDED' },
+      });
+      if (superseded.count !== 1) throw new ConflictException('报价版本状态已变化，请刷新后重试');
+      const planIds = version.paymentPlans.map((plan) => plan.id);
+      if (planIds.length) {
+        await tx.paymentPlanInstallment.updateMany({
+          where: { paymentPlanId: { in: planIds }, paymentId: null, status: { in: ['PENDING', 'DUE'] } },
+          data: { status: 'CANCELLED' },
+        });
+      }
+      await tx.paymentPlan.updateMany({
+        where: { quotationVersionId: version.id, status: 'DRAFT', orderId: null },
+        data: { status: 'CANCELLED' },
+      });
+      const reopened = await tx.quotation.updateMany({
+        where: { id, status: 'PENDING_CONFIRM', currentVersion: quotation.currentVersion },
+        data: { status: 'DRAFT' },
+      });
+      if (reopened.count !== 1) throw new ConflictException('报价状态已变化，请刷新后重试');
+      return tx.quotation.findUniqueOrThrow({ where: { id }, include: { items: true } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   private async cancelQuotation(id: number, actor: QuotationActor) {
@@ -451,6 +690,40 @@ export class QuotationsService {
           throw new ConflictException('报价版本状态已变化，请刷新后重试');
         }
       }
+      if (quotation.status === 'PENDING_CONFIRM') {
+        const version = quotation.versions[0];
+        const plan = version?.paymentPlans[0];
+        if (
+          !version ||
+          version.version !== quotation.currentVersion ||
+          version.status !== 'ISSUED' ||
+          version.paymentPlans.length !== 1 ||
+          !plan ||
+          plan.status !== 'DRAFT' ||
+          plan.orderId != null ||
+          quotation.convertedOrderId != null ||
+          plan.installments.some((installment) =>
+            installment.paymentId != null || !['PENDING', 'DUE'].includes(installment.status),
+          )
+        ) {
+          throw new ConflictException('待确认报价已有支付、转单或版本不一致，不能取消');
+        }
+        await tx.paymentPlanInstallment.updateMany({
+          where: { paymentPlanId: plan.id, paymentId: null, status: { in: ['PENDING', 'DUE'] } },
+          data: { status: 'CANCELLED' },
+        });
+        const cancelledPlan = await tx.paymentPlan.updateMany({
+          where: { id: plan.id, status: 'DRAFT', orderId: null },
+          data: { status: 'CANCELLED' },
+        });
+        const cancelledVersion = await tx.quotationVersion.updateMany({
+          where: { id: version.id, status: 'ISSUED', acceptedByCustomerId: null },
+          data: { status: 'CANCELLED' },
+        });
+        if (cancelledPlan.count !== 1 || cancelledVersion.count !== 1) {
+          throw new ConflictException('报价版本或付款计划状态已变化，请刷新后重试');
+        }
+      }
 
       const updated = await tx.quotation.updateMany({
         where: { id, status: quotation.status, ...this.accessScope(actor) },
@@ -465,7 +738,7 @@ export class QuotationsService {
     });
   }
 
-  private async issueVersion(id: number, actor: QuotationActor) {
+  private async issueVersion(id: number, dto: IssueQuotationDto, actor: QuotationActor) {
     return this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<Array<{ id: number }>>(
         Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`,
@@ -496,20 +769,9 @@ export class QuotationsService {
       if (quotation.validUntil && quotation.validUntil.getTime() <= Date.now()) {
         throw new BadRequestException('报价有效期已过，请先更新有效期');
       }
-      if (quotation.channel === 'PARTNER_WAX') {
-        if (
-          quotation.customer.accountType !== 'PARTNER' ||
-          quotation.customer.partnerStatus !== 'APPROVED'
-        ) {
-          throw new ForbiddenException('合作蜡模报价只允许发送给有效合作商家');
-        }
-        throw new ServiceUnavailableException(
-          '合作蜡模报价仍需绑定确认设计版本和生效价格协议，当前保持暂停',
-        );
-      }
       const version = quotation.currentVersion + 1;
       const customerSnapshot = {
-        version: 1,
+        version: 2,
         legacy: false,
         customerId: quotation.customerId,
         customerName: quotation.customerName,
@@ -518,37 +780,325 @@ export class QuotationsService {
         salesConsultantId: quotation.salesConsultantId,
         depositAmount: quotation.depositAmount.toString(),
       };
-      const versionItems = quotation.items.map((item) => ({
-        productId: item.productId,
-        skuId: item.skuId,
-        description: [item.productName, item.spec].filter(Boolean).join(' / '),
-        quantity: item.quantity,
-        unitPrice: item.quotedPrice,
-        subtotal: item.subtotal,
-        pricingSnapshot: {
-          version: 1,
-          originalUnitPrice: item.unitPrice.toString(),
-          quotedUnitPrice: item.quotedPrice.toString(),
-          productName: item.productName,
-          productImage: item.productImage,
-          spec: item.spec,
+      const now = new Date();
+      const channel = quotation.channel;
+      let designFileVersionId: number | null = null;
+      let partnerPriceAgreementId: number | null = null;
+      let pricing: Prisma.JsonObject = { method: channel === 'RETAIL' ? 'SKU_FIXED' : 'QUOTED' };
+      let internalDesign: Prisma.JsonObject | null = null;
+      let waxWeight: Prisma.Decimal | null = null;
+      let versionItems: Array<{
+        productId: number | null;
+        skuId: number | null;
+        waxType: WaxType | null;
+        description: string;
+        quantity: number;
+        unitPrice: Prisma.Decimal;
+        subtotal: Prisma.Decimal;
+        pricingSnapshot: Prisma.JsonObject;
+      }>;
+
+      if (channel === 'RETAIL') {
+        if (dto.designFileVersionId || dto.waxType || dto.resourceRequirements?.length) {
+          throw new BadRequestException('零售报价不能绑定 3D 文件、蜡种或定制资源');
+        }
+        const skuIds = quotation.items.map((item) => item.skuId).filter((value): value is number => value != null);
+        if (skuIds.length !== quotation.items.length || new Set(skuIds).size !== skuIds.length) {
+          throw new BadRequestException('零售报价每一行必须绑定唯一 SKU');
+        }
+        const skus = await tx.productSKU.findMany({
+          where: { id: { in: skuIds }, isActive: true },
+          select: {
+            id: true,
+            productId: true,
+            price: true,
+            skuCode: true,
+            product: { select: { name: true, code: true, status: true, salesMode: true } },
+          },
+        });
+        if (skus.length !== skuIds.length) throw new BadRequestException('零售报价包含无效 SKU');
+        const skuById = new Map(skus.map((sku) => [sku.id, sku]));
+        versionItems = quotation.items.map((item) => {
+          const sku = skuById.get(item.skuId!);
+          if (!sku || sku.productId !== item.productId || sku.product.status !== 'PUBLISHED' || sku.product.salesMode !== 'DIRECT_PURCHASE') {
+            throw new BadRequestException('零售报价只能使用当前可直接购买的商品规格');
+          }
+          const unitPrice = roundMoney(sku.price);
+          const subtotal = roundMoney(unitPrice.mul(item.quantity));
+          return {
+            productId: sku.productId,
+            skuId: sku.id,
+            waxType: null,
+            description: [sku.product.name, item.spec].filter(Boolean).join(' / '),
+            quantity: item.quantity,
+            unitPrice,
+            subtotal,
+            pricingSnapshot: {
+              version: 2,
+              method: 'SKU_FIXED',
+              productName: sku.product.name,
+              productCode: sku.product.code,
+              productImage: item.productImage,
+              skuCode: sku.skuCode,
+              spec: item.spec,
+            },
+          };
+        });
+      } else if (channel === 'PARTNER_WAX') {
+        if (quotation.customer.accountType !== 'PARTNER' || quotation.customer.partnerStatus !== 'APPROVED') {
+          throw new ForbiddenException('合作蜡模报价只允许发送给有效合作商家');
+        }
+        if (!dto.designFileVersionId || !dto.waxType) {
+          throw new BadRequestException('合作蜡模报价必须选择客户已确认的 3D 文件版本和蜡种');
+        }
+        if (quotation.items.length !== 1) {
+          throw new BadRequestException('合作蜡模报价必须且只能包含一个文件计价行');
+        }
+        const design = await tx.cooperationDesignFileVersion.findFirst({
+          where: {
+            id: dto.designFileVersionId,
+            status: 'CONFIRMED',
+            confirmedByCustomerId: quotation.customerId,
+            designFile: { customerId: quotation.customerId },
+          },
+          include: {
+            designFile: { select: { referenceNo: true, currentVersion: true } },
+            mediaAsset: {
+              select: {
+                id: true,
+                storageKey: true,
+                originalName: true,
+                mimeType: true,
+                byteSize: true,
+                checksumSha256: true,
+                accessLevel: true,
+                status: true,
+              },
+            },
+          },
+        });
+        if (!design || design.version !== design.designFile.currentVersion) {
+          throw new ConflictException('只能使用客户本人确认的当前 3D 文件版本');
+        }
+        const verifiedDesignMedia = await this.designMediaAuthority().readVerifiedDesignFile(
+          design.mediaAsset,
+          design.checksumSha256,
+        );
+        waxWeight = dto.waxType === 'RED' ? design.redWaxWeight : design.purpleWaxWeight;
+        if (!waxWeight || waxWeight.lte(0)) throw new BadRequestException('所选蜡种缺少已确认蜡重');
+        waxWeight = roundWeight(waxWeight);
+        const agreements = await tx.partnerPriceAgreement.findMany({
+          where: {
+            customerId: quotation.customerId!,
+            effectiveFrom: { lte: now },
+            OR: [{ effectiveUntil: null }, { effectiveUntil: { gt: now } }],
+          },
+          orderBy: [{ effectiveFrom: 'desc' }, { version: 'desc' }],
+          take: 2,
+        });
+        if (agreements.length > 1) {
+          throw new ConflictException('合作客户存在重叠生效的双蜡价，请先修复价格协议');
+        }
+        const agreement = agreements[0] ?? null;
+        const effectiveRate = resolveWaxRate(dto.waxType, agreement);
+        const rate = effectiveRate.rate;
+        const unitPrice = roundMoney(waxWeight.mul(rate));
+        const item = quotation.items[0];
+        designFileVersionId = design.id;
+        partnerPriceAgreementId = effectiveRate.agreementId;
+        pricing = {
+          method: 'WAX_WEIGHT_RATE',
+          waxType: dto.waxType,
+          confirmedWaxWeight: waxWeight.toFixed(3),
+          rate: roundMoney(rate).toFixed(2),
+          rateSource: effectiveRate.source,
+          agreementId: agreement?.id ?? null,
+          agreementVersion: agreement?.version ?? null,
+          agreementEffectiveFrom: agreement?.effectiveFrom.toISOString() ?? null,
+          agreementEffectiveUntil: agreement?.effectiveUntil?.toISOString() ?? null,
+        };
+        internalDesign = {
+          designFileVersionId: design.id,
+          designFileVersion: design.version,
+          referenceNo: design.designFile.referenceNo,
+          mediaAssetId: design.mediaAsset.id,
+          originalName: verifiedDesignMedia.originalName,
+          byteSize: verifiedDesignMedia.byteSize,
+          mimeType: verifiedDesignMedia.mimeType,
+          checksumSha256: verifiedDesignMedia.checksumSha256,
+          targetGoldWeight: design.targetGoldWeight?.toFixed(3) ?? null,
+        };
+        versionItems = [{
+          productId: item.productId,
+          skuId: null,
+          waxType: dto.waxType,
+          description: item.productName,
+          quantity: 1,
+          unitPrice,
+          subtotal: unitPrice,
+          pricingSnapshot: {
+            version: 2,
+            productName: item.productName,
+            productImage: item.productImage,
+            ...pricing,
+          },
+        }];
+      } else {
+        if (dto.designFileVersionId || dto.waxType) {
+          throw new BadRequestException('高级定制报价不能使用合作蜡模文件计价字段');
+        }
+        versionItems = quotation.items.map((item) => ({
+          productId: item.productId,
+          skuId: item.skuId,
+          waxType: null,
+          description: [item.productName, item.spec].filter(Boolean).join(' / '),
+          quantity: item.quantity,
+          unitPrice: roundMoney(item.quotedPrice),
+          subtotal: roundMoney(item.quotedPrice.mul(item.quantity)),
+          pricingSnapshot: {
+            version: 2,
+            method: 'QUOTED',
+            productName: item.productName,
+            productImage: item.productImage,
+            spec: item.spec,
+          },
+        }));
+      }
+
+      const requestedResources = dto.resourceRequirements ?? [];
+      if (channel !== 'RETAIL') {
+        const resourceIds = requestedResources.map((item) => item.resourceBucketId);
+        if (resourceIds.length !== new Set(resourceIds).size) throw new BadRequestException('报价资源桶不能重复');
+        const buckets = await tx.tradeResourceBucket.findMany({ where: { id: { in: resourceIds }, isActive: true } });
+        if (buckets.length !== resourceIds.length) throw new BadRequestException('报价包含无效资源桶');
+        if (buckets.some((bucket) => bucket.channel !== channel)) throw new BadRequestException('资源桶与报价通道不匹配');
+        if (buckets.some((bucket) =>
+          (bucket.bucketStart && bucket.bucketStart > now) ||
+          (bucket.bucketEnd && bucket.bucketEnd <= now),
+        )) throw new BadRequestException('报价包含当前未生效的资源桶');
+        const kinds = new Set(buckets.map((bucket) => bucket.kind));
+        if (!kinds.has('CAPACITY') || !kinds.has('MATERIAL')) {
+          throw new BadRequestException('定制与合作蜡模报价必须同时配置产能和材料门禁');
+        }
+      }
+
+      const requestedFeeIds = dto.feeRuleIds ?? [];
+      if (requestedFeeIds.length !== new Set(requestedFeeIds).size) throw new BadRequestException('费用规则不能重复');
+      const feeRules = await tx.quotationFeeRule.findMany({
+        where: {
+          id: { in: requestedFeeIds },
+          channel,
+          effectiveFrom: { lte: now },
+          OR: [{ effectiveUntil: null }, { effectiveUntil: { gt: now } }],
         },
-      }));
-      const content = {
+      });
+      if (feeRules.length !== requestedFeeIds.length) throw new BadRequestException('报价包含无效或未生效的费用规则');
+      if (new Set(feeRules.map((rule) => rule.code)).size !== feeRules.length) {
+        throw new BadRequestException('同一报价不能选择同代码的多个费用版本');
+      }
+      const currentFeeVersions = feeRules.length === 0
+        ? []
+        : await tx.quotationFeeRule.findMany({
+            where: {
+              channel,
+              code: { in: feeRules.map((rule) => rule.code) },
+              effectiveFrom: { lte: now },
+              OR: [{ effectiveUntil: null }, { effectiveUntil: { gt: now } }],
+            },
+            orderBy: [{ code: 'asc' }, { version: 'desc' }],
+          });
+      const currentFeeByCode = new Map<string, (typeof currentFeeVersions)[number]>();
+      for (const rule of currentFeeVersions) {
+        if (!currentFeeByCode.has(rule.code)) currentFeeByCode.set(rule.code, rule);
+      }
+      if (feeRules.some((rule) => !rule.enabled || currentFeeByCode.get(rule.code)?.id !== rule.id)) {
+        throw new BadRequestException('报价费用规则已被新版替代或停用');
+      }
+      if (feeRules.some((rule) => rule.waxType != null && rule.waxType !== dto.waxType)) {
+        throw new BadRequestException('费用规则与所选蜡种不匹配');
+      }
+      const feeLines = feeRules.map((rule) => {
+        const basisQuantity = rule.calculationMethod === 'PER_GRAM' ? waxWeight : null;
+        if (rule.calculationMethod === 'PER_GRAM' && !basisQuantity) {
+          throw new BadRequestException('按克费用只能用于具有确认蜡重的报价');
+        }
+        const amount = roundMoney(
+          rule.calculationMethod === 'PER_GRAM'
+            ? rule.unitAmount.mul(basisQuantity!)
+            : rule.unitAmount,
+        );
+        return {
+          feeRuleId: rule.id,
+          code: rule.code,
+          displayText: rule.displayText,
+          calculationMethod: rule.calculationMethod,
+          rate: roundMoney(rule.unitAmount),
+          basisQuantity,
+          amount,
+          currency: rule.currency,
+        };
+      });
+      const { subtotalAmount, discountAmount, feeAmount, totalAmount } =
+        computeFinalQuoteAmounts(
+          versionItems.map((item) => item.subtotal),
+          feeLines.map((item) => item.amount),
+        );
+      if (totalAmount.lte(0)) throw new BadRequestException('提交报价前必须设置正数成交总额');
+      const buckets = channel === 'RETAIL' ? [] : await tx.tradeResourceBucket.findMany({
+        where: { id: { in: requestedResources.map((item) => item.resourceBucketId) } },
+      });
+      const bucketById = new Map(buckets.map((bucket) => [bucket.id, bucket]));
+      const businessSnapshot: Prisma.JsonObject = {
+        schemaVersion: 2,
+        quotationId: quotation.id,
+        quoteNo: quotation.quoteNo,
         version,
-        channel: quotation.channel,
+        channel,
         currency: 'CNY',
-        subtotalAmount: quotation.totalAmount.toString(),
-        discountAmount: quotation.discountAmount.toString(),
-        feeAmount: '0',
-        totalAmount: quotation.finalAmount.toString(),
         validUntil: quotation.validUntil?.toISOString() ?? null,
-        customerSnapshot,
-        items: versionItems,
+        customer: customerSnapshot,
+        pricing,
+        internalDesign,
+        items: sortSnapshotRows(versionItems.map((item) => ({
+          productId: item.productId,
+          skuId: item.skuId,
+          waxType: item.waxType,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice.toFixed(2),
+          subtotal: item.subtotal.toFixed(2),
+          pricingSnapshot: item.pricingSnapshot,
+        })), snapshotItemSortKey),
+        fees: sortSnapshotRows(feeLines.map((line) => ({
+          feeRuleId: line.feeRuleId,
+          code: line.code,
+          displayText: line.displayText,
+          calculationMethod: line.calculationMethod,
+          rate: line.rate.toFixed(2),
+          basisQuantity: line.basisQuantity?.toFixed(3) ?? null,
+          amount: line.amount.toFixed(2),
+        })), snapshotFeeSortKey),
+        resources: sortSnapshotRows(requestedResources.map((requirement) => {
+          const bucket = bucketById.get(requirement.resourceBucketId)!;
+          return {
+            resourceBucketId: bucket.id,
+            channel: bucket.channel,
+            kind: bucket.kind,
+            code: bucket.code,
+            bucketKey: bucket.bucketKey,
+            displayName: bucket.displayName,
+            unit: bucket.unit,
+            requiredQuantity: roundWeight(requirement.requiredQuantity).toFixed(3),
+          };
+        }), snapshotResourceSortKey),
+        amounts: {
+          subtotalAmount: subtotalAmount.toFixed(2),
+          discountAmount: discountAmount.toFixed(2),
+          feeAmount: feeAmount.toFixed(2),
+          totalAmount: totalAmount.toFixed(2),
+        },
       };
-      const contentHash = createHash('sha256')
-        .update(JSON.stringify(this.canonicalVersionContent(content)))
-        .digest('hex');
+      const contentHash = hashBusinessSnapshot(businessSnapshot);
       const quotationVersion = await tx.quotationVersion.create({
         data: {
           quotationId: quotation.id,
@@ -556,22 +1106,45 @@ export class QuotationsService {
           channel: quotation.channel,
           status: 'ISSUED',
           currency: 'CNY',
-          subtotalAmount: quotation.totalAmount,
-          discountAmount: quotation.discountAmount,
-          feeAmount: 0,
-          totalAmount: quotation.finalAmount,
+          subtotalAmount,
+          discountAmount,
+          feeAmount,
+          totalAmount,
           validUntil: quotation.validUntil,
           contentHash,
           customerSnapshot,
+          snapshotSchemaVersion: 2,
+          businessSnapshot,
+          designFileVersionId,
+          partnerPriceAgreementId,
           createdBy: actor.id,
           issuedAt: new Date(),
           items: {
             create: versionItems,
           },
+          feeLines: { create: feeLines },
+          resourceRequirements: {
+            create: requestedResources.map((requirement) => {
+              const bucket = bucketById.get(requirement.resourceBucketId)!;
+              return {
+                resourceBucketId: requirement.resourceBucketId,
+                requiredQuantity: roundWeight(requirement.requiredQuantity),
+                resourceSnapshot: {
+                  version: 1,
+                  channel: bucket.channel,
+                  kind: bucket.kind,
+                  code: bucket.code,
+                  bucketKey: bucket.bucketKey,
+                  displayName: bucket.displayName,
+                  unit: bucket.unit,
+                },
+              };
+            }),
+          },
         },
-        include: { items: true },
+        include: { items: true, feeLines: true, resourceRequirements: true },
       });
-      const finalCents = Math.round(Number(quotation.finalAmount) * 100);
+      const finalCents = Math.round(Number(totalAmount) * 100);
       const depositCents = Math.round(Number(quotation.depositAmount) * 100);
       if (finalCents <= 0) {
         throw new BadRequestException('提交报价前必须设置正数成交总额');
@@ -584,19 +1157,25 @@ export class QuotationsService {
             { sequence: 1, label: '定金', amount: new Prisma.Decimal(depositCents).div(100) },
             { sequence: 2, label: '尾款', amount: new Prisma.Decimal(finalCents - depositCents).div(100) },
           ].filter((item) => Number(item.amount) > 0)
-        : [{ sequence: 1, label: '全款', amount: quotation.finalAmount }];
+        : [{ sequence: 1, label: '全款', amount: totalAmount }];
       await tx.paymentPlan.create({
         data: {
           quotationVersionId: quotationVersion.id,
           currency: 'CNY',
-          totalAmount: quotation.finalAmount,
+          totalAmount,
           status: 'DRAFT',
           installments: { create: installments },
         },
       });
       const updated = await tx.quotation.updateMany({
         where: { id, status: 'DRAFT', currentVersion: quotation.currentVersion },
-        data: { status: 'PENDING_CONFIRM', currentVersion: version },
+        data: {
+          status: 'PENDING_CONFIRM',
+          currentVersion: version,
+          totalAmount: subtotalAmount,
+          discountAmount,
+          finalAmount: totalAmount,
+        },
       });
       if (updated.count === 0) {
         throw new ConflictException('报价单状态已变化，请刷新后重试');
@@ -606,7 +1185,7 @@ export class QuotationsService {
   }
 
   async findForCustomer(customerId: number) {
-    return this.prisma.quotation.findMany({
+    const quotations = await this.prisma.quotation.findMany({
       where: {
         customerId,
         status: { in: ['PENDING_CONFIRM', 'CONFIRMED', 'CONVERTED', 'EXPIRED'] },
@@ -627,6 +1206,7 @@ export class QuotationsService {
             id: true,
             version: true,
             status: true,
+            snapshotSchemaVersion: true,
             currency: true,
             totalAmount: true,
             validUntil: true,
@@ -637,24 +1217,203 @@ export class QuotationsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    return quotations.map((quotation) => ({
+      ...quotation,
+      currentVersionRecord: quotation.versions[0] ?? null,
+    }));
   }
 
   async findForCustomerById(customerId: number, id: number) {
     const quotation = await this.prisma.quotation.findFirst({
       where: { id, customerId, status: { not: 'DRAFT' } },
-      include: {
+      select: {
+        id: true,
+        quoteNo: true,
+        channel: true,
+        status: true,
+        currentVersion: true,
+        finalAmount: true,
+        validUntil: true,
+        convertedOrderId: true,
         versions: {
           orderBy: { version: 'desc' },
-          include: { items: true, paymentPlans: { include: { installments: true } } },
+          select: {
+            id: true,
+            version: true,
+            channel: true,
+            status: true,
+            snapshotSchemaVersion: true,
+            currency: true,
+            subtotalAmount: true,
+            discountAmount: true,
+            feeAmount: true,
+            totalAmount: true,
+            validUntil: true,
+            issuedAt: true,
+            acceptedAt: true,
+            items: {
+              select: {
+                id: true,
+                productId: true,
+                skuId: true,
+                waxType: true,
+                description: true,
+                quantity: true,
+                unitPrice: true,
+                subtotal: true,
+                pricingSnapshot: true,
+              },
+            },
+            feeLines: {
+              select: {
+                id: true,
+                code: true,
+                displayText: true,
+                calculationMethod: true,
+                rate: true,
+                basisQuantity: true,
+                amount: true,
+                currency: true,
+              },
+            },
+            resourceRequirements: {
+              select: {
+                requiredQuantity: true,
+                resourceBucket: {
+                  select: { kind: true, displayName: true, unit: true },
+                },
+              },
+            },
+            designFileVersion: {
+              select: {
+                id: true,
+                designFileId: true,
+                version: true,
+                status: true,
+                checksumSha256: true,
+                redWaxWeight: true,
+                purpleWaxWeight: true,
+                confirmedAt: true,
+                designFile: { select: { referenceNo: true } },
+                mediaAsset: { select: { originalName: true, byteSize: true } },
+              },
+            },
+            paymentPlans: {
+              select: {
+                id: true,
+                status: true,
+                currency: true,
+                totalAmount: true,
+                installments: {
+                  select: { sequence: true, label: true, amount: true, dueAt: true, status: true },
+                  orderBy: { sequence: 'asc' },
+                },
+              },
+            },
+          },
         },
         convertedOrder: { select: { id: true, orderNo: true, status: true } },
       },
     });
     if (!quotation) throw new NotFoundException('报价单不存在或无权访问');
-    return quotation;
+    const versions = quotation.versions.map((version) => {
+      const safeItems = version.items.map((item) => {
+        const pricing = item.pricingSnapshot && typeof item.pricingSnapshot === 'object' && !Array.isArray(item.pricingSnapshot)
+          ? item.pricingSnapshot as Prisma.JsonObject
+          : {};
+        const source = String(pricing.rateSource ?? pricing.method ?? 'CUSTOM_QUOTE');
+        const sourceCode = source === 'SKU_FIXED'
+          ? 'SKU_FIXED_PRICE'
+          : source === 'QUOTED'
+            ? 'CUSTOM_QUOTE'
+            : source;
+        const rateSourceLabel = sourceCode === 'CUSTOMER_AGREEMENT'
+          ? '客户专属协议价'
+          : sourceCode === 'SYSTEM_DEFAULT_D19_V1'
+            ? '系统默认合作价'
+            : sourceCode === 'SKU_FIXED_PRICE'
+              ? 'SKU 固定价'
+              : '定制报价';
+        return {
+          id: item.id,
+          productId: item.productId,
+          skuId: item.skuId,
+          waxType: item.waxType,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          subtotal: item.subtotal,
+          pricingSnapshot: {
+            source: sourceCode,
+            confirmedWaxWeight: pricing.confirmedWaxWeight ?? null,
+            rate: pricing.rate ?? null,
+            rateSourceLabel,
+          },
+          pricingSource: sourceCode,
+          confirmedWaxWeight: pricing.confirmedWaxWeight ?? null,
+          rate: pricing.rate ?? null,
+        };
+      });
+      const source = safeItems[0]?.pricingSource ?? 'CUSTOM_QUOTE';
+      const pricingSource = source === 'CUSTOMER_AGREEMENT'
+        ? { code: source, label: '客户专属协议价' }
+        : source === 'SYSTEM_DEFAULT_D19_V1'
+          ? { code: source, label: '系统默认合作价' }
+          : source === 'SKU_FIXED_PRICE'
+            ? { code: source, label: 'SKU 固定价' }
+            : { code: 'CUSTOM_QUOTE', label: '定制报价' };
+      const waxType = safeItems.find((item) => item.waxType)?.waxType ?? null;
+      return {
+        ...version,
+        subtotal: version.subtotalAmount,
+        items: safeItems,
+        feeLines: version.feeLines,
+        resourceRequirements: version.resourceRequirements.map((requirement) => ({
+          kind: requirement.resourceBucket.kind,
+          displayName: requirement.resourceBucket.displayName,
+          unit: requirement.resourceBucket.unit,
+          requiredQuantity: requirement.requiredQuantity,
+          resourceBucket: requirement.resourceBucket,
+        })),
+        designFileVersion: version.designFileVersion ? {
+          id: version.designFileVersion.id,
+          fileId: version.designFileVersion.designFileId,
+          designFileId: version.designFileVersion.designFileId,
+          fileName: version.designFileVersion.designFile.referenceNo,
+          originalName: version.designFileVersion.mediaAsset.originalName,
+          byteSize: version.designFileVersion.mediaAsset.byteSize,
+          checksumSha256: version.designFileVersion.checksumSha256,
+          downloadUrl: `/api/customers/me/cooperation-design-files/${version.designFileVersion.designFileId}/versions/${version.designFileVersion.version}/content`,
+          version: version.designFileVersion.version,
+          status: version.designFileVersion.status,
+          waxType,
+          confirmedWaxWeight: waxType === 'RED'
+            ? version.designFileVersion.redWaxWeight
+            : waxType === 'PURPLE'
+              ? version.designFileVersion.purpleWaxWeight
+              : null,
+          redWaxWeight: version.designFileVersion.redWaxWeight,
+          purpleWaxWeight: version.designFileVersion.purpleWaxWeight,
+          confirmedAt: version.designFileVersion.confirmedAt,
+        } : null,
+        pricingSource,
+      };
+    });
+    return {
+      ...quotation,
+      versions,
+      currentVersionRecord:
+        versions.find((version) => version.version === quotation.currentVersion) ?? null,
+    };
   }
 
   async acceptCurrentVersion(customerId: number, id: number) {
+    void customerId;
+    void id;
+    throw new ServiceUnavailableException(
+      '分步接受入口已关闭，请使用客户报价确认并转单的原子入口',
+    );
+    /* istanbul ignore next -- legacy implementation kept unreachable during compatibility cleanup */
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`);
       const quotation = await tx.quotation.findFirst({
@@ -728,6 +1487,13 @@ export class QuotationsService {
     id: number,
     data: { address: string },
   ) {
+    void customerId;
+    void id;
+    void data;
+    throw new ServiceUnavailableException(
+      '分步转单入口已关闭，请使用客户报价确认并转单的原子入口',
+    );
+    /* istanbul ignore next -- legacy implementation kept unreachable during compatibility cleanup */
     const address = data.address?.trim();
     if (!address) throw new BadRequestException('请提供有效的收货地址');
     return runWithDocumentNumberRetry({

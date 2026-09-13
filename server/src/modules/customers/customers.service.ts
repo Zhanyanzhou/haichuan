@@ -832,6 +832,7 @@ export class CustomersService {
       });
       await transaction.customerAddress.deleteMany({ where: { customerId } });
       await transaction.customerFavorite.deleteMany({ where: { customerId } });
+      await transaction.notificationPreference.deleteMany({ where: { customerId } });
       await transaction.notificationDelivery.updateMany({
         where: {
           notification: { customerId },
@@ -839,6 +840,7 @@ export class CustomersService {
         },
         data: {
           status: 'CANCELLED',
+          destinationHash: null,
           nextAttemptAt: null,
           lastErrorCode: 'CUSTOMER_ACCOUNT_CLOSED',
         },

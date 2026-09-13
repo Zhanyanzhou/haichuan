@@ -167,6 +167,8 @@ export type PageSessionCache = {
   metadata: Record<string, unknown>;
   lastSaved: string | null;
   updatedAt: string | null;
+  contentHash: string | null;
+  reviewStatus: "DRAFT" | "IN_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
 };
 
 export type PageEditorHistorySnapshot = {

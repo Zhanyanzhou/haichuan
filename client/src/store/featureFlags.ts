@@ -17,6 +17,7 @@ export interface CommerceFlags {
   commerceEnabled: boolean;
   cartEnabled: boolean;
   paymentEnabled: boolean;
+  quotationOrderingEnabled: boolean;
   partnerApplicationsWriteEnabled: boolean;
 }
 
@@ -24,6 +25,7 @@ const SAFE_FLAGS: CommerceFlags = {
   commerceEnabled: false,
   cartEnabled: false,
   paymentEnabled: false,
+  quotationOrderingEnabled: false,
   partnerApplicationsWriteEnabled: false,
 };
 
@@ -47,6 +49,7 @@ export const useCommerceFlags = create<CommerceFlagsState>((set, get) => ({
           commerceEnabled: Boolean(data.commerceEnabled),
           cartEnabled: Boolean(data.cartEnabled),
           paymentEnabled: Boolean(data.paymentEnabled),
+          quotationOrderingEnabled: Boolean(data.quotationOrderingEnabled),
           partnerApplicationsWriteEnabled: Boolean(data.partnerApplicationsWriteEnabled),
         },
       });
@@ -68,6 +71,17 @@ export function useCommerceEnabled(): boolean {
     if (!flags && !loading) void load();
   }, [flags, loading, load]);
   return flags?.commerceEnabled ?? false;
+}
+
+/** 报价确认转单使用独立门禁；加载失败或字段缺失时保持关闭。 */
+export function useQuotationOrderingEnabled(): boolean {
+  const flags = useCommerceFlags((s) => s.flags);
+  const loading = useCommerceFlags((s) => s.loading);
+  const load = useCommerceFlags((s) => s.load);
+  useEffect(() => {
+    if (!flags && !loading) void load();
+  }, [flags, loading, load]);
+  return flags?.quotationOrderingEnabled ?? false;
 }
 
 /** 交易页面读取完整能力集合；加载失败仍返回安全关闭值。 */

@@ -1,8 +1,10 @@
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS build
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS build
 
 WORKDIR /app
 
-RUN apk add --no-cache openssl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -12,24 +14,27 @@ COPY tsconfig.json nest-cli.json ./
 COPY src ./src
 RUN npx prisma generate && npm run build
 
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS runtime-deps
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runtime-deps
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --omit=optional
+RUN npm ci --omit=dev --include=optional --legacy-peer-deps \
+    && rm -rf node_modules/prisma node_modules/.bin/prisma
 
 # 受签名运维镜像：从锁文件安装出的构建层仅复制 Prisma CLI 的闭包，
 # 并固化备份脚本、bash 与数据库客户端；不携带完整开发工具链。
 FROM runtime-deps AS operations
 
-RUN apk add --no-cache bash mariadb-client openssl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends default-mysql-client openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/node_modules/prisma ./node_modules/prisma
 COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 RUN mkdir -p node_modules/.bin \
-    && ln -s ../prisma/build/index.js node_modules/.bin/prisma
+    && ln -sf ../prisma/build/index.js node_modules/.bin/prisma
 COPY --from=build /app/dist ./dist
 COPY prisma ./prisma
 COPY scripts/backup.sh scripts/check-backup-health.sh scripts/restore.sh scripts/restore-drill.sh scripts/prune-backups.sh /usr/local/bin/
@@ -68,13 +73,15 @@ LABEL org.opencontainers.image.source="${BUILD_SOURCE}" \
       io.haichuan.component="server" \
       io.haichuan.migration-bundle-sha256="${MIGRATION_BUNDLE_SHA256}"
 
-RUN apk add --no-cache openssl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/dist ./dist
 COPY prisma ./prisma
 
-RUN mkdir -p /app/uploads /app/private-media/products \
+RUN mkdir -p /app/uploads /app/private-media/page-assets-archive /app/private-media/products \
     && chown -R node:node /app/uploads /app/private-media
 
 USER node

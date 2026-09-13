@@ -24,6 +24,79 @@ async function fulfillJson(route: Route, data: unknown, status = 200) {
 }
 
 test.describe("后台经营底座第一批状态", () => {
+  test("通知故障台只展示无联系信息摘要并区分安全重投与人工核对", async ({ page }) => {
+    await authenticateAdmin(page);
+    let retryCalls = 0;
+    let safeFailurePending = true;
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path.endsWith("/api/auth/profile")) return route.fallback();
+      if (path.endsWith("/api/notification-operations/failures") && request.method() === "GET") {
+        await fulfillJson(route, {
+          list: [
+            ...(safeFailurePending ? [{
+              id: 81,
+              notificationId: 41,
+              notificationType: "ORDER_CREATED",
+              notificationStatus: "AVAILABLE",
+              deliveryStatus: "FAILED",
+              attempts: 5,
+              lastErrorCode: "SMTP_SEND_FAILED",
+              retryable: true,
+              updatedAt: "2026-09-12T01:05:00.000Z",
+            }] : []),
+            {
+              id: 82,
+              notificationId: 42,
+              notificationType: "PAYMENT_CONFIRMED",
+              notificationStatus: "AVAILABLE",
+              deliveryStatus: "FAILED",
+              attempts: 1,
+              lastErrorCode: "DELIVERY_RESULT_UNKNOWN",
+              retryable: false,
+              updatedAt: "2026-09-12T01:06:00.000Z",
+            },
+          ],
+          total: safeFailurePending ? 2 : 1,
+          page: 1,
+          pageSize: 20,
+        });
+        return;
+      }
+      if (
+        path.endsWith("/api/notification-operations/failures/81/retry")
+        && request.method() === "POST"
+      ) {
+        retryCalls += 1;
+        safeFailurePending = false;
+        await fulfillJson(route, { eventId: 81, notificationId: 41, status: "PENDING" });
+        return;
+      }
+      if (path.endsWith("/api/settings/logs")) {
+        await fulfillJson(route, { list: [], total: 0, page: 1, pageSize: 30 });
+        return;
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto("/admin/audit-logs");
+    await expect(page.getByRole("heading", { name: "通知投递故障" })).toBeVisible();
+    await expect(page.getByText("ORDER_CREATED · #41")).toBeVisible();
+    await expect(page.getByText("PAYMENT_CONFIRMED · #42")).toBeVisible();
+    await expect(page.getByText("需人工核对")).toBeVisible();
+    await expect(page.getByText(/@|1380000|customer@example/)).toHaveCount(0);
+
+    await page.getByRole("button", { name: "重投通知事件 81" }).click();
+    await page.getByRole("button", { name: "重新投递", exact: true }).click();
+
+    await expect(page.getByText("已重新进入投递队列，最终结果将写入操作日志")).toBeVisible();
+    await expect.poll(() => retryCalls).toBe(1);
+    await expect(page.getByText("ORDER_CREATED · #41")).toHaveCount(0);
+    await expect(page.getByText("PAYMENT_CONFIRMED · #42")).toBeVisible();
+  });
+
   test("合作申请加载失败可重试，审核写请求保持可恢复且移动端不产生页面级横向滚动", async ({
     page,
   }) => {

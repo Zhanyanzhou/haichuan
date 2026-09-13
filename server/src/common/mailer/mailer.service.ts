@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import {
   type ExternalProviderAdapter,
+  ExternalProviderError,
   type ExternalProviderOperationContext,
   runExternalProviderOperation,
 } from '../payment-gateway/external-provider.contract';
@@ -140,9 +141,14 @@ export class MailerService implements ExternalProviderAdapter {
         },
       );
       return { delivered: true };
-    } catch {
+    } catch (error) {
       this.logger.error('邮件发送失败（收件地址、主题与提供商错误已脱敏）');
-      return { delivered: false, reason: 'send_failed' };
+      const resultUnknown = error instanceof ExternalProviderError
+        && ['TIMEOUT', 'NETWORK', 'UNKNOWN_RESULT'].includes(error.code);
+      return {
+        delivered: false,
+        reason: resultUnknown ? 'result_unknown' : 'send_failed',
+      };
     }
   }
 

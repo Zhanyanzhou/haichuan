@@ -5,9 +5,16 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  CHECKPOINT_MIGRATION_COUNT,
+  EXPECTED_TRIGGER_COUNT,
   EXPECTED_MIGRATION_COUNT,
+  MEDIA_AUTHORIZATION_MIGRATION,
+  MIGRATION_PRIVILEGES,
+  MYSQL_IMAGE,
   PREFLIGHT_SQL,
   PROFILE_MIGRATION,
+  QUOTATION_EXPANSION_MIGRATION,
+  QUOTATION_INVARIANTS_MIGRATION,
   TRADE_MIGRATION,
   assertAllGuardsBeforePersistentDdl,
   assertGuardBeforePersistentDdl,
@@ -17,12 +24,52 @@ import {
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDirectory = path.resolve(scriptDirectory, '..', 'prisma', 'migrations');
+const rehearsalSource = fs.readFileSync(path.join(scriptDirectory, 'database-upgrade-rehearsal.mjs'), 'utf8');
+const baseCompose = fs.readFileSync(path.resolve(scriptDirectory, '..', '..', 'docker-compose.yml'), 'utf8');
 
 test('migration inventory is the expected complete ordered set', () => {
   const migrations = discoverMigrations(migrationsDirectory);
   assert.equal(migrations.length, EXPECTED_MIGRATION_COUNT);
-  assert.equal(migrations.at(-2), TRADE_MIGRATION);
-  assert.equal(migrations.at(-1), PROFILE_MIGRATION);
+  assert.equal(CHECKPOINT_MIGRATION_COUNT, 51);
+  assert.equal(migrations.at(-5), TRADE_MIGRATION);
+  assert.equal(migrations.at(-4), PROFILE_MIGRATION);
+  assert.equal(migrations.at(-3), QUOTATION_EXPANSION_MIGRATION);
+  assert.equal(migrations.at(-2), QUOTATION_INVARIANTS_MIGRATION);
+  assert.equal(migrations.at(-1), MEDIA_AUTHORIZATION_MIGRATION);
+});
+
+test('rehearsal pins the controlled MySQL image and migrates without root or SUPER', () => {
+  assert.match(MYSQL_IMAGE, /^mysql:8\.0@sha256:[a-f0-9]{64}$/);
+  assert.ok(baseCompose.includes(`image: ${MYSQL_IMAGE}`));
+  assert.deepEqual(MIGRATION_PRIVILEGES, [
+    'SELECT',
+    'INSERT',
+    'UPDATE',
+    'CREATE',
+    'ALTER',
+    'DROP',
+    'INDEX',
+    'REFERENCES',
+    'CREATE TEMPORARY TABLES',
+    'TRIGGER',
+  ]);
+  assert.ok(!MIGRATION_PRIVILEGES.includes('DELETE'));
+  assert.ok(!MIGRATION_PRIVILEGES.includes('SUPER'));
+  assert.match(rehearsalSource, /--log-bin-trust-function-creators=ON/);
+  assert.match(rehearsalSource, /buildDatabaseUrl\(migrationUser, migrationPassword/);
+  assert.doesNotMatch(rehearsalSource, /buildDatabaseUrl\(['"]root['"]/);
+  assert.match(rehearsalSource, /SELECT CURRENT_USER\(\)/);
+  assert.match(rehearsalSource, /privilege_type = 'SUPER'/);
+});
+
+test('rehearsal verifies current trigger definers and the locked-account lifecycle', () => {
+  const triggerCount = discoverMigrations(migrationsDirectory)
+    .map((migration) => fs.readFileSync(path.join(migrationsDirectory, migration, 'migration.sql'), 'utf8'))
+    .reduce((count, sql) => count + (sql.match(/^CREATE TRIGGER\b/gm)?.length ?? 0), 0);
+  assert.equal(triggerCount, EXPECTED_TRIGGER_COUNT);
+  assert.match(rehearsalSource, /FROM information_schema\.triggers/);
+  assert.match(rehearsalSource, /ALTER USER .* ACCOUNT LOCK/);
+  assert.match(rehearsalSource, /trigger-enforced-after-account-lock/);
 });
 
 test('all data guards precede the first persistent DDL in guarded migrations', () => {

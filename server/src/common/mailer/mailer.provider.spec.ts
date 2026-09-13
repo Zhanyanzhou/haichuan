@@ -55,10 +55,9 @@ test('邮件送达未知时只尝试一次且日志不含原始异常', async ()
       { to: 'secret@example.test', subject: 'secret', html: '<p>secret</p>' },
       { idempotencyKey: 'notification:event:43' },
     ),
-    { delivered: false, reason: 'send_failed' },
+    { delivered: false, reason: 'result_unknown' },
   );
   assert.equal(calls, 1);
   assert.doesNotMatch(errors.join('\n'), /secret|example\.test|provider path/i);
 });
-
 

@@ -40,11 +40,11 @@ for numeric_name in BACKUP_RPO_SECONDS RESTORE_RTO_SECONDS; do
   [[ "$numeric_value" =~ ^[1-9][0-9]{0,8}$ ]] || fail "${numeric_name} 必须是正整数"
 done
 
-[[ -d "$BACKUP_DIR" ]] || fail "备份目录不存在"
+[[ -d "$BACKUP_DIR" && ! -L "$BACKUP_DIR" ]] || fail "备份目录不存在或类型不安全"
 manifest_path="$BACKUP_DIR/$RESTORE_MANIFEST"
-[[ -f "$manifest_path" ]] || fail "备份清单不存在"
+[[ -f "$manifest_path" && ! -L "$manifest_path" ]] || fail "备份清单不存在或类型不安全"
 awk '
-  NF != 2 || $1 !~ /^[0-9a-fA-F]{64}$/ || $2 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ { invalid = 1 }
+  NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-fA-F]+$/ || $2 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ { invalid = 1 }
   END { exit invalid ? 1 : 0 }
 ' "$manifest_path" || fail "备份清单格式不安全"
 (cd "$BACKUP_DIR" && sha256sum -c -- "$RESTORE_MANIFEST" >/dev/null) || fail "备份清单或制品校验失败"
@@ -75,16 +75,21 @@ now_epoch=$(date -u +%s)
 backup_age_seconds=$((now_epoch - snapshot_epoch))
 [[ "$backup_age_seconds" -ge 0 && "$backup_age_seconds" -le "$BACKUP_RPO_SECONDS" ]] || fail "待演练备份不满足 RPO"
 
-[[ -d "$RESTORE_DRILL_ROOT" && -d "$RESTORE_EVIDENCE_DIR" ]] || fail "演练根目录和证据目录必须预先存在"
+[[ -d "$RESTORE_DRILL_ROOT" && ! -L "$RESTORE_DRILL_ROOT" && -d "$RESTORE_EVIDENCE_DIR" && ! -L "$RESTORE_EVIDENCE_DIR" ]] ||
+  fail "演练根目录和证据目录必须是预先存在的真实目录"
 drill_root=$(realpath "$RESTORE_DRILL_ROOT")
 case "$drill_root" in /|/app|/media|"$(realpath "$BACKUP_DIR")") fail "RESTORE_DRILL_ROOT 范围过宽或与备份目录重合" ;; esac
+evidence_dir=$(realpath "$RESTORE_EVIDENCE_DIR")
+case "$evidence_dir/" in "$drill_root"/*/) ;; *) fail "证据目录越出 RESTORE_DRILL_ROOT" ;; esac
 IFS=':' read -ra media_targets <<< "$MEDIA_TARGET_DIRS"
 [[ "${#media_targets[@]}" -eq 2 ]] || fail "必须提供两个媒体目标目录"
 declare -A required_media=( [uploads]=0 [private-media]=0 )
 for target_dir in "${media_targets[@]}"; do
   [[ -d "$target_dir" ]] || fail "媒体目标目录不存在: $target_dir"
+  [[ ! -L "$target_dir" ]] || fail "媒体目标目录不得是符号链接: $target_dir"
   resolved_target=$(realpath "$target_dir")
   case "$resolved_target/" in "$drill_root"/*/) ;; *) fail "媒体目标目录越出 RESTORE_DRILL_ROOT" ;; esac
+  [[ "$resolved_target" != "$evidence_dir" ]] || fail "媒体目标目录不得与证据目录重合"
   target_name=$(basename "$resolved_target")
   [[ -v "required_media[$target_name]" ]] || fail "媒体目标必须命名为 uploads 或 private-media"
   required_media[$target_name]=1
@@ -166,4 +171,3 @@ applied_migration_count=$(mysql_exec -N "$DB_NAME" -e "SELECT COUNT(*) FROM _pri
 [[ "$applied_migration_count" =~ ^[1-9][0-9]*$ ]] || fail "恢复后 migration 计数无效"
 restore_result="SUCCESS"
 error_code="NONE"
-

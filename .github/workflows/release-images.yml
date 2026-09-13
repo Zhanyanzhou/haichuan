@@ -7,6 +7,10 @@ on:
         description: "正式公开站点 Origin（HTTPS，不含路径）"
         required: true
         type: string
+      public_seo_snapshot_artifact_id:
+        description: "同仓同提交、由已批准只读发布事实导出的不可变 SEO snapshot artifact ID"
+        required: true
+        type: string
       api_base_url:
         description: "前端 API 基础路径"
         required: true
@@ -102,6 +106,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: 配置 Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
@@ -111,12 +116,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: 登录 GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: 安装发布验证依赖
+        run: npm ci --ignore-scripts
 
       - name: 计算发布事实
         id: release
@@ -126,6 +127,89 @@ jobs:
           echo "server_image=ghcr.io/${GITHUB_REPOSITORY,,}-server" >> "$GITHUB_OUTPUT"
           echo "client_image=ghcr.io/${GITHUB_REPOSITORY,,}-client" >> "$GITHUB_OUTPUT"
           echo "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}-operations" >> "$GITHUB_OUTPUT"
+
+      - name: 获取并校验不可变 SEO snapshot 制品
+        id: seo-source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SEO_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
+          PUBLIC_SITE_ORIGIN: ${{ inputs.public_site_origin }}
+          EXPECTED_SEO_PRODUCER_WORKFLOW_PATH: .github/workflows/export-public-seo-snapshot.yml
+        run: |
+          set -euo pipefail
+          [[ "$SEO_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] || { echo "PUBLIC_SEO_ARTIFACT_ID_INVALID" >&2; exit 1; }
+          seo_input_dir="${RUNNER_TEMP}/public-seo-input"
+          mkdir -p "$seo_input_dir" client/.release-seo
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SEO_ARTIFACT_ID}" > "$seo_input_dir/metadata.json"
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SEO_ARTIFACT_ID}/zip" > "$seo_input_dir/artifact.zip"
+          producer_run_id="$(node -e 'const m=require(process.argv[1]); const expectedName=`public-seo-snapshot-${process.env.GITHUB_SHA}`; if(m.name!==expectedName || m.expired || !Number.isInteger(m.workflow_run?.id) || m.workflow_run?.head_sha!==process.env.GITHUB_SHA || !/^sha256:[a-f0-9]{64}$/.test(m.digest||"")) process.exit(1); process.stdout.write(String(m.workflow_run.id))' "$seo_input_dir/metadata.json")" \
+            || { echo "PUBLIC_SEO_ARTIFACT_METADATA_INVALID" >&2; exit 1; }
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${producer_run_id}" > "$seo_input_dir/producer-run.json"
+          PRODUCER_RUN_PATH="$seo_input_dir/producer-run.json" node -e 'const r=require(process.env.PRODUCER_RUN_PATH); const workflowPath=String(r.path||"").split("@",1)[0]; if(r.head_sha!==process.env.GITHUB_SHA || r.repository?.full_name!==process.env.GITHUB_REPOSITORY || (r.head_repository && r.head_repository.full_name!==process.env.GITHUB_REPOSITORY) || workflowPath!==process.env.EXPECTED_SEO_PRODUCER_WORKFLOW_PATH || r.event!=="workflow_dispatch" || r.status!=="completed" || r.conclusion!=="success") process.exit(1)' \
+            || { echo "PUBLIC_SEO_PRODUCER_RUN_INVALID" >&2; exit 1; }
+          expected_digest="$(node -e 'process.stdout.write(require(process.argv[1]).digest)' "$seo_input_dir/metadata.json")"
+          actual_digest="sha256:$(sha256sum "$seo_input_dir/artifact.zip" | cut -d ' ' -f 1)"
+          test "$actual_digest" = "$expected_digest" || { echo "PUBLIC_SEO_ARTIFACT_DIGEST_MISMATCH" >&2; exit 1; }
+          mapfile -t entries < <(unzip -Z1 "$seo_input_dir/artifact.zip")
+          test "${#entries[@]}" -eq 1 && test "${entries[0]}" = "public-seo-snapshot.json" \
+            || { echo "PUBLIC_SEO_ARTIFACT_CONTENT_INVALID" >&2; exit 1; }
+          unzip -q "$seo_input_dir/artifact.zip" -d "$seo_input_dir/extracted"
+          cp "$seo_input_dir/extracted/public-seo-snapshot.json" client/.release-seo/public-seo-snapshot.json
+          SEO_METADATA_PATH="$seo_input_dir/metadata.json" \
+          SEO_SNAPSHOT_PATH="client/.release-seo/public-seo-snapshot.json" \
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          import { validatePublicSeoSnapshot } from "./scripts/export-public-seo-snapshot.mjs";
+          const metadata = JSON.parse(readFileSync(process.env.SEO_METADATA_PATH, "utf8"));
+          const snapshot = validatePublicSeoSnapshot(JSON.parse(readFileSync(process.env.SEO_SNAPSHOT_PATH, "utf8")));
+          if (snapshot.origin !== process.env.PUBLIC_SITE_ORIGIN) throw new Error("PUBLIC_SEO_ORIGIN_MISMATCH");
+          const lines = [
+            `snapshot_hash=${snapshot.snapshotHash}`,
+            `source_artifact_digest=${metadata.digest}`,
+          ];
+          process.stdout.write(`validated immutable SEO snapshot ${snapshot.snapshotHash}\n`);
+          const fs = await import("node:fs");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
+          NODE
+
+      - name: 构建并冻结客户端 SEO 发布制品
+        id: seo
+        shell: bash
+        env:
+          VITE_API_BASE_URL: ${{ inputs.api_base_url }}
+          VITE_PUBLIC_SITE_ORIGIN: ${{ inputs.public_site_origin }}
+          VITE_ANALYTICS_ENABLED: ${{ inputs.analytics_enabled }}
+        run: |
+          set -euo pipefail
+          npm ci --prefix client
+          npm run build --prefix client
+          grep -F '<meta name="robots" content="noindex, nofollow" />' client/dist/index.html >/dev/null \
+            || { echo "PUBLIC_SPA_FALLBACK_NOINDEX_MISSING" >&2; exit 1; }
+          node scripts/prerender-public-routes.mjs \
+            --snapshot client/.release-seo/public-seo-snapshot.json \
+            --base-html client/dist/index.html \
+            --out-dir client/dist
+          node scripts/generate-public-seo-artifacts.mjs \
+            --strict \
+            --origin "$VITE_PUBLIC_SITE_ORIGIN" \
+            --manifest client/.release-seo/public-seo-snapshot.json \
+            --prerender-manifest client/dist/prerendered-routes.json \
+            --out-dir client/dist \
+            --nginx-map client/.release-seo/public-seo-routes.conf
+          mkdir -p client/.release-seo/tools
+          cp scripts/export-public-seo-snapshot.mjs \
+             scripts/generate-public-seo-artifacts.mjs \
+             scripts/prerender-public-routes.mjs \
+             client/.release-seo/tools/
+          echo "prerender_manifest_sha=$(sha256sum client/dist/prerendered-routes.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: 登录 GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 构建并推送服务端镜像
         id: server
@@ -161,6 +245,43 @@ jobs:
             VITE_API_BASE_URL=${{ inputs.api_base_url }}
             VITE_PUBLIC_SITE_ORIGIN=${{ inputs.public_site_origin }}
             VITE_ANALYTICS_ENABLED=${{ inputs.analytics_enabled }}
+            PUBLIC_SEO_SNAPSHOT_HASH=${{ steps.seo-source.outputs.snapshot_hash }}
+            PUBLIC_SEO_PRERENDER_MANIFEST_SHA256=${{ steps.seo.outputs.prerender_manifest_sha }}
+            PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST=${{ steps.seo-source.outputs.source_artifact_digest }}
+
+      - name: 以一次性 Nginx 核对客户端原始 HTTP 与 SEO 制品
+        shell: bash
+        env:
+          CLIENT_REFERENCE: ${{ steps.release.outputs.client_image }}@${{ steps.client.outputs.digest }}
+          PUBLIC_SEO_SNAPSHOT_HASH: ${{ steps.seo-source.outputs.snapshot_hash }}
+          PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ steps.seo.outputs.prerender_manifest_sha }}
+          PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST: ${{ steps.seo-source.outputs.source_artifact_digest }}
+        run: |
+          set -euo pipefail
+          docker pull "$CLIENT_REFERENCE"
+          client_container="$(docker run -d --rm \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+            --add-host server:127.0.0.1 \
+            -p 127.0.0.1::8081 \
+            "$CLIENT_REFERENCE")"
+          cleanup_client() { docker rm -f "$client_container" >/dev/null 2>&1 || true; }
+          trap cleanup_client EXIT
+          client_port="$(docker port "$client_container" 8081/tcp | awk -F: 'NR==1 { print $NF }')"
+          test -n "$client_port" || { echo "CLIENT_HTTP_PORT_MISSING" >&2; exit 1; }
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --output /dev/null "http://127.0.0.1:${client_port}/"; then
+              break
+            fi
+            test "$attempt" -lt 30 || { docker logs "$client_container"; exit 1; }
+            sleep 1
+          done
+          node scripts/verify-public-seo-http.mjs \
+            --base-url "http://127.0.0.1:${client_port}" \
+            --snapshot client/.release-seo/public-seo-snapshot.json
+          test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-snapshot-sha256"}}{{end}}')" = "$PUBLIC_SEO_SNAPSHOT_HASH"
+          test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-prerender-manifest-sha256"}}{{end}}')" = "$PUBLIC_SEO_PRERENDER_MANIFEST_SHA256"
+          test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-source-artifact-digest"}}{{end}}')" = "$PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST"
 
       - name: 构建并推送运维与备份镜像
         id: operations
@@ -178,6 +299,97 @@ jobs:
             BUILD_REVISION=${{ github.sha }}
             BUILD_SOURCE=${{ github.server_url }}/${{ github.repository }}
             MIGRATION_BUNDLE_SHA256=${{ steps.release.outputs.migration_sha }}
+
+      - name: 核对三镜像不可变身份标签
+        shell: bash
+        env:
+          SERVER_REFERENCE: ${{ steps.release.outputs.server_image }}@${{ steps.server.outputs.digest }}
+          CLIENT_REFERENCE: ${{ steps.release.outputs.client_image }}@${{ steps.client.outputs.digest }}
+          OPERATIONS_REFERENCE: ${{ steps.release.outputs.operations_image }}@${{ steps.operations.outputs.digest }}
+          MIGRATION_SHA: ${{ steps.release.outputs.migration_sha }}
+        run: |
+          set -euo pipefail
+          verify_identity() {
+            reference="$1"
+            component="$2"
+            docker pull "$reference"
+            test "$(docker image inspect "$reference" --format '{{with .Config.Labels}}{{index . "org.opencontainers.image.revision"}}{{end}}')" = "$GITHUB_SHA"
+            test "$(docker image inspect "$reference" --format '{{with .Config.Labels}}{{index . "io.haichuan.component"}}{{end}}')" = "$component"
+            test "$(docker image inspect "$reference" --format '{{with .Config.Labels}}{{index . "io.haichuan.migration-bundle-sha256"}}{{end}}')" = "$MIGRATION_SHA"
+          }
+          verify_identity "$SERVER_REFERENCE" server
+          verify_identity "$CLIENT_REFERENCE" client
+          verify_identity "$OPERATIONS_REFERENCE" operations
+
+      - name: 离线核对服务端镜像原生依赖
+        shell: bash
+        env:
+          SERVER_REFERENCE: ${{ steps.release.outputs.server_image }}@${{ steps.server.outputs.digest }}
+        run: |
+          docker pull "$SERVER_REFERENCE"
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+            --entrypoint node \
+            "$SERVER_REFERENCE" \
+            -e '
+              const fs = require("node:fs");
+              const fail = (code, error) => {
+                console.error(code, error ?? "");
+                process.exit(1);
+              };
+              if (typeof process.getuid !== "function" || process.getuid() === 0) {
+                fail("SERVER_RUNTIME_USER_INVALID");
+              }
+              if (fs.existsSync("node_modules/.bin/prisma")) {
+                fail("SERVER_RUNTIME_PRISMA_CLI_PRESENT");
+              }
+              try {
+                require("@nestjs/common");
+              } catch (error) {
+                fail("SERVER_RUNTIME_DEPENDENCY_INVALID:@nestjs/common", error);
+              }
+              let prisma;
+              try {
+                prisma = require("@prisma/client").Prisma;
+              } catch (error) {
+                fail("SERVER_RUNTIME_PRISMA_CLIENT_INVALID", error);
+              }
+              if (!prisma?.prismaVersion?.client) {
+                fail("SERVER_RUNTIME_PRISMA_CLIENT_INVALID");
+              }
+              let sharp;
+              try {
+                sharp = require("sharp");
+              } catch (error) {
+                fail("SERVER_RUNTIME_NATIVE_DEPENDENCY_INVALID:sharp", error);
+              }
+              sharp({
+                create: {
+                  width: 2,
+                  height: 2,
+                  channels: 4,
+                  background: { r: 212, g: 175, b: 55, alpha: 1 },
+                },
+              })
+                .png()
+                .toBuffer({ resolveWithObject: true })
+                .then(({ data, info }) => {
+                  if (data.length === 0 || info.format !== "png" || info.width !== 2 || info.height !== 2) {
+                    fail("SERVER_RUNTIME_NATIVE_DEPENDENCY_INVALID:sharp");
+                  }
+                  console.log(JSON.stringify({
+                    uid: process.getuid(),
+                    sharp: sharp.versions.sharp,
+                    vips: sharp.versions.vips,
+                    png: { format: info.format, width: info.width, height: info.height, size: data.length },
+                    prismaClient: prisma.prismaVersion.client,
+                    prismaCliPresent: false,
+                  }));
+                })
+                .catch((error) => fail("SERVER_RUNTIME_NATIVE_DEPENDENCY_INVALID:sharp", error));
+            '
 
       - name: 离线核对运维镜像恢复入口
         shell: bash
@@ -210,6 +422,7 @@ jobs:
             done
             command -v mariadb >/dev/null || fail "OPERATIONS_RUNTIME_TOOL_MISSING:mariadb"
             command -v mysqladmin >/dev/null || fail "OPERATIONS_RUNTIME_TOOL_MISSING:mysqladmin"
+            node -e "for (const dependency of ['@nestjs/common', '@prisma/client', 'bcrypt']) require(dependency)"
             ./node_modules/.bin/prisma --version >/dev/null || fail "OPERATIONS_RUNTIME_TOOL_MISSING:prisma"
           '
           test "$(docker image inspect "$OPERATIONS_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.component"}}{{end}}')" = "operations" || fail "OPERATIONS_RUNTIME_LABEL_INVALID:component"
@@ -347,9 +560,13 @@ jobs:
           QUALITY_RUN_ID: ${{ needs.quality-proof.outputs.run_id }}
           QUALITY_RUN_URL: ${{ needs.quality-proof.outputs.run_url }}
           QUALITY_HEAD_SHA: ${{ needs.quality-proof.outputs.head_sha }}
+          PUBLIC_SEO_SNAPSHOT_HASH: ${{ steps.seo-source.outputs.snapshot_hash }}
+          PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ steps.seo.outputs.prerender_manifest_sha }}
+          PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
+          PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ steps.seo-source.outputs.source_artifact_digest }}
         run: |
           mkdir -p release-output
-          node -e 'const fs=require("node:fs"); const image=(name,digest)=>({image:name,digest,reference:`${name}@${digest}`,provenancePredicateType:"https://slsa.dev/provenance/v1",sbomPredicateType:"https://spdx.dev/Document/v2.3"}); const repository=process.env.GITHUB_REPOSITORY.toLowerCase(); const operations={...image(process.env.OPERATIONS_IMAGE_NAME,process.env.OPERATIONS_IMAGE_DIGEST),runtimeExecutables:["/usr/local/bin/backup.sh","/usr/local/bin/check-backup-health.sh","/usr/local/bin/restore.sh","/usr/local/bin/restore-drill.sh","/usr/local/bin/prune-backups.sh"]}; const manifest={schemaVersion:3,gitSha:process.env.GITHUB_SHA,migrationBundleSha256:process.env.MIGRATION_SHA,source:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`,qualityGate:{workflow:"quality.yml",runId:Number(process.env.QUALITY_RUN_ID),runUrl:process.env.QUALITY_RUN_URL,headSha:process.env.QUALITY_HEAD_SHA,event:"push",conclusion:"success"},attestationPolicy:{signerWorkflow:`github.com/${repository}/.github/workflows/release-images.yml`,sourceDigest:process.env.GITHUB_SHA,imageAttestationsVerified:true,provenancePredicateType:"https://slsa.dev/provenance/v1",sbomPredicateType:"https://spdx.dev/Document/v2.3",manifestPredicateType:"https://slsa.dev/provenance/v1"},server:image(process.env.SERVER_IMAGE_NAME,process.env.SERVER_IMAGE_DIGEST),client:image(process.env.CLIENT_IMAGE_NAME,process.env.CLIENT_IMAGE_DIGEST),operations}; fs.writeFileSync("release-output/release-manifest.json",`${JSON.stringify(manifest,null,2)}\n`);'
+          node -e 'const fs=require("node:fs"); const image=(name,digest)=>({image:name,digest,reference:`${name}@${digest}`,provenancePredicateType:"https://slsa.dev/provenance/v1",sbomPredicateType:"https://spdx.dev/Document/v2.3"}); const repository=process.env.GITHUB_REPOSITORY.toLowerCase(); const operations={...image(process.env.OPERATIONS_IMAGE_NAME,process.env.OPERATIONS_IMAGE_DIGEST),runtimeExecutables:["/usr/local/bin/backup.sh","/usr/local/bin/check-backup-health.sh","/usr/local/bin/restore.sh","/usr/local/bin/restore-drill.sh","/usr/local/bin/prune-backups.sh"]}; const publicSeo={snapshotHash:process.env.PUBLIC_SEO_SNAPSHOT_HASH,prerenderManifestSha256:process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256,sourceArtifactId:Number(process.env.PUBLIC_SEO_SOURCE_ARTIFACT_ID),sourceArtifactDigest:process.env.PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST}; const manifest={schemaVersion:3,gitSha:process.env.GITHUB_SHA,migrationBundleSha256:process.env.MIGRATION_SHA,source:`${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}`,qualityGate:{workflow:"quality.yml",runId:Number(process.env.QUALITY_RUN_ID),runUrl:process.env.QUALITY_RUN_URL,headSha:process.env.QUALITY_HEAD_SHA,event:"push",conclusion:"success"},attestationPolicy:{signerWorkflow:`github.com/${repository}/.github/workflows/release-images.yml`,sourceDigest:process.env.GITHUB_SHA,imageAttestationsVerified:true,provenancePredicateType:"https://slsa.dev/provenance/v1",sbomPredicateType:"https://spdx.dev/Document/v2.3",manifestPredicateType:"https://slsa.dev/provenance/v1"},publicSeo,server:image(process.env.SERVER_IMAGE_NAME,process.env.SERVER_IMAGE_DIGEST),client:image(process.env.CLIENT_IMAGE_NAME,process.env.CLIENT_IMAGE_DIGEST),operations}; fs.writeFileSync("release-output/release-manifest.json",`${JSON.stringify(manifest,null,2)}\n`);'
           node scripts/verify-release-images.mjs --manifest release-output/release-manifest.json
 
       - name: 为发布清单生成签名证明

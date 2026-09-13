@@ -8,9 +8,11 @@ import { MailerService } from "../mailer/mailer.service";
 import {
   LEAD_PRIVACY_DISPOSITION_ERROR_CODE,
   LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
+  SERVICE_NOTIFICATION_EVENT_TYPE,
 } from "./notification-delivery.constants";
+import { NotificationDeliveryPolicyService } from "./notification-delivery-policy.service";
 
-const ORDER_EVENT_TYPE = "notification.delivery.requested";
+const ORDER_EVENT_TYPE = SERVICE_NOTIFICATION_EVENT_TYPE;
 const SEND_STARTED = "SEND_STARTED";
 const MAX_ATTEMPTS = 5;
 const CLAIM_TIMEOUT_MS = 5 * 60 * 1000;
@@ -21,6 +23,12 @@ type ClaimedEvent = {
   eventType: string;
   payload: Prisma.JsonValue;
 };
+
+type ClaimSkipped = { skipped: true };
+
+type ManualRetryAuditContext =
+  | { kind: "lead"; requestedBy: number; leadId: number }
+  | { kind: "notification"; requestedBy: number; notificationId: number };
 
 function asPositiveInteger(value: unknown): number | null {
   const number = Number(value);
@@ -51,6 +59,7 @@ export class ReliableNotificationDeliveryWorker {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly mailer: MailerService,
+    private readonly deliveryPolicy: NotificationDeliveryPolicyService,
   ) {}
 
   isEnabled() {
@@ -77,25 +86,33 @@ export class ReliableNotificationDeliveryWorker {
     for (let index = 0; index < boundedLimit; index += 1) {
       const event = await this.claimNext();
       if (!event) break;
+      if ("skipped" in event) {
+        processed += 1;
+        continue;
+      }
       await this.processClaimed(event);
       processed += 1;
     }
     return processed;
   }
 
-  private async claimNext(): Promise<ClaimedEvent | null> {
+  private async claimNext(): Promise<ClaimedEvent | ClaimSkipped | null> {
     const now = new Date();
     const staleBefore = new Date(now.getTime() - CLAIM_TIMEOUT_MS);
     return this.prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<Array<{
         id: number;
+        attempts: number;
         eventType: string;
+        payload: Prisma.JsonValue;
         status: string;
         lastErrorCode: string | null;
       }>>(Prisma.sql`
         SELECT
           id,
+          attempts,
           event_type AS eventType,
+          payload,
           status,
           last_error_code AS lastErrorCode
         FROM outbox_events
@@ -116,7 +133,7 @@ export class ReliableNotificationDeliveryWorker {
         && candidate.status === "PROCESSING"
         && candidate.lastErrorCode === SEND_STARTED
       ) {
-        await tx.outboxEvent.updateMany({
+        const failed = await tx.outboxEvent.updateMany({
           where: {
             id: candidate.id,
             status: "PROCESSING",
@@ -130,10 +147,18 @@ export class ReliableNotificationDeliveryWorker {
             lastErrorCode: "DELIVERY_RESULT_UNKNOWN",
           },
         });
+        if (failed.count === 1) {
+          await this.writeManualRetryOutcome(
+            tx,
+            candidate,
+            "TERMINATED",
+            "DELIVERY_RESULT_UNKNOWN",
+          );
+        }
         this.logger.warn(
           `通知投递事件 ${candidate.id} 发送结果未知，已停止自动重发`,
         );
-        return null;
+        return { skipped: true };
       }
       const event = await tx.outboxEvent.update({
         where: { id: candidate.id },
@@ -180,12 +205,7 @@ export class ReliableNotificationDeliveryWorker {
       (delivery) => delivery.channel === "EMAIL",
     );
     if (!emailDelivery || ["SENT", "DELIVERED", "CANCELLED", "SUPPRESSED"].includes(emailDelivery.status)) {
-      await this.complete(event.id);
-      return;
-    }
-    const orderId = asPositiveInteger(payload.orderId);
-    if (!orderId) {
-      await this.fail(event, "INVALID_EVENT_PAYLOAD", true);
+      await this.completeClaimed(event);
       return;
     }
     if (emailDelivery.status === "SENDING") {
@@ -195,23 +215,8 @@ export class ReliableNotificationDeliveryWorker {
       return;
     }
 
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      select: { id: true, customerId: true, customerEmail: true },
-    });
-    const destination = order?.customerEmail?.trim().toLowerCase() || null;
-    if (
-      !order
-      || order.customerId !== notification.customerId
-      || !destination
-      || emailDelivery.destinationHash !== emailHash(destination)
-    ) {
-      await this.suppress(event.id, emailDelivery.id, "DESTINATION_UNAVAILABLE");
-      return;
-    }
-
     if (!await this.claimDeliveryForSend(event.id, emailDelivery.id)) {
-      await this.complete(event.id);
+      await this.completeClaimed(event);
       return;
     }
 
@@ -230,7 +235,45 @@ export class ReliableNotificationDeliveryWorker {
       select: { id: true },
     });
     if (!stillSendable) {
-      await this.complete(event.id);
+      await this.completeClaimed(event);
+      return;
+    }
+
+    let destination: string | null = null;
+    if (notification.type === "SERVICE_CONSULTATION_REPLIED") {
+      const customer = await this.prisma.customer.findUnique({
+        where: { id: notification.customerId },
+        select: { email: true, status: true },
+      });
+      destination = customer?.status === "ACTIVE"
+        ? customer.email?.trim().toLowerCase() || null
+        : null;
+    } else {
+      const orderId = asPositiveInteger(payload.orderId);
+      if (!orderId) {
+        await this.fail(event, "INVALID_EVENT_PAYLOAD", true, emailDelivery.id);
+        return;
+      }
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: { customerId: true, customerEmail: true },
+      });
+      destination = order?.customerId === notification.customerId
+        ? order.customerEmail?.trim().toLowerCase() || null
+        : null;
+    }
+    if (!destination || emailDelivery.destinationHash !== emailHash(destination)) {
+      await this.suppress(event, emailDelivery.id, "DESTINATION_UNAVAILABLE");
+      return;
+    }
+
+    const policy = await this.deliveryPolicy.evaluate(this.prisma, {
+      customerId: notification.customerId,
+      channel: "EMAIL",
+      topic: notification.type,
+    });
+    if (!policy.allowed) {
+      await this.suppress(event, emailDelivery.id, policy.reason);
       return;
     }
 
@@ -246,13 +289,20 @@ export class ReliableNotificationDeliveryWorker {
           ${actionUrl ? `<p><a href="${escapeHtml(actionUrl)}">查看客户中心</a></p>` : ""}
         `),
       },
-      { requireNotificationDeliveryEnabled: true },
+      {
+        requireNotificationDeliveryEnabled: true,
+        idempotencyKey: `notification:event:${event.id}`,
+      },
     );
     if (result.delivered) {
-      await this.completeSentDelivery(event.id, emailDelivery.id);
+      await this.completeSentDelivery(event, emailDelivery.id);
       return;
     }
 
+    if (result.reason === "result_unknown") {
+      await this.fail(event, "DELIVERY_RESULT_UNKNOWN", true, emailDelivery.id);
+      return;
+    }
     const reason = result.reason === "not_configured"
       ? "SMTP_NOT_CONFIGURED"
       : result.reason === "delivery_disabled"
@@ -304,13 +354,18 @@ export class ReliableNotificationDeliveryWorker {
       where: { id: activityId },
       include: { lead: { include: { inquiry: true } } },
     });
+    const currentInquiry = stillSendable?.lead.inquiry;
+    const currentDestination = currentInquiry?.customerEmail
+      ?.trim()
+      .toLowerCase() || null;
     if (
       !stillSendable
       || stillSendable.leadId !== leadId
       || stillSendable.type !== "REPLY"
       || stillSendable.lead.privacyDisposedAt
       || !stillSendable.content
-      || !stillSendable.lead.inquiry?.customerEmail
+      || !currentInquiry
+      || !currentDestination
     ) {
       await this.fail(
         event,
@@ -324,28 +379,35 @@ export class ReliableNotificationDeliveryWorker {
 
     let result: Awaited<ReturnType<MailerService["send"]>>;
     try {
-      const accountHint = inquiry.customerId
+      const accountHint = currentInquiry.customerId
         ? `<p>如需继续沟通，可<a href="${escapeHtml(this.mailer.getSiteBaseUrl())}/customer">登录客户中心</a>查看详情。</p>`
         : "<p>如需继续沟通，请使用您提交咨询时填写的常用联系方式。</p>";
       result = await this.mailer.send(
         {
-          to: destination,
+          to: currentDestination,
           subject: "您的咨询已回复 - 海川珠宝",
           html: this.mailer.renderShell(`
-            <p>您好，${escapeHtml(inquiry.customerName)}：</p>
+            <p>您好，${escapeHtml(currentInquiry.customerName)}：</p>
             <p>您的咨询已有顾问回复：</p>
-            <div style="background:#f9f7f4;padding:16px;border-radius:6px;margin:16px 0;white-space:pre-wrap;">${escapeHtml(activity.content)}</div>
+            <div style="background:#f9f7f4;padding:16px;border-radius:6px;margin:16px 0;white-space:pre-wrap;">${escapeHtml(stillSendable.content)}</div>
             ${accountHint}
           `),
         },
-        { requireNotificationDeliveryEnabled: true },
+        {
+          requireNotificationDeliveryEnabled: true,
+          idempotencyKey: `notification:event:${event.id}`,
+        },
       );
     } catch {
       await this.fail(event, "SMTP_SEND_FAILED", false);
       return;
     }
     if (result.delivered) {
-      await this.complete(event.id);
+      await this.completeClaimed(event);
+      return;
+    }
+    if (result.reason === "result_unknown") {
+      await this.fail(event, "DELIVERY_RESULT_UNKNOWN", true);
       return;
     }
     const reason = result.reason === "not_configured"
@@ -384,17 +446,17 @@ export class ReliableNotificationDeliveryWorker {
     });
   }
 
-  private async suppress(eventId: number, deliveryId: number, errorCode: string) {
+  private async suppress(event: ClaimedEvent, deliveryId: number, errorCode: string) {
     await this.prisma.$transaction(async (tx) => {
       const owner = await tx.outboxEvent.updateMany({
-        where: { id: eventId, status: "PROCESSING", lockedBy: this.workerId },
+        where: { id: event.id, status: "PROCESSING", lockedBy: this.workerId },
         data: { lockedAt: new Date() },
       });
       if (owner.count !== 1) return;
       await tx.notificationDelivery.updateMany({
         where: {
           id: deliveryId,
-          status: { in: ["PENDING", "FAILED"] },
+          status: { in: ["PENDING", "FAILED", "SENDING"] },
         },
         data: {
           status: "SUPPRESSED",
@@ -403,8 +465,8 @@ export class ReliableNotificationDeliveryWorker {
           lastErrorCode: errorCode,
         },
       });
-      await tx.outboxEvent.updateMany({
-        where: { id: eventId, status: "PROCESSING", lockedBy: this.workerId },
+      const completed = await tx.outboxEvent.updateMany({
+        where: { id: event.id, status: "PROCESSING", lockedBy: this.workerId },
         data: {
           status: "PROCESSED",
           processedAt: new Date(),
@@ -413,13 +475,16 @@ export class ReliableNotificationDeliveryWorker {
           lastErrorCode: null,
         },
       });
+      if (completed.count === 1) {
+        await this.writeManualRetryOutcome(tx, event, "TERMINATED", errorCode);
+      }
     });
   }
 
-  private async completeSentDelivery(eventId: number, deliveryId: number) {
+  private async completeSentDelivery(event: ClaimedEvent, deliveryId: number) {
     await this.prisma.$transaction(async (tx) => {
       const owner = await tx.outboxEvent.updateMany({
-        where: { id: eventId, status: "PROCESSING", lockedBy: this.workerId },
+        where: { id: event.id, status: "PROCESSING", lockedBy: this.workerId },
         data: { lockedAt: new Date() },
       });
       if (owner.count !== 1) return;
@@ -434,8 +499,8 @@ export class ReliableNotificationDeliveryWorker {
           lastErrorCode: null,
         },
       });
-      await tx.outboxEvent.updateMany({
-        where: { id: eventId, status: "PROCESSING", lockedBy: this.workerId },
+      const completed = await tx.outboxEvent.updateMany({
+        where: { id: event.id, status: "PROCESSING", lockedBy: this.workerId },
         data: {
           status: "PROCESSED",
           processedAt: new Date(),
@@ -444,6 +509,9 @@ export class ReliableNotificationDeliveryWorker {
           lastErrorCode: null,
         },
       });
+      if (completed.count === 1) {
+        await this.writeManualRetryOutcome(tx, event, "SUCCEEDED");
+      }
     });
   }
 
@@ -457,6 +525,28 @@ export class ReliableNotificationDeliveryWorker {
         lockedBy: null,
         lastErrorCode: null,
       },
+    });
+  }
+
+  private async completeClaimed(event: ClaimedEvent) {
+    if (!this.manualRetryAuditContext(event)) {
+      await this.complete(event.id);
+      return;
+    }
+    await this.prisma.$transaction(async (tx) => {
+      const completed = await tx.outboxEvent.updateMany({
+        where: { id: event.id, status: "PROCESSING", lockedBy: this.workerId },
+        data: {
+          status: "PROCESSED",
+          processedAt: new Date(),
+          lockedAt: null,
+          lockedBy: null,
+          lastErrorCode: null,
+        },
+      });
+      if (completed.count === 1) {
+        await this.writeManualRetryOutcome(tx, event, "SUCCEEDED");
+      }
     });
   }
 
@@ -490,10 +580,11 @@ export class ReliableNotificationDeliveryWorker {
         });
         deliveryCanRetry = deliveryUpdate.count === 1;
       }
-      await tx.outboxEvent.updateMany({
+      const finalStatus = !deliveryCanRetry ? "PROCESSED" : exhausted ? "FAILED" : "PENDING";
+      const updated = await tx.outboxEvent.updateMany({
         where: { id: event.id, status: "PROCESSING", lockedBy: this.workerId },
         data: {
-          status: !deliveryCanRetry ? "PROCESSED" : exhausted ? "FAILED" : "PENDING",
+          status: finalStatus,
           availableAt: !deliveryCanRetry ? new Date() : nextAttemptAt ?? new Date(),
           processedAt: !deliveryCanRetry ? new Date() : null,
           lockedAt: null,
@@ -501,6 +592,14 @@ export class ReliableNotificationDeliveryWorker {
           lastErrorCode: !deliveryCanRetry ? null : errorCode,
         },
       });
+      if (updated.count === 1 && exhausted) {
+        await this.writeManualRetryOutcome(
+          tx,
+          event,
+          "TERMINATED",
+          errorCode,
+        );
+      }
     });
     if (exhausted) {
       // 死信告警：重试耗尽的通知进入 FAILED 终态，ERROR 级供值班监控直接告警；
@@ -513,5 +612,82 @@ export class ReliableNotificationDeliveryWorker {
         `通知投递事件 ${event.id} 处理失败（第 ${event.attempts} 次）：${errorCode}，${delayMinutes} 分钟后重试`,
       );
     }
+  }
+
+  private manualRetryAuditContext(event: ClaimedEvent): ManualRetryAuditContext | null {
+    if (
+      !event.payload
+      || typeof event.payload !== "object"
+      || Array.isArray(event.payload)
+    ) {
+      return null;
+    }
+    const payload = event.payload as Record<string, unknown>;
+    const manualRetry = payload.manualRetry;
+    if (!manualRetry || typeof manualRetry !== "object" || Array.isArray(manualRetry)) {
+      return null;
+    }
+    const retry = manualRetry as Record<string, unknown>;
+    const requestedBy = asPositiveInteger(retry.requestedBy);
+    if (!requestedBy) return null;
+    if (event.eventType === LEAD_REPLY_NOTIFICATION_EVENT_TYPE) {
+      const leadId = asPositiveInteger(payload.leadId);
+      return leadId ? { kind: "lead", leadId, requestedBy } : null;
+    }
+    if (event.eventType === SERVICE_NOTIFICATION_EVENT_TYPE) {
+      const notificationId = asPositiveInteger(payload.notificationId);
+      return notificationId
+        ? { kind: "notification", notificationId, requestedBy }
+        : null;
+    }
+    return null;
+  }
+
+  private async writeManualRetryOutcome(
+    tx: Prisma.TransactionClient,
+    event: ClaimedEvent,
+    outcome: "SUCCEEDED" | "TERMINATED",
+    errorCode?: string,
+  ) {
+    const context = this.manualRetryAuditContext(event);
+    if (!context) return;
+    const succeeded = outcome === "SUCCEEDED";
+    if (context.kind === "notification") {
+      await tx.operationLog.create({
+        data: {
+          userId: context.requestedBy,
+          action: succeeded
+            ? "NOTIFICATION_RETRY_SUCCEEDED"
+            : "NOTIFICATION_RETRY_TERMINATED",
+          module: "notifications",
+          targetId: event.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            eventId: event.id,
+            notificationId: context.notificationId,
+            result: outcome,
+            ...(errorCode ? { errorCode } : {}),
+          }),
+        },
+      });
+      return;
+    }
+    await tx.leadActivity.create({
+      data: {
+        leadId: context.leadId,
+        type: "NOTE",
+        content: succeeded
+          ? `回复通知人工重投已成功（事件 #${event.id}）`
+          : `回复通知人工重投已终止（事件 #${event.id}，错误码：${errorCode ?? "UNKNOWN"}）`,
+        createdBy: context.requestedBy,
+        metadata: {
+          action: succeeded
+            ? "LEAD_REPLY_NOTIFICATION_RETRY_SUCCEEDED"
+            : "LEAD_REPLY_NOTIFICATION_RETRY_TERMINATED",
+          eventId: event.id,
+          ...(errorCode ? { errorCode } : {}),
+        },
+      },
+    });
   }
 }

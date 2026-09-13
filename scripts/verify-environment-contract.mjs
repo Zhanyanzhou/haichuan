@@ -286,10 +286,15 @@ const productionEvidenceSource = read("scripts/verify-production-evidence.mjs");
 const productionRunbook = read("docs/PRODUCTION_RELEASE_RUNBOOK.md");
 const serverComposeBlock = serviceBlock(compose, "server");
 const serverComposeKeys = mappingKeys(serverComposeBlock, "environment");
+const serverComposeValues = mappingValues(serverComposeBlock, "environment");
 const serverVolumesBlock = sectionBody(serverComposeBlock, "volumes");
 const serverVolumeEntries = sequenceEntries(serverComposeBlock, "volumes");
 const clientComposeBlock = serviceBlock(compose, "client");
 const backupComposeBlock = serviceBlock(compose, "backup");
+const releasePreflightComposeBlock = serviceBlock(operationsCompose, "release-preflight");
+const releasePreflightComposeValues = mappingValues(releasePreflightComposeBlock, "environment");
+const bootstrapAdminComposeBlock = serviceBlock(operationsCompose, "bootstrap-admin");
+const bootstrapAdminComposeValues = mappingValues(bootstrapAdminComposeBlock, "environment");
 const clientComposeKeys = collectMatches(clientComposeBlock, [
   /^\s+(VITE_[A-Z][A-Z0-9_]*):/gm,
 ]);
@@ -329,6 +334,13 @@ const releasePreflightCliKeys = new Set([
   "RELEASE_PREFLIGHT_ENVIRONMENT_ID",
   "RELEASE_PREFLIGHT_EXPECTED_DATABASE",
   "RELEASE_PREFLIGHT_APPROVAL_REFERENCE",
+]);
+const migrationCapabilityEvidenceKeys = new Set([
+  "MIGRATION_TARGET_ENVIRONMENT_ID",
+  "MIGRATION_EXPECTED_DATABASE",
+  "MIGRATION_APPROVAL_REFERENCE_SHA256",
+  "MIGRATION_ACCOUNT_CAPABILITY_EVIDENCE_SHA256",
+  "MIGRATION_TRIGGER_POLICY_EVIDENCE_SHA256",
 ]);
 const secretKeys = new Set([
   "MYSQL_ROOT_PASSWORD",
@@ -374,7 +386,11 @@ function requireSubset(label, expected, actual) {
   return missing;
 }
 
-requireSubset("server runtime 未显式注入到 compose", serverRuntimeKeys, serverComposeKeys);
+requireSubset(
+  "server runtime 未显式注入到 compose",
+  serverRuntimeKeys,
+  serverComposeKeys,
+);
 requireSubset(
   "server runtime 未记录在 .env.example 或 compose 内部固定值",
   new Set([...serverRuntimeKeys].filter((key) => !internalServerKeys.has(key))),
@@ -394,6 +410,11 @@ requireSubset(
 requireSubset(
   "正式发布前审计 CLI 环境变量未记录在 .env.example",
   releasePreflightCliKeys,
+  envExampleKeys,
+);
+requireSubset(
+  "生产 migration 账号能力证据未记录在 .env.example",
+  migrationCapabilityEvidenceKeys,
   envExampleKeys,
 );
 requireSubset("client build 变量未记录在 .env.example", clientBuildKeys, envExampleKeys);
@@ -421,6 +442,57 @@ requireSubset(
   releaseDeploymentKeys,
   envExampleKeys,
 );
+
+const mediaStorageComposeContracts = new Map([
+  ["PUBLIC_MEDIA_ROOT", "/app/uploads"],
+  ["PAGE_MEDIA_ARCHIVE_ROOT", "/app/private-media/page-assets-archive"],
+  ["PAYMENT_PROOF_MEDIA_ROOT", "/app/private-media/payment-proofs"],
+  ["PRODUCT_MEDIA_ROOT", "/app/private-media/products"],
+]);
+for (const [key, expectedPath] of mediaStorageComposeContracts) {
+  if (serverComposeValues.get(key) !== expectedPath) {
+    errors.push(`server Compose 媒体路径必须固定且持久化: ${key}=${expectedPath}`);
+  }
+}
+for (const expectedMount of [
+  "uploads_data:/app/uploads",
+  "private_media_data:/app/private-media",
+]) {
+  if (!serverVolumeEntries.includes(expectedMount)) {
+    errors.push(`server Compose 缺少媒体持久卷挂载: ${expectedMount}`);
+  }
+}
+if (serverComposeValues.get("BACKUP_INTERVAL_SECONDS") !==
+    "${BACKUP_INTERVAL_SECONDS:?BACKUP_INTERVAL_SECONDS is required}") {
+  errors.push("server Compose 必须向后台状态注入真实 BACKUP_INTERVAL_SECONDS，不得用 RPO 代替");
+}
+
+const releasePreflightRuntimeContracts = new Map([
+  ["VITE_PUBLIC_SITE_ORIGIN", "${VITE_PUBLIC_SITE_ORIGIN:?VITE_PUBLIC_SITE_ORIGIN is required}"],
+  ["CUSTOMER_COMMERCE_ENABLED", "${CUSTOMER_COMMERCE_ENABLED:-false}"],
+  ["CUSTOMER_QUOTATION_ORDERING_ENABLED", "${CUSTOMER_QUOTATION_ORDERING_ENABLED:-false}"],
+  ["PAYMENT_GATEWAY_TRANSACTIONS_ENABLED", "${PAYMENT_GATEWAY_TRANSACTIONS_ENABLED:-false}"],
+  ["PAYMENT_GATEWAY_REFUNDS_ENABLED", "${PAYMENT_GATEWAY_REFUNDS_ENABLED:-false}"],
+  ["PARTNER_APPLICATIONS_WRITE_ENABLED", "${PARTNER_APPLICATIONS_WRITE_ENABLED:-false}"],
+]);
+for (const [key, expectedValue] of releasePreflightRuntimeContracts) {
+  if (releasePreflightComposeValues.get(key) !== expectedValue) {
+    errors.push(`release-preflight Compose 必须与 server 消费同一运行合同: ${key}`);
+  }
+}
+
+const bootstrapAdminTargetContracts = new Map([
+  ["DATABASE_URL", "${BOOTSTRAP_DATABASE_URL:-}"],
+  ["BOOTSTRAP_ADMIN_TARGET_CLASS", "${BOOTSTRAP_ADMIN_TARGET_CLASS:-}"],
+  ["BOOTSTRAP_ADMIN_ENVIRONMENT_ID", "${BOOTSTRAP_ADMIN_ENVIRONMENT_ID:-}"],
+  ["BOOTSTRAP_ADMIN_EXPECTED_DATABASE", "${BOOTSTRAP_ADMIN_EXPECTED_DATABASE:-}"],
+  ["BOOTSTRAP_ADMIN_APPROVAL_REFERENCE", "${BOOTSTRAP_ADMIN_APPROVAL_REFERENCE:-}"],
+]);
+for (const [key, expectedValue] of bootstrapAdminTargetContracts) {
+  if (bootstrapAdminComposeValues.get(key) !== expectedValue) {
+    errors.push(`bootstrap-admin Compose 缺少失败关闭的目标绑定: ${key}`);
+  }
+}
 
 const releaseFoundationComposeContracts = [
   {
@@ -479,7 +551,7 @@ for (const [label, condition] of [
   ["backup service 禁止 bind checkout 可执行脚本", !/\.\/server\/scripts\/(?:backup|check-backup-health|restore|restore-drill|prune-backups)\.sh/.test(backupComposeBlock)],
   ["operations 镜像必须逐项内置五份备份恢复脚本", normalizedServerDockerfile.includes(operationsScriptCopy)],
   ["operations 镜像内五份脚本必须只读可执行", normalizedServerDockerfile.includes(operationsScriptPermissions)],
-  ["operations 镜像必须内置 bash 与数据库客户端", serverDockerfile.includes("apk add --no-cache bash mariadb-client openssl")],
+  ["operations 镜像必须内置 MySQL 8 默认认证兼容客户端", normalizedServerDockerfile.includes("apt-get install -y --no-install-recommends default-mysql-client openssl")],
   ["backup service 必须声明健康检查", backupComposeBlock.includes("/bin/bash /usr/local/bin/check-backup-health.sh")],
   ["后台备份状态必须读取执行标记", settingsService.includes("backup-status.env")],
 ]) {
@@ -667,6 +739,7 @@ const knownExampleKeys = new Set([
   ...operationalKeys,
   ...publishedRevisionCliKeys,
   ...releasePreflightCliKeys,
+  ...migrationCapabilityEvidenceKeys,
   ...releaseDeploymentKeys,
   ...composeInterpolationKeys,
   ...collectMatches(read("server/scripts/restore-drill.sh"), [/\$\{([A-Z][A-Z0-9_]*)/g]),
@@ -683,6 +756,7 @@ const nonRuntimeKeys = new Set([
   ...[...oneShotCliKeys].filter((key) => !serverRuntimeKeys.has(key)),
   ...publishedRevisionCliKeys,
   ...releasePreflightCliKeys,
+  ...migrationCapabilityEvidenceKeys,
 ]);
 for (const key of nonRuntimeKeys) {
   if (serverComposeKeys.has(key)) {
@@ -703,10 +777,12 @@ for (const key of secretKeys) {
 const summary = {
   serverRuntimeKeys: sorted(serverRuntimeKeys),
   serverComposeKeys: sorted(serverComposeKeys),
+  mediaStorageComposeContracts: Object.fromEntries(mediaStorageComposeContracts),
   seedKeys: sorted(seedKeys),
   oneShotCliKeys: sorted(oneShotCliKeys),
   publishedRevisionCliKeys: sorted(publishedRevisionCliKeys),
   releasePreflightCliKeys: sorted(releasePreflightCliKeys),
+  migrationCapabilityEvidenceKeys: sorted(migrationCapabilityEvidenceKeys),
   clientBuildKeys: sorted(clientBuildKeys),
   envExampleKeyCount: envExampleKeys.size,
   releaseFoundationKeys: sorted(releaseFoundationKeys),

@@ -15,6 +15,29 @@ interface FindManyCall {
   distinct?: unknown;
 }
 
+function eligibleImage(id: number, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    mediaAssetId: id,
+    mediaAsset: {
+      id,
+      status: "READY",
+      accessLevel: "PUBLIC",
+      lifecycleRevision: 1,
+      authorization: {
+        revision: 1,
+        publicUseEpoch: 1,
+        reviewStatus: "APPROVED",
+        revocationStatus: "ACTIVE",
+        publicWebUseAllowed: true,
+        validFrom: null,
+        validUntil: null,
+      },
+    },
+    ...extra,
+  };
+}
+
 function createService() {
   const findManyCalls: FindManyCall[] = [];
   let countWhere: Record<string, unknown> | undefined;
@@ -233,8 +256,7 @@ test("commerce 档位的游客详情返回真实展示价、规格、库存状�
           isCustom: false,
           category: { id: 3, name: "戒指" },
           productAttributes: [],
-          images: [{
-            id: 501,
+          images: [eligibleImage(501, {
             url: "/uploads/internal-product-88.jpg",
             storageKey: "private/product-88.jpg",
             type: "FRONT",
@@ -242,9 +264,9 @@ test("commerce 档位的游客详情返回真实展示价、规格、库存状�
             isVideo: false,
             width: 1200,
             height: 1500,
-          }],
-          primaryImage: null,
-          listingImage: null,
+          })],
+          primaryImage: eligibleImage(501, { storageKey: "private/product-88.jpg" }),
+          listingImage: eligibleImage(501, { storageKey: "private/product-88.jpg" }),
           skus: [{ inventories: [{ quantity: 1 }] }],
           status: "PUBLISHED",
           visibility: "PUBLIC",
@@ -262,13 +284,12 @@ test("commerce 档位的游客详情返回真实展示价、规格、库存状�
 
   const result = await service.findPublicById("HC-REAL-088");
 
-  assert.deepEqual(findFirstArgs.where, {
-    deletedAt: null,
-    status: "PUBLISHED",
-    publicationQualityStatus: "READY",
-    visibility: { in: ["PUBLIC"] },
-    code: "HC-REAL-088",
-  });
+  assert.equal(findFirstArgs.where.status, "PUBLISHED");
+  assert.deepEqual(findFirstArgs.where.visibility, { in: ["PUBLIC"] });
+  assert.equal(findFirstArgs.where.code, "HC-REAL-088");
+  assert.ok(findFirstArgs.where.primaryImage);
+  assert.ok(findFirstArgs.where.listingImage);
+  assert.ok(findFirstArgs.where.images);
   assert.equal(findFirstArgs.select.price, true);
   assert.deepEqual(findFirstArgs.select.skus.select.inventories, {
     select: { quantity: true },
@@ -326,9 +347,9 @@ test("装修商品引用解析：保持输入顺序并区分删除、下架、�
       visibility: "PUBLIC",
       deletedAt: null,
       category: { id: 1, name: "戒指" },
-      listingImage: { id: 101 },
-      primaryImage: null,
-      images: [],
+      listingImage: eligibleImage(101),
+      primaryImage: eligibleImage(101),
+      images: [eligibleImage(101)],
     },
     {
       id: 12,
@@ -340,9 +361,9 @@ test("装修商品引用解析：保持输入顺序并区分删除、下架、�
       visibility: "PUBLIC",
       deletedAt: new Date("2026-08-01T00:00:00.000Z"),
       category: { id: 1, name: "戒指" },
-      listingImage: { id: 102 },
-      primaryImage: null,
-      images: [],
+      listingImage: eligibleImage(102),
+      primaryImage: eligibleImage(102),
+      images: [eligibleImage(102)],
     },
     {
       id: 13,
@@ -368,9 +389,9 @@ test("装修商品引用解析：保持输入顺序并区分删除、下架、�
       visibility: "PUBLIC",
       deletedAt: null,
       category: { id: 3, name: "耳饰" },
-      listingImage: { id: 202 },
-      primaryImage: null,
-      images: [],
+      listingImage: eligibleImage(202),
+      primaryImage: eligibleImage(202),
+      images: [eligibleImage(202)],
     },
   ];
   const prisma = {

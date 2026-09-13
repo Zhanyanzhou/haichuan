@@ -68,7 +68,10 @@ function validDraft() {
     },
     metadata: {},
     editorVersion: "0.22.4",
+    locale: "zh-CN",
     status: "DRAFT",
+    reviewStatus: "APPROVED",
+    contentHash: "a".repeat(64),
     version: 0,
     publishedAt: null,
     publishedBy: null,
@@ -246,6 +249,16 @@ async function mockEditorApis(
     if (url.includes("/revisions")) {
       return route.fulfill(json([]));
     }
+    if (url.includes("/review/submit")) {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      draft = {
+        ...draft,
+        reviewStatus: "IN_REVIEW",
+        updatedAt: "2026-08-14T00:00:01.500Z",
+        contentHash: body.expectedContentHash ?? draft.contentHash,
+      };
+      return route.fulfill(json(draft));
+    }
     if (url.includes("/published")) {
       return route.fulfill(json(opts.publishedDocument ?? null));
     }
@@ -278,7 +291,14 @@ async function mockEditorApis(
         });
       }
       return route.fulfill(
-        json({ ...draft, status: "PUBLISHED", version: 1, updatedAt: "2026-08-14T00:00:02.000Z" }),
+        json({
+          ...draft,
+          status: "PUBLISHED",
+          reviewStatus: "PUBLISHED",
+          publishedHash: draft.contentHash,
+          version: 1,
+          updatedAt: "2026-08-14T00:00:02.000Z",
+        }),
       );
     }
     if (method === "PUT") {
@@ -378,6 +398,79 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
 
   test.beforeEach(async ({ page }) => {
     await authenticateAdmin(page);
+  });
+
+  test("未经审核的语言草稿不能直接发布", async ({ page }) => {
+    await mockEditorApis(page, {
+      valid: true,
+      draftDocument: {
+        ...validDraft(),
+        reviewStatus: "DRAFT",
+      },
+    });
+
+    await page.goto("/admin/editor/home");
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(publishButton).toBeDisabled();
+    await expect(publishButton).toHaveAttribute(
+      "title",
+      "当前语言版本需先通过审核",
+    );
+    await expect(page.getByRole("button", { name: "提交审核" })).toBeVisible();
+  });
+
+  test("审核工具栏在 1440、1600 与 390 宽度可直接点击且键盘焦点不裁切", async ({ page }, testInfo) => {
+    await mockEditorApis(page, {
+      valid: true,
+      draftDocument: {
+        ...validDraft(),
+        reviewStatus: "DRAFT",
+      },
+    });
+    await page.goto("/admin/editor/home");
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1600, height: 1000 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      const locale = page.getByLabel("内容语言", { exact: true });
+      const submit = page.getByRole("button", { name: "提交审核", exact: true });
+      await expect(locale).toBeVisible();
+      await expect(submit).toBeVisible();
+      await expect(submit).toBeEnabled();
+      expect(await submit.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return hit === element || element.contains(hit);
+      })).toBe(true);
+      expect(await page.locator(".homepage-editor__locale-review-controls").evaluate((element) => (
+        element.scrollWidth <= element.clientWidth
+        && Array.from(element.querySelectorAll("select, button, [role='status']")).every(
+          (control) => control.scrollWidth <= control.clientWidth,
+        )
+      ))).toBe(true);
+      await locale.focus();
+      await page.keyboard.press("Tab");
+      await expect(submit).toBeFocused();
+      await expect(submit).toHaveCSS("outline-style", "solid");
+      const screenshot = testInfo.outputPath(`review-toolbar-${viewport.width}x${viewport.height}.png`);
+      await page.screenshot({ path: screenshot, animations: "disabled" });
+      await testInfo.attach(`review-toolbar-${viewport.width}x${viewport.height}`, {
+        path: screenshot,
+        contentType: "image/png",
+      });
+    }
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    const submitted = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && new URL(response.url()).pathname === "/api/page-modules/document/review/submit"
+    ));
+    await page.getByRole("button", { name: "提交审核", exact: true }).click();
+    expect((await submitted).ok()).toBe(true);
+    await expect(page.getByTestId("page-review-status")).toHaveText("待审核");
   });
 
   test("内容检查存在错误时保存草稿并展示精确清单，不调用发布接口", async ({ page }) => {
@@ -699,9 +792,9 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       const drawer = page.getByRole("dialog", { name: "页面展示设置" });
       await expect(drawer).toBeVisible();
       await expect(drawer.getByRole("status", { name: "当前页面可选展示资料说明" })).toContainText(
-        "素材来源记录可后续补充，不阻断本次页面发布",
+        "素材授权在页面素材库集中维护",
       );
-      await expect(drawer).toContainText("填写后会校验长度、格式与素材是否已上传到本站");
+      await expect(drawer).toContainText("实际可见素材的公开资格由服务端统一检查");
     });
   }
 
@@ -1090,7 +1183,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     await expect(publishButton).toBeDisabled();
     await expect(publishButton).toHaveAttribute(
       "title",
-      "当前账号只能编辑草稿，需由管理员发布",
+      "当前账号可提交审核，发布需由管理员完成",
     );
     expect(requests.persistentWriteCalls()).toBe(0);
   });
@@ -1478,7 +1571,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     });
   }
 
-  test("页面素材来源记录默认收起且不阻断发布，仍可按需保存审计资料", async ({ page }) => {
+  test("页面只展示素材授权汇总并跳转集中素材库，不再写入逐素材权利记录", async ({ page }) => {
     const requests = await mockEditorApis(page, { valid: true });
     const publishedAdminRequest = page.waitForRequest((request) =>
       new URL(request.url()).pathname.endsWith(
@@ -1498,17 +1591,12 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     await expect(drawer).toContainText("不随公开页面接口返回");
     await drawer.getByPlaceholder("例：品牌内容组").fill("品牌内容组");
     await expect(drawer.getByRole("region", { name: "媒体来源与授权" })).toContainText(
-      "1 项当前公开素材",
+      "1 项当前页面素材",
     );
-    await expect(drawer.getByRole("region", { name: "媒体来源与授权" })).toContainText("可选审计记录");
-    await expect(drawer.getByRole("region", { name: "媒体来源与授权" })).toContainText("不影响本次发布");
-    await expect(drawer).toContainText("已填写 0 / 1 项");
-    await expect(drawer.getByRole("textbox", { name: "素材 1 来源" })).toBeHidden();
-    await drawer.getByText("按需编辑 1 项素材来源记录").click();
-    await expect(drawer.getByRole("textbox", { name: "素材 1 来源" })).toBeVisible();
-    await drawer.getByRole("textbox", { name: "素材 1 来源" }).fill("品牌自有拍摄");
-    await drawer.getByRole("textbox", { name: "素材 1 授权编号" }).fill("HC-OWN-2026-001");
-    await expect(drawer).toContainText("已填写 1 / 1 项");
+    await expect(drawer.getByRole("region", { name: "媒体来源与授权" })).toContainText("集中维护");
+    await expect(drawer.getByRole("textbox", { name: /素材 \d+ 来源/ })).toHaveCount(0);
+    await expect(drawer.getByRole("link", { name: "在页面素材库登记与审核" }))
+      .toHaveAttribute("href", "/admin/media");
     await expect(drawer).toContainText("页面设置与画布修改会一起保存为整页草稿");
     const draftSaveRequest = page.waitForRequest((request) => {
       const pathname = new URL(request.url()).pathname;
@@ -1523,13 +1611,9 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       },
       metadata: {
         contentOwner: "品牌内容组",
-        mediaRights: [{
-          assetUrl: "/svg/template-hero.svg",
-          source: "品牌自有拍摄",
-          authorizationId: "HC-OWN-2026-001",
-        }],
       },
     });
+    expect(request.postDataJSON().metadata).not.toHaveProperty("mediaRights");
     await expect(drawer).toBeHidden();
     await expect(page.getByText("整页草稿已保存，包含页面设置与画布修改", { exact: true }))
       .toBeVisible();
@@ -1647,7 +1731,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     });
   }
 
-  test("移动端窄屏仍可完整查看并编辑素材授权字段", async ({ page }) => {
+  test("移动端窄屏可查看授权汇总与素材库入口，不出现页面级授权表单", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockEditorApis(page, { valid: true });
     await page.goto("/admin/editor/home");
@@ -1660,10 +1744,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     expect(drawerBox).not.toBeNull();
     expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
     expect(drawerBox!.width).toBeLessThanOrEqual(390.5);
-    await drawer.getByText("按需编辑 1 项素材来源记录").click();
-    await drawer.getByRole("textbox", { name: "素材 1 来源" }).fill("品牌自有拍摄");
-    await expect(drawer.getByRole("textbox", { name: "素材 1 来源" })).toHaveValue(
-      "品牌自有拍摄",
-    );
+    await expect(drawer.getByRole("link", { name: "在页面素材库登记与审核" })).toBeVisible();
+    await expect(drawer.getByRole("textbox", { name: /素材 \d+ 来源/ })).toHaveCount(0);
   });
 });

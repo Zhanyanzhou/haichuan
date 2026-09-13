@@ -1,9 +1,26 @@
 {
-  "contractSchemaVersion": 9,
+  "contractSchemaVersion": 10,
   "registryVersion": 19,
   "expectedTemplateCount": 1,
   "activeTemplateCount": 1,
   "publicationGateVersion": 3,
+  "managedMediaAuthorizationPolicy": {
+    "authority": "MediaAssetAuthorization",
+    "identity": "MediaAsset.storageKey",
+    "draftBehavior": "warn",
+    "templatePublishBehavior": "block-ineligible",
+    "pagePublishBehavior": "block-visible-ineligible",
+    "publicReadBehavior": "fail-closed",
+    "revocationPropagation": "live",
+    "restoreBehavior": "requires-republish",
+    "legacyPageMediaRights": "advisory-only",
+    "supportedPublicationGateVersions": [
+      3,
+      4
+    ],
+    "enforcementPublicationGateVersion": 3,
+    "shadowPublicationGateVersion": 4
+  },
   "editorPolicy": {
     "version": 3,
     "designScope": "template-definition",

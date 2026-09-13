@@ -492,6 +492,25 @@
     left: 18px;
     gap: 14px;
   }
+  .site-main--overlay[data-page-key="products"] .hc-phase1-hero__copy-band {
+    padding-top: 44px;
+  }
+  /* 作品 Hero 在手机端以独立浅色文案带开场，页头必须使用深色控件。 */
+  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand,
+  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand-text,
+  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__nav-item,
+  .site-shell[data-page-key="products"] .site-header__left-group.is-overlay-light .site-menu-toggle,
+  .site-shell[data-page-key="products"] .site-header__left-group.is-overlay-light .site-header__nav-item {
+    color: #181a1b;
+    text-shadow: none;
+  }
+  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand-text::after {
+    color: rgba(24, 26, 27, 0.58);
+    text-shadow: none;
+  }
+  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__logo {
+    filter: none;
+  }
   .home-brand-signature {
     margin-bottom: 20px;
   }
@@ -637,8 +656,14 @@
 
 .page-public-fallback__action:focus-visible,
 .page-public-fallback__retry:focus-visible {
-  outline: 2px solid currentColor;
+  outline: 2px solid var(--hc-ink);
   outline-offset: 4px;
+}
+
+/* 安全短页眉题是 10px 功能文字；提升到次级文字令牌以满足浅色画布 AA 对比度。 */
+.editorial-shell section[data-production-fallback="safe-status"] > div > p:first-child,
+.site-shell section[data-production-fallback="safe-status"] > div > p:first-child {
+  color: #5F6568 !important;
 }
 
 @media (max-width: 980px) {

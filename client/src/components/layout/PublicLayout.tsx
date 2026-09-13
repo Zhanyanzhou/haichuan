@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation, useOutletContext } from "react-router-dom";
 import { getPageDocumentMeta, usePageMetaStore } from "@/store/pageMetaStore";
 import {
   PublicSiteSettingsProvider,
@@ -17,7 +17,10 @@ import {
   resolvePageHeaderMode,
 } from "@/page-builder/config/editorPages";
 import PublishedPageDecoration from "@/page-builder/runtime/PublishedPageDecoration";
-import { usePublishedPageDocument } from "@/page-builder/runtime/usePublishedPageDocument";
+import {
+  usePublishedPageDocument,
+  type PublishedPageDocumentResource,
+} from "@/page-builder/runtime/usePublishedPageDocument";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 import StorefrontFooter from "./StorefrontFooter";
@@ -25,7 +28,6 @@ import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
 import {
   DEFAULT_PUBLIC_CONTENT_LOCALE,
-  PUBLIC_ENGLISH_ROUTES_ENABLED,
   resolvePublicLocalePath,
   withPublicLocalePath,
 } from "@/i18n/publicLocale";
@@ -35,6 +37,44 @@ import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
+
+const NON_PUBLIC_SYSTEM_HERO_MEDIA = new Set([
+  "/images/system/product-placeholder.svg",
+  "/images/system/launch-short-page-desktop.svg",
+  "/images/system/launch-short-page-mobile.svg",
+]);
+
+/**
+ * 历史发布快照可能仍引用仅供系统空态使用的 Hero 图片。公开 Renderer 会安全省略
+ * 这些图片，因此入口层也要同步省略对应区块，避免白色悬浮导航落在空白首屏上。
+ */
+function omitNonPublicProductsHeroes(
+  resource: PublishedPageDocumentResource,
+  pageKey?: string,
+): PublishedPageDocumentResource {
+  if (pageKey !== "products" || resource.status !== "published" || !resource.pageDocument) {
+    return resource;
+  }
+  const content = resource.pageDocument.puckData.content;
+  const filteredContent = content.filter((block) => {
+    if (block.type !== "首屏主视觉") return true;
+    const media = [block.props?.desktopImage, block.props?.mobileImage]
+      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+      .map((value) => value.trim());
+    return media.some((value) => !NON_PUBLIC_SYSTEM_HERO_MEDIA.has(value));
+  });
+  if (filteredContent.length === content.length) return resource;
+  if (filteredContent.length === 0) {
+    return { ...resource, pageDocument: null, status: "invalid", stale: false };
+  }
+  return {
+    ...resource,
+    pageDocument: {
+      ...resource.pageDocument,
+      puckData: { ...resource.pageDocument.puckData, content: filteredContent },
+    },
+  };
+}
 
 /** 幂等写入/更新 <meta> 标签（按 name 或 property 选择）。 */
 function upsertMeta(attr: "name" | "property", key: string, content: string) {
@@ -108,6 +148,56 @@ function resolvePublicSocialImage(
   }
 }
 
+function normalizeRuntimeCanonicalPath(
+  value: unknown,
+  locale: "zh-CN" | "en",
+  fallbackContentPath: string,
+): string | null {
+  const source = typeof value === "string" && value.trim()
+    ? value.trim()
+    : fallbackContentPath;
+  if (
+    !source.startsWith("/")
+    || source.startsWith("//")
+    || /[?#\\]/.test(source)
+    || Array.from(source).some((character) => character.charCodeAt(0) <= 0x1f)
+  ) {
+    return null;
+  }
+  const localized = resolvePublicLocalePath(source);
+  return withPublicLocalePath(localized.pathname, locale);
+}
+
+function readPrerenderedRouteEvidence() {
+  const root = document.getElementById("root");
+  const path = root?.dataset.prerenderedPath;
+  const contentHash = root?.dataset.publishedContentHash;
+  if (
+    root?.dataset.prerendered !== "true"
+    || typeof path !== "string"
+    || !/^[a-f0-9]{64}$/.test(contentHash || "")
+  ) {
+    return null;
+  }
+  return { path, contentHash: contentHash! };
+}
+
+function readHeadMeta(attr: "name" | "property", key: string) {
+  return normalizeMetadataText(
+    document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)?.content,
+  );
+}
+
+function readHeadAlternates() {
+  return Array.from(
+    document.head.querySelectorAll<HTMLLinkElement>('link[rel="alternate"][hreflang]'),
+  ).flatMap((link) => {
+    const hrefLang = normalizeMetadataText(link.hreflang);
+    const href = normalizeMetadataText(link.href);
+    return hrefLang && href ? [{ hrefLang, href }] : [];
+  });
+}
+
 const SOCIAL_META_KEYS = [
   ["property", "og:type"],
   ["property", "og:site_name"],
@@ -130,6 +220,13 @@ const publicSiteOrigin = normalizePublicSiteOrigin(
   import.meta.env.VITE_PUBLIC_SITE_ORIGIN,
   { allowHttp: import.meta.env.DEV },
 );
+
+const ENGLISH_PUBLIC_CONTENT_PAGE_KEYS = new Set([
+  "home",
+  "products",
+  "about",
+  "custom",
+]);
 
 /* ═══════ 内联图标 ═══════ */
 const MenuIcon = () => (
@@ -222,22 +319,73 @@ const AccountIcon = () => (
 
 export default function PublicLayout() {
   const location = useLocation();
+  const parentOutletContext = useOutletContext<{
+    englishPublication?: {
+      pageKey: string;
+      documentResource: PublishedPageDocumentResource;
+    };
+  } | null>();
   const localizedPath = resolvePublicLocalePath(location.pathname);
+  const english = localizedPath.locale === "en";
   const contentPathname = localizedPath.pathname;
   const mainRef = useRef<HTMLElement>(null);
   const previousPathRef = useRef(location.pathname);
+  const initialPrerenderedSeoRef = useRef<{
+    evidence: ReturnType<typeof readPrerenderedRouteEvidence>;
+    title?: string;
+    description?: string;
+    image?: string;
+    alternates: Array<{ hrefLang: string; href: string }>;
+  } | undefined>(undefined);
+  if (initialPrerenderedSeoRef.current === undefined) {
+    initialPrerenderedSeoRef.current = {
+      evidence: readPrerenderedRouteEvidence(),
+      title: normalizeMetadataText(document.title),
+      description: readHeadMeta("name", "description"),
+      image: readHeadMeta("property", "og:image"),
+      alternates: readHeadAlternates(),
+    };
+  }
   const previewPageKey = contentPathname.match(/^\/preview\/([^/]+)$/)?.[1];
   const previewPage = isEditorPageKey(previewPageKey)
     ? getEditorPage(previewPageKey)
     : undefined;
   const isHome = contentPathname === "/" || previewPage?.key === "home";
   const pageDefinition = getEditorPageByPath(contentPathname) ?? previewPage;
-  const publishedHeaderDocument = usePublishedPageDocument(
-    previewPage ? undefined : pageDefinition?.key,
+  const parentEnglishPublication = parentOutletContext?.englishPublication;
+  const inheritedEnglishPublication = english
+    && parentEnglishPublication
+    && parentEnglishPublication?.pageKey === pageDefinition?.key
+      ? parentEnglishPublication.documentResource
+      : null;
+  const standalonePublishedHeaderDocumentResource = usePublishedPageDocument(
+    previewPage || inheritedEnglishPublication ? undefined : pageDefinition?.key,
+    localizedPath.locale,
+  );
+  const publishedHeaderDocumentResource = inheritedEnglishPublication
+    ?? standalonePublishedHeaderDocumentResource;
+  const publishedHeaderDocument = omitNonPublicProductsHeroes(
+    publishedHeaderDocumentResource,
+    pageDefinition?.key,
+  );
+  const supportsEnglishContent = Boolean(
+    pageDefinition && ENGLISH_PUBLIC_CONTENT_PAGE_KEYS.has(pageDefinition.key),
+  );
+  const alternateDocument = usePublishedPageDocument(
+    !previewPage
+      && supportsEnglishContent
+      && publishedHeaderDocument.status === "published"
+      ? pageDefinition?.key
+      : undefined,
+    english ? DEFAULT_PUBLIC_CONTENT_LOCALE : "en",
   );
   const publishedHeaderReadiness = getPublishedPageReadiness(
     pageDefinition?.key,
     publishedHeaderDocument.pageDocument?.puckData,
+  );
+  const alternateReadiness = getPublishedPageReadiness(
+    pageDefinition?.key,
+    alternateDocument.pageDocument?.puckData,
   );
   const pageDocumentUnavailable = Boolean(
     !previewPage
@@ -258,6 +406,14 @@ export default function PublicLayout() {
   // 预览页由 PagePreview 读取草稿；不能再套一层公开发布文档装饰器。
   const decorationPage = previewPage ? undefined : isHome ? undefined : pageDefinition;
   const decorationFallback = (() => {
+    if (english && decorationPage) {
+      return {
+        eyebrow: "HAICHUAN JEWELRY",
+        title: `${decorationPage.key.charAt(0).toUpperCase()}${decorationPage.key.slice(1)} is not published`,
+        description: "This language version is unavailable until an approved English page is published.",
+        primaryAction: { label: "Back to English home", href: "/en" },
+      };
+    }
     const fallback = decorationPage?.publicFallback;
     if (!fallback || decorationPage?.key !== "custom") return fallback;
     const productRef = normalizePublicProductReference(
@@ -276,7 +432,8 @@ export default function PublicLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [scrolled, setScrolled] = useState(false);
-  const siteSettingsResource = usePublicSiteSettingsResource();
+  // 英文站点资料尚无独立正式发布事实；不要请求中文 SiteSettings 再静默复用。
+  const siteSettingsResource = usePublicSiteSettingsResource(!english);
   const siteSettings = siteSettingsResource.settings;
   const customerAuthStatus = useCustomerAuthStore((state) => state.status);
   const setCustomerAuth = useCustomerAuthStore((state) => state.setAuth);
@@ -290,6 +447,10 @@ export default function PublicLayout() {
       ? publishedHeaderDocument.pageDocument?.metadata
       : undefined,
   );
+  const publishedContentHash = typeof publishedHeaderDocument.pageDocument?.contentHash === "string"
+    && /^[a-f0-9]{64}$/.test(publishedHeaderDocument.pageDocument.contentHash)
+    ? publishedHeaderDocument.pageDocument.contentHash
+    : null;
   const noIndex = Boolean(
     nonIndexableRoute || previewPage || pageMeta.noIndex || pageDocumentUnavailable,
   );
@@ -301,7 +462,7 @@ export default function PublicLayout() {
     return buildPublicUrl(publicSiteOrigin, logo) || undefined;
   })();
   const organizationStructuredData =
-    !noIndex && publicSiteOrigin && siteSettings && siteSettingsResource.status === "loaded"
+    !english && !noIndex && publicSiteOrigin && siteSettings && siteSettingsResource.status === "loaded"
       ? {
           "@context": "https://schema.org",
           "@type": "Organization",
@@ -351,42 +512,64 @@ export default function PublicLayout() {
   }, [customerAuthStatus, markCustomerAnonymous, needsCustomerIdentity, setCustomerAuth]);
 
   useEffect(() => {
-    const siteName = siteSettings?.siteName || "海川珠宝";
+    const siteName = english ? "Haichuan Jewelry" : siteSettings?.siteName || "海川珠宝";
     const routeTitle = pageDefinition && !isHome
-      ? `${pageDefinition.label} | ${siteName}`
+      ? `${english ? pageDefinition.key : pageDefinition.label} | ${siteName}`
       : undefined;
-    const routeDescription = pageDefinition?.publicFallback?.description
-      || pageDefinition?.description;
+    const routeDescription = english
+      ? "Haichuan Jewelry English content page."
+      : pageDefinition?.publicFallback?.description || pageDefinition?.description;
     // 已发布 PageDocument SEO 优先；代码页面设置只在没有装修文档时作为安全回退。
-    const title =
-      publishedPageMeta.title || pageMeta.title || routeTitle || siteSettings?.seoTitle || siteSettings?.siteName;
-    const description =
-      publishedPageMeta.description ||
-      pageMeta.description ||
-      routeDescription ||
-      siteSettings?.seoDescription ||
-      siteSettings?.siteDescription;
-    const keywords = siteSettings?.seoKeywords;
-    const canonicalPath =
-      noIndex || pageMeta.canonicalPath === null
-        ? null
-        : pageMeta.canonicalPath || location.pathname;
+    const canonicalPath = noIndex || pageMeta.canonicalPath === null
+      ? null
+      : normalizeRuntimeCanonicalPath(
+          pageMeta.canonicalPath,
+          localizedPath.locale,
+          contentPathname,
+        );
     const canonicalUrl = canonicalPath
       ? buildPublicUrl(publicSiteOrigin, canonicalPath)
       : null;
+    const prerenderedEvidence = initialPrerenderedSeoRef.current?.evidence ?? null;
+    const prerenderedRouteMatches = Boolean(
+      canonicalPath
+      && prerenderedEvidence
+      && prerenderedEvidence.path === canonicalPath,
+    );
+    const staticTitle = prerenderedRouteMatches ? initialPrerenderedSeoRef.current?.title : undefined;
+    const staticDescription = prerenderedRouteMatches ? initialPrerenderedSeoRef.current?.description : undefined;
+    const staticImage = prerenderedRouteMatches ? initialPrerenderedSeoRef.current?.image : undefined;
+    const title =
+      publishedPageMeta.title
+      || (english ? undefined : pageMeta.title)
+      || staticTitle
+      || routeTitle
+      || (english ? undefined : siteSettings?.seoTitle || siteSettings?.siteName);
+    const description =
+      publishedPageMeta.description
+      || (english ? undefined : pageMeta.description)
+      || staticDescription
+      || routeDescription
+      || (english ? undefined : siteSettings?.seoDescription || siteSettings?.siteDescription);
+    const keywords = english ? undefined : siteSettings?.seoKeywords;
     const normalizedTitle = normalizeMetadataText(title);
     const normalizedDescription = normalizeMetadataText(description);
     const image = resolvePublicSocialImage(
       publicSiteOrigin,
-      publishedPageMeta.image || pageMeta.image,
+      publishedPageMeta.image || pageMeta.image || staticImage,
     );
-    const socialMetadataReady = Boolean(
+    const publishedHashMatches = !pageDefinition
+      || (publishedContentHash !== null
+        && publishedContentHash === prerenderedEvidence?.contentHash);
+    const indexableSeoReady = Boolean(
       !noIndex
+      && prerenderedRouteMatches
+      && publishedHashMatches
       && canonicalUrl
       && normalizedTitle
       && normalizedDescription
-      && siteSettings
-      && siteSettingsResource.status === "loaded",
+      && image
+      && (english || (siteSettings && siteSettingsResource.status === "loaded")),
     );
 
     document.title = normalizedTitle || siteName;
@@ -395,11 +578,16 @@ export default function PublicLayout() {
     upsertMeta(
       "name",
       "robots",
-      noIndex ? "noindex, nofollow" : "index, follow",
+      indexableSeoReady ? "index, follow" : "noindex, nofollow",
+    );
+    syncMeta(
+      "name",
+      "published-content-hash",
+      prerenderedRouteMatches ? prerenderedEvidence?.contentHash : undefined,
     );
     syncLink("canonical", canonicalUrl);
 
-    if (socialMetadataReady && canonicalUrl && normalizedTitle && normalizedDescription) {
+    if (indexableSeoReady && canonicalUrl && normalizedTitle && normalizedDescription && image) {
       upsertMeta("property", "og:type", "website");
       upsertMeta("property", "og:site_name", siteName);
       upsertMeta("property", "og:title", normalizedTitle);
@@ -419,22 +607,30 @@ export default function PublicLayout() {
       clearSocialMetadata();
     }
 
-    if (!canonicalUrl || noIndex) {
+    if (!canonicalUrl || !indexableSeoReady) {
       syncAlternateLinks([]);
       return () => {
         syncLink("canonical", null);
         syncAlternateLinks([]);
         clearSocialMetadata();
+        syncMeta("name", "published-content-hash");
         upsertMeta("name", "robots", "noindex, nofollow");
       };
     }
     const alternateBasePath = contentPathname;
+    const currentLocaleReady = !pageDefinition
+      ? indexableSeoReady
+      : publishedHeaderDocument.status === "published" && publishedHeaderReadiness?.ready;
+    const counterpartReady = supportsEnglishContent
+      && alternateDocument.status === "published"
+      && alternateReadiness?.ready;
+    const chineseReady = english ? counterpartReady : currentLocaleReady;
+    const englishReady = english ? currentLocaleReady : counterpartReady;
     const alternateLocales = [
-      {
-        locale: DEFAULT_PUBLIC_CONTENT_LOCALE,
-        hrefLang: "zh-CN",
-      },
-      ...(PUBLIC_ENGLISH_ROUTES_ENABLED
+      ...(chineseReady
+        ? [{ locale: DEFAULT_PUBLIC_CONTENT_LOCALE, hrefLang: "zh-CN" }]
+        : []),
+      ...(englishReady
         ? [{ locale: "en" as const, hrefLang: "en" }]
         : []),
     ];
@@ -445,16 +641,26 @@ export default function PublicLayout() {
       );
       return href ? [{ hrefLang, href }] : [];
     });
-    const defaultHref = buildPublicUrl(
-      publicSiteOrigin,
-      withPublicLocalePath(alternateBasePath, DEFAULT_PUBLIC_CONTENT_LOCALE),
-    );
+    const defaultHref = chineseReady
+      ? buildPublicUrl(
+          publicSiteOrigin,
+          withPublicLocalePath(alternateBasePath, DEFAULT_PUBLIC_CONTENT_LOCALE),
+        )
+      : null;
     if (defaultHref) alternates.push({ hrefLang: "x-default", href: defaultHref });
-    syncAlternateLinks(alternates);
+    const immutableAlternates = new Set(
+      initialPrerenderedSeoRef.current?.alternates.map(
+        ({ hrefLang, href }) => `${hrefLang}\u0000${href}`,
+      ) ?? [],
+    );
+    syncAlternateLinks(alternates.filter(
+      ({ hrefLang, href }) => immutableAlternates.has(`${hrefLang}\u0000${href}`),
+    ));
     return () => {
       syncLink("canonical", null);
       syncAlternateLinks([]);
       clearSocialMetadata();
+      syncMeta("name", "published-content-hash");
       upsertMeta("name", "robots", "noindex, nofollow");
     };
   }, [
@@ -464,15 +670,22 @@ export default function PublicLayout() {
     publishedPageMeta.title,
     publishedPageMeta.description,
     publishedPageMeta.image,
+    publishedContentHash,
     location.pathname,
     pageDefinition,
     isHome,
     noIndex,
     contentPathname,
     localizedPath.locale,
+    english,
+    supportsEnglishContent,
+    alternateDocument.status,
+    alternateReadiness?.ready,
+    publishedHeaderDocument.status,
+    publishedHeaderReadiness?.ready,
   ]);
 
-  const siteName = siteSettings?.siteName || "海川珠宝";
+  const siteName = english ? "Haichuan Jewelry" : siteSettings?.siteName || "海川珠宝";
   const contactPhone = siteSettings?.contactPhone?.trim() || "";
   const contactAddress = siteSettings?.contactAddress?.trim() || "";
   const logoUrl = resolveSiteLogo(siteSettings?.logo);
@@ -530,6 +743,7 @@ export default function PublicLayout() {
     <PublicSiteSettingsProvider resource={siteSettingsResource}>
     <div
       className={isHome ? "editorial-shell" : `site-shell${overlaysPageContent ? " site-shell--overlay" : ""}`}
+      data-page-key={pageDefinition?.key}
       data-page-header-mode={resolvedHeaderMode}
       data-page-header-surface={isTransparent ? "transparent" : "solid"}
     >
@@ -537,7 +751,7 @@ export default function PublicLayout() {
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:bg-white focus:px-4 focus:py-3 focus:text-brand-text focus:shadow-lg"
       >
-        跳至主内容
+        {english ? "Skip to main content" : "跳至主内容"}
       </a>
       {/* ═══════ Header ═══════ */}
       <header
@@ -553,9 +767,9 @@ export default function PublicLayout() {
           <div className="site-header__left" />
 
           <Link
-            to="/"
+            to={withPublicLocalePath("/", localizedPath.locale)}
             className="site-header__brand"
-            aria-label={`${siteName}首页`}
+            aria-label={english ? `${siteName} home` : `${siteName}首页`}
             onClick={handleBrandHomeClick}
           >
             {logoUrl && (
@@ -573,28 +787,28 @@ export default function PublicLayout() {
             <span className="site-header__brand-text">{siteName}</span>
           </Link>
 
-          <nav className="site-header__right" aria-label="快捷入口">
+          <nav className="site-header__right" aria-label={english ? "Quick links" : "快捷入口"}>
             <Link
-              to="/catalog"
-              aria-label="选款中心"
+              to={withPublicLocalePath(english ? "/products" : "/catalog", localizedPath.locale)}
+              aria-label={english ? "Collection" : "选款中心"}
               className="site-header__nav-item"
             >
               <DiamondIcon />
               <span className="site-header__nav-label hidden sm:inline">
-                选款
+                {english ? "Collection" : "选款"}
               </span>
             </Link>
             <Link
-              to="/contact"
-              aria-label="预约咨询"
+              to={withPublicLocalePath(english ? "/custom" : "/contact", localizedPath.locale)}
+              aria-label={english ? "Bespoke" : "预约咨询"}
               className="site-header__nav-item"
             >
               <CalendarIcon />
               <span className="site-header__nav-label hidden sm:inline">
-                预约
+                {english ? "Bespoke" : "预约"}
               </span>
             </Link>
-            <Link
+            {!english ? <Link
               to="/customer"
               aria-label="我的账户"
               className="site-header__nav-item"
@@ -603,7 +817,7 @@ export default function PublicLayout() {
               <span className="site-header__nav-label hidden sm:inline">
                 我的账户
               </span>
-            </Link>
+            </Link> : null}
           </nav>
         </div>
       </header>
@@ -612,7 +826,7 @@ export default function PublicLayout() {
       <div
         className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
       >
-        <button
+        {!english ? <button
           ref={menuToggleRef}
           type="button"
           className="site-menu-toggle"
@@ -632,32 +846,33 @@ export default function PublicLayout() {
               <span className="site-menu-toggle__label">菜单</span>
             </>
           )}
-        </button>
+        </button> : null}
         <Link
-          to="/catalog#catalog-search-input"
-          aria-label="搜索"
+          to={withPublicLocalePath(english ? "/products" : "/catalog#catalog-search-input", localizedPath.locale)}
+          aria-label={english ? "Collection" : "搜索"}
           className="site-header__nav-item"
         >
           <SearchIcon />
-          <span className="site-header__nav-label hidden sm:inline">搜索</span>
+          <span className="site-header__nav-label hidden sm:inline">{english ? "Collection" : "搜索"}</span>
         </Link>
       </div>
 
       {/* ═══════ 菜单面板 ═══════ */}
-      <StorefrontMenuDrawer
+      {!english ? <StorefrontMenuDrawer
         open={menuOpen}
         onOpenChange={setMenuOpen}
         contactPhone={contactPhone}
         contactAddress={contactAddress}
         menuId="brand-menu"
         returnFocusRef={menuToggleRef}
-      />
+      /> : null}
 
       {/* ═══════ Main ═══════ */}
       <main
         ref={mainRef}
         id="main-content"
         tabIndex={-1}
+        data-page-key={pageDefinition?.key}
         style={{ outline: "none" }}
         className={isHome
           ? `editorial-main site-main${overlaysPageContent ? " site-main--overlay" : ""}`
@@ -665,26 +880,27 @@ export default function PublicLayout() {
       >
         {USE_MOCK && (
           <aside
-            aria-label="演示数据说明"
+            aria-label={english ? "Synthetic data notice" : "演示数据说明"}
             className={`border-b border-[#DDE1E2] bg-[#F4F5F5] px-5 py-3 text-center text-[12px] leading-5 tracking-[0.06em] text-[#5F6568]${
               overlaysPageContent ? " mt-16 md:mt-[72px] xl:mt-[108px]" : ""
             }`}
           >
-            <strong className="font-medium text-[#181A1B]">演示数据</strong>
+            <strong className="font-medium text-[#181A1B]">{english ? "Synthetic QA data" : "演示数据"}</strong>
             <span aria-hidden="true"> · </span>
-            当前商品、订单与账号仅用于本地功能验收，不代表真实库存、价格或服务承诺。
+            {english ? "Local verification only; this is not real inventory, pricing, or a service promise." : "当前商品、订单与账号仅用于本地功能验收，不代表真实库存、价格或服务承诺。"}
           </aside>
         )}
         <PublishedPageDecoration
           pageKey={decorationPage?.key}
-          pageLabel={decorationPage?.label}
+          pageLabel={english ? decorationPage?.key : decorationPage?.label}
           documentResource={publishedHeaderDocument}
+          locale={localizedPath.locale}
           replaceChildren={Boolean(decorationPage && !decorationPage.dynamic)}
           publicFallback={decorationFallback}
         >
           {needsCustomerIdentity && customerAuthStatus === "unknown" ? (
             <div className="flex min-h-[40vh] items-center justify-center" role="status">
-              正在确认账户状态…
+              {english ? "Checking account status…" : "正在确认账户状态…"}
             </div>
           ) : (
             <Outlet context={publishedHeaderDocument} />
@@ -692,8 +908,12 @@ export default function PublicLayout() {
         </PublishedPageDecoration>
       </main>
 
-      <StorefrontFooter siteName={siteName} showService={!hideFooterService} />
-      <AnalyticsConsentBanner />
+      {english ? (
+        <footer className="site-footer px-6 py-10 text-center text-sm text-brand-muted">
+          © {new Date().getFullYear()} Haichuan Jewelry
+        </footer>
+      ) : <StorefrontFooter siteName={siteName} showService={!hideFooterService} />}
+      {!english ? <AnalyticsConsentBanner /> : null}
     </div>
     </PublicSiteSettingsProvider>
   );

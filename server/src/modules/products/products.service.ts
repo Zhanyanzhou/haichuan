@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   Logger,
   NotFoundException,
   ConflictException,
@@ -49,7 +50,9 @@ import type { Response } from "express";
 import type {
   CustomerOrStaffRequest,
   CustomerPrincipal,
+  StaffPrincipal,
 } from "../../common/security/authenticated-principal";
+import { evaluateMediaPublicEligibility } from "../upload/media-public-eligibility";
 
 const PRODUCT_QUALITY_GATE_VERSION = "p0-product-quality-v1";
 const FORBIDDEN_PUBLIC_CONTENT =
@@ -86,6 +89,27 @@ const CUSTOMER_FACING_IMAGE_SELECT = {
   isVideo: true,
   width: true,
   height: true,
+  mimeType: true,
+  mediaAssetId: true,
+  mediaAsset: {
+    select: {
+      id: true,
+      status: true,
+      accessLevel: true,
+      lifecycleRevision: true,
+      authorization: {
+        select: {
+          revision: true,
+          publicUseEpoch: true,
+          reviewStatus: true,
+          revocationStatus: true,
+          publicWebUseAllowed: true,
+          validFrom: true,
+          validUntil: true,
+        },
+      },
+    },
+  },
 } satisfies Prisma.ProductImageSelect;
 
 const CUSTOMER_FACING_LIST_SELECT = {
@@ -192,19 +216,20 @@ const PUBLICATION_QUALITY_SELECT = {
   deliveryMethods: true,
   shippingTemplate: { select: { isActive: true } },
   primaryImage: {
-    select: { id: true, url: true, storageKey: true, isVideo: true, mimeType: true },
+    select: CUSTOMER_FACING_IMAGE_SELECT,
   },
   listingImage: {
-    select: { id: true, url: true, storageKey: true, isVideo: true, mimeType: true },
+    select: CUSTOMER_FACING_IMAGE_SELECT,
   },
   images: {
-    where: { isVideo: false },
     select: {
       id: true,
       url: true,
       storageKey: true,
       isVideo: true,
       mimeType: true,
+      mediaAssetId: true,
+      mediaAsset: CUSTOMER_FACING_IMAGE_SELECT.mediaAsset,
     },
   },
   skus: {
@@ -239,6 +264,44 @@ type CustomerFacingProduct =
   | CustomerFacingListProduct
   | CustomerFacingPublicDetailProduct
   | CustomerFacingDetailProduct;
+
+type ProductMutationActor = Pick<StaffPrincipal, "id" | "role">;
+type ProductReviewStatus = "DRAFT" | "IN_REVIEW";
+
+function publicMediaAssetWhere(now: Date): Prisma.MediaAssetWhereInput {
+  return {
+    status: "READY",
+    accessLevel: "PUBLIC",
+    authorization: {
+      is: {
+        reviewStatus: "APPROVED",
+        revocationStatus: "ACTIVE",
+        publicWebUseAllowed: true,
+        AND: [
+          { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+          { OR: [{ validUntil: null }, { validUntil: { gt: now } }] },
+        ],
+      },
+    },
+  };
+}
+
+/** 普通附图失效策略尚未决定；当前安全默认是任一公开媒体失效即整件停止公开。 */
+function withPublicMediaEligibility(
+  base: Prisma.ProductWhereInput,
+  now: Date = new Date(),
+): Prisma.ProductWhereInput {
+  const eligibleAsset = publicMediaAssetWhere(now);
+  const eligibleImage: Prisma.ProductImageWhereInput = {
+    mediaAsset: { is: eligibleAsset },
+  };
+  return {
+    ...base,
+    primaryImage: { is: eligibleImage },
+    listingImage: { is: eligibleImage },
+    images: { every: eligibleImage },
+  };
+}
 
 type CompletenessProduct = {
   name?: string | null;
@@ -280,8 +343,14 @@ function publicationQualityHash(product: PublicationQualitySnapshot): string {
     primaryImageId: product.primaryImage?.id ?? null,
     listingImageId: product.listingImage?.id ?? null,
     imageIds: product.images
-      .map((image) => image.id)
-      .sort((left, right) => left - right),
+      .map((image) => ({
+        id: image.id,
+        mediaAssetId: image.mediaAssetId,
+        lifecycleRevision: image.mediaAsset?.lifecycleRevision ?? null,
+        authorizationRevision: image.mediaAsset?.authorization?.revision ?? null,
+        publicUseEpoch: image.mediaAsset?.authorization?.publicUseEpoch ?? null,
+      }))
+      .sort((left, right) => left.id - right.id),
     skus: product.skus.map((sku) => ({
       id: sku.id,
       price: String(sku.price),
@@ -443,8 +512,8 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
 }
 
 /** 从 DTO 提取 Prisma update 数据，仅包含前端传入的字段 */
-function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
-  const data: Prisma.ProductUpdateInput = {
+function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUncheckedUpdateManyInput {
+  const data: Prisma.ProductUncheckedUpdateManyInput = {
     // 任意业务内容编辑先退出正式发布质量态；已发布商品会在同一事务末尾重新校验。
     publicationQualityStatus: "QUARANTINED",
     publicationQualityHash: null,
@@ -453,7 +522,7 @@ function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
 
   if (dto.name !== undefined) data.name = dto.name;
   if (dto.categoryId !== undefined) {
-    data.category = { connect: { id: dto.categoryId } };
+    data.categoryId = dto.categoryId;
   }
   if (dto.shortDescription !== undefined)
     data.shortDescription = dto.shortDescription;
@@ -480,9 +549,7 @@ function mapUpdateDto(dto: UpdateProductDto): Prisma.ProductUpdateInput {
   if (dto.fulfillmentType !== undefined) data.fulfillmentType = dto.fulfillmentType;
   if (dto.dispatchTime !== undefined) data.dispatchTime = dto.dispatchTime;
   if (dto.shippingTemplateId !== undefined) {
-    data.shippingTemplate = dto.shippingTemplateId
-      ? { connect: { id: dto.shippingTemplateId } }
-      : { disconnect: true };
+    data.shippingTemplateId = dto.shippingTemplateId;
   }
   if (dto.deliveryMethods !== undefined) data.deliveryMethods = dto.deliveryMethods;
   if (dto.requiresInsuredShipping !== undefined)
@@ -526,6 +593,110 @@ export class ProductsService {
     private productAccess: ProductAccessService,
   ) {}
 
+  private isPublicImageEligible(image: Pick<CustomerFacingImage, "mediaAsset">): boolean {
+    const asset = image.mediaAsset;
+    if (!asset) return false;
+    return evaluateMediaPublicEligibility({
+      assetStatus: asset.status,
+      accessLevel: asset.accessLevel,
+      authorization: asset.authorization,
+    }).eligible;
+  }
+
+  private isPublishingAdmin(actor?: ProductMutationActor): boolean {
+    return !actor || actor.role === "SUPER_ADMIN" || actor.role === "ADMIN";
+  }
+
+  private async getProductReviewState(
+    productId: number,
+    db: Prisma.TransactionClient | PrismaService,
+  ): Promise<{ status: ProductReviewStatus; submissionId?: number }> {
+    const operationLog = (db as Prisma.TransactionClient & {
+      operationLog?: Prisma.TransactionClient["operationLog"];
+    }).operationLog;
+    if (!operationLog || typeof operationLog.findFirst !== "function") {
+      return { status: "DRAFT" };
+    }
+    const latest = await operationLog.findFirst({
+      where: {
+        module: "products",
+        targetId: productId,
+        action: { in: [
+          "product.review.submit",
+          "product.review.return",
+          "product.publish",
+          "product.publish.scheduled",
+        ] },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { id: true, action: true },
+    });
+    return latest?.action === "product.review.submit"
+      ? { status: "IN_REVIEW", submissionId: latest.id }
+      : { status: "DRAFT" };
+  }
+
+  private async assertCanMutateProductDraft(
+    productId: number,
+    actor: ProductMutationActor | undefined,
+    db: Prisma.TransactionClient | PrismaService,
+  ) {
+    const productDelegate = db.product as typeof db.product & {
+      findFirst?: Prisma.TransactionClient["product"]["findFirst"];
+      findUnique?: Prisma.TransactionClient["product"]["findUnique"];
+    };
+    // 生产事务始终走 findFirst（同时排除软删除）；少量隔离单测只提供 findUnique，
+    // 但调用前的行锁同样已限定 deleted_at IS NULL。
+    const product = typeof productDelegate.findFirst === "function"
+      ? await productDelegate.findFirst({
+          where: { id: productId, deletedAt: null },
+          select: { status: true },
+        })
+      : typeof productDelegate.findUnique === "function"
+        ? await productDelegate.findUnique({
+            where: { id: productId },
+            select: { status: true },
+          })
+        : await this.prisma.product.findFirst({
+            where: { id: productId, deletedAt: null },
+            select: { status: true },
+          });
+    if (!product) throw new NotFoundException("商品不存在或已删除");
+    const review = await this.getProductReviewState(productId, db);
+    if (review.status === "IN_REVIEW") {
+      throw new ConflictException("作品正在审核中；管理员须先发布或退回草稿后才能修改");
+    }
+    if (this.isPublishingAdmin(actor)) return;
+    if (product.status !== "DRAFT") {
+      throw new ForbiddenException("编辑角色只能维护草稿；已发布或已下架作品须由管理员处理");
+    }
+  }
+
+  private assertCanChangePublication(actor?: ProductMutationActor) {
+    if (!this.isPublishingAdmin(actor)) {
+      throw new ForbiddenException("只有管理员可以发布、下架或变更作品公开计划");
+    }
+  }
+
+  private async writeProductAudit(
+    transaction: Prisma.TransactionClient,
+    actor: ProductMutationActor | undefined,
+    productId: number,
+    action: string,
+    detail: Record<string, unknown>,
+  ) {
+    if (!actor) return;
+    await transaction.operationLog.create({
+      data: {
+        userId: actor.id,
+        action,
+        module: "products",
+        targetId: productId,
+        detail: JSON.stringify({ schemaVersion: 1, productId, ...detail }),
+      },
+    });
+  }
+
   @Cron(CronExpression.EVERY_MINUTE)
   async publishScheduledProducts() {
     const due = await this.prisma.product.findMany({
@@ -542,6 +713,22 @@ export class ProductsService {
       try {
         await this.prisma.$transaction(async (tx) => {
           await this.lockProductForTradeMutation(item.id, tx);
+          const review = await this.getProductReviewState(item.id, tx);
+          if (review.status === "IN_REVIEW") {
+            throw new ConflictException("作品正在审核中，定时计划不能代替管理员审核");
+          }
+          const scheduledBy = await tx.operationLog.findFirst({
+            where: {
+              module: "products",
+              targetId: item.id,
+              action: "product.publish.schedule",
+            },
+            orderBy: { createdAt: "desc" },
+            select: { userId: true },
+          });
+          if (!scheduledBy) {
+            throw new ConflictException("定时上架缺少可审计的管理员来源");
+          }
           await this.syncProductStartingPrice(item.id, tx);
           await this.assertInventoryPolicy(item.id, tx);
           await this.canPublish(item.id, tx);
@@ -555,6 +742,13 @@ export class ProductsService {
               scheduledPublishError: null,
             },
           });
+          await this.writeProductAudit(
+            tx,
+            { id: scheduledBy.userId, role: "ADMIN" },
+            item.id,
+            "product.publish.scheduled",
+            { status: "PUBLISHED" },
+          );
         });
         this.notifyPublicChange(item.id);
       } catch (error) {
@@ -685,8 +879,35 @@ export class ProductsService {
         this.prisma.product.count({ where }),
       ]);
 
+      const canReadReviewLogs = typeof this.prisma.operationLog?.findMany === "function";
+      const reviewLogs = list.length > 0 && canReadReviewLogs
+        ? await this.prisma.operationLog.findMany({
+            where: {
+              module: "products",
+              targetId: { in: list.map((product) => product.id) },
+              action: { in: [
+                "product.review.submit",
+                "product.review.return",
+                "product.publish",
+                "product.publish.scheduled",
+              ] },
+            },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            select: { targetId: true, action: true },
+          })
+        : [];
+      const latestReviewAction = new Map<number, string>();
+      for (const log of reviewLogs) {
+        if (log.targetId != null && !latestReviewAction.has(log.targetId)) {
+          latestReviewAction.set(log.targetId, log.action);
+        }
+      }
       const enrichedList = list.map((product) => ({
         ...product,
+        reviewStatus:
+          latestReviewAction.get(product.id) === "product.review.submit"
+            ? "IN_REVIEW" as const
+            : "DRAFT" as const,
         // 后台媒体也统一走受控媒体端点（迁移后旧 /uploads 文件删除，url 不再可用）
         images: product.images.map((image) => ({
           ...image,
@@ -741,7 +962,27 @@ export class ProductsService {
           type: true,
           sortOrder: true,
           createdAt: true,
-          product: { select: { id: true, name: true, code: true } },
+          mediaAssetId: true,
+          mediaAsset: {
+            select: {
+              id: true,
+              status: true,
+              accessLevel: true,
+              authorization: {
+                select: {
+                  revision: true,
+                  publicUseEpoch: true,
+                  sourceType: true,
+                  reviewStatus: true,
+                  revocationStatus: true,
+                  publicWebUseAllowed: true,
+                  validFrom: true,
+                  validUntil: true,
+                },
+              },
+            },
+          },
+          product: { select: { id: true, name: true, code: true, status: true } },
         },
       }),
       this.prisma.productImage.count({ where }),
@@ -755,6 +996,16 @@ export class ProductsService {
         productId: row.product.id,
         productName: row.product.name,
         productCode: row.product.code,
+        productStatus: row.product.status,
+        mediaAssetId: row.mediaAssetId,
+        authorization: row.mediaAsset?.authorization ?? null,
+        publicEligibility: row.mediaAsset
+          ? evaluateMediaPublicEligibility({
+              assetStatus: row.mediaAsset.status,
+              accessLevel: row.mediaAsset.accessLevel,
+              authorization: row.mediaAsset.authorization,
+            })
+          : { eligible: false, reasons: ["AUTHORIZATION_MISSING" as const] },
         mediaUrl: `/products/catalog/${row.product.id}/media/${row.id}?width=480`,
       })),
       total,
@@ -815,8 +1066,17 @@ export class ProductsService {
         product.primaryImage,
         ...product.images,
       ].find((image) =>
-        image ? this.productMedia.isProductMediaReadable(image) : false,
+        image
+          ? this.productMedia.isProductMediaReadable(image) && this.isPublicImageEligible(image)
+          : false,
       )?.id;
+      const allMediaEligible = Boolean(
+        product.primaryImage &&
+        product.listingImage &&
+        this.isPublicImageEligible(product.primaryImage) &&
+        this.isPublicImageEligible(product.listingImage) &&
+        product.images.every((image) => this.isPublicImageEligible(image)),
+      );
       const reason = product.deletedAt
         ? "DELETED"
         : product.status === "OFFLINE"
@@ -833,7 +1093,9 @@ export class ProductsService {
                     ? "RELEASE_HIDDEN"
                     : !imageId
                       ? "MISSING_IMAGE"
-                      : "AVAILABLE";
+                      : !allMediaEligible
+                        ? "NOT_READY"
+                        : "AVAILABLE";
       return {
         ...reference,
         id: product.id,
@@ -891,9 +1153,9 @@ export class ProductsService {
   ) {
     const page = this.toBoundedPositiveInt(params.page, 1, 10_000);
     const pageSize = this.toBoundedPositiveInt(params.pageSize, 20, 100);
-    const baseWhere: Prisma.ProductWhereInput =
-      customerFacingProductWhereForVisibilities(visibilities);
-    const where: Prisma.ProductWhereInput = { ...baseWhere };
+    const baseWhere = customerFacingProductWhereForVisibilities(visibilities);
+    const securedBaseWhere = withPublicMediaEligibility(baseWhere);
+    const where: Prisma.ProductWhereInput = { ...securedBaseWhere };
     const andFilters: Prisma.ProductWhereInput[] = [];
 
     if (params.ids !== undefined) {
@@ -1045,7 +1307,7 @@ export class ProductsService {
               ? [{ code: "asc" }, { id: "asc" }]
               : [{ updatedAt: "desc" }, { id: "desc" }];
 
-    const facetWhere: Prisma.ProductWhereInput = { ...baseWhere };
+    const facetWhere: Prisma.ProductWhereInput = { ...securedBaseWhere };
     if (categoryIds.length > 0) {
       facetWhere.categoryId = { in: categoryIds };
     } else if (params.categoryId) {
@@ -1106,7 +1368,11 @@ export class ProductsService {
   ): Record<string, unknown> {
     const productId = product.id;
     const mapImage = (image: CustomerFacingImage | null) => {
-      if (!image || !this.productMedia.isProductMediaReadable(image)) return null;
+      if (
+        !image ||
+        !this.productMedia.isProductMediaReadable(image) ||
+        !this.isPublicImageEligible(image)
+      ) return null;
       return {
         id: image.id,
         type: image.type,
@@ -1285,18 +1551,23 @@ export class ProductsService {
     ) {
       throw new NotFoundException("媒体不存在");
     }
+    const now = new Date();
     const image = await this.prisma.productImage.findFirst({
       where: {
         id: imageId,
         productId,
+        mediaAsset: { is: publicMediaAssetWhere(now) },
         product: {
-          deletedAt: null,
-          status: "PUBLISHED",
-          publicationQualityStatus: "READY",
-          visibility: "PUBLIC",
-          ...customerFacingReleaseWhere(),
+          is: withPublicMediaEligibility({
+            deletedAt: null,
+            status: "PUBLISHED",
+            publicationQualityStatus: "READY",
+            visibility: "PUBLIC",
+            ...customerFacingReleaseWhere(),
+          }, now),
         },
       },
+      include: { mediaAsset: { include: { authorization: true } } },
     });
     if (!image) throw new NotFoundException("媒体不存在");
 
@@ -1304,14 +1575,13 @@ export class ProductsService {
     const resized = await this.resizeMediaBuffer(
       buffer,
       width || "",
-      `public:${image.id}:${image.storageKey || image.url || "unknown"}`,
+      `public:${image.id}:${image.mediaAsset?.lifecycleRevision ?? 0}:${image.mediaAsset?.authorization?.publicUseEpoch ?? 0}:${image.storageKey || image.url || "unknown"}`,
     );
     response.setHeader("Content-Type", resized?.mimeType ?? mimeType);
-    // 宽度在 URL query 上，不同宽度的变体按完整 URL 独立缓存
-    response.setHeader(
-      "Cache-Control",
-      "public, max-age=300, stale-while-revalidate=86400",
-    );
+    // 授权撤销/到期必须让下一次请求回源复核，禁止浏览器或中间层继续复用旧公开字节。
+    // 进程内仅缓存已缩放字节；每次进入本方法前仍会重新查询授权事实。
+    response.setHeader("Cache-Control", "no-store, max-age=0");
+    response.setHeader("Pragma", "no-cache");
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.end(resized?.buffer ?? buffer);
   }
@@ -1328,9 +1598,29 @@ export class ProductsService {
     response: Response,
     width?: string,
   ): Promise<void> {
+    const customerRequest = request.authKind !== "staff";
+    const visibleToCustomer = customerRequest
+      ? withPublicMediaEligibility({
+          deletedAt: null,
+          status: "PUBLISHED",
+          publicationQualityStatus: "READY",
+          visibility: { in: this.resolveVisibleVisibilities(request.customer) },
+          ...customerFacingReleaseWhere(),
+        })
+      : undefined;
     const image = await this.prisma.productImage.findFirst({
-      where: { id: imageId, productId },
+      where: {
+        id: imageId,
+        productId,
+        ...(customerRequest
+          ? {
+              mediaAsset: { is: publicMediaAssetWhere(new Date()) },
+              product: { is: visibleToCustomer },
+            }
+          : {}),
+      },
       include: {
+        mediaAsset: { include: { authorization: true } },
         product: {
           select: {
             id: true,
@@ -1440,9 +1730,9 @@ export class ProductsService {
     if (!value) return null;
     // 游客详情在公开列表白名单上仅追加已获准的工艺字段；
     // description/gemInfo/SKU 与履约细节仍只在登录目录详情返回。
-    const publicWhere = {
-      ...customerFacingProductWhereForVisibilities(["PUBLIC"]),
-    };
+    const publicWhere = withPublicMediaEligibility(
+      customerFacingProductWhereForVisibilities(["PUBLIC"]),
+    );
     let product = await this.prisma.product.findFirst({
       where: {
         ...publicWhere,
@@ -1467,9 +1757,9 @@ export class ProductsService {
     const value = String(reference).trim();
     if (!value) return null;
     const visibilities = this.resolveVisibleVisibilities(customer);
-    const catalogWhere = {
-      ...customerFacingProductWhereForVisibilities(visibilities),
-    };
+    const catalogWhere = withPublicMediaEligibility(
+      customerFacingProductWhereForVisibilities(visibilities),
+    );
     let product = await this.prisma.product.findFirst({
       where: {
         ...catalogWhere,
@@ -1547,7 +1837,9 @@ export class ProductsService {
     const rows = await this.prisma.product.findMany({
       where: {
         id: { in: ids },
-        ...customerFacingProductWhereForVisibilities(visibilities),
+        ...withPublicMediaEligibility(
+          customerFacingProductWhereForVisibilities(visibilities),
+        ),
       },
       select: {
         id: true,
@@ -1654,6 +1946,7 @@ export class ProductsService {
       },
     });
     if (!product) return null;
+    const review = await this.getProductReviewState(id, this.prisma);
     // 后台/详情媒体统一走受控媒体端点（迁移后旧 /uploads 文件删除，url 不再可用）
     const withMedia = (image: ProductImage) => ({
       ...image,
@@ -1661,6 +1954,7 @@ export class ProductsService {
     });
     return {
       ...product,
+      reviewStatus: review.status,
       tags: product.tags.map((tag) => ({
         id: tag.id,
         productId: tag.productId,
@@ -1673,7 +1967,13 @@ export class ProductsService {
     };
   }
 
-  async create(dto: CreateProductDto) {
+  async create(dto: CreateProductDto, actor?: ProductMutationActor) {
+    if (!this.isPublishingAdmin(actor) && dto.status && dto.status !== "DRAFT") {
+      throw new ForbiddenException("编辑角色只能创建草稿作品");
+    }
+    if (dto.status === "PUBLISHED" || dto.publishMode === "SCHEDULED") {
+      this.assertCanChangePublication(actor);
+    }
     // 检查分类是否存在
     const category = await this.prisma.category.findUnique({
       where: { id: dto.categoryId },
@@ -1931,14 +2231,20 @@ export class ProductsService {
     ].some((value) => Number(value) > 0);
     if (!hasPositiveWeight) errors.push("与材质一致且大于 0g 的商品或 SKU 重量");
 
-    const hasReadableImage = product.images.some((image) =>
-      this.productMedia.isProductMediaReadable(image),
+    const hasReadableImage = product.images.some(
+      (image) =>
+        !image.isVideo &&
+        this.productMedia.isProductMediaReadable(image) &&
+        this.isPublicImageEligible(image),
     );
-    if (!hasReadableImage) errors.push("至少一张可读取的非视频商品图片");
-    if (!product.primaryImage || !this.productMedia.isProductMediaReadable(product.primaryImage))
-      errors.push("已指定且可读取的详情主图");
-    if (!product.listingImage || !this.productMedia.isProductMediaReadable(product.listingImage))
-      errors.push("已指定且可读取的列表图");
+    if (!hasReadableImage) errors.push("至少一张已登记且授权有效的非视频商品图片");
+    if (!product.primaryImage || !this.productMedia.isProductMediaReadable(product.primaryImage) || !this.isPublicImageEligible(product.primaryImage))
+      errors.push("已指定、可读取且授权有效的详情主图");
+    if (!product.listingImage || !this.productMedia.isProductMediaReadable(product.listingImage) || !this.isPublicImageEligible(product.listingImage))
+      errors.push("已指定、可读取且授权有效的列表图");
+    if (product.images.some((image) => !this.isPublicImageEligible(image))) {
+      errors.push("全部商品附图均已登记且授权有效");
+    }
 
     switch (product.salesMode) {
       case "DIRECT_PURCHASE": {
@@ -2084,7 +2390,7 @@ export class ProductsService {
     }
   }
 
-  async update(id: number, dto: UpdateProductDto) {
+  async update(id: number, dto: UpdateProductDto, actor?: ProductMutationActor) {
     // 排除已软删除商品,避免改动或重新上架已删除记录
     const existing = await this.prisma.product.findFirst({
       where: { id, deletedAt: null },
@@ -2095,6 +2401,10 @@ export class ProductsService {
     if (existing.status === "ARCHIVED") {
       throw new ConflictException("商品位于回收站，请先恢复为草稿后再编辑");
     }
+    if (!this.isPublishingAdmin(actor) && existing.status !== "DRAFT") {
+      throw new ForbiddenException("编辑角色只能维护草稿；已发布或已下架作品须由管理员处理");
+    }
+    if (dto.publishMode === "SCHEDULED") this.assertCanChangePublication(actor);
 
     // 检查分类是否存在
     if (dto.categoryId !== undefined) {
@@ -2124,6 +2434,7 @@ export class ProductsService {
     try {
       const product = await this.prisma.$transaction(async (tx) => {
         await this.lockProductForTradeMutation(id, tx);
+        await this.assertCanMutateProductDraft(id, actor, tx);
         if (Object.keys(data).length) {
           // 乐观并发控制：读取基线后他人已保存过时拒绝本次覆盖，避免双人编辑静默互相冲写。
           const updated = await tx.product.updateMany({
@@ -2155,6 +2466,11 @@ export class ProductsService {
         }
 
         await this.reconcileTradeRulesInTransaction(id, tx);
+        if (dto.publishMode === "SCHEDULED") {
+          await this.writeProductAudit(tx, actor, id, "product.publish.schedule", {
+            scheduledPublishAt: dto.scheduledPublishAt ?? null,
+          });
+        }
         return tx.product.findUniqueOrThrow({ where: { id } });
       });
 
@@ -2173,7 +2489,8 @@ export class ProductsService {
     }
   }
 
-  async updateStatus(id: number, status: ProductStatus) {
+  async updateStatus(id: number, status: ProductStatus, actor?: ProductMutationActor) {
+    this.assertCanChangePublication(actor);
     const existing = await this.findLifecycleProduct(id);
     if (existing.status === "ARCHIVED") {
       throw new ConflictException("商品位于回收站，请先恢复为草稿后再操作");
@@ -2191,10 +2508,17 @@ export class ProductsService {
       };
       const product = await this.prisma.$transaction(async (tx) => {
         await this.lockProductForTradeMutation(id, tx);
+        const review = await this.getProductReviewState(id, tx);
         await this.syncProductStartingPrice(id, tx);
         await this.assertInventoryPolicy(id, tx);
         await this.canPublish(id, tx);
-        return tx.product.update({ where: { id }, data });
+        const updated = await tx.product.update({ where: { id }, data });
+        await this.writeProductAudit(tx, actor, id, "product.publish", {
+          previousStatus: existing.status,
+          status: "PUBLISHED",
+          reviewSubmissionId: review.submissionId ?? null,
+        });
+        return updated;
       });
       this.notifyPublicChange(product.id);
       return product;
@@ -2212,7 +2536,27 @@ export class ProductsService {
       };
     }
 
-    const product = await this.prisma.product.update({ where: { id }, data });
+    const product = await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(id, tx);
+      const review = await this.getProductReviewState(id, tx);
+      if (review.status === "IN_REVIEW" && status !== "DRAFT") {
+        throw new ConflictException("作品正在审核中；管理员只能直接通过上架或退回草稿");
+      }
+      const updated = await tx.product.update({ where: { id }, data });
+      const auditAction = status === "OFFLINE"
+        ? "product.unpublish"
+        : review.status === "IN_REVIEW"
+          ? "product.review.return"
+          : "product.return-to-draft";
+      await this.writeProductAudit(
+        tx,
+        actor,
+        id,
+        auditAction,
+        { previousStatus: existing.status, status },
+      );
+      return updated;
+    });
     this.notifyPublicChange(product.id);
     return product;
   }
@@ -2238,14 +2582,24 @@ export class ProductsService {
     return product;
   }
 
-  async archive(id: number) {
+  async archive(id: number, actor?: ProductMutationActor) {
     const existing = await this.findLifecycleProduct(id);
     if (existing.status === "ARCHIVED") {
       throw new ConflictException("商品已在回收站，请刷新列表确认最新状态");
     }
-    const product = await this.prisma.product.update({
-      where: { id },
-      data: { status: "ARCHIVED" },
+    if (existing.status !== "DRAFT") this.assertCanChangePublication(actor);
+    const product = await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(id, tx);
+      await this.assertCanMutateProductDraft(id, actor, tx);
+      const updated = await tx.product.update({
+        where: { id },
+        data: { status: "ARCHIVED" },
+      });
+      await this.writeProductAudit(tx, actor, id, "product.archive", {
+        previousStatus: existing.status,
+        status: "ARCHIVED",
+      });
+      return updated;
     });
     this.notifyPublicChange(product.id);
     return product;
@@ -2263,6 +2617,31 @@ export class ProductsService {
     });
     this.notifyPublicChange(product.id);
     return product;
+  }
+
+  async submitForReview(id: number, actor: ProductMutationActor) {
+    const submittedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(id, tx);
+      const product = await tx.product.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true, status: true, updatedAt: true },
+      });
+      if (!product) throw new NotFoundException("商品不存在或已删除");
+      if (product.status !== "DRAFT") {
+        throw new ConflictException("只有草稿作品可以提交审核");
+      }
+      const review = await this.getProductReviewState(id, tx);
+      if (review.status === "IN_REVIEW") {
+        throw new ConflictException("作品已提交审核，请等待管理员处理");
+      }
+      await this.writeProductAudit(tx, actor, id, "product.review.submit", {
+        status: product.status,
+        productUpdatedAt: product.updatedAt.toISOString(),
+        submittedAt: submittedAt.toISOString(),
+      });
+    });
+    return { productId: id, reviewStatus: "IN_REVIEW" as const, submittedAt };
   }
 
   async delete(id: number) {
@@ -2296,28 +2675,38 @@ export class ProductsService {
   async addImage(
     productId: number,
     data: AddProductImageDto,
+    actor?: ProductMutationActor,
   ) {
-    // 受控存储优先 storageKey（私有目录）；legacy 本机 URL 必须保留为底层读取事实。
-    // 对调用方始终返回 /products/catalog/:id/media/:imageId 受控端点。
+    // 新写入必须关联集中媒体资产；旧 URL 记录只读兼容且默认不得支持发布。
     const storageKey = data.storageKey?.trim() || undefined;
-    const initialUrl =
-      data.url || (storageKey ? `pending://${storageKey}` : "");
-    if (!initialUrl) throw new BadRequestException("图片地址或存储键不能为空");
+    if (!storageKey) throw new BadRequestException("商品图片缺少受控存储键，请重新上传");
     if (
       !this.productMedia.isProductMediaReadable({
         storageKey,
-        url: data.url,
       })
     ) {
       throw new BadRequestException("媒体文件不可读取，请重新上传");
     }
     const image = await this.prisma.$transaction(async (tx) => {
       await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
+      const mediaAsset = await tx.mediaAsset.findFirst({
+        where: {
+          id: data.mediaAssetId,
+          storageKey: { equals: storageKey, startsWith: "product-assets/" },
+          status: "READY",
+        },
+        select: { id: true },
+      });
+      if (!mediaAsset) {
+        throw new BadRequestException("商品图片与媒体资产登记不一致，请重新上传");
+      }
       const created = await tx.productImage.create({
         data: {
           productId,
-          url: initialUrl,
-          storageKey: storageKey ?? null,
+          url: `pending://${storageKey}`,
+          storageKey,
+          mediaAssetId: mediaAsset.id,
           type: this.normalizeImageType(data.type),
           sortOrder: data.sortOrder ?? 0,
           isVideo: data.isVideo ?? false,
@@ -2334,16 +2723,10 @@ export class ProductsService {
       });
       const mediaUrl = `/products/catalog/${productId}/media/${created.id}`;
       let result: ProductImage | (ProductImage & { url: string });
-      if (storageKey) {
-        result = await tx.productImage.update({
-          where: { id: created.id },
-          data: { url: mediaUrl },
-        });
-      } else {
-        // legacy /uploads 与 /images/products 路径是这类记录唯一的底层读取事实，
-        // 数据库必须保留；仅返回值改写为受控端点，公开序列化也不会泄漏底层路径。
-        result = { ...created, url: mediaUrl };
-      }
+      result = await tx.productImage.update({
+        where: { id: created.id },
+        data: { url: mediaUrl },
+      });
       await this.revalidatePublishedQualityAfterMutation(productId, tx);
       return result;
     });
@@ -2355,6 +2738,7 @@ export class ProductsService {
     productId: number,
     imageId: number,
     data: { type?: string; sortOrder?: number },
+    actor?: ProductMutationActor,
   ) {
     const updateData: Prisma.ProductImageUpdateInput = {};
     if (data.type !== undefined)
@@ -2362,6 +2746,7 @@ export class ProductsService {
     if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
     const image = await this.prisma.$transaction(async (tx) => {
       await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
       const img = await tx.productImage.findFirst({
         where: { id: imageId, productId },
       });
@@ -2377,9 +2762,10 @@ export class ProductsService {
     return image;
   }
 
-  async deleteImage(productId: number, imageId: number) {
+  async deleteImage(productId: number, imageId: number, actor?: ProductMutationActor) {
     const image = await this.prisma.$transaction(async (tx) => {
       await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
       const existing = await tx.productImage.findFirst({
         where: { id: imageId, productId },
       });
@@ -2394,11 +2780,12 @@ export class ProductsService {
   }
 
   /** 设置详情主图 */
-  async setPrimaryImage(productId: number, imageId: number) {
+  async setPrimaryImage(productId: number, imageId: number, actor?: ProductMutationActor) {
     // 主图通过 primaryImageId 指针 + sortOrder 表达，不改写图片 type（保留原始视角语义 FRONT/SIDE/...）。
     // 旧实现把所有 FRONT 改 SIDE、目标改 FRONT，会破坏原始拍摄视角。
     const result = await this.prisma.$transaction(async (tx) => {
       await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
       const img = await tx.productImage.findFirst({
         where: { id: imageId, productId },
       });
@@ -2447,9 +2834,10 @@ export class ProductsService {
   }
 
   /** 直接设置列表图（不裁切） */
-  async setListingImage(productId: number, imageId: number) {
+  async setListingImage(productId: number, imageId: number, actor?: ProductMutationActor) {
     await this.prisma.$transaction(async (tx) => {
       await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
       const img = await tx.productImage.findFirst({
         where: { id: imageId, productId },
       });
@@ -2469,9 +2857,10 @@ export class ProductsService {
   }
 
   /** 恢复列表图为详情主图 */
-  async resetListingToPrimary(productId: number) {
+  async resetListingToPrimary(productId: number, actor?: ProductMutationActor) {
     const listingImageId = await this.prisma.$transaction(async (tx) => {
       await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
       const product = await tx.product.findUnique({
         where: { id: productId },
         select: { primaryImageId: true, primaryImage: true },
@@ -2500,15 +2889,20 @@ export class ProductsService {
   async addCertificate(
     productId: number,
     dto: CreateCertificateDto,
+    actor?: ProductMutationActor,
   ) {
-    const cert = await this.prisma.certificate.create({
-      data: {
-        productId,
-        certType: dto.certType,
-        certNumber: dto.certNumber ?? "",
-        certImage: dto.certImage ?? null,
-        expireDate: dto.expireDate ? new Date(dto.expireDate) : null,
-      },
+    const cert = await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
+      return tx.certificate.create({
+        data: {
+          productId,
+          certType: dto.certType,
+          certNumber: dto.certNumber ?? "",
+          certImage: dto.certImage ?? null,
+          expireDate: dto.expireDate ? new Date(dto.expireDate) : null,
+        },
+      });
     });
     this.notifyPublicChange(productId);
     return cert;
@@ -2518,32 +2912,38 @@ export class ProductsService {
     productId: number,
     certId: number,
     dto: UpdateCertificateDto,
+    actor?: ProductMutationActor,
   ) {
-    // P1-22：校验证书归属于 URL 声明的商品，避免跨商品越权改删
-    const existing = await this.prisma.certificate.findFirst({
-      where: { id: certId, productId },
-    });
-    if (!existing) throw new NotFoundException("证书不存在或不属于该商品");
     const data: Prisma.CertificateUpdateInput = {};
     if (dto.certType !== undefined) data.certType = dto.certType;
     if (dto.certNumber !== undefined) data.certNumber = dto.certNumber;
     if (dto.certImage !== undefined) data.certImage = dto.certImage;
     if (dto.expireDate !== undefined)
       data.expireDate = dto.expireDate ? new Date(dto.expireDate) : null;
-    const cert = await this.prisma.certificate.update({
-      where: { id: certId },
-      data,
+    const cert = await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
+      // P1-22：校验证书归属于 URL 声明的商品，避免跨商品越权改删
+      const existing = await tx.certificate.findFirst({
+        where: { id: certId, productId },
+      });
+      if (!existing) throw new NotFoundException("证书不存在或不属于该商品");
+      return tx.certificate.update({ where: { id: certId }, data });
     });
     this.notifyPublicChange(cert.productId);
     return cert;
   }
 
-  async deleteCertificate(productId: number, certId: number) {
-    const cert = await this.prisma.certificate.findFirst({
-      where: { id: certId, productId },
+  async deleteCertificate(productId: number, certId: number, actor?: ProductMutationActor) {
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
+      const cert = await tx.certificate.findFirst({
+        where: { id: certId, productId },
+      });
+      if (!cert) throw new NotFoundException("证书不存在或不属于该商品");
+      await tx.certificate.delete({ where: { id: certId } });
     });
-    if (!cert) throw new NotFoundException("证书不存在或不属于该商品");
-    await this.prisma.certificate.delete({ where: { id: certId } });
     this.notifyPublicChange(productId);
     return { id: certId };
   }
@@ -2559,10 +2959,12 @@ export class ProductsService {
   async createSku(
     productId: number,
     dto: CreateSkuDto,
+    actor?: ProductMutationActor,
   ) {
     try {
       const sku = await this.prisma.$transaction(async (tx) => {
         await this.lockProductForTradeMutation(productId, tx);
+        await this.assertCanMutateProductDraft(productId, actor, tx);
         const created = await tx.productSKU.create({
           data: {
             productId,
@@ -2598,6 +3000,7 @@ export class ProductsService {
     productId: number,
     skuId: number,
     dto: UpdateSkuDto,
+    actor?: ProductMutationActor,
   ) {
     const data: Prisma.ProductSKUUpdateInput = {};
     if (dto.skuCode !== undefined) data.skuCode = dto.skuCode;
@@ -2610,6 +3013,7 @@ export class ProductsService {
     try {
       const sku = await this.prisma.$transaction(async (tx) => {
         await this.lockProductForTradeMutation(productId, tx);
+        await this.assertCanMutateProductDraft(productId, actor, tx);
         const existing = await tx.productSKU.findFirst({
           where: { id: skuId, productId },
         });
@@ -2637,10 +3041,11 @@ export class ProductsService {
     }
   }
 
-  async deleteSku(productId: number, skuId: number) {
+  async deleteSku(productId: number, skuId: number, actor?: ProductMutationActor) {
     try {
       await this.prisma.$transaction(async (tx) => {
         await this.lockProductForTradeMutation(productId, tx);
+        await this.assertCanMutateProductDraft(productId, actor, tx);
         const sku = await tx.productSKU.findFirst({
           where: { id: skuId, productId },
           select: { id: true },
@@ -2681,7 +3086,7 @@ export class ProductsService {
     }));
   }
 
-  async updateTags(productId: number, tags: string[]) {
+  async updateTags(productId: number, tags: string[], actor?: ProductMutationActor) {
     // 校验单条标签长度（schema tag.name VarChar(50)，超长会触发 Prisma 500）
     for (const tag of tags) {
       if (
@@ -2695,6 +3100,8 @@ export class ProductsService {
     const names = [...new Set(tags.map((t) => t.trim()))];
     // 删除 + 重建放入同一事务；标签字典按名称 find-or-create（slug 即名称，保证幂等）
     await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
       const tagIds: number[] = [];
       for (const name of names) {
         const existing = await tx.tag.findUnique({ where: { slug: name } });
@@ -2795,7 +3202,11 @@ export class ProductsService {
     });
   }
 
-  async setAttributes(productId: number, attributeValueIds: number[]) {
+  async setAttributes(
+    productId: number,
+    attributeValueIds: number[],
+    actor?: ProductMutationActor,
+  ) {
     const ids = [
       ...new Set(
         (attributeValueIds || [])
@@ -2803,15 +3214,17 @@ export class ProductsService {
           .filter((n) => Number.isInteger(n) && n > 0),
       ),
     ];
-    if (ids.length) {
-      const count = await this.prisma.attributeValue.count({
-        where: { id: { in: ids } },
-      });
-      if (count !== ids.length) {
-        throw new BadRequestException("包含不存在的属性值");
-      }
-    }
     await this.prisma.$transaction(async (tx) => {
+      await this.lockProductForTradeMutation(productId, tx);
+      await this.assertCanMutateProductDraft(productId, actor, tx);
+      if (ids.length) {
+        const count = await tx.attributeValue.count({
+          where: { id: { in: ids } },
+        });
+        if (count !== ids.length) {
+          throw new BadRequestException("包含不存在的属性值");
+        }
+      }
       await tx.productAttributeValue.deleteMany({ where: { productId } });
       if (ids.length) {
         await tx.productAttributeValue.createMany({

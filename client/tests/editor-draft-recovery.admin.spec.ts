@@ -228,6 +228,8 @@ const publishedDoc = {
   metadata: { seoTitle: "线上版本" },
   editorVersion: "0.22.4",
   status: "PUBLISHED",
+  reviewStatus: "PUBLISHED",
+  contentHash: "b".repeat(64),
   version: 1,
   publishedAt: "2026-08-14T00:00:00.000Z",
   updatedAt: "2026-08-14T00:00:00.000Z",
@@ -240,6 +242,8 @@ const draftDoc = {
   metadata: { seoTitle: "草稿版本" },
   editorVersion: "0.22.4",
   status: "DRAFT",
+  reviewStatus: "DRAFT",
+  contentHash: "a".repeat(64),
   version: 1,
   publishedAt: null,
   updatedAt: "2026-08-14T01:00:00.000Z",
@@ -251,6 +255,16 @@ function json(data: unknown) {
     contentType: "application/json",
     body: JSON.stringify({ code: 200, data, message: "success" }),
   };
+}
+
+async function approveCurrentPageForPublishing(page: Page) {
+  const reviewStatus = page.getByTestId("page-review-status");
+  await expect(reviewStatus).toHaveText("草稿");
+  await page.getByRole("button", { name: "提交审核", exact: true }).click();
+  await expect(reviewStatus).toHaveText("待审核");
+  await page.getByRole("button", { name: "批准", exact: true }).click();
+  await expect(reviewStatus).toHaveText("已批准");
+  await expect(page.locator(".homepage-editor__toolbar-publish")).toBeEnabled();
 }
 
 async function mockEditorApis(
@@ -334,6 +348,23 @@ async function mockEditorApis(
         nextBeforeVersion: null,
       }));
     }
+    if (url.includes("/review/submit")) {
+      saved = {
+        ...saved,
+        reviewStatus: "IN_REVIEW",
+        updatedAt: "2026-08-14T01:40:00.000Z",
+      };
+      return route.fulfill(json(saved));
+    }
+    if (url.includes("/review") && method === "PUT") {
+      const body = route.request().postDataJSON() as { action?: string };
+      saved = {
+        ...saved,
+        reviewStatus: body.action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED",
+        updatedAt: "2026-08-14T01:45:00.000Z",
+      };
+      return route.fulfill(json(saved));
+    }
     if (method === "DELETE" && url.includes("/document/draft")) {
       if (discardFailureCount > 0) {
         discardFailureCount -= 1;
@@ -366,6 +397,7 @@ async function mockEditorApis(
       saved = {
         ...saved,
         status: "PUBLISHED",
+        reviewStatus: "PUBLISHED",
         publishedAt: "2026-08-14T02:00:00.000Z",
       };
       published = { ...published, ...saved };
@@ -708,17 +740,11 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     ).toBeVisible();
 
     const rights = drawer.getByRole("region", { name: "媒体来源与授权" });
-    await expect(rights).toContainText("1 项当前公开素材");
-    await expect(rights.getByTestId("page-media-right")).toHaveCount(1);
-    await expect(rights.locator("code")).toHaveText(draftAssetUrl);
-    await expect(rights).not.toContainText(publishedAssetUrl);
-    await rights.getByText("按需编辑 1 项素材来源记录", { exact: true }).click();
-    await expect(
-      rights.getByRole("textbox", { name: "素材 1 来源" }),
-    ).toHaveValue(draftMediaRight.source);
-    await expect(
-      rights.getByRole("textbox", { name: "素材 1 授权编号" }),
-    ).toHaveValue(draftMediaRight.authorizationId);
+    await expect(rights).toContainText("1 项当前页面素材");
+    await expect(rights.getByTestId("page-media-right")).toHaveCount(0);
+    await expect(rights.getByRole("link", { name: "在页面素材库登记与审核" }))
+      .toHaveAttribute("href", "/admin/media");
+    await expect(rights.getByRole("textbox", { name: /素材 \d+ 来源/ })).toHaveCount(0);
 
     await drawer.getByRole("button", { name: "保存整页草稿" }).click();
     await expect.poll(() => savePayloads.length).toBe(1);
@@ -1325,6 +1351,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await mockEditorApis(page, { saveDelayMs: 250 });
 
     await page.goto("/admin/editor/home");
+    await approveCurrentPageForPublishing(page);
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 10000 });
     await publishButton.click();
@@ -1405,6 +1432,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     });
 
     await page.goto("/admin/editor/home");
+    await approveCurrentPageForPublishing(page);
     const heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("草稿标题");
 
@@ -1433,6 +1461,8 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     let heroTitleInput = await selectHeroTitleInput(page);
     await expect(heroTitleInput).toHaveValue("草稿标题");
     await heroTitleInput.fill("发布失败后保留的草稿标题");
+
+    await approveCurrentPageForPublishing(page);
 
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 10000 });
@@ -1533,9 +1563,9 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
 
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
-    // 工具栏先于 650ms 防抖发布校验出现。先等初始 home 校验真正完成，
-    // 避免把它在高并发下的延迟到达误记为 SPA 切页后发出的旧页请求。
-    await expect(page.locator(".homepage-editor__toolbar-publish")).toBeEnabled();
+    // 工具栏先于 650ms 防抖发布校验出现。直接等待初始 home 校验完成，
+    // 不再用未经审核时必然禁用的发布按钮间接推断校验状态。
+    await expect.poll(() => validations).toEqual(["home"]);
     validations.length = 0;
 
     await page.evaluate(() => {

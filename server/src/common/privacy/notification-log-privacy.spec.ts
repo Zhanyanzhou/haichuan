@@ -37,7 +37,7 @@ test("邮件降级与失败日志不泄露收件地址、主题或提供商错�
       throw new Error("provider secret path C:\\private\\smtp.key");
     },
   };
-  assert.deepEqual(await service.send(sensitive), { delivered: false, reason: "send_failed" });
+  assert.deepEqual(await service.send(sensitive), { delivered: false, reason: "result_unknown" });
 
   const output = [...logs.warnings, ...logs.errors].join("\n");
   assert.doesNotMatch(output, /customer@example\.com|13800138000|provider secret|smtp\.key|密码重置/);

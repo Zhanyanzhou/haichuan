@@ -65,13 +65,28 @@ test('refresh token 只以哈希落库，轮换沿用同一 family 并作废旧 
   assert.notEqual(fixture.rows[0].tokenHash, issued.refreshToken);
   assert.equal(fixture.rows[0].userAgentHash?.includes('browser'), false);
   const familyId = fixture.rows[0].familyId;
+  assert.equal(issued.familyId, familyId);
 
   const rotated = await fixture.service.rotateAdmin(issued.refreshToken, { userAgent: 'browser-2' });
   assert.equal(rotated.userId, 7);
   assert.equal(fixture.rows.length, 2);
   assert.equal(fixture.rows[0].revokedAt instanceof Date, true);
   assert.equal(fixture.rows[1].familyId, familyId);
+  assert.equal(rotated.familyId, familyId);
   assert.notEqual(rotated.refreshToken, issued.refreshToken);
+});
+
+test('员工 access family 可按员工与 family 精确吊销', async () => {
+  const fixture = adminFixture();
+  const first = await fixture.service.issueAdmin(7, {});
+  await fixture.service.issueAdmin(7, {});
+  await fixture.service.issueAdmin(8, {});
+
+  await fixture.service.revokeAdminFamilyForUser(7, first.familyId);
+
+  assert.equal(fixture.rows[0].revokedAt instanceof Date, true);
+  assert.equal(fixture.rows[1].revokedAt, null);
+  assert.equal(fixture.rows[2].revokedAt, null);
 });
 
 test('重复使用已轮换 refresh token 会撤销整个 family', async () => {

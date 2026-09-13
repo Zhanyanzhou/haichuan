@@ -48,6 +48,27 @@ import {
   matchesDynamicTemplateDefinitionChecksum,
 } from "./dynamic-template-definition-integrity";
 import { validateDynamicTemplateDefinition } from "./generated/validateTemplateDefinition.generated";
+import type { PublicContentLocale } from "../../common/content-locale";
+import {
+  createPageLocaleContentHash,
+  hasPageLocaleDraftMetadata,
+  readPageLocaleRevisionMarker,
+  revisionBelongsToLocale,
+  stripPageLocaleRevisionMetadata,
+  toDatabaseContentLocale,
+  withPageLocaleRevisionMetadata,
+  withPageLocaleDraftMetadata,
+} from "./page-document-localization";
+import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
+import { resolveMediaStorageRoots } from "../upload/media-storage-paths";
+import {
+  buildManagedMediaShadowReport,
+  buildMediaPublicationManifestRows,
+  createMediaPublicationReferenceKey,
+  isCurrentResolutionCompatibleWithManifest,
+  type MediaPublicationResolution,
+  type PublicationMediaReference,
+} from "./media-publication-manifest";
 
 /**
  * 页面构建器区块类型契约 — 与前端 puckConfig MyComponents 严格一致,
@@ -67,6 +88,7 @@ const EDITOR_ONLY_COMPONENTS = new Set(["网站全局设置", "业务功能区"]
 // 装修文档是不可信大 JSON：与母模板定义（dynamic-templates MAX_DEFINITION_BYTES）
 // 同一 1 MiB 上限，保存前失败关闭；HTTP 层另有 Express 默认 body 限制兜底。
 const MAX_PAGE_DOCUMENT_BYTES = 1024 * 1024;
+const LOCALIZED_REVISION_SCAN_BATCHES = 10;
 
 const PUCK_REQUIRED_IMAGE_FIELDS: Record<string, string[]> = {
   首屏主视觉: ["desktopImage"],
@@ -134,6 +156,28 @@ type PageDocumentRecord = Record<string, unknown> & {
   zones?: unknown;
 };
 
+type LocalizedPageDraft = {
+  id: number | null;
+  documentId: number;
+  locale: PublicContentLocale;
+  puckData: unknown;
+  metadata: unknown;
+  reviewStatus: "DRAFT" | "IN_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
+  contentHash: string;
+  submittedBy: number | null;
+  submittedAt: Date | null;
+  reviewedBy: number | null;
+  reviewedAt: Date | null;
+  reviewNote: string | null;
+  publishedRevisionId: number | null;
+  publishedHash: string | null;
+  publishedBy: number | null;
+  publishedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  legacy: boolean;
+};
+
 type PageValidationDb = Pick<
   Prisma.TransactionClient,
   "siteSetting" | "product" | "category" | "dynamicTemplateVersion"
@@ -173,9 +217,12 @@ function toInputJsonValue(value: unknown): Prisma.InputJsonValue {
 @Injectable()
 export class PageModulesService {
   private readonly publicEvents = new EventEmitter();
-  private readonly uploadsRoot = resolve(process.cwd(), "uploads");
+  private readonly uploadsRoot = resolveMediaStorageRoots().publicRoot;
 
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private readonly mediaAuthorizationResolver?: MediaAuthorizationResolverService,
+  ) {
     // 每条 SSE 连接都会订阅发布事件，连接数随并发前台用户增长；
     // 关闭默认上限避免误报 EventEmitter 内存泄漏告警
     this.publicEvents.setMaxListeners(0);
@@ -482,6 +529,1250 @@ export class PageModulesService {
     } : null;
   }
 
+  private async getLocalizedPageDraft(
+    pageKey: string,
+    locale: PublicContentLocale,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<{ document: Awaited<ReturnType<typeof db.pageDocument.findUnique>>; draft: LocalizedPageDraft } | null> {
+    const document = await db.pageDocument.findUnique({ where: { pageKey } });
+    if (!document) return null;
+    const localization = await db.pageDocumentLocalization.findUnique({
+      where: {
+        documentId_locale: {
+          documentId: document.id,
+          locale: toDatabaseContentLocale(locale),
+        },
+      },
+    });
+    const useLegacyChinese = locale === "zh-CN"
+      && (!localization || !hasPageLocaleDraftMetadata(localization.metadata, locale));
+    if (useLegacyChinese) {
+      const normalizedPuckData = this.normalizePageDocumentPuckData(document.puckData);
+      const metadata = withoutContentTemplatePublicationAttestation(document.metadata);
+      return {
+        document,
+        draft: {
+          id: localization?.id ?? null,
+          documentId: document.id,
+          locale,
+          puckData: normalizedPuckData,
+          metadata,
+          reviewStatus: document.publishedRevisionId ? "PUBLISHED" : "DRAFT",
+          contentHash: createPageLocaleContentHash(normalizedPuckData, metadata),
+          submittedBy: localization?.submittedBy ?? null,
+          submittedAt: localization?.submittedAt ?? null,
+          reviewedBy: localization?.reviewedBy ?? null,
+          reviewedAt: localization?.reviewedAt ?? null,
+          reviewNote: localization?.reviewNote ?? null,
+          publishedRevisionId: localization?.publishedRevisionId ?? document.publishedRevisionId,
+          publishedHash: localization?.publishedHash ?? null,
+          publishedBy: localization?.publishedBy ?? document.publishedBy,
+          publishedAt: localization?.publishedAt ?? document.publishedAt,
+          createdAt: localization?.createdAt ?? document.createdAt,
+          updatedAt: document.updatedAt,
+          legacy: true,
+        },
+      };
+    }
+    if (!localization) return null;
+    return {
+      document,
+      draft: {
+        id: localization.id,
+        documentId: document.id,
+        locale,
+        puckData: localization.puckData,
+        metadata: localization.metadata,
+        reviewStatus: localization.reviewStatus,
+        contentHash: localization.contentHash,
+        submittedBy: localization.submittedBy,
+        submittedAt: localization.submittedAt,
+        reviewedBy: localization.reviewedBy,
+        reviewedAt: localization.reviewedAt,
+        reviewNote: localization.reviewNote,
+        publishedRevisionId: localization.publishedRevisionId,
+        publishedHash: localization.publishedHash,
+        publishedBy: localization.publishedBy,
+        publishedAt: localization.publishedAt,
+        createdAt: localization.createdAt,
+        updatedAt: localization.updatedAt,
+        legacy: false,
+      },
+    };
+  }
+
+  private async toLocalizedPageResource(
+    document: NonNullable<Awaited<ReturnType<PrismaService["pageDocument"]["findUnique"]>>>,
+    draft: LocalizedPageDraft,
+  ) {
+    return {
+      id: document.id,
+      pageKey: document.pageKey,
+      schemaVersion: document.schemaVersion,
+      editorType: document.editorType,
+      editorVersion: document.editorVersion,
+      templateId: document.templateId,
+      templateVersion: document.templateVersion,
+      locale: draft.locale,
+      puckData: await this.hydrateDynamicTemplateDefinitions(draft.puckData),
+      metadata: stripPageLocaleRevisionMetadata(
+        withoutContentTemplatePublicationAttestation(draft.metadata),
+      ),
+      status: draft.publishedRevisionId && draft.publishedHash === draft.contentHash
+        ? "PUBLISHED"
+        : "DRAFT",
+      reviewStatus: draft.reviewStatus,
+      contentHash: draft.contentHash,
+      submittedBy: draft.submittedBy,
+      submittedAt: draft.submittedAt,
+      reviewedBy: draft.reviewedBy,
+      reviewedAt: draft.reviewedAt,
+      reviewNote: draft.reviewNote,
+      publishedRevisionId: draft.publishedRevisionId,
+      publishedHash: draft.publishedHash,
+      publishedBy: draft.publishedBy,
+      publishedAt: draft.publishedAt,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+    };
+  }
+
+  async getLocalizedPageDocument(
+    pageKey: string,
+    locale: PublicContentLocale,
+  ) {
+    const localized = await this.getLocalizedPageDraft(pageKey, locale);
+    return localized
+      ? this.toLocalizedPageResource(localized.document!, localized.draft)
+      : null;
+  }
+
+  private assertLocalizedPageInput(
+    pageKey: string,
+    puckData: Record<string, unknown>,
+    metadata?: Record<string, unknown>,
+  ) {
+    const pageRule = getContentTemplatePageRule(pageKey);
+    if (!pageRule) {
+      throw new BadRequestException(`页面标识「${pageKey}」未在页面合同注册`);
+    }
+    if (
+      Buffer.byteLength(JSON.stringify(puckData ?? {}), "utf8")
+        + Buffer.byteLength(JSON.stringify(metadata ?? {}), "utf8")
+        > MAX_PAGE_DOCUMENT_BYTES
+    ) {
+      throw new BadRequestException("页面装修文档不能超过 1 MiB");
+    }
+    if (
+      pageRule.contentPlacement === "root-only"
+      && puckData?.zones !== undefined
+      && (
+        !puckData.zones
+        || typeof puckData.zones !== "object"
+        || Array.isArray(puckData.zones)
+        || Object.values(puckData.zones).some(
+          (blocks) => !Array.isArray(blocks) || blocks.length > 0,
+        )
+      )
+    ) {
+      throw new BadRequestException(
+        "页面内容模块只能位于根内容 content，不能放入插槽 zones",
+      );
+    }
+  }
+
+  private getPersistablePageMetadata(metadata?: unknown) {
+    const withoutAttestation = withoutContentTemplatePublicationAttestation(metadata);
+    return Object.fromEntries(
+      Object.entries(stripPageLocaleRevisionMetadata(withoutAttestation))
+        .filter(([key]) => key !== "contentTemplateContract"),
+    );
+  }
+
+  async saveLocalizedPageDocument(
+    pageKey: string,
+    locale: PublicContentLocale,
+    puckData: Record<string, unknown>,
+    metadata?: Record<string, unknown>,
+    editorVersion?: string,
+    expectedUpdatedAt?: string,
+  ) {
+    this.assertLocalizedPageInput(pageKey, puckData, metadata);
+    const normalizedPuckData = this.normalizePageDocumentPuckData(puckData);
+    await this.assertDynamicTemplateDraftInstancesAuthorized(normalizedPuckData);
+    const persistableMetadata = this.getPersistablePageMetadata(metadata);
+    const contentHash = createPageLocaleContentHash(
+      normalizedPuckData,
+      persistableMetadata,
+    );
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      let document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      const documentExisted = Boolean(document);
+      if (!document) {
+        document = await tx.pageDocument.create({
+          data: {
+            pageKey,
+            puckData: toInputJsonValue({ content: [], root: { props: {} }, zones: {} }),
+            metadata: toInputJsonValue({}),
+            editorVersion,
+            schemaVersion: 1,
+          },
+        });
+      } else {
+        await tx.$queryRaw<Array<{ id: number }>>`
+          SELECT id FROM page_documents WHERE id = ${document.id} FOR UPDATE
+        `;
+      }
+
+      const current = documentExisted
+        ? await this.getLocalizedPageDraft(pageKey, locale, tx)
+        : null;
+      if (current) {
+        if (!expected) {
+          throw new BadRequestException("保存已有语言草稿时缺少页面版本标识");
+        }
+        if (current.draft.updatedAt.getTime() !== expected.getTime()) {
+          throw new ConflictException(
+            "该语言页面已被其他编辑者更新，请重新加载后再保存",
+          );
+        }
+      } else if (expectedUpdatedAt !== undefined && !expected) {
+        throw new BadRequestException("页面版本标识不正确");
+      }
+
+      const existingLocalization = await tx.pageDocumentLocalization.findUnique({
+        where: {
+          documentId_locale: {
+            documentId: document.id,
+            locale: toDatabaseContentLocale(locale),
+          },
+        },
+      });
+      const publishedHash = existingLocalization?.publishedHash ?? null;
+      const contentChanged = existingLocalization?.contentHash !== contentHash
+        || current?.draft.legacy === true;
+      const reviewStatus = publishedHash === contentHash
+        ? "PUBLISHED"
+        : !contentChanged && existingLocalization
+          ? existingLocalization.reviewStatus
+          : "DRAFT";
+      const localization = await tx.pageDocumentLocalization.upsert({
+        where: {
+          documentId_locale: {
+            documentId: document.id,
+            locale: toDatabaseContentLocale(locale),
+          },
+        },
+        create: {
+          documentId: document.id,
+          locale: toDatabaseContentLocale(locale),
+          puckData: toInputJsonValue(normalizedPuckData),
+          metadata: toInputJsonValue(withPageLocaleDraftMetadata(persistableMetadata, locale)),
+          contentHash,
+          reviewStatus,
+          publishedRevisionId: current?.draft.publishedRevisionId ?? null,
+          publishedHash: current?.draft.publishedHash ?? null,
+          publishedBy: current?.draft.publishedBy ?? null,
+          publishedAt: current?.draft.publishedAt ?? null,
+        },
+        update: {
+          puckData: toInputJsonValue(normalizedPuckData),
+          metadata: toInputJsonValue(withPageLocaleDraftMetadata(persistableMetadata, locale)),
+          contentHash,
+          reviewStatus,
+          ...(current?.draft.legacy ? {
+            publishedRevisionId: current.draft.publishedRevisionId,
+            publishedHash: current.draft.publishedHash,
+            publishedBy: current.draft.publishedBy,
+            publishedAt: current.draft.publishedAt,
+          } : {}),
+          ...(contentChanged ? {
+            submittedBy: null,
+            submittedAt: null,
+            reviewedBy: null,
+            reviewedAt: null,
+            reviewNote: null,
+          } : {}),
+        },
+      });
+      if (locale === "zh-CN") {
+        document = await tx.pageDocument.update({
+          where: { id: document.id },
+          data: {
+            puckData: toInputJsonValue(normalizedPuckData),
+            metadata: toInputJsonValue(persistableMetadata),
+            editorVersion,
+            status: "DRAFT",
+          },
+        });
+      }
+      return { document, localization };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    return this.toLocalizedPageResource(result.document, {
+      ...result.localization,
+      locale,
+      legacy: false,
+    });
+  }
+
+  async submitLocalizedPageDocumentReview(
+    pageKey: string,
+    locale: PublicContentLocale,
+    expectedUpdatedAt: string,
+    expectedContentHash: string,
+    userId: number,
+  ) {
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (!expected) throw new BadRequestException("提交审核时缺少页面版本标识");
+    const result = await this.prisma.$transaction(async (tx) => {
+      const document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      if (!document) throw new NotFoundException("页面草稿不存在");
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE id = ${document.id} FOR UPDATE
+      `;
+      const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
+      if (!current) throw new NotFoundException("该语言草稿不存在");
+      if (current.draft.updatedAt.getTime() !== expected.getTime()) {
+        throw new ConflictException("该语言草稿已变化，请重新加载后再提交审核");
+      }
+      if (current.draft.contentHash !== expectedContentHash) {
+        throw new ConflictException("该语言草稿内容哈希已变化，请重新加载后再提交审核");
+      }
+      if (!["DRAFT", "CHANGES_REQUESTED"].includes(current.draft.reviewStatus)) {
+        throw new BadRequestException("只有草稿或已退回内容可以提交审核");
+      }
+      const submittedAt = new Date();
+      const localization = await tx.pageDocumentLocalization.upsert({
+        where: {
+          documentId_locale: {
+            documentId: document.id,
+            locale: toDatabaseContentLocale(locale),
+          },
+        },
+        create: {
+          documentId: document.id,
+          locale: toDatabaseContentLocale(locale),
+          puckData: toInputJsonValue(current.draft.puckData),
+          metadata: toInputJsonValue(withPageLocaleDraftMetadata(
+            this.getPersistablePageMetadata(
+              stripPageLocaleRevisionMetadata(current.draft.metadata),
+            ),
+            locale,
+          )),
+          contentHash: current.draft.contentHash,
+          reviewStatus: "IN_REVIEW",
+          submittedBy: userId,
+          submittedAt,
+          publishedRevisionId: current.draft.publishedRevisionId,
+          publishedHash: current.draft.publishedHash,
+          publishedBy: current.draft.publishedBy,
+          publishedAt: current.draft.publishedAt,
+        },
+        update: {
+          puckData: toInputJsonValue(current.draft.puckData),
+          metadata: toInputJsonValue(withPageLocaleDraftMetadata(
+            this.getPersistablePageMetadata(
+              stripPageLocaleRevisionMetadata(current.draft.metadata),
+            ),
+            locale,
+          )),
+          contentHash: current.draft.contentHash,
+          reviewStatus: "IN_REVIEW",
+          submittedBy: userId,
+          submittedAt,
+          reviewedBy: null,
+          reviewedAt: null,
+          reviewNote: null,
+        },
+      });
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: "PAGE_LOCALE_REVIEW_SUBMITTED",
+          module: "page-builder",
+          targetId: document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_LOCALE_REVIEW_SUBMITTED",
+            actor: userId,
+            pageKey,
+            locale,
+            contentHash: current.draft.contentHash,
+            fromStatus: current.draft.reviewStatus,
+            toStatus: "IN_REVIEW",
+            result: "succeeded",
+          }),
+        },
+      });
+      return { document, localization };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return this.toLocalizedPageResource(result.document, {
+      ...result.localization,
+      locale,
+      legacy: false,
+    });
+  }
+
+  async reviewLocalizedPageDocument(
+    pageKey: string,
+    locale: PublicContentLocale,
+    action: "APPROVE" | "REQUEST_CHANGES",
+    expectedUpdatedAt: string,
+    expectedContentHash: string,
+    userId: number,
+    reviewNote?: string,
+  ) {
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (!expected) throw new BadRequestException("审核页面时缺少页面版本标识");
+    const result = await this.prisma.$transaction(async (tx) => {
+      const document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      if (!document) throw new NotFoundException("页面草稿不存在");
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE id = ${document.id} FOR UPDATE
+      `;
+      const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
+      if (!current || current.draft.id === null) {
+        throw new NotFoundException("该语言草稿不存在");
+      }
+      if (current.draft.updatedAt.getTime() !== expected.getTime()) {
+        throw new ConflictException("该语言草稿已变化，请重新加载后再审核");
+      }
+      if (current.draft.contentHash !== expectedContentHash) {
+        throw new ConflictException("该语言草稿内容哈希已变化，请重新加载后再审核");
+      }
+      if (current.draft.reviewStatus !== "IN_REVIEW") {
+        throw new BadRequestException("只有审核中的草稿可以复核");
+      }
+      if (current.draft.submittedBy === userId) {
+        throw new BadRequestException("页面内容提交人与审核人必须分离");
+      }
+      if (action === "REQUEST_CHANGES" && !reviewNote?.trim()) {
+        throw new BadRequestException("退回修改时必须填写审核意见");
+      }
+      const localization = await tx.pageDocumentLocalization.update({
+        where: { id: current.draft.id },
+        data: {
+          reviewStatus: action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED",
+          reviewedBy: userId,
+          reviewedAt: new Date(),
+          reviewNote: reviewNote?.trim() || null,
+        },
+      });
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: action === "APPROVE"
+            ? "PAGE_LOCALE_REVIEW_APPROVED"
+            : "PAGE_LOCALE_CHANGES_REQUESTED",
+          module: "page-builder",
+          targetId: document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: action === "APPROVE"
+              ? "PAGE_LOCALE_REVIEW_APPROVED"
+              : "PAGE_LOCALE_CHANGES_REQUESTED",
+            actor: userId,
+            pageKey,
+            locale,
+            contentHash: current.draft.contentHash,
+            fromStatus: current.draft.reviewStatus,
+            toStatus: action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED",
+            reviewNote: reviewNote?.trim() || null,
+            result: "succeeded",
+          }),
+        },
+      });
+      return { document, localization };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return this.toLocalizedPageResource(result.document, {
+      ...result.localization,
+      locale,
+      legacy: false,
+    });
+  }
+
+  private async getLocalizedPublishedPageSnapshot(
+    pageKey: string,
+    locale: PublicContentLocale,
+  ) {
+    const current = await this.getLocalizedPageDraft(pageKey, locale);
+    if (!current?.draft.publishedRevisionId) return null;
+    const revision = await this.prisma.pageDocumentRevision.findFirst({
+      where: {
+        id: current.draft.publishedRevisionId,
+        documentId: current.document!.id,
+        status: "published",
+      },
+    });
+    if (!revision || !revisionBelongsToLocale(revision.metadata, locale)) {
+      return {
+        pageKey,
+        locale,
+        status: "INVALID" as const,
+        invalidReason: "published-locale-revision-invalid",
+        publishedAt: current.draft.publishedAt,
+        updatedAt: current.draft.updatedAt,
+      };
+    }
+    const cleanMetadata = this.getPersistablePageMetadata(
+      withoutContentTemplatePublicationAttestation(revision.metadata),
+    );
+    const contentHash = createPageLocaleContentHash(
+      this.normalizeStoredRevisionPuckData(revision.puckData),
+      cleanMetadata,
+    );
+    const marker = readPageLocaleRevisionMarker(revision.metadata);
+    const expectedHash = current.draft.publishedHash;
+    const legacyChineseRevision = locale === "zh-CN" && !marker;
+    if (
+      !legacyChineseRevision
+      && (
+        !expectedHash
+        || expectedHash !== contentHash
+        || marker?.contentHash !== contentHash
+      )
+    ) {
+      return {
+        pageKey,
+        locale,
+        status: "INVALID" as const,
+        invalidReason: "published-content-integrity-failed",
+        publishedAt: current.draft.publishedAt,
+        updatedAt: current.draft.updatedAt,
+        version: revision.version,
+      };
+    }
+    return {
+      pageKey,
+      locale,
+      puckData: revision.puckData,
+      metadata: revision.metadata,
+      status: "PUBLISHED" as const,
+      publishedRevisionId: revision.id,
+      publishedAt: revision.publishedAt,
+      publishedBy: revision.publishedBy,
+      updatedAt: revision.publishedAt ?? revision.createdAt,
+      version: revision.version,
+      contentHash,
+      review: marker ? {
+        submittedBy: marker.submittedBy,
+        submittedAt: marker.submittedAt,
+        reviewedBy: marker.reviewedBy,
+        reviewedAt: marker.reviewedAt,
+      } : null,
+    };
+  }
+
+  async getLocalizedPublishedPageDocument(
+    pageKey: string,
+    locale: PublicContentLocale,
+  ) {
+    const snapshot = await this.getLocalizedPublishedPageSnapshot(pageKey, locale);
+    if (!snapshot || snapshot.status === "INVALID") return snapshot;
+    if (!hasCurrentContentTemplatePublicationAttestation(snapshot.metadata)) {
+      return {
+        pageKey,
+        locale,
+        status: "INVALID",
+        invalidReason: "publication-revalidation-required",
+        publishedAt: snapshot.publishedAt,
+        updatedAt: snapshot.updatedAt,
+        version: snapshot.version,
+      };
+    }
+    if (!await this.isPublishedMediaManifestCurrent(snapshot.publishedRevisionId)) {
+      return {
+        pageKey,
+        locale,
+        status: "INVALID",
+        invalidReason: "publication-revalidation-required",
+        publishedAt: snapshot.publishedAt,
+        updatedAt: snapshot.updatedAt,
+        version: snapshot.version,
+      };
+    }
+    const validation = await this.collectPageDocumentValidation(
+      this.prisma,
+      snapshot.puckData,
+      snapshot.metadata,
+      pageKey,
+    );
+    if (!validation.valid) {
+      return {
+        pageKey,
+        locale,
+        status: "INVALID",
+        invalidReason: "publication-revalidation-required",
+        publishedAt: snapshot.publishedAt,
+        updatedAt: snapshot.updatedAt,
+        version: snapshot.version,
+      };
+    }
+    return {
+      pageKey,
+      locale,
+      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
+      metadata: this.getPublicPageMetadata(
+        stripPageLocaleRevisionMetadata(snapshot.metadata),
+      ),
+      status: "PUBLISHED",
+      publishedAt: snapshot.publishedAt,
+      updatedAt: snapshot.updatedAt,
+      version: snapshot.version,
+      contentHash: snapshot.contentHash,
+    };
+  }
+
+  async getLocalizedPublishedPageDocumentForAdmin(
+    pageKey: string,
+    locale: PublicContentLocale,
+  ) {
+    const snapshot = await this.getLocalizedPublishedPageSnapshot(pageKey, locale);
+    if (!snapshot || snapshot.status === "INVALID") return snapshot;
+    const publicationAttested = hasCurrentContentTemplatePublicationAttestation(
+      snapshot.metadata,
+    );
+    const pageReadiness = await this.collectPageDocumentValidation(
+      this.prisma,
+      snapshot.puckData,
+      snapshot.metadata,
+      pageKey,
+    );
+    const attestationIssues: ContentTemplateIssue[] = publicationAttested
+      ? []
+      : [{
+          code: "page-validation-publication-attestation-stale",
+          severity: "error",
+          layer: "page",
+          path: "metadata",
+          message: "线上版本缺少当前发布合同签认，必须重新校验并发布。",
+        }];
+    const publicationIssues = [...attestationIssues, ...pageReadiness.issues];
+    return {
+      ...snapshot,
+      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
+      metadata: stripPageLocaleRevisionMetadata(
+        withoutContentTemplatePublicationAttestation(snapshot.metadata),
+      ),
+      publicationAttested,
+      publicationReadiness: {
+        valid: publicationIssues.every((issue) => issue.severity !== "error"),
+        errors: publicationIssues
+          .filter((issue) => issue.severity === "error")
+          .map((issue) => issue.message),
+        issues: publicationIssues,
+      },
+    };
+  }
+
+  async publishLocalizedPageDocument(
+    pageKey: string,
+    locale: PublicContentLocale,
+    userId: number | undefined,
+    expectedUpdatedAt: string,
+    expectedContentHash?: string,
+  ) {
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (!expected) throw new BadRequestException("发布页面时缺少页面版本标识");
+    const result = await this.prisma.$transaction(async (tx) => {
+      const document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      if (!document) throw new NotFoundException("页面草稿不存在");
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE id = ${document.id} FOR UPDATE
+      `;
+      const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
+      if (!current || current.draft.id === null) {
+        throw new NotFoundException("该语言草稿不存在");
+      }
+      if (current.draft.updatedAt.getTime() !== expected.getTime()) {
+        throw new ConflictException("该语言页面已被其他编辑者更新，请重新加载后再发布");
+      }
+      if (!expectedContentHash || current.draft.contentHash !== expectedContentHash) {
+        throw new ConflictException("该语言草稿内容哈希已变化，请重新加载后再发布");
+      }
+      if (current.draft.reviewStatus !== "APPROVED") {
+        throw new BadRequestException("该语言草稿尚未审核通过，不能发布");
+      }
+      if (
+        current.draft.submittedBy === null
+        || current.draft.submittedAt === null
+        || current.draft.reviewedBy === null
+        || current.draft.reviewedAt === null
+        || current.draft.submittedBy === current.draft.reviewedBy
+      ) {
+        throw new BadRequestException("该语言草稿缺少独立、完整的审核记录，不能发布");
+      }
+      const normalizedPuckData = this.normalizePageDocumentPuckData(current.draft.puckData);
+      const cleanMetadata = this.getPersistablePageMetadata(
+        stripPageLocaleRevisionMetadata(current.draft.metadata),
+      );
+      const contentHash = createPageLocaleContentHash(normalizedPuckData, cleanMetadata);
+      if (contentHash !== current.draft.contentHash) {
+        throw new ConflictException("该语言草稿内容哈希不一致，请重新保存并审核");
+      }
+      const validation = await this.collectPageDocumentValidation(
+        tx,
+        normalizedPuckData,
+        cleanMetadata,
+        pageKey,
+      );
+      const errors = validation.issues
+        .filter((issue) => issue.severity === "error")
+        .map((issue) => issue.message);
+      if (errors.length > 0) {
+        throw new BadRequestException({
+          message: `页面发布校验失败：${errors.slice(0, 8).join("；")}`,
+          valid: false,
+          errors,
+          issues: validation.issues,
+        });
+      }
+      const lastRevision = await tx.pageDocumentRevision.findFirst({
+        where: { documentId: document.id },
+        orderBy: { version: "desc" },
+        select: { version: true },
+      });
+      const publishedAt = new Date();
+      const revisionMetadata = withPageLocaleRevisionMetadata({
+        ...cleanMetadata,
+        [CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY]:
+          createContentTemplatePublicationAttestation(),
+      }, locale, contentHash, {
+        submittedBy: current.draft.submittedBy,
+        submittedAt: current.draft.submittedAt,
+        reviewedBy: current.draft.reviewedBy,
+        reviewedAt: current.draft.reviewedAt,
+      });
+      const revision = await tx.pageDocumentRevision.create({
+        data: {
+          documentId: document.id,
+          version: (lastRevision?.version ?? 0) + 1,
+          puckData: toInputJsonValue(normalizedPuckData),
+          metadata: toInputJsonValue(revisionMetadata),
+          status: "published",
+          publishedBy: userId,
+          publishedAt,
+        },
+      });
+      const managedMediaAuthorization = await this.writePagePublicationMediaManifest(
+        tx,
+        revision.id,
+        normalizedPuckData,
+        revisionMetadata,
+        pageKey,
+      );
+      const localization = await tx.pageDocumentLocalization.update({
+        where: { id: current.draft.id },
+        data: {
+          reviewStatus: "PUBLISHED",
+          publishedRevisionId: revision.id,
+          publishedHash: contentHash,
+          publishedBy: userId,
+          publishedAt,
+        },
+      });
+      if (locale === "zh-CN") {
+        await tx.pageDocument.update({
+          where: { id: document.id },
+          data: {
+            status: "PUBLISHED",
+            publishedRevisionId: revision.id,
+            publishedAt,
+            publishedBy: userId,
+          },
+        });
+      }
+      if (userId !== undefined) {
+        await tx.operationLog.create({
+          data: {
+            userId,
+            action: "PAGE_LOCALE_PUBLISHED",
+            module: "page-builder",
+            targetId: document.id,
+            detail: JSON.stringify({
+              schemaVersion: 1,
+              event: "PAGE_LOCALE_PUBLISHED",
+              actor: userId,
+              timestamp: publishedAt.toISOString(),
+              pageKey,
+              locale,
+              contentHash,
+              fromRevision: current.draft.publishedRevisionId,
+              toRevision: revision.id,
+              toRevisionVersion: revision.version,
+              ...(managedMediaAuthorization ? { managedMediaAuthorization } : {}),
+              result: "succeeded",
+            }),
+          },
+        });
+      }
+      return { document, localization, revision };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.notifyPublicChange(pageKey, "page-document-published", result.revision.version, locale);
+    return this.toLocalizedPageResource(result.document, {
+      ...result.localization,
+      locale,
+      legacy: false,
+    });
+  }
+
+  async getLocalizedPageDocumentRevisions(
+    pageKey: string,
+    locale: PublicContentLocale,
+    beforeVersion?: number,
+    requestedLimit = 20,
+  ) {
+    if (!getContentTemplatePageRule(pageKey)) {
+      throw new BadRequestException(`页面标识「${pageKey}」未在页面合同注册`);
+    }
+    if (beforeVersion !== undefined && (!Number.isInteger(beforeVersion) || beforeVersion <= 0)) {
+      throw new BadRequestException("历史版本游标无效");
+    }
+    if (!Number.isInteger(requestedLimit) || requestedLimit <= 0) {
+      throw new BadRequestException("历史版本分页数量无效");
+    }
+    const limit = Math.min(requestedLimit, 50);
+    const current = await this.getLocalizedPageDraft(pageKey, locale);
+    if (!current) return { items: [], nextBeforeVersion: null };
+    type RevisionSummaryRow = {
+      id: number;
+      version: number;
+      status: string;
+      metadata: Prisma.JsonValue;
+      publishedAt: Date | null;
+      publishedBy: number | null;
+      createdAt: Date;
+    };
+    const localized: RevisionSummaryRow[] = [];
+    const batchSize = Math.max(50, limit * 2);
+    let scanBeforeVersion = beforeVersion;
+    let exhausted = false;
+    let scannedBatches = 0;
+    while (localized.length <= limit && scannedBatches < LOCALIZED_REVISION_SCAN_BATCHES) {
+      const revisions: RevisionSummaryRow[] = await this.prisma.pageDocumentRevision.findMany({
+        where: {
+          documentId: current.document!.id,
+          status: "published",
+          ...(scanBeforeVersion === undefined ? {} : { version: { lt: scanBeforeVersion } }),
+        },
+        orderBy: { version: "desc" },
+        take: batchSize,
+        select: {
+          id: true,
+          version: true,
+          status: true,
+          metadata: true,
+          publishedAt: true,
+          publishedBy: true,
+          createdAt: true,
+        },
+      });
+      scannedBatches += 1;
+      if (revisions.length === 0) {
+        exhausted = true;
+        break;
+      }
+      for (const revision of revisions) {
+        if (revisionBelongsToLocale(revision.metadata, locale)) localized.push(revision);
+        if (localized.length > limit) break;
+      }
+      scanBeforeVersion = revisions[revisions.length - 1]!.version;
+      if (revisions.length < batchSize) {
+        exhausted = true;
+        break;
+      }
+    }
+    const page = localized.slice(0, limit);
+    return {
+      items: page.map(({ metadata, ...revision }) => {
+        const marker = readPageLocaleRevisionMarker(metadata);
+        return {
+          ...revision,
+          locale,
+          contentHash: marker?.contentHash ?? null,
+          review: marker ? {
+            submittedBy: marker.submittedBy,
+            submittedAt: marker.submittedAt,
+            reviewedBy: marker.reviewedBy,
+            reviewedAt: marker.reviewedAt,
+          } : null,
+          isPublished: revision.id === current.draft.publishedRevisionId,
+        };
+      }),
+      nextBeforeVersion: localized.length > limit
+        ? page[page.length - 1]?.version ?? null
+        : exhausted
+          ? null
+          : scanBeforeVersion ?? null,
+    };
+  }
+
+  async getLocalizedPageDocumentRevision(
+    pageKey: string,
+    locale: PublicContentLocale,
+    version: number,
+  ) {
+    if (!Number.isInteger(version) || version <= 0) {
+      throw new BadRequestException("版本号不正确");
+    }
+    const current = await this.getLocalizedPageDraft(pageKey, locale);
+    if (!current) throw new NotFoundException("该语言页面文档不存在");
+    const revision = await this.prisma.pageDocumentRevision.findFirst({
+      where: { documentId: current.document!.id, version, status: "published" },
+    });
+    if (!revision || !revisionBelongsToLocale(revision.metadata, locale)) {
+      throw new NotFoundException("指定语言版本不存在");
+    }
+    const marker = readPageLocaleRevisionMarker(revision.metadata);
+    const normalizedPuckData = this.normalizeStoredRevisionPuckData(revision.puckData);
+    return {
+      ...revision,
+      locale,
+      puckData: await this.hydrateDynamicTemplateDefinitions(normalizedPuckData),
+      metadata: stripPageLocaleRevisionMetadata(
+        withoutContentTemplatePublicationAttestation(revision.metadata),
+      ),
+      contentHash: marker?.contentHash ?? createPageLocaleContentHash(
+        normalizedPuckData,
+        this.getPersistablePageMetadata(
+          withoutContentTemplatePublicationAttestation(revision.metadata),
+        ),
+      ),
+      review: marker ? {
+        submittedBy: marker.submittedBy,
+        submittedAt: marker.submittedAt,
+        reviewedBy: marker.reviewedBy,
+        reviewedAt: marker.reviewedAt,
+      } : null,
+      isPublished: revision.id === current.draft.publishedRevisionId,
+    };
+  }
+
+  async restoreLocalizedPageDocumentRevision(
+    pageKey: string,
+    locale: PublicContentLocale,
+    version: number,
+    expectedUpdatedAt: string,
+    userId: number,
+  ) {
+    if (!Number.isInteger(version) || version <= 0) {
+      throw new BadRequestException("版本号不正确");
+    }
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (!expected) throw new BadRequestException("恢复版本时缺少页面版本标识");
+    const result = await this.prisma.$transaction(async (tx) => {
+      const document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      if (!document) throw new NotFoundException("页面文档不存在");
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE id = ${document.id} FOR UPDATE
+      `;
+      const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
+      if (!current || current.draft.id === null) throw new NotFoundException("该语言草稿不存在");
+      if (current.draft.updatedAt.getTime() !== expected.getTime()) {
+        throw new ConflictException("该语言草稿已变化，请重新加载版本记录后再恢复");
+      }
+      const revision = await tx.pageDocumentRevision.findFirst({
+        where: { documentId: document.id, version, status: "published" },
+      });
+      if (!revision || !revisionBelongsToLocale(revision.metadata, locale)) {
+        throw new NotFoundException("指定语言版本不存在");
+      }
+      const puckData = this.normalizeStoredRevisionPuckData(revision.puckData);
+      const metadata = this.getPersistablePageMetadata(
+        withoutContentTemplatePublicationAttestation(revision.metadata),
+      );
+      const contentHash = createPageLocaleContentHash(puckData, metadata);
+      const marker = readPageLocaleRevisionMarker(revision.metadata);
+      if (marker && (
+        marker.locale !== locale
+        || marker.contentHash !== contentHash
+      )) {
+        throw new ConflictException("该语言线上版本校验失败，草稿未修改");
+      }
+      const localization = await tx.pageDocumentLocalization.update({
+        where: { id: current.draft.id },
+        data: {
+          puckData: toInputJsonValue(puckData),
+          metadata: toInputJsonValue(withPageLocaleDraftMetadata(metadata, locale)),
+          contentHash,
+          reviewStatus: "DRAFT",
+          submittedBy: null,
+          submittedAt: null,
+          reviewedBy: null,
+          reviewedAt: null,
+          reviewNote: null,
+        },
+      });
+      if (locale === "zh-CN") {
+        await tx.pageDocument.update({
+          where: { id: document.id },
+          data: {
+            puckData: toInputJsonValue(puckData),
+            metadata: toInputJsonValue(metadata),
+            status: "DRAFT",
+          },
+        });
+      }
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: "PAGE_LOCALE_REVISION_RESTORED_TO_DRAFT",
+          module: "page-builder",
+          targetId: document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_LOCALE_REVISION_RESTORED_TO_DRAFT",
+            actor: userId,
+            pageKey,
+            locale,
+            sourceRevision: revision.id,
+            sourceRevisionVersion: revision.version,
+            publishedRevisionUnchanged: current.draft.publishedRevisionId,
+            contentHash,
+            result: "succeeded",
+          }),
+        },
+      });
+      return { document, localization };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return this.toLocalizedPageResource(result.document, {
+      ...result.localization,
+      locale,
+      legacy: false,
+    });
+  }
+
+  async rollbackLocalizedPagePublication(
+    pageKey: string,
+    locale: PublicContentLocale,
+    revisionId: number,
+    expectedPublishedRevisionId: number,
+    userId: number,
+  ) {
+    if (!Number.isInteger(revisionId) || revisionId <= 0) {
+      throw new BadRequestException("发布版本标识不正确");
+    }
+    if (!Number.isInteger(expectedPublishedRevisionId) || expectedPublishedRevisionId <= 0) {
+      throw new BadRequestException("当前线上版本标识不正确");
+    }
+    const result = await this.prisma.$transaction(async (tx) => {
+      const document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      if (!document) throw new NotFoundException("页面文档不存在");
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE id = ${document.id} FOR UPDATE
+      `;
+      const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
+      if (!current || current.draft.id === null) throw new NotFoundException("该语言页面不存在");
+      if (current.draft.publishedRevisionId !== expectedPublishedRevisionId) {
+        throw new ConflictException("该语言线上版本已变化，请重新加载版本记录后再回滚");
+      }
+      const source = await tx.pageDocumentRevision.findFirst({
+        where: { id: revisionId, documentId: document.id, status: "published" },
+      });
+      if (!source || !revisionBelongsToLocale(source.metadata, locale)) {
+        throw new BadRequestException("指定发布版本不属于当前页面语言");
+      }
+      if (source.id === current.draft.publishedRevisionId) {
+        throw new BadRequestException("该版本已经是当前语言线上版本");
+      }
+      const puckData = this.normalizeStoredRevisionPuckData(source.puckData);
+      const metadata = this.getPersistablePageMetadata(
+        withoutContentTemplatePublicationAttestation(source.metadata),
+      );
+      const contentHash = createPageLocaleContentHash(puckData, metadata);
+      const sourceMarker = readPageLocaleRevisionMarker(source.metadata);
+      if (sourceMarker && sourceMarker.contentHash !== contentHash) {
+        throw new ConflictException("指定历史版本内容完整性校验失败，不能回滚发布");
+      }
+      const validation = await this.collectPageDocumentValidation(
+        tx,
+        puckData,
+        metadata,
+        pageKey,
+      );
+      const errors = validation.issues
+        .filter((issue) => issue.severity === "error")
+        .map((issue) => issue.message);
+      if (errors.length > 0) {
+        throw new BadRequestException({
+          message: `指定历史版本当前不可公开：${errors.slice(0, 8).join("；")}`,
+          valid: false,
+          errors,
+          issues: validation.issues,
+        });
+      }
+      const lastRevision = await tx.pageDocumentRevision.findFirst({
+        where: { documentId: document.id },
+        orderBy: { version: "desc" },
+        select: { version: true },
+      });
+      const restoredAt = new Date();
+      const restoredMetadata = withPageLocaleRevisionMetadata({
+        ...metadata,
+        [CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY]:
+          createContentTemplatePublicationAttestation(),
+      }, locale, contentHash, {
+        submittedBy: sourceMarker?.submittedBy ?? null,
+        submittedAt: sourceMarker?.submittedAt ? new Date(sourceMarker.submittedAt) : null,
+        reviewedBy: sourceMarker?.reviewedBy ?? null,
+        reviewedAt: sourceMarker?.reviewedAt ? new Date(sourceMarker.reviewedAt) : null,
+      });
+      const revision = await tx.pageDocumentRevision.create({
+        data: {
+          documentId: document.id,
+          version: (lastRevision?.version ?? 0) + 1,
+          puckData: toInputJsonValue(puckData),
+          metadata: toInputJsonValue(restoredMetadata),
+          status: "published",
+          publishedBy: userId,
+          publishedAt: restoredAt,
+        },
+      });
+      const managedMediaAuthorization = await this.writePagePublicationMediaManifest(
+        tx,
+        revision.id,
+        puckData,
+        restoredMetadata,
+        pageKey,
+      );
+      const localization = await tx.pageDocumentLocalization.update({
+        where: { id: current.draft.id },
+        data: {
+          publishedRevisionId: revision.id,
+          publishedHash: contentHash,
+          publishedBy: userId,
+          publishedAt: restoredAt,
+          reviewStatus: current.draft.contentHash === contentHash
+            ? "PUBLISHED"
+            : current.draft.reviewStatus === "PUBLISHED"
+              ? "APPROVED"
+              : current.draft.reviewStatus,
+        },
+      });
+      if (locale === "zh-CN") {
+        await tx.pageDocument.update({
+          where: { id: document.id },
+          data: {
+            status: "PUBLISHED",
+            publishedRevisionId: revision.id,
+            publishedAt: restoredAt,
+            publishedBy: userId,
+          },
+        });
+      }
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: "PAGE_LOCALE_PUBLICATION_ROLLED_BACK",
+          module: "page-builder",
+          targetId: document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_LOCALE_PUBLICATION_ROLLED_BACK",
+            actor: userId,
+            pageKey,
+            locale,
+            fromRevision: expectedPublishedRevisionId,
+            sourceRevision: source.id,
+            toRevision: revision.id,
+            toRevisionVersion: revision.version,
+            contentHash,
+            ...(managedMediaAuthorization ? { managedMediaAuthorization } : {}),
+            result: "succeeded",
+          }),
+        },
+      });
+      return { document, localization, revision };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.notifyPublicChange(pageKey, "page-document-published", result.revision.version, locale);
+    return this.toLocalizedPageResource(result.document, {
+      ...result.localization,
+      locale,
+      legacy: false,
+    });
+  }
+
+  async discardLocalizedPageDocumentDraft(
+    pageKey: string,
+    locale: PublicContentLocale,
+    expectedUpdatedAt: string,
+  ) {
+    const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
+    if (!expected) throw new BadRequestException("放弃草稿时缺少页面版本标识");
+    const result = await this.prisma.$transaction(async (tx) => {
+      const document = await tx.pageDocument.findUnique({ where: { pageKey } });
+      if (!document) throw new NotFoundException("页面文档不存在");
+      await tx.$queryRaw<Array<{ id: number }>>`
+        SELECT id FROM page_documents WHERE id = ${document.id} FOR UPDATE
+      `;
+      const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
+      if (!current || current.draft.id === null || !current.draft.publishedRevisionId) {
+        throw new BadRequestException("该语言没有可恢复的线上版本");
+      }
+      if (current.draft.updatedAt.getTime() !== expected.getTime()) {
+        throw new ConflictException("该语言草稿已变化，请重新加载后再放弃");
+      }
+      const revision = await tx.pageDocumentRevision.findFirst({
+        where: {
+          id: current.draft.publishedRevisionId,
+          documentId: document.id,
+          status: "published",
+        },
+      });
+      if (!revision || !revisionBelongsToLocale(revision.metadata, locale)) {
+        throw new ConflictException("该语言线上版本不可用，草稿未修改");
+      }
+      const puckData = this.normalizeStoredRevisionPuckData(revision.puckData);
+      const metadata = this.getPersistablePageMetadata(
+        withoutContentTemplatePublicationAttestation(revision.metadata),
+      );
+      const contentHash = createPageLocaleContentHash(puckData, metadata);
+      const marker = readPageLocaleRevisionMarker(revision.metadata);
+      if (
+        (marker && marker.contentHash !== contentHash)
+        || (!marker && locale !== "zh-CN")
+        || (current.draft.publishedHash !== null
+          && current.draft.publishedHash !== contentHash)
+      ) {
+        throw new ConflictException("该语言线上版本完整性校验失败，草稿未修改");
+      }
+      const localization = await tx.pageDocumentLocalization.update({
+        where: { id: current.draft.id },
+        data: {
+          puckData: toInputJsonValue(puckData),
+          metadata: toInputJsonValue(withPageLocaleDraftMetadata(metadata, locale)),
+          contentHash,
+          publishedHash: contentHash,
+          reviewStatus: "PUBLISHED",
+          submittedBy: null,
+          submittedAt: null,
+          reviewedBy: null,
+          reviewedAt: null,
+          reviewNote: null,
+        },
+      });
+      if (locale === "zh-CN") {
+        await tx.pageDocument.update({
+          where: { id: document.id },
+          data: {
+            puckData: toInputJsonValue(puckData),
+            metadata: toInputJsonValue(metadata),
+            status: "PUBLISHED",
+          },
+        });
+      }
+      return { document, localization };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return this.toLocalizedPageResource(result.document, {
+      ...result.localization,
+      locale,
+      legacy: false,
+    });
+  }
+
   private getPublicPageMetadata(metadata: unknown): Record<string, string> {
     if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
       return {};
@@ -534,6 +1825,19 @@ export class PageModulesService {
     const snapshot = await this.getPublishedPageDocumentSnapshot(pageKey);
     if (!snapshot) return null;
     if (!hasCurrentContentTemplatePublicationAttestation(snapshot.metadata)) {
+      return {
+        pageKey: snapshot.pageKey,
+        status: "INVALID",
+        invalidReason: "publication-revalidation-required",
+        publishedAt: snapshot.publishedAt,
+        updatedAt: snapshot.updatedAt,
+        version: snapshot.version,
+      };
+    }
+    if (
+      !snapshot.publishedRevisionId
+      || !await this.isPublishedMediaManifestCurrent(snapshot.publishedRevisionId)
+    ) {
       return {
         pageKey: snapshot.pageKey,
         status: "INVALID",
@@ -775,6 +2079,13 @@ export class PageModulesService {
           publishedAt,
         },
       });
+      const managedMediaAuthorization = await this.writePagePublicationMediaManifest(
+        tx,
+        revision.id,
+        normalizedPuckData,
+        revisionMetadata,
+        pageKey,
+      );
 
       const published = await tx.pageDocument.update({
         where: { id: doc.id },
@@ -803,6 +2114,7 @@ export class PageModulesService {
               fromRevision: doc.publishedRevisionId,
               toRevision: revision.id,
               toRevisionVersion: revision.version,
+              ...(managedMediaAuthorization ? { managedMediaAuthorization } : {}),
               result: "succeeded",
             }),
           },
@@ -847,6 +2159,35 @@ export class PageModulesService {
     );
   }
 
+  async validateLocalizedPageDocument(
+    pageKey: string,
+    locale: PublicContentLocale,
+    puckDataOverride?: unknown,
+    metadataOverride?: unknown,
+  ) {
+    let puckData = puckDataOverride;
+    let metadata = metadataOverride;
+    if (puckData === undefined || metadata === undefined) {
+      const current = await this.getLocalizedPageDraft(pageKey, locale);
+      if (!current) {
+        const issues: ContentTemplateIssue[] = [
+          this.createServerValidationIssue("该语言页面草稿不存在"),
+        ];
+        return { valid: false, errors: ["该语言页面草稿不存在"], issues };
+      }
+      if (puckData === undefined) puckData = current.draft.puckData;
+      if (metadata === undefined) {
+        metadata = this.getPersistablePageMetadata(current.draft.metadata);
+      }
+    }
+    return this.collectPageDocumentValidation(
+      this.prisma,
+      puckData,
+      metadata,
+      pageKey,
+    );
+  }
+
   /** 模板原子激活在同一事务内复用页面发布的完整校验规则。 */
   async validatePageDocumentSnapshot(
     db: PageValidationDb,
@@ -855,6 +2196,189 @@ export class PageModulesService {
     metadata: unknown,
   ) {
     return this.collectPageDocumentValidation(db, puckData, metadata, pageKey);
+  }
+
+  private async resolvePagePublicationMedia(
+    db: PageValidationDb,
+    puckData: unknown,
+    metadata: unknown,
+    pageKey: string,
+  ): Promise<{
+    references: PublicationMediaReference[];
+    resolution: MediaPublicationResolution;
+  } | null> {
+    if (!this.mediaAuthorizationResolver) return null;
+    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData, db);
+    const pageRule = getContentTemplatePageRule(pageKey);
+    const exactReferences = collectDynamicTemplateInstanceReferences(puckData);
+    const versions = exactReferences.length === 0
+      ? []
+      : await db.dynamicTemplateVersion.findMany({
+          where: {
+            OR: exactReferences.map((reference) => ({
+              version: reference.templateVersion,
+              template: { templateId: reference.templateId },
+            })),
+          },
+          select: {
+            id: true,
+            version: true,
+            template: { select: { templateId: true } },
+          },
+        });
+    const versionIdByKey = new Map(versions.map((version) => [
+      dynamicTemplateVersionKey(version.template.templateId, version.version),
+      version.id,
+    ]));
+    const versionIdByBlockId = new Map<string, number>();
+    const collectBlockVersions = (blocks: unknown) => {
+      if (!Array.isArray(blocks)) return;
+      for (const block of blocks) {
+        if (!isRecord(block) || !isRecord(block.props)) continue;
+        const blockId = this.isNonEmptyString(block.props.id) ? block.props.id.trim() : "";
+        const reference = readDynamicTemplateInstanceReference(block.props);
+        if (!blockId || !reference) continue;
+        const versionId = versionIdByKey.get(dynamicTemplateVersionKey(
+          reference.templateId,
+          reference.templateVersion,
+        ));
+        if (versionId) versionIdByBlockId.set(blockId, versionId);
+      }
+    };
+    if (isRecord(puckData)) {
+      collectBlockVersions(puckData.content);
+      if (pageRule?.contentPlacement !== "root-only" && isRecord(puckData.zones)) {
+        Object.values(puckData.zones).forEach(collectBlockVersions);
+      }
+    }
+    const references: PublicationMediaReference[] = [
+      ...getPageDocumentMediaReferences(puckData, metadata, pageKey, {
+        preserveReferencePaths: true,
+      }).map(
+        (reference): PublicationMediaReference => ({
+          url: reference.url,
+          path: reference.path,
+          sourceType: "PAGE_DOCUMENT_REVISION",
+          sourceId: pageKey,
+          origin: reference.path === "metadata.ogImage" ? "PAGE_METADATA" : "PAGE_INSTANCE",
+        }),
+      ),
+      ...getDynamicTemplateDocumentMediaReferences(hydrated, {
+        includeZones: pageRule?.contentPlacement !== "root-only",
+        canonicalResponsivePaths: true,
+        preserveReferencePaths: true,
+      }).map((reference): PublicationMediaReference => ({
+        url: reference.url,
+        path: reference.path,
+        sourceType: "PAGE_DOCUMENT_REVISION",
+        sourceId: pageKey,
+        origin: reference.field.endsWith(".backgroundImage")
+          ? "TEMPLATE_BACKGROUND"
+          : "PAGE_INSTANCE",
+        ...(reference.blockId && versionIdByBlockId.has(reference.blockId)
+          ? { dynamicTemplateVersionId: versionIdByBlockId.get(reference.blockId) }
+          : {}),
+      })),
+    ];
+    const uniqueReferences = [...new Map(references.map((reference) => [
+      `${reference.path ?? ""}\u0000${reference.url}`,
+      reference,
+    ])).values()];
+    const resolution = await this.mediaAuthorizationResolver.resolveReferences(
+      uniqueReferences,
+      db === this.prisma
+        ? { mode: "ENFORCE" }
+        : { transaction: db as Prisma.TransactionClient, mode: "ENFORCE" },
+    ) as MediaPublicationResolution;
+    return { references: uniqueReferences, resolution };
+  }
+
+  private managedMediaIssues(
+    resolution: MediaPublicationResolution | undefined,
+  ): ContentTemplateIssue[] {
+    return (resolution?.issues ?? []).map((issue) => ({
+      code: `page-validation-managed-media-${issue.code.toLowerCase().replaceAll("_", "-")}`,
+      severity: issue.severity === "ERROR" ? "error" : "warning",
+      layer: "page",
+      path: issue.path ?? "puckData",
+      message: `${issue.message}：${issue.url}`,
+    }));
+  }
+
+  private async writePagePublicationMediaManifest(
+    transaction: Prisma.TransactionClient,
+    pageDocumentRevisionId: number,
+    puckData: unknown,
+    metadata: unknown,
+    pageKey: string,
+  ) {
+    const publicationMedia = await this.resolvePagePublicationMedia(
+      transaction,
+      puckData,
+      metadata,
+      pageKey,
+    );
+    if (!publicationMedia) return null;
+    const blocking = publicationMedia.resolution.issues.filter(
+      (issue) => issue.severity === "ERROR",
+    );
+    if (blocking.length > 0) {
+      throw new BadRequestException({
+        message: `页面素材校验失败：${blocking.slice(0, 8).map((issue) => issue.message).join("；")}`,
+        valid: false,
+        issues: blocking,
+        shadowReport: buildManagedMediaShadowReport(publicationMedia.resolution),
+      });
+    }
+    const rows = buildMediaPublicationManifestRows(
+      publicationMedia.references,
+      publicationMedia.resolution,
+    );
+    if (rows.length > 0) {
+      await transaction.pageDocumentRevisionMediaAsset.createMany({
+        data: rows.map((row) => ({
+          ...row,
+          pageDocumentRevisionId,
+        })),
+      });
+    }
+    return buildManagedMediaShadowReport(publicationMedia.resolution);
+  }
+
+  private async isPublishedMediaManifestCurrent(revisionId: number): Promise<boolean> {
+    if (!this.mediaAuthorizationResolver) return true;
+    const manifest = await this.prisma.pageDocumentRevisionMediaAsset.findMany({
+      where: { pageDocumentRevisionId: revisionId },
+      select: {
+        assetId: true,
+        referencePath: true,
+        referenceKey: true,
+        assetLifecycleRevision: true,
+        authorizationRevision: true,
+        publicUseEpoch: true,
+        asset: { select: { storageKey: true } },
+      },
+    });
+    if (manifest.length === 0) return true;
+    const resolution = await this.mediaAuthorizationResolver.resolveReferences(
+      manifest.map((entry) => ({
+        url: `/uploads/${entry.asset.storageKey}`,
+        path: entry.referencePath,
+        sourceType: "PAGE_DOCUMENT_REVISION",
+        sourceId: String(revisionId),
+      })),
+      { mode: "ENFORCE" },
+    ) as MediaPublicationResolution;
+    if (!resolution.eligible || resolution.items.length !== manifest.length) return false;
+    const itemByPath = new Map(resolution.items.map((item) => [item.context.path, item]));
+    return manifest.every((entry) => (
+      entry.referenceKey === createMediaPublicationReferenceKey(entry.referencePath)
+      && Boolean(itemByPath.get(entry.referencePath))
+      && isCurrentResolutionCompatibleWithManifest(
+        entry,
+        itemByPath.get(entry.referencePath)!,
+      )
+    ));
   }
 
   private async collectPageDocumentValidation(
@@ -869,6 +2393,10 @@ export class PageModulesService {
       ...(await this.collectSiteSettingsReadinessIssues(db, puckData, pageKey)),
       ...this.collectMetadataIssues(metadata),
       ...(await this.collectMediaRightsIssues(db, puckData, metadata, pageKey)),
+      ...this.managedMediaIssues(
+        (await this.resolvePagePublicationMedia(db, puckData, metadata, pageKey))
+          ?.resolution,
+      ),
     ];
     const publicationIssues = issues.map((issue) =>
       this.toUsablePublicationIssue(issue),
@@ -2698,6 +4226,13 @@ export class PageModulesService {
           publishedAt: restoredAt,
         },
       });
+      const managedMediaAuthorization = await this.writePagePublicationMediaManifest(
+        tx,
+        restoredRevision.id,
+        normalizedPuckData,
+        restoredMetadata,
+        pageKey,
+      );
 
       const updated = await tx.pageDocument.updateMany({
         where: {
@@ -2731,6 +4266,7 @@ export class PageModulesService {
             sourceRevisionVersion: revision.version,
             toRevision: restoredRevision.id,
             toRevisionVersion: restoredRevision.version,
+            ...(managedMediaAuthorization ? { managedMediaAuthorization } : {}),
             result: "succeeded",
           }),
         },
@@ -2747,10 +4283,12 @@ export class PageModulesService {
     pageKey: string,
     type: "page-document-published",
     version?: number,
+    locale: PublicContentLocale = "zh-CN",
   ): void {
     this.publicEvents.emit("page-published", {
       type,
       pageKey,
+      locale,
       version,
       changedAt: new Date().toISOString(),
     });

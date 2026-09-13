@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 
 interface Props {
   children: ReactNode;
@@ -20,6 +21,7 @@ export class ErrorBoundary extends Component<Props, State> {
       errorInfo.componentStack,
     );
     if (this.props.fallback === undefined) {
+      const english = getBrowserPublicContentLocale() === "en";
       let robots = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
       if (!robots) {
         robots = document.createElement("meta");
@@ -29,7 +31,7 @@ export class ErrorBoundary extends Component<Props, State> {
       robots.content = "noindex, nofollow";
       document.head.querySelector('link[rel="canonical"]')?.remove();
       document.head.querySelector('meta[property="og:url"]')?.remove();
-      document.title = "页面加载异常";
+      document.title = english ? "Page unavailable" : "页面加载异常";
     }
   }
 
@@ -40,6 +42,7 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       if (this.props.fallback !== undefined) return this.props.fallback;
+      const english = getBrowserPublicContentLocale() === "en";
       return (
         <div className="min-h-screen flex items-center justify-center bg-brand-bg">
           <div className="text-center max-w-md px-6">
@@ -48,10 +51,12 @@ export class ErrorBoundary extends Component<Props, State> {
               className="text-2xl font-medium mb-2"
               style={{ color: "#181A1B" }}
             >
-              页面加载异常
+              {english ? "Page unavailable" : "页面加载异常"}
             </h2>
             <p className="text-sm text-brand-muted mb-6">
-              当前页面暂时无法显示，请刷新后重试。
+              {english
+                ? "This page cannot be displayed right now. Refresh and try again."
+                : "当前页面暂时无法显示，请刷新后重试。"}
             </p>
             <button
               type="button"
@@ -61,7 +66,7 @@ export class ErrorBoundary extends Component<Props, State> {
               }}
               className="rounded bg-[#181A1B] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#101213] focus:outline-none focus:ring-2 focus:ring-[#181A1B] focus:ring-offset-2"
             >
-              刷新页面
+              {english ? "Refresh page" : "刷新页面"}
             </button>
           </div>
         </div>

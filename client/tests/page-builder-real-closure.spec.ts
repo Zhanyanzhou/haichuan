@@ -1,4 +1,15 @@
-import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
+import { readFileSync, writeFileSync } from "node:fs";
+import {
+  expect,
+  request as playwrightRequest,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+  type Request,
+} from "@playwright/test";
+import { addDynamicTemplateNode } from "../src/page-builder/template-definition";
+import { createNewDynamicTemplateDraft } from "../src/page-builder/template-editor/dynamicTemplateDraftRepository";
 import { productionStageAction } from "./fixtures/template-authoring-main-route";
 
 const realQaEnabled = process.env.PAGE_BUILDER_REAL_QA === "true";
@@ -11,12 +22,18 @@ const expectedBrowserBaseUrl = "http://127.0.0.1:5175";
 const forwardedProtoHeaders = process.env.PLAYWRIGHT_FORWARDED_PROTO
   ? { "X-Forwarded-Proto": process.env.PLAYWRIGHT_FORWARDED_PROTO }
   : undefined;
+const realQaPhase = process.env.PAGE_BUILDER_QA_PHASE ?? "combined";
+const realQaHandoffPath = process.env.PAGE_BUILDER_QA_HANDOFF_PATH ?? "";
 
 const exactQaTarget = realQaEnabled
   && apiBaseUrl === expectedApiBaseUrl
   && browserBaseUrl === expectedBrowserBaseUrl
   && username.length > 0
   && password.length > 0;
+
+const uploadedAssetIdsByUrl = new Map<string, number>();
+let mediaReviewerCreated = false;
+let pageReviewActorSequence = 0;
 
 function unwrap<T>(body: unknown): T {
   if (body && typeof body === "object" && "data" in body) {
@@ -56,6 +73,57 @@ type PageDocumentRevisionSummary = {
 
 type PageDocumentRevisionDetail = PageDocumentRevisionSummary & {
   puckData: { content: PageDocumentBlock[] };
+};
+
+type RestartPhaseHandoff = {
+  qaRunId: string;
+  pageKey: string;
+  templateId: string;
+  templateNameV2: string;
+  templateVersionChecksums: { v1: string; v2: string };
+  templateDefinitions: { v1: unknown; v2: unknown };
+  pageRevisionV1: PageDocumentRevisionSummary;
+  pageRevisionV2: PageDocumentRevisionSummary;
+  pageRevisionPuckData: {
+    v1: PageDocumentRevisionDetail["puckData"];
+    v2: PageDocumentRevisionDetail["puckData"];
+  };
+  v1InstanceIdentities: Array<{ instanceId: string; version: number }>;
+  upgradedInstanceIdentities: Array<{ instanceId: string; version: number }>;
+  bilingualPublication?: {
+    pageKey: "about";
+    zh: { contentHash: string; title: string; lastModified: string };
+    en: { contentHash: string; title: string; lastModified: string };
+  };
+  bilingualPublicationV1?: {
+    pageKey: "about";
+    zh: {
+      contentHash: string;
+      title: string;
+      updatedAt: string;
+      publishedRevisionId: number;
+    };
+    en: {
+      contentHash: string;
+      title: string;
+      updatedAt: string;
+      publishedRevisionId: number;
+    };
+  };
+  bilingualDraftState?: {
+    pageKey: "about";
+    zh: {
+      contentHash: string;
+      title: string;
+      updatedAt: string;
+      publishedRevisionId: number;
+    };
+    en: {
+      contentHash: string;
+      title: string;
+      updatedAt: string;
+    };
+  };
 };
 
 function dynamicTemplateVersions(
@@ -124,16 +192,108 @@ async function browserWrite<T>(
 ): Promise<T> {
   const result = await browserWriteResult(page, path, data, method);
 
-  expect(result.ok, `${result.status} ${path} 应成功`).toBe(true);
+  expect(
+    result.ok,
+    `${result.status} ${path} 应成功：${JSON.stringify(result.body)}`,
+  ).toBe(true);
   return unwrap<T>(result.body);
 }
 
-async function loginThroughUi(page: Page) {
-  await page.goto("/admin/login");
-  await page.getByRole("textbox", { name: "用户名" }).fill(username);
-  await page.locator("#admin-login-password").fill(password);
-  await page.getByRole("button", { name: "登录" }).click();
-  await expect(page).toHaveURL(/\/admin\/dashboard$/);
+type AuthenticatedApiSession = {
+  context: APIRequestContext;
+  cookieHeader: string;
+  csrfToken: string;
+};
+
+async function newAuthenticatedApiSession(
+  credentials: { username: string; password: string },
+): Promise<AuthenticatedApiSession> {
+  const context = await playwrightRequest.newContext({
+    baseURL: browserBaseUrl,
+    extraHTTPHeaders: forwardedProtoHeaders,
+  });
+  const loginOptions = {
+    data: credentials,
+    headers: {
+      Origin: browserBaseUrl,
+      "X-Session-Mode": "cookie",
+    },
+  };
+  let response = await context.post("/api/auth/login", loginOptions);
+  for (let attempt = 0; response.status() === 429 && attempt < 2; attempt += 1) {
+    const retryAfterSeconds = Number.parseInt(response.headers()["retry-after"] ?? "60", 10);
+    await response.dispose();
+    await new Promise((resolve) => {
+      setTimeout(resolve, Math.min(60, Math.max(1, retryAfterSeconds)) * 1000);
+    });
+    response = await context.post("/api/auth/login", loginOptions);
+  }
+  expect(response.ok(), `${response.status()} /api/auth/login 应成功`).toBe(true);
+  const cookiePairs = response.headersArray()
+    .filter((header) => header.name.toLowerCase() === "set-cookie")
+    .map((header) => header.value.split(";", 1)[0]!)
+    .filter(Boolean);
+  const csrfCookie = cookiePairs.find((cookie) => cookie.startsWith("hc_csrf="));
+  expect(csrfCookie, "API 登录后应获得 CSRF Cookie").toBeTruthy();
+  return {
+    context,
+    cookieHeader: cookiePairs.join("; "),
+    csrfToken: decodeURIComponent(csrfCookie!.slice("hc_csrf=".length)),
+  };
+}
+
+async function apiWriteResult(
+  session: AuthenticatedApiSession,
+  path: string,
+  data: Record<string, unknown>,
+  method: "PUT" | "POST" = "PUT",
+) {
+  const response = await session.context.fetch(`/api${path}`, {
+    method,
+    data,
+    headers: {
+      Cookie: session.cookieHeader,
+      Origin: browserBaseUrl,
+      "X-CSRF-Token": session.csrfToken,
+    },
+  });
+  return {
+    ok: response.ok(),
+    status: response.status(),
+    body: await response.json().catch(() => null),
+  };
+}
+
+async function apiWrite<T>(
+  session: AuthenticatedApiSession,
+  path: string,
+  data: Record<string, unknown>,
+  method: "PUT" | "POST" = "PUT",
+): Promise<T> {
+  const result = await apiWriteResult(session, path, data, method);
+  expect(result.ok, `${result.status} ${path} 应成功：${JSON.stringify(result.body)}`).toBe(true);
+  return unwrap<T>(result.body);
+}
+
+async function loginThroughUi(
+  page: Page,
+  credentials: { username: string; password: string } = { username, password },
+) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto("/admin/login");
+    await page.getByRole("textbox", { name: "用户名" }).fill(credentials.username);
+    await page.locator("#admin-login-password").fill(credentials.password);
+    const loginResponse = page.waitForResponse((response) => (
+      response.request().method() === "POST"
+      && new URL(response.url()).pathname === "/api/auth/login"
+    ));
+    await page.getByRole("button", { name: "登录" }).click();
+    const response = await loginResponse;
+    if (response.status() !== 429) break;
+    const retryAfterSeconds = Number.parseInt(response.headers()["retry-after"] ?? "60", 10);
+    await page.waitForTimeout(Math.min(60, Math.max(1, retryAfterSeconds)) * 1000);
+  }
+  await expect(page).toHaveURL(/\/admin\/(?:dashboard|products)$/);
   await expect(page.getByRole("button", { name: /账户菜单/ })).toBeVisible();
 }
 
@@ -185,6 +345,104 @@ async function loginAndPrepareIsolatedQaSite(page: Page) {
     persisted: true,
   });
   expect(readiness.blockers).toEqual([]);
+}
+
+async function approveCurrentPageDraftThroughApi(page: Page, pageKey: string) {
+  type ReviewSnapshot = {
+    updatedAt: string;
+    contentHash: string;
+    reviewStatus: "DRAFT" | "IN_REVIEW" | "APPROVED" | "CHANGES_REQUESTED";
+  };
+  let current = await responseData<ReviewSnapshot>(await page.request.get(
+    `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}&locale=zh-CN`,
+  ));
+  if (current.reviewStatus === "DRAFT" || current.reviewStatus === "CHANGES_REQUESTED") {
+    current = await browserWrite<ReviewSnapshot>(page, "/page-modules/document/review/submit", {
+      pageKey,
+      locale: "zh-CN",
+      expectedUpdatedAt: current.updatedAt,
+      expectedContentHash: current.contentHash,
+    }, "POST");
+  }
+  if (current.reviewStatus === "IN_REVIEW") {
+    const browser = page.context().browser();
+    if (!browser) throw new Error("真实页面审核测试缺少浏览器实例");
+    const token = `${Date.now().toString(36)}${++pageReviewActorSequence}`;
+    const reviewerCredentials = {
+      username: `page_reviewer_${token}`,
+      password: `Qa!R26_${token.slice(-6)}`,
+    };
+    await browserWrite(page, "/users", {
+      username: reviewerCredentials.username,
+      password: reviewerCredentials.password,
+      realName: "页面内容合成 QA 审核者",
+      role: "ADMIN",
+    }, "POST");
+    const reviewerContext = await browser.newContext({
+      extraHTTPHeaders: forwardedProtoHeaders,
+    });
+    try {
+      const reviewerPage = await reviewerContext.newPage();
+      await loginThroughUi(reviewerPage, reviewerCredentials);
+      current = await browserWrite<ReviewSnapshot>(reviewerPage, "/page-modules/document/review", {
+        pageKey,
+        locale: "zh-CN",
+        action: "APPROVE",
+        expectedUpdatedAt: current.updatedAt,
+        expectedContentHash: current.contentHash,
+      });
+    } finally {
+      await reviewerContext.close();
+    }
+  }
+  expect(current.reviewStatus).toBe("APPROVED");
+  await page.reload();
+  await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("page-review-status")).toHaveText("已批准");
+}
+
+async function captureAndVerifyReviewToolbar(
+  page: Page,
+  testInfo: Parameters<Parameters<typeof test>[1]>[1],
+) {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1600, height: 1000 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    const locale = page.getByLabel("内容语言", { exact: true });
+    const submit = page.getByRole("button", { name: "提交审核", exact: true });
+    await expect(locale).toBeVisible();
+    await expect(submit).toBeVisible();
+    await expect(submit).toBeEnabled();
+    const submitBox = await submit.boundingBox();
+    if (!submitBox) throw new Error(`${viewport.width}×${viewport.height} 提交审核缺少可用几何尺寸`);
+    expect(submitBox.x).toBeGreaterThanOrEqual(0);
+    expect(submitBox.y).toBeGreaterThanOrEqual(0);
+    expect(submitBox.x + submitBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(submitBox.y + submitBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(await submit.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return hit === element || element.contains(hit);
+    }), `${viewport.width}×${viewport.height} 提交审核中心点不得被其他工具覆盖`).toBe(true);
+    expect(await page.locator(".homepage-editor__locale-review-controls").evaluate((element) => (
+      element.scrollWidth <= element.clientWidth
+      && Array.from(element.querySelectorAll("select, button, [role='status']")).every(
+        (control) => control.scrollWidth <= control.clientWidth,
+      )
+    )), `${viewport.width}×${viewport.height} 语言与审核文字不得裁切`).toBe(true);
+    await locale.focus();
+    await page.keyboard.press("Tab");
+    await expect(submit).toBeFocused();
+    await expect(submit).toHaveCSS("outline-style", "solid");
+    await page.screenshot({
+      path: testInfo.outputPath(`page-review-toolbar-${viewport.width}x${viewport.height}.png`),
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 1600, height: 1000 });
 }
 
 async function expectPageWorkspaceReady(page: Page) {
@@ -463,7 +721,8 @@ async function uploadTemplateInstanceImage(
   await (await chooserPromise).setFiles(
     "public/images/admin/templates/jewelry-home-wireframe.png",
   );
-  const uploaded = await responseData<{ url: string }>(await uploadResponsePromise);
+  const uploaded = await responseData<{ id: number; url: string }>(await uploadResponsePromise);
+  uploadedAssetIdsByUrl.set(uploaded.url, uploaded.id);
   await expect(field.getByRole("button", { name: "替换图片" })).toBeVisible();
   const altInput = field.getByRole("textbox", { name: /替代文字$/ });
   await altInput.fill(altText);
@@ -477,30 +736,24 @@ async function completePagePublicationMediaThroughUi(
   assetUrls: string[],
   authorizationPrefix: string,
 ) {
-  expect(assetUrls.length, "正式发布页面必须至少包含一项已上传公开素材").toBeGreaterThan(0);
+  // 同一文件重复上传会返回相同的内容寻址 URL；页面授权清单按公开素材身份去重，
+  // 测试断言必须遵循相同边界，不能把两个槽位误算成两项不同素材。
+  const uniqueAssetUrls = [...new Set(assetUrls)];
+  expect(uniqueAssetUrls.length, "正式发布页面必须至少包含一项已上传公开素材").toBeGreaterThan(0);
   await page.getByRole("button", { name: /^更多编辑操作/ }).click();
   await page.getByRole("menuitem", { name: /页面设置$/ }).click();
   const settings = page.getByRole("dialog", { name: "页面展示设置", exact: true });
   const ogImage = settings.locator('[data-page-settings-field="ogImage"]');
   await ogImage.getByRole("button", { name: "或粘贴图片链接", exact: true }).click();
   await ogImage.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片")
-    .fill(assetUrls[0]);
+    .fill(uniqueAssetUrls[0]);
   await ogImage.getByRole("button", { name: /确\s*认/ }).click();
 
   const rights = settings.getByRole("region", { name: "媒体来源与授权", exact: true });
-  await expect(rights).toContainText(`${assetUrls.length} 项当前公开素材`);
-  const items = rights.getByTestId("page-media-right");
-  await expect(items).toHaveCount(assetUrls.length);
-  await rights.locator("details.homepage-editor__media-rights-details > summary").click();
-  for (const [index, assetUrl] of assetUrls.entries()) {
-    const item = items.nth(index);
-    await expect(item.locator("code"), `素材 ${index + 1} 必须对应真实上传地址`)
-      .toHaveText(assetUrl);
-    await item.getByRole("textbox", { name: `素材 ${index + 1} 来源`, exact: true })
-      .fill("QA 自有测试素材");
-    await item.getByRole("textbox", { name: `素材 ${index + 1} 授权编号`, exact: true })
-      .fill(`${authorizationPrefix}-${String(index + 1).padStart(2, "0")}`);
-  }
+  await expect(rights).toContainText(`${uniqueAssetUrls.length} 项当前页面素材`);
+  await expect(rights.getByTestId("page-media-right")).toHaveCount(0);
+  await expect(rights.getByRole("link", { name: "在页面素材库登记与审核" }))
+    .toHaveAttribute("href", "/admin/media");
 
   const saveResponse = page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -510,6 +763,71 @@ async function completePagePublicationMediaThroughUi(
   await settings.getByRole("button", { name: "保存整页草稿", exact: true }).click();
   expect((await saveResponse).ok()).toBe(true);
   await expect(settings).toBeHidden();
+
+  const assets = uniqueAssetUrls.map((url) => {
+    const id = uploadedAssetIdsByUrl.get(url);
+    if (!id) throw new Error(`缺少已上传素材的稳定 ID：${url}`);
+    return { id, url };
+  });
+  const pendingAssets: Array<{ id: number; revision: number }> = [];
+  for (const asset of assets) {
+    const detail = await responseData<{
+      authorization: { revision: number; reviewStatus: string; revocationStatus: string };
+    }>(await page.request.get(`${apiBaseUrl}/upload/media/${asset.id}/authorization`));
+    if (detail.authorization.reviewStatus === "APPROVED"
+      && detail.authorization.revocationStatus === "ACTIVE") continue;
+    const drafted = await browserWrite<{
+      authorization: { revision: number };
+    }>(page, `/upload/media/${asset.id}/authorization/draft`, {
+      expectedRevision: detail.authorization.revision,
+      sourceType: "BRAND_OWNED",
+      authorizationBasis: `${authorizationPrefix} 一次性隔离 QA 自有素材`,
+      evidenceReference: `${authorizationPrefix}-${asset.id}`,
+      publicWebUseAllowed: true,
+    });
+    const submitted = await browserWrite<{
+      authorization: { revision: number };
+    }>(page, `/upload/media/${asset.id}/authorization/submit`, {
+      expectedRevision: drafted.authorization.revision,
+    }, "POST");
+    pendingAssets.push({ id: asset.id, revision: submitted.authorization.revision });
+  }
+  if (pendingAssets.length === 0) return;
+
+  const qaRunId = process.env.PAGE_BUILDER_QA_RUN_ID ?? "qa";
+  const reviewerCredentials = {
+    username: `qa_media_reviewer_${qaRunId}`,
+    password: `QaMedia9${qaRunId.slice(-4)}`,
+  };
+  if (!mediaReviewerCreated) {
+    await browserWrite(page, "/users", {
+      ...reviewerCredentials,
+      realName: "素材授权 QA 复核员",
+      role: "ADMIN",
+    }, "POST");
+    mediaReviewerCreated = true;
+  }
+  const browser = page.context().browser();
+  if (!browser) throw new Error("真实素材授权缺少浏览器上下文");
+  const reviewerContext = await browser.newContext({ extraHTTPHeaders: forwardedProtoHeaders });
+  try {
+    const reviewerPage = await reviewerContext.newPage();
+    await loginThroughUi(reviewerPage, reviewerCredentials);
+    for (const asset of pendingAssets) {
+      const approved = await browserWrite<{
+        authorization: { reviewStatus: string; revocationStatus: string };
+      }>(reviewerPage, `/upload/media/${asset.id}/authorization/approve`, {
+        expectedRevision: asset.revision,
+        reviewNote: `${authorizationPrefix} 独立复核通过`,
+      }, "POST");
+      expect(approved.authorization).toMatchObject({
+        reviewStatus: "APPROVED",
+        revocationStatus: "ACTIVE",
+      });
+    }
+  } finally {
+    await reviewerContext.close();
+  }
 }
 
 async function recoverTemplateCatalogAfterThrottle(page: Page) {
@@ -892,6 +1210,49 @@ async function designAcceptanceTemplate(
   return { inspector, sizeControls };
 }
 
+function createLegacyResponsiveRealQaDefinition() {
+  const draft = createNewDynamicTemplateDraft("真实旧 Schema 响应式复制");
+  const container = addDynamicTemplateNode(draft.definition, draft.definition.rootNodeId, "Container");
+  const image = addDynamicTemplateNode(container.definition, container.nodeId, "ImageSlot");
+  draft.definition = image.definition;
+  draft.definition.schemaVersion = 1;
+  delete draft.definition.metadata.previewTabletWidth;
+  for (const node of Object.values(draft.definition.nodes)) {
+    node.responsive.mobile = {
+      ...structuredClone(node.responsive.desktop),
+      ...structuredClone(node.responsive.mobile),
+    };
+  }
+  for (const slot of Object.values(draft.definition.slots)) {
+    slot.mobileRules = {
+      ...structuredClone(slot.desktopRules),
+      ...structuredClone(slot.mobileRules),
+    };
+  }
+  const imageSlotId = image.slotId!;
+  draft.definition.nodes[image.nodeId].name = "旧版主图";
+  draft.definition.slots[imageSlotId].label = "旧版主图";
+  Object.assign(draft.definition.nodes[image.nodeId].responsive.desktop, {
+    width: { value: 40, unit: "%" },
+    height: { mode: "auto" },
+  });
+  Object.assign(draft.definition.nodes[image.nodeId].responsive.mobile, {
+    width: { value: 82, unit: "%" },
+    height: { mode: "auto" },
+  });
+  Object.assign(draft.definition.slots[imageSlotId].desktopRules, {
+    aspectRatio: "4:3",
+    objectFit: "cover",
+    objectPosition: "left top",
+  });
+  Object.assign(draft.definition.slots[imageSlotId].mobileRules, {
+    aspectRatio: "1:1",
+    objectFit: "contain",
+    objectPosition: "right bottom",
+  });
+  return { definition: draft.definition, imageNodeId: image.nodeId, imageSlotId };
+}
+
 test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 NestJS API）", () => {
   test.describe.configure({ mode: "serial" });
 
@@ -899,6 +1260,209 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     !exactQaTarget,
     "仅在显式 PAGE_BUILDER_REAL_QA=true 且使用 127.0.0.1:3101/5175 一次性环境时运行",
   );
+
+  test("真实专项：旧 Schema 响应式分组复制经 Repository 保存重开", async ({ page }) => {
+    test.setTimeout(180_000);
+    await loginAndPrepareIsolatedQaSite(page);
+    const legacy = createLegacyResponsiveRealQaDefinition();
+    const created = await browserWrite<{
+      templateId: string;
+      definitionSchemaVersion: number;
+      draft: { revision: number; definition: typeof legacy.definition } | null;
+    }>(
+      page,
+      "/page-modules/dynamic-templates",
+      { definition: legacy.definition },
+      "POST",
+    );
+    expect(created.definitionSchemaVersion).toBe(1);
+    expect(created.draft?.revision).toBe(1);
+    expect(created.draft?.definition.schemaVersion).toBe(1);
+
+    await page.goto("/admin/editor/products");
+    await expectPageWorkspaceReady(page);
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await recoverTemplateCatalogAfterThrottle(page);
+    const templateCard = page.locator(
+      `[data-unified-template-library="design"] [data-template-identity="template:${created.templateId}"] .homepage-editor__template-card-main`,
+    );
+    const loadResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "GET"
+        && url.pathname === `/api/page-modules/dynamic-templates/${created.templateId}/draft`;
+    });
+    await templateCard.click();
+    expect((await loadResponse).ok()).toBe(true);
+    const tree = page.getByRole("tree", { name: "模板区域与槽位", exact: true });
+    await tree.locator(`[data-selection-target-id="${legacy.imageNodeId}"]`).click();
+    const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
+    const desktop = page.getByRole("button", { name: /^桌面端模板布局/ });
+    if (await desktop.getAttribute("aria-pressed") !== "true") await desktop.click();
+    await expect(desktop).toHaveAttribute("aria-pressed", "true");
+    const responsiveGroups = inspector.getByRole("group", { name: "响应式设计组", exact: true });
+    await responsiveGroups.getByRole("checkbox", { name: "图片显示", exact: true }).check();
+    await inspector.getByRole("button", { name: "复制当前画布到另一画布", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "确认替换", exact: true }).click();
+
+    const saveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "PATCH"
+        && url.pathname === `/api/page-modules/dynamic-templates/${created.templateId}/draft`;
+    });
+    await page.getByRole("button", { name: "保存模板", exact: true }).click();
+    expect((await saveResponse).ok()).toBe(true);
+
+    const assertPersistedCopy = async () => {
+      const resource = await responseData<{
+        draft: {
+          definition: typeof legacy.definition;
+          revision: number;
+        };
+      }>(await page.request.get(
+        `${apiBaseUrl}/page-modules/dynamic-templates/${created.templateId}/draft`,
+      ));
+      expect(resource.draft.revision).toBe(2);
+      expect(resource.draft.definition.slots[legacy.imageSlotId].mobileRules).toMatchObject({
+        aspectRatio: "4:3",
+        objectFit: "cover",
+        objectPosition: "left top",
+      });
+      expect(
+        resource.draft.definition.nodes[legacy.imageNodeId].responsive.mobile.width,
+        "未选择的尺寸组必须保留原移动端值",
+      ).toEqual({ value: 82, unit: "%" });
+      return resource;
+    };
+    await assertPersistedCopy();
+
+    await page.reload();
+    await expectPageWorkspaceReady(page);
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await recoverTemplateCatalogAfterThrottle(page);
+    await templateCard.click();
+    await tree.locator(`[data-selection-target-id="${legacy.imageNodeId}"]`).click();
+    await page.getByRole("button", { name: /^移动端模板布局/ }).click();
+    await expect(inspector.getByRole("textbox", { name: "自定义图片比例", exact: true }))
+      .toHaveValue("4:3");
+    await assertPersistedCopy();
+  });
+
+  test("真实专项：必填后代阻断容器删除并可恢复、撤销、保存重开", async ({ page }) => {
+    test.setTimeout(180_000);
+    const templateName = "真实必填容器恢复";
+    await loginAndPrepareIsolatedQaSite(page);
+    await page.goto("/admin/editor/products");
+    await expectPageWorkspaceReady(page);
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await recoverTemplateCatalogAfterThrottle(page);
+    await page.getByRole("button", { name: "新建模板", exact: true }).click();
+    await createTemplateThroughSevenStepRecipe(page, {
+      width: 1080,
+      height: 1080,
+      layout: "上图下文",
+      media: "无图片",
+      content: ["主标题"],
+      name: templateName,
+    });
+    await fillTemplateIdentity(page, templateName, "验证必填后代容器的恢复、撤销和真实保存重开");
+
+    const tree = page.getByRole("tree", { name: "模板区域与槽位", exact: true });
+    const heading = tree.getByRole("treeitem", { name: /^主标题 / });
+    const container = tree.getByRole("treeitem", { name: /^内容区域 布局容器/ });
+    const headingNodeId = await heading.getAttribute("data-selection-target-id");
+    const containerNodeId = await container.getAttribute("data-selection-target-id");
+    if (!headingNodeId || !containerNodeId) throw new Error("真实必填恢复场景缺少稳定节点身份");
+    const treeNodeOrderBeforeDelete = await tree
+      .locator('[role="treeitem"][data-selection-target-id]')
+      .evaluateAll((items) => items.map((item) => item.getAttribute("data-selection-target-id")));
+    const templateWrites: string[] = [];
+    const captureTemplateWrite = (request: Request) => {
+      const url = new URL(request.url());
+      const method = request.method();
+      if (
+        (method === "POST" && url.pathname === "/api/page-modules/dynamic-templates")
+        || (method === "PATCH"
+          && /^\/api\/page-modules\/dynamic-templates\/[^/]+\/draft$/.test(url.pathname))
+      ) templateWrites.push(`${method} ${url.pathname}`);
+    };
+    page.on("request", captureTemplateWrite);
+
+    await heading.click();
+    await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
+    const hideable = page.getByRole("switch", { name: "页面可隐藏", exact: true });
+    if (await hideable.getAttribute("aria-checked") === "true") await hideable.click();
+    await page.getByRole("switch", { name: "页面必须填写", exact: true }).check();
+    await page.getByRole("button", { name: "返回当前结构全部字段", exact: true }).click();
+
+    const containerRow = container.locator("..");
+    await containerRow.hover();
+    await containerRow.locator(".template-editor__structure-more").click();
+    await page.getByRole("menuitem", { name: "删除容器", exact: true }).click();
+    await page.getByRole("dialog", { name: /删除“内容区域”及其内容/ })
+      .getByRole("button", { name: "删除节点", exact: true }).click();
+    const recovery = page.getByRole("dialog", { name: "无法删除“内容区域”", exact: true });
+    await expect(recovery).toContainText(/“主标题”是必填槽位/);
+    expect(templateWrites).toEqual([]);
+    await recovery.getByRole("button", { name: "定位并取消必填", exact: true }).click();
+    await expect(heading).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).toBeFocused();
+    await page.getByRole("switch", { name: "页面必须填写", exact: true }).uncheck();
+    expect(templateWrites).toEqual([]);
+
+    await containerRow.hover();
+    await containerRow.locator(".template-editor__structure-more").click();
+    await page.getByRole("menuitem", { name: "删除容器", exact: true }).click();
+    await page.getByRole("dialog", { name: /删除“内容区域”及其内容/ })
+      .getByRole("button", { name: "删除节点", exact: true }).click();
+    await expect(tree.locator(`[data-selection-target-id="${containerNodeId}"]`)).toHaveCount(0);
+    expect(templateWrites).toEqual([]);
+    await page.getByRole("button", { name: "撤销", exact: true }).click();
+    await expect(tree.locator(`[data-selection-target-id="${containerNodeId}"]`)).toHaveCount(1);
+    await expect(tree.locator(`[data-selection-target-id="${headingNodeId}"]`)).toHaveCount(1);
+    const treeNodeOrderAfterUndo = await tree
+      .locator('[role="treeitem"][data-selection-target-id]')
+      .evaluateAll((items) => items.map((item) => item.getAttribute("data-selection-target-id")));
+    expect(treeNodeOrderAfterUndo).toEqual(treeNodeOrderBeforeDelete);
+    await tree.locator(`[data-selection-target-id="${headingNodeId}"]`).click();
+    await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
+    await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).not.toBeChecked();
+    expect(templateWrites).toEqual([]);
+
+    const createResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "POST"
+        && url.pathname === "/api/page-modules/dynamic-templates";
+    });
+    await page.getByRole("button", { name: "保存模板", exact: true }).click();
+    const created = await responseData<{ templateId: string }>(await createResponse);
+    expect(templateWrites).toEqual(["POST /api/page-modules/dynamic-templates"]);
+    page.off("request", captureTemplateWrite);
+
+    await page.reload();
+    await expectPageWorkspaceReady(page);
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    await recoverTemplateCatalogAfterThrottle(page);
+    await page.locator(
+      `[data-unified-template-library="design"] [data-template-identity="template:${created.templateId}"] .homepage-editor__template-card-main`,
+    ).click();
+    await expect(tree.locator(`[data-selection-target-id="${containerNodeId}"]`)).toHaveCount(1);
+    await expect(tree.locator(`[data-selection-target-id="${headingNodeId}"]`)).toHaveCount(1);
+
+    const persisted = await responseData<{
+      draft: {
+        definition: {
+          nodes: Record<string, { childIds: string[]; slotId?: string }>;
+          slots: Record<string, { required: boolean }>;
+        };
+      };
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/dynamic-templates/${created.templateId}/draft`,
+    ));
+    const persistedHeading = persisted.draft.definition.nodes[headingNodeId];
+    expect(persisted.draft.definition.nodes[containerNodeId].childIds).toContain(headingNodeId);
+    expect(persistedHeading.slotId).toBeTruthy();
+    expect(persisted.draft.definition.slots[persistedHeading.slotId!].required).toBe(false);
+  });
 
   test("拖入模板、编辑、保存、刷新、预览、发布，并保持未发布草稿与公开快照隔离", async ({
     browser,
@@ -1002,6 +1566,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       errors: string[];
     }>(page, "/page-modules/document/validate", { pageKey }, "POST");
     expect(validation.valid, JSON.stringify(validation.errors)).toBe(true);
+    await approveCurrentPageDraftThroughApi(page, pageKey);
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
     await expect(publishButton).toBeEnabled({ timeout: 15_000 });
     const publishResponse = page.waitForResponse((response) => {
@@ -1013,7 +1578,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect((await publishResponse).ok()).toBe(true);
 
     const anonymous = await browser.newContext({
-      viewport: { width: 1200, height: 900 },
+      viewport: { width: 1920, height: 1200 },
       extraHTTPHeaders: forwardedProtoHeaders,
     });
     const publicPage = await anonymous.newPage();
@@ -1546,6 +2111,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       uploadedImageUrls,
       "QA-FOUR-THREE",
     );
+    await approveCurrentPageDraftThroughApi(page, pageKey);
     const publishPageResponse = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "PUT"
@@ -1685,11 +2251,12 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await anonymous.close();
   });
 
-  test("真实网站完成 1920×240 模板设计、页面内容、版本锁定、回收站与恢复闭环", async ({
+  test("[phase1] 真实网站完成 1920×240 模板设计、页面内容与双版本发布", async ({
     browser,
     page,
   }, testInfo) => {
-    test.setTimeout(300_000);
+    test.skip(realQaPhase === "phase2", "重启后验证由独立的新 Playwright 进程执行");
+    test.setTimeout(420_000);
     const pageKey = "products";
     const templateNameV1 = "真实闭环临时模板";
     const templateNameV2 = "真实闭环临时模板 v2";
@@ -1874,7 +2441,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await (await imageChooserPromise).setFiles(
       "public/images/admin/templates/jewelry-home-wireframe.png",
     );
-    const uploadedImage = await responseData<{ url: string }>(await uploadImageResponsePromise);
+    const uploadedImage = await responseData<{ id: number; url: string }>(await uploadImageResponsePromise);
+    uploadedAssetIdsByUrl.set(uploadedImage.url, uploadedImage.id);
     await expect(imageField.getByRole("button", { name: "替换图片" })).toBeVisible();
     await imageField.getByRole("textbox", { name: "主图片替代文字" })
       .fill("周年典藏系列珠宝工艺展示");
@@ -2008,6 +2576,16 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     ));
     expect(unchangedPopulatedV1?.props?.layoutOverridesByNodeId).toEqual({});
 
+    await captureAndVerifyReviewToolbar(page, testInfo);
+    const submitReviewResponsePromise = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "POST"
+        && url.pathname === "/api/page-modules/document/review/submit";
+    });
+    await page.getByRole("button", { name: "提交审核", exact: true }).click();
+    expect((await submitReviewResponsePromise).ok()).toBe(true);
+    await expect(page.getByTestId("page-review-status")).toHaveText("待审核");
+    await approveCurrentPageDraftThroughApi(page, pageKey);
     const publishPageResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "PUT"
@@ -2104,7 +2682,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     )).toBe(true);
     await publicPage.screenshot({
-      path: testInfo.outputPath("dynamic-template-public-1200x900.png"),
+      path: testInfo.outputPath("dynamic-template-public-1920x1200.png"),
       fullPage: true,
     });
 
@@ -2376,6 +2954,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(pageRevisionsAfterDraftSave.items).toEqual(pageRevisionsAfterV1Publish.items);
     pageDocumentWritePaths.length = 0;
 
+    await approveCurrentPageDraftThroughApi(page, pageKey);
     const publishV2PageResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "PUT"
@@ -2391,6 +2970,63 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       "/api/page-modules/document/publish",
     ]);
     page.off("request", capturePageDocumentWrite);
+
+    if (realQaPhase === "phase1") {
+      if (!realQaHandoffPath) throw new Error("phase1 缺少 PAGE_BUILDER_QA_HANDOFF_PATH");
+      const phase1Draft = await responseData<PageDocumentSnapshot>(
+        await page.request.get(
+          `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}&locale=zh-CN`,
+        ),
+      );
+      const phase1Public = await responseData<PageDocumentSnapshot>(
+        await page.request.get(
+          `${apiBaseUrl}/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
+        ),
+      );
+      const phase1Revisions = await responseData<{ items: PageDocumentRevisionSummary[] }>(
+        await page.request.get(
+          `${apiBaseUrl}/page-modules/document/revisions?pageKey=${pageKey}&limit=50`,
+        ),
+      );
+      const pageRevisionV2 = phase1Revisions.items.find((revision) => revision.isPublished);
+      if (!pageRevisionV2) throw new Error("phase1 页面 v2 发布后缺少线上 revision");
+      expect(dynamicTemplateVersions(phase1Draft, createdTemplate.templateId)).toEqual([2, 1]);
+      expect(dynamicTemplateVersions(phase1Public, createdTemplate.templateId)).toEqual([2, 1]);
+      expect(pageRevisionV2.id).toBe(phase1Draft.publishedRevisionId);
+      expect(pageRevisionV2.version).toBe(pageRevisionV1.version + 1);
+      const pageRevisionV2Detail = await responseData<PageDocumentRevisionDetail>(
+        await page.request.get(
+          `${apiBaseUrl}/page-modules/document/revisions/${pageRevisionV2.version}?pageKey=${pageKey}`,
+        ),
+      );
+      const handoff: RestartPhaseHandoff = {
+        qaRunId: process.env.PAGE_BUILDER_QA_RUN_ID ?? "",
+        pageKey,
+        templateId: createdTemplate.templateId,
+        templateNameV2,
+        templateVersionChecksums: {
+          v1: publishedV1.definitionChecksum,
+          v2: publishedV2.definitionChecksum,
+        },
+        templateDefinitions: {
+          v1: publishedV1Snapshot.definition,
+          v2: publishedV2.definition,
+        },
+        pageRevisionV1,
+        pageRevisionV2,
+        pageRevisionPuckData: {
+          v1: pageRevisionV1PuckDataSnapshot,
+          v2: pageRevisionV2Detail.puckData,
+        },
+        v1InstanceIdentities,
+        upgradedInstanceIdentities,
+      };
+      writeFileSync(realQaHandoffPath, JSON.stringify(handoff, null, 2), "utf8");
+      return;
+    }
+
+    await page.reload();
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(2);
 
     const draftAfterV2Publish = await responseData<PageDocumentSnapshot>(
       await page.request.get(
@@ -2443,7 +3079,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(publicAfterV2Publish.version).toBe(pageRevisionV2.version);
 
     const publishedV2Anonymous = await browser.newContext({
-      viewport: { width: 1200, height: 900 },
+      viewport: { width: 1920, height: 1200 },
       extraHTTPHeaders: forwardedProtoHeaders,
     });
     const anonymousPublicAfterV2Publish = await responseData<PageDocumentSnapshot>(
@@ -2549,6 +3185,35 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(Math.abs(renderedV2Gap - 20)).toBeLessThanOrEqual(1);
     expect(Math.abs(renderedV1Gap - 4)).toBeLessThanOrEqual(1);
     expect(renderedV2Gap).toBeGreaterThan(renderedV1Gap + 10);
+    await publishedV2Page.screenshot({
+      path: testInfo.outputPath("dynamic-template-v2-public-1920x1200.png"),
+      fullPage: true,
+    });
+
+    await publishedV2Page.setViewportSize({ width: 390, height: 844 });
+    await publishedV2Page.reload();
+    await expect(publicTemplateInstances).toHaveCount(2);
+    const mobileV2StageChildren = publicUpgradedV2
+      .locator(`[data-template-node-id="${stageNode.nodeId}"] > [data-template-node-id]`);
+    await expect(mobileV2StageChildren).toHaveCount(2);
+    const [mobileV2TextBox, mobileV2ImageBox] = await Promise.all([
+      mobileV2StageChildren.nth(0).boundingBox(),
+      mobileV2StageChildren.nth(1).boundingBox(),
+    ]);
+    if (!mobileV2TextBox || !mobileV2ImageBox) {
+      throw new Error("移动公开 Renderer 缺少文字区与图片区的几何尺寸");
+    }
+    expect(mobileV2TextBox.y).toBeLessThan(mobileV2ImageBox.y);
+    expect(Math.abs(mobileV2TextBox.x - mobileV2ImageBox.x)).toBeLessThanOrEqual(2);
+    await expect.poll(() => publishedV2Page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    )).toBe(true);
+    await publishedV2Page.screenshot({
+      path: testInfo.outputPath("dynamic-template-v2-public-390x844.png"),
+      fullPage: true,
+    });
+    await publishedV2Page.setViewportSize({ width: 1920, height: 1200 });
+    await publishedV2Page.reload();
 
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
     await page.locator(
@@ -2822,6 +3487,262 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       fullPage: true,
     });
     await rollbackAnonymous.close();
+  });
+
+  test("[phase2] 新进程验证重启持久化、公开渲染、回收恢复与线上回滚", async ({
+    browser,
+    page,
+  }, testInfo) => {
+    test.skip(realQaPhase !== "phase2", "仅由本任务 QA runner 在容器重启后执行");
+    test.setTimeout(240_000);
+    if (!realQaHandoffPath) throw new Error("phase2 缺少 PAGE_BUILDER_QA_HANDOFF_PATH");
+    const handoff = JSON.parse(readFileSync(realQaHandoffPath, "utf8")) as RestartPhaseHandoff;
+    expect(handoff.qaRunId).toBe(process.env.PAGE_BUILDER_QA_RUN_ID);
+    const bilingualPublication = handoff.bilingualPublication;
+    if (!bilingualPublication) throw new Error("phase2 缺少双语发布快照交接事实");
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await loginThroughUi(page);
+    await page.goto(`/admin/editor/${handoff.pageKey}`);
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(2);
+
+    const draftAfterRestart = await responseData<PageDocumentSnapshot>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/admin?pageKey=${handoff.pageKey}&locale=zh-CN`,
+      ),
+    );
+    const publicAfterRestart = await responseData<PageDocumentSnapshot>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/published?pageKey=${handoff.pageKey}&locale=zh-CN`,
+      ),
+    );
+    expect(draftAfterRestart.publishedRevisionId).toBe(handoff.pageRevisionV2.id);
+    expect(publicAfterRestart.version).toBe(handoff.pageRevisionV2.version);
+    expect(dynamicTemplateInstanceIdentities(draftAfterRestart, handoff.templateId))
+      .toEqual(handoff.upgradedInstanceIdentities);
+    expect(dynamicTemplateInstanceIdentities(publicAfterRestart, handoff.templateId))
+      .toEqual(handoff.upgradedInstanceIdentities);
+
+    const exactTemplateV1 = await responseData<{
+      definitionChecksum: string;
+      definition: unknown;
+      version: number;
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/dynamic-templates/published/${handoff.templateId}/versions/1`,
+    ));
+    const exactTemplateV2 = await responseData<typeof exactTemplateV1>(await page.request.get(
+      `${apiBaseUrl}/page-modules/dynamic-templates/published/${handoff.templateId}/versions/2`,
+    ));
+    expect(exactTemplateV1).toMatchObject({
+      version: 1,
+      definitionChecksum: handoff.templateVersionChecksums.v1,
+    });
+    expect(exactTemplateV2).toMatchObject({
+      version: 2,
+      definitionChecksum: handoff.templateVersionChecksums.v2,
+    });
+    expect(exactTemplateV1.definition).toEqual(handoff.templateDefinitions.v1);
+    expect(exactTemplateV2.definition).toEqual(handoff.templateDefinitions.v2);
+
+    const revisionV1AfterRestart = await responseData<PageDocumentRevisionDetail>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/revisions/${handoff.pageRevisionV1.version}?pageKey=${handoff.pageKey}`,
+      ),
+    );
+    const revisionV2AfterRestart = await responseData<PageDocumentRevisionDetail>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/revisions/${handoff.pageRevisionV2.version}?pageKey=${handoff.pageKey}`,
+      ),
+    );
+    expect(revisionV1AfterRestart.puckData).toEqual(handoff.pageRevisionPuckData.v1);
+    expect(revisionV2AfterRestart.puckData).toEqual(handoff.pageRevisionPuckData.v2);
+    expect(revisionV2AfterRestart.isPublished).toBe(true);
+
+    const anonymous = await browser.newContext({
+      viewport: { width: 1920, height: 1200 },
+      extraHTTPHeaders: forwardedProtoHeaders,
+    });
+    const publicPage = await anonymous.newPage();
+
+    const englishApiAfterRestart = await responseData<PageDocumentSnapshot & { contentHash: string }>(
+      await anonymous.request.get(
+        `${browserBaseUrl}/api/page-modules/document/published?pageKey=${bilingualPublication.pageKey}&locale=en`,
+      ),
+    );
+    expect(englishApiAfterRestart).toMatchObject({
+      contentHash: bilingualPublication.en.contentHash,
+    });
+    expect(englishApiAfterRestart.puckData.content[0]?.props?.title).toBe(bilingualPublication.en.title);
+
+    const englishRouteResponse = await publicPage.goto(`${browserBaseUrl}/en/about`);
+    expect(englishRouteResponse?.status()).toBe(200);
+    await expect(publicPage.locator("html")).toHaveAttribute("lang", "en");
+    await expect(publicPage.getByText(bilingualPublication.en.title)).toBeVisible();
+    await expect(publicPage.locator("body")).not.toContainText(bilingualPublication.zh.title);
+    const englishRawHtml = await (await anonymous.request.get(`${browserBaseUrl}/en/about`)).text();
+    expect(englishRawHtml).toContain(`data-published-content-hash="${bilingualPublication.en.contentHash}"`);
+    expect(englishRawHtml).toContain(`<title>${bilingualPublication.en.title}</title>`);
+
+    const chineseRouteResponse = await anonymous.request.get(`${browserBaseUrl}/about`);
+    expect(chineseRouteResponse.status()).toBe(200);
+    const chineseRawHtml = await chineseRouteResponse.text();
+    expect(chineseRawHtml).toContain(`data-published-content-hash="${bilingualPublication.zh.contentHash}"`);
+    expect(chineseRawHtml).toContain(`<title>${bilingualPublication.zh.title}</title>`);
+
+    for (const pathname of ["/en/custom", "/en/not-a-published-route"]) {
+      const notFoundResponse = await anonymous.request.get(`${browserBaseUrl}${pathname}`);
+      expect(notFoundResponse.status()).toBe(404);
+      const notFoundHtml = await notFoundResponse.text();
+      expect(notFoundHtml).toContain('<html lang="en">');
+      expect(notFoundHtml).toContain("Page not available");
+      expect(notFoundHtml).toContain('content="noindex,nofollow"');
+    }
+
+    await publicPage.goto(`${browserBaseUrl}/products`);
+    const publicInstances = publicPage.locator("section[data-dynamic-template-version]").filter({
+      has: publicPage.locator(
+        `.hc-dynamic-template[data-dynamic-template-id="${handoff.templateId}"]`,
+      ),
+    });
+    await expect(publicInstances).toHaveCount(2);
+    expect(await publicInstances.evaluateAll((nodes) => nodes.map((node) => ({
+      instanceId: node.getAttribute("data-dynamic-template-instance-id"),
+      version: Number(node.getAttribute("data-dynamic-template-version")),
+    })))).toEqual(handoff.upgradedInstanceIdentities);
+    await expect(publicPage.getByText("周年典藏系列", { exact: true })).toBeVisible();
+    await expect(publicPage.getByText("经典常青系列", { exact: true })).toBeVisible();
+    await expect.poll(() => publicPage.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    )).toBe(true);
+    await publicPage.screenshot({
+      path: testInfo.outputPath("post-restart-public-v2-1920x1200.png"),
+      fullPage: true,
+    });
+
+    const templateDraftAfterRestart = await responseData<{
+      draft: { revision: number; definitionChecksum: string } | null;
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/dynamic-templates/${handoff.templateId}/draft`,
+    ));
+    expect(templateDraftAfterRestart.draft, "重启后归档前必须能读取当前草稿并锁定并发身份")
+      .not.toBeNull();
+    expect(templateDraftAfterRestart.draft?.definitionChecksum)
+      .toBe(handoff.templateVersionChecksums.v2);
+    await browserWrite(
+      page,
+      `/page-modules/dynamic-templates/${handoff.templateId}/archive`,
+      {
+        expectedRevision: templateDraftAfterRestart.draft!.revision,
+        expectedChecksum: templateDraftAfterRestart.draft!.definitionChecksum,
+      },
+      "POST",
+    );
+    const archivedExactV1 = await responseData<typeof exactTemplateV1>(await page.request.get(
+      `${apiBaseUrl}/page-modules/dynamic-templates/published/${handoff.templateId}/versions/1`,
+    ));
+    const archivedExactV2 = await responseData<typeof exactTemplateV2>(await page.request.get(
+      `${apiBaseUrl}/page-modules/dynamic-templates/published/${handoff.templateId}/versions/2`,
+    ));
+    expect(archivedExactV1.definition).toEqual(handoff.templateDefinitions.v1);
+    expect(archivedExactV2.definition).toEqual(handoff.templateDefinitions.v2);
+    await publicPage.reload();
+    await expect(publicInstances).toHaveCount(2);
+
+    await browserWrite(page, `/page-modules/dynamic-templates/${handoff.templateId}/restore`, {}, "POST");
+    const restoredCatalog = await readTemplateCatalogWithThrottleRetry<{
+      items: Array<{
+        kind: string;
+        template: { templateId?: string; status?: string; version?: number };
+      }>;
+    }>(page);
+    expect(restoredCatalog.items.some((item) => (
+      item.kind === "editable"
+      && item.template.templateId === handoff.templateId
+      && item.template.status === "ACTIVE"
+    ))).toBe(true);
+
+    await browserWrite(page,
+      `/page-modules/document/revisions/${handoff.pageRevisionV1.id}/rollback-publication`,
+      {
+        pageKey: handoff.pageKey,
+        locale: "zh-CN",
+        expectedPublishedRevisionId: handoff.pageRevisionV2.id,
+      });
+    const draftAfterRollback = await responseData<PageDocumentSnapshot>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/admin?pageKey=${handoff.pageKey}&locale=zh-CN`,
+      ),
+    );
+    const publicAfterRollback = await responseData<PageDocumentSnapshot>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/published?pageKey=${handoff.pageKey}&locale=zh-CN`,
+      ),
+    );
+    expect(draftAfterRollback.puckData).toEqual(handoff.pageRevisionPuckData.v2);
+    expect(dynamicTemplateInstanceIdentities(draftAfterRollback, handoff.templateId))
+      .toEqual(handoff.upgradedInstanceIdentities);
+    expect(dynamicTemplateInstanceIdentities(publicAfterRollback, handoff.templateId))
+      .toEqual(handoff.v1InstanceIdentities);
+    expect(publicAfterRollback.version).toBe(handoff.pageRevisionV2.version + 1);
+
+    const immutableV1AfterRollback = await responseData<PageDocumentRevisionDetail>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/revisions/${handoff.pageRevisionV1.version}?pageKey=${handoff.pageKey}`,
+      ),
+    );
+    const immutableV2AfterRollback = await responseData<PageDocumentRevisionDetail>(
+      await page.request.get(
+        `${apiBaseUrl}/page-modules/document/revisions/${handoff.pageRevisionV2.version}?pageKey=${handoff.pageKey}`,
+      ),
+    );
+    expect(immutableV1AfterRollback.puckData).toEqual(handoff.pageRevisionPuckData.v1);
+    expect(immutableV2AfterRollback.puckData).toEqual(handoff.pageRevisionPuckData.v2);
+
+    await publicPage.reload();
+    const rollbackInstances = publicPage.locator('section[data-dynamic-template-version="1"]').filter({
+      has: publicPage.locator(
+        `.hc-dynamic-template[data-dynamic-template-id="${handoff.templateId}"]`,
+      ),
+    });
+    await expect(rollbackInstances).toHaveCount(2);
+    await publicPage.screenshot({
+      path: testInfo.outputPath("post-restart-rollback-public-1920x1200.png"),
+      fullPage: true,
+    });
+    await publicPage.setViewportSize({ width: 390, height: 844 });
+    await publicPage.reload();
+    await expect(rollbackInstances).toHaveCount(2);
+    await expect.poll(() => publicPage.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    )).toBe(true);
+    await publicPage.screenshot({
+      path: testInfo.outputPath("post-restart-rollback-public-390x844.png"),
+      fullPage: true,
+    });
+
+    const evidencePath = testInfo.outputPath("post-restart-closure-evidence.json");
+    writeFileSync(evidencePath, JSON.stringify({
+      qaRunId: handoff.qaRunId,
+      templateId: handoff.templateId,
+      phase: "phase2",
+      assertions: {
+        mysqlPersistenceAfterRestart: true,
+        exactTemplateVersionsImmutable: true,
+        archivedTemplateKeepsExistingPublicPage: true,
+        restoredTemplateReturnsToCatalog: true,
+        rollbackCreatesNewPublicRevision: true,
+        rollbackPreservesCurrentDraft: true,
+        publishedEnglishSnapshotRouteReturns200: true,
+        chineseRouteRemains200: true,
+        unpublishedAndUnknownEnglishRoutesReturn404: true,
+      },
+    }, null, 2), "utf8");
+    await testInfo.attach("post-restart-closure-evidence", {
+      contentType: "application/json",
+      path: evidencePath,
+    });
+    await anonymous.close();
   });
 
   test("真实网站以 Product Slot 选择真实商品 code，并阻断未就绪商品发布", async ({ page }, testInfo) => {
@@ -3190,5 +4111,660 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(catalog.items.some((item) => (
       item.kind === "editable" && item.template.templateId === createdDraft.templateId
     ))).toBe(false);
+  });
+
+  test("[phase1] 真实双语页面中文发布与英文隔离", async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+    await loginAndPrepareIsolatedQaSite(page);
+
+    const runToken = Date.now().toString(36);
+    const editorCredentials = {
+      username: `locale_editor_${runToken}`,
+      password: `Qa!E26_${runToken.slice(-6)}`,
+    };
+    const editorUser = await browserWrite<{ id: number }>(page, "/users", {
+      username: editorCredentials.username,
+      password: editorCredentials.password,
+      realName: "双语页面合成 QA 编辑者",
+      role: "EDITOR",
+    }, "POST");
+    expect(editorUser.id).toBeGreaterThan(0);
+
+    const editorSession = await newAuthenticatedApiSession(editorCredentials);
+
+    const pageKey = "about";
+    const makeDocument = (title: string) => ({
+      content: [{
+        type: "首屏主视觉",
+        props: {
+          id: `synthetic-locale-${runToken}`,
+          title,
+          subtitle: "SYNTHETIC QA CONTENT — NOT FORMAL BRAND COPY",
+          desktopImage: "/images/hero-desktop.jpg",
+          mobileImage: "/images/hero-mobile.jpg",
+          altText: "Synthetic QA jewelry image",
+          actionText: "",
+          targetType: "none",
+          linkUrl: "",
+        },
+      }],
+      zones: {},
+      root: { props: {} },
+    });
+    const metadata = {
+      seoTitle: "SYNTHETIC QA — Haichuan Jewelry",
+      seoDescription: "Synthetic bilingual publication lifecycle verification only.",
+      contentOwner: "SYNTHETIC QA",
+      mediaRights: [],
+    };
+    const zhTitle = `合成 QA 中文 ${runToken}`;
+    const enV1Title = `SYNTHETIC QA EN V1 ${runToken}`;
+
+    const zhDraft = await apiWrite<{
+      updatedAt: string;
+      contentHash: string;
+      locale: string;
+    }>(editorSession, "/page-modules/document", {
+      pageKey,
+      locale: "zh-CN",
+      puckData: makeDocument(zhTitle),
+      metadata,
+      editorVersion: "0.22.4",
+    });
+    expect(zhDraft.locale).toBe("zh-CN");
+
+    const enInitial = await apiWrite<{
+      updatedAt: string;
+      contentHash: string;
+      reviewStatus: string;
+      locale: string;
+    }>(editorSession, "/page-modules/document", {
+      pageKey,
+      locale: "en",
+      puckData: makeDocument(`${enV1Title} DRAFT`),
+      metadata,
+      editorVersion: "0.22.4",
+    });
+    expect(enInitial).toMatchObject({ locale: "en", reviewStatus: "DRAFT" });
+    expect(enInitial.contentHash).toMatch(/^[a-f0-9]{64}$/);
+
+    expect(await responseData<unknown>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=en`,
+    ))).toBeNull();
+    expect(await responseData<unknown>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
+    ))).toBeNull();
+
+    const omittedLocalePublishDenied = await browserWriteResult(page, "/page-modules/document/publish", {
+      pageKey,
+      expectedUpdatedAt: zhDraft.updatedAt,
+      expectedContentHash: zhDraft.contentHash,
+    });
+    expect(omittedLocalePublishDenied.status).toBe(400);
+
+    const zhSubmitted = await apiWrite<PageDocumentSnapshot & { contentHash: string }>(
+      editorSession,
+      "/page-modules/document/review/submit",
+      {
+        pageKey,
+        locale: "zh-CN",
+        expectedUpdatedAt: zhDraft.updatedAt,
+        expectedContentHash: zhDraft.contentHash,
+      },
+      "POST",
+    );
+    const zhApproved = await browserWrite<PageDocumentSnapshot & { contentHash: string }>(
+      page,
+      "/page-modules/document/review",
+      {
+        pageKey,
+        locale: "zh-CN",
+        action: "APPROVE",
+        expectedUpdatedAt: zhSubmitted.updatedAt,
+        expectedContentHash: zhSubmitted.contentHash,
+      },
+    );
+    expect(await responseData<unknown>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
+    ))).toBeNull();
+    const zhPublished = await browserWrite<PageDocumentSnapshot & {
+      contentHash: string;
+      publishedRevisionId: number;
+    }>(page, "/page-modules/document/publish", {
+      pageKey,
+      locale: "zh-CN",
+      expectedUpdatedAt: zhApproved.updatedAt,
+      expectedContentHash: zhApproved.contentHash,
+    });
+    expect(zhPublished.puckData.content[0]?.props?.title).toBe(zhTitle);
+    expect((await responseData<PageDocumentSnapshot>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
+    ))).puckData.content[0]?.props?.title).toBe(zhTitle);
+    expect(await responseData<unknown>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=en`,
+    ))).toBeNull();
+    const unpublishedEnglishResponse = await page.goto(`${browserBaseUrl}/en/about`, { waitUntil: "commit" });
+    expect(unpublishedEnglishResponse?.status()).toBe(404);
+    await expect(page.getByText("Page not available")).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(zhTitle);
+
+    if (!realQaHandoffPath) throw new Error("phase1 缺少 PAGE_BUILDER_QA_HANDOFF_PATH");
+    const handoff = JSON.parse(readFileSync(realQaHandoffPath, "utf8")) as RestartPhaseHandoff;
+    handoff.bilingualDraftState = {
+      pageKey,
+      zh: {
+        contentHash: zhPublished.contentHash,
+        title: zhTitle,
+        updatedAt: zhPublished.updatedAt,
+        publishedRevisionId: zhPublished.publishedRevisionId,
+      },
+      en: {
+        contentHash: enInitial.contentHash,
+        title: enV1Title,
+        updatedAt: enInitial.updatedAt,
+      },
+    };
+    writeFileSync(realQaHandoffPath, JSON.stringify(handoff, null, 2), "utf8");
+
+    const evidence = {
+      qaRunId: process.env.PAGE_BUILDER_QA_RUN_ID,
+      testTitle: testInfo.titlePath.join(" > "),
+      project: testInfo.project.name,
+      browserChannel: process.env.PLAYWRIGHT_BROWSER_CHANNEL,
+      databaseBootstrap: process.env.PAGE_BUILDER_QA_DATABASE_BOOTSTRAP,
+      appliedMigrations: Number(process.env.PAGE_BUILDER_QA_APPLIED_MIGRATIONS),
+      pageKey,
+      locales: ["zh-CN", "en"],
+      assertions: {
+        chinesePublicationVisibleAnonymously: true,
+        englishNeverFallsBackToChinese: true,
+        omittedLocalePublishDenied: true,
+        browserErrors: [],
+        browserRequestFailures: [],
+      },
+    };
+    const evidencePath = testInfo.outputPath("bilingual-zh-publication-evidence.json");
+    writeFileSync(evidencePath, JSON.stringify(evidence, null, 2), "utf8");
+    await testInfo.attach("bilingual-zh-publication-evidence", {
+      contentType: "application/json",
+      path: evidencePath,
+    });
+
+    await editorSession.context.dispose();
+  });
+
+  test("[phase1] 真实双语页面英文 V1 审核发布与快照隔离", async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+    await loginAndPrepareIsolatedQaSite(page);
+    if (!realQaHandoffPath) throw new Error("phase1 缺少 PAGE_BUILDER_QA_HANDOFF_PATH");
+    const handoff = JSON.parse(readFileSync(realQaHandoffPath, "utf8")) as RestartPhaseHandoff;
+    const draftState = handoff.bilingualDraftState;
+    if (!draftState || draftState.pageKey !== "about") throw new Error("phase1 缺少双语草稿交接事实");
+
+    const runToken = Date.now().toString(36);
+    const editorCredentials = {
+      username: `locale_editor_v1_${runToken}`,
+      password: `Qa!E26_${runToken.slice(-6)}`,
+    };
+    const editorUser = await browserWrite<{ id: number }>(page, "/users", {
+      username: editorCredentials.username,
+      password: editorCredentials.password,
+      realName: "双语页面合成 QA V1 编辑者",
+      role: "EDITOR",
+    }, "POST");
+    expect(editorUser.id).toBeGreaterThan(0);
+    const editorSession = await newAuthenticatedApiSession(editorCredentials);
+
+    const pageKey = draftState.pageKey;
+    const zhTitle = draftState.zh.title;
+    const enV1Title = draftState.en.title;
+    const zhPublished = draftState.zh;
+    const enInitial = draftState.en;
+    const makeDocument = (title: string) => ({
+      content: [{
+        type: "首屏主视觉",
+        props: {
+          id: `synthetic-locale-${runToken}`,
+          title,
+          subtitle: "SYNTHETIC QA CONTENT — NOT FORMAL BRAND COPY",
+          desktopImage: "/images/hero-desktop.jpg",
+          mobileImage: "/images/hero-mobile.jpg",
+          altText: "Synthetic QA jewelry image",
+          actionText: "",
+          targetType: "none",
+          linkUrl: "",
+        },
+      }],
+      zones: {},
+      root: { props: {} },
+    });
+    const metadata = {
+      seoTitle: "SYNTHETIC QA — Haichuan Jewelry",
+      seoDescription: "Synthetic bilingual publication lifecycle verification only.",
+      contentOwner: "SYNTHETIC QA",
+      mediaRights: [],
+    };
+
+    const submitted = await apiWrite<{
+      updatedAt: string;
+      contentHash: string;
+      reviewStatus: string;
+    }>(editorSession, "/page-modules/document/review/submit", {
+      pageKey,
+      locale: "en",
+      expectedUpdatedAt: enInitial.updatedAt,
+      expectedContentHash: enInitial.contentHash,
+    }, "POST");
+    expect(submitted.reviewStatus).toBe("IN_REVIEW");
+
+    const editorReviewDenied = await apiWriteResult(editorSession, "/page-modules/document/review", {
+      pageKey,
+      locale: "en",
+      action: "APPROVE",
+      expectedUpdatedAt: submitted.updatedAt,
+      expectedContentHash: submitted.contentHash,
+    });
+    expect(editorReviewDenied.status).toBe(403);
+    const editorPublishDenied = await apiWriteResult(editorSession, "/page-modules/document/publish", {
+      pageKey,
+      locale: "en",
+      expectedUpdatedAt: submitted.updatedAt,
+      expectedContentHash: submitted.contentHash,
+    });
+    expect(editorPublishDenied.status).toBe(403);
+
+    const changesRequested = await browserWrite<{
+      updatedAt: string;
+      contentHash: string;
+      reviewStatus: string;
+      reviewNote: string;
+    }>(page, "/page-modules/document/review", {
+      pageKey,
+      locale: "en",
+      action: "REQUEST_CHANGES",
+      expectedUpdatedAt: submitted.updatedAt,
+      expectedContentHash: submitted.contentHash,
+      reviewNote: "Synthetic QA: replace draft marker before approval.",
+    });
+    expect(changesRequested).toMatchObject({
+      reviewStatus: "CHANGES_REQUESTED",
+      reviewNote: "Synthetic QA: replace draft marker before approval.",
+    });
+
+    const enV1Draft = await apiWrite<{
+      updatedAt: string;
+      contentHash: string;
+      reviewStatus: string;
+    }>(editorSession, "/page-modules/document", {
+      pageKey,
+      locale: "en",
+      puckData: makeDocument(enV1Title),
+      metadata,
+      editorVersion: "0.22.4",
+      expectedUpdatedAt: changesRequested.updatedAt,
+    });
+    expect(enV1Draft.reviewStatus).toBe("DRAFT");
+    const enV1Submitted = await apiWrite<PageDocumentSnapshot & {
+      contentHash: string;
+      reviewStatus: string;
+    }>(editorSession, "/page-modules/document/review/submit", {
+      pageKey,
+      locale: "en",
+      expectedUpdatedAt: enV1Draft.updatedAt,
+      expectedContentHash: enV1Draft.contentHash,
+    }, "POST");
+    const enV1Approved = await browserWrite<PageDocumentSnapshot & {
+      contentHash: string;
+      reviewStatus: string;
+    }>(page, "/page-modules/document/review", {
+      pageKey,
+      locale: "en",
+      action: "APPROVE",
+      expectedUpdatedAt: enV1Submitted.updatedAt,
+      expectedContentHash: enV1Submitted.contentHash,
+    });
+    expect(enV1Approved.reviewStatus).toBe("APPROVED");
+    expect(await responseData<unknown>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=en`,
+    ))).toBeNull();
+    const enV1ApprovedAfterIdempotentSave = await browserWrite<PageDocumentSnapshot & {
+      contentHash: string;
+      reviewStatus: string;
+    }>(page, "/page-modules/document", {
+      pageKey,
+      locale: "en",
+      puckData: makeDocument(enV1Title),
+      metadata,
+      editorVersion: "0.22.4",
+      expectedUpdatedAt: enV1Approved.updatedAt,
+    });
+    expect(enV1ApprovedAfterIdempotentSave).toMatchObject({
+      contentHash: enV1Approved.contentHash,
+      reviewStatus: "APPROVED",
+    });
+    await page.goto("/admin/editor/about");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    await page.getByLabel("内容语言", { exact: true }).selectOption("en");
+    await expect(page.getByTestId("page-review-status")).toHaveText("已批准");
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(publishButton).toBeEnabled();
+    const enV1PublishResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return response.request().method() === "PUT"
+        && url.pathname === "/api/page-modules/document/publish";
+    });
+    await publishButton.click();
+    const enV1PublishedResponse = await enV1PublishResponse;
+    expect(enV1PublishedResponse.ok()).toBe(true);
+    const enV1Published = unwrap<PageDocumentSnapshot & {
+      contentHash: string;
+      reviewStatus: string;
+      publishedRevisionId: number;
+    }>(await enV1PublishedResponse.json());
+    expect(enV1Published.reviewStatus).toBe("PUBLISHED");
+
+    const publicV1 = await responseData<PageDocumentSnapshot>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=en`,
+    ));
+    expect(publicV1.puckData.content[0]?.props?.title).toBe(enV1Title);
+    const publicZhAfterEnglishPublish = await responseData<PageDocumentSnapshot & {
+      contentHash: string;
+      locale: string;
+    }>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
+    ));
+    expect(publicZhAfterEnglishPublish).toMatchObject({
+      contentHash: zhPublished.contentHash,
+      locale: "zh-CN",
+    });
+    expect(publicZhAfterEnglishPublish.puckData.content[0]?.props?.title).toBe(zhTitle);
+
+    // PageDocument 发布只改变数据库中的发布事实；当前客户端镜像的精确英文
+    // 路由表仍来自启动前的不可变快照，必须继续失败关闭，直到生成并部署新制品。
+    const databasePublishedStillInactive = await request.get(`${browserBaseUrl}/en/about`);
+    expect(databasePublishedStillInactive.status()).toBe(404);
+    expect(await databasePublishedStillInactive.text()).toContain("Page not available");
+    const uppercaseEnglishResponse = await request.get(`${browserBaseUrl}/EN/about`);
+    expect(uppercaseEnglishResponse.status()).toBe(404);
+    const unsupportedEnglishResponse = await request.get(`${browserBaseUrl}/en/catalog`);
+    expect(unsupportedEnglishResponse.status()).toBe(404);
+    const unsupportedEnglishBody = await unsupportedEnglishResponse.text();
+    expect(unsupportedEnglishBody).toContain("Page not available");
+    expect(unsupportedEnglishBody).not.toContain("页面尚未发布");
+
+    handoff.bilingualPublicationV1 = {
+      pageKey,
+      zh: {
+        contentHash: zhPublished.contentHash,
+        title: zhTitle,
+        updatedAt: zhPublished.updatedAt,
+        publishedRevisionId: zhPublished.publishedRevisionId,
+      },
+      en: {
+        contentHash: enV1Published.contentHash,
+        title: enV1Title,
+        updatedAt: enV1Published.updatedAt,
+        publishedRevisionId: enV1Published.publishedRevisionId,
+      },
+    };
+    writeFileSync(realQaHandoffPath, JSON.stringify(handoff, null, 2), "utf8");
+
+    const evidence = {
+      qaRunId: process.env.PAGE_BUILDER_QA_RUN_ID,
+      testTitle: testInfo.titlePath.join(" > "),
+      project: testInfo.project.name,
+      browserChannel: process.env.PLAYWRIGHT_BROWSER_CHANNEL,
+      databaseBootstrap: process.env.PAGE_BUILDER_QA_DATABASE_BOOTSTRAP,
+      appliedMigrations: Number(process.env.PAGE_BUILDER_QA_APPLIED_MIGRATIONS),
+      pageKey,
+      locales: ["zh-CN", "en"],
+      assertions: {
+        englishNeverFallsBackToChinese: true,
+        editorReviewAndPublishDenied: true,
+        runtimePublishRemainsInactiveUntilSnapshotPromotion: true,
+        unsupportedEnglishRouteReturns404: true,
+        browserErrors: [],
+        browserRequestFailures: [],
+      },
+    };
+    const evidencePath = testInfo.outputPath("bilingual-publication-v1-evidence.json");
+    writeFileSync(evidencePath, JSON.stringify(evidence, null, 2), "utf8");
+    await testInfo.attach("bilingual-publication-v1-evidence", {
+      contentType: "application/json",
+      path: evidencePath,
+    });
+
+    await editorSession.context.dispose();
+  });
+
+  test("[phase1] 真实双语页面 V2 并发、发布回滚与历史保持", async ({
+    page,
+    request,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+    await loginAndPrepareIsolatedQaSite(page);
+    if (!realQaHandoffPath) throw new Error("phase1 缺少 PAGE_BUILDER_QA_HANDOFF_PATH");
+    const handoff = JSON.parse(readFileSync(realQaHandoffPath, "utf8")) as RestartPhaseHandoff;
+    const v1 = handoff.bilingualPublicationV1;
+    if (!v1 || v1.pageKey !== "about") throw new Error("phase1 缺少双语 V1 交接事实");
+
+    const runToken = Date.now().toString(36);
+    const editorCredentials = {
+      username: `locale_editor_v2_${runToken}`,
+      password: `Qa!E26_${runToken.slice(-6)}`,
+    };
+    const editorUser = await browserWrite<{ id: number }>(page, "/users", {
+      username: editorCredentials.username,
+      password: editorCredentials.password,
+      realName: "双语页面合成 QA V2 编辑者",
+      role: "EDITOR",
+    }, "POST");
+    expect(editorUser.id).toBeGreaterThan(0);
+    const editorSession = await newAuthenticatedApiSession(editorCredentials);
+
+    const pageKey = v1.pageKey;
+    const enV1Title = v1.en.title;
+    const enV2Title = `SYNTHETIC QA EN V2 ${runToken}`;
+    const makeDocument = (title: string) => ({
+      content: [{
+        type: "首屏主视觉",
+        props: {
+          id: `synthetic-locale-${runToken}`,
+          title,
+          subtitle: "SYNTHETIC QA CONTENT — NOT FORMAL BRAND COPY",
+          desktopImage: "/images/hero-desktop.jpg",
+          mobileImage: "/images/hero-mobile.jpg",
+          altText: "Synthetic QA jewelry image",
+          actionText: "",
+          targetType: "none",
+          linkUrl: "",
+        },
+      }],
+      zones: {},
+      root: { props: {} },
+    });
+    const metadata = {
+      seoTitle: "SYNTHETIC QA — Haichuan Jewelry",
+      seoDescription: "Synthetic bilingual publication lifecycle verification only.",
+      contentOwner: "SYNTHETIC QA",
+      mediaRights: [],
+    };
+    const enV1Published = v1.en;
+
+    const enV2Draft = await apiWrite<{
+      updatedAt: string;
+      contentHash: string;
+      reviewStatus: string;
+    }>(editorSession, "/page-modules/document", {
+      pageKey,
+      locale: "en",
+      puckData: makeDocument(enV2Title),
+      metadata,
+      editorVersion: "0.22.4",
+      expectedUpdatedAt: enV1Published.updatedAt,
+    });
+    expect(enV2Draft.reviewStatus).toBe("DRAFT");
+    const staleSave = await apiWriteResult(editorSession, "/page-modules/document", {
+      pageKey,
+      locale: "en",
+      puckData: makeDocument(`${enV2Title} STALE`),
+      metadata,
+      editorVersion: "0.22.4",
+      expectedUpdatedAt: enV1Published.updatedAt,
+    });
+    expect(staleSave.status).toBe(409);
+    const draftAfterConflict = await responseData<PageDocumentSnapshot & {
+      contentHash: string;
+      reviewStatus: string;
+    }>(await page.request.get(
+      `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}&locale=en`,
+    ));
+    expect(draftAfterConflict.puckData.content[0]?.props?.title).toBe(enV2Title);
+    expect(draftAfterConflict).toMatchObject({
+      contentHash: enV2Draft.contentHash,
+      reviewStatus: "DRAFT",
+    });
+    const publicStillV1 = await responseData<PageDocumentSnapshot>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=en`,
+    ));
+    expect(publicStillV1.puckData.content[0]?.props?.title).toBe(enV1Title);
+
+    const enV2Submitted = await apiWrite<PageDocumentSnapshot & { contentHash: string }>(
+      editorSession,
+      "/page-modules/document/review/submit",
+      {
+        pageKey,
+        locale: "en",
+        expectedUpdatedAt: enV2Draft.updatedAt,
+        expectedContentHash: enV2Draft.contentHash,
+      },
+      "POST",
+    );
+    const enV2Approved = await browserWrite<PageDocumentSnapshot & { contentHash: string }>(
+      page,
+      "/page-modules/document/review",
+      {
+        pageKey,
+        locale: "en",
+        action: "APPROVE",
+        expectedUpdatedAt: enV2Submitted.updatedAt,
+        expectedContentHash: enV2Submitted.contentHash,
+      },
+    );
+    const publicAfterV2Approval = await responseData<PageDocumentSnapshot>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=en`,
+    ));
+    expect(publicAfterV2Approval.puckData.content[0]?.props?.title).toBe(enV1Title);
+    const enV2Published = await browserWrite<PageDocumentSnapshot & { contentHash: string; publishedRevisionId: number }>(
+      page,
+      "/page-modules/document/publish",
+      {
+        pageKey,
+        locale: "en",
+        expectedUpdatedAt: enV2Approved.updatedAt,
+        expectedContentHash: enV2Approved.contentHash,
+      },
+    );
+    const publicV2 = await responseData<PageDocumentSnapshot & { contentHash: string }>(
+      await request.get(
+        `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=en`,
+      ),
+    );
+    expect(publicV2).toMatchObject({ contentHash: enV2Published.contentHash });
+    expect(publicV2.puckData.content[0]?.props?.title).toBe(enV2Title);
+    const history = await responseData<{ items: PageDocumentRevisionSummary[] }>(
+      await page.request.get(`${apiBaseUrl}/page-modules/document/revisions?pageKey=${pageKey}&locale=en&limit=20`),
+    );
+    expect(history.items).toHaveLength(2);
+    expect(history.items.filter((item) => item.isPublished)).toEqual([
+      expect.objectContaining({ id: enV2Published.publishedRevisionId }),
+    ]);
+    const v1Revision = history.items.find((item) => item.id === enV1Published.publishedRevisionId);
+    expect(v1Revision).toBeTruthy();
+    const zhHistory = await responseData<{ items: PageDocumentRevisionSummary[] }>(
+      await page.request.get(`${apiBaseUrl}/page-modules/document/revisions?pageKey=${pageKey}&locale=zh-CN&limit=20`),
+    );
+    expect(zhHistory.items).toHaveLength(1);
+    expect(zhHistory.items[0]?.id).toBe(v1.zh.publishedRevisionId);
+
+    const rolledBack = await browserWrite<PageDocumentSnapshot & { reviewStatus: string }>(
+      page,
+      `/page-modules/document/revisions/${v1Revision!.id}/rollback-publication`,
+      {
+        pageKey,
+        locale: "en",
+        expectedPublishedRevisionId: enV2Published.publishedRevisionId,
+      },
+    );
+    expect(rolledBack.reviewStatus).toBe("APPROVED");
+    const publicAfterRollback = await responseData<PageDocumentSnapshot & { contentHash: string; updatedAt: string }>(await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=${pageKey}&locale=en`,
+    ));
+    expect(publicAfterRollback.puckData.content[0]?.props?.title).toBe(enV1Title);
+    const historyAfterRollback = await responseData<{ items: PageDocumentRevisionSummary[] }>(
+      await page.request.get(`${apiBaseUrl}/page-modules/document/revisions?pageKey=${pageKey}&locale=en&limit=20`),
+    );
+    expect(historyAfterRollback.items).toHaveLength(3);
+    expect(historyAfterRollback.items.filter((item) => item.isPublished)).toEqual([
+      expect.objectContaining({ id: rolledBack.publishedRevisionId }),
+    ]);
+    expect(historyAfterRollback.items.map((item) => item.id)).toEqual(expect.arrayContaining([
+      enV1Published.publishedRevisionId,
+      enV2Published.publishedRevisionId,
+      rolledBack.publishedRevisionId,
+    ]));
+    const draftAfterRollback = await responseData<PageDocumentSnapshot>(
+      await editorSession.context.get(`/api/page-modules/document/admin?pageKey=${pageKey}&locale=en`, {
+        headers: { Cookie: editorSession.cookieHeader },
+      }),
+    );
+    expect(draftAfterRollback.puckData.content[0]?.props?.title).toBe(enV2Title);
+    handoff.bilingualPublication = {
+      pageKey,
+      zh: {
+        contentHash: v1.zh.contentHash,
+        title: v1.zh.title,
+        lastModified: v1.zh.updatedAt.slice(0, 10),
+      },
+      en: {
+        contentHash: publicAfterRollback.contentHash,
+        title: enV1Title,
+        lastModified: publicAfterRollback.updatedAt.slice(0, 10),
+      },
+    };
+    writeFileSync(realQaHandoffPath, JSON.stringify(handoff, null, 2), "utf8");
+
+    const evidence = {
+      qaRunId: process.env.PAGE_BUILDER_QA_RUN_ID,
+      testTitle: testInfo.titlePath.join(" > "),
+      project: testInfo.project.name,
+      browserChannel: process.env.PLAYWRIGHT_BROWSER_CHANNEL,
+      databaseBootstrap: process.env.PAGE_BUILDER_QA_DATABASE_BOOTSTRAP,
+      appliedMigrations: Number(process.env.PAGE_BUILDER_QA_APPLIED_MIGRATIONS),
+      pageKey,
+      locales: ["zh-CN", "en"],
+      assertions: {
+        v1HandoffVerified: true,
+        englishV2PublicPointerVerified: true,
+        optimisticConflictRereadVerified: true,
+        rollbackPreservesDraft: true,
+        browserErrors: [],
+        browserRequestFailures: [],
+      },
+    };
+    const evidencePath = testInfo.outputPath("bilingual-publication-evidence.json");
+    writeFileSync(evidencePath, JSON.stringify(evidence, null, 2), "utf8");
+    await testInfo.attach("bilingual-publication-evidence", {
+      contentType: "application/json",
+      path: evidencePath,
+    });
+
+    await editorSession.context.dispose();
   });
 });

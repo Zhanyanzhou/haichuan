@@ -18,6 +18,7 @@ interface BackupStatus {
   autoBackup: boolean;
   storageMounted?: boolean;
   backupSchedule: string | null;
+  backupRetentionDays?: number | null;
   totalBackups: number;
   incompleteArtifactCount?: number;
   latestFiles?: Array<{ name: string; size: number }>;
@@ -42,6 +43,12 @@ function formatTime(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatBackupRetentionDays(value: unknown): string {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? `${value} 天`
+    : "由部署环境管理";
 }
 
 const EXECUTION_STATUS_META: Record<
@@ -161,6 +168,13 @@ export default function Settings() {
               </Tag>
             </div>
 
+            <div className="flex items-center justify-between gap-4 p-4 bg-brand-bg">
+              <span className="text-sm text-brand-muted">备份保留期</span>
+              <span className="text-sm text-brand-text">
+                {formatBackupRetentionDays(status.backupRetentionDays)}
+              </span>
+            </div>
+
             <div className="p-4 bg-brand-bg text-xs space-y-1">
                 <div className="flex justify-between gap-4">
                   <span className="text-brand-muted">最近执行结果</span>
@@ -203,8 +217,8 @@ export default function Settings() {
                   ))}
                 </ul>
                 <p className="text-xs leading-[18px] text-brand-muted mt-2">
-                  恢复演练：备份文件位于宿主机 ./backups（数据库 .sql.gz、媒体 .tar.gz
-                  与批次 .sha256 清单），恢复前必须先校验清单，并定期在隔离环境做真实恢复验证。
+                  恢复演练：备份文件由部署环境管理；恢复前必须先校验数据库、媒体与批次清单，
+                  并定期在隔离环境做真实恢复验证。
                 </p>
               </div>
             )}

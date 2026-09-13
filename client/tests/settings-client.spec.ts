@@ -8,6 +8,55 @@ async function authenticateAuditAdmin(page: Page) {
   });
 }
 
+const backupRetentionScenarios = [
+  { name: "7 天", value: 7, expected: "7 天" },
+  { name: "非 7 天", value: 30, expected: "30 天" },
+  { name: "缺失", value: undefined, expected: "由部署环境管理" },
+  { name: "非法", value: "7 days /srv/private", expected: "由部署环境管理" },
+] as const;
+
+for (const scenario of backupRetentionScenarios) {
+  test(`备份保留期${scenario.name}时界面遵守安全展示合同`, async ({ page }) => {
+    await authenticateAuditAdmin(page);
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
+      if (url.pathname === "/api/settings/backup") {
+        const data = {
+          lastBackup: null,
+          autoBackup: false,
+          storageMounted: false,
+          backupSchedule: null,
+          totalBackups: 0,
+          executionStatus: "UNKNOWN",
+          lastExitCode: null,
+          message: "备份存储未挂载；由部署环境管理。",
+          ...(scenario.value === undefined
+            ? {}
+            : { backupRetentionDays: scenario.value }),
+        };
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ code: 200, data, message: "ok" }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: {}, message: "ok" }),
+      });
+    });
+
+    await page.goto("/admin/settings");
+    const retentionRow = page.getByText("备份保留期", { exact: true }).locator("..");
+    await expect(retentionRow.getByText(scenario.expected, { exact: true })).toBeVisible();
+    await expect(retentionRow).not.toContainText("/srv/");
+    await expect(retentionRow).not.toContainText("BACKUP_RETENTION_DAYS");
+    await expect(page.getByText("7 days /srv/private", { exact: true })).toHaveCount(0);
+  });
+}
+
 test("操作日志沿用员工鉴权和现有分页筛选参数", async ({ page }) => {
   await authenticateAuditAdmin(page);
   const logRequests: Array<{
@@ -72,7 +121,7 @@ test("操作日志沿用员工鉴权和现有分页筛选参数", async ({ page 
           id: 3,
           createdAt: "2026-08-26T10:00:00.000Z",
           action: "发布商品",
-          module: "product",
+          module: "products",
           targetId: 12,
           detail: JSON.stringify({ productCode: "HC-001" }),
           user: { realName: "设置审计员" },
@@ -166,6 +215,18 @@ test("操作日志沿用员工鉴权和现有分页筛选参数", async ({ page 
   await page.getByRole("button", { name: "重置筛选" }).click();
   await expect(auditTable.getByText("模板已移入回收站", { exact: true })).toBeVisible();
   await expect(page.locator(".ant-select-dropdown:visible")).toHaveCount(0);
+
+  await page.getByRole("combobox", { name: "按模块筛选" }).click();
+  await page
+    .locator(".ant-select-item-option")
+    .filter({ hasText: "商品" })
+    .click();
+  await expect
+    .poll(() => logRequests.some((request) => request.module === "products"))
+    .toBe(true);
+  await expect(auditTable.getByText("记录 #12", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "重置筛选" }).click();
+
   const detailButton = page.getByRole("button", { name: "查看详情" }).first();
   await detailButton.focus();
   await page.keyboard.press("Enter");

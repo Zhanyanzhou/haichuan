@@ -19,7 +19,17 @@ import {
   calculateDynamicTemplateDefinitionChecksum,
   matchesDynamicTemplateDefinitionChecksum,
 } from "./dynamic-template-definition-integrity";
-import { collectDynamicTemplateInstanceReferences } from "./dynamic-template-instance";
+import {
+  collectDynamicTemplateInstanceReferences,
+  getDynamicTemplateDefinitionMediaReferences,
+} from "./dynamic-template-instance";
+import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
+import {
+  buildManagedMediaShadowReport,
+  buildMediaPublicationManifestRows,
+  type MediaPublicationResolution,
+  type PublicationMediaReference,
+} from "./media-publication-manifest";
 
 const TEMPLATE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 const MAX_DEFINITION_BYTES = 1024 * 1024;
@@ -106,7 +116,39 @@ function getLegacyEmptyPolicySlotIds(definition: TemplateDefinitionV2): string[]
 
 @Injectable()
 export class DynamicTemplatesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mediaAuthorizationResolver?: MediaAuthorizationResolverService,
+  ) {}
+
+  private async resolvePublicationMedia(
+    transaction: Prisma.TransactionClient,
+    definition: TemplateDefinitionV2,
+    version: number,
+  ): Promise<{
+    references: PublicationMediaReference[];
+    resolution: MediaPublicationResolution;
+  } | null> {
+    if (!this.mediaAuthorizationResolver) return null;
+    const references = getDynamicTemplateDefinitionMediaReferences(definition, {
+      preserveReferencePaths: true,
+    }).map(
+      (reference): PublicationMediaReference => ({
+        url: reference.url,
+        path: reference.path,
+        sourceType: "DYNAMIC_TEMPLATE_VERSION",
+        sourceId: `${definition.templateId}:v${version}`,
+        origin: reference.field.endsWith(".backgroundImage")
+          ? "TEMPLATE_BACKGROUND"
+          : "TEMPLATE_DEFAULT",
+      }),
+    );
+    const resolution = await this.mediaAuthorizationResolver.resolveReferences(
+      references,
+      { transaction, mode: "ENFORCE" },
+    ) as MediaPublicationResolution;
+    return { references, resolution };
+  }
 
   private requireOwnerId(ownerId: number | undefined): number {
     if (!Number.isInteger(ownerId) || Number(ownerId) <= 0) {
@@ -1186,6 +1228,22 @@ export class DynamicTemplatesService {
         const versionNote = requestedVersionNote === undefined
           ? template.draft.versionNote ?? null
           : requestedVersionNote;
+        const publicationMedia = await this.resolvePublicationMedia(
+          tx,
+          validated.definition,
+          nextVersion,
+        );
+        const publicationMediaErrors = publicationMedia?.resolution.issues.filter(
+          (issue) => issue.severity === "ERROR",
+        ) ?? [];
+        if (publicationMediaErrors.length > 0) {
+          throw new BadRequestException({
+            message: `母模板素材校验失败：${publicationMediaErrors.slice(0, 8).map((issue) => issue.message).join("；")}`,
+            code: "DYNAMIC_TEMPLATE_MEDIA_INELIGIBLE",
+            issues: publicationMediaErrors,
+            shadowReport: buildManagedMediaShadowReport(publicationMedia!.resolution),
+          });
+        }
         const claimedDraft = await tx.dynamicTemplateDraft.updateMany({
           where: { id: template.draft.id, revision: input.expectedRevision },
           data: {
@@ -1228,6 +1286,20 @@ export class DynamicTemplatesService {
             publishedById: resolvedOwnerId,
           },
         });
+        if (publicationMedia) {
+          const manifestRows = buildMediaPublicationManifestRows(
+            publicationMedia.references,
+            publicationMedia.resolution,
+          );
+          if (manifestRows.length > 0) {
+            await tx.dynamicTemplateVersionMediaAsset.createMany({
+              data: manifestRows.map((row) => ({
+                ...row,
+                dynamicTemplateVersionId: published.id,
+              })),
+            });
+          }
+        }
         const draft = await tx.dynamicTemplateDraft.findUnique({
           where: { id: template.draft.id },
         });
@@ -1245,6 +1317,10 @@ export class DynamicTemplatesService {
               templateId: template.templateId,
               fromVersion: template.publishedVersion,
               toVersion: published.version,
+              ...(publicationMedia ? {
+                managedMediaAuthorization:
+                  buildManagedMediaShadowReport(publicationMedia.resolution),
+              } : {}),
               result: "succeeded",
             }),
           },
@@ -1341,11 +1417,18 @@ export class DynamicTemplatesService {
       definitionChecksum: published.definitionChecksum,
     });
     if (!definition) throw new ConflictException("正式模板版本完整性校验失败，已拒绝加载");
+    const publishedMetadata = this.definitionProjection(definition);
     return {
       templateId: template.templateId,
-      name: template.name,
-      category: template.category,
+      name: publishedMetadata.name,
+      category: publishedMetadata.category,
       status: template.status,
+      purpose: publishedMetadata.purpose,
+      layoutType: publishedMetadata.layoutType,
+      description: publishedMetadata.description,
+      slotSummary: publishedMetadata.slotSummary,
+      recommendedFor: publishedMetadata.recommendedFor,
+      tags: publishedMetadata.tags,
       sourceReference: template.sourceReference,
       ...published,
       definition,

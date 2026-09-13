@@ -434,6 +434,7 @@ export class LeadsService {
       }
 
       const previousErrorCode = event.lastErrorCode as string;
+      const retriedAt = new Date();
       const changed = await transaction.outboxEvent.updateMany({
         where: {
           id: event.id,
@@ -442,11 +443,18 @@ export class LeadsService {
         },
         data: {
           status: "PENDING",
-          availableAt: new Date(),
+          availableAt: retriedAt,
           lockedAt: null,
           lockedBy: null,
           processedAt: null,
           lastErrorCode: null,
+          payload: {
+            ...payload,
+            manualRetry: {
+              requestedBy: actorId,
+              requestedAt: retriedAt.toISOString(),
+            },
+          },
         },
       });
       if (changed.count !== 1) {

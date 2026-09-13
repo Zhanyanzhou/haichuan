@@ -32,6 +32,7 @@ type ProductManageTableProps = {
   batchProcessing: boolean;
   pendingProductId: number | null;
   hasFilters: boolean;
+  canGovernPublic: boolean;
   onSelectionChange: (keys: Key[]) => void;
   onOpenEdit: (product: Product) => void;
   onClone: (product: Product) => void | Promise<void>;
@@ -41,6 +42,7 @@ type ProductManageTableProps = {
   ) => void;
   onConfirmArchive: (product: Product) => void;
   onConfirmRestore: (product: Product) => void;
+  onSubmitForReview: (product: Product) => void;
 };
 
 export default function ProductManageTable({
@@ -50,12 +52,14 @@ export default function ProductManageTable({
   batchProcessing,
   pendingProductId,
   hasFilters,
+  canGovernPublic,
   onSelectionChange,
   onOpenEdit,
   onClone,
   onRequestStatusChange,
   onConfirmArchive,
   onConfirmRestore,
+  onSubmitForReview,
 }: ProductManageTableProps) {
   const columns: TableColumnsType<ProductListItem> = [
       {
@@ -174,6 +178,9 @@ export default function ProductManageTable({
         key: "status",
         width: 92,
         render: (_: unknown, product: ProductListItem) => {
+          if (product.reviewStatus === "IN_REVIEW") {
+            return <Tag color="blue">审核中</Tag>;
+          }
           const meta = statusMeta[product.status as ProductStatus] || { label: product.status || "未知状态", color: "default" as const };
           return <Tag color={meta.color}>{meta.label}</Tag>;
         },
@@ -185,6 +192,7 @@ export default function ProductManageTable({
         width: 210,
         render: (_: unknown, product: ProductListItem) => {
           const rowPending = pendingProductId === product.id;
+          const reviewLocked = product.reviewStatus === "IN_REVIEW";
           return (
           <Space className="product-manage__row-actions" size={10} wrap>
             {product.status === "ARCHIVED" ? (
@@ -220,7 +228,7 @@ export default function ProductManageTable({
                   onClick={() => onOpenEdit(product)}
                   disabled={rowPending}
                 >
-                  编辑商品
+                  {reviewLocked ? "查看审核" : "编辑商品"}
                 </Button>
                 <Button
                   type="link"
@@ -231,7 +239,30 @@ export default function ProductManageTable({
                 >
                   复制
                 </Button>
-                {product.status === "PUBLISHED" ? (
+                {canGovernPublic && reviewLocked ? (
+                  <>
+                    <Button
+                      type="link"
+                      size="small"
+                      className="product-manage__action-link"
+                      onClick={() => onRequestStatusChange(product, "PUBLISHED")}
+                      loading={rowPending}
+                      disabled={pendingProductId !== null && !rowPending}
+                    >
+                      通过并上架
+                    </Button>
+                    <Button
+                      type="link"
+                      size="small"
+                      className="product-manage__action-link"
+                      onClick={() => onRequestStatusChange(product, "DRAFT")}
+                      loading={rowPending}
+                      disabled={pendingProductId !== null && !rowPending}
+                    >
+                      退回修改
+                    </Button>
+                  </>
+                ) : canGovernPublic && product.status === "PUBLISHED" ? (
                   <Button
                     type="link"
                     size="small"
@@ -242,7 +273,7 @@ export default function ProductManageTable({
                   >
                     下架
                   </Button>
-                ) : (
+                ) : canGovernPublic ? (
                   <Button
                     type="link"
                     size="small"
@@ -253,8 +284,19 @@ export default function ProductManageTable({
                   >
                     上架
                   </Button>
-                )}
-                <Dropdown
+                ) : product.status === "DRAFT" && !reviewLocked ? (
+                  <Button
+                    type="link"
+                    size="small"
+                    className="product-manage__action-link"
+                    onClick={() => onSubmitForReview(product)}
+                    loading={rowPending}
+                    disabled={pendingProductId !== null && !rowPending}
+                  >
+                    提交审核
+                  </Button>
+                ) : null}
+                {!reviewLocked && (canGovernPublic || product.status === "DRAFT") ? <Dropdown
                   overlayClassName="product-manage__dropdown"
                   disabled={pendingProductId !== null}
                   menu={{
@@ -271,7 +313,7 @@ export default function ProductManageTable({
                   <Button type="link" size="small" className="product-manage__action-link" loading={rowPending}>
                     更多 <DownOutlined />
                   </Button>
-                </Dropdown>
+                </Dropdown> : null}
               </>
             )}
           </Space>
@@ -292,8 +334,8 @@ export default function ProductManageTable({
       rowSelection={{
         selectedRowKeys: selectedIds,
         onChange: onSelectionChange,
-        getCheckboxProps: () => ({
-          disabled: batchProcessing || pendingProductId !== null,
+        getCheckboxProps: (product) => ({
+          disabled: batchProcessing || pendingProductId !== null || (!canGovernPublic && product.reviewStatus === "IN_REVIEW"),
         }),
       }}
       locale={{

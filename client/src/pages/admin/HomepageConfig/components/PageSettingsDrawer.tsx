@@ -1,6 +1,6 @@
 /**
  * PageSettingsDrawer.tsx — 页面展示设置抽屉。
- * 编辑可选的内部内容责任、公开 SEO，以及发布前必需的素材记录。
+ * 编辑可选的内部内容责任与公开 SEO；素材授权只在页面素材库集中维护。
  * 未完成的资料可以保存为草稿；正式发布由服务端统一校验。
  */
 import { useEffect, useMemo, useState } from "react";
@@ -9,7 +9,6 @@ import MediaPickerField from "@/page-builder/fields/MediaPickerField";
 import {
   CONTENT_TEMPLATE_PAGE_METADATA,
   getPageDocumentMediaReferences,
-  type ContentTemplateMediaRight,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { getDynamicTemplateDocumentMediaReferences } from "@/page-builder/dynamic-template-instance";
 import type { PuckProps } from "@/page-builder/types";
@@ -45,7 +44,6 @@ export default function PageSettingsDrawer({
     seoDescription?: string;
     ogImage?: string;
     contentOwner?: string;
-    mediaRights?: ContentTemplateMediaRight[];
   }) => Promise<boolean>;
 }) {
   const { modal } = AntdApp.useApp();
@@ -53,7 +51,6 @@ export default function PageSettingsDrawer({
   const [seoDescription, setSeoDescription] = useState("");
   const [ogImage, setOgImage] = useState("");
   const [contentOwner, setContentOwner] = useState("");
-  const [mediaRights, setMediaRights] = useState<ContentTemplateMediaRight[]>([]);
   const [saving, setSaving] = useState(false);
   const [baselineSignature, setBaselineSignature] = useState("");
   const pagePublishIssues = publishIssues.filter(
@@ -66,29 +63,15 @@ export default function PageSettingsDrawer({
       const nextSeoDescription = typeof metadata?.seoDescription === "string" ? metadata.seoDescription : "";
       const nextOgImage = typeof metadata?.ogImage === "string" ? metadata.ogImage : "";
       const nextContentOwner = typeof metadata?.contentOwner === "string" ? metadata.contentOwner : "";
-      const nextMediaRights = Array.isArray(metadata?.mediaRights)
-        ? metadata.mediaRights.flatMap((item: unknown) => {
-            if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-            const record = item as Record<string, unknown>;
-            return [{
-              assetUrl: typeof record.assetUrl === "string" ? record.assetUrl.trim() : "",
-              source: typeof record.source === "string" ? record.source : "",
-              authorizationId:
-                typeof record.authorizationId === "string" ? record.authorizationId : "",
-            }];
-          })
-        : [];
       setSeoTitle(nextSeoTitle);
       setSeoDescription(nextSeoDescription);
       setOgImage(nextOgImage);
       setContentOwner(nextContentOwner);
-      setMediaRights(nextMediaRights);
       setBaselineSignature(JSON.stringify({
         seoTitle: nextSeoTitle,
         seoDescription: nextSeoDescription,
         ogImage: nextOgImage,
         contentOwner: nextContentOwner,
-        mediaRights: nextMediaRights,
       }));
     }
   }, [open, metadata]);
@@ -124,21 +107,12 @@ export default function PageSettingsDrawer({
       return true;
     });
   }, [ogImage, pageKey, puckData]);
-  const mediaRightsByUrl = useMemo(
-    () => new Map(mediaRights.map((item) => [item.assetUrl, item])),
-    [mediaRights],
-  );
-  const completedMediaRightsCount = mediaReferences.filter((reference) => {
-    const right = mediaRightsByUrl.get(reference.url);
-    return Boolean(right?.source.trim() && right?.authorizationId.trim());
-  }).length;
   const currentSignature = useMemo(() => JSON.stringify({
     seoTitle,
     seoDescription,
     ogImage,
     contentOwner,
-    mediaRights,
-  }), [contentOwner, mediaRights, ogImage, seoDescription, seoTitle]);
+  }), [contentOwner, ogImage, seoDescription, seoTitle]);
   const dirty = Boolean(baselineSignature) && currentSignature !== baselineSignature;
 
   const requestClose = () => {
@@ -156,21 +130,6 @@ export default function PageSettingsDrawer({
       onOk: onClose,
     });
   };
-  const updateMediaRight = (
-    assetUrl: string,
-    field: "source" | "authorizationId",
-    value: string,
-  ) => {
-    setMediaRights((current) => {
-      const index = current.findIndex((item) => item.assetUrl === assetUrl);
-      if (index < 0) {
-        return [...current, { assetUrl, source: "", authorizationId: "", [field]: value }];
-      }
-      return current.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, [field]: value } : item,
-      );
-    });
-  };
   const saveSettings = async () => {
     if (saving) return;
     setSaving(true);
@@ -180,14 +139,6 @@ export default function PageSettingsDrawer({
         seoDescription: seoDescription.trim(),
         ogImage: ogImage.trim(),
         contentOwner: contentOwner.trim(),
-        mediaRights: mediaReferences.map((reference) => {
-          const existing = mediaRightsByUrl.get(reference.url);
-          return {
-            assetUrl: reference.url,
-            source: existing?.source.trim() ?? "",
-            authorizationId: existing?.authorizationId.trim() ?? "",
-          };
-        }),
       });
     } finally {
       setSaving(false);
@@ -259,10 +210,10 @@ export default function PageSettingsDrawer({
         >
           <div className="homepage-editor__media-rights-heading">
             <strong>页面标题、描述、分享图与责任团队均为可选</strong>
-            <span>素材来源记录可后续补充，不阻断本次页面发布</span>
+            <span>素材授权在页面素材库集中维护</span>
           </div>
           <p className="homepage-editor__page-settings-hint">
-            可选展示资料留空不会阻断发布；填写后会校验长度、格式与素材是否已上传到本站。资料未完成时仍可保存草稿。
+            可选展示资料留空不会阻断发布；资料未完成时仍可保存草稿。实际可见素材的公开资格由服务端统一检查。
           </p>
         </section>
         <div data-page-settings-field="contentOwner">
@@ -330,7 +281,7 @@ export default function PageSettingsDrawer({
           style={{ marginTop: 6 }}
         >
           分享到微信 / 微博 / Twitter 等平台时显示的封面图，建议
-          1200×630；使用分享图时，也需在下方补齐素材来源与授权记录。
+          1200×630；素材来源与授权在页面素材库集中登记。
         </p>
         <section
           className="homepage-editor__media-rights"
@@ -338,69 +289,22 @@ export default function PageSettingsDrawer({
           data-page-settings-field="mediaRights"
         >
           <div className="homepage-editor__media-rights-heading">
-            <strong>媒体来源与授权（可选审计记录）</strong>
-            <span>{mediaReferences.length} 项当前公开素材</span>
+            <strong>素材授权状态</strong>
+            <span>{mediaReferences.length} 项当前页面素材</span>
           </div>
           <p className="homepage-editor__page-settings-hint">
-            页面发布只检查素材地址和文件是否安全可用；逐项来源记录不影响本次发布。记录仅用于内部审计，不随公开页面接口返回。
+            素材来源、授权证明与审核在页面素材库集中维护。页面草稿可以继续保存；发布时服务端会汇总检查当前页面及母模板继承的实际可见素材。
           </p>
-          {mediaReferences.length > 0 ? (
-            <p role="status" aria-live="polite">
-              已填写 {completedMediaRightsCount} / {mediaReferences.length} 项
-              {completedMediaRightsCount < mediaReferences.length ? "，可在后续素材治理中补充。" : "。"}
-            </p>
-          ) : null}
           {mediaReferences.length === 0 ? (
             <p className="homepage-editor__media-rights-empty">当前页面尚未引用公开素材。</p>
           ) : (
-            <details className="homepage-editor__media-rights-details">
-              <summary>按需编辑 {mediaReferences.length} 项素材来源记录</summary>
-              {mediaReferences.map((reference, index) => {
-                const right = mediaRightsByUrl.get(reference.url);
-                return (
-                  <div
-                    className="homepage-editor__media-rights-item"
-                    key={reference.url}
-                    data-testid="page-media-right"
-                  >
-                    <div className="homepage-editor__media-rights-asset">
-                      <strong>素材 {index + 1}</strong>
-                      <code title={reference.url}>{reference.url}</code>
-                      <span>{reference.moduleType || "社交分享图"} · {reference.path}</span>
-                    </div>
-                    <label htmlFor={`media-right-source-${index}`}>
-                      素材来源（可选）
-                    </label>
-                    <Input
-                      id={`media-right-source-${index}`}
-                      aria-label={`素材 ${index + 1} 来源`}
-                      value={right?.source ?? ""}
-                      onChange={(event) =>
-                        updateMediaRight(reference.url, "source", event.target.value)
-                      }
-                      placeholder="例：品牌自有拍摄 / 已授权供应商"
-                      maxLength={CONTENT_TEMPLATE_PAGE_METADATA.mediaRights.fieldLimits.source}
-                      showCount
-                    />
-                    <label htmlFor={`media-right-authorization-${index}`}>
-                      授权编号 / 存档编号（可选）
-                    </label>
-                    <Input
-                      id={`media-right-authorization-${index}`}
-                      aria-label={`素材 ${index + 1} 授权编号`}
-                      value={right?.authorizationId ?? ""}
-                      onChange={(event) =>
-                        updateMediaRight(reference.url, "authorizationId", event.target.value)
-                      }
-                      placeholder="例：HC-OWN-2026-001"
-                      maxLength={CONTENT_TEMPLATE_PAGE_METADATA.mediaRights.fieldLimits.authorizationId}
-                      showCount
-                    />
-                  </div>
-                );
-              })}
-            </details>
+            <p role="status" aria-live="polite">
+              当前页面引用 {mediaReferences.length} 项素材；具体合格项与阻断项以服务端发布检查为准。
+            </p>
           )}
+          <Button href="/admin/media" target="_blank" rel="noopener noreferrer">
+            在页面素材库登记与审核
+          </Button>
         </section>
         <p
           className="homepage-editor__page-settings-hint"

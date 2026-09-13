@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+// Public SEO is part of the signed release supply chain. Importing its focused
+// specs keeps the root `npm test` and the quality workflow from bypassing them.
+import "./export-public-seo-snapshot.spec.mjs";
+import "./generate-public-seo-artifacts.spec.mjs";
+import "./prerender-public-routes.spec.mjs";
+import "./public-seo-release-contract.spec.mjs";
+import "../server/scripts/database-upgrade-rehearsal.test.mjs";
+
 import {
   releaseStaticWorkflowPaths,
   validateComposeBuildPolicy,
@@ -11,12 +19,23 @@ import {
 } from "./verify-release-images.mjs";
 
 const releaseWorkflow = readFileSync(new URL("../.github/workflows/release-images.yml", import.meta.url), "utf8");
+const qualityWorkflow = readFileSync(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
 const productionEvidenceWorkflow = readFileSync(new URL("../.github/workflows/verify-production-evidence.yml", import.meta.url), "utf8");
 const baseCompose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8");
 const operationsCompose = readFileSync(new URL("../docker-compose.operations.yml", import.meta.url), "utf8");
 const wechatPayCompose = readFileSync(new URL("../docker-compose.wechat-pay.yml", import.meta.url), "utf8");
 const serverDockerfile = readFileSync(new URL("../server/Dockerfile", import.meta.url), "utf8");
+const clientDockerfile = readFileSync(new URL("../client/Dockerfile", import.meta.url), "utf8");
+const operationsShellSources = [
+  "check-backup-health.sh",
+  "restore.sh",
+  "restore-drill.sh",
+  "prune-backups.sh",
+].map((name) => [name, readFileSync(new URL(`../server/scripts/${name}`, import.meta.url), "utf8")]);
+const localRecoveryDrill = readFileSync(new URL("./run-operations-recovery-drill.ps1", import.meta.url), "utf8");
 const reverseProxyVerifier = readFileSync(new URL("./verify-reverse-proxy-security.mjs", import.meta.url), "utf8");
+const environmentExample = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
+const productionRunbook = readFileSync(new URL("../docs/PRODUCTION_RELEASE_RUNBOOK.md", import.meta.url), "utf8");
 
 const gitSha = "a".repeat(40);
 const migrationBundleSha256 = "b".repeat(64);
@@ -27,9 +46,116 @@ const operationsDigest = `sha256:${"e".repeat(64)}`;
 test("static release checks follow all active release workflows", () => {
   assert.deepEqual(releaseStaticWorkflowPaths, [
     ".github/workflows/quality.yml",
+    ".github/workflows/export-public-seo-snapshot.yml",
     ".github/workflows/release-images.yml",
     ".github/workflows/verify-production-evidence.yml",
   ]);
+});
+
+test("clean CI jobs install root verifier dependencies before loading release checks", () => {
+  const qualityInstall = qualityWorkflow.indexOf("npm ci --ignore-scripts");
+  const qualityVerify = qualityWorkflow.indexOf("node scripts/verify-release-images.mjs --static");
+  assert.ok(qualityInstall >= 0 && qualityInstall < qualityVerify);
+  assert.match(qualityWorkflow, /^permissions:\s*\r?\n\s{2}contents: read/m);
+  assert.match(qualityWorkflow, /persist-credentials: false/);
+  assert.match(qualityWorkflow, /ParseFile\(/);
+  assert.match(qualityWorkflow, /scripts\/run-operations-recovery-drill\.ps1/);
+
+  const releaseInstall = releaseWorkflow.indexOf("npm ci --ignore-scripts");
+  const releaseManifestVerify = releaseWorkflow.indexOf(
+    "node scripts/verify-release-images.mjs --manifest release-output/release-manifest.json",
+  );
+  const registryLogin = releaseWorkflow.indexOf("uses: docker/login-action@");
+  const clientInstall = releaseWorkflow.indexOf("npm ci --prefix client");
+  assert.ok(releaseInstall >= 0 && releaseInstall < releaseManifestVerify);
+  assert.ok(clientInstall >= 0 && clientInstall < registryLogin);
+  assert.match(releaseWorkflow, /persist-credentials: false/);
+});
+
+test("release workflow verifies common identity labels on all three image digests", () => {
+  assert.match(releaseWorkflow, /verify_identity "\$SERVER_REFERENCE" server/);
+  assert.match(releaseWorkflow, /verify_identity "\$CLIENT_REFERENCE" client/);
+  assert.match(releaseWorkflow, /verify_identity "\$OPERATIONS_REFERENCE" operations/);
+  for (const label of [
+    "org.opencontainers.image.revision",
+    "io.haichuan.component",
+    "io.haichuan.migration-bundle-sha256",
+  ]) {
+    assert.match(releaseWorkflow, new RegExp(label.replaceAll(".", "\\.")));
+  }
+});
+
+test("client Docker stages and release workflow keep an exact build ARG contract", () => {
+  const stages = clientDockerfile.split(/(?=^FROM\s+)/gm).filter(Boolean);
+  assert.equal(stages.length, 2);
+  assert.match(stages[0], /^FROM\s+\S+\s+AS\s+verify\s*$/m);
+  assert.match(stages[1], /^FROM\s+\S+\s*$/m);
+
+  const argNames = (source) => [...source.matchAll(/^ARG\s+([A-Z][A-Z0-9_]*)(?:=.*)?\s*$/gm)]
+    .map((match) => match[1]);
+  const verifyArgs = [
+    "VITE_API_BASE_URL",
+    "VITE_PUBLIC_SITE_ORIGIN",
+    "VITE_ANALYTICS_ENABLED",
+    "PUBLIC_SEO_SNAPSHOT_HASH",
+    "PUBLIC_SEO_PRERENDER_MANIFEST_SHA256",
+    "PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST",
+  ];
+  const runtimeArgs = [
+    "BUILD_REVISION",
+    "BUILD_SOURCE",
+    "MIGRATION_BUNDLE_SHA256",
+    "PUBLIC_SEO_SNAPSHOT_HASH",
+    "PUBLIC_SEO_PRERENDER_MANIFEST_SHA256",
+    "PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST",
+  ];
+  assert.deepEqual(argNames(stages[0]), verifyArgs);
+  assert.deepEqual(argNames(stages[1]), runtimeArgs);
+
+  const clientBuildStep = releaseWorkflow.match(
+    /- name: \u6784\u5efa\u5e76\u63a8\u9001\u5ba2\u6237\u7aef\u955c\u50cf\r?\n(?<body>[\s\S]*?)(?=\r?\n\s{6}- name:)/,
+  );
+  assert.ok(clientBuildStep, "client image build step missing");
+  const workflowArgs = [...clientBuildStep.groups.body.matchAll(/^\s{12}([A-Z][A-Z0-9_]*)=/gm)]
+    .map((match) => match[1]);
+  assert.deepEqual(workflowArgs, [
+    "BUILD_REVISION",
+    "BUILD_SOURCE",
+    "MIGRATION_BUNDLE_SHA256",
+    "VITE_API_BASE_URL",
+    "VITE_PUBLIC_SITE_ORIGIN",
+    "VITE_ANALYTICS_ENABLED",
+    "PUBLIC_SEO_SNAPSHOT_HASH",
+    "PUBLIC_SEO_PRERENDER_MANIFEST_SHA256",
+    "PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST",
+  ]);
+  assert.deepEqual(
+    [...new Set([...verifyArgs, ...runtimeArgs])].sort(),
+    [...workflowArgs].sort(),
+  );
+});
+
+test("production migration gate binds trigger privilege and binary-log policy evidence", () => {
+  for (const key of [
+    "MIGRATION_TARGET_ENVIRONMENT_ID",
+    "MIGRATION_EXPECTED_DATABASE",
+    "MIGRATION_APPROVAL_REFERENCE_SHA256",
+    "MIGRATION_ACCOUNT_CAPABILITY_EVIDENCE_SHA256",
+    "MIGRATION_TRIGGER_POLICY_EVIDENCE_SHA256",
+  ]) {
+    assert.match(environmentExample, new RegExp(`^${key}=$`, "m"));
+  }
+  for (const required of [
+    "TRIGGER",
+    "@@GLOBAL.log_bin",
+    "@@GLOBAL.log_bin_trust_function_creators",
+    "MySQL 1419",
+    "MySQL 1449",
+    "20260913121000_enforce_quotation_conversion_invariants",
+    "不能直接盲重跑",
+  ]) {
+    assert.ok(productionRunbook.includes(required), `missing migration account gate: ${required}`);
+  }
 });
 
 test("production evidence workflow verifies but never signs operator artifacts", () => {
@@ -87,7 +213,12 @@ test("release workflow rejects non-default or unprotected release refs before qu
 test("backup execution is immutable inside the attested operations image", () => {
   assert.match(baseCompose, /^  backup:\s*\r?\n\s{4}image:\s*"\$\{OPERATIONS_IMAGE_NAME:\?OPERATIONS_IMAGE_NAME is required\}@sha256:\$\{OPERATIONS_IMAGE_DIGEST:\?OPERATIONS_IMAGE_DIGEST is required\}"/m);
   assert.doesNotMatch(baseCompose, /\.\/server\/scripts\/(?:backup|check-backup-health)\.sh/);
-  assert.match(serverDockerfile, /RUN apk add --no-cache bash mariadb-client openssl/);
+  assert.match(serverDockerfile, /node:22-bookworm-slim@sha256:[a-f0-9]{64}/);
+  assert.match(serverDockerfile, /apt-get install -y --no-install-recommends default-mysql-client openssl/);
+  assert.match(
+    serverDockerfile,
+    /^RUN npm ci --omit=dev --include=optional --legacy-peer-deps \\\r?\n\s+&& rm -rf node_modules\/prisma node_modules\/\.bin\/prisma\s*$/m,
+  );
   for (const script of [
     "backup.sh",
     "check-backup-health.sh",
@@ -103,6 +234,24 @@ test("backup execution is immutable inside the attested operations image", () =>
   assert.match(releaseWorkflow, /id: operations-provenance/);
   assert.match(releaseWorkflow, /id: operations-sbom/);
   assert.match(releaseWorkflow, /runtimeExecutables/);
+  assert.match(releaseWorkflow, /SERVER_RUNTIME_DEPENDENCY_INVALID:@nestjs\/common/);
+  assert.match(releaseWorkflow, /\['@nestjs\/common', '@prisma\/client', 'bcrypt'\]/);
+});
+
+test("backup manifest SHA validation is portable across the operations image awk", () => {
+  for (const [name, source] of operationsShellSources) {
+    assert.match(source, /length\(\$1\) != 64/, name);
+    assert.doesNotMatch(source, /\$1\s*!~\s*\/\^\[0-9a-fA-F\]\{64\}\$\//, name);
+  }
+});
+
+test("local recovery drill is isolated, credential-safe and keeps production RTO unverified", () => {
+  assert.match(localRecoveryDrill, /hc-ops-rehearsal-/);
+  assert.match(localRecoveryDrill, /administratorLoginAfterRestore = \$true/);
+  assert.match(localRecoveryDrill, /businessRtoMet = 'UNVERIFIED'/);
+  assert.match(localRecoveryDrill, /cleanupRemaining/);
+  assert.doesNotMatch(localRecoveryDrill, /Get-Content[^\r\n]*\.env|--env-file/);
+  assert.doesNotMatch(localRecoveryDrill, /accessToken\s*\)|console\.log\([^\r\n]*accessToken/);
 });
 
 test("production Compose rejects invalid service structures", () => {
@@ -188,6 +337,12 @@ function validManifest() {
       provenancePredicateType: "https://slsa.dev/provenance/v1",
       sbomPredicateType: "https://spdx.dev/Document/v2.3",
       manifestPredicateType: "https://slsa.dev/provenance/v1",
+    },
+    publicSeo: {
+      snapshotHash: "1".repeat(64),
+      prerenderManifestSha256: "2".repeat(64),
+      sourceArtifactId: 5678,
+      sourceArtifactDigest: `sha256:${"3".repeat(64)}`,
     },
     server: {
       image: "ghcr.io/example/haichuan-server",
@@ -326,6 +481,21 @@ test("rejects an unknown manifest schema", () => {
   expectCode((manifest) => {
     manifest.schemaVersion = 2;
   }, "RELEASE_MANIFEST_SCHEMA_INVALID");
+});
+
+test("release manifest requires exact immutable public SEO evidence", () => {
+  expectCode((manifest) => {
+    delete manifest.publicSeo;
+  }, "RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
+  expectCode((manifest) => {
+    manifest.publicSeo.snapshotHash = "not-a-digest";
+  }, "RELEASE_MANIFEST_PUBLIC_SEO_INVALID");
+  expectCode((manifest) => {
+    manifest.publicSeo.sourceArtifactId = 0;
+  }, "RELEASE_MANIFEST_PUBLIC_SEO_INVALID");
+  expectCode((manifest) => {
+    manifest.publicSeo.untrusted = true;
+  }, "RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
 });
 
 test("release environment refuses floating tags, manifest drift and invalid backup/volume policy", () => {

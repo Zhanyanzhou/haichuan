@@ -86,6 +86,7 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
       await expect(page.locator("#cf-name")).toHaveAttribute("autocomplete", "name");
       await expect(page.locator("#cf-phone")).toHaveAttribute("autocomplete", "tel-national");
       await expect(page.locator("#cf-phone")).toHaveAttribute("inputmode", "numeric");
+      await expect(page.locator("#cf-email")).toHaveAttribute("autocomplete", "email");
       await expect(submit).toHaveAttribute("type", "submit");
       await submit.press("Enter");
 
@@ -124,6 +125,30 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
     });
   }
 
+  test("电子邮件偏好要求选填邮箱，并保留手机号必填合同", async ({ page }) => {
+    let inquiryRequests = 0;
+    await mockServiceApis(page, async (route) => {
+      inquiryRequests += 1;
+      await fulfill(route, { id: 1 });
+    });
+    await page.goto("/contact");
+    await fillRequiredContactFields(page);
+    await page.locator("#cf-contact").selectOption("电子邮件");
+    await page.getByRole("button", { name: "提交需求" }).click();
+
+    await expect(page.locator("#cf-email")).toBeFocused();
+    await expect(page.locator("#cf-email-error"))
+      .toHaveText("选择电子邮件联系时请填写邮箱");
+    expect(inquiryRequests).toBe(0);
+
+    await page.locator("#cf-phone").fill("");
+    await page.locator("#cf-email").fill("visitor@example.com");
+    await page.getByRole("button", { name: "提交需求" }).click();
+    await expect(page.locator("#cf-phone")).toBeFocused();
+    await expect(page.locator("#cf-phone-error")).toHaveText("请输入正确的手机号码");
+    expect(inquiryRequests).toBe(0);
+  });
+
   test("提交中阻止重复请求，成功后聚焦结果标题", async ({ page }) => {
     let inquiryRequests = 0;
     let releaseInquiry = () => {};
@@ -152,16 +177,37 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
     expect(inquiryRequests).toBe(1);
   });
 
-  test("提交失败以 alert 呈现且不伪造成功", async ({ page }) => {
+  test("电子邮件偏好提交失败保留输入，重试只确认需求已保存", async ({ page }) => {
+    const bodies: Array<Record<string, unknown>> = [];
     await mockServiceApis(page, async (route) => {
-      await fulfill(route, { statusCode: 500, message: "提交服务暂时不可用" }, 500);
+      bodies.push(route.request().postDataJSON());
+      if (bodies.length === 1) {
+        await fulfill(route, { statusCode: 500, message: "提交服务暂时不可用" }, 500);
+        return;
+      }
+      await fulfill(route, { id: 1 });
     });
     await page.goto("/contact");
     await fillRequiredContactFields(page);
+    await page.locator("#cf-email").fill("visitor@example.com");
+    await page.locator("#cf-contact").selectOption("电子邮件");
     await page.getByRole("button", { name: "提交需求" }).press("Enter");
 
     await expect(page.locator("form").getByRole("alert")).toBeVisible();
     await expect(page.getByRole("heading", { name: "需求已提交" })).toHaveCount(0);
+    await expect(page.locator("#cf-phone")).toHaveValue("13800000000");
+    await expect(page.locator("#cf-email")).toHaveValue("visitor@example.com");
+    await expect(page.locator("#cf-contact")).toHaveValue("电子邮件");
+
+    await page.getByRole("button", { name: "提交需求" }).click();
+    await expect(page.getByRole("heading", { name: "需求已提交" })).toBeVisible();
+    await expect(page.getByText("邮件已送达")).toHaveCount(0);
+    expect(bodies).toHaveLength(2);
+    for (const body of bodies) {
+      expect(body.customerPhone).toBe("13800000000");
+      expect(body.customerEmail).toBe("visitor@example.com");
+      expect(body.preferredContact).toBe("电子邮件");
+    }
   });
 });
 

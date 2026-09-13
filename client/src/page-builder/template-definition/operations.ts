@@ -2017,9 +2017,16 @@ export function moveDynamicTemplateNodeToLanding(
 
 export type DynamicTemplateLayoutGroupKind = "vertical" | "horizontal" | "columns" | "empty";
 
-export function getDynamicTemplateLayoutGroupNodeType(kind: DynamicTemplateLayoutGroupKind): DynamicTemplateNodeType {
+export function getDynamicTemplateLayoutGroupNodeType(
+  kind: DynamicTemplateLayoutGroupKind,
+  parentType?: DynamicTemplateNodeType,
+): DynamicTemplateNodeType {
   if (kind === "horizontal") return "Row";
   if (kind === "columns") return "Grid";
+  // Row 只接受 Column 作为可继续容纳内容的纵向子组。这里仍保持“上下排列”
+  // 的用户意图，但选择当前父级合法的原生节点，避免用户能建外层左右组、却
+  // 无法继续建立图片组和文字组的死路。
+  if (parentType === "Row") return "Column";
   return "Stack";
 }
 
@@ -2038,7 +2045,7 @@ export function addDynamicTemplateLayoutGroup(
   kind: DynamicTemplateLayoutGroupKind,
   index?: number,
 ): { definition: TemplateDefinitionV2; nodeId: string } {
-  const type = getDynamicTemplateLayoutGroupNodeType(kind);
+  const type = getDynamicTemplateLayoutGroupNodeType(kind, definition.nodes[parentId]?.type);
   const result = addDynamicTemplateNode(definition, parentId, type, index);
   const next = cloneDefinition(result.definition);
   next.nodes[result.nodeId].name = getLayoutGroupName(kind);
@@ -2068,8 +2075,8 @@ export function groupDynamicTemplateNodes(
   ) {
     throw new DynamicTemplateOperationError("GROUP_REQUIRES_CONTIGUOUS_SIBLINGS", "只能组合连续排列的同级对象。");
   }
-  const groupType = getDynamicTemplateLayoutGroupNodeType(kind);
   const parent = definition.nodes[parentId];
+  const groupType = getDynamicTemplateLayoutGroupNodeType(kind, parent.type);
   if (!canNestDynamicTemplateNode(parent.type, groupType)) {
     throw new DynamicTemplateOperationError("ILLEGAL_NESTING", "当前上级不接受这种布局分组。");
   }

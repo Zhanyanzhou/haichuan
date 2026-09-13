@@ -9,6 +9,8 @@ export interface AdminAccessTokenPayload {
   sub: number;
   type: 'admin';
   tokenUse: 'access';
+  /** 新签发的员工访问令牌绑定到服务端 refresh family，便于改密、禁用和退出后立即吊销。 */
+  sessionFamilyId?: string;
   username?: string;
   role?: Role;
 }

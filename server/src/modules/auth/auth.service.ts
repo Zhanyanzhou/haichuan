@@ -5,6 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import type { User } from '@prisma/client';
 import { ApiError } from '../../common/errors/api-error';
+import type { AdminAccessTokenPayload } from '../../common/security/authenticated-principal';
 
 type SafeStaff = Omit<User, 'password'>;
 
@@ -104,8 +105,8 @@ export class AuthService {
     return result;
   }
 
-  async login(user: SafeStaff) {
-    const accessToken = this.issueAccessToken(user);
+  async login(user: SafeStaff, sessionFamilyId?: string) {
+    const accessToken = this.issueAccessToken(user, sessionFamilyId);
 
     // 更新最后登录信息
     await this.prisma.user.update({
@@ -125,14 +126,14 @@ export class AuthService {
     };
   }
 
-  async resume(userId: number) {
+  async resume(userId: number, sessionFamilyId?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.status === 'DISABLED') {
       throw new UnauthorizedException('账号无效或已被禁用');
     }
     const { password: _, ...safeUser } = user;
     return {
-      accessToken: this.issueAccessToken(safeUser),
+      accessToken: this.issueAccessToken(safeUser, sessionFamilyId),
       user: {
         id: safeUser.id,
         username: safeUser.username,
@@ -145,6 +146,7 @@ export class AuthService {
 
   private issueAccessToken(
     user: Pick<SafeStaff, 'id' | 'username' | 'role'>,
+    sessionFamilyId?: string,
   ) {
     return this.jwtService.sign(
       {
@@ -153,9 +155,33 @@ export class AuthService {
         tokenUse: 'access',
         username: user.username,
         role: user.role,
+        ...(sessionFamilyId ? { sessionFamilyId } : {}),
       },
       { expiresIn: '15m' },
     );
+  }
+
+  async resolveRevocableAccessSession(accessToken: string): Promise<{
+    userId: number;
+    familyId: string;
+  } | null> {
+    try {
+      const payload = await this.jwtService.verifyAsync<AdminAccessTokenPayload>(
+        accessToken,
+      );
+      if (
+        payload.type !== 'admin'
+        || payload.tokenUse !== 'access'
+        || !Number.isInteger(payload.sub)
+        || typeof payload.sessionFamilyId !== 'string'
+        || !payload.sessionFamilyId
+      ) {
+        return null;
+      }
+      return { userId: payload.sub, familyId: payload.sessionFamilyId };
+    } catch {
+      return null;
+    }
   }
 
   async register(data: { username: string; password: string; realName?: string; phone?: string }) {

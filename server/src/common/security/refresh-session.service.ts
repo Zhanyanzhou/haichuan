@@ -13,6 +13,7 @@ export type SessionMetadata = {
 type IssuedRefreshSession = {
   refreshToken: string;
   expiresAt: Date;
+  familyId: string;
 };
 
 function sha256(value: string): string {
@@ -45,16 +46,17 @@ export class RefreshSessionService {
   ): Promise<IssuedRefreshSession> {
     const refreshToken = createOpaqueToken();
     const expiresAt = new Date(Date.now() + REFRESH_SESSION_TTL_MS);
+    const familyId = randomUUID();
     await this.prisma.adminRefreshSession.create({
       data: {
         userId,
         tokenHash: sha256(refreshToken),
-        familyId: randomUUID(),
+        familyId,
         expiresAt,
         ...sessionMetadata(metadata),
       },
     });
-    return { refreshToken, expiresAt };
+    return { refreshToken, expiresAt, familyId };
   }
 
   async issueCustomer(
@@ -83,17 +85,18 @@ export class RefreshSessionService {
   ): Promise<IssuedRefreshSession> {
     const refreshToken = createOpaqueToken();
     const expiresAt = new Date(Date.now() + REFRESH_SESSION_TTL_MS);
+    const familyId = randomUUID();
     await client.customerRefreshSession.create({
       data: {
         customerId,
         tokenHash: sha256(refreshToken),
-        familyId: randomUUID(),
+        familyId,
         expiresAt,
         authVersion,
         ...sessionMetadata(metadata),
       },
     });
-    return { refreshToken, expiresAt };
+    return { refreshToken, expiresAt, familyId };
   }
 
   async rotateAdmin(
@@ -155,7 +158,12 @@ export class RefreshSessionService {
       await this.revokeAdminFamily(current.familyId, now);
       throw new UnauthorizedException("刷新会话已失效，请重新登录");
     }
-    return { refreshToken: nextToken, expiresAt, userId: current.userId };
+    return {
+      refreshToken: nextToken,
+      expiresAt,
+      familyId: current.familyId,
+      userId: current.userId,
+    };
   }
 
   async rotateCustomer(
@@ -226,6 +234,7 @@ export class RefreshSessionService {
     return {
       refreshToken: nextToken,
       expiresAt,
+      familyId: current.familyId,
       customerId: current.customerId,
     };
   }
@@ -258,6 +267,16 @@ export class RefreshSessionService {
   async revokeAllCustomer(customerId: number): Promise<void> {
     await this.prisma.customerRefreshSession.updateMany({
       where: { customerId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  async revokeAdminFamilyForUser(
+    userId: number,
+    familyId: string,
+  ): Promise<void> {
+    await this.prisma.adminRefreshSession.updateMany({
+      where: { userId, familyId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
   }

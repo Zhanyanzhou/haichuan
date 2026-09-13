@@ -14,6 +14,12 @@ const PRODUCT_IMAGE_TYPES = ["FRONT", "SIDE", "TOP", "DETAIL", "WEARING"];
 
 export class AddProductImageDto {
   @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: "媒体资产标识必须是整数" })
+  @Min(1, { message: "媒体资产标识必须大于0" })
+  mediaAssetId?: number;
+
+  @IsOptional()
   @IsString({ message: "图片地址必须是字符串" })
   @MaxLength(500, { message: "图片地址不能超过500个字符" })
   url?: string;

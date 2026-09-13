@@ -5,6 +5,7 @@ export const COMMERCE_RELEASE_PROFILE: ReleaseProfile = RELEASE_PROFILES[1];
 
 export const RELEASE_RUNTIME_GATE_KEYS = [
   "customer-commerce",
+  "customer-quotation-ordering",
   "payment-gateway-transactions",
   "payment-gateway-refunds",
 ] as const;
@@ -12,6 +13,7 @@ export type ReleaseRuntimeGateKey = (typeof RELEASE_RUNTIME_GATE_KEYS)[number];
 
 export type ReleaseRuntimeGateEnvironment = {
   CUSTOMER_COMMERCE_ENABLED?: string;
+  CUSTOMER_QUOTATION_ORDERING_ENABLED?: string;
   PAYMENT_GATEWAY_TRANSACTIONS_ENABLED?: string;
   PAYMENT_GATEWAY_REFUNDS_ENABLED?: string;
 };
@@ -30,31 +32,31 @@ export const COMMERCE_CODE_READINESS = [
     capability: "frontend-payment-visibility-contract",
     ready: false,
     summary:
-      "公开 flags 当前把 paymentEnabled 等同于客户交易开关，尚未与支付网关交易门禁分别对齐",
+      "公开 flags 已区分报价确认、客户交易和支付网关门禁；尚缺生产 React/Nginx 与真实 Chrome 对开关组合的隔离验收",
   },
   {
     capability: "three-quotation-channels",
     ready: false,
     summary:
-      "零售与定制报价已有版本化基础，但合作蜡模仍因设计版本、价格协议和资源门禁缺失而安全暂停",
+      "零售、定制和合作蜡模的版本、价格、设计与资源门禁代码已接线；尚缺三通道真实 MySQL/Nest/UI 全旅程证据",
   },
   {
     capability: "customer-self-confirmation-entry",
     ready: false,
     summary:
-      "客户本人接受报价的服务逻辑已存在，但尚无受客户认证保护的 HTTP 入口",
+      "客户本人读取、文件确认和报价成交 HTTP 入口已由客户认证保护；尚缺真实客户隔离、权限失败与重启回读证据",
   },
   {
     capability: "transactional-quotation-conversion-entry",
     ready: false,
     summary:
-      "同事务转单逻辑已有目标测试，但客户入口尚未接线，非标准定制项与合作蜡模仍失败关闭",
+      "三通道已接入 Serializable 同事务转单、幂等键和请求哈希；尚缺真实数据库并发、重复请求及回滚矩阵证据",
   },
   {
     capability: "inventory-and-price-snapshots",
     ready: false,
     summary:
-      "标准零售已有 Inventory、SKU 成交价与订单快照，定制产能/材料及合作蜡模资源和完整快照尚未闭环",
+      "零售库存、定制与合作资源预占、不可变报价及订单交易快照代码已建立；尚缺真实数据库逐字段和服务重启验收",
   },
   {
     capability: "payment-refund-reconciliation-code",
@@ -113,6 +115,10 @@ export function evaluateReleaseRuntimeGates(
       environmentVariable: "CUSTOMER_COMMERCE_ENABLED" as const,
     },
     {
+      capability: "customer-quotation-ordering" as const,
+      environmentVariable: "CUSTOMER_QUOTATION_ORDERING_ENABLED" as const,
+    },
+    {
       capability: "payment-gateway-transactions" as const,
       environmentVariable: "PAYMENT_GATEWAY_TRANSACTIONS_ENABLED" as const,
     },
@@ -144,6 +150,25 @@ export function isCustomerCommerceEnabled(
   commerceFlag = process.env.CUSTOMER_COMMERCE_ENABLED,
 ) {
   return isCommerceFeatureEnabled(releaseProfile, commerceFlag);
+}
+
+/**
+ * 客户报价确认转单独立于零售结算和支付网关；缺失或非严格 true 时安全关闭。
+ * 发布档位仍是父级门禁，避免 lead-generation 环境误开放交易写入。
+ */
+export function isCustomerQuotationOrderingEnabled(
+  releaseProfile = process.env.RELEASE_PROFILE,
+  quotationOrderingFlag = process.env.CUSTOMER_QUOTATION_ORDERING_ENABLED,
+) {
+  return isCommerceFeatureEnabled(releaseProfile, quotationOrderingFlag);
+}
+
+/** 新建在线支付交易的公开可见门禁；不影响既有支付的回调、查单与对账。 */
+export function isPaymentGatewayTransactionsEnabled(
+  releaseProfile = process.env.RELEASE_PROFILE,
+  paymentTransactionsFlag = process.env.PAYMENT_GATEWAY_TRANSACTIONS_ENABLED,
+) {
+  return isCommerceFeatureEnabled(releaseProfile, paymentTransactionsFlag);
 }
 
 /**

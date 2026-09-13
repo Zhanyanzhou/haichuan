@@ -53,6 +53,12 @@ function createFixture(releaseProfile = "lead-generation") {
       sbomPredicateType: "https://spdx.dev/Document/v2.3",
       manifestPredicateType: "https://slsa.dev/provenance/v1",
     },
+    publicSeo: {
+      snapshotHash: sha("f"),
+      prerenderManifestSha256: sha("0"),
+      sourceArtifactId: 456,
+      sourceArtifactDigest: `sha256:${sha("9")}`,
+    },
     server: image("server", "c"),
     client: image("client", "d"),
     operations: {

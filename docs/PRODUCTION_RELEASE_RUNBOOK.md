@@ -20,6 +20,19 @@ npm run test:release-supply-chain
 npm run verify:release-images
 ```
 
+### 1.1 PageDocument 内容发布与公开路由激活
+
+后台把 PageDocument 标记为已发布，只会更新数据库中的已审核发布事实，不会修改正在运行的 client 镜像，也不会授予运行时进程生成 Nginx 路由或读取生产库的隐式权限。英文公开路由继续失败关闭：只有存在于该 client 镜像所绑定不可变 SEO snapshot 中的精确路径才返回 200；未发布、校验失败、未进入快照或未知的英文路径均返回英文 404。中文既有公开路由合同不因英文发布而改变。
+
+需要让新发布、回滚或取消发布的 PageDocument 在公网生效时，必须把它作为一次新的内容制品发布处理：
+
+1. 在后台完成保存、独立审核与发布，并确认匿名 published API 返回预期 locale、revision 和 content hash；此时直接访问尚未进入当前镜像的英文路由仍应为 404。
+2. 对同一个受保护代码 SHA 手动运行 `Export Public SEO Snapshot`，由 `public-seo-production` 环境中的专用只读数据库账号重新导出发布事实；不得手工编辑 snapshot，也不得复用发布前的 artifact。
+3. 记录新 artifact ID、artifact digest 与 snapshot hash，再以该 artifact ID 运行 `Release Images`。工作流只接受同仓、同 SHA、来源工作流成功且摘要匹配的唯一 JSON，并把 snapshot、预渲染清单与精确 Nginx 路由表冻结到新的 client digest。
+4. 按正常部署审批将新的固定 client digest 替换到目标环境；数据库发布本身不授权构建、部署或切流。替换后从真实 Nginx 回源验证目标英文路径为 200、对应中文路径不受影响、至少一个未发布英文路径和一个未知英文路径仍为 404，并核对镜像上的三个 public SEO label 与本次 artifact 一致。
+
+取消发布和内容回滚遵循同一方向：数据库状态改变后必须重新导出快照、构建并部署新 client digest；旧 digest 会继续服务它冻结时的路由和 HTML，不能把“数据库已取消发布”误报为公网已经撤下。需要紧急下线时，应按获批的流量隔离或固定 digest 回滚流程处理，不能放宽英文 SPA fallback。
+
 取得真实制品后，先验证 manifest 和 sidecar，再逐一验证 registry 中的镜像证明；`owner/repo`、SHA 与 digest 必须取自本次已批准清单，而不是从 manifest 反向复制为“预期值”：
 
 ```bash
@@ -78,7 +91,7 @@ docker compose --env-file <受控环境文件> -f docker-compose.yml \
 docker compose --env-file <受控环境文件> -f docker-compose.yml ps mysql
 ```
 
-只有 `mysql` 显示 healthy 后，才能运行下列一次性 operations。若目标数据库由外部平台管理，则用平台证据证明目标实例 ready，不执行上面的本地 MySQL 命令。无论哪一种，都必须先完成 migration 状态核对、获批 migration 和只读 preflight，之后才能启动应用服务。
+只有 `mysql` 显示 healthy 后，才能运行下列一次性 operations。若目标数据库由外部平台管理，则用平台证据证明目标实例 ready，不执行上面的本地 MySQL 命令。无论哪一种，都必须先完成 migration 状态核对、获批 migration、迁移账号能力核对和只读 preflight，之后才能启动应用服务。
 
 ```bash
 docker compose --env-file <受控环境文件> \
@@ -94,7 +107,18 @@ docker compose --env-file <受控环境文件> \
 
 `migration-status` 只读检查不授权 `migrate deploy`。实际 migration 必须另有目标库、待执行清单、备份回滚点、执行人与窗口批准；本 runbook 不把该批准隐含在命令中。
 
-若只读预检证明没有启用的 `SUPER_ADMIN`，才运行一次 `bootstrap-admin`。新密码须符合 D.25 的 6–18 位校验，通过一次性环境注入，命令结束立即清除；证据只记录结果、启用超管数量、operations digest 和审批引用哈希。已有合格超管时不得重复初始化。
+当前 migration bundle 含 `CREATE TRIGGER`。执行前必须把以下两类独立证据绑定到同一 `MIGRATION_TARGET_ENVIRONMENT_ID`、`MIGRATION_EXPECTED_DATABASE`、精确迁移账号和审批引用，并保存证据文件的小写 SHA-256：
+
+1. 账号能力：DBA 或托管平台导出的有效授权证明该账号对目标库具备本批次全部 DDL 权限，其中明确包含 `TRIGGER`；不得以 root、管理员账号或另一环境的成功结果替代。
+2. binary log 策略：记录 `@@GLOBAL.log_bin` 与 `@@GLOBAL.log_bin_trust_function_creators`。若 `log_bin=ON`，则必须由 DBA/托管平台预先确认并按该平台受支持方式使 `log_bin_trust_function_creators=ON`，或提供经审定的等价策略；普通账号即使具备 `TRIGGER`，在 trust 保持 OFF 且没有 `SUPER` 时仍会以 MySQL 1419 阻断 `CREATE TRIGGER`。托管服务不提供 `SUPER` 或不允许该参数时，本批次 migration 阻断，不能临时提升应用账号、改历史 migration 或把本地高权限容器结果当作放行依据。
+
+只有上述证据及 `.env.example` 中五个 `MIGRATION_*` 绑定字段完整后，才可在另行批准的窗口使用精确迁移账号执行 `prisma migrate deploy`。`20260913121000_enforce_quotation_conversion_invariants` 的 trigger 未指定显式 `DEFINER`，因此创建者账号会成为长期 definer：迁移完成后不得删除该身份；应按 DBA 审定方案锁定账号并把运行期权限收敛到触发器执行所需最小集合，同时保留可审计的身份恢复方案。删除 definer 会使相关业务写入以 MySQL 1449 失败。
+
+若该 migration 中断，先停止且不能直接盲重跑。当前 SQL 在首个 `CREATE TRIGGER` 前只有临时 guard；本轮精确 1419 复现未产生 m55 trigger 或后置 CHECK，但 `_prisma_migrations` 已留下 unfinished。目标环境仍必须由 DBA 对照 migration SQL、ledger、实际约束与 trigger 清单确认是否存在部分应用，再按 Prisma 官方失败迁移恢复流程制定并审批处置方案，不能从本地复现外推目标库状态。
+
+若只读预检证明没有启用的 `SUPER_ADMIN`，才运行一次 `bootstrap-admin`。受控环境必须同时提供 `BOOTSTRAP_ADMIN_TARGET_CLASS=production`、目标环境 ID、预期数据库名、审批引用和专用 `BOOTSTRAP_DATABASE_URL`；CLI 在连接前核对 URL 库名，连接后用 `SELECT DATABASE()` 再核对当前库，任一缺失或不匹配均在密码哈希和写入前失败关闭。新密码须符合 D.25 的 6–18 位校验，通过一次性环境注入，命令结束立即清除；输出与审计只记录环境、数据库及审批引用哈希，不记录连接串、凭据或审批原文。已有合格超管时不得重复初始化。
+
+`synthetic-test` 仅供隔离本地 QA：目标环境 ID 和专属数据库名都必须显式包含 `synthetic`、`test`、`qa`、`isolated` 或 `rehearsal` 标识。它不会自动降级生产门禁，也不能作为生产初始化证据。
 
 在获批的目标环境中，首管理员使用 operations 入口，不运行 Demo Seed：
 
@@ -135,6 +159,18 @@ unset BOOTSTRAP_ADMIN_USERNAME BOOTSTRAP_ADMIN_PASSWORD
 
 脚本从受清单保护的快照元数据读取恢复点，记录数据库与媒体恢复耗时、RPO/RTO 目标、表与 migration 数量及证据哈希。它明确写入 `BUSINESS_RTO_MET=UNVERIFIED`；最终 RTO 必须累加故障发现、目标准备、数据库与媒体恢复、服务 `/api/ready`/登录/smoke 和切流时间，再由生产证据验证器裁决。
 
+### 3.1 本地隔离恢复闭环
+
+在 Windows + Docker Desktop 上，可从仓库根目录运行：
+
+```powershell
+pwsh -NoProfile -File scripts/run-operations-recovery-drill.ps1
+```
+
+该入口不读取 `.env`，只创建带随机 `hc-ops-rehearsal-*` 前缀的本地镜像、容器、网络和命名卷，并使用合成账号与合成数据。它会按当前 migration bundle 构建 Node 22 server/operations 镜像，执行 migration、一次性首管理员初始化、数据库与 uploads/private-media 同批备份、`check-backup-health.sh`、隔离空库与空媒体卷恢复、MySQL/服务端容器重建，以及 `/api/health`、`/api/ready`、恢复后合成管理员登录和恢复前后 SHA-256 指纹核对。登录探针只记录成功布尔值，不输出密码或 token。成功或失败都会只清理该随机前缀下的资源；最终 JSON 必须同时满足 `result=passed`、`healthReadyBeforeAndAfterServerRecreation=true`、`administratorLoginAfterRestore=true` 和 `cleanupRemaining=0`。
+
+这个闭环只证明当前工作树在本机合成环境中的脚本、镜像和持久化路径可执行。它固定保留 `businessRtoMet=UNVERIFIED`，不能替代目标环境的真实数据库/媒体、外部不可变备份副本、管理员首次登录、核心业务 smoke、DNS/TLS/CSP、监控告警送达、切流或回滚证据，也不授权任何生产操作。
+
 ## 4. 边缘、告警与最终证据
 
 外部 TLS/域名验收至少包括：正式域名解析、证书链和有效期、HTTP 到 HTTPS 跳转、可信代理头、HSTS、CSP。只保存证据文件哈希；私钥、DNS/API token 和真实监控端点留在受控系统。
@@ -155,7 +191,7 @@ JSON receipt 只是一条结构化 claim，不具备独立证明力。每个 rec
 | --- | --- |
 | runtime identity | 在已拉取 digest 上执行 `node scripts/verify-release-images.mjs --runtime`；该脚本只读取 allowlist 中的 RepoDigest 与 OCI label |
 | Compose contract | 执行 `node scripts/verify-release-images.mjs --manifest <path> --environment` 与 `docker compose ... config --images`，确认全部是批准的 digest |
-| database / admin / feature gates | 使用已批准的 operations digest 实际执行 `migration-status`、只读 `release-preflight`，仅在需要时执行获批的一次性 `bootstrap-admin` |
+| database / admin / feature gates | 使用已批准的 operations digest 实际执行 `migration-status`、只读 `release-preflight`；以同一目标和精确迁移账号的独立证据证明包含 `TRIGGER` 的 DDL 能力，并在 binary log 开启时证明受支持的 `log_bin_trust_function_creators` 策略；仅在需要时执行获批的一次性 `bootstrap-admin` |
 | storage | 对目标 Docker/编排 API 核对三个独立持久卷、实际挂载和重建后持久性；仓库目前没有可独立替代目标平台 API 的通用命令 |
 | recovery | 执行 `check-backup-health.sh`、获批的隔离 `restore-drill.sh`，并从监控/切流系统取得完整端到端 RTO 时间 |
 | edge / observability | 从独立网络观察点验证 DNS/TLS/重定向/安全头；通过监控提供商 API 触发并确认一次安全告警演练 |

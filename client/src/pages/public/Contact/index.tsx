@@ -33,7 +33,7 @@ const CONSULT_TYPES = [
   "到店咨询",
   "其他",
 ];
-const CONTACT_METHODS = ["电话", "短信"];
+const CONTACT_METHODS = ["电话", "短信", "电子邮件"];
 const TIME_OPTIONS = [
   "上午 (9:00-12:00)",
   "下午 (14:00-18:00)",
@@ -68,6 +68,7 @@ type ProductContextStatus = "none" | "loading" | "ready" | "unavailable" | "erro
 const REQUIRED_FIELDS = [
   "name",
   "phone",
+  "email",
   "consultationType",
   "message",
   "privacyConsent",
@@ -76,6 +77,7 @@ type RequiredField = (typeof REQUIRED_FIELDS)[number];
 const FIELD_IDS: Record<RequiredField, string> = {
   name: "cf-name",
   phone: "cf-phone",
+  email: "cf-email",
   consultationType: "cf-type",
   message: "cf-message",
   privacyConsent: "cf-privacy-consent",
@@ -83,6 +85,7 @@ const FIELD_IDS: Record<RequiredField, string> = {
 const ERROR_IDS: Record<RequiredField, string> = {
   name: "cf-name-error",
   phone: "cf-phone-error",
+  email: "cf-email-error",
   consultationType: "cf-type-error",
   message: "cf-message-error",
   privacyConsent: "cf-privacy-consent-error",
@@ -210,6 +213,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
   const [form, setForm] = useState({
     name: savedCustomer?.name || "",
     phone: savedCustomer?.phone || "",
+    email: savedCustomer?.email || "",
     consultationType: preselectedConsultationType,
     preferredContact: "电话",
     preferredTime: "",
@@ -322,6 +326,10 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     if (!form.name.trim()) e.name = "请输入姓名";
     if (!/^1[3-9]\d{9}$/.test(form.phone.trim()))
       e.phone = "请输入正确的手机号码";
+    if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()))
+      e.email = "请输入正确的电子邮箱";
+    else if (form.preferredContact === "电子邮件" && !form.email.trim())
+      e.email = "选择电子邮件联系时请填写邮箱";
     if (!form.consultationType) e.consultationType = "请选择咨询类型";
     if (!form.message.trim()) e.message = "请描述您的需求";
     else if (form.message.trim().length > 2000) e.message = "需求描述不能超过2000个字符";
@@ -345,6 +353,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
         {
           name: form.name.trim(),
           phone: form.phone.trim(),
+          email: form.email.trim() || undefined,
           consultationType: form.consultationType,
           preferredContact: form.preferredContact,
           preferredTime: form.preferredTime || undefined,
@@ -842,6 +851,39 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   )}
                 </div>
               </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={lblS} htmlFor="cf-email">
+                  电子邮箱（选填）
+                </label>
+                <input
+                  id="cf-email"
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  aria-invalid={errors.email ? true : undefined}
+                  aria-describedby={errors.email ? ERROR_IDS.email : undefined}
+                  style={{
+                    ...inputS,
+                    borderColor: errors.email ? "#8C3F3B" : T.line,
+                  }}
+                  value={form.email}
+                  onChange={(e) => set("email", e.target.value)}
+                  placeholder="用于电子邮件联系（选填）"
+                  maxLength={100}
+                />
+                {errors.email && (
+                  <p
+                    id={ERROR_IDS.email}
+                    style={{
+                      fontSize: 11,
+                      color: "#8C3F3B",
+                      margin: "2px 0 0",
+                    }}
+                  >
+                    {errors.email}
+                  </p>
+                )}
+              </div>
               <div
                 className="contact-row"
                 style={{
@@ -901,7 +943,16 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                     id="cf-contact"
                     style={selS}
                     value={form.preferredContact}
-                    onChange={(e) => set("preferredContact", e.target.value)}
+                    onChange={(e) => {
+                      set("preferredContact", e.target.value);
+                      if (e.target.value !== "电子邮件" && errors.email) {
+                        setErrors((current) => {
+                          const next = { ...current };
+                          delete next.email;
+                          return next;
+                        });
+                      }
+                    }}
                   >
                     {CONTACT_METHODS.map((m) => (
                       <option key={m} value={m}>
@@ -1026,7 +1077,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                     >
                       隐私说明
                     </Link>
-                    ，提交的姓名、电话和需求仅用于预约联系与服务处理。
+                    ，提交的姓名、电话、选填邮箱和需求仅用于预约联系与服务处理。
                   </span>
                 </label>
                 {errors.privacyConsent && (

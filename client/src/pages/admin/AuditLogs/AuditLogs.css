@@ -4,6 +4,35 @@
   box-shadow: 0 6px 20px rgba(24, 26, 27, 0.035);
 }
 
+.audit-logs__notification-card {
+  margin-bottom: 24px;
+}
+
+.audit-logs__section-heading {
+  display: flex;
+  min-height: 40px;
+  margin-bottom: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.audit-logs__section-heading h2 {
+  margin: 0;
+  color: var(--adm-ink);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+}
+
+.audit-logs__notification-id {
+  color: var(--adm-ink);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
 .audit-logs__filters {
   display: flex;
   min-height: 40px;
@@ -96,6 +125,15 @@
 }
 
 @media (max-width: 767px) {
+  .audit-logs__section-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .audit-logs__section-heading > .ant-btn {
+    width: 100%;
+  }
+
   .audit-logs__search,
   .audit-logs__filter,
   .audit-logs__action-filter,

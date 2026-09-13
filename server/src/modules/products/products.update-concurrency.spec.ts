@@ -42,6 +42,12 @@ function createUpdateService(options: { concurrentWrite: boolean }) {
         updatedAt: baseUpdatedAt,
       }),
     },
+    category: {
+      findUnique: async () => ({ id: 3 }),
+    },
+    shippingTemplate: {
+      findFirst: async () => ({ id: 4 }),
+    },
     $transaction: async (callback: (client: unknown) => Promise<unknown>) =>
       callback(tx),
   };
@@ -83,4 +89,19 @@ test('编辑期间他人已保存时更新被 409 拒绝而非静默覆盖', asy
       error instanceof ConflictException &&
       /商品已被其他操作更新/.test(error.message),
   );
+});
+
+test('商品关系字段以标量外键写入 updateMany', async () => {
+  const { service, updateManyCalls } =
+    createUpdateService({ concurrentWrite: false });
+
+  await service.update(1, {
+    categoryId: 3,
+    shippingTemplateId: 4,
+  } as UpdateProductDto);
+
+  assert.equal(updateManyCalls[0].data.categoryId, 3);
+  assert.equal(updateManyCalls[0].data.shippingTemplateId, 4);
+  assert.equal('category' in updateManyCalls[0].data, false);
+  assert.equal('shippingTemplate' in updateManyCalls[0].data, false);
 });

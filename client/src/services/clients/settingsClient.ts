@@ -111,6 +111,7 @@ export const settingsApi = {
         commerceEnabled: false,
         cartEnabled: false,
         paymentEnabled: false,
+        quotationOrderingEnabled: false,
         partnerApplicationsWriteEnabled: false,
         analyticsDashboardEnabled: true,
       });

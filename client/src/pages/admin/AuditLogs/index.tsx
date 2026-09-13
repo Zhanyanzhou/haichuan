@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  App as AntdApp,
   Button,
   Card,
   Descriptions,
   Drawer,
   Input,
+  Popconfirm,
   Select,
   Table,
   Tag,
@@ -12,7 +14,7 @@ import {
 } from "antd";
 import type { TableColumnsType, TagProps } from "antd";
 import { ReloadOutlined, UndoOutlined } from "@ant-design/icons";
-import { settingsApi } from "@/services/api";
+import api, { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
 import {
@@ -33,6 +35,18 @@ interface AuditLogRow {
   detail: string | null;
   ip?: string | null;
   user?: { username?: string | null; realName?: string | null } | null;
+}
+
+interface NotificationFailureRow {
+  id: number;
+  notificationId: number | null;
+  notificationType: string;
+  notificationStatus: string;
+  deliveryStatus: string;
+  attempts: number;
+  lastErrorCode: string | null;
+  retryable: boolean;
+  updatedAt: string;
 }
 
 interface ActionMeta {
@@ -72,6 +86,21 @@ const ACTION_META: Record<string, ActionMeta> = {
     color: "warning",
     module: "page-builder",
   },
+  NOTIFICATION_RETRY_REQUESTED: {
+    label: "通知已请求重投",
+    color: "processing",
+    module: "notifications",
+  },
+  NOTIFICATION_RETRY_SUCCEEDED: {
+    label: "通知重投成功",
+    color: "success",
+    module: "notifications",
+  },
+  NOTIFICATION_RETRY_TERMINATED: {
+    label: "通知重投已终止",
+    color: "error",
+    module: "notifications",
+  },
   create: { label: "已创建", color: "processing" },
   update: { label: "已更新", color: "default" },
   delete: { label: "已删除", color: "error" },
@@ -83,11 +112,12 @@ const MODULE_OPTIONS = [
   { value: "page-builder-template", label: "模板设计" },
   { value: "page-builder", label: "页面装修" },
   { value: "page-modules", label: "页面装修接口" },
-  { value: "product", label: "商品" },
+  { value: "products", label: "商品" },
   { value: "category", label: "分类" },
   { value: "order", label: "订单" },
   { value: "orders", label: "订单导出" },
   { value: "inventory", label: "库存" },
+  { value: "notifications", label: "通知投递" },
   { value: "user", label: "后台员工" },
   { value: "gold_price", label: "金价" },
 ];
@@ -107,6 +137,10 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   schemaVersion: "记录格式",
   event: "事件代码",
   actor: "操作人 ID",
+  eventId: "通知事件 ID",
+  notificationId: "通知 ID",
+  errorCode: "错误码",
+  previousErrorCode: "重投前错误码",
   timestamp: "业务发生时间",
   templateId: "模板 ID",
   pageKey: "页面标识",
@@ -198,6 +232,7 @@ function detailValue(value: unknown): ReactNode {
 }
 
 export default function AuditLogs() {
+  const { message } = AntdApp.useApp();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [logs, setLogs] = useState<AuditLogRow[]>([]);
@@ -208,6 +243,10 @@ export default function AuditLogs() {
   const [module, setModule] = useState<string>();
   const [action, setAction] = useState<string>();
   const [selectedLog, setSelectedLog] = useState<AuditLogRow | null>(null);
+  const [notificationFailures, setNotificationFailures] = useState<NotificationFailureRow[]>([]);
+  const [notificationFailuresLoading, setNotificationFailuresLoading] = useState(true);
+  const [notificationFailuresError, setNotificationFailuresError] = useState("");
+  const [retryingEventIds, setRetryingEventIds] = useState<Set<number>>(new Set());
   const requestSequence = useRef(0);
 
   const load = useCallback(async () => {
@@ -237,6 +276,49 @@ export default function AuditLogs() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadNotificationFailures = useCallback(async () => {
+    setNotificationFailuresLoading(true);
+    setNotificationFailuresError("");
+    try {
+      const response = await api.get("/notification-operations/failures", {
+        params: { page: 1, pageSize: 20 },
+      });
+      const data = unwrapResponse<PaginatedResult<NotificationFailureRow>>(response);
+      setNotificationFailures(data?.list ?? []);
+    } catch (loadError: unknown) {
+      setNotificationFailuresError(getSafeAdminErrorMessage(
+        loadError,
+        "通知投递故障加载失败。请稍后重新加载。",
+      ));
+    } finally {
+      setNotificationFailuresLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadNotificationFailures();
+  }, [loadNotificationFailures]);
+
+  const retryNotificationFailure = async (eventId: number) => {
+    setRetryingEventIds((current) => new Set(current).add(eventId));
+    try {
+      await api.post(`/notification-operations/failures/${eventId}/retry`);
+      message.success("已重新进入投递队列，最终结果将写入操作日志");
+      await Promise.all([loadNotificationFailures(), load()]);
+    } catch (retryError: unknown) {
+      message.error(getSafeAdminErrorMessage(
+        retryError,
+        "通知重投失败。请刷新状态后重试。",
+      ));
+    } finally {
+      setRetryingEventIds((current) => {
+        const next = new Set(current);
+        next.delete(eventId);
+        return next;
+      });
+    }
+  };
 
   const actionOptions = useMemo(() => Object.entries(ACTION_META)
     .filter(([, meta]) => !module || !meta.module || meta.module === module)
@@ -311,6 +393,58 @@ export default function AuditLogs() {
       ),
     },
   ];
+  const notificationFailureColumns: TableColumnsType<NotificationFailureRow> = [
+    {
+      title: "通知",
+      key: "notification",
+      width: 220,
+      render: (_value, row) => (
+        <span className="audit-logs__notification-id">
+          {row.notificationType} · #{row.notificationId ?? "—"}
+        </span>
+      ),
+    },
+    {
+      title: "失败原因",
+      dataIndex: "lastErrorCode",
+      width: 220,
+      render: (value: string | null) => value ?? "UNKNOWN",
+    },
+    {
+      title: "尝试次数",
+      dataIndex: "attempts",
+      width: 110,
+    },
+    {
+      title: "最后更新",
+      dataIndex: "updatedAt",
+      width: 180,
+      render: (value: string) => <time className="audit-logs__time">{formatTime(value)}</time>,
+    },
+    {
+      title: "处理",
+      key: "action",
+      width: 150,
+      fixed: "right",
+      render: (_value, row) => row.retryable ? (
+        <Popconfirm
+          title="重新投递这条通知？"
+          description="仅对明确失败的邮件重投；发送结果未知的记录不会开放此操作。"
+          okText="重新投递"
+          cancelText="取消"
+          onConfirm={() => retryNotificationFailure(row.id)}
+        >
+          <Button
+            type="link"
+            loading={retryingEventIds.has(row.id)}
+            aria-label={`重投通知事件 ${row.id}`}
+          >
+            安全重投
+          </Button>
+        </Popconfirm>
+      ) : <Tag color="warning">需人工核对</Tag>,
+    },
+  ];
 
   const resetFilters = () => {
     setKeywordInput("");
@@ -335,6 +469,38 @@ export default function AuditLogs() {
           </Button>
         )}
       />
+      <Card className="audit-logs__card audit-logs__notification-card">
+        <div className="audit-logs__section-heading">
+          <div>
+            <h2>通知投递故障</h2>
+            <Typography.Text type="secondary">
+              这里只显示无联系信息的故障摘要；重投请求与最终结果都会记录操作人。
+            </Typography.Text>
+          </div>
+          <Button onClick={() => void loadNotificationFailures()}>
+            刷新故障
+          </Button>
+        </div>
+        {notificationFailuresLoading ? (
+          <AdminLoadingState subject="通知投递故障" />
+        ) : notificationFailuresError ? (
+          <AdminErrorState
+            message={notificationFailuresError}
+            onRetry={() => void loadNotificationFailures()}
+          />
+        ) : notificationFailures.length === 0 ? (
+          <AdminEmptyState message="当前没有待处理的通知投递故障" />
+        ) : (
+          <Table
+            dataSource={notificationFailures}
+            rowKey="id"
+            columns={notificationFailureColumns}
+            size="middle"
+            scroll={{ x: 880 }}
+            pagination={false}
+          />
+        )}
+      </Card>
       <Card className="audit-logs__card">
         <div className="audit-logs__filters" role="search" aria-label="操作日志筛选">
           <Input.Search

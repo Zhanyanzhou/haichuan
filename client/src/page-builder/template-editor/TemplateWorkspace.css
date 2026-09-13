@@ -3807,6 +3807,7 @@ button.template-editor__toolbar-state {
 .template-editor__simple-select { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 8px; margin: 12px 0; font-size: 13px; }
 .template-editor__simple-select select { width: 100%; min-height: 36px; padding: 6px 8px; border: 1px solid var(--adm-line); border-radius: 4px; color: var(--adm-text); background: var(--adm-content-bg); }
 .template-editor__simple-select input { width: 100%; min-height: 36px; padding: 6px 8px; border: 1px solid var(--adm-line); border-radius: 4px; color: var(--adm-text); background: var(--adm-content-bg); font: inherit; }
+.template-editor__simple-select > .homepage-editor__field-error { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
 .template-editor__focus-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 12px 0; }
 .template-editor__focus-grid button { min-height: 28px; padding: 4px 2px; font-size: 12px; }
 .template-editor__simple-slot .template-editor__canvas-size-field { display: flex; width: 100%; margin: 10px 0; }

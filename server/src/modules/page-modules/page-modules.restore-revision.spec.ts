@@ -275,7 +275,7 @@ test("修订列表、详情和草稿恢复继承后台角色边界，恢复传�
   );
   const calls: unknown[][] = [];
   const controller = new PageModulesController({
-    restorePageDocumentRevision: (...args: unknown[]) => {
+    restoreLocalizedPageDocumentRevision: (...args: unknown[]) => {
       calls.push(args);
       return { ok: true };
     },
@@ -289,15 +289,17 @@ test("修订列表、详情和草稿恢复继承后台角色边界，恢复传�
 
   assert.deepEqual(calls, [[
     "home",
+    "zh-CN",
     3,
     CURRENT_UPDATED_AT.toISOString(),
     17,
   ]]);
 });
 
-test("发布 DTO 缺少 expectedUpdatedAt 时校验失败", async () => {
+test("发布 DTO 强制携带时间戳和当前内容哈希", async () => {
   const dto = new PublishPageDocumentDto();
   dto.pageKey = "home";
   const errors = await validate(dto);
   assert.ok(errors.some((error) => error.property === "expectedUpdatedAt"));
+  assert.ok(errors.some((error) => error.property === "expectedContentHash"));
 });

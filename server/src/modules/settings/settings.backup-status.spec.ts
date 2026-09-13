@@ -2,6 +2,8 @@ import * as assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   evaluateBackupExecutionMarker,
+  formatBackupRetentionDisplay,
+  resolveBackupRetentionDays,
   summarizeBackupArtifacts,
 } from "./settings.service";
 
@@ -10,6 +12,28 @@ const NOW = new Date("2026-08-26T12:00:00.000Z");
 function artifact(name: string, size: number, mtime: string) {
   return { name, size, mtime: new Date(mtime) };
 }
+
+test("备份保留期 7 天按安全配置原值展示", () => {
+  assert.equal(resolveBackupRetentionDays("7"), 7);
+  assert.equal(formatBackupRetentionDisplay("7"), "7 天");
+});
+
+test("备份保留期非 7 天按安全配置原值展示", () => {
+  assert.equal(resolveBackupRetentionDays("30"), 30);
+  assert.equal(formatBackupRetentionDisplay("30"), "30 天");
+});
+
+test("备份保留期缺失时交由部署环境管理", () => {
+  assert.equal(resolveBackupRetentionDays(undefined), null);
+  assert.equal(formatBackupRetentionDisplay(undefined), "由部署环境管理");
+});
+
+test("备份保留期非法时不回显原始配置", () => {
+  const invalid = "7 days /srv/private";
+  assert.equal(resolveBackupRetentionDays(invalid), null);
+  assert.equal(formatBackupRetentionDisplay(invalid), "由部署环境管理");
+  assert.equal(formatBackupRetentionDisplay(invalid).includes(invalid), false);
+});
 
 test("备份状态只接受数据库与两类媒体同批的完整备份组", () => {
   const result = summarizeBackupArtifacts([

@@ -1,0 +1,82 @@
+.customer-notification-preferences {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.customer-notification-preferences__heading h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.customer-notification-preferences__heading p,
+.customer-notification-preferences__channel-note,
+.customer-notification-preferences [role="status"],
+.customer-notification-preferences [role="alert"] {
+  margin: 8px 0 0;
+  color: var(--soft);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.customer-notification-preferences__list {
+  display: grid;
+  margin-top: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+}
+
+.customer-notification-preferences__list label {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.customer-notification-preferences__list label > span {
+  display: grid;
+  gap: 2px;
+}
+
+.customer-notification-preferences__list strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.customer-notification-preferences__list small {
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.customer-notification-preferences__list input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  accent-color: var(--ink);
+}
+
+.customer-notification-preferences__list input:focus-visible,
+.customer-notification-preferences button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.customer-notification-preferences button {
+  min-height: 44px;
+  margin-left: 8px;
+  text-decoration: underline;
+}
+
+@media (max-width: 767px) {
+  .customer-notification-preferences__list {
+    grid-template-columns: 1fr;
+  }
+}

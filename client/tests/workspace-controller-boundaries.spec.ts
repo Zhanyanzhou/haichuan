@@ -30,6 +30,9 @@ test.describe("店铺装修双工作区控制器边界", () => {
 
     expect(controller).toContain("saveQueueRef");
     expect(controller).toContain("validationRequestRef");
+    expect(controller).toContain("publishOwnerRef");
+    expect(controller).toContain("publishOwnerRef.current = null");
+    expect(controller).toContain("publishOwnerRef.current === publishOwner");
     expect(controller).toContain("expectedUpdatedAt");
     expect(controller).toContain("pageDocumentApi.getRevision");
     expect(controller).toContain("stageRevisionAsDraft");

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { getContentTemplateContract } from "../src/page-builder/generated/contentTemplates.generated";
 import {
+  addDynamicTemplateLayoutGroup,
   addDynamicTemplateNode,
   compileDynamicTemplateRenderPlan,
   createBlankDynamicTemplateDefinition,
@@ -66,6 +67,33 @@ test.describe("TD-2 模板结构 typed operations", () => {
     expect(ungrouped.nodes[region.nodeId].childIds).toEqual(originalNodeIds);
     expect(ungrouped.nodes[grouped.nodeId]).toBeUndefined();
     expect(originalNodeIds.map((nodeId) => ungrouped.nodes[nodeId].slotId)).toEqual(originalSlotIds);
+  });
+
+  test("Row 下纵向与空白组使用 Column，其他父级继续使用 Stack", () => {
+    let definition = createBlankDynamicTemplateDefinition("布局组父级适配测试");
+    const region = addDynamicTemplateNode(definition, definition.rootNodeId, "Container");
+    definition = region.definition;
+
+    const regularVertical = addDynamicTemplateLayoutGroup(definition, region.nodeId, "vertical");
+    definition = regularVertical.definition;
+    expect(definition.nodes[regularVertical.nodeId].type).toBe("Stack");
+
+    const row = addDynamicTemplateNode(definition, region.nodeId, "Row");
+    definition = row.definition;
+    const rowVertical = addDynamicTemplateLayoutGroup(definition, row.nodeId, "vertical");
+    definition = rowVertical.definition;
+    const rowEmpty = addDynamicTemplateLayoutGroup(definition, row.nodeId, "empty");
+    definition = rowEmpty.definition;
+    expect(definition.nodes[rowVertical.nodeId].type).toBe("Column");
+    expect(definition.nodes[rowEmpty.nodeId].type).toBe("Column");
+
+    const first = addDynamicTemplateNode(definition, row.nodeId, "Spacer");
+    definition = first.definition;
+    const second = addDynamicTemplateNode(definition, row.nodeId, "Divider");
+    definition = second.definition;
+    const grouped = groupDynamicTemplateNodes(definition, [first.nodeId, second.nodeId], "vertical");
+    expect(grouped.definition.nodes[grouped.nodeId].type).toBe("Column");
+    expect(grouped.definition.nodes[grouped.nodeId].childIds).toEqual([first.nodeId, second.nodeId]);
   });
 
   test("结构落点统一修正同父级向后移动并拒绝循环与锁定目标", () => {

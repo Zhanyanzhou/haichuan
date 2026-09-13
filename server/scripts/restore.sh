@@ -26,16 +26,18 @@ fail() {
 }
 
 [[ "$DB_NAME" =~ ^[A-Za-z0-9_]+$ ]] || fail "DB_NAME 只允许字母、数字和下划线"
+[[ "$RESTORE_DATABASE_ONLY" = "true" || "$RESTORE_DATABASE_ONLY" = "false" ]] ||
+  fail "RESTORE_DATABASE_ONLY 只允许 true 或 false"
 [[ "$RESTORE_MANIFEST" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*\.sha256$ ]] ||
   fail "RESTORE_MANIFEST 必须是 BACKUP_DIR 下的安全 .sha256 文件名"
 [[ -d "$BACKUP_DIR" ]] || fail "备份目录不存在: $BACKUP_DIR"
 
 MANIFEST_PATH="$BACKUP_DIR/$RESTORE_MANIFEST"
-[[ -f "$MANIFEST_PATH" ]] || fail "备份清单不存在: $MANIFEST_PATH"
+[[ -f "$MANIFEST_PATH" && ! -L "$MANIFEST_PATH" ]] || fail "备份清单不存在或类型不安全: $MANIFEST_PATH"
 
 # backup.sh 的清单固定为「64 位 SHA-256 + 两个空格 + 单个安全文件名」。
 awk '
-  NF != 2 || $1 !~ /^[0-9a-fA-F]{64}$/ || $2 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ {
+  NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-fA-F]+$/ || $2 !~ /^[A-Za-z0-9][A-Za-z0-9_.-]*$/ {
     invalid = 1
   }
   END { exit invalid ? 1 : 0 }
@@ -48,7 +50,8 @@ DB_DUMPS=()
 MEDIA_ARCHIVES=()
 METADATA_FILES=()
 for artifact in "${ARTIFACTS[@]}"; do
-  [[ -f "$BACKUP_DIR/$artifact" ]] || fail "清单中的备份文件不存在: $artifact"
+  [[ -f "$BACKUP_DIR/$artifact" && ! -L "$BACKUP_DIR/$artifact" ]] ||
+    fail "清单中的备份文件不存在或类型不安全: $artifact"
   case "$artifact" in
     *.sql.gz) DB_DUMPS+=("$BACKUP_DIR/$artifact") ;;
     *.tar.gz) MEDIA_ARCHIVES+=("$BACKUP_DIR/$artifact") ;;
@@ -59,6 +62,9 @@ done
 
 [[ "${#DB_DUMPS[@]}" -eq 1 ]] || fail "每个恢复批次必须且只能包含一个数据库备份"
 [[ "${#METADATA_FILES[@]}" -eq 1 ]] || fail "备份批次必须且只能包含一个快照元数据文件"
+if [[ "$RESTORE_DATABASE_ONLY" = "false" ]]; then
+  [[ "${#MEDIA_ARCHIVES[@]}" -eq 2 ]] || fail "完整恢复必须且只能包含 uploads 与 private-media 两个媒体归档"
+fi
 
 (cd "$BACKUP_DIR" && sha256sum -c -- "$RESTORE_MANIFEST") ||
   fail "备份清单校验失败，未执行任何恢复"
@@ -77,9 +83,9 @@ schema_exists=$(mysql_exec -N -e \
   "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '$DB_NAME'")
 [[ "$schema_exists" = "1" ]] || fail "目标数据库不存在，脚本不会自动创建: $DB_NAME"
 
-table_count=$(mysql_exec -N -e \
-  "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME'")
-[[ "$table_count" = "0" ]] ||
+schema_object_count=$(mysql_exec -N -e \
+  "SELECT (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME') + (SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = '$DB_NAME') + (SELECT COUNT(*) FROM information_schema.events WHERE event_schema = '$DB_NAME')")
+[[ "$schema_object_count" = "0" ]] ||
   fail "目标数据库必须为空；脚本禁止原位覆盖，请改用新的隔离恢复库"
 expected_confirm="RESTORE:$DB_NAME"
 [[ "$RESTORE_CONFIRM" = "$expected_confirm" ]] ||
@@ -89,7 +95,7 @@ declare -A MEDIA_TARGET_BY_NAME=()
 if [[ -n "$MEDIA_TARGET_DIRS" ]]; then
   IFS=':' read -ra TARGET_DIRS <<< "$MEDIA_TARGET_DIRS"
   for target_dir in "${TARGET_DIRS[@]}"; do
-    [[ -d "$target_dir" ]] || fail "媒体目标目录不存在: $target_dir"
+    [[ -d "$target_dir" && ! -L "$target_dir" ]] || fail "媒体目标目录不存在或类型不安全: $target_dir"
     [[ -z "$(find "$target_dir" -mindepth 1 -print -quit)" ]] ||
       fail "媒体目标目录必须为空，脚本不会覆盖或合并现有文件: $target_dir"
     target_name=$(basename "$target_dir")
@@ -97,6 +103,11 @@ if [[ -n "$MEDIA_TARGET_DIRS" ]]; then
       fail "媒体目标目录 basename 重复: $target_name"
     MEDIA_TARGET_BY_NAME[$target_name]="$target_dir"
   done
+fi
+
+if [[ "$RESTORE_DATABASE_ONLY" = "false" ]]; then
+  [[ -n "${MEDIA_TARGET_BY_NAME[uploads]:-}" && -n "${MEDIA_TARGET_BY_NAME[private-media]:-}" ]] ||
+    fail "完整恢复必须提供 uploads 与 private-media 两个同名空目标目录"
 fi
 
 if [[ "${#MEDIA_ARCHIVES[@]}" -gt 0 && "$RESTORE_DATABASE_ONLY" != "true" ]]; then

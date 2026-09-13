@@ -116,6 +116,13 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await page.getByRole("button", { name: "保存当前装修草稿", exact: true }).click();
     await expect.poll(() => server.pageDocument.puckData.content.length).toBe(1);
     expect(server.pageDocument.puckData.content[0]).toMatchObject({ type: "动态模板实例", props: { templateId: saved.templateId, templateVersion: 1 } });
+    const pageReviewStatus = page.getByTestId("page-review-status");
+    await expect(pageReviewStatus).toHaveText("草稿");
+    await page.getByRole("button", { name: "提交审核", exact: true }).click();
+    await expect(pageReviewStatus).toHaveText("待审核");
+    await page.getByRole("button", { name: "批准", exact: true }).click();
+    await expect(pageReviewStatus).toHaveText("已批准");
+    await expect(page.getByRole("button", { name: "发布到前台网站", exact: true })).toBeEnabled();
     await page.getByRole("button", { name: "发布到前台网站", exact: true }).click();
     await expect.poll(() => server.publishedPage).not.toBeNull();
     await page.goto("/");

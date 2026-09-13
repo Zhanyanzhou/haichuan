@@ -32,6 +32,7 @@ import {
   AdminLoadingState,
 } from "@/components/common/AdminDataStates";
 import ProductManageTable from "./ProductManageTable";
+import { useAuthStore } from "@/store/authStore";
 import {
   statusMeta,
   statuses,
@@ -76,6 +77,8 @@ function getProductActionErrorMessage(error: unknown, action: string): string {
 export default function ProductManage() {
   const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
+  const role = useAuthStore((state) => state.user?.role);
+  const canGovernPublic = role === "SUPER_ADMIN" || role === "ADMIN";
   const [searchParams] = useSearchParams();
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -329,6 +332,21 @@ export default function ProductManage() {
     });
   };
 
+  const submitForReview = async (product: Product) => {
+    if (pendingProductId !== null) return;
+    setPendingProductId(product.id);
+    try {
+      await productApi.submitForReview(product.id);
+      message.success(`「${product.name}」已提交审核；管理员复核后才能发布。`);
+      await Promise.all([loadProducts(), loadCounts()]);
+    } catch (requestError: unknown) {
+      reportUnexpectedProductActionError(requestError, "提交商品审核");
+      message.error(getProductActionErrorMessage(requestError, "提交审核"));
+    } finally {
+      setPendingProductId(null);
+    }
+  };
+
   const archiveProduct = async (product: Product) => {
     if (pendingProductId !== null) return;
     setPendingProductId(product.id);
@@ -452,6 +470,26 @@ export default function ProductManage() {
       okButtonProps: { danger: true },
       onOk: () => changeSelectedStatus("OFFLINE"),
     });
+  };
+
+  const submitSelectedForReview = async () => {
+    if (!selectedIds.length) {
+      message.warning("请先选择草稿商品，再提交审核");
+      return;
+    }
+    setBatchProcessing(true);
+    try {
+      const { succeeded, failed } = await runBatch(selectedIds, (id) => productApi.submitForReview(id));
+      if (failed.length === 0) {
+        message.success(`已提交 ${succeeded.length} 件商品审核`);
+        setSelectedIds([]);
+      } else {
+        setSelectedIds(failed.map(({ id }) => id));
+        message.warning(`已提交 ${succeeded.length} 件，${failed.length} 件未提交；请确认所选商品仍为草稿。`);
+      }
+    } finally {
+      setBatchProcessing(false);
+    }
   };
 
   const batchArchive = async () => {
@@ -752,7 +790,7 @@ export default function ProductManage() {
           <Dropdown
             overlayClassName="product-manage__dropdown"
             menu={{
-              items: [
+              items: canGovernPublic ? [
                 {
                   key: "published",
                   label: "批量上架",
@@ -770,6 +808,20 @@ export default function ProductManage() {
                   label: "移入回收站",
                   danger: true,
                   disabled: batchProcessing || activeStatus === "ARCHIVED",
+                  onClick: confirmBatchArchive,
+                },
+              ] : [
+                {
+                  key: "submit-review",
+                  label: "批量提交审核",
+                  disabled: batchProcessing || activeStatus === "ARCHIVED" || activeStatus === "PUBLISHED" || activeStatus === "OFFLINE",
+                  onClick: () => void submitSelectedForReview(),
+                },
+                {
+                  key: "archive-drafts",
+                  label: "将草稿移入回收站",
+                  danger: true,
+                  disabled: batchProcessing || activeStatus !== "DRAFT",
                   onClick: confirmBatchArchive,
                 },
               ],
@@ -800,12 +852,14 @@ export default function ProductManage() {
           batchProcessing={batchProcessing}
           pendingProductId={pendingProductId}
           hasFilters={hasFilters}
+          canGovernPublic={canGovernPublic}
           onSelectionChange={setSelectedIds}
           onOpenEdit={openEdit}
           onClone={cloneProduct}
           onRequestStatusChange={requestStatusChange}
           onConfirmArchive={confirmArchive}
           onConfirmRestore={confirmRestore}
+          onSubmitForReview={(product) => void submitForReview(product)}
         />
       )}
 

@@ -1,5 +1,8 @@
 node_modules
 dist
+# 严格 release 镜像消费工作流已冻结并核验的 dist；普通开发仍直接运行 Vite build。
+!dist/
+!dist/**
 dist-verify
 dist-verify-inventory-reservation
 .env

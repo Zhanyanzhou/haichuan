@@ -99,6 +99,8 @@ test("安全失败可通过 compare-and-set 重新入队并写入 Lead 审计", 
   assert.match(JSON.stringify(harness.activityWrites), /事件 #81/);
   assert.match(JSON.stringify(harness.activityWrites), /SMTP_SEND_FAILED/);
   assert.match(JSON.stringify(harness.activityWrites), /"createdBy":7/);
+  assert.match(JSON.stringify(harness.outboxUpdates), /"manualRetry"/);
+  assert.match(JSON.stringify(harness.outboxUpdates), /"requestedBy":7/);
 });
 
 test("发送结果未知时禁止人工重投，避免客户收到重复回复", async () => {

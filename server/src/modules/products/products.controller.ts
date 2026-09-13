@@ -46,8 +46,6 @@ import {
   UpdateProductImageDto,
   CropListingImageDto,
 } from "./dto";
-import { join } from "path";
-import { stat } from "node:fs/promises";
 import { Observable } from "rxjs";
 import { ProductStatus, type ProductImage } from "@prisma/client";
 import type { Response } from "express";
@@ -56,6 +54,7 @@ import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
 import type {
   CustomerOrStaffRequest,
   CustomerRequest,
+  StaffRequest,
 } from "../../common/security/authenticated-principal";
 const sharp = require("sharp");
 
@@ -247,24 +246,24 @@ export class ProductsController {
   @ApiBearerAuth()
   @Post()
   @ApiOperation({ summary: "新增产品" })
-  async create(@Body() dto: CreateProductDto) {
-    return this.productsService.create(dto);
+  async create(@Req() request: StaffRequest, @Body() dto: CreateProductDto) {
+    return this.productsService.create(dto, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(":id")
   @ApiOperation({ summary: "编辑产品" })
-  async update(@Param("id") id: string, @Body() dto: UpdateProductDto) {
-    return this.productsService.update(+id, dto);
+  async update(@Req() request: StaffRequest, @Param("id") id: string, @Body() dto: UpdateProductDto) {
+    return this.productsService.update(+id, dto, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(":id/archive")
   @ApiOperation({ summary: "将商品移入回收站" })
-  archive(@Param("id") id: string) {
-    return this.productsService.archive(+id);
+  archive(@Req() request: StaffRequest, @Param("id") id: string) {
+    return this.productsService.archive(+id, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -277,17 +276,26 @@ export class ProductsController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
+  @Post(":id/submit-review")
+  @ApiOperation({ summary: "提交商品草稿审核（不直接发布）" })
+  submitForReview(@Req() request: StaffRequest, @Param("id") id: string) {
+    return this.productsService.submitForReview(+id, request.user);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @Put(":id/status")
+  @Roles("SUPER_ADMIN", "ADMIN")
   @ApiOperation({ summary: "更新产品状态" })
-  async updateStatus(@Param("id") id: string, @Body("status") status: string) {
+  async updateStatus(@Req() request: StaffRequest, @Param("id") id: string, @Body("status") status: string) {
     const validStatuses = ["DRAFT", "PUBLISHED", "OFFLINE", "ARCHIVED"];
     if (!validStatuses.includes(status)) {
       throw new BadRequestException("商品状态不正确，请重新选择");
     }
     if (status === "ARCHIVED") {
-      return this.productsService.archive(+id);
+      return this.productsService.archive(+id, request.user);
     }
-    return this.productsService.updateStatus(+id, status as ProductStatus);
+    return this.productsService.updateStatus(+id, status as ProductStatus, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -313,8 +321,8 @@ export class ProductsController {
   @ApiBearerAuth()
   @Post(":id/images")
   @ApiOperation({ summary: "添加产品图片" })
-  addImage(@Param("id") id: string, @Body() body: AddProductImageDto) {
-    return this.productsService.addImage(+id, body);
+  addImage(@Req() request: StaffRequest, @Param("id") id: string, @Body() body: AddProductImageDto) {
+    return this.productsService.addImage(+id, body, request.user);
   }
 
   /* ═══ 主图/列表图管理（静态路径，优先匹配） ═══ */
@@ -322,24 +330,24 @@ export class ProductsController {
   @ApiBearerAuth()
   @Put(":id/images/primary")
   @ApiOperation({ summary: "设置详情主图" })
-  setPrimaryImage(@Param("id") id: string, @Body() body: { imageId: number }) {
-    return this.productsService.setPrimaryImage(+id, body.imageId);
+  setPrimaryImage(@Req() request: StaffRequest, @Param("id") id: string, @Body() body: { imageId: number }) {
+    return this.productsService.setPrimaryImage(+id, body.imageId, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(":id/images/listing")
   @ApiOperation({ summary: "直接设置列表图（不裁切）" })
-  setListingImage(@Param("id") id: string, @Body() body: { imageId: number }) {
-    return this.productsService.setListingImage(+id, body.imageId);
+  setListingImage(@Req() request: StaffRequest, @Param("id") id: string, @Body() body: { imageId: number }) {
+    return this.productsService.setListingImage(+id, body.imageId, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(":id/images/listing/reset")
   @ApiOperation({ summary: "恢复列表图为详情主图" })
-  resetListingToPrimary(@Param("id") id: string) {
-    return this.productsService.resetListingToPrimary(+id);
+  resetListingToPrimary(@Req() request: StaffRequest, @Param("id") id: string) {
+    return this.productsService.resetListingToPrimary(+id, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -347,19 +355,20 @@ export class ProductsController {
   @Put(":id/images/:imageId")
   @ApiOperation({ summary: "更新图片信息（类型/排序）" })
   updateImage(
+    @Req() request: StaffRequest,
     @Param("id", ParseIntPipe) id: number,
     @Param("imageId", ParseIntPipe) imageId: number,
     @Body() body: UpdateProductImageDto,
   ) {
-    return this.productsService.updateImage(id, imageId, body);
+    return this.productsService.updateImage(id, imageId, body, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Delete(":id/images/:imageId")
   @ApiOperation({ summary: "删除产品图片" })
-  deleteImage(@Param("id") id: string, @Param("imageId") imageId: string) {
-    return this.productsService.deleteImage(+id, +imageId);
+  deleteImage(@Req() request: StaffRequest, @Param("id") id: string, @Param("imageId") imageId: string) {
+    return this.productsService.deleteImage(+id, +imageId, request.user);
   }
 
   /* ═══ 列表图裁切 ═══ */
@@ -368,6 +377,7 @@ export class ProductsController {
   @Post(":id/images/:sourceImageId/crop-listing")
   @ApiOperation({ summary: "裁切生成1200×1200 WebP列表图" })
   async cropListingImage(
+    @Req() request: StaffRequest,
     @Param("id") id: string,
     @Param("sourceImageId") sourceImageId: string,
     @Body() dto: CropListingImageDto,
@@ -381,7 +391,10 @@ export class ProductsController {
     if (!sourceImg) throw new NotFoundException("源图片不属于该商品");
 
     // 裁切：归一化坐标 → 实际像素 → sharp 处理
-    // 读取原图字节与尺寸：优先私有存储，回退旧公开路径（迁移兼容）
+    if (!sourceImg.storageKey || !sourceImg.mediaAssetId) {
+      throw new BadRequestException("旧商品图尚未关联媒体资产，不能生成新的公开派生图");
+    }
+    // 读取原图字节与尺寸：只允许已登记的受控私有素材。
     const { buffer: sourceBuffer } =
       await this.productMedia.readProductImage(sourceImg);
     const metadata = await sharp(sourceBuffer).metadata();
@@ -406,65 +419,33 @@ export class ProductsController {
       throw new BadRequestException("裁切区域超出图片范围");
     }
 
-    // 优先私有裁切（新上传图片走私有存储）；无 storageKey 回退旧 uploads 裁切（迁移兼容）
-    let derived: ProductImage;
-    if (sourceImg.storageKey) {
-      const result = await this.uploadService.cropPrivateImage(
-        sourceImg.storageKey,
-        cropPx,
-        1200,
-        "webp",
-      );
-      derived = await this.productsService.addImage(+id, {
-        storageKey: result.storageKey,
-        type: "FRONT",
-        sortOrder: 0,
-        sourceImageId: +sourceImageId,
-        cropData: {
-          x: dto.x,
-          y: dto.y,
-          width: dto.width,
-          height: dto.height,
-        },
-        width: result.width,
-        height: result.height,
-        mimeType: result.mimeType,
-        fileSize: result.fileSize,
-      });
-    } else {
-      // 旧公开路径回退
-      const sourcePath = sourceImg.url.replace(/^\/uploads\//, "");
-      const result = await this.uploadService.cropImage(
-        sourcePath,
-        cropPx,
-        1200,
-        "webp",
-      );
-      const destPath = join(
-        this.uploadService["uploadDir"],
-        result.url.replace(/^\/uploads\//, ""),
-      );
-      const fileStat = await stat(destPath);
-      derived = await this.productsService.addImage(+id, {
-        url: result.url,
-        type: "FRONT",
-        sortOrder: 0,
-        sourceImageId: +sourceImageId,
-        cropData: {
-          x: dto.x,
-          y: dto.y,
-          width: dto.width,
-          height: dto.height,
-        },
-        width: 1200,
-        height: 1200,
-        mimeType: "image/webp",
-        fileSize: fileStat.size,
-      });
-    }
+    const result = await this.uploadService.cropPrivateImage(
+      sourceImg.storageKey,
+      cropPx,
+      1200,
+      "webp",
+      request.user.id,
+    );
+    const derived: ProductImage = await this.productsService.addImage(+id, {
+      mediaAssetId: result.mediaAssetId,
+      storageKey: result.storageKey,
+      type: "FRONT",
+      sortOrder: 0,
+      sourceImageId: +sourceImageId,
+      cropData: {
+        x: dto.x,
+        y: dto.y,
+        width: dto.width,
+        height: dto.height,
+      },
+      width: result.width,
+      height: result.height,
+      mimeType: result.mimeType,
+      fileSize: result.fileSize,
+    }, request.user);
 
     // 切换 listingImageId
-    await this.productsService.setListingImage(+id, derived.id);
+    await this.productsService.setListingImage(+id, derived.id, request.user);
 
     return { id: derived.id, listingImageId: derived.id };
   }
@@ -482,8 +463,8 @@ export class ProductsController {
   @ApiBearerAuth()
   @Put(":id/tags")
   @ApiOperation({ summary: "批量更新商品标签" })
-  updateTags(@Param("id") id: string, @Body() body: { tags: string[] }) {
-    return this.productsService.updateTags(+id, body.tags || []);
+  updateTags(@Req() request: StaffRequest, @Param("id") id: string, @Body() body: { tags: string[] }) {
+    return this.productsService.updateTags(+id, body.tags || [], request.user);
   }
 
   /* ═══ 商品属性管理 ═══ */
@@ -500,12 +481,14 @@ export class ProductsController {
   @Put(":id/attributes")
   @ApiOperation({ summary: "批量设置商品属性值（按 attributeValueId）" })
   updateAttributes(
+    @Req() request: StaffRequest,
     @Param("id") id: string,
     @Body() body: { attributeValueIds: number[] },
   ) {
     return this.productsService.setAttributes(
       +id,
       body.attributeValueIds || [],
+      request.user,
     );
   }
 
@@ -514,8 +497,8 @@ export class ProductsController {
   @ApiBearerAuth()
   @Post(":id/certificates")
   @ApiOperation({ summary: "添加商品证书" })
-  addCertificate(@Param("id") id: string, @Body() dto: CreateCertificateDto) {
-    return this.productsService.addCertificate(+id, dto);
+  addCertificate(@Req() request: StaffRequest, @Param("id") id: string, @Body() dto: CreateCertificateDto) {
+    return this.productsService.addCertificate(+id, dto, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -523,19 +506,20 @@ export class ProductsController {
   @Put(":id/certificates/:certId")
   @ApiOperation({ summary: "更新证书信息" })
   updateCertificate(
+    @Req() request: StaffRequest,
     @Param("id") id: string,
     @Param("certId") certId: string,
     @Body() dto: UpdateCertificateDto,
   ) {
-    return this.productsService.updateCertificate(+id, +certId, dto);
+    return this.productsService.updateCertificate(+id, +certId, dto, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Delete(":id/certificates/:certId")
   @ApiOperation({ summary: "删除商品证书" })
-  deleteCertificate(@Param("id") id: string, @Param("certId") certId: string) {
-    return this.productsService.deleteCertificate(+id, +certId);
+  deleteCertificate(@Req() request: StaffRequest, @Param("id") id: string, @Param("certId") certId: string) {
+    return this.productsService.deleteCertificate(+id, +certId, request.user);
   }
 
   /* ═══ SKU 管理 ═══ */
@@ -551,8 +535,8 @@ export class ProductsController {
   @ApiBearerAuth()
   @Post(":id/skus")
   @ApiOperation({ summary: "创建商品SKU" })
-  createSku(@Param("id") id: string, @Body() dto: CreateSkuDto) {
-    return this.productsService.createSku(+id, dto);
+  createSku(@Req() request: StaffRequest, @Param("id") id: string, @Body() dto: CreateSkuDto) {
+    return this.productsService.createSku(+id, dto, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -560,18 +544,19 @@ export class ProductsController {
   @Put(":id/skus/:skuId")
   @ApiOperation({ summary: "更新SKU信息" })
   updateSku(
+    @Req() request: StaffRequest,
     @Param("id") id: string,
     @Param("skuId") skuId: string,
     @Body() dto: UpdateSkuDto,
   ) {
-    return this.productsService.updateSku(+id, +skuId, dto);
+    return this.productsService.updateSku(+id, +skuId, dto, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Delete(":id/skus/:skuId")
   @ApiOperation({ summary: "彻底删除SKU（若有关联库存/订单则拒绝）" })
-  deleteSku(@Param("id") id: string, @Param("skuId") skuId: string) {
-    return this.productsService.deleteSku(+id, +skuId);
+  deleteSku(@Req() request: StaffRequest, @Param("id") id: string, @Param("skuId") skuId: string) {
+    return this.productsService.deleteSku(+id, +skuId, request.user);
   }
 }

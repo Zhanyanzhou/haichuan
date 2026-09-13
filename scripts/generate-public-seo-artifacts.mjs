@@ -1,11 +1,17 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  normalizeProductionOrigin,
+  validatePublicSeoSnapshot,
+} from "./export-public-seo-snapshot.mjs";
 
 const projectRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const defaultManifest = resolve(projectRoot, "client/seo/published-routes.json");
 const defaultOutputDirectory = resolve(projectRoot, "client/public");
-const nonIndexablePrefixes = [
+const privatePathPrefixes = [
   "/admin",
   "/cart",
   "/checkout",
@@ -13,14 +19,30 @@ const nonIndexablePrefixes = [
   "/partner",
   "/preview",
   "/__templates",
-  "/en",
 ];
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+function fail(message) {
+  throw new Error(message);
+}
+
+function assertRecord(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label} must be an object.`);
+  return value;
+}
+
+function assertExactKeys(value, allowed, label) {
+  const extras = Object.keys(value).filter((key) => !allowed.has(key));
+  if (extras.length > 0) fail(`${label} contains unsupported field(s): ${extras.join(", ")}.`);
+}
 
 function parseArguments(argv) {
   const result = {
     check: false,
     strict: false,
     manifest: defaultManifest,
+    prerenderManifest: "",
+    nginxMap: "",
     outputDirectory: defaultOutputDirectory,
     origin: process.env.PUBLIC_SITE_ORIGIN || process.env.VITE_PUBLIC_SITE_ORIGIN || "",
   };
@@ -30,89 +52,189 @@ function parseArguments(argv) {
     else if (argument === "--strict") result.strict = true;
     else if (argument === "--origin") result.origin = argv[++index] || "";
     else if (argument === "--manifest") result.manifest = resolve(argv[++index] || "");
+    else if (argument === "--prerender-manifest") result.prerenderManifest = resolve(argv[++index] || "");
+    else if (argument === "--nginx-map") result.nginxMap = resolve(argv[++index] || "");
     else if (argument === "--out-dir") result.outputDirectory = resolve(argv[++index] || "");
-    else throw new Error(`Unknown argument: ${argument}`);
+    else fail(`Unknown argument: ${argument}`);
   }
   return result;
 }
 
-function normalizeProductionOrigin(value) {
+function normalizeOptionalOrigin(value) {
   if (!value) return null;
-  const url = new URL(value);
-  if (
-    url.protocol !== "https:"
-    || url.username
-    || url.password
-    || url.pathname !== "/"
-    || url.search
-    || url.hash
-  ) {
-    throw new Error("Production site origin must be an HTTPS origin without credentials, path, query, or fragment.");
-  }
-  return url.origin;
+  return normalizeProductionOrigin(value);
 }
 
 function isPrivatePath(pathname) {
   const lowerPath = pathname.toLowerCase();
-  return nonIndexablePrefixes.some(
+  return privatePathPrefixes.some(
     (prefix) => lowerPath === prefix || lowerPath.startsWith(`${prefix}/`),
   );
 }
 
-function normalizeRoute(entry, index) {
+function normalizeLegacyRoute(entry, index) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-    throw new Error(`Route ${index + 1} must be an object.`);
+    fail(`Route ${index + 1} must be an object.`);
   }
   if (entry.published !== true || entry.indexable !== true) {
-    throw new Error(`Route ${index + 1} must explicitly be published and indexable.`);
+    fail(`Route ${index + 1} must explicitly be published and indexable.`);
   }
-  if (entry.locale !== "zh-CN") {
-    throw new Error(`Route ${index + 1} uses an unavailable locale.`);
-  }
+  if (entry.locale !== "zh-CN") fail(`Route ${index + 1} uses an unavailable locale.`);
   if (
     typeof entry.path !== "string"
     || !entry.path.startsWith("/")
     || entry.path.startsWith("//")
     || /[?#\\\u0000-\u001f]/.test(entry.path)
   ) {
-    throw new Error(`Route ${index + 1} has an invalid public path.`);
+    fail(`Route ${index + 1} has an invalid public path.`);
   }
-  const pathname = entry.path === "/"
-    ? "/"
-    : `/${entry.path.replace(/^\/+|\/+$/g, "")}`;
-  if (isPrivatePath(pathname)) {
-    throw new Error(`Route ${index + 1} is private and cannot enter the sitemap.`);
-  }
+  const pathname = entry.path === "/" ? "/" : `/${entry.path.replace(/^\/+|\/+$/g, "")}`;
+  if (isPrivatePath(pathname)) fail(`Route ${index + 1} is private and cannot enter the sitemap.`);
   if (
     entry.lastModified !== undefined
     && (typeof entry.lastModified !== "string"
       || !/^\d{4}-\d{2}-\d{2}$/.test(entry.lastModified)
       || Number.isNaN(Date.parse(`${entry.lastModified}T00:00:00Z`)))
   ) {
-    throw new Error(`Route ${index + 1} has an invalid lastModified date.`);
+    fail(`Route ${index + 1} has an invalid lastModified date.`);
   }
   return {
     pathname,
+    locale: "zh-CN",
     ...(entry.lastModified ? { lastModified: entry.lastModified } : {}),
   };
 }
 
-async function readManifest(pathname) {
-  const value = JSON.parse(await readFile(pathname, "utf8"));
-  if (!value || value.schemaVersion !== 1 || !Array.isArray(value.routes)) {
-    throw new Error("Published route manifest must use schemaVersion 1 and a routes array.");
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function escapeRegularExpression(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+async function verifyPrerenderManifest(pathname, snapshot) {
+  if (!pathname) fail("Schema v2 requires --prerender-manifest.");
+  const value = assertRecord(JSON.parse(await readFile(pathname, "utf8")), "Pre-render manifest");
+  assertExactKeys(value, new Set(["schemaVersion", "snapshotHash", "routes"]), "Pre-render manifest");
+  if (value.schemaVersion !== 1 || value.snapshotHash !== snapshot.snapshotHash || !Array.isArray(value.routes)) {
+    fail("Pre-render manifest must use schemaVersion 1 and match the immutable SEO snapshot hash.");
   }
-  const routes = value.routes.map(normalizeRoute);
+  if (value.routes.length !== snapshot.routes.length) {
+    fail("Pre-render manifest route set does not match the immutable SEO snapshot.");
+  }
+
+  const expectedRoutes = new Map(snapshot.routes.map((route) => [route.path, route]));
+  const manifestDirectory = dirname(pathname);
+  const seen = new Set();
+  for (const [index, uncheckedEntry] of value.routes.entries()) {
+    const entry = assertRecord(uncheckedEntry, `Pre-render manifest routes[${index}]`);
+    assertExactKeys(entry, new Set(["path", "contentHash", "file", "htmlHash"]), `Pre-render manifest routes[${index}]`);
+    const route = expectedRoutes.get(entry.path);
+    if (!route || seen.has(entry.path)) fail(`Unexpected or duplicate pre-render route: ${String(entry.path)}.`);
+    seen.add(entry.path);
+    if (entry.contentHash !== route.contentHash || !SHA256_PATTERN.test(entry.htmlHash)) {
+      fail(`Pre-render hashes do not match snapshot route ${entry.path}.`);
+    }
+    const expectedFile = route.path === "/" ? "index.html" : `${route.path.slice(1)}/index.html`;
+    if (
+      typeof entry.file !== "string"
+      || entry.file !== expectedFile
+      || !entry.file.endsWith("index.html")
+      || isAbsolute(entry.file)
+      || entry.file.includes("\\")
+      || entry.file.split("/").some((segment) => !segment || segment === "." || segment === "..")
+    ) {
+      fail(`Pre-render route ${entry.path} has an unsafe output file.`);
+    }
+    const absoluteFile = resolve(manifestDirectory, entry.file);
+    if (!absoluteFile.startsWith(`${resolve(manifestDirectory)}${sep}`)) {
+      fail(`Pre-render route ${entry.path} escapes its manifest directory.`);
+    }
+    const html = await readFile(absoluteFile, "utf8");
+    if (sha256(html) !== entry.htmlHash) fail(`Pre-rendered HTML drifted for route ${entry.path}.`);
+    const hashPattern = new RegExp(
+      `<meta\\b(?=[^>]*name=["']published-content-hash["'])(?=[^>]*content=["']${route.contentHash}["'])[^>]*>`,
+      "i",
+    );
+    const rootHashPattern = new RegExp(
+      `<div\\b(?=[^>]*id=["']root["'])(?=[^>]*data-prerendered-path=["']${escapeRegularExpression(escapeHtmlAttribute(route.path))}["'])(?=[^>]*data-published-content-hash=["']${route.contentHash}["'])[^>]*>`,
+      "i",
+    );
+    if (!hashPattern.test(html) || !rootHashPattern.test(html)) {
+      fail(`Pre-rendered HTML does not bind the published content hash for route ${entry.path}.`);
+    }
+    if (!html.includes(route.renderedBodyHtml)) {
+      fail(`Pre-rendered HTML does not contain the immutable published body for route ${entry.path}.`);
+    }
+    const canonicalHref = escapeHtmlAttribute(new URL(route.canonicalPath, snapshot.origin).href);
+    const canonicalPattern = new RegExp(
+      `<link\\b(?=[^>]*rel=["']canonical["'])(?=[^>]*href=["']${escapeRegularExpression(canonicalHref)}["'])[^>]*>`,
+      "i",
+    );
+    if (!canonicalPattern.test(html)) {
+      fail(`Pre-rendered HTML canonical does not match snapshot route ${entry.path}.`);
+    }
+    for (const alternate of route.alternates) {
+      const alternateHref = escapeHtmlAttribute(new URL(alternate.path, snapshot.origin).href);
+      const alternatePattern = new RegExp(
+        `<link\\b(?=[^>]*rel=["']alternate["'])(?=[^>]*hreflang=["']${escapeRegularExpression(alternate.hrefLang)}["'])(?=[^>]*href=["']${escapeRegularExpression(alternateHref)}["'])[^>]*>`,
+        "i",
+      );
+      if (!alternatePattern.test(html)) {
+        fail(`Pre-rendered HTML alternates do not match snapshot route ${entry.path}.`);
+      }
+    }
+  }
+}
+
+async function readPublishedRoutes(options) {
+  const unchecked = JSON.parse(await readFile(options.manifest, "utf8"));
+  if (unchecked?.schemaVersion === 2) {
+    const snapshot = validatePublicSeoSnapshot(unchecked);
+    await verifyPrerenderManifest(options.prerenderManifest, snapshot);
+    const configuredOrigin = normalizeOptionalOrigin(options.origin);
+    if (configuredOrigin && configuredOrigin !== snapshot.origin) {
+      fail("Configured production origin does not match the immutable SEO snapshot origin.");
+    }
+    return {
+      origin: snapshot.origin,
+      schemaVersion: 2,
+      routes: snapshot.routes.map((route) => ({
+        pathname: route.path,
+        locale: route.locale,
+        lastModified: route.lastModified,
+        alternates: route.alternates,
+      })),
+    };
+  }
+  if (!unchecked || unchecked.schemaVersion !== 1 || !Array.isArray(unchecked.routes)) {
+    fail("Published route manifest must use schemaVersion 1 or immutable snapshot schemaVersion 2.");
+  }
+  const routes = unchecked.routes.map(normalizeLegacyRoute);
   const seen = new Set();
   for (const route of routes) {
-    if (seen.has(route.pathname)) throw new Error(`Duplicate public route: ${route.pathname}`);
+    if (seen.has(route.pathname)) fail(`Duplicate public route: ${route.pathname}`);
     seen.add(route.pathname);
   }
-  return routes.sort((left, right) => left.pathname.localeCompare(right.pathname, "en"));
+  return {
+    origin: normalizeOptionalOrigin(options.origin),
+    schemaVersion: 1,
+    routes: routes.sort((left, right) => left.pathname.localeCompare(right.pathname, "en")),
+  };
 }
 
 function escapeXml(value) {
-  return value
+  return String(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -120,33 +242,78 @@ function escapeXml(value) {
     .replace(/'/g, "&apos;");
 }
 
-export function renderPublicSeoArtifacts(origin, routes) {
+export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1 } = {}) {
+  const hasAlternates = routes.some((route) => Array.isArray(route.alternates) && route.alternates.length > 0);
   const sitemapLines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    "<!-- Generated from client/seo/published-routes.json; do not add unverified URLs by hand. -->",
-    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    schemaVersion === 1
+      ? "<!-- Generated from client/seo/published-routes.json; do not add unverified URLs by hand. -->"
+      : "<!-- Generated from a verified published-route manifest; do not add unverified URLs by hand. -->",
+    `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"${hasAlternates ? ' xmlns:xhtml="http://www.w3.org/1999/xhtml"' : ""}>`,
   ];
   if (origin) {
     for (const route of routes) {
       sitemapLines.push("  <url>", `    <loc>${escapeXml(new URL(route.pathname, `${origin}/`).href)}</loc>`);
       if (route.lastModified) sitemapLines.push(`    <lastmod>${route.lastModified}</lastmod>`);
+      for (const alternate of route.alternates ?? []) {
+        sitemapLines.push(
+          `    <xhtml:link rel="alternate" hreflang="${escapeXml(alternate.hrefLang)}" href="${escapeXml(new URL(alternate.path, `${origin}/`).href)}" />`,
+        );
+      }
       sitemapLines.push("  </url>");
     }
   }
   sitemapLines.push("</urlset>", "");
 
+  const hasPublishedEnglish = routes.some((route) => route.locale === "en");
+  const disallowedPrefixes = [
+    ...privatePathPrefixes,
+    ...(schemaVersion === 2 && hasPublishedEnglish
+      ? privatePathPrefixes.map((prefix) => `/en${prefix}`)
+      : ["/en"]),
+  ];
   const robotsLines = [
-    "# Generated from client/seo/published-routes.json; use the generator for production.",
+    schemaVersion === 1
+      ? "# Generated from client/seo/published-routes.json; use the generator for production."
+      : "# Generated from a verified published-route manifest; use the generator for production.",
     "User-agent: *",
     "Allow: /",
-    ...nonIndexablePrefixes.map((prefix) => `Disallow: ${prefix}`),
+    ...disallowedPrefixes.map((prefix) => `Disallow: ${prefix}`),
   ];
   if (origin && routes.length > 0) robotsLines.push(`Sitemap: ${origin}/sitemap.xml`);
   robotsLines.push("");
-  return {
-    robots: robotsLines.join("\n"),
-    sitemap: sitemapLines.join("\n"),
-  };
+  return { robots: robotsLines.join("\n"), sitemap: sitemapLines.join("\n") };
+}
+
+export function renderPublicSeoNginxMap(routes) {
+  const locations = routes.flatMap((route) => {
+    const outputFile = route.pathname === "/"
+      ? "/index.html"
+      : `${route.pathname}/index.html`;
+    return [
+      `location = \"${route.pathname}\" {`,
+      `  try_files \"${outputFile}\" =404;`,
+      "  expires -1;",
+      "}",
+      "",
+      `location = \"${outputFile}\" {`,
+      "  absolute_redirect off;",
+      `  return 308 \"${route.pathname}$is_args$args\";`,
+      "}",
+      ...(route.pathname === "/" ? [] : [
+        "",
+        `location = \"${route.pathname}/\" {`,
+        "  absolute_redirect off;",
+        `  return 308 \"${route.pathname}$is_args$args\";`,
+        "}",
+      ]),
+    ];
+  });
+  return [
+    "# Generated from the verified pre-render manifest; included at server scope.",
+    ...locations,
+    "",
+  ].join("\n");
 }
 
 async function checkOrWrite(pathname, expected, check) {
@@ -156,24 +323,32 @@ async function checkOrWrite(pathname, expected, check) {
   }
   const actual = await readFile(pathname, "utf8");
   if (actual.replace(/\r\n/g, "\n") !== expected) {
-    throw new Error(`${pathname} is stale. Run generate-public-seo-artifacts.mjs.`);
+    fail(`${pathname} is stale. Run generate-public-seo-artifacts.mjs.`);
   }
 }
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
-  const origin = normalizeProductionOrigin(options.origin);
-  const routes = await readManifest(options.manifest);
-  if (options.strict && (!origin || routes.length === 0)) {
-    throw new Error("Strict mode requires a confirmed HTTPS origin and at least one verified published route.");
+  const published = await readPublishedRoutes(options);
+  if (options.strict && (!published.origin || published.routes.length === 0 || published.schemaVersion !== 2)) {
+    fail("Strict mode requires an immutable schema v2 snapshot, its verified pre-render manifest, and at least one route.");
   }
-  const artifacts = renderPublicSeoArtifacts(origin, routes);
+  if (options.strict && !options.nginxMap) {
+    fail("Strict mode requires --nginx-map so only verified pre-rendered routes can be served as indexable HTML.");
+  }
+  const artifacts = renderPublicSeoArtifacts(published.origin, published.routes, {
+    schemaVersion: published.schemaVersion,
+  });
+  if (!options.check) await mkdir(options.outputDirectory, { recursive: true });
   await Promise.all([
     checkOrWrite(resolve(options.outputDirectory, "robots.txt"), artifacts.robots, options.check),
     checkOrWrite(resolve(options.outputDirectory, "sitemap.xml"), artifacts.sitemap, options.check),
+    ...(options.nginxMap
+      ? [checkOrWrite(options.nginxMap, renderPublicSeoNginxMap(published.routes), options.check)]
+      : []),
   ]);
   process.stdout.write(
-    `${options.check ? "verified" : "generated"}: ${routes.length} published route(s), origin ${origin || "unset"}\n`,
+    `${options.check ? "verified" : "generated"}: ${published.routes.length} published route(s), origin ${published.origin || "unset"}\n`,
   );
 }
 
@@ -183,5 +358,3 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exitCode = 1;
   });
 }
-
-

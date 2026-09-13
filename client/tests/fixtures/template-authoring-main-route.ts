@@ -93,6 +93,8 @@ export function pageDraft() {
     metadata: {},
     editorVersion: "0.22.4",
     status: "DRAFT",
+    reviewStatus: "DRAFT",
+    contentHash: "a".repeat(64),
     version: 0,
     publishedAt: null,
     publishedBy: null,
@@ -330,6 +332,23 @@ export async function installNewTemplateServer(
     if (path.includes("/page-modules/document/revisions")) return route.fulfill(json([]));
     if (path.includes("/page-modules/document/published")) return route.fulfill(json(server.publishedPage));
     if (path.includes("/page-modules/document/admin")) return route.fulfill(json(server.pageDocument));
+    if (options.pageLifecycle && path === "/api/page-modules/document/review/submit" && method === "POST") {
+      recordWrite(route, path);
+      server.pageDocument = {
+        ...server.pageDocument,
+        reviewStatus: "IN_REVIEW",
+      };
+      return route.fulfill(json(server.pageDocument));
+    }
+    if (options.pageLifecycle && path === "/api/page-modules/document/review" && method === "PUT") {
+      const { body } = recordWrite(route, path);
+      const action = (body as { action?: string }).action;
+      server.pageDocument = {
+        ...server.pageDocument,
+        reviewStatus: action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED",
+      };
+      return route.fulfill(json(server.pageDocument));
+    }
     if (options.pageLifecycle && path === "/api/page-modules/document" && method === "PUT") {
       const { body } = recordWrite(route, path);
       server.pageDocument = { ...server.pageDocument, ...(body as object), version: server.pageDocument.version + 1 };
@@ -346,7 +365,12 @@ export async function installNewTemplateServer(
     }
     if (options.pageLifecycle && path === "/api/page-modules/document/publish" && method === "PUT") {
       const { body } = recordWrite(route, path);
-      server.publishedPage = { ...server.pageDocument, ...(body as object), status: "PUBLISHED" };
+      server.publishedPage = {
+        ...server.pageDocument,
+        ...(body as object),
+        status: "PUBLISHED",
+        reviewStatus: "PUBLISHED",
+      };
       return route.fulfill(json(server.publishedPage));
     }
 

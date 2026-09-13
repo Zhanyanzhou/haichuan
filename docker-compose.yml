@@ -69,6 +69,8 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:?CORS_ORIGIN is required}
       # 线上交易总开关（默认关闭；获 D.2 批准后才显式设为 true）
       CUSTOMER_COMMERCE_ENABLED: "${CUSTOMER_COMMERCE_ENABLED:-false}"
+      # 客户报价确认转单独立开关；不等于在线支付开放。
+      CUSTOMER_QUOTATION_ORDERING_ENABLED: "${CUSTOMER_QUOTATION_ORDERING_ENABLED:-false}"
       PARTNER_APPLICATIONS_WRITE_ENABLED: "${PARTNER_APPLICATIONS_WRITE_ENABLED:-false}"
       # 动态模板只读预检始终可用；原子激活必须在目标环境单独显式开启。
       RELEASE_PROFILE: "${RELEASE_PROFILE:-lead-generation}"
@@ -113,9 +115,15 @@ services:
       ALIYUN_SMS_SIGN_NAME: "${ALIYUN_SMS_SIGN_NAME:-}"
       ALIYUN_SMS_TEMPLATE_CODE: "${ALIYUN_SMS_TEMPLATE_CODE:-}"
       SMS_VERIFICATION_REQUIRED: "${SMS_VERIFICATION_REQUIRED:-false}"
+      # D.29 页面素材公开读取与私有归档分别复用现有持久化卷；URL 仍保持 /uploads/page-assets/*。
+      PUBLIC_MEDIA_ROOT: /app/uploads
+      PAGE_MEDIA_ARCHIVE_ROOT: /app/private-media/page-assets-archive
+      # 付款凭证保持私有并复用 private_media_data，禁止落入可公开读取的 /app/uploads。
+      PAYMENT_PROOF_MEDIA_ROOT: /app/private-media/payment-proofs
       PRODUCT_MEDIA_ROOT: /app/private-media/products
       BACKUP_DIR: /backups
-      BACKUP_INTERVAL_SECONDS: "${BACKUP_RPO_SECONDS:?BACKUP_RPO_SECONDS is required}"
+      BACKUP_INTERVAL_SECONDS: "${BACKUP_INTERVAL_SECONDS:?BACKUP_INTERVAL_SECONDS is required}"
+      BACKUP_RETENTION_DAYS: "${BACKUP_RETENTION_DAYS:?BACKUP_RETENTION_DAYS is required}"
       # 后台状态与 backup healthcheck 使用同一 RPO 边界，不额外放宽。
       BACKUP_HEALTH_GRACE_SECONDS: "0"
     # P0-3：不对宿主机暴露 3000（仅 nginx 反代 /api 与 /uploads → server:3000，见 nginx.conf）
@@ -123,7 +131,7 @@ services:
       - "3000"
     volumes:
       - uploads_data:/app/uploads
-      # 受控商品媒体和付款凭证必须跨容器重建持久化，禁止写回镜像层。
+      # 页面素材归档、受控商品媒体和付款凭证必须跨容器重建持久化，禁止写回镜像层。
       - private_media_data:/app/private-media
       # 备份产物只读挂载：settings.getBackupStatus 据此向后台展示真实备份状态（OR-1 衔接）。
       - type: bind
@@ -186,8 +194,8 @@ services:
 
   # ===== 定时备份（OR-1：数据库 + 媒体卷，含付款凭证）=====
   # 复用已签名 operations digest；备份脚本与数据库客户端均固化在镜像内，禁止从 checkout bind 可执行代码。
-  # 启动即执行一轮备份（部署即可验证），此后每 BACKUP_INTERVAL_SECONDS 一轮，保留 7 天。
-  # 产出在宿主机 ./backups（建议纳入宿主机异地同步，如 rsync/对象存储）。
+  # 启动即执行一轮备份（部署即可验证），此后每 BACKUP_INTERVAL_SECONDS 一轮；保留目标由 BACKUP_RETENTION_DAYS 显式给定。
+  # 产出在 BACKUP_HOST_DIR 指向的宿主机绝对路径；异地加密/不可变副本需由目标环境另行接线并验收。
   backup:
     image: "${OPERATIONS_IMAGE_NAME:?OPERATIONS_IMAGE_NAME is required}@sha256:${OPERATIONS_IMAGE_DIGEST:?OPERATIONS_IMAGE_DIGEST is required}"
     container_name: jewelry-backup
@@ -257,7 +265,7 @@ services:
   #   http://server:3000/api/ready   （后端与数据库就绪）
   #   http://client:8081/            （受控网络内的可信前台回源）
   # 通知渠道在 UI 配置（邮件/企业微信/webhook 均可）。
-  # 备份容器与磁盘水位无 HTTP 端点，由 backup.sh 输出告警日志（docker logs jewelry-backup 巡检）。
+  # 备份容器健康、磁盘水位与真实通知接收必须在目标环境单独接线并演练；未接线时为发布阻断，日志巡检不构成 PASS。
   uptime-kuma:
     image: louislam/uptime-kuma:1@sha256:3d632903e6af34139a37f18055c4f1bfd9b7205ae1138f1e5e8940ddc1d176f9
     container_name: jewelry-uptime-kuma

@@ -1,6 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
+  IsDate,
   IsIn,
   IsInt,
   IsNumber,
@@ -47,6 +48,25 @@ export class QuotationListQueryDto {
   @IsInt()
   @Min(1)
   salesConsultantId?: number;
+
+  @IsOptional()
+  @IsIn(['RETAIL', 'CUSTOM', 'PARTNER_WAX'])
+  channel?: 'RETAIL' | 'CUSTOM' | 'PARTNER_WAX';
+}
+
+export class QuotationCustomerLookupQueryDto {
+  @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  @MaxLength(100)
+  keyword?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  pageSize?: number;
 }
 
 /** 报价单商品行（关联 SKU 可选；转订单时必须全部带 skuId） */
@@ -130,6 +150,8 @@ export class CreateQuotationDto {
   depositAmount?: number;
 
   @IsOptional()
+  @Type(() => Date)
+  @IsDate()
   validUntil?: Date;
 
   @IsArray()
@@ -176,6 +198,8 @@ export class UpdateQuotationDto {
   depositAmount?: number;
 
   @IsOptional()
+  @Type(() => Date)
+  @IsDate()
   validUntil?: Date;
 
   @IsOptional()

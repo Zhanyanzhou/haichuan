@@ -12,6 +12,8 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { OutboxService } from "../../common/outbox/outbox.service";
 import { ReliableNotificationIntentService } from "../../common/notifications/reliable-notification-intent.service";
+import { ReliableNotificationDeliveryWorker } from "../../common/notifications/reliable-notification-delivery.worker";
+import { NotificationDeliveryPolicyService } from "../../common/notifications/notification-delivery-policy.service";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { JwtStrategy } from "../auth/jwt.strategy";
 import { InquiriesService } from "../inquiries/inquiries.service";
@@ -45,7 +47,7 @@ test(
     });
     const suffix = randomUUID().replace(/-/g, "").slice(0, 12);
     const phone = `19${String(Date.now()).slice(-9)}`;
-    const usernames = [`lead_cs_${suffix}`, `lead_admin_${suffix}`];
+    const usernames = [`lead_cs_${suffix}`, `lead_admin_${suffix}`, `lead_warehouse_${suffix}`];
     const idempotencyKey = `lead-real-submit-${suffix}`;
     const retryDeduplicationKey = `lead-real-retry-${suffix}`;
     let customerId: number | null = null;
@@ -59,7 +61,7 @@ test(
     let closeApp: (() => Promise<void>) | null = null;
 
     try {
-      const [customerService, admin] = await Promise.all([
+      const [customerService, admin, warehouse] = await Promise.all([
         prisma.user.create({
           data: {
             username: usernames[0],
@@ -76,6 +78,14 @@ test(
             role: "ADMIN",
           },
         }),
+        prisma.user.create({
+          data: {
+            username: usernames[2],
+            password: "isolated-test-only",
+            realName: "隔离测试仓库员工",
+            role: "WAREHOUSE",
+          },
+        }),
       ]);
       const customer = await prisma.customer.create({
         data: {
@@ -87,7 +97,8 @@ test(
       customerId = customer.id;
 
       const outbox = new OutboxService();
-      const reliableNotifications = new ReliableNotificationIntentService(outbox);
+      const deliveryPolicy = new NotificationDeliveryPolicyService();
+      const reliableNotifications = new ReliableNotificationIntentService(outbox, deliveryPolicy);
       const leadsService = new LeadsService(
         prisma as never,
         outbox,
@@ -133,6 +144,7 @@ test(
         customerEmail: customer.email as string,
         message: "真实隔离库咨询旅程",
         consultationType: "预约鉴赏",
+        preferredContact: "电子邮件",
         privacyConsent: true,
         idempotencyKey,
         customer: {
@@ -156,6 +168,12 @@ test(
       leadId = lead.id;
       assert.equal(await prisma.inquiry.count({ where: { id: inquiryId } }), 1);
       assert.equal(await prisma.lead.count({ where: { inquiryId } }), 1);
+      const persistedInquiry = await prisma.inquiry.findUniqueOrThrow({
+        where: { id: inquiryId },
+      });
+      assert.equal(persistedInquiry.customerEmail, customer.email);
+      assert.equal(persistedInquiry.preferredContact, "电子邮件");
+      assert.equal(lead.email, customer.email);
       assert.equal(
         await prisma.consentRecord.count({ where: { source: `inquiry:${inquiryId}` } }),
         1,
@@ -277,16 +295,28 @@ test(
       const detail = await callLeadApi(actorId, `/inquiry/${leadId}`);
       assert.equal(detail.response.status, 200);
       assert.equal(detail.body.id, leadId);
+      assert.equal(detail.body.email, customer.email);
+      assert.equal(detail.body.preferredContact, "电子邮件");
 
       await leadsService.updateLead("inquiry", leadId, { status: "CONTACTED" }, actorId);
-      await leadsService.addFollowUp({
-        leadType: "inquiry",
-        leadId,
-        content: "已电话确认客户需求",
-        contactMethod: "phone",
-        nextFollowUpAt: "2026-09-20T03:00:00.000Z",
-        createdBy: actorId,
+      const followUpWrite = await callLeadApi(actorId, `/inquiry/${leadId}/follow-up`, {
+        method: "POST",
+        body: JSON.stringify({
+          content: "已电话确认客户需求",
+          contactMethod: "phone",
+          nextFollowUpAt: "2026-09-20T03:00:00.000Z",
+        }),
       });
+      assert.equal(followUpWrite.response.status, 201);
+      const followUpDetail = await callLeadApi(actorId, `/inquiry/${leadId}`);
+      assert.equal(followUpDetail.response.status, 200);
+      assert.equal(followUpDetail.body.nextFollowUpAt, "2026-09-20T03:00:00.000Z");
+      assert.equal(followUpDetail.body.followUps[0].type, "FOLLOW_UP");
+      assert.equal(followUpDetail.body.followUps[0].contactMethod, "phone");
+      assert.equal(
+        followUpDetail.body.followUps[0].nextFollowUpAt,
+        "2026-09-20T03:00:00.000Z",
+      );
       const beforeReply = await prisma.lead.findUniqueOrThrow({ where: { id: leadId } });
       const reply = await leadsService.replyToLead(
         "inquiry",
@@ -326,12 +356,61 @@ test(
           lastErrorCode: "SMTP_SEND_FAILED",
         },
       });
-      await leadsService.retryNotificationFailure(failedEvent.id, actorId);
+      const forbiddenRetry = await callLeadApi(
+        warehouse.id,
+        `/notification-failures/${failedEvent.id}/retry`,
+        { method: "POST" },
+      );
+      assert.equal(forbiddenRetry.response.status, 403);
+      const concurrentRetries = await Promise.all([
+        callLeadApi(actorId, `/notification-failures/${failedEvent.id}/retry`, { method: "POST" }),
+        callLeadApi(actorId, `/notification-failures/${failedEvent.id}/retry`, { method: "POST" }),
+      ]);
+      assert.deepEqual(
+        concurrentRetries.map(({ response }) => response.status).sort(),
+        [201, 409],
+      );
       const retried = await prisma.outboxEvent.findUniqueOrThrow({
         where: { id: failedEvent.id },
       });
       assert.equal(retried.status, "PENDING");
       assert.equal(retried.lastErrorCode, null);
+      assert.equal(
+        (retried.payload as Record<string, any>).manualRetry.requestedBy,
+        actorId,
+      );
+
+      let externalSends = 0;
+      const notificationWorker = new ReliableNotificationDeliveryWorker(
+        prisma as never,
+        { get: () => "true" } as never,
+        {
+          getSiteBaseUrl: () => "http://127.0.0.1",
+          renderShell: (html: string) => html,
+          send: async () => {
+            externalSends += 1;
+            return { delivered: true };
+          },
+        } as never,
+        deliveryPolicy,
+      );
+      await notificationWorker.drainOnce(10);
+      assert.equal(externalSends, 1);
+      assert.equal(
+        (await prisma.outboxEvent.findUniqueOrThrow({ where: { id: failedEvent.id } })).status,
+        "PROCESSED",
+      );
+      const retryOutcomeAudits = await prisma.leadActivity.findMany({
+        where: { leadId, createdBy: actorId, type: "NOTE" },
+        select: { metadata: true },
+      });
+      assert.equal(
+        retryOutcomeAudits.filter((entry) =>
+          (entry.metadata as Record<string, unknown> | null)?.action
+            === "LEAD_REPLY_NOTIFICATION_RETRY_SUCCEEDED"
+        ).length,
+        1,
+      );
 
       await leadsService.updateLead(
         "inquiry",

@@ -46,6 +46,7 @@ const MIN_DATABASE_BACKUP_BYTES = 1024;
 const DEFAULT_BACKUP_INTERVAL_SECONDS = 86400;
 const DEFAULT_BACKUP_HEALTH_GRACE_SECONDS = 3600;
 const SETTINGS_UPDATE_MAX_ATTEMPTS = 3;
+const BACKUP_RETENTION_DAYS_PATTERN = /^[1-9][0-9]{0,8}$/;
 
 type BackupArtifact = { name: string; size: number; mtime: Date };
 
@@ -79,6 +80,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isIsoTimestamp(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)
     && Number.isFinite(Date.parse(value));
+}
+
+export function resolveBackupRetentionDays(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  if (!BACKUP_RETENTION_DAYS_PATTERN.test(value)) return null;
+  return Number(value);
+}
+
+export function formatBackupRetentionDisplay(value: unknown): string {
+  const days = resolveBackupRetentionDays(value);
+  return days === null ? '由部署环境管理' : `${days} 天`;
 }
 
 export function evaluateBackupExecutionMarker(
@@ -326,6 +338,8 @@ export class SettingsService {
     // OR-1 备份容器产物目录（compose 将宿主 ./backups 只读挂载到 server 容器 /backups）。
     // 本地开发未挂载该目录时诚实说明，不返回误导性的"未接入"。
     const dir = process.env.BACKUP_DIR || '/backups';
+    const backupRetentionDays = resolveBackupRetentionDays(process.env.BACKUP_RETENTION_DAYS);
+    const backupRetentionDisplay = formatBackupRetentionDisplay(process.env.BACKUP_RETENTION_DAYS);
     try {
       const entries = await fs.promises.readdir(dir);
       const configuredInterval = Number(process.env.BACKUP_INTERVAL_SECONDS || DEFAULT_BACKUP_INTERVAL_SECONDS);
@@ -361,7 +375,10 @@ export class SettingsService {
         if (stat.isFile()) files.push({ name, size: stat.size, mtime: stat.mtime });
       }
       const intervalHours = Math.max(1, Math.round(intervalSeconds / 3600));
-      const schedule = `backup 容器目标每 ${intervalHours} 小时一轮（保留 7 天）`;
+      const retentionSchedule = backupRetentionDays === null
+        ? '保留期由部署环境管理'
+        : `保留 ${backupRetentionDisplay}`;
+      const schedule = `backup 容器目标每 ${intervalHours} 小时一轮（${retentionSchedule}）`;
       const summary = summarizeBackupArtifacts(files, intervalSeconds);
       if (files.length === 0) {
         return {
@@ -369,11 +386,12 @@ export class SettingsService {
           autoBackup: false,
           storageMounted: true,
           backupSchedule: schedule,
+          backupRetentionDays,
           totalBackups: 0,
           ...execution,
           message: execution.executionStatus === 'FAILED'
             ? `最近一次备份失败（${execution.errorCode || 'UNKNOWN'}），且暂无完整备份产物。`
-            : `备份目录已挂载（${dir}），但暂无备份产物；请确认 backup 容器已启动，详见 docker logs jewelry-backup。`,
+            : '备份存储已挂载，但暂无备份产物；请确认备份服务运行状态。',
         };
       }
       if (!summary.latest) {
@@ -382,6 +400,7 @@ export class SettingsService {
           autoBackup: false,
           storageMounted: true,
           backupSchedule: schedule,
+          backupRetentionDays,
           totalBackups: 0,
           incompleteArtifactCount: summary.incompleteArtifactCount,
           ...execution,
@@ -417,6 +436,7 @@ export class SettingsService {
         autoBackup,
         storageMounted: true,
         backupSchedule: schedule,
+        backupRetentionDays,
         totalBackups: summary.completeSets.length,
         incompleteArtifactCount: summary.incompleteArtifactCount,
         latestFiles: latestFiles.map((file) => ({ name: file.name, size: file.size })),
@@ -432,9 +452,10 @@ export class SettingsService {
           autoBackup: false,
           storageMounted: false,
           backupSchedule: null,
+          backupRetentionDays,
           totalBackups: 0,
           ...evaluateBackupExecutionMarker(null, DEFAULT_BACKUP_INTERVAL_SECONDS, DEFAULT_BACKUP_HEALTH_GRACE_SECONDS),
-          message: '备份目录未挂载到 server 容器（本地开发环境属正常）；生产部署请确认 ./backups 已只读挂载。',
+          message: '备份存储未挂载；本地开发环境可由部署环境管理，生产部署请核对只读挂载。',
         };
       }
       throw error;

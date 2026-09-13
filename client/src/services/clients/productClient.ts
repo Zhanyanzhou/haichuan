@@ -608,6 +608,7 @@ export const productApi = {
   addImage: async (
     productId: number,
     data: {
+      mediaAssetId?: number;
       url?: string;
       storageKey?: string;
       type?: string;
@@ -725,6 +726,18 @@ export const productApi = {
       return mockRes(product);
     }
     return api.put(`/products/${id}/status`, { status });
+  },
+  submitForReview: async (id: number) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      const product = getMockProducts().find((item) => item.id === id);
+      if (!product) throw new Error("商品不存在");
+      if (product.status !== "DRAFT") {
+        throw mockRequestError("只有草稿作品可以提交审核", 409);
+      }
+      return mockRes({ productId: id, reviewStatus: "IN_REVIEW", submittedAt: new Date().toISOString() });
+    }
+    return api.post(`/products/${id}/submit-review`);
   },
   /* 标签管理 */
   getTags: async (productId: number) => {

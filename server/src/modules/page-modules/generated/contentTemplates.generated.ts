@@ -1,13 +1,30 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/content-templates.contract.json
- * SHA-256：c0c27b66cbb8edf7b046e422ff862e37f751e1724a2427d25a4159964698ffd3
+ * SHA-256：7b3c5da4fcf10e1d513abf4ad808955299e5f503d8661801d4fa6f66ffaea4a0
  */
 
 export const CONTENT_TEMPLATE_REGISTRY_VERSION = 19;
-export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 9;
+export const CONTENT_TEMPLATE_CONTRACT_SCHEMA_VERSION = 10;
 export const CONTENT_TEMPLATE_CONTRACT_VERSION = 6;
 export const CONTENT_TEMPLATE_PUBLICATION_GATE_VERSION = 3;
+export const CONTENT_TEMPLATE_MANAGED_MEDIA_AUTHORIZATION_POLICY = {
+  "authority": "MediaAssetAuthorization",
+  "draftBehavior": "warn",
+  "enforcementPublicationGateVersion": 3,
+  "identity": "MediaAsset.storageKey",
+  "legacyPageMediaRights": "advisory-only",
+  "pagePublishBehavior": "block-visible-ineligible",
+  "publicReadBehavior": "fail-closed",
+  "restoreBehavior": "requires-republish",
+  "revocationPropagation": "live",
+  "shadowPublicationGateVersion": 4,
+  "supportedPublicationGateVersions": [
+    3,
+    4
+  ],
+  "templatePublishBehavior": "block-ineligible"
+} as const;
 export const CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY = "_contentPublication";
 export const CONTENT_TEMPLATE_EDITOR_POLICY = {
   "allowSemanticOverlap": true,
@@ -2777,6 +2794,7 @@ export function getPageDocumentMediaReferences(
   puckData: unknown,
   metadata?: unknown,
   pageKey?: string,
+  options: { preserveReferencePaths?: boolean } = {},
 ): ContentTemplateMediaReference[] {
   const references: ContentTemplateMediaReference[] = [];
   if (isRecord(metadata) && hasNonEmptyText(metadata.ogImage)) {
@@ -2809,10 +2827,13 @@ export function getPageDocumentMediaReferences(
     }
   }
 
-  const seenUrls = new Set<string>();
+  const seen = new Set<string>();
   return references.filter((reference) => {
-    if (seenUrls.has(reference.url)) return false;
-    seenUrls.add(reference.url);
+    const key = options.preserveReferencePaths
+      ? reference.path + "\u0000" + reference.url
+      : reference.url;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }

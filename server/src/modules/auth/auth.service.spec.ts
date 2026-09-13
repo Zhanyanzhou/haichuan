@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HttpStatus } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { JwtService } from '@nestjs/jwt';
 import { ApiError } from '../../common/errors/api-error';
 import { AuthService } from './auth.service';
 
@@ -56,4 +57,36 @@ test('后台员工连续登录失败后返回稳定且不泄露账号存在性�
         && error.details?.retryAfterMinutes === 15,
     );
   }
+});
+
+test('新签发员工 access token 绑定 session family，且只解析可吊销的后台 access token', async () => {
+  const jwt = new JwtService({ secret: 'auth-service-unit-secret' });
+  const familyId = '00000000-0000-4000-8000-000000000007';
+  const service = new AuthService(
+    { user: { update: async () => ({}) } } as never,
+    jwt,
+    {} as never,
+  );
+  const result = await service.login({
+    id: 7,
+    username: 'session-staff',
+    role: 'EDITOR',
+    status: 'ACTIVE',
+  } as never, familyId);
+  const payload = await jwt.verifyAsync<Record<string, unknown>>(result.accessToken);
+  assert.equal(payload.type, 'admin');
+  assert.equal(payload.tokenUse, 'access');
+  assert.equal(payload.sessionFamilyId, familyId);
+  assert.deepEqual(
+    await service.resolveRevocableAccessSession(result.accessToken),
+    { userId: 7, familyId },
+  );
+
+  const customerToken = jwt.sign({
+    sub: 7,
+    type: 'customer',
+    tokenUse: 'access',
+    sessionFamilyId: familyId,
+  });
+  assert.equal(await service.resolveRevocableAccessSession(customerToken), null);
 });

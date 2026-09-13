@@ -15,6 +15,7 @@ export type PagePublishEvent = {
   pageKey?: string;
   version?: number;
   changedAt?: string;
+  locale?: PublicContentLocale;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -39,6 +40,7 @@ function normalizePublishEvent(value: unknown): PagePublishEvent {
     pageKey: typeof source.pageKey === "string" ? source.pageKey : undefined,
     version: typeof source.version === "number" ? source.version : undefined,
     changedAt: typeof source.changedAt === "string" ? source.changedAt : undefined,
+    locale: source.locale === "zh-CN" || source.locale === "en" ? source.locale : undefined,
   };
 }
 
@@ -123,6 +125,7 @@ export function usePagePublishStream(
 
       if (payload.type === "heartbeat") return;
       if (payload.pageKey && payload.pageKey !== pageKey) return;
+      if (payload.locale && payload.locale !== locale) return;
 
       // ready 表示订阅已建立。此时补拉快照，覆盖断线期间错过的发布，
       // 也封闭首次读取页面与建立订阅之间的空窗；心跳不触发重复读取。

@@ -4,6 +4,7 @@ import {
   DYNAMIC_TEMPLATE_BLOCK_TYPE,
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   dynamicTemplateVersionKey,
+  getDynamicTemplateDefinitionMediaReferences,
   getDynamicTemplateDocumentMediaReferences,
 } from "./dynamic-template-instance";
 import { definitionFixture } from "./dynamic-template-test-fixture";
@@ -58,6 +59,59 @@ function imageDefinition(): TemplateDefinitionV2 {
   };
   return definition;
 }
+
+test("母模板发布引用只收集正式默认内容与公开可达背景", () => {
+  const definition = imageDefinition();
+  definition.schemaVersion = 3;
+  definition.defaultContent.slot_image = {
+    src: "/uploads/page-assets/default.jpg",
+    alt: "默认主图",
+  };
+  definition.nodes.node_root.responsive.desktop.backgroundImage =
+    "/uploads/page-assets/background.jpg";
+  definition.nodes.node_container.hidden = true;
+
+  assert.deepEqual(
+    getDynamicTemplateDefinitionMediaReferences(definition).map((item) => ({
+      url: item.url,
+      path: item.path,
+    })),
+    [{
+      url: "/uploads/page-assets/background.jpg",
+      path: "nodes.node_root.responsive.desktop.backgroundImage",
+    }],
+  );
+
+  definition.nodes.node_container.hidden = false;
+  assert.deepEqual(
+    getDynamicTemplateDefinitionMediaReferences(definition).map((item) => item.url).sort(),
+    [
+      "/uploads/page-assets/background.jpg",
+      "/uploads/page-assets/default.jpg",
+    ],
+  );
+});
+
+test("母模板发布保留同一 URL 的每个断点背景与槽位路径", () => {
+  const definition = imageDefinition();
+  definition.schemaVersion = 3;
+  const sharedUrl = "/uploads/page-assets/shared-template.jpg";
+  definition.nodes.node_root.responsive.desktop.backgroundImage = sharedUrl;
+  definition.nodes.node_root.responsive.mobile.backgroundImage = sharedUrl;
+  definition.defaultContent.slot_image = { src: sharedUrl, alt: "主图" };
+  definition.defaultContent.slot_image_duplicate = { src: sharedUrl, alt: "副图" };
+  const references = getDynamicTemplateDefinitionMediaReferences(definition, {
+    preserveReferencePaths: true,
+  })
+    .filter((item) => item.url === sharedUrl);
+  assert.deepEqual(references.map((item) => item.path).sort(), [
+    "defaultContent.slot_image",
+    "defaultContent.slot_image_duplicate",
+    "nodes.node_root.responsive.desktop.backgroundImage",
+    "nodes.node_root.responsive.mobile.backgroundImage",
+    "nodes.node_root.responsive.tablet.backgroundImage",
+  ]);
+});
 
 function documentWithDefinition(
   definition: TemplateDefinitionV2,
@@ -167,6 +221,12 @@ test("动态模板媒体收集按桌面与移动端公开可达性取并集并�
   assert.equal(references.length, 1);
   assert.equal(references[0]?.url, "/uploads/mobile-only.jpg");
   assert.equal(references[0]?.field, "slot_image");
+  const publicationReferences = getDynamicTemplateDocumentMediaReferences(
+    documentWithDefinition(definition),
+    { preserveReferencePaths: true, canonicalResponsivePaths: true },
+  );
+  assert.equal(publicationReferences.length, 2);
+  assert.equal(new Set(publicationReferences.map((item) => item.path)).size, 2);
 });
 
 test("隐藏实例、隐藏槽位和不可达祖先不会扩大公开素材授权范围", async (t) => {

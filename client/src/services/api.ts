@@ -22,9 +22,12 @@ import type {
   OrderStatus,
   OrderType,
   PaymentStatus,
+  QuoteChannel,
   QuotationStatus,
   User,
+  WaxType,
 } from "@/types";
+import type { CustomerNotificationPreference } from "@/pages/public/CustomerCenter/types";
 
 export {
   publicPageDocumentStreamUrl,
@@ -79,6 +82,24 @@ export {
   customerAdminApi,
   type CustomerAdminListQuery,
 } from "./clients/customerAdminClient";
+export {
+  customerQuotationApi,
+  parseCustomerDesignFilesResponse,
+  type ConfirmQuotationOrderInput,
+  type ConfirmQuotationOrderResult,
+  type CustomerCooperationDesignFileResource,
+  type CustomerQuotationPage,
+} from "./clients/customerQuotationClient";
+export {
+  quotationConfigurationApi,
+  type CooperationDesignFileResource,
+  type CreatePartnerPriceAgreementInput,
+  type CreateQuotationFeeRuleInput,
+  type CreateTradeResourceBucketInput,
+  type PartnerPriceAgreementResource,
+  type QuotationFeeRuleResource,
+  type TradeResourceBucketResource,
+} from "./clients/quotationConfigurationClient";
 export {
   inquiriesApi,
   type InquiryListQuery,
@@ -308,6 +329,7 @@ export interface QuotationListQuery {
   status?: "all" | QuotationStatus;
   keyword?: string;
   salesConsultantId?: number;
+  channel?: "all" | QuoteChannel;
 }
 
 export interface QuotationItemInput {
@@ -319,10 +341,13 @@ export interface QuotationItemInput {
   quantity: number;
   unitPrice: number;
   quotedPrice: number;
+  waxType?: WaxType;
 }
 
 export interface CreateQuotationInput {
   customerId?: number;
+  channel?: QuoteChannel;
+  sourceLeadId?: number;
   customerName: string;
   customerPhone: string;
   customerEmail?: string;
@@ -337,13 +362,94 @@ export type UpdateQuotationInput = Partial<
   Omit<CreateQuotationInput, "customerId">
 >;
 
+export interface IssueQuotationInput {
+  designFileVersionId?: number;
+  waxType?: WaxType;
+  feeRuleIds?: number[];
+  resourceRequirements?: Array<{
+    resourceBucketId: number;
+    requiredQuantity: number;
+  }>;
+}
+
+export interface QuotationIssueFeeRule {
+  id: number;
+  code: string;
+  version: number;
+  channel: QuoteChannel;
+  waxType?: WaxType | null;
+  calculationMethod: "FIXED" | "PER_GRAM" | "PER_ORDER";
+  unitAmount: number | string;
+  currency: string;
+  displayText: string;
+}
+
+export interface QuotationIssueResourceBucket {
+  id: number;
+  channel: "CUSTOM" | "PARTNER_WAX";
+  kind: "CAPACITY" | "MATERIAL";
+  code: string;
+  bucketKey: string;
+  displayName: string;
+  unit: string;
+  availableQuantity: number | string;
+  reservedQuantity: number | string;
+  version: number;
+  bucketStart?: string | null;
+  bucketEnd?: string | null;
+}
+
+export interface QuotationIssueDesignFile {
+  id: number;
+  referenceNo: string;
+  currentVersion: number;
+  versions?: Array<{
+    id: number;
+    designFileId: number;
+    version: number;
+    status: "DRAFT" | "SUBMITTED" | "CONFIRMED" | "SUPERSEDED" | "REJECTED";
+    redWaxWeight?: number | string | null;
+    purpleWaxWeight?: number | string | null;
+    confirmedAt?: string | null;
+  }>;
+}
+
+export interface QuotationIssueOptions {
+  feeRules: QuotationIssueFeeRule[];
+  resourceBuckets: QuotationIssueResourceBucket[];
+  designFiles: QuotationIssueDesignFile[];
+}
+
+export interface QuotationIssueCustomer {
+  id: number;
+  name?: string | null;
+  phone: string;
+  email?: string | null;
+  accountType: "MEMBER" | "PARTNER";
+  partnerStatus: string;
+  status: string;
+}
+
+export interface QuotationIssueCustomerPage {
+  list: QuotationIssueCustomer[];
+}
+
 export const quotationApi = {
   getList: (params: QuotationListQuery) => api.get("/quotations", { params }),
+  searchIssueCustomers: (params: { keyword: string; pageSize?: number }) =>
+    api.get("/quotations/issue-customers", { params }),
   getById: (id: number) => api.get(`/quotations/${id}`),
+  getIssueOptions: (id: number) =>
+    api.get(`/quotations/${id}/issue-options`),
   create: (data: CreateQuotationInput) => api.post("/quotations", data),
   update: (id: number, data: UpdateQuotationInput) =>
     api.put(`/quotations/${id}`, data),
   submit: (id: number) => api.put(`/quotations/${id}/submit`),
+  /** v2 发出报价：服务端冻结费用、资源、文件与价格来源快照。 */
+  issue: (id: number, data: IssueQuotationInput = {}) =>
+    api.post(`/quotations/${id}/issue`, data),
+  /** 已发出版本只能追加修订，不能原地覆盖。 */
+  revise: (id: number) => api.post(`/quotations/${id}/revisions`),
   confirm: (id: number) => api.put(`/quotations/${id}/confirm`),
   cancel: (id: number) => api.put(`/quotations/${id}/cancel`),
   convertToOrder: (id: number, data: { address: string; orderType?: string }) =>
@@ -547,6 +653,21 @@ export const customerApi = {
       {},
       { headers: customerAuthHeaders(), suppressGlobalError: true },
     ),
+  getNotificationPreferences: () =>
+    api.get("/customers/me/notification-preferences", {
+      headers: customerAuthHeaders(),
+      suppressGlobalError: true,
+    }),
+  updateNotificationPreference: (data: {
+    channel: "EMAIL" | "SMS";
+    topic: CustomerNotificationPreference["topic"];
+    enabled: boolean;
+    expectedUpdatedAt: string | null;
+  }) =>
+    api.patch("/customers/me/notification-preferences", data, {
+      headers: customerAuthHeaders(),
+      suppressGlobalError: true,
+    }),
   createAfterSales: (
     orderId: number,
     data: {
@@ -907,6 +1028,124 @@ export const warehouseApi = {
 };
 
 // ===== Upload API =====
+export type MediaAssetSourceType =
+  | "BRAND_OWNED"
+  | "COMMISSIONED"
+  | "LICENSED_THIRD_PARTY"
+  | "PUBLIC_DOMAIN"
+  | "CUSTOMER_SUPPLIED"
+  | "AI_GENERATED"
+  | "LEGACY_UNVERIFIED"
+  | "OTHER";
+
+export type MediaAuthorizationReviewStatus =
+  | "DRAFT"
+  | "IN_REVIEW"
+  | "APPROVED"
+  | "REJECTED";
+
+export type MediaAuthorizationRevocationStatus = "ACTIVE" | "REVOKED";
+
+export type MediaAuthorizationSummary = {
+  revision: number;
+  publicUseEpoch: number;
+  sourceType: MediaAssetSourceType;
+  publicWebUseAllowed?: boolean;
+  reviewStatus: MediaAuthorizationReviewStatus;
+  revocationStatus: MediaAuthorizationRevocationStatus;
+  validFrom?: string | null;
+  validUntil?: string | null;
+};
+
+export type MediaPublicEligibility = {
+  eligible: boolean;
+  reasons: string[];
+};
+
+export type MediaAuthorizationDetail = MediaAuthorizationSummary & {
+  mediaAssetId: number;
+  authorizationBasis?: string | null;
+  evidenceReference?: string | null;
+  submittedAt?: string | null;
+  reviewedAt?: string | null;
+  reviewNote?: string | null;
+  revokedAt?: string | null;
+  revocationReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PageMediaAsset = {
+  id: number;
+  url: string;
+  name: string;
+  type: "image" | "video";
+  mimeType: string;
+  size: number;
+  width?: number;
+  height?: number;
+  createdAt: string;
+  status: "PENDING" | "READY" | "QUARANTINED" | "ARCHIVED";
+  available: boolean;
+  previewUrl?: string;
+  publicUrl?: string | null;
+  lifecycleRevision?: number;
+  integrityCheckedAt?: string;
+  quarantineReason?: string;
+  authorization?: MediaAuthorizationSummary | null;
+  publicEligibility?: MediaPublicEligibility;
+};
+
+export type StoredPageMediaAsset = PageMediaAsset & {
+  filename: string;
+  format?: string;
+  deduplicated: boolean;
+};
+
+export type MediaAuthorizationResource = {
+  asset: Pick<PageMediaAsset, 'id' | 'name' | 'mimeType' | 'status'>
+    & Partial<PageMediaAsset>
+    & { accessLevel?: string };
+  authorization: MediaAuthorizationDetail | null;
+  publicEligibility: MediaPublicEligibility;
+  proof?: {
+    authorizationBasis?: string | null;
+    evidenceReference?: string | null;
+    reviewNote?: string | null;
+    revocationReason?: string | null;
+    events?: unknown[];
+  } | null;
+};
+
+export type MediaAuthorizationImpactPreview = {
+  complete: boolean;
+  reason?: string;
+  items: Array<{
+    assetId: number;
+    eligibleForPublic: boolean;
+    blockingReasons: string[];
+    affectedPublishedPages: Array<{ pageKey: string; locale?: string }>;
+    affectedDraftPages: Array<{ pageKey: string; locale?: string }>;
+  }>;
+  summary: {
+    total: number;
+    eligible: number;
+    blocked: number;
+    publishedAffected: number;
+    draftAffected: number;
+  };
+};
+
+export type SaveMediaAuthorizationDraftInput = {
+  expectedRevision: number;
+  sourceType: MediaAssetSourceType;
+  authorizationBasis?: string;
+  evidenceReference?: string;
+  publicWebUseAllowed: boolean;
+  validFrom?: string | null;
+  validUntil?: string | null;
+};
+
 export const uploadApi = {
   uploadImage: async (file: File) => {
     if (USE_MOCK) {
@@ -947,6 +1186,45 @@ export const uploadApi = {
       timeout: 120000,
     });
   },
+  listPageMedia: (params?: {
+    page?: number;
+    pageSize?: number;
+    type?: "image" | "video";
+    includeArchived?: boolean;
+    status?: "READY" | "ARCHIVED" | "QUARANTINED";
+    keyword?: string;
+  }) => api.get("/upload/media", {
+    params: {
+      ...params,
+      includeArchived: params?.includeArchived ? "true" : undefined,
+    },
+  }),
+  archivePageMedia: (id: number) => api.delete(`/upload/media/${id}`),
+  restorePageMedia: (id: number) => api.post(`/upload/media/${id}/restore`),
+  getMediaAuthorization: (id: number) =>
+    api.get(`/upload/media/${id}/authorization`),
+  saveMediaAuthorizationDraft: (id: number, data: SaveMediaAuthorizationDraftInput) =>
+    api.put(`/upload/media/${id}/authorization/draft`, data),
+  submitMediaAuthorization: (id: number, expectedRevision: number) =>
+    api.post(`/upload/media/${id}/authorization/submit`, { expectedRevision }),
+  approveMediaAuthorization: (id: number, expectedRevision: number, reviewNote?: string) =>
+    api.post(`/upload/media/${id}/authorization/approve`, { expectedRevision, reviewNote }),
+  rejectMediaAuthorization: (id: number, expectedRevision: number, reviewNote: string) =>
+    api.post(`/upload/media/${id}/authorization/reject`, { expectedRevision, reviewNote }),
+  revokeMediaAuthorization: (id: number, expectedRevision: number, reason: string) =>
+    api.post(`/upload/media/${id}/authorization/revoke`, { expectedRevision, reason }),
+  renewMediaAuthorization: (
+    id: number,
+    expectedRevision: number,
+    validUntil: string,
+    evidenceReference?: string,
+  ) => api.post(`/upload/media/${id}/authorization/renew`, {
+    expectedRevision,
+    validUntil,
+    evidenceReference,
+  }),
+  previewMediaAuthorizationImpact: (assetIds: number[]) =>
+    api.post("/upload/media/authorization/impact-preview", { assetIds }),
 };
 
 // contentSlotsApi 已删除（2026-08-15 ContentSlot 死资产清退）：
@@ -960,6 +1238,15 @@ export type PageDocumentResource = {
   metadata?: Record<string, unknown>;
   editorVersion?: string;
   status: "DRAFT" | "PUBLISHED";
+  locale?: PublicContentLocale;
+  reviewStatus?: "DRAFT" | "IN_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
+  contentHash?: string;
+  publishedHash?: string | null;
+  submittedAt?: string | null;
+  submittedBy?: number | null;
+  reviewedAt?: string | null;
+  reviewedBy?: number | null;
+  reviewNote?: string | null;
   version: number;
   publishedRevisionId?: number | null;
   isPublished?: boolean;
@@ -1015,16 +1302,31 @@ function persistMockPageDocuments() {
   }
 }
 
-function nextMockDocumentVersion(pageKey: string) {
+function nextMockDocumentVersion(pageKey: string, locale: PublicContentLocale = "zh-CN") {
   const store = loadMockPageDocuments();
+  const storeKey = pageLocaleStoreKey(pageKey, locale);
   const versions = [
-    store.drafts[pageKey]?.version || 0,
-    store.published[pageKey]?.version || 0,
-    ...(store.revisions[pageKey] || []).map(
+    store.drafts[storeKey]?.version || 0,
+    store.published[storeKey]?.version || 0,
+    ...(store.revisions[storeKey] || []).map(
       (revision) => revision.version || 0,
     ),
   ];
   return Math.max(0, ...versions) + 1;
+}
+
+function pageLocaleStoreKey(pageKey: string, locale: PublicContentLocale) {
+  return locale === "zh-CN" ? pageKey : `${locale}:${pageKey}`;
+}
+
+function createMockContentHash(puckData: unknown, metadata: unknown) {
+  const source = JSON.stringify({ puckData, metadata });
+  let value = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    value ^= source.charCodeAt(index);
+    value = Math.imul(value, 16777619);
+  }
+  return (Math.abs(value).toString(16).padStart(8, "0")).repeat(8).slice(0, 64);
 }
 
 function createMockPageDocument(data: {
@@ -1036,6 +1338,7 @@ function createMockPageDocument(data: {
   version?: number;
   publishedAt?: string | null;
   publishedBy?: number | null;
+  locale?: PublicContentLocale;
 }): PageDocumentResource {
   const now = new Date().toISOString();
   return {
@@ -1045,7 +1348,10 @@ function createMockPageDocument(data: {
     metadata: data.metadata,
     editorVersion: data.editorVersion,
     status: data.status || "DRAFT",
-    version: data.version || nextMockDocumentVersion(data.pageKey),
+    locale: data.locale ?? "zh-CN",
+    reviewStatus: data.status === "PUBLISHED" ? "PUBLISHED" : "DRAFT",
+    contentHash: createMockContentHash(data.puckData, data.metadata),
+    version: data.version || nextMockDocumentVersion(data.pageKey, data.locale),
     publishedAt: data.publishedAt ?? null,
     publishedBy: data.publishedBy ?? null,
     createdAt: now,
@@ -1104,54 +1410,65 @@ export const pageDocumentApi = {
   ) => {
     if (USE_MOCK) {
       await mockDelay(120);
-      if (locale === "en") return mockRes(null);
       const store = loadMockPageDocuments();
-      return mockRes(getMockPublicPageDocument(store.published[pageKey]));
+      return mockRes(getMockPublicPageDocument(store.published[pageLocaleStoreKey(pageKey, locale)]));
     }
     return api.get("/page-modules/document/published", {
       params: { pageKey, locale },
       suppressGlobalError: true,
     });
   },
-  getPublishedAdmin: async (pageKey = "home") => {
+  getPublishedAdmin: async (
+    pageKey = "home",
+    locale: PublicContentLocale = "zh-CN",
+  ) => {
     if (USE_MOCK) {
       await mockDelay(120);
       const store = loadMockPageDocuments();
-      return mockRes(store.published[pageKey] || null);
+      return mockRes(store.published[pageLocaleStoreKey(pageKey, locale)] || null);
     }
     return api.get("/page-modules/document/published/admin", {
-      params: { pageKey },
+      params: { pageKey, locale },
       suppressGlobalError: true,
     });
   },
-  getAdmin: async (pageKey = "home") => {
+  getAdmin: async (
+    pageKey = "home",
+    locale: PublicContentLocale = "zh-CN",
+  ) => {
     if (USE_MOCK) {
       await mockDelay(120);
       const store = loadMockPageDocuments();
-      return mockRes(store.drafts[pageKey] || store.published[pageKey] || null);
+      const storeKey = pageLocaleStoreKey(pageKey, locale);
+      return mockRes(store.drafts[storeKey] || store.published[storeKey] || null);
     }
     return api.get("/page-modules/document/admin", {
-      params: { pageKey },
+      params: { pageKey, locale },
       suppressGlobalError: true,
     });
   },
-  discardDraft: async (pageKey: string, expectedUpdatedAt: string) => {
+  discardDraft: async (
+    pageKey: string,
+    locale: PublicContentLocale,
+    expectedUpdatedAt: string,
+  ) => {
     if (USE_MOCK) {
       await mockDelay(160);
       const store = loadMockPageDocuments();
-      const current = store.drafts[pageKey] || store.published[pageKey];
+      const storeKey = pageLocaleStoreKey(pageKey, locale);
+      const current = store.drafts[storeKey] || store.published[storeKey];
       if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
         throw mockRequestError("放弃草稿时缺少页面版本标识", 400);
       }
       if (!current || current.updatedAt !== expectedUpdatedAt) {
         throw mockRequestError("草稿已被其他编辑保存，请刷新页面后重试", 409);
       }
-      delete store.drafts[pageKey];
+      delete store.drafts[storeKey];
       persistMockPageDocuments();
       return mockRes({ discarded: true });
     }
     return api.delete("/page-modules/document/draft", {
-      params: { pageKey, expectedUpdatedAt },
+      params: { pageKey, locale, expectedUpdatedAt },
       suppressGlobalError: true,
     });
   },
@@ -1161,12 +1478,14 @@ export const pageDocumentApi = {
     metadata?: Record<string, unknown>;
     editorVersion?: string;
     expectedUpdatedAt?: string;
+    locale?: PublicContentLocale;
   }) => {
     if (USE_MOCK) {
       await mockDelay(160);
       const store = loadMockPageDocuments();
-      const previous =
-        store.drafts[data.pageKey] || store.published[data.pageKey];
+      const locale = data.locale ?? "zh-CN";
+      const storeKey = pageLocaleStoreKey(data.pageKey, locale);
+      const previous = store.drafts[storeKey] || store.published[storeKey];
       if (previous && (!data.expectedUpdatedAt || Number.isNaN(Date.parse(data.expectedUpdatedAt)))) {
         throw mockRequestError("保存已有页面时缺少页面版本标识", 400);
       }
@@ -1175,16 +1494,21 @@ export const pageDocumentApi = {
       }
       const now = new Date().toISOString();
       const document: PageDocumentResource = {
-        ...(previous || createMockPageDocument(data)),
+        ...(previous || createMockPageDocument({ ...data, locale })),
         puckData: cloneMockDocument(data.puckData),
         metadata: data.metadata,
         editorVersion: data.editorVersion,
         status: "DRAFT",
+        locale,
+        reviewStatus: previous?.contentHash === createMockContentHash(data.puckData, data.metadata)
+          ? previous.reviewStatus ?? "DRAFT"
+          : "DRAFT",
+        contentHash: createMockContentHash(data.puckData, data.metadata),
         publishedAt: previous?.publishedAt ?? null,
         publishedBy: previous?.publishedBy ?? null,
         updatedAt: now,
       };
-      store.drafts[data.pageKey] = document;
+      store.drafts[storeKey] = document;
       persistMockPageDocuments();
       return mockRes(cloneMockDocument(document));
     }
@@ -1194,13 +1518,15 @@ export const pageDocumentApi = {
   },
   publish: async (
     pageKey: string,
-    userId: number | undefined,
+    locale: PublicContentLocale,
     expectedUpdatedAt: string,
+    expectedContentHash: string,
   ) => {
     if (USE_MOCK) {
       await mockDelay(180);
       const store = loadMockPageDocuments();
-      const draft = store.drafts[pageKey];
+      const storeKey = pageLocaleStoreKey(pageKey, locale);
+      const draft = store.drafts[storeKey];
       if (!draft) throw new Error("请先保存页面草稿");
       if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
         throw mockRequestError("发布页面时缺少页面版本标识", 400);
@@ -1208,13 +1534,22 @@ export const pageDocumentApi = {
       if (draft.updatedAt !== expectedUpdatedAt) {
         throw mockRequestError("该页面已被其他编辑者更新，请重新加载后再发布", 409);
       }
+      if (draft.contentHash !== expectedContentHash) {
+        throw mockRequestError("页面内容已变化，请重新加载后再发布", 409);
+      }
+      if (draft.reviewStatus !== "APPROVED") {
+        throw mockRequestError("页面尚未通过审核，不能发布", 409);
+      }
       const now = new Date().toISOString();
       const published: PageDocumentResource = {
         ...cloneMockDocument(draft),
         status: "PUBLISHED",
-        version: nextMockDocumentVersion(pageKey),
+        locale,
+        reviewStatus: "PUBLISHED",
+        version: nextMockDocumentVersion(pageKey, locale),
         publishedAt: now,
-        publishedBy: userId ?? 1,
+        publishedBy: 1,
+        publishedHash: draft.contentHash,
         updatedAt: now,
       };
       const revision = {
@@ -1223,10 +1558,10 @@ export const pageDocumentApi = {
         isPublished: true,
       };
       published.publishedRevisionId = revision.id;
-      store.published[pageKey] = published;
-      store.revisions[pageKey] = [
+      store.published[storeKey] = published;
+      store.revisions[storeKey] = [
         revision,
-        ...(store.revisions[pageKey] || []).map((item) => ({
+        ...(store.revisions[storeKey] || []).map((item) => ({
           ...item,
           isPublished: false,
         })),
@@ -1236,8 +1571,9 @@ export const pageDocumentApi = {
     }
     return api.put("/page-modules/document/publish", {
       pageKey,
-      userId,
+      locale,
       expectedUpdatedAt,
+      expectedContentHash,
     }, {
       suppressGlobalError: true,
     });
@@ -1247,6 +1583,7 @@ export const pageDocumentApi = {
     puckData?: unknown,
     metadata?: Record<string, unknown>,
     signal?: AbortSignal,
+    locale: PublicContentLocale = "zh-CN",
   ) => {
     if (USE_MOCK) {
       await mockDelay(100);
@@ -1259,20 +1596,22 @@ export const pageDocumentApi = {
     }
     return api.post(
       "/page-modules/document/validate",
-      { pageKey, puckData, metadata },
+      { pageKey, puckData, metadata, locale },
       { signal, suppressGlobalError: true },
     );
   },
   getRevisions: async (
     pageKey = "home",
+    locale: PublicContentLocale = "zh-CN",
     options: { beforeVersion?: number; limit?: number } = {},
   ) => {
     if (USE_MOCK) {
       await mockDelay(120);
       const store = loadMockPageDocuments();
-      const pointer = store.published[pageKey]?.publishedRevisionId;
+      const storeKey = pageLocaleStoreKey(pageKey, locale);
+      const pointer = store.published[storeKey]?.publishedRevisionId;
       const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
-      const eligible = (store.revisions[pageKey] || [])
+      const eligible = (store.revisions[storeKey] || [])
         .filter((revision) => options.beforeVersion === undefined || revision.version < options.beforeVersion)
         .sort((left, right) => right.version - left.version);
       const page = eligible.slice(0, limit);
@@ -1290,46 +1629,50 @@ export const pageDocumentApi = {
       }));
     }
     return api.get("/page-modules/document/revisions", {
-      params: { pageKey, ...options },
+      params: { pageKey, locale, ...options },
       suppressGlobalError: true,
     });
   },
   getRevision: async (
     pageKey: string,
+    locale: PublicContentLocale,
     version: number,
     signal?: AbortSignal,
   ) => {
     if (USE_MOCK) {
       await mockDelay(120);
       const store = loadMockPageDocuments();
-      const revision = (store.revisions[pageKey] || []).find(
+      const storeKey = pageLocaleStoreKey(pageKey, locale);
+      const revision = (store.revisions[storeKey] || []).find(
         (item) => item.version === version,
       );
       if (!revision) throw mockRequestError("指定版本不存在", 404);
       return mockRes(cloneMockDocument({
         ...revision,
-        isPublished: revision.id === store.published[pageKey]?.publishedRevisionId,
+        isPublished: revision.id === store.published[storeKey]?.publishedRevisionId,
       }));
     }
     return api.get(`/page-modules/document/revisions/${version}`, {
-      params: { pageKey },
+      params: { pageKey, locale },
       signal,
       suppressGlobalError: true,
     });
   },
   rollbackPublication: async (
     pageKey: string,
+    locale: PublicContentLocale,
     revisionId: number,
     expectedPublishedRevisionId: number,
   ) => {
     if (USE_MOCK) {
       await mockDelay(160);
       const store = loadMockPageDocuments();
-      const published = store.published[pageKey];
+      const storeKey = pageLocaleStoreKey(pageKey, locale);
+      const published = store.published[storeKey];
       if (!published || published.publishedRevisionId !== expectedPublishedRevisionId) {
         throw mockRequestError("线上版本已变化，请重新加载版本记录后再回滚", 409);
       }
-      const revision = (store.revisions[pageKey] || []).find((item) => item.id === revisionId);
+      const revision = (store.revisions[storeKey] || []).find((item) => item.id === revisionId);
       if (!revision) throw mockRequestError("指定发布版本不属于当前页面", 400);
       published.publishedRevisionId = revisionId;
       published.puckData = cloneMockDocument(revision.puckData);
@@ -1339,12 +1682,12 @@ export const pageDocumentApi = {
       published.publishedBy = revision.publishedBy;
       const updatedAt = new Date().toISOString();
       published.updatedAt = updatedAt;
-      const draft = store.drafts[pageKey];
+      const draft = store.drafts[storeKey];
       if (draft) {
         draft.publishedRevisionId = revisionId;
         draft.updatedAt = updatedAt;
       }
-      store.revisions[pageKey] = (store.revisions[pageKey] || []).map((item) => ({
+      store.revisions[storeKey] = (store.revisions[storeKey] || []).map((item) => ({
         ...item,
         isPublished: item.id === revisionId,
       }));
@@ -1353,9 +1696,73 @@ export const pageDocumentApi = {
     }
     return api.put(
       `/page-modules/document/revisions/${revisionId}/rollback-publication`,
-      { pageKey, expectedPublishedRevisionId },
+      { pageKey, locale, expectedPublishedRevisionId },
       { suppressGlobalError: true },
     );
+  },
+  submitReview: async (
+    pageKey: string,
+    locale: PublicContentLocale,
+    expectedUpdatedAt: string,
+    expectedContentHash: string,
+  ) => {
+    if (USE_MOCK) {
+      await mockDelay(140);
+      const store = loadMockPageDocuments();
+      const storeKey = pageLocaleStoreKey(pageKey, locale);
+      const draft = store.drafts[storeKey];
+      if (!draft || draft.updatedAt !== expectedUpdatedAt || draft.contentHash !== expectedContentHash) {
+        throw mockRequestError("页面内容已变化，请重新加载后再提交审核", 409);
+      }
+      if (!["DRAFT", "CHANGES_REQUESTED"].includes(draft.reviewStatus ?? "DRAFT")) {
+        throw mockRequestError("当前审核状态不允许再次提交", 409);
+      }
+      draft.reviewStatus = "IN_REVIEW";
+      draft.submittedAt = new Date().toISOString();
+      draft.submittedBy = 1;
+      draft.reviewNote = null;
+      persistMockPageDocuments();
+      return mockRes(cloneMockDocument(draft));
+    }
+    return api.post("/page-modules/document/review/submit", {
+      pageKey,
+      locale,
+      expectedUpdatedAt,
+      expectedContentHash,
+    }, { suppressGlobalError: true });
+  },
+  review: async (
+    pageKey: string,
+    locale: PublicContentLocale,
+    expectedUpdatedAt: string,
+    expectedContentHash: string,
+    action: "APPROVE" | "REQUEST_CHANGES",
+    note?: string,
+  ) => {
+    if (USE_MOCK) {
+      await mockDelay(140);
+      const store = loadMockPageDocuments();
+      const draft = store.drafts[pageLocaleStoreKey(pageKey, locale)];
+      if (!draft || draft.updatedAt !== expectedUpdatedAt || draft.contentHash !== expectedContentHash) {
+        throw mockRequestError("页面内容已变化，请重新加载后再审核", 409);
+      }
+      if (draft.reviewStatus !== "IN_REVIEW") throw mockRequestError("页面不在待审核状态", 409);
+      if (action === "REQUEST_CHANGES" && !note?.trim()) throw mockRequestError("退回修改必须填写原因", 400);
+      draft.reviewStatus = action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED";
+      draft.reviewedAt = new Date().toISOString();
+      draft.reviewedBy = 1;
+      draft.reviewNote = note?.trim() || null;
+      persistMockPageDocuments();
+      return mockRes(cloneMockDocument(draft));
+    }
+    return api.put("/page-modules/document/review", {
+      pageKey,
+      locale,
+      expectedUpdatedAt,
+      expectedContentHash,
+      action,
+      reviewNote: note,
+    }, { suppressGlobalError: true });
   },
 };
 

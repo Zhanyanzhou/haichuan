@@ -43,6 +43,9 @@ test("账户注销在同一事务清除联系方式、换绑目标、安全事�
     customerFavorite: {
       deleteMany: capture("customerFavorite.deleteMany", { count: 1 }),
     },
+    notificationPreference: {
+      deleteMany: capture("notificationPreference.deleteMany", { count: 2 }),
+    },
     notificationDelivery: {
       updateMany: capture("notificationDelivery.updateMany", { count: 1 }),
     },
@@ -107,6 +110,12 @@ test("账户注销在同一事务清除联系方式、换绑目标、安全事�
   const consentWrite = writes.find((write) => write.model === "consentRecord.updateMany");
   assert.equal(consentWrite?.args.data.customerId, null);
   assert.equal(consentWrite?.args.data.anonymousIdHash, null);
+
+  const deliveryWrite = writes.find((write) => write.model === "notificationDelivery.updateMany");
+  assert.equal(deliveryWrite?.args.data.status, "CANCELLED");
+  assert.equal(deliveryWrite?.args.data.destinationHash, null);
+  const preferenceWrite = writes.find((write) => write.model === "notificationPreference.deleteMany");
+  assert.deepEqual(preferenceWrite?.args.where, { customerId: 9 });
 
   const contactWrites = writes.filter((write) => write.model === "customerContactChange.updateMany");
   assert.equal(contactWrites.length, 2);

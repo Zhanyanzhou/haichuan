@@ -14,6 +14,7 @@ const forwardedProto = process.env.PLAYWRIGHT_FORWARDED_PROTO;
 const browserChannel = process.env.PLAYWRIGHT_BROWSER_CHANNEL === "chrome"
   ? "chrome" as const
   : undefined;
+const browserExecutablePath = process.env.PLAYWRIGHT_BROWSER_EXECUTABLE_PATH || undefined;
 
 // 每个 spec 必须且只能属于一个确定性边界。混合文件按主要业务参与者归类；
 // 真实环境会话与真实接口验收另行执行，不能用这些自有 API 夹具代替。
@@ -36,6 +37,7 @@ const testBoundaryFiles = {
   customer: [
     "closure-locale-notifications.spec.ts",
     "customer-consultation-reply.spec.ts",
+    "customer-quotation-contract.spec.ts",
     "customer-profile-management.spec.ts",
     "public-access.spec.ts",
     "public-sales-mode.spec.ts",
@@ -65,6 +67,7 @@ const testBoundaryFiles = {
     "template-native-responsive.admin.spec.ts",
     "template-breakpoint-comparison.admin.spec.ts",
     "admin-auth-store-capabilities.spec.ts",
+    "admin-auth-real-closure.spec.ts",
     "admin-header-toolbar.spec.ts",
     "admin-operating-foundation-states.spec.ts",
     "admin-role-route-consistency.spec.ts",
@@ -79,6 +82,8 @@ const testBoundaryFiles = {
     "editor-leave-guard.admin.spec.ts",
     "inquiry-context.admin.spec.ts",
     "lead-follow-up-contract.spec.ts",
+    "media-library.admin.spec.ts",
+    "media-video-real-closure.admin.spec.ts",
     "order-manage-capabilities.spec.ts",
     "page-builder-real-closure.spec.ts",
     "page-publish-validation.admin.spec.ts",
@@ -182,7 +187,14 @@ export default defineConfig({
     {
       name: "admin-chromium",
       testMatch: testMatch(testBoundaryFiles.admin),
-      use: { ...devices["Desktop Chrome"], ...(browserChannel ? { channel: browserChannel } : {}) },
+      use: {
+        ...devices["Desktop Chrome"],
+        ...(browserExecutablePath
+          ? { launchOptions: { executablePath: browserExecutablePath } }
+          : browserChannel
+            ? { channel: browserChannel }
+            : {}),
+      },
     },
   ],
   webServer: process.env.PLAYWRIGHT_BASE_URL

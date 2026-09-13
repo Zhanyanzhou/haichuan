@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Req, Res, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Put, Query, Req, Res, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { memoryStorage } from 'multer';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -31,6 +31,7 @@ import { RefreshSessionService } from '../../common/security/refresh-session.ser
 import { CustomerNotificationsService } from './customer-notifications.service';
 import { MarketingService } from '../marketing/marketing.service';
 import { CustomerNotificationQueryDto } from './dto/customer-notification-query.dto';
+import { UpdateCustomerNotificationPreferenceDto } from './dto/customer-notification-preference.dto';
 import { CustomerInquiryQueryDto } from './dto/customer-inquiry-query.dto';
 import type { CustomerRequest } from '../../common/security/authenticated-principal';
 import { CustomerAvatarService } from './customer-avatar.service';
@@ -352,6 +353,23 @@ export class CustomersController {
   @Put('me/notifications/:id/read')
   markNotificationRead(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
     return this.customerNotifications.markRead(request.customer.id, id);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Get('me/notification-preferences')
+  getNotificationPreferences(@Req() request: CustomerRequest) {
+    return this.customerNotifications.listPreferences(request.customer.id);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Patch('me/notification-preferences')
+  updateNotificationPreference(
+    @Req() request: CustomerRequest,
+    @Body() dto: UpdateCustomerNotificationPreferenceDto,
+  ) {
+    return this.customerNotifications.updatePreference(request.customer.id, dto);
   }
 
   // 物流轨迹：客户查询自己已发货订单的快递轨迹（快递100，未配置凭据时 503）

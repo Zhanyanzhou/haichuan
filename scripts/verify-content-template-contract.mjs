@@ -18,7 +18,28 @@ const byKey = Object.fromEntries(contract.templates.map((template) => [template.
 const commercialPurposes = ["品牌展示", "商品销售", "活动转化", "内容传播", "信任建立"];
 const devices = ["desktop", "mobile"];
 
-assert.equal(contract.contractSchemaVersion, 9, "必须使用带按轴尺寸兼容语义的合同 schema v9");
+assert.equal(contract.contractSchemaVersion, 10, "必须使用带集中素材授权继承语义的合同 schema v10");
+assert.equal(contract.publicationGateVersion, 3, "第一阶段实际发布门禁必须保持 v3");
+assert.deepEqual(
+  contract.managedMediaAuthorizationPolicy,
+  {
+    authority: "MediaAssetAuthorization",
+    identity: "MediaAsset.storageKey",
+    draftBehavior: "warn",
+    templatePublishBehavior: "block-ineligible",
+    pagePublishBehavior: "block-visible-ineligible",
+    publicReadBehavior: "fail-closed",
+    revocationPropagation: "live",
+    restoreBehavior: "requires-republish",
+    legacyPageMediaRights: "advisory-only",
+    supportedPublicationGateVersions: [3, 4],
+    enforcementPublicationGateVersion: 3,
+    shadowPublicationGateVersion: 4,
+  },
+  "集中素材授权必须保持 v3 实际门禁与 v4 shadow 双轨策略",
+);
+assert.match(client, /CONTENT_TEMPLATE_MANAGED_MEDIA_AUTHORIZATION_POLICY/, "客户端生成物必须携带集中素材授权策略");
+assert.match(server, /CONTENT_TEMPLATE_MANAGED_MEDIA_AUTHORIZATION_POLICY/, "服务端生成物必须携带集中素材授权策略");
 assert.deepEqual(
   contract.editorPolicy,
   {

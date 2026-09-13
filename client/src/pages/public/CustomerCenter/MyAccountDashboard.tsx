@@ -19,7 +19,10 @@ import {
 } from "@/services/clients/customerProfileClient";
 import { getRequestErrorMessage } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
-import { useCommerceEnabled } from "@/store/featureFlags";
+import {
+  useCommerceCapabilities,
+  useCommerceEnabled,
+} from "@/store/featureFlags";
 import { SecureImage } from "@/components/common/SecureImage";
 import CustomerPaymentDialog, {
   type CustomerPaymentOrder,
@@ -29,6 +32,7 @@ import CustomerAfterSalesDialog, {
   getRequestableAfterSalesItems,
 } from "./CustomerAfterSalesDialog";
 import CustomerOrdersPanel from "./CustomerOrdersPanel";
+import CustomerQuotationsPanel from "./CustomerQuotationsPanel";
 import CustomerReviewDialog from "./CustomerReviewDialog";
 import ForYouRecommendations from "./ForYouRecommendations";
 import CustomerNotificationsPanel from "./CustomerNotificationsPanel";
@@ -224,6 +228,8 @@ export default function MyAccountDashboard({
   const navigate = useNavigate();
   const name = profile?.name || "海川贵宾";
   const commerceEnabled = useCommerceEnabled();
+  const { flags: commerceFlags } = useCommerceCapabilities();
+  const paymentEnabled = commerceFlags?.paymentEnabled ?? false;
   const inquiries = inquiryPage.list;
   const partnerStatus = partner?.customer?.partnerStatus || "NONE";
   const partnerApprovedAt = partner?.customer?.partnerApprovedAt || null;
@@ -696,14 +702,17 @@ export default function MyAccountDashboard({
           <a href="#my-appointments">
             <span>02</span>我的预约
           </a>
+          <a href="#my-quotations">
+            <span>03</span>我的报价
+          </a>
           <a href="#my-orders">
-            <span>03</span>我的订单
+            <span>04</span>我的订单
           </a>
           <a href="#my-profile">
-            <span>04</span>个人资料
+            <span>05</span>个人资料
           </a>
           <a href="#my-notifications">
-            <span>05</span>服务通知
+            <span>06</span>服务通知
           </a>
         </nav>
 
@@ -1121,9 +1130,15 @@ export default function MyAccountDashboard({
             )}
           </section>
 
+          <CustomerQuotationsPanel
+            addresses={addresses}
+            onOrderCreated={onRefresh}
+          />
+
           <CustomerOrdersPanel
             orders={orders}
             commerceEnabled={commerceEnabled}
+            paymentEnabled={paymentEnabled}
             uploadingProof={uploading}
             cancellingAfterSalesId={cancellingAfterSalesId}
             onOpenReview={openReview}

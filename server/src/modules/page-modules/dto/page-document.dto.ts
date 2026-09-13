@@ -1,7 +1,25 @@
 import { Type } from "class-transformer";
-import { IsISO8601, IsInt, IsObject, IsOptional, IsString, MaxLength, Min } from "class-validator";
+import {
+  IsISO8601,
+  IsIn,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  Min,
+} from "class-validator";
 
-export class SavePageDocumentDto {
+const PAGE_CONTENT_LOCALES = ["zh-CN", "en"] as const;
+
+class LocalizedPageDocumentDto {
+  @IsOptional()
+  @IsIn(PAGE_CONTENT_LOCALES)
+  locale?: "zh-CN" | "en";
+}
+
+export class SavePageDocumentDto extends LocalizedPageDocumentDto {
   @IsString()
   @MaxLength(80)
   pageKey!: string;
@@ -23,7 +41,7 @@ export class SavePageDocumentDto {
   expectedUpdatedAt?: string;
 }
 
-export class PublishPageDocumentDto {
+export class PublishPageDocumentDto extends LocalizedPageDocumentDto {
   @IsOptional()
   @IsString()
   @MaxLength(80)
@@ -31,9 +49,12 @@ export class PublishPageDocumentDto {
 
   @IsISO8601()
   expectedUpdatedAt!: string;
+
+  @Matches(/^[a-f0-9]{64}$/)
+  expectedContentHash!: string;
 }
 
-export class ValidatePageDocumentDto {
+export class ValidatePageDocumentDto extends LocalizedPageDocumentDto {
   @IsOptional()
   @IsString()
   @MaxLength(80)
@@ -48,7 +69,7 @@ export class ValidatePageDocumentDto {
   metadata?: Record<string, unknown>;
 }
 
-export class RestorePageDocumentRevisionDto {
+export class RestorePageDocumentRevisionDto extends LocalizedPageDocumentDto {
   @IsOptional()
   @IsString()
   @MaxLength(80)
@@ -58,7 +79,7 @@ export class RestorePageDocumentRevisionDto {
   expectedUpdatedAt!: string;
 }
 
-export class RollbackPagePublicationDto {
+export class RollbackPagePublicationDto extends LocalizedPageDocumentDto {
   @IsOptional()
   @IsString()
   @MaxLength(80)
@@ -68,4 +89,27 @@ export class RollbackPagePublicationDto {
   @IsInt()
   @Min(1)
   expectedPublishedRevisionId!: number;
+}
+
+export class SubmitPageDocumentReviewDto extends LocalizedPageDocumentDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  pageKey?: string;
+
+  @IsISO8601()
+  expectedUpdatedAt!: string;
+
+  @Matches(/^[a-f0-9]{64}$/)
+  expectedContentHash!: string;
+}
+
+export class ReviewPageDocumentDto extends SubmitPageDocumentReviewDto {
+  @IsIn(["APPROVE", "REQUEST_CHANGES"])
+  action!: "APPROVE" | "REQUEST_CHANGES";
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  reviewNote?: string;
 }

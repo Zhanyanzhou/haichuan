@@ -1,0 +1,120 @@
+name: Export Public SEO Snapshot
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: 只读导出公开 SEO 发布事实
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: public-seo-production
+    env:
+      PUBLIC_SEO_EXPORT_READ_ONLY_AUTHORIZED: "1"
+      PUBLIC_SEO_SOURCE_ENVIRONMENT_ID: ${{ vars.PUBLIC_SEO_SOURCE_ENVIRONMENT_ID }}
+      PUBLIC_SEO_EXPECTED_DATABASE: ${{ vars.PUBLIC_SEO_EXPECTED_DATABASE }}
+      PUBLIC_SEO_EXPECTED_DATABASE_HOST: ${{ vars.PUBLIC_SEO_EXPECTED_DATABASE_HOST }}
+      PUBLIC_SEO_APPROVAL_REFERENCE: ${{ vars.PUBLIC_SEO_APPROVAL_REFERENCE }}
+      PUBLIC_SEO_EXPECTED_ORIGIN: ${{ vars.PUBLIC_SEO_EXPECTED_ORIGIN }}
+      PUBLIC_SEO_RELEASE_PROFILE: ${{ vars.PUBLIC_SEO_RELEASE_PROFILE }}
+    steps:
+      - name: 检出触发工作流的精确提交
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: 拒绝缺失的受保护环境配置
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            PUBLIC_SEO_SOURCE_ENVIRONMENT_ID
+            PUBLIC_SEO_EXPECTED_DATABASE
+            PUBLIC_SEO_EXPECTED_DATABASE_HOST
+            PUBLIC_SEO_APPROVAL_REFERENCE
+            PUBLIC_SEO_EXPECTED_ORIGIN
+            PUBLIC_SEO_RELEASE_PROFILE
+          )
+          for name in "${required[@]}"; do
+            test -n "${!name:-}" || { echo "PUBLIC_SEO_PROTECTED_CONFIG_MISSING:${name}" >&2; exit 1; }
+          done
+          test "$PUBLIC_SEO_SOURCE_ENVIRONMENT_ID" = "public-seo-production" \
+            || { echo "PUBLIC_SEO_SOURCE_ENVIRONMENT_DRIFT" >&2; exit 1; }
+
+      - name: 安装服务端锁定依赖并编译只读导出器
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix server
+          npm run build --prefix server
+
+      - name: 从专用只读账号导出并冻结快照
+        id: snapshot
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.PUBLIC_SEO_READ_ONLY_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          test -n "${DATABASE_URL:-}" \
+            || { echo "PUBLIC_SEO_PROTECTED_CONFIG_MISSING:DATABASE_URL" >&2; exit 1; }
+          export_dir="${RUNNER_TEMP}/public-seo-export"
+          artifact_dir="${RUNNER_TEMP}/public-seo-artifact"
+          mkdir -p "$export_dir" "$artifact_dir"
+          node server/dist/cli/export-public-seo-snapshot.js \
+            --output "$export_dir/public-seo-source.json"
+          node scripts/export-public-seo-snapshot.mjs \
+            --input "$export_dir/public-seo-source.json" \
+            --output "$artifact_dir/public-seo-snapshot.json"
+          SNAPSHOT_PATH="$artifact_dir/public-seo-snapshot.json" \
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          import { validatePublicSeoSnapshot } from "./scripts/export-public-seo-snapshot.mjs";
+          const snapshot = validatePublicSeoSnapshot(JSON.parse(readFileSync(process.env.SNAPSHOT_PATH, "utf8")));
+          if (snapshot.origin !== process.env.PUBLIC_SEO_EXPECTED_ORIGIN) {
+            throw new Error("PUBLIC_SEO_EXPORTED_ORIGIN_MISMATCH");
+          }
+          if (snapshot.routes.length === 0) throw new Error("PUBLIC_SEO_EXPORTED_ROUTE_SET_EMPTY");
+          process.stdout.write(`validated public SEO snapshot ${snapshot.snapshotHash}\n`);
+          NODE
+          test "$(find "$artifact_dir" -maxdepth 1 -type f -printf '%f\n')" = "public-seo-snapshot.json" \
+            || { echo "PUBLIC_SEO_ARTIFACT_MUST_CONTAIN_ONE_JSON" >&2; exit 1; }
+          echo "snapshot_sha256=$(sha256sum "$artifact_dir/public-seo-snapshot.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "snapshot_path=$artifact_dir/public-seo-snapshot.json" >> "$GITHUB_OUTPUT"
+
+      - name: 上传同仓同 SHA 的唯一 JSON 制品
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-seo-snapshot-${{ github.sha }}
+          path: ${{ steps.snapshot.outputs.snapshot_path }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: 记录不可变摘要（不输出数据库或签认原文）
+        shell: bash
+        env:
+          SNAPSHOT_SHA256: ${{ steps.snapshot.outputs.snapshot_sha256 }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          [[ "$SNAPSHOT_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$ARTIFACT_DIGEST" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] || exit 1
+          {
+            echo "### Public SEO snapshot"
+            echo "- repository: ${GITHUB_REPOSITORY}"
+            echo "- commit: ${GITHUB_SHA}"
+            echo "- artifact id: ${ARTIFACT_ID}"
+            echo "- artifact digest: sha256:${ARTIFACT_DIGEST}"
+            echo "- snapshot file sha256: ${SNAPSHOT_SHA256}"
+          } >> "$GITHUB_STEP_SUMMARY"

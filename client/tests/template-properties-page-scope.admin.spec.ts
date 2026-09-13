@@ -19,6 +19,15 @@ async function mountScope(page: Page, width = 384) {
   return page.evaluate(() => window.__templateScopeIds);
 }
 
+async function mountLegacyDesign(page: Page, width = 384) {
+  page.on("pageerror", (error) => console.error("旧模板属性测试异常:", error.stack ?? error.message));
+  await page.route("**/api/**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+  await page.route("**/__template-scope-review?*", (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><html><head><script type="module">import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type; window.__vite_plugin_react_preamble_installed__ = true;</script></head><body><div id="root"></div><script type="module" src="/tests/fixtures/template-properties-page-scope.tsx"></script></body></html>` }));
+  await page.goto(`/__template-scope-review?legacy-design&width=${width}`, { waitUntil: "load" });
+  await expect(page.getByRole("region", { name: "槽位设计设置", exact: true })).toBeVisible();
+  return page.evaluate(() => window.__templateScopeIds);
+}
+
 async function snapshot(page: Page) {
   return page.evaluate(() => {
     const state = window.__templateScopeSession.getState();
@@ -50,6 +59,138 @@ test("确定性 UI：页面规则分组、只读字段查看与冲突修复保�
   await expect(panel.getByRole("textbox", { name: "工艺标题页面表单示意", exact: true })).toHaveAttribute("readonly", "");
   await panel.getByRole("button", { name: "工艺标题 可选 · 定位对象", exact: true }).click();
   await expect(page.getByRole("complementary", { name: "模板属性", exact: true })).toHaveAttribute("data-template-inspector-object-id", ids.textNodeId);
+});
+
+test("确定性 UI：旧模板自定义图片比例保留非法文本、Enter/失焦提交、Escape 取消且适配 240px 属性区", async ({ page }) => {
+  const ids = await mountLegacyDesign(page, 240);
+  const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
+  const input = inspector.getByRole("textbox", { name: "自定义图片比例", exact: true });
+  const before = await snapshot(page);
+
+  await input.fill("0:3");
+  await input.press("Enter");
+  await expect(input).toHaveValue("0:3");
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+  await expect(inspector.getByRole("alert")).toHaveText("请输入有效图片比例，例如 12:5。");
+  expect(await snapshot(page)).toEqual(before);
+
+  await input.press("Escape");
+  await expect(input).toHaveValue("4:3");
+  await expect(input).not.toHaveAttribute("aria-invalid", "true");
+  await input.fill("12:5");
+  await input.press("Enter");
+  const entered = await snapshot(page);
+  expect(JSON.parse(entered.definition).slots[ids.imageSlotId].desktopRules.aspectRatio).toBe("12:5");
+  expect(entered.history).toBe(before.history + 1);
+
+  await input.fill("12::5");
+  await page.locator("body").click({ position: { x: 2, y: 2 } });
+  await expect(input).toHaveValue("12::5");
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(await snapshot(page)).toEqual(entered);
+  await input.press("Escape");
+  await expect(input).toHaveValue("12:5");
+
+  await input.fill("7:3");
+  await page.locator("body").click({ position: { x: 2, y: 2 } });
+  await expect(input).toHaveValue("7:3");
+  const blurred = await snapshot(page);
+  expect(JSON.parse(blurred.definition).slots[ids.imageSlotId].desktopRules.aspectRatio).toBe("7:3");
+  expect(blurred.history).toBe(entered.history + 1);
+
+  await input.fill("x:y");
+  await input.press("Enter");
+  const layout = await inspector.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+  const inputBox = await input.boundingBox();
+  const errorBox = await inspector.getByRole("alert").boundingBox();
+  const inspectorBox = await inspector.boundingBox();
+  if (!inputBox || !errorBox || !inspectorBox) throw new Error("缺少比例输入或就近错误布局");
+  expect(errorBox.x).toBeGreaterThanOrEqual(inputBox.x - 1);
+  expect(errorBox.x + errorBox.width).toBeLessThanOrEqual(inspectorBox.x + inspectorBox.width + 1);
+});
+
+test("确定性 UI：旧模板响应式分组复制与恢复保留未选值、取消零提交、单步撤销并可保存重开", async ({ page }) => {
+  const ids = await mountLegacyDesign(page);
+  const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
+  const groups = inspector.getByRole("group", { name: "响应式设计组", exact: true });
+  const imageDisplay = groups.getByRole("checkbox", { name: "图片显示", exact: true });
+  await imageDisplay.check();
+  const before = await snapshot(page);
+  const beforeDefinition = JSON.parse(before.definition);
+
+  await inspector.getByRole("button", { name: "复制当前画布到另一画布", exact: true }).click();
+  await expect(page.getByRole("dialog")).toContainText("只复制已选设计组中的中性设计值");
+  expect(await snapshot(page)).toEqual(before);
+  await page.getByRole("dialog").getByRole("button", { name: /取\s*消/ }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(imageDisplay).toBeChecked();
+  expect(await snapshot(page)).toEqual(before);
+
+  await inspector.getByRole("button", { name: "复制当前画布到另一画布", exact: true }).click();
+  await page.getByRole("button", { name: "确认替换", exact: true }).click();
+  const copied = await snapshot(page);
+  const copiedDefinition = JSON.parse(copied.definition);
+  expect(copiedDefinition.slots[ids.imageSlotId].mobileRules).toMatchObject({
+    aspectRatio: "4:3",
+    objectFit: "cover",
+    objectPosition: "left top",
+  });
+  expect(copiedDefinition.nodes[ids.imageNodeId].responsive.mobile.width)
+    .toEqual(beforeDefinition.nodes[ids.imageNodeId].responsive.mobile.width);
+  expect(copied.history).toBe(before.history + 1);
+  await page.evaluate(() => window.__templateScopeSession.getState().undo());
+  expect(await snapshot(page)).toEqual(before);
+
+  await inspector.getByRole("button", { name: "复制当前画布到另一画布", exact: true }).click();
+  await page.getByRole("button", { name: "确认替换", exact: true }).click();
+  await page.evaluate((nodeId) => {
+    const session = window.__templateScopeSession;
+    const saved = structuredClone(session.getState().draft!);
+    session.getState().markSaved(saved);
+    session.getState().close();
+    session.getState().open(saved);
+    session.getState().selectObject(nodeId);
+    session.getState().setDevice("mobile");
+    session.getState().setInspectorTask("design");
+  }, ids.imageNodeId);
+  await expect(imageDisplay).toBeChecked();
+  const customRatio = inspector.getByRole("textbox", { name: "自定义图片比例", exact: true });
+  await expect(customRatio).toHaveValue("4:3");
+  const reopened = await snapshot(page);
+  expect(JSON.parse(reopened.definition).slots[ids.imageSlotId].mobileRules.aspectRatio).toBe("4:3");
+  expect(reopened.history).toBe(0);
+  expect(reopened.dirty).toBe(false);
+
+  await customRatio.fill("9:16");
+  await customRatio.press("Enter");
+  const changed = await snapshot(page);
+  expect(JSON.parse(changed.definition).slots[ids.imageSlotId].mobileRules.aspectRatio).toBe("9:16");
+  await inspector.getByRole("button", { name: "恢复上次保存值", exact: true }).click();
+  const restored = await snapshot(page);
+  const restoredDefinition = JSON.parse(restored.definition);
+  expect(restoredDefinition.slots[ids.imageSlotId].mobileRules.aspectRatio).toBe("4:3");
+  expect(restoredDefinition.nodes[ids.imageNodeId].responsive.mobile.width)
+    .toEqual(copiedDefinition.nodes[ids.imageNodeId].responsive.mobile.width);
+  expect(restored.history).toBe(changed.history + 1);
+  await page.evaluate(() => window.__templateScopeSession.getState().undo());
+  expect(JSON.parse((await snapshot(page)).definition).slots[ids.imageSlotId].mobileRules.aspectRatio).toBe("9:16");
+
+  await inspector.getByRole("button", { name: "恢复上次保存值", exact: true }).click();
+  await page.evaluate((nodeId) => {
+    const session = window.__templateScopeSession;
+    const saved = structuredClone(session.getState().draft!);
+    session.getState().markSaved(saved);
+    session.getState().close();
+    session.getState().open(saved);
+    session.getState().selectObject(nodeId);
+    session.getState().setDevice("mobile");
+    session.getState().setInspectorTask("design");
+  }, ids.imageNodeId);
+  const savedReopened = await snapshot(page);
+  expect(JSON.parse(savedReopened.definition).slots[ids.imageSlotId].mobileRules.aspectRatio).toBe("4:3");
+  expect(savedReopened.history).toBe(0);
+  expect(savedReopened.dirty).toBe(false);
 });
 
 test("确定性 UI：240px 属性区重排、键盘详情与明确必填组合动作", async ({ page }) => {

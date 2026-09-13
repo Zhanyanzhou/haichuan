@@ -5,7 +5,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { QuotationsService, type QuotationActor } from './quotations.service';
-import { CreateQuotationDto, UpdateQuotationDto, ConvertQuotationDto, QuotationListQueryDto } from './dto/quotation.dto';
+import { CreateQuotationDto, UpdateQuotationDto, ConvertQuotationDto, QuotationCustomerLookupQueryDto, QuotationListQueryDto } from './dto/quotation.dto';
+import { IssueQuotationDto } from './dto/quotation-commerce.dto';
 
 // 报价管理角色边界：
 // - 查看/创建/编辑/转单/取消/删除：SUPER_ADMIN、ADMIN、SALES_CONSULTANT（销售顾问管理自己报价）
@@ -24,10 +25,22 @@ export class QuotationsController {
     return this.quotationsService.findAll(query, user);
   }
 
+  @Get('issue-customers')
+  @ApiOperation({ summary: '报价绑定客户最小字段搜索' })
+  searchIssueCustomers(@Query() query: QuotationCustomerLookupQueryDto) {
+    return this.quotationsService.searchIssueCustomers(query);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: '报价单详情' })
   findById(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
     return this.quotationsService.findById(id, user);
+  }
+
+  @Get(':id/issue-options')
+  @ApiOperation({ summary: '按报价范围读取当前有效的发出选项' })
+  issueOptions(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
+    return this.quotationsService.getIssueOptions(id, user);
   }
 
   @Post()
@@ -44,8 +57,28 @@ export class QuotationsController {
 
   @Put(':id/submit')
   @ApiOperation({ summary: '提交报价（草稿→待客户确认）' })
-  submit(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
-    return this.quotationsService.changeStatus(id, 'PENDING_CONFIRM', user);
+  submit(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: IssueQuotationDto,
+    @CurrentUser() user: QuotationActor,
+  ) {
+    return this.quotationsService.issue(id, dto, user);
+  }
+
+  @Post(':id/issue')
+  @ApiOperation({ summary: '发出不可变报价版本（v2）' })
+  issue(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: IssueQuotationDto,
+    @CurrentUser() user: QuotationActor,
+  ) {
+    return this.quotationsService.issue(id, dto, user);
+  }
+
+  @Post(':id/revisions')
+  @ApiOperation({ summary: '将待确认版本作废并创建下一版草稿' })
+  revise(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
+    return this.quotationsService.revise(id, user);
   }
 
   @Put(':id/confirm')

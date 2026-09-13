@@ -321,6 +321,7 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
     await expect(version37.getByText("当前线上版本")).toBeVisible();
     expect(rollbackPayloads).toEqual([{
       pageKey: "home",
+      locale: "zh-CN",
       expectedPublishedRevisionId: 39,
     }]);
     expect(unexpectedWrites).toEqual([]);

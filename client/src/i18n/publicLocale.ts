@@ -4,11 +4,8 @@ export type PublicContentLocale = (typeof PUBLIC_CONTENT_LOCALES)[number];
 
 export const DEFAULT_PUBLIC_CONTENT_LOCALE: PublicContentLocale = "zh-CN";
 
-/**
- * EN-A 只建立不会误展示中文内容的安全轨道。英文内容、独立发布指针和内容哈希
- * 尚未完成前，这个门禁必须保持关闭，不能通过环境变量绕过内容验收。
- */
-export const PUBLIC_ENGLISH_ROUTES_ENABLED = false;
+/** 英文路由已接入独立草稿、审核、发布指针与内容哈希；具体页面仍以英文发布事实为准。 */
+export const PUBLIC_ENGLISH_ROUTES_ENABLED = true;
 
 export type PublicLocalePath = {
   locale: PublicContentLocale;
@@ -23,9 +20,16 @@ function normalizePathname(pathname: string): string {
 
 export function resolvePublicLocalePath(pathname: string): PublicLocalePath {
   const normalized = normalizePathname(pathname);
-  if (normalized === "/en") return { locale: "en", pathname: "/" };
-  if (normalized.startsWith("/en/")) {
-    return { locale: "en", pathname: normalized.slice(3) || "/" };
+  if (/^\/en$/i.test(normalized)) return { locale: "en", pathname: "/" };
+  if (/^\/en\//i.test(normalized)) {
+    const contentPathname = normalized.slice(3) || "/";
+    const staticContentRoute = contentPathname.match(/^\/(products|about|custom)\/?$/i);
+    return {
+      locale: "en",
+      pathname: staticContentRoute
+        ? `/${staticContentRoute[1]!.toLowerCase()}`
+        : contentPathname,
+    };
   }
   return { locale: DEFAULT_PUBLIC_CONTENT_LOCALE, pathname: normalized };
 }
