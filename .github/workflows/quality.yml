@@ -103,11 +103,28 @@ jobs:
           npm run test:page-builder-publish
 
   # 公开、客户与后台三类确定性 UI E2E。各规格自行拦截其所需 API；需要真实服务的契约段按层级跳过。
-  # 使用单 worker，避免共享前端运行时与异步夹具在并行压力下互相污染。
+  # 独立 runner 分区并发、分区内部保持单 worker，避免共享前端运行时与异步夹具互相污染。
   # 显式不可达的 API 地址保证 CI 不会静默借用外部或遗留后端。
   e2e-deterministic:
+    name: Deterministic E2E - ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: public
+            project: public-chromium
+            shard: 1/1
+          - name: customer
+            project: customer-chromium
+            shard: 1/1
+          - name: admin-1-of-2
+            project: admin-chromium
+            shard: 1/2
+          - name: admin-2-of-2
+            project: admin-chromium
+            shard: 2/2
     steps:
       - name: 检出代码
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -133,16 +150,15 @@ jobs:
         working-directory: client
         run: npx playwright install --with-deps chromium
 
-      - name: 运行三类确定性 E2E
+      - name: 运行确定性 E2E 分区
         working-directory: client
         env:
           PLAYWRIGHT_APP_MODE: development
           VITE_API_BASE_URL: http://127.0.0.1:39999/api
         run: >-
           npx playwright test
-          --project=public-chromium
-          --project=customer-chromium
-          --project=admin-chromium
+          --project=${{ matrix.project }}
+          --shard=${{ matrix.shard }}
           --workers=1
 
   real-mysql:

@@ -77,7 +77,12 @@ export default function CanvasImageFocusEditor({ nodeId, sourceElement, editing,
         preview({ x: current.focus.x + (event.clientX - current.x) / Math.max(1, Math.abs(current.dx)) * Math.sign(current.dx) * 100, y: current.focus.y + (event.clientY - current.y) / Math.max(1, Math.abs(current.dy)) * Math.sign(current.dy) * 100 });
       }}
       onPointerUp={(event) => { drag.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
-      onPointerCancel={() => close(false)} onLostPointerCapture={() => { if (drag.current) close(false); }}>
+      onPointerCancel={() => close(false)} onLostPointerCapture={(event) => {
+        const current = drag.current;
+        if (!current || current.id !== event.pointerId || current.element !== event.currentTarget) return;
+        // 上一轮释放的丢失事件可能晚于下一轮按下到达；当前指针已重新持有 capture 时不能取消新事务。
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) close(false);
+      }}>
       <span aria-hidden="true" style={{ position: "absolute", left: `${focus.x}%`, top: `${focus.y}%`, transform: "translate(-50%, -50%)", border: "2px solid white", outline: "1px solid #181A1B", borderRadius: "50%", width: 18, height: 18 }}>+</span>
     </div>
     <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "white", padding: 4 }} onPointerDown={(event) => event.stopPropagation()}>

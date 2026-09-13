@@ -725,6 +725,9 @@ test("隔离画布新增：鼠标取景遵守屏幕阈值，松手保留预览�
   await page.mouse.move(point.x, point.y); await page.mouse.down(); await page.mouse.move(point.x + 2, point.y); await page.mouse.up();
   await expect(image).toHaveCSS("object-position", original); expect((await snapshot(page)).preview).toBe(false);
   await page.mouse.move(point.x, point.y); await page.mouse.down();
+  // 上一次正常释放的 lostpointercapture 可能晚于下一次 pointerdown 到达；
+  // 新一轮已经重新持有 capture 时，不得被旧事件取消。
+  await slider.dispatchEvent("lostpointercapture", { pointerId: 1 });
   await page.mouse.move(point.x + 18, point.y + 12, { steps: 5 });
   await expect.poll(() => image.evaluate((element) => getComputedStyle(element).objectPosition)).not.toBe(original);
   await page.mouse.up(); await expect(slider).toBeVisible(); expect((await snapshot(page)).history).toBe(0); expect((await snapshot(page)).preview).toBe(true);
