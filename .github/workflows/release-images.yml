@@ -810,7 +810,7 @@ jobs:
                   source,
                   sourceRef: process.env.GITHUB_REF,
                   gitSha: process.env.GITHUB_SHA,
-                  buildkitProvenancePredicateType,
+                  buildkitProvenancePredicateType: buildkitPredicateType,
                   buildkitProvenanceSha256: image.buildkitProvenance.sha256,
                 },
                 internalParameters: {},
