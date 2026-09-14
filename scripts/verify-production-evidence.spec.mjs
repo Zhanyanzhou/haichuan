@@ -40,7 +40,7 @@ function createFixture(releaseProfile = "lead-generation") {
     sbomPredicateType: "https://spdx.dev/Document",
   });
   const manifest = {
-    schemaVersion: 5,
+    schemaVersion: 6,
     releaseStage: "production",
     imageTag: `sha-${gitSha}`,
     gitSha,
@@ -75,6 +75,8 @@ function createFixture(releaseProfile = "lead-generation") {
       prerenderManifestSha256: sha("0"),
       sourceArtifactId: 456,
       sourceArtifactDigest: `sha256:${sha("9")}`,
+      sourceKind: "approved-snapshot",
+      contentReady: true,
     },
     server: image("server", "c"),
     client: image("client", "d"),
@@ -234,7 +236,7 @@ function successfulExecutor(calls = []) {
         subject: [{ digest: { sha256: manifestSha256 } }],
         predicate: {
           buildDefinition: {
-            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v5`,
+            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v6`,
             externalParameters: {
               gitSha: manifest.gitSha,
               sourceRef: manifest.attestationPolicy.sourceRef,

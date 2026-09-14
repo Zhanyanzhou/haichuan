@@ -33,11 +33,16 @@ test("client image requires immutable SEO inputs and carries their evidence labe
 
 test("Nginx serves only generated indexable routes while preserving protected SPA and media behavior", () => {
   const nginx = read("client/nginx.conf");
+  const nginxMain = read("client/nginx-main.conf");
+  const generator = read("scripts/generate-public-seo-artifacts.mjs");
   assert.ok(nginx.includes("include /etc/nginx/public-seo-routes.conf;"));
+  assert.ok(nginxMain.includes("include /etc/nginx/public-seo-policy.conf;"));
   assert.match(nginx, /location = \/search \{\s+return 308 \/catalog\$is_args\$args;/);
   assert.match(nginx, /location ~\* \^\/en\(\?:\/\|\$\) \{\s+error_page 404 =404 \/404-en\.html;\s+return 404;/);
   assert.match(nginx, /location \/ \{[\s\S]*?try_files \$uri =404;/);
-  assert.match(nginx, /~\*\^\/\(admin\|preview\|customer\|cart\|checkout\|partner\)\(\/\|\\\?\|\$\) "noindex, nofollow";/);
+  assert.ok(generator.includes("renderPublicSeoPolicy"));
+  assert.ok(generator.includes("admin|preview|customer|cart|checkout|partner"));
+  assert.ok(generator.includes('"noindex, nofollow"'));
   assert.match(nginx, /location ~\* \^\/\(admin\|preview\|customer\|cart\|checkout\|partner\)\(\/\|\$\) \{[\s\S]*?try_files \/index\.html =404;/);
   assert.match(nginx, /location \/uploads\/page-assets\/ \{[\s\S]*?proxy_cache off;[\s\S]*?expires off;/);
   assert.match(nginx, /location \/uploads\/page-assets\/ \{[\s\S]*?Cache-Control: public, no-store/);

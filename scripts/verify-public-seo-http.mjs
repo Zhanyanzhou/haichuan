@@ -47,6 +47,19 @@ export function assertSafeNotFoundHtml(html, locale, pathname) {
   if (!homeLink.test(html)) fail(`Not-found route ${pathname} did not provide its locale home link.`);
 }
 
+export function assertSafeFallbackHtml(html, pathname) {
+  assertDocumentLocale(html, "zh-CN", `Safe fallback route ${pathname}`);
+  if (!String(html).includes('data-content-ready="false"')) {
+    fail(`Safe fallback route ${pathname} did not declare contentReady=false.`);
+  }
+  if (!/name=["']robots["'][^>]*content=["'][^"']*noindex[^"']*nofollow/i.test(String(html))) {
+    fail(`Safe fallback route ${pathname} did not remain noindex,nofollow.`);
+  }
+  if (/<link\b[^>]*rel=["']canonical["']/i.test(String(html)) || /property=["']og:/i.test(String(html))) {
+    fail(`Safe fallback route ${pathname} exposed publishable SEO metadata.`);
+  }
+}
+
 function parseArguments(argv) {
   const result = { baseUrl: "", snapshot: "", requireRepresentative: false };
   for (let index = 0; index < argv.length; index += 1) {
@@ -104,6 +117,19 @@ export async function verifyPublicSeoHttp({ baseUrl, snapshot, requireRepresenta
     const locales = new Set(verifiedSnapshot.routes.map((route) => route.locale));
     if (!["page", "legal", "product"].every((kind) => kinds.has(kind)) || !locales.has("zh-CN") || !locales.has("en")) {
       fail("Representative HTTP verification requires Chinese, English, page, legal, and product fixtures.");
+    }
+  }
+
+  if (!verifiedSnapshot.contentReady) {
+    for (const pathname of ["/", "/catalog", "/contact"]) {
+      const response = await fetchManual(baseUrl, pathname);
+      if (response.status !== 200 || !response.headers.get("content-type")?.toLowerCase().includes("text/html")) {
+        fail(`Safe fallback route ${pathname} was not available as HTML.`);
+      }
+      if (!/noindex/i.test(response.headers.get("x-robots-tag") || "")) {
+        fail(`Safe fallback route ${pathname} did not receive an index-blocking response header.`);
+      }
+      assertSafeFallbackHtml(await response.text(), pathname);
     }
   }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   assertRelativeLocation,
+  assertSafeFallbackHtml,
   assertSafeNotFoundHtml,
 } from "./verify-public-seo-http.mjs";
 
@@ -19,6 +20,13 @@ test("HTTP SEO verification accepts only same-origin relative redirects", () => 
       /same-origin relative Location/,
     );
   }
+});
+
+test("HTTP SEO verification accepts only an explicit non-publishable fallback document", () => {
+  const safe = '<html lang="zh-CN"><head><meta name="robots" content="noindex, nofollow"></head><body><main data-content-ready="false">预发布</main></body></html>';
+  assert.doesNotThrow(() => assertSafeFallbackHtml(safe, "/"));
+  assert.throws(() => assertSafeFallbackHtml(safe.replace("false", "true"), "/"), /contentReady=false/);
+  assert.throws(() => assertSafeFallbackHtml(safe.replace("</head>", '<link rel="canonical" href="https://example.test/"></head>'), "/"), /publishable SEO metadata/);
 });
 
 test("HTTP SEO verification preserves the exact redirect path and query", () => {

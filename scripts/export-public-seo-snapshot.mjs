@@ -337,6 +337,7 @@ export function createPublicSeoSnapshot(input) {
   const value = assertRecord(input, "Snapshot export input");
   assertExactKeys(value, new Set([
     "schemaVersion",
+    "contentReady",
     "sourceStage",
     "origin",
     "sourceSnapshotHashBefore",
@@ -348,6 +349,17 @@ export function createPublicSeoSnapshot(input) {
   }
   if (!SOURCE_STAGES.has(value.sourceStage)) {
     fail("Snapshot export input sourceStage must be preproduction or production.");
+  }
+  const contentReady = value.contentReady ?? true;
+  if (typeof contentReady !== "boolean") fail("Snapshot export input contentReady must be boolean.");
+  if (!contentReady && value.sourceStage !== "preproduction") {
+    fail("Only preproduction snapshots may use contentReady=false.");
+  }
+  if (!contentReady && value.routes.length !== 0) {
+    fail("A contentReady=false snapshot must not contain publishable routes.");
+  }
+  if (contentReady && value.routes.length === 0) {
+    fail("A contentReady=true snapshot must contain at least one reviewed route.");
   }
   const sourceHashBefore = normalizeHash(value.sourceSnapshotHashBefore, "sourceSnapshotHashBefore");
   const sourceHashAfter = normalizeHash(value.sourceSnapshotHashAfter, "sourceSnapshotHashAfter");
@@ -403,6 +415,7 @@ export function createPublicSeoSnapshot(input) {
   const snapshotBody = {
     schemaVersion: 3,
     sourceStage: value.sourceStage,
+    contentReady,
     origin,
     sourceSnapshotHash: sourceHashBefore,
     routes: routesWithAlternates,
@@ -421,6 +434,7 @@ export function validatePublicSeoSnapshot(snapshot) {
   const sourceInput = {
     schemaVersion: 1,
     sourceStage: value.sourceStage,
+    contentReady: value.contentReady,
     origin: value.origin,
     sourceSnapshotHashBefore: value.sourceSnapshotHash,
     sourceSnapshotHashAfter: value.sourceSnapshotHash,

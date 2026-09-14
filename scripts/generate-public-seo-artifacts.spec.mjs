@@ -9,6 +9,7 @@ import { createPublicSeoSnapshot } from "./export-public-seo-snapshot.mjs";
 import {
   renderPublicSeoArtifacts,
   renderPublicSeoNginxMap,
+  renderPublicSeoPolicy,
 } from "./generate-public-seo-artifacts.mjs";
 import { prerenderPublicRoutes } from "./prerender-public-routes.mjs";
 import {
@@ -250,4 +251,37 @@ test("strict mode refuses legacy manifests without immutable pre-render evidence
     "https://jewelry.example.test",
     "--strict",
   ));
+});
+
+test("contentReady=false produces global noindex and safe public-route routing", async (t) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-public-seo-fallback-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const outputDirectory = join(temporaryDirectory, "dist");
+  mkdirSync(outputDirectory);
+  const snapshot = createPublicSeoSnapshot({
+    ...makeSnapshotInput([]),
+    sourceStage: "preproduction",
+    contentReady: false,
+  });
+  const snapshotPath = join(temporaryDirectory, "snapshot.json");
+  writeFileSync(snapshotPath, JSON.stringify(snapshot), "utf8");
+  await prerenderPublicRoutes({ snapshot, baseHtml: BASE_HTML, outDir: outputDirectory });
+  const nginxMapPath = join(temporaryDirectory, "routes.conf");
+  const nginxPolicyPath = join(temporaryDirectory, "policy.conf");
+  execFileSync(process.execPath, [
+    scriptPath,
+    "--strict",
+    "--origin", snapshot.origin,
+    "--manifest", snapshotPath,
+    "--prerender-manifest", join(outputDirectory, "prerendered-routes.json"),
+    "--out-dir", outputDirectory,
+    "--nginx-map", nginxMapPath,
+    "--nginx-policy", nginxPolicyPath,
+  ], { stdio: "pipe" });
+  assert.match(readFileSync(join(outputDirectory, "robots.txt"), "utf8"), /^Disallow: \/$/m);
+  assert.doesNotMatch(readFileSync(join(outputDirectory, "sitemap.xml"), "utf8"), /<loc>/);
+  assert.match(readFileSync(nginxMapPath, "utf8"), /preproduction-not-ready\.html/);
+  assert.match(readFileSync(nginxPolicyPath, "utf8"), /default "noindex, nofollow"/);
+  assert.match(renderPublicSeoPolicy(false), /default "noindex, nofollow"/);
+  assert.doesNotMatch(renderPublicSeoNginxMap([], { contentReady: false }), /index,follow/);
 });

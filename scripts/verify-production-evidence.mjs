@@ -190,6 +190,7 @@ function assertStrictManifestSchema(manifest) {
   ], "PRODUCTION_EVIDENCE_MANIFEST_ATTESTATION_SCHEMA_INVALID");
   assertExactKeys(manifest.publicSeo, [
     "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest",
+    "sourceKind", "contentReady",
   ], "PRODUCTION_EVIDENCE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
   for (const component of ["server", "client", "operations"]) {
     const allowedImageKeys = [
@@ -540,7 +541,7 @@ function parseManifestProvenanceOutput(stdout, spec) {
   const predicate = matched?.predicate;
   const parameters = predicate?.buildDefinition?.externalParameters;
   const expectedBuilder = `https://${spec.trusted.manifestSignerWorkflow}@${spec.trusted.sourceRef}`;
-  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v5`;
+  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v6`;
   if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
       parameters?.gitSha !== spec.trusted.releaseGitSha ||
       parameters?.sourceRef !== spec.trusted.sourceRef ||

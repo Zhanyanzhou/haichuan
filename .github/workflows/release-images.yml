@@ -16,8 +16,9 @@ on:
         required: true
         type: string
       public_seo_snapshot_artifact_id:
-        description: "同仓同提交、由已批准只读发布事实导出的不可变 SEO snapshot artifact ID"
-        required: true
+        description: "正式发布必填；预发布可留空并自动生成 contentReady=false 安全短页"
+        required: false
+        default: ""
         type: string
       api_base_url:
         description: "前端 API 基础路径"
@@ -143,6 +144,9 @@ jobs:
       public_seo_snapshot_hash: ${{ steps.seo-source.outputs.snapshot_hash }}
       public_seo_prerender_manifest_sha256: ${{ steps.seo.outputs.prerender_manifest_sha }}
       public_seo_source_artifact_digest: ${{ steps.seo-source.outputs.source_artifact_digest }}
+      public_seo_source_artifact_id: ${{ steps.seo-source.outputs.source_artifact_id }}
+      public_seo_source_kind: ${{ steps.seo-source.outputs.source_kind }}
+      public_seo_content_ready: ${{ steps.seo-source.outputs.content_ready }}
     steps:
       - name: 检出精确提交
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -186,7 +190,7 @@ jobs:
           echo "client_image=ghcr.io/${GITHUB_REPOSITORY,,}${repository_stage_suffix}-client" >> "$GITHUB_OUTPUT"
           echo "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}${repository_stage_suffix}-operations" >> "$GITHUB_OUTPUT"
 
-      - name: 获取并校验不可变 SEO snapshot 制品
+      - name: 获取审核快照或生成预发布安全快照
         id: seo-source
         shell: bash
         env:
@@ -197,9 +201,26 @@ jobs:
           RELEASE_STAGE: ${{ steps.release.outputs.release_stage }}
         run: |
           set -euo pipefail
-          [[ "$SEO_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] || { echo "PUBLIC_SEO_ARTIFACT_ID_INVALID" >&2; exit 1; }
           seo_input_dir="${RUNNER_TEMP}/public-seo-input"
           mkdir -p "$seo_input_dir" client/.release-seo
+          if [ -z "$SEO_ARTIFACT_ID" ]; then
+            test "$RELEASE_STAGE" = "preproduction" || {
+              echo "PUBLIC_SEO_ARTIFACT_ID_REQUIRED_FOR_PRODUCTION" >&2
+              exit 1
+            }
+            node scripts/create-preproduction-safe-seo-snapshot.mjs \
+              --origin "$PUBLIC_SITE_ORIGIN" \
+              --revision "$GITHUB_SHA" \
+              --output client/.release-seo/public-seo-snapshot.json
+            snapshot_digest="sha256:$(sha256sum client/.release-seo/public-seo-snapshot.json | cut -d ' ' -f 1)"
+            {
+              echo "source_artifact_id=0"
+              echo "source_artifact_digest=${snapshot_digest}"
+              echo "source_kind=safe-fallback"
+              echo "content_ready=false"
+            } >> "$GITHUB_OUTPUT"
+          else
+          [[ "$SEO_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] || { echo "PUBLIC_SEO_ARTIFACT_ID_INVALID" >&2; exit 1; }
           gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SEO_ARTIFACT_ID}" > "$seo_input_dir/metadata.json"
           gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SEO_ARTIFACT_ID}/zip" > "$seo_input_dir/artifact.zip"
           producer_run_id="$(node -e 'const m=require(process.argv[1]); const expectedName=`public-seo-${process.env.RELEASE_STAGE}-snapshot-${process.env.GITHUB_SHA}`; if(m.name!==expectedName || m.expired || !Number.isInteger(m.workflow_run?.id) || m.workflow_run?.head_sha!==process.env.GITHUB_SHA || !/^sha256:[a-f0-9]{64}$/.test(m.digest||"")) process.exit(1); process.stdout.write(String(m.workflow_run.id))' "$seo_input_dir/metadata.json")" \
@@ -215,19 +236,26 @@ jobs:
             || { echo "PUBLIC_SEO_ARTIFACT_CONTENT_INVALID" >&2; exit 1; }
           unzip -q "$seo_input_dir/artifact.zip" -d "$seo_input_dir/extracted"
           cp "$seo_input_dir/extracted/public-seo-snapshot.json" client/.release-seo/public-seo-snapshot.json
+          fi
           SEO_METADATA_PATH="$seo_input_dir/metadata.json" \
           SEO_SNAPSHOT_PATH="client/.release-seo/public-seo-snapshot.json" \
           node --input-type=module <<'NODE'
           import { readFileSync } from "node:fs";
           import { validatePublicSeoSnapshot } from "./scripts/export-public-seo-snapshot.mjs";
-          const metadata = JSON.parse(readFileSync(process.env.SEO_METADATA_PATH, "utf8"));
           const snapshot = validatePublicSeoSnapshot(JSON.parse(readFileSync(process.env.SEO_SNAPSHOT_PATH, "utf8")));
           if (snapshot.sourceStage !== process.env.RELEASE_STAGE) throw new Error("PUBLIC_SEO_SOURCE_STAGE_MISMATCH");
           if (snapshot.origin !== process.env.PUBLIC_SITE_ORIGIN) throw new Error("PUBLIC_SEO_ORIGIN_MISMATCH");
-          const lines = [
-            `snapshot_hash=${snapshot.snapshotHash}`,
-            `source_artifact_digest=${metadata.digest}`,
-          ];
+          if (snapshot.sourceStage === "production" && snapshot.contentReady !== true) throw new Error("PUBLIC_SEO_PRODUCTION_CONTENT_NOT_READY");
+          const lines = [`snapshot_hash=${snapshot.snapshotHash}`];
+          if (process.env.SEO_ARTIFACT_ID) {
+            const metadata = JSON.parse(readFileSync(process.env.SEO_METADATA_PATH, "utf8"));
+            lines.push(
+              `source_artifact_id=${process.env.SEO_ARTIFACT_ID}`,
+              `source_artifact_digest=${metadata.digest}`,
+              "source_kind=approved-snapshot",
+              `content_ready=${snapshot.contentReady}`,
+            );
+          }
           process.stdout.write(`validated immutable SEO snapshot ${snapshot.snapshotHash}\n`);
           const fs = await import("node:fs");
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join("\n")}\n`);
@@ -246,6 +274,14 @@ jobs:
           npm run build --prefix client
           grep -F '<meta name="robots" content="noindex, nofollow" />' client/dist/index.html >/dev/null \
             || { echo "PUBLIC_SPA_FALLBACK_NOINDEX_MISSING" >&2; exit 1; }
+          if [ "${{ steps.seo-source.outputs.content_ready }}" = "false" ]; then
+            node scripts/create-preproduction-safe-seo-snapshot.mjs \
+              --origin "$VITE_PUBLIC_SITE_ORIGIN" \
+              --revision "$GITHUB_SHA" \
+              --output "${RUNNER_TEMP}/safe-seo-recheck.json" \
+              --html-output client/dist/preproduction-not-ready.html
+            cmp "${RUNNER_TEMP}/safe-seo-recheck.json" client/.release-seo/public-seo-snapshot.json
+          fi
           node scripts/prerender-public-routes.mjs \
             --snapshot client/.release-seo/public-seo-snapshot.json \
             --base-html client/dist/index.html \
@@ -256,7 +292,8 @@ jobs:
             --manifest client/.release-seo/public-seo-snapshot.json \
             --prerender-manifest client/dist/prerendered-routes.json \
             --out-dir client/dist \
-            --nginx-map client/.release-seo/public-seo-routes.conf
+            --nginx-map client/.release-seo/public-seo-routes.conf \
+            --nginx-policy client/.release-seo/public-seo-policy.conf
           mkdir -p client/.release-seo/tools
           cp scripts/export-public-seo-snapshot.mjs \
              scripts/generate-public-seo-artifacts.mjs \
@@ -308,6 +345,8 @@ jobs:
             PUBLIC_SEO_SNAPSHOT_HASH=${{ steps.seo-source.outputs.snapshot_hash }}
             PUBLIC_SEO_PRERENDER_MANIFEST_SHA256=${{ steps.seo.outputs.prerender_manifest_sha }}
             PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST=${{ steps.seo-source.outputs.source_artifact_digest }}
+            PUBLIC_SEO_CONTENT_READY=${{ steps.seo-source.outputs.content_ready }}
+            PUBLIC_SEO_SOURCE_KIND=${{ steps.seo-source.outputs.source_kind }}
 
       - name: 以一次性 Nginx 核对客户端原始 HTTP 与 SEO 制品
         shell: bash
@@ -316,6 +355,8 @@ jobs:
           PUBLIC_SEO_SNAPSHOT_HASH: ${{ steps.seo-source.outputs.snapshot_hash }}
           PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ steps.seo.outputs.prerender_manifest_sha }}
           PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST: ${{ steps.seo-source.outputs.source_artifact_digest }}
+          PUBLIC_SEO_CONTENT_READY: ${{ steps.seo-source.outputs.content_ready }}
+          PUBLIC_SEO_SOURCE_KIND: ${{ steps.seo-source.outputs.source_kind }}
         run: |
           set -euo pipefail
           docker pull "$CLIENT_REFERENCE"
@@ -342,6 +383,8 @@ jobs:
           test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-snapshot-sha256"}}{{end}}')" = "$PUBLIC_SEO_SNAPSHOT_HASH"
           test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-prerender-manifest-sha256"}}{{end}}')" = "$PUBLIC_SEO_PRERENDER_MANIFEST_SHA256"
           test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-source-artifact-digest"}}{{end}}')" = "$PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST"
+          test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-content-ready"}}{{end}}')" = "$PUBLIC_SEO_CONTENT_READY"
+          test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-source-kind"}}{{end}}')" = "$PUBLIC_SEO_SOURCE_KIND"
 
       - name: 构建并推送运维与备份镜像
         id: operations
@@ -547,8 +590,10 @@ jobs:
           QUALITY_HEAD_SHA: ${{ needs.quality-proof.outputs.head_sha }}
           PUBLIC_SEO_SNAPSHOT_HASH: ${{ steps.seo-source.outputs.snapshot_hash }}
           PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ steps.seo.outputs.prerender_manifest_sha }}
-          PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
+          PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ steps.seo-source.outputs.source_artifact_id }}
           PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ steps.seo-source.outputs.source_artifact_digest }}
+          PUBLIC_SEO_SOURCE_KIND: ${{ steps.seo-source.outputs.source_kind }}
+          PUBLIC_SEO_CONTENT_READY: ${{ steps.seo-source.outputs.content_ready }}
           RELEASE_STAGE: ${{ steps.release.outputs.release_stage }}
           IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
         run: |
@@ -566,7 +611,7 @@ jobs:
             sbom: descriptor("sbom/" + component + ".spdx.json"),
           });
           const inputs = {
-            schemaVersion: 2,
+            schemaVersion: 3,
             releaseStage: process.env.RELEASE_STAGE,
             imageTag: process.env.IMAGE_TAG,
             gitSha: process.env.GITHUB_SHA,
@@ -580,6 +625,8 @@ jobs:
               prerenderManifestSha256: process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256,
               sourceArtifactId: Number(process.env.PUBLIC_SEO_SOURCE_ARTIFACT_ID),
               sourceArtifactDigest: process.env.PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST,
+              sourceKind: process.env.PUBLIC_SEO_SOURCE_KIND,
+              contentReady: process.env.PUBLIC_SEO_CONTENT_READY === "true",
             },
             images: {
               server: image("server", process.env.SERVER_IMAGE_NAME, process.env.SERVER_IMAGE_DIGEST),
@@ -653,8 +700,10 @@ jobs:
           EXPECTED_OPERATIONS_DIGEST: ${{ needs.build-push.outputs.operations_digest }}
           EXPECTED_PUBLIC_SEO_SNAPSHOT_HASH: ${{ needs.build-push.outputs.public_seo_snapshot_hash }}
           EXPECTED_PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ needs.build-push.outputs.public_seo_prerender_manifest_sha256 }}
-          EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
+          EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ needs.build-push.outputs.public_seo_source_artifact_id }}
           EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ needs.build-push.outputs.public_seo_source_artifact_digest }}
+          EXPECTED_PUBLIC_SEO_SOURCE_KIND: ${{ needs.build-push.outputs.public_seo_source_kind }}
+          EXPECTED_PUBLIC_SEO_CONTENT_READY: ${{ needs.build-push.outputs.public_seo_content_ready }}
           EXPECTED_RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
           EXPECTED_IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
@@ -677,7 +726,7 @@ jobs:
           };
           const input = JSON.parse(fs.readFileSync("release-input/signing-inputs.json", "utf8"));
           exact(input, ["schemaVersion", "releaseStage", "imageTag", "gitSha", "source", "sourceRef", "migrationBundleSha256", "qualityGate", "publicSeo", "images"], "RELEASE_SIGNING_INPUTS_SCHEMA_INVALID");
-          if (input.schemaVersion !== 2 || input.gitSha !== process.env.GITHUB_SHA ||
+          if (input.schemaVersion !== 3 || input.gitSha !== process.env.GITHUB_SHA ||
               input.source !== process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY ||
               input.sourceRef !== process.env.GITHUB_REF ||
               input.releaseStage !== process.env.EXPECTED_RELEASE_STAGE ||
@@ -690,12 +739,16 @@ jobs:
               input.qualityGate.runUrl !== process.env.EXPECTED_QUALITY_RUN_URL ||
               input.qualityGate.headSha !== process.env.EXPECTED_QUALITY_HEAD_SHA ||
               input.qualityGate.headSha !== process.env.GITHUB_SHA) fail("RELEASE_SIGNING_QUALITY_MISMATCH");
-          exact(input.publicSeo, ["sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest"], "RELEASE_SIGNING_SEO_SCHEMA_INVALID");
+          exact(input.publicSeo, ["sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest", "sourceKind", "contentReady"], "RELEASE_SIGNING_SEO_SCHEMA_INVALID");
           if (input.publicSeo.sourceStage !== input.releaseStage ||
               input.publicSeo.snapshotHash !== process.env.EXPECTED_PUBLIC_SEO_SNAPSHOT_HASH ||
               input.publicSeo.prerenderManifestSha256 !== process.env.EXPECTED_PUBLIC_SEO_PRERENDER_MANIFEST_SHA256 ||
               input.publicSeo.sourceArtifactId !== Number(process.env.EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_ID) ||
-              input.publicSeo.sourceArtifactDigest !== process.env.EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST) {
+              input.publicSeo.sourceArtifactDigest !== process.env.EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST ||
+              input.publicSeo.sourceKind !== process.env.EXPECTED_PUBLIC_SEO_SOURCE_KIND ||
+              input.publicSeo.contentReady !== (process.env.EXPECTED_PUBLIC_SEO_CONTENT_READY === "true") ||
+              (input.releaseStage === "production" && (!input.publicSeo.contentReady || input.publicSeo.sourceKind !== "approved-snapshot")) ||
+              (input.publicSeo.sourceKind === "safe-fallback" && (input.releaseStage !== "preproduction" || input.publicSeo.contentReady || input.publicSeo.sourceArtifactId !== 0))) {
             fail("RELEASE_SIGNING_SEO_MISMATCH");
           }
           exact(input.images, ["server", "client", "operations"], "RELEASE_SIGNING_IMAGES_SCHEMA_INVALID");
@@ -908,8 +961,10 @@ jobs:
           QUALITY_HEAD_SHA: ${{ needs.quality-proof.outputs.head_sha }}
           PUBLIC_SEO_SNAPSHOT_HASH: ${{ needs.build-push.outputs.public_seo_snapshot_hash }}
           PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ needs.build-push.outputs.public_seo_prerender_manifest_sha256 }}
-          PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
+          PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ needs.build-push.outputs.public_seo_source_artifact_id }}
           PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ needs.build-push.outputs.public_seo_source_artifact_digest }}
+          PUBLIC_SEO_SOURCE_KIND: ${{ needs.build-push.outputs.public_seo_source_kind }}
+          PUBLIC_SEO_CONTENT_READY: ${{ needs.build-push.outputs.public_seo_content_ready }}
           RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
           IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
@@ -942,7 +997,7 @@ jobs:
             ],
           };
           const manifest = {
-            schemaVersion: 5,
+            schemaVersion: 6,
             releaseStage: process.env.RELEASE_STAGE,
             imageTag: process.env.IMAGE_TAG,
             gitSha: process.env.GITHUB_SHA,
@@ -977,6 +1032,8 @@ jobs:
               prerenderManifestSha256: process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256,
               sourceArtifactId: Number(process.env.PUBLIC_SEO_SOURCE_ARTIFACT_ID),
               sourceArtifactDigest: process.env.PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST,
+              sourceKind: process.env.PUBLIC_SEO_SOURCE_KIND,
+              contentReady: process.env.PUBLIC_SEO_CONTENT_READY === "true",
             },
             server: image("server", process.env.SERVER_IMAGE_NAME, process.env.SERVER_IMAGE_DIGEST),
             client: image("client", process.env.CLIENT_IMAGE_NAME, process.env.CLIENT_IMAGE_DIGEST),
@@ -1002,12 +1059,12 @@ jobs:
           const source = manifest.source;
           const predicate = {
             buildDefinition: {
-              buildType: source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v5",
+              buildType: source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v6",
               externalParameters: {
                 gitSha: process.env.GITHUB_SHA,
                 sourceRef: process.env.GITHUB_REF,
                 qualityGateRunId: Number(process.env.QUALITY_RUN_ID),
-                schemaVersion: 5,
+                schemaVersion: 6,
                 releaseStage: process.env.RELEASE_STAGE,
                 imageTag: process.env.IMAGE_TAG,
               },
@@ -1073,12 +1130,12 @@ jobs:
           const parameters = predicate?.buildDefinition?.externalParameters;
           const source = process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY;
           const expectedBuilder = "https://github.com/" + process.env.GITHUB_REPOSITORY + "/.github/workflows/release-images.yml@" + process.env.GITHUB_REF;
-          const expectedBuildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v5";
+          const expectedBuildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v6";
           if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
               parameters?.gitSha !== process.env.GITHUB_SHA ||
               parameters?.sourceRef !== process.env.GITHUB_REF ||
               parameters?.qualityGateRunId !== Number(process.env.QUALITY_RUN_ID) ||
-              parameters?.schemaVersion !== 5 ||
+              parameters?.schemaVersion !== 6 ||
               parameters?.releaseStage !== process.env.RELEASE_STAGE ||
               parameters?.imageTag !== process.env.IMAGE_TAG ||
               predicate?.runDetails?.builder?.id !== expectedBuilder) {

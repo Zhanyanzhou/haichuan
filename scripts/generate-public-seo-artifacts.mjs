@@ -43,6 +43,7 @@ function parseArguments(argv) {
     manifest: defaultManifest,
     prerenderManifest: "",
     nginxMap: "",
+    nginxPolicy: "",
     outputDirectory: defaultOutputDirectory,
     origin: process.env.PUBLIC_SITE_ORIGIN || process.env.VITE_PUBLIC_SITE_ORIGIN || "",
   };
@@ -54,6 +55,7 @@ function parseArguments(argv) {
     else if (argument === "--manifest") result.manifest = resolve(argv[++index] || "");
     else if (argument === "--prerender-manifest") result.prerenderManifest = resolve(argv[++index] || "");
     else if (argument === "--nginx-map") result.nginxMap = resolve(argv[++index] || "");
+    else if (argument === "--nginx-policy") result.nginxPolicy = resolve(argv[++index] || "");
     else if (argument === "--out-dir") result.outputDirectory = resolve(argv[++index] || "");
     else fail(`Unknown argument: ${argument}`);
   }
@@ -209,6 +211,7 @@ async function readPublishedRoutes(options) {
     return {
       origin: snapshot.origin,
       schemaVersion: 3,
+      contentReady: snapshot.contentReady,
       routes: snapshot.routes.map((route) => ({
         pathname: route.path,
         locale: route.locale,
@@ -229,6 +232,7 @@ async function readPublishedRoutes(options) {
   return {
     origin: normalizeOptionalOrigin(options.origin),
     schemaVersion: 1,
+    contentReady: true,
     routes: routes.sort((left, right) => left.pathname.localeCompare(right.pathname, "en")),
   };
 }
@@ -242,7 +246,7 @@ function escapeXml(value) {
     .replace(/'/g, "&apos;");
 }
 
-export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1 } = {}) {
+export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1, contentReady = true } = {}) {
   const hasAlternates = routes.some((route) => Array.isArray(route.alternates) && route.alternates.length > 0);
   const sitemapLines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -277,15 +281,42 @@ export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1 } =
       ? "# Generated from client/seo/published-routes.json; use the generator for production."
       : "# Generated from a verified published-route manifest; use the generator for production.",
     "User-agent: *",
-    "Allow: /",
-    ...disallowedPrefixes.map((prefix) => `Disallow: ${prefix}`),
+    ...(contentReady
+      ? ["Allow: /", ...disallowedPrefixes.map((prefix) => `Disallow: ${prefix}`)]
+      : ["Disallow: /"]),
   ];
   if (origin && routes.length > 0) robotsLines.push(`Sitemap: ${origin}/sitemap.xml`);
   robotsLines.push("");
   return { robots: robotsLines.join("\n"), sitemap: sitemapLines.join("\n") };
 }
 
-export function renderPublicSeoNginxMap(routes) {
+export function renderPublicSeoPolicy(contentReady = true) {
+  return [
+    "# Generated from the immutable SEO snapshot; included at http scope.",
+    "map $request_uri $hc_robots_tag {",
+    `  default ${contentReady ? '\"\"' : '\"noindex, nofollow\"'};`,
+    '  ~*^/(admin|preview|customer|cart|checkout|partner)(/|\\?|$) "noindex, nofollow";',
+    "}",
+    "",
+  ].join("\n");
+}
+
+export function renderPublicSeoNginxMap(routes, { contentReady = true } = {}) {
+  if (!contentReady) {
+    const safePaths = ["/", "/products", "/catalog", "/custom", "/about", "/contact", "/privacy", "/business-info"];
+    return [
+      "# Generated safe preproduction routing; no route is indexable or publishable.",
+      "location = /preproduction-not-ready.html { internal; }",
+      ...safePaths.flatMap((pathname) => [
+        "",
+        `location = \"${pathname}\" {`,
+        "  try_files /preproduction-not-ready.html =404;",
+        "  expires -1;",
+        "}",
+      ]),
+      "",
+    ].join("\n");
+  }
   const locations = routes.flatMap((route) => {
     const outputFile = route.pathname === "/"
       ? "/index.html"
@@ -330,21 +361,25 @@ async function checkOrWrite(pathname, expected, check) {
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   const published = await readPublishedRoutes(options);
-  if (options.strict && (!published.origin || published.routes.length === 0 || published.schemaVersion !== 3)) {
-    fail("Strict mode requires an immutable schema v3 snapshot, its verified pre-render manifest, and at least one route.");
+  if (options.strict && (!published.origin || published.schemaVersion !== 3 || (published.contentReady !== false && published.routes.length === 0))) {
+    fail("Strict mode requires an immutable schema v3 snapshot and verified pre-render evidence; reviewed snapshots require at least one route.");
   }
   if (options.strict && !options.nginxMap) {
     fail("Strict mode requires --nginx-map so only verified pre-rendered routes can be served as indexable HTML.");
   }
   const artifacts = renderPublicSeoArtifacts(published.origin, published.routes, {
     schemaVersion: published.schemaVersion,
+    contentReady: published.contentReady,
   });
   if (!options.check) await mkdir(options.outputDirectory, { recursive: true });
   await Promise.all([
     checkOrWrite(resolve(options.outputDirectory, "robots.txt"), artifacts.robots, options.check),
     checkOrWrite(resolve(options.outputDirectory, "sitemap.xml"), artifacts.sitemap, options.check),
     ...(options.nginxMap
-      ? [checkOrWrite(options.nginxMap, renderPublicSeoNginxMap(published.routes), options.check)]
+      ? [checkOrWrite(options.nginxMap, renderPublicSeoNginxMap(published.routes, { contentReady: published.contentReady }), options.check)]
+      : []),
+    ...(options.nginxPolicy
+      ? [checkOrWrite(options.nginxPolicy, renderPublicSeoPolicy(published.contentReady), options.check)]
       : []),
   ]);
   process.stdout.write(
