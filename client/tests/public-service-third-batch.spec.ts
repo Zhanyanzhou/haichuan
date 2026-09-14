@@ -186,15 +186,19 @@ for (const viewport of viewports) {
     await expect(name).toHaveAttribute("aria-describedby", "cf-name-error");
     await expect(name).toBeInViewport();
     await expect(nameError).toBeInViewport();
-    const [headerBox, nameBox, nameErrorBox] = await Promise.all([
-      header.boundingBox(),
-      name.boundingBox(),
-      nameError.boundingBox(),
-    ]);
-    expect(headerBox && nameBox && nameErrorBox).toBeTruthy();
-    expect(nameBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height + 8);
-    expect(nameErrorBox!.y).toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height);
-    expect(nameErrorBox!.y + nameErrorBox!.height).toBeLessThanOrEqual(viewport.height);
+    // 聚焦与 scrollIntoView 已触发时，页面仍可能在下一帧提交字体/错误文案造成的布局变化。
+    // 轮询用户最终可见的稳定关系，仍会让持续被固定页头遮挡的真实回归失败。
+    await expect.poll(async () => {
+      const [headerBox, nameBox, nameErrorBox] = await Promise.all([
+        header.boundingBox(),
+        name.boundingBox(),
+        nameError.boundingBox(),
+      ]);
+      if (!headerBox || !nameBox || !nameErrorBox) return false;
+      return nameBox.y >= headerBox.y + headerBox.height + 8
+        && nameErrorBox.y >= nameBox.y + nameBox.height
+        && nameErrorBox.y + nameErrorBox.height <= viewport.height;
+    }).toBe(true);
     await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
     await expectWriteGate(writes);
