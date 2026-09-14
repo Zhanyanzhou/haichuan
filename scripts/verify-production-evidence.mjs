@@ -25,7 +25,8 @@ const requiredExternalServices = Object.freeze([
   "object-storage",
 ]);
 const provenancePredicateType = "https://slsa.dev/provenance/v1";
-const sbomPredicateType = "https://spdx.dev/Document/v2.3";
+const sbomPredicateType = "https://spdx.dev/Document";
+const sigstoreBundleMediaType = "application/vnd.dev.sigstore.bundle.v0.3+json";
 const githubRepositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const githubRefPattern = /^refs\/(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
@@ -182,15 +183,18 @@ function assertStrictManifestSchema(manifest) {
     "workflow", "runId", "runUrl", "headSha", "event", "conclusion",
   ], "PRODUCTION_EVIDENCE_MANIFEST_QUALITY_SCHEMA_INVALID");
   assertExactKeys(manifest.attestationPolicy, [
-    "signerWorkflow", "sourceDigest", "imageAttestationsVerified", "provenancePredicateType",
-    "sbomPredicateType", "manifestPredicateType",
+    "signingSystem", "cosignVersion", "bundleMediaType", "signerWorkflow", "signerIdentity",
+    "certificateOidcIssuer", "sourceRef", "sourceDigest", "imageSignaturesVerified",
+    "imageAttestationsVerified", "provenancePredicateType", "sbomPredicateType",
+    "manifestPredicateType",
   ], "PRODUCTION_EVIDENCE_MANIFEST_ATTESTATION_SCHEMA_INVALID");
   assertExactKeys(manifest.publicSeo, [
     "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest",
   ], "PRODUCTION_EVIDENCE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
   for (const component of ["server", "client", "operations"]) {
     const allowedImageKeys = [
-      "image", "digest", "reference", "provenancePredicateType", "sbomPredicateType",
+      "image", "digest", "reference", "signatureBundle", "provenanceBundle", "sbomBundle",
+      "provenancePredicateType", "sbomPredicateType",
     ];
     if (component === "operations") allowedImageKeys.push("runtimeExecutables");
     assertExactKeys(
@@ -224,13 +228,35 @@ export function validateProductionEvidenceStructure(evidence, trusted) {
   const release = requireObject(evidence.release, "PRODUCTION_EVIDENCE_RELEASE_MISSING");
   assertExactKeys(release, ["manifest", "manifestAttestationBundle", "runtimeIdentityReceipt", "composeContractReceipt"], "PRODUCTION_EVIDENCE_RELEASE_SCHEMA_INVALID");
   const manifest = parseJsonArtifact(release.manifest, "release.manifest", trusted.evidenceRoot);
-  readArtifact(release.manifestAttestationBundle, "release.manifestAttestationBundle", trusted.evidenceRoot);
+  const manifestAttestationBundle = parseJsonArtifact(
+    release.manifestAttestationBundle,
+    "release.manifestAttestationBundle",
+    trusted.evidenceRoot,
+  );
+  if (manifestAttestationBundle?.mediaType !== sigstoreBundleMediaType) {
+    fail("PRODUCTION_EVIDENCE_MANIFEST_BUNDLE_FORMAT_INVALID");
+  }
   rejectSensitiveKeys(manifest, "manifest");
   assertStrictManifestSchema(manifest);
   validateReleaseManifest(manifest, { gitSha: trusted.releaseGitSha, migrationBundleSha256: trusted.migrationBundleSha256 });
   if (manifest.source !== trusted.releaseSource) fail("PRODUCTION_EVIDENCE_RELEASE_SOURCE_MISMATCH");
   if (manifest.attestationPolicy.signerWorkflow.toLowerCase() !== trusted.manifestSignerWorkflow.toLowerCase()) {
     fail("PRODUCTION_EVIDENCE_MANIFEST_SIGNER_MISMATCH");
+  }
+  if (manifest.attestationPolicy.sourceRef !== trusted.sourceRef) {
+    fail("PRODUCTION_EVIDENCE_MANIFEST_SOURCE_REF_MISMATCH");
+  }
+  for (const component of ["server", "client", "operations"]) {
+    for (const kind of ["signature", "provenance", "sbom"]) {
+      const bundle = parseJsonArtifact(
+        manifest[component][`${kind}Bundle`],
+        `manifest.${component}.${kind}Bundle`,
+        trusted.evidenceRoot,
+      );
+      if (bundle?.mediaType !== sigstoreBundleMediaType) {
+        fail(`PRODUCTION_EVIDENCE_SIGSTORE_BUNDLE_FORMAT_INVALID:${component}:${kind}`);
+      }
+    }
   }
   const manifestSha256 = release.manifest.sha256;
   const manifestSubject = { subjectSha256: manifestSha256 };
@@ -392,66 +418,166 @@ function requireTrustedRegularFile(path, evidenceRoot, code) {
   return realpathSync(absolutePath);
 }
 
-function attestationArgs({ subject, bundlePath, bundleFromOci, trusted, predicateType }) {
-  const args = [
-    "attestation", "verify", subject,
-    "--repo", trusted.repository,
-    "--signer-workflow", trusted.manifestSignerWorkflow,
-    "--source-digest", trusted.releaseGitSha,
-    "--source-ref", trusted.sourceRef,
-    "--deny-self-hosted-runners",
-    "--predicate-type", predicateType,
-    "--format", "json",
+function cosignPredicateName(predicateType) {
+  if (predicateType === provenancePredicateType) return "slsaprovenance1";
+  if (predicateType === sbomPredicateType) return "spdxjson";
+  fail("PRODUCTION_EVIDENCE_PREDICATE_TYPE_UNSUPPORTED");
+}
+
+function cosignIdentityArgs(trusted, signerWorkflow) {
+  return [
+    "--certificate-identity", `https://${signerWorkflow}@${trusted.sourceRef}`,
+    "--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
+    "--certificate-github-workflow-trigger", "workflow_dispatch",
+    "--certificate-github-workflow-sha", trusted.releaseGitSha,
+    "--certificate-github-workflow-repository", trusted.repository,
+    "--certificate-github-workflow-ref", trusted.sourceRef,
   ];
-  if (bundlePath) args.push("--bundle", bundlePath);
-  if (bundleFromOci) args.push("--bundle-from-oci");
-  return args;
 }
 
-function evidenceAttestationArgs({ subject, bundlePath, trusted }) {
-  const args = attestationArgs({
+function blobAttestationArgs({ subject, bundlePath, trusted, signerWorkflow, predicateType }) {
+  return [
+    "verify-blob-attestation",
+    "--bundle", bundlePath,
+    "--type", cosignPredicateName(predicateType),
+    ...cosignIdentityArgs(trusted, signerWorkflow),
     subject,
-    bundlePath,
-    trusted: { ...trusted, manifestSignerWorkflow: trusted.evidenceSignerWorkflow },
-    predicateType: provenancePredicateType,
-  });
-  return args;
+  ];
 }
 
-function parseVerifiedAttestationOutput(stdout, label, expectedPredicateType, expectedSubjectSha256) {
-  let output;
+function imageSignatureArgs({ subject, bundlePath, trusted }) {
+  return [
+    "verify",
+    "--bundle", bundlePath,
+    ...cosignIdentityArgs(trusted, trusted.manifestSignerWorkflow),
+    subject,
+  ];
+}
+
+function imageAttestationArgs({ subject, bundlePath, trusted, predicateType }) {
+  return [
+    "verify-attestation",
+    "--bundle", bundlePath,
+    "--type", cosignPredicateName(predicateType),
+    ...cosignIdentityArgs(trusted, trusted.manifestSignerWorkflow),
+    subject,
+  ];
+}
+
+function parseCosignDocuments(stdout, label) {
+  const text = String(stdout ?? "").trim();
+  if (!text) fail(`PRODUCTION_EVIDENCE_ATTESTATION_OUTPUT_INVALID:${label}`);
   try {
-    output = JSON.parse(stdout);
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [parsed];
   } catch {
-    fail(`PRODUCTION_EVIDENCE_ATTESTATION_OUTPUT_INVALID:${label}`);
+    try {
+      return text.split(/\r?\n/).filter(Boolean).flatMap((line) => {
+        const parsed = JSON.parse(line);
+        return Array.isArray(parsed) ? parsed : [parsed];
+      });
+    } catch {
+      fail(`PRODUCTION_EVIDENCE_ATTESTATION_OUTPUT_INVALID:${label}`);
+    }
   }
-  if (!Array.isArray(output) || output.length === 0) {
-    fail(`PRODUCTION_EVIDENCE_ATTESTATION_OUTPUT_INVALID:${label}`);
-  }
-  const matched = output.some((entry) => {
-    const statement = entry?.verificationResult?.statement;
-    if (statement?.predicateType !== expectedPredicateType || !Array.isArray(statement.subject)) return false;
-    return statement.subject.some((subject) => subject?.digest?.sha256 === expectedSubjectSha256);
+}
+
+function parseCosignStatements(stdout, label) {
+  return parseCosignDocuments(stdout, label).map((envelope) => {
+    if (typeof envelope?.payload !== "string" || envelope.payload.length === 0) {
+      fail(`PRODUCTION_EVIDENCE_ATTESTATION_OUTPUT_INVALID:${label}`);
+    }
+    try {
+      return JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
+    } catch {
+      fail(`PRODUCTION_EVIDENCE_ATTESTATION_OUTPUT_INVALID:${label}`);
+    }
   });
-  if (!matched) fail(`PRODUCTION_EVIDENCE_ATTESTATION_RESULT_MISMATCH:${label}`);
-  return output.length;
+}
+
+function parseCosignImageAttestationOutput(stdout, spec, trusted) {
+  const statements = parseCosignStatements(stdout, spec.label);
+  const matched = statements.find((statement) =>
+    statement?.predicateType === spec.predicateType &&
+    Array.isArray(statement.subject) &&
+    statement.subject.some((subject) => subject?.digest?.sha256 === spec.subjectSha256));
+  if (!matched) fail(`PRODUCTION_EVIDENCE_ATTESTATION_RESULT_MISMATCH:${spec.label}`);
+  if (spec.predicateType === provenancePredicateType) {
+    const parameters = matched?.predicate?.buildDefinition?.externalParameters;
+    const expectedBuilder = `https://${trusted.manifestSignerWorkflow}@${trusted.sourceRef}`;
+    if (parameters?.component !== spec.component || parameters?.source !== trusted.releaseSource ||
+        parameters?.sourceRef !== trusted.sourceRef || parameters?.gitSha !== trusted.releaseGitSha ||
+        matched?.predicate?.runDetails?.builder?.id?.toLowerCase() !== expectedBuilder.toLowerCase()) {
+      fail(`PRODUCTION_EVIDENCE_PROVENANCE_CONTENT_MISMATCH:${spec.label}`);
+    }
+  } else if (matched?.predicate?.spdxVersion !== "SPDX-2.3" || matched?.predicate?.SPDXID !== "SPDXRef-DOCUMENT") {
+    fail(`PRODUCTION_EVIDENCE_SBOM_CONTENT_MISMATCH:${spec.label}`);
+  }
+  return 1;
+}
+
+function parseCosignImageSignatureOutput(stdout, spec) {
+  const matched = parseCosignDocuments(stdout, spec.label).some((entry) => {
+    const critical = entry?.critical ?? entry?.Critical;
+    const image = critical?.image ?? critical?.Image;
+    return (image?.["docker-manifest-digest"] ?? image?.["Docker-manifest-digest"]) === `sha256:${spec.subjectSha256}`;
+  });
+  if (!matched) fail(`PRODUCTION_EVIDENCE_SIGNATURE_RESULT_MISMATCH:${spec.label}`);
+  return 1;
+}
+
+function parseManifestProvenanceOutput(stdout, spec) {
+  const statements = parseCosignStatements(stdout, spec.label);
+  const matched = statements.find((statement) =>
+    statement?.predicateType === provenancePredicateType &&
+    statement.subject?.some((subject) => subject?.digest?.sha256 === spec.subjectSha256));
+  const predicate = matched?.predicate;
+  const parameters = predicate?.buildDefinition?.externalParameters;
+  const expectedBuilder = `https://${spec.trusted.manifestSignerWorkflow}@${spec.trusted.sourceRef}`;
+  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v4`;
+  if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
+      parameters?.gitSha !== spec.trusted.releaseGitSha ||
+      parameters?.sourceRef !== spec.trusted.sourceRef ||
+      parameters?.qualityGateRunId !== spec.manifest.qualityGate.runId ||
+      parameters?.schemaVersion !== spec.manifest.schemaVersion ||
+      predicate?.runDetails?.builder?.id?.toLowerCase() !== expectedBuilder.toLowerCase()) {
+    fail("PRODUCTION_EVIDENCE_MANIFEST_PROVENANCE_CONTENT_MISMATCH");
+  }
+  const expectedDependencies = new Set([
+    `${spec.trusted.releaseSource}@git:${spec.trusted.releaseGitSha}`,
+    ...["server", "client", "operations"].map((component) => {
+      const image = spec.manifest[component];
+      return `${image.image}@${image.digest}`;
+    }),
+  ]);
+  const resolvedDependencies = predicate?.buildDefinition?.resolvedDependencies ?? [];
+  const actualDependencies = new Set(resolvedDependencies.map((dependency) =>
+    dependency?.digest?.gitCommit
+      ? `${dependency.uri}@git:${dependency.digest.gitCommit}`
+      : `${dependency?.uri}@sha256:${dependency?.digest?.sha256}`));
+  if (resolvedDependencies.length !== expectedDependencies.size ||
+      actualDependencies.size !== expectedDependencies.size ||
+      [...expectedDependencies].some((dependency) => !actualDependencies.has(dependency))) {
+    fail("PRODUCTION_EVIDENCE_MANIFEST_PROVENANCE_DEPENDENCIES_MISMATCH");
+  }
+  return 1;
 }
 
 async function runAttestationVerification(executor, spec) {
   let result;
   try {
-    result = await executor("gh", spec.args, { cwd: projectRoot, shell: false });
+    result = await executor("cosign", spec.args, { cwd: projectRoot, shell: false });
   } catch (error) {
-    if (error?.code === "ENOENT") fail("PRODUCTION_EVIDENCE_GH_CLI_MISSING");
+    if (error?.code === "ENOENT") fail("PRODUCTION_EVIDENCE_COSIGN_CLI_MISSING");
     fail(`PRODUCTION_EVIDENCE_ATTESTATION_EXECUTION_FAILED:${spec.label}`);
   }
   if (!result || result.exitCode !== 0) fail(`PRODUCTION_EVIDENCE_ATTESTATION_VERIFY_FAILED:${spec.label}`);
-  return parseVerifiedAttestationOutput(
-    result.stdout,
-    spec.label,
-    spec.predicateType,
-    spec.subjectSha256,
-  );
+  if (spec.kind === "image-attestation") {
+    return parseCosignImageAttestationOutput(result.stdout, spec, spec.trusted);
+  }
+  if (spec.kind === "image-signature") return parseCosignImageSignatureOutput(result.stdout, spec);
+  if (spec.kind === "manifest-blob") return parseManifestProvenanceOutput(result.stdout, spec);
+  return 1;
 }
 
 export async function verifyProductionEvidence(evidence, trusted, options = {}) {
@@ -466,6 +592,15 @@ export async function verifyProductionEvidence(evidence, trusted, options = {}) 
     trusted.evidenceRoot,
     "PRODUCTION_EVIDENCE_ATTESTATION_BUNDLE_INVALID",
   );
+  let evidenceBundle;
+  try {
+    evidenceBundle = JSON.parse(readFileSync(evidenceBundlePath, "utf8"));
+  } catch {
+    fail("PRODUCTION_EVIDENCE_ATTESTATION_BUNDLE_JSON_INVALID");
+  }
+  if (evidenceBundle?.mediaType !== sigstoreBundleMediaType) {
+    fail("PRODUCTION_EVIDENCE_ATTESTATION_BUNDLE_FORMAT_INVALID");
+  }
   let evidenceFromDisk;
   try {
     evidenceFromDisk = JSON.parse(readFileSync(evidencePath, "utf8"));
@@ -483,33 +618,63 @@ export async function verifyProductionEvidence(evidence, trusted, options = {}) 
   const specs = [
     {
       label: "production-evidence",
-      args: evidenceAttestationArgs({ subject: evidencePath, bundlePath: evidenceBundlePath, trusted }),
+      args: blobAttestationArgs({
+        subject: evidencePath,
+        bundlePath: evidenceBundlePath,
+        trusted,
+        signerWorkflow: trusted.evidenceSignerWorkflow,
+        predicateType: provenancePredicateType,
+      }),
       predicateType: provenancePredicateType,
       subjectSha256: sha256(readFileSync(evidencePath)),
+      kind: "evidence-blob",
     },
     {
       label: "release-manifest",
-      args: attestationArgs({
+      args: blobAttestationArgs({
         subject: manifestPath,
         bundlePath: manifestBundlePath,
         trusted,
+        signerWorkflow: trusted.manifestSignerWorkflow,
         predicateType: provenancePredicateType,
       }),
       predicateType: provenancePredicateType,
       subjectSha256: validated.manifestSha256,
+      kind: "manifest-blob",
+      manifest: validated.manifest,
+      trusted,
     },
   ];
   for (const component of ["server", "client", "operations"]) {
     const image = validated.manifest[component];
+    const signatureBundlePath = resolveArtifactPath(
+      image.signatureBundle,
+      `manifest.${component}.signatureBundle`,
+      trusted.evidenceRoot,
+    );
+    specs.push({
+      label: `${component}-signature`,
+      args: imageSignatureArgs({ subject: image.reference, bundlePath: signatureBundlePath, trusted }),
+      kind: "image-signature",
+      subjectSha256: image.digest.slice("sha256:".length),
+    });
     for (const [kind, predicateType] of [["provenance", provenancePredicateType], ["sbom", sbomPredicateType]]) {
+      const bundlePath = resolveArtifactPath(
+        image[`${kind}Bundle`],
+        `manifest.${component}.${kind}Bundle`,
+        trusted.evidenceRoot,
+      );
       specs.push({
         label: `${component}-${kind}`,
-        args: attestationArgs({
-          subject: `oci://${image.reference}`,
-          bundleFromOci: true,
+        args: imageAttestationArgs({
+          subject: image.reference,
+          bundlePath,
           trusted,
           predicateType,
         }),
+        kind: "image-attestation",
+        component,
+        trusted,
         predicateType,
         subjectSha256: image.digest.slice("sha256:".length),
       });

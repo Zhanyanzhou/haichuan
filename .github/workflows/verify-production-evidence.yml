@@ -40,16 +40,16 @@ on:
           - lead-generation
           - commerce
 
-permissions:
-  actions: read
-  attestations: read
-  contents: read
-  packages: read
+permissions: {}
 
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      packages: read
     steps:
       - name: 拒绝未受保护的验证来源
         shell: bash
@@ -83,6 +83,18 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: 安装固定版本 Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v3.1.3
+
+      - name: 登录 GHCR 以读取私有镜像签名
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 安装验证器依赖
         run: npm ci --ignore-scripts
 
@@ -98,7 +110,6 @@ jobs:
       - name: 重验 production evidence 与完整签名链
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
           ENVIRONMENT_ID_SHA256: ${{ inputs.environment_id_sha256 }}
           APPROVAL_REFERENCE_SHA256: ${{ inputs.approval_reference_sha256 }}
           RELEASE_GIT_SHA: ${{ inputs.release_git_sha }}

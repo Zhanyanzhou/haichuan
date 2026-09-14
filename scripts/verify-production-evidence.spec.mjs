@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { validateProductionEvidenceStructure, verifyProductionEvidence } from "./verify-production-evidence.mjs";
@@ -10,14 +10,6 @@ import { validateProductionEvidenceStructure, verifyProductionEvidence } from ".
 const sha = (character) => character.repeat(64);
 const gitSha = "a".repeat(40);
 const source = "https://github.com/example/haichuan";
-const image = (component, character) => ({
-  image: `ghcr.io/example/haichuan-${component}`,
-  digest: `sha256:${sha(character)}`,
-  reference: `ghcr.io/example/haichuan-${component}@sha256:${sha(character)}`,
-  provenancePredicateType: "https://slsa.dev/provenance/v1",
-  sbomPredicateType: "https://spdx.dev/Document/v2.3",
-});
-
 function hash(content) {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -27,13 +19,25 @@ function createFixture(releaseProfile = "lead-generation") {
   const files = new Map();
   const artifact = (name, content) => {
     const serialized = typeof content === "string" ? content : `${JSON.stringify(content, null, 2)}\n`;
-    writeFileSync(join(root, name), serialized);
+    const absolutePath = join(root, name);
+    mkdirSync(dirname(absolutePath), { recursive: true });
+    writeFileSync(absolutePath, serialized);
     const descriptor = { path: name, sha256: hash(serialized) };
     files.set(name, serialized);
     return descriptor;
   };
+  const image = (component, character) => ({
+    image: `ghcr.io/example/haichuan-${component}`,
+    digest: `sha256:${sha(character)}`,
+    reference: `ghcr.io/example/haichuan-${component}@sha256:${sha(character)}`,
+    signatureBundle: artifact(`attestations/${component}-image.sigstore.json`, { mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json" }),
+    provenanceBundle: artifact(`attestations/${component}-provenance.sigstore.json`, { mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json" }),
+    sbomBundle: artifact(`attestations/${component}-sbom.sigstore.json`, { mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json" }),
+    provenancePredicateType: "https://slsa.dev/provenance/v1",
+    sbomPredicateType: "https://spdx.dev/Document",
+  });
   const manifest = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     gitSha,
     migrationBundleSha256: sha("b"),
     source,
@@ -46,11 +50,18 @@ function createFixture(releaseProfile = "lead-generation") {
       conclusion: "success",
     },
     attestationPolicy: {
+      signingSystem: "sigstore-cosign-keyless",
+      cosignVersion: "v3.1.3",
+      bundleMediaType: "application/vnd.dev.sigstore.bundle.v0.3+json",
       signerWorkflow: "github.com/example/haichuan/.github/workflows/release-images.yml",
+      signerIdentity: "https://github.com/example/haichuan/.github/workflows/release-images.yml@refs/heads/main",
+      certificateOidcIssuer: "https://token.actions.githubusercontent.com",
+      sourceRef: "refs/heads/main",
       sourceDigest: gitSha,
+      imageSignaturesVerified: true,
       imageAttestationsVerified: true,
       provenancePredicateType: "https://slsa.dev/provenance/v1",
-      sbomPredicateType: "https://spdx.dev/Document/v2.3",
+      sbomPredicateType: "https://spdx.dev/Document",
       manifestPredicateType: "https://slsa.dev/provenance/v1",
     },
     publicSeo: {
@@ -168,7 +179,7 @@ function createFixture(releaseProfile = "lead-generation") {
     evidenceSignerWorkflow: "github.com/example/haichuan/.github/workflows/production-evidence.yml",
   };
   const evidenceBundlePath = join(root, "production-evidence.attestation.json");
-  writeFileSync(evidenceBundlePath, "{}\n");
+  writeFileSync(evidenceBundlePath, '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}\n');
   const writeEvidence = () => {
     const evidencePath = join(root, "production-evidence.json");
     writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
@@ -198,18 +209,82 @@ async function withFixtureAsync(callback, releaseProfile) {
 function successfulExecutor(calls = []) {
   return async (command, args, options) => {
     calls.push({ command, args, options });
-    const subject = args[2];
-    const predicateType = args[args.indexOf("--predicate-type") + 1];
-    const subjectSha256 = subject.startsWith("oci://")
-      ? subject.match(/@sha256:([a-f0-9]{64})$/)?.[1]
-      : hash(readFileSync(subject));
+    const subject = args.at(-1);
+    if (args[0] === "verify") {
+      const digest = subject.match(/@(sha256:[a-f0-9]{64})$/)?.[1];
+      return {
+        exitCode: 0,
+        stdout: `${JSON.stringify([{ critical: { image: { "docker-manifest-digest": digest } } }])}\n`,
+        stderr: "",
+      };
+    }
+    if (args[0] === "verify-blob-attestation") {
+      if (!subject.endsWith("release-manifest.json")) return { exitCode: 0, stdout: "", stderr: "" };
+      const manifest = JSON.parse(readFileSync(subject, "utf8"));
+      const manifestSha256 = hash(readFileSync(subject));
+      const statement = {
+        _type: "https://in-toto.io/Statement/v1",
+        predicateType: "https://slsa.dev/provenance/v1",
+        subject: [{ digest: { sha256: manifestSha256 } }],
+        predicate: {
+          buildDefinition: {
+            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v4`,
+            externalParameters: {
+              gitSha: manifest.gitSha,
+              sourceRef: manifest.attestationPolicy.sourceRef,
+              qualityGateRunId: manifest.qualityGate.runId,
+              schemaVersion: manifest.schemaVersion,
+            },
+            resolvedDependencies: [
+              { uri: manifest.source, digest: { gitCommit: manifest.gitSha } },
+              ...["server", "client", "operations"].map((component) => ({
+                uri: manifest[component].image,
+                digest: { sha256: manifest[component].digest.slice("sha256:".length) },
+              })),
+            ],
+          },
+          runDetails: { builder: { id: manifest.attestationPolicy.signerIdentity } },
+        },
+      };
+      return {
+        exitCode: 0,
+        stdout: `${JSON.stringify({ payloadType: "application/vnd.in-toto+json", payload: Buffer.from(JSON.stringify(statement)).toString("base64"), signatures: [] })}\n`,
+        stderr: "",
+      };
+    }
+    if (args[0] !== "verify-attestation") return { exitCode: 0, stdout: "", stderr: "" };
+    const subjectSha256 = subject.match(/@sha256:([a-f0-9]{64})$/)?.[1];
+    const component = subject.match(/haichuan-(server|client|operations)@/)?.[1];
+    const predicateName = args[args.indexOf("--type") + 1];
+    const predicateType = predicateName === "spdxjson"
+      ? "https://spdx.dev/Document"
+      : "https://slsa.dev/provenance/v1";
+    const predicate = predicateName === "spdxjson"
+      ? { spdxVersion: "SPDX-2.3", SPDXID: "SPDXRef-DOCUMENT" }
+      : {
+          buildDefinition: {
+            externalParameters: {
+              component,
+              source,
+              sourceRef: "refs/heads/main",
+              gitSha,
+            },
+          },
+          runDetails: {
+            builder: {
+              id: "https://github.com/example/haichuan/.github/workflows/release-images.yml@refs/heads/main",
+            },
+          },
+        };
+    const statement = {
+      _type: "https://in-toto.io/Statement/v1",
+      predicateType,
+      subject: [{ digest: { sha256: subjectSha256 } }],
+      predicate,
+    };
     return {
       exitCode: 0,
-      stdout: JSON.stringify([{
-        verificationResult: {
-          statement: { predicateType, subject: [{ digest: { sha256: subjectSha256 } }] },
-        },
-      }]),
+      stdout: `${JSON.stringify({ payloadType: "application/vnd.in-toto+json", payload: Buffer.from(JSON.stringify(statement)).toString("base64"), signatures: [] })}\n`,
       stderr: "",
     };
   };
@@ -403,26 +478,40 @@ test("orchestrator verifies signed evidence, manifest and all OCI provenance/SBO
       evidenceBundlePath: fixture.evidenceBundlePath,
       executor: successfulExecutor(calls),
     });
-    assert.equal(result.verifiedAttestationCount, 8);
+    assert.equal(result.verifiedAttestationCount, 11);
     assert.deepEqual(result.verifiedSubjects, [
-      "production-evidence", "release-manifest", "server-provenance", "server-sbom",
-      "client-provenance", "client-sbom", "operations-provenance", "operations-sbom",
+      "production-evidence", "release-manifest",
+      "server-signature", "server-provenance", "server-sbom",
+      "client-signature", "client-provenance", "client-sbom",
+      "operations-signature", "operations-provenance", "operations-sbom",
     ]);
-    assert.equal(calls.length, 8);
+    assert.equal(calls.length, 11);
     for (const call of calls) {
-      assert.equal(call.command, "gh");
+      assert.equal(call.command, "cosign");
       assert.ok(Array.isArray(call.args));
       assert.equal(call.options.shell, false);
-      assert.ok(call.args.includes("--source-ref"));
-      assert.ok(call.args.includes("--source-digest"));
-      assert.ok(call.args.includes("--signer-workflow"));
-      assert.equal(call.args[call.args.indexOf("--repo") + 1], fixture.trusted.repository);
-      assert.equal(call.args[call.args.indexOf("--source-digest") + 1], fixture.trusted.releaseGitSha);
-      assert.equal(call.args[call.args.indexOf("--source-ref") + 1], fixture.trusted.sourceRef);
+      assert.equal(call.args[call.args.indexOf("--certificate-github-workflow-sha") + 1], fixture.trusted.releaseGitSha);
+      assert.equal(call.args[call.args.indexOf("--certificate-github-workflow-ref") + 1], fixture.trusted.sourceRef);
+      assert.equal(call.args[call.args.indexOf("--certificate-github-workflow-repository") + 1], fixture.trusted.repository);
+      assert.equal(call.args[call.args.indexOf("--certificate-oidc-issuer") + 1], "https://token.actions.githubusercontent.com");
     }
-    assert.equal(calls[0].args[calls[0].args.indexOf("--signer-workflow") + 1], fixture.trusted.evidenceSignerWorkflow);
-    assert.ok(calls.slice(1).every(({ args }) => args[args.indexOf("--signer-workflow") + 1] === fixture.trusted.manifestSignerWorkflow));
-    assert.ok(calls.slice(2).every(({ args }) => args.includes("--bundle-from-oci")));
+    assert.equal(
+      calls[0].args[calls[0].args.indexOf("--certificate-identity") + 1],
+      `https://${fixture.trusted.evidenceSignerWorkflow}@${fixture.trusted.sourceRef}`,
+    );
+    assert.ok(calls.slice(1).every(({ args }) =>
+      args[args.indexOf("--certificate-identity") + 1] ===
+        `https://${fixture.trusted.manifestSignerWorkflow}@${fixture.trusted.sourceRef}`));
+    assert.deepEqual(calls.slice(2).map(({ args }) => args[0]), [
+      "verify", "verify-attestation", "verify-attestation",
+      "verify", "verify-attestation", "verify-attestation",
+      "verify", "verify-attestation", "verify-attestation",
+    ]);
+    for (const call of calls.slice(2)) {
+      const bundlePath = call.args[call.args.indexOf("--bundle") + 1];
+      assert.ok(bundlePath.startsWith(fixture.root));
+      assert.match(bundlePath, /attestations[\\/](?:server|client|operations)-(?:image|provenance|sbom)\.sigstore\.json$/);
+    }
   });
 });
 
@@ -461,7 +550,40 @@ test("unsigned production claims fail closed when the top-level evidence bundle 
   });
 });
 
-test("missing or tampered manifest bundle fails closed before gh verification", async () => {
+test("top-level production evidence rejects a legacy bundle before invoking Cosign", async () => {
+  await withFixtureAsync(async (fixture) => {
+    writeFileSync(fixture.evidenceBundlePath, '{"mediaType":"application/vnd.dev.cosign.bundle+json"}\n');
+    let called = false;
+    await assert.rejects(
+      verifyProductionEvidence(fixture.evidence, fixture.trusted, {
+        evidencePath: fixture.writeEvidence(),
+        evidenceBundlePath: fixture.evidenceBundlePath,
+        executor: async () => {
+          called = true;
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+      }),
+      (error) => error?.message === "PRODUCTION_EVIDENCE_ATTESTATION_BUNDLE_FORMAT_INVALID",
+    );
+    assert.equal(called, false);
+  });
+});
+
+test("a forged top-level object with only the standard mediaType still requires Cosign proof", async () => {
+  await withFixtureAsync(async (fixture) => {
+    writeFileSync(fixture.evidenceBundlePath, '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json"}\n');
+    await assert.rejects(
+      verifyProductionEvidence(fixture.evidence, fixture.trusted, {
+        evidencePath: fixture.writeEvidence(),
+        evidenceBundlePath: fixture.evidenceBundlePath,
+        executor: async () => ({ exitCode: 1, stdout: "", stderr: "invalid protobuf bundle" }),
+      }),
+      (error) => error?.message === "PRODUCTION_EVIDENCE_ATTESTATION_VERIFY_FAILED:production-evidence",
+    );
+  });
+});
+
+test("missing or tampered manifest bundle fails closed before Cosign verification", async () => {
   await withFixtureAsync(async (fixture) => {
     writeFileSync(join(fixture.root, fixture.evidence.release.manifestAttestationBundle.path), "tampered\n");
     await assert.rejects(
@@ -475,10 +597,48 @@ test("missing or tampered manifest bundle fails closed before gh verification", 
   });
 });
 
+test("a manifest-bound image sidecar must be a standard Sigstore protobuf bundle", () => {
+  withFixture((fixture) => {
+    const descriptor = fixture.evidence.release.manifest;
+    const manifestPath = join(fixture.root, descriptor.path);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const bundleDescriptor = manifest.server.signatureBundle;
+    const bundlePath = join(fixture.root, bundleDescriptor.path);
+    writeFileSync(bundlePath, `${JSON.stringify({ mediaType: "application/vnd.dev.cosign.simplesigning.v1+json" })}\n`);
+    bundleDescriptor.sha256 = hash(readFileSync(bundlePath));
+    writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+    descriptor.sha256 = hash(readFileSync(manifestPath));
+    assert.throws(
+      () => validateProductionEvidenceStructure(fixture.evidence, fixture.trusted),
+      (error) => error?.message === "PRODUCTION_EVIDENCE_SIGSTORE_BUNDLE_FORMAT_INVALID:server:signature",
+    );
+  });
+});
+
+test("a forged image sidecar with only the standard mediaType fails its own Cosign verification", async () => {
+  await withFixtureAsync(async (fixture) => {
+    const fallback = successfulExecutor();
+    await assert.rejects(
+      verifyProductionEvidence(fixture.evidence, fixture.trusted, {
+        evidencePath: fixture.writeEvidence(),
+        evidenceBundlePath: fixture.evidenceBundlePath,
+        executor: async (command, args, options) => {
+          const bundlePath = args[args.indexOf("--bundle") + 1];
+          if (args[0] === "verify" && /server-image\.sigstore\.json$/.test(bundlePath)) {
+            return { exitCode: 1, stdout: "", stderr: "invalid protobuf bundle" };
+          }
+          return fallback(command, args, options);
+        },
+      }),
+      (error) => error?.message === "PRODUCTION_EVIDENCE_ATTESTATION_VERIFY_FAILED:server-signature",
+    );
+  });
+});
+
 test("a rehashed forged manifest bundle still fails cryptographic verification", async () => {
   await withFixtureAsync(async (fixture) => {
     const descriptor = fixture.evidence.release.manifestAttestationBundle;
-    const forgedBundle = '{"forged":true}\n';
+    const forgedBundle = '{"mediaType":"application/vnd.dev.sigstore.bundle.v0.3+json","forged":true}\n';
     writeFileSync(join(fixture.root, descriptor.path), forgedBundle);
     descriptor.sha256 = hash(forgedBundle);
     const fallback = successfulExecutor();
@@ -496,6 +656,35 @@ test("a rehashed forged manifest bundle still fails cryptographic verification",
       }),
       (error) => error?.message === "PRODUCTION_EVIDENCE_ATTESTATION_VERIFY_FAILED:release-manifest",
     );
+  });
+});
+
+test("verified manifest DSSE must bind builder, release facts and all resolved dependencies", async () => {
+  await withFixtureAsync(async (fixture) => {
+    const fallback = successfulExecutor();
+    const corruptManifestOutput = async (field) => {
+      await assert.rejects(
+        verifyProductionEvidence(fixture.evidence, fixture.trusted, {
+          evidencePath: fixture.writeEvidence(),
+          evidenceBundlePath: fixture.evidenceBundlePath,
+          executor: async (command, args, options) => {
+            const result = await fallback(command, args, options);
+            if (args[0] !== "verify-blob-attestation" || !args.at(-1).endsWith("release-manifest.json")) return result;
+            const envelope = JSON.parse(result.stdout);
+            const statement = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
+            if (field === "builder") statement.predicate.runDetails.builder.id = "https://github.com/other/workflow";
+            if (field === "dependencies") statement.predicate.buildDefinition.resolvedDependencies.pop();
+            envelope.payload = Buffer.from(JSON.stringify(statement)).toString("base64");
+            return { ...result, stdout: `${JSON.stringify(envelope)}\n` };
+          },
+        }),
+        (error) => error?.message === (field === "builder"
+          ? "PRODUCTION_EVIDENCE_MANIFEST_PROVENANCE_CONTENT_MISMATCH"
+          : "PRODUCTION_EVIDENCE_MANIFEST_PROVENANCE_DEPENDENCIES_MISMATCH"),
+      );
+    };
+    await corruptManifestOutput("builder");
+    await corruptManifestOutput("dependencies");
   });
 });
 
@@ -536,7 +725,7 @@ test("wrong repository, signer workflow, source SHA or source ref fails closed",
         evidenceBundlePath: fixture.evidenceBundlePath,
         executor: async () => ({ exitCode: 1, stdout: "", stderr: "source ref mismatch" }),
       }),
-      (error) => error?.message === "PRODUCTION_EVIDENCE_ATTESTATION_VERIFY_FAILED:production-evidence",
+      (error) => error?.message === "PRODUCTION_EVIDENCE_MANIFEST_SOURCE_REF_MISMATCH",
     );
   });
 });
@@ -545,7 +734,7 @@ test("one OCI provenance or SBOM failure rejects the complete production evidenc
   await withFixtureAsync(async (fixture) => {
     const fallback = successfulExecutor();
     const executor = async (command, args, options) => {
-      if (args[2].includes("-operations@") && args.includes("https://spdx.dev/Document/v2.3")) {
+      if (args.at(-1).includes("-operations@") && args.includes("spdxjson")) {
         return { exitCode: 1, stdout: "", stderr: "SBOM attestation missing" };
       }
       return fallback(command, args, options);
@@ -580,7 +769,7 @@ test("command-injection text is rejected and never reaches an executor or shell"
   });
 });
 
-test("missing gh executable fails closed", async () => {
+test("missing cosign executable fails closed", async () => {
   await withFixtureAsync(async (fixture) => {
     await assert.rejects(
       verifyProductionEvidence(fixture.evidence, fixture.trusted, {
@@ -590,7 +779,7 @@ test("missing gh executable fails closed", async () => {
           throw Object.assign(new Error("not found"), { code: "ENOENT" });
         },
       }),
-      (error) => error?.message === "PRODUCTION_EVIDENCE_GH_CLI_MISSING",
+      (error) => error?.message === "PRODUCTION_EVIDENCE_COSIGN_CLI_MISSING",
     );
   });
 });

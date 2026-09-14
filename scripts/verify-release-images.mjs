@@ -312,6 +312,13 @@ function assertComposeImages() {
 function assertReleaseWorkflow() {
   const path = ".github/workflows/release-images.yml";
   const source = readProjectFile(path);
+  let workflow;
+  try {
+    workflow = parseYaml(source, { json: false });
+  } catch {
+    fail("RELEASE_WORKFLOW_YAML_INVALID");
+  }
+  if (!isRecord(workflow) || !isRecord(workflow.jobs)) fail("RELEASE_WORKFLOW_SCHEMA_INVALID");
   const header = source.split(/^jobs:/m, 1)[0];
   if (!/^on:\s*\r?\n\s{2}workflow_dispatch:/m.test(header)) {
     fail("RELEASE_WORKFLOW_NOT_MANUAL_ONLY");
@@ -344,10 +351,36 @@ function assertReleaseWorkflow() {
   if (!source.includes(":sha-${{ github.sha }}")) {
     fail("RELEASE_WORKFLOW_COMMIT_TAG_MISSING");
   }
-  if (!/^\s{2}actions:\s*read\s*$/m.test(source)) {
+  if (!/^permissions:\s*\{\}\s*$/m.test(source) ||
+      !/^\s{6}actions:\s*read\s*$/m.test(source)) {
     fail("RELEASE_WORKFLOW_ACTIONS_READ_PERMISSION_MISSING");
   }
-  if ((source.match(/create-storage-record: false/g) ?? []).length !== 3) fail("RELEASE_WORKFLOW_STORAGE_RECORD_POLICY_INVALID");
+  if (!/^\s{6}id-token:\s*write\s*$/m.test(source) ||
+      !/^\s{6}packages:\s*write\s*$/m.test(source) ||
+      /^\s+attestations:\s*/m.test(source)) {
+    fail("RELEASE_WORKFLOW_SIGSTORE_PERMISSION_POLICY_INVALID");
+  }
+  const buildJob = workflow.jobs["build-push"];
+  const signingJob = workflow.jobs["sign-release"];
+  if (!isRecord(buildJob) || !isRecord(signingJob) ||
+      !isRecord(buildJob.permissions) || !isRecord(signingJob.permissions)) {
+    fail("RELEASE_WORKFLOW_SIGNING_JOB_ISOLATION_MISSING");
+  }
+  if (Object.hasOwn(buildJob.permissions, "id-token") ||
+      JSON.stringify(Object.keys(buildJob.permissions).sort()) !== JSON.stringify(["actions", "contents", "packages"]) ||
+      buildJob.permissions.actions !== "read" || buildJob.permissions.contents !== "read" ||
+      buildJob.permissions.packages !== "write") {
+    fail("RELEASE_WORKFLOW_BUILD_PERMISSIONS_INVALID");
+  }
+  if (JSON.stringify(Object.keys(signingJob.permissions).sort()) !== JSON.stringify(["actions", "id-token", "packages"]) ||
+      signingJob.permissions.actions !== "read" || signingJob.permissions["id-token"] !== "write" ||
+      signingJob.permissions.packages !== "write") {
+    fail("RELEASE_WORKFLOW_SIGNING_PERMISSIONS_INVALID");
+  }
+  const signingSource = source.slice(source.indexOf("  sign-release:"));
+  if (/actions\/checkout@|npm ci|node scripts\/|docker (?:build|run)/.test(signingSource)) {
+    fail("RELEASE_WORKFLOW_SIGNING_JOB_EXECUTES_REPOSITORY_CODE");
+  }
   if (!/^\s{2}quality-proof:\s*$/m.test(source) ||
       !/^\s{4}needs:\s*quality-proof\s*$/m.test(source)) {
     fail("RELEASE_WORKFLOW_QUALITY_PROOF_DEPENDENCY_MISSING");
@@ -358,17 +391,30 @@ function assertReleaseWorkflow() {
     'run.event === "push"',
     'run.conclusion === "success"',
     "QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND",
-    "schemaVersion:3",
+    "schemaVersion: 4",
     "qualityGate:",
     "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}-operations",
     "target: operations",
     "https://slsa.dev/provenance/v1",
-    "https://spdx.dev/Document/v2.3",
-    "gh attestation verify",
-    "--signer-workflow",
-    "--source-digest",
-    "--source-ref",
+    "https://spdx.dev/Document",
+    "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",
+    "cosign-release: v3.1.3",
+    "cosign sign --yes",
+    "cosign attest --yes",
+    "cosign verify-attestation",
+    "cosign verify-blob-attestation",
+    "--certificate-identity",
+    "--certificate-oidc-issuer \"https://token.actions.githubusercontent.com\"",
+    "--certificate-github-workflow-sha \"$GITHUB_SHA\"",
+    "--certificate-github-workflow-ref \"$GITHUB_REF\"",
+    "--type slsaprovenance1",
+    "--type spdxjson",
     "--bundle",
+    "application/vnd.dev.sigstore.bundle.v0.3+json",
+    "artifact-ids: ${{ needs.build-push.outputs.signing_inputs_artifact_id }}",
+    "RELEASE_SIGNING_INPUTS_HASH_MISMATCH",
+    "RELEASE_MANIFEST_PROVENANCE_CONTENT_INVALID",
+    "RELEASE_MANIFEST_PROVENANCE_DEPENDENCIES_INVALID",
     "release-manifest.attestation.json",
     "runtimeExecutables",
     "OPERATIONS_RUNTIME_EXECUTABLE_INVALID",
@@ -377,6 +423,24 @@ function assertReleaseWorkflow() {
     if (!source.includes(required)) {
       fail(`RELEASE_WORKFLOW_QUALITY_PROOF_CONTRACT_MISSING:${required}`);
     }
+  }
+  for (const required of [
+    "sigstore_public_log_acknowledged:",
+    "SIGSTORE_PUBLIC_LOG_ACKNOWLEDGEMENT_REQUIRED",
+    "RELEASE_PROVENANCE_SOURCE_BINDING_INVALID",
+    "sign_image server \"$SERVER_REFERENCE\"",
+    "sign_image client \"$CLIENT_REFERENCE\"",
+    "sign_image operations \"$OPERATIONS_REFERENCE\"",
+    '--bundle "release-output/attestations/${component}-image.sigstore.json"',
+    '--bundle "release-output/attestations/${component}-provenance.sigstore.json"',
+    '--bundle "release-output/attestations/${component}-sbom.sigstore.json"',
+  ]) {
+    if (!source.includes(required)) fail(`RELEASE_WORKFLOW_SIGSTORE_CONTRACT_MISSING:${required}`);
+  }
+  if (/actions\/(?:attest|attest-build-provenance)@/.test(source) ||
+      /--(?:key|new-bundle-format|insecure-ignore-tlog|insecure-ignore-sct)\b/.test(source) ||
+      /--tlog-upload(?:=|\s+)false\b/.test(source)) {
+    fail("RELEASE_WORKFLOW_SIGSTORE_FAIL_CLOSED_POLICY_INVALID");
   }
   return path;
 }
@@ -391,14 +455,18 @@ export function validateProductionEvidenceVerificationWorkflow(source) {
   if (!isRecord(workflow) || !isRecord(workflow.permissions) || !isRecord(workflow.jobs)) {
     fail("PRODUCTION_EVIDENCE_WORKFLOW_SCHEMA_INVALID");
   }
-  const expectedPermissions = ["actions", "attestations", "contents", "packages"];
-  const actualPermissions = Object.keys(workflow.permissions).sort();
-  if (JSON.stringify(actualPermissions) !== JSON.stringify(expectedPermissions) ||
-      expectedPermissions.some((name) => workflow.permissions[name] !== "read")) {
-    fail("PRODUCTION_EVIDENCE_WORKFLOW_PERMISSIONS_INVALID");
+  if (Object.keys(workflow.permissions).length !== 0) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_ROOT_PERMISSIONS_INVALID");
   }
-  if (Object.values(workflow.jobs).some((job) => isRecord(job) && Object.hasOwn(job, "permissions"))) {
-    fail("PRODUCTION_EVIDENCE_WORKFLOW_JOB_PERMISSIONS_FORBIDDEN");
+  const verifyJob = workflow.jobs.verify;
+  if (!isRecord(verifyJob) || !isRecord(verifyJob.permissions)) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_JOB_PERMISSIONS_MISSING");
+  }
+  const expectedPermissions = ["actions", "contents", "packages"];
+  const actualPermissions = Object.keys(verifyJob.permissions).sort();
+  if (JSON.stringify(actualPermissions) !== JSON.stringify(expectedPermissions) ||
+      expectedPermissions.some((name) => verifyJob.permissions[name] !== "read")) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_PERMISSIONS_INVALID");
   }
   const header = source.split(/^jobs:/m, 1)[0];
   if (!/^on:\s*\r?\n\s{2}workflow_dispatch:/m.test(header)) {
@@ -409,9 +477,9 @@ export function validateProductionEvidenceVerificationWorkflow(source) {
   }
   for (const required of [
     "actions: read",
-    "attestations: read",
     "contents: read",
     "packages: read",
+    "permissions: {}",
     "拒绝未受保护的验证来源",
     "RELEASE_REF_NOT_PROTECTED",
     "actions/download-artifact@",
@@ -419,7 +487,9 @@ export function validateProductionEvidenceVerificationWorkflow(source) {
     "repository: ${{ github.repository }}",
     "persist-credentials: false",
     "npm ci --ignore-scripts",
-    "GH_TOKEN: ${{ github.token }}",
+    "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6",
+    "cosign-release: v3.1.3",
+    "docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9",
     "node scripts/verify-production-evidence.mjs",
     "--evidence .codex-tmp/production-evidence/production-evidence.json",
     "--evidence-root .codex-tmp/production-evidence",
@@ -444,6 +514,9 @@ export function validateProductionEvidenceVerificationWorkflow(source) {
   }
   if (/actions\/(?:attest|attest-build-provenance)@/.test(source)) {
     fail("PRODUCTION_EVIDENCE_WORKFLOW_MUST_NOT_SIGN_EVIDENCE");
+  }
+  if (/^\s+attestations:\s*/m.test(source) || /\bGH_TOKEN\s*:/.test(source)) {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_LEGACY_ATTESTATION_PERMISSION_FORBIDDEN");
   }
   if (/inputs\.evidence_signer_workflow/.test(source)) {
     fail("PRODUCTION_EVIDENCE_WORKFLOW_SIGNER_INPUT_FORBIDDEN");
@@ -557,6 +630,12 @@ function verifyStaticContract() {
 
 function validateImageEntry(name, entry) {
   if (!entry || typeof entry !== "object") fail(`RELEASE_MANIFEST_${name.toUpperCase()}_MISSING`);
+  const requiredKeys = [
+    "image", "digest", "reference", "signatureBundle", "provenanceBundle", "sbomBundle",
+    "provenancePredicateType", "sbomPredicateType",
+  ];
+  if (name === "operations") requiredKeys.push("runtimeExecutables");
+  if (!hasExactKeys(entry, requiredKeys)) fail(`RELEASE_MANIFEST_${name.toUpperCase()}_SCHEMA_INVALID`);
   if (!imageNamePattern.test(entry.image ?? "")) {
     fail(`RELEASE_MANIFEST_${name.toUpperCase()}_IMAGE_INVALID`);
   }
@@ -570,13 +649,25 @@ function validateImageEntry(name, entry) {
   if (entry.provenancePredicateType !== "https://slsa.dev/provenance/v1") {
     fail(`RELEASE_MANIFEST_${name.toUpperCase()}_PROVENANCE_POLICY_INVALID`);
   }
-  if (entry.sbomPredicateType !== "https://spdx.dev/Document/v2.3") {
+  if (entry.sbomPredicateType !== "https://spdx.dev/Document") {
     fail(`RELEASE_MANIFEST_${name.toUpperCase()}_SBOM_POLICY_INVALID`);
+  }
+  for (const [kind, expectedPath] of [
+    ["signature", `attestations/${name}-image.sigstore.json`],
+    ["provenance", `attestations/${name}-provenance.sigstore.json`],
+    ["sbom", `attestations/${name}-sbom.sigstore.json`],
+  ]) {
+    const descriptor = entry[`${kind}Bundle`];
+    if (!hasExactKeys(descriptor, ["path", "sha256"]) ||
+        descriptor.path !== expectedPath ||
+        !/^[a-f0-9]{64}$/.test(descriptor.sha256 ?? "")) {
+      fail(`RELEASE_MANIFEST_${name.toUpperCase()}_${kind.toUpperCase()}_BUNDLE_INVALID`);
+    }
   }
 }
 
 export function validateReleaseManifest(manifest, expected) {
-  if (manifest?.schemaVersion !== 3) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest?.schemaVersion !== 4) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
   if (!gitShaPattern.test(manifest.gitSha ?? "")) fail("RELEASE_MANIFEST_GIT_SHA_INVALID");
   if (manifest.gitSha !== expected.gitSha) fail("RELEASE_MANIFEST_GIT_SHA_MISMATCH");
   if (!/^[a-f0-9]{64}$/.test(manifest.migrationBundleSha256 ?? "")) {
@@ -603,16 +694,34 @@ export function validateReleaseManifest(manifest, expected) {
   }
   const policy = manifest.attestationPolicy;
   if (!policy || typeof policy !== "object") fail("RELEASE_MANIFEST_ATTESTATION_POLICY_MISSING");
+  if (!hasExactKeys(policy, [
+    "signingSystem", "cosignVersion", "bundleMediaType", "signerWorkflow", "signerIdentity",
+    "certificateOidcIssuer", "sourceRef", "sourceDigest", "imageSignaturesVerified",
+    "imageAttestationsVerified", "provenancePredicateType", "sbomPredicateType",
+    "manifestPredicateType",
+  ])) fail("RELEASE_MANIFEST_ATTESTATION_POLICY_SCHEMA_INVALID");
   const sourceUrl = new URL(manifest.source);
   const repositoryPath = sourceUrl.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
   const expectedSigner = `github.com/${repositoryPath}/.github/workflows/release-images.yml`;
   if (policy.signerWorkflow?.toLowerCase() !== expectedSigner) {
     fail("RELEASE_MANIFEST_SIGNER_WORKFLOW_INVALID");
   }
+  if (!/^refs\/(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(policy.sourceRef ?? "") ||
+      policy.sourceRef.includes("..") || policy.sourceRef.includes("//")) {
+    fail("RELEASE_MANIFEST_SOURCE_REF_INVALID");
+  }
+  if (policy.signerIdentity?.toLowerCase() !== `https://${expectedSigner}@${policy.sourceRef}`) {
+    fail("RELEASE_MANIFEST_SIGNER_IDENTITY_INVALID");
+  }
   if (policy.sourceDigest !== manifest.gitSha) fail("RELEASE_MANIFEST_ATTESTATION_SHA_MISMATCH");
-  if (policy.imageAttestationsVerified !== true ||
+  if (policy.signingSystem !== "sigstore-cosign-keyless" ||
+      policy.cosignVersion !== "v3.1.3" ||
+      policy.bundleMediaType !== "application/vnd.dev.sigstore.bundle.v0.3+json" ||
+      policy.certificateOidcIssuer !== "https://token.actions.githubusercontent.com" ||
+      policy.imageSignaturesVerified !== true ||
+      policy.imageAttestationsVerified !== true ||
       policy.provenancePredicateType !== "https://slsa.dev/provenance/v1" ||
-      policy.sbomPredicateType !== "https://spdx.dev/Document/v2.3" ||
+      policy.sbomPredicateType !== "https://spdx.dev/Document" ||
       policy.manifestPredicateType !== "https://slsa.dev/provenance/v1") {
     fail("RELEASE_MANIFEST_ATTESTATION_POLICY_INVALID");
   }

@@ -52,7 +52,7 @@ test("static release checks follow all active release workflows", () => {
   ]);
 });
 
-test("clean CI jobs install root verifier dependencies before loading release checks", () => {
+test("build job installs verifier dependencies while isolated signing job executes no repository code", () => {
   const qualityInstall = qualityWorkflow.indexOf("npm ci --ignore-scripts");
   const qualityVerify = qualityWorkflow.indexOf("node scripts/verify-release-images.mjs --static");
   assert.ok(qualityInstall >= 0 && qualityInstall < qualityVerify);
@@ -62,14 +62,16 @@ test("clean CI jobs install root verifier dependencies before loading release ch
   assert.match(qualityWorkflow, /scripts\/run-operations-recovery-drill\.ps1/);
 
   const releaseInstall = releaseWorkflow.indexOf("npm ci --ignore-scripts");
-  const releaseManifestVerify = releaseWorkflow.indexOf(
-    "node scripts/verify-release-images.mjs --manifest release-output/release-manifest.json",
-  );
+  const migrationVerify = releaseWorkflow.indexOf("node scripts/verify-migration-integrity.mjs --print-bundle-sha");
   const registryLogin = releaseWorkflow.indexOf("uses: docker/login-action@");
   const clientInstall = releaseWorkflow.indexOf("npm ci --prefix client");
-  assert.ok(releaseInstall >= 0 && releaseInstall < releaseManifestVerify);
+  assert.ok(releaseInstall >= 0 && releaseInstall < migrationVerify);
   assert.ok(clientInstall >= 0 && clientInstall < registryLogin);
   assert.match(releaseWorkflow, /persist-credentials: false/);
+  const signingJob = releaseWorkflow.slice(releaseWorkflow.indexOf("  sign-release:"));
+  assert.doesNotMatch(signingJob, /actions\/checkout@|npm ci|node scripts\/|docker (?:build|run)/);
+  assert.match(signingJob, /artifact-ids: \$\{\{ needs\.build-push\.outputs\.signing_inputs_artifact_id \}\}/);
+  assert.match(signingJob, /RELEASE_SIGNING_INPUTS_HASH_MISMATCH/);
 });
 
 test("release workflow verifies common identity labels on all three image digests", () => {
@@ -162,15 +164,20 @@ test("production evidence workflow verifies but never signs operator artifacts",
   assert.match(productionEvidenceWorkflow, /^on:\s*\r?\n\s{2}workflow_dispatch:/m);
   assert.doesNotMatch(productionEvidenceWorkflow, /^\s{2}(?:push|pull_request|schedule):/m);
   assert.match(productionEvidenceWorkflow, /actions\/download-artifact@[a-f0-9]{40}/);
+  assert.match(productionEvidenceWorkflow, /sigstore\/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6/);
+  assert.match(productionEvidenceWorkflow, /cosign-release: v3\.1\.3/);
+  assert.match(productionEvidenceWorkflow, /docker\/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9/);
   assert.match(productionEvidenceWorkflow, /persist-credentials: false/);
   assert.match(productionEvidenceWorkflow, /npm ci --ignore-scripts/);
   assert.match(productionEvidenceWorkflow, /run-id: \$\{\{ inputs\.evidence_run_id \}\}/);
   assert.match(productionEvidenceWorkflow, /node scripts\/verify-production-evidence\.mjs/);
-  assert.match(productionEvidenceWorkflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.doesNotMatch(productionEvidenceWorkflow, /GH_TOKEN:|attestations:\s*(?:read|write)/);
   assert.match(productionEvidenceWorkflow, /--evidence-signer-workflow "\$EVIDENCE_SIGNER_WORKFLOW"/);
   assert.match(productionEvidenceWorkflow, /EVIDENCE_SIGNER_WORKFLOW: \$\{\{ vars\.PRODUCTION_EVIDENCE_SIGNER_WORKFLOW \}\}/);
   assert.match(productionEvidenceWorkflow, /PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_NOT_CONFIGURED/);
   assert.doesNotMatch(productionEvidenceWorkflow, /inputs\.evidence_signer_workflow/);
+  assert.match(productionEvidenceWorkflow, /^permissions:\s*\{\}\s*$/m);
+  assert.match(productionEvidenceWorkflow, /^\s{4}permissions:\s*\r?\n\s{6}actions: read\s*\r?\n\s{6}contents: read\s*\r?\n\s{6}packages: read/m);
   assert.match(productionEvidenceWorkflow, /--manifest-signer-workflow "\$MANIFEST_SIGNER_WORKFLOW"/);
   assert.match(productionEvidenceWorkflow, /--environment-id-sha256 "\$ENVIRONMENT_ID_SHA256"/);
   assert.match(productionEvidenceWorkflow, /--approval-reference-sha256 "\$APPROVAL_REFERENCE_SHA256"/);
@@ -178,18 +185,18 @@ test("production evidence workflow verifies but never signs operator artifacts",
   assert.equal(validateProductionEvidenceVerificationWorkflow(productionEvidenceWorkflow).ok, true);
   assert.throws(
     () => validateProductionEvidenceVerificationWorkflow(
-      productionEvidenceWorkflow.replace("attestations: read", "attestations: write"),
+      productionEvidenceWorkflow.replace("packages: read", "packages: write"),
     ),
     { message: "PRODUCTION_EVIDENCE_WORKFLOW_PERMISSIONS_INVALID" },
   );
   assert.throws(
     () => validateProductionEvidenceVerificationWorkflow(
       productionEvidenceWorkflow.replace(
-        "  verify:\n",
-        "  verify:\n    permissions:\n      contents: write\n",
+        "permissions: {}",
+        "permissions:\n  contents: read",
       ),
     ),
-    { message: "PRODUCTION_EVIDENCE_WORKFLOW_JOB_PERMISSIONS_FORBIDDEN" },
+    { message: "PRODUCTION_EVIDENCE_WORKFLOW_ROOT_PERMISSIONS_INVALID" },
   );
 });
 
@@ -231,11 +238,16 @@ test("backup execution is immutable inside the attested operations image", () =>
     assert.match(releaseWorkflow, new RegExp(`/usr/local/bin/${script.replace(".", "\\.")}`));
   }
   assert.match(releaseWorkflow, /target: operations/);
-  assert.match(releaseWorkflow, /id: operations-provenance/);
-  assert.match(releaseWorkflow, /id: operations-sbom/);
+  assert.match(releaseWorkflow, /sign_image operations "\$OPERATIONS_REFERENCE"/);
+  assert.match(releaseWorkflow, /\$\{component\}-provenance\.sigstore\.json/);
+  assert.match(releaseWorkflow, /\$\{component\}-sbom\.sigstore\.json/);
   assert.match(releaseWorkflow, /runtimeExecutables/);
   assert.match(releaseWorkflow, /SERVER_RUNTIME_DEPENDENCY_INVALID:@nestjs\/common/);
-  assert.match(releaseWorkflow, /\['@nestjs\/common', '@prisma\/client', 'bcrypt'\]/);
+  assert.match(
+    releaseWorkflow,
+    /node -e "for \(const dependency of \[\\"@nestjs\/common\\", \\"@prisma\/client\\", \\"bcrypt\\"\]\) require\(dependency\)"/,
+  );
+  assert.doesNotMatch(releaseWorkflow, /\['@nestjs\/common', '@prisma\/client', 'bcrypt'\]/);
 });
 
 test("backup manifest SHA validation is portable across the operations image awk", () => {
@@ -315,10 +327,24 @@ test("base, operations and WeChat Compose accept image-only services and reject 
   }
 });
 const source = "https://github.com/example/haichuan";
+const bundle = (component, kind) => ({
+  path: `attestations/${component}-${kind}.sigstore.json`,
+  sha256: "4".repeat(64),
+});
+const imageEntry = (component, digest) => ({
+  image: `ghcr.io/example/haichuan-${component}`,
+  digest,
+  reference: `ghcr.io/example/haichuan-${component}@${digest}`,
+  signatureBundle: bundle(component, "image"),
+  provenanceBundle: bundle(component, "provenance"),
+  sbomBundle: bundle(component, "sbom"),
+  provenancePredicateType: "https://slsa.dev/provenance/v1",
+  sbomPredicateType: "https://spdx.dev/Document",
+});
 
 function validManifest() {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     gitSha,
     migrationBundleSha256,
     source,
@@ -331,11 +357,18 @@ function validManifest() {
       conclusion: "success",
     },
     attestationPolicy: {
+      signingSystem: "sigstore-cosign-keyless",
+      cosignVersion: "v3.1.3",
+      bundleMediaType: "application/vnd.dev.sigstore.bundle.v0.3+json",
       signerWorkflow: "github.com/example/haichuan/.github/workflows/release-images.yml",
+      signerIdentity: "https://github.com/example/haichuan/.github/workflows/release-images.yml@refs/heads/main",
+      certificateOidcIssuer: "https://token.actions.githubusercontent.com",
+      sourceRef: "refs/heads/main",
       sourceDigest: gitSha,
+      imageSignaturesVerified: true,
       imageAttestationsVerified: true,
       provenancePredicateType: "https://slsa.dev/provenance/v1",
-      sbomPredicateType: "https://spdx.dev/Document/v2.3",
+      sbomPredicateType: "https://spdx.dev/Document",
       manifestPredicateType: "https://slsa.dev/provenance/v1",
     },
     publicSeo: {
@@ -344,26 +377,10 @@ function validManifest() {
       sourceArtifactId: 5678,
       sourceArtifactDigest: `sha256:${"3".repeat(64)}`,
     },
-    server: {
-      image: "ghcr.io/example/haichuan-server",
-      digest: serverDigest,
-      reference: `ghcr.io/example/haichuan-server@${serverDigest}`,
-      provenancePredicateType: "https://slsa.dev/provenance/v1",
-      sbomPredicateType: "https://spdx.dev/Document/v2.3",
-    },
-    client: {
-      image: "ghcr.io/example/haichuan-client",
-      digest: clientDigest,
-      reference: `ghcr.io/example/haichuan-client@${clientDigest}`,
-      provenancePredicateType: "https://slsa.dev/provenance/v1",
-      sbomPredicateType: "https://spdx.dev/Document/v2.3",
-    },
+    server: imageEntry("server", serverDigest),
+    client: imageEntry("client", clientDigest),
     operations: {
-      image: "ghcr.io/example/haichuan-operations",
-      digest: operationsDigest,
-      reference: `ghcr.io/example/haichuan-operations@${operationsDigest}`,
-      provenancePredicateType: "https://slsa.dev/provenance/v1",
-      sbomPredicateType: "https://spdx.dev/Document/v2.3",
+      ...imageEntry("operations", operationsDigest),
       runtimeExecutables: [
         "/usr/local/bin/backup.sh",
         "/usr/local/bin/check-backup-health.sh",
@@ -443,7 +460,7 @@ test("rejects a missing operations image", () => {
 test("rejects missing or drifted operations runtime executables", () => {
   expectCode((manifest) => {
     delete manifest.operations.runtimeExecutables;
-  }, "RELEASE_MANIFEST_OPERATIONS_EXECUTABLES_INVALID");
+  }, "RELEASE_MANIFEST_OPERATIONS_SCHEMA_INVALID");
   expectCode((manifest) => {
     manifest.operations.runtimeExecutables[2] = "/usr/local/bin/unapproved.sh";
   }, "RELEASE_MANIFEST_OPERATIONS_EXECUTABLES_INVALID");
@@ -466,6 +483,27 @@ test("rejects signer workflow, source digest and attestation policy drift", () =
   expectCode((manifest) => {
     manifest.attestationPolicy.imageAttestationsVerified = false;
   }, "RELEASE_MANIFEST_ATTESTATION_POLICY_INVALID");
+  expectCode((manifest) => {
+    manifest.attestationPolicy.imageSignaturesVerified = false;
+  }, "RELEASE_MANIFEST_ATTESTATION_POLICY_INVALID");
+  expectCode((manifest) => {
+    manifest.attestationPolicy.cosignVersion = "v3.0.6";
+  }, "RELEASE_MANIFEST_ATTESTATION_POLICY_INVALID");
+  expectCode((manifest) => {
+    manifest.attestationPolicy.sourceRef = "refs/heads/release/other";
+  }, "RELEASE_MANIFEST_SIGNER_IDENTITY_INVALID");
+});
+
+test("rejects missing, renamed or unhashed Sigstore bundle descriptors", () => {
+  expectCode((manifest) => {
+    delete manifest.server.signatureBundle;
+  }, "RELEASE_MANIFEST_SERVER_SCHEMA_INVALID");
+  expectCode((manifest) => {
+    manifest.client.provenanceBundle.path = "attestations/other.sigstore.json";
+  }, "RELEASE_MANIFEST_CLIENT_PROVENANCE_BUNDLE_INVALID");
+  expectCode((manifest) => {
+    manifest.operations.sbomBundle.sha256 = "not-a-sha";
+  }, "RELEASE_MANIFEST_OPERATIONS_SBOM_BUNDLE_INVALID");
 });
 
 test("rejects invalid per-image provenance and SBOM predicate policies", () => {

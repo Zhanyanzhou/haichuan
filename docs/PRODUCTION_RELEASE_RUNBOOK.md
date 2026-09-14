@@ -9,8 +9,10 @@
 - workflow dispatch 只允许仓库默认分支，或 GitHub 明确标记为 protected 且位于 `refs/heads/release/` 下的发布分支；其他 ref 在查找质量门禁和推送镜像前失败；
 - 同一 `gitSha` 的 `Quality Gate` 必须来自 `push` 且成功；
 - server、client、operations 三镜像都必须有不可变 digest、OCI revision、migration bundle label；
-- 三镜像的 SLSA provenance 与 SPDX 2.3 SBOM 必须由 `release-images.yml` 签名并在工作流内验证；
-- `release-manifest.json` 生成后单独签名，证明 bundle 作为 sidecar 上传；
+- 构建/推送与签名是两个独立 job：构建 job 没有 `id-token`，签名 job 不检出仓库、不执行 `npm ci`、仓库脚本、镜像或构建产物中的可执行代码，只读取同一运行上游输出的固定 digest、质量门禁元数据和逐文件 SHA-256 绑定的 provenance/SBOM JSON；
+- 三镜像各自必须有 Cosign Keyless 镜像签名、SLSA v1 provenance attestation 与 SPDX 2.3 SBOM attestation，并由 `release-images.yml` 在工作流内按精确 digest、GitHub OIDC issuer、workflow identity、source ref 与 source SHA 复核；
+- `release-manifest.json` 使用 schema v4，明确记录 Cosign 版本、标准 Sigstore bundle media type、签名身份、issuer、source ref、source SHA，以及每张镜像三个 bundle 的路径和 SHA-256；manifest 自身再生成 SLSA v1 provenance attestation，标准 protobuf bundle 作为 sidecar 上传；
+- 签名固定使用已审定的 Cosign `v3.1.3`，不得使用长期私钥，不得关闭 Rekor、SCT 或 claims 校验；首次真实签名前必须把公共透明日志会记录证书、签名及制品/证明元数据的影响告知批准人，并把 `sigstore_public_log_acknowledged` 明确设为 `true`，否则工作流在构建和签名前失败；
 - `docker-compose.yml` 没有 `build`、`latest` 或 `local` 回退，镜像或关键恢复参数缺失时必须失败。
 
 本地代码合同验证：
@@ -33,27 +35,37 @@ npm run verify:release-images
 
 取消发布和内容回滚遵循同一方向：数据库状态改变后必须重新导出快照、构建并部署新 client digest；旧 digest 会继续服务它冻结时的路由和 HTML，不能把“数据库已取消发布”误报为公网已经撤下。需要紧急下线时，应按获批的流量隔离或固定 digest 回滚流程处理，不能放宽英文 SPA fallback。
 
-取得真实制品后，先验证 manifest 和 sidecar，再逐一验证 registry 中的镜像证明；`owner/repo`、SHA 与 digest 必须取自本次已批准清单，而不是从 manifest 反向复制为“预期值”：
+取得真实制品后，使用固定的 Cosign `v3.1.3` 先验证 manifest 和标准 bundle sidecar，再逐一验证 registry 中三镜像的普通签名、SLSA v1 provenance 与 SPDX 2.3 SBOM；identity、`owner/repo`、SHA、ref 与 digest 必须取自本次已批准清单，而不是从 manifest 或 bundle 反向复制为“预期值”：
 
 ```bash
-gh attestation verify release-manifest.json \
-  --repo owner/repo \
-  --bundle release-manifest.attestation.json \
-  --signer-workflow github.com/owner/repo/.github/workflows/release-images.yml \
-  --source-digest "$RELEASE_GIT_SHA" \
-  --source-ref "$RELEASE_SOURCE_REF" \
-  --deny-self-hosted-runners
+COSIGN_IDENTITY="https://github.com/owner/repo/.github/workflows/release-images.yml@${RELEASE_SOURCE_REF}"
+COSIGN_IDENTITY_ARGS=(
+  --certificate-identity "$COSIGN_IDENTITY"
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+  --certificate-github-workflow-trigger workflow_dispatch
+  --certificate-github-workflow-sha "$RELEASE_GIT_SHA"
+  --certificate-github-workflow-repository owner/repo
+  --certificate-github-workflow-ref "$RELEASE_SOURCE_REF"
+)
 
-gh attestation verify "oci://${SERVER_IMAGE_NAME}@sha256:${SERVER_IMAGE_DIGEST}" --repo owner/repo --bundle-from-oci \
-  --signer-workflow github.com/owner/repo/.github/workflows/release-images.yml \
-  --source-digest "$RELEASE_GIT_SHA" --source-ref "$RELEASE_SOURCE_REF" --deny-self-hosted-runners
-gh attestation verify "oci://${SERVER_IMAGE_NAME}@sha256:${SERVER_IMAGE_DIGEST}" --repo owner/repo --bundle-from-oci \
-  --predicate-type https://spdx.dev/Document/v2.3 \
-  --signer-workflow github.com/owner/repo/.github/workflows/release-images.yml \
-  --source-digest "$RELEASE_GIT_SHA" --source-ref "$RELEASE_SOURCE_REF" --deny-self-hosted-runners
+cosign verify-blob-attestation \
+  --bundle release-manifest.attestation.json \
+  --type slsaprovenance1 \
+  "${COSIGN_IDENTITY_ARGS[@]}" \
+  release-manifest.json
+
+SERVER_REFERENCE="${SERVER_IMAGE_NAME}@sha256:${SERVER_IMAGE_DIGEST}"
+cosign verify --bundle attestations/server-image.sigstore.json \
+  "${COSIGN_IDENTITY_ARGS[@]}" "$SERVER_REFERENCE"
+cosign verify-attestation --bundle attestations/server-provenance.sigstore.json \
+  --type slsaprovenance1 "${COSIGN_IDENTITY_ARGS[@]}" "$SERVER_REFERENCE"
+cosign verify-attestation --bundle attestations/server-sbom.sigstore.json \
+  --type spdxjson "${COSIGN_IDENTITY_ARGS[@]}" "$SERVER_REFERENCE"
 ```
 
-client 与 operations 必须执行同样两项验证。随后在已拉取三镜像的受控主机执行：
+client 与 operations 必须执行同样三项验证。每项都必须显式传入对应的 `--bundle <sidecar>`，并解析密码学验证成功后的输出，核对普通签名 subject digest、provenance subject/predicate/builder/source/ref/SHA，以及 SBOM subject 和 SPDX 2.3 内容；只验证 registry referrer 或只读取 bundle 的 `mediaType` 均不够。release artifact 中九个镜像 bundle 的实际哈希必须与 schema v4 manifest 的 descriptor 一致，manifest bundle 的 `mediaType` 以及九个镜像 bundle 的 `mediaType` 都必须是 `application/vnd.dev.sigstore.bundle.v0.3+json`。随后在已拉取三镜像的受控主机执行：
+
+Cosign 的 `--type spdxjson` 对应 in-toto predicate type `https://spdx.dev/Document`；本项目再对 predicate 内部的 `spdxVersion: SPDX-2.3` 和 `SPDXID: SPDXRef-DOCUMENT` 做独立内容校验。不得把文档版本后缀伪写进 predicate type，或只凭 `--type` 筛选结果宣称 SBOM 版本已验证。
 
 ```powershell
 node scripts/verify-release-images.mjs --manifest release-manifest.json --environment
@@ -181,9 +193,9 @@ pwsh -NoProfile -File scripts/run-operations-recovery-drill.ps1
 
 将上述事实汇总为 schema v3 的 `production-evidence.json`。证据文件本身不能决定目标环境、目标版本、仓库、source ref 或 signer workflow；这些信任锚必须由发布负责人从已批准工单、冻结候选和审定的 workflow 独立写入 CLI 参数。所有 `path` 都必须位于同一个仓库内受控目录、必须是非符号链接普通文件，并给出小写 SHA-256。验证器会重新读取和计算每个 manifest、报告、runbook、claim receipt 与 manifest bundle 的哈希。
 
-JSON receipt 只是一条结构化 claim，不具备独立证明力。每个 receipt 仍只允许 `schemaVersion`、`kind`、`provider`、`outcome`、`observedAt`、`environmentIdSha256`、`approvalReferenceSha256`、`releaseGitSha`、`manifestSha256`、`subjectSha256`，但最终 `production-evidence.json` 必须由审定的外部 evidence workflow 生成并形成 GitHub Sigstore attestation bundle；该 workflow 必须实际重执行或通过受信 API 验证 runtime/Compose/database/admin/storage/recovery/edge/observability/feature/external-service/rollback 各项，不能接受操作者上传的自报 JSON 后直接签名。暂未建立这种 workflow 或缺少任一真实检查时，不能生成可通过验收的 bundle，必须失败关闭。
+JSON receipt 只是一条结构化 claim，不具备独立证明力。每个 receipt 仍只允许 `schemaVersion`、`kind`、`provider`、`outcome`、`observedAt`、`environmentIdSha256`、`approvalReferenceSha256`、`releaseGitSha`、`manifestSha256`、`subjectSha256`，但最终 `production-evidence.json` 必须由审定的外部 evidence workflow 生成，并用 Cosign Keyless 形成标准 protobuf Sigstore attestation bundle；该 workflow 的 signer identity 必须与 release workflow 分离，且必须实际重执行或通过受信 API 验证 runtime/Compose/database/admin/storage/recovery/edge/observability/feature/external-service/rollback 各项，不能接受操作者上传的自报 JSON 后直接签名。暂未建立这种 workflow 或缺少任一真实检查时，不能生成可通过验收的 bundle，必须失败关闭。
 
-验证器按固定顺序建立单向信任链：先做纯 schema、路径、哈希、RPO/RTO 与交叉绑定校验；再验证顶层 `production-evidence.json` bundle；随后用 `release-manifest.attestation.json` 验证本地 manifest；最后对清单中的 server/client/operations digest 分别从 OCI registry 重新验证 SLSA provenance 与 SPDX SBOM。所有 `gh` 调用都使用独立 argv，不经过 shell；任一命令缺失、退出非零、JSON 结果为空、predicate 或 subject digest 不匹配，整体验收失败。manifest bundle 由 `release-images.yml` 上传，OCI bundle 由同一工作流推送到 registry；普通 registry receipt 已从验收合同中移除。
+验证器按固定顺序建立单向信任链：先做纯 schema、路径、bundle descriptor 哈希、RPO/RTO 与交叉绑定校验；顶层 `production-evidence.json` bundle 必须在调用 Cosign 前就是 `application/vnd.dev.sigstore.bundle.v0.3+json`，但仅有该字段的伪对象仍必须由后续密码学验证拒绝；再用独立 evidence signer identity 验证该 bundle。随后用 release signer identity 和 `release-manifest.attestation.json` 验证本地 manifest，并解析已验证 DSSE，核对 manifest digest、builder、Git SHA、source ref、quality run、schemaVersion 和三镜像 resolved dependencies；最后把清单中的九个 sidecar 分别传给 Cosign，验证 server/client/operations 的普通镜像签名、SLSA v1 provenance 与 SPDX 2.3 SBOM。所有 `cosign` 调用都使用独立 argv，不经过 shell，并强制标准 bundle、GitHub OIDC issuer、精确 workflow identity、workflow SHA、repository 与 ref；任一命令缺失、退出非零、predicate、identity 或 subject digest 不匹配，整体验收失败。manifest bundle 与九个镜像 bundle sidecar 由 `release-images.yml` 上传，OCI referrer 由同一工作流推送到 registry；普通 registry receipt 已从验收合同中移除。
 
 外部 evidence workflow 至少必须把下列命令或受信提供商 API 的原始结果绑定到 claim 哈希；不存在对应接线时必须拒绝签名：
 
