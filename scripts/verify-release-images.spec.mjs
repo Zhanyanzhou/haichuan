@@ -5,9 +5,12 @@ import test from "node:test";
 // Public SEO is part of the signed release supply chain. Importing its focused
 // specs keeps the root `npm test` and the quality workflow from bypassing them.
 import "./export-public-seo-snapshot.spec.mjs";
+import "./create-preproduction-safe-seo-snapshot.spec.mjs";
 import "./generate-public-seo-artifacts.spec.mjs";
 import "./prerender-public-routes.spec.mjs";
 import "./public-seo-release-contract.spec.mjs";
+import "./public-seo-http.spec.mjs";
+import "./prepare-preproduction-deploy.spec.mjs";
 import "../server/scripts/database-upgrade-rehearsal.test.mjs";
 
 import {
@@ -102,6 +105,8 @@ test("client Docker stages and release workflow keep an exact build ARG contract
     "PUBLIC_SEO_SNAPSHOT_HASH",
     "PUBLIC_SEO_PRERENDER_MANIFEST_SHA256",
     "PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST",
+    "PUBLIC_SEO_CONTENT_READY",
+    "PUBLIC_SEO_SOURCE_KIND",
   ];
   const runtimeArgs = [
     "BUILD_REVISION",
@@ -110,6 +115,8 @@ test("client Docker stages and release workflow keep an exact build ARG contract
     "PUBLIC_SEO_SNAPSHOT_HASH",
     "PUBLIC_SEO_PRERENDER_MANIFEST_SHA256",
     "PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST",
+    "PUBLIC_SEO_CONTENT_READY",
+    "PUBLIC_SEO_SOURCE_KIND",
   ];
   assert.deepEqual(argNames(stages[0]), verifyArgs);
   assert.deepEqual(argNames(stages[1]), runtimeArgs);
@@ -130,6 +137,8 @@ test("client Docker stages and release workflow keep an exact build ARG contract
     "PUBLIC_SEO_SNAPSHOT_HASH",
     "PUBLIC_SEO_PRERENDER_MANIFEST_SHA256",
     "PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST",
+    "PUBLIC_SEO_CONTENT_READY",
+    "PUBLIC_SEO_SOURCE_KIND",
   ]);
   assert.deepEqual(
     [...new Set([...verifyArgs, ...runtimeArgs])].sort(),
@@ -344,7 +353,7 @@ const imageEntry = (component, digest) => ({
 
 function validManifest() {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     releaseStage: "production",
     imageTag: `sha-${gitSha}`,
     gitSha,
@@ -379,6 +388,8 @@ function validManifest() {
       prerenderManifestSha256: "2".repeat(64),
       sourceArtifactId: 5678,
       sourceArtifactDigest: `sha256:${"3".repeat(64)}`,
+      sourceKind: "approved-snapshot",
+      contentReady: true,
     },
     server: imageEntry("server", serverDigest),
     client: imageEntry("client", clientDigest),
@@ -540,6 +551,35 @@ test("stage-bound manifests isolate preproduction repositories and production va
   );
 });
 
+test("preproduction accepts a safe fallback while production rejects it", () => {
+  const manifest = validManifest();
+  manifest.releaseStage = "preproduction";
+  manifest.imageTag = `preproduction-sha-${gitSha}`;
+  manifest.publicSeo = {
+    ...manifest.publicSeo,
+    sourceStage: "preproduction",
+    sourceArtifactId: 0,
+    sourceKind: "safe-fallback",
+    contentReady: false,
+  };
+  for (const component of ["server", "client", "operations"]) {
+    manifest[component].image = `ghcr.io/example/haichuan-preproduction-${component}`;
+    manifest[component].reference = `${manifest[component].image}@${manifest[component].digest}`;
+  }
+  assert.deepEqual(validateReleaseManifest(manifest, { gitSha, migrationBundleSha256, releaseStage: "preproduction" }), manifest);
+  manifest.releaseStage = "production";
+  manifest.imageTag = `sha-${gitSha}`;
+  manifest.publicSeo.sourceStage = "production";
+  for (const component of ["server", "client", "operations"]) {
+    manifest[component].image = `ghcr.io/example/haichuan-${component}`;
+    manifest[component].reference = `${manifest[component].image}@${manifest[component].digest}`;
+  }
+  assert.throws(
+    () => validateReleaseManifest(manifest, { gitSha, migrationBundleSha256, releaseStage: "production" }),
+    (error) => error?.message === "RELEASE_MANIFEST_PUBLIC_SEO_FALLBACK_INVALID",
+  );
+});
+
 test("release manifest requires exact immutable public SEO evidence", () => {
   expectCode((manifest) => {
     delete manifest.publicSeo;
@@ -549,7 +589,7 @@ test("release manifest requires exact immutable public SEO evidence", () => {
   }, "RELEASE_MANIFEST_PUBLIC_SEO_INVALID");
   expectCode((manifest) => {
     manifest.publicSeo.sourceArtifactId = 0;
-  }, "RELEASE_MANIFEST_PUBLIC_SEO_INVALID");
+  }, "RELEASE_MANIFEST_PUBLIC_SEO_APPROVED_SOURCE_INVALID");
   expectCode((manifest) => {
     manifest.publicSeo.untrusted = true;
   }, "RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");

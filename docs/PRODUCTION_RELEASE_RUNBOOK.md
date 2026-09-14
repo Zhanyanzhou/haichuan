@@ -2,7 +2,45 @@
 
 > 本文定义代码仓可提供的失败关闭接口，不表示任何环境已经验收或上线。执行目标库写入、部署、切流、恢复或备份删除前，仍需取得精确环境和动作的有效批准。真实域名、TLS、密钥、数据库连接串、监控端点与通知对象不得写入仓库证据。
 
-## 1. 发布硬门禁
+## 0. 面向非技术负责人的部署合同
+
+本项目默认由 Codex 承担部署中的技术判断和操作。负责人不需要选择 Docker 命令、镜像标签、迁移工具或测试脚本，只需要表达结果：
+
+- **“部署”或“部署一下”**：默认更新现有预发布环境，保持交易、支付、真实通知和搜索引擎收录关闭；不自动公开正式域名。
+- **“正式上线”或“发布给客户”**：准备并执行生产公开放量。Codex 先完成可逆准备，在最终切流以及尚未被当前授权覆盖的生产写入前，给出一次简短 Go/No-Go 确认。
+- **“回滚”**：优先恢复上一份已验证的固定代码制品。涉及数据库恢复、数据覆盖或不兼容 Schema 时单独说明风险并确认。
+
+Codex 只有在下列信息会真实改变业务结果时才询问负责人：公司和法务事实、公开联系方式、价格和库存口径、交易或外部通知是否启用、需要本人完成的登录/扫码/平台审批、不可逆数据操作，以及正式公开流量。普通技术选项由 Codex 按当前代码和本 Runbook 选择，不把命令或原始日志交给负责人决定。
+
+### 0.1 四段发布模型
+
+发布分成四个可以独立推进的阶段：
+
+1. **代码制品**：质量检查、镜像构建、SBOM、签名、固定 digest。
+2. **环境部署**：备份、迁移检查、部署、健康检查和回滚点。
+3. **内容发布**：页面、SEO、法务、联系方式和媒体授权的审核与内容哈希。
+4. **正式放量**：把已经验收的代码和内容开放到正式域名或客户流量。
+
+页面内容未完成可以阻止第 3、4 阶段，但不得阻止第 1 阶段或带安全降级内容的预发布部署。预发布内容不完整时，制品必须明确记录 `contentReady=false`，只显示项目已有的安全短页或失败关闭状态；不得使用测试 seed、虚假联系方式、占位商品或虚构审核记录。生产制品仍要求本次正式内容快照通过。
+
+当前 `Release Images` 已按此模型分层：`production` 必须提供同阶段审核快照；`preproduction` 可留空快照 ID，由工作流生成与同一 Git SHA、目标 Origin 绑定的确定性安全快照。安全快照不含可发布路由，`robots.txt` 全站禁止抓取，Nginx 对已知公开路径同时下发 `X-Robots-Tag: noindex, nofollow` 并显示安全短页；后台 SPA 保持可用以继续完善内容。
+
+### 0.2 一次确认原则
+
+- 同一阶段的可逆准备、只读检查、构建、预发布更新和相称验证在已有授权范围内连续执行，不逐项重复确认。
+- 需要用户决定时，先准备具体结果，再给主推荐、影响和回退方式；同一阶段合并为一次确认。
+- 登录、扫码、验证码和平台审批由用户本人完成；不得要求用户发送密码、Token、私钥或数据库连接串。
+- 单人经营场景不创建虚假的第二员工账号。Codex 可以生成草稿并做自动检查，但不能审批自己生成的业务事实；负责人对法务、公司资料、联系方式和公开承诺做一次与内容哈希绑定的确认。若当前程序仍强制双账号审核，应作为实现差距处理，在正式放量前修正或取得真实第二审核人，不能直接改表冒充审核。
+
+### 0.3 速度与执行通道
+
+- 首选 CI/CD、镜像仓库和最小权限机器身份；目标服务器只运行固定 digest，不从源码现场构建正式候选。
+- 无法使用自动通道时，生成一份可审计、幂等的 release bundle 或部署脚本，采用“一次上传、一次执行、一次汇总”。云控制台逐条命令只作应急通道。
+- 已通过且输入未变化的质量、签名或验证结果直接复用。失败后从失败阶段继续，不机械重跑整条流水线。
+- 完整恢复演练用于首次生产部署、高风险或不兼容数据库迁移、备份方案变化及定期灾备演练。普通无 Schema 变更发布只验证最新备份健康、回滚点和恢复步骤；任何 migration 执行前仍必须有可恢复备份。
+- 面向负责人的最终报告只包含“已完成、尚未完成、需要你做的一件事”；完整证据保存在 CI、manifest 和部署报告中。
+
+## 1. 正式生产制品硬门禁
 
 正式发布只接受 `.github/workflows/release-images.yml` 产出的 `release-output/`：
 
@@ -11,7 +49,7 @@
 - server、client、operations 三镜像都必须有不可变 digest、OCI revision、migration bundle label；
 - 构建/推送与签名是两个独立 job：构建 job 没有 `id-token`，签名 job 不检出仓库、不执行 `npm ci`、仓库脚本、镜像或构建产物中的可执行代码，只读取同一运行上游输出的固定 digest、质量门禁元数据和逐文件 SHA-256 绑定的 provenance/SBOM JSON；
 - 三镜像各自必须有 Cosign Keyless 镜像签名、SLSA v1 provenance attestation 与 SPDX 2.3 SBOM attestation，并由 `release-images.yml` 在工作流内按精确 digest、GitHub OIDC issuer、workflow identity、source ref 与 source SHA 复核；
-- `release-manifest.json` 使用 schema v5，明确记录 `releaseStage`、阶段绑定的 `imageTag`、Cosign 版本、标准 Sigstore bundle media type、签名身份、issuer、source ref、source SHA，以及每张镜像三个 bundle 的路径和 SHA-256；manifest 自身再生成 SLSA v1 provenance attestation，标准 protobuf bundle 作为 sidecar 上传；
+- `release-manifest.json` 使用 schema v6，明确记录 `releaseStage`、阶段绑定的 `imageTag`、`publicSeo.contentReady`、内容来源类型、Cosign 版本、标准 Sigstore bundle media type、签名身份、issuer、source ref、source SHA，以及每张镜像三个 bundle 的路径和 SHA-256；manifest 自身再生成 SLSA v1 provenance attestation，标准 protobuf bundle 作为 sidecar 上传；
 - 签名固定使用已审定的 Cosign `v3.1.3`，不得使用长期私钥，不得关闭 Rekor、SCT 或 claims 校验；首次真实签名前必须把公共透明日志会记录证书、签名及制品/证明元数据的影响告知批准人，并把 `sigstore_public_log_acknowledged` 明确设为 `true`，否则工作流在构建和签名前失败；
 - `docker-compose.yml` 没有 `build`、`latest` 或 `local` 回退，镜像或关键恢复参数缺失时必须失败。
 
@@ -22,7 +60,24 @@ npm run test:release-supply-chain
 npm run verify:release-images
 ```
 
-### 1.1 PageDocument 内容发布与公开路由激活
+### 1.1 预发布一次性部署入口
+
+Codex 应把同一 Git SHA 的源码支持文件与 `release-output/` 组合成一个目录后只上传一次；目标机只执行一次下列入口，不再逐条粘贴 Docker 命令：
+
+```bash
+bash scripts/deploy-preproduction.sh \
+  --release-dir /受控发布目录/release-output \
+  --env-file /opt/haichuan-preview/.env \
+  --project-name haichuan-preview
+```
+
+该入口只接受 `releaseStage=preproduction` 的 schema v6 清单，并固定信任本仓 `release-images.yml` 的 GitHub OIDC 身份；`--project-name` 必须填写目标机既有 Compose 项目名，避免从一次性上传目录运行时误建第二套容器。执行顺序是 manifest 密码学验签、阶段/仓库/digest/内容状态核对、关闭交易与真实外部副作用、Compose 展开、既有备份健康、拉取固定镜像、只读 migration status、内容就绪时只读 release preflight、替换三个应用容器、真实回源健康和安全短页检查。`--dry-run` 只执行到 Compose 展开，不拉取或替换容器。
+
+脚本不会自动执行 migration。存在待执行 migration 时，`migration-status` 非零并停止；Codex 应先取得目标库、迁移清单、备份回滚点和迁移窗口授权，再按第 2 节处理。内容为 `safe-fallback` 时仅跳过依赖正式内容的 preflight，不跳过签名、镜像、备份、迁移状态、健康或 noindex 检查。
+
+已有上一版 digest-pinned 三镜像时，容器替换后的失败会自动恢复上一版 server/client/backup。第一次从历史临时 tag 切换到签名镜像时没有可信的自动回滚引用，环境文件必须显式设置 `PREPRODUCTION_INITIAL_SIGNED_CUTOVER_AUTHORIZED=1`；这是一次性切换风险授权，不得作为长期默认值。完成首次切换后应删除该字段。脚本不读取或打印密钥值，不把 `.env` 复制进发布目录。
+
+### 1.2 PageDocument 内容发布与公开路由激活
 
 后台把 PageDocument 标记为已发布，只会更新数据库中的已审核发布事实，不会修改正在运行的 client 镜像，也不会授予运行时进程生成 Nginx 路由或读取生产库的隐式权限。英文公开路由继续失败关闭：只有存在于该 client 镜像所绑定不可变 SEO snapshot 中的精确路径才返回 200；未发布、校验失败、未进入快照或未知的英文路径均返回英文 404。中文既有公开路由合同不因英文发布而改变。
 
@@ -31,7 +86,7 @@ npm run verify:release-images
 1. 在后台完成保存、独立审核与发布，并确认匿名 published API 返回预期 locale、revision 和 content hash；此时直接访问尚未进入当前镜像的英文路由仍应为 404。
 2. 对同一个受保护代码 SHA 手动运行 `Export Public SEO Snapshot`。受控预发布选择 `preproduction`，只从 `public-seo-preproduction` 环境中的专用只读数据库账号生成带 `sourceStage=preproduction` 的阶段证据；正式制品只能选择 `production`，并从 `public-seo-production` 生成带 `sourceStage=production` 的证据。两个阶段分别使用受保护环境配置，不得手工编辑 snapshot，也不得复用发布前的 artifact；不得跨阶段复用。
    GitHub hosted runner 只通过 SSH 本地转发访问来源数据库：两个环境分别保存 `PUBLIC_SEO_SSH_PRIVATE_KEY`、单条固定 `PUBLIC_SEO_SSH_KNOWN_HOSTS` 和只读 `PUBLIC_SEO_READ_ONLY_DATABASE_URL`，并分别配置 SSH 主机、用户、端口、固定 `SHA256:` host-key 指纹、本地高位端口及远端数据库主机/端口。数据库 URL 必须指向 runner 的 `127.0.0.1:<本地高位端口>`；SSH 远端只连接目标宿主机 `127.0.0.1:<远端高位端口>`。`PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY` 与 `PUBLIC_SEO_EXPECTED_DATABASE_HOST` 必须一致，单独绑定目标栈中的数据库身份，不得用上述两个 loopback 传输地址代替；CLI 继续以预期库名、`SELECT DATABASE()` 和 `USAGE/SELECT/SHOW VIEW` grants 复核数据库。目标栈显式叠加 `docker-compose.public-seo-tunnel.yml`，并把 `PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT` 设置为未占用的高位端口；该 overlay 只生成 `127.0.0.1:<高位端口>:3306`，不得使用开发 override，也不得绑定 `0.0.0.0`。腾讯云安全组不得开放该高位端口或 3306。工作流无论成功失败都会停止隧道并清理临时私钥。
-3. 记录新 artifact ID、artifact digest 与 snapshot hash，再以该 artifact ID 运行 `Release Images`，并令 `release_stage` 与 snapshot 的 `sourceStage` 完全一致。`preproduction` 只接受同阶段 SEO artifact，镜像仓库使用 `*-preproduction-{server,client,operations}`，标签使用 `preproduction-sha-<SHA>`，manifest 与 signing inputs 也记录 `releaseStage=preproduction`；`production` 保持既有 `*-{server,client,operations}` 仓库和 `sha-<SHA>` 标签，只接受 production artifact。两档复用同一套构建、Cosign 签名和证明验证链，但 artifact 名称按阶段隔离。生产证据和生产部署验证器固定要求 `releaseStage=production`，不得消费预发布 manifest、镜像或证明。
+3. 记录新 artifact ID、artifact digest 与 snapshot hash，再以该 artifact ID 运行 `Release Images`，并令 `release_stage` 与 snapshot 的 `sourceStage` 完全一致。若预发布内容尚未就绪，可把 artifact ID 留空，工作流会生成 `sourceKind=safe-fallback`、`contentReady=false`、`sourceArtifactId=0` 的同 SHA 安全快照；只要提供了 artifact ID，就仍只接受同仓、同提交、同阶段且生产工作流成功生成的不可变 artifact。`preproduction` 镜像仓库使用 `*-preproduction-{server,client,operations}`，标签使用 `preproduction-sha-<SHA>`；`production` 保持既有 `*-{server,client,operations}` 仓库和 `sha-<SHA>` 标签，并强制 `sourceKind=approved-snapshot`、`contentReady=true`。两档复用同一套构建、Cosign 签名和证明验证链。生产证据和生产部署验证器固定要求 `releaseStage=production`，不得消费预发布 manifest、镜像或证明。
 4. 按正常部署审批将新的固定 client digest 替换到目标环境；数据库发布本身不授权构建、部署或切流。替换后从真实 Nginx 回源验证目标英文路径为 200、对应中文路径不受影响、至少一个未发布英文路径和一个未知英文路径仍为 404，并核对镜像上的三个 public SEO label 与本次 artifact 一致。
 
 取消发布和内容回滚遵循同一方向：数据库状态改变后必须重新导出快照、构建并部署新 client digest；旧 digest 会继续服务它冻结时的路由和 HTML，不能把“数据库已取消发布”误报为公网已经撤下。需要紧急下线时，应按获批的流量隔离或固定 digest 回滚流程处理，不能放宽英文 SPA fallback。
@@ -64,7 +119,7 @@ cosign verify-attestation --bundle attestations/server-sbom.sigstore.json \
   --type spdxjson "${COSIGN_IDENTITY_ARGS[@]}" "$SERVER_REFERENCE"
 ```
 
-client 与 operations 必须执行同样三项验证。每项都必须显式传入对应的 `--bundle <sidecar>`，并解析密码学验证成功后的输出，核对普通签名 subject digest、provenance subject/predicate/builder/source/ref/SHA，以及 SBOM subject 和 SPDX 2.3 内容；只验证 registry referrer 或只读取 bundle 的 `mediaType` 均不够。release artifact 中九个镜像 bundle 的实际哈希必须与 schema v5 manifest 的 descriptor 一致，manifest bundle 的 `mediaType` 以及九个镜像 bundle 的 `mediaType` 都必须是 `application/vnd.dev.sigstore.bundle.v0.3+json`。随后在已拉取三镜像的受控主机执行：
+client 与 operations 必须执行同样三项验证。每项都必须显式传入对应的 `--bundle <sidecar>`，并解析密码学验证成功后的输出，核对普通签名 subject digest、provenance subject/predicate/builder/source/ref/SHA，以及 SBOM subject 和 SPDX 2.3 内容；只验证 registry referrer 或只读取 bundle 的 `mediaType` 均不够。release artifact 中九个镜像 bundle 的实际哈希必须与 schema v6 manifest 的 descriptor 一致，manifest bundle 的 `mediaType` 以及九个镜像 bundle 的 `mediaType` 都必须是 `application/vnd.dev.sigstore.bundle.v0.3+json`。随后在已拉取三镜像的受控主机执行：
 
 Cosign 的 `--type spdxjson` 对应 in-toto predicate type `https://spdx.dev/Document`；本项目再对 predicate 内部的 `spdxVersion: SPDX-2.3` 和 `SPDXID: SPDXRef-DOCUMENT` 做独立内容校验。不得把文档版本后缀伪写进 predicate type，或只凭 `--type` 筛选结果宣称 SBOM 版本已验证。
 

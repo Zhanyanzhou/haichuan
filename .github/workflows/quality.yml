@@ -18,8 +18,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: 校验备份恢复脚本语法
-        run: bash -n server/scripts/backup.sh server/scripts/restore.sh server/scripts/check-backup-health.sh server/scripts/restore-drill.sh server/scripts/prune-backups.sh
+      - name: 校验部署与备份恢复脚本语法
+        run: bash -n scripts/deploy-preproduction.sh server/scripts/backup.sh server/scripts/restore.sh server/scripts/check-backup-health.sh server/scripts/restore-drill.sh server/scripts/prune-backups.sh
 
       - name: 校验本地恢复演练入口语法
         shell: pwsh

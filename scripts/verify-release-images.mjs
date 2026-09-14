@@ -401,7 +401,7 @@ function assertReleaseWorkflow() {
     'run.event === "push"',
     'run.conclusion === "success"',
     "QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND",
-    "schemaVersion: 5",
+    "schemaVersion: 6",
     "release_stage:",
     "PUBLIC_SEO_SOURCE_STAGE_MISMATCH",
     "qualityGate:",
@@ -679,7 +679,7 @@ function validateImageEntry(name, entry) {
 }
 
 export function validateReleaseManifest(manifest, expected) {
-  if (manifest?.schemaVersion !== 5) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest?.schemaVersion !== 6) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
   if (manifest.releaseStage !== "preproduction" && manifest.releaseStage !== "production") {
     fail("RELEASE_MANIFEST_STAGE_INVALID");
   }
@@ -754,6 +754,8 @@ export function validateReleaseManifest(manifest, expected) {
     "prerenderManifestSha256",
     "sourceArtifactId",
     "sourceArtifactDigest",
+    "sourceKind",
+    "contentReady",
   ])) {
     fail("RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
   }
@@ -761,9 +763,23 @@ export function validateReleaseManifest(manifest, expected) {
       !/^[a-f0-9]{64}$/.test(publicSeo.snapshotHash) ||
       !/^[a-f0-9]{64}$/.test(publicSeo.prerenderManifestSha256) ||
       !Number.isSafeInteger(publicSeo.sourceArtifactId) ||
-      publicSeo.sourceArtifactId <= 0 ||
+      publicSeo.sourceArtifactId < 0 ||
       !digestPattern.test(publicSeo.sourceArtifactDigest)) {
     fail("RELEASE_MANIFEST_PUBLIC_SEO_INVALID");
+  }
+  if (publicSeo.sourceKind === "approved-snapshot") {
+    if (!publicSeo.contentReady || publicSeo.sourceArtifactId <= 0) {
+      fail("RELEASE_MANIFEST_PUBLIC_SEO_APPROVED_SOURCE_INVALID");
+    }
+  } else if (publicSeo.sourceKind === "safe-fallback") {
+    if (manifest.releaseStage !== "preproduction" || publicSeo.contentReady || publicSeo.sourceArtifactId !== 0) {
+      fail("RELEASE_MANIFEST_PUBLIC_SEO_FALLBACK_INVALID");
+    }
+  } else {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_SOURCE_KIND_INVALID");
+  }
+  if (manifest.releaseStage === "production" && (!publicSeo.contentReady || publicSeo.sourceKind !== "approved-snapshot")) {
+    fail("RELEASE_MANIFEST_PRODUCTION_CONTENT_NOT_READY");
   }
   validateImageEntry("server", manifest.server);
   validateImageEntry("client", manifest.client);

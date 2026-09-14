@@ -73,6 +73,11 @@ test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜�
   const dockerfile = readFileSync(resolve("Dockerfile"), "utf8");
   const compose = readFileSync(resolve("../docker-compose.yml"), "utf8");
   const nginx = readFileSync(resolve("nginx.conf"), "utf8");
+  const nginxMain = readFileSync(resolve("nginx-main.conf"), "utf8");
+  const publicSeoGenerator = readFileSync(
+    resolve("../scripts/generate-public-seo-artifacts.mjs"),
+    "utf8",
+  );
   const spaShell = readFileSync(resolve("index.html"), "utf8");
 
   expect(dockerfile).toContain("ARG VITE_PUBLIC_SITE_ORIGIN");
@@ -96,8 +101,13 @@ test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜�
   expect(nginx).toContain(
     "location ~* ^/(admin|preview|customer|cart|checkout|partner)(/|$)",
   );
-  expect(nginx).toContain("map $request_uri $hc_robots_tag");
-  expect(nginx).not.toContain('~*^/en(/|$) "noindex, nofollow"');
+  expect(nginxMain).toContain("include /etc/nginx/public-seo-policy.conf;");
+  expect(publicSeoGenerator).toContain(
+    '"map $request_uri $hc_robots_tag {"',
+  );
+  expect(publicSeoGenerator).not.toContain(
+    '~*^/en(/|$) "noindex, nofollow"',
+  );
   expect(nginx).toContain(
     'add_header X-Robots-Tag $hc_robots_tag always',
   );

@@ -16,6 +16,7 @@ test("exports a canonical immutable snapshot with reciprocal locale alternates",
   const snapshot = createPublicSeoSnapshot(makeSnapshotInput(makeRepresentativeRoutes()));
   assert.equal(snapshot.schemaVersion, 3);
   assert.equal(snapshot.sourceStage, "production");
+  assert.equal(snapshot.contentReady, true);
   assert.match(snapshot.snapshotHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(validatePublicSeoSnapshot(snapshot), snapshot);
 
@@ -28,6 +29,29 @@ test("exports a canonical immutable snapshot with reciprocal locale alternates",
   ];
   assert.deepEqual(chinese.alternates, expectedAlternates);
   assert.deepEqual(english.alternates, expectedAlternates);
+});
+
+test("allows only an empty, non-publishable preproduction fallback snapshot", () => {
+  const fallback = createPublicSeoSnapshot({
+    ...makeSnapshotInput([]),
+    sourceStage: "preproduction",
+    contentReady: false,
+  });
+  assert.equal(fallback.contentReady, false);
+  assert.deepEqual(fallback.routes, []);
+  assert.deepEqual(validatePublicSeoSnapshot(fallback), fallback);
+  assert.throws(
+    () => createPublicSeoSnapshot({ ...makeSnapshotInput([]), contentReady: false }),
+    /Only preproduction/i,
+  );
+  assert.throws(
+    () => createPublicSeoSnapshot({ ...makeSnapshotInput([makeRoute()]), sourceStage: "preproduction", contentReady: false }),
+    /must not contain publishable routes/i,
+  );
+  assert.throws(
+    () => createPublicSeoSnapshot(makeSnapshotInput([])),
+    /must contain at least one reviewed route/i,
+  );
 });
 
 test("binds the source stage into canonical evidence and rejects unsupported stages", () => {
