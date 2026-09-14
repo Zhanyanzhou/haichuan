@@ -41,7 +41,7 @@
     "verify:wechat-pay-certificate-files": "node scripts/verify-environment-contract.mjs --wechat-pay-host-files",
     "verify:migration-integrity": "node scripts/verify-migration-integrity.mjs",
     "verify:release-images": "node scripts/verify-release-images.mjs --static",
-    "test:release-supply-chain": "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs",
+    "test:release-supply-chain": "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs scripts/production-evidence-collector.spec.mjs",
     "verify:production-evidence": "node scripts/verify-production-evidence.mjs",
     "audit:public-assets": "node scripts/audit-public-assets.mjs",
     "verify:public-asset-audit": "node scripts/audit-public-assets.mjs --check artifacts/public-asset-audit/current.json",

@@ -200,6 +200,8 @@ JSON receipt 只是一条结构化 claim，不具备独立证明力。每个 rec
 
 外部 evidence workflow 至少必须把下列命令或受信提供商 API 的原始结果绑定到 claim 哈希；不存在对应接线时必须拒绝签名：
 
+目标服务器固定命令 `haichuan-production-evidence-collect` 的 root 所有安装、强制 SSH、脱敏 receipt 和失败关闭合同见 `docs/PRODUCTION_EVIDENCE_COLLECTOR.md`。安装 collector 只补齐安全采集入口；缺少下列任一真实 provider receipt 时仍不得签名。
+
 | claim 范围 | 必须由受信执行器实际产生的证据 |
 | --- | --- |
 | runtime identity | 在已拉取 digest 上执行 `node scripts/verify-release-images.mjs --runtime`；该脚本只读取 allowlist 中的 RepoDigest 与 OCI label |
