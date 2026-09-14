@@ -199,7 +199,7 @@ async function verifyPrerenderManifest(pathname, snapshot) {
 
 async function readPublishedRoutes(options) {
   const unchecked = JSON.parse(await readFile(options.manifest, "utf8"));
-  if (unchecked?.schemaVersion === 2) {
+  if (unchecked?.schemaVersion === 3) {
     const snapshot = validatePublicSeoSnapshot(unchecked);
     await verifyPrerenderManifest(options.prerenderManifest, snapshot);
     const configuredOrigin = normalizeOptionalOrigin(options.origin);
@@ -208,7 +208,7 @@ async function readPublishedRoutes(options) {
     }
     return {
       origin: snapshot.origin,
-      schemaVersion: 2,
+      schemaVersion: 3,
       routes: snapshot.routes.map((route) => ({
         pathname: route.path,
         locale: route.locale,
@@ -218,7 +218,7 @@ async function readPublishedRoutes(options) {
     };
   }
   if (!unchecked || unchecked.schemaVersion !== 1 || !Array.isArray(unchecked.routes)) {
-    fail("Published route manifest must use schemaVersion 1 or immutable snapshot schemaVersion 2.");
+    fail("Published route manifest must use schemaVersion 1 or immutable snapshot schemaVersion 3.");
   }
   const routes = unchecked.routes.map(normalizeLegacyRoute);
   const seen = new Set();
@@ -268,7 +268,7 @@ export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1 } =
   const hasPublishedEnglish = routes.some((route) => route.locale === "en");
   const disallowedPrefixes = [
     ...privatePathPrefixes,
-    ...(schemaVersion === 2 && hasPublishedEnglish
+    ...(schemaVersion === 3 && hasPublishedEnglish
       ? privatePathPrefixes.map((prefix) => `/en${prefix}`)
       : ["/en"]),
   ];
@@ -330,8 +330,8 @@ async function checkOrWrite(pathname, expected, check) {
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   const published = await readPublishedRoutes(options);
-  if (options.strict && (!published.origin || published.routes.length === 0 || published.schemaVersion !== 2)) {
-    fail("Strict mode requires an immutable schema v2 snapshot, its verified pre-render manifest, and at least one route.");
+  if (options.strict && (!published.origin || published.routes.length === 0 || published.schemaVersion !== 3)) {
+    fail("Strict mode requires an immutable schema v3 snapshot, its verified pre-render manifest, and at least one route.");
   }
   if (options.strict && !options.nginxMap) {
     fail("Strict mode requires --nginx-map so only verified pre-rendered routes can be served as indexable HTML.");

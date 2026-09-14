@@ -35,6 +35,7 @@ const RESERVED_PUBLIC_PATHS = new Set([
 const ENGLISH_PUBLIC_CONTENT_PATHS = new Set(["/", "/about", "/products", "/custom"]);
 const ROUTE_KINDS = new Set(["page", "legal", "product"]);
 const CONTENT_SOURCES = new Set(["human-reviewed", "verified-facts"]);
+const SOURCE_STAGES = new Set(["preproduction", "production"]);
 
 function fail(message) {
   throw new Error(message);
@@ -336,6 +337,7 @@ export function createPublicSeoSnapshot(input) {
   const value = assertRecord(input, "Snapshot export input");
   assertExactKeys(value, new Set([
     "schemaVersion",
+    "sourceStage",
     "origin",
     "sourceSnapshotHashBefore",
     "sourceSnapshotHashAfter",
@@ -343,6 +345,9 @@ export function createPublicSeoSnapshot(input) {
   ]), "Snapshot export input");
   if (value.schemaVersion !== 1 || !Array.isArray(value.routes)) {
     fail("Snapshot export input must use schemaVersion 1 and a routes array.");
+  }
+  if (!SOURCE_STAGES.has(value.sourceStage)) {
+    fail("Snapshot export input sourceStage must be preproduction or production.");
   }
   const sourceHashBefore = normalizeHash(value.sourceSnapshotHashBefore, "sourceSnapshotHashBefore");
   const sourceHashAfter = normalizeHash(value.sourceSnapshotHashAfter, "sourceSnapshotHashAfter");
@@ -396,7 +401,8 @@ export function createPublicSeoSnapshot(input) {
 
   const origin = normalizeProductionOrigin(value.origin);
   const snapshotBody = {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    sourceStage: value.sourceStage,
     origin,
     sourceSnapshotHash: sourceHashBefore,
     routes: routesWithAlternates,
@@ -409,11 +415,12 @@ export function createPublicSeoSnapshot(input) {
 
 export function validatePublicSeoSnapshot(snapshot) {
   const value = assertRecord(snapshot, "Public SEO snapshot");
-  if (value.schemaVersion !== 2 || !Array.isArray(value.routes)) {
-    fail("Public SEO snapshot must use schemaVersion 2 and a routes array.");
+  if (value.schemaVersion !== 3 || !Array.isArray(value.routes)) {
+    fail("Public SEO snapshot must use schemaVersion 3 and a routes array.");
   }
   const sourceInput = {
     schemaVersion: 1,
+    sourceStage: value.sourceStage,
     origin: value.origin,
     sourceSnapshotHashBefore: value.sourceSnapshotHash,
     sourceSnapshotHashAfter: value.sourceSnapshotHash,

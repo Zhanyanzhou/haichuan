@@ -1,0 +1,6 @@
+# 仅供受控 SEO 只读导出使用；必须与基础 compose 显式叠加，不会被默认加载。
+# 只把 MySQL 映射到腾讯云宿主机 loopback 高位端口，安全组不得开放该端口或 3306。
+services:
+  mysql:
+    ports:
+      - "127.0.0.1:${PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT:?PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT is required}:3306"

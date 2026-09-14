@@ -148,7 +148,7 @@ test("renderer never emits route URLs without an explicit origin", () => {
   assert.doesNotMatch(artifacts.robots, /^Sitemap:/m);
 });
 
-test("strict schema v2 emits only hash-matched pre-rendered routes and reciprocal alternates", async (t) => {
+test("strict schema v3 emits only hash-matched pre-rendered routes and reciprocal alternates", async (t) => {
   const prepared = await prepareVerifiedArtifacts();
   t.after(() => rmSync(prepared.temporaryDirectory, { recursive: true, force: true }));
   const artifacts = runVerifiedGenerator(prepared);
@@ -234,7 +234,7 @@ test("sitemap XML escapes canonical and alternate URLs", () => {
       locale: "zh-CN",
       alternates: [{ hrefLang: "zh-CN", path: "/collections/a&b" }],
     }],
-    { schemaVersion: 2 },
+    { schemaVersion: 3 },
   );
   assert.match(artifacts.sitemap, /a&amp;b/);
   assert.doesNotMatch(artifacts.sitemap, /a&b/);

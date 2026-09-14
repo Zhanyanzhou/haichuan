@@ -344,7 +344,9 @@ const imageEntry = (component, digest) => ({
 
 function validManifest() {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
+    releaseStage: "production",
+    imageTag: `sha-${gitSha}`,
     gitSha,
     migrationBundleSha256,
     source,
@@ -372,6 +374,7 @@ function validManifest() {
       manifestPredicateType: "https://slsa.dev/provenance/v1",
     },
     publicSeo: {
+      sourceStage: "production",
       snapshotHash: "1".repeat(64),
       prerenderManifestSha256: "2".repeat(64),
       sourceArtifactId: 5678,
@@ -519,6 +522,22 @@ test("rejects an unknown manifest schema", () => {
   expectCode((manifest) => {
     manifest.schemaVersion = 2;
   }, "RELEASE_MANIFEST_SCHEMA_INVALID");
+});
+
+test("stage-bound manifests isolate preproduction repositories and production validation", () => {
+  const manifest = validManifest();
+  manifest.releaseStage = "preproduction";
+  manifest.imageTag = `preproduction-sha-${gitSha}`;
+  manifest.publicSeo.sourceStage = "preproduction";
+  for (const component of ["server", "client", "operations"]) {
+    manifest[component].image = `ghcr.io/example/haichuan-preproduction-${component}`;
+    manifest[component].reference = `${manifest[component].image}@${manifest[component].digest}`;
+  }
+  assert.deepEqual(validateReleaseManifest(manifest, { gitSha, migrationBundleSha256, releaseStage: "preproduction" }), manifest);
+  assert.throws(
+    () => validateReleaseManifest(manifest, { gitSha, migrationBundleSha256, releaseStage: "production" }),
+    (error) => error?.message === "RELEASE_MANIFEST_STAGE_MISMATCH",
+  );
 });
 
 test("release manifest requires exact immutable public SEO evidence", () => {

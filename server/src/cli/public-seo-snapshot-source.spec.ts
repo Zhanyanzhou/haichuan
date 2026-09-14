@@ -141,6 +141,7 @@ function database(options: { includeEnglish?: boolean; products?: any[]; secondS
 }
 
 const config = {
+  sourceStage: "production" as const,
   expectedOrigin: "https://shop.example.invalid",
   sourceEnvironmentId: "public-seo-production",
   expectedDatabase: "jewelry_production",
@@ -402,9 +403,11 @@ test("来源环境、origin、法律签认和两次读取漂移均阻断", async
 test("CLI 配置只接受显式只读授权、目标库身份与受保护配置", () => {
   const environment = {
     PUBLIC_SEO_EXPORT_READ_ONLY_AUTHORIZED: "1",
+    PUBLIC_SEO_SOURCE_STAGE: "production",
     PUBLIC_SEO_SOURCE_ENVIRONMENT_ID: "public-seo-production",
     PUBLIC_SEO_EXPECTED_DATABASE: "jewelry_production",
     PUBLIC_SEO_EXPECTED_DATABASE_HOST: "db.example.invalid",
+    PUBLIC_SEO_DATABASE_TRANSPORT_HOST: "db.example.invalid",
     PUBLIC_SEO_APPROVAL_REFERENCE: "release-approval-42",
     PUBLIC_SEO_EXPECTED_ORIGIN: "https://shop.example.invalid",
     PUBLIC_SEO_RELEASE_PROFILE: "lead-generation",
@@ -412,6 +415,7 @@ test("CLI 配置只接受显式只读授权、目标库身份与受保护配置"
   };
   const parsed = createPublicSeoExportConfig(environment);
   assert.equal(parsed.identity.expectedDatabase, "jewelry_production");
+  assert.equal(parsed.source.sourceStage, "production");
   assert.equal("DATABASE_URL" in parsed, false);
   assert.equal(JSON.stringify(parsed).includes("secret"), false);
   assert.throws(
@@ -419,21 +423,37 @@ test("CLI 配置只接受显式只读授权、目标库身份与受保护配置"
     /READ_ONLY_AUTHORIZATION_REQUIRED/,
   );
   assert.throws(
+    () => createPublicSeoExportConfig({ ...environment, PUBLIC_SEO_SOURCE_STAGE: "preproduction" }),
+    /SOURCE_STAGE_ENVIRONMENT_MISMATCH/,
+  );
+  assert.throws(
     () => createPublicSeoExportConfig({ ...environment, DATABASE_URL: "mysql:\/\/writer:secret@db.example.invalid:3306/other" }),
     /DATABASE_NAME_MISMATCH/,
   );
   assert.throws(
     () => createPublicSeoExportConfig({ ...environment, DATABASE_URL: "mysql:\/\/readonly:secret@clone.example.invalid:3306/jewelry_production" }),
-    /DATABASE_HOST_MISMATCH/,
+    /DATABASE_TRANSPORT_HOST_MISMATCH/,
+  );
+  const tunneled = createPublicSeoExportConfig({
+    ...environment,
+    PUBLIC_SEO_EXPECTED_DATABASE_HOST: "mysql.internal",
+    PUBLIC_SEO_DATABASE_TRANSPORT_HOST: "127.0.0.1",
+    DATABASE_URL: "mysql://readonly:secret@127.0.0.1:43306/jewelry_production",
+  });
+  assert.equal(
+    tunneled.source.databaseHostHash,
+    createHash("sha256").update("mysql.internal").digest("hex"),
   );
 });
 
 test("producer 在读取发布事实前拒绝带写权限或跨库权限的数据库账号", async () => {
   const identity = createPublicSeoExportConfig({
     PUBLIC_SEO_EXPORT_READ_ONLY_AUTHORIZED: "1",
+    PUBLIC_SEO_SOURCE_STAGE: "production",
     PUBLIC_SEO_SOURCE_ENVIRONMENT_ID: "public-seo-production",
     PUBLIC_SEO_EXPECTED_DATABASE: "jewelry_production",
     PUBLIC_SEO_EXPECTED_DATABASE_HOST: "db.example.invalid",
+    PUBLIC_SEO_DATABASE_TRANSPORT_HOST: "db.example.invalid",
     PUBLIC_SEO_APPROVAL_REFERENCE: "release-approval-42",
     PUBLIC_SEO_EXPECTED_ORIGIN: "https://shop.example.invalid",
     PUBLIC_SEO_RELEASE_PROFILE: "lead-generation",

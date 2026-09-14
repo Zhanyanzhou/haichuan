@@ -11,7 +11,7 @@
 - server、client、operations 三镜像都必须有不可变 digest、OCI revision、migration bundle label；
 - 构建/推送与签名是两个独立 job：构建 job 没有 `id-token`，签名 job 不检出仓库、不执行 `npm ci`、仓库脚本、镜像或构建产物中的可执行代码，只读取同一运行上游输出的固定 digest、质量门禁元数据和逐文件 SHA-256 绑定的 provenance/SBOM JSON；
 - 三镜像各自必须有 Cosign Keyless 镜像签名、SLSA v1 provenance attestation 与 SPDX 2.3 SBOM attestation，并由 `release-images.yml` 在工作流内按精确 digest、GitHub OIDC issuer、workflow identity、source ref 与 source SHA 复核；
-- `release-manifest.json` 使用 schema v4，明确记录 Cosign 版本、标准 Sigstore bundle media type、签名身份、issuer、source ref、source SHA，以及每张镜像三个 bundle 的路径和 SHA-256；manifest 自身再生成 SLSA v1 provenance attestation，标准 protobuf bundle 作为 sidecar 上传；
+- `release-manifest.json` 使用 schema v5，明确记录 `releaseStage`、阶段绑定的 `imageTag`、Cosign 版本、标准 Sigstore bundle media type、签名身份、issuer、source ref、source SHA，以及每张镜像三个 bundle 的路径和 SHA-256；manifest 自身再生成 SLSA v1 provenance attestation，标准 protobuf bundle 作为 sidecar 上传；
 - 签名固定使用已审定的 Cosign `v3.1.3`，不得使用长期私钥，不得关闭 Rekor、SCT 或 claims 校验；首次真实签名前必须把公共透明日志会记录证书、签名及制品/证明元数据的影响告知批准人，并把 `sigstore_public_log_acknowledged` 明确设为 `true`，否则工作流在构建和签名前失败；
 - `docker-compose.yml` 没有 `build`、`latest` 或 `local` 回退，镜像或关键恢复参数缺失时必须失败。
 
@@ -29,8 +29,9 @@ npm run verify:release-images
 需要让新发布、回滚或取消发布的 PageDocument 在公网生效时，必须把它作为一次新的内容制品发布处理：
 
 1. 在后台完成保存、独立审核与发布，并确认匿名 published API 返回预期 locale、revision 和 content hash；此时直接访问尚未进入当前镜像的英文路由仍应为 404。
-2. 对同一个受保护代码 SHA 手动运行 `Export Public SEO Snapshot`，由 `public-seo-production` 环境中的专用只读数据库账号重新导出发布事实；不得手工编辑 snapshot，也不得复用发布前的 artifact。
-3. 记录新 artifact ID、artifact digest 与 snapshot hash，再以该 artifact ID 运行 `Release Images`。工作流只接受同仓、同 SHA、来源工作流成功且摘要匹配的唯一 JSON，并把 snapshot、预渲染清单与精确 Nginx 路由表冻结到新的 client digest。
+2. 对同一个受保护代码 SHA 手动运行 `Export Public SEO Snapshot`。受控预发布选择 `preproduction`，只从 `public-seo-preproduction` 环境中的专用只读数据库账号生成带 `sourceStage=preproduction` 的阶段证据；正式制品只能选择 `production`，并从 `public-seo-production` 生成带 `sourceStage=production` 的证据。两个阶段分别使用受保护环境配置，不得手工编辑 snapshot，也不得复用发布前的 artifact；不得跨阶段复用。
+   GitHub hosted runner 只通过 SSH 本地转发访问来源数据库：两个环境分别保存 `PUBLIC_SEO_SSH_PRIVATE_KEY`、单条固定 `PUBLIC_SEO_SSH_KNOWN_HOSTS` 和只读 `PUBLIC_SEO_READ_ONLY_DATABASE_URL`，并分别配置 SSH 主机、用户、端口、固定 `SHA256:` host-key 指纹、本地高位端口及远端数据库主机/端口。数据库 URL 必须指向 runner 的 `127.0.0.1:<本地高位端口>`；SSH 远端只连接目标宿主机 `127.0.0.1:<远端高位端口>`。`PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY` 与 `PUBLIC_SEO_EXPECTED_DATABASE_HOST` 必须一致，单独绑定目标栈中的数据库身份，不得用上述两个 loopback 传输地址代替；CLI 继续以预期库名、`SELECT DATABASE()` 和 `USAGE/SELECT/SHOW VIEW` grants 复核数据库。目标栈显式叠加 `docker-compose.public-seo-tunnel.yml`，并把 `PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT` 设置为未占用的高位端口；该 overlay 只生成 `127.0.0.1:<高位端口>:3306`，不得使用开发 override，也不得绑定 `0.0.0.0`。腾讯云安全组不得开放该高位端口或 3306。工作流无论成功失败都会停止隧道并清理临时私钥。
+3. 记录新 artifact ID、artifact digest 与 snapshot hash，再以该 artifact ID 运行 `Release Images`，并令 `release_stage` 与 snapshot 的 `sourceStage` 完全一致。`preproduction` 只接受同阶段 SEO artifact，镜像仓库使用 `*-preproduction-{server,client,operations}`，标签使用 `preproduction-sha-<SHA>`，manifest 与 signing inputs 也记录 `releaseStage=preproduction`；`production` 保持既有 `*-{server,client,operations}` 仓库和 `sha-<SHA>` 标签，只接受 production artifact。两档复用同一套构建、Cosign 签名和证明验证链，但 artifact 名称按阶段隔离。生产证据和生产部署验证器固定要求 `releaseStage=production`，不得消费预发布 manifest、镜像或证明。
 4. 按正常部署审批将新的固定 client digest 替换到目标环境；数据库发布本身不授权构建、部署或切流。替换后从真实 Nginx 回源验证目标英文路径为 200、对应中文路径不受影响、至少一个未发布英文路径和一个未知英文路径仍为 404，并核对镜像上的三个 public SEO label 与本次 artifact 一致。
 
 取消发布和内容回滚遵循同一方向：数据库状态改变后必须重新导出快照、构建并部署新 client digest；旧 digest 会继续服务它冻结时的路由和 HTML，不能把“数据库已取消发布”误报为公网已经撤下。需要紧急下线时，应按获批的流量隔离或固定 digest 回滚流程处理，不能放宽英文 SPA fallback。
@@ -63,7 +64,7 @@ cosign verify-attestation --bundle attestations/server-sbom.sigstore.json \
   --type spdxjson "${COSIGN_IDENTITY_ARGS[@]}" "$SERVER_REFERENCE"
 ```
 
-client 与 operations 必须执行同样三项验证。每项都必须显式传入对应的 `--bundle <sidecar>`，并解析密码学验证成功后的输出，核对普通签名 subject digest、provenance subject/predicate/builder/source/ref/SHA，以及 SBOM subject 和 SPDX 2.3 内容；只验证 registry referrer 或只读取 bundle 的 `mediaType` 均不够。release artifact 中九个镜像 bundle 的实际哈希必须与 schema v4 manifest 的 descriptor 一致，manifest bundle 的 `mediaType` 以及九个镜像 bundle 的 `mediaType` 都必须是 `application/vnd.dev.sigstore.bundle.v0.3+json`。随后在已拉取三镜像的受控主机执行：
+client 与 operations 必须执行同样三项验证。每项都必须显式传入对应的 `--bundle <sidecar>`，并解析密码学验证成功后的输出，核对普通签名 subject digest、provenance subject/predicate/builder/source/ref/SHA，以及 SBOM subject 和 SPDX 2.3 内容；只验证 registry referrer 或只读取 bundle 的 `mediaType` 均不够。release artifact 中九个镜像 bundle 的实际哈希必须与 schema v5 manifest 的 descriptor 一致，manifest bundle 的 `mediaType` 以及九个镜像 bundle 的 `mediaType` 都必须是 `application/vnd.dev.sigstore.bundle.v0.3+json`。随后在已拉取三镜像的受控主机执行：
 
 Cosign 的 `--type spdxjson` 对应 in-toto predicate type `https://spdx.dev/Document`；本项目再对 predicate 内部的 `spdxVersion: SPDX-2.3` 和 `SPDXID: SPDXRef-DOCUMENT` 做独立内容校验。不得把文档版本后缀伪写进 predicate type，或只凭 `--type` 筛选结果宣称 SBOM 版本已验证。
 

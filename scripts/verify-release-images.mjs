@@ -348,7 +348,13 @@ function assertReleaseWorkflow() {
       (source.match(/^\s+provenance:\s+mode=max\s*$/gm) ?? []).length !== 3) {
     fail("RELEASE_WORKFLOW_ATTESTATION_CONTRACT_INVALID");
   }
-  if (!source.includes(":sha-${{ github.sha }}")) {
+  for (const component of ["server", "client", "operations"]) {
+    if (!source.includes(`tags: \${{ steps.release.outputs.${component}_image }}:\${{ steps.release.outputs.image_tag }}`)) {
+      fail(`RELEASE_WORKFLOW_COMMIT_TAG_MISSING:${component}`);
+    }
+  }
+  if (!source.includes('image_tag="sha-${GITHUB_SHA}"') ||
+      !source.includes('image_tag="preproduction-sha-${GITHUB_SHA}"')) {
     fail("RELEASE_WORKFLOW_COMMIT_TAG_MISSING");
   }
   if (!/^permissions:\s*\{\}\s*$/m.test(source) ||
@@ -372,6 +378,10 @@ function assertReleaseWorkflow() {
       buildJob.permissions.packages !== "write") {
     fail("RELEASE_WORKFLOW_BUILD_PERMISSIONS_INVALID");
   }
+  if (buildJob.outputs?.release_stage !== "${{ steps.release.outputs.release_stage }}" ||
+      buildJob.outputs?.image_tag !== "${{ steps.release.outputs.image_tag }}") {
+    fail("RELEASE_WORKFLOW_STAGE_OUTPUTS_INVALID");
+  }
   if (JSON.stringify(Object.keys(signingJob.permissions).sort()) !== JSON.stringify(["actions", "id-token", "packages"]) ||
       signingJob.permissions.actions !== "read" || signingJob.permissions["id-token"] !== "write" ||
       signingJob.permissions.packages !== "write") {
@@ -391,9 +401,11 @@ function assertReleaseWorkflow() {
     'run.event === "push"',
     'run.conclusion === "success"',
     "QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND",
-    "schemaVersion: 4",
+    "schemaVersion: 5",
+    "release_stage:",
+    "PUBLIC_SEO_SOURCE_STAGE_MISMATCH",
     "qualityGate:",
-    "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}-operations",
+    "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}${repository_stage_suffix}-operations",
     "target: operations",
     "https://slsa.dev/provenance/v1",
     "https://spdx.dev/Document",
@@ -667,9 +679,19 @@ function validateImageEntry(name, entry) {
 }
 
 export function validateReleaseManifest(manifest, expected) {
-  if (manifest?.schemaVersion !== 4) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest?.schemaVersion !== 5) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest.releaseStage !== "preproduction" && manifest.releaseStage !== "production") {
+    fail("RELEASE_MANIFEST_STAGE_INVALID");
+  }
   if (!gitShaPattern.test(manifest.gitSha ?? "")) fail("RELEASE_MANIFEST_GIT_SHA_INVALID");
   if (manifest.gitSha !== expected.gitSha) fail("RELEASE_MANIFEST_GIT_SHA_MISMATCH");
+  const expectedImageTag = manifest.releaseStage === "production"
+    ? `sha-${manifest.gitSha}`
+    : `preproduction-sha-${manifest.gitSha}`;
+  if (manifest.imageTag !== expectedImageTag) fail("RELEASE_MANIFEST_IMAGE_TAG_INVALID");
+  if (expected.releaseStage && manifest.releaseStage !== expected.releaseStage) {
+    fail("RELEASE_MANIFEST_STAGE_MISMATCH");
+  }
   if (!/^[a-f0-9]{64}$/.test(manifest.migrationBundleSha256 ?? "")) {
     fail("RELEASE_MANIFEST_MIGRATION_BUNDLE_INVALID");
   }
@@ -727,6 +749,7 @@ export function validateReleaseManifest(manifest, expected) {
   }
   const publicSeo = manifest.publicSeo;
   if (!hasExactKeys(publicSeo, [
+    "sourceStage",
     "snapshotHash",
     "prerenderManifestSha256",
     "sourceArtifactId",
@@ -734,7 +757,8 @@ export function validateReleaseManifest(manifest, expected) {
   ])) {
     fail("RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
   }
-  if (!/^[a-f0-9]{64}$/.test(publicSeo.snapshotHash) ||
+  if (publicSeo.sourceStage !== manifest.releaseStage ||
+      !/^[a-f0-9]{64}$/.test(publicSeo.snapshotHash) ||
       !/^[a-f0-9]{64}$/.test(publicSeo.prerenderManifestSha256) ||
       !Number.isSafeInteger(publicSeo.sourceArtifactId) ||
       publicSeo.sourceArtifactId <= 0 ||
@@ -752,7 +776,8 @@ export function validateReleaseManifest(manifest, expected) {
     fail("RELEASE_MANIFEST_OPERATIONS_EXECUTABLES_INVALID");
   }
   for (const component of ["server", "client", "operations"]) {
-    if (manifest[component].image !== `ghcr.io/${repositoryPath}-${component}`) {
+    const stageSuffix = manifest.releaseStage === "production" ? "" : "-preproduction";
+    if (manifest[component].image !== `ghcr.io/${repositoryPath}${stageSuffix}-${component}`) {
       fail(`RELEASE_MANIFEST_${component.toUpperCase()}_REPOSITORY_INVALID`);
     }
   }
@@ -770,6 +795,7 @@ function readAndValidateManifest(path) {
   return validateReleaseManifest(manifest, {
     gitSha: currentGitSha(),
     migrationBundleSha256: repositoryMigrationBundleSha256(),
+    releaseStage: "production",
   });
 }
 

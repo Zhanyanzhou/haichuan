@@ -48,12 +48,18 @@ test("release workflow validates a same-SHA artifact before build and performs r
   for (const required of [
     "public_seo_snapshot_artifact_id:",
     "m.workflow_run?.head_sha!==process.env.GITHUB_SHA",
-    "public-seo-snapshot-${process.env.GITHUB_SHA}",
+    "public-seo-${process.env.RELEASE_STAGE}-snapshot-${process.env.GITHUB_SHA}",
     "EXPECTED_SEO_PRODUCER_WORKFLOW_PATH: .github/workflows/export-public-seo-snapshot.yml",
     "PUBLIC_SEO_PRODUCER_RUN_INVALID",
     "PUBLIC_SEO_ARTIFACT_DIGEST_MISMATCH",
     "validatePublicSeoSnapshot",
     "PUBLIC_SEO_ORIGIN_MISMATCH",
+    "PUBLIC_SEO_SOURCE_STAGE_MISMATCH",
+    "release_stage:",
+    "preproduction-sha-${GITHUB_SHA}",
+    "-preproduction",
+    "releaseStage: process.env.RELEASE_STAGE",
+    "sourceStage: process.env.RELEASE_STAGE",
     "PUBLIC_SPA_FALLBACK_NOINDEX_MISSING",
     "node scripts/prerender-public-routes.mjs",
     "node scripts/generate-public-seo-artifacts.mjs",
@@ -71,27 +77,40 @@ test("release workflow validates a same-SHA artifact before build and performs r
   }
 });
 
-test("SEO producer workflow reads only protected environment facts and uploads one same-SHA JSON", () => {
+test("SEO producer workflow binds preproduction or production to protected environment facts", () => {
   const workflow = read(".github/workflows/export-public-seo-snapshot.yml");
-  assert.match(workflow, /on:\s*\n\s*workflow_dispatch:\s*\n/);
+  assert.match(workflow, /workflow_dispatch:\s*\n\s*inputs:\s*\n\s*source_stage:/);
   assert.match(workflow, /permissions:\s*\n\s*contents: read/);
-  assert.ok(!workflow.includes("inputs:"), "producer must not accept operator-entered content facts");
   for (const required of [
-    "environment: public-seo-production",
+    "environment: public-seo-${{ inputs.source_stage }}",
     "PUBLIC_SEO_EXPORT_READ_ONLY_AUTHORIZED: \"1\"",
+    "PUBLIC_SEO_SOURCE_STAGE: ${{ inputs.source_stage }}",
     "PUBLIC_SEO_SOURCE_ENVIRONMENT_ID: ${{ vars.PUBLIC_SEO_SOURCE_ENVIRONMENT_ID }}",
     "PUBLIC_SEO_EXPECTED_DATABASE: ${{ vars.PUBLIC_SEO_EXPECTED_DATABASE }}",
     "PUBLIC_SEO_EXPECTED_DATABASE_HOST: ${{ vars.PUBLIC_SEO_EXPECTED_DATABASE_HOST }}",
+    "PUBLIC_SEO_DATABASE_TRANSPORT_HOST: \"127.0.0.1\"",
     "PUBLIC_SEO_APPROVAL_REFERENCE: ${{ vars.PUBLIC_SEO_APPROVAL_REFERENCE }}",
     "PUBLIC_SEO_EXPECTED_ORIGIN: ${{ vars.PUBLIC_SEO_EXPECTED_ORIGIN }}",
     "PUBLIC_SEO_RELEASE_PROFILE: ${{ vars.PUBLIC_SEO_RELEASE_PROFILE }}",
     "DATABASE_URL: ${{ secrets.PUBLIC_SEO_READ_ONLY_DATABASE_URL }}",
+    "PUBLIC_SEO_SSH_PRIVATE_KEY: ${{ secrets.PUBLIC_SEO_SSH_PRIVATE_KEY }}",
+    "PUBLIC_SEO_SSH_KNOWN_HOSTS: ${{ secrets.PUBLIC_SEO_SSH_KNOWN_HOSTS }}",
+    "PUBLIC_SEO_SSH_HOST_KEY_SHA256: ${{ vars.PUBLIC_SEO_SSH_HOST_KEY_SHA256 }}",
+    "PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY: ${{ vars.PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY }}",
+    "PUBLIC_SEO_DATABASE_URL_MUST_USE_SSH_LOOPBACK_TUNNEL",
+    "PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST_MUST_USE_TARGET_LOOPBACK",
+    'test "$PUBLIC_SEO_EXPECTED_DATABASE_HOST" = "$PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY"',
+    "StrictHostKeyChecking=yes",
+    "ExitOnForwardFailure=yes",
+    "127.0.0.1:${PUBLIC_SEO_SSH_LOCAL_PORT}",
+    "if: always()",
+    "清理 SSH 隧道和临时密钥",
     "PUBLIC_SEO_SOURCE_ENVIRONMENT_DRIFT",
     "node server/dist/cli/export-public-seo-snapshot.js",
     "node scripts/export-public-seo-snapshot.mjs",
     "validatePublicSeoSnapshot",
     "PUBLIC_SEO_ARTIFACT_MUST_CONTAIN_ONE_JSON",
-    "name: public-seo-snapshot-${{ github.sha }}",
+    "name: public-seo-${{ inputs.source_stage }}-snapshot-${{ github.sha }}",
     "path: ${{ steps.snapshot.outputs.snapshot_path }}",
     "ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}",
   ]) {
@@ -99,10 +118,19 @@ test("SEO producer workflow reads only protected environment facts and uploads o
   }
   const jobEnv = workflow.match(/\n    env:\n(?<body>(?:      .+\n)+)    steps:/)?.groups?.body ?? "";
   assert.ok(!jobEnv.includes("DATABASE_URL"), "database secret must not be available to checkout/install/build/upload steps");
+  assert.ok(!jobEnv.includes("PUBLIC_SEO_SSH_PRIVATE_KEY"), "SSH private key must not be available at job scope");
   assert.match(
     workflow,
     /- name: 从专用只读账号导出并冻结快照[\s\S]*?env:\s*\n\s*DATABASE_URL: \$\{\{ secrets\.PUBLIC_SEO_READ_ONLY_DATABASE_URL \}\}[\s\S]*?node server\/dist\/cli\/export-public-seo-snapshot\.js/,
   );
+});
+
+test("SEO tunnel overlay exposes MySQL only on an explicit loopback high port", () => {
+  const overlay = read("docker-compose.public-seo-tunnel.yml");
+  assert.match(overlay, /services:\s*\n\s*mysql:\s*\n\s*ports:/);
+  assert.ok(overlay.includes("127.0.0.1:${PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT:?PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT is required}:3306"));
+  assert.doesNotMatch(overlay, /0\.0\.0\.0|\[::\]|["']3306:3306["']/);
+  assert.doesNotMatch(overlay, /^\s*build:/m);
 });
 
 test("runbook keeps PageDocument publication separate from immutable public-route activation", () => {

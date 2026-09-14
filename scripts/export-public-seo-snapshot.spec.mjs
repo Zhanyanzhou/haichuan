@@ -14,7 +14,8 @@ import {
 
 test("exports a canonical immutable snapshot with reciprocal locale alternates", () => {
   const snapshot = createPublicSeoSnapshot(makeSnapshotInput(makeRepresentativeRoutes()));
-  assert.equal(snapshot.schemaVersion, 2);
+  assert.equal(snapshot.schemaVersion, 3);
+  assert.equal(snapshot.sourceStage, "production");
   assert.match(snapshot.snapshotHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(validatePublicSeoSnapshot(snapshot), snapshot);
 
@@ -27,6 +28,19 @@ test("exports a canonical immutable snapshot with reciprocal locale alternates",
   ];
   assert.deepEqual(chinese.alternates, expectedAlternates);
   assert.deepEqual(english.alternates, expectedAlternates);
+});
+
+test("binds the source stage into canonical evidence and rejects unsupported stages", () => {
+  const production = createPublicSeoSnapshot(makeSnapshotInput([makeRoute()]));
+  const preproductionInput = makeSnapshotInput([makeRoute()]);
+  preproductionInput.sourceStage = "preproduction";
+  const preproduction = createPublicSeoSnapshot(preproductionInput);
+  assert.equal(preproduction.sourceStage, "preproduction");
+  assert.notEqual(preproduction.snapshotHash, production.snapshotHash);
+  assert.throws(
+    () => createPublicSeoSnapshot({ ...makeSnapshotInput([makeRoute()]), sourceStage: "staging" }),
+    /sourceStage must be preproduction or production/,
+  );
 });
 
 test("fails closed on source or per-route before/after hash drift", () => {

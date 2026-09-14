@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
+import "./prepare-production-evidence-signing.spec.mjs";
+import "./verify-production-evidence-workflow.spec.mjs";
+
 import { validateProductionEvidenceStructure, verifyProductionEvidence } from "./verify-production-evidence.mjs";
 
 const sha = (character) => character.repeat(64);
@@ -37,7 +40,9 @@ function createFixture(releaseProfile = "lead-generation") {
     sbomPredicateType: "https://spdx.dev/Document",
   });
   const manifest = {
-    schemaVersion: 4,
+    schemaVersion: 5,
+    releaseStage: "production",
+    imageTag: `sha-${gitSha}`,
     gitSha,
     migrationBundleSha256: sha("b"),
     source,
@@ -65,6 +70,7 @@ function createFixture(releaseProfile = "lead-generation") {
       manifestPredicateType: "https://slsa.dev/provenance/v1",
     },
     publicSeo: {
+      sourceStage: "production",
       snapshotHash: sha("f"),
       prerenderManifestSha256: sha("0"),
       sourceArtifactId: 456,
@@ -228,12 +234,14 @@ function successfulExecutor(calls = []) {
         subject: [{ digest: { sha256: manifestSha256 } }],
         predicate: {
           buildDefinition: {
-            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v4`,
+            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v5`,
             externalParameters: {
               gitSha: manifest.gitSha,
               sourceRef: manifest.attestationPolicy.sourceRef,
               qualityGateRunId: manifest.qualityGate.runId,
               schemaVersion: manifest.schemaVersion,
+              releaseStage: manifest.releaseStage,
+              imageTag: manifest.imageTag,
             },
             resolvedDependencies: [
               { uri: manifest.source, digest: { gitCommit: manifest.gitSha } },
@@ -265,6 +273,8 @@ function successfulExecutor(calls = []) {
           buildDefinition: {
             externalParameters: {
               component,
+              releaseStage: "production",
+              imageTag: `sha-${gitSha}`,
               source,
               sourceRef: "refs/heads/main",
               gitSha,
@@ -307,6 +317,23 @@ test("rejects manifest identity copied from the untrusted manifest itself", () =
   withFixture((fixture) => {
     fixture.trusted.releaseGitSha = "f".repeat(40);
     assert.throws(() => validateProductionEvidenceStructure(fixture.evidence, fixture.trusted), (error) => error?.message === "RELEASE_MANIFEST_GIT_SHA_MISMATCH");
+  });
+});
+
+test("production evidence rejects a stage-bound preproduction release manifest", () => {
+  withFixture((fixture) => {
+    const descriptor = fixture.evidence.release.manifest;
+    const manifest = JSON.parse(fixture.files.get(descriptor.path));
+    manifest.releaseStage = "preproduction";
+    manifest.imageTag = `preproduction-sha-${manifest.gitSha}`;
+    manifest.publicSeo.sourceStage = "preproduction";
+    const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+    writeFileSync(join(fixture.root, descriptor.path), serialized);
+    descriptor.sha256 = hash(serialized);
+    assert.throws(
+      () => validateProductionEvidenceStructure(fixture.evidence, fixture.trusted),
+      (error) => error?.message === "RELEASE_MANIFEST_STAGE_MISMATCH",
+    );
   });
 });
 

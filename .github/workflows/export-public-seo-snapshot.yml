@@ -2,6 +2,15 @@ name: Export Public SEO Snapshot
 
 on:
   workflow_dispatch:
+    inputs:
+      source_stage:
+        description: "只读发布事实来源阶段"
+        required: true
+        default: "preproduction"
+        type: choice
+        options:
+          - preproduction
+          - production
 
 permissions:
   contents: read
@@ -11,15 +20,25 @@ jobs:
     name: 只读导出公开 SEO 发布事实
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: public-seo-production
+    environment: public-seo-${{ inputs.source_stage }}
     env:
       PUBLIC_SEO_EXPORT_READ_ONLY_AUTHORIZED: "1"
+      PUBLIC_SEO_SOURCE_STAGE: ${{ inputs.source_stage }}
       PUBLIC_SEO_SOURCE_ENVIRONMENT_ID: ${{ vars.PUBLIC_SEO_SOURCE_ENVIRONMENT_ID }}
       PUBLIC_SEO_EXPECTED_DATABASE: ${{ vars.PUBLIC_SEO_EXPECTED_DATABASE }}
       PUBLIC_SEO_EXPECTED_DATABASE_HOST: ${{ vars.PUBLIC_SEO_EXPECTED_DATABASE_HOST }}
+      PUBLIC_SEO_DATABASE_TRANSPORT_HOST: "127.0.0.1"
       PUBLIC_SEO_APPROVAL_REFERENCE: ${{ vars.PUBLIC_SEO_APPROVAL_REFERENCE }}
       PUBLIC_SEO_EXPECTED_ORIGIN: ${{ vars.PUBLIC_SEO_EXPECTED_ORIGIN }}
       PUBLIC_SEO_RELEASE_PROFILE: ${{ vars.PUBLIC_SEO_RELEASE_PROFILE }}
+      PUBLIC_SEO_SSH_HOST: ${{ vars.PUBLIC_SEO_SSH_HOST }}
+      PUBLIC_SEO_SSH_PORT: ${{ vars.PUBLIC_SEO_SSH_PORT }}
+      PUBLIC_SEO_SSH_USER: ${{ vars.PUBLIC_SEO_SSH_USER }}
+      PUBLIC_SEO_SSH_HOST_KEY_SHA256: ${{ vars.PUBLIC_SEO_SSH_HOST_KEY_SHA256 }}
+      PUBLIC_SEO_SSH_LOCAL_PORT: ${{ vars.PUBLIC_SEO_SSH_LOCAL_PORT }}
+      PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST: ${{ vars.PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST }}
+      PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT: ${{ vars.PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT }}
+      PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY: ${{ vars.PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY }}
     steps:
       - name: 检出触发工作流的精确提交
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -36,18 +55,44 @@ jobs:
         run: |
           set -euo pipefail
           required=(
+            PUBLIC_SEO_SOURCE_STAGE
             PUBLIC_SEO_SOURCE_ENVIRONMENT_ID
             PUBLIC_SEO_EXPECTED_DATABASE
             PUBLIC_SEO_EXPECTED_DATABASE_HOST
             PUBLIC_SEO_APPROVAL_REFERENCE
             PUBLIC_SEO_EXPECTED_ORIGIN
             PUBLIC_SEO_RELEASE_PROFILE
+            PUBLIC_SEO_SSH_HOST
+            PUBLIC_SEO_SSH_PORT
+            PUBLIC_SEO_SSH_USER
+            PUBLIC_SEO_SSH_HOST_KEY_SHA256
+            PUBLIC_SEO_SSH_LOCAL_PORT
+            PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST
+            PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT
+            PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY
           )
           for name in "${required[@]}"; do
             test -n "${!name:-}" || { echo "PUBLIC_SEO_PROTECTED_CONFIG_MISSING:${name}" >&2; exit 1; }
           done
-          test "$PUBLIC_SEO_SOURCE_ENVIRONMENT_ID" = "public-seo-production" \
+          case "$PUBLIC_SEO_SOURCE_STAGE" in preproduction|production) ;; *) exit 1 ;; esac
+          test "$PUBLIC_SEO_SOURCE_ENVIRONMENT_ID" = "public-seo-${PUBLIC_SEO_SOURCE_STAGE}" \
             || { echo "PUBLIC_SEO_SOURCE_ENVIRONMENT_DRIFT" >&2; exit 1; }
+          [[ "$PUBLIC_SEO_SSH_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "PUBLIC_SEO_SSH_HOST_INVALID" >&2; exit 1; }
+          [[ "$PUBLIC_SEO_SSH_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo "PUBLIC_SEO_SSH_USER_INVALID" >&2; exit 1; }
+          [[ "$PUBLIC_SEO_SSH_PORT" =~ ^[0-9]+$ ]] && (( PUBLIC_SEO_SSH_PORT >= 1 && PUBLIC_SEO_SSH_PORT <= 65535 )) \
+            || { echo "PUBLIC_SEO_SSH_PORT_INVALID" >&2; exit 1; }
+          [[ "$PUBLIC_SEO_SSH_LOCAL_PORT" =~ ^[0-9]+$ ]] && (( PUBLIC_SEO_SSH_LOCAL_PORT >= 1024 && PUBLIC_SEO_SSH_LOCAL_PORT <= 65535 )) \
+            || { echo "PUBLIC_SEO_SSH_LOCAL_PORT_INVALID" >&2; exit 1; }
+          [[ "$PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST" =~ ^[A-Za-z0-9.-]+$ ]] \
+            || { echo "PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST_INVALID" >&2; exit 1; }
+          [[ "$PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT" =~ ^[0-9]+$ ]] && (( PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT >= 1 && PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT <= 65535 )) \
+            || { echo "PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT_INVALID" >&2; exit 1; }
+          [[ "$PUBLIC_SEO_SSH_HOST_KEY_SHA256" =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]] \
+            || { echo "PUBLIC_SEO_SSH_HOST_KEY_FINGERPRINT_INVALID" >&2; exit 1; }
+          test "$PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST" = "127.0.0.1" \
+            || { echo "PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST_MUST_USE_TARGET_LOOPBACK" >&2; exit 1; }
+          test "$PUBLIC_SEO_EXPECTED_DATABASE_HOST" = "$PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY" \
+            || { echo "PUBLIC_SEO_DATABASE_TARGET_HOST_DRIFT" >&2; exit 1; }
 
       - name: 安装服务端锁定依赖并编译只读导出器
         shell: bash
@@ -55,6 +100,58 @@ jobs:
           set -euo pipefail
           npm ci --prefix server
           npm run build --prefix server
+
+      - name: 建立固定主机指纹的只读数据库 SSH 隧道
+        id: tunnel
+        shell: bash
+        env:
+          PUBLIC_SEO_SSH_PRIVATE_KEY: ${{ secrets.PUBLIC_SEO_SSH_PRIVATE_KEY }}
+          PUBLIC_SEO_SSH_KNOWN_HOSTS: ${{ secrets.PUBLIC_SEO_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "${PUBLIC_SEO_SSH_PRIVATE_KEY:-}" \
+            || { echo "PUBLIC_SEO_PROTECTED_CONFIG_MISSING:PUBLIC_SEO_SSH_PRIVATE_KEY" >&2; exit 1; }
+          test -n "${PUBLIC_SEO_SSH_KNOWN_HOSTS:-}" \
+            || { echo "PUBLIC_SEO_PROTECTED_CONFIG_MISSING:PUBLIC_SEO_SSH_KNOWN_HOSTS" >&2; exit 1; }
+          tunnel_dir="${RUNNER_TEMP}/public-seo-ssh-tunnel"
+          install -d -m 700 "$tunnel_dir"
+          key_path="$tunnel_dir/id_ed25519"
+          known_hosts_path="$tunnel_dir/known_hosts"
+          printf '%s\n' "$PUBLIC_SEO_SSH_PRIVATE_KEY" | sed 's/\r$//' > "$key_path"
+          printf '%s\n' "$PUBLIC_SEO_SSH_KNOWN_HOSTS" | sed 's/\r$//' > "$known_hosts_path"
+          chmod 600 "$key_path" "$known_hosts_path"
+          test "$(awk 'NF && $1 !~ /^#/ { count += 1 } END { print count + 0 }' "$known_hosts_path")" = "1" \
+            || { echo "PUBLIC_SEO_SSH_KNOWN_HOSTS_INVALID" >&2; exit 1; }
+          actual_fingerprint="$(ssh-keygen -lf "$known_hosts_path" -E sha256 | awk 'NR == 1 { print $2 }')"
+          test "$actual_fingerprint" = "$PUBLIC_SEO_SSH_HOST_KEY_SHA256" \
+            || { echo "PUBLIC_SEO_SSH_HOST_KEY_FINGERPRINT_MISMATCH" >&2; exit 1; }
+          ssh -N -T \
+            -L "127.0.0.1:${PUBLIC_SEO_SSH_LOCAL_PORT}:${PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST}:${PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT}" \
+            -p "$PUBLIC_SEO_SSH_PORT" \
+            -i "$key_path" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=${known_hosts_path}" \
+            -o ExitOnForwardFailure=yes \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=2 \
+            "${PUBLIC_SEO_SSH_USER}@${PUBLIC_SEO_SSH_HOST}" &
+          tunnel_pid=$!
+          printf '%s\n' "$tunnel_pid" > "$tunnel_dir/pid"
+          ready=0
+          for _ in $(seq 1 20); do
+            kill -0 "$tunnel_pid" 2>/dev/null \
+              || { wait "$tunnel_pid"; echo "PUBLIC_SEO_SSH_TUNNEL_EXITED" >&2; exit 1; }
+            if exec 9<>"/dev/tcp/127.0.0.1/${PUBLIC_SEO_SSH_LOCAL_PORT}" 2>/dev/null; then
+              exec 9>&-
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "1" || { echo "PUBLIC_SEO_SSH_TUNNEL_NOT_READY" >&2; exit 1; }
+          echo "PUBLIC_SEO_SSH_TUNNEL_READY"
 
       - name: 从专用只读账号导出并冻结快照
         id: snapshot
@@ -65,6 +162,13 @@ jobs:
           set -euo pipefail
           test -n "${DATABASE_URL:-}" \
             || { echo "PUBLIC_SEO_PROTECTED_CONFIG_MISSING:DATABASE_URL" >&2; exit 1; }
+          node - <<'NODE'
+          const url = new URL(process.env.DATABASE_URL ?? "");
+          if (url.protocol !== "mysql:" || url.hostname !== "127.0.0.1" ||
+              url.port !== process.env.PUBLIC_SEO_SSH_LOCAL_PORT) {
+            throw new Error("PUBLIC_SEO_DATABASE_URL_MUST_USE_SSH_LOOPBACK_TUNNEL");
+          }
+          NODE
           export_dir="${RUNNER_TEMP}/public-seo-export"
           artifact_dir="${RUNNER_TEMP}/public-seo-artifact"
           mkdir -p "$export_dir" "$artifact_dir"
@@ -81,6 +185,9 @@ jobs:
           if (snapshot.origin !== process.env.PUBLIC_SEO_EXPECTED_ORIGIN) {
             throw new Error("PUBLIC_SEO_EXPORTED_ORIGIN_MISMATCH");
           }
+          if (snapshot.sourceStage !== process.env.PUBLIC_SEO_SOURCE_STAGE) {
+            throw new Error("PUBLIC_SEO_EXPORTED_SOURCE_STAGE_MISMATCH");
+          }
           if (snapshot.routes.length === 0) throw new Error("PUBLIC_SEO_EXPORTED_ROUTE_SET_EMPTY");
           process.stdout.write(`validated public SEO snapshot ${snapshot.snapshotHash}\n`);
           NODE
@@ -89,11 +196,29 @@ jobs:
           echo "snapshot_sha256=$(sha256sum "$artifact_dir/public-seo-snapshot.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           echo "snapshot_path=$artifact_dir/public-seo-snapshot.json" >> "$GITHUB_OUTPUT"
 
+      - name: 清理 SSH 隧道和临时密钥
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          tunnel_dir="${RUNNER_TEMP}/public-seo-ssh-tunnel"
+          if test -f "$tunnel_dir/pid"; then
+            tunnel_pid="$(cat "$tunnel_dir/pid")"
+            if [[ "$tunnel_pid" =~ ^[1-9][0-9]*$ ]]; then
+              kill "$tunnel_pid" 2>/dev/null || true
+              wait "$tunnel_pid" 2>/dev/null || true
+            fi
+          fi
+          if test -d "$tunnel_dir"; then
+            find "$tunnel_dir" -type f -exec sh -c 'for path do : > "$path"; rm -f -- "$path"; done' sh {} +
+            rmdir "$tunnel_dir"
+          fi
+
       - name: 上传同仓同 SHA 的唯一 JSON 制品
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: public-seo-snapshot-${{ github.sha }}
+          name: public-seo-${{ inputs.source_stage }}-snapshot-${{ github.sha }}
           path: ${{ steps.snapshot.outputs.snapshot_path }}
           if-no-files-found: error
           retention-days: 30
@@ -114,6 +239,7 @@ jobs:
             echo "### Public SEO snapshot"
             echo "- repository: ${GITHUB_REPOSITORY}"
             echo "- commit: ${GITHUB_SHA}"
+            echo "- source stage: ${PUBLIC_SEO_SOURCE_STAGE}"
             echo "- artifact id: ${ARTIFACT_ID}"
             echo "- artifact digest: sha256:${ARTIFACT_DIGEST}"
             echo "- snapshot file sha256: ${SNAPSHOT_SHA256}"

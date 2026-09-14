@@ -58,6 +58,7 @@ export function makeRoute(overrides = {}) {
 export function makeSnapshotInput(routes) {
   return {
     schemaVersion: 1,
+    sourceStage: "production",
     origin: "https://jewelry.example.test",
     sourceSnapshotHashBefore: SOURCE_HASH,
     sourceSnapshotHashAfter: SOURCE_HASH,

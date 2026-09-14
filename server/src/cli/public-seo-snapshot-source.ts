@@ -29,6 +29,7 @@ const REQUIRED_SETTINGS = [
 
 type PublicLocale = "zh-CN" | "en";
 type ReleaseProfile = "lead-generation" | "commerce";
+type SourceStage = "preproduction" | "production";
 type LegalSourceHashes = {
   privacy: string;
   businessInfo: string;
@@ -41,6 +42,7 @@ export interface PublicSeoSnapshotDatabase {
 }
 
 export type PublicSeoSourceConfig = {
+  sourceStage: SourceStage;
   expectedOrigin: string;
   sourceEnvironmentId: string;
   expectedDatabase: string;
@@ -682,6 +684,7 @@ async function readProjection(
   }
   routes.sort((left, right) => left.path.localeCompare(right.path, "en"));
   const sourceHash = sha256({
+    sourceStage: config.sourceStage,
     sourceEnvironmentId: config.sourceEnvironmentId,
     expectedDatabase: config.expectedDatabase,
     databaseHostHash: config.databaseHostHash,
@@ -709,6 +712,12 @@ export async function createPublicSeoExportInput(
   validatePage: PublicSeoPageValidator,
   now = new Date(),
 ) {
+  if (config.sourceStage !== "preproduction" && config.sourceStage !== "production") {
+    fail("SOURCE_STAGE_INVALID");
+  }
+  if (config.sourceEnvironmentId !== `public-seo-${config.sourceStage}`) {
+    fail("SOURCE_STAGE_ENVIRONMENT_MISMATCH");
+  }
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$/.test(config.sourceEnvironmentId)) {
     fail("SOURCE_ENVIRONMENT_ID_INVALID");
   }
@@ -741,6 +750,7 @@ export async function createPublicSeoExportInput(
   });
   return {
     schemaVersion: 1,
+    sourceStage: config.sourceStage,
     origin: normalizeOrigin(config.expectedOrigin),
     sourceSnapshotHashBefore: before.sourceHash,
     sourceSnapshotHashAfter: after.sourceHash,

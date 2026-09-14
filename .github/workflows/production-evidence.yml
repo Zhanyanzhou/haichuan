@@ -1,0 +1,521 @@
+name: Production Evidence Attestation
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: "同一 SHA 的成功 Release Images workflow run ID"
+        required: true
+        type: string
+      sigstore_public_log_acknowledged:
+        description: "已确认生产证据签名会写入公共 Sigstore 透明日志"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions: {}
+
+jobs:
+  collect:
+    name: 从受限目标环境采集并冻结证据
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-evidence
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      signing_inputs_artifact_id: ${{ steps.upload-signing-inputs.outputs.artifact-id }}
+      signing_inputs_sha256: ${{ steps.prepare.outputs.signing_inputs_sha256 }}
+      environment_id_sha256: ${{ steps.prepare.outputs.environment_id_sha256 }}
+      approval_reference_sha256: ${{ steps.prepare.outputs.approval_reference_sha256 }}
+      migration_bundle_sha256: ${{ steps.manifest.outputs.migration_bundle_sha256 }}
+      release_profile: ${{ steps.prepare.outputs.release_profile }}
+      source_ref: ${{ steps.release-run.outputs.source_ref }}
+    env:
+      ENVIRONMENT_ID_SHA256: ${{ vars.PRODUCTION_EVIDENCE_ENVIRONMENT_ID_SHA256 }}
+      APPROVAL_REFERENCE_SHA256: ${{ vars.PRODUCTION_EVIDENCE_APPROVAL_REFERENCE_SHA256 }}
+      RELEASE_PROFILE: ${{ vars.PRODUCTION_EVIDENCE_RELEASE_PROFILE }}
+      RELEASE_OWNER: ${{ vars.PRODUCTION_EVIDENCE_RELEASE_OWNER }}
+      ROLLBACK_OWNER: ${{ vars.PRODUCTION_EVIDENCE_ROLLBACK_OWNER }}
+      INCIDENT_OWNER: ${{ vars.PRODUCTION_EVIDENCE_INCIDENT_OWNER }}
+      SSH_HOST: ${{ vars.PRODUCTION_EVIDENCE_SSH_HOST }}
+      SSH_PORT: ${{ vars.PRODUCTION_EVIDENCE_SSH_PORT }}
+      SSH_USER: ${{ vars.PRODUCTION_EVIDENCE_SSH_USER }}
+      REMOTE_COLLECTOR_SHA256: ${{ vars.PRODUCTION_EVIDENCE_REMOTE_COLLECTOR_SHA256 }}
+      MANIFEST_SIGNER_WORKFLOW: github.com/${{ github.repository }}/.github/workflows/release-images.yml
+      EVIDENCE_SIGNER_WORKFLOW: github.com/${{ github.repository }}/.github/workflows/production-evidence.yml
+    steps:
+      - name: 拒绝未确认的公共透明日志披露
+        shell: bash
+        env:
+          SIGSTORE_PUBLIC_LOG_ACKNOWLEDGED: ${{ inputs.sigstore_public_log_acknowledged }}
+        run: |
+          set -euo pipefail
+          test "$SIGSTORE_PUBLIC_LOG_ACKNOWLEDGED" = "true" || {
+            echo "PRODUCTION_EVIDENCE_SIGSTORE_PUBLIC_LOG_ACKNOWLEDGEMENT_REQUIRED" >&2
+            exit 1
+          }
+
+      - name: 拒绝未受保护的证据来源
+        shell: bash
+        env:
+          DEFAULT_BRANCH_REF: refs/heads/${{ github.event.repository.default_branch }}
+          EVIDENCE_REF: ${{ github.ref }}
+          EVIDENCE_REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          if [ "$EVIDENCE_REF" = "$DEFAULT_BRANCH_REF" ]; then exit 0; fi
+          case "$EVIDENCE_REF" in refs/heads/release/*) ;; *) echo "EVIDENCE_REF_NOT_DEFAULT_OR_RELEASE_BRANCH" >&2; exit 1 ;; esac
+          test "$EVIDENCE_REF_PROTECTED" = "true" || { echo "EVIDENCE_REF_NOT_PROTECTED" >&2; exit 1; }
+
+      - name: 检出精确证据合同
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: 安装锁定验证依赖
+        run: npm ci --ignore-scripts
+
+      - name: 校验受保护环境的最小配置
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ENVIRONMENT_ID_SHA256 APPROVAL_REFERENCE_SHA256 RELEASE_PROFILE RELEASE_OWNER ROLLBACK_OWNER INCIDENT_OWNER SSH_HOST SSH_PORT SSH_USER REMOTE_COLLECTOR_SHA256; do
+            test -n "${!name:-}" || { echo "PRODUCTION_EVIDENCE_PROTECTED_CONFIG_MISSING:${name}" >&2; exit 1; }
+          done
+          [[ "$ENVIRONMENT_ID_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$APPROVAL_REFERENCE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$REMOTE_COLLECTOR_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$ ]]
+          [[ "$SSH_PORT" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$SSH_PORT" -le 65535 ]
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+          [[ "$RELEASE_PROFILE" = "lead-generation" || "$RELEASE_PROFILE" = "commerce" ]]
+          test "${#RELEASE_OWNER}" -ge 2 && test "${#ROLLBACK_OWNER}" -ge 2 && test "${#INCIDENT_OWNER}" -ge 2
+
+      - name: 核对 Release Images 运行与唯一清单制品
+        id: release-run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "PRODUCTION_EVIDENCE_RELEASE_RUN_ID_INVALID" >&2; exit 1; }
+          node --input-type=module <<'NODE'
+          import { appendFileSync, writeFileSync } from "node:fs";
+          const runId = process.env.RELEASE_RUN_ID;
+          const repository = process.env.GITHUB_REPOSITORY;
+          const headers = {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${process.env.GH_TOKEN}`,
+            "User-Agent": "haichuan-production-evidence",
+            "X-GitHub-Api-Version": "2022-11-28",
+          };
+          const request = async (path) => {
+            const response = await fetch(`https://api.github.com/repos/${repository}${path}`, { headers });
+            if (!response.ok) throw new Error("PRODUCTION_EVIDENCE_RELEASE_METADATA_UNAVAILABLE");
+            return response.json();
+          };
+          const run = await request(`/actions/runs/${runId}`);
+          const workflowPath = String(run.path ?? "").split("@", 1)[0];
+          const sourceRef = `refs/heads/${run.head_branch ?? ""}`;
+          if (run.repository?.full_name !== repository || run.head_repository?.full_name !== repository ||
+              run.head_sha !== process.env.GITHUB_SHA || sourceRef !== process.env.GITHUB_REF ||
+              workflowPath !== ".github/workflows/release-images.yml" || run.event !== "workflow_dispatch" ||
+              run.status !== "completed" || run.conclusion !== "success") {
+            throw new Error("PRODUCTION_EVIDENCE_RELEASE_RUN_INVALID");
+          }
+          const artifactPayload = await request(`/actions/runs/${runId}/artifacts?per_page=100`);
+          const expectedName = `release-production-manifest-${process.env.GITHUB_SHA}`;
+          const artifacts = (artifactPayload.artifacts ?? []).filter((item) =>
+            item.name === expectedName && !item.expired && item.workflow_run?.id === Number(runId) &&
+            /^sha256:[a-f0-9]{64}$/.test(item.digest ?? ""));
+          if (artifacts.length !== 1) throw new Error("PRODUCTION_EVIDENCE_RELEASE_ARTIFACT_INVALID");
+          writeFileSync(`${process.env.RUNNER_TEMP}/release-run.json`, JSON.stringify({
+            runId: Number(runId), headSha: run.head_sha, sourceRef, artifactId: artifacts[0].id,
+            artifactDigest: artifacts[0].digest,
+          }));
+          appendFileSync(process.env.GITHUB_OUTPUT, `artifact_id=${artifacts[0].id}\nsource_ref=${sourceRef}\n`);
+          NODE
+
+      - name: 按发布运行的固定 artifact ID 下载签名清单
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ steps.release-run.outputs.artifact_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.release_run_id }}
+          path: .codex-tmp/release-manifest
+
+      - name: 重验清单并建立受限采集请求
+        id: manifest
+        shell: bash
+        env:
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-images.mjs --manifest .codex-tmp/release-manifest/release-manifest.json >/dev/null
+          mkdir -p .codex-tmp/production-evidence-source
+          cp -R .codex-tmp/release-manifest/. .codex-tmp/production-evidence-source/
+          cp docs/PRODUCTION_RELEASE_RUNBOOK.md .codex-tmp/production-evidence-source/rollback-runbook.md
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+          const manifest = JSON.parse(readFileSync(".codex-tmp/release-manifest/release-manifest.json", "utf8"));
+          if (manifest.releaseStage !== "production") throw new Error("PRODUCTION_EVIDENCE_RELEASE_STAGE_INVALID");
+          const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+          const request = {
+            schemaVersion: 1,
+            repository: process.env.GITHUB_REPOSITORY,
+            releaseSource: `https://github.com/${process.env.GITHUB_REPOSITORY}`,
+            releaseRunId: Number(process.env.RELEASE_RUN_ID),
+            evidenceRunId: Number(process.env.GITHUB_RUN_ID),
+            releaseGitSha: process.env.GITHUB_SHA,
+            sourceRef: process.env.GITHUB_REF,
+            migrationBundleSha256: manifest.migrationBundleSha256,
+            releaseProfile: process.env.RELEASE_PROFILE,
+            environmentIdSha256: process.env.ENVIRONMENT_ID_SHA256,
+            approvalReferenceSha256: process.env.APPROVAL_REFERENCE_SHA256,
+            releaseOwner: process.env.RELEASE_OWNER,
+            rollbackOwner: process.env.ROLLBACK_OWNER,
+            incidentOwner: process.env.INCIDENT_OWNER,
+            manifestSha256: sha256(".codex-tmp/release-manifest/release-manifest.json"),
+            rollbackRunbookSha256: sha256(".codex-tmp/production-evidence-source/rollback-runbook.md"),
+            manifest,
+          };
+          writeFileSync(`${process.env.RUNNER_TEMP}/production-evidence-request.json`, `${JSON.stringify(request)}\n`, { flag: "wx" });
+          appendFileSync(process.env.GITHUB_OUTPUT, `migration_bundle_sha256=${manifest.migrationBundleSha256}\n`);
+          NODE
+
+      - name: 配置受限 SSH 身份与固定主机指纹
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_EVIDENCE_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_EVIDENCE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "${SSH_PRIVATE_KEY:-}" || { echo "PRODUCTION_EVIDENCE_SSH_KEY_MISSING" >&2; exit 1; }
+          test -n "${SSH_KNOWN_HOSTS:-}" || { echo "PRODUCTION_EVIDENCE_SSH_HOST_KEY_MISSING" >&2; exit 1; }
+          install -d -m 0700 "${RUNNER_TEMP}/production-evidence-ssh"
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "${RUNNER_TEMP}/production-evidence-ssh/id"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "${RUNNER_TEMP}/production-evidence-ssh/known_hosts"
+          ssh-keygen -y -f "${RUNNER_TEMP}/production-evidence-ssh/id" >/dev/null
+          lookup="$SSH_HOST"
+          if [ "$SSH_PORT" != "22" ]; then lookup="[$SSH_HOST]:$SSH_PORT"; fi
+          ssh-keygen -F "$lookup" -f "${RUNNER_TEMP}/production-evidence-ssh/known_hosts" >/dev/null \
+            || { echo "PRODUCTION_EVIDENCE_SSH_HOST_KEY_NOT_PINNED" >&2; exit 1; }
+
+      - name: 通过强制命令采集脱敏 provider receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! ssh -T \
+            -i "${RUNNER_TEMP}/production-evidence-ssh/id" \
+            -p "$SSH_PORT" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o IdentitiesOnly=yes \
+            -o PasswordAuthentication=no \
+            -o KbdInteractiveAuthentication=no \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="${RUNNER_TEMP}/production-evidence-ssh/known_hosts" \
+            "$SSH_USER@$SSH_HOST" "haichuan-production-evidence-collect" \
+            < "${RUNNER_TEMP}/production-evidence-request.json" \
+            > ".codex-tmp/production-evidence-envelope.json" \
+            2> "${RUNNER_TEMP}/production-evidence-ssh-error.log"; then
+            echo "PRODUCTION_EVIDENCE_REMOTE_COLLECTION_FAILED" >&2
+            exit 1
+          fi
+          test "$(wc -c < ".codex-tmp/production-evidence-envelope.json")" -le 12582912 \
+            || { echo "PRODUCTION_EVIDENCE_REMOTE_RESPONSE_TOO_LARGE" >&2; exit 1; }
+
+      - name: 重验远程采集绑定并只物化允许文件
+        shell: bash
+        env:
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          MIGRATION_BUNDLE_SHA256: ${{ steps.manifest.outputs.migration_bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          node scripts/prepare-production-evidence-signing.mjs \
+            --materialize-collector-envelope ".codex-tmp/production-evidence-envelope.json" \
+            --evidence-root .codex-tmp/production-evidence-source \
+            --collector-sha256 "$REMOTE_COLLECTOR_SHA256" \
+            --environment-id-sha256 "$ENVIRONMENT_ID_SHA256" \
+            --approval-reference-sha256 "$APPROVAL_REFERENCE_SHA256" \
+            --release-git-sha "$GITHUB_SHA" \
+            --migration-bundle-sha256 "$MIGRATION_BUNDLE_SHA256" \
+            --release-source "https://github.com/$GITHUB_REPOSITORY" \
+            --repo "$GITHUB_REPOSITORY" \
+            --source-ref "$GITHUB_REF" \
+            --manifest-signer-workflow "$MANIFEST_SIGNER_WORKFLOW" \
+            --evidence-signer-workflow "$EVIDENCE_SIGNER_WORKFLOW" \
+            --release-profile "$RELEASE_PROFILE" \
+            --release-run-id "$RELEASE_RUN_ID" \
+            --evidence-run-id "$GITHUB_RUN_ID" \
+            --release-owner "$RELEASE_OWNER" \
+            --rollback-owner "$ROLLBACK_OWNER" \
+            --incident-owner "$INCIDENT_OWNER"
+
+      - name: 校验证据结构并冻结签名输入
+        id: prepare
+        shell: bash
+        env:
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          MIGRATION_BUNDLE_SHA256: ${{ steps.manifest.outputs.migration_bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          result_path="${RUNNER_TEMP}/production-evidence-prepare-result.json"
+          node scripts/prepare-production-evidence-signing.mjs \
+            --evidence-root .codex-tmp/production-evidence-source \
+            --output-root .codex-tmp/production-evidence-signing \
+            --environment-id-sha256 "$ENVIRONMENT_ID_SHA256" \
+            --approval-reference-sha256 "$APPROVAL_REFERENCE_SHA256" \
+            --release-git-sha "$GITHUB_SHA" \
+            --migration-bundle-sha256 "$MIGRATION_BUNDLE_SHA256" \
+            --release-source "https://github.com/$GITHUB_REPOSITORY" \
+            --repo "$GITHUB_REPOSITORY" \
+            --source-ref "$GITHUB_REF" \
+            --manifest-signer-workflow "$MANIFEST_SIGNER_WORKFLOW" \
+            --evidence-signer-workflow "$EVIDENCE_SIGNER_WORKFLOW" \
+            --release-profile "$RELEASE_PROFILE" \
+            --release-run-id "$RELEASE_RUN_ID" \
+            --evidence-run-id "$GITHUB_RUN_ID" \
+            --release-owner "$RELEASE_OWNER" \
+            --rollback-owner "$ROLLBACK_OWNER" \
+            --incident-owner "$INCIDENT_OWNER" > "$result_path"
+          PREPARE_RESULT_PATH="$result_path" node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from "node:fs";
+          const result = JSON.parse(readFileSync(process.env.PREPARE_RESULT_PATH, "utf8"));
+          if (!/^[a-f0-9]{64}$/.test(result.signingInputsSha256 ?? "")) process.exit(1);
+          appendFileSync(process.env.GITHUB_OUTPUT, [
+            `signing_inputs_sha256=${result.signingInputsSha256}`,
+            `environment_id_sha256=${process.env.ENVIRONMENT_ID_SHA256}`,
+            `approval_reference_sha256=${process.env.APPROVAL_REFERENCE_SHA256}`,
+            `release_profile=${process.env.RELEASE_PROFILE}`,
+          ].join("\n") + "\n");
+          NODE
+
+      - name: 上传同次运行的固定签名输入
+        id: upload-signing-inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-evidence-signing-inputs-${{ github.run_id }}
+          path: .codex-tmp/production-evidence-signing
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: 清理 SSH 临时材料
+        if: always()
+        shell: bash
+        run: |
+          rm -f "${RUNNER_TEMP}/production-evidence-ssh/id" \
+            "${RUNNER_TEMP}/production-evidence-ssh/known_hosts" \
+            "${RUNNER_TEMP}/production-evidence-ssh-error.log" \
+            "${RUNNER_TEMP}/production-evidence-request.json" \
+            ".codex-tmp/production-evidence-envelope.json"
+
+  sign:
+    name: 独立 Keyless 签署生产证据
+    needs: collect
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      id-token: write
+    outputs:
+      signed_artifact_id: ${{ steps.upload-signed.outputs.artifact-id }}
+    steps:
+      - name: 配置固定 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+
+      - name: 安装固定版本 Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v3.1.3
+
+      - name: 按 collect job 输出的 artifact ID 下载
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.collect.outputs.signing_inputs_artifact_id }}
+          path: production-evidence-input
+
+      - name: 校验签名输入摘要和运行绑定
+        shell: bash
+        env:
+          EXPECTED_SIGNING_INPUTS_SHA256: ${{ needs.collect.outputs.signing_inputs_sha256 }}
+          EXPECTED_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFileSync } from "node:fs";
+          const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+          const root = "production-evidence-input";
+          const inputsPath = `${root}/production-evidence-signing-inputs.json`;
+          if (hash(inputsPath) !== process.env.EXPECTED_SIGNING_INPUTS_SHA256) throw new Error("PRODUCTION_EVIDENCE_SIGNING_INPUTS_HASH_MISMATCH");
+          const input = JSON.parse(readFileSync(inputsPath, "utf8"));
+          const expectedWorkflow = `github.com/${process.env.GITHUB_REPOSITORY}/.github/workflows/production-evidence.yml`;
+          if (input.schemaVersion !== 1 || input.repository !== process.env.GITHUB_REPOSITORY ||
+              input.releaseGitSha !== process.env.GITHUB_SHA || input.sourceRef !== process.env.GITHUB_REF ||
+              input.evidenceRunId !== Number(process.env.GITHUB_RUN_ID) ||
+              input.releaseRunId !== Number(process.env.EXPECTED_RELEASE_RUN_ID) ||
+              input.evidenceSignerWorkflow !== expectedWorkflow ||
+              hash(`${root}/production-evidence.json`) !== input.evidenceSha256 ||
+              hash(`${root}/production-evidence.provenance.json`) !== input.predicateSha256) {
+            throw new Error("PRODUCTION_EVIDENCE_SIGNING_INPUTS_BINDING_INVALID");
+          }
+          NODE
+
+      - name: 签署并立即验证 SLSA v1 evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="production-evidence-input"
+          signer_identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/production-evidence.yml@${GITHUB_REF}"
+          cosign attest-blob --yes \
+            --type slsaprovenance1 \
+            --predicate "$root/production-evidence.provenance.json" \
+            --bundle "$root/production-evidence.attestation.json" \
+            "$root/production-evidence.json" >/dev/null
+          cosign verify-blob-attestation \
+            --type slsaprovenance1 \
+            --bundle "$root/production-evidence.attestation.json" \
+            --certificate-identity "$signer_identity" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-github-workflow-trigger "workflow_dispatch" \
+            --certificate-github-workflow-sha "$GITHUB_SHA" \
+            --certificate-github-workflow-repository "$GITHUB_REPOSITORY" \
+            --certificate-github-workflow-ref "$GITHUB_REF" \
+            "$root/production-evidence.json" > "$root/production-evidence.attestation.verified.jsonl"
+          BUNDLE_PATH="$root/production-evidence.attestation.json" node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          const bundle = JSON.parse(readFileSync(process.env.BUNDLE_PATH, "utf8"));
+          if (bundle.mediaType !== "application/vnd.dev.sigstore.bundle.v0.3+json") {
+            throw new Error("PRODUCTION_EVIDENCE_SIGSTORE_BUNDLE_FORMAT_INVALID");
+          }
+          NODE
+
+      - name: 上传待独立完整复验的签名制品
+        id: upload-signed
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-evidence-signed-internal-${{ github.run_id }}
+          path: production-evidence-input
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  verify:
+    name: 用现有合同复验完整信任链
+    needs:
+      - collect
+      - sign
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    steps:
+      - name: 检出精确验证器
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: 安装固定版本 Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v3.1.3
+
+      - name: 登录 GHCR 以读取私有镜像证明
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 安装锁定验证依赖
+        run: npm ci --ignore-scripts
+
+      - name: 按 sign job 的固定 artifact ID 下载
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.sign.outputs.signed_artifact_id }}
+          path: .codex-tmp/production-evidence
+
+      - name: 重验 production evidence 与全部发布签名链
+        shell: bash
+        env:
+          ENVIRONMENT_ID_SHA256: ${{ needs.collect.outputs.environment_id_sha256 }}
+          APPROVAL_REFERENCE_SHA256: ${{ needs.collect.outputs.approval_reference_sha256 }}
+          MIGRATION_BUNDLE_SHA256: ${{ needs.collect.outputs.migration_bundle_sha256 }}
+          RELEASE_PROFILE: ${{ needs.collect.outputs.release_profile }}
+          SOURCE_REF: ${{ needs.collect.outputs.source_ref }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-production-evidence.mjs \
+            --evidence .codex-tmp/production-evidence/production-evidence.json \
+            --evidence-root .codex-tmp/production-evidence \
+            --evidence-bundle .codex-tmp/production-evidence/production-evidence.attestation.json \
+            --environment-id-sha256 "$ENVIRONMENT_ID_SHA256" \
+            --approval-reference-sha256 "$APPROVAL_REFERENCE_SHA256" \
+            --release-git-sha "$GITHUB_SHA" \
+            --migration-bundle-sha256 "$MIGRATION_BUNDLE_SHA256" \
+            --release-source "https://github.com/$GITHUB_REPOSITORY" \
+            --release-profile "$RELEASE_PROFILE" \
+            --repo "$GITHUB_REPOSITORY" \
+            --source-ref "$SOURCE_REF" \
+            --manifest-signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/release-images.yml" \
+            --evidence-signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/production-evidence.yml"
+          echo "PRODUCTION_EVIDENCE_SIGNED_AND_VERIFIED"
+
+      - name: 上传通过完整复验的最终制品
+        id: upload-final
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: production-evidence-${{ github.sha }}-${{ github.run_id }}
+          path: .codex-tmp/production-evidence
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+      - name: 记录脱敏交付指针
+        shell: bash
+        env:
+          FINAL_ARTIFACT_ID: ${{ steps.upload-final.outputs.artifact-id }}
+          FINAL_ARTIFACT_DIGEST: ${{ steps.upload-final.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          [[ "$FINAL_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$FINAL_ARTIFACT_DIGEST" =~ ^[a-f0-9]{64}$ ]]
+          {
+            echo "### Verified production evidence"
+            echo "- repository: ${GITHUB_REPOSITORY}"
+            echo "- commit: ${GITHUB_SHA}"
+            echo "- source ref: ${GITHUB_REF}"
+            echo "- artifact id: ${FINAL_ARTIFACT_ID}"
+            echo "- artifact digest: sha256:${FINAL_ARTIFACT_DIGEST}"
+          } >> "$GITHUB_STEP_SUMMARY"

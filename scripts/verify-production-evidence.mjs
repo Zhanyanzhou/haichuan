@@ -176,7 +176,7 @@ function validateTrustedContext(trusted) {
 
 function assertStrictManifestSchema(manifest) {
   assertExactKeys(manifest, [
-    "schemaVersion", "gitSha", "migrationBundleSha256", "source", "qualityGate",
+    "schemaVersion", "releaseStage", "imageTag", "gitSha", "migrationBundleSha256", "source", "qualityGate",
     "attestationPolicy", "publicSeo", "server", "client", "operations",
   ], "PRODUCTION_EVIDENCE_MANIFEST_SCHEMA_INVALID");
   assertExactKeys(manifest.qualityGate, [
@@ -189,7 +189,7 @@ function assertStrictManifestSchema(manifest) {
     "manifestPredicateType",
   ], "PRODUCTION_EVIDENCE_MANIFEST_ATTESTATION_SCHEMA_INVALID");
   assertExactKeys(manifest.publicSeo, [
-    "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest",
+    "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest",
   ], "PRODUCTION_EVIDENCE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
   for (const component of ["server", "client", "operations"]) {
     const allowedImageKeys = [
@@ -238,7 +238,11 @@ export function validateProductionEvidenceStructure(evidence, trusted) {
   }
   rejectSensitiveKeys(manifest, "manifest");
   assertStrictManifestSchema(manifest);
-  validateReleaseManifest(manifest, { gitSha: trusted.releaseGitSha, migrationBundleSha256: trusted.migrationBundleSha256 });
+  validateReleaseManifest(manifest, {
+    gitSha: trusted.releaseGitSha,
+    migrationBundleSha256: trusted.migrationBundleSha256,
+    releaseStage: "production",
+  });
   if (manifest.source !== trusted.releaseSource) fail("PRODUCTION_EVIDENCE_RELEASE_SOURCE_MISMATCH");
   if (manifest.attestationPolicy.signerWorkflow.toLowerCase() !== trusted.manifestSignerWorkflow.toLowerCase()) {
     fail("PRODUCTION_EVIDENCE_MANIFEST_SIGNER_MISMATCH");
@@ -506,6 +510,8 @@ function parseCosignImageAttestationOutput(stdout, spec, trusted) {
     const parameters = matched?.predicate?.buildDefinition?.externalParameters;
     const expectedBuilder = `https://${trusted.manifestSignerWorkflow}@${trusted.sourceRef}`;
     if (parameters?.component !== spec.component || parameters?.source !== trusted.releaseSource ||
+        parameters?.releaseStage !== "production" ||
+        parameters?.imageTag !== spec.manifest.imageTag ||
         parameters?.sourceRef !== trusted.sourceRef || parameters?.gitSha !== trusted.releaseGitSha ||
         matched?.predicate?.runDetails?.builder?.id?.toLowerCase() !== expectedBuilder.toLowerCase()) {
       fail(`PRODUCTION_EVIDENCE_PROVENANCE_CONTENT_MISMATCH:${spec.label}`);
@@ -534,12 +540,14 @@ function parseManifestProvenanceOutput(stdout, spec) {
   const predicate = matched?.predicate;
   const parameters = predicate?.buildDefinition?.externalParameters;
   const expectedBuilder = `https://${spec.trusted.manifestSignerWorkflow}@${spec.trusted.sourceRef}`;
-  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v4`;
+  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v5`;
   if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
       parameters?.gitSha !== spec.trusted.releaseGitSha ||
       parameters?.sourceRef !== spec.trusted.sourceRef ||
       parameters?.qualityGateRunId !== spec.manifest.qualityGate.runId ||
       parameters?.schemaVersion !== spec.manifest.schemaVersion ||
+      parameters?.releaseStage !== "production" ||
+      parameters?.imageTag !== spec.manifest.imageTag ||
       predicate?.runDetails?.builder?.id?.toLowerCase() !== expectedBuilder.toLowerCase()) {
     fail("PRODUCTION_EVIDENCE_MANIFEST_PROVENANCE_CONTENT_MISMATCH");
   }
@@ -674,6 +682,7 @@ export async function verifyProductionEvidence(evidence, trusted, options = {}) 
         }),
         kind: "image-attestation",
         component,
+        manifest: validated.manifest,
         trusted,
         predicateType,
         subjectSha256: image.digest.slice("sha256:".length),

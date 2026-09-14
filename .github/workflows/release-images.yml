@@ -3,8 +3,16 @@ name: Release Images
 on:
   workflow_dispatch:
     inputs:
+      release_stage:
+        description: "制品阶段；预发布与正式发布严格隔离"
+        required: true
+        default: "preproduction"
+        type: choice
+        options:
+          - preproduction
+          - production
       public_site_origin:
-        description: "正式公开站点 Origin（HTTPS，不含路径）"
+        description: "目标阶段站点 Origin（HTTPS，不含路径，必须与同阶段 SEO snapshot 一致）"
         required: true
         type: string
       public_seo_snapshot_artifact_id:
@@ -121,6 +129,8 @@ jobs:
       contents: read
       packages: write
     outputs:
+      release_stage: ${{ steps.release.outputs.release_stage }}
+      image_tag: ${{ steps.release.outputs.image_tag }}
       migration_sha: ${{ steps.release.outputs.migration_sha }}
       server_image: ${{ steps.release.outputs.server_image }}
       server_digest: ${{ steps.server.outputs.digest }}
@@ -154,11 +164,27 @@ jobs:
       - name: 计算发布事实
         id: release
         shell: bash
+        env:
+          RELEASE_STAGE: ${{ inputs.release_stage }}
         run: |
+          set -euo pipefail
+          case "$RELEASE_STAGE" in
+            production)
+              repository_stage_suffix=""
+              image_tag="sha-${GITHUB_SHA}"
+              ;;
+            preproduction)
+              repository_stage_suffix="-preproduction"
+              image_tag="preproduction-sha-${GITHUB_SHA}"
+              ;;
+            *) echo "RELEASE_STAGE_INVALID" >&2; exit 1 ;;
+          esac
           echo "migration_sha=$(node scripts/verify-migration-integrity.mjs --print-bundle-sha)" >> "$GITHUB_OUTPUT"
-          echo "server_image=ghcr.io/${GITHUB_REPOSITORY,,}-server" >> "$GITHUB_OUTPUT"
-          echo "client_image=ghcr.io/${GITHUB_REPOSITORY,,}-client" >> "$GITHUB_OUTPUT"
-          echo "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}-operations" >> "$GITHUB_OUTPUT"
+          echo "release_stage=${RELEASE_STAGE}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
+          echo "server_image=ghcr.io/${GITHUB_REPOSITORY,,}${repository_stage_suffix}-server" >> "$GITHUB_OUTPUT"
+          echo "client_image=ghcr.io/${GITHUB_REPOSITORY,,}${repository_stage_suffix}-client" >> "$GITHUB_OUTPUT"
+          echo "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}${repository_stage_suffix}-operations" >> "$GITHUB_OUTPUT"
 
       - name: 获取并校验不可变 SEO snapshot 制品
         id: seo-source
@@ -168,6 +194,7 @@ jobs:
           SEO_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
           PUBLIC_SITE_ORIGIN: ${{ inputs.public_site_origin }}
           EXPECTED_SEO_PRODUCER_WORKFLOW_PATH: .github/workflows/export-public-seo-snapshot.yml
+          RELEASE_STAGE: ${{ steps.release.outputs.release_stage }}
         run: |
           set -euo pipefail
           [[ "$SEO_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]] || { echo "PUBLIC_SEO_ARTIFACT_ID_INVALID" >&2; exit 1; }
@@ -175,7 +202,7 @@ jobs:
           mkdir -p "$seo_input_dir" client/.release-seo
           gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SEO_ARTIFACT_ID}" > "$seo_input_dir/metadata.json"
           gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SEO_ARTIFACT_ID}/zip" > "$seo_input_dir/artifact.zip"
-          producer_run_id="$(node -e 'const m=require(process.argv[1]); const expectedName=`public-seo-snapshot-${process.env.GITHUB_SHA}`; if(m.name!==expectedName || m.expired || !Number.isInteger(m.workflow_run?.id) || m.workflow_run?.head_sha!==process.env.GITHUB_SHA || !/^sha256:[a-f0-9]{64}$/.test(m.digest||"")) process.exit(1); process.stdout.write(String(m.workflow_run.id))' "$seo_input_dir/metadata.json")" \
+          producer_run_id="$(node -e 'const m=require(process.argv[1]); const expectedName=`public-seo-${process.env.RELEASE_STAGE}-snapshot-${process.env.GITHUB_SHA}`; if(m.name!==expectedName || m.expired || !Number.isInteger(m.workflow_run?.id) || m.workflow_run?.head_sha!==process.env.GITHUB_SHA || !/^sha256:[a-f0-9]{64}$/.test(m.digest||"")) process.exit(1); process.stdout.write(String(m.workflow_run.id))' "$seo_input_dir/metadata.json")" \
             || { echo "PUBLIC_SEO_ARTIFACT_METADATA_INVALID" >&2; exit 1; }
           gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${producer_run_id}" > "$seo_input_dir/producer-run.json"
           PRODUCER_RUN_PATH="$seo_input_dir/producer-run.json" node -e 'const r=require(process.env.PRODUCER_RUN_PATH); const workflowPath=String(r.path||"").split("@",1)[0]; if(r.head_sha!==process.env.GITHUB_SHA || r.repository?.full_name!==process.env.GITHUB_REPOSITORY || (r.head_repository && r.head_repository.full_name!==process.env.GITHUB_REPOSITORY) || workflowPath!==process.env.EXPECTED_SEO_PRODUCER_WORKFLOW_PATH || r.event!=="workflow_dispatch" || r.status!=="completed" || r.conclusion!=="success") process.exit(1)' \
@@ -195,6 +222,7 @@ jobs:
           import { validatePublicSeoSnapshot } from "./scripts/export-public-seo-snapshot.mjs";
           const metadata = JSON.parse(readFileSync(process.env.SEO_METADATA_PATH, "utf8"));
           const snapshot = validatePublicSeoSnapshot(JSON.parse(readFileSync(process.env.SEO_SNAPSHOT_PATH, "utf8")));
+          if (snapshot.sourceStage !== process.env.RELEASE_STAGE) throw new Error("PUBLIC_SEO_SOURCE_STAGE_MISMATCH");
           if (snapshot.origin !== process.env.PUBLIC_SITE_ORIGIN) throw new Error("PUBLIC_SEO_ORIGIN_MISMATCH");
           const lines = [
             `snapshot_hash=${snapshot.snapshotHash}`,
@@ -251,7 +279,7 @@ jobs:
           file: server/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.release.outputs.server_image }}:sha-${{ github.sha }}
+          tags: ${{ steps.release.outputs.server_image }}:${{ steps.release.outputs.image_tag }}
           provenance: mode=max
           sbom: true
           build-args: |
@@ -267,7 +295,7 @@ jobs:
           file: client/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.release.outputs.client_image }}:sha-${{ github.sha }}
+          tags: ${{ steps.release.outputs.client_image }}:${{ steps.release.outputs.image_tag }}
           provenance: mode=max
           sbom: true
           build-args: |
@@ -324,7 +352,7 @@ jobs:
           target: operations
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.release.outputs.operations_image }}:sha-${{ github.sha }}
+          tags: ${{ steps.release.outputs.operations_image }}:${{ steps.release.outputs.image_tag }}
           provenance: mode=max
           sbom: true
           build-args: |
@@ -521,6 +549,8 @@ jobs:
           PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ steps.seo.outputs.prerender_manifest_sha }}
           PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
           PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ steps.seo-source.outputs.source_artifact_digest }}
+          RELEASE_STAGE: ${{ steps.release.outputs.release_stage }}
+          IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
         run: |
           set -euo pipefail
           node - <<'NODE'
@@ -536,13 +566,16 @@ jobs:
             sbom: descriptor("sbom/" + component + ".spdx.json"),
           });
           const inputs = {
-            schemaVersion: 1,
+            schemaVersion: 2,
+            releaseStage: process.env.RELEASE_STAGE,
+            imageTag: process.env.IMAGE_TAG,
             gitSha: process.env.GITHUB_SHA,
             source: process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY,
             sourceRef: process.env.GITHUB_REF,
             migrationBundleSha256: process.env.MIGRATION_SHA,
             qualityGate: { runId: Number(process.env.QUALITY_RUN_ID), runUrl: process.env.QUALITY_RUN_URL, headSha: process.env.QUALITY_HEAD_SHA },
             publicSeo: {
+              sourceStage: process.env.RELEASE_STAGE,
               snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH,
               prerenderManifestSha256: process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256,
               sourceArtifactId: Number(process.env.PUBLIC_SEO_SOURCE_ARTIFACT_ID),
@@ -562,7 +595,7 @@ jobs:
         id: signing-inputs-artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-signing-inputs-${{ github.run_id }}
+          name: release-${{ steps.release.outputs.release_stage }}-signing-inputs-${{ github.run_id }}
           path: |
             release-output/signing-inputs.json
             release-output/provenance/*.buildkit.json
@@ -622,6 +655,8 @@ jobs:
           EXPECTED_PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ needs.build-push.outputs.public_seo_prerender_manifest_sha256 }}
           EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
           EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ needs.build-push.outputs.public_seo_source_artifact_digest }}
+          EXPECTED_RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
+          EXPECTED_IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
           set -euo pipefail
           mkdir -p release-output/provenance release-output/sbom release-output/attestations release-output/verified
@@ -641,10 +676,12 @@ jobs:
                 JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...keys].sort())) fail(code);
           };
           const input = JSON.parse(fs.readFileSync("release-input/signing-inputs.json", "utf8"));
-          exact(input, ["schemaVersion", "gitSha", "source", "sourceRef", "migrationBundleSha256", "qualityGate", "publicSeo", "images"], "RELEASE_SIGNING_INPUTS_SCHEMA_INVALID");
-          if (input.schemaVersion !== 1 || input.gitSha !== process.env.GITHUB_SHA ||
+          exact(input, ["schemaVersion", "releaseStage", "imageTag", "gitSha", "source", "sourceRef", "migrationBundleSha256", "qualityGate", "publicSeo", "images"], "RELEASE_SIGNING_INPUTS_SCHEMA_INVALID");
+          if (input.schemaVersion !== 2 || input.gitSha !== process.env.GITHUB_SHA ||
               input.source !== process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY ||
               input.sourceRef !== process.env.GITHUB_REF ||
+              input.releaseStage !== process.env.EXPECTED_RELEASE_STAGE ||
+              input.imageTag !== process.env.EXPECTED_IMAGE_TAG ||
               input.migrationBundleSha256 !== process.env.EXPECTED_MIGRATION_SHA) {
             fail("RELEASE_SIGNING_INPUTS_IDENTITY_MISMATCH");
           }
@@ -653,8 +690,9 @@ jobs:
               input.qualityGate.runUrl !== process.env.EXPECTED_QUALITY_RUN_URL ||
               input.qualityGate.headSha !== process.env.EXPECTED_QUALITY_HEAD_SHA ||
               input.qualityGate.headSha !== process.env.GITHUB_SHA) fail("RELEASE_SIGNING_QUALITY_MISMATCH");
-          exact(input.publicSeo, ["snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest"], "RELEASE_SIGNING_SEO_SCHEMA_INVALID");
-          if (input.publicSeo.snapshotHash !== process.env.EXPECTED_PUBLIC_SEO_SNAPSHOT_HASH ||
+          exact(input.publicSeo, ["sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest"], "RELEASE_SIGNING_SEO_SCHEMA_INVALID");
+          if (input.publicSeo.sourceStage !== input.releaseStage ||
+              input.publicSeo.snapshotHash !== process.env.EXPECTED_PUBLIC_SEO_SNAPSHOT_HASH ||
               input.publicSeo.prerenderManifestSha256 !== process.env.EXPECTED_PUBLIC_SEO_PRERENDER_MANIFEST_SHA256 ||
               input.publicSeo.sourceArtifactId !== Number(process.env.EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_ID) ||
               input.publicSeo.sourceArtifactDigest !== process.env.EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST) {
@@ -668,7 +706,7 @@ jobs:
           };
           const source = input.source;
           const builderId = "https://github.com/" + process.env.GITHUB_REPOSITORY + "/.github/workflows/release-images.yml@" + process.env.GITHUB_REF;
-          const buildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#cosign-image-release-v1";
+          const buildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#cosign-image-release-v2";
           for (const component of ["server", "client", "operations"]) {
             const image = input.images[component];
             exact(image, ["image", "digest", "reference", "buildkitProvenance", "sbom"], "RELEASE_SIGNING_IMAGE_SCHEMA_INVALID:" + component);
@@ -712,6 +750,8 @@ jobs:
                 buildType,
                 externalParameters: {
                   component,
+                  releaseStage: input.releaseStage,
+                  imageTag: input.imageTag,
                   platform: "linux/amd64",
                   source,
                   sourceRef: process.env.GITHUB_REF,
@@ -766,6 +806,8 @@ jobs:
           SERVER_REFERENCE: ${{ needs.build-push.outputs.server_image }}@${{ needs.build-push.outputs.server_digest }}
           CLIENT_REFERENCE: ${{ needs.build-push.outputs.client_image }}@${{ needs.build-push.outputs.client_digest }}
           OPERATIONS_REFERENCE: ${{ needs.build-push.outputs.operations_image }}@${{ needs.build-push.outputs.operations_digest }}
+          EXPECTED_RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
+          EXPECTED_IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
           set -euo pipefail
           signer_identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release-images.yml@${GITHUB_REF}"
@@ -836,6 +878,8 @@ jobs:
               statement.subject?.some((subject) => subject?.digest?.sha256 === expectedDigest));
             const parameters = provenance?.predicate?.buildDefinition?.externalParameters;
             if (parameters?.component !== component || parameters?.source !== expectedSource ||
+                parameters?.releaseStage !== process.env.EXPECTED_RELEASE_STAGE ||
+                parameters?.imageTag !== process.env.EXPECTED_IMAGE_TAG ||
                 parameters?.sourceRef !== process.env.GITHUB_REF || parameters?.gitSha !== process.env.GITHUB_SHA ||
                 provenance?.predicate?.runDetails?.builder?.id !== expectedBuilder) {
               throw new Error("RELEASE_SIGNED_PROVENANCE_CONTENT_INVALID:" + component);
@@ -849,7 +893,7 @@ jobs:
           }
           NODE
 
-      - name: 生成 schema v4 不可变发布清单和真实 SLSA v1 predicate
+      - name: 生成 schema v5 不可变发布清单和真实 SLSA v1 predicate
         shell: bash
         env:
           SERVER_IMAGE_NAME: ${{ needs.build-push.outputs.server_image }}
@@ -866,6 +910,8 @@ jobs:
           PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ needs.build-push.outputs.public_seo_prerender_manifest_sha256 }}
           PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ inputs.public_seo_snapshot_artifact_id }}
           PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ needs.build-push.outputs.public_seo_source_artifact_digest }}
+          RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
+          IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
           set -euo pipefail
           node - <<'NODE'
@@ -896,7 +942,9 @@ jobs:
             ],
           };
           const manifest = {
-            schemaVersion: 4,
+            schemaVersion: 5,
+            releaseStage: process.env.RELEASE_STAGE,
+            imageTag: process.env.IMAGE_TAG,
             gitSha: process.env.GITHUB_SHA,
             migrationBundleSha256: process.env.MIGRATION_SHA,
             source: process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY,
@@ -924,6 +972,7 @@ jobs:
               manifestPredicateType: "https://slsa.dev/provenance/v1",
             },
             publicSeo: {
+              sourceStage: process.env.RELEASE_STAGE,
               snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH,
               prerenderManifestSha256: process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256,
               sourceArtifactId: Number(process.env.PUBLIC_SEO_SOURCE_ARTIFACT_ID),
@@ -933,10 +982,11 @@ jobs:
             client: image("client", process.env.CLIENT_IMAGE_NAME, process.env.CLIENT_IMAGE_DIGEST),
             operations,
           };
+          const stageSuffix = process.env.RELEASE_STAGE === "production" ? "" : "-preproduction";
           const expectedImageNames = {
-            server: "ghcr.io/" + process.env.GITHUB_REPOSITORY.toLowerCase() + "-server",
-            client: "ghcr.io/" + process.env.GITHUB_REPOSITORY.toLowerCase() + "-client",
-            operations: "ghcr.io/" + process.env.GITHUB_REPOSITORY.toLowerCase() + "-operations",
+            server: "ghcr.io/" + process.env.GITHUB_REPOSITORY.toLowerCase() + stageSuffix + "-server",
+            client: "ghcr.io/" + process.env.GITHUB_REPOSITORY.toLowerCase() + stageSuffix + "-client",
+            operations: "ghcr.io/" + process.env.GITHUB_REPOSITORY.toLowerCase() + stageSuffix + "-operations",
           };
           for (const component of ["server", "client", "operations"]) {
             if (manifest[component].image !== expectedImageNames[component] ||
@@ -952,12 +1002,14 @@ jobs:
           const source = manifest.source;
           const predicate = {
             buildDefinition: {
-              buildType: source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v4",
+              buildType: source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v5",
               externalParameters: {
                 gitSha: process.env.GITHUB_SHA,
                 sourceRef: process.env.GITHUB_REF,
                 qualityGateRunId: Number(process.env.QUALITY_RUN_ID),
-                schemaVersion: 4,
+                schemaVersion: 5,
+                releaseStage: process.env.RELEASE_STAGE,
+                imageTag: process.env.IMAGE_TAG,
               },
               internalParameters: {},
               resolvedDependencies: [
@@ -982,6 +1034,8 @@ jobs:
           CLIENT_REFERENCE: ${{ needs.build-push.outputs.client_image }}@${{ needs.build-push.outputs.client_digest }}
           OPERATIONS_REFERENCE: ${{ needs.build-push.outputs.operations_image }}@${{ needs.build-push.outputs.operations_digest }}
           QUALITY_RUN_ID: ${{ needs.quality-proof.outputs.run_id }}
+          RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
+          IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
           set -euo pipefail
           signer_identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release-images.yml@${GITHUB_REF}"
@@ -1019,12 +1073,14 @@ jobs:
           const parameters = predicate?.buildDefinition?.externalParameters;
           const source = process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY;
           const expectedBuilder = "https://github.com/" + process.env.GITHUB_REPOSITORY + "/.github/workflows/release-images.yml@" + process.env.GITHUB_REF;
-          const expectedBuildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v4";
+          const expectedBuildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v5";
           if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
               parameters?.gitSha !== process.env.GITHUB_SHA ||
               parameters?.sourceRef !== process.env.GITHUB_REF ||
               parameters?.qualityGateRunId !== Number(process.env.QUALITY_RUN_ID) ||
-              parameters?.schemaVersion !== 4 ||
+              parameters?.schemaVersion !== 5 ||
+              parameters?.releaseStage !== process.env.RELEASE_STAGE ||
+              parameters?.imageTag !== process.env.IMAGE_TAG ||
               predicate?.runDetails?.builder?.id !== expectedBuilder) {
             throw new Error("RELEASE_MANIFEST_PROVENANCE_CONTENT_INVALID");
           }
@@ -1049,7 +1105,7 @@ jobs:
       - name: 上传发布清单
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: release-manifest-${{ github.sha }}
+          name: release-${{ needs.build-push.outputs.release_stage }}-manifest-${{ github.sha }}
           path: |
             release-output/release-manifest.json
             release-output/release-manifest.attestation.json

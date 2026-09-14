@@ -61,10 +61,15 @@ export function createPublicSeoExportConfig(environment: NodeJS.ProcessEnv) {
   });
   const expectedOrigin = environment.PUBLIC_SEO_EXPECTED_ORIGIN?.trim() ?? "";
   const expectedDatabaseHost = environment.PUBLIC_SEO_EXPECTED_DATABASE_HOST?.trim().toLowerCase() ?? "";
+  const databaseTransportHost = environment.PUBLIC_SEO_DATABASE_TRANSPORT_HOST?.trim().toLowerCase() ?? "";
   const releaseProfile = environment.PUBLIC_SEO_RELEASE_PROFILE?.trim();
+  const sourceStage = environment.PUBLIC_SEO_SOURCE_STAGE?.trim();
   if (!expectedOrigin) throw new Error("PUBLIC_SEO_EXPORT_EXPECTED_ORIGIN_REQUIRED");
   if (!expectedDatabaseHost || expectedDatabaseHost.length > 253) {
     throw new Error("PUBLIC_SEO_EXPORT_EXPECTED_DATABASE_HOST_REQUIRED");
+  }
+  if (!databaseTransportHost || databaseTransportHost.length > 253) {
+    throw new Error("PUBLIC_SEO_EXPORT_DATABASE_TRANSPORT_HOST_REQUIRED");
   }
   let actualDatabaseHost = "";
   try {
@@ -72,19 +77,26 @@ export function createPublicSeoExportConfig(environment: NodeJS.ProcessEnv) {
   } catch {
     throw new Error("PUBLIC_SEO_EXPORT_DATABASE_URL_INVALID");
   }
-  if (actualDatabaseHost !== expectedDatabaseHost) {
-    throw new Error("PUBLIC_SEO_EXPORT_DATABASE_HOST_MISMATCH");
+  if (actualDatabaseHost !== databaseTransportHost) {
+    throw new Error("PUBLIC_SEO_EXPORT_DATABASE_TRANSPORT_HOST_MISMATCH");
   }
   if (releaseProfile !== "lead-generation" && releaseProfile !== "commerce") {
     throw new Error("PUBLIC_SEO_EXPORT_RELEASE_PROFILE_REQUIRED");
   }
+  if (sourceStage !== "preproduction" && sourceStage !== "production") {
+    throw new Error("PUBLIC_SEO_EXPORT_SOURCE_STAGE_REQUIRED");
+  }
+  if (identity.environmentId !== `public-seo-${sourceStage}`) {
+    throw new Error("PUBLIC_SEO_EXPORT_SOURCE_STAGE_ENVIRONMENT_MISMATCH");
+  }
   return {
     identity,
     source: {
+      sourceStage,
       expectedOrigin,
       sourceEnvironmentId: identity.environmentId,
       expectedDatabase: identity.expectedDatabase,
-      databaseHostHash: sha256(actualDatabaseHost),
+      databaseHostHash: sha256(expectedDatabaseHost),
       approvalReferenceHash: identity.approvalReferenceHash,
       releaseProfile,
     },
