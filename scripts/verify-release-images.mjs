@@ -566,7 +566,7 @@ function assertReleaseSupplyChainTests() {
       !rootTest.includes("npm run test:release-supply-chain")) {
     fail("RELEASE_SUPPLY_CHAIN_TEST_NOT_IN_QUALITY_SUITE");
   }
-  if (releaseTest !== "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs") {
+  if (releaseTest !== "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs scripts/production-evidence-collector.spec.mjs") {
     fail("RELEASE_SUPPLY_CHAIN_TEST_COMMAND_INVALID");
   }
   return {
