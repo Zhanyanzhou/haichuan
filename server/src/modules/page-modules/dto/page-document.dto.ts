@@ -1,5 +1,6 @@
 import { Type } from "class-transformer";
 import {
+  IsBoolean,
   IsISO8601,
   IsIn,
   IsInt,
@@ -112,4 +113,8 @@ export class ReviewPageDocumentDto extends SubmitPageDocumentReviewDto {
   @IsString()
   @MaxLength(2000)
   reviewNote?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  selfReviewAcknowledged?: boolean;
 }

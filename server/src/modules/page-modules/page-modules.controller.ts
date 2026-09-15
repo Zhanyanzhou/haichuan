@@ -316,6 +316,7 @@ export class PageModulesController {
       body.expectedContentHash,
       req.user.id,
       body.reviewNote,
+      body.selfReviewAcknowledged ?? false,
     );
   }
 }
