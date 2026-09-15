@@ -75,6 +75,7 @@ test("build job installs verifier dependencies while isolated signing job execut
   assert.doesNotMatch(signingJob, /actions\/checkout@|npm ci|node scripts\/|docker (?:build|run)/);
   assert.match(signingJob, /artifact-ids: \$\{\{ needs\.build-push\.outputs\.signing_inputs_artifact_id \}\}/);
   assert.match(signingJob, /artifact-ids:[\s\S]*?merge-multiple: true/);
+  assert.match(signingJob, /buildkitProvenancePredicateType: buildkitPredicateType/);
   assert.match(signingJob, /RELEASE_SIGNING_INPUTS_HASH_MISMATCH/);
 });
 
