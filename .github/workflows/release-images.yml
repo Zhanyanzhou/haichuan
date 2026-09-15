@@ -683,6 +683,7 @@ jobs:
         with:
           artifact-ids: ${{ needs.build-push.outputs.signing_inputs_artifact_id }}
           path: release-input
+          merge-multiple: true
 
       - name: 校验上游摘要并构造独立 SLSA v1 provenance
         shell: bash
