@@ -15,9 +15,15 @@ import {
   resolveDesignMediaPath,
   type DesignMediaAssetDescriptor,
 } from './design-file-media';
+import {
+  isResponsivePublicImageWidth,
+  resizePublicImageBuffer,
+} from './responsive-public-media';
 const sharp = require('sharp');
 
 const CHECKSUM_MISMATCH_QUARANTINE_REASON = 'CHECKSUM_MISMATCH';
+const RESPONSIVE_PUBLIC_MEDIA_CACHE_TTL_MS = 5 * 60_000;
+const RESPONSIVE_PUBLIC_MEDIA_CACHE_MAX_ENTRIES = 64;
 
 export type PageMediaType = 'image' | 'video';
 
@@ -68,6 +74,14 @@ export class UploadService implements OnModuleInit {
   ]);
   private readonly maxSize = 10 * 1024 * 1024; // 10MB
   private readonly maxVideoSize = 100 * 1024 * 1024;
+  private readonly responsivePublicMediaCache = new Map<
+    string,
+    { expiresAt: number; value: { buffer: Buffer; mimeType: string } }
+  >();
+  private readonly responsivePublicMediaInFlight = new Map<
+    string,
+    Promise<{ buffer: Buffer; mimeType: string }>
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -630,6 +644,78 @@ export class UploadService implements OnModuleInit {
     return this.readPageMediaContent(initial.id, initial.storageKey, requirePublicAuthorization);
   }
 
+  /** 历史商品媒体必须经商品媒体控制器读取，禁止匿名静态路径返回同一原文件。 */
+  async isLegacyProductMediaStorageKey(storageKey: string): Promise<boolean> {
+    const productImage = await this.prisma.productImage.findFirst({
+      where: { url: `/uploads/${storageKey}` },
+      select: { id: true },
+    });
+    return productImage !== null;
+  }
+
+  /**
+   * 为公开页面图片生成固定宽度 WebP。受控 page-assets 仍先经过授权与完整性校验；
+   * 历史 uploads 图片只允许从公开根内读取，原文件不修改，转码失败则返回原图。
+   */
+  async getResponsivePublicImage(
+    storageKey: string,
+    width: number,
+    requirePublicAuthorization: boolean,
+  ): Promise<{ buffer: Buffer; mimeType: string }> {
+    if (!isResponsivePublicImageWidth(width)) throw new NotFoundException('素材不存在');
+    const source = requirePublicAuthorization
+      ? await this.getPageMediaContentByStorageKey(storageKey, true)
+      : await this.readLegacyPublicImage(storageKey);
+    const cacheKey = `${storageKey}:w${width}:${source.fingerprint}`;
+    const cached = this.responsivePublicMediaCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    if (cached) this.responsivePublicMediaCache.delete(cacheKey);
+
+    const existing = this.responsivePublicMediaInFlight.get(cacheKey);
+    if (existing) return existing;
+
+    const pending = resizePublicImageBuffer(source.buffer, width, source.mimeType);
+    this.responsivePublicMediaInFlight.set(cacheKey, pending);
+
+    try {
+      const value = await pending;
+      if (this.responsivePublicMediaCache.size >= RESPONSIVE_PUBLIC_MEDIA_CACHE_MAX_ENTRIES) {
+        const oldestKey = this.responsivePublicMediaCache.keys().next().value;
+        if (oldestKey) this.responsivePublicMediaCache.delete(oldestKey);
+      }
+      this.responsivePublicMediaCache.set(cacheKey, {
+        expiresAt: Date.now() + RESPONSIVE_PUBLIC_MEDIA_CACHE_TTL_MS,
+        value,
+      });
+      return value;
+    } finally {
+      if (this.responsivePublicMediaInFlight.get(cacheKey) === pending) {
+        this.responsivePublicMediaInFlight.delete(cacheKey);
+      }
+    }
+  }
+
+  private async readLegacyPublicImage(storageKey: string): Promise<{
+    buffer: Buffer;
+    mimeType: string;
+    fingerprint: string;
+  }> {
+    const path = this.resolveWithinRoot(this.uploadDir, storageKey);
+    if (!path || !existsSync(path)) throw new NotFoundException('素材不存在');
+    const extension = extname(storageKey).toLowerCase();
+    const mimeType = extension === '.png'
+      ? 'image/png'
+      : extension === '.webp'
+        ? 'image/webp'
+        : 'image/jpeg';
+    const [buffer, fileStat] = await Promise.all([readFile(path), stat(path)]);
+    return {
+      buffer,
+      mimeType,
+      fingerprint: `${fileStat.size}:${fileStat.mtimeMs}`,
+    };
+  }
+
   private async readPageMediaContent(
     id: number,
     storageKey: string,
@@ -659,9 +745,20 @@ export class UploadService implements OnModuleInit {
         await this.quarantinePageAsset(transaction, asset);
         return { kind: 'QUARANTINED' as const };
       }
-      return { kind: 'CONTENT' as const, buffer, mimeType: asset.mimeType };
+      return {
+        kind: 'CONTENT' as const,
+        buffer,
+        mimeType: asset.mimeType,
+        fingerprint: asset.checksumSha256,
+      };
     });
-    if (result.kind === 'CONTENT') return { buffer: result.buffer, mimeType: result.mimeType };
+    if (result.kind === 'CONTENT') {
+      return {
+        buffer: result.buffer,
+        mimeType: result.mimeType,
+        fingerprint: result.fingerprint,
+      };
+    }
     if (result.kind === 'QUARANTINED') throw new ConflictException('素材完整性校验失败，已隔离');
     if (result.kind === 'NOT_PUBLIC') throw new NotFoundException('素材当前不可公开访问');
     if (result.kind === 'MISSING') throw new NotFoundException('素材文件不存在');

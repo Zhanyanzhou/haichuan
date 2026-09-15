@@ -122,7 +122,6 @@ const testBoundaryFiles = {
     "template-design-integrated-flow.admin.spec.ts",
     "template-structure-keyboard.spec.ts",
     "template-publish-workflow.spec.ts",
-    "template-version-origin.spec.ts",
     "ui-color-standards.spec.ts",
     "visual-editor-hero.spec.ts",
     "warehouse-manage.spec.ts",

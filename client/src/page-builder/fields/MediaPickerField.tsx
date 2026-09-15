@@ -23,6 +23,7 @@ import { unwrapResponse } from "@/utils/unwrap";
 import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
 import { sizeMatchStatus, useImageNaturalSize } from "./specCheck";
 import { addPageMediaItem } from "./pageMediaLibrary";
+import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
 
 export const SESSION_MEDIA_UPLOADED_EVENT = "page-builder:media-uploaded";
 export const sessionUploadedMedia = new Set<string>();
@@ -91,7 +92,8 @@ export default function MediaPickerField({
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState(value || "");
   const [uploading, setUploading] = useState(false);
-  const imgSize = useImageNaturalSize(value);
+  const previewSrc = resolveManagedTemplateMediaPreviewUrl(value);
+  const imgSize = useImageNaturalSize(previewSrc);
   const matchStatus = sizeMatchStatus(spec, imgSize.width, imgSize.height);
   const resolutionTooSmall = Boolean(
     spec && imgSize.loaded &&
@@ -273,7 +275,7 @@ export default function MediaPickerField({
               style={hasCropPreview ? { aspectRatio: previewAspectRatio } : undefined}
             >
               <img
-                src={value}
+                src={previewSrc}
                 alt="预览"
                 style={{
                   objectFit: hasCropPreview ? "cover" : "contain",

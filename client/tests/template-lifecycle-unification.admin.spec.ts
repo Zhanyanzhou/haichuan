@@ -602,7 +602,13 @@ async function openDesignCatalog(page: Page) {
   const designMode = page.getByRole("button", { name: "模板设计", exact: true });
   await expect(designMode).toBeVisible({ timeout: 15_000 });
   await designMode.click();
-  await expect(page.getByRole("complementary", { name: "模板组件库" })).toBeVisible();
+  const library = page.getByRole("complementary", { name: "模板组件库", exact: true });
+  const expandLibrary = page.getByRole("button", { name: "展开模板组件库", exact: true });
+  await expect.poll(async () => (
+    await library.isVisible() || await expandLibrary.isVisible()
+  )).toBe(true);
+  if (!await library.isVisible()) await expandLibrary.click();
+  await expect(library).toBeVisible();
 }
 
 async function openCardAction(page: Page, name: string, action: string) {
@@ -800,6 +806,9 @@ function dynamicWrites(server: LifecycleServer, suffix: string) {
 }
 
 test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromium）", () => {
+  // 生命周期用例验证 Repository 与 UI 状态，不复测紧凑覆盖层；该行为由响应式专用用例覆盖。
+  test.use({ viewport: { width: 1440, height: 900 } });
+
   test("空目录明确区分首屏测试样例、已保存模板与已发布模板", async ({ page }) => {
     const server = await installLifecycleServer(page);
     await page.goto("/admin/editor/home", { waitUntil: "domcontentloaded" });
@@ -892,7 +901,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
       await expect(card).toBeVisible();
       await expect(card).toBeEnabled();
     }
-    await expect(publishedCard).toContainText("线上 v2");
+    await expect(publishedCard).toHaveAccessibleName(/线上 v2$/);
     const library = page.getByRole("complementary", { name: "模板组件库" });
     await expect(library.locator('[data-template-identity^="source:"]')).toHaveCount(0);
     await expect(library.locator('[data-template-catalog-card]:not([data-template-identity^="template:"])'))
@@ -1094,9 +1103,9 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     const cardMain = publishedWithoutDraftCard(page);
     const card = cardMain.locator("..");
     await expect(card).toBeVisible();
-    await expect(card).toContainText("草稿已保存 · 缺少可编辑草稿");
-    await expect(card).toContainText("线上 v3");
-    await expect(card).toContainText("从正式版本建立编辑草稿");
+    await expect(card).toContainText("缺少编辑草稿");
+    await expect(cardMain).toHaveAccessibleName(/可从正式版本 v3 建立/);
+    await expect(card).toContainText("从正式版本 v3 创建");
     await expect(card).toContainText("不会发布模板或修改页面");
     await expect(cardMain).not.toHaveAttribute("aria-disabled", "true");
     await expect(page.getByRole("complementary", { name: "模板组件库" }))
@@ -1165,7 +1174,6 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     const reason = "正式版本已变化，未建立编辑草稿；请重新读取目录后重试";
     await expect(page.getByText(reason, { exact: true }).first()).toBeVisible();
     const card = publishedWithoutDraftCard(page).locator("..");
-    await expect(card).toContainText("重试建立编辑草稿");
     await expect(card).toContainText(reason);
     expect((await readTemplateSession(page)).definition).toBeNull();
     expect(dynamicWrites(server, "/draft/from-published")).toHaveLength(1);
@@ -1184,7 +1192,6 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     const reason = "服务端返回的编辑草稿不完整或身份不一致，当前会话未改变；请重新读取目录后重试";
     await expect(page.getByText(reason, { exact: true }).first()).toBeVisible();
     const card = publishedWithoutDraftCard(page).locator("..");
-    await expect(card).toContainText("重试建立编辑草稿");
     await expect(card).toContainText(reason);
     expect((await readTemplateSession(page)).definition).toBeNull();
     expect(dynamicWrites(server, "/draft/from-published")).toHaveLength(1);

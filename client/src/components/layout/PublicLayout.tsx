@@ -850,7 +850,7 @@ export default function PublicLayout() {
         <Link
           to={withPublicLocalePath(english ? "/products" : "/catalog#catalog-search-input", localizedPath.locale)}
           aria-label={english ? "Collection" : "搜索"}
-          className="site-header__nav-item"
+          className="site-header__nav-item site-header__nav-item--search"
         >
           <SearchIcon />
           <span className="site-header__nav-label hidden sm:inline">{english ? "Collection" : "搜索"}</span>

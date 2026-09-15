@@ -35,6 +35,9 @@ export function validateProductionEvidenceSignerWorkflow(source) {
       !hasExactKeys(workflow.on.workflow_dispatch.inputs, [
         "release_run_id",
         "sigstore_public_log_acknowledged",
+        "unprotected_ref_authorized",
+        "authorization_sha256",
+        "authorized_source_sha",
       ])) {
     fail("PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_NOT_MANUAL_ONLY");
   }
@@ -69,11 +72,59 @@ export function validateProductionEvidenceSignerWorkflow(source) {
   if (/actions\/checkout@|npm\s+(?:ci|install)|node\s+scripts\/|docker\s+(?:build|run)|docker\/login-action@/.test(signJobSource)) {
     fail("PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_SIGN_JOB_REPOSITORY_CODE_FORBIDDEN");
   }
-  for (const match of source.matchAll(/^\s+(?:-\s+)?uses:\s+([^\s]+)\s*$/gm)) {
-    if (!/@[a-f0-9]{40}$/.test(match[1])) {
-      fail(`PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_ACTION_NOT_PINNED:${match[1]}`);
+  for (const job of Object.values(workflow.jobs)) {
+    for (const step of job.steps ?? []) {
+      if (typeof step?.uses === "string" && typeof step?.run === "string") {
+        fail("PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_STEP_USES_AND_RUN_CONFLICT");
+      }
+      if (typeof step?.uses === "string" && !/@[a-f0-9]{40}$/.test(step.uses)) {
+        fail(`PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_ACTION_NOT_PINNED:${step.uses}`);
+      }
+      if (step?.uses?.startsWith("actions/checkout@") && step.with?.["persist-credentials"] !== false) {
+        fail("PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_CHECKOUT_CREDENTIALS_PERSIST");
+      }
     }
   }
+  const collectSteps = workflow.jobs.collect.steps;
+  const authorization = collectSteps?.filter((step) => step?.name === "校验证据来源与显式批准绑定");
+  if (authorization?.length !== 1 || typeof authorization[0].run !== "string") {
+    fail("PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_AUTHORIZATION_MISSING");
+  }
+  const authorizationRun = authorization[0].run.split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#")).join("\n");
+  for (const required of [
+    'test "$UNPROTECTED_REF_AUTHORIZED" = "true"',
+    '[[ "$AUTHORIZATION_SHA256" =~ ^[a-f0-9]{64}$ ]]',
+    'test "$AUTHORIZATION_SHA256" = "$APPROVAL_REFERENCE_SHA256"',
+    '[[ "$AUTHORIZED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]',
+    'test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA"',
+    'echo "- actor: $GITHUB_ACTOR"',
+    'echo "- run: $GITHUB_RUN_ID"',
+  ]) {
+    if (!authorizationRun.includes(required)) {
+      fail(`PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_AUTHORIZATION_CONTRACT_MISSING:${required}`);
+    }
+  }
+  const findStep = (jobName, stepName, code) => {
+    const matches = workflow.jobs[jobName].steps?.filter((step) => step?.name === stepName) ?? [];
+    if (matches.length !== 1 || typeof matches[0].run !== "string") fail(code);
+    return matches[0];
+  };
+  const executable = (step) => step.run.split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#")).join("\n");
+  const signRun = executable(findStep("sign", "签署并立即验证 SLSA v1 evidence bundle", "PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_SIGN_STEP_MISSING"));
+  for (const required of [
+    "cosign attest-blob --yes", "--type slsaprovenance1",
+    "cosign verify-blob-attestation", '--certificate-identity "$signer_identity"',
+    '--certificate-github-workflow-sha "$GITHUB_SHA"',
+  ]) if (!signRun.includes(required)) fail(`PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_SIGN_CONTRACT_MISSING:${required}`);
+  const verifyRun = executable(findStep("verify", "重验 production evidence 与全部发布签名链", "PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_VERIFY_STEP_MISSING"));
+  for (const required of [
+    "node scripts/verify-production-evidence.mjs", '--evidence-bundle .codex-tmp/production-evidence/production-evidence.attestation.json',
+    '--approval-reference-sha256 "$APPROVAL_REFERENCE_SHA256"',
+    '--manifest-signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/release-images.yml"',
+    '--evidence-signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/production-evidence.yml"',
+  ]) if (!verifyRun.includes(required)) fail(`PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_VERIFY_CONTRACT_MISSING:${required}`);
   for (const required of [
     "environment: production-evidence",
     "PRODUCTION_EVIDENCE_ENVIRONMENT_ID_SHA256",
@@ -82,8 +133,8 @@ export function validateProductionEvidenceSignerWorkflow(source) {
     "PRODUCTION_EVIDENCE_SSH_PRIVATE_KEY",
     "PRODUCTION_EVIDENCE_SSH_KNOWN_HOSTS",
     "SIGSTORE_PUBLIC_LOG_ACKNOWLEDGEMENT_REQUIRED",
-    "EVIDENCE_REF_NOT_PROTECTED",
-    "release-production-manifest-${process.env.GITHUB_SHA}",
+    "UNPROTECTED_EVIDENCE_REF_CONFIRMATION_REQUIRED",
+    "release-production-high-manifest-${process.env.GITHUB_SHA}",
     "manifest.releaseStage !== \"production\"",
     "artifact-ids: ${{ steps.release-run.outputs.artifact_id }}",
     "github-token: ${{ github.token }}",

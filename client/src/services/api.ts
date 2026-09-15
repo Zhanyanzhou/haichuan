@@ -74,9 +74,6 @@ export {
   type TemplateCatalogItemResource,
   type TemplateCatalogResource,
 } from "./clients/dynamicTemplateClient";
-export {
-  type SystemContentTemplateCurrent,
-} from "./clients/systemContentTemplateClient";
 export { recommendationApi } from "./clients/recommendationClient";
 export {
   customerAdminApi,
@@ -1358,19 +1355,6 @@ function createMockPageDocument(data: {
     updatedAt: now,
   };
 }
-
-export type PersonalContentTemplate = {
-  id: number;
-  name: string;
-  moduleType: string;
-  contractKey: string;
-  contractVersion: number;
-  layoutData: Record<string, unknown>;
-  revision: number;
-  contentDefaults: Record<string, unknown> | null;
-  createdAt: string;
-  updatedAt: string;
-};
 
 type MockPublicPageDocument = Pick<
   PageDocumentResource,

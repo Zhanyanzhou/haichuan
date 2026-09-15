@@ -747,7 +747,7 @@ test(
       });
       assert.doesNotMatch(passwordAudit.detail || "", /password|R7|T8/i);
 
-      const serverRoot = process.cwd();
+      const serverRoot = resolve(__dirname, "../../..");
       const clientRoot = resolve(serverRoot, "../client");
       browserTempDir = resolve(serverRoot, `.auth-browser-${marker}`);
       const envDir = resolve(browserTempDir, "env");

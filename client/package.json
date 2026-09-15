@@ -12,6 +12,7 @@
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "test:public-env": "node --test vite-public-env.spec.mjs",
     "test:e2e": "playwright test",
     "test:a11y": "playwright test public-accessibility.spec.ts --project=public-chromium"
   },

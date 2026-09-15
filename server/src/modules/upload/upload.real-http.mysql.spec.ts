@@ -31,6 +31,7 @@ import { PublicUploadsGateway } from './public-uploads.gateway';
 const sharp = require('sharp');
 const databaseUrl = process.env.MEDIA_REAL_MYSQL_URL?.trim();
 const nginxUrl = process.env.MEDIA_REAL_NGINX_URL?.trim();
+const { validateTarget: validateSharedTarget } = require('../../../scripts/run-real-mysql-tests.cjs');
 
 @Module({
   imports: [
@@ -62,6 +63,12 @@ type ApiResult = { status: number; body: unknown; data: Record<string, unknown> 
 function validateTarget(value: string | undefined) {
   assert.equal(process.env.MEDIA_REAL_MYSQL_TEST, '1', '必须显式声明 MEDIA_REAL_MYSQL_TEST=1');
   assert.ok(value, '必须显式提供 MEDIA_REAL_MYSQL_URL');
+  if (
+    process.env.REAL_MYSQL_TEST_ISOLATED === '1'
+    && value === process.env.REAL_MYSQL_TEST_DATABASE_URL
+  ) {
+    return validateSharedTarget(process.env);
+  }
   const target = new URL(value);
   assert.equal(target.protocol, 'mysql:');
   assert.ok(['127.0.0.1', 'localhost'].includes(target.hostname));

@@ -5,8 +5,8 @@
  * 本文件是多轮改版的地层堆积，同属性可能有多处声明，生效规则=特异性优先、同特异性看源顺序。
  * 现行有效层只有三处，其余为历史地层（勿在其上"再补一条覆盖"，直接改对应有效层）：
  *   1. body grid 变量意图层：搜 `--editor-library-dock-width`（四区比例唯一定义点）。
- *   2. 响应式覆盖层：≤1199 面板覆盖化 / ≤767 手机层。
- *   3. 桌面收敛层：搜 `@media (min-width: 1200px)`（12%/8%/60%/20% 固定比例，含 is-inspecting 同值对偶）。
+ *   2. 响应式覆盖层：≤1439 面板覆盖化 / ≤767 手机层。
+ *   3. 宽屏停靠层：搜 `@media (min-width: 1440px)`（共享最小可用宽度，含 is-inspecting 同值对偶）。
  * 历史教训：不要在 `.is-inspecting` 等更高特异性选择器下重复声明 body grid/宽度（会压过意图层引发整页抖动）；
  * 2026-08-19 已清 10 处 is-inspecting grid 残留与 inspector 440/520/480 三个被收敛层压死的旧值。 */
 .homepage-editor {
@@ -2804,7 +2804,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   color: var(--adm-muted);
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__workspace-status {
     display: none;
   }
@@ -3894,12 +3894,8 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   min-height: 0;
 }
 
-/* 窄桌面/平板：模板库成为覆盖式抽屉，不再持续挤压画布。
- * 2026-08-19 修正：条件由 max-1599 收窄为 max-1199——1200-1599 区间此层的
- * is-inspecting 分支(0-2-0)会压过桌面收敛层(0-1-0)的 240px，点选模块时
- * library 列 240→0 突跳 240px（笔记本宽度点选抖动的病灶）。≥1200 一律由
- * 桌面收敛层管三栏固定列，抽屉化只在 ≤1199 生效。 */
-@media (max-width: 1199px) {
+/* 净宽不足以同时容纳四个职责区时，模板库成为覆盖式抽屉，不持续挤压画布。 */
+@media (max-width: 1439px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
     --editor-library-width: 0px;
@@ -3919,10 +3915,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
     width: 40px;
     box-shadow: none;
   }
-}
-
-/* 平板：属性面板覆盖在画布右侧，图层面板默认收为 40px 导航条。 */
-@media (max-width: 1199px) {
+  /* 平板：属性面板覆盖在画布右侧，图层面板默认收为 40px 导航条。 */
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
     --editor-inspector-width: 0px;
@@ -4015,7 +4008,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   text-overflow: ellipsis;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__workspace-status {
     display: inline-flex !important;
     flex: 0 1 auto;
@@ -4091,7 +4084,8 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 
   [data-compact-overlay="library-trigger"]
     .homepage-editor__library-expand-btn.admin-panel-collapse-toggle {
-    left: 12px;
+    /* 一级导航收起入口占用左侧 8–36px；模板目录按面板顺序排在其后。 */
+    left: 52px;
   }
 
   [data-compact-overlay="inspector"].is-inspector-collapsed
@@ -4745,7 +4739,7 @@ button.template-editor__toolbar-state:focus-visible {
   outline-offset: 2px;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .template-editor__workspace-context {
     gap: 6px;
   }
@@ -5397,7 +5391,7 @@ button.template-editor__toolbar-state:focus-visible {
   color: var(--adm-action);
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .template-editor__body,
   .template-editor__body.is-inspecting {
     --editor-library-width: 220px;
@@ -6218,7 +6212,7 @@ button.template-editor__toolbar-state:focus-visible {
   background: var(--adm-neutral-bg);
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__right-workspace,
   .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
     width: min(480px, calc(100% - var(--editor-structure-width)));
@@ -8132,18 +8126,8 @@ button.template-editor__toolbar-state:focus-visible {
   cursor: pointer;
 }
 
-/* 窄桌面打开属性面板时收起覆盖式模板库，避免两个抽屉同时遮住画布。 */
-@media (max-width: 1199px) {
-  .homepage-editor__body.is-inspecting
-    .homepage-editor__library:not(.homepage-editor__library--collapsed) {
-    visibility: hidden;
-    transform: translateX(-100%);
-    pointer-events: none;
-  }
-}
-
 /* 页面装修的平板图层入口保留在模板抽屉右侧；模板设计使用末尾独立的窄屏覆盖定位。 */
-@media (min-width: 768px) and (max-width: 1199px) {
+@media (min-width: 768px) and (max-width: 1439px) {
   .homepage-editor__body:not(.is-inspecting, .template-editor__body):has(
       .homepage-editor__library:not(.homepage-editor__library--collapsed)
     )
@@ -8266,15 +8250,13 @@ button.template-editor__toolbar-state:focus-visible {
   writing-mode: horizontal-tb;
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1440px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
-    /* 桌面四区硬合同：页面装修与模板设计均为 12% / 8% / 60% / 20%。
-     * important 与唯一声明门禁共同防止模式样式或收起态覆盖。 */
-    --editor-library-dock-width: 12% !important;
-    --editor-structure-dock-width: 8% !important;
-    --editor-inspector-dock-width: 20% !important;
-    display: grid;
+    /* 页面装修与模板设计共用一组可用宽度；画布消费剩余空间。 */
+    --editor-library-dock-width: clamp(220px, 16vw, 280px);
+    --editor-structure-dock-width: clamp(144px, 11vw, 184px);
+    --editor-inspector-dock-width: clamp(360px, 25vw, 440px);
     grid-template-columns: minmax(0, 1fr);
   }
   .homepage-editor__body .homepage-editor__library {
@@ -8284,9 +8266,6 @@ button.template-editor__toolbar-state:focus-visible {
     z-index: 30;
     width: var(--editor-library-dock-width);
     transition: left 160ms ease;
-  }
-  .homepage-editor__body .homepage-editor__library--collapsed {
-    width: var(--editor-library-dock-width);
   }
   .homepage-editor__body .homepage-editor__structure-workspace {
     position: absolute;
@@ -8299,9 +8278,6 @@ button.template-editor__toolbar-state:focus-visible {
     transition:
       left 160ms ease,
       width 160ms ease;
-  }
-  .homepage-editor__body .homepage-editor__structure-workspace.is-collapsed {
-    width: var(--editor-structure-dock-width);
   }
   .homepage-editor__body .homepage-editor__stage {
     grid-column: 1;
@@ -8356,7 +8332,7 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 /* 窄屏本来就是覆盖式面板；固定画布矩形，避免任何抽屉状态触发布局重排。 */
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
     display: block;
@@ -8370,7 +8346,7 @@ button.template-editor__toolbar-state:focus-visible {
   }
 }
 
-@media (min-width: 901px) and (max-width: 1199px) {
+@media (min-width: 901px) and (max-width: 1439px) {
   .homepage-editor__body.is-inspecting
     .homepage-editor__structure-workspace {
     position: absolute;
@@ -10472,7 +10448,7 @@ button.template-editor__toolbar-state:focus-visible {
   line-height: 1.5;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__mode-slot {
     left: calc(50% + 132px);
     width: 160px;
@@ -10496,7 +10472,7 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 /* T1 最终级联：历史模板专属规则之后仍保持覆盖式属性区。 */
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__body.template-editor__body
     > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
     position: absolute;
@@ -10718,7 +10694,7 @@ button.template-editor__toolbar-state:focus-visible {
 
 /* T1 收纳入口必须处于画布之上，并保留可读的横排标签；旧桌面 dock 的 28px
  * 图标尺寸不能重新压缩窄屏入口。父层不接管画布命中，只让真实按钮接管。 */
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__body > [data-compact-overlay="library-trigger"],
   .homepage-editor__body > [data-compact-overlay="inspector"].is-inspector-collapsed {
     position: absolute;
@@ -10749,14 +10725,16 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 /* 模板窄屏结构覆盖层位于画布之上、目录/属性抽屉之下，避开顶部恢复入口。 */
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__body.template-editor__body
     > .homepage-editor__structure-workspace {
     position: absolute;
     inset: 60px auto 0 12px;
     z-index: 59;
-    width: min(208px, calc(100% - 24px));
+    width: min(176px, calc(100% - 24px));
     height: auto;
+    container-name: editor-structure-dock;
+    container-type: inline-size;
   }
 
   .homepage-editor__body.template-editor__body
@@ -10774,7 +10752,7 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 /* 最终级联：页面窄屏属性覆盖层位于画布选区工具之上。 */
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__body:not(.template-editor__body)
     > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
     position: absolute;
@@ -10819,13 +10797,13 @@ button.template-editor__toolbar-state:focus-visible {
   }
 }
 
-/* 1025-1199px 已有固定后台导航，模板侧栏改为非模态窄桌面 dock。
+/* 1025-1439px 已有固定后台导航，模板侧栏改为非模态窄桌面 dock。
  * 打开的次要面板占用自己的边缘带，画布和悬浮主操作使用剩余矩形；
  * 这样可见按钮不会继续显示在面板下方，也无需用 inert 阻断顶部历史操作。 */
-@media (min-width: 1025px) and (max-width: 1199px) {
+@media (min-width: 1025px) and (max-width: 1439px) {
   .homepage-editor__body.template-editor__body {
     --template-editor-compact-inspector-width: clamp(360px, 38vw, 420px);
-    --template-editor-compact-structure-width: 208px;
+    --template-editor-compact-structure-width: 176px;
   }
 
   .homepage-editor__body.template-editor__body
@@ -10969,7 +10947,7 @@ button.template-editor__toolbar-state:focus-visible {
   flex: 0 0 auto;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .admin-header__editor-slot
     .homepage-editor__toolbar:not(.template-editor__toolbar) {
     grid-template-columns: minmax(0, 1fr) auto;

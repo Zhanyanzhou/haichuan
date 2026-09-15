@@ -40,45 +40,6 @@ import type { StaffRequest } from "../../common/security/authenticated-principal
 export class PageModulesController {
   constructor(private service: PageModulesService) {}
 
-  // ========== 旧系统母模板兼容读取（只读） ==========
-
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
-  @Roles("SUPER_ADMIN", "ADMIN", "EDITOR", "CUSTOMER_SERVICE", "WAREHOUSE", "SALES_CONSULTANT", "FINANCE")
-  @Get("system-content-templates")
-  @ApiOperation({ summary: "获取所有旧系统母模板当前兼容布局" })
-  getSystemContentTemplates() {
-    return this.service.getSystemContentTemplates();
-  }
-
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
-  @Roles("SUPER_ADMIN", "ADMIN", "EDITOR", "CUSTOMER_SERVICE", "WAREHOUSE", "SALES_CONSULTANT", "FINANCE")
-  @Get("system-content-templates/:contractKey/history")
-  @ApiOperation({ summary: "获取旧系统母模板兼容版本历史" })
-  getSystemContentTemplateHistory(@Param("contractKey") contractKey: string) {
-    return this.service.getSystemContentTemplateHistory(contractKey);
-  }
-
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
-  @Roles("SUPER_ADMIN", "ADMIN", "EDITOR", "CUSTOMER_SERVICE", "WAREHOUSE", "SALES_CONSULTANT", "FINANCE")
-  @Get("system-content-templates/:contractKey")
-  @ApiOperation({ summary: "获取旧系统母模板当前兼容布局" })
-  getSystemContentTemplate(@Param("contractKey") contractKey: string) {
-    return this.service.getSystemContentTemplate(contractKey);
-  }
-
-  // ========== 旧个人模板兼容读取（只读） ==========
-
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
-  @Get("personal-content-templates")
-  @ApiOperation({ summary: "获取当前账号的布局模板" })
-  getPersonalContentTemplates(@Req() req: StaffRequest) {
-    return this.service.getPersonalContentTemplates(req.user.id);
-  }
-
   // ========== Puck 页面文档（PageDocument）API ==========
 
   @Public()

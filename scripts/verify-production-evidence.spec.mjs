@@ -40,7 +40,8 @@ function createFixture(releaseProfile = "lead-generation") {
     sbomPredicateType: "https://spdx.dev/Document",
   });
   const manifest = {
-    schemaVersion: 6,
+    schemaVersion: 7,
+    assuranceLevel: "high",
     releaseStage: "production",
     imageTag: `sha-${gitSha}`,
     gitSha,
@@ -51,8 +52,22 @@ function createFixture(releaseProfile = "lead-generation") {
       runId: 123,
       runUrl: `${source}/actions/runs/123`,
       headSha: gitSha,
+      headRef: "refs/heads/main",
+      runAttempt: 1,
+      profile: "full",
       event: "push",
       conclusion: "success",
+      proofArtifactId: 9876,
+      proofArtifactDigest: `sha256:${sha("7")}`,
+      proofSha256: sha("8"),
+      jobSet: ["verify", "e2e-deterministic", "real-mysql"],
+    },
+    releaseAuthorization: {
+      mode: "explicit-unprotected-ref",
+      approvalSha256: sha("2"),
+      sourceSha: gitSha,
+      actor: "release-owner",
+      runId: 4321,
     },
     attestationPolicy: {
       signingSystem: "sigstore-cosign-keyless",
@@ -236,12 +251,13 @@ function successfulExecutor(calls = []) {
         subject: [{ digest: { sha256: manifestSha256 } }],
         predicate: {
           buildDefinition: {
-            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v6`,
+            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v7`,
             externalParameters: {
               gitSha: manifest.gitSha,
               sourceRef: manifest.attestationPolicy.sourceRef,
               qualityGateRunId: manifest.qualityGate.runId,
               schemaVersion: manifest.schemaVersion,
+              assuranceLevel: "high",
               releaseStage: manifest.releaseStage,
               imageTag: manifest.imageTag,
             },

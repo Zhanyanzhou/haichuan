@@ -9,6 +9,7 @@ import {
 } from "../modules/page-modules/generated/contentTemplates.generated";
 import {
   createPageLocaleContentHash,
+  PAGE_LOCALE_SELF_REVIEW_ACTION,
   readPageLocaleRevisionMarker,
   stripPageLocaleRevisionMetadata,
 } from "../modules/page-modules/page-document-localization";
@@ -39,6 +40,8 @@ export interface PublicSeoSnapshotDatabase {
   siteSetting: { findUnique(args: unknown): Promise<any> };
   pageDocument: { findMany(args: unknown): Promise<any[]> };
   product: { findMany(args: unknown): Promise<any[]> };
+  operationLog: { findUnique(args: unknown): Promise<any> };
+  user: { findUnique(args: unknown): Promise<any> };
 }
 
 export type PublicSeoSourceConfig = {
@@ -289,7 +292,15 @@ function assertMediaManifestCurrent(revision: any, pageKey: string, publicMetada
   }
 }
 
-function projectPage(document: any, localization: any, locale: PublicLocale, origin: string, siteName: string, now: Date): SnapshotRouteInput {
+async function projectPage(
+  database: PublicSeoSnapshotDatabase,
+  document: any,
+  localization: any,
+  locale: PublicLocale,
+  origin: string,
+  siteName: string,
+  now: Date,
+): Promise<SnapshotRouteInput> {
   if (!localization || localization.reviewStatus !== "PUBLISHED") fail(`PAGE_${document.pageKey}_${locale}_NOT_PUBLISHED`);
   if (!localization.publishedRevisionId || !text(localization.publishedHash) || !localization.publishedAt) {
     fail(`PAGE_${document.pageKey}_${locale}_PUBLISHED_POINTER_MISSING`);
@@ -314,7 +325,55 @@ function projectPage(document: any, localization: any, locale: PublicLocale, ori
     || !marker.submittedAt
     || !marker.reviewedAt
   ) fail(`PAGE_${document.pageKey}_${locale}_REVIEW_EVIDENCE_MISSING`);
-  if (marker.submittedBy === marker.reviewedBy) fail(`PAGE_${document.pageKey}_${locale}_REVIEW_NOT_INDEPENDENT`);
+  if (marker.submittedBy === marker.reviewedBy) {
+    const selfReview = marker.selfReview;
+    if (
+      !selfReview
+      || selfReview.actor !== marker.reviewedBy
+      || selfReview.actorRole !== "SUPER_ADMIN"
+      || selfReview.revision !== marker.submittedAt
+      || selfReview.reviewedAt !== marker.reviewedAt
+    ) fail(`PAGE_${document.pageKey}_${locale}_SELF_REVIEW_EVIDENCE_INVALID`);
+    const [audit, actor] = await Promise.all([
+      database.operationLog.findUnique({
+        where: { id: selfReview.auditLogId },
+        select: { id: true, userId: true, action: true, module: true, targetId: true, detail: true },
+      }),
+      database.user.findUnique({
+        where: { id: selfReview.actor },
+        select: { role: true, status: true },
+      }),
+    ]);
+    let detail: Record<string, unknown> | null = null;
+    try {
+      detail = audit && typeof audit.detail === "string"
+        ? JSON.parse(audit.detail) as Record<string, unknown>
+        : null;
+    } catch {
+      detail = null;
+    }
+    if (
+      actor?.role !== "SUPER_ADMIN"
+      || actor.status !== "ACTIVE"
+      || !audit
+      || audit.userId !== selfReview.actor
+      || audit.action !== PAGE_LOCALE_SELF_REVIEW_ACTION
+      || audit.module !== "page-builder"
+      || audit.targetId !== document.id
+      || detail?.schemaVersion !== 1
+      || detail.event !== PAGE_LOCALE_SELF_REVIEW_ACTION
+      || detail.actor !== selfReview.actor
+      || detail.actorRole !== "SUPER_ADMIN"
+      || detail.pageKey !== document.pageKey
+      || detail.locale !== locale
+      || detail.revision !== selfReview.revision
+      || detail.contentHash !== marker.contentHash
+      || detail.reviewedAt !== marker.reviewedAt
+      || detail.result !== "succeeded"
+    ) fail(`PAGE_${document.pageKey}_${locale}_SELF_REVIEW_EVIDENCE_INVALID`);
+  } else if (marker.selfReview) {
+    fail(`PAGE_${document.pageKey}_${locale}_SELF_REVIEW_EVIDENCE_INVALID`);
+  }
   const submittedAt = timestamp(marker.submittedAt);
   const reviewedAt = timestamp(marker.reviewedAt);
   const publishedAt = new Date(revision.publishedAt).getTime();
@@ -637,7 +696,7 @@ async function readProjection(
   for (const pageKey of PAGE_KEYS) {
     const document = documentByKey.get(pageKey);
     const chinese = document.localizations.find((entry: any) => entry.locale === "ZH_CN");
-    routes.push(projectPage(document, chinese, "zh-CN", site.origin, text(site.settings.siteName), now));
+    routes.push(await projectPage(database, document, chinese, "zh-CN", site.origin, text(site.settings.siteName), now));
     const validation = await validatePage(pageKey, chinese.publishedRevision.puckData, chinese.publishedRevision.metadata);
     if (!validation.valid) fail(`PAGE_${pageKey}_zh-CN_CURRENT_VALIDATION_FAILED`);
   }
@@ -655,7 +714,7 @@ async function readProjection(
     for (const pageKey of PAGE_KEYS.filter((key) => ENGLISH_PAGE_KEYS.has(key))) {
       const document = documentByKey.get(pageKey);
       const english = document.localizations.find((entry: any) => entry.locale === "EN");
-      routes.push(projectPage(document, english, "en", site.origin, text(site.settings.siteName), now));
+      routes.push(await projectPage(database, document, english, "en", site.origin, text(site.settings.siteName), now));
       const validation = await validatePage(pageKey, english.publishedRevision.puckData, english.publishedRevision.metadata);
       if (!validation.valid) fail(`PAGE_${pageKey}_en_CURRENT_VALIDATION_FAILED`);
     }

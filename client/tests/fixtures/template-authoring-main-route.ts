@@ -9,7 +9,6 @@ import type {
   PublishedDynamicTemplateResource,
 } from "../../src/services/clients/dynamicTemplateClient";
 import { installAdminSession } from "./session-auth";
-import { systemTemplateCatalogItems } from "./template-catalog";
 
 // 主路由确定性 UI 共用夹具。所有 /api 请求均被截获，模板与页面只保存在测试进程内。
 // 默认仍拒绝页面写入；黄金闭环必须显式开启 pageLifecycle，不能冒充真实持久化证据。
@@ -199,7 +198,6 @@ export async function installNewTemplateServer(
     if (path === "/api/auth/profile") return route.fallback();
     if (path === "/api/page-modules/dynamic-templates/catalog" && method === "GET") {
       const items = [
-        ...systemTemplateCatalogItems(),
         ...(server.persisted
           ? [{ kind: "editable" as const, template: server.persisted }]
           : []),
@@ -337,6 +335,7 @@ export async function installNewTemplateServer(
       server.pageDocument = {
         ...server.pageDocument,
         reviewStatus: "IN_REVIEW",
+        submittedBy: 1,
       };
       return route.fulfill(json(server.pageDocument));
     }

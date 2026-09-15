@@ -3,6 +3,7 @@ import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { resolveMediaStorageRoots } from './media-storage-paths';
 import { UploadService } from './upload.service';
+import { parseResponsivePublicImageRequest } from './responsive-public-media';
 
 type StaticHandler = (request: Request, response: Response, next: NextFunction) => void;
 
@@ -99,6 +100,25 @@ export function classifyPublicPageAssetPath(requestUrl: string): PublicPageAsset
   return { kind: 'PAGE_ASSET', storageKey: segments.join('/') };
 }
 
+export function parsePublicUploadStorageKey(requestUrl: string): string | null {
+  const rawPath = requestUrl.split('?', 1)[0] || '';
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(rawPath);
+  } catch {
+    return null;
+  }
+  const withoutLeadingSlash = decodedPath.replace(/^\/+/, '');
+  const segments = withoutLeadingSlash.split('/');
+  if (
+    segments.length < 1
+    || segments.some((segment) => !segment || segment === '.' || segment === '..')
+    || decodedPath.includes('\\')
+    || /[\u0000-\u001f\u007f]/u.test(decodedPath)
+  ) return null;
+  return segments.join('/');
+}
+
 @Injectable()
 export class PublicUploadsGateway implements OnModuleInit {
   constructor(
@@ -116,13 +136,52 @@ export class PublicUploadsGateway implements OnModuleInit {
     });
 
     app.use('/uploads', (request: Request, response: Response, next: NextFunction) => {
+      const responsiveImage = parseResponsivePublicImageRequest(request.url);
+      if (responsiveImage.kind === 'INVALID') {
+        return next(new NotFoundException('素材不存在'));
+      }
+      if (responsiveImage.kind === 'IMAGE') {
+        if (!['GET', 'HEAD'].includes(request.method)) {
+          return next(new NotFoundException('素材不存在'));
+        }
+        const requirePublicAuthorization = responsiveImage.storageKey.startsWith('page-assets/');
+        void this.uploadService.isLegacyProductMediaStorageKey(responsiveImage.storageKey)
+          .then((blocked) => {
+            if (blocked) throw new NotFoundException('素材不存在');
+            return this.uploadService.getResponsivePublicImage(
+              responsiveImage.storageKey,
+              responsiveImage.width,
+              requirePublicAuthorization,
+            );
+          })
+          .then((media) => sendPublicMedia(request, response, media))
+          .catch(next);
+        return;
+      }
+
       const pageAsset = classifyPublicPageAssetPath(request.url);
-      if (pageAsset.kind === 'OTHER_UPLOAD') return staticHandler(request, response, next);
+      if (pageAsset.kind === 'OTHER_UPLOAD') {
+        const storageKey = parsePublicUploadStorageKey(request.url);
+        if (!storageKey || !['GET', 'HEAD'].includes(request.method)) {
+          return next(new NotFoundException('素材不存在'));
+        }
+        void this.uploadService.isLegacyProductMediaStorageKey(storageKey)
+          .then((blocked) => {
+            if (blocked) throw new NotFoundException('素材不存在');
+            return staticHandler(request, response, next);
+          })
+          .catch(next);
+        return;
+      }
       if (!['GET', 'HEAD'].includes(request.method) || pageAsset.kind === 'INVALID_PAGE_ASSET') {
         return next(new NotFoundException('素材不存在'));
       }
 
-      void this.uploadService.getPageMediaContentByStorageKey(pageAsset.storageKey, true)
+      void this.uploadService.isLegacyProductMediaStorageKey(pageAsset.storageKey)
+        .then((blocked) => {
+          if (blocked) throw new NotFoundException('素材不存在');
+          return this.uploadService.getPageMediaContentByStorageKey(pageAsset.storageKey, true);
+        })
         .then((media) => sendPublicMedia(request, response, media))
         .catch(next);
     });

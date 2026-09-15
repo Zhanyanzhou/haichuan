@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   CHECKPOINT_MIGRATION_COUNT,
+  CUSTOMER_SMS_RATE_LIMIT_MIGRATION,
   EXPECTED_TRIGGER_COUNT,
   EXPECTED_MIGRATION_COUNT,
   MEDIA_AUTHORIZATION_MIGRATION,
@@ -13,6 +14,7 @@ import {
   MYSQL_IMAGE,
   PREFLIGHT_SQL,
   PROFILE_MIGRATION,
+  PRODUCT_IMAGE_URL_INDEX_MIGRATION,
   QUOTATION_EXPANSION_MIGRATION,
   QUOTATION_INVARIANTS_MIGRATION,
   TRADE_MIGRATION,
@@ -31,11 +33,13 @@ test('migration inventory is the expected complete ordered set', () => {
   const migrations = discoverMigrations(migrationsDirectory);
   assert.equal(migrations.length, EXPECTED_MIGRATION_COUNT);
   assert.equal(CHECKPOINT_MIGRATION_COUNT, 51);
-  assert.equal(migrations.at(-5), TRADE_MIGRATION);
-  assert.equal(migrations.at(-4), PROFILE_MIGRATION);
-  assert.equal(migrations.at(-3), QUOTATION_EXPANSION_MIGRATION);
-  assert.equal(migrations.at(-2), QUOTATION_INVARIANTS_MIGRATION);
-  assert.equal(migrations.at(-1), MEDIA_AUTHORIZATION_MIGRATION);
+  assert.equal(migrations.at(-7), TRADE_MIGRATION);
+  assert.equal(migrations.at(-6), PROFILE_MIGRATION);
+  assert.equal(migrations.at(-5), QUOTATION_EXPANSION_MIGRATION);
+  assert.equal(migrations.at(-4), QUOTATION_INVARIANTS_MIGRATION);
+  assert.equal(migrations.at(-3), MEDIA_AUTHORIZATION_MIGRATION);
+  assert.equal(migrations.at(-2), CUSTOMER_SMS_RATE_LIMIT_MIGRATION);
+  assert.equal(migrations.at(-1), PRODUCT_IMAGE_URL_INDEX_MIGRATION);
 });
 
 test('rehearsal pins the controlled MySQL image and migrates without root or SUPER', () => {

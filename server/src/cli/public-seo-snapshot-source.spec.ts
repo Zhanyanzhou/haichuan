@@ -7,6 +7,7 @@ import {
 } from "../modules/page-modules/generated/contentTemplates.generated";
 import {
   createPageLocaleContentHash,
+  PAGE_LOCALE_SELF_REVIEW_ACTION,
   withPageLocaleRevisionMetadata,
 } from "../modules/page-modules/page-document-localization";
 import { createPublicSeoExportConfig } from "./export-public-seo-snapshot";
@@ -111,7 +112,14 @@ function settings(includeEnglish = false) {
   };
 }
 
-function database(options: { includeEnglish?: boolean; products?: any[]; secondSettings?: any } = {}) {
+function database(options: {
+  includeEnglish?: boolean;
+  products?: any[];
+  secondSettings?: any;
+  documents?: any[];
+  audit?: any;
+  actor?: any;
+} = {}) {
   const calls: string[] = [];
   let settingsRead = 0;
   return {
@@ -127,7 +135,7 @@ function database(options: { includeEnglish?: boolean; products?: any[]; secondS
       pageDocument: {
         findMany: async () => {
           calls.push("pageDocument.findMany");
-          return structuredClone(documents(options.includeEnglish));
+          return structuredClone(options.documents ?? documents(options.includeEnglish));
         },
       },
       product: {
@@ -135,6 +143,12 @@ function database(options: { includeEnglish?: boolean; products?: any[]; secondS
           calls.push("product.findMany");
           return structuredClone(options.products ?? []);
         },
+      },
+      operationLog: {
+        findUnique: async () => structuredClone(options.audit ?? null),
+      },
+      user: {
+        findUnique: async () => structuredClone(options.actor ?? null),
       },
     } as PublicSeoSnapshotDatabase,
   };
@@ -243,6 +257,102 @@ test("producer 只读取显式 locale 发布 revision，并生成六个中文页
     "siteSetting.findUnique", "pageDocument.findMany", "product.findMany",
     "siteSetting.findUnique", "pageDocument.findMany", "product.findMany",
   ]);
+});
+
+test("producer 只接受与发布 revision 精确绑定的超级管理员自审审计", async () => {
+  const rows = documents();
+  const page = rows[0];
+  const row = page.localizations[0];
+  const reviewedAt = new Date("2026-09-12T09:00:00.000Z");
+  const revision = "2026-09-12T08:00:00.000Z";
+  const marker = withPageLocaleRevisionMetadata(
+    row.publishedRevision.metadata,
+    "zh-CN",
+    row.publishedHash,
+    {
+      submittedBy: 10,
+      submittedAt: new Date("2026-09-12T08:00:00.000Z"),
+      reviewedBy: 10,
+      reviewedAt,
+      selfReview: {
+        action: PAGE_LOCALE_SELF_REVIEW_ACTION,
+        auditLogId: 501,
+        actor: 10,
+        actorRole: "SUPER_ADMIN",
+        revision,
+        reviewedAt: reviewedAt.toISOString(),
+      },
+    },
+  );
+  row.publishedRevision.metadata = marker;
+  const audit = {
+    id: 501,
+    userId: 10,
+    action: PAGE_LOCALE_SELF_REVIEW_ACTION,
+    module: "page-builder",
+    targetId: page.id,
+    detail: JSON.stringify({
+      schemaVersion: 1,
+      event: PAGE_LOCALE_SELF_REVIEW_ACTION,
+      actor: 10,
+      actorRole: "SUPER_ADMIN",
+      pageKey: page.pageKey,
+      locale: "zh-CN",
+      revision,
+      contentHash: row.publishedHash,
+      reviewedAt: reviewedAt.toISOString(),
+      result: "succeeded",
+    }),
+  };
+  const accepted = database({ documents: rows, audit, actor: { role: "SUPER_ADMIN", status: "ACTIVE" } });
+  await assert.doesNotReject(
+    () => createPublicSeoExportInput(accepted.value, config, validatePage, NOW),
+  );
+
+  const rejected = database({ documents: rows, audit, actor: { role: "ADMIN", status: "ACTIVE" } });
+  await assert.rejects(
+    () => createPublicSeoExportInput(rejected.value, config, validatePage, NOW),
+    /SELF_REVIEW_EVIDENCE_INVALID/,
+  );
+
+  const disabled = database({
+    documents: rows,
+    audit,
+    actor: { role: "SUPER_ADMIN", status: "DISABLED" },
+  });
+  await assert.rejects(
+    () => createPublicSeoExportInput(disabled.value, config, validatePage, NOW),
+    /SELF_REVIEW_EVIDENCE_INVALID/,
+  );
+
+  const driftedAudit = {
+    ...audit,
+    detail: JSON.stringify({
+      ...JSON.parse(audit.detail),
+      contentHash: "f".repeat(64),
+    }),
+  };
+  const hashDrift = database({
+    documents: rows,
+    audit: driftedAudit,
+    actor: { role: "SUPER_ADMIN", status: "ACTIVE" },
+  });
+  await assert.rejects(
+    () => createPublicSeoExportInput(hashDrift.value, config, validatePage, NOW),
+    /SELF_REVIEW_EVIDENCE_INVALID/,
+  );
+
+  (row.publishedRevision.metadata as any).__pageLocaleRevision.selfReview.revision =
+    "2026-09-12T08:30:00.000Z";
+  const revisionDrift = database({
+    documents: rows,
+    audit,
+    actor: { role: "SUPER_ADMIN", status: "ACTIVE" },
+  });
+  await assert.rejects(
+    () => createPublicSeoExportInput(revisionDrift.value, config, validatePage, NOW),
+    /(?:SELF_REVIEW_EVIDENCE_INVALID|REVIEW_EVIDENCE_MISSING)/,
+  );
 });
 
 test("静态 SEO 正文只使用已审核 SEO 字段，不收集隐藏或内部 Puck 文案", async () => {

@@ -17,8 +17,8 @@ const rendererDocument: PuckDocument = {
     type: "首屏主视觉",
     props: {
       id: "hero-only-renderer",
-      desktopImage: "/images/test-hero.svg",
-      mobileImage: "/images/test-hero.svg",
+      desktopImage: "/uploads/test-hero.png",
+      mobileImage: "/uploads/test-hero.png",
       altText: "首屏测试图",
       eyebrow: "HERO TEST",
       title: "首屏模板测试",

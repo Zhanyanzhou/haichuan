@@ -281,6 +281,16 @@ export class RefreshSessionService {
     });
   }
 
+  async revokeCustomerFamilyForCustomer(
+    customerId: number,
+    familyId: string,
+  ): Promise<void> {
+    await this.prisma.customerRefreshSession.updateMany({
+      where: { customerId, familyId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   private async revokeAdminFamily(familyId: string, revokedAt: Date) {
     await this.prisma.adminRefreshSession.updateMany({
       where: { familyId, revokedAt: null },

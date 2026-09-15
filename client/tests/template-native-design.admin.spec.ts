@@ -38,6 +38,14 @@ async function openPropertyGroup(page: Page, name: string) {
   if (await group.count() && !(await group.getAttribute("open") !== null)) await group.locator(":scope > summary").click();
 }
 
+async function selectStructureTarget(page: Page, targetId: string) {
+  const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
+  if (await structureTrigger.isVisible()) await structureTrigger.click();
+  await page.getByRole("tree", { name: "模板区域与槽位" })
+    .locator(`[role="treeitem"][data-selection-target-id="${targetId}"]`)
+    .click();
+}
+
 test("属性可见性：显示操作恢复 display none，仅作用正在查看的设备", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "建立本端隐藏前置", exact: true }).click();
@@ -80,7 +88,7 @@ for (const viewportWidth of [1200, 1920]) test(`对象属性布局：${viewportW
   await applyBasicSkeleton(page);
   const state = await readSession(page);
   const headingId = Object.values(state.definition!.nodes).find((node) => node.type === "HeadingSlot")!.nodeId;
-  await page.getByRole("tree", { name: "模板区域与槽位" }).locator(`[role="treeitem"][data-selection-target-id="${headingId}"]`).click();
+  await selectStructureTarget(page, headingId);
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
   const typography = inspector.getByRole("heading", { name: "文字排版", exact: true });
   const responsive = inspector.getByText("断点显示与继承", { exact: true });
@@ -93,7 +101,7 @@ for (const viewportWidth of [1200, 1920]) test(`对象属性布局：${viewportW
   expect(await inspector.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
   await page.screenshot({ path: testInfo.outputPath(`properties-text-${viewportWidth}.png`) });
   const imageId = Object.values(state.definition!.nodes).find((node) => node.type === "ImageSlot")!.nodeId;
-  await page.getByRole("tree", { name: "模板区域与槽位" }).locator(`[role="treeitem"][data-selection-target-id="${imageId}"]`).click();
+  await selectStructureTarget(page, imageId);
   const imageControls = inspector.getByRole("heading", { name: "图片适配与焦点", exact: true });
   const imageDimensions = inspector.getByRole("heading", { name: "尺寸与位置", exact: true });
   await expect(imageControls).toBeInViewport();
@@ -117,7 +125,7 @@ test("主路由属性：空白零高区域可以从最小固定高度开始，�
   const before = await readSession(page);
   const region = before.selectedObjectId!;
   const heightMode = page.getByRole("combobox", { name: "高度方式", exact: true });
-  await expect(page.getByLabel("当前画布对象外框尺寸")).toContainText("画布占位高 240 px（非输出高度）");
+  await expect(page.getByLabel("当前画布对象外框尺寸")).toContainText("画布占位高 256 px（非输出高度）");
   await expect(page.getByText("当前为空，画布使用编辑占位；模板仍按所选高度规则输出，添加内容后按实际内容重测。", { exact: true })).toBeVisible();
   await expect(heightMode.locator('option[value="fixed"]')).toHaveJSProperty("disabled", false);
   await heightMode.selectOption("fixed");
@@ -179,7 +187,7 @@ for (const viewportWidth of [1200, 1600, 1920]) test(`主路由属性体验：${
   await applyBasicSkeleton(page);
   const state = await readSession(page);
   const region = state.definition!.nodes[state.definition!.rootNodeId].childIds[0];
-  await page.getByRole("tree", { name: "模板区域与槽位" }).locator(`[role="treeitem"][data-selection-target-id="${region}"]`).click();
+  await selectStructureTarget(page, region);
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
   const heightMode = inspector.getByRole("combobox", { name: "高度方式", exact: true });
   await expect(heightMode).toBeInViewport();
@@ -239,7 +247,7 @@ test("主路由属性：网格列数重输不改比例，增减只处理末尾�
   await applyBasicSkeleton(page);
   const initial = await readSession(page);
   const region = initial.definition!.nodes[initial.definition!.rootNodeId].childIds[0];
-  await page.getByRole("tree", { name: "模板区域与槽位" }).locator(`[role="treeitem"][data-selection-target-id="${region}"]`).click();
+  await selectStructureTarget(page, region);
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
   await inspector.getByRole("button", { name: "预览网格排列", exact: true }).click();
   await inspector.getByRole("button", { name: "确认排列转换", exact: true }).click();
@@ -275,7 +283,7 @@ test("主路由属性：排列预览占用交互，其他属性不能替换预�
   await applyBasicSkeleton(page);
   const initial = await readSession(page);
   const region = initial.definition!.nodes[initial.definition!.rootNodeId].childIds[0];
-  await page.getByRole("tree", { name: "模板区域与槽位" }).locator(`[role="treeitem"][data-selection-target-id="${region}"]`).click();
+  await selectStructureTarget(page, region);
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
   const before = await readSession(page);
   await inspector.getByRole("button", { name: "预览上下排列", exact: true }).click();
@@ -299,7 +307,7 @@ test("主路由属性：手机查看桌面基础时解释排列禁用并可切�
   await applyBasicSkeleton(page);
   const initial = await readSession(page);
   const region = initial.definition!.nodes[initial.definition!.rootNodeId].childIds[0];
-  await page.getByRole("tree", { name: "模板区域与槽位" }).locator(`[role="treeitem"][data-selection-target-id="${region}"]`).click();
+  await selectStructureTarget(page, region);
   await page.getByRole("button", { name: /^移动端模板布局/ }).click();
   const inspector = page.getByRole("region", { name: "对象设计属性", exact: true });
   await inspector.getByRole("combobox", { name: "修改作用域", exact: true }).selectOption("base");

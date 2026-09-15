@@ -15,7 +15,7 @@ export class BindWechatDto {
   bindToken!: string;
 
   @IsString()
-  @Matches(/^1\d{10}$/, { message: "请提供有效的手机号码" })
+  @Matches(/^1[3-9]\d{9}$/, { message: "请提供有效的手机号码" })
   phone!: string;
 
   @IsString()

@@ -344,6 +344,20 @@ test(
         where: { leadId, type: "REPLY" },
         orderBy: { id: "desc" },
       });
+      // 本用例后半段专门验证兼容的 Lead 失败事件人工重投。顾问回复同时会创建
+      // Notification 投递事件；该链路由 reliable-notifications.mysql.spec.ts 覆盖，
+      // 在这里按精确去重键结清，避免一个 worker drain 同时统计两个不同场景。
+      const reliableReplyEvent = await prisma.outboxEvent.findUniqueOrThrow({
+        where: { deduplicationKey: `lead.reply.in-app:${replyActivity.id}` },
+      });
+      assert.equal(reliableReplyEvent.status, "PENDING");
+      await prisma.outboxEvent.update({
+        where: { id: reliableReplyEvent.id },
+        data: {
+          status: "PROCESSED",
+          processedAt: new Date(),
+        },
+      });
       const failedEvent = await prisma.outboxEvent.create({
         data: {
           aggregateType: "Lead",

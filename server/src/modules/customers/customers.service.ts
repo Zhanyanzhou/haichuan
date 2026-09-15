@@ -10,6 +10,8 @@ import { MailerService } from '../../common/mailer/mailer.service';
 import { SmsService } from '../../common/sms/sms.service';
 import { OrdersService } from '../orders/orders.service';
 import { RefreshSessionService, type SessionMetadata } from '../../common/security/refresh-session.service';
+import type { CustomerAccessTokenPayload } from '../../common/security/authenticated-principal';
+import { isCustomerAccessTokenPayload } from '../../common/security/access-session-validation';
 import { anonymizeCustomerConsultations } from '../leads/lead-privacy-disposition';
 import { customerFacingProductWhere } from '../products/product-eligibility';
 import { assertAccountPassword } from '../users/staff-password-policy';
@@ -95,9 +97,15 @@ export class CustomersService {
     return value;
   }
 
-  private issueAccessToken(customerId: number, authVersion: number) {
+  private issueAccessToken(customerId: number, authVersion: number, sessionFamilyId?: string) {
     return this.jwtService.sign(
-      { sub: customerId, type: 'customer', tokenUse: 'access', authVersion },
+      {
+        sub: customerId,
+        type: 'customer',
+        tokenUse: 'access',
+        authVersion,
+        ...(sessionFamilyId ? { sessionFamilyId } : {}),
+      },
       { expiresIn: '15m' },
     );
   }
@@ -188,9 +196,9 @@ export class CustomersService {
     email: string | null;
     authVersion: number;
     avatarStorageKey?: string | null;
-  }) {
+  }, sessionFamilyId?: string) {
     return {
-      accessToken: this.issueAccessToken(customer.id, customer.authVersion),
+      accessToken: this.issueAccessToken(customer.id, customer.authVersion, sessionFamilyId),
       customer: {
         id: customer.id,
         phone: customer.phone,
@@ -201,11 +209,98 @@ export class CustomersService {
     };
   }
 
-  // ===== 手机验真（短信验证码，开关式强制）=====
+  // ===== 手机验真（短信验证码，手机号身份注册强制）=====
 
-  /** 注册是否需要短信验证码（前端据此渲染验证码输入；默认关，凭据接入后由运营打开） */
+  /** 手机号作为账户身份时始终需要验证码；通道未配置只影响发码可用性，不能降级绕过。 */
   smsRequirements() {
-    return { registerRequired: this.sms.isRegisterVerificationRequired() };
+    return { registerRequired: true };
+  }
+
+  private async reserveSmsCode(
+    phone: string,
+    codeHash: string,
+    purpose: CustomerSmsPurpose,
+    now: Date,
+  ) {
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    // 首次切换到原子计数行时继承当日旧记录，避免升级当天重置冷却与日额度。
+    const [existingCount, latestExisting] = await Promise.all([
+      this.prisma.customerSmsCode.count({
+        where: { phone, createdAt: { gte: dayStart } },
+      }),
+      this.prisma.customerSmsCode.findFirst({
+        where: { phone, createdAt: { gte: dayStart } },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      }),
+    ]);
+    // 先用单语句自动提交创建稳定锁行；并发创建的唯一键冲突表示另一连接已完成初始化。
+    try {
+      await this.prisma.customerSmsRateLimit.create({
+        data: {
+          phone,
+          windowStart: dayStart,
+          dailyCount: existingCount,
+          lastAttemptAt: latestExisting?.createdAt ?? null,
+        },
+      });
+    } catch (error) {
+      const alreadyExists =
+        error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+      if (!alreadyExists) throw error;
+    }
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const cooldownSince = new Date(now.getTime() - 60_000);
+          // 更新现有主键行以取得排他锁；同手机号串行，不同手机号可并行。
+          const rateLimit = await tx.customerSmsRateLimit.update({
+            where: { phone },
+            data: { updatedAt: now },
+          });
+          if (rateLimit.lastAttemptAt && rateLimit.lastAttemptAt >= cooldownSince) {
+            throw new BadRequestException('发送过于频繁，请 60 秒后再试');
+          }
+
+          const sameWindow = rateLimit.windowStart.getTime() === dayStart.getTime();
+          const sentToday = sameWindow ? rateLimit.dailyCount : 0;
+          if (sentToday >= 10) {
+            throw new BadRequestException('今日该手机号验证码发送次数已达上限，请明日再试或联系顾问');
+          }
+
+          await tx.customerSmsRateLimit.update({
+            where: { phone },
+            data: {
+              windowStart: dayStart,
+              dailyCount: sentToday + 1,
+              lastAttemptAt: now,
+            },
+          });
+
+          return tx.customerSmsCode.create({
+            data: {
+              phone,
+              codeHash,
+              purpose,
+              expiresAt: new Date(now.getTime() + 5 * 60_000),
+              // 外部通道明确受理后才置为可消费；进程崩溃、失败或超时均保持禁用。
+              usedAt: now,
+            },
+            select: { id: true },
+          });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      } catch (error) {
+        const retryable =
+          error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034';
+        if (!retryable) throw error;
+        if (attempt === 2) {
+          throw new ServiceUnavailableException('发送请求过于集中，请稍后再试');
+        }
+      }
+    }
+    throw new ServiceUnavailableException('发送请求过于集中，请稍后再试');
   }
 
   /**
@@ -217,43 +312,29 @@ export class CustomersService {
     if (!/^1\d{10}$/.test(phone || '')) {
       throw new BadRequestException('请提供有效的手机号码');
     }
-    const now = new Date();
-
-    const cooldownSince = new Date(now.getTime() - 60_000);
-    const recent = await this.prisma.customerSmsCode.findFirst({
-      where: { phone, createdAt: { gte: cooldownSince } },
-      select: { id: true },
-    });
-    if (recent) throw new BadRequestException('发送过于频繁，请 60 秒后再试');
-
-    const dayStart = new Date(now);
-    dayStart.setHours(0, 0, 0, 0);
-    const sentToday = await this.prisma.customerSmsCode.count({
-      where: { phone, createdAt: { gte: dayStart } },
-    });
-    if (sentToday >= 10) {
-      throw new BadRequestException('今日该手机号验证码发送次数已达上限，请明日再试或联系顾问');
-    }
-
     if (!this.sms.isAvailable()) {
-      throw new ServiceUnavailableException('短信服务未配置，请直接注册或联系顾问');
+      throw new ServiceUnavailableException('短信服务暂不可用，请稍后再试或联系顾问');
     }
 
+    const now = new Date();
     // crypto 随机 6 位数字码（Math.random 不可用于安全场景）
     const code = String(randomInt(100000, 1000000));
     const codeHash = createHash('sha256').update(`${phone}:${code}`).digest('hex');
-    await this.prisma.customerSmsCode.create({
-      data: {
-        phone,
-        codeHash,
-        purpose,
-        expiresAt: new Date(now.getTime() + 5 * 60_000),
-      },
+    // 额度在调用外部通道前占用。失败或结果未知时也保留，防止重试造成重复短信。
+    const reservation = await this.reserveSmsCode(phone, codeHash, purpose, now);
+    const result = await this.sms.sendVerificationCode(phone, code, {
+      idempotencyKey: `sms:verification:${reservation.id}`,
     });
-    const result = await this.sms.sendVerificationCode(phone, code);
     if (!result.delivered) {
+      if (result.reason === 'result_unknown') {
+        throw new ServiceUnavailableException('短信发送结果未确认，请 60 秒后再试或联系顾问');
+      }
       throw new ServiceUnavailableException('短信发送失败，请稍后重试或联系顾问');
     }
+    await this.prisma.customerSmsCode.update({
+      where: { id: reservation.id },
+      data: { usedAt: null },
+    });
     return { message: '验证码已发送，5 分钟内有效' };
   }
 
@@ -294,8 +375,7 @@ export class CustomersService {
     sessionMetadata?: SessionMetadata,
   ) {
     const phone = this.normalizePhone(data.phone);
-    const smsRequired = this.sms.isRegisterVerificationRequired();
-    if (smsRequired && !data.smsCode?.trim()) throw new BadRequestException('请输入短信验证码');
+    if (!data.smsCode?.trim()) throw new BadRequestException('请输入短信验证码');
     const name = data.name?.trim();
     const email = data.email?.trim().toLowerCase();
     if (!name || name.length > 50) throw new BadRequestException('请填写有效的称呼');
@@ -306,9 +386,7 @@ export class CustomersService {
     const passwordHash = await bcrypt.hash(password, 12);
     const now = new Date();
     const created = await this.prisma.$transaction(async (tx) => {
-      if (smsRequired) {
-        await this.consumeSmsCode(tx, phone, data.smsCode!, now);
-      }
+      await this.consumeSmsCode(tx, phone, data.smsCode!, now);
       const existing = await tx.customer.findUnique({ where: { phone } });
       if (existing) {
         throw new ConflictException('无法完成注册，请直接登录或通过账户恢复流程处理');
@@ -327,7 +405,7 @@ export class CustomersService {
       return { customer: resolvedCustomer, refreshSession };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return {
-      ...this.accountResponse(created.customer),
+      ...this.accountResponse(created.customer, created.refreshSession?.familyId),
       refreshSession: created.refreshSession,
     };
   }
@@ -338,7 +416,7 @@ export class CustomersService {
     captchaId?: string;
     captchaCode?: string;
     smsCode?: string;
-  }) {
+  }, sessionMetadata?: SessionMetadata) {
     const phone = this.normalizePhone(data.phone);
     // 分级挑战：先校验当前等级要求的验证，再做密码比较；成功后清零计数。
     const failureCount = this.currentLoginFailureCount(phone);
@@ -370,16 +448,40 @@ export class CustomersService {
     }
     if (customer.status === 'DISABLED') throw new UnauthorizedException('该账户已被停用');
     this.loginFailures.delete(phone);
-    return { ...this.accountResponse(customer), sessionAuthVersion: customer.authVersion };
+    const refreshSession = sessionMetadata
+      ? await this.refreshSessions.issueCustomer(
+          customer.id,
+          sessionMetadata,
+          customer.authVersion,
+        )
+      : undefined;
+    return {
+      ...this.accountResponse(customer, refreshSession?.familyId),
+      refreshSession,
+      sessionAuthVersion: customer.authVersion,
+    };
   }
 
-  async resume(customerId: number) {
+  async resume(customerId: number, sessionFamilyId?: string) {
     const customer = await this.prisma.customer.findFirst({
       where: { id: customerId, status: 'ACTIVE' },
       select: { id: true, phone: true, name: true, email: true, authVersion: true, avatarStorageKey: true },
     });
     if (!customer) throw new UnauthorizedException('客户登录已失效');
-    return this.accountResponse(customer);
+    return this.accountResponse(customer, sessionFamilyId);
+  }
+
+  async resolveRevocableAccessSession(accessToken: string): Promise<{
+    customerId: number;
+    familyId: string;
+  } | null> {
+    try {
+      const payload = await this.jwtService.verifyAsync<CustomerAccessTokenPayload>(accessToken);
+      if (!isCustomerAccessTokenPayload(payload) || !payload.sessionFamilyId) return null;
+      return { customerId: payload.sub, familyId: payload.sessionFamilyId };
+    } catch {
+      return null;
+    }
   }
 
   /**

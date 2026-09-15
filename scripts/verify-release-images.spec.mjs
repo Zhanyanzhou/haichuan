@@ -15,8 +15,10 @@ import "../server/scripts/database-upgrade-rehearsal.test.mjs";
 
 import {
   releaseStaticWorkflowPaths,
+  validateQualityWorkflowStructure,
   validateComposeBuildPolicy,
   validateProductionEvidenceVerificationWorkflow,
+  validateReleaseWorkflowStructure,
   validateReleaseEnvironment,
   validateReleaseManifest,
 } from "./verify-release-images.mjs";
@@ -190,6 +192,8 @@ test("production evidence workflow verifies but never signs operator artifacts",
   assert.match(productionEvidenceWorkflow, /--manifest-signer-workflow "\$MANIFEST_SIGNER_WORKFLOW"/);
   assert.match(productionEvidenceWorkflow, /--environment-id-sha256 "\$ENVIRONMENT_ID_SHA256"/);
   assert.match(productionEvidenceWorkflow, /--approval-reference-sha256 "\$APPROVAL_REFERENCE_SHA256"/);
+  assert.match(productionEvidenceWorkflow, /UNPROTECTED_EVIDENCE_VERIFY_REF_CONFIRMATION_REQUIRED/);
+  assert.match(productionEvidenceWorkflow, /EVIDENCE_VERIFY_AUTHORIZATION_APPROVAL_MISMATCH/);
   assert.doesNotMatch(productionEvidenceWorkflow, /actions\/(?:attest|attest-build-provenance)@/);
   assert.equal(validateProductionEvidenceVerificationWorkflow(productionEvidenceWorkflow).ok, true);
   assert.throws(
@@ -207,6 +211,23 @@ test("production evidence workflow verifies but never signs operator artifacts",
     ),
     { message: "PRODUCTION_EVIDENCE_WORKFLOW_ROOT_PERMISSIONS_INVALID" },
   );
+  const wrongRun = productionEvidenceWorkflow.replace(
+    "          run-id: ${{ inputs.evidence_run_id }}",
+    "          run-id: 999 # run-id: ${{ inputs.evidence_run_id }}",
+  );
+  assert.notEqual(wrongRun, productionEvidenceWorkflow);
+  assert.throws(() => validateProductionEvidenceVerificationWorkflow(wrongRun), {
+    message: "PRODUCTION_EVIDENCE_WORKFLOW_DOWNLOAD_BINDING_INVALID",
+  });
+  const commentedSourceBinding = productionEvidenceWorkflow.replace(
+    '            test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" ||',
+    '            # test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" ||',
+  );
+  assert.notEqual(commentedSourceBinding, productionEvidenceWorkflow);
+  assert.throws(
+    () => validateProductionEvidenceVerificationWorkflow(commentedSourceBinding),
+    /PRODUCTION_EVIDENCE_WORKFLOW_AUTHORIZATION_CONTRACT_MISSING/,
+  );
 });
 
 test("reverse proxy static verification cannot claim target edge readiness", () => {
@@ -216,14 +237,49 @@ test("reverse proxy static verification cannot claim target edge readiness", () 
   assert.doesNotMatch(reverseProxyVerifier, /项反向代理安全合同通过/);
 });
 
-test("release workflow rejects non-default or unprotected release refs before quality lookup", () => {
-  const policyIndex = releaseWorkflow.indexOf("拒绝未受保护的发布来源");
-  const qualityLookupIndex = releaseWorkflow.indexOf("查找同一 SHA 的成功质量门禁");
-  assert.ok(policyIndex >= 0 && policyIndex < qualityLookupIndex);
-  assert.match(releaseWorkflow, /DEFAULT_BRANCH_REF: refs\/heads\/\$\{\{ github\.event\.repository\.default_branch \}\}/);
-  assert.match(releaseWorkflow, /refs\/heads\/release\/\*/);
-  assert.match(releaseWorkflow, /RELEASE_REF_PROTECTED: \$\{\{ github\.ref_protected \}\}/);
-  assert.match(releaseWorkflow, /if \[ "\$RELEASE_REF_PROTECTED" != "true" \]/);
+test("release workflow structurally binds unprotected authorization before the same-SHA quality proof", () => {
+  assert.doesNotThrow(() => validateReleaseWorkflowStructure(releaseWorkflow));
+  assert.doesNotThrow(() => validateQualityWorkflowStructure(qualityWorkflow));
+  const commentedAuthorization = releaseWorkflow.replace(
+    '            test "$UNPROTECTED_REF_AUTHORIZED" = "true" ||',
+    '            # test "$UNPROTECTED_REF_AUTHORIZED" = "true" ||',
+  );
+  assert.notEqual(commentedAuthorization, releaseWorkflow);
+  assert.throws(
+    () => validateReleaseWorkflowStructure(commentedAuthorization),
+    /RELEASE_WORKFLOW_SOURCE_AUTHORIZATION_CONTRACT_MISSING/,
+  );
+  const commentedSourceBinding = releaseWorkflow.replace(
+    '            test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" ||',
+    '            # test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" ||',
+  );
+  assert.notEqual(commentedSourceBinding, releaseWorkflow);
+  assert.throws(
+    () => validateReleaseWorkflowStructure(commentedSourceBinding),
+    /RELEASE_WORKFLOW_SOURCE_AUTHORIZATION_CONTRACT_MISSING/,
+  );
+  const wrongRun = releaseWorkflow.replace(
+    "          run-id: ${{ steps.quality.outputs.run_id }}",
+    "          run-id: 999 # run-id: ${{ steps.quality.outputs.run_id }}",
+  );
+  assert.notEqual(wrongRun, releaseWorkflow);
+  assert.throws(() => validateReleaseWorkflowStructure(wrongRun), {
+    message: "RELEASE_WORKFLOW_QUALITY_DOWNLOAD_BINDING_INVALID",
+  });
+  const shorthandPredicateBinding = releaseWorkflow.replace(
+    "                  buildkitProvenancePredicateType: buildkitPredicateType,",
+    "                  buildkitProvenancePredicateType,",
+  );
+  assert.notEqual(shorthandPredicateBinding, releaseWorkflow);
+  assert.throws(() => validateReleaseWorkflowStructure(shorthandPredicateBinding), {
+    message: "RELEASE_SIGNING_BUILDKIT_PREDICATE_BINDING_INVALID",
+  });
+  const commentedProofCheck = qualityWorkflow.replace(
+    '          if (Object.values(results).some((result) => result !== "success")) {',
+    '          # if (Object.values(results).some((result) => result !== "success")) {',
+  );
+  assert.notEqual(commentedProofCheck, qualityWorkflow);
+  assert.throws(() => validateQualityWorkflowStructure(commentedProofCheck), /QUALITY_FULL_PROOF_GENERATOR_CONTRACT_MISSING/);
 });
 
 test("backup execution is immutable inside the attested operations image", () => {
@@ -353,7 +409,8 @@ const imageEntry = (component, digest) => ({
 
 function validManifest() {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
+    assuranceLevel: "high",
     releaseStage: "production",
     imageTag: `sha-${gitSha}`,
     gitSha,
@@ -364,8 +421,22 @@ function validManifest() {
       runId: 1234,
       runUrl: `${source}/actions/runs/1234`,
       headSha: gitSha,
+      headRef: "refs/heads/main",
+      runAttempt: 1,
+      profile: "full",
       event: "push",
       conclusion: "success",
+      proofArtifactId: 9876,
+      proofArtifactDigest: `sha256:${"7".repeat(64)}`,
+      proofSha256: "8".repeat(64),
+      jobSet: ["verify", "e2e-deterministic", "real-mysql"],
+    },
+    releaseAuthorization: {
+      mode: "explicit-unprotected-ref",
+      approvalSha256: "9".repeat(64),
+      sourceSha: gitSha,
+      actor: "release-owner",
+      runId: 4321,
     },
     attestationPolicy: {
       signingSystem: "sigstore-cosign-keyless",
@@ -420,10 +491,56 @@ test("accepts a manifest bound to the expected source, quality run, migration an
   assert.deepEqual(validate(validManifest()), validManifest());
 });
 
+test("baseline keeps immutable digests and private SBOM without Sigstore fields", () => {
+  const manifest = validManifest();
+  manifest.assuranceLevel = "baseline";
+  delete manifest.attestationPolicy;
+  manifest.baselinePolicy = {
+    artifactSystem: "github-actions-private-artifact",
+    publicTransparencyLog: false,
+    immutableImageDigests: true,
+    buildkitProvenanceIncluded: true,
+    sbomIncluded: true,
+  };
+  for (const component of ["server", "client", "operations"]) {
+    const runtimeExecutables = manifest[component].runtimeExecutables;
+    manifest[component] = {
+      image: manifest[component].image,
+      digest: manifest[component].digest,
+      reference: manifest[component].reference,
+      buildkitProvenance: { path: `provenance/${component}.buildkit.json`, sha256: "4".repeat(64) },
+      sbom: { path: `sbom/${component}.spdx.json`, sha256: "5".repeat(64) },
+      ...(runtimeExecutables ? { runtimeExecutables } : {}),
+    };
+  }
+  assert.deepEqual(validate(manifest), manifest);
+  manifest.server.signatureBundle = { path: "attestations/server-image.sigstore.json", sha256: "6".repeat(64) };
+  assert.throws(() => validate(manifest), { message: "RELEASE_MANIFEST_SERVER_SCHEMA_INVALID" });
+});
+
 test("rejects a manifest for another Git revision", () => {
   expectCode((manifest) => {
     manifest.gitSha = "e".repeat(40);
   }, "RELEASE_MANIFEST_GIT_SHA_MISMATCH");
+});
+
+test("rejects an unprotected release authorization not bound to the manifest revision", () => {
+  expectCode((manifest) => {
+    manifest.releaseAuthorization.sourceSha = "e".repeat(40);
+  }, "RELEASE_MANIFEST_AUTHORIZATION_INVALID");
+  expectCode((manifest) => {
+    delete manifest.releaseAuthorization.sourceSha;
+  }, "RELEASE_MANIFEST_AUTHORIZATION_INVALID");
+});
+
+test("protected-ref authorization forbids explicit approval and source hashes", () => {
+  const manifest = validManifest();
+  manifest.releaseAuthorization.mode = "protected-ref";
+  manifest.releaseAuthorization.approvalSha256 = null;
+  manifest.releaseAuthorization.sourceSha = null;
+  assert.deepEqual(validate(manifest), manifest);
+  manifest.releaseAuthorization.sourceSha = gitSha;
+  assert.throws(() => validate(manifest), { message: "RELEASE_MANIFEST_AUTHORIZATION_INVALID" });
 });
 
 test("rejects a manifest for another migration bundle", () => {
@@ -468,7 +585,7 @@ test("rejects floating image references and digest/reference mismatches", () => 
 test("rejects a missing operations image", () => {
   expectCode((manifest) => {
     delete manifest.operations;
-  }, "RELEASE_MANIFEST_OPERATIONS_MISSING");
+  }, "RELEASE_MANIFEST_TOP_LEVEL_SCHEMA_INVALID");
 });
 
 test("rejects missing or drifted operations runtime executables", () => {
@@ -583,7 +700,7 @@ test("preproduction accepts a safe fallback while production rejects it", () => 
 test("release manifest requires exact immutable public SEO evidence", () => {
   expectCode((manifest) => {
     delete manifest.publicSeo;
-  }, "RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
+  }, "RELEASE_MANIFEST_TOP_LEVEL_SCHEMA_INVALID");
   expectCode((manifest) => {
     manifest.publicSeo.snapshotHash = "not-a-digest";
   }, "RELEASE_MANIFEST_PUBLIC_SEO_INVALID");

@@ -392,7 +392,7 @@ export default function StorefrontNavigation({
         >
           {isMenuOpen ? <><CloseIcon /><span className="site-menu-toggle__label">关闭</span></> : <><MenuIcon /><span className="site-menu-toggle__label">菜单</span></>}
         </button>
-        <Link to="/catalog#catalog-search-input" aria-label="搜索" className="site-header__nav-item" onClick={handlePreviewLink}>
+        <Link to="/catalog#catalog-search-input" aria-label="搜索" className="site-header__nav-item site-header__nav-item--search" onClick={handlePreviewLink}>
           <SearchIcon /><span className="site-header__nav-label hidden sm:inline">搜索</span>
         </Link>
       </div>

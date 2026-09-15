@@ -25,6 +25,7 @@ import {
   useContentTemplateRenderSurface,
   type ContentTemplateRenderMode,
 } from "../runtime/ContentTemplateRenderSurface";
+import { resolveManagedTemplateMediaPreviewUrl } from "./managedMediaPreview";
 
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
@@ -83,7 +84,10 @@ function safeColor(value: string | undefined): string | undefined {
   return value && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value) ? value : undefined;
 }
 
-function backgroundImageToCss(rules: DynamicTemplateRenderPlanNode["rules"]): string | undefined {
+function backgroundImageToCss(
+  rules: DynamicTemplateRenderPlanNode["rules"],
+  allowPrivatePreview: boolean,
+): string | undefined {
   const layers: string[] = [];
   const gradient = rules.backgroundGradient;
   if (gradient && safeColor(gradient.from) && safeColor(gradient.to)
@@ -91,7 +95,10 @@ function backgroundImageToCss(rules: DynamicTemplateRenderPlanNode["rules"]): st
     layers.push(`linear-gradient(${gradient.angle}deg, ${gradient.from}, ${gradient.to})`);
   }
   if (rules.backgroundImage && isSafeTemplateMediaUrl(rules.backgroundImage)) {
-    layers.push(`url(${JSON.stringify(rules.backgroundImage)})`);
+    const source = allowPrivatePreview
+      ? resolveManagedTemplateMediaPreviewUrl(rules.backgroundImage)
+      : rules.backgroundImage;
+    layers.push(`url(${JSON.stringify(source)})`);
   }
   return layers.length ? layers.join(", ") : undefined;
 }
@@ -134,6 +141,7 @@ function rulesToStyle(
   parentFree = false,
   parentRules?: DynamicTemplateRenderPlanNode["rules"],
   relationalLayout = false,
+  allowPrivateMediaPreview = false,
 ): CSSProperties {
   const { rules } = node;
   const alignsOwnChildren = rules.display === "flex" || rules.display === "grid";
@@ -161,7 +169,7 @@ function rulesToStyle(
     backgroundColor: safeColor(rules.backgroundColor) ?? (rules.backgroundToken
       ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[rules.backgroundToken]
       : undefined),
-    backgroundImage: backgroundImageToCss(rules),
+    backgroundImage: backgroundImageToCss(rules, allowPrivateMediaPreview),
     backgroundSize: rules.backgroundImage ? "cover" : undefined,
     backgroundPosition: rules.backgroundImage ? "center" : undefined,
     opacity: Number.isFinite(rules.opacity) ? Math.max(0, Math.min(1, rules.opacity!)) : undefined,
@@ -388,7 +396,7 @@ function renderSlotContent(
     if (!src) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">图片待填写</span>;
     return (
       <img
-        src={src}
+        src={mode === "public" ? src : resolveManagedTemplateMediaPreviewUrl(src)}
         alt={alt}
         style={{
           width: "100%",
@@ -746,7 +754,18 @@ function RenderNode({
       data-template-background-token={node.rules.backgroundToken}
       data-template-border-token={node.rules.borderToken}
       style={{
-        ...rulesToStyle(node, layoutPreview, placementPreview, parentFree, parentRules, relationalLayout),
+        ...rulesToStyle(
+          node,
+          layoutPreview,
+          placementPreview,
+          parentFree,
+          parentRules,
+          relationalLayout,
+          mode !== "public",
+        ),
+        ...(showEmptyStructure && !node.slot && node.children.length === 0
+          ? { minHeight: "256px" }
+          : {}),
         // 新合同的阅读顺序与叠放层序共用 childIds，断点不维护第二套排序。
         ...(relationalLayout ? { order: siblingIndex, zIndex: layoutPreview?.zIndex ?? node.layoutOverride?.zIndex ?? siblingIndex } : {}),
         ...(layoutEditable || freePlacementEditable ? {

@@ -19,6 +19,7 @@ import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/component
 import type { PaginatedResult } from '@/types';
 import { SecureImage } from '@/components/common/SecureImage';
 import { readPageMediaLibrary, writePageMediaLibrary } from '@/page-builder/fields/pageMediaLibrary';
+import { resolveManagedTemplateMediaPreviewUrl } from '@/page-builder/template-definition/managedMediaPreview';
 import { useAuthStore } from '@/store/authStore';
 
 type ProductMediaRow = {
@@ -503,7 +504,7 @@ export default function MediaLibrary() {
                       <div key={m.id} style={{ border: '1px solid var(--adm-line)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
                         {m.status === 'READY' && m.available && m.type === 'image' ? (
                           <button type="button" aria-label={`预览 ${m.name}`} onClick={() => setPreview(m)} style={{ display: 'block', width: '100%', padding: 0, border: 0, background: 'transparent', cursor: 'pointer' }}>
-                            <Image src={m.url} alt="" width="100%" height={120} style={{ objectFit: 'cover', display: 'block' }} preview={false} />
+                            <Image src={resolveManagedTemplateMediaPreviewUrl(m.url)} alt="" width="100%" height={120} style={{ objectFit: 'cover', display: 'block' }} preview={false} />
                           </button>
                         ) : m.status === 'READY' && m.available ? (
                           <button type="button" aria-label={`预览 ${m.name}`} onClick={() => setPreview(m)} style={{ display: 'block', width: '100%', padding: 0, border: 0, background: 'transparent', cursor: 'pointer' }}>
@@ -596,7 +597,7 @@ export default function MediaLibrary() {
       {/* 素材预览 */}
       <Modal open={!!preview} footer={null} onCancel={() => setPreview(null)} width={720} title={preview?.name || '预览'}>
         {preview && (preview.type === 'image'
-          ? <Image src={preview.url} width="100%" style={{ objectFit: 'contain' }} />
+          ? <Image src={resolveManagedTemplateMediaPreviewUrl(preview.url)} width="100%" style={{ objectFit: 'contain' }} />
           : <video src={preview.url} controls style={{ width: '100%', maxHeight: '60vh', display: 'block' }} />
         )}
       </Modal>

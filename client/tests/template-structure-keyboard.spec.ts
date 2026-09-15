@@ -4,7 +4,6 @@ import { addDynamicTemplateNode } from "../src/page-builder/template-definition"
 import { createNewDynamicTemplateDraft } from "../src/page-builder/template-editor/dynamicTemplateDraftRepository";
 import type { TemplateCatalogItemResource } from "../src/services/clients/dynamicTemplateClient";
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalog } from "./fixtures/template-catalog";
 import {
   addTwoRegions, createBlankTemplate, installNewTemplateServer,
   readSession, structurePanel,
@@ -264,8 +263,7 @@ async function installMockEditorApis(
       return route.fulfill({ status: 409, contentType: "application/json", body: "{}" });
     }
     if (pathname === "/api/page-modules/dynamic-templates/catalog") {
-      const catalog = systemTemplateCatalog();
-      return route.fulfill(json({ ...catalog, items: [deepTemplate, ...catalog.items] }));
+      return route.fulfill(json({ source: "unified", items: [deepTemplate] }));
     }
     const draftMatch = pathname.match(/^\/api\/page-modules\/dynamic-templates\/([^/]+)\/draft$/);
     if (draftMatch && method === "GET") {
@@ -322,6 +320,8 @@ async function openTemplateStructure(
   await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
   // development 页面首次加载必经 650ms 防抖校验；先等初始化收尾，避免把它计入键盘行为。
   await expect.poll(() => requestMonitor.validationRequests).toBeGreaterThanOrEqual(1);
+  const pageInspectorClose = page.getByRole("button", { name: "收起属性面板", exact: true });
+  if (await pageInspectorClose.isVisible()) await pageInspectorClose.click();
   await page.getByRole("button", { name: "模板设计", exact: true }).click();
   await expect(page.getByRole("group", { name: "店铺装修工作模式切换" }))
     .toHaveAttribute("data-active-mode", "template");
@@ -329,7 +329,9 @@ async function openTemplateStructure(
   await expect(page.locator('.template-editor__toolbar [role="status"]'))
     .toHaveAttribute("aria-label", "模板状态：未选择模板");
   expect(requestMonitor.draftReads, "首次进入模板工作区只显示目录，不得自动读取历史模板草稿").toEqual([]);
-  if (viewport.width < 1200) {
+  const compact = viewport.width <= 1439;
+  const modalOverlay = viewport.width <= 1024;
+  if (compact) {
     const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });
     await expect(expandLibrary).toBeVisible();
     await expandLibrary.focus();
@@ -351,14 +353,14 @@ async function openTemplateStructure(
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
 
-  if (viewport.width < 1200) {
+  if (compact) {
     const expand = page.getByRole("button", { name: "展开模板结构面板" });
     await expect(expand).toBeVisible();
     await expand.focus();
     await page.keyboard.press("Enter");
   }
 
-  const structure = viewport.width < 1200
+  const structure = modalOverlay
     ? page.getByRole("dialog", { name: "模板结构", exact: true })
     : page.getByRole("complementary", { name: "模板结构", exact: true });
   const tree = structure.getByRole("tree", { name: "模板区域与槽位" });

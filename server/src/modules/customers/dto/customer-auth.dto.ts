@@ -45,10 +45,9 @@ export class CustomerRegisterDto extends AccountPasswordDto {
   @MaxLength(100)
   email?: string;
 
-  @IsOptional()
   @IsString()
   @Matches(/^\d{6}$/, { message: '短信验证码格式不正确' })
-  smsCode?: string;
+  smsCode!: string;
 }
 
 export class CustomerLoginDto extends CustomerPhoneDto {

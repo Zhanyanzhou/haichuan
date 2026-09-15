@@ -220,12 +220,14 @@
 }
 
 .brand-menu__top {
+  box-sizing: border-box;
   display: flex;
   flex: 0 0 auto;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-start;
   gap: 44px;
-  min-height: 108px;
+  min-height: var(--site-header-height);
+  padding-top: var(--site-header-action-top);
 }
 
 .brand-menu__top-action {
@@ -249,11 +251,6 @@
   text-decoration: none;
   cursor: pointer;
   transition: color 220ms ease;
-}
-
-.brand-menu__top-action[data-menu-close] {
-  box-sizing: border-box;
-  padding-bottom: 5px;
 }
 
 .brand-menu__top-action svg {

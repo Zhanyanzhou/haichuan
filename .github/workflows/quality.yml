@@ -4,16 +4,21 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   verify:
+    name: Quality checks
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - name: 检出代码
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -36,7 +41,7 @@ jobs:
           }
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
           cache: npm
@@ -90,11 +95,24 @@ jobs:
           DATABASE_URL: "mysql://ci:ci@localhost:3306/ci_db"
         run: npx prisma validate
 
-      - name: 运行质量检查
+      - name: 运行快速质量检查
         run: |
           npm run lint
           npm run typecheck
-          npm test
+          npm run test:contracts
+          npm run test:content-templates
+          npm run test:template-v2-gate-d
+          npm run test:decision-governance
+          npm run test:client-public-env
+          npm run test:server
+          npm run test:release-supply-chain
+
+      - name: 运行完整应用质量检查
+        if: github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/')
+        run: |
+          npm run test:public-assets
+          npm run test:runtime-ownership
+          npm run test:admin-ui-standards
           npm run test:trade
           npm run test:selection-inquiry
           npm run test:ui-colors
@@ -108,6 +126,7 @@ jobs:
   e2e-deterministic:
     name: Deterministic E2E - ${{ matrix.name }}
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/')
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -127,10 +146,12 @@ jobs:
             shard: 2/2
     steps:
       - name: 检出代码
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
           cache: npm
@@ -141,7 +162,7 @@ jobs:
         run: npm ci
 
       - name: 缓存 Playwright 浏览器
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('client/package-lock.json') }}
@@ -161,10 +182,22 @@ jobs:
           --shard=${{ matrix.shard }}
           --workers=1
 
+      - name: 保存失败的 E2E 报告与 trace
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: playwright-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            client/playwright-report
+            client/test-results
+          if-no-files-found: warn
+          retention-days: 10
+
   real-mysql:
     name: Real MySQL - migrations and persistence
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    if: github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/')
+    timeout-minutes: 30
     services:
       mysql:
         image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
@@ -182,16 +215,31 @@ jobs:
           --health-retries=30
     steps:
       - name: 检出代码
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: server/package-lock.json
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
       - name: 安装服务端依赖
         working-directory: server
         run: npm ci
+      - name: 安装真实鉴权浏览器闭环依赖
+        working-directory: client
+        run: npm ci
+      - name: 缓存真实鉴权浏览器
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('client/package-lock.json') }}
+      - name: 安装真实鉴权 Chromium
+        working-directory: client
+        run: npx playwright install --with-deps chromium
       - name: 生成 Prisma Client
         working-directory: server
         run: npx prisma generate
@@ -216,7 +264,7 @@ jobs:
           test "$trigger_probe" = "1"
       - name: 验证一次性数据库入口保护
         run: node --test server/scripts/run-real-mysql-tests.spec.cjs
-      - name: 空库完成 56 个不可变 migration 与全部已登记真实 MySQL 闭环（禁止跳过）
+      - name: 空库完成全部不可变 migration 与已登记真实 MySQL 闭环（禁止跳过）
         env:
           MYSQL_CONTAINER_ID: ${{ job.services.mysql.id }}
           MYSQL_TEST_PASSWORD: isolated-ci-test-only
@@ -224,8 +272,63 @@ jobs:
           REAL_MYSQL_TEST_DATABASE_URL: mysql://isolated_ci:isolated-ci-test-only@127.0.0.1:${{ job.services.mysql.ports[3306] }}/haichuan_ci_real_tests
         run: |
           node server/scripts/run-real-mysql-tests.cjs
+          expected_migrations="$(find server/prisma/migrations -mindepth 2 -maxdepth 2 -type f -name migration.sql | wc -l | tr -d '[:space:]')"
+          test "$expected_migrations" -gt 0
           applied_migrations="$(docker exec -e MYSQL_PWD="$MYSQL_TEST_PASSWORD" "$MYSQL_CONTAINER_ID" \
             mysql --protocol=TCP --host=127.0.0.1 --user=isolated_ci --batch --skip-column-names \
             -e "SELECT COUNT(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;" \
             haichuan_ci_real_tests)"
-          test "$applied_migrations" = "56"
+          test "$applied_migrations" = "$expected_migrations"
+
+  full-proof:
+    name: Full quality proof
+    needs:
+      - verify
+      - e2e-deterministic
+      - real-mysql
+    if: always() && (github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: 生成完整档机器证明
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          E2E_RESULT: ${{ needs.e2e-deterministic.result }}
+          MYSQL_RESULT: ${{ needs.real-mysql.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p quality-proof
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const results = {
+            verify: process.env.VERIFY_RESULT,
+            "e2e-deterministic": process.env.E2E_RESULT,
+            "real-mysql": process.env.MYSQL_RESULT,
+          };
+          if (Object.values(results).some((result) => result !== "success")) {
+            throw new Error(`QUALITY_FULL_JOB_SET_INCOMPLETE:${JSON.stringify(results)}`);
+          }
+          const proof = {
+            schemaVersion: 1,
+            profile: "full",
+            workflow: "quality.yml",
+            repository: process.env.GITHUB_REPOSITORY,
+            gitSha: process.env.GITHUB_SHA,
+            ref: process.env.GITHUB_REF,
+            event: process.env.GITHUB_EVENT_NAME,
+            runId: Number(process.env.GITHUB_RUN_ID),
+            runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+            jobSet: ["verify", "e2e-deterministic", "real-mysql"],
+            results,
+          };
+          fs.writeFileSync("quality-proof/quality-full-proof.json", `${JSON.stringify(proof, null, 2)}\n`);
+          NODE
+
+      - name: 上传完整档机器证明
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: quality-full-proof-${{ github.sha }}-${{ github.run_id }}
+          path: quality-proof/quality-full-proof.json
+          if-no-files-found: error
+          retention-days: 30

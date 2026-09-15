@@ -17,7 +17,7 @@ const migrationsDirectory = path.join(prismaDirectory, 'migrations');
 const prismaCli = path.join(serverDirectory, 'node_modules', 'prisma', 'build', 'index.js');
 
 export const MYSQL_IMAGE = 'mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b';
-export const EXPECTED_MIGRATION_COUNT = 56;
+export const EXPECTED_MIGRATION_COUNT = 58;
 export const CHECKPOINT_MIGRATION_COUNT = 51;
 export const MIGRATION_PRIVILEGES = Object.freeze([
   'SELECT',
@@ -36,6 +36,8 @@ export const PROFILE_MIGRATION = '20260911220000_add_customer_profile_security';
 export const QUOTATION_EXPANSION_MIGRATION = '20260913120000_expand_quotation_conversion_contract';
 export const QUOTATION_INVARIANTS_MIGRATION = '20260913121000_enforce_quotation_conversion_invariants';
 export const MEDIA_AUTHORIZATION_MIGRATION = '20260913122000_add_media_authorization_inheritance';
+export const CUSTOMER_SMS_RATE_LIMIT_MIGRATION = '20260915002000_add_customer_sms_rate_limits';
+export const PRODUCT_IMAGE_URL_INDEX_MIGRATION = '20260915113500_add_product_image_url_index';
 export const EXPECTED_TRIGGER_COUNT = 14;
 
 export const PREFLIGHT_SQL = `
@@ -270,6 +272,8 @@ export async function main() {
   assert.equal(migrationNames[53], QUOTATION_EXPANSION_MIGRATION);
   assert.equal(migrationNames[54], QUOTATION_INVARIANTS_MIGRATION);
   assert.equal(migrationNames[55], MEDIA_AUTHORIZATION_MIGRATION);
+  assert.equal(migrationNames[56], CUSTOMER_SMS_RATE_LIMIT_MIGRATION);
+  assert.equal(migrationNames[57], PRODUCT_IMAGE_URL_INDEX_MIGRATION);
   assert.ok(fs.existsSync(prismaCli), 'Run npm install in server before this rehearsal');
   verifyStaticMigrationGuards();
 

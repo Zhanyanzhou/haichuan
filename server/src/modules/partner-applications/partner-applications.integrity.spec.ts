@@ -301,7 +301,7 @@ test('暂停同步后同一旧 JWT 会读取实时状态并立即失去 PARTNER 
     { verifyAsync: async () => ({ sub: 9, type: 'customer', tokenUse: 'access' }) } as any,
     {
       customer: {
-        findUnique: async () => ({
+        findFirst: async () => ({
           id: 9,
           status: 'ACTIVE',
           accountType: 'PARTNER',

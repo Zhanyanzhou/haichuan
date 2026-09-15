@@ -544,6 +544,7 @@ export default function DynamicTemplateStructurePanel({
   modalOverlay = compactOverlay,
   publishIssueEditing = false,
   onOpenPublishReview,
+  onSelectTarget,
   onPanelKeyDown,
   onCollapse,
 }: {
@@ -553,6 +554,7 @@ export default function DynamicTemplateStructurePanel({
   modalOverlay?: boolean;
   publishIssueEditing?: boolean;
   onOpenPublishReview?: () => void;
+  onSelectTarget?: () => void;
   onPanelKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
   onCollapse?: () => void;
 }) {
@@ -693,6 +695,7 @@ export default function DynamicTemplateStructurePanel({
     if (!result) return;
     if (result.ok) {
       setSelectionExclusion(null);
+      onSelectTarget?.();
       return;
     }
     setSelectionExclusion(result.exclusions[0] ?? null);
@@ -908,6 +911,7 @@ export default function DynamicTemplateStructurePanel({
       : definition.rootNodeId;
     if (issue.roleId) selectContractRole(nodeId, issue.roleId);
     else selectObject(nodeId);
+    onSelectTarget?.();
   };
 
   const repairIssue = (issue: TemplateStructureIssue) => {
@@ -1431,6 +1435,7 @@ export default function DynamicTemplateStructurePanel({
         onClick={() => {
           selectObject(definition.rootNodeId);
           setSelectionExclusion(null);
+          onSelectTarget?.();
         }}
       >
         <BlockOutlined aria-hidden="true" />

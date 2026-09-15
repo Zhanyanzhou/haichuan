@@ -1,9 +1,7 @@
 import {
   useCallback,
   useEffect,
-  lazy,
   useRef,
-  Suspense,
   useState,
 } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
@@ -22,14 +20,11 @@ import {
 import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
-import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
+import PuckDocumentRenderer, {
+  type PuckDocument,
+} from "@/page-builder/runtime/PuckDocumentRenderer";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
-
-// 首页基础内容与装修渲染器分离，只有取得已发布的 Puck 数据时才加载编辑器运行时。
-const PuckDocumentRenderer = lazy(
-  () => import("@/page-builder/runtime/PuckDocumentRenderer"),
-);
 
 const LG = "#F4F5F5";
 
@@ -38,18 +33,6 @@ function HomeDocumentLoading({ english = false }: { english?: boolean }) {
     <div aria-busy="true" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center" }}>
       <h1 className="sr-only">{english ? "Haichuan Jewelry" : "海川珠宝"}</h1>
       <span style={{ color: "#5F6568", fontSize: 12, letterSpacing: ".16em" }}>{english ? "Loading home" : "正在载入首页"}</span>
-    </div>
-  );
-}
-
-function PuckDocumentLoading({ english = false }: { english?: boolean }) {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      style={{ minHeight: 180, display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12, letterSpacing: ".12em" }}
-    >
-      {english ? "Rendering home content" : "正在渲染首页内容"}
     </div>
   );
 }
@@ -168,13 +151,11 @@ export default function Home() {
   return (
     <div data-page-document-state="published" style={{ background: LG }}>
       {!hasVisibleHeroTitle ? <h1 className="sr-only">{english ? "Haichuan Jewelry" : "海川珠宝"}</h1> : null}
-      <Suspense fallback={<PuckDocumentLoading english={english} />}>
-        <PuckDocumentRenderer
-          data={readiness.data as PuckDocument}
-          surface="home"
-          heroHeadingLevel={hasVisibleHeroTitle ? 1 : 2}
-        />
-      </Suspense>
+      <PuckDocumentRenderer
+        data={readiness.data as PuckDocument}
+        surface="home"
+        heroHeadingLevel={hasVisibleHeroTitle ? 1 : 2}
+      />
       <StaleDocumentNotice
         visible={documentStale}
         onRefresh={() => void refreshDocument(false)}
@@ -327,13 +308,11 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
 
   return (
     <main style={{ background: LG }}>
-      <Suspense fallback={<PuckDocumentLoading />}>
-        <PuckDocumentRenderer
-          data={previewData}
-          mode="preview"
-          surface={pageKey === "home" ? "home" : undefined}
-        />
-      </Suspense>
+      <PuckDocumentRenderer
+        data={previewData}
+        mode="preview"
+        surface={pageKey === "home" ? "home" : undefined}
+      />
     </main>
   );
 }

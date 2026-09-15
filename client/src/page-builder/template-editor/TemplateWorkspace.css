@@ -906,18 +906,16 @@
 /* 空结构仍保留真实 auto 高度；这里只扩大模板设计画布中的操作面。
    根节点由独立空白起步区承接，因此仅处理根节点内部的空区域/分组。 */
 .hc-dynamic-template[data-dynamic-template-mode="editor"][data-dynamic-template-editor-surface="template-definition"]
-  [data-template-node-id]
-  [data-template-empty-structure="true"] {
+  [data-template-node-id][data-template-empty-structure="true"] {
   position: relative;
-  min-height: clamp(120px, 14vw, 240px);
+  min-height: clamp(256px, 14vw, 320px);
   outline: 1px dashed rgb(51 95 125 / 45%);
   outline-offset: -1px;
   background: rgb(238 244 247 / 28%);
 }
 
 .hc-dynamic-template[data-dynamic-template-mode="editor"][data-dynamic-template-editor-surface="template-definition"]
-  [data-template-node-id]
-  [data-template-empty-structure="true"]::before {
+  [data-template-node-id][data-template-empty-structure="true"]::before {
   position: absolute;
   inset: 50% auto auto 50%;
   max-width: calc(100% - 32px);
@@ -2151,7 +2149,7 @@
   font-size: 13px;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .template-editor__recovery-banner {
     left: 52px;
     right: 52px;
@@ -3142,18 +3140,19 @@
 @media (min-width: 1200px) {
   .template-editor__canvas-scroll.homepage-editor__canvas-scroll { padding-top: 48px; }
 }
-[data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-preview-wrap {
+.unified-template-library__scroll .homepage-editor__template-preview-wrap {
   aspect-ratio: auto;
   min-height: 0;
   overflow: visible;
   border: 0;
   background: transparent;
 }
-[data-unified-template-library="design"] .template-editor__catalog-preview-shell {
+.unified-template-library__scroll .template-editor__catalog-preview-shell,
+.template-editor__catalog-preview-shell.is-detail {
   position: relative;
   box-sizing: border-box;
   display: grid;
-  grid-template-rows: 112px auto;
+  grid-template-rows: auto auto auto;
   gap: 6px;
   width: 100%;
   height: auto;
@@ -3161,20 +3160,20 @@
   overflow: visible;
   background: transparent;
 }
-[data-unified-template-library="design"] .template-editor__catalog-artboard-stage {
+.template-editor__catalog-artboard-stage {
   position: relative;
   display: grid;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   place-items: center;
-  border: 1px solid var(--adm-line);
   border-radius: 4px;
   background: var(--adm-neutral-bg);
+  box-shadow: inset 0 0 0 1px var(--adm-line);
 }
-[data-unified-template-library="design"] .template-editor__catalog-preview-placeholder {
+.unified-template-library__scroll .template-editor__catalog-preview-placeholder {
   min-height: 0;
-  height: 136px;
+  height: 132px;
 }
 .template-editor__catalog-dimensions {
   position: static;
@@ -3192,116 +3191,147 @@
   white-space: nowrap;
   pointer-events: none;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll.is-double .template-editor__catalog-preview-shell {
-  grid-template-rows: 72px auto;
+.template-editor__catalog-preview-issue {
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--adm-warning);
+  background: var(--adm-warning-bg);
+  font-size: 10px;
+  line-height: 16px;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-card {
-  padding-bottom: 0;
+.template-editor__catalog-preview-issue.is-media-failed {
+  color: var(--adm-danger);
+  background: var(--adm-error-bg);
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-card-main {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  gap: 4px 10px;
-  align-content: center;
-  min-height: 78px;
+.unified-template-library__scroll .homepage-editor__template-card {
+  margin: 0;
+  padding: 0;
+}
+.unified-template-library__scroll .homepage-editor__template-card-main {
+  display: block;
+  min-height: 0;
   padding: 8px;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-preview-wrap {
-  grid-column: 1;
-  grid-row: 1 / span 4;
-  width: 96px;
+.unified-template-library__scroll .homepage-editor__template-preview-wrap {
+  width: 100%;
   height: auto;
-  align-self: center;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-name {
-  grid-column: 2;
-  padding: 0 20px 0 0;
+.template-editor__catalog-card-info {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 9px 3px 2px;
+}
+.unified-template-library__scroll .homepage-editor__template-name,
+.unified-template-library__scroll :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+.unified-template-library__scroll .homepage-editor__template-name {
+  overflow: hidden;
+  color: var(--adm-text-strong);
   font-size: 14px;
   line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
-  grid-column: 2;
-  padding: 0;
-  font-size: 12px;
-  line-height: 18px;
+.unified-template-library__scroll :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
+  font-size: 11px;
+  line-height: 17px;
 }
-[data-unified-template-library="design"] .template-editor__catalog-version-state {
+.template-editor__catalog-version-state {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
-[data-unified-template-library="design"] .template-editor__catalog-draft-state {
+.template-editor__catalog-draft-state {
   color: var(--adm-text);
   font-weight: 600;
 }
-[data-unified-template-library="design"] .template-editor__catalog-published-state {
+.template-editor__catalog-published-state {
   color: var(--adm-muted);
   font-weight: 500;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .unified-template-library__primary-action { display: none; }
-@container template-library (max-width: 235px) {
-  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-card-main {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto;
-    gap: 6px;
-    align-content: start;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-preview-wrap {
-    grid-column: 1;
-    grid-row: 1;
-    width: 100%;
-    height: auto;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-name,
-  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
-    grid-column: 1;
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    overflow-wrap: normal;
-    word-break: normal;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-card-status {
-    overflow: visible;
-    white-space: normal;
-    overflow-wrap: normal;
-    word-break: normal;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll :is(.unified-template-library__metadata, .unified-template-library__disabled-reason) {
-    display: -webkit-box;
-    max-height: 36px;
-    overflow: hidden;
-    white-space: normal;
-    overflow-wrap: break-word;
-    word-break: normal;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll .template-editor__catalog-card-action {
-    top: 14px;
-    right: 14px;
-    width: 32px;
-    height: 32px;
-    min-height: 0;
-    padding: 0;
-    border: 0;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll .template-editor__catalog-card-action > .template-editor__template-more {
-    opacity: 0.96;
-  }
+.unified-template-library__scroll .unified-template-library__primary-action { display: none; }
+.template-editor__catalog-card-action {
+  top: 14px;
+  right: 14px;
+  width: auto;
+  height: 34px;
+}
+.template-editor__catalog-card-actions {
+  display: flex;
+  gap: 4px;
+  pointer-events: auto;
+}
+.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more) {
+  position: static;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--adm-neutral-border);
+  border-radius: 50%;
+  color: var(--adm-text-strong);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 1px 4px rgb(24 26 27 / 10%);
+  cursor: pointer;
+  opacity: 0.96;
+}
+.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more):hover,
+.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more):focus-visible {
+  border-color: var(--adm-action);
+  color: var(--adm-action);
+  outline: 0;
+}
+.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more):focus-visible {
+  box-shadow: 0 0 0 2px var(--adm-focus);
+}
+.template-editor__catalog-preview-dialog-body {
+  display: grid;
+  gap: 12px;
+}
+.template-editor__catalog-preview-dialog-summary,
+.template-editor__catalog-preview-dialog-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.template-editor__catalog-preview-dialog-summary {
+  color: var(--adm-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.template-editor__catalog-preview-dialog-summary > :first-child {
+  color: var(--adm-text-strong);
+  font-weight: 600;
+}
+.template-editor__catalog-preview-dialog-toolbar > [role="group"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.template-editor__catalog-preview-dialog-scroller {
+  max-height: min(68vh, calc(100vh - 240px));
+  min-height: 180px;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  background: var(--adm-neutral-bg);
+  overscroll-behavior: contain;
+}
+.template-editor__catalog-preview-shell.is-detail {
+  min-width: 100%;
+}
+.template-editor__catalog-preview-shell.is-detail .template-editor__catalog-artboard-stage {
+  background: color-mix(in srgb, var(--adm-neutral-bg) 88%, var(--adm-content-bg));
 }
 .template-editor__inspector .homepage-editor__inspector-header {
   grid-template-columns: 36px minmax(0, 1fr) auto;
@@ -3699,15 +3729,14 @@ button.template-editor__toolbar-state {
   .template-editor__toolbar-subject { display: none; }
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .template-editor__canvas-controls--minimal {
     left: 50%;
     bottom: 20px;
   }
 }
 
-/* 1200px 桌面窗口下第四区仅 240px：只收紧属性区内部排版，
- * 不改动 editor.css 统一维护的 12% / 8% / 60% / 20% 四区合同。 */
+/* 属性区低于紧凑表单宽度时收紧内部排版；不复制外壳断点与宽度。 */
 @container (max-width: 260px) {
   .template-editor__inspector .homepage-editor__inspector-header {
     grid-template-columns: 34px minmax(0, 1fr);
@@ -3949,10 +3978,10 @@ button.template-editor__toolbar-state {
   font: inherit;
 }
 
-/* 压力预览只替换四区内部内容。桌面 dock 的 12% / 8% / 60% / 20%
- * 几何继续由 editor.css 唯一合同控制；这里仅撤销旧公开预览的隐藏侧栏，
+/* 压力预览只替换四区内部内容。宽屏 dock 几何继续由 editor.css
+ * 唯一合同控制；这里仅撤销旧公开预览的隐藏侧栏，
  * 并让中央画布继续消费同一组 dock 变量，不另建模式宽度。 */
-@media (min-width: 1200px) {
+@media (min-width: 1440px) {
   .homepage-editor__body.template-editor__body.is-previewing
     > .homepage-editor__library.template-editor__library,
   .homepage-editor__body.template-editor__body.is-previewing

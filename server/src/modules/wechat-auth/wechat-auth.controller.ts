@@ -97,7 +97,11 @@ export class WechatAuthController {
         cookies.push(
           ...buildSessionCookieHeaders(
             "customer",
-            outcome.session.accessToken,
+            this.wechatAuth.issueSessionAccessToken(
+              outcome.session.customerId,
+              outcome.session.authVersion,
+              refresh.familyId,
+            ),
             refresh.refreshToken,
           ).headers,
         );
@@ -139,29 +143,34 @@ export class WechatAuthController {
     @Body() body: BindWechatDto,
   ) {
     response.setHeader("Cache-Control", "no-store, private, max-age=0");
-    const { sessionAuthVersion, ...result } = await this.wechatAuth.bindWechat(
+    const { sessionAuthVersion, accessToken: _, ...result } = await this.wechatAuth.bindWechat(
       body,
       extractWechatOAuthBindingCookie(request.headers?.cookie),
     );
+    const session = await this.refreshSessions.issueCustomer(
+      result.customer.id,
+      requestSessionMetadata(request),
+      sessionAuthVersion,
+    );
+    const accessToken = this.wechatAuth.issueSessionAccessToken(
+      result.customer.id,
+      sessionAuthVersion,
+      session.familyId,
+    );
     if (request.headers?.["x-session-mode"] === "cookie") {
-      const session = await this.refreshSessions.issueCustomer(
-        result.customer.id,
-        requestSessionMetadata(request),
-        sessionAuthVersion,
-      );
       response.setHeader(
         "Set-Cookie",
         [
           ...buildSessionCookieHeaders(
             "customer",
-            result.accessToken,
+            accessToken,
             session.refreshToken,
           ).headers,
         ],
       );
       return { customer: result.customer };
     }
-    return result;
+    return { ...result, accessToken };
   }
 
   @Public()

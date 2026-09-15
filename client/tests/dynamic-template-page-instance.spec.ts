@@ -996,6 +996,9 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
 }
 
 test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹具）", () => {
+  // 本组验证页面实例业务链路，使用当前四区停靠边界避免把功能断言耦合到覆盖层状态。
+  // 需要验证紧凑工作区交接的场景会在用例内显式切到 1200px。
+  test.use({ viewport: { width: 1440, height: 900 } });
   test.skip(appMode === "mock", "development 模式拦截自有 API；不作为真实 API 写入证据");
 
   for (const scenario of mixedUpgradeScenarios) {
@@ -1113,6 +1116,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   });
 
   test("发布卡预览与添加分离，预览和设备切换零写，显式添加才创建精确空内容实例", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 });
     const {
       savedPayload,
       currentDocument,
@@ -1136,13 +1140,13 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
     await preview.click();
     const dialog = page.getByRole("dialog", {
-      name: "预览模板：内容展示｜版本升级 · v2",
+      name: "放大预览：内容展示｜版本升级",
     });
     await expect(dialog).toContainText("精确版本 v2");
     await expect(dialog.locator('[data-preview-viewport="desktop"]')).toBeVisible();
     await expect(dialog.frameLocator("iframe").locator('[data-dynamic-template-id="tpl_page_upgrade"]'))
       .toHaveAttribute("data-dynamic-template-device", "desktop");
-    await dialog.getByRole("button", { name: "移动端预览" }).click();
+    await dialog.getByRole("button", { name: "移动端" }).click();
     await expect(dialog.locator('[data-preview-viewport="mobile"]')).toBeVisible();
     await expect(dialog.frameLocator("iframe").locator('[data-dynamic-template-id="tpl_page_upgrade"]'))
       .toHaveAttribute("data-dynamic-template-device", "mobile");
@@ -1163,7 +1167,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
     await preview.click();
     await page.getByRole("dialog", {
-      name: "预览模板：内容展示｜版本升级 · v2",
+      name: "放大预览：内容展示｜版本升级",
     }).getByRole("button", { name: "添加到页面", exact: true }).click();
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(2);
     await expect(page.getByText("修改已更新，尚未保存页面草稿", { exact: true })).toBeVisible();
@@ -1187,6 +1191,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   });
 
   test("已有动态主舞台时仍可继续插入，独立升级只修改当前页面草稿", async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 });
     const { inspector, savedPayload, currentDocument, templateWrites } = await prepareEditor(page, {
       primaryStage: true,
     });
@@ -1199,7 +1204,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(cardControl).toBeVisible();
     await expect(cardControl).not.toHaveAttribute("aria-disabled", "true");
     await expect(cardControl).toHaveAttribute("draggable", "true");
-    await expect(cardControl.locator("..")).toContainText("预览模板");
+    await expect(cardControl.locator("..")).not.toContainText("预览模板");
+    await expect(page.getByRole("button", { name: "放大预览：内容展示｜版本升级" })).toBeVisible();
     await expect(page.getByRole("button", {
       name: "添加到页面：内容展示｜版本升级 v2",
     })).toBeEnabled();
@@ -1211,7 +1217,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(dragTypes).toContain("application/x-haichuan-published-template");
     await cardControl.click();
     const previewDialog = page.getByRole("dialog", {
-      name: "预览模板：内容展示｜版本升级 · v2",
+      name: "放大预览：内容展示｜版本升级",
     });
     await expect(previewDialog).not.toContainText("当前页面已有主舞台");
     await expect(previewDialog.getByRole("button", { name: "添加到页面", exact: true })).toBeEnabled();
@@ -1249,6 +1255,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     { name: "新版不符合页面导航规则", options: { incompatibleHeader: true } },
   ] as const) {
     test(`动态主舞台发布卡在${scenario.name}时保持可发现且不开放升级`, async ({ page }) => {
+      await page.setViewportSize({ width: 1200, height: 900 });
       const { savedPayload, templateWrites } = await prepareEditor(page, {
         primaryStage: true,
         ...scenario.options,
@@ -1268,6 +1275,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   }
 
   test("升级产生第二个主舞台时仍允许确认升级", async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 900 });
     const { savedPayload, templateWrites } = await prepareEditor(page, {
       upgradeWouldDuplicatePrimaryStage: true,
     });
@@ -1337,6 +1345,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
   }
 
   test("同一已发布母模板可连续拖入任意多个页面实例并保存", async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 900 });
     const { savedPayload } = await prepareEditor(page);
     await page.evaluate(() => {
       type DragImageObservation = {
@@ -1526,9 +1535,12 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await inspector.getByRole("button", { name: "查看差异" }).click();
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" }).click();
-    const validationsBeforePublish = validationRequestCount();
-    await page.getByRole("button", { name: "发布到前台网站" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect.poll(() => savedPayload()).not.toBeNull();
+    const validationsBeforePublish = validationRequestCount();
+    const publish = page.getByRole("button", { name: "发布到前台网站" });
+    await expect(publish).toBeEnabled();
+    await publish.click();
     const review = page.getByRole("region", { name: "本次发布检查" });
     const issue = review.locator('[data-page-publish-field="slot_required"]');
     await expect(issue).toContainText("页面内容 / 新增必填正文");
@@ -1538,6 +1550,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await inspector.getByRole("textbox", { name: "新增必填正文" }).fill("运营填写的必填正文");
     await expect(inspector.getByRole("textbox", { name: "新增必填正文" })).toBeFocused();
     expect(pageWrites.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      "PUT /api/page-modules/document",
       "PUT /api/page-modules/document",
     ]);
     expect(validationRequestCount() - validationsBeforePublish).toBe(1);
@@ -1731,10 +1744,15 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await inspector.getByRole("button", { name: "查看差异" }).click();
     await page.getByRole("dialog", { name: "模板版本升级：v1 → v2" })
       .getByRole("button", { name: "确认升级页面草稿" }).click();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect.poll(() => pageWrites.length).toBe(1);
     const validationsBeforePublish = validationRequestCount();
-    await page.getByRole("button", { name: "发布到前台网站" }).click();
-    await expect.poll(() => pageWrites.length).toBe(2);
+    const publish = page.getByRole("button", { name: "发布到前台网站" });
+    await expect(publish).toBeEnabled();
+    await publish.click();
+    await expect.poll(() => pageWrites.some(({ path }) => path.endsWith("/publish"))).toBe(true);
     expect(pageWrites.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      "PUT /api/page-modules/document",
       "PUT /api/page-modules/document",
       "PUT /api/page-modules/document/publish",
     ]);

@@ -7,6 +7,7 @@ import test from "node:test";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
 import { PageModulesService } from "./page-modules.service";
+import { readPageLocaleRevisionMarker } from "./page-document-localization";
 
 const { validateTarget } = require("../../../scripts/run-real-mysql-tests.cjs");
 const databaseUrl = process.env.REAL_MYSQL_TEST_DATABASE_URL;
@@ -195,6 +196,115 @@ test(
       if (previousPublicRoot === undefined) delete process.env.PUBLIC_MEDIA_ROOT;
       else process.env.PUBLIC_MEDIA_ROOT = previousPublicRoot;
       await rm(publicRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "真实 MySQL：超级管理员自审在并发复核下只提交一次并保留精确审计",
+  { skip: databaseUrl ? false : "需要显式提供一次性 REAL_MYSQL_TEST_DATABASE_URL" },
+  async () => {
+    assert.equal(databaseUrl, validateTarget(process.env), "自审并发测试必须使用显式隔离库");
+    const prisma = new PrismaService({ datasourceUrl: databaseUrl });
+    await prisma.$connect();
+    try {
+      const marker = randomUUID().replaceAll("-", "").slice(0, 16);
+      const actor = await prisma.user.create({
+        data: {
+          username: `page-self-review-${marker}`,
+          password: "isolated-fixture-no-login",
+          realName: "页面自审超级管理员",
+          role: "SUPER_ADMIN",
+          status: "ACTIVE",
+        },
+      });
+      const pages = new PageModulesService(
+        prisma,
+        new MediaAuthorizationResolverService(prisma),
+      );
+      const saved = await pages.saveLocalizedPageDocument(
+        "about",
+        "zh-CN",
+        { content: [], root: { props: {} }, zones: {} },
+        { seoTitle: `自审并发 ${marker}`, seoDescription: "隔离数据库事务验证" },
+        "ci-real-mysql-self-review",
+      );
+      const submitted = await pages.submitLocalizedPageDocumentReview(
+        "about",
+        "zh-CN",
+        saved.updatedAt.toISOString(),
+        saved.contentHash,
+        actor.id,
+      );
+      assert.ok(submitted.submittedAt);
+
+      const attempts = await Promise.allSettled([
+        pages.reviewLocalizedPageDocument(
+          "about",
+          "zh-CN",
+          "APPROVE",
+          submitted.updatedAt.toISOString(),
+          submitted.contentHash,
+          actor.id,
+          undefined,
+          true,
+        ),
+        pages.reviewLocalizedPageDocument(
+          "about",
+          "zh-CN",
+          "APPROVE",
+          submitted.updatedAt.toISOString(),
+          submitted.contentHash,
+          actor.id,
+          undefined,
+          true,
+        ),
+      ]);
+      assert.equal(attempts.filter((attempt) => attempt.status === "fulfilled").length, 1);
+      assert.equal(attempts.filter((attempt) => attempt.status === "rejected").length, 1);
+
+      const document = await prisma.pageDocument.findUniqueOrThrow({
+        where: { pageKey: "about" },
+        include: { localizations: { where: { locale: "ZH_CN" } } },
+      });
+      assert.equal(document.localizations[0]?.reviewStatus, "APPROVED");
+      const audits = await prisma.operationLog.findMany({
+        where: {
+          userId: actor.id,
+          action: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+          module: "page-builder",
+          targetId: document.id,
+        },
+      });
+      assert.equal(audits.length, 1, "并发自审只能形成一条成功审计");
+      const detail = JSON.parse(audits[0]!.detail ?? "null");
+      assert.equal(detail.actorRole, "SUPER_ADMIN");
+      assert.equal(detail.pageKey, "about");
+      assert.equal(detail.locale, "zh-CN");
+      assert.equal(detail.contentHash, submitted.contentHash);
+      assert.equal(detail.revision, submitted.submittedAt.toISOString());
+      assert.equal(detail.result, "succeeded");
+
+      const approvedAttempt = attempts.find((attempt) => attempt.status === "fulfilled");
+      assert.ok(approvedAttempt && approvedAttempt.status === "fulfilled");
+      Object.defineProperty(pages, "collectPageDocumentValidation", {
+        value: async () => ({ valid: true, errors: [], issues: [] }),
+      });
+      const published = await pages.publishLocalizedPageDocument(
+        "about",
+        "zh-CN",
+        actor.id,
+        approvedAttempt.value.updatedAt.toISOString(),
+        approvedAttempt.value.contentHash,
+      );
+      const publishedRevision = await prisma.pageDocumentRevision.findUniqueOrThrow({
+        where: { id: published.publishedRevisionId! },
+      });
+      const reviewMarker = readPageLocaleRevisionMarker(publishedRevision.metadata);
+      assert.equal(reviewMarker?.selfReview?.auditLogId, audits[0]!.id);
+      assert.equal(reviewMarker?.selfReview?.revision, submitted.submittedAt.toISOString());
+    } finally {
+      await prisma.$disconnect();
     }
   },
 );

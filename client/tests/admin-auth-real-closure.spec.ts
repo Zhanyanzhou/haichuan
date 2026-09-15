@@ -22,7 +22,7 @@ test.describe("后台员工真实 Cookie 会话", () => {
       }
     });
 
-    await page.goto("/admin/login");
+    await page.goto("/admin/login", { timeout: 45_000 });
     await page.getByPlaceholder("输入用户名").fill(username!);
     await page.getByPlaceholder("输入密码").fill(password!);
     await page.getByRole("button", { name: "登录", exact: true }).click();

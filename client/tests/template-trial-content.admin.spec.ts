@@ -2,7 +2,6 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 import type { TemplateDefinitionV2 } from "../src/page-builder/template-definition";
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalogItems } from "./fixtures/template-catalog";
 import { createBlankTemplate, applyBasicSkeleton, productionStageAction, completeProductionReviews as reviewTemplateForPublish } from "./fixtures/template-authoring-main-route";
 
 const NOW = "2026-09-10T10:00:00.000Z";
@@ -148,7 +147,6 @@ async function installTrialContentServer(page: Page) {
       return route.fulfill(json({
         source: "unified",
         items: [
-          ...systemTemplateCatalogItems(),
           ...(state.resource ? [{ kind: "editable", template: state.resource }] : []),
           ...(state.published ? [{ kind: "published", template: state.published }] : []),
         ],

@@ -8,7 +8,6 @@ import MatureContentTemplateRenderer from "@/page-builder/template-definition/Ma
 import { getMatureContentTemplateSlotType } from "@/page-builder/template-definition/validateTemplateDefinition";
 import {
   normalizeLegacyRenderColors,
-  useHasMissingAssets,
 } from "@/page-builder/runtime/renderParity";
 import type { PuckBlock, PuckDocument, PuckProps } from "@/page-builder/types";
 import {
@@ -178,11 +177,6 @@ function GuardedBlock({
   priority: boolean;
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap;
 }) {
-  const hasMissingAsset = useHasMissingAssets(block.props || {});
-
-  if (hasMissingAsset && mode === "public") {
-    return null;
-  }
   return renderBlock(
     block,
     index,

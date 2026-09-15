@@ -21,12 +21,21 @@ function validateBody<T>(metatype: Type<T>, value: unknown): Promise<T> {
 }
 
 test("会员注册与密码重置只接受 6-18 位新密码", async () => {
+  await assert.rejects(
+    validateBody(CustomerRegisterDto, {
+      phone: "13800138000",
+      name: "测试会员",
+      password: "a1b2c3",
+    }),
+    BadRequestException,
+  );
   for (const password of ["123456", "x".repeat(18)]) {
     await assert.doesNotReject(
       validateBody(CustomerRegisterDto, {
         phone: "13800138000",
         name: "测试会员",
         password,
+        smsCode: "123456",
       }),
     );
     await assert.doesNotReject(
@@ -43,6 +52,7 @@ test("会员注册与密码重置只接受 6-18 位新密码", async () => {
         phone: "13800138000",
         name: "测试会员",
         password,
+        smsCode: "123456",
       }),
       BadRequestException,
     );
@@ -102,6 +112,10 @@ test("会员注册和重置服务接受 6/18 位字母数字组合，拒绝越�
     customerRefreshSession: {
       updateMany: async () => { revokedSessions += 1; return { count: 1 }; },
     },
+    customerSmsCode: {
+      findFirst: async () => ({ id: 1 }),
+      updateMany: async () => ({ count: 1 }),
+    },
   };
   const service = new CustomersService(
     {
@@ -113,16 +127,16 @@ test("会员注册和重置服务接受 6/18 位字母数字组合，拒绝越�
     {} as never,
     { sign: () => "test-access-token" } as never,
     {} as never,
-    { isRegisterVerificationRequired: () => false } as never,
+    { isRegisterVerificationRequired: () => true } as never,
     {} as never,
   );
   for (const password of ["x".repeat(5), "x".repeat(19), "123456", "abcdef"] ) {
-    await assert.rejects(service.register({ phone: "13800138000", name: "测试会员", password }), BadRequestException);
+    await assert.rejects(service.register({ phone: "13800138000", name: "测试会员", password, smsCode: "123456" }), BadRequestException);
     await assert.rejects(service.resetPassword("a".repeat(64), password), BadRequestException);
   }
   assert.equal(createdHashes.length + updatedHashes.length + claimedTokens + revokedSessions, 0);
   for (const password of ["a1b2c3", `a1${"x".repeat(16)}`]) {
-    await service.register({ phone: "13800138000", name: "测试会员", password });
+    await service.register({ phone: "13800138000", name: "测试会员", password, smsCode: "123456" });
     await service.resetPassword("a".repeat(64), password);
     assert.equal(await bcrypt.compare(password, createdHashes.at(-1)!), true);
     assert.equal(await bcrypt.compare(password, updatedHashes.at(-1)!), true);
@@ -148,8 +162,7 @@ test("会员历史长密码仍能按原哈希登录", async () => {
 
 test("微信绑定创建新会员需短信验真并强制 6-18 位新密码", async () => {
   const createdPasswords: string[] = [];
-  const service = new WechatAuthService(
-    {
+  const prisma = {
       customer: {
         findUnique: async () => null,
         create: async ({ data }: { data: { phone: string; passwordHash: string } }) => {
@@ -166,7 +179,12 @@ test("微信绑定创建新会员需短信验真并强制 6-18 位新密码", as
         findFirst: async () => ({ id: 1 }),
         updateMany: async () => ({ count: 1 }),
       },
-    } as never,
+    };
+  Object.assign(prisma, {
+    $transaction: async (action: (tx: typeof prisma) => Promise<unknown>) => action(prisma),
+  });
+  const service = new WechatAuthService(
+    prisma as never,
     {
       verifyAsync: async () => ({
         type: "customer",

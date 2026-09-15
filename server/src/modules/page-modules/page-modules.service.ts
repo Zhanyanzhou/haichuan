@@ -14,7 +14,6 @@ import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 import {
   CONTENT_TEMPLATE_ASSET_POLICY,
   CONTENT_TEMPLATE_BY_MODULE_TYPE,
-  CONTENT_TEMPLATE_REGISTRY,
   CONTENT_TEMPLATE_PAGE_METADATA,
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
   createContentTemplatePublicationAttestation,
@@ -31,7 +30,6 @@ import {
   sanitizeContentTemplateLayoutData,
   withoutContentTemplatePublicationAttestation,
   type ContentTemplateIssue,
-  type ContentTemplateContract,
 } from "./content-template-contract";
 import { customerFacingProductWhereForVisibilities } from "../products/product-eligibility";
 import {
@@ -230,13 +228,6 @@ export class PageModulesService {
     this.publicEvents.setMaxListeners(0);
   }
 
-  private requirePersonalTemplateOwner(ownerId?: number) {
-    if (!Number.isInteger(ownerId) || Number(ownerId) <= 0) {
-      throw new BadRequestException("当前登录身份无效");
-    }
-    return Number(ownerId);
-  }
-
   private normalizeFixedTemplateOrigin(moduleType: string, value: unknown) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     const origin = value as Record<string, unknown>;
@@ -267,102 +258,6 @@ export class PageModulesService {
       };
     }
     return undefined;
-  }
-
-  private getSystemContentTemplateContract(contractKey: string): ContentTemplateContract {
-    const registryItem = CONTENT_TEMPLATE_REGISTRY.find((item) => item.key === contractKey);
-    const contract = registryItem
-      ? CONTENT_TEMPLATE_BY_MODULE_TYPE[registryItem.moduleType]
-      : undefined;
-    if (!contract) throw new NotFoundException("系统母模板合同不存在");
-    return contract;
-  }
-
-  private isMissingLegacyPersonalTemplateRevision(error: unknown): boolean {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2022") {
-      return false;
-    }
-    const details = `${error.message} ${JSON.stringify(error.meta ?? {})}`;
-    return /personal_content_templates[^\n]*revision|revision[^\n]*personal_content_templates/i.test(details);
-  }
-
-  private toSystemContentTemplateCurrent(contract: ContentTemplateContract) {
-    const baseline = sanitizeContentTemplateLayoutData(contract.moduleType, { version: 2 });
-    if (!baseline) throw new ConflictException("系统母模板代码合同基线无效");
-    return {
-      contractKey: contract.key,
-      moduleType: contract.moduleType,
-      displayName: contract.displayName,
-      contractVersion: contract.version,
-      activeVersion: 0,
-      layoutData: baseline,
-      source: "code" as const,
-      changeNote: null,
-      updatedAt: null,
-    };
-  }
-
-  async getSystemContentTemplates() {
-    return CONTENT_TEMPLATE_REGISTRY.map((item) => {
-      const contract = CONTENT_TEMPLATE_BY_MODULE_TYPE[item.moduleType];
-      if (!contract) throw new ConflictException(`系统模板合同缺失：${item.moduleType}`);
-      return this.toSystemContentTemplateCurrent(contract);
-    });
-  }
-
-  async getSystemContentTemplate(contractKey: string) {
-    const contract = this.getSystemContentTemplateContract(contractKey);
-    return this.toSystemContentTemplateCurrent(contract);
-  }
-
-  async getSystemContentTemplateHistory(contractKey: string) {
-    const contract = this.getSystemContentTemplateContract(contractKey);
-    const baseline = sanitizeContentTemplateLayoutData(contract.moduleType, { version: 2 });
-    if (!baseline) throw new ConflictException("系统母模板代码合同基线无效");
-    return [
-      {
-        version: 0,
-        contractKey: contract.key,
-        moduleType: contract.moduleType,
-        contractVersion: contract.version,
-        layoutData: baseline,
-        changeNote: "代码机器合同基线",
-        createdById: null,
-        createdAt: null,
-        active: true,
-        source: "code" as const,
-      },
-    ];
-  }
-
-  async getPersonalContentTemplates(ownerId?: number) {
-    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
-    const orderBy = [{ updatedAt: "desc" as const }, { id: "desc" as const }];
-    try {
-      return await this.prisma.personalContentTemplate.findMany({
-        where: { ownerId: resolvedOwnerId },
-        orderBy,
-      });
-    } catch (error) {
-      if (!this.isMissingLegacyPersonalTemplateRevision(error)) throw error;
-      const legacyRows = await this.prisma.personalContentTemplate.findMany({
-        where: { ownerId: resolvedOwnerId },
-        orderBy,
-        select: {
-          id: true,
-          ownerId: true,
-          name: true,
-          moduleType: true,
-          contractKey: true,
-          contractVersion: true,
-          layoutData: true,
-          contentDefaults: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-      return legacyRows.map((row) => ({ ...row, revision: 1 }));
-    }
   }
 
   publicChangeStream(): Observable<MessageEvent> {

@@ -627,10 +627,13 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       await expect(review).toBeVisible();
       await expect(review).toContainText("页面不会自动保存或发布");
 
+      await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+      await expect.poll(requests.persistentWriteCalls).toBe(2);
+      await expect(publishButton).toBeEnabled();
       await publishButton.click();
       await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
       expect(requests.publishCalls()).toBe(1);
-      expect(requests.persistentWriteCalls()).toBe(3);
+      expect(requests.persistentWriteCalls()).toBe(4);
       await expectNoHorizontalOverflow(page);
     });
   }
@@ -889,7 +892,11 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     );
     await titleInput.fill("403 后仍保留的发布草稿");
 
-    await page.locator(".homepage-editor__toolbar-publish").click();
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(publishButton).toBeDisabled();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect(publishButton).toBeEnabled();
+    await publishButton.click();
 
     const review = page.getByRole("region", { name: "本次发布检查" });
     await expect(review).toContainText("本次发布失败");
@@ -899,9 +906,9 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       .toContainText("发布失败 · 可重试");
     await expect(titleInput).toHaveValue("403 后仍保留的发布草稿");
     await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
-    expect(requests.saveCalls()).toBe(1);
+    expect(requests.saveCalls()).toBe(2);
     expect(requests.publishCalls()).toBe(1);
-    expect(requests.persistentWriteCalls()).toBe(2);
+    expect(requests.persistentWriteCalls()).toBe(3);
   });
 
   test("发布 409 后保留本地修改不发额外写请求且冲突状态持续可见", async ({ page }) => {
@@ -921,7 +928,11 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     );
     await titleInput.fill("冲突后保留的本地修改");
 
-    await page.locator(".homepage-editor__toolbar-publish").click();
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(publishButton).toBeDisabled();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect(publishButton).toBeEnabled();
+    await publishButton.click();
 
     const review = page.getByRole("region", { name: "本次发布检查" });
     await expect(review.getByRole("button", { name: "保留本地修改", exact: true })).toBeVisible();
@@ -934,9 +945,9 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       .toContainText("发布失败 · 可重试");
     await expect(page.getByRole("button", { name: "保存当前装修草稿" })).toBeEnabled();
     await expect(page.getByText("店铺首页已发布")).toHaveCount(0);
-    expect(requests.saveCalls()).toBe(1);
+    expect(requests.saveCalls()).toBe(2);
     expect(requests.publishCalls()).toBe(1);
-    expect(requests.persistentWriteCalls()).toBe(2);
+    expect(requests.persistentWriteCalls()).toBe(3);
   });
 
   test("发布 409 后仅在确认后加载远端草稿并可继续发布", async ({ page }) => {
@@ -955,7 +966,11 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       { name: "主标题", exact: true },
     );
     await titleInput.fill("确认前不能丢失的本地修改");
-    await page.locator(".homepage-editor__toolbar-publish").click();
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(publishButton).toBeDisabled();
+    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
+    await expect(publishButton).toBeEnabled();
+    await publishButton.click();
 
     const review = page.getByRole("region", { name: "本次发布检查" });
     await review.getByRole("button", { name: /重新\s*加载远端草稿/ }).click();
@@ -963,18 +978,18 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     await expect(confirm).toContainText("当前本地修改将被远端草稿替换");
     await expect(confirm).toContainText("不会自动合并或覆盖任一侧");
     await expect(titleInput).toHaveValue("确认前不能丢失的本地修改");
-    expect(requests.persistentWriteCalls()).toBe(2);
+    expect(requests.persistentWriteCalls()).toBe(3);
 
     await confirm.getByRole("button", { name: "重新加载远端草稿", exact: true }).click();
     await expect(titleInput).toHaveValue("确认后加载的远端草稿");
     await expect(page.locator('.homepage-editor__workspace-status[data-mode="error"]')).toHaveCount(0);
-    expect(requests.persistentWriteCalls()).toBe(2);
+    expect(requests.persistentWriteCalls()).toBe(3);
 
-    await page.locator(".homepage-editor__toolbar-publish").click();
+    await publishButton.click();
     await expect(page.getByText("店铺首页已发布")).toBeVisible({ timeout: 8000 });
-    expect(requests.saveCalls()).toBe(2);
+    expect(requests.saveCalls()).toBe(3);
     expect(requests.publishCalls()).toBe(2);
-    expect(requests.persistentWriteCalls()).toBe(4);
+    expect(requests.persistentWriteCalls()).toBe(5);
   });
 
   test("发布失败在自动重验后仍保留，关闭重开后明确重试只发送一次请求", async ({ page }) => {

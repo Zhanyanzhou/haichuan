@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalog } from "./fixtures/template-catalog";
+import type { TemplateCatalogResource } from "../src/services/clients/dynamicTemplateClient";
 import { createBlankTemplate, firstRegionAction, makeResource, productionStageAction } from "./fixtures/template-authoring-main-route";
 import { createBlankDynamicTemplateDefinition } from "../src/page-builder/template-definition";
 
@@ -98,7 +98,7 @@ function editableTemplateCatalog() {
 async function installTemplateDesignFixture(
   page: Page,
   dangerousWrites: string[],
-  templateCatalog: ReturnType<typeof systemTemplateCatalog> = { items: [] },
+  templateCatalog: TemplateCatalogResource = { items: [] },
 ) {
   await installAdminSession(page, {
     username: "td3c2-compact-overlay",
@@ -120,11 +120,7 @@ async function installTemplateDesignFixture(
     if (pathname === "/api/page-modules/dynamic-templates/catalog") {
       return route.fulfill(json(templateCatalog));
     }
-    if (
-      pathname === "/api/page-modules/personal-content-templates"
-      || pathname === "/api/page-modules/system-content-templates"
-      || pathname === "/api/page-modules/document/revisions"
-    ) {
+    if (pathname === "/api/page-modules/document/revisions") {
       return route.fulfill(json([]));
     }
     if (pathname === "/api/page-modules/document/published") {
@@ -859,7 +855,8 @@ test.describe("TD-3C3 模板设计四区高频操作（Mock Chromium）", () => 
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
     const expandLibrary = page.getByRole("button", { name: "展开模板组件库", exact: true });
-    if (await expandLibrary.isVisible()) await expandLibrary.click();
+    await expect(expandLibrary).toBeVisible();
+    await expandLibrary.click();
     const library = page.locator('[data-unified-template-library="design"]');
     const card = library.locator(".homepage-editor__template-card").first();
     const cardMain = card.locator(".homepage-editor__template-card-main");
@@ -894,8 +891,8 @@ test.describe("TD-3C3 模板设计四区高频操作（Mock Chromium）", () => 
     const library = page.locator('[data-unified-template-library="design"]');
     const firstCard = library.locator(".homepage-editor__template-card").first();
     await expect(firstCard).toBeVisible();
-    await expect(firstCard).toContainText("草稿");
-    await expect(firstCard).toContainText("已保存");
+    await expect(firstCard.locator('[data-template-publication-status="draft"]')).toBeVisible();
+    await expect(firstCard).toContainText("尚未发布");
     await expect(library).not.toContainText(/内置模板|系统模板|动态模板|个人模板|自定义模板/);
     await expect(library.locator('[aria-label*="动态模板"], [title*="动态模板"]')).toHaveCount(0);
     const templateList = library.getByRole("region", { name: "模板列表", exact: true });

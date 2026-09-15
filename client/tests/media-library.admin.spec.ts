@@ -63,6 +63,44 @@ async function installBaseRoutes(
 }
 
 test.describe('页面素材库确定性浏览器状态', () => {
+  test('未批准图片在后台素材库通过鉴权预览地址显示', async ({ page }) => {
+    const previewStorageKeys: string[] = [];
+    const publicAssetRequests: string[] = [];
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname.startsWith('/uploads/page-assets/')) publicAssetRequests.push(url.pathname);
+    });
+    await installBaseRoutes(page, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (url.pathname === '/api/upload/media' && request.method() === 'GET') {
+        await fulfillJson(route, { list: [asset()], total: 1, page: 1, pageSize: 100 });
+        return;
+      }
+      if (url.pathname === '/api/upload/media/preview-by-storage-key' && request.method() === 'GET') {
+        previewStorageKeys.push(url.searchParams.get('storageKey') || '');
+        await route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
+        return;
+      }
+      await fulfillJson(route, {});
+    });
+
+    await page.goto('/admin/media');
+    const previewButton = page.getByRole('button', { name: '预览 合成页面素材.png' });
+    await expect(previewButton).toBeVisible();
+    await expect.poll(() => previewStorageKeys).toContain('page-assets/fixture.png');
+    expect(publicAssetRequests).toEqual([]);
+
+    await previewButton.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('合成页面素材.png');
+    await expect(dialog.locator('img')).toHaveAttribute(
+      'src',
+      '/api/upload/media/preview-by-storage-key?storageKey=page-assets%2Ffixture.png',
+    );
+    expect(publicAssetRequests).toEqual([]);
+  });
+
   test('加载失败不会伪装成空库，键盘重试后同步服务端素材供装修选择', async ({ page }) => {
     let fail = true;
     let releaseFailure: () => void = () => undefined;

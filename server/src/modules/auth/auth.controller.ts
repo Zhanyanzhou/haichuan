@@ -113,21 +113,19 @@ export class AuthController {
     @Req() request: ExpressRequest,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const refreshToken = extractRefreshCookieToken(
-      request.headers?.cookie,
-      "admin",
-    );
-    await this.refreshSessions.revokeAdmin(refreshToken);
     const bearerToken = extractBearerToken(request.headers?.authorization);
     if (bearerToken) {
       const accessSession =
         await this.authService.resolveRevocableAccessSession(bearerToken);
-      if (accessSession) {
-        await this.refreshSessions.revokeAdminFamilyForUser(
-          accessSession.userId,
-          accessSession.familyId,
-        );
-      }
+      if (!accessSession) throw new UnauthorizedException("后台会话无效");
+      await this.refreshSessions.revokeAdminFamilyForUser(
+        accessSession.userId,
+        accessSession.familyId,
+      );
+    } else {
+      await this.refreshSessions.revokeAdmin(
+        extractRefreshCookieToken(request.headers?.cookie, "admin"),
+      );
     }
     response.setHeader("Set-Cookie", buildClearSessionCookieHeaders("admin"));
     return { success: true };

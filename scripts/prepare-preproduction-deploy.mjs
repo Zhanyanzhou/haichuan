@@ -1,6 +1,9 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { validateReleaseManifest } from "./verify-release-images.mjs";
 
 const EXPECTED_SOURCE = "https://github.com/Zhanyanzhou/haichuan";
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
@@ -41,15 +44,55 @@ function parseDotEnv(source) {
   return values;
 }
 
-export function validatePreproductionDeployInputs(manifest, envSource) {
-  exact(manifest, [
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function verifyDescriptorFile(releaseDir, descriptor, expectedPath, code) {
+  if (!descriptor || Object.keys(descriptor).sort().join("\0") !== ["path", "sha256"].sort().join("\0") ||
+      descriptor.path !== expectedPath || !/^[a-f0-9]{64}$/.test(descriptor.sha256 ?? "")) fail(`${code}_DESCRIPTOR_INVALID`);
+  const filePath = resolve(releaseDir, descriptor.path);
+  const within = relative(releaseDir, filePath);
+  if (!within || within.startsWith("..") || isAbsolute(within)) fail(`${code}_PATH_INVALID`);
+  const stat = lstatSync(filePath);
+  if (!stat.isFile() || stat.isSymbolicLink()) fail(`${code}_FILE_INVALID`);
+  if (sha256(readFileSync(filePath)) !== descriptor.sha256) fail(`${code}_HASH_MISMATCH`);
+}
+
+export function validatePreproductionDeployInputs(manifest, envSource, bundle = undefined) {
+  const commonKeys = [
     "schemaVersion", "releaseStage", "imageTag", "gitSha", "migrationBundleSha256", "source",
-    "qualityGate", "attestationPolicy", "publicSeo", "server", "client", "operations",
-  ], "PREPRODUCTION_DEPLOY_MANIFEST_SCHEMA_INVALID");
-  if (manifest.schemaVersion !== 6 || manifest.releaseStage !== "preproduction" || manifest.source !== EXPECTED_SOURCE
+    "assuranceLevel", "qualityGate", "releaseAuthorization", "publicSeo", "server", "client", "operations",
+  ];
+  if (manifest?.assuranceLevel === "high") commonKeys.push("attestationPolicy");
+  else if (manifest?.assuranceLevel === "baseline") commonKeys.push("baselinePolicy");
+  else fail("PREPRODUCTION_DEPLOY_ASSURANCE_LEVEL_INVALID");
+  exact(manifest, commonKeys, "PREPRODUCTION_DEPLOY_MANIFEST_SCHEMA_INVALID");
+  if (manifest.schemaVersion !== 7 || manifest.releaseStage !== "preproduction" || manifest.source !== EXPECTED_SOURCE
       || !SHA.test(manifest.gitSha ?? "") || manifest.imageTag !== `preproduction-sha-${manifest.gitSha}`
       || !/^[a-f0-9]{64}$/.test(manifest.migrationBundleSha256 ?? "")) {
     fail("PREPRODUCTION_DEPLOY_MANIFEST_IDENTITY_INVALID");
+  }
+  validateReleaseManifest(manifest, {
+    gitSha: manifest.gitSha,
+    migrationBundleSha256: manifest.migrationBundleSha256,
+    releaseStage: "preproduction",
+  });
+  if (bundle) {
+    if (!/^[a-f0-9]{64}$/.test(bundle.expectedManifestSha256 ?? "") ||
+        sha256(bundle.manifestBytes) !== bundle.expectedManifestSha256) {
+      fail("PREPRODUCTION_DEPLOY_MANIFEST_SHA256_MISMATCH");
+    }
+    for (const component of COMPONENTS) {
+      if (manifest.assuranceLevel === "baseline") {
+        verifyDescriptorFile(bundle.releaseDir, manifest[component].buildkitProvenance, `provenance/${component}.buildkit.json`, `PREPRODUCTION_DEPLOY_${component.toUpperCase()}_PROVENANCE`);
+        verifyDescriptorFile(bundle.releaseDir, manifest[component].sbom, `sbom/${component}.spdx.json`, `PREPRODUCTION_DEPLOY_${component.toUpperCase()}_SBOM`);
+      } else {
+        verifyDescriptorFile(bundle.releaseDir, manifest[component].signatureBundle, `attestations/${component}-image.sigstore.json`, `PREPRODUCTION_DEPLOY_${component.toUpperCase()}_SIGNATURE`);
+        verifyDescriptorFile(bundle.releaseDir, manifest[component].provenanceBundle, `attestations/${component}-provenance.sigstore.json`, `PREPRODUCTION_DEPLOY_${component.toUpperCase()}_PROVENANCE`);
+        verifyDescriptorFile(bundle.releaseDir, manifest[component].sbomBundle, `attestations/${component}-sbom.sigstore.json`, `PREPRODUCTION_DEPLOY_${component.toUpperCase()}_SBOM`);
+      }
+    }
   }
   exact(manifest.publicSeo, [
     "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId",
@@ -93,6 +136,7 @@ export function validatePreproductionDeployInputs(manifest, envSource) {
     RELEASE_GIT_SHA: manifest.gitSha,
     RELEASE_SOURCE: manifest.source,
     MIGRATION_BUNDLE_SHA256: manifest.migrationBundleSha256,
+    ASSURANCE_LEVEL: manifest.assuranceLevel,
     PUBLIC_SEO_CONTENT_READY: String(seo.contentReady),
     PUBLIC_SEO_SOURCE_KIND: seo.sourceKind,
     INITIAL_CUTOVER_AUTHORIZED: env.get("PREPRODUCTION_INITIAL_SIGNED_CUTOVER_AUTHORIZED") === "1" ? "true" : "false",
@@ -102,18 +146,30 @@ export function validatePreproductionDeployInputs(manifest, envSource) {
 function parseArguments(argv) {
   const manifestIndex = argv.indexOf("--manifest");
   const envIndex = argv.indexOf("--env-file");
-  if (manifestIndex < 0 || envIndex < 0 || !argv[manifestIndex + 1] || !argv[envIndex + 1] || argv.length !== 4) {
+  const shaIndex = argv.indexOf("--expected-manifest-sha256");
+  if (manifestIndex < 0 || envIndex < 0 || shaIndex < 0 || !argv[manifestIndex + 1] ||
+      !argv[envIndex + 1] || !argv[shaIndex + 1] || argv.length !== 6) {
     fail("PREPRODUCTION_DEPLOY_ARGUMENTS_INVALID");
   }
-  return { manifest: resolve(argv[manifestIndex + 1]), envFile: resolve(argv[envIndex + 1]) };
+  return {
+    manifest: resolve(argv[manifestIndex + 1]),
+    envFile: resolve(argv[envIndex + 1]),
+    expectedManifestSha256: argv[shaIndex + 1],
+  };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const options = parseArguments(process.argv.slice(2));
+    const manifestBytes = readFileSync(options.manifest);
     const result = validatePreproductionDeployInputs(
-      JSON.parse(readFileSync(options.manifest, "utf8")),
+      JSON.parse(manifestBytes.toString("utf8")),
       readFileSync(options.envFile, "utf8"),
+      {
+        expectedManifestSha256: options.expectedManifestSha256,
+        manifestBytes,
+        releaseDir: dirname(options.manifest),
+      },
     );
     for (const [key, value] of Object.entries(result)) process.stdout.write(`${key}=${value}\n`);
   } catch (error) {

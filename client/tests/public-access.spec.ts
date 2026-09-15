@@ -137,7 +137,7 @@ test.describe("游客公开浏览", () => {
       await page.route("**/api/customers/sms-requirements", (route) => route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ code: 200, data: { registerRequired: false } }),
+        body: JSON.stringify({ code: 200, data: { registerRequired: true } }),
       }));
       await page.route("**/api/customers/wechat/config**", (route) => route.fulfill({
         status: 200,
@@ -159,6 +159,7 @@ test.describe("游客公开浏览", () => {
       await expect(page.getByRole("button", { name: "创建会员账户" })).toBeVisible();
       await expect(page.getByLabel("称呼")).toBeVisible();
       await expect(page.getByLabel("邮箱（选填）")).toBeVisible();
+      await expect(page.getByLabel("短信验证码")).toBeVisible();
       const registerPassword = page.getByLabel("密码");
       await expect(registerPassword).toHaveAttribute("minlength", "6");
       await expect(registerPassword).toHaveAttribute("maxlength", "18");
@@ -177,7 +178,7 @@ test.describe("游客公开浏览", () => {
         contentType: "application/json",
         body: JSON.stringify({
           code: 200,
-          data: { registerRequired: false },
+          data: { registerRequired: true },
           message: "success",
         }),
       }),

@@ -1,7 +1,7 @@
 /**
  * renderParity.tsx — 公开端与编辑器画布共享的渲染一致性规则。
  *
- * 公开端与编辑器共同使用本地素材缺失检测，保证"画布≈前台"。
+ * 编辑器主动检测本地素材缺失；公开端由实际图片请求处理失败，避免重复占用首屏连接。
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
@@ -47,7 +47,7 @@ export function getLocalUploadUrls(props: AssetRecord): string[] {
   return [...urls];
 }
 
-/** HEAD 探测区块引用的本地素材是否仍然存在（素材被删后两端都显示占位）。 */
+/** 编辑态 HEAD 探测区块引用的本地素材是否仍然存在。 */
 export function useHasMissingAssets(props: AssetRecord): boolean {
   const urlsKey = useMemo(
     () => getLocalUploadUrls(props || {}).join("\n"),

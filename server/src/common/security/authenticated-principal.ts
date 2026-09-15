@@ -15,6 +15,17 @@ export interface AdminAccessTokenPayload {
   role?: Role;
 }
 
+/** 客户 access token 的最小可信载荷；运行时还必须复核账号、版本及可选会话家族。 */
+export interface CustomerAccessTokenPayload {
+  sub: number;
+  type: 'customer';
+  tokenUse: 'access';
+  /** 兼容上线前尚未过期的 v1 token；数据库版本改变后旧 token 立即失效。 */
+  authVersion?: number;
+  /** 新签发 token 绑定 refresh family，使退出当前设备可立即撤销 access。 */
+  sessionFamilyId?: string;
+}
+
 export type StaffRequest = Request & { user: StaffPrincipal };
 
 /** 客户守卫向下游暴露经过数据库实时复核的最小身份与可见性事实。 */

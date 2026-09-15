@@ -6,7 +6,9 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
-const COMPACT_WORKSPACE_QUERY = "(max-width: 1199px)";
+export const COMPACT_WORKSPACE_MAX_WIDTH = 1439;
+export const COMPACT_WORKSPACE_QUERY = `(max-width: ${COMPACT_WORKSPACE_MAX_WIDTH}px)`;
+export const DOCKED_WORKSPACE_QUERY = `(min-width: ${COMPACT_WORKSPACE_MAX_WIDTH + 1}px)`;
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",

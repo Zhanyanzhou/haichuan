@@ -11,6 +11,14 @@ on:
         options:
           - preproduction
           - production
+      assurance_level:
+        description: "发布证明等级；baseline 不写公共透明日志，high 执行完整 Sigstore/SLSA 链"
+        required: true
+        default: "baseline"
+        type: choice
+        options:
+          - baseline
+          - high
       public_site_origin:
         description: "目标阶段站点 Origin（HTTPS，不含路径，必须与同阶段 SEO snapshot 一致）"
         required: true
@@ -41,6 +49,24 @@ on:
         options:
           - "false"
           - "true"
+      unprotected_ref_authorized:
+        description: "仅当当前私有仓 ref 无法启用 GitHub 保护时：已确认从该 ref 生成本次制品"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      release_authorization_sha256:
+        description: "未保护 ref 的批准记录 SHA-256；受保护 ref 可留空"
+        required: false
+        default: ""
+        type: string
+      authorized_source_sha:
+        description: "未保护 ref 必填：人工批准的精确 40 位 source SHA；必须等于本次 GITHUB_SHA"
+        required: false
+        default: ""
+        type: string
 
 permissions: {}
 
@@ -54,8 +80,19 @@ jobs:
       run_id: ${{ steps.quality.outputs.run_id }}
       run_url: ${{ steps.quality.outputs.run_url }}
       head_sha: ${{ steps.quality.outputs.head_sha }}
+      head_ref: ${{ steps.quality-proof.outputs.head_ref }}
+      run_attempt: ${{ steps.quality-proof.outputs.run_attempt }}
+      proof_artifact_id: ${{ steps.quality.outputs.proof_artifact_id }}
+      proof_artifact_digest: ${{ steps.quality.outputs.proof_artifact_digest }}
+      proof_sha256: ${{ steps.quality-proof.outputs.proof_sha256 }}
+      authorization_mode: ${{ steps.source-authorization.outputs.mode }}
+      authorization_sha256: ${{ steps.source-authorization.outputs.approval_sha256 }}
+      authorization_source_sha: ${{ steps.source-authorization.outputs.source_sha }}
+      authorization_actor: ${{ steps.source-authorization.outputs.actor }}
+      authorization_run_id: ${{ steps.source-authorization.outputs.run_id }}
     steps:
       - name: 拒绝未确认的 Sigstore 公共日志披露
+        if: inputs.assurance_level == 'high'
         shell: bash
         env:
           SIGSTORE_PUBLIC_LOG_ACKNOWLEDGED: ${{ inputs.sigstore_public_log_acknowledged }}
@@ -66,34 +103,53 @@ jobs:
           }
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
 
-      - name: 拒绝未受保护的发布来源
+      - name: 拒绝未获明确授权的发布来源
+        id: source-authorization
         shell: bash
         env:
           DEFAULT_BRANCH_REF: refs/heads/${{ github.event.repository.default_branch }}
           RELEASE_REF: ${{ github.ref }}
           RELEASE_REF_PROTECTED: ${{ github.ref_protected }}
+          UNPROTECTED_REF_AUTHORIZED: ${{ inputs.unprotected_ref_authorized }}
+          RELEASE_AUTHORIZATION_SHA256: ${{ inputs.release_authorization_sha256 }}
+          AUTHORIZED_SOURCE_SHA: ${{ inputs.authorized_source_sha }}
         run: |
-          if [ "$RELEASE_REF" = "$DEFAULT_BRANCH_REF" ]; then
-            exit 0
-          fi
+          set -euo pipefail
           case "$RELEASE_REF" in
-            refs/heads/release/*) ;;
+            "$DEFAULT_BRANCH_REF"|refs/heads/release/*) ;;
             *) echo "RELEASE_REF_NOT_DEFAULT_OR_RELEASE_BRANCH" >&2; exit 1 ;;
           esac
-          if [ "$RELEASE_REF_PROTECTED" != "true" ]; then
-            echo "RELEASE_REF_NOT_PROTECTED" >&2
-            exit 1
+          if [ "$RELEASE_REF_PROTECTED" = "true" ]; then
+            mode="protected-ref"
+            approval_sha256=""
+            source_sha=""
+          else
+            test "$UNPROTECTED_REF_AUTHORIZED" = "true" || { echo "UNPROTECTED_RELEASE_REF_CONFIRMATION_REQUIRED" >&2; exit 1; }
+            [[ "$RELEASE_AUTHORIZATION_SHA256" =~ ^[a-f0-9]{64}$ ]] || { echo "RELEASE_AUTHORIZATION_SHA256_INVALID" >&2; exit 1; }
+            [[ "$AUTHORIZED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "AUTHORIZED_SOURCE_SHA_INVALID" >&2; exit 1; }
+            test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" || { echo "AUTHORIZED_SOURCE_SHA_MISMATCH" >&2; exit 1; }
+            mode="explicit-unprotected-ref"
+            approval_sha256="$RELEASE_AUTHORIZATION_SHA256"
+            source_sha="$AUTHORIZED_SOURCE_SHA"
           fi
+          {
+            echo "mode=$mode"
+            echo "approval_sha256=$approval_sha256"
+            echo "source_sha=$source_sha"
+            echo "actor=$GITHUB_ACTOR"
+            echo "run_id=$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
 
       - name: 查找同一 SHA 的成功质量门禁
         id: quality
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_QUALITY_BRANCH: ${{ github.ref_name }}
         run: |
           gh api --paginate --slurp \
             -H "Accept: application/vnd.github+json" \
@@ -101,11 +157,13 @@ jobs:
             > "${RUNNER_TEMP}/quality-runs.json"
           node - <<'NODE'
           const fs = require("node:fs");
+          (async () => {
           const payload = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/quality-runs.json`, "utf8"));
           const runs = Array.isArray(payload) ? payload.flatMap((page) => page.workflow_runs ?? []) : payload.workflow_runs ?? [];
           const candidates = runs
             .filter((run) =>
               run.head_sha === process.env.GITHUB_SHA &&
+              run.head_branch === process.env.EXPECTED_QUALITY_BRANCH &&
               run.event === "push" &&
               run.status === "completed" &&
               run.conclusion === "success" &&
@@ -113,12 +171,64 @@ jobs:
             .sort((left, right) => Number(right.id) - Number(left.id));
           const run = candidates[0];
           if (!run) throw new Error("QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND");
+          const response = await fetch(`${process.env.GITHUB_API_URL}/repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${run.id}/artifacts?per_page=100`, {
+            headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: "application/vnd.github+json" },
+          });
+          if (!response.ok) throw new Error("QUALITY_FULL_PROOF_METADATA_UNAVAILABLE");
+          const artifactPayload = await response.json();
+          const expectedName = `quality-full-proof-${process.env.GITHUB_SHA}-${run.id}`;
+          const artifacts = (artifactPayload.artifacts ?? []).filter((artifact) =>
+            artifact.name === expectedName && !artifact.expired && artifact.workflow_run?.id === Number(run.id) &&
+            /^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? ""));
+          if (artifacts.length !== 1) throw new Error("QUALITY_FULL_PROOF_ARTIFACT_NOT_FOUND");
           const output = [
             `run_id=${run.id}`,
             `run_url=${run.html_url}`,
             `head_sha=${run.head_sha}`,
+            `proof_artifact_id=${artifacts[0].id}`,
+            `proof_artifact_digest=${artifacts[0].digest}`,
           ].join("\n");
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `${output}\n`);
+          })().catch((error) => { console.error(error); process.exit(1); });
+          NODE
+
+      - name: 下载固定完整档机器证明
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ steps.quality.outputs.proof_artifact_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.quality.outputs.run_id }}
+          path: quality-proof
+
+      - name: 验证完整档机器证明
+        id: quality-proof
+        env:
+          EXPECTED_RUN_ID: ${{ steps.quality.outputs.run_id }}
+          EXPECTED_HEAD_SHA: ${{ steps.quality.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const { createHash } = require("node:crypto");
+          const fs = require("node:fs");
+          const path = "quality-proof/quality-full-proof.json";
+          const bytes = fs.readFileSync(path);
+          const proof = JSON.parse(bytes);
+          const keys = Object.keys(proof).sort().join("\0");
+          const expectedKeys = ["schemaVersion", "profile", "workflow", "repository", "gitSha", "ref", "event", "runId", "runAttempt", "jobSet", "results"].sort().join("\0");
+          const expectedJobs = ["verify", "e2e-deterministic", "real-mysql"];
+          if (keys !== expectedKeys || proof.schemaVersion !== 1 || proof.profile !== "full" ||
+              proof.workflow !== "quality.yml" || proof.repository !== process.env.GITHUB_REPOSITORY ||
+              proof.gitSha !== process.env.EXPECTED_HEAD_SHA || proof.ref !== process.env.GITHUB_REF ||
+              proof.event !== "push" || proof.runId !== Number(process.env.EXPECTED_RUN_ID) ||
+              !Number.isSafeInteger(proof.runAttempt) || proof.runAttempt <= 0 ||
+              JSON.stringify(proof.jobSet) !== JSON.stringify(expectedJobs) ||
+              Object.keys(proof.results ?? {}).sort().join("\0") !== [...expectedJobs].sort().join("\0") ||
+              Object.values(proof.results).some((result) => result !== "success")) {
+            throw new Error("QUALITY_FULL_PROOF_INVALID");
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,
+            `head_ref=${proof.ref}\nrun_attempt=${proof.runAttempt}\nproof_sha256=${createHash("sha256").update(bytes).digest("hex")}\n`);
           NODE
 
   build-push:
@@ -149,16 +259,36 @@ jobs:
       public_seo_content_ready: ${{ steps.seo-source.outputs.content_ready }}
     steps:
       - name: 检出精确提交
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: 下载已验证的完整质量证明
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.quality-proof.outputs.proof_artifact_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.quality-proof.outputs.run_id }}
+          path: release-output/quality
+
+      - name: 重验完整质量证明哈希
+        shell: bash
+        env:
+          EXPECTED_QUALITY_PROOF_SHA256: ${{ needs.quality-proof.outputs.proof_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum release-output/quality/quality-full-proof.json | cut -d ' ' -f 1)" = "$EXPECTED_QUALITY_PROOF_SHA256" || {
+            echo "QUALITY_FULL_PROOF_HASH_MISMATCH" >&2
+            exit 1
+          }
 
       - name: 配置 Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
 
@@ -245,6 +375,7 @@ jobs:
           const snapshot = validatePublicSeoSnapshot(JSON.parse(readFileSync(process.env.SEO_SNAPSHOT_PATH, "utf8")));
           if (snapshot.sourceStage !== process.env.RELEASE_STAGE) throw new Error("PUBLIC_SEO_SOURCE_STAGE_MISMATCH");
           if (snapshot.origin !== process.env.PUBLIC_SITE_ORIGIN) throw new Error("PUBLIC_SEO_ORIGIN_MISMATCH");
+          if (process.env.SEO_ARTIFACT_ID && snapshot.contentReady !== true) throw new Error("PUBLIC_SEO_APPROVED_CONTENT_NOT_READY");
           if (snapshot.sourceStage === "production" && snapshot.contentReady !== true) throw new Error("PUBLIC_SEO_PRODUCTION_CONTENT_NOT_READY");
           const lines = [`snapshot_hash=${snapshot.snapshotHash}`];
           if (process.env.SEO_ARTIFACT_ID) {
@@ -588,6 +719,16 @@ jobs:
           QUALITY_RUN_ID: ${{ needs.quality-proof.outputs.run_id }}
           QUALITY_RUN_URL: ${{ needs.quality-proof.outputs.run_url }}
           QUALITY_HEAD_SHA: ${{ needs.quality-proof.outputs.head_sha }}
+          QUALITY_HEAD_REF: ${{ needs.quality-proof.outputs.head_ref }}
+          QUALITY_RUN_ATTEMPT: ${{ needs.quality-proof.outputs.run_attempt }}
+          QUALITY_PROOF_ARTIFACT_ID: ${{ needs.quality-proof.outputs.proof_artifact_id }}
+          QUALITY_PROOF_ARTIFACT_DIGEST: ${{ needs.quality-proof.outputs.proof_artifact_digest }}
+          QUALITY_PROOF_SHA256: ${{ needs.quality-proof.outputs.proof_sha256 }}
+          AUTHORIZATION_MODE: ${{ needs.quality-proof.outputs.authorization_mode }}
+          AUTHORIZATION_SHA256: ${{ needs.quality-proof.outputs.authorization_sha256 }}
+          AUTHORIZATION_SOURCE_SHA: ${{ needs.quality-proof.outputs.authorization_source_sha }}
+          AUTHORIZATION_ACTOR: ${{ needs.quality-proof.outputs.authorization_actor }}
+          AUTHORIZATION_RUN_ID: ${{ needs.quality-proof.outputs.authorization_run_id }}
           PUBLIC_SEO_SNAPSHOT_HASH: ${{ steps.seo-source.outputs.snapshot_hash }}
           PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ steps.seo.outputs.prerender_manifest_sha }}
           PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ steps.seo-source.outputs.source_artifact_id }}
@@ -618,7 +759,25 @@ jobs:
             source: process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY,
             sourceRef: process.env.GITHUB_REF,
             migrationBundleSha256: process.env.MIGRATION_SHA,
-            qualityGate: { runId: Number(process.env.QUALITY_RUN_ID), runUrl: process.env.QUALITY_RUN_URL, headSha: process.env.QUALITY_HEAD_SHA },
+            qualityGate: {
+              runId: Number(process.env.QUALITY_RUN_ID),
+              runUrl: process.env.QUALITY_RUN_URL,
+              headSha: process.env.QUALITY_HEAD_SHA,
+              headRef: process.env.QUALITY_HEAD_REF,
+              runAttempt: Number(process.env.QUALITY_RUN_ATTEMPT),
+              profile: "full",
+              proofArtifactId: Number(process.env.QUALITY_PROOF_ARTIFACT_ID),
+              proofArtifactDigest: process.env.QUALITY_PROOF_ARTIFACT_DIGEST,
+              proofSha256: process.env.QUALITY_PROOF_SHA256,
+              jobSet: ["verify", "e2e-deterministic", "real-mysql"],
+            },
+            releaseAuthorization: {
+              mode: process.env.AUTHORIZATION_MODE,
+              approvalSha256: process.env.AUTHORIZATION_SHA256 || null,
+              sourceSha: process.env.AUTHORIZATION_SOURCE_SHA || null,
+              actor: process.env.AUTHORIZATION_ACTOR,
+              runId: Number(process.env.AUTHORIZATION_RUN_ID),
+            },
             publicSeo: {
               sourceStage: process.env.RELEASE_STAGE,
               snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH,
@@ -640,20 +799,172 @@ jobs:
 
       - name: 上传哈希约束签名输入
         id: signing-inputs-artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: release-${{ steps.release.outputs.release_stage }}-signing-inputs-${{ github.run_id }}
           path: |
             release-output/signing-inputs.json
+            release-output/quality/quality-full-proof.json
             release-output/provenance/*.buildkit.json
             release-output/sbom/*.spdx.json
           if-no-files-found: error
           retention-days: 1
 
+  package-baseline:
+    needs:
+      - quality-proof
+      - build-push
+    if: inputs.assurance_level == 'baseline'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+    steps:
+      - name: 下载同次运行的固定构建输入
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          artifact-ids: ${{ needs.build-push.outputs.signing_inputs_artifact_id }}
+          path: release-input
+
+      - name: 生成不写公共透明日志的 baseline 清单
+        shell: bash
+        env:
+          EXPECTED_INPUT_SHA256: ${{ needs.build-push.outputs.signing_inputs_sha256 }}
+          EXPECTED_RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
+          EXPECTED_MIGRATION_SHA: ${{ needs.build-push.outputs.migration_sha }}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum release-input/signing-inputs.json | cut -d ' ' -f 1)" = "$EXPECTED_INPUT_SHA256"
+          mkdir -p release-output/quality release-output/provenance release-output/sbom
+          cp release-input/quality/quality-full-proof.json release-output/quality/
+          cp release-input/provenance/*.buildkit.json release-output/provenance/
+          cp release-input/sbom/*.spdx.json release-output/sbom/
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const { createHash } = require("node:crypto");
+          const path = require("node:path");
+          const input = JSON.parse(fs.readFileSync("release-input/signing-inputs.json", "utf8"));
+          const fail = (code) => { throw new Error(code); };
+          const exact = (value, keys, code) => {
+            if (!value || typeof value !== "object" || Array.isArray(value) ||
+                Object.keys(value).sort().join("\0") !== [...keys].sort().join("\0")) fail(code);
+          };
+          const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+          exact(input, ["schemaVersion", "releaseStage", "imageTag", "gitSha", "source", "sourceRef", "migrationBundleSha256", "qualityGate", "releaseAuthorization", "publicSeo", "images"], "RELEASE_BASELINE_INPUT_SCHEMA_INVALID");
+          if (input.schemaVersion !== 3 || input.gitSha !== process.env.GITHUB_SHA ||
+              input.source !== `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}` ||
+              input.sourceRef !== process.env.GITHUB_REF ||
+              input.releaseStage !== process.env.EXPECTED_RELEASE_STAGE ||
+              input.migrationBundleSha256 !== process.env.EXPECTED_MIGRATION_SHA ||
+              input.qualityGate?.headSha !== process.env.GITHUB_SHA || input.qualityGate?.headRef !== process.env.GITHUB_REF ||
+              input.qualityGate?.profile !== "full") fail("RELEASE_BASELINE_INPUT_IDENTITY_MISMATCH");
+          exact(input.qualityGate, ["runId", "runUrl", "headSha", "headRef", "runAttempt", "profile", "proofArtifactId", "proofArtifactDigest", "proofSha256", "jobSet"], "RELEASE_BASELINE_QUALITY_SCHEMA_INVALID");
+          const proofBytes = fs.readFileSync("release-input/quality/quality-full-proof.json");
+          const proof = JSON.parse(proofBytes);
+          if (sha256(proofBytes) !== input.qualityGate.proofSha256 || proof.profile !== "full" ||
+              proof.runId !== input.qualityGate.runId || proof.runAttempt !== input.qualityGate.runAttempt ||
+              proof.gitSha !== input.gitSha || proof.ref !== input.sourceRef ||
+              JSON.stringify(proof.jobSet) !== JSON.stringify(input.qualityGate.jobSet) ||
+              Object.values(proof.results ?? {}).some((result) => result !== "success")) fail("RELEASE_BASELINE_QUALITY_PROOF_INVALID");
+          exact(input.releaseAuthorization, ["mode", "approvalSha256", "sourceSha", "actor", "runId"], "RELEASE_BASELINE_AUTHORIZATION_SCHEMA_INVALID");
+          if (input.releaseAuthorization.runId !== Number(process.env.GITHUB_RUN_ID) ||
+              input.releaseAuthorization.actor !== process.env.GITHUB_ACTOR ||
+              (input.releaseAuthorization.mode === "explicit-unprotected-ref"
+                ? !/^[a-f0-9]{64}$/.test(input.releaseAuthorization.approvalSha256 ?? "") || input.releaseAuthorization.sourceSha !== process.env.GITHUB_SHA
+                : input.releaseAuthorization.mode !== "protected-ref" || input.releaseAuthorization.approvalSha256 !== null || input.releaseAuthorization.sourceSha !== null)) {
+            fail("RELEASE_BASELINE_AUTHORIZATION_INVALID");
+          }
+          if (input.releaseStage === "production" &&
+              (!input.publicSeo?.contentReady || input.publicSeo?.sourceKind !== "approved-snapshot")) {
+            fail("RELEASE_BASELINE_PRODUCTION_CONTENT_NOT_READY");
+          }
+          if (input.publicSeo?.sourceKind === "approved-snapshot" && input.publicSeo?.contentReady !== true) {
+            fail("RELEASE_BASELINE_APPROVED_CONTENT_NOT_READY");
+          }
+          const image = (component) => ({
+            image: input.images[component].image,
+            digest: input.images[component].digest,
+            reference: input.images[component].reference,
+            buildkitProvenance: input.images[component].buildkitProvenance,
+            sbom: input.images[component].sbom,
+          });
+          exact(input.images, ["server", "client", "operations"], "RELEASE_BASELINE_IMAGES_SCHEMA_INVALID");
+          for (const component of ["server", "client", "operations"]) {
+            const entry = input.images[component];
+            exact(entry, ["image", "digest", "reference", "buildkitProvenance", "sbom"], "RELEASE_BASELINE_IMAGE_SCHEMA_INVALID");
+            for (const [kind, expectedPath] of [["buildkitProvenance", `provenance/${component}.buildkit.json`], ["sbom", `sbom/${component}.spdx.json`]]) {
+              const descriptor = entry[kind];
+              exact(descriptor, ["path", "sha256"], "RELEASE_BASELINE_DESCRIPTOR_SCHEMA_INVALID");
+              if (descriptor.path !== expectedPath || sha256(fs.readFileSync(path.join("release-input", descriptor.path))) !== descriptor.sha256) {
+                fail("RELEASE_BASELINE_DESCRIPTOR_HASH_MISMATCH");
+              }
+            }
+          }
+          const manifest = {
+            schemaVersion: 7,
+            assuranceLevel: "baseline",
+            releaseStage: input.releaseStage,
+            imageTag: input.imageTag,
+            gitSha: input.gitSha,
+            migrationBundleSha256: input.migrationBundleSha256,
+            source: input.source,
+            qualityGate: {
+              workflow: "quality.yml",
+              runId: input.qualityGate.runId,
+              runUrl: input.qualityGate.runUrl,
+              headSha: input.qualityGate.headSha,
+              headRef: input.qualityGate.headRef,
+              runAttempt: input.qualityGate.runAttempt,
+              profile: "full",
+              event: "push",
+              conclusion: "success",
+              proofArtifactId: input.qualityGate.proofArtifactId,
+              proofArtifactDigest: input.qualityGate.proofArtifactDigest,
+              proofSha256: input.qualityGate.proofSha256,
+              jobSet: input.qualityGate.jobSet,
+            },
+            releaseAuthorization: input.releaseAuthorization,
+            baselinePolicy: {
+              artifactSystem: "github-actions-private-artifact",
+              publicTransparencyLog: false,
+              immutableImageDigests: true,
+              buildkitProvenanceIncluded: true,
+              sbomIncluded: true,
+            },
+            publicSeo: input.publicSeo,
+            server: image("server"),
+            client: image("client"),
+            operations: {
+              ...image("operations"),
+              runtimeExecutables: [
+                "/usr/local/bin/backup.sh",
+                "/usr/local/bin/check-backup-health.sh",
+                "/usr/local/bin/restore.sh",
+                "/usr/local/bin/restore-drill.sh",
+                "/usr/local/bin/prune-backups.sh",
+              ],
+            },
+          };
+          fs.writeFileSync("release-output/release-manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+
+      - name: 上传 baseline 私有清单与 SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-${{ needs.build-push.outputs.release_stage }}-baseline-manifest-${{ github.sha }}
+          path: |
+            release-output/release-manifest.json
+            release-output/quality/quality-full-proof.json
+            release-output/provenance/*.buildkit.json
+            release-output/sbom/*.spdx.json
+          if-no-files-found: error
+          retention-days: 90
+
   sign-release:
     needs:
       - quality-proof
       - build-push
+    if: inputs.assurance_level == 'high'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -662,7 +973,7 @@ jobs:
       id-token: write
     steps:
       - name: 配置固定 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
 
@@ -679,7 +990,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 按本次运行的固定 artifact ID 下载签名输入
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           artifact-ids: ${{ needs.build-push.outputs.signing_inputs_artifact_id }}
           path: release-input
@@ -708,7 +1019,8 @@ jobs:
           EXPECTED_IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
           set -euo pipefail
-          mkdir -p release-output/provenance release-output/sbom release-output/attestations release-output/verified
+          mkdir -p release-output/quality release-output/provenance release-output/sbom release-output/attestations release-output/verified
+          cp release-input/quality/quality-full-proof.json release-output/quality/
           actual_inputs_sha="$(sha256sum release-input/signing-inputs.json | cut -d ' ' -f 1)"
           test "$actual_inputs_sha" = "$EXPECTED_SIGNING_INPUTS_SHA256" || {
             echo "RELEASE_SIGNING_INPUTS_HASH_MISMATCH" >&2
@@ -725,7 +1037,7 @@ jobs:
                 JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...keys].sort())) fail(code);
           };
           const input = JSON.parse(fs.readFileSync("release-input/signing-inputs.json", "utf8"));
-          exact(input, ["schemaVersion", "releaseStage", "imageTag", "gitSha", "source", "sourceRef", "migrationBundleSha256", "qualityGate", "publicSeo", "images"], "RELEASE_SIGNING_INPUTS_SCHEMA_INVALID");
+          exact(input, ["schemaVersion", "releaseStage", "imageTag", "gitSha", "source", "sourceRef", "migrationBundleSha256", "qualityGate", "releaseAuthorization", "publicSeo", "images"], "RELEASE_SIGNING_INPUTS_SCHEMA_INVALID");
           if (input.schemaVersion !== 3 || input.gitSha !== process.env.GITHUB_SHA ||
               input.source !== process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY ||
               input.sourceRef !== process.env.GITHUB_REF ||
@@ -734,11 +1046,32 @@ jobs:
               input.migrationBundleSha256 !== process.env.EXPECTED_MIGRATION_SHA) {
             fail("RELEASE_SIGNING_INPUTS_IDENTITY_MISMATCH");
           }
-          exact(input.qualityGate, ["runId", "runUrl", "headSha"], "RELEASE_SIGNING_QUALITY_SCHEMA_INVALID");
+          exact(input.qualityGate, ["runId", "runUrl", "headSha", "headRef", "runAttempt", "profile", "proofArtifactId", "proofArtifactDigest", "proofSha256", "jobSet"], "RELEASE_SIGNING_QUALITY_SCHEMA_INVALID");
           if (input.qualityGate.runId !== Number(process.env.EXPECTED_QUALITY_RUN_ID) ||
               input.qualityGate.runUrl !== process.env.EXPECTED_QUALITY_RUN_URL ||
               input.qualityGate.headSha !== process.env.EXPECTED_QUALITY_HEAD_SHA ||
-              input.qualityGate.headSha !== process.env.GITHUB_SHA) fail("RELEASE_SIGNING_QUALITY_MISMATCH");
+              input.qualityGate.profile !== "full" ||
+              input.qualityGate.headSha !== process.env.GITHUB_SHA || input.qualityGate.headRef !== process.env.GITHUB_REF ||
+              !Number.isSafeInteger(input.qualityGate.runAttempt) || input.qualityGate.runAttempt <= 0 ||
+              !Number.isSafeInteger(input.qualityGate.proofArtifactId) || input.qualityGate.proofArtifactId <= 0 ||
+              !/^sha256:[a-f0-9]{64}$/.test(input.qualityGate.proofArtifactDigest ?? "") ||
+              !/^[a-f0-9]{64}$/.test(input.qualityGate.proofSha256 ?? "") ||
+              JSON.stringify(input.qualityGate.jobSet) !== JSON.stringify(["verify", "e2e-deterministic", "real-mysql"])) fail("RELEASE_SIGNING_QUALITY_MISMATCH");
+          const qualityProofBytes = fs.readFileSync("release-input/quality/quality-full-proof.json");
+          const qualityProof = JSON.parse(qualityProofBytes);
+          if (sha256(qualityProofBytes) !== input.qualityGate.proofSha256 || qualityProof.runId !== input.qualityGate.runId ||
+              qualityProof.runAttempt !== input.qualityGate.runAttempt || qualityProof.gitSha !== input.gitSha ||
+              qualityProof.ref !== input.sourceRef || qualityProof.profile !== "full" ||
+              JSON.stringify(qualityProof.jobSet) !== JSON.stringify(input.qualityGate.jobSet) ||
+              Object.values(qualityProof.results ?? {}).some((result) => result !== "success")) fail("RELEASE_SIGNING_QUALITY_PROOF_INVALID");
+          exact(input.releaseAuthorization, ["mode", "approvalSha256", "sourceSha", "actor", "runId"], "RELEASE_SIGNING_AUTHORIZATION_SCHEMA_INVALID");
+          if (input.releaseAuthorization.runId !== Number(process.env.GITHUB_RUN_ID) ||
+              input.releaseAuthorization.actor !== process.env.GITHUB_ACTOR ||
+              (input.releaseAuthorization.mode === "explicit-unprotected-ref"
+                ? !/^[a-f0-9]{64}$/.test(input.releaseAuthorization.approvalSha256 ?? "") || input.releaseAuthorization.sourceSha !== process.env.GITHUB_SHA
+                : input.releaseAuthorization.mode !== "protected-ref" || input.releaseAuthorization.approvalSha256 !== null || input.releaseAuthorization.sourceSha !== null)) {
+            fail("RELEASE_SIGNING_AUTHORIZATION_INVALID");
+          }
           exact(input.publicSeo, ["sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest", "sourceKind", "contentReady"], "RELEASE_SIGNING_SEO_SCHEMA_INVALID");
           if (input.publicSeo.sourceStage !== input.releaseStage ||
               input.publicSeo.snapshotHash !== process.env.EXPECTED_PUBLIC_SEO_SNAPSHOT_HASH ||
@@ -748,6 +1081,7 @@ jobs:
               input.publicSeo.sourceKind !== process.env.EXPECTED_PUBLIC_SEO_SOURCE_KIND ||
               input.publicSeo.contentReady !== (process.env.EXPECTED_PUBLIC_SEO_CONTENT_READY === "true") ||
               (input.releaseStage === "production" && (!input.publicSeo.contentReady || input.publicSeo.sourceKind !== "approved-snapshot")) ||
+              (input.publicSeo.sourceKind === "approved-snapshot" && !input.publicSeo.contentReady) ||
               (input.publicSeo.sourceKind === "safe-fallback" && (input.releaseStage !== "preproduction" || input.publicSeo.contentReady || input.publicSeo.sourceArtifactId !== 0))) {
             fail("RELEASE_SIGNING_SEO_MISMATCH");
           }
@@ -809,7 +1143,7 @@ jobs:
                   source,
                   sourceRef: process.env.GITHUB_REF,
                   gitSha: process.env.GITHUB_SHA,
-                  buildkitProvenancePredicateType,
+                  buildkitProvenancePredicateType: buildkitPredicateType,
                   buildkitProvenanceSha256: image.buildkitProvenance.sha256,
                 },
                 internalParameters: {},
@@ -946,7 +1280,7 @@ jobs:
           }
           NODE
 
-      - name: 生成 schema v5 不可变发布清单和真实 SLSA v1 predicate
+      - name: 生成 schema v7 高保证发布清单和真实 SLSA v1 predicate
         shell: bash
         env:
           SERVER_IMAGE_NAME: ${{ needs.build-push.outputs.server_image }}
@@ -959,6 +1293,16 @@ jobs:
           QUALITY_RUN_ID: ${{ needs.quality-proof.outputs.run_id }}
           QUALITY_RUN_URL: ${{ needs.quality-proof.outputs.run_url }}
           QUALITY_HEAD_SHA: ${{ needs.quality-proof.outputs.head_sha }}
+          QUALITY_HEAD_REF: ${{ needs.quality-proof.outputs.head_ref }}
+          QUALITY_RUN_ATTEMPT: ${{ needs.quality-proof.outputs.run_attempt }}
+          QUALITY_PROOF_ARTIFACT_ID: ${{ needs.quality-proof.outputs.proof_artifact_id }}
+          QUALITY_PROOF_ARTIFACT_DIGEST: ${{ needs.quality-proof.outputs.proof_artifact_digest }}
+          QUALITY_PROOF_SHA256: ${{ needs.quality-proof.outputs.proof_sha256 }}
+          AUTHORIZATION_MODE: ${{ needs.quality-proof.outputs.authorization_mode }}
+          AUTHORIZATION_SHA256: ${{ needs.quality-proof.outputs.authorization_sha256 }}
+          AUTHORIZATION_SOURCE_SHA: ${{ needs.quality-proof.outputs.authorization_source_sha }}
+          AUTHORIZATION_ACTOR: ${{ needs.quality-proof.outputs.authorization_actor }}
+          AUTHORIZATION_RUN_ID: ${{ needs.quality-proof.outputs.authorization_run_id }}
           PUBLIC_SEO_SNAPSHOT_HASH: ${{ needs.build-push.outputs.public_seo_snapshot_hash }}
           PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ needs.build-push.outputs.public_seo_prerender_manifest_sha256 }}
           PUBLIC_SEO_SOURCE_ARTIFACT_ID: ${{ needs.build-push.outputs.public_seo_source_artifact_id }}
@@ -997,7 +1341,8 @@ jobs:
             ],
           };
           const manifest = {
-            schemaVersion: 6,
+            schemaVersion: 7,
+            assuranceLevel: "high",
             releaseStage: process.env.RELEASE_STAGE,
             imageTag: process.env.IMAGE_TAG,
             gitSha: process.env.GITHUB_SHA,
@@ -1008,8 +1353,22 @@ jobs:
               runId: Number(process.env.QUALITY_RUN_ID),
               runUrl: process.env.QUALITY_RUN_URL,
               headSha: process.env.QUALITY_HEAD_SHA,
+              headRef: process.env.QUALITY_HEAD_REF,
+              runAttempt: Number(process.env.QUALITY_RUN_ATTEMPT),
+              profile: "full",
               event: "push",
               conclusion: "success",
+              proofArtifactId: Number(process.env.QUALITY_PROOF_ARTIFACT_ID),
+              proofArtifactDigest: process.env.QUALITY_PROOF_ARTIFACT_DIGEST,
+              proofSha256: process.env.QUALITY_PROOF_SHA256,
+              jobSet: ["verify", "e2e-deterministic", "real-mysql"],
+            },
+            releaseAuthorization: {
+              mode: process.env.AUTHORIZATION_MODE,
+              approvalSha256: process.env.AUTHORIZATION_SHA256 || null,
+              sourceSha: process.env.AUTHORIZATION_SOURCE_SHA || null,
+              actor: process.env.AUTHORIZATION_ACTOR,
+              runId: Number(process.env.AUTHORIZATION_RUN_ID),
             },
             attestationPolicy: {
               signingSystem: "sigstore-cosign-keyless",
@@ -1059,12 +1418,13 @@ jobs:
           const source = manifest.source;
           const predicate = {
             buildDefinition: {
-              buildType: source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v6",
+              buildType: source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v7",
               externalParameters: {
                 gitSha: process.env.GITHUB_SHA,
                 sourceRef: process.env.GITHUB_REF,
                 qualityGateRunId: Number(process.env.QUALITY_RUN_ID),
-                schemaVersion: 6,
+                schemaVersion: 7,
+                assuranceLevel: "high",
                 releaseStage: process.env.RELEASE_STAGE,
                 imageTag: process.env.IMAGE_TAG,
               },
@@ -1130,12 +1490,13 @@ jobs:
           const parameters = predicate?.buildDefinition?.externalParameters;
           const source = process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY;
           const expectedBuilder = "https://github.com/" + process.env.GITHUB_REPOSITORY + "/.github/workflows/release-images.yml@" + process.env.GITHUB_REF;
-          const expectedBuildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v6";
+          const expectedBuildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v7";
           if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
               parameters?.gitSha !== process.env.GITHUB_SHA ||
               parameters?.sourceRef !== process.env.GITHUB_REF ||
               parameters?.qualityGateRunId !== Number(process.env.QUALITY_RUN_ID) ||
-              parameters?.schemaVersion !== 6 ||
+              parameters?.schemaVersion !== 7 ||
+              parameters?.assuranceLevel !== "high" ||
               parameters?.releaseStage !== process.env.RELEASE_STAGE ||
               parameters?.imageTag !== process.env.IMAGE_TAG ||
               predicate?.runDetails?.builder?.id !== expectedBuilder) {
@@ -1160,12 +1521,15 @@ jobs:
           NODE
 
       - name: 上传发布清单
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: release-${{ needs.build-push.outputs.release_stage }}-manifest-${{ github.sha }}
+          name: release-${{ needs.build-push.outputs.release_stage }}-high-manifest-${{ github.sha }}
           path: |
             release-output/release-manifest.json
             release-output/release-manifest.attestation.json
+            release-output/quality/quality-full-proof.json
             release-output/attestations/*.sigstore.json
+            release-output/provenance/*.slsa-v1.json
+            release-output/sbom/*.spdx.json
           if-no-files-found: error
           retention-days: 90

@@ -32,7 +32,6 @@ import {
   BLOCK_META,
   isContentTemplateInsertable,
 } from "@/page-builder/config/blockMeta";
-import { type SystemContentTemplateCurrent } from "@/services/api";
 import {
   RESPONSIVE_CANVAS,
   isMobileCanvasWidth,
@@ -84,7 +83,6 @@ import {
   useVisualEditorSession,
 } from "@/page-builder/visual-editor/visualEditorSession";
 import { UnifiedTemplateLibrary } from "@/page-builder/template-editor/TemplateEditorLibrary";
-import { getSystemTemplatePublicationBlockReason } from "@/page-builder/template-editor/templatePublicationStatus";
 import WorkspaceCanvasControls from "@/page-builder/template-editor/WorkspaceCanvasControls";
 import { useTemplateWorkspaceController } from "@/page-builder/template-editor/TemplateWorkspaceController";
 import { USE_MOCK } from "@/services/mockData";
@@ -111,13 +109,11 @@ import { DynamicTemplateUpgradeReviewModal } from "@/page-builder/dynamic-templa
 import type { PromoteDynamicTemplateInstanceRequest } from "@/page-builder/dynamic-template-instance/promoteToTemplate";
 import type { PublishedDynamicTemplateResource } from "@/services/clients/dynamicTemplateClient";
 import type { EditorWorkspaceMode } from "@/page-builder/template-editor/types";
-import {
-  countUpgradeableSystemTemplateInstances,
-  upgradeSystemTemplateInstances,
-} from "@/page-builder/templates/templateOrigin";
 import WorkspacePanelHeader from "@/page-builder/workspace/WorkspacePanelHeader";
 import WorkspacePanelCollapseButton from "@/page-builder/workspace/WorkspacePanelCollapseButton";
-import useCompactWorkspaceOverlay from "@/page-builder/workspace/useCompactWorkspaceOverlay";
+import useCompactWorkspaceOverlay, {
+  DOCKED_WORKSPACE_QUERY,
+} from "@/page-builder/workspace/useCompactWorkspaceOverlay";
 import "./editor.css";
 import EditorToolbar, { VIEWPORT_PRESETS } from "./components/EditorToolbar";
 import UnsavedChangesGuard from "./components/UnsavedChangesGuard";
@@ -802,11 +798,19 @@ function getPageTemplateUpgradeRuleBlockers(
 function PageTemplateLibraryAdapter({
   active,
   pageKey,
+  obscuredByInspector,
+  onRequestCompactOpen,
+  onPageActionComplete,
+  onRetainLibraryAfterSelection,
   onTemplateDragStart,
   onTemplateDragEnd,
 }: {
   active: boolean;
   pageKey: EditorPageKey;
+  obscuredByInspector: boolean;
+  onRequestCompactOpen: () => void;
+  onPageActionComplete: () => void;
+  onRetainLibraryAfterSelection: () => void;
   onTemplateDragStart: (label: string, insertAt: (insertionIndex: number) => void) => void;
   onTemplateDragEnd: () => void;
 }) {
@@ -920,8 +924,9 @@ function PageTemplateLibraryAdapter({
       }));
     }
     setDynamicUpgradeReview(null);
+    onPageActionComplete();
     message.success(`已升级 ${plan.upgradedCount} 个模板实例；保存页面草稿后才会持久化`);
-  }, [dispatch, dynamicUpgradeReview, message]);
+  }, [dispatch, dynamicUpgradeReview, message, onPageActionComplete]);
 
   const insertPublishedDynamicTemplate = useCallback((
     template: PublishedDynamicTemplateResource,
@@ -971,12 +976,18 @@ function PageTemplateLibraryAdapter({
       } as typeof currentDocument,
       recordHistory: true,
     });
+    if (requestedInsertionIndex !== undefined) {
+      onRetainLibraryAfterSelection();
+    }
     dispatch({
       type: "setUi",
       ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
     });
+    if (requestedInsertionIndex === undefined) {
+      onPageActionComplete();
+    }
     message.success(`已添加“${template.name}”v${template.version}，可在右侧填写页面内容`);
-  }, [dispatch, message]);
+  }, [dispatch, message, onPageActionComplete, onRetainLibraryAfterSelection]);
 
   return (
     <>
@@ -984,6 +995,8 @@ function PageTemplateLibraryAdapter({
       mode="page"
       active={active}
       device={previewViewport}
+      obscuredByInspector={obscuredByInspector}
+      onRequestCompactOpen={onRequestCompactOpen}
       isPublishedTemplateAllowed={() => true}
       onInsertPublished={insertPublishedDynamicTemplate}
       onPublishedDragStart={(template) => onTemplateDragStart(
@@ -1288,7 +1301,7 @@ function EditorBody({
   // 右侧属性面板手动收起（2026-08-16）：点选模块仍自动弹出(is-inspecting)，手动收起后保持收起
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => {
     try {
-      if (window.matchMedia("(min-width: 1200px)").matches) return false;
+      if (window.matchMedia(DOCKED_WORKSPACE_QUERY).matches) return false;
       return (
         sessionStorage.getItem("homepage-editor-inspector-collapsed") === "1"
       );
@@ -1318,6 +1331,23 @@ function EditorBody({
     onClose: closeInspector,
   });
   const requestInspectorOpen = inspectorOverlay.requestOpen;
+  const suppressNextInspectorAutoOpenRef = useRef(false);
+  const retainLibraryAfterSelection = useCallback(() => {
+    suppressNextInspectorAutoOpenRef.current = true;
+  }, []);
+  const selectedItemId = selectedItem?.props?.id;
+  const previousSelectedItemIdRef = useRef(selectedItemId);
+  useEffect(() => {
+    const previousSelectedItemId = previousSelectedItemIdRef.current;
+    previousSelectedItemIdRef.current = selectedItemId;
+    if (selectedItemId && selectedItemId !== previousSelectedItemId) {
+      if (suppressNextInspectorAutoOpenRef.current) {
+        suppressNextInspectorAutoOpenRef.current = false;
+        return;
+      }
+      requestInspectorOpen();
+    }
+  }, [requestInspectorOpen, selectedItemId]);
   const publishReviewRef = useRef<HTMLElement>(null);
   const publishReviewTargets = useMemo(() => publishReviewIssues
     .filter((issue) => issue.severity === "error")
@@ -2044,6 +2074,10 @@ function EditorBody({
         <PageTemplateLibraryAdapter
           active={workspaceActive}
           pageKey={pageKey}
+          obscuredByInspector={!inspectorCollapsed}
+          onRequestCompactOpen={closeInspector}
+          onPageActionComplete={requestInspectorOpen}
+          onRetainLibraryAfterSelection={retainLibraryAfterSelection}
           onTemplateDragStart={handleTemplateDragStart}
           onTemplateDragEnd={handleTemplateDragEnd}
         />

@@ -187,13 +187,15 @@ export default function TemplateCatalogCard({
             />
           )}
         </span>
-        <span className="homepage-editor__template-name">{name}</span>
-        {metadata ? <span className="unified-template-library__metadata">{metadata}</span> : null}
-        {statusLabel ? (
-          <span className="homepage-editor__template-card-status">{statusLabel}</span>
-        ) : null}
-        {actionLabel ? <span className="unified-template-library__primary-action">{actionLabel}</span> : null}
-        {disabledReason ? <span className="unified-template-library__disabled-reason">{disabledReason}</span> : null}
+        <span className="template-editor__catalog-card-info">
+          <span className="homepage-editor__template-name">{name}</span>
+          {metadata ? <span className="unified-template-library__metadata">{metadata}</span> : null}
+          {statusLabel ? (
+            <span className="homepage-editor__template-card-status">{statusLabel}</span>
+          ) : null}
+          {actionLabel ? <span className="unified-template-library__primary-action">{actionLabel}</span> : null}
+          {disabledReason ? <span className="unified-template-library__disabled-reason">{disabledReason}</span> : null}
+        </span>
       </div>
       {trailingAction ? (
         <span className="template-editor__catalog-card-action">

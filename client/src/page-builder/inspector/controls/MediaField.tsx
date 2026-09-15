@@ -18,6 +18,7 @@ import {
   PAGE_MEDIA_LIBRARY_CHANGED_EVENT,
   readPageMediaLibrary,
 } from "../../fields/pageMediaLibrary";
+import { resolveManagedTemplateMediaPreviewUrl } from "../../template-definition/managedMediaPreview";
 
 interface MediaFieldProps {
   def: MediaFieldDef;
@@ -176,7 +177,11 @@ export default function MediaField({
                     onClick={() => selectMedia(item.url)}
                     aria-label={item.url === value ? `当前素材：${item.name}` : `使用素材：${item.name}`}
                   >
-                    <img src={item.url} alt="" loading="lazy" />
+                    <img
+                      src={resolveManagedTemplateMediaPreviewUrl(item.url)}
+                      alt=""
+                      loading="lazy"
+                    />
                   </button>
                 ))}
               </div>

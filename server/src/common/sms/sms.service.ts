@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import {
+  ExternalProviderError,
   type ExternalProviderAdapter,
   type ExternalProviderOperationContext,
   runExternalProviderOperation,
@@ -86,9 +87,9 @@ export class SmsService implements ExternalProviderAdapter {
     return this.deliveryProvider?.isConfigured() ?? Boolean(this.client);
   }
 
-  /** 注册是否强制短信验证（默认关；凭据接入且运营确认后由环境变量打开） */
+  /** 手机号身份注册始终强制验真；保留方法供现有调用方兼容。 */
   isRegisterVerificationRequired(): boolean {
-    return this.configService.get<string>('SMS_VERIFICATION_REQUIRED') === 'true';
+    return true;
   }
 
   /**
@@ -144,9 +145,15 @@ export class SmsService implements ExternalProviderAdapter {
             ? 'provider_rejected'
             : result.providerCode,
       };
-    } catch {
+    } catch (error) {
       this.logger.error('阿里云短信发送异常（手机号与提供商错误已脱敏）');
-      return { delivered: false, reason: 'send_failed' };
+      const resultUnknown =
+        error instanceof ExternalProviderError
+        && ['TIMEOUT', 'NETWORK', 'UNKNOWN_RESULT'].includes(error.code);
+      return {
+        delivered: false,
+        reason: resultUnknown ? 'result_unknown' : 'send_failed',
+      };
     }
   }
 }

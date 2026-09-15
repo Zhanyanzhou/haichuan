@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
@@ -28,9 +28,27 @@ const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
   "/images/system/launch-short-page-mobile.svg",
 ]);
 
+const DEFERRED_MEDIA_ROOT_MARGIN = "200px 0px";
+const RESPONSIVE_HERO_IMAGE_WIDTHS = [480, 800, 1200, 1680] as const;
+
 function publicHeroMedia(value: unknown, editMode: boolean | undefined) {
   const source = typeof value === "string" ? value.trim() : "";
   return !editMode && NON_PUBLISHABLE_SYSTEM_MEDIA.has(source) ? "" : source;
+}
+
+function buildResponsiveHeroSrcSet(source: string): string | undefined {
+  if (!/^\/uploads\//.test(source) || !/\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(source)) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(source, "https://public-media.local");
+    return RESPONSIVE_HERO_IMAGE_WIDTHS.map((width) => {
+      parsed.searchParams.set("width", String(width));
+      return `${parsed.pathname}${parsed.search}${parsed.hash} ${width}w`;
+    }).join(", ");
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -55,8 +73,37 @@ export default function HeroSection({
   const desktopImg = configuredDesktopImg || configuredMobileImg;
   const mobileImg = configuredMobileImg || configuredDesktopImg;
   const imageSourceKey = `${desktopImg}\u0000${mobileImg}`;
+  const desktopSrcSet = buildResponsiveHeroSrcSet(desktopImg);
+  const mobileSrcSet = buildResponsiveHeroSrcSet(mobileImg);
   const [failedImageSourceKey, setFailedImageSourceKey] = useState<string | null>(null);
   const imageFailed = failedImageSourceKey === imageSourceKey;
+  const mediaRef = useRef<HTMLDivElement | null>(null);
+  const [loadableImageSourceKey, setLoadableImageSourceKey] = useState<string | null>(
+    editMode || priority ? imageSourceKey : null,
+  );
+  const shouldLoadImage = editMode || priority || loadableImageSourceKey === imageSourceKey;
+
+  useEffect(() => {
+    if (editMode || priority || !desktopImg) {
+      setLoadableImageSourceKey(imageSourceKey);
+      return;
+    }
+
+    const media = mediaRef.current;
+    if (!media || typeof IntersectionObserver === "undefined") {
+      setLoadableImageSourceKey(imageSourceKey);
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setLoadableImageSourceKey(imageSourceKey);
+      observer.disconnect();
+    }, { rootMargin: DEFERRED_MEDIA_ROOT_MARGIN });
+    observer.observe(media);
+
+    return () => observer.disconnect();
+  }, [desktopImg, editMode, imageSourceKey, priority]);
 
   // 已配置的装修区块没有素材时，不能回退到活动默认图，避免前台或画布闪出陌生图片。
   if (!desktopImg && !mobileImg && !editMode) return null;
@@ -119,18 +166,24 @@ export default function HeroSection({
       <DesignSystemStyles />
       <ContentTemplateLayoutStyles />
       <div
+        ref={mediaRef}
         className="hc-content-template__media hc-phase1-hero__media"
         data-content-role-desktop="desktopImage"
         data-content-role-mobile="mobileImage"
       >
-        {desktopImg && !imageFailed ? (
+        {desktopImg && !imageFailed && shouldLoadImage ? (
           <picture data-editor-field="desktopImage mobileImage">
-            <source
-              media={RESPONSIVE_CANVAS.mobileMediaQuery}
-              srcSet={mobileImg}
-            />
+            {mobileImg ? (
+              <source
+                media={RESPONSIVE_CANVAS.mobileMediaQuery}
+                srcSet={mobileSrcSet || mobileImg}
+                sizes={mobileSrcSet ? "100vw" : undefined}
+              />
+            ) : null}
             <img
               src={desktopImg}
+              srcSet={desktopSrcSet}
+              sizes={desktopSrcSet ? "100vw" : undefined}
               alt={c?.altText || title}
               loading={editMode || priority ? "eager" : "lazy"}
               {...(priority ? { fetchpriority: "high" } : {})}

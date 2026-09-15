@@ -18,6 +18,8 @@
   --site-content-max: 1280px;
   --site-content-gutter: clamp(20px, 5.55vw, 80px);
   --site-header-height: 88px;
+  --site-header-action-size: 44px;
+  --site-header-action-top: 21.5px;
   /* 宽屏页头保留贴近画布边缘的品牌式留白，左右严格镜像。 */
   --site-header-edge: 48px;
   --site-header-utility-width: 375px;
@@ -84,8 +86,8 @@
   align-items: center;
   justify-content: center;
   gap: 9px;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: var(--site-header-action-size);
+  min-height: var(--site-header-action-size);
   padding: 0;
   border: 0;
   background: transparent;
@@ -143,6 +145,7 @@
 
 .site-header__nav-item svg,
 .site-menu-toggle svg {
+  display: block;
   width: 24px;
   height: 24px;
   stroke-width: 1.25;
@@ -240,13 +243,27 @@
 /* ═══════ 左侧组合：菜单 + 搜索 ═══════ */
 .site-header__left-group {
   position: fixed;
-  top: 23px;
+  top: var(--site-header-action-top);
   left: var(--site-header-edge, 48px);
   z-index: 130;
   display: inline-flex;
   align-items: center;
   gap: 44px;
-  height: 44px;
+  height: var(--site-header-action-size);
+}
+
+/* 左侧入口统一使用同一 44px 居中盒；不再用控件级位移补偿不同 padding。 */
+.site-header__left-group > .site-menu-toggle,
+.site-header__left-group > .site-header__nav-item {
+  height: var(--site-header-action-size);
+  padding-block: 0;
+}
+
+/* 放大镜斜柄令墨迹中心比画布中心低 1/30；aria-label 选择器兼容旧预发布壳。 */
+.site-header__left-group > .site-header__nav-item--search > svg,
+.site-header__left-group > .site-header__nav-item:is([aria-label="搜索"], [aria-label="Collection"]) > svg,
+.brand-menu__top > a > svg {
+  transform: translateY(-3.333%);
 }
 
 .site-menu-toggle {
@@ -255,8 +272,8 @@
   align-items: center;
   justify-content: flex-start;
   gap: 9px;
-  min-height: 44px;
-  padding: 0 0 5px;
+  min-height: var(--site-header-action-size);
+  padding: 0;
   margin: 0;
   border: 0;
   background: transparent;
@@ -332,6 +349,7 @@
   .editorial-shell,
   .storefront-navigation {
     --site-header-height: 108px;
+    --site-header-action-top: 31.5px;
   }
   .site-header__inner {
     width: calc(100% - (2 * var(--site-header-edge)));
@@ -358,9 +376,6 @@
     justify-content: flex-start;
     gap: 44px;
   }
-  .site-header__left-group {
-    top: 32px;
-  }
 }
 
 /* Tablet: 768–1199 */
@@ -369,6 +384,7 @@
   .editorial-shell,
   .storefront-navigation {
     --site-header-height: 72px;
+    --site-header-action-top: 13.5px;
   }
   .site-main {
     padding-top: var(--site-header-height);
@@ -411,7 +427,6 @@
     font-size: 13px;
   }
   .site-header__left-group {
-    top: 15px;
     left: 36px;
     gap: 22px;
   }
@@ -437,6 +452,7 @@
   .editorial-shell,
   .storefront-navigation {
     --site-header-height: 64px;
+    --site-header-action-top: 9.5px;
   }
   .site-header__inner {
     width: calc(100% - 36px);
@@ -488,7 +504,6 @@
     height: 22px;
   }
   .site-header__left-group {
-    top: 11px;
     left: 18px;
     gap: 14px;
   }
@@ -942,7 +957,6 @@
     letter-spacing: 0.2em;
   }
   .site-header__left-group {
-    top: 11px;
     left: 18px;
     gap: 14px;
   }
@@ -1135,7 +1149,6 @@
   }
 
   .site-header__left-group {
-    top: 10px;
     left: 16px;
     width: 44px;
     gap: 0;

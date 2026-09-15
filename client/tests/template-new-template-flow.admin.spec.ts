@@ -528,6 +528,8 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     await createBlankTemplate(page);
     await applyBasicSkeleton(page);
     const beforeSelection = await readSession(page);
+    const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
+    if (await structureTrigger.isVisible()) await structureTrigger.click();
     await structurePanel(page).getByRole("button", { name: "模板整体", exact: true }).click();
     const before = await readSession(page);
     expect(before.historyPast).toEqual(beforeSelection.historyPast);
@@ -953,7 +955,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     expect(server.writes.filter((write) => write.path.endsWith("/publish"))).toHaveLength(1);
   });
 
-  test("1200px 四区保持 12/8/60/20 且 96px 结构名称水平单行可读", async ({ page }) => {
+  test("1200px 使用可达覆盖层，1440px 起按最小可用宽度停靠四区", async ({ page }) => {
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1200, height: 900 });
     await createBlankTemplate(page);
@@ -962,28 +964,15 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
 
     const body = page.locator(".homepage-editor__body.template-editor__body:visible");
     await expect(body).toHaveCount(1);
-    const geometry = await body.evaluate((element) => {
-      const outer = element.getBoundingClientRect();
-      const rect = (selector: string) => {
-        const target = element.querySelector<HTMLElement>(selector);
-        if (!target) throw new Error(`缺少四区节点：${selector}`);
-        return target.getBoundingClientRect();
-      };
-      const library = rect(":scope > .homepage-editor__library");
-      const structure = rect(":scope > .homepage-editor__structure-workspace");
-      const canvas = rect(".homepage-editor__canvas-scroll");
-      const inspector = rect(":scope > .homepage-editor__right-workspace");
-      return {
-        innerWidth: window.innerWidth,
-        outerWidth: outer.width,
-        widths: [library.width, structure.width, canvas.width, inspector.width],
-      };
-    });
-    expect(geometry.innerWidth).toBe(1200);
-    expect(geometry.widths.map((width) => Math.round(width))).toEqual([144, 96, 720, 240]);
-    expect(Math.round(geometry.outerWidth)).toBe(1200);
+    await expect(body).toHaveAttribute("data-template-workspace-compact", "true");
+    const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
+    await expect(structureTrigger).toBeVisible();
+    await structureTrigger.click();
+    await expect(page.getByRole("button", { name: "收起模板结构面板", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "展开模板属性面板", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1201);
 
-    const expectReadableStructureNames = async () => {
+    const expectReadableStructureNames = async (compact = false) => {
       const tree = structurePanel(page).getByRole("tree", { name: "模板区域与槽位", exact: true });
       for (const name of ["双图文布局", "图片槽位 2", "文字组"]) {
         const item = tree.getByRole("treeitem", { name: new RegExp(name) }).first();
@@ -1008,23 +997,28 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
             writingMode: style.writingMode,
           };
         });
-        expect(layout.whiteSpace).toBe("nowrap");
-        expect(layout.overflow).toBe("hidden");
-        expect(layout.textOverflow).toBe("ellipsis");
+        if (compact) {
+          expect(layout.lineCount).toBeLessThanOrEqual(2);
+          expect(layout.width).toBeGreaterThanOrEqual(64);
+        } else {
+          expect(layout.whiteSpace).toBe("nowrap");
+          expect(layout.overflow).toBe("hidden");
+          expect(layout.textOverflow).toBe("ellipsis");
+          expect(layout.lineCount).toBe(1);
+          expect(layout.width).toBeGreaterThanOrEqual(32);
+        }
         expect(layout.writingMode).toBe("horizontal-tb");
-        expect(layout.lineCount).toBe(1);
-        expect(layout.width).toBeGreaterThanOrEqual(32);
         expect(layout.itemScrollWidth).toBeLessThanOrEqual(layout.itemClientWidth + 1);
       }
     };
-    await expectReadableStructureNames();
-    const secondImage = structurePanel(page).getByRole("treeitem", { name: /图片槽位 2/ }).first();
-    await secondImage.click();
-    const secondImageRow = secondImage.locator("..");
-    const nodeMenu = secondImageRow.getByRole("button", { name: "图片槽位 2节点操作", exact: true });
+    await expectReadableStructureNames(true);
+    const editableLayout = structurePanel(page).getByRole("treeitem", { name: /文字组 布局容器/ }).first();
+    await editableLayout.focus();
+    const editableLayoutRow = editableLayout.locator("..");
+    const nodeMenu = editableLayoutRow.getByRole("button", { name: "文字组容器操作", exact: true });
     await expect(nodeMenu).toBeVisible();
     const nonOverlappingControls = await Promise.all([
-      secondImage.locator("strong").first().boundingBox(),
+      editableLayout.locator("strong").first().boundingBox(),
       nodeMenu.boundingBox(),
     ]);
     expect(nonOverlappingControls[0]).not.toBeNull();
@@ -1036,16 +1030,22 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     await expect(page.getByRole("menuitem", { name: "上移", exact: true })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "下移", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
-    await page.setViewportSize({ width: 1600, height: 900 });
-    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1600);
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1366);
+    await expect(body).toHaveAttribute("data-template-workspace-compact", "true");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1367);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440);
+    await expect(body).toHaveAttribute("data-template-workspace-compact", "false");
     await expectReadableStructureNames();
     for (const viewport of [
-      { width: 1600, height: 900, expected: [192, 128, 960, 320] },
-      { width: 1920, height: 1200, expected: [230, 154, 1152, 384] },
+      { width: 1440, height: 900, expected: [230, 158, 691, 360] },
+      { width: 1600, height: 900, expected: [256, 176, 768, 400] },
+      { width: 1920, height: 1200, expected: [280, 184, 1016, 440] },
     ]) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(viewport.width);
-      const widths = await body.evaluate((element) => {
+      const readWidths = () => body.evaluate((element) => {
         const width = (selector: string) => {
           const target = element.querySelector<HTMLElement>(selector);
           if (!target) throw new Error(`缺少桌面四区节点：${selector}`);
@@ -1058,7 +1058,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
           width(":scope > .homepage-editor__right-workspace"),
         ];
       });
-      expect(widths).toEqual(viewport.expected);
+      await expect.poll(readWidths, { timeout: 2_000 }).toEqual(viewport.expected);
     }
     await page.setViewportSize({ width: 1024, height: 768 });
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1024);
@@ -1084,6 +1084,8 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
       expect((await navigation.boundingBox())!.y).toBe(navigationBefore!.y);
       await navigation.locator(".template-editor__canvas-add > summary").click();
       expect(stableAuthoringFacts(await readSession(page))).toEqual(before);
+      const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
+      if (await structureTrigger.isVisible()) await structureTrigger.click();
       await structurePanel(page).getByRole("treeitem", { name: /内容区域 1/ }).first().click();
       const frame = page.locator("iframe[title$='模板隔离画布']");
       await expect(frame).toBeVisible();
@@ -1150,7 +1152,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     test(`${viewport.width}×${viewport.height} 长中文与无空格 token 不造成页面横向溢出，覆盖层关闭后焦点返回`, async ({ page }) => {
       const server = await installNewTemplateServer(page);
       await page.setViewportSize(viewport);
-      if (viewport.width < 1200) {
+      if (viewport.width < 1440) {
         await openTemplateDesignWithoutDraft(page);
         const more = page.getByRole("button", { name: "更多模板操作", exact: true });
         await more.focus();
@@ -1169,7 +1171,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
       }
 
       const longName = "长中文模板制作流程焦点与溢出验证-UNBROKEN_TOKEN_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      if (viewport.width < 1200) {
+      if (viewport.width < 1440) {
         const identityEntry = await fillTemplateIdentity(page, longName, "移动端长内容与焦点返回验证");
         const inspector = page.getByRole("dialog", { name: "模板属性工作区", exact: true });
         await expect(inspector).toBeVisible();

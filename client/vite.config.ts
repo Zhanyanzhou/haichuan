@@ -1,6 +1,7 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
+import { createPublicClientEnvDefinitions } from "./vite-public-env.mjs";
 
 const apiProxyTarget = "http://127.0.0.1:3000";
 
@@ -8,15 +9,13 @@ export default defineConfig(({ mode, command }) => {
   if (command === "build" && mode === "mock") {
     throw new Error("生产构建禁止使用 mock mode");
   }
+  const env = loadEnv(mode, process.cwd(), "");
   return {
     plugins: [react()],
-    // 仅把确需由浏览器读取的公开配置暴露给 import.meta.env。
-    // Vite 的 envPrefix 是前缀匹配，因此使用完整键名作为最小白名单。
-    envPrefix: [
-      "VITE_API_BASE_URL",
-      "VITE_PUBLIC_SITE_ORIGIN",
-      "VITE_ANALYTICS_ENABLED",
-    ],
+    // 不允许任何环境变量仅凭前缀自动进入浏览器包；只由 define 精确注入下面
+    // 三个已确认可公开的浏览器配置。
+    envPrefix: [],
+    define: createPublicClientEnvDefinitions(env),
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),

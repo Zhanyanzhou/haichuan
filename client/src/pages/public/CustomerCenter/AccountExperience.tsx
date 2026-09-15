@@ -333,9 +333,8 @@ function MemberAccess({
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  // 手机验真：是否强制验证码由服务端开关决定（SMS 凭据接入后打开）
+  // 手机号作为账户身份时必须验真；要求接口异常时保持失败关闭。
   const [smsCode, setSmsCode] = useState("");
-  const [smsRequired, setSmsRequired] = useState(false);
   const [smsCooldown, setSmsCooldown] = useState(0);
   const [sendingSms, setSendingSms] = useState(false);
   // 登录分级挑战：3 次失败要求图形验证码，5 次失败升级短信验证码（服务端判定）
@@ -396,16 +395,6 @@ function MemberAccess({
   };
 
   useEffect(() => {
-    customerApi
-      .smsRequirements()
-      .then((res: unknown) => {
-        const data = unwrapResponse<{ registerRequired?: boolean }>(res);
-        setSmsRequired(Boolean(data?.registerRequired));
-      })
-      .catch(() => setSmsRequired(false));
-  }, []);
-
-  useEffect(() => {
     if (smsCooldown <= 0) return;
     const timer = setInterval(() => setSmsCooldown((v) => v - 1), 1000);
     return () => clearInterval(timer);
@@ -459,7 +448,7 @@ function MemberAccess({
             password,
             name,
             email: email || undefined,
-            smsCode: smsRequired ? smsCode.trim() : undefined,
+            smsCode: smsCode.trim(),
           });
       }}
     >
@@ -516,7 +505,7 @@ function MemberAccess({
           />
         </label>
       )}
-      {mode === "register" && smsRequired && (
+      {mode === "register" && (
         <label>
           短信验证码
           <span

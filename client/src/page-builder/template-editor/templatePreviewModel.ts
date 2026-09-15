@@ -234,18 +234,41 @@ export function createTemplatePreviewContentBySlotId(
 }
 
 /**
- * 目录里的新方案用临时样例补齐空槽位，已保存的显式默认值优先；
- * 返回值只传给缩略图 Renderer，不写回模板定义。
+ * 模板目录渲染该草稿或精确版本实际保存的默认内容；新配方只为未配置文字
+ * 补充与创建预览同源的中性短文。图片、商品和集合不使用参考素材掩盖空态。
+ * 返回值只传给 Renderer，不产生写入。
  */
 export function createTemplateCatalogPreviewContentBySlotId(
   definition: TemplateDefinitionV2,
 ): Record<string, unknown> {
-  const persisted = createTemplatePreviewContentBySlotId(definition);
+  const persisted = structuredClone(definition.defaultContent ?? {});
   if (Number(definition.schemaVersion) < 3 || !definition.templateRecipe) return persisted;
   return {
     ...createTemplateRecipePreviewContent(definition),
     ...persisted,
   };
+}
+
+function hasConfiguredCatalogMedia(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some(hasConfiguredCatalogMedia);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>).some(([key, child]) => (
+    /(?:image|media|poster|cover|thumbnail|src|url)$/i.test(key)
+      ? hasConfiguredCatalogMedia(child)
+      : typeof child === "object" && hasConfiguredCatalogMedia(child)
+  ));
+}
+
+/** 只判断模板实际默认内容，不把创建预览的临时文字或中性素材算作已配置。 */
+export function hasUnconfiguredTemplateCatalogMedia(definition: TemplateDefinitionV2): boolean {
+  return Object.values(definition.slots).some((slot) => {
+    const isMediaSlot = slot.type === "image"
+      || slot.type === "product"
+      || slot.type === "collection"
+      || isMatureContentTemplateSlotType(slot.type);
+    return isMediaSlot && !hasConfiguredCatalogMedia(definition.defaultContent?.[slot.slotId]);
+  });
 }
 
 /**

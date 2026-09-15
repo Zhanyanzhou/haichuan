@@ -6,12 +6,26 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => readFile(path.join(root, file), "utf8");
-const [text, client, server, previewSource, blockMetaSource] = await Promise.all([
+const [
+  text,
+  client,
+  server,
+  previewSource,
+  blockMetaSource,
+  pageModulesControllerSource,
+  pageModulesServiceSource,
+  dynamicTemplateControllerSource,
+  clientApiSource,
+] = await Promise.all([
   read("contracts/page-builder/content-templates.contract.json"),
   read("client/src/page-builder/generated/contentTemplates.generated.ts"),
   read("server/src/modules/page-modules/generated/contentTemplates.generated.ts"),
   read("client/src/page-builder/preview/ContentTemplateSkeletonPreview.tsx"),
   read("client/src/page-builder/config/blockMeta.ts"),
+  read("server/src/modules/page-modules/page-modules.controller.ts"),
+  read("server/src/modules/page-modules/page-modules.service.ts"),
+  read("server/src/modules/page-modules/dynamic-templates.controller.ts"),
+  read("client/src/services/api.ts"),
 ]);
 const contract = JSON.parse(text);
 const byKey = Object.fromEntries(contract.templates.map((template) => [template.key, template]));
@@ -85,6 +99,36 @@ const activeTemplateKeys = contract.templates
   .filter((template) => template.implementationStatus === "active")
   .map((template) => template.key);
 assert.deepEqual(activeTemplateKeys, ["hero"], "活动内置目录只保留 hero 首屏测试模板");
+assert.doesNotMatch(
+  pageModulesControllerSource,
+  /@(?:Get|Post|Patch|Delete)\("(?:system-content-templates|personal-content-templates)/,
+  "旧系统或个人模板 HTTP 入口必须继续不存在",
+);
+assert.doesNotMatch(
+  pageModulesServiceSource,
+  /(?:getSystemContentTemplates|getSystemContentTemplateHistory|getSystemContentTemplate|getPersonalContentTemplates|overwriteSystemContentTemplate|rollbackSystemContentTemplate|createPersonalContentTemplate|updatePersonalContentTemplate|deletePersonalContentTemplate)\s*\(|this\.prisma\.personalContentTemplate\./,
+  "PageModulesService 不得恢复旧模板读写方法或数据库访问",
+);
+assert.doesNotMatch(
+  clientApiSource,
+  /SystemContentTemplateCurrent|PersonalContentTemplate|system-content-templates|personal-content-templates/,
+  "客户端公共 API 不得恢复旧模板兼容类型或路径",
+);
+assert.match(
+  dynamicTemplateControllerSource,
+  /@Get\("catalog"\)[\s\S]*?this\.service\.listPublished\(\)[\s\S]*?this\.service\.listMine\(req\.user\.id\)/,
+  "统一模板目录必须只聚合当前 Repository 的正式版本与可编辑草稿",
+);
+await assert.rejects(
+  () => read("client/src/services/clients/systemContentTemplateClient.ts"),
+  (error) => error?.code === "ENOENT",
+  "旧系统模板客户端文件必须继续不存在",
+);
+await assert.rejects(
+  () => read("client/src/page-builder/templates/templateOrigin.ts"),
+  (error) => error?.code === "ENOENT",
+  "旧模板来源升级工具必须继续不存在",
+);
 for (const rule of contract.pageRules) {
   assert.deepEqual(
     [...rule.allowedTemplateKeys].sort(),

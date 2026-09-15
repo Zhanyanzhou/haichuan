@@ -31,4 +31,22 @@ test("production evidence signer contract rejects extra artifact inputs, self-ho
     () => validateProductionEvidenceSignerWorkflow(workflow.replace("runs-on: ubuntu-latest", "runs-on: self-hosted")),
     { message: "PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_PERMISSIONS_INVALID:collect" },
   );
+  const commentedAuthorization = workflow.replace(
+    '            test "$UNPROTECTED_REF_AUTHORIZED" = "true" ||',
+    '            # test "$UNPROTECTED_REF_AUTHORIZED" = "true" ||',
+  );
+  assert.notEqual(commentedAuthorization, workflow);
+  assert.throws(
+    () => validateProductionEvidenceSignerWorkflow(commentedAuthorization),
+    /PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_AUTHORIZATION_CONTRACT_MISSING/,
+  );
+  const commentedSourceBinding = workflow.replace(
+    '            test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" ||',
+    '            # test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" ||',
+  );
+  assert.notEqual(commentedSourceBinding, workflow);
+  assert.throws(
+    () => validateProductionEvidenceSignerWorkflow(commentedSourceBinding),
+    /PRODUCTION_EVIDENCE_SIGNER_WORKFLOW_AUTHORIZATION_CONTRACT_MISSING/,
+  );
 });

@@ -1,7 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalogItems } from "./fixtures/template-catalog";
 import { saveTemplate } from "./fixtures/template-authoring-main-route";
 
 const NOW = "2026-09-09T09:00:00.000Z";
@@ -58,7 +57,10 @@ type DraftResource = {
   };
 };
 
-type SystemCompatibilityCatalogItem = ReturnType<typeof systemTemplateCatalogItems>[number];
+type RetiredSystemCompatibilityPayload = {
+  kind: "system-compatibility";
+  template: { contractKey: string };
+};
 
 type SessionSnapshot = {
   compatibilityRecovery: unknown;
@@ -224,7 +226,7 @@ function pageDraft() {
 async function installBoundaryServer(
   page: Page,
   catalogResources?: DraftResource[],
-  compatibilityItems: SystemCompatibilityCatalogItem[] = [],
+  retiredCompatibilityPayloads: RetiredSystemCompatibilityPayload[] = [],
 ): Promise<BoundaryServer> {
   const resources = new Map<string, DraftResource>(
     (catalogResources ?? [
@@ -260,7 +262,7 @@ async function installBoundaryServer(
             kind: "editable" as const,
             template: structuredClone(template),
           })),
-          ...compatibilityItems.map((item) => structuredClone(item)),
+          ...retiredCompatibilityPayloads.map((item) => structuredClone(item)),
         ],
       }));
     }
@@ -623,15 +625,17 @@ test.describe("TD6 exact draft GET：并发与离开边界", () => {
 });
 
 test("TD6 历史来源标记不触发恢复转换，exact GET 草稿原样打开且不产生 dirty 或写入", async ({ page }) => {
-  const [systemCompatibility] = systemTemplateCatalogItems();
-  if (!systemCompatibility) throw new Error("缺少系统兼容目录夹具");
+  const retiredCompatibilityPayload: RetiredSystemCompatibilityPayload = {
+    kind: "system-compatibility",
+    template: { contractKey: "hero" },
+  };
   const catalogA = makeResource(TEMPLATE_A, "TD6 边界模板 A", CHECKSUM_A, 11);
-  catalogA.sourceReference = `legacy_system_${systemCompatibility.template.contractKey}`;
+  catalogA.sourceReference = `legacy_system_${retiredCompatibilityPayload.template.contractKey}`;
   const catalogB = makeResource(TEMPLATE_B, "TD6 边界模板 B", CHECKSUM_B, 22);
   const server = await installBoundaryServer(
     page,
     [catalogA, catalogB],
-    [systemCompatibility],
+    [retiredCompatibilityPayload],
   );
   const exactA = structuredClone(catalogA);
   exactA.description = "仅来自 exact GET 的新鲜描述";

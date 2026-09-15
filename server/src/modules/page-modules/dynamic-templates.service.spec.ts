@@ -95,7 +95,6 @@ function createStatefulService(mediaAuthorizationResolver?: {
   const operationLogs: any[] = [];
   let pageDocuments: any[] = [];
   let pageSchemes: any[] = [];
-  let personalTemplates: Array<{ id: number; ownerId: number }> = [];
   let activationCount = 0;
   let nextTemplateId = 1;
   let nextDraftId = 11;
@@ -400,14 +399,6 @@ function createStatefulService(mediaAuthorizationResolver?: {
         return clone(pageSchemes);
       },
     },
-    personalContentTemplate: {
-      findFirst: async (args: any) => {
-        calls.push({ operation: "personalTemplate.findFirst", args: clone(args) });
-        return clone(personalTemplates.find((item) => (
-          item.id === args.where.id && item.ownerId === args.where.ownerId
-        )) ?? null);
-      },
-    },
     operationLog: {
       create: async (args: any) => {
         calls.push({ operation: "operationLog.create", args: clone(args) });
@@ -500,9 +491,6 @@ function createStatefulService(mediaAuthorizationResolver?: {
     },
     setPageSchemes: (schemes: any[]) => {
       pageSchemes = clone(schemes);
-    },
-    setPersonalTemplates: (templates: Array<{ id: number; ownerId: number }>) => {
-      personalTemplates = clone(templates);
     },
     setActivationCount: (count: number) => {
       activationCount = count;

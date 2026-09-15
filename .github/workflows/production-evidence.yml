@@ -15,6 +15,24 @@ on:
         options:
           - "false"
           - "true"
+      unprotected_ref_authorized:
+        description: "当前 ref 未受保护时，已人工确认本次生产证据采集（确认会记录 actor 与 run）"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      authorization_sha256:
+        description: "未保护 ref 的批准记录 SHA-256；必须与受信审批引用一致"
+        required: false
+        default: ""
+        type: string
+      authorized_source_sha:
+        description: "未保护 ref 必填：人工批准的精确 40 位 source SHA；必须等于本次 GITHUB_SHA"
+        required: false
+        default: ""
+        type: string
 
 permissions: {}
 
@@ -60,26 +78,45 @@ jobs:
             exit 1
           }
 
-      - name: 拒绝未受保护的证据来源
+      - name: 校验证据来源与显式批准绑定
         shell: bash
         env:
           DEFAULT_BRANCH_REF: refs/heads/${{ github.event.repository.default_branch }}
           EVIDENCE_REF: ${{ github.ref }}
           EVIDENCE_REF_PROTECTED: ${{ github.ref_protected }}
+          UNPROTECTED_REF_AUTHORIZED: ${{ inputs.unprotected_ref_authorized }}
+          AUTHORIZATION_SHA256: ${{ inputs.authorization_sha256 }}
+          AUTHORIZED_SOURCE_SHA: ${{ inputs.authorized_source_sha }}
         run: |
           set -euo pipefail
-          if [ "$EVIDENCE_REF" = "$DEFAULT_BRANCH_REF" ]; then exit 0; fi
-          case "$EVIDENCE_REF" in refs/heads/release/*) ;; *) echo "EVIDENCE_REF_NOT_DEFAULT_OR_RELEASE_BRANCH" >&2; exit 1 ;; esac
-          test "$EVIDENCE_REF_PROTECTED" = "true" || { echo "EVIDENCE_REF_NOT_PROTECTED" >&2; exit 1; }
+          case "$EVIDENCE_REF" in "$DEFAULT_BRANCH_REF"|refs/heads/release/*) ;; *) echo "EVIDENCE_REF_NOT_DEFAULT_OR_RELEASE_BRANCH" >&2; exit 1 ;; esac
+          if [ "$EVIDENCE_REF_PROTECTED" = "true" ]; then
+            authorization_mode="protected-ref"
+          else
+            test "$UNPROTECTED_REF_AUTHORIZED" = "true" || { echo "UNPROTECTED_EVIDENCE_REF_CONFIRMATION_REQUIRED" >&2; exit 1; }
+            [[ "$AUTHORIZATION_SHA256" =~ ^[a-f0-9]{64}$ ]] || { echo "EVIDENCE_AUTHORIZATION_SHA256_INVALID" >&2; exit 1; }
+            test "$AUTHORIZATION_SHA256" = "$APPROVAL_REFERENCE_SHA256" || { echo "EVIDENCE_AUTHORIZATION_APPROVAL_MISMATCH" >&2; exit 1; }
+            [[ "$AUTHORIZED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "EVIDENCE_AUTHORIZED_SOURCE_SHA_INVALID" >&2; exit 1; }
+            test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" || { echo "EVIDENCE_AUTHORIZED_SOURCE_SHA_MISMATCH" >&2; exit 1; }
+            authorization_mode="explicit-unprotected-ref"
+          fi
+          {
+            echo "### Production evidence source authorization"
+            echo "- mode: $authorization_mode"
+            echo "- actor: $GITHUB_ACTOR"
+            echo "- run: $GITHUB_RUN_ID"
+            echo "- ref: $EVIDENCE_REF"
+            echo "- source-sha: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 检出精确证据合同
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
           cache: npm
@@ -138,7 +175,7 @@ jobs:
             throw new Error("PRODUCTION_EVIDENCE_RELEASE_RUN_INVALID");
           }
           const artifactPayload = await request(`/actions/runs/${runId}/artifacts?per_page=100`);
-          const expectedName = `release-production-manifest-${process.env.GITHUB_SHA}`;
+          const expectedName = `release-production-high-manifest-${process.env.GITHUB_SHA}`;
           const artifacts = (artifactPayload.artifacts ?? []).filter((item) =>
             item.name === expectedName && !item.expired && item.workflow_run?.id === Number(runId) &&
             /^sha256:[a-f0-9]{64}$/.test(item.digest ?? ""));
@@ -151,7 +188,7 @@ jobs:
           NODE
 
       - name: 按发布运行的固定 artifact ID 下载签名清单
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           artifact-ids: ${{ steps.release-run.outputs.artifact_id }}
           github-token: ${{ github.token }}
@@ -175,6 +212,7 @@ jobs:
           import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
           const manifest = JSON.parse(readFileSync(".codex-tmp/release-manifest/release-manifest.json", "utf8"));
           if (manifest.releaseStage !== "production") throw new Error("PRODUCTION_EVIDENCE_RELEASE_STAGE_INVALID");
+          if (manifest.assuranceLevel !== "high") throw new Error("PRODUCTION_EVIDENCE_HIGH_ASSURANCE_REQUIRED");
           const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
           const request = {
             schemaVersion: 1,
@@ -310,7 +348,7 @@ jobs:
 
       - name: 上传同次运行的固定签名输入
         id: upload-signing-inputs
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: production-evidence-signing-inputs-${{ github.run_id }}
           path: .codex-tmp/production-evidence-signing
@@ -340,7 +378,7 @@ jobs:
       signed_artifact_id: ${{ steps.upload-signed.outputs.artifact-id }}
     steps:
       - name: 配置固定 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
 
@@ -350,7 +388,7 @@ jobs:
           cosign-release: v3.1.3
 
       - name: 按 collect job 输出的 artifact ID 下载
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           artifact-ids: ${{ needs.collect.outputs.signing_inputs_artifact_id }}
           path: production-evidence-input
@@ -413,7 +451,7 @@ jobs:
 
       - name: 上传待独立完整复验的签名制品
         id: upload-signed
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: production-evidence-signed-internal-${{ github.run_id }}
           path: production-evidence-input
@@ -434,12 +472,12 @@ jobs:
       packages: read
     steps:
       - name: 检出精确验证器
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
           cache: npm
@@ -461,7 +499,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: 按 sign job 的固定 artifact ID 下载
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           artifact-ids: ${{ needs.sign.outputs.signed_artifact_id }}
           path: .codex-tmp/production-evidence
@@ -494,7 +532,7 @@ jobs:
 
       - name: 上传通过完整复验的最终制品
         id: upload-final
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: production-evidence-${{ github.sha }}-${{ github.run_id }}
           path: .codex-tmp/production-evidence

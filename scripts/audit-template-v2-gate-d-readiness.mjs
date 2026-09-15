@@ -1,6 +1,18 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  DYNAMIC_TEMPLATE_ACTIVATION_CALL_PATTERN,
+  DYNAMIC_TEMPLATE_CATALOG_PATTERN,
+  DYNAMIC_TEMPLATE_PUBLISH_CALL_PATTERN,
+  DYNAMIC_TEMPLATE_PUBLISH_ROUTE_PATTERN,
+  findMatchingSourcePaths,
+  isRuntimeTypeScriptSource,
+  LEGACY_TEMPLATE_CLIENT_PATTERN,
+  LEGACY_TEMPLATE_SERVER_ROUTE_PATTERN,
+  LEGACY_TEMPLATE_SERVER_SERVICE_PATTERN,
+  TEMPLATE_VERSION_HISTORY_POLICY_PATTERN,
+} from "./template-v2-gate-d-rules.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const clientRoot = path.join(root, "client/src");
@@ -19,7 +31,7 @@ async function collectRuntimeSources(directory) {
       files.push(...await collectRuntimeSources(absolutePath));
       continue;
     }
-    if (!/\.(?:ts|tsx)$/.test(entry.name) || /\.spec\.(?:ts|tsx)$/.test(entry.name)) continue;
+    if (!isRuntimeTypeScriptSource(entry.name)) continue;
     files.push({
       path: path.relative(root, absolutePath).replaceAll("\\", "/"),
       source: await readFile(absolutePath, "utf8"),
@@ -33,34 +45,29 @@ const [
   serverFiles,
   templateEditorTypes,
   templateWorkspace,
-  systemTemplateClient,
-  apiClient,
-  pageModulesController,
-  pageModulesService,
+  templateWorkspaceController,
   dynamicTemplateController,
   dynamicTemplateClient,
-  homepageConfig,
 ] = await Promise.all([
   collectRuntimeSources(clientRoot),
   collectRuntimeSources(serverRoot),
   read("client/src/page-builder/template-editor/types.ts"),
   read("client/src/page-builder/template-editor/TemplateWorkspace.tsx"),
-  read("client/src/services/clients/systemContentTemplateClient.ts"),
-  read("client/src/services/api.ts"),
-  read("server/src/modules/page-modules/page-modules.controller.ts"),
-  read("server/src/modules/page-modules/page-modules.service.ts"),
+  read("client/src/page-builder/template-editor/TemplateWorkspaceController.tsx"),
   read("server/src/modules/page-modules/dynamic-templates.controller.ts"),
   read("client/src/services/clients/dynamicTemplateClient.ts"),
-  read("client/src/pages/admin/HomepageConfig/index.tsx"),
 ]);
 
-const clientRuntime = clientFiles.map((file) => file.source).join("\n");
 const issues = [];
 const requireMatch = (text, pattern, message) => {
   if (!pattern.test(text)) issues.push(message);
 };
 const requireNoMatch = (text, pattern, message) => {
   if (pattern.test(text)) issues.push(message);
+};
+const requireNoMatchInFiles = (files, pattern, message) => {
+  const matches = findMatchingSourcePaths(files, pattern);
+  if (matches.length > 0) issues.push(`${message}：${matches.join(", ")}`);
 };
 
 requireMatch(
@@ -81,19 +88,18 @@ for (const [pattern, message] of [
   [/另存到模板库/, "客户端运行时仍展示旧另存模板入口"],
   [/\bcanOverwriteSystemTemplates\b/, "客户端仍保留旧系统模板覆盖能力开关"],
 ]) {
-  requireNoMatch(clientRuntime, pattern, message);
+  requireNoMatchInFiles(clientFiles, pattern, message);
 }
 
-requireNoMatch(
-  systemTemplateClient,
-  /systemContentTemplateApi|api\.get\(/,
-  "客户端仍保留旧系统模板独立请求门面",
+requireNoMatchInFiles(
+  clientFiles,
+  LEGACY_TEMPLATE_CLIENT_PATTERN,
+  "客户端仍保留旧系统或个人模板兼容入口与类型",
 );
-requireNoMatch(apiClient, /personalContentTemplateApi/, "客户端仍保留旧个人模板独立请求门面");
 
 requireMatch(
   templateWorkspace,
-  /页面中已使用的模板会继续保留添加或升级时选择的版本；此处仅供查看，不会修改模板草稿、正式版本或任何页面。/,
+  TEMPLATE_VERSION_HISTORY_POLICY_PATTERN,
   "统一母模板版本历史没有明确页面锁版与只读语义",
 );
 requireNoMatch(
@@ -102,26 +108,26 @@ requireNoMatch(
   "模板工作区仍暴露旧历史激活或并列模板产品概念",
 );
 
-requireNoMatch(
-  pageModulesService,
-  /(?:overwriteSystemContentTemplate|rollbackSystemContentTemplate|createPersonalContentTemplate|updatePersonalContentTemplate|deletePersonalContentTemplate)|this\.prisma\.personalContentTemplate\.(?:create|updateMany|deleteMany)\s*\(/,
-  "PageModulesService 仍保留旧模板写方法或数据库写入",
+requireNoMatchInFiles(
+  serverFiles,
+  LEGACY_TEMPLATE_SERVER_SERVICE_PATTERN,
+  "服务端运行时仍保留旧模板读写方法或数据库访问",
 );
 
-requireNoMatch(
-  pageModulesController,
-  /@(?:Post|Patch|Delete)\("(?:system-content-templates|personal-content-templates)|return this\.service\.(?:overwriteSystemContentTemplate|rollbackSystemContentTemplate|createPersonalContentTemplate|updatePersonalContentTemplate|deletePersonalContentTemplate)\s*\(/,
-  "旧模板 HTTP 写端点仍存在",
+requireNoMatchInFiles(
+  serverFiles,
+  LEGACY_TEMPLATE_SERVER_ROUTE_PATTERN,
+  "旧模板 HTTP 读写端点仍存在",
 );
 
 requireMatch(
   dynamicTemplateController,
-  /@Get\("catalog"\)[\s\S]*?this\.service\.listPublished\(\)[\s\S]*?this\.pageModules\.getSystemContentTemplates\(\)[\s\S]*?this\.pageModules\.getPersonalContentTemplates/,
-  "服务端未提供统一母模板目录聚合入口",
+  DYNAMIC_TEMPLATE_CATALOG_PATTERN,
+  "服务端统一母模板目录未仅聚合当前 Repository 的正式版本与可编辑草稿",
 );
 requireMatch(
   dynamicTemplateController,
-  /@Post\(":templateId\/publish"\)[\s\S]*?return this\.service\.publish\(/,
+  DYNAMIC_TEMPLATE_PUBLISH_ROUTE_PATTERN,
   "统一 V2 publish 没有转发到独立模板版本发布服务",
 );
 requireMatch(dynamicTemplateClient, /\blistCatalog\s*:\s*async\s*\(/, "客户端缺少统一母模板目录调用");
@@ -132,13 +138,13 @@ requireNoMatch(
   "运行时仍暴露 Activation 入口",
 );
 requireMatch(
-  homepageConfig,
-  /dynamicTemplateApi\.publish\(/,
+  templateWorkspaceController,
+  DYNAMIC_TEMPLATE_PUBLISH_CALL_PATTERN,
   "模板设计发布入口没有调用独立 V2 publish",
 );
 requireNoMatch(
-  homepageConfig.match(/const publishDynamicTemplateDraft[\s\S]*?\n  \};/)?.[0] ?? "",
-  /(?:getActivationImpact|\.activate)\(/,
+  templateWorkspaceController,
+  DYNAMIC_TEMPLATE_ACTIVATION_CALL_PATTERN,
   "模板设计发布仍耦合页面影响预检或全页面 Activation",
 );
 
@@ -166,14 +172,12 @@ if (issues.length > 0) {
     legacyWriteSurfaces: {
       client: "closed",
       pageModulesService: "removed",
-      httpWriteRoutes: "removed",
+      legacyHttpRoutes: "removed",
       dynamicTemplatePublish: "independent-version-only",
       dynamicTemplateActivation: "runtime-path-removed; database-ledger-retained",
       catalog: "single-server-aggregation",
     },
     retainedCompatibility: [
-      "system template list/get/history",
-      "personal template list",
       "legacy page origin hydration and exact historical rendering",
       "DynamicTemplateToolbox node palette",
       "historical activation migration and ledger schema for database compatibility",

@@ -66,7 +66,7 @@ function normalizeKey(key) {
 function rejectSensitiveKeys(value, path = "evidence") {
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value)) {
-    if (forbiddenNormalizedKeyPattern.test(normalizeKey(key))) {
+    if (key !== "releaseAuthorization" && forbiddenNormalizedKeyPattern.test(normalizeKey(key))) {
       fail(`PRODUCTION_EVIDENCE_SENSITIVE_KEY_FORBIDDEN:${path}.${key}`);
     }
     rejectSensitiveKeys(child, `${path}.${key}`);
@@ -176,12 +176,16 @@ function validateTrustedContext(trusted) {
 
 function assertStrictManifestSchema(manifest) {
   assertExactKeys(manifest, [
-    "schemaVersion", "releaseStage", "imageTag", "gitSha", "migrationBundleSha256", "source", "qualityGate",
-    "attestationPolicy", "publicSeo", "server", "client", "operations",
+    "schemaVersion", "assuranceLevel", "releaseStage", "imageTag", "gitSha", "migrationBundleSha256", "source", "qualityGate",
+    "releaseAuthorization", "attestationPolicy", "publicSeo", "server", "client", "operations",
   ], "PRODUCTION_EVIDENCE_MANIFEST_SCHEMA_INVALID");
   assertExactKeys(manifest.qualityGate, [
-    "workflow", "runId", "runUrl", "headSha", "event", "conclusion",
+    "workflow", "runId", "runUrl", "headSha", "headRef", "runAttempt", "profile", "event", "conclusion",
+    "proofArtifactId", "proofArtifactDigest", "proofSha256", "jobSet",
   ], "PRODUCTION_EVIDENCE_MANIFEST_QUALITY_SCHEMA_INVALID");
+  assertExactKeys(manifest.releaseAuthorization, [
+    "mode", "approvalSha256", "sourceSha", "actor", "runId",
+  ], "PRODUCTION_EVIDENCE_MANIFEST_AUTHORIZATION_SCHEMA_INVALID");
   assertExactKeys(manifest.attestationPolicy, [
     "signingSystem", "cosignVersion", "bundleMediaType", "signerWorkflow", "signerIdentity",
     "certificateOidcIssuer", "sourceRef", "sourceDigest", "imageSignaturesVerified",
@@ -239,11 +243,16 @@ export function validateProductionEvidenceStructure(evidence, trusted) {
   }
   rejectSensitiveKeys(manifest, "manifest");
   assertStrictManifestSchema(manifest);
+  if (manifest.assuranceLevel !== "high") fail("PRODUCTION_EVIDENCE_HIGH_ASSURANCE_REQUIRED");
   validateReleaseManifest(manifest, {
     gitSha: trusted.releaseGitSha,
     migrationBundleSha256: trusted.migrationBundleSha256,
     releaseStage: "production",
   });
+  if (manifest.releaseAuthorization.mode === "explicit-unprotected-ref" &&
+      manifest.releaseAuthorization.approvalSha256 !== trusted.approvalReferenceSha256) {
+    fail("PRODUCTION_EVIDENCE_RELEASE_AUTHORIZATION_MISMATCH");
+  }
   if (manifest.source !== trusted.releaseSource) fail("PRODUCTION_EVIDENCE_RELEASE_SOURCE_MISMATCH");
   if (manifest.attestationPolicy.signerWorkflow.toLowerCase() !== trusted.manifestSignerWorkflow.toLowerCase()) {
     fail("PRODUCTION_EVIDENCE_MANIFEST_SIGNER_MISMATCH");
@@ -541,12 +550,13 @@ function parseManifestProvenanceOutput(stdout, spec) {
   const predicate = matched?.predicate;
   const parameters = predicate?.buildDefinition?.externalParameters;
   const expectedBuilder = `https://${spec.trusted.manifestSignerWorkflow}@${spec.trusted.sourceRef}`;
-  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v6`;
+  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v7`;
   if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
       parameters?.gitSha !== spec.trusted.releaseGitSha ||
       parameters?.sourceRef !== spec.trusted.sourceRef ||
       parameters?.qualityGateRunId !== spec.manifest.qualityGate.runId ||
       parameters?.schemaVersion !== spec.manifest.schemaVersion ||
+      parameters?.assuranceLevel !== "high" ||
       parameters?.releaseStage !== "production" ||
       parameters?.imageTag !== spec.manifest.imageTag ||
       predicate?.runDetails?.builder?.id?.toLowerCase() !== expectedBuilder.toLowerCase()) {

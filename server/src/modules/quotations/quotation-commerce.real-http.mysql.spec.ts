@@ -13,6 +13,7 @@ import { resolveDesignMediaPath } from '../upload/design-file-media';
 import { hashBusinessSnapshot } from './quotation-snapshot';
 
 const databaseUrl = process.env.QUOTATION_REAL_MYSQL_URL?.trim();
+const { validateTarget: validateSharedTarget } = require('../../../scripts/run-real-mysql-tests.cjs');
 
 type ApiResult = {
   status: number;
@@ -33,6 +34,12 @@ function validateIsolatedTarget(value: string | undefined) {
     '必须显式声明 QUOTATION_REAL_MYSQL_TEST=1',
   );
   assert.ok(value, '必须显式提供 QUOTATION_REAL_MYSQL_URL');
+  if (
+    process.env.REAL_MYSQL_TEST_ISOLATED === '1'
+    && value === process.env.REAL_MYSQL_TEST_DATABASE_URL
+  ) {
+    return validateSharedTarget(process.env);
+  }
   const target = new URL(value);
   assert.equal(target.protocol, 'mysql:');
   assert.match(
@@ -108,6 +115,11 @@ test(
         : '需要显式提供本任务一次性 QUOTATION_REAL_MYSQL_URL',
   },
   async () => {
+    const startedAt = Date.now();
+    const stage = (name: string) => {
+      console.log(`REAL_MYSQL_STAGE quotation-commerce ${name} elapsed_ms=${Date.now() - startedAt}`);
+    };
+    stage('start');
     assert.equal(process.versions.node.split('.')[0], '22', '真实报价闭环必须在 Node 22 下运行');
     assert.equal(process.env.RELEASE_PROFILE, 'commerce');
     assert.equal(process.env.CUSTOMER_QUOTATION_ORDERING_ENABLED, 'true');
@@ -129,6 +141,7 @@ test(
 
     const prisma = new PrismaClient({ datasourceUrl: isolatedDatabaseUrl });
     await prisma.$connect();
+    stage('database-connected');
     const populatedTables = await Promise.all([
       prisma.user.count(),
       prisma.customer.count(),
@@ -142,6 +155,7 @@ test(
       [0, 0, 0, 0, 0, 0],
       '报价闭环必须从空的一次性业务库开始',
     );
+    stage('empty-database-confirmed');
 
     const password = 'QuotePass9!';
     const passwordHash = await bcrypt.hash(password, 4);
@@ -208,13 +222,16 @@ test(
     await prisma.inventory.create({
       data: { skuId: sku.id, warehouseId: warehouse.id, quantity: 10 },
     });
+    stage('synthetic-fixtures-created');
     const designBytes = Buffer.from(`haichuan-partner-design-${runId}`);
     const designChecksum = createHash('sha256').update(designBytes).digest('hex');
     let designStoragePath: string | null = null;
 
     let api: RunningApi | undefined;
     try {
+      stage('first-api-starting');
       api = await startApi(apiPort);
+      stage('first-api-started');
       const flags = await api.call('/settings/flags');
       assertStatus(flags, 200, '读取独立交易开关');
       assert.equal(flags.data.quotationOrderingEnabled, true);
@@ -242,6 +259,7 @@ test(
       const salesToken = await loginStaff(sales.username);
       const customerAToken = await loginCustomer(customerA.phone);
       const customerBToken = await loginCustomer(customerB.phone);
+      stage('synthetic-sessions-created');
 
       assertStatus(await api.call('/quotation-configuration/fee-rules'), 401, '匿名读取报价配置');
       assertStatus(
@@ -311,6 +329,7 @@ test(
       const customMaterial = await createBucket('CUSTOM', 'MATERIAL');
       const partnerCapacity = await createBucket('PARTNER_WAX', 'CAPACITY');
       const partnerMaterial = await createBucket('PARTNER_WAX', 'MATERIAL');
+      stage('quotation-configuration-created');
 
       const designFile = await postAdmin('/cooperation-design-files', {
         customerId: customerA.id,
@@ -384,6 +403,8 @@ test(
         customerBToken,
       );
       assert.equal(foreignDesignDownload.status, 404);
+      // 原始 fetch Response 必须显式读完，否则其连接可能在测试断言完成后继续占用句柄。
+      await foreignDesignDownload.arrayBuffer();
 
       const missingMedia = await prisma.mediaAsset.create({
         data: {
@@ -426,6 +447,7 @@ test(
       assertStatus(confirmedDesign, 201, '客户本人确认 3D 版本');
       assert.equal(confirmedDesign.data.status, 'CONFIRMED');
       assert.equal('targetGoldWeight' in confirmedDesign.data, false);
+      stage('design-media-verified');
 
       const createQuotation = async (
         channel: 'RETAIL' | 'CUSTOM' | 'PARTNER_WAX',
@@ -500,6 +522,7 @@ test(
         feeRuleIds: [partnerFee.id],
         resourceRequirements: partnerRequirements,
       }, '发出 PARTNER_WAX 报价版本');
+      stage('quotation-versions-issued');
 
       const customerQuotes = await api.call('/customers/me/quotations', customerAToken);
       assertStatus(customerQuotes, 200, '客户读取本人报价列表');
@@ -581,6 +604,7 @@ test(
         '深圳市合作路 1 号',
       );
       assertStatus(partnerOrderResult, 201, 'PARTNER_WAX 客户确认并转单');
+      stage('primary-conversions-completed');
 
       const insufficientQuote = await createQuotation('CUSTOM', [{
         productName: `资源不足验收项-${runId}`,
@@ -698,9 +722,12 @@ test(
         '报价转单不得自动创建支付、退款或通知事实',
       );
 
+      stage('first-api-closing');
       await api.app.close();
       api = undefined;
+      stage('first-api-closed');
       api = await startApi(apiPort);
+      stage('second-api-started');
       const restartedCustomerQuote = await api.call(
         `/customers/me/quotations/${partnerQuote.id}`,
         customerAToken,
@@ -741,10 +768,13 @@ test(
         ]),
         [0, 0, 0, 0, 0],
       );
+      stage('restart-persistence-verified');
     } finally {
+      stage('cleanup-starting');
       if (api) await api.app.close();
       await prisma.$disconnect();
       if (designStoragePath) await rm(designStoragePath, { force: true });
+      stage('cleanup-completed');
     }
   },
 );

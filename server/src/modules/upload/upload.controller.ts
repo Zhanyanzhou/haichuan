@@ -140,6 +140,22 @@ export class UploadController {
   }
 
   @ApiBearerAuth()
+  @ApiOperation({ summary: '按正式存储键在后台预览页面素材' })
+  @Get('media/preview-by-storage-key')
+  async previewPageMediaByStorageKey(
+    @Query('storageKey') storageKey: string,
+    @Res() response: Response,
+  ) {
+    if (typeof storageKey !== 'string' || !storageKey.trim() || storageKey.length > 512) {
+      throw new BadRequestException('素材存储键无效');
+    }
+    const media = await this.uploadService.getPageMediaContentByStorageKey(storageKey, false);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.type(media.mimeType).send(media.buffer);
+  }
+
+  @ApiBearerAuth()
   @ApiOperation({ summary: '读取素材授权详情及内部证明链' })
   @Get('media/:id/authorization')
   async getMediaAuthorization(@Param('id', ParseIntPipe) id: number) {

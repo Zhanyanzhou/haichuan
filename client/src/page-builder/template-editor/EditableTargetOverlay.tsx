@@ -1134,6 +1134,7 @@ export default function EditableTargetOverlay({
         <div
           className="template-editor__editable-overlay-selection"
           data-overlay-selection-for={selectedBox.target.targetId}
+          data-overlay-text-editable={selectedBox.target.textEditable ? "true" : undefined}
           data-spacing-editing={spacingEditing}
           data-gesture-operation={gestureRef.current?.activated ? gestureRef.current.operation : undefined}
           style={{

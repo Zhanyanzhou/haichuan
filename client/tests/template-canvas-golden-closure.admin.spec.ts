@@ -120,7 +120,8 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await expect(pageReviewStatus).toHaveText("草稿");
     await page.getByRole("button", { name: "提交审核", exact: true }).click();
     await expect(pageReviewStatus).toHaveText("待审核");
-    await page.getByRole("button", { name: "批准", exact: true }).click();
+    await page.getByRole("button", { name: "本人提交：确认自审", exact: true }).click();
+    await page.getByRole("button", { name: "确认本人审核并批准", exact: true }).click();
     await expect(pageReviewStatus).toHaveText("已批准");
     await expect(page.getByRole("button", { name: "发布到前台网站", exact: true })).toBeEnabled();
     await page.getByRole("button", { name: "发布到前台网站", exact: true }).click();

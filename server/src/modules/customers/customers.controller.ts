@@ -24,6 +24,7 @@ import {
 import {
   buildClearSessionCookieHeaders,
   buildSessionCookieHeaders,
+  extractBearerToken,
   extractRefreshCookieToken,
   requestSessionMetadata,
 } from '../../common/security/session-security';
@@ -78,7 +79,7 @@ export class CustomersController {
     const cookieMode = request.headers?.['x-session-mode'] === 'cookie';
     const result = await this.customersService.register(
       dto,
-      cookieMode ? requestSessionMetadata(request) : undefined,
+      requestSessionMetadata(request),
     );
     if (cookieMode) {
       if (!result.refreshSession) throw new UnauthorizedException('客户会话未建立');
@@ -92,23 +93,23 @@ export class CustomersController {
       );
       return { customer: result.customer };
     }
-    return result;
+    const { refreshSession: _, ...bearerResult } = result;
+    return bearerResult;
   }
 
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
   async login(@Req() request: Request, @Res({ passthrough: true }) response: Response, @Body() dto: CustomerLoginDto) {
-    const { sessionAuthVersion, ...result } = await this.customersService.login(dto);
+    const { sessionAuthVersion: _, refreshSession, ...result } = await this.customersService.login(
+      dto,
+      requestSessionMetadata(request),
+    );
     if (request.headers?.['x-session-mode'] === 'cookie') {
-      const session = await this.refreshSessions.issueCustomer(
-        result.customer.id,
-        requestSessionMetadata(request),
-        sessionAuthVersion,
-      );
+      if (!refreshSession) throw new UnauthorizedException('客户会话未建立');
       response.setHeader(
         'Set-Cookie',
-        buildSessionCookieHeaders('customer', result.accessToken, session.refreshToken).headers,
+        buildSessionCookieHeaders('customer', result.accessToken, refreshSession.refreshToken).headers,
       );
       return { customer: result.customer };
     }
@@ -127,7 +128,7 @@ export class CustomersController {
       refreshToken,
       requestSessionMetadata(request),
     );
-    const result = await this.customersService.resume(rotated.customerId);
+    const result = await this.customersService.resume(rotated.customerId, rotated.familyId);
     response.setHeader(
       'Set-Cookie',
       buildSessionCookieHeaders('customer', result.accessToken, rotated.refreshToken).headers,
@@ -138,9 +139,19 @@ export class CustomersController {
   @Public()
   @Post(['logout', 'session/logout'])
   async logout(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    await this.refreshSessions.revokeCustomer(
-      extractRefreshCookieToken(request.headers?.cookie, 'customer'),
-    );
+    const bearerToken = extractBearerToken(request.headers?.authorization);
+    if (bearerToken) {
+      const accessSession = await this.customersService.resolveRevocableAccessSession(bearerToken);
+      if (!accessSession) throw new UnauthorizedException('客户会话无效');
+      await this.refreshSessions.revokeCustomerFamilyForCustomer(
+        accessSession.customerId,
+        accessSession.familyId,
+      );
+    } else {
+      await this.refreshSessions.revokeCustomer(
+        extractRefreshCookieToken(request.headers?.cookie, 'customer'),
+      );
+    }
     response.setHeader('Set-Cookie', buildClearSessionCookieHeaders('customer'));
     return { success: true };
   }

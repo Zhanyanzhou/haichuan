@@ -25,7 +25,7 @@ test("公开 Renderer 只渲染首屏合同并保留真实渲染标记", async (
     contentType: "text/html; charset=utf-8",
     body: fixturePage,
   }));
-  await page.route("**/images/test-hero.svg", (route) => route.fulfill({
+  await page.route("**/uploads/test-hero.png*", (route) => route.fulfill({
     status: 200,
     contentType: "image/svg+xml",
     body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9"><rect width="16" height="9" fill="#dedede"/></svg>',
@@ -38,6 +38,11 @@ test("公开 Renderer 只渲染首屏合同并保留真实渲染标记", async (
   await expect(frame).toHaveAttribute("data-content-template-renderer", "real");
   await expect(fixture.getByRole("heading", { name: "首屏模板测试" })).toBeVisible();
   await expect(fixture.locator('[data-content-template="hero"]')).toHaveCount(1);
+  await expect(fixture.locator("img")).toHaveAttribute(
+    "srcset",
+    "/uploads/test-hero.png?width=480 480w, /uploads/test-hero.png?width=800 800w, /uploads/test-hero.png?width=1200 1200w, /uploads/test-hero.png?width=1680 1680w",
+  );
+  await expect(fixture.locator("img")).toHaveAttribute("sizes", "100vw");
 });
 
 test("公开 Renderer 只展示页面实例明确上传图片的动态模板", async ({ page }) => {
@@ -46,7 +51,12 @@ test("公开 Renderer 只展示页面实例明确上传图片的动态模板", a
     contentType: "text/html; charset=utf-8",
     body: fixturePage,
   }));
-  await page.route("**/images/*.svg", (route) => route.fulfill({
+  await page.route(/\/(?:images|uploads)\/.*\.svg$/, (route) => route.fulfill({
+    status: 200,
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9"><rect width="16" height="9" fill="#dedede"/></svg>',
+  }));
+  await page.route("**/uploads/test-hero.png*", (route) => route.fulfill({
     status: 200,
     contentType: "image/svg+xml",
     body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9"><rect width="16" height="9" fill="#dedede"/></svg>',
@@ -69,16 +79,22 @@ test("公开 Renderer 只展示页面实例明确上传图片的动态模板", a
 });
 
 test("公开 Renderer 按页面顺序展示多个有图首屏", async ({ page }) => {
+  const imageMethods: string[] = [];
+  const imageUrls: string[] = [];
   await page.route(/\/__content-template-renderer(?:\?.*)?$/, (route) => route.fulfill({
     status: 200,
     contentType: "text/html; charset=utf-8",
     body: fixturePage,
   }));
-  await page.route("**/images/test-hero.svg", (route) => route.fulfill({
-    status: 200,
-    contentType: "image/svg+xml",
-    body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9"><rect width="16" height="9" fill="#dedede"/></svg>',
-  }));
+  await page.route("**/uploads/test-hero.png*", (route) => {
+    imageMethods.push(route.request().method());
+    imageUrls.push(route.request().url());
+    return route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 9"><rect width="16" height="9" fill="#dedede"/></svg>',
+    });
+  });
 
   await page.goto("/__content-template-renderer");
 
@@ -88,4 +104,10 @@ test("公开 Renderer 按页面顺序展示多个有图首屏", async ({ page })
   await expect(fixture.getByRole("heading", { name: "第二个首屏模板" })).toBeVisible();
   await expect(fixture.getByRole("heading", { level: 1 })).toHaveCount(1);
   await expect(fixture.getByRole("heading", { level: 2 })).toHaveCount(1);
+  await expect(fixture.locator("picture")).toHaveCount(1);
+  expect(imageMethods).not.toContain("HEAD");
+  expect(imageUrls.some((url) => /[?&]width=(?:480|800|1200|1680)(?:&|$)/.test(url))).toBe(true);
+
+  await fixture.getByRole("heading", { name: "第二个首屏模板" }).scrollIntoViewIfNeeded();
+  await expect(fixture.locator("picture")).toHaveCount(2);
 });

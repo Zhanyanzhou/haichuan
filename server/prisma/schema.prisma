@@ -339,6 +339,7 @@ model ProductImage {
   mediaAssetId  Int?           @map("media_asset_id")
   mediaAsset    MediaAsset?    @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
 
+  @@index([url], map: "product_images_url_idx")
   @@map("product_images")
 }
 
@@ -768,6 +769,17 @@ model CustomerSmsCode {
 
   @@index([phone, createdAt])
   @@map("customer_sms_codes")
+}
+
+// 每手机号一行的共享限额状态：为多连接/多实例发码提供稳定行锁。
+model CustomerSmsRateLimit {
+  phone         String   @id @db.VarChar(20)
+  windowStart   DateTime @map("window_start")
+  dailyCount    Int      @default(0) @map("daily_count")
+  lastAttemptAt DateTime? @map("last_attempt_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("customer_sms_rate_limits")
 }
 
 // 商品评价：仅已完成订单的关联客户可评；一人一单商品一条（防刷）；先审后展（品牌调性）

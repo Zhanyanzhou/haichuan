@@ -531,6 +531,8 @@ test("内容共用合同上限且达到后可取消替换，创建不超限（�
   const node = Object.values(created.nodes).find((item) => item.slotId && created.slots[item.slotId].semanticRole === "subtitle")!;
   const parent = Object.values(created.nodes).find((item) => item.childIds.includes(node.nodeId))!;
   const index = parent.childIds.indexOf(node.nodeId);
+  const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
+  if (await structureTrigger.isVisible()) await structureTrigger.click();
   await page.getByRole("treeitem", { name: "副标题 文字区域 可选", exact: true }).hover();
   await page.getByRole("button", { name: "副标题节点操作", exact: true }).click();
   const up = page.getByRole("menuitem", { name: "上移", exact: true });
