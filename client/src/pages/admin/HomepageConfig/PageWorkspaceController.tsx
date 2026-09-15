@@ -166,6 +166,7 @@ export function usePageWorkspaceController({
   // 是否存在尚未发布的草稿修改。
   const [hasPendingDraft, setHasPendingDraft] = useState(false);
   const [reviewStatus, setReviewStatus] = useState<PageDocumentResource["reviewStatus"]>("DRAFT");
+  const [reviewSubmittedBy, setReviewSubmittedBy] = useState<number | null>(null);
   const [publishedNeedsRevalidation, setPublishedNeedsRevalidation] = useState(false);
   const pendingDraftRef = useRef<PuckDocument | null>(null);
   const editingDraftSnapshotRef = useRef<{
@@ -240,6 +241,7 @@ export function usePageWorkspaceController({
       setHasUnsavedChanges(false);
       setHasPendingDraft(false);
       setReviewStatus("DRAFT");
+      setReviewSubmittedBy(null);
       setPublishedNeedsRevalidation(false);
       setViewingPublished(false);
       setPublishIssues([]);
@@ -308,6 +310,7 @@ export function usePageWorkspaceController({
         const publishedDoc = unwrapResponse<PageDocumentResource | null>(publishedResponse);
         const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
         setReviewStatus(adminDoc?.reviewStatus ?? "DRAFT");
+        setReviewSubmittedBy(adminDoc?.submittedBy ?? null);
         const publishedPuck = getPuckDocument(publishedDoc?.puckData);
         const draftPuck = getPuckDocument(adminDoc?.puckData);
 
@@ -648,7 +651,10 @@ export function usePageWorkspaceController({
             contentHash: savedDocument?.contentHash ?? null,
             reviewStatus: savedDocument?.reviewStatus ?? "DRAFT",
           };
-          if (isActivePage()) setReviewStatus(savedDocument?.reviewStatus ?? "DRAFT");
+          if (isActivePage()) {
+            setReviewStatus(savedDocument?.reviewStatus ?? "DRAFT");
+            setReviewSubmittedBy(savedDocument?.submittedBy ?? null);
+          }
 
           if (!isActivePage()) return true;
           setDraftSaveFailed(false);
@@ -1403,6 +1409,7 @@ export function usePageWorkspaceController({
     }
     if (activePageKeyRef.current === targetWorkspaceKey) {
       setReviewStatus(resource.reviewStatus ?? "DRAFT");
+      setReviewSubmittedBy(resource.submittedBy ?? null);
     }
   }, []);
 
@@ -1439,6 +1446,7 @@ export function usePageWorkspaceController({
   const reviewDraft = useCallback(async (
     action: "APPROVE" | "REQUEST_CHANGES",
     note?: string,
+    selfReviewAcknowledged = false,
   ) => {
     const targetWorkspaceKey = workspaceKey;
     const current = pageSessionCacheRef.current[targetWorkspaceKey];
@@ -1454,6 +1462,7 @@ export function usePageWorkspaceController({
         current.contentHash,
         action,
         note,
+        selfReviewAcknowledged,
       );
       applyReviewResource(targetWorkspaceKey, unwrapResponse<PageDocumentResource | null>(response));
       if (targetWorkspaceKey === activePageKeyRef.current) {
@@ -1855,6 +1864,7 @@ export function usePageWorkspaceController({
     pageSettingsFocusField,
     hasPendingDraft,
     reviewStatus,
+    reviewSubmittedBy,
     canDiscardDraft,
     publishedNeedsRevalidation,
     viewingPublished,

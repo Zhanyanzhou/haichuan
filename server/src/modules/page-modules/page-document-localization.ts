@@ -5,7 +5,18 @@ import type { PublicContentLocale } from "../../common/content-locale";
 export const PAGE_LOCALE_REVISION_METADATA_KEY = "__pageLocaleRevision";
 export const PAGE_LOCALE_DRAFT_METADATA_KEY = "__pageLocaleDraft";
 
-type PageLocaleRevisionMarker = {
+export const PAGE_LOCALE_SELF_REVIEW_ACTION = "PAGE_LOCALE_SELF_REVIEW_APPROVED";
+
+export type PageLocaleSelfReviewMarker = {
+  action: typeof PAGE_LOCALE_SELF_REVIEW_ACTION;
+  auditLogId: number;
+  actor: number;
+  actorRole: "SUPER_ADMIN";
+  revision: string;
+  reviewedAt: string;
+};
+
+export type PageLocaleRevisionMarker = {
   schemaVersion: 1;
   locale: PublicContentLocale;
   contentHash: string;
@@ -13,6 +24,7 @@ type PageLocaleRevisionMarker = {
   submittedAt: string | null;
   reviewedBy: number | null;
   reviewedAt: string | null;
+  selfReview?: PageLocaleSelfReviewMarker;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -82,6 +94,7 @@ export function withPageLocaleRevisionMetadata(
     submittedAt: Date | null;
     reviewedBy: number | null;
     reviewedAt: Date | null;
+    selfReview?: PageLocaleSelfReviewMarker;
   },
 ): Record<string, unknown> {
   return {
@@ -94,6 +107,7 @@ export function withPageLocaleRevisionMetadata(
       submittedAt: review.submittedAt?.toISOString() ?? null,
       reviewedBy: review.reviewedBy,
       reviewedAt: review.reviewedAt?.toISOString() ?? null,
+      ...(review.selfReview ? { selfReview: review.selfReview } : {}),
     } satisfies PageLocaleRevisionMarker,
   };
 }
@@ -113,10 +127,40 @@ export function readPageLocaleRevisionMarker(
     || (marker.reviewedBy !== null && !Number.isInteger(marker.reviewedBy))
     || (marker.submittedAt !== null && typeof marker.submittedAt !== "string")
     || (marker.reviewedAt !== null && typeof marker.reviewedAt !== "string")
+    || (
+      marker.selfReview !== undefined
+      && (
+        !isRecord(marker.selfReview)
+        || marker.selfReview.action !== PAGE_LOCALE_SELF_REVIEW_ACTION
+        || !Number.isInteger(marker.selfReview.auditLogId)
+        || !Number.isInteger(marker.selfReview.actor)
+        || marker.selfReview.actorRole !== "SUPER_ADMIN"
+        || typeof marker.selfReview.revision !== "string"
+        || Number.isNaN(Date.parse(marker.selfReview.revision))
+        || typeof marker.selfReview.reviewedAt !== "string"
+        || Number.isNaN(Date.parse(marker.selfReview.reviewedAt))
+      )
+    )
   ) {
     return null;
   }
-  return marker as PageLocaleRevisionMarker;
+  const parsed = marker as PageLocaleRevisionMarker;
+  const isSelfReview = parsed.submittedBy !== null
+    && parsed.submittedBy === parsed.reviewedBy;
+  if (
+    (isSelfReview && !parsed.selfReview)
+    || (!isSelfReview && parsed.selfReview !== undefined)
+    || (parsed.selfReview && (
+      parsed.submittedAt === null
+      || parsed.reviewedAt === null
+      || parsed.selfReview.actor !== parsed.submittedBy
+      || parsed.selfReview.revision !== parsed.submittedAt
+      || parsed.selfReview.reviewedAt !== parsed.reviewedAt
+    ))
+  ) {
+    return null;
+  }
+  return parsed;
 }
 
 export function revisionBelongsToLocale(

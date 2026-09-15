@@ -84,6 +84,9 @@ export default function EditorToolbar({
   localeSwitchDisabled,
   onSubmitReview,
   onApproveReview,
+  isOwnReviewSubmission,
+  canSelfReview,
+  onSelfApproveReview,
   onRequestChanges,
   onPublish,
   onSaveDraft,
@@ -125,6 +128,9 @@ export default function EditorToolbar({
   localeSwitchDisabled: boolean;
   onSubmitReview: () => void;
   onApproveReview: () => void;
+  isOwnReviewSubmission: boolean;
+  canSelfReview: boolean;
+  onSelfApproveReview: () => void;
   onRequestChanges: (note: string) => void;
   onPublish: (data: unknown) => void;
   onSaveDraft: (data: unknown) => void;
@@ -166,13 +172,19 @@ export default function EditorToolbar({
   } | null>(null);
   const wasPreviewModeRef = useRef(previewMode);
   const currentViewport = viewports.current;
+  // 服务端会在保存任何内容变化时撤销旧审核并回到 DRAFT。
+  // 本地修改尚未保存时也必须立即呈现这一事实，否则已发布/已批准页面会
+  // 继续隐藏“提交审核”，用户只能看到一个永远不可用的发布按钮。
+  const effectiveReviewStatus = hasUnsavedChanges ? "DRAFT" : reviewStatus;
   const publishUnavailableReason = USE_MOCK
       ? "Mock 模式未连接真实发布服务"
     : viewingPublished
       ? "正在查看线上版本，无需重复发布"
     : !canPublish
       ? "当前账号可提交审核，发布需由管理员完成"
-    : reviewStatus !== "APPROVED"
+    : effectiveReviewStatus === "PUBLISHED" && !hasPendingDraft
+      ? "当前语言版本已发布，没有待发布更改"
+    : effectiveReviewStatus !== "APPROVED"
       ? "当前语言版本需先通过审核"
       : null;
   const publishActionLabel = publishUnavailableReason
@@ -771,23 +783,51 @@ export default function EditorToolbar({
                 </select>
               </label>
               <span role="status" data-testid="page-review-status">
-                {reviewStatus === "DRAFT" ? "草稿"
-                  : reviewStatus === "IN_REVIEW" ? "待审核"
-                    : reviewStatus === "CHANGES_REQUESTED" ? "已退回"
-                      : reviewStatus === "APPROVED" ? "已批准"
-                        : reviewStatus === "PUBLISHED" ? "已发布"
+                {effectiveReviewStatus === "DRAFT" ? "草稿"
+                  : effectiveReviewStatus === "IN_REVIEW" ? "待审核"
+                    : effectiveReviewStatus === "CHANGES_REQUESTED" ? "已退回"
+                      : effectiveReviewStatus === "APPROVED" ? "已批准"
+                        : effectiveReviewStatus === "PUBLISHED" ? "已发布"
                           : "已归档"}
               </span>
-              {(reviewStatus === "DRAFT" || reviewStatus === "CHANGES_REQUESTED") && !viewingPublished ? (
+              {(effectiveReviewStatus === "DRAFT" || effectiveReviewStatus === "CHANGES_REQUESTED") && !viewingPublished ? (
                 <button type="button" onClick={onSubmitReview} disabled={saving || publishing}>
                   提交审核
                 </button>
               ) : null}
-              {canPublish && reviewStatus === "IN_REVIEW" ? (
+              {canPublish && effectiveReviewStatus === "IN_REVIEW" ? (
                 <>
-                  <button type="button" onClick={onApproveReview} disabled={saving || publishing}>
-                    批准
-                  </button>
+                  {!isOwnReviewSubmission ? (
+                    <button type="button" onClick={onApproveReview} disabled={saving || publishing}>
+                      批准
+                    </button>
+                  ) : null}
+                  {canSelfReview ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        modal.confirm({
+                          title: "确认审核本人提交的页面？",
+                          content: "仅超级管理员可使用。确认后会记录本次页面版本和内容指纹，后续修改仍需重新提交并再次确认。",
+                          okText: "确认本人审核并批准",
+                          cancelText: "取消",
+                          onOk: onSelfApproveReview,
+                        });
+                      }}
+                      disabled={saving || publishing}
+                    >
+                      本人提交：确认自审
+                    </button>
+                  ) : null}
+                  {isOwnReviewSubmission && !canSelfReview ? (
+                    <button
+                      type="button"
+                      disabled
+                      title="普通管理员不能审核本人提交的页面，请由其他管理员审核"
+                    >
+                      需其他管理员审核
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => {

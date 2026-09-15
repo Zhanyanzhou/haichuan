@@ -1738,6 +1738,7 @@ export const pageDocumentApi = {
     expectedContentHash: string,
     action: "APPROVE" | "REQUEST_CHANGES",
     note?: string,
+    selfReviewAcknowledged = false,
   ) => {
     if (USE_MOCK) {
       await mockDelay(140);
@@ -1747,6 +1748,9 @@ export const pageDocumentApi = {
         throw mockRequestError("页面内容已变化，请重新加载后再审核", 409);
       }
       if (draft.reviewStatus !== "IN_REVIEW") throw mockRequestError("页面不在待审核状态", 409);
+      if (draft.submittedBy === 1 && !selfReviewAcknowledged) {
+        throw mockRequestError("页面内容提交人与审核人必须分离；超级管理员自审须单独明确确认", 400);
+      }
       if (action === "REQUEST_CHANGES" && !note?.trim()) throw mockRequestError("退回修改必须填写原因", 400);
       draft.reviewStatus = action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED";
       draft.reviewedAt = new Date().toISOString();
@@ -1762,6 +1766,7 @@ export const pageDocumentApi = {
       expectedContentHash,
       action,
       reviewNote: note,
+      selfReviewAcknowledged,
     }, { suppressGlobalError: true });
   },
 };

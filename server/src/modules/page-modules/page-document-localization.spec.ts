@@ -208,6 +208,7 @@ test("页面复核拒绝提交人审核自己的同语言草稿", async () => {
   const transaction = {
     $queryRaw: async () => [{ id: 7 }],
     pageDocument: { findUnique: async () => document },
+    user: { findUnique: async () => ({ role: "ADMIN", status: "ACTIVE" }) },
     pageDocumentLocalization: {
       update: async () => { writes += 1; },
     },
@@ -256,9 +257,120 @@ test("页面复核拒绝提交人审核自己的同语言草稿", async () => {
       && error.message.includes("提交人与审核人必须分离"),
   );
   assert.equal(writes, 0);
+
+  await assert.rejects(
+    () => service.reviewLocalizedPageDocument(
+      "home",
+      "en",
+      "APPROVE",
+      updatedAt.toISOString(),
+      "1".repeat(64),
+      12,
+      undefined,
+      true,
+    ),
+    (error: unknown) => error instanceof BadRequestException
+      && error.message.includes("只有超级管理员"),
+  );
+  assert.equal(writes, 0);
 });
 
-test("英文发布只切换英文指针，并继续以 ENFORCE 解析页面素材", async () => {
+test("超级管理员明确确认后可批准本人提交的精确页面版本并写专用审计", async () => {
+  const updatedAt = new Date("2026-09-12T05:30:00.000Z");
+  const submittedAt = new Date("2026-09-12T05:20:00.000Z");
+  const reviewedAt = new Date("2026-09-12T05:31:00.000Z");
+  const contentHash = "a".repeat(64);
+  let audit: any;
+  const document = {
+    id: 7,
+    pageKey: "home",
+    schemaVersion: 1,
+    editorType: "puck",
+    editorVersion: "test",
+    templateId: null,
+    templateVersion: null,
+    puckData: {},
+    metadata: {},
+    status: "DRAFT",
+    publishedRevisionId: null,
+    publishedAt: null,
+    publishedBy: null,
+    createdAt: updatedAt,
+    updatedAt,
+  };
+  const draft = {
+    id: 9,
+    documentId: 7,
+    locale: "en" as const,
+    puckData: { content: [], root: { props: {} }, zones: {} },
+    metadata: {},
+    reviewStatus: "IN_REVIEW" as const,
+    contentHash,
+    submittedBy: 12,
+    submittedAt,
+    reviewedBy: null,
+    reviewedAt: null,
+    reviewNote: null,
+    publishedRevisionId: null,
+    publishedHash: null,
+    publishedBy: null,
+    publishedAt: null,
+    createdAt: updatedAt,
+    updatedAt,
+    legacy: false,
+  };
+  const transaction = {
+    $queryRaw: async () => [{ id: 7 }],
+    pageDocument: { findUnique: async () => document },
+    user: { findUnique: async () => ({ role: "SUPER_ADMIN", status: "ACTIVE" }) },
+    pageDocumentLocalization: {
+      update: async (args: any) => ({ ...draft, ...args.data, updatedAt: reviewedAt }),
+    },
+    operationLog: {
+      create: async (args: any) => { audit = args.data; return { id: 91 }; },
+    },
+  };
+  const prisma = {
+    $transaction: async (run: (tx: typeof transaction) => Promise<unknown>) => run(transaction),
+  };
+  const service = new PageModulesService(prisma as unknown as PrismaService);
+  Object.defineProperty(service, "getLocalizedPageDraft", {
+    value: async () => ({ document, draft }),
+  });
+
+  const result = await service.reviewLocalizedPageDocument(
+    "home",
+    "en",
+    "APPROVE",
+    updatedAt.toISOString(),
+    contentHash,
+    12,
+    undefined,
+    true,
+  );
+
+  assert.equal(result.reviewStatus, "APPROVED");
+  assert.equal(audit.action, "PAGE_LOCALE_SELF_REVIEW_APPROVED");
+  const detail = JSON.parse(audit.detail);
+  assert.equal(typeof detail.reviewedAt, "string");
+  assert.deepEqual({ ...detail, reviewedAt: "<reviewed-at>" }, {
+    schemaVersion: 1,
+    event: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+    actor: 12,
+    actorRole: "SUPER_ADMIN",
+    pageKey: "home",
+    locale: "en",
+    revision: submittedAt.toISOString(),
+    reviewedAt: "<reviewed-at>",
+    contentHash,
+    fromStatus: "IN_REVIEW",
+    toStatus: "APPROVED",
+    reviewNote: null,
+    result: "succeeded",
+  });
+});
+
+test("英文超级管理员自审发布绑定同一审计记录并只切换英文指针", async () => {
   const updatedAt = new Date("2026-09-12T06:00:00.000Z");
   const submittedAt = new Date("2026-09-12T04:00:00.000Z");
   const reviewedAt = new Date("2026-09-12T05:00:00.000Z");
@@ -292,7 +404,7 @@ test("英文发布只切换英文指针，并继续以 ENFORCE 解析页面素�
     contentHash,
     submittedBy: 12,
     submittedAt,
-    reviewedBy: 13,
+    reviewedBy: 12,
     reviewedAt,
     reviewNote: null,
     publishedRevisionId: 39,
@@ -312,6 +424,7 @@ test("英文发布只切换英文指针，并继续以 ENFORCE 解析页面素�
         throw new Error("英文发布不得更新中文 PageDocument 指针");
       },
     },
+    user: { findUnique: async () => ({ role: "SUPER_ADMIN", status: "ACTIVE" }) },
     pageDocumentRevision: {
       findFirst: async () => ({ version: 41 }),
       create: async (args: any) => {
@@ -334,6 +447,25 @@ test("英文发布只切换英文指针，并继续以 ENFORCE 解析页面素�
       },
     },
     operationLog: {
+      findMany: async () => [{
+        id: 88,
+        userId: 12,
+        action: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+        module: "page-builder",
+        targetId: 7,
+        detail: JSON.stringify({
+          event: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+          actor: 12,
+          actorRole: "SUPER_ADMIN",
+          pageKey: "home",
+          locale: "en",
+          schemaVersion: 1,
+          revision: submittedAt.toISOString(),
+          contentHash,
+          reviewedAt: reviewedAt.toISOString(),
+          result: "succeeded",
+        }),
+      }],
       create: async (args: any) => {
         calls.push({ operation: "operationLog.create", args: structuredClone(args) });
         return { id: 1 };
@@ -382,9 +514,249 @@ test("英文发布只切换英文指针，并继续以 ENFORCE 解析页面素�
   assert.equal(marker?.locale, "en");
   assert.equal(marker?.contentHash, contentHash);
   assert.equal(marker?.submittedBy, 12);
-  assert.equal(marker?.reviewedBy, 13);
+  assert.equal(marker?.reviewedBy, 12);
+  assert.deepEqual(marker?.selfReview, {
+    action: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+    auditLogId: 88,
+    actor: 12,
+    actorRole: "SUPER_ADMIN",
+    revision: submittedAt.toISOString(),
+    reviewedAt: reviewedAt.toISOString(),
+  });
   assert.deepEqual(mediaModes, ["ENFORCE"]);
   assert.equal(auditCall?.args.data.action, "PAGE_LOCALE_PUBLISHED");
+
+  draft.reviewedBy = 13;
+  await service.publishLocalizedPageDocument(
+    "home",
+    "en",
+    21,
+    updatedAt.toISOString(),
+    contentHash,
+  );
+  const independentRevision = calls
+    .filter((call) => call.operation === "revision.create")
+    .at(-1);
+  const independentMarker = readPageLocaleRevisionMarker(
+    independentRevision?.args.data.metadata,
+  );
+  assert.equal(independentMarker?.submittedBy, 12);
+  assert.equal(independentMarker?.reviewedBy, 13);
+  assert.equal(independentMarker?.selfReview, undefined);
+});
+
+test("自审发布拒绝失配的 revision、hash 与已停用或降级的审核人", async () => {
+  const submittedAt = new Date("2026-09-12T08:00:00.000Z");
+  const reviewedAt = new Date("2026-09-12T09:00:00.000Z");
+  const contentHash = "b".repeat(64);
+  const validDetail = {
+    schemaVersion: 1,
+    event: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+    actor: 12,
+    actorRole: "SUPER_ADMIN",
+    pageKey: "home",
+    locale: "en",
+    revision: submittedAt.toISOString(),
+    contentHash,
+    reviewedAt: reviewedAt.toISOString(),
+    result: "succeeded",
+  };
+  const makeTransaction = (
+    actor: { role: string; status: string },
+    detail: Record<string, unknown>,
+  ) => ({
+    user: { findUnique: async () => actor },
+    operationLog: {
+      findMany: async () => [{
+        id: 88,
+        userId: 12,
+        action: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+        module: "page-builder",
+        targetId: 7,
+        detail: JSON.stringify(detail),
+      }],
+      findUnique: async () => null,
+    },
+  });
+  const service = new PageModulesService({} as PrismaService);
+  const input = {
+    documentId: 7,
+    pageKey: "home",
+    locale: "en",
+    contentHash,
+    submittedBy: 12,
+    submittedAt,
+    reviewedBy: 12,
+    reviewedAt,
+  };
+  const resolve = (tx: unknown, nextInput = input) => (
+    (service as any).resolvePageSelfReviewEvidence(tx, nextInput)
+  );
+
+  await assert.rejects(
+    () => resolve(makeTransaction(
+      { role: "SUPER_ADMIN", status: "ACTIVE" },
+      { ...validDetail, revision: "2026-09-12T07:59:59.999Z" },
+    )),
+    (error: unknown) => error instanceof BadRequestException,
+  );
+  await assert.rejects(
+    () => resolve(makeTransaction(
+      { role: "SUPER_ADMIN", status: "ACTIVE" },
+      { ...validDetail, contentHash: "c".repeat(64) },
+    )),
+    (error: unknown) => error instanceof BadRequestException,
+  );
+  for (const actor of [
+    { role: "ADMIN", status: "ACTIVE" },
+    { role: "SUPER_ADMIN", status: "DISABLED" },
+  ]) {
+    await assert.rejects(
+      () => resolve(makeTransaction(actor, validDetail)),
+      (error: unknown) => error instanceof BadRequestException,
+    );
+  }
+});
+
+test("回滚自审发布重新核验审计并保留 marker，审核人停用时零写入", async () => {
+  const submittedAt = new Date("2026-09-12T08:00:00.000Z");
+  const reviewedAt = new Date("2026-09-12T09:00:00.000Z");
+  const publishedAt = new Date("2026-09-12T10:00:00.000Z");
+  const puckData = { content: [], root: { props: {} }, zones: {} };
+  const metadata = { seoTitle: "Self-reviewed rollback" };
+  const contentHash = createPageLocaleContentHash(puckData, metadata);
+  const selfReview = {
+    action: "PAGE_LOCALE_SELF_REVIEW_APPROVED" as const,
+    auditLogId: 88,
+    actor: 12,
+    actorRole: "SUPER_ADMIN" as const,
+    revision: submittedAt.toISOString(),
+    reviewedAt: reviewedAt.toISOString(),
+  };
+  const source = {
+    id: 41,
+    documentId: 7,
+    version: 4,
+    puckData,
+    metadata: withPageLocaleRevisionMetadata(metadata, "en", contentHash, {
+      submittedBy: 12,
+      submittedAt,
+      reviewedBy: 12,
+      reviewedAt,
+      selfReview,
+    }),
+    status: "published",
+    publishedAt,
+    publishedBy: 12,
+    createdAt: publishedAt,
+  };
+  const document = { id: 7, pageKey: "home", publishedRevisionId: 42 };
+  const draft = {
+    id: 19,
+    documentId: 7,
+    locale: "en" as const,
+    puckData,
+    metadata,
+    reviewStatus: "PUBLISHED" as const,
+    contentHash,
+    submittedBy: 13,
+    submittedAt,
+    reviewedBy: 14,
+    reviewedAt,
+    reviewNote: null,
+    publishedRevisionId: 42,
+    publishedHash: contentHash,
+    publishedBy: 14,
+    publishedAt,
+    createdAt: submittedAt,
+    updatedAt: publishedAt,
+    legacy: false,
+  };
+  const makeService = (
+    status: "ACTIVE" | "DISABLED",
+    options: {
+      auditAvailable?: boolean;
+      auditDetail?: Record<string, unknown>;
+    } = {},
+  ) => {
+    const writes: Array<{ operation: string; args: any }> = [];
+    const transaction: any = {
+      $queryRaw: async () => [{ id: 7 }],
+      pageDocument: { findUnique: async () => document },
+      user: { findUnique: async () => ({ role: "SUPER_ADMIN", status }) },
+      operationLog: {
+        findUnique: async () => options.auditAvailable === false ? null : ({
+          id: 88,
+          userId: 12,
+          action: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+          module: "page-builder",
+          targetId: 7,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+            actor: 12,
+            actorRole: "SUPER_ADMIN",
+            pageKey: "home",
+            locale: "en",
+            revision: submittedAt.toISOString(),
+            contentHash,
+            reviewedAt: reviewedAt.toISOString(),
+            result: "succeeded",
+            ...options.auditDetail,
+          }),
+        }),
+        create: async (args: any) => { writes.push({ operation: "audit.create", args }); return { id: 99 }; },
+      },
+      pageDocumentRevision: {
+        findFirst: async (args: any) => args.where?.id ? source : { version: 42 },
+        create: async (args: any) => {
+          writes.push({ operation: "revision.create", args: structuredClone(args) });
+          return { id: 43, ...args.data, createdAt: publishedAt };
+        },
+      },
+      pageDocumentLocalization: {
+        update: async (args: any) => {
+          writes.push({ operation: "localization.update", args: structuredClone(args) });
+          return { ...draft, ...args.data };
+        },
+      },
+    };
+    const prisma = {
+      $transaction: async (run: (tx: typeof transaction) => Promise<unknown>) => run(transaction),
+    };
+    const service = new PageModulesService(prisma as unknown as PrismaService);
+    Object.defineProperty(service, "getLocalizedPageDraft", {
+      value: async () => ({ document, draft }),
+    });
+    Object.defineProperty(service, "collectPageDocumentValidation", {
+      value: async () => ({ valid: true, errors: [], issues: [] }),
+    });
+    Object.defineProperty(service, "writePagePublicationMediaManifest", {
+      value: async () => null,
+    });
+    return { service, writes };
+  };
+
+  const active = makeService("ACTIVE");
+  await active.service.rollbackLocalizedPagePublication("home", "en", 41, 42, 21);
+  const revisionWrite = active.writes.find((write) => write.operation === "revision.create");
+  assert.deepEqual(
+    readPageLocaleRevisionMarker(revisionWrite?.args.data.metadata)?.selfReview,
+    selfReview,
+  );
+
+  for (const blocked of [
+    makeService("DISABLED"),
+    makeService("ACTIVE", { auditAvailable: false }),
+    makeService("ACTIVE", { auditDetail: { contentHash: "f".repeat(64) } }),
+    makeService("ACTIVE", { auditDetail: { revision: "2026-09-12T07:59:59.999Z" } }),
+  ]) {
+    await assert.rejects(
+      () => blocked.service.rollbackLocalizedPagePublication("home", "en", 41, 42, 21),
+      (error: unknown) => error instanceof BadRequestException,
+    );
+    assert.equal(blocked.writes.length, 0);
+  }
 });
 
 test("中英文公开读取各自精确发布指针，不读取另一语言或更新后的草稿", async () => {

@@ -2240,7 +2240,8 @@ export default function StoreDecorationWorkbench({
 }: {
   pageKey?: EditorPageKey;
 }) {
-  const adminRole = useAuthStore((state) => state.user?.role);
+  const adminUser = useAuthStore((state) => state.user);
+  const adminRole = adminUser?.role;
   const canPublish = adminRole === "SUPER_ADMIN" || adminRole === "ADMIN";
   // 页面装修可由编辑与管理员完成；母模板设计是全站级结构权限，
   // 前后端统一只向 SUPER_ADMIN 开放。
@@ -2297,6 +2298,7 @@ export default function StoreDecorationWorkbench({
     pageSettingsFocusField,
     hasPendingDraft,
     reviewStatus,
+    reviewSubmittedBy,
     canDiscardDraft,
     publishedNeedsRevalidation,
     viewingPublished,
@@ -2609,6 +2611,9 @@ export default function StoreDecorationWorkbench({
             localeSwitchDisabled={hasProtectedUnsavedChanges || saving || publishing}
             onSubmitReview={() => { void submitForReview(); }}
             onApproveReview={() => { void reviewDraft("APPROVE"); }}
+            isOwnReviewSubmission={reviewSubmittedBy === adminUser?.id}
+            canSelfReview={adminRole === "SUPER_ADMIN" && reviewSubmittedBy === adminUser?.id}
+            onSelfApproveReview={() => { void reviewDraft("APPROVE", undefined, true); }}
             onRequestChanges={(note) => { void reviewDraft("REQUEST_CHANGES", note); }}
             onPublish={publishHome}
             onSaveDraft={(nextData) => {

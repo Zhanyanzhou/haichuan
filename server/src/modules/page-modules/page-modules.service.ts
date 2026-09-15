@@ -52,6 +52,8 @@ import type { PublicContentLocale } from "../../common/content-locale";
 import {
   createPageLocaleContentHash,
   hasPageLocaleDraftMetadata,
+  PAGE_LOCALE_SELF_REVIEW_ACTION,
+  type PageLocaleSelfReviewMarker,
   readPageLocaleRevisionMarker,
   revisionBelongsToLocale,
   stripPageLocaleRevisionMetadata,
@@ -924,6 +926,7 @@ export class PageModulesService {
     expectedContentHash: string,
     userId: number,
     reviewNote?: string,
+    selfReviewAcknowledged = false,
   ) {
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
     if (!expected) throw new BadRequestException("审核页面时缺少页面版本标识");
@@ -946,37 +949,60 @@ export class PageModulesService {
       if (current.draft.reviewStatus !== "IN_REVIEW") {
         throw new BadRequestException("只有审核中的草稿可以复核");
       }
-      if (current.draft.submittedBy === userId) {
-        throw new BadRequestException("页面内容提交人与审核人必须分离");
+      const isSelfReview = current.draft.submittedBy === userId;
+      if (isSelfReview) {
+        if (action !== "APPROVE" || !selfReviewAcknowledged) {
+          throw new BadRequestException("页面内容提交人与审核人必须分离；超级管理员自审须单独明确确认");
+        }
+        const actor = await tx.user.findUnique({
+          where: { id: userId },
+          select: { role: true, status: true },
+        });
+        if (actor?.role !== "SUPER_ADMIN" || actor.status !== "ACTIVE") {
+          throw new BadRequestException("只有超级管理员可以明确确认并批准本人提交的页面");
+        }
+        if (!current.draft.submittedAt) {
+          throw new BadRequestException("当前页面缺少可绑定的提交版本，不能执行自审");
+        }
       }
       if (action === "REQUEST_CHANGES" && !reviewNote?.trim()) {
         throw new BadRequestException("退回修改时必须填写审核意见");
       }
+      const reviewedAt = new Date();
       const localization = await tx.pageDocumentLocalization.update({
         where: { id: current.draft.id },
         data: {
           reviewStatus: action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED",
           reviewedBy: userId,
-          reviewedAt: new Date(),
+          reviewedAt,
           reviewNote: reviewNote?.trim() || null,
         },
       });
       await tx.operationLog.create({
         data: {
           userId,
-          action: action === "APPROVE"
+          action: isSelfReview
+            ? PAGE_LOCALE_SELF_REVIEW_ACTION
+            : action === "APPROVE"
             ? "PAGE_LOCALE_REVIEW_APPROVED"
             : "PAGE_LOCALE_CHANGES_REQUESTED",
           module: "page-builder",
           targetId: document.id,
           detail: JSON.stringify({
             schemaVersion: 1,
-            event: action === "APPROVE"
+            event: isSelfReview
+              ? PAGE_LOCALE_SELF_REVIEW_ACTION
+              : action === "APPROVE"
               ? "PAGE_LOCALE_REVIEW_APPROVED"
               : "PAGE_LOCALE_CHANGES_REQUESTED",
             actor: userId,
+            ...(isSelfReview ? { actorRole: "SUPER_ADMIN" } : {}),
             pageKey,
             locale,
+            ...(isSelfReview ? {
+              revision: current.draft.submittedAt!.toISOString(),
+              reviewedAt: reviewedAt.toISOString(),
+            } : {}),
             contentHash: current.draft.contentHash,
             fromStatus: current.draft.reviewStatus,
             toStatus: action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED",
@@ -1168,6 +1194,102 @@ export class PageModulesService {
     };
   }
 
+  private async resolvePageSelfReviewEvidence(
+    tx: Prisma.TransactionClient,
+    input: {
+      documentId: number;
+      pageKey: string;
+      locale: PublicContentLocale;
+      contentHash: string;
+      submittedBy: number;
+      submittedAt: Date;
+      reviewedBy: number;
+      reviewedAt: Date;
+      marker?: PageLocaleSelfReviewMarker;
+    },
+  ): Promise<PageLocaleSelfReviewMarker> {
+    if (input.submittedBy !== input.reviewedBy) {
+      throw new BadRequestException("页面自审记录的提交人与审核人不一致");
+    }
+    const revision = input.submittedAt.toISOString();
+    const reviewedAt = input.reviewedAt.toISOString();
+    if (input.marker && (
+      input.marker.action !== PAGE_LOCALE_SELF_REVIEW_ACTION
+      || input.marker.actor !== input.reviewedBy
+      || input.marker.actorRole !== "SUPER_ADMIN"
+      || input.marker.revision !== revision
+      || input.marker.reviewedAt !== reviewedAt
+    )) {
+      throw new BadRequestException("页面自审版本标记与当前审核记录不匹配");
+    }
+    const actor = await tx.user.findUnique({
+      where: { id: input.reviewedBy },
+      select: { role: true, status: true },
+    });
+    const auditRows = input.marker
+      ? [await tx.operationLog.findUnique({
+          where: { id: input.marker.auditLogId },
+          select: {
+            id: true,
+            userId: true,
+            action: true,
+            module: true,
+            targetId: true,
+            detail: true,
+          },
+        })]
+      : await tx.operationLog.findMany({
+          where: {
+            userId: input.reviewedBy,
+            action: PAGE_LOCALE_SELF_REVIEW_ACTION,
+            module: "page-builder",
+            targetId: input.documentId,
+          },
+          orderBy: { id: "desc" },
+          select: {
+            id: true,
+            userId: true,
+            action: true,
+            module: true,
+            targetId: true,
+            detail: true,
+          },
+        });
+    const audit = auditRows.find((row) => {
+      if (!row || typeof row.detail !== "string") return false;
+      try {
+        const detail = JSON.parse(row.detail) as Record<string, unknown>;
+        return row.userId === input.reviewedBy
+          && row.action === PAGE_LOCALE_SELF_REVIEW_ACTION
+          && row.module === "page-builder"
+          && row.targetId === input.documentId
+          && detail.schemaVersion === 1
+          && detail.event === PAGE_LOCALE_SELF_REVIEW_ACTION
+          && detail.actor === input.reviewedBy
+          && detail.actorRole === "SUPER_ADMIN"
+          && detail.pageKey === input.pageKey
+          && detail.locale === input.locale
+          && detail.revision === revision
+          && detail.contentHash === input.contentHash
+          && detail.reviewedAt === reviewedAt
+          && detail.result === "succeeded";
+      } catch {
+        return false;
+      }
+    });
+    if (actor?.role !== "SUPER_ADMIN" || actor.status !== "ACTIVE" || !audit) {
+      throw new BadRequestException("页面缺少匹配当前版本的有效超级管理员自审记录");
+    }
+    return {
+      action: PAGE_LOCALE_SELF_REVIEW_ACTION,
+      auditLogId: audit.id,
+      actor: input.reviewedBy,
+      actorRole: "SUPER_ADMIN",
+      revision,
+      reviewedAt,
+    };
+  }
+
   async publishLocalizedPageDocument(
     pageKey: string,
     locale: PublicContentLocale,
@@ -1201,9 +1323,21 @@ export class PageModulesService {
         || current.draft.submittedAt === null
         || current.draft.reviewedBy === null
         || current.draft.reviewedAt === null
-        || current.draft.submittedBy === current.draft.reviewedBy
       ) {
-        throw new BadRequestException("该语言草稿缺少独立、完整的审核记录，不能发布");
+        throw new BadRequestException("该语言草稿缺少有效、完整的审核记录，不能发布");
+      }
+      let selfReview: PageLocaleSelfReviewMarker | undefined;
+      if (current.draft.submittedBy === current.draft.reviewedBy) {
+        selfReview = await this.resolvePageSelfReviewEvidence(tx, {
+          documentId: document.id,
+          pageKey,
+          locale,
+          contentHash: current.draft.contentHash,
+          submittedBy: current.draft.submittedBy,
+          submittedAt: current.draft.submittedAt,
+          reviewedBy: current.draft.reviewedBy,
+          reviewedAt: current.draft.reviewedAt,
+        });
       }
       const normalizedPuckData = this.normalizePageDocumentPuckData(current.draft.puckData);
       const cleanMetadata = this.getPersistablePageMetadata(
@@ -1245,6 +1379,7 @@ export class PageModulesService {
         submittedAt: current.draft.submittedAt,
         reviewedBy: current.draft.reviewedBy,
         reviewedAt: current.draft.reviewedAt,
+        selfReview,
       });
       const revision = await tx.pageDocumentRevision.create({
         data: {
@@ -1587,6 +1722,40 @@ export class PageModulesService {
       if (sourceMarker && sourceMarker.contentHash !== contentHash) {
         throw new ConflictException("指定历史版本内容完整性校验失败，不能回滚发布");
       }
+      let sourceSelfReview: PageLocaleSelfReviewMarker | undefined;
+      if (
+        sourceMarker
+        && sourceMarker.submittedBy !== null
+        && sourceMarker.submittedBy === sourceMarker.reviewedBy
+      ) {
+        if (
+          sourceMarker.submittedBy === null
+          || sourceMarker.submittedAt === null
+          || sourceMarker.reviewedBy === null
+          || sourceMarker.reviewedAt === null
+          || !sourceMarker.selfReview
+        ) {
+          throw new BadRequestException("指定历史版本缺少完整的超级管理员自审记录，不能回滚发布");
+        }
+        const submittedAt = new Date(sourceMarker.submittedAt);
+        const reviewedAt = new Date(sourceMarker.reviewedAt);
+        if (Number.isNaN(submittedAt.getTime()) || Number.isNaN(reviewedAt.getTime())) {
+          throw new BadRequestException("指定历史版本的自审时间无效，不能回滚发布");
+        }
+        sourceSelfReview = await this.resolvePageSelfReviewEvidence(tx, {
+          documentId: document.id,
+          pageKey,
+          locale,
+          contentHash,
+          submittedBy: sourceMarker.submittedBy,
+          submittedAt,
+          reviewedBy: sourceMarker.reviewedBy,
+          reviewedAt,
+          marker: sourceMarker.selfReview,
+        });
+      } else if (sourceMarker?.selfReview) {
+        throw new BadRequestException("指定历史版本包含不一致的自审标记，不能回滚发布");
+      }
       const validation = await this.collectPageDocumentValidation(
         tx,
         puckData,
@@ -1619,6 +1788,7 @@ export class PageModulesService {
         submittedAt: sourceMarker?.submittedAt ? new Date(sourceMarker.submittedAt) : null,
         reviewedBy: sourceMarker?.reviewedBy ?? null,
         reviewedAt: sourceMarker?.reviewedAt ? new Date(sourceMarker.reviewedAt) : null,
+        selfReview: sourceSelfReview,
       });
       const revision = await tx.pageDocumentRevision.create({
         data: {

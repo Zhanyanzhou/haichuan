@@ -262,7 +262,16 @@ async function approveCurrentPageForPublishing(page: Page) {
   await expect(reviewStatus).toHaveText("草稿");
   await page.getByRole("button", { name: "提交审核", exact: true }).click();
   await expect(reviewStatus).toHaveText("待审核");
-  await page.getByRole("button", { name: "批准", exact: true }).click();
+  await page.getByRole("button", { name: "本人提交：确认自审", exact: true }).click();
+  const reviewRequest = page.waitForRequest((request) => (
+    new URL(request.url()).pathname === "/api/page-modules/document/review"
+    && request.method() === "PUT"
+  ));
+  await page.getByRole("button", { name: "确认本人审核并批准", exact: true }).click();
+  expect((await reviewRequest).postDataJSON()).toMatchObject({
+    action: "APPROVE",
+    selfReviewAcknowledged: true,
+  });
   await expect(reviewStatus).toHaveText("已批准");
   await expect(page.locator(".homepage-editor__toolbar-publish")).toBeEnabled();
 }
@@ -286,6 +295,8 @@ async function mockEditorApis(
     discardFailureCount?: number;
     normalizeSavedPuckData?: (puckData: any) => any;
     normalizeSavedMetadata?: (metadata: any) => any;
+    savedReviewStatus?: Record<string, any>["reviewStatus"];
+    savedContentHash?: string;
   } = {},
 ) {
   let published: Record<string, any> = options.published ?? publishedDoc;
@@ -352,6 +363,7 @@ async function mockEditorApis(
       saved = {
         ...saved,
         reviewStatus: "IN_REVIEW",
+        submittedBy: 1,
         updatedAt: "2026-08-14T01:40:00.000Z",
       };
       return route.fulfill(json(saved));
@@ -455,6 +467,8 @@ async function mockEditorApis(
         metadata: options.normalizeSavedMetadata
           ? options.normalizeSavedMetadata(body.metadata ?? saved.metadata)
           : (body.metadata ?? saved.metadata) as any,
+        ...(options.savedReviewStatus ? { reviewStatus: options.savedReviewStatus } : {}),
+        ...(options.savedContentHash ? { contentHash: options.savedContentHash } : {}),
         updatedAt: "2026-08-14T01:30:00.000Z",
       };
       return route.fulfill(json(saved));
@@ -481,6 +495,54 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       "aria-label",
       /草稿状态：有未发布更改，已保存/,
     );
+  });
+
+  test("超级管理员取消独立自审确认时不发送批准请求", async ({ page }) => {
+    const reviewRequests: unknown[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "PUT"
+        && new URL(request.url()).pathname.endsWith("/page-modules/document/review")
+      ) {
+        reviewRequests.push(request.postDataJSON());
+      }
+    });
+
+    await page.goto("/admin/editor/home");
+    await page.getByRole("button", { name: "提交审核", exact: true }).click();
+    await expect(page.getByTestId("page-review-status")).toHaveText("待审核");
+    await page.getByRole("button", { name: "本人提交：确认自审", exact: true }).click();
+    const confirmation = page.getByRole("dialog", { name: "确认审核本人提交的页面？" });
+    await expect(confirmation).toBeVisible();
+    await page.getByRole("button", { name: /取\s*消/ }).click();
+
+    await expect(confirmation).toBeHidden();
+    await expect(page.getByTestId("page-review-status")).toHaveText("待审核");
+    expect(reviewRequests).toEqual([]);
+  });
+
+  test("普通管理员不能从界面批准本人提交的页面", async ({ page }) => {
+    await page.unroute("**/api/auth/profile");
+    await installAdminSession(page, {
+      id: 1,
+      username: "own-submission-admin",
+      realName: "普通管理员",
+      role: "ADMIN",
+    });
+    await page.unroute(`${API_PREFIX}*`);
+    await mockEditorApis(page, {
+      draft: {
+        ...draftDoc,
+        reviewStatus: "IN_REVIEW",
+        submittedBy: 1,
+      },
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.getByTestId("page-review-status")).toHaveText("待审核");
+    await expect(page.getByRole("button", { name: "需其他管理员审核", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "批准", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "本人提交：确认自审", exact: true })).toHaveCount(0);
   });
 
   test("线上内容与草稿一致时默认直接进入编辑模式", async ({
@@ -545,6 +607,91 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       }),
     ).toHaveCount(0);
     expect(adminReads).toBe(1);
+  });
+
+  test("已发布页面产生本地修改后立即进入可提交审核状态", async ({ page }) => {
+    const sharedPuckData = {
+      content: [{
+        ...heroBlock,
+        props: { ...heroBlock.props, title: "已发布标题" },
+      }],
+      root: { props: {} },
+    };
+    const sharedMetadata = { seoTitle: "已发布页面资料" };
+    const publishedHash = "b".repeat(64);
+    const savedHash = "c".repeat(64);
+    const lifecycleRequests: Array<{ method: string; path: string; body: any }> = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (
+        (request.method() === "PUT" && path.endsWith("/page-modules/document"))
+        || (request.method() === "POST" && path.endsWith("/page-modules/document/review/submit"))
+        || path.endsWith("/page-modules/document/publish")
+      ) {
+        lifecycleRequests.push({
+          method: request.method(),
+          path,
+          body: request.postDataJSON(),
+        });
+      }
+    });
+    await page.unroute(`${API_PREFIX}*`);
+    await mockEditorApis(page, {
+      published: {
+        ...publishedDoc,
+        puckData: sharedPuckData,
+        metadata: sharedMetadata,
+        contentHash: publishedHash,
+        reviewStatus: "PUBLISHED",
+      },
+      draft: {
+        ...draftDoc,
+        puckData: sharedPuckData,
+        metadata: sharedMetadata,
+        contentHash: publishedHash,
+        reviewStatus: "PUBLISHED",
+      },
+      savedReviewStatus: "DRAFT",
+      savedContentHash: savedHash,
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
+    const reviewStatus = page.getByTestId("page-review-status");
+    const publishButton = page.locator(".homepage-editor__toolbar-publish");
+    await expect(reviewStatus).toHaveText("已发布");
+    await expect(page.getByRole("button", { name: "提交审核", exact: true })).toHaveCount(0);
+    await expect(publishButton).toBeDisabled();
+    await expect(publishButton).toHaveAttribute(
+      "title",
+      "当前语言版本已发布，没有待发布更改",
+    );
+
+    const heroTitleInput = await selectHeroTitleInput(page);
+    await heroTitleInput.fill("修改后待审核标题");
+    await expect(reviewStatus).toHaveText("草稿");
+    const submitButton = page.getByRole("button", { name: "提交审核", exact: true });
+    await expect(submitButton).toBeEnabled();
+    await expect(page.getByRole("button", { name: "批准", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "本人提交：确认自审", exact: true })).toHaveCount(0);
+    await expect(publishButton).toBeDisabled();
+    await expect(publishButton).toHaveAttribute("title", "当前语言版本需先通过审核");
+
+    const submittedRequest = page.waitForRequest((request) => (
+      request.method() === "POST"
+      && new URL(request.url()).pathname.endsWith("/page-modules/document/review/submit")
+    ));
+    await submitButton.click();
+    const submittedBody = (await submittedRequest).postDataJSON();
+    expect(submittedBody).toMatchObject({
+      expectedUpdatedAt: "2026-08-14T01:30:00.000Z",
+      expectedContentHash: savedHash,
+    });
+    await expect(reviewStatus).toHaveText("待审核");
+    expect(lifecycleRequests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+      "PUT /api/page-modules/document",
+      "POST /api/page-modules/document/review/submit",
+    ]);
   });
 
   test("连续编辑文字后立即预览并退出，保存仍使用完整最新画布", async ({
