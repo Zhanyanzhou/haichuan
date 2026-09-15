@@ -1113,22 +1113,21 @@ jobs:
             --certificate-github-workflow-sha "$GITHUB_SHA" \
             --certificate-github-workflow-repository "$GITHUB_REPOSITORY" \
             --certificate-github-workflow-ref "$GITHUB_REF" \
-            release-output/release-manifest.json > release-output/verified/release-manifest.dsse.jsonl
+            release-output/release-manifest.json
           node - <<'NODE'
           const { createHash } = require("node:crypto");
           const fs = require("node:fs");
           const bundle = JSON.parse(fs.readFileSync("release-output/release-manifest.attestation.json", "utf8"));
           if (bundle?.mediaType !== "application/vnd.dev.sigstore.bundle.v0.3+json") throw new Error("RELEASE_MANIFEST_SIGSTORE_BUNDLE_FORMAT_INVALID");
+          const manifestPayload = bundle?.dsseEnvelope?.payload;
+          if (typeof manifestPayload !== "string" || manifestPayload.length === 0) throw new Error("RELEASE_MANIFEST_DSSE_PAYLOAD_MISSING");
           const manifestBytes = fs.readFileSync("release-output/release-manifest.json");
           const expectedManifestDigest = createHash("sha256").update(manifestBytes).digest("hex");
-          const statements = fs.readFileSync("release-output/verified/release-manifest.dsse.jsonl", "utf8")
-            .split(/\r?\n/).filter(Boolean).map((line) => {
-              const envelope = JSON.parse(line);
-              return JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
-            });
-          const statement = statements.find((candidate) =>
-            candidate?.predicateType === "https://slsa.dev/provenance/v1" &&
-            candidate.subject?.some((subject) => subject?.digest?.sha256 === expectedManifestDigest));
+          const statement = JSON.parse(Buffer.from(manifestPayload, "base64").toString("utf8"));
+          if (statement?.predicateType !== "https://slsa.dev/provenance/v1" ||
+              !statement.subject?.some((subject) => subject?.digest?.sha256 === expectedManifestDigest)) {
+            throw new Error("RELEASE_MANIFEST_PROVENANCE_SUBJECT_INVALID");
+          }
           const predicate = statement?.predicate;
           const parameters = predicate?.buildDefinition?.externalParameters;
           const source = process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY;

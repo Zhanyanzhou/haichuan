@@ -81,6 +81,8 @@ test("build job installs verifier dependencies while isolated signing job execut
   assert.match(signingJob, /--digest "\$expected_digest" --digestAlg sha256/);
   assert.match(signingJob, /--type "https:\/\/sigstore\.dev\/cosign\/sign\/v1"/);
   assert.match(signingJob, /const payload = bundle\?\.dsseEnvelope\?\.payload/);
+  assert.match(signingJob, /const manifestPayload = bundle\?\.dsseEnvelope\?\.payload/);
+  assert.doesNotMatch(signingJob, /release-manifest\.dsse\.jsonl/);
   assert.match(signingJob, /RELEASE_SIGNING_INPUTS_HASH_MISMATCH/);
 });
 
