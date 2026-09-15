@@ -876,15 +876,19 @@ jobs:
           verify_image() {
             component="$1"
             reference="$2"
-            cosign verify "${verification_identity[@]}" \
+            expected_digest="${reference#*@sha256:}"
+            cosign verify-blob-attestation "${verification_identity[@]}" \
               --bundle "release-output/attestations/${component}-image.sigstore.json" \
-              "$reference" > "release-output/verified/${component}-image.json"
-            cosign verify-attestation "${verification_identity[@]}" \
+              --digest "$expected_digest" --digestAlg sha256 \
+              --type "https://sigstore.dev/cosign/sign/v1"
+            cosign verify-blob-attestation "${verification_identity[@]}" \
               --bundle "release-output/attestations/${component}-provenance.sigstore.json" \
-              --type slsaprovenance1 "$reference" > "release-output/verified/${component}-provenance.dsse.jsonl"
-            cosign verify-attestation "${verification_identity[@]}" \
+              --digest "$expected_digest" --digestAlg sha256 \
+              --type slsaprovenance1
+            cosign verify-blob-attestation "${verification_identity[@]}" \
               --bundle "release-output/attestations/${component}-sbom.sigstore.json" \
-              --type spdxjson "$reference" > "release-output/verified/${component}-sbom.dsse.jsonl"
+              --digest "$expected_digest" --digestAlg sha256 \
+              --type spdxjson
           }
           verify_image server "$SERVER_REFERENCE"
           verify_image client "$CLIENT_REFERENCE"
@@ -899,37 +903,33 @@ jobs:
           };
           const expectedSource = process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY;
           const expectedBuilder = "https://github.com/" + process.env.GITHUB_REPOSITORY + "/.github/workflows/release-images.yml@" + process.env.GITHUB_REF;
-          const parseDocuments = (pathname) => {
-            const text = fs.readFileSync(pathname, "utf8").trim();
-            if (!text) throw new Error("RELEASE_COSIGN_OUTPUT_EMPTY:" + pathname);
-            try {
-              const parsed = JSON.parse(text);
-              return Array.isArray(parsed) ? parsed : [parsed];
-            } catch {
-              return text.split(/\r?\n/).filter(Boolean).flatMap((line) => {
-                const parsed = JSON.parse(line);
-                return Array.isArray(parsed) ? parsed : [parsed];
-              });
+          const readBundle = (pathname) => JSON.parse(fs.readFileSync(pathname, "utf8"));
+          const statementFromBundle = (bundle, component, kind) => {
+            const payload = bundle?.dsseEnvelope?.payload;
+            if (typeof payload !== "string" || payload.length === 0) {
+              throw new Error("RELEASE_SIGSTORE_DSSE_PAYLOAD_MISSING:" + component + ":" + kind);
             }
+            return JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
           };
-          const statements = (pathname) => parseDocuments(pathname).map((envelope) =>
-            JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8")));
           for (const component of ["server", "client", "operations"]) {
+            const bundles = {};
             for (const kind of ["image", "provenance", "sbom"]) {
               const pathname = "release-output/attestations/" + component + "-" + kind + ".sigstore.json";
-              const bundle = JSON.parse(fs.readFileSync(pathname, "utf8"));
+              const bundle = readBundle(pathname);
               if (bundle?.mediaType !== expectedMediaType) throw new Error("RELEASE_SIGSTORE_BUNDLE_FORMAT_INVALID:" + component + ":" + kind);
+              bundles[kind] = bundle;
             }
             const expectedDigest = references[component].split("@sha256:")[1];
-            const signature = parseDocuments("release-output/verified/" + component + "-image.json").find((entry) => {
-              const critical = entry?.critical ?? entry?.Critical;
-              const image = critical?.image ?? critical?.Image;
-              return (image?.["docker-manifest-digest"] ?? image?.["Docker-manifest-digest"]) === "sha256:" + expectedDigest;
-            });
-            if (!signature) throw new Error("RELEASE_SIGNED_IMAGE_SUBJECT_INVALID:" + component);
-            const provenance = statements("release-output/verified/" + component + "-provenance.dsse.jsonl").find((statement) =>
-              statement?.predicateType === "https://slsa.dev/provenance/v1" &&
-              statement.subject?.some((subject) => subject?.digest?.sha256 === expectedDigest));
+            const signature = statementFromBundle(bundles.image, component, "image");
+            if (signature?.predicateType !== "https://sigstore.dev/cosign/sign/v1" ||
+                !signature.subject?.some((subject) => subject?.digest?.sha256 === expectedDigest)) {
+              throw new Error("RELEASE_SIGNED_IMAGE_SUBJECT_INVALID:" + component);
+            }
+            const provenance = statementFromBundle(bundles.provenance, component, "provenance");
+            if (provenance?.predicateType !== "https://slsa.dev/provenance/v1" ||
+                !provenance.subject?.some((subject) => subject?.digest?.sha256 === expectedDigest)) {
+              throw new Error("RELEASE_SIGNED_PROVENANCE_SUBJECT_INVALID:" + component);
+            }
             const parameters = provenance?.predicate?.buildDefinition?.externalParameters;
             if (parameters?.component !== component || parameters?.source !== expectedSource ||
                 parameters?.releaseStage !== process.env.EXPECTED_RELEASE_STAGE ||
@@ -938,9 +938,11 @@ jobs:
                 provenance?.predicate?.runDetails?.builder?.id !== expectedBuilder) {
               throw new Error("RELEASE_SIGNED_PROVENANCE_CONTENT_INVALID:" + component);
             }
-            const sbom = statements("release-output/verified/" + component + "-sbom.dsse.jsonl").find((statement) =>
-              statement?.predicateType === "https://spdx.dev/Document" &&
-              statement.subject?.some((subject) => subject?.digest?.sha256 === expectedDigest));
+            const sbom = statementFromBundle(bundles.sbom, component, "sbom");
+            if (sbom?.predicateType !== "https://spdx.dev/Document" ||
+                !sbom.subject?.some((subject) => subject?.digest?.sha256 === expectedDigest)) {
+              throw new Error("RELEASE_SIGNED_SBOM_SUBJECT_INVALID:" + component);
+            }
             if (sbom?.predicate?.spdxVersion !== "SPDX-2.3" || sbom?.predicate?.SPDXID !== "SPDXRef-DOCUMENT") {
               throw new Error("RELEASE_SIGNED_SBOM_CONTENT_INVALID:" + component);
             }

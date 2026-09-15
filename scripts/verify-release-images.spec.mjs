@@ -76,6 +76,11 @@ test("build job installs verifier dependencies while isolated signing job execut
   assert.match(signingJob, /artifact-ids: \$\{\{ needs\.build-push\.outputs\.signing_inputs_artifact_id \}\}/);
   assert.match(signingJob, /artifact-ids:[\s\S]*?merge-multiple: true/);
   assert.match(signingJob, /buildkitProvenancePredicateType: buildkitPredicateType/);
+  assert.doesNotMatch(signingJob, /cosign verify(?:-attestation)? "\$\{verification_identity\[@\]\}"/);
+  assert.match(signingJob, /cosign verify-blob-attestation "\$\{verification_identity\[@\]\}"/);
+  assert.match(signingJob, /--digest "\$expected_digest" --digestAlg sha256/);
+  assert.match(signingJob, /--type "https:\/\/sigstore\.dev\/cosign\/sign\/v1"/);
+  assert.match(signingJob, /const payload = bundle\?\.dsseEnvelope\?\.payload/);
   assert.match(signingJob, /RELEASE_SIGNING_INPUTS_HASH_MISMATCH/);
 });
 

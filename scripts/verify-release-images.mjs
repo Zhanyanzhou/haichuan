@@ -413,7 +413,6 @@ function assertReleaseWorkflow() {
     "cosign-release: v3.1.3",
     "cosign sign --yes",
     "cosign attest --yes",
-    "cosign verify-attestation",
     "cosign verify-blob-attestation",
     "--certificate-identity",
     "--certificate-oidc-issuer \"https://token.actions.githubusercontent.com\"",
@@ -421,6 +420,8 @@ function assertReleaseWorkflow() {
     "--certificate-github-workflow-ref \"$GITHUB_REF\"",
     "--type slsaprovenance1",
     "--type spdxjson",
+    "--type \"https://sigstore.dev/cosign/sign/v1\"",
+    "--digest \"$expected_digest\" --digestAlg sha256",
     "--bundle",
     "application/vnd.dev.sigstore.bundle.v0.3+json",
     "artifact-ids: ${{ needs.build-push.outputs.signing_inputs_artifact_id }}",
@@ -446,6 +447,7 @@ function assertReleaseWorkflow() {
     '--bundle "release-output/attestations/${component}-image.sigstore.json"',
     '--bundle "release-output/attestations/${component}-provenance.sigstore.json"',
     '--bundle "release-output/attestations/${component}-sbom.sigstore.json"',
+    'const payload = bundle?.dsseEnvelope?.payload;',
   ]) {
     if (!source.includes(required)) fail(`RELEASE_WORKFLOW_SIGSTORE_CONTRACT_MISSING:${required}`);
   }
