@@ -184,7 +184,7 @@ export default function EditorToolbar({
       ? "当前账号可提交审核，发布需由管理员完成"
     : effectiveReviewStatus === "PUBLISHED" && !hasPendingDraft
       ? "当前语言版本已发布，没有待发布更改"
-    : effectiveReviewStatus !== "APPROVED"
+    : effectiveReviewStatus !== "APPROVED" && !hasUnsavedChanges
       ? "当前语言版本需先通过审核"
       : null;
   const publishActionLabel = publishUnavailableReason

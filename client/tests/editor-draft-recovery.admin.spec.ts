@@ -674,8 +674,11 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await expect(submitButton).toBeEnabled();
     await expect(page.getByRole("button", { name: "批准", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "本人提交：确认自审", exact: true })).toHaveCount(0);
-    await expect(publishButton).toBeDisabled();
-    await expect(publishButton).toHaveAttribute("title", "当前语言版本需先通过审核");
+    await expect(publishButton).toBeEnabled();
+    await expect(publishButton).toHaveAttribute(
+      "title",
+      "保存当前草稿并发布页面；只有此操作会更新客户前台，无图片模板会自动隐藏",
+    );
 
     const submittedRequest = page.waitForRequest((request) => (
       request.method() === "POST"
