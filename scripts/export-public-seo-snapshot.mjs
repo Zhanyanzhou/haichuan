@@ -32,7 +32,6 @@ const RESERVED_PUBLIC_PATHS = new Set([
   "/search",
   "/sitemap.xml",
 ]);
-const ENGLISH_PUBLIC_CONTENT_PATHS = new Set(["/", "/about", "/products", "/custom"]);
 const ROUTE_KINDS = new Set(["page", "legal", "product"]);
 const CONTENT_SOURCES = new Set(["human-reviewed", "verified-facts"]);
 const SOURCE_STAGES = new Set(["preproduction", "production"]);
@@ -103,12 +102,6 @@ export function normalizePublicPath(value, label = "Route path") {
 }
 
 function localizedContentPath(pathname, locale) {
-  if (locale === "en") {
-    if (pathname !== "/en" && !pathname.startsWith("/en/")) {
-      fail(`English route ${pathname} must use the /en prefix.`);
-    }
-    return pathname === "/en" ? "/" : pathname.slice(3);
-  }
   if (locale !== "zh-CN") fail(`Unsupported route locale: ${String(locale)}.`);
   if (pathname === "/en" || pathname.startsWith("/en/")) {
     fail(`Chinese route ${pathname} must not use the /en prefix.`);
@@ -133,9 +126,6 @@ function assertPublicPath(pathname, locale) {
   }
   if (contentPath.endsWith("/index.html")) {
     fail(`Reserved physical index route ${pathname} cannot enter a public SEO snapshot.`);
-  }
-  if (locale === "en" && !ENGLISH_PUBLIC_CONTENT_PATHS.has(contentPath)) {
-    fail(`English route ${pathname} is not available in the public application.`);
   }
 }
 
@@ -197,6 +187,38 @@ function normalizeRenderedBody(value, label) {
   return html;
 }
 
+function normalizeBootstrapPageDocument(value, label, pathname, kind) {
+  if (value === undefined) return undefined;
+  if (pathname !== "/" || kind !== "page") {
+    fail(`${label} is only allowed for the public home page.`);
+  }
+  const document = assertRecord(value, label);
+  assertExactKeys(document, new Set(["pageKey", "puckData", "metadata", "status"]), label);
+  if (document.pageKey !== "home" || document.status !== "PUBLISHED") {
+    fail(`${label} must contain the published home PageDocument.`);
+  }
+  if (!document.puckData || typeof document.puckData !== "object" || Array.isArray(document.puckData)) {
+    fail(`${label}.puckData must be an object.`);
+  }
+  if (!Array.isArray(document.puckData.content) || document.puckData.content.length === 0) {
+    fail(`${label}.puckData must contain published content blocks.`);
+  }
+  if (!document.metadata || typeof document.metadata !== "object" || Array.isArray(document.metadata)) {
+    fail(`${label}.metadata must be an object.`);
+  }
+  try {
+    JSON.stringify(document);
+  } catch {
+    fail(`${label} must be JSON serializable.`);
+  }
+  return {
+    pageKey: "home",
+    puckData: document.puckData,
+    metadata: document.metadata,
+    status: "PUBLISHED",
+  };
+}
+
 function normalizeStructuredData(value, label) {
   if (value === undefined) return undefined;
   const nodes = Array.isArray(value) ? value : [value];
@@ -242,6 +264,7 @@ function normalizeRoute(entry, index) {
     "description",
     "shareImage",
     "renderedBodyHtml",
+    "bootstrapPageDocument",
     "structuredData",
     "productCode",
   ]), label);
@@ -256,9 +279,6 @@ function normalizeRoute(entry, index) {
   }
   if (!CONTENT_SOURCES.has(value.contentSource)) {
     fail(`${label}.contentSource must be human-reviewed or verified-facts; machine translation and fallback content are not publishable.`);
-  }
-  if (value.locale === "en" && value.contentSource !== "human-reviewed") {
-    fail(`${label} English content must be human-reviewed.`);
   }
   if (value.kind !== "product" && value.contentSource !== "human-reviewed") {
     fail(`${label} authored page content must be human-reviewed.`);
@@ -293,6 +313,12 @@ function normalizeRoute(entry, index) {
   }
 
   const structuredData = normalizeStructuredData(value.structuredData, `${label}.structuredData`);
+  const bootstrapPageDocument = normalizeBootstrapPageDocument(
+    value.bootstrapPageDocument,
+    `${label}.bootstrapPageDocument`,
+    pathname,
+    value.kind,
+  );
   if (value.kind === "product") {
     const nodes = Array.isArray(structuredData) ? structuredData : [structuredData];
     if (!structuredData || !nodes.some((node) => node?.["@type"] === "Product" && node.sku === productCode)) {
@@ -316,6 +342,7 @@ function normalizeRoute(entry, index) {
     description: normalizeText(value.description, `${label}.description`, 500),
     shareImage: normalizeShareImage(value.shareImage, `${label}.shareImage`),
     renderedBodyHtml: normalizeRenderedBody(value.renderedBodyHtml, `${label}.renderedBodyHtml`),
+    ...(bootstrapPageDocument === undefined ? {} : { bootstrapPageDocument }),
     ...(structuredData === undefined ? {} : { structuredData }),
     ...(productCode ? { productCode } : {}),
   };
@@ -390,10 +417,6 @@ export function createPublicSeoSnapshot(input) {
   const routesWithAlternates = routes.map((route) => {
     const group = groups.get(route.alternateKey) ?? [];
     const chinese = group.find((entry) => entry.locale === "zh-CN");
-    const english = group.find((entry) => entry.locale === "en");
-    if (english && !chinese) {
-      fail(`English route ${english.path} requires a published Chinese reciprocal alternate.`);
-    }
     if (group.some((entry) => entry.kind !== route.kind)) {
       fail(`Alternate key ${route.alternateKey} cannot mix route kinds.`);
     }
@@ -405,7 +428,6 @@ export function createPublicSeoSnapshot(input) {
     }
     const alternates = [
       ...(chinese ? [{ locale: "zh-CN", hrefLang: "zh-CN", path: chinese.path }] : []),
-      ...(english ? [{ locale: "en", hrefLang: "en", path: english.path }] : []),
       ...(chinese ? [{ locale: "zh-CN", hrefLang: "x-default", path: chinese.path }] : []),
     ];
     return { ...route, alternates };

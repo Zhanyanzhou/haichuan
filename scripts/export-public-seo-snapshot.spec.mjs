@@ -12,7 +12,7 @@ import {
   makeSnapshotInput,
 } from "./public-seo-test-fixtures.mjs";
 
-test("exports a canonical immutable snapshot with reciprocal locale alternates", () => {
+test("exports a canonical immutable Chinese-only snapshot", () => {
   const snapshot = createPublicSeoSnapshot(makeSnapshotInput(makeRepresentativeRoutes()));
   assert.equal(snapshot.schemaVersion, 3);
   assert.equal(snapshot.sourceStage, "production");
@@ -21,14 +21,11 @@ test("exports a canonical immutable snapshot with reciprocal locale alternates",
   assert.deepEqual(validatePublicSeoSnapshot(snapshot), snapshot);
 
   const chinese = snapshot.routes.find((route) => route.path === "/about");
-  const english = snapshot.routes.find((route) => route.path === "/en/about");
   const expectedAlternates = [
     { locale: "zh-CN", hrefLang: "zh-CN", path: "/about" },
-    { locale: "en", hrefLang: "en", path: "/en/about" },
     { locale: "zh-CN", hrefLang: "x-default", path: "/about" },
   ];
   assert.deepEqual(chinese.alternates, expectedAlternates);
-  assert.deepEqual(english.alternates, expectedAlternates);
 });
 
 test("allows only an empty, non-publishable preproduction fallback snapshot", () => {
@@ -72,7 +69,7 @@ test("fails closed on source or per-route before/after hash drift", () => {
   sourceDrift.sourceSnapshotHashAfter = "f".repeat(64);
   assert.throws(() => createPublicSeoSnapshot(sourceDrift), /source facts changed/i);
 
-  const routeDrift = makeRoute({ contentHashAfter: CONTENT_HASHES.aboutEn });
+  const routeDrift = makeRoute({ contentHashAfter: "3".repeat(64) });
   assert.throws(
     () => createPublicSeoSnapshot(makeSnapshotInput([routeDrift])),
     /content hash changed/i,
@@ -102,7 +99,7 @@ test("rejects insecure origins, non-canonical routes, private paths, and duplica
   );
   assert.throws(
     () => createPublicSeoSnapshot(makeSnapshotInput([makeRoute({ path: "/en/cart", locale: "en" })])),
-    /private route/i,
+    /unsupported route locale/i,
   );
   for (const path of [
     "/api/health",
@@ -124,7 +121,7 @@ test("rejects insecure origins, non-canonical routes, private paths, and duplica
         canonicalPath: path,
         ...(path.startsWith("/en/") ? { locale: "en" } : {}),
       })])),
-      /reserved infrastructure route/i,
+      path.startsWith("/en/") ? /unsupported route locale/i : /reserved infrastructure route/i,
       path,
     );
   }
@@ -142,7 +139,7 @@ test("rejects insecure origins, non-canonical routes, private paths, and duplica
         canonicalPath: path,
         locale: "en",
       })])),
-      /not available in the public application/i,
+      /unsupported route locale/i,
       path,
     );
   }
@@ -152,7 +149,7 @@ test("rejects insecure origins, non-canonical routes, private paths, and duplica
   );
 });
 
-test("English routes require human-reviewed content and a Chinese reciprocal", () => {
+test("English routes are retired even when content was human reviewed", () => {
   const machineTranslated = makeRoute({
     path: "/en/about",
     locale: "en",
@@ -160,13 +157,13 @@ test("English routes require human-reviewed content and a Chinese reciprocal", (
   });
   assert.throws(
     () => createPublicSeoSnapshot(makeSnapshotInput([makeRoute(), machineTranslated])),
-    /machine translation and fallback content/i,
+    /unsupported route locale/i,
   );
 
   const englishOnly = makeRoute({ path: "/en/about", locale: "en" });
   assert.throws(
     () => createPublicSeoSnapshot(makeSnapshotInput([englishOnly])),
-    /reciprocal alternate/i,
+    /unsupported route locale/i,
   );
 });
 

@@ -175,7 +175,11 @@ async function verifyPrerenderManifest(pathname, snapshot) {
     if (!hashPattern.test(html) || !rootHashPattern.test(html)) {
       fail(`Pre-rendered HTML does not bind the published content hash for route ${entry.path}.`);
     }
-    if (!html.includes(route.renderedBodyHtml)) {
+    const hasPublishedHomeFirstFold = route.bootstrapPageDocument
+      && route.path === "/"
+      && /data-public-first-fold=["']published["']/i.test(html)
+      && /<script\b(?=[^>]*id=["']hc-published-page-document["'])(?=[^>]*type=["']application\/json["'])[^>]*>/i.test(html);
+    if (!hasPublishedHomeFirstFold && !html.includes(route.renderedBodyHtml)) {
       fail(`Pre-rendered HTML does not contain the immutable published body for route ${entry.path}.`);
     }
     const canonicalHref = escapeHtmlAttribute(new URL(route.canonicalPath, snapshot.origin).href);

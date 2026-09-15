@@ -627,6 +627,7 @@ body:has(.homepage-editor)
 }
 
 .homepage-editor__locale-review-controls select,
+.homepage-editor__locale-review-controls .homepage-editor__locale-label,
 .homepage-editor__locale-review-controls button,
 .homepage-editor__locale-review-controls [role="status"] {
   min-height: 30px;
@@ -636,6 +637,11 @@ body:has(.homepage-editor)
   color: inherit;
   padding: 4px 8px;
   font: inherit;
+}
+
+.homepage-editor__locale-review-controls .homepage-editor__locale-label {
+  display: inline-flex;
+  align-items: center;
 }
 
 .homepage-editor__locale-review-controls [role="status"] {
@@ -11009,6 +11015,9 @@ button.template-editor__toolbar-state:focus-visible {
   .admin-header__editor-slot
     .homepage-editor__toolbar:not(.template-editor__toolbar)
     .homepage-editor__locale-review-controls select,
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__locale-review-controls .homepage-editor__locale-label,
   .admin-header__editor-slot
     .homepage-editor__toolbar:not(.template-editor__toolbar)
     .homepage-editor__locale-review-controls button,

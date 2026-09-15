@@ -13,7 +13,6 @@ import {
 import { Transform } from "class-transformer";
 import {
   DEFAULT_PUBLIC_CONTENT_LOCALE,
-  PUBLIC_CONTENT_LOCALES,
 } from "../../../common/content-locale";
 
 /** 站点设置更新：仅允许 DEFAULT_SETTINGS 内的已知键，防止任意键污染统一设置。 */
@@ -59,8 +58,8 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
-  @ArrayMaxSize(2)
-  @IsIn(PUBLIC_CONTENT_LOCALES, { each: true })
+  @ArrayMaxSize(1)
+  @IsIn([DEFAULT_PUBLIC_CONTENT_LOCALE], { each: true })
   publishedLocales?: string[];
 
   @IsOptional()

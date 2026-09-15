@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   createRouteBarrier,
   mockCatalogDetail,
+  publishedCatalogDocument,
   publicProduct,
   type FixtureSalesMode,
   type WriteObservation,
@@ -63,6 +64,183 @@ test("Catalog 观察器构造异常时不升级为整页错误", async ({ page }
   expect(pageErrors).toEqual([]);
   await expectWriteContract(writes);
 });
+
+test("Catalog 慢鉴权期间先显示公开目录，恢复会员后只刷新一次会员投影", async ({ page }) => {
+  const profileBarrier = createRouteBarrier();
+  const publicItem = publicProduct(71, "DISPLAY_ONLY");
+  const memberItem = { ...publicItem, name: "会员目录投影作品" };
+  let profileReads = 0;
+  let publicReads = 0;
+  let memberReads = 0;
+
+  const respond = (route: import("@playwright/test").Route, data: unknown, status = 200) => route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(status === 200
+      ? { code: 200, data, message: "success" }
+      : { statusCode: status, message: "fixture unauthenticated" }),
+  });
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    if (path.endsWith("/stream")) return route.abort();
+    if (path === "/api/customers/me") {
+      profileReads += 1;
+      if (profileReads === 1) {
+        await profileBarrier.waitUntilReleased();
+        return respond(route, null, 401);
+      }
+      return respond(route, {
+        id: 71,
+        phone: "13800000000",
+        name: "目录会员",
+        email: null,
+      });
+    }
+    if (path === "/api/customers/session/refresh") {
+      return respond(route, {
+        customer: {
+          id: 71,
+          phone: "13800000000",
+          name: "目录会员",
+          email: null,
+        },
+      });
+    }
+    if (path === "/api/products/public") {
+      publicReads += 1;
+      return respond(route, {
+        list: [publicItem], total: 1, page: 1, pageSize: 32, facets: { sizes: [] },
+      });
+    }
+    if (path === "/api/products/catalog") {
+      memberReads += 1;
+      return respond(route, {
+        list: [memberItem], total: 1, page: 1, pageSize: 32, facets: { sizes: [] },
+      });
+    }
+    if (path === "/api/page-modules/document/published") {
+      return respond(route, url.searchParams.get("pageKey") === "catalog"
+        ? publishedCatalogDocument()
+        : null);
+    }
+    if (path === "/api/settings/flags") {
+      return respond(route, { commerceEnabled: true, cartEnabled: true, paymentEnabled: false });
+    }
+    if (path === "/api/settings/public") return respond(route, { siteName: "海川珠宝" });
+    if (path === "/api/categories/tree") {
+      return respond(route, [{ id: 1, name: "戒指", slug: "rings", level: 1, parentId: null, children: [] }]);
+    }
+    if (path === "/api/attributes" || path === "/api/customers/me/favorites") {
+      return respond(route, []);
+    }
+    return respond(route, null);
+  });
+
+  await page.goto("/catalog");
+  await profileBarrier.reached;
+  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeVisible();
+  await expect(page.getByText(publicItem.name, { exact: true })).toBeVisible();
+  expect(publicReads).toBe(1);
+  expect(memberReads).toBe(0);
+
+  profileBarrier.release();
+  await expect(page.getByText(memberItem.name, { exact: true })).toBeVisible();
+  await expect(page.getByText(publicItem.name, { exact: true })).toHaveCount(0);
+  expect(profileReads).toBe(2);
+  expect(memberReads).toBe(1);
+});
+
+for (const viewport of [
+  { name: "desktop", width: 1440, height: 900 },
+  { name: "mobile", width: 390, height: 844 },
+] as const) {
+  test(`/products ${viewport.name} 慢 PageDocument 加载壳与 Hero 几何一致且 CLS 小于 0.1`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await installLayoutShiftProbe(page);
+    const documentBarrier = createRouteBarrier();
+    const respond = (route: import("@playwright/test").Route, data: unknown) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data, message: "success" }),
+    });
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.endsWith("/stream")) return route.abort();
+      if (url.pathname === "/api/page-modules/document/published") {
+        if (url.searchParams.get("pageKey") !== "products") return respond(route, null);
+        await documentBarrier.waitUntilReleased();
+        return respond(route, {
+          pageKey: "products",
+          locale: "zh-CN",
+          status: "PUBLISHED",
+          version: 7,
+          puckData: {
+            content: [{
+              type: "首屏主视觉",
+              props: {
+                id: `products-cls-${viewport.name}`,
+                isVisible: true,
+                eyebrow: "海川典藏",
+                title: "珠宝作品",
+                subtitle: "慢接口稳定性验证",
+                desktopImage: "/images/editorial/poster-floral-lock-v1.png",
+                mobileImage: "/images/editorial/poster-floral-lock-v1.png",
+                altText: "珠宝作品主视觉",
+                actionText: "进入选款中心",
+                targetType: "page",
+                linkUrl: "/catalog",
+                alignment: "left",
+              },
+            }],
+            zones: {},
+            root: { props: {} },
+          },
+          metadata: {},
+        });
+      }
+      if (url.pathname === "/api/settings/public") return respond(route, { siteName: "海川珠宝" });
+      if (url.pathname === "/api/settings/flags") {
+        return respond(route, { commerceEnabled: true, cartEnabled: true, paymentEnabled: false });
+      }
+      return respond(route, null);
+    });
+
+    await page.goto("/products");
+    await documentBarrier.reached;
+    const loading = page.locator('[data-page-document-state="loading"]');
+    await expect(loading).toBeVisible();
+    const loadingFooter = await page.locator(".site-footer").boundingBox();
+    expect(loadingFooter).not.toBeNull();
+    await waitForVisualStability(page);
+    await page.evaluate(() => {
+      (window as Window & { __hcLayoutShiftProbe: { reset: () => void } })
+        .__hcLayoutShiftProbe.reset();
+    });
+
+    documentBarrier.release();
+    await expect(page.getByRole("heading", { level: 1, name: "珠宝作品" })).toBeVisible();
+    await waitForVisualStability(page);
+    const loadedFooter = await page.locator(".site-footer").boundingBox();
+    const cls = await page.evaluate(() => {
+      const probe = (window as Window & {
+        __hcLayoutShiftProbe: {
+          supported: boolean;
+          read: () => { value: number; samples: unknown[] };
+        };
+      }).__hcLayoutShiftProbe;
+      return { supported: probe.supported, ...probe.read() };
+    });
+    await testInfo.attach(`products-loading-cls-${viewport.name}`, {
+      body: JSON.stringify(cls, null, 2),
+      contentType: "application/json",
+    });
+    expect(cls.supported).toBe(true);
+    expect(Math.abs(loadedFooter!.y - loadingFooter!.y), `${viewport.width}px 页脚不得在 PageDocument 替换时跳动`).toBeLessThan(1);
+    expect(cls.value, `${viewport.width}px /products loading→Hero CLS`).toBeLessThan(0.1);
+  });
+}
 
 const fiveModes = [
   publicProduct(1, "DIRECT_PURCHASE", { available: true }),

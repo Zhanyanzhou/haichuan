@@ -318,6 +318,7 @@ export default function ProductDetail() {
   const commerceEnabled = commerceFlags?.commerceEnabled ?? false;
   const cartEnabled = commerceFlags?.cartEnabled ?? false;
   const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
+  const productAudience = isSignedIn ? "member" : "public";
   // 心愿单仅对登录客户启用；游客仍可浏览公开安全字段。
   const [favorited, setFavorited] = useState(false);
   const [favBusy, setFavBusy] = useState(false);
@@ -399,7 +400,7 @@ export default function ProductDetail() {
     return () => {
       cancelled = true;
     };
-  }, [id, revision]);
+  }, [id, productAudience, revision]);
 
   useEffect(() => {
     if (!product?.id) {

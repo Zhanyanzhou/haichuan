@@ -31,7 +31,11 @@ import {
   SubmitPageDocumentReviewDto,
   ValidatePageDocumentDto,
 } from "./dto";
-import { parsePublicContentLocale } from "../../common/content-locale";
+import {
+  parsePublicContentLocale,
+  requireEditablePublicContentLocale,
+  requirePublishedPublicContentLocale,
+} from "../../common/content-locale";
 import type { StaffRequest } from "../../common/security/authenticated-principal";
 
 @ApiTags("页面模块")
@@ -53,7 +57,7 @@ export class PageModulesController {
   ) {
     return this.service.getLocalizedPublishedPageDocument(
       pageKey || "home",
-      parsePublicContentLocale(locale),
+      requirePublishedPublicContentLocale(locale),
     );
   }
 
@@ -77,7 +81,7 @@ export class PageModulesController {
   pageDocumentChangeStream(
     @Query("locale") locale?: string,
   ): Observable<MessageEvent> {
-    parsePublicContentLocale(locale);
+    requirePublishedPublicContentLocale(locale);
     return this.service.publicChangeStream();
   }
 
@@ -106,7 +110,7 @@ export class PageModulesController {
   ) {
     return this.service.saveLocalizedPageDocument(
       body.pageKey,
-      parsePublicContentLocale(body.locale),
+      requireEditablePublicContentLocale(body.locale),
       body.puckData,
       body.metadata,
       body.editorVersion,
@@ -126,7 +130,7 @@ export class PageModulesController {
   ) {
     return this.service.publishLocalizedPageDocument(
       body?.pageKey || "home",
-      parsePublicContentLocale(body.locale),
+      requireEditablePublicContentLocale(body.locale),
       req.user.id,
       body.expectedUpdatedAt,
       body.expectedContentHash,
@@ -144,7 +148,7 @@ export class PageModulesController {
   ) {
     return this.service.discardLocalizedPageDocumentDraft(
       pageKey || "home",
-      parsePublicContentLocale(locale),
+      requireEditablePublicContentLocale(locale),
       expectedUpdatedAt,
     );
   }
@@ -156,7 +160,7 @@ export class PageModulesController {
   validateDocument(@Body() body: ValidatePageDocumentDto) {
     return this.service.validateLocalizedPageDocument(
       body?.pageKey || "home",
-      parsePublicContentLocale(body.locale),
+      requireEditablePublicContentLocale(body.locale),
       body?.puckData,
       body?.metadata,
     );
@@ -214,7 +218,7 @@ export class PageModulesController {
   ) {
     return this.service.restoreLocalizedPageDocumentRevision(
       body.pageKey || "home",
-      parsePublicContentLocale(body.locale),
+      requireEditablePublicContentLocale(body.locale),
       Number(version),
       body.expectedUpdatedAt,
       req.user.id,
@@ -234,7 +238,7 @@ export class PageModulesController {
   ) {
     return this.service.rollbackLocalizedPagePublication(
       body.pageKey || "home",
-      parsePublicContentLocale(body.locale),
+      requireEditablePublicContentLocale(body.locale),
       Number(revisionId),
       body.expectedPublishedRevisionId,
       req.user.id,
@@ -252,7 +256,7 @@ export class PageModulesController {
   ) {
     return this.service.submitLocalizedPageDocumentReview(
       body.pageKey || "home",
-      parsePublicContentLocale(body.locale),
+      requireEditablePublicContentLocale(body.locale),
       body.expectedUpdatedAt,
       body.expectedContentHash,
       req.user.id,
@@ -271,7 +275,7 @@ export class PageModulesController {
   ) {
     return this.service.reviewLocalizedPageDocument(
       body.pageKey || "home",
-      parsePublicContentLocale(body.locale),
+      requireEditablePublicContentLocale(body.locale),
       body.action,
       body.expectedUpdatedAt,
       body.expectedContentHash,

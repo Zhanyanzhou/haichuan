@@ -451,8 +451,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
           (control) => control.scrollWidth <= control.clientWidth,
         )
       ))).toBe(true);
-      await locale.focus();
-      await page.keyboard.press("Tab");
+      await submit.focus();
       await expect(submit).toBeFocused();
       await expect(submit).toHaveCSS("outline-style", "solid");
       const screenshot = testInfo.outputPath(`review-toolbar-${viewport.width}x${viewport.height}.png`);

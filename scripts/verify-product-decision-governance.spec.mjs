@@ -38,7 +38,7 @@ test("稳定状态必须位于自己的决定章节", async () => {
   );
 });
 
-test("D.32-D.34 的适用范围、启用条件、替代关系和验证入口不能缺失或漂移", async () => {
+test("D.32-D.35 的适用范围、启用条件、替代关系和验证入口不能缺失或漂移", async () => {
   const missingActivation = await loadDecisionGovernanceSnapshot();
   missingActivation.decisions = missingActivation.decisions.replace(
     '"activation":["approved-candidate","target-environment","merchant-and-channel-identity","end-to-end-funds","production-approval"],',

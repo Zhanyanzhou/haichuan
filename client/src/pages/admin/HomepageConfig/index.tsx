@@ -2280,7 +2280,7 @@ export default function StoreDecorationWorkbench({
   // 页面装修可由编辑与管理员完成；母模板设计是全站级结构权限，
   // 前后端统一只向 SUPER_ADMIN 开放。
   const canManageTemplates = adminRole === "SUPER_ADMIN";
-  const [contentLocale, setContentLocale] = useState<PublicContentLocale>("zh-CN");
+  const contentLocale: PublicContentLocale = "zh-CN";
   const [workspaceMode, setWorkspaceMode] = useState<EditorWorkspaceMode>("page");
   const pageViewportBeforeTemplateRef = useRef<{ width: number; height: number } | null>(null);
   const pageWorkspaceController = usePageWorkspaceController({
@@ -2622,7 +2622,6 @@ export default function StoreDecorationWorkbench({
           {workspaceMode === "page" ? (
             <EditorToolbar
             pageKey={pageKey}
-            locale={contentLocale}
             reviewStatus={reviewStatus ?? "DRAFT"}
             publishing={publishing}
             saving={saving}
@@ -2641,8 +2640,6 @@ export default function StoreDecorationWorkbench({
             publishReviewActive={publishReviewActive}
             publishReviewErrorCount={publishReviewIssues.filter((issue) => issue.severity === "error").length}
             onOpenPublishReview={openPublishReview}
-            onLocaleChange={setContentLocale}
-            localeSwitchDisabled={hasProtectedUnsavedChanges || saving || publishing}
             onSubmitReview={() => { void submitForReview(); }}
             onApproveReview={() => { void reviewDraft("APPROVE"); }}
             isOwnReviewSubmission={reviewSubmittedBy === adminUser?.id}

@@ -1,18 +1,11 @@
 import {
-  useCallback,
+  lazy,
+  Suspense,
   useEffect,
-  useRef,
-  useState,
 } from "react";
-import { useOutletContext, useParams } from "react-router-dom";
-import { pageDocumentApi } from "@/services/api";
-import { unwrapResponse } from "@/utils/unwrap";
+import { useOutletContext } from "react-router-dom";
 import { trackPageView } from "@/hooks/useAnalytics";
-import {
-  ensureEditorPageStructure,
-  getEditorPage,
-  isEditorPageKey,
-} from "@/page-builder/config/editorPages";
+import { getEditorPage } from "@/page-builder/config/editorPages";
 import {
   usePublishedPageDocument,
   type PublishedPageDocumentResource,
@@ -20,31 +13,129 @@ import {
 import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
-import PuckDocumentRenderer, {
-  type PuckDocument,
-} from "@/page-builder/runtime/PuckDocumentRenderer";
-import { migratePuckData } from "@/page-builder/utils/migratePuckData";
-import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
+import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
 
 const LG = "#F4F5F5";
+const PuckDocumentRenderer = lazy(() => import("@/page-builder/runtime/PuckDocumentRenderer"));
 
-function HomeDocumentLoading({ english = false }: { english?: boolean }) {
+type HomeHeroPreview = {
+  image: string;
+  mobileImage: string;
+  title: string;
+  subtitle: string;
+  eyebrow: string;
+};
+
+function text(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+/**
+ * 公开首页在完整 Renderer 分块到达前只读取已发布文档的首个 Hero。
+ * 这不是第二套内容：同一份 PageDocument 仍是唯一输入，只是先稳定呈现
+ * 首屏的图片、标题和空间，避免访客看到技术性的全屏加载页。
+ */
+function getHomeHeroPreview(data?: PuckDocument | null): HomeHeroPreview {
+  const blocks = Array.isArray(data?.content) ? data.content : [];
+  const hero = blocks.find((block) => block?.type === "首屏主视觉" && block.props?.isVisible !== false);
+  // Puck 的已发布首屏字段直接位于 block.props；此处必须与公开 Renderer、
+  // 发布校验和初始模板保持同一数据结构，不能再造嵌套 content 副本。
+  const content = hero?.props && typeof hero.props === "object" && !Array.isArray(hero.props)
+    ? hero.props as Record<string, unknown>
+    : {};
+  const desktopImage = text(content?.desktopImage);
+  const mobileImage = text(content?.mobileImage);
+  return {
+    image: desktopImage || mobileImage,
+    mobileImage: mobileImage || desktopImage,
+    title: text(content?.title),
+    subtitle: text(content?.subtitle),
+    eyebrow: text(content?.eyebrow),
+  };
+}
+export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
+  const hero = getHomeHeroPreview(data);
+  const hasCopy = Boolean(hero.eyebrow || hero.title || hero.subtitle);
+
   return (
-    <div aria-busy="true" style={{ background: LG, minHeight: "100vh", display: "grid", placeItems: "center" }}>
-      <h1 className="sr-only">{english ? "Haichuan Jewelry" : "海川珠宝"}</h1>
-      <span style={{ color: "#5F6568", fontSize: 12, letterSpacing: ".16em" }}>{english ? "Loading home" : "正在载入首页"}</span>
-    </div>
+    <section
+      aria-busy="true"
+      aria-label="首页首屏"
+      data-page-document-state="loading"
+      style={{
+        position: "relative",
+        isolation: "isolate",
+        minHeight: "max(620px, 100svh)",
+        overflow: "hidden",
+        background: hero.image ? "#181A1B" : LG,
+        color: hero.image ? "#FFFFFF" : "#181A1B",
+      }}
+    >
+      {hero.image ? (
+        <picture>
+          {hero.mobileImage ? <source media="(max-width: 767px)" srcSet={hero.mobileImage} /> : null}
+          <img
+            src={hero.image}
+            alt=""
+            aria-hidden="true"
+            fetchPriority="high"
+            decoding="async"
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              zIndex: -2,
+            }}
+          />
+        </picture>
+      ) : null}
+      {hero.image && hasCopy ? (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: -1,
+            background: "linear-gradient(90deg, rgba(16,18,19,.58) 0%, rgba(16,18,19,.24) 42%, rgba(16,18,19,0) 72%)",
+          }}
+        />
+      ) : null}
+      {hasCopy ? (
+        <div
+          style={{
+            display: "grid",
+            alignContent: "end",
+            minHeight: "max(620px, 100svh)",
+            width: "min(100%, 1440px)",
+            margin: "0 auto",
+            padding: "clamp(128px, 16vw, 236px) clamp(24px, 7vw, 136px)",
+          }}
+        >
+          <div style={{ maxWidth: 620 }}>
+            {hero.eyebrow ? (
+              <p style={{ margin: "0 0 18px", fontSize: 11, letterSpacing: "0.18em", lineHeight: 1.4 }}>
+                {hero.eyebrow}
+              </p>
+            ) : null}
+            {hero.title ? (
+              <h1 style={{ margin: 0, fontFamily: 'var(--hc-font-display, "Noto Serif SC", serif)', fontSize: "clamp(42px, 5.2vw, 76px)", fontWeight: 400, lineHeight: 1.14 }}>
+                {hero.title}
+              </h1>
+            ) : null}
+            {hero.subtitle ? (
+              <p style={{ margin: "20px 0 0", fontFamily: 'var(--hc-font-display, "Noto Serif SC", serif)', fontSize: "clamp(17px, 1.45vw, 22px)", fontStyle: "italic", lineHeight: 1.7 }}>
+                {hero.subtitle}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : <span className="sr-only">首页内容正在准备</span>}
+    </section>
   );
 }
-
 export default function Home() {
-  const english = getBrowserPublicContentLocale() === "en";
-  const homeFallback = english ? {
-    eyebrow: "HAICHUAN JEWELRY",
-    title: "English home is not published",
-    description: "This language version is unavailable until an approved English page is published.",
-    primaryAction: { label: "Try again later", href: "/en" },
-  } : getEditorPage("home").publicFallback;
+  const homeFallback = getEditorPage("home").publicFallback;
   const layoutDocumentResource = useOutletContext<PublishedPageDocumentResource | null>();
   // 正常公开路由消费 PublicLayout 的单一资源；独立挂载 Home 时保留安全读取能力。
   const standaloneDocumentResource = usePublishedPageDocument(
@@ -62,7 +153,7 @@ export default function Home() {
   }, []);
 
   if (documentStatus === "idle" || documentStatus === "loading") {
-    return <HomeDocumentLoading english={english} />;
+    return <HomeFirstFold />;
   }
 
   if (documentStatus === "error" || documentStatus === "invalid") {
@@ -71,17 +162,17 @@ export default function Home() {
     return (
       <PublicPageFallback
         pageKey="home"
-        pageLabel={english ? "Home" : "店铺首页"}
+        pageLabel="店铺首页"
         status={documentStatus}
         content={fallback ? {
           ...fallback,
-          title: english ? (isReadFailure ? "English home is temporarily unavailable" : "English home is being prepared") : (isReadFailure ? "首页暂不可用" : "首页正在完善"),
+          title: isReadFailure ? "首页暂不可用" : "首页正在完善",
           description: isReadFailure
-            ? (english ? "The English page could not be loaded. Please try again." : "首页内容暂时无法载入。您可以重新载入，或先进入选款中心浏览当前公开款式。")
-            : (english ? "This English page must pass review before it can be shown." : "首页现有内容需要重新审核后才能公开。您可以先进入选款中心，或了解珠宝定制服务。"),
+            ? "首页内容暂时无法载入。您可以重新载入，或先进入选款中心浏览当前公开款式。"
+            : "首页现有内容需要重新审核后才能公开。您可以先进入选款中心，或了解珠宝定制服务。",
         } : undefined}
         onRetry={isReadFailure ? () => void refreshDocument(true) : undefined}
-        locale={english ? "en" : "zh-CN"}
+        locale="zh-CN"
       />
     );
   }
@@ -90,10 +181,10 @@ export default function Home() {
     return (
       <PublicPageFallback
         pageKey="home"
-        pageLabel={english ? "Home" : "店铺首页"}
+        pageLabel="店铺首页"
         status="unpublished"
         content={homeFallback}
-        locale={english ? "en" : "zh-CN"}
+        locale="zh-CN"
       />
     );
   }
@@ -102,10 +193,10 @@ export default function Home() {
     return (
       <PublicPageFallback
         pageKey="home"
-        pageLabel={english ? "Home" : "店铺首页"}
+        pageLabel="店铺首页"
         status="invalid"
         content={homeFallback}
-        locale={english ? "en" : "zh-CN"}
+        locale="zh-CN"
       />
     );
   }
@@ -116,14 +207,14 @@ export default function Home() {
     return (
       <PublicPageFallback
         pageKey="home"
-        pageLabel={english ? "Home" : "店铺首页"}
+        pageLabel="店铺首页"
         status="invalid"
         content={fallback ? {
           ...fallback,
-          title: english ? "English home is being prepared" : "首页正在完善",
-          description: english ? "This English page has not passed the publication checks." : "首页内容尚未满足公开展示要求。您可以先进入选款中心，或了解珠宝定制服务。",
+          title: "首页正在完善",
+          description: "首页内容尚未满足公开展示要求。您可以先进入选款中心，或了解珠宝定制服务。",
         } : undefined}
-        locale={english ? "en" : "zh-CN"}
+        locale="zh-CN"
       />
     );
   }
@@ -150,169 +241,19 @@ export default function Home() {
 
   return (
     <div data-page-document-state="published" style={{ background: LG }}>
-      {!hasVisibleHeroTitle ? <h1 className="sr-only">{english ? "Haichuan Jewelry" : "海川珠宝"}</h1> : null}
-      <PuckDocumentRenderer
-        data={readiness.data as PuckDocument}
-        surface="home"
-        heroHeadingLevel={hasVisibleHeroTitle ? 1 : 2}
-      />
+      {!hasVisibleHeroTitle ? <h1 className="sr-only">海川珠宝</h1> : null}
+      <Suspense fallback={<HomeFirstFold data={readiness.data as PuckDocument} />}>
+        <PuckDocumentRenderer
+          data={readiness.data as PuckDocument}
+          surface="home"
+          heroHeadingLevel={hasVisibleHeroTitle ? 1 : 2}
+        />
+      </Suspense>
       <StaleDocumentNotice
         visible={documentStale}
         onRefresh={() => void refreshDocument(false)}
-        locale={english ? "en" : "zh-CN"}
+        locale="zh-CN"
       />
     </div>
-  );
-}
-
-function useDraftPageDocument(pageKey = "home") {
-  const [pageDocument, setPageDocument] = useState<{
-    puckData?: PuckDocument;
-  } | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const refresh = useCallback(
-    async () => {
-      setStatus("loading");
-      try {
-        const response = await pageDocumentApi.getAdmin(pageKey);
-        if (mountedRef.current) {
-          setPageDocument(unwrapResponse<{ puckData?: PuckDocument } | null>(response));
-          setStatus("ready");
-        }
-      } catch {
-        if (mountedRef.current) {
-          setPageDocument(null);
-          setStatus("error");
-        }
-      }
-    },
-    [pageKey],
-  );
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  return { pageDocument, status, refresh };
-}
-
-export function HomePreview() {
-  return <PagePreview pageKey="home" />;
-}
-
-export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
-  const { pageKey: routePageKey } = useParams();
-  const pageKey = pageKeyProp || routePageKey || "home";
-  const { pageDocument, status, refresh } = useDraftPageDocument(pageKey);
-  const previewData = pageDocument?.puckData && isEditorPageKey(pageKey)
-    ? ensureEditorPageStructure(pageKey, migratePuckData(pageDocument.puckData))
-    : null;
-
-  if (status === "loading") {
-    return <main aria-busy="true" style={{ background: LG, minHeight: "100vh" }} />;
-  }
-
-  if (status === "error") {
-    return (
-      <main
-        data-page-document-state="preview-error"
-        style={{
-          background: LG,
-          minHeight: "70vh",
-          display: "grid",
-          placeItems: "center",
-          padding: 24,
-        }}
-      >
-        <section
-          role="alert"
-          aria-label="草稿预览暂时无法载入"
-          style={{
-            width: "min(100%, 520px)",
-            padding: "32px 28px",
-            background: "#FFFFFF",
-            border: "1px solid #DDE1E2",
-            textAlign: "center",
-          }}
-        >
-          <h1 style={{ margin: 0, color: "#181A1B", fontSize: 24, fontWeight: 500 }}>
-            草稿预览暂时无法载入
-          </h1>
-          <p style={{ margin: "14px 0 24px", color: "#5F6568", lineHeight: 1.7 }}>
-            当前没有展示推荐结构或历史内容，请重新载入以核对最新草稿。
-          </p>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            style={{
-              minHeight: 42,
-              padding: "0 20px",
-              border: "1px solid #181A1B",
-              background: "#181A1B",
-              color: "#FFFFFF",
-              cursor: "pointer",
-            }}
-          >
-            重新载入草稿预览
-          </button>
-        </section>
-      </main>
-    );
-  }
-
-  if (!previewData) {
-    return (
-      <main
-        data-page-document-state="preview-empty"
-        style={{
-          background: LG,
-          minHeight: "70vh",
-          display: "grid",
-          placeItems: "center",
-          padding: 24,
-        }}
-      >
-        <section
-          role="status"
-          aria-labelledby="draft-preview-empty-title"
-          style={{
-            width: "min(100%, 520px)",
-            padding: "32px 28px",
-            background: "#FFFFFF",
-            border: "1px solid #DDE1E2",
-            textAlign: "center",
-          }}
-        >
-          <h1
-            id="draft-preview-empty-title"
-            style={{ margin: 0, color: "#181A1B", fontSize: 24, fontWeight: 500 }}
-          >
-            尚无已保存草稿
-          </h1>
-          <p style={{ margin: "14px 0 0", color: "#5F6568", lineHeight: 1.7 }}>
-            请先在店铺装修中保存草稿再预览。当前不会展示推荐结构或历史内容。
-          </p>
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <main style={{ background: LG }}>
-      <PuckDocumentRenderer
-        data={previewData}
-        mode="preview"
-        surface={pageKey === "home" ? "home" : undefined}
-      />
-    </main>
   );
 }

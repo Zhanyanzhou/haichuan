@@ -61,7 +61,7 @@ export const editorPages: EditorPageDefinition[] = [
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
-      eyebrow: "HAICHUAN JEWELRY",
+      eyebrow: "海川珠宝",
       title: "首页正在准备",
       description: "首页内容正在整理。您可以先进入选款中心浏览当前公开款式，或了解珠宝定制服务。",
       primaryAction: { label: "进入选款中心", href: "/catalog" },
@@ -76,7 +76,7 @@ export const editorPages: EditorPageDefinition[] = [
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
-      eyebrow: "ABOUT HAICHUAN",
+      eyebrow: "关于海川",
       title: "关于海川",
       description:
         "品牌、作品与工艺资料正在核验。您可以先浏览当前公开款式，或预约珠宝顾问了解更多。",
@@ -92,7 +92,7 @@ export const editorPages: EditorPageDefinition[] = [
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
-      eyebrow: "CURATED EXHIBITION",
+      eyebrow: "作品展陈",
       title: "珠宝作品正在策展",
       description:
         "我们正在完成作品资料与材质工艺内容的审核。您可以先浏览当前已公开款式，或预约珠宝顾问获得协助。",
@@ -122,7 +122,7 @@ export const editorPages: EditorPageDefinition[] = [
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
-      eyebrow: "BESPOKE SERVICE",
+      eyebrow: "定制服务",
       title: "珠宝定制",
       description:
         "定制内容正在整理。您可以先提交咨询需求，由珠宝顾问了解您的佩戴场景与偏好。",

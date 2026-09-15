@@ -388,16 +388,17 @@ test("静态 SEO 正文只使用已审核 SEO 字段，不收集隐藏或内部 
   assert.doesNotMatch(serialized, /供应商内部备注不得公开|网站内容正在完善/);
 });
 
-test("只有完整且独立审核的四个英文页面才能进入快照", async () => {
-  const result = await createPublicSeoExportInput(database({ includeEnglish: true }).value, config, validatePage, NOW);
-  assert.equal(result.routes.filter((route) => route.locale === "en").length, 4);
-  assert.ok(result.routes.some((route) => route.path === "/en/about"));
-
-  const incomplete = database({ includeEnglish: true });
-  const rows = await incomplete.value.pageDocument.findMany({});
-  rows.find((entry) => entry.pageKey === "about").localizations = rows.find((entry) => entry.pageKey === "about").localizations.filter((entry: any) => entry.locale !== "EN");
-  incomplete.value.pageDocument.findMany = async () => structuredClone(rows);
-  await assert.rejects(() => createPublicSeoExportInput(incomplete.value, config, validatePage, NOW), /ENGLISH_PUBLISHED_PAGE_SET_INCOMPLETE/);
+test("历史英文页面记录保留但不会进入中文快照", async () => {
+  const rows = documents(true);
+  const result = await createPublicSeoExportInput(
+    database({ documents: rows }).value,
+    config,
+    validatePage,
+    NOW,
+  );
+  assert.doesNotMatch(JSON.stringify(result.routes), /\"locale\":\"en\"/);
+  assert.ok(result.routes.some((route) => route.path === "/about"));
+  assert.ok(rows.some((document) => document.localizations.some((entry) => entry.locale === "EN")));
 });
 
 test("草稿、缺失审核、中文 fallback 与 hash 漂移均失败关闭", async () => {
@@ -459,10 +460,17 @@ test("当前页面校验器或商品分类不满足发布资格时失败关闭",
   }
 });
 
-test("英文商品无发布审核模型，存在翻译时拒绝导出", async () => {
+test("历史英文商品翻译不阻断中文快照且不会被导出", async () => {
   const value = product();
   value.translations = [{ locale: "EN" }];
-  await assert.rejects(() => createPublicSeoExportInput(database({ products: [value] }).value, config, validatePage, NOW), /ENGLISH_REVIEW_EVIDENCE_UNAVAILABLE/);
+  const result = await createPublicSeoExportInput(
+    database({ products: [value] }).value,
+    config,
+    validatePage,
+    NOW,
+  );
+  assert.ok(result.routes.some((route) => route.path === "/products/HC-RING-01"));
+  assert.doesNotMatch(JSON.stringify(result.routes), /translations|\"locale\":\"en\"/);
 });
 
 test("不稳定货号、缺失主图、撤销授权和不完整 SEO 均失败关闭", async () => {

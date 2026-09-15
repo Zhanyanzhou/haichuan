@@ -15,6 +15,7 @@ export const REQUIRED_DECISION_STATUSES = Object.freeze({
   "D.32": "TARGET",
   "D.33": "ENABLED",
   "D.34": "OPTIONAL_HIGH_ASSURANCE",
+  "D.35": "RETIRED",
 });
 
 export const REQUIRED_DECISION_CONTRACTS = Object.freeze({
@@ -42,10 +43,22 @@ export const REQUIRED_DECISION_CONTRACTS = Object.freeze({
     supersedes: ["D.24:universal-high-assurance"],
     validation: ["test:release-supply-chain", "release-workflow", "target-environment-runbook"],
   }),
+  "D.35": Object.freeze({
+    scope: ["public-website", "english-locale", "en-routes"],
+    activation: ["none"],
+    supersedes: [
+      "D.20:bilingual-public-site",
+      "D.28:english-seo-artifact-exception",
+      "D.30:english-frozen-route-artifact",
+      "D.32:future-english-commerce",
+    ],
+    validation: ["test:decision-governance", "public-route-tests", "contracts:check"],
+  }),
 });
 
 export const REQUIRED_RETIRED_CAPABILITIES = Object.freeze({
   "page-recipe-guidance": "D.14",
+  "public-english-site": "D.35",
 });
 
 function error(code, detail = "") {

@@ -6,7 +6,7 @@ function apiResponse(data: unknown) {
 }
 
 test.describe("收敛闭环：公开语言与客户通知", () => {
-  test("英文内容页只请求英文公开事实，未开放英文业务区保持 noindex", async ({ page }) => {
+  test("退役英文链接只重定向中文且不请求英文公开事实", async ({ page }) => {
     const apiRequests: string[] = [];
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
@@ -21,65 +21,38 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
       await route.abort();
     });
 
-    await page.goto("/en/about");
-    await expect(page.getByRole("heading", { name: "About is not published" })).toBeVisible();
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
-      "content",
-      "noindex, nofollow",
-    );
-    expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=en"))).toBe(true);
-    expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=zh-CN"))).toBe(false);
+    await page.goto("/en/about?from=legacy#story");
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/about");
+    expect(new URL(page.url()).search).toBe("?from=legacy");
+    expect(new URL(page.url()).hash).toBe("#story");
+    await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+    expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=en"))).toBe(false);
+    expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=zh-CN"))).toBe(true);
 
     apiRequests.length = 0;
     await page.goto("/EN/about");
-    await expect(page.getByRole("heading", { name: "About is not published" })).toBeVisible();
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=en"))).toBe(true);
-    expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=zh-CN"))).toBe(false);
-
-    for (const path of [
-      "/en/catalog",
-      "/en/products/HC-001",
-      "/en/contact",
-      "/en/privacy",
-    ]) {
-      apiRequests.length = 0;
-      await page.goto(path);
-      await expect(
-        page.getByRole("heading", { name: "English site is not published yet" }),
-      ).toBeVisible();
-      await expect(page.locator("html")).toHaveAttribute("lang", "en");
-      await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
-        "content",
-        "noindex, nofollow",
-      );
-      await expect(page.locator('link[rel="canonical"]')).toHaveCount(0);
-      await expect(page.locator('[data-locale-availability="unavailable"]')).toBeVisible();
-      expect(apiRequests, path).toEqual([]);
-    }
-
-    await page.getByRole("link", { name: "Visit the Chinese site" }).click();
-    await expect.poll(() => new URL(page.url()).pathname).toBe("/");
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/about");
     await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+    expect(apiRequests.some((requestUrl) => requestUrl.includes("locale=en"))).toBe(false);
   });
 
-  test("英文页面只在本语言发布事实有效时开放，并在撤销或失效后清除旧正文", async ({ page }) => {
+  test("即使存在历史英文发布事实，旧英文链接也只渲染中文发布事实", async ({ page }) => {
     const englishTitle = "SYNTHETIC ENGLISH ABOUT PUBLICATION";
-    const publishedFact = {
+    const chineseTitle = "合成中文关于页面";
+    const chineseFact = {
       pageKey: "about",
-      locale: "en",
+      locale: "zh-CN",
       status: "PUBLISHED",
       puckData: {
         content: [{
           type: "首屏主视觉",
           props: {
-            id: "english-about-publication",
-            title: englishTitle,
-            subtitle: "English publication fact only",
+            id: "chinese-about-publication",
+            title: chineseTitle,
+            subtitle: "只允许中文公开事实",
             desktopImage: "/images/hero-desktop.jpg",
             mobileImage: "/images/hero-mobile.jpg",
-            altText: "Synthetic jewelry image",
+            altText: "合成珠宝图片",
             actionText: "",
             targetType: "none",
             linkUrl: "",
@@ -90,7 +63,17 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
       },
       metadata: {},
     };
-    let englishFact: unknown = publishedFact;
+    const historicalEnglishFact = {
+      ...chineseFact,
+      locale: "en",
+      puckData: {
+        ...chineseFact.puckData,
+        content: [{
+          ...chineseFact.puckData.content[0],
+          props: { ...chineseFact.puckData.content[0].props, title: englishTitle },
+        }],
+      },
+    };
     const requestedLocales: string[] = [];
 
     await page.route("**/api/**", async (route) => {
@@ -100,7 +83,7 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
         requestedLocales.push(locale);
         await route.fulfill({
           contentType: "application/json",
-          body: apiResponse(locale === "en" ? englishFact : null),
+          body: apiResponse(locale === "en" ? historicalEnglishFact : chineseFact),
         });
         return;
       }
@@ -108,31 +91,11 @@ test.describe("收敛闭环：公开语言与客户通知", () => {
     });
 
     await page.goto("/en/about");
-    await expect(page.getByText(englishTitle, { exact: true })).toBeVisible();
-    await expect(page.locator('[data-locale-availability="unavailable"]')).toHaveCount(0);
-    expect(requestedLocales.filter((locale) => locale === "en").length).toBeGreaterThan(0);
-
-    englishFact = {
-      pageKey: "about",
-      status: "INVALID",
-      invalidReason: "publication-revalidation-required",
-    };
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await expect(page.getByRole("heading", { name: "About is not published" })).toBeVisible();
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/about");
+    await expect(page.getByText(chineseTitle, { exact: true })).toBeVisible();
     await expect(page.getByText(englishTitle, { exact: true })).toHaveCount(0);
-    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
-      "content",
-      "noindex, nofollow",
-    );
-
-    englishFact = publishedFact;
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await expect(page.getByText(englishTitle, { exact: true })).toBeVisible();
-
-    englishFact = null;
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await expect(page.getByRole("heading", { name: "About is not published" })).toBeVisible();
-    await expect(page.getByText(englishTitle, { exact: true })).toHaveCount(0);
+    expect(requestedLocales).not.toContain("en");
+    expect(requestedLocales).toContain("zh-CN");
   });
 
   test("已登录客户只能通过本人 Cookie 会话读取并更新服务通知", async ({ page }) => {

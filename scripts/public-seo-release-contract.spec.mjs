@@ -38,7 +38,10 @@ test("Nginx serves only generated indexable routes while preserving protected SP
   assert.ok(nginx.includes("include /etc/nginx/public-seo-routes.conf;"));
   assert.ok(nginxMain.includes("include /etc/nginx/public-seo-policy.conf;"));
   assert.match(nginx, /location = \/search \{\s+return 308 \/catalog\$is_args\$args;/);
-  assert.match(nginx, /location ~\* \^\/en\(\?:\/\|\$\) \{\s+error_page 404 =404 \/404-en\.html;\s+return 404;/);
+  assert.match(nginx, /location = \/en \{\s+return 308 \/\$is_args\$args;\s+absolute_redirect off;/);
+  assert.ok(nginx.includes("location ~* ^/en/([^/].*)$ {"));
+  assert.match(nginx, /location ~\* \^\/en\(\?:\/\|\$\) \{\s+return 404;/);
+  assert.doesNotMatch(nginx, /404-en\.html/);
   assert.match(nginx, /location \/ \{[\s\S]*?try_files \$uri =404;/);
   assert.ok(generator.includes("renderPublicSeoPolicy"));
   assert.ok(generator.includes("admin|preview|customer|cart|checkout|partner"));
@@ -141,13 +144,13 @@ test("SEO tunnel overlay exposes MySQL only on an explicit loopback high port", 
 test("runbook keeps PageDocument publication separate from immutable public-route activation", () => {
   const runbook = read("docs/PRODUCTION_RELEASE_RUNBOOK.md");
   for (const required of [
-    "后台把 PageDocument 标记为已发布，只会更新数据库中的已审核发布事实",
-    "直接访问尚未进入当前镜像的英文路由仍应为 404",
+    "后台把 PageDocument 标记为已发布，只会更新数据库中的已审核中文发布事实",
+    "历史 `/en` 与 `/en/<path>` 只允许同源 `308` 到对应中文路径",
     "手动运行 `Export Public SEO Snapshot`",
     "不得手工编辑 snapshot，也不得复用发布前的 artifact",
     "运行 `Release Images`",
     "数据库发布本身不授权构建、部署或切流",
-    "至少一个未发布英文路径和一个未知英文路径仍为 404",
+    "`/en//...`、编码斜杠和反斜杠必须失败关闭",
     "取消发布和内容回滚遵循同一方向",
   ]) {
     assert.ok(runbook.includes(required), `missing explicit PageDocument activation contract: ${required}`);

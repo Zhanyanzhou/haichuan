@@ -45,9 +45,10 @@ export function sendPublicMedia(
   request: Pick<Request, 'method' | 'headers'>,
   response: Response,
   media: MediaResponse,
+  cacheControl = 'public, no-store',
 ) {
   const size = media.buffer.byteLength;
-  response.setHeader('Cache-Control', 'public, no-store');
+  response.setHeader('Cache-Control', cacheControl);
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('Accept-Ranges', 'bytes');
   response.type(media.mimeType);
@@ -154,7 +155,14 @@ export class PublicUploadsGateway implements OnModuleInit {
               requirePublicAuthorization,
             );
           })
-          .then((media) => sendPublicMedia(request, response, media))
+          .then((media) => sendPublicMedia(
+            request,
+            response,
+            media,
+            requirePublicAuthorization
+              ? 'public, no-store'
+              : 'public, max-age=604800, stale-while-revalidate=86400',
+          ))
           .catch(next);
         return;
       }

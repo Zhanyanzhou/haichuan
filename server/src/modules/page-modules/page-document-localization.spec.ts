@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BadRequestException, ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import {
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
@@ -73,22 +73,30 @@ test("无语言标记的旧 revision 只属于中文，不能成为英文回退"
   }, "zh-CN"), false);
 });
 
-test("公开页面接口把 en 原样交给本地化读取，缺省 locale 仍为 zh-CN", async () => {
+test("公开页面接口在读取事实源前拒绝 en，缺省 locale 仍为 zh-CN", async () => {
   const calls: Array<{ pageKey: string; locale: string }> = [];
   const service = {
     getLocalizedPublishedPageDocument: async (pageKey: string, locale: string) => {
       calls.push({ pageKey, locale });
       return { pageKey, locale, status: "PUBLISHED" };
     },
+    getLocalizedPageDocument: async (pageKey: string, locale: string) => {
+      calls.push({ pageKey, locale });
+      return { pageKey, locale, status: "HISTORICAL" };
+    },
   };
   const controller = new PageModulesController(service as any);
 
-  await controller.getPublishedDocument("home", "en");
+  await assert.rejects(
+    async () => controller.getPublishedDocument("home", "en"),
+    (error: unknown) => error instanceof NotFoundException,
+  );
   await controller.getPublishedDocument("about", undefined);
+  await controller.getAdminDocument("about", "en");
 
   assert.deepEqual(calls, [
-    { pageKey: "home", locale: "en" },
     { pageKey: "about", locale: "zh-CN" },
+    { pageKey: "about", locale: "en" },
   ]);
 });
 

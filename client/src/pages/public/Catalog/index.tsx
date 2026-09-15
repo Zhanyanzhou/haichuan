@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { App as AntdApp } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
+import { useCustomerAuthStore } from "@/store/customerAuthStore";
 import type { CatalogProduct } from "@/data/catalogData";
 import {
   expandCategoryIds,
@@ -258,6 +259,9 @@ export default function Catalog({
     return () => window.cancelAnimationFrame(frame);
   }, [editorPreview, location.hash, location.key]);
   const selectedIds = useSelectionStore((s) => s.selectedIds);
+  const catalogAudience = useCustomerAuthStore((state) => state.isLoggedIn)
+    ? "member"
+    : "public";
   const removeInvalidSelections = useSelectionStore((s) => s.removeMany);
   const { materialOptions, craftOptions } = useAttributeDictionary();
 
@@ -327,6 +331,7 @@ export default function Catalog({
     revision: catalogRevision,
   } = useProductData(catalogQuery, {
     loadCategories: false,
+    refreshKey: catalogAudience,
   });
   const apiLoading = productsLoading || (Boolean(categoryTarget) && categoriesLoading);
   const apiError = productsError || (categoryTarget ? categoriesError : null);

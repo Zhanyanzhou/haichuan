@@ -463,3 +463,6 @@ export default function AdminLayout() {
     </div>
   );
 }
+import "@/styles/adminLuxury.css";
+import "@/styles/adminDashboard.css";
+import "@/styles/adminCompatibility.css";

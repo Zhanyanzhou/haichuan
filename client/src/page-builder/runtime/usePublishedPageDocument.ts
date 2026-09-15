@@ -80,6 +80,23 @@ export function isPublishedPageDocument(
 }
 
 /**
+ * 发布流程会把首页的同一份已发布 PageDocument 随静态首屏一同输出。
+ * 浏览器只在首个挂载周期读取它；后续仍由既有公开接口和发布事件校准。
+ * 解析失败或页面键不匹配时安全忽略，绝不把静态 HTML 当作新的内容来源。
+ */
+function readPrerenderedPublishedPageDocument(pageKey?: string): PublishedPageDocument | null {
+  if (!pageKey || typeof document === "undefined") return null;
+  const node = document.getElementById("hc-published-page-document");
+  if (!node?.textContent) return null;
+  try {
+    const value = JSON.parse(node.textContent) as unknown;
+    return isPublishedPageDocument(value, pageKey) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 统一公开发布态语义：
  * - 200 + null = 从未发布；
  * - 非空但结构不合法 = invalid；
@@ -91,12 +108,17 @@ export function usePublishedPageDocument(
   localeOverride?: PublicContentLocale,
 ): PublishedPageDocumentResource {
   const locale = localeOverride ?? getBrowserPublicContentLocale();
-  const [state, setState] = useState<PublishedPageDocumentState>({
-    pageKey: undefined,
-    pageDocument: null,
-    status: pageKey ? "loading" : "idle",
+  const initialBootstrapRef = useRef<PublishedPageDocument | null | undefined>(undefined);
+  if (initialBootstrapRef.current === undefined) {
+    initialBootstrapRef.current = readPrerenderedPublishedPageDocument(pageKey);
+  }
+  const initialBootstrap = initialBootstrapRef.current;
+  const [state, setState] = useState<PublishedPageDocumentState>(() => ({
+    pageKey: initialBootstrap?.pageKey,
+    pageDocument: initialBootstrap ?? null,
+    status: initialBootstrap ? "published" : (pageKey ? "loading" : "idle"),
     stale: false,
-  });
+  }));
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
   const activeRefreshRef = useRef<{ key: string; pending: boolean } | null>(null);
@@ -104,7 +126,9 @@ export function usePublishedPageDocument(
     key: string;
     pageKey: string;
     pageDocument: PublishedPageDocument;
-  } | null>(null);
+  } | null>(initialBootstrap && pageKey
+    ? { key: `${locale}:${pageKey}`, pageKey, pageDocument: initialBootstrap }
+    : null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -232,16 +256,16 @@ export function usePublishedPageDocument(
     }
   }, [locale, pageKey]);
 
+  usePagePublishStream(pageKey, () => {
+    void refresh(false);
+  }, locale);
+
   useEffect(() => {
     if (lastValidRef.current?.key !== `${locale}:${pageKey ?? ""}`) {
       lastValidRef.current = null;
     }
     void refresh(true);
   }, [locale, pageKey, refresh]);
-
-  usePagePublishStream(pageKey, () => {
-    void refresh(false);
-  }, locale);
 
   // 页面重新可见时主动对齐 revision，弥补断网、合盖或后台标签页期间错过的发布事件。
   useEffect(() => {

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation, useOutletContext } from "react-router-dom";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { getPageDocumentMeta, usePageMetaStore } from "@/store/pageMetaStore";
 import {
   PublicSiteSettingsProvider,
@@ -26,17 +26,14 @@ import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 import StorefrontFooter from "./StorefrontFooter";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
-import {
-  DEFAULT_PUBLIC_CONTENT_LOCALE,
-  resolvePublicLocalePath,
-  withPublicLocalePath,
-} from "@/i18n/publicLocale";
+import { resolvePublicLocalePath, withPublicLocalePath } from "@/i18n/publicLocale";
 import { useCustomerAuthStore, type CustomerAccount } from "@/store/customerAuthStore";
 import { customerApi } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
+import RouteLoading from "@/components/common/RouteLoading";
 
 const NON_PUBLIC_SYSTEM_HERO_MEDIA = new Set([
   "/images/system/product-placeholder.svg",
@@ -221,13 +218,6 @@ const publicSiteOrigin = normalizePublicSiteOrigin(
   { allowHttp: import.meta.env.DEV },
 );
 
-const ENGLISH_PUBLIC_CONTENT_PAGE_KEYS = new Set([
-  "home",
-  "products",
-  "about",
-  "custom",
-]);
-
 /* ═══════ 内联图标 ═══════ */
 const MenuIcon = () => (
   <svg
@@ -319,12 +309,6 @@ const AccountIcon = () => (
 
 export default function PublicLayout() {
   const location = useLocation();
-  const parentOutletContext = useOutletContext<{
-    englishPublication?: {
-      pageKey: string;
-      documentResource: PublishedPageDocumentResource;
-    };
-  } | null>();
   const localizedPath = resolvePublicLocalePath(location.pathname);
   const english = localizedPath.locale === "en";
   const contentPathname = localizedPath.pathname;
@@ -352,40 +336,18 @@ export default function PublicLayout() {
     : undefined;
   const isHome = contentPathname === "/" || previewPage?.key === "home";
   const pageDefinition = getEditorPageByPath(contentPathname) ?? previewPage;
-  const parentEnglishPublication = parentOutletContext?.englishPublication;
-  const inheritedEnglishPublication = english
-    && parentEnglishPublication
-    && parentEnglishPublication?.pageKey === pageDefinition?.key
-      ? parentEnglishPublication.documentResource
-      : null;
   const standalonePublishedHeaderDocumentResource = usePublishedPageDocument(
-    previewPage || inheritedEnglishPublication ? undefined : pageDefinition?.key,
+    previewPage ? undefined : pageDefinition?.key,
     localizedPath.locale,
   );
-  const publishedHeaderDocumentResource = inheritedEnglishPublication
-    ?? standalonePublishedHeaderDocumentResource;
+  const publishedHeaderDocumentResource = standalonePublishedHeaderDocumentResource;
   const publishedHeaderDocument = omitNonPublicProductsHeroes(
     publishedHeaderDocumentResource,
     pageDefinition?.key,
   );
-  const supportsEnglishContent = Boolean(
-    pageDefinition && ENGLISH_PUBLIC_CONTENT_PAGE_KEYS.has(pageDefinition.key),
-  );
-  const alternateDocument = usePublishedPageDocument(
-    !previewPage
-      && supportsEnglishContent
-      && publishedHeaderDocument.status === "published"
-      ? pageDefinition?.key
-      : undefined,
-    english ? DEFAULT_PUBLIC_CONTENT_LOCALE : "en",
-  );
   const publishedHeaderReadiness = getPublishedPageReadiness(
     pageDefinition?.key,
     publishedHeaderDocument.pageDocument?.puckData,
-  );
-  const alternateReadiness = getPublishedPageReadiness(
-    pageDefinition?.key,
-    alternateDocument.pageDocument?.puckData,
   );
   const pageDocumentUnavailable = Boolean(
     !previewPage
@@ -394,6 +356,8 @@ export default function PublicLayout() {
   );
   const fallbackHasContactAction = Boolean(
     pageDocumentUnavailable
+    && publishedHeaderDocument.status !== "idle"
+    && publishedHeaderDocument.status !== "loading"
     && [
       pageDefinition?.publicFallback?.primaryAction,
       pageDefinition?.publicFallback?.secondaryAction,
@@ -617,37 +581,7 @@ export default function PublicLayout() {
         upsertMeta("name", "robots", "noindex, nofollow");
       };
     }
-    const alternateBasePath = contentPathname;
-    const currentLocaleReady = !pageDefinition
-      ? indexableSeoReady
-      : publishedHeaderDocument.status === "published" && publishedHeaderReadiness?.ready;
-    const counterpartReady = supportsEnglishContent
-      && alternateDocument.status === "published"
-      && alternateReadiness?.ready;
-    const chineseReady = english ? counterpartReady : currentLocaleReady;
-    const englishReady = english ? currentLocaleReady : counterpartReady;
-    const alternateLocales = [
-      ...(chineseReady
-        ? [{ locale: DEFAULT_PUBLIC_CONTENT_LOCALE, hrefLang: "zh-CN" }]
-        : []),
-      ...(englishReady
-        ? [{ locale: "en" as const, hrefLang: "en" }]
-        : []),
-    ];
-    const alternates = alternateLocales.flatMap(({ locale, hrefLang }) => {
-      const href = buildPublicUrl(
-        publicSiteOrigin,
-        withPublicLocalePath(alternateBasePath, locale),
-      );
-      return href ? [{ hrefLang, href }] : [];
-    });
-    const defaultHref = chineseReady
-      ? buildPublicUrl(
-          publicSiteOrigin,
-          withPublicLocalePath(alternateBasePath, DEFAULT_PUBLIC_CONTENT_LOCALE),
-        )
-      : null;
-    if (defaultHref) alternates.push({ hrefLang: "x-default", href: defaultHref });
+    const alternates = [{ hrefLang: "zh-CN", href: canonicalUrl }, { hrefLang: "x-default", href: canonicalUrl }];
     const immutableAlternates = new Set(
       initialPrerenderedSeoRef.current?.alternates.map(
         ({ hrefLang, href }) => `${hrefLang}\u0000${href}`,
@@ -678,9 +612,6 @@ export default function PublicLayout() {
     contentPathname,
     localizedPath.locale,
     english,
-    supportsEnglishContent,
-    alternateDocument.status,
-    alternateReadiness?.ready,
     publishedHeaderDocument.status,
     publishedHeaderReadiness?.ready,
   ]);
@@ -898,13 +829,9 @@ export default function PublicLayout() {
           replaceChildren={Boolean(decorationPage && !decorationPage.dynamic)}
           publicFallback={decorationFallback}
         >
-          {needsCustomerIdentity && customerAuthStatus === "unknown" ? (
-            <div className="flex min-h-[40vh] items-center justify-center" role="status">
-              {english ? "Checking account status…" : "正在确认账户状态…"}
-            </div>
-          ) : (
+          <Suspense fallback={<RouteLoading />}>
             <Outlet context={publishedHeaderDocument} />
-          )}
+          </Suspense>
         </PublishedPageDecoration>
       </main>
 

@@ -90,11 +90,13 @@ type RestartPhaseHandoff = {
   };
   v1InstanceIdentities: Array<{ instanceId: string; version: number }>;
   upgradedInstanceIdentities: Array<{ instanceId: string; version: number }>;
+  /** @deprecated D.35 后仅供跳过的历史双语用例反序列化，新的 QA 不再写入。 */
   bilingualPublication?: {
     pageKey: "about";
     zh: { contentHash: string; title: string; lastModified: string };
     en: { contentHash: string; title: string; lastModified: string };
   };
+  /** @deprecated D.35 后仅供跳过的历史双语用例反序列化，新的 QA 不再写入。 */
   bilingualPublicationV1?: {
     pageKey: "about";
     zh: {
@@ -110,6 +112,7 @@ type RestartPhaseHandoff = {
       publishedRevisionId: number;
     };
   };
+  /** @deprecated D.35 后仅供跳过的历史双语用例反序列化，新的 QA 不再写入。 */
   bilingualDraftState?: {
     pageKey: "about";
     zh: {
@@ -433,8 +436,7 @@ async function captureAndVerifyReviewToolbar(
         (control) => control.scrollWidth <= control.clientWidth,
       )
     )), `${viewport.width}×${viewport.height} 语言与审核文字不得裁切`).toBe(true);
-    await locale.focus();
-    await page.keyboard.press("Tab");
+    await submit.focus();
     await expect(submit).toBeFocused();
     await expect(submit).toHaveCSS("outline-style", "solid");
     await page.screenshot({
@@ -3498,9 +3500,6 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     if (!realQaHandoffPath) throw new Error("phase2 缺少 PAGE_BUILDER_QA_HANDOFF_PATH");
     const handoff = JSON.parse(readFileSync(realQaHandoffPath, "utf8")) as RestartPhaseHandoff;
     expect(handoff.qaRunId).toBe(process.env.PAGE_BUILDER_QA_RUN_ID);
-    const bilingualPublication = handoff.bilingualPublication;
-    if (!bilingualPublication) throw new Error("phase2 缺少双语发布快照交接事实");
-
     await page.setViewportSize({ width: 1600, height: 1000 });
     await loginThroughUi(page);
     await page.goto(`/admin/editor/${handoff.pageKey}`);
@@ -3564,40 +3563,6 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       extraHTTPHeaders: forwardedProtoHeaders,
     });
     const publicPage = await anonymous.newPage();
-
-    const englishApiAfterRestart = await responseData<PageDocumentSnapshot & { contentHash: string }>(
-      await anonymous.request.get(
-        `${browserBaseUrl}/api/page-modules/document/published?pageKey=${bilingualPublication.pageKey}&locale=en`,
-      ),
-    );
-    expect(englishApiAfterRestart).toMatchObject({
-      contentHash: bilingualPublication.en.contentHash,
-    });
-    expect(englishApiAfterRestart.puckData.content[0]?.props?.title).toBe(bilingualPublication.en.title);
-
-    const englishRouteResponse = await publicPage.goto(`${browserBaseUrl}/en/about`);
-    expect(englishRouteResponse?.status()).toBe(200);
-    await expect(publicPage.locator("html")).toHaveAttribute("lang", "en");
-    await expect(publicPage.getByText(bilingualPublication.en.title)).toBeVisible();
-    await expect(publicPage.locator("body")).not.toContainText(bilingualPublication.zh.title);
-    const englishRawHtml = await (await anonymous.request.get(`${browserBaseUrl}/en/about`)).text();
-    expect(englishRawHtml).toContain(`data-published-content-hash="${bilingualPublication.en.contentHash}"`);
-    expect(englishRawHtml).toContain(`<title>${bilingualPublication.en.title}</title>`);
-
-    const chineseRouteResponse = await anonymous.request.get(`${browserBaseUrl}/about`);
-    expect(chineseRouteResponse.status()).toBe(200);
-    const chineseRawHtml = await chineseRouteResponse.text();
-    expect(chineseRawHtml).toContain(`data-published-content-hash="${bilingualPublication.zh.contentHash}"`);
-    expect(chineseRawHtml).toContain(`<title>${bilingualPublication.zh.title}</title>`);
-
-    for (const pathname of ["/en/custom", "/en/not-a-published-route"]) {
-      const notFoundResponse = await anonymous.request.get(`${browserBaseUrl}${pathname}`);
-      expect(notFoundResponse.status()).toBe(404);
-      const notFoundHtml = await notFoundResponse.text();
-      expect(notFoundHtml).toContain('<html lang="en">');
-      expect(notFoundHtml).toContain("Page not available");
-      expect(notFoundHtml).toContain('content="noindex,nofollow"');
-    }
 
     await publicPage.goto(`${browserBaseUrl}/products`);
     const publicInstances = publicPage.locator("section[data-dynamic-template-version]").filter({
@@ -3733,9 +3698,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
         restoredTemplateReturnsToCatalog: true,
         rollbackCreatesNewPublicRevision: true,
         rollbackPreservesCurrentDraft: true,
-        publishedEnglishSnapshotRouteReturns200: true,
-        chineseRouteRemains200: true,
-        unpublishedAndUnknownEnglishRoutesReturn404: true,
+        chinesePublicRoutePersistsAfterRestart: true,
+        retiredEnglishContractCoveredInDedicatedPhase1Test: true,
       },
     }, null, 2), "utf8");
     await testInfo.attach("post-restart-closure-evidence", {
@@ -4113,7 +4077,57 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     ))).toBe(false);
   });
 
-  test("[phase1] 真实双语页面中文发布与英文隔离", async ({
+  test("[phase1] 英文退役后公开读取与新增写入均失败关闭", async ({ page, request }) => {
+    test.setTimeout(90_000);
+    await loginAndPrepareIsolatedQaSite(page);
+
+    const retiredDraft = await browserWriteResult(page, "/page-modules/document", {
+      pageKey: "about",
+      locale: "en",
+      puckData: { content: [], zones: {}, root: { props: {} } },
+      metadata: {
+        seoTitle: "Retired locale QA",
+        seoDescription: "Retired locale QA",
+        contentOwner: "QA",
+        mediaRights: [],
+      },
+      editorVersion: "0.22.4",
+    });
+    expect(retiredDraft.status).toBe(400);
+    expect(JSON.stringify(retiredDraft.body)).toContain("CONTENT_LOCALE_RETIRED");
+
+    for (const [path, payload, method] of [
+      ["/page-modules/document/review/submit", { pageKey: "about", locale: "en" }, "POST"],
+      ["/page-modules/document/review", { pageKey: "about", locale: "en", action: "APPROVE" }, "PUT"],
+      ["/page-modules/document/publish", { pageKey: "about", locale: "en" }, "PUT"],
+    ] as const) {
+      const result = await browserWriteResult(page, path, payload, method);
+      expect(result.status).toBe(400);
+      expect(JSON.stringify(result.body)).toContain("CONTENT_LOCALE_RETIRED");
+    }
+
+    const publicEnglish = await request.get(
+      `${browserBaseUrl}/api/page-modules/document/published?pageKey=about&locale=en`,
+    );
+    expect(publicEnglish.status()).toBe(404);
+    expect(await publicEnglish.text()).toContain("CONTENT_LOCALE_UNAVAILABLE");
+
+    const publicEnglishStream = await request.get(
+      `${browserBaseUrl}/api/page-modules/document/stream?pageKey=about&locale=en`,
+    );
+    expect(publicEnglishStream.status()).toBe(404);
+    expect(await publicEnglishStream.text()).toContain("CONTENT_LOCALE_UNAVAILABLE");
+
+    // 历史英文资料只读保留，避免退役公开入口时破坏既有审计记录。
+    expect((await page.request.get(
+      `${apiBaseUrl}/page-modules/document/admin?pageKey=about&locale=en`,
+    )).status()).toBe(200);
+    expect((await page.request.get(
+      `${apiBaseUrl}/page-modules/document/revisions?pageKey=about&locale=en&limit=20`,
+    )).status()).toBe(200);
+  });
+
+  test.skip("[历史合同] 真实双语页面中文发布与英文隔离", async ({
     page,
     request,
   }, testInfo) => {
@@ -4296,7 +4310,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await editorSession.context.dispose();
   });
 
-  test("[phase1] 真实双语页面英文 V1 审核发布与快照隔离", async ({
+  test.skip("[历史合同] 真实双语页面英文 V1 审核发布与快照隔离", async ({
     page,
     request,
   }, testInfo) => {
@@ -4543,7 +4557,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await editorSession.context.dispose();
   });
 
-  test("[phase1] 真实双语页面 V2 并发、发布回滚与历史保持", async ({
+  test.skip("[历史合同] 真实双语页面 V2 并发、发布回滚与历史保持", async ({
     page,
     request,
   }, testInfo) => {

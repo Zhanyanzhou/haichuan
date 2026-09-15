@@ -29,6 +29,24 @@
   padding-top: 0 !important;
 }
 
+/* 产品 PageDocument 的 loading 与 published 共用首屏关键几何，避免 Renderer
+   样式接管瞬间主区塌陷；手机按 Hero 的 4:5 媒体区保留高度。 */
+.site-main[data-page-key="products"] .hc-products-page-frame {
+  min-height: max(620px, 100svh);
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .site-main[data-page-key="products"] .hc-products-page-frame {
+    min-height: 75svh;
+  }
+}
+
+@media (max-width: 767px) {
+  .site-main[data-page-key="products"] .hc-products-page-frame {
+    min-height: calc(100vw * 5 / 4);
+  }
+}
+
 /* ═══════ Header ═══════ */
 .site-header {
   position: fixed;
@@ -199,26 +217,9 @@
   text-shadow: 0 1px 16px rgba(255, 255, 255, 0.18);
 }
 
-.site-header__brand-text::after {
-  content: "HAICHUAN JEWELRY";
-  margin-top: 9px;
-  color: rgba(24, 26, 27, 0.72);
-  font-family: var(--brand-serif);
-  font-size: 9.5px;
-  font-weight: 500;
-  letter-spacing: 0.34em;
-  line-height: 1;
-  transform: translateX(-0.02em);
-}
-
 .site-header.is-overlay-light .site-header__brand-text {
   color: #F7F8F8;
   text-shadow: 0 2px 22px rgba(0, 0, 0, 0.28);
-}
-
-.site-header.is-overlay-light .site-header__brand-text::after {
-  color: rgba(247, 248, 248, 0.82);
-  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.22);
 }
 
 .site-header.is-overlay-light .site-header__logo {

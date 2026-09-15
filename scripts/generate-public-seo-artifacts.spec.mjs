@@ -149,17 +149,16 @@ test("renderer never emits route URLs without an explicit origin", () => {
   assert.doesNotMatch(artifacts.robots, /^Sitemap:/m);
 });
 
-test("strict schema v3 emits only hash-matched pre-rendered routes and reciprocal alternates", async (t) => {
+test("strict schema v3 emits only hash-matched Chinese routes and x-default alternates", async (t) => {
   const prepared = await prepareVerifiedArtifacts();
   t.after(() => rmSync(prepared.temporaryDirectory, { recursive: true, force: true }));
   const artifacts = runVerifiedGenerator(prepared);
 
   assert.match(artifacts.sitemap, /xmlns:xhtml="http:\/\/www\.w3\.org\/1999\/xhtml"/);
   assert.match(artifacts.sitemap, /<loc>https:\/\/jewelry\.example\.test\/about<\/loc>/);
-  assert.match(artifacts.sitemap, /hreflang="en" href="https:\/\/jewelry\.example\.test\/en\/about"/);
   assert.match(artifacts.sitemap, /hreflang="x-default" href="https:\/\/jewelry\.example\.test\/about"/);
-  assert.doesNotMatch(artifacts.robots, /^Disallow: \/en$/m);
-  assert.match(artifacts.robots, /^Disallow: \/en\/admin$/m);
+  assert.doesNotMatch(artifacts.sitemap, /hreflang="en"|\/en\//);
+  assert.match(artifacts.robots, /^Disallow: \/en$/m);
   const nginxMap = readFileSync(prepared.nginxMapPath, "utf8");
   assert.match(nginxMap, /^location = "\/about" \{$/m);
   assert.match(nginxMap, /^  try_files "\/about\/index\.html" =404;$/m);
@@ -173,7 +172,31 @@ test("strict schema v3 emits only hash-matched pre-rendered routes and reciproca
     /location = "\/about\/" \{\n  absolute_redirect off;\n  return 308 "\/about\$is_args\$args";/,
   );
   assert.match(nginxMap, /return 308 "\/about\$is_args\$args";/);
-  assert.match(nginxMap, /^location = "\/en\/about" \{$/m);
+  assert.doesNotMatch(nginxMap, /^location = "\/en(?:\/|\")/m);
+});
+
+test("strict generation accepts the home first-fold artifact bound to its published snapshot", async (t) => {
+  const home = makeRoute({
+    path: "/",
+    alternateKey: "page:home",
+    bootstrapPageDocument: {
+      pageKey: "home",
+      puckData: {
+        content: [{
+          type: "首屏主视觉",
+          props: { desktopImage: "/uploads/home-hero.jpg", title: "光映新姿" },
+        }],
+      },
+      metadata: {},
+      status: "PUBLISHED",
+    },
+  });
+  const prepared = await prepareVerifiedArtifacts([home]);
+  t.after(() => rmSync(prepared.temporaryDirectory, { recursive: true, force: true }));
+  assert.doesNotThrow(() => runVerifiedGenerator(prepared));
+  const html = readFileSync(join(prepared.outputDirectory, "index.html"), "utf8");
+  assert.match(html, /data-public-first-fold="published"/);
+  assert.match(html, /hc-published-page-document/);
 });
 
 test("generated canonical redirects never expose an absolute origin or internal port", () => {

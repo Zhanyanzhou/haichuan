@@ -17,7 +17,6 @@ import { createMediaPublicationReferenceKey } from "../modules/page-modules/medi
 import { evaluateMediaPublicEligibility } from "../modules/upload/media-public-eligibility";
 
 const PAGE_KEYS = ["home", "products", "catalog", "custom", "about", "contact"] as const;
-const ENGLISH_PAGE_KEYS = new Set<string>(["home", "products", "custom", "about"]);
 const PRODUCT_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REQUIRED_SETTINGS = [
@@ -28,7 +27,7 @@ const REQUIRED_SETTINGS = [
   "privacyPolicyReviewReference",
 ] as const;
 
-type PublicLocale = "zh-CN" | "en";
+type PublicLocale = "zh-CN";
 type ReleaseProfile = "lead-generation" | "commerce";
 type SourceStage = "preproduction" | "production";
 type LegalSourceHashes = {
@@ -79,6 +78,13 @@ type SnapshotRouteInput = {
   description: string;
   shareImage: string;
   renderedBodyHtml: string;
+  /** 首页首次访问可读取的同源、已发布 PageDocument；仅用于客户端首屏接管。 */
+  bootstrapPageDocument?: {
+    pageKey: "home";
+    puckData: unknown;
+    metadata: unknown;
+    status: "PUBLISHED";
+  };
   structuredData?: unknown;
   productCode?: string;
 };
@@ -249,7 +255,7 @@ function requireSettings(settingsRow: any, config: PublicSeoSourceConfig) {
   if (settings.defaultLocale !== "zh-CN") fail("DEFAULT_LOCALE_INVALID");
   if (!Array.isArray(settings.publishedLocales)) fail("PUBLISHED_LOCALES_INVALID");
   const locales: string[] = settings.publishedLocales.map(text);
-  if (new Set(locales).size !== locales.length || !locales.includes("zh-CN") || locales.some((locale) => locale !== "zh-CN" && locale !== "en")) {
+  if (locales.length !== 1 || locales[0] !== "zh-CN") {
     fail("PUBLISHED_LOCALES_INVALID");
   }
   return { settings, origin, locales, version: settingsRow.version, updatedAt: settingsRow.updatedAt };
@@ -402,8 +408,7 @@ async function projectPage(
   }
   const basePath = CONTENT_TEMPLATE_PAGE_PATHS[document.pageKey as keyof typeof CONTENT_TEMPLATE_PAGE_PATHS];
   if (typeof basePath !== "string") fail("PAGE_ROUTE_UNSUPPORTED");
-  if (locale === "en" && !ENGLISH_PAGE_KEYS.has(document.pageKey)) fail("ENGLISH_PAGE_ROUTE_UNSUPPORTED");
-  const path = locale === "en" ? (basePath === "/" ? "/en" : `/en${basePath}`) : basePath;
+  const path = basePath;
   return {
     path,
     canonicalPath: path,
@@ -421,6 +426,16 @@ async function projectPage(
     description,
     shareImage,
     renderedBodyHtml: semanticBody(title, description),
+    ...(document.pageKey === "home" ? {
+      // 该快照与 SEO 路由使用同一份不可变 revision 和 contentHash；不是额外的
+      // 首页配置。客户端只在首个挂载周期使用，随后照常向公开接口校准。
+      bootstrapPageDocument: {
+        pageKey: "home" as const,
+        puckData: revision.puckData,
+        metadata,
+        status: "PUBLISHED" as const,
+      },
+    } : {}),
   };
 }
 
@@ -528,10 +543,6 @@ function projectProduct(product: any, origin: string, siteName: string, now: Dat
   const currentQualityHash = productQualityHash(product);
   if (product.publicationQualityHash !== currentQualityHash) fail(`PRODUCT_${code}_QUALITY_HASH_DRIFT`);
   const image = assertProductImagePublic(product, now);
-  const translations = Array.isArray(product.translations) ? product.translations : [];
-  if (translations.some((translation: any) => translation.locale === "EN")) {
-    fail(`PRODUCT_${code}_ENGLISH_REVIEW_EVIDENCE_UNAVAILABLE`);
-  }
   const title = text(product.name);
   const description = text(product.shortDescription);
   if (!title || !description) fail(`PRODUCT_${code}_SEO_INCOMPLETE`);
@@ -666,11 +677,6 @@ const PRODUCT_SELECT = {
       inventories: { select: { quantity: true } },
     },
   },
-  translations: {
-    where: { locale: { in: ["ZH_CN", "EN"] } },
-    orderBy: { locale: "asc" },
-    select: { locale: true },
-  },
 } satisfies Prisma.ProductSelect;
 
 async function readProjection(
@@ -699,27 +705,6 @@ async function readProjection(
     routes.push(await projectPage(database, document, chinese, "zh-CN", site.origin, text(site.settings.siteName), now));
     const validation = await validatePage(pageKey, chinese.publishedRevision.puckData, chinese.publishedRevision.metadata);
     if (!validation.valid) fail(`PAGE_${pageKey}_zh-CN_CURRENT_VALIDATION_FAILED`);
-  }
-
-  const englishRows = documents.flatMap((document) =>
-    document.localizations
-      .filter((entry: any) => entry.locale === "EN")
-      .map((entry: any) => ({ document, entry })),
-  );
-  const englishEnabled = site.locales.includes("en");
-  if (englishEnabled) {
-    if (englishRows.length !== ENGLISH_PAGE_KEYS.size || englishRows.some(({ document }) => !ENGLISH_PAGE_KEYS.has(document.pageKey))) {
-      fail("ENGLISH_PUBLISHED_PAGE_SET_INCOMPLETE");
-    }
-    for (const pageKey of PAGE_KEYS.filter((key) => ENGLISH_PAGE_KEYS.has(key))) {
-      const document = documentByKey.get(pageKey);
-      const english = document.localizations.find((entry: any) => entry.locale === "EN");
-      routes.push(await projectPage(database, document, english, "en", site.origin, text(site.settings.siteName), now));
-      const validation = await validatePage(pageKey, english.publishedRevision.puckData, english.publishedRevision.metadata);
-      if (!validation.valid) fail(`PAGE_${pageKey}_en_CURRENT_VALIDATION_FAILED`);
-    }
-  } else if (englishRows.length > 0) {
-    fail("ENGLISH_CONTENT_EXISTS_BUT_LOCALE_UNPUBLISHED");
   }
 
   const chineseHome = routes.find((route) => route.path === "/");

@@ -86,7 +86,7 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
       await expect(toggle).toBeFocused();
     });
 
-    test(`${viewport.name} 中英文首页安全短页保持 AA 对比度与键盘可达`, async ({ page }, testInfo) => {
+    test(`${viewport.name} 中文首页安全短页保持 AA 对比度与键盘可达`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport);
       await mockPublicApis(page);
 
@@ -95,11 +95,6 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
           path: "/",
           title: "首页正在准备",
           description: "首页内容正在整理。您可以先进入选款中心浏览当前公开款式，或了解珠宝定制服务。",
-        },
-        {
-          path: "/en",
-          title: "English home is not published",
-          description: "This language version is unavailable until an approved English page is published.",
         },
       ]) {
         await page.goto(locale.path);

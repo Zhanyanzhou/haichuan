@@ -43,7 +43,6 @@ import {
   type VisualNodeSelection,
 } from "@/page-builder/visual-editor/visualEditorSession";
 import type { PublishValidationStatus } from "@/page-builder/inspector/publishValidation";
-import type { PublicContentLocale } from "@/i18n/publicLocale";
 import { formatViewportSize, type ViewportPreset } from "../editor-utils";
 import WorkspaceContextControls from "@/page-builder/template-editor/WorkspaceContextControls";
 import useWorkspaceHistoryShortcuts from "@/page-builder/template-editor/useWorkspaceHistoryShortcuts";
@@ -61,7 +60,6 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
 
 export default function EditorToolbar({
   pageKey,
-  locale,
   reviewStatus,
   publishing,
   saving,
@@ -80,8 +78,6 @@ export default function EditorToolbar({
   publishReviewActive,
   publishReviewErrorCount,
   onOpenPublishReview,
-  onLocaleChange,
-  localeSwitchDisabled,
   onSubmitReview,
   onApproveReview,
   isOwnReviewSubmission,
@@ -105,7 +101,6 @@ export default function EditorToolbar({
   restoreViewport,
 }: {
   pageKey: EditorPageKey;
-  locale: PublicContentLocale;
   reviewStatus: "DRAFT" | "IN_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
   publishing: boolean;
   saving: boolean;
@@ -124,8 +119,6 @@ export default function EditorToolbar({
   publishReviewActive: boolean;
   publishReviewErrorCount: number;
   onOpenPublishReview: () => void;
-  onLocaleChange: (locale: PublicContentLocale) => void;
-  localeSwitchDisabled: boolean;
   onSubmitReview: () => void;
   onApproveReview: () => void;
   isOwnReviewSubmission: boolean;
@@ -769,19 +762,7 @@ export default function EditorToolbar({
               </span>
             ) : null}
             <div className="homepage-editor__locale-review-controls" aria-label="内容语言与审核状态">
-              <label>
-                <span className="sr-only">内容语言</span>
-                <select
-                  value={locale}
-                  disabled={localeSwitchDisabled}
-                  onChange={(event) => onLocaleChange(event.target.value as PublicContentLocale)}
-                  title={localeSwitchDisabled ? "请先保存当前修改再切换语言" : "切换独立的中文或英文页面草稿"}
-                  aria-label="内容语言"
-                >
-                  <option value="zh-CN">中文</option>
-                  <option value="en">English</option>
-                </select>
-              </label>
+              <span className="homepage-editor__locale-label" aria-label="内容语言">中文</span>
               <span role="status" data-testid="page-review-status">
                 {effectiveReviewStatus === "DRAFT" ? "草稿"
                   : effectiveReviewStatus === "IN_REVIEW" ? "待审核"

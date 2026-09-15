@@ -80,17 +80,17 @@ bash scripts/deploy-preproduction.sh \
 
 ### 1.2 PageDocument 内容发布与公开路由激活
 
-后台把 PageDocument 标记为已发布，只会更新数据库中的已审核发布事实，不会修改正在运行的 client 镜像，也不会授予运行时进程生成 Nginx 路由或读取生产库的隐式权限。英文公开路由继续失败关闭：只有存在于该 client 镜像所绑定不可变 SEO snapshot 中的精确路径才返回 200；未发布、校验失败、未进入快照或未知的英文路径均返回英文 404。中文既有公开路由合同不因英文发布而改变。
+后台把 PageDocument 标记为已发布，只会更新数据库中的已审核中文发布事实，不会修改正在运行的 client 镜像，也不会授予运行时进程生成 Nginx 路由或读取生产库的隐式权限。英文公开站已按 D.35 退役：SEO snapshot 不得包含英文路由，历史 `/en` 与 `/en/<path>` 只允许同源 `308` 到对应中文路径，公开内容接口必须拒绝 `locale=en`；`/en//...`、编码斜杠和反斜杠必须失败关闭。
 
 需要让新发布、回滚或取消发布的 PageDocument 在公网生效时，必须把它作为一次新的内容制品发布处理：
 
-1. 在后台完成保存、独立审核与发布，并确认匿名 published API 返回预期 locale、revision 和 content hash；此时直接访问尚未进入当前镜像的英文路由仍应为 404。
+1. 在后台完成中文页面保存、独立审核与发布，并确认匿名 published API 返回 `zh-CN`、预期 revision 和 content hash；确认 `locale=en` 失败关闭且历史英文记录未被修改。
 2. 对同一个受保护代码 SHA 手动运行 `Export Public SEO Snapshot`。受控预发布选择 `preproduction`，只从 `public-seo-preproduction` 环境中的专用只读数据库账号生成带 `sourceStage=preproduction` 的阶段证据；正式制品只能选择 `production`，并从 `public-seo-production` 生成带 `sourceStage=production` 的证据。两个阶段分别使用受保护环境配置，不得手工编辑 snapshot，也不得复用发布前的 artifact；不得跨阶段复用。
    GitHub hosted runner 只通过 SSH 本地转发访问来源数据库：两个环境分别保存 `PUBLIC_SEO_SSH_PRIVATE_KEY`、单条固定 `PUBLIC_SEO_SSH_KNOWN_HOSTS` 和只读 `PUBLIC_SEO_READ_ONLY_DATABASE_URL`，并分别配置 SSH 主机、用户、端口、固定 `SHA256:` host-key 指纹、本地高位端口及远端数据库主机/端口。数据库 URL 必须指向 runner 的 `127.0.0.1:<本地高位端口>`；SSH 远端只连接目标宿主机 `127.0.0.1:<远端高位端口>`。`PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY` 与 `PUBLIC_SEO_EXPECTED_DATABASE_HOST` 必须一致，单独绑定目标栈中的数据库身份，不得用上述两个 loopback 传输地址代替；CLI 继续以预期库名、`SELECT DATABASE()` 和 `USAGE/SELECT/SHOW VIEW` grants 复核数据库。目标栈显式叠加 `docker-compose.public-seo-tunnel.yml`，并把 `PUBLIC_SEO_SSH_REMOTE_DATABASE_PORT` 设置为未占用的高位端口；该 overlay 只生成 `127.0.0.1:<高位端口>:3306`，不得使用开发 override，也不得绑定 `0.0.0.0`。腾讯云安全组不得开放该高位端口或 3306。工作流无论成功失败都会停止隧道并清理临时私钥。
 3. 记录新 artifact ID、artifact digest 与 snapshot hash，再以该 artifact ID 运行 `Release Images`，并令 `release_stage` 与 snapshot 的 `sourceStage` 完全一致。若预发布内容尚未就绪，可把 artifact ID 留空，工作流会生成 `sourceKind=safe-fallback`、`contentReady=false`、`sourceArtifactId=0` 的同 SHA 安全快照；只要提供了 artifact ID，就仍只接受同仓、同提交、同阶段且生产工作流成功生成的不可变 artifact。`preproduction` 镜像仓库使用 `*-preproduction-{server,client,operations}`，标签使用 `preproduction-sha-<SHA>`；`production` 保持既有 `*-{server,client,operations}` 仓库和 `sha-<SHA>` 标签，并强制 `sourceKind=approved-snapshot`、`contentReady=true`。通常预发布选择默认 `baseline`；需要独立生产证据、合规取证或公共 Sigstore 证明时选择 `high`。生产证据工作流只接受 `releaseStage=production` 且 `assuranceLevel=high` 的 manifest，不得消费 baseline 或预发布制品。
-4. 按正常部署审批将新的固定 client digest 替换到目标环境；数据库发布本身不授权构建、部署或切流。替换后从真实 Nginx 回源验证目标英文路径为 200、对应中文路径不受影响、至少一个未发布英文路径和一个未知英文路径仍为 404，并核对镜像上的三个 public SEO label 与本次 artifact 一致。
+4. 按正常部署审批将新的固定 client digest 替换到目标环境；数据库发布本身不授权构建、部署或切流。替换后从真实 Nginx 回源验证 `/en` 与历史已知英文路径只返回同源中文 308、畸形英文路径失败关闭、中文路径不受影响，并核对 sitemap/hreflang 没有英文以及镜像上的 public SEO labels 与本次 artifact 一致。
 
-取消发布和内容回滚遵循同一方向：数据库状态改变后必须重新导出快照、构建并部署新 client digest；旧 digest 会继续服务它冻结时的路由和 HTML，不能把“数据库已取消发布”误报为公网已经撤下。需要紧急下线时，应按获批的流量隔离或固定 digest 回滚流程处理，不能放宽英文 SPA fallback。
+取消发布和内容回滚遵循同一方向：数据库状态改变后必须重新导出快照、构建并部署新 client digest；旧 digest 会继续服务它冻结时的路由和 HTML，不能把“数据库已取消发布”误报为公网已经撤下。需要紧急下线时，应按获批的流量隔离或固定 digest 回滚流程处理，不能恢复英文路由或公开接口。
 
 以下 Cosign 验证仅适用于 `assuranceLevel=high`。取得真实高保证制品后，使用固定的 Cosign `v3.1.3` 先验证 manifest 和标准 bundle sidecar，再逐一验证 registry 中三镜像的普通签名、SLSA v1 provenance 与 SPDX 2.3 SBOM；identity、`owner/repo`、SHA、ref 与 digest 必须取自本次已批准清单，而不是从 manifest 或 bundle 反向复制为“预期值”：
 

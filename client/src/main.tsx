@@ -18,9 +18,6 @@ import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
 import './styles/globals.css';
-import './styles/adminLuxury.css';
-import './styles/adminDashboard.css';
-import './styles/adminCompatibility.css';
 
 /**
  * 2026-08-16 声明式 BrowserRouter → 数据路由迁移（批次 D 前置）：
@@ -39,12 +36,21 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   </React.StrictMode>,
 );
 
-// 中文衬线（Noto Serif SC）的 @font-face 分片表体积大（gzip ~99KB），作为渲染阻塞
-// CSS 会推迟首绘。改为首帧绘制后动态加载对应 CSS chunk：首屏先用系统衬线渲染，
-// 本地分片毫秒级到达后按 display=swap 换装，无境外可达性风险。
-requestAnimationFrame(() =>
-  requestAnimationFrame(() => {
+// 中文衬线分片不与 PageDocument 和首屏图片争抢首访带宽；完整页面 load 后再在空闲期换装。
+const loadDeferredChineseFonts = () => {
+  const load = () => {
     void import('@fontsource/noto-serif-sc/300.css');
     void import('@fontsource/noto-serif-sc/400.css');
-  }),
-);
+  };
+  const scheduleIdle = (window as Window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+  }).requestIdleCallback;
+  if (scheduleIdle) {
+    scheduleIdle(load, { timeout: 2000 });
+  } else {
+    globalThis.setTimeout(load, 1000);
+  }
+};
+
+if (document.readyState === 'complete') loadDeferredChineseFonts();
+else window.addEventListener('load', loadDeferredChineseFonts, { once: true });

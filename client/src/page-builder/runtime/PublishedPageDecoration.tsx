@@ -260,10 +260,11 @@ export default function PublishedPageDecoration({
     }
     return withDecorationState(
       <div
+        className={pageKey === "products" ? "hc-products-page-frame" : undefined}
         data-page-document-state="loading"
         aria-busy="true"
         aria-live="polite"
-        style={{ minHeight: "60vh", display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12 }}
+        style={{ minHeight: pageKey === "products" ? undefined : "60vh", display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12 }}
       >
         {english ? `Loading ${pageLabel || "page"}` : `正在载入${pageLabel || "页面"}`}
       </div>,
@@ -334,7 +335,7 @@ export default function PublishedPageDecoration({
     );
     return withDecorationState(
       pageKey === "products"
-        ? <div data-page-document-state={hasPublishedDocument ? "published" : effectiveStatus}>{replacement}</div>
+        ? <div className="hc-products-page-frame" data-page-document-state={hasPublishedDocument ? "published" : effectiveStatus}>{replacement}</div>
         : replacement,
     );
   }

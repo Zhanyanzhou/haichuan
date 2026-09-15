@@ -7,6 +7,8 @@ import {
 } from "../src/utils/publicSiteUrl";
 import { isNonIndexablePublicRoute } from "../src/utils/publicSeoPolicy";
 import {
+  PUBLIC_ENGLISH_ROUTES_ENABLED,
+  resolveRetiredEnglishRedirect,
   resolvePublicLocalePath,
   withPublicLocalePath,
 } from "../src/i18n/publicLocale";
@@ -41,6 +43,8 @@ test("账户、交易、受控预览和开发页统一使用非索引路由策�
     "/partner",
     "/preview/home",
     "/__templates",
+    "/en",
+    "/en/about",
   ]) {
     expect(isNonIndexablePublicRoute(pathname), pathname).toBe(true);
   }
@@ -53,20 +57,25 @@ test("账户、交易、受控预览和开发页统一使用非索引路由策�
     "/contact",
     "/privacy",
     "/business-info",
-    "/en",
-    "/en/about",
   ]) {
     expect(isNonIndexablePublicRoute(pathname), pathname).toBe(false);
   }
 });
 
-test("英文公开路由大小写输入统一解析到规范的小写内容路径", () => {
+test("退役英文路由保持历史解析但只允许安全地回到同源中文路径", () => {
+  expect(PUBLIC_ENGLISH_ROUTES_ENABLED).toBe(false);
   expect(resolvePublicLocalePath("/EN/about")).toEqual({
     locale: "en",
     pathname: "/about",
   });
   expect(withPublicLocalePath("/ABOUT", "en")).toBe("/en/ABOUT");
   expect(withPublicLocalePath("/about", "en")).toBe("/en/about");
+  expect(resolveRetiredEnglishRedirect("/en")).toBe("/");
+  expect(resolveRetiredEnglishRedirect("/EN/about")).toBe("/about");
+  expect(resolveRetiredEnglishRedirect("/en//evil.example")).toBe("/");
+  expect(resolveRetiredEnglishRedirect("/en/%2F%2Fevil.example")).toBe("/");
+  expect(resolveRetiredEnglishRedirect("/en/%5cevil.example")).toBe("/");
+  expect(resolveRetiredEnglishRedirect("/en/\\evil.example")).toBe("/");
 });
 
 test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜像且 Nginx 二次隔离非公开页面", () => {
@@ -91,13 +100,12 @@ test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜�
   expect(nginx).toContain("include /etc/nginx/public-seo-routes.conf;");
   expect(nginx).toContain("location ~* ^/en(?:/|$)");
   expect(spaShell).toContain('<meta name="robots" content="noindex, nofollow" />');
-  expect(nginx).toMatch(
-    /location ~\* \^\/en\(\?:\/\|\$\) \{\s*error_page 404 =404 \/404-en\.html;\s*return 404;/,
-  );
+  expect(nginx).toContain("location = /en {");
+  expect(nginx).toContain("location ~* ^/en/([^/].*)$ {");
+  expect(nginx).toMatch(/location ~\* \^\/en\(\?:\/\|\$\) \{\s*return 404;/);
   expect(nginx).toContain("error_page 404 /404.html;");
   expect(nginx).toContain("location = /404.html");
-  expect(nginx).toContain("error_page 404 =404 /404-en.html;");
-  expect(nginx).toContain("location = /404-en.html");
+  expect(nginx).not.toContain("404-en.html");
   expect(nginx).toContain(
     "location ~* ^/(admin|preview|customer|cart|checkout|partner)(/|$)",
   );
@@ -105,9 +113,7 @@ test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜�
   expect(publicSeoGenerator).toContain(
     '"map $request_uri $hc_robots_tag {"',
   );
-  expect(publicSeoGenerator).not.toContain(
-    '~*^/en(/|$) "noindex, nofollow"',
-  );
+  expect(publicSeoGenerator).toContain('"/en"');
   expect(nginx).toContain(
     'add_header X-Robots-Tag $hc_robots_tag always',
   );
@@ -117,11 +123,79 @@ test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜�
   );
 });
 
-test("公开 SSE URL 显式携带内容语言，英文不会缺省订阅中文流", () => {
+test("公开 SSE URL 显式携带中文语言", () => {
   expect(publicProductStreamUrl("zh-CN")).toContain("locale=zh-CN");
-  expect(publicProductStreamUrl("en")).toContain("locale=en");
   expect(publicPageDocumentStreamUrl("zh-CN")).toContain("locale=zh-CN");
-  expect(publicPageDocumentStreamUrl("en")).toContain("locale=en");
+});
+
+test("首页公开读取期间不再向访客呈现技术性加载文案", async ({ page }) => {
+  let pageDocumentRequested = false;
+
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/page-modules/document/published") {
+      expect(url.searchParams.get("locale")).toBe("zh-CN");
+      pageDocumentRequested = true;
+      await route.fulfill({ json: { code: 200, data: null, message: "success" } });
+      return;
+    }
+    await route.fulfill({ json: { code: 200, data: null, message: "success" } });
+  });
+
+  await page.goto("/");
+  await expect.poll(() => pageDocumentRequested).toBe(true);
+  await expect(page.getByText("正在载入首页", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Loading home", { exact: true })).toHaveCount(0);
+});
+
+test("预渲染首页在接口校准前先使用同一份已发布文档", async ({ page }) => {
+  const bootstrap = JSON.stringify({
+    pageKey: "home",
+    status: "PUBLISHED",
+    metadata: {},
+    puckData: {
+      content: [{
+        type: "首屏主视觉",
+        props: { desktopImage: "/uploads/static-hero.jpg", title: "静态首屏" },
+      }],
+    },
+  }).replaceAll("<", "\\u003c");
+  await page.route("**/__prerendered-home-bootstrap", (route) => route.fulfill({
+    contentType: "text/html",
+    body: `<!doctype html><html><head><meta charset="utf-8"><script type="module">
+      import RefreshRuntime from '/@react-refresh';
+      RefreshRuntime.injectIntoGlobalHook(window);
+      window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+      window.__vite_plugin_react_preamble_installed__ = true;
+    </script></head><body><div id="root"><script id="hc-published-page-document" type="application/json">${bootstrap}</script></div><script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { usePublishedPageDocument } from '/src/page-builder/runtime/usePublishedPageDocument.ts';
+      import { HomeFirstFold } from '/src/pages/public/Home/index.tsx';
+      function App() {
+        const resource = usePublishedPageDocument('home');
+        return React.createElement(
+          React.Fragment,
+          null,
+          React.createElement('output', null, resource.pageDocument?.puckData.content[0].props.title ?? resource.status),
+          React.createElement(HomeFirstFold, { data: resource.pageDocument?.puckData }),
+        );
+      }
+      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    </script></body></html>`,
+  }));
+  await page.route("**/api/page-modules/document/published**", (route) => route.fulfill({
+    status: 503,
+    json: { code: 503, message: "fixture unavailable" },
+  }));
+
+  await page.goto("/__prerendered-home-bootstrap");
+  await expect(page.locator("output")).toHaveText("静态首屏");
+  await expect(page.getByRole("heading", { name: "静态首屏" })).toBeVisible();
+  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
+    "src",
+    "/uploads/static-hero.jpg",
+  );
 });
 
 for (const scenario of ["首次订阅与断线重连", "首次订阅重叠且补拉失败"] as const) {

@@ -8,17 +8,16 @@ import { rolesForAdminRoute } from "@/config/adminRouteAccess";
 import { CONTENT_TEMPLATE_PAGE_PATHS } from "@/page-builder/generated/contentTemplates.generated";
 import {
   type PublicContentLocale,
+  resolveRetiredEnglishRedirect,
   withPublicLocalePath,
 } from "@/i18n/publicLocale";
+import PublicLayout from "@/components/layout/PublicLayout";
+import Home from "@/pages/public/Home";
 
 // 后台布局与后台鉴权失败页依赖 Ant Design，不应进入前台首屏依赖图。
 const AdminLayout = lazy(() => import("@/components/layout/AdminLayout"));
 const ProtectedRoute = lazy(() => import("@/components/common/ProtectedRoute"));
 const AntdProvider = lazy(() => import("@/components/common/AntdProvider"));
-const PublicLayout = lazy(() => import("@/components/layout/PublicLayout"));
-const EnglishPublicRouteGate = lazy(
-  () => import("@/components/common/EnglishPublicRouteGate"),
-);
 const CustomerProtectedRoute = lazy(() =>
   import("@/components/common/CustomerProtectedRoute").then((module) => ({
     default: module.CustomerProtectedRoute,
@@ -29,12 +28,11 @@ const AdminIndexRedirect = lazy(
   () => import("@/pages/admin/AdminIndexRedirect"),
 );
 // Lazy load pages
-const Home = lazy(() => import("@/pages/public/Home"));
 const HomePreview = lazy(() =>
-  import("@/pages/public/Home").then((m) => ({ default: m.HomePreview })),
+  import("@/pages/public/Home/Preview").then((m) => ({ default: m.HomePreview })),
 );
 const PagePreview = lazy(() =>
-  import("@/pages/public/Home").then((m) => ({ default: m.PagePreview })),
+  import("@/pages/public/Home/Preview").then((m) => ({ default: m.PagePreview })),
 );
 const ProductDetail = lazy(() => import("@/pages/public/ProductDetail"));
 const CustomerCenter = lazy(() => import("@/pages/public/CustomerCenter"));
@@ -132,7 +130,13 @@ function contentPageRoute(pageKey: keyof typeof CONTENT_TEMPLATE_PAGE_PATHS) {
   return publicPath === "/" ? "" : publicPath.slice(1);
 }
 
-/** 中文和英文共享同一组核心路由定义；英文入口由外层发布门禁统一控制。 */
+function RetiredEnglishRouteRedirect() {
+  const location = useLocation();
+  const chinesePath = resolveRetiredEnglishRedirect(location.pathname);
+  return <Navigate replace to={`${chinesePath}${location.search}${location.hash}`} />;
+}
+
+/** 公开网站只提供中文路由；locale 参数仅保留既有接口类型兼容。 */
 function publicRouteElements(locale: PublicContentLocale) {
   return (
     <>
@@ -261,11 +265,7 @@ function App() {
             />
           </Route>
 
-          <Route path="/en" element={<EnglishPublicRouteGate />}>
-            <Route element={<PublicLayout />}>
-              {publicRouteElements("en")}
-            </Route>
-          </Route>
+          <Route path="/en/*" element={<RetiredEnglishRouteRedirect />} />
 
           <Route
             path="/admin"
