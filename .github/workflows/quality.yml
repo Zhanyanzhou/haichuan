@@ -54,10 +54,17 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: 校验 migration 历史不可变与例外清单
+        shell: bash
         env:
-          MIGRATION_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          MIGRATION_PUSH_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           MIGRATION_HEAD_SHA: ${{ github.sha }}
-        run: node scripts/verify-migration-integrity.mjs --git-range
+          MIGRATION_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          migration_base_sha="$MIGRATION_PUSH_BASE_SHA"
+          if [[ "$migration_base_sha" =~ ^0+$ ]]; then
+            migration_base_sha="$(git merge-base "$MIGRATION_HEAD_SHA" "refs/remotes/origin/$MIGRATION_DEFAULT_BRANCH")"
+          fi
+          MIGRATION_BASE_SHA="$migration_base_sha" node scripts/verify-migration-integrity.mjs --git-range
 
       - name: 校验不可变镜像发布合同
         run: node scripts/verify-release-images.mjs --static

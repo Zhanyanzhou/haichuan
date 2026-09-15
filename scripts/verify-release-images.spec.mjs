@@ -65,6 +65,16 @@ test("build job installs verifier dependencies while isolated signing job execut
   assert.match(qualityWorkflow, /persist-credentials: false/);
   assert.match(qualityWorkflow, /ParseFile\(/);
   assert.match(qualityWorkflow, /scripts\/run-operations-recovery-drill\.ps1/);
+  assert.match(qualityWorkflow, /MIGRATION_PUSH_BASE_SHA:/);
+  assert.match(qualityWorkflow, /if \[\[ "\$migration_base_sha" =~ \^0\+\$ \]\]; then/);
+  assert.match(
+    qualityWorkflow,
+    /git merge-base "\$MIGRATION_HEAD_SHA" "refs\/remotes\/origin\/\$MIGRATION_DEFAULT_BRANCH"/,
+  );
+  assert.match(
+    qualityWorkflow,
+    /MIGRATION_BASE_SHA="\$migration_base_sha" node scripts\/verify-migration-integrity\.mjs --git-range/,
+  );
 
   const releaseInstall = releaseWorkflow.indexOf("npm ci --ignore-scripts");
   const migrationVerify = releaseWorkflow.indexOf("node scripts/verify-migration-integrity.mjs --print-bundle-sha");
