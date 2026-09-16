@@ -141,6 +141,14 @@ test("SEO tunnel overlay exposes MySQL only on an explicit loopback high port", 
   assert.doesNotMatch(overlay, /^\s*build:/m);
 });
 
+test("HTTP SEO probe treats historical English unpublished paths as same-origin 308", () => {
+  const verifier = read("scripts/verify-public-seo-http.mjs");
+  assert.match(verifier, /retiredEnglishPath = "\/en\/__seo-unpublished-probe__"/);
+  assert.match(verifier, /retiredEnglish\.status !== 308/);
+  assert.match(verifier, /assertLocation\(retiredEnglish, "\/__seo-unpublished-probe__", ""\)/);
+  assert.doesNotMatch(verifier, /\["\/en\/__seo-unpublished-probe__", 404, "en"\]/);
+});
+
 test("runbook keeps PageDocument publication separate from immutable public-route activation", () => {
   const runbook = read("docs/PRODUCTION_RELEASE_RUNBOOK.md");
   for (const required of [

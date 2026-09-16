@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -42,6 +43,15 @@ test("HTTP SEO verification preserves the exact redirect path and query", () => 
     () => assertRelativeLocation(null, "/catalog", ""),
     /did not provide Location/,
   );
+});
+
+test("HTTP SEO verification retires English unpublished paths with a same-origin 308", () => {
+  const source = readFileSync(new URL("./verify-public-seo-http.mjs", import.meta.url), "utf8");
+  assert.match(source, /const retiredEnglishPath = "\/en\/__seo-unpublished-probe__";/);
+  assert.match(source, /retiredEnglish\.status !== 308/);
+  assert.match(source, /assertLocation\(retiredEnglish, "\/__seo-unpublished-probe__", ""\)/);
+  assert.match(source, /const malformedEnglishPath = "\/en\/\/__seo-malformed-probe__";/);
+  assert.doesNotMatch(source, /\["\/en\/__seo-unpublished-probe__", 404, "en"\]/);
 });
 
 test("HTTP SEO verification requires locale-correct noindex 404 documents", () => {

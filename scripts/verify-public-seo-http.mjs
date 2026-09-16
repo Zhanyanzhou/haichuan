@@ -174,21 +174,36 @@ export async function verifyPublicSeoHttp({ baseUrl, snapshot, requireRepresenta
   }
 
   const reservedPaths = new Set(verifiedSnapshot.routes.map((route) => route.path));
-  const probes = [
-    ["/__seo-unpublished-probe__", 404, "zh-CN"],
-    ["/products/__seo-invalid-probe__", 404, "zh-CN"],
-    ["/en/__seo-unpublished-probe__", 404, "en"],
+  const notFoundProbes = [
+    ["/__seo-unpublished-probe__", "zh-CN"],
+    ["/products/__seo-invalid-probe__", "zh-CN"],
   ];
-  for (const [pathname, expectedStatus, locale] of probes) {
+  for (const [pathname, locale] of notFoundProbes) {
     if (reservedPaths.has(pathname)) fail(`SEO probe path unexpectedly entered the snapshot: ${pathname}.`);
     const response = await fetchManual(baseUrl, pathname);
-    if (response.status !== expectedStatus) {
-      fail(`SEO probe ${pathname} returned HTTP ${response.status}, expected ${expectedStatus}.`);
+    if (response.status !== 404) {
+      fail(`SEO probe ${pathname} returned HTTP ${response.status}, expected 404.`);
     }
     if (!response.headers.get("content-type")?.toLowerCase().includes("text/html")) {
       fail(`SEO probe ${pathname} did not return HTML.`);
     }
     assertSafeNotFoundHtml(await response.text(), locale, pathname);
+  }
+
+  const retiredEnglishPath = "/en/__seo-unpublished-probe__";
+  if (reservedPaths.has(retiredEnglishPath)) {
+    fail(`SEO probe path unexpectedly entered the snapshot: ${retiredEnglishPath}.`);
+  }
+  const retiredEnglish = await fetchManual(baseUrl, retiredEnglishPath);
+  if (retiredEnglish.status !== 308) {
+    fail(`SEO probe ${retiredEnglishPath} returned HTTP ${retiredEnglish.status}, expected 308.`);
+  }
+  assertLocation(retiredEnglish, "/__seo-unpublished-probe__", "");
+
+  const malformedEnglishPath = "/en//__seo-malformed-probe__";
+  const malformedEnglish = await fetchManual(baseUrl, malformedEnglishPath);
+  if (malformedEnglish.status !== 404) {
+    fail(`Malformed English path ${malformedEnglishPath} returned HTTP ${malformedEnglish.status}, expected 404.`);
   }
 
   const internalManifest = await fetchManual(baseUrl, "/prerendered-routes.json");
