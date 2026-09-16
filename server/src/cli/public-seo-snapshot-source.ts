@@ -102,6 +102,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function publicPageMetadata(metadata: unknown): Record<string, string> {
+  if (!isRecord(metadata)) return {};
+  return Object.fromEntries(
+    CONTENT_TEMPLATE_PAGE_METADATA.publicFields.flatMap((field) => {
+      const value = metadata[field];
+      return typeof value === "string" && value.trim()
+        ? [[field, value.trim()]]
+        : [];
+    }),
+  );
+}
+
+function disabledOverrideNodes(overrides: unknown): Set<string> {
+  const disabled = new Set<string>();
+  if (!isRecord(overrides) || !isRecord(overrides.nodes)) return disabled;
+  for (const [nodeId, node] of Object.entries(overrides.nodes)) {
+    if (isRecord(node) && node.enabled === false) disabled.add(nodeId);
+  }
+  return disabled;
+}
+
+/** 静态首屏只嵌入公开可见 Puck 字段，不写出内部备注或已关闭节点文案。 */
+function toPublicBootstrapPuckData(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toPublicBootstrapPuckData);
+  if (!isRecord(value)) return value;
+  const disabled = disabledOverrideNodes(value.__instanceOverrides);
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, child]) => {
+      if (key === "internal" || disabled.has(key)) return [];
+      return [[key, toPublicBootstrapPuckData(child)]];
+    }),
+  );
+}
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -431,8 +465,8 @@ async function projectPage(
       // 首页配置。客户端只在首个挂载周期使用，随后照常向公开接口校准。
       bootstrapPageDocument: {
         pageKey: "home" as const,
-        puckData: revision.puckData,
-        metadata,
+        puckData: toPublicBootstrapPuckData(revision.puckData),
+        metadata: publicPageMetadata(metadata),
         status: "PUBLISHED" as const,
       },
     } : {}),

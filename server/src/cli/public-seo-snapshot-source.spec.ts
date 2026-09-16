@@ -384,8 +384,13 @@ test("静态 SEO 正文只使用已审核 SEO 字段，不收集隐藏或内部 
   });
   fake.value.pageDocument.findMany = async () => structuredClone(rows);
   const result = await createPublicSeoExportInput(fake.value, config, validatePage, NOW);
-  const serialized = JSON.stringify(result.routes.find((route) => route.path === "/"));
+  const home = result.routes.find((route) => route.path === "/");
+  assert.ok(home?.bootstrapPageDocument);
+  assert.equal(home.bootstrapPageDocument.pageKey, "home");
+  const serialized = JSON.stringify(home);
   assert.doesNotMatch(serialized, /供应商内部备注不得公开|网站内容正在完善/);
+  assert.match(serialized, /published zh-CN content/);
+  assert.doesNotMatch(home.renderedBodyHtml, /供应商内部备注不得公开|网站内容正在完善/);
 });
 
 test("历史英文页面记录保留但不会进入中文快照", async () => {

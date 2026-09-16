@@ -310,7 +310,7 @@ for (const viewport of viewports) {
 test("其他公开路由继续显示唯一共享页脚服务条", async ({ page }) => {
   const writes = await mockPublicServiceThirdBatch(page);
   await page.goto("/privacy");
-  await expect(page.getByText("PRIVATE APPOINTMENT", { exact: true })).toBeVisible();
+  await expect(page.getByText("私人预约", { exact: true })).toBeVisible();
   await expect(page.locator("footer.site-footer")).toHaveCount(1);
   await expectWriteGate(writes);
 });

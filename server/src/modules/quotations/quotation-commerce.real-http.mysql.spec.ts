@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
+import type { Server } from 'node:http';
 import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { NestFactory } from '@nestjs/core';
@@ -55,6 +56,14 @@ function validateIsolatedTarget(value: string | undefined) {
   return target.href;
 }
 
+async function closeApi(api?: RunningApi) {
+  if (!api) return;
+  const server = api.app.getHttpServer() as Server;
+  server.closeIdleConnections?.();
+  server.closeAllConnections?.();
+  await api.app.close();
+}
+
 function assertStatus(result: ApiResult, expected: number, label: string) {
   assert.equal(
     result.status,
@@ -88,7 +97,7 @@ async function startApi(apiPort: number): Promise<RunningApi> {
     if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
-    return fetch(`${baseUrl}${path}`, { ...init, headers });
+    return fetch(`${baseUrl}${path}`, { ...init, headers, keepalive: false });
   };
   return {
     app,
@@ -723,7 +732,7 @@ test(
       );
 
       stage('first-api-closing');
-      await api.app.close();
+      await closeApi(api);
       api = undefined;
       stage('first-api-closed');
       api = await startApi(apiPort);
@@ -771,7 +780,8 @@ test(
       stage('restart-persistence-verified');
     } finally {
       stage('cleanup-starting');
-      if (api) await api.app.close();
+      await closeApi(api);
+      api = undefined;
       await prisma.$disconnect();
       if (designStoragePath) await rm(designStoragePath, { force: true });
       stage('cleanup-completed');
