@@ -14,7 +14,7 @@ import {
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   dynamicTemplateVersionKey,
   readResolvedDynamicTemplateDefinitions,
-} from "@/page-builder/dynamic-template-instance";
+} from "@/page-builder/dynamic-template-instance/types";
 import type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
 export const EDITOR_PAGE_KEYS = [

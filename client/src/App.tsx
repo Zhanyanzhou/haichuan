@@ -12,7 +12,6 @@ import {
   withPublicLocalePath,
 } from "@/i18n/publicLocale";
 import PublicLayout from "@/components/layout/PublicLayout";
-import Home from "@/pages/public/Home";
 
 // 后台布局与后台鉴权失败页依赖 Ant Design，不应进入前台首屏依赖图。
 const AdminLayout = lazy(() => import("@/components/layout/AdminLayout"));
@@ -28,6 +27,7 @@ const AdminIndexRedirect = lazy(
   () => import("@/pages/admin/AdminIndexRedirect"),
 );
 // Lazy load pages
+const Home = lazy(() => import("@/pages/public/Home"));
 const HomePreview = lazy(() =>
   import("@/pages/public/Home/Preview").then((m) => ({ default: m.HomePreview })),
 );
