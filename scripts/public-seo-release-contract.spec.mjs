@@ -42,7 +42,8 @@ test("Nginx serves only generated indexable routes while preserving protected SP
   assert.ok(nginx.includes("location ~* ^/en/([^/].*)$ {"));
   assert.match(nginx, /location ~\* \^\/en\(\?:\/\|\$\) \{\s+return 404;/);
   assert.match(nginx, /location ~\* \^\/en\/\/ \{\s+return 404;/);
-  assert.match(nginx, /location ~\* \^\/en\/\.\+\(%2f\|%5c\|\\\\\) \{\s+return 404;/);
+  assert.match(nginx, /location ~\* \^\/en\/\.\+%2f \{\s+return 404;/);
+  assert.match(nginx, /location ~\* \^\/en\/\.\+%5c \{\s+return 404;/);
   assert.match(nginxMain, /merge_slashes off;/);
   assert.doesNotMatch(nginx, /404-en\.html/);
   assert.match(nginx, /location \/ \{[\s\S]*?try_files \$uri =404;/);

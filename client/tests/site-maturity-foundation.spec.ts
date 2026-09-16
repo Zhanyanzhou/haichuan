@@ -103,7 +103,8 @@ test("Dockerfile 只声明公开 Vite 构建参数，Compose 使用不可变镜�
   expect(nginx).toContain("location = /en {");
   expect(nginx).toContain("location ~* ^/en/([^/].*)$ {");
   expect(nginx).toMatch(/location ~\* \^\/en\/\/ \{\s*return 404;/);
-  expect(nginx).toMatch(/location ~\* \^\/en\/\.\+\(%2f\|%5c\|\\\\\) \{\s*return 404;/);
+  expect(nginx).toMatch(/location ~\* \^\/en\/\.\+%2f \{\s*return 404;/);
+  expect(nginx).toMatch(/location ~\* \^\/en\/\.\+%5c \{\s*return 404;/);
   expect(nginxMain).toContain("merge_slashes off;");
   expect(nginx).toMatch(/location ~\* \^\/en\(\?:\/\|\$\) \{\s*return 404;/);
   expect(nginx).toContain("error_page 404 /404.html;");
