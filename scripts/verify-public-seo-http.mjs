@@ -200,10 +200,14 @@ export async function verifyPublicSeoHttp({ baseUrl, snapshot, requireRepresenta
   }
   assertLocation(retiredEnglish, "/__seo-unpublished-probe__", "");
 
-  const malformedEnglishPath = "/en//__seo-malformed-probe__";
-  const malformedEnglish = await fetchManual(baseUrl, malformedEnglishPath);
-  if (malformedEnglish.status !== 404) {
-    fail(`Malformed English path ${malformedEnglishPath} returned HTTP ${malformedEnglish.status}, expected 404.`);
+  for (const malformedEnglishPath of [
+    "/en//__seo-malformed-probe__",
+    "/en/%2F%2F__seo-malformed-probe__",
+  ]) {
+    const malformedEnglish = await fetchManual(baseUrl, malformedEnglishPath);
+    if (malformedEnglish.status !== 404) {
+      fail(`Malformed English path ${malformedEnglishPath} returned HTTP ${malformedEnglish.status}, expected 404.`);
+    }
   }
 
   const internalManifest = await fetchManual(baseUrl, "/prerendered-routes.json");

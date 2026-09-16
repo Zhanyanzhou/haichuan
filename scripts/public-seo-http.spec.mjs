@@ -50,7 +50,8 @@ test("HTTP SEO verification retires English unpublished paths with a same-origin
   assert.match(source, /const retiredEnglishPath = "\/en\/__seo-unpublished-probe__";/);
   assert.match(source, /retiredEnglish\.status !== 308/);
   assert.match(source, /assertLocation\(retiredEnglish, "\/__seo-unpublished-probe__", ""\)/);
-  assert.match(source, /const malformedEnglishPath = "\/en\/\/__seo-malformed-probe__";/);
+  assert.match(source, /"\/en\/\/__seo-malformed-probe__"/);
+  assert.match(source, /"\/en\/%2F%2F__seo-malformed-probe__"/);
   assert.doesNotMatch(source, /\["\/en\/__seo-unpublished-probe__", 404, "en"\]/);
 });
 
