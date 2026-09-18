@@ -62,6 +62,38 @@ function text(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
+  "/images/system/product-placeholder.svg",
+  "/images/system/launch-short-page-desktop.svg",
+  "/images/system/launch-short-page-mobile.svg",
+]);
+
+function isHeroRoleEnabled(content, roleId) {
+  const overrides = content?.__instanceOverrides;
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return true;
+  const collection = overrides.version === 2 ? overrides.nodes : overrides.textRoles;
+  if (!collection || typeof collection !== "object" || Array.isArray(collection)) return true;
+  const node = collection[roleId];
+  return !node || typeof node !== "object" || Array.isArray(node) || node.enabled !== false;
+}
+
+function heroImageAtWidth(source, width, origin) {
+  if (!source) return "";
+  try {
+    const url = new URL(source, origin);
+    if (
+      url.protocol !== "https:"
+      || url.origin !== origin
+      || !/^\/uploads\//.test(url.pathname)
+      || !/\.(?:jpe?g|png|webp)$/i.test(url.pathname)
+    ) return url.protocol === "https:" && url.origin === origin ? url.href : "";
+    url.searchParams.set("width", String(width));
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
 function publicHomeHero(route, origin) {
   const blocks = route.bootstrapPageDocument?.puckData?.content;
   if (!Array.isArray(blocks)) return null;
@@ -71,26 +103,23 @@ function publicHomeHero(route, origin) {
   const content = hero?.props && typeof hero.props === "object" && !Array.isArray(hero.props)
     ? hero.props
     : {};
-  const desktopImage = text(content?.desktopImage);
-  const mobileImage = text(content?.mobileImage);
-  const safeImage = (source) => {
-    if (!source) return "";
-    try {
-      const url = new URL(source, origin);
-      return url.protocol === "https:" && url.origin === origin ? url.href : "";
-    } catch {
-      return "";
-    }
-  };
-  const image = safeImage(desktopImage || mobileImage);
-  const mobile = safeImage(mobileImage || desktopImage);
+  const desktopImage = isHeroRoleEnabled(content, "desktopImage")
+    ? text(content?.desktopImage)
+    : "";
+  const mobileImage = isHeroRoleEnabled(content, "mobileImage")
+    ? text(content?.mobileImage)
+    : "";
+  const publishableDesktop = NON_PUBLISHABLE_SYSTEM_MEDIA.has(desktopImage) ? "" : desktopImage;
+  const publishableMobile = NON_PUBLISHABLE_SYSTEM_MEDIA.has(mobileImage) ? "" : mobileImage;
+  const image = heroImageAtWidth(publishableDesktop || publishableMobile, 1680, origin);
+  const mobile = heroImageAtWidth(publishableMobile || publishableDesktop, 480, origin);
   if (!image) return null;
   return {
     image,
     mobile,
-    title: text(content?.title),
-    subtitle: text(content?.subtitle),
-    eyebrow: text(content?.eyebrow),
+    title: isHeroRoleEnabled(content, "title") ? text(content?.title) : "",
+    subtitle: isHeroRoleEnabled(content, "subtitle") ? text(content?.subtitle) : "",
+    eyebrow: isHeroRoleEnabled(content, "eyebrow") ? text(content?.eyebrow) : "",
   };
 }
 
@@ -146,7 +175,8 @@ export function renderPrerenderedHtml(baseHtml, snapshot, route) {
   const firstFoldHead = homeHero
     ? [
       HOME_FIRST_FOLD_CSS,
-      `  <link data-public-first-fold="home" rel="preload" as="image" href="${escapeHtml(homeHero.image)}" fetchpriority="high">`,
+      `  <link data-public-first-fold="home" rel="preload" as="image" href="${escapeHtml(homeHero.mobile)}" media="(max-width: 767px)" fetchpriority="high">`,
+      `  <link data-public-first-fold="home" rel="preload" as="image" href="${escapeHtml(homeHero.image)}" media="(min-width: 768px)" fetchpriority="high">`,
     ]
     : [];
   const managedHead = [

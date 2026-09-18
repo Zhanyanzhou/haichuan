@@ -370,14 +370,6 @@ export default function PublicLayout() {
   // 预览页由 PagePreview 读取草稿；不能再套一层公开发布文档装饰器。
   const decorationPage = previewPage ? undefined : isHome ? undefined : pageDefinition;
   const decorationFallback = (() => {
-    if (english && decorationPage) {
-      return {
-        eyebrow: "HAICHUAN JEWELRY",
-        title: `${decorationPage.key.charAt(0).toUpperCase()}${decorationPage.key.slice(1)} is not published`,
-        description: "This language version is unavailable until an approved English page is published.",
-        primaryAction: { label: "Back to English home", href: "/en" },
-      };
-    }
     const fallback = decorationPage?.publicFallback;
     if (!fallback || decorationPage?.key !== "custom") return fallback;
     const productRef = normalizePublicProductReference(

@@ -16,6 +16,11 @@ import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageR
 import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
 
 const LG = "#F4F5F5";
+const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
+  "/images/system/product-placeholder.svg",
+  "/images/system/launch-short-page-desktop.svg",
+  "/images/system/launch-short-page-mobile.svg",
+]);
 const PuckDocumentRenderer = lazy(() => import("@/page-builder/runtime/PuckDocumentRenderer"));
 
 type HomeHeroPreview = {
@@ -28,6 +33,34 @@ type HomeHeroPreview = {
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function publicHeroMedia(value: unknown) {
+  const source = text(value);
+  return NON_PUBLISHABLE_SYSTEM_MEDIA.has(source) ? "" : source;
+}
+
+function isHeroRoleEnabled(content: Record<string, unknown>, roleId: string) {
+  const overrides = content.__instanceOverrides;
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return true;
+  const record = overrides as Record<string, unknown>;
+  const collectionKey = record.version === 2 ? "nodes" : "textRoles";
+  const collection = record[collectionKey];
+  if (!collection || typeof collection !== "object" || Array.isArray(collection)) return true;
+  const node = (collection as Record<string, unknown>)[roleId];
+  return !node || typeof node !== "object" || Array.isArray(node)
+    || (node as Record<string, unknown>).enabled !== false;
+}
+
+function heroImageAtWidth(source: string, width: 480 | 1680) {
+  if (!/^\/uploads\//.test(source) || !/\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(source)) return source;
+  try {
+    const parsed = new URL(source, "https://public-media.local");
+    parsed.searchParams.set("width", String(width));
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return source;
+  }
 }
 /**
  * 公开首页在完整 Renderer 分块到达前只读取已发布文档的首个 Hero。
@@ -42,14 +75,18 @@ function getHomeHeroPreview(data?: PuckDocument | null): HomeHeroPreview {
   const content = hero?.props && typeof hero.props === "object" && !Array.isArray(hero.props)
     ? hero.props as Record<string, unknown>
     : {};
-  const desktopImage = text(content?.desktopImage);
-  const mobileImage = text(content?.mobileImage);
+  const desktopImage = isHeroRoleEnabled(content, "desktopImage")
+    ? publicHeroMedia(content.desktopImage)
+    : "";
+  const mobileImage = isHeroRoleEnabled(content, "mobileImage")
+    ? publicHeroMedia(content.mobileImage)
+    : "";
   return {
-    image: desktopImage || mobileImage,
-    mobileImage: mobileImage || desktopImage,
-    title: text(content?.title),
-    subtitle: text(content?.subtitle),
-    eyebrow: text(content?.eyebrow),
+    image: heroImageAtWidth(desktopImage || mobileImage, 1680),
+    mobileImage: heroImageAtWidth(mobileImage || desktopImage, 480),
+    title: isHeroRoleEnabled(content, "title") ? text(content.title) : "",
+    subtitle: isHeroRoleEnabled(content, "subtitle") ? text(content.subtitle) : "",
+    eyebrow: isHeroRoleEnabled(content, "eyebrow") ? text(content.eyebrow) : "",
   };
 }
 export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {

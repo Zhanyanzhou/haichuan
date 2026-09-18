@@ -93,10 +93,56 @@ test("home injects the reviewed first-fold document and preloads its same-origin
 
   const html = readFileSync(join(temporaryDirectory, "index.html"), "utf8");
   assert.match(html, /data-public-first-fold="published"/);
-  assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero\.jpg" fetchpriority="high"/);
+  assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero-mobile\.jpg\?width=480" media="\(max-width: 767px\)" fetchpriority="high"/);
+  assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero\.jpg\?width=1680" media="\(min-width: 768px\)" fetchpriority="high"/);
+  assert.match(html, /<source media="\(max-width: 767px\)" srcset="https:\/\/jewelry\.example\.test\/uploads\/hero-mobile\.jpg\?width=480">/);
+  assert.match(html, /<img src="https:\/\/jewelry\.example\.test\/uploads\/hero\.jpg\?width=1680"/);
   assert.match(html, /id="hc-published-page-document" type="application\/json"/);
   assert.match(html, /光映新姿/);
   assert.doesNotMatch(html, /首页语义正文/);
+});
+
+test("home first fold follows instance visibility and ignores editor-only media", async (t) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-home-overrides-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const home = makeRoute({
+    path: "/",
+    alternateKey: "page:home",
+    title: "海川珠宝",
+    bootstrapPageDocument: {
+      pageKey: "home",
+      puckData: {
+        content: [{
+          type: "首屏主视觉",
+          props: {
+            desktopImage: "/uploads/hero.jpg",
+            mobileImage: "/images/system/launch-short-page-mobile.svg",
+            eyebrow: "不应闪现的眉题",
+            title: "不应闪现的标题",
+            subtitle: "可见副标题",
+            __instanceOverrides: {
+              version: 2,
+              nodes: {
+                eyebrow: { enabled: false },
+                title: { enabled: false },
+              },
+            },
+          },
+        }],
+      },
+      metadata: {},
+      status: "PUBLISHED",
+    },
+  });
+  const snapshot = createPublicSeoSnapshot(makeSnapshotInput([home]));
+  await prerenderPublicRoutes({ snapshot, baseHtml: BASE_HTML, outDir: temporaryDirectory });
+
+  const html = readFileSync(join(temporaryDirectory, "index.html"), "utf8");
+  const visibleFirstFold = html.match(/<main class="hc-prerendered-home"[\s\S]*?<\/main>/)?.[0] ?? "";
+  assert.doesNotMatch(visibleFirstFold, /不应闪现的眉题|不应闪现的标题/);
+  assert.match(visibleFirstFold, /可见副标题/);
+  assert.doesNotMatch(visibleFirstFold, /launch-short-page-mobile/);
+  assert.match(visibleFirstFold, /hero\.jpg\?width=480/);
 });
 
 test("invalid or tampered snapshots produce no output", async (t) => {

@@ -76,7 +76,9 @@ export default function HeroSection({
   const desktopSrcSet = buildResponsiveHeroSrcSet(desktopImg);
   const mobileSrcSet = buildResponsiveHeroSrcSet(mobileImg);
   const [failedImageSourceKey, setFailedImageSourceKey] = useState<string | null>(null);
+  const [readyImageSourceKey, setReadyImageSourceKey] = useState<string | null>(null);
   const imageFailed = failedImageSourceKey === imageSourceKey;
+  const imageReady = readyImageSourceKey === imageSourceKey;
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const [loadableImageSourceKey, setLoadableImageSourceKey] = useState<string | null>(
     editMode || priority ? imageSourceKey : null,
@@ -135,7 +137,7 @@ export default function HeroSection({
   const useNeutralMediaFallback = Boolean(editMode && (!hasConfiguredImage || imageFailed));
   const textTone = useNeutralMediaFallback ? "dark" : "light";
   const heroStyle = {
-    background: "#F7F8F8",
+    background: useNeutralMediaFallback || !hasConfiguredImage ? "#F7F8F8" : "#181A1B",
     outline: editMode ? "2px solid rgba(24,26,27,0.48)" : undefined,
     outlineOffset: -2,
     position: "relative",
@@ -191,15 +193,18 @@ export default function HeroSection({
               onLoad={(event) => {
                 const renderable = hasRenderableImageDimensions(event.currentTarget);
                 setFailedImageSourceKey(renderable ? null : imageSourceKey);
+                setReadyImageSourceKey(renderable ? imageSourceKey : null);
               }}
               onError={() => {
                 setFailedImageSourceKey(imageSourceKey);
+                setReadyImageSourceKey(null);
               }}
               width={3360}
               height={1470}
               className="hc-hero__image absolute inset-0 h-full w-full object-cover"
               style={{
-                opacity: imageFailed ? 0 : 1,
+                opacity: imageReady && !imageFailed ? 1 : 0,
+                transition: motionDisabled ? undefined : "opacity 240ms ease-out",
               }}
             />
           </picture>
