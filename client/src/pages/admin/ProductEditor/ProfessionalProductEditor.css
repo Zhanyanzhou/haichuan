@@ -55,6 +55,9 @@
   box-shadow: 0 2px 7px rgba(24,26,27, .08);
 }
 
+.pro-editor__tabs-main { min-width: 0; height: 100%; display: flex; align-items: center; }
+.pro-editor__back { flex: 0 0 auto; height: 32px; margin-right: 6px; color: var(--pro-muted); }
+.pro-editor__back:hover { color: var(--pro-ink) !important; background: var(--pro-action-soft) !important; }
 .pro-editor__tabs nav { height: 100%; display: flex; }
 .pro-editor__tabs nav button {
   height: 100%; padding: 0 20px; border: 0; background: transparent; color: var(--pro-ink);
@@ -242,6 +245,7 @@
 @media (max-width: 720px) {
   .pro-editor { padding-bottom: 128px; }
   .pro-editor__tabs { height: 84px; padding: 0 8px; align-items: flex-start; overflow-x: auto; }
+  .pro-editor__tabs-main { min-width: max-content; }
   .pro-editor__tabs nav button { padding: 0 10px; }
   .pro-editor__required { position: absolute; right: 12px; bottom: 8px; }
   .pro-editor__card { padding: 18px 14px 24px; }

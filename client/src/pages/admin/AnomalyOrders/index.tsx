@@ -7,16 +7,9 @@ import { orderApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import { canAccessAdminRoute } from "@/config/adminRouteAccess";
+import { ORDER_STATUS_META } from "@/constants/tradeStatusCopy";
 import { useAuthStore } from "@/store/authStore";
 import type { Order } from "@/types";
-
-const STATUS_LABEL: Record<string, { c: string; t: string }> = {
-  PENDING_PAYMENT: { c: "gold", t: "待付款" },
-  PENDING_SHIP: { c: "blue", t: "待发货" },
-  SHIPPED: { c: "cyan", t: "已发货" },
-  COMPLETED: { c: "green", t: "已完成" },
-  CANCELLED: { c: "red", t: "已取消" },
-};
 
 const ORDER_TYPE_LABEL: Record<string, string> = {
   SPOT: "现货",
@@ -128,8 +121,8 @@ export default function AnomalyOrders() {
                 dataIndex: "status",
                 width: 90,
                 render: (v: string) => {
-                  const m = STATUS_LABEL[v];
-                  return <Tag color={m?.c}>{m?.t || v}</Tag>;
+                  const m = ORDER_STATUS_META[v as keyof typeof ORDER_STATUS_META];
+                  return <Tag color={m?.color}>{m?.label || v}</Tag>;
                 },
               },
               {

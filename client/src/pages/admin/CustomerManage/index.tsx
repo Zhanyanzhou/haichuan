@@ -22,6 +22,7 @@ import {
   AdminLoadingState,
 } from "@/components/common/AdminDataStates";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import { ORDER_STATUS_META } from "@/constants/tradeStatusCopy";
 
 /**
  * 客户档案管理（只读运营视图）
@@ -94,14 +95,6 @@ const PARTNER_STATUS_TEXT: Record<string, { label: string; color: string }> = {
   APPROVED: { label: "已通过", color: "green" },
   REJECTED: { label: "已驳回", color: "red" },
   SUSPENDED: { label: "已暂停", color: "red" },
-};
-
-const ORDER_STATUS_TEXT: Record<string, { label: string; color: string }> = {
-  PENDING_PAYMENT: { label: "待付款", color: "orange" },
-  PENDING_SHIP: { label: "待发货", color: "gold" },
-  SHIPPED: { label: "已发货", color: "blue" },
-  COMPLETED: { label: "已完成", color: "green" },
-  CANCELLED: { label: "已取消", color: "default" },
 };
 
 const ORDER_TYPE_TEXT: Record<string, string> = {
@@ -485,7 +478,7 @@ export default function CustomerManage() {
                       dataIndex: "status",
                       width: 90,
                       render: (v: string) => {
-                        const s = ORDER_STATUS_TEXT[v];
+                        const s = ORDER_STATUS_META[v as keyof typeof ORDER_STATUS_META];
                         return <Tag color={s?.color}>{s?.label ?? v}</Tag>;
                       },
                     },

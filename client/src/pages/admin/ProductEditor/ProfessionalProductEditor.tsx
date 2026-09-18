@@ -1,5 +1,6 @@
 import {
   ArrowDownOutlined,
+  ArrowLeftOutlined,
   ArrowUpOutlined,
   DeleteOutlined,
   EyeOutlined,
@@ -28,7 +29,7 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AdminErrorState } from "@/components/common/AdminDataStates";
 import { SecureImage } from "@/components/common/SecureImage";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
@@ -53,6 +54,7 @@ import type {
   ShippingTemplate,
 } from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
+import { normalizeAdminReturnPath } from "@/utils/adminReturnPath";
 import UnsavedChangesGuard from "../HomepageConfig/components/UnsavedChangesGuard";
 import "./ProfessionalProductEditor.css";
 
@@ -268,6 +270,12 @@ export default function ProfessionalProductEditor() {
   const parsedEditingId = Number(id);
   const editingId = id && Number.isInteger(parsedEditingId) && parsedEditingId > 0 ? parsedEditingId : null;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedReturnPath = searchParams.get("returnTo");
+  const returnPath = normalizeAdminReturnPath(requestedReturnPath) || "/admin/products";
+  const returnPathQuery = requestedReturnPath
+    ? `?returnTo=${encodeURIComponent(returnPath)}`
+    : "";
   const commerceEnabled = useCommerceEnabled();
   const role = useAuthStore((state) => state.user?.role);
   const canGovernPublic = role === "SUPER_ADMIN" || role === "ADMIN";
@@ -672,7 +680,11 @@ export default function ProfessionalProductEditor() {
           ? "已保存定时上架计划"
           : "商品已保存至仓库";
       messageApi.success(successMessage);
-      if (!editingId) navigate(`/admin/products/${productId}/edit`, { replace: true });
+      if (!editingId) {
+        navigate(`/admin/products/${productId}/edit${returnPathQuery}`, {
+          replace: true,
+        });
+      }
       return true;
     } catch (error: unknown) {
       if (isFormValidationError(error)) {
@@ -915,7 +927,17 @@ export default function ProfessionalProductEditor() {
     <div className="pro-editor">
       <h1 className="pro-editor__sr-only">{editingId ? "编辑商品" : "新建商品"}</h1>
       <header className="pro-editor__tabs">
-        <nav aria-label="商品编辑步骤">{tabs.map(([key, label]) => <button key={key} aria-current={active === key ? "step" : undefined} className={active === key ? "is-active" : ""} onClick={() => { setActive(key); document.getElementById(key)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>{label}</button>)}</nav>
+        <div className="pro-editor__tabs-main">
+          <Button
+            type="text"
+            className="pro-editor__back"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate(returnPath)}
+          >
+            返回商品列表
+          </Button>
+          <nav aria-label="商品编辑步骤">{tabs.map(([key, label]) => <button key={key} aria-current={active === key ? "step" : undefined} className={active === key ? "is-active" : ""} onClick={() => { setActive(key); document.getElementById(key)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>{label}</button>)}</nav>
+        </div>
         <label className="pro-editor__required"><Switch checked={requiredOnly} onChange={setRequiredOnly} /> 只看核心字段</label>
       </header>
 

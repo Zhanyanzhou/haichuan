@@ -64,6 +64,7 @@ import type {
   Payment,
 } from "@/types";
 import {
+  ORDER_STATUS_META,
   PAYMENT_STATUS_META,
   fulfillmentStatusLabel,
   paymentStatusLabel,
@@ -80,27 +81,18 @@ function isMultiPackageShipConflict(error: unknown) {
     message.includes("多包裹订单请前往履约中心");
 }
 
-// 订单状态映射（颜色 + 中文）
-const STATUS_META: Record<OrderStatus, { c: string; t: string }> = {
-  PENDING_PAYMENT: { c: "gold", t: "待付款" },
-  PENDING_SHIP: { c: "blue", t: "待发货" },
-  SHIPPED: { c: "cyan", t: "已发货" },
-  COMPLETED: { c: "green", t: "已完成" },
-  CANCELLED: { c: "red", t: "已取消" },
-};
+function isOrderStatusFilter(value: string): value is "all" | OrderStatus {
+  return value === "all" || Object.prototype.hasOwnProperty.call(ORDER_STATUS_META, value);
+}
 
 const STATUS_TABS: Array<{ k: "all" | OrderStatus; l: string }> = [
   { k: "all", l: "全部" },
-  { k: "PENDING_PAYMENT", l: "待付款" },
-  { k: "PENDING_SHIP", l: "待发货" },
-  { k: "SHIPPED", l: "已发货" },
-  { k: "COMPLETED", l: "已完成" },
-  { k: "CANCELLED", l: "已取消" },
+  { k: "PENDING_PAYMENT", l: ORDER_STATUS_META.PENDING_PAYMENT.label },
+  { k: "PENDING_SHIP", l: ORDER_STATUS_META.PENDING_SHIP.label },
+  { k: "SHIPPED", l: ORDER_STATUS_META.SHIPPED.label },
+  { k: "COMPLETED", l: ORDER_STATUS_META.COMPLETED.label },
+  { k: "CANCELLED", l: ORDER_STATUS_META.CANCELLED.label },
 ];
-
-function isOrderStatusFilter(value: string): value is "all" | OrderStatus {
-  return value === "all" || Object.prototype.hasOwnProperty.call(STATUS_META, value);
-}
 
 type OrderOperationType =
   | "amount"
@@ -579,7 +571,7 @@ export default function OrderManage() {
               r.customerName,
               r.customerPhone,
               `¥${r.finalAmount}`,
-              STATUS_META[r.status as OrderStatus]?.t || r.status,
+              ORDER_STATUS_META[r.status as OrderStatus]?.label || r.status,
               r.createdAt,
               r.paymentConfirmedAt || "",
             ]),
@@ -1076,7 +1068,7 @@ export default function OrderManage() {
                 dataIndex: "status",
                 width: 90,
                 render: (v: OrderStatus) => (
-                  <Tag color={STATUS_META[v]?.c}>{STATUS_META[v]?.t}</Tag>
+                  <Tag color={ORDER_STATUS_META[v]?.color}>{ORDER_STATUS_META[v]?.label}</Tag>
                 ),
               },
               {
@@ -1171,8 +1163,8 @@ export default function OrderManage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold">订单摘要</h3>
-                <Tag color={STATUS_META[detail.status]?.c}>
-                  {STATUS_META[detail.status]?.t}
+                <Tag color={ORDER_STATUS_META[detail.status]?.color}>
+                  {ORDER_STATUS_META[detail.status]?.label}
                 </Tag>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
@@ -1644,6 +1636,9 @@ export default function OrderManage() {
               订单：{shippingOrder.orderNo} · ¥
               {Number(shippingOrder.finalAmount).toLocaleString()}
             </div>
+            <p className="mb-3 text-xs text-brand-muted">
+              单包裹可在此直接登记物流。多包裹、拣货复核请到履约中心处理。
+            </p>
             <Form.Item
               name="logisticsCompany"
               label="物流公司"

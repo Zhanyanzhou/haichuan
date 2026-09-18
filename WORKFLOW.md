@@ -42,7 +42,7 @@
 
 - 产品定位、品牌、公开信息架构或页面职责 → `docs/PROJECT_GUARDRAILS.md`。
 - 客户前台视觉、交互、响应式 → 先核页面目标，再按 `docs/UI_GUIDE.md` 实现，并验收真实桌面与移动页面。
-- 管理后台体验 → `docs/UI_GUIDE.md` 附录 A 与 `docs/ADMIN_COPY_GUIDE.md`，按受影响页面、视口和状态验收。
+- 管理后台体验与增量功能 → `docs/UI_GUIDE.md` 附录 A、`docs/ADMIN_COPY_GUIDE.md` 与 `docs/ADMIN_INCREMENTAL_DEVELOPMENT.md`，按受影响页面、视口和状态验收；优先复用现有后台能力，禁止平行建设。
 - 模板设计 → 先读唯一标准 `docs/page-builder/template-creation-rules.md`，再按需读从属编辑与页面交接细则 `docs/page-builder/template-design-framework.md`、`PROJECT_RULES.md` §7 和当前机器合同；旧计划、归档、Skill 与现有代码不能恢复过期产品要求。页面装修消费继续按交接细则分别核对 Template Repository 与 `PageDocument`。属性面板验证覆盖所需合同、适配、保存、回显和公开渲染，不改造无关模块。
 - 功能生命周期、退役恢复或内容发布边界 → 先读 `docs/DECISIONS.md` 的相关稳定编号和该条验证入口。当前代码与测试只说明实际行为；缺少新的、可核实产品决定时，不把缺失模块解释为待补功能，也不以旧断言恢复已退役能力。
 - 易变状态 → 先查 `docs/CURRENT_STATE.md`，再以当前代码、配置和运行结果复核；状态文档不授予权限。

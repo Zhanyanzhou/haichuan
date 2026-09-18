@@ -42,6 +42,33 @@ import "./ProductManage.css";
 
 type ProductActionError = { status?: number };
 
+const DEFAULT_PRODUCT_PAGE_SIZE = 20;
+const DEFAULT_PRODUCT_SORT: NonNullable<ProductAdminQuery["sortBy"]> =
+  "updated_desc";
+
+function readPositiveInteger(
+  value: string | null,
+  fallback: number,
+  maximum = 1000,
+): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= maximum
+    ? parsed
+    : fallback;
+}
+
+function readProductStatus(value: string | null): ProductStatus | undefined {
+  return statuses.includes(value as ProductStatus)
+    ? (value as ProductStatus)
+    : undefined;
+}
+
+function readProductSort(
+  value: string | null,
+): NonNullable<ProductAdminQuery["sortBy"]> {
+  return value === "sortOrder" ? "sortOrder" : DEFAULT_PRODUCT_SORT;
+}
+
 function reportUnexpectedProductActionError(error: unknown, action: string) {
   const status = (error as ProductActionError | undefined)?.status;
   if (status && status >= 400 && status < 500) return;
@@ -79,16 +106,28 @@ export default function ProductManage() {
   const navigate = useNavigate();
   const role = useAuthStore((state) => state.user?.role);
   const canGovernPublic = role === "SUPER_ADMIN" || role === "ADMIN";
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTitleKeyword = searchParams.get("title") || "";
+  const initialCodeKeyword = searchParams.get("code") || "";
   const [products, setProducts] = useState<ProductListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
-  const [activeStatus, setActiveStatus] = useState<ProductStatus | undefined>();
-  const [titleKeyword, setTitleKeyword] = useState("");
-  const [codeKeyword, setCodeKeyword] = useState("");
+  const [page, setPage] = useState(() =>
+    readPositiveInteger(searchParams.get("page"), 1),
+  );
+  const [pageSize, setPageSize] = useState(() =>
+    readPositiveInteger(
+      searchParams.get("pageSize"),
+      DEFAULT_PRODUCT_PAGE_SIZE,
+      100,
+    ),
+  );
+  const [activeStatus, setActiveStatus] = useState<ProductStatus | undefined>(
+    () => readProductStatus(searchParams.get("status")),
+  );
+  const [titleKeyword, setTitleKeyword] = useState(initialTitleKeyword);
+  const [codeKeyword, setCodeKeyword] = useState(initialCodeKeyword);
   // 支持来自分类管理「查看商品列表」的跳转：挂载时从 URL 读取 categoryId 预筛一次。
   // 用 lazy initializer 直接作为初始值，避免额外 effect 进入 loadProducts 依赖链造成 double 请求 / 429 风险。
   const [categoryId, setCategoryId] = useState<number | undefined>(() => {
@@ -101,15 +140,50 @@ export default function ProductManage() {
   const [selectedIds, setSelectedIds] = useState<Key[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [countsAvailable, setCountsAvailable] = useState(false);
-  const [debouncedKeyword, setDebouncedKeyword] = useState("");
+  const [debouncedKeyword, setDebouncedKeyword] = useState(
+    initialTitleKeyword || initialCodeKeyword,
+  );
   const [pendingProductId, setPendingProductId] = useState<number | null>(null);
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(
+    () => searchParams.get("advanced") === "1" || Boolean(searchParams.get("categoryId")),
+  );
   const productRequestIdRef = useRef(0);
   const [sortBy, setSortBy] = useState<
     NonNullable<ProductAdminQuery["sortBy"]>
-  >("updated_desc");
+  >(() => readProductSort(searchParams.get("sort")));
+
+  const listQueryString = useMemo(() => {
+    const next = new URLSearchParams();
+    if (page > 1) next.set("page", String(page));
+    if (pageSize !== DEFAULT_PRODUCT_PAGE_SIZE) {
+      next.set("pageSize", String(pageSize));
+    }
+    if (activeStatus) next.set("status", activeStatus);
+    if (titleKeyword.trim()) next.set("title", titleKeyword.trim());
+    if (codeKeyword.trim()) next.set("code", codeKeyword.trim());
+    if (categoryId) next.set("categoryId", String(categoryId));
+    if (sortBy !== DEFAULT_PRODUCT_SORT) next.set("sort", sortBy);
+    if (isAdvancedOpen) next.set("advanced", "1");
+    return next.toString();
+  }, [
+    activeStatus,
+    categoryId,
+    codeKeyword,
+    isAdvancedOpen,
+    page,
+    pageSize,
+    sortBy,
+    titleKeyword,
+  ]);
+  const listReturnPath = `/admin/products${
+    listQueryString ? `?${listQueryString}` : ""
+  }`;
+
+  useEffect(() => {
+    setSearchParams(listQueryString, { replace: true });
+  }, [listQueryString, setSearchParams]);
 
   const keyword = titleKeyword || codeKeyword;
   // 必须用 useMemo 稳定引用：productIdSearch 被放进 loadProducts 的 useCallback 依赖，
@@ -270,6 +344,7 @@ export default function ProductManage() {
     setCategoryId(undefined);
     setActiveStatus(undefined);
     setSortBy("updated_desc");
+    setIsAdvancedOpen(false);
     setPage(1);
   };
 
@@ -539,14 +614,18 @@ export default function ProductManage() {
       message.warning("分类数据加载中，请稍候再点");
       return;
     }
-    navigate("/admin/products/new");
-  }, [categoriesLoaded, message, navigate]);
+    navigate(
+      `/admin/products/new?returnTo=${encodeURIComponent(listReturnPath)}`,
+    );
+  }, [categoriesLoaded, listReturnPath, message, navigate]);
 
   const openEdit = useCallback(
     (product: Product) => {
-      navigate(`/admin/products/${product.id}/edit`);
+      navigate(
+        `/admin/products/${product.id}/edit?returnTo=${encodeURIComponent(listReturnPath)}`,
+      );
     },
-    [navigate],
+    [listReturnPath, navigate],
   );
 
   const cloneProduct = async (product: Product) => {
@@ -640,7 +719,9 @@ export default function ProductManage() {
             ? `已复制为「${created.name}」（SKU 库存已归零，请在编辑页补库存）`
             : `已复制为「${created.name}」，${failedCount} 项子资源复制失败；SKU 库存已归零，请在编辑页核对`,
         );
-        navigate(`/admin/products/${created.id}/edit`);
+        navigate(
+          `/admin/products/${created.id}/edit?returnTo=${encodeURIComponent(listReturnPath)}`,
+        );
         void loadProducts();
         void loadCounts();
       } else {

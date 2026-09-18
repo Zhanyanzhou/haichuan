@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { App as AntdApp, Button, Descriptions, Drawer, Form, Input, Modal, Select, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { afterSalesApi, orderApi } from '@/services/api';
@@ -8,7 +9,7 @@ import { useAuthStore } from '@/store/authStore';
 import type { AfterSalesCase, AfterSalesStatus, AfterSalesType, Order, PaginatedResult } from '@/types';
 
 const STATUS_META: Record<AfterSalesStatus, { color: string; label: string }> = {
-  REQUESTED: { color: 'gold', label: '已申请' },
+  REQUESTED: { color: 'gold', label: '待审核' },
   APPROVED: { color: 'blue', label: '已通过' },
   REJECTED: { color: 'default', label: '已驳回' },
   RETURNING: { color: 'cyan', label: '逆向物流中' },
@@ -26,10 +27,10 @@ const TYPE_META: Record<AfterSalesType, { label: string }> = {
 
 const STATUS_TABS: Array<{ key: string; label: string }> = [
   { key: 'all', label: '全部' },
-  { key: 'REQUESTED', label: '待审核' },
-  { key: 'APPROVED', label: '处理中' },
-  { key: 'COMPLETED', label: '已完成' },
-  { key: 'REJECTED', label: '已驳回' },
+  { key: 'REQUESTED', label: STATUS_META.REQUESTED.label },
+  { key: 'APPROVED', label: STATUS_META.APPROVED.label },
+  { key: 'COMPLETED', label: STATUS_META.COMPLETED.label },
+  { key: 'REJECTED', label: STATUS_META.REJECTED.label },
 ];
 
 type AfterSalesListItem = AfterSalesCase & {
@@ -38,6 +39,7 @@ type AfterSalesListItem = AfterSalesCase & {
 
 export default function AfterSalesManage() {
   const { message, modal } = AntdApp.useApp();
+  const navigate = useNavigate();
   const role = useAuthStore((state) => state.user?.role);
   // 与 after-sales.controller 类级 @Roles 一致：客服可登记、审核并推进售后。
   const canManageAfterSales = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'CUSTOMER_SERVICE';
@@ -166,7 +168,10 @@ export default function AfterSalesManage() {
       content: (
         <div className="space-y-2">
           {action === 'APPROVED' && record.type === 'REFUND' && (
-            <Input placeholder="审核通过的退款金额（可选）" type="number" onChange={(e) => { approvedRefundAmount = Number(e.target.value); }} />
+            <>
+              <p className="text-sm text-brand-muted">通过后只确认退款额度，不会把钱退回。真正退款请到退款中心执行。</p>
+              <Input placeholder="审核通过的退款金额（可选）" type="number" onChange={(e) => { approvedRefundAmount = Number(e.target.value); }} />
+            </>
           )}
           <Input.TextArea placeholder="处理备注（可选）" rows={3} onChange={(e) => { adminNote = e.target.value; }} />
         </div>
@@ -180,7 +185,17 @@ export default function AfterSalesManage() {
             adminNote: adminNote || undefined,
             approvedRefundAmount: approvedRefundAmount && approvedRefundAmount > 0 ? approvedRefundAmount : undefined,
           });
-          message.success(action === 'APPROVED' ? '已审核通过' : '已驳回');
+          if (action === 'APPROVED' && record.type === 'REFUND') {
+            modal.confirm({
+              title: '售后已通过，退款尚未执行',
+              content: '当前只确认了退款额度。请到退款中心创建或执行退款单。',
+              okText: '前往退款中心',
+              cancelText: '留在售后',
+              onOk: () => navigate('/admin/trade/refunds'),
+            });
+          } else {
+            message.success(action === 'APPROVED' ? '已审核通过' : '已驳回');
+          }
           void load();
         } catch (e: unknown) {
           message.error(getSafeAdminErrorMessage(e, '售后审核未完成，请重新加载工单后重试。'));
@@ -229,7 +244,7 @@ export default function AfterSalesManage() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="font-semibold text-brand-text">售后中心</h1>
-          <p className="text-sm text-brand-muted mt-1">退款退货 · 换货 · 维修（售后审核通过后可在退款中心发起退款）</p>
+          <p className="text-sm text-brand-muted mt-1">处理退货、换货和维修。退款类工单通过后只确认额度，真正退款到退款中心执行。</p>
         </div>
         <Space>
           <Input.Search
@@ -313,6 +328,9 @@ export default function AfterSalesManage() {
                       <Button size="small" danger icon={<CloseOutlined />} onClick={() => handleReview(r, 'REJECTED')}>驳回</Button>
                     </>
                   )}
+                  {r.type === 'REFUND' && r.status === 'APPROVED' && (
+                    <Button size="small" onClick={() => navigate('/admin/trade/refunds')}>去退款中心</Button>
+                  )}
                   {canManageAfterSales && !['COMPLETED', 'REJECTED', 'CANCELLED', 'REQUESTED'].includes(r.status) && (
                     <Button size="small" onClick={() => handleUpdateStatus(r)}>推进状态</Button>
                   )}
@@ -343,6 +361,13 @@ export default function AfterSalesManage() {
                 ? new Date(detail.createdAt).toLocaleString('zh-CN')
                 : '—'}
             </Descriptions.Item>
+            {detail.type === 'REFUND' && detail.status === 'APPROVED' && (
+              <Descriptions.Item label="下一步">
+                <Button size="small" type="primary" onClick={() => navigate('/admin/trade/refunds')}>
+                  去退款中心执行退款
+                </Button>
+              </Descriptions.Item>
+            )}
           </Descriptions>
         )}
       </Drawer>

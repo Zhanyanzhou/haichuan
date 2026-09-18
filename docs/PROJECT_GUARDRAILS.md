@@ -17,6 +17,7 @@
 | `docs/PUBLIC_ACCESS_MATRIX.md` | 公开数据、身份、操作权限与当前交易开关边界 |
 | `docs/UI_GUIDE.md` | 全站视觉与体验详细标准：正文为客户前台，附录 A 为管理后台 |
 | `docs/ADMIN_COPY_GUIDE.md` | 管理后台文案、复杂状态和操作反馈 |
+| `docs/ADMIN_INCREMENTAL_DEVELOPMENT.md` | 管理后台增量开发：复用现有能力、保持一致性、禁止平行建设 |
 | `docs/AI_TOOLING.md` | Codex、Skill、MCP 与本地工具适配，不授予额外权限 |
 | `docs/AI_COLLABORATION_STANDARD.md` | 多任务协作、所有权、冲突与验收分工 |
 | `docs/page-builder/template-creation-rules.md` | 模板设计唯一产品执行标准：步骤、预设、生成、精调、管理、内容版本边界与验收 |

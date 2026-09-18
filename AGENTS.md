@@ -7,7 +7,7 @@
 
 ## 0. 项目入口
 
-- 产品与品牌只认 `docs/PROJECT_GUARDRAILS.md`；视觉、响应式、交互和无障碍只认 `docs/UI_GUIDE.md`；后台文案与复杂交互再读 `docs/ADMIN_COPY_GUIDE.md`。状态、层级和操作优先做成可见、可操作、可预览和可撤销的界面。
+- 产品与品牌只认 `docs/PROJECT_GUARDRAILS.md`；视觉、响应式、交互和无障碍只认 `docs/UI_GUIDE.md`；后台文案与复杂交互再读 `docs/ADMIN_COPY_GUIDE.md`；后台新增功能、状态、入口和交互只认 `docs/ADMIN_INCREMENTAL_DEVELOPMENT.md`。状态、层级和操作优先做成可见、可操作、可预览和可撤销的界面。
 - 涉及功能启用、暂停、本期不做、退役、重新启用，或页面内容发布与整站发布边界时，先按需读取 `docs/DECISIONS.md` 中的稳定编号及其验证入口。代码、旧测试、归档或行业惯例不能自行恢复已退役能力；没有可核实的新产品决定时，保留现状并报告最小待决事项。
 - 易变事实先查 `docs/CURRENT_STATE.md`，再用当前代码、配置、合同和运行结果复核；状态文档不授予操作权限。
 

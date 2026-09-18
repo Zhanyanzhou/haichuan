@@ -200,7 +200,7 @@ export default function FulfillmentCenter() {
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="font-semibold text-brand-text">履约中心</h1>
-          <p className="text-sm text-brand-muted mt-1">拣货 · 复核 · 发货 · 物流跟踪 · 异常处理</p>
+          <p className="text-sm text-brand-muted mt-1">仓储拣货、复核、发货与物流跟踪。管理员也可在订单中心为单包裹登记物流。</p>
         </div>
         <Space>
           <Input.Search

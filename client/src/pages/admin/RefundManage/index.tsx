@@ -9,7 +9,7 @@ import type { PaginatedResult, Refund, RefundStatus } from '@/types';
 
 const STATUS_META: Record<RefundStatus, { color: string; label: string }> = {
   PENDING: { color: 'gold', label: '待审核' },
-  APPROVED: { color: 'blue', label: '审核通过待执行' },
+  APPROVED: { color: 'blue', label: '待执行' },
   PROCESSING: { color: 'cyan', label: '执行中' },
   COMPLETED: { color: 'green', label: '已完成' },
   REJECTED: { color: 'default', label: '已拒绝' },
@@ -18,12 +18,12 @@ const STATUS_META: Record<RefundStatus, { color: string; label: string }> = {
 
 const STATUS_TABS: Array<{ key: string; label: string }> = [
   { key: 'all', label: '全部' },
-  { key: 'PENDING', label: '待审核' },
-  { key: 'APPROVED', label: '待执行' },
-  { key: 'PROCESSING', label: '渠道处理中' },
-  { key: 'COMPLETED', label: '已完成' },
-  { key: 'REJECTED', label: '已拒绝' },
-  { key: 'FAILED', label: '执行失败' },
+  { key: 'PENDING', label: STATUS_META.PENDING.label },
+  { key: 'APPROVED', label: STATUS_META.APPROVED.label },
+  { key: 'PROCESSING', label: STATUS_META.PROCESSING.label },
+  { key: 'COMPLETED', label: STATUS_META.COMPLETED.label },
+  { key: 'REJECTED', label: STATUS_META.REJECTED.label },
+  { key: 'FAILED', label: STATUS_META.FAILED.label },
 ];
 
 type RefundListItem = Refund & {
@@ -136,28 +136,44 @@ export default function RefundManage() {
   };
 
   const handleChannelRefund = async (record: RefundListItem) => {
-    setChannelLoadingId(record.id);
-    try {
-      const response = record.status === 'APPROVED'
-        ? await refundApi.startChannel(record.id)
-        : await refundApi.queryChannel(record.id);
-      const result = unwrapResponse<{ state?: string }>(response);
-      if (result?.state === 'SUCCESS') {
-        message.success('微信已确认原路退款成功');
-      } else if (result?.state === 'ABNORMAL') {
-        message.warning('微信退款异常，请保持原退款单并进行渠道对账');
-      } else if (result?.state === 'CLOSED') {
-        message.warning('微信退款已关闭，可在核对后重新创建退款申请');
-      } else {
-        message.info('微信退款处理中，稍后可继续查询');
+    const run = async () => {
+      setChannelLoadingId(record.id);
+      try {
+        const response = record.status === 'APPROVED'
+          ? await refundApi.startChannel(record.id)
+          : await refundApi.queryChannel(record.id);
+        const result = unwrapResponse<{ state?: string }>(response);
+        if (result?.state === 'SUCCESS') {
+          message.success('微信已确认原路退款成功');
+        } else if (result?.state === 'ABNORMAL') {
+          message.warning('微信退款异常，请保持原退款单并进行渠道对账');
+        } else if (result?.state === 'CLOSED') {
+          message.warning('微信退款已关闭，可在核对后重新创建退款申请');
+        } else {
+          message.info('微信退款处理中，稍后可继续查询');
+        }
+        await load();
+        if (detail?.id === record.id) await openDetail(record);
+      } catch (e: unknown) {
+        message.error(getSafeAdminErrorMessage(e, '原路退款操作未完成，请保留当前退款单并稍后查询。'));
+      } finally {
+        setChannelLoadingId(null);
       }
-      await load();
-      if (detail?.id === record.id) await openDetail(record);
-    } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, '原路退款操作未完成，请保留当前退款单并稍后查询。'));
-    } finally {
-      setChannelLoadingId(null);
+    };
+
+    if (record.status !== 'APPROVED') {
+      await run();
+      return;
     }
+
+    modal.confirm({
+      title: '确认发起原路退款？',
+      content: `将向微信发起退款 ¥${Number(record.amount).toLocaleString()}。渠道受理后不可从后台撤回。`,
+      okText: '确认发起',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => run(),
+    });
   };
 
   const handleExecute = (record: RefundListItem, action: 'COMPLETED' | 'FAILED') => {

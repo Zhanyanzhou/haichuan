@@ -52,11 +52,13 @@ test.describe("商品管理列表查询契约", () => {
     await expect
       .poll(() => new URLSearchParams(productQueries.at(-1)).get("sortBy"))
       .toBe("sortOrder");
+    await expect(page).toHaveURL(/sort=sortOrder/);
 
     await page.getByRole("button", { name: /重\s*置/ }).click();
     await expect
       .poll(() => new URLSearchParams(productQueries.at(-1)).get("sortBy"))
       .toBe("updated_desc");
+    await expect(page).not.toHaveURL(/sort=/);
 
     expect(productQueries.some((query) => query.includes("sortBy=updatedAt"))).toBe(
       false,

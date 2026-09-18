@@ -5,32 +5,14 @@ import { SecureImage } from '@/components/common/SecureImage';
 import { paymentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+import { PAYMENT_STATUS_META } from '@/constants/tradeStatusCopy';
 import { useAuthStore } from '@/store/authStore';
 import type { PaginatedResult, Payment } from '@/types';
-
-const statusMap: Record<string, { color: string; label: string }> = {
-  PENDING: { color: 'gold', label: '待审核' },
-  PAID: { color: 'green', label: '已确认收款' },
-  FAILED: { color: 'red', label: '已驳回' },
-  REFUNDED: { color: 'purple', label: '已退款' },
-  PARTIAL_REFUND: { color: 'purple', label: '部分退款' },
-};
 
 const ONLINE_PAYMENT_METHODS = new Set(['wechat', 'alipay']);
 
 function isOnlinePayment(payment: Pick<Payment, 'method'>) {
   return ONLINE_PAYMENT_METHODS.has(payment.method);
-}
-
-function getPaymentStatusMeta(payment: Pick<Payment, 'method' | 'status'>) {
-  if (!isOnlinePayment(payment)) return statusMap[payment.status];
-  return {
-    PENDING: { color: 'processing', label: '等待渠道确认' },
-    PAID: { color: 'green', label: '在线支付成功' },
-    FAILED: { color: 'default', label: '在线支付未完成' },
-    REFUNDED: { color: 'purple', label: '已原路退款' },
-    PARTIAL_REFUND: { color: 'purple', label: '部分原路退款' },
-  }[payment.status] ?? statusMap[payment.status];
 }
 
 type PaymentListItem = Payment & {
@@ -71,9 +53,9 @@ export default function PaymentReview() {
   const [receiptForm] = Form.useForm<ReceiptFormValues>();
   const STATUS_TABS: Array<{ k: string; l: string }> = [
     { k: 'all', l: '全部' },
-    { k: 'PENDING', l: '待处理' },
-    { k: 'PAID', l: '已到账' },
-    { k: 'FAILED', l: '未完成' },
+    { k: 'PENDING', l: PAYMENT_STATUS_META.PENDING.label },
+    { k: 'PAID', l: PAYMENT_STATUS_META.PAID.label },
+    { k: 'FAILED', l: PAYMENT_STATUS_META.FAILED.label },
   ];
 
   const load = useCallback(async () => {
@@ -272,8 +254,15 @@ export default function PaymentReview() {
             {
               title: '状态',
               render: (_: unknown, record: PaymentListItem) => {
-                const meta = getPaymentStatusMeta(record);
-                return <Tag color={meta?.color}>{meta?.label || record.status}</Tag>;
+                const meta = PAYMENT_STATUS_META[record.status];
+                return (
+                  <div>
+                    <Tag color={meta?.color}>{meta?.label || record.status}</Tag>
+                    {isOnlinePayment(record) && record.status === 'PENDING' ? (
+                      <p className="text-xs text-brand-muted mt-1">在线支付由渠道确认</p>
+                    ) : null}
+                  </div>
+                );
               },
             },
             {
@@ -371,8 +360,15 @@ export default function PaymentReview() {
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label="付款单号"><code className="text-xs text-brand-gold">{detail.paymentNo}</code></Descriptions.Item>
             <Descriptions.Item label="状态">{(() => {
-              const meta = getPaymentStatusMeta(detail);
-              return <Tag color={meta?.color}>{meta?.label || detail.status}</Tag>;
+              const meta = PAYMENT_STATUS_META[detail.status];
+              return (
+                <div>
+                  <Tag color={meta?.color}>{meta?.label || detail.status}</Tag>
+                  {isOnlinePayment(detail) && detail.status === 'PENDING' ? (
+                    <p className="text-xs text-brand-muted mt-1">在线支付由渠道确认，不走线下审核</p>
+                  ) : null}
+                </div>
+              );
             })()}</Descriptions.Item>
             <Descriptions.Item label="订单号">{detail.order.orderNo}</Descriptions.Item>
             <Descriptions.Item label="客户">{detail.order.customerName} · {detail.order.customerPhone}</Descriptions.Item>

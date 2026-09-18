@@ -22,7 +22,7 @@ import {
   AdminLoadingState,
 } from "@/components/common/AdminDataStates";
 
-const sm: Record<string, { c: string; t: string }> = {
+const STOCK_HINT: Record<string, { c: string; t: string }> = {
   normal: { c: "green", t: "正常" },
   low: { c: "gold", t: "偏低" },
   out: { c: "red", t: "缺货" },
@@ -82,7 +82,8 @@ export default function Inventory() {
       if (!data || !Array.isArray(data.list) || !Number.isFinite(Number(data.total))) {
         throw new Error("Invalid inventory response");
       }
-      // 服务端返回嵌套 sku/warehouse，mock 返回扁平字段——两侧兼容，并在前端统一计算库存状态
+      // 服务端返回嵌套 sku/warehouse，mock 返回扁平字段——两侧兼容。
+      // 正常/偏低/缺货只是按当前页数量与安全库存算出的提示，不是仓库业务状态。
       const rows = data.list.map((i): InventoryRow => {
         const quantity = i.quantity ?? 0;
         const safety = i.safetyStock ?? 0;
@@ -172,7 +173,7 @@ export default function Inventory() {
   };
 
   const handleExport = () => {
-    const csv = ["SKU,产品,仓库,库存,状态"]
+    const csv = ["SKU,产品,仓库,库存,本页提示"]
       .concat(
         filtered.map((i) =>
           csvRow([
@@ -180,7 +181,7 @@ export default function Inventory() {
             i.productName,
             i.warehouse,
             i.quantity,
-            sm[i.status]?.t || i.status,
+            STOCK_HINT[i.status]?.t || i.status,
           ]),
         ),
       )
@@ -209,7 +210,7 @@ export default function Inventory() {
           <h1 className="font-semibold text-brand-text">
             库存管理
           </h1>
-          <p className="text-sm text-brand-muted mt-1">多仓库 · 安全预警</p>
+          <p className="text-sm text-brand-muted mt-1">按仓库查看数量。下方提示仅根据当前页计算，不是全仓库存状态。</p>
         </div>
         <Space>
           <Select
@@ -226,11 +227,11 @@ export default function Inventory() {
             }}
             options={warehouses.map((w) => ({ value: w.id, label: w.name }))}
           />
-          <Select value={filter} onChange={setFilter} className="w-32" aria-label="本页库存状态筛选">
-            <Select.Option value="all">全部</Select.Option>
-            <Select.Option value="normal">正常</Select.Option>
-            <Select.Option value="low">偏低</Select.Option>
-            <Select.Option value="out">缺货</Select.Option>
+          <Select value={filter} onChange={setFilter} className="w-36" aria-label="本页库存提示筛选">
+            <Select.Option value="all">本页全部</Select.Option>
+            <Select.Option value="normal">本页正常</Select.Option>
+            <Select.Option value="low">本页偏低</Select.Option>
+            <Select.Option value="out">本页缺货</Select.Option>
           </Select>
           <Button
             icon={<ExportOutlined />}
@@ -261,7 +262,7 @@ export default function Inventory() {
       ) : (
         <>
           <p className="text-xs leading-[18px] text-brand-muted">
-            全量总数来自服务端；状态统计与状态筛选仅针对当前页已加载记录。
+            全量总数来自服务端；提示标签与筛选只作用于当前页已加载记录，不能代表全仓库存状态。
           </p>
           <div className="grid grid-cols-4 gap-4">
             {stats.map((s) => (
@@ -275,7 +276,7 @@ export default function Inventory() {
           </div>
           <Card className="!bg-white !border-brand-line">
             {filtered.length === 0 ? (
-              <AdminEmptyState description="当前页没有符合状态筛选的库存记录" />
+              <AdminEmptyState description="当前页没有符合提示筛选的库存记录" />
             ) : (
               <Table
                 dataSource={filtered}
@@ -319,10 +320,10 @@ export default function Inventory() {
               ),
             },
             {
-              title: "状态",
+              title: "本页提示",
               dataIndex: "status",
               render: (v: string) => {
-                const s = sm[v];
+                const s = STOCK_HINT[v];
                 return <Tag color={s?.c}>{s?.t}</Tag>;
               },
             },

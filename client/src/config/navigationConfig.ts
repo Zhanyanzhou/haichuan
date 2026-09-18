@@ -231,7 +231,7 @@ export const navigationConfig: NavDomain[] = [
           { key: "products", label: "商品管理", route: "/admin/products" },
           {
             key: "categories",
-            label: "类目与属性",
+            label: "类目管理",
             route: "/admin/categories",
           },
           {
@@ -463,7 +463,7 @@ export const navigationConfig: NavDomain[] = [
         collapsible: false,
         defaultOpen: true,
         items: [
-          { key: "customer-leads", label: "客户线索", route: "/admin/leads" },
+          { key: "customer-leads", label: "全部线索", route: "/admin/leads" },
           {
             key: "customer-leads-pending",
             label: "待处理线索",

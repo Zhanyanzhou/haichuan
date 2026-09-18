@@ -233,7 +233,7 @@ test.describe("后台经营底座第一批状态", () => {
     await page.getByRole("button", { name: "重新加载" }).click();
     await expect(page.getByText("库存记录总数（全量）")).toBeVisible();
     await expect(
-      page.getByText("全量总数来自服务端；状态统计与状态筛选仅针对当前页已加载记录。"),
+      page.getByText("全量总数来自服务端；提示标签与筛选只作用于当前页已加载记录，不能代表全仓库存状态。"),
     ).toBeVisible();
     await expect(page.getByText("本页正常")).toBeVisible();
     await expect(page.getByText("本页缺货")).toBeVisible();
@@ -506,7 +506,10 @@ test.describe("后台经营底座第一批状态", () => {
     await page.reload();
     await expect(page.getByText("尚未配置当前金价")).toBeVisible();
     await expect(page.getByText("暂无金价历史")).toBeVisible();
-    await page.getByRole("button", { name: "手动调价" }).click();
+    await expect(page.getByText("只记录金价事实，不会改写商品售价")).toBeVisible();
+    await page.getByRole("button", { name: "更新金价" }).click();
+    await expect(page.getByText("保存后只新增一条金价记录")).toBeVisible();
+    await expect(page.getByText("重算全店")).toHaveCount(0);
     await expect(page.getByRole("spinbutton")).toHaveValue("");
   });
 });

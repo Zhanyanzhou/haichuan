@@ -120,6 +120,9 @@ test.describe('交易后台不把人工操作伪装成在线资金结果', () =>
 
     await expect(page.getByRole('heading', { name: '支付记录' })).toBeVisible();
     await expect(page.getByText('客户在线支付为标准主链；线下收款仅在异常补录中处理')).toBeVisible();
+    await expect(page.getByRole('button', { name: '待确认' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '已收款' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '待处理' })).toHaveCount(0);
     await page.getByRole('button', { name: '异常补录' }).click();
     await expect(page.getByRole('dialog', { name: '线下收款异常补录' })).toBeVisible();
     await page
@@ -166,7 +169,10 @@ test.describe('交易后台不把人工操作伪装成在线资金结果', () =>
     }));
 
     await page.goto('/admin/trade/payments');
-    await expect(page.getByText('等待渠道确认')).toBeVisible();
+    await expect(page.getByRole('button', { name: '待确认' })).toBeVisible();
+    await expect(page.getByRole('table').getByText('待确认')).toBeVisible();
+    await expect(page.getByText('在线支付由渠道确认')).toBeVisible();
+    await expect(page.getByText('等待渠道确认')).toHaveCount(0);
     await expect(page.getByText('渠道自动确认')).toBeVisible();
     await expect(page.getByRole('button', { name: '确认收款' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '驳回' })).toHaveCount(0);
@@ -230,6 +236,31 @@ test.describe('交易后台不把人工操作伪装成在线资金结果', () =>
     await expect(originalRouteButton).toBeEnabled();
     await expect(page.getByRole('button', { name: '补录线下退款' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '确认退款已完成' })).toHaveCount(0);
+
+    let channelStarts = 0;
+    await page.route('**/api/refunds/1/channel', async (route) => {
+      if (route.request().method() === 'PUT') {
+        channelStarts += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 200, message: 'ok', data: { state: 'PROCESSING' } }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await originalRouteButton.click();
+    const confirm = page.getByRole('dialog', { name: '确认发起原路退款？' });
+    await expect(confirm).toBeVisible();
+    // Ant Design 两字按钮的无障碍名会插入空格（取 消）
+    await confirm.getByRole('button', { name: /取\s*消/ }).click();
+    expect(channelStarts).toBe(0);
+
+    await originalRouteButton.click();
+    await page.getByRole('button', { name: '确认发起' }).click();
+    await expect.poll(() => channelStarts).toBe(1);
   });
 });
 
