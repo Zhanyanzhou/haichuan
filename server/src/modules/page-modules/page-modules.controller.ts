@@ -36,10 +36,12 @@ import {
   requireEditablePublicContentLocale,
   requirePublishedPublicContentLocale,
 } from "../../common/content-locale";
+import { RejectRetiredEditableLocaleGuard } from "../../common/reject-retired-editable-locale.guard";
 import type { StaffRequest } from "../../common/security/authenticated-principal";
 
 @ApiTags("页面模块")
 @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
+@UseGuards(RejectRetiredEditableLocaleGuard)
 @Controller("page-modules")
 export class PageModulesController {
   constructor(private service: PageModulesService) {}
@@ -134,6 +136,7 @@ export class PageModulesController {
       req.user.id,
       body.expectedUpdatedAt,
       body.expectedContentHash,
+      body.selfReviewAcknowledged ?? false,
     );
   }
 

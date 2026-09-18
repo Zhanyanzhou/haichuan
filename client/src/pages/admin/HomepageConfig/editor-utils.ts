@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { isMobileCanvasWidth } from "@/page-builder/config/blockContracts";
 import type { PublishValidationIssue } from "@/page-builder/inspector/publishValidation";
+import { collapseManagedMediaAuthorizationIssues } from "@/page-builder/inspector/managedMediaPublishIssues";
 import { isPuckDocument, type PuckDocument, type PuckProps } from "@/page-builder/types";
 
 export type ViewportPreset = {
@@ -187,7 +188,10 @@ export function resolvePublishValidationIssues(result: {
   const fallbackErrors = (result.errors ?? [])
     .filter((message) => !structuredErrorMessages.has(message))
     .map((message) => ({ message, severity: "error" as const }));
-  return [...structuredIssues, ...fallbackErrors];
+  return collapseManagedMediaAuthorizationIssues([
+    ...structuredIssues,
+    ...fallbackErrors,
+  ]);
 }
 
 export function getModuleDisplayName(

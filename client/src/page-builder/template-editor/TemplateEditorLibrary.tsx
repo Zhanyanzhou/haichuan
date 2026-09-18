@@ -50,8 +50,14 @@ import TemplateCatalogControls from "./TemplateCatalogControls";
 import { groupTemplateCatalogEntries } from "./templateCatalogGrouping";
 import {
   DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT,
+  PAGE_TEMPLATE_INSERTED_EVENT,
+  PAGE_TEMPLATE_LIBRARY_HANDOFF_EVENT,
   type DynamicTemplateCatalogChangeDetail,
+  type PageTemplateInserted,
+  type PageTemplateLibraryHandoff,
 } from "./templateCatalogEvents";
+import { describePageTemplateAddAction, describePageTemplateHandoff } from "./pageTemplateHandoff";
+import { isTemplateDesignLibraryTemplate } from "../templates/pageEditorCatalog";
 import {
   getTemplatePublicationLabel,
   matchesTemplatePublicationFilter,
@@ -64,7 +70,10 @@ import {
   hasUnconfiguredTemplateCatalogMedia,
   type TemplateCatalogPreviewModel,
 } from "./templatePreviewModel";
-import type { TemplateWorkspaceScrollState } from "./templateEditorSession";
+import {
+  resolveTemplateLibraryScrollRestore,
+  type TemplateWorkspaceScrollState,
+} from "./templateEditorSession";
 import type { TemplateEditorDraft } from "./types";
 import {
   dynamicTemplateApi,
@@ -72,7 +81,18 @@ import {
   type PublishedDynamicTemplateResource,
   type TemplateCatalogItemResource,
 } from "@/services/clients/dynamicTemplateClient";
+import { requestStatus } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
+
+function catalogRetryDelayMs(error: unknown, attempt: number) {
+  const headers = (error as { response?: { headers?: Record<string, string> } })?.response?.headers;
+  const retryAfter = headers?.["retry-after"] ?? headers?.["Retry-After"];
+  const seconds = Number.parseInt(String(retryAfter ?? ""), 10);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(seconds, 8) * 1000 + 250;
+  }
+  return Math.min(1000 * (attempt + 1), 4000) + 250;
+}
 
 const COLLAPSED_STORAGE_KEY = "homepage-editor-library-collapsed";
 
@@ -175,6 +195,8 @@ interface PageModeProps {
   obscuredByInspector?: boolean;
   onRequestCompactOpen?: () => void;
   isPublishedTemplateAllowed: (template: PublishedDynamicTemplateResource) => boolean;
+  pageHasBlocks: boolean;
+  hasRootSelection: boolean;
   onInsertPublished: (template: PublishedDynamicTemplateResource) => void;
   onPublishedDragStart: (template: PublishedDynamicTemplateResource) => void;
   onPublishedDragEnd: () => void;
@@ -249,11 +271,13 @@ const DETAIL_ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25] as const;
 function TemplateCatalogPreviewDialog({
   preview,
   initialDevice,
+  insertActionTitle,
   onClose,
   onInsert,
 }: {
   preview: TemplateCatalogDetailPreview;
   initialDevice: "desktop" | "mobile";
+  insertActionTitle?: string;
   onClose: () => void;
   onInsert?: (template: PublishedDynamicTemplateResource) => void;
 }) {
@@ -284,6 +308,7 @@ function TemplateCatalogPreviewDialog({
       open
       width="min(1180px, calc(100vw - 32px))"
       okText={canInsert ? "添加到页面" : undefined}
+      okButtonProps={canInsert && insertActionTitle ? { title: insertActionTitle } : undefined}
       cancelText="关闭预览"
       footer={canInsert ? undefined : <Button onClick={onClose}>关闭预览</Button>}
       onOk={canInsert ? () => onInsert?.(preview.insertTemplate!) : undefined}
@@ -541,6 +566,11 @@ function readDynamicCatalogChange(event: Event): DynamicTemplateCatalogChangeDet
     ) return null;
     return detail as DynamicTemplateCatalogChangeDetail;
   }
+  if (detail.kind === "removed") {
+    const identity = detail.identity;
+    if (!isRecord(identity) || !isNonEmptyString(identity.templateId)) return null;
+    return detail as DynamicTemplateCatalogChangeDetail;
+  }
   if (detail.kind === "verified-catalog") {
     const identity = detail.identity;
     const catalog = detail.catalog;
@@ -562,6 +592,59 @@ function readDynamicCatalogChange(event: Event): DynamicTemplateCatalogChangeDet
     return detail as DynamicTemplateCatalogChangeDetail;
   }
   return null;
+}
+
+function readPositiveIntegerVersion(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) return null;
+  return value;
+}
+
+function readPageLibraryHandoff(event: Event): PageTemplateLibraryHandoff | null {
+  const value = (event as CustomEvent<unknown>).detail;
+  if (!isRecord(value)) return null;
+  if (!isNonEmptyString(value.templateId)) return null;
+  const version = readPositiveIntegerVersion(value.version);
+  if (version === null) return null;
+  if (!isNonEmptyString(value.name)) return null;
+  return {
+    templateId: value.templateId,
+    version,
+    name: value.name,
+  };
+}
+
+function readPageLibraryInserted(event: Event): PageTemplateInserted | null {
+  const value = (event as CustomEvent<unknown>).detail;
+  if (!isRecord(value)) return null;
+  if (!isNonEmptyString(value.templateId)) return null;
+  const version = readPositiveIntegerVersion(value.version);
+  if (version === null) return null;
+  return {
+    templateId: value.templateId,
+    version,
+  };
+}
+
+function matchesPageHandoff(
+  handoff: PageTemplateLibraryHandoff | null,
+  identity: { templateId: string; version: number },
+) {
+  return Boolean(
+    handoff
+    && identity.templateId === handoff.templateId
+    && identity.version === handoff.version,
+  );
+}
+
+function isPageHandoffEntry(
+  entry: UnifiedCatalogEntry,
+  handoff: PageTemplateLibraryHandoff | null,
+): entry is PagePublishedCatalogEntry {
+  return Boolean(
+    handoff
+    && entry.kind === "page-published"
+    && matchesPageHandoff(handoff, entry.template),
+  );
 }
 
 function DesignTemplateCard({
@@ -805,6 +888,9 @@ function PagePublishedTemplateCard({
   device,
   entry,
   getUpgradeCount,
+  hasRootSelection,
+  pageHasBlocks,
+  handoff = false,
   onActivate,
   onDragEnd,
   onDragStart,
@@ -814,6 +900,9 @@ function PagePublishedTemplateCard({
   device: "desktop" | "mobile";
   entry: PagePublishedCatalogEntry;
   getUpgradeCount: PageModeProps["getPublishedUpgradeCount"];
+  hasRootSelection: boolean;
+  pageHasBlocks: boolean;
+  handoff?: boolean;
   onActivate: PageModeProps["onInsertPublished"];
   onDragEnd: PageModeProps["onPublishedDragEnd"];
   onDragStart: PageModeProps["onPublishedDragStart"];
@@ -821,18 +910,30 @@ function PagePublishedTemplateCard({
   onUpgrade: PageModeProps["onUpgradePublished"];
 }) {
   const upgradeCount = getUpgradeCount(entry.template);
+  const guidance = describePageTemplateHandoff({
+    name: entry.name,
+    version: entry.template.version,
+    pageHasBlocks,
+    upgradeCount,
+    hasSelection: hasRootSelection,
+  });
+  const showHandoffUpgrade = handoff && upgradeCount > 0;
   return (
     <TemplateCatalogCard
-      ariaLabel={`预览${entry.name}版本${entry.template.version}`}
-      className={`unified-template-library__card is-${device}`}
+      active={handoff}
+      ariaLabel={handoff ? guidance.cardAriaLabel : `预览${entry.name}版本${entry.template.version}`}
+      className={`unified-template-library__card is-${device}${handoff ? " is-handoff" : ""}`}
       compact={false}
       controlClassName="homepage-editor__dynamic-template-card-main"
+      dataCatalogHandoff={handoff}
       dataTemplateIdentity={entry.identity}
       dataTemplateName={entry.template.templateId}
       draggable
       name={entry.name}
       preview={entry.preview}
-      statusLabel={`v${entry.template.version} · 已发布`}
+      statusLabel={handoff
+        ? `刚发布 · 已发布 · v${entry.template.version}`
+        : `v${entry.template.version} · 已发布`}
       onClick={() => onPreview(entry.template)}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "copy";
@@ -854,24 +955,38 @@ function PagePublishedTemplateCard({
           >
             <EyeOutlined />
           </button>
+          {showHandoffUpgrade ? (
+            <button
+              type="button"
+              className="homepage-editor__template-upgrade-action is-handoff-upgrade"
+              data-catalog-handoff-upgrade="true"
+              style={{ position: "static", width: "auto", padding: "0 9px", borderRadius: 16 }}
+              onClick={() => onUpgrade(entry.template)}
+              aria-label={guidance.upgradeAriaLabel}
+              title={guidance.upgradeAriaLabel}
+            >
+              {guidance.upgradeLabel}
+            </button>
+          ) : null}
           <button
             type="button"
             className="homepage-editor__template-upgrade-action"
+            data-catalog-handoff-add={handoff ? "true" : undefined}
             style={{ position: "static", width: "auto", padding: "0 9px", borderRadius: 16 }}
             onClick={() => onActivate(entry.template)}
-            aria-label={`添加到页面：${entry.name} v${entry.template.version}`}
-            title="添加到页面"
+            aria-label={guidance.add.ariaLabel}
+            title={guidance.add.title}
           >
-            添加到页面
+            {guidance.add.label}
           </button>
-          {upgradeCount > 0 ? (
+          {upgradeCount > 0 && !showHandoffUpgrade ? (
             <button
               type="button"
               className="homepage-editor__template-upgrade-action"
               style={{ position: "static" }}
               onClick={() => onUpgrade(entry.template)}
-              aria-label={`升级页面中的${entry.name}模板实例，共 ${upgradeCount} 处`}
-              title={`升级页面中的${entry.name}模板实例，共 ${upgradeCount} 处`}
+              aria-label={guidance.upgradeAriaLabel}
+              title={guidance.upgradeAriaLabel}
             >
               <ExclamationCircleOutlined />
             </button>
@@ -896,7 +1011,12 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [detailPreview, setDetailPreview] = useState<TemplateCatalogDetailPreview | null>(null);
+  const [pageHandoff, setPageHandoff] = useState<PageTemplateLibraryHandoff | null>(null);
+  const focusedHandoffKeyRef = useRef<string | null>(null);
+  const pageHandoffRef = useRef<PageTemplateLibraryHandoff | null>(null);
+  pageHandoffRef.current = pageHandoff;
   const templateScrollRef = useRef<HTMLDivElement>(null);
+  const libraryScrollRef = useRef(0);
   const pendingCompactOpenRef = useRef(false);
   const templateSessionId = props.mode === "design" ? props.sessionId : null;
   const readWorkspaceScroll = props.mode === "design" ? props.readWorkspaceScroll : null;
@@ -954,15 +1074,25 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     });
   }, []);
   useLayoutEffect(() => {
-    if (!readWorkspaceScroll || !templateSessionId || collapsed || catalogLoading) return;
+    if (!readWorkspaceScroll || collapsed || catalogLoading) return;
     const element = templateScrollRef.current;
     if (!element) return;
-    const scrollTop = readWorkspaceScroll().library;
+    const nextScrollTop = resolveTemplateLibraryScrollRestore(
+      element.scrollTop,
+      readWorkspaceScroll().library,
+      libraryScrollRef.current,
+    );
+    if (Math.abs(element.scrollTop - nextScrollTop) < 1) {
+      libraryScrollRef.current = element.scrollTop;
+      return;
+    }
     const frame = window.requestAnimationFrame(() => {
-      element.scrollTop = scrollTop;
+      if (Math.abs(element.scrollTop - nextScrollTop) < 1) return;
+      element.scrollTop = nextScrollTop;
+      libraryScrollRef.current = element.scrollTop;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [catalogItems.length, catalogLoading, collapsed, localDrafts.length, readWorkspaceScroll, templateSessionId]);
+  }, [catalogItems.length, catalogLoading, collapsed, localDrafts.length, readWorkspaceScroll]);
   const libraryOverlay = useCompactWorkspaceOverlay({
     open: props.mode === "design" && !collapsed,
     onOpen: () => setLibraryCollapsed(false),
@@ -976,6 +1106,43 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     }
     libraryOverlay.requestOpen();
   }, [libraryOverlay.compact, libraryOverlay.requestOpen, obscuredByInspector, onRequestCompactOpen]);
+
+  const clearMatchingPageHandoff = useCallback((identity: { templateId: string; version: number }) => {
+    if (!matchesPageHandoff(pageHandoffRef.current, identity)) return;
+    focusedHandoffKeyRef.current = null;
+    setPageHandoff(null);
+  }, []);
+
+  const insertPublishedFromPageLibrary = useCallback((template: PublishedDynamicTemplateResource) => {
+    if (props.mode !== "page") return;
+    clearMatchingPageHandoff(template);
+    props.onInsertPublished(template);
+  }, [clearMatchingPageHandoff, props]);
+
+  useEffect(() => {
+    if (props.mode !== "page") return;
+    const handlePageHandoff = (event: Event) => {
+      const detail = readPageLibraryHandoff(event);
+      if (!detail) return;
+      setKeyword("");
+      setDesignStatus("all");
+      setDesignView("library");
+      focusedHandoffKeyRef.current = null;
+      setPageHandoff(detail);
+      requestLibraryOpen();
+    };
+    const handlePageInserted = (event: Event) => {
+      const detail = readPageLibraryInserted(event);
+      if (!detail) return;
+      clearMatchingPageHandoff(detail);
+    };
+    window.addEventListener(PAGE_TEMPLATE_LIBRARY_HANDOFF_EVENT, handlePageHandoff);
+    window.addEventListener(PAGE_TEMPLATE_INSERTED_EVENT, handlePageInserted);
+    return () => {
+      window.removeEventListener(PAGE_TEMPLATE_LIBRARY_HANDOFF_EVENT, handlePageHandoff);
+      window.removeEventListener(PAGE_TEMPLATE_INSERTED_EVENT, handlePageInserted);
+    };
+  }, [clearMatchingPageHandoff, props.mode, requestLibraryOpen]);
 
   useEffect(() => {
     if (!pendingCompactOpenRef.current || obscuredByInspector) return;
@@ -1020,19 +1187,32 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     setCatalogLoading(true);
     setCatalogError(null);
     try {
-      const response = await dynamicTemplateApi.listCatalog({ dedupe: false });
-      if (requestId !== catalogRequestIdRef.current) return;
-      const catalog = unwrapResponse<{ items?: TemplateCatalogItemResource[] }>(response);
-      const nextItems = Array.isArray(catalog?.items) ? catalog.items : [];
-      catalogItemsRef.current = nextItems;
-      setCatalogItems(nextItems);
-    } catch {
-      if (requestId !== catalogRequestIdRef.current) return;
-      setCatalogError(catalogItemsRef.current.length > 0
-        ? "目录刷新失败，已保留上次成功结果。"
-        : localOnly
-          ? "模板目录暂时无法读取；仅显示当前本机草稿。"
-          : "模板目录暂时无法读取，请重试。");
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const response = await dynamicTemplateApi.listCatalog({ dedupe: false });
+          if (requestId !== catalogRequestIdRef.current) return;
+          const catalog = unwrapResponse<{ items?: TemplateCatalogItemResource[] }>(response);
+          const nextItems = Array.isArray(catalog?.items) ? catalog.items : [];
+          catalogItemsRef.current = nextItems;
+          setCatalogItems(nextItems);
+          setCatalogError(null);
+          return;
+        } catch (error) {
+          if (requestId !== catalogRequestIdRef.current) return;
+          if (requestStatus(error) === 429 && attempt < 2) {
+            await new Promise((resolve) => {
+              window.setTimeout(resolve, catalogRetryDelayMs(error, attempt));
+            });
+            continue;
+          }
+          setCatalogError(catalogItemsRef.current.length > 0
+            ? "目录刷新失败，已保留上次成功结果。"
+            : localOnly
+              ? "模板目录暂时无法读取；仅显示当前本机草稿。"
+              : "模板目录暂时无法读取，请重试。");
+          return;
+        }
+      }
     } finally {
       if (requestId === catalogRequestIdRef.current) setCatalogLoading(false);
     }
@@ -1049,6 +1229,12 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const applyDynamicCatalogChange = useCallback((
     detail: DynamicTemplateCatalogChangeDetail,
   ) => {
+    if (detail.kind === "removed") {
+      applyCatalogItems(catalogItemsRef.current.filter((item) => (
+        item.template.templateId !== detail.identity.templateId
+      )));
+      return true;
+    }
     if (detail.kind === "verified-catalog") {
       applyCatalogItems(detail.catalog.items);
       return true;
@@ -1082,9 +1268,9 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   useEffect(() => {
     if (catalogActive) void refreshCatalog();
     const handleDynamicCatalogChanged = (event: Event) => {
-      if (!catalogActive) return;
       const detail = readDynamicCatalogChange(event);
-      if (!detail || !applyDynamicCatalogChange(detail)) void refreshCatalog();
+      if (detail && applyDynamicCatalogChange(detail)) return;
+      if (catalogActive) void refreshCatalog();
     };
     const handleLocalChanged = () => setLocalDrafts(localOnly ? listLocalDynamicTemplateDrafts() : []);
     window.addEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, handleDynamicCatalogChanged);
@@ -1103,6 +1289,19 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       const editable = entry.editable;
       const presentation = resolveUnifiedTemplateCatalogPresentation(entry);
       if (!presentation) continue;
+
+      if (
+        props.mode === "design"
+        && !isTemplateDesignLibraryTemplate({
+          templateId: presentation.templateId,
+          tags: presentation.source === "published"
+            ? presentation.published.tags
+            : presentation.editable.tags,
+          sourceReference: entry.sourceReference,
+        })
+      ) {
+        continue;
+      }
 
       if (props.mode === "page") {
         if (
@@ -1224,6 +1423,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
 
     if (props.mode === "design" && localOnly) {
       for (const template of localDrafts) {
+        if (!isTemplateDesignLibraryTemplate({ templateId: template.definition.templateId })) continue;
         if (!matchesKeyword(keyword, template.definition.name, template.definition.metadata.category)) continue;
         const target: TemplateEditorLibraryTarget = { kind: "dynamic-local", localDraftId: template.localDraftId };
         const active = props.activeLocalDraftId === template.localDraftId;
@@ -1259,7 +1459,10 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     if (props.mode === "design" && props.currentDraft?.sourceType === "local"
       && !entries.some((entry) => entry.key === `local-${props.currentDraft?.localDraftId}`)) {
       const currentDraft = props.currentDraft;
-      if (matchesKeyword(keyword, currentDraft.definition.name, currentDraft.definition.metadata.category)) {
+      if (
+        !isTemplateDesignLibraryTemplate({ templateId: currentDraft.definition.templateId })
+        && matchesKeyword(keyword, currentDraft.definition.name, currentDraft.definition.metadata.category)
+      ) {
         const target: TemplateEditorLibraryTarget = { kind: "dynamic-local", localDraftId: currentDraft.localDraftId! };
         entries.unshift({
             kind: "design", key: `local-${currentDraft.localDraftId}`,
@@ -1290,10 +1493,63 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     () => groupTemplateCatalogEntries(catalogEntries, (entry) => entry.group),
     [catalogEntries],
   );
-  const visibleCatalogGroups = props.mode === "design"
-    ? [{ group: "模板", entries: catalogEntries }]
-    : groupedCatalogEntries;
+  const visibleCatalogGroups = useMemo(() => {
+    if (props.mode === "design") {
+      return [{ group: "模板", entries: catalogEntries }];
+    }
+    if (!pageHandoff) return groupedCatalogEntries;
+    const pinned: UnifiedCatalogEntry[] = [];
+    const restGroups = groupedCatalogEntries.flatMap(({ group, entries }) => {
+      const remaining = entries.filter((entry) => {
+        if (isPageHandoffEntry(entry, pageHandoff)) {
+          pinned.push(entry);
+          return false;
+        }
+        return true;
+      });
+      return remaining.length > 0 ? [{ group, entries: remaining }] : [];
+    });
+    if (pinned.length === 0) return groupedCatalogEntries;
+    return [{ group: "刚发布", entries: pinned }, ...restGroups];
+  }, [catalogEntries, groupedCatalogEntries, pageHandoff, props.mode]);
   const visibleEntryCount = visibleCatalogGroups.reduce((count, group) => count + group.entries.length, 0);
+  const pageHandoffGuidance = props.mode === "page" && pageHandoff
+    ? describePageTemplateHandoff({
+      name: pageHandoff.name,
+      version: pageHandoff.version,
+      pageHasBlocks: props.pageHasBlocks,
+      hasSelection: props.hasRootSelection,
+      upgradeCount: catalogEntries.reduce((count, entry) => (
+        isPageHandoffEntry(entry, pageHandoff)
+          ? props.getPublishedUpgradeCount(entry.template)
+          : count
+      ), 0),
+    })
+    : null;
+  useLayoutEffect(() => {
+    if (props.mode !== "page" || !catalogActive || !pageHandoff || collapsed || catalogLoading) return;
+    const key = `${pageHandoff.templateId}@${pageHandoff.version}`;
+    const card = templateScrollRef.current?.querySelector<HTMLElement>("[data-catalog-handoff='true']");
+    if (!card) return;
+    card.scrollIntoView({ block: "nearest" });
+    if (focusedHandoffKeyRef.current === key) return;
+    focusedHandoffKeyRef.current = key;
+  }, [
+    catalogActive,
+    catalogItems,
+    catalogLoading,
+    collapsed,
+    pageHandoff,
+    props.mode,
+  ]);
+  const pageInsertAction = props.mode === "page"
+    ? describePageTemplateAddAction({
+      name: detailPreview?.name ?? "模板",
+      version: detailPreview?.insertTemplate?.version ?? 1,
+      pageHasBlocks: props.pageHasBlocks,
+      hasSelection: props.hasRootSelection,
+    })
+    : null;
   const hasFilters = Boolean(keyword.trim()) || (props.mode === "design" && (designStatus !== "all" || designView !== "library"));
   const resetFilters = () => {
     setKeyword("");
@@ -1367,7 +1623,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             ? designView === "trash"
               ? "回收站中的模板只能恢复或永久删除"
               : "点击编辑模板；更多操作在卡片右侧"
-            : "点击卡片预览；使用“添加到页面”或拖拽完成添加"}
+            : "点击卡片预览；拖到目标位置，或使用“添加到页面”"}
           countLabel={String(visibleEntryCount)}
           countTitle={`当前显示 ${visibleEntryCount} 个模板`}
         />
@@ -1422,12 +1678,18 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             <button type="button" onClick={resetFilters}>重置筛选</button>
           </div>
         ) : null}
+        {pageHandoffGuidance ? (
+          <div className="unified-template-library__handoff-status" role="status">
+            {pageHandoffGuidance.liveStatus}
+          </div>
+        ) : null}
       </div>
 
       <div
         ref={templateScrollRef}
         className="homepage-editor__template-scroll unified-template-library__scroll"
         onScroll={props.mode === "design" && templateSessionId ? (event) => {
+          libraryScrollRef.current = event.currentTarget.scrollTop;
           props.updateWorkspaceScroll(templateSessionId, {
             library: event.currentTarget.scrollTop,
           });
@@ -1448,7 +1710,8 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         <section className="homepage-editor__template-group" aria-label="模板列表">
           {visibleCatalogGroups.map(({ group, entries }) => {
             // 设计模式的单一分组名就是“模板”，再拼接后缀会得到“模板模板”。
-            return <div key={group} role="group" aria-label={group.endsWith("模板") ? group : `${group}模板`}>
+            // “刚发布”是交接钉住分组，不能再拼成“刚发布模板”。
+            return <div key={group} role="group" aria-label={group === "刚发布" || group.endsWith("模板") ? group : `${group}模板`}>
             <div className="homepage-editor__template-group-grid">
             {entries.map((entry) => {
                 if (entry.kind === "design" && props.mode === "design") {
@@ -1476,7 +1739,10 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       device={props.device}
                       entry={entry}
                       getUpgradeCount={props.getPublishedUpgradeCount}
-                      onActivate={props.onInsertPublished}
+                      hasRootSelection={props.hasRootSelection}
+                      pageHasBlocks={props.pageHasBlocks}
+                      handoff={isPageHandoffEntry(entry, pageHandoff)}
+                      onActivate={insertPublishedFromPageLibrary}
                       onDragStart={props.onPublishedDragStart}
                       onDragEnd={props.onPublishedDragEnd}
                       onPreview={openPublishedPreview}
@@ -1537,9 +1803,10 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       <TemplateCatalogPreviewDialog
         preview={detailPreview}
         initialDevice={props.device}
+        insertActionTitle={pageInsertAction?.title}
         onClose={closeDetailPreview}
         onInsert={props.mode === "page" ? (template) => {
-          props.onInsertPublished(template);
+          insertPublishedFromPageLibrary(template);
           setDetailPreview(null);
         } : undefined}
       />

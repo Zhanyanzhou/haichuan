@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { App as AntdApp, Button, Input, Select, Tag } from "antd";
-import MediaPickerField from "../fields/MediaPickerField";
+import MediaPickerField, { mediaSpecFromRecommendation } from "../fields/MediaPickerField";
 import ProductReferencesField from "../fields/ProductReferencesField";
 import NumberField, { focusFirstInvalidNumberField } from "../inspector/controls/NumberField";
 import RestoreDefaultButton from "../inspector/controls/RestoreDefaultButton";
@@ -21,6 +21,10 @@ import {
   readResolvedDynamicTemplateDefinitions,
   type DynamicTemplateInstanceProps,
 } from "./types";
+import {
+  countNonEditableSlotContent,
+  stripNonEditableSlotContent,
+} from "./unauthorizedSlotContent";
 import DynamicTemplateUpgradePanel from "./DynamicTemplateUpgradePanel";
 import {
   promoteInstanceOverridesToTemplateDraft,
@@ -28,6 +32,7 @@ import {
 } from "./promoteToTemplate";
 import ImageFocusField from "../inspector/controls/ImageFocusField";
 import InspectorFooterBar from "../inspector/InspectorFooterBar";
+import { resolvePublishIssueReviewAction } from "../inspector/publishReminderDialog";
 import {
   getInspectorPublishIssues,
   type PublishValidationIssue,
@@ -235,6 +240,12 @@ export default function DynamicTemplateInstanceInspector({
       return { contentBySlotId: next };
     });
   };
+  const stripLockedPageValues = () => {
+    editor.updateFromCurrent((current) => ({
+      contentBySlotId: stripNonEditableSlotContent(current.contentBySlotId, definition),
+    }));
+  };
+  const lockedLeftoverCount = countNonEditableSlotContent(content, definition);
   const toggleHidden = (slotId: string, checked: boolean) => {
     editor.updateFromCurrent((current) => {
       const currentHidden = Array.isArray(current.hiddenSlotIds)
@@ -371,7 +382,16 @@ export default function DynamicTemplateInstanceInspector({
         ? undefined
         : definition.defaultContent[slot.slotId];
     if (!field.editable) {
-      return <p className="homepage-editor__properties-hint">此内容由模板锁定，页面不能修改。</p>;
+      return (
+        <>
+          <p className="homepage-editor__properties-hint">此内容由模板锁定，页面不能修改。</p>
+          {hasPageValue ? (
+            <p className="homepage-editor__properties-hint" role="status">
+              当前草稿仍保留旧的页面覆盖，发布前需要移除。
+            </p>
+          ) : null}
+        </>
+      );
     }
     if (field.controlKind === "text" && ["heading", "badge", "icon"].includes(field.slotType)) {
       return (
@@ -422,13 +442,21 @@ export default function DynamicTemplateInstanceInspector({
             fieldKey={slot.slotId}
             value={typeof image.src === "string" ? image.src : ""}
             required={field.required}
+            spec={mediaSpecFromRecommendation(
+              field.validation.recommendedWidth,
+              field.validation.recommendedHeight,
+              slotRules.aspectRatio,
+              field.label,
+            )}
             previewAspectRatio={slotRules.aspectRatio?.replace(":", " / ")}
             previewFit={objectFit}
             previewFocus={focus}
             previewZoom={(imageLayout.imageScalePercent ?? 100) / 100}
             onChange={(src) => updateContent(
               slot.slotId,
-              src.trim() ? { ...image, src } : "",
+              src.trim()
+                ? { src, alt: typeof image.alt === "string" ? image.alt : "" }
+                : "",
             )}
           />
           {assetGuidance ? (
@@ -442,7 +470,10 @@ export default function DynamicTemplateInstanceInspector({
               aria-label={`${field.label}替代文字`}
               value={typeof image.alt === "string" ? image.alt : ""}
               placeholder="描述图片内容，供无障碍与图片缺失时使用"
-              onChange={(event) => updateContent(slot.slotId, { ...image, alt: event.target.value })}
+              onChange={(event) => updateContent(slot.slotId, {
+                src: typeof image.src === "string" ? image.src : "",
+                alt: event.target.value,
+              })}
             />
           </label>
           {imageNode && imagePolicy?.imageFit ? (
@@ -603,23 +634,28 @@ export default function DynamicTemplateInstanceInspector({
         </span>
       </legend>
       {renderSlotControl(field)}
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 10 }}>
-        <Button
-          size="small"
-          disabled={field.required || !Object.prototype.hasOwnProperty.call(content, slot.slotId)}
-          title={field.required ? "必填内容必须由页面实例提供" : undefined}
-          onClick={() => resetContent(slot.slotId)}
-        >
-          移除页面内容覆盖
-        </Button>
-        {field.hideable && !field.required ? (
+      {hasPageValue && (!field.required || !field.editable) ? (
+        <div style={{ marginTop: 6 }}>
+          <Button
+            type="link"
+            size="small"
+            aria-label="恢复为模板内容"
+            onClick={() => resetContent(slot.slotId)}
+            style={{ height: 24, paddingInline: 0 }}
+          >
+            恢复模板内容
+          </Button>
+        </div>
+      ) : null}
+      {field.hideable && !field.required ? (
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
           <SwitchField
             label={visualKindForField(field) === "text" ? "显示这段文字" : "显示此内容"}
             value={!hidden.includes(slot.slotId)}
             onChange={(checked) => toggleHidden(slot.slotId, !checked)}
           />
-        ) : null}
       </div>
+      ) : null}
     </fieldset>
     );
   };
@@ -645,6 +681,20 @@ export default function DynamicTemplateInstanceInspector({
             hint={editor.historyTransactionPending ? "正在记录本次显隐操作，完成后可继续修改或撤销。" : undefined}
             onChange={(checked) => editor.updateHistoryTransaction({ isVisible: checked })}
           />
+          {lockedLeftoverCount > 0 ? (
+            <div className="homepage-editor__dynamic-instance-locked-leftover" role="status">
+              <p className="homepage-editor__properties-hint">
+                {lockedLeftoverCount} 个锁定字段仍保留页面覆盖，发布前需要移除。
+              </p>
+              <Button
+                size="small"
+                aria-label="移除锁定字段的页面覆盖"
+                onClick={stripLockedPageValues}
+              >
+                移除锁定字段的页面覆盖
+              </Button>
+            </div>
+          ) : null}
           <div
             className="homepage-editor__dynamic-instance-public-status"
             data-state={publicVisibilityState}
@@ -938,19 +988,13 @@ export default function DynamicTemplateInstanceInspector({
         warningCount={currentPublishWarningCount}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
-        onReviewIssues={currentPublishErrorCount > 0
-          ? onOpenPublishReview
-          : currentPublishWarningCount > 0
-            ? () => modal.warning({
-                title: `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
-                content: currentPublishIssues.map((issue, index) => (
-                  <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                    <strong>提醒：</strong>{issue.message}
-                  </p>
-                )),
-                okText: "知道了",
-              })
-            : undefined}
+        onReviewIssues={resolvePublishIssueReviewAction({
+          errorCount: currentPublishErrorCount,
+          warningCount: currentPublishWarningCount,
+          issues: currentPublishIssues,
+          onOpenPublishReview,
+          modal,
+        })}
       />
     </section>
   );

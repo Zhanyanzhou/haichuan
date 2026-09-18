@@ -130,7 +130,7 @@ function Fixture() {
   const [canvasVisible, setCanvasVisible] = React.useState(true);
   return <App><div style={{ width: "100vw", height: "100vh", display: "flex", flexDirection: "column" }}>
     <button data-testid="toggle-canvas" onClick={() => setCanvasVisible((visible) => !visible)}>切换测试画布挂载</button>
-    <div><button onClick={() => state.undo()}>撤销</button><button onClick={() => state.redo()}>重做</button>{(["desktop", "tablet", "mobile"] as const).map((bp) => <button key={bp} onClick={() => state.setBreakpoint(bp)}>聚焦{bp}</button>)}</div>
+    <div><button onClick={() => state.undo()}>撤销</button><button onClick={() => state.redo()}>重做</button>{(["desktop", "mobile"] as const).map((bp) => <button key={bp} onClick={() => state.setBreakpoint(bp)}>聚焦{bp}</button>)}</div>
     <output data-testid="state" style={{ display: "none" }}>{JSON.stringify({
       ids: { region, stack, first, second, locked, hidden, text, destination }, rootId: definition.rootNodeId,
       selected: state.selectionSnapshot.targets, scope: state.editingScopeId,

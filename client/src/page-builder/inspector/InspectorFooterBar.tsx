@@ -3,6 +3,7 @@
  * 整页保存与发布统一留在编辑器顶部；此处只反馈草稿同步状态。
  */
 
+import { formatPublishReminderLabel } from "./publishReminderDialog";
 import type { PublishValidationStatus } from "./publishValidation";
 
 /** 更多菜单可挂载的模块级操作（复制/隐藏/恢复默认/删除等，P5 逐步补齐） */
@@ -54,10 +55,12 @@ export default function InspectorFooterBar({
       : errorCount > 0
         ? `${errorCount} 项发布阻断`
         : warningCount > 0
-          ? `${warningCount} 项待检查`
+          ? formatPublishReminderLabel(warningCount)
           : validationStatus === "valid"
             ? "发布检查已通过"
             : null;
+  const issueKind = errorCount > 0 ? "error" : warningCount > 0 ? "warning" : undefined;
+  const issueTitle = issueKind === "warning" ? "这些提示不影响本次发布" : undefined;
 
   return (
     <footer className="homepage-editor__properties-actions">
@@ -81,11 +84,22 @@ export default function InspectorFooterBar({
             {validationLabel}
           </button>
         ) : issueCount > 0 && onReviewIssues ? (
-          <button type="button" onClick={onReviewIssues} data-validation-status={validationStatus}>
+          <button
+            type="button"
+            onClick={onReviewIssues}
+            data-validation-status={validationStatus}
+            data-issue-kind={issueKind}
+            title={issueTitle}
+          >
             {validationLabel}
           </button>
         ) : (
-          <span className="homepage-editor__properties-validation" data-validation-status={validationStatus}>
+          <span
+            className="homepage-editor__properties-validation"
+            data-validation-status={validationStatus}
+            data-issue-kind={issueKind}
+            title={issueTitle}
+          >
             {validationLabel}
           </span>
         )

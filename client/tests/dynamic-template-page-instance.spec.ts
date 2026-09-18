@@ -556,7 +556,7 @@ function pageDocument(v1 = definition(1)) {
   };
 }
 
-async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; catalogMissing?: boolean; retiredNodeType?: "Carousel" | "ProductCollection"; complex?: boolean; business?: boolean; directBusiness?: boolean; image?: boolean; descriptorPolicy?: boolean; duplicate?: boolean; lockedBusiness?: boolean; legacyLayout?: boolean; restoreTemplateValue?: boolean; lockedLayout?: boolean; primaryStage?: boolean; upgradeWouldDuplicatePrimaryStage?: boolean; noNewVersion?: boolean; invalidLatestDefinition?: boolean; invalidCurrentVersion?: boolean; incompatibleHeader?: boolean; missingCurrentVersion?: boolean; mixedUpgradeScenario?: MixedUpgradeScenario; templateConflict?: boolean; requiredUpgrade?: boolean; destructiveRemoval?: boolean; restrictLatestLayout?: boolean; personalUpgradeHint?: boolean; saveFailureStatus?: 409 | 500; adminRole?: "SUPER_ADMIN" | "ADMIN" | "EDITOR"; publishIssues?: Array<{ code: string; message: string; severity: "error" | "warning" | "info"; blockId?: string; path?: string; field?: string }> } = {}) {
+async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; catalogMissing?: boolean; retiredNodeType?: "Carousel" | "ProductCollection"; complex?: boolean; business?: boolean; directBusiness?: boolean; image?: boolean; descriptorPolicy?: boolean; duplicate?: boolean; lockedBusiness?: boolean; legacyLayout?: boolean; restoreTemplateValue?: boolean; lockedLeftover?: boolean; lockedLayout?: boolean; primaryStage?: boolean; upgradeWouldDuplicatePrimaryStage?: boolean; noNewVersion?: boolean; invalidLatestDefinition?: boolean; invalidCurrentVersion?: boolean; incompatibleHeader?: boolean; missingCurrentVersion?: boolean; mixedUpgradeScenario?: MixedUpgradeScenario; templateConflict?: boolean; requiredUpgrade?: boolean; destructiveRemoval?: boolean; restrictLatestLayout?: boolean; personalUpgradeHint?: boolean; saveFailureStatus?: 409 | 500; adminRole?: "SUPER_ADMIN" | "ADMIN" | "EDITOR"; publishIssues?: Array<{ code: string; message: string; severity: "error" | "warning" | "info"; blockId?: string; path?: string; field?: string }> } = {}) {
   const sourceDefinition = options.retiredNodeType === "Carousel"
     ? carouselDefinition()
     : options.retiredNodeType === "ProductCollection"
@@ -667,6 +667,12 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
     };
     draft.puckData.content[0].props.hiddenSlotIds = ["slot_heading"];
     draft.puckData.content[0].props.isVisible = false;
+  }
+  if (options.lockedLeftover) {
+    draft.puckData.content[0].props.contentBySlotId = {
+      ...draft.puckData.content[0].props.contentBySlotId,
+      slot_locked_copy: "旧页面覆盖说明",
+    };
   }
   let savedPayload: Record<string, unknown> | null = null;
   let currentDocument = draft;
@@ -895,6 +901,32 @@ async function prepareEditor(page: Page, options: { failVersionCheck?: boolean; 
     }
     if (path.endsWith("/page-modules/document/validate")) {
       validationRequestCount += 1;
+      if (options.lockedLeftover) {
+        const body = request.postDataJSON() as {
+          puckData?: {
+            content?: Array<{ props?: { contentBySlotId?: Record<string, unknown> } }>;
+          };
+        };
+        const leftover = body.puckData?.content?.some((block) => (
+          Object.prototype.hasOwnProperty.call(block.props?.contentBySlotId ?? {}, "slot_locked_copy")
+        ));
+        if (leftover) {
+          const issues = [{
+            code: "locked-slot-page-value",
+            message: "只读说明不允许在页面中修改",
+            severity: "error" as const,
+            blockId: "dynamic-upgrade-block",
+            path: "content[0].props.contentBySlotId.slot_locked_copy",
+            field: "slot_locked_copy",
+          }];
+          return route.fulfill(json({
+            valid: false,
+            errors: issues.map((issue) => issue.message),
+            issues,
+          }));
+        }
+        return route.fulfill(json({ valid: true, errors: [], issues: [] }));
+      }
       const issues = options.publishIssues ?? [];
       return route.fulfill(json({
         valid: !issues.some((issue) => issue.severity === "error"),
@@ -2376,6 +2408,50 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
   });
 
+  test("锁定槽位残留页面覆盖可恢复为模板内容，且不静默丢弃", async ({ page }) => {
+    const { inspector, currentDocument, pageWrites, templateWrites } = await prepareEditor(page, {
+      descriptorPolicy: true,
+      noNewVersion: true,
+      lockedLeftover: true,
+    });
+    const lockedField = inspector.locator('[data-slot-id="slot_locked_copy"]');
+    await expect(lockedField).toContainText("此内容由模板锁定，页面不能修改。");
+    await expect(lockedField).toContainText("当前草稿仍保留旧的页面覆盖，发布前需要移除。");
+    await expect(inspector.getByRole("button", { name: "移除锁定字段的页面覆盖" })).toBeVisible();
+    await expect(lockedField.getByRole("button", { name: "恢复为模板内容" })).toBeVisible();
+    expect(currentDocument().puckData.content[0].props.contentBySlotId.slot_locked_copy).toBe("旧页面覆盖说明");
+
+    await lockedField.getByRole("button", { name: "恢复为模板内容" }).click();
+    await expect(lockedField.getByRole("button", { name: "恢复为模板内容" })).toHaveCount(0);
+    await expect(lockedField).not.toContainText("当前草稿仍保留旧的页面覆盖，发布前需要移除。");
+    await expect(inspector.getByRole("button", { name: "移除锁定字段的页面覆盖" })).toHaveCount(0);
+    expect(currentDocument().puckData.content[0].props.contentBySlotId.slot_locked_copy).toBe("旧页面覆盖说明");
+    expect(pageWrites).toEqual([]);
+    expect(templateWrites).toEqual([]);
+  });
+
+  test("发布前锁定槽位残留会打开检查面板，一键移除后继续保存并发布", async ({ page }) => {
+    const { savedPayload, pageWrites, templateWrites } = await prepareEditor(page, {
+      descriptorPolicy: true,
+      noNewVersion: true,
+      lockedLeftover: true,
+    });
+    const publish = page.getByRole("button", { name: "发布到前台网站" });
+    await expect(publish).toBeEnabled();
+    await publish.click();
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await expect(review).toContainText("只读说明不允许在页面中修改");
+    await review.locator('button[aria-label="移除锁定字段的页面覆盖"]').click();
+    await expect.poll(() => pageWrites.some(({ path }) => path.endsWith("/publish"))).toBe(true);
+    const payload = savedPayload() as {
+      puckData?: { content?: Array<{ props?: { contentBySlotId?: Record<string, unknown> } }> };
+    } | null;
+    expect(payload?.puckData?.content?.[0]?.props?.contentBySlotId).not.toHaveProperty("slot_locked_copy");
+    expect(pageWrites.some(({ method, path }) => method === "PUT" && path.endsWith("/page-modules/document"))).toBe(true);
+    expect(pageWrites.at(-1)).toEqual({ method: "PUT", path: "/api/page-modules/document/publish" });
+    expect(templateWrites).toEqual([]);
+  });
+
   test("母模板授权的几何、文字和间距由精确属性面板写入同一实例覆盖", async ({ page }) => {
     const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { legacyLayout: true });
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
@@ -2532,6 +2608,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       .toHaveAttribute("data-workspace-field-shared", "true");
 
     const mediaField = inspector.locator('[data-media-field="slot_image"]');
+    await expect(mediaField.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
+    await expect(mediaField).toHaveAttribute("data-has-page-media", "true");
     await mediaField.getByRole("button", { name: "图片链接" }).click();
     await mediaField.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片")
       .fill("/images/audit/template-v1-jewelry-banner.png");
@@ -2567,6 +2645,45 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(imageAfterReload).toHaveCSS("object-fit", "contain");
     await expect(imageAfterReload).toHaveCSS("object-position", "0% 0%");
     await expect(imageAfterReload).toHaveCSS("transform", /matrix\(1\.3/);
+  });
+
+  test("替换未公开授权的页面素材后画布走预览图，不误判为文件缺失", async ({ page }) => {
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const previewProbes: string[] = [];
+    const publicAssetProbes: string[] = [];
+    const { inspector } = await prepareEditor(page, { image: true });
+
+    await page.route("**/uploads/page-assets/**", async (route) => {
+      const url = new URL(route.request().url());
+      publicAssetProbes.push(`${route.request().method()}:${url.pathname}`);
+      await route.fulfill({ status: 404, body: "not found" });
+    });
+    await page.route("**/api/upload/media/preview-by-storage-key**", async (route) => {
+      const url = new URL(route.request().url());
+      previewProbes.push(`${route.request().method()}:${url.searchParams.get("storageKey") || ""}`);
+      await route.fulfill({ status: 200, contentType: "image/png", body: png });
+    });
+
+    const mediaField = inspector.locator('[data-media-field="slot_image"]');
+    await mediaField.getByRole("button", { name: "图片链接" }).click();
+    await mediaField.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片")
+      .fill("/uploads/page-assets/replaced.png");
+    await mediaField.getByRole("button", { name: /确\s*认/ }).click();
+
+    const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
+    const image = canvas.locator('[data-template-node-id="node_image"] img');
+    await expect(image).toHaveAttribute(
+      "data-template-managed-preview",
+      "/api/upload/media/preview-by-storage-key?storageKey=page-assets%2Freplaced.png",
+    );
+    await expect(image).toHaveAttribute("src", /^blob:/);
+    await expect(canvas.getByText("该内容暂不可展示")).toHaveCount(0);
+    await expect.poll(() => previewProbes.some((item) => item.startsWith("GET:"))).toBe(true);
+    await expect.poll(() => previewProbes.some((item) => item.startsWith("HEAD:"))).toBe(true);
+    expect(publicAssetProbes.some((item) => item.startsWith("HEAD:"))).toBe(false);
   });
 
   test("可选图片清空写入显式空值并在保存重开后保持为空", async ({ page }) => {
@@ -2932,7 +3049,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(inspector.locator('[data-slot-id="slot_product"]')).toContainText("商品");
     await expect(inspector.locator('[data-slot-id="slot_action"]')).toContainText("按钮");
     await expect(inspector.locator('[data-slot-id="slot_heading"]')
-      .getByRole("button", { name: "移除页面内容覆盖" })).toBeDisabled();
+      .getByRole("button", { name: "恢复为模板内容" })).toHaveCount(0);
+    await expect(inspector.locator('[data-slot-id="slot_summary"]')
+      .getByRole("button", { name: "恢复为模板内容" })).toHaveCount(0);
 
     const productField = inspector.locator("fieldset").filter({ hasText: "主商品" });
     await productField.getByRole("button", { name: "选择商品" }).click();

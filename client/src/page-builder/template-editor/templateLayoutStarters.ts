@@ -11,7 +11,7 @@ export const TEMPLATE_LAYOUT_STARTERS = [
   { id: "stacked", label: "上下排列", description: "两个内容区域上下排列，内容由你添加。" },
   { id: "columns", label: "左右两栏", description: "桌面两栏等宽，手机上下排列，内容由你添加。" },
   { id: "image-text", label: "左图右文", description: "左侧图片，右侧标题、正文和按钮；手机图片在上。" },
-  { id: "cards", label: "三列卡片", description: "三组图片、标题和正文；平板两列，手机一列。" },
+  { id: "cards", label: "三列卡片", description: "三组图片、标题和正文；桌面三列，手机一列。" },
 ] as const;
 
 export type TemplateLayoutStarter = typeof TEMPLATE_LAYOUT_STARTERS[number]["id"];
@@ -58,7 +58,6 @@ export function addTemplateLayoutStarter(
   if (kind !== "stacked") {
     rules.desktop.columns = kind === "cards" ? [1, 1, 1] : [1, 1];
     rules.mobile.columns = [1];
-    if (kind === "cards") rules.tablet = { columns: [1, 1] };
   }
   rules.mobile.gap = { value: 16, unit: "px" };
   const groups = Array.from({ length: kind === "cards" ? 3 : 2 }, (_, position) => {

@@ -35,6 +35,9 @@ export interface PublishValidationIssue {
   message: string;
   severity: "error" | "warning" | "info";
   path?: string;
+  assetId?: number;
+  assetUrl?: string;
+  authorizationRevision?: number;
 }
 
 export type PagePublishIssueDevice = "desktop" | "mobile" | "shared";
@@ -284,7 +287,9 @@ function dynamicObjectForIssue(
     group: `slot-${slotType ?? "content"}`,
     groupLabel: "页面内容",
     access: slot && slot.editable === false ? "read-only" as const : "editable" as const,
-    reason: undefined,
+    reason: slot && slot.editable === false
+      ? "此内容由模板锁定。请恢复为模板内容，或在本次发布检查中移除锁定字段的页面覆盖。"
+      : undefined,
   };
 }
 

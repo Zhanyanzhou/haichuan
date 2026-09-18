@@ -76,6 +76,11 @@ test("公开 Renderer 只展示页面实例明确上传图片的动态模板", a
   );
   await expect(publishedInstance).toHaveCount(1);
   await expect(publishedInstance.locator('img[alt="页面上传图"]')).toBeVisible();
+  await expect(page.locator('[data-renderer-fixture="unsupported-public"]').getByRole("alert")).toHaveCount(0);
+  await expect(page.locator('[data-renderer-fixture="unsupported-public"]').getByText("模板版本无法渲染")).toHaveCount(0);
+  await expect(page.locator('[data-renderer-fixture="unsupported-public"]').getByText("合同错误时不应公开的标题")).toHaveCount(0);
+  await expect(page.locator('[data-renderer-fixture="unsupported-preview"]').getByRole("alert")).toHaveCount(1);
+  await expect(page.locator('[data-renderer-fixture="unsupported-preview"]').getByText("模板版本无法渲染")).toBeVisible();
 });
 
 test("公开 Renderer 按页面顺序展示多个有图首屏", async ({ page }) => {

@@ -20,6 +20,7 @@ import InspectorObjectContext, {
 } from "./InspectorObjectContext";
 import InspectorDisclosure from "./InspectorDisclosure";
 import InspectorFooterBar from "./InspectorFooterBar";
+import { resolvePublishIssueReviewAction } from "./publishReminderDialog";
 import {
   getInspectorPublishIssues,
   isPagePublishIssue,
@@ -1199,23 +1200,13 @@ export default function SchemaInspectorPanel({
         warningCount={currentPublishWarningCount}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
-        onReviewIssues={currentPublishErrorCount > 0
-          ? onOpenPublishReview
-          : currentPublishWarningCount > 0
-            ? () => modal.warning({
-                title: `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
-                content: (
-                  <div className="homepage-editor__publish-issue-list">
-                    {currentPublishIssues.map((issue, index) => (
-                      <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                        <strong>提醒：</strong>{issue.message}
-                      </p>
-                    ))}
-                  </div>
-                ),
-                okText: "知道了",
-              })
-            : undefined}
+        onReviewIssues={resolvePublishIssueReviewAction({
+          errorCount: currentPublishErrorCount,
+          warningCount: currentPublishWarningCount,
+          issues: currentPublishIssues,
+          onOpenPublishReview,
+          modal,
+        })}
       />
     </section>
   );

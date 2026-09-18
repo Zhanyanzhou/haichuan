@@ -12,7 +12,7 @@ import {
   type TemplateCatalogResource,
 } from "@/services/clients/dynamicTemplateClient";
 import { unwrapResponse } from "@/utils/unwrap";
-import { getEditorErrorMessage, getEditorHttpStatus } from "@/page-builder/workspace/editorLifecycleErrors";
+import { copyEditorLocalConflictSnapshot, getEditorErrorMessage, getEditorHttpStatus } from "@/page-builder/workspace/editorLifecycleErrors";
 import {
   createDynamicTemplateStableId,
   normalizeTemplateDimensionContract,
@@ -41,7 +41,11 @@ import type {
   PublishedDraftCreationState,
   TemplateEditorLibraryTarget,
 } from "./TemplateEditorLibrary";
-import { notifyDynamicTemplateCatalogChanged } from "./templateCatalogEvents";
+import {
+  notifyDynamicTemplateCatalogChanged,
+  notifyDynamicTemplateRemovedFromCatalog,
+  notifyPageTemplateLibraryHandoff,
+} from "./templateCatalogEvents";
 import {
   useTemplateEditorSession,
   type TemplateWorkspaceScrollState,
@@ -491,7 +495,7 @@ export function useTemplateWorkspaceController({
 }): TemplateWorkspaceController {
   const { message, modal } = AntdApp.useApp();
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
-  const saveInFlightRef = useRef<Promise<boolean> | null>(null);
+  const saveInFlightBySessionRef = useRef(new Map<string, Promise<boolean>>());
   const lifecycleInFlightRef = useRef(false);
   const publishedDraftCreationRequestRef = useRef(0);
   const transitionInFlightRef = useRef(false);
@@ -795,7 +799,6 @@ export function useTemplateWorkspaceController({
   }, [activateTemplateSession, message, openPersistedDraft, requireActive]);
 
   const persist = useCallback((options: PersistTemplateOptions = {}): Promise<boolean> => {
-    if (saveInFlightRef.current) return saveInFlightRef.current;
     if (focusFirstInvalidNumberField()) return Promise.resolve(false);
     const session = useTemplateEditorSession.getState();
     if (session.activeInteraction) {
@@ -805,6 +808,8 @@ export function useTemplateWorkspaceController({
     const currentDraft = session.draft;
     const sessionId = session.sessionId;
     if (!canManageTemplates || !currentDraft || !sessionId) return Promise.resolve(false);
+    const inflightForSession = saveInFlightBySessionRef.current.get(sessionId);
+    if (inflightForSession) return inflightForSession;
     let requestedDraft = structuredClone(currentDraft);
     session.setSaveStatus("saving");
     const savePromise = (async (): Promise<boolean> => {
@@ -842,6 +847,7 @@ export function useTemplateWorkspaceController({
             const original = structuredClone(requestedDraft.copySourceDefinition ?? requestedDraft.definition);
             original.name = requestedDraft.definition.name;
             const resource = await saveDraftWithVerification(requestedDraft, original, () => dynamicTemplateApi.create({ definition: original, copySource: requestedDraft.copySource, versionNote: requestedDraft.versionNote }));
+            if (useTemplateEditorSession.getState().sessionId !== sessionId) return true;
             const initialSaved = resource ? createPersistedDraft(resource, null) : null;
             if (!initialSaved) throw new Error("服务端没有返回有效的副本草稿");
             notifyEditableTemplateCatalogChanged(resource);
@@ -881,6 +887,7 @@ export function useTemplateWorkspaceController({
                 versionNote: requestedDraft.versionNote,
                 ...(requestedDraft.copySource ? { copySource: requestedDraft.copySource } : {}),
               }));
+          if (useTemplateEditorSession.getState().sessionId !== sessionId) return true;
           const persistedDraft = saved ? createPersistedDraft(
             saved,
             saved.publishedVersion > 0
@@ -934,7 +941,21 @@ export function useTemplateWorkspaceController({
           if (nameConflict) {
             message.warning(`${conflictMessage}；当前修改仍完整保留，请打开模板设置，修改模板名称后重新保存。`);
           } else if (conflicted) {
-            message.warning(`${conflictMessage}；当前工作仍完整保留，请重新打开目录中的同一模板处理冲突。`);
+            modal.confirm({
+              title: "模板保存发生冲突",
+              content: `${conflictMessage}。当前工作仍完整保留。你可以复制本地草稿后再重新打开同一模板，系统不会自动覆盖远端。`,
+              okText: "复制本地草稿",
+              cancelText: "留在当前会话",
+              onOk: async () => {
+                const copied = await copyEditorLocalConflictSnapshot({
+                  templateId: requestedDraft.definition.templateId,
+                  versionNote: requestedDraft.versionNote,
+                  definition: requestedDraft.definition,
+                });
+                if (copied) message.success("已复制本地模板草稿，可粘贴到笔记后再重新打开同一模板");
+                else message.warning("无法写入剪贴板；请留在当前会话核对修改");
+              },
+            });
           } else if (permissionDenied) {
             message.error("服务端拒绝保存模板：当前账号没有模板管理权限；修改仍完整保留。");
           } else {
@@ -944,12 +965,14 @@ export function useTemplateWorkspaceController({
         return false;
       }
     })();
-    saveInFlightRef.current = savePromise;
+    saveInFlightBySessionRef.current.set(sessionId, savePromise);
     void savePromise.finally(() => {
-      if (saveInFlightRef.current === savePromise) saveInFlightRef.current = null;
+      if (saveInFlightBySessionRef.current.get(sessionId) === savePromise) {
+        saveInFlightBySessionRef.current.delete(sessionId);
+      }
     });
     return savePromise;
-  }, [canManageTemplates, localOnly, message]);
+  }, [canManageTemplates, localOnly, message, modal]);
 
   const persistForExit = useCallback(async () => {
     const source = useTemplateEditorSession.getState();
@@ -1916,6 +1939,12 @@ export function useTemplateWorkspaceController({
   const usePublishedTemplateInPage = useCallback(() => {
     const current = publishWorkflowRef.current;
     if (current.status !== "published" || current.catalogStatus !== "fresh") return;
+    const publishedName = current.snapshot.reviewedDefinition.name.trim() || "未命名模板";
+    notifyPageTemplateLibraryHandoff({
+      templateId: current.published.templateId,
+      version: current.published.version,
+      name: publishedName,
+    });
     useVisualEditorSession.getState().activateWorkspace("page");
     notifyDynamicTemplateCatalogChanged();
     onReturnPage();
@@ -2196,7 +2225,7 @@ export function useTemplateWorkspaceController({
       if (latestMatches && sourceSessionUnchanged) {
         closeTemplateSession();
       }
-      notifyDynamicTemplateCatalogChanged();
+      notifyDynamicTemplateRemovedFromCatalog(template.templateId);
       if (latestMatches && !sourceSessionUnchanged) {
         message.warning(`模板“${template.name}”已移入回收站；当前会话有后续修改，未自动关闭`);
       } else {
@@ -2249,7 +2278,7 @@ export function useTemplateWorkspaceController({
       if (latestMatches && sourceSessionUnchanged) {
         closeTemplateSession();
       }
-      notifyDynamicTemplateCatalogChanged();
+      notifyDynamicTemplateRemovedFromCatalog(template.templateId);
       if (latestMatches && !sourceSessionUnchanged) {
         message.warning(`模板“${template.name}”已永久删除；当前会话有后续修改，未自动关闭`);
       } else {

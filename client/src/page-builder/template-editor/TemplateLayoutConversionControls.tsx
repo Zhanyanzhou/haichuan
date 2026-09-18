@@ -10,7 +10,7 @@ import { getTemplateLayoutPresentation } from "./templateLayoutPresentation";
 
 type Layout = Extract<DynamicTemplateDefinitionCommand, { type: "convert-layout" }>["layout"];
 const names: Record<Layout, string> = { vertical: "上下排列", horizontal: "左右排列", wrap: "自动换行", grid: "网格排列", free: "自由排列" };
-const breakpoints: TemplateBreakpoint[] = ["desktop", "tablet", "mobile"];
+const breakpoints: TemplateBreakpoint[] = ["desktop", "mobile"];
 function label(rules: ReturnType<typeof resolveTemplateNodeRules>) {
   return getTemplateLayoutPresentation(rules).label;
 }

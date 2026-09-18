@@ -961,7 +961,7 @@ export default function DynamicTemplateStructurePanel({
       const next = structuredClone(currentDraft.definition);
       setTemplateNodeRule(next, issue.nodeId, issue.device, "hidden", false);
       if (rules.display === "none") {
-        const upstream: TemplateBreakpoint[] = issue.device === "mobile" ? ["tablet", "desktop"] : issue.device === "tablet" ? ["desktop"] : [];
+        const upstream: TemplateBreakpoint[] = issue.device === "mobile" ? ["desktop"] : [];
         const display = upstream.map((breakpoint) => resolveTemplateNodeRules(next, issue.nodeId!, breakpoint).display)
           .find((value) => value !== "none") ?? createDefaultDynamicTemplateResponsiveRules(target.type).display;
         setTemplateNodeRule(next, issue.nodeId, issue.device, "display", display);

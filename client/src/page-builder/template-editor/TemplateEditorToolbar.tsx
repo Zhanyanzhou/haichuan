@@ -7,7 +7,6 @@ import {
   SettingOutlined,
   DeleteOutlined,
   MobileOutlined,
-  TabletOutlined,
   PlusOutlined,
   RollbackOutlined,
 } from "@ant-design/icons";
@@ -73,8 +72,6 @@ export default function TemplateEditorToolbar({
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
   const draft = useTemplateEditorSession((state) => state.draft);
   const device = useTemplateEditorSession((state) => state.device);
-  const breakpoint = useTemplateEditorSession((state) => state.breakpoint);
-  const setBreakpoint = useTemplateEditorSession((state) => state.setBreakpoint);
   const previewMode = useTemplateEditorSession((state) => state.previewMode);
   const previewScenario = useTemplateEditorSession((state) => state.previewScenario);
   const productionReviewFacts = useTemplateEditorSession((state) => state.productionReviewFacts);
@@ -337,17 +334,7 @@ export default function TemplateEditorToolbar({
 
   const toolbar = (
     <header className="homepage-editor__toolbar template-editor__toolbar">
-      {Number(draft?.definition.schemaVersion) >= 2 ? <WorkspaceDeviceSwitcher
-        ariaLabel="模板响应式断点"
-        title="切换模板的桌面、平板或手机布局规则"
-        value={breakpoint}
-        options={[
-          { value: "desktop", label: "桌面", detail: `${desktopPreviewWidth} px`, icon: <DesktopOutlined />, ariaLabel: `桌面端模板布局（${desktopPreviewWidth} px）` },
-          { value: "tablet", label: "平板", detail: "834 px", icon: <TabletOutlined />, ariaLabel: "平板端模板布局（834 px）" },
-          { value: "mobile", label: "手机", detail: `${mobilePreviewWidth} px`, icon: <MobileOutlined />, ariaLabel: `移动端模板布局（${mobilePreviewWidth} px）` },
-        ]}
-        onChange={setBreakpoint}
-      /> : <WorkspaceDeviceSwitcher
+      <WorkspaceDeviceSwitcher
         ariaLabel="模板设计设备：桌面端与移动端规则分别调整"
         title="切换模板的桌面端或移动端布局规则"
         value={device}
@@ -368,7 +355,7 @@ export default function TemplateEditorToolbar({
           },
         ]}
         onChange={setDevice}
-      />}
+      />
 
       <WorkspaceContextControls
         activeMode="template"

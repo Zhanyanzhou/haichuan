@@ -15,6 +15,7 @@ import {
   dynamicTemplateVersionKey,
   readResolvedDynamicTemplateDefinitions,
 } from "@/page-builder/dynamic-template-instance/types";
+import { hasExplicitDynamicTemplateInstanceImage } from "@/page-builder/dynamic-template-instance/mediaReferences";
 import type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
 export const EDITOR_PAGE_KEYS = [
@@ -184,12 +185,32 @@ export function isContentTemplateBlockPublicReady(block: {
 }
 
 /** 判断区块是否至少具备一项会在前台形成可见输出的合同内容。 */
-export function isContentTemplateBlockPublicRenderable(block: {
-  type?: string;
-  props?: Record<string, unknown>;
-} | undefined) {
+export function isContentTemplateBlockPublicRenderable(
+  block: {
+    type?: string;
+    props?: Record<string, unknown>;
+  } | undefined,
+  document?: {
+    [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]?: unknown;
+  } | null,
+) {
   if (!block || !isContentTemplateBlockPublicReady(block)) return false;
-  if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) return true;
+  if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+    const templateId = typeof block.props?.templateId === "string" ? block.props.templateId : "";
+    const templateVersion = Number(block.props?.templateVersion);
+    const resolved = readResolvedDynamicTemplateDefinitions(
+      document?.[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
+    )[dynamicTemplateVersionKey(templateId, templateVersion)];
+    if (!resolved) return false;
+    const hiddenSlotIds = Array.isArray(block.props?.hiddenSlotIds)
+      ? block.props.hiddenSlotIds.filter((id): id is string => typeof id === "string")
+      : [];
+    return hasExplicitDynamicTemplateInstanceImage(
+      resolved.definition,
+      block.props?.contentBySlotId,
+      hiddenSlotIds,
+    );
+  }
   const contract = getContentTemplateContract(block.type || "");
   if (!contract) return false;
   const props = block.props ?? {};
@@ -230,6 +251,9 @@ export function resolvePageHeaderMode(
     (block) => block?.props?.isVisible !== false && block?.type !== "业务功能区",
   );
   if (firstVisible?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+    if (!isContentTemplateBlockPublicRenderable(firstVisible, data)) {
+      return rule.headerMode.fallback;
+    }
     const templateId = typeof firstVisible.props?.templateId === "string"
       ? firstVisible.props.templateId
       : "";
@@ -243,7 +267,7 @@ export function resolvePageHeaderMode(
   }
   const contract = getContentTemplateContract(firstVisible?.type || "");
   return contract?.key === rule.headerMode.overlayRequiresFirstTemplate
-    && isContentTemplateBlockPublicRenderable(firstVisible)
+    && isContentTemplateBlockPublicRenderable(firstVisible, data)
     ? "overlay-light"
     : rule.headerMode.fallback;
 }

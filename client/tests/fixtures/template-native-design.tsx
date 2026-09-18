@@ -23,7 +23,6 @@ const cards = Array.from({ length: 3 }, () => add(region, "ImageSlot"));
 const headingRegion = add(definition.rootNodeId, "Container");
 const heading = add(headingRegion, "HeadingSlot");
 setTemplateNodeRule(definition, region, "desktop", "columns", [1, 1, 1]);
-setTemplateNodeRule(definition, region, "tablet", "columns", [1, 1]);
 setTemplateNodeRule(definition, region, "mobile", "columns", [1]);
 for (const id of cards) setTemplateNodeRule(definition, id, "desktop", "height", { mode: "fixed", value: { value: 100, unit: "px" } });
 draft.definition = definition;
@@ -44,7 +43,7 @@ function Fixture() {
   };
   const rendering = <DynamicTemplateRenderer definition={state.previewDocument ?? state.draft!.definition} device={state.device} breakpoint={state.breakpoint} contentBySlotId={renderedContent} layoutOverridesByNodeId={override ? { [cards[0]]: { desktop: { focusXPercent: 27 } } } : undefined} showEmptySlots />;
   return <App><main style={{ display: "grid", gridTemplateColumns: "1fr 350px", height: "100vh" }}>
-    <section><nav>{(["desktop", "tablet", "mobile"] as const).map((bp) => <button key={bp} onClick={() => state.setBreakpoint(bp)}>{bp}</button>)}
+    <section><nav>{(["desktop", "mobile"] as const).map((bp) => <button key={bp} onClick={() => state.setBreakpoint(bp)}>{bp}</button>)}
       <button onClick={() => select([region])}>选择网格</button><button onClick={() => select([cards[0]])}>选择图片</button><button onClick={() => select(cards)}>多选图片</button>
       <button onClick={() => select([region, cards[0]])}>混选网格和图片</button>
       <button onClick={() => select([heading])}>选择标题</button>
@@ -58,8 +57,8 @@ function Fixture() {
         setTemplateNodeRule(next, region, "desktop", "justifyContent", "space-around");
       } }); }}>建立已有策略前置</button>
       <button onClick={() => state.executeCommand({ type: "update-definition", label: "继承冲突验收前置", update: (next) => {
-        setTemplateNodeRule(next, region, "tablet", "width", "fit");
-        for (const id of cards) setTemplateNodeRule(next, id, "tablet", "width", { value: 100, unit: "px" });
+        setTemplateNodeRule(next, region, "mobile", "width", "fit");
+        for (const id of cards) setTemplateNodeRule(next, id, "mobile", "width", { value: 100, unit: "px" });
       } })}>建立继承冲突前置</button>
       <button onClick={() => state.executeCommand({ type: "update-definition", label: "纵向 Flex 验收前置", update: (next) => { setTemplateNodeRule(next, region, "desktop", "display", "flex"); setTemplateNodeRule(next, region, "desktop", "direction", "column"); } })}>纵向Flex测试</button>
       <button onClick={() => state.undo()}>撤销</button><button onClick={() => state.redo()}>重做</button>

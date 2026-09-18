@@ -118,13 +118,11 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     expect(server.pageDocument.puckData.content[0]).toMatchObject({ type: "动态模板实例", props: { templateId: saved.templateId, templateVersion: 1 } });
     const pageReviewStatus = page.getByTestId("page-review-status");
     await expect(pageReviewStatus).toHaveText("草稿");
-    await page.getByRole("button", { name: "提交审核", exact: true }).click();
-    await expect(pageReviewStatus).toHaveText("待审核");
-    await page.getByRole("button", { name: "本人提交：确认自审", exact: true }).click();
-    await page.getByRole("button", { name: "确认本人审核并批准", exact: true }).click();
-    await expect(pageReviewStatus).toHaveText("已批准");
-    await expect(page.getByRole("button", { name: "发布到前台网站", exact: true })).toBeEnabled();
-    await page.getByRole("button", { name: "发布到前台网站", exact: true }).click();
+    await expect(page.getByRole("button", { name: "提交审核", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "本人提交：确认自审", exact: true })).toHaveCount(0);
+    const publishPage = page.getByRole("button", { name: "发布到前台网站", exact: true });
+    await expect(publishPage).toBeEnabled();
+    await publishPage.click();
     await expect.poll(() => server.publishedPage).not.toBeNull();
     await page.goto("/");
     await expect(page.locator(`[data-template-node-id="${saved.rootNodeId}"]`)).toBeVisible();
@@ -253,19 +251,16 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     expect(dragged.definition!.nodes[grid].responsive.desktop.gap?.value).toBeGreaterThan(24);
     await expect(page.getByRole("spinbutton", { name: "对象间距", exact: true })).toHaveValue(String(dragged.definition!.nodes[grid].responsive.desktop.gap!.value));
     await number(page, "对象间距", 24);
-    await breakpoint(page, "平板");
-    await number(page, "网格列数", 2);
     await breakpoint(page, "移动");
     await number(page, "网格列数", 1);
     const beforeReset = (await readSession(page)).definition!;
-    expect(beforeReset.nodes[grid].responsive.tablet?.columns).toHaveLength(2);
     expect(beforeReset.nodes[grid].responsive.mobile.columns).toHaveLength(1);
     await page.locator('[data-template-design-property="node.columns"]').getByRole("button", { name: "恢复继承", exact: true }).click();
-    await expect(page.getByRole("spinbutton", { name: "网格列数", exact: true })).toHaveValue("2");
+    await expect(page.getByRole("spinbutton", { name: "网格列数", exact: true })).toHaveValue("3");
     await number(page, "网格列数", 1);
     const saved = await savedReopenAndUse(page, server, "黄金卡片");
     expect(saved.nodes[grid].childIds).toEqual(cards);
-    for (const [width, columns] of [[1280, 3], [834, 2], [390, 1]]) {
+    for (const [width, columns] of [[1280, 3], [834, 3], [390, 1]]) {
       await page.setViewportSize({ width, height: 900 });
       const renderedGrid = page.locator(`[data-template-node-id="${grid}"]`);
       await expect.poll(async () => renderedGrid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(columns);

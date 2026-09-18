@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { BadRequestException, NotFoundException } from "@nestjs/common";
 import type { ArgumentsHost } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { HttpExceptionFilter } from "./http-exception.filter";
@@ -72,4 +73,23 @@ test("头像文件超过 Multer 限制时返回统一 413 业务错误而不是 
   assert.equal(result.statusCode, 413);
   assert.equal(result.body.errorCode, "AVATAR_FILE_TOO_LARGE");
   assert.equal(result.body.message, "头像图片不能超过 5MB");
+});
+
+test("HttpException 对象响应中的业务 code 会进入 errorCode，不折叠成 VALIDATION_ERROR", () => {
+  const retired = capture(new BadRequestException({
+    code: "CONTENT_LOCALE_RETIRED",
+    message: "This content locale is retired",
+    locale: "en",
+  }));
+  assert.equal(retired.statusCode, 400);
+  assert.equal(retired.body.errorCode, "CONTENT_LOCALE_RETIRED");
+  assert.equal(retired.body.message, "This content locale is retired");
+
+  const unavailable = capture(new NotFoundException({
+    code: "CONTENT_LOCALE_UNAVAILABLE",
+    message: "Requested locale is not published",
+    locale: "en",
+  }));
+  assert.equal(unavailable.statusCode, 404);
+  assert.equal(unavailable.body.errorCode, "CONTENT_LOCALE_UNAVAILABLE");
 });

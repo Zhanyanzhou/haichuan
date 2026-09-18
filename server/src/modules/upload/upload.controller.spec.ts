@@ -17,7 +17,12 @@ test('后台按存储键预览页面素材不放宽公开授权', async () => {
       return { buffer: Buffer.from('image'), mimeType: 'image/png' };
     },
   } as unknown as UploadService;
-  const responseState: { headers: Record<string, string>; mimeType?: string; body?: Buffer } = {
+  const responseState: {
+    headers: Record<string, string>;
+    mimeType?: string;
+    body?: Buffer;
+    ended?: boolean;
+  } = {
     headers: {},
   };
   const response = {
@@ -33,22 +38,81 @@ test('后台按存储键预览页面素材不放宽公开授权', async () => {
       responseState.body = value;
       return this;
     },
+    end() {
+      responseState.ended = true;
+      return this;
+    },
   } as unknown as Response;
   const controller = new UploadController(
     uploadService,
     {} as MediaAuthorizationService,
   );
 
-  await controller.previewPageMediaByStorageKey('page-assets/abc123.png', response);
+  await controller.previewPageMediaByStorageKey(
+    'page-assets/abc123.png',
+    response,
+    { method: 'GET' } as import('express').Request,
+  );
 
   assert.deepEqual(calls, [{
     storageKey: 'page-assets/abc123.png',
     requirePublicAuthorization: false,
   }]);
-  assert.equal(responseState.headers['Cache-Control'], 'private, no-store');
+  assert.equal(responseState.headers['Cache-Control'], 'private, max-age=60');
   assert.equal(responseState.headers['X-Content-Type-Options'], 'nosniff');
+  assert.equal(responseState.headers['Content-Length'], '5');
   assert.equal(responseState.mimeType, 'image/png');
   assert.deepEqual(responseState.body, Buffer.from('image'));
+  assert.equal(responseState.ended, undefined);
+});
+
+test('后台按存储键预览支持 HEAD，不回传文件体', async () => {
+  const uploadService = {
+    getPageMediaContentByStorageKey: async () => ({
+      buffer: Buffer.from('image'),
+      mimeType: 'image/png',
+    }),
+  } as unknown as UploadService;
+  const responseState: {
+    headers: Record<string, string>;
+    mimeType?: string;
+    body?: Buffer;
+    ended?: boolean;
+  } = { headers: {} };
+  const response = {
+    setHeader(name: string, value: string) {
+      responseState.headers[name] = value;
+      return this;
+    },
+    type(value: string) {
+      responseState.mimeType = value;
+      return this;
+    },
+    send(value: Buffer) {
+      responseState.body = value;
+      return this;
+    },
+    end() {
+      responseState.ended = true;
+      return this;
+    },
+  } as unknown as Response;
+  const controller = new UploadController(
+    uploadService,
+    {} as MediaAuthorizationService,
+  );
+
+  await controller.previewPageMediaByStorageKey(
+    'page-assets/abc123.png',
+    response,
+    { method: 'HEAD' } as import('express').Request,
+  );
+
+  assert.equal(responseState.headers['Cache-Control'], 'private, max-age=60');
+  assert.equal(responseState.headers['Content-Length'], '5');
+  assert.equal(responseState.mimeType, 'image/png');
+  assert.equal(responseState.body, undefined);
+  assert.equal(responseState.ended, true);
 });
 
 test('后台按存储键预览页面素材拒绝空存储键', async () => {

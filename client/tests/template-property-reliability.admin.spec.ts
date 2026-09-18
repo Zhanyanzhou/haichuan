@@ -126,7 +126,7 @@ test("新增颜色字体共用修改范围；内容共享；关闭替换后裁�
   const { ids } = await openGenerated(page);
   await select(page, ids.title);
   await expect(page.getByRole("combobox", { name: "修改作用域" })).toHaveCount(0);
-  await expect(page.getByText("正在修改桌面基础，保留手机和平板的独立设置。", { exact: true })).toBeVisible();
+  await expect(page.getByText("正在修改桌面基础，保留手机的独立设置。", { exact: true })).toBeVisible();
   await select(page, ids.title, "mobile");
   await page.getByRole("combobox", { name: "修改作用域" }).selectOption("base");
   await select(page, ids.title);
@@ -204,12 +204,42 @@ test("背景图片槽位保留唯一默认图片入口，容器仍可配置 CSS 
     useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "背景槽位兼容前置", update: (next: { slots: Record<string, { semanticRole: string }> }) => { next.slots[slotId].semanticRole = "backgroundImage"; } });
   }, ids.imageSlot);
   await select(page, ids.image);
-  await expect(page.getByRole("region", { name: "模板默认内容" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
+  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  await expect(defaults.getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
+  await expect(defaults.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
+  await expect(defaults.locator("[data-media-field]")).toHaveAttribute("data-has-page-media", "true");
   await expect(page.getByRole("region", { name: "模板颜色与背景" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("image-properties-1600.png"), fullPage: true });
   await select(page, ids.root);
   await expect(page.getByRole("region", { name: "模板颜色与背景" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
   await page.screenshot({ path: testInfo.outputPath("root-size-first-1600.png"), fullPage: true });
+});
+
+test("图片默认内容只保存地址和说明，属性含本页图片入口", async ({ page }) => {
+  const { ids } = await openGenerated(page);
+  await page.evaluate(async ({ slotId }) => {
+    const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
+    useTemplateEditorSession.getState().executeCommand({
+      type: "update-definition",
+      label: "写入模板默认图",
+      update: (next: { defaultContent: Record<string, unknown> }) => {
+        next.defaultContent[slotId] = { src: "/uploads/page-assets/old.jpg", alt: "旧图" };
+      },
+    });
+  }, { slotId: ids.imageSlot });
+  await select(page, ids.image);
+  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  await expect(defaults.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
+  await defaults.getByRole("button", { name: "图片链接" }).click();
+  await defaults.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片").fill("/uploads/page-assets/new.jpg");
+  await defaults.getByRole("button", { name: /确\s*认/ }).click();
+  const stored = await page.evaluate(async ({ slotId }) => {
+    const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
+    return useTemplateEditorSession.getState().draft?.definition.defaultContent[slotId];
+  }, { slotId: ids.imageSlot });
+  expect(stored).toEqual({ src: "/uploads/page-assets/new.jpg", alt: "旧图" });
 });
 
 test("模板库按真实画幅自适应完整预览，并以只读放大入口查看长页", async ({ page }, testInfo) => {

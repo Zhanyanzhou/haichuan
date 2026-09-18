@@ -43,6 +43,7 @@ import {
   resetTemplateNodeRule,
   setTemplateSlotRule,
   resetTemplateSlotRule,
+  TEMPLATE_CONTENT_BREAKPOINTS,
   type TemplateBreakpoint,
   type ResolvedTemplateDefinition,
 } from "./responsive";
@@ -103,8 +104,13 @@ export function adaptLegacyResponsiveUpdate(
   breakpoint: TemplateBreakpoint,
   update: (projected: ResolvedTemplateDefinition) => void,
 ): TemplateDefinitionV2 {
+  if (breakpoint === "tablet") {
+    throw new DynamicTemplateOperationError(
+      "TABLET_CONTENT_UNSUPPORTED",
+      definition.schemaVersion === 1 ? "旧模板没有平板覆盖。" : "模板设计只支持桌面端与移动端，不提供独立平板内容。",
+    );
+  }
   if (definition.schemaVersion === 1) {
-    if (breakpoint === "tablet") throw new DynamicTemplateOperationError("LEGACY_TABLET_UNSUPPORTED", "旧模板没有平板覆盖。");
     const next = cloneDefinition(definition);
     // v1 合同仍保证 desktop/mobile 完整；不能投影成同一端后改写另一端。
     update(next as ResolvedTemplateDefinition);
@@ -1584,8 +1590,7 @@ function syncPlacementForParent(
   const parent = definition.nodes[parentId];
   const child = definition.nodes[nodeId];
   if (!parent || !child) return;
-  const devices: readonly TemplateBreakpoint[] = Number(definition.schemaVersion) >= 2
-    ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"];
+  const devices = TEMPLATE_CONTENT_BREAKPOINTS;
   for (const device of devices) {
     const parentIsFree = parent.type === "Stack" && resolveTemplateNodeRules(definition, parent.nodeId, device).layoutMode === "free";
     if (!parentIsFree) {
@@ -2232,7 +2237,7 @@ function hasIndependentHeight(rules: DynamicTemplateResponsiveRules) {
 function collectLayoutRelationshipErrors(definition: TemplateDefinitionV2) {
   if (definition.schemaVersion < 2) return [];
   const issues: Array<{ key: string; message: string }> = [];
-  for (const breakpoint of ["desktop", "tablet", "mobile"] as const) {
+  for (const breakpoint of TEMPLATE_CONTENT_BREAKPOINTS) {
     for (const parent of Object.values(definition.nodes)) {
       if (!parent.childIds.length || parent.hidden) continue;
       const parentRules = resolveTemplateNodeRules(definition, parent.nodeId, breakpoint);

@@ -2,7 +2,7 @@ import { useState } from "react";
 import TextField from "../inspector/controls/TextField";
 import NumberField from "../inspector/controls/NumberField";
 import SwitchField from "../inspector/controls/SwitchField";
-import MediaPickerField from "../fields/MediaPickerField";
+import MediaPickerField, { mediaSpecFromRecommendation } from "../fields/MediaPickerField";
 import {
   getDynamicTemplateStructureLockOwnerId,
   type TemplateDefinitionV2,
@@ -64,8 +64,11 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
       <div className="homepage-editor__inspector-section-body">
         {image ? <>
           <MediaPickerField fieldKey={`default:${slot.slotId}`} value={typeof value === "string" ? value : typeof record.src === "string" ? record.src : ""}
-            readOnly={locked} placeholder="选择默认图片" previewAspectRatio={slotRules?.aspectRatio?.replace(":", " / ")} previewFit={slotRules?.objectFit}
-            onChange={(src) => content({ ...record, src, alt: typeof record.alt === "string" ? record.alt : "" })} />
+            readOnly={locked} placeholder="选择默认图片" spec={mediaSpecFromRecommendation(slot.validation.recommendedWidth, slot.validation.recommendedHeight, slotRules?.aspectRatio, slot.label)}
+            previewAspectRatio={slotRules?.aspectRatio?.replace(":", " / ")} previewFit={slotRules?.objectFit}
+            onChange={(src) => content(src.trim()
+              ? { src, alt: typeof record.alt === "string" ? record.alt : "" }
+              : "")} />
           <TextField transactional label="默认图片说明" value={typeof record.alt === "string" ? record.alt : ""} maxLength={160} readOnly={locked}
             onChange={(alt) => content({ src: typeof value === "string" ? value : typeof record.src === "string" ? record.src : "", alt })} />
         </> : <TextField transactional key={slot.slotId} label={action ? "默认按钮文字" : "默认文字"}
@@ -76,7 +79,7 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
       </div>
     </section> : null}
     {(section === "all" || section === "background" || (section === "text-style" && textSlot)) ? <section className="homepage-editor__inspector-section" aria-label={section === "text-style" ? "模板颜色与字体" : "模板颜色与背景"}>
-      <div className="homepage-editor__inspector-section-head"><strong>{textSlot && section !== "background" ? "颜色与字体" : "背景与颜色"}</strong><span>{({ desktop: "桌面基础", tablet: "平板独立设置", mobile: "手机独立设置" })[breakpoint]}</span></div>
+      <div className="homepage-editor__inspector-section-head"><strong>{textSlot && section !== "background" ? "颜色与字体" : "背景与颜色"}</strong><span>{({ desktop: "桌面基础", mobile: "手机独立设置" } as const)[breakpoint === "mobile" ? "mobile" : "desktop"]}</span></div>
       <div className="homepage-editor__inspector-section-body">
         {textSlot && section !== "background" ? <>
           {colorField("文字颜色", slotRules?.color, (color) => textStyle("color", color))}

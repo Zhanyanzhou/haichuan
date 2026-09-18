@@ -336,6 +336,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     await expect(wizard).toBeVisible();
     expect((await readSession(page)).definition).toBeNull();
     await wizard.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(wizard).toHaveCount(0);
     await createBlankTemplate(page);
     await expect(blankTemplateStart(page)).toBeVisible();
     const snapshot = await readSession(page);
@@ -1164,6 +1165,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
         await expect(wizard).toBeVisible();
         expect((await readSession(page)).definition).toBeNull();
         await wizard.getByRole("button", { name: "取消", exact: true }).click();
+        await expect(wizard).toHaveCount(0);
         await createBlankTemplate(page);
         await expect(blankTemplateStart(page)).toBeVisible();
       } else {

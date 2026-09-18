@@ -553,6 +553,266 @@ test("英文超级管理员自审发布绑定同一审计记录并只切换英�
   assert.equal(independentMarker?.selfReview, undefined);
 });
 
+test("超级管理员可在发布时明确自审并直接发布草稿", async () => {
+  const updatedAt = new Date("2026-09-16T10:00:00.000Z");
+  const puckData = { content: [], root: { props: {} }, zones: {} };
+  const metadata = { seoTitle: "待发布中文页" };
+  const contentHash = createPageLocaleContentHash(puckData, metadata);
+  const document = {
+    id: 9,
+    pageKey: "home",
+    schemaVersion: 1,
+    editorType: "puck",
+    editorVersion: "test",
+    templateId: null,
+    templateVersion: null,
+    puckData,
+    metadata,
+    status: "DRAFT",
+    publishedRevisionId: null,
+    publishedAt: null,
+    publishedBy: null,
+    createdAt: updatedAt,
+    updatedAt,
+  };
+  const draft = {
+    id: 31,
+    documentId: 9,
+    locale: "zh-CN" as const,
+    puckData,
+    metadata: withPageLocaleDraftMetadata(metadata, "zh-CN"),
+    reviewStatus: "DRAFT" as const,
+    contentHash,
+    submittedBy: null,
+    submittedAt: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    reviewNote: null,
+    publishedRevisionId: null,
+    publishedHash: null,
+    publishedBy: null,
+    publishedAt: null,
+    createdAt: updatedAt,
+    updatedAt,
+    legacy: false,
+  };
+  const audits: Array<{
+    id: number;
+    userId: number;
+    action: string;
+    module: string;
+    targetId: number;
+    detail: string;
+  }> = [];
+  const calls: Array<{ operation: string; args: any }> = [];
+  const transaction: any = {
+    $queryRaw: async () => [{ id: 9 }],
+    pageDocument: {
+      findUnique: async () => structuredClone(document),
+      update: async (args: any) => {
+        calls.push({ operation: "document.update", args: structuredClone(args) });
+        return { ...structuredClone(document), ...structuredClone(args.data) };
+      },
+    },
+    user: { findUnique: async () => ({ role: "SUPER_ADMIN", status: "ACTIVE" }) },
+    pageDocumentRevision: {
+      findFirst: async () => null,
+      create: async (args: any) => {
+        calls.push({ operation: "revision.create", args: structuredClone(args) });
+        return {
+          id: 77,
+          ...structuredClone(args.data),
+          createdAt: new Date("2026-09-16T10:01:00.000Z"),
+        };
+      },
+    },
+    pageDocumentLocalization: {
+      update: async (args: any) => {
+        calls.push({ operation: "localization.update", args: structuredClone(args) });
+        Object.assign(draft, args.data);
+        return {
+          ...structuredClone(draft),
+          ...structuredClone(args.data),
+          updatedAt: new Date("2026-09-16T10:01:00.000Z"),
+        };
+      },
+    },
+    operationLog: {
+      findMany: async () => audits.filter((row) => row.action === "PAGE_LOCALE_SELF_REVIEW_APPROVED"),
+      create: async (args: any) => {
+        const row = {
+          id: audits.length + 200,
+          ...structuredClone(args.data),
+        };
+        audits.push(row);
+        calls.push({ operation: "operationLog.create", args: structuredClone(args) });
+        return row;
+      },
+    },
+  };
+  const prisma = {
+    $transaction: async (run: (tx: typeof transaction) => Promise<unknown>) => run(transaction),
+  };
+  const service = new PageModulesService(
+    prisma as unknown as PrismaService,
+    {
+      resolveReferences: async () => ({ eligible: true, issues: [], items: [] }),
+    } as any,
+  );
+  Object.defineProperty(service, "getLocalizedPageDraft", {
+    value: async () => ({ document, draft }),
+  });
+  Object.defineProperty(service, "collectPageDocumentValidation", {
+    value: async () => ({ valid: true, errors: [], issues: [] }),
+  });
+  Object.defineProperty(service, "hydrateDynamicTemplateDefinitions", {
+    value: async (value: unknown) => value,
+  });
+
+  await assert.rejects(
+    () => service.publishLocalizedPageDocument(
+      "home",
+      "zh-CN",
+      12,
+      updatedAt.toISOString(),
+      contentHash,
+    ),
+    (error: unknown) => error instanceof BadRequestException
+      && String((error as BadRequestException).message).includes("尚未审核通过"),
+  );
+
+  const published = await service.publishLocalizedPageDocument(
+    "home",
+    "zh-CN",
+    12,
+    updatedAt.toISOString(),
+    contentHash,
+    true,
+  );
+  const marker = readPageLocaleRevisionMarker(
+    calls.find((call) => call.operation === "revision.create")?.args.data.metadata,
+  );
+  assert.equal(published.reviewStatus, "PUBLISHED");
+  assert.equal(draft.reviewStatus, "PUBLISHED");
+  assert.equal(marker?.submittedBy, 12);
+  assert.equal(marker?.reviewedBy, 12);
+  assert.equal(marker?.selfReview?.actor, 12);
+  assert.equal(marker?.selfReview?.actorRole, "SUPER_ADMIN");
+  assert.deepEqual(
+    calls
+      .filter((call) => call.operation === "operationLog.create")
+      .map((call) => call.args.data.action),
+    [
+      "PAGE_LOCALE_REVIEW_SUBMITTED",
+      "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+      "PAGE_LOCALE_PUBLISHED",
+    ],
+  );
+});
+
+test("已发布且内容哈希未变时重复发布返回当前线上版本且不新建 revision", async () => {
+  const updatedAt = new Date("2026-09-17T02:25:31.611Z");
+  const puckData = { content: [], root: { props: {} }, zones: {} };
+  const metadata = { seoTitle: "已发布中文页" };
+  const contentHash = createPageLocaleContentHash(puckData, metadata);
+  const document = {
+    id: 9,
+    pageKey: "home",
+    schemaVersion: 1,
+    editorType: "puck",
+    editorVersion: "test",
+    templateId: null,
+    templateVersion: null,
+    puckData,
+    metadata,
+    status: "PUBLISHED",
+    publishedRevisionId: 49,
+    publishedAt: updatedAt,
+    publishedBy: 1,
+    createdAt: updatedAt,
+    updatedAt,
+  };
+  const draft = {
+    id: 31,
+    documentId: 9,
+    locale: "zh-CN" as const,
+    puckData,
+    metadata: withPageLocaleDraftMetadata(metadata, "zh-CN"),
+    reviewStatus: "PUBLISHED" as const,
+    contentHash,
+    submittedBy: 1,
+    submittedAt: updatedAt,
+    reviewedBy: 1,
+    reviewedAt: updatedAt,
+    reviewNote: null,
+    publishedRevisionId: 49,
+    publishedHash: contentHash,
+    publishedBy: 1,
+    publishedAt: updatedAt,
+    createdAt: updatedAt,
+    updatedAt,
+    legacy: false,
+  };
+  const calls: Array<{ operation: string; args: any }> = [];
+  const transaction: any = {
+    $queryRaw: async () => [{ id: 9 }],
+    pageDocument: {
+      findUnique: async () => structuredClone(document),
+    },
+    pageDocumentRevision: {
+      findFirst: async () => {
+        throw new Error("already-published publish must not query revisions");
+      },
+      create: async () => {
+        throw new Error("already-published publish must not create a revision");
+      },
+    },
+    pageDocumentLocalization: {
+      update: async () => {
+        throw new Error("already-published publish must not update localization");
+      },
+    },
+    operationLog: {
+      create: async () => {
+        throw new Error("already-published publish must not write operation logs");
+      },
+    },
+  };
+  const prisma = {
+    $transaction: async (run: (tx: typeof transaction) => Promise<unknown>) => run(transaction),
+  };
+  const service = new PageModulesService(
+    prisma as unknown as PrismaService,
+    {
+      resolveReferences: async () => ({ eligible: true, issues: [], items: [] }),
+    } as any,
+  );
+  Object.defineProperty(service, "getLocalizedPageDraft", {
+    value: async () => ({ document, draft }),
+  });
+  Object.defineProperty(service, "hydrateDynamicTemplateDefinitions", {
+    value: async (value: unknown) => value,
+  });
+  Object.defineProperty(service, "notifyPublicChange", {
+    value: () => {
+      calls.push({ operation: "notifyPublicChange", args: {} });
+    },
+  });
+
+  const published = await service.publishLocalizedPageDocument(
+    "home",
+    "zh-CN",
+    1,
+    updatedAt.toISOString(),
+    contentHash,
+    true,
+  );
+  assert.equal(published.reviewStatus, "PUBLISHED");
+  assert.equal(published.contentHash, contentHash);
+  assert.equal(published.publishedRevisionId, 49);
+  assert.deepEqual(calls, []);
+});
+
 test("自审发布拒绝失配的 revision、hash 与已停用或降级的审核人", async () => {
   const submittedAt = new Date("2026-09-12T08:00:00.000Z");
   const reviewedAt = new Date("2026-09-12T09:00:00.000Z");

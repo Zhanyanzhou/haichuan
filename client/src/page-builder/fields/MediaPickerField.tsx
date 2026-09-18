@@ -8,7 +8,7 @@
  * 4. 操作按钮全部带文字：更换 / 链接 / 删除(danger)。
  */
 
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { App as AntdApp, Upload, Button, Input, type InputRef } from "antd";
 import {
   InboxOutlined,
@@ -22,7 +22,11 @@ import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
 import { sizeMatchStatus, useImageNaturalSize } from "./specCheck";
-import { addPageMediaItem } from "./pageMediaLibrary";
+import {
+  addPageMediaItem,
+  PAGE_MEDIA_LIBRARY_CHANGED_EVENT,
+  readPageMediaLibrary,
+} from "./pageMediaLibrary";
 import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
 
 export const SESSION_MEDIA_UPLOADED_EVENT = "page-builder:media-uploaded";
@@ -33,6 +37,22 @@ export interface MediaSpec {
   height: number;
   ratio: string;
   label: string;
+}
+
+/** 槽位建议宽高转为上传规格；缺任一尺寸时不显示比例检查。 */
+export function mediaSpecFromRecommendation(
+  width?: number,
+  height?: number,
+  aspectRatio?: string,
+  label = "建议尺寸",
+): MediaSpec | undefined {
+  if (!width || !height || width <= 0 || height <= 0) return undefined;
+  return {
+    width,
+    height,
+    ratio: aspectRatio ? aspectRatio.replace(":", " / ") : `${width} / ${height}`,
+    label,
+  };
 }
 
 interface MediaPickerFieldProps {
@@ -92,6 +112,13 @@ export default function MediaPickerField({
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState(value || "");
   const [uploading, setUploading] = useState(false);
+  const [builtinPageMediaOpen, setBuiltinPageMediaOpen] = useState(false);
+  const [mediaRevision, setMediaRevision] = useState(0);
+  const usesBuiltinPageMedia = !sessionOnly && !onOpenPageMedia;
+  const openPageMedia = onOpenPageMedia ?? (usesBuiltinPageMedia
+    ? () => setBuiltinPageMediaOpen((open) => !open)
+    : undefined);
+  const pageMediaExpanded = onOpenPageMedia ? pageMediaOpen : builtinPageMediaOpen;
   const previewSrc = resolveManagedTemplateMediaPreviewUrl(value);
   const imgSize = useImageNaturalSize(previewSrc);
   const matchStatus = sizeMatchStatus(spec, imgSize.width, imgSize.height);
@@ -126,6 +153,36 @@ export default function MediaPickerField({
     setUrlMode(false);
     setUrlInput(value || "");
   }, [value]);
+
+  useEffect(() => {
+    if (!usesBuiltinPageMedia) return undefined;
+    const refresh = () => setMediaRevision((revision) => revision + 1);
+    window.addEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
+    window.addEventListener(PAGE_MEDIA_LIBRARY_CHANGED_EVENT, refresh);
+    return () => {
+      window.removeEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
+      window.removeEventListener(PAGE_MEDIA_LIBRARY_CHANGED_EVENT, refresh);
+    };
+  }, [usesBuiltinPageMedia]);
+
+  const availablePageMedia = useMemo(() => {
+    void mediaRevision;
+    if (!usesBuiltinPageMedia) return [];
+    const items = new Map<string, { url: string; name: string }>();
+    if (value) items.set(value, { url: value, name: "当前图片" });
+    readPageMediaLibrary().filter((item) => item.type === "image").forEach((item) => {
+      items.set(item.url, { url: item.url, name: item.name });
+    });
+    [...sessionUploadedMedia].forEach((url, index) => {
+      if (!items.has(url)) items.set(url, { url, name: `当前浏览器图片 ${index + 1}` });
+    });
+    return [...items.values()];
+  }, [mediaRevision, usesBuiltinPageMedia, value]);
+
+  const selectPageMedia = (nextValue: string) => {
+    setBuiltinPageMediaOpen(false);
+    onChange?.(nextValue);
+  };
 
   /* ── 上传 ── */
   const handleUpload = async (file: File) => {
@@ -247,6 +304,7 @@ export default function MediaPickerField({
       data-media-device={device}
       data-workspace-field-control="media-picker"
       data-workspace-field-shared="true"
+      data-has-page-media={!sessionOnly && Boolean(openPageMedia) ? "true" : "false"}
       data-media-session-only={sessionOnly ? "true" : undefined}
       tabIndex={fieldKey ? -1 : undefined}
     >
@@ -310,7 +368,7 @@ export default function MediaPickerField({
           {!readOnly && (
             <div
               className="homepage-editor__media-preview-actions"
-              data-has-page-media={!taskPresentation && onOpenPageMedia ? "true" : "false"}
+              data-has-page-media={!taskPresentation && openPageMedia ? "true" : "false"}
             >
               <Button
                 size="small"
@@ -321,14 +379,15 @@ export default function MediaPickerField({
               >
                 {taskPresentation ? "更换图片" : "替换图片"}
               </Button>
-              {taskPresentation || onOpenPageMedia ? (
+              {taskPresentation || openPageMedia ? (
                 <Button
                   size="small"
                   icon={<PictureOutlined />}
-                  className={pageMediaOpen ? "is-active" : undefined}
-                  aria-pressed={pageMediaOpen}
-                  disabled={!onOpenPageMedia}
-                  onClick={onOpenPageMedia}
+                  className={pageMediaExpanded ? "is-active" : undefined}
+                  aria-label={taskPresentation ? "选择本页图片" : "本页图片"}
+                  aria-pressed={pageMediaExpanded}
+                  disabled={!openPageMedia}
+                  onClick={openPageMedia}
                 >
                   {taskPresentation ? "选择本页图片" : "本页图片"}
                 </Button>
@@ -471,8 +530,11 @@ export default function MediaPickerField({
               <Button
                 size="small"
                 icon={<PictureOutlined />}
-                disabled={!onOpenPageMedia}
-                onClick={onOpenPageMedia}
+                disabled={!openPageMedia}
+                className={pageMediaExpanded ? "is-active" : undefined}
+                aria-label="选择本页图片"
+                aria-pressed={pageMediaExpanded}
+                onClick={openPageMedia}
               >
                 选择本页图片
               </Button>
@@ -489,6 +551,18 @@ export default function MediaPickerField({
               className="homepage-editor__media-alt-actions"
               style={{ marginTop: 6 }}
             >
+              {openPageMedia ? (
+                <Button
+                  size="small"
+                  icon={<PictureOutlined />}
+                  className={pageMediaExpanded ? "is-active" : undefined}
+                  aria-label="本页图片"
+                  aria-pressed={pageMediaExpanded}
+                  onClick={openPageMedia}
+                >
+                  本页图片
+                </Button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setUrlMode(true)}
@@ -523,6 +597,44 @@ export default function MediaPickerField({
             <summary>查看图片信息</summary>
             <p>当前 {imgSize.width} × {imgSize.height}；建议 {spec.width} × {spec.height}（{spec.ratio}）。</p>
           </details>
+        </div>
+      ) : null}
+      {usesBuiltinPageMedia && pageMediaExpanded && !readOnly ? (
+        <div
+          className="homepage-editor__current-page-media"
+          aria-label="选择本页与当前浏览器图片"
+          role="region"
+        >
+          <div className="homepage-editor__current-page-media-heading">
+            <strong>本页与当前浏览器图片</strong>
+            <span>{availablePageMedia.length} 张</span>
+          </div>
+          <p className="homepage-editor__current-page-media-empty">
+            这里只汇总当前页面引用和本浏览器上传记录，不是跨设备的账号素材库。
+          </p>
+          {availablePageMedia.length > 0 ? (
+            <div className="homepage-editor__current-page-media-items">
+              {availablePageMedia.map((item) => (
+                <button
+                  key={item.url}
+                  type="button"
+                  className={item.url === value ? "is-current" : ""}
+                  onClick={() => selectPageMedia(item.url)}
+                  aria-label={item.url === value ? `当前素材：${item.name}` : `使用素材：${item.name}`}
+                >
+                  <img
+                    src={resolveManagedTemplateMediaPreviewUrl(item.url)}
+                    alt=""
+                    loading="lazy"
+                  />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="homepage-editor__current-page-media-empty">
+              当前页面和浏览器暂无可复用图片，可使用“更换图片”上传。
+            </p>
+          )}
         </div>
       ) : null}
     </div>

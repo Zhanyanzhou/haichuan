@@ -25,7 +25,10 @@ import {
   useContentTemplateRenderSurface,
   type ContentTemplateRenderMode,
 } from "../runtime/ContentTemplateRenderSurface";
-import { resolveManagedTemplateMediaPreviewUrl } from "./managedMediaPreview";
+import {
+  resolveManagedTemplateMediaPreviewUrl,
+  useManagedTemplateMediaDisplayUrl,
+} from "./managedMediaPreview";
 
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
@@ -84,9 +87,13 @@ function safeColor(value: string | undefined): string | undefined {
   return value && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value) ? value : undefined;
 }
 
+function isDisplayableTemplateMediaUrl(value: string | undefined): value is string {
+  return Boolean(value && (value.startsWith("blob:") || isSafeTemplateMediaUrl(value)));
+}
+
 function backgroundImageToCss(
   rules: DynamicTemplateRenderPlanNode["rules"],
-  allowPrivatePreview: boolean,
+  imageUrl?: string,
 ): string | undefined {
   const layers: string[] = [];
   const gradient = rules.backgroundGradient;
@@ -94,11 +101,8 @@ function backgroundImageToCss(
     && Number.isFinite(gradient.angle) && gradient.angle >= 0 && gradient.angle <= 360) {
     layers.push(`linear-gradient(${gradient.angle}deg, ${gradient.from}, ${gradient.to})`);
   }
-  if (rules.backgroundImage && isSafeTemplateMediaUrl(rules.backgroundImage)) {
-    const source = allowPrivatePreview
-      ? resolveManagedTemplateMediaPreviewUrl(rules.backgroundImage)
-      : rules.backgroundImage;
-    layers.push(`url(${JSON.stringify(source)})`);
+  if (isDisplayableTemplateMediaUrl(imageUrl)) {
+    layers.push(`url(${JSON.stringify(imageUrl)})`);
   }
   return layers.length ? layers.join(", ") : undefined;
 }
@@ -134,6 +138,48 @@ function ratioToCss(ratio: string | undefined): string | undefined {
     : undefined;
 }
 
+/** 解析 "4:5" 这类比例；无法解析时返回 undefined。 */
+function parseAspectRatio(ratio: string | undefined): { width: number; height: number } | undefined {
+  if (!ratio || !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(ratio)) return undefined;
+  const [width, height] = ratio.split(":").map(Number);
+  if (!(width > 0) || !(height > 0)) return undefined;
+  return { width, height };
+}
+
+/**
+ * 移动端竖框 + cover 会裁掉横图内嵌标题。
+ * 仅在槽位显式声明竖版比例（如 4:5）且未做实例覆盖时改为 contain；
+ * 素材本身已是竖版时与 cover 视觉等价。不根据流式容器高度推断，避免误伤作品集等布局。
+ */
+export function resolveImageObjectFit(
+  node: Pick<DynamicTemplateRenderPlanNode, "layoutOverride" | "slot" | "slotRules">,
+  viewport: "desktop" | "mobile" | undefined,
+): NonNullable<CSSProperties["objectFit"]> {
+  const explicitOverride = node.layoutOverride?.objectFit;
+  const requested = explicitOverride
+    ?? node.slotRules?.objectFit
+    ?? TEMPLATE_MEDIA_DEFAULTS.objectFit;
+  if (explicitOverride || requested !== "cover" || viewport !== "mobile") return requested;
+  // 只处理通栏背景图：竖框 cover 会裁掉横图内嵌标题。作品集等竖图槽位保持原 cover。
+  if (node.slot?.semanticRole !== "backgroundImage") return requested;
+  const frame = parseAspectRatio(node.slotRules?.aspectRatio);
+  if (frame && frame.width / frame.height < 1) return "contain";
+  return requested;
+}
+
+/** 竖框 contain 会留下大块上下空白；首屏改回桌面横图比例，让内嵌标题完整可见。 */
+function resolveImageFrameAspectRatio(
+  node: DynamicTemplateRenderPlanNode,
+  viewport: "desktop" | "mobile" | undefined,
+): string | undefined {
+  if (resolveImageObjectFit(node, viewport) !== "contain" || viewport !== "mobile") return undefined;
+  const desktop = parseAspectRatio(node.slot?.desktopRules?.aspectRatio);
+  if (desktop && desktop.width / desktop.height >= 1) {
+    return `${desktop.width} / ${desktop.height}`;
+  }
+  return undefined;
+}
+
 function rulesToStyle(
   node: DynamicTemplateRenderPlanNode,
   previewOverride?: TemplateInstanceLayoutOverride,
@@ -141,7 +187,8 @@ function rulesToStyle(
   parentFree = false,
   parentRules?: DynamicTemplateRenderPlanNode["rules"],
   relationalLayout = false,
-  allowPrivateMediaPreview = false,
+  backgroundDisplayUrl?: string,
+  viewport?: "desktop" | "mobile",
 ): CSSProperties {
   const { rules } = node;
   const alignsOwnChildren = rules.display === "flex" || rules.display === "grid";
@@ -169,7 +216,7 @@ function rulesToStyle(
     backgroundColor: safeColor(rules.backgroundColor) ?? (rules.backgroundToken
       ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[rules.backgroundToken]
       : undefined),
-    backgroundImage: backgroundImageToCss(rules, allowPrivateMediaPreview),
+    backgroundImage: backgroundImageToCss(rules, backgroundDisplayUrl),
     backgroundSize: rules.backgroundImage ? "cover" : undefined,
     backgroundPosition: rules.backgroundImage ? "center" : undefined,
     opacity: Number.isFinite(rules.opacity) ? Math.max(0, Math.min(1, rules.opacity!)) : undefined,
@@ -205,13 +252,14 @@ function rulesToStyle(
     if (rules.height.mode === "fill" && parentRules?.display !== "flex") style.height = "100%";
   }
   const height = rules.height;
+  const landscapeSafeRatio = resolveImageFrameAspectRatio(node, viewport);
   if (height.mode === "min-height") style.minHeight = lengthToCss(height.value);
   if (height.mode === "fixed" || height.mode === "viewport") style.height = lengthToCss(height.value);
   if (height.mode === "aspect-ratio" && height.ratio) {
-    style.aspectRatio = `${height.ratio.width} / ${height.ratio.height}`;
+    style.aspectRatio = landscapeSafeRatio ?? `${height.ratio.width} / ${height.ratio.height}`;
   }
   const imageSlotAspectRatio = node.slot?.type === "image" && height.mode === "auto"
-    ? ratioToCss(node.slotRules?.aspectRatio)
+    ? landscapeSafeRatio ?? ratioToCss(node.slotRules?.aspectRatio)
     : undefined;
   if (imageSlotAspectRatio) {
     style.aspectRatio = imageSlotAspectRatio;
@@ -326,6 +374,48 @@ function getSafeActionContent(content: unknown): { label: string; href?: string 
   return { label };
 }
 
+function ManagedTemplateSlotImage({
+  src,
+  alt,
+  objectFit,
+  objectPosition,
+  transform,
+  transformOrigin,
+  hostFetch,
+}: {
+  src: string;
+  alt: string;
+  objectFit: NonNullable<CSSProperties["objectFit"]>;
+  objectPosition: string;
+  transform?: string;
+  transformOrigin?: string;
+  hostFetch: boolean;
+}) {
+  const media = useManagedTemplateMediaDisplayUrl(src, hostFetch);
+  const previewUrl = hostFetch ? resolveManagedTemplateMediaPreviewUrl(src) : src;
+  const displaySrc = hostFetch
+    ? (media.status === "error" ? previewUrl : media.displaySrc)
+    : src;
+  const style: CSSProperties = {
+    width: "100%",
+    height: "100%",
+    objectFit,
+    objectPosition,
+    transform,
+    transformOrigin,
+  };
+  return (
+    <img
+      src={displaySrc || undefined}
+      alt={alt}
+      data-template-image-fit={objectFit}
+      data-template-media-state={media.status}
+      data-template-managed-preview={hostFetch ? previewUrl : undefined}
+      style={style}
+    />
+  );
+}
+
 function renderSlotContent(
   node: DynamicTemplateRenderPlanNode,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
@@ -394,20 +484,18 @@ function renderSlotContent(
     const alt = typeof record?.alt === "string" ? record.alt : "";
     const defaultFocus = objectPositionToPercent(node.slotRules?.objectPosition ?? TEMPLATE_MEDIA_DEFAULTS.objectPosition);
     if (!src) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">图片待填写</span>;
+    const objectFit = resolveImageObjectFit(node, editorViewport);
     return (
-      <img
-        src={mode === "public" ? src : resolveManagedTemplateMediaPreviewUrl(src)}
+      <ManagedTemplateSlotImage
+        src={src}
         alt={alt}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: node.layoutOverride?.objectFit ?? node.slotRules?.objectFit ?? TEMPLATE_MEDIA_DEFAULTS.objectFit,
-          objectPosition: `${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`,
-          transform: node.layoutOverride?.imageScalePercent && node.layoutOverride.imageScalePercent !== 100
-            ? `scale(${node.layoutOverride.imageScalePercent / 100})`
-            : undefined,
-          transformOrigin: `${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`,
-        }}
+        hostFetch={mode !== "public"}
+        objectFit={objectFit}
+        objectPosition={`${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`}
+        transform={node.layoutOverride?.imageScalePercent && node.layoutOverride.imageScalePercent !== 100
+          ? `scale(${node.layoutOverride.imageScalePercent / 100})`
+          : undefined}
+        transformOrigin={`${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`}
       />
     );
   }
@@ -517,6 +605,19 @@ function RenderNode({
   siblingIndex?: number;
 }) {
   const layoutElement = useRef<HTMLElement | null>(null);
+  const backgroundSource = !node.hidden && node.rules.backgroundImage && isSafeTemplateMediaUrl(node.rules.backgroundImage)
+    ? node.rules.backgroundImage
+    : "";
+  const backgroundMedia = useManagedTemplateMediaDisplayUrl(backgroundSource, mode !== "public");
+  const backgroundDisplayUrl = !backgroundSource
+    ? undefined
+    : mode === "public"
+      ? backgroundSource
+      : backgroundMedia.status === "ready"
+        ? backgroundMedia.displaySrc
+        : backgroundMedia.status === "error"
+          ? resolveManagedTemplateMediaPreviewUrl(backgroundSource)
+          : undefined;
   const hasPositionedChildren = relationalLayout && node.children.some((child) => child.rules.anchor || child.rules.placement);
   useLayoutEffect(() => {
     const element = layoutElement.current;
@@ -761,7 +862,8 @@ function RenderNode({
           parentFree,
           parentRules,
           relationalLayout,
-          mode !== "public",
+          backgroundDisplayUrl,
+          device,
         ),
         ...(showEmptyStructure && !node.slot && node.children.length === 0
           ? { minHeight: "256px" }

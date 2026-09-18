@@ -395,10 +395,6 @@ test("试排图片侧栏与画布按当前设备复用 4:3、适配和焦点且�
   }
   expect(sources[0]).not.toBe(sources[1]);
 
-  await page.locator(".template-editor__toolbar").getByRole("button", { name: /平板端模板布局/ }).click();
-  await selectNode(page, cases[0].node.nodeId);
-  await expect(page.locator('[data-template-trial-image-target="tablet"]'))
-    .toHaveText(`目标构图：平板端 · 4 / 3 · ${cases[0].desktop.fit}`);
   await page.locator(".template-editor__toolbar").getByRole("button", { name: /移动端模板布局/ }).click();
   for (const entry of cases) {
     await selectNode(page, entry.node.nodeId);

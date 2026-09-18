@@ -160,7 +160,16 @@ test("预渲染首页在接口校准前先使用同一份已发布文档", async
     puckData: {
       content: [{
         type: "首屏主视觉",
-        props: { desktopImage: "/uploads/static-hero.jpg", title: "静态首屏" },
+        props: {
+          desktopImage: "/uploads/static-hero.jpg",
+          mobileImage: "/images/system/launch-short-page-mobile.svg",
+          title: "静态首屏",
+          subtitle: "稳定首屏副标题",
+          __instanceOverrides: {
+            version: 2,
+            nodes: { title: { enabled: false } },
+          },
+        },
       }],
     },
   }).replaceAll("<", "\\u003c");
@@ -195,10 +204,15 @@ test("预渲染首页在接口校准前先使用同一份已发布文档", async
 
   await page.goto("/__prerendered-home-bootstrap");
   await expect(page.locator("output")).toHaveText("静态首屏");
-  await expect(page.getByRole("heading", { name: "静态首屏" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "静态首屏" })).toHaveCount(0);
+  await expect(page.getByText("稳定首屏副标题")).toBeVisible();
+  await expect(page.locator('section[aria-label="首页首屏"] source')).toHaveAttribute(
+    "srcset",
+    "/uploads/static-hero.jpg?width=480",
+  );
   await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveAttribute(
     "src",
-    "/uploads/static-hero.jpg",
+    "/uploads/static-hero.jpg?width=1680",
   );
 });
 

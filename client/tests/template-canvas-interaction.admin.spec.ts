@@ -613,7 +613,7 @@ test("间距实际交互：三列网格column规则仍以横向真实间隙放�
   await page.getByRole("button", { name: "撤销", exact: true }).click(); await expect.poll(actualGap).toBeCloseTo(20, 0);
 });
 
-test("隔离画布新增：三断点观察菜单只改预览宽度，不改根尺寸和保存状态", async ({ page }) => {
+test("隔离画布新增：观察菜单只改预览宽度，不改根尺寸和保存状态", async ({ page }) => {
   await mountCanvas(page);
   const before = await snapshot(page);
   await page.getByRole("button", { name: /^预览宽度：/ }).click();
@@ -624,7 +624,7 @@ test("隔离画布新增：三断点观察菜单只改预览宽度，不改根�
   await expect(panel.getByRole("button", { name: "恢复已保存尺寸" })).toHaveCount(0);
   const width = panel.getByRole("spinbutton", { name: "预览宽度", exact: true });
   await width.fill("834"); await width.press("Enter");
-  const after = await snapshot(page); expect(after.breakpoint).toBe("tablet"); expect(after.previewWidth).toBe(834); expect(after.rootResponsive).toEqual(before.rootResponsive); expect(after.history).toBe(0); expect(after.dirty).toBe(false);
+  const after = await snapshot(page); expect(after.breakpoint).toBe("desktop"); expect(after.previewWidth).toBe(834); expect(after.rootResponsive).toEqual(before.rootResponsive); expect(after.history).toBe(0); expect(after.dirty).toBe(false);
 });
 
 test("隔离画布新增：旧合同仍保留原模板高度与比例菜单", async ({ page }) => {

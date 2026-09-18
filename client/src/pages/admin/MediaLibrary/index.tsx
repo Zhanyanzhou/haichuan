@@ -89,9 +89,10 @@ function getAuthorizationDisplay(item: PageMediaAsset) {
 }
 
 export default function MediaLibrary() {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
   const role = useAuthStore((state) => state.user?.role);
+  const currentUserId = useAuthStore((state) => state.user?.id);
   const canEditAuthorization = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'EDITOR';
   const canManagePageMedia = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const [loading, setLoading] = useState(true);
@@ -326,6 +327,32 @@ export default function MediaLibrary() {
     } finally {
       setAuthorizationSaving(false);
     }
+  };
+
+  const approveAuthorization = () => {
+    const authorization = authorizationResource?.authorization;
+    if (!authorization) return;
+    const isSelfReview = authorization.submittedById === currentUserId;
+    const execute = () => runAuthorizationAction(
+      '素材授权审核已通过',
+      (assetId, revision) => uploadApi.approveMediaAuthorization(
+        assetId,
+        revision,
+        reviewNote.trim() || undefined,
+        isSelfReview,
+      ),
+    );
+    if (!isSelfReview) {
+      void execute();
+      return;
+    }
+    modal.confirm({
+      title: '确认以超级管理员身份自审',
+      content: '请仅在你已核实素材来源、拥有公开网站使用权，并愿意以当前账号留下审核记录时继续。',
+      okText: '确认权利并通过',
+      cancelText: '取消',
+      onOk: execute,
+    });
   };
 
   const handleUpload = async (
@@ -762,10 +789,7 @@ export default function MediaLibrary() {
                   <Button
                     type="primary"
                     loading={authorizationSaving}
-                    onClick={() => void runAuthorizationAction(
-                      '素材授权审核已通过',
-                      (assetId, revision) => uploadApi.approveMediaAuthorization(assetId, revision, reviewNote.trim() || undefined),
-                    )}
+                    onClick={approveAuthorization}
                   >
                     通过审核
                   </Button>

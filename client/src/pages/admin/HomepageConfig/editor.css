@@ -1021,6 +1021,9 @@ body:has(.homepage-editor)
   margin: 10px 12px 0;
   padding: 9px 12px;
 }
+.homepage-editor__live-health-alert {
+  align-items: flex-start;
+}
 .homepage-editor__revision-list {
   display: grid;
   gap: 10px;
@@ -1309,7 +1312,7 @@ body:has(.homepage-editor)
   padding: 0 0 6px;
   border-color: var(--adm-line);
 }
-.homepage-editor__template-preview-img {
+.homepage-editor__template-preview-img:not(.template-editor__catalog-viewport-preview) {
   display: block;
   width: 100%;
   /* 缩略图按合同比例出图(横版横框/竖版竖框),SVG viewBox 决定高度,上限夹取防极宽模板拉长卡片 */
@@ -4248,8 +4251,9 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   display: contents;
 }
 
-.homepage-editor__page-workspace.is-inactive {
-  display: none;
+.homepage-editor__page-workspace.is-inactive,
+.homepage-editor__page-workspace[hidden] {
+  display: none !important;
 }
 
 .template-editor__body {
@@ -4613,6 +4617,36 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   font-weight: 500;
 }
 
+.template-editor__workspace-page-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.template-editor__workspace-page-switcher-label {
+  color: var(--adm-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 28px;
+  white-space: nowrap;
+}
+
+.template-editor__workspace-page-select {
+  max-width: 168px;
+  min-width: 112px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  color: var(--adm-text-strong);
+  background: var(--adm-content-bg);
+  font-size: 13px;
+  line-height: 26px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
 .template-editor__workspace-context-divider {
   flex: 0 0 auto;
   width: 1px;
@@ -4772,6 +4806,26 @@ button.template-editor__toolbar-state:focus-visible {
     display: none;
   }
 
+  .template-editor__workspace-identity:has(.template-editor__workspace-page-select) {
+    display: inline-flex;
+  }
+
+  .template-editor__workspace-context-divider:has(+ .template-editor__workspace-identity .template-editor__workspace-page-select) {
+    display: block;
+  }
+
+  .template-editor__workspace-page-switcher-label {
+    display: none;
+  }
+
+  .template-editor__workspace-page-select {
+    max-width: 88px;
+    min-width: 72px;
+    height: 26px;
+    padding-inline: 4px;
+    font-size: 11px;
+  }
+
   .template-editor__workspace-context .template-editor__toolbar-state {
     max-width: 72px;
     padding-inline: 2px;
@@ -4811,15 +4865,26 @@ button.template-editor__toolbar-state:focus-visible {
   box-shadow: 0 0 0 2px rgb(24 26 27 / 10%);
 }
 
+.unified-template-library__card.is-handoff {
+  border-color: var(--adm-gold);
+  box-shadow: 0 0 0 2px rgb(201 162 39 / 28%);
+}
+
+.homepage-editor__template-upgrade-action.is-handoff-upgrade {
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .unified-template-library__card .homepage-editor__template-preview-wrap {
   min-height: 0;
   max-height: none;
-  overflow: hidden;
-  background: var(--adm-neutral-bg);
+  overflow: visible;
+  background: transparent;
   pointer-events: none;
 }
 
 .unified-template-library__card .homepage-editor__template-preview-img {
+  width: auto;
   max-height: none;
 }
 
@@ -4851,8 +4916,8 @@ button.template-editor__toolbar-state:focus-visible {
 .template-editor__catalog-preview-shell {
   display: grid;
   min-width: 0;
-  padding: 7px;
-  background: var(--adm-neutral-bg);
+  padding: 0;
+  background: transparent;
 }
 
 .template-editor__catalog-viewport-preview {
@@ -10126,6 +10191,21 @@ button.template-editor__toolbar-state:focus-visible {
   border-color: #181a1b;
   outline: 0;
 }
+.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"] {
+  color: var(--adm-muted);
+  border-color: var(--adm-line);
+  background: transparent;
+  font-weight: 400;
+}
+.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"]:hover,
+.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"]:focus-visible {
+  border-color: var(--adm-muted);
+  color: #181a1b;
+}
+.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="error"] {
+  color: var(--adm-error, #a32020);
+  border-color: currentColor;
+}
 
 /* 参考图硬对齐：媒体对象在内容编辑中是一条完整任务，不再回退到通用字段堆叠。 */
 .homepage-editor__task-group[data-selected-task="media"]
@@ -10795,6 +10875,7 @@ button.template-editor__toolbar-state:focus-visible {
 .unified-template-library__filter-summary { display: flex; align-items: center; gap: 6px; font-size: 11px; padding-top: 6px; }
 .unified-template-library__filter-summary span { flex: 1; overflow-wrap: anywhere; }
 .unified-template-library__filter-summary button { flex: 0 0 auto; padding: 4px; border: 1px solid var(--adm-line); border-radius: 4px; background: var(--adm-content-bg); }
+.unified-template-library__handoff-status { padding-top: 6px; color: var(--adm-text-secondary, #5c6366); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 
 @media (max-width: 767px) {
   .homepage-editor__body.template-editor__body

@@ -1,5 +1,5 @@
 import {
-  Controller, Post, Put, Get, Delete, Query, UseInterceptors, UploadedFiles, UploadedFile,
+  Controller, Post, Put, Get, Head, Delete, Query, UseInterceptors, UploadedFiles, UploadedFile,
   UseGuards, Body, BadRequestException, Param, ParseIntPipe, Req, Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
@@ -11,6 +11,7 @@ import { UploadService } from './upload.service';
 import { PageMediaQueryDto } from './dto/page-media-query.dto';
 import {
   ExpectedMediaAuthorizationRevisionDto,
+  AuthorizeMediaPublicUseDto,
   MediaAuthorizationImpactPreviewDto,
   RejectMediaAuthorizationDto,
   RenewMediaAuthorizationDto,
@@ -27,6 +28,9 @@ import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { Throttle } from '@nestjs/throttler';
 import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
 import type { CustomerRequest, StaffRequest } from '../../common/security/authenticated-principal';
+
+/** 装修页会并行请求目录卡片、画布实例、属性面板和 HEAD 探测；不能与全局 60/min 共用同一拒绝阈值。 */
+const STAFF_MEDIA_PREVIEW_THROTTLE = { default: { limit: 600, ttl: 60_000 } };
 
 const imageMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const imageUploadOptions = {
@@ -141,18 +145,27 @@ export class UploadController {
 
   @ApiBearerAuth()
   @ApiOperation({ summary: '按正式存储键在后台预览页面素材' })
+  @Throttle(STAFF_MEDIA_PREVIEW_THROTTLE)
   @Get('media/preview-by-storage-key')
+  @Head('media/preview-by-storage-key')
   async previewPageMediaByStorageKey(
     @Query('storageKey') storageKey: string,
     @Res() response: Response,
+    @Req() request?: Request,
   ) {
     if (typeof storageKey !== 'string' || !storageKey.trim() || storageKey.length > 512) {
       throw new BadRequestException('素材存储键无效');
     }
     const media = await this.uploadService.getPageMediaContentByStorageKey(storageKey, false);
-    response.setHeader('Cache-Control', 'private, no-store');
+    // 存储键按内容寻址；短时私有缓存让目录 iframe、画布和属性面板复用同一张图，避免瞬时打满连接。
+    response.setHeader('Cache-Control', 'private, max-age=60');
     response.setHeader('X-Content-Type-Options', 'nosniff');
-    response.type(media.mimeType).send(media.buffer);
+    response.setHeader('Content-Length', String(media.buffer.byteLength));
+    response.type(media.mimeType);
+    if ((request?.method ?? 'GET').toUpperCase() === 'HEAD') {
+      return response.end();
+    }
+    return response.send(media.buffer);
   }
 
   @ApiBearerAuth()
@@ -185,6 +198,22 @@ export class UploadController {
   }
 
   @ApiBearerAuth()
+  @ApiOperation({ summary: '超级管理员在装修页确认素材可公开使用' })
+  @Roles('SUPER_ADMIN')
+  @Post('media/:id/authorization/authorize-public-use')
+  async authorizeMediaPublicUse(
+    @Req() request: StaffRequest,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AuthorizeMediaPublicUseDto,
+  ) {
+    return this.mediaAuthorizationService.authorizePublicUse(
+      id,
+      request.user.id,
+      dto.selfReviewAcknowledged,
+    );
+  }
+
+  @ApiBearerAuth()
   @ApiOperation({ summary: '批准素材公开授权' })
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Post('media/:id/authorization/approve')
@@ -193,7 +222,13 @@ export class UploadController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ReviewMediaAuthorizationDto,
   ) {
-    return this.mediaAuthorizationService.approve(id, request.user.id, dto.expectedRevision, dto.reviewNote);
+    return this.mediaAuthorizationService.approve(
+      id,
+      request.user.id,
+      dto.expectedRevision,
+      dto.reviewNote,
+      dto.selfReviewAcknowledged ?? false,
+    );
   }
 
   @ApiBearerAuth()

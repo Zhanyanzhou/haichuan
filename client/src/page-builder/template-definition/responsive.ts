@@ -10,6 +10,28 @@ import type {
 
 export type { TemplateBreakpoint } from "./generated/templateDefinition.generated";
 
+/** 模板设计只编辑桌面与手机；平板宽度沿用桌面内容，不做第三份来源。 */
+export const TEMPLATE_CONTENT_BREAKPOINTS = ["desktop", "mobile"] as const;
+export type TemplateContentBreakpoint = (typeof TEMPLATE_CONTENT_BREAKPOINTS)[number];
+
+export function isTemplateContentBreakpoint(
+  breakpoint: TemplateBreakpoint,
+): breakpoint is TemplateContentBreakpoint {
+  return breakpoint === "desktop" || breakpoint === "mobile";
+}
+
+export function toTemplateContentBreakpoint(
+  breakpoint: TemplateBreakpoint,
+): TemplateContentBreakpoint {
+  return breakpoint === "mobile" ? "mobile" : "desktop";
+}
+
+function rejectTabletContent(schemaVersion: number): never {
+  throw new Error(schemaVersion === 1
+    ? "旧模板没有平板覆盖；请使用原有桌面或移动规则。"
+    : "模板设计只支持桌面端与移动端，不提供独立平板内容。");
+}
+
 const MEMBER_GROUPS = new Set(["padding", "margin", "placement"]);
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -38,13 +60,13 @@ export function mergeTemplateResponsiveRecord(
 export function resolveTemplateBreakpoint(
   definition: Pick<TemplateDefinitionV2, "schemaVersion" | "metadata">,
   width: number,
-): TemplateBreakpoint {
+): TemplateContentBreakpoint {
   if (!Number.isFinite(width) || width <= 0) throw new Error("画布宽度必须是正数。");
   if (definition.schemaVersion === 1) {
     const boundary = Math.min(1024, Math.max(480, Math.round(definition.metadata.mobileBreakpoint ?? 767)));
     return width <= boundary ? "mobile" : "desktop";
   }
-  return width <= 767 ? "mobile" : width < 1024 ? "tablet" : "desktop";
+  return width <= 767 ? "mobile" : "desktop";
 }
 
 export function resolveTemplateNodeRules(
@@ -56,13 +78,12 @@ export function resolveTemplateNodeRules(
   if (!node) throw new Error("当前对象不存在。");
   if (definition.schemaVersion === 1) {
     // v1 的完整性由版本化 validator 保证，不从 Desktop 合并旧 Mobile。
-    return clone(node.responsive[breakpoint === "mobile" ? "mobile" : "desktop"]) as DynamicTemplateResponsiveRules;
+    return clone(node.responsive[toTemplateContentBreakpoint(breakpoint)]) as DynamicTemplateResponsiveRules;
   }
   let rules = node.responsive.desktop as unknown as Record<string, unknown>;
-  if (breakpoint !== "desktop") {
-    rules = mergeTemplateResponsiveRecord(rules, node.responsive.tablet ?? {});
+  if (toTemplateContentBreakpoint(breakpoint) === "mobile") {
+    rules = mergeTemplateResponsiveRecord(rules, node.responsive.mobile);
   }
-  if (breakpoint === "mobile") rules = mergeTemplateResponsiveRecord(rules, node.responsive.mobile);
   return clone(rules) as unknown as DynamicTemplateResponsiveRules;
 }
 
@@ -73,11 +94,12 @@ export function resolveTemplateSlotRules(
 ): DynamicTemplateSlotRules {
   const slot = definition.slots[slotId];
   if (!slot) throw new Error("当前内容字段不存在。");
-  if (definition.schemaVersion === 1) return clone(breakpoint === "mobile" ? slot.mobileRules : slot.desktopRules);
+  if (definition.schemaVersion === 1) {
+    return clone(toTemplateContentBreakpoint(breakpoint) === "mobile" ? slot.mobileRules : slot.desktopRules);
+  }
   return clone({
     ...slot.desktopRules,
-    ...(breakpoint !== "desktop" ? slot.tabletRules : {}),
-    ...(breakpoint === "mobile" ? slot.mobileRules : {}),
+    ...(toTemplateContentBreakpoint(breakpoint) === "mobile" ? slot.mobileRules : {}),
   });
 }
 
@@ -118,11 +140,10 @@ function checkedPath(path: string | readonly string[]): string[] {
 }
 
 function localNodeRules(definition: TemplateDefinitionV2, nodeId: string, breakpoint: TemplateBreakpoint) {
-  if (definition.schemaVersion === 1 && breakpoint === "tablet") throw new Error("旧模板没有平板覆盖；请使用原有桌面或移动规则。");
+  if (breakpoint === "tablet") rejectTabletContent(definition.schemaVersion);
   const node = definition.nodes[nodeId];
   if (!node) throw new Error("当前对象不存在。");
-  if (breakpoint === "tablet") node.responsive.tablet ??= {};
-  return node.responsive[breakpoint]! as unknown as Record<string, unknown>;
+  return node.responsive[breakpoint] as unknown as Record<string, unknown>;
 }
 
 function writePath(
@@ -167,6 +188,7 @@ export function resetTemplateNodeRule(
   breakpoint: TemplateBreakpoint,
   path: string | readonly string[],
 ): void {
+  if (breakpoint === "tablet") rejectTabletContent(definition.schemaVersion);
   if (definition.schemaVersion < 2 || breakpoint === "desktop") throw new Error("只有次断点覆盖可以恢复继承。");
   const parts = checkedPath(path);
   const node = definition.nodes[nodeId];
@@ -182,11 +204,10 @@ export function resetTemplateNodeRule(
 }
 
 function localSlotRules(definition: TemplateDefinitionV2, slotId: string, breakpoint: TemplateBreakpoint) {
-  if (definition.schemaVersion === 1 && breakpoint === "tablet") throw new Error("旧模板没有平板覆盖。");
+  if (breakpoint === "tablet") rejectTabletContent(definition.schemaVersion);
   const slot = definition.slots[slotId];
   if (!slot) throw new Error("当前内容字段不存在。");
-  if (breakpoint === "tablet") slot.tabletRules ??= {};
-  return (breakpoint === "desktop" ? slot.desktopRules : breakpoint === "mobile" ? slot.mobileRules : slot.tabletRules!) as Record<string, unknown>;
+  return (breakpoint === "desktop" ? slot.desktopRules : slot.mobileRules) as Record<string, unknown>;
 }
 
 export function setTemplateSlotRule(
@@ -198,10 +219,11 @@ export function setTemplateSlotRule(
 export function resetTemplateSlotRule(
   definition: TemplateDefinitionV2, slotId: string, breakpoint: TemplateBreakpoint, path: string | readonly string[],
 ): void {
+  if (breakpoint === "tablet") rejectTabletContent(definition.schemaVersion);
   if (definition.schemaVersion < 2 || breakpoint === "desktop") throw new Error("只有次断点覆盖可以恢复继承。");
   const slot = definition.slots[slotId];
   if (!slot) throw new Error("当前内容字段不存在。");
-  const target = breakpoint === "tablet" ? slot.tabletRules : slot.mobileRules;
+  const target = slot.mobileRules;
   const [key] = checkedPath(path);
   if (target) delete (target as Record<string, unknown>)[key];
 }
@@ -212,9 +234,9 @@ export function getTemplateNodeRuleSource(
   const node = definition.nodes[nodeId];
   if (!node) return "system";
   const parts = checkedPath(path);
-  const sources: TemplateBreakpoint[] = definition.schemaVersion === 1
-    ? [breakpoint === "mobile" ? "mobile" : "desktop"]
-    : breakpoint === "mobile" ? ["mobile", "tablet", "desktop"] : breakpoint === "tablet" ? ["tablet", "desktop"] : ["desktop"];
+  const sources: TemplateContentBreakpoint[] = toTemplateContentBreakpoint(breakpoint) === "mobile"
+    ? ["mobile", "desktop"]
+    : ["desktop"];
   for (const source of sources) {
     const rule = node.responsive[source] as DynamicTemplateResponsiveOverride | undefined;
     if (!rule || !Object.prototype.hasOwnProperty.call(rule, parts[0])) continue;

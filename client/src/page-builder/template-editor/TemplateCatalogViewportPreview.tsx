@@ -27,6 +27,17 @@ import type {
 // “渲染器缺失”和“仍在完成首帧”。保留有限等待，避免短暂拥塞被永久误报。
 const PREVIEW_RENDER_TIMEOUT_MS = 3_000;
 const CATALOG_PREVIEW_MAX_HEIGHT = 220;
+const CATALOG_STYLE_RESYNC_DEBOUNCE_MS = 160;
+
+function catalogStylesheetSignature(doc: Document): string {
+  return Array.from(doc.head.querySelectorAll('link[rel="stylesheet"], style'))
+    .map((node) => (
+      node instanceof HTMLLinkElement
+        ? `link:${node.href}`
+        : `style:${node.getAttribute("data-vite-dev-id") ?? node.id}:${(node.textContent ?? "").length}`
+    ))
+    .join("|");
+}
 
 export type TemplateCatalogPreviewPresentation = "thumbnail" | "detail";
 
@@ -92,6 +103,7 @@ export default function TemplateCatalogViewportPreview({
   const styleSyncIdRef = useRef(0);
   const previewTimedOutRef = useRef(false);
   const mediaSourceSignatureRef = useRef("");
+  const lastParentStyleSignatureRef = useRef("");
   const initialNaturalHeight = heightMode === "auto"
     ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, fallbackHeight)
     : fallbackHeight;
@@ -117,6 +129,14 @@ export default function TemplateCatalogViewportPreview({
     scale: viewport === "mobile" ? 0.25 : 0.1,
   });
   const syncFrameStyles = useCallback((nextDocument: Document) => {
+    const parentSignature = catalogStylesheetSignature(document);
+    if (
+      parentSignature === lastParentStyleSignatureRef.current
+      && nextDocument.head.childElementCount > 0
+    ) {
+      return;
+    }
+    lastParentStyleSignatureRef.current = parentSignature;
     const syncId = styleSyncIdRef.current + 1;
     styleSyncIdRef.current = syncId;
     setStylesReady(false);
@@ -167,26 +187,27 @@ export default function TemplateCatalogViewportPreview({
     setRendererReady(false);
     setSlotBoxCount(0);
     mediaSourceSignatureRef.current = "";
+    lastParentStyleSignatureRef.current = "";
     setContentIssue(hasUnconfiguredMedia ? "media-unconfigured" : null);
     setPreviewStatus(unavailable ? "unavailable" : "loading");
   }, [hasUnconfiguredMedia, initialNaturalHeight, renderRevision, templateKey, unavailable, viewport]);
 
   useLayoutEffect(() => {
     if (!frameDocument || isUnavailable) return undefined;
-    let animationFrameId: number | null = null;
+    let debounceTimer: number | null = null;
     const observer = new MutationObserver(() => {
-      if (animationFrameId !== null) return;
-      animationFrameId = window.requestAnimationFrame(() => {
-        animationFrameId = null;
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
         if (frameRef.current?.contentDocument === frameDocument) {
           syncFrameStyles(frameDocument);
         }
-      });
+      }, CATALOG_STYLE_RESYNC_DEBOUNCE_MS);
     });
     observer.observe(document.head, { childList: true });
     return () => {
       observer.disconnect();
-      if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
     };
   }, [frameDocument, isUnavailable, syncFrameStyles]);
 
@@ -269,18 +290,28 @@ export default function TemplateCatalogViewportPreview({
       const hasFailedMedia = mediaElements.some((node) => (
         node.tagName === "IMG"
         && Boolean(node.getAttribute("src"))
+        && node.getAttribute("data-template-media-state") !== "loading"
         && (node as HTMLImageElement).complete
         && (node as HTMLImageElement).naturalWidth === 0
+      ));
+      // 任一图片已成功解码时，清除早先瞬时 error / 竞态造成的粘滞失败态。
+      const hasLoadedMedia = mediaElements.some((node) => (
+        node.tagName === "IMG"
+        && (node as HTMLImageElement).complete
+        && (node as HTMLImageElement).naturalWidth > 0
       ));
       const renderedUnconfiguredMedia = Array.from(content.querySelectorAll(".hc-dynamic-template__empty-slot"))
         .some((node) => /图片待填写|商品待选择|集合待选择/.test(node.textContent ?? ""));
       const sourceChanged = mediaSourceSignature !== mediaSourceSignatureRef.current;
       mediaSourceSignatureRef.current = mediaSourceSignature;
-      setContentIssue((current) => hasFailedMedia
-        ? "media-failed"
-        : current === "media-failed" && !sourceChanged
-          ? current
-          : hasUnconfiguredMedia || renderedUnconfiguredMedia ? "media-unconfigured" : null);
+      setContentIssue((current) => {
+        if (hasFailedMedia && !hasLoadedMedia) return "media-failed";
+        if (hasLoadedMedia) {
+          return hasUnconfiguredMedia || renderedUnconfiguredMedia ? "media-unconfigured" : null;
+        }
+        if (current === "media-failed" && !sourceChanged) return current;
+        return hasUnconfiguredMedia || renderedUnconfiguredMedia ? "media-unconfigured" : null;
+      });
     };
     const scheduleDetection = () => {
       if (animationFrameId !== null) return;
@@ -292,7 +323,13 @@ export default function TemplateCatalogViewportPreview({
     const handleMediaError = (event: Event) => {
       const tagName = (event.target as Element | null)?.tagName;
       if (tagName === "IMG" || tagName === "VIDEO" || tagName === "SOURCE") {
-        setContentIssue("media-failed");
+        scheduleDetection();
+      }
+    };
+    const handleMediaLoad = (event: Event) => {
+      const tagName = (event.target as Element | null)?.tagName;
+      if (tagName === "IMG" || tagName === "VIDEO" || tagName === "SOURCE") {
+        scheduleDetection();
       }
     };
     const observer = new ownerWindow.MutationObserver(scheduleDetection);
@@ -304,12 +341,14 @@ export default function TemplateCatalogViewportPreview({
       attributeFilter: ["src"],
     });
     content.addEventListener("error", handleMediaError, true);
+    content.addEventListener("load", handleMediaLoad, true);
     scheduleDetection();
     const detectionTimers = [50, 250, 1_000]
       .map((delay) => ownerWindow.setTimeout(scheduleDetection, delay));
     return () => {
       observer.disconnect();
       content.removeEventListener("error", handleMediaError, true);
+      content.removeEventListener("load", handleMediaLoad, true);
       detectionTimers.forEach((timer) => ownerWindow.clearTimeout(timer));
       if (animationFrameId !== null) ownerWindow.cancelAnimationFrame(animationFrameId);
     };

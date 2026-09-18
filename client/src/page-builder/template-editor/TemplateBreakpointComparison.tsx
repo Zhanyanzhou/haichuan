@@ -12,9 +12,9 @@ export interface TemplateBreakpointComparisonProps {
   onFocus: (breakpoint: TemplateBreakpoint, nodeId?: string) => void;
 }
 
-const LABELS: Record<TemplateBreakpoint, string> = { desktop: "Desktop", tablet: "Tablet", mobile: "Mobile" };
+const LABELS: Record<"desktop" | "mobile", string> = { desktop: "桌面端", mobile: "手机端" };
 
-function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFocus, breakpoint }: TemplateBreakpointComparisonProps & { breakpoint: TemplateBreakpoint }) {
+function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFocus, breakpoint }: TemplateBreakpointComparisonProps & { breakpoint: "desktop" | "mobile" }) {
   const frame = resolveTemplateDesignFrame(definition, breakpoint);
   const hostRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -92,16 +92,15 @@ function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFoc
       const nodeId = target.closest<HTMLElement>("[data-template-node-id]")?.dataset.templateNodeId;
       if (nodeId && definition.nodes[nodeId]) onFocus(breakpoint, nodeId);
     }} onSubmitCapture={(event) => event.preventDefault()}>
-      <DynamicTemplateRenderer definition={definition} device={breakpoint === "mobile" ? "mobile" : "desktop"} breakpoint={breakpoint}
+      <DynamicTemplateRenderer definition={definition} device={breakpoint} breakpoint={breakpoint}
         contentBySlotId={contentBySlotId} mode="preview" showEmptySlots interactionOwner="host-overlay" />
     </div>, root)}
   </section>;
 }
 
-/** 三个视口只消费同一文档；选择与退出并排查看由宿主编辑上下文负责。 */
+/** 两个视口只消费同一文档；选择与退出并排查看由宿主编辑上下文负责。 */
 export default function TemplateBreakpointComparison(props: TemplateBreakpointComparisonProps) {
-  if (Number(props.definition.schemaVersion) < 2) return <p role="status">兼容模式暂不支持三断点并排查看。</p>;
-  return <div className="template-breakpoint-comparison" aria-label="三断点并排查看">
-    {(["desktop", "tablet", "mobile"] as const).map((breakpoint) => <ComparisonViewport key={breakpoint} {...props} breakpoint={breakpoint} />)}
+  return <div className="template-breakpoint-comparison" aria-label="桌面与手机并排查看">
+    {(["desktop", "mobile"] as const).map((breakpoint) => <ComparisonViewport key={breakpoint} {...props} breakpoint={breakpoint} />)}
   </div>;
 }

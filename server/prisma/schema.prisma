@@ -2140,6 +2140,7 @@ model MediaAssetAuthorization {
   reviewedById        Int?                               @map("reviewed_by")
   reviewedAt          DateTime?                          @map("reviewed_at")
   reviewNote          String?                            @map("review_note") @db.Text
+  selfReviewAcknowledged Boolean                         @default(false) @map("self_review_acknowledged")
   validFrom           DateTime?                          @map("valid_from")
   validUntil          DateTime?                          @map("valid_until")
   revocationStatus    MediaAuthorizationRevocationStatus @default(ACTIVE) @map("revocation_status")

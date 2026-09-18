@@ -16,6 +16,7 @@ export const REQUIRED_DECISION_STATUSES = Object.freeze({
   "D.33": "ENABLED",
   "D.34": "OPTIONAL_HIGH_ASSURANCE",
   "D.35": "RETIRED",
+  "D.36": "RETIRED",
 });
 
 export const REQUIRED_DECISION_CONTRACTS = Object.freeze({
@@ -59,6 +60,7 @@ export const REQUIRED_DECISION_CONTRACTS = Object.freeze({
 export const REQUIRED_RETIRED_CAPABILITIES = Object.freeze({
   "page-recipe-guidance": "D.14",
   "public-english-site": "D.35",
+  "template-tablet-content-endpoint": "D.36",
 });
 
 function error(code, detail = "") {

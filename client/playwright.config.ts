@@ -47,6 +47,11 @@ const testBoundaryFiles = {
   admin: [
     "recipe-radius-input.test.ts",
     "template-inline-text-guard.unit.ts",
+    "published-page-readiness.unit.ts",
+    "instance-edit-policy.unit.ts",
+    "page-template-handoff.unit.ts",
+    "published-template-catalog-cache.unit.ts",
+    "template-library-scroll.unit.ts",
     "template-layout-diagram.unit.ts",
     "template-media-arrangement.unit.ts",
     "template-media-history.unit.ts",

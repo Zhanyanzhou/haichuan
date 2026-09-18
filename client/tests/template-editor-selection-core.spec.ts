@@ -228,18 +228,18 @@ test.describe("画布交互事务与当前编辑层级", () => {
     expect(initial.commitInteraction(accepted)).toMatchObject({ ok: true, changed: true });
   });
 
-  test("平板断点与连续宽度只改会话状态，旧模板不静默新增平板", () => {
+  test("中间宽度观察只改会话状态，不提供独立平板内容端点", () => {
     openFixture();
     const store = useTemplateEditorSession.getState();
     const draft = structuredClone(store.draft!);
     draft.definition.schemaVersion = 2;
     store.open(draft);
-    expect(store.setBreakpoint("tablet")).toBe(true);
+    expect(store.setBreakpoint("tablet")).toBe(false);
     expect(useTemplateEditorSession.getState().device).toBe("desktop");
     store.setPreviewWidth(600);
     expect(useTemplateEditorSession.getState()).toMatchObject({ previewWidth: 600, breakpoint: "mobile", device: "mobile", dirty: false });
     store.setPreviewWidth(900);
-    expect(useTemplateEditorSession.getState()).toMatchObject({ previewWidth: 900, breakpoint: "tablet", device: "desktop" });
+    expect(useTemplateEditorSession.getState()).toMatchObject({ previewWidth: 900, breakpoint: "desktop", device: "desktop" });
     store.setPreviewWidth(Number.NaN);
     expect(useTemplateEditorSession.getState().previewWidth).toBe(900);
     store.setBreakpoint("desktop");
@@ -259,8 +259,8 @@ test.describe("画布交互事务与当前编辑层级", () => {
     store.setPreviewMode(true);
     store.setDevice("mobile");
     expect(useTemplateEditorSession.getState()).toMatchObject({ previewMode: true, device: "mobile", breakpoint: "mobile" });
-    expect(store.setBreakpoint("tablet")).toBe(true);
-    expect(useTemplateEditorSession.getState()).toMatchObject({ previewMode: true, device: "desktop", breakpoint: "tablet" });
+    expect(store.setBreakpoint("tablet")).toBe(false);
+    expect(useTemplateEditorSession.getState()).toMatchObject({ previewMode: true, device: "mobile", breakpoint: "mobile" });
     expect(store.setPreviewWidth(390)).toBe(true);
     expect(useTemplateEditorSession.getState()).toMatchObject({ previewWidth: 390, breakpoint: "mobile" });
     const rejected = store.executeCommand({ type: "update-definition", label: "预览写入应拒绝", update: (definition) => { definition.nodes[fixture.firstId].name = "不能写入"; } });
@@ -315,14 +315,14 @@ test.describe("画布交互事务与当前编辑层级", () => {
     const token = store.beginInteraction("改为网格")!;
     const preview = store.previewInteraction(token, {
       type: "convert-layout", label: "改为网格", nodeId: group.nodeId,
-      breakpoint: "tablet", layout: "grid", columns: [1, 1],
+      breakpoint: "mobile", layout: "grid", columns: [1, 1],
     });
     expect(preview.ok).toBe(true);
     expect(useTemplateEditorSession.getState().draft?.definition).toEqual(child.definition);
     expect(store.commitInteraction(token)).toMatchObject({ ok: true, changed: true });
     const updated = useTemplateEditorSession.getState().draft!.definition;
-    expect(resolveTemplateNodeRules(updated, group.nodeId, "tablet")).toMatchObject({ display: "grid", columns: [1, 1] });
-    expect(updated.nodes[group.nodeId].responsive.tablet).toEqual({ display: "grid", columns: [1, 1] });
+    expect(resolveTemplateNodeRules(updated, group.nodeId, "mobile")).toMatchObject({ display: "grid", columns: [1, 1] });
+    expect(updated.nodes[group.nodeId].responsive.mobile).toEqual({ display: "grid", columns: [1, 1] });
     expect(updated.nodes[group.nodeId].responsive.desktop).toEqual(child.definition.nodes[group.nodeId].responsive.desktop);
     expect(useTemplateEditorSession.getState().historyPast).toHaveLength(1);
     store.undo();

@@ -522,7 +522,7 @@ export class UploadService implements OnModuleInit {
         throw new ConflictException('相同素材当前不可上传，请稍后重试');
       }
       if (existing) {
-        await this.mediaAuthorizationService.ensureLegacyDraft(transaction, existing.id, input.uploadedBy);
+        await this.mediaAuthorizationService.ensureUploadAuthorization(transaction, existing.id, input.uploadedBy);
         return existing;
       }
       const created = await transaction.mediaAsset.create({
@@ -539,7 +539,7 @@ export class UploadService implements OnModuleInit {
           uploadedBy: input.uploadedBy,
         },
       });
-      await this.mediaAuthorizationService.ensureLegacyDraft(transaction, created.id, input.uploadedBy);
+      await this.mediaAuthorizationService.ensureUploadAuthorization(transaction, created.id, input.uploadedBy);
       return created;
     });
 
@@ -1203,7 +1203,7 @@ export class UploadService implements OnModuleInit {
             uploadedBy,
           },
         });
-        await this.mediaAuthorizationService.ensureLegacyDraft(transaction, created.id, uploadedBy);
+        await this.mediaAuthorizationService.ensureUploadAuthorization(transaction, created.id, uploadedBy);
         return created;
       });
       return {
@@ -1378,7 +1378,7 @@ export class UploadService implements OnModuleInit {
             uploadedBy,
           },
         });
-        await this.mediaAuthorizationService.ensureLegacyDraft(transaction, created.id, uploadedBy);
+        await this.mediaAuthorizationService.ensureUploadAuthorization(transaction, created.id, uploadedBy);
         return created;
       });
       return {

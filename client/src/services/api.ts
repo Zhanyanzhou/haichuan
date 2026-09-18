@@ -1065,6 +1065,9 @@ export type MediaAuthorizationDetail = MediaAuthorizationSummary & {
   evidenceReference?: string | null;
   submittedAt?: string | null;
   reviewedAt?: string | null;
+  submittedById?: number | null;
+  reviewedById?: number | null;
+  selfReviewAcknowledged?: boolean;
   reviewNote?: string | null;
   revokedAt?: string | null;
   revocationReason?: string | null;
@@ -1204,10 +1207,22 @@ export const uploadApi = {
     api.put(`/upload/media/${id}/authorization/draft`, data),
   submitMediaAuthorization: (id: number, expectedRevision: number) =>
     api.post(`/upload/media/${id}/authorization/submit`, { expectedRevision }),
-  approveMediaAuthorization: (id: number, expectedRevision: number, reviewNote?: string) =>
-    api.post(`/upload/media/${id}/authorization/approve`, { expectedRevision, reviewNote }),
+  approveMediaAuthorization: (
+    id: number,
+    expectedRevision: number,
+    reviewNote?: string,
+    selfReviewAcknowledged = false,
+  ) => api.post(`/upload/media/${id}/authorization/approve`, {
+    expectedRevision,
+    reviewNote,
+    selfReviewAcknowledged,
+  }),
   rejectMediaAuthorization: (id: number, expectedRevision: number, reviewNote: string) =>
     api.post(`/upload/media/${id}/authorization/reject`, { expectedRevision, reviewNote }),
+  authorizeMediaPublicUse: (id: number, selfReviewAcknowledged = true) =>
+    api.post(`/upload/media/${id}/authorization/authorize-public-use`, {
+      selfReviewAcknowledged,
+    }),
   revokeMediaAuthorization: (id: number, expectedRevision: number, reason: string) =>
     api.post(`/upload/media/${id}/authorization/revoke`, { expectedRevision, reason }),
   renewMediaAuthorization: (
@@ -1252,6 +1267,10 @@ export type PageDocumentResource = {
   createdAt: string;
   updatedAt: string;
   publicationAttested?: boolean;
+  publicationReadiness?: {
+    valid: boolean;
+    errors: string[];
+  };
 };
 
 type MockPageDocumentStore = {
@@ -1505,6 +1524,7 @@ export const pageDocumentApi = {
     locale: PublicContentLocale,
     expectedUpdatedAt: string,
     expectedContentHash: string,
+    selfReviewAcknowledged = false,
   ) => {
     if (USE_MOCK) {
       await mockDelay(180);
@@ -1521,7 +1541,7 @@ export const pageDocumentApi = {
       if (draft.contentHash !== expectedContentHash) {
         throw mockRequestError("页面内容已变化，请重新加载后再发布", 409);
       }
-      if (draft.reviewStatus !== "APPROVED") {
+      if (draft.reviewStatus !== "APPROVED" && !selfReviewAcknowledged) {
         throw mockRequestError("页面尚未通过审核，不能发布", 409);
       }
       const now = new Date().toISOString();
@@ -1558,6 +1578,7 @@ export const pageDocumentApi = {
       locale,
       expectedUpdatedAt,
       expectedContentHash,
+      selfReviewAcknowledged,
     }, {
       suppressGlobalError: true,
     });

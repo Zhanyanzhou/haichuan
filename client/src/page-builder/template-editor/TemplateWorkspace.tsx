@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from "react";
 import "./TemplateWorkspace.css";
+import "./TemplateCatalogPreview.css";
 import DynamicTemplateCanvas from "./DynamicTemplateCanvas";
 import DynamicTemplateInspectorPanel from "./DynamicTemplateInspectorPanel";
 import { TemplateTrialPreviewControls } from "./TemplateTrialContentControls";

@@ -1,4 +1,4 @@
-.template-breakpoint-comparison { display: grid; grid-template-columns: repeat(3, minmax(280px, 1fr)); align-items: start; gap: 16px; padding: 16px; overflow: auto; min-width: 0; max-width: 100%; height: 100%; background: #f4f5f5; }
+.template-breakpoint-comparison { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); align-items: start; gap: 16px; padding: 16px; overflow: auto; min-width: 0; max-width: 100%; height: 100%; background: #f4f5f5; }
 .template-breakpoint-comparison__card { min-width: 0; background: #FFFFFF; border: 1px solid #DDE1E2; border-radius: 4px; overflow: hidden; }
 .template-breakpoint-comparison__card > header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; color: #181A1B; font-size: 14px; line-height: 22px; }
 .template-breakpoint-comparison__card > header > span { color: #5F6568; font-size: 13px; }

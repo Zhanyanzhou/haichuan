@@ -222,18 +222,18 @@ for (const viewportWidth of [1200, 1600, 1920]) test(`主路由属性体验：${
   await page.screenshot({ path: testInfo.outputPath(`inspector-${viewportWidth}.png`), fullPage: false });
   expect(server.writes).toEqual([]);
 });
-test("隔离属性：三断点列数继承、即时预览、一次提交与恢复继承", async ({ page }) => {
+test("隔离属性：双端列数继承、即时预览、一次提交与恢复继承", async ({ page }) => {
   await mount(page);
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   const columns = page.getByRole("spinbutton", { name: "网格列数", exact: true });
-  await expect(columns).toHaveValue("2");
+  await expect(columns).toHaveValue("1");
   await columns.fill("4");
   expect((await snapshot(page)).history).toBe(0);
   expect((await snapshot(page)).preview).toBe(true);
   await columns.press("Enter");
   expect((await snapshot(page)).history).toBe(1);
   const state = await snapshot(page);
-  expect(state.definition.nodes[state.ids.region].responsive.tablet.columns).toEqual([1, 1, 1, 1]);
+  expect(state.definition.nodes[state.ids.region].responsive.mobile.columns).toEqual([1, 1, 1, 1]);
   expect(state.definition.nodes[state.ids.region].responsive.desktop.columns).toEqual([1, 1, 1]);
   await page.locator('[data-template-design-property="node.columns"]').getByRole("button", { name: "恢复继承", exact: true }).click();
   await expect(columns).toHaveValue("3");
@@ -305,6 +305,16 @@ test("主路由属性：手机查看桌面基础时解释排列禁用并可切�
   const server = await installNewTemplateServer(page);
   await createBlankTemplate(page);
   await applyBasicSkeleton(page);
+  await expect(page.getByLabel("模板设计设备：桌面端与移动端规则分别调整").getByRole("button")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: /^桌面端模板布局/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^移动端模板布局/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /平板/ })).toHaveCount(0);
+  await page.getByRole("complementary", { name: "模板属性", exact: true }).getByText("模板设置", { exact: true }).click();
+  await page.getByRole("region", { name: "模板名称与页面职责", exact: true }).getByRole("button", { name: "模板资料与使用限制", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /模板资料/ })).toBeVisible();
+  await expect(page.getByText(/Tablet|平板端/)).toHaveCount(0);
+  await expect(page.locator('[data-template-inspector-field="metadata.mobileBreakpoint"]')).toHaveCount(0);
+  await expect(page.getByRole("spinbutton", { name: "小屏布局切换宽度", exact: true })).toHaveCount(0);
   const initial = await readSession(page);
   const region = initial.definition!.nodes[initial.definition!.rootNodeId].childIds[0];
   await selectStructureTarget(page, region);
@@ -379,7 +389,7 @@ test("隔离属性：可选主值恢复系统行为，保留下级覆盖且不�
   await mount(page);
   await openPropertyGroup(page, "尺寸限制");
   await openPropertyGroup(page, "外观");
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   const gap = page.getByRole("spinbutton", { name: "对象间距", exact: true });
   await gap.fill("27"); await gap.press("Enter");
   await page.getByRole("button", { name: "desktop", exact: true }).click();
@@ -398,9 +408,9 @@ test("隔离属性：可选主值恢复系统行为，保留下级覆盖且不�
     expect(state.definition.nodes[state.ids.region].responsive.desktop).not.toHaveProperty(key);
   }
   const state = await snapshot(page);
-  expect(state.definition.nodes[state.ids.region].responsive.tablet.gap).toEqual({ value: 27, unit: "px" });
+  expect(state.definition.nodes[state.ids.region].responsive.mobile.gap).toEqual({ value: 27, unit: "px" });
   expect(state.definition.nodes[state.ids.region].responsive.desktop).toMatchObject({ width: expect.anything(), height: expect.anything(), display: "grid" });
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   await expect(gap).toHaveValue("27");
   const gapRow = page.locator('[data-template-design-property="node.gap"]');
   await expect(gapRow.getByRole("button", { name: "恢复系统默认", exact: true })).toHaveCount(0);
@@ -661,7 +671,7 @@ test("隔离属性：图片适配与整体焦点重置系统值，保留次断�
   let state = await snapshot(page);
   const slotId = state.definition.nodes[state.ids.cards[0]].slotId;
   expect(state.definition.slots[slotId].desktopRules.objectFit).toBeUndefined();
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   await page.getByRole("spinbutton", { name: "水平焦点", exact: true }).fill("79");
   await page.getByRole("spinbutton", { name: "水平焦点", exact: true }).press("Enter");
   await page.getByRole("button", { name: "desktop", exact: true }).click();
@@ -672,7 +682,7 @@ test("隔离属性：图片适配与整体焦点重置系统值，保留次断�
   await page.getByRole("button", { name: "图片焦点恢复系统默认", exact: true }).click();
   state = await snapshot(page);
   expect(state.definition.slots[slotId].desktopRules.objectPosition).toBeUndefined();
-  expect(state.definition.slots[slotId].tabletRules.objectPosition).toBe("79% 50%");
+  expect(state.definition.slots[slotId].mobileRules.objectPosition).toBe("79% 50%");
   await expect(page.getByTestId("render").locator("img").first()).toHaveCSS("object-position", "50% 50%");
 });
 
@@ -693,14 +703,14 @@ test("隔离属性：应用所有断点失败有原因且零写入，保留确�
   for (const [label, value] of [["最小宽度", "100"], ["最大宽度", "200"]]) {
     const input = page.getByRole("spinbutton", { name: label, exact: true }); await input.fill(value); await input.press("Enter");
   }
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   for (const [label, value] of [["最小宽度", "50"], ["最大宽度", "80"]]) {
     const input = page.getByRole("spinbutton", { name: label, exact: true }); await input.fill(value); await input.press("Enter");
   }
   const before = await snapshot(page);
   const row = page.locator('[data-template-design-property="node.maxWidth"]');
   await row.locator(".template-native__property-metadata > summary").click();
-  await row.getByRole("button", { name: "应用到所有断点", exact: true }).click();
+  await row.getByRole("button", { name: "应用到电脑与手机", exact: true }).click();
   await row.getByRole("button", { name: "确认统一", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("最小尺寸不能大于最大尺寸");
   await expect(row.getByRole("group", { name: "确认统一最大宽度", exact: true })).toBeVisible();
@@ -711,7 +721,7 @@ test("隔离属性：应用所有断点失败有原因且零写入，保留确�
 test("隔离属性：全部恢复继承导致父子约束冲突时原子失败并解释", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "建立继承冲突前置", exact: true }).click();
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   await page.getByRole("button", { name: "选择图片", exact: true }).click();
   const before = await snapshot(page);
   await page.getByText("断点显示与继承", { exact: true }).click();
@@ -753,14 +763,14 @@ test("合同边界：当前断点隐藏子项或父级不制造假尺寸循环�
   const state = await snapshot(page);
   for (const hideParent of [false, true]) {
     const hidden = executeDynamicTemplateDefinitionCommand(state.definition, { type: "update-definition", label: "隐藏布局前置", update: (next) => {
-      next.nodes[state.ids.region].responsive.tablet = { ...(next.nodes[state.ids.region].responsive.tablet ?? {}), width: "fit", ...(hideParent ? { hidden: true } : {}) };
-      if (!hideParent) for (const id of state.ids.cards) next.nodes[id].responsive.tablet = { hidden: true };
+      next.nodes[state.ids.region].responsive.mobile = { ...(next.nodes[state.ids.region].responsive.mobile ?? {}), width: "fit", ...(hideParent ? { hidden: true } : {}) };
+      if (!hideParent) for (const id of state.ids.cards) next.nodes[id].responsive.mobile = { hidden: true };
     } });
     expect(hidden.ok).toBe(true);
     if (!hidden.ok) continue;
     const shown = executeDynamicTemplateDefinitionCommand(hidden.definition, { type: "update-definition", label: "恢复显示约束边界", update: (next) => {
-      if (hideParent) next.nodes[state.ids.region].responsive.tablet!.hidden = false;
-      else next.nodes[state.ids.cards[0]].responsive.tablet!.hidden = false;
+      if (hideParent) next.nodes[state.ids.region].responsive.mobile!.hidden = false;
+      else next.nodes[state.ids.cards[0]].responsive.mobile!.hidden = false;
     } });
     expect(shown.ok).toBe(false);
     if (!shown.ok) expect(shown.message).toContain("不能填满适应内容宽度的父容器");

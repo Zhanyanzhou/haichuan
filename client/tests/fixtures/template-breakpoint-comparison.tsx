@@ -5,7 +5,7 @@ import { createNewDynamicTemplateDraft } from "../../src/page-builder/template-e
 import { addDynamicTemplateNode } from "../../src/page-builder/template-definition";
 import { setTemplateNodeRule, type TemplateBreakpoint } from "../../src/page-builder/template-definition/responsive";
 import "../../src/styles/globals.css";
-const draft = createNewDynamicTemplateDraft("三视图隔离测试");
+const draft = createNewDynamicTemplateDraft("双视图隔离测试");
 let definition = draft.definition;
 const grid = addDynamicTemplateNode(definition, definition.rootNodeId, "Grid");
 definition = grid.definition;
@@ -17,7 +17,6 @@ for (let index = 0; index < 3; index += 1) {
   setTemplateNodeRule(definition, child.nodeId, "desktop", "height", { mode: "fixed", value: { value: 120, unit: "px" } });
 }
 setTemplateNodeRule(definition, grid.nodeId, "desktop", "columns", [1, 1, 1]);
-setTemplateNodeRule(definition, grid.nodeId, "tablet", "columns", [1, 1]);
 setTemplateNodeRule(definition, grid.nodeId, "mobile", "columns", [1]);
 setTemplateNodeRule(definition, cards[0], "mobile", "hidden", true);
 const original = JSON.stringify(definition);

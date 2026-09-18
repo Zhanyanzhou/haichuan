@@ -5,7 +5,12 @@ import {
   setTemplateDesignHeightMode,
   setTemplateDesignWidth,
 } from "../src/page-builder/template-definition/templateDimensions";
-import { deriveTemplatePersistencePresentation } from "../src/page-builder/template-editor/templatePublishWorkflow";
+import { isConsultationStarterTemplate } from "../src/page-builder/templates/consultationStarterCatalog";
+import {
+  isHeroTestSampleTemplate,
+  isPageEditorLibraryTemplate,
+  isTemplateDesignLibraryTemplate,
+} from "../src/page-builder/templates/pageEditorCatalog";
 import type { TemplateEditorDraft } from "../src/page-builder/template-editor/types";
 import type {
   DynamicTemplateResource,
@@ -62,11 +67,16 @@ function json(data: unknown, status = 200) {
   };
 }
 
-function pageDraft() {
+function pageDraft(puckData?: {
+  content: unknown[];
+  zones?: Record<string, unknown>;
+  root?: { props: Record<string, unknown> };
+  resolvedDynamicTemplates?: Record<string, unknown>;
+}) {
   return {
     id: 9901,
     pageKey: "home",
-    puckData: { content: [], zones: {}, root: { props: {} } },
+    puckData: puckData ?? { content: [], zones: {}, root: { props: {} } },
     metadata: {},
     editorVersion: "0.22.4",
     status: "DRAFT",
@@ -212,9 +222,18 @@ async function installLifecycleServer(
     createDraftFromPublishedResult?: "success" | "conflict" | "malformed";
     includeStandardRecords?: boolean;
     includePublishedWithoutDraft?: boolean;
+    consultationStarters?: boolean;
+    heroTestSample?: boolean;
     legacySourceRecord?: boolean;
     operatorWorkflowRecords?: boolean;
     sharedSourceRecords?: boolean;
+    historicalPublished?: PublishedDynamicTemplateResource[];
+    pagePuckData?: {
+      content: unknown[];
+      zones?: Record<string, unknown>;
+      root?: { props: Record<string, unknown> };
+      resolvedDynamicTemplates?: Record<string, unknown>;
+    };
   } = {},
 ) {
   const records: DynamicTemplateResource[] = [];
@@ -292,6 +311,44 @@ async function installLifecycleServer(
     published.push(makePublished(publishedWithoutDraft));
     publishedWithoutDraft.draft = null;
     records.push(publishedWithoutDraft);
+  }
+
+  if (options.consultationStarters) {
+    const consultationDefinition = makeDefinition("hc_consult_contact", "咨询联系图文");
+    consultationDefinition.metadata.category = "咨询内容";
+    consultationDefinition.metadata.tags = ["consultation-starter", "contact"];
+    consultationDefinition.metadata.recommendedFor = ["contact"];
+    const consultation = makeResource({
+      definition: consultationDefinition,
+      id: 9361,
+      publishedVersion: 1,
+      sourceReference: "consultation-starter:contact",
+    });
+    const hero = makeResource({
+      definition: makeDefinition(HERO_TEMPLATE_ID, HERO_TEMPLATE_NAME),
+      id: 9362,
+      publishedVersion: 1,
+    });
+    records.push(consultation, hero);
+    published.push(makePublished(consultation), makePublished(hero));
+  }
+
+  if (options.heroTestSample) {
+    const heroSampleDefinition = makeDefinition("tpl_hero", "首屏");
+    heroSampleDefinition.metadata.tags = ["hero-test-sample", "home"];
+    const heroSample = makeResource({
+      definition: heroSampleDefinition,
+      id: 9364,
+      publishedVersion: 1,
+      sourceReference: "content-template:hero",
+    });
+    const operatorHero = makeResource({
+      definition: makeDefinition(HERO_TEMPLATE_ID, HERO_TEMPLATE_NAME),
+      id: 9365,
+      publishedVersion: 1,
+    });
+    records.push(heroSample, operatorHero);
+    published.push(makePublished(heroSample), makePublished(operatorHero));
   }
 
   const server: LifecycleServer = {
@@ -509,6 +566,8 @@ async function installLifecycleServer(
       const version = Number(publishedVersionMatch[2]);
       const publishedTemplate = server.published.find((item) => (
         item.templateId === templateId && item.version === version
+      )) ?? (options.historicalPublished ?? []).find((item) => (
+        item.templateId === templateId && item.version === version
       ));
       if (!publishedTemplate) return route.fulfill(json(null, 404));
       return route.fulfill(json({
@@ -545,7 +604,9 @@ async function installLifecycleServer(
     }
     if (path.includes("/page-modules/document/revisions")) return route.fulfill(json([]));
     if (path.includes("/page-modules/document/published")) return route.fulfill(json(null));
-    if (path.includes("/page-modules/document/admin")) return route.fulfill(json(pageDraft()));
+    if (path.includes("/page-modules/document/admin")) {
+      return route.fulfill(json(pageDraft(options.pagePuckData)));
+    }
 
     if (WRITE_METHODS.has(method)) {
       const write = captureWrite(route);
@@ -561,6 +622,57 @@ async function installLifecycleServer(
     role: "SUPER_ADMIN",
   });
   return server;
+}
+
+async function openPageLibraryAfterHandoff(page: Page, detail?: {
+  templateId: string;
+  version: number;
+  name: string;
+}) {
+  await page.getByRole("button", { name: "模板设计", exact: true }).click();
+  await expect(page.getByRole("group", { name: "店铺装修工作模式切换" }))
+    .toHaveAttribute("data-active-mode", "template");
+  await page.evaluate((handoff) => {
+    window.dispatchEvent(new CustomEvent("haichuan:page-template-library-handoff", { detail: handoff }));
+  }, detail ?? {
+    templateId: PUBLISHED_TEMPLATE_ID,
+    version: 2,
+    name: PUBLISHED_TEMPLATE_NAME,
+  });
+  await page.getByRole("button", { name: "页面装修", exact: true }).click();
+  const pageLibrary = page.getByRole("complementary", { name: "模板组件库" });
+  const expandLibrary = page.getByRole("button", { name: "展开模板组件库", exact: true });
+  await expect.poll(async () => (
+    await pageLibrary.isVisible() || await expandLibrary.isVisible()
+  )).toBe(true);
+  if (!await pageLibrary.isVisible()) await expandLibrary.click();
+  const handoffCard = pageLibrary.locator('[data-catalog-handoff="true"]');
+  await expect(handoffCard).toHaveCount(1);
+  return { pageLibrary, handoffCard };
+}
+
+function homeHeroBlock(id = "hero-existing") {
+  return {
+    type: "首屏主视觉",
+    props: {
+      id,
+      isVisible: true,
+      desktopImage: "/svg/template-hero.svg",
+      mobileImage: "/svg/template-hero.svg",
+      title: "现有首屏",
+      subtitle: "HAICHUAN JEWELRY",
+      actionText: "探索作品",
+      targetType: "page",
+      linkUrl: "/products",
+      productId: 0,
+      altText: "现有首屏",
+      alignment: "left",
+      desktopFocusX: 50,
+      desktopFocusY: 50,
+      mobileFocusX: 50,
+      mobileFocusY: 50,
+    },
+  };
 }
 
 function escapeRegExp(value: string) {
@@ -714,6 +826,7 @@ async function expectUnifiedTemplateWorkspace(
   await expect(toolbar).toBeVisible();
   await expect(toolbar.getByRole("button", { name: /^桌面端模板布局/ })).toBeVisible();
   await expect(toolbar.getByRole("button", { name: /^移动端模板布局/ })).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: /平板/ })).toHaveCount(0);
   await expect(toolbar.getByRole("button", { name: "预览模板", exact: true })).toBeVisible();
   await expect(toolbar.getByRole("button", { name: "保存模板", exact: true })).toBeVisible();
   await expect(toolbar.getByRole("button", { name: /^发布模板新版本/ })).toBeVisible();
@@ -826,6 +939,241 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     await expect.poll(() => server.catalogRequests).toBeGreaterThan(0);
     expect(server.writes).toHaveLength(0);
     expect(server.allWrites).toHaveLength(0);
+  });
+
+  test("页面装修目录预览在未进入模板设计时也按真实画板缩放，不裁成放大图", async ({ page }) => {
+    const server = await installLifecycleServer(page);
+    const previewTemplateId = "tpl_catalog_preview_share";
+    const designWidth = 1200;
+    const designHeight = 900;
+    const resource = makeResource({
+      definition: makeSizedDefinition(previewTemplateId, "目录预览互通", {
+        height: designHeight,
+        mode: "fixed",
+        width: designWidth,
+      }),
+      id: 9611,
+      publishedVersion: 1,
+    });
+    server.records.push(resource);
+    server.published.push(makePublished(resource));
+
+    await page.goto("/admin/editor/home", { waitUntil: "domcontentloaded" });
+    const pageLibrary = page.getByRole("complementary", { name: "模板组件库" });
+    const expandLibrary = page.getByRole("button", { name: "展开模板组件库", exact: true });
+    await expect.poll(async () => (
+      await pageLibrary.isVisible() || await expandLibrary.isVisible()
+    )).toBe(true);
+    if (!await pageLibrary.isVisible()) await expandLibrary.click();
+
+    const pageCard = pageLibrary.locator(`[data-template-name="${previewTemplateId}"]`);
+    await expect(pageCard).toBeVisible();
+    const pageShell = pageCard.locator("[data-template-catalog-preview-shell]");
+    await expect(pageShell).toHaveAttribute("data-preview-status", "ready");
+    await pageCard.hover();
+    const pageFrame = pageCard.locator("iframe[data-template-catalog-viewport]");
+    await expect.poll(async () => {
+      const thumbnail = pageFrame.contentFrame();
+      return thumbnail ? thumbnail.locator("html").evaluate(() => innerWidth) : 0;
+    }).toBe(designWidth);
+
+    await expect.poll(async () => {
+      const rect = await pageFrame.boundingBox();
+      const clip = await pageCard.locator(".template-editor__catalog-artboard-stage").boundingBox();
+      if (!rect || !clip) return null;
+      return { rect, clip };
+    }).not.toBeNull();
+    const pageRect = (await pageFrame.boundingBox())!;
+    const pageClip = (await pageCard.locator(".template-editor__catalog-artboard-stage").boundingBox())!;
+    const expectedScale = Math.min(pageClip.width / designWidth, 220 / designHeight);
+    expect(pageRect.width / pageRect.height, "页面装修目录保持真实比例").toBeCloseTo(designWidth / designHeight, 2);
+    expect(pageRect.width, "页面装修目录宽度同步缩放").toBeCloseTo(designWidth * expectedScale, 0);
+    expect(pageRect.height, "页面装修目录高度同步缩放").toBeCloseTo(designHeight * expectedScale, 0);
+    expect(pageRect.x).toBeGreaterThanOrEqual(pageClip.x - 1);
+    expect(pageRect.y).toBeGreaterThanOrEqual(pageClip.y - 1);
+    expect(pageRect.x + pageRect.width).toBeLessThanOrEqual(pageClip.x + pageClip.width + 1);
+    expect(pageRect.y + pageRect.height).toBeLessThanOrEqual(pageClip.y + pageClip.height + 1);
+  });
+
+  test("咨询起步身份识别覆盖标签、来源和模板 ID", () => {
+    expect(isConsultationStarterTemplate({ tags: ["consultation-starter"] })).toBe(true);
+    expect(isConsultationStarterTemplate({ sourceReference: "consultation-starter:home" })).toBe(true);
+    expect(isConsultationStarterTemplate({ templateId: "hc_consult_home" })).toBe(true);
+    expect(isConsultationStarterTemplate({
+      templateId: HERO_TEMPLATE_ID,
+      tags: ["home"],
+    })).toBe(false);
+    expect(isHeroTestSampleTemplate({ templateId: "tpl_hero" })).toBe(true);
+    expect(isHeroTestSampleTemplate({ tags: ["hero-test-sample"] })).toBe(true);
+    expect(isPageEditorLibraryTemplate({ templateId: "tpl_hero" })).toBe(false);
+    expect(isPageEditorLibraryTemplate({ templateId: HERO_TEMPLATE_ID })).toBe(true);
+    expect(isTemplateDesignLibraryTemplate({ templateId: "tpl_hero" })).toBe(false);
+    expect(isTemplateDesignLibraryTemplate({ templateId: HERO_TEMPLATE_ID })).toBe(true);
+  });
+
+  test("页面装修模板库不展示咨询起步卡，模板设计仍可见", async ({ page }) => {
+    await installLifecycleServer(page, { consultationStarters: true });
+    await page.goto("/admin/editor/home", { waitUntil: "domcontentloaded" });
+    const pageLibrary = page.getByRole("complementary", { name: "模板组件库" });
+    const expandLibrary = page.getByRole("button", { name: "展开模板组件库", exact: true });
+    await expect.poll(async () => (
+      await pageLibrary.isVisible() || await expandLibrary.isVisible()
+    )).toBe(true);
+    if (!await pageLibrary.isVisible()) await expandLibrary.click();
+    await expect(pageLibrary.locator(`[data-template-name="${HERO_TEMPLATE_ID}"]`)).toBeVisible();
+    await expect(pageLibrary.locator('[data-template-name="hc_consult_contact"]')).toHaveCount(0);
+    await expect(pageLibrary).not.toContainText("咨询联系图文");
+
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    const designLibrary = page.getByRole("complementary", { name: "模板组件库" });
+    await expect(designLibrary.locator('[data-template-name="hc_consult_contact"]')).toBeVisible();
+    await expect(designLibrary.locator(`[data-template-name="${HERO_TEMPLATE_ID}"]`)).toBeVisible();
+  });
+
+  test("页面装修与模板设计都不展示首屏测试样例", async ({ page }) => {
+    await installLifecycleServer(page, { heroTestSample: true });
+    await page.goto("/admin/editor/home", { waitUntil: "domcontentloaded" });
+    const pageLibrary = page.getByRole("complementary", { name: "模板组件库" });
+    const expandLibrary = page.getByRole("button", { name: "展开模板组件库", exact: true });
+    await expect.poll(async () => (
+      await pageLibrary.isVisible() || await expandLibrary.isVisible()
+    )).toBe(true);
+    if (!await pageLibrary.isVisible()) await expandLibrary.click();
+    await expect(pageLibrary.locator(`[data-template-name="${HERO_TEMPLATE_ID}"]`)).toBeVisible();
+    await expect(pageLibrary.locator('[data-template-name="tpl_hero"]')).toHaveCount(0);
+    await expect(pageLibrary).not.toContainText("content-template:hero");
+
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    const designLibrary = page.getByRole("complementary", { name: "模板组件库" });
+    await expect(designLibrary.locator('[data-template-name="tpl_hero"]')).toHaveCount(0);
+    await expect(designLibrary.locator(`[data-template-name="${HERO_TEMPLATE_ID}"]`)).toBeVisible();
+    await expect(page.locator(".homepage-editor__page-workspace")).toHaveAttribute("hidden", "");
+    await expect(page.locator(".homepage-editor__page-workspace")).toHaveAttribute("inert", "");
+    await expect(page.getByRole("region", { name: "模板实例属性" })).toHaveCount(0);
+  });
+
+  test("发布后切到页面装修会定位刚发布模板，添加后才结束钉住", async ({ page }) => {
+    await installLifecycleServer(page, { includeStandardRecords: true });
+    await page.goto("/admin/editor/home", { waitUntil: "domcontentloaded" });
+    const { pageLibrary, handoffCard } = await openPageLibraryAfterHandoff(page);
+
+    await expect(handoffCard).toHaveAttribute("data-template-name", PUBLISHED_TEMPLATE_ID);
+    await expect(handoffCard).toContainText("刚发布 · 已发布 · v2");
+    await expect(pageLibrary.getByRole("group", { name: "刚发布", exact: true })).toBeVisible();
+    await expect(pageLibrary.locator(".unified-template-library__handoff-status")).toContainText(
+      `刚发布的“${PUBLISHED_TEMPLATE_NAME}”v2 已定位到模板组件库，可预览或添加到当前页面。`,
+    );
+    const addButton = handoffCard.getByRole("button", {
+      name: `添加到页面：${PUBLISHED_TEMPLATE_NAME} v2`,
+      exact: true,
+    });
+    await expect(addButton).toBeVisible();
+    await expect(page.getByText(`已添加“${PUBLISHED_TEMPLATE_NAME}”v2`, { exact: false })).toHaveCount(0);
+
+    await addButton.click();
+    await expect(page.getByText(
+      `已添加“${PUBLISHED_TEMPLATE_NAME}”v2，可在右侧填写页面内容`,
+      { exact: true },
+    )).toBeVisible();
+    await expect(pageLibrary.locator('[data-catalog-handoff="true"]')).toHaveCount(0);
+    await expect(pageLibrary.getByRole("group", { name: "刚发布", exact: true })).toHaveCount(0);
+    await expect(pageLibrary.locator(".unified-template-library__handoff-status")).toHaveCount(0);
+  });
+
+  test("页面已有模块时刚发布只定位，不把添加到页面当成默认动作", async ({ page }) => {
+    await installLifecycleServer(page, {
+      includeStandardRecords: true,
+      pagePuckData: {
+        content: [homeHeroBlock()],
+        zones: {},
+        root: { props: {} },
+      },
+    });
+    await page.goto("/admin/editor/home", { waitUntil: "domcontentloaded" });
+    const { pageLibrary, handoffCard } = await openPageLibraryAfterHandoff(page);
+
+    await expect(pageLibrary.locator(".unified-template-library__handoff-status")).toContainText(
+      "请拖到目标位置",
+    );
+    const addButton = handoffCard.getByRole("button", {
+      name: `添加到页面：${PUBLISHED_TEMPLATE_NAME} v2`,
+      exact: true,
+    });
+    await expect(addButton).toHaveAttribute("title", /添加到所选模块之后|添加到页面末尾/);
+    await expect(addButton).not.toBeFocused();
+    await expect(page.getByText(`已添加“${PUBLISHED_TEMPLATE_NAME}”v2`, { exact: false })).toHaveCount(0);
+
+    await addButton.click();
+    await expect(page.getByText(
+      `已添加“${PUBLISHED_TEMPLATE_NAME}”v2，可在右侧填写页面内容`,
+      { exact: true },
+    )).toBeVisible();
+    await expect(pageLibrary.locator('[data-catalog-handoff="true"]')).toHaveCount(0);
+  });
+
+  test("页面已有旧实例时刚发布突出升级，而不是再添加一块", async ({ page }) => {
+    const previousDefinition = makeDefinition(PUBLISHED_TEMPLATE_ID, PUBLISHED_TEMPLATE_NAME);
+    previousDefinition.metadata.headerCompatibility = ["overlay-light", "solid"];
+    const previousResource = makeResource({
+      checksum: "d".repeat(64),
+      definition: previousDefinition,
+      id: 9199,
+      publishedVersion: 1,
+      revision: 2,
+    });
+    const previousPublished = makePublished(previousResource, "d".repeat(64));
+    await installLifecycleServer(page, {
+      includeStandardRecords: true,
+      historicalPublished: [previousPublished],
+      pagePuckData: {
+        content: [
+          homeHeroBlock(),
+          {
+            type: "动态模板实例",
+            props: {
+              id: "old-published-instance",
+              instanceId: "old-published-instance",
+              instanceSchemaVersion: 1,
+              moduleName: PUBLISHED_TEMPLATE_NAME,
+              templateId: PUBLISHED_TEMPLATE_ID,
+              templateVersion: 1,
+              contentBySlotId: {},
+              layoutOverridesByNodeId: {},
+              hiddenSlotIds: [],
+              isVisible: true,
+            },
+          },
+        ],
+        zones: {},
+        root: { props: {} },
+        resolvedDynamicTemplates: {
+          [`${PUBLISHED_TEMPLATE_ID}@1`]: {
+            templateId: PUBLISHED_TEMPLATE_ID,
+            version: 1,
+            schemaVersion: previousPublished.schemaVersion,
+            definitionChecksum: previousPublished.definitionChecksum,
+            definition: previousPublished.definition,
+          },
+        },
+      },
+    });
+    await page.goto("/admin/editor/home", { waitUntil: "domcontentloaded" });
+    const { pageLibrary, handoffCard } = await openPageLibraryAfterHandoff(page);
+
+    await expect(pageLibrary.locator(".unified-template-library__handoff-status")).toContainText(
+      `刚发布的“${PUBLISHED_TEMPLATE_NAME}”v2 已定位到模板组件库。当前页面有 1 处旧实例可升级；也可拖到目标位置添加新实例。`,
+    );
+    const upgradeButton = handoffCard.getByRole("button", {
+      name: `升级页面中的${PUBLISHED_TEMPLATE_NAME}模板实例，共 1 处`,
+      exact: true,
+    });
+    await expect(upgradeButton).toContainText("升级 1 处");
+    await expect(handoffCard.getByRole("button", {
+      name: `添加到页面：${PUBLISHED_TEMPLATE_NAME} v2`,
+      exact: true,
+    })).toBeVisible();
+    await expect(page.getByText(`已添加“${PUBLISHED_TEMPLATE_NAME}”v2`, { exact: false })).toHaveCount(0);
+    await expect(pageLibrary.locator('[data-catalog-handoff="true"]')).toHaveCount(1);
   });
 
   test("持久化展示状态区分新模板、服务端草稿、修改中、保存中与失败", () => {

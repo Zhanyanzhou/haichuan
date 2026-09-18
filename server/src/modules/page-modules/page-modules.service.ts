@@ -1185,12 +1185,112 @@ export class PageModulesService {
     };
   }
 
+  private async completeSuperAdminSelfReviewForPublish(
+    tx: Prisma.TransactionClient,
+    current: { document: { id: number }; draft: LocalizedPageDraft },
+    pageKey: string,
+    locale: PublicContentLocale,
+    userId: number,
+  ) {
+    if (current.draft.id === null) {
+      throw new NotFoundException("该语言草稿不存在");
+    }
+    const actor = await tx.user.findUnique({
+      where: { id: userId },
+      select: { role: true, status: true },
+    });
+    if (actor?.role !== "SUPER_ADMIN" || actor.status !== "ACTIVE") {
+      throw new BadRequestException("只有超级管理员可以在发布时明确确认并完成本人审核");
+    }
+    const reviewStatus = current.draft.reviewStatus;
+    if (reviewStatus !== "DRAFT" && reviewStatus !== "CHANGES_REQUESTED" && reviewStatus !== "IN_REVIEW") {
+      throw new BadRequestException("该语言草稿尚未审核通过，不能发布");
+    }
+    if (
+      reviewStatus === "IN_REVIEW"
+      && current.draft.submittedBy !== null
+      && current.draft.submittedBy !== userId
+    ) {
+      throw new BadRequestException("当前草稿由其他人员提交审核，请先批准后再发布");
+    }
+    const now = new Date();
+    let submittedBy = current.draft.submittedBy;
+    let submittedAt = current.draft.submittedAt;
+    if (reviewStatus === "DRAFT" || reviewStatus === "CHANGES_REQUESTED") {
+      submittedBy = userId;
+      submittedAt = now;
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: "PAGE_LOCALE_REVIEW_SUBMITTED",
+          module: "page-builder",
+          targetId: current.document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_LOCALE_REVIEW_SUBMITTED",
+            actor: userId,
+            pageKey,
+            locale,
+            contentHash: current.draft.contentHash,
+            fromStatus: reviewStatus,
+            toStatus: "IN_REVIEW",
+            result: "succeeded",
+          }),
+        },
+      });
+    }
+    if (submittedBy === null || submittedAt === null) {
+      throw new BadRequestException("当前页面缺少可绑定的提交版本，不能执行自审");
+    }
+    await tx.pageDocumentLocalization.update({
+      where: { id: current.draft.id },
+      data: {
+        reviewStatus: "APPROVED",
+        submittedBy,
+        submittedAt,
+        reviewedBy: userId,
+        reviewedAt: now,
+        reviewNote: null,
+      },
+    });
+    await tx.operationLog.create({
+      data: {
+        userId,
+        action: PAGE_LOCALE_SELF_REVIEW_ACTION,
+        module: "page-builder",
+        targetId: current.document.id,
+        detail: JSON.stringify({
+          schemaVersion: 1,
+          event: PAGE_LOCALE_SELF_REVIEW_ACTION,
+          actor: userId,
+          actorRole: "SUPER_ADMIN",
+          pageKey,
+          locale,
+          revision: submittedAt.toISOString(),
+          reviewedAt: now.toISOString(),
+          contentHash: current.draft.contentHash,
+          fromStatus: "IN_REVIEW",
+          toStatus: "APPROVED",
+          reviewNote: null,
+          result: "succeeded",
+        }),
+      },
+    });
+    current.draft.reviewStatus = "APPROVED";
+    current.draft.submittedBy = submittedBy;
+    current.draft.submittedAt = submittedAt;
+    current.draft.reviewedBy = userId;
+    current.draft.reviewedAt = now;
+    current.draft.reviewNote = null;
+  }
+
   async publishLocalizedPageDocument(
     pageKey: string,
     locale: PublicContentLocale,
     userId: number | undefined,
     expectedUpdatedAt: string,
     expectedContentHash?: string,
+    selfReviewAcknowledged = false,
   ) {
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
     if (!expected) throw new BadRequestException("发布页面时缺少页面版本标识");
@@ -1210,8 +1310,28 @@ export class PageModulesService {
       if (!expectedContentHash || current.draft.contentHash !== expectedContentHash) {
         throw new ConflictException("该语言草稿内容哈希已变化，请重新加载后再发布");
       }
+      if (
+        current.draft.reviewStatus === "PUBLISHED"
+        && current.draft.publishedRevisionId
+        && current.draft.publishedHash === expectedContentHash
+      ) {
+        return {
+          document,
+          localization: current.draft,
+          revision: null,
+        };
+      }
       if (current.draft.reviewStatus !== "APPROVED") {
-        throw new BadRequestException("该语言草稿尚未审核通过，不能发布");
+        if (!selfReviewAcknowledged || userId === undefined) {
+          throw new BadRequestException("该语言草稿尚未审核通过，不能发布");
+        }
+        await this.completeSuperAdminSelfReviewForPublish(
+          tx,
+          { document, draft: current.draft },
+          pageKey,
+          locale,
+          userId,
+        );
       }
       if (
         current.draft.submittedBy === null
@@ -1341,7 +1461,9 @@ export class PageModulesService {
       }
       return { document, localization, revision };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    this.notifyPublicChange(pageKey, "page-document-published", result.revision.version, locale);
+    if (result.revision) {
+      this.notifyPublicChange(pageKey, "page-document-published", result.revision.version, locale);
+    }
     return this.toLocalizedPageResource(result.document, {
       ...result.localization,
       locale,
@@ -2366,8 +2488,13 @@ export class PageModulesService {
       severity: issue.severity === "ERROR" ? "error" : "warning",
       layer: "page",
       path: issue.path ?? "puckData",
-      message: `${issue.message}：${issue.url}`,
-    }));
+      message: issue.message,
+      ...(issue.assetId ? { assetId: issue.assetId } : {}),
+      ...(issue.url ? { assetUrl: issue.url } : {}),
+      ...(issue.authorizationRevision != null
+        ? { authorizationRevision: issue.authorizationRevision }
+        : {}),
+    } as ContentTemplateIssue));
   }
 
   private async writePagePublicationMediaManifest(
@@ -2388,10 +2515,17 @@ export class PageModulesService {
       (issue) => issue.severity === "ERROR",
     );
     if (blocking.length > 0) {
-      throw new BadRequestException({
-        message: `页面素材校验失败：${blocking.slice(0, 8).map((issue) => issue.message).join("；")}`,
-        valid: false,
+      const issues = this.managedMediaIssues({
+        ...publicationMedia.resolution,
         issues: blocking,
+      });
+      throw new BadRequestException({
+        message: `页面素材校验失败：${issues.slice(0, 8).map((issue) => issue.message).join("；")}`,
+        valid: false,
+        errors: issues
+          .filter((issue) => issue.severity === "error")
+          .map((issue) => issue.message),
+        issues,
         shadowReport: buildManagedMediaShadowReport(publicationMedia.resolution),
       });
     }

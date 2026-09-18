@@ -32,7 +32,7 @@ async function openImageDefaults(page: Page, width: number) {
 }
 
 for (const width of [1600, 390]) {
-  test(`模板工具栏在 ${width}px 三设备切换不遮挡主要操作`, async ({ page }, testInfo) => {
+  test(`模板工具栏在 ${width}px 双设备切换不遮挡主要操作`, async ({ page }, testInfo) => {
     const server = await openImageDefaults(page, width);
     const before = (await readSession(page)).definition;
     if (width < 600) await page.keyboard.press("Escape");
@@ -41,7 +41,7 @@ for (const width of [1600, 390]) {
     const preview = toolbar.getByRole("button", { name: "预览模板", exact: true });
     const save = toolbar.getByRole("button", { name: "保存模板", exact: true });
     await expect(switcher).toBeVisible();
-    for (const [breakpoint, label] of [["tablet", "平板端"], ["mobile", "移动端"], ["desktop", "桌面端"]] as const) {
+    for (const [breakpoint, label] of [["mobile", "移动端"], ["desktop", "桌面端"]] as const) {
       const button = switcher.getByRole("button", { name: new RegExp(`^${label}模板布局`) });
       await button.click();
       await expect(button).toHaveAttribute("aria-pressed", "true");

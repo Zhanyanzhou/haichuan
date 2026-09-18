@@ -18,6 +18,7 @@ export interface TemplateCatalogCardProps {
   dataTemplateIdentity?: string;
   dataTemplateName?: string;
   disabled?: boolean;
+  dataCatalogHandoff?: boolean;
   draggable?: boolean;
   statusLabel?: ReactNode;
   metadata?: ReactNode;
@@ -81,6 +82,7 @@ export default function TemplateCatalogCard({
   dataTemplateIdentity,
   dataTemplateName,
   disabled = false,
+  dataCatalogHandoff = false,
   draggable = false,
   statusLabel,
   metadata,
@@ -153,10 +155,11 @@ export default function TemplateCatalogCard({
 
   return (
     <article
-      className={`homepage-editor__template-card${className ? ` ${className}` : ""}${active ? " is-active" : ""}${disabled ? " is-disabled" : ""}${compact ? " is-compact" : ""}`}
+      className={`homepage-editor__template-card${className ? ` ${className}` : ""}${active ? " is-active" : ""}${dataCatalogHandoff ? " is-handoff" : ""}${disabled ? " is-disabled" : ""}${compact ? " is-compact" : ""}`}
       data-template-catalog-card="shared"
       data-template-identity={dataTemplateIdentity}
       data-template-name={dataTemplateName}
+      data-catalog-handoff={dataCatalogHandoff ? "true" : undefined}
       onMouseEnter={() => setPreviewMounted(true)}
       onFocusCapture={() => setPreviewMounted(true)}
     >

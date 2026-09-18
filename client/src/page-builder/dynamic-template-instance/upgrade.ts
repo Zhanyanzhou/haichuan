@@ -1,5 +1,6 @@
 import {
   getEffectiveDynamicTemplateInstanceEditPolicy,
+  isLayoutOverrideCapabilityEnabled,
   validateDynamicTemplateDefinition,
   type TemplateDefinitionV2,
   type DynamicTemplateSlotDefinition,
@@ -104,7 +105,7 @@ function validateLayoutOverride(input: {
     field,
     reason,
   });
-  if (!node || !policy) {
+  if (!node || !slot || !policy) {
     for (const field of Object.keys(override) as Array<keyof TemplateInstanceLayoutOverride>) {
       add(field, `${device === "desktop" ? "桌面端" : "移动端"}节点“${node?.name ?? nodeId}”已不再允许页面构图调整。`);
     }
@@ -115,25 +116,28 @@ function validateLayoutOverride(input: {
   );
   for (const field of Object.keys(override) as Array<keyof TemplateInstanceLayoutOverride>) {
     const value = override[field];
-    const valid = field === "offsetXPercent" || field === "offsetYPercent"
-      ? policy.position && finiteInRange(value, -policy.maxOffsetPercent, policy.maxOffsetPercent)
-      : field === "widthPercent"
-        ? policy.size && finiteInRange(value, policy.minWidthPercent, policy.maxWidthPercent)
-        : field === "zIndex"
-          ? policy.zIndex && Number.isInteger(value) && Number(value) >= -10 && Number(value) <= 10
-          : field === "objectFit"
-            ? policy.imageFit && slot?.type === "image" && ["cover", "contain", "fill"].includes(String(value))
-            : field === "imageScalePercent"
-              ? policy.imageFit && slot?.type === "image" && finiteInRange(value, 100, 200)
-              : field === "focusXPercent" || field === "focusYPercent"
-                ? policy.imageFocus && slot?.type === "image" && finiteInRange(value, 0, 100)
-                : field === "fontSizePx"
-                  ? policy.typography && finiteInRange(value, policy.minFontSizePx ?? 12, policy.maxFontSizePx ?? 96)
-                  : field === "textAlign"
-                    ? policy.typography && ["left", "center", "right"].includes(String(value))
-                    : field === "marginTopPx" || field === "marginBottomPx"
-                      ? policy.spacing && finiteInRange(value, 0, policy.maxSpacingPx ?? 120)
-                      : false;
+    const authorized = isLayoutOverrideCapabilityEnabled(policy, slot, field);
+    const valid = !authorized
+      ? false
+      : field === "offsetXPercent" || field === "offsetYPercent"
+        ? finiteInRange(value, -policy.maxOffsetPercent, policy.maxOffsetPercent)
+        : field === "widthPercent"
+          ? finiteInRange(value, policy.minWidthPercent, policy.maxWidthPercent)
+          : field === "zIndex"
+            ? Number.isInteger(value) && Number(value) >= -10 && Number(value) <= 10
+            : field === "objectFit"
+              ? ["cover", "contain", "fill"].includes(String(value))
+              : field === "imageScalePercent"
+                ? finiteInRange(value, 100, 200)
+                : field === "focusXPercent" || field === "focusYPercent"
+                  ? finiteInRange(value, 0, 100)
+                  : field === "fontSizePx"
+                    ? finiteInRange(value, policy.minFontSizePx ?? 12, policy.maxFontSizePx ?? 96)
+                    : field === "textAlign"
+                      ? ["left", "center", "right"].includes(String(value))
+                      : field === "marginTopPx" || field === "marginBottomPx"
+                        ? finiteInRange(value, 0, policy.maxSpacingPx ?? 120)
+                        : false;
     if (!valid) {
       add(field, `${device === "desktop" ? "桌面端" : "移动端"}节点“${node.name}”的 ${field} 无法由目标版本完整表达。`);
     }

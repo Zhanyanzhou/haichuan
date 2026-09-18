@@ -11,7 +11,7 @@ import {
  * 店铺装修编辑器 —— 未保存内容保护（D1）回归测试
  *
  * 覆盖 P1 修复：编辑器有未保存修改时，点击后台侧边栏其他菜单（SPA 路由跳转）
- * 不再静默丢失，而是只提供「保存并离开 / 继续编辑」；
+ * 不再静默丢失，并提供「保存并离开 / 放弃修改 / 继续编辑」；
  * 保存草稿后脏状态清空，刷新后内容正确回显。
  *
  * 运行方式（测试通过当前 Cookie 会话接口夹具建立确定性管理员身份）：
@@ -159,7 +159,7 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
     // 展开编辑器的一级导航并触发 SPA 路由跳转。
     await leaveViaPrimaryNavigation(page);
 
-    const guard = page.getByRole("dialog", { name: "保存后离开？" });
+    const guard = page.getByRole("dialog", { name: "离开当前编辑？" });
     await expect(guard).toBeVisible();
     // 确认出现时，URL 仍停留在编辑器
     await expect(page).toHaveURL(/\/admin\/editor\/home/);
@@ -176,11 +176,23 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
     await addModuleToCanvas(page);
 
     await leaveViaPrimaryNavigation(page);
-    const guard = page.getByRole("dialog", { name: "保存后离开？" });
+    const guard = page.getByRole("dialog", { name: "离开当前编辑？" });
     await expect(guard).toBeVisible();
-    await expect(guard.getByRole("button", { name: "直接离开（放弃修改）" })).toHaveCount(0);
+    await expect(guard.getByRole("button", { name: "放弃修改" })).toBeVisible();
 
     await guard.getByRole("button", { name: "保存并离开" }).click();
+    await expect(page).toHaveURL(/\/admin\/dashboard/);
+  });
+
+  test("选择「放弃修改」后不保存并完成跳转", async ({ page }) => {
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    await addModuleToCanvas(page);
+
+    await leaveViaPrimaryNavigation(page);
+    const guard = page.getByRole("dialog", { name: "离开当前编辑？" });
+    await guard.getByRole("button", { name: "放弃修改" }).click();
+
     await expect(page).toHaveURL(/\/admin\/dashboard/);
   });
 
@@ -192,7 +204,7 @@ test.describe("店铺装修 —— 未保存内容保护（D1）", () => {
     await addModuleToCanvas(page);
 
     await leaveViaPrimaryNavigation(page);
-    const guard = page.getByRole("dialog", { name: "保存后离开？" });
+    const guard = page.getByRole("dialog", { name: "离开当前编辑？" });
     await guard.getByRole("button", { name: "保存并离开" }).click();
 
     await expect(page).toHaveURL(/\/admin\/editor\/home/);

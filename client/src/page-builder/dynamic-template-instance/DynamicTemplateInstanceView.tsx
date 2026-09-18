@@ -6,7 +6,7 @@ import {
 import { useResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import { hasExplicitDynamicTemplateInstanceImage } from "./mediaReferences";
-import { resolveTemplateBreakpoint, type TemplateBreakpoint } from "../template-definition/responsive";
+import { resolveTemplateBreakpoint, toTemplateContentBreakpoint, type TemplateBreakpoint } from "../template-definition/responsive";
 
 function useDynamicTemplateDevice(
   mobileBreakpoint = 767,
@@ -24,12 +24,10 @@ function useDynamicTemplateDevice(
   useEffect(() => {
     if (!enabled) return undefined;
     const media = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const tablet = window.matchMedia("(max-width: 1023px)");
     const update = () => setDevice(current());
     update();
     media.addEventListener("change", update);
-    tablet.addEventListener("change", update);
-    return () => { media.removeEventListener("change", update); tablet.removeEventListener("change", update); };
+    return () => { media.removeEventListener("change", update); };
   }, [breakpoint, current, enabled]);
   return device;
 }
@@ -55,7 +53,7 @@ export default function DynamicTemplateInstanceView({
     deviceOverride === undefined,
     resolvedDefinition?.schemaVersion,
   );
-  const device = deviceOverride ?? responsiveDevice;
+  const device = toTemplateContentBreakpoint(deviceOverride ?? responsiveDevice);
   if (props.isVisible === false) {
     if (mode !== "editor") return null;
     return (
@@ -90,6 +88,7 @@ export default function DynamicTemplateInstanceView({
       resolvedDefinition,
       props.contentBySlotId,
       props.hiddenSlotIds,
+      device,
     )
   ) {
     return null;
@@ -102,7 +101,7 @@ export default function DynamicTemplateInstanceView({
     >
       <DynamicTemplateRenderer
         definition={resolvedDefinition}
-        device={device === "tablet" ? "desktop" : device}
+        device={device}
         breakpoint={device}
         contentBySlotId={props.contentBySlotId}
         hiddenSlotIds={props.hiddenSlotIds}

@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   pageDocumentApi,
+  uploadApi,
   type PageDocumentResource,
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import {
   createEditorPageDefault,
   ensureEditorPageStructure,
@@ -15,6 +17,7 @@ import {
 } from "@/page-builder/config/editorPages";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
 import {
+  collectLockedLeftoverPublishIssues,
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   getRequiredDynamicTemplateDefinitionKeys,
   inspectResolvedDynamicTemplateDefinitions,
@@ -30,6 +33,10 @@ import {
   getPagePublishIssueKey,
   reconcilePagePublishIssueKey,
 } from "@/page-builder/inspector/publishValidation";
+import {
+  collectManagedMediaAssetIds,
+  isManagedMediaAuthorizationIssue,
+} from "@/page-builder/inspector/managedMediaPublishIssues";
 import { USE_MOCK } from "@/services/mockData";
 import type { PuckDocument, PuckProps } from "@/page-builder/types";
 import {
@@ -45,26 +52,57 @@ import {
 } from "./editor-store";
 import {
   canonicalizePageContent,
-  dataSignature,
   formatEditorTime,
   getPuckDocument,
   normalizePuckMetadata,
   resolvePublishValidationIssues,
 } from "./editor-utils";
 import {
+  copyEditorLocalConflictSnapshot,
+  getEditorApiErrorMessage,
   getEditorErrorMessage,
   getEditorHttpStatus,
 } from "@/page-builder/workspace/editorLifecycleErrors";
 import type { PublicContentLocale } from "@/i18n/publicLocale";
 
+function collectPageLockedLeftoverIssues(
+  nextData: unknown,
+  resolved: ResolvedDynamicTemplateDefinitionMap,
+): PublishValidationIssue[] {
+  const document = getPuckDocument(nextData);
+  if (!document) return [];
+  return collectLockedLeftoverPublishIssues(document, {
+    ...inspectResolvedDynamicTemplateDefinitions(
+      document[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
+    ).definitions,
+    ...resolved,
+  });
+}
+
+function readPublishedLiveHealth(publishedDoc: PageDocumentResource | null | undefined) {
+  const attestedStale = publishedDoc?.publicationAttested === false;
+  const readinessInvalid = publishedDoc?.publicationReadiness?.valid === false;
+  const errors = (publishedDoc?.publicationReadiness?.errors ?? []).filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+  return {
+    needsRevalidation: Boolean(publishedDoc) && (attestedStale || readinessInvalid),
+    errors: attestedStale && errors.length === 0
+      ? ["线上版本缺少当前发布合同签认，必须重新校验并发布。"]
+      : errors,
+  };
+}
+
 export function usePageWorkspaceController({
   pageKey,
   locale,
   canPublish,
+  canPublishWithSelfReview = false,
 }: {
   pageKey: EditorPageKey;
   locale: PublicContentLocale;
   canPublish: boolean;
+  canPublishWithSelfReview?: boolean;
 }) {
   const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
@@ -99,6 +137,9 @@ export function usePageWorkspaceController({
   const [saving, setSaving] = useState(false);
   const [draftSaveFailed, setDraftSaveFailed] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [authorizingPublicMedia, setAuthorizingPublicMedia] = useState(false);
+  const authorizeDialogOpenRef = useRef(false);
+  const publishHomeRef = useRef<(nextData: unknown) => Promise<void>>(async () => {});
   const [publishIssues, setPublishIssues] = useState<PublishValidationIssue[]>(
     [],
   );
@@ -114,6 +155,7 @@ export function usePageWorkspaceController({
   const previousPublishIssuesRef = useRef<PublishValidationIssue[]>([]);
   const [validationRevision, setValidationRevision] = useState(0);
   const validationRequestRef = useRef(0);
+  const saveGenerationByWorkspaceRef = useRef<Record<string, number>>({});
   const publishOperationRef = useRef(false);
   const publishOwnerRef = useRef<symbol | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -158,7 +200,10 @@ export function usePageWorkspaceController({
   const pageHistoryCommandsRef = useRef(new Map<number, PageEditorHistoryCommand>());
   const pageSessionCacheRef = useRef<Record<string, PageSessionCache>>({});
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const dataSignatureRef = useRef("");  const [metadata, setMetadata] = useState<PuckProps>({});
+  // 已保存基线同时包含画布与页面 metadata。只比较画布时，SEO/内容负责人等修改
+  // 会在随后的 Puck 同步里被清掉，409 保留本地后也无法拦截离开。
+  const dataSignatureRef = useRef("");
+  const [metadata, setMetadata] = useState<PuckProps>({});
   const latestMetadata = useRef<PuckProps>({});
   const [pageSettingsOpen, setPageSettingsOpen] = useState(false);
   const [pageSettingsData, setPageSettingsData] = useState<PuckDocument | null>(null);
@@ -168,6 +213,7 @@ export function usePageWorkspaceController({
   const [reviewStatus, setReviewStatus] = useState<PageDocumentResource["reviewStatus"]>("DRAFT");
   const [reviewSubmittedBy, setReviewSubmittedBy] = useState<number | null>(null);
   const [publishedNeedsRevalidation, setPublishedNeedsRevalidation] = useState(false);
+  const [publishedRevalidationErrors, setPublishedRevalidationErrors] = useState<string[]>([]);
   const pendingDraftRef = useRef<PuckDocument | null>(null);
   const editingDraftSnapshotRef = useRef<{
     data: PuckDocument;
@@ -243,6 +289,7 @@ export function usePageWorkspaceController({
       setReviewStatus("DRAFT");
       setReviewSubmittedBy(null);
       setPublishedNeedsRevalidation(false);
+      setPublishedRevalidationErrors([]);
       setViewingPublished(false);
       setPublishIssues([]);
       setPublishValidationStatus("idle");
@@ -287,15 +334,18 @@ export function usePageWorkspaceController({
           serverData = cachedPage.data;
           setData(cachedPage.data);
           latestData.current = cachedPage.data;
-          dataSignatureRef.current = dataSignature(cachedPage.data);
           setMetadata(cachedPage.metadata);
           latestMetadata.current = cachedPage.metadata;
+          dataSignatureRef.current = canonicalizePageContent(
+            cachedPage.data,
+            cachedPage.metadata,
+          );
         } else if (!hasInitializedEditorRef.current) {
           setData(serverData);
           latestData.current = serverData;
-          dataSignatureRef.current = dataSignature(serverData);
           setMetadata({});
           latestMetadata.current = {};
+          dataSignatureRef.current = canonicalizePageContent(serverData, {});
         }
         setHasUnsavedChanges(false);
       }
@@ -315,9 +365,9 @@ export function usePageWorkspaceController({
         const draftPuck = getPuckDocument(adminDoc?.puckData);
 
         const nextHasPublished = Boolean(publishedPuck);
-        setPublishedNeedsRevalidation(
-          nextHasPublished && publishedDoc?.publicationAttested === false,
-        );
+        const liveHealth = readPublishedLiveHealth(nextHasPublished ? publishedDoc : null);
+        setPublishedNeedsRevalidation(liveHealth.needsRevalidation);
+        setPublishedRevalidationErrors(liveHealth.errors);
         // 草稿差异判定须同时比较 content 与 metadata：
         // 仅改 SEO 等 metadata 而未动内容的草稿，此前会被误判为“与线上一致”，
         // 导致刷新后既不提示草稿、也不提供“继续编辑草稿”入口。
@@ -345,9 +395,12 @@ export function usePageWorkspaceController({
             : normalizePuckMetadata(publishedDoc?.metadata);
           setData(serverData);
           latestData.current = serverData;
-          dataSignatureRef.current = dataSignature(serverData);
           setMetadata(displayMetadata);
           latestMetadata.current = displayMetadata;
+          dataSignatureRef.current = canonicalizePageContent(
+            serverData,
+            displayMetadata,
+          );
           setViewingPublished(false);
           // 乐观锁与“上次保存时间”仍以草稿文档为准，保证后续保存/发布能正确串行。
           const draftUpdatedAt = adminDoc?.updatedAt || null;
@@ -363,7 +416,7 @@ export function usePageWorkspaceController({
           // 新页面没有服务端数据时，仅此处一次性落入该页面的正确默认结构。
           setData(serverData);
           latestData.current = serverData;
-          dataSignatureRef.current = dataSignature(serverData);
+          dataSignatureRef.current = canonicalizePageContent(serverData, {});
           pageSessionCacheRef.current[workspaceKey] = {
             data: serverData,
             metadata: {},
@@ -428,14 +481,17 @@ export function usePageWorkspaceController({
       // Puck 会在整页替换时补齐默认字段。服务端草稿采用归一化结果
       // 建立新基线；从线上比较返回时则恢复进入前的已保存基线与脏状态。
       dataSignatureRef.current =
-        controlledState.baselineSignature ?? dataSignature(nextDocument);
+        controlledState.baselineSignature
+        ?? canonicalizePageContent(nextDocument, latestMetadata.current);
       setHasUnsavedChanges(controlledState.hasUnsavedChanges);
       setValidationRevision((revision) => revision + 1);
       return;
     }
     // 规范化比较(忽略 block id/键序/非 content 字段):
     // Puck 首帧会 normalize 画布数据,JSON 全等会让每次进入编辑器都误报"有未保存修改"
-    const changed = dataSignature(nextDocument) !== dataSignatureRef.current;
+    const changed =
+      canonicalizePageContent(nextDocument, latestMetadata.current)
+      !== dataSignatureRef.current;
     setHasUnsavedChanges(changed);
     setValidationRevision((revision) => revision + 1);
     // 查看线上版本时画布被编辑:自动切回编辑草稿并提示,避免“看着线上却在改草稿”的状态错乱。
@@ -519,6 +575,69 @@ export function usePageWorkspaceController({
     }
     setValidationRevision((revision) => revision + 1);
   }, [modal, publishAttemptFailure]);
+
+  const authorizePublicMedia = useCallback((
+    assetIds: number[],
+    options?: { resumePublish?: boolean },
+  ) => {
+    const uniqueIds = [...new Set(assetIds.filter((id) => Number.isInteger(id) && id > 0))];
+    if (uniqueIds.length === 0 || authorizingPublicMedia || authorizeDialogOpenRef.current) return;
+    const resumePublish = Boolean(options?.resumePublish);
+    authorizeDialogOpenRef.current = true;
+    modal.confirm({
+      title: uniqueIds.length > 1
+        ? `确认这 ${uniqueIds.length} 张图可公开使用？`
+        : "确认这张图可公开使用？",
+      content: resumePublish
+        ? "请仅在你已核实素材来源、拥有公开网站使用权，并愿意以当前账号留下审核记录时继续。确认权利后将继续发布当前草稿。"
+        : "请仅在你已核实素材来源、拥有公开网站使用权，并愿意以当前账号留下审核记录时继续。确认后不会自动发布。",
+      okText: "确认权利并通过",
+      cancelText: "取消",
+      onCancel: () => {
+        authorizeDialogOpenRef.current = false;
+      },
+      afterClose: () => {
+        authorizeDialogOpenRef.current = false;
+      },
+      onOk: async () => {
+        setAuthorizingPublicMedia(true);
+        let confirmed = 0;
+        let lastError: unknown;
+        try {
+          for (const assetId of uniqueIds) {
+            try {
+              await uploadApi.authorizeMediaPublicUse(assetId, true);
+              confirmed += 1;
+            } catch (error) {
+              lastError = error;
+            }
+          }
+          setValidationRevision((revision) => revision + 1);
+          if (confirmed === uniqueIds.length) {
+            if (resumePublish) {
+              message.success(uniqueIds.length > 1
+                ? `已确认 ${uniqueIds.length} 张图可公开使用，正在继续发布`
+                : "已确认这张图可公开使用，正在继续发布");
+              await publishHomeRef.current(latestData.current);
+              return;
+            }
+            message.success(uniqueIds.length > 1
+              ? `已确认 ${uniqueIds.length} 张图可公开使用，请再点发布`
+              : "已确认这张图可公开使用，请再点发布");
+            return;
+          }
+          if (confirmed > 0) {
+            message.error(`已确认 ${confirmed} 张图，还有 ${uniqueIds.length - confirmed} 张未完成。请重试未完成项。`);
+            return;
+          }
+          message.error(getSafeAdminErrorMessage(lastError, "素材公开确认失败，请重新检查后再试。"));
+          throw lastError instanceof Error ? lastError : new Error("authorize-public-use-failed");
+        } finally {
+          setAuthorizingPublicMedia(false);
+        }
+      },
+    });
+  }, [authorizingPublicMedia, message, modal]);
 
   useEffect(() => {
     if (!publishAttemptFailure) return;
@@ -606,9 +725,25 @@ export function usePageWorkspaceController({
       }
       const requestedData = getPuckDocument(nextData) ?? latestData.current;
       const requestedMetadata = latestMetadata.current;
+      const leftoverIssues = collectPageLockedLeftoverIssues(
+        requestedData,
+        resolvedDynamicTemplateDefinitions,
+      );
+      if (leftoverIssues.length > 0) {
+        setPublishIssues(leftoverIssues);
+        setPublishValidationStatus("invalid");
+        setDraftSaveFailed(true);
+        activatePublishReview(leftoverIssues);
+        if (!options.silent) {
+          message.warning("先移除锁定字段的页面覆盖，才能保存这份草稿");
+        }
+        return false;
+      }
       const save = async (): Promise<boolean> => {
         const editableData = requestedData;
         const isActivePage = () => targetWorkspaceKey === activePageKeyRef.current;
+        const saveGeneration = (saveGenerationByWorkspaceRef.current[targetWorkspaceKey] ?? 0) + 1;
+        saveGenerationByWorkspaceRef.current[targetWorkspaceKey] = saveGeneration;
         // 顶栏手动保存才点亮按钮 loading 与成功提示；发布前、保存并离开等
         // 内部显式保存使用 silent，避免重复成功提示。
         if (isActivePage() && !options.silent) {
@@ -651,6 +786,9 @@ export function usePageWorkspaceController({
             contentHash: savedDocument?.contentHash ?? null,
             reviewStatus: savedDocument?.reviewStatus ?? "DRAFT",
           };
+          if (saveGenerationByWorkspaceRef.current[targetWorkspaceKey] !== saveGeneration) {
+            return true;
+          }
           if (isActivePage()) {
             setReviewStatus(savedDocument?.reviewStatus ?? "DRAFT");
             setReviewSubmittedBy(savedDocument?.submittedBy ?? null);
@@ -665,7 +803,10 @@ export function usePageWorkspaceController({
             JSON.stringify(requestedMetadata);
           const hasNewerLocalChanges =
             hasNewerLocalData || hasNewerLocalMetadata;
-          dataSignatureRef.current = dataSignature(persistedData);
+          dataSignatureRef.current = canonicalizePageContent(
+            persistedData,
+            persistedMetadata,
+          );
           if (hasNewerLocalChanges) {
             setHasUnsavedChanges(true);
           } else {
@@ -695,19 +836,63 @@ export function usePageWorkspaceController({
           const status = getEditorHttpStatus(error);
           const isConflict = status === 409;
           if (isConflict) {
+            setHasUnsavedChanges(true);
             modal.confirm({
               title: "检测到其他人更新了这份整页草稿",
-              content:
-                "当前页面设置与画布修改仍完整保留。你可以继续留在本地核对，或明确放弃本地修改并重新加载远端整页草稿。",
+              content: (
+                <div>
+                  <p>当前页面设置与画布修改仍完整保留。系统不会自动覆盖本地或远端内容。</p>
+                  <p>重新加载远端草稿前，可先复制本地草稿快照。</p>
+                </div>
+              ),
               okText: "重新加载远端草稿",
               cancelText: "保留本地修改",
               okButtonProps: { danger: true },
+              footer: (_, { OkBtn, CancelBtn }) => (
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void copyEditorLocalConflictSnapshot({
+                        pageKey: targetPageKey,
+                        puckData: latestData.current,
+                        metadata: latestMetadata.current,
+                      }).then((copied) => {
+                        if (copied) message.success("已复制本地整页草稿");
+                        else message.warning("无法写入剪贴板，请留在本地核对");
+                      });
+                    }}
+                  >
+                    复制本地草稿
+                  </button>
+                  <CancelBtn />
+                  <OkBtn />
+                </div>
+              ),
               onOk: () => setLoadAttempt((attempt) => attempt + 1),
             });
           } else {
-            message.error(status === 403
+            const failureMessage = status === 403
               ? "当前账号已没有保存草稿的权限；权限可能已发生变化。请重新登录后再试，或联系管理员确认权限。"
-              : getEditorErrorMessage(error, "整页草稿保存失败，请重试"));
+              : getEditorErrorMessage(error, "整页草稿保存失败，请重试");
+            if (failureMessage.includes("不允许在页面中修改")) {
+              const leftoverSaveIssues = collectPageLockedLeftoverIssues(
+                editableData,
+                resolvedDynamicTemplateDefinitions,
+              );
+              const fallbackIssues = leftoverSaveIssues.length > 0
+                ? leftoverSaveIssues
+                : [{
+                    code: "locked-slot-page-value",
+                    message: failureMessage,
+                    severity: "error" as const,
+                    path: "contentBySlotId",
+                  }];
+              setPublishIssues(fallbackIssues);
+              setPublishValidationStatus("invalid");
+              activatePublishReview(fallbackIssues);
+            }
+            message.error(failureMessage);
           }
           return false;
         } finally {
@@ -722,7 +907,18 @@ export function usePageWorkspaceController({
       );
       return queuedSave;
     },
-    [initialLoading, loadError, loadedPageKey, locale, message, modal, pageKey, workspaceKey],
+    [
+      activatePublishReview,
+      initialLoading,
+      loadError,
+      loadedPageKey,
+      locale,
+      message,
+      modal,
+      pageKey,
+      resolvedDynamicTemplateDefinitions,
+      workspaceKey,
+    ],
   );
 
   // 2026-08-16 批次 D（用户决策）：2 秒自动保存已移除，改为显式保存模型——
@@ -900,11 +1096,14 @@ export function usePageWorkspaceController({
       };
       setData(structured);
       latestData.current = structured;
-      dataSignatureRef.current = dataSignature(structured);
       if (draftMetadata) {
         setMetadata(draftMetadata);
         latestMetadata.current = draftMetadata;
       }
+      dataSignatureRef.current = canonicalizePageContent(
+        structured,
+        latestMetadata.current,
+      );
       setHasUnsavedChanges(false);
       pendingDraftRef.current = null;
       editingDraftSnapshotRef.current = null;
@@ -1049,9 +1248,12 @@ export function usePageWorkspaceController({
     };
     setData(publishedDataRef.current);
     latestData.current = publishedDataRef.current;
-    dataSignatureRef.current = dataSignature(publishedDataRef.current);
     setMetadata(publishedMetadataRef.current);
     latestMetadata.current = publishedMetadataRef.current;
+    dataSignatureRef.current = canonicalizePageContent(
+      publishedDataRef.current,
+      publishedMetadataRef.current,
+    );
     setHasUnsavedChanges(false);
     viewingPublishedRef.current = true;
     setViewingPublished(true);
@@ -1125,9 +1327,12 @@ export function usePageWorkspaceController({
         };
         setData(targetPublishedData);
         latestData.current = targetPublishedData;
-        dataSignatureRef.current = dataSignature(targetPublishedData);
         setMetadata(targetPublishedMetadata);
         latestMetadata.current = targetPublishedMetadata;
+        dataSignatureRef.current = canonicalizePageContent(
+          targetPublishedData,
+          targetPublishedMetadata,
+        );
         setHasUnsavedChanges(false);
         setHasPendingDraft(false);
         setViewingPublished(false);
@@ -1285,17 +1490,27 @@ export function usePageWorkspaceController({
     const snapshot = structuredClone(
       input.direction === "back" ? command.before : command.after,
     );
+    // 脏状态相对“最近一次成功保存”的基线计算；命令快照里的 savedSignature
+    // 可能早于后续保存，直接写回会把已落库内容误判为干净。
+    const savedBaseline = dataSignatureRef.current;
+    const restoredSignature = canonicalizePageContent(
+      input.data,
+      snapshot.metadata,
+    );
+    const dirty = restoredSignature !== savedBaseline;
     controlledCanvasStateRef.current = {
-      hasUnsavedChanges: snapshot.hasUnsavedChanges,
-      baselineSignature: snapshot.savedSignature,
+      hasUnsavedChanges: dirty,
+      baselineSignature: savedBaseline,
     };
     setData(input.data);
     latestData.current = input.data;
     setMetadata(snapshot.metadata);
     latestMetadata.current = snapshot.metadata;
-    dataSignatureRef.current = snapshot.savedSignature;
-    setHasUnsavedChanges(snapshot.hasUnsavedChanges);
-    setHasPendingDraft(snapshot.hasPendingDraft);
+    setHasUnsavedChanges(dirty);
+    setHasPendingDraft(
+      publishedBaselineRef.current != null
+      && restoredSignature !== publishedBaselineRef.current,
+    );
     pendingDraftRef.current = snapshot.pendingDraft;
     setValidationRevision((revision) => revision + 1);
     return true;
@@ -1357,6 +1572,9 @@ export function usePageWorkspaceController({
             publishedDataRef.current = nextPublishedData;
             publishedMetadataRef.current = nextPublishedMetadata;
             publishedBaselineRef.current = nextPublishedBaseline;
+            const liveHealth = readPublishedLiveHealth(publishedDocument);
+            setPublishedNeedsRevalidation(liveHealth.needsRevalidation);
+            setPublishedRevalidationErrors(liveHealth.errors);
             setHasPendingDraft(
               canonicalizePageContent(latestData.current, latestMetadata.current)
                 !== nextPublishedBaseline,
@@ -1366,7 +1584,10 @@ export function usePageWorkspaceController({
               latestData.current = nextPublishedData;
               setMetadata(nextPublishedMetadata);
               latestMetadata.current = nextPublishedMetadata;
-              dataSignatureRef.current = dataSignature(nextPublishedData);
+              dataSignatureRef.current = canonicalizePageContent(
+                nextPublishedData,
+                nextPublishedMetadata,
+              );
             }
             setRevisions((items) => items.map((item) => ({
               ...item,
@@ -1504,6 +1725,23 @@ export function usePageWorkspaceController({
     );
     const editableData = nextData ?? latestData.current;
     const pageLabel = getEditorPage(pageKey).label;
+    const leftoverIssues = collectPageLockedLeftoverIssues(
+      editableData,
+      resolvedDynamicTemplateDefinitions,
+    );
+    if (leftoverIssues.length > 0) {
+      setPublishIssues(leftoverIssues);
+      setPublishValidationStatus("invalid");
+      setPublishAttemptFailure({
+        issue: leftoverIssues[0],
+        sourceSignature: canonicalizePageContent(
+          editableData,
+          latestMetadata.current,
+        ),
+      });
+      activatePublishReview(leftoverIssues);
+      return;
+    }
 
     publishOperationRef.current = true;
     publishOwnerRef.current = publishOwner;
@@ -1541,12 +1779,32 @@ export function usePageWorkspaceController({
         message.error("当前页面内容指纹缺失，请刷新页面后再发布");
         return;
       }
-      if (persistedDraft.reviewStatus !== "APPROVED") {
-        message.warning("当前语言版本尚未通过审核，请先提交并由管理员批准");
+      if (persistedDraft.reviewStatus === "PUBLISHED") {
+        message.success(
+          pageKey === "home"
+            ? "店铺首页已是最新线上版本，前台已在使用这份内容"
+            : `${pageLabel}已是最新线上版本，前台已在使用这份内容`,
+        );
         return;
+      }
+      if (persistedDraft.reviewStatus !== "APPROVED") {
+        if (!canPublishWithSelfReview) {
+          message.warning("当前语言版本尚未通过审核，请先提交并由管理员批准");
+          return;
+        }
       }
       const persistedUpdatedAt = persistedDraft.updatedAt;
       const persistedContentHash = persistedDraft.contentHash;
+      const selfReviewAcknowledged = persistedDraft.reviewStatus !== "APPROVED";
+      const resumePublishAfterMediaConfirm = (blockers: PublishValidationIssue[]) => {
+        const mediaIds = collectManagedMediaAssetIds(blockers);
+        const mediaOnly = blockers.every((issue) => (
+          issue.severity !== "error" || isManagedMediaAuthorizationIssue(issue)
+        ));
+        if (canPublishWithSelfReview && mediaOnly && mediaIds.length > 0) {
+          authorizePublicMedia(mediaIds, { resumePublish: true });
+        }
+      };
 
       // 发布前以刚保存的服务端草稿重新校验。异步编辑预检只负责即时反馈，
       // 不能代替本次发布动作的同源、最新资格判断。
@@ -1579,7 +1837,14 @@ export function usePageWorkspaceController({
             }));
         setPublishIssues(resolvedBlockers);
         setPublishValidationStatus("invalid");
+        if (resolvedBlockers.some((issue) => issue.message.includes("不允许在页面中修改"))) {
+          setPublishAttemptFailure({
+            issue: resolvedBlockers[0],
+            sourceSignature: publishSourceSignature,
+          });
+        }
         activatePublishReview(resolvedBlockers);
+        resumePublishAfterMediaConfirm(resolvedBlockers);
         return;
       }
 
@@ -1603,6 +1868,7 @@ export function usePageWorkspaceController({
             locale,
             persistedUpdatedAt,
             persistedContentHash,
+            selfReviewAcknowledged,
           );
           const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishResponse);
           const publishedData = getPuckDocument(publishedDocument?.puckData) ?? publishData;
@@ -1637,7 +1903,10 @@ export function usePageWorkspaceController({
               latestData.current,
               latestMetadata.current,
             ) !== publishSourceSignature;
-          dataSignatureRef.current = dataSignature(publishedData);
+          dataSignatureRef.current = canonicalizePageContent(
+            publishedData,
+            publishedMetadata,
+          );
           if (hasNewerLocalChanges) {
             setHasUnsavedChanges(true);
             setHasPendingDraft(
@@ -1663,6 +1932,7 @@ export function usePageWorkspaceController({
           publishedMetadataRef.current = { ...publishedMetadata };
           editingDraftSnapshotRef.current = null;
           setPublishedNeedsRevalidation(false);
+          setPublishedRevalidationErrors([]);
           setPublishAttemptFailure(null);
           setPublishReviewActive(false);
           setPublishReviewOpen(false);
@@ -1702,6 +1972,7 @@ export function usePageWorkspaceController({
               if (refreshedBlockers.length > 0) {
                 setPublishValidationStatus("invalid");
                 activatePublishReview(refreshedBlockers);
+                resumePublishAfterMediaConfirm(refreshedBlockers);
                 return;
               }
             } catch {
@@ -1709,22 +1980,33 @@ export function usePageWorkspaceController({
             }
           }
           const status = getEditorHttpStatus(error);
+          const mediaPublishBlocked = /素材|公开使用|授权/.test(getEditorApiErrorMessage(error));
           const failureMessage = status === 403
             ? "当前账号已没有发布权限；权限可能已发生变化。请重新登录后再试，或联系管理员确认权限。"
             : status === 409
               ? "远端草稿已更新，发布未完成。请选择保留本地修改或重新加载远端草稿。"
+              : status === 400
+                ? (mediaPublishBlocked
+                    ? "新替换的图片尚未批准公开使用，页面没有发布。超级管理员可在本页确认权利后继续发布。"
+                    : "当前草稿尚未完成审核确认，页面没有发布。超级管理员可直接重试发布；其他账号请先提交审核。")
               : getEditorErrorMessage(error, "发布失败，请稍后重试");
           const lifecycleIssue: PublishValidationIssue = {
             code: status === 409
               ? "publish-request-conflict"
               : status === 403
                 ? "publish-permission-changed"
-                : "publish-validation-unavailable",
+                : status === 400
+                  ? "publish-review-required"
+                  : "publish-validation-unavailable",
             message: failureMessage,
             severity: "error",
             path: "lifecycle.publish",
           };
           if (!isActivePublish()) return;
+          if (status === 409) {
+            // 发布前静默保存可能已清掉脏标记；409 后本地仍需对账，离开必须拦截。
+            setHasUnsavedChanges(true);
+          }
           setPublishAttemptFailure({
             issue: lifecycleIssue,
             sourceSignature: publishSourceSignature,
@@ -1763,6 +2045,7 @@ export function usePageWorkspaceController({
       }
     }
   };
+  publishHomeRef.current = publishHome;
 
 
   const readViewingPublished = useCallback(
@@ -1867,6 +2150,7 @@ export function usePageWorkspaceController({
     reviewSubmittedBy,
     canDiscardDraft,
     publishedNeedsRevalidation,
+    publishedRevalidationErrors,
     viewingPublished,
     draftSavedAtLabel: pageSessionCacheRef.current[workspaceKey]?.lastSaved ?? null,
     readViewingPublished,
@@ -1900,6 +2184,8 @@ export function usePageWorkspaceController({
     submitForReview,
     reviewDraft,
     publishHome,
+    authorizePublicMedia,
+    authorizingPublicMedia,
     trackEditorData,
     syncCanvasDataWithoutAdvancingSavedBaseline,
     saveProtectedChanges,

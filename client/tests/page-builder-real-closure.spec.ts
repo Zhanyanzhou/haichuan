@@ -415,30 +415,30 @@ async function captureAndVerifyReviewToolbar(
   ]) {
     await page.setViewportSize(viewport);
     const locale = page.getByLabel("内容语言", { exact: true });
-    const submit = page.getByRole("button", { name: "提交审核", exact: true });
+    const publish = page.locator(".homepage-editor__toolbar-publish");
     await expect(locale).toBeVisible();
-    await expect(submit).toBeVisible();
-    await expect(submit).toBeEnabled();
-    const submitBox = await submit.boundingBox();
-    if (!submitBox) throw new Error(`${viewport.width}×${viewport.height} 提交审核缺少可用几何尺寸`);
-    expect(submitBox.x).toBeGreaterThanOrEqual(0);
-    expect(submitBox.y).toBeGreaterThanOrEqual(0);
-    expect(submitBox.x + submitBox.width).toBeLessThanOrEqual(viewport.width);
-    expect(submitBox.y + submitBox.height).toBeLessThanOrEqual(viewport.height);
-    expect(await submit.evaluate((element) => {
+    await expect(publish).toBeVisible();
+    await expect(publish).toBeEnabled();
+    const publishBox = await publish.boundingBox();
+    if (!publishBox) throw new Error(`${viewport.width}×${viewport.height} 发布缺少可用几何尺寸`);
+    expect(publishBox.x).toBeGreaterThanOrEqual(0);
+    expect(publishBox.y).toBeGreaterThanOrEqual(0);
+    expect(publishBox.x + publishBox.width).toBeLessThanOrEqual(viewport.width);
+    expect(publishBox.y + publishBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(await publish.evaluate((element) => {
       const box = element.getBoundingClientRect();
       const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       return hit === element || element.contains(hit);
-    }), `${viewport.width}×${viewport.height} 提交审核中心点不得被其他工具覆盖`).toBe(true);
+    }), `${viewport.width}×${viewport.height} 发布中心点不得被其他工具覆盖`).toBe(true);
     expect(await page.locator(".homepage-editor__locale-review-controls").evaluate((element) => (
       element.scrollWidth <= element.clientWidth
       && Array.from(element.querySelectorAll("select, button, [role='status']")).every(
         (control) => control.scrollWidth <= control.clientWidth,
       )
     )), `${viewport.width}×${viewport.height} 语言与审核文字不得裁切`).toBe(true);
-    await submit.focus();
-    await expect(submit).toBeFocused();
-    await expect(submit).toHaveCSS("outline-style", "solid");
+    await publish.focus();
+    await expect(publish).toBeFocused();
+    await expect(publish).toHaveCSS("outline-style", "solid");
     await page.screenshot({
       path: testInfo.outputPath(`page-review-toolbar-${viewport.width}x${viewport.height}.png`),
       fullPage: true,
@@ -554,7 +554,7 @@ async function createTemplateThroughSevenStepRecipe(
   );
   await creator.getByRole("button", { name: "创建模板", exact: true }).click();
   await expect(creator).toBeHidden();
-  await expect(page.getByText("尚未保存", { exact: false }).first()).toBeVisible();
+  await expect(page.getByText(/尚未保存|有未保存修改/).first()).toBeVisible();
 }
 
 async function openFreeRefinementSessionThroughSevenSteps(page: Page) {
@@ -923,7 +923,7 @@ async function createAndPublishFourThreeTemplateThroughUi(
     saved.templateId,
   );
   expect((await confirmAndWaitForSinglePublish()).ok()).toBe(true);
-  await expect(page.getByText("模板 v1 已发布；目录已确认可用。已有页面继续锁定原版本。", { exact: true }))
+  await expect(page.getByText("模板 v1 已发布；目录已确认可用。可在页面装修中选用，不会改任何现有页面。", { exact: true }))
     .toBeVisible();
   await review.getByRole("button", { name: "去页面装修使用", exact: true }).click();
 
@@ -931,7 +931,14 @@ async function createAndPublishFourThreeTemplateThroughUi(
     `[data-unified-template-library="page"] [data-template-identity="template:${saved.templateId}"]`,
   );
   await expect(pageCard).toHaveCount(1);
-  await expect(pageCard).toContainText("已发布 · v1");
+  await expect(pageCard).toHaveAttribute("data-catalog-handoff", "true");
+  await expect(pageCard).toContainText("刚发布 · 已发布 · v1");
+  await expect(page.getByRole("group", { name: "刚发布", exact: true })).toBeVisible();
+  await expect(pageCard.getByRole("button", {
+    name: `添加到页面：${templateName} v1`,
+    exact: true,
+  })).toBeFocused();
+  await expect(page.getByText(`已添加“${templateName}”v1`, { exact: false })).toHaveCount(0);
   const published = await responseData<{
     definition: {
       nodes: Record<string, { nodeId: string; slotId?: string; type: string }>;
@@ -1712,7 +1719,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
         record.templateId,
       );
       expect((await confirmAndWaitForSinglePublish()).ok()).toBe(true);
-      await expect(page.getByText("模板 v1 已发布；目录已确认可用。已有页面继续锁定原版本。", { exact: true })).toBeVisible();
+      await expect(page.getByText("模板 v1 已发布；目录已确认可用。可在页面装修中选用，不会改任何现有页面。", { exact: true })).toBeVisible();
       await review.getByRole("button", { name: "继续设计", exact: true }).click();
 
       const published = await responseData<{
@@ -2365,7 +2372,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
         createdTemplate.templateId,
       );
     expect((await publishV1Once()).ok()).toBe(true);
-    await expect(page.getByText("模板 v1 已发布；目录已确认可用。已有页面继续锁定原版本。", { exact: true })).toBeVisible();
+    await expect(page.getByText("模板 v1 已发布；目录已确认可用。可在页面装修中选用，不会改任何现有页面。", { exact: true })).toBeVisible();
     await publishReviewV1.getByRole("button", { name: "继续设计", exact: true }).click();
     const publishedV1 = await responseData<{
       templateId: string;
@@ -2579,15 +2586,6 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(unchangedPopulatedV1?.props?.layoutOverridesByNodeId).toEqual({});
 
     await captureAndVerifyReviewToolbar(page, testInfo);
-    const submitReviewResponsePromise = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "POST"
-        && url.pathname === "/api/page-modules/document/review/submit";
-    });
-    await page.getByRole("button", { name: "提交审核", exact: true }).click();
-    expect((await submitReviewResponsePromise).ok()).toBe(true);
-    await expect(page.getByTestId("page-review-status")).toHaveText("待审核");
-    await approveCurrentPageDraftThroughApi(page, pageKey);
     const publishPageResponsePromise = page.waitForResponse((response) => {
       const url = new URL(response.url());
       return response.request().method() === "PUT"
@@ -3218,9 +3216,12 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await publishedV2Page.reload();
 
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
-    await page.locator(
+    await recoverTemplateCatalogAfterThrottle(page);
+    const archiveSourceCard = page.locator(
       `[data-unified-template-library="design"] [data-template-identity="template:${createdTemplate.templateId}"] .homepage-editor__template-card-main`,
-    ).click();
+    );
+    await expect(archiveSourceCard).toBeVisible({ timeout: 30_000 });
+    await archiveSourceCard.click();
     await page.locator(".template-editor__toolbar")
       .getByRole("button", { name: "更多模板操作", exact: true }).click();
     await page.getByRole("menuitem", { name: "移入回收站" }).click();
@@ -3237,6 +3238,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(archiveDialog).toBeHidden();
 
     await page.getByRole("button", { name: "页面装修", exact: true }).click();
+    await recoverTemplateCatalogAfterThrottle(page);
     await expect(page.locator(
       `[data-template-identity="template:${createdTemplate.templateId}"]`,
     )).toHaveCount(0);
@@ -3962,7 +3964,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     const navigation = page.getByRole("navigation", { name: "后台导航", exact: true });
     await expect(navigation).toBeVisible();
     await navigation.getByRole("button", { name: /首页/ }).first().click();
-    const leaveGuard = page.getByRole("dialog", { name: "保存后离开？", exact: true });
+    const leaveGuard = page.getByRole("dialog", { name: "离开当前编辑？", exact: true });
     await expect(leaveGuard).toContainText("有未保存修改");
     await expect(page).toHaveURL(/\/admin\/editor\/products/);
     await leaveGuard.getByRole("button", { name: "继续编辑", exact: true }).click();

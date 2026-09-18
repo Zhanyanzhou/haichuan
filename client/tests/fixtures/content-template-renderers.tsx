@@ -46,6 +46,19 @@ const emptyHeroDocument: PuckDocument = {
   }],
 };
 
+const unsupportedHeroDocument: PuckDocument = {
+  ...rendererDocument,
+  content: [{
+    ...rendererDocument.content[0],
+    props: {
+      ...rendererDocument.content[0].props,
+      id: "hero-unsupported-contract",
+      title: "合同错误时不应公开的标题",
+      __contentTemplate: { key: "wrong-key", version: 1 },
+    },
+  }],
+};
+
 const multipleHeroDocument: PuckDocument = {
   ...rendererDocument,
   content: [
@@ -200,6 +213,12 @@ createRoot(document.getElementById("root")!).render(
     </div>
     <div data-renderer-fixture="dynamic-with-image">
       <PuckDocumentRenderer data={dynamicImageDocument(true)} />
+    </div>
+    <div data-renderer-fixture="unsupported-public">
+      <PuckDocumentRenderer data={unsupportedHeroDocument} />
+    </div>
+    <div data-renderer-fixture="unsupported-preview">
+      <PuckDocumentRenderer data={unsupportedHeroDocument} mode="preview" />
     </div>
   </MemoryRouter>,
 );

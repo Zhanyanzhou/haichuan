@@ -123,6 +123,7 @@ async function fixture() {
   const { prisma, rows } = createPrismaDouble();
   const service = new UploadService(prisma, {
     ensureLegacyDraft: async () => undefined,
+    ensureUploadAuthorization: async () => undefined,
   } as never);
   Object.defineProperty(service, 'uploadDir', { value: join(root, 'uploads') });
   Object.defineProperty(service, 'archivedPageMediaRoot', { value: join(root, 'private-media', 'page-assets-archive') });
@@ -163,7 +164,7 @@ test('商品图片上传会登记 MediaAsset 并以旧素材默认拒绝策略�
   const { prisma, rows } = createPrismaDouble();
   const authorizationCalls: Array<{ assetId: number; uploadedBy?: number }> = [];
   const service = new UploadService(prisma, {
-    ensureLegacyDraft: async (_transaction: unknown, assetId: number, uploadedBy?: number) => {
+    ensureUploadAuthorization: async (_transaction: unknown, assetId: number, uploadedBy?: number) => {
       authorizationCalls.push({ assetId, uploadedBy });
     },
   } as never);

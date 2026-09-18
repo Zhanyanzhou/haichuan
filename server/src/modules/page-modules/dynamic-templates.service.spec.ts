@@ -979,10 +979,12 @@ test("正式版本向 EDITOR 开放，设计操作只允许超级管理员且旧
   assert.equal(Reflect.getMetadata(ROLES_KEY, prototype.getPublishedVersion), undefined);
   for (const method of [
     prototype.listMine,
+    prototype.ensureConsultationStarters,
     prototype.create,
     prototype.getDraft,
     prototype.updateDraft,
     prototype.publish,
+    prototype.rebuildDraftFromPublished,
     prototype.listVersions,
     prototype.archive,
     prototype.restore,
@@ -1013,6 +1015,7 @@ test("正式版本向 EDITOR 开放，设计操作只允许超级管理员且旧
 test("统一母模板目录只返回 Repository 正式版本与可编辑草稿", async () => {
   const listMineCalls: number[] = [];
   const controller = new DynamicTemplatesController({
+    ensureConsultationStarters: async () => ({ items: [] }),
     listPublished: async () => [{ templateId: "tpl_published" }],
     listMine: async (ownerId: number) => {
       listMineCalls.push(ownerId);

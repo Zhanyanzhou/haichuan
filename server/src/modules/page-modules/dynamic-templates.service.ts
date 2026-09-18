@@ -23,6 +23,10 @@ import {
   collectDynamicTemplateInstanceReferences,
   getDynamicTemplateDefinitionMediaReferences,
 } from "./dynamic-template-instance";
+import {
+  buildConsultationStarterDefinition,
+  CONSULTATION_STARTER_SPECS,
+} from "./consultation-starter-templates";
 import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
 import {
   buildManagedMediaShadowReport,
@@ -640,6 +644,90 @@ export class DynamicTemplatesService {
       const deleteBlockers = this.catalogDeleteBlockers(template, evidence);
       return { ...template, canDelete: deleteBlockers.length === 0, deleteBlockers };
     });
+  }
+
+  async ensureConsultationStarters(ownerId: number | undefined) {
+    const resolvedOwnerId = this.requireOwnerId(ownerId);
+    const existing = await this.prisma.dynamicTemplate.findMany({
+      where: {
+        sourceReference: {
+          in: CONSULTATION_STARTER_SPECS.map((spec) => spec.sourceReference),
+        },
+        status: "ACTIVE",
+      },
+      include: { draft: true },
+    });
+    const existingByReference = new Map(
+      existing.flatMap((template) => (
+        template.sourceReference ? [[template.sourceReference, template] as const] : []
+      )),
+    );
+    const results: Array<{
+      sourceReference: string;
+      templateId: string;
+      outcome: "already-published" | "published-existing-draft" | "created" | "skipped-foreign";
+    }> = [];
+    for (const spec of CONSULTATION_STARTER_SPECS) {
+      const found = existingByReference.get(spec.sourceReference);
+      if (found && found.publishedVersion > 0) {
+        results.push({
+          sourceReference: spec.sourceReference,
+          templateId: found.templateId,
+          outcome: "already-published",
+        });
+        continue;
+      }
+      if (found && found.ownerId === resolvedOwnerId && found.draft && found.publishedVersion === 0) {
+        await this.publish(resolvedOwnerId, found.templateId, {
+          expectedRevision: found.draft.revision,
+        });
+        results.push({
+          sourceReference: spec.sourceReference,
+          templateId: found.templateId,
+          outcome: "published-existing-draft",
+        });
+        continue;
+      }
+      if (found) {
+        results.push({
+          sourceReference: spec.sourceReference,
+          templateId: found.templateId,
+          outcome: "skipped-foreign",
+        });
+        continue;
+      }
+      let created;
+      try {
+        created = await this.create(resolvedOwnerId, {
+          definition: buildConsultationStarterDefinition(spec),
+          versionNote: "咨询站页面装修起步模板",
+        });
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        created = await this.getOwnedTemplate(resolvedOwnerId, spec.templateId);
+      }
+      if (!created.draft) throw new ConflictException("起步模板草稿创建失败");
+      await this.prisma.dynamicTemplate.updateMany({
+        where: {
+          templateId: created.templateId,
+          ownerId: resolvedOwnerId,
+          sourceType: "CUSTOM",
+          status: "ACTIVE",
+        },
+        data: { sourceReference: spec.sourceReference },
+      });
+      if (created.publishedVersion === 0) {
+        await this.publish(resolvedOwnerId, created.templateId, {
+          expectedRevision: created.draft.revision,
+        });
+      }
+      results.push({
+        sourceReference: spec.sourceReference,
+        templateId: created.templateId,
+        outcome: "created",
+      });
+    }
+    return { items: results };
   }
 
   async listPublished() {

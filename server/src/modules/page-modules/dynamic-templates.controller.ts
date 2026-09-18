@@ -16,6 +16,7 @@ import { SkipGenericAudit } from "../../common/decorators/skip-generic-audit.dec
 import { RolesGuard } from "../../common/guards/roles.guard";
 import type { StaffRequest } from "../../common/security/authenticated-principal";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
+import { Throttle } from "@nestjs/throttler";
 import {
   ArchiveDynamicTemplateDto,
   CreateDynamicTemplateDto,
@@ -24,6 +25,9 @@ import {
   UpdateDynamicTemplateDraftDto,
 } from "./dto";
 import { DynamicTemplatesService } from "./dynamic-templates.service";
+
+/** 模板目录与版本读取会在保存/发布后连续刷新；不能与全局 60/min 共用同一拒绝阈值。 */
+const STAFF_TEMPLATE_READ_THROTTLE = { default: { limit: 600, ttl: 60_000 } };
 
 @ApiTags("母模板")
 @ApiBearerAuth()
@@ -34,6 +38,7 @@ export class DynamicTemplatesController {
   constructor(private readonly service: DynamicTemplatesService) {}
 
   @Get("catalog")
+  @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取统一母模板目录（正式版本与可编辑草稿）" })
   async listCatalog(@Req() req: StaffRequest) {
     const [published, editable] = await Promise.all([
@@ -48,13 +53,22 @@ export class DynamicTemplatesController {
     };
   }
 
+  @Roles("SUPER_ADMIN")
+  @Post("consultation-starters")
+  @ApiOperation({ summary: "安装咨询站页面装修起步模板（幂等）" })
+  ensureConsultationStarters(@Req() req: StaffRequest) {
+    return this.service.ensureConsultationStarters(req.user.id);
+  }
+
   @Get("published")
+  @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取后台可用的母模板正式版本" })
   listPublished() {
     return this.service.listPublished();
   }
 
   @Get("published/:templateId/versions/:version")
+  @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取指定母模板正式版本" })
   getPublishedVersion(
     @Param("templateId") templateId: string,
@@ -65,6 +79,7 @@ export class DynamicTemplatesController {
 
   @Roles("SUPER_ADMIN")
   @Get("mine")
+  @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取当前管理员拥有的母模板与草稿" })
   listMine(@Req() req: StaffRequest) {
     return this.service.listMine(req.user.id);
@@ -79,6 +94,7 @@ export class DynamicTemplatesController {
 
   @Roles("SUPER_ADMIN")
   @Get(":templateId/draft")
+  @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取当前管理员拥有的母模板草稿" })
   getDraft(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
     return this.service.getDraft(req.user.id, templateId);
@@ -121,6 +137,7 @@ export class DynamicTemplatesController {
 
   @Roles("SUPER_ADMIN")
   @Get(":templateId/versions")
+  @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取当前管理员模板的版本历史" })
   listVersions(
     @Param("templateId") templateId: string,

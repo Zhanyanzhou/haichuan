@@ -33,6 +33,7 @@ import { DynamicTemplatesController } from "./dynamic-templates.controller";
 type ServiceMethod =
   | "archive"
   | "create"
+  | "ensureConsultationStarters"
   | "getDraft"
   | "getPublishedVersion"
   | "listMine"
@@ -62,6 +63,10 @@ function createHarness(options: {
   const service = {
     archive: record("archive", options.service?.archive),
     create: record("create", options.service?.create),
+    ensureConsultationStarters: record(
+      "ensureConsultationStarters",
+      options.service?.ensureConsultationStarters,
+    ),
     getDraft: record("getDraft", options.service?.getDraft),
     getPublishedVersion: record(
       "getPublishedVersion",
@@ -129,6 +134,7 @@ test("动态模板 Controller 保持模板草稿、发布与目录路由形状",
       RequestMethod.GET,
     ],
     ["listMine", "mine", RequestMethod.GET],
+    ["ensureConsultationStarters", "consultation-starters", RequestMethod.POST],
     ["create", "/", RequestMethod.POST],
     ["getDraft", ":templateId/draft", RequestMethod.GET],
     ["updateDraft", ":templateId/draft", RequestMethod.PATCH],
@@ -247,6 +253,7 @@ test("类级员工守卫与角色、mine/draft 的 SUPER_ADMIN 加严边界保�
   );
   for (const handler of [
     DynamicTemplatesController.prototype.listMine,
+    DynamicTemplatesController.prototype.ensureConsultationStarters,
     DynamicTemplatesController.prototype.getDraft,
     DynamicTemplatesController.prototype.create,
     DynamicTemplatesController.prototype.updateDraft,
@@ -382,6 +389,7 @@ test("catalog 只组合统一 Repository 的正式版本与可编辑草稿", asy
     ],
   });
   assert.equal(callsFor(harness.calls, "listPublished").length, 1);
+  assert.equal(callsFor(harness.calls, "ensureConsultationStarters").length, 0);
   assert.deepEqual(callsFor(harness.calls, "listMine"), [
     { method: "listMine", args: [52] },
   ]);
@@ -417,6 +425,7 @@ test("ADMIN 目录不读取 SUPER_ADMIN 私有草稿", async () => {
     { items: [] },
   );
   assert.equal(callsFor(harness.calls, "listMine").length, 0);
+  assert.equal(callsFor(harness.calls, "ensureConsultationStarters").length, 0);
   assert.equal(callsFor(harness.calls, "listPublished").length, 1);
 });
 

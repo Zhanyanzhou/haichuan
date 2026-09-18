@@ -6,6 +6,7 @@ import {
   isEditorPageKey,
   type EditorPageKey,
 } from "@/page-builder/config/editorPages";
+import { DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY } from "@/page-builder/dynamic-template-instance/types";
 
 type PublicPuckBlock = {
   type?: string;
@@ -14,6 +15,7 @@ type PublicPuckBlock = {
 
 type PublicPuckData = {
   content?: PublicPuckBlock[];
+  [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]?: unknown;
   [key: string]: unknown;
 };
 
@@ -47,7 +49,7 @@ export function getPublishedPageReadiness(
     : [];
   const brandBlocks = visibleBlocks
     .filter(isRenderablePublishedBrandBlock)
-    .filter((block) => isContentTemplateBlockPublicRenderable(block));
+    .filter((block) => isContentTemplateBlockPublicRenderable(block, data));
   const invalidBlocks = visibleBlocks
     .filter((block) => block?.type !== "业务功能区")
     .filter((block) => !isContentTemplateBlockPublicReady(block));

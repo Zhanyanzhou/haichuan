@@ -85,7 +85,7 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
     expect(server.writes).toEqual([]);
   });
 
-  base("平板隐藏问题定位真实上级，修复保留排列和手机独立隐藏", async ({ page }) => {
+  base("手机隐藏问题定位真实上级，修复保留排列", async ({ page }) => {
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1600, height: 1000 });
     await createBlankTemplate(page);
@@ -109,7 +109,7 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
       return parentId;
     });
     const before = await readSession(page);
-    const issue = structurePanel(page).getByRole("listitem").filter({ hasText: /在平板不可见.*上级/ });
+    const issue = structurePanel(page).getByRole("listitem").filter({ hasText: /在手机不可见.*上级/ });
     await issue.getByRole("button", { name: "定位", exact: true }).click();
     const breakpoint = await page.evaluate(async () => {
       const { useTemplateEditorSession } = await import(
@@ -117,14 +117,14 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
       );
       return useTemplateEditorSession.getState().breakpoint;
     });
-    expect(breakpoint).toBe("tablet");
+    expect(breakpoint).toBe("mobile");
     expect((await readSession(page)).selectedObjectId).toBe(regionId);
     await issue.getByRole("button", { name: "修复", exact: true }).click();
     const after = await readSession(page);
-    expect(after.definition!.nodes[regionId].responsive.tablet).toMatchObject({ hidden: false, display: "flex" });
-    expect(after.definition!.nodes[regionId].responsive.mobile).toEqual(before.definition!.nodes[regionId].responsive.mobile);
+    expect(after.definition!.nodes[regionId].responsive.mobile).toMatchObject({ hidden: false, display: "flex" });
+    expect(after.definition!.nodes[regionId].responsive.tablet).toEqual(before.definition!.nodes[regionId].responsive.tablet);
     await expect(issue).toHaveCount(0);
-    await expect(structurePanel(page).getByRole("listitem").filter({ hasText: /在手机不可见.*上级/ })).toHaveCount(1);
+    await expect(structurePanel(page).getByRole("listitem").filter({ hasText: /在平板不可见/ })).toHaveCount(0);
     expect(after.historyPast).toHaveLength(before.historyPast.length + 1);
     expect(server.writes).toEqual([]);
   });

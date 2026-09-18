@@ -10,7 +10,11 @@ import { DynamicTemplateRenderer, type TemplateDefinitionV2 } from "../template-
 import { registerResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import { analyzeDynamicTemplateUpgrade } from "./upgrade";
-import { DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT } from "../template-editor/templateCatalogEvents";
+import { dropPublishedTemplatesById, publishedCatalogIdentity } from "./publishedTemplateCatalogCache";
+import {
+  DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT,
+  type DynamicTemplateCatalogChangeDetail,
+} from "../template-editor/templateCatalogEvents";
 import type {
   DynamicTemplateUpgradeAnalysis,
   DynamicTemplateUpgradeInstancePlan,
@@ -19,8 +23,67 @@ import "./DynamicTemplateUpgradePanel.css";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
 let publishedTemplatesCache: PublishedDynamicTemplateResource[] | null = null;
+let publishedTemplatesCacheKey = "";
 let publishedTemplatesCachedAt = 0;
 let publishedTemplatesRequest: Promise<PublishedDynamicTemplateResource[]> | null = null;
+let publishedTemplatesLoadGeneration = 0;
+
+export function invalidatePublishedTemplateCatalogCache() {
+  publishedTemplatesCache = null;
+  publishedTemplatesCacheKey = "";
+  publishedTemplatesCachedAt = 0;
+  publishedTemplatesRequest = null;
+  publishedTemplatesLoadGeneration += 1;
+}
+
+function dropPublishedTemplateFromCache(templateId: string) {
+  // 抬升世代并丢弃在途 Promise，避免归档前的 listCatalog 回包把已移除模板写回缓存。
+  publishedTemplatesRequest = null;
+  publishedTemplatesLoadGeneration += 1;
+  if (!publishedTemplatesCache) return;
+  publishedTemplatesCache = dropPublishedTemplatesById(publishedTemplatesCache, templateId);
+  publishedTemplatesCacheKey = publishedCatalogIdentity(publishedTemplatesCache);
+}
+
+function readRemovedCatalogTemplateId(event: Event): string | null {
+  const detail = (event as CustomEvent<DynamicTemplateCatalogChangeDetail | undefined>).detail;
+  return detail?.kind === "removed" ? detail.identity.templateId : null;
+}
+
+async function loadPublishedTemplates(forceRefresh = false) {
+  if (forceRefresh) {
+    invalidatePublishedTemplateCatalogCache();
+  } else if (publishedTemplatesRequest) {
+    return publishedTemplatesRequest;
+  } else if (
+    publishedTemplatesCache
+    && Date.now() - publishedTemplatesCachedAt < CATALOG_CACHE_TTL_MS
+  ) {
+    return publishedTemplatesCache;
+  }
+  const generation = publishedTemplatesLoadGeneration;
+  const request = dynamicTemplateApi.listCatalog({ dedupe: false })
+    .then((response) => {
+      if (generation !== publishedTemplatesLoadGeneration) {
+        return publishedTemplatesCache ?? [];
+      }
+      const catalog = unwrapResponse<TemplateCatalogResource>(response);
+      const templates = catalog?.items.flatMap((item) => (
+        item.kind === "published" ? [item.template] : []
+      )) ?? [];
+      publishedTemplatesCache = templates;
+      publishedTemplatesCacheKey = publishedCatalogIdentity(templates);
+      publishedTemplatesCachedAt = Date.now();
+      return templates;
+    })
+    .finally(() => {
+      if (publishedTemplatesRequest === request) {
+        publishedTemplatesRequest = null;
+      }
+    });
+  publishedTemplatesRequest = request;
+  return request;
+}
 
 type TemplateVersionCheckState =
   | { status: "loading" }
@@ -28,31 +91,6 @@ type TemplateVersionCheckState =
   | { status: "catalog-missing" }
   | { status: "current"; latest: PublishedDynamicTemplateResource }
   | { status: "upgrade-available"; latest: PublishedDynamicTemplateResource };
-
-async function loadPublishedTemplates(forceRefresh = false) {
-  if (publishedTemplatesRequest) return publishedTemplatesRequest;
-  if (
-    !forceRefresh
-    && publishedTemplatesCache
-    && Date.now() - publishedTemplatesCachedAt < CATALOG_CACHE_TTL_MS
-  ) {
-    return publishedTemplatesCache;
-  }
-  publishedTemplatesRequest = dynamicTemplateApi.listCatalog()
-    .then((response) => {
-      const catalog = unwrapResponse<TemplateCatalogResource>(response);
-      const templates = catalog?.items.flatMap((item) => (
-        item.kind === "published" ? [item.template] : []
-      )) ?? [];
-      publishedTemplatesCache = templates;
-      publishedTemplatesCachedAt = Date.now();
-      return templates;
-    })
-    .finally(() => {
-      publishedTemplatesRequest = null;
-    });
-  return publishedTemplatesRequest;
-}
 
 export default function DynamicTemplateUpgradePanel({
   definition,
@@ -98,8 +136,16 @@ export default function DynamicTemplateUpgradePanel({
           }
         });
     };
-    refreshLatest(reloadRequest > 0);
-    const refreshAfterCatalogChange = () => refreshLatest(true);
+    refreshLatest(true);
+    const refreshAfterCatalogChange = (event: Event) => {
+      const removedTemplateId = readRemovedCatalogTemplateId(event);
+      if (removedTemplateId) {
+        dropPublishedTemplateFromCache(removedTemplateId);
+        refreshLatest(false);
+        return;
+      }
+      refreshLatest(true);
+    };
     window.addEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
     return () => {
       cancelled = true;

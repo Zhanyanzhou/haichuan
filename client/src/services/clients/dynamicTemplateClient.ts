@@ -142,6 +142,12 @@ export const dynamicTemplateApi = {
       dedupe: options.dedupe,
     });
   },
+  ensureConsultationStarters: async () => {
+    if (USE_MOCK) unavailableMockWrite();
+    return api.post("/page-modules/dynamic-templates/consultation-starters", undefined, {
+      suppressGlobalError: true,
+    });
+  },
   getPublishedVersion: async (templateId: string, version: number) => {
     if (USE_MOCK) {
       await mockDelay(80);

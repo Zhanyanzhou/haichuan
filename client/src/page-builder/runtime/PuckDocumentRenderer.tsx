@@ -123,7 +123,7 @@ function renderBlock(
     path: `content[${index}].props.__contentTemplate`,
   }).find((issue) => issue.severity === "error");
   if (templateIssue) {
-    return (
+    return mode === "public" ? null : (
       <UnsupportedContentTemplateState
         key={key}
         type={block.type}
@@ -261,9 +261,11 @@ export default function PuckDocumentRenderer({
       <ErrorBoundary
         key={`eb-${block.props?.id || index}`}
         fallback={
-          <section role="status" style={{ padding: "48px 24px", textAlign: "center", color: "#5F6568" }}>
-            {english ? "This content is temporarily unavailable" : "该内容暂不可展示"}
-          </section>
+          mode === "public" ? null : (
+            <section role="status" style={{ padding: "48px 24px", textAlign: "center", color: "#5F6568" }}>
+              {english ? "This content is temporarily unavailable" : "该内容暂不可展示"}
+            </section>
+          )
         }
       >
         <GuardedBlock
