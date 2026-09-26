@@ -71,3 +71,22 @@ test('创建商品 DTO 接受两种库存策略并拒绝未知值', async () => 
   });
   assert.ok(errors.some((error) => error.property === 'inventoryPolicy'));
 });
+
+test('创建商品 DTO 只接受去重后的既有提取方式', async () => {
+  const accepted = await validateCreateProduct({
+    ...validProduct,
+    deliveryMethods: ['EXPRESS', 'STORE_PICKUP', 'DEDICATED'],
+  });
+  assert.equal(accepted.length, 0);
+
+  for (const deliveryMethods of [
+    ['EXPRESS', 'EXPRESS'],
+    ['SAME_CITY_COURIER'],
+  ]) {
+    const errors = await validateCreateProduct({
+      ...validProduct,
+      deliveryMethods,
+    });
+    assert.ok(errors.some((error) => error.property === 'deliveryMethods'));
+  }
+});

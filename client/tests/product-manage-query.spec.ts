@@ -231,4 +231,177 @@ test.describe("商品管理列表查询契约", () => {
     await expect.poll(() => statusWrites).toEqual(["PUBLISHED"]);
     expect(contentWrites).toBe(0);
   });
+
+  test("迟到的退回审核响应按当前页签回读，不用发起操作时的旧筛选覆盖列表", async ({ page }) => {
+    await installAdminSession(page, { username: "late-status-admin", role: "ADMIN" });
+    const productStatus = "DRAFT";
+    let reviewStatus: "IN_REVIEW" | "DRAFT" = "IN_REVIEW";
+    let releaseStatusWrite!: () => void;
+    let markStatusWriteStarted!: () => void;
+    const statusWriteGate = new Promise<void>((resolve) => {
+      releaseStatusWrite = resolve;
+    });
+    const statusWriteStarted = new Promise<void>((resolve) => {
+      markStatusWriteStarted = resolve;
+    });
+    const productQueries: string[] = [];
+    const product = {
+      id: 21,
+      code: "LATE-STATUS-21",
+      name: "迟到退回作品",
+      categoryId: 1,
+      materialType: "GOLD_999",
+      salesMode: "DISPLAY_ONLY",
+      visibility: "PUBLIC",
+      price: 12800,
+      totalStock: 1,
+      salesCount: 0,
+      images: [],
+      skus: [],
+      createdAt: "2026-09-22T08:00:00.000Z",
+    };
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const path = url.pathname;
+      if (path === "/api/auth/profile") return route.fallback();
+      if (path === "/api/products/21/status" && request.method() === "PUT") {
+        reviewStatus = "DRAFT";
+        markStatusWriteStarted();
+        await statusWriteGate;
+        return route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: 200,
+            data: { ...product, status: productStatus, reviewStatus },
+            message: "ok",
+          }),
+        });
+      }
+      if (path === "/api/products") {
+        productQueries.push(url.search);
+        const requestedStatus = url.searchParams.get("status");
+        const list = !requestedStatus || requestedStatus === productStatus
+          ? [{ ...product, status: productStatus, reviewStatus }]
+          : [];
+        return route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ code: 200, data: { list, total: list.length }, message: "ok" }),
+        });
+      }
+      const data = path === "/api/products/counts"
+        ? {
+            all: 1,
+            DRAFT: 1,
+            PUBLISHED: 0,
+            OFFLINE: 0,
+            ARCHIVED: 0,
+          }
+        : path === "/api/categories/admin/tree"
+          ? []
+          : {};
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "ok" }),
+      });
+    });
+
+    await page.goto("/admin/products?status=DRAFT");
+    const productRow = page.getByRole("row").filter({ hasText: product.name });
+    await productRow.getByRole("button", { name: "退回修改", exact: true }).click();
+    await statusWriteStarted;
+
+    await page.getByRole("tab", { name: /仓库中/ }).click();
+    await expect(page).toHaveURL(/status=OFFLINE/);
+    await expect.poll(() => productQueries.filter((query) => (
+      new URLSearchParams(query).get("status") === "OFFLINE"
+    )).length).toBeGreaterThan(0);
+    releaseStatusWrite();
+
+    await expect(productRow).toHaveCount(0);
+    await expect.poll(() => {
+      const latest = productQueries.at(-1);
+      return latest ? new URLSearchParams(latest).get("status") : null;
+    }).toBe("OFFLINE");
+  });
+
+  test("批量提交审核成功后重新读取权威审核状态", async ({ page }) => {
+    await installAdminSession(page, {
+      username: "batch-review-editor",
+      realName: "批量审核编辑",
+      role: "EDITOR",
+    });
+    const reviewStatuses = new Map<number, "IN_REVIEW">();
+    let productReads = 0;
+    const products = [31, 32].map((id) => ({
+      id,
+      code: `BATCH-REVIEW-${id}`,
+      name: `批量审核作品 ${id}`,
+      categoryId: 1,
+      materialType: "GOLD_999",
+      status: "DRAFT",
+      salesMode: "DISPLAY_ONLY",
+      visibility: "PUBLIC",
+      price: 12800,
+      totalStock: 1,
+      salesCount: 0,
+      images: [],
+      skus: [],
+      createdAt: "2026-09-22T08:00:00.000Z",
+    }));
+
+    await page.route("**/api/**", async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (path === "/api/auth/profile") return route.fallback();
+      const submitMatch = path.match(/^\/api\/products\/(31|32)\/submit-review$/);
+      if (submitMatch && request.method() === "POST") {
+        const id = Number(submitMatch[1]);
+        reviewStatuses.set(id, "IN_REVIEW");
+        return route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: 200,
+            data: { productId: id, reviewStatus: "IN_REVIEW", submittedAt: "2026-09-22T08:10:00.000Z" },
+            message: "ok",
+          }),
+        });
+      }
+      if (path === "/api/products") {
+        productReads += 1;
+        const list = products.map((product) => ({
+          ...product,
+          reviewStatus: reviewStatuses.get(product.id),
+        }));
+        return route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ code: 200, data: { list, total: list.length }, message: "ok" }),
+        });
+      }
+      const data = path === "/api/products/counts"
+        ? { all: 2, DRAFT: 2, PUBLISHED: 0, OFFLINE: 0, ARCHIVED: 0 }
+        : path === "/api/categories/admin/tree"
+          ? []
+          : {};
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "ok" }),
+      });
+    });
+
+    await page.goto("/admin/products?status=DRAFT");
+    await expect(page.getByRole("button", { name: "提交审核" })).toHaveCount(2);
+    const readsBeforeSubmit = productReads;
+    for (const product of products) {
+      await page.getByRole("row").filter({ hasText: product.name }).getByRole("checkbox").check();
+    }
+    await page.getByRole("button", { name: "更多批量操作" }).click();
+    await page.getByRole("menuitem", { name: "批量提交审核" }).click();
+
+    await expect(page.getByText("已提交 2 件商品审核", { exact: true })).toBeVisible();
+    await expect.poll(() => productReads).toBeGreaterThan(readsBeforeSubmit);
+    await expect(page.getByText("审核中", { exact: true })).toHaveCount(2);
+    await expect(page.getByRole("button", { name: "提交审核" })).toHaveCount(0);
+  });
 });

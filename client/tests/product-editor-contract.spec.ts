@@ -198,6 +198,288 @@ test.describe("商品编辑器现有接口契约", () => {
     expect(antdConsoleProblems).toEqual([]);
   });
 
+  test("保存后以权威 GET 完整回填服务端规范化字段", async ({ page }) => {
+    await installAdminSession(page);
+    let saved = false;
+    let updatePayload: Record<string, unknown> | undefined;
+    const baseProduct = {
+      id: 10,
+      code: "CANONICAL-010",
+      name: "初始标题",
+      shortDescription: "完整商品简介与佩戴建议",
+      description: "完整商品说明，用于验证保存后的权威回读。",
+      categoryId: 1,
+      materialType: "AU750",
+      price: 6999,
+      status: "OFFLINE",
+      visibility: "MEMBER",
+      salesMode: "DISPLAY_ONLY",
+      inventoryPolicy: "STANDARD",
+      purchaseRegion: "MAINLAND",
+      publishMode: "WAREHOUSE",
+      fulfillmentType: "PREORDER",
+      dispatchTime: "CUSTOM",
+      customLeadTime: "确认规格后 15 个工作日",
+      deliveryMethods: ["EXPRESS"],
+      shippingTemplateId: 7,
+      requiresInsuredShipping: false,
+      requiresSignature: false,
+      includesCertificate: false,
+      images: [{ id: 110, productId: 10, url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", type: "FRONT", sortOrder: 0, isVideo: false }],
+      skus: [{ id: 210, productId: 10, skuCode: "CANONICAL-010-A", material: "AU750", size: "14", price: 6999, isActive: true }],
+      detailContent: [],
+    };
+
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
+      if (url.pathname === "/api/categories/admin/tree") return fulfill(route, [{ id: 1, name: "戒指", children: [] }]);
+      if (url.pathname === "/api/shipping-templates") return fulfill(route, [{ id: 7, name: "标准配送", isDefault: true, isActive: true }]);
+      if (url.pathname === "/api/settings/flags") return fulfill(route, { commerceEnabled: true, cartEnabled: true, paymentEnabled: false });
+      if (url.pathname === "/api/products/10" && route.request().method() === "GET") {
+        return fulfill(route, saved ? {
+          ...baseProduct,
+          name: "服务端规范化标题",
+          salesMode: "APPOINTMENT",
+          dispatchTime: "WITHIN_24_HOURS",
+          customLeadTime: null,
+          deliveryMethods: ["STORE_PICKUP"],
+          shippingTemplateId: null,
+        } : baseProduct);
+      }
+      if (url.pathname === "/api/products/10" && route.request().method() === "PUT") {
+        updatePayload = route.request().postDataJSON() as Record<string, unknown>;
+        saved = true;
+        return fulfill(route, { id: 10 });
+      }
+      return fulfill(route, {});
+    });
+
+    await page.goto("/admin/products/10/edit");
+    const title = page.getByRole("textbox", { name: "商品标题" });
+    await expect(title).toHaveValue("初始标题");
+    await title.fill("仅存在于提交前的本地标题");
+    await page.getByRole("radio", { name: "24小时内" }).click();
+    await page.getByRole("button", { name: "保存更改" }).click();
+
+    await expect(page.getByText("商品已保存至仓库")).toBeVisible();
+    expect(updatePayload?.customLeadTime).toBeNull();
+    await expect(title).toHaveValue("服务端规范化标题");
+    await expect(page.getByRole("radio", { name: "预约到店" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "24小时内" })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "到店自提" })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "物流配送" })).not.toBeChecked();
+    await expect(page.locator(".pro-editor__footer [role='status']")).toContainText("最后保存于");
+  });
+
+  test("写入成功但权威 GET 暂时失败时只重试回读，不重复 PUT 或发布动作", async ({ page }) => {
+    await installAdminSession(page);
+    let productGetRequests = 0;
+    let updateRequests = 0;
+    let publishRequests = 0;
+    let writesCompleted = false;
+    let releaseLateVerification!: () => void;
+    let signalLateVerificationStarted!: () => void;
+    const lateVerificationGate = new Promise<void>((resolve) => {
+      releaseLateVerification = resolve;
+    });
+    const lateVerificationStarted = new Promise<void>((resolve) => {
+      signalLateVerificationStarted = resolve;
+    });
+    const baseProduct = {
+      id: 15,
+      code: "VERIFY-015",
+      name: "待更新的已发布商品",
+      shortDescription: "完整商品简介与佩戴建议",
+      description: "完整商品说明，用于验证保存结果未知时的只读恢复。",
+      categoryId: 1,
+      materialType: "AU750",
+      price: 6999,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      salesMode: "DISPLAY_ONLY",
+      inventoryPolicy: "STANDARD",
+      purchaseRegion: "MAINLAND",
+      publishMode: "IMMEDIATE",
+      fulfillmentType: "IN_STOCK",
+      dispatchTime: "WITHIN_48_HOURS",
+      deliveryMethods: [],
+      images: [{ id: 115, productId: 15, url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", type: "FRONT", sortOrder: 0, isVideo: false }],
+      skus: [],
+      detailContent: [],
+    };
+
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
+      if (url.pathname === "/api/categories/admin/tree") return fulfill(route, [{ id: 1, name: "戒指", children: [] }]);
+      if (url.pathname === "/api/shipping-templates") return fulfill(route, []);
+      if (url.pathname === "/api/settings/flags") return fulfill(route, { commerceEnabled: false, cartEnabled: false, paymentEnabled: false });
+      if (url.pathname === "/api/products/15" && route.request().method() === "GET") {
+        productGetRequests += 1;
+        if (productGetRequests === 2 || productGetRequests === 4) {
+          return fulfill(route, { statusCode: 503, message: "temporary read failure" }, 503);
+        }
+        if (productGetRequests === 5) {
+          signalLateVerificationStarted();
+          await lateVerificationGate;
+        }
+        return fulfill(route, writesCompleted ? {
+          ...baseProduct,
+          name: "权威回读确认后的商品标题",
+        } : baseProduct);
+      }
+      if (url.pathname === "/api/products/16" && route.request().method() === "GET") {
+        return fulfill(route, {
+          ...baseProduct,
+          id: 16,
+          code: "VERIFY-016",
+          name: "另一件商品",
+          images: [],
+        });
+      }
+      if (url.pathname === "/api/products/15" && route.request().method() === "PUT") {
+        updateRequests += 1;
+        return fulfill(route, { id: 15 });
+      }
+      if (url.pathname === "/api/products/15/status" && route.request().method() === "PUT") {
+        publishRequests += 1;
+        writesCompleted = true;
+        return fulfill(route, { ...baseProduct, name: "权威回读确认后的商品标题" });
+      }
+      return fulfill(route, {});
+    });
+
+    await page.goto("/admin/products/15/edit");
+    const title = page.getByRole("textbox", { name: "商品标题" });
+    await expect(title).toHaveValue("待更新的已发布商品");
+    await title.fill("运营提交的新标题");
+    await page.getByRole("button", { name: "保存更改" }).click();
+
+    const pendingVerification = page.getByRole("alert").filter({ hasText: "商品已写入，最新状态待确认" });
+    await expect(pendingVerification).toBeVisible();
+    await expect(pendingVerification).toContainText("系统不会重复保存或重新执行发布动作");
+    await expect(title).toHaveValue("运营提交的新标题");
+    expect(updateRequests).toBe(1);
+    expect(publishRequests).toBe(1);
+    expect(productGetRequests).toBe(2);
+
+    await pendingVerification.getByRole("button", { name: "重新读取保存结果" }).click();
+    await expect(title).toHaveValue("权威回读确认后的商品标题");
+    await expect(page.getByText("商品保存结果已确认")).toBeVisible();
+    await expect(page.locator(".pro-editor__footer [role='status']")).toContainText("最后保存于");
+    expect(updateRequests).toBe(1);
+    expect(publishRequests).toBe(1);
+    expect(productGetRequests).toBe(3);
+
+    await expect(page.getByText("商品保存结果已确认")).toHaveCount(0, { timeout: 5000 });
+    await title.fill("第二次运营修改");
+    await page.getByRole("button", { name: "保存更改" }).click();
+    await expect(pendingVerification).toBeVisible();
+    await pendingVerification.getByRole("button", { name: "重新读取保存结果" }).click();
+    await lateVerificationStarted;
+
+    await page.getByRole("button", { name: "返回商品列表" }).click();
+    const leaveDialog = page.getByRole("dialog", { name: "离开当前编辑？" });
+    await expect(leaveDialog).toBeVisible();
+    await leaveDialog.getByRole("button", { name: "放弃修改" }).click();
+    await expect(page).toHaveURL(/\/admin\/products$/);
+    await page.goto("/admin/products/16/edit");
+    await expect(page).toHaveURL(/\/admin\/products\/16\/edit$/);
+    await expect(title).toHaveValue("另一件商品");
+
+    releaseLateVerification();
+    await expect(title).toHaveValue("另一件商品");
+    await expect(page.getByText("商品保存结果已确认")).toHaveCount(0);
+    expect(updateRequests).toBe(2);
+    expect(publishRequests).toBe(2);
+    expect(productGetRequests).toBe(5);
+  });
+
+  test("保存中切换商品时隔离旧编辑会话的迟到回读", async ({ page }) => {
+    await installAdminSession(page);
+    let releaseProductAUpdate!: () => void;
+    let signalProductAUpdateStarted!: () => void;
+    let signalProductARefreshFinished!: () => void;
+    const productAUpdateGate = new Promise<void>((resolve) => {
+      releaseProductAUpdate = resolve;
+    });
+    const productAUpdateStarted = new Promise<void>((resolve) => {
+      signalProductAUpdateStarted = resolve;
+    });
+    const productARefreshFinished = new Promise<void>((resolve) => {
+      signalProductARefreshFinished = resolve;
+    });
+    let productAGetCount = 0;
+
+    const createProduct = (id: number, name: string) => ({
+      id,
+      code: `ROUTE-${id}`,
+      name,
+      shortDescription: `${name}的完整简介与佩戴建议`,
+      description: `${name}的完整商品说明，用于验证编辑会话隔离。`,
+      categoryId: 1,
+      materialType: "AU750",
+      price: 6999,
+      status: "OFFLINE",
+      visibility: "MEMBER",
+      salesMode: "DISPLAY_ONLY",
+      inventoryPolicy: "STANDARD",
+      purchaseRegion: "MAINLAND",
+      publishMode: "WAREHOUSE",
+      fulfillmentType: "IN_STOCK",
+      dispatchTime: "WITHIN_48_HOURS",
+      deliveryMethods: [],
+      images: [],
+      skus: [],
+      detailContent: [],
+    });
+
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
+      if (url.pathname === "/api/categories/admin/tree") return fulfill(route, [{ id: 1, name: "戒指", children: [] }]);
+      if (url.pathname === "/api/shipping-templates") return fulfill(route, []);
+      if (url.pathname === "/api/settings/flags") return fulfill(route, { commerceEnabled: false, cartEnabled: false, paymentEnabled: false });
+      if (url.pathname === "/api/products/10" && route.request().method() === "GET") {
+        productAGetCount += 1;
+        await fulfill(route, createProduct(10, productAGetCount === 1 ? "商品 A" : "商品 A 迟到回读"));
+        if (productAGetCount > 1) signalProductARefreshFinished();
+        return;
+      }
+      if (url.pathname === "/api/products/10" && route.request().method() === "PUT") {
+        signalProductAUpdateStarted();
+        await productAUpdateGate;
+        return fulfill(route, { id: 10 });
+      }
+      if (url.pathname === "/api/products/11" && route.request().method() === "GET") {
+        return fulfill(route, createProduct(11, "商品 B"));
+      }
+      return fulfill(route, {});
+    });
+
+    await page.goto("/admin/products/10/edit");
+    const title = page.getByRole("textbox", { name: "商品标题" });
+    await expect(title).toHaveValue("商品 A");
+    await title.fill("商品 A 待保存");
+    await page.getByRole("button", { name: "保存更改" }).click();
+    await productAUpdateStarted;
+
+    await page.evaluate(() => {
+      window.history.pushState({}, "", "/admin/products/11/edit");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(page).toHaveURL(/\/admin\/products\/11\/edit$/);
+    await expect(title).toHaveValue("商品 B");
+    await expect(page.getByRole("button", { name: "保存更改" })).not.toHaveClass(/ant-btn-loading/);
+
+    releaseProductAUpdate();
+    await productARefreshFinished;
+    await expect(title).toHaveValue("商品 B");
+    await expect(page.locator(".pro-editor__footer [role='status']")).toContainText("当前状态：仓库中");
+    await expect(page.getByText("草稿已保存")).toHaveCount(0);
+  });
+
   test("列表发布错误使用审核文案，下架必须确认后才发送请求", async ({ page }) => {
     const antdConsoleProblems: string[] = [];
     const duplicatedExpectedFailures: string[] = [];
@@ -273,6 +555,9 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByText("一物一件", { exact: true })).toBeVisible();
     await expect(page.getByText("售罄 / 不可加入购物车", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "上架" }).click();
+    const publishDialog = page.getByRole("dialog", { name: "上架“发布校验商品”？" });
+    await expect(publishDialog).toBeVisible();
+    await publishDialog.getByRole("button", { name: "确认上架" }).click();
     await expect(page.getByText(/商品未达到发布条件/)).toBeVisible();
     expect(publishRequests).toBe(1);
 
@@ -350,5 +635,86 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.locator(".pro-editor__submit-error").getByText(/一物一件商品必须且只能有一个有效 SKU/)).toBeVisible();
     await expect(page.getByText("商品已保存至仓库")).toHaveCount(0);
     expect(updateAttempts).toBe(1);
+  });
+
+  test("首次创建响应丢失后由操作者显式重试并恢复同一货号，不重复创建业务对象", async ({ page }) => {
+    await installAdminSession(page);
+    let createAttempts = 0;
+    let updateAttempts = 0;
+    const createBodies: unknown[] = [];
+    const product = {
+      id: 31,
+      code: "CREATE-RECOVERY-031",
+      name: "未命名商品-CREATE-RECOVERY-031",
+      categoryId: 1,
+      materialType: "GOLD_999",
+      price: 0,
+      status: "DRAFT",
+      visibility: "MEMBER",
+      salesMode: "DISPLAY_ONLY",
+      inventoryPolicy: "STANDARD",
+      purchaseRegion: "MAINLAND",
+      publishMode: "WAREHOUSE",
+      fulfillmentType: "IN_STOCK",
+      dispatchTime: "WITHIN_48_HOURS",
+      deliveryMethods: ["EXPRESS"],
+      requiresInsuredShipping: true,
+      requiresSignature: true,
+      includesCertificate: true,
+      images: [],
+      skus: [{
+        id: 311,
+        productId: 31,
+        skuCode: "CREATE-RECOVERY-031-DEFAULT",
+        material: "GOLD_999",
+        price: 0,
+        isActive: true,
+      }],
+      detailContent: [],
+    };
+
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
+      if (url.pathname === "/api/categories/admin/tree") return fulfill(route, [{ id: 1, name: "戒指", children: [] }]);
+      if (url.pathname === "/api/shipping-templates") return fulfill(route, []);
+      if (url.pathname === "/api/settings/flags") return fulfill(route, { commerceEnabled: false, cartEnabled: false, paymentEnabled: false });
+      if (url.pathname === "/api/products" && route.request().method() === "POST") {
+        createAttempts += 1;
+        createBodies.push(route.request().postDataJSON());
+        if (createAttempts === 1) {
+          return fulfill(route, { statusCode: 503, message: "response lost after commit" }, 503);
+        }
+        return fulfill(route, product);
+      }
+      if (url.pathname === "/api/products/31" && route.request().method() === "PUT") {
+        updateAttempts += 1;
+        return fulfill(route, { id: 31 });
+      }
+      if (url.pathname === "/api/products/31" && route.request().method() === "GET") {
+        return fulfill(route, product);
+      }
+      return fulfill(route, {});
+    });
+
+    await page.goto("/admin/products/new");
+    await page.getByRole("button", { name: "基础信息" }).click();
+    await page.getByRole("textbox", { name: "货号" }).fill(product.code);
+    await page.getByRole("combobox", { name: "当前类目" }).click();
+    await page.getByText("戒指", { exact: true }).click();
+
+    const saveDraft = page.getByRole("button", { name: "保存草稿" });
+    await saveDraft.click();
+    await expect(page.locator(".pro-editor__submit-error")).toContainText("商品创建结果待确认");
+    await expect(page.locator(".pro-editor__submit-error")).toContainText("再次点击保存");
+    expect(createAttempts).toBe(1);
+    expect(updateAttempts).toBe(0);
+
+    await saveDraft.click();
+    await expect(page.getByText("草稿已保存")).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/products\/31\/edit$/);
+    expect(createAttempts).toBe(2);
+    expect(updateAttempts).toBe(1);
+    expect(createBodies[1]).toEqual(createBodies[0]);
   });
 });

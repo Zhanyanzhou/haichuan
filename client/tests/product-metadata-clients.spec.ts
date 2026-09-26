@@ -137,6 +137,17 @@ test("AI 分类记录、报告与人工确认保持现有请求合同", async ({
   await expect(
     page.getByRole("heading", { name: "AI 智能分类" }),
   ).toBeVisible();
+  await expect(
+    page.getByText("这里记录识别审核结果，不会修改商品分类", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "确认或驳回只用于核对模型识别记录。需要调整公开商品分类时，请前往商品管理编辑并保存对应商品。",
+      { exact: true },
+    ),
+  ).toBeVisible();
   await expect(page.getByText("平安扣", { exact: true })).toBeVisible();
   await expect(page.getByText("95%", { exact: true })).toBeVisible();
 
@@ -146,6 +157,9 @@ test("AI 分类记录、报告与人工确认保持现有请求合同", async ({
   await page.getByRole("button", { name: "确认结果" }).click();
 
   await expect.poll(() => confirmations.length).toBe(1);
+  await expect(
+    page.getByText("识别审核结果已记录，商品分类未修改", { exact: true }),
+  ).toBeVisible();
   expect(confirmations[0].url).toBe("/api/ai-classify/confirm/7");
   expect(confirmations[0].headers.authorization).toBeUndefined();
   expect(confirmations[0].headers["x-csrf-token"]).toBe(

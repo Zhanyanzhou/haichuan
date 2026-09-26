@@ -101,6 +101,15 @@ test(
           passwordHash,
         },
       });
+      const partnerCustomer = await prisma.customer.create({
+        data: {
+          phone: `137${marker.replace(/\D/g, "").padEnd(8, "6").slice(0, 8)}`,
+          name: `合作媒体客户-${marker}`,
+          passwordHash,
+          accountType: "PARTNER",
+          partnerStatus: "APPROVED",
+        },
+      });
       const category = await prisma.category.create({
         data: { name: `媒体会话分类-${marker}`, slug: `media-session-${marker}` },
       });
@@ -260,10 +269,13 @@ test(
         assert.equal(result.response.status, 201);
         return cookieSession(result.response, "admin");
       };
-      const loginCustomer = async (loginPassword = password) => {
+      const loginCustomer = async (
+        loginPassword = password,
+        phone = customer.phone,
+      ) => {
         const result = await jsonCall("/api/customers/login", undefined, {
           method: "POST",
-          body: JSON.stringify({ phone: customer.phone, password: loginPassword }),
+          body: JSON.stringify({ phone, password: loginPassword }),
         });
         assert.equal(result.response.status, 201);
         assert.equal(typeof result.body?.data?.accessToken, "string");
@@ -374,6 +386,76 @@ test(
         await assertRejectedMedia(await call(mediaPath(memberMedia), warehouseToken), 401);
       });
 
+      await t.test("合作资格暂停与受控媒体读取按客户锁串行并使用最新资格", async () => {
+        const partnerToken = await loginCustomer(password, partnerCustomer.phone);
+        await assertMedia(
+          await call(mediaPath(partnerMedia), partnerToken),
+          partnerMedia.bytes,
+        );
+        const auditBefore = await prisma.productAccessLog.count({
+          where: {
+            customerId: partnerCustomer.id,
+            productId: partnerMedia.product.id,
+            eventType: "MEDIA_VIEW",
+          },
+        });
+        assert.equal(auditBefore, 1);
+
+        let settled = false;
+        let pending: Promise<Response> | undefined;
+        await prisma.$transaction(async (transaction) => {
+          await transaction.$queryRaw`SELECT id FROM customers WHERE id = ${partnerCustomer.id} FOR UPDATE`;
+          pending = call(mediaPath(partnerMedia), partnerToken).then((response) => {
+            settled = true;
+            return response;
+          });
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          assert.equal(settled, false, "客户行锁释放前受控媒体读取必须保持等待");
+          await transaction.customer.update({
+            where: { id: partnerCustomer.id },
+            data: { partnerStatus: "SUSPENDED" },
+          });
+        });
+
+        await assertRejectedMedia(await (pending as Promise<Response>), 404);
+        assert.equal(
+          await prisma.productAccessLog.count({
+            where: {
+              customerId: partnerCustomer.id,
+              productId: partnerMedia.product.id,
+              eventType: "MEDIA_VIEW",
+            },
+          }),
+          auditBefore,
+        );
+        assert.equal(
+          (await call(`/api/products/catalog/${partnerMedia.product.id}`, partnerToken)).status,
+          404,
+        );
+        const catalog = await jsonCall(
+          `/api/products/catalog?ids=${partnerMedia.product.id}`,
+          partnerToken,
+        );
+        assert.equal(catalog.response.status, 200);
+        assert.equal(
+          (catalog.body?.data?.list ?? []).some(
+            (entry: { id?: number }) => entry.id === partnerMedia.product.id,
+          ),
+          false,
+        );
+        const recommendations = await jsonCall(
+          "/api/recommendations/hot?limit=24",
+          partnerToken,
+        );
+        assert.equal(recommendations.response.status, 200);
+        assert.equal(
+          (recommendations.body?.data ?? []).some(
+            (entry: { id?: number }) => entry.id === partnerMedia.product.id,
+          ),
+          false,
+        );
+      });
+
       await t.test("客户当前会话注销、全会话改密和对象权限在媒体入口即时生效", async () => {
         const firstCustomerToken = await loginCustomer();
         const secondCustomerToken = await loginCustomer();
@@ -408,10 +490,10 @@ test(
         );
         assert.equal((await call("/api/customers/me", secondCustomerToken)).status, 401);
         await assertRejectedMedia(await call(mediaPath(memberMedia), secondCustomerToken), 401);
-        assert.equal(typeof await loginCustomer(changedPassword), "string");
       });
 
       await t.test("客户混合 Cookie/Bearer 注销仅撤销 Bearer 所在会话家族", async () => {
+        // 后续 cookie 与 bearer 两次登录同时证明改密生效，并保持整套件不越过真实 5/min 登录限流。
         const cookie = await loginCustomerCookie(changedPassword);
         const bearer = await loginCustomer(changedPassword);
         const cookiePayload = jwt.decode(cookie.accessToken) as { sessionFamilyId?: string };

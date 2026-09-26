@@ -13,6 +13,8 @@ import { ProductsService } from './products.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import { CreateTagDto, UpdateTagDto } from './dto/tag.dto';
 
 @ApiTags('标签字典')
@@ -25,19 +27,26 @@ export class TagsController {
 
   @Get()
   @ApiOperation({ summary: '标签字典列表' })
-  list() {
-    return this.productsService.listTags();
+  list(@CurrentUser() actor: StaffPrincipal) {
+    return this.productsService.listTags(actor);
   }
 
   @Post()
   @ApiOperation({ summary: '新增标签' })
-  create(@Body() body: CreateTagDto) {
-    return this.productsService.createTag(body);
+  create(
+    @Body() body: CreateTagDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.createTag(body, actor);
   }
 
   @Put(':id')
   @ApiOperation({ summary: '编辑标签（含启停）' })
-  update(@Param('id', ParseIntPipe) id: number, @Body() body: UpdateTagDto) {
-    return this.productsService.updateTag(id, body);
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: UpdateTagDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.updateTag(id, body, actor);
   }
 }
