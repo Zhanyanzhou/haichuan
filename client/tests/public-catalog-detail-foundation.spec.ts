@@ -1056,7 +1056,7 @@ test("Catalog error 状态提供可理解恢复路径", async ({ page }) => {
   await page.goto("/catalog");
   await expect(page.getByText("作品目录暂时无法加载")).toBeVisible();
   const recoveryActions = page.locator(".catalog-state").getByRole("button", { name: "重新加载" })
-    .or(page.locator(".catalog-state").getByRole("link", { name: "预约咨询" }));
+    .or(page.locator(".catalog-state").getByRole("link", { name: "提交选款需求" }));
   await expect(recoveryActions).toHaveCount(2);
   const actionSizes = await recoveryActions.evaluateAll((actions) => actions.map((action) => {
     const box = action.getBoundingClientRect();

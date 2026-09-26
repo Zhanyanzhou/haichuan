@@ -332,6 +332,10 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     setReceipt(null);
     setSubmitError("");
     setErrors({});
+    // 新入口同时作废旧上下文的结果待确认预约：其迟到响应本就会被丢弃，
+    // 保留预约只会把新入口的首次提交误判为内容冲突。
+    clearConsultationSubmissionAttempt("contact", formOwnerRef.current);
+    setPendingSubmission(false);
 
     if (previous.sourceType !== sourceType) {
       setForm((current) => ({
@@ -1542,16 +1546,6 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
           outline-offset: 2px;
         }
 
-        .contact-privacy-link {
-          display: inline-flex;
-          min-width: 44px;
-          min-height: 44px;
-          align-items: center;
-          justify-content: center;
-          margin-block: -14px;
-          vertical-align: middle;
-        }
-
         .contact-form input:focus-visible,
         .contact-form select:focus-visible,
         .contact-form textarea:focus-visible {
@@ -1569,6 +1563,16 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
             min-height: 44px;
           }
 
+          /* 触控目标补强只在窄屏生效；桌面保持内联文本尺寸（≤24px 门禁）。 */
+          .contact-privacy-link {
+            display: inline-flex;
+            min-width: 44px;
+            min-height: 44px;
+            align-items: center;
+            justify-content: center;
+            margin-block: -14px;
+            vertical-align: middle;
+          }
         }
       `}</style>
     </div>
