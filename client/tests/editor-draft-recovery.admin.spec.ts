@@ -264,8 +264,8 @@ async function approveCurrentPageForPublishing(page: Page) {
 async function mockEditorApis(
   page: Page,
   options: {
-    published?: Record<string, any>;
-    draft?: Record<string, any>;
+    published?: Record<string, any> | null;
+    draft?: Record<string, any> | null;
     saveDelayMs?: number;
     saveFailureCount?: number;
     beforeSaveResponse?: () => Promise<void>;
@@ -284,8 +284,14 @@ async function mockEditorApis(
     savedContentHash?: string;
   } = {},
 ) {
-  let published: Record<string, any> = options.published ?? publishedDoc;
-  let saved: Record<string, any> = { ...(options.draft ?? draftDoc) };
+  let published: Record<string, any> | null = options.published === undefined
+    ? publishedDoc
+    : options.published;
+  let saved: Record<string, any> | null = options.draft === undefined
+    ? { ...draftDoc }
+    : options.draft
+      ? { ...options.draft }
+      : null;
   let revisionsFailureCount = options.revisionsFailureCount ?? 0;
   let revisionDetailFailureCount = options.revisionDetailFailureCount ?? 0;
   let saveFailureCount = options.saveFailureCount ?? 0;
@@ -339,14 +345,14 @@ async function mockEditorApis(
       return route.fulfill(json({
         items: revisions.map(({ puckData: _puckData, metadata: _metadata, ...summary }) => ({
           ...summary,
-          isPublished: summary.isPublished ?? summary.version === published.version,
+          isPublished: summary.isPublished ?? summary.version === published?.version,
         })),
         nextBeforeVersion: null,
       }));
     }
     if (url.includes("/review/submit")) {
       saved = {
-        ...saved,
+        ...(saved ?? {}),
         reviewStatus: "IN_REVIEW",
         submittedBy: 1,
         updatedAt: "2026-08-14T01:40:00.000Z",
@@ -356,7 +362,7 @@ async function mockEditorApis(
     if (url.includes("/review") && method === "PUT") {
       const body = route.request().postDataJSON() as { action?: string };
       saved = {
-        ...saved,
+        ...(saved ?? {}),
         reviewStatus: body.action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED",
         updatedAt: "2026-08-14T01:45:00.000Z",
       };
@@ -374,8 +380,8 @@ async function mockEditorApis(
           }),
         });
       }
-      saved = { ...published };
-      return route.fulfill(json({ discarded: true }));
+      saved = published ? { ...published } : null;
+      return route.fulfill(json(saved));
     }
     if (url.includes("/published")) {
       return route.fulfill(json(published));
@@ -392,12 +398,12 @@ async function mockEditorApis(
         });
       }
       saved = {
-        ...saved,
+        ...(saved ?? {}),
         status: "PUBLISHED",
         reviewStatus: "PUBLISHED",
         publishedAt: "2026-08-14T02:00:00.000Z",
       };
-      published = { ...published, ...saved };
+      published = { ...(published ?? {}), ...(saved ?? {}) };
       return route.fulfill(json(saved));
     }
     if (url.includes("/admin")) {
@@ -445,13 +451,17 @@ async function mockEditorApis(
         metadata?: unknown;
       };
       saved = {
-        ...saved,
+        pageKey: "home",
+        locale: "zh-CN",
+        status: "DRAFT",
+        reviewStatus: "DRAFT",
+        ...(saved ?? {}),
         puckData: options.normalizeSavedPuckData
-          ? options.normalizeSavedPuckData(body.puckData ?? saved.puckData)
-          : (body.puckData ?? saved.puckData) as any,
+          ? options.normalizeSavedPuckData(body.puckData ?? saved?.puckData)
+          : (body.puckData ?? saved?.puckData) as any,
         metadata: options.normalizeSavedMetadata
-          ? options.normalizeSavedMetadata(body.metadata ?? saved.metadata)
-          : (body.metadata ?? saved.metadata) as any,
+          ? options.normalizeSavedMetadata(body.metadata ?? saved?.metadata)
+          : (body.metadata ?? saved?.metadata) as any,
         ...(options.savedReviewStatus ? { reviewStatus: options.savedReviewStatus } : {}),
         ...(options.savedContentHash ? { contentHash: options.savedContentHash } : {}),
         updatedAt: "2026-08-14T01:30:00.000Z",
@@ -468,6 +478,26 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
   test.beforeEach(async ({ page }) => {
     await authenticateAdmin(page);
     await mockEditorApis(page);
+  });
+
+  test("服务端尚无页面文档时默认内容明确标记为尚未保存", async ({ page }) => {
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() !== "GET" && path.includes("/page-modules/document")) {
+        writes.push(`${request.method()} ${path}`);
+      }
+    });
+    await page.unroute(`${API_PREFIX}*`);
+    await mockEditorApis(page, { published: null, draft: null });
+
+    await page.goto("/admin/editor/home");
+
+    const status = page.getByRole("status", { name: /页面草稿尚未保存/ });
+    await expect(status).toBeVisible();
+    await expect(status).toContainText("当前显示默认内容；保存后才会写入服务端");
+    await expect(page.getByText("页面草稿已保存", { exact: true })).toHaveCount(0);
+    expect(writes).toEqual([]);
   });
 
   test("存在未发布草稿时，重新进入编辑器默认加载草稿", async ({ page }) => {
@@ -1456,6 +1486,48 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await dialog.getByRole("button", { name: "放弃草稿" }).click();
     await expect(alert).toHaveCount(0);
     await expect(status).toHaveCount(0);
+  });
+
+  test("放弃草稿写入成功但权威回读失败时只用 GET 恢复", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.unroute(`${API_PREFIX}*`);
+    await mockEditorApis(page, { adminFailureOnRequest: 2 });
+    let discardWrites = 0;
+    let adminReads = 0;
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        request.method() === "DELETE"
+        && url.pathname.endsWith("/page-modules/document/draft")
+      ) discardWrites += 1;
+      if (
+        request.method() === "GET"
+        && url.pathname.endsWith("/page-modules/document/admin")
+      ) adminReads += 1;
+    });
+
+    await page.goto("/admin/editor/home");
+    await expect(page.locator(".homepage-editor__draft-status")).toContainText("有未发布更改");
+    await page.getByRole("button", { name: "更多编辑操作" }).click();
+    await page.getByRole("menuitem", { name: "放弃草稿" }).click();
+    await page
+      .getByRole("dialog", { name: "放弃当前草稿并恢复线上版本？" })
+      .getByRole("button", { name: "放弃草稿" })
+      .click();
+
+    const recoveryAlert = page.getByRole("alert").filter({ hasText: "草稿已放弃，状态待确认" });
+    await expect(recoveryAlert).toContainText("系统不会重复放弃草稿");
+    await expect(page.locator('.homepage-editor__load-error[role="status"]')).toContainText(
+      "草稿已放弃，等待重新读取当前权威状态",
+    );
+    expect(discardWrites).toBe(1);
+    expect(adminReads).toBe(2);
+
+    await recoveryAlert.getByRole("button", { name: "重新读取放弃结果" }).click();
+    await expect(recoveryAlert).toHaveCount(0);
+    await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
+    expect(discardWrites).toBe(1);
+    expect(adminReads).toBe(3);
   });
 
   test("仅 metadata 不同时仍识别为未发布草稿", async ({ page }) => {

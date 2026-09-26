@@ -117,7 +117,7 @@ export default function AIClassify() {
         status: 'confirmed',
         confirmedCategoryId: record.predictedCategoryId,
       });
-      message.success('识别结果已确认');
+      message.success('识别审核结果已记录，商品分类未修改');
       void loadRecords();
       void loadReport();
     } catch (e: unknown) { message.error(getSafeAdminErrorMessage(e, '识别结果确认失败，请重新加载后重试。')); }
@@ -164,7 +164,13 @@ export default function AIClassify() {
 
   return (
     <div className="space-y-6">
-      <div><h1 className="font-semibold text-brand-text">AI 智能分类</h1><p className="text-sm text-brand-muted mt-1">上传图片 → AI 识别 → 人工确认</p></div>
+      <div><h1 className="font-semibold text-brand-text">AI 智能分类</h1><p className="text-sm text-brand-muted mt-1">上传图片 → AI 识别 → 人工记录审核结果</p></div>
+      <Alert
+        type="info"
+        showIcon
+        message="这里记录识别审核结果，不会修改商品分类"
+        description="确认或驳回只用于核对模型识别记录。需要调整公开商品分类时，请前往商品管理编辑并保存对应商品。"
+      />
       <Row gutter={[16, 16]}>
         {stats.map(s => (
           <Col xs={12} sm={6} key={s.t}><div className="bg-white border border-brand-line p-4"><div className="flex justify-between"><div><p className="text-xs text-brand-muted">{s.t}</p><p className="text-xl font-sans font-bold text-brand-text mt-1">{s.v}</p></div><span className="text-xl text-brand-gold">{s.i}</span></div></div></Col>

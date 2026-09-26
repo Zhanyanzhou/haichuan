@@ -26,6 +26,7 @@ export type CustomerOrder = {
   orderType?: string;
   paymentMethod?: string | null;
   quoteChannel?: "RETAIL" | "CUSTOM" | "PARTNER_WAX" | null;
+  customStage?: string | null;
   createdAt: string;
   paymentConfirmedAt?: string | null;
   shippedAt?: string | null;
@@ -60,7 +61,6 @@ export type CustomerOrder = {
     id: number;
     refundNo: string;
     amount: number | string;
-    reason?: string | null;
     status: string;
     createdAt: string;
     completedAt?: string | null;
@@ -144,12 +144,18 @@ export type CustomerAddress = {
   city?: string | null;
   district?: string | null;
   detail: string;
+  postalCode?: string | null;
+  isDefault: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type CustomerSelectionInquiry = {
   id: number;
   leadId?: number | null;
   status: string;
+  handlingState?: CustomerConsultationHandlingState | null;
+  nextAction?: CustomerConsultationNextAction | null;
   message?: string | null;
   createdAt: string;
   updatedAt?: string;
@@ -161,6 +167,8 @@ export type CustomerInquiry = {
   id: number;
   leadId?: number | null;
   status: string;
+  handlingState?: CustomerConsultationHandlingState | null;
+  nextAction?: CustomerConsultationNextAction | null;
   message?: string;
   createdAt: string;
   updatedAt?: string;
@@ -178,11 +186,24 @@ export type CustomerConsultationReply = {
   createdAt: string;
 };
 
+export type CustomerConsultationHandlingState =
+  | "WAITING_ASSIGNMENT"
+  | "ADVISOR_ASSIGNED"
+  | "IN_PROGRESS"
+  | "CLOSED";
+
+export type CustomerConsultationNextAction =
+  | "WAIT_FOR_ADVISOR"
+  | "REVIEW_ADVISOR_REPLY"
+  | "START_NEW_CONSULTATION";
+
 export type CustomerConsultationDetail = {
   leadId: number;
   sourceId: number;
   type: "inquiry" | "selection";
   status: string;
+  handlingState?: CustomerConsultationHandlingState | null;
+  nextAction?: CustomerConsultationNextAction | null;
   message?: string | null;
   createdAt: string;
   updatedAt: string;

@@ -48,8 +48,8 @@ Codex 只有在下列信息会真实改变业务结果时才询问负责人：�
 - 同一 `gitSha`、同一发布分支的 `Quality Gate` 必须来自 `push` 且成功，并执行完整档；Release Images 会按质量 run 的固定 artifact ID 下载 `quality-full-proof.json`，复核 SHA、ref、run/run attempt、固定 job set 与全部成功结果并把证明哈希写入 manifest。功能分支 push 的快速档或仅自报 `profile=full` 不能作为发布依据；
 - server、client、operations 三镜像都必须有不可变 digest、OCI revision、migration bundle label；
 - 构建/推送与签名是两个独立 job：构建 job 没有 `id-token`，签名 job 不检出仓库、不执行 `npm ci`、仓库脚本、镜像或构建产物中的可执行代码，只读取同一运行上游输出的固定 digest、质量门禁元数据和逐文件 SHA-256 绑定的 provenance/SBOM JSON；
-- `assurance_level=baseline` 是默认档：产出 schema v7 私有 GitHub Actions manifest artifact，保留三镜像固定 digest、BuildKit provenance、SPDX SBOM 及其 SHA-256，不写公共 Sigstore 透明日志，也不要求公开日志确认；
-- `assurance_level=high` 是高保证档：在 baseline 的共同门禁之上，为三镜像分别生成 Cosign Keyless 签名、SLSA v1 provenance attestation 与 SPDX 2.3 SBOM attestation，并由 `release-images.yml` 按精确 digest、GitHub OIDC issuer、workflow identity、source ref 与 source SHA 复核；schema v7 manifest 自身再生成 SLSA v1 provenance attestation并上传标准 protobuf bundle；
+- `assurance_level=baseline` 是默认档：产出 schema v9 私有 GitHub Actions manifest artifact，保留三镜像固定 digest、BuildKit provenance、SPDX SBOM 及其 SHA-256，并把经快照校验的规范 HTTPS Origin 与六个公开 PageDocument 的固定路径和内容哈希写入 `publicSeo`；不写公共 Sigstore 透明日志，也不要求公开日志确认；
+- `assurance_level=high` 是高保证档：在 baseline 的共同门禁之上，为三镜像分别生成 Cosign Keyless 签名、SLSA v1 provenance attestation 与 SPDX 2.3 SBOM attestation，并由 `release-images.yml` 按精确 digest、GitHub OIDC issuer、workflow identity、source ref 与 source SHA 复核；schema v9 manifest 自身再生成 SLSA v1 provenance attestation并上传标准 protobuf bundle，签名覆盖完整 manifest，包括 `publicSeo.origin` 与六页 `pageDocuments`；
 - 高保证档签名固定使用已审定的 Cosign `v3.1.3`，不得使用长期私钥，不得关闭 Rekor、SCT 或 claims 校验；首次真实签名前必须把公共透明日志会记录证书、签名及制品/证明元数据的影响告知批准人，并把 `sigstore_public_log_acknowledged` 明确设为 `true`，否则高保证任务在签名前失败；
 - `docker-compose.yml` 没有 `build`、`latest` 或 `local` 回退，镜像或关键恢复参数缺失时必须失败。
 
@@ -72,7 +72,7 @@ bash scripts/deploy-preproduction.sh \
   --project-name haichuan-preview
 ```
 
-该入口只接受 `releaseStage=preproduction` 的 schema v7 清单。`--expected-manifest-sha256` 必须来自批准 artifact 的独立元数据或批准记录，不能通过部署目录中的同一份 `release-manifest.json` 临时反算后回填。入口先核对清单原始字节哈希，并逐文件核对 descriptor 的固定路径、普通文件属性与 SHA-256；`baseline` 检查私有 artifact 中三镜像的 SBOM 和 BuildKit provenance，`high` 还会按本仓 `release-images.yml` 的 GitHub OIDC 身份验证 manifest，并逐镜像验证普通签名、SLSA provenance 和 SPDX SBOM attestation。`--project-name` 必须填写目标机既有 Compose 项目名，避免从一次性上传目录运行时误建第二套容器。共同执行顺序是阶段/仓库/digest/内容状态核对、关闭交易与真实外部副作用、Compose 展开、既有备份健康、拉取固定镜像、只读 migration status、内容就绪时只读 release preflight、替换三个应用容器、真实回源健康和安全短页检查；`high` 在这些步骤前增加验签。`--dry-run` 只执行到 Compose 展开，不拉取或替换容器。
+该入口只接受 `releaseStage=preproduction` 的 schema v9 清单。`publicSeo.origin` 必须是规范 HTTPS Origin，且目标 `.env` 的 `VITE_PUBLIC_SITE_ORIGIN` 规范化后必须与其精确一致；同一份清单不能切换到另一域名部署。内容就绪时，`publicSeo.pageDocuments` 必须按固定顺序精确包含 `about`、`catalog`、`contact`、`custom`、`home`、`products` 的路径和 SHA-256；安全降级时必须为空。`--expected-manifest-sha256` 必须来自批准 artifact 的独立元数据或批准记录，不能通过部署目录中的同一份 `release-manifest.json` 临时反算后回填。入口先核对清单原始字节哈希，并逐文件核对 descriptor 的固定路径、普通文件属性与 SHA-256；`baseline` 检查私有 artifact 中三镜像的 SBOM 和 BuildKit provenance，`high` 还会按本仓 `release-images.yml` 的 GitHub OIDC 身份验证 manifest，并逐镜像验证普通签名、SLSA provenance 和 SPDX SBOM attestation。预发布环境除了把交易、支付、普通通知和分析开关保持为 `false`，还必须让 `SMTP_HOST`、`SMTP_USER`、`SMTP_PASS` 及四项 `ALIYUN_SMS_*` 投递配置全部为空；密码找回和验证码属于账户安全路径，不受普通通知开关完整覆盖，任一配置残留都会让准备入口按键名失败关闭且不输出值。`--project-name` 必须填写目标机既有 Compose 项目名，避免从一次性上传目录运行时误建第二套容器。共同执行顺序是阶段/仓库/digest/内容状态核对、关闭交易与真实外部副作用、Compose 展开、既有备份健康、拉取固定镜像、只读 migration status、内容就绪时把清单六页哈希注入只读 release preflight 并与中文发布指针及 revision 重算值逐页核对；已有旧栈时再对替换前公开 API 做只读比对，首次获批切换仅跳过这一项，不跳过数据库预检；替换三个应用容器后，逐页比对公开 API 与静态 HTML 的版本、哈希、路径、内容类型和可索引状态。任一项失败即停止并在可用时回滚；`high` 在这些步骤前增加验签。`--dry-run` 只执行到 Compose 展开，不拉取或替换容器。
 
 脚本不会自动执行 migration。存在待执行 migration 时，`migration-status` 非零并停止；Codex 应先取得目标库、迁移清单、备份回滚点和迁移窗口授权，再按第 2 节处理。内容为 `safe-fallback` 时仅跳过依赖正式内容的 preflight，不跳过签名、镜像、备份、迁移状态、健康或 noindex 检查。
 
@@ -82,7 +82,7 @@ bash scripts/deploy-preproduction.sh \
 
 后台把 PageDocument 标记为已发布，只会更新数据库中的已审核中文发布事实，不会修改正在运行的 client 镜像，也不会授予运行时进程生成 Nginx 路由或读取生产库的隐式权限。英文公开站已按 D.35 退役：SEO snapshot 不得包含英文路由，历史 `/en` 与 `/en/<path>` 只允许同源 `308` 到对应中文路径，公开内容接口必须拒绝 `locale=en`；`/en//...`、编码斜杠和反斜杠必须失败关闭。
 
-需要让新发布、回滚或取消发布的 PageDocument 在公网生效时，必须把它作为一次新的内容制品发布处理：
+需要让新发布、回滚或取消发布的 PageDocument 在公网生效时，必须把它作为一次新的内容制品发布处理。开始导出候选快照后应冻结六页发布写入，直到部署后的六页 API＋HTML 对账完成；若期间任何页面重新发布，原候选失效，必须重新导出、构建和部署：
 
 1. 在后台完成中文页面保存、独立审核与发布，并确认匿名 published API 返回 `zh-CN`、预期 revision 和 content hash；确认 `locale=en` 失败关闭且历史英文记录未被修改。
 2. 对同一个受保护代码 SHA 手动运行 `Export Public SEO Snapshot`。受控预发布选择 `preproduction`，只从 `public-seo-preproduction` 环境中的专用只读数据库账号生成带 `sourceStage=preproduction` 的阶段证据；正式制品只能选择 `production`，并从 `public-seo-production` 生成带 `sourceStage=production` 的证据。两个阶段分别使用受保护环境配置，不得手工编辑 snapshot，也不得复用发布前的 artifact；不得跨阶段复用。
@@ -120,7 +120,7 @@ cosign verify-attestation --bundle attestations/server-sbom.sigstore.json \
   --type spdxjson "${COSIGN_IDENTITY_ARGS[@]}" "$SERVER_REFERENCE"
 ```
 
-client 与 operations 必须执行同样三项验证。每项都必须显式传入对应的 `--bundle <sidecar>`，并解析密码学验证成功后的输出，核对普通签名 subject digest、provenance subject/predicate/builder/source/ref/SHA，以及 SBOM subject 和 SPDX 2.3 内容；只验证 registry referrer 或只读取 bundle 的 `mediaType` 均不够。高保证 release artifact 中九个镜像 bundle 的实际哈希必须与 schema v7 manifest 的 descriptor 一致，manifest bundle 的 `mediaType` 以及九个镜像 bundle 的 `mediaType` 都必须是 `application/vnd.dev.sigstore.bundle.v0.3+json`。随后在已拉取三镜像的受控主机执行：
+client 与 operations 必须执行同样三项验证。每项都必须显式传入对应的 `--bundle <sidecar>`，并解析密码学验证成功后的输出，核对普通签名 subject digest、provenance subject/predicate/builder/source/ref/SHA，以及 SBOM subject 和 SPDX 2.3 内容；只验证 registry referrer 或只读取 bundle 的 `mediaType` 均不够。高保证 release artifact 中九个镜像 bundle 的实际哈希必须与 schema v9 manifest 的 descriptor 一致，manifest bundle 的 `mediaType` 以及九个镜像 bundle 的 `mediaType` 都必须是 `application/vnd.dev.sigstore.bundle.v0.3+json`。随后在已拉取三镜像的受控主机执行：
 
 Cosign 的 `--type spdxjson` 对应 in-toto predicate type `https://spdx.dev/Document`；本项目再对 predicate 内部的 `spdxVersion: SPDX-2.3` 和 `SPDXID: SPDXRef-DOCUMENT` 做独立内容校验。不得把文档版本后缀伪写进 predicate type，或只凭 `--type` 筛选结果宣称 SBOM 版本已验证。
 
@@ -146,7 +146,7 @@ docker compose --env-file <受控环境文件> \
 
 机器合同要求两个互不相同的宿主绝对文件路径、两个精确的固定容器目标、long bind、`read_only: true` 和 `create_host_path: false`。缺任一路径、相同源、目录/过宽路径、可写挂载、自动创建宿主路径或容器目标漂移均失败关闭。文件预检只检查路径和文件元数据，不读取或打印 PEM 内容；Compose `config` 也只验证解析后的静态结构。实际证书链、商户号绑定、APIv3 密钥、网络、微信回调、成功/失败/退款/对账仍必须在获批环境真实验收。
 
-叠加 override 不会打开 `PAYMENT_GATEWAY_TRANSACTIONS_ENABLED`、`PAYMENT_GATEWAY_REFUNDS_ENABLED` 或客户交易能力。获批沙箱或受控取证启动按第 5 节在同一组 `-f` 参数下执行，凭据挂载和启动不自行授权资金操作；真实渠道测试中的付款、退款等动作须有精确测试范围授权。正式开放真实资金能力和公开放量仍须批准策略明确开放相应能力，并通过交易及外部服务门禁；未启用支付的内容/线索档位始终只使用基础 Compose。
+叠加 override 不会打开 `PAYMENT_GATEWAY_TRANSACTIONS_ENABLED`、`PAYMENT_GATEWAY_REFUNDS_ENABLED` 或客户交易能力。`PAYMENT_PROVIDER_MODE` 安全默认为 `disabled`；隔离测试可在非生产环境显式使用 `simulator`。先构建 server，再以 `npm --prefix server run payment-simulator:start` 启动独立回环 HTTP 进程，并以 `PAYMENT_SIMULATOR_BASE_URL`、合成签名密钥和场景选择显式接入；该进程禁止非回环监听，不得同时配置真实渠道凭据，生产启动发现 simulator 必须失败关闭。模拟状态只在 simulator 进程存活期间保留，不是真实渠道或持久化证据。真实渠道只能显式选择 `live`，且 provider mode 本身不授予资金操作权限。获批沙箱或受控取证启动按第 5 节在同一组 `-f` 参数下执行，凭据挂载和启动不自行授权资金操作；真实渠道测试中的付款、退款等动作须有精确测试范围授权。正式开放真实资金能力和公开放量仍须批准策略明确开放相应能力，并通过交易及外部服务门禁；未启用支付的内容/线索档位始终只使用基础 Compose。
 
 ## 2. 目标库与首管理员
 
@@ -244,11 +244,17 @@ pwsh -NoProfile -File scripts/run-operations-recovery-drill.ps1
 
 外部 TLS/域名验收至少包括：正式域名解析、证书链和有效期、HTTP 到 HTTPS 跳转、可信代理头、HSTS、CSP。只保存证据文件哈希；私钥、DNS/API token 和真实监控端点留在受控系统。
 
-当前 `client/nginx.conf` 的 `8080` 只提供 ACME 挑战，其余请求返回 HTTPS 跳转；TLS 边缘回源使用宿主 `127.0.0.1:8081` 或受控容器网络的 `client:8081`。边缘必须覆盖 `X-Real-IP` 为实际客户端的单个 IP，并由 HTTPS 终结层下发 HSTS。证书签发、续期和可信回源均须在目标环境验证，不以能访问 HTTP 页面替代。生产 Compose 必须显式指定 `-f docker-compose.yml`，禁止自动合并本地开发 override。
+当前 `client/nginx.conf` 的 `8080` 只提供 ACME 挑战，其余请求按不可变 SEO snapshot 中的规范 HTTPS origin 跳转；TLS 边缘回源使用宿主 `127.0.0.1:8081` 或受控容器网络的 `client:8081`，该入口只接受同一 snapshot 生成的规范 Host，其他 Host 返回 421。容器健康检查改走仅监听容器回环的 `127.0.0.1:8082/healthz`，不得通过伪造公开 Host 绕过回源门禁。边缘必须覆盖 `X-Real-IP` 为实际客户端的单个 IP，并由 HTTPS 终结层下发 HSTS。证书签发、续期、外层 SNI/Host allowlist 和可信回源均须在目标环境验证，不以能访问 HTTP 页面替代。生产 Compose 必须显式指定 `-f docker-compose.yml`，禁止自动合并本地开发 override。
 
 监控必须覆盖 `/api/health`、`/api/ready`、可信前台回源和 backup 容器健康。backup unhealthy 必须进入真实通知渠道，不能以“看日志”代替。验收时安全触发一次模拟告警，记录监控身份哈希、事件哈希、触发/收到/确认时间和责任人；不在仓库保存 webhook、收件人或 token。
 
-将上述事实汇总为 schema v3 的 `production-evidence.json`。证据文件本身不能决定目标环境、目标版本、仓库、source ref 或 signer workflow；这些信任锚必须由发布负责人从已批准工单、冻结候选和审定的 workflow 独立写入 CLI 参数。所有 `path` 都必须位于同一个仓库内受控目录、必须是非符号链接普通文件，并给出小写 SHA-256。验证器会重新读取和计算每个 manifest、报告、runbook、claim receipt 与 manifest bundle 的哈希。
+受员工认证保护的 `/api/metrics` 提供脱敏 Prometheus 指标。咨询提交的服务端故障应从 `haichuan_http_server_errors_total{method="POST",route=~"/api/(inquiries|selection-inquiries)"}` 计算增量或错误率；不得直接用同时包含 4xx 客户输入错误的 `haichuan_http_request_errors_total` 触发值班告警。持久化异步失败另以 `haichuan_outbox_events{status="failed"}`、`haichuan_outbox_oldest_available_age_seconds`、`haichuan_outbox_oldest_processing_age_seconds` 和 `haichuan_metrics_source_available{source="outbox"}` 监控：前者只衡量已到期 `PENDING`，在途年龄以最早非空 `lockedAt` 衡量，需结合 Worker 租约和目标告警窗口判断卡死，不得把短时正常外发直接当作故障。
+
+队列为空不能证明消费者仍在运行。可靠通知与密码重置消费者还分别以固定 `worker="notification_delivery"`、`worker="password_reset_delivery"` 输出 `haichuan_worker_enabled`、`haichuan_worker_running`、最近开始/完成/成功时间戳和 `haichuan_worker_failures_total`。目标监控应在启动宽限后检查预期时间序列存在；仅对 `enabled=1` 的 Worker 判断最近完成或成功时间是否超过获批持续窗口，并把长时间 `running=1` 与最老在途锁龄组合判定。进程重启会重置内存计数，故失败计数只用于计算单实例 counter 增量，不得跨进程直接累加为业务事实。具体阈值、持续窗口、监控抓取身份和接收人必须在获批目标环境确定并完成真实送达演练；代码中存在指标不等于告警闭环通过。
+
+将上述事实汇总为 schema v5 的 `production-evidence.json`。v5 的 `edge` 区段必须自描述正式 HTTPS 域名 origin（拒绝裸 IP、localhost 与单标签主机名）、DNS/HTTPS 可达、308 同源跳转、证书链、证书起止时间、续期验证、HSTS、CSP 和可信代理验证结果；证书剩余期低于“24 小时”与“总有效期 20%”两者中的较大值（门槛最多 7 天）、HSTS `max-age` 少于 31536000 秒或缺少 `includeSubDomains` 时失败关闭。这个自适应门槛允许短周期证书以已验证的自动续期通过，但不会接受即将耗尽的证书。`edge.json` receipt 的 subject 必须绑定该区段脱敏事实的规范 JSON。
+
+v5 的 `observability` 区段还必须嵌入由受信监控执行器生成的结构化事实：健康/就绪/可信前台/backup 检查、受保护 metrics 抓取、咨询 5xx、Outbox、可靠通知和账户恢复 Worker 时间序列均已验证；告警演练类型必须属于允许集合，并给出监控身份与事件的 SHA-256、按触发→收到→确认递增的 UTC 时间，以及与 `incidentOwner` 一致的确认人。`observability.json` receipt 的 subject 必须绑定这些规范事实，而不是只绑定 manifest。任一事实缺失或为 false、时间倒序/超出 freshness、责任人漂移、未知字段或 subject 漂移都会失败关闭；旧 schema v4 因未绑定告警演练事实而不再接受。证据文件本身不能决定目标环境、目标版本、仓库、source ref 或 signer workflow；这些信任锚必须由发布负责人从已批准工单、冻结候选和审定的 workflow 独立写入 CLI 参数。所有 `path` 都必须位于同一个仓库内受控目录、必须是非符号链接普通文件，并给出小写 SHA-256。验证器会重新读取和计算每个 manifest、报告、runbook、claim receipt 与 manifest bundle 的哈希。
 
 JSON receipt 只是一条结构化 claim，不具备独立证明力。每个 receipt 仍只允许 `schemaVersion`、`kind`、`provider`、`outcome`、`observedAt`、`environmentIdSha256`、`approvalReferenceSha256`、`releaseGitSha`、`manifestSha256`、`subjectSha256`，但最终 `production-evidence.json` 必须由审定的外部 evidence workflow 生成，并用 Cosign Keyless 形成标准 protobuf Sigstore attestation bundle；该 workflow 的 signer identity 必须与 release workflow 分离，且必须实际重执行或通过受信 API 验证 runtime/Compose/database/admin/storage/recovery/edge/observability/feature/external-service/rollback 各项，不能接受操作者上传的自报 JSON 后直接签名。暂未建立这种 workflow 或缺少任一真实检查时，不能生成可通过验收的 bundle，必须失败关闭。
 

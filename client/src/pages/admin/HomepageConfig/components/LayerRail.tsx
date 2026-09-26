@@ -18,6 +18,7 @@ const PAGE_MODULE_DELETE_RECOVERY_COPY =
   "确认后，当前编辑会话中可用顶部“撤销”恢复；刷新或离开编辑会话后，不能依靠撤销找回。发布历史只包含已发布快照；从未发布的模块内容无法从发布历史恢复。";
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
 import { getModuleDisplayName } from "../editor-utils";
+import { DYNAMIC_TEMPLATE_BLOCK_TYPE } from "@/page-builder/dynamic-template-instance/types";
 import type { PuckProps } from "@/page-builder/types";
 import { getContentTemplateContract } from "@/page-builder/generated/contentTemplates.generated";
 import { resolveVisualNode } from "@/page-builder/runtime/visualLayout";
@@ -112,16 +113,23 @@ export default function LayerRail({
   /** Shift 范围选择的锚点 */
   const anchorRef = useRef<number | null>(null);
 
-  /* 同类型序号：类型出现 ≥2 次时显示 "名称 i/n" */
+  /* 同一模板重复使用才编号，不能把所有动态模板实例混成一组。 */
   const numberedNames = useMemo(() => {
+    const groupKey = (item: PageModuleData) => item.type === DYNAMIC_TEMPLATE_BLOCK_TYPE
+      ? `${item.type}:${String(item.props.templateId ?? getModuleDisplayName(item.type, item.props))}`
+      : item.type;
     const totals = new Map<string, number>();
-    content.forEach((item) => totals.set(item.type, (totals.get(item.type) || 0) + 1));
+    content.forEach((item) => {
+      const key = groupKey(item);
+      totals.set(key, (totals.get(key) || 0) + 1);
+    });
     const seen = new Map<string, number>();
     return content.map((item) => {
-      const ordinal = (seen.get(item.type) || 0) + 1;
-      seen.set(item.type, ordinal);
+      const key = groupKey(item);
+      const ordinal = (seen.get(key) || 0) + 1;
+      seen.set(key, ordinal);
       const base = getModuleDisplayName(item.type, item.props);
-      return (totals.get(item.type) || 0) > 1 ? `${base} ${ordinal}/${totals.get(item.type)}` : base;
+      return (totals.get(key) || 0) > 1 ? `${base} ${ordinal}/${totals.get(key)}` : base;
     });
   }, [content]);
 

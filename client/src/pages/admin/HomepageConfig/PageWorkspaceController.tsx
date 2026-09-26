@@ -93,6 +93,21 @@ function readPublishedLiveHealth(publishedDoc: PageDocumentResource | null | und
   };
 }
 
+type PendingPublicationVerification = {
+  workspaceKey: string;
+  sourceSignature: string;
+  persistedContentHash: string;
+  expectedVersion: number | null;
+  expectedPublishedRevisionId: number | null;
+};
+
+type PendingRollbackVerification = {
+  workspaceKey: string;
+  sourceRevision: PageDocumentRevisionSummary;
+  sourceSignature: string;
+  previousPublishedRevisionId: number;
+};
+
 export function usePageWorkspaceController({
   pageKey,
   locale,
@@ -140,6 +155,7 @@ export function usePageWorkspaceController({
   const [authorizingPublicMedia, setAuthorizingPublicMedia] = useState(false);
   const authorizeDialogOpenRef = useRef(false);
   const publishHomeRef = useRef<(nextData: unknown) => Promise<void>>(async () => {});
+  const pendingPublicationVerificationRef = useRef<PendingPublicationVerification | null>(null);
   const [publishIssues, setPublishIssues] = useState<PublishValidationIssue[]>(
     [],
   );
@@ -159,6 +175,7 @@ export function usePageWorkspaceController({
   const publishOperationRef = useRef(false);
   const publishOwnerRef = useRef<symbol | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [hasPersistedDraft, setHasPersistedDraft] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [revisionsLoading, setRevisionsLoading] = useState(false);
@@ -171,6 +188,8 @@ export function usePageWorkspaceController({
   const [revisionDetailError, setRevisionDetailError] = useState<string | null>(null);
   const revisionDetailRequestRef = useRef(0);
   const [rollingBackRevisionId, setRollingBackRevisionId] = useState<number | null>(null);
+  const rollbackOwnerRef = useRef<symbol | null>(null);
+  const pendingRollbackVerificationRef = useRef<PendingRollbackVerification | null>(null);
   const [revisionFailure, setRevisionFailure] = useState<{
     message: string;
     revision?: PageDocumentRevisionSummary;
@@ -179,6 +198,8 @@ export function usePageWorkspaceController({
   const [draftDiscardError, setDraftDiscardError] = useState<string | null>(
     null,
   );
+  const [draftDiscardVerificationPending, setDraftDiscardVerificationPending] =
+    useState(false);
   const [draftSnapshot, setDraftSnapshot] = useState<PageDraftSnapshot | null>(
     null,
   );
@@ -241,6 +262,10 @@ export function usePageWorkspaceController({
     // 而旧操作的 finally 不能再清除随后启动的新发布。
     publishOwnerRef.current = null;
     publishOperationRef.current = false;
+    pendingPublicationVerificationRef.current = null;
+    rollbackOwnerRef.current = null;
+    pendingRollbackVerificationRef.current = null;
+    setRollingBackRevisionId(null);
     setPublishing(false);
     setPreviewMode(false);
   }, [workspaceKey]);
@@ -285,6 +310,7 @@ export function usePageWorkspaceController({
       setLoadedPageKey(null);
       setDraftSaveFailed(false);
       setHasUnsavedChanges(false);
+      setHasPersistedDraft(false);
       setHasPendingDraft(false);
       setReviewStatus("DRAFT");
       setReviewSubmittedBy(null);
@@ -294,6 +320,9 @@ export function usePageWorkspaceController({
       setPublishIssues([]);
       setPublishValidationStatus("idle");
       setPublishAttemptFailure(null);
+      pendingPublicationVerificationRef.current = null;
+      rollbackOwnerRef.current = null;
+      pendingRollbackVerificationRef.current = null;
       setPublishReviewActive(false);
       setPublishReviewOpen(false);
       setPublishReviewIssueKey(null);
@@ -311,6 +340,7 @@ export function usePageWorkspaceController({
       setDraftSnapshot(null);
       setRevisionFailure(null);
       setDraftDiscardError(null);
+      setDraftDiscardVerificationPending(false);
       setRevisionsOpen(false);
       setPendingPageHistoryCommand(null);
       pendingPageHistoryCommandRef.current = null;
@@ -331,6 +361,7 @@ export function usePageWorkspaceController({
         if (!hasInitializedEditorRef.current) setInitialLoading(true);
         // 已访问页面直接恢复会话，避免默认模板闪现和重复全量更新。
         if (cachedPage) {
+          setHasPersistedDraft(Boolean(cachedPage.updatedAt));
           serverData = cachedPage.data;
           setData(cachedPage.data);
           latestData.current = cachedPage.data;
@@ -363,6 +394,7 @@ export function usePageWorkspaceController({
         setReviewSubmittedBy(adminDoc?.submittedBy ?? null);
         const publishedPuck = getPuckDocument(publishedDoc?.puckData);
         const draftPuck = getPuckDocument(adminDoc?.puckData);
+        setHasPersistedDraft(Boolean(draftPuck));
 
         const nextHasPublished = Boolean(publishedPuck);
         const liveHealth = readPublishedLiveHealth(nextHasPublished ? publishedDoc : null);
@@ -573,6 +605,11 @@ export function usePageWorkspaceController({
       });
       return;
     }
+    if (publishAttemptFailure?.issue.code === "publish-result-unverified") {
+      // 发布写请求已经成功返回；这里只重读线上快照，绝不重复 PUT。
+      void publishHomeRef.current(latestData.current);
+      return;
+    }
     setValidationRevision((revision) => revision + 1);
   }, [modal, publishAttemptFailure]);
 
@@ -641,6 +678,7 @@ export function usePageWorkspaceController({
 
   useEffect(() => {
     if (!publishAttemptFailure) return;
+    if (publishAttemptFailure.issue.code === "publish-result-unverified") return;
     const currentSignature = canonicalizePageContent(
       latestData.current,
       latestMetadata.current,
@@ -762,6 +800,9 @@ export function usePageWorkspaceController({
               undefined,
           });
           const savedDocument = unwrapResponse<PageDocumentResource | null>(response);
+          if (!savedDocument) {
+            throw new Error("page-draft-save-response-invalid");
+          }
           // 服务端会在保存时移除旧联系电话、门店资料等业务事实副本。
           // 后续画布、缓存与发布校验必须以服务端回包为准，否则当前会话会继续
           // 持有已经从数据库清除的旧字段，直到刷新页面后才恢复一致。
@@ -796,6 +837,7 @@ export function usePageWorkspaceController({
 
           if (!isActivePage()) return true;
           setDraftSaveFailed(false);
+          setHasPersistedDraft(true);
           const hasNewerLocalData =
             JSON.stringify(latestData.current) !== JSON.stringify(editableData);
           const hasNewerLocalMetadata =
@@ -1298,6 +1340,7 @@ export function usePageWorkspaceController({
           return;
         }
         setDraftDiscardError(null);
+        setDraftDiscardVerificationPending(false);
         // 排空在途保存(如页面设置触发的静默保存):
         // 否则 in-flight 保存会在丢弃完成后回写草稿,让被丢弃的修改"复活"。
         await Promise.resolve(saveQueueRef.current).catch(() => {});
@@ -1310,8 +1353,14 @@ export function usePageWorkspaceController({
           setDraftDiscardError("当前页面版本标识缺失，请刷新页面后再放弃草稿");
           return;
         }
+        let discardedResource: PageDocumentResource | null = null;
         try {
-          await pageDocumentApi.discardDraft(pageKey, locale, expectedUpdatedAt);
+          const discardResponse = await pageDocumentApi.discardDraft(
+            pageKey,
+            locale,
+            expectedUpdatedAt,
+          );
+          discardedResource = unwrapResponse<PageDocumentResource | null>(discardResponse);
         } catch (error) {
           if (targetWorkspaceKey === activePageKeyRef.current) {
             setDraftDiscardError(
@@ -1321,42 +1370,77 @@ export function usePageWorkspaceController({
           return;
         }
         if (targetWorkspaceKey !== activePageKeyRef.current) return;
-        controlledCanvasStateRef.current = {
-          hasUnsavedChanges: false,
-          baselineSignature: null,
-        };
-        setData(targetPublishedData);
-        latestData.current = targetPublishedData;
-        setMetadata(targetPublishedMetadata);
-        latestMetadata.current = targetPublishedMetadata;
-        dataSignatureRef.current = canonicalizePageContent(
+
+        const targetPublishedSignature = canonicalizePageContent(
           targetPublishedData,
           targetPublishedMetadata,
         );
-        setHasUnsavedChanges(false);
-        setHasPendingDraft(false);
-        setViewingPublished(false);
-        pendingDraftRef.current = null;
-        editingDraftSnapshotRef.current = null;
-        viewingPublishedRef.current = false;
-        message.success("已放弃草稿，当前内容与线上版本一致");
-        // 重拉 admin 文档建立新的乐观锁与保存基准
+        const applyAuthoritativeDraft = (resource: PageDocumentResource | null) => {
+          const resourceData = getPuckDocument(resource?.puckData);
+          const nextData = resourceData
+            ? ensureEditorPageStructure(pageKey, migratePuckData(resourceData))
+            : targetPublishedData;
+          const nextMetadata = resourceData
+            ? normalizePuckMetadata(resource?.metadata)
+            : targetPublishedMetadata;
+          const nextSignature = canonicalizePageContent(nextData, nextMetadata);
+          const matchesPublished = nextSignature === targetPublishedSignature;
+          const nextUpdatedAt = resource?.updatedAt ?? null;
+          const nextReviewStatus = resource?.reviewStatus ?? "PUBLISHED";
+
+          controlledCanvasStateRef.current = {
+            hasUnsavedChanges: false,
+            baselineSignature: null,
+          };
+          setData(nextData);
+          latestData.current = nextData;
+          setMetadata(nextMetadata);
+          latestMetadata.current = nextMetadata;
+          dataSignatureRef.current = nextSignature;
+          pageSessionCacheRef.current[targetWorkspaceKey] = {
+            data: nextData,
+            metadata: nextMetadata,
+            lastSaved: nextUpdatedAt ? formatEditorTime(nextUpdatedAt) : null,
+            updatedAt: nextUpdatedAt,
+            contentHash: resource?.contentHash ?? null,
+            reviewStatus: nextReviewStatus,
+          };
+          setReviewStatus(nextReviewStatus);
+          setReviewSubmittedBy(resource?.submittedBy ?? null);
+          setHasUnsavedChanges(false);
+          setHasPendingDraft(!matchesPublished);
+          setViewingPublished(false);
+          pendingDraftRef.current = matchesPublished ? null : nextData;
+          editingDraftSnapshotRef.current = null;
+          viewingPublishedRef.current = false;
+          return matchesPublished;
+        };
+
+        // DELETE 回包是服务端已提交的权威资源，先采用它作为安全基线；随后再用
+        // 独立 GET 确认当前后台读模型，避免回包丢失或服务端规范化造成会话漂移。
+        applyAuthoritativeDraft(discardedResource);
         try {
           const adminResponse = await pageDocumentApi.getAdmin(pageKey, locale);
           const adminDoc = unwrapResponse<PageDocumentResource | null>(adminResponse);
-          pageSessionCacheRef.current[targetWorkspaceKey] = {
-            data: targetPublishedData,
-            metadata: targetPublishedMetadata,
-            lastSaved: null,
-            updatedAt: adminDoc?.updatedAt || null,
-            contentHash: adminDoc?.contentHash ?? null,
-            reviewStatus: adminDoc?.reviewStatus ?? "DRAFT",
-          };
-          if (targetWorkspaceKey === activePageKeyRef.current) {
-            setReviewStatus(adminDoc?.reviewStatus ?? "DRAFT");
+          if (targetWorkspaceKey !== activePageKeyRef.current) return;
+          if (!getPuckDocument(adminDoc?.puckData)) {
+            throw new Error("discarded-draft-readback-invalid");
           }
+          const matchesPublished = applyAuthoritativeDraft(adminDoc);
+          setDraftDiscardVerificationPending(false);
+          setDraftDiscardError(null);
+          message.success(
+            matchesPublished
+              ? "已放弃草稿，当前内容与线上版本一致"
+              : "草稿已放弃；重新读取时发现新的未发布内容，已载入当前权威草稿",
+          );
         } catch {
-          // 基准刷新失败不阻断;下次保存若乐观锁不匹配会显式提示
+          if (targetWorkspaceKey !== activePageKeyRef.current) return;
+          setDraftDiscardVerificationPending(true);
+          setDraftDiscardError(
+            "草稿已成功放弃，但暂时无法重新读取当前权威状态。请重新读取；系统不会重复放弃草稿。",
+          );
+          message.warning("草稿已放弃、重新读取待确认；重试只会读取当前草稿，不会重复写入");
         }
       },
     });
@@ -1516,9 +1600,164 @@ export function usePageWorkspaceController({
     return true;
   }, []);
 
+  const verifyPendingRollback = useCallback(async (
+    pending: PendingRollbackVerification,
+    isActiveRollback: () => boolean,
+  ) => {
+    try {
+      // 回滚会创建新的不可变发布版本。必须同时以线上快照、版本列表和草稿
+      // 三个权威读模型确认结果，不能把来源历史版本直接标成当前线上版本。
+      const [publishedResponse, revisionsResponse, adminResponse] = await Promise.all([
+        pageDocumentApi.getPublishedAdmin(pageKey, locale),
+        pageDocumentApi.getRevisions(pageKey, locale, { limit: 20 }),
+        pageDocumentApi.getAdmin(pageKey, locale),
+      ]);
+      if (!isActiveRollback()) return false;
+
+      const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishedResponse);
+      const revisionPage = unwrapResponse<PageDocumentRevisionPage>(revisionsResponse);
+      const adminDocument = unwrapResponse<PageDocumentResource | null>(adminResponse);
+      const publishedPuck = getPuckDocument(publishedDocument?.puckData);
+      const publishedMetadata = normalizePuckMetadata(publishedDocument?.metadata);
+      const publishedRevisionId = publishedDocument?.publishedRevisionId;
+      const publishedEntries = (revisionPage?.items ?? []).filter((item) => item.isPublished);
+      const publishedEntry = publishedEntries[0];
+      const sourceMatches = Boolean(publishedPuck)
+        && canonicalizePageContent(publishedPuck, publishedMetadata)
+          === pending.sourceSignature;
+      const createdNewRevision = Number.isInteger(publishedRevisionId)
+        && publishedRevisionId !== pending.previousPublishedRevisionId
+        && publishedRevisionId !== pending.sourceRevision.id;
+
+      if (
+        !publishedDocument
+        || !publishedPuck
+        || publishedDocument.status !== "PUBLISHED"
+        || !createdNewRevision
+        || !sourceMatches
+        || adminDocument?.publishedRevisionId !== publishedRevisionId
+        || publishedEntries.length !== 1
+        || publishedEntry?.id !== publishedRevisionId
+        || publishedEntry.version !== publishedDocument.version
+      ) {
+        throw new Error("rollback-snapshot-not-confirmed");
+      }
+
+      const nextPublishedData = ensureEditorPageStructure(
+        pageKey,
+        migratePuckData(publishedPuck),
+      );
+      const nextPublishedBaseline = canonicalizePageContent(
+        nextPublishedData,
+        publishedMetadata,
+      );
+      const adminPuck = getPuckDocument(adminDocument?.puckData);
+      const adminMetadata = normalizePuckMetadata(adminDocument?.metadata);
+      if (adminDocument && adminPuck) {
+        pageSessionCacheRef.current[pending.workspaceKey] = {
+          data: ensureEditorPageStructure(pageKey, migratePuckData(adminPuck)),
+          metadata: adminMetadata,
+          lastSaved: formatEditorTime(adminDocument.updatedAt),
+          updatedAt: adminDocument.updatedAt,
+          contentHash: adminDocument.contentHash ?? null,
+          reviewStatus: adminDocument.reviewStatus ?? "DRAFT",
+        };
+      }
+
+      if (!isActiveRollback()) return false;
+      setRevisions(revisionPage?.items ?? []);
+      setRevisionNextBeforeVersion(revisionPage?.nextBeforeVersion ?? null);
+      setReviewStatus(adminDocument?.reviewStatus ?? "DRAFT");
+      setReviewSubmittedBy(adminDocument?.submittedBy ?? null);
+      const protectedDraft = viewingPublishedRef.current
+        ? editingDraftSnapshotRef.current
+        : null;
+      const hasPendingDraft = canonicalizePageContent(
+        protectedDraft?.data ?? latestData.current,
+        protectedDraft?.metadata ?? latestMetadata.current,
+      ) !== nextPublishedBaseline;
+      setHasPendingDraft(hasPendingDraft);
+      setDraftSnapshot(
+        adminPuck && canonicalizePageContent(adminPuck, adminMetadata) !== nextPublishedBaseline
+          ? {
+              pageKey,
+              puckData: adminPuck,
+              metadata: adminMetadata,
+              updatedAt: adminDocument?.updatedAt ?? null,
+            }
+          : null,
+      );
+      publishedDataRef.current = nextPublishedData;
+      publishedMetadataRef.current = publishedMetadata;
+      publishedBaselineRef.current = nextPublishedBaseline;
+      const liveHealth = readPublishedLiveHealth(publishedDocument);
+      setPublishedNeedsRevalidation(liveHealth.needsRevalidation);
+      setPublishedRevalidationErrors(liveHealth.errors);
+      if (viewingPublishedRef.current) {
+        setData(nextPublishedData);
+        latestData.current = nextPublishedData;
+        setMetadata(publishedMetadata);
+        latestMetadata.current = publishedMetadata;
+        dataSignatureRef.current = nextPublishedBaseline;
+      }
+      pendingRollbackVerificationRef.current = null;
+      setRevisionFailure(null);
+      message.success(
+        `已从历史版本 ${pending.sourceRevision.version} 创建并切换到新线上版本 ${publishedDocument.version}；当前草稿与历史版本保持不变`,
+      );
+      return true;
+    } catch {
+      if (!isActiveRollback()) return false;
+      pendingRollbackVerificationRef.current = pending;
+      setRevisionFailure({
+        message:
+          "回滚已请求，但暂时无法确认新的线上版本。请重新加载确认；系统只会读取线上状态，不会重复回滚。",
+        revision: pending.sourceRevision,
+        action: "rollback",
+      });
+      message.warning("回滚已请求、线上待确认；重试只会读取线上状态，不会重复回滚");
+      return false;
+    }
+  }, [locale, message, pageKey]);
+
+  const runPendingRollbackVerification = useCallback(async (
+    pending: PendingRollbackVerification,
+  ) => {
+    if (rollbackOwnerRef.current) return;
+    const rollbackOwner = Symbol(pending.workspaceKey);
+    rollbackOwnerRef.current = rollbackOwner;
+    setRollingBackRevisionId(pending.sourceRevision.id);
+    setRevisionFailure(null);
+    const isActiveRollback = () => (
+      pending.workspaceKey === activePageKeyRef.current
+      && rollbackOwnerRef.current === rollbackOwner
+    );
+    try {
+      await verifyPendingRollback(pending, isActiveRollback);
+    } finally {
+      if (rollbackOwnerRef.current === rollbackOwner) {
+        rollbackOwnerRef.current = null;
+        setRollingBackRevisionId(null);
+      }
+    }
+  }, [verifyPendingRollback]);
+
   const rollbackPublication = useCallback(
     (revision: PageDocumentRevisionSummary) => {
       const targetWorkspaceKey = workspaceKey;
+      const pending = pendingRollbackVerificationRef.current;
+      if (pending?.workspaceKey === targetWorkspaceKey) {
+        if (pending.sourceRevision.id !== revision.id) {
+          setRevisionFailure({
+            message: "另一项线上回滚仍待确认，请先重新加载确认其结果。",
+            revision: pending.sourceRevision,
+            action: "rollback",
+          });
+          return;
+        }
+        void runPendingRollbackVerification(pending);
+        return;
+      }
       const currentPublished = revisions.find((item) => item.isPublished);
       if (!currentPublished) {
         setRevisionFailure({ message: "当前线上版本指针缺失，不能执行回滚" });
@@ -1527,76 +1766,62 @@ export function usePageWorkspaceController({
       modal.confirm({
         title: `回滚线上到版本 ${revision.version}？`,
         content:
-          "此操作只切换线上发布指针，不会覆盖当前页面草稿，也不会修改或删除任何历史版本。",
+          "系统会复制该历史内容，创建新的不可变线上版本；不会覆盖当前页面草稿，也不会修改或删除已有历史版本。",
         okText: "确认回滚线上",
         cancelText: "取消",
         onOk: async () => {
-          if (targetWorkspaceKey !== activePageKeyRef.current) return;
+          if (targetWorkspaceKey !== activePageKeyRef.current || rollbackOwnerRef.current) return;
+          const rollbackOwner = Symbol(targetWorkspaceKey);
+          rollbackOwnerRef.current = rollbackOwner;
           setRollingBackRevisionId(revision.id);
           setRevisionFailure(null);
+          const isActiveRollback = () => (
+            targetWorkspaceKey === activePageKeyRef.current
+            && rollbackOwnerRef.current === rollbackOwner
+          );
+          let pendingVerification: PendingRollbackVerification | null = null;
+          let writeStarted = false;
           try {
-            const response = await pageDocumentApi.rollbackPublication(
+            const sourceResponse = await pageDocumentApi.getRevision(
+              pageKey,
+              locale,
+              revision.version,
+            );
+            if (!isActiveRollback()) return;
+            const sourceDetail = unwrapResponse<PageDocumentRevisionDetail>(sourceResponse);
+            const sourcePuck = getPuckDocument(sourceDetail?.puckData);
+            if (!sourceDetail || sourceDetail.id !== revision.id || !sourcePuck) {
+              throw new Error("历史版本正文无效，已拒绝回滚");
+            }
+            pendingVerification = {
+              workspaceKey: targetWorkspaceKey,
+              sourceRevision: revision,
+              sourceSignature: canonicalizePageContent(
+                sourcePuck,
+                normalizePuckMetadata(sourceDetail.metadata),
+              ),
+              previousPublishedRevisionId: currentPublished.id,
+            };
+            pendingRollbackVerificationRef.current = pendingVerification;
+            writeStarted = true;
+            await pageDocumentApi.rollbackPublication(
               pageKey,
               locale,
               revision.id,
               currentPublished.id,
             );
-            const updatedDocument = unwrapResponse<PageDocumentResource | null>(response);
-            const cached = pageSessionCacheRef.current[targetWorkspaceKey];
-            if (cached && updatedDocument?.updatedAt) {
-              pageSessionCacheRef.current[targetWorkspaceKey] = {
-                ...cached,
-                updatedAt: updatedDocument.updatedAt,
-                contentHash: updatedDocument.contentHash ?? cached.contentHash,
-                reviewStatus: updatedDocument.reviewStatus ?? cached.reviewStatus,
-              };
-              if (targetWorkspaceKey === activePageKeyRef.current) {
-                setReviewStatus(updatedDocument.reviewStatus ?? cached.reviewStatus);
-              }
-            }
-
-            const publishedResponse = await pageDocumentApi.getPublishedAdmin(pageKey, locale);
-            if (targetWorkspaceKey !== activePageKeyRef.current) return;
-            const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishedResponse);
-            const publishedPuck = getPuckDocument(publishedDocument?.puckData);
-            if (!publishedPuck) throw new Error("回滚后未能读取新的线上版本");
-            const nextPublishedData = ensureEditorPageStructure(
-              pageKey,
-              migratePuckData(publishedPuck),
-            );
-            const nextPublishedMetadata = normalizePuckMetadata(publishedDocument?.metadata);
-            const nextPublishedBaseline = canonicalizePageContent(
-              nextPublishedData,
-              nextPublishedMetadata,
-            );
-            publishedDataRef.current = nextPublishedData;
-            publishedMetadataRef.current = nextPublishedMetadata;
-            publishedBaselineRef.current = nextPublishedBaseline;
-            const liveHealth = readPublishedLiveHealth(publishedDocument);
-            setPublishedNeedsRevalidation(liveHealth.needsRevalidation);
-            setPublishedRevalidationErrors(liveHealth.errors);
-            setHasPendingDraft(
-              canonicalizePageContent(latestData.current, latestMetadata.current)
-                !== nextPublishedBaseline,
-            );
-            if (viewingPublishedRef.current) {
-              setData(nextPublishedData);
-              latestData.current = nextPublishedData;
-              setMetadata(nextPublishedMetadata);
-              latestMetadata.current = nextPublishedMetadata;
-              dataSignatureRef.current = canonicalizePageContent(
-                nextPublishedData,
-                nextPublishedMetadata,
-              );
-            }
-            setRevisions((items) => items.map((item) => ({
-              ...item,
-              isPublished: item.id === revision.id,
-            })));
-            message.success(`线上页面已回滚到版本 ${revision.version}；当前草稿保持不变`);
-            await loadRevisions();
+            if (!isActiveRollback()) return;
+            await verifyPendingRollback(pendingVerification, isActiveRollback);
           } catch (error) {
-            if (targetWorkspaceKey !== activePageKeyRef.current) return;
+            if (!isActiveRollback()) return;
+            const status = getEditorHttpStatus(error);
+            if (writeStarted && pendingVerification && status === undefined) {
+              await verifyPendingRollback(pendingVerification, isActiveRollback);
+              return;
+            }
+            if (pendingRollbackVerificationRef.current === pendingVerification) {
+              pendingRollbackVerificationRef.current = null;
+            }
             setRevisionFailure({
               message: getEditorErrorMessage(error, "线上回滚失败，请稍后重试"),
               revision,
@@ -1604,14 +1829,23 @@ export function usePageWorkspaceController({
             });
             throw error;
           } finally {
-            if (targetWorkspaceKey === activePageKeyRef.current) {
+            if (rollbackOwnerRef.current === rollbackOwner) {
+              rollbackOwnerRef.current = null;
               setRollingBackRevisionId(null);
             }
           }
         },
       });
     },
-    [loadRevisions, locale, message, modal, pageKey, revisions, workspaceKey],
+    [
+      locale,
+      modal,
+      pageKey,
+      revisions,
+      runPendingRollbackVerification,
+      verifyPendingRollback,
+      workspaceKey,
+    ],
   );
 
   const applyReviewResource = useCallback((
@@ -1698,6 +1932,131 @@ export function usePageWorkspaceController({
     }
   }, [applyReviewResource, locale, message, pageKey, workspaceKey]);
 
+  const verifyPendingPublication = async (
+    pending: PendingPublicationVerification,
+    isActivePublish: () => boolean,
+  ) => {
+    const pageLabel = getEditorPage(pageKey).label;
+    try {
+      const response = await pageDocumentApi.getPublishedAdmin(pageKey, locale);
+      if (!isActivePublish()) return false;
+
+      const publishedDocument = unwrapResponse<PageDocumentResource | null>(response);
+      const rawPublishedData = getPuckDocument(publishedDocument?.puckData);
+      const publishedHash = publishedDocument?.contentHash ?? null;
+      const expectedVersionMatches = pending.expectedVersion === null
+        || publishedDocument?.version === pending.expectedVersion;
+      const expectedRevisionMatches = pending.expectedPublishedRevisionId === null
+        || publishedDocument?.publishedRevisionId === pending.expectedPublishedRevisionId;
+      const publishedMetadata = normalizePuckMetadata(publishedDocument?.metadata);
+      const sourceMatches = Boolean(rawPublishedData)
+        && canonicalizePageContent(rawPublishedData, publishedMetadata)
+          === pending.sourceSignature;
+      // 管理端 published GET 返回的是展开后的线上快照合同；它以 status、
+      // contentHash 与发布指针标识线上事实，不承诺返回草稿审核字段或 publishedHash。
+      const isPublishedSnapshot = publishedDocument?.status === "PUBLISHED";
+
+      if (
+        !publishedDocument
+        || !rawPublishedData
+        || !isPublishedSnapshot
+        || publishedHash !== pending.persistedContentHash
+        || !sourceMatches
+        || !expectedVersionMatches
+        || !expectedRevisionMatches
+      ) {
+        throw new Error("published-snapshot-not-confirmed");
+      }
+
+      const publishedData = ensureEditorPageStructure(
+        pageKey,
+        migratePuckData(rawPublishedData),
+      );
+      const publishedBaseline = canonicalizePageContent(
+        publishedData,
+        publishedMetadata,
+      );
+      const currentSignature = canonicalizePageContent(
+        latestData.current,
+        latestMetadata.current,
+      );
+      const hasNewerLocalChanges = currentSignature !== pending.sourceSignature;
+      const currentData = latestData.current;
+      const currentMetadata = latestMetadata.current;
+
+      pageSessionCacheRef.current[pending.workspaceKey] = {
+        data: hasNewerLocalChanges ? currentData : publishedData,
+        metadata: hasNewerLocalChanges ? currentMetadata : publishedMetadata,
+        lastSaved: formatEditorTime(publishedDocument.updatedAt),
+        updatedAt: publishedDocument.updatedAt,
+        contentHash: publishedDocument.contentHash ?? pending.persistedContentHash,
+        reviewStatus: "PUBLISHED",
+      };
+
+      if (!isActivePublish()) return false;
+      setReviewStatus("PUBLISHED");
+      setReviewSubmittedBy(publishedDocument.submittedBy ?? null);
+      dataSignatureRef.current = publishedBaseline;
+      if (hasNewerLocalChanges) {
+        setHasUnsavedChanges(true);
+        setHasPendingDraft(currentSignature !== publishedBaseline);
+        pendingDraftRef.current = currentData;
+        // 线上已确认，但当前画布已经前进；重新预检当前草稿，不能沿用发布快照结论。
+        setValidationRevision((revision) => revision + 1);
+      } else {
+        setData(publishedData);
+        latestData.current = publishedData;
+        setMetadata(publishedMetadata);
+        latestMetadata.current = publishedMetadata;
+        setHasUnsavedChanges(false);
+        setHasPendingDraft(false);
+        pendingDraftRef.current = null;
+        setPublishIssues([]);
+        setPublishValidationStatus("valid");
+      }
+      setViewingPublished(false);
+      viewingPublishedRef.current = false;
+      publishedBaselineRef.current = publishedBaseline;
+      publishedDataRef.current = publishedData;
+      publishedMetadataRef.current = { ...publishedMetadata };
+      editingDraftSnapshotRef.current = null;
+      const liveHealth = readPublishedLiveHealth(publishedDocument);
+      setPublishedNeedsRevalidation(liveHealth.needsRevalidation);
+      setPublishedRevalidationErrors(liveHealth.errors);
+      pendingPublicationVerificationRef.current = null;
+      setPublishAttemptFailure(null);
+      setPublishReviewActive(false);
+      setPublishReviewOpen(false);
+      setPublishReviewIssueKey(null);
+      void loadRevisions();
+      message.success(
+        hasNewerLocalChanges
+          ? `${pageLabel}线上版本已确认；确认期间的新修改仍保留为未保存内容`
+          : pageKey === "home"
+            ? "店铺首页已发布，并已确认前台读取的线上版本"
+            : `${pageLabel}已发布，并已确认前台读取的线上版本`,
+      );
+      return true;
+    } catch {
+      if (!isActivePublish()) return false;
+      pendingPublicationVerificationRef.current = pending;
+      const lifecycleIssue: PublishValidationIssue = {
+        code: "publish-result-unverified",
+        message:
+          "发布已请求，但暂时无法确认线上版本。当前草稿及确认期间的本地修改均已保留；请重试线上确认，系统不会重复发布。",
+        severity: "error",
+        path: "lifecycle.publish",
+      };
+      setPublishAttemptFailure({
+        issue: lifecycleIssue,
+        sourceSignature: pending.sourceSignature,
+      });
+      activatePublishReview([lifecycleIssue]);
+      message.warning("发布已请求、线上待确认；重试只会读取线上版本，不会重复发布");
+      return false;
+    }
+  };
+
   const publishHome = async (
     nextData: unknown,
   ) => {
@@ -1723,6 +2082,22 @@ export function usePageWorkspaceController({
       targetWorkspaceKey === activePageKeyRef.current
       && publishOwnerRef.current === publishOwner
     );
+    const pendingVerification = pendingPublicationVerificationRef.current;
+    if (pendingVerification?.workspaceKey === targetWorkspaceKey) {
+      publishOperationRef.current = true;
+      publishOwnerRef.current = publishOwner;
+      setPublishing(true);
+      try {
+        await verifyPendingPublication(pendingVerification, isActivePublish);
+      } finally {
+        if (publishOwnerRef.current === publishOwner) {
+          publishOwnerRef.current = null;
+          publishOperationRef.current = false;
+          setPublishing(false);
+        }
+      }
+      return;
+    }
     const editableData = nextData ?? latestData.current;
     const pageLabel = getEditorPage(pageKey).label;
     const leftoverIssues = collectPageLockedLeftoverIssues(
@@ -1850,6 +2225,13 @@ export function usePageWorkspaceController({
 
       const publishPersistedDraft = async () => {
         if (!isActivePublish()) return;
+        const uncertainPublicationVerification: PendingPublicationVerification = {
+          workspaceKey: targetWorkspaceKey,
+          sourceSignature: publishSourceSignature,
+          persistedContentHash,
+          expectedVersion: null,
+          expectedPublishedRevisionId: null,
+        };
         try {
           if (
             canonicalizePageContent(
@@ -1871,85 +2253,36 @@ export function usePageWorkspaceController({
             selfReviewAcknowledged,
           );
           const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishResponse);
-          const publishedData = getPuckDocument(publishedDocument?.puckData) ?? publishData;
-          const publishedMetadata =
-            publishedDocument?.metadata &&
-            typeof publishedDocument.metadata === "object" &&
-            !Array.isArray(publishedDocument.metadata)
-              ? publishedDocument.metadata
-              : publishMetadata;
-          const publishedBaseline = canonicalizePageContent(
-            publishedData,
-            publishedMetadata,
-          );
-          pageSessionCacheRef.current[targetWorkspaceKey] = {
-            data: publishedData,
-            metadata: publishedMetadata,
-            lastSaved: formatEditorTime(
-              publishedDocument?.updatedAt || new Date(),
-            ),
-            updatedAt:
-              publishedDocument?.updatedAt ||
-              pageSessionCacheRef.current[targetWorkspaceKey]?.updatedAt ||
-              null,
-            contentHash: publishedDocument?.contentHash ?? persistedContentHash,
-            reviewStatus: publishedDocument?.reviewStatus ?? "PUBLISHED",
-          };
-
           if (!isActivePublish()) return;
-          setReviewStatus(publishedDocument?.reviewStatus ?? "PUBLISHED");
-          const hasNewerLocalChanges =
-            canonicalizePageContent(
-              latestData.current,
-              latestMetadata.current,
-            ) !== publishSourceSignature;
-          dataSignatureRef.current = canonicalizePageContent(
-            publishedData,
-            publishedMetadata,
-          );
-          if (hasNewerLocalChanges) {
-            setHasUnsavedChanges(true);
-            setHasPendingDraft(
-              canonicalizePageContent(
-                latestData.current,
-                latestMetadata.current,
-              ) !== publishedBaseline,
-            );
-          } else {
-            setData(publishedData);
-            latestData.current = publishedData;
-            setMetadata(publishedMetadata);
-            latestMetadata.current = publishedMetadata;
-            setHasUnsavedChanges(false);
-            setHasPendingDraft(false);
-          }
-          setViewingPublished(false);
-          publishedBaselineRef.current = publishedBaseline;
-          pendingDraftRef.current = null;
-          // 线上基线同步推进：发布后「查看线上版本」必须看到刚发布的内容，
-          // 而不是发布前的旧线上版。
-          publishedDataRef.current = publishedData;
-          publishedMetadataRef.current = { ...publishedMetadata };
-          editingDraftSnapshotRef.current = null;
-          setPublishedNeedsRevalidation(false);
-          setPublishedRevalidationErrors([]);
-          setPublishAttemptFailure(null);
-          setPublishReviewActive(false);
-          setPublishReviewOpen(false);
-          setPublishReviewIssueKey(null);
-          setPublishIssues([]);
-          setPublishValidationStatus("valid");
-          void loadRevisions();
-          message.success(
-            hasNewerLocalChanges
-              ? `${pageLabel}已发布；发布期间的新修改仍保留为未保存内容`
-              : pageKey === "home"
-                ? "店铺首页已发布，前台页面将立即读取最新版本"
-                : `${pageLabel}已发布，前台页面将立即读取最新版本`,
-          );
+          const pendingVerification: PendingPublicationVerification = {
+            ...uncertainPublicationVerification,
+            expectedVersion: Number.isInteger(publishedDocument?.version)
+              ? publishedDocument?.version ?? null
+              : null,
+            expectedPublishedRevisionId: Number.isInteger(
+              publishedDocument?.publishedRevisionId,
+            )
+              ? publishedDocument?.publishedRevisionId ?? null
+              : null,
+          };
+          // PUT 回包只能证明发布请求被服务端接受；线上基线必须由管理端
+          // published GET 权威回读确认，失败时保留该请求身份供 GET-only 重试。
+          pendingPublicationVerificationRef.current = pendingVerification;
+          await verifyPendingPublication(pendingVerification, isActivePublish);
         } catch (error) {
           if (!isActivePublish()) return;
-          if (getEditorHttpStatus(error) === 400) {
+          const status = getEditorHttpStatus(error);
+          if (status === undefined) {
+            // 请求已经发出但没有得到可证明“未提交”的响应。此时只能读取
+            // 线上快照确认同一内容哈希，不能再次 PUT 以免生成重复 revision。
+            pendingPublicationVerificationRef.current = uncertainPublicationVerification;
+            await verifyPendingPublication(
+              uncertainPublicationVerification,
+              isActivePublish,
+            );
+            return;
+          }
+          if (status === 400) {
             try {
               const refreshedResponse = await pageDocumentApi.validate(
                 pageKey,
@@ -1979,7 +2312,6 @@ export function usePageWorkspaceController({
               // 保留下面的安全通用错误；不把内部响应正文透传到后台页面。
             }
           }
-          const status = getEditorHttpStatus(error);
           const mediaPublishBlocked = /素材|公开使用|授权/.test(getEditorApiErrorMessage(error));
           const failureMessage = status === 403
             ? "当前账号已没有发布权限；权限可能已发生变化。请重新登录后再试，或联系管理员确认权限。"
@@ -2120,6 +2452,7 @@ export function usePageWorkspaceController({
     publishReviewOpen,
     publishReviewIssueKey,
     hasUnsavedChanges,
+    hasPersistedDraft,
     hasProtectedUnsavedChanges,
     previewMode,
     revisionsOpen,
@@ -2136,6 +2469,7 @@ export function usePageWorkspaceController({
     rollingBackRevisionId,
     revisionFailure,
     draftDiscardError,
+    draftDiscardVerificationPending,
     draftSnapshot,
     initialLoading,
     loadedPageKey,

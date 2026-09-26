@@ -563,7 +563,7 @@ export const productApi = {
       persistMockProducts();
       return mockRes(product);
     }
-    return api.post("/products", data);
+    return api.post("/products", data, { suppressGlobalError: true });
   },
   update: async (id: number, data: ProductWriteInput) => {
     if (USE_MOCK) {
@@ -828,13 +828,13 @@ export const productApi = {
     return api.delete(`/products/${productId}/certificates/${certId}`);
   },
   /* SKU 管理 */
-  getSkus: async (productId: number) => {
+  getSkus: async (productId: number, options: { dedupe?: boolean } = {}) => {
     if (USE_MOCK) {
       await mockDelay();
       const product = getMockProducts().find((item) => item.id === productId);
       return mockRes(product?.skus || []);
     }
-    return api.get(`/products/${productId}/skus`);
+    return api.get(`/products/${productId}/skus`, { dedupe: options.dedupe });
   },
   createSku: async (productId: number, data: ProductSkuWriteInput) => {
     if (USE_MOCK) {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { inquiriesApi, productApi } from "@/services/api";
 import { requestErrorCode, requestStatus } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -10,7 +10,26 @@ import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { useCustomerAuthStore } from "@/store/customerAuthStore";
-import { createIdempotencyKey } from "@/utils/idempotency";
+import { isStaleSessionResponseError } from "@/services/sessionEpoch";
+import {
+  PRIVACY_CONSENT_CONTENT_HASH,
+  PRIVACY_CONSENT_VERSION,
+} from "@/config/privacyConsent";
+import {
+  getConsultationSubmissionStatusCopy,
+  parseConsultationSubmissionReceipt,
+  type ConsultationSubmissionReceipt,
+} from "@/services/clients/consultationSubmissionReceipt";
+import {
+  clearContactConsultationDraft,
+  clearConsultationSubmissionAttempt,
+  consultationDraftOwner,
+  createConsultationSubmissionFingerprint,
+  readContactConsultationDraft,
+  readConsultationSubmissionAttempt,
+  reserveConsultationSubmissionAttempt,
+  saveContactConsultationDraft,
+} from "@/utils/consultationJourneyState";
 
 const T = {
   bg: "#FFFFFF",
@@ -56,6 +75,8 @@ const SOURCE_TYPE_TO_CONSULTATION: Record<string, string> = {
   custom: "高级定制",
   privacy: "其他",
 };
+const PRIVACY_REQUEST_MESSAGE =
+  "我希望行使以下个人信息权利（查询、更正、删除或撤回同意，请说明具体需求）：";
 
 type InquirySourceProduct = {
   id: number;
@@ -154,6 +175,7 @@ export type ContactProps = {
 
 export default function Contact({ mode = "public" }: ContactProps = {}) {
   const editorPreview = mode === "editor-preview";
+  const location = useLocation();
   useStructuredData("contact-faq", editorPreview ? null : {
     "@context": "https://schema.org",
     "@type": "FAQPage",
@@ -210,22 +232,31 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
 
   const authenticatedCustomer = useCustomerAuthStore((state) => state.customer);
   const savedCustomer = editorPreview ? null : authenticatedCustomer;
-  const [form, setForm] = useState({
-    name: savedCustomer?.name || "",
-    phone: savedCustomer?.phone || "",
-    email: savedCustomer?.email || "",
-    consultationType: preselectedConsultationType,
-    preferredContact: "电话",
-    preferredTime: "",
-    budgetRange: "",
-    message: isPrivacyRequest
-      ? "我希望行使以下个人信息权利（查询、更正、删除或撤回同意，请说明具体需求）："
-      : "",
-    privacyConsent: false,
+  const draftOwner = consultationDraftOwner(savedCustomer?.id);
+  const [restoredDraft] = useState(() => (
+    editorPreview ? null : readContactConsultationDraft(draftOwner)
+  ));
+  const [form, setForm] = useState(() => {
+    const restored = restoredDraft;
+    return {
+      name: restored?.name || savedCustomer?.name || "",
+      phone: restored?.phone || savedCustomer?.phone || "",
+      email: restored?.email || savedCustomer?.email || "",
+      consultationType: restored?.consultationType || preselectedConsultationType,
+      preferredContact: restored?.preferredContact || "电话",
+      preferredTime: restored?.preferredTime || "",
+      budgetRange: restored?.budgetRange || "",
+      message: restored?.message || (isPrivacyRequest
+        ? PRIVACY_REQUEST_MESSAGE
+        : ""),
+      // 阅读说明不能替代明确同意；往返后始终要求重新勾选。
+      privacyConsent: false,
+    };
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [receipt, setReceipt] = useState<ConsultationSubmissionReceipt | null>(null);
   const [submitError, setSubmitError] = useState("");
   const [sourceProduct, setSourceProduct] = useState<InquirySourceProduct | null>(null);
   const [productContextStatus, setProductContextStatus] =
@@ -233,8 +264,109 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
   const [productContextRevision, setProductContextRevision] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
   const successHeadingRef = useRef<HTMLHeadingElement>(null);
+  const invalidFieldAlignmentCleanupRef = useRef<(() => void) | null>(null);
   const submitPendingRef = useRef(false);
-  const idempotencyKeyRef = useRef(createIdempotencyKey());
+  const submitOperationRef = useRef(0);
+  const formOwnerRef = useRef(draftOwner);
+  const inquiryContextRef = useRef({ sourceType, rawProductRef });
+  const [pendingSubmission, setPendingSubmission] = useState(() => (
+    editorPreview
+      ? false
+      : Boolean(readConsultationSubmissionAttempt("contact", draftOwner))
+  ));
+
+  useEffect(() => {
+    if (restoredDraft) clearContactConsultationDraft();
+  }, [restoredDraft]);
+
+  useEffect(() => {
+    if (editorPreview || formOwnerRef.current === draftOwner) return;
+    submitOperationRef.current += 1;
+    formOwnerRef.current = draftOwner;
+    clearContactConsultationDraft();
+    submitPendingRef.current = false;
+    setSubmitting(false);
+    setSubmitted(false);
+    setReceipt(null);
+    setSubmitError("");
+    setErrors({});
+    setPendingSubmission(Boolean(
+      readConsultationSubmissionAttempt("contact", draftOwner),
+    ));
+    setForm({
+      name: savedCustomer?.name || "",
+      phone: savedCustomer?.phone || "",
+      email: savedCustomer?.email || "",
+      consultationType: preselectedConsultationType,
+      preferredContact: "电话",
+      preferredTime: "",
+      budgetRange: "",
+      message: isPrivacyRequest
+        ? PRIVACY_REQUEST_MESSAGE
+        : "",
+      privacyConsent: false,
+    });
+  }, [
+    draftOwner,
+    editorPreview,
+    isPrivacyRequest,
+    preselectedConsultationType,
+    savedCustomer,
+  ]);
+
+  useEffect(() => {
+    if (editorPreview) return;
+    const previous = inquiryContextRef.current;
+    if (
+      previous.sourceType === sourceType
+      && previous.rawProductRef === rawProductRef
+    ) return;
+
+    inquiryContextRef.current = { sourceType, rawProductRef };
+    // Contact 路由只改变 query 时不会重挂载。新的业务入口必须成为新的提交会话，
+    // 否则旧入口的迟到响应可能把当前入口覆盖成成功或错误状态。
+    submitOperationRef.current += 1;
+    submitPendingRef.current = false;
+    setSubmitting(false);
+    setSubmitted(false);
+    setReceipt(null);
+    setSubmitError("");
+    setErrors({});
+
+    if (previous.sourceType !== sourceType) {
+      setForm((current) => ({
+        ...current,
+        consultationType: preselectedConsultationType,
+        message: isPrivacyRequest && !current.message.trim()
+          ? PRIVACY_REQUEST_MESSAGE
+          : previous.sourceType === "privacy" && current.message === PRIVACY_REQUEST_MESSAGE
+            ? ""
+            : current.message,
+      }));
+    }
+  }, [
+    editorPreview,
+    isPrivacyRequest,
+    preselectedConsultationType,
+    rawProductRef,
+    sourceType,
+  ]);
+
+  useEffect(() => () => {
+    submitOperationRef.current += 1;
+  }, []);
+
+  useEffect(() => {
+    if (editorPreview || !authenticatedCustomer) return;
+    // Cookie 会话可能在页面首屏之后才恢复；只补齐仍为空的身份字段，避免覆盖
+    // 客户已开始填写或主动修改的内容。
+    setForm((current) => ({
+      ...current,
+      name: current.name || authenticatedCustomer.name || "",
+      phone: current.phone || authenticatedCustomer.phone || "",
+      email: current.email || authenticatedCustomer.email || "",
+    }));
+  }, [authenticatedCustomer, editorPreview]);
 
   useEffect(() => {
     if (editorPreview) return;
@@ -285,6 +417,8 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     if (submitted) successHeadingRef.current?.focus();
   }, [submitted]);
 
+  useEffect(() => () => invalidFieldAlignmentCleanupRef.current?.(), []);
+
   const set = <Key extends keyof typeof form>(
     key: Key,
     value: (typeof form)[Key],
@@ -315,8 +449,42 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
           `#${FIELD_IDS[field]}`,
         );
         if (!target) return;
+
+        invalidFieldAlignmentCleanupRef.current?.();
         target.focus({ preventScroll: true });
-        target.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+        const alignWhileFocused = () => {
+          if (document.activeElement !== target) return;
+          target.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+        };
+        alignWhileFocused();
+
+        let frame = 0;
+        const observer = typeof ResizeObserver === "undefined"
+          ? null
+          : new ResizeObserver(() => {
+              cancelAnimationFrame(frame);
+              frame = requestAnimationFrame(alignWhileFocused);
+            });
+        if (observer) {
+          observer.observe(document.body);
+          if (formRef.current) observer.observe(formRef.current);
+        }
+
+        const cleanup = () => {
+          cancelAnimationFrame(frame);
+          observer?.disconnect();
+          target.removeEventListener("blur", cleanup);
+          if (invalidFieldAlignmentCleanupRef.current === cleanup) {
+            invalidFieldAlignmentCleanupRef.current = null;
+          }
+        };
+        invalidFieldAlignmentCleanupRef.current = cleanup;
+        target.addEventListener("blur", cleanup, { once: true });
+
+        // 字体是最常见的晚布局来源；ResizeObserver 覆盖其他表单或页面尺寸变化。
+        void document.fonts.ready.then(() => {
+          frame = requestAnimationFrame(alignWhileFocused);
+        });
       });
     });
   };
@@ -345,47 +513,119 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     if (editorPreview) return;
     if (submitPendingRef.current || submitting) return;
     if (!validate()) return;
+    const operationId = ++submitOperationRef.current;
+    const requestOwner = formOwnerRef.current;
+    const isCurrentOperation = () =>
+      submitOperationRef.current === operationId
+      && formOwnerRef.current === requestOwner;
     submitPendingRef.current = true;
     setSubmitting(true);
     setSubmitError("");
+    let attemptReserved = false;
     try {
-      await inquiriesApi.submit(
-        {
-          name: form.name.trim(),
-          phone: form.phone.trim(),
-          email: form.email.trim() || undefined,
-          consultationType: form.consultationType,
-          preferredContact: form.preferredContact,
-          preferredTime: form.preferredTime || undefined,
-          budgetRange: form.budgetRange || undefined,
-          productId: sourceProduct?.id,
-          message: form.message.trim(),
-          privacyConsent: form.privacyConsent,
-        },
-        idempotencyKeyRef.current,
+      const submission = {
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        email: form.email.trim() || undefined,
+        consultationType: form.consultationType,
+        preferredContact: form.preferredContact,
+        preferredTime: form.preferredTime || undefined,
+        budgetRange: form.budgetRange || undefined,
+        productId: sourceProduct?.id,
+        message: form.message.trim(),
+        privacyConsent: form.privacyConsent,
+      };
+      const fingerprint = await createConsultationSubmissionFingerprint({
+        version: 1,
+        customerId: authenticatedCustomer?.id ?? null,
+        customerName: authenticatedCustomer?.name?.trim() || submission.name,
+        customerPhone: authenticatedCustomer?.phone || submission.phone,
+        customerEmail:
+          authenticatedCustomer?.email?.trim() || submission.email || null,
+        productId: submission.productId ?? null,
+        consultationType: submission.consultationType || null,
+        preferredContact: submission.preferredContact || null,
+        preferredTime: submission.preferredTime || null,
+        budgetRange: submission.budgetRange || null,
+        message: submission.message,
+        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+        privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
+      });
+      const reservation = reserveConsultationSubmissionAttempt(
+        "contact",
+        requestOwner,
+        fingerprint,
       );
-      idempotencyKeyRef.current = createIdempotencyKey();
+      if (reservation.status === "conflict") {
+        setPendingSubmission(true);
+        setSubmitError(
+          "当前内容与一笔结果待确认的咨询不同。为避免重复，请恢复原内容后重试，或先明确放弃恢复。",
+        );
+        return;
+      }
+      attemptReserved = true;
+      if (reservation.recovered) setPendingSubmission(true);
+      const response = await inquiriesApi.submit(
+        submission,
+        reservation.attempt.key,
+      );
+      if (!isCurrentOperation()) return;
+      const nextReceipt = parseConsultationSubmissionReceipt(
+        unwrapResponse<unknown>(response),
+      );
+      if (!nextReceipt) throw new Error("咨询回执响应不完整");
+      clearConsultationSubmissionAttempt("contact", requestOwner);
+      setPendingSubmission(false);
       trackSubmitInquiry();
+      clearContactConsultationDraft();
+      setReceipt(nextReceipt);
       setSubmitted(true);
     } catch (error) {
+      if (!isCurrentOperation() || isStaleSessionResponseError(error)) return;
       const status = requestStatus(error);
+      if (!attemptReserved) {
+        setPendingSubmission(false);
+        setSubmitError("浏览器暂时无法准备安全提交，请刷新页面后重试。");
+        return;
+      }
       if (
         sourceProduct
         && requestErrorCode(error) === "INQUIRY_PRODUCT_NOT_AVAILABLE"
       ) {
+        clearConsultationSubmissionAttempt("contact", requestOwner);
+        setPendingSubmission(false);
         setProductContextStatus("unavailable");
         setSubmitError("作品当前不可咨询，请移除作品后提交普通咨询。");
       } else if (status === 429) {
-        setSubmitError("提交过于频繁，请稍后再试。");
+        setPendingSubmission(true);
+        setSubmitError("提交过于频繁，结果待确认；请保持内容不变并稍后重试。");
+      } else if (status === 409) {
+        setPendingSubmission(true);
+        setSubmitError("幂等凭据与既有提交冲突，请先放弃恢复再发起新咨询。");
       } else if (status && status >= 400 && status < 500) {
+        clearConsultationSubmissionAttempt("contact", requestOwner);
+        setPendingSubmission(false);
         setSubmitError("提交信息未通过校验，请检查后重试。");
       } else {
-        setSubmitError("提交服务暂时不可用，请稍后再试。");
+        setPendingSubmission(true);
+        setSubmitError(
+          "提交结果待确认。请保持内容不变并重试，系统会复用原请求查回回执。",
+        );
       }
     } finally {
-      submitPendingRef.current = false;
-      setSubmitting(false);
+      if (isCurrentOperation()) {
+        submitPendingRef.current = false;
+        setSubmitting(false);
+      }
     }
+  };
+
+  const abandonPendingSubmission = () => {
+    clearConsultationSubmissionAttempt("contact", formOwnerRef.current);
+    setPendingSubmission(false);
+    setSubmitError(
+      "已放弃恢复；这不会撤销服务器上可能已生效的咨询。确认确需新建后可再次提交。",
+    );
   };
 
   if (submitted) {
@@ -445,6 +685,33 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
           >
             我们会根据您提供的联系方式与您联系，具体时间与安排以实际沟通为准。
           </p>
+          {receipt ? (
+            <dl
+              aria-label="咨询回执"
+              style={{
+                width: "min(420px, 100%)",
+                margin: "0 0 28px",
+                padding: "18px 20px",
+                border: `1px solid ${T.line}`,
+                display: "grid",
+                gridTemplateColumns: "auto 1fr",
+                gap: "8px 20px",
+                textAlign: "left",
+                fontSize: 13,
+              }}
+            >
+              <dt style={{ color: T.sec }}>咨询编号</dt>
+              <dd style={{ margin: 0, color: T.txt }}>#{receipt.sourceId}</dd>
+              <dt style={{ color: T.sec }}>当前状态</dt>
+              <dd style={{ margin: 0, color: T.txt }}>
+                {getConsultationSubmissionStatusCopy(receipt.status)}
+              </dd>
+              <dt style={{ color: T.sec }}>提交时间</dt>
+              <dd style={{ margin: 0, color: T.txt }}>
+                {new Date(receipt.createdAt).toLocaleString("zh-CN")}
+              </dd>
+            </dl>
+          ) : null}
           <div
             style={{
               display: "flex",
@@ -453,6 +720,21 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
               gap: 16,
             }}
           >
+            {authenticatedCustomer && receipt ? (
+              <Link
+                to={`/customer?section=consultations&leadId=${receipt.leadId}`}
+                className="contact-success__primary"
+                style={{
+                  padding: "10px 28px",
+                  border: `1px solid ${T.txt}`,
+                  fontSize: 13,
+                  color: T.txt,
+                  textDecoration: "none",
+                }}
+              >
+                查看本次咨询
+              </Link>
+            ) : null}
             <Link
               to="/catalog"
               className="contact-success__primary"
@@ -525,7 +807,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
         </div>
       </section>}
 
-      {/* ═══ 主体：左40% 右60% ═══ */}
+      {/* ═══ 主体：主任务左60%，支持信息右40% ═══ */}
       <section style={{ paddingBlock: "clamp(36px,5vh,64px)" }}>
         <div
           className="contact-grid"
@@ -534,157 +816,12 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
             marginInline: "auto",
             paddingInline: PX,
             display: "grid",
-            gridTemplateColumns: "minmax(0,2fr) minmax(0,3fr)",
+            gridTemplateColumns: "minmax(0,3fr) minmax(0,2fr)",
             gap: "clamp(32px,5vw,64px)",
           }}
         >
-          {/* 左侧 */}
-          <div>
-            <div style={{ marginBottom: 36 }}>
-              <p
-                style={{
-                  fontSize: 11,
-                  letterSpacing: "0.12em",
-                  color: T.light,
-                  marginBottom: 20,
-                }}
-              >
-                我们的服务
-              </p>
-              {SERVICES.map((s, i) => (
-                <div
-                  key={i}
-                  style={{ marginBottom: i < SERVICES.length - 1 ? 24 : 0 }}
-                >
-                  <p
-                    style={{
-                      fontSize: 15,
-                      fontWeight: 400,
-                      color: T.txt,
-                      margin: "0 0 4px",
-                    }}
-                  >
-                    <span
-                      style={{ color: T.gold, marginRight: 8, fontWeight: 300 }}
-                    >
-                      0{i + 1}
-                    </span>
-                    {s.title}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 12,
-                      color: T.sec,
-                      margin: 0,
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    {s.desc}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <div
-              style={{ borderTop: `1px solid ${T.line}`, marginBottom: 28 }}
-            />
-            <div style={{ marginBottom: 28 }}>
-              <p
-                style={{
-                  fontSize: 11,
-                  letterSpacing: "0.12em",
-                  color: T.light,
-                  marginBottom: 14,
-                }}
-              >
-                联系方式
-              </p>
-              {settingsStatus === "loading" && (
-                <p
-                  aria-live="polite"
-                  style={{ fontSize: 12, color: T.light, margin: 0 }}
-                >
-                  正在加载联系方式…
-                </p>
-              )}
-              {settingsStatus === "error" && (
-                <p
-                  role="alert"
-                  style={{
-                    fontSize: 12,
-                    color: T.sec,
-                    margin: 0,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  联系信息暂时无法加载，您仍可通过本页表单提交需求。
-                </p>
-              )}
-              {settingsStatus === "loaded" && CONTACT_INFO.length === 0 && (
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: T.sec,
-                    margin: 0,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  公开联系方式正在完善，您仍可通过本页表单提交需求。
-                </p>
-              )}
-              {settingsStatus === "loaded" &&
-                CONTACT_INFO.map((c) => (
-                  <div key={c.label} style={{ marginBottom: 10, fontSize: 13 }}>
-                    <span style={{ color: T.light, marginRight: 8 }}>
-                      {c.label}
-                    </span>
-                    {c.href ? (
-                      <a
-                        href={c.href}
-                        style={{ color: T.txt, textDecoration: "none" }}
-                      >
-                        {c.value}
-                      </a>
-                    ) : (
-                      <span style={{ color: T.txt }}>{c.value}</span>
-                    )}
-                  </div>
-                ))}
-            </div>
-            <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 20 }}>
-              <p
-                style={{
-                  fontSize: 11,
-                  letterSpacing: "0.12em",
-                  color: T.light,
-                  marginBottom: 10,
-                }}
-              >
-                咨询流程
-              </p>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 12,
-                  color: T.sec,
-                  flexWrap: "wrap",
-                }}
-              >
-                <span>提交需求</span>
-                <span style={{ color: T.light }}>→</span>
-                <span>沟通确认</span>
-                <span style={{ color: T.light }}>→</span>
-                <span>具体安排</span>
-              </div>
-              <p style={{ fontSize: 11, color: T.light, marginTop: 8 }}>
-                我们会根据您提供的联系方式与您联系，具体时间与安排以实际沟通为准。
-              </p>
-            </div>
-          </div>
-
-          {/* 右侧：表单 */}
-          <div>
+          {/* 主任务：咨询表单 */}
+          <div className="contact-request">
             {isPrivacyRequest && (
               <section
                 aria-labelledby="privacy-request-title"
@@ -1045,6 +1182,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
               </div>
               <div style={{ marginBottom: 18 }}>
                 <label
+                  className="contact-privacy-consent"
                   style={{
                     display: "flex",
                     alignItems: "flex-start",
@@ -1072,7 +1210,23 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                     我已阅读并同意
                     <Link
                       to="/privacy"
-                      onClick={(e) => e.stopPropagation()}
+                      state={{
+                        privacyReturnTo: `${location.pathname}${location.search}`,
+                      }}
+                      className="contact-privacy-link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        saveContactConsultationDraft(draftOwner, {
+                          name: form.name,
+                          phone: form.phone,
+                          email: form.email,
+                          consultationType: form.consultationType,
+                          preferredContact: form.preferredContact,
+                          preferredTime: form.preferredTime,
+                          budgetRange: form.budgetRange,
+                          message: form.message,
+                        });
+                      }}
                       style={{ color: T.txt, textDecoration: "underline" }}
                     >
                       隐私说明
@@ -1093,6 +1247,39 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                   </p>
                 )}
               </div>
+              {pendingSubmission && (
+                <div
+                  role="status"
+                  style={{
+                    border: `1px solid ${T.line}`,
+                    background: T.bg,
+                    padding: "12px 14px",
+                    marginBottom: 12,
+                    fontSize: 12,
+                    color: T.sec,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  <p style={{ margin: "0 0 8px" }}>
+                    存在一笔结果待确认的咨询。保持原内容再次提交可安全查回原回执；新建前请先明确放弃恢复。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={abandonPendingSubmission}
+                    style={{
+                      minHeight: 44,
+                      border: 0,
+                      padding: "0 8px",
+                      background: "transparent",
+                      color: T.txt,
+                      textDecoration: "underline",
+                      cursor: "pointer",
+                    }}
+                  >
+                    放弃恢复并准备新建
+                  </button>
+                </div>
+              )}
               {submitError && (
                 <p
                   role="alert"
@@ -1125,6 +1312,151 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                       : "提交需求"}
               </button>
             </form>
+          </div>
+
+          {/* 支持信息：服务、联系方式与流程 */}
+          <div className="contact-support">
+            <div style={{ marginBottom: 36 }}>
+              <p
+                style={{
+                  fontSize: 11,
+                  letterSpacing: "0.12em",
+                  color: T.light,
+                  marginBottom: 20,
+                }}
+              >
+                我们的服务
+              </p>
+              {SERVICES.map((s, i) => (
+                <div
+                  key={i}
+                  style={{ marginBottom: i < SERVICES.length - 1 ? 24 : 0 }}
+                >
+                  <p
+                    style={{
+                      fontSize: 15,
+                      fontWeight: 400,
+                      color: T.txt,
+                      margin: "0 0 4px",
+                    }}
+                  >
+                    <span
+                      style={{ color: T.gold, marginRight: 8, fontWeight: 300 }}
+                    >
+                      0{i + 1}
+                    </span>
+                    {s.title}
+                  </p>
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: T.sec,
+                      margin: 0,
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {s.desc}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div
+              style={{ borderTop: `1px solid ${T.line}`, marginBottom: 28 }}
+            />
+            <div style={{ marginBottom: 28 }}>
+              <p
+                style={{
+                  fontSize: 11,
+                  letterSpacing: "0.12em",
+                  color: T.light,
+                  marginBottom: 14,
+                }}
+              >
+                联系方式
+              </p>
+              {settingsStatus === "loading" && (
+                <p
+                  aria-live="polite"
+                  style={{ fontSize: 12, color: T.light, margin: 0 }}
+                >
+                  正在加载联系方式…
+                </p>
+              )}
+              {settingsStatus === "error" && (
+                <p
+                  role="alert"
+                  style={{
+                    fontSize: 12,
+                    color: T.sec,
+                    margin: 0,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  联系信息暂时无法加载，您仍可通过本页表单提交需求。
+                </p>
+              )}
+              {settingsStatus === "loaded" && CONTACT_INFO.length === 0 && (
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: T.sec,
+                    margin: 0,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  公开联系方式正在完善，您仍可通过本页表单提交需求。
+                </p>
+              )}
+              {settingsStatus === "loaded" &&
+                CONTACT_INFO.map((c) => (
+                  <div key={c.label} style={{ marginBottom: 10, fontSize: 13 }}>
+                    <span style={{ color: T.light, marginRight: 8 }}>
+                      {c.label}
+                    </span>
+                    {c.href ? (
+                      <a
+                        href={c.href}
+                        style={{ color: T.txt, textDecoration: "none" }}
+                      >
+                        {c.value}
+                      </a>
+                    ) : (
+                      <span style={{ color: T.txt }}>{c.value}</span>
+                    )}
+                  </div>
+                ))}
+            </div>
+            <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 20 }}>
+              <p
+                style={{
+                  fontSize: 11,
+                  letterSpacing: "0.12em",
+                  color: T.light,
+                  marginBottom: 10,
+                }}
+              >
+                咨询流程
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 12,
+                  color: T.sec,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>提交需求</span>
+                <span style={{ color: T.light }}>→</span>
+                <span>沟通确认</span>
+                <span style={{ color: T.light }}>→</span>
+                <span>具体安排</span>
+              </div>
+              <p style={{ fontSize: 11, color: T.light, marginTop: 8 }}>
+                我们会根据您提供的联系方式与您联系，具体时间与安排以实际沟通为准。
+              </p>
+            </div>
           </div>
         </div>
       </section>
@@ -1205,6 +1537,21 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
           outline-offset: 3px;
         }
 
+        .contact-privacy-link:focus-visible {
+          outline: 2px solid ${T.txt};
+          outline-offset: 2px;
+        }
+
+        .contact-privacy-link {
+          display: inline-flex;
+          min-width: 44px;
+          min-height: 44px;
+          align-items: center;
+          justify-content: center;
+          margin-block: -14px;
+          vertical-align: middle;
+        }
+
         .contact-form input:focus-visible,
         .contact-form select:focus-visible,
         .contact-form textarea:focus-visible {
@@ -1215,6 +1562,13 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
         @media (max-width: 900px) {
           .contact-grid { grid-template-columns: 1fr !important; }
           .contact-row { grid-template-columns: 1fr !important; }
+        }
+
+        @media (max-width: 720px) {
+          .contact-privacy-consent {
+            min-height: 44px;
+          }
+
         }
       `}</style>
     </div>

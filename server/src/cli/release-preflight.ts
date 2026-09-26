@@ -4,8 +4,15 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { PrismaService } from "../common/prisma/prisma.service";
 import {
+  CONTENT_TEMPLATE_PAGE_KEYS,
   hasCurrentContentTemplatePublicationAttestation,
+  withoutContentTemplatePublicationAttestation,
 } from "../modules/page-modules/content-template-contract";
+import {
+  createPageLocaleContentHash,
+  readPageLocaleRevisionMarker,
+  revisionBelongsToLocale,
+} from "../modules/page-modules/page-document-localization";
 import { PageModulesService } from "../modules/page-modules/page-modules.service";
 import {
   evaluateSitePublicationReadiness,
@@ -14,6 +21,7 @@ import {
 import {
   COMMERCE_CODE_READINESS,
   COMMERCE_RELEASE_PROFILE,
+  evaluateReleasePaymentProviderMode,
   evaluateReleaseRuntimeGates,
   isPartnerApplicationsWriteEnabled,
   parseReleaseProfile,
@@ -34,14 +42,7 @@ export {
   type ReleaseProfile,
 } from "../common/release/release-profile";
 
-export const RELEASE_PAGE_KEYS = [
-  "home",
-  "about",
-  "products",
-  "catalog",
-  "custom",
-  "contact",
-] as const;
+export const RELEASE_PAGE_KEYS = CONTENT_TEMPLATE_PAGE_KEYS;
 
 const DEMO_PRODUCT_CODES = [
   "HC-ZD-001",
@@ -62,6 +63,13 @@ type PublishedRevisionRow = {
   puckData: Prisma.JsonValue;
   metadata: Prisma.JsonValue;
 };
+type PublishedLocalizationRow = {
+  reviewStatus: string;
+  publishedRevisionId: number | null;
+  publishedHash: string | null;
+};
+
+type ReleasePageKey = (typeof RELEASE_PAGE_KEYS)[number];
 
 export type ReleasePreflightDatabase = {
   user: {
@@ -79,13 +87,29 @@ export type ReleasePreflightDatabase = {
   pageDocumentRevision: {
     findFirst(args: unknown): Promise<PublishedRevisionRow | null>;
   };
+  pageDocumentLocalization?: {
+    findUnique(args: unknown): Promise<PublishedLocalizationRow | null>;
+  };
 };
 
 export type PageValidationResult = {
   valid: boolean;
   errors?: string[];
-  issues?: Array<{ code?: string; severity?: string }>;
+  issues?: Array<{
+    code?: string;
+    severity?: string;
+    message?: string;
+    path?: string;
+  }>;
 };
+
+function formalPlaceholderIssues(validation: PageValidationResult) {
+  return (validation.issues ?? []).filter((issue) =>
+    issue.severity === "warning"
+      && typeof issue.message === "string"
+      && issue.message.includes("仍是占位内容")
+  );
+}
 
 export type ReleasePreflightCheck = {
   code: string;
@@ -99,7 +123,24 @@ export type ReleasePreflightOptions = {
   configuredClientPublicSiteOrigin?: string;
   requireConfiguredClientPublicSiteOrigin?: boolean;
   releaseRuntimeEnvironment?: ReleaseRuntimeGateEnvironment;
+  expectedPageContentHashes?: Record<ReleasePageKey, string>;
 };
+
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+
+export function parseReleasePageContentHashes(
+  environment: NodeJS.ProcessEnv,
+): Record<ReleasePageKey, string> | undefined {
+  const entries = RELEASE_PAGE_KEYS.map((pageKey) => [
+    pageKey,
+    environment[`PUBLIC_SEO_PAGE_HASH_${pageKey.toUpperCase()}`]?.trim() ?? "",
+  ] as const);
+  if (entries.every(([, value]) => value === "")) return undefined;
+  if (entries.some(([, value]) => !SHA256_PATTERN.test(value))) {
+    throw new Error("RELEASE_PREFLIGHT_PAGE_HASHES_INVALID");
+  }
+  return Object.fromEntries(entries) as Record<ReleasePageKey, string>;
+}
 
 export interface ReleasePreflightTargetConfig extends TargetDatabaseIdentity {}
 
@@ -438,6 +479,22 @@ export async function runReleasePreflight(
       },
     });
   }
+  const paymentProviderMode = evaluateReleasePaymentProviderMode(
+    releaseProfile,
+    options.releaseRuntimeEnvironment ?? {},
+  );
+  checks.push({
+    code: "release-profile-payment-provider-mode",
+    ok: paymentProviderMode.ready,
+    summary: paymentProviderMode.ready
+      ? `payment provider mode ${paymentProviderMode.configuredMode} 符合 ${releaseProfile} 发布边界`
+      : `${releaseProfile} 发布候选不允许 payment provider mode ${paymentProviderMode.configuredMode}`,
+    facts: {
+      configuredMode: paymentProviderMode.configuredMode,
+      allowedModes: paymentProviderMode.allowedModes,
+      simulatorAcceptedForRelease: false,
+    },
+  });
   if (releaseProfile === COMMERCE_RELEASE_PROFILE) {
     for (const capability of COMMERCE_CODE_READINESS) {
       checks.push({
@@ -661,7 +718,27 @@ export async function runReleasePreflight(
       continue;
     }
 
-    if (!document.publishedRevisionId) {
+    let publishedRevisionId = document.publishedRevisionId;
+    let localizedPublishedHash: string | null = null;
+    const expectedContentHash = options.expectedPageContentHashes?.[pageKey];
+    if (expectedContentHash) {
+      const localization = await database.pageDocumentLocalization?.findUnique({
+        where: { documentId_locale: { documentId: document.id, locale: "ZH_CN" } },
+        select: { reviewStatus: true, publishedRevisionId: true, publishedHash: true },
+      });
+      if (!localization || localization.reviewStatus !== "PUBLISHED" || !localization.publishedRevisionId) {
+        checks.push({
+          code: `page-${pageKey}-published-current`,
+          ok: false,
+          summary: `${pageKey} 缺少已发布的中文本地化版本指针`,
+        });
+        continue;
+      }
+      publishedRevisionId = localization.publishedRevisionId;
+      localizedPublishedHash = localization.publishedHash;
+    }
+
+    if (!publishedRevisionId) {
       checks.push({
         code: `page-${pageKey}-published-current`,
         ok: false,
@@ -672,7 +749,7 @@ export async function runReleasePreflight(
 
     const revision = await database.pageDocumentRevision.findFirst({
       where: {
-        id: document.publishedRevisionId,
+        id: publishedRevisionId,
         documentId: document.id,
         status: "published",
       },
@@ -683,7 +760,7 @@ export async function runReleasePreflight(
         code: `page-${pageKey}-published-current`,
         ok: false,
         summary: `${pageKey} 线上版本指针无效`,
-        facts: { publishedRevisionId: document.publishedRevisionId },
+        facts: { publishedRevisionId },
       });
       continue;
     }
@@ -698,23 +775,60 @@ export async function runReleasePreflight(
       continue;
     }
 
+    if (expectedContentHash) {
+      const localeMarker = readPageLocaleRevisionMarker(revision.metadata);
+      const actualContentHash = createPageLocaleContentHash(
+        revision.puckData,
+        withoutContentTemplatePublicationAttestation(revision.metadata),
+      );
+      const matchesManifest = actualContentHash === expectedContentHash
+        && localizedPublishedHash === expectedContentHash
+        && revisionBelongsToLocale(revision.metadata, "zh-CN")
+        && localeMarker?.contentHash === expectedContentHash;
+      checks.push({
+        code: `page-${pageKey}-manifest-hash`,
+        ok: matchesManifest,
+        summary: matchesManifest
+          ? `${pageKey} 中文发布指针与候选清单内容哈希一致`
+          : `${pageKey} 中文发布指针与候选清单内容哈希不一致`,
+        facts: {
+          revisionId: revision.id,
+          version: revision.version,
+          manifestHashMatched: actualContentHash === expectedContentHash,
+          publishedPointerHashMatched: localizedPublishedHash === expectedContentHash,
+          localeMarkerMatched: revisionBelongsToLocale(revision.metadata, "zh-CN"),
+          revisionMarkerHashMatched: localeMarker?.contentHash === expectedContentHash,
+        },
+      });
+    }
+
     try {
       const validation = await validatePage(
         pageKey,
         revision.puckData,
         revision.metadata,
       );
+      const placeholderIssues = formalPlaceholderIssues(validation);
+      const ready = validation.valid && placeholderIssues.length === 0;
       checks.push({
         code: `page-${pageKey}-published-current`,
-        ok: validation.valid,
-        summary: validation.valid
+        ok: ready,
+        summary: ready
           ? `${pageKey} 指针 revision 通过当前服务端验证`
-          : `${pageKey} 指针 revision 重新验证失败`,
+          : placeholderIssues.length > 0
+            ? `${pageKey} 指针 revision 仍含正式上线不允许的占位内容`
+            : `${pageKey} 指针 revision 重新验证失败`,
         facts: {
           revisionId: revision.id,
           version: revision.version,
           errorCount: validation.errors?.length ?? 0,
           issueCodes: uniqueIssueCodes(validation),
+          ...(placeholderIssues.length > 0 ? {
+            placeholderIssueCount: placeholderIssues.length,
+            placeholderIssuePaths: placeholderIssues
+              .map((issue) => issue.path)
+              .filter((path): path is string => Boolean(path)),
+          } : {}),
         },
       });
     } catch {
@@ -797,6 +911,7 @@ function safeReleasePreflightErrorCode(error: unknown): string {
 async function main() {
   const config = createReleasePreflightTargetConfig(process.env);
   const releaseProfile = parseReleasePreflightProfile(process.env);
+  const expectedPageContentHashes = parseReleasePageContentHashes(process.env);
   const prisma = new PrismaService();
   await prisma.$connect();
   try {
@@ -812,6 +927,7 @@ async function main() {
         configuredClientPublicSiteOrigin: process.env.VITE_PUBLIC_SITE_ORIGIN,
         requireConfiguredClientPublicSiteOrigin: true,
         releaseRuntimeEnvironment: process.env,
+        expectedPageContentHashes,
       },
     );
     console.log(JSON.stringify(result, null, 2));

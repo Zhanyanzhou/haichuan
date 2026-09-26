@@ -1,6 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import {
+  PRIVACY_CONSENT_CONTENT_HASH,
+  PRIVACY_CONSENT_VERSION,
+} from "../src/config/privacyConsent";
+import {
   createRouteBarrier,
   mockCatalogDetail,
   publishedCatalogDocument,
@@ -517,10 +521,20 @@ for (const viewport of [
       .toHaveAttribute("href", "/catalog");
     const action = page.locator(".product-detail-page__primary-action");
     await expect(action).toHaveCount(1);
+    await expect(action).toHaveText("请先选择规格");
+    await expect(page.locator(".product-detail-page__commerce-facts dd.is-price")).toContainText("起");
+    await page.locator(".product-detail-page__sku-option").click();
     await expect(action).toHaveText("登录后购买");
     await expect(page.getByText("0g", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "证书" })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "评价" })).toHaveCount(0);
+    const sizeGuidanceLink = page.getByRole("link", { name: "联系珠宝顾问确认尺寸" });
+    await expect(page.locator(".product-detail-page__decision-panel"))
+      .toContainText("暂无已核实的作品或规格尺寸");
+    await sizeGuidanceLink.scrollIntoViewIfNeeded();
+    const sizeGuidanceLinkBox = await sizeGuidanceLink.boundingBox();
+    expect(sizeGuidanceLinkBox).not.toBeNull();
+    expect(sizeGuidanceLinkBox!.height).toBeGreaterThanOrEqual(44);
 
     const media = page.locator(".product-detail-page__main-media img");
     await expect(media).toHaveAttribute("width", "1200");
@@ -550,6 +564,197 @@ for (const viewport of [
       expect(galleryBox!.width / summaryBox!.width).toBeGreaterThan(1.32);
       expect(galleryBox!.width / summaryBox!.width).toBeLessThan(1.5);
     }
+    await expectNoHorizontalOverflow(page);
+    await expectWriteContract(writes);
+  });
+}
+
+test("Catalog 进入详情后恢复完整来源 URL、滚动位置与原作品焦点", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const writes = await mockCatalogDetail(page, {
+    products: fiveModes,
+    catalogTotal: 64,
+  });
+  // 使用受支持且非默认的排序和第二页，避免规范化逻辑正确移除非法 sort/page=1
+  // 时把测试夹具自身的问题误判成返回链丢参。
+  const sourceUrl = "/catalog?sort=sku&page=2";
+  await page.goto(sourceUrl);
+  await expect(page.locator(".catalog-matrix")).toBeVisible();
+
+  const displayCard = page.locator('[data-catalog-product-id="6"]');
+  const displayDetail = displayCard.getByRole("link", { name: "查看作品" });
+  await displayCard.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, 80));
+  const displayScrollY = await page.evaluate(() => window.scrollY);
+  await displayDetail.click();
+  await expect(page).toHaveURL(/\/products\/HC-TEST-006$/);
+  const catalogBreadcrumb = page.getByRole("navigation", { name: "面包屑" })
+    .getByRole("link", { name: "选款中心" });
+  await expect(catalogBreadcrumb).toHaveAttribute("href", sourceUrl);
+  await catalogBreadcrumb.click();
+  await expect(page).toHaveURL(new RegExp(`${sourceUrl.replace("?", "\\?")}$`));
+  await expect(displayDetail).toBeFocused();
+  await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - displayScrollY))
+    .toBeLessThanOrEqual(2);
+
+  const selectionCard = page.locator('[data-catalog-product-id="2"]');
+  const quickViewTrigger = selectionCard.getByRole("button", { name: /快速预览/ });
+  await selectionCard.scrollIntoViewIfNeeded();
+  await quickViewTrigger.click();
+  await page.getByRole("dialog").getByRole("link", { name: "查看完整信息" }).click();
+  await expect(page).toHaveURL(/\/products\/HC-TEST-002$/);
+  const secondBreadcrumb = page.getByRole("navigation", { name: "面包屑" })
+    .getByRole("link", { name: "选款中心" });
+  await expect(secondBreadcrumb).toHaveAttribute("href", sourceUrl);
+  await secondBreadcrumb.click();
+  await expect(page).toHaveURL(new RegExp(`${sourceUrl.replace("?", "\\?")}$`));
+  await expect(quickViewTrigger).toBeFocused();
+  await expectWriteContract(writes);
+});
+
+for (const viewport of [
+  { name: "mobile", width: 390, height: 844 },
+  { name: "desktop", width: 1440, height: 900 },
+]) {
+  test(`Catalog ${viewport.name} 来源作品失效后聚焦结果区而非同位置的另一作品`, async ({ page }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const writes = await mockCatalogDetail(page, {
+      products: fiveModes,
+      catalogTotal: 64,
+    });
+    const catalogProducts = [...fiveModes];
+    await page.route(/\/api\/products\/public(?:\?.*)?$/, async (route) => {
+      const url = new URL(route.request().url());
+      const requestedPage = Number.parseInt(url.searchParams.get("page") || "1", 10);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: 200,
+          data: {
+            list: catalogProducts,
+            total: 64,
+            page: Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1,
+            pageSize: 32,
+            facets: { sizes: [] },
+          },
+          message: "success",
+        }),
+      });
+    });
+    const sourceUrl = "/catalog?sort=sku&page=2";
+    await page.goto(sourceUrl);
+
+    const sourceCard = page.locator('[data-catalog-product-id="6"]');
+    await sourceCard.scrollIntoViewIfNeeded();
+    await sourceCard.getByRole("link", { name: "查看作品" }).click();
+    await expect(page).toHaveURL(/\/products\/HC-TEST-006$/);
+
+    const sourceIndex = catalogProducts.findIndex((product) => product.id === 6);
+    expect(sourceIndex).toBeGreaterThanOrEqual(0);
+    const replacement = publicProduct(66, "DISPLAY_ONLY");
+    catalogProducts.splice(sourceIndex, 1, replacement);
+
+    await page.getByRole("navigation", { name: "面包屑" })
+      .getByRole("link", { name: "选款中心" })
+      .click();
+
+    await expect(page).toHaveURL(new RegExp(`${sourceUrl.replace("?", "\\?")}$`));
+    const results = page.getByRole("region", { name: "作品结果" });
+    await expect(results).toBeFocused();
+    const replacementCard = page.locator(`[data-catalog-product-id="${replacement.id}"]`);
+    await expect(replacementCard.getByRole("link", { name: "查看作品" })).not.toBeFocused();
+    await expect(replacementCard.getByRole("button", { name: /快速预览/ })).not.toBeFocused();
+    await expectNoHorizontalOverflow(page);
+    await expectWriteContract(writes);
+  });
+}
+
+for (const viewport of [
+  { name: "mobile", width: 390, height: 844 },
+  { name: "desktop", width: 1440, height: 900 },
+]) {
+  test(`Catalog ${viewport.name} 从详情绕行首页后按全新访问进入`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const writes = await mockCatalogDetail(page, {
+      products: fiveModes,
+      catalogTotal: 64,
+    });
+    const sourceUrl = "/catalog";
+    await page.goto(sourceUrl);
+    const displayCard = page.locator('[data-catalog-product-id="6"]');
+    const displayDetail = displayCard.getByRole("link", { name: "查看作品" });
+    await displayCard.scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollBy(0, 80));
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await displayDetail.click();
+    await expect(page).toHaveURL(/\/products\/HC-TEST-006$/);
+
+    await page.getByRole("navigation", { name: "面包屑" })
+      .getByRole("link", { name: "首页" })
+      .click();
+    await expect(page).toHaveURL(/\/$/);
+    if (viewport.name === "mobile") {
+      await page.getByRole("link", { name: "进入选款中心" }).click();
+    } else {
+      await page.locator("header").getByRole("link", { name: "选款中心" }).click();
+    }
+    await expect(page).toHaveURL(/\/catalog$/);
+    await expect(page.locator(".catalog-matrix")).toBeVisible();
+    await page.waitForTimeout(250);
+    await page.screenshot({
+      path: testInfo.outputPath(`catalog-new-visit-${viewport.name}.png`),
+      fullPage: false,
+    });
+
+    expect(await page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(2);
+    await expect(displayDetail).not.toBeFocused();
+    await expectWriteContract(writes);
+  });
+}
+
+test("ProductDetail 评价接口失败时仅局部降级且不显示全局错误", async ({ page }) => {
+  const product = publicProduct(28, "DISPLAY_ONLY");
+  const writes = await mockCatalogDetail(page, { products: [product] });
+  await page.route("**/api/reviews/product/28**", (route) => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ statusCode: 503, message: "reviews unavailable" }),
+  }));
+  const reviewResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/reviews/product/28"
+      && response.status() === 503,
+  );
+
+  await page.goto("/products/28");
+  await reviewResponse;
+
+  await expect(page.getByRole("heading", { level: 1, name: product.name })).toBeVisible();
+  await expect(page.locator(".product-detail-page__primary-action"))
+    .toHaveText("咨询此款作品");
+  await expect(page.getByRole("tab", { name: "评价" })).toHaveCount(0);
+  await page.waitForTimeout(250);
+  await expect(page.locator(".ant-message").getByRole("alert")).toHaveCount(0);
+  await expectWriteContract(writes);
+});
+
+for (const width of [375, 390]) {
+  test(`ProductDetail ${width}px 面包屑链接保留至少 44×44px 触控目标`, async ({ page }) => {
+    const product = publicProduct(29, "DISPLAY_ONLY");
+    await page.setViewportSize({ width, height: 844 });
+    const writes = await mockCatalogDetail(page, { products: [product] });
+
+    await page.goto("/products/29");
+    await expect(page.getByRole("heading", { level: 1, name: product.name })).toBeVisible();
+    const breadcrumbLinks = page.getByRole("navigation", { name: "面包屑" }).getByRole("link");
+    await expect(breadcrumbLinks).toHaveCount(2);
+    const linkSizes = await breadcrumbLinks.evaluateAll((links) =>
+      links.map((link) => {
+        const box = link.getBoundingClientRect();
+        return { width: box.width, height: box.height };
+      }),
+    );
+    expect(linkSizes.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
     await expectNoHorizontalOverflow(page);
     await expectWriteContract(writes);
   });
@@ -671,6 +876,169 @@ test("ProductDetail 快速切换作品时不会被较早请求的迟到响应覆
   await expectWriteContract(writes);
 });
 
+test("ProductDetail 切换作品与客户身份后忽略旧收藏和评价响应并重载会员投影", async ({ page }) => {
+  const first = publicProduct(63, "DISPLAY_ONLY");
+  const second = publicProduct(64, "DISPLAY_ONLY");
+  const favoriteBarrier = createRouteBarrier();
+  const firstReviewsBarrier = createRouteBarrier();
+  let secondDetailReads = 0;
+  let favoritesReads = 0;
+  let favoriteWrites = 0;
+
+  const writes = await mockCatalogDetail(page, {
+    products: [first, second],
+    signedIn: true,
+    allowFavoriteWrite: true,
+    reviewsByProduct: {
+      [first.id]: {
+        list: [{ id: 6301, rating: 1, content: "旧作品评价", createdAt: "2026-09-01T00:00:00.000Z" }],
+        total: 1,
+        averageRating: 1,
+      },
+      [second.id]: {
+        list: [{ id: 6401, rating: 5, content: "当前作品评价", createdAt: "2026-09-02T00:00:00.000Z" }],
+        total: 1,
+        averageRating: 5,
+      },
+    },
+  });
+  await page.route(`**/api/reviews/product/${first.id}**`, async (route) => {
+    await firstReviewsBarrier.waitUntilReleased();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: 200,
+        data: {
+          list: [{ id: 6301, rating: 1, content: "旧作品评价", createdAt: "2026-09-01T00:00:00.000Z" }],
+          total: 1,
+          averageRating: 1,
+        },
+        message: "success",
+      }),
+    });
+  });
+  await page.route(`**/api/customers/me/favorites/${first.id}`, async (route) => {
+    favoriteWrites += 1;
+    await favoriteBarrier.waitUntilReleased();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: { favorited: true }, message: "success" }),
+    });
+  });
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path === `/api/products/catalog/${second.id}`) secondDetailReads += 1;
+    if (path === "/api/customers/me/favorites") favoritesReads += 1;
+  });
+
+  await page.goto(`/products/${first.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: first.name })).toBeVisible();
+  await firstReviewsBarrier.reached;
+  await page.getByRole("button", { name: "加入心愿单" }).click();
+  await favoriteBarrier.reached;
+
+  await page.evaluate((path) => {
+    window.history.pushState({}, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, `/products/${second.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: second.name })).toBeVisible();
+  await page.getByRole("tab", { name: "评价" }).click();
+  await expect(page.getByText("当前作品评价", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "加入心愿单" })).toBeVisible();
+
+  const favoriteResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname === `/api/customers/me/favorites/${first.id}`,
+  );
+  favoriteBarrier.release();
+  firstReviewsBarrier.release();
+  await favoriteResponse;
+  await page.waitForTimeout(50);
+  await expect(page.getByRole("button", { name: "加入心愿单" })).toBeVisible();
+  await expect(page.getByText("旧作品评价", { exact: true })).toHaveCount(0);
+
+  await page.evaluate(async () => {
+    const { useCustomerAuthStore } = await import("/src/store/customerAuthStore.ts");
+    useCustomerAuthStore.getState().setAuth({
+      id: 2,
+      phone: "13800000002",
+      name: "第二位测试客户",
+      email: null,
+    });
+  });
+  await expect.poll(() => secondDetailReads).toBe(2);
+  await expect.poll(() => favoritesReads).toBeGreaterThanOrEqual(3);
+  await expect(page.getByRole("heading", { level: 1, name: second.name })).toBeVisible();
+  expect(favoriteWrites).toBe(1);
+  await expectWriteContract(writes);
+});
+
+test("ProductDetail 切换作品后旧加购失败不占用或污染当前作品", async ({ page }) => {
+  const first = publicProduct(65, "DIRECT_PURCHASE", { available: true });
+  const second = publicProduct(66, "DIRECT_PURCHASE", { available: true });
+  const firstCartBarrier = createRouteBarrier();
+  let firstCartWrites = 0;
+  let secondCartWrites = 0;
+  const writes = await mockCatalogDetail(page, {
+    products: [first, second],
+    signedIn: true,
+    flags: { commerceEnabled: true, cartEnabled: true, paymentEnabled: false },
+  });
+  await page.route("**/api/cart", async (route) => {
+    const body = route.request().postDataJSON() as { productId?: number };
+    if (body.productId === first.id) {
+      firstCartWrites += 1;
+      await firstCartBarrier.waitUntilReleased();
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ statusCode: 409, message: "旧作品库存冲突" }),
+      });
+    }
+    if (body.productId === second.id) {
+      secondCartWrites += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: { id: 6601 }, message: "success" }),
+      });
+    }
+    return route.abort();
+  });
+
+  await page.goto(`/products/${first.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: first.name })).toBeVisible();
+  await page.locator(".product-detail-page__sku-option").click();
+  await page.locator(".product-detail-page__primary-action").click();
+  await firstCartBarrier.reached;
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("加入中...");
+
+  await page.evaluate((path) => {
+    window.history.pushState({}, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, `/products/${second.id}`);
+  await expect(page.getByRole("heading", { level: 1, name: second.name })).toBeVisible();
+  await page.locator(".product-detail-page__sku-option").click();
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("加入购物车");
+  await page.locator(".product-detail-page__primary-action").click();
+  await expect.poll(() => secondCartWrites).toBe(1);
+
+  const firstCartResponse = page.waitForResponse((response) => {
+    if (new URL(response.url()).pathname !== "/api/cart") return false;
+    return response.request().postDataJSON()?.productId === first.id;
+  });
+  firstCartBarrier.release();
+  await firstCartResponse;
+  await page.waitForTimeout(50);
+
+  await expect(page.getByRole("heading", { level: 1, name: second.name })).toBeVisible();
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("加入购物车");
+  await expect(page.getByText("旧作品库存冲突", { exact: true })).toHaveCount(0);
+  expect(firstCartWrites).toBe(1);
+  await expectWriteContract(writes);
+});
+
 test("Catalog loading、error、empty 与 no-results 状态完整", async ({ page }) => {
   const barrier = createRouteBarrier();
   const writes = await mockCatalogDetail(page, { products: fiveModes, productsBarrier: barrier });
@@ -683,10 +1051,24 @@ test("Catalog loading、error、empty 与 no-results 状态完整", async ({ pag
 });
 
 test("Catalog error 状态提供可理解恢复路径", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const writes = await mockCatalogDetail(page, { products: [], productsStatus: 500 });
   await page.goto("/catalog");
   await expect(page.getByText("作品目录暂时无法加载")).toBeVisible();
-  await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
+  const recoveryActions = page.locator(".catalog-state").getByRole("button", { name: "重新加载" })
+    .or(page.locator(".catalog-state").getByRole("link", { name: "预约咨询" }));
+  await expect(recoveryActions).toHaveCount(2);
+  const actionSizes = await recoveryActions.evaluateAll((actions) => actions.map((action) => {
+    const box = action.getBoundingClientRect();
+    return { width: box.width, height: box.height };
+  }));
+  expect(actionSizes.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
+  await expectNoHorizontalOverflow(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const desktopActionHeights = await recoveryActions.evaluateAll((actions) =>
+    actions.map((action) => action.getBoundingClientRect().height),
+  );
+  expect(desktopActionHeights.every((height) => height <= 44)).toBe(true);
   await expect(
     page.getByRole("alert").filter({ hasText: "服务器繁忙，请稍后再试" }),
   ).toHaveCount(0);
@@ -694,6 +1076,7 @@ test("Catalog error 状态提供可理解恢复路径", async ({ page }) => {
 });
 
 test("Catalog 分类资源失败时保留已成功加载的作品并提供局部重试", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const writes = await mockCatalogDetail(page, {
     products: fiveModes,
     categoriesStatus: 503,
@@ -702,7 +1085,17 @@ test("Catalog 分类资源失败时保留已成功加载的作品并提供局部
 
   await expect(page.getByText("分类筛选暂时无法加载，作品列表仍可浏览。"))
     .toBeVisible();
-  await expect(page.getByRole("button", { name: "重试分类" })).toBeVisible();
+  const retryCategories = page.getByRole("button", { name: "重试分类" });
+  await expect(retryCategories).toBeVisible();
+  const retryCategoriesBox = await retryCategories.boundingBox();
+  expect(retryCategoriesBox).not.toBeNull();
+  expect(retryCategoriesBox!.width).toBeGreaterThanOrEqual(44);
+  expect(retryCategoriesBox!.height).toBeGreaterThanOrEqual(44);
+  await expectNoHorizontalOverflow(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const desktopRetryCategoriesBox = await retryCategories.boundingBox();
+  expect(desktopRetryCategoriesBox).not.toBeNull();
+  expect(desktopRetryCategoriesBox!.height).toBeLessThanOrEqual(44);
   await expect(page.locator(".catalog-matrix")).toBeVisible();
   await expect(page.getByText("构图验证作品 1", { exact: true })).toBeVisible();
   await expect(page.getByText("作品目录暂时无法加载")).toHaveCount(0);
@@ -717,10 +1110,21 @@ test("Catalog empty 与 no-results 分离", async ({ page }) => {
 });
 
 test("Catalog 有数据但关键词无命中时显示 no-results", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   const writes = await mockCatalogDetail(page, { products: fiveModes });
   await page.goto("/catalog?query=%E6%97%A0%E7%BB%93%E6%9E%9C");
   await expect(page.getByText("没有符合当前筛选的作品")).toBeVisible();
-  await expect(page.getByRole("button", { name: "清除筛选" })).toBeVisible();
+  const clearFilters = page.getByRole("button", { name: "清除筛选" });
+  await expect(clearFilters).toBeVisible();
+  const clearFiltersBox = await clearFilters.boundingBox();
+  expect(clearFiltersBox).not.toBeNull();
+  expect(clearFiltersBox!.width).toBeGreaterThanOrEqual(44);
+  expect(clearFiltersBox!.height).toBeGreaterThanOrEqual(44);
+  await expectNoHorizontalOverflow(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const desktopClearFiltersBox = await clearFilters.boundingBox();
+  expect(desktopClearFiltersBox).not.toBeNull();
+  expect(desktopClearFiltersBox!.height).toBeLessThanOrEqual(44);
   await expectWriteContract(writes);
 });
 
@@ -751,6 +1155,10 @@ test("五种 SalesMode 各自只呈现一个 ProductPrimaryAction", async ({ pag
     await page.goto(`/products/${product.id}`);
     const action = page.locator(".product-detail-page__primary-action");
     await expect(action).toHaveCount(1);
+    if (product.salesMode === "DIRECT_PURCHASE") {
+      await expect(action).toHaveText("请先选择规格");
+      await page.locator(".product-detail-page__sku-option").click();
+    }
     await expect(action).toHaveText(expected[product.salesMode]);
     if (product.salesMode === "SELECTION") {
       await action.click();
@@ -817,7 +1225,17 @@ for (const viewport of [
         submittedPayload = route.request().postDataJSON() as Record<string, unknown>;
         await route.fulfill({
           contentType: "application/json",
-          body: JSON.stringify({ code: 200, data: { id: 91 }, message: "ok" }),
+          body: JSON.stringify({
+            code: 200,
+            data: {
+              id: 91,
+              sourceId: 91,
+              leadId: 191,
+              status: "PENDING",
+              createdAt: "2026-09-22T00:00:00.000Z",
+            },
+            message: "ok",
+          }),
         });
       },
     });
@@ -840,6 +1258,8 @@ for (const viewport of [
     expect(submittedPayload).toMatchObject({
       productId: product.id,
       consultationType: "到店咨询",
+      privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+      privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
     });
     expect(submittedPayload).not.toHaveProperty("productName");
     expect(submittedPayload).not.toHaveProperty("productCode");
@@ -856,7 +1276,17 @@ test("Contact 首选时间可留空，非空短留言按权威合同提交", asy
       submittedPayload = route.request().postDataJSON() as Record<string, unknown>;
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({ code: 200, data: { id: 95 }, message: "ok" }),
+        body: JSON.stringify({
+          code: 200,
+          data: {
+            id: 95,
+            sourceId: 95,
+            leadId: 195,
+            status: "PENDING",
+            createdAt: "2026-09-22T00:00:00.000Z",
+          },
+          message: "ok",
+        }),
       });
     },
   });
@@ -872,7 +1302,12 @@ test("Contact 首选时间可留空，非空短留言按权威合同提交", asy
   await page.getByRole("button", { name: "提交需求" }).click();
 
   await expect(page.getByRole("heading", { name: "需求已提交" })).toBeVisible();
-  expect(submittedPayload).toMatchObject({ consultationType: "选款建议", message: "咨询" });
+  expect(submittedPayload).toMatchObject({
+    consultationType: "选款建议",
+    message: "咨询",
+    privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+    privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
+  });
   expect(submittedPayload).not.toHaveProperty("preferredTime");
   await expectWriteContract(writes, 0, 0, 1);
 });
@@ -897,7 +1332,17 @@ test("Contact 提交时作品失效会保留可恢复选择，移除后作为普
       }
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({ code: 200, data: { id: 92 }, message: "ok" }),
+        body: JSON.stringify({
+          code: 200,
+          data: {
+            id: 92,
+            sourceId: 92,
+            leadId: 192,
+            status: "PENDING",
+            createdAt: "2026-09-22T00:00:00.000Z",
+          },
+          message: "ok",
+        }),
       });
     },
   });
@@ -917,6 +1362,69 @@ test("Contact 提交时作品失效会保留可恢复选择，移除后作为普
   await expect(page.getByRole("heading", { name: "需求已提交" })).toBeVisible();
   expect(payloads[0]).toMatchObject({ productId: product.id });
   expect(payloads[1]).not.toHaveProperty("productId");
+  await expectWriteContract(writes, 0, 0, 2);
+});
+
+test("Contact 同一 SPA 更换来源作品时隔离旧提交并只提交当前作品", async ({ page }) => {
+  const first = publicProduct(46, "DISPLAY_ONLY");
+  const second = publicProduct(47, "DISPLAY_ONLY");
+  let releaseFirstInquiry = () => {};
+  const firstInquiryReleased = new Promise<void>((resolve) => {
+    releaseFirstInquiry = resolve;
+  });
+  const payloads: Record<string, unknown>[] = [];
+  const idempotencyKeys: string[] = [];
+  const writes = await mockCatalogDetail(page, {
+    products: [first, second],
+    onInquiry: async (route) => {
+      payloads.push(route.request().postDataJSON() as Record<string, unknown>);
+      idempotencyKeys.push(route.request().headers()["idempotency-key"] || "");
+      if (payloads.length === 1) await firstInquiryReleased;
+      const sourceId = payloads.length === 1 ? 146 : 147;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: 200,
+          data: {
+            id: sourceId,
+            sourceId,
+            leadId: sourceId + 100,
+            status: "PENDING",
+            createdAt: "2026-09-22T00:00:00.000Z",
+          },
+          message: "ok",
+        }),
+      });
+    },
+  });
+
+  await page.goto(`/contact?type=product&productRef=${first.code}`);
+  await expect(page.locator(".contact-product-context").getByText(first.name, { exact: true }))
+    .toBeVisible();
+  await fillContactForm(page);
+  await page.getByRole("button", { name: "提交需求" }).click();
+  await expect.poll(() => payloads).toHaveLength(1);
+
+  await page.evaluate((nextUrl) => {
+    window.history.pushState(null, "", nextUrl);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, `/contact?type=product&productRef=${second.code}`);
+  await expect(page.locator(".contact-product-context").getByText(second.name, { exact: true }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "提交需求" })).toBeEnabled();
+
+  releaseFirstInquiry();
+  await expect(page.getByRole("heading", { name: "需求已提交" })).toHaveCount(0);
+  await page.getByRole("button", { name: "提交需求" }).click();
+  await expect(page.getByRole("heading", { name: "需求已提交" })).toBeFocused();
+
+  expect(payloads).toHaveLength(2);
+  expect(payloads[0]).toMatchObject({ productId: first.id });
+  expect(payloads[1]).toMatchObject({ productId: second.id });
+  expect(idempotencyKeys[0]).toBeTruthy();
+  expect(idempotencyKeys[1]).toBeTruthy();
+  expect(idempotencyKeys[1]).not.toBe(idempotencyKeys[0]);
+  await expect(page.locator('dl[aria-label="咨询回执"]')).toContainText("#147");
   await expectWriteContract(writes, 0, 0, 2);
 });
 
@@ -1007,6 +1515,92 @@ test("DIRECT_PURCHASE flags unknown 时 fail-closed", async ({ page }) => {
   await expectWriteContract(writes);
 });
 
+test("DIRECT_PURCHASE 已知售罄不会被较慢的交易开关状态遮蔽", async ({ page }) => {
+  const flagsBarrier = createRouteBarrier();
+  const writes = await mockCatalogDetail(page, {
+    products: [publicProduct(36, "DIRECT_PURCHASE", { available: false })],
+    flagsBarrier,
+  });
+
+  await page.goto("/products/36");
+  await flagsBarrier.reached;
+
+  const action = page.locator(".product-detail-page__primary-action");
+  await expect(action).toHaveText("已售罄");
+  await expect(action).toBeDisabled();
+  await expect(page.getByText("该作品已售罄，仍可继续浏览作品信息或联系珠宝顾问。"))
+    .toBeVisible();
+
+  flagsBarrier.release();
+  await expectWriteContract(writes);
+});
+
+test("非直购 SalesMode 不把遗留 SKU 误呈现为价格或售罄规格", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const directFixture = publicProduct(40, "DIRECT_PURCHASE", { available: false });
+  const modes: Array<{ mode: FixtureSalesMode; label: string }> = [
+    { mode: "DISPLAY_ONLY", label: "咨询此款作品" },
+    { mode: "SELECTION", label: "加入选款" },
+    { mode: "APPOINTMENT", label: "预约鉴赏此款" },
+    { mode: "CUSTOM_INQUIRY", label: "咨询此款定制" },
+  ];
+  const products = modes.map(({ mode }, index) => {
+    const product = publicProduct(41 + index, mode);
+    product.price = 12800;
+    product.skus = directFixture.skus.map((sku) => ({
+      ...sku,
+      id: 410 + index,
+      productId: product.id,
+      skuCode: `HC-NON-DIRECT-${index}`,
+      size: "13 号",
+      isAvailableForPurchase: false,
+    }));
+    return product;
+  });
+  const writes = await mockCatalogDetail(page, { products });
+
+  for (const [index, { label }] of modes.entries()) {
+    await page.goto(`/products/${41 + index}`);
+    await expect(page.locator(".product-detail-page__primary-action")).toHaveText(label);
+    await expect(page.locator(".product-detail-page__sku-option")).toHaveCount(0);
+    await expect(page.getByText("价格待确认", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("已售罄", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("下单前", { exact: false })).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  }
+  await expectWriteContract(writes);
+});
+
+test("ProductDetail 遇到历史异常 JSON 形状时保留核心作品与行动", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const product = publicProduct(45, "DISPLAY_ONLY");
+  Object.assign(product, {
+    size: "",
+    craftTechnique: "花丝",
+    detailContent: { type: "TEXT", text: "异常旧数据" },
+    deliveryMethods: { method: "EXPRESS" },
+    certificates: "旧证书数据",
+    skus: { id: 451 },
+  });
+  const writes = await mockCatalogDetail(page, { products: [product] });
+
+  await page.goto("/products/45");
+
+  await expect(page.getByRole("heading", { level: 1, name: product.name })).toBeVisible();
+  await expect(page.locator(".product-detail-page__primary-action"))
+    .toHaveText("咨询此款作品");
+  const decision = page.locator(".product-detail-page__decision-panel");
+  await expect(decision).toContainText("公开尺寸事实");
+  await expect(decision).toContainText("暂无已核实的作品或规格尺寸");
+  await expect(decision).toContainText("尺寸辅助状态");
+  await expect(decision).toContainText("当前结构化事实中暂无已核实的测量、佩戴适配或改圈指导");
+  await expect(decision.getByRole("link", { name: "联系珠宝顾问确认尺寸" }))
+    .toHaveAttribute("href", "/contact?type=purchase-support&productRef=HC-TEST-045");
+  expect(pageErrors).toEqual([]);
+  await expectWriteContract(writes);
+});
+
 test("DIRECT_PURCHASE commerce off 与售罄各保持单一准确行动", async ({ page }) => {
   const writes = await mockCatalogDetail(page, {
     products: [publicProduct(21, "DIRECT_PURCHASE", { available: true })],
@@ -1025,8 +1619,150 @@ test("DIRECT_PURCHASE 登录且开放时写请求仅由函数桩接收一次", a
     allowCartWrite: true,
   });
   await page.goto("/products/22");
+  await page.locator(".product-detail-page__sku-option").click();
   await page.locator(".product-detail-page__primary-action").click();
   await expectWriteContract(writes, 1);
+});
+
+test("DIRECT_PURCHASE 多尺寸规格保持起价，部分售罄与未知库存 fail-closed", async ({ page }) => {
+  const product = publicProduct(30, "DIRECT_PURCHASE", { available: true, size: "12—16 号" });
+  const baseSku = product.skus[0];
+  product.size = "";
+  product.price = 9800;
+  product.skus = [
+    { ...baseSku, id: 301, skuCode: "HC-30-12", size: "12 号", price: 12800, isAvailableForPurchase: true },
+    { ...baseSku, id: 302, skuCode: "HC-30-14", size: "14 号", price: 9800, isAvailableForPurchase: false },
+    { ...baseSku, id: 303, skuCode: "HC-30-16", size: "16 号", price: 13800, isAvailableForPurchase: undefined },
+  ];
+  const writes = await mockCatalogDetail(page, { products: [product], signedIn: true });
+
+  await page.goto("/products/30");
+  const price = page.locator(".product-detail-page__commerce-facts dd.is-price");
+  await expect(price).toContainText("¥9,800");
+  await expect(price).toContainText("起");
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("请先选择规格");
+  await expect(page.locator(".product-detail-page__quantity")).toHaveCount(0);
+  const decision = page.locator(".product-detail-page__decision-panel");
+  await expect(decision).toContainText("选择规格后查看对应尺寸");
+  await expect(decision).toContainText("当前结构化事实中暂无已核实的测量、佩戴适配或改圈指导");
+
+  const available = page.getByRole("button", { name: /12 号.*可选择/ });
+  const soldOut = page.getByRole("button", { name: /14 号.*已售罄/ });
+  const unknown = page.getByRole("button", { name: /16 号.*库存待确认/ });
+  await expect(available).toBeEnabled();
+  await expect(soldOut).toBeDisabled();
+  await expect(unknown).toBeDisabled();
+
+  await available.click();
+  await expect(price).toContainText("¥12,800");
+  await expect(price).not.toContainText("起");
+  await expect(decision.getByText("12 号", { exact: true })).toBeVisible();
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("加入购物车");
+  await expect(page.locator(".product-detail-page__quantity")).toBeVisible();
+  await expectWriteContract(writes);
+});
+
+test("DIRECT_PURCHASE 无规格、全售罄、未知库存与无价格均给出恢复说明", async ({ page }) => {
+  const noSku = publicProduct(31, "DIRECT_PURCHASE", { available: true });
+  noSku.skus = [];
+  const soldOut = publicProduct(32, "DIRECT_PURCHASE", { available: true });
+  soldOut.skus = soldOut.skus.map((sku) => ({ ...sku, isAvailableForPurchase: false }));
+  const unknown = publicProduct(33, "DIRECT_PURCHASE", { available: true });
+  unknown.skus = unknown.skus.map((sku) => ({ ...sku, isAvailableForPurchase: undefined }));
+  const noPrice = publicProduct(34, "DIRECT_PURCHASE", { available: true });
+  noPrice.price = 0;
+  noPrice.skus = noPrice.skus.map((sku) => ({ ...sku, price: 0, isAvailableForPurchase: true }));
+  const writes = await mockCatalogDetail(page, {
+    products: [noSku, soldOut, unknown, noPrice],
+    signedIn: true,
+  });
+
+  await page.goto("/products/31");
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("规格暂不可用");
+  await expect(page.getByText("当前没有可选择的公开规格。")).toBeVisible();
+  await expect(page.locator(".product-detail-page__status-copy").getByRole("link", { name: "联系珠宝顾问" })).toBeVisible();
+
+  await page.goto("/products/32");
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("当前规格已售罄");
+  await expect(page.locator(".product-detail-page__sku-option")).toBeDisabled();
+  await expect(page.getByText("当前公开规格均已售罄。")).toBeVisible();
+
+  await page.goto("/products/33");
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("规格库存待确认");
+  await expect(page.locator(".product-detail-page__sku-option")).toBeDisabled();
+  await expect(page.getByText("当前规格的库存状态暂时无法确认。")).toBeVisible();
+
+  await page.goto("/products/34");
+  await page.locator(".product-detail-page__sku-option").click();
+  await expect(page.locator(".product-detail-page__primary-action")).toHaveText("价格暂不可用");
+  await expect(page.getByText("所选规格暂时没有有效公开价格。")).toBeVisible();
+  await expect(page.locator(".product-detail-page__quantity")).toHaveCount(0);
+  await expectWriteContract(writes);
+});
+
+test("ProductDetail 仅展示获准的尺寸、价格与履约事实且不读取动态金价", async ({ page }) => {
+  const product = publicProduct(35, "DIRECT_PURCHASE", {
+    available: true,
+    size: "13 号",
+    certificates: [
+      { id: 351, productId: 35, certType: "GIA", certNumber: "GIA-VALID", expireDate: "2099-12-31T00:00:00.000Z" },
+      { id: 352, productId: 35, certType: "NATIONAL", certNumber: "EXPIRED", expireDate: "2020-01-01T00:00:00.000Z" },
+    ],
+  });
+  Object.assign(product, {
+    fulfillmentType: "PREORDER" as const,
+    dispatchTime: "WITHIN_48_HOURS" as const,
+    customLeadTime: "约 15—20 个工作日",
+    deliveryMethods: ["EXPRESS", "STORE_PICKUP", "DEDICATED", "SAME_CITY_COURIER"],
+    requiresInsuredShipping: true,
+    requiresSignature: true,
+    includesCertificate: true,
+  });
+  const customProduct = publicProduct(36, "DIRECT_PURCHASE", {
+    available: true,
+    size: "14 号",
+  });
+  Object.assign(customProduct, {
+    fulfillmentType: "CUSTOM" as const,
+    dispatchTime: "CUSTOM" as const,
+    customLeadTime: "确认规格后 15 个工作日",
+    deliveryMethods: ["STORE_PICKUP"],
+  });
+  let goldPriceReads = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.endsWith("/gold-price/latest")) goldPriceReads += 1;
+  });
+  const writes = await mockCatalogDetail(page, { products: [product, customProduct] });
+
+  await page.goto("/products/35");
+  const decision = page.locator(".product-detail-page__decision-panel");
+  await expect(decision.getByRole("heading", { name: "选购与服务信息" })).toBeVisible();
+  await expect(decision).toContainText("公开尺寸事实");
+  await expect(decision).toContainText("13 号");
+  await expect(decision).toContainText("尺寸辅助状态");
+  await expect(decision).toContainText("当前结构化事实中暂无已核实的测量、佩戴适配或改圈指导");
+  await expect(decision.getByRole("link", { name: "联系珠宝顾问确认尺寸" }))
+    .toHaveAttribute("href", "/contact?type=purchase-support&productRef=HC-TEST-035");
+  await expect(decision).toContainText("有效规格的最低公开价格");
+  await expect(decision).toContainText("预订作品");
+  await expect(decision).toContainText("48 小时内发出");
+  await expect(decision).not.toContainText("约 15—20 个工作日");
+  await expect(decision).toContainText("物流配送、到店自提、专人配送");
+  await expect(decision).not.toContainText("SAME_CITY_COURIER");
+  await expect(decision).toContainText("需要保价运输");
+  await expect(decision).toContainText("需要签收确认");
+  await expect(decision).toContainText("1 份已登记有效证书");
+  await page.getByRole("tab", { name: "证书" }).click();
+  await expect(page.getByText("GIA证书 — GIA-VALID")).toBeVisible();
+  await expect(page.getByText("EXPIRED")).toHaveCount(0);
+  await expect(page.getByText("金价参考")).toHaveCount(0);
+
+  await page.goto("/products/36");
+  const customDecision = page.locator(".product-detail-page__decision-panel");
+  await expect(customDecision).toContainText("确认规格后 15 个工作日");
+  await expect(customDecision).toContainText("到店自提");
+  expect(goldPriceReads).toBe(0);
+  await expectWriteContract(writes);
 });
 
 test("货号详情的收藏写入使用真实商品 ID 而不是路由字符串", async ({ page }) => {
@@ -1040,11 +1776,12 @@ test("货号详情的收藏写入使用真实商品 ID 而不是路由字符串"
   await expect(page.getByRole("heading", { level: 1, name: product.name })).toBeVisible();
 
   const favoriteRequest = page.waitForRequest((request) =>
-    new URL(request.url()).pathname.endsWith("/customers/me/favorites/27/toggle"),
+    request.method() === "PUT" &&
+      new URL(request.url()).pathname.endsWith("/customers/me/favorites/27"),
   );
   await page.getByRole("button", { name: "加入心愿单" }).click();
   expect(new URL((await favoriteRequest).url()).pathname)
-    .toBe("/api/customers/me/favorites/27/toggle");
+    .toBe("/api/customers/me/favorites/27");
   await expect(page.getByRole("button", { name: "已加入心愿单" })).toBeVisible();
   await expectWriteContract(writes, 0, 1);
 });
@@ -1111,6 +1848,11 @@ test("ProductDetail 缺媒体、不存在与请求失败使用可区分的安全
   await missingPage.goto("/products/27");
   await expect(missingPage.getByRole("heading", { name: "作品暂不可浏览" })).toBeVisible();
   await expect(missingPage.getByRole("button", { name: "重新尝试" })).toHaveCount(0);
+  const missingCatalogLink = missingPage.getByRole("link", { name: "进入选款中心" });
+  const missingCatalogLinkBox = await missingCatalogLink.boundingBox();
+  expect(missingCatalogLinkBox).not.toBeNull();
+  expect(missingCatalogLinkBox!.width).toBeGreaterThanOrEqual(44);
+  expect(missingCatalogLinkBox!.height).toBeGreaterThanOrEqual(44);
   await expectWriteContract(writes);
   await expectWriteContract(failedWrites);
   await expectWriteContract(missingWrites);
@@ -1257,6 +1999,23 @@ for (const viewport of [
 
     await page.goto("/contact");
     await expect(page.locator("#cf-name")).toBeVisible();
+    if (viewport.width === 390) {
+      const consentTargets = page.locator(".contact-privacy-consent")
+        .or(page.locator(".contact-privacy-link"));
+      await expect(consentTargets).toHaveCount(2);
+      const consentTargetSizes = await consentTargets.evaluateAll((targets) => targets.map((target) => {
+        const box = target.getBoundingClientRect();
+        return { width: box.width, height: box.height };
+      }));
+      expect(consentTargetSizes.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
+    } else if (viewport.width === 1440) {
+      const consentLabelBox = await page.locator(".contact-privacy-consent").boundingBox();
+      const privacyLinkBox = await page.locator(".contact-privacy-link").boundingBox();
+      expect(consentLabelBox).not.toBeNull();
+      expect(privacyLinkBox).not.toBeNull();
+      expect(consentLabelBox!.height).toBeLessThanOrEqual(44);
+      expect(privacyLinkBox!.height).toBeLessThanOrEqual(24);
+    }
     await scanSeriousAccessibility(page, testInfo, `${viewport.name}-contact`);
     await expectNoHorizontalOverflow(page);
 
@@ -1284,8 +2043,8 @@ for (const viewport of [
     await waitForVisualStability(page);
 
     const commerceFacts = page.locator(".product-detail-page__commerce-facts");
-    await expect(commerceFacts.locator(":scope > dt")).toHaveCount(3);
-    await expect(commerceFacts.locator(":scope > dd")).toHaveCount(3);
+    await expect(commerceFacts.locator(":scope > dt")).toHaveCount(2);
+    await expect(commerceFacts.locator(":scope > dd")).toHaveCount(2);
     await expect(commerceFacts.locator(":scope > :not(dt):not(dd)")).toHaveCount(0);
     const skuSizes = await page.locator(".product-detail-page__sku-option").evaluateAll((nodes) =>
       nodes.map((node) => {
@@ -1295,6 +2054,20 @@ for (const viewport of [
     );
     expect(skuSizes.length).toBeGreaterThan(0);
     expect(skuSizes.every(({ width, height }) => width >= 44 && height >= 44)).toBe(true);
+    if (viewport.width === 390 || viewport.width === 1440) {
+      const tabSizes = await page.locator(".product-detail-page .ant-tabs-tab").evaluateAll((tabs) => tabs.map((tab) => {
+        const box = tab.getBoundingClientRect();
+        return { width: box.width, height: box.height };
+      }));
+      expect(tabSizes.length).toBeGreaterThan(0);
+      if (viewport.width === 390) {
+        expect(tabSizes.every(({ width, height }) =>
+          width >= 44 && height >= 44 && height <= 48,
+        )).toBe(true);
+      } else {
+        expect(tabSizes.every(({ height }) => height <= 48)).toBe(true);
+      }
+    }
     await scanSeriousAccessibility(page, testInfo, `${viewport.name}-product-loaded`);
     await expectNoHorizontalOverflow(page);
 

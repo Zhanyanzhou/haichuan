@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 import { publishedCatalogDocument } from "./fixtures/public-catalog-detail";
+import {
+  PRIVACY_CONSENT_CONTENT_HASH,
+  PRIVACY_CONSENT_VERSION,
+} from "../src/config/privacyConsent";
 
 const products = Array.from({ length: 40 }, (_, index) => {
   const id = index + 1;
@@ -123,7 +127,20 @@ async function mockCatalogApi(page: Page) {
   });
 }
 
-async function seedSelection(page: Page, ids: number[]) {
+async function seedSelection(
+  page: Page,
+  ids: number[],
+  ownerKey: "guest" | `customer:${number}` = "guest",
+) {
+  await page.addInitScript(({ selectedIds, owner }) => {
+    localStorage.setItem(
+      "hc_selection_tray",
+      JSON.stringify({ state: { ownerKey: owner, selectedIds }, version: 1 }),
+    );
+  }, { selectedIds: ids, owner: ownerKey });
+}
+
+async function seedLegacySelection(page: Page, ids: number[]) {
   await page.addInitScript((selectedIds) => {
     localStorage.setItem(
       "hc_selection_tray",
@@ -134,6 +151,77 @@ async function seedSelection(page: Page, ids: number[]) {
 
 test.beforeEach(async ({ page }) => {
   await mockCatalogApi(page);
+});
+
+test("Catalog 身份未确定时隐藏选款，同一客户确认后恢复并跨刷新保留", async ({ page }) => {
+  let releaseProfile: (() => void) | undefined;
+  const profileBlocked = new Promise<void>((resolve) => {
+    releaseProfile = resolve;
+  });
+  let profileReads = 0;
+  await seedSelection(page, [1], "customer:7");
+  await page.route("**/api/customers/me", async (route) => {
+    profileReads += 1;
+    if (profileReads === 1) await profileBlocked;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped({
+        id: 7,
+        phone: "13800000007",
+        name: "作用域会员 A",
+        email: null,
+      })),
+    });
+  });
+  await page.route("**/api/products/catalog**", (route) => {
+    const url = new URL(route.request().url());
+    const ids = url.searchParams.get("ids")?.split(",").map(Number).filter(Boolean);
+    const filtered = ids ? products.filter((product) => ids.includes(product.id)) : products;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped({
+        list: filtered.slice(0, 32),
+        total: filtered.length,
+        page: 1,
+        pageSize: 32,
+        facets: { sizes: ["标准", "大号"] },
+      })),
+    });
+  });
+
+  await page.goto("/catalog");
+  await expect(page.getByText("已选 1 款")).toHaveCount(0);
+  expect(await page.evaluate(() => {
+    const raw = localStorage.getItem("hc_selection_tray");
+    return raw ? JSON.parse(raw).state.ownerKey : null;
+  })).toBe("customer:7");
+
+  releaseProfile?.();
+  await expect(page.getByText("已选 1 款")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("已选 1 款")).toBeVisible();
+});
+
+test("Catalog 丢弃没有 owner 的 v0 选款而不认领给当前访客", async ({ page }) => {
+  await seedLegacySelection(page, [1]);
+  await page.route("**/api/customers/me", (route) =>
+    route.fulfill({ status: 401, json: { message: "anonymous" } }),
+  );
+  await page.route("**/api/customers/session/refresh", (route) =>
+    route.fulfill({ status: 401, json: { message: "anonymous" } }),
+  );
+
+  await page.goto("/catalog");
+  await expect(page.getByText("已选 1 款")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem("hc_selection_tray");
+    return raw ? JSON.parse(raw) : null;
+  })).toEqual({
+    state: { ownerKey: "guest", selectedIds: [] },
+    version: 1,
+  });
 });
 
 test("Catalog 在公开商品响应畸形时过滤无效记录而不污染目录", async ({ page }) => {
@@ -171,6 +259,11 @@ test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款�
   await page.goto("/catalog");
   expect(new URL((await firstRequest).url()).searchParams.get("page")).toBe("1");
   await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
+  const pagination = page.getByRole("navigation", { name: "作品分页" });
+  await expect(pagination.getByRole("button", { name: "1", exact: true }))
+    .toHaveAttribute("aria-current", "page");
+  await expect(pagination.getByRole("button", { name: "上一页" })).toBeDisabled();
+  await expect(pagination.getByRole("button", { name: "下一页" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "2", exact: true })).toBeVisible();
 
   const quickViewTrigger = page.getByRole("button", { name: "快速预览 作品 01" });
@@ -194,11 +287,48 @@ test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款�
   await secondRequest;
   await expect(page).toHaveURL(/page=2/);
   await expect(page.getByRole("heading", { name: "作品 33" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "作品结果" })).toBeFocused();
+  await expect(pagination.getByRole("button", { name: "2", exact: true }))
+    .toHaveAttribute("aria-current", "page");
   await expect(page.getByText("已选 1 款")).toBeVisible();
   await page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }).press("Enter");
   await expect(page.getByRole("dialog", { name: "提交选款咨询" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "提交选款咨询" })).toHaveCount(0);
+});
+
+test("Catalog 加载状态可被辅助技术识别，越界页替换当前历史项", async ({ page }) => {
+  let releaseProducts: (() => void) | undefined;
+  const productsBlocked = new Promise<void>((resolve) => {
+    releaseProducts = resolve;
+  });
+  let barrierReached: (() => void) | undefined;
+  const reached = new Promise<void>((resolve) => {
+    barrierReached = resolve;
+  });
+  await page.route("**/api/products/public**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/api/products/public")) {
+      barrierReached?.();
+      await productsBlocked;
+    }
+    await route.fallback();
+  });
+
+  await page.goto("/catalog");
+  await reached;
+  const loading = page.getByRole("status", { name: "正在加载珠宝作品…" });
+  await expect(loading).toHaveAttribute("aria-busy", "true");
+  await expect(page.getByRole("region", { name: "作品结果" }))
+    .toHaveAttribute("aria-busy", "true");
+  releaseProducts?.();
+  await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
+
+  await page.goto("/catalog?page=99");
+  await expect(page).toHaveURL(/\/catalog\?page=2$/);
+  await expect(page.getByRole("heading", { name: "作品 33" })).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/catalog$/);
 });
 
 test("Catalog 将现有 URL 筛选翻译为服务端参数而不复用商品 ids", async ({ page }) => {
@@ -253,6 +383,16 @@ test("Catalog 搜索的空态、错误态与 390px 溢出状态完整", async ({
   await input.fill("触发错误");
   await input.press("Enter");
   await expect(page.getByText("作品目录暂时无法加载")).toBeVisible();
+  const selectionCta = page.getByRole("link", { name: "提交选款需求" });
+  await expect(selectionCta).toHaveAttribute("href", "/contact?type=product");
+  const [retryBox, ctaBox] = await Promise.all([
+    page.getByRole("button", { name: "重新加载" }).boundingBox(),
+    selectionCta.boundingBox(),
+  ]);
+  expect(retryBox).not.toBeNull();
+  expect(ctaBox).not.toBeNull();
+  expect(retryBox!.height).toBeGreaterThanOrEqual(44);
+  expect(ctaBox!.height).toBeGreaterThanOrEqual(44);
   await expect
     .poll(() =>
       page.evaluate(
@@ -260,6 +400,10 @@ test("Catalog 搜索的空态、错误态与 390px 溢出状态完整", async ({
       ),
     )
     .toBe(true);
+
+  await selectionCta.click();
+  await expect(page).toHaveURL(/\/contact\?type=product$/);
+  await expect(page.locator("#cf-type")).toHaveValue("选款建议");
 });
 
 test("Catalog 筛选无结果时保留仍有效的持久化选款", async ({ page }) => {
@@ -283,6 +427,34 @@ test("Catalog 筛选无结果时保留仍有效的持久化选款", async ({ pag
       ),
     )
     .toBe(true);
+});
+
+test("选款咨询提交前可核对全部作品名称与编号并逐项移除", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedSelection(page, [1, 2]);
+  await page.goto("/catalog");
+
+  await page.getByRole("button", { name: "查看已选 2 款并提交选款咨询" }).click();
+  const dialog = page.getByRole("dialog", { name: "提交选款咨询" });
+  const selectionList = dialog.getByRole("list", { name: "本次选款作品" });
+  await expect(selectionList.getByText("作品 01", { exact: true })).toBeVisible();
+  await expect(selectionList.getByText("作品编号 HC-TEST-001", { exact: true })).toBeVisible();
+  await expect(selectionList.getByText("作品 02", { exact: true })).toBeVisible();
+  await expect(selectionList.getByText("作品编号 HC-TEST-002", { exact: true })).toBeVisible();
+
+  const removeFirst = selectionList.getByRole("button", { name: "移除 作品 01" });
+  const removeBox = await removeFirst.boundingBox();
+  expect(removeBox).not.toBeNull();
+  expect(removeBox!.width).toBeGreaterThanOrEqual(44);
+  expect(removeBox!.height).toBeGreaterThanOrEqual(44);
+  await removeFirst.click();
+
+  await expect(dialog.getByText("已选 1 款作品", { exact: false })).toBeVisible();
+  await expect(selectionList.getByText("作品 01", { exact: true })).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem("hc_selection_tray");
+    return raw ? JSON.parse(raw).state.selectedIds : [];
+  })).toEqual([2]);
 });
 
 test("Catalog 权威查询确认作品失效后清理旧选款且空目录不显示虚假数量", async ({ page }) => {
@@ -395,7 +567,13 @@ test("选款咨询失败保留填写内容，重试复用幂等键且阻止同�
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(wrapped({ id: 71, leadId: 91, status: "PENDING" })),
+      body: JSON.stringify(wrapped({
+        id: 71,
+        sourceId: 71,
+        leadId: 91,
+        status: "PENDING",
+        createdAt: "2026-09-22T00:00:00.000Z",
+      })),
     });
   });
   await seedSelection(page, [1]);
@@ -407,12 +585,27 @@ test("选款咨询失败保留填写内容，重试复用幂等键且阻止同�
   await dialog.getByRole("checkbox").check();
   await dialog.getByRole("button", { name: "提交选款咨询（1 款）" }).click();
 
-  await expect(dialog.getByRole("alert")).toHaveText(
-    "提交失败，已保留本次选款与填写内容，请重新提交。",
-  );
+  await expect(dialog.getByRole("alert")).toContainText("提交结果待确认");
+  await expect(dialog.getByText(
+    "存在一笔结果待确认的选款咨询。保持原内容重试可安全查回原回执；新建前请先明确放弃恢复。",
+    { exact: true },
+  )).toBeVisible();
   await expect(dialog.getByPlaceholder("您的称呼")).toHaveValue("测试访客");
   await expect(dialog.getByPlaceholder("方便我们联系您")).toHaveValue("13800138000");
-  const retry = dialog.getByRole("button", { name: "重新提交选款咨询（1 款）" });
+  const storedAttempt = await page.evaluate(() => ({ ...sessionStorage }));
+  expect(JSON.stringify(storedAttempt)).not.toContain("测试访客");
+  expect(JSON.stringify(storedAttempt)).not.toContain("13800138000");
+
+  await page.reload();
+  await page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }).click();
+  await expect(dialog.getByText(
+    "存在一笔结果待确认的选款咨询。保持原内容重试可安全查回原回执；新建前请先明确放弃恢复。",
+    { exact: true },
+  )).toBeVisible();
+  await dialog.getByPlaceholder("您的称呼").fill("测试访客");
+  await dialog.getByPlaceholder("方便我们联系您").fill("13800138000");
+  await dialog.getByRole("checkbox").check();
+  const retry = dialog.getByRole("button", { name: "提交选款咨询（1 款）" });
   await retry.evaluate((button: HTMLButtonElement) => {
     button.click();
     button.click();
@@ -424,14 +617,322 @@ test("选款咨询失败保留填写内容，重试复用幂等键且阻止同�
     customerName: "测试访客",
     phone: "13800138000",
     privacyConsent: true,
+    privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+    privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
   });
   await expect.poll(() => page.evaluate(() =>
     document.documentElement.scrollWidth <= document.documentElement.clientWidth,
   )).toBe(true);
 
   releaseRetry?.();
-  await expect(dialog).toHaveCount(0);
+  const receiptDialog = page.getByRole("dialog", { name: "选款咨询已提交" });
+  await expect(receiptDialog).toBeVisible();
+  await receiptDialog.getByRole("button", { name: "完成并清空选款" }).click();
+  await expect(receiptDialog).toHaveCount(0);
   await expect(page.getByText("已选 1 款")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => {
+    const raw = localStorage.getItem("hc_selection_tray");
+    return raw ? JSON.parse(raw).state.selectedIds : [];
+  })).toEqual([]);
+});
+
+test("客户 A 的迟到选款咨询不会污染或提前解锁客户 B 的提交", async ({ page }) => {
+  let releaseCustomerA!: () => void;
+  let releaseCustomerB!: () => void;
+  const customerAGate = new Promise<void>((resolve) => {
+    releaseCustomerA = resolve;
+  });
+  const customerBGate = new Promise<void>((resolve) => {
+    releaseCustomerB = resolve;
+  });
+  const writes: Array<Record<string, unknown>> = [];
+
+  await page.route("**/api/customers/me", (route) =>
+    route.fulfill({ status: 401, json: { message: "anonymous" } }),
+  );
+  await page.route("**/api/customers/session/refresh", (route) =>
+    route.fulfill({ status: 401, json: { message: "anonymous" } }),
+  );
+  await page.route("**/api/settings/public**", (route) =>
+    route.fulfill({ status: 200, json: wrapped({}) }),
+  );
+  await page.route("**/api/settings/flags", (route) =>
+    route.fulfill({ status: 200, json: wrapped({ commerceEnabled: false }) }),
+  );
+  await page.route("**/api/products/catalog**", (route) => {
+    const url = new URL(route.request().url());
+    const ids = url.searchParams.get("ids")?.split(",").map(Number).filter(Boolean);
+    const filtered = ids?.length
+      ? products.filter((product) => ids.includes(product.id))
+      : products;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped({
+        list: filtered.slice(0, 32),
+        total: filtered.length,
+        page: 1,
+        pageSize: 32,
+        facets: { sizes: ["标准", "大号"] },
+      })),
+    });
+  });
+
+  await page.route("**/api/selection-inquiries", async (route) => {
+    const requestIndex = writes.push(route.request().postDataJSON());
+    if (requestIndex === 1) await customerAGate;
+    if (requestIndex === 2) await customerBGate;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped({
+        id: 70 + requestIndex,
+        sourceId: 70 + requestIndex,
+        leadId: 90 + requestIndex,
+        status: "PENDING",
+        createdAt: "2026-09-22T00:00:00.000Z",
+      })),
+    });
+  });
+
+  await page.goto("/catalog");
+  await page.evaluate(async () => {
+    const { useCustomerAuthStore } = await import("/src/store/customerAuthStore.ts");
+    const { useSelectionStore } = await import("/src/store/selectionStore.ts");
+    useCustomerAuthStore.getState().setAuth({
+      id: 101,
+      name: "客户 A",
+      phone: "13800000101",
+      email: "a@example.test",
+    });
+    useSelectionStore.getState().toggle(1);
+  });
+
+  await page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }).click();
+  let dialog = page.getByRole("dialog", { name: "提交选款咨询" });
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "提交选款咨询（1 款）" }).click();
+  await expect.poll(() => writes.length).toBe(1);
+
+  await page.evaluate(async () => {
+    const { useCustomerAuthStore } = await import("/src/store/customerAuthStore.ts");
+    const { useSelectionStore } = await import("/src/store/selectionStore.ts");
+    useCustomerAuthStore.getState().setAuth({
+      id: 202,
+      name: "客户 B",
+      phone: "13800000202",
+      email: "b@example.test",
+    });
+    useSelectionStore.getState().toggle(2);
+  });
+
+  await expect(dialog).toHaveCount(0);
+  await page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }).click();
+  dialog = page.getByRole("dialog", { name: "提交选款咨询" });
+  await expect(dialog.getByText("客户 B")).toBeVisible();
+  await dialog.getByRole("checkbox").check();
+  const customerBSubmit = dialog.getByRole("button", { name: "提交选款咨询（1 款）" });
+  await customerBSubmit.click();
+  await expect.poll(() => writes.length).toBe(2);
+  const customerBSubmitting = dialog.getByRole("button", { name: "提交中…" });
+  await expect(customerBSubmitting).toBeDisabled();
+
+  releaseCustomerA();
+  await page.waitForTimeout(150);
+  await expect(customerBSubmitting).toBeDisabled();
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "选款咨询已提交" })).toHaveCount(0);
+  await customerBSubmitting.evaluate((button: HTMLButtonElement) => button.click());
+  expect(writes).toHaveLength(2);
+
+  releaseCustomerB();
+  const receiptDialog = page.getByRole("dialog", { name: "选款咨询已提交" });
+  await expect(receiptDialog).toContainText("#72");
+  await expect(receiptDialog).not.toContainText("#71");
+});
+
+test("登录客户从选款回执按 canonical Lead 进入本人咨询详情", async ({ page }) => {
+  const customer = {
+    id: 7,
+    phone: "13800000007",
+    name: "选款回执会员",
+    email: null,
+  };
+  const consultationPaths: string[] = [];
+
+  await page.addInitScript(() => {
+    document.cookie = "hc_csrf=selection-receipt-csrf; path=/";
+  });
+  await page.route("**/api/customers/me", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped(customer)),
+  }));
+  await page.route("**/api/selection-inquiries", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped({
+      id: 71,
+      sourceId: 71,
+      leadId: 91,
+      status: "PENDING",
+      createdAt: "2026-09-22T08:00:00.000Z",
+    })),
+  }));
+  await page.route("**/api/customers/me/consultations/*", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    consultationPaths.push(path);
+    if (path !== "/api/customers/me/consultations/91") {
+      return route.fulfill({ status: 404, json: { message: "咨询记录不存在" } });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped({
+        leadId: 91,
+        sourceId: 71,
+        type: "selection",
+        status: "FOLLOWING",
+        message: "希望比较作品的日常佩戴感。",
+        consultationType: null,
+        preferredContact: null,
+        preferredTime: null,
+        budgetRange: null,
+        product: null,
+        items: [{ productNameSnapshot: "作品 01" }],
+        createdAt: "2026-09-22T08:00:00.000Z",
+        updatedAt: "2026-09-22T09:00:00.000Z",
+        reply: {
+          id: 601,
+          content: "顾问已记录您的比较需求，可在沟通时继续补充佩戴场景。",
+          createdAt: "2026-09-22T09:00:00.000Z",
+        },
+      })),
+    });
+  });
+  await page.route("**/api/customers/me/inquiries**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped({ list: [], total: 0, page: 1, pageSize: 3 })),
+  }));
+  await page.route("**/api/customers/me/selection-inquiries", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped([])),
+  }));
+  await page.route("**/api/customers/me/notifications**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped({
+      list: [], total: 0, unreadCount: 0, page: 1, pageSize: 20,
+    })),
+  }));
+  await page.route("**/api/customers/me/notification-preferences", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped({ list: [], marketingConsentGranted: false })),
+  }));
+  await page.route("**/api/customers/me/quotations**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped({ list: [], total: 0, page: 1, pageSize: 20 })),
+  }));
+  await page.route("**/api/customers/me/favorites", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped([])),
+  }));
+  await page.route("**/api/customers/me/cooperation-design-files", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped([])),
+  }));
+  for (const path of ["orders", "addresses"] as const) {
+    await page.route(`**/api/customers/me/${path}`, (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped([])),
+    }));
+  }
+  await page.route("**/api/partner-applications/me", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped(null)),
+  }));
+  await page.route("**/api/settings/flags", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped({
+      commerceEnabled: false,
+      cartEnabled: false,
+      paymentEnabled: false,
+      partnerApplicationsWriteEnabled: false,
+    })),
+  }));
+  await page.route("**/api/settings/public**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped({
+      siteName: "海川珠宝",
+      contactPhone: "",
+      contactEmail: "",
+      contactAddress: "",
+      businessHours: "",
+    })),
+  }));
+  await page.route("**/api/products/catalog**", (route) => {
+    const url = new URL(route.request().url());
+    const ids = url.searchParams.get("ids")?.split(",").map(Number).filter(Boolean);
+    const filtered = ids?.length
+      ? products.filter((product) => ids.includes(product.id))
+      : products;
+    const pageNumber = Number(url.searchParams.get("page") || 1);
+    const pageSize = Number(url.searchParams.get("pageSize") || 32);
+    const start = (pageNumber - 1) * pageSize;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(wrapped({
+        list: filtered.slice(start, start + pageSize),
+        total: filtered.length,
+        page: pageNumber,
+        pageSize,
+        facets: { sizes: ["标准", "大号"] },
+      })),
+    });
+  });
+  await page.route("**/api/recommendations/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(wrapped([])),
+  }));
+
+  await seedSelection(page, [1], "customer:7");
+  await page.goto("/catalog");
+  await page.getByRole("button", { name: "查看已选 1 款并提交选款咨询" }).click();
+  const dialog = page.getByRole("dialog", { name: "提交选款咨询" });
+  await expect(dialog.getByText("选款回执会员")).toBeVisible();
+  await dialog.getByRole("checkbox").check();
+  await dialog.getByRole("button", { name: "提交选款咨询（1 款）" }).click();
+
+  const receiptDialog = page.getByRole("dialog", { name: "选款咨询已提交" });
+  await expect(receiptDialog).toContainText("#71");
+  const detailLink = receiptDialog.getByRole("link", { name: "查看本次咨询" });
+  await expect(detailLink).toHaveAttribute(
+    "href",
+    "/customer?section=consultations&leadId=91",
+  );
+  await detailLink.click();
+
+  await expect(page).toHaveURL(/\/customer\?section=consultations&leadId=91$/);
+  const detail = page.getByRole("region", { name: "咨询详情" });
+  await expect(detail.getByRole("heading", { name: "作品 01" })).toBeVisible();
+  await expect(detail.getByText("持续跟进中", { exact: true })).toBeVisible();
+  await expect(detail.getByText(
+    "顾问已记录您的比较需求，可在沟通时继续补充佩戴场景。",
+  )).toBeVisible();
+  expect(consultationPaths).toEqual(["/api/customers/me/consultations/91"]);
+  expect(consultationPaths).not.toContain("/api/customers/me/consultations/71");
 });
 
 test("Catalog 在 390px 保持 4:5 媒体、可用对话框宽度并恢复触发焦点", async ({ page }) => {

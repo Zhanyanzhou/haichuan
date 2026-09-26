@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { Suspense, lazy } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { RequestErrorNotice } from "@/components/common/RequestErrorNotice";
@@ -88,6 +88,14 @@ const PartnerApplications = lazy(
 );
 const ReviewManage = lazy(() => import("@/pages/admin/ReviewManage"));
 const CustomerManage = lazy(() => import("@/pages/admin/CustomerManage"));
+
+function ProductEditorRoute() {
+  const { id } = useParams();
+
+  // React Router 在 /products/:id/edit 之间跳转时会复用同一组件实例。
+  // 以商品身份重建编辑器，隔离上一件商品尚在飞行的保存、回读和锁定状态。
+  return <ProductEditor key={id || "new"} />;
+}
 
 const AdminPage = ({
   children,
@@ -298,7 +306,7 @@ function App() {
               path="products/new"
               element={
                 <AdminPage route="/admin/products">
-                  <ProductEditor />
+                  <ProductEditorRoute />
                 </AdminPage>
               }
             />
@@ -306,7 +314,7 @@ function App() {
               path="products/:id/edit"
               element={
                 <AdminPage route="/admin/products">
-                  <ProductEditor />
+                  <ProductEditorRoute />
                 </AdminPage>
               }
             />

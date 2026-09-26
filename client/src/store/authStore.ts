@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { User } from '@/types';
+import { advanceSessionEpoch } from '@/services/sessionEpoch';
 
 interface AuthState {
   user: User | null;
@@ -25,9 +26,18 @@ export const useAuthStore = create<AuthState>()((set) => ({
   status: 'unknown',
   isLoggedIn: false,
 
-  setAuth: (user: User) => set({ user, status: 'authenticated', isLoggedIn: true }),
-  markAnonymous: () => set({ user: null, status: 'anonymous', isLoggedIn: false }),
-  logout: () => set({ user: null, status: 'anonymous', isLoggedIn: false }),
+  setAuth: (user: User) => {
+    advanceSessionEpoch('admin');
+    set({ user, status: 'authenticated', isLoggedIn: true });
+  },
+  markAnonymous: () => {
+    advanceSessionEpoch('admin');
+    set({ user: null, status: 'anonymous', isLoggedIn: false });
+  },
+  logout: () => {
+    advanceSessionEpoch('admin');
+    set({ user: null, status: 'anonymous', isLoggedIn: false });
+  },
 
   updateUser: (userData: Partial<User>) => {
     set((state) => ({

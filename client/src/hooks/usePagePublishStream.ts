@@ -3,6 +3,7 @@ import { publicPageDocumentStreamUrl } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import {
   getBrowserPublicContentLocale,
+  isPublicContentLocaleAvailable,
   type PublicContentLocale,
 } from "@/i18n/publicLocale";
 
@@ -50,9 +51,9 @@ function normalizePublishEvent(value: unknown): PagePublishEvent {
 const MAX_RETRIES = 10;
 const BASE_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30000;
-// SSE 重连耗尽后的兜底轮询间隔：直接回源拉取已发布文档（接口已 no-store），
-// 保证长连接长期不可用时前台内容至多滞后约一分钟，而不是永远停在旧快照。
-const POLLING_FALLBACK_MS = 60000;
+// SSE 只负责快速通知；即使长连接看似健康，也可能因多进程/多实例错过其它进程的发布事件。
+// 可见页因此独立定期回源对账（公开读取接口已 no-store），将最坏陈旧时间限制在约一分钟。
+const RECONCILIATION_INTERVAL_MS = 60000;
 
 export function usePagePublishStream(
   pageKey: string | undefined,
@@ -67,12 +68,14 @@ export function usePagePublishStream(
 
   useEffect(() => {
     if (!pageKey) return;
+    if (!isPublicContentLocaleAvailable(locale)) return;
     if (USE_MOCK) return;
-    if (typeof EventSource === "undefined") return;
+    const supportsEventSource = typeof EventSource !== "undefined";
 
     let stream: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let recoveryTimer: ReturnType<typeof setInterval> | null = null;
+    let reconciliationTimer: ReturnType<typeof setInterval> | null = null;
     let retry = 0;
     let closed = false;
 
@@ -91,23 +94,37 @@ export function usePagePublishStream(
       stream = null;
     };
 
-    const stopPolling = () => {
-      if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
+    const stopRecovery = () => {
+      if (recoveryTimer) {
+        clearInterval(recoveryTimer);
+        recoveryTimer = null;
       }
     };
 
-    // 兜底轮询：消费方只把回调当"刷新信号"使用，合成事件与真实发布事件等效。
-    // 轮询期间每个周期也顺带重试一次 SSE；一旦 SSE 恢复（收到消息）即停止轮询。
-    const startPolling = () => {
-      if (pollTimer || closed) return;
-      pollTimer = setInterval(() => {
+    const stopReconciliation = () => {
+      if (reconciliationTimer) {
+        clearInterval(reconciliationTimer);
+        reconciliationTimer = null;
+      }
+    };
+
+    // 重连耗尽后仍低频尝试恢复 SSE；内容对账由独立计时器负责，连接恢复不会取消它。
+    const startRecovery = () => {
+      if (recoveryTimer || closed) return;
+      recoveryTimer = setInterval(() => {
         if (closed) return;
         retry = 0;
         open();
+      }, RECONCILIATION_INTERVAL_MS);
+    };
+
+    // 消费方把合成事件当作刷新信号；实际 GET 继续复用消费方已有的 in-flight/stale 边界。
+    const startReconciliation = () => {
+      if (reconciliationTimer || closed || document.visibilityState === "hidden") return;
+      reconciliationTimer = setInterval(() => {
+        if (closed || document.visibilityState === "hidden") return;
         callbackRef.current({ type: "unknown", pageKey });
-      }, POLLING_FALLBACK_MS);
+      }, RECONCILIATION_INTERVAL_MS);
     };
 
     const handleMessage = (event: MessageEvent<string>) => {
@@ -133,20 +150,20 @@ export function usePagePublishStream(
     };
 
     const open = () => {
-      if (closed || document.visibilityState === "hidden" || stream) return;
+      if (!supportsEventSource || closed || document.visibilityState === "hidden" || stream) return;
       clearRetryTimer();
       stream = new EventSource(publicPageDocumentStreamUrl(locale));
       stream.onmessage = (event) => {
         retry = 0; // 成功收到消息即视为连接健康，重置退避计数
-        stopPolling(); // SSE 已恢复，退出兜底轮询
+        stopRecovery(); // SSE 已恢复，退出低频恢复尝试；独立内容对账继续运行
         handleMessage(event);
       };
       stream.onerror = () => {
         closeStream();
         if (closed) return;
         if (retry >= MAX_RETRIES) {
-          // 不再永久放弃：降级为 60 秒轮询兜底，避免前台停在旧快照。
-          startPolling();
+          // 不再永久放弃：低频尝试恢复长连接，内容对账不依赖此恢复结果。
+          startRecovery();
           return;
         }
         const delay = Math.min(
@@ -161,23 +178,27 @@ export function usePagePublishStream(
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
         clearRetryTimer();
-        stopPolling();
+        stopRecovery();
+        stopReconciliation();
         closeStream();
         retry = 0;
         return;
       }
 
       retry = 0;
+      startReconciliation();
       open();
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    startReconciliation();
     open();
     return () => {
       closed = true;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       closeStream();
-      stopPolling();
+      stopRecovery();
+      stopReconciliation();
       clearRetryTimer();
     };
   }, [locale, pageKey]);

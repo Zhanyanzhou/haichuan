@@ -76,7 +76,6 @@ export default function EditorToolbar({
   draftSavedAtLabel,
   publishValidationStatus,
   publishAttemptFailed,
-  publishReviewActive,
   publishReviewErrorCount,
   onOpenPublishReview,
   onSubmitReview,
@@ -120,7 +119,6 @@ export default function EditorToolbar({
   draftSavedAtLabel: string | null;
   publishValidationStatus: PublishValidationStatus;
   publishAttemptFailed: boolean;
-  publishReviewActive: boolean;
   publishReviewErrorCount: number;
   onOpenPublishReview: () => void;
   onSubmitReview: () => void;
@@ -236,10 +234,19 @@ export default function EditorToolbar({
           : publishReviewErrorCount > 0
             ? `发布未通过 · ${publishReviewErrorCount} 项`
             : "已满足发布门禁";
-  const showPublishReviewStatus = publishReviewActive
-    || publishReviewErrorCount > 0
-    || publishAttemptFailed
+  // 发布资格错误由发布按钮打开右侧“本次发布检查”统一承载，避免在工具栏
+  // 重复展示错误摘要；实际发布失败和检查不可用仍保留可重试入口。
+  const showPublishReviewStatus = publishAttemptFailed
     || publishValidationStatus === "unavailable";
+  const publishedLiveHealthLabel = publishedRevalidationErrors.length > 0
+    ? `线上版本异常 · ${publishedRevalidationErrors.length} 项`
+    : "线上版本待校验";
+  const publishedLiveHealthAriaLabel = publishedRevalidationErrors.length > 0
+    ? `线上已发布版本未通过公开校验，共 ${publishedRevalidationErrors.length} 项；打开页面设置查看`
+    : "线上已发布版本需要重新校验；打开页面设置查看";
+  const publishedLiveHealthTitle = publishedRevalidationErrors.length > 0
+    ? `线上版本未通过公开校验：${publishedRevalidationErrors.slice(0, 3).join("；")}`
+    : "线上版本需要重新校验；打开页面设置查看详情";
 
   useEffect(() => {
     onDataChange(appData);
@@ -747,6 +754,18 @@ export default function EditorToolbar({
               </span>
             ) : null}
             <div className="homepage-editor__locale-review-controls" aria-label="内容语言与审核状态">
+              {publishedNeedsRevalidation ? (
+                <button
+                  type="button"
+                  className="homepage-editor__published-live-health"
+                  data-testid="published-live-health-alert"
+                  onClick={() => onOpenPageSettings()}
+                  aria-label={publishedLiveHealthAriaLabel}
+                  title={publishedLiveHealthTitle}
+                >
+                  {publishedLiveHealthLabel}
+                </button>
+              ) : null}
               <span className="homepage-editor__locale-label" aria-label="内容语言">中文</span>
               <span role="status" data-testid="page-review-status">
                 {effectiveReviewStatus === "DRAFT" ? "草稿"

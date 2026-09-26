@@ -147,7 +147,8 @@ export default function Inventory() {
 
   const handleAdjust = async () => {
     if (adjusting) return;
-    if (!adjustModal.record) return;
+    const record = adjustModal.record;
+    if (!record) return;
     if (adjustQty === null || !Number.isInteger(adjustQty) || adjustQty < 0) {
       message.error("目标库存必须是非负整数");
       return;
@@ -156,17 +157,52 @@ export default function Inventory() {
       message.error("目标库存超出合理范围（上限 1,000,000），请核对数量");
       return;
     }
+    const targetQuantity = adjustQty;
     setAdjusting(true);
     try {
-      await inventoryApi.update(adjustModal.record.id, {
+      await inventoryApi.update(record.id, {
         type: "adjust",
-        quantity: adjustQty,
+        quantity: targetQuantity,
+        expectedQuantity: record.quantity,
       });
       message.success("库存已调整");
       setAdjustModal({ open: false, record: null });
       void load();
     } catch (error: unknown) {
-      message.error(getSafeAdminErrorMessage(error, "库存调整失败，请重新加载库存后核对数量。"));
+      const status = (error as { status?: number; response?: { status?: number } })?.response?.status
+        ?? (error as { status?: number })?.status;
+      const shouldReadAuthority = status === undefined
+        || status === 408
+        || status === 409
+        || status >= 500;
+      if (!shouldReadAuthority) {
+        message.error(getSafeAdminErrorMessage(error, "库存调整失败，请核对输入后重试。"));
+        return;
+      }
+
+      try {
+        const authorityResponse = await inventoryApi.getById(record.id);
+        const authority = unwrapResponse<InventoryApiItem>(authorityResponse);
+        const authoritativeQuantity = Number(authority?.quantity);
+        if (!Number.isSafeInteger(authoritativeQuantity) || authoritativeQuantity < 0) {
+          throw new Error("Invalid inventory authority response");
+        }
+        if (authoritativeQuantity === targetQuantity) {
+          message.success("权威库存已是目标值");
+          setAdjustModal({ open: false, record: null });
+          void load();
+        } else if (authoritativeQuantity === record.quantity) {
+          message.warning("库存调整未生效，可再次确认保存");
+        } else {
+          message.warning("库存已被其他操作更新，已按最新结果重新加载");
+          setAdjustModal({ open: false, record: null });
+          void load();
+        }
+      } catch {
+        message.error("库存调整结果待确认，已停止重复提交。请重新加载库存后核对。");
+        setAdjustModal({ open: false, record: null });
+        void load();
+      }
     } finally {
       setAdjusting(false);
     }

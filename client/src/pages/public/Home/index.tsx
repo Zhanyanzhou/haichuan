@@ -114,7 +114,7 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
             src={hero.image}
             alt=""
             aria-hidden="true"
-            fetchPriority="high"
+            {...{ fetchpriority: "high" }}
             decoding="async"
             style={{
               position: "absolute",
@@ -167,7 +167,49 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
             ) : null}
           </div>
         </div>
-      ) : <span className="sr-only">首页内容正在准备</span>}
+      ) : (
+        <div
+          data-home-loading-status="true"
+          role="status"
+          aria-live="polite"
+          style={{
+            display: "grid",
+            minHeight: "max(620px, 100svh)",
+            placeItems: "center",
+            padding: "clamp(112px, 14vw, 180px) 24px 72px",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              justifyItems: "center",
+              gap: 18,
+              color: "#4A4A47",
+              textAlign: "center",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                display: "block",
+                width: "clamp(56px, 5vw, 76px)",
+                height: 1,
+                background: "rgba(143, 112, 58, 0.72)",
+              }}
+            />
+            <span
+              style={{
+                fontFamily: 'var(--hc-font-body, Inter, "Noto Sans SC", sans-serif)',
+                fontSize: 12,
+                fontWeight: 400,
+                lineHeight: 1.7,
+              }}
+            >
+              首页内容正在准备
+            </span>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -256,34 +298,13 @@ export default function Home() {
     );
   }
 
-  const hasVisibleHeroTitle = readiness.data.content?.some((block) => {
-    if (
-      block.type !== "首屏主视觉"
-      || block.props?.isVisible === false
-      || typeof block.props?.title !== "string"
-      || block.props.title.trim().length === 0
-    ) return false;
-    const overrides = block.props.__instanceOverrides;
-    if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return true;
-    const record = overrides as Record<string, unknown>;
-    const nodes = record.nodes && typeof record.nodes === "object" && !Array.isArray(record.nodes)
-      ? record.nodes as Record<string, unknown>
-      : {};
-    const textRoles = record.textRoles && typeof record.textRoles === "object" && !Array.isArray(record.textRoles)
-      ? record.textRoles as Record<string, unknown>
-      : {};
-    const titleNode = (record.version === 2 ? nodes.title : textRoles.title) as Record<string, unknown> | undefined;
-    return titleNode?.enabled !== false;
-  });
-
   return (
     <div data-page-document-state="published" style={{ background: LG }}>
-      {!hasVisibleHeroTitle ? <h1 className="sr-only">海川珠宝</h1> : null}
       <Suspense fallback={<HomeFirstFold data={readiness.data as PuckDocument} />}>
         <PuckDocumentRenderer
           data={readiness.data as PuckDocument}
           surface="home"
-          heroHeadingLevel={hasVisibleHeroTitle ? 1 : 2}
+          primaryHeading="海川珠宝"
         />
       </Suspense>
       <StaleDocumentNotice

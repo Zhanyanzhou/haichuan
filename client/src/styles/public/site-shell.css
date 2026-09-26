@@ -508,25 +508,6 @@
     left: 18px;
     gap: 14px;
   }
-  .site-main--overlay[data-page-key="products"] .hc-phase1-hero__copy-band {
-    padding-top: 44px;
-  }
-  /* 作品 Hero 在手机端以独立浅色文案带开场，页头必须使用深色控件。 */
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand,
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand-text,
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__nav-item,
-  .site-shell[data-page-key="products"] .site-header__left-group.is-overlay-light .site-menu-toggle,
-  .site-shell[data-page-key="products"] .site-header__left-group.is-overlay-light .site-header__nav-item {
-    color: #181a1b;
-    text-shadow: none;
-  }
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand-text::after {
-    color: rgba(24, 26, 27, 0.58);
-    text-shadow: none;
-  }
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__logo {
-    filter: none;
-  }
   .home-brand-signature {
     margin-bottom: 20px;
   }
@@ -1132,8 +1113,13 @@
   }
 }
 
-/* ═══ 移动端触控目标补强（2026-08-16）：页脚导航与备案链接 ≥44px 高 ═══ */
+/* ═══ 移动端触控目标补强：品牌入口、页脚导航与备案链接 ≥44px ═══ */
 @media (max-width: 767px) {
+  .site-header__brand {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .site-footer__links a,
   .site-footer__filing {
     display: flex;
@@ -1166,7 +1152,7 @@
   }
 
   .site-header__brand {
-    min-width: 0;
+    min-width: 44px;
     max-width: 100%;
   }
 

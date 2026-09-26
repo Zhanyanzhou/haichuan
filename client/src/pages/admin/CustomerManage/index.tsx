@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
   Card,
@@ -132,7 +132,10 @@ export default function CustomerManage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  const listRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
   const fetchList = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -143,9 +146,11 @@ export default function CustomerManage() {
         status: status === "ALL" ? undefined : status,
       });
       const data = unwrapResponse<{ list: AdminCustomerRow[]; total: number }>(res);
+      if (requestId !== listRequestIdRef.current) return;
       setRows(data?.list ?? []);
       setTotal(data?.total ?? 0);
     } catch (error: unknown) {
+      if (requestId !== listRequestIdRef.current) return;
       setError(
         getSafeAdminErrorMessage(
           error,
@@ -153,7 +158,7 @@ export default function CustomerManage() {
         ),
       );
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setLoading(false);
     }
   }, [page, pageSize, keyword, status]);
 
@@ -162,6 +167,7 @@ export default function CustomerManage() {
   }, [fetchList]);
 
   const openDetail = async (id: number) => {
+    const requestId = ++detailRequestIdRef.current;
     setDetailOpen(true);
     // 记录当前查看的客户 ID：详情加载失败时据此提供重试入口
     setDetailId(id);
@@ -170,8 +176,10 @@ export default function CustomerManage() {
     setDetail(null);
     try {
       const res = await customerAdminApi.detail(id);
+      if (requestId !== detailRequestIdRef.current) return;
       setDetail(unwrapResponse<AdminCustomerDetail>(res));
     } catch (error: unknown) {
+      if (requestId !== detailRequestIdRef.current) return;
       setDetailError(
         getSafeAdminErrorMessage(
           error,
@@ -179,8 +187,17 @@ export default function CustomerManage() {
         ),
       );
     } finally {
-      setDetailLoading(false);
+      if (requestId === detailRequestIdRef.current) setDetailLoading(false);
     }
+  };
+
+  const closeDetail = () => {
+    detailRequestIdRef.current += 1;
+    setDetailOpen(false);
+    setDetailId(null);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(false);
   };
 
   const columns = [
@@ -363,7 +380,7 @@ export default function CustomerManage() {
         placement="right"
         width="min(640px, calc(100vw - 16px))"
         open={detailOpen}
-        onClose={() => setDetailOpen(false)}
+        onClose={closeDetail}
       >
         {detailLoading ? (
           <div className="py-20 text-center">

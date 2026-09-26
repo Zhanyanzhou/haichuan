@@ -14,6 +14,14 @@ async function fulfill(route: Route, data: unknown, status = 200) {
   });
 }
 
+const receipt = (sourceId: number, leadId = sourceId + 100) => ({
+  id: sourceId,
+  sourceId,
+  leadId,
+  status: "PENDING",
+  createdAt: "2026-09-22T08:00:00.000Z",
+});
+
 async function mockServiceApis(
   page: Page,
   onInquiry?: (route: Route) => Promise<void>,
@@ -27,7 +35,7 @@ async function mockServiceApis(
     }
     if (path.endsWith("/inquiries") && request.method() === "POST") {
       if (onInquiry) return onInquiry(route);
-      return fulfill(route, { id: 1 });
+      return fulfill(route, receipt(1));
     }
     if (request.method() !== "GET") return route.abort();
     if (path.endsWith("/settings/public")) {
@@ -69,6 +77,35 @@ async function expectNoHorizontalOverflow(page: Page) {
 }
 
 test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
+  test("Cookie 会话延迟恢复后补填咨询联系方式且不覆盖已输入内容", async ({ page }) => {
+    let profileRequests = 0;
+    let releaseProfile = () => {};
+    const profileReleased = new Promise<void>((resolve) => {
+      releaseProfile = resolve;
+    });
+    await mockServiceApis(page);
+    await page.route("**/api/customers/me", async (route) => {
+      profileRequests += 1;
+      await profileReleased;
+      await fulfill(route, {
+        id: 7,
+        name: "已登录会员",
+        phone: "13800138000",
+        email: "member@example.com",
+      });
+    });
+
+    await page.goto("/contact");
+    await expect(page.locator("#cf-name")).toBeVisible();
+    await page.locator("#cf-name").fill("我已开始填写");
+    releaseProfile();
+
+    await expect.poll(() => profileRequests).toBe(1);
+    await expect(page.locator("#cf-name")).toHaveValue("我已开始填写");
+    await expect(page.locator("#cf-phone")).toHaveValue("13800138000");
+    await expect(page.locator("#cf-email")).toHaveValue("member@example.com");
+  });
+
   for (const viewport of [
     { name: "desktop", width: 1440, height: 900 },
     { name: "mobile", width: 390, height: 844 },
@@ -77,7 +114,7 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
       let inquiryRequests = 0;
       await mockServiceApis(page, async (route) => {
         inquiryRequests += 1;
-        await fulfill(route, { id: 1 });
+        await fulfill(route, receipt(1));
       });
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.goto("/contact");
@@ -129,7 +166,7 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
     let inquiryRequests = 0;
     await mockServiceApis(page, async (route) => {
       inquiryRequests += 1;
-      await fulfill(route, { id: 1 });
+      await fulfill(route, receipt(1));
     });
     await page.goto("/contact");
     await fillRequiredContactFields(page);
@@ -158,7 +195,7 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
     await mockServiceApis(page, async (route) => {
       inquiryRequests += 1;
       await inquiryReleased;
-      await fulfill(route, { id: 1 });
+      await fulfill(route, receipt(1));
     });
     await page.goto("/contact");
     await fillRequiredContactFields(page);
@@ -179,13 +216,15 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
 
   test("电子邮件偏好提交失败保留输入，重试只确认需求已保存", async ({ page }) => {
     const bodies: Array<Record<string, unknown>> = [];
+    const idempotencyKeys: string[] = [];
     await mockServiceApis(page, async (route) => {
       bodies.push(route.request().postDataJSON());
+      idempotencyKeys.push(route.request().headers()["idempotency-key"] || "");
       if (bodies.length === 1) {
         await fulfill(route, { statusCode: 500, message: "提交服务暂时不可用" }, 500);
         return;
       }
-      await fulfill(route, { id: 1 });
+      await fulfill(route, receipt(1));
     });
     await page.goto("/contact");
     await fillRequiredContactFields(page);
@@ -198,16 +237,73 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
     await expect(page.locator("#cf-phone")).toHaveValue("13800000000");
     await expect(page.locator("#cf-email")).toHaveValue("visitor@example.com");
     await expect(page.locator("#cf-contact")).toHaveValue("电子邮件");
+    await expect(page.getByText(
+      "存在一笔结果待确认的咨询。保持原内容再次提交可安全查回原回执；新建前请先明确放弃恢复。",
+      { exact: true },
+    )).toBeVisible();
 
+    const storedAttempt = await page.evaluate(() => ({ ...sessionStorage }));
+    expect(JSON.stringify(storedAttempt)).not.toContain("13800000000");
+    expect(JSON.stringify(storedAttempt)).not.toContain("visitor@example.com");
+    expect(JSON.stringify(storedAttempt)).not.toContain("日常佩戴");
+
+    await page.reload();
+    await expect(page.getByText(
+      "存在一笔结果待确认的咨询。保持原内容再次提交可安全查回原回执；新建前请先明确放弃恢复。",
+      { exact: true },
+    )).toBeVisible();
+    await fillRequiredContactFields(page);
+    await page.locator("#cf-email").fill("visitor@example.com");
+    await page.locator("#cf-contact").selectOption("电子邮件");
     await page.getByRole("button", { name: "提交需求" }).click();
     await expect(page.getByRole("heading", { name: "需求已提交" })).toBeVisible();
     await expect(page.getByText("邮件已送达")).toHaveCount(0);
     expect(bodies).toHaveLength(2);
+    expect(idempotencyKeys[0]).toBeTruthy();
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
     for (const body of bodies) {
       expect(body.customerPhone).toBe("13800000000");
       expect(body.customerEmail).toBe("visitor@example.com");
       expect(body.preferredContact).toBe("电子邮件");
     }
+    expect(await page.evaluate(() => Object.keys(sessionStorage).some(
+      (key) => key.startsWith("hc:consultation-submission-attempt:contact:"),
+    ))).toBe(false);
+  });
+
+  test("结果待确认时不同内容零请求，明确放弃后才生成新提交意图", async ({ page }) => {
+    const keys: string[] = [];
+    await mockServiceApis(page, async (route) => {
+      keys.push(route.request().headers()["idempotency-key"] || "");
+      if (keys.length === 1) {
+        await fulfill(route, { statusCode: 503, message: "响应丢失" }, 503);
+        return;
+      }
+      await fulfill(route, receipt(2));
+    });
+    await page.goto("/contact");
+    await fillRequiredContactFields(page);
+    await page.getByRole("button", { name: "提交需求" }).click();
+    await expect.poll(() => keys.length).toBe(1);
+
+    await page.reload();
+    await fillRequiredContactFields(page);
+    await page.locator("#cf-message").fill("这是另一笔不同的咨询需求。");
+    await page.getByRole("button", { name: "提交需求" }).click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+      "当前内容与一笔结果待确认的咨询不同",
+    );
+    expect(keys).toHaveLength(1);
+
+    await page.getByRole("button", { name: "放弃恢复并准备新建" }).click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+      "这不会撤销服务器上可能已生效的咨询",
+    );
+    await page.getByRole("button", { name: "提交需求" }).click();
+    await expect(page.getByRole("heading", { name: "需求已提交" })).toBeVisible();
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBeTruthy();
+    expect(keys[1]).not.toBe(keys[0]);
   });
 });
 

@@ -5,10 +5,16 @@ import { RELEASE_RUNTIME_GATE_KEYS } from "../common/release/release-profile";
 import {
   createContentTemplatePublicationAttestation,
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
+  withoutContentTemplatePublicationAttestation,
 } from "../modules/page-modules/content-template-contract";
+import {
+  createPageLocaleContentHash,
+  withPageLocaleRevisionMetadata,
+} from "../modules/page-modules/page-document-localization";
 import {
   createReleasePreflightTargetConfig,
   evaluateMigrationIntegrity,
+  parseReleasePageContentHashes,
   parseReleasePreflightProfile,
   parseReleaseProfile,
   RELEASE_PAGE_KEYS,
@@ -38,10 +44,35 @@ type FakeOptions = {
 };
 
 function currentMetadata(): Prisma.JsonObject {
-  return {
+  const metadata = {
     [CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY]:
       createContentTemplatePublicationAttestation() as unknown as Prisma.JsonObject,
   };
+  const contentHash = createPageLocaleContentHash(
+    currentPuckData,
+    withoutContentTemplatePublicationAttestation(metadata),
+  );
+  return withPageLocaleRevisionMetadata(metadata, "zh-CN", contentHash, {
+    submittedBy: 1,
+    submittedAt: new Date("2026-09-20T08:00:00.000Z"),
+    reviewedBy: 2,
+    reviewedAt: new Date("2026-09-20T09:00:00.000Z"),
+  }) as Prisma.JsonObject;
+}
+
+const currentPuckData = { content: [{ type: "测试区块", props: {} }] } as Prisma.JsonObject;
+
+function currentPageContentHash() {
+  return createPageLocaleContentHash(
+    currentPuckData,
+    withoutContentTemplatePublicationAttestation(currentMetadata()),
+  );
+}
+
+function revisionIdForPageKey(pageKey: (typeof RELEASE_PAGE_KEYS)[number]) {
+  const index = RELEASE_PAGE_KEYS.indexOf(pageKey);
+  assert.notEqual(index, -1);
+  return 101 + index;
 }
 
 function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase {
@@ -52,7 +83,7 @@ function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase
       pageKey,
       publishedRevisionId: pageKey === options.missingPointerPageKey
         ? null
-        : 101 + index,
+        : revisionIdForPageKey(pageKey),
     }));
   const settings = options.settings === undefined
     ? {
@@ -101,6 +132,19 @@ function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase
         return pages;
       },
     },
+    pageDocumentLocalization: {
+      async findUnique(args: any) {
+        const page = pages.find((candidate) =>
+          candidate.id === args.where.documentId_locale.documentId
+        );
+        if (!page || !page.publishedRevisionId) return null;
+        return {
+          reviewStatus: "PUBLISHED",
+          publishedRevisionId: page.publishedRevisionId,
+          publishedHash: currentPageContentHash(),
+        };
+      },
+    },
     pageDocumentRevision: {
       async findFirst(args: any) {
         const page = pages.find(
@@ -111,7 +155,7 @@ function createFakeDatabase(options: FakeOptions = {}): ReleasePreflightDatabase
         return {
           id: page.publishedRevisionId,
           version: 3,
-          puckData: { content: [{ type: "测试区块", props: {} }] },
+          puckData: currentPuckData,
           metadata: page.pageKey === options.stalePageKey ? {} : currentMetadata(),
         } as any;
       },
@@ -136,6 +180,97 @@ test("线索型发布门禁在超管、店铺资料、页面、作品和非交�
     RELEASE_PAGE_KEYS.length,
   );
   assert.ok(result.manualChecksRequired.length > 0);
+});
+
+test("发布前门禁把六个中文发布指针的实际哈希绑定到候选清单", async () => {
+  const expectedPageContentHashes = Object.fromEntries(
+    RELEASE_PAGE_KEYS.map((pageKey) => [pageKey, currentPageContentHash()]),
+  ) as Record<(typeof RELEASE_PAGE_KEYS)[number], string>;
+  const matching = await runReleasePreflight(
+    createFakeDatabase(),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    {
+      configuredClientPublicSiteOrigin: "https://example.invalid",
+      expectedPageContentHashes,
+    },
+  );
+  assert.equal(matching.technicalReady, true);
+  assert.equal(
+    matching.checks.filter((check) => check.code.endsWith("-manifest-hash") && check.ok).length,
+    RELEASE_PAGE_KEYS.length,
+  );
+
+  const drifted = await runReleasePreflight(
+    createFakeDatabase(),
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    {
+      configuredClientPublicSiteOrigin: "https://example.invalid",
+      expectedPageContentHashes: { ...expectedPageContentHashes, contact: "f".repeat(64) },
+    },
+  );
+  assert.equal(drifted.technicalReady, false);
+  assert.equal(drifted.checks.find((check) => check.code === "page-contact-manifest-hash")?.ok, false);
+});
+
+test("发布前门禁在首次切换前拒绝 locale 标记或标记哈希漂移", async () => {
+  const expectedPageContentHashes = Object.fromEntries(
+    RELEASE_PAGE_KEYS.map((pageKey) => [pageKey, currentPageContentHash()]),
+  ) as Record<(typeof RELEASE_PAGE_KEYS)[number], string>;
+  const database = createFakeDatabase();
+  const originalFindFirst = database.pageDocumentRevision.findFirst;
+  database.pageDocumentRevision.findFirst = async (args: unknown) => {
+    const revision = await originalFindFirst(args);
+    if (!revision || (args as { where?: { documentId?: number } }).where?.documentId !== 1) {
+      return revision;
+    }
+    const metadata = structuredClone(revision.metadata) as Record<string, unknown>;
+    const marker = metadata.__pageLocaleRevision as Record<string, unknown>;
+    marker.locale = "en";
+    return { ...revision, metadata: metadata as Prisma.JsonObject };
+  };
+
+  const result = await runReleasePreflight(
+    database,
+    async () => ({ valid: true, errors: [], issues: [] }),
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    {
+      configuredClientPublicSiteOrigin: "https://example.invalid",
+      expectedPageContentHashes,
+    },
+  );
+
+  assert.equal(result.technicalReady, false);
+  assert.deepEqual(
+    result.checks.find((check) => check.code === "page-home-manifest-hash")?.facts,
+    {
+      revisionId: 101,
+      version: 3,
+      manifestHashMatched: true,
+      publishedPointerHashMatched: true,
+      localeMarkerMatched: false,
+      revisionMarkerHashMatched: true,
+    },
+  );
+});
+
+test("发布前哈希环境必须六页同时存在且格式正确", () => {
+  assert.equal(parseReleasePageContentHashes({}), undefined);
+  assert.throws(
+    () => parseReleasePageContentHashes({ PUBLIC_SEO_PAGE_HASH_HOME: "a".repeat(64) }),
+    { message: "RELEASE_PREFLIGHT_PAGE_HASHES_INVALID" },
+  );
+  const environment = Object.fromEntries(RELEASE_PAGE_KEYS.map((pageKey) => [
+    `PUBLIC_SEO_PAGE_HASH_${pageKey.toUpperCase()}`,
+    "b".repeat(64),
+  ]));
+  assert.deepEqual(parseReleasePageContentHashes(environment), Object.fromEntries(
+    RELEASE_PAGE_KEYS.map((pageKey) => [pageKey, "b".repeat(64)]),
+  ));
 });
 
 test("预期客户端公开域名配置缺失或与 SiteSettings 不一致时阻断且不冒充制品证据", async () => {
@@ -232,6 +367,34 @@ test("发布前门禁同时报告缺失资料、正式商品、Demo 商品与失
   assert.ok(failedCodes.includes("page-custom-published-current"));
 });
 
+test("发布前门禁拒绝已发布 revision 中被页面预检降级为 warning 的占位文案", async () => {
+  const result = await runReleasePreflight(
+    createFakeDatabase(),
+    async (pageKey) => pageKey === "home"
+      ? {
+          valid: true,
+          errors: [],
+          issues: [{
+            code: "page-validation-title",
+            severity: "warning",
+            message: "首页主视觉：标题“首页正在准备”仍是占位内容，请填写正式文案",
+            path: "content[0].props.title",
+          }],
+        }
+      : { valid: true, errors: [], issues: [] },
+    passingMigrationIntegrityCheck,
+    "lead-generation",
+    { configuredClientPublicSiteOrigin: "https://example.invalid" },
+  );
+
+  const home = result.checks.find((check) => check.code === "page-home-published-current");
+  assert.equal(result.technicalReady, false);
+  assert.equal(home?.ok, false);
+  assert.equal(home?.facts?.placeholderIssueCount, 1);
+  assert.deepEqual(home?.facts?.placeholderIssuePaths, ["content[0].props.title"]);
+  assert.match(home?.summary || "", /占位内容/);
+});
+
 test("交易型发布档位要求运行门禁和已知代码闭环，不能只凭直购商品误判 ready", async () => {
   const blocked = await runReleasePreflight(
     createFakeDatabase({ directPurchaseProductCount: 0 }),
@@ -247,6 +410,7 @@ test("交易型发布档位要求运行门禁和已知代码闭环，不能只�
     {
       configuredClientPublicSiteOrigin: "https://example.invalid",
       releaseRuntimeEnvironment: {
+        PAYMENT_PROVIDER_MODE: "live",
         CUSTOMER_COMMERCE_ENABLED: "true",
         CUSTOMER_QUOTATION_ORDERING_ENABLED: "true",
         PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "true",
@@ -274,6 +438,9 @@ test("交易型发布档位要求运行门禁和已知代码闭环，不能只�
     (check) => check.code === "release-profile-customer-commerce-gate" && check.ok,
   ));
   assert.ok(ready.checks.some(
+    (check) => check.code === "release-profile-payment-provider-mode" && check.ok,
+  ));
+  assert.ok(ready.checks.some(
     (check) => check.code === "commerce-payment-refund-reconciliation-code" && check.ok,
   ));
   assert.ok(ready.checks.some(
@@ -291,6 +458,32 @@ test("交易型发布档位要求运行门禁和已知代码闭环，不能只�
   assert.ok(ready.checks.some(
     (check) => check.code === "commerce-inventory-and-price-snapshots" && !check.ok,
   ));
+});
+
+test("交易发布预检拒绝 disabled、simulator 和未知 payment provider mode", async () => {
+  for (const mode of ["disabled", "simulator", "unknown"]) {
+    const result = await runReleasePreflight(
+      createFakeDatabase({ directPurchaseProductCount: 1 }),
+      async () => ({ valid: true, errors: [], issues: [] }),
+      passingMigrationIntegrityCheck,
+      "commerce",
+      {
+        configuredClientPublicSiteOrigin: "https://example.invalid",
+        releaseRuntimeEnvironment: {
+          PAYMENT_PROVIDER_MODE: mode,
+          CUSTOMER_COMMERCE_ENABLED: "true",
+          CUSTOMER_QUOTATION_ORDERING_ENABLED: "true",
+          PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "true",
+          PAYMENT_GATEWAY_REFUNDS_ENABLED: "true",
+        },
+      },
+    );
+    const providerMode = result.checks.find(
+      (check) => check.code === "release-profile-payment-provider-mode",
+    );
+    assert.equal(providerMode?.ok, false);
+    assert.equal(providerMode?.facts?.simulatorAcceptedForRelease, false);
+  }
 });
 
 test("runtime 默认安全选择线索型，但发布候选要求显式且受支持的档位", () => {
@@ -507,7 +700,7 @@ test("发布前门禁把当前服务端重新验证失败视为阻断", async ()
   );
   assert.equal(productsCheck?.ok, false);
   assert.deepEqual(productsCheck?.facts, {
-    revisionId: 103,
+    revisionId: revisionIdForPageKey("products"),
     version: 3,
     errorCount: 1,
     issueCodes: ["page-validation-test"],
@@ -535,7 +728,7 @@ test("发布前门禁与 Public 一致，只验证 publishedRevisionId 指向的
   assert.equal(result.technicalReady, true);
   assert.equal(revisionQueries.length, RELEASE_PAGE_KEYS.length);
   assert.deepEqual(revisionQueries[0], {
-    where: { id: 101, documentId: 1, status: "published" },
+    where: { id: revisionIdForPageKey("home"), documentId: 1, status: "published" },
     select: { id: true, version: true, puckData: true, metadata: true },
   });
   assert.equal(
@@ -544,7 +737,7 @@ test("发布前门禁与 Public 一致，只验证 publishedRevisionId 指向的
   );
   assert.deepEqual(
     result.checks.find((check) => check.code === "page-home-published-current")?.facts,
-    { revisionId: 101, version: 3, errorCount: 0, issueCodes: [] },
+    { revisionId: revisionIdForPageKey("home"), version: 3, errorCount: 0, issueCodes: [] },
   );
 });
 
@@ -574,7 +767,7 @@ test("发布前门禁失败关闭空指针与跨页面或悬空指针", async ()
       code: "page-about-published-current",
       ok: false,
       summary: "about 线上版本指针无效",
-      facts: { publishedRevisionId: 102 },
+      facts: { publishedRevisionId: revisionIdForPageKey("about") },
     },
   );
   assert.equal(validatedPageKeys.includes("home"), false);

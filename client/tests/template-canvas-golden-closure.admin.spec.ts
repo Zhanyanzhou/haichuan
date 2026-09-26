@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { getDynamicTemplatePageFieldDescriptors } from "../src/page-builder/dynamic-template-instance/pageFieldDescriptors";
 import { completeProductionReviews, createBlankTemplate, fillTemplateIdentity, installNewTemplateServer, readSession, saveTemplate, type NewTemplateMockServer } from "./fixtures/template-authoring-main-route";
 
 // 主路由真实 UI + 自有 API 内存夹具。没有真实模板、页面或发布写入。
@@ -55,6 +56,12 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     else await page.getByRole("button", { name: "进入选中容器", exact: true }).click();
   }
   async function number(page: Page, label: string, value: number) {
+    if (label === "水平焦点" || label === "垂直焦点") {
+      const precise = page.getByRole("button", { name: "精确百分比", exact: true });
+      if (await precise.count() && (await precise.getAttribute("aria-expanded")) !== "true") {
+        await precise.click();
+      }
+    }
     const field = page.getByRole("spinbutton", { name: label, exact: true });
     await field.fill(String(value)); await field.press("Enter");
     await expect(field).toHaveValue(String(value));
@@ -81,8 +88,16 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await page.getByRole("button", { name: "页面装修", exact: true }).click();
     await page.getByRole("button", { name: `添加到页面：${name} v1`, exact: true }).click();
     const inspector = page.getByRole("region", { name: "模板实例属性", exact: true });
+    const pageFields = getDynamicTemplatePageFieldDescriptors(saved);
+    expect(pageFields.map((field) => field.slotId).sort()).toEqual(Object.keys(saved.slots).sort());
+    await expect(inspector.locator("fieldset[data-slot-id]")).toHaveCount(pageFields.length);
+    const supplementaryFields = inspector.getByRole("button", { name: /^补充内容 · \d+ 项$/ });
+    if (await supplementaryFields.count() && (await supplementaryFields.getAttribute("aria-expanded")) !== "true") {
+      await supplementaryFields.click();
+    }
     for (const slot of Object.values(saved.slots)) {
       const field = inspector.locator(`fieldset[data-slot-id="${slot.slotId}"]`);
+      await expect(field).toBeVisible();
       if (slot.type === "image") {
         await field.getByRole("button", { name: /粘贴图片链接/ }).click();
         const urlInput = field.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片");
@@ -102,8 +117,9 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
         if (!(await urlInput.isVisible())) await field.getByRole("button", { name: /图片链接$/ }).click();
         await urlInput.fill("/images/system/product-placeholder.svg");
         await field.getByRole("button", { name: /^确\s*认$/ }).click();
-        await expect.poll(async () => field.locator(".homepage-editor__media-preview-img img").evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-        await expect(field.locator(".homepage-editor__media-preview-img img")).toBeVisible();
+        const previewImage = field.locator(".homepage-editor__media-preview-img img, [data-image-focus-pad] img").first();
+        await expect.poll(async () => previewImage.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+        await expect(previewImage).toBeVisible();
         await expect(field.getByRole("alert").filter({ hasText: "当前图片暂不可用" })).toHaveCount(0);
       } else if (["heading", "text", "button"].includes(slot.type)) {
         await field.getByRole("textbox").first().fill(`${name} · ${slot.label}`);
@@ -155,6 +171,7 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     const afterTrial = await readSession(page);
     expect(afterTrial.definition).toEqual(beforeTrial.definition);
     expect(afterTrial.historyPast).toEqual(beforeTrial.historyPast);
+    await page.getByText("断点显示与继承", { exact: true }).click();
     await page.getByText("高级定位 · 改为局部叠放", { exact: true }).click();
     await page.getByRole("button", { name: "锚点 left top", exact: true }).click();
     await page.getByRole("button", { name: "确认定位", exact: true }).click();

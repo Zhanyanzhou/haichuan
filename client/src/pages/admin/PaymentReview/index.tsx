@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { App as AntdApp, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { SecureImage } from '@/components/common/SecureImage';
@@ -20,6 +20,28 @@ type PaymentListItem = Payment & {
   reviewer?: { id: number; realName?: string; username: string } | null;
 };
 
+type PaymentReviewOperation = {
+  payment: PaymentListItem;
+  approved: boolean;
+  reviewNote: string;
+  ownerId: number | undefined;
+};
+
+function normalizeReviewNote(value: string | null | undefined) {
+  return value?.trim() || '';
+}
+
+function isAmbiguousWriteFailure(error: unknown) {
+  const status = (error as { response?: { status?: unknown }; status?: unknown })?.response?.status
+    ?? (error as { status?: unknown })?.status;
+  return typeof status !== 'number' || status >= 500;
+}
+
+function expectedReviewNote(operation: PaymentReviewOperation) {
+  const note = normalizeReviewNote(operation.reviewNote);
+  return !operation.approved && !note ? '线下付款凭证审核未通过' : note;
+}
+
 type ReceiptFormValues = {
   orderId: number;
   amount: number;
@@ -30,9 +52,62 @@ type ReceiptFormValues = {
   reviewNote?: string;
 };
 
+function createReceiptIdempotencyKey() {
+  const suffix = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `manual-receipt-${suffix}`;
+}
+
+type ReceiptAttempt = {
+  fingerprint: string;
+  key: string;
+};
+
+function receiptAttemptStorageKey(userId: number | undefined) {
+  return `hc:manual-receipt-attempt:${userId ?? 'unknown'}`;
+}
+
+function readReceiptAttempt(storageKey: string): ReceiptAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(storageKey);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<ReceiptAttempt>;
+    return typeof value.fingerprint === 'string' && typeof value.key === 'string'
+      ? { fingerprint: value.fingerprint, key: value.key }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeReceiptAttempt(storageKey: string, attempt: ReceiptAttempt) {
+  try {
+    const serialized = JSON.stringify(attempt);
+    sessionStorage.setItem(storageKey, serialized);
+    return sessionStorage.getItem(storageKey) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+function clearReceiptAttempt(storageKey: string) {
+  try {
+    sessionStorage.removeItem(storageKey);
+  } catch {
+    // ignore
+  }
+}
+
+async function hashReceiptPayload(payload: object) {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export default function PaymentReview() {
-  const { message, modal } = AntdApp.useApp();
+  const { message } = AntdApp.useApp();
   const role = useAuthStore((state) => state.user?.role);
+  const userId = useAuthStore((state) => state.user?.id);
   const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const [list, setList] = useState<PaymentListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -47,10 +122,17 @@ export default function PaymentReview() {
   const [detail, setDetail] = useState<PaymentListItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [reviewOperation, setReviewOperation] = useState<PaymentReviewOperation | null>(null);
   const [queryingId, setQueryingId] = useState<number | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptSubmitting, setReceiptSubmitting] = useState(false);
   const [receiptForm] = Form.useForm<ReceiptFormValues>();
+  const listRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
+  const reviewRequestIdRef = useRef(0);
+  const currentUserIdRef = useRef(userId);
+  currentUserIdRef.current = userId;
+  const receiptAttemptRef = useRef<(ReceiptAttempt & { storageKey: string }) | null>(null);
   const STATUS_TABS: Array<{ k: string; l: string }> = [
     { k: 'all', l: '全部' },
     { k: 'PENDING', l: PAYMENT_STATUS_META.PENDING.label },
@@ -59,6 +141,7 @@ export default function PaymentReview() {
   ];
 
   const load = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setLoading(true);
     setLoadError(false);
     try {
@@ -68,63 +151,124 @@ export default function PaymentReview() {
         keyword: keyword || undefined,
       });
       const data = unwrapResponse<PaginatedResult<PaymentListItem>>(res);
+      if (requestId !== listRequestIdRef.current) return;
       setList(data?.list || []);
       setTotal(data?.total || 0);
     } catch {
+      if (requestId !== listRequestIdRef.current) return;
       setLoadError(true);
       setList([]);
+      setTotal(0);
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setLoading(false);
     }
   }, [page, pageSize, statusFilter, keyword]);
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    reviewRequestIdRef.current += 1;
+    setReviewOperation(null);
+    setReviewing(false);
+  }, [userId]);
+
   const openDetail = async (record: PaymentListItem) => {
+    const requestId = ++detailRequestIdRef.current;
     setDetail(record);
     setDetailLoading(true);
     try {
       const res = await paymentApi.getById(record.id);
+      if (requestId !== detailRequestIdRef.current) return;
       const full = unwrapResponse<PaymentListItem>(res);
       if (full) setDetail(full);
     } catch { /* 保留列表数据 */ } finally {
-      setDetailLoading(false);
+      if (requestId === detailRequestIdRef.current) setDetailLoading(false);
     }
   };
 
   const review = (payment: PaymentListItem, approved: boolean) => {
-    let reviewNote = '';
-    modal.confirm({
-      title: approved ? '确认已收到线下转账？' : '驳回该付款凭证？',
-      icon: null,
-      content: (
-        <div className="space-y-2">
-          <p className="text-sm text-brand-muted">订单 {payment.order.orderNo} · 金额 ¥{Number(payment.amount).toLocaleString()}</p>
-          <Input.TextArea placeholder="审核备注（可选，将记录到交易事件）" onChange={(event) => { reviewNote = event.target.value; }} rows={3} />
-        </div>
-      ),
-      okText: approved ? '确认收款' : '确认驳回',
-      okButtonProps: { danger: !approved },
-      onOk: async () => {
-        setReviewing(true);
-        try {
-          if (approved) {
-            await paymentApi.approve(payment.id, reviewNote || undefined);
-            message.success('已确认收款，订单进入待发货');
-          } else {
-            await paymentApi.reject(payment.id, reviewNote || undefined);
-            message.success('付款凭证已驳回');
-          }
-          await load();
-          if (detail?.id === payment.id) void openDetail(payment);
-        } catch (e: unknown) {
-          // 并发审核失败时后端返回明确中文错误（"该付款记录已被处理，请刷新后重试"）
-          message.error(getSafeAdminErrorMessage(e, '付款凭证审核未完成，请重新加载后确认当前状态。'));
-        } finally {
-          setReviewing(false);
+    setReviewOperation({ payment, approved, reviewNote: '', ownerId: userId });
+  };
+
+  const refreshAfterReview = async (payment: PaymentListItem) => {
+    await load();
+    if (detail?.id === payment.id) void openDetail(payment);
+  };
+
+  const reviewMatchesAuthority = (
+    authoritative: PaymentListItem,
+    operation: PaymentReviewOperation,
+  ) => {
+    const expectedStatuses = operation.approved
+      ? new Set(['PAID', 'PARTIAL_REFUND', 'REFUNDED'])
+      : new Set(['FAILED']);
+    return expectedStatuses.has(authoritative.status)
+      && authoritative.reviewedBy === operation.ownerId
+      && Boolean(authoritative.reviewedAt)
+      && normalizeReviewNote(authoritative.reviewNote)
+        === expectedReviewNote(operation);
+  };
+
+  const submitReview = async () => {
+    if (!reviewOperation) return;
+    const operation = reviewOperation;
+    if (operation.ownerId !== currentUserIdRef.current) {
+      setReviewOperation(null);
+      return;
+    }
+    const requestId = ++reviewRequestIdRef.current;
+    const note = normalizeReviewNote(operation.reviewNote);
+    setReviewing(true);
+    try {
+      if (operation.approved) {
+        await paymentApi.approve(operation.payment.id, note || undefined);
+      } else {
+        await paymentApi.reject(operation.payment.id, note || undefined);
+      }
+      if (
+        requestId !== reviewRequestIdRef.current
+        || operation.ownerId !== currentUserIdRef.current
+      ) return;
+      message.success(operation.approved
+        ? '已确认收款，请刷新订单核对当前付款与履约状态'
+        : '付款凭证已驳回');
+      setReviewOperation(null);
+      await refreshAfterReview(operation.payment);
+    } catch (error: unknown) {
+      if (
+        requestId !== reviewRequestIdRef.current
+        || operation.ownerId !== currentUserIdRef.current
+      ) return;
+      if (!isAmbiguousWriteFailure(error)) {
+        message.error(getSafeAdminErrorMessage(error, '付款凭证审核未完成，请重新加载后确认当前状态。'));
+        return;
+      }
+      try {
+        const response = await paymentApi.getById(operation.payment.id, { suppressGlobalError: true });
+        if (
+          requestId !== reviewRequestIdRef.current
+          || operation.ownerId !== currentUserIdRef.current
+        ) return;
+        const authoritative = unwrapResponse<PaymentListItem>(response);
+        if (authoritative && reviewMatchesAuthority(authoritative, operation)) {
+          message.success(operation.approved
+            ? '确认收款已写入并完成权威核验'
+            : '驳回结果已写入并完成权威核验');
+          setReviewOperation(null);
+          await refreshAfterReview(operation.payment);
+          return;
         }
-      },
-    });
+        if (authoritative?.status === 'PENDING') {
+          message.warning('权威付款仍处于待审核，本次审核确定未生效；审核备注已保留，可安全重试。');
+          return;
+        }
+        message.warning('付款审核结果与本次操作不一致；当前内容已保留，请先核对付款详情。');
+      } catch {
+        message.warning('付款审核结果待确认；当前内容已保留，请先重新读取付款详情，勿盲目重复操作。');
+      }
+    } finally {
+      if (requestId === reviewRequestIdRef.current) setReviewing(false);
+    }
   };
 
   // 掉单/对账工具：主动查渠道状态，核销逻辑与回调同源（服务端完成金额校验与幂等）。
@@ -161,20 +305,55 @@ export default function PaymentReview() {
     }
     setReceiptSubmitting(true);
     try {
-      await paymentApi.createReceipt({
+      const payload = {
         orderId: Number(values.orderId),
         amount: Number(values.amount),
         method: values.method,
         type: values.type,
         paidAt: values.paidAt ? values.paidAt.toISOString() : undefined,
-        gatewayTradeNo: values.gatewayTradeNo || undefined,
-        reviewNote: values.reviewNote || undefined,
+        gatewayTradeNo: values.gatewayTradeNo?.trim() || undefined,
+        reviewNote: values.reviewNote?.trim() || undefined,
+      };
+      const storageKey = receiptAttemptStorageKey(userId);
+      const fingerprint = await hashReceiptPayload(payload);
+      const storedAttempt = receiptAttemptRef.current?.storageKey === storageKey
+        ? receiptAttemptRef.current
+        : readReceiptAttempt(storageKey);
+      if (storedAttempt?.fingerprint !== fingerprint) {
+        const nextAttempt = {
+          fingerprint,
+          key: createReceiptIdempotencyKey(),
+          storageKey,
+        };
+        receiptAttemptRef.current = nextAttempt;
+      } else {
+        receiptAttemptRef.current = { ...storedAttempt, storageKey };
+      }
+      const persisted = writeReceiptAttempt(storageKey, {
+        fingerprint: receiptAttemptRef.current.fingerprint,
+        key: receiptAttemptRef.current.key,
       });
+      if (!persisted) {
+        receiptAttemptRef.current = null;
+        message.error('浏览器无法安全保存本次收款的重试凭据，系统未发送收款请求。请恢复会话存储后再试。');
+        return;
+      }
+      await paymentApi.createReceipt(payload, receiptAttemptRef.current.key);
       message.success('收款已登记，订单金额已同步');
+      clearReceiptAttempt(storageKey);
+      receiptAttemptRef.current = null;
       setReceiptOpen(false);
       void load();
     } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, '收款登记失败，请核对金额和付款信息后重试。'));
+      const status = (e as { status?: unknown; response?: { status?: unknown } })?.response?.status
+        ?? (e as { status?: unknown })?.status;
+      if (typeof status !== 'number' || status >= 500) {
+        message.warning('收款结果待确认；请保持当前内容不变并重试，系统会沿用同一凭据安全恢复。');
+      } else {
+        clearReceiptAttempt(receiptAttemptStorageKey(userId));
+        receiptAttemptRef.current = null;
+        message.error(getSafeAdminErrorMessage(e, '收款登记失败，请核对金额和付款信息后重试。'));
+      }
     } finally {
       setReceiptSubmitting(false);
     }
@@ -312,11 +491,44 @@ export default function PaymentReview() {
         {proofPaymentId !== null && <SecureImage src={`/payments/${proofPaymentId}/proof`} alt="付款凭证" className="w-full" tokenKind="staff" />}
       </Modal>
 
+      <Modal
+        open={reviewOperation !== null}
+        title={reviewOperation?.approved ? '确认已收到线下转账？' : '驳回该付款凭证？'}
+        okText={reviewOperation?.approved ? '确认收款' : '确认驳回'}
+        okButtonProps={{ danger: reviewOperation ? !reviewOperation.approved : false }}
+        confirmLoading={reviewing}
+        closable={!reviewing}
+        maskClosable={false}
+        onOk={() => void submitReview()}
+        onCancel={() => {
+          if (!reviewing) setReviewOperation(null);
+        }}
+      >
+        {reviewOperation ? (
+          <div className="space-y-2">
+            <p className="text-sm text-brand-muted">
+              订单 {reviewOperation.payment.order.orderNo} · 金额 ¥{Number(reviewOperation.payment.amount).toLocaleString()}
+            </p>
+            <Input.TextArea
+              placeholder="审核备注（可选，将记录到交易事件）"
+              value={reviewOperation.reviewNote}
+              onChange={(event) => setReviewOperation((current) => current
+                ? { ...current, reviewNote: event.target.value }
+                : current)}
+              rows={3}
+              disabled={reviewing}
+            />
+          </div>
+        ) : null}
+      </Modal>
+
       {/* 线下异常补录（定金/尾款/全款/补款）；在线支付不得进入此流程。 */}
       <Modal
         title="线下收款异常补录"
         open={receiptOpen}
-        onCancel={() => setReceiptOpen(false)}
+        onCancel={() => {
+          setReceiptOpen(false);
+        }}
         onOk={handleCreateReceipt}
         confirmLoading={receiptSubmitting}
         okText="确认补录"
@@ -355,7 +567,17 @@ export default function PaymentReview() {
       </Modal>
 
       {/* 详情抽屉 */}
-      <Drawer open={!!detail} onClose={() => setDetail(null)} width={520} title="付款详情" loading={detailLoading && !detail}>
+      <Drawer
+        open={!!detail}
+        onClose={() => {
+          detailRequestIdRef.current += 1;
+          setDetail(null);
+          setDetailLoading(false);
+        }}
+        width={520}
+        title="付款详情"
+        loading={detailLoading && !detail}
+      >
         {detail && (
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label="付款单号"><code className="text-xs text-brand-gold">{detail.paymentNo}</code></Descriptions.Item>

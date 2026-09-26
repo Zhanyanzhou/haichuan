@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { computeProductPublicationQualityHash } from "../modules/products/product-publication-quality-hash";
 import test from "node:test";
 import {
+  CONTENT_TEMPLATE_PAGE_KEYS,
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
   createContentTemplatePublicationAttestation,
 } from "../modules/page-modules/generated/contentTemplates.generated";
@@ -18,7 +20,7 @@ import {
 } from "./public-seo-snapshot-source";
 
 const NOW = new Date("2026-09-13T08:00:00.000Z");
-const PAGE_KEYS = ["home", "products", "catalog", "custom", "about", "contact"];
+const PAGE_KEYS = CONTENT_TEMPLATE_PAGE_KEYS;
 const LEGAL_SOURCE_HASHES = {
   privacy: "6".repeat(64),
   businessInfo: "7".repeat(64),
@@ -103,6 +105,14 @@ function settings(includeEnglish = false) {
     value: {
       siteName: "Haichuan Jewelry",
       canonicalBaseUrl: "https://shop.example.invalid",
+      brandPresentationMode: "text-only",
+      brandReviewReference: "brand-approved-3",
+      contactPhone: "400-123-4567",
+      contactEmail: "service@example.invalid",
+      contactAddress: "深圳市罗湖区珠宝园区",
+      businessHours: "周一至周六 10:00-18:00",
+      seoTitle: "海川珠宝",
+      seoDescription: "了解海川珠宝作品、高级定制与咨询服务。",
       seoReviewReference: "seo-approved-7",
       legalEntityReviewReference: `legal-approved-4|sha256:${LEGAL_SOURCE_HASHES.businessInfo}`,
       privacyPolicyReviewReference: `privacy-v2-approved|sha256:${LEGAL_SOURCE_HASHES.privacy}`,
@@ -168,29 +178,9 @@ const config = {
 const validatePage = async () => ({ valid: true });
 
 function qualityHash(product: any) {
-  return hash({
-    version: "p0-product-quality-v1",
-    code: product.code,
-    name: product.name,
-    shortDescription: product.shortDescription,
-    description: product.description,
-    detailContent: product.detailContent,
-    materialType: product.materialType,
-    goldWeight: product.goldWeight == null ? null : String(product.goldWeight),
-    weight: product.weight == null ? null : String(product.weight),
-    salesMode: product.salesMode,
-    inventoryPolicy: product.inventoryPolicy,
-    primaryImageId: product.primaryImage?.id ?? null,
-    listingImageId: product.listingImage?.id ?? null,
-    imageIds: product.images.map((image: any) => image.id).sort((a: number, b: number) => a - b),
-    skus: product.skus
-      .filter((sku: any) => sku.isActive)
-      .map((sku: any) => ({
-        id: sku.id,
-        price: String(sku.price),
-        goldWeight: sku.goldWeight == null ? null : String(sku.goldWeight),
-        inventoryRecords: sku.inventories.length,
-      })),
+  return computeProductPublicationQualityHash({
+    ...product,
+    skus: product.skus.filter((sku: any) => sku.isActive),
   });
 }
 
@@ -205,8 +195,25 @@ function product() {
     materialType: "GOLD_999",
     goldWeight: "8.20",
     weight: "8.20",
+    size: "圈口 14",
+    gemInfo: null,
+    craftTechnique: ["古法"],
     salesMode: "DISPLAY_ONLY",
     inventoryPolicy: "STANDARD",
+    fulfillmentType: "IN_STOCK",
+    dispatchTime: "WITHIN_48_HOURS",
+    deliveryMethods: ["STORE_PICKUP"],
+    requiresInsuredShipping: false,
+    requiresSignature: true,
+    includesCertificate: false,
+    packageType: null,
+    customLeadTime: null,
+    isHot: false,
+    isNew: false,
+    isRecommended: false,
+    isLimited: false,
+    isCustom: false,
+    shippingTemplate: null,
     status: "PUBLISHED",
     visibility: "PUBLIC",
     publicationQualityStatus: "READY",
@@ -236,8 +243,12 @@ function product() {
       },
     },
     listingImage: { id: 402 },
-    images: [{ id: 401 }, { id: 402 }],
-    skus: [{ id: 501, isActive: true, price: "9999", goldWeight: "8.20", inventories: [{ quantity: 1 }] }],
+    images: [
+      { id: 401, type: "FRONT", sortOrder: 0, mediaAssetId: 801, mediaAsset: { lifecycleRevision: 1, authorization: { revision: 3, publicUseEpoch: 2 } } },
+      { id: 402, type: "DETAIL", sortOrder: 1, mediaAssetId: null, mediaAsset: null },
+    ],
+    skus: [{ id: 501, isActive: true, material: "GOLD_999", size: "圈口 14", price: "9999", goldWeight: "8.20", inventories: [{ quantity: 1 }] }],
+    certificates: [],
     translations: [],
   };
   value.publicationQualityHash = qualityHash(value);
@@ -425,6 +436,45 @@ test("草稿、缺失审核、中文 fallback 与 hash 漂移均失败关闭", a
   await assert.rejects(() => createPublicSeoExportInput(fallback.value, config, validatePage, NOW), /NOT_PUBLISHED/);
 });
 
+test("静态 SEO 快照拒绝页面验证中的正式内容占位警告", async () => {
+  await assert.rejects(
+    () => createPublicSeoExportInput(
+      database().value,
+      config,
+      async (pageKey) => pageKey === "home"
+        ? {
+            valid: true,
+            issues: [{
+              severity: "warning",
+              message: "首页主视觉：标题“首页正在准备”仍是占位内容，请填写正式文案",
+            }],
+          }
+        : { valid: true, issues: [] },
+      NOW,
+    ),
+    /PAGE_home_zh-CN_PLACEHOLDER_CONTENT/,
+  );
+});
+
+test("静态 SEO 快照生成前复用正式站点准备度并拒绝占位事实", async () => {
+  const blockedSettings = settings();
+  blockedSettings.value.contactPhone = "正在完善";
+  blockedSettings.value.brandReviewReference = "";
+
+  await assert.rejects(
+    () => createPublicSeoExportInput(
+      database({ secondSettings: blockedSettings }).value,
+      config,
+      validatePage,
+      NOW,
+    ),
+    (error: unknown) => error instanceof Error
+      && error.message.startsWith("PUBLIC_SEO_EXPORT_SITE_PUBLICATION_READINESS_BLOCKED:")
+      && error.message.includes("BRAND_REVIEW_MISSING")
+      && error.message.includes("SITE_CONTACT_PHONE_PLACEHOLDER"),
+  );
+});
+
 test("商品投影重算质量 hash、要求公开主图授权且不泄漏内部字段", async () => {
   const value = product();
   value.skus.push({
@@ -443,6 +493,20 @@ test("商品投影重算质量 hash、要求公开主图授权且不泄漏内部
 
   value.publicationQualityHash = "0".repeat(64);
   await assert.rejects(() => createPublicSeoExportInput(database({ products: [value] }).value, config, validatePage, NOW), /QUALITY_HASH_DRIFT/);
+});
+
+test("静态 SEO 快照拒绝沿用图片类型或排序已变化的旧质量 hash", async () => {
+  for (const mutate of [
+    (value: any) => { value.images[0].type = "DETAIL"; },
+    (value: any) => { value.images[0].sortOrder = 9; },
+  ]) {
+    const value = product();
+    mutate(value);
+    await assert.rejects(
+      () => createPublicSeoExportInput(database({ products: [value] }).value, config, validatePage, NOW),
+      /QUALITY_HASH_DRIFT/,
+    );
+  }
 });
 
 test("当前页面校验器或商品分类不满足发布资格时失败关闭", async () => {

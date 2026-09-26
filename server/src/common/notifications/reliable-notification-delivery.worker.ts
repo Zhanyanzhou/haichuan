@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Optional } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { Prisma } from "@prisma/client";
@@ -11,6 +11,7 @@ import {
   SERVICE_NOTIFICATION_EVENT_TYPE,
 } from "./notification-delivery.constants";
 import { NotificationDeliveryPolicyService } from "./notification-delivery-policy.service";
+import { OperationalMetricsService } from "../observability/operational-metrics.service";
 
 const ORDER_EVENT_TYPE = SERVICE_NOTIFICATION_EVENT_TYPE;
 const SEND_STARTED = "SEND_STARTED";
@@ -60,7 +61,10 @@ export class ReliableNotificationDeliveryWorker {
     private readonly config: ConfigService,
     private readonly mailer: MailerService,
     private readonly deliveryPolicy: NotificationDeliveryPolicyService,
-  ) {}
+    @Optional() private readonly metrics?: OperationalMetricsService,
+  ) {
+    this.metrics?.registerWorker("notification_delivery", this.isEnabled());
+  }
 
   isEnabled() {
     return this.config.get<string>("NOTIFICATION_DELIVERY_ENABLED")
@@ -70,10 +74,17 @@ export class ReliableNotificationDeliveryWorker {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async scheduledDrain() {
-    if (!this.isEnabled() || this.draining) return;
+    const enabled = this.isEnabled();
+    this.metrics?.registerWorker("notification_delivery", enabled);
+    if (!enabled || this.draining) return;
     this.draining = true;
+    this.metrics?.recordWorkerRunStarted("notification_delivery");
     try {
       await this.drainOnce();
+      this.metrics?.recordWorkerRunCompleted("notification_delivery", "success");
+    } catch (error) {
+      this.metrics?.recordWorkerRunCompleted("notification_delivery", "failure");
+      throw error;
     } finally {
       this.draining = false;
     }
@@ -267,33 +278,30 @@ export class ReliableNotificationDeliveryWorker {
       return;
     }
 
-    const policy = await this.deliveryPolicy.evaluate(this.prisma, {
-      customerId: notification.customerId,
-      channel: "EMAIL",
-      topic: notification.type,
-    });
-    if (!policy.allowed) {
-      await this.suppress(event, emailDelivery.id, policy.reason);
+    let delivery:
+      | { kind: "result"; result: Awaited<ReturnType<MailerService["send"]>> }
+      | { kind: "suppress"; reason: string }
+      | { kind: "result_unknown" };
+    try {
+      delivery = await this.sendServiceNotificationWithCustomerLock(
+        event,
+        notification,
+        emailDelivery.destinationHash,
+        destination,
+      );
+    } catch {
+      await this.fail(event, "DELIVERY_RESULT_UNKNOWN", true, emailDelivery.id);
       return;
     }
-
-    const actionUrl = notification.actionUrl?.startsWith("/")
-      ? `${this.mailer.getSiteBaseUrl()}${notification.actionUrl}`
-      : null;
-    const result = await this.mailer.send(
-      {
-        to: destination,
-        subject: notification.title,
-        html: this.mailer.renderShell(`
-          <p>${escapeHtml(notification.body)}</p>
-          ${actionUrl ? `<p><a href="${escapeHtml(actionUrl)}">查看客户中心</a></p>` : ""}
-        `),
-      },
-      {
-        requireNotificationDeliveryEnabled: true,
-        idempotencyKey: `notification:event:${event.id}`,
-      },
-    );
+    if (delivery.kind === "suppress") {
+      await this.suppress(event, emailDelivery.id, delivery.reason);
+      return;
+    }
+    if (delivery.kind === "result_unknown") {
+      await this.fail(event, "DELIVERY_RESULT_UNKNOWN", true, emailDelivery.id);
+      return;
+    }
+    const { result } = delivery;
     if (result.delivered) {
       await this.completeSentDelivery(event, emailDelivery.id);
       return;
@@ -309,6 +317,83 @@ export class ReliableNotificationDeliveryWorker {
         ? "NOTIFICATION_DELIVERY_DISABLED"
         : "SMTP_SEND_FAILED";
     await this.fail(event, reason, false, emailDelivery.id);
+  }
+
+  /**
+   * 服务通知包含客户私有事实。发送前的普通读取无法阻止注销、联系方式换绑或偏好修改
+   * 在读取后、SMTP 接收前插队，因此这里用 customers 共享锁覆盖最后一次活动状态复核、
+   * 当前咨询邮箱解析、偏好复核和外部发送。认证写与注销沿同一 customers 首锁顺序
+   * 等待；若注销先提交，本事务拿不到 ACTIVE 客户并保持零外发。订单类服务通知
+   * 仍使用下单时冻结的交付邮箱；资料邮箱换绑不会自动改投或抑制该类交易通知。
+   */
+  private async sendServiceNotificationWithCustomerLock(
+    event: ClaimedEvent,
+    notification: {
+      customerId: number;
+      type: string;
+      title: string;
+      body: string;
+      actionUrl: string | null;
+    },
+    destinationHash: string | null,
+    frozenDestination: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const customers = await tx.$queryRaw<Array<{ id: number; email: string | null }>>(
+        Prisma.sql`SELECT id, email FROM customers WHERE id = ${notification.customerId} AND status = 'ACTIVE' FOR SHARE`,
+      );
+      const customer = customers[0];
+      if (!customer) {
+        return { kind: "suppress", reason: "DESTINATION_UNAVAILABLE" } as const;
+      }
+
+      // 咨询回复绑定账户当前邮箱；订单类通知保留下单时的交付邮箱合同。
+      const destination = notification.type === "SERVICE_CONSULTATION_REPLIED"
+        ? customer.email?.trim().toLowerCase() || null
+        : frozenDestination;
+      if (!destination || destinationHash !== emailHash(destination)) {
+        return { kind: "suppress", reason: "DESTINATION_UNAVAILABLE" } as const;
+      }
+
+      // 所有客户侧偏好写入都先锁同一 customer 行；在共享锁持有期间复核，
+      // 可防止偏好关闭在复核后、SMTP 开始前插队。
+      const policy = await this.deliveryPolicy.evaluate(tx, {
+        customerId: notification.customerId,
+        channel: "EMAIL",
+        topic: notification.type,
+      });
+      if (!policy.allowed) {
+        return { kind: "suppress", reason: policy.reason } as const;
+      }
+
+      const actionUrl = notification.actionUrl?.startsWith("/")
+        ? `${this.mailer.getSiteBaseUrl()}${notification.actionUrl}`
+        : null;
+      try {
+        const result = await this.mailer.send(
+          {
+            to: destination,
+            subject: notification.title,
+            html: this.mailer.renderShell(`
+              <p>${escapeHtml(notification.body)}</p>
+              ${actionUrl ? `<p><a href="${escapeHtml(actionUrl)}">查看客户中心</a></p>` : ""}
+            `),
+          },
+          {
+            requireNotificationDeliveryEnabled: true,
+            idempotencyKey: `notification:event:${event.id}`,
+          },
+        );
+        return { kind: "result", result } as const;
+      } catch {
+        // SMTP 或适配器若已受理后抛错，不能证明未发送；终止自动重投。
+        return { kind: "result_unknown" } as const;
+      }
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      maxWait: 5_000,
+      timeout: 20_000,
+    });
   }
 
   private async processLeadReply(event: ClaimedEvent) {
@@ -399,7 +484,9 @@ export class ReliableNotificationDeliveryWorker {
         },
       );
     } catch {
-      await this.fail(event, "SMTP_SEND_FAILED", false);
+      // MailerService 合同会把确定拒绝和结果未知转换为返回值；若未来适配器或
+      // 运行时违约直接抛错，这里无法证明 SMTP 尚未受理，必须按结果未知终止重放。
+      await this.fail(event, "DELIVERY_RESULT_UNKNOWN", true);
       return;
     }
     if (result.delivered) {

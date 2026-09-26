@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { OutboxService } from "../outbox/outbox.service";
@@ -43,6 +43,13 @@ function moneyText(cents: number): string {
   return `¥${(cents / 100).toFixed(2)}`;
 }
 
+function customerOrderActionUrl(orderId: number): string {
+  if (!Number.isSafeInteger(orderId) || orderId <= 0) {
+    throw new TypeError("Order notification requires a positive integer order id");
+  }
+  return `/customer?section=orders&orderId=${orderId}`;
+}
+
 @Injectable()
 export class ReliableNotificationIntentService {
   constructor(
@@ -62,7 +69,7 @@ export class ReliableNotificationIntentService {
       type: "SERVICE_ORDER_CREATED",
       title: "订单已创建",
       body: `订单 ${order.orderNo} 已创建，应付金额 ${moneyText(finalCents)}。`,
-      actionUrl: "/customer?section=orders",
+      actionUrl: customerOrderActionUrl(order.id),
       destinationEmail: order.customerEmail,
       payload: { orderId: order.id },
       outboxPayload: { orderId: order.id },
@@ -85,7 +92,7 @@ export class ReliableNotificationIntentService {
       type: "SERVICE_PAYMENT_CONFIRMED",
       title: "付款已确认",
       body: `订单 ${payment.orderNo} 本次确认收款 ${moneyText(paymentCents)}，累计已收 ${moneyText(payment.cumulativePaidCents)}，剩余应收 ${moneyText(remainingCents)}。`,
-      actionUrl: "/customer?section=orders",
+      actionUrl: customerOrderActionUrl(payment.id),
       destinationEmail: payment.customerEmail,
       payload: {
         orderId: payment.id,
@@ -128,7 +135,7 @@ export class ReliableNotificationIntentService {
       type: `SERVICE_ORDER_${input.event}`,
       title: content.title,
       body: content.body,
-      actionUrl: "/customer?section=orders",
+      actionUrl: customerOrderActionUrl(order.id),
       destinationEmail: order.customerEmail,
       payload: {
         orderId: order.id,
@@ -152,7 +159,7 @@ export class ReliableNotificationIntentService {
       type: "SERVICE_REFUND_COMPLETED",
       title: "退款已完成",
       body: `订单 ${order.orderNo} 的退款 ${refund.refundNo} 已完成，金额 ${moneyText(amountCents)}。`,
-      actionUrl: "/customer?section=orders",
+      actionUrl: customerOrderActionUrl(order.id),
       destinationEmail: order.customerEmail,
       payload: { orderId: order.id, refundId: refund.id },
       outboxPayload: { orderId: order.id },
@@ -174,13 +181,16 @@ export class ReliableNotificationIntentService {
       where: { id: input.customerId },
       select: { email: true, status: true },
     });
+    if (!customer || customer.status !== "ACTIVE") {
+      throw new ConflictException("客户账户已停用，不能创建咨询回复通知");
+    }
     return this.createServiceIntent(tx, {
       customerId: input.customerId,
       type: "SERVICE_CONSULTATION_REPLIED",
       title: "顾问已回复您的咨询",
       body: "您的咨询已有新的顾问回复，请登录客户中心查看。",
       actionUrl: `/customer?section=consultations&leadId=${input.leadId}`,
-      destinationEmail: customer?.status === "ACTIVE" ? customer.email : null,
+      destinationEmail: customer.email,
       payload: {
         leadId: input.leadId,
         activityId: input.activityId,

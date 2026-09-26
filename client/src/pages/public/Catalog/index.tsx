@@ -41,6 +41,10 @@ import {
   type URLParamKey,
 } from "./catalogQuery";
 import { catalogTokens as T } from "./catalogTokens";
+import {
+  completeCatalogReturnContext,
+  readCatalogReturnContext,
+} from "./catalogReturnContext";
 
 const DESKTOP_HEADER_H = 108;
 const PAGE_SIZE = 32;
@@ -66,7 +70,8 @@ function Pagination({
     else if (pages[pages.length - 1] !== "...") pages.push("...");
   }
   return (
-    <div
+    <nav
+      aria-label="作品分页"
       style={{
         maxWidth: 1560,
         marginInline: "auto",
@@ -77,7 +82,7 @@ function Pagination({
         gap: 4,
       }}
     >
-      <PBtn disabled={page === 1} onClick={() => onPage(page - 1)}>
+      <PBtn ariaLabel="上一页" disabled={page === 1} onClick={() => onPage(page - 1)}>
         ‹
       </PBtn>
       {pages.map((p, i) =>
@@ -94,10 +99,10 @@ function Pagination({
           </PBtn>
         ),
       )}
-      <PBtn disabled={page === tp} onClick={() => onPage(page + 1)}>
+      <PBtn ariaLabel="下一页" disabled={page === tp} onClick={() => onPage(page + 1)}>
         ›
       </PBtn>
-    </div>
+    </nav>
   );
 }
 
@@ -106,16 +111,21 @@ function PBtn({
   active,
   disabled,
   onClick,
+  ariaLabel,
 }: {
   children: React.ReactNode;
   active?: boolean;
   disabled?: boolean;
   onClick: () => void;
+  ariaLabel?: string;
 }) {
   return (
     <button
+      type="button"
       disabled={disabled}
       onClick={onClick}
+      aria-label={ariaLabel}
+      aria-current={active ? "page" : undefined}
       style={{
         minWidth: 44,
         minHeight: 44,
@@ -219,8 +229,12 @@ export default function Catalog({
 }: CatalogProps = {}) {
   const { message } = AntdApp.useApp();
   const location = useLocation();
-  const { flags: commerceFlags, loading: commerceFlagsLoading } =
-    useCommerceCapabilities();
+  const {
+    flags: commerceFlags,
+    loading: commerceFlagsLoading,
+    error: commerceFlagsError,
+    reload: reloadCommerceFlags,
+  } = useCommerceCapabilities();
   const commerceAllowed =
     !commerceFlagsLoading &&
     commerceFlags?.commerceEnabled === true &&
@@ -245,6 +259,9 @@ export default function Catalog({
   const [quickView, setQuickView] = useState<CatalogProduct | null>(null);
   const filterTriggerRef = useRef<HTMLElement | null>(null);
   const quickViewTriggerRef = useRef<HTMLElement | null>(null);
+  const resultsRef = useRef<HTMLElement | null>(null);
+  const pendingPageFocusRef = useRef<number | null>(null);
+  const pendingCatalogReturnRef = useRef<ReturnType<typeof readCatalogReturnContext>>(null);
   const closeFilter = useCallback(() => setFilterOpen(false), []);
   const closeQuickView = useCallback(() => setQuickView(null), []);
 
@@ -329,12 +346,15 @@ export default function Catalog({
     error: productsError,
     reload: reloadProducts,
     revision: catalogRevision,
+    queryKey: catalogQueryKey,
+    dataQueryKey: catalogDataQueryKey,
   } = useProductData(catalogQuery, {
     loadCategories: false,
     refreshKey: catalogAudience,
   });
   const apiLoading = productsLoading || (Boolean(categoryTarget) && categoriesLoading);
   const apiError = productsError || (categoryTarget ? categoriesError : null);
+  const catalogResponseCurrent = catalogDataQueryKey === catalogQueryKey;
   const tp = Math.ceil(total / PAGE_SIZE);
   const sizeOptions = facets.sizes;
 
@@ -411,8 +431,143 @@ export default function Catalog({
     : 0;
 
   useEffect(() => {
-    if (!apiLoading && params.page > tp && tp > 0) update("page", String(tp));
+    if (!apiLoading && params.page > tp && tp > 0) {
+      update("page", String(tp), { replace: true });
+    }
   }, [apiLoading, tp, params.page, update]);
+
+  const currentCatalogUrl = `${location.pathname}${location.search}${location.hash}`;
+  const catalogUrlForDetail = editorPreview ? null : currentCatalogUrl;
+
+  useEffect(() => {
+    if (
+      editorPreview
+      || apiLoading
+      || apiError
+      || !catalogResponseCurrent
+      || (tp > 0 && params.page > tp)
+    ) {
+      return;
+    }
+    if (!pendingCatalogReturnRef.current) {
+      pendingCatalogReturnRef.current = readCatalogReturnContext(currentCatalogUrl);
+    }
+    const returnContext = pendingCatalogReturnRef.current;
+    if (!returnContext) return;
+
+    let focusFrame = 0;
+    let mutationFocusFrame = 0;
+    let settleTimer = 0;
+    let mutationObserver: MutationObserver | null = null;
+    const cancelOnInteraction = () => {
+      completeCatalogReturnContext(returnContext);
+      pendingCatalogReturnRef.current = null;
+      if (settleTimer) window.clearTimeout(settleTimer);
+      mutationObserver?.disconnect();
+    };
+    window.addEventListener("pointerdown", cancelOnInteraction, { capture: true, once: true });
+    window.addEventListener("keydown", cancelOnInteraction, { capture: true, once: true });
+
+    const resolveFocusTarget = () => {
+      const results = resultsRef.current;
+      if (!results) return null;
+      const productCell = results.querySelector<HTMLElement>(
+        `[data-catalog-product-id="${returnContext.productId}"]`,
+      );
+      // 旧索引只描述离开目录时的快照位置。原作品下架、权限变化或结果重排后，
+      // 同一索引可能已属于另一作品，不能把返回焦点错误交给无关项目。
+      if (!productCell) return results;
+      const preferredSelector = returnContext.focusTarget === "quick-view"
+        ? "[data-catalog-product-focus]"
+        : "[data-catalog-detail-entry]";
+      const fallbackSelector = returnContext.focusTarget === "quick-view"
+        ? "[data-catalog-detail-entry]"
+        : "[data-catalog-product-focus]";
+      return productCell?.querySelector<HTMLElement>(preferredSelector)
+        || productCell?.querySelector<HTMLElement>(fallbackSelector)
+        || results;
+    };
+    const scrollFrame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: returnContext.scrollY, behavior: "auto" });
+      focusFrame = window.requestAnimationFrame(() => {
+        const focusTarget = resolveFocusTarget();
+        if (!focusTarget || pendingCatalogReturnRef.current !== returnContext) return;
+        focusTarget.focus({ preventScroll: true });
+        const results = resultsRef.current;
+        if (results && typeof window.MutationObserver === "function") {
+          mutationObserver = new window.MutationObserver(() => {
+            if (pendingCatalogReturnRef.current !== returnContext) return;
+            if (mutationFocusFrame) window.cancelAnimationFrame(mutationFocusFrame);
+            mutationFocusFrame = window.requestAnimationFrame(() => {
+              resolveFocusTarget()?.focus({ preventScroll: true });
+            });
+          });
+          mutationObserver.observe(results, { childList: true, subtree: true });
+        }
+        // 身份/能力读取可能在目录首帧后再替换结果节点。只有经历短暂稳定期且
+        // 用户没有开始新的键盘或指针操作，才消费本次恢复上下文。
+        settleTimer = window.setTimeout(() => {
+          if (pendingCatalogReturnRef.current !== returnContext) return;
+          const settledTarget = resolveFocusTarget();
+          settledTarget?.focus({ preventScroll: true });
+          completeCatalogReturnContext(returnContext);
+          pendingCatalogReturnRef.current = null;
+          mutationObserver?.disconnect();
+        }, 1_500);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(scrollFrame);
+      if (focusFrame) window.cancelAnimationFrame(focusFrame);
+      if (mutationFocusFrame) window.cancelAnimationFrame(mutationFocusFrame);
+      if (settleTimer) window.clearTimeout(settleTimer);
+      mutationObserver?.disconnect();
+      window.removeEventListener("pointerdown", cancelOnInteraction, { capture: true });
+      window.removeEventListener("keydown", cancelOnInteraction, { capture: true });
+    };
+  }, [
+    apiError,
+    apiLoading,
+    catalogResponseCurrent,
+    currentCatalogUrl,
+    editorPreview,
+    params.page,
+    tp,
+  ]);
+
+  useEffect(() => {
+    const pendingPage = pendingPageFocusRef.current;
+    if (
+      editorPreview
+      || pendingPage === null
+      || pendingPage !== params.page
+      || apiLoading
+      || apiError
+      || !catalogResponseCurrent
+    ) {
+      return;
+    }
+    pendingPageFocusRef.current = null;
+    const frame = window.requestAnimationFrame(() => {
+      const results = resultsRef.current;
+      if (!results) return;
+      results.scrollIntoView({ block: "start", behavior: "auto" });
+      results.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    apiError,
+    apiLoading,
+    catalogResponseCurrent,
+    editorPreview,
+    params.page,
+  ]);
+
+  const goToPage = useCallback((page: number) => {
+    if (page === params.page) return;
+    pendingPageFocusRef.current = page;
+    update("page", String(page));
+  }, [params.page, update]);
   const [stickyVisible, setStickyVisible] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -702,6 +857,14 @@ export default function Catalog({
         .catalog-toolbar__inner {
           gap: 20px;
         }
+        .catalog-recovery-target {
+          box-sizing: border-box;
+          display: inline-flex !important;
+          min-width: 44px;
+          min-height: 44px;
+          align-items: center;
+          justify-content: center;
+        }
         @media (max-width: 900px) {
           .catalog-page__discovery-main {
             grid-template-columns: minmax(240px, .72fr) minmax(360px, 1fr);
@@ -883,9 +1046,13 @@ export default function Catalog({
           分类筛选暂时无法加载，作品列表仍可浏览。
           <button
             type="button"
+            className="catalog-recovery-target"
             onClick={reloadCategories}
             style={{
               marginLeft: 12,
+              minHeight: 44,
+              display: "inline-flex",
+              alignItems: "center",
               border: 0,
               borderBottom: `1px solid ${T.txt}`,
               background: "none",
@@ -897,9 +1064,58 @@ export default function Catalog({
           </button>
         </div>
       ) : null}
+      {!editorPreview
+      && commerceFlagsError
+      && mergedProducts.some((product) =>
+        product.salesMode === "DIRECT_PURCHASE"
+        && product.isAvailableForPurchase === true
+      ) ? (
+        <div
+          role="alert"
+          aria-live="polite"
+          style={{
+            margin: "20px auto 0",
+            maxWidth: 1560,
+            paddingInline: "clamp(24px,5vw,80px)",
+            color: T.sec,
+            fontSize: 13,
+          }}
+        >
+          购买状态暂时无法确认，作品仍可继续浏览。
+          <button
+            type="button"
+            className="catalog-recovery-target"
+            onClick={() => void reloadCommerceFlags()}
+            style={{
+              marginLeft: 12,
+              minHeight: 44,
+              display: "inline-flex",
+              alignItems: "center",
+              border: 0,
+              borderBottom: `1px solid ${T.txt}`,
+              background: "none",
+              color: T.txt,
+              cursor: "pointer",
+            }}
+          >
+            重新检查购买状态
+          </button>
+        </div>
+      ) : null}
+      <section
+        ref={resultsRef}
+        tabIndex={-1}
+        aria-label="作品结果"
+        aria-busy={apiLoading}
+        style={{ scrollMarginTop: DESKTOP_HEADER_H + 16 }}
+      >
       {apiLoading ? (
         <div
           className="catalog-state"
+          role="status"
+          aria-label="正在加载珠宝作品…"
+          aria-live="polite"
+          aria-busy="true"
           style={{
             textAlign: "center",
             paddingBlock: 80,
@@ -930,6 +1146,7 @@ export default function Catalog({
           <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
             <button
               type="button"
+              className="catalog-recovery-target"
               onClick={() => {
                 reloadProducts();
                 if (categoriesError) reloadCategories();
@@ -946,7 +1163,8 @@ export default function Catalog({
               重新加载
             </button>
             <Link
-              to="/contact"
+              to="/contact?type=product"
+              className="catalog-recovery-target"
               style={{
                 border: `1px solid ${T.txt}`,
                 padding: "8px 20px",
@@ -955,7 +1173,7 @@ export default function Catalog({
                 textDecoration: "none",
               }}
             >
-              预约咨询
+              提交选款需求
             </Link>
           </div>
         </div>
@@ -976,6 +1194,7 @@ export default function Catalog({
                 没有符合当前筛选的作品
               </p>
               <button
+                className="catalog-recovery-target"
                 onClick={clearAll}
                 style={{
                   background: "none",
@@ -1003,10 +1222,11 @@ export default function Catalog({
                   marginInline: "auto",
                 }}
               >
-                当前暂无已上架作品，欢迎预约咨询，顾问将为您推荐最新臻品。
+                当前暂无已上架作品。您仍可提交选款需求，具体建议与安排以实际沟通为准。
               </p>
               <Link
-                to="/contact"
+                to="/contact?type=product"
+                className="catalog-recovery-target"
                 style={{
                   display: "inline-flex",
                   minHeight: 44,
@@ -1019,7 +1239,7 @@ export default function Catalog({
                   letterSpacing: "0.08em",
                 }}
               >
-                预约咨询
+                提交选款需求
               </Link>
             </>
           )}
@@ -1028,16 +1248,19 @@ export default function Catalog({
         <ProductGrid
           products={mergedProducts}
           commerceAllowed={commerceAllowed}
+          catalogUrl={catalogUrlForDetail}
+          startIndex={(params.page - 1) * PAGE_SIZE}
           onQuickView={(product, trigger) => {
             quickViewTriggerRef.current = trigger;
             setQuickView(product);
           }}
         />
       )}
+      </section>
       <Pagination
         total={total}
         page={params.page}
-        onPage={(p) => update("page", String(p))}
+        onPage={goToPage}
       />
       {quickView && (
         <QuickView
@@ -1045,6 +1268,11 @@ export default function Catalog({
           onClose={closeQuickView}
           returnFocusRef={quickViewTriggerRef}
           commerceAllowed={commerceAllowed}
+          productIndex={
+            (params.page - 1) * PAGE_SIZE
+            + Math.max(0, mergedProducts.findIndex((product) => product.id === quickView.id))
+          }
+          catalogUrl={catalogUrlForDetail}
         />
       )}
       {filterOpen && (

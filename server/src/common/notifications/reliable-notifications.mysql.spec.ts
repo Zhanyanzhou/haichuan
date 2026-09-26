@@ -13,16 +13,18 @@ import { ReliableNotificationDeliveryWorker } from "./reliable-notification-deli
 import { ReliableNotificationOperationsController } from "./reliable-notification-operations.controller";
 import { ReliableNotificationOperationsService } from "./reliable-notification-operations.service";
 import { NotificationDeliveryPolicyService } from "./notification-delivery-policy.service";
+import { IdempotencyService } from "../idempotency/idempotency-key";
 
 const { validateTarget } = require("../../../scripts/run-real-mysql-tests.cjs");
 const databaseUrl = process.env.REAL_MYSQL_TEST_DATABASE_URL;
 
 test(
-  "真实 MySQL：通知意图原子去重、并发领取、幂等发送、退避与终止",
+  "真实 MySQL：通知意图原子去重、并发领取、幂等发送、退避、终止与发送期客户锁",
   { skip: databaseUrl ? false : "需要显式提供一次性 REAL_MYSQL_TEST_DATABASE_URL" },
   async () => {
     assert.equal(databaseUrl, validateTarget(process.env));
     const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
+    const control = new PrismaClient({ datasourceUrl: databaseUrl });
     const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
     const customer = await prisma.customer.create({
       data: {
@@ -70,6 +72,7 @@ test(
       prisma.order.create({ data: orderData(2) }),
       prisma.order.create({ data: orderData(3) }),
       prisma.order.create({ data: orderData(4) }),
+      prisma.order.create({ data: orderData(5) }),
     ]);
     const policy = new NotificationDeliveryPolicyService();
     const service = new ReliableNotificationIntentService(new OutboxService(), policy);
@@ -263,7 +266,10 @@ test(
       assert.equal(failedDelivery.attempts, 5);
       assert.equal(failedDelivery.nextAttemptAt, null);
 
-      const operations = new ReliableNotificationOperationsService(prisma as never);
+      const operations = new ReliableNotificationOperationsService(
+        prisma as never,
+        new IdempotencyService(),
+      );
       const originalJwtCanActivate = JwtAuthGuard.prototype.canActivate;
       JwtAuthGuard.prototype.canActivate = function (context) {
         context.switchToHttp().getRequest().user = {
@@ -304,16 +310,26 @@ test(
         assert.equal(failureSummary?.retryable, true);
         assert.equal("payload" in (failureSummary || {}), false);
 
-        const retryResponse = await fetch(
-          `http://127.0.0.1:${operationsPort}/api/notification-operations/failures/${failingEvent.id}/retry`,
-          { method: "POST" },
-        );
-        assert.equal(retryResponse.status, 201);
-        assert.deepEqual(await retryResponse.json(), {
+        const retryUrl = `http://127.0.0.1:${operationsPort}/api/notification-operations/failures/${failingEvent.id}/retry`;
+        const retryIdempotencyKey = `notification-retry-${suffix}`;
+        const retryResponses = await Promise.all([
+          fetch(retryUrl, {
+            method: "POST",
+            headers: { "Idempotency-Key": retryIdempotencyKey },
+          }),
+          fetch(retryUrl, {
+            method: "POST",
+            headers: { "Idempotency-Key": retryIdempotencyKey },
+          }),
+        ]);
+        assert.deepEqual(retryResponses.map(({ status }) => status), [201, 201]);
+        const retryBodies = await Promise.all(retryResponses.map((response) => response.json()));
+        assert.deepEqual(retryBodies[0], {
           eventId: failingEvent.id,
           notificationId: failedNotificationId,
           status: "PENDING",
         });
+        assert.deepEqual(retryBodies[1], retryBodies[0]);
       } finally {
         await operationsApp.close();
         JwtAuthGuard.prototype.canActivate = originalJwtCanActivate;
@@ -405,6 +421,97 @@ test(
         (await prisma.outboxEvent.findUniqueOrThrow({ where: { id: suppressedEvent.id } })).status,
         "PROCESSED",
       );
+
+      await prisma.$transaction((tx) => service.enqueueOrderLifecycle(tx, {
+        id: orders[4].id,
+        orderNo: orders[4].orderNo,
+        customerId: customer.id,
+        customerEmail: customer.email,
+        finalAmount: orders[4].finalAmount,
+      }, {
+        event: "SHIPPED",
+        fulfillmentId: orders[4].id,
+        carrier: "LOCK-PROOF",
+        trackingNo: `LOCK${suffix}`,
+      }));
+      const lockingEvent = await prisma.outboxEvent.findUniqueOrThrow({
+        where: { deduplicationKey: `order.shipped:${orders[4].id}` },
+      });
+      const lockingNotificationId = Number(
+        (lockingEvent.payload as Record<string, unknown>).notificationId,
+      );
+      let signalSendStarted!: () => void;
+      let releaseSend!: () => void;
+      const sendStarted = new Promise<void>((resolve) => {
+        signalSendStarted = resolve;
+      });
+      const sendReleased = new Promise<void>((resolve) => {
+        releaseSend = resolve;
+      });
+      const lockingWorker = new ReliableNotificationDeliveryWorker(
+        prisma as never,
+        enabledConfig as never,
+        {
+          getSiteBaseUrl: () => "http://127.0.0.1",
+          renderShell: (html: string) => html,
+          send: async () => {
+            signalSendStarted();
+            await sendReleased;
+            return { delivered: true };
+          },
+        } as never,
+        policy,
+      );
+      const drainWithLock = lockingWorker.drainOnce(1);
+      let sendStartTimeout: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([
+          sendStarted,
+          new Promise<never>((_, reject) => {
+            sendStartTimeout = setTimeout(
+              () => reject(new Error("通知 Worker 未进入受客户锁保护的 SMTP 发送")),
+              5_000,
+            );
+          }),
+        ]);
+      } finally {
+        if (sendStartTimeout) clearTimeout(sendStartTimeout);
+      }
+      let identityWriteSettled = false;
+      const identityWrite = control.customer.update({
+        where: { id: customer.id },
+        data: { status: "DISABLED", authVersion: { increment: 1 } },
+      }).then(() => {
+        identityWriteSettled = true;
+      });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.equal(
+          identityWriteSettled,
+          false,
+          "SMTP 仍在途时客户认证状态写入必须等待共享锁释放",
+        );
+      } finally {
+        releaseSend();
+      }
+      await drainWithLock;
+      await identityWrite;
+      assert.equal(identityWriteSettled, true);
+      assert.equal(
+        (await prisma.notificationDelivery.findUniqueOrThrow({
+          where: {
+            notificationId_channel: {
+              notificationId: lockingNotificationId,
+              channel: "EMAIL",
+            },
+          },
+        })).status,
+        "SENT",
+      );
+      assert.equal(
+        (await prisma.customer.findUniqueOrThrow({ where: { id: customer.id } })).status,
+        "DISABLED",
+      );
     } finally {
       const notifications = await prisma.notification.findMany({
         where: { customerId: customer.id },
@@ -427,7 +534,7 @@ test(
       await prisma.operationLog.deleteMany({ where: { userId: admin.id } });
       await prisma.user.delete({ where: { id: admin.id } });
       await prisma.customer.delete({ where: { id: customer.id } });
-      await prisma.$disconnect();
+      await Promise.all([prisma.$disconnect(), control.$disconnect()]);
     }
   },
 );

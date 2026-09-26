@@ -2,6 +2,11 @@ import * as assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { Prisma } from "@prisma/client";
+import { MailerService } from "../mailer/mailer.service";
+import {
+  createLoopbackSmtpConfig,
+  startLoopbackSmtpSandbox,
+} from "../mailer/smtp-loopback-sandbox.test-support";
 import { OutboxService } from "../outbox/outbox.service";
 import { ReliableNotificationIntentService } from "./reliable-notification-intent.service";
 import { ReliableNotificationDeliveryWorker } from "./reliable-notification-delivery.worker";
@@ -85,6 +90,10 @@ test("可靠通知：订单创建原子生成站内事实、邮件意图和无 P
   assert.equal(harness.notifications[0].type, "SERVICE_ORDER_CREATED");
   assert.equal(harness.notifications[0].locale, "ZH_CN");
   assert.equal(harness.notifications[0].status, "AVAILABLE");
+  assert.equal(
+    harness.notifications[0].actionUrl,
+    "/customer?section=orders&orderId=11",
+  );
   assert.deepEqual(
     harness.deliveries.map((delivery) => delivery.channel),
     ["IN_APP", "EMAIL"],
@@ -138,6 +147,10 @@ test("可靠通知：每笔支付确认使用 paymentId 去重并记录累计与
   assert.equal(harness.notifications[0].type, "SERVICE_PAYMENT_CONFIRMED");
   assert.match(harness.notifications[0].body, /本次确认收款 ¥30\.00/);
   assert.match(harness.notifications[0].body, /剩余应收 ¥70\.00/);
+  assert.equal(
+    harness.notifications[0].actionUrl,
+    "/customer?section=orders&orderId=12",
+  );
   assert.deepEqual(harness.deliveries.map((delivery) => delivery.channel), ["IN_APP"]);
   assert.equal(harness.outboxEvents[0].deduplicationKey, "payment.confirmed:91");
   assert.deepEqual(harness.outboxEvents[0].payload, {
@@ -169,6 +182,10 @@ test("可靠通知：订单生命周期事件复用统一意图并按履约单�
     ["DELIVERED", "PENDING"],
   );
   assert.equal(harness.outboxEvents[0].deduplicationKey, "order.shipped:31");
+  assert.equal(
+    harness.notifications[0].actionUrl,
+    "/customer?section=orders&orderId=15",
+  );
   assert.deepEqual(harness.outboxEvents[0].payload, {
     notificationId: 1,
     orderId: 15,
@@ -191,6 +208,10 @@ test("可靠通知：退款完成意图包含退款事实并按 refundId 去重"
 
   assert.equal(harness.notifications[0].type, "SERVICE_REFUND_COMPLETED");
   assert.match(harness.notifications[0].body, /REF-41.*¥18\.80/);
+  assert.equal(
+    harness.notifications[0].actionUrl,
+    "/customer?section=orders&orderId=16",
+  );
   assert.equal(harness.outboxEvents[0].deduplicationKey, "refund.completed:41");
   assert.deepEqual(harness.outboxEvents[0].payload, {
     notificationId: 1,
@@ -212,6 +233,22 @@ test("可靠通知：Outbox 写入失败会向上抛出以回滚业务事务", a
   );
 });
 
+test("可靠通知：非正整数订单 ID 不会生成客户定位链接", async () => {
+  const harness = createIntentHarness();
+  await assert.rejects(
+    () => harness.service.enqueueOrderCreated(harness.tx, {
+      id: 0,
+      orderNo: "ORD-INVALID",
+      customerId: 9,
+      customerEmail: null,
+      finalAmount: 50,
+    }),
+    /positive integer order id/,
+  );
+  assert.equal(harness.notifications.length, 0);
+  assert.equal(harness.outboxEvents.length, 0);
+});
+
 test("可靠通知：外部投递开关缺失时 worker 不访问数据库", async () => {
   let touched = false;
   const worker = new ReliableNotificationDeliveryWorker(
@@ -228,6 +265,55 @@ test("可靠通知：外部投递开关缺失时 worker 不访问数据库", asy
   assert.equal(worker.isEnabled(), false);
   assert.equal(await worker.drainOnce(), 0);
   assert.equal(touched, false);
+});
+
+test("可靠通知：定时空轮询也记录消费者成功心跳", async () => {
+  const telemetry: string[] = [];
+  const prisma = {
+    $transaction: async (operation: (tx: unknown) => Promise<unknown>) => operation({
+      $queryRaw: async () => [],
+    }),
+  };
+  const metrics = {
+    registerWorker: (_worker: string, enabled: boolean) => telemetry.push(`register:${enabled}`),
+    recordWorkerRunStarted: () => telemetry.push("started"),
+    recordWorkerRunCompleted: (_worker: string, outcome: string) => telemetry.push(`completed:${outcome}`),
+  };
+  const worker = new ReliableNotificationDeliveryWorker(
+    prisma as never,
+    { get: () => "true" } as never,
+    {} as never,
+    allowAllNotificationPolicy,
+    metrics as never,
+  );
+
+  await worker.scheduledDrain();
+
+  assert.deepEqual(telemetry, [
+    "register:true",
+    "register:true",
+    "started",
+    "completed:success",
+  ]);
+});
+
+test("可靠通知：定时轮询异常记录失败后继续交给调度器处理", async () => {
+  const telemetry: string[] = [];
+  const metrics = {
+    registerWorker: () => undefined,
+    recordWorkerRunStarted: () => telemetry.push("started"),
+    recordWorkerRunCompleted: (_worker: string, outcome: string) => telemetry.push(`completed:${outcome}`),
+  };
+  const worker = new ReliableNotificationDeliveryWorker(
+    { $transaction: async () => { throw new Error("queue unavailable"); } } as never,
+    { get: () => "true" } as never,
+    {} as never,
+    allowAllNotificationPolicy,
+    metrics as never,
+  );
+
+  await assert.rejects(() => worker.scheduledDrain(), /queue unavailable/);
+  assert.deepEqual(telemetry, ["started", "completed:failure"]);
 });
 
 test("可靠通知：账号关闭后的 CANCELLED 投递不能被 worker 重新标记或发送", async () => {
@@ -310,6 +396,9 @@ test("可靠通知：领取后偏好改为关闭会在外部调用前抑制且�
   let deliveryStatus = "PENDING";
   let outboxStatus = "PROCESSING";
   const tx = {
+    $queryRaw: async () => [{ id: 71, email: "customer@example.com" }],
+    notificationPreference: { findUnique: async () => ({ enabled: false }) },
+    consentRecord: { findFirst: async () => null },
     outboxEvent: {
       updateMany: async ({ data }: any) => {
         if (data.status) outboxStatus = data.status;
@@ -351,8 +440,6 @@ test("可靠通知：领取后偏好改为关闭会在外部调用前抑制且�
       }),
     },
     notificationDelivery: { findFirst: async () => ({ id: 152 }) },
-    notificationPreference: { findUnique: async () => ({ enabled: false }) },
-    consentRecord: { findFirst: async () => null },
   };
   const worker = new ReliableNotificationDeliveryWorker(
     prisma as never,
@@ -383,6 +470,7 @@ test("可靠通知：领取后偏好改为关闭会在外部调用前抑制且�
 test("可靠通知：发送期间注销不会把 CANCELLED 覆盖为 SENT 或重新排队", async () => {
   let deliveryStatus = "PENDING";
   let outboxStatus = "PROCESSING";
+  let customerLockHeld = false;
   const deliveryUpdates: string[] = [];
   const updateDelivery = async ({ where, data }: any) => {
     const expected = where.status;
@@ -399,11 +487,21 @@ test("可靠通知：发送期间注销不会把 CANCELLED 覆盖为 SENT 或重
     return { count: 1 };
   };
   const tx = {
+    $queryRaw: async () => {
+      customerLockHeld = true;
+      return [{ id: 8, email: "customer@example.com" }];
+    },
     notificationDelivery: { updateMany: updateDelivery },
     outboxEvent: { updateMany: updateOutbox },
   };
   const prisma = {
-    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => {
+      try {
+        return await callback(tx);
+      } finally {
+        customerLockHeld = false;
+      }
+    },
     notification: {
       findUnique: async () => ({
         id: 22,
@@ -443,6 +541,7 @@ test("可靠通知：发送期间注销不会把 CANCELLED 覆盖为 SENT 或重
       getSiteBaseUrl: () => "https://example.com",
       renderShell: (html: string) => html,
       send: async () => {
+        assert.equal(customerLockHeld, true, "SMTP 开始时必须仍持有客户共享锁");
         deliveryStatus = "CANCELLED";
         return { delivered: true };
       },
@@ -526,6 +625,85 @@ test("可靠通知：租约恢复遇到 SENDING 时停止自动重发并标记�
   assert.equal(lastErrorCode, "DELIVERY_RESULT_UNKNOWN");
 });
 
+test("可靠通知：邮件适配器契约外抛错立即按结果未知终止", async () => {
+  let deliveryStatus = "PENDING";
+  let outboxStatus = "PROCESSING";
+  let lastErrorCode: string | null = null;
+  const tx = {
+    $queryRaw: async () => [{ id: 10, email: "customer@example.com" }],
+    notificationDelivery: {
+      updateMany: async ({ where, data }: any) => {
+        const expected = where.status;
+        const matches = typeof expected === "string"
+          ? deliveryStatus === expected
+          : expected?.in?.includes(deliveryStatus);
+        if (!matches) return { count: 0 };
+        deliveryStatus = data.status;
+        lastErrorCode = data.lastErrorCode ?? lastErrorCode;
+        return { count: 1 };
+      },
+    },
+    outboxEvent: {
+      updateMany: async ({ data }: any) => {
+        if (data.status) outboxStatus = data.status;
+        lastErrorCode = data.lastErrorCode ?? lastErrorCode;
+        return { count: 1 };
+      },
+    },
+  };
+  const worker = new ReliableNotificationDeliveryWorker(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+      notification: {
+        findUnique: async () => ({
+          id: 24,
+          customerId: 10,
+          type: "SERVICE_PAYMENT_CONFIRMED",
+          title: "付款已确认",
+          body: "付款事实",
+          actionUrl: "/customer?section=orders&orderId=14",
+          deliveries: [{
+            id: 34,
+            channel: "EMAIL",
+            status: "PENDING",
+            destinationHash: emailHashForTest("customer@example.com"),
+          }],
+        }),
+      },
+      order: {
+        findUnique: async () => ({
+          id: 14,
+          customerId: 10,
+          customerEmail: "customer@example.com",
+        }),
+      },
+      notificationDelivery: {
+        findFirst: async () => deliveryStatus === "SENDING" ? { id: 34 } : null,
+      },
+    } as never,
+    { get: () => "true" } as never,
+    {
+      getSiteBaseUrl: () => "https://example.com",
+      renderShell: (html: string) => html,
+      send: async () => {
+        throw new Error("adapter contract violation");
+      },
+    } as never,
+    allowAllNotificationPolicy,
+  );
+
+  await (worker as any).processClaimed({
+    id: 44,
+    attempts: 1,
+    eventType: "notification.delivery.requested",
+    payload: { notificationId: 24, orderId: 14 },
+  });
+
+  assert.equal(deliveryStatus, "FAILED");
+  assert.equal(outboxStatus, "FAILED");
+  assert.equal(lastErrorCode, "DELIVERY_RESULT_UNKNOWN");
+});
+
 test("线索回复通知：从活动和咨询实时解析收件人且转义自由文本", async () => {
   const outboxUpdates: any[] = [];
   let sent: any = null;
@@ -581,6 +759,65 @@ test("线索回复通知：从活动和咨询实时解析收件人且转义自�
   assert.doesNotMatch(sent.html, /<script>/);
   assert.equal(outboxUpdates[0].lastErrorCode, "SEND_STARTED");
   assert.equal(outboxUpdates[1].status, "PROCESSED");
+});
+
+test("线索回复 worker 通过真实 MailerService 把当前回复交给回环 SMTP", async () => {
+  const sandbox = await startLoopbackSmtpSandbox();
+  try {
+    const activity = {
+      id: 71,
+      leadId: 61,
+      type: "REPLY",
+      content: "lead-reply-loopback-proof",
+      lead: {
+        sourceType: "INQUIRY",
+        privacyDisposedAt: null,
+        inquiry: {
+          id: 27,
+          customerId: null,
+          customerName: "Sandbox Customer",
+          customerEmail: "lead-recipient@example.test",
+        },
+      },
+    };
+    const outboxUpdates: Array<Record<string, unknown>> = [];
+    const mailer = new MailerService(createLoopbackSmtpConfig(sandbox.port, {
+      NOTIFICATION_DELIVERY_ENABLED: "true",
+      SITE_BASE_URL: "https://shop.example.test",
+    }));
+    const worker = new ReliableNotificationDeliveryWorker(
+      {
+        leadActivity: { findUnique: async () => activity },
+        outboxEvent: {
+          updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+            outboxUpdates.push(data);
+            return { count: 1 };
+          },
+        },
+      } as never,
+      { get: () => "true" } as never,
+      mailer,
+      allowAllNotificationPolicy,
+    );
+
+    await (worker as any).processClaimed({
+      id: 81,
+      attempts: 1,
+      eventType: "lead.reply.notification.requested",
+      payload: { leadId: activity.leadId, activityId: activity.id },
+    });
+
+    assert.equal(outboxUpdates[0]?.lastErrorCode, "SEND_STARTED");
+    assert.equal(outboxUpdates[1]?.status, "PROCESSED");
+    assert.ok(
+      sandbox.capture.commands.some(
+        (line) => line.toLowerCase() === "rcpt to:<lead-recipient@example.test>",
+      ),
+    );
+    assert.match(sandbox.capture.message, /lead-reply-loopback-proof/i);
+  } finally {
+    await sandbox.close();
+  }
 });
 
 test("线索回复通知：发送时只使用隐私复核后的最新快照", async () => {
@@ -700,6 +937,61 @@ test("线索回复通知：SMTP 失败保留错误码并进入有界重试", asy
 
   assert.equal(finalUpdate.status, "PENDING");
   assert.equal(finalUpdate.lastErrorCode, "SMTP_SEND_FAILED");
+  assert.ok(finalUpdate.availableAt instanceof Date);
+});
+
+test("线索回复通知：邮件适配器契约外抛错按结果未知终止自动重投", async () => {
+  let finalUpdate: any = null;
+  const tx = {
+    outboxEvent: {
+      updateMany: async ({ data }: any) => {
+        if (data.status) finalUpdate = data;
+        return { count: 1 };
+      },
+    },
+  };
+  const activity = {
+    id: 59,
+    leadId: 49,
+    type: "REPLY",
+    content: "顾问回复",
+    lead: {
+      sourceType: "INQUIRY",
+      privacyDisposedAt: null,
+      inquiry: {
+        id: 19,
+        customerId: 9,
+        customerName: "客户辛",
+        customerEmail: "customer@example.com",
+      },
+    },
+  };
+  const worker = new ReliableNotificationDeliveryWorker(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+      leadActivity: { findUnique: async () => activity },
+      outboxEvent: { updateMany: async () => ({ count: 1 }) },
+    } as never,
+    { get: () => "true" } as never,
+    {
+      renderShell: (html: string) => html,
+      getSiteBaseUrl: () => "https://example.com",
+      send: async () => {
+        throw new Error("adapter contract violation");
+      },
+    } as never,
+    allowAllNotificationPolicy,
+  );
+
+  await (worker as any).processClaimed({
+    id: 72,
+    attempts: 1,
+    eventType: "lead.reply.notification.requested",
+    payload: { leadId: 49, activityId: 59 },
+  });
+
+  assert.equal(finalUpdate.status, "FAILED");
+  assert.equal(finalUpdate.lastErrorCode, "DELIVERY_RESULT_UNKNOWN");
   assert.ok(finalUpdate.availableAt instanceof Date);
 });
 
@@ -884,6 +1176,7 @@ test("线索回复通知：人工重投耗尽后把操作者、错误码和终�
 test("通用通知：人工重投成功把操作者与最终结果写入操作日志", async () => {
   let auditWrite: any = null;
   const tx = {
+    $queryRaw: async () => [{ id: 9, email: "customer@example.com" }],
     outboxEvent: { updateMany: async () => ({ count: 1 }) },
     notificationDelivery: { updateMany: async () => ({ count: 1 }) },
     operationLog: {
@@ -953,6 +1246,7 @@ test("通用通知：人工重投成功把操作者与最终结果写入操作�
 test("通用通知：人工重投再次失败时写入终止结果和错误码", async () => {
   let auditWrite: any = null;
   const tx = {
+    $queryRaw: async () => [{ id: 10, email: "customer@example.com" }],
     outboxEvent: { updateMany: async () => ({ count: 1 }) },
     notificationDelivery: { updateMany: async () => ({ count: 1 }) },
     operationLog: {

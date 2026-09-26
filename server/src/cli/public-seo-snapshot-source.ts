@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import {
+  CONTENT_TEMPLATE_PAGE_KEYS,
   CONTENT_TEMPLATE_PAGE_PATHS,
   CONTENT_TEMPLATE_PAGE_METADATA,
   getPageDocumentMediaReferences,
@@ -15,8 +16,10 @@ import {
 } from "../modules/page-modules/page-document-localization";
 import { createMediaPublicationReferenceKey } from "../modules/page-modules/media-publication-manifest";
 import { evaluateMediaPublicEligibility } from "../modules/upload/media-public-eligibility";
+import { computeProductPublicationQualityHash } from "../modules/products/product-publication-quality-hash";
+import { evaluateSitePublicationReadiness } from "../modules/settings/site-publication-readiness";
 
-const PAGE_KEYS = ["home", "products", "catalog", "custom", "about", "contact"] as const;
+const PAGE_KEYS = CONTENT_TEMPLATE_PAGE_KEYS;
 const PRODUCT_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REQUIRED_SETTINGS = [
@@ -59,7 +62,20 @@ export type PublicSeoPageValidator = (
   pageKey: string,
   puckData: unknown,
   metadata: unknown,
-) => Promise<{ valid: boolean }>;
+) => Promise<{
+  valid: boolean;
+  issues?: Array<{ severity?: string; message?: string }>;
+}>;
+
+function hasFormalPlaceholderIssue(
+  validation: Awaited<ReturnType<PublicSeoPageValidator>>,
+): boolean {
+  return (validation.issues ?? []).some((issue) =>
+    issue.severity === "warning"
+      && typeof issue.message === "string"
+      && issue.message.includes("仍是占位内容")
+  );
+}
 
 type SnapshotRouteInput = {
   path: string;
@@ -292,6 +308,16 @@ function requireSettings(settingsRow: any, config: PublicSeoSourceConfig) {
   if (locales.length !== 1 || locales[0] !== "zh-CN") {
     fail("PUBLISHED_LOCALES_INVALID");
   }
+  const readiness = evaluateSitePublicationReadiness(settings, {
+    persisted: true,
+    requireLaunchDetails: true,
+  });
+  if (!readiness.ready) {
+    const blockerCodes = [...new Set(
+      readiness.blockers.map((blocker) => blocker.code),
+    )].sort();
+    fail(`SITE_PUBLICATION_READINESS_BLOCKED:${blockerCodes.join(",")}`);
+  }
   return { settings, origin, locales, version: settingsRow.version, updatedAt: settingsRow.updatedAt };
 }
 
@@ -520,34 +546,6 @@ function projectLegalRoutes(
   });
 }
 
-function productQualityHash(product: any): string {
-  const snapshot = {
-    version: "p0-product-quality-v1",
-    code: product.code,
-    name: product.name,
-    shortDescription: product.shortDescription,
-    description: product.description,
-    detailContent: product.detailContent,
-    materialType: product.materialType,
-    goldWeight: product.goldWeight == null ? null : String(product.goldWeight),
-    weight: product.weight == null ? null : String(product.weight),
-    salesMode: product.salesMode,
-    inventoryPolicy: product.inventoryPolicy,
-    primaryImageId: product.primaryImage?.id ?? null,
-    listingImageId: product.listingImage?.id ?? null,
-    imageIds: (product.images ?? []).map((image: any) => image.id).sort((left: number, right: number) => left - right),
-    skus: (product.skus ?? [])
-      .filter((sku: any) => sku.isActive)
-      .map((sku: any) => ({
-        id: sku.id,
-        price: String(sku.price),
-        goldWeight: sku.goldWeight == null ? null : String(sku.goldWeight),
-        inventoryRecords: (sku.inventories ?? []).length,
-      })),
-  };
-  return sha256(snapshot);
-}
-
 function assertProductImagePublic(product: any, now: Date) {
   const image = product.primaryImage;
   if (!image || image.productId !== product.id || image.isVideo || !image.mediaAsset) {
@@ -574,7 +572,10 @@ function projectProduct(product: any, origin: string, siteName: string, now: Dat
   if (!product.category || !product.category.isActive || product.category.deletedAt) {
     fail(`PRODUCT_${code}_CATEGORY_NOT_PUBLIC`);
   }
-  const currentQualityHash = productQualityHash(product);
+  const currentQualityHash = computeProductPublicationQualityHash({
+    ...product,
+    skus: product.skus.filter((sku: any) => sku.isActive),
+  });
   if (product.publicationQualityHash !== currentQualityHash) fail(`PRODUCT_${code}_QUALITY_HASH_DRIFT`);
   const image = assertProductImagePublic(product, now);
   const title = text(product.name);
@@ -679,8 +680,24 @@ const PRODUCT_SELECT = {
   materialType: true,
   goldWeight: true,
   weight: true,
+  size: true,
+  gemInfo: true,
+  craftTechnique: true,
   salesMode: true,
   inventoryPolicy: true,
+  fulfillmentType: true,
+  dispatchTime: true,
+  deliveryMethods: true,
+  requiresInsuredShipping: true,
+  requiresSignature: true,
+  includesCertificate: true,
+  packageType: true,
+  customLeadTime: true,
+  isHot: true,
+  isNew: true,
+  isRecommended: true,
+  isLimited: true,
+  isCustom: true,
   status: true,
   visibility: true,
   publicationQualityStatus: true,
@@ -700,16 +717,50 @@ const PRODUCT_SELECT = {
     },
   },
   listingImage: { select: { id: true } },
-  images: { where: { isVideo: false }, orderBy: { id: "asc" }, select: { id: true } },
+  images: {
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      type: true,
+      sortOrder: true,
+      mediaAssetId: true,
+      mediaAsset: {
+        select: {
+          lifecycleRevision: true,
+          authorization: { select: { revision: true, publicUseEpoch: true } },
+        },
+      },
+    },
+  },
+  shippingTemplate: {
+    select: {
+      id: true,
+      feeMode: true,
+      baseFee: true,
+      remoteSurcharge: true,
+      freeShippingThreshold: true,
+      excludedRegions: true,
+      insured: true,
+      signatureRequired: true,
+      isActive: true,
+      updatedAt: true,
+    },
+  },
   skus: {
     orderBy: { id: "asc" },
     select: {
       id: true,
       isActive: true,
+      material: true,
+      size: true,
       price: true,
       goldWeight: true,
       inventories: { select: { quantity: true } },
     },
+  },
+  certificates: {
+    orderBy: { id: "asc" },
+    select: { id: true, certType: true, certNumber: true, expireDate: true },
   },
 } satisfies Prisma.ProductSelect;
 
@@ -739,6 +790,9 @@ async function readProjection(
     routes.push(await projectPage(database, document, chinese, "zh-CN", site.origin, text(site.settings.siteName), now));
     const validation = await validatePage(pageKey, chinese.publishedRevision.puckData, chinese.publishedRevision.metadata);
     if (!validation.valid) fail(`PAGE_${pageKey}_zh-CN_CURRENT_VALIDATION_FAILED`);
+    if (hasFormalPlaceholderIssue(validation)) {
+      fail(`PAGE_${pageKey}_zh-CN_PLACEHOLDER_CONTENT`);
+    }
   }
 
   const chineseHome = routes.find((route) => route.path === "/");

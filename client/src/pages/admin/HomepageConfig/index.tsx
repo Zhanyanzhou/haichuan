@@ -1061,6 +1061,7 @@ function PageTemplateLibraryAdapter({
 
 function InspectorPanel({
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   onSaveDraft,
   publishIssues,
@@ -1072,6 +1073,7 @@ function InspectorPanel({
   onPromoteToTemplate,
 }: {
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   onSaveDraft: () => void;
   publishIssues: PublishValidationIssue[];
@@ -1127,6 +1129,7 @@ function InspectorPanel({
         </div>
         <InspectorFooterBar
           hasUnsavedChanges={hasUnsavedChanges}
+          hasPersistedDraft={hasPersistedDraft}
           saving={saving}
           errorCount={publishErrorCount}
           warningCount={publishWarningCount}
@@ -1149,6 +1152,7 @@ function InspectorPanel({
     return (
       <DynamicTemplateInstanceInspector
         hasUnsavedChanges={hasUnsavedChanges}
+        hasPersistedDraft={hasPersistedDraft}
         saving={saving}
         publishIssues={publishIssues}
         validationStatus={validationStatus}
@@ -1166,6 +1170,7 @@ function InspectorPanel({
       <SchemaInspectorPanel
         schema={inspectorSchema}
         hasUnsavedChanges={hasUnsavedChanges}
+        hasPersistedDraft={hasPersistedDraft}
         saving={saving}
         onSaveDraft={onSaveDraft}
         templateDesignEnabled={false}
@@ -1261,6 +1266,7 @@ function EditorBody({
   pageLabel,
   pageMode,
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   previewMode,
   viewingPublished,
@@ -1291,6 +1297,7 @@ function EditorBody({
   pageLabel: string;
   pageMode: "brand" | "commerce";
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   previewMode: boolean;
   viewingPublished: boolean;
@@ -1425,7 +1432,7 @@ function EditorBody({
     onClosePublishReview();
     if (inspectorOverlay.compact) closeInspector();
     window.requestAnimationFrame(() => {
-      document.getElementById("homepage-page-publish-review-entry")?.focus();
+      document.querySelector<HTMLButtonElement>(".homepage-editor__toolbar-publish")?.focus();
     });
   }, [closeInspector, inspectorOverlay.compact, onClosePublishReview]);
 
@@ -2171,7 +2178,9 @@ function EditorBody({
             <span>
               {hasUnsavedChanges
                 ? "正在预览尚未保存的修改；预览本身不会保存或发布。"
-                : "正在预览已保存草稿；预览本身不会再次保存或发布。"}
+                : hasPersistedDraft
+                  ? "正在预览已保存草稿；预览本身不会再次保存或发布。"
+                  : "正在预览尚未保存的默认内容；预览本身不会保存或发布。"}
             </span>
           </div>
         ) : null}
@@ -2316,6 +2325,7 @@ function EditorBody({
             ) : (
               <InspectorPanel
                 hasUnsavedChanges={hasUnsavedChanges}
+                hasPersistedDraft={hasPersistedDraft}
                 saving={saving}
                 onSaveDraft={() => onSaveDraft(appData)}
                 publishIssues={publishIssues}
@@ -2378,6 +2388,7 @@ export default function StoreDecorationWorkbench({
     publishReviewOpen,
     publishReviewIssueKey,
     hasUnsavedChanges,
+    hasPersistedDraft,
     hasProtectedUnsavedChanges,
     previewMode,
     revisionsOpen,
@@ -2394,6 +2405,7 @@ export default function StoreDecorationWorkbench({
     rollingBackRevisionId,
     revisionFailure,
     draftDiscardError,
+    draftDiscardVerificationPending,
     draftSnapshot,
     initialLoading,
     loadedPageKey,
@@ -2609,49 +2621,38 @@ export default function StoreDecorationWorkbench({
         onSave={savePageSettings}
       />
 
-      {publishedNeedsRevalidation ? (
-        <div
-          className="homepage-editor__draft-action-error homepage-editor__live-health-alert"
-          role="alert"
-          data-testid="published-live-health-alert"
-        >
-          <ExclamationCircleOutlined aria-hidden="true" />
-          <div>
-            <strong>客户前台当前无法显示此页面的线上版本</strong>
-            <span>
-              {publishedRevalidationErrors.length > 0
-                ? `线上版本未通过公开校验：${
-                  publishedRevalidationErrors.length <= 3
-                    ? publishedRevalidationErrors.join("；")
-                    : `${publishedRevalidationErrors.slice(0, 3).join("；")}；另有 ${publishedRevalidationErrors.length - 3} 项`
-                }。请审核并发布当前草稿以更新客户前台。`
-                : "线上版本未通过公开校验。请审核并发布当前草稿以更新客户前台。"}
-            </span>
-          </div>
-        </div>
-      ) : null}
-
       {draftDiscardError ? (
         <div className="homepage-editor__draft-action-error" role="alert">
           <ExclamationCircleOutlined aria-hidden="true" />
           <div>
-            <strong>草稿仍然保留</strong>
+            <strong>
+              {draftDiscardVerificationPending ? "草稿已放弃，状态待确认" : "草稿仍然保留"}
+            </strong>
             <span>{draftDiscardError}</span>
           </div>
-          <Button size="small" onClick={discardDraftToPublished}>
-            重新放弃草稿
-          </Button>
           <Button
+            size="small"
+            onClick={draftDiscardVerificationPending ? retryLoad : discardDraftToPublished}
+          >
+            {draftDiscardVerificationPending ? "重新读取放弃结果" : "重新放弃草稿"}
+          </Button>
+          {!draftDiscardVerificationPending ? <Button
             size="small"
             type="text"
             onClick={dismissDraftDiscardError}
           >
             关闭
-          </Button>
+          </Button> : null}
         </div>
       ) : null}
 
-      {loadError ? (
+      {draftDiscardVerificationPending ? (
+        <div className="homepage-editor__load-error" role="status" aria-live="polite">
+          <Spin size="large" />
+          <strong>草稿已放弃，等待重新读取当前权威状态</strong>
+          <span>恢复前编辑器保持只读，避免在未确认基线上继续写入。</span>
+        </div>
+      ) : loadError ? (
         <div className="homepage-editor__load-error" role="alert">
           <ExclamationCircleOutlined />
           <strong>无法打开店铺装修</strong>
@@ -2737,7 +2738,6 @@ export default function StoreDecorationWorkbench({
             draftSavedAtLabel={draftSavedAtLabel}
             publishValidationStatus={publishValidationStatus}
             publishAttemptFailed={Boolean(publishAttemptFailure)}
-            publishReviewActive={publishReviewActive}
             publishReviewErrorCount={publishReviewIssues.filter((issue) => issue.severity === "error").length}
             onOpenPublishReview={openPublishReview}
             onSubmitReview={() => { void submitForReview(); }}
@@ -2781,6 +2781,7 @@ export default function StoreDecorationWorkbench({
               pageLabel={getEditorPage(pageKey).label}
               pageMode={getEditorPage(pageKey).mode}
               hasUnsavedChanges={hasUnsavedChanges}
+              hasPersistedDraft={hasPersistedDraft}
               saving={saving}
               previewMode={previewMode}
               viewingPublished={viewingPublished}

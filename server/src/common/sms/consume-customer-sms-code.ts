@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import { BadRequestException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 
-export type CustomerSmsPurpose = 'REGISTER' | 'LOGIN' | 'PROFILE_VERIFY';
+export type CustomerSmsPurpose =
+  | 'REGISTER'
+  | 'LOGIN'
+  | 'PROFILE_VERIFY'
+  | 'ACCOUNT_CLOSE';
 
 /**
  * 客户短信验证码一次性消费（唯一实现）：注册验真、登录挑战、微信绑定建号共用。

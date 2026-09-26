@@ -60,7 +60,13 @@ export function publicProduct(
     weight?: number;
     size?: string;
     image?: string | null;
-    certificates?: Array<{ id: number; productId: number; certType: "NATIONAL"; certNumber: string }>;
+    certificates?: Array<{
+      id: number;
+      productId: number;
+      certType: "NATIONAL" | "PROVINCIAL" | "GIA" | "OTHER";
+      certNumber: string;
+      expireDate?: string;
+    }>;
   } = {},
 ) {
   const direct = salesMode === "DIRECT_PURCHASE";
@@ -106,8 +112,10 @@ export function publicProduct(
           productId: id,
           skuCode: `HC-${id}-A`,
           material: "AU750" as const,
+          size: options.size ?? "可调节",
           goldWeight: options.goldWeight ?? 5.2,
           price: 12800,
+          isAvailableForPurchase: options.available,
           isActive: true,
         }]
       : [],
@@ -163,6 +171,8 @@ export async function mockCatalogDetail(
   page: Page,
   options: {
     products: CatalogDetailProduct[];
+    /** 需要验证服务端分页时，可让当前夹具页保持同一作品集合并声明更大的总数。 */
+    catalogTotal?: number;
     signedIn?: boolean;
     flags?: { commerceEnabled: boolean; cartEnabled: boolean; paymentEnabled: boolean };
     flagsStatus?: number;
@@ -210,9 +220,13 @@ export async function mockCatalogDetail(
         writes.unexpected += 1;
         return route.abort();
       }
-      if (/\/customers\/me\/favorites\/\d+\/toggle$/.test(path) && method === "POST") {
+      const isExplicitFavoriteWrite = /\/customers\/me\/favorites\/\d+$/.test(path)
+        && (method === "PUT" || method === "DELETE");
+      const isLegacyFavoriteWrite = /\/customers\/me\/favorites\/\d+\/toggle$/.test(path)
+        && method === "POST";
+      if (isExplicitFavoriteWrite || isLegacyFavoriteWrite) {
         writes.favorite += 1;
-        if (options.allowFavoriteWrite) return fulfill(route, { favorited: true });
+        if (options.allowFavoriteWrite) return fulfill(route, { favorited: method !== "DELETE" });
         writes.unexpected += 1;
         return route.abort();
       }
@@ -274,10 +288,11 @@ export async function mockCatalogDetail(
       }
       const hasNoResultQuery = Array.from(url.searchParams.values()).includes("无结果");
       const list = hasNoResultQuery ? [] : options.products;
+      const requestedPage = Number.parseInt(url.searchParams.get("page") || "1", 10);
       return fulfill(route, {
         list,
-        total: list.length,
-        page: 1,
+        total: hasNoResultQuery ? 0 : options.catalogTotal ?? list.length,
+        page: Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1,
         pageSize: 32,
         facets: { sizes: [] },
       });

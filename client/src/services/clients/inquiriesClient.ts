@@ -1,6 +1,13 @@
 import { USE_MOCK, mockDelay } from "../mockData";
 import api, { customerAuthHeaders } from "../httpClient";
 import { mockResponse } from "../mockResponse";
+import type { ConsultationSubmissionReceipt } from "./consultationSubmissionReceipt";
+import {
+  PRIVACY_CONSENT_CONTENT_HASH,
+  PRIVACY_CONSENT_VERSION,
+} from "@/config/privacyConsent";
+
+export type { ConsultationSubmissionReceipt } from "./consultationSubmissionReceipt";
 
 export type InquiryListQuery = {
   page?: number;
@@ -8,11 +15,19 @@ export type InquiryListQuery = {
   status?: string;
 };
 
-export type InquiryStatusUpdateInput = {
-  status?: string;
-  reply?: string;
-  assignedTo?: number;
-};
+export type InquiryStatusUpdateInput =
+  | {
+      reply: string;
+      expectedUpdatedAt: string;
+      idempotencyKey: string;
+      assignedTo?: never;
+    }
+  | {
+      assignedTo: number;
+      reply?: never;
+      expectedUpdatedAt?: never;
+      idempotencyKey: string;
+    };
 
 export type InquirySubmitInput = {
   name: string;
@@ -40,30 +55,40 @@ export const inquiriesApi = {
       await mockDelay(300);
       return mockResponse({ success: true });
     }
-    if (data.reply) {
-      return api.put(`/inquiries/${id}/reply`, { reply: data.reply });
+    if (data.reply !== undefined) {
+      return api.put(
+        `/inquiries/${id}/reply`,
+        {
+          reply: data.reply,
+          expectedUpdatedAt: data.expectedUpdatedAt,
+        },
+        { headers: { "Idempotency-Key": data.idempotencyKey } },
+      );
     }
-    if (data.assignedTo) {
-      return api.put(`/inquiries/${id}/assign`, {
-        assignedTo: data.assignedTo,
-      });
-    }
-    return api.put(`/inquiries/${id}/reply`, data);
+    return api.put(
+      `/inquiries/${id}/assign`,
+      { assignedTo: data.assignedTo },
+      { headers: { "Idempotency-Key": data.idempotencyKey } },
+    );
   },
-  submit: async (data: InquirySubmitInput, idempotencyKey?: string) => {
+  submit: async (data: InquirySubmitInput, idempotencyKey: string) => {
     if (USE_MOCK) {
       await mockDelay(500);
-      return mockResponse({
-        id: Date.now(),
-        ...data,
+      const sourceId = Date.now();
+      return mockResponse<ConsultationSubmissionReceipt>({
+        id: sourceId,
+        sourceId,
+        leadId: sourceId + 1,
         status: "PENDING",
         createdAt: new Date().toISOString(),
       });
     }
-    return api.post(
+    return api.post<ConsultationSubmissionReceipt>(
       "/inquiries",
       {
         ...data,
+        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+        privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
         customerName: data.name,
         customerPhone: data.phone,
         customerEmail: data.email,
@@ -71,7 +96,7 @@ export const inquiriesApi = {
       {
         headers: {
           ...customerAuthHeaders(),
-          ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+          "Idempotency-Key": idempotencyKey,
         },
       },
     );

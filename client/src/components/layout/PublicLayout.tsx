@@ -1,5 +1,12 @@
-import { Suspense, useEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { getPageDocumentMeta, usePageMetaStore } from "@/store/pageMetaStore";
 import {
   PublicSiteSettingsProvider,
@@ -34,6 +41,7 @@ import { unwrapResponse } from "@/utils/unwrap";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
 import RouteLoading from "@/components/common/RouteLoading";
+import { clearCatalogReturnContext } from "@/pages/public/Catalog/catalogReturnContext";
 
 const NON_PUBLIC_SYSTEM_HERO_MEDIA = new Set([
   "/images/system/product-placeholder.svg",
@@ -309,6 +317,7 @@ const AccountIcon = () => (
 
 export default function PublicLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const localizedPath = resolvePublicLocalePath(location.pathname);
   const english = localizedPath.locale === "en";
   const contentPathname = localizedPath.pathname;
@@ -385,6 +394,25 @@ export default function PublicLayout() {
       },
     };
   })();
+  const customProductRef = contentPathname === "/custom"
+    ? normalizePublicProductReference(
+        new URLSearchParams(location.search).get("productRef"),
+      )
+    : null;
+  const preserveCustomInquiryContext = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!customProductRef || !(event.target instanceof Element)) return;
+    const anchor = event.target.closest("a[href]");
+    if (!(anchor instanceof HTMLAnchorElement)) return;
+    if (anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
+    const target = new URL(anchor.href, window.location.origin);
+    if (target.origin !== window.location.origin || target.pathname !== "/contact") return;
+    if (target.searchParams.get("type") !== "custom") return;
+    if (normalizePublicProductReference(target.searchParams.get("productRef"))) return;
+    target.searchParams.set("productRef", customProductRef);
+    event.preventDefault();
+    event.stopPropagation();
+    navigate(`${target.pathname}${target.search}${target.hash}`);
+  };
   const [menuOpen, setMenuOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [scrolled, setScrolled] = useState(false);
@@ -395,7 +423,9 @@ export default function PublicLayout() {
   const setCustomerAuth = useCustomerAuthStore((state) => state.setAuth);
   const markCustomerAnonymous = useCustomerAuthStore((state) => state.markAnonymous);
   const needsCustomerIdentity =
-    contentPathname === "/catalog" || /^\/products\/[^/]+$/.test(contentPathname);
+    contentPathname === "/catalog"
+    || contentPathname === "/contact"
+    || /^\/products\/[^/]+$/.test(contentPathname);
   const pageMeta = usePageMetaStore((state) => state.meta);
   const nonIndexableRoute = isNonIndexablePublicRoute(location.pathname);
   const publishedPageMeta = getPageDocumentMeta(
@@ -445,8 +475,9 @@ export default function PublicLayout() {
       : null;
   useStructuredData("organization", organizationStructuredData);
 
-  // 选款和作品详情会根据客户身份选择公开/会员事实。HttpOnly Cookie 无法由
-  // JavaScript 自行探测，因此刷新这两类页面时通过最小 profile 请求恢复会话。
+  // 选款、作品详情和咨询表单会根据客户身份选择会员事实或预填联系方式。
+  // HttpOnly Cookie 无法由 JavaScript 自行探测，因此刷新这些页面时通过最小
+  // profile 请求恢复会话。
   useEffect(() => {
     if (!needsCustomerIdentity || customerAuthStatus !== "unknown") return;
 
@@ -620,6 +651,16 @@ export default function PublicLayout() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  useLayoutEffect(() => {
+    const remainsInCatalogDetailChain = contentPathname === "/catalog"
+      || /^\/products\/[^/]+$/.test(contentPathname);
+    if (!remainsInCatalogDetailChain) {
+      // 持久页头允许用户在新页面的被动 effect 执行前立刻再次导航。
+      // 在提交阶段清除一次性返回位置，避免“目录 → 详情 → 首页 → 目录”误恢复旧滚动。
+      clearCatalogReturnContext();
+    }
+  }, [contentPathname]);
+
   useEffect(() => {
     const pathChanged = previousPathRef.current !== location.pathname;
     previousPathRef.current = location.pathname;
@@ -631,7 +672,7 @@ export default function PublicLayout() {
       mainRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [location.pathname]);
+  }, [contentPathname, location.pathname]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("home-route", isHome);
@@ -743,42 +784,43 @@ export default function PublicLayout() {
             </Link> : null}
           </nav>
         </div>
-      </header>
 
-      {/* ═══════ 左侧组合：菜单 + 搜索 ═══════ */}
-      <div
-        className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
-      >
-        {!english ? <button
-          ref={menuToggleRef}
-          type="button"
-          className="site-menu-toggle"
-          onClick={() => setMenuOpen((o) => !o)}
-          aria-expanded={menuOpen}
-          aria-controls="brand-menu"
-          aria-label={menuOpen ? "关闭菜单" : "打开菜单"}
+        {/* ═══════ 左侧组合：菜单 + 搜索 ═══════ */}
+        <nav
+          aria-label={english ? "Menu and search" : "菜单与搜索"}
+          className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
         >
-          {menuOpen ? (
-            <>
-              <CloseIcon />
-              <span className="site-menu-toggle__label">关闭</span>
-            </>
-          ) : (
-            <>
-              <MenuIcon />
-              <span className="site-menu-toggle__label">菜单</span>
-            </>
-          )}
-        </button> : null}
-        <Link
-          to={withPublicLocalePath(english ? "/products" : "/catalog#catalog-search-input", localizedPath.locale)}
-          aria-label={english ? "Collection" : "搜索"}
-          className="site-header__nav-item site-header__nav-item--search"
-        >
-          <SearchIcon />
-          <span className="site-header__nav-label hidden sm:inline">{english ? "Collection" : "搜索"}</span>
-        </Link>
-      </div>
+          {!english ? <button
+            ref={menuToggleRef}
+            type="button"
+            className="site-menu-toggle"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-expanded={menuOpen}
+            aria-controls="brand-menu"
+            aria-label={menuOpen ? "关闭菜单" : "打开菜单"}
+          >
+            {menuOpen ? (
+              <>
+                <CloseIcon />
+                <span className="site-menu-toggle__label">关闭</span>
+              </>
+            ) : (
+              <>
+                <MenuIcon />
+                <span className="site-menu-toggle__label">菜单</span>
+              </>
+            )}
+          </button> : null}
+          <Link
+            to={withPublicLocalePath(english ? "/products" : "/catalog#catalog-search-input", localizedPath.locale)}
+            aria-label={english ? "Collection" : "搜索"}
+            className="site-header__nav-item site-header__nav-item--search"
+          >
+            <SearchIcon />
+            <span className="site-header__nav-label hidden sm:inline">{english ? "Collection" : "搜索"}</span>
+          </Link>
+        </nav>
+      </header>
 
       {/* ═══════ 菜单面板 ═══════ */}
       {!english ? <StorefrontMenuDrawer
@@ -796,10 +838,10 @@ export default function PublicLayout() {
         id="main-content"
         tabIndex={-1}
         data-page-key={pageDefinition?.key}
-        style={{ outline: "none" }}
         className={isHome
-          ? `editorial-main site-main${overlaysPageContent ? " site-main--overlay" : ""}`
-          : `site-main${overlaysPageContent ? " site-main--overlay" : ""}`}
+          ? `editorial-main site-main focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#181A1B]${overlaysPageContent ? " site-main--overlay" : ""}`
+          : `site-main focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#181A1B]${overlaysPageContent ? " site-main--overlay" : ""}`}
+        onClickCapture={preserveCustomInquiryContext}
       >
         {USE_MOCK && (
           <aside

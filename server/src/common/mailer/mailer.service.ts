@@ -17,6 +17,40 @@ export interface MailDeliveryProvider extends ExternalProviderAdapter {
 
 export const MAIL_DELIVERY_PROVIDER = Symbol('MAIL_DELIVERY_PROVIDER');
 
+function normalizeSmtpDeliveryError(error: unknown): unknown {
+  const candidate = error as {
+    code?: unknown;
+    responseCode?: unknown;
+  } | null;
+  const code = typeof candidate?.code === 'string'
+    ? candidate.code.toUpperCase()
+    : '';
+  const responseCode = Number(candidate?.responseCode);
+
+  if (code === 'EAUTH') {
+    return new ExternalProviderError(
+      'AUTHENTICATION',
+      'SMTP 身份验证失败',
+      false,
+      Number.isInteger(responseCode) ? `SMTP_${responseCode}` : undefined,
+    );
+  }
+  if (
+    ['EENVELOPE', 'EMESSAGE', 'EREQUIRETLS'].includes(code)
+    && Number.isInteger(responseCode)
+    && responseCode >= 400
+    && responseCode <= 599
+  ) {
+    return new ExternalProviderError(
+      'PROVIDER_REJECTED',
+      'SMTP 服务明确拒绝投递',
+      responseCode < 500,
+      `SMTP_${responseCode}`,
+    );
+  }
+  return error;
+}
+
 /**
  * SMTP 邮件服务（OR-2 触达最小版）。
  * 设计约定（与 KimiService 的降级范式一致）：
@@ -130,7 +164,13 @@ export class MailerService implements ExternalProviderAdapter {
             await this.deliveryProvider.send(message, context);
             return;
           }
-          await this.transporter!.sendMail(message);
+          try {
+            await this.transporter!.sendMail(message);
+          } catch (error) {
+            // SMTP 4xx/5xx 与认证失败都明确表示本次未被接受；连接中断或超时
+            // 才属于结果待确认。不要把确定拒收误归类为可能已送达。
+            throw normalizeSmtpDeliveryError(error);
+          }
         },
         {
           idempotencyKey:

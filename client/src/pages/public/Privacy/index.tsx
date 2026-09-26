@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
@@ -72,6 +72,7 @@ const SECTIONS = [
 ];
 
 export default function Privacy() {
+  const location = useLocation();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   const [contact, setContact] = useState<{
@@ -114,6 +115,14 @@ export default function Privacy() {
   }, []);
 
   const hasContact = contact.phone || contact.email;
+  const locationState = typeof location.state === "object" && location.state !== null
+    ? location.state as Record<string, unknown>
+    : null;
+  const privacyReturnTo = typeof locationState?.privacyReturnTo === "string"
+    && locationState.privacyReturnTo.startsWith("/")
+    && !locationState.privacyReturnTo.startsWith("//")
+    ? locationState.privacyReturnTo
+    : null;
 
   return (
     <div style={{ background: T.bg }}>
@@ -125,6 +134,23 @@ export default function Privacy() {
         }}
       >
         <div style={{ maxWidth: MW, marginInline: "auto", paddingInline: PX }}>
+          {privacyReturnTo ? (
+            <Link
+              to={privacyReturnTo}
+              style={{
+                display: "inline-flex",
+                minHeight: 44,
+                alignItems: "center",
+                marginBottom: 12,
+                color: T.txt,
+                fontSize: 13,
+                textDecoration: "underline",
+                textUnderlineOffset: 4,
+              }}
+            >
+              ← 返回继续填写
+            </Link>
+          ) : null}
           <p
             style={{
               fontSize: 10,

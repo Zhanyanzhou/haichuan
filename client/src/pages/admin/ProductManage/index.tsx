@@ -383,7 +383,7 @@ export default function ProductManage() {
             ? "商品已移入仓库"
             : "商品状态已更新",
       );
-      await Promise.all([loadProducts(), loadCounts()]);
+      await Promise.all([loadProductsRef.current(), loadCounts()]);
     } catch (requestError: unknown) {
       reportUnexpectedProductActionError(requestError, "更新商品状态");
       message.error(getProductActionErrorMessage(requestError, "商品状态更新"));
@@ -393,6 +393,19 @@ export default function ProductManage() {
   };
 
   const requestStatusChange = (product: Product, status: ProductStatus) => {
+    if (status === "PUBLISHED") {
+      const isReviewApproval = product.reviewStatus === "IN_REVIEW";
+      modal.confirm({
+        title: isReviewApproval
+          ? `通过审核并上架“${product.name}”？`
+          : `上架“${product.name}”？`,
+        content: "上架后，商品将立即对当前可见范围内的客户展示。请确认商品资料和可见范围已核对。",
+        okText: isReviewApproval ? "确认通过并上架" : "确认上架",
+        cancelText: "取消",
+        onOk: () => changeStatus(product.id, status),
+      });
+      return;
+    }
     if (status !== "OFFLINE") {
       void changeStatus(product.id, status);
       return;
@@ -413,7 +426,7 @@ export default function ProductManage() {
     try {
       await productApi.submitForReview(product.id);
       message.success(`「${product.name}」已提交审核；管理员复核后才能发布。`);
-      await Promise.all([loadProducts(), loadCounts()]);
+      await Promise.all([loadProductsRef.current(), loadCounts()]);
     } catch (requestError: unknown) {
       reportUnexpectedProductActionError(requestError, "提交商品审核");
       message.error(getProductActionErrorMessage(requestError, "提交审核"));
@@ -521,7 +534,7 @@ export default function ProductManage() {
         setSelectedIds(failed.map(({ id }) => id));
         message.error(getProductActionErrorMessage(failed[0]?.error, "批量状态更新"));
       }
-      await Promise.all([loadProducts(), loadCounts()]);
+      await Promise.all([loadProductsRef.current(), loadCounts()]);
     } finally {
       message.destroy("batch-status");
       setBatchProcessing(false);
@@ -529,12 +542,22 @@ export default function ProductManage() {
   };
 
   const requestSelectedStatusChange = (status: ProductStatus) => {
-    if (status !== "OFFLINE") {
-      void changeSelectedStatus(status);
-      return;
-    }
     if (!selectedIds.length) {
       message.warning("请先选择商品，再进行批量操作");
+      return;
+    }
+    if (status === "PUBLISHED") {
+      modal.confirm({
+        title: `确认批量上架 ${selectedIds.length} 件商品？`,
+        content: `上架后，这 ${selectedIds.length} 件商品将立即对各自当前可见范围内的客户展示。请确认商品资料和可见范围已核对。`,
+        okText: "确认批量上架",
+        cancelText: "取消",
+        onOk: () => changeSelectedStatus("PUBLISHED"),
+      });
+      return;
+    }
+    if (status !== "OFFLINE") {
+      void changeSelectedStatus(status);
       return;
     }
     modal.confirm({
@@ -562,6 +585,7 @@ export default function ProductManage() {
         setSelectedIds(failed.map(({ id }) => id));
         message.warning(`已提交 ${succeeded.length} 件，${failed.length} 件未提交；请确认所选商品仍为草稿。`);
       }
+      await Promise.all([loadProductsRef.current(), loadCounts()]);
     } finally {
       setBatchProcessing(false);
     }
@@ -683,9 +707,10 @@ export default function ProductManage() {
       );
       if (created?.id) {
         // SKU 已在创建事务中复制并建立零库存记录；其余子资源继续沿用现有接口。
-        const subTasks: Promise<unknown>[] = [
-          ...(source.images || []).map((img) =>
-            productApi.addImage(created.id, {
+        const subTasks: Array<{ label: string; task: Promise<unknown> }> = [
+          ...(source.images || []).map((img, index) => ({
+            label: `图片 ${index + 1}`,
+            task: productApi.addImage(created.id, {
               url: img.url,
               storageKey: img.storageKey ?? undefined,
               type: img.type,
@@ -696,29 +721,35 @@ export default function ProductManage() {
               mimeType: img.mimeType ?? undefined,
               fileSize: img.fileSize ?? undefined,
             }),
-          ),
-          ...(source.certificates || []).map((cert) =>
-            productApi.addCertificate(created.id, {
+          })),
+          ...(source.certificates || []).map((cert, index) => ({
+            label: `证书 ${index + 1}`,
+            task: productApi.addCertificate(created.id, {
               certType: cert.certType,
               certNumber: cert.certNumber,
               certImage: cert.certImage,
               expireDate: cert.expireDate,
             }),
-          ),
-          productApi.updateTags(
-            created.id,
-            (source.tags || []).map((t) => t.tagName),
-          ),
+          })),
+          {
+            label: "商品标签",
+            task: productApi.updateTags(
+              created.id,
+              (source.tags || []).map((t) => t.tagName),
+            ),
+          },
         ];
-        const results = await Promise.allSettled(subTasks);
-        const failedCount = results.filter(
-          (r) => r.status === "rejected",
-        ).length;
-        message.success(
-          failedCount === 0
-            ? `已复制为「${created.name}」（SKU 库存已归零，请在编辑页补库存）`
-            : `已复制为「${created.name}」，${failedCount} 项子资源复制失败；SKU 库存已归零，请在编辑页核对`,
+        const results = await Promise.allSettled(subTasks.map(({ task }) => task));
+        const failedLabels = results.flatMap((result, index) =>
+          result.status === "rejected" ? [subTasks[index].label] : [],
         );
+        if (failedLabels.length === 0) {
+          message.success(`已复制为「${created.name}」（SKU 库存已归零，请在编辑页补库存）`);
+        } else {
+          message.warning(
+            `主商品「${created.name}」已创建；未完成：${failedLabels.join("、")}。SKU 库存已归零，请在编辑页核对后重试。`,
+          );
+        }
         navigate(
           `/admin/products/${created.id}/edit?returnTo=${encodeURIComponent(listReturnPath)}`,
         );

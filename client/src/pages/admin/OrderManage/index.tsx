@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { SecureImage } from "@/components/common/SecureImage";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
@@ -9,6 +9,7 @@ import {
 } from "@/components/common/AdminDataStates";
 import {
   App as AntdApp,
+  Alert,
   Button,
   Card,
   DatePicker,
@@ -81,6 +82,99 @@ function isMultiPackageShipConflict(error: unknown) {
     message.includes("多包裹订单请前往履约中心");
 }
 
+function getHttpErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as { status?: unknown; response?: { status?: unknown } };
+  const status = candidate.response?.status ?? candidate.status;
+  return typeof status === "number" ? status : null;
+}
+
+function isAmbiguousWriteFailure(error: unknown) {
+  const status = getHttpErrorStatus(error);
+  return status === null || status >= 500;
+}
+
+function isIdempotencyConflict(error: unknown) {
+  if (getHttpErrorStatus(error) !== 409 || !error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    message?: unknown;
+    response?: { data?: { message?: unknown } };
+  };
+  const message = candidate.response?.data?.message ?? candidate.message;
+  const text = Array.isArray(message) ? message.join(" ") : message;
+  return typeof text === "string" && /幂等|idempoten/i.test(text);
+}
+
+type AdminOrderCreateAttempt = {
+  fingerprint: string;
+  key: string;
+};
+
+function orderCreateAttemptStorageKey(userId: number) {
+  return `hc:admin-order-create-attempt:${userId}`;
+}
+
+function readOrderCreateAttempt(storageKey: string): AdminOrderCreateAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(storageKey);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<AdminOrderCreateAttempt>;
+    return typeof value.fingerprint === "string" && typeof value.key === "string"
+      ? { fingerprint: value.fingerprint, key: value.key }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeOrderCreateAttempt(
+  storageKey: string,
+  attempt: AdminOrderCreateAttempt,
+) {
+  try {
+    const serialized = JSON.stringify(attempt);
+    sessionStorage.setItem(storageKey, serialized);
+    return sessionStorage.getItem(storageKey) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+function clearOrderCreateAttempt(storageKey: string) {
+  try {
+    sessionStorage.removeItem(storageKey);
+  } catch {
+    // 已确认成功、确定拒绝或员工明确放弃后，不让清理失败覆盖业务结果。
+  }
+}
+
+function createAdminOrderIdempotencyKey() {
+  const suffix = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `admin-order-create-${suffix}`;
+}
+
+async function hashAdminOrderCreatePayload(payload: object) {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+function normalizeOrderCreateItems(items: CreateOrderInput["items"]) {
+  const quantities = new Map<number, number>();
+  for (const item of items) {
+    quantities.set(item.skuId, (quantities.get(item.skuId) ?? 0) + item.quantity);
+  }
+  return [...quantities.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([skuId, quantity]) => ({ skuId, quantity }));
+}
+
 function isOrderStatusFilter(value: string): value is "all" | OrderStatus {
   return value === "all" || Object.prototype.hasOwnProperty.call(ORDER_STATUS_META, value);
 }
@@ -112,6 +206,44 @@ interface OrderOperationValues {
   internalNote?: string;
   salesConsultantId?: number;
   stage?: CustomStage;
+}
+
+const ORDER_OPERATION_LABEL: Record<OrderOperationType, string> = {
+  amount: "订单金额",
+  address: "收货地址",
+  note: "内部备注",
+  consultant: "销售顾问",
+  "custom-stage": "定制阶段",
+};
+
+function isOrderOperationApplied(
+  order: Order,
+  type: OrderOperationType,
+  values: OrderOperationValues,
+) {
+  if (type === "amount") {
+    const fields = [
+      "discountAmount",
+      "adjustmentAmount",
+      "finalAmount",
+      "depositAmount",
+      "balanceAmount",
+    ] as const;
+    const submittedFields = fields.filter((field) => values[field] !== undefined);
+    return submittedFields.length > 0 && submittedFields.every((field) =>
+      Number(order[field]) === Number(values[field]),
+    );
+  }
+  if (type === "address") {
+    return Boolean(values.address?.trim()) && order.address === values.address?.trim();
+  }
+  if (type === "note") {
+    return (order.internalNote?.trim() || null) === (values.internalNote?.trim() || null);
+  }
+  if (type === "consultant") {
+    return (order.salesConsultantId ?? null) === (values.salesConsultantId ?? null);
+  }
+  return order.customStage === values.stage;
 }
 
 // 交易事件类型中文映射（时间线展示）
@@ -186,6 +318,100 @@ const CUSTOM_STAGE_LABEL: Record<string, string> = {
   COMPLETED: "已完成",
 };
 
+const MANUAL_CUSTOM_STAGE_OPTIONS = Object.entries(CUSTOM_STAGE_LABEL)
+  .filter(
+    ([stage]) =>
+      !["DEPOSIT_PAID", "BALANCE_PAID", "DELIVERED", "COMPLETED"].includes(stage),
+  )
+  .map(([value, label]) => ({ value, label }));
+
+const POST_DEPOSIT_MANUAL_STAGES = new Set<CustomStage>([
+  "DESIGN_CONFIRM",
+  "IN_PRODUCTION",
+  "QC_PASSED",
+  "PENDING_BALANCE",
+]);
+
+const DELIVERY_BLOCKING_REFUND_STATUSES = new Set(["PENDING", "APPROVED", "PROCESSING"]);
+const DELIVERY_BLOCKING_AFTER_SALES_STATUSES = new Set([
+  "REQUESTED",
+  "APPROVED",
+  "RETURNING",
+  "QC_PASSED",
+  "QC_FAILED",
+]);
+
+function hasDeliveryBlockingDispute(order: Order | null) {
+  return Boolean(
+    order?.refunds?.some((refund) => DELIVERY_BLOCKING_REFUND_STATUSES.has(refund.status))
+    || order?.afterSalesCases?.some((caseRecord) =>
+      DELIVERY_BLOCKING_AFTER_SALES_STATUSES.has(caseRecord.status),
+    ),
+  );
+}
+
+function getCustomStageFinancialGate(order: Order | null) {
+  if (!order) return { depositReady: false, fullyPaid: false, factsValid: false };
+  const finalAmount = Number(order.finalAmount);
+  const depositAmount = Number(order.depositAmount || 0);
+  const paidAmount = Number(order.paidAmount || 0);
+  const refundedAmount = Number(order.refundedAmount || 0);
+  const factsValid = [finalAmount, depositAmount, paidAmount, refundedAmount]
+    .every(Number.isFinite) && finalAmount > 0 && depositAmount >= 0;
+  if (!factsValid) return { depositReady: false, fullyPaid: false, factsValid: false };
+  const netPaidAmount = paidAmount - refundedAmount;
+  const requiredDeposit = depositAmount > 0 ? depositAmount : finalAmount;
+  return {
+    factsValid: true,
+    depositReady: netPaidAmount >= requiredDeposit,
+    fullyPaid: netPaidAmount >= finalAmount,
+  };
+}
+
+function getAvailableManualCustomStages(order: Order | null) {
+  const gate = getCustomStageFinancialGate(order);
+  return MANUAL_CUSTOM_STAGE_OPTIONS.filter((option) => {
+    if (option.value === order?.customStage) return false;
+    if (POST_DEPOSIT_MANUAL_STAGES.has(option.value as CustomStage)) return gate.depositReady;
+    if (option.value === "PENDING_DELIVERY") {
+      return gate.fullyPaid && !hasDeliveryBlockingDispute(order);
+    }
+    return true;
+  });
+}
+
+function getCustomStageFinancialHint(order: Order | null): string | null {
+  const gate = getCustomStageFinancialGate(order);
+  if (!gate.factsValid) return "收款事实不完整，设计、制作和交付阶段已失败关闭，请先核对订单金额。";
+  if (!gate.depositReady) return "已确认净收尚未达到约定定金，暂不能进入设计、制作、质检或待付尾款阶段。";
+  if (!gate.fullyPaid) return "尾款尚未收齐，暂不能进入待交付阶段。";
+  if (hasDeliveryBlockingDispute(order)) return "订单存在处理中的退款或售后，暂不能进入待交付阶段。";
+  return null;
+}
+
+function getOrderStatusMeta(order: Pick<Order, "status" | "orderType" | "customStage">) {
+  if (
+    order.orderType === "CUSTOM" &&
+    order.status === "PENDING_SHIP" &&
+    order.customStage
+  ) {
+    return {
+      color: "purple",
+      label: CUSTOM_STAGE_LABEL[order.customStage] || order.customStage,
+    };
+  }
+  return ORDER_STATUS_META[order.status];
+}
+
+function getDeliveryStatusMeta(
+  order: Pick<Order, "orderType" | "deliveryStatus">,
+) {
+  if (order.orderType === "CUSTOM" && (order.deliveryStatus || "NONE") === "NONE") {
+    return { c: "purple", t: "未到交付阶段" };
+  }
+  return DELIVERY_STATUS_META[order.deliveryStatus || "NONE"];
+}
+
 /** 由 paidAmount / finalAmount 派生支付状态（列表与详情复用） */
 function derivePaymentStatus(
   paid: number | undefined | null,
@@ -241,6 +467,42 @@ type OrderDetail = Order & {
   } | null;
 };
 
+type ShipmentVerification = "applied" | "not-applied" | "unknown";
+
+function verifyAuthoritativeShipment(
+  order: OrderDetail,
+  values: { logisticsCompany: string; logisticsNo: string },
+): ShipmentVerification {
+  const fulfillments = order.fulfillments ?? [];
+  const fulfillment = fulfillments.length === 1 ? fulfillments[0] : null;
+  const carrier = (fulfillment?.carrier ?? order.logisticsCompany)?.trim();
+  const trackingNo = (fulfillment?.trackingNo ?? order.logisticsNo)?.trim();
+  const targetCarrier = values.logisticsCompany.trim();
+  const targetTrackingNo = values.logisticsNo.trim();
+
+  if (
+    fulfillment
+    && ["SHIPPED", "ABNORMAL", "DELIVERED"].includes(fulfillment.status)
+    && carrier === targetCarrier
+    && trackingNo === targetTrackingNo
+  ) {
+    return "applied";
+  }
+
+  if (
+    order.status === "PENDING_SHIP"
+    && order.deliveryStatus === "PENDING_SHIP"
+    && fulfillments.length === 1
+    && ["PENDING_PICK", "PENDING_CHECK", "PENDING_SHIP"].includes(fulfillment?.status ?? "")
+    && !carrier
+    && !trackingNo
+  ) {
+    return "not-applied";
+  }
+
+  return "unknown";
+}
+
 type OrderCapabilities = Readonly<{
   canExport: boolean;
   canCreate: boolean;
@@ -279,6 +541,7 @@ export default function OrderManage() {
   const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
   const role = useAuthStore((state) => state.user?.role);
+  const userId = useAuthStore((state) => state.user?.id);
   const capabilities = getOrderCapabilities(role);
   const [searchParams, setSearchParams] = useSearchParams();
   const [list, setList] = useState<Order[]>([]);
@@ -314,7 +577,12 @@ export default function OrderManage() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<unknown | null>(null);
+  const detailRequestIdRef = useRef(0);
   const [shippingOrder, setShippingOrder] = useState<Order | null>(null);
+  const shippingRequestIdRef = useRef(0);
+  const [cancellingOrder, setCancellingOrder] = useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
   const detailHasBlockingPayment =
     detail?.payments?.some((payment) => payment.status !== "FAILED") ?? false;
   const canEditDetailAmount = Boolean(
@@ -326,6 +594,12 @@ export default function OrderManage() {
     capabilities.canEditAddress &&
       detail &&
       ["PENDING_PAYMENT", "PENDING_SHIP"].includes(detail.status),
+  );
+  const canAdvanceCustomStageDetail = Boolean(
+    capabilities.canAdvanceCustomStage &&
+      detail?.orderType === "CUSTOM" &&
+      detail.customStage !== "COMPLETED" &&
+      !["CANCELLED", "COMPLETED"].includes(detail.status),
   );
   const canReceiveDetail = Boolean(
     capabilities.canReceive &&
@@ -358,6 +632,9 @@ export default function OrderManage() {
   const [consultants, setConsultants] = useState<User[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [createSaving, setCreateSaving] = useState(false);
+  const [pendingCreateAttempt, setPendingCreateAttempt] = useState(false);
+  const [createAttemptConflict, setCreateAttemptConflict] = useState(false);
+  const createRequestIdRef = useRef(0);
   const [createForm] = Form.useForm<Omit<CreateOrderInput, "items">>();
   const [itemRows, setItemRows] = useState<
     Array<{ key: number; productId?: number; skuId?: number; quantity: number }>
@@ -365,9 +642,16 @@ export default function OrderManage() {
   const [productOptions, setProductOptions] = useState<
     Array<{ value: number; label: string }>
   >([]);
+  const [productSearching, setProductSearching] = useState(false);
+  const [productSearchKeyword, setProductSearchKeyword] = useState("");
+  const [productSearchError, setProductSearchError] = useState<string | null>(null);
+  const productSearchRequestIdRef = useRef(0);
   const [skuOptionsMap, setSkuOptionsMap] = useState<
     Record<number, Array<{ value: number; label: string }>>
   >({});
+  const [skuLoadErrors, setSkuLoadErrors] = useState<Record<number, string>>({});
+  const [skuLoadingMap, setSkuLoadingMap] = useState<Record<number, boolean>>({});
+  const skuRequestIdRef = useRef<Record<number, number>>({});
   // 建单试算：skuId → 售价（元），用于优惠券门槛判断与券后合计展示
   const [skuPriceMap, setSkuPriceMap] = useState<Record<number, number>>({});
   const [couponOptions, setCouponOptions] = useState<
@@ -382,7 +666,9 @@ export default function OrderManage() {
     setPage(1);
   };
 
+  const listRequestIdRef = useRef(0);
   const load = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setLoading(true);
     setLoadError(null);
     try {
@@ -404,14 +690,16 @@ export default function OrderManage() {
       };
       const res = await orderApi.getList(params);
       const data = unwrapResponse<PaginatedResult<Order>>(res);
+      if (requestId !== listRequestIdRef.current) return;
       setList(data?.list || []);
       setTotal(data?.total || 0);
     } catch (error: unknown) {
+      if (requestId !== listRequestIdRef.current) return;
       setLoadError(error);
       setList([]);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setLoading(false);
     }
   }, [
     page,
@@ -431,18 +719,31 @@ export default function OrderManage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    createRequestIdRef.current += 1;
+    setCreateSaving(false);
+    setCreateAttemptConflict(false);
+    setPendingCreateAttempt(
+      userId != null
+        && readOrderCreateAttempt(orderCreateAttemptStorageKey(userId)) !== null,
+    );
+  }, [userId]);
+
   const openDetail = async (orderId: number) => {
+    const requestId = ++detailRequestIdRef.current;
     setDetailId(orderId);
     setDetail(null);
     setDetailLoading(true);
     setDetailError(null);
     try {
       const res = await orderApi.getById(orderId);
+      if (requestId !== detailRequestIdRef.current) return;
       setDetail(unwrapResponse<OrderDetail>(res));
     } catch (e: unknown) {
+      if (requestId !== detailRequestIdRef.current) return;
       setDetailError(e);
     } finally {
-      setDetailLoading(false);
+      if (requestId === detailRequestIdRef.current) setDetailLoading(false);
     }
   };
 
@@ -455,14 +756,40 @@ export default function OrderManage() {
     },
   ) => {
     if (!capabilities.canShip) return;
+    const requestId = ++shippingRequestIdRef.current;
     setShipping(true);
     try {
       await orderApi.ship(id, values);
+      if (requestId !== shippingRequestIdRef.current) return;
       message.success("发货信息已登记，订单状态已更新为“已发货”。");
       setShippingOrder(null);
       void load();
       if (detail?.id === id) void openDetail(id);
     } catch (e: unknown) {
+      if (requestId !== shippingRequestIdRef.current) return;
+      if (isAmbiguousWriteFailure(e)) {
+        try {
+          const authoritative = unwrapResponse<OrderDetail>(await orderApi.getById(id));
+          if (requestId !== shippingRequestIdRef.current) return;
+          const verification = verifyAuthoritativeShipment(authoritative, values);
+          if (verification === "applied") {
+            message.success("发货信息已写入并完成权威核验");
+            setShippingOrder(null);
+            void load();
+            if (detail?.id === id) void openDetail(id);
+            return;
+          }
+          if (verification === "not-applied") {
+            message.warning("权威订单仍明确处于待发货，本次登记确定未生效；当前物流信息已保留，可安全重试。");
+            return;
+          }
+          message.warning("发货登记结果待确认，当前物流信息已保留；请先核对订单详情或履约中心，暂不要重复操作。");
+        } catch {
+          if (requestId !== shippingRequestIdRef.current) return;
+          message.warning("发货登记结果待确认，当前物流信息已保留；请先核对订单详情或履约中心，暂不要重复操作。");
+        }
+        return;
+      }
       const errorMessage = getSafeAdminErrorMessage(
         e,
         "发货登记失败，请核对物流信息后重试。",
@@ -478,8 +805,20 @@ export default function OrderManage() {
         });
       }
     } finally {
-      setShipping(false);
+      if (requestId === shippingRequestIdRef.current) setShipping(false);
     }
+  };
+
+  const openShippingModal = (order: Order) => {
+    shippingRequestIdRef.current += 1;
+    setShipping(false);
+    setShippingOrder(order);
+  };
+
+  const closeShippingModal = () => {
+    shippingRequestIdRef.current += 1;
+    setShipping(false);
+    setShippingOrder(null);
   };
 
   const handleComplete = (record: Order) => {
@@ -495,6 +834,21 @@ export default function OrderManage() {
           message.success("订单已完成");
           void load();
         } catch (e: unknown) {
+          if (isAmbiguousWriteFailure(e)) {
+            try {
+              const authoritative = unwrapResponse<OrderDetail>(await orderApi.getById(record.id));
+              if (authoritative.status === "COMPLETED") {
+                message.success("订单已完成并完成权威核验");
+                void load();
+                return;
+              }
+              message.warning("权威订单仍未完成，本次操作确定未生效，可安全重试。");
+              return;
+            } catch {
+              message.warning("订单完成结果待确认，请先重新加载核对，暂不要重复操作。");
+              return;
+            }
+          }
           message.error(getSafeAdminErrorMessage(e, "订单完成状态更新失败，请重新加载后重试。"));
         }
       },
@@ -503,34 +857,45 @@ export default function OrderManage() {
 
   const handleCancel = (record: Order) => {
     if (!capabilities.canCancel) return;
-    let internalNote = "";
-    modal.confirm({
-      title: "确认取消该订单？",
-      content: (
-        <Input.TextArea
-          placeholder="取消原因（将记录到交易事件）"
-          rows={3}
-          onChange={(e) => {
-            internalNote = e.target.value;
-          }}
-        />
-      ),
-      okText: "确认取消",
-      cancelText: ADMIN_COPY.actions.cancel,
-      okButtonProps: { danger: true },
-      onOk: async () => {
+    setCancelReason("");
+    setCancellingOrder(record);
+  };
+
+  const submitCancel = async () => {
+    if (!cancellingOrder || cancelling) return;
+    const orderId = cancellingOrder.id;
+    setCancelling(true);
+    try {
+      await orderApi.updateStatus(orderId, {
+        status: "CANCELLED",
+        internalNote: cancelReason.trim() || undefined,
+      });
+      message.success("订单已取消");
+      setCancellingOrder(null);
+      setCancelReason("");
+      void load();
+    } catch (e: unknown) {
+      if (isAmbiguousWriteFailure(e)) {
         try {
-          await orderApi.updateStatus(record.id, {
-            status: "CANCELLED",
-            internalNote: internalNote || undefined,
-          });
-          message.success("订单已取消");
-          void load();
-        } catch (e: unknown) {
-          message.error(getSafeAdminErrorMessage(e, "订单取消失败，请重新加载后确认当前状态。"));
+          const authoritative = unwrapResponse<OrderDetail>(await orderApi.getById(orderId));
+          if (authoritative.status === "CANCELLED") {
+            message.success("订单已取消并完成权威核验");
+            setCancellingOrder(null);
+            setCancelReason("");
+            void load();
+            return;
+          }
+          message.warning("权威订单仍未取消，本次操作确定未生效，当前原因已保留，可安全重试。");
+          return;
+        } catch {
+          message.warning("订单取消结果待确认，当前原因已保留；请先重新加载核对，暂不要重复操作。");
+          return;
         }
-      },
-    });
+      }
+      message.error(getSafeAdminErrorMessage(e, "订单取消失败，请重新加载后确认当前状态。"));
+    } finally {
+      setCancelling(false);
+    }
   };
 
   const handleExport = async () => {
@@ -621,7 +986,7 @@ export default function OrderManage() {
       (type === "address" && canEditDetailAddress) ||
       (type === "note" && capabilities.canEditNote) ||
       (type === "consultant" && capabilities.canEditConsultant) ||
-      (type === "custom-stage" && capabilities.canAdvanceCustomStage);
+      (type === "custom-stage" && canAdvanceCustomStageDetail);
     if (!allowed) return;
     if (type === "consultant" && consultants.length === 0)
       void loadConsultants();
@@ -630,15 +995,17 @@ export default function OrderManage() {
 
   const submitOp = async (values: OrderOperationValues) => {
     if (!detail) return;
+    const operationType = opModal.type;
+    const submittedDetailRequestId = detailRequestIdRef.current;
     const allowed =
-      (opModal.type === "amount" && canEditDetailAmount) ||
-      (opModal.type === "address" && canEditDetailAddress) ||
-      (opModal.type === "note" && capabilities.canEditNote) ||
-      (opModal.type === "consultant" && capabilities.canEditConsultant) ||
-      (opModal.type === "custom-stage" && capabilities.canAdvanceCustomStage);
-    if (!allowed) return;
+      (operationType === "amount" && canEditDetailAmount) ||
+      (operationType === "address" && canEditDetailAddress) ||
+      (operationType === "note" && capabilities.canEditNote) ||
+      (operationType === "consultant" && capabilities.canEditConsultant) ||
+      (operationType === "custom-stage" && canAdvanceCustomStageDetail);
+    if (!operationType || !allowed) return;
     try {
-      if (opModal.type === "amount") {
+      if (operationType === "amount") {
         if (!values.reason?.trim()) return;
         await orderApi.updateAmount(detail.id, {
           discountAmount: values.discountAmount,
@@ -648,30 +1015,51 @@ export default function OrderManage() {
           balanceAmount: values.balanceAmount,
           reason: values.reason,
         });
-      } else if (opModal.type === "address") {
+      } else if (operationType === "address") {
         if (!values.address?.trim()) return;
         await orderApi.updateAddress(detail.id, values.address);
       }
-      else if (opModal.type === "note")
+      else if (operationType === "note")
         await orderApi.updateNote(detail.id, values.internalNote);
-      else if (opModal.type === "consultant")
+      else if (operationType === "consultant")
         await orderApi.updateConsultant(
           detail.id,
           values.salesConsultantId ?? null,
         );
-      else if (opModal.type === "custom-stage" && values.stage)
+      else if (operationType === "custom-stage" && values.stage)
         await orderApi.advanceCustomStage(detail.id, values.stage);
       message.success("订单信息已更新");
       setOpModal({ type: null, open: false });
       void openDetail(detail.id);
       void load();
     } catch (e: unknown) {
+      if (isAmbiguousWriteFailure(e)) {
+        try {
+          const authoritative = unwrapResponse<OrderDetail>(await orderApi.getById(detail.id));
+          if (submittedDetailRequestId !== detailRequestIdRef.current) return;
+          setDetail(authoritative);
+          if (isOrderOperationApplied(authoritative, operationType, values)) {
+            message.success(`${ORDER_OPERATION_LABEL[operationType]}已写入并完成权威核验`);
+            setOpModal({ type: null, open: false });
+            void load();
+            return;
+          }
+          message.warning("权威订单仍未匹配本次修改，本次操作确定未生效，当前输入已保留，可安全重试。");
+          return;
+        } catch {
+          if (submittedDetailRequestId !== detailRequestIdRef.current) return;
+          message.warning("订单修改结果待确认，当前输入已保留；请先重新加载详情，暂不要重复操作。");
+          return;
+        }
+      }
       message.error(getSafeAdminErrorMessage(e, "订单信息更新失败，请检查填写内容后重试。"));
     }
   };
 
   const handleReceive = () => {
     if (!detail || !canReceiveDetail) return;
+    const orderId = detail.id;
+    const submittedDetailRequestId = detailRequestIdRef.current;
     modal.confirm({
       title: "确认签收？",
       content: "确认后，订单的发货状态将更新为“已签收”。",
@@ -679,11 +1067,31 @@ export default function OrderManage() {
       cancelText: ADMIN_COPY.actions.cancel,
       onOk: async () => {
         try {
-          await orderApi.confirmReceive(detail.id);
+          await orderApi.confirmReceive(orderId);
+          if (submittedDetailRequestId !== detailRequestIdRef.current) return;
           message.success("订单已签收");
-          void openDetail(detail.id);
+          void openDetail(orderId);
           void load();
         } catch (e: unknown) {
+          if (submittedDetailRequestId !== detailRequestIdRef.current) return;
+          if (isAmbiguousWriteFailure(e)) {
+            try {
+              const authoritative = unwrapResponse<OrderDetail>(await orderApi.getById(orderId));
+              if (submittedDetailRequestId !== detailRequestIdRef.current) return;
+              if (authoritative.deliveryStatus === "RECEIVED") {
+                setDetail(authoritative);
+                message.success("订单已签收并完成权威核验");
+                void load();
+                return;
+              }
+              message.warning("权威订单仍未签收，本次操作确定未生效，可安全重试。");
+              return;
+            } catch {
+              if (submittedDetailRequestId !== detailRequestIdRef.current) return;
+              message.warning("签收结果待确认，请先重新加载订单详情核对，暂不要重复操作。");
+              return;
+            }
+          }
           message.error(getSafeAdminErrorMessage(e, "签收状态更新失败，请重新加载后重试。"));
         }
       },
@@ -691,25 +1099,51 @@ export default function OrderManage() {
   };
 
   const searchProducts = async (kw: string) => {
+    const requestId = ++productSearchRequestIdRef.current;
+    setProductSearchKeyword(kw);
+    setProductSearching(true);
+    setProductSearchError(null);
     try {
       const res = await productApi.getList({
         keyword: kw || undefined,
         pageSize: 30,
       });
       const list = unwrapResponse<PaginatedResult<Product>>(res)?.list || [];
+      if (requestId !== productSearchRequestIdRef.current) return;
       setProductOptions(
         list.map((p) => ({ value: p.id, label: `${p.name} (${p.code})` })),
       );
-    } catch {
+    } catch (error: unknown) {
+      if (requestId !== productSearchRequestIdRef.current) return;
       setProductOptions([]);
+      setProductSearchError(
+        getSafeAdminErrorMessage(error, "商品搜索失败，请保留当前输入并重试。"),
+      );
+    } finally {
+      if (requestId === productSearchRequestIdRef.current) {
+        setProductSearching(false);
+      }
     }
   };
 
   const loadSkus = async (productId: number) => {
-    if (skuOptionsMap[productId]) return;
+    if (
+      skuOptionsMap[productId]
+      && !skuLoadErrors[productId]
+      && !skuLoadingMap[productId]
+    ) return;
+    const requestId = (skuRequestIdRef.current[productId] ?? 0) + 1;
+    skuRequestIdRef.current[productId] = requestId;
+    setSkuLoadingMap((loadingMap) => ({ ...loadingMap, [productId]: true }));
+    setSkuLoadErrors((errors) => {
+      const next = { ...errors };
+      delete next[productId];
+      return next;
+    });
     try {
-      const res = await productApi.getSkus(productId);
+      const res = await productApi.getSkus(productId, { dedupe: false });
       const list = unwrapResponse<ProductSKU[]>(res) || [];
+      if (requestId !== skuRequestIdRef.current[productId]) return;
       setSkuOptionsMap((m) => ({
         ...m,
         [productId]: list.map((s) => ({ value: s.id, label: s.skuCode })),
@@ -720,8 +1154,17 @@ export default function OrderManage() {
         for (const s of list) next[s.id] = Number(s.price) || 0;
         return next;
       });
-    } catch {
+    } catch (error: unknown) {
+      if (requestId !== skuRequestIdRef.current[productId]) return;
       setSkuOptionsMap((m) => ({ ...m, [productId]: [] }));
+      setSkuLoadErrors((errors) => ({
+        ...errors,
+        [productId]: getSafeAdminErrorMessage(error, "SKU 加载失败，请重试。"),
+      }));
+    } finally {
+      if (requestId === skuRequestIdRef.current[productId]) {
+        setSkuLoadingMap((loadingMap) => ({ ...loadingMap, [productId]: false }));
+      }
     }
   };
 
@@ -770,19 +1213,105 @@ export default function OrderManage() {
     };
   }, [createOpen, createTotalCents]);
 
+  const openCreateDialog = () => {
+    setCreateAttemptConflict(false);
+    setPendingCreateAttempt(
+      userId != null
+        && readOrderCreateAttempt(orderCreateAttemptStorageKey(userId)) !== null,
+    );
+    void searchProducts("");
+    setCreateOpen(true);
+  };
+
+  const abandonPendingCreateAttempt = () => {
+    if (userId == null) return;
+    modal.confirm({
+      title: "放弃待确认的人工建单凭据？",
+      content: "这不会撤销服务器上可能已经创建的订单，也不会释放可能已经占用的库存或优惠券。请先刷新并核对订单列表；放弃后，当前表单将被视为一笔新的建单意图。",
+      okText: "确认放弃凭据",
+      cancelText: "保留凭据",
+      okButtonProps: { danger: true },
+      onOk: () => {
+        clearOrderCreateAttempt(orderCreateAttemptStorageKey(userId));
+        setPendingCreateAttempt(false);
+        setCreateAttemptConflict(false);
+        message.info("待确认凭据已放弃；请再次提交当前内容以创建新的订单意图。");
+      },
+    });
+  };
+
   const submitCreate = async (values: Omit<CreateOrderInput, "items">) => {
     if (!capabilities.canCreate) return;
-    const items: CreateOrderInput["items"] = itemRows.flatMap((row) =>
+    if (userId == null) {
+      message.error("当前员工会话缺少身份，系统未发送建单请求。请重新登录后再试。");
+      return;
+    }
+    const ownerId = userId;
+    const requestId = ++createRequestIdRef.current;
+    const items = normalizeOrderCreateItems(itemRows.flatMap((row) =>
       row.skuId ? [{ skuId: row.skuId, quantity: row.quantity }] : [],
-    );
+    ));
     if (items.length === 0) {
       message.error("请至少选择一个商品 SKU");
       return;
     }
+    let requestSent = false;
     setCreateSaving(true);
     try {
-      await orderApi.create({ ...values, items });
+      const payload: CreateOrderInput = {
+        ...(values.customerId == null ? {} : { customerId: Number(values.customerId) }),
+        customerName: values.customerName.trim(),
+        customerPhone: values.customerPhone.trim(),
+        ...(values.customerEmail?.trim()
+          ? { customerEmail: values.customerEmail.trim() }
+          : {}),
+        address: values.address.trim(),
+        paymentMethod: values.paymentMethod?.trim() || "bank_transfer",
+        ...(values.couponId == null ? {} : { couponId: Number(values.couponId) }),
+        items,
+      };
+      const storageKey = orderCreateAttemptStorageKey(ownerId);
+      const fingerprint = await hashAdminOrderCreatePayload({
+        customerId: payload.customerId ?? null,
+        customerName: payload.customerName,
+        customerPhone: payload.customerPhone,
+        customerEmail: payload.customerEmail ?? null,
+        address: payload.address,
+        paymentMethod: payload.paymentMethod,
+        couponId: payload.couponId ?? null,
+        items: payload.items,
+      });
+      if (
+        requestId !== createRequestIdRef.current
+        || useAuthStore.getState().user?.id !== ownerId
+      ) return;
+      const storedAttempt = readOrderCreateAttempt(storageKey);
+      if (storedAttempt && storedAttempt.fingerprint !== fingerprint) {
+        setPendingCreateAttempt(true);
+        setCreateAttemptConflict(true);
+        message.warning("检测到另一笔结果待确认的人工建单；系统未发送当前订单。请恢复原内容重试，或先核对订单列表后明确放弃旧凭据。");
+        return;
+      }
+      const attempt = storedAttempt ?? {
+        fingerprint,
+        key: createAdminOrderIdempotencyKey(),
+      };
+      if (!writeOrderCreateAttempt(storageKey, attempt)) {
+        message.error("浏览器无法安全保存本次建单的重试凭据，系统未发送请求。请恢复会话存储后再试。");
+        return;
+      }
+      setPendingCreateAttempt(true);
+      setCreateAttemptConflict(false);
+      requestSent = true;
+      await orderApi.create(payload, attempt.key);
+      if (
+        requestId !== createRequestIdRef.current
+        || useAuthStore.getState().user?.id !== ownerId
+      ) return;
       message.success("订单已创建");
+      clearOrderCreateAttempt(storageKey);
+      setPendingCreateAttempt(false);
+      setCreateAttemptConflict(false);
       setCreateOpen(false);
       createForm.resetFields();
       setItemRows([{ key: 1, quantity: 1 }]);
@@ -790,9 +1319,30 @@ export default function OrderManage() {
       setSkuOptionsMap({});
       void load();
     } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, "订单创建失败，请核对必填信息和商品明细后重试。"));
+      if (
+        requestId !== createRequestIdRef.current
+        || useAuthStore.getState().user?.id !== ownerId
+      ) return;
+      if (!requestSent) {
+        message.error("无法生成安全的人工建单重试凭据，系统未发送请求。请刷新页面后再试。");
+      } else if (isAmbiguousWriteFailure(e)) {
+        setPendingCreateAttempt(true);
+        message.warning("订单创建结果待确认；请保持客户、地址、付款方式、优惠券和商品明细不变后重试，系统会沿用同一凭据恢复结果。");
+      } else if (isIdempotencyConflict(e)) {
+        setPendingCreateAttempt(true);
+        setCreateAttemptConflict(true);
+        message.warning("当前建单凭据已对应另一组内容，系统未创建新订单。请先核对订单列表，再恢复原内容重试或明确放弃旧凭据。");
+      } else {
+        clearOrderCreateAttempt(orderCreateAttemptStorageKey(ownerId));
+        setPendingCreateAttempt(false);
+        setCreateAttemptConflict(false);
+        message.error(getSafeAdminErrorMessage(e, "订单创建失败，请核对必填信息和商品明细后重试。"));
+      }
     } finally {
-      setCreateSaving(false);
+      if (
+        requestId === createRequestIdRef.current
+        && useAuthStore.getState().user?.id === ownerId
+      ) setCreateSaving(false);
     }
   };
 
@@ -843,10 +1393,7 @@ export default function OrderManage() {
           {capabilities.canCreate && (
             <Button
               type="primary"
-              onClick={() => {
-                void searchProducts("");
-                setCreateOpen(true);
-              }}
+              onClick={openCreateDialog}
             >
               人工建单
             </Button>
@@ -1067,16 +1614,17 @@ export default function OrderManage() {
                 title: "订单状态",
                 dataIndex: "status",
                 width: 90,
-                render: (v: OrderStatus) => (
-                  <Tag color={ORDER_STATUS_META[v]?.color}>{ORDER_STATUS_META[v]?.label}</Tag>
-                ),
+                render: (_v: OrderStatus, r: Order) => {
+                  const m = getOrderStatusMeta(r);
+                  return <Tag color={m?.color}>{m?.label || r.status}</Tag>;
+                },
               },
               {
                 title: "发货状态",
                 dataIndex: "deliveryStatus",
                 width: 90,
-                render: (v: string) => {
-                  const m = DELIVERY_STATUS_META[v || "NONE"];
+                render: (_v: string, r: Order) => {
+                  const m = getDeliveryStatusMeta(r);
                   return <Tag color={m?.c}>{m?.t || "—"}</Tag>;
                 },
               },
@@ -1100,12 +1648,14 @@ export default function OrderManage() {
                     >
                       详情
                     </Button>
-                    {capabilities.canShip && r.status === "PENDING_SHIP" && (
+                    {capabilities.canShip &&
+                      r.status === "PENDING_SHIP" &&
+                      r.deliveryStatus === "PENDING_SHIP" && (
                       <Button
                         size="small"
                         type="primary"
                         icon={<TruckOutlined />}
-                        onClick={() => setShippingOrder(r)}
+                        onClick={() => openShippingModal(r)}
                       >
                         发货
                       </Button>
@@ -1142,8 +1692,10 @@ export default function OrderManage() {
       <Drawer
         open={detailId !== null}
         onClose={() => {
+          detailRequestIdRef.current += 1;
           setDetailId(null);
           setDetail(null);
+          setDetailLoading(false);
           setDetailError(null);
         }}
         width="min(720px, calc(100vw - 16px))"
@@ -1163,8 +1715,8 @@ export default function OrderManage() {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold">订单摘要</h3>
-                <Tag color={ORDER_STATUS_META[detail.status]?.color}>
-                  {ORDER_STATUS_META[detail.status]?.label}
+                <Tag color={getOrderStatusMeta(detail)?.color}>
+                  {getOrderStatusMeta(detail)?.label || detail.status}
                 </Tag>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
@@ -1518,7 +2070,7 @@ export default function OrderManage() {
               canEditDetailAddress ||
               capabilities.canEditNote ||
               capabilities.canEditConsultant ||
-              (capabilities.canAdvanceCustomStage && detail.orderType === "CUSTOM") ||
+              canAdvanceCustomStageDetail ||
               canReceiveDetail ||
               requiresFulfillmentCenter) && (
               <div>
@@ -1544,7 +2096,7 @@ export default function OrderManage() {
                       修改顾问
                     </Button>
                   )}
-                  {capabilities.canAdvanceCustomStage && detail.orderType === "CUSTOM" && (
+                  {canAdvanceCustomStageDetail && (
                     <Button size="small" onClick={() => openOp("custom-stage")}>
                       推进定制阶段
                     </Button>
@@ -1619,11 +2171,38 @@ export default function OrderManage() {
         )}
       </Drawer>
 
+      <Modal
+        title={cancellingOrder ? `取消订单“${cancellingOrder.orderNo}”？` : "取消订单"}
+        open={!!cancellingOrder}
+        onCancel={() => {
+          if (cancelling) return;
+          setCancellingOrder(null);
+          setCancelReason("");
+        }}
+        onOk={() => void submitCancel()}
+        confirmLoading={cancelling}
+        okText="确认取消"
+        cancelText={ADMIN_COPY.actions.cancel}
+        okButtonProps={{ danger: true }}
+        destroyOnHidden
+      >
+        <p className="mb-3 text-sm text-brand-muted">
+          取消后订单将进入终态，不能继续付款或履约。取消原因会记录到交易事件。
+        </p>
+        <Input.TextArea
+          aria-label="取消原因"
+          placeholder="请输入取消原因（选填）"
+          rows={3}
+          value={cancelReason}
+          onChange={(event) => setCancelReason(event.target.value)}
+        />
+      </Modal>
+
       {/* 发货弹窗 */}
       <Modal
         title="登记发货物流"
         open={!!shippingOrder}
-        onCancel={() => setShippingOrder(null)}
+        onCancel={closeShippingModal}
         footer={null}
         destroyOnHidden
       >
@@ -1673,7 +2252,7 @@ export default function OrderManage() {
               <Input.TextArea rows={3} />
             </Form.Item>
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setShippingOrder(null)}>{ADMIN_COPY.actions.cancel}</Button>
+              <Button onClick={closeShippingModal}>{ADMIN_COPY.actions.cancel}</Button>
               <Button type="primary" htmlType="submit" loading={shipping}>
                 确认发货
               </Button>
@@ -1754,12 +2333,14 @@ export default function OrderManage() {
               rules={[{ required: true, message: "请选择定制阶段" }]}
             >
               <Select
-                options={Object.entries(CUSTOM_STAGE_LABEL).map(([k, v]) => ({
-                  value: k,
-                  label: v,
-                }))}
+                options={getAvailableManualCustomStages(detail)}
               />
             </Form.Item>
+          )}
+          {opModal.type === "custom-stage" && getCustomStageFinancialHint(detail) && (
+            <p role="note" style={{ marginTop: -12, color: "var(--adm-text-secondary)", fontSize: 12 }}>
+              {getCustomStageFinancialHint(detail)}
+            </p>
           )}
           <div className="flex justify-end gap-2">
             <Button onClick={() => setOpModal({ type: null, open: false })}>
@@ -1782,6 +2363,24 @@ export default function OrderManage() {
         width={680}
       >
         <Form layout="vertical" form={createForm} onFinish={submitCreate}>
+          {pendingCreateAttempt ? (
+            <Alert
+              className="mb-4"
+              type="warning"
+              showIcon
+              message={createAttemptConflict
+                ? "存在另一笔结果待确认的人工建单"
+                : "存在结果待确认的人工建单"}
+              description={createAttemptConflict
+                ? "请恢复原客户、地址、付款方式、优惠券和商品明细后重试。只有核对订单列表后确认这是新意图，才放弃原凭据。"
+                : "保持原建单内容不变后再次提交，系统会沿用同一凭据恢复权威结果；请勿改动内容后重复创建。"}
+              action={(
+                <Button size="small" danger onClick={abandonPendingCreateAttempt}>
+                  放弃旧凭据
+                </Button>
+              )}
+            />
+          ) : null}
           <div className="grid grid-cols-2 gap-4">
             <Form.Item
               name="customerName"
@@ -1840,7 +2439,16 @@ export default function OrderManage() {
                   style={{ width: 260 }}
                   onSearch={searchProducts}
                   filterOption={false}
+                  loading={productSearching}
                   options={productOptions}
+                  notFoundContent={productSearching ? "正在搜索商品…" : productSearchError ? (
+                    <div className="space-y-2 py-1 text-sm">
+                      <div>{productSearchError}</div>
+                      <Button size="small" onClick={() => void searchProducts(productSearchKeyword)}>
+                        重新搜索商品
+                      </Button>
+                    </div>
+                  ) : "输入名称或货号搜索商品"}
                   value={row.productId}
                   onChange={(pid: number) => {
                     setItemRows((rs) =>
@@ -1857,8 +2465,17 @@ export default function OrderManage() {
                   placeholder="SKU"
                   style={{ width: 170 }}
                   disabled={!row.productId}
+                  loading={row.productId ? skuLoadingMap[row.productId] : false}
                   options={skuOptionsMap[row.productId || 0] || []}
                   value={row.skuId}
+                  notFoundContent={row.productId && skuLoadErrors[row.productId] ? (
+                    <div className="space-y-2 py-1 text-sm">
+                      <div>{skuLoadErrors[row.productId]}</div>
+                      <Button size="small" onClick={() => void loadSkus(row.productId!)}>
+                        重新加载 SKU
+                      </Button>
+                    </div>
+                  ) : "该商品暂无可用 SKU"}
                   onChange={(sid: number) =>
                     setItemRows((rs) =>
                       rs.map((r) =>

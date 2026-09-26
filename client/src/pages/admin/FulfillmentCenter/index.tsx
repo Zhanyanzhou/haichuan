@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Button, Drawer, Form, Input, message, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { App, Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { ExportOutlined, EyeOutlined, TruckOutlined } from '@ant-design/icons';
 import { fulfillmentApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
@@ -56,7 +56,65 @@ type FulfillmentListItem = {
   };
 };
 
+type WriteVerification = 'applied' | 'not-applied' | 'unknown';
+
+function getHttpErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = error as { status?: unknown; response?: { status?: unknown } };
+  const status = candidate.response?.status ?? candidate.status;
+  return typeof status === 'number' ? status : null;
+}
+
+function isAmbiguousWriteFailure(error: unknown) {
+  const status = getHttpErrorStatus(error);
+  return status === null || status >= 500;
+}
+
+function verifyDispatchResult(
+  fulfillment: FulfillmentListItem,
+  values: { carrier: string; trackingNo: string },
+): WriteVerification {
+  const carrier = fulfillment.carrier?.trim();
+  const trackingNo = fulfillment.trackingNo?.trim();
+  if (
+    ['SHIPPED', 'ABNORMAL', 'DELIVERED'].includes(fulfillment.status)
+    && carrier === values.carrier.trim()
+    && trackingNo === values.trackingNo.trim()
+  ) {
+    return 'applied';
+  }
+  if (
+    ['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP'].includes(fulfillment.status)
+    && !carrier
+    && !trackingNo
+  ) {
+    return 'not-applied';
+  }
+  return 'unknown';
+}
+
+function verifyStatusResult(
+  fulfillment: FulfillmentListItem,
+  originalStatus: FulfillmentStatus,
+  targetStatus: 'DELIVERED' | 'ABNORMAL',
+  abnormalReason?: string,
+): WriteVerification {
+  if (targetStatus === 'DELIVERED' && fulfillment.status === 'DELIVERED') {
+    return 'applied';
+  }
+  if (
+    targetStatus === 'ABNORMAL'
+    && fulfillment.status === 'ABNORMAL'
+    && fulfillment.abnormalReason?.trim() === abnormalReason?.trim()
+  ) {
+    return 'applied';
+  }
+  if (fulfillment.status === originalStatus) return 'not-applied';
+  return 'unknown';
+}
+
 export default function FulfillmentCenter() {
+  const { message, modal } = App.useApp();
   const [list, setList] = useState<FulfillmentListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -66,16 +124,50 @@ export default function FulfillmentCenter() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [keyword, setKeyword] = useState('');
   const [keywordInput, setKeywordInput] = useState('');
+  const listRequestIdRef = useRef(0);
   const [detail, setDetail] = useState<FulfillmentListItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const detailRequestIdRef = useRef(0);
   const [dispatchTarget, setDispatchTarget] = useState<FulfillmentListItem | null>(null);
   const [dispatching, setDispatching] = useState(false);
+  const dispatchRequestIdRef = useRef(0);
   const [abnormalTarget, setAbnormalTarget] = useState<FulfillmentListItem | null>(null);
   const [abnormalReason, setAbnormalReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const abnormalRequestIdRef = useRef(0);
+  const deliveredRequestIdRef = useRef(0);
   const [dispatchForm] = Form.useForm();
 
+  const openDispatchModal = (record: FulfillmentListItem) => {
+    dispatchRequestIdRef.current += 1;
+    setDispatching(false);
+    dispatchForm.resetFields();
+    setDispatchTarget(record);
+  };
+
+  const closeDispatchModal = () => {
+    dispatchRequestIdRef.current += 1;
+    setDispatching(false);
+    setDispatchTarget(null);
+    dispatchForm.resetFields();
+  };
+
+  const openAbnormalModal = (record: FulfillmentListItem) => {
+    abnormalRequestIdRef.current += 1;
+    setSubmitting(false);
+    setAbnormalReason('');
+    setAbnormalTarget(record);
+  };
+
+  const closeAbnormalModal = () => {
+    abnormalRequestIdRef.current += 1;
+    setSubmitting(false);
+    setAbnormalTarget(null);
+    setAbnormalReason('');
+  };
+
   const load = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setLoading(true);
     setLoadError(false);
     try {
@@ -86,13 +178,15 @@ export default function FulfillmentCenter() {
         keyword: keyword || undefined,
       });
       const data = unwrapResponse<PaginatedResult<FulfillmentListItem>>(res);
+      if (requestId !== listRequestIdRef.current) return;
       setList(data?.list || []);
       setTotal(data?.total || 0);
     } catch {
+      if (requestId !== listRequestIdRef.current) return;
       setLoadError(true);
       setList([]);
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setLoading(false);
     }
   }, [page, pageSize, statusFilter, keyword]);
 
@@ -100,48 +194,122 @@ export default function FulfillmentCenter() {
     void load();
   }, [load]);
 
+  useEffect(() => () => {
+    listRequestIdRef.current += 1;
+    detailRequestIdRef.current += 1;
+    dispatchRequestIdRef.current += 1;
+    abnormalRequestIdRef.current += 1;
+    deliveredRequestIdRef.current += 1;
+  }, []);
+
   const openDetail = async (record: FulfillmentListItem) => {
+    const requestId = ++detailRequestIdRef.current;
     setDetail(record);
     setDetailLoading(true);
     try {
       const res = await fulfillmentApi.getById(record.id);
       const full = unwrapResponse<FulfillmentListItem>(res);
+      if (requestId !== detailRequestIdRef.current) return;
       if (full) setDetail(full);
     } catch (e: unknown) {
+      if (requestId !== detailRequestIdRef.current) return;
       // 保留列表快照展示，但明确告知详情刷新失败，可关闭重开重试
       message.error(getSafeAdminErrorMessage(e, '履约详情加载失败，当前展示列表快照，请重新打开重试。'));
     } finally {
-      setDetailLoading(false);
+      if (requestId === detailRequestIdRef.current) setDetailLoading(false);
     }
+  };
+
+  const closeDetail = () => {
+    detailRequestIdRef.current += 1;
+    setDetailLoading(false);
+    setDetail(null);
   };
 
   const handleDispatch = async (values: { carrier: string; trackingNo: string; internalNote?: string }) => {
     if (!dispatchTarget) return;
+    const target = dispatchTarget;
+    const requestId = ++dispatchRequestIdRef.current;
     setDispatching(true);
     try {
-      await fulfillmentApi.dispatch(dispatchTarget.id, values);
+      await fulfillmentApi.dispatch(target.id, values);
+      if (requestId !== dispatchRequestIdRef.current) return;
       message.success('该包裹已发货，订单状态将按全部包裹聚合更新');
-      setDispatchTarget(null);
-      dispatchForm.resetFields();
+      closeDispatchModal();
       void load();
     } catch (error: unknown) {
+      if (requestId !== dispatchRequestIdRef.current) return;
+      if (isAmbiguousWriteFailure(error)) {
+        try {
+          const authoritative = unwrapResponse<FulfillmentListItem>(
+            await fulfillmentApi.getById(target.id),
+          );
+          if (requestId !== dispatchRequestIdRef.current) return;
+          const verification = verifyDispatchResult(authoritative, values);
+          if (verification === 'applied') {
+            message.success('发货信息已写入并完成权威核验');
+            closeDispatchModal();
+            void load();
+            return;
+          }
+          if (verification === 'not-applied') {
+            message.warning('权威履约单仍明确处于待发货，本次登记确定未生效；当前物流信息已保留，可安全重试。');
+            return;
+          }
+          message.warning('发货登记结果待确认，当前物流信息已保留；请先重新加载或查看履约详情，暂不要重复操作。');
+        } catch {
+          if (requestId !== dispatchRequestIdRef.current) return;
+          message.warning('发货登记结果待确认，当前物流信息已保留；请先重新加载或查看履约详情，暂不要重复操作。');
+        }
+        return;
+      }
       message.error(getSafeAdminErrorMessage(error, '发货登记失败，请核对物流信息后重试。'));
     } finally {
-      setDispatching(false);
+      if (requestId === dispatchRequestIdRef.current) setDispatching(false);
     }
   };
 
-  const handleMarkDelivered = async (id: number) => {
-    Modal.confirm({
+  const handleMarkDelivered = (record: FulfillmentListItem) => {
+    modal.confirm({
       title: '将该包裹标记为已送达？',
       content: '标记送达后，履约单进入终态，不可再变更。',
       okText: '确认送达',
       onOk: async () => {
+        const requestId = ++deliveredRequestIdRef.current;
         try {
-          await fulfillmentApi.updateStatus(id, { status: 'DELIVERED' });
+          await fulfillmentApi.updateStatus(record.id, { status: 'DELIVERED' });
+          if (requestId !== deliveredRequestIdRef.current) return;
           message.success('已标记送达');
           void load();
         } catch (error: unknown) {
+          if (requestId !== deliveredRequestIdRef.current) return;
+          if (isAmbiguousWriteFailure(error)) {
+            try {
+              const authoritative = unwrapResponse<FulfillmentListItem>(
+                await fulfillmentApi.getById(record.id),
+              );
+              if (requestId !== deliveredRequestIdRef.current) return;
+              const verification = verifyStatusResult(
+                authoritative,
+                record.status,
+                'DELIVERED',
+              );
+              if (verification === 'applied') {
+                message.success('送达状态已写入并完成权威核验');
+                void load();
+                return;
+              }
+              if (verification === 'not-applied') {
+                message.warning('权威履约单仍未送达，本次操作确定未生效，可安全重试。');
+                return;
+              }
+              message.warning('送达结果待确认，请先重新加载或查看履约详情，暂不要重复操作。');
+            } catch {
+              if (requestId !== deliveredRequestIdRef.current) return;
+              message.warning('送达结果待确认，请先重新加载或查看履约详情，暂不要重复操作。');
+            }
+            return;
+          }
           message.error(getSafeAdminErrorMessage(error, '送达状态更新失败，请重新加载后重试。'));
         }
       },
@@ -154,17 +322,50 @@ export default function FulfillmentCenter() {
       message.warning('请填写物流异常原因');
       return;
     }
+    const target = abnormalTarget;
+    const reason = abnormalReason.trim();
+    const requestId = ++abnormalRequestIdRef.current;
     setSubmitting(true);
     try {
-      await fulfillmentApi.updateStatus(abnormalTarget.id, { status: 'ABNORMAL', abnormalReason: abnormalReason.trim() });
+      await fulfillmentApi.updateStatus(target.id, { status: 'ABNORMAL', abnormalReason: reason });
+      if (requestId !== abnormalRequestIdRef.current) return;
       message.success('已标记物流异常');
-      setAbnormalTarget(null);
-      setAbnormalReason('');
+      closeAbnormalModal();
       void load();
     } catch (error: unknown) {
+      if (requestId !== abnormalRequestIdRef.current) return;
+      if (isAmbiguousWriteFailure(error)) {
+        try {
+          const authoritative = unwrapResponse<FulfillmentListItem>(
+            await fulfillmentApi.getById(target.id),
+          );
+          if (requestId !== abnormalRequestIdRef.current) return;
+          const verification = verifyStatusResult(
+            authoritative,
+            target.status,
+            'ABNORMAL',
+            reason,
+          );
+          if (verification === 'applied') {
+            message.success('物流异常已写入并完成权威核验');
+            closeAbnormalModal();
+            void load();
+            return;
+          }
+          if (verification === 'not-applied') {
+            message.warning('权威履约单仍为已发货，本次异常登记确定未生效；异常原因已保留，可安全重试。');
+            return;
+          }
+          message.warning('物流异常登记结果待确认，异常原因已保留；请先重新加载或查看履约详情，暂不要重复操作。');
+        } catch {
+          if (requestId !== abnormalRequestIdRef.current) return;
+          message.warning('物流异常登记结果待确认，异常原因已保留；请先重新加载或查看履约详情，暂不要重复操作。');
+        }
+        return;
+      }
       message.error(getSafeAdminErrorMessage(error, '物流异常登记失败，请检查原因后重试。'));
     } finally {
-      setSubmitting(false);
+      if (requestId === abnormalRequestIdRef.current) setSubmitting(false);
     }
   };
 
@@ -266,14 +467,14 @@ export default function FulfillmentCenter() {
                 <Space>
                   <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(r)}>详情</Button>
                   {['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP'].includes(r.status) && (
-                    <Button size="small" type="primary" icon={<TruckOutlined />} onClick={() => setDispatchTarget(r)}>发货</Button>
+                    <Button size="small" type="primary" icon={<TruckOutlined />} onClick={() => openDispatchModal(r)}>发货</Button>
                   )}
                   {r.status === 'SHIPPED' && (
-                    <Button size="small" onClick={() => handleMarkDelivered(r.id)}>标记送达</Button>
+                    <Button size="small" onClick={() => handleMarkDelivered(r)}>标记送达</Button>
                   )}
                   {r.status !== 'DELIVERED' && r.status !== 'ABNORMAL' && (
                     <Tooltip title="物流异常">
-                      <Button size="small" danger onClick={() => setAbnormalTarget(r)}>异常</Button>
+                      <Button size="small" danger onClick={() => openAbnormalModal(r)}>异常</Button>
                     </Tooltip>
                   )}
                 </Space>
@@ -284,7 +485,7 @@ export default function FulfillmentCenter() {
       )}
 
       {/* 详情抽屉 */}
-      <Drawer open={!!detail} onClose={() => setDetail(null)} width={560} title="履约详情" loading={detailLoading}>
+      <Drawer open={!!detail} onClose={closeDetail} width={560} title="履约详情" loading={detailLoading}>
         {detail && (
           <div className="space-y-4 text-sm">
             <div className="flex justify-between"><span className="text-brand-muted">履约单号</span><code className="text-brand-gold">{detail.fulfillmentNo}</code></div>
@@ -319,11 +520,16 @@ export default function FulfillmentCenter() {
       <Modal
         title="登记发货"
         open={!!dispatchTarget}
-        onCancel={() => { setDispatchTarget(null); dispatchForm.resetFields(); }}
+        onCancel={closeDispatchModal}
         footer={null}
         destroyOnHidden
       >
         <Form form={dispatchForm} layout="vertical" onFinish={handleDispatch}>
+          {dispatchTarget && (
+            <p className="mb-3 text-sm text-brand-muted">
+              履约单：{dispatchTarget.fulfillmentNo} · 订单：{dispatchTarget.order?.orderNo}
+            </p>
+          )}
           <Form.Item name="carrier" label="承运商" rules={[{ required: true, message: '请填写承运商' }]}>
             <Select placeholder="选择或输入承运商" showSearch options={[
               { value: '顺丰速运', label: '顺丰速运' },
@@ -348,7 +554,7 @@ export default function FulfillmentCenter() {
           </Form.Item>
           <Form.Item name="internalNote" label="内部备注"><Input.TextArea rows={3} /></Form.Item>
           <div className="flex justify-end gap-2">
-            <Button onClick={() => { setDispatchTarget(null); dispatchForm.resetFields(); }}>取消</Button>
+            <Button onClick={closeDispatchModal}>取消</Button>
             <Button type="primary" htmlType="submit" loading={dispatching}>确认发货</Button>
           </div>
         </Form>
@@ -358,12 +564,17 @@ export default function FulfillmentCenter() {
       <Modal
         title="标记物流异常"
         open={!!abnormalTarget}
-        onCancel={() => { setAbnormalTarget(null); setAbnormalReason(''); }}
+        onCancel={closeAbnormalModal}
         onOk={submitAbnormal}
         okText="标记物流异常"
         okButtonProps={{ danger: true }}
         confirmLoading={submitting}
       >
+        {abnormalTarget && (
+          <p className="mb-2 text-sm text-brand-muted">
+            履约单：{abnormalTarget.fulfillmentNo} · 订单：{abnormalTarget.order?.orderNo}
+          </p>
+        )}
         <p className="text-sm text-brand-muted mb-2">请描述物流异常情况，以便后续跟进处理。</p>
         <Input.TextArea rows={3} value={abnormalReason} onChange={(e) => setAbnormalReason(e.target.value)} placeholder="例：包裹在运输途中破损，客户拒收" />
       </Modal>

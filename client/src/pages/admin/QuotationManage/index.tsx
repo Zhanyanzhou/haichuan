@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   App as AntdApp,
   Alert,
@@ -30,6 +30,7 @@ import {
   productApi,
   quotationApi,
   userApi,
+  type CreateQuotationInput,
   type IssueQuotationInput,
   type QuotationIssueCustomerPage,
   type QuotationIssueDesignFile,
@@ -140,7 +141,120 @@ interface QuotationFormValues {
   items: ItemFormValue[];
 }
 
+type QuotationCreateAttempt = {
+  fingerprint: string;
+  key: string;
+};
+
+function getHttpErrorStatus(error: unknown): number | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as { status?: unknown; response?: { status?: unknown } };
+  const status = candidate.response?.status ?? candidate.status;
+  return typeof status === "number" ? status : null;
+}
+
+function isAmbiguousQuotationCreateFailure(error: unknown) {
+  const status = getHttpErrorStatus(error);
+  return status === null || status === 408 || status >= 500;
+}
+
+function isQuotationCreateIdempotencyConflict(error: unknown) {
+  if (getHttpErrorStatus(error) !== 409 || !error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    message?: unknown;
+    response?: { data?: { message?: unknown } };
+  };
+  const message = candidate.response?.data?.message ?? candidate.message;
+  const text = Array.isArray(message) ? message.join(" ") : message;
+  return typeof text === "string" && /幂等|idempoten/i.test(text);
+}
+
+function quotationCreateAttemptStorageKey(userId: number) {
+  return `hc:quotation-create-attempt:${userId}`;
+}
+
+function readQuotationCreateAttempt(storageKey: string): QuotationCreateAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(storageKey);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<QuotationCreateAttempt>;
+    return typeof value.fingerprint === "string" && typeof value.key === "string"
+      ? { fingerprint: value.fingerprint, key: value.key }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeQuotationCreateAttempt(
+  storageKey: string,
+  attempt: QuotationCreateAttempt,
+) {
+  try {
+    const serialized = JSON.stringify(attempt);
+    sessionStorage.setItem(storageKey, serialized);
+    return sessionStorage.getItem(storageKey) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+function clearQuotationCreateAttempt(storageKey: string) {
+  try {
+    sessionStorage.removeItem(storageKey);
+  } catch {
+    // 已确认成功、确定拒绝或员工明确放弃后，不让清理失败覆盖业务结果。
+  }
+}
+
+function createQuotationIdempotencyKey() {
+  const suffix = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `quotation-create-${suffix}`;
+}
+
+function canonicalQuotationCreatePayload(payload: CreateQuotationInput) {
+  const items = payload.items.map((item) => ({
+    productId: item.productId ?? null,
+    skuId: item.skuId ?? null,
+    productName: item.productName.trim(),
+    productImage: item.productImage?.trim() || null,
+    spec: item.spec?.trim() || null,
+    quantity: Number(item.quantity),
+    unitPrice: Number(item.unitPrice),
+    quotedPrice: Number(item.quotedPrice),
+    waxType: item.waxType ?? null,
+  })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  return {
+    customerId: payload.customerId ?? null,
+    channel: payload.channel ?? "CUSTOM",
+    sourceLeadId: payload.sourceLeadId ?? null,
+    customerName: payload.customerName.trim(),
+    customerPhone: payload.customerPhone.trim(),
+    customerEmail: payload.customerEmail?.trim() || null,
+    salesConsultantId: payload.salesConsultantId ?? null,
+    remark: payload.remark?.trim() || null,
+    depositAmount: Number(payload.depositAmount ?? 0),
+    validUntil: payload.validUntil ?? null,
+    items,
+  };
+}
+
+async function hashQuotationCreatePayload(payload: CreateQuotationInput) {
+  const bytes = new TextEncoder().encode(
+    JSON.stringify(canonicalQuotationCreatePayload(payload)),
+  );
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 interface IssueQuotationFormValues {
+  changeSummary?: string;
   designFileVersionId?: number;
   waxType?: WaxType;
   feeRuleIds?: number[];
@@ -305,6 +419,7 @@ function LinkedSkuSelector({
 export default function QuotationManage() {
   const { message, modal } = AntdApp.useApp();
   const role = useAuthStore((state) => state.user?.role);
+  const userId = useAuthStore((state) => state.user?.id ?? null);
   const canConfigure = role === "SUPER_ADMIN" || role === "ADMIN";
   const [list, setList] = useState<Quotation[]>([]);
   const [total, setTotal] = useState(0);
@@ -321,10 +436,18 @@ export default function QuotationManage() {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<unknown | null>(null);
+  const [revisionConfirmation, setRevisionConfirmation] = useState<{
+    id: number;
+    quoteNo: string;
+  } | null>(null);
+  const [revisionConfirmationLoading, setRevisionConfirmationLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingCreateAttempt, setPendingCreateAttempt] = useState(false);
+  const [createAttemptConflict, setCreateAttemptConflict] = useState(false);
+  const createRequestIdRef = useRef(0);
   const [form] = Form.useForm<QuotationFormValues>();
   const selectedChannel = Form.useWatch("channel", form) ?? "CUSTOM";
   const [issueForm] = Form.useForm<IssueQuotationFormValues>();
@@ -336,6 +459,9 @@ export default function QuotationManage() {
   const [resourceBucketOptions, setResourceBucketOptions] = useState<QuotationIssueResourceBucket[]>([]);
   const [designFileOptions, setDesignFileOptions] = useState<QuotationIssueDesignFile[]>([]);
   const [customerSearching, setCustomerSearching] = useState(false);
+  const [customerSearchKeyword, setCustomerSearchKeyword] = useState("");
+  const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
+  const customerSearchRequestIdRef = useRef(0);
   const [customerOptions, setCustomerOptions] = useState<Array<{
     value: number;
     label: string;
@@ -373,17 +499,23 @@ export default function QuotationManage() {
   };
 
   const searchCustomers = async (keyword: string) => {
+    const requestId = ++customerSearchRequestIdRef.current;
+    setCustomerSearchKeyword(keyword);
     if (!keyword.trim()) {
       setCustomerOptions([]);
+      setCustomerSearchError(null);
+      setCustomerSearching(false);
       return;
     }
     setCustomerSearching(true);
+    setCustomerSearchError(null);
     try {
       const response = await quotationApi.searchIssueCustomers({
         keyword: keyword.trim(),
         pageSize: 20,
       });
       const data = unwrapResponse<QuotationIssueCustomerPage>(response);
+      if (requestId !== customerSearchRequestIdRef.current) return;
       setCustomerOptions((data?.list ?? []).map((customer) => ({
         value: customer.id,
         label: `${customer.name || "未命名客户"} · ${customer.phone}`,
@@ -393,14 +525,22 @@ export default function QuotationManage() {
         accountType: customer.accountType,
         partnerStatus: customer.partnerStatus,
       })));
-    } catch {
+    } catch (error: unknown) {
+      if (requestId !== customerSearchRequestIdRef.current) return;
       setCustomerOptions([]);
+      setCustomerSearchError(
+        getSafeAdminErrorMessage(error, "客户搜索失败，请保留当前输入并重试。"),
+      );
     } finally {
-      setCustomerSearching(false);
+      if (requestId === customerSearchRequestIdRef.current) {
+        setCustomerSearching(false);
+      }
     }
   };
 
+  const listRequestIdRef = useRef(0);
   const load = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setLoading(true);
     setLoadError(null);
     try {
@@ -411,18 +551,32 @@ export default function QuotationManage() {
         keyword: keyword || undefined,
       });
       const data = unwrapResponse<PaginatedResult<Quotation>>(res);
+      if (requestId !== listRequestIdRef.current) return;
       setList(data?.list || []);
       setTotal(data?.total || 0);
+      return true;
     } catch (error: unknown) {
+      if (requestId !== listRequestIdRef.current) return false;
       setLoadError(error);
       setList([]);
       setTotal(0);
+      return false;
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setLoading(false);
     }
   }, [page, pageSize, statusFilter, channelFilter, keyword]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    createRequestIdRef.current += 1;
+    setSubmitting(false);
+    setCreateAttemptConflict(false);
+    setPendingCreateAttempt(
+      userId != null
+        && readQuotationCreateAttempt(quotationCreateAttemptStorageKey(userId)) !== null,
+    );
+  }, [userId]);
 
   const openDetail = async (id: number) => {
     setDetailId(id);
@@ -443,7 +597,27 @@ export default function QuotationManage() {
     try {
       const res = await quotationApi.getById(id);
       setDetail(unwrapResponse<QuotationDetail>(res));
-    } catch { /* 保留现有详情 */ }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const confirmRevisionSnapshot = async (target: { id: number; quoteNo: string }) => {
+    setRevisionConfirmationLoading(true);
+    try {
+      const [listConfirmed, detailConfirmed] = await Promise.all([
+        load(),
+        detailId === target.id ? reloadDetail(target.id) : Promise.resolve(true),
+      ]);
+      if (!listConfirmed || !detailConfirmed) return;
+      setRevisionConfirmation((current) => (
+        current?.id === target.id ? null : current
+      ));
+      message.success("已读取报价修订后的权威状态");
+    } finally {
+      setRevisionConfirmationLoading(false);
+    }
   };
 
   // 后台员工可发出、修订或取消报价，但不能代客户确认。
@@ -509,6 +683,7 @@ export default function QuotationManage() {
       return;
     }
     const payload: IssueQuotationInput = {
+      changeSummary: values.changeSummary?.trim() || undefined,
       designFileVersionId: values.designFileVersionId,
       waxType: values.waxType,
       feeRuleIds: values.feeRuleIds,
@@ -544,10 +719,23 @@ export default function QuotationManage() {
       cancelText: "取消",
       onOk: async () => {
         try {
-          await quotationApi.revise(record.id);
+          const response = await quotationApi.revise(record.id);
+          const revised = unwrapResponse<Quotation>(response);
+          const draftSnapshot: Quotation = {
+            ...record,
+            ...revised,
+            status: "DRAFT",
+          };
+          const recoveryTarget = { id: record.id, quoteNo: record.quoteNo };
+          setList((current) => current.map((item) => (
+            item.id === record.id ? { ...item, ...draftSnapshot } : item
+          )));
+          setDetail((current) => current?.id === record.id
+            ? { ...current, ...draftSnapshot }
+            : current);
+          setRevisionConfirmation(recoveryTarget);
           message.success("报价修订草稿已创建");
-          await load();
-          if (detailId === record.id) await reloadDetail(record.id);
+          await confirmRevisionSnapshot(recoveryTarget);
         } catch (error: unknown) {
           message.error(
             getSafeAdminErrorMessage(
@@ -627,6 +815,35 @@ export default function QuotationManage() {
     }
   };
 
+  const openCreateDialog = () => {
+    setEditingId(null);
+    form.resetFields();
+    setCreateAttemptConflict(false);
+    setPendingCreateAttempt(
+      userId != null
+        && readQuotationCreateAttempt(quotationCreateAttemptStorageKey(userId)) !== null,
+    );
+    void loadConsultants();
+    setCreateOpen(true);
+  };
+
+  const abandonPendingCreateAttempt = () => {
+    if (userId == null) return;
+    modal.confirm({
+      title: "放弃旧的报价创建凭据？",
+      content: "放弃凭据不会撤销一张可能已经创建成功的报价。请先核对报价列表；确认放弃后，下一次提交会生成新凭据。",
+      okText: "确认放弃凭据",
+      okButtonProps: { danger: true },
+      cancelText: "继续保留",
+      onOk: () => {
+        clearQuotationCreateAttempt(quotationCreateAttemptStorageKey(userId));
+        setPendingCreateAttempt(false);
+        setCreateAttemptConflict(false);
+        message.info("旧凭据已放弃；请确认列表中没有重复报价后再提交。", 5);
+      },
+    });
+  };
+
   const handleSave = async () => {
     let values: QuotationFormValues;
     try {
@@ -634,45 +851,124 @@ export default function QuotationManage() {
     } catch {
       return;
     }
-    setSubmitting(true);
-    try {
-      const payload = {
-        customerId: values.customerId,
-        channel: values.channel,
-        customerName: values.customerName,
-        customerPhone: values.customerPhone,
-        customerEmail: values.customerEmail || undefined,
-        salesConsultantId: values.salesConsultantId || undefined,
-        remark: values.remark || undefined,
-        depositAmount: values.depositAmount || 0,
-        validUntil: values.validUntil ? values.validUntil.toISOString() : undefined,
-        items: values.items.map((it) => ({
-          productName: it.productName,
-          productImage: it.productImage || undefined,
-          spec: it.spec || undefined,
-          skuId: it.skuId || undefined,
-          productId: it.productId || undefined,
-          quantity: it.quantity,
-          unitPrice: it.unitPrice,
-          quotedPrice: it.quotedPrice,
-          waxType: it.waxType,
-        })),
-      };
-      if (editingId) {
+    const payload: CreateQuotationInput = {
+      customerId: values.customerId,
+      channel: values.channel,
+      customerName: values.customerName.trim(),
+      customerPhone: values.customerPhone.trim(),
+      customerEmail: values.customerEmail?.trim() || undefined,
+      salesConsultantId: values.salesConsultantId || undefined,
+      remark: values.remark?.trim() || undefined,
+      depositAmount: values.depositAmount || 0,
+      validUntil: values.validUntil ? values.validUntil.toISOString() : undefined,
+      items: values.items.map((it) => ({
+        productName: it.productName.trim(),
+        productImage: it.productImage?.trim() || undefined,
+        spec: it.spec?.trim() || undefined,
+        skuId: it.skuId || undefined,
+        productId: it.productId || undefined,
+        quantity: Number(it.quantity),
+        unitPrice: Number(it.unitPrice),
+        quotedPrice: Number(it.quotedPrice),
+        waxType: it.waxType,
+      })),
+    };
+
+    if (editingId) {
+      setSubmitting(true);
+      try {
         await quotationApi.update(editingId, payload);
         message.success("报价单已更新");
-      } else {
-        await quotationApi.create(payload);
-        message.success("报价单已创建（草稿）");
+        setCreateOpen(false);
+        form.resetFields();
+        setEditingId(null);
+        void load();
+      } catch (e: unknown) {
+        message.error(getSafeAdminErrorMessage(e, "报价单更新失败，请检查填写内容后重试。"));
+      } finally {
+        setSubmitting(false);
       }
+      return;
+    }
+
+    if (userId == null) {
+      message.error("当前员工会话缺少身份，系统未发送报价创建请求。请重新登录后再试。", 6);
+      return;
+    }
+
+    const ownerId = userId;
+    const requestId = ++createRequestIdRef.current;
+    const storageKey = quotationCreateAttemptStorageKey(ownerId);
+    let requestSent = false;
+    setSubmitting(true);
+    try {
+      const fingerprint = await hashQuotationCreatePayload(payload);
+      if (
+        requestId !== createRequestIdRef.current
+        || useAuthStore.getState().user?.id !== ownerId
+      ) return;
+
+      const storedAttempt = readQuotationCreateAttempt(storageKey);
+      if (storedAttempt && storedAttempt.fingerprint !== fingerprint) {
+        setPendingCreateAttempt(true);
+        setCreateAttemptConflict(true);
+        message.warning("检测到另一张结果待确认的报价草稿；系统未发送当前报价。请恢复原内容重试，或先核对报价列表后明确放弃旧凭据。", 8);
+        return;
+      }
+
+      const attempt = storedAttempt ?? {
+        fingerprint,
+        key: createQuotationIdempotencyKey(),
+      };
+      if (!writeQuotationCreateAttempt(storageKey, attempt)) {
+        message.error("浏览器无法安全保存本次报价创建的重试凭据，系统未发送请求。请恢复会话存储后再试。", 8);
+        return;
+      }
+
+      setPendingCreateAttempt(true);
+      setCreateAttemptConflict(false);
+      requestSent = true;
+      await quotationApi.create(payload, attempt.key);
+
+      if (
+        requestId !== createRequestIdRef.current
+        || useAuthStore.getState().user?.id !== ownerId
+      ) return;
+
+      clearQuotationCreateAttempt(storageKey);
+      setPendingCreateAttempt(false);
+      setCreateAttemptConflict(false);
+      message.success("报价单已创建（草稿）");
       setCreateOpen(false);
       form.resetFields();
       setEditingId(null);
       void load();
     } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, editingId ? "报价单更新失败，请检查填写内容后重试。" : "报价单创建失败，请检查填写内容后重试。"));
+      if (
+        requestId !== createRequestIdRef.current
+        || useAuthStore.getState().user?.id !== ownerId
+      ) return;
+      if (!requestSent) {
+        message.error("浏览器无法安全生成本次报价创建凭据，系统未发送请求。请稍后重试。", 8);
+      } else if (isAmbiguousQuotationCreateFailure(e)) {
+        setPendingCreateAttempt(true);
+        setCreateAttemptConflict(false);
+        message.warning("报价草稿创建结果待确认；请保持客户、渠道、顾问、有效期和商品明细不变后重试，系统会沿用同一凭据恢复结果。", 8);
+      } else if (isQuotationCreateIdempotencyConflict(e)) {
+        setPendingCreateAttempt(true);
+        setCreateAttemptConflict(true);
+        message.warning("当前报价创建凭据已对应另一组内容，系统未创建新报价。请先核对报价列表，再恢复原内容重试或明确放弃旧凭据。", 8);
+      } else {
+        clearQuotationCreateAttempt(storageKey);
+        setPendingCreateAttempt(false);
+        setCreateAttemptConflict(false);
+        message.error(getSafeAdminErrorMessage(e, "报价单创建失败，请检查填写内容后重试。"));
+      }
     } finally {
-      setSubmitting(false);
+      if (
+        requestId === createRequestIdRef.current
+        && useAuthStore.getState().user?.id === ownerId
+      ) setSubmitting(false);
     }
   };
 
@@ -689,7 +985,7 @@ export default function QuotationManage() {
           <Space wrap>
             <Button icon={<ReloadOutlined />} onClick={() => void load()}>刷新</Button>
             {canConfigure ? <Button onClick={() => setConfigurationOpen(true)}>报价配置</Button> : null}
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditingId(null); form.resetFields(); void loadConsultants(); setCreateOpen(true); }}>新建报价</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateDialog}>新建报价</Button>
           </Space>
         )}
       />
@@ -739,6 +1035,23 @@ export default function QuotationManage() {
         </Space>
       </Card>
 
+      {revisionConfirmation ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="修订草稿已创建，权威状态待确认"
+          description={`报价 ${revisionConfirmation.quoteNo} 的修订写入已经成功；当前只会重新读取状态，不会再次创建修订版。`}
+          action={(
+            <Button
+              loading={revisionConfirmationLoading}
+              onClick={() => void confirmRevisionSnapshot(revisionConfirmation)}
+            >
+              重新读取报价
+            </Button>
+          )}
+        />
+      ) : null}
+
       {loadError ? (
         <AdminErrorState
           subject="报价单"
@@ -754,6 +1067,7 @@ export default function QuotationManage() {
             rowKey="id"
             loading={loading}
             size="middle"
+            scroll={{ x: 1445 }}
             pagination={{
               current: page, pageSize, total,
               showSizeChanger: true,
@@ -766,27 +1080,30 @@ export default function QuotationManage() {
                 : "暂无报价单；可新建报价草稿并提交客户确认",
             }}
             columns={[
-              { title: "报价单号", dataIndex: "quoteNo", render: (v: string) => <code className="text-xs text-brand-gold">{v}</code> },
+              { title: "报价单号", dataIndex: "quoteNo", width: 160, render: (v: string) => <code className="text-xs text-brand-gold">{v}</code> },
               { title: "渠道", dataIndex: "channel", width: 100, render: (v: QuoteChannel | undefined) => CHANNEL_META[v ?? "CUSTOM"] },
               { title: "版本", dataIndex: "currentVersion", width: 70, render: (v: number | undefined) => v ? `V${v}` : "V1" },
-              { title: "客户", dataIndex: "customerName", render: (v: string, r: Quotation) => <div><p>{v}</p><p className="text-xs text-brand-muted">{r.customerPhone}</p></div> },
+              { title: "客户", dataIndex: "customerName", width: 160, render: (v: string, r: Quotation) => <div><p>{v}</p><p className="text-xs text-brand-muted">{r.customerPhone}</p></div> },
               { title: "原价合计", dataIndex: "totalAmount", width: 110, render: (v: number) => <span className="text-brand-muted">¥{Number(v).toLocaleString()}</span> },
               { title: "报价合计", dataIndex: "finalAmount", width: 110, render: (v: number) => <span className="text-brand-gold font-medium">¥{Number(v).toLocaleString()}</span> },
               { title: "建议定金", dataIndex: "depositAmount", width: 100, render: (v: number) => v ? `¥${Number(v).toLocaleString()}` : "—" },
               { title: "有效期", dataIndex: "validUntil", width: 110, render: (v: string) => v ? dayjs(v).format("YYYY-MM-DD") : "—" },
               { title: "状态", dataIndex: "status", width: 100, render: (v: QuotationStatus) => <Tag color={STATUS_META[v]?.c}>{STATUS_META[v]?.t}</Tag> },
-              { title: "创建时间", dataIndex: "createdAt", render: (v: string) => <span className="text-brand-muted text-xs">{v ? dayjs(v).format("YYYY-MM-DD HH:mm") : ""}</span> },
+              { title: "创建时间", dataIndex: "createdAt", width: 165, render: (v: string) => <span className="text-brand-muted text-xs">{v ? dayjs(v).format("YYYY-MM-DD HH:mm") : ""}</span> },
               {
                 title: "操作", width: 260, render: (_: unknown, r: Quotation) => (
                   <Space>
                     <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(r.id)}>详情</Button>
-                    {r.status === "DRAFT" && (
+                    {revisionConfirmation?.id === r.id ? (
+                      <Text type="warning" className="!text-xs">修订状态待确认</Text>
+                    ) : null}
+                    {!revisionConfirmation && r.status === "DRAFT" && (
                       <Button size="small" onClick={() => void openEdit(r)}>编辑</Button>
                     )}
-                    {r.status === "DRAFT" && (
+                    {!revisionConfirmation && r.status === "DRAFT" && (
                       <Button size="small" type="primary" onClick={() => void openIssue(r)}>发出报价</Button>
                     )}
-                    {r.status === "PENDING_CONFIRM" && (
+                    {!revisionConfirmation && r.status === "PENDING_CONFIRM" && (
                       <>
                         <Button size="small" onClick={() => createRevision(r)}>创建修订版</Button>
                         <Text type="secondary" className="!text-xs">
@@ -794,7 +1111,7 @@ export default function QuotationManage() {
                         </Text>
                       </>
                     )}
-                    {r.status === "CONFIRMED" && (
+                    {!revisionConfirmation && r.status === "CONFIRMED" && (
                       <Text type="secondary" className="!text-xs">历史版本只读；员工不能代转单</Text>
                     )}
                   </Space>
@@ -876,6 +1193,10 @@ export default function QuotationManage() {
                   <div>
                     <Text type="secondary">费用合计：</Text>
                     ¥{Number(currentQuotationVersion(detail)!.feeAmount ?? 0).toLocaleString("zh-CN")}
+                  </div>
+                  <div className="col-span-2">
+                    <Text type="secondary">本版变更：</Text>
+                    {currentQuotationVersion(detail)!.changeSummary || (currentQuotationVersion(detail)!.version === 1 ? "首次报价" : "历史版本未记录变更说明")}
                   </div>
                 </div>
 
@@ -977,7 +1298,24 @@ export default function QuotationManage() {
             </div>
 
             {/* 操作区 */}
+            {revisionConfirmation?.id === detail.id ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="当前报价修订状态待确认"
+                description="当前已停用编辑、发出、取消和删除操作；请只重新读取报价，避免把成功写入误当成失败后再次操作。"
+                action={(
+                  <Button
+                    loading={revisionConfirmationLoading}
+                    onClick={() => void confirmRevisionSnapshot(revisionConfirmation)}
+                  >
+                    重新读取报价
+                  </Button>
+                )}
+              />
+            ) : null}
             {(detail.status === "PENDING_CONFIRM" || detail.status === "CONFIRMED") &&
+              !revisionConfirmation &&
               !isLegacyQuotationVersion(currentQuotationVersion(detail)) && (
               <Alert
                 type="info"
@@ -987,18 +1325,18 @@ export default function QuotationManage() {
               />
             )}
             <div className="flex gap-2 flex-wrap border-t border-brand-line pt-4">
-              {detail.status === "DRAFT" && (
+              {!revisionConfirmation && detail.status === "DRAFT" && (
                 <Button type="primary" onClick={() => void openIssue(detail)}>
                   {isLegacyQuotationVersion(currentQuotationVersion(detail)) ? "按 v2 发出报价" : "发出报价"}
                 </Button>
               )}
-              {detail.status === "PENDING_CONFIRM" && (
+              {!revisionConfirmation && detail.status === "PENDING_CONFIRM" && (
                 <>
                   <Button onClick={() => createRevision(detail)}>创建修订版</Button>
                   <Button onClick={() => changeStatus(detail, "cancel", "取消")}>取消报价</Button>
                 </>
               )}
-              {(detail.status === "DRAFT" || detail.status === "CANCELLED") && (
+              {!revisionConfirmation && (detail.status === "DRAFT" || detail.status === "CANCELLED") && (
                 <Button danger onClick={() => handleRemove(detail)}>删除报价单</Button>
               )}
             </div>
@@ -1035,6 +1373,24 @@ export default function QuotationManage() {
         width={720}
         destroyOnHidden
       >
+        {!editingId && pendingCreateAttempt ? (
+          <Alert
+            className="mb-4"
+            type="warning"
+            showIcon
+            message={createAttemptConflict
+              ? "存在另一张结果待确认的报价草稿"
+              : "存在结果待确认的报价草稿"}
+            description={createAttemptConflict
+              ? "当前内容与已保存的重试凭据不一致。请恢复原客户、渠道、顾问、有效期和商品明细；或先核对报价列表，再明确放弃旧凭据。"
+              : "请保持当前客户、渠道、顾问、有效期和商品明细不变后再次提交；系统会沿用同一凭据恢复权威结果。"}
+            action={(
+              <Button danger size="small" onClick={abandonPendingCreateAttempt}>
+                放弃旧凭据
+              </Button>
+            )}
+          />
+        ) : null}
         <Form form={form} layout="vertical" initialValues={{ channel: "CUSTOM", items: [{ quantity: 1 }] }}>
           <div className="grid grid-cols-2 gap-3">
             <Form.Item
@@ -1051,7 +1407,14 @@ export default function QuotationManage() {
                 loading={customerSearching}
                 placeholder="搜索客户姓名或手机号"
                 options={customerOptions}
-                notFoundContent={customerSearching ? "正在搜索客户…" : "输入姓名或手机号搜索"}
+                notFoundContent={customerSearching ? "正在搜索客户…" : customerSearchError ? (
+                  <div className="space-y-2 py-1 text-sm">
+                    <div>{customerSearchError}</div>
+                    <Button size="small" onClick={() => void searchCustomers(customerSearchKeyword)}>
+                      重新搜索客户
+                    </Button>
+                  </div>
+                ) : "输入姓名或手机号搜索"}
                 onSelect={(value) => {
                   const customer = customerOptions.find((option) => option.value === value);
                   if (!customer) return;
@@ -1204,6 +1567,19 @@ export default function QuotationManage() {
           description="客户、价格、费用、文件和资源要求将写入版本快照。后续调整必须创建修订版；后台员工不能代客户确认。"
         />
         <Form form={issueForm} layout="vertical">
+          <Form.Item
+            name="changeSummary"
+            label={issuingQuotation && (issuingQuotation.currentVersion ?? 0) > 0 ? "本版变更说明" : "报价说明（选填）"}
+            rules={issuingQuotation && (issuingQuotation.currentVersion ?? 0) > 0
+              ? [{ required: true, whitespace: true, message: "请说明本版相对上一版本的变更" }]
+              : undefined}
+            extra={(issuingQuotation?.currentVersion ?? 0) > 0
+              ? "客户与运营会在版本历史中看到此说明，用于核对本次金额、范围或交期变化。"
+              : "首次报价可留空；后续修订必须填写。"}
+          >
+            <Input.TextArea rows={3} maxLength={1000} showCount />
+          </Form.Item>
+
           {issuingQuotation?.channel === "PARTNER_WAX" ? (
             <div className="grid grid-cols-2 gap-3">
               <Form.Item

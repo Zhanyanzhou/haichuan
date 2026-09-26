@@ -78,13 +78,13 @@ collector 直接重验以下目标机事实：
 - `facts.json` 与 `database-preflight-report.json`；
 - `database-preflight.json`、`admin.json`、`storage.json`；
 - `backup-manifest.json`、`restore-drill.json`、`write-quiesce.json`、`offsite-replication.json`；
-- `edge.json`、`observability.json`、`feature-gates.json`、`rollback.json`；
+- `edge.json`、`observability-facts.json`、`observability.json`、`feature-gates.json`、`rollback.json`；
 - `external-email.json`、`external-sms.json`、`external-logistics.json`、`external-payment-gateway.json`、`external-wechat.json`、`external-object-storage.json`；
 - 当前 Release Images artifact 中的 `release-manifest.attestation.json` 副本（只用于计算并交叉核对哈希，不会由 collector 回传覆盖 runner 文件）。
 
-每个 receipt 必须严格使用 `docs/PRODUCTION_RELEASE_RUNBOOK.md` 的十字段 schema，并绑定同一个 environment、approval、Git SHA 和 manifest SHA。`facts.json` 只允许环境绑定、数据库状态、管理员计数/初始化结果、RPO/RTO 分段时长和六项外部服务状态。文件或 JSON key 中不得出现密码、Token、连接串、私钥、API Key、credential 或 auth 类字段；不得包含客户、订单、支付或联系人记录。
+每个 receipt 必须严格使用 `docs/PRODUCTION_RELEASE_RUNBOOK.md` 的十字段 schema，并绑定同一个 environment、approval、Git SHA 和 manifest SHA。`facts.json` 只允许环境绑定、数据库状态、管理员计数/初始化结果、RPO/RTO 分段时长、边缘层脱敏事实和六项外部服务状态。边缘层事实必须绑定 release manifest 的正式 HTTPS 域名 origin（拒绝裸 IP、localhost 和单标签主机名），并明确记录 DNS、HTTPS、308 同源跳转、证书链和有效期、续期验证、HSTS、CSP 与可信代理验证结果；collector 会按 schema 固定键顺序规范化这些事实，`edge.json` 的 `subjectSha256` 必须绑定规范 JSON，而不是依赖输入键顺序或只绑定 manifest。文件或 JSON key 中不得出现密码、Token、连接串、私钥、API Key、credential 或 auth 类字段；不得包含客户、订单、支付或联系人记录。
 
-所有 facts/receipts 必须在 `maxReceiptAgeSeconds` 内，时间在未来超过 60 秒、缺文件、哈希或绑定不一致、migration 非最新、容器非 healthy、RPO/RTO 未达标、恢复点不是 `quiesced`、commerce 支付未验证，都会失败关闭且不输出可签名 evidence。
+所有 facts/receipts 必须在 `maxReceiptAgeSeconds` 内，时间在未来超过 60 秒、缺文件、哈希或绑定不一致、migration 非最新、容器非 healthy、RPO/RTO 未达标、恢复点不是 `quiesced`、commerce 支付未验证，都会失败关闭且不输出可签名 evidence。边缘层还要求续期已由受信执行器验证，证书剩余有效期至少达到“24 小时”与“总有效期 20%”两者中的较大值、但门槛最多为 7 天；这样普通长周期证书保留 7 天缓冲，同时不会让 7 天以内的自动续期短周期证书永远无法通过。HSTS `max-age` 必须至少 31536000 秒并包含 `includeSubDomains`；这些条件不满足时同样失败关闭。
 
 ## 4. 准入、回退与当前边界
 
@@ -94,3 +94,4 @@ collector 直接重验以下目标机事实：
 
 当前预发布实例若仍使用 `devsync-*` 镜像、缺 migration、正式域名/告警/异地副本或真实 provider receipts，安装 collector 也只会得到失败关闭。这是正确结果，不能以放宽 freshness、删除 receipt 或手写全通过 JSON 绕过。
 
+`observability-facts.json` 是 schema v5 的强制结构化输入，不是可手写的“全部通过”声明。它必须由受信监控执行器针对同一环境和 manifest 生成，并精确包含健康探针、就绪探针、可信前台 origin、backup 健康、受保护 metrics 抓取、咨询 5xx、Outbox 及可靠通知/账户恢复两个 Worker 时间序列的验证结果；上述布尔值必须都为 `true`。同一文件还必须包含允许的安全演练类型、监控身份 SHA-256、告警事件 SHA-256、按顺序递增的触发/收到/确认 UTC 时间，以及精确匹配请求 `incidentOwner` 的确认人。采集器会拒绝缺失、未知字段、敏感键、时间倒序、过期演练、责任人漂移或任一检查失败，并要求 `observability.json` receipt 的 subject 精确绑定这些事实的规范 JSON；旧 schema v4 的 manifest-only 可观测性 receipt 不再有效。

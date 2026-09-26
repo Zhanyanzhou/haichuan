@@ -19,9 +19,6 @@ export default function NotFound() {
 
   return (
     <section className="not-found-page" aria-labelledby="not-found-title">
-      <div className="not-found-page__code" aria-hidden="true">
-        404
-      </div>
       <div className="not-found-page__content">
         <p className="not-found-page__eyebrow">PAGE NOT FOUND</p>
         <h1 id="not-found-title">此页未被找到</h1>
