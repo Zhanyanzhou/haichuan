@@ -34,6 +34,7 @@ model User {
   leadActivities               LeadActivity[]                 @relation("LeadActivityCreator")
   leadLegalHolds               Lead[]                         @relation("LeadLegalHoldActor")
   leadPrivacyDispositions      Lead[]                         @relation("LeadPrivacyDispositionActor")
+  leadRetentionDispositionRuns LeadRetentionDispositionRun[] @relation("LeadRetentionDispositionActor")
   // 交易域审核/执行人关联（命名关系，避免与既有 User 关系冲突）
   paymentReviews               Payment[]                      @relation("PaymentReviewer")
   refundRequests               Refund[]                       @relation("RefundRequester")
@@ -595,6 +596,8 @@ model Order {
   snapshotSchemaVersion       Int?                 @map("snapshot_schema_version")
   transactionSnapshot         Json?                @map("transaction_snapshot")
   transactionSnapshotHash     String?              @map("transaction_snapshot_hash") @db.Char(64)
+  checkoutIdempotencyKeyHash  String?              @unique @map("checkout_idempotency_key_hash") @db.Char(64)
+  checkoutRequestHash         String?              @map("checkout_request_hash") @db.Char(64)
 
   items                OrderItem[]
   payments             Payment[]
@@ -619,6 +622,7 @@ model Order {
   quotedLines          QuotedOrderLine[]
   resourceReservations OrderResourceReservation[]
   quotationConversion  QuotationConversion?
+  paymentProofAssets   PaymentProofAsset[]
 
   @@index([orderNo])
   @@index([status])
@@ -684,9 +688,31 @@ model Customer {
   acceptedQuotationVersions QuotationVersion[]             @relation("QuotationVersionAcceptedByCustomer")
   confirmedOrders           Order[]                        @relation("OrderConfirmedByCustomer")
   quotationConversions      QuotationConversion[]
+  paymentProofAssets        PaymentProofAsset[]
+  gatewayOperations         CustomerGatewayOperation[]
 
   @@index([partnerStatus])
   @@map("customers")
+}
+
+// 客户主动支付/关单调用第三方渠道前的短期线性化凭据。
+// 每次进行中的渠道操作各占一条；任一有效 lease 都会阻止账户注销。
+// 注销与预约都先锁 customers 行，避免账户关闭后旧 principal 再产生资金副作用。
+model CustomerGatewayOperation {
+  id          String   @id @db.Char(36)
+  customerId  Int      @map("customer_id")
+  authVersion Int      @map("auth_version")
+  kind        String   @db.VarChar(30)
+  orderId     Int      @map("order_id")
+  paymentId   Int?     @map("payment_id")
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@index([customerId, expiresAt], map: "customer_gateway_operations_customer_expiry_idx")
+  @@index([customerId, orderId, expiresAt], map: "customer_gateway_operations_order_expiry_idx")
+  @@map("customer_gateway_operations")
 }
 
 enum CustomerContactChangeType {
@@ -773,11 +799,11 @@ model CustomerSmsCode {
 
 // 每手机号一行的共享限额状态：为多连接/多实例发码提供稳定行锁。
 model CustomerSmsRateLimit {
-  phone         String   @id @db.VarChar(20)
-  windowStart   DateTime @map("window_start")
-  dailyCount    Int      @default(0) @map("daily_count")
+  phone         String    @id @db.VarChar(20)
+  windowStart   DateTime  @map("window_start")
+  dailyCount    Int       @default(0) @map("daily_count")
   lastAttemptAt DateTime? @map("last_attempt_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   @@map("customer_sms_rate_limits")
 }
@@ -844,18 +870,20 @@ enum ProductAccessEventType {
 }
 
 model CustomerAddress {
-  id             Int      @id @default(autoincrement())
-  customerId     Int      @map("customer_id")
-  recipientName  String   @map("recipient_name") @db.VarChar(50)
-  recipientPhone String   @map("recipient_phone") @db.VarChar(20)
-  province       String?  @db.VarChar(50)
-  city           String?  @db.VarChar(50)
-  district       String?  @db.VarChar(50)
-  detail         String   @db.VarChar(300)
-  postalCode     String?  @map("postal_code") @db.VarChar(20)
-  isDefault      Boolean  @default(false) @map("is_default")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id                         Int      @id @default(autoincrement())
+  customerId                 Int      @map("customer_id")
+  recipientName              String   @map("recipient_name") @db.VarChar(50)
+  recipientPhone             String   @map("recipient_phone") @db.VarChar(20)
+  province                   String?  @db.VarChar(50)
+  city                       String?  @db.VarChar(50)
+  district                   String?  @db.VarChar(50)
+  detail                     String   @db.VarChar(300)
+  postalCode                 String?  @map("postal_code") @db.VarChar(20)
+  isDefault                  Boolean  @default(false) @map("is_default")
+  creationIdempotencyKeyHash String?  @unique @map("creation_idempotency_key_hash") @db.Char(64)
+  creationRequestHash        String?  @map("creation_request_hash") @db.Char(64)
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -940,14 +968,58 @@ model Payment {
   paidAt         DateTime?     @map("paid_at")
   createdAt      DateTime      @default(now()) @map("created_at")
 
-  order       Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  refunds     Refund[]
-  reviewer    User?                   @relation("PaymentReviewer", fields: [reviewedBy], references: [id])
-  installment PaymentPlanInstallment?
+  order              Order                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds            Refund[]
+  reviewer           User?                   @relation("PaymentReviewer", fields: [reviewedBy], references: [id])
+  installment        PaymentPlanInstallment?
+  paymentProofAssets PaymentProofAsset[]
 
   @@index([orderId])
   @@index([paymentNo])
   @@map("payments")
+}
+
+enum PaymentProofAssetStatus {
+  UPLOADED
+  ATTACHED
+  DELETING
+}
+
+model PaymentProofAsset {
+  id                 Int                     @id @default(autoincrement())
+  storageKey         String                  @unique @map("storage_key") @db.VarChar(500)
+  customerId         Int                     @map("customer_id")
+  orderId            Int?                    @map("order_id")
+  paymentId          Int?                    @map("payment_id")
+  submissionOrderId  Int?                    @map("submission_order_id")
+  submissionKeyHash  String?                 @unique @map("submission_key_hash") @db.Char(64)
+  fileChecksumSha256 String?                 @map("file_checksum_sha256") @db.Char(64)
+  fileSize           Int?                    @map("file_size")
+  mimeType           String?                 @map("mime_type") @db.VarChar(50)
+  fileReadyAt        DateTime?               @map("file_ready_at")
+  status             PaymentProofAssetStatus @default(UPLOADED)
+  attachedAt         DateTime?               @map("attached_at")
+  deletingAt         DateTime?               @map("deleting_at")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  order    Order?   @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  payment  Payment? @relation(fields: [paymentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([customerId, status, createdAt], map: "payment_proof_assets_customer_status_created_idx")
+  @@index([status, createdAt], map: "payment_proof_assets_status_created_idx")
+  @@index([orderId], map: "payment_proof_assets_order_id_idx")
+  @@index([paymentId], map: "payment_proof_assets_payment_id_idx")
+  @@map("payment_proof_assets")
+}
+
+model PaymentProofGcState {
+  id         Int      @id @default(1)
+  scanOffset Int      @default(0) @map("scan_offset")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("payment_proof_gc_state")
 }
 
 enum PaymentStatus {
@@ -1101,6 +1173,8 @@ model AfterSalesCase {
   adminNote             String?          @map("admin_note") @db.Text
   requestedRefundAmount Decimal?         @map("requested_refund_amount") @db.Decimal(12, 2)
   approvedRefundAmount  Decimal?         @map("approved_refund_amount") @db.Decimal(12, 2)
+  idempotencyKeyHash    String?          @unique @map("idempotency_key_hash") @db.Char(64)
+  submissionFingerprint String?          @map("submission_fingerprint") @db.Char(64)
   handledBy             Int?             @map("handled_by")
   handledAt             DateTime?        @map("handled_at")
   createdAt             DateTime         @default(now()) @map("created_at")
@@ -1171,6 +1245,7 @@ model Inquiry {
   message               String    @db.Text
   privacyConsent        Boolean   @default(false) @map("privacy_consent")
   privacyConsentVersion String?   @map("privacy_consent_version") @db.VarChar(50)
+  privacyConsentHash    String?   @map("privacy_consent_hash") @db.Char(64)
   privacyConsentedAt    DateTime? @map("privacy_consented_at")
   status                String    @default("PENDING") @db.VarChar(20)
   assignedTo            Int?      @map("assigned_to")
@@ -1217,6 +1292,33 @@ model OperationLog {
   @@index([module])
   @@index([createdAt])
   @@map("operation_logs")
+}
+
+// 到期线索匿名化属于批量且不可逆的隐私写入；同一操作凭据只能恢复原批次结果，
+// 不能在响应丢失后静默处理下一批。仅保存凭据哈希、请求摘要和无 PII 汇总。
+model LeadRetentionDispositionRun {
+  id                              Int      @id @default(autoincrement())
+  idempotencyKeyHash              String   @unique(map: "lead_retention_runs_idempotency_key_hash_key") @map("idempotency_key_hash") @db.Char(64)
+  operationFingerprint            String   @map("operation_fingerprint") @db.Char(64)
+  actorId                         Int      @map("actor_id")
+  limit                           Int
+  asOf                            DateTime @map("as_of")
+  requested                       Int
+  anonymized                      Int
+  skipped                         Json
+  eligibleRemaining               Int      @map("eligible_remaining")
+  complete                        Boolean
+  operationLogId                  Int      @unique(map: "lead_retention_runs_operation_log_id_key") @map("operation_log_id")
+  candidateSetSha256              String   @map("candidate_set_sha256") @db.Char(64)
+  policyApprovalReferenceSha256   String   @map("policy_approval_reference_sha256") @db.Char(64)
+  policyVersion                   String   @map("policy_version") @db.VarChar(50)
+  policyFingerprintSha256         String   @map("policy_fingerprint_sha256") @db.Char(64)
+  createdAt                       DateTime @default(now()) @map("created_at")
+
+  actor User @relation("LeadRetentionDispositionActor", fields: [actorId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "lead_retention_runs_actor_id_fkey")
+
+  @@index([actorId, createdAt], map: "lead_retention_runs_actor_created_idx")
+  @@map("lead_retention_disposition_runs")
 }
 
 // ========== 系统设置 ==========
@@ -1419,6 +1521,7 @@ model DynamicTemplate {
   definitionSchemaVersion Int                       @map("definition_schema_version")
   publishedVersion        Int                       @default(0) @map("published_version")
   sourceReference         String?                   @map("source_reference") @db.VarChar(128)
+  catalogCoverUrl         String?                   @map("catalog_cover_url") @db.VarChar(500)
   archivedAt              DateTime?                 @map("archived_at")
   createdAt               DateTime                  @default(now()) @map("created_at")
   updatedAt               DateTime                  @updatedAt @map("updated_at")
@@ -1515,6 +1618,7 @@ model SelectionInquiry {
   message               String?   @db.Text
   privacyConsent        Boolean   @default(false) @map("privacy_consent")
   privacyConsentVersion String?   @map("privacy_consent_version") @db.VarChar(50)
+  privacyConsentHash    String?   @map("privacy_consent_hash") @db.Char(64)
   privacyConsentedAt    DateTime? @map("privacy_consented_at")
   status                String    @default("PENDING") @db.VarChar(20)
   internalNote          String?   @map("internal_note") @db.Text
@@ -1814,10 +1918,12 @@ model Quotation {
   depositAmount     Decimal         @default(0) @map("deposit_amount") @db.Decimal(10, 2) // 建议定金
   validUntil        DateTime?       @map("valid_until") // 报价有效期
   remark            String?         @db.Text
-  convertedOrderId  Int?            @unique @map("converted_order_id") // 转换后的订单 ID；一张报价单最多转换为一张订单
-  convertedAt       DateTime?       @map("converted_at")
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
+  convertedOrderId             Int?     @unique @map("converted_order_id") // 转换后的订单 ID；一张报价单最多转换为一张订单
+  convertedAt                  DateTime? @map("converted_at")
+  creationIdempotencyKeyHash  String?   @unique @map("creation_idempotency_key_hash") @db.Char(64)
+  creationRequestHash         String?   @map("creation_request_hash") @db.Char(64)
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @updatedAt @map("updated_at")
 
   items           QuotationItem[]
   customer        Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -2126,29 +2232,29 @@ model MediaAsset {
 }
 
 model MediaAssetAuthorization {
-  assetId             Int                                @id @map("asset_id")
-  revision            Int                                @default(1)
-  publicUseEpoch      Int                                @default(0) @map("public_use_epoch")
-  sourceType          MediaAssetSourceType               @default(LEGACY_UNVERIFIED) @map("source_type")
-  authorizationBasis  String?                            @map("authorization_basis") @db.Text
-  evidenceReference   String?                            @map("evidence_reference") @db.VarChar(1000)
-  publicWebUseAllowed Boolean                            @default(false) @map("public_web_use_allowed")
-  reviewStatus        MediaAuthorizationReviewStatus     @default(DRAFT) @map("review_status")
-  preparedById        Int?                               @map("prepared_by")
-  submittedById       Int?                               @map("submitted_by")
-  submittedAt         DateTime?                          @map("submitted_at")
-  reviewedById        Int?                               @map("reviewed_by")
-  reviewedAt          DateTime?                          @map("reviewed_at")
-  reviewNote          String?                            @map("review_note") @db.Text
-  selfReviewAcknowledged Boolean                         @default(false) @map("self_review_acknowledged")
-  validFrom           DateTime?                          @map("valid_from")
-  validUntil          DateTime?                          @map("valid_until")
-  revocationStatus    MediaAuthorizationRevocationStatus @default(ACTIVE) @map("revocation_status")
-  revokedById         Int?                               @map("revoked_by")
-  revokedAt           DateTime?                          @map("revoked_at")
-  revocationReason    String?                            @map("revocation_reason") @db.Text
-  createdAt           DateTime                           @default(now()) @map("created_at")
-  updatedAt           DateTime                           @updatedAt @map("updated_at")
+  assetId                Int                                @id @map("asset_id")
+  revision               Int                                @default(1)
+  publicUseEpoch         Int                                @default(0) @map("public_use_epoch")
+  sourceType             MediaAssetSourceType               @default(LEGACY_UNVERIFIED) @map("source_type")
+  authorizationBasis     String?                            @map("authorization_basis") @db.Text
+  evidenceReference      String?                            @map("evidence_reference") @db.VarChar(1000)
+  publicWebUseAllowed    Boolean                            @default(false) @map("public_web_use_allowed")
+  reviewStatus           MediaAuthorizationReviewStatus     @default(DRAFT) @map("review_status")
+  preparedById           Int?                               @map("prepared_by")
+  submittedById          Int?                               @map("submitted_by")
+  submittedAt            DateTime?                          @map("submitted_at")
+  reviewedById           Int?                               @map("reviewed_by")
+  reviewedAt             DateTime?                          @map("reviewed_at")
+  reviewNote             String?                            @map("review_note") @db.Text
+  selfReviewAcknowledged Boolean                            @default(false) @map("self_review_acknowledged")
+  validFrom              DateTime?                          @map("valid_from")
+  validUntil             DateTime?                          @map("valid_until")
+  revocationStatus       MediaAuthorizationRevocationStatus @default(ACTIVE) @map("revocation_status")
+  revokedById            Int?                               @map("revoked_by")
+  revokedAt              DateTime?                          @map("revoked_at")
+  revocationReason       String?                            @map("revocation_reason") @db.Text
+  createdAt              DateTime                           @default(now()) @map("created_at")
+  updatedAt              DateTime                           @updatedAt @map("updated_at")
 
   asset       MediaAsset @relation(fields: [assetId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   preparedBy  User?      @relation("MediaAuthorizationPreparer", fields: [preparedById], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -2285,17 +2391,18 @@ model CustomerRefreshSession {
 }
 
 model ConsentRecord {
-  id              Int             @id @default(autoincrement())
-  customerId      Int?            @map("customer_id")
-  anonymousIdHash String?         @map("anonymous_id_hash") @db.Char(64)
-  purpose         ConsentPurpose
-  decision        ConsentDecision
-  policyVersion   String          @map("policy_version") @db.VarChar(50)
-  locale          ContentLocale
-  source          String          @db.VarChar(50)
-  decidedAt       DateTime        @default(now()) @map("decided_at")
-  expiresAt       DateTime?       @map("expires_at")
-  createdAt       DateTime        @default(now()) @map("created_at")
+  id                Int             @id @default(autoincrement())
+  customerId        Int?            @map("customer_id")
+  anonymousIdHash   String?         @map("anonymous_id_hash") @db.Char(64)
+  purpose           ConsentPurpose
+  decision          ConsentDecision
+  policyVersion     String          @map("policy_version") @db.VarChar(50)
+  policyContentHash String?         @map("policy_content_hash") @db.Char(64)
+  locale            ContentLocale
+  source            String          @db.VarChar(50)
+  decidedAt         DateTime        @default(now()) @map("decided_at")
+  expiresAt         DateTime?       @map("expires_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
 
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 

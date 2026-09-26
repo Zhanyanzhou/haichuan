@@ -5,6 +5,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OrdersService } from './orders.service';
 
+const ADMIN = { type: 'ADMIN' as const, id: 1 };
+
 type FakePayment = {
   id: number;
   orderId: number;
@@ -13,6 +15,7 @@ type FakePayment = {
   type: string;
   status: string;
   paymentNo: string;
+  gatewayNotify?: unknown;
 };
 
 function createHarness(finalAmount = 100) {
@@ -50,6 +53,7 @@ function createHarness(finalAmount = 100) {
     events: [] as Array<Record<string, unknown>>,
     notifications: [] as Array<Record<string, unknown>>,
     fulfillmentAuthorityCalls: [] as Array<Record<string, unknown>>,
+    simulatePaymentNoRaceOnce: false,
   };
 
   const applyOrderData = (data: Record<string, any>) => {
@@ -79,6 +83,8 @@ function createHarness(finalAmount = 100) {
       },
     },
     payment: {
+      findUnique: async ({ where }: any) =>
+        state.payments.find((payment) => payment.paymentNo === where.paymentNo) ?? null,
       findFirst: async ({ where }: any) =>
         state.payments.find(
           (payment) =>
@@ -94,8 +100,17 @@ function createHarness(finalAmount = 100) {
           type: data.type,
           status: data.status,
           paymentNo: data.paymentNo,
+          gatewayNotify: data.gatewayNotify,
         };
         state.payments.push(payment);
+        if (state.simulatePaymentNoRaceOnce) {
+          state.simulatePaymentNoRaceOnce = false;
+          throw new Prisma.PrismaClientKnownRequestError('payment_no unique race', {
+            code: 'P2002',
+            clientVersion: 'test',
+            meta: { target: ['payment_no'] },
+          });
+        }
         return payment;
       },
       findMany: async ({ where }: any) =>
@@ -203,12 +218,99 @@ test('人工收款标为 FULL 但未收足时仍保持待付款且不创建履�
     amount: 30,
     method: 'bank_transfer',
     type: 'FULL',
+    idempotencyKey: 'manual-receipt-partial-full',
   });
 
   assert.equal(state.order.status, 'PENDING_PAYMENT');
   assert.equal(Number(state.order.paidAmount), 30);
   assert.equal(state.fulfillments.length, 0);
   assert.equal(state.reservationConsumes, 0);
+});
+
+test('线下部分实收同键同内容重放只保留一次付款、事件、通知与累计金额', async () => {
+  const { service, state } = createHarness(100);
+  const receipt = {
+    orderId: 1,
+    amount: 30,
+    method: 'bank_transfer' as const,
+    type: 'DEPOSIT' as const,
+    reviewNote: '柜台已核对',
+    idempotencyKey: 'manual-receipt-response-loss',
+    operator: { type: 'ADMIN' as const, id: 12, name: '财务甲' },
+  };
+
+  const first = await service.recordManualReceipt(receipt);
+  const replayed = await service.recordManualReceipt(receipt);
+
+  assert.equal(replayed.id, first.id);
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.events.length, 1);
+  assert.equal(state.notifications.length, 1);
+  assert.equal(Number(state.order.paidAmount), 30);
+  assert.equal(Number(state.order.paidDeposit), 30);
+  assert.equal(state.payments[0].paymentNo.length, 50);
+  assert.deepEqual(state.payments[0].gatewayNotify, {
+    source: 'MANUAL_RECEIPT',
+    requestHash: (state.payments[0].gatewayNotify as { requestHash: string }).requestHash,
+  });
+});
+
+test('线下实收同键异内容冲突且不发生第二次业务写入', async () => {
+  const { service, state } = createHarness(100);
+  const base = {
+    orderId: 1,
+    amount: 30,
+    method: 'bank_transfer' as const,
+    type: 'DEPOSIT' as const,
+    idempotencyKey: 'manual-receipt-fingerprint-conflict',
+    operator: { type: 'ADMIN' as const, id: 12 },
+  };
+  await service.recordManualReceipt(base);
+
+  await assert.rejects(
+    () => service.recordManualReceipt({ ...base, amount: 31 }),
+    ConflictException,
+  );
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.events.length, 1);
+  assert.equal(state.notifications.length, 1);
+  assert.equal(Number(state.order.paidAmount), 30);
+});
+
+test('线下实收 paymentNo 并发唯一冲突后只恢复同键同指纹的胜出记录', async () => {
+  const { service, state } = createHarness(100);
+  state.simulatePaymentNoRaceOnce = true;
+
+  const recovered = await service.recordManualReceipt({
+    orderId: 1,
+    amount: 30,
+    method: 'store',
+    type: 'FULL',
+    idempotencyKey: 'manual-receipt-concurrent-winner',
+    operator: { type: 'ADMIN', id: 12 },
+  });
+
+  assert.equal(recovered.id, 1);
+  assert.equal(state.payments.length, 1);
+  assert.equal(state.events.length, 0);
+  assert.equal(state.notifications.length, 0);
+  assert.equal(Number(state.order.paidAmount), 0);
+});
+
+test('线下实收缺少幂等键时在事务前以 428 拒绝', async () => {
+  const { service, state } = createHarness(100);
+  await assert.rejects(
+    () => service.recordManualReceipt({
+      orderId: 1,
+      amount: 30,
+      method: 'bank_transfer',
+      type: 'DEPOSIT',
+      idempotencyKey: undefined as never,
+    }),
+    (error: unknown) => (error as { status?: number }).status === 428,
+  );
+  assert.equal(state.transactionCalls, 0);
+  assert.equal(state.payments.length, 0);
 });
 
 test('累计线下实收精确达到应收后只创建一张待拣货履约单', async () => {
@@ -219,12 +321,14 @@ test('累计线下实收精确达到应收后只创建一张待拣货履约单',
     amount: 40,
     method: 'bank_transfer',
     type: 'DEPOSIT',
+    idempotencyKey: 'manual-receipt-deposit-40',
   });
   await service.recordManualReceipt({
     orderId: 1,
     amount: 60,
     method: 'store',
     type: 'BALANCE',
+    idempotencyKey: 'manual-receipt-balance-60',
   });
 
   assert.equal(state.order.status, 'PENDING_SHIP');
@@ -249,6 +353,7 @@ test('线下实收超过剩余应收时整笔拒绝且不创建 Payment', async 
     amount: 80,
     method: 'bank_transfer',
     type: 'DEPOSIT',
+    idempotencyKey: 'manual-receipt-deposit-80',
   });
 
   await assert.rejects(
@@ -258,6 +363,7 @@ test('线下实收超过剩余应收时整笔拒绝且不创建 Payment', async 
         amount: 30,
         method: 'store',
         type: 'BALANCE',
+        idempotencyKey: 'manual-receipt-overpay-30',
       }),
     BadRequestException,
   );
@@ -274,6 +380,7 @@ test('人工入口不能把微信或支付宝伪装成已到账', async () => {
         amount: 100,
         method: 'wechat',
         type: 'FULL',
+        idempotencyKey: 'manual-receipt-invalid-online',
       } as never),
     BadRequestException,
   );
@@ -290,6 +397,7 @@ test('在线 Payment 缺少验签渠道事实时不能由后台人工确认到�
     amount: new Prisma.Decimal(100),
     method: 'wechat',
     type: 'FULL',
+    idempotencyKey: 'manual-receipt-ship-single',
     status: 'PENDING',
     proofUrl: null,
     order: {
@@ -331,6 +439,136 @@ test('在线 Payment 缺少验签渠道事实时不能由后台人工确认到�
   assert.equal(updates, 0);
 });
 
+test('线下付款确认响应丢失后仅同管理员同备注重放为零写恢复', async () => {
+  let updates = 0;
+  const payment = {
+    id: 19,
+    orderId: 1,
+    paymentNo: 'PAY-BANK-19',
+    amount: new Prisma.Decimal(100),
+    method: 'bank_transfer',
+    type: 'FULL',
+    status: 'PAID',
+    proofUrl: 'payment-proof:19',
+    reviewedBy: 7,
+    reviewedAt: new Date('2026-09-23T10:00:00.000Z'),
+    reviewNote: '到账已核对',
+    installment: null,
+    order: {
+      id: 1,
+      orderNo: 'ORD-REPLAY-1',
+      status: 'PENDING_SHIP',
+      finalAmount: new Prisma.Decimal(100),
+      items: [],
+      paymentPlans: [],
+    },
+  };
+  const tx = {
+    $queryRaw: async () => [{ id: 1 }],
+    payment: {
+      findUnique: async () => payment,
+      updateMany: async () => {
+        updates += 1;
+        return { count: 1 };
+      },
+    },
+  };
+  const service = new OrdersService(
+    {
+      payment: { findUnique: async () => ({ orderId: 1 }) },
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    } as unknown as PrismaService,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  const replayed = await service.confirmPaymentSettlement(
+    19,
+    7,
+    ' 到账已核对 ',
+    { type: 'ADMIN', id: 7 },
+  );
+  assert.equal(replayed?.id, 19);
+  assert.equal(updates, 0);
+
+  await assert.rejects(
+    () => service.confirmPaymentSettlement(
+      19,
+      7,
+      '另一条备注',
+      { type: 'ADMIN', id: 7 },
+    ),
+    ConflictException,
+  );
+  assert.equal(updates, 0);
+});
+
+test('线下付款驳回应答丢失后仅同管理员同原因重放为零写恢复', async () => {
+  let updates = 0;
+  const payment = {
+    id: 20,
+    orderId: 1,
+    paymentNo: 'PAY-BANK-20',
+    amount: new Prisma.Decimal(100),
+    method: 'bank_transfer',
+    type: 'FULL',
+    status: 'FAILED',
+    reviewedBy: 8,
+    reviewedAt: new Date('2026-09-23T10:05:00.000Z'),
+    reviewNote: '凭证无法核验',
+    installment: null,
+  };
+  const tx = {
+    $queryRaw: async () => [{ id: 1 }],
+    payment: {
+      findUnique: async () => payment,
+      updateMany: async () => {
+        updates += 1;
+        return { count: 1 };
+      },
+    },
+  };
+  const service = new OrdersService(
+    {
+      payment: { findUnique: async () => ({ orderId: 1 }) },
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    } as unknown as PrismaService,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  const replayed = await service.rejectOfflinePayment(
+    20,
+    8,
+    ' 凭证无法核验 ',
+    { type: 'ADMIN', id: 8 },
+  );
+  assert.equal(replayed.id, 20);
+  assert.equal(updates, 0);
+
+  await assert.rejects(
+    () => service.rejectOfflinePayment(
+      20,
+      9,
+      '凭证无法核验',
+      { type: 'ADMIN', id: 9 },
+    ),
+    ConflictException,
+  );
+  await assert.rejects(
+    () => service.rejectOfflinePayment(
+      20,
+      8,
+      '另一条驳回原因',
+      { type: 'ADMIN', id: 8 },
+    ),
+    ConflictException,
+  );
+  assert.equal(updates, 0);
+});
+
 test('订单中心发货复用付款时创建的履约单，不再新建第二张', async () => {
   const { service, state } = createHarness(100);
   await service.recordManualReceipt({
@@ -338,10 +576,11 @@ test('订单中心发货复用付款时创建的履约单，不再新建第二�
     amount: 100,
     method: 'bank_transfer',
     type: 'FULL',
+    idempotencyKey: 'manual-receipt-ship-single',
   });
   const fulfillmentId = state.fulfillments[0].id;
 
-  await service.ship(1, { logisticsCompany: '顺丰', logisticsNo: 'SF001' });
+  await service.ship(1, { logisticsCompany: '顺丰', logisticsNo: 'SF001' }, ADMIN);
 
   assert.equal(state.fulfillments.length, 1);
   assert.equal(state.fulfillments[0].id, fulfillmentId);
@@ -359,6 +598,7 @@ test('订单中心兼容入口对多包裹始终 409，显式传 fulfillmentId �
     amount: 100,
     method: 'bank_transfer',
     type: 'FULL',
+    idempotencyKey: 'manual-receipt-ship-multi',
   });
   state.fulfillments.push({
     id: 2,
@@ -370,7 +610,7 @@ test('订单中心兼容入口对多包裹始终 409，显式传 fulfillmentId �
   });
 
   await assert.rejects(
-    () => service.ship(1, { logisticsCompany: '顺丰', logisticsNo: 'SF-MISSING' }),
+    () => service.ship(1, { logisticsCompany: '顺丰', logisticsNo: 'SF-MISSING' }, ADMIN),
     /前往履约中心逐包发货/,
   );
 
@@ -379,7 +619,7 @@ test('订单中心兼容入口对多包裹始终 409，显式传 fulfillmentId �
       fulfillmentId: 1,
       logisticsCompany: '顺丰',
       logisticsNo: 'SF-WH-1',
-    }),
+    }, ADMIN),
     /前往履约中心逐包发货/,
   );
   assert.equal(state.fulfillments[0].status, 'PENDING_PICK');
@@ -410,8 +650,8 @@ test('付款确认事务先锁订单再重读 Payment 和订单状态', async ()
     },
   };
   const tx = {
-    $queryRaw: async () => {
-      sequence.push('order-lock');
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      sequence.push(query.strings?.join('').includes('FROM users') ? 'staff-lock' : 'order-lock');
       return [{ id: 1 }];
     },
     payment: {
@@ -464,8 +704,8 @@ test('取消事务按 Order、Payment、Fulfillment、库存预占顺序处理',
     customerName: '合成客户',
   };
   const tx = {
-    $queryRaw: async () => {
-      sequence.push('order-lock');
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      sequence.push(query.strings?.join('').includes('FROM users') ? 'staff-lock' : 'order-lock');
       return [{ id: 1 }];
     },
     order: {
@@ -515,10 +755,11 @@ test('取消事务按 Order、Payment、Fulfillment、库存预占顺序处理',
     return 1;
   };
 
-  const result = await service.updateStatus(1, { status: 'CANCELLED' });
+  const result = await service.updateStatus(1, { status: 'CANCELLED' }, ADMIN);
 
   assert.equal(result?.status, 'CANCELLED');
-  assert.deepEqual(sequence.slice(0, 7), [
+  assert.deepEqual(sequence.slice(0, 8), [
+    'staff-lock',
     'order-lock',
     'order-reread',
     'payment-read',
@@ -556,7 +797,7 @@ test('取消拿到订单锁后发现确认付款会拒绝且不释放库存', as
   };
 
   await assert.rejects(
-    () => service.updateStatus(1, { status: 'CANCELLED' }),
+    () => service.updateStatus(1, { status: 'CANCELLED' }, ADMIN),
     ConflictException,
   );
   assert.equal(released, false);
@@ -593,7 +834,7 @@ test('取消拿到订单锁后发现 PENDING 支付会拒绝且不释放库存',
   };
 
   await assert.rejects(
-    () => service.updateStatus(1, { status: 'CANCELLED' }),
+    () => service.updateStatus(1, { status: 'CANCELLED' }, ADMIN),
     /待处理的支付交易 PAY-RACE/,
   );
   assert.equal(released, false);
@@ -652,7 +893,7 @@ test('未付款报价订单取消时同步取消未绑定分期和 ACTIVE 付款
   );
   (service as any).releaseStockReservations = async () => 0;
 
-  await service.updateStatus(1, { status: 'CANCELLED' });
+  await service.updateStatus(1, { status: 'CANCELLED' }, ADMIN);
   assert.equal(order.status, 'CANCELLED');
   assert.equal(plan.status, 'CANCELLED');
   assert.deepEqual(plan.installments.map((item) => item.status), [

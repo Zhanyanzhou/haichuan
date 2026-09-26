@@ -4,16 +4,13 @@ import { TradeEventsService } from '../trade-events/trade-events.service';
 import { TRADE_ENTITY_TYPE, TRADE_EVENT_TYPE, type OperatorContext } from '../trade-events/trade-events.constants';
 import { Prisma, type FulfillmentStatus } from '@prisma/client';
 import { ReliableNotificationIntentService } from '../../common/notifications/reliable-notification-intent.service';
+import { findDeliveryBlockingDisputes } from '../../common/trade/delivery-blocking-disputes';
+import {
+  lockAuthorizedStaffForOrder,
+  type StaffOrderActor,
+} from '../../common/security/staff-order-authorization';
 
 const PENDING_FULFILLMENT_STATUSES: FulfillmentStatus[] = ['PENDING_PICK', 'PENDING_CHECK', 'PENDING_SHIP'];
-const ACTIVE_REFUND_STATUSES = ['PENDING', 'APPROVED', 'PROCESSING'] as const;
-const ACTIVE_AFTER_SALES_STATUSES = [
-  'REQUESTED',
-  'APPROVED',
-  'RETURNING',
-  'QC_PASSED',
-  'QC_FAILED',
-] as const;
 
 const fulfillmentListSelect = {
   id: true,
@@ -89,19 +86,22 @@ export class FulfillmentService {
     if (rows.length === 0) throw new NotFoundException('订单不存在');
   }
 
-  private async assertDispatchIsNotBlocked(tx: Prisma.TransactionClient, orderId: number) {
-    const [activeRefund, activeAfterSales] = await Promise.all([
-      tx.refund.findFirst({
-        where: { orderId, status: { in: [...ACTIVE_REFUND_STATUSES] } },
-        select: { id: true },
-      }),
-      tx.afterSalesCase.findFirst({
-        where: { orderId, status: { in: [...ACTIVE_AFTER_SALES_STATUSES] } },
-        select: { id: true },
-      }),
-    ]);
+  private async assertDispatchIsNotBlocked(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: number;
+      paidAmount: Prisma.Decimal;
+      refundedAmount: Prisma.Decimal;
+      finalAmount: Prisma.Decimal;
+    },
+  ) {
+    const { activeRefund, activeAfterSales } = await findDeliveryBlockingDisputes(tx, order.id);
     if (activeRefund || activeAfterSales) {
       throw new ConflictException('订单存在处理中的退款或售后，暂不可发货');
+    }
+    const netPaid = new Prisma.Decimal(order.paidAmount).minus(order.refundedAmount);
+    if (netPaid.lessThan(order.finalAmount)) {
+      throw new ConflictException('订单退款后净收不足，不可发货，请先核对退款与订单状态');
     }
   }
 
@@ -113,6 +113,8 @@ export class FulfillmentService {
       deliveryStatus: string;
       shippedAt: Date | null;
       receivedAt: Date | null;
+      orderType: string;
+      customStage: string | null;
     },
     operator: OperatorContext,
   ) {
@@ -161,12 +163,18 @@ export class FulfillmentService {
       ? new Date(Math.max(...deliveredTimes.map((value) => value.getTime())))
       : null;
     const previousDeliveryStatus = order.deliveryStatus;
+    const previousCustomStage = order.customStage;
+    const shouldProjectCustomDelivery =
+      order.orderType === 'CUSTOM' &&
+      allDelivered &&
+      !['DELIVERED', 'COMPLETED'].includes(previousCustomStage ?? '');
 
     await tx.order.update({
       where: { id: order.id },
       data: {
         status: nextOrderStatus as 'PENDING_SHIP' | 'SHIPPED',
         deliveryStatus: nextDeliveryStatus,
+        ...(shouldProjectCustomDelivery ? { customStage: 'DELIVERED' as const } : {}),
         shippedAt,
         receivedAt,
         logisticsCompany: single && !hasPending ? single.carrier : null,
@@ -186,10 +194,25 @@ export class FulfillmentService {
       });
     }
 
+    if (shouldProjectCustomDelivery) {
+      await this.tradeEvents.record(tx, {
+        orderId: order.id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: order.id,
+        eventType: TRADE_EVENT_TYPE.ORDER_CUSTOM_STAGE_CHANGED,
+        fromStatus: previousCustomStage,
+        toStatus: 'DELIVERED',
+        operator,
+      });
+    }
+
     return { allDispatched, allDelivered, deliveryStatus: nextDeliveryStatus };
   }
 
-  async findAll(params: { page?: number; pageSize?: number; status?: string; keyword?: string }) {
+  async findAll(
+    params: { page?: number; pageSize?: number; status?: string; keyword?: string },
+    actor: StaffOrderActor,
+  ) {
     const page = Math.max(Number(params.page) || 1, 1);
     const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
     const where: Prisma.FulfillmentWhereInput = {};
@@ -203,16 +226,19 @@ export class FulfillmentService {
       ];
     }
 
-    const [list, total] = await Promise.all([
-      this.prisma.fulfillment.findMany({
-        where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        select: fulfillmentListSelect,
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.fulfillment.count({ where }),
-    ]);
+    const [list, total] = await this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, 'FULFILLMENT_MANAGE');
+      return Promise.all([
+        tx.fulfillment.findMany({
+          where,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: fulfillmentListSelect,
+          orderBy: { createdAt: 'desc' },
+        }),
+        tx.fulfillment.count({ where }),
+      ]);
+    });
     return {
       list: list.map((fulfillment) => ({
         ...fulfillment,
@@ -227,10 +253,13 @@ export class FulfillmentService {
     };
   }
 
-  async findById(id: number) {
-    const fulfillment = await this.prisma.fulfillment.findUnique({
-      where: { id },
-      select: fulfillmentDetailSelect,
+  async findById(id: number, actor: StaffOrderActor) {
+    const fulfillment = await this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, 'FULFILLMENT_MANAGE');
+      return tx.fulfillment.findUnique({
+        where: { id },
+        select: fulfillmentDetailSelect,
+      });
     });
     if (!fulfillment) throw new NotFoundException('履约单不存在');
 
@@ -255,20 +284,24 @@ export class FulfillmentService {
   async dispatch(
     fulfillmentId: number,
     dto: { carrier: string; trackingNo: string; internalNote?: string },
-    operator: OperatorContext,
+    actor: StaffOrderActor,
     options: { requireSingleOrderId?: number } = {},
   ) {
     const carrier = dto.carrier?.trim();
     const trackingNo = dto.trackingNo?.trim();
     if (!carrier || !trackingNo) throw new BadRequestException('发货必须填写承运商和运单号');
 
-    const fulfillmentRef = await this.prisma.fulfillment.findUnique({
-      where: { id: fulfillmentId },
-      select: { orderId: true },
+    const fulfillmentRef = await this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, 'FULFILLMENT_MANAGE');
+      return tx.fulfillment.findUnique({
+        where: { id: fulfillmentId },
+        select: { orderId: true },
+      });
     });
     if (!fulfillmentRef) throw new NotFoundException('履约单不存在');
 
     return this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, 'FULFILLMENT_MANAGE');
       await this.lockOrder(tx, fulfillmentRef.orderId);
       const fulfillment = await tx.fulfillment.findUnique({ where: { id: fulfillmentId }, include: { order: true } });
       if (!fulfillment || fulfillment.orderId !== fulfillmentRef.orderId) {
@@ -301,7 +334,7 @@ export class FulfillmentService {
       if (fulfillment.order.status !== 'PENDING_SHIP') {
         throw new BadRequestException('订单未完成付款审核，不可发货');
       }
-      await this.assertDispatchIsNotBlocked(tx, fulfillment.orderId);
+      await this.assertDispatchIsNotBlocked(tx, fulfillment.order);
 
       // 乐观锁：防止并发发货
       const now = new Date();
@@ -344,17 +377,21 @@ export class FulfillmentService {
   async updateStatus(
     fulfillmentId: number,
     dto: { status: string; abnormalReason?: string; internalNote?: string },
-    operator: OperatorContext,
+    actor: StaffOrderActor,
     options: { requireSingleOrderId?: number } = {},
   ) {
-    // 事务外只定位不可变 orderId，避免 MySQL 在订单锁前建立旧的一致性读快照。
-    const fulfillmentRef = await this.prisma.fulfillment.findUnique({
-      where: { id: fulfillmentId },
-      select: { orderId: true },
+    // 短事务先复核员工并定位不可变 orderId；写事务再复核员工后按 Order → Fulfillment 锁序推进。
+    const fulfillmentRef = await this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, 'FULFILLMENT_MANAGE');
+      return tx.fulfillment.findUnique({
+        where: { id: fulfillmentId },
+        select: { orderId: true },
+      });
     });
     if (!fulfillmentRef) throw new NotFoundException('履约单不存在');
 
     return this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, 'FULFILLMENT_MANAGE');
       await this.lockOrder(tx, fulfillmentRef.orderId);
       const fulfillment = await tx.fulfillment.findUnique({
         where: { id: fulfillmentId },

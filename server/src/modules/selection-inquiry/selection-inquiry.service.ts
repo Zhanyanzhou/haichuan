@@ -1,14 +1,21 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
-import { PRIVACY_CONSENT_VERSION } from "../../common/privacy/privacy-consent";
+import {
+  PRIVACY_CONSENT_CONTENT_HASH,
+  PRIVACY_CONSENT_VERSION,
+} from "../../common/privacy/privacy-consent";
 import { CreateSelectionInquiryDto } from "./dto/create-selection-inquiry.dto";
-import type { CustomerPrincipal } from "../../common/security/authenticated-principal";
+import type {
+  CustomerPrincipal,
+  StaffPrincipal,
+} from "../../common/security/authenticated-principal";
 import {
   assertMatchingSubmission,
   isUniqueConstraintError,
@@ -21,6 +28,7 @@ import {
   CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
   toCustomerSelectionInquirySubmission,
 } from "./customer-selection-inquiry.response";
+import { lockActiveCustomerForWrite } from "../customers/customer-write-gate";
 
 const MAX_IDEMPOTENT_TRANSACTION_ATTEMPTS = 3;
 
@@ -40,6 +48,35 @@ export class SelectionInquiryService {
     private productsService: ProductsService,
     private leadsService: LeadsService,
   ) {}
+
+  private requireStaffActor(
+    actor: Pick<StaffPrincipal, "id" | "sessionFamilyId"> | number | undefined,
+  ) {
+    const principal = typeof actor === "number" ? { id: actor } : actor;
+    if (!principal || !Number.isInteger(principal.id) || principal.id <= 0) {
+      throw new ForbiddenException("无法确认选款咨询查看人");
+    }
+    return principal;
+  }
+
+  private async lockStaffReader(
+    transaction: Prisma.TransactionClient,
+    actor: Pick<StaffPrincipal, "id" | "sessionFamilyId">,
+  ) {
+    const user = await transaction.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE') FOR SHARE`,
+    );
+    if (user.length !== 1) {
+      throw new ForbiddenException("当前员工已停用或无权查看选款咨询");
+    }
+    if (!actor.sessionFamilyId) return;
+    const session = await transaction.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+    );
+    if (session.length !== 1) {
+      throw new ForbiddenException("当前员工会话已失效，不能继续查看选款咨询");
+    }
+  }
 
   private async findIdempotentSubmission(
     client: Pick<Prisma.TransactionClient, "lead" | "selectionInquiry">,
@@ -70,6 +107,49 @@ export class SelectionInquiryService {
     });
   }
 
+  /**
+   * 幂等赢家也是客户私有结果。无论从预检、P2034 还是 P2002 进入恢复，
+   * 已登录客户都必须在同一事务内重新复核 ACTIVE + authVersion 后才能读取。
+   */
+  private async findAuthorizedIdempotentSubmission(
+    idempotencyKeyHash: string,
+    submissionFingerprint: string,
+    customer: CustomerPrincipal | undefined,
+  ) {
+    for (
+      let attempt = 0;
+      attempt < MAX_IDEMPOTENT_TRANSACTION_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        return await this.prisma.$transaction(
+          async (transaction) => {
+            if (customer) {
+              await lockActiveCustomerForWrite(transaction, customer);
+            }
+            return this.findIdempotentSubmission(
+              transaction,
+              idempotencyKeyHash,
+              submissionFingerprint,
+            );
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+      } catch (error) {
+        if (!isSerializableTransactionConflict(error)) throw error;
+        if (attempt === MAX_IDEMPOTENT_TRANSACTION_ATTEMPTS - 1) {
+          throw new ServiceUnavailableException(
+            "请求繁忙，请使用同一幂等键稍后重试",
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5 * (attempt + 1)));
+      }
+    }
+    throw new ServiceUnavailableException(
+      "请求繁忙，请使用同一幂等键稍后重试",
+    );
+  }
+
   private hasSameProductSet(
     items: Array<{ productId: number | null }>,
     expectedProductIds: number[],
@@ -92,7 +172,8 @@ export class SelectionInquiryService {
     keyword?: string;
     page?: number;
     pageSize?: number;
-  }) {
+  }, actorInput?: Pick<StaffPrincipal, "id" | "sessionFamilyId"> | number) {
+    const actor = this.requireStaffActor(actorInput);
     const { status, keyword, page = 1, pageSize = 20 } = params;
     const where: Prisma.SelectionInquiryWhereInput = {};
     if (status) where.status = status;
@@ -102,23 +183,33 @@ export class SelectionInquiryService {
         { phone: { contains: keyword } },
       ];
     }
-    const [list, total] = await Promise.all([
-      this.prisma.selectionInquiry.findMany({
-        where,
-        include: { items: true },
-        orderBy: { createdAt: "desc" },
-        skip: (+page - 1) * +pageSize,
-        take: +pageSize,
-      }),
-      this.prisma.selectionInquiry.count({ where }),
-    ]);
-    return { list, total, page: +page, pageSize: +pageSize };
+    return this.prisma.$transaction(async (transaction) => {
+      await this.lockStaffReader(transaction, actor);
+      const [list, total] = await Promise.all([
+        transaction.selectionInquiry.findMany({
+          where,
+          include: { items: true },
+          orderBy: { createdAt: "desc" },
+          skip: (+page - 1) * +pageSize,
+          take: +pageSize,
+        }),
+        transaction.selectionInquiry.count({ where }),
+      ]);
+      return { list, total, page: +page, pageSize: +pageSize };
+    });
   }
 
-  async findOne(id: number) {
-    return this.prisma.selectionInquiry.findUnique({
-      where: { id },
-      include: { items: true },
+  async findOne(
+    id: number,
+    actorInput?: Pick<StaffPrincipal, "id" | "sessionFamilyId"> | number,
+  ) {
+    const actor = this.requireStaffActor(actorInput);
+    return this.prisma.$transaction(async (transaction) => {
+      await this.lockStaffReader(transaction, actor);
+      return transaction.selectionInquiry.findUnique({
+        where: { id },
+        include: { items: true },
+      });
     });
   }
 
@@ -162,37 +253,9 @@ export class SelectionInquiryService {
     const distinctIds = Array.from(
       new Set(validItems.map((item) => item.productId)),
     ).sort((left, right) => left - right);
-    const snapshots =
-      await this.productsService.resolveVisibleProductSnapshots(
-        distinctIds,
-        data.customer,
-      );
-    if (snapshots.size !== distinctIds.length) {
-      throw new BadRequestException(
-        "所选作品中有不存在或暂不可选的款式，请刷新页面后重新选择",
-      );
-    }
-
     const itemByProductId = new Map(
       validItems.map((item) => [item.productId, item]),
     );
-    const createItems = distinctIds.map((productId) => {
-      const item = itemByProductId.get(productId);
-      const snap = snapshots.get(productId);
-      if (!item || !snap) {
-        throw new BadRequestException(
-          "所选作品中有不存在或暂不可选的款式，请刷新页面后重新选择",
-        );
-      }
-      return {
-        productId,
-        productNameSnapshot: snap.name,
-        productSkuSnapshot: item.productSkuSnapshot?.trim() || null,
-        productImageSnapshot: snap.mediaUrl,
-      };
-    });
-    const privacyConsentedAt = new Date();
-    const recentSince = new Date(privacyConsentedAt.getTime() - 10 * 60 * 1000);
     const email = data.customer?.email || data.email?.trim() || null;
     const wechat = data.wechat?.trim() || null;
     const message = data.message?.trim() || null;
@@ -205,17 +268,45 @@ export class SelectionInquiryService {
       wechat,
       message,
       productIds: distinctIds,
-      productSkuSnapshots: createItems.map((item) => ({
-        productId: item.productId,
-        productSkuSnapshot: item.productSkuSnapshot,
+      productSkuSnapshots: distinctIds.map((productId) => ({
+        productId,
+        productSkuSnapshot:
+          itemByProductId.get(productId)?.productSkuSnapshot?.trim() || null,
       })),
-      privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+      privacyConsentVersion: data.privacyConsentVersion,
+      privacyConsentContentHash: data.privacyConsentContentHash,
     });
 
-    // 同一手机号与同一商品集合在短时间内的重复请求复用原记录。
+    if (idempotency.idempotencyKeyHash) {
+      // 已落库请求的安全重放必须早于作品当前可见性校验。
+      // 否则首次提交成功但响应丢失后，作品恰好下架会让客户丢失 canonical Lead 回执。
+      // 已登录客户仍在同一事务中锁定并复核 ACTIVE/authVersion。
+      const replay = await this.findAuthorizedIdempotentSubmission(
+        idempotency.idempotencyKeyHash,
+        idempotency.submissionFingerprint,
+        data.customer,
+      );
+      if (replay) return toCustomerSelectionInquirySubmission(replay);
+    }
+
+    if (
+      data.privacyConsentVersion !== PRIVACY_CONSENT_VERSION
+      || data.privacyConsentContentHash !== PRIVACY_CONSENT_CONTENT_HASH
+    ) {
+      throw new BadRequestException("隐私说明已更新，请刷新页面后重新提交");
+    }
+
+    const privacyConsentedAt = new Date();
+    const recentSince = new Date(privacyConsentedAt.getTime() - 10 * 60 * 1000);
+
+    // 旧客户端未传幂等键时，仅对完整规范化请求摘要一致的短时重试复用原记录。
+    // 禁止只凭手机号+作品集合复用：那会把不同联系人/留言合并并泄露原回执 ID。
     // 显式幂等键跨接口全局唯一；旧客户端仍保留十分钟同集合兼容去重。
     const create = async () => this.prisma.$transaction(
       async (transaction) => {
+        const lockedCustomer = data.customer
+          ? await lockActiveCustomerForWrite(transaction, data.customer)
+          : undefined;
         if (idempotency.idempotencyKeyHash) {
           const existing = await this.findIdempotentSubmission(
             transaction,
@@ -223,14 +314,46 @@ export class SelectionInquiryService {
             idempotency.submissionFingerprint,
           );
           if (existing) return existing;
-        } else {
+        }
+
+        // 与合作资格审核共用客户行锁，并在同一 Serializable 事务内读取作品。
+        // 新请求只能使用锁内最新资格；已经提交的幂等回放仍在本检查前返回。
+        const snapshots =
+          await this.productsService.resolveVisibleProductSnapshots(
+            distinctIds,
+            lockedCustomer,
+            transaction,
+          );
+        if (snapshots.size !== distinctIds.length) {
+          throw new BadRequestException(
+            "所选作品中有不存在或暂不可选的款式，请刷新页面后重新选择",
+          );
+        }
+        const createItems = distinctIds.map((productId) => {
+          const item = itemByProductId.get(productId);
+          const snap = snapshots.get(productId);
+          if (!item || !snap) {
+            throw new BadRequestException(
+              "所选作品中有不存在或暂不可选的款式，请刷新页面后重新选择",
+            );
+          }
+          return {
+            productId,
+            productNameSnapshot: snap.name,
+            productSkuSnapshot: item.productSkuSnapshot?.trim() || null,
+            productImageSnapshot: snap.mediaUrl,
+          };
+        });
+
+        if (!idempotency.idempotencyKeyHash) {
           const recentInquiries = await transaction.selectionInquiry.findMany({
             where: { phone, createdAt: { gte: recentSince } },
             select: CUSTOMER_SELECTION_INQUIRY_DEDUPE_SELECT,
             orderBy: { createdAt: "desc" },
           });
           const existingInquiry = recentInquiries.find((inquiry) =>
-            this.hasSameProductSet(inquiry.items, distinctIds),
+            inquiry.lead?.submissionFingerprint === idempotency.submissionFingerprint
+            && this.hasSameProductSet(inquiry.items, distinctIds),
           );
           if (existingInquiry) return existingInquiry;
         }
@@ -247,6 +370,7 @@ export class SelectionInquiryService {
             message,
             privacyConsent: true,
             privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+            privacyConsentHash: PRIVACY_CONSENT_CONTENT_HASH,
             privacyConsentedAt,
             status: "PENDING",
             items: { create: createItems },
@@ -279,6 +403,7 @@ export class SelectionInquiryService {
             purpose: "SERVICE_PRIVACY",
             decision: "GRANTED",
             policyVersion: PRIVACY_CONSENT_VERSION,
+            policyContentHash: PRIVACY_CONSENT_CONTENT_HASH,
             locale: "ZH_CN",
             source: `selection-inquiry:${inquiry.id}`,
             decidedAt: privacyConsentedAt,
@@ -306,10 +431,10 @@ export class SelectionInquiryService {
 
           // P2034 表示整段 Serializable 事务已经回滚。该路径有显式唯一幂等键，
           // 所以可安全重放完整短事务；先读赢家可避免重复进入下一轮竞争。
-          const existing = await this.findIdempotentSubmission(
-            this.prisma,
+          const existing = await this.findAuthorizedIdempotentSubmission(
             idempotency.idempotencyKeyHash,
             idempotency.submissionFingerprint,
+            data.customer,
           );
           if (existing) return existing;
           if (attempt === attempts - 1) {
@@ -331,10 +456,10 @@ export class SelectionInquiryService {
       if (!idempotency.idempotencyKeyHash || !isUniqueConstraintError(error)) {
         throw error;
       }
-      const existing = await this.findIdempotentSubmission(
-        this.prisma,
+      const existing = await this.findAuthorizedIdempotentSubmission(
         idempotency.idempotencyKeyHash,
         idempotency.submissionFingerprint,
+        data.customer,
       );
       if (!existing) throw error;
       return toCustomerSelectionInquirySubmission(existing);
@@ -344,7 +469,8 @@ export class SelectionInquiryService {
   async update(
     id: number,
     data: UpdateSelectionInquiryDto,
-    createdBy?: number,
+    idempotencyKey: string | undefined,
+    createdBy?: Pick<StaffPrincipal, "id" | "sessionFamilyId"> | number,
   ) {
     return this.leadsService.updateBySource(
       "selection",
@@ -356,6 +482,7 @@ export class SelectionInquiryService {
         closureReason: data.closureReason,
         reopenReason: data.reopenReason,
       },
+      idempotencyKey,
       createdBy,
     );
   }

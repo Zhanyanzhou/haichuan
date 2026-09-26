@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, Headers, Req, UseGuards, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, Headers, Req, Res, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CartService } from './cart.service';
 import { OptionalCustomerAuthGuard } from '../customers/optional-customer-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
@@ -20,31 +21,39 @@ export class CartController {
 
   @Get()
   @ApiOperation({ summary: '获取购物车' })
-  getCart(@Req() req: OptionalCustomerRequest, @Headers('x-session-id') sessionId?: string) {
-    return this.cartService.getCart({ userId: req.customer?.id, sessionId, customer: req.customer });
+  getCart(
+    @Req() req: OptionalCustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Headers('x-session-id') sessionId?: string,
+  ) {
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.vary('Cookie');
+    response.vary('Authorization');
+    response.vary('x-session-id');
+    return this.cartService.getCart({ sessionId, customer: req.customer });
   }
 
   @Post()
   @ApiOperation({ summary: '添加商品到购物车' })
   addItem(@Req() req: OptionalCustomerRequest, @Body() body: AddCartItemDto, @Headers('x-session-id') sessionId?: string) {
-    return this.cartService.addItem({ ...body, userId: req.customer?.id, sessionId, customer: req.customer });
+    return this.cartService.addItem({ ...body, sessionId, customer: req.customer });
   }
 
   @Put(':id')
   @ApiOperation({ summary: '更新购物车商品数量' })
   updateQuantity(@Req() req: OptionalCustomerRequest, @Param('id', ParseIntPipe) id: number, @Body() body: UpdateCartItemDto, @Headers('x-session-id') sessionId?: string) {
-    return this.cartService.updateQuantity(id, body.quantity, { userId: req.customer?.id, sessionId, customer: req.customer });
+    return this.cartService.updateQuantity(id, body.quantity, { sessionId, customer: req.customer });
   }
 
   @Delete(':id')
   @ApiOperation({ summary: '从购物车移除商品' })
   removeItem(@Req() req: OptionalCustomerRequest, @Param('id', ParseIntPipe) id: number, @Headers('x-session-id') sessionId?: string) {
-    return this.cartService.removeItem(id, { userId: req.customer?.id, sessionId, customer: req.customer });
+    return this.cartService.removeItem(id, { sessionId, customer: req.customer });
   }
 
   @Delete()
   @ApiOperation({ summary: '清空购物车' })
   clearCart(@Req() req: OptionalCustomerRequest, @Headers('x-session-id') sessionId?: string) {
-    return this.cartService.clearCart({ userId: req.customer?.id, sessionId, customer: req.customer });
+    return this.cartService.clearCart({ sessionId, customer: req.customer });
   }
 }

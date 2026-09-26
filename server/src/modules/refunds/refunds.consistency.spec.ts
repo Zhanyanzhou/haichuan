@@ -57,6 +57,7 @@ function createHarness(
     order: { id: 1, refundedAmount: new Prisma.Decimal(0) },
     events: [] as Array<Record<string, unknown>>,
     refundUpdates: 0,
+    operations: [] as string[],
   };
 
   const matchesStatus = (actual: string, expected: any) =>
@@ -73,7 +74,10 @@ function createHarness(
   };
 
   const tx: any = {
-    $queryRaw: async () => [{ id: 1 }],
+    $queryRaw: async () => {
+      state.operations.push('raw-lock');
+      return [{ id: 1 }];
+    },
     payment: {
       findMany: async ({ where }: any) =>
         state.payments.filter(
@@ -95,6 +99,7 @@ function createHarness(
     },
     refund: {
       findUnique: async ({ where, include }: any) => {
+        state.operations.push('refund-find');
         const refund = findRefund(where);
         if (!refund) return null;
         if (include?.payment) {
@@ -162,6 +167,15 @@ function createHarness(
         return { count: 1 };
       },
     },
+    tradeEvent: {
+      findFirst: async ({ where }: any) =>
+        [...state.events].reverse().find(
+          (event) =>
+            event.entityType === where.entityType &&
+            event.entityId === where.entityId &&
+            event.eventType === where.eventType,
+        ) ?? null,
+    },
   };
   const prisma: any = {
     ...tx,
@@ -169,14 +183,164 @@ function createHarness(
   };
   const service = new RefundsService(
     prisma as PrismaService,
-    { record: async (_tx: unknown, event: Record<string, unknown>) => state.events.push(event) } as never,
+    {
+      record: async (_tx: unknown, event: Record<string, any>) => state.events.push({
+        ...event,
+        operatorId: event.operator?.id ?? null,
+      }),
+    } as never,
     { isRefundCreationEnabled: () => false } as never,
     { get: () => undefined } as never,
   );
   return { service, state };
 }
 
-const admin = { type: 'ADMIN' as const, id: 1 };
+const admin = {
+  id: 1,
+  username: 'admin',
+  realName: '管理员',
+  role: 'ADMIN',
+  status: 'ACTIVE',
+} as any;
+
+test('分期退款预检按原付款扣除占用额度并标明定金与尾款', async () => {
+  const prisma = {
+    order: {
+      findUnique: async () => ({
+        id: 1,
+        orderNo: 'ORD-INSTALLMENT-1',
+        status: 'SHIPPED',
+        orderType: 'CUSTOM',
+        currency: 'CNY',
+        quotationVersionId: 7,
+        paymentPlans: [{ id: 10 }],
+        payments: [
+          {
+            id: 11,
+            paymentNo: 'PAY-DEPOSIT-30',
+            amount: new Prisma.Decimal(30),
+            method: 'wechat',
+            status: 'PAID',
+            type: 'DEPOSIT',
+            paidAt: new Date('2026-09-01T00:00:00.000Z'),
+            createdAt: new Date('2026-09-01T00:00:00.000Z'),
+            installment: {
+              label: '定金',
+              sequence: 1,
+              paymentPlan: {
+                status: 'COMPLETED',
+                installments: [{ status: 'PAID' }, { status: 'PAID' }],
+              },
+            },
+          },
+          {
+            id: 12,
+            paymentNo: 'PAY-BALANCE-70',
+            amount: new Prisma.Decimal(70),
+            method: 'bank_transfer',
+            status: 'PARTIAL_REFUND',
+            type: 'BALANCE',
+            paidAt: new Date('2026-09-02T00:00:00.000Z'),
+            createdAt: new Date('2026-09-02T00:00:00.000Z'),
+            installment: {
+              label: '尾款',
+              sequence: 2,
+              paymentPlan: {
+                status: 'COMPLETED',
+                installments: [{ status: 'PAID' }, { status: 'PAID' }],
+              },
+            },
+          },
+        ],
+        refunds: [
+          { paymentId: 11, amount: new Prisma.Decimal(5) },
+          { paymentId: 12, amount: new Prisma.Decimal(20) },
+        ],
+      }),
+    },
+  };
+  const tx = {
+    ...prisma,
+    $queryRaw: async () => [{ id: admin.id, username: 'admin' }],
+  };
+  const service = new RefundsService(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    } as unknown as PrismaService,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  const result = await service.getCreateEligibility(1, admin);
+
+  assert.equal(result.totalAvailableRefundAmount, '75.00');
+  assert.deepEqual(
+    result.payments.map((payment) => ({
+      id: payment.id,
+      label: payment.installmentLabel,
+      available: payment.availableRefundAmount,
+      eligible: payment.eligible,
+    })),
+    [
+      { id: 11, label: '定金', available: '25.00', eligible: true },
+      { id: 12, label: '尾款', available: '50.00', eligible: true },
+    ],
+  );
+});
+
+test('分期未全部实收或未发货时预检保留原付款事实但失败关闭退款选择', async () => {
+  const prisma = {
+    order: {
+      findUnique: async () => ({
+        id: 2,
+        orderNo: 'ORD-INSTALLMENT-BLOCKED',
+        status: 'PENDING_SHIP',
+        orderType: 'CUSTOM',
+        currency: 'CNY',
+        quotationVersionId: 8,
+        paymentPlans: [{ id: 20 }],
+        payments: [{
+          id: 21,
+          paymentNo: 'PAY-DEPOSIT-BLOCKED',
+          amount: new Prisma.Decimal(30),
+          method: 'wechat',
+          status: 'PAID',
+          type: 'DEPOSIT',
+          paidAt: new Date('2026-09-01T00:00:00.000Z'),
+          createdAt: new Date('2026-09-01T00:00:00.000Z'),
+          installment: {
+            label: '定金',
+            sequence: 1,
+            paymentPlan: {
+              status: 'ACTIVE',
+              installments: [{ status: 'PAID' }, { status: 'PENDING' }],
+            },
+          },
+        }],
+        refunds: [],
+      }),
+    },
+  };
+  const tx = {
+    ...prisma,
+    $queryRaw: async () => [{ id: admin.id, username: 'admin' }],
+  };
+  const service = new RefundsService(
+    {
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+    } as unknown as PrismaService,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  const result = await service.getCreateEligibility(2, admin);
+
+  assert.equal(result.totalAvailableRefundAmount, '0.00');
+  assert.equal(result.payments[0].eligible, false);
+  assert.match(result.payments[0].reason ?? '', /尚未全部实收并进入已发货阶段/);
+});
 
 test('退款自动选择一笔足额原支付，不把一张退款跨多笔支付拆账', async () => {
   const { service, state } = createHarness([
@@ -264,6 +428,11 @@ test('相同幂等键重复创建返回同一退款，不同金额复用该键�
   });
   assert.equal(duplicate.id, 7);
   assert.equal(state.refunds.length, 1);
+  assert.deepEqual(
+    state.operations.slice(0, 3),
+    ['raw-lock', 'raw-lock', 'refund-find'],
+    '退款创建必须先锁员工与订单，再建立幂等及额度读取快照',
+  );
 
   await assert.rejects(
     () => service.create({
@@ -378,6 +547,67 @@ test('关联售后在退款审核前失效时拒绝继续推进', async () => {
   assert.equal(state.refunds[0].status, 'PENDING');
 });
 
+test('退款审核响应丢失后同管理员同动作同备注重放为零写恢复', async () => {
+  const refund: FakeRefund = {
+    id: 1,
+    orderId: 1,
+    paymentId: 1,
+    refundNo: 'RFD-REVIEW-REPLAY',
+    amount: new Prisma.Decimal(20),
+    reason: '审核恢复测试',
+    status: 'PENDING',
+    idempotencyKey: 'refund-review-replay',
+    gatewayRefundNo: null,
+  };
+  const { service, state } = createHarness([
+    { id: 1, amount: new Prisma.Decimal(100), method: 'bank_transfer', status: 'PAID' },
+  ], [refund]);
+
+  await service.review(1, 'APPROVED', '同意退款', admin);
+  const updateCount = state.refundUpdates;
+  const eventCount = state.events.length;
+
+  const replayed = await service.review(1, 'APPROVED', ' 同意退款 ', admin);
+  assert.equal((replayed as FakeRefund | null)?.status, 'APPROVED');
+  assert.equal(state.refundUpdates, updateCount);
+  assert.equal(state.events.length, eventCount);
+
+  await assert.rejects(
+    () => service.review(1, 'APPROVED', '改变备注', admin),
+    BadRequestException,
+  );
+  await assert.rejects(
+    () => service.review(1, 'REJECTED', '同意退款', admin),
+    BadRequestException,
+  );
+});
+
+test('退款拒绝审核同管理员同备注重放不重复写事件', async () => {
+  const refund: FakeRefund = {
+    id: 1,
+    orderId: 1,
+    paymentId: 1,
+    refundNo: 'RFD-REJECT-REPLAY',
+    amount: new Prisma.Decimal(20),
+    reason: '拒绝恢复测试',
+    status: 'PENDING',
+    idempotencyKey: 'refund-reject-replay',
+    gatewayRefundNo: null,
+  };
+  const { service, state } = createHarness([
+    { id: 1, amount: new Prisma.Decimal(100), method: 'bank_transfer', status: 'PAID' },
+  ], [refund]);
+
+  await service.review(1, 'REJECTED', '资料不完整', admin);
+  const updateCount = state.refundUpdates;
+  const eventCount = state.events.length;
+  const replayed = await service.review(1, 'REJECTED', '资料不完整', admin);
+
+  assert.equal((replayed as FakeRefund | null)?.status, 'REJECTED');
+  assert.equal(state.refundUpdates, updateCount);
+  assert.equal(state.events.length, eventCount);
+});
+
 test('在线支付退款不能由后台人工标记完成', async () => {
   const refund: FakeRefund = {
     id: 1,
@@ -464,6 +694,17 @@ test('线下退款执行失败必须填写失败原因，且原因进入交易�
   await service.execute(1, 'FAILED', undefined, admin, '银行退回请求超时');
   assert.equal(state.refunds[0].status, 'APPROVED');
   assert.equal(state.events.at(-1)?.reason, '银行退回请求超时');
+
+  const updateCount = state.refundUpdates;
+  const eventCount = state.events.length;
+  await service.execute(1, 'FAILED', undefined, admin, ' 银行退回请求超时 ');
+  assert.equal(state.refundUpdates, updateCount);
+  assert.equal(state.events.length, eventCount);
+
+  await service.execute(1, 'FAILED', undefined, admin, '银行账户信息有误');
+  assert.equal(state.refundUpdates, updateCount + 1);
+  assert.equal(state.events.length, eventCount + 1);
+  assert.equal(state.events.at(-1)?.reason, '银行账户信息有误');
 });
 
 test('关联退款达到审核额度后在同一事务闭合退款类售后工单', async () => {

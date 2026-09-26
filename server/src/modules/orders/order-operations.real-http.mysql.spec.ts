@@ -269,6 +269,7 @@ test(
 
       const receipt = await call('/payments/receipt', adminToken, {
         method: 'POST',
+        headers: { 'Idempotency-Key': `manual-receipt-${runId}` },
         body: JSON.stringify({
           orderId: order.id,
           amount: 100,
@@ -293,6 +294,7 @@ test(
 
       const duplicateReceipt = await call('/payments/receipt', adminToken, {
         method: 'POST',
+        headers: { 'Idempotency-Key': `manual-receipt-duplicate-${runId}` },
         body: JSON.stringify({
           orderId: order.id,
           amount: 100,
@@ -376,7 +378,10 @@ test(
       assertStatus(
         await call(`/customers/me/orders/${order.id}/after-sales`, customerBToken, {
           method: 'POST',
-          headers: { 'X-Session-Domain': 'customer' },
+          headers: {
+            'X-Session-Domain': 'customer',
+            'Idempotency-Key': `cross-customer-after-sales-${runId}`,
+          },
           body: JSON.stringify({ orderItemId: orderItem.id, type: 'REFUND', reason: '越权售后' }),
         }),
         404,
@@ -385,7 +390,10 @@ test(
 
       const createdCase = await call(`/customers/me/orders/${order.id}/after-sales`, customerAToken, {
         method: 'POST',
-        headers: { 'X-Session-Domain': 'customer' },
+        headers: {
+          'X-Session-Domain': 'customer',
+          'Idempotency-Key': `customer-after-sales-${runId}`,
+        },
         body: JSON.stringify({
           orderItemId: orderItem.id,
           type: 'REFUND',
@@ -397,7 +405,10 @@ test(
       assertStatus(
         await call(`/customers/me/orders/${order.id}/after-sales`, customerAToken, {
           method: 'POST',
-          headers: { 'X-Session-Domain': 'customer' },
+          headers: {
+            'X-Session-Domain': 'customer',
+            'Idempotency-Key': `duplicate-after-sales-${runId}`,
+          },
           body: JSON.stringify({
             orderItemId: orderItem.id,
             type: 'REFUND',

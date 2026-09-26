@@ -18,6 +18,7 @@ import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { CreateOrderDto, ShipOrderDto, UpdateOrderStatusDto, UpdateOrderAmountDto, UpdateOrderAddressDto, UpdateOrderNoteDto, UpdateOrderConsultantDto, AdvanceCustomStageDto } from "./dto/create-order.dto";
 import { OrderListQueryDto } from "./dto/order-query.dto";
 import type { StaffPrincipal } from "../../common/security/authenticated-principal";
+import { IdempotencyKey } from "../../common/idempotency/idempotency-key";
 
 // 交易域角色边界（P0 修复，对应任务优先问题 #5）：
 // - 订单查看（列表/详情）：SUPER_ADMIN、ADMIN、CUSTOMER_SERVICE。
@@ -35,24 +36,27 @@ export class OrdersController {
   @ApiBearerAuth()
   @Get()
   @ApiOperation({ summary: "获取订单列表（服务端分页与筛选）" })
-  findAll(@Query() query: OrderListQueryDto) {
-    return this.ordersService.findAll(query);
+  findAll(
+    @Query() query: OrderListQueryDto,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.ordersService.findAll(query, user);
   }
 
   @ApiBearerAuth()
   @Roles("SUPER_ADMIN", "ADMIN", "FINANCE")
   @Get("anomalies")
-  @ApiOperation({ summary: "异常订单聚合（长时间未付款/超时未发货/定制超期/物流异常/退款中）" })
-  findAnomalies() {
-    return this.ordersService.findAnomalies();
+  @ApiOperation({ summary: "异常订单聚合（未付款/未发货/定制超期/物流/退款/付款角色）" })
+  findAnomalies(@CurrentUser() user: StaffPrincipal) {
+    return this.ordersService.findAnomalies(user);
   }
 
   @ApiBearerAuth()
   @Roles("SUPER_ADMIN", "ADMIN", "FINANCE")
   @Get("trade-overview")
   @ApiOperation({ summary: "交易数据首页统计（今日成交/已收/待收/退款/客单价/分布）" })
-  getTradeOverview() {
-    return this.ordersService.getTradeOverview();
+  getTradeOverview(@CurrentUser() user: StaffPrincipal) {
+    return this.ordersService.getTradeOverview(user);
   }
 
   @ApiBearerAuth()
@@ -60,18 +64,17 @@ export class OrdersController {
   @Get("export")
   @ApiOperation({ summary: "导出订单（与当前筛选一致，仅 ADMIN）" })
   async exportOrders(@Query() query: OrderListQueryDto, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.findAllForExport(query, {
-      type: 'ADMIN' as const,
-      id: user?.id,
-      name: user?.realName || user?.username,
-    });
+    return this.ordersService.findAllForExport(query, user);
   }
 
   @ApiBearerAuth()
   @Get(":id")
   @ApiOperation({ summary: "获取订单详情（含快照、收款、库存预占、履约、事件时间线）" })
-  findById(@Param("id", ParseIntPipe) id: number) {
-    return this.ordersService.findById(id);
+  findById(
+    @Param("id", ParseIntPipe) id: number,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.ordersService.findById(id, user);
   }
 
   // 后台人工建单入口（DECISIONS D.7）：
@@ -81,10 +84,15 @@ export class OrdersController {
   @Roles("SUPER_ADMIN", "ADMIN")
   @Post()
   @ApiOperation({ summary: "后台人工建单（非公开；客户下单请走 /customers/checkout）" })
-  create(@Body() dto: CreateOrderDto, @CurrentUser() user: StaffPrincipal) {
+  create(
+    @Body() dto: CreateOrderDto,
+    @CurrentUser() user: StaffPrincipal,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
     return this.ordersService.create({
       ...dto,
-      operator: { type: 'ADMIN' as const, id: user?.id, name: user?.realName || user?.username },
+      staffPrincipal: user,
+      adminCreation: { actorId: user.id, idempotencyKey },
     });
   }
 
@@ -93,11 +101,7 @@ export class OrdersController {
   @Put(":id/ship")
   @ApiOperation({ summary: "发货并登记物流（由履约流程调用；未付款订单不可发货）" })
   ship(@Param("id", ParseIntPipe) id: number, @Body() dto: ShipOrderDto, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.ship(id, dto, {
-      type: 'ADMIN' as const,
-      id: user?.id,
-      name: user?.realName || user?.username,
-    });
+    return this.ordersService.ship(id, dto, user);
   }
 
   @ApiBearerAuth()
@@ -105,10 +109,7 @@ export class OrdersController {
   @Put(":id/status")
   @ApiOperation({ summary: "更新订单状态（含状态机校验；仅允许完成/取消等非交易关键转换）" })
   updateStatus(@Param("id", ParseIntPipe) id: number, @Body() dto: UpdateOrderStatusDto, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.updateStatus(id, {
-      ...dto,
-      operator: { type: 'ADMIN' as const, id: user?.id, name: user?.realName || user?.username },
-    });
+    return this.ordersService.updateStatus(id, dto, user);
   }
 
   // ════════ 交易中心：订单管理中心操作（金额/地址/备注/签收/顾问/定制阶段） ════════
@@ -120,9 +121,7 @@ export class OrdersController {
   @Put(":id/amount")
   @ApiOperation({ summary: "修改订单金额（优惠/调整/应收/定金/尾款，记录审计 before/after）" })
   updateAmount(@Param("id", ParseIntPipe) id: number, @Body() dto: UpdateOrderAmountDto, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.updateAmount(id, dto, {
-      type: 'ADMIN' as const, id: user?.id, name: user?.realName || user?.username,
-    });
+    return this.ordersService.updateAmount(id, dto, user);
   }
 
   @ApiBearerAuth()
@@ -130,9 +129,7 @@ export class OrdersController {
   @Put(":id/address")
   @ApiOperation({ summary: "修改收货地址（已发货/已完成不可改）" })
   updateAddress(@Param("id", ParseIntPipe) id: number, @Body() dto: UpdateOrderAddressDto, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.updateAddress(id, dto.address, {
-      type: 'ADMIN' as const, id: user?.id, name: user?.realName || user?.username,
-    });
+    return this.ordersService.updateAddress(id, dto.address, user);
   }
 
   @ApiBearerAuth()
@@ -140,9 +137,7 @@ export class OrdersController {
   @Put(":id/note")
   @ApiOperation({ summary: "修改内部备注（后台备注，不展示给客户）" })
   updateNote(@Param("id", ParseIntPipe) id: number, @Body() dto: UpdateOrderNoteDto, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.updateNote(id, dto.internalNote ?? '', {
-      type: 'ADMIN' as const, id: user?.id, name: user?.realName || user?.username,
-    });
+    return this.ordersService.updateNote(id, dto.internalNote ?? '', user);
   }
 
   @ApiBearerAuth()
@@ -150,9 +145,7 @@ export class OrdersController {
   @Put(":id/receive")
   @ApiOperation({ summary: "确认签收（发货维度 SHIPPED→RECEIVED）" })
   confirmReceive(@Param("id", ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.confirmReceive(id, {
-      type: 'ADMIN' as const, id: user?.id, name: user?.realName || user?.username,
-    });
+    return this.ordersService.confirmReceive(id, user);
   }
 
   @ApiBearerAuth()
@@ -160,9 +153,7 @@ export class OrdersController {
   @Put(":id/consultant")
   @ApiOperation({ summary: "修改销售顾问" })
   updateConsultant(@Param("id", ParseIntPipe) id: number, @Body() dto: UpdateOrderConsultantDto, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.updateSalesConsultant(id, dto.salesConsultantId ?? null, {
-      type: 'ADMIN' as const, id: user?.id, name: user?.realName || user?.username,
-    });
+    return this.ordersService.updateSalesConsultant(id, dto.salesConsultantId ?? null, user);
   }
 
   @ApiBearerAuth()
@@ -170,8 +161,6 @@ export class OrdersController {
   @Put(":id/custom-stage")
   @ApiOperation({ summary: "推进定制订单阶段（仅 orderType=CUSTOM 可用）" })
   advanceCustomStage(@Param("id", ParseIntPipe) id: number, @Body() dto: AdvanceCustomStageDto, @CurrentUser() user: StaffPrincipal) {
-    return this.ordersService.advanceCustomStage(id, dto.stage, {
-      type: 'ADMIN' as const, id: user?.id, name: user?.realName || user?.username,
-    });
+    return this.ordersService.advanceCustomStage(id, dto.stage, user);
   }
 }

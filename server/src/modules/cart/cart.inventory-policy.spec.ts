@@ -3,11 +3,27 @@ import { test } from "node:test";
 import { BadRequestException, ConflictException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
+import type { CustomerPrincipal } from "../../common/security/authenticated-principal";
 import { CartService } from "./cart.service";
+
+const customer = (id: number): CustomerPrincipal => ({
+  id,
+  name: null,
+  phone: "13800000000",
+  email: null,
+  authVersion: 3,
+  accountType: "RETAIL",
+  partnerStatus: null,
+});
 
 function createService(policy: "STANDARD" | "SINGLE_UNIT", stock: number) {
   let created = 0;
   const tx = {
+    $queryRaw: async () => [{
+      id: 1,
+      accountType: "RETAIL",
+      partnerStatus: null,
+    }],
     productSKU: {
       findFirst: async () => ({
         id: 10,
@@ -44,7 +60,7 @@ function createService(policy: "STANDARD" | "SINGLE_UNIT", stock: number) {
 test("0 库存 DIRECT_PURCHASE 不得加入购物车并返回 409", async () => {
   const { service, created } = createService("STANDARD", 0);
   await assert.rejects(
-    () => service.addItem({ userId: 1, productId: 1, skuId: 10, quantity: 1 }),
+    () => service.addItem({ customer: customer(1), productId: 1, skuId: 10, quantity: 1 }),
     ConflictException,
   );
   assert.equal(created(), 0);
@@ -53,12 +69,12 @@ test("0 库存 DIRECT_PURCHASE 不得加入购物车并返回 409", async () => 
 test("SINGLE_UNIT 购物车数量上限为 1", async () => {
   const { service, created } = createService("SINGLE_UNIT", 1);
   await assert.rejects(
-    () => service.addItem({ userId: 1, productId: 1, skuId: 10, quantity: 2 }),
+    () => service.addItem({ customer: customer(1), productId: 1, skuId: 10, quantity: 2 }),
     ConflictException,
   );
   assert.equal(created(), 0);
   await assert.doesNotReject(() =>
-    service.addItem({ userId: 1, productId: 1, skuId: 10, quantity: 1 }),
+    service.addItem({ customer: customer(1), productId: 1, skuId: 10, quantity: 1 }),
   );
   assert.equal(created(), 1);
 });
@@ -116,7 +132,14 @@ function createMergeService(initialRows: MemoryCart[]) {
   };
   const prisma = {
     cart,
-    $transaction: async (callback: (client: any) => Promise<any>) => callback({ cart }),
+    $transaction: async (callback: (client: any) => Promise<any>) => callback({
+      $queryRaw: async () => [{
+        id: 5,
+        accountType: "RETAIL",
+        partnerStatus: null,
+      }],
+      cart,
+    }),
   };
   return {
     service: new CartService(
@@ -132,7 +155,7 @@ test("有效客户与当前 session 共存时原子认领游客购物车", async
     { id: 1, userId: null, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab", skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
   ]);
 
-  const cart = await service.getCart({ userId: 5, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
+  const cart = await service.getCart({ customer: customer(5), sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
 
   assert.equal(cart.length, 1);
   assert.equal(rows[0].userId, 5);
@@ -145,7 +168,7 @@ test("合并重复 SINGLE_UNIT SKU 时仅保留一件", async () => {
     { id: 2, userId: 5, sessionId: null, skuId: 10, productId: 1, quantity: 1, inventoryPolicy: "SINGLE_UNIT" },
   ]);
 
-  await service.getCart({ userId: 5, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
+  await service.getCart({ customer: customer(5), sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
 
   assert.deepEqual(rows.map(({ id, userId, sessionId, quantity }) => ({ id, userId, sessionId, quantity })), [
     { id: 2, userId: 5, sessionId: null, quantity: 1 },
@@ -158,7 +181,7 @@ test("合并普通 SKU 时数量不超过购物车上限", async () => {
     { id: 2, userId: 5, sessionId: null, skuId: 10, productId: 1, quantity: 98, inventoryPolicy: "STANDARD" },
   ]);
 
-  await service.getCart({ userId: 5, sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
+  await service.getCart({ customer: customer(5), sessionId: "1a2b3c4d-0000-4000-8000-0123456789ab" });
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].quantity, 99);
@@ -226,11 +249,19 @@ test("读取购物车会重新核对商品、SKU、数量与库存并返回可�
   const service = new CartService(
     {
       cart: { findMany: async () => rows },
+      $transaction: async (callback: (client: any) => Promise<any>) => callback({
+        $queryRaw: async () => [{
+          id: 5,
+          accountType: "RETAIL",
+          partnerStatus: null,
+        }],
+        cart: { findMany: async () => rows },
+      }),
     } as unknown as PrismaService,
     {} as ProductsService,
   );
 
-  const cart = await service.getCart({ userId: 5 });
+  const cart = await service.getCart({ customer: customer(5) });
 
   assert.deepEqual(
     cart.map((item) => item.availability.status),

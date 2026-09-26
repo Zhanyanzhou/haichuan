@@ -10,6 +10,8 @@ import {
 import { Prisma, QuotationStatus, Role, type QuoteChannel, type WaxType } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { parseIdempotencyKey } from '../../common/idempotency/idempotency-key';
+import type { CustomerPrincipal, StaffPrincipal } from '../../common/security/authenticated-principal';
 import { businessDateKey } from '../../common/time/business-date';
 import { runWithDocumentNumberRetry } from '../../common/trade/document-number-retry';
 import { OrdersService } from '../orders/orders.service';
@@ -27,11 +29,31 @@ import {
   sortSnapshotRows,
 } from './quotation-snapshot';
 import { UploadService } from '../upload/upload.service';
+import { lockActiveCustomerForRead } from '../customers/customer-write-gate';
 
-export interface QuotationActor {
-  id: number;
-  role: Role;
-}
+export type QuotationActor = Pick<StaffPrincipal, 'id' | 'role' | 'sessionFamilyId'>;
+
+type CreateQuotationInput = {
+  channel?: 'RETAIL' | 'CUSTOM' | 'PARTNER_WAX';
+  customerId?: number;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  salesConsultantId?: number;
+  remark?: string;
+  depositAmount?: number;
+  validUntil?: Date;
+  items: Array<{
+    skuId?: number;
+    productId?: number;
+    productName: string;
+    productImage?: string;
+    spec?: string;
+    quantity: number;
+    unitPrice: number;
+    quotedPrice: number;
+  }>;
+};
 
 /**
  * 报价管理服务：员工维护草稿、提交待确认和取消，客户本人接受不可变版本并转单。
@@ -80,13 +102,14 @@ export class QuotationsService {
   private async resolveSalesConsultantId(
     requestedId: number | undefined,
     actor: QuotationActor,
+    client: Pick<Prisma.TransactionClient, 'user'> | PrismaService = this.prisma,
   ): Promise<number | undefined> {
     if (!this.isAdministrator(actor)) {
       this.accessScope(actor);
       return actor.id;
     }
     if (requestedId === undefined) return undefined;
-    const consultant = await this.prisma.user.findUnique({
+    const consultant = await client.user.findUnique({
       where: { id: requestedId },
       select: { id: true, role: true, status: true },
     });
@@ -142,6 +165,134 @@ export class QuotationsService {
     }
   }
 
+  private versionChangeSummary(snapshot: Prisma.JsonValue | null | undefined) {
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null;
+    const value = (snapshot as Prisma.JsonObject).changeSummary;
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
+  }
+
+  private stripCreationRecoveryFields<T extends object>(quotation: T) {
+    const {
+      creationIdempotencyKeyHash: _creationIdempotencyKeyHash,
+      creationRequestHash: _creationRequestHash,
+      ...safe
+    } = quotation as T & {
+      creationIdempotencyKeyHash?: string | null;
+      creationRequestHash?: string | null;
+    };
+    return safe;
+  }
+
+  private buildCreationIdempotency(
+    data: CreateQuotationInput,
+    actorId: number,
+    idempotencyKey: string,
+  ) {
+    if (!Number.isSafeInteger(actorId) || actorId <= 0) {
+      throw new BadRequestException('报价创建员工身份无效');
+    }
+    const items = data.items.map((item) => ({
+      skuId: item.skuId ?? null,
+      productId: item.productId ?? null,
+      productName: item.productName.trim(),
+      productImage: item.productImage?.trim() || null,
+      spec: item.spec?.trim() || null,
+      quantity: item.quantity,
+      unitPriceCents: Math.round(Number(item.unitPrice) * 100),
+      quotedPriceCents: Math.round(Number(item.quotedPrice) * 100),
+    })).sort((left, right) => {
+      const leftKey = JSON.stringify(left);
+      const rightKey = JSON.stringify(right);
+      return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    });
+    const canonicalRequest = {
+      version: 1,
+      actorId,
+      channel: data.channel ?? 'CUSTOM',
+      customerId: data.customerId ?? null,
+      customerName: data.customerName.trim(),
+      customerPhone: data.customerPhone.trim(),
+      customerEmail: data.customerEmail?.trim() || null,
+      salesConsultantId: data.salesConsultantId ?? null,
+      remark: data.remark?.trim() || null,
+      depositAmountCents: Math.round(Number(data.depositAmount ?? 0) * 100),
+      validUntil: data.validUntil?.toISOString() ?? null,
+      items,
+    };
+    return {
+      keyHash: createHash('sha256')
+        .update('quotation-create')
+        .update('\0')
+        .update(String(actorId))
+        .update('\0')
+        .update(idempotencyKey)
+        .digest('hex'),
+      requestHash: createHash('sha256')
+        .update(JSON.stringify(canonicalRequest))
+        .digest('hex'),
+    };
+  }
+
+  private async lockActiveQuotationActor(
+    tx: Prisma.TransactionClient,
+    actor: QuotationActor,
+    mode: 'read' | 'write',
+  ): Promise<QuotationActor> {
+    if (!actor || !Number.isSafeInteger(actor.id) || actor.id <= 0) {
+      throw new ForbiddenException('当前员工身份无效');
+    }
+    const actors = mode === 'read'
+      ? await tx.$queryRaw<Array<{ id: number; role: Role }>>(
+          Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'SALES_CONSULTANT') FOR SHARE`,
+        )
+      : await tx.$queryRaw<Array<{ id: number; role: Role }>>(
+          Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'SALES_CONSULTANT') FOR UPDATE`,
+        );
+    if (actors.length !== 1) {
+      throw new ForbiddenException('当前员工已停用或无权访问报价');
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = mode === 'read'
+        ? await tx.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+          )
+        : await tx.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+          );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException('当前员工会话已失效，不能访问报价');
+      }
+    }
+    return actors[0];
+  }
+
+  private async findCreationReplay(
+    tx: Prisma.TransactionClient,
+    idempotency: { keyHash: string; requestHash: string },
+  ) {
+    const quotation = await tx.quotation.findUnique({
+      where: { creationIdempotencyKeyHash: idempotency.keyHash },
+      include: { items: true },
+    });
+    if (!quotation) return null;
+    if (quotation.creationRequestHash !== idempotency.requestHash) {
+      throw new ConflictException('该幂等键已用于不同的报价创建请求，请核对原待确认意图');
+    }
+    return this.stripCreationRecoveryFields(quotation);
+  }
+
+  private isCreationIdempotencyRace(error: unknown): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError)
+      || error.code !== 'P2002'
+    ) return false;
+    const rawTarget = error.meta?.target;
+    const target = (Array.isArray(rawTarget) ? rawTarget.join(',') : String(rawTarget ?? ''))
+      .toLowerCase();
+    return target.includes('creation_idempotency_key_hash')
+      || target.includes('creationidempotencykeyhash');
+  }
+
   /** 商品行 → QuotationItem 入库数据（整数分） */
   private buildItemData(items: Array<{ skuId?: number; productId?: number; productName: string; productImage?: string; spec?: string; quantity: number; unitPrice: number; quotedPrice: number }>) {
     return items.map((it) => {
@@ -164,43 +315,53 @@ export class QuotationsService {
     params: { page?: number; pageSize?: number; status?: string; keyword?: string; salesConsultantId?: number; channel?: QuoteChannel },
     actor: QuotationActor,
   ) {
-    const page = Math.max(Number(params.page) || 1, 1);
-    const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
-    const where: Prisma.QuotationWhereInput = {};
-    if (params.status && params.status !== 'all') where.status = params.status as QuotationStatus;
-    if (params.channel) where.channel = params.channel;
-    if (this.isAdministrator(actor)) {
-      if (params.salesConsultantId) where.salesConsultantId = Number(params.salesConsultantId);
-    } else {
-      Object.assign(where, this.accessScope(actor));
-    }
-    if (params.keyword) {
-      where.OR = [
-        { quoteNo: { contains: params.keyword } },
-        { customerName: { contains: params.keyword } },
-        { customerPhone: { contains: params.keyword } },
-      ];
-    }
-    const [list, total] = await Promise.all([
-      this.prisma.quotation.findMany({
-        where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          items: true,
-          customer: { select: { id: true, name: true, phone: true } },
-          salesConsultant: { select: { id: true, realName: true, username: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.quotation.count({ where }),
-    ]);
-    return { list, total, page, pageSize };
+    return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'read');
+      const page = Math.max(Number(params.page) || 1, 1);
+      const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
+      const where: Prisma.QuotationWhereInput = {};
+      if (params.status && params.status !== 'all') where.status = params.status as QuotationStatus;
+      if (params.channel) where.channel = params.channel;
+      if (this.isAdministrator(lockedActor)) {
+        if (params.salesConsultantId) where.salesConsultantId = Number(params.salesConsultantId);
+      } else {
+        Object.assign(where, this.accessScope(lockedActor));
+      }
+      if (params.keyword) {
+        where.OR = [
+          { quoteNo: { contains: params.keyword } },
+          { customerName: { contains: params.keyword } },
+          { customerPhone: { contains: params.keyword } },
+        ];
+      }
+      const [list, total] = await Promise.all([
+        tx.quotation.findMany({
+          where,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: {
+            items: true,
+            customer: { select: { id: true, name: true, phone: true } },
+            salesConsultant: { select: { id: true, realName: true, username: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        tx.quotation.count({ where }),
+      ]);
+      return {
+        list: list.map((quotation) => this.stripCreationRecoveryFields(quotation)),
+        total,
+        page,
+        pageSize,
+      };
+    });
   }
 
   async findById(id: number, actor: QuotationActor) {
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, ...this.accessScope(actor) },
+    return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'read');
+      const quotation = await tx.quotation.findFirst({
+      where: { id, ...this.accessScope(lockedActor) },
       include: {
         items: {
           include: {
@@ -227,6 +388,7 @@ export class QuotationsService {
             validUntil: true,
             issuedAt: true,
             acceptedAt: true,
+            businessSnapshot: true,
             items: true,
             feeLines: true,
             resourceRequirements: {
@@ -249,51 +411,62 @@ export class QuotationsService {
         },
       },
     });
-    if (!quotation) throw new NotFoundException('报价单不存在');
-    return {
-      ...quotation,
-      currentVersionRecord:
-        quotation.versions.find((version) => version.version === quotation.currentVersion) ?? null,
-    };
+      if (!quotation) throw new NotFoundException('报价单不存在');
+      const versions = quotation.versions.map(({ businessSnapshot, ...version }) => ({
+        ...version,
+        changeSummary: this.versionChangeSummary(businessSnapshot),
+      }));
+      return {
+        ...this.stripCreationRecoveryFields(quotation),
+        versions,
+        currentVersionRecord:
+          versions.find((version) => version.version === quotation.currentVersion) ?? null,
+      };
+    });
   }
 
-  async searchIssueCustomers(params: { keyword?: string; pageSize?: number }) {
-    const keyword = params.keyword?.trim();
-    const list = await this.prisma.customer.findMany({
-      where: {
-        status: 'ACTIVE',
-        ...(keyword
-          ? { OR: [
-              { name: { contains: keyword } },
-              { phone: { contains: keyword } },
-              { email: { contains: keyword } },
-            ] }
-          : {}),
-      },
-      take: Math.min(Math.max(params.pageSize ?? 20, 1), 50),
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        email: true,
-        accountType: true,
-        partnerStatus: true,
-        status: true,
-      },
-      orderBy: { updatedAt: 'desc' },
+  async searchIssueCustomers(params: { keyword?: string; pageSize?: number }, actor: QuotationActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockActiveQuotationActor(tx, actor, 'read');
+      const keyword = params.keyword?.trim();
+      const list = await tx.customer.findMany({
+        where: {
+          status: 'ACTIVE',
+          ...(keyword
+            ? { OR: [
+                { name: { contains: keyword } },
+                { phone: { contains: keyword } },
+                { email: { contains: keyword } },
+              ] }
+            : {}),
+        },
+        take: Math.min(Math.max(params.pageSize ?? 20, 1), 50),
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          email: true,
+          accountType: true,
+          partnerStatus: true,
+          status: true,
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+      return { list };
     });
-    return { list };
   }
 
   async getIssueOptions(id: number, actor: QuotationActor) {
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, ...this.accessScope(actor) },
+    return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'read');
+      const quotation = await tx.quotation.findFirst({
+      where: { id, ...this.accessScope(lockedActor) },
       select: { id: true, channel: true, customerId: true },
     });
     if (!quotation) throw new NotFoundException('报价单不存在');
     const now = new Date();
     const [feeRuleCandidates, resourceBuckets, designFiles] = await Promise.all([
-      this.prisma.quotationFeeRule.findMany({
+      tx.quotationFeeRule.findMany({
         where: {
           channel: quotation.channel,
           effectiveFrom: { lte: now },
@@ -315,7 +488,7 @@ export class QuotationsService {
       }),
       quotation.channel === 'RETAIL'
         ? Promise.resolve([])
-        : this.prisma.tradeResourceBucket.findMany({
+        : tx.tradeResourceBucket.findMany({
             where: {
               channel: quotation.channel,
               isActive: true,
@@ -339,7 +512,7 @@ export class QuotationsService {
             orderBy: [{ kind: 'asc' }, { code: 'asc' }, { bucketKey: 'asc' }],
           }),
       quotation.channel === 'PARTNER_WAX' && quotation.customerId
-        ? this.prisma.cooperationDesignFile.findMany({
+        ? tx.cooperationDesignFile.findMany({
             where: { customerId: quotation.customerId },
             select: {
               id: true,
@@ -371,71 +544,92 @@ export class QuotationsService {
         return rule.enabled;
       })
       .map(({ enabled: _enabled, ...rule }) => rule);
-    return { feeRules, resourceBuckets, designFiles };
+      return { feeRules, resourceBuckets, designFiles };
+    });
   }
 
-  async create(data: {
-    channel?: 'RETAIL' | 'CUSTOM' | 'PARTNER_WAX';
-    customerId?: number;
-    customerName: string;
-    customerPhone: string;
-    customerEmail?: string;
-    salesConsultantId?: number;
-    remark?: string;
-    depositAmount?: number;
-    validUntil?: Date;
-    items: Array<{ skuId?: number; productId?: number; productName: string; productImage?: string; spec?: string; quantity: number; unitPrice: number; quotedPrice: number }>;
-  }, actor: QuotationActor) {
+  async create(
+    data: CreateQuotationInput,
+    actor: QuotationActor,
+    rawIdempotencyKey: string,
+  ) {
+    const idempotencyKey = parseIdempotencyKey(rawIdempotencyKey, true)!;
     if (!data.items?.length) throw new BadRequestException('报价单至少包含一个商品');
     this.assertUniqueSkuIds(data.items);
     if (!data.customerName?.trim() || !data.customerPhone?.trim()) {
       throw new BadRequestException('请提供客户姓名和手机号');
     }
-    let customerName = data.customerName.trim();
-    let customerPhone = data.customerPhone.trim();
-    let customerEmail = data.customerEmail?.trim() || null;
-    if (data.customerId) {
-      const customer = await this.prisma.customer.findUnique({
-        where: { id: data.customerId },
-        select: { id: true, name: true, phone: true, email: true, status: true },
-      });
-      if (!customer || customer.status !== 'ACTIVE') {
-        throw new BadRequestException('关联客户不存在或已停用');
-      }
-      customerName = customer.name?.trim() || customerName;
-      customerPhone = customer.phone;
-      customerEmail = customer.email?.trim() || null;
-    }
+    const idempotency = this.buildCreationIdempotency(data, actor.id, idempotencyKey);
     const amounts = this.computeAmounts(data.items);
     const items = this.buildItemData(data.items);
-    const salesConsultantId = await this.resolveSalesConsultantId(data.salesConsultantId, actor);
 
-    return runWithDocumentNumberRetry({
-      targetMarkers: ['quoteNo', 'quote_no', 'quotations_quote_no_key'],
-      documentLabel: '报价单',
-      runTransaction: () => this.prisma.$transaction(async (tx) =>
-        tx.quotation.create({
-          data: {
-            quoteNo: await this.generateQuoteNo(tx),
-            customerId: data.customerId || null,
-            customerName,
-            customerPhone,
-            customerEmail,
-            salesConsultantId: salesConsultantId ?? null,
-            status: 'DRAFT',
-            channel: data.channel ?? 'CUSTOM',
-            totalAmount: amounts.totalAmount,
-            discountAmount: amounts.discountAmount,
-            finalAmount: amounts.finalAmount,
-            depositAmount: new Prisma.Decimal(Math.round(Number(data.depositAmount || 0) * 100)).div(100),
-            validUntil: data.validUntil || null,
-            remark: data.remark?.trim() || null,
-            items: { create: items },
-          },
-          include: { items: true },
-        }),
-      ),
-    });
+    const run = () => this.prisma.$transaction(async (tx) => {
+      // 员工是本事务第一把锁：Guard 通过后的停用或撤权不得继续读取客户或写入报价。
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'write');
+      const replay = await this.findCreationReplay(tx, idempotency);
+      if (replay) return replay;
+
+      let customerName = data.customerName.trim();
+      let customerPhone = data.customerPhone.trim();
+      let customerEmail = data.customerEmail?.trim() || null;
+      if (data.customerId) {
+        const customer = await tx.customer.findUnique({
+          where: { id: data.customerId },
+          select: { id: true, name: true, phone: true, email: true, status: true },
+        });
+        if (!customer || customer.status !== 'ACTIVE') {
+          throw new BadRequestException('关联客户不存在或已停用');
+        }
+        customerName = customer.name?.trim() || customerName;
+        customerPhone = customer.phone;
+        customerEmail = customer.email?.trim() || null;
+      }
+      const salesConsultantId = await this.resolveSalesConsultantId(
+        data.salesConsultantId,
+        lockedActor,
+        tx,
+      );
+      const created = await tx.quotation.create({
+        data: {
+          quoteNo: await this.generateQuoteNo(tx),
+          customerId: data.customerId || null,
+          customerName,
+          customerPhone,
+          customerEmail,
+          salesConsultantId: salesConsultantId ?? null,
+          status: 'DRAFT',
+          channel: data.channel ?? 'CUSTOM',
+          totalAmount: amounts.totalAmount,
+          discountAmount: amounts.discountAmount,
+          finalAmount: amounts.finalAmount,
+          depositAmount: new Prisma.Decimal(Math.round(Number(data.depositAmount || 0) * 100)).div(100),
+          validUntil: data.validUntil || null,
+          remark: data.remark?.trim() || null,
+          creationIdempotencyKeyHash: idempotency.keyHash,
+          creationRequestHash: idempotency.requestHash,
+          items: { create: items },
+        },
+        include: { items: true },
+      });
+      return this.stripCreationRecoveryFields(created);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    try {
+      return await runWithDocumentNumberRetry({
+        targetMarkers: ['quoteNo', 'quote_no', 'quotations_quote_no_key'],
+        documentLabel: '报价单',
+        runTransaction: run,
+      });
+    } catch (error) {
+      if (this.isCreationIdempotencyRace(error)) {
+        const replay = await this.prisma.$transaction(async (tx) => {
+          await this.lockActiveQuotationActor(tx, actor, 'write');
+          return this.findCreationReplay(tx, idempotency);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        if (replay) return replay;
+      }
+      throw error;
+    }
   }
 
   /** 编辑报价单（仅 DRAFT 可改） */
@@ -452,12 +646,13 @@ export class QuotationsService {
   }, actor: QuotationActor) {
     if (data.items) this.assertUniqueSkuIds(data.items);
     return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'write');
       const locked = await tx.$queryRaw<Array<{ id: number }>>(
         Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`,
       );
       if (locked.length === 0) throw new NotFoundException('报价单不存在');
       const quotation = await tx.quotation.findFirst({
-        where: { id, ...this.accessScope(actor) },
+        where: { id, ...this.accessScope(lockedActor) },
       });
       if (!quotation) throw new NotFoundException('报价单不存在');
       if (quotation.status !== 'DRAFT') {
@@ -477,7 +672,7 @@ export class QuotationsService {
       if (data.customerName !== undefined) updateData.customerName = data.customerName.trim();
       if (data.customerPhone !== undefined) updateData.customerPhone = data.customerPhone.trim();
       if (data.customerEmail !== undefined) updateData.customerEmail = data.customerEmail.trim() || null;
-      if (this.isAdministrator(actor) && data.salesConsultantId !== undefined) {
+      if (this.isAdministrator(lockedActor) && data.salesConsultantId !== undefined) {
         const consultant = await tx.user.findUnique({
           where: { id: data.salesConsultantId },
           select: { id: true, role: true, status: true },
@@ -501,8 +696,8 @@ export class QuotationsService {
         updateData.finalAmount = amounts.finalAmount;
       }
 
-      return tx.quotation.update({
-        where: { id, status: 'DRAFT', ...this.accessScope(actor) },
+      const updated = await tx.quotation.update({
+        where: { id, status: 'DRAFT', ...this.accessScope(lockedActor) },
         data: {
           ...updateData,
           ...(data.items
@@ -511,6 +706,7 @@ export class QuotationsService {
         },
         include: { items: true },
       });
+      return this.stripCreationRecoveryFields(updated);
     });
   }
 
@@ -527,21 +723,26 @@ export class QuotationsService {
     if (newStatus === 'CANCELLED') {
       return this.cancelQuotation(id, actor);
     }
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, ...this.accessScope(actor) },
-    });
-    if (!quotation) throw new NotFoundException('报价单不存在');
-    const allowed = QuotationsService.VALID_TRANSITIONS[quotation.status];
-    if (!allowed || !allowed.includes(newStatus)) {
-      throw new BadRequestException(`报价单状态不能从 ${quotation.status} 变更为 ${newStatus}`);
-    }
-    const updated = await this.prisma.quotation.updateMany({
-      where: { id, status: quotation.status, ...this.accessScope(actor) },
-      data: { status: newStatus },
-    });
-    if (updated.count === 0) throw new ConflictException('报价单状态已变化，请刷新后重试');
-    return this.prisma.quotation.findFirst({
-      where: { id, ...this.accessScope(actor) },
+    return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'write');
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`);
+      const quotation = await tx.quotation.findFirst({
+        where: { id, ...this.accessScope(lockedActor) },
+      });
+      if (!quotation) throw new NotFoundException('报价单不存在');
+      const allowed = QuotationsService.VALID_TRANSITIONS[quotation.status];
+      if (!allowed || !allowed.includes(newStatus)) {
+        throw new BadRequestException(`报价单状态不能从 ${quotation.status} 变更为 ${newStatus}`);
+      }
+      const updated = await tx.quotation.updateMany({
+        where: { id, status: quotation.status, ...this.accessScope(lockedActor) },
+        data: { status: newStatus },
+      });
+      if (updated.count === 0) throw new ConflictException('报价单状态已变化，请刷新后重试');
+      const current = await tx.quotation.findFirst({
+        where: { id, ...this.accessScope(lockedActor) },
+      });
+      return current ? this.stripCreationRecoveryFields(current) : null;
     });
   }
 
@@ -551,9 +752,10 @@ export class QuotationsService {
 
   async revise(id: number, actor: QuotationActor) {
     return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'write');
       await tx.$queryRaw(Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`);
       const quotation = await tx.quotation.findFirst({
-        where: { id, ...this.accessScope(actor) },
+        where: { id, ...this.accessScope(lockedActor) },
       });
       if (!quotation) throw new NotFoundException('报价单不存在');
       if (quotation.status !== 'PENDING_CONFIRM') {
@@ -599,18 +801,20 @@ export class QuotationsService {
         data: { status: 'DRAFT' },
       });
       if (reopened.count !== 1) throw new ConflictException('报价状态已变化，请刷新后重试');
-      return tx.quotation.findUniqueOrThrow({ where: { id }, include: { items: true } });
+      const revised = await tx.quotation.findUniqueOrThrow({ where: { id }, include: { items: true } });
+      return this.stripCreationRecoveryFields(revised);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   private async cancelQuotation(id: number, actor: QuotationActor) {
     return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'write');
       const locked = await tx.$queryRaw<Array<{ id: number }>>(
         Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`,
       );
       if (locked.length === 0) throw new NotFoundException('报价单不存在');
       const quotation = await tx.quotation.findFirst({
-        where: { id, ...this.accessScope(actor) },
+        where: { id, ...this.accessScope(lockedActor) },
         include: {
           versions: {
             orderBy: { version: 'desc' },
@@ -625,9 +829,12 @@ export class QuotationsService {
       });
       if (!quotation) throw new NotFoundException('报价单不存在');
       if (quotation.status === 'CANCELLED') {
-        return tx.quotation.findFirst({
-          where: { id, ...this.accessScope(actor) },
+        const alreadyCancelled = await tx.quotation.findFirst({
+          where: { id, ...this.accessScope(lockedActor) },
         });
+        return alreadyCancelled
+          ? this.stripCreationRecoveryFields(alreadyCancelled)
+          : null;
       }
       const allowed = QuotationsService.VALID_TRANSITIONS[quotation.status];
       if (!allowed?.includes('CANCELLED')) {
@@ -726,26 +933,28 @@ export class QuotationsService {
       }
 
       const updated = await tx.quotation.updateMany({
-        where: { id, status: quotation.status, ...this.accessScope(actor) },
+        where: { id, status: quotation.status, ...this.accessScope(lockedActor) },
         data: { status: 'CANCELLED' },
       });
       if (updated.count === 0) {
         throw new ConflictException('报价单状态已变化，请刷新后重试');
       }
-      return tx.quotation.findFirst({
-        where: { id, ...this.accessScope(actor) },
+      const cancelled = await tx.quotation.findFirst({
+        where: { id, ...this.accessScope(lockedActor) },
       });
+      return cancelled ? this.stripCreationRecoveryFields(cancelled) : null;
     });
   }
 
   private async issueVersion(id: number, dto: IssueQuotationDto, actor: QuotationActor) {
     return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'write');
       const locked = await tx.$queryRaw<Array<{ id: number }>>(
         Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`,
       );
       if (locked.length === 0) throw new NotFoundException('报价单不存在');
       const quotation = await tx.quotation.findFirst({
-        where: { id, ...this.accessScope(actor) },
+        where: { id, ...this.accessScope(lockedActor) },
         include: {
           items: true,
           customer: {
@@ -770,6 +979,10 @@ export class QuotationsService {
         throw new BadRequestException('报价有效期已过，请先更新有效期');
       }
       const version = quotation.currentVersion + 1;
+      const changeSummary = dto.changeSummary?.trim() || null;
+      if (version > 1 && !changeSummary) {
+        throw new BadRequestException('修订报价必须说明本版本相对上一版本的变更');
+      }
       const customerSnapshot = {
         version: 2,
         legacy: false,
@@ -1056,6 +1269,7 @@ export class QuotationsService {
         channel,
         currency: 'CNY',
         validUntil: quotation.validUntil?.toISOString() ?? null,
+        changeSummary,
         customer: customerSnapshot,
         pricing,
         internalDesign,
@@ -1117,7 +1331,7 @@ export class QuotationsService {
           businessSnapshot,
           designFileVersionId,
           partnerPriceAgreementId,
-          createdBy: actor.id,
+          createdBy: lockedActor.id,
           issuedAt: new Date(),
           items: {
             create: versionItems,
@@ -1184,10 +1398,14 @@ export class QuotationsService {
     });
   }
 
-  async findForCustomer(customerId: number) {
-    const quotations = await this.prisma.quotation.findMany({
+  async findForCustomer(
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, principal);
+      const quotations = await transaction.quotation.findMany({
       where: {
-        customerId,
+        customerId: principal.id,
         status: { in: ['PENDING_CONFIRM', 'CONFIRMED', 'CONVERTED', 'EXPIRED'] },
       },
       select: {
@@ -1212,20 +1430,34 @@ export class QuotationsService {
             validUntil: true,
             issuedAt: true,
             acceptedAt: true,
+            businessSnapshot: true,
           },
         },
       },
       orderBy: { createdAt: 'desc' },
     });
-    return quotations.map((quotation) => ({
-      ...quotation,
-      currentVersionRecord: quotation.versions[0] ?? null,
-    }));
+      return quotations.map((quotation) => {
+        const versions = quotation.versions.map(({ businessSnapshot, ...version }) => ({
+          ...version,
+          changeSummary: this.versionChangeSummary(businessSnapshot),
+        }));
+        return {
+          ...quotation,
+          versions,
+          currentVersionRecord: versions[0] ?? null,
+        };
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async findForCustomerById(customerId: number, id: number) {
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, customerId, status: { not: 'DRAFT' } },
+  async findForCustomerById(
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+    id: number,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, principal);
+      const quotation = await transaction.quotation.findFirst({
+      where: { id, customerId: principal.id, status: { not: 'DRAFT' } },
       select: {
         id: true,
         quoteNo: true,
@@ -1251,6 +1483,7 @@ export class QuotationsService {
             validUntil: true,
             issuedAt: true,
             acceptedAt: true,
+            businessSnapshot: true,
             items: {
               select: {
                 id: true,
@@ -1316,7 +1549,7 @@ export class QuotationsService {
       },
     });
     if (!quotation) throw new NotFoundException('报价单不存在或无权访问');
-    const versions = quotation.versions.map((version) => {
+    const versions = quotation.versions.map(({ businessSnapshot, ...version }) => {
       const safeItems = version.items.map((item) => {
         const pricing = item.pricingSnapshot && typeof item.pricingSnapshot === 'object' && !Array.isArray(item.pricingSnapshot)
           ? item.pricingSnapshot as Prisma.JsonObject
@@ -1365,6 +1598,7 @@ export class QuotationsService {
       const waxType = safeItems.find((item) => item.waxType)?.waxType ?? null;
       return {
         ...version,
+        changeSummary: this.versionChangeSummary(businessSnapshot),
         subtotal: version.subtotalAmount,
         items: safeItems,
         feeLines: version.feeLines,
@@ -1399,12 +1633,13 @@ export class QuotationsService {
         pricingSource,
       };
     });
-    return {
-      ...quotation,
-      versions,
-      currentVersionRecord:
-        versions.find((version) => version.version === quotation.currentVersion) ?? null,
-    };
+      return {
+        ...quotation,
+        versions,
+        currentVersionRecord:
+          versions.find((version) => version.version === quotation.currentVersion) ?? null,
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async acceptCurrentVersion(customerId: number, id: number) {
@@ -1748,15 +1983,20 @@ export class QuotationsService {
   }
 
   async remove(id: number, actor: QuotationActor) {
-    const quotation = await this.prisma.quotation.findFirst({
-      where: { id, ...this.accessScope(actor) },
-    });
-    if (!quotation) throw new NotFoundException('报价单不存在');
-    if (quotation.status !== 'DRAFT') {
-      throw new BadRequestException('只有从未提交的草稿报价单可以删除');
-    }
-    return this.prisma.quotation.delete({
-      where: { id, ...this.accessScope(actor) },
+    return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveQuotationActor(tx, actor, 'write');
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM quotations WHERE id = ${id} FOR UPDATE`);
+      const quotation = await tx.quotation.findFirst({
+        where: { id, ...this.accessScope(lockedActor) },
+      });
+      if (!quotation) throw new NotFoundException('报价单不存在');
+      if (quotation.status !== 'DRAFT') {
+        throw new BadRequestException('只有从未提交的草稿报价单可以删除');
+      }
+      const removed = await tx.quotation.delete({
+        where: { id, ...this.accessScope(lockedActor) },
+      });
+      return this.stripCreationRecoveryFields(removed);
     });
   }
 }

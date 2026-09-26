@@ -67,4 +67,13 @@ export class CreateSelectionInquiryDto {
   @IsBoolean({ message: "请阅读并同意隐私说明" })
   @Equals(true, { message: "请阅读并同意隐私说明" })
   privacyConsent!: unknown;
+
+  @IsString()
+  @IsNotEmpty({ message: "隐私说明已更新，请刷新页面后重新提交" })
+  @MaxLength(50)
+  privacyConsentVersion!: string;
+
+  @IsString()
+  @Matches(/^[a-f0-9]{64}$/, { message: "隐私说明已更新，请刷新页面后重新提交" })
+  privacyConsentContentHash!: string;
 }

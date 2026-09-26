@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { IdempotencyService } from '../../common/idempotency/idempotency-key';
 import { AfterSalesService } from './after-sales.service';
 
 function createHarness(caseInput: {
@@ -25,7 +26,12 @@ function createHarness(caseInput: {
   };
   const events: Array<Record<string, unknown>> = [];
   const tx: any = {
-    $queryRaw: async () => [{ id: caseRecord.orderId }],
+    $queryRaw: async (query: any) => {
+      const sql = (query?.strings ?? []).join(' ');
+      return sql.includes('FROM users')
+        ? [{ id: admin.id, username: 'admin', realName: '售后管理员' }]
+        : [{ id: caseRecord.orderId }];
+    },
     afterSalesCase: {
       findUnique: async () => caseRecord,
       updateMany: async ({ where, data }: any) => {
@@ -48,6 +54,7 @@ function createHarness(caseInput: {
         events.push(event);
       },
     } as never,
+    new IdempotencyService(),
   );
   return { service, caseRecord, events };
 }

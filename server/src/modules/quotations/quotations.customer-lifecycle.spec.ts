@@ -171,6 +171,10 @@ function cancellationHarness(options?: {
   const tx: any = {
     $queryRaw: async (query: { strings?: readonly string[] }) => {
       const sql = query.strings?.join("?") ?? "";
+      if (sql.includes("FROM users")) {
+        lockOrder.push("staff");
+        return [{ id: 1, role: "ADMIN" }];
+      }
       if (sql.includes("FROM quotations")) lockOrder.push("quotation");
       if (sql.includes("FROM payment_plans")) lockOrder.push("paymentPlan");
       return [{ id: 8 }];
@@ -285,7 +289,7 @@ test("已确认报价取消时原子取消接受版本、ACTIVE 计划与未付�
   assert.equal(harness.state.versionStatus, "CANCELLED");
   assert.equal(harness.state.planStatus, "CANCELLED");
   assert.deepEqual(harness.state.installmentStatuses, ["CANCELLED", "CANCELLED"]);
-  assert.deepEqual(harness.lockOrder, ["quotation", "paymentPlan"]);
+  assert.deepEqual(harness.lockOrder, ["staff", "quotation", "paymentPlan"]);
 });
 
 test("并发重复取消已确认报价保持幂等且只取消一次计划", async () => {
@@ -338,7 +342,12 @@ test("待客户确认报价取消时同步取消 ISSUED 版本、DRAFT 计划和
   const writes: string[] = [];
   let quotationStatus = "PENDING_CONFIRM";
   const tx = {
-    $queryRaw: async () => [{ id: 8 }],
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join("") ?? "";
+      return sql.includes("FROM users")
+        ? [{ id: 1, role: "ADMIN" }]
+        : [{ id: 8 }];
+    },
     quotation: {
       findFirst: async () => quotationStatus === "PENDING_CONFIRM"
         ? {
@@ -404,7 +413,12 @@ test("待客户确认报价取消时同步取消 ISSUED 版本、DRAFT 计划和
 test("修订待确认报价时先作废版本并取消所有未付分期，再重新开放草稿", async () => {
   const writes: string[] = [];
   const tx = {
-    $queryRaw: async () => [{ id: 8 }],
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join("") ?? "";
+      return sql.includes("FROM users")
+        ? [{ id: 1, role: "ADMIN" }]
+        : [{ id: 8 }];
+    },
     quotation: {
       findFirst: async () => ({ id: 8, status: "PENDING_CONFIRM", currentVersion: 2 }),
       updateMany: async () => {

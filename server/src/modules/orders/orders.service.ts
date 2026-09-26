@@ -6,7 +6,6 @@ import {
   Logger,
   OnModuleInit,
   Optional,
-  HttpStatus,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import {
@@ -19,7 +18,7 @@ import {
   Coupon,
   Prisma,
 } from "@prisma/client";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { TradeEventsService } from "../trade-events/trade-events.service";
 import { MailerService } from "../../common/mailer/mailer.service";
@@ -41,7 +40,33 @@ import { runWithDocumentNumberRetry } from "../../common/trade/document-number-r
 import { ReliableNotificationIntentService } from "../../common/notifications/reliable-notification-intent.service";
 import { FulfillmentService } from "../fulfillment/fulfillment.service";
 import { hashBusinessSnapshot } from "../quotations/quotation-snapshot";
-import { ApiError } from "../../common/errors/api-error";
+import { resolveInstallmentPaymentType } from "../payments/payment-plan-installment-type";
+import {
+  resolveCustomerPaymentProof,
+  storedCustomerPaymentProofExists,
+} from "../payment-proofs/payment-proof-storage";
+import {
+  MAX_ACTIVE_PENDING_PROOF_ORDERS_PER_CUSTOMER,
+  MAX_ATTACHED_PAYMENT_PROOF_BYTES_PER_CUSTOMER,
+  MAX_ATTACHED_PAYMENT_PROOFS_PER_CUSTOMER,
+  MAX_ATTACHED_PAYMENT_PROOFS_PER_ORDER,
+} from "../payment-proofs/payment-proof-policy";
+import type { CustomerPrincipal, StaffPrincipal } from "../../common/security/authenticated-principal";
+import {
+  lockAuthorizedStaffForPayment,
+  type StaffPaymentAuthorization,
+} from "../../common/security/staff-payment-authorization";
+import {
+  lockAuthorizedStaffForOrder,
+  type StaffOrderActor,
+} from "../../common/security/staff-order-authorization";
+import {
+  lockActiveCustomerForRead,
+  lockActiveCustomerForWrite,
+} from "../customers/customer-write-gate";
+import { parseIdempotencyKey } from "../../common/idempotency/idempotency-key";
+import { assertZeroShippingCheckoutReady } from "./shipping-pricing-boundary";
+import { findDeliveryBlockingDisputes } from "../../common/trade/delivery-blocking-disputes";
 
 /** 订单状态机：定义合法状态转换（导出供行为级测试消费） */
 export const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -56,10 +81,12 @@ const OFFLINE_PAYMENT_RESERVATION_MS = 24 * 60 * 60 * 1000;
 const CONFIRMED_PAYMENT_STATUSES = ["PAID", "PARTIAL_REFUND", "REFUNDED"] as const;
 const MANUAL_RECEIPT_METHODS = ["bank_transfer", "store"] as const;
 const ONLINE_PAYMENT_METHODS = ["alipay", "wechat"] as const;
+const MANUAL_RECEIPT_IDEMPOTENCY_SOURCE = "MANUAL_RECEIPT";
 const CUSTOMER_VISIBLE_EVENT_TYPES: ReadonlySet<string> = new Set([
   TRADE_EVENT_TYPE.ORDER_CREATED,
   TRADE_EVENT_TYPE.ORDER_CANCELLED,
   TRADE_EVENT_TYPE.ORDER_COMPLETED,
+  TRADE_EVENT_TYPE.ORDER_CUSTOM_STAGE_CHANGED,
   TRADE_EVENT_TYPE.PAYMENT_APPROVED,
   TRADE_EVENT_TYPE.FULFILLMENT_CREATED,
   TRADE_EVENT_TYPE.SHIPMENT_DISPATCHED,
@@ -121,6 +148,123 @@ export interface OrderListParams {
 @Injectable()
 export class OrdersService implements OnModuleInit {
   private readonly logger = new Logger(OrdersService.name);
+
+  private storedPaymentProofExists(customerId: number, storageKey: string) {
+    return storedCustomerPaymentProofExists(customerId, storageKey);
+  }
+
+  private async claimPaymentProofAsset(
+    tx: Prisma.TransactionClient,
+    customerId: number,
+    orderId: number,
+    assetId: number,
+    storageKey: string,
+  ) {
+    const asset = await tx.paymentProofAsset.findUniqueOrThrow({
+      where: { id: assetId },
+      select: {
+        id: true,
+        storageKey: true,
+        customerId: true,
+        orderId: true,
+        paymentId: true,
+        submissionOrderId: true,
+        fileSize: true,
+        status: true,
+      },
+    });
+    if (
+      asset.storageKey !== storageKey
+      || asset.customerId !== customerId
+      || asset.submissionOrderId !== orderId
+    ) {
+      throw new ConflictException("付款凭证归属不一致，请重新上传");
+    }
+    if (asset.status === "ATTACHED" && asset.orderId === orderId) {
+      if (asset.paymentId === null) {
+        throw new ConflictException("付款凭证缺少原付款关联，请联系人工核对");
+      }
+      return { assetId: asset.id, paymentId: asset.paymentId, replayed: true as const };
+    }
+
+    if (!asset.fileSize || asset.fileSize <= 0) {
+      throw new ConflictException("付款凭证缺少可核验的文件大小，请联系人工核对");
+    }
+
+    const customerAttachedCount = await tx.paymentProofAsset.count({
+      where: { customerId, status: "ATTACHED" },
+    });
+    if (customerAttachedCount >= MAX_ATTACHED_PAYMENT_PROOFS_PER_CUSTOMER) {
+      throw new ConflictException(
+        `该客户已保留 ${MAX_ATTACHED_PAYMENT_PROOFS_PER_CUSTOMER} 张付款凭证，请先联系人工核对`,
+      );
+    }
+
+    const customerAttachedBytes = await tx.paymentProofAsset.aggregate({
+      where: { customerId, status: "ATTACHED" },
+      _sum: { fileSize: true },
+    });
+    const attachedBytes = customerAttachedBytes._sum.fileSize ?? 0;
+    if (attachedBytes + asset.fileSize > MAX_ATTACHED_PAYMENT_PROOF_BYTES_PER_CUSTOMER) {
+      throw new ConflictException("该客户付款凭证累计大小已达到 240 MiB，请先联系人工核对");
+    }
+
+    const activePendingProofOrderCount = await tx.order.count({
+      where: {
+        customerId,
+        id: { not: orderId },
+        status: "PENDING_PAYMENT",
+        payments: {
+          some: {
+            status: "PENDING",
+            method: "bank_transfer",
+            proofUrl: { not: null },
+          },
+        },
+        paymentProofAssets: { some: { status: "ATTACHED" } },
+      },
+    });
+    if (activePendingProofOrderCount >= MAX_ACTIVE_PENDING_PROOF_ORDERS_PER_CUSTOMER) {
+      throw new ConflictException(
+        `该客户已有 ${MAX_ACTIVE_PENDING_PROOF_ORDERS_PER_CUSTOMER} 笔活跃待审凭证订单，请先完成审核`,
+      );
+    }
+
+    const attachedCount = await tx.paymentProofAsset.count({
+      where: { orderId, status: "ATTACHED" },
+    });
+    if (attachedCount >= MAX_ATTACHED_PAYMENT_PROOFS_PER_ORDER) {
+      throw new ConflictException(
+        `该订单已保留 ${MAX_ATTACHED_PAYMENT_PROOFS_PER_ORDER} 张付款凭证，请先联系人工核对`,
+      );
+    }
+
+    const attachedAt = new Date();
+    const claimed = await tx.paymentProofAsset.updateMany({
+      where: {
+        id: asset.id,
+        customerId,
+        status: "UPLOADED",
+        orderId: null,
+      },
+      data: { status: "ATTACHED", orderId, attachedAt, deletingAt: null },
+    });
+    if (claimed.count === 1) {
+      return { assetId: asset.id, paymentId: null, replayed: false as const };
+    }
+
+    const current = await tx.paymentProofAsset.findUnique({
+      where: { id: asset.id },
+      select: { customerId: true, orderId: true, paymentId: true, status: true },
+    });
+    if (current?.customerId === customerId && current.status === "ATTACHED" && current.orderId === orderId) {
+      if (current.paymentId === null) {
+        throw new ConflictException("付款凭证缺少原付款关联，请联系人工核对");
+      }
+      return { assetId: asset.id, paymentId: current.paymentId, replayed: true as const };
+    }
+    throw new ConflictException("该付款凭证已用于其他订单或正在清理，请重新上传");
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -420,8 +564,8 @@ export class OrdersService implements OnModuleInit {
 
   /**
    * 一笔 Payment 确认后统一刷新订单实收。零售订单全额到账后消费 Inventory
-   * 并创建仓库履约单；非零售订单在专属生产/交付履约尚无权威模型时失败关闭，
-   * 不能把资源桶强行映射为零售仓库与 InventoryReservation。
+   * 并创建仓库履约单；定制/合作订单消费报价资源预占并进入定制阶段，
+   * 不把资源桶强行映射为零售仓库与 InventoryReservation。
    */
   private async applyConfirmedPaymentToOrder(
     tx: Prisma.TransactionClient,
@@ -429,7 +573,10 @@ export class OrdersService implements OnModuleInit {
       id: number;
       status: OrderStatus;
       quoteChannel?: QuoteChannel | null;
+      customStage?: CustomStage | null;
       finalAmount: Prisma.Decimal;
+      depositAmount: Prisma.Decimal;
+      balanceAmount: Prisma.Decimal;
       items: Array<{
         id: number;
         productId: number;
@@ -466,11 +613,45 @@ export class OrdersService implements OnModuleInit {
     }
 
     if (usesTradeResourceReservations(order.quoteChannel)) {
-      throw new ApiError(
-        HttpStatus.CONFLICT,
-        "NON_RETAIL_FULFILLMENT_MODEL_REQUIRED",
-        "定制与合作订单的生产交付履约尚未配置，已拒绝确认全额收款",
+      const consumedResources = await this.consumeTradeResourceReservations(
+        tx,
+        order.id,
+        now,
       );
+      if (consumedResources === 0) {
+        throw new ConflictException("订单缺少可核销的定制资源预占，不能确认全额收款");
+      }
+
+      const advanced = await tx.order.updateMany({
+        where: { id: order.id, status: "PENDING_PAYMENT" },
+        data: {
+          status: "PENDING_SHIP",
+          paymentConfirmedAt: now,
+          paidAmount,
+          paymentMethod,
+          deliveryStatus: "NONE",
+          paidDeposit: order.depositAmount,
+          paidBalance: order.balanceAmount,
+          customStage: "BALANCE_PAID",
+          reservedAt: null,
+        },
+      });
+      if (advanced.count === 0) {
+        throw new ConflictException("订单状态已变化，请刷新后重试");
+      }
+
+      await this.tradeEvents.record(tx, {
+        orderId: order.id,
+        entityType: TRADE_ENTITY_TYPE.ORDER,
+        entityId: order.id,
+        eventType: TRADE_EVENT_TYPE.ORDER_CUSTOM_STAGE_CHANGED,
+        fromStatus: order.customStage ?? null,
+        toStatus: "BALANCE_PAID",
+        operator,
+        reason: "全额收款已确认，报价资源预占已核销",
+        metadata: { quoteChannel: order.quoteChannel, consumedResources },
+      });
+      return { fullyPaid: true, paidCents };
     }
 
     const consumed = await this.consumeStockReservations(tx, order.id, now);
@@ -686,6 +867,14 @@ export class OrdersService implements OnModuleInit {
       },
     });
 
+    // 历史预占若缺少 Inventory 归属，无法安全判断应恢复到哪个仓位。
+    // 必须在抢占 releasedAt 之前失败关闭，让外层事务完整回滚；禁止再回写非权威的 SKU.stock。
+    if (reservations.some((reservation) => reservation.inventoryId === null)) {
+      throw new ConflictException(
+        "订单库存归属异常，暂时无法释放库存，请联系管理员核对后重试",
+      );
+    }
+
     const byProduct = new Map<number, typeof reservations>();
     for (const reservation of reservations) {
       const group = byProduct.get(reservation.sku.productId) ?? [];
@@ -728,24 +917,20 @@ export class OrdersService implements OnModuleInit {
             });
           }
         }
-        // inventoryId 为空的是旧版预占；SINGLE_UNIT 不再回写废弃的 SKU.stock，
-        // 避免策略切换后把一物一件恢复为大于 1。
+        // SINGLE_UNIT 只恢复一次，避免策略切换后把一物一件恢复为大于 1。
         continue;
       }
 
       for (const reservation of claimed) {
-        if (reservation.inventoryId) {
-          await tx.inventory.update({
-            where: { id: reservation.inventoryId },
-            data: { quantity: { increment: reservation.quantity } },
-          });
-        } else {
-          // 仅兼容迁移前的 STANDARD 预占；当前预占始终写 Inventory。
-          await tx.productSKU.update({
-            where: { id: reservation.skuId },
-            data: { stock: { increment: reservation.quantity } },
-          });
+        if (!reservation.inventoryId) {
+          throw new ConflictException(
+            "订单库存归属异常，暂时无法释放库存，请联系管理员核对后重试",
+          );
         }
+        await tx.inventory.update({
+          where: { id: reservation.inventoryId },
+          data: { quantity: { increment: reservation.quantity } },
+        });
       }
     }
 
@@ -818,7 +1003,9 @@ export class OrdersService implements OnModuleInit {
         where: { id: reservation.id, status: "RESERVED" },
         data: { status: "CONSUMED", consumedAt },
       });
-      if (claimed.count !== 1) continue;
+      if (claimed.count !== 1) {
+        throw new ConflictException("资源预占状态已变化，不能核销");
+      }
       const bucket = await tx.tradeResourceBucket.updateMany({
         where: {
           id: reservation.resourceBucketId,
@@ -1074,55 +1261,58 @@ export class OrdersService implements OnModuleInit {
     return where;
   }
 
-  async findAll(params: OrderListParams) {
+  async findAll(params: OrderListParams, actor: StaffOrderActor) {
     const page = Math.max(Number(params.page) || 1, 1);
     const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
     const where = this.buildListWhere(params);
 
-    const [list, total] = await Promise.all([
-      this.prisma.order.findMany({
-        where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          items: {
-            include: {
-              product: { select: { id: true, name: true, code: true } },
+    return this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, "ORDER_QUERY");
+      const [list, total] = await Promise.all([
+        tx.order.findMany({
+          where,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: {
+            items: {
+              include: {
+                product: { select: { id: true, name: true, code: true } },
+              },
+            },
+            payments: {
+              select: {
+                id: true,
+                status: true,
+                method: true,
+                amount: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: "desc" },
+              take: 1,
             },
           },
-          payments: {
-            select: {
-              id: true,
-              status: true,
-              method: true,
-              amount: true,
-              createdAt: true,
-            },
-            orderBy: { createdAt: "desc" },
-            take: 1,
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      this.prisma.order.count({ where }),
-    ]);
-
-    return { list, total, page, pageSize };
+          orderBy: { createdAt: "desc" },
+        }),
+        tx.order.count({ where }),
+      ]);
+      return { list, total, page, pageSize };
+    });
   }
 
   /** 订单导出：数据读取与操作日志同成同败，避免客户信息被无痕导出。 */
   async findAllForExport(
     params: OrderListParams,
-    operator: OperatorContext,
+    actor: StaffOrderActor,
     limit = 1000,
   ) {
-    const operatorId = operator.id;
+    const operatorId = actor.id;
     if (!operatorId) {
       throw new BadRequestException("订单导出缺少可审计的操作人");
     }
     const where = this.buildListWhere(params);
     const boundedLimit = Math.min(Math.max(limit, 1), 1000);
     return this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
       const rows = await tx.order.findMany({
         where,
         take: boundedLimit,
@@ -1139,7 +1329,7 @@ export class OrdersService implements OnModuleInit {
       });
       await tx.operationLog.create({
         data: {
-          userId: operatorId,
+          userId: operator.id!,
           action: "export",
           module: "orders",
           detail: JSON.stringify({
@@ -1163,106 +1353,153 @@ export class OrdersService implements OnModuleInit {
     });
   }
 
-  async findById(id: number) {
-    const order = await this.prisma.order.findUnique({
-      where: { id },
-      include: {
-        items: {
-          include: {
-            product: {
-              select: { id: true, name: true, code: true, materialType: true },
+  async findById(id: number, actor: StaffOrderActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, "ORDER_QUERY");
+      const order = await tx.order.findUnique({
+        where: { id },
+        include: {
+          items: {
+            include: {
+              product: {
+                select: { id: true, name: true, code: true, materialType: true },
+              },
+              sku: { select: { skuCode: true, material: true, size: true } },
             },
-            sku: { select: { skuCode: true, material: true, size: true } },
           },
-        },
-        payments: { orderBy: { createdAt: "desc" } },
-        refunds: { orderBy: { createdAt: "desc" } },
-        reservations: { orderBy: { createdAt: "asc" } },
-        quotedLines: { orderBy: { id: "asc" } },
-        resourceReservations: {
-          orderBy: { id: "asc" },
-          include: {
-            resourceBucket: {
-              select: {
-                id: true,
-                channel: true,
-                kind: true,
-                code: true,
-                bucketKey: true,
-                displayName: true,
-                unit: true,
+          payments: { orderBy: { createdAt: "desc" } },
+          refunds: { orderBy: { createdAt: "desc" } },
+          reservations: { orderBy: { createdAt: "asc" } },
+          quotedLines: { orderBy: { id: "asc" } },
+          resourceReservations: {
+            orderBy: { id: "asc" },
+            include: {
+              resourceBucket: {
+                select: {
+                  id: true,
+                  channel: true,
+                  kind: true,
+                  code: true,
+                  bucketKey: true,
+                  displayName: true,
+                  unit: true,
+                },
               },
             },
           },
-        },
-        quotationVersion: {
-          select: {
-            id: true,
-            quotationId: true,
-            version: true,
-            status: true,
-            snapshotSchemaVersion: true,
-            contentHash: true,
+          quotationVersion: {
+            select: {
+              id: true,
+              quotationId: true,
+              version: true,
+              status: true,
+              snapshotSchemaVersion: true,
+              contentHash: true,
+            },
+          },
+          quotationSource: {
+            select: { id: true, quoteNo: true, channel: true, status: true },
+          },
+          quotationConversion: {
+            select: { id: true, quotationVersionId: true, customerId: true, createdAt: true },
+          },
+          fulfillments: { orderBy: { createdAt: "desc" } },
+          afterSalesCases: { orderBy: { createdAt: "desc" } },
+          tradeEvents: { orderBy: { createdAt: "asc" } },
+          customer: {
+            select: { id: true, name: true, phone: true, email: true },
           },
         },
-        quotationSource: {
-          select: { id: true, quoteNo: true, channel: true, status: true },
-        },
-        quotationConversion: {
-          select: { id: true, quotationVersionId: true, customerId: true, createdAt: true },
-        },
-        fulfillments: { orderBy: { createdAt: "desc" } },
-        afterSalesCases: { orderBy: { createdAt: "desc" } },
-        tradeEvents: { orderBy: { createdAt: "asc" } },
-        customer: {
-          select: { id: true, name: true, phone: true, email: true },
-        },
-      },
+      });
+      if (!order) throw new NotFoundException("订单不存在");
+      if (
+        order.transactionSnapshot != null
+        && (
+          order.snapshotSchemaVersion !== 2
+          || !order.transactionSnapshotHash
+          || hashBusinessSnapshot(order.transactionSnapshot) !== order.transactionSnapshotHash
+        )
+      ) {
+        throw new ConflictException("订单交易快照完整性校验失败");
+      }
+      return order;
     });
-    if (!order) throw new NotFoundException("订单不存在");
-    if (
-      order.transactionSnapshot != null
-      && (
-        order.snapshotSchemaVersion !== 2
-        || !order.transactionSnapshotHash
-        || hashBusinessSnapshot(order.transactionSnapshot) !== order.transactionSnapshotHash
-      )
-    ) {
-      throw new ConflictException("订单交易快照完整性校验失败");
-    }
-    return order;
   }
 
   /**
    * 客户查看自己订单的物流轨迹（归属校验 + 已发货才可查）。
    * 查询由快递100 服务完成（未配置凭据时诚实 503）。
    */
-  async trackForCustomer(customerId: number, orderId: number) {
-    const order = await this.prisma.order.findFirst({
-      where: { id: orderId, customerId },
-      select: {
-        id: true,
-        orderNo: true,
-        status: true,
-        logisticsCompany: true,
-        logisticsNo: true,
-      },
-    });
-    if (!order) throw new NotFoundException("订单不存在");
-    if (!order.logisticsNo || !["SHIPPED", "COMPLETED"].includes(order.status)) {
-      throw new BadRequestException("订单尚未发货，暂无物流轨迹");
-    }
-    return this.logistics.track(order.logisticsCompany, order.logisticsNo);
+  async trackForCustomer(
+    customer: Pick<CustomerPrincipal, "id" | "authVersion">,
+    orderId: number,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, customer);
+      const order = await transaction.order.findFirst({
+        where: { id: orderId, customerId: customer.id },
+        select: {
+          id: true,
+          orderNo: true,
+          status: true,
+          logisticsCompany: true,
+          logisticsNo: true,
+        },
+      });
+      if (!order) throw new NotFoundException("订单不存在");
+      if (!order.logisticsNo || !["SHIPPED", "COMPLETED"].includes(order.status)) {
+        throw new BadRequestException("订单尚未发货，暂无物流轨迹");
+      }
+      // 物流正文也是客户私有数据；在共享锁释放前完成受超时约束的查询，
+      // 避免账户注销先提交后，旧 principal 仍向外部渠道发送运单号并收到结果。
+      return this.logistics.track(order.logisticsCompany, order.logisticsNo);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async findForCustomer(customerId: number) {
+  async findForCustomer(
+    customer: Pick<CustomerPrincipal, "id" | "authVersion">,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, customer);
+      return this.findCustomerOrders(transaction, customer.id);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async findOneForCustomer(
+    customer: Pick<CustomerPrincipal, "id" | "authVersion">,
+    orderId: number | string,
+  ) {
+    const normalizedOrderId = typeof orderId === "number"
+      ? orderId
+      : /^[1-9]\d*$/.test(orderId)
+        ? Number(orderId)
+        : Number.NaN;
+    if (!Number.isSafeInteger(normalizedOrderId) || normalizedOrderId <= 0) {
+      throw new BadRequestException("订单编号无效");
+    }
+    const [order] = await this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, customer);
+      return this.findCustomerOrders(transaction, customer.id, normalizedOrderId);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    if (!order) throw new NotFoundException("订单不存在");
+    return order;
+  }
+
+  private async findCustomerOrders(
+    transaction: Prisma.TransactionClient,
+    customerId: number,
+    orderId?: number,
+  ) {
     // 客户订单字段白名单：internalNote（后台内部备注）、userId、salesConsultantId、
     // source、paymentProof 属于后台事实，不得进入客户响应。新增 Order 标量字段时
     // 必须先确认客户可见性，再显式加入本 select，避免随模型扩展自动外发。
-    const orders = await this.prisma.order.findMany({
-      where: { customerId },
+    const orders = await transaction.order.findMany({
+      where: {
+        customerId,
+        ...(orderId === undefined ? {} : { id: orderId }),
+      },
       // 个人订单列表安全上限，防止极端账户全量加载；正常用户远不到此数
-      take: 100,
+      take: orderId === undefined ? 100 : 1,
       select: {
         id: true,
         orderNo: true,
@@ -1300,7 +1537,19 @@ export class OrdersService implements OnModuleInit {
         quoteChannel: true,
         couponId: true,
         items: {
-          include: {
+          select: {
+            id: true,
+            productId: true,
+            skuId: true,
+            quantity: true,
+            unitPrice: true,
+            subtotal: true,
+            productNameSnapshot: true,
+            productImageSnapshot: true,
+            productCodeSnapshot: true,
+            skuSnapshot: true,
+            actualWeight: true,
+            certNumber: true,
             product: { select: { id: true, name: true, code: true } },
             sku: { select: { skuCode: true, material: true, size: true } },
           },
@@ -1340,11 +1589,11 @@ export class OrdersService implements OnModuleInit {
           take: 1,
         },
         refunds: {
+          // reason/reviewNote 均由后台退款链路写入，不是已批准的客户公开说明。
           select: {
             id: true,
             refundNo: true,
             amount: true,
-            reason: true,
             status: true,
             createdAt: true,
             completedAt: true,
@@ -1369,6 +1618,11 @@ export class OrdersService implements OnModuleInit {
           take: 5,
         },
         tradeEvents: {
+          // 先按客户可见类型过滤，再取最近 20 条；否则大量更新的内部事件会在
+          // 数据库截断阶段挤掉较早但应公开的定制、履约或售后进度。
+          where: {
+            eventType: { in: [...CUSTOMER_VISIBLE_EVENT_TYPES] },
+          },
           select: {
             id: true,
             eventType: true,
@@ -1409,9 +1663,46 @@ export class OrdersService implements OnModuleInit {
           ...payment,
           hasProof: Boolean(proofUrl),
         })),
-        timeline: tradeEvents.filter((event) =>
-          CUSTOMER_VISIBLE_EVENT_TYPES.has(event.eventType),
-        ),
+        refunds: safeOrder.refunds.map((refund) => {
+          const {
+            reason: _reason,
+            reviewNote: _reviewNote,
+            gatewayRefundNo: _gatewayRefundNo,
+            requestedBy: _requestedBy,
+            reviewedBy: _reviewedBy,
+            processedBy: _processedBy,
+            ...safeRefund
+          } = refund as typeof refund & {
+            reason?: unknown;
+            reviewNote?: unknown;
+            gatewayRefundNo?: unknown;
+            requestedBy?: unknown;
+            reviewedBy?: unknown;
+            processedBy?: unknown;
+          };
+          return safeRefund;
+        }),
+        afterSalesCases: safeOrder.afterSalesCases.map((caseRecord) => {
+          const {
+            adminNote: _adminNote,
+            handledBy: _handledBy,
+            ...safeCase
+          } = caseRecord as typeof caseRecord & {
+            adminNote?: unknown;
+            handledBy?: unknown;
+          };
+          return safeCase;
+        }),
+        timeline: tradeEvents
+          .filter((event) => CUSTOMER_VISIBLE_EVENT_TYPES.has(event.eventType))
+          .map((event) => ({
+            id: event.id,
+            eventType: event.eventType,
+            entityType: event.entityType,
+            fromStatus: event.fromStatus,
+            toStatus: event.toStatus,
+            createdAt: event.createdAt,
+          })),
       };
     });
   }
@@ -1435,11 +1726,48 @@ export class OrdersService implements OnModuleInit {
     /** 操作人上下文（客户结算=客户；后台人工建单=管理员） */
     operator?: OperatorContext;
     /** 仅由已认证客户结算服务设置；用于可见性校验、购物车绑定和原子清理。 */
-    checkoutCustomer?: CustomerProductAccess & { id: number };
+    checkoutCustomer?: CustomerProductAccess & Pick<CustomerPrincipal, "id" | "authVersion">;
+    /** 客户结算请求的作用域键与请求摘要；与订单、库存预占在同一事务内写入。 */
+    checkoutIdempotency?: { keyHash: string; requestHash: string };
+    /** 后台人工建单的员工域幂等上下文；复用订单现有摘要列，不扩展客户结算作用域。 */
+    adminCreation?: { actorId: number; idempotencyKey: string };
+    /** 后台人工建单的完整员工入口身份；服务端以数据库当前状态重新授权。 */
+    staffPrincipal?: Pick<StaffPrincipal, "id">;
   }) {
-    const operator: OperatorContext = data.operator ?? {
-      type: OPERATOR_TYPE.SYSTEM,
-    };
+    if (data.checkoutCustomer && !data.checkoutIdempotency) {
+      throw new BadRequestException("客户结算缺少幂等上下文");
+    }
+    if (data.checkoutCustomer && data.adminCreation) {
+      throw new BadRequestException("客户结算与后台人工建单上下文不能同时存在");
+    }
+    if (
+      data.adminCreation
+      && (!data.staffPrincipal || data.staffPrincipal.id !== data.adminCreation.actorId)
+    ) {
+      throw new BadRequestException("后台人工建单的员工身份上下文无效");
+    }
+    const operator: OperatorContext = data.operator ?? (
+      data.adminCreation && data.staffPrincipal
+        ? { type: OPERATOR_TYPE.ADMIN, id: data.staffPrincipal.id }
+        : { type: OPERATOR_TYPE.SYSTEM }
+    );
+    if (
+      !data.checkoutCustomer
+      && operator.type === OPERATOR_TYPE.ADMIN
+      && !data.adminCreation
+    ) {
+      throw new BadRequestException("后台人工建单缺少幂等上下文");
+    }
+    const adminIdempotency = data.adminCreation
+      ? this.buildAdminOrderCreateIdempotency(data, operator)
+      : null;
+    if (adminIdempotency) {
+      const replay = await this.prisma.$transaction(async (tx) => {
+        await lockAuthorizedStaffForOrder(tx, data.staffPrincipal!, "ORDER_ADMIN");
+        return this.findOrderCreateReplay(adminIdempotency, tx);
+      });
+      if (replay) return replay;
+    }
     const customer = this.validateCustomerData(data);
     const quantities = this.normalizeItems(data.items);
     const skus = await this.prisma.productSKU.findMany({
@@ -1457,6 +1785,17 @@ export class OrdersService implements OnModuleInit {
             name: true,
             code: true,
             inventoryPolicy: true,
+            shippingTemplate: {
+              select: {
+                id: true,
+                feeMode: true,
+                baseFee: true,
+                remoteSurcharge: true,
+                freeShippingThreshold: true,
+                excludedRegions: true,
+                isActive: true,
+              },
+            },
             primaryImage: { select: { url: true } },
             images: {
               select: { url: true },
@@ -1471,6 +1810,7 @@ export class OrdersService implements OnModuleInit {
       throw new BadRequestException(
         '订单中包含不可直接购买的商品（仅"直接购买"商品可下单，其余请走咨询/预约）',
       );
+    assertZeroShippingCheckoutReady(skus.map((sku) => sku.product));
 
     // 一次性聚合所有 SKU 的可用库存，替代循环内 N 次 aggregate（避免 N+1）
     const stockRows = await this.prisma.inventory.groupBy({
@@ -1549,6 +1889,12 @@ export class OrdersService implements OnModuleInit {
 
     const run = () =>
       this.prisma.$transaction(async (tx) => {
+        const transactionOperator = data.adminCreation
+          ? await lockAuthorizedStaffForOrder(tx, data.staffPrincipal!, "ORDER_ADMIN")
+          : operator;
+        const lockedCheckoutAccess = data.checkoutCustomer
+          ? await lockActiveCustomerForWrite(tx, data.checkoutCustomer)
+          : undefined;
         // 商品写入口与结算共用商品行锁。先按稳定顺序锁定，再做事务内当前读，
         // 防止事务外试算后发生改价、停售、SKU 停用或销售模式切换仍按旧事实成交。
         const productIds = [...new Set(skus.map((sku) => sku.productId))]
@@ -1561,7 +1907,7 @@ export class OrdersService implements OnModuleInit {
             id: { in: [...quantities.keys()] },
             isActive: true,
             product: data.checkoutCustomer
-              ? directPurchaseProductWhere(data.checkoutCustomer)
+              ? directPurchaseProductWhere(lockedCheckoutAccess)
               : directPurchaseProductBaseWhere(),
           },
           select: {
@@ -1569,7 +1915,22 @@ export class OrdersService implements OnModuleInit {
             productId: true,
             skuCode: true,
             price: true,
-            product: { select: { inventoryPolicy: true } },
+            product: {
+              select: {
+                inventoryPolicy: true,
+                shippingTemplate: {
+                  select: {
+                    id: true,
+                    feeMode: true,
+                    baseFee: true,
+                    remoteSurcharge: true,
+                    freeShippingThreshold: true,
+                    excludedRegions: true,
+                    isActive: true,
+                  },
+                },
+              },
+            },
           },
         });
         if (currentSkus.length !== skus.length) {
@@ -1577,6 +1938,9 @@ export class OrdersService implements OnModuleInit {
             "商品销售资格或规格状态已变化，请刷新后重新确认",
           );
         }
+        assertZeroShippingCheckoutReady(
+          currentSkus.map((sku) => sku.product),
+        );
         const currentSkuMap = new Map(currentSkus.map((sku) => [sku.id, sku]));
         for (const preflightSku of skus) {
           const currentSku = currentSkuMap.get(preflightSku.id);
@@ -1696,6 +2060,14 @@ export class OrdersService implements OnModuleInit {
             orderType: data.orderType ?? "SPOT",
             salesConsultantId: data.salesConsultantId ?? null,
             source: data.source?.trim() || null,
+            checkoutIdempotencyKeyHash:
+              data.checkoutCustomer && data.checkoutIdempotency
+                ? data.checkoutIdempotency.keyHash
+                : adminIdempotency?.keyHash ?? null,
+            checkoutRequestHash:
+              data.checkoutCustomer && data.checkoutIdempotency
+                ? data.checkoutIdempotency.requestHash
+                : adminIdempotency?.requestHash ?? null,
             reservedAt,
             items: { create: orderItems },
           },
@@ -1743,7 +2115,7 @@ export class OrdersService implements OnModuleInit {
           entityId: order.id,
           eventType: TRADE_EVENT_TYPE.ORDER_CREATED,
           toStatus: "PENDING_PAYMENT",
-          operator,
+          operator: transactionOperator,
           metadata: {
             totalAmount: totalAmount.toString(),
             itemCount: order.items.length,
@@ -1755,7 +2127,7 @@ export class OrdersService implements OnModuleInit {
           entityId: order.id,
           eventType: TRADE_EVENT_TYPE.STOCK_RESERVED,
           toStatus: "PENDING_PAYMENT",
-          operator,
+          operator: transactionOperator,
           reason: `预占 ${order.items.length} 个商品行，24h 内未付款自动释放`,
         });
 
@@ -1774,11 +2146,113 @@ export class OrdersService implements OnModuleInit {
       }, data.checkoutCustomer
         ? { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
         : undefined);
-    return runWithDocumentNumberRetry({
-      targetMarkers: ["orderNo", "order_no", "orders_order_no_key"],
-      documentLabel: "订单",
-      runTransaction: run,
+    try {
+      return await runWithDocumentNumberRetry({
+        targetMarkers: ["orderNo", "order_no", "orders_order_no_key"],
+        documentLabel: "订单",
+        runTransaction: run,
+      });
+    } catch (error) {
+      if (adminIdempotency && this.isOrderCreateIdempotencyRace(error)) {
+        const replay = await this.prisma.$transaction(async (tx) => {
+          await lockAuthorizedStaffForOrder(tx, data.staffPrincipal!, "ORDER_ADMIN");
+          return this.findOrderCreateReplay(adminIdempotency, tx);
+        });
+        if (replay) return replay;
+      }
+      throw error;
+    }
+  }
+
+  private buildAdminOrderCreateIdempotency(
+    data: {
+      customerId?: number;
+      customerName: string;
+      customerPhone: string;
+      customerEmail?: string;
+      address: string;
+      paymentMethod?: string;
+      items: { skuId: number; quantity: number }[];
+      orderType?: OrderType;
+      salesConsultantId?: number;
+      source?: string;
+      couponId?: number;
+      operator?: OperatorContext;
+      adminCreation?: { actorId: number; idempotencyKey: string };
+    },
+    operator: OperatorContext,
+  ) {
+    const adminCreation = data.adminCreation!;
+    if (
+      operator.type !== OPERATOR_TYPE.ADMIN
+      || !Number.isSafeInteger(operator.id)
+      || operator.id !== adminCreation.actorId
+    ) {
+      throw new BadRequestException("后台人工建单的操作人上下文无效");
+    }
+    const key = parseIdempotencyKey(adminCreation.idempotencyKey, true)!;
+    const quantities = new Map<number, number>();
+    for (const item of data.items) {
+      quantities.set(item.skuId, (quantities.get(item.skuId) ?? 0) + item.quantity);
+    }
+    const canonicalRequest = {
+      version: 1,
+      actorId: adminCreation.actorId,
+      customerId: data.customerId ?? null,
+      customerName: data.customerName.trim(),
+      customerPhone: data.customerPhone.trim(),
+      customerEmail: data.customerEmail?.trim() || null,
+      address: data.address.trim(),
+      paymentMethod: data.paymentMethod?.trim() || "bank_transfer",
+      couponId: data.couponId ?? null,
+      orderType: data.orderType ?? "SPOT",
+      salesConsultantId: data.salesConsultantId ?? null,
+      source: data.source?.trim() || null,
+      items: [...quantities]
+        .sort(([left], [right]) => left - right)
+        .map(([skuId, quantity]) => ({ skuId, quantity })),
+    };
+    return {
+      keyHash: createHash("sha256")
+        .update("admin-order-create")
+        .update("\0")
+        .update(String(adminCreation.actorId))
+        .update("\0")
+        .update(key)
+        .digest("hex"),
+      requestHash: createHash("sha256")
+        .update(JSON.stringify(canonicalRequest))
+        .digest("hex"),
+    };
+  }
+
+  private async findOrderCreateReplay(idempotency: {
+    keyHash: string;
+    requestHash: string;
+  }, client: Pick<Prisma.TransactionClient, "order">) {
+    const order = await client.order.findUnique({
+      where: { checkoutIdempotencyKeyHash: idempotency.keyHash },
+      include: { items: true },
     });
+    if (!order) return null;
+    if (order.checkoutRequestHash !== idempotency.requestHash) {
+      throw new ConflictException(
+        "该幂等键已用于不同的后台人工建单请求，请核对或放弃原待确认意图",
+      );
+    }
+    return order;
+  }
+
+  private isOrderCreateIdempotencyRace(error: unknown): boolean {
+    if (
+      !(error instanceof Prisma.PrismaClientKnownRequestError)
+      || error.code !== "P2002"
+    ) return false;
+    const rawTarget = error.meta?.target;
+    const target = (Array.isArray(rawTarget) ? rawTarget.join(",") : String(rawTarget ?? ""))
+      .toLowerCase();
+    return target.includes("checkout_idempotency_key_hash")
+      || target.includes("checkoutidempotencykeyhash");
   }
 
   /**
@@ -1923,11 +2397,31 @@ export class OrdersService implements OnModuleInit {
       select: {
         id: true,
         productId: true,
-        product: { select: { inventoryPolicy: true } },
+        product: {
+          select: {
+            inventoryPolicy: true,
+            shippingTemplate: {
+              select: {
+                id: true,
+                feeMode: true,
+                baseFee: true,
+                remoteSurcharge: true,
+                freeShippingThreshold: true,
+                excludedRegions: true,
+                isActive: true,
+              },
+            },
+          },
+        },
       },
     }) : [];
     if (channel === "RETAIL" && quoteSkus.length !== quoteSkuIds.length) {
       throw new BadRequestException("报价单包含不存在的商品规格");
+    }
+    if (channel === "RETAIL") {
+      assertZeroShippingCheckoutReady(
+        quoteSkus.map((sku) => sku.product),
+      );
     }
     const quoteSkuFacts = new Map(
       quoteSkus.map((sku) => [
@@ -2149,28 +2643,29 @@ export class OrdersService implements OnModuleInit {
   }
 
   async submitOfflinePaymentProof(
-    customerId: number,
+    principal: Pick<CustomerPrincipal, "id" | "authVersion">,
     orderId: number,
+    assetId: number,
     proofKey: string,
     operator?: OperatorContext,
   ) {
+    const customerId = principal.id;
     const actor: OperatorContext = operator ?? {
       type: OPERATOR_TYPE.CUSTOMER,
       id: customerId,
     };
-    const normalizedProofKey = proofKey?.trim();
-    const paymentProofKeyPattern = new RegExp(
-      `^${customerId}/\\d{4}/\\d{2}/\\d{2}/[0-9a-f-]{36}\\.(jpg|png|webp|gif)$`,
-      "i",
-    );
-    if (
-      !normalizedProofKey ||
-      !paymentProofKeyPattern.test(normalizedProofKey)
-    ) {
+    const resolvedProof = resolveCustomerPaymentProof(customerId, proofKey);
+    if (!resolvedProof) {
       throw new BadRequestException("付款凭证必须是当前客户上传的私有图片");
+    }
+    const normalizedProofKey = resolvedProof.storageKey;
+    if (!(await this.storedPaymentProofExists(customerId, normalizedProofKey))) {
+      throw new BadRequestException("付款凭证不存在或已失效，请重新上传");
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // 付款凭证的客户级配额以客户行为串行点；所有此路径固定先锁客户、再锁订单。
+      await lockActiveCustomerForWrite(tx, principal);
       const accessibleOrder = await tx.order.findFirst({
         where: { id: orderId, customerId },
         select: { id: true },
@@ -2182,6 +2677,37 @@ export class OrdersService implements OnModuleInit {
         include: { paymentPlans: { select: { id: true } } },
       });
       if (!order) throw new NotFoundException("订单不存在或无权操作");
+      const submittedAsset = await tx.paymentProofAsset.findUnique({
+        where: { id: assetId },
+        select: {
+          storageKey: true,
+          customerId: true,
+          orderId: true,
+          paymentId: true,
+          submissionOrderId: true,
+          status: true,
+        },
+      });
+      if (
+        !submittedAsset
+        || submittedAsset.storageKey !== normalizedProofKey
+        || submittedAsset.customerId !== customerId
+        || submittedAsset.submissionOrderId !== orderId
+      ) {
+        throw new ConflictException("付款凭证归属不一致，请重新上传");
+      }
+      if (submittedAsset.status === "ATTACHED" && submittedAsset.orderId === orderId) {
+        if (submittedAsset.paymentId === null) {
+          throw new ConflictException("付款凭证缺少原付款关联，请联系人工核对");
+        }
+        const replayPayment = await tx.payment.findUnique({
+          where: { id: submittedAsset.paymentId },
+        });
+        if (!replayPayment || replayPayment.orderId !== orderId) {
+          throw new ConflictException("原付款记录不存在或归属不一致，请联系人工核对");
+        }
+        return { order, payment: replayPayment };
+      }
       if (order.status !== "PENDING_PAYMENT")
         throw new BadRequestException("当前订单不能提交付款凭证");
       if (await this.expireReservationIfNeeded(tx, order.id)) {
@@ -2207,6 +2733,38 @@ export class OrdersService implements OnModuleInit {
         throw new BadRequestException(
           `订单已有在线待支付交易 ${pendingOnline.paymentNo}，不能同时提交线下凭证`,
         );
+      }
+
+      const pendingProofPayment = await tx.payment.findFirst({
+        where: {
+          orderId,
+          status: "PENDING",
+          method: "bank_transfer",
+          proofUrl: { not: null },
+        },
+        select: { paymentNo: true },
+      });
+      if (pendingProofPayment) {
+        throw new ConflictException(
+          `付款 ${pendingProofPayment.paymentNo} 已有待审核付款凭证，不能用新凭证覆盖`,
+        );
+      }
+
+      const claim = await this.claimPaymentProofAsset(
+        tx,
+        customerId,
+        orderId,
+        assetId,
+        normalizedProofKey,
+      );
+      if (claim.replayed) {
+        const replayPayment = await tx.payment.findUnique({
+          where: { id: claim.paymentId },
+        });
+        if (!replayPayment || replayPayment.orderId !== orderId) {
+          throw new ConflictException("原付款记录不存在或归属不一致，请联系人工核对");
+        }
+        return { order, payment: replayPayment };
       }
 
       let payment;
@@ -2257,6 +2815,21 @@ export class OrdersService implements OnModuleInit {
           throw new ConflictException("付款计划没有可提交凭证的下一期");
         }
         const installment = plan.installments[nextIndex];
+        const installmentTypes = plan.installments.map((planInstallment) =>
+          resolveInstallmentPaymentType({
+            finalCents: this.moneyToCents(order.finalAmount, "订单应收金额"),
+            depositCents: this.moneyToCents(order.depositAmount, "订单定金金额"),
+            balanceCents: this.moneyToCents(order.balanceAmount, "订单尾款金额"),
+            installmentCount: plan.installments.length,
+            sequence: planInstallment.sequence,
+            label: planInstallment.label,
+            amountCents: this.moneyToCents(planInstallment.amount, "分期金额"),
+          }),
+        );
+        if (installmentTypes.some((type) => type === null)) {
+          throw new ConflictException("付款计划与订单冻结金额拆分不一致");
+        }
+        const installmentType = installmentTypes[nextIndex]!;
         if (installment.paymentId !== null) {
           const boundPayment = installment.payment;
           if (
@@ -2264,6 +2837,7 @@ export class OrdersService implements OnModuleInit {
             boundPayment.status !== "PENDING" ||
             boundPayment.method !== "bank_transfer" ||
             boundPayment.orderId !== orderId ||
+            boundPayment.type !== installmentType ||
             this.moneyToCents(boundPayment.amount, "付款金额") !==
               this.moneyToCents(installment.amount, "分期金额")
           ) {
@@ -2294,12 +2868,7 @@ export class OrdersService implements OnModuleInit {
               paymentNo: this.createPaymentNo(),
               amount: installment.amount,
               method: "bank_transfer",
-              type:
-                plan.installments.length === 1
-                  ? "FULL"
-                  : installment.sequence === 1
-                    ? "DEPOSIT"
-                    : "BALANCE",
+              type: installmentType,
               status: "PENDING",
               proofUrl: normalizedProofKey,
             },
@@ -2351,6 +2920,19 @@ export class OrdersService implements OnModuleInit {
               },
             });
       }
+      const linkedAsset = await tx.paymentProofAsset.updateMany({
+        where: {
+          id: claim.assetId,
+          customerId,
+          orderId,
+          status: "ATTACHED",
+          paymentId: null,
+        },
+        data: { paymentId: payment.id },
+      });
+      if (linkedAsset.count !== 1) {
+        throw new ConflictException("付款凭证与付款记录关联失败，请刷新后重试");
+      }
       await tx.order.update({
         where: { id: orderId },
         data: {
@@ -2367,7 +2949,7 @@ export class OrdersService implements OnModuleInit {
         metadata: { hasProof: true },
       });
       return { order, payment };
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     if (!result.order)
       throw new BadRequestException("订单的库存保留已到期，请重新下单");
     // 凭证提交响应只返回安全支付字段：私有凭证路径、审核字段与渠道原始数据不外发
@@ -2395,20 +2977,41 @@ export class OrdersService implements OnModuleInit {
     reviewNote?: string,
     operator?: OperatorContext,
     gateway?: { tradeNo: string; notify: Prisma.InputJsonValue },
+    options: {
+      customerPrincipal?: Pick<CustomerPrincipal, "id" | "authVersion">;
+      staffPrincipal?: Pick<StaffPrincipal, "id">;
+      staffAuthorization?: StaffPaymentAuthorization;
+    } = {},
   ) {
-    const actor: OperatorContext = operator ?? {
+    const fallbackActor: OperatorContext = operator ?? {
       type: OPERATOR_TYPE.ADMIN,
       id: reviewerId ?? undefined,
     };
-    // Payment 只在事务外用于定位不可变的 orderId；事务内的第一把业务锁必须是订单行。
-    // 付款状态和订单状态都在拿到订单锁后重新读取，和取消入口保持同一锁顺序。
-    const paymentRef = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
-      select: { orderId: true },
-    });
-    if (!paymentRef) throw new NotFoundException("付款记录不存在");
-
+    const locatedPayment = options.staffPrincipal
+      ? null
+      : await this.prisma.payment.findUnique({
+          where: { id: paymentId },
+          select: { orderId: true },
+        });
+    if (!options.staffPrincipal && !locatedPayment) {
+      throw new NotFoundException("付款记录不存在");
+    }
     return this.prisma.$transaction(async (tx) => {
+      const actor = options.staffPrincipal
+        ? await lockAuthorizedStaffForPayment(
+            tx,
+            options.staffPrincipal,
+            options.staffAuthorization ?? "PAYMENT_ADMIN",
+          )
+        : fallbackActor;
+      if (options.customerPrincipal) {
+        await lockActiveCustomerForWrite(tx, options.customerPrincipal);
+      }
+      const paymentRef = locatedPayment ?? await tx.payment.findUnique({
+          where: { id: paymentId },
+          select: { orderId: true },
+        });
+      if (!paymentRef) throw new NotFoundException("付款记录不存在");
       await this.lockOrderForTrade(tx, paymentRef.orderId);
 
       const payment = await tx.payment.findUnique({
@@ -2432,6 +3035,19 @@ export class OrdersService implements OnModuleInit {
       const allowedStatuses: PaymentStatus[] = gateway
         ? ["PENDING", "FAILED"]
         : ["PENDING"];
+      if (!gateway && payment.status !== "PENDING") {
+        const sameManualApproval =
+          payment.status === "PAID" &&
+          payment.method === "bank_transfer" &&
+          Boolean(payment.proofUrl) &&
+          payment.reviewedBy === reviewerId &&
+          Boolean(payment.reviewedAt) &&
+          (payment.reviewNote?.trim() || "") === (reviewNote?.trim() || "");
+        if (sameManualApproval) {
+          return tx.payment.findUnique({ where: { id: paymentId } });
+        }
+        throw new ConflictException("付款审核结果已变化，请刷新后核对");
+      }
       const eligible =
         allowedStatuses.includes(payment.status) &&
         ((payment.method === "bank_transfer" && !!payment.proofUrl) ||
@@ -2604,15 +3220,30 @@ export class OrdersService implements OnModuleInit {
     paymentId: number,
     reason: string,
     operator: OperatorContext = { type: OPERATOR_TYPE.SYSTEM },
-    options: { reviewerId?: number; expectedMethod?: string } = {},
+    options: {
+      reviewerId?: number;
+      expectedMethod?: string;
+      customerPrincipal?: Pick<CustomerPrincipal, "id" | "authVersion">;
+      staffPrincipal?: Pick<StaffPrincipal, "id">;
+      staffAuthorization?: StaffPaymentAuthorization;
+    } = {},
   ) {
-    const paymentRef = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
-      select: { orderId: true },
-    });
-    if (!paymentRef) throw new NotFoundException("付款记录不存在");
-
     return this.prisma.$transaction(async (tx) => {
+      const effectiveOperator = options.staffPrincipal
+        ? await lockAuthorizedStaffForPayment(
+            tx,
+            options.staffPrincipal,
+            options.staffAuthorization ?? "PAYMENT_ADMIN",
+          )
+        : operator;
+      if (options.customerPrincipal) {
+        await lockActiveCustomerForWrite(tx, options.customerPrincipal);
+      }
+      const paymentRef = await tx.payment.findUnique({
+        where: { id: paymentId },
+        select: { orderId: true },
+      });
+      if (!paymentRef) throw new NotFoundException("付款记录不存在");
       await this.lockOrderForTrade(tx, paymentRef.orderId);
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
@@ -2624,7 +3255,18 @@ export class OrdersService implements OnModuleInit {
       if (options.expectedMethod && payment.method !== options.expectedMethod) {
         throw new BadRequestException("付款方式与失败处理入口不匹配");
       }
-      if (payment.status !== "PENDING") return payment;
+      if (payment.status !== "PENDING") {
+        if (options.reviewerId !== undefined) {
+          const sameManualRejection =
+            payment.status === "FAILED" &&
+            payment.reviewedBy === options.reviewerId &&
+            Boolean(payment.reviewedAt) &&
+            (payment.reviewNote?.trim() || "") === reason.trim();
+          if (sameManualRejection) return payment;
+          throw new ConflictException("付款审核结果已变化，请刷新后核对");
+        }
+        return payment;
+      }
 
       const now = new Date();
       const failed = await tx.payment.updateMany({
@@ -2659,7 +3301,7 @@ export class OrdersService implements OnModuleInit {
         eventType: TRADE_EVENT_TYPE.PAYMENT_REJECTED,
         fromStatus: "PENDING",
         toStatus: "FAILED",
-        operator,
+        operator: effectiveOperator,
         reason: reason.trim(),
       });
       return tx.payment.findUnique({ where: { id: paymentId } });
@@ -2678,9 +3320,11 @@ export class OrdersService implements OnModuleInit {
     paidAt?: string | Date;
     gatewayTradeNo?: string;
     reviewNote?: string;
+    idempotencyKey: string;
     operator?: OperatorContext;
+    staffPrincipal?: Pick<StaffPrincipal, "id">;
   }) {
-    const actor: OperatorContext = data.operator ?? {
+    const fallbackActor: OperatorContext = data.operator ?? {
       type: OPERATOR_TYPE.ADMIN,
     };
     const amountCents = this.moneyToCents(data.amount, "收款金额");
@@ -2696,119 +3340,196 @@ export class OrdersService implements OnModuleInit {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      await this.lockOrderForTrade(tx, data.orderId);
-      const order = await tx.order.findUnique({
-        where: { id: data.orderId },
-        include: {
-          items: true,
-          paymentPlans: { select: { id: true } },
-        },
-      });
-      if (!order) throw new NotFoundException("订单不存在");
-      if (order.status !== "PENDING_PAYMENT") {
-        throw new BadRequestException("只有待付款订单可以登记线下实收");
-      }
-      if (
-        order.quotationVersionId != null ||
-        (order.paymentPlans?.length ?? 0) > 0
-      ) {
-        throw new BadRequestException(
-          "报价分期订单必须按付款计划提交凭证并审核，不能使用异常实收绕过分期金额",
-        );
-      }
-
-      const now = data.paidAt ? new Date(data.paidAt) : new Date();
-      if (Number.isNaN(now.getTime())) {
-        throw new BadRequestException("到账时间无效");
-      }
-
-      const confirmedCents = await this.getConfirmedPaymentCents(tx, data.orderId);
-      const finalCents = this.moneyToCents(order.finalAmount, "订单应收金额");
-      if (confirmedCents + amountCents > finalCents) {
-        const availableCents = Math.max(finalCents - confirmedCents, 0);
-        throw new BadRequestException(
-          `收款金额超过剩余应收，当前最多可登记 ¥${(availableCents / 100).toFixed(2)}`,
-        );
-      }
-      const pendingPayment = await tx.payment.findFirst({
-        where: { orderId: data.orderId, status: "PENDING" },
-        select: { paymentNo: true },
-      });
-      if (pendingPayment) {
-        throw new BadRequestException(
-          `订单已有待处理付款 ${pendingPayment.paymentNo}，请先完成审核或渠道查询`,
-        );
-      }
-
-      const payment = await tx.payment.create({
-        data: {
-          paymentNo: this.createPaymentNo(),
-          orderId: data.orderId,
-          amount: new Prisma.Decimal(amountCents).div(100),
-          method: data.method.trim(),
-          type: data.type,
-          status: "PAID",
-          gatewayTradeNo: data.gatewayTradeNo?.trim() || null,
-          paidAt: now,
-          reviewedBy: actor.id ?? null,
-          reviewedAt: now,
-          reviewNote: data.reviewNote?.trim() || null,
-        },
-      });
-
-      if (data.type === "DEPOSIT" || data.type === "BALANCE") {
-        await tx.order.update({
-          where: { id: data.orderId },
-          data:
-            data.type === "DEPOSIT"
-              ? { paidDeposit: { increment: payment.amount } }
-              : { paidBalance: { increment: payment.amount } },
-        });
-      }
-
-      const settlement = await this.applyConfirmedPaymentToOrder(
-        tx,
-        order,
-        data.method,
-        now,
-        actor,
-        "异常线下实收确认，预占转为实扣",
-      );
-
-      await this.tradeEvents.record(tx, {
+    const idempotencyKey = parseIdempotencyKey(data.idempotencyKey, true)!;
+    const paidAt = data.paidAt ? new Date(data.paidAt) : null;
+    if (paidAt && Number.isNaN(paidAt.getTime())) {
+      throw new BadRequestException("到账时间无效");
+    }
+    const gatewayTradeNo = data.gatewayTradeNo?.trim() || null;
+    const reviewNote = data.reviewNote?.trim() || null;
+    const actorId = data.staffPrincipal?.id ?? fallbackActor.id;
+    const actorScope = actorId == null ? "system" : String(actorId);
+    const paymentNoHash = createHash("sha256")
+      .update("manual-receipt\0")
+      .update(actorScope)
+      .update("\0")
+      .update(idempotencyKey)
+      .digest("hex");
+    const paymentNo = `MR${paymentNoHash.slice(0, 48)}`;
+    const requestHash = createHash("sha256")
+      .update(JSON.stringify({
         orderId: data.orderId,
-        entityType: TRADE_ENTITY_TYPE.PAYMENT,
-        entityId: payment.id,
-        eventType: TRADE_EVENT_TYPE.PAYMENT_APPROVED,
-        fromStatus: "PENDING",
-        toStatus: "PAID",
-        operator: actor,
-        reason: data.reviewNote?.trim() || null,
-        metadata: {
-          method: data.method,
-          type: data.type,
-          manual: true,
-          gatewayTradeNo: data.gatewayTradeNo || null,
-          fullyPaid: settlement.fullyPaid,
-        },
-      });
-
-      if (order.customerId) {
-        await this.reliableNotifications?.enqueuePaymentConfirmed(tx, {
-          id: order.id,
-          orderNo: order.orderNo,
-          customerId: order.customerId,
-          customerEmail: order.customerEmail,
-          finalAmount: order.finalAmount,
-          paymentId: payment.id,
-          paymentAmount: payment.amount,
-          cumulativePaidCents: settlement.paidCents,
-        });
+        amountCents,
+        method: data.method,
+        type: data.type,
+        paidAt: paidAt?.toISOString() ?? null,
+        gatewayTradeNo,
+        reviewNote,
+        actorId: actorId ?? null,
+      }))
+      .digest("hex");
+    const restoreManualReceipt = <T extends { gatewayNotify?: unknown }>(payment: T | null): T | null => {
+      if (!payment) return null;
+      const receipt = payment.gatewayNotify as {
+        source?: unknown;
+        requestHash?: unknown;
+      } | null;
+      if (
+        receipt?.source !== MANUAL_RECEIPT_IDEMPOTENCY_SOURCE
+        || receipt.requestHash !== requestHash
+      ) {
+        throw new ConflictException("该幂等键已用于不同的线下收款，请重新确认本次收款意图");
       }
-
       return payment;
-    });
+    };
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const actor = data.staffPrincipal
+          ? await lockAuthorizedStaffForPayment(
+              tx,
+              data.staffPrincipal,
+              "PAYMENT_RECEIPT",
+            )
+          : fallbackActor;
+        await this.lockOrderForTrade(tx, data.orderId);
+        const replayed = restoreManualReceipt(await tx.payment.findUnique({
+          where: { paymentNo },
+        }));
+        if (replayed) return replayed;
+        const order = await tx.order.findUnique({
+          where: { id: data.orderId },
+          include: {
+            items: true,
+            paymentPlans: { select: { id: true } },
+          },
+        });
+        if (!order) throw new NotFoundException("订单不存在");
+        if (order.status !== "PENDING_PAYMENT") {
+          throw new BadRequestException("只有待付款订单可以登记线下实收");
+        }
+        if (
+          order.quotationVersionId != null ||
+          (order.paymentPlans?.length ?? 0) > 0
+        ) {
+          throw new BadRequestException(
+            "报价分期订单必须按付款计划提交凭证并审核，不能使用异常实收绕过分期金额",
+          );
+        }
+
+        const now = paidAt ?? new Date();
+
+        const confirmedCents = await this.getConfirmedPaymentCents(tx, data.orderId);
+        const finalCents = this.moneyToCents(order.finalAmount, "订单应收金额");
+        if (confirmedCents + amountCents > finalCents) {
+          const availableCents = Math.max(finalCents - confirmedCents, 0);
+          throw new BadRequestException(
+            `收款金额超过剩余应收，当前最多可登记 ¥${(availableCents / 100).toFixed(2)}`,
+          );
+        }
+        const pendingPayment = await tx.payment.findFirst({
+          where: { orderId: data.orderId, status: "PENDING" },
+          select: { paymentNo: true },
+        });
+        if (pendingPayment) {
+          throw new BadRequestException(
+            `订单已有待处理付款 ${pendingPayment.paymentNo}，请先完成审核或渠道查询`,
+          );
+        }
+
+        const payment = await tx.payment.create({
+          data: {
+            paymentNo,
+            orderId: data.orderId,
+            amount: new Prisma.Decimal(amountCents).div(100),
+            method: data.method.trim(),
+            type: data.type,
+            status: "PAID",
+            gatewayTradeNo,
+            gatewayNotify: {
+              source: MANUAL_RECEIPT_IDEMPOTENCY_SOURCE,
+              requestHash,
+            },
+            paidAt: now,
+            reviewedBy: actor.id ?? null,
+            reviewedAt: now,
+            reviewNote,
+          },
+        });
+
+        if (data.type === "DEPOSIT" || data.type === "BALANCE") {
+          await tx.order.update({
+            where: { id: data.orderId },
+            data:
+              data.type === "DEPOSIT"
+                ? { paidDeposit: { increment: payment.amount } }
+                : { paidBalance: { increment: payment.amount } },
+          });
+        }
+
+        const settlement = await this.applyConfirmedPaymentToOrder(
+          tx,
+          order,
+          data.method,
+          now,
+          actor,
+          "异常线下实收确认，预占转为实扣",
+        );
+
+        await this.tradeEvents.record(tx, {
+          orderId: data.orderId,
+          entityType: TRADE_ENTITY_TYPE.PAYMENT,
+          entityId: payment.id,
+          eventType: TRADE_EVENT_TYPE.PAYMENT_APPROVED,
+          fromStatus: "PENDING",
+          toStatus: "PAID",
+          operator: actor,
+          reason: data.reviewNote?.trim() || null,
+          metadata: {
+            method: data.method,
+            type: data.type,
+            manual: true,
+            gatewayTradeNo,
+            fullyPaid: settlement.fullyPaid,
+          },
+        });
+
+        if (order.customerId) {
+          await this.reliableNotifications?.enqueuePaymentConfirmed(tx, {
+            id: order.id,
+            orderNo: order.orderNo,
+            customerId: order.customerId,
+            customerEmail: order.customerEmail,
+            finalAmount: order.finalAmount,
+            paymentId: payment.id,
+            paymentAmount: payment.amount,
+            cumulativePaidCents: settlement.paidCents,
+          });
+        }
+
+        return payment;
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError
+        && error.code === "P2002"
+      ) {
+        const replayed = restoreManualReceipt(
+          data.staffPrincipal
+            ? await this.prisma.$transaction(async (tx) => {
+                await lockAuthorizedStaffForPayment(
+                  tx,
+                  data.staffPrincipal!,
+                  "PAYMENT_RECEIPT",
+                );
+                return tx.payment.findUnique({ where: { paymentNo } });
+              })
+            : await this.prisma.payment.findUnique({ where: { paymentNo } }),
+        );
+        if (replayed) return replayed;
+      }
+      throw error;
+    }
   }
 
   async rejectOfflinePayment(
@@ -2816,6 +3537,7 @@ export class OrdersService implements OnModuleInit {
     reviewerId: number,
     reviewNote?: string,
     operator?: OperatorContext,
+    staffPrincipal?: Pick<StaffPrincipal, "id">,
   ) {
     const actor: OperatorContext = operator ?? {
       type: OPERATOR_TYPE.ADMIN,
@@ -2825,7 +3547,12 @@ export class OrdersService implements OnModuleInit {
       paymentId,
       reviewNote?.trim() || "线下付款凭证审核未通过",
       actor,
-      { reviewerId, expectedMethod: "bank_transfer" },
+      {
+        reviewerId,
+        expectedMethod: "bank_transfer",
+        staffPrincipal,
+        staffAuthorization: staffPrincipal ? "PAYMENT_ADMIN" : undefined,
+      },
     );
     if (!result || result.status !== "FAILED") {
       throw new BadRequestException("该付款记录不能被驳回");
@@ -2845,35 +3572,38 @@ export class OrdersService implements OnModuleInit {
       logisticsNo: string;
       internalNote?: string;
     },
-    operator?: OperatorContext,
+    actor: StaffOrderActor,
   ) {
-    const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
-    // PENDING_SHIP（“只有待发货订单可以发货”）守卫由唯一履约 authority 在订单行锁内执行。
-    const order = await this.prisma.order.findUnique({
-      where: { id },
-      select: { id: true },
+    const fulfillmentId = await this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
+      // PENDING_SHIP（“只有待发货订单可以发货”）守卫由唯一履约 authority 在订单行锁内执行。
+      const order = await tx.order.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (!order) throw new NotFoundException("订单不存在");
+      const fulfillments = await tx.fulfillment.findMany({
+        where: { orderId: id },
+        orderBy: { id: "asc" },
+        select: { id: true },
+        take: 2,
+      });
+      if (fulfillments.length === 0) {
+        throw new BadRequestException(
+          "订单尚未生成履约单，请先核对付款确认结果",
+        );
+      }
+      if (fulfillments.length !== 1) {
+        throw new ConflictException("多包裹订单请前往履约中心逐包发货");
+      }
+      if (data.fulfillmentId !== undefined && data.fulfillmentId !== fulfillments[0].id) {
+        throw new ConflictException("履约单与订单不匹配，请前往履约中心处理");
+      }
+      return fulfillments[0].id;
     });
-    if (!order) throw new NotFoundException("订单不存在");
-    const fulfillments = await this.prisma.fulfillment.findMany({
-      where: { orderId: id },
-      orderBy: { id: "asc" },
-      select: { id: true },
-      take: 2,
-    });
-    if (fulfillments.length === 0) {
-      throw new BadRequestException(
-        "订单尚未生成履约单，请先核对付款确认结果",
-      );
-    }
-    if (fulfillments.length !== 1) {
-      throw new ConflictException("多包裹订单请前往履约中心逐包发货");
-    }
-    if (data.fulfillmentId !== undefined && data.fulfillmentId !== fulfillments[0].id) {
-      throw new ConflictException("履约单与订单不匹配，请前往履约中心处理");
-    }
 
     await this.fulfillmentAuthority().dispatch(
-      fulfillments[0].id,
+      fulfillmentId,
       {
         carrier: data.logisticsCompany,
         trackingNo: data.logisticsNo,
@@ -2882,9 +3612,12 @@ export class OrdersService implements OnModuleInit {
       actor,
       { requireSingleOrderId: id },
     );
-    return this.prisma.order.findUnique({
-      where: { id },
-      include: { fulfillments: true },
+    return this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
+      return tx.order.findUnique({
+        where: { id },
+        include: { fulfillments: true },
+      });
     });
   }
 
@@ -2897,7 +3630,7 @@ export class OrdersService implements OnModuleInit {
     orderId: number,
     operator: OperatorContext,
     reason: string | null,
-    options: { internalNote?: string } = {},
+    options: { internalNote?: string; allowAlreadyCancelled?: boolean } = {},
   ) {
     await this.lockOrderForTrade(tx, orderId);
     const lockedOrder = await tx.order.findUnique({
@@ -2905,6 +3638,12 @@ export class OrdersService implements OnModuleInit {
       include: { paymentPlans: { select: { id: true } } },
     });
     if (!lockedOrder) throw new NotFoundException("订单不存在");
+
+    // 客户请求可能已提交但 HTTP 响应丢失。仅对显式允许的客户重放返回
+    // 当前已取消结果，不再次返券、释放资源、写事件或发送通知。
+    if (options.allowAlreadyCancelled && lockedOrder.status === "CANCELLED") {
+      return lockedOrder;
+    }
 
     const currentStatus = lockedOrder.status as OrderStatus;
     const allowedNext = VALID_TRANSITIONS[currentStatus];
@@ -3006,7 +3745,11 @@ export class OrdersService implements OnModuleInit {
    * 客户本人取消未付款订单：归属校验 + 待处理支付拦截后复用取消链路。
    * 存在 PENDING 在线交易或待审凭证时拒绝——渠道可能正在扣款，须先查单/结束支付。
    */
-  async cancelForCustomer(customerId: number, orderId: number) {
+  async cancelForCustomer(
+    principal: Pick<CustomerPrincipal, "id" | "authVersion">,
+    orderId: number,
+  ) {
+    const customerId = principal.id;
     const owned = await this.prisma.order.findFirst({
       where: { id: orderId, customerId },
       select: { id: true },
@@ -3014,11 +3757,13 @@ export class OrdersService implements OnModuleInit {
     if (!owned) throw new NotFoundException("订单不存在或无权操作");
 
     const cancelled = await this.prisma.$transaction(async (tx) => {
+      await lockActiveCustomerForWrite(tx, principal);
       return this.executeUnpaidCancellation(
         tx,
         orderId,
         { type: OPERATOR_TYPE.CUSTOMER, id: customerId },
         "客户自助取消未付款订单",
+        { allowAlreadyCancelled: true },
       );
     });
     if (!cancelled) return null;
@@ -3041,11 +3786,9 @@ export class OrdersService implements OnModuleInit {
       logisticsCompany?: string;
       logisticsNo?: string;
       internalNote?: string;
-      operator?: OperatorContext;
     },
+    actor: StaffOrderActor,
   ) {
-    const operator: OperatorContext = (data as { operator?: OperatorContext })
-      .operator ?? { type: OPERATOR_TYPE.ADMIN };
     const newStatus = data.status as OrderStatus;
     if (newStatus === "PENDING_SHIP") {
       throw new BadRequestException("待发货必须通过付款审核进入");
@@ -3057,17 +3800,19 @@ export class OrdersService implements OnModuleInit {
     // 取消与确认收款共用固定锁顺序：Order → Payment → Fulfillment → 库存预占。
     // 所有资格判断都在订单行锁之后重读，避免付款先提交后仍按旧状态取消。
     if (newStatus === "CANCELLED") {
-      const cancelled = await this.prisma.$transaction((tx) =>
-        this.executeUnpaidCancellation(tx, id, operator, data.internalNote || null, {
+      const cancelled = await this.prisma.$transaction(async (tx) => {
+        const operator = await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
+        return this.executeUnpaidCancellation(tx, id, operator, data.internalNote || null, {
           internalNote: data.internalNote || undefined,
-        }),
-      );
+        });
+      });
       if (!cancelled) throw new NotFoundException("订单不存在");
       this.logger.log(`订单 #${id} 状态变更为 ${newStatus}`);
       return cancelled;
     }
 
     const completed = await this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
       await this.lockOrderForTrade(tx, id);
       const order = await tx.order.findUnique({ where: { id } });
       if (!order) throw new NotFoundException("订单不存在");
@@ -3096,16 +3841,33 @@ export class OrdersService implements OnModuleInit {
       }
 
       const now = new Date();
+      const previousCustomStage = order.customStage;
+      const shouldProjectCustomCompletion =
+        order.orderType === "CUSTOM" && previousCustomStage !== "COMPLETED";
       const updated = await tx.order.updateMany({
         where: { id, status: currentStatus, deliveryStatus: "RECEIVED" },
         data: {
           status: newStatus,
+          ...(shouldProjectCustomCompletion
+            ? { customStage: "COMPLETED" as const }
+            : {}),
           completedAt: now,
           internalNote: data.internalNote?.trim() || undefined,
         },
       });
       if (updated.count === 0) {
         throw new ConflictException("订单状态已变化，请刷新后重试");
+      }
+      if (shouldProjectCustomCompletion) {
+        await this.tradeEvents.record(tx, {
+          orderId: id,
+          entityType: TRADE_ENTITY_TYPE.ORDER,
+          entityId: id,
+          eventType: TRADE_EVENT_TYPE.ORDER_CUSTOM_STAGE_CHANGED,
+          fromStatus: previousCustomStage ?? null,
+          toStatus: "COMPLETED",
+          operator,
+        });
       }
       await this.tradeEvents.record(tx, {
         orderId: id,
@@ -3205,9 +3967,8 @@ export class OrdersService implements OnModuleInit {
       balanceAmount?: number | string;
       reason?: string;
     },
-    operator?: OperatorContext,
+    actor: StaffOrderActor,
   ) {
-    const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
     const reason = data.reason?.trim();
     if (!reason) throw new BadRequestException("修改订单金额必须填写调整原因");
     const hasAmountInput = [
@@ -3222,6 +3983,7 @@ export class OrdersService implements OnModuleInit {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
       await this.lockOrderForTrade(tx, id);
       const order = await tx.order.findUnique({
         where: { id },
@@ -3352,7 +4114,7 @@ export class OrdersService implements OnModuleInit {
         entityType: TRADE_ENTITY_TYPE.ORDER,
         entityId: id,
         eventType: TRADE_EVENT_TYPE.ORDER_AMOUNT_EDITED,
-        operator: actor,
+        operator,
         reason,
         metadata: { before, after },
       });
@@ -3361,12 +4123,12 @@ export class OrdersService implements OnModuleInit {
   }
 
   /** 修改收货地址（已发货/已完成不可改） */
-  async updateAddress(id: number, address: string, operator?: OperatorContext) {
-    const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
+  async updateAddress(id: number, address: string, actor: StaffOrderActor) {
     const trimmed = address?.trim();
     if (!trimmed || trimmed.length > 500)
       throw new BadRequestException("请提供有效的收货地址");
     return this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
       await this.lockOrderForTrade(tx, id);
       const order = await tx.order.findUnique({ where: { id } });
       if (!order) throw new NotFoundException("订单不存在");
@@ -3385,7 +4147,7 @@ export class OrdersService implements OnModuleInit {
         entityType: TRADE_ENTITY_TYPE.ORDER,
         entityId: id,
         eventType: TRADE_EVENT_TYPE.ORDER_ADDRESS_EDITED,
-        operator: actor,
+        operator,
         metadata: { before: order.address, after: trimmed },
       });
       return tx.order.findUnique({ where: { id } });
@@ -3396,11 +4158,11 @@ export class OrdersService implements OnModuleInit {
   async updateNote(
     id: number,
     internalNote: string,
-    operator?: OperatorContext,
+    actor: StaffOrderActor,
   ) {
-    const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
     const normalizedNote = internalNote?.trim() || null;
     return this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, "ORDER_NOTE");
       await this.lockOrderForTrade(tx, id);
       const order = await tx.order.findUnique({ where: { id } });
       if (!order) throw new NotFoundException("订单不存在");
@@ -3413,7 +4175,7 @@ export class OrdersService implements OnModuleInit {
         entityType: TRADE_ENTITY_TYPE.ORDER,
         entityId: id,
         eventType: TRADE_EVENT_TYPE.ORDER_NOTE_EDITED,
-        operator: actor,
+        operator,
         metadata: { before: order.internalNote, after: normalizedNote },
       });
       return tx.order.findUnique({ where: { id } });
@@ -3421,42 +4183,48 @@ export class OrdersService implements OnModuleInit {
   }
 
   /** 单包裹兼容签收入口；包裹与订单事实统一委托 FulfillmentService。 */
-  async confirmReceive(id: number, operator?: OperatorContext) {
-    const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
-    const order = await this.prisma.order.findUnique({
-      where: { id },
-      select: { id: true },
+  async confirmReceive(id: number, actor: StaffOrderActor) {
+    const fulfillmentId = await this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
+      const order = await tx.order.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (!order) throw new NotFoundException("订单不存在");
+      const fulfillments = await tx.fulfillment.findMany({
+        where: { orderId: id },
+        orderBy: { id: "asc" },
+        select: { id: true },
+        take: 2,
+      });
+      if (fulfillments.length === 0) {
+        throw new ConflictException("订单缺少履约单，不能确认签收");
+      }
+      if (fulfillments.length !== 1) {
+        throw new ConflictException("多包裹订单请前往履约中心逐包确认送达");
+      }
+      return fulfillments[0].id;
     });
-    if (!order) throw new NotFoundException("订单不存在");
-    const fulfillments = await this.prisma.fulfillment.findMany({
-      where: { orderId: id },
-      orderBy: { id: "asc" },
-      select: { id: true },
-      take: 2,
-    });
-    if (fulfillments.length === 0) {
-      throw new ConflictException("订单缺少履约单，不能确认签收");
-    }
-    if (fulfillments.length !== 1) {
-      throw new ConflictException("多包裹订单请前往履约中心逐包确认送达");
-    }
     await this.fulfillmentAuthority().updateStatus(
-      fulfillments[0].id,
+      fulfillmentId,
       { status: "DELIVERED" },
       actor,
       { requireSingleOrderId: id },
     );
-    return this.prisma.order.findUnique({ where: { id } });
+    return this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
+      return tx.order.findUnique({ where: { id } });
+    });
   }
 
   /** 修改销售顾问 */
   async updateSalesConsultant(
     id: number,
     salesConsultantId: number | null,
-    operator?: OperatorContext,
+    actor: StaffOrderActor,
   ) {
-    const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
     return this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
       await this.lockOrderForTrade(tx, id);
       const order = await tx.order.findUnique({ where: { id } });
       if (!order) throw new NotFoundException("订单不存在");
@@ -3469,7 +4237,7 @@ export class OrdersService implements OnModuleInit {
         entityType: TRADE_ENTITY_TYPE.ORDER,
         entityId: id,
         eventType: TRADE_EVENT_TYPE.ORDER_CONSULTANT_CHANGED,
-        operator: actor,
+        operator,
         metadata: { before: order.salesConsultantId, after: salesConsultantId },
       });
       return tx.order.findUnique({ where: { id } });
@@ -3478,25 +4246,75 @@ export class OrdersService implements OnModuleInit {
 
   /**
    * 推进定制订单阶段（仅 orderType=CUSTOM 可用）。
-   * 不做严格线性校验，允许业务跳转（定制流程可能因返工回退）。
+   * 非终态阶段不做严格线性校验，允许业务跳转（定制流程可能因返工回退）。
+   * 已交付/已完成由权威交付与订单完成事务写入，不能在此伪造。
    */
   async advanceCustomStage(
     id: number,
     stage: CustomStage,
-    operator?: OperatorContext,
+    actor: StaffOrderActor,
   ) {
-    const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN };
     return this.prisma.$transaction(async (tx) => {
+      const operator = await lockAuthorizedStaffForOrder(tx, actor, "ORDER_ADMIN");
       await this.lockOrderForTrade(tx, id);
       const order = await tx.order.findUnique({ where: { id } });
       if (!order) throw new NotFoundException("订单不存在");
       if (order.orderType !== "CUSTOM") {
         throw new BadRequestException("只有定制订单可以推进定制阶段");
       }
-      await tx.order.update({
-        where: { id },
+      if (["CANCELLED", "COMPLETED"].includes(order.status)) {
+        throw new BadRequestException("已取消或已完成订单不能推进定制阶段");
+      }
+      if (order.customStage === stage) {
+        return order;
+      }
+      if (order.customStage === "COMPLETED") {
+        throw new BadRequestException("已完成的定制阶段不能通过人工入口改写");
+      }
+      if (["DELIVERED", "COMPLETED"].includes(stage)) {
+        throw new BadRequestException("已交付和已完成只能由权威交付与订单完成流程写入");
+      }
+      if (["DEPOSIT_PAID", "BALANCE_PAID"].includes(stage)) {
+        throw new BadRequestException("已付定金和尾款完成只能由权威收款确认流程写入");
+      }
+      const finalAmount = new Prisma.Decimal(order.finalAmount);
+      const depositAmount = new Prisma.Decimal(order.depositAmount);
+      const netPaidAmount = new Prisma.Decimal(order.paidAmount).minus(order.refundedAmount);
+      const requiredDeposit = depositAmount.greaterThan(0) ? depositAmount : finalAmount;
+      if (
+        (["DESIGN_CONFIRM", "IN_PRODUCTION", "QC_PASSED", "PENDING_BALANCE"] as CustomStage[])
+          .includes(stage)
+        && (
+          finalAmount.lessThanOrEqualTo(0)
+          || requiredDeposit.lessThanOrEqualTo(0)
+          || netPaidAmount.lessThan(requiredDeposit)
+        )
+      ) {
+        throw new ConflictException(
+          "已确认净收未达到订单约定定金，不能进入设计、制作、质检或待付尾款阶段",
+        );
+      }
+      if (
+        stage === "PENDING_DELIVERY"
+        && (finalAmount.lessThanOrEqualTo(0) || netPaidAmount.lessThan(finalAmount))
+      ) {
+        throw new ConflictException(
+          "订单尚未收齐或退款后净收不足，不能进入待交付阶段",
+        );
+      }
+      if (stage === "PENDING_DELIVERY") {
+        const { activeRefund, activeAfterSales } = await findDeliveryBlockingDisputes(tx, id);
+        if (activeRefund || activeAfterSales) {
+          throw new ConflictException("订单存在处理中的退款或售后，不能进入待交付阶段");
+        }
+      }
+      const updated = await tx.order.updateMany({
+        where: { id, status: order.status, customStage: order.customStage },
         data: { customStage: stage },
       });
+      if (updated.count === 0) {
+        throw new ConflictException("订单或定制阶段已变化，请刷新后重试");
+      }
       await this.tradeEvents.record(tx, {
         orderId: id,
         entityType: TRADE_ENTITY_TYPE.ORDER,
@@ -3504,7 +4322,7 @@ export class OrdersService implements OnModuleInit {
         eventType: TRADE_EVENT_TYPE.ORDER_CUSTOM_STAGE_CHANGED,
         fromStatus: order.customStage ?? null,
         toStatus: stage,
-        operator: actor,
+        operator,
       });
       return tx.order.findUnique({ where: { id } });
     });
@@ -3513,10 +4331,10 @@ export class OrdersService implements OnModuleInit {
   // ════════ 第五阶段：异常订单聚合 + 交易数据统计（只读） ════════
 
   /**
-   * 异常订单聚合：长时间未付款 / 超时未发货 / 定制超期 / 物流异常 / 退款处理中。
+   * 异常订单聚合：长时间未付款 / 超时未发货 / 定制超期 / 物流异常 / 退款处理中 / 付款角色漂移。
    * 为每条订单标注 anomalyReasons，供异常订单页展示。
    */
-  async findAnomalies() {
+  async findAnomalies(actor: StaffOrderActor) {
     const now = new Date();
     const h24 = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const h48 = new Date(now.getTime() - 48 * 60 * 60 * 1000);
@@ -3530,12 +4348,31 @@ export class OrdersService implements OnModuleInit {
         some: { status: "PENDING", proofUrl: { not: null }, createdAt: { lt: cutoff } },
       },
     });
+    const paymentRoleMismatch: Prisma.OrderWhereInput = {
+      paymentPlans: {
+        some: {
+          installments: {
+            some: {
+              OR: [
+                { label: "定金", payment: { is: { type: { not: "DEPOSIT" } } } },
+                { label: "尾款", payment: { is: { type: { not: "BALANCE" } } } },
+                { label: "全款", payment: { is: { type: { not: "FULL" } } } },
+              ],
+            },
+          },
+        },
+      },
+    };
 
     const where: Prisma.OrderWhereInput = {
       OR: [
         { status: "PENDING_PAYMENT", createdAt: { lt: h24 } }, // 长时间未付款
         pendingProofOlderThan(h24), // 凭证待审核超 24h
-        { status: "PENDING_SHIP", paymentConfirmedAt: { lt: h48 } }, // 超时未发货
+        {
+          status: "PENDING_SHIP",
+          deliveryStatus: "PENDING_SHIP",
+          paymentConfirmedAt: { lt: h48 },
+        }, // 真实进入待发货维度后超时；定制/合作生产阶段不误报
         {
           orderType: "CUSTOM",
           customStage: { not: "COMPLETED" },
@@ -3547,32 +4384,47 @@ export class OrdersService implements OnModuleInit {
             some: { status: { in: ["PENDING", "APPROVED", "PROCESSING"] } },
           },
         }, // 退款处理中
+        paymentRoleMismatch, // 已绑定分期标签与付款角色不一致
       ],
     };
 
-    const [list, total] = await Promise.all([
-      this.prisma.order.findMany({
-        where,
-        include: {
-          items: {
-            select: {
-              id: true,
-              productNameSnapshot: true,
-              productCodeSnapshot: true,
+    const [list, total] = await this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, "ORDER_FINANCE_QUERY");
+      return Promise.all([
+        tx.order.findMany({
+          where,
+          include: {
+            items: {
+              select: {
+                id: true,
+                productNameSnapshot: true,
+                productCodeSnapshot: true,
+              },
+            },
+            payments: {
+              where: { status: "PENDING", proofUrl: { not: null } },
+              select: { createdAt: true },
+              orderBy: { createdAt: "asc" },
+              take: 1,
+            },
+            paymentPlans: {
+              select: {
+                installments: {
+                  where: { paymentId: { not: null } },
+                  select: {
+                    label: true,
+                    payment: { select: { type: true } },
+                  },
+                },
+              },
             },
           },
-          payments: {
-            where: { status: "PENDING", proofUrl: { not: null } },
-            select: { createdAt: true },
-            orderBy: { createdAt: "asc" },
-            take: 1,
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 200,
-      }),
-      this.prisma.order.count({ where }),
-    ]);
+          orderBy: { createdAt: "desc" },
+          take: 200,
+        }),
+        tx.order.count({ where }),
+      ]);
+    });
 
     const enriched = list.map((o) => {
       const reasons: string[] = [];
@@ -3585,6 +4437,7 @@ export class OrdersService implements OnModuleInit {
       }
       if (
         o.status === "PENDING_SHIP" &&
+        o.deliveryStatus === "PENDING_SHIP" &&
         o.paymentConfirmedAt &&
         o.paymentConfirmedAt < h48
       )
@@ -3596,9 +4449,25 @@ export class OrdersService implements OnModuleInit {
       )
         reasons.push("定制超期");
       if (o.deliveryStatus === "ABNORMAL") reasons.push("物流异常");
+      const expectedPaymentTypeByLabel: Record<string, string> = {
+        定金: "DEPOSIT",
+        尾款: "BALANCE",
+        全款: "FULL",
+      };
+      const hasPaymentRoleMismatch = (o.paymentPlans ?? []).some((plan) =>
+        plan.installments.some((installment) => {
+          const expectedType = expectedPaymentTypeByLabel[installment.label];
+          return Boolean(
+            expectedType &&
+            installment.payment &&
+            installment.payment.type !== expectedType,
+          );
+        }),
+      );
+      if (hasPaymentRoleMismatch) reasons.push("付款角色与分期不一致");
       if (reasons.length === 0) reasons.push("退款处理中");
       // reasons 面向后台展示，剥离临时投影避免响应冗余
-      const { payments: _payments, ...order } = o;
+      const { payments: _payments, paymentPlans: _paymentPlans, ...order } = o;
       return { ...order, anomalyReasons: reasons };
     });
 
@@ -3609,7 +4478,7 @@ export class OrdersService implements OnModuleInit {
    * 交易数据首页：今日成交额/订单数 + 累计已收/待收/退款/净收/客单价 + 来源/类型分布。
    * 严格区分订单金额与实际到账金额——未付款订单不计入已收。
    */
-  async getTradeOverview() {
+  async getTradeOverview(actor: StaffOrderActor) {
     const now = new Date();
     const todayStart = new Date(
       now.getFullYear(),
@@ -3626,32 +4495,35 @@ export class OrdersService implements OnModuleInit {
       activeOrderCount,
       sourceGroup,
       typeGroup,
-    ] = await Promise.all([
-      this.prisma.order.aggregate({
-        where: { createdAt: { gte: todayStart }, status: { not: "CANCELLED" } },
-        _sum: { finalAmount: true },
-      }),
-      this.prisma.order.count({
-        where: { createdAt: { gte: todayStart }, status: { not: "CANCELLED" } },
-      }),
-      this.prisma.order.aggregate({ _sum: { paidAmount: true } }),
-      this.prisma.order.aggregate({
-        where: { status: { not: "CANCELLED" } },
-        _sum: { finalAmount: true },
-      }),
-      this.prisma.order.aggregate({ _sum: { refundedAmount: true } }),
-      this.prisma.order.count({ where: { status: { not: "CANCELLED" } } }),
-      this.prisma.order.groupBy({
-        by: ["source"],
-        where: { status: { not: "CANCELLED" } },
-        _count: { _all: true },
-      }),
-      this.prisma.order.groupBy({
-        by: ["orderType"],
-        where: { status: { not: "CANCELLED" } },
-        _count: { _all: true },
-      }),
-    ]);
+    ] = await this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForOrder(tx, actor, "ORDER_FINANCE_QUERY");
+      return Promise.all([
+        tx.order.aggregate({
+          where: { createdAt: { gte: todayStart }, status: { not: "CANCELLED" } },
+          _sum: { finalAmount: true },
+        }),
+        tx.order.count({
+          where: { createdAt: { gte: todayStart }, status: { not: "CANCELLED" } },
+        }),
+        tx.order.aggregate({ _sum: { paidAmount: true } }),
+        tx.order.aggregate({
+          where: { status: { not: "CANCELLED" } },
+          _sum: { finalAmount: true },
+        }),
+        tx.order.aggregate({ _sum: { refundedAmount: true } }),
+        tx.order.count({ where: { status: { not: "CANCELLED" } } }),
+        tx.order.groupBy({
+          by: ["source"],
+          where: { status: { not: "CANCELLED" } },
+          _count: { _all: true },
+        }),
+        tx.order.groupBy({
+          by: ["orderType"],
+          where: { status: { not: "CANCELLED" } },
+          _count: { _all: true },
+        }),
+      ]);
+    });
 
     const paidAmount = Number(paidAgg._sum.paidAmount || 0);
     const finalAmount = Number(finalAgg._sum.finalAmount || 0);

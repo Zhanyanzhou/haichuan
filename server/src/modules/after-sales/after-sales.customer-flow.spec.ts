@@ -4,12 +4,17 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { IdempotencyService } from '../../common/idempotency/idempotency-key';
 import { AfterSalesService } from './after-sales.service';
 import { CreateCustomerAfterSalesDto } from './dto/after-sales.dto';
+
+const CUSTOMER = { id: 7, authVersion: 1 };
+const IDEMPOTENCY_KEY = 'after-sales-request-0001';
 
 type CaseRecord = {
   id: number;
@@ -22,6 +27,8 @@ type CaseRecord = {
   reason: string;
   requestedRefundAmount: number | null;
   approvedRefundAmount: number | null;
+  idempotencyKeyHash?: string | null;
+  submissionFingerprint?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -32,6 +39,7 @@ function createHarness(options?: {
   orderStatus?: string;
   itemIds?: number[];
   cases?: CaseRecord[];
+  activePrincipal?: boolean;
 }) {
   const customerId = options?.customerId ?? 7;
   const order = {
@@ -44,12 +52,14 @@ function createHarness(options?: {
   const cases = [...(options?.cases ?? [])];
   const events: Array<Record<string, unknown>> = [];
   let lockCalls = 0;
+  let updateCalls = 0;
   let nextId = 100;
   let transactionTail = Promise.resolve();
 
   const tx: any = {
     $queryRaw: async () => {
       lockCalls += 1;
+      if (lockCalls === 1 && options?.activePrincipal === false) return [];
       return [{ id: order.id }];
     },
     order: {
@@ -91,6 +101,8 @@ function createHarness(options?: {
           reason: data.reason,
           requestedRefundAmount: data.requestedRefundAmount,
           approvedRefundAmount: null,
+          idempotencyKeyHash: data.idempotencyKeyHash ?? null,
+          submissionFingerprint: data.submissionFingerprint ?? null,
           createdAt: now,
           updatedAt: now,
         };
@@ -98,6 +110,7 @@ function createHarness(options?: {
         return record;
       },
       updateMany: async ({ where, data }: any) => {
+        updateCalls += 1;
         const record = cases.find(
           (candidate) =>
             candidate.id === where.id &&
@@ -108,8 +121,14 @@ function createHarness(options?: {
         Object.assign(record, data, { updatedAt: new Date() });
         return { count: 1 };
       },
-      findUnique: async ({ where }: any) =>
-        cases.find((record) => record.id === where.id) ?? null,
+      findUnique: async ({ where }: any) => {
+        if (where.idempotencyKeyHash !== undefined) {
+          return cases.find(
+            (record) => record.idempotencyKeyHash === where.idempotencyKeyHash,
+          ) ?? null;
+        }
+        return cases.find((record) => record.id === where.id) ?? null;
+      },
     },
   };
 
@@ -133,7 +152,7 @@ function createHarness(options?: {
     record: async (_tx: unknown, event: Record<string, unknown>) => {
       events.push(event);
     },
-  } as never);
+  } as never, new IdempotencyService());
 
   return {
     service,
@@ -141,6 +160,9 @@ function createHarness(options?: {
     events,
     get lockCalls() {
       return lockCalls;
+    },
+    get updateCalls() {
+      return updateCalls;
     },
   };
 }
@@ -158,6 +180,8 @@ function requestedCase(overrides: Partial<CaseRecord> = {}): CaseRecord {
     reason: '不再需要',
     requestedRefundAmount: null,
     approvedRefundAmount: null,
+    idempotencyKeyHash: null,
+    submissionFingerprint: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -187,40 +211,40 @@ test('客户售后 DTO 白名单不接收客户、退款金额、证据或后台
 test('客户只能为本人现货订单商品创建售后，退款金额保持由后台核定', async () => {
   const harness = createHarness({ orderStatus: 'PENDING_SHIP' });
 
-  const result = await harness.service.createForCustomer(7, 9, {
+  const result = await harness.service.createForCustomer(CUSTOMER, 9, {
     orderItemId: 21,
     type: 'REFUND',
     reason: '  下单后发现尺寸不合适  ',
-  });
+  }, IDEMPOTENCY_KEY);
 
   assert.equal(harness.cases[0]?.customerId, 7);
   assert.equal(result.reason, '下单后发现尺寸不合适');
   assert.equal(result.requestedRefundAmount, null);
   assert.equal(harness.events[0]?.eventType, 'AFTER_SALES_REQUESTED');
   assert.deepEqual(harness.events[0]?.operator, { type: 'CUSTOMER', id: 7 });
-  assert.equal(harness.lockCalls, 1);
+  assert.equal(harness.lockCalls, 2);
 });
 
 test('客户不能访问他人订单，也不能为不属于订单的商品申请售后', async () => {
   const foreign = createHarness({ customerId: 8 });
   await assert.rejects(
     () =>
-      foreign.service.createForCustomer(7, 9, {
+      foreign.service.createForCustomer(CUSTOMER, 9, {
         orderItemId: 21,
         type: 'REFUND',
         reason: '申请退款',
-      }),
+      }, IDEMPOTENCY_KEY),
     NotFoundException,
   );
 
   const wrongItem = createHarness();
   await assert.rejects(
     () =>
-      wrongItem.service.createForCustomer(7, 9, {
+      wrongItem.service.createForCustomer(CUSTOMER, 9, {
         orderItemId: 99,
         type: 'REFUND',
         reason: '申请退款',
-      }),
+      }, IDEMPOTENCY_KEY),
     NotFoundException,
   );
 });
@@ -229,22 +253,22 @@ test('订单类型和状态严格限制客户自助售后类型', async () => {
   const customOrder = createHarness({ orderType: 'CUSTOM' });
   await assert.rejects(
     () =>
-      customOrder.service.createForCustomer(7, 9, {
+      customOrder.service.createForCustomer(CUSTOMER, 9, {
         orderItemId: 21,
         type: 'REPAIR',
         reason: '申请维修',
-      }),
+      }, IDEMPOTENCY_KEY),
     BadRequestException,
   );
 
   const pendingShip = createHarness({ orderStatus: 'PENDING_SHIP' });
   await assert.rejects(
     () =>
-      pendingShip.service.createForCustomer(7, 9, {
+      pendingShip.service.createForCustomer(CUSTOMER, 9, {
         orderItemId: 21,
         type: 'EXCHANGE',
         reason: '申请换货',
-      }),
+      }, IDEMPOTENCY_KEY),
     BadRequestException,
   );
 
@@ -252,11 +276,11 @@ test('订单类型和状态严格限制客户自助售后类型', async () => {
     const harness = createHarness({ orderStatus: status });
     await assert.rejects(
       () =>
-        harness.service.createForCustomer(7, 9, {
+        harness.service.createForCustomer(CUSTOMER, 9, {
           orderItemId: 21,
           type: 'REFUND',
           reason: '申请退款',
-        }),
+        }, IDEMPOTENCY_KEY),
       BadRequestException,
     );
   }
@@ -267,8 +291,8 @@ test('同一订单商品的并发申请只有一个成功', async () => {
   const input = { orderItemId: 21, type: 'REPAIR', reason: '需要维修' };
 
   const results = await Promise.allSettled([
-    harness.service.createForCustomer(7, 9, input),
-    harness.service.createForCustomer(7, 9, input),
+    harness.service.createForCustomer(CUSTOMER, 9, input, 'after-sales-request-a'),
+    harness.service.createForCustomer(CUSTOMER, 9, input, 'after-sales-request-b'),
   ]);
 
   assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
@@ -276,21 +300,74 @@ test('同一订单商品的并发申请只有一个成功', async () => {
   assert.ok(rejected && rejected.status === 'rejected');
   assert.ok(rejected.reason instanceof ConflictException);
   assert.equal(harness.cases.length, 1);
-  assert.equal(harness.lockCalls, 2);
+  assert.equal(harness.lockCalls, 4);
+});
+
+test('同一幂等键和同一申请在响应丢失后返回原工单且零重复写入', async () => {
+  const harness = createHarness();
+  const input = { orderItemId: 21, type: 'REPAIR', reason: '  需要检查连接处  ' };
+
+  const created = await harness.service.createForCustomer(
+    CUSTOMER,
+    9,
+    input,
+    IDEMPOTENCY_KEY,
+  );
+  const replayed = await harness.service.createForCustomer(
+    CUSTOMER,
+    9,
+    input,
+    IDEMPOTENCY_KEY,
+  );
+
+  assert.equal(replayed?.id, created?.id);
+  assert.equal(harness.cases.length, 1);
+  assert.equal(harness.events.length, 1);
+  assert.equal(harness.lockCalls, 3);
+  assert.match(harness.cases[0]?.idempotencyKeyHash ?? '', /^[a-f0-9]{64}$/);
+  assert.match(harness.cases[0]?.submissionFingerprint ?? '', /^[a-f0-9]{64}$/);
+});
+
+test('同一幂等键改动申请内容会冲突且不覆盖原工单', async () => {
+  const harness = createHarness();
+  await harness.service.createForCustomer(
+    CUSTOMER,
+    9,
+    { orderItemId: 21, type: 'REPAIR', reason: '检查连接处' },
+    IDEMPOTENCY_KEY,
+  );
+
+  await assert.rejects(
+    () => harness.service.createForCustomer(
+      CUSTOMER,
+      9,
+      { orderItemId: 21, type: 'REPAIR', reason: '改成检查宝石' },
+      IDEMPOTENCY_KEY,
+    ),
+    (error: unknown) =>
+      error instanceof ConflictException &&
+      error.message === '该 Idempotency-Key 已用于不同的售后申请',
+  );
+  assert.equal(harness.cases.length, 1);
+  assert.equal(harness.events.length, 1);
 });
 
 test('客户只能撤销本人待受理售后，其他状态和他人工单均拒绝', async () => {
   const own = createHarness({ cases: [requestedCase()] });
-  const cancelled = await own.service.cancelForCustomer(7, 44);
+  const cancelled = await own.service.cancelForCustomer(CUSTOMER, 44);
+  const replayed = await own.service.cancelForCustomer(CUSTOMER, 44);
   assert.equal(cancelled?.status, 'CANCELLED');
+  assert.equal(replayed?.status, 'CANCELLED');
   assert.equal(own.events[0]?.eventType, 'AFTER_SALES_STATUS_CHANGED');
   assert.equal(own.events[0]?.toStatus, 'CANCELLED');
+  assert.equal(own.updateCalls, 1);
+  assert.equal(own.events.length, 1);
 
   const approved = createHarness({
     cases: [requestedCase({ status: 'APPROVED' })],
   });
   await assert.rejects(
-    () => approved.service.cancelForCustomer(7, 44),
+    () => approved.service.cancelForCustomer(CUSTOMER, 44),
     BadRequestException,
   );
 
@@ -298,7 +375,24 @@ test('客户只能撤销本人待受理售后，其他状态和他人工单均�
     cases: [requestedCase({ customerId: 8 })],
   });
   await assert.rejects(
-    () => foreign.service.cancelForCustomer(7, 44),
+    () => foreign.service.cancelForCustomer(CUSTOMER, 44),
     NotFoundException,
   );
+});
+
+test('注销先提交后旧 principal 不能创建售后且领域记录零写回', async () => {
+  const harness = createHarness({ activePrincipal: false });
+
+  await assert.rejects(
+    () => harness.service.createForCustomer(CUSTOMER, 9, {
+      orderItemId: 21,
+      type: 'REFUND',
+      reason: '申请退款',
+    }, IDEMPOTENCY_KEY),
+    UnauthorizedException,
+  );
+
+  assert.equal(harness.cases.length, 0);
+  assert.equal(harness.events.length, 0);
+  assert.equal(harness.lockCalls, 1);
 });

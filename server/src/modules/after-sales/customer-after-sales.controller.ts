@@ -8,13 +8,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { Request } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
+import { IdempotencyKey } from '../../common/idempotency/idempotency-key';
+import type { CustomerRequest } from '../../common/security/authenticated-principal';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { AfterSalesService } from './after-sales.service';
 import { CreateCustomerAfterSalesDto } from './dto/after-sales.dto';
-
-type CustomerRequest = Request & { customer: { id: number } };
 
 /** 客户本人售后入口；不复用后台 DTO，避免客户注入金额、客户或处理字段。 */
 @Public()
@@ -29,11 +28,13 @@ export class CustomerAfterSalesController {
     @Req() request: CustomerRequest,
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: CreateCustomerAfterSalesDto,
+    @IdempotencyKey() idempotencyKey: string,
   ) {
     return this.afterSalesService.createForCustomer(
-      request.customer.id,
+      request.customer,
       orderId,
       dto,
+      idempotencyKey,
     );
   }
 
@@ -44,7 +45,7 @@ export class CustomerAfterSalesController {
     @Param('caseId', ParseIntPipe) caseId: number,
   ) {
     return this.afterSalesService.cancelForCustomer(
-      request.customer.id,
+      request.customer,
       caseId,
     );
   }

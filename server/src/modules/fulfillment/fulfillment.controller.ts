@@ -20,31 +20,27 @@ export class FulfillmentController {
 
   @ApiBearerAuth()
   @Get()
-  findAll(@Query() query: FulfillmentQueryDto) {
-    return this.fulfillmentService.findAll(query);
+  findAll(@Query() query: FulfillmentQueryDto, @CurrentUser() user: StaffPrincipal) {
+    return this.fulfillmentService.findAll(query, user);
   }
 
   @ApiBearerAuth()
   @Get(':id')
-  findById(@Param('id', ParseIntPipe) id: number) {
-    return this.fulfillmentService.findById(id);
+  findById(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
+    return this.fulfillmentService.findById(id, user);
   }
 
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN', 'WAREHOUSE')
   @Put(':id/dispatch')
   dispatch(@Param('id', ParseIntPipe) id: number, @Body() dto: DispatchFulfillmentDto, @CurrentUser() user: StaffPrincipal) {
-    return this.fulfillmentService.dispatch(id, dto, {
-      type: 'ADMIN', id: user.id, name: user.realName || user.username,
-    });
+    return this.fulfillmentService.dispatch(id, dto, user);
   }
 
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN', 'WAREHOUSE')
   @Put(':id/status')
   updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateFulfillmentStatusDto, @CurrentUser() user: StaffPrincipal) {
-    return this.fulfillmentService.updateStatus(id, dto, {
-      type: 'ADMIN', id: user.id, name: user.realName || user.username,
-    });
+    return this.fulfillmentService.updateStatus(id, dto, user);
   }
 }

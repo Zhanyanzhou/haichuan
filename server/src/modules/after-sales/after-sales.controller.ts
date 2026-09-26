@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { IdempotencyKey } from '../../common/idempotency/idempotency-key';
 import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import { AfterSalesService } from './after-sales.service';
 import { AfterSalesQueryDto, CreateAfterSalesDto, ReviewAfterSalesDto, UpdateAfterSalesStatusDto } from './dto/after-sales.dto';
@@ -20,23 +21,37 @@ export class AfterSalesController {
 
   @ApiBearerAuth()
   @Get()
-  findAll(@Query() query: AfterSalesQueryDto) {
-    return this.afterSalesService.findAll(query);
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  findAll(
+    @Query() query: AfterSalesQueryDto,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.afterSalesService.findAll(query, user);
   }
 
   @ApiBearerAuth()
   @Get(':id')
-  findById(@Param('id', ParseIntPipe) id: number) {
-    return this.afterSalesService.findById(id);
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  findById(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.afterSalesService.findById(id, user);
   }
 
   @ApiBearerAuth()
   @Post()
-  create(@Body() dto: CreateAfterSalesDto, @CurrentUser() user: StaffPrincipal) {
+  create(
+    @Body() dto: CreateAfterSalesDto,
+    @CurrentUser() user: StaffPrincipal,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
     return this.afterSalesService.create({
       ...dto,
-      operator: { type: 'ADMIN', id: user.id, name: user.realName || user.username },
-    });
+      operator: user,
+    }, idempotencyKey);
   }
 
   @ApiBearerAuth()
@@ -47,15 +62,13 @@ export class AfterSalesController {
       dto.action as 'APPROVED' | 'REJECTED',
       dto.adminNote,
       dto.approvedRefundAmount,
-      { type: 'ADMIN', id: user.id, name: user.realName || user.username },
+      user,
     );
   }
 
   @ApiBearerAuth()
   @Put(':id/status')
   updateStatus(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateAfterSalesStatusDto, @CurrentUser() user: StaffPrincipal) {
-    return this.afterSalesService.updateStatus(id, dto.status, dto.adminNote, {
-      type: 'ADMIN', id: user.id, name: user.realName || user.username,
-    });
+    return this.afterSalesService.updateStatus(id, dto.status, dto.adminNote, user);
   }
 }

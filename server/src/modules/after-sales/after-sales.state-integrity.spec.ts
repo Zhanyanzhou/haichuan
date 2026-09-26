@@ -2,6 +2,7 @@ import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { IdempotencyService } from '../../common/idempotency/idempotency-key';
 import { AfterSalesService } from './after-sales.service';
 
 function createHarness(linkedRefundStatus?: string) {
@@ -13,7 +14,12 @@ function createHarness(linkedRefundStatus?: string) {
     adminNote: null,
   };
   const tx: any = {
-    $queryRaw: async () => [{ id: record.orderId }],
+    $queryRaw: async (query: any) => {
+      const sql = (query?.strings ?? []).join(' ');
+      return sql.includes('FROM users')
+        ? [{ id: admin.id, username: 'admin', realName: '售后管理员' }]
+        : [{ id: record.orderId }];
+    },
     afterSalesCase: {
       findUnique: async () => record,
       updateMany: async ({ where, data }: any) => {
@@ -38,6 +44,7 @@ function createHarness(linkedRefundStatus?: string) {
       $transaction: async (callback: (client: any) => Promise<unknown>) => callback(tx),
     } as unknown as PrismaService,
     { record: async () => undefined } as never,
+    new IdempotencyService(),
   );
   return { service, record };
 }

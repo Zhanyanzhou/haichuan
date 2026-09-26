@@ -204,11 +204,21 @@ test(
     const category = await prisma.category.create({
       data: { name: `报价验收分类-${runId}`, slug: `quotation-${runId}` },
     });
+    const shippingTemplate = await prisma.shippingTemplate.create({
+      data: {
+        name: `报价验收包邮模板-${runId}`,
+        feeMode: 'FREE',
+        baseFee: 0,
+        remoteSurcharge: 0,
+        isActive: true,
+      },
+    });
     const product = await prisma.product.create({
       data: {
         code: `QUOTE-${runId}`,
         name: `报价验收现货-${runId}`,
         categoryId: category.id,
+        shippingTemplateId: shippingTemplate.id,
         salesMode: 'DIRECT_PURCHASE',
         status: 'PUBLISHED',
       },
@@ -399,7 +409,10 @@ test(
         customerAToken,
       );
       assert.equal(ownDesignDownload.status, 200);
-      assert.equal(ownDesignDownload.headers.get('cache-control'), 'private, no-store');
+      assert.equal(
+        ownDesignDownload.headers.get('cache-control'),
+        'private, no-store, max-age=0',
+      );
       assert.equal(ownDesignDownload.headers.get('x-content-type-options'), 'nosniff');
       assert.match(ownDesignDownload.headers.get('content-disposition') ?? '', /attachment/);
       assert.equal(
@@ -458,13 +471,18 @@ test(
       assert.equal('targetGoldWeight' in confirmedDesign.data, false);
       stage('design-media-verified');
 
+      let quotationCreateSequence = 0;
       const createQuotation = async (
         channel: 'RETAIL' | 'CUSTOM' | 'PARTNER_WAX',
         items: unknown[],
         depositAmount = 0,
       ) => {
+        quotationCreateSequence += 1;
         const result = await api!.call('/quotations', salesToken, {
           method: 'POST',
+          headers: {
+            'Idempotency-Key': `quotation-${channel.toLowerCase()}-${runId}-${quotationCreateSequence}`,
+          },
           body: JSON.stringify({
             channel,
             customerId: customerA.id,
