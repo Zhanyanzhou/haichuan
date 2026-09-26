@@ -17,7 +17,7 @@ const ts = requireFromServer("typescript");
 const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
 const PAYMENT_METHOD_HASHES = Object.freeze({
   rejectOfflinePayment: "b158f4d2f9ab48db2363d4a9e3fff5177bf1870f3a07bb0659e917f95b7c9380",
-  failPendingPaymentAttempt: "d3f96b19c034ed2c7a1b9a589f6a8a84dea641f87f60a67b292dc3ca0df08bd9",
+  failPendingPaymentAttempt: "6614ff28edab754ec8af62505f222956aab9b9453f8b3da605e5e1bafa1cb97c",
 });
 const LEGACY_INLINE_REJECT_METHOD = `async rejectOfflinePayment(paymentId: number, reviewerId: number, reviewNote?: string, operator?: OperatorContext) {
   const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN, id: reviewerId }; return this.prisma.$transaction(async (tx) => {
@@ -161,7 +161,7 @@ function runPaymentPinSelfTest(source) {
     ["wrapper status guard", "rejectOfflinePayment", replaceOnce('result.status !== "FAILED"', 'result.status === "FAILED"')],
     ["helper transaction receiver", "failPendingPaymentAttempt", replaceOnce("this.prisma.$transaction", "this.prismaRead.$transaction")],
     ["helper customer principal lock", "failPendingPaymentAttempt", replaceOnce("await lockActiveCustomerForWrite(tx, options.customerPrincipal);", "void options.customerPrincipal;")],
-    ["helper paymentId", "failPendingPaymentAttempt", replaceOnce("where: { id: paymentId },\n      select", "where: { id: paymentId + 1 },\n      select")],
+    ["helper paymentId", "failPendingPaymentAttempt", replaceOnce("where: { id: paymentId },\n        select", "where: { id: paymentId + 1 },\n        select")],
     ["helper order lock", "failPendingPaymentAttempt", replaceOnce("this.lockOrderForTrade(tx, paymentRef.orderId)", "this.lockOrderForTrade(tx, paymentRef.orderId + 1)")],
     ["helper transaction reread", "failPendingPaymentAttempt", replaceOnce("const payment = await tx.payment.findUnique", "const payment = await tx.payment.findFirst")],
     ["helper method guard", "failPendingPaymentAttempt", replaceOnce("payment.method !== options.expectedMethod", "payment.method === options.expectedMethod")],
