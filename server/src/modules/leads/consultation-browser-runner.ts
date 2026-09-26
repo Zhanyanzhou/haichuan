@@ -135,12 +135,36 @@ export async function runConsultationBrowserJourney(input: {
     if (previousCorsOrigin === undefined) delete process.env.CORS_ORIGIN;
     else process.env.CORS_ORIGIN = previousCorsOrigin;
     try {
-      if (vite && vite.exitCode === null && vite.signalCode === null) {
-        assert.equal(terminateOwnedChildTree(vite), true, 'CONSULTATION_VITE_CLEANUP_FAILED');
+      if (vite) {
+        const child = vite;
+        if (child.exitCode === null && child.signalCode === null) {
+          assert.equal(terminateOwnedChildTree(child), true, 'CONSULTATION_VITE_CLEANUP_FAILED');
+          // Linux 组终止异步生效：等待 close 落地（有界），超时则直接走下面的强制清理。
+          await new Promise<void>((settled) => {
+            const guard = setTimeout(settled, 5_000);
+            child.once('close', () => { clearTimeout(guard); settled(); });
+          });
+        }
+        // 无论 EOF 是否到达都强制关闭父侧句柄：幸存的孙进程（如 esbuild）持有管道
+        // 写端时，stdout/stderr 永远等不到 EOF，打开的流与 IPC 通道会把 node --test
+        // 子进程的事件循环吊住，表现为测试通过后进程挂起（CI Linux 实测 300s 超时）。
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        try { child.disconnect(); } catch { /* 通道已关闭时 disconnect 抛错，清理路径忽略 */ }
       }
     } finally {
       await writeFile(resolve(runRoot, 'vite-startup.log'), viteOutput, { flag: 'wx' });
       console.log(`CONSULTATION_BROWSER_ARTIFACTS: ${runRoot}`);
+      // 挂起诊断：unref 定时器本身不持有事件循环，正常退出时永不触发；仅当循环在
+      // 清理后仍被未知句柄吊住时，20 秒后打印活跃句柄类型清单，供 CI 日志定位根因。
+      const hangGuard = setTimeout(() => {
+        const active = ((process as unknown as { _getActiveHandles?: () => unknown[] })
+          ._getActiveHandles?.() ?? [])
+          .filter((handle) => handle !== hangGuard)
+          .map((handle) => (handle as object)?.constructor?.name ?? String(typeof handle));
+        console.error(`CONSULTATION_HANG_DIAGNOSTIC active_handles=[${active.join(',')}]`);
+      }, 20_000);
+      hangGuard.unref();
     }
   }
 }
