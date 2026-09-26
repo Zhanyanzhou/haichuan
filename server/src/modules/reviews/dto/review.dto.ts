@@ -29,12 +29,12 @@ export class CreateReviewDto {
   @MaxLength(500, { message: '评价内容不能超过 500 字' })
   content!: string;
 
-  @ApiPropertyOptional({ description: '晒单图 URL 列表（最多 6 张，走公开上传管线）', type: [String] })
+  @ApiPropertyOptional({ description: '晒单图私有上传凭据列表（最多 6 张）', type: [String] })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(6, { message: '晒单图最多 6 张' })
   @IsString({ each: true })
-  @MaxLength(500, { each: true, message: '图片 URL 过长' })
+  @MaxLength(160, { each: true, message: '晒单图凭据过长' })
   imageUrls?: string[];
 }
 
