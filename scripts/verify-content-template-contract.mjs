@@ -15,6 +15,7 @@ const [
   pageModulesControllerSource,
   pageModulesServiceSource,
   dynamicTemplateControllerSource,
+  dynamicTemplateServiceSource,
   clientApiSource,
 ] = await Promise.all([
   read("contracts/page-builder/content-templates.contract.json"),
@@ -25,6 +26,7 @@ const [
   read("server/src/modules/page-modules/page-modules.controller.ts"),
   read("server/src/modules/page-modules/page-modules.service.ts"),
   read("server/src/modules/page-modules/dynamic-templates.controller.ts"),
+  read("server/src/modules/page-modules/dynamic-templates.service.ts"),
   read("client/src/services/api.ts"),
 ]);
 const contract = JSON.parse(text);
@@ -116,7 +118,12 @@ assert.doesNotMatch(
 );
 assert.match(
   dynamicTemplateControllerSource,
-  /@Get\("catalog"\)[\s\S]*?this\.service\.listPublished\(\)[\s\S]*?this\.service\.listMine\(req\.user\.id\)/,
+  /@Get\("catalog"\)[\s\S]*?this\.service\.listCatalog\(req\.user\)/,
+  "统一模板目录入口必须只委托 listCatalog 完成聚合",
+);
+assert.match(
+  dynamicTemplateServiceSource,
+  /async listCatalog\(actor[\s\S]*?listPublishedWithClient\(transaction\)[\s\S]*?staff\.role === "SUPER_ADMIN"[\s\S]*?listMineWithClient\(staff\.id, transaction\)/,
   "统一模板目录必须只聚合当前 Repository 的正式版本与可编辑草稿",
 );
 await assert.rejects(

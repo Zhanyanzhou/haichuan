@@ -6,7 +6,7 @@ export const LEGACY_TEMPLATE_SERVER_SERVICE_PATTERN = /(?:getSystemContentTempla
 
 export const LEGACY_TEMPLATE_SERVER_ROUTE_PATTERN = /@(?:Get|Post|Patch|Put|Delete)\s*\(\s*["'](?:system-content-templates|personal-content-templates)(?:\/[^"']*)?["']/;
 
-export const DYNAMIC_TEMPLATE_CATALOG_PATTERN = /@Get\s*\(\s*["']catalog["']\s*\)[\s\S]*?this\s*\.\s*service\s*\.\s*listPublished\s*\(\s*\)[\s\S]*?this\s*\.\s*service\s*\.\s*listMine\s*\(\s*req\s*\.\s*user\s*\.\s*id\s*\)/;
+export const DYNAMIC_TEMPLATE_CATALOG_PATTERN = /@Get\s*\(\s*["']catalog["']\s*\)[\s\S]*?this\s*\.\s*service\s*\.\s*listCatalog\s*\(\s*req\s*\.\s*user\s*\)/;
 
 export const DYNAMIC_TEMPLATE_PUBLISH_ROUTE_PATTERN = /@Post\s*\(\s*["']:templateId\/publish["']\s*\)[\s\S]*?return\s+this\s*\.\s*service\s*\.\s*publish\s*\(/;
 

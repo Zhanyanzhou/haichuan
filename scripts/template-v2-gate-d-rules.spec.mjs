@@ -42,9 +42,7 @@ test("Gate D 路由规则兼容单双引号与格式调整", () => {
   const catalog = `
     @Get( 'catalog' )
     async listCatalog(req) {
-      const published = await this . service . listPublished ( );
-      const mine = await this . service . listMine ( req . user . id );
-      return { published, mine };
+      return this . service . listCatalog ( req . user );
     }
   `;
   const publish = `

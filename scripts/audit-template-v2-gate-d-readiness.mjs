@@ -47,6 +47,7 @@ const [
   templateWorkspace,
   templateWorkspaceController,
   dynamicTemplateController,
+  dynamicTemplateService,
   dynamicTemplateClient,
 ] = await Promise.all([
   collectRuntimeSources(clientRoot),
@@ -55,6 +56,7 @@ const [
   read("client/src/page-builder/template-editor/TemplateWorkspace.tsx"),
   read("client/src/page-builder/template-editor/TemplateWorkspaceController.tsx"),
   read("server/src/modules/page-modules/dynamic-templates.controller.ts"),
+  read("server/src/modules/page-modules/dynamic-templates.service.ts"),
   read("client/src/services/clients/dynamicTemplateClient.ts"),
 ]);
 
@@ -123,6 +125,11 @@ requireNoMatchInFiles(
 requireMatch(
   dynamicTemplateController,
   DYNAMIC_TEMPLATE_CATALOG_PATTERN,
+  "服务端统一母模板目录入口未只委托 listCatalog 完成聚合",
+);
+requireMatch(
+  dynamicTemplateService,
+  /async listCatalog\(actor[\s\S]*?listPublishedWithClient\(transaction\)[\s\S]*?staff\.role === "SUPER_ADMIN"[\s\S]*?listMineWithClient\(staff\.id, transaction\)/,
   "服务端统一母模板目录未仅聚合当前 Repository 的正式版本与可编辑草稿",
 );
 requireMatch(
