@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { CHECKSUM, makeResource, installNewTemplateServer, openTemplateDesignWithoutDraft, readSession, saveTemplate } from "./fixtures/template-authoring-main-route";
+import { CHECKSUM, clickNewTemplateEntry, makeResource, installNewTemplateServer, openTemplateDesignWithoutDraft, readSession, saveTemplate } from "./fixtures/template-authoring-main-route";
 
 async function openInsertionScenario(page: Page, scenario: "space" | "full" | "background" | "legacy" | "anchored") {
   const server = await installNewTemplateServer(page);
@@ -121,7 +121,7 @@ for (const scenario of ["background", "legacy"] as const) test(`新增放置保�
 });
 
 async function configure(page: Page) {
-  await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+  await clickNewTemplateEntry(page);
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();

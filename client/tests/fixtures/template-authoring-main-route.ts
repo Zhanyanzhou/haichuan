@@ -523,6 +523,29 @@ export async function openTemplateDesignWithoutDraft(page: Page) {
   await expect(page.getByRole("region", { name: "空模板画布", exact: true })).toBeVisible();
 }
 
+/**
+ * 新建模板入口随布局切换：521–1439px 用顶部快捷按钮；≥1440px 停靠布局以
+ * 组件库底部主入口为准；≤520px 收进“更多模板操作”菜单。返回实际使用的入口，
+ * 供焦点恢复断言复用。
+ */
+export async function clickNewTemplateEntry(page: Page) {
+  const width = page.viewportSize()?.width ?? 1280;
+  if (width > 520 && width < 1440) {
+    const top = page.getByRole("button", { name: "顶部新建模板", exact: true });
+    await top.click();
+    return top;
+  }
+  if (width >= 1440) {
+    const library = page.getByRole("button", { name: "新建模板", exact: true });
+    await library.click();
+    return library;
+  }
+  await page.getByRole("button", { name: "更多模板操作", exact: true }).click();
+  const menuItem = page.getByRole("menuitem", { name: /新建模板$/ });
+  await menuItem.click();
+  return menuItem;
+}
+
 export async function createBlankTemplate(page: Page) {
   await openTemplateDesignWithoutDraft(page);
   // 旧空白模板兼容编辑夹具：仅在自有 Mock 页面装入 schema 2 草稿。

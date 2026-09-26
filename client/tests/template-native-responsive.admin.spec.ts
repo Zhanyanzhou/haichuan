@@ -83,6 +83,9 @@ test("确定性属性：文字组复制影响只读Renderer，复制到桌面不
   await page.screenshot({ path: "test-results/native-responsive/narrow-confirmation.png", fullPage: true });
   await page.getByRole("button", { name: "确认应用", exact: true }).click();
   await expect(page.getByTestId("render").getByText("中性测试标题", { exact: true })).toHaveCSS("font-size", "32px");
+  // 撤销上一笔复制，让手机恢复独立字号 18，第二阶段才有真实差异可复制到桌面。
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  await expect(page.getByTestId("render").getByText("中性测试标题", { exact: true })).toHaveCSS("font-size", "18px");
   await page.getByRole("button", { name: "desktop", exact: true }).click();
   await page.getByRole("combobox", { name: "复制设计的来源设备" }).selectOption("mobile");
   const before = await snapshot(page), slotId = before.definition.nodes[before.ids.heading].slotId;
@@ -90,9 +93,9 @@ test("确定性属性：文字组复制影响只读Renderer，复制到桌面不
   await page.getByRole("button", { name: "检查所选组差异", exact: true }).click();
   await page.getByRole("button", { name: "确认应用", exact: true }).click();
   const after = await snapshot(page);
-  expect(after.definition.slots[slotId].desktopRules.fontSize).toEqual({ value: 32, unit: "px" });
+  expect(after.definition.slots[slotId].desktopRules.fontSize).toEqual({ value: 18, unit: "px" });
   expect(after.definition.slots[slotId].mobileRules).toEqual(before.definition.slots[slotId].mobileRules);
-  expect(after.definition.slots[slotId]).toEqual({ ...before.definition.slots[slotId], desktopRules: { ...before.definition.slots[slotId].desktopRules, fontSize: { value: 32, unit: "px" } } });
+  expect(after.definition.slots[slotId]).toEqual({ ...before.definition.slots[slotId], desktopRules: { ...before.definition.slots[slotId].desktopRules, fontSize: { value: 18, unit: "px" } } });
   expect(after.definition.defaultContent).toEqual(before.definition.defaultContent);
   expect(await page.locator("aside").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await expect(page.locator(".ant-modal-wrap")).toBeHidden();

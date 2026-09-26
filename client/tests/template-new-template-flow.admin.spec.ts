@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type { TemplateDefinitionV2 } from "../src/page-builder/template-definition";
 import {
   NEW_TEMPLATE_NAME,
+  clickNewTemplateEntry,
   homepageConfigSource,
   installNewTemplateServer,
   readSession,
@@ -31,7 +32,7 @@ import {
 test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", () => {
   async function openSizeDialog(page: Page) {
     await openTemplateDesignWithoutDraft(page);
-    await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+    await clickNewTemplateEntry(page);
     const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
     await dialog.getByRole("button", { name: "通用模板", exact: true }).click();
     await dialog.getByRole("button", { name: "下一步", exact: true }).click();
@@ -78,8 +79,12 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
       await page.screenshot({ path: testInfo.outputPath(`template-settings-${width}.png`), animations: "disabled" });
       if (width < 1200) {
         await page.getByRole("button", { name: "收起模板属性面板", exact: true }).click();
+        await expect(settingsButton).toContainText("模板设置");
+      } else {
+        // 命名后桌面工具栏不再保留设置快捷入口（改由“更多模板操作”菜单进入）；
+        // 撤销恢复未命名状态后入口应重新出现。
+        await expect(settingsButton).toHaveCount(0);
       }
-      await expect(settingsButton).toContainText("模板设置");
       await page.getByRole("button", { name: "撤销", exact: true }).click();
       await expect.poll(async () => (await readSession(page)).definition).toEqual(initial.definition);
       await expect(settingsButton).toContainText(width < 1200 ? "未命名模板" : "填写模板名称");
@@ -161,11 +166,11 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     await expect(blankTemplateStart(page)).toBeHidden();
     const created = await readSession(page);
     expect(created.definition!.metadata.canvasSize).toEqual({ width: 1200, height: 800, aspectRatio: 1.5 });
-    await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+    await clickNewTemplateEntry(page);
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
     expect(stableAuthoringFacts(await readSession(page))).toEqual(stableAuthoringFacts(created));
-    await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+    await clickNewTemplateEntry(page);
     await dialog.getByRole("button", { name: "通用模板", exact: true }).click();
     await dialog.getByRole("button", { name: "下一步", exact: true }).click();
     await dialog.getByRole("button", { name: /正方形 1:1/ }).click();
@@ -262,9 +267,9 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     await expect(dialog).toBeHidden();
     expect((await readSession(page)).definition).toBeNull();
     await page.setViewportSize({ width: 1600, height: 1000 });
-    await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+    const entry = await clickNewTemplateEntry(page);
     await dialog.getByRole("button", { name: "Close", exact: true }).click();
-    await expect(page.getByRole("button", { name: "顶部新建模板", exact: true })).toBeFocused();
+    await expect(entry).toBeFocused();
   });
 });
 
@@ -331,7 +336,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     expect((await readSession(page)).definition).toBeNull();
     expect(server.writes).toEqual([]);
 
-    await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+    await clickNewTemplateEntry(page);
     const wizard = page.getByRole("dialog", { name: "创建模板", exact: true });
     await expect(wizard).toBeVisible();
     expect((await readSession(page)).definition).toBeNull();
@@ -1136,12 +1141,12 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     expect(await navigation.innerText()).toBe(scopeText);
     await tools.click();
     await page.getByRole("button", { name: "多设备并排预览", exact: true }).click();
-    await expect(page.locator(".template-breakpoint-comparison__card iframe")).toHaveCount(3);
+    await expect(page.locator(".template-breakpoint-comparison__card iframe")).toHaveCount(2);
     await page.getByRole("button", { name: "预览模板", exact: true }).click();
     await expect(page.locator("iframe.template-editor__viewport-frame")).toHaveCount(1);
     await expect(page.locator(".template-breakpoint-comparison__card iframe")).toHaveCount(0);
     await page.getByRole("button", { name: "退出预览并继续编辑", exact: true }).click();
-    await expect(page.locator(".template-breakpoint-comparison__card iframe")).toHaveCount(3);
+    await expect(page.locator(".template-breakpoint-comparison__card iframe")).toHaveCount(2);
     expect(stableAuthoringFacts(await readSession(page))).toEqual(before);
     expect(server.writes).toEqual([]);
   });

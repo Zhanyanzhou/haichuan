@@ -37,7 +37,7 @@ for (const width of [1600, 390]) {
     const before = (await readSession(page)).definition;
     if (width < 600) await page.keyboard.press("Escape");
     const toolbar = page.locator(".template-editor__toolbar");
-    const switcher = toolbar.locator('[aria-label="模板响应式断点"]');
+    const switcher = toolbar.locator(".homepage-editor__viewport-switcher");
     const preview = toolbar.getByRole("button", { name: "预览模板", exact: true });
     const save = toolbar.getByRole("button", { name: "保存模板", exact: true });
     await expect(switcher).toBeVisible();
