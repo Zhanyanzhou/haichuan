@@ -332,10 +332,14 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     setReceipt(null);
     setSubmitError("");
     setErrors({});
-    // 新入口同时作废旧上下文的结果待确认预约：其迟到响应本就会被丢弃，
-    // 保留预约只会把新入口的首次提交误判为内容冲突。
-    clearConsultationSubmissionAttempt("contact", formOwnerRef.current);
-    setPendingSubmission(false);
+    // 仅在来源作品变化时作废旧上下文的结果待确认预约：换作品意味着用户明确
+    // 转向新咨询对象，旧预约不应拦截新作品的首次提交；业务类型切换（如定制
+    // 转预约）保留草稿内容，旧预约必须继续参与内容冲突校验，防止在结果待确认
+    // 期间以不同内容重复提交。
+    if (previous.rawProductRef !== rawProductRef) {
+      clearConsultationSubmissionAttempt("contact", formOwnerRef.current);
+      setPendingSubmission(false);
+    }
 
     if (previous.sourceType !== sourceType) {
       setForm((current) => ({
@@ -1562,8 +1566,12 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
           .contact-privacy-consent {
             min-height: 44px;
           }
+        }
 
-          /* 触控目标补强只在窄屏生效；桌面保持内联文本尺寸（≤24px 门禁）。 */
+        /* 触控目标补强在 1440px 以下生效：390 移动门禁与 1280 小桌面（多为
+           触控本）隐私链路门禁均要求 ≥44px；1440 宽桌面保持内联文本尺寸
+           （≤24px 门禁）。 */
+        @media (max-width: 1439px) {
           .contact-privacy-link {
             display: inline-flex;
             min-width: 44px;
