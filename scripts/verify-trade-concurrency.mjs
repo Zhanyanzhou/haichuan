@@ -16,7 +16,7 @@ const requireFromServer = createRequire(path.join(root, "server", "package.json"
 const ts = requireFromServer("typescript");
 const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
 const PAYMENT_METHOD_HASHES = Object.freeze({
-  rejectOfflinePayment: "4b758682b661bed4caabb62c82394837d12522a4e264edccf5139b2231fa62e6",
+  rejectOfflinePayment: "b158f4d2f9ab48db2363d4a9e3fff5177bf1870f3a07bb0659e917f95b7c9380",
   failPendingPaymentAttempt: "d3f96b19c034ed2c7a1b9a589f6a8a84dea641f87f60a67b292dc3ca0df08bd9",
 });
 const LEGACY_INLINE_REJECT_METHOD = `async rejectOfflinePayment(paymentId: number, reviewerId: number, reviewNote?: string, operator?: OperatorContext) {
