@@ -4,9 +4,31 @@ import test from "node:test";
 
 import {
   assertRelativeLocation,
+  assertRepresentativeSnapshotCoverage,
   assertSafeFallbackHtml,
   assertSafeNotFoundHtml,
+  matchesPublishedRouteBody,
 } from "./verify-public-seo-http.mjs";
+
+test("representative HTTP verification follows the Chinese-only publication contract", () => {
+  const chineseOnly = [
+    { kind: "page", locale: "zh-CN" },
+    { kind: "legal", locale: "zh-CN" },
+    { kind: "product", locale: "zh-CN" },
+  ];
+  assert.doesNotThrow(() => assertRepresentativeSnapshotCoverage(chineseOnly));
+  assert.throws(
+    () => assertRepresentativeSnapshotCoverage(chineseOnly.slice(0, 2)),
+    /Chinese-only page, legal, and product fixtures/,
+  );
+  assert.throws(
+    () => assertRepresentativeSnapshotCoverage([
+      ...chineseOnly,
+      { kind: "page", locale: "en" },
+    ]),
+    /Chinese-only page, legal, and product fixtures/,
+  );
+});
 
 test("HTTP SEO verification accepts only same-origin relative redirects", () => {
   assert.doesNotThrow(() => assertRelativeLocation("/about?seo-probe=1", "/about", "?seo-probe=1"));
@@ -28,6 +50,18 @@ test("HTTP SEO verification accepts only an explicit non-publishable fallback do
   assert.doesNotThrow(() => assertSafeFallbackHtml(safe, "/"));
   assert.throws(() => assertSafeFallbackHtml(safe.replace("false", "true"), "/"), /contentReady=false/);
   assert.throws(() => assertSafeFallbackHtml(safe.replace("</head>", '<link rel="canonical" href="https://example.test/"></head>'), "/"), /publishable SEO metadata/);
+});
+
+test("HTTP SEO verification accepts the published home bootstrap instead of requiring fallback body text", () => {
+  const route = {
+    path: "/",
+    renderedBodyHtml: "<main>semantic fallback</main>",
+    bootstrapPageDocument: { pageKey: "home" },
+  };
+  const home = '<main data-public-first-fold="published"></main><script id="hc-published-page-document" type="application/json">{}</script>';
+  assert.equal(matchesPublishedRouteBody(home, route), true);
+  assert.equal(matchesPublishedRouteBody(route.renderedBodyHtml, route), false);
+  assert.equal(matchesPublishedRouteBody(route.renderedBodyHtml, { ...route, bootstrapPageDocument: undefined }), true);
 });
 
 test("HTTP SEO verification preserves the exact redirect path and query", () => {

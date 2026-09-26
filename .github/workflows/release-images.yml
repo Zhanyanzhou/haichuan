@@ -295,6 +295,9 @@ jobs:
       - name: 安装发布验证依赖
         run: npm ci --ignore-scripts
 
+      - name: 校验 Node.js 发布基线
+        run: npm run verify:node-version
+
       - name: 计算发布事实
         id: release
         shell: bash
@@ -377,7 +380,7 @@ jobs:
           if (snapshot.origin !== process.env.PUBLIC_SITE_ORIGIN) throw new Error("PUBLIC_SEO_ORIGIN_MISMATCH");
           if (process.env.SEO_ARTIFACT_ID && snapshot.contentReady !== true) throw new Error("PUBLIC_SEO_APPROVED_CONTENT_NOT_READY");
           if (snapshot.sourceStage === "production" && snapshot.contentReady !== true) throw new Error("PUBLIC_SEO_PRODUCTION_CONTENT_NOT_READY");
-          const lines = [`snapshot_hash=${snapshot.snapshotHash}`];
+          const lines = [`snapshot_hash=${snapshot.snapshotHash}`, `origin=${snapshot.origin}`];
           if (process.env.SEO_ARTIFACT_ID) {
             const metadata = JSON.parse(readFileSync(process.env.SEO_METADATA_PATH, "utf8"));
             lines.push(
@@ -424,7 +427,9 @@ jobs:
             --prerender-manifest client/dist/prerendered-routes.json \
             --out-dir client/dist \
             --nginx-map client/.release-seo/public-seo-routes.conf \
-            --nginx-policy client/.release-seo/public-seo-policy.conf
+            --nginx-policy client/.release-seo/public-seo-policy.conf \
+            --nginx-origin-redirect client/.release-seo/public-origin-redirect.conf \
+            --nginx-origin-host client/.release-seo/public-origin-host.conf
           mkdir -p client/.release-seo/tools
           cp scripts/export-public-seo-snapshot.mjs \
              scripts/generate-public-seo-artifacts.mjs \
@@ -487,6 +492,7 @@ jobs:
           PUBLIC_SEO_PRERENDER_MANIFEST_SHA256: ${{ steps.seo.outputs.prerender_manifest_sha }}
           PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST: ${{ steps.seo-source.outputs.source_artifact_digest }}
           PUBLIC_SEO_CONTENT_READY: ${{ steps.seo-source.outputs.content_ready }}
+          PUBLIC_SEO_ORIGIN: ${{ steps.seo-source.outputs.origin }}
           PUBLIC_SEO_SOURCE_KIND: ${{ steps.seo-source.outputs.source_kind }}
         run: |
           set -euo pipefail
@@ -751,8 +757,37 @@ jobs:
             buildkitProvenance: descriptor("provenance/" + component + ".buildkit.json"),
             sbom: descriptor("sbom/" + component + ".spdx.json"),
           });
+          const snapshot = JSON.parse(fs.readFileSync("client/.release-seo/public-seo-snapshot.json", "utf8"));
+          const requiredPagePaths = {
+            about: "/about", catalog: "/catalog", contact: "/contact",
+            custom: "/custom", home: "/", products: "/products",
+          };
+          const pageDocuments = snapshot.contentReady === true
+            ? snapshot.routes
+                .filter((route) => route.kind === "page")
+                .map((route) => {
+                  const alternateKey = String(route.alternateKey ?? "");
+                  if (!/^page:(about|catalog|contact|custom|home|products)$/.test(alternateKey)) {
+                    throw new Error("PUBLIC_SEO_PAGE_ALTERNATE_KEY_INVALID");
+                  }
+                  return {
+                    pageKey: alternateKey.slice("page:".length),
+                    path: route.path,
+                    contentHash: route.contentHash,
+                  };
+                })
+                .sort((left, right) => left.pageKey.localeCompare(right.pageKey))
+            : [];
+          if (snapshot.contentReady === true && (
+            pageDocuments.length !== Object.keys(requiredPagePaths).length
+            || pageDocuments.some((page, index) => {
+              const pageKey = Object.keys(requiredPagePaths)[index];
+              return page.pageKey !== pageKey || page.path !== requiredPagePaths[pageKey]
+                || !/^[a-f0-9]{64}$/.test(page.contentHash);
+            })
+          )) throw new Error("PUBLIC_SEO_PAGE_DOCUMENT_SET_INVALID");
           const inputs = {
-            schemaVersion: 3,
+            schemaVersion: 5,
             releaseStage: process.env.RELEASE_STAGE,
             imageTag: process.env.IMAGE_TAG,
             gitSha: process.env.GITHUB_SHA,
@@ -779,6 +814,7 @@ jobs:
               runId: Number(process.env.AUTHORIZATION_RUN_ID),
             },
             publicSeo: {
+              origin: process.env.PUBLIC_SEO_ORIGIN,
               sourceStage: process.env.RELEASE_STAGE,
               snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH,
               prerenderManifestSha256: process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256,
@@ -786,6 +822,7 @@ jobs:
               sourceArtifactDigest: process.env.PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST,
               sourceKind: process.env.PUBLIC_SEO_SOURCE_KIND,
               contentReady: process.env.PUBLIC_SEO_CONTENT_READY === "true",
+              pageDocuments,
             },
             images: {
               server: image("server", process.env.SERVER_IMAGE_NAME, process.env.SERVER_IMAGE_DIGEST),
@@ -832,6 +869,7 @@ jobs:
           EXPECTED_INPUT_SHA256: ${{ needs.build-push.outputs.signing_inputs_sha256 }}
           EXPECTED_RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
           EXPECTED_MIGRATION_SHA: ${{ needs.build-push.outputs.migration_sha }}
+          EXPECTED_PUBLIC_SEO_ORIGIN: ${{ inputs.public_site_origin }}
         run: |
           set -euo pipefail
           test "$(sha256sum release-input/signing-inputs.json | cut -d ' ' -f 1)" = "$EXPECTED_INPUT_SHA256"
@@ -851,7 +889,7 @@ jobs:
           };
           const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
           exact(input, ["schemaVersion", "releaseStage", "imageTag", "gitSha", "source", "sourceRef", "migrationBundleSha256", "qualityGate", "releaseAuthorization", "publicSeo", "images"], "RELEASE_BASELINE_INPUT_SCHEMA_INVALID");
-          if (input.schemaVersion !== 3 || input.gitSha !== process.env.GITHUB_SHA ||
+          if (input.schemaVersion !== 5 || input.gitSha !== process.env.GITHUB_SHA ||
               input.source !== `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}` ||
               input.sourceRef !== process.env.GITHUB_REF ||
               input.releaseStage !== process.env.EXPECTED_RELEASE_STAGE ||
@@ -873,6 +911,27 @@ jobs:
                 ? !/^[a-f0-9]{64}$/.test(input.releaseAuthorization.approvalSha256 ?? "") || input.releaseAuthorization.sourceSha !== process.env.GITHUB_SHA
                 : input.releaseAuthorization.mode !== "protected-ref" || input.releaseAuthorization.approvalSha256 !== null || input.releaseAuthorization.sourceSha !== null)) {
             fail("RELEASE_BASELINE_AUTHORIZATION_INVALID");
+          }
+          exact(input.publicSeo, ["origin", "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest", "sourceKind", "contentReady", "pageDocuments"], "RELEASE_BASELINE_SEO_SCHEMA_INVALID");
+          const requiredPagePaths = { about: "/about", catalog: "/catalog", contact: "/contact", custom: "/custom", home: "/", products: "/products" };
+          const expectedPageKeys = Object.keys(requiredPagePaths);
+          if (!Array.isArray(input.publicSeo.pageDocuments)
+              || (input.publicSeo.contentReady
+                ? input.publicSeo.pageDocuments.length !== expectedPageKeys.length
+                  || input.publicSeo.pageDocuments.some((page, index) => {
+                    exact(page, ["pageKey", "path", "contentHash"], "RELEASE_BASELINE_SEO_PAGE_SCHEMA_INVALID");
+                    const key = expectedPageKeys[index];
+                    return page.pageKey !== key || page.path !== requiredPagePaths[key] || !/^[a-f0-9]{64}$/.test(page.contentHash);
+                  })
+                : input.publicSeo.pageDocuments.length !== 0)) fail("RELEASE_BASELINE_SEO_PAGES_INVALID");
+          let normalizedOrigin;
+          try {
+            const url = new URL(input.publicSeo.origin);
+            if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error();
+            normalizedOrigin = url.origin;
+          } catch { fail("RELEASE_BASELINE_SEO_ORIGIN_INVALID"); }
+          if (normalizedOrigin !== input.publicSeo.origin || input.publicSeo.origin !== process.env.EXPECTED_PUBLIC_SEO_ORIGIN) {
+            fail("RELEASE_BASELINE_SEO_ORIGIN_MISMATCH");
           }
           if (input.releaseStage === "production" &&
               (!input.publicSeo?.contentReady || input.publicSeo?.sourceKind !== "approved-snapshot")) {
@@ -901,7 +960,7 @@ jobs:
             }
           }
           const manifest = {
-            schemaVersion: 7,
+            schemaVersion: 9,
             assuranceLevel: "baseline",
             releaseStage: input.releaseStage,
             imageTag: input.imageTag,
@@ -1015,6 +1074,7 @@ jobs:
           EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ needs.build-push.outputs.public_seo_source_artifact_digest }}
           EXPECTED_PUBLIC_SEO_SOURCE_KIND: ${{ needs.build-push.outputs.public_seo_source_kind }}
           EXPECTED_PUBLIC_SEO_CONTENT_READY: ${{ needs.build-push.outputs.public_seo_content_ready }}
+          EXPECTED_PUBLIC_SEO_ORIGIN: ${{ inputs.public_site_origin }}
           EXPECTED_RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
           EXPECTED_IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
@@ -1038,7 +1098,7 @@ jobs:
           };
           const input = JSON.parse(fs.readFileSync("release-input/signing-inputs.json", "utf8"));
           exact(input, ["schemaVersion", "releaseStage", "imageTag", "gitSha", "source", "sourceRef", "migrationBundleSha256", "qualityGate", "releaseAuthorization", "publicSeo", "images"], "RELEASE_SIGNING_INPUTS_SCHEMA_INVALID");
-          if (input.schemaVersion !== 3 || input.gitSha !== process.env.GITHUB_SHA ||
+          if (input.schemaVersion !== 5 || input.gitSha !== process.env.GITHUB_SHA ||
               input.source !== process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY ||
               input.sourceRef !== process.env.GITHUB_REF ||
               input.releaseStage !== process.env.EXPECTED_RELEASE_STAGE ||
@@ -1072,8 +1132,27 @@ jobs:
                 : input.releaseAuthorization.mode !== "protected-ref" || input.releaseAuthorization.approvalSha256 !== null || input.releaseAuthorization.sourceSha !== null)) {
             fail("RELEASE_SIGNING_AUTHORIZATION_INVALID");
           }
-          exact(input.publicSeo, ["sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest", "sourceKind", "contentReady"], "RELEASE_SIGNING_SEO_SCHEMA_INVALID");
-          if (input.publicSeo.sourceStage !== input.releaseStage ||
+          exact(input.publicSeo, ["origin", "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest", "sourceKind", "contentReady", "pageDocuments"], "RELEASE_SIGNING_SEO_SCHEMA_INVALID");
+          const requiredPagePaths = { about: "/about", catalog: "/catalog", contact: "/contact", custom: "/custom", home: "/", products: "/products" };
+          const expectedPageKeys = Object.keys(requiredPagePaths);
+          if (!Array.isArray(input.publicSeo.pageDocuments)
+              || (input.publicSeo.contentReady
+                ? input.publicSeo.pageDocuments.length !== expectedPageKeys.length
+                  || input.publicSeo.pageDocuments.some((page, index) => {
+                    exact(page, ["pageKey", "path", "contentHash"], "RELEASE_SIGNING_SEO_PAGE_SCHEMA_INVALID");
+                    const key = expectedPageKeys[index];
+                    return page.pageKey !== key || page.path !== requiredPagePaths[key] || !/^[a-f0-9]{64}$/.test(page.contentHash);
+                  })
+                : input.publicSeo.pageDocuments.length !== 0)) fail("RELEASE_SIGNING_SEO_PAGES_INVALID");
+          let normalizedOrigin;
+          try {
+            const url = new URL(input.publicSeo.origin);
+            if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error();
+            normalizedOrigin = url.origin;
+          } catch { fail("RELEASE_SIGNING_SEO_ORIGIN_INVALID"); }
+          if (normalizedOrigin !== input.publicSeo.origin ||
+              input.publicSeo.origin !== process.env.EXPECTED_PUBLIC_SEO_ORIGIN ||
+              input.publicSeo.sourceStage !== input.releaseStage ||
               input.publicSeo.snapshotHash !== process.env.EXPECTED_PUBLIC_SEO_SNAPSHOT_HASH ||
               input.publicSeo.prerenderManifestSha256 !== process.env.EXPECTED_PUBLIC_SEO_PRERENDER_MANIFEST_SHA256 ||
               input.publicSeo.sourceArtifactId !== Number(process.env.EXPECTED_PUBLIC_SEO_SOURCE_ARTIFACT_ID) ||
@@ -1280,7 +1359,7 @@ jobs:
           }
           NODE
 
-      - name: 生成 schema v7 高保证发布清单和真实 SLSA v1 predicate
+      - name: 生成 schema v9 高保证发布清单和真实 SLSA v1 predicate
         shell: bash
         env:
           SERVER_IMAGE_NAME: ${{ needs.build-push.outputs.server_image }}
@@ -1309,6 +1388,7 @@ jobs:
           PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ needs.build-push.outputs.public_seo_source_artifact_digest }}
           PUBLIC_SEO_SOURCE_KIND: ${{ needs.build-push.outputs.public_seo_source_kind }}
           PUBLIC_SEO_CONTENT_READY: ${{ needs.build-push.outputs.public_seo_content_ready }}
+          PUBLIC_SEO_ORIGIN: ${{ inputs.public_site_origin }}
           RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
           IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
         run: |
@@ -1316,6 +1396,7 @@ jobs:
           node - <<'NODE'
           const { createHash } = require("node:crypto");
           const fs = require("node:fs");
+          const input = JSON.parse(fs.readFileSync("release-input/signing-inputs.json", "utf8"));
           const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
           const workflow = "github.com/" + process.env.GITHUB_REPOSITORY + "/.github/workflows/release-images.yml";
           const signerIdentity = "https://" + workflow + "@" + process.env.GITHUB_REF;
@@ -1341,7 +1422,7 @@ jobs:
             ],
           };
           const manifest = {
-            schemaVersion: 7,
+            schemaVersion: 9,
             assuranceLevel: "high",
             releaseStage: process.env.RELEASE_STAGE,
             imageTag: process.env.IMAGE_TAG,
@@ -1385,15 +1466,7 @@ jobs:
               sbomPredicateType: "https://spdx.dev/Document",
               manifestPredicateType: "https://slsa.dev/provenance/v1",
             },
-            publicSeo: {
-              sourceStage: process.env.RELEASE_STAGE,
-              snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH,
-              prerenderManifestSha256: process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256,
-              sourceArtifactId: Number(process.env.PUBLIC_SEO_SOURCE_ARTIFACT_ID),
-              sourceArtifactDigest: process.env.PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST,
-              sourceKind: process.env.PUBLIC_SEO_SOURCE_KIND,
-              contentReady: process.env.PUBLIC_SEO_CONTENT_READY === "true",
-            },
+            publicSeo: input.publicSeo,
             server: image("server", process.env.SERVER_IMAGE_NAME, process.env.SERVER_IMAGE_DIGEST),
             client: image("client", process.env.CLIENT_IMAGE_NAME, process.env.CLIENT_IMAGE_DIGEST),
             operations,
@@ -1418,12 +1491,13 @@ jobs:
           const source = manifest.source;
           const predicate = {
             buildDefinition: {
-              buildType: source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v7",
+              buildType: source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v9",
               externalParameters: {
                 gitSha: process.env.GITHUB_SHA,
                 sourceRef: process.env.GITHUB_REF,
                 qualityGateRunId: Number(process.env.QUALITY_RUN_ID),
-                schemaVersion: 7,
+                schemaVersion: 9,
+                publicSeoOrigin: manifest.publicSeo.origin,
                 assuranceLevel: "high",
                 releaseStage: process.env.RELEASE_STAGE,
                 imageTag: process.env.IMAGE_TAG,
@@ -1453,6 +1527,7 @@ jobs:
           QUALITY_RUN_ID: ${{ needs.quality-proof.outputs.run_id }}
           RELEASE_STAGE: ${{ needs.build-push.outputs.release_stage }}
           IMAGE_TAG: ${{ needs.build-push.outputs.image_tag }}
+          PUBLIC_SEO_ORIGIN: ${{ inputs.public_site_origin }}
         run: |
           set -euo pipefail
           signer_identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release-images.yml@${GITHUB_REF}"
@@ -1490,12 +1565,13 @@ jobs:
           const parameters = predicate?.buildDefinition?.externalParameters;
           const source = process.env.GITHUB_SERVER_URL + "/" + process.env.GITHUB_REPOSITORY;
           const expectedBuilder = "https://github.com/" + process.env.GITHUB_REPOSITORY + "/.github/workflows/release-images.yml@" + process.env.GITHUB_REF;
-          const expectedBuildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v7";
+          const expectedBuildType = source + "/blob/" + process.env.GITHUB_SHA + "/.github/workflows/release-images.yml#release-manifest-v9";
           if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
               parameters?.gitSha !== process.env.GITHUB_SHA ||
               parameters?.sourceRef !== process.env.GITHUB_REF ||
               parameters?.qualityGateRunId !== Number(process.env.QUALITY_RUN_ID) ||
-              parameters?.schemaVersion !== 7 ||
+              parameters?.schemaVersion !== 9 ||
+              parameters?.publicSeoOrigin !== process.env.PUBLIC_SEO_ORIGIN ||
               parameters?.assuranceLevel !== "high" ||
               parameters?.releaseStage !== process.env.RELEASE_STAGE ||
               parameters?.imageTag !== process.env.IMAGE_TAG ||

@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  RELEASE_PROFILE_CONTRACT,
+  isReleaseProfile,
+} from "./release-profile-contract.mjs";
+import { normalizeProductionOrigin } from "./export-public-seo-snapshot.mjs";
 import { validateReleaseManifest } from "./verify-release-images.mjs";
 
 const EXPECTED_SOURCE = "https://github.com/Zhanyanzhou/haichuan";
@@ -17,6 +22,15 @@ const DISABLED_GATES = [
   "PAYMENT_GATEWAY_TRANSACTIONS_ENABLED",
   "PAYMENT_GATEWAY_REFUNDS_ENABLED",
   "ANALYTICS_INGESTION_ENABLED",
+];
+const DISABLED_EXTERNAL_CONFIG = [
+  "SMTP_HOST",
+  "SMTP_USER",
+  "SMTP_PASS",
+  "ALIYUN_SMS_ACCESS_KEY_ID",
+  "ALIYUN_SMS_ACCESS_KEY_SECRET",
+  "ALIYUN_SMS_SIGN_NAME",
+  "ALIYUN_SMS_TEMPLATE_CODE",
 ];
 
 function fail(code) {
@@ -56,6 +70,12 @@ function verifyDescriptorFile(releaseDir, descriptor, expectedPath, code) {
   if (!within || within.startsWith("..") || isAbsolute(within)) fail(`${code}_PATH_INVALID`);
   const stat = lstatSync(filePath);
   if (!stat.isFile() || stat.isSymbolicLink()) fail(`${code}_FILE_INVALID`);
+  const canonicalReleaseDir = realpathSync(releaseDir);
+  const canonicalFilePath = realpathSync(filePath);
+  const withinCanonicalRoot = relative(canonicalReleaseDir, canonicalFilePath);
+  if (!withinCanonicalRoot || withinCanonicalRoot.startsWith("..") || isAbsolute(withinCanonicalRoot)) {
+    fail(`${code}_PATH_INVALID`);
+  }
   if (sha256(readFileSync(filePath)) !== descriptor.sha256) fail(`${code}_HASH_MISMATCH`);
 }
 
@@ -68,7 +88,7 @@ export function validatePreproductionDeployInputs(manifest, envSource, bundle = 
   else if (manifest?.assuranceLevel === "baseline") commonKeys.push("baselinePolicy");
   else fail("PREPRODUCTION_DEPLOY_ASSURANCE_LEVEL_INVALID");
   exact(manifest, commonKeys, "PREPRODUCTION_DEPLOY_MANIFEST_SCHEMA_INVALID");
-  if (manifest.schemaVersion !== 7 || manifest.releaseStage !== "preproduction" || manifest.source !== EXPECTED_SOURCE
+  if (manifest.schemaVersion !== 9 || manifest.releaseStage !== "preproduction" || manifest.source !== EXPECTED_SOURCE
       || !SHA.test(manifest.gitSha ?? "") || manifest.imageTag !== `preproduction-sha-${manifest.gitSha}`
       || !/^[a-f0-9]{64}$/.test(manifest.migrationBundleSha256 ?? "")) {
     fail("PREPRODUCTION_DEPLOY_MANIFEST_IDENTITY_INVALID");
@@ -95,8 +115,8 @@ export function validatePreproductionDeployInputs(manifest, envSource, bundle = 
     }
   }
   exact(manifest.publicSeo, [
-    "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId",
-    "sourceArtifactDigest", "sourceKind", "contentReady",
+    "origin", "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId",
+    "sourceArtifactDigest", "sourceKind", "contentReady", "pageDocuments",
   ], "PREPRODUCTION_DEPLOY_CONTENT_SCHEMA_INVALID");
   const seo = manifest.publicSeo;
   if (seo.sourceStage !== "preproduction" || typeof seo.contentReady !== "boolean"
@@ -124,11 +144,25 @@ export function validatePreproductionDeployInputs(manifest, envSource, bundle = 
   }
 
   const env = parseDotEnv(envSource);
+  let deploymentOrigin;
+  try {
+    deploymentOrigin = normalizeProductionOrigin(env.get("VITE_PUBLIC_SITE_ORIGIN"));
+  } catch {
+    fail("PREPRODUCTION_DEPLOY_PUBLIC_SITE_ORIGIN_INVALID");
+  }
+  if (deploymentOrigin !== seo.origin) fail("PREPRODUCTION_DEPLOY_PUBLIC_SITE_ORIGIN_MISMATCH");
   for (const key of DISABLED_GATES) {
     const value = (env.get(key) ?? "false").toLowerCase();
     if (value !== "false") fail(`PREPRODUCTION_DEPLOY_UNSAFE_GATE:${key}`);
   }
-  if ((env.get("RELEASE_PROFILE") ?? "lead-generation") !== "lead-generation") {
+  for (const key of DISABLED_EXTERNAL_CONFIG) {
+    if ((env.get(key) ?? "") !== "") {
+      fail(`PREPRODUCTION_DEPLOY_UNSAFE_EXTERNAL_CONFIG:${key}`);
+    }
+  }
+  const releaseProfile = env.get("RELEASE_PROFILE");
+  if (!isReleaseProfile(releaseProfile) ||
+      releaseProfile !== RELEASE_PROFILE_CONTRACT.defaultProfile) {
     fail("PREPRODUCTION_DEPLOY_RELEASE_PROFILE_INVALID");
   }
   return {
@@ -136,9 +170,15 @@ export function validatePreproductionDeployInputs(manifest, envSource, bundle = 
     RELEASE_GIT_SHA: manifest.gitSha,
     RELEASE_SOURCE: manifest.source,
     MIGRATION_BUNDLE_SHA256: manifest.migrationBundleSha256,
+    RELEASE_PROFILE: releaseProfile,
     ASSURANCE_LEVEL: manifest.assuranceLevel,
     PUBLIC_SEO_CONTENT_READY: String(seo.contentReady),
     PUBLIC_SEO_SOURCE_KIND: seo.sourceKind,
+    PUBLIC_SEO_ORIGIN: seo.origin,
+    ...Object.fromEntries(seo.pageDocuments.map((page) => [
+      `PUBLIC_SEO_PAGE_HASH_${page.pageKey.toUpperCase()}`,
+      page.contentHash,
+    ])),
     INITIAL_CUTOVER_AUTHORIZED: env.get("PREPRODUCTION_INITIAL_SIGNED_CUTOVER_AUTHORIZED") === "1" ? "true" : "false",
   };
 }

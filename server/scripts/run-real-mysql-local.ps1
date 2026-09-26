@@ -100,12 +100,12 @@ try {
 
   $null = Invoke-Docker exec --env "MYSQL_PWD=$rootPassword" $containerName `
     mysql --protocol=TCP --host=127.0.0.1 --user=root `
-    --execute "SET GLOBAL log_bin_trust_function_creators=ON;"
+    --execute "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci'; SET GLOBAL init_connect = 'SET collation_connection = utf8mb4_unicode_ci'; SET GLOBAL log_bin_trust_function_creators=ON; ALTER DATABASE $databaseName CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
   $probe = (& docker exec --env "MYSQL_PWD=$databasePassword" $containerName `
     mysql --batch --skip-column-names --protocol=TCP --host=127.0.0.1 --user=$databaseUser `
     --database=$databaseName `
-    --execute "SELECT DATABASE(), CURRENT_USER(), @@log_bin_trust_function_creators;").Trim()
-  if ($LASTEXITCODE -ne 0 -or $probe -notmatch "^$databaseName\s+$databaseUser@%\s+1$") {
+    --execute "SELECT DATABASE(), CURRENT_USER(), @@SESSION.collation_connection, @@collation_database, @@GLOBAL.character_set_server, @@GLOBAL.collation_server, @@GLOBAL.init_connect, @@log_bin_trust_function_creators;").Trim()
+  if ($LASTEXITCODE -ne 0 -or $probe -notmatch "^$databaseName\s+$databaseUser@%\s+utf8mb4_unicode_ci\s+utf8mb4_unicode_ci\s+utf8mb4\s+utf8mb4_unicode_ci\s+SET collation_connection = utf8mb4_unicode_ci\s+1$") {
     throw "DEDICATED_MYSQL_CONNECTION_POLICY_PROBE_FAILED"
   }
 

@@ -40,7 +40,7 @@ function createFixture(releaseProfile = "lead-generation") {
     sbomPredicateType: "https://spdx.dev/Document",
   });
   const manifest = {
-    schemaVersion: 7,
+    schemaVersion: 9,
     assuranceLevel: "high",
     releaseStage: "production",
     imageTag: `sha-${gitSha}`,
@@ -85,6 +85,7 @@ function createFixture(releaseProfile = "lead-generation") {
       manifestPredicateType: "https://slsa.dev/provenance/v1",
     },
     publicSeo: {
+      origin: "https://jewelry.example.test",
       sourceStage: "production",
       snapshotHash: sha("f"),
       prerenderManifestSha256: sha("0"),
@@ -92,6 +93,14 @@ function createFixture(releaseProfile = "lead-generation") {
       sourceArtifactDigest: `sha256:${sha("9")}`,
       sourceKind: "approved-snapshot",
       contentReady: true,
+      pageDocuments: [
+        ["about", "/about", "1"],
+        ["catalog", "/catalog", "2"],
+        ["contact", "/contact", "3"],
+        ["custom", "/custom", "4"],
+        ["home", "/", "5"],
+        ["products", "/products", "6"],
+      ].map(([pageKey, path, digit]) => ({ pageKey, path, contentHash: sha(digit) })),
     },
     server: image("server", "c"),
     client: image("client", "d"),
@@ -122,6 +131,39 @@ function createFixture(releaseProfile = "lead-generation") {
   });
   const preflightReport = artifact("preflight-report.json", "preflight report\n");
   const rollbackRunbook = artifact("rollback-runbook.md", "# rollback\n");
+  const edgeFacts = {
+    origin: "https://jewelry.example.test",
+    dnsResolved: true,
+    httpsReachable: true,
+    httpRedirectStatus: 308,
+    httpRedirectTargetOrigin: "https://jewelry.example.test",
+    certificateChainValid: true,
+    certificateNotBefore: "2026-09-01T00:00:00Z",
+    certificateNotAfter: "2026-12-01T00:00:00Z",
+    certificateRenewalOutcome: "verified",
+    hstsMaxAgeSeconds: 31536000,
+    hstsIncludeSubDomains: true,
+    contentSecurityPolicyPresent: true,
+    trustedProxyVerified: true,
+  };
+  const observabilityFacts = {
+    healthProbeVerified: true,
+    readyProbeVerified: true,
+    frontendOriginVerified: true,
+    backupHealthVerified: true,
+    metricsScrapeVerified: true,
+    inquiryServerErrorSeriesVerified: true,
+    outboxSeriesVerified: true,
+    notificationDeliveryWorkerSeriesVerified: true,
+    accountRecoveryWorkerSeriesVerified: true,
+    alertDrillKind: "synthetic-consumer-heartbeat-stale",
+    monitorIdentitySha256: sha("6"),
+    alertEventSha256: sha("7"),
+    triggeredAt: "2026-09-06T09:58:00Z",
+    receivedAt: "2026-09-06T09:58:10Z",
+    acknowledgedAt: "2026-09-06T09:58:20Z",
+    acknowledgedBy: "incident-owner",
+  };
   const externalServices = ["email", "sms", "logistics", "payment-gateway", "wechat", "object-storage"]
     .map((name) => {
       const status = releaseProfile === "commerce" && name === "payment-gateway" ? "verified" : "disabled";
@@ -137,7 +179,7 @@ function createFixture(releaseProfile = "lead-generation") {
       };
     });
   const evidence = {
-    schemaVersion: 3,
+    schemaVersion: 5,
     generatedAt: "2026-09-06T10:00:00Z",
     environment: {
       approvalReferenceSha256: sha("2"),
@@ -179,8 +221,26 @@ function createFixture(releaseProfile = "lead-generation") {
         offsiteReplication: receipt("offsite-replication", "offsite-replication", "backup-provider", "verified"),
       },
     },
-    edge: { receipt: receipt("edge", "edge-security", "edge-audit", "verified") },
-    observability: { receipt: receipt("observability", "observability-alert-drill", "monitor-audit", "verified") },
+    edge: {
+      ...edgeFacts,
+      receipt: receipt(
+        "edge",
+        "edge-security",
+        "edge-audit",
+        "verified",
+        hash(`${JSON.stringify(edgeFacts, null, 2)}\n`),
+      ),
+    },
+    observability: {
+      ...observabilityFacts,
+      receipt: receipt(
+        "observability",
+        "observability-alert-drill",
+        "monitor-audit",
+        "verified",
+        hash(`${JSON.stringify(observabilityFacts, null, 2)}\n`),
+      ),
+    },
     featureGates: { receipt: receipt("feature-gates", "feature-gates", "release-preflight-cli", releaseProfile) },
     externalServices,
     rollback: {
@@ -251,12 +311,13 @@ function successfulExecutor(calls = []) {
         subject: [{ digest: { sha256: manifestSha256 } }],
         predicate: {
           buildDefinition: {
-            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v7`,
+            buildType: `${manifest.source}/blob/${manifest.gitSha}/.github/workflows/release-images.yml#release-manifest-v9`,
             externalParameters: {
               gitSha: manifest.gitSha,
               sourceRef: manifest.attestationPolicy.sourceRef,
               qualityGateRunId: manifest.qualityGate.runId,
               schemaVersion: manifest.schemaVersion,
+              publicSeoOrigin: manifest.publicSeo.origin,
               assuranceLevel: "high",
               releaseStage: manifest.releaseStage,
               imageTag: manifest.imageTag,
@@ -329,6 +390,12 @@ test("accepts the pure structure and hash layer before cryptographic verificatio
     assert.equal(result.manifest.gitSha, gitSha);
     assert.equal(result.manifestSha256, evidence.release.manifest.sha256);
   });
+});
+
+test("rejects legacy production evidence that lacks bound observability facts", () => {
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.schemaVersion = 4;
+  }, "PRODUCTION_EVIDENCE_SCHEMA_INVALID"));
 });
 
 test("rejects manifest identity copied from the untrusted manifest itself", () => {
@@ -444,6 +511,89 @@ test("rejects unknown fields inside provider receipts", () => {
     writeFileSync(join(fixture.root, descriptor.path), serialized);
     descriptor.sha256 = hash(serialized);
     assert.throws(() => validateProductionEvidenceStructure(fixture.evidence, fixture.trusted), (error) => error?.message === "PRODUCTION_EVIDENCE_RECEIPT_SCHEMA_INVALID:edge:note");
+  });
+});
+
+test("edge evidence fails closed on origin, HSTS, certificate lifetime and receipt subject drift", () => {
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.edge.origin = "https://other.example.test";
+  }, "PRODUCTION_EVIDENCE_EDGE_ORIGIN_INVALID"));
+  withFixture((fixture) => {
+    const descriptor = fixture.evidence.release.manifest;
+    const previousManifestSha256 = descriptor.sha256;
+    const manifest = JSON.parse(fixture.files.get(descriptor.path));
+    manifest.publicSeo.origin = "https://203.0.113.10";
+    const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+    writeFileSync(join(fixture.root, descriptor.path), serialized);
+    descriptor.sha256 = hash(serialized);
+    const rebindReceipts = (value) => {
+      if (!value || typeof value !== "object") return;
+      if (typeof value.path === "string" && typeof value.sha256 === "string") {
+        const artifactPath = join(fixture.root, value.path);
+        try {
+          const receipt = JSON.parse(readFileSync(artifactPath, "utf8"));
+          if (receipt.manifestSha256 === previousManifestSha256) {
+            receipt.manifestSha256 = descriptor.sha256;
+            if (receipt.subjectSha256 === previousManifestSha256) receipt.subjectSha256 = descriptor.sha256;
+            const receiptBytes = `${JSON.stringify(receipt, null, 2)}\n`;
+            writeFileSync(artifactPath, receiptBytes);
+            value.sha256 = hash(receiptBytes);
+          }
+        } catch {
+          // Non-receipt descriptors remain unchanged.
+        }
+      }
+      for (const child of Object.values(value)) rebindReceipts(child);
+    };
+    rebindReceipts(fixture.evidence);
+    fixture.evidence.edge.origin = "https://203.0.113.10";
+    fixture.evidence.edge.httpRedirectTargetOrigin = "https://203.0.113.10";
+    assert.throws(
+      () => validateProductionEvidenceStructure(fixture.evidence, fixture.trusted),
+      { message: "PRODUCTION_EVIDENCE_EDGE_DOMAIN_REQUIRED" },
+    );
+  });
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.edge.hstsIncludeSubDomains = false;
+  }, "PRODUCTION_EVIDENCE_EDGE_HSTS_INVALID"));
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.edge.certificateNotAfter = "2026-09-07T00:00:00Z";
+  }, "PRODUCTION_EVIDENCE_EDGE_CERTIFICATE_VALIDITY_INSUFFICIENT"));
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.edge.hstsMaxAgeSeconds = 63072000;
+  }, "PRODUCTION_EVIDENCE_RECEIPT_SUBJECT_MISMATCH:edge"));
+});
+
+test("observability evidence requires complete checks, ordered delivery and the incident owner", () => {
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.observability.metricsScrapeVerified = false;
+  }, "PRODUCTION_EVIDENCE_OBSERVABILITY_CHECK_FAILED:metricsScrapeVerified"));
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.observability.receivedAt = "2026-09-06T09:57:00Z";
+  }, "PRODUCTION_EVIDENCE_OBSERVABILITY_TIME_INVALID"));
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.observability.acknowledgedBy = "another-owner";
+  }, "PRODUCTION_EVIDENCE_OBSERVABILITY_OWNER_MISMATCH"));
+});
+
+test("observability receipt subject is bound to the normalized drill facts", () => {
+  withFixture((fixture) => expectCode(fixture, ({ evidence }) => {
+    evidence.observability.alertDrillKind = "synthetic-readiness-failure";
+  }, "PRODUCTION_EVIDENCE_RECEIPT_SUBJECT_MISMATCH:observability"));
+});
+
+test("observability receipt cannot predate alert acknowledgement", () => {
+  withFixture((fixture) => {
+    const descriptor = fixture.evidence.observability.receipt;
+    const receipt = JSON.parse(fixture.files.get(descriptor.path));
+    receipt.observedAt = "2026-09-06T09:58:19Z";
+    const serialized = `${JSON.stringify(receipt, null, 2)}\n`;
+    writeFileSync(join(fixture.root, descriptor.path), serialized);
+    descriptor.sha256 = hash(serialized);
+    assert.throws(
+      () => validateProductionEvidenceStructure(fixture.evidence, fixture.trusted),
+      (error) => error?.message === "PRODUCTION_EVIDENCE_OBSERVABILITY_RECEIPT_TIME_INVALID",
+    );
   });
 });
 
@@ -718,17 +868,19 @@ test("verified manifest DSSE must bind builder, release facts and all resolved d
             const envelope = JSON.parse(result.stdout);
             const statement = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
             if (field === "builder") statement.predicate.runDetails.builder.id = "https://github.com/other/workflow";
+            if (field === "origin") statement.predicate.buildDefinition.externalParameters.publicSeoOrigin = "https://other.example.test";
             if (field === "dependencies") statement.predicate.buildDefinition.resolvedDependencies.pop();
             envelope.payload = Buffer.from(JSON.stringify(statement)).toString("base64");
             return { ...result, stdout: `${JSON.stringify(envelope)}\n` };
           },
         }),
-        (error) => error?.message === (field === "builder"
+        (error) => error?.message === (["builder", "origin"].includes(field)
           ? "PRODUCTION_EVIDENCE_MANIFEST_PROVENANCE_CONTENT_MISMATCH"
           : "PRODUCTION_EVIDENCE_MANIFEST_PROVENANCE_DEPENDENCIES_MISMATCH"),
       );
     };
     await corruptManifestOutput("builder");
+    await corruptManifestOutput("origin");
     await corruptManifestOutput("dependencies");
   });
 });

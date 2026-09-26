@@ -17,9 +17,13 @@ test("client image requires immutable SEO inputs and carries their evidence labe
   for (const required of [
     "COPY .release-seo/public-seo-snapshot.json",
     "COPY .release-seo/public-seo-routes.conf",
+    "COPY .release-seo/public-origin-redirect.conf",
+    "COPY .release-seo/public-origin-host.conf",
     "COPY dist/",
     "--prerender-manifest ./dist/prerendered-routes.json",
     "--nginx-map ./public-seo-routes.conf",
+    "--nginx-origin-redirect ./public-origin-redirect.conf",
+    "--nginx-origin-host ./public-origin-host.conf",
     "--strict",
     "--check",
     "rm ./dist/prerendered-routes.json",
@@ -36,7 +40,12 @@ test("Nginx serves only generated indexable routes while preserving protected SP
   const nginxMain = read("client/nginx-main.conf");
   const generator = read("scripts/generate-public-seo-artifacts.mjs");
   assert.ok(nginx.includes("include /etc/nginx/public-seo-routes.conf;"));
+  assert.match(nginx, /location \/ \{[\s\S]*?include \/etc\/nginx\/public-origin-redirect\.conf;/);
+  assert.doesNotMatch(nginx, /return 308 https:\/\/\$host\$request_uri;/);
   assert.ok(nginxMain.includes("include /etc/nginx/public-seo-policy.conf;"));
+  assert.ok(nginxMain.includes("include /etc/nginx/public-origin-host.conf;"));
+  assert.match(nginx, /listen 127\.0\.0\.1:8082;[\s\S]*?location = \/healthz \{\s+return 204;/);
+  assert.match(nginx, /listen 8081;[\s\S]*?if \(\$hc_public_origin_host_allowed = 0\) \{ return 421; \}/);
   assert.match(nginx, /location = \/search \{\s+return 308 \/catalog\$is_args\$args;/);
   assert.match(nginx, /location = \/en \{\s+return 308 \/\$is_args\$args;\s+absolute_redirect off;/);
   assert.ok(nginx.includes("location ~* ^/en/([^/].*)$ {"));
@@ -75,6 +84,8 @@ test("release workflow validates a same-SHA artifact before build and performs r
     "PUBLIC_SPA_FALLBACK_NOINDEX_MISSING",
     "node scripts/prerender-public-routes.mjs",
     "node scripts/generate-public-seo-artifacts.mjs",
+    "--nginx-origin-redirect client/.release-seo/public-origin-redirect.conf",
+    "--nginx-origin-host client/.release-seo/public-origin-host.conf",
     "node scripts/verify-public-seo-http.mjs",
     "publicSeo: {",
     "snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH",

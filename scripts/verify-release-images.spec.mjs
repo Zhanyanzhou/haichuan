@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 // Public SEO is part of the signed release supply chain. Importing its focused
 // specs keeps the root `npm test` and the quality workflow from bypassing them.
@@ -17,10 +22,13 @@ import {
   releaseStaticWorkflowPaths,
   validateQualityWorkflowStructure,
   validateComposeBuildPolicy,
+  validateComposeImagePinning,
+  validateDockerNpmInstallBoundary,
   validateProductionEvidenceVerificationWorkflow,
   validateReleaseWorkflowStructure,
   validateReleaseEnvironment,
   validateReleaseManifest,
+  verifyReleaseBundleDescriptors,
 } from "./verify-release-images.mjs";
 
 const releaseWorkflow = readFileSync(new URL("../.github/workflows/release-images.yml", import.meta.url), "utf8");
@@ -30,6 +38,7 @@ const baseCompose = readFileSync(new URL("../docker-compose.yml", import.meta.ur
 const operationsCompose = readFileSync(new URL("../docker-compose.operations.yml", import.meta.url), "utf8");
 const wechatPayCompose = readFileSync(new URL("../docker-compose.wechat-pay.yml", import.meta.url), "utf8");
 const serverDockerfile = readFileSync(new URL("../server/Dockerfile", import.meta.url), "utf8");
+const serverPackageManifest = readFileSync(new URL("../server/package.json", import.meta.url), "utf8");
 const clientDockerfile = readFileSync(new URL("../client/Dockerfile", import.meta.url), "utf8");
 const operationsShellSources = [
   "check-backup-health.sh",
@@ -39,6 +48,7 @@ const operationsShellSources = [
 ].map((name) => [name, readFileSync(new URL(`../server/scripts/${name}`, import.meta.url), "utf8")]);
 const localRecoveryDrill = readFileSync(new URL("./run-operations-recovery-drill.ps1", import.meta.url), "utf8");
 const reverseProxyVerifier = readFileSync(new URL("./verify-reverse-proxy-security.mjs", import.meta.url), "utf8");
+const preproductionDeploy = readFileSync(new URL("./deploy-preproduction.sh", import.meta.url), "utf8");
 const environmentExample = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
 const productionRunbook = readFileSync(new URL("../docs/PRODUCTION_RELEASE_RUNBOOK.md", import.meta.url), "utf8");
 
@@ -59,8 +69,9 @@ test("static release checks follow all active release workflows", () => {
 
 test("build job installs verifier dependencies while isolated signing job executes no repository code", () => {
   const qualityInstall = qualityWorkflow.indexOf("npm ci --ignore-scripts");
+  const qualityNodeGate = qualityWorkflow.indexOf("npm run verify:node-version");
   const qualityVerify = qualityWorkflow.indexOf("node scripts/verify-release-images.mjs --static");
-  assert.ok(qualityInstall >= 0 && qualityInstall < qualityVerify);
+  assert.ok(qualityInstall >= 0 && qualityInstall < qualityNodeGate && qualityNodeGate < qualityVerify);
   assert.match(qualityWorkflow, /^permissions:\s*\r?\n\s{2}contents: read/m);
   assert.match(qualityWorkflow, /persist-credentials: false/);
   assert.match(qualityWorkflow, /ParseFile\(/);
@@ -77,16 +88,47 @@ test("build job installs verifier dependencies while isolated signing job execut
   );
 
   const releaseInstall = releaseWorkflow.indexOf("npm ci --ignore-scripts");
+  const releaseNodeGate = releaseWorkflow.indexOf("npm run verify:node-version");
   const migrationVerify = releaseWorkflow.indexOf("node scripts/verify-migration-integrity.mjs --print-bundle-sha");
   const registryLogin = releaseWorkflow.indexOf("uses: docker/login-action@");
   const clientInstall = releaseWorkflow.indexOf("npm ci --prefix client");
-  assert.ok(releaseInstall >= 0 && releaseInstall < migrationVerify);
+  assert.ok(releaseInstall >= 0 && releaseInstall < releaseNodeGate && releaseNodeGate < migrationVerify);
   assert.ok(clientInstall >= 0 && clientInstall < registryLogin);
   assert.match(releaseWorkflow, /persist-credentials: false/);
   const signingJob = releaseWorkflow.slice(releaseWorkflow.indexOf("  sign-release:"));
   assert.doesNotMatch(signingJob, /actions\/checkout@|npm ci|node scripts\/|docker (?:build|run)/);
   assert.match(signingJob, /artifact-ids: \$\{\{ needs\.build-push\.outputs\.signing_inputs_artifact_id \}\}/);
   assert.match(signingJob, /RELEASE_SIGNING_INPUTS_HASH_MISMATCH/);
+});
+
+test("release workflow accepts only exact page-prefixed SEO snapshot keys", () => {
+  assert.match(releaseWorkflow, /\^page:\(about\|catalog\|contact\|custom\|home\|products\)\$/);
+  assert.match(releaseWorkflow, /PUBLIC_SEO_PAGE_ALTERNATE_KEY_INVALID/);
+  assert.doesNotMatch(releaseWorkflow, /replace\(\/\^page:\//);
+});
+
+test("server Docker installs isolate lifecycle scripts that escape the server build context", () => {
+  assert.deepEqual(
+    validateDockerNpmInstallBoundary(serverDockerfile, serverPackageManifest, "server"),
+    {
+      buildContext: "server",
+      npmCiCount: 2,
+      isolatedLifecycleScripts: ["preinstall"],
+    },
+  );
+  for (const unsafeDockerfile of [
+    serverDockerfile.replace("npm ci --ignore-scripts", "npm ci"),
+    serverDockerfile.replace(
+      "npm ci --ignore-scripts --omit=dev",
+      "npm ci --omit=dev",
+    ),
+  ]) {
+    assert.notEqual(unsafeDockerfile, serverDockerfile);
+    assert.throws(
+      () => validateDockerNpmInstallBoundary(unsafeDockerfile, serverPackageManifest, "server"),
+      { message: "DOCKER_INSTALL_SCRIPT_ESCAPES_BUILD_CONTEXT:server:preinstall" },
+    );
+  }
 });
 
 test("release workflow verifies common identity labels on all three image digests", () => {
@@ -290,6 +332,22 @@ test("release workflow structurally binds unprotected authorization before the s
   );
   assert.notEqual(commentedProofCheck, qualityWorkflow);
   assert.throws(() => validateQualityWorkflowStructure(commentedProofCheck), /QUALITY_FULL_PROOF_GENERATOR_CONTRACT_MISSING/);
+  const missingQualityNodeGate = qualityWorkflow.replace(
+    "        run: npm run verify:node-version",
+    "        run: node --version",
+  );
+  assert.notEqual(missingQualityNodeGate, qualityWorkflow);
+  assert.throws(() => validateQualityWorkflowStructure(missingQualityNodeGate), {
+    message: "QUALITY_NODE_VERSION_GATE_INVALID",
+  });
+  const missingReleaseNodeGate = releaseWorkflow.replace(
+    "        run: npm run verify:node-version",
+    "        run: node --version",
+  );
+  assert.notEqual(missingReleaseNodeGate, releaseWorkflow);
+  assert.throws(() => validateReleaseWorkflowStructure(missingReleaseNodeGate), {
+    message: "RELEASE_WORKFLOW_NODE_VERSION_GATE_INVALID",
+  });
 });
 
 test("backup execution is immutable inside the attested operations image", () => {
@@ -299,7 +357,7 @@ test("backup execution is immutable inside the attested operations image", () =>
   assert.match(serverDockerfile, /apt-get install -y --no-install-recommends default-mysql-client openssl/);
   assert.match(
     serverDockerfile,
-    /^RUN npm ci --omit=dev --include=optional --legacy-peer-deps \\\r?\n\s+&& rm -rf node_modules\/prisma node_modules\/\.bin\/prisma\s*$/m,
+    /^RUN npm ci --ignore-scripts --omit=dev --include=optional --legacy-peer-deps \\\r?\n\s+&& rm -rf node_modules\/prisma node_modules\/\.bin\/prisma\s*$/m,
   );
   for (const script of [
     "backup.sh",
@@ -401,6 +459,48 @@ test("base, operations and WeChat Compose accept image-only services and reject 
     );
   }
 });
+
+test("Compose image pinning ignores non-image local identity defaults but rejects floating image values", () => {
+  assert.ok(baseCompose.includes('RELEASE_GIT_SHA: "${RELEASE_GIT_SHA:-local}"'));
+  assert.ok(validateComposeImagePinning(baseCompose).length > 0);
+  assert.throws(
+    () => validateComposeImagePinning(baseCompose.replace(
+      /image: mysql:8\.0@sha256:[a-f0-9]{64}/,
+      "image: mysql:latest",
+    )),
+    { message: "COMPOSE_PRODUCTION_IMAGE_FALLBACK_FORBIDDEN" },
+  );
+  assert.throws(
+    () => validateComposeImagePinning(baseCompose.replace(
+      '${CLIENT_IMAGE_NAME:?CLIENT_IMAGE_NAME is required}@sha256:${CLIENT_IMAGE_DIGEST:?CLIENT_IMAGE_DIGEST is required}',
+      '${CLIENT_IMAGE_NAME:-local}',
+    )),
+    { message: "COMPOSE_PRODUCTION_IMAGE_FALLBACK_FORBIDDEN" },
+  );
+});
+
+test("executable static release verifier accepts the current repository contract", () => {
+  assert.doesNotThrow(() => execFileSync(
+    process.execPath,
+    [fileURLToPath(new URL("./verify-release-images.mjs", import.meta.url)), "--static"],
+    { stdio: "pipe" },
+  ));
+});
+
+test("preproduction deploy passes immutable release identity into the server runtime", () => {
+  for (const key of ["RELEASE_GIT_SHA", "RELEASE_SOURCE", "MIGRATION_BUNDLE_SHA256"]) {
+    assert.match(
+      preproductionDeploy,
+      new RegExp(`export[^\\n]*\\b${key}\\b`),
+      `${key} must be exported from the verified manifest before Compose starts`,
+    );
+    assert.match(
+      baseCompose,
+      new RegExp(`^\\s{6}${key}: "\\$\\{${key}:-local\\}"$`, "m"),
+      `${key} must reach the server container and stay explicitly incomplete for local Compose`,
+    );
+  }
+});
 const source = "https://github.com/example/haichuan";
 const bundle = (component, kind) => ({
   path: `attestations/${component}-${kind}.sigstore.json`,
@@ -419,7 +519,7 @@ const imageEntry = (component, digest) => ({
 
 function validManifest() {
   return {
-    schemaVersion: 7,
+    schemaVersion: 9,
     assuranceLevel: "high",
     releaseStage: "production",
     imageTag: `sha-${gitSha}`,
@@ -464,6 +564,7 @@ function validManifest() {
       manifestPredicateType: "https://slsa.dev/provenance/v1",
     },
     publicSeo: {
+      origin: "https://jewelry.example.test",
       sourceStage: "production",
       snapshotHash: "1".repeat(64),
       prerenderManifestSha256: "2".repeat(64),
@@ -471,6 +572,14 @@ function validManifest() {
       sourceArtifactDigest: `sha256:${"3".repeat(64)}`,
       sourceKind: "approved-snapshot",
       contentReady: true,
+      pageDocuments: [
+        ["about", "/about", "a"],
+        ["catalog", "/catalog", "b"],
+        ["contact", "/contact", "c"],
+        ["custom", "/custom", "d"],
+        ["home", "/", "e"],
+        ["products", "/products", "f"],
+      ].map(([pageKey, path, digit]) => ({ pageKey, path, contentHash: digit.repeat(64) })),
     },
     server: imageEntry("server", serverDigest),
     client: imageEntry("client", clientDigest),
@@ -487,6 +596,22 @@ function validManifest() {
   };
 }
 
+function writeManifestSidecars(root, manifest) {
+  const descriptorKeys = manifest.assuranceLevel === "high"
+    ? ["signatureBundle", "provenanceBundle", "sbomBundle"]
+    : ["buildkitProvenance", "sbom"];
+  for (const component of ["server", "client", "operations"]) {
+    for (const key of descriptorKeys) {
+      const descriptor = manifest[component][key];
+      const content = `${component}:${key}\n`;
+      const path = join(root, descriptor.path);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, content);
+      descriptor.sha256 = createHash("sha256").update(content).digest("hex");
+    }
+  }
+}
+
 function validate(manifest) {
   return validateReleaseManifest(manifest, { gitSha, migrationBundleSha256 });
 }
@@ -499,6 +624,53 @@ function expectCode(mutator, code) {
 
 test("accepts a manifest bound to the expected source, quality run, migration and digests", () => {
   assert.deepEqual(validate(validManifest()), validManifest());
+});
+
+test("manifest bundle verification hashes every declared SBOM and provenance sidecar", () => {
+  const root = mkdtempSync(join(tmpdir(), "haichuan-release-bundle-"));
+  try {
+    const manifest = validManifest();
+    writeManifestSidecars(root, manifest);
+    assert.deepEqual(verifyReleaseBundleDescriptors(manifest, root), {
+      verifiedFileCount: 9,
+    });
+
+    writeFileSync(join(root, manifest.client.sbomBundle.path), "tampered\n");
+    assert.throws(
+      () => verifyReleaseBundleDescriptors(manifest, root),
+      { message: "RELEASE_BUNDLE_CLIENT_SBOM_BUNDLE_HASH_MISMATCH" },
+    );
+    rmSync(join(root, manifest.server.signatureBundle.path));
+    assert.throws(
+      () => verifyReleaseBundleDescriptors(manifest, root),
+      { message: "RELEASE_BUNDLE_SERVER_SIGNATURE_BUNDLE_FILE_INVALID" },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("manifest bundle verification rejects a sidecar reached through an escaping parent link", () => {
+  const root = mkdtempSync(join(tmpdir(), "haichuan-release-bundle-"));
+  const outside = mkdtempSync(join(tmpdir(), "haichuan-release-outside-"));
+  try {
+    const manifest = validManifest();
+    manifest.client.sbomBundle.path = "linked/client-sbom.sigstore.json";
+    writeManifestSidecars(root, manifest);
+
+    const linkedDirectory = join(root, "linked");
+    rmSync(linkedDirectory, { recursive: true, force: true });
+    writeFileSync(join(outside, "client-sbom.sigstore.json"), "client:sbomBundle\n");
+    symlinkSync(outside, linkedDirectory, process.platform === "win32" ? "junction" : "dir");
+
+    assert.throws(
+      () => verifyReleaseBundleDescriptors(manifest, root),
+      { message: "RELEASE_BUNDLE_CLIENT_SBOM_BUNDLE_PATH_INVALID" },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test("baseline keeps immutable digests and private SBOM without Sigstore fields", () => {
@@ -662,6 +834,22 @@ test("rejects an unknown manifest schema", () => {
   }, "RELEASE_MANIFEST_SCHEMA_INVALID");
 });
 
+test("binds the release manifest to one canonical HTTPS public SEO origin", () => {
+  for (const origin of [
+    undefined,
+    "http://jewelry.example.test",
+    "https://jewelry.example.test/path",
+    "https://jewelry.example.test/",
+  ]) {
+    expectCode((manifest) => {
+      if (origin === undefined) delete manifest.publicSeo.origin;
+      else manifest.publicSeo.origin = origin;
+    }, origin === undefined
+      ? "RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID"
+      : "RELEASE_MANIFEST_PUBLIC_SEO_ORIGIN_INVALID");
+  }
+});
+
 test("stage-bound manifests isolate preproduction repositories and production validation", () => {
   const manifest = validManifest();
   manifest.releaseStage = "preproduction";
@@ -688,6 +876,7 @@ test("preproduction accepts a safe fallback while production rejects it", () => 
     sourceArtifactId: 0,
     sourceKind: "safe-fallback",
     contentReady: false,
+    pageDocuments: [],
   };
   for (const component of ["server", "client", "operations"]) {
     manifest[component].image = `ghcr.io/example/haichuan-preproduction-${component}`;
@@ -720,6 +909,12 @@ test("release manifest requires exact immutable public SEO evidence", () => {
   expectCode((manifest) => {
     manifest.publicSeo.untrusted = true;
   }, "RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
+  expectCode((manifest) => {
+    manifest.publicSeo.pageDocuments[0].contentHash = "not-a-hash";
+  }, "RELEASE_MANIFEST_PUBLIC_SEO_PAGES_INVALID");
+  expectCode((manifest) => {
+    manifest.publicSeo.pageDocuments.reverse();
+  }, "RELEASE_MANIFEST_PUBLIC_SEO_PAGES_INVALID");
 });
 
 test("release environment refuses floating tags, manifest drift and invalid backup/volume policy", () => {
@@ -728,7 +923,7 @@ test("release environment refuses floating tags, manifest drift and invalid back
     SERVER_IMAGE_NAME: manifest.server.image, SERVER_IMAGE_DIGEST: manifest.server.digest.slice(7),
     CLIENT_IMAGE_NAME: manifest.client.image, CLIENT_IMAGE_DIGEST: manifest.client.digest.slice(7),
     OPERATIONS_IMAGE_NAME: manifest.operations.image, OPERATIONS_IMAGE_DIGEST: manifest.operations.digest.slice(7), RELEASE_GIT_SHA: gitSha,
-    RELEASE_SOURCE: source, MIGRATION_BUNDLE_SHA256: migrationBundleSha256,
+    RELEASE_SOURCE: source, MIGRATION_BUNDLE_SHA256: migrationBundleSha256, RELEASE_PROFILE: "lead-generation",
     BACKUP_INTERVAL_SECONDS: "3600", BACKUP_RPO_SECONDS: "7200", RESTORE_RTO_SECONDS: "3600",
     BACKUP_RETENTION_DAYS: "7", BACKUP_DB_READY_TIMEOUT_SECONDS: "60",
     MYSQL_VOLUME_NAME: "mysql-data", UPLOADS_VOLUME_NAME: "uploads-data",
@@ -739,9 +934,15 @@ test("release environment refuses floating tags, manifest drift and invalid back
     [{ SERVER_IMAGE_NAME: "ghcr.io/example/haichuan-server:latest" }, "ENV_SERVER_IMAGE_NOT_DIGEST_PINNED"],
     [{ CLIENT_IMAGE_NAME: manifest.server.image }, "ENV_CLIENT_IMAGE_MANIFEST_MISMATCH"],
     [{ RELEASE_GIT_SHA: "f".repeat(40) }, "ENV_RELEASE_GIT_SHA_MANIFEST_MISMATCH"],
+    [{ RELEASE_PROFILE: "transactional" }, "ENV_RELEASE_PROFILE_INVALID"],
     [{ BACKUP_INTERVAL_SECONDS: "7201" }, "ENV_BACKUP_RPO_UNACHIEVABLE"],
     [{ RESTORE_RTO_SECONDS: "0" }, "ENV_RESTORE_RTO_SECONDS_INVALID"],
     [{ UPLOADS_VOLUME_NAME: "mysql-data" }, "ENV_VOLUME_IDENTITIES_MUST_BE_DISTINCT"],
     [{ BACKUP_HOST_DIR: "./backups" }, "ENV_BACKUP_HOST_DIR_NOT_ABSOLUTE_OR_TOO_BROAD"],
   ]) assert.throws(() => validateReleaseEnvironment({ ...env, ...changes }, manifest), { message: code });
+  const missingReleaseProfile = { ...env };
+  delete missingReleaseProfile.RELEASE_PROFILE;
+  assert.throws(() => validateReleaseEnvironment(missingReleaseProfile, manifest), {
+    message: "ENV_RELEASE_PROFILE_INVALID",
+  });
 });

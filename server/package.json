@@ -7,6 +7,7 @@
     "node": "22.x"
   },
   "scripts": {
+    "preinstall": "node ../scripts/verify-node-version.mjs",
     "test": "node --test -r ts-node/register \"src/**/*.spec.ts\"",
     "build": "nest build",
     "start": "nest start",
@@ -20,6 +21,7 @@
     "page-revisions:backfill:dry-run": "npm run build && node dist/cli/page-published-revision-backfill.js",
     "page-revisions:backfill:apply": "npm run build && node dist/cli/page-published-revision-backfill.js --apply",
     "trade:reconcile": "npm run build && node dist/cli/payment-reconciliation.js",
+    "payment-simulator:start": "node dist/cli/payment-simulator.js",
     "audit:public-media": "npm run build && node dist/cli/public-media-audit.js"
   },
   "dependencies": {

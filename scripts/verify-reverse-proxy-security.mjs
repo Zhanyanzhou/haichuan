@@ -6,23 +6,37 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFile(join(root, path), "utf8");
-const [nginx, nginxMain, compose, dockerfile, serverMain, wechatController] = await Promise.all([
+const [nginx, nginxMain, compose, dockerfile, serverMain, wechatController, seoGenerator] = await Promise.all([
   read("client/nginx.conf"),
   read("client/nginx-main.conf"),
   read("docker-compose.yml"),
   read("client/Dockerfile"),
   read("server/src/main.ts"),
   read("server/src/modules/wechat-auth/wechat-auth.controller.ts"),
+  read("scripts/generate-public-seo-artifacts.mjs"),
 ]);
 
 const checks = [
-  ["公网 8080 仅包含 ACME 与动态 Host HTTPS 重定向结构", () => {
-    assert.match(nginx, /server\s*\{\s*listen 8080;[\s\S]*?location \^~ \/\.well-known\/acme-challenge\/[\s\S]*?location \/\s*\{\s*return 308 https:\/\/\$host\$request_uri;/);
+  ["公网 8080 仅包含 ACME 与 snapshot 绑定的 canonical HTTPS 重定向", () => {
+    assert.match(nginx, /server\s*\{\s*listen 8080;[\s\S]*?location \^~ \/\.well-known\/acme-challenge\/[\s\S]*?location \/\s*\{[\s\S]*?include \/etc\/nginx\/public-origin-redirect\.conf;/);
+    assert.doesNotMatch(nginx, /return 308 https:\/\/\$host\$request_uri;/);
+    assert.match(dockerfile, /COPY \.release-seo\/public-origin-redirect\.conf \.\/public-origin-redirect\.conf/);
+    assert.match(dockerfile, /--nginx-origin-redirect \.\/public-origin-redirect\.conf/);
+    assert.match(seoGenerator, /return 308 "\$\{canonicalOrigin\}\$request_uri";/);
   }],
   ["可信 TLS 回源使用独立 8081 且不公开绑定", () => {
     assert.match(nginx, /server\s*\{\s*listen 8081;/);
     assert.match(compose, /"127\.0\.0\.1:8081:8081"/);
     assert.match(dockerfile, /^EXPOSE 8080 8081$/m);
+  }],
+  ["可信 TLS 回源只接受 snapshot 绑定的规范 Host，健康检查使用容器回环专口", () => {
+    assert.match(nginxMain, /include \/etc\/nginx\/public-origin-host\.conf;/);
+    assert.match(nginx, /server\s*\{\s*listen 127\.0\.0\.1:8082;[\s\S]*?location = \/healthz\s*\{\s*return 204;/);
+    assert.match(nginx, /server\s*\{\s*listen 8081;[\s\S]*?if \(\$hc_public_origin_host_allowed = 0\) \{ return 421; \}/);
+    assert.match(compose, /http:\/\/127\.0\.0\.1:8082\/healthz/);
+    assert.doesNotMatch(compose, /http:\/\/127\.0\.0\.1:8081\//);
+    assert.match(dockerfile, /--nginx-origin-host \.\/public-origin-host\.conf/);
+    assert.match(seoGenerator, /map \$host \$hc_public_origin_host_allowed/);
   }],
   ["不再使用客户端可控协议头或追加式 XFF", () => {
     assert.doesNotMatch(nginx, /\$http_x_forwarded_proto/);
@@ -36,9 +50,10 @@ const checks = [
     assert.match(nginx, /server\s*\{\s*listen 8081;[\s\S]*?set_real_ip_from 0\.0\.0\.0\/0;[\s\S]*?set_real_ip_from ::\/0;[\s\S]*?real_ip_header X-Real-IP;[\s\S]*?real_ip_recursive off;/);
     assert.match(nginx, /proxy_set_header X-Real-IP \$remote_addr;/);
   }],
-  ["健康检查走可信入口且不伪造协议头", () => {
-    assert.match(compose, /http:\/\/127\.0\.0\.1:8081\//);
-    assert.doesNotMatch(compose, /wget[^\n]*X-Forwarded-Proto/);
+  ["健康检查仅走容器回环专口且不伪造公开请求头", () => {
+    assert.match(compose, /http:\/\/127\.0\.0\.1:8082\/healthz/);
+    assert.doesNotMatch(compose, /wget[^\n]*(?:Host:|X-Forwarded-|Forwarded:)/);
+    assert.match(nginx, /listen 127\.0\.0\.1:8082;/);
   }],
   ["旧搜索入口只返回保留查询串的同源相对重定向", () => {
     const searchLocation = nginx.match(/location = \/search\s*\{([\s\S]*?)\n\s*\}/)?.[1] ?? "";
@@ -84,7 +99,7 @@ console.log(JSON.stringify({
   limitations: [
     {
       code: "TARGET_EDGE_CANONICAL_HOST_ALLOWLIST_UNVERIFIED",
-      reason: "8080 当前按请求 Host 生成 HTTPS Location；正式域名或上游 Host allowlist 未在仓库内确定。",
+      reason: "内层 8080 重定向与 8081 回源 Host 均已绑定不可变 snapshot；外层 TLS edge 的 SNI/Host allowlist 仍须在目标环境验证。",
     },
     {
       code: "TARGET_EDGE_REAL_IP_TRUST_BOUNDARY_UNVERIFIED",

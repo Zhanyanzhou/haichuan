@@ -60,6 +60,26 @@ export function assertSafeFallbackHtml(html, pathname) {
   }
 }
 
+export function matchesPublishedRouteBody(html, route) {
+  if (route.bootstrapPageDocument && route.path === "/") {
+    return html.includes('data-public-first-fold="published"')
+      && /<script\b(?=[^>]*id=["']hc-published-page-document["'])(?=[^>]*type=["']application\/json["'])[^>]*>/i.test(html);
+  }
+  return html.includes(route.renderedBodyHtml);
+}
+
+export function assertRepresentativeSnapshotCoverage(routes) {
+  const kinds = new Set(routes.map((route) => route.kind));
+  const locales = new Set(routes.map((route) => route.locale));
+  if (
+    !["page", "legal", "product"].every((kind) => kinds.has(kind))
+    || locales.size !== 1
+    || !locales.has("zh-CN")
+  ) {
+    fail("Representative HTTP verification requires Chinese-only page, legal, and product fixtures.");
+  }
+}
+
 function parseArguments(argv) {
   const result = { baseUrl: "", snapshot: "", requireRepresentative: false };
   for (let index = 0; index < argv.length; index += 1) {
@@ -113,11 +133,7 @@ function assertLocation(response, pathname, search) {
 export async function verifyPublicSeoHttp({ baseUrl, snapshot, requireRepresentative = false }) {
   const verifiedSnapshot = validatePublicSeoSnapshot(snapshot);
   if (requireRepresentative) {
-    const kinds = new Set(verifiedSnapshot.routes.map((route) => route.kind));
-    const locales = new Set(verifiedSnapshot.routes.map((route) => route.locale));
-    if (!["page", "legal", "product"].every((kind) => kinds.has(kind)) || !locales.has("zh-CN") || !locales.has("en")) {
-      fail("Representative HTTP verification requires Chinese, English, page, legal, and product fixtures.");
-    }
+    assertRepresentativeSnapshotCoverage(verifiedSnapshot.routes);
   }
 
   if (!verifiedSnapshot.contentReady) {
@@ -146,7 +162,7 @@ export async function verifyPublicSeoHttp({ baseUrl, snapshot, requireRepresenta
     assertDocumentLocale(html, route.locale, `Published route ${route.path}`);
     const canonical = escapeHtml(new URL(route.canonicalPath, verifiedSnapshot.origin).href);
     if (
-      !html.includes(route.renderedBodyHtml)
+      !matchesPublishedRouteBody(html, route)
       || !html.includes(`data-prerendered-path="${escapeHtml(route.path)}"`)
       || !html.includes(`data-published-content-hash="${route.contentHash}"`)
       || !html.includes(`name="published-content-hash" content="${route.contentHash}"`)

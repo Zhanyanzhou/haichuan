@@ -7,6 +7,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createPublicSeoSnapshot } from "./export-public-seo-snapshot.mjs";
 import {
+  renderCanonicalOriginHostMap,
+  renderCanonicalOriginRedirect,
   renderPublicSeoArtifacts,
   renderPublicSeoNginxMap,
   renderPublicSeoPolicy,
@@ -54,6 +56,8 @@ async function prepareVerifiedArtifacts(routes = makeRepresentativeRoutes()) {
     snapshot,
     prerenderManifestPath: join(outputDirectory, "prerendered-routes.json"),
     nginxMapPath: join(temporaryDirectory, "public-seo-routes.map.conf"),
+    nginxOriginRedirectPath: join(temporaryDirectory, "public-origin-redirect.conf"),
+    nginxOriginHostPath: join(temporaryDirectory, "public-origin-host.conf"),
   };
 }
 
@@ -71,6 +75,10 @@ function runVerifiedGenerator(prepared, ...arguments_) {
       prepared.outputDirectory,
       "--nginx-map",
       prepared.nginxMapPath,
+      "--nginx-origin-redirect",
+      prepared.nginxOriginRedirectPath,
+      "--nginx-origin-host",
+      prepared.nginxOriginHostPath,
       ...arguments_,
     ],
     { stdio: "pipe" },
@@ -173,6 +181,14 @@ test("strict schema v3 emits only hash-matched Chinese routes and x-default alte
   );
   assert.match(nginxMap, /return 308 "\/about\$is_args\$args";/);
   assert.doesNotMatch(nginxMap, /^location = "\/en(?:\/|\")/m);
+  assert.equal(
+    readFileSync(prepared.nginxOriginRedirectPath, "utf8"),
+    '# Generated from the immutable SEO snapshot; included inside the public HTTP redirect location.\nreturn 308 "https://jewelry.example.test$request_uri";\n',
+  );
+  assert.equal(
+    readFileSync(prepared.nginxOriginHostPath, "utf8"),
+    '# Generated from the immutable SEO snapshot; included inside the Nginx http context.\nmap $host $hc_public_origin_host_allowed {\n  default 0;\n  "jewelry.example.test" 1;\n}\n',
+  );
 });
 
 test("strict generation accepts the home first-fold artifact bound to its published snapshot", async (t) => {
@@ -219,6 +235,28 @@ test("generated canonical redirects never expose an absolute origin or internal 
   );
   assert.doesNotMatch(nginxMap, /https?:\/\//i);
   assert.doesNotMatch(nginxMap, /:8081/);
+});
+
+test("public HTTP redirect is pinned to the canonical immutable snapshot origin", () => {
+  assert.equal(
+    renderCanonicalOriginRedirect("https://jewelry.example.test"),
+    '# Generated from the immutable SEO snapshot; included inside the public HTTP redirect location.\nreturn 308 "https://jewelry.example.test$request_uri";\n',
+  );
+  assert.throws(
+    () => renderCanonicalOriginRedirect("http://jewelry.example.test"),
+    /explicit HTTPS origin|HTTPS origin/,
+  );
+});
+
+test("trusted TLS origin host is pinned to the canonical immutable snapshot hostname", () => {
+  assert.equal(
+    renderCanonicalOriginHostMap("https://Jewelry.Example.Test:8443"),
+    '# Generated from the immutable SEO snapshot; included inside the Nginx http context.\nmap $host $hc_public_origin_host_allowed {\n  default 0;\n  "jewelry.example.test" 1;\n}\n',
+  );
+  assert.throws(
+    () => renderCanonicalOriginHostMap("http://jewelry.example.test"),
+    /explicit HTTPS origin|HTTPS origin/,
+  );
 });
 
 test("strict generation fails closed on HTML drift, content hash drift, and origin mismatch", async (t) => {
@@ -291,6 +329,8 @@ test("contentReady=false produces global noindex and safe public-route routing",
   await prerenderPublicRoutes({ snapshot, baseHtml: BASE_HTML, outDir: outputDirectory });
   const nginxMapPath = join(temporaryDirectory, "routes.conf");
   const nginxPolicyPath = join(temporaryDirectory, "policy.conf");
+  const nginxOriginRedirectPath = join(temporaryDirectory, "origin-redirect.conf");
+  const nginxOriginHostPath = join(temporaryDirectory, "origin-host.conf");
   execFileSync(process.execPath, [
     scriptPath,
     "--strict",
@@ -300,11 +340,15 @@ test("contentReady=false produces global noindex and safe public-route routing",
     "--out-dir", outputDirectory,
     "--nginx-map", nginxMapPath,
     "--nginx-policy", nginxPolicyPath,
+    "--nginx-origin-redirect", nginxOriginRedirectPath,
+    "--nginx-origin-host", nginxOriginHostPath,
   ], { stdio: "pipe" });
   assert.match(readFileSync(join(outputDirectory, "robots.txt"), "utf8"), /^Disallow: \/$/m);
   assert.doesNotMatch(readFileSync(join(outputDirectory, "sitemap.xml"), "utf8"), /<loc>/);
   assert.match(readFileSync(nginxMapPath, "utf8"), /preproduction-not-ready\.html/);
   assert.match(readFileSync(nginxPolicyPath, "utf8"), /default "noindex, nofollow"/);
+  assert.match(readFileSync(nginxOriginRedirectPath, "utf8"), /https:\/\/jewelry\.example\.test\$request_uri/);
+  assert.match(readFileSync(nginxOriginHostPath, "utf8"), /"jewelry\.example\.test" 1;/);
   assert.match(renderPublicSeoPolicy(false), /default "noindex, nofollow"/);
   assert.doesNotMatch(renderPublicSeoNginxMap([], { contentReady: false }), /index,follow/);
 });

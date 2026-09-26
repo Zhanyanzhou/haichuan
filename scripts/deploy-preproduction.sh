@@ -43,14 +43,16 @@ docker compose version >/dev/null
 
 declare SERVER_IMAGE_NAME SERVER_IMAGE_DIGEST CLIENT_IMAGE_NAME CLIENT_IMAGE_DIGEST
 declare OPERATIONS_IMAGE_NAME OPERATIONS_IMAGE_DIGEST RELEASE_GIT_SHA RELEASE_SOURCE
-declare MIGRATION_BUNDLE_SHA256 ASSURANCE_LEVEL PUBLIC_SEO_CONTENT_READY PUBLIC_SEO_SOURCE_KIND INITIAL_CUTOVER_AUTHORIZED
+declare MIGRATION_BUNDLE_SHA256 RELEASE_PROFILE ASSURANCE_LEVEL PUBLIC_SEO_CONTENT_READY PUBLIC_SEO_SOURCE_KIND INITIAL_CUTOVER_AUTHORIZED
+declare PUBLIC_SEO_PAGE_HASH_HOME PUBLIC_SEO_PAGE_HASH_ABOUT PUBLIC_SEO_PAGE_HASH_PRODUCTS
+declare PUBLIC_SEO_PAGE_HASH_CATALOG PUBLIC_SEO_PAGE_HASH_CUSTOM PUBLIC_SEO_PAGE_HASH_CONTACT
 prepare_output="$(node "$project_root/scripts/prepare-preproduction-deploy.mjs" \
   --manifest "$manifest" \
   --expected-manifest-sha256 "$expected_manifest_sha256" \
   --env-file "$env_file")"
 while IFS='=' read -r key value; do
   case "$key" in
-    SERVER_IMAGE_NAME|SERVER_IMAGE_DIGEST|CLIENT_IMAGE_NAME|CLIENT_IMAGE_DIGEST|OPERATIONS_IMAGE_NAME|OPERATIONS_IMAGE_DIGEST|RELEASE_GIT_SHA|RELEASE_SOURCE|MIGRATION_BUNDLE_SHA256|ASSURANCE_LEVEL|PUBLIC_SEO_CONTENT_READY|PUBLIC_SEO_SOURCE_KIND|INITIAL_CUTOVER_AUTHORIZED)
+    SERVER_IMAGE_NAME|SERVER_IMAGE_DIGEST|CLIENT_IMAGE_NAME|CLIENT_IMAGE_DIGEST|OPERATIONS_IMAGE_NAME|OPERATIONS_IMAGE_DIGEST|RELEASE_GIT_SHA|RELEASE_SOURCE|MIGRATION_BUNDLE_SHA256|RELEASE_PROFILE|ASSURANCE_LEVEL|PUBLIC_SEO_CONTENT_READY|PUBLIC_SEO_SOURCE_KIND|PUBLIC_SEO_PAGE_HASH_HOME|PUBLIC_SEO_PAGE_HASH_ABOUT|PUBLIC_SEO_PAGE_HASH_PRODUCTS|PUBLIC_SEO_PAGE_HASH_CATALOG|PUBLIC_SEO_PAGE_HASH_CUSTOM|PUBLIC_SEO_PAGE_HASH_CONTACT|INITIAL_CUTOVER_AUTHORIZED)
       printf -v "$key" '%s' "$value" ;;
     *) echo "DEPLOY_PREPARE_OUTPUT_INVALID" >&2; exit 1 ;;
   esac
@@ -94,6 +96,9 @@ fi
 
 export SERVER_IMAGE_NAME SERVER_IMAGE_DIGEST CLIENT_IMAGE_NAME CLIENT_IMAGE_DIGEST
 export OPERATIONS_IMAGE_NAME OPERATIONS_IMAGE_DIGEST RELEASE_GIT_SHA RELEASE_SOURCE MIGRATION_BUNDLE_SHA256
+export RELEASE_PROFILE
+export PUBLIC_SEO_PAGE_HASH_HOME PUBLIC_SEO_PAGE_HASH_ABOUT PUBLIC_SEO_PAGE_HASH_PRODUCTS
+export PUBLIC_SEO_PAGE_HASH_CATALOG PUBLIC_SEO_PAGE_HASH_CUSTOM PUBLIC_SEO_PAGE_HASH_CONTACT
 compose=(docker compose --project-name "$project_name" --env-file "$env_file" -f "$project_root/docker-compose.yml")
 operations_compose=("${compose[@]}" -f "$project_root/docker-compose.operations.yml" --profile operations)
 
@@ -155,6 +160,14 @@ docker pull "$OPERATIONS_IMAGE_NAME@sha256:$OPERATIONS_IMAGE_DIGEST" >/dev/null
 "${operations_compose[@]}" run --rm migration-status
 if [ "$PUBLIC_SEO_CONTENT_READY" = "true" ]; then
   "${operations_compose[@]}" run --rm release-preflight
+  if [ "$rollback_available" = "true" ]; then
+    node "$project_root/scripts/verify-public-page-sync.mjs" \
+      --manifest "$manifest" \
+      --base-url http://127.0.0.1:8081 \
+      --mode api
+  else
+    echo "DEPLOY_PREMUTATION_PAGE_SYNC_SKIPPED reason=authorized-initial-cutover"
+  fi
 else
   echo "DEPLOY_CONTENT_PREFLIGHT_SKIPPED reason=signed-safe-fallback"
 fi
@@ -163,7 +176,12 @@ mutation_started="true"
 "${compose[@]}" up -d --no-deps --wait server client backup
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8081/ >"$safe_home_file"
 curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8081/api/ready >/dev/null
-if [ "$PUBLIC_SEO_CONTENT_READY" = "false" ]; then
+if [ "$PUBLIC_SEO_CONTENT_READY" = "true" ]; then
+  node "$project_root/scripts/verify-public-page-sync.mjs" \
+    --manifest "$manifest" \
+    --base-url http://127.0.0.1:8081 \
+    --mode full
+else
   grep -F 'data-content-ready="false"' "$safe_home_file" >/dev/null \
     || { echo "DEPLOY_SAFE_FALLBACK_MARKER_MISSING" >&2; exit 1; }
   curl --fail --silent --show-error --head --max-time 10 http://127.0.0.1:8081/ \

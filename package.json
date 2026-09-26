@@ -7,6 +7,7 @@
     "node": "22.x"
   },
   "scripts": {
+    "preinstall": "node scripts/verify-node-version.mjs",
     "dev": "npm run build:server && concurrently \"npm run dev:server:run\" \"npm run dev:client\"",
     "dev:server": "npm run build:server && npm run dev:server:run",
     "dev:server:run": "cd server && node --env-file=.env scripts/start-local.cjs",
@@ -43,8 +44,10 @@
     "verify:environment-contract": "node scripts/verify-environment-contract.mjs",
     "verify:wechat-pay-certificate-files": "node scripts/verify-environment-contract.mjs --wechat-pay-host-files",
     "verify:migration-integrity": "node scripts/verify-migration-integrity.mjs",
+    "verify:dependency-licenses": "node scripts/verify-dependency-licenses.mjs",
+    "verify:node-version": "node scripts/verify-node-version.mjs",
     "verify:release-images": "node scripts/verify-release-images.mjs --static",
-    "test:release-supply-chain": "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs scripts/production-evidence-collector.spec.mjs",
+    "test:release-supply-chain": "node --test scripts/release-profile-contract.spec.mjs scripts/verify-dependency-licenses.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-node-version.spec.mjs scripts/verify-public-page-sync.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs scripts/production-evidence-collector.spec.mjs",
     "verify:production-evidence": "node scripts/verify-production-evidence.mjs",
     "audit:public-assets": "node scripts/audit-public-assets.mjs",
     "verify:public-asset-audit": "node scripts/audit-public-assets.mjs --check artifacts/public-asset-audit/current.json",

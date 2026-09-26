@@ -88,6 +88,9 @@ $clientBuildContext = Join-Path $playwrightOutputDirectory ".client-build-contex
 $seoInputPath = Join-Path $playwrightOutputDirectory "public-seo-snapshot-input.json"
 $seoSnapshotPath = Join-Path $clientBuildContext ".release-seo\public-seo-snapshot.json"
 $seoRoutesPath = Join-Path $clientBuildContext ".release-seo\public-seo-routes.conf"
+$seoPolicyPath = Join-Path $clientBuildContext ".release-seo\public-seo-policy.conf"
+$seoOriginRedirectPath = Join-Path $clientBuildContext ".release-seo\public-origin-redirect.conf"
+$seoOriginHostPath = Join-Path $clientBuildContext ".release-seo\public-origin-host.conf"
 $seoOrigin = "https://qa-isolated.example.invalid"
 
 function Assert-ExternalSuccess([string]$label) {
@@ -302,7 +305,10 @@ try {
     --manifest $seoSnapshotPath `
     --prerender-manifest (Join-Path $clientBuildContext "dist\prerendered-routes.json") `
     --out-dir (Join-Path $clientBuildContext "dist") `
-    --nginx-map $seoRoutesPath
+    --nginx-map $seoRoutesPath `
+    --nginx-policy $seoPolicyPath `
+    --nginx-origin-redirect $seoOriginRedirectPath `
+    --nginx-origin-host $seoOriginHostPath
   Assert-ExternalSuccess "生成隔离 QA SEO 与 Nginx 冻结制品"
   $seoSnapshotHash = (Get-Content -LiteralPath $seoSnapshotPath -Raw -Encoding utf8 | ConvertFrom-Json).snapshotHash
   $seoPrerenderManifestSha256 = Get-Sha256 (Join-Path $clientBuildContext "dist\prerendered-routes.json")
@@ -580,7 +586,10 @@ try {
     --manifest $seoSnapshotPath `
     --prerender-manifest (Join-Path $clientBuildContext "dist\prerendered-routes.json") `
     --out-dir (Join-Path $clientBuildContext "dist") `
-    --nginx-map $seoRoutesPath
+    --nginx-map $seoRoutesPath `
+    --nginx-policy $seoPolicyPath `
+    --nginx-origin-redirect $seoOriginRedirectPath `
+    --nginx-origin-host $seoOriginHostPath
   Assert-ExternalSuccess "生成双语发布后的 SEO 与 Nginx 冻结制品"
   $seoSnapshotHash = (Get-Content -LiteralPath $seoSnapshotPath -Raw -Encoding utf8 | ConvertFrom-Json).snapshotHash
   $seoPrerenderManifestSha256 = Get-Sha256 (Join-Path $clientBuildContext "dist\prerendered-routes.json")

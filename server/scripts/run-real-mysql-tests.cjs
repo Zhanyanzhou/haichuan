@@ -7,22 +7,63 @@ const { tmpdir } = require("node:os");
 const path = require("node:path");
 
 const DEFAULT_TEST_FILE_TIMEOUT_MS = 120_000;
+const REQUIRED_MIGRATION_SESSION_COLLATION = "utf8mb4_unicode_ci";
+const REQUIRED_MIGRATION_DATABASE_COLLATION = "utf8mb4_unicode_ci";
+const REQUIRED_MIGRATION_SERVER_CHARACTER_SET = "utf8mb4";
+const REQUIRED_MIGRATION_SERVER_COLLATION = "utf8mb4_unicode_ci";
 
 const serverRoot = path.resolve(__dirname, "..");
 const sharedTestFiles = [
   "src/common/notifications/reliable-notifications.mysql.spec.ts",
   "src/modules/auth/admin-auth-session.mysql.spec.ts",
+  "src/modules/cart/cart.mysql.spec.ts",
+  "src/modules/customers/customers.admin-staff-authorization.mysql.spec.ts",
   "src/modules/customers/customers.identity-isolation.mysql.spec.ts",
   "src/modules/customers/customers.sms-security.mysql.spec.ts",
   "src/modules/leads/leads.workflow.mysql.spec.ts",
+  "src/modules/ai-classify/ai-classify.staff-authorization.mysql.spec.ts",
+  "src/modules/gold-price/gold-price.staff-authorization.mysql.spec.ts",
+  "src/modules/marketing/marketing.staff-authorization.mysql.spec.ts",
+  "src/modules/analytics/analytics.staff-authorization.mysql.spec.ts",
   "src/modules/page-modules/dynamic-template-page-instance.real.spec.ts",
+  "src/modules/page-modules/dynamic-templates.staff-authorization.mysql.spec.ts",
+  "src/modules/page-modules/page-modules.staff-authorization.mysql.spec.ts",
   "src/modules/page-modules/media-publication.real.mysql.spec.ts",
+  "src/modules/reviews/reviews.staff-authorization.mysql.spec.ts",
+  "src/modules/settings/settings.staff-authorization.mysql.spec.ts",
+  "src/modules/statistics/statistics.staff-authorization.mysql.spec.ts",
+  "src/modules/users/users.staff-authorization.mysql.spec.ts",
+  "src/modules/partner-applications/partner-applications.staff-authorization.mysql.spec.ts",
+  "src/modules/products/products.staff-authorization.mysql.spec.ts",
+  "src/modules/shipping-templates/shipping-templates.staff-authorization.mysql.spec.ts",
+  "src/modules/after-sales/after-sales.staff-authorization.mysql.spec.ts",
+  "src/modules/refunds/refunds.staff-authorization.mysql.spec.ts",
+  "src/modules/inventory/inventory.staff-authorization.mysql.spec.ts",
+  "src/modules/quotations/quotations.staff-authorization.mysql.spec.ts",
+  "src/modules/payment-proofs/payment-proofs.mysql.spec.ts",
   "src/modules/orders/trade.real-db-concurrency.spec.ts",
   "src/modules/leads/leads.privacy-disposition.mysql.spec.ts",
   "src/modules/selection-inquiry/selection-inquiry.mysql.spec.ts",
   "src/modules/upload/media-immutability.mysql.spec.ts",
+  "src/modules/upload/media-staff-authorization.mysql.spec.ts",
 ];
 const isolatedTestSuites = [
+  {
+    name: "consultation-journey",
+    file: "src/modules/leads/consultation-journey.real-http.mysql.spec.ts",
+    timeoutMs: 300_000,
+    environment: ({ runId }) => ({
+      CONSULTATION_REAL_MYSQL_TEST: "1",
+      CONSULTATION_RUN_ID: runId,
+      JWT_SECRET: `consultation-${runId}-local-isolated-secret`,
+      RELEASE_PROFILE: "lead-generation",
+      CUSTOMER_COMMERCE_ENABLED: "false",
+      CUSTOMER_QUOTATION_ORDERING_ENABLED: "false",
+      PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "false",
+      PAYMENT_GATEWAY_REFUNDS_ENABLED: "false",
+      NOTIFICATION_DELIVERY_ENABLED: "false",
+    }),
+  },
   {
     name: "order-operations",
     file: "src/modules/orders/order-operations.real-http.mysql.spec.ts",
@@ -96,6 +137,27 @@ function validateTarget(env) {
     || target.search || target.hash
   ) throw new Error("REAL_MYSQL_TARGET_NOT_DISPOSABLE_TEST_DATABASE");
   return target.href;
+}
+
+function assertMigrationSessionCollation(actual) {
+  if (actual !== REQUIRED_MIGRATION_SESSION_COLLATION) {
+    throw new Error("REAL_MYSQL_MIGRATION_SESSION_COLLATION_REQUIRED");
+  }
+}
+
+function assertMigrationDatabaseCollation(actual) {
+  if (actual !== REQUIRED_MIGRATION_DATABASE_COLLATION) {
+    throw new Error("REAL_MYSQL_MIGRATION_DATABASE_COLLATION_REQUIRED");
+  }
+}
+
+function assertMigrationServerDefaults(characterSet, collation) {
+  if (
+    characterSet !== REQUIRED_MIGRATION_SERVER_CHARACTER_SET
+    || collation !== REQUIRED_MIGRATION_SERVER_COLLATION
+  ) {
+    throw new Error("REAL_MYSQL_MIGRATION_SERVER_DEFAULTS_REQUIRED");
+  }
 }
 
 function assertCompleteTap(output, minimumTests = testFiles.length) {
@@ -231,6 +293,7 @@ function runOwnedChild(args, options = {}) {
     cwd,
     env,
     timeoutMs = DEFAULT_TEST_FILE_TIMEOUT_MS,
+    exitWithParent = false,
     onLine = () => {},
     writeStdout = (chunk) => process.stdout.write(chunk),
     writeStderr = (chunk) => process.stderr.write(chunk),
@@ -244,11 +307,17 @@ function runOwnedChild(args, options = {}) {
     let stdout = "";
     let stdoutPending = "";
     let stderrPending = "";
-    const child = spawn(process.execPath, args, {
+    const childArgs = exitWithParent
+      ? ["--require", path.join(__dirname, "exit-with-parent.cjs"), ...args]
+      : args;
+    const childEnv = exitWithParent
+      ? { ...(env ?? process.env), HAICHUAN_EXIT_WITH_PARENT_OWNER: "1" }
+      : env;
+    const child = spawn(process.execPath, childArgs, {
       cwd,
-      env,
+      env: childEnv,
       detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: exitWithParent ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
     const emit = (channel, chunk, flush = false) => {
@@ -338,10 +407,10 @@ async function main() {
   const tsNodeRegister = require.resolve("ts-node/register");
   const prismaSchema = path.join(runRoot, "prisma", "schema.prisma");
   const absoluteTestFiles = (files) => files.map((file) => path.join(serverRoot, file));
-  const runTests = async (file, index, childEnv = env) => {
+  const runTests = async (file, index, childEnv = env, timeoutMs = DEFAULT_TEST_FILE_TIMEOUT_MS) => {
     const startedAt = Date.now();
     let lastStage = "process-started";
-    console.log(`REAL_MYSQL_FILE_START: ${index}/${testFiles.length} ${file}; timeout_ms=${DEFAULT_TEST_FILE_TIMEOUT_MS}`);
+    console.log(`REAL_MYSQL_FILE_START: ${index}/${testFiles.length} ${file}; timeout_ms=${timeoutMs}`);
     try {
       const result = await runOwnedChild([
         "--test", "--test-concurrency=1", "--test-reporter=tap", "-r", tsNodeRegister,
@@ -349,7 +418,7 @@ async function main() {
       ], {
         cwd: runRoot,
         env: childEnv,
-        timeoutMs: DEFAULT_TEST_FILE_TIMEOUT_MS,
+        timeoutMs,
         onLine: (line) => {
           const stage = /REAL_MYSQL_STAGE\s+(.+?)(?:\s+elapsed_ms=\d+)?$/.exec(line)?.[1];
           if (stage) lastStage = stage;
@@ -378,6 +447,12 @@ async function main() {
     const { PrismaClient } = require("@prisma/client");
     const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
     try {
+      const [session] = await prisma.$queryRawUnsafe(
+        "SELECT @@SESSION.collation_connection AS collation_connection, @@collation_database AS collation_database, @@GLOBAL.character_set_server AS character_set_server, @@GLOBAL.collation_server AS collation_server",
+      );
+      assertMigrationSessionCollation(session?.collation_connection);
+      assertMigrationDatabaseCollation(session?.collation_database);
+      assertMigrationServerDefaults(session?.character_set_server, session?.collation_server);
       const tables = await prisma.$queryRaw`
         SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()
       `;
@@ -402,7 +477,7 @@ async function main() {
       await runTests(suite.file, completedFiles + 1, {
         ...env,
         ...suite.environment({ databaseUrl, port, runId }),
-      });
+      }, suite.timeoutMs);
       completedFiles += 1;
     }
 
@@ -428,6 +503,9 @@ async function main() {
 
 module.exports = {
   validateTarget,
+  assertMigrationSessionCollation,
+  assertMigrationDatabaseCollation,
+  assertMigrationServerDefaults,
   assertCompleteTap,
   assertLocalDependencies,
   assertCompleteInventory,
@@ -438,6 +516,10 @@ module.exports = {
   runOwnedChild,
   terminateOwnedChildTree,
   DEFAULT_TEST_FILE_TIMEOUT_MS,
+  REQUIRED_MIGRATION_SESSION_COLLATION,
+  REQUIRED_MIGRATION_DATABASE_COLLATION,
+  REQUIRED_MIGRATION_SERVER_CHARACTER_SET,
+  REQUIRED_MIGRATION_SERVER_COLLATION,
   testFiles,
   isolatedTestSuites,
 };

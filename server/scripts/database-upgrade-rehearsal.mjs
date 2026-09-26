@@ -17,7 +17,9 @@ const migrationsDirectory = path.join(prismaDirectory, 'migrations');
 const prismaCli = path.join(serverDirectory, 'node_modules', 'prisma', 'build', 'index.js');
 
 export const MYSQL_IMAGE = 'mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b';
-export const EXPECTED_MIGRATION_COUNT = 58;
+export const MIGRATION_CONNECTION_COLLATION = 'utf8mb4_unicode_ci';
+export const MYSQL_INIT_CONNECT_SQL = `SET collation_connection = ${MIGRATION_CONNECTION_COLLATION}`;
+export const EXPECTED_MIGRATION_COUNT = 70;
 export const CHECKPOINT_MIGRATION_COUNT = 51;
 export const MIGRATION_PRIVILEGES = Object.freeze([
   'SELECT',
@@ -38,7 +40,40 @@ export const QUOTATION_INVARIANTS_MIGRATION = '20260913121000_enforce_quotation_
 export const MEDIA_AUTHORIZATION_MIGRATION = '20260913122000_add_media_authorization_inheritance';
 export const CUSTOMER_SMS_RATE_LIMIT_MIGRATION = '20260915002000_add_customer_sms_rate_limits';
 export const PRODUCT_IMAGE_URL_INDEX_MIGRATION = '20260915113500_add_product_image_url_index';
-export const EXPECTED_TRIGGER_COUNT = 14;
+export const AUDITED_MEDIA_SELF_REVIEW_MIGRATION = '20260916174500_allow_audited_media_self_review';
+export const DYNAMIC_TEMPLATE_CATALOG_COVER_MIGRATION = '20260918120000_add_dynamic_template_catalog_cover';
+export const CHECKOUT_IDEMPOTENCY_MIGRATION = '20260920173000_add_checkout_idempotency';
+export const PAYMENT_PROOF_ASSET_MIGRATION = '20260920200000_add_payment_proof_assets';
+export const CUSTOMER_GATEWAY_OPERATION_MIGRATION = '20260921120000_add_customer_gateway_operations';
+export const INQUIRY_REPLY_BACKFILL_MIGRATION = '20260922120000_backfill_inquiry_reply_activities';
+export const PRODUCT_QUALITY_V3_QUARANTINE_MIGRATION = '20260922150000_quarantine_legacy_product_quality_hashes';
+export const SERVICE_PRIVACY_CONSENT_HASH_MIGRATION = '20260923120000_add_service_privacy_consent_hashes';
+export const AFTER_SALES_IDEMPOTENCY_MIGRATION = '20260923170000_add_after_sales_idempotency';
+export const CUSTOMER_ADDRESS_IDEMPOTENCY_MIGRATION = '20260923190000_add_customer_address_idempotency';
+export const QUOTATION_CREATION_IDEMPOTENCY_MIGRATION = '20260924210000_add_quotation_creation_idempotency';
+export const LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_MIGRATION = '20260924220000_add_lead_retention_disposition_idempotency';
+export const EXPECTED_MIGRATION_TAIL = Object.freeze([
+  TRADE_MIGRATION,
+  PROFILE_MIGRATION,
+  QUOTATION_EXPANSION_MIGRATION,
+  QUOTATION_INVARIANTS_MIGRATION,
+  MEDIA_AUTHORIZATION_MIGRATION,
+  CUSTOMER_SMS_RATE_LIMIT_MIGRATION,
+  PRODUCT_IMAGE_URL_INDEX_MIGRATION,
+  AUDITED_MEDIA_SELF_REVIEW_MIGRATION,
+  DYNAMIC_TEMPLATE_CATALOG_COVER_MIGRATION,
+  CHECKOUT_IDEMPOTENCY_MIGRATION,
+  PAYMENT_PROOF_ASSET_MIGRATION,
+  CUSTOMER_GATEWAY_OPERATION_MIGRATION,
+  INQUIRY_REPLY_BACKFILL_MIGRATION,
+  PRODUCT_QUALITY_V3_QUARANTINE_MIGRATION,
+  SERVICE_PRIVACY_CONSENT_HASH_MIGRATION,
+  AFTER_SALES_IDEMPOTENCY_MIGRATION,
+  CUSTOMER_ADDRESS_IDEMPOTENCY_MIGRATION,
+  QUOTATION_CREATION_IDEMPOTENCY_MIGRATION,
+  LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_MIGRATION,
+]);
+export const EXPECTED_TRIGGER_COUNT = 15;
 
 export const PREFLIGHT_SQL = `
 SELECT 'blank_customer_email' AS issue
@@ -248,6 +283,10 @@ function removeTree(directory) {
 function verifyStaticMigrationGuards() {
   const tradeSql = fs.readFileSync(path.join(migrationsDirectory, TRADE_MIGRATION, 'migration.sql'), 'utf8');
   const profileSql = fs.readFileSync(path.join(migrationsDirectory, PROFILE_MIGRATION, 'migration.sql'), 'utf8');
+  const paymentProofSql = fs.readFileSync(
+    path.join(migrationsDirectory, PAYMENT_PROOF_ASSET_MIGRATION, 'migration.sql'),
+    'utf8',
+  );
   assertGuardBeforePersistentDdl(
     tradeSql,
     'DROP TEMPORARY TABLE `_guard_installment_payment_orphan`;',
@@ -258,22 +297,41 @@ function verifyStaticMigrationGuards() {
     'DROP TEMPORARY TABLE `_guard_duplicate_customer_email`;',
     'ALTER TABLE `customers`',
   );
+  assertGuardBeforePersistentDdl(
+    paymentProofSql,
+    'DROP TEMPORARY TABLE `_guard_payment_proof_invalid_owner`;',
+    'CREATE TABLE `payment_proof_assets`',
+  );
+  assertGuardBeforePersistentDdl(
+    paymentProofSql,
+    'DROP TEMPORARY TABLE `_guard_payment_proof_key_conflict`;',
+    'CREATE TABLE `payment_proof_assets`',
+  );
   assert.match(firstPersistentDdl(tradeSql), /^CREATE UNIQUE INDEX `payments_gateway_trade_no_key`/);
   assert.match(firstPersistentDdl(profileSql), /^ALTER TABLE `customers`/);
+  assert.match(firstPersistentDdl(paymentProofSql), /^CREATE TABLE `payment_proof_assets`/);
+  assert.match(paymentProofSql, /CONSTRAINT `payment_proof_assets_state_check`[\s\S]*?CHECK \(/);
+  assert.match(paymentProofSql, /CONSTRAINT `payment_proof_assets_submission_check`[\s\S]*?CHECK \(/);
+  assert.match(paymentProofSql, /UNIQUE INDEX `payment_proof_assets_submission_key_hash_key`/);
+  assert.match(paymentProofSql, /CREATE TRIGGER `payment_proof_assets_controlled_update`/);
   assertAllGuardsBeforePersistentDdl(tradeSql);
   assertAllGuardsBeforePersistentDdl(profileSql);
+  assertAllGuardsBeforePersistentDdl(paymentProofSql);
 }
 
 export async function main() {
   const migrationNames = discoverMigrations();
   assert.equal(migrationNames.length, EXPECTED_MIGRATION_COUNT, 'Unexpected migration inventory size');
-  assert.equal(migrationNames[51], TRADE_MIGRATION);
-  assert.equal(migrationNames[52], PROFILE_MIGRATION);
-  assert.equal(migrationNames[53], QUOTATION_EXPANSION_MIGRATION);
-  assert.equal(migrationNames[54], QUOTATION_INVARIANTS_MIGRATION);
-  assert.equal(migrationNames[55], MEDIA_AUTHORIZATION_MIGRATION);
-  assert.equal(migrationNames[56], CUSTOMER_SMS_RATE_LIMIT_MIGRATION);
-  assert.equal(migrationNames[57], PRODUCT_IMAGE_URL_INDEX_MIGRATION);
+  assert.equal(
+    EXPECTED_MIGRATION_COUNT,
+    CHECKPOINT_MIGRATION_COUNT + EXPECTED_MIGRATION_TAIL.length,
+    'Expected migration count must match the checkpoint plus the explicit tail contract',
+  );
+  assert.deepEqual(
+    migrationNames.slice(CHECKPOINT_MIGRATION_COUNT),
+    EXPECTED_MIGRATION_TAIL,
+    'Unexpected migration tail order',
+  );
   assert.ok(fs.existsSync(prismaCli), 'Run npm install in server before this rehearsal');
   verifyStaticMigrationGuards();
 
@@ -498,6 +556,7 @@ export async function main() {
       '--server-id=1',
       '--log-bin=mysql-bin',
       '--log-bin-trust-function-creators=ON',
+      `--init-connect=${MYSQL_INIT_CONNECT_SQL}`,
     ]);
     containerCreated = createResult.status === 0;
 
@@ -539,11 +598,24 @@ export async function main() {
     const stage51 = prepareMigrationStage(tempDirectory, migrationNames, CHECKPOINT_MIGRATION_COUNT);
     const stage52 = prepareMigrationStage(tempDirectory, migrationNames, 52);
     const stage53 = prepareMigrationStage(tempDirectory, migrationNames, 53);
-    const stage56 = prepareMigrationStage(tempDirectory, migrationNames, EXPECTED_MIGRATION_COUNT);
+    const stageCurrent = prepareMigrationStage(tempDirectory, migrationNames, EXPECTED_MIGRATION_COUNT);
     const base51 = `${resourcePrefix}_base51`;
     createDatabase(base51);
-    const connectedIdentity = migrationMysql(base51, 'SELECT CURRENT_USER();').stdout.trim();
+    const [[connectedIdentity, migrationSessionCollation, initConnectSql]] = parseRows(
+      migrationMysql(
+        base51,
+        'SELECT CURRENT_USER(), @@SESSION.collation_connection, @@GLOBAL.init_connect;',
+      ).stdout,
+    );
     assert.equal(connectedIdentity, `${migrationUser}@%`, 'Prisma migration identity is not the ordinary migration account');
+    assert.equal(
+      migrationSessionCollation,
+      MIGRATION_CONNECTION_COLLATION,
+      'Ordinary migration sessions must align CAST expressions with immutable utf8mb4_unicode_ci migrations',
+    );
+    assert.equal(initConnectSql, MYSQL_INIT_CONNECT_SQL, 'MySQL init_connect contract changed');
+    report.mysqlRuntime.migrationSessionCollation = migrationSessionCollation;
+    report.mysqlRuntime.initConnect = 'verified';
     const grantee = `'${migrationUser}'@'%'`;
     const escapedGrantee = grantee.replaceAll("'", "''");
     const grantedPrivileges = parseRows(mysql(null, `
@@ -664,7 +736,7 @@ export async function main() {
     cloneDatabase(healthy, base51Dump);
     const healthyBackup = dumpDatabase(healthy);
     preflight(healthy, 51);
-    deploy(healthy, stage56);
+    deploy(healthy, stageCurrent);
     validateLedger(healthy, EXPECTED_MIGRATION_COUNT);
     const triggerDefiners = parseRows(mysql(healthy, `
       SELECT trigger_name, definer
@@ -679,12 +751,12 @@ export async function main() {
     );
     report.migrationAccount.createdTriggerCount = triggerDefiners.length;
     report.migrationAccount.triggerDefinerIdentity = `${migrationUser}@%`;
-    const status = runPrisma(healthy, stage56, ['migrate', 'status']);
+    const status = runPrisma(healthy, stageCurrent, ['migrate', 'status']);
     assert.match(status.stdout, /Database schema is up to date!/);
     const diff = runPrisma(
       healthy,
-      stage56,
-      ['migrate', 'diff', '--from-url', buildDatabaseUrl(migrationUser, migrationPassword, port, healthy), '--to-schema-datamodel', stage56, '--exit-code'],
+      stageCurrent,
+      ['migrate', 'diff', '--from-url', buildDatabaseUrl(migrationUser, migrationPassword, port, healthy), '--to-schema-datamodel', stageCurrent, '--exit-code'],
       { allowFailure: true, appendSchema: false },
     );
     if (diff.status !== 0) {
@@ -707,7 +779,10 @@ export async function main() {
         'payment_plans_quotation_version_id_key',
         'payment_plans_order_id_key',
         'payment_plan_installments_payment_id_key',
-        'fulfillments_order_id_warehouse_id_key'
+        'fulfillments_order_id_warehouse_id_key',
+        'payment_proof_assets_storage_key_key',
+        'payment_proof_assets_submission_key_hash_key',
+        'quotations_creation_idempotency_key_hash_key'
       )
       GROUP BY table_name, index_name, non_unique
       ORDER BY table_name, index_name;
@@ -719,6 +794,9 @@ export async function main() {
       ['payment_plans.payment_plans_order_id_key', { nonUnique: '0', columns: 'order_id' }],
       ['payment_plan_installments.payment_plan_installments_payment_id_key', { nonUnique: '0', columns: 'payment_id' }],
       ['fulfillments.fulfillments_order_id_warehouse_id_key', { nonUnique: '0', columns: 'order_id,warehouse_id' }],
+      ['payment_proof_assets.payment_proof_assets_storage_key_key', { nonUnique: '0', columns: 'storage_key' }],
+      ['payment_proof_assets.payment_proof_assets_submission_key_hash_key', { nonUnique: '0', columns: 'submission_key_hash' }],
+      ['quotations.quotations_creation_idempotency_key_hash_key', { nonUnique: '0', columns: 'creation_idempotency_key_hash' }],
     ]);
     assert.deepEqual(uniqueIndexes, expectedUniqueIndexes);
 
@@ -739,7 +817,10 @@ export async function main() {
         'payment_plan_installments_payment_id_fkey',
         'fulfillments_warehouse_id_fkey',
         'after_sales_cases_order_item_id_fkey',
-        'refunds_after_sales_case_id_fkey'
+        'refunds_after_sales_case_id_fkey',
+        'payment_proof_assets_customer_id_fkey',
+        'payment_proof_assets_order_id_fkey',
+        'payment_proof_assets_payment_id_fkey'
       )
       GROUP BY k.table_name, k.constraint_name, r.update_rule, r.delete_rule
       ORDER BY k.table_name, k.constraint_name;
@@ -759,6 +840,18 @@ export async function main() {
       ['payment_plan_installments.payment_plan_installments_payment_id_fkey', {
         columns: 'payment_id', referencedTable: 'payments', referencedColumns: 'id',
         updateRule: 'CASCADE', deleteRule: 'RESTRICT',
+      }],
+      ['payment_proof_assets.payment_proof_assets_customer_id_fkey', {
+        columns: 'customer_id', referencedTable: 'customers', referencedColumns: 'id',
+        updateRule: 'RESTRICT', deleteRule: 'RESTRICT',
+      }],
+      ['payment_proof_assets.payment_proof_assets_order_id_fkey', {
+        columns: 'order_id', referencedTable: 'orders', referencedColumns: 'id',
+        updateRule: 'RESTRICT', deleteRule: 'RESTRICT',
+      }],
+      ['payment_proof_assets.payment_proof_assets_payment_id_fkey', {
+        columns: 'payment_id', referencedTable: 'payments', referencedColumns: 'id',
+        updateRule: 'RESTRICT', deleteRule: 'RESTRICT',
       }],
       ['payment_plans.payment_plans_order_id_fkey', {
         columns: 'order_id', referencedTable: 'orders', referencedColumns: 'id',
@@ -792,7 +885,9 @@ export async function main() {
         'payment_plans_source_check',
         'payment_plans_total_amount_check',
         'payment_plan_installments_amount_check',
-        'payment_plan_installments_sequence_check'
+        'payment_plan_installments_sequence_check',
+        'payment_proof_assets_state_check',
+        'payment_proof_assets_submission_check'
       );
     `).stdout).map(([name, clause]) => [name, normalizeCheck(clause)]));
     const expectedCheckFragments = new Map([
@@ -803,6 +898,8 @@ export async function main() {
       ['payment_plans_total_amount_check', 'total_amount > 0'],
       ['payment_plan_installments_amount_check', 'amount > 0'],
       ['payment_plan_installments_sequence_check', 'sequence > 0'],
+      ['payment_proof_assets_state_check', "status = 'uploaded' and order_id is null and payment_id is null and file_size > 0 and attached_at is null and deleting_at is null or status = 'attached' and order_id is not null and file_size > 0 and attached_at is not null and deleting_at is null or status = 'deleting' and order_id is null and payment_id is null and attached_at is null and deleting_at is not null"],
+      ['payment_proof_assets_submission_check', "status = 'deleting' and submission_key_hash is null and submission_order_id is null and file_checksum_sha256 is null and file_size is null and mime_type is null or status = 'attached' and submission_key_hash is null and submission_order_id is null and file_checksum_sha256 is null and file_size > 0 and mime_type is null or submission_key_hash is not null and submission_order_id is not null and file_checksum_sha256 is not null and file_size > 0 and mime_type is not null"],
     ]);
     assert.deepEqual(checks, expectedCheckFragments);
 

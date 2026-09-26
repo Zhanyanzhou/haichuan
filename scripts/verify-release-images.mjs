@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { load as parseYaml } from "js-yaml";
@@ -8,6 +9,8 @@ import {
   verifyContentReadinessArtifact,
   writeContentReadinessEvidence,
 } from "./verify-release-images-content-readiness.mjs";
+import { normalizeProductionOrigin } from "./export-public-seo-snapshot.mjs";
+import { isReleaseProfile } from "./release-profile-contract.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
@@ -52,6 +55,19 @@ function findWorkflowStep(job, name, code) {
   return matches[0];
 }
 
+function assertRootNodeVersionGate(job, installStepName, beforeStepName, codePrefix) {
+  const install = findWorkflowStep(job, installStepName, `${codePrefix}_ROOT_INSTALL_MISSING`);
+  const gate = findWorkflowStep(job, "校验 Node.js 发布基线", `${codePrefix}_NODE_VERSION_GATE_MISSING`);
+  const before = findWorkflowStep(job, beforeStepName, `${codePrefix}_NODE_VERSION_GATE_BOUNDARY_MISSING`);
+  const steps = workflowSteps(job, `${codePrefix}_STEPS_INVALID`);
+  if (steps.indexOf(install) >= steps.indexOf(gate) || steps.indexOf(gate) >= steps.indexOf(before)) {
+    fail(`${codePrefix}_NODE_VERSION_GATE_ORDER_INVALID`);
+  }
+  if (Object.hasOwn(gate, "working-directory") || executableRun(gate).trim() !== "npm run verify:node-version") {
+    fail(`${codePrefix}_NODE_VERSION_GATE_INVALID`);
+  }
+}
+
 function executableRun(step) {
   if (typeof step?.run !== "string") return "";
   return step.run.split(/\r?\n/).filter((line) => !line.trimStart().startsWith("#")).join("\n");
@@ -70,6 +86,9 @@ function parseWorkflow(source, code) {
 
 export function validateQualityWorkflowStructure(source) {
   const workflow = parseWorkflow(source, "QUALITY_WORKFLOW_YAML_OR_SCHEMA_INVALID");
+  const verify = workflow.jobs.verify;
+  if (!isRecord(verify)) fail("QUALITY_VERIFY_JOB_MISSING");
+  assertRootNodeVersionGate(verify, "安装根目录依赖", "安装服务端依赖", "QUALITY");
   const proof = workflow.jobs["full-proof"];
   if (!isRecord(proof) || JSON.stringify(proof.needs) !== JSON.stringify(["verify", "e2e-deterministic", "real-mysql"]) ||
       proof.if !== "always() && (github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/'))") {
@@ -162,7 +181,39 @@ export function validateReleaseWorkflowStructure(source) {
   )) {
     fail("RELEASE_SIGNING_BUILDKIT_PREDICATE_BINDING_INVALID");
   }
+  assertRootNodeVersionGate(
+    workflow.jobs["build-push"],
+    "安装发布验证依赖",
+    "构建并推送服务端镜像",
+    "RELEASE_WORKFLOW",
+  );
   return workflow;
+}
+
+export function validateDockerNpmInstallBoundary(dockerfileSource, manifestSource, buildContext) {
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestSource);
+  } catch {
+    fail(`DOCKER_BUILD_CONTEXT_PACKAGE_MANIFEST_INVALID:${buildContext}`);
+  }
+  const escapingLifecycleScripts = ["preinstall", "install", "postinstall"]
+    .filter((name) => typeof manifest?.scripts?.[name] === "string" && /\.\.[\\/]/.test(manifest.scripts[name]));
+  const normalizedDockerfile = dockerfileSource.replace(/\\\r?\n\s*/g, " ");
+  const npmCiInstructions = [...normalizedDockerfile.matchAll(/^RUN\s+([^\r\n]*\bnpm\s+ci\b[^\r\n]*)$/gim)]
+    .map((match) => match[1]);
+  if (npmCiInstructions.length === 0) {
+    fail(`DOCKER_NPM_CI_MISSING:${buildContext}`);
+  }
+  if (escapingLifecycleScripts.length > 0 &&
+      npmCiInstructions.some((instruction) => !/(?:^|\s)--ignore-scripts(?:\s|$)/.test(instruction))) {
+    fail(`DOCKER_INSTALL_SCRIPT_ESCAPES_BUILD_CONTEXT:${buildContext}:${escapingLifecycleScripts[0]}`);
+  }
+  return {
+    buildContext,
+    npmCiCount: npmCiInstructions.length,
+    isolatedLifecycleScripts: escapingLifecycleScripts,
+  };
 }
 
 export function findComposeBuildServices(source) {
@@ -267,7 +318,7 @@ function assertOperationsDockerStage() {
   const runtimeDependencies = /^FROM\s+node:22-bookworm-slim@sha256:[a-f0-9]{64}\s+AS\s+runtime-deps\s*$/im.exec(source);
   if (
     !runtimeDependencies
-    || !source.includes("npm ci --omit=dev --include=optional --legacy-peer-deps")
+    || !source.includes("npm ci --ignore-scripts --omit=dev --include=optional --legacy-peer-deps")
     || !source.includes("rm -rf node_modules/prisma node_modules/.bin/prisma")
   ) {
     fail("RUNTIME_DEPENDENCIES_STAGE_INVALID");
@@ -339,14 +390,21 @@ function assertNodeAndClientRuntimeBaseline() {
     }
   }
 
+  const serverInstallBoundary = validateDockerNpmInstallBoundary(
+    readProjectFile("server/Dockerfile"),
+    readProjectFile("server/package.json"),
+    "server",
+  );
+
   const compose = readProjectFile("docker-compose.yml");
   const clientNginx = readProjectFile("client/nginx.conf");
   const clientMainNginx = readProjectFile("client/nginx-main.conf");
   if (!compose.includes('- "80:8080"') ||
       !compose.includes('- "127.0.0.1:8081:8081"') ||
-      !compose.includes("http://127.0.0.1:8081/") ||
+      !compose.includes("http://127.0.0.1:8082/healthz") ||
       !/^\s*listen\s+8080;\s*$/m.test(clientNginx) ||
       !/^\s*listen\s+8081;\s*$/m.test(clientNginx) ||
+      !/^\s*listen\s+127\.0\.0\.1:8082;\s*$/m.test(clientNginx) ||
       !/^EXPOSE\s+8080\s+8081\s*$/m.test(readProjectFile("client/Dockerfile"))) {
     fail("CLIENT_NON_ROOT_PORT_CONTRACT_INVALID");
   }
@@ -363,7 +421,27 @@ function assertNodeAndClientRuntimeBaseline() {
     packageCount: 3,
     workflowCount: releaseStaticWorkflowPaths.length,
     dockerfileCount: 2,
+    serverDockerNpmCiCount: serverInstallBoundary.npmCiCount,
   };
+}
+
+export function validateComposeImagePinning(source) {
+  const imageValues = [...source.matchAll(/^\s+image:\s*["']?([^"'\r\n]+)["']?\s*$/gm)]
+    .map((match) => match[1].trim());
+  if (imageValues.length === 0) fail("COMPOSE_PRODUCTION_IMAGE_MISSING");
+  for (const value of imageValues) {
+    if (/(?:latest|:-local|:-2-(?:server|client))/i.test(value)) {
+      fail("COMPOSE_PRODUCTION_IMAGE_FALLBACK_FORBIDDEN");
+    }
+    if (value.startsWith("${SERVER_IMAGE_NAME:?") || value.startsWith("${CLIENT_IMAGE_NAME:?") ||
+        value.startsWith("${OPERATIONS_IMAGE_NAME:?")) {
+      continue;
+    }
+    if (!/@sha256:[a-f0-9]{64}$/.test(value)) {
+      fail(`COMPOSE_EXTERNAL_IMAGE_NOT_PINNED:${value}`);
+    }
+  }
+  return imageValues;
 }
 
 function assertComposeImages() {
@@ -381,21 +459,7 @@ function assertComposeImages() {
   ]) {
     validateComposeBuildPolicy(readProjectFile(path));
   }
-  if (/(?:latest|:-local|:-2-(?:server|client))/i.test(source)) {
-    fail("COMPOSE_PRODUCTION_IMAGE_FALLBACK_FORBIDDEN");
-  }
-
-  const imageValues = [...source.matchAll(/^\s+image:\s*["']?([^"'\r\n]+)["']?\s*$/gm)]
-    .map((match) => match[1].trim());
-  for (const value of imageValues) {
-    if (value.startsWith("${SERVER_IMAGE_NAME:?") || value.startsWith("${CLIENT_IMAGE_NAME:?") ||
-        value.startsWith("${OPERATIONS_IMAGE_NAME:?")) {
-      continue;
-    }
-    if (!/@sha256:[a-f0-9]{64}$/.test(value)) {
-      fail(`COMPOSE_EXTERNAL_IMAGE_NOT_PINNED:${value}`);
-    }
-  }
+  const imageValues = validateComposeImagePinning(source);
   for (const required of [
     "read_only: true",
     "no-new-privileges:true",
@@ -508,7 +572,7 @@ function assertReleaseWorkflow() {
     'run.event === "push"',
     'run.conclusion === "success"',
     "QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND",
-    "schemaVersion: 7",
+    "schemaVersion: 9",
     "assurance_level:",
     "assuranceLevel: \"baseline\"",
     "assuranceLevel: \"high\"",
@@ -516,6 +580,8 @@ function assertReleaseWorkflow() {
     "if: inputs.assurance_level == 'high'",
     "release_stage:",
     "PUBLIC_SEO_SOURCE_STAGE_MISMATCH",
+    "EXPECTED_PUBLIC_SEO_ORIGIN",
+    "publicSeoOrigin: manifest.publicSeo.origin",
     "qualityGate:",
     "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}${repository_stage_suffix}-operations",
     "target: operations",
@@ -717,7 +783,7 @@ function assertReleaseSupplyChainTests() {
       !rootTest.includes("npm run test:release-supply-chain")) {
     fail("RELEASE_SUPPLY_CHAIN_TEST_NOT_IN_QUALITY_SUITE");
   }
-  if (releaseTest !== "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs scripts/production-evidence-collector.spec.mjs") {
+  if (releaseTest !== "node --test scripts/release-profile-contract.spec.mjs scripts/verify-dependency-licenses.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-node-version.spec.mjs scripts/verify-public-page-sync.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs scripts/production-evidence-collector.spec.mjs") {
     fail("RELEASE_SUPPLY_CHAIN_TEST_COMMAND_INVALID");
   }
   return {
@@ -839,7 +905,7 @@ function validateImageEntry(name, entry, assuranceLevel) {
 }
 
 export function validateReleaseManifest(manifest, expected) {
-  if (manifest?.schemaVersion !== 7) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest?.schemaVersion !== 9) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
   if (manifest.assuranceLevel !== "baseline" && manifest.assuranceLevel !== "high") {
     fail("RELEASE_MANIFEST_ASSURANCE_LEVEL_INVALID");
   }
@@ -943,6 +1009,7 @@ export function validateReleaseManifest(manifest, expected) {
   }
   const publicSeo = manifest.publicSeo;
   if (!hasExactKeys(publicSeo, [
+    "origin",
     "sourceStage",
     "snapshotHash",
     "prerenderManifestSha256",
@@ -950,8 +1017,18 @@ export function validateReleaseManifest(manifest, expected) {
     "sourceArtifactDigest",
     "sourceKind",
     "contentReady",
+    "pageDocuments",
   ])) {
     fail("RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
+  }
+  let normalizedPublicSeoOrigin;
+  try {
+    normalizedPublicSeoOrigin = normalizeProductionOrigin(publicSeo.origin);
+  } catch {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_ORIGIN_INVALID");
+  }
+  if (normalizedPublicSeoOrigin !== publicSeo.origin) {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_ORIGIN_INVALID");
   }
   if (publicSeo.sourceStage !== manifest.releaseStage ||
       !/^[a-f0-9]{64}$/.test(publicSeo.snapshotHash) ||
@@ -975,6 +1052,32 @@ export function validateReleaseManifest(manifest, expected) {
   if (manifest.releaseStage === "production" && (!publicSeo.contentReady || publicSeo.sourceKind !== "approved-snapshot")) {
     fail("RELEASE_MANIFEST_PRODUCTION_CONTENT_NOT_READY");
   }
+  const requiredPagePaths = {
+    about: "/about",
+    catalog: "/catalog",
+    contact: "/contact",
+    custom: "/custom",
+    home: "/",
+    products: "/products",
+  };
+  const expectedPageKeys = Object.keys(requiredPagePaths);
+  if (!Array.isArray(publicSeo.pageDocuments)) {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_PAGES_INVALID");
+  }
+  if (!publicSeo.contentReady) {
+    if (publicSeo.pageDocuments.length !== 0) fail("RELEASE_MANIFEST_PUBLIC_SEO_PAGES_INVALID");
+  } else if (
+    publicSeo.pageDocuments.length !== expectedPageKeys.length
+    || publicSeo.pageDocuments.some((page, index) => {
+      const pageKey = expectedPageKeys[index];
+      return !hasExactKeys(page, ["pageKey", "path", "contentHash"])
+        || page.pageKey !== pageKey
+        || page.path !== requiredPagePaths[pageKey]
+        || !/^[a-f0-9]{64}$/.test(page.contentHash ?? "");
+    })
+  ) {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_PAGES_INVALID");
+  }
   validateImageEntry("server", manifest.server, manifest.assuranceLevel);
   validateImageEntry("client", manifest.client, manifest.assuranceLevel);
   validateImageEntry("operations", manifest.operations, manifest.assuranceLevel);
@@ -994,6 +1097,54 @@ export function validateReleaseManifest(manifest, expected) {
   return manifest;
 }
 
+export function verifyReleaseBundleDescriptors(manifest, releaseRoot) {
+  const root = resolve(releaseRoot);
+  let canonicalRoot;
+  try {
+    canonicalRoot = realpathSync(root);
+  } catch {
+    fail("RELEASE_BUNDLE_ROOT_INVALID");
+  }
+  let verifiedFileCount = 0;
+  for (const component of ["server", "client", "operations"]) {
+    const descriptors = manifest.assuranceLevel === "high"
+      ? [
+          ["signatureBundle", manifest[component].signatureBundle],
+          ["provenanceBundle", manifest[component].provenanceBundle],
+          ["sbomBundle", manifest[component].sbomBundle],
+        ]
+      : [
+          ["buildkitProvenance", manifest[component].buildkitProvenance],
+          ["sbom", manifest[component].sbom],
+        ];
+    for (const [kind, descriptor] of descriptors) {
+      const code = `RELEASE_BUNDLE_${component.toUpperCase()}_${kind.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`;
+      const absolutePath = resolve(root, descriptor.path);
+      const relativePath = relative(root, absolutePath);
+      if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+        fail(`${code}_PATH_INVALID`);
+      }
+      let stat;
+      let canonicalPath;
+      try {
+        stat = lstatSync(absolutePath);
+        canonicalPath = realpathSync(absolutePath);
+      } catch {
+        fail(`${code}_FILE_INVALID`);
+      }
+      if (!stat.isFile() || stat.isSymbolicLink()) fail(`${code}_FILE_INVALID`);
+      const canonicalRelativePath = relative(canonicalRoot, canonicalPath);
+      if (!canonicalRelativePath || canonicalRelativePath.startsWith("..") || isAbsolute(canonicalRelativePath)) {
+        fail(`${code}_PATH_INVALID`);
+      }
+      const actualSha256 = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
+      if (actualSha256 !== descriptor.sha256) fail(`${code}_HASH_MISMATCH`);
+      verifiedFileCount += 1;
+    }
+  }
+  return { verifiedFileCount };
+}
+
 function readAndValidateManifest(path) {
   const absolutePath = resolve(projectRoot, path);
   const relativePath = relative(projectRoot, absolutePath);
@@ -1002,11 +1153,13 @@ function readAndValidateManifest(path) {
   }
   if (!existsSync(absolutePath)) fail(`RELEASE_MANIFEST_MISSING:${path}`);
   const manifest = JSON.parse(readFileSync(absolutePath, "utf8"));
-  return validateReleaseManifest(manifest, {
+  const validated = validateReleaseManifest(manifest, {
     gitSha: currentGitSha(),
     migrationBundleSha256: repositoryMigrationBundleSha256(),
     releaseStage: "production",
   });
+  verifyReleaseBundleDescriptors(validated, dirname(absolutePath));
+  return validated;
 }
 
 function inspectImageField(reference, format) {
@@ -1089,6 +1242,7 @@ function imageReferenceFromEnvironment(env, component) {
 }
 
 export function validateReleaseEnvironment(env, manifest) {
+  if (!isReleaseProfile(env.RELEASE_PROFILE)) fail("ENV_RELEASE_PROFILE_INVALID");
   for (const component of ["server", "client", "operations"]) {
     const reference = imageReferenceFromEnvironment(env, component);
     if (reference !== manifest[component].reference) fail(`ENV_${component.toUpperCase()}_IMAGE_MANIFEST_MISMATCH`);

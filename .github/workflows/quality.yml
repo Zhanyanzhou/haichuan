@@ -53,6 +53,9 @@ jobs:
       - name: 安装根目录依赖
         run: npm ci --ignore-scripts
 
+      - name: 校验 Node.js 发布基线
+        run: npm run verify:node-version
+
       - name: 校验 migration 历史不可变与例外清单
         shell: bash
         env:
@@ -258,12 +261,12 @@ jobs:
         run: |
           docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER_ID" \
             mysql -uroot --batch --skip-column-names \
-            -e "SET GLOBAL log_bin_trust_function_creators = ON;"
+            -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci'; SET GLOBAL init_connect = 'SET collation_connection = utf8mb4_unicode_ci'; SET GLOBAL log_bin_trust_function_creators = ON; ALTER DATABASE haichuan_ci_real_tests CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
           policy="$(docker exec -e MYSQL_PWD="$MYSQL_TEST_PASSWORD" "$MYSQL_CONTAINER_ID" \
             mysql --protocol=TCP --host=127.0.0.1 --user=isolated_ci --batch --skip-column-names \
-            -e "SELECT @@GLOBAL.log_bin, @@GLOBAL.log_bin_trust_function_creators, (SELECT COUNT(*) FROM information_schema.USER_PRIVILEGES WHERE GRANTEE = CONCAT(QUOTE(SUBSTRING_INDEX(CURRENT_USER(), '@', 1)), '@', QUOTE(SUBSTRING_INDEX(CURRENT_USER(), '@', -1))) AND PRIVILEGE_TYPE = 'SUPER');" \
+            -e "SELECT @@SESSION.collation_connection, @@collation_database, @@GLOBAL.character_set_server, @@GLOBAL.collation_server, @@GLOBAL.init_connect, @@GLOBAL.log_bin, @@GLOBAL.log_bin_trust_function_creators, (SELECT COUNT(*) FROM information_schema.USER_PRIVILEGES WHERE GRANTEE = CONCAT(QUOTE(SUBSTRING_INDEX(CURRENT_USER(), '@', 1)), '@', QUOTE(SUBSTRING_INDEX(CURRENT_USER(), '@', -1))) AND PRIVILEGE_TYPE = 'SUPER');" \
             haichuan_ci_real_tests)"
-          test "$policy" = $'1\t1\t0'
+          test "$policy" = $'utf8mb4_unicode_ci\tutf8mb4_unicode_ci\tutf8mb4\tutf8mb4_unicode_ci\tSET collation_connection = utf8mb4_unicode_ci\t1\t1\t0'
           trigger_probe="$(docker exec -e MYSQL_PWD="$MYSQL_TEST_PASSWORD" "$MYSQL_CONTAINER_ID" \
             mysql --protocol=TCP --host=127.0.0.1 --user=isolated_ci --batch --skip-column-names \
             -e "CREATE TABLE __hc_trigger_probe (id INT PRIMARY KEY, touched INT NOT NULL DEFAULT 0); CREATE TRIGGER __hc_trigger_probe_before_insert BEFORE INSERT ON __hc_trigger_probe FOR EACH ROW SET NEW.touched = 1; INSERT INTO __hc_trigger_probe (id) VALUES (1); SELECT touched FROM __hc_trigger_probe WHERE id = 1; DROP TRIGGER __hc_trigger_probe_before_insert; DROP TABLE __hc_trigger_probe;" \

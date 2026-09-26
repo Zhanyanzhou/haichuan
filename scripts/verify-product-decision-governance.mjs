@@ -17,6 +17,7 @@ export const REQUIRED_DECISION_STATUSES = Object.freeze({
   "D.34": "OPTIONAL_HIGH_ASSURANCE",
   "D.35": "RETIRED",
   "D.36": "RETIRED",
+  "D.37": "ENABLED",
 });
 
 export const REQUIRED_DECISION_CONTRACTS = Object.freeze({
@@ -54,6 +55,16 @@ export const REQUIRED_DECISION_CONTRACTS = Object.freeze({
       "D.32:future-english-commerce",
     ],
     validation: ["test:decision-governance", "public-route-tests", "contracts:check"],
+  }),
+  "D.37": Object.freeze({
+    scope: ["template-design", "editor-four-region", "selection-and-property-loop"],
+    activation: ["template-context-opened", "editor-target-selected"],
+    supersedes: [],
+    validation: [
+      "test:decision-governance",
+      "client/tests/template-native-design.admin.spec.ts",
+      "client/tests/template-canvas-golden-closure.admin.spec.ts",
+    ],
   }),
 });
 

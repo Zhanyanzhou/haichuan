@@ -235,10 +235,14 @@ function validateWechatPaymentHostPaths(environment, { requireFiles = false } = 
   return contractErrors;
 }
 
+const serverTestSupportFiles = new Set([
+  "server/src/modules/leads/consultation-browser-runner.ts",
+  "server/src/modules/payments/customer-payment-simulator.http-fixture.ts",
+].map((file) => path.normalize(file)));
 const serverSourceFiles = walk(
   "server/src",
   (file) => file.endsWith(".ts") && !/\.(?:spec|test)\.ts$/.test(file),
-);
+).filter((file) => !serverTestSupportFiles.has(file));
 const serverSource = serverSourceFiles
   .filter((file) => !/[\\/]cli[\\/]/.test(file))
   .map(read)
@@ -281,6 +285,7 @@ const wechatPayCompose = read("docker-compose.wechat-pay.yml");
 const releaseWorkflow = read(".github/workflows/release-images.yml");
 const releaseProfileAuthoritySource = read("server/src/common/release/release-profile.ts");
 const runtimeEnvironmentSource = read("server/src/common/config/runtime-environment.ts");
+const appModuleSource = read("server/src/app.module.ts");
 const releasePreflightSource = read("server/src/cli/release-preflight.ts");
 const productionEvidenceSource = read("scripts/verify-production-evidence.mjs");
 const productionRunbook = read("docs/PRODUCTION_RELEASE_RUNBOOK.md");
@@ -355,6 +360,7 @@ const secretKeys = new Set([
   "KUAIDI100_KEY",
   "ALIYUN_SMS_ACCESS_KEY_ID",
   "ALIYUN_SMS_ACCESS_KEY_SECRET",
+  "PAYMENT_SIMULATOR_SIGNING_SECRET",
   "BOOTSTRAP_ADMIN_PASSWORD",
   "DEMO_ADMIN_PASSWORD",
 ]);
@@ -368,6 +374,11 @@ const releaseDeploymentKeys = new Set([
   "SERVER_IMAGE_NAME", "SERVER_IMAGE_DIGEST",
   "CLIENT_IMAGE_NAME", "CLIENT_IMAGE_DIGEST",
   "OPERATIONS_IMAGE_NAME", "OPERATIONS_IMAGE_DIGEST",
+  "RELEASE_GIT_SHA",
+  "RELEASE_SOURCE",
+  "MIGRATION_BUNDLE_SHA256",
+]);
+const releaseRuntimeIdentityKeys = new Set([
   "RELEASE_GIT_SHA",
   "RELEASE_SOURCE",
   "MIGRATION_BUNDLE_SHA256",
@@ -401,7 +412,11 @@ requireSubset(
   new Set([...seedKeys].filter((key) => !internalServerKeys.has(key))),
   envExampleKeys,
 );
-requireSubset("one-shot CLI 环境变量未记录在 .env.example", oneShotCliKeys, envExampleKeys);
+requireSubset(
+  "one-shot CLI 环境变量未记录在 .env.example",
+  new Set([...oneShotCliKeys].filter((key) => !internalServerKeys.has(key))),
+  envExampleKeys,
+);
 requireSubset(
   "PageDocument 发布指针 CLI 环境变量未记录在 .env.example",
   publishedRevisionCliKeys,
@@ -431,6 +446,16 @@ requireSubset(
   envExampleKeys,
 );
 requireSubset(
+  "运行时发布身份未显式注入到 server Compose",
+  releaseRuntimeIdentityKeys,
+  serverComposeKeys,
+);
+requireSubset(
+  "运行时发布身份未记录在 .env.example",
+  releaseRuntimeIdentityKeys,
+  envExampleKeys,
+);
+requireSubset(
   "不可变镜像变量未被 compose 消费",
   new Set(["SERVER_IMAGE_NAME", "SERVER_IMAGE_DIGEST", "CLIENT_IMAGE_NAME", "CLIENT_IMAGE_DIGEST", "OPERATIONS_IMAGE_NAME", "OPERATIONS_IMAGE_DIGEST"]),
   composeInterpolationKeys,
@@ -448,6 +473,7 @@ const mediaStorageComposeContracts = new Map([
   ["PAGE_MEDIA_ARCHIVE_ROOT", "/app/private-media/page-assets-archive"],
   ["PAYMENT_PROOF_MEDIA_ROOT", "/app/private-media/payment-proofs"],
   ["PRODUCT_MEDIA_ROOT", "/app/private-media/products"],
+  ["REVIEW_MEDIA_ROOT", "/app/private-media/review-images"],
 ]);
 for (const [key, expectedPath] of mediaStorageComposeContracts) {
   if (serverComposeValues.get(key) !== expectedPath) {
@@ -465,6 +491,16 @@ for (const expectedMount of [
 if (serverComposeValues.get("BACKUP_INTERVAL_SECONDS") !==
     "${BACKUP_INTERVAL_SECONDS:?BACKUP_INTERVAL_SECONDS is required}") {
   errors.push("server Compose 必须向后台状态注入真实 BACKUP_INTERVAL_SECONDS，不得用 RPO 代替");
+}
+
+for (const [key, expectedValue] of new Map([
+  ["RELEASE_GIT_SHA", "${RELEASE_GIT_SHA:-local}"],
+  ["RELEASE_SOURCE", "${RELEASE_SOURCE:-local}"],
+  ["MIGRATION_BUNDLE_SHA256", "${MIGRATION_BUNDLE_SHA256:-local}"],
+])) {
+  if (serverComposeValues.get(key) !== expectedValue) {
+    errors.push(`server Compose 必须把 ${key} 传入运行时，并让普通本地启动显式保持 incomplete`);
+  }
 }
 
 const releasePreflightRuntimeContracts = new Map([
@@ -581,8 +617,9 @@ if (!releasePreflightSource.includes("DEFAULT_RELEASE_PROFILE") ||
     !releasePreflightSource.includes("COMMERCE_RELEASE_PROFILE")) {
   errors.push("release-preflight 未消费发布档位权威常量");
 }
-if (!runtimeEnvironmentSource.includes('import { parseReleaseProfile } from "../release/release-profile";') ||
-    !runtimeEnvironmentSource.includes("RELEASE_PROFILE: releaseProfile")) {
+if (!/\bparseReleaseProfile\b/.test(runtimeEnvironmentSource) ||
+    !/RELEASE_PROFILE\s*:\s*releaseProfile\b/.test(runtimeEnvironmentSource) ||
+    !/validate\s*:\s*validateRuntimeEnvironment\b/.test(appModuleSource)) {
   errors.push("runtime 启动门禁未消费发布档位权威合同");
 }
 if (!productionEvidenceSource.includes('from "./release-profile-contract.mjs"') ||
@@ -776,6 +813,7 @@ for (const key of secretKeys) {
 
 const summary = {
   serverRuntimeKeys: sorted(serverRuntimeKeys),
+  serverTestSupportFiles: sorted(serverTestSupportFiles),
   serverComposeKeys: sorted(serverComposeKeys),
   mediaStorageComposeContracts: Object.fromEntries(mediaStorageComposeContracts),
   seedKeys: sorted(seedKeys),
