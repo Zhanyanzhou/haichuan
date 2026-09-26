@@ -1,6 +1,14 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { devices, expect, test, type Page } from "@playwright/test";
+
+// 本用例启动真实 Nest HTTP 候选（ts-node + server 源码），依赖 server/node_modules。
+// 确定性 CI 分区只安装 client 依赖，按既有真实闭环约定在本地或含 server 依赖的环境执行。
+const serverDepsAvailable = existsSync(fileURLToPath(new URL(
+  "../../server/node_modules/ts-node/register/transpile-only.js",
+  import.meta.url,
+)));
 
 type CandidateDescriptor = {
   type: "ready";
@@ -113,6 +121,10 @@ test.describe("客户付款弹窗连接本机真实 Nest HTTP 候选", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {
+    test.skip(
+      !serverDepsAvailable,
+      "需要 server 端依赖（真实 Nest HTTP 候选）；确定性 CI 分区不安装 server 依赖，本用例在本地或含 server 依赖的环境执行",
+    );
     candidate = await startCandidate();
   });
 

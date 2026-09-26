@@ -635,7 +635,9 @@ test.describe("游客公开浏览", () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.route("**/api/customers/forgot-password", (route) => route.fulfill({
         status: 429,
-        headers: { "Retry-After": "120" },
+        // 测试环境的 API 基址与页面跨源；非 safelist 响应头须显式 Expose 才能被 JS 读取，
+        // 生产同源部署无此限制。
+        headers: { "Retry-After": "120", "Access-Control-Expose-Headers": "Retry-After" },
         contentType: "application/json",
         body: JSON.stringify({ code: 429, message: "请求过于频繁", errorCode: "HTTP_429" }),
       }));
