@@ -54,6 +54,7 @@ test('注入但未配置的测试 provider 也不能绕过 fail-closed', async (
   const gateway = new PaymentGatewayService(
     config({
       RELEASE_PROFILE: 'commerce',
+      PAYMENT_PROVIDER_MODE: 'live',
       PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: 'true',
     }),
     { wechat: unavailable },
@@ -99,6 +100,7 @@ test('查单使用稳定幂等键有限重试，资金写操作不盲重试', as
   const gateway = new PaymentGatewayService(
     config({
       RELEASE_PROFILE: 'commerce',
+      PAYMENT_PROVIDER_MODE: 'live',
       PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: 'true',
     }),
     { wechat: fake },
@@ -147,5 +149,4 @@ test('逐笔对账明确分类非成功、金额和渠道流水差异', async ()
     'GATEWAY_TRADE_NO_MISMATCH',
   ]);
 });
-
 
