@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { AddressInfo } from "node:net";
-import { Module, ValidationPipe } from "@nestjs/common";
+import { ForbiddenException, Module, ValidationPipe } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { NestFactory } from "@nestjs/core";
 import { JwtModule, JwtService } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { PRIVACY_CONSENT_CONTENT_HASH } from "../../common/privacy/privacy-consent";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { OutboxService } from "../../common/outbox/outbox.service";
 import { ReliableNotificationIntentService } from "../../common/notifications/reliable-notification-intent.service";
@@ -47,7 +48,12 @@ test(
     });
     const suffix = randomUUID().replace(/-/g, "").slice(0, 12);
     const phone = `19${String(Date.now()).slice(-9)}`;
-    const usernames = [`lead_cs_${suffix}`, `lead_admin_${suffix}`, `lead_warehouse_${suffix}`];
+    const usernames = [
+      `lead_cs_${suffix}`,
+      `lead_admin_${suffix}`,
+      `lead_warehouse_${suffix}`,
+      `lead_revoked_${suffix}`,
+    ];
     const idempotencyKey = `lead-real-submit-${suffix}`;
     const retryDeduplicationKey = `lead-real-retry-${suffix}`;
     let customerId: number | null = null;
@@ -61,7 +67,7 @@ test(
     let closeApp: (() => Promise<void>) | null = null;
 
     try {
-      const [customerService, admin, warehouse] = await Promise.all([
+      const [customerService, admin, warehouse, revokedCustomerService] = await Promise.all([
         prisma.user.create({
           data: {
             username: usernames[0],
@@ -84,6 +90,14 @@ test(
             password: "isolated-test-only",
             realName: "隔离测试仓库员工",
             role: "WAREHOUSE",
+          },
+        }),
+        prisma.user.create({
+          data: {
+            username: usernames[3],
+            password: "isolated-test-only",
+            realName: "隔离测试待撤权客服",
+            role: "CUSTOMER_SERVICE",
           },
         }),
       ]);
@@ -146,12 +160,16 @@ test(
         consultationType: "预约鉴赏",
         preferredContact: "电子邮件",
         privacyConsent: true,
+        privacyConsentVersion: "privacy-v2",
+        privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
         idempotencyKey,
         customer: {
           id: customer.id,
           name: customer.name,
           phone: customer.phone,
           email: customer.email,
+          authVersion: customer.authVersion,
+          accountType: customer.accountType,
         },
       };
 
@@ -190,12 +208,16 @@ test(
         message: "真实隔离库选款咨询旅程",
         items: [{ productId: product.id, productSkuSnapshot: "隔离测试规格" }],
         privacyConsent: true,
+        privacyConsentVersion: "privacy-v2",
+        privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
         idempotencyKey: `lead-real-selection-${suffix}`,
         customer: {
           id: customer.id,
           name: customer.name,
           phone: customer.phone,
           email: customer.email,
+          authVersion: customer.authVersion,
+          accountType: customer.accountType,
         },
       };
       const [firstSelection, replayedSelection] = await Promise.all([
@@ -271,6 +293,126 @@ test(
         const body = await response.json().catch(() => null);
         return { response, body };
       };
+      const assertPendingWhileLocked = async (
+        operation: Promise<unknown>,
+        message: string,
+      ) => {
+        const state = await Promise.race([
+          operation.then(
+            () => "settled" as const,
+            () => "settled" as const,
+          ),
+          new Promise<"pending">((resolve) => {
+            setTimeout(() => resolve("pending"), 200);
+          }),
+        ]);
+        assert.equal(state, "pending", message);
+      };
+
+      let staleClaim: ReturnType<typeof callLeadApi> | undefined;
+      await prisma.$transaction(async (transaction) => {
+        const locked = await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${revokedCustomerService.id} AND status = 'ACTIVE' AND role = 'CUSTOMER_SERVICE' FOR UPDATE`,
+        );
+        assert.deepEqual(locked, [{ id: revokedCustomerService.id }]);
+
+        staleClaim = callLeadApi(
+          revokedCustomerService.id,
+          `/selection/${selectionLead.id}/claim`,
+          { method: "POST" },
+        );
+        await assertPendingWhileLocked(
+          staleClaim,
+          "旧客服领取请求必须等待员工行锁，不能越过并发撤权",
+        );
+
+        await transaction.user.update({
+          where: { id: revokedCustomerService.id },
+          data: { role: "WAREHOUSE" },
+        });
+      });
+
+      assert.ok(staleClaim);
+      const staleClaimResult = await staleClaim;
+      assert.equal(staleClaimResult.response.status, 403);
+      assert.equal(
+        (await prisma.lead.findUniqueOrThrow({ where: { id: selectionLead.id } })).assignedTo,
+        null,
+      );
+      assert.deepEqual(
+        await prisma.selectionInquiry.findUniqueOrThrow({
+          where: { id: selectionInquiryId },
+          select: { handledBy: true, handledAt: true },
+        }),
+        { handledBy: null, handledAt: null },
+      );
+      assert.equal(
+        await prisma.leadActivity.count({
+          where: { leadId: selectionLead.id, type: "ASSIGNED" },
+        }),
+        0,
+      );
+
+      await prisma.user.update({
+        where: { id: revokedCustomerService.id },
+        data: { role: "CUSTOMER_SERVICE" },
+      });
+      const sessionFamilyId = randomUUID();
+      const refreshSession = await prisma.adminRefreshSession.create({
+        data: {
+          userId: revokedCustomerService.id,
+          tokenHash: `${randomUUID().replace(/-/g, "")}${randomUUID().replace(/-/g, "")}`,
+          familyId: sessionFamilyId,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        },
+      });
+      let staleSessionClaim: Promise<unknown> | undefined;
+      await prisma.$transaction(async (transaction) => {
+        const lockedActor = await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${revokedCustomerService.id} FOR UPDATE`,
+        );
+        assert.deepEqual(lockedActor, [{ id: revokedCustomerService.id }]);
+        const locked = await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE id = ${refreshSession.id} AND user_id = ${revokedCustomerService.id} AND family_id = ${sessionFamilyId} AND revoked_at IS NULL FOR UPDATE`,
+        );
+        assert.deepEqual(locked, [{ id: refreshSession.id }]);
+
+        staleSessionClaim = leadsService.claimLead(
+          "selection",
+          selectionLead.id,
+          { id: revokedCustomerService.id, sessionFamilyId },
+        );
+        await assertPendingWhileLocked(
+          staleSessionClaim,
+          "旧客服领取请求必须等待 users → refresh family 顺序的并发登出事务",
+        );
+
+        await transaction.adminRefreshSession.update({
+          where: { id: refreshSession.id },
+          data: { revokedAt: new Date() },
+        });
+      });
+
+      assert.ok(staleSessionClaim);
+      await assert.rejects(staleSessionClaim, ForbiddenException);
+      assert.equal(
+        (await prisma.lead.findUniqueOrThrow({ where: { id: selectionLead.id } })).assignedTo,
+        null,
+      );
+      assert.deepEqual(
+        await prisma.selectionInquiry.findUniqueOrThrow({
+          where: { id: selectionInquiryId },
+          select: { handledBy: true, handledAt: true },
+        }),
+        { handledBy: null, handledAt: null },
+      );
+      assert.equal(
+        await prisma.leadActivity.count({
+          where: { leadId: selectionLead.id, type: "ASSIGNED" },
+        }),
+        0,
+      );
+
       const claims = await Promise.all([
         callLeadApi(customerService.id, `/inquiry/${leadId}/claim`, { method: "POST" }),
         callLeadApi(admin.id, `/inquiry/${leadId}/claim`, { method: "POST" }),
@@ -298,9 +440,16 @@ test(
       assert.equal(detail.body.email, customer.email);
       assert.equal(detail.body.preferredContact, "电子邮件");
 
-      await leadsService.updateLead("inquiry", leadId, { status: "CONTACTED" }, actorId);
+      await leadsService.updateLead(
+        "inquiry",
+        leadId,
+        { status: "CONTACTED" },
+        `lead-real-contacted-${suffix}`,
+        actorId,
+      );
       const followUpWrite = await callLeadApi(actorId, `/inquiry/${leadId}/follow-up`, {
         method: "POST",
+        headers: { "Idempotency-Key": `lead-real-follow-up-${suffix}` },
         body: JSON.stringify({
           content: "已电话确认客户需求",
           contactMethod: "phone",
@@ -373,17 +522,28 @@ test(
       const forbiddenRetry = await callLeadApi(
         warehouse.id,
         `/notification-failures/${failedEvent.id}/retry`,
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": `lead-real-retry-forbidden-${suffix}` },
+        },
       );
       assert.equal(forbiddenRetry.response.status, 403);
+      const notificationRetryIdempotencyKey = `lead-real-retry-request-${suffix}`;
       const concurrentRetries = await Promise.all([
-        callLeadApi(actorId, `/notification-failures/${failedEvent.id}/retry`, { method: "POST" }),
-        callLeadApi(actorId, `/notification-failures/${failedEvent.id}/retry`, { method: "POST" }),
+        callLeadApi(actorId, `/notification-failures/${failedEvent.id}/retry`, {
+          method: "POST",
+          headers: { "Idempotency-Key": notificationRetryIdempotencyKey },
+        }),
+        callLeadApi(actorId, `/notification-failures/${failedEvent.id}/retry`, {
+          method: "POST",
+          headers: { "Idempotency-Key": notificationRetryIdempotencyKey },
+        }),
       ]);
       assert.deepEqual(
         concurrentRetries.map(({ response }) => response.status).sort(),
-        [201, 409],
+        [201, 201],
       );
+      assert.deepEqual(concurrentRetries[0].body, concurrentRetries[1].body);
       const retried = await prisma.outboxEvent.findUniqueOrThrow({
         where: { id: failedEvent.id },
       });
@@ -392,6 +552,17 @@ test(
       assert.equal(
         (retried.payload as Record<string, any>).manualRetry.requestedBy,
         actorId,
+      );
+      const retryRequestAudits = await prisma.leadActivity.findMany({
+        where: { leadId, createdBy: actorId, type: "NOTE" },
+        select: { metadata: true },
+      });
+      assert.equal(
+        retryRequestAudits.filter((entry) =>
+          (entry.metadata as Record<string, unknown> | null)?.action
+            === "LEAD_REPLY_NOTIFICATION_RETRY_REQUESTED"
+        ).length,
+        1,
       );
 
       let externalSends = 0;
@@ -433,12 +604,14 @@ test(
           status: "FOLLOWING",
           nextFollowUpAt: "2026-09-21T03:00:00.000Z",
         },
+        `lead-real-following-${suffix}`,
         actorId,
       );
       await leadsService.updateLead(
         "inquiry",
         leadId,
         { status: "COMPLETED", closureReason: "本次咨询服务已完成" },
+        `lead-real-completed-${suffix}`,
         actorId,
       );
 

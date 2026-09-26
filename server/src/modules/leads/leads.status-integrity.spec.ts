@@ -37,6 +37,7 @@ function createHarness(options: {
   const inquiryUpdates: unknown[] = [];
   const assigneeQueries: unknown[] = [];
   const prisma = {
+    $queryRaw: async () => [{ id: 9 }],
     user: {
       findFirst: async (args: unknown) => {
         assigneeQueries.push(args);
@@ -52,6 +53,7 @@ function createHarness(options: {
       findUniqueOrThrow: async () => ({ ...lead, status: "COMPLETED" }),
     },
     leadActivity: {
+      findUnique: async () => null,
       createMany: async (args: unknown) => {
         activityWrites.push(args);
         return { count: 1 };
@@ -79,7 +81,13 @@ test("完成和无效状态必须携带明确原因", async () => {
   const harness = createHarness();
 
   await assert.rejects(
-    harness.service.updateLead("inquiry", 41, { status: "COMPLETED" }, 9),
+    harness.service.updateLead(
+      "inquiry",
+      41,
+      { status: "COMPLETED" },
+      "status-missing-reason",
+      9,
+    ),
     (error: unknown) =>
       error instanceof UnprocessableEntityException &&
       error.message === "完成或无效时必须填写原因",
@@ -91,7 +99,13 @@ test("分配线索前必须确认负责人存在且仍为启用状态", async ()
   const harness = createHarness({ assignee: null });
 
   await assert.rejects(
-    harness.service.updateLead("inquiry", 41, { assignedTo: 99 }, 9),
+    harness.service.updateLead(
+      "inquiry",
+      41,
+      { assignedTo: 99 },
+      "status-inactive-assignee",
+      9,
+    ),
     (error: unknown) =>
       error instanceof UnprocessableEntityException
       && error.message === "负责人不存在、已停用或无权处理线索",
@@ -114,6 +128,7 @@ test("完成状态原子写入原因、留存时间、审计活动并镜像旧�
     "inquiry",
     41,
     { status: "COMPLETED", closureReason: "客户需求已确认并完成本次咨询" },
+    "status-complete",
     9,
   );
 
@@ -143,7 +158,13 @@ test("完成状态原子写入原因、留存时间、审计活动并镜像旧�
 test("终态重新打开必须填写原因并清空当前终态留存时钟", async () => {
   const withoutReason = createHarness({ lead: { status: "INVALID" } });
   await assert.rejects(
-    withoutReason.service.updateLead("inquiry", 41, { status: "PENDING" }, 9),
+    withoutReason.service.updateLead(
+      "inquiry",
+      41,
+      { status: "PENDING" },
+      "status-reopen-missing-reason",
+      9,
+    ),
     (error: unknown) =>
       error instanceof UnprocessableEntityException &&
       error.message === "重新打开线索时必须填写原因",
@@ -161,6 +182,7 @@ test("终态重新打开必须填写原因并清空当前终态留存时钟", as
     "inquiry",
     41,
     { status: "PENDING", reopenReason: "客户确认这是新的独立需求" },
+    "status-reopen",
     9,
   );
 
@@ -183,6 +205,7 @@ test("并发更新使用状态和 updatedAt compare-and-set，冲突时不写审
       "inquiry",
       41,
       { status: "COMPLETED", closureReason: "本次咨询完成" },
+      "status-concurrent-complete",
       9,
     ),
     ConflictException,
@@ -195,7 +218,13 @@ test("负责人等非状态字段的并发覆盖也会被乐观锁拒绝", async
   const harness = createHarness({ updateCount: 0 });
 
   await assert.rejects(
-    harness.service.updateLead("inquiry", 41, { assignedTo: 12 }, 9),
+    harness.service.updateLead(
+      "inquiry",
+      41,
+      { assignedTo: 12 },
+      "status-concurrent-assign",
+      9,
+    ),
     ConflictException,
   );
   assert.equal(harness.activityWrites.length, 0);
@@ -213,19 +242,43 @@ test("负责人等非状态字段的并发覆盖也会被乐观锁拒绝", async
 test("状态机拒绝未知状态与非法流转，合法流转写入目标状态", async () => {
   const harness = createHarness();
   await assert.rejects(
-    () => harness.service.updateLead("inquiry", 41, { status: "ARBITRARY" }),
+    () => harness.service.updateLead(
+      "inquiry",
+      41,
+      { status: "ARBITRARY" },
+      "status-unknown",
+      9,
+    ),
     UnprocessableEntityException,
   );
   await assert.rejects(
-    () => harness.service.updateLead("inquiry", 41, { status: "PENDING" }),
+    () => harness.service.updateLead(
+      "inquiry",
+      41,
+      { status: "PENDING" },
+      "status-invalid-transition",
+      9,
+    ),
     UnprocessableEntityException,
   );
   const terminal = createHarness({ lead: { status: "COMPLETED" } });
   await assert.rejects(
-    () => terminal.service.updateLead("inquiry", 41, { status: "FOLLOWING" }),
+    () => terminal.service.updateLead(
+      "inquiry",
+      41,
+      { status: "FOLLOWING" },
+      "status-terminal-transition",
+      9,
+    ),
     UnprocessableEntityException,
   );
-  await harness.service.updateLead("inquiry", 41, { status: "FOLLOWING" }, 9);
+  await harness.service.updateLead(
+    "inquiry",
+    41,
+    { status: "FOLLOWING" },
+    "status-following",
+    9,
+  );
   const update = harness.leadUpdates.at(-1) as { data: { status: string } };
   assert.equal(update.data.status, "FOLLOWING");
 });
@@ -236,6 +289,7 @@ test("单独变更下次跟进时间也写入可归因审计", async () => {
     "inquiry",
     41,
     { nextFollowUpAt: "2026-09-15T03:00:00.000Z" },
+    "status-next-follow-up",
     9,
   );
 
@@ -248,7 +302,12 @@ test("会产生写入的线索更新缺失认证员工时拒绝且不写审计",
   const harness = createHarness();
 
   await assert.rejects(
-    harness.service.updateLead("inquiry", 41, { internalNote: "不可匿名写入" }),
+    harness.service.updateLead(
+      "inquiry",
+      41,
+      { internalNote: "不可匿名写入" },
+      "status-missing-actor",
+    ),
     ForbiddenException,
   );
   assert.equal(harness.leadUpdates.length, 0);

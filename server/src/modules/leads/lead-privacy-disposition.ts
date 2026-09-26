@@ -3,6 +3,10 @@ import {
   LEAD_PRIVACY_DISPOSITION_ERROR_CODE,
   LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
 } from "../../common/notifications/notification-delivery.constants";
+import {
+  LEAD_RETENTION_POLICY,
+  LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+} from "./lead-submission";
 
 export const ANONYMIZED_CUSTOMER_NAME = "已匿名化";
 export const ANONYMIZED_SOURCE_TEXT = "已按隐私规则匿名化";
@@ -26,6 +30,8 @@ type AnonymizeOptions = {
   now: Date;
   actorId: number | null;
   expectedCustomerId?: number;
+  policyApprovalReferenceSha256?: string;
+  policyFingerprintSha256?: string;
 };
 
 function sourceIdOf(lead: LeadPrivacyCandidate) {
@@ -139,6 +145,14 @@ async function scrubClaimedLead(
       metadata: {
         action: "PRIVACY_ANONYMIZED",
         mode: options.mode,
+        ...(options.mode === "RETENTION"
+          ? {
+              policyApprovalReferenceSha256:
+                options.policyApprovalReferenceSha256,
+              policyVersion: LEAD_RETENTION_POLICY.version,
+              policyFingerprintSha256: options.policyFingerprintSha256,
+            }
+          : {}),
       },
     },
   });
@@ -153,6 +167,19 @@ export async function anonymizeLeadInTransaction(
   lead: LeadPrivacyCandidate,
   options: AnonymizeOptions,
 ) {
+  if (
+    options.mode === "RETENTION"
+    && !/^[a-f0-9]{64}$/.test(options.policyApprovalReferenceSha256 ?? "")
+  ) {
+    throw new Error("LEAD_RETENTION_POLICY_APPROVAL_REQUIRED");
+  }
+  if (
+    options.mode === "RETENTION"
+    && options.policyFingerprintSha256
+      !== LEAD_RETENTION_POLICY_FINGERPRINT_SHA256
+  ) {
+    throw new Error("LEAD_RETENTION_POLICY_FINGERPRINT_MISMATCH");
+  }
   const where: Prisma.LeadWhereInput = {
     id: lead.id,
     privacyDisposedAt: null,

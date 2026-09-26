@@ -95,6 +95,7 @@ test("会员注册和重置服务接受 6/18 位字母数字组合，拒绝越�
   let claimedTokens = 0;
   let revokedSessions = 0;
   const transaction = {
+    $queryRaw: async () => [{ id: 9 }],
     customer: {
       findUnique: async () => null,
       create: async ({ data }: { data: { passwordHash: string } }) => {
@@ -107,10 +108,16 @@ test("会员注册和重置服务接受 6/18 位字母数字组合，拒绝越�
       },
     },
     customerPasswordResetToken: {
-      updateMany: async () => { claimedTokens += 1; return { count: 1 }; },
+      updateMany: async ({ where }: { where: { id?: number } }) => {
+        if (where.id !== undefined) claimedTokens += 1;
+        return { count: 1 };
+      },
     },
     customerRefreshSession: {
       updateMany: async () => { revokedSessions += 1; return { count: 1 }; },
+    },
+    outboxEvent: {
+      updateMany: async () => ({ count: 0 }),
     },
     customerSmsCode: {
       findFirst: async () => ({ id: 1 }),

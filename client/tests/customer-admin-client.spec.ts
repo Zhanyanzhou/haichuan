@@ -193,3 +193,75 @@ test("客户档案详情失败不暴露服务端异常并可就地重试", async
   await expect(drawer.getByRole("button", { name: "重新加载" })).toBeVisible();
   await expect(page.getByText(internalMessage, { exact: true })).toHaveCount(0);
 });
+
+test("关闭旧客户详情后，迟到响应不能覆盖新客户档案", async ({ page }) => {
+  await authenticateCustomerService(page);
+  const customerB = {
+    ...customer,
+    id: 43,
+    phone: "13900000000",
+    name: "客户档案新对象",
+    email: "customer-43@example.test",
+  };
+  const detailB = {
+    ...detail,
+    customer: {
+      ...detail.customer,
+      ...customerB,
+      updatedAt: "2026-08-21T09:00:00.000Z",
+      _count: { inquiries: 1, selectionInquiries: 0, reviews: 0 },
+    },
+    recentOrders: [
+      {
+        ...detail.recentOrders[0],
+        id: 10,
+        orderNo: "ORD-CUSTOMER-43",
+      },
+    ],
+    favorites: [],
+    addressCount: 0,
+  };
+  let releaseOldDetail: (() => void) | undefined;
+  let oldDetailCompleted = false;
+  const oldDetailCanFinish = new Promise<void>((resolve) => {
+    releaseOldDetail = resolve;
+  });
+
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/auth/profile")) return route.fallback();
+    if (path.endsWith("/customers/admin/42")) {
+      await oldDetailCanFinish;
+      await fulfill(route, detail);
+      oldDetailCompleted = true;
+      return;
+    }
+    if (path.endsWith("/customers/admin/43")) return fulfill(route, detailB);
+    if (path.endsWith("/customers/admin")) {
+      return fulfill(route, { list: [customer, customerB], total: 2 });
+    }
+    if (path.endsWith("/settings/flags")) {
+      return fulfill(route, {
+        commerceEnabled: false,
+        cartEnabled: false,
+        paymentEnabled: false,
+      });
+    }
+    return fulfill(route, {});
+  });
+
+  await page.goto("/admin/customers");
+  const rows = page.locator("tbody tr");
+  await rows.filter({ hasText: "客户档案合同样本" }).getByRole("button", { name: "查看档案" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  await rows.filter({ hasText: "客户档案新对象" }).getByRole("button", { name: "查看档案" }).click();
+  const drawer = page.getByRole("dialog", { name: "客户档案 #43" });
+  await expect(drawer.getByText("ORD-CUSTOMER-43", { exact: true })).toBeVisible();
+
+  releaseOldDetail?.();
+  await expect.poll(() => oldDetailCompleted).toBe(true);
+  await expect(drawer.getByText("ORD-CUSTOMER-43", { exact: true })).toBeVisible();
+  await expect(drawer.getByText("ORD-CUSTOMER-42", { exact: true })).toHaveCount(0);
+});

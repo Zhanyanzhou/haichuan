@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Put, Query, Req, Res, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Patch, Post, Put, Query, Req, Res, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { memoryStorage } from 'multer';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -11,7 +11,7 @@ import { CustomerAuthGuard } from './customer-auth.guard';
 import { CustomersService } from './customers.service';
 import { Throttle } from '@nestjs/throttler';
 import { CheckoutDto } from './dto/checkout.dto';
-import { CustomerAddressDto, SubmitPaymentProofDto } from './dto/customer-address.dto';
+import { CustomerAddressDto } from './dto/customer-address.dto';
 import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
 import {
   CloseCustomerAccountDto,
@@ -34,9 +34,13 @@ import { MarketingService } from '../marketing/marketing.service';
 import { CustomerNotificationQueryDto } from './dto/customer-notification-query.dto';
 import { UpdateCustomerNotificationPreferenceDto } from './dto/customer-notification-preference.dto';
 import { CustomerInquiryQueryDto } from './dto/customer-inquiry-query.dto';
-import type { CustomerRequest } from '../../common/security/authenticated-principal';
+import type {
+  CustomerRequest,
+  StaffRequest,
+} from '../../common/security/authenticated-principal';
 import { CustomerAvatarService } from './customer-avatar.service';
 import { CustomerProfileService } from './customer-profile.service';
+import { IdempotencyKey } from '../../common/idempotency/idempotency-key';
 import {
   ChangeCustomerPasswordDto,
   ConfirmCustomerContactChangeDto,
@@ -50,6 +54,12 @@ import {
 // 因此所有用 CustomerAuthGuard 保护的前台接口必须显式标注 @Public()，
 // 让全局 JwtAuthGuard / RolesGuard 旁通，再由方法级 CustomerAuthGuard 完成客户鉴权。
 // 这样既不弱化后台 admin 认证，也不会把客户私有数据暴露给匿名访问。
+
+function setCustomerPrivateNoStore(response: Response) {
+  response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  response.vary('Cookie');
+  response.vary('Authorization');
+}
 
 @Controller('customers')
 export class CustomersController {
@@ -68,8 +78,12 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('checkout')
-  checkout(@Req() request: CustomerRequest, @Body() dto: CheckoutDto) {
-    return this.customersService.checkout(request.customer.id, dto);
+  checkout(
+    @Req() request: CustomerRequest,
+    @Body() dto: CheckoutDto,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
+    return this.customersService.checkout(request.customer, dto, idempotencyKey);
   }
 
   @Public()
@@ -160,7 +174,12 @@ export class CustomersController {
   @Public()
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('forgot-password')
-  forgotPassword(@Body() dto: ForgotPasswordDto) {
+  @HttpCode(HttpStatus.ACCEPTED)
+  forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    response.setHeader('Cache-Control', 'no-store, max-age=0');
     return this.customersService.requestPasswordReset(dto.email);
   }
 
@@ -196,8 +215,16 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @Get('me/coupons/usable')
-  usableCoupons(@Query('amountCents') amountCents: string) {
-    return this.marketingService.listUsableCoupons(Number(amountCents) || 0);
+  usableCoupons(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Query('amountCents') amountCents: string,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.marketingService.listUsableCoupons(
+      Number(amountCents) || 0,
+      request.customer,
+    );
   }
 
   /** 查询手机号当前需要的挑战等级（无副作用；仅按失败计数，与账号是否存在无关） */
@@ -227,15 +254,19 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me')
-  getProfile(@Req() request: CustomerRequest) {
-    return this.customerProfile.getProfile(request.customer.id);
+  getProfile(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customerProfile.getProfile(request.customer);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me')
   updateProfile(@Req() request: CustomerRequest, @Body() dto: UpdateCustomerNameDto) {
-    return this.customerProfile.updateName(request.customer.id, dto.name);
+    return this.customerProfile.updateName(request.customer, dto.name);
   }
 
   @Public()
@@ -243,7 +274,15 @@ export class CustomersController {
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('me/security/sms-code')
   requestProfileSecuritySms(@Req() request: CustomerRequest) {
-    return this.customerProfile.requestCurrentPhoneCode(request.customer.id);
+    return this.customerProfile.requestCurrentPhoneCode(request.customer);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('me/close/sms-code')
+  requestAccountClosureSms(@Req() request: CustomerRequest) {
+    return this.customerProfile.requestAccountClosureCode(request.customer);
   }
 
   @Public()
@@ -256,7 +295,7 @@ export class CustomersController {
     @Body() dto: ChangeCustomerPasswordDto,
   ) {
     const result = await this.customerProfile.changePassword(
-      request.customer.id,
+      request.customer,
       dto,
       requestSessionMetadata(request),
     );
@@ -272,7 +311,7 @@ export class CustomersController {
     @Req() request: CustomerRequest,
     @Body() dto: StartCustomerContactChangeDto,
   ) {
-    return this.customerProfile.startContactChange(request.customer.id, dto);
+    return this.customerProfile.startContactChange(request.customer, dto);
   }
 
   @Public()
@@ -286,7 +325,7 @@ export class CustomersController {
     @Body() dto: ConfirmCustomerContactChangeDto,
   ) {
     const result = await this.customerProfile.confirmContactChange(
-      request.customer.id,
+      request.customer,
       changeId,
       dto.verificationCode,
       requestSessionMetadata(request),
@@ -306,10 +345,12 @@ export class CustomersController {
   updateAvatar(
     @Req() request: CustomerRequest,
     @UploadedFile() file: Express.Multer.File,
+    @IdempotencyKey() idempotencyKey: string,
   ) {
     return this.customerAvatars.replace(
-      request.customer.id,
+      request.customer,
       file,
+      idempotencyKey,
       requestSessionMetadata(request),
     );
   }
@@ -319,9 +360,22 @@ export class CustomersController {
   @Delete('me/avatar')
   deleteAvatar(@Req() request: CustomerRequest) {
     return this.customerAvatars.delete(
-      request.customer.id,
+      request.customer,
       requestSessionMetadata(request),
     );
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Get('me/avatar/status')
+  avatarUploadStatus(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customerAvatars.replaceStatus(request.customer, idempotencyKey);
   }
 
   @Public()
@@ -331,15 +385,31 @@ export class CustomersController {
     @Req() request: CustomerRequest,
     @Res() response: Response,
   ) {
-    const image = await this.customerAvatars.read(request.customer.id);
+    const image = await this.customerAvatars.read(request.customer);
     response.type('image/webp').set('Cache-Control', 'private, no-store').send(image);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/orders')
-  getOrders(@Req() request: CustomerRequest) {
-    return this.ordersService.findForCustomer(request.customer.id);
+  getOrders(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.ordersService.findForCustomer(request.customer);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Get('me/orders/:id')
+  getOrder(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Param('id') id: string,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.ordersService.findOneForCustomer(request.customer, id);
   }
 
   @Public()
@@ -347,30 +417,36 @@ export class CustomersController {
   @Get('me/notifications')
   getNotifications(
     @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
     @Query() query: CustomerNotificationQueryDto,
   ) {
-    return this.customerNotifications.list(request.customer.id, query);
+    setCustomerPrivateNoStore(response);
+    return this.customerNotifications.list(request.customer, query);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me/notifications/read-all')
   markAllNotificationsRead(@Req() request: CustomerRequest) {
-    return this.customerNotifications.markAllRead(request.customer.id);
+    return this.customerNotifications.markAllRead(request.customer);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me/notifications/:id/read')
   markNotificationRead(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
-    return this.customerNotifications.markRead(request.customer.id, id);
+    return this.customerNotifications.markRead(request.customer, id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/notification-preferences')
-  getNotificationPreferences(@Req() request: CustomerRequest) {
-    return this.customerNotifications.listPreferences(request.customer.id);
+  getNotificationPreferences(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customerNotifications.listPreferences(request.customer);
   }
 
   @Public()
@@ -380,7 +456,7 @@ export class CustomersController {
     @Req() request: CustomerRequest,
     @Body() dto: UpdateCustomerNotificationPreferenceDto,
   ) {
-    return this.customerNotifications.updatePreference(request.customer.id, dto);
+    return this.customerNotifications.updatePreference(request.customer, dto);
   }
 
   // 物流轨迹：客户查询自己已发货订单的快递轨迹（快递100，未配置凭据时 503）
@@ -388,8 +464,13 @@ export class CustomersController {
   @UseGuards(CustomerAuthGuard)
   @Get('me/orders/:id/tracking')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  getTracking(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
-    return this.ordersService.trackForCustomer(request.customer.id, id);
+  getTracking(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.ordersService.trackForCustomer(request.customer, id);
   }
 
   // 客户自助取消未付款订单（存在待处理支付时服务端拒绝，防止渠道扣款与取消竞态）
@@ -398,14 +479,18 @@ export class CustomersController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('me/orders/:id/cancel')
   cancelOrder(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
-    return this.ordersService.cancelForCustomer(request.customer.id, id);
+    return this.ordersService.cancelForCustomer(request.customer, id);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/selection-inquiries')
-  getSelectionInquiries(@Req() request: CustomerRequest) {
-    return this.customersService.getSelectionInquiries(request.customer.id);
+  getSelectionInquiries(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customersService.getSelectionInquiries(request.customer);
   }
 
   @Public()
@@ -413,54 +498,63 @@ export class CustomersController {
   @Get('me/consultations/:leadId')
   getConsultation(
     @Req() request: CustomerRequest,
-    @Param('leadId', ParseIntPipe) leadId: number,
+    @Res({ passthrough: true }) response: Response,
+    @Param('leadId') leadId: string,
   ) {
-    return this.customersService.getConsultation(request.customer.id, leadId);
+    setCustomerPrivateNoStore(response);
+    return this.customersService.getConsultation(request.customer, leadId);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/inquiries')
-  getInquiries(@Req() request: CustomerRequest, @Query() query: CustomerInquiryQueryDto) {
-    return this.customersService.getInquiries(request.customer.id, query);
-  }
-
-  @Public()
-  @UseGuards(CustomerAuthGuard, CustomerCommerceGuard)
-  @Post('me/orders/:id/payment-proof')
-  submitPaymentProof(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number, @Body() dto: SubmitPaymentProofDto) {
-    return this.ordersService.submitOfflinePaymentProof(request.customer.id, id, dto.proofKey, {
-      type: 'CUSTOMER' as const,
-      id: request.customer.id,
-    });
+  getInquiries(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Query() query: CustomerInquiryQueryDto,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customersService.getInquiries(request.customer, query);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/addresses')
-  listAddresses(@Req() request: CustomerRequest) {
-    return this.customersService.listAddresses(request.customer.id);
+  listAddresses(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customersService.listAddresses(request.customer);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Post('me/addresses')
-  createAddress(@Req() request: CustomerRequest, @Body() dto: CustomerAddressDto) {
-    return this.customersService.createAddress(request.customer.id, dto);
+  createAddress(
+    @Req() request: CustomerRequest,
+    @Body() dto: CustomerAddressDto,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
+    return this.customersService.createAddress(request.customer, dto, idempotencyKey);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Put('me/addresses/:id')
   updateAddress(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number, @Body() dto: CustomerAddressDto) {
-    return this.customersService.updateAddress(request.customer.id, id, dto);
+    return this.customersService.updateAddress(request.customer, id, dto);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/favorites')
-  listFavorites(@Req() request: CustomerRequest) {
-    return this.customersService.listFavorites(request.customer.id);
+  listFavorites(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customersService.listFavorites(request.customer);
   }
 
   @Public()
@@ -468,14 +562,30 @@ export class CustomersController {
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @Post('me/favorites/:productId/toggle')
   toggleFavorite(@Req() request: CustomerRequest, @Param('productId', ParseIntPipe) productId: number) {
-    return this.customersService.toggleFavorite(request.customer.id, productId);
+    return this.customersService.toggleFavorite(request.customer, productId);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Put('me/favorites/:productId')
+  addFavorite(@Req() request: CustomerRequest, @Param('productId', ParseIntPipe) productId: number) {
+    return this.customersService.addFavorite(request.customer, productId);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Delete('me/favorites/:productId')
+  removeFavorite(@Req() request: CustomerRequest, @Param('productId', ParseIntPipe) productId: number) {
+    return this.customersService.removeFavorite(request.customer, productId);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Delete('me/addresses/:id')
   deleteAddress(@Req() request: CustomerRequest, @Param('id', ParseIntPipe) id: number) {
-    return this.customersService.deleteAddress(request.customer.id, id);
+    return this.customersService.deleteAddress(request.customer, id);
   }
 
   // ===== 合规（个保法：可携带权 + 注销权）=====
@@ -484,11 +594,15 @@ export class CustomersController {
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me/data-export')
-  exportMyData(@Req() request: CustomerRequest) {
-    return this.customersService.exportMyData(request.customer.id);
+  exportMyData(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customersService.exportMyData(request.customer);
   }
 
-  /** 注销账户：密码二次确认 → 匿名化 + 永久无法登录（订单/评价按法定与展示需要保留） */
+  /** 注销账户：密码或无密码账户的当前手机验证码确认 → 匿名化 + 永久无法登录 */
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
@@ -498,7 +612,7 @@ export class CustomersController {
     @Res({ passthrough: true }) response: Response,
     @Body() dto: CloseCustomerAccountDto,
   ) {
-    const result = await this.customersService.closeAccount(request.customer.id, dto.password);
+    const result = await this.customersService.closeAccount(request.customer, dto);
     response.setHeader('Set-Cookie', buildClearSessionCookieHeaders('customer'));
     return result;
   }
@@ -511,15 +625,25 @@ export class CustomersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
   @Get('admin')
-  adminList(@Query() query: { page?: string; pageSize?: string; keyword?: string; status?: string }) {
-    return this.customersService.adminListCustomers(query);
+  adminList(
+    @Req() request: StaffRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Query() query: { page?: string; pageSize?: string; keyword?: string; status?: string },
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customersService.adminListCustomers(query, request.user);
   }
 
   /** 客户 360° 详情：档案 + 消费聚合 + 最近订单 + 收藏 + 地址数 */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
   @Get('admin/:id')
-  adminDetail(@Param('id', ParseIntPipe) id: number) {
-    return this.customersService.adminGetCustomer(id);
+  adminDetail(
+    @Req() request: StaffRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    setCustomerPrivateNoStore(response);
+    return this.customersService.adminGetCustomer(id, request.user);
   }
 }
