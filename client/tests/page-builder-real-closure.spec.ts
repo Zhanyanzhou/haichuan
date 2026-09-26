@@ -3399,7 +3399,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await rollbackDialog.getByRole("button", { name: "确认回滚线上", exact: true }).click();
     expect((await rollbackResponsePromise).ok()).toBe(true);
     await expect(page.getByText(
-      `线上页面已回滚到版本 ${pageRevisionV1.version}；当前草稿保持不变`,
+      `已从历史版本 ${pageRevisionV1.version} 创建并切换到新线上版本 ${pageRevisionV2.version + 1}；当前草稿与历史版本保持不变`,
       { exact: true },
     )).toBeVisible();
 

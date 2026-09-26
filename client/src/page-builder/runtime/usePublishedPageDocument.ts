@@ -5,6 +5,7 @@ import { unwrapResponse } from "@/utils/unwrap";
 import type { PuckBlock, PuckDocument } from "./PuckDocumentRenderer";
 import {
   getBrowserPublicContentLocale,
+  isPublicContentLocaleAvailable,
   type PublicContentLocale,
 } from "@/i18n/publicLocale";
 
@@ -29,6 +30,10 @@ type PublishedPageDocumentState = {
   status: PublishedPageDocumentStatus;
   /** 刷新失败时仍在使用最后一次有效发布快照。 */
   stale: boolean;
+};
+
+type PublishedPageDocumentInternalState = PublishedPageDocumentState & {
+  resourceKey?: string;
 };
 
 export type PublishedPageDocumentResource = PublishedPageDocumentState & {
@@ -108,15 +113,21 @@ export function usePublishedPageDocument(
   localeOverride?: PublicContentLocale,
 ): PublishedPageDocumentResource {
   const locale = localeOverride ?? getBrowserPublicContentLocale();
+  const publishedLocaleAvailable = isPublicContentLocaleAvailable(locale);
   const initialBootstrapRef = useRef<PublishedPageDocument | null | undefined>(undefined);
   if (initialBootstrapRef.current === undefined) {
-    initialBootstrapRef.current = readPrerenderedPublishedPageDocument(pageKey);
+    initialBootstrapRef.current = publishedLocaleAvailable
+      ? readPrerenderedPublishedPageDocument(pageKey)
+      : null;
   }
   const initialBootstrap = initialBootstrapRef.current;
-  const [state, setState] = useState<PublishedPageDocumentState>(() => ({
+  const [state, setState] = useState<PublishedPageDocumentInternalState>(() => ({
+    resourceKey: initialBootstrap && pageKey ? `${locale}:${pageKey}` : undefined,
     pageKey: initialBootstrap?.pageKey,
     pageDocument: initialBootstrap ?? null,
-    status: initialBootstrap ? "published" : (pageKey ? "loading" : "idle"),
+    status: initialBootstrap
+      ? "published"
+      : (pageKey ? (publishedLocaleAvailable ? "loading" : "invalid") : "idle"),
     stale: false,
   }));
   const mountedRef = useRef(true);
@@ -143,9 +154,24 @@ export function usePublishedPageDocument(
       activeRefreshRef.current = null;
       lastValidRef.current = null;
       setState({
+        resourceKey: undefined,
         pageKey: undefined,
         pageDocument: null,
         status: "idle",
+        stale: false,
+      });
+      return;
+    }
+
+    if (!publishedLocaleAvailable) {
+      requestIdRef.current += 1;
+      activeRefreshRef.current = null;
+      lastValidRef.current = null;
+      setState({
+        resourceKey: `${locale}:${pageKey}`,
+        pageKey,
+        pageDocument: null,
+        status: "invalid",
         stale: false,
       });
       return;
@@ -167,6 +193,7 @@ export function usePublishedPageDocument(
 
     if (showLoading && !lastValid) {
       setState({
+        resourceKey: key,
         pageKey,
         pageDocument: null,
         status: "loading",
@@ -184,6 +211,7 @@ export function usePublishedPageDocument(
         // 必须清除旧内存快照，避免撤销发布后继续展示历史正文。
         lastValidRef.current = null;
         setState({
+          resourceKey: key,
           pageKey,
           pageDocument: null,
           status: "unpublished",
@@ -197,6 +225,7 @@ export function usePublishedPageDocument(
       if (isExplicitlyInvalidPublishedPageDocument(pageDocument, pageKey)) {
         lastValidRef.current = null;
         setState({
+          resourceKey: key,
           pageKey,
           pageDocument: null,
           status: "invalid",
@@ -208,6 +237,7 @@ export function usePublishedPageDocument(
       if (!isPublishedPageDocument(pageDocument, pageKey)) {
         if (lastValid) {
           setState({
+            resourceKey: key,
             pageKey,
             pageDocument: lastValid,
             status: "published",
@@ -215,6 +245,7 @@ export function usePublishedPageDocument(
           });
         } else {
           setState({
+            resourceKey: key,
             pageKey,
             pageDocument: null,
             status: "invalid",
@@ -226,6 +257,7 @@ export function usePublishedPageDocument(
 
       lastValidRef.current = { key, pageKey, pageDocument };
       setState({
+        resourceKey: key,
         pageKey,
         pageDocument,
         status: "published",
@@ -235,6 +267,7 @@ export function usePublishedPageDocument(
       if (!mountedRef.current || requestIdRef.current !== requestId) return;
       if (lastValid) {
         setState({
+          resourceKey: key,
           pageKey,
           pageDocument: lastValid,
           status: "published",
@@ -242,6 +275,7 @@ export function usePublishedPageDocument(
         });
       } else {
         setState({
+          resourceKey: key,
           pageKey,
           pageDocument: null,
           status: "error",
@@ -254,9 +288,9 @@ export function usePublishedPageDocument(
         if (operation.pending && mountedRef.current) void refresh(false);
       }
     }
-  }, [locale, pageKey]);
+  }, [locale, pageKey, publishedLocaleAvailable]);
 
-  usePagePublishStream(pageKey, () => {
+  usePagePublishStream(publishedLocaleAvailable ? pageKey : undefined, () => {
     void refresh(false);
   }, locale);
 
@@ -281,5 +315,21 @@ export function usePublishedPageDocument(
     };
   }, [pageKey, refresh]);
 
-  return { ...state, refresh };
+  const currentResourceKey = pageKey ? `${locale}:${pageKey}` : undefined;
+  const scopedState: PublishedPageDocumentInternalState = state.resourceKey === currentResourceKey
+    ? state
+    : {
+        resourceKey: currentResourceKey,
+        pageKey,
+        pageDocument: null,
+        status: pageKey ? (publishedLocaleAvailable ? "loading" : "invalid") : "idle",
+        stale: false,
+      };
+  return {
+    pageKey: scopedState.pageKey,
+    pageDocument: scopedState.pageDocument,
+    status: scopedState.status,
+    stale: scopedState.stale,
+    refresh,
+  };
 }

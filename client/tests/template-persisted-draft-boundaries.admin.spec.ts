@@ -687,7 +687,10 @@ async function editTemplateName(page: Page, name: string) {
 }
 
 async function createUnsavedTemplate(page: Page) {
-  await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+  await page
+    .getByRole("complementary", { name: "模板组件库" })
+    .getByRole("button", { name: "新建模板", exact: true })
+    .click();
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
@@ -816,8 +819,9 @@ test.describe("普通保存响应恢复（自有 API Mock）", () => {
         expect((await readSessionSnapshot(page)).dirty).toBe(false);
         expect(server.resources.get(templateId)?.draft.definition.name).toBe("换一个模板名称");
       } else if (newTemplate) {
-        await expect(page.locator(".ant-message-notice-content").last()).not.toContainText("修改模板名称");
-        await expect(page.locator(".ant-message-notice-content").last()).toContainText(
+        const conflictDialog = page.getByRole("dialog", { name: "模板保存发生冲突" });
+        await expect(conflictDialog).not.toContainText("修改模板名称");
+        await expect(conflictDialog).toContainText(
           scenario === "同ID内容冲突" ? "服务端模板身份或版本与本次保存不一致" : "暂时无法确认服务端保存结果",
         );
       }

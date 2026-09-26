@@ -11,27 +11,33 @@ export default function CanvasImageFocusEditor({ nodeId, sourceElement, editing,
   const document = useTemplateEditorSession((state) => state.previewDocument ?? state.draft?.definition);
   const breakpoint = useTemplateEditorSession((state) => state.breakpoint);
   const active = useTemplateEditorSession((state) => state.activeInteraction);
+  const requested = useTemplateEditorSession((state) => state.imageFocusEditingNodeId === nodeId);
   const token = useRef<string | null>(null);
+  const onEditingChangeRef = useRef(onEditingChange);
+  onEditingChangeRef.current = onEditingChange;
   const drag = useRef<{ id: number; x: number; y: number; focus: { x: number; y: number }; dx: number; dy: number; active: boolean; element: HTMLElement } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const slotId = document?.nodes[nodeId]?.slotId;
   const rules = document && slotId ? resolveTemplateSlotRules(document, slotId, breakpoint) : null;
   const focus = objectPositionToPercent(rules?.objectPosition);
+  useEffect(() => {
+    if (requested && !editing) onEditingChangeRef.current(true);
+  }, [requested, editing]);
   const close = useCallback((commit: boolean) => {
     const current = token.current; token.current = null; drag.current = null;
     if (current) {
       const session = useTemplateEditorSession.getState();
       if (commit) session.commitInteraction(current); else session.cancelInteraction(current);
     }
-    onEditingChange(false);
-  }, [onEditingChange]);
+    onEditingChangeRef.current(false);
+  }, []);
   useEffect(() => {
     if (!editing) return;
     token.current = useTemplateEditorSession.getState().beginInteraction("调整图片取景");
-    if (!token.current) onEditingChange(false);
+    if (!token.current) onEditingChangeRef.current(false);
     return () => { if (token.current) useTemplateEditorSession.getState().cancelInteraction(token.current); token.current = null; };
-  }, [editing, nodeId, breakpoint, onEditingChange]);
-  useEffect(() => { if (editing && token.current && useTemplateEditorSession.getState().activeInteraction?.token !== token.current) { token.current = null; onEditingChange(false); } }, [active, editing, onEditingChange]);
+  }, [editing, nodeId, breakpoint]);
+  useEffect(() => { if (editing && token.current && useTemplateEditorSession.getState().activeInteraction?.token !== token.current) { token.current = null; onEditingChangeRef.current(false); } }, [active, editing]);
   useEffect(() => {
     if (!editing) return;
     const escape = (event: KeyboardEvent) => {
@@ -43,6 +49,7 @@ export default function CanvasImageFocusEditor({ nodeId, sourceElement, editing,
     return () => { window.removeEventListener("keydown", escape, true); window.removeEventListener("blur", blur); };
   }, [close, editing]);
   if (!rules || !slotId) return null;
+  if (!editing) return null;
   const preview = (position: typeof focus, fit = rules.objectFit ?? "cover") => {
     if (!token.current) return;
     const result = useTemplateEditorSession.getState().previewInteraction(token.current, { type: "update-definition", label: "调整图片取景", update: (next) => {
@@ -51,7 +58,7 @@ export default function CanvasImageFocusEditor({ nodeId, sourceElement, editing,
     } });
     setError(result.ok ? null : result.message);
   };
-  if (!editing) return <button type="button" style={{ pointerEvents: "auto", position: "absolute", left: 0, bottom: 0 }} onClick={(event) => { event.stopPropagation(); setError(null); onEditingChange(true); }}>调整画面</button>;
+  if (!editing) return null;
   return <div role="group" aria-label="图片取景编辑" style={{ position: "absolute", inset: 0, pointerEvents: "auto", zIndex: 400, outline: "2px dashed #5F6568" }}>
     <div role="slider" aria-label="图片焦点" aria-valuemin={0} aria-valuemax={100} aria-valuenow={focus.x} aria-valuetext={`横向 ${focus.x}%，纵向 ${focus.y}%`} tabIndex={0}
       style={{ position: "absolute", inset: 0, cursor: rules.objectFit === "contain" ? "crosshair" : "grab", touchAction: "none" }}

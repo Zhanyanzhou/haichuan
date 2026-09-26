@@ -8,7 +8,7 @@
  * 4. 操作按钮全部带文字：更换 / 链接 / 删除(danger)。
  */
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { App as AntdApp, Upload, Button, Input, type InputRef } from "antd";
 import {
   InboxOutlined,
@@ -24,13 +24,12 @@ import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
 import { sizeMatchStatus, useImageNaturalSize } from "./specCheck";
 import {
   addPageMediaItem,
-  PAGE_MEDIA_LIBRARY_CHANGED_EVENT,
-  readPageMediaLibrary,
 } from "./pageMediaLibrary";
 import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
+import ImageFocusPad from "../inspector/controls/ImageFocusPad";
+import SharedPageMediaPicker from "./SharedPageMediaPicker";
 
 export const SESSION_MEDIA_UPLOADED_EVENT = "page-builder:media-uploaded";
-export const sessionUploadedMedia = new Set<string>();
 
 export interface MediaSpec {
   width: number;
@@ -78,6 +77,9 @@ interface MediaPickerFieldProps {
   previewFocus?: { x: number; y: number };
   previewFit?: "cover" | "contain" | "fill";
   previewZoom?: number;
+  /** 在预览上拖动焦点；提供后预览不再兼作更换图片入口。 */
+  onFocusChange?: (next: { x: number; y: number }) => void;
+  focusDisabled?: boolean;
   /** 打开页面素材选择区。 */
   onOpenPageMedia?: () => void;
   pageMediaOpen?: boolean;
@@ -100,6 +102,8 @@ export default function MediaPickerField({
   previewFocus,
   previewFit,
   previewZoom,
+  onFocusChange,
+  focusDisabled = false,
   onOpenPageMedia,
   pageMediaOpen = false,
   taskPresentation = false,
@@ -113,7 +117,6 @@ export default function MediaPickerField({
   const [urlInput, setUrlInput] = useState(value || "");
   const [uploading, setUploading] = useState(false);
   const [builtinPageMediaOpen, setBuiltinPageMediaOpen] = useState(false);
-  const [mediaRevision, setMediaRevision] = useState(0);
   const usesBuiltinPageMedia = !sessionOnly && !onOpenPageMedia;
   const openPageMedia = onOpenPageMedia ?? (usesBuiltinPageMedia
     ? () => setBuiltinPageMediaOpen((open) => !open)
@@ -153,31 +156,6 @@ export default function MediaPickerField({
     setUrlMode(false);
     setUrlInput(value || "");
   }, [value]);
-
-  useEffect(() => {
-    if (!usesBuiltinPageMedia) return undefined;
-    const refresh = () => setMediaRevision((revision) => revision + 1);
-    window.addEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
-    window.addEventListener(PAGE_MEDIA_LIBRARY_CHANGED_EVENT, refresh);
-    return () => {
-      window.removeEventListener(SESSION_MEDIA_UPLOADED_EVENT, refresh);
-      window.removeEventListener(PAGE_MEDIA_LIBRARY_CHANGED_EVENT, refresh);
-    };
-  }, [usesBuiltinPageMedia]);
-
-  const availablePageMedia = useMemo(() => {
-    void mediaRevision;
-    if (!usesBuiltinPageMedia) return [];
-    const items = new Map<string, { url: string; name: string }>();
-    if (value) items.set(value, { url: value, name: "当前图片" });
-    readPageMediaLibrary().filter((item) => item.type === "image").forEach((item) => {
-      items.set(item.url, { url: item.url, name: item.name });
-    });
-    [...sessionUploadedMedia].forEach((url, index) => {
-      if (!items.has(url)) items.set(url, { url, name: `当前浏览器图片 ${index + 1}` });
-    });
-    return [...items.values()];
-  }, [mediaRevision, usesBuiltinPageMedia, value]);
 
   const selectPageMedia = (nextValue: string) => {
     setBuiltinPageMediaOpen(false);
@@ -221,7 +199,6 @@ export default function MediaPickerField({
           name: file.name || "未命名图片",
           createdAt: new Date().toISOString(),
         });
-        sessionUploadedMedia.add(finalUrl);
         window.dispatchEvent(new CustomEvent(SESSION_MEDIA_UPLOADED_EVENT));
         onChange?.(finalUrl);
         message.success("上传成功");
@@ -320,6 +297,22 @@ export default function MediaPickerField({
       {/* ═══ 预览（有图时的默认态） ═══ */}
       {hasValue && (
         <div>
+          {onFocusChange && !imgSize.error ? (
+            <>
+              <ImageFocusPad
+                value={{ x: focusX, y: focusY }}
+                disabled={Boolean(readOnly || uploading || focusDisabled)}
+                previewSrc={value}
+                previewAlt="预览"
+                previewFit={previewFit ?? (hasCropPreview ? "cover" : "contain")}
+                previewZoom={previewZoom}
+                previewAspectRatio={previewAspectRatio}
+                ariaLabel="拖动调整画面焦点"
+                onChange={onFocusChange}
+              />
+              <p className="image-focus-pad__hint">拖动画面中的点调整构图；更换图片请用下方按钮。</p>
+            </>
+          ) : (
           <button
             type="button"
             className="homepage-editor__media-preview-trigger"
@@ -360,6 +353,7 @@ export default function MediaPickerField({
               ) : null}
             </div>
           </button>
+          )}
           {taskPresentation && spec ? (
             <p className="homepage-editor__media-recommendation">
               建议 {spec.width} × {spec.height} · {spec.ratio} · 2K+
@@ -599,43 +593,12 @@ export default function MediaPickerField({
           </details>
         </div>
       ) : null}
-      {usesBuiltinPageMedia && pageMediaExpanded && !readOnly ? (
-        <div
-          className="homepage-editor__current-page-media"
-          aria-label="选择本页与当前浏览器图片"
-          role="region"
-        >
-          <div className="homepage-editor__current-page-media-heading">
-            <strong>本页与当前浏览器图片</strong>
-            <span>{availablePageMedia.length} 张</span>
-          </div>
-          <p className="homepage-editor__current-page-media-empty">
-            这里只汇总当前页面引用和本浏览器上传记录，不是跨设备的账号素材库。
-          </p>
-          {availablePageMedia.length > 0 ? (
-            <div className="homepage-editor__current-page-media-items">
-              {availablePageMedia.map((item) => (
-                <button
-                  key={item.url}
-                  type="button"
-                  className={item.url === value ? "is-current" : ""}
-                  onClick={() => selectPageMedia(item.url)}
-                  aria-label={item.url === value ? `当前素材：${item.name}` : `使用素材：${item.name}`}
-                >
-                  <img
-                    src={resolveManagedTemplateMediaPreviewUrl(item.url)}
-                    alt=""
-                    loading="lazy"
-                  />
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="homepage-editor__current-page-media-empty">
-              当前页面和浏览器暂无可复用图片，可使用“更换图片”上传。
-            </p>
-          )}
-        </div>
+      {usesBuiltinPageMedia && !readOnly ? (
+        <SharedPageMediaPicker
+          open={pageMediaExpanded}
+          currentValue={value}
+          onSelect={selectPageMedia}
+        />
       ) : null}
     </div>
   );

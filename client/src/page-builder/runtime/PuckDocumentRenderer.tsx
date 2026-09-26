@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 import {
@@ -15,10 +16,20 @@ import {
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   DynamicTemplateInstanceView,
   dynamicTemplateVersionKey,
+  hasExplicitDynamicTemplateInstanceImage,
   readResolvedDynamicTemplateDefinitions,
   type DynamicTemplateInstanceProps,
   type ResolvedDynamicTemplateDefinitionMap,
 } from "@/page-builder/dynamic-template-instance";
+import {
+  resolveTemplateBreakpoint,
+  toTemplateContentBreakpoint,
+  type TemplateContentBreakpoint,
+} from "@/page-builder/template-definition/responsive";
+import {
+  compileDynamicTemplateRenderPlan,
+  findFirstReachableHeadingSlotId,
+} from "@/page-builder/template-definition/renderPlan";
 
 export type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
@@ -72,6 +83,80 @@ function hasRequiredPublicMedia(block: PuckBlock) {
   }
 }
 
+function usePublicRendererViewportWidth(enabled: boolean) {
+  const [width, setWidth] = useState<number | undefined>(() => (
+    enabled && typeof window !== "undefined" ? window.innerWidth : undefined
+  ));
+  useEffect(() => {
+    if (!enabled) {
+      setWidth(undefined);
+      return undefined;
+    }
+    const update = () => setWidth(window.innerWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [enabled]);
+  return width;
+}
+
+function getResolvedDynamicTemplate(
+  block: PuckBlock,
+  resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
+) {
+  if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE) return undefined;
+  const templateId = String(block.props?.templateId ?? "");
+  const templateVersion = Number(block.props?.templateVersion);
+  return resolvedDynamicTemplates[
+    dynamicTemplateVersionKey(templateId, templateVersion)
+  ];
+}
+
+function resolveDynamicTemplateDevice(
+  block: PuckBlock,
+  resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
+  viewportWidth: number | undefined,
+): TemplateContentBreakpoint {
+  const resolved = getResolvedDynamicTemplate(block, resolvedDynamicTemplates);
+  if (!resolved || viewportWidth === undefined) return "desktop";
+  return toTemplateContentBreakpoint(
+    resolveTemplateBreakpoint(resolved.definition, viewportWidth),
+  );
+}
+
+function isPubliclyRenderableBlock(
+  block: PuckBlock,
+  resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
+  device: TemplateContentBreakpoint,
+) {
+  const normalized = normalizeLegacyRenderColors(block.props || {});
+  const props: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
+    ? normalized as PuckProps
+    : {};
+  if (props.isVisible === false) return false;
+
+  if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+    const instanceProps = props as DynamicTemplateInstanceProps;
+    const resolved = getResolvedDynamicTemplate({ ...block, props }, resolvedDynamicTemplates);
+    if (!resolved || resolved.definition.templateId !== instanceProps.templateId) return false;
+    return hasExplicitDynamicTemplateInstanceImage(
+      resolved.definition,
+      instanceProps.contentBySlotId,
+      instanceProps.hiddenSlotIds,
+      device,
+    );
+  }
+
+  const templateIssue = getContentTemplateIssues({
+    moduleType: block.type,
+    props,
+    blockId: props.id,
+    path: "public-renderer",
+  }).some((issue) => issue.severity === "error");
+  if (templateIssue || !hasRequiredPublicMedia({ ...block, props })) return false;
+  return Boolean(getMatureContentTemplateSlotType(block.type || ""));
+}
+
 export type PuckDocumentRenderMode = "public" | "preview";
 
 function renderBlock(
@@ -82,6 +167,7 @@ function renderBlock(
   homeSurface: boolean,
   priority: boolean,
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
+  deviceOverride?: TemplateContentBreakpoint,
 ) {
   const normalized = normalizeLegacyRenderColors(block.props || {});
   const props: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
@@ -90,6 +176,14 @@ function renderBlock(
   const key = textValue(props.id) || `${block.type || "block"}-${index}`;
   const preview = mode === "preview";
   if (props.isVisible === false) return null;
+  if (
+    mode === "public"
+    && !isPubliclyRenderableBlock(
+      { ...block, props },
+      resolvedDynamicTemplates,
+      deviceOverride ?? "desktop",
+    )
+  ) return null;
 
   if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
     const instanceProps = props as DynamicTemplateInstanceProps;
@@ -110,8 +204,10 @@ function renderBlock(
         key={key}
         props={instanceProps}
         definition={resolved.definition}
+        deviceOverride={deviceOverride}
         mode={mode}
         primaryHeadingLevel={heroHeadingLevel}
+        priority={mode === "public" && priority}
       />
     );
   }
@@ -168,6 +264,7 @@ function GuardedBlock({
   homeSurface,
   priority,
   resolvedDynamicTemplates,
+  deviceOverride,
 }: {
   block: PuckBlock;
   index: number;
@@ -176,6 +273,7 @@ function GuardedBlock({
   homeSurface: boolean;
   priority: boolean;
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap;
+  deviceOverride?: TemplateContentBreakpoint;
 }) {
   return renderBlock(
     block,
@@ -185,6 +283,7 @@ function GuardedBlock({
     homeSurface,
     priority,
     resolvedDynamicTemplates,
+    deviceOverride,
   );
 }
 
@@ -202,6 +301,7 @@ export default function PuckDocumentRenderer({
   primaryHeading?: string;
   surface?: "home";
 }) {
+  const viewportWidth = usePublicRendererViewportWidth(mode === "public");
   if (!Array.isArray(data?.content)) return null;
   const english = getBrowserPublicContentLocale() === "en";
   const content = data.content;
@@ -218,40 +318,48 @@ export default function PuckDocumentRenderer({
   const isPrimaryStage = (block: PuckBlock) => (
     isVisiblePrimaryStageBlock(block, resolvedDynamicTemplates)
   );
+  const deviceForBlock = (block: PuckBlock) => resolveDynamicTemplateDevice(
+    block,
+    resolvedDynamicTemplates,
+    viewportWidth,
+  );
+  const isRenderablePrimaryStage = (block: PuckBlock) => (
+    isPrimaryStage(block)
+    && (mode !== "public" || isPubliclyRenderableBlock(
+      block,
+      resolvedDynamicTemplates,
+      deviceForBlock(block),
+    ))
+  );
   const allBlocks = [...content, ...zoneBlocks];
   const dynamicPrimaryStageHasHeading = (block: PuckBlock) => {
-    if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isPrimaryStage(block)) return false;
+    if (block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isRenderablePrimaryStage(block)) return false;
     const templateId = String(block.props?.templateId ?? "");
     const templateVersion = Number(block.props?.templateVersion);
     const definition = resolvedDynamicTemplates[
       dynamicTemplateVersionKey(templateId, templateVersion)
     ]?.definition;
     if (!definition) return false;
-    const hidden = new Set(Array.isArray(block.props?.hiddenSlotIds) ? block.props.hiddenSlotIds : []);
-    const instanceContent = block.props?.contentBySlotId && typeof block.props.contentBySlotId === "object"
-      && !Array.isArray(block.props.contentBySlotId)
-      ? block.props.contentBySlotId as Record<string, unknown>
-      : {};
-    return Object.values(definition.slots).some((slot) => {
-      if (!["heading", "heroTemplate"].includes(slot.type) || hidden.has(slot.slotId)) return false;
-      const value = Object.prototype.hasOwnProperty.call(instanceContent, slot.slotId)
-        ? instanceContent[slot.slotId]
-        : definition.defaultContent[slot.slotId];
-      return slot.type === "heroTemplate"
-        ? Boolean(value && typeof value === "object" && !Array.isArray(value)
-          && typeof (value as Record<string, unknown>).title === "string"
-          && ((value as Record<string, unknown>).title as string).trim().length > 0)
-        : typeof value === "string" && value.trim().length > 0;
+    const instanceProps = block.props as DynamicTemplateInstanceProps;
+    const device = deviceForBlock(block);
+    const result = compileDynamicTemplateRenderPlan(definition, {
+      device,
+      breakpoint: device,
+      contentBySlotId: instanceProps.contentBySlotId,
+      hiddenSlotIds: instanceProps.hiddenSlotIds,
+      layoutOverridesByNodeId: instanceProps.layoutOverridesByNodeId,
+      showEmptySlots: false,
     });
+    return result.ok && Boolean(findFirstReachableHeadingSlotId(result.plan.root));
   };
   const primaryHeroIndex = allBlocks.findIndex((block) => (
     block.type === "首屏主视觉"
-      ? block.props?.isVisible !== false
+      ? isRenderablePrimaryStage(block)
         && typeof block.props?.title === "string"
         && block.props.title.trim().length > 0
       : dynamicPrimaryStageHasHeading(block)
   ));
-  const primaryStageIndex = allBlocks.findIndex(isPrimaryStage);
+  const primaryStageIndex = allBlocks.findIndex(isRenderablePrimaryStage);
   // 区块级兜底：单个 block 运行时抛错只跳过该区块，避免整页白屏
   const render = (block: PuckBlock, index: number) => {
     const blockHeroHeadingLevel = index === primaryHeroIndex
@@ -276,6 +384,7 @@ export default function PuckDocumentRenderer({
           homeSurface={homeSurface}
           priority={index === primaryStageIndex}
           resolvedDynamicTemplates={resolvedDynamicTemplates}
+          deviceOverride={mode === "public" ? deviceForBlock(block) : undefined}
         />
       </ErrorBoundary>
     );

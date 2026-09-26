@@ -6,6 +6,7 @@ import {
   canNestDynamicTemplateNode,
   getDynamicTemplateNodeRegistryEntry,
   resolveDynamicTemplateMoveLanding,
+  resolveDynamicTemplateMoveShortcutLanding,
   moveDynamicTemplateNodeToLanding,
   duplicateDynamicTemplateNode,
   DynamicTemplateRenderer,
@@ -416,13 +417,17 @@ export default function DynamicTemplateCanvas() {
     if (sourceDefinition && sourceRules && gesture.target.source === "definition-node" && !sourceRules.placement && !sourceRules.anchor && gesture.operation === "move") {
       const drop = gesture.dropTarget;
       const hovered = drop ? sourceDefinition.nodes[drop.nodeId] : null;
-      const parentId = hovered ? findDynamicTemplateParentId(sourceDefinition, hovered.nodeId) : null;
+      const parentId = hovered ? findDynamicTemplateParentId(sourceDefinition, hovered.nodeId) : findDynamicTemplateParentId(sourceDefinition, gesture.target.ownerNodeId);
       const parentRules = parentId ? resolveTemplateNodeRules(sourceDefinition, parentId, breakpoint) : null;
       const canEnter = hovered && getDynamicTemplateNodeRegistryEntry(hovered.type).canHaveChildren && drop && drop.x > .2 && drop.x < .8 && drop.y > .2 && drop.y < .8;
-      const landing = hovered && drop ? resolveDynamicTemplateMoveLanding(sourceDefinition, gesture.target.ownerNodeId, {
+      const pointerLanding = hovered && drop ? resolveDynamicTemplateMoveLanding(sourceDefinition, gesture.target.ownerNodeId, {
         targetNodeId: hovered.nodeId,
         placement: canEnter ? "inside" : (parentRules?.direction === "row" ? drop.x : drop.y) < .5 ? "before" : "after",
       }) : null;
+      const keyboardDelta = parentRules?.direction === "row" ? gesture.deltaSourceX : gesture.deltaSourceY;
+      const landing = pointerLanding ?? (!drop && phase === "commit" && keyboardDelta
+        ? resolveDynamicTemplateMoveShortcutLanding(sourceDefinition, gesture.target.ownerNodeId, keyboardDelta < 0 ? "up" : "down")
+        : null);
       const blocked = !landing ? "当前位置没有可用落点" : landing.disabledReason;
       setFlowDropLabel(blocked ?? `${landing!.parentId === findDynamicTemplateParentId(sourceDefinition, gesture.target.ownerNodeId) ? "重排" : "跨容器移动"}：${landing!.pathLabel}`);
       if (phase === "preview" && placementTokenRef.current) {

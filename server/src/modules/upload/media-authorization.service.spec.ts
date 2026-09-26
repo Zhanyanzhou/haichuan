@@ -13,6 +13,7 @@ const incremented = (current: number, value: unknown) => {
 test('授权草稿、提交、独立审核在 Serializable 事务内形成连续事件哈希与 OperationLog', async () => {
   const events: Array<Record<string, any>> = [];
   const operationLogs: Array<Record<string, any>> = [];
+  const productQualityInvalidations: Array<Record<string, any>> = [];
   const isolationLevels: string[] = [];
   let authorization: Record<string, any> = {
     assetId: 17,
@@ -61,6 +62,13 @@ test('授权草稿、提交、独立审核在 Serializable 事务内形成连续
     updatedAt: new Date('2026-09-13T00:00:00Z'),
   };
   const transaction = {
+    $queryRaw: async () => [{ id: 2, role: 'SUPER_ADMIN' }],
+    product: {
+      updateMany: async (args: Record<string, any>) => {
+        productQualityInvalidations.push(args);
+        return { count: 1 };
+      },
+    },
     mediaAsset: {
       findFirst: async () => ({ ...asset, authorization: { ...authorization } }),
     },
@@ -138,6 +146,18 @@ test('授权草稿、提交、独立审核在 Serializable 事务内形成连续
   assert.equal(events[2].previousEventHash, events[1].eventHash);
   assert.equal(operationLogs.length, 3);
   assert.equal(operationLogs.every((log) => !log.detail.includes('internal://evidence')), true);
+  assert.equal(productQualityInvalidations.length, 3);
+  assert.deepEqual(productQualityInvalidations[0], {
+    where: {
+      publicationQualityStatus: 'READY',
+      images: { some: { mediaAssetId: 17 } },
+    },
+    data: {
+      publicationQualityStatus: 'QUARANTINED',
+      publicationQualityHash: null,
+      publicationQualityCheckedAt: null,
+    },
+  });
   await assert.rejects(
     () => service.revoke(17, 3, { expectedRevision: 4, reason: '\t  ' }),
     BadRequestException,
@@ -162,12 +182,14 @@ test('授权草稿、提交、独立审核在 Serializable 事务内形成连续
   assert.equal(events.length, 3);
   assert.equal(operationLogs.length, 3);
   await assert.rejects(() => service.submit(17, 2, 2), ConflictException);
+  assert.equal(productQualityInvalidations.length, 3, '失败或过期操作不得额外改写商品质量状态');
 });
 
 test('自动建档使用 DRAFT/LEGACY_UNVERIFIED 并写入第一个 SHA-256 事件', async () => {
   const createdRecords: Array<Record<string, any>> = [];
   const eventRecords: Array<Record<string, any>> = [];
   const transaction = {
+    product: { updateMany: async () => ({ count: 0 }) },
     mediaAssetAuthorization: {
       findUnique: async () => null,
       create: async ({ data }: any) => {
@@ -221,6 +243,7 @@ test('上传入库只登记未核验草稿，不隐式代替版权确认和审�
   const events: Array<Record<string, any>> = [];
   const operationLogs: Array<Record<string, any>> = [];
   const transaction = {
+    product: { updateMany: async () => ({ count: 0 }) },
     mediaAssetAuthorization: {
       findUnique: async () => current,
       findUniqueOrThrow: async () => {
@@ -322,6 +345,8 @@ test('在职 SUPER_ADMIN 只有明确确认后才能自审素材授权并留下�
     lifecycleRevision: 1,
   };
   const transaction = {
+    $queryRaw: async () => [{ id: 5, role: 'SUPER_ADMIN' }],
+    product: { updateMany: async () => ({ count: 0 }) },
     mediaAsset: { findFirst: async () => ({ ...asset, authorization: { ...authorization } }) },
     mediaAssetAuthorization: {
       updateMany: async ({ data }: any) => {
@@ -397,6 +422,8 @@ test('在职 SUPER_ADMIN 可从装修页一次确认草稿素材公开使用', a
     lifecycleRevision: 1,
   };
   const transaction = {
+    $queryRaw: async () => [{ id: 5, role: 'SUPER_ADMIN' }],
+    product: { updateMany: async () => ({ count: 0 }) },
     mediaAsset: { findFirst: async () => ({ ...asset, authorization: { ...authorization } }) },
     mediaAssetAuthorization: {
       updateMany: async ({ data }: any) => {
@@ -438,6 +465,7 @@ test('在职 SUPER_ADMIN 可从装修页一次确认草稿素材公开使用', a
 test('EDITOR 入库仍保持未核验草稿，不自动批准公开', async () => {
   const createdRecords: Array<Record<string, any>> = [];
   const transaction = {
+    product: { updateMany: async () => ({ count: 0 }) },
     user: {
       findUnique: async () => ({ role: 'EDITOR' }),
     },
@@ -483,6 +511,7 @@ test('旧素材可用 expectedRevision=0 首次显式建立草稿，但不能覆
   let authorization: Record<string, any> | null = null;
   const events: Array<Record<string, any>> = [];
   const operationLogs: Array<Record<string, any>> = [];
+  const productQualityInvalidations: Array<Record<string, any>> = [];
   const asset = {
     id: 31,
     storageKey: 'page-assets/legacy.png',
@@ -505,6 +534,13 @@ test('旧素材可用 expectedRevision=0 首次显式建立草稿，但不能覆
     updatedAt: new Date(),
   };
   const transaction = {
+    $queryRaw: async () => [{ id: 8, role: 'EDITOR' }],
+    product: {
+      updateMany: async (args: Record<string, any>) => {
+        productQualityInvalidations.push(args);
+        return { count: 1 };
+      },
+    },
     mediaAsset: {
       findFirst: async () => ({ ...asset, authorization }),
     },
@@ -566,6 +602,11 @@ test('旧素材可用 expectedRevision=0 首次显式建立草稿，但不能覆
   assert.match(events[0].eventHash, /^[a-f0-9]{64}$/);
   assert.equal(operationLogs.length, 1);
   assert.equal(operationLogs[0].detail.includes('internal://legacy/31'), false);
+  assert.equal(productQualityInvalidations.length, 1);
+  assert.equal(
+    productQualityInvalidations[0]?.where?.images?.some?.mediaAssetId,
+    31,
+  );
   await assert.rejects(
     () => service.saveDraft(31, 9, {
       expectedRevision: 0,
@@ -579,6 +620,8 @@ test('旧素材可用 expectedRevision=0 首次显式建立草稿，但不能覆
 test('首次显式建档的并发唯一冲突映射为 409', async () => {
   const uniqueConflict = Object.assign(new Error('duplicate'), { code: 'P2002' });
   const transaction = {
+    $queryRaw: async () => [{ id: 8, role: 'EDITOR' }],
+    product: { updateMany: async () => ({ count: 0 }) },
     mediaAsset: {
       findFirst: async () => ({
         id: 41,

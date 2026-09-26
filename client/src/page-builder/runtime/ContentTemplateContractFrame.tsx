@@ -1219,6 +1219,15 @@ function ContentTemplateReadOnlyContractFrame({
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || !contract || !layout) return;
+    const hasExplicitInstanceOverrides = Boolean(resolveInstanceOverrides(contract, props));
+    if (
+      renderSurface !== CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW
+      && !hasExplicitInstanceOverrides
+    ) {
+      // 无实例布局覆盖的公开/页面预览由语义 Renderer 自身撑开高度；
+      // 否则 content 模式会被预览画框锁成固定高度，后续区块与页脚会重叠。
+      return;
+    }
     const ownerWindow = root.ownerDocument.defaultView;
     const appliedVariables = new Set<string>();
     const frameHeight = createContractFrameHeightSync(root, contract);
@@ -1328,14 +1337,19 @@ function ContentTemplateReadOnlyContractFrame({
       clearVariables();
       frameHeight.clear();
     };
-  }, [contract, layout, mode, moduleType, props]);
+  }, [contract, layout, mode, moduleType, props, renderSurface]);
 
   if (!contract || !layout) return <>{children}</>;
 
   const scopeId = `hc-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const previewProps = props ?? {};
   const explicitInstanceOverrides = resolveInstanceOverrides(contract, previewProps);
-  const instanceOverrides = resolveEffectiveInstanceOverrides(contract, previewProps);
+  // 公开/页面预览必须先保留语义 Renderer 的自然流。合同默认几何只服务
+  // 模板目录预览与编辑选区；若在没有实例覆盖时也下沉为绝对定位，移动端
+  // stacked 合同会被重新拆成媒体、文案和 CTA 三个重叠坐标层。
+  const instanceOverrides = renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW
+    ? resolveEffectiveInstanceOverrides(contract, previewProps)
+    : explicitInstanceOverrides;
   const instanceCss = createInstanceCss(
     contract,
     instanceOverrides,

@@ -2111,22 +2111,51 @@ export function useTemplateWorkspaceController({
     setLifecycleBusy(true);
     setPublishedDraftCreation({ ...requestState, status: "creating" });
     try {
-      const response = await dynamicTemplateApi.createDraftFromPublished(template.templateId, {
-        expectedVersion,
-        expectedChecksum,
-      });
-      const resource = unwrapResponse<DynamicTemplateResource | null>(response);
-      const persistedDraft = resource
-        ? createTrustedDraftFromPublished(resource, published)
-        : null;
+      let resource: DynamicTemplateResource | null = null;
+      let persistedDraft: TemplateEditorDraft | null = null;
+      let writeError: unknown = null;
+      try {
+        const response = await dynamicTemplateApi.createDraftFromPublished(template.templateId, {
+          expectedVersion,
+          expectedChecksum,
+        });
+        resource = unwrapResponse<DynamicTemplateResource | null>(response);
+        persistedDraft = resource
+          ? createTrustedDraftFromPublished(resource, published)
+          : null;
+      } catch (error) {
+        writeError = error;
+      }
+
+      // POST 可能已经提交但响应丢失、冲突或身份畸形。此处只读核验精确的
+      // revision 1 草稿；不能通过重复 POST 来猜测写入结果。
       if (!resource || !persistedDraft) {
-        const reason = "服务端返回的编辑草稿不完整或身份不一致，当前会话未改变；请重新读取目录后重试";
-        if (publishedDraftCreationRequestRef.current === requestId) {
-          setPublishedDraftCreation({ ...requestState, status: "failed", reason });
+        try {
+          const verificationResponse = await dynamicTemplateApi.getDraft(template.templateId);
+          const verifiedResource = unwrapResponse<DynamicTemplateResource | null>(verificationResponse);
+          const verifiedDraft = verifiedResource
+            ? createTrustedDraftFromPublished(verifiedResource, published)
+            : null;
+          if (verifiedResource && verifiedDraft) {
+            resource = verifiedResource;
+            persistedDraft = verifiedDraft;
+          }
+        } catch {
+          // 下方统一进入 detached；保留会话且只允许重新读取目录。
         }
-        message.error(reason);
+      }
+
+      if (!resource || !persistedDraft) {
+        const reason = writeError && getEditorHttpStatus(writeError) === 409
+          ? "正式版本或草稿状态已变化，写入结果待确认；为避免重复创建，请重新读取目录"
+          : "编辑草稿写入结果无法确认；当前会话未改变。为避免重复创建，请重新读取目录";
+        if (publishedDraftCreationRequestRef.current === requestId) {
+          setPublishedDraftCreation({ ...requestState, status: "detached", reason });
+        }
+        message.warning(reason);
         return false;
       }
+
       if (!isOriginalOperation()) {
         const reason = "编辑草稿已建立，但当前会话已有后续变化；未自动打开，请重新读取目录";
         if (publishedDraftCreationRequestRef.current === requestId) {

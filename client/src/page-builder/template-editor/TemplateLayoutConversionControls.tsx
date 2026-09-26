@@ -53,7 +53,12 @@ export default function TemplateLayoutConversionControls({ nodeId, disabled = fa
       setNotice("画布正在预览。子对象 ID、父子关系和阅读顺序不变；确认后一次撤销可恢复。");
     } catch (error) { cancel(); setNotice(error instanceof Error ? error.message : "无法转换排列，请检查容器状态。"); }
   };
-  return <section className="template-editor__settings-section template-native__layout" aria-label="容器排列转换"><h3>容器排列</h3>
+  return <section className="template-editor__settings-section template-native__layout" aria-label="排列与分栏设置">
+    <div className="template-native__layout-heading">
+      <h3>排列与分栏</h3>
+      <p>当前：{label(rules)} · {breakpoint === "desktop" ? "桌面" : "手机"}</p>
+    </div>
+    <p className="template-native__layout-help">选择一种排列会先在画布预览，确认后才写入当前设备规则。</p>
     <div className="template-native__layout-choices" role="group" aria-label="选择容器排列方式">{(Object.keys(names) as Layout[]).filter((layout) => layout !== "free" || node.type === "Stack").map((layout) => <button type="button" key={layout} aria-label={`预览${names[layout]}`} aria-pressed={currentLayout === layout} title={`预览${names[layout]}，确认后应用`} disabled={disabled || pending || blockedByOtherInteraction} onClick={() => start(layout)}><span aria-hidden="true">{{ vertical: "↕", horizontal: "↔", wrap: "↵", grid: "▦", free: "⤢" }[layout]}</span>{names[layout]}</button>)}</div>
     {pending && preview ? <><table aria-label="布局转换断点影响"><thead><tr><th>断点</th><th>原排列</th><th>预览排列与子项变化</th></tr></thead><tbody>{breakpoints.map((bp) => {
       const changedChildren = node.childIds.filter((id) => JSON.stringify(resolveTemplateNodeRules(draft.definition, id, bp)) !== JSON.stringify(resolveTemplateNodeRules(preview, id, bp)));

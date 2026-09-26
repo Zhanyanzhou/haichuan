@@ -357,6 +357,7 @@ interface TemplateEditorSessionState {
   workspaceScroll: TemplateWorkspaceScrollState;
   saveStatus: TemplateSaveStatus;
   lastCommandResult: DynamicTemplateCommandResult | null;
+  imageFocusEditingNodeId: string | null;
   open: (draft: TemplateEditorDraft, options?: { isNew?: boolean }) => void;
   close: () => void;
   restoreBaseline: () => boolean;
@@ -392,6 +393,7 @@ interface TemplateEditorSessionState {
   setContentLayer: (contentLayer: TemplateEditorContentLayer) => void;
   setInspectorTask: (inspectorTask: TemplateInspectorTask) => void;
   setInspectorView: (inspectorView: TemplateInspectorView) => void;
+  setImageFocusEditing: (nodeId: string | null) => void;
   confirmDeviceReview: (device: TemplateEditorDevice) => void;
   confirmPageScopeReview: (source?: "publish-review") => void;
   confirmStressPreviewScenarioReview: (scenario: TemplateStressPreviewScenario) => void;
@@ -448,6 +450,7 @@ const EMPTY_STATE = {
   },
   saveStatus: "idle" as const,
   lastCommandResult: null as DynamicTemplateCommandResult | null,
+  imageFocusEditingNodeId: null as string | null,
 };
 
 export const useTemplateEditorSession = create<TemplateEditorSessionState>((set, get) => ({
@@ -954,6 +957,9 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set,
   )),
   setInspectorView: (inspectorView) => set((state) => (
     state.previewMode ? state : { inspectorView }
+  )),
+  setImageFocusEditing: (nodeId) => set((state) => (
+    state.previewMode ? state : { imageFocusEditingNodeId: nodeId }
   )),
   confirmDeviceReview: (device) => set((state) => (
     state.draft && !state.previewMode && state.device === device

@@ -8,12 +8,13 @@ import {
   InboxOutlined,
   LeftOutlined,
   MinusOutlined,
+  PictureOutlined,
   PlusOutlined,
   PlusCircleOutlined,
   ReloadOutlined,
   RightOutlined,
 } from "@ant-design/icons";
-import { Button, Dropdown, Modal, Spin, type MenuProps } from "antd";
+import { App as AntdApp, Button, Dropdown, Modal, Spin, type MenuProps } from "antd";
 import {
   memo,
   useCallback,
@@ -44,7 +45,11 @@ import {
   listLocalDynamicTemplateDrafts,
   type StoredDynamicTemplateDraft,
 } from "./dynamicTemplateDraftRepository";
+import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
+import { getEditorErrorMessage } from "../workspace/editorLifecycleErrors";
 import TemplateCatalogCard from "./TemplateCatalogCard";
+import TemplateCatalogCoverEditor from "./TemplateCatalogCoverEditor";
+import { resolveCatalogCoverFrame } from "./catalogCoverGeometry";
 import TemplateCatalogViewportPreview from "./TemplateCatalogViewportPreview";
 import TemplateCatalogControls from "./TemplateCatalogControls";
 import { groupTemplateCatalogEntries } from "./templateCatalogGrouping";
@@ -373,6 +378,36 @@ function TemplateCatalogPreviewDialog({
   );
 }
 
+const CatalogCoverThumbnail = memo(function CatalogCoverThumbnail({
+  catalogCoverUrl,
+  coverWidth,
+  coverHeight,
+  fallback,
+}: {
+  catalogCoverUrl?: string | null;
+  coverWidth: number;
+  coverHeight: number;
+  fallback: ReactNode;
+}) {
+  const [failed, setFailed] = useState(false);
+  const src = catalogCoverUrl?.trim() ?? "";
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+  if (!src || failed) return fallback;
+  return (
+    <span
+      className="template-editor__catalog-cover-preview"
+      data-catalog-cover="true"
+      data-cover-width={String(Math.round(coverWidth))}
+      data-cover-height={String(Math.round(coverHeight))}
+      style={{ aspectRatio: `${coverWidth} / ${coverHeight}` }}
+    >
+      <img alt="" loading="lazy" src={resolveManagedTemplateMediaPreviewUrl(src)} onError={() => setFailed(true)} />
+    </span>
+  );
+});
+
 function resolveUnifiedTemplatePreviewDefinition(
   presentation: UnifiedTemplateCatalogPresentation,
 ): { definition: TemplateDefinitionV2; previewKey: string } | null {
@@ -383,15 +418,24 @@ function renderDynamicTemplatePreview(
   definition: TemplateDefinitionV2,
   device: "desktop" | "mobile",
   previewKey = definition.templateId,
+  catalogCoverUrl?: string | null,
 ): Pick<CatalogEntryBase, "preview"> {
   const previewModel = createTemplateCatalogPreviewModel(definition, device);
+  const coverFrame = resolveCatalogCoverFrame(definition);
   return {
     preview: (
-      <DynamicTemplateCatalogPreview
-        definition={definition}
-        device={device}
-        previewKey={previewKey}
-        previewModel={previewModel}
+      <CatalogCoverThumbnail
+        catalogCoverUrl={catalogCoverUrl}
+        coverWidth={coverFrame.width}
+        coverHeight={coverFrame.height}
+        fallback={(
+          <DynamicTemplateCatalogPreview
+            definition={definition}
+            device={device}
+            previewKey={previewKey}
+            previewModel={previewModel}
+          />
+        )}
       />
     ),
   };
@@ -400,10 +444,16 @@ function renderDynamicTemplatePreview(
 function renderUnifiedTemplatePreview(
   presentation: UnifiedTemplateCatalogPresentation,
   device: "desktop" | "mobile",
+  catalogCoverUrl?: string | null,
 ): Pick<CatalogEntryBase, "preview"> {
   const resolved = resolveUnifiedTemplatePreviewDefinition(presentation);
   if (resolved) {
-    return renderDynamicTemplatePreview(resolved.definition, device, resolved.previewKey);
+    return renderDynamicTemplatePreview(
+      resolved.definition,
+      device,
+      resolved.previewKey,
+      catalogCoverUrl,
+    );
   }
   const viewport = RESPONSIVE_CANVAS[device];
   return {
@@ -463,6 +513,15 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
 }
 
+function isOptionalNullableString(value: unknown): boolean {
+  return value === undefined || isNullableString(value);
+}
+
+function catalogCoverUrlOf(value: { catalogCoverUrl?: string | null } | null | undefined): string | null {
+  const next = value?.catalogCoverUrl?.trim();
+  return next ? next : null;
+}
+
 function isIntegerAtLeast(value: unknown, minimum: number): value is number {
   return Number.isInteger(value) && Number(value) >= minimum;
 }
@@ -503,6 +562,7 @@ function isDynamicTemplateResource(value: unknown): value is DynamicTemplateReso
     || !isIntegerAtLeast(value.definitionSchemaVersion, 1)
     || !isIntegerAtLeast(value.publishedVersion, 0)
     || !isNullableString(value.sourceReference)
+    || !isOptionalNullableString(value.catalogCoverUrl)
     || !isNullableString(value.archivedAt)
     || typeof value.createdAt !== "string"
     || typeof value.updatedAt !== "string"
@@ -530,6 +590,7 @@ function isPublishedTemplateResource(value: unknown): value is PublishedDynamicT
   if (!isRecord(value) || !isNonEmptyString(value.templateId)) return false;
   return hasSharedTemplatePresentationFields(value)
     && isNullableString(value.sourceReference)
+    && isOptionalNullableString(value.catalogCoverUrl)
     && isIntegerAtLeast(value.version, 1)
     && isIntegerAtLeast(value.schemaVersion, 1)
     && isTemplateDefinitionFor(value.definition, value.templateId)
@@ -659,6 +720,7 @@ function DesignTemplateCard({
   publishedDraftCreation,
   onRefresh,
   onRestore,
+  onEditCatalogCover,
 }: {
   device: "desktop" | "mobile";
   entry: DesignCatalogEntry;
@@ -674,6 +736,7 @@ function DesignTemplateCard({
   publishedDraftCreation?: PublishedDraftCreationState | null;
   onRefresh: () => void;
   onRestore: (template: DynamicTemplateResource) => void;
+  onEditCatalogCover?: (template: DynamicTemplateResource) => void;
 }) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const archivedTemplate = entry.target.kind === "dynamic-persisted"
@@ -792,6 +855,9 @@ function DesignTemplateCard({
       && publishedTemplate
     ) onCreateDraftFromPublished(persistedTemplate, publishedTemplate);
     if (key === "reload-catalog") onRefresh();
+    if (key === "catalog-cover") {
+      if (persistedTemplate && onEditCatalogCover) onEditCatalogCover(persistedTemplate);
+    }
     if (
       key === "move-to-trash"
       && entry.target.kind !== "dynamic-local"
@@ -851,6 +917,7 @@ function DesignTemplateCard({
             }}
           >
             <EyeOutlined />
+            <span>预览</span>
           </button>
           <Dropdown
             destroyOnHidden
@@ -860,6 +927,19 @@ function DesignTemplateCard({
               { key: "copy", label: entry.active ? "复制当前草稿" : missingEditableDraft ? `复制正式版 v${formalVersion}` : "复制草稿", disabled: missingEditableDraft && publishedTemplate?.schemaVersion === 1, title: missingEditableDraft && publishedTemplate?.schemaVersion === 1 ? "此旧正式版需先建立对应编辑草稿再复制" : undefined },
               ...(!missingEditableDraft && publishedTemplate ? [{ key: "copy-published", label: `复制正式版 v${formalVersion}`, disabled: publishedTemplate.schemaVersion === 1, title: publishedTemplate.schemaVersion === 1 ? "此旧正式版需先建立对应编辑草稿再复制" : undefined }] : []),
               ...(!missingEditableDraft ? [{ key: "rename", label: "重命名" }] : []),
+              persistedTemplate && onEditCatalogCover
+                ? {
+                    key: "catalog-cover",
+                    icon: <PictureOutlined />,
+                    label: catalogCoverUrlOf(persistedTemplate) ? "更换预览图" : "上传预览图",
+                  }
+                : {
+                    key: "catalog-cover-unavailable",
+                    icon: <PictureOutlined />,
+                    disabled: true,
+                    label: "上传预览图",
+                    title: "请先保存模板，再上传组件库预览图",
+                  },
             ] : actionItems, onClick: handleActionClick }}
             open={actionsOpen}
             onOpenChange={setActionsOpen}
@@ -876,6 +956,7 @@ function DesignTemplateCard({
               onClick={(event) => event.stopPropagation()}
             >
               <EllipsisOutlined />
+              <span>管理</span>
             </button>
           </Dropdown>
         </span>
@@ -945,7 +1026,7 @@ function PagePublishedTemplateCard({
       }}
       onDragEnd={onDragEnd}
       trailingAction={(
-        <span className="template-editor__catalog-card-actions">
+        <span className="template-editor__catalog-card-actions template-editor__catalog-page-actions">
           <button
             type="button"
             className="template-editor__catalog-preview-action"
@@ -954,13 +1035,14 @@ function PagePublishedTemplateCard({
             title={`放大预览：${entry.name}`}
           >
             <EyeOutlined />
+            <span>预览</span>
           </button>
           {showHandoffUpgrade ? (
             <button
               type="button"
               className="homepage-editor__template-upgrade-action is-handoff-upgrade"
+              data-catalog-action="primary"
               data-catalog-handoff-upgrade="true"
-              style={{ position: "static", width: "auto", padding: "0 9px", borderRadius: 16 }}
               onClick={() => onUpgrade(entry.template)}
               aria-label={guidance.upgradeAriaLabel}
               title={guidance.upgradeAriaLabel}
@@ -972,7 +1054,7 @@ function PagePublishedTemplateCard({
             type="button"
             className="homepage-editor__template-upgrade-action"
             data-catalog-handoff-add={handoff ? "true" : undefined}
-            style={{ position: "static", width: "auto", padding: "0 9px", borderRadius: 16 }}
+            data-catalog-action={showHandoffUpgrade ? "secondary" : "primary"}
             onClick={() => onActivate(entry.template)}
             aria-label={guidance.add.ariaLabel}
             title={guidance.add.title}
@@ -983,12 +1065,13 @@ function PagePublishedTemplateCard({
             <button
               type="button"
               className="homepage-editor__template-upgrade-action"
-              style={{ position: "static" }}
+              data-catalog-action="secondary"
               onClick={() => onUpgrade(entry.template)}
               aria-label={guidance.upgradeAriaLabel}
               title={guidance.upgradeAriaLabel}
             >
               <ExclamationCircleOutlined />
+              <span>{guidance.upgradeLabel}</span>
             </button>
           ) : null}
         </span>
@@ -1011,6 +1094,14 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [detailPreview, setDetailPreview] = useState<TemplateCatalogDetailPreview | null>(null);
+  const [coverEditor, setCoverEditor] = useState<{
+    templateId: string;
+    name: string;
+    catalogCoverUrl: string | null;
+    definition: TemplateDefinitionV2;
+  } | null>(null);
+  const [coverSaving, setCoverSaving] = useState(false);
+  const { message } = AntdApp.useApp();
   const [pageHandoff, setPageHandoff] = useState<PageTemplateLibraryHandoff | null>(null);
   const focusedHandoffKeyRef = useRef<string | null>(null);
   const pageHandoffRef = useRef<PageTemplateLibraryHandoff | null>(null);
@@ -1226,6 +1317,40 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     setCatalogError(null);
   }, []);
 
+  const applyCatalogCover = useCallback((templateId: string, catalogCoverUrl: string | null) => {
+    const nextItems: TemplateCatalogItemResource[] = catalogItemsRef.current.map((item) => {
+      if (item.template.templateId !== templateId) return item;
+      if (item.kind === "published") {
+        return { kind: "published" as const, template: { ...item.template, catalogCoverUrl } };
+      }
+      return { kind: "editable" as const, template: { ...item.template, catalogCoverUrl } };
+    });
+    catalogItemsRef.current = nextItems;
+    setCatalogItems(nextItems);
+  }, []);
+
+  const persistCatalogCover = useCallback(async (templateId: string, catalogCoverUrl: string | null) => {
+    setCoverSaving(true);
+    try {
+      const response = await dynamicTemplateApi.updateCatalogCover(templateId, { catalogCoverUrl });
+      const updated = unwrapResponse<DynamicTemplateResource>(response);
+      const nextUrl = catalogCoverUrlOf(updated) ?? catalogCoverUrl;
+      applyCatalogCover(templateId, nextUrl);
+      setCoverEditor((current) => (
+        current && current.templateId === templateId
+          ? { ...current, catalogCoverUrl: nextUrl }
+          : current
+      ));
+      message.success(nextUrl ? "组件库预览图已更新" : "已改回实时预览");
+      void refreshCatalog();
+    } catch (error) {
+      message.error(getEditorErrorMessage(error, "预览图未能保存。请确认已选择素材库中的图片后重试。"));
+      throw error;
+    } finally {
+      setCoverSaving(false);
+    }
+  }, [applyCatalogCover, message, refreshCatalog]);
+
   const applyDynamicCatalogChange = useCallback((
     detail: DynamicTemplateCatalogChangeDetail,
   ) => {
@@ -1233,7 +1358,9 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       applyCatalogItems(catalogItemsRef.current.filter((item) => (
         item.template.templateId !== detail.identity.templateId
       )));
-      return true;
+      // “移出当前目录”既可能是永久删除，也可能是进入回收站。先撤下旧卡片，
+      // 再读取服务端目录，才能保留归档资源而不是把它误当成已删除。
+      return false;
     }
     if (detail.kind === "verified-catalog") {
       applyCatalogItems(detail.catalog.items);
@@ -1250,8 +1377,11 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       const existingChecksum = existing.template.draft?.definitionChecksum ?? null;
       if (existingRevision > detail.identity.revision) return true;
       if (existingRevision === detail.identity.revision) {
-        if (existingChecksum === detail.identity.definitionChecksum) return true;
-        return false;
+        if (existingChecksum !== detail.identity.definitionChecksum) return false;
+        if (
+          existing.template.status === incoming.status
+          && existing.template.archivedAt === incoming.archivedAt
+        ) return true;
       }
       const nextItems = [...catalogItemsRef.current];
       nextItems[existingIndex] = { kind: "editable", template: incoming };
@@ -1322,7 +1452,11 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             identity: entry.key,
             group: presentation.category,
             name: presentation.name,
-            ...renderUnifiedTemplatePreview(presentation, "desktop"),
+            ...renderUnifiedTemplatePreview(
+            presentation,
+            "desktop",
+            catalogCoverUrlOf(presentation.published),
+          ),
             template: presentation.published,
           });
           continue;
@@ -1395,6 +1529,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             currentDefinition,
             "desktop",
             `${ordinaryEditable.templateId}:draft`,
+            catalogCoverUrlOf(ordinaryEditable) ?? catalogCoverUrlOf(entry.published),
           ),
         });
         continue;
@@ -1416,7 +1551,11 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           lifecycle: ordinaryEditable.status === "ARCHIVED" ? "archived" : "published-current",
           name: ordinaryEditable.name,
           target,
-          ...renderUnifiedTemplatePreview(presentation, "desktop"),
+          ...renderUnifiedTemplatePreview(
+            presentation,
+            "desktop",
+            catalogCoverUrlOf(ordinaryEditable) ?? catalogCoverUrlOf(entry.published),
+          ),
         });
       }
     }
@@ -1460,7 +1599,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       && !entries.some((entry) => entry.key === `local-${props.currentDraft?.localDraftId}`)) {
       const currentDraft = props.currentDraft;
       if (
-        !isTemplateDesignLibraryTemplate({ templateId: currentDraft.definition.templateId })
+        isTemplateDesignLibraryTemplate({ templateId: currentDraft.definition.templateId })
         && matchesKeyword(keyword, currentDraft.definition.name, currentDraft.definition.metadata.category)
       ) {
         const target: TemplateEditorLibraryTarget = { kind: "dynamic-local", localDraftId: currentDraft.localDraftId! };
@@ -1729,6 +1868,14 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       publishedDraftCreation={props.publishedDraftCreation}
                       onRefresh={() => { void refreshCatalog(); }}
                       onRestore={props.onRestore}
+                      onEditCatalogCover={localOnly ? undefined : (template) => {
+                        setCoverEditor({
+                          templateId: template.templateId,
+                          name: template.name,
+                          catalogCoverUrl: catalogCoverUrlOf(template),
+                          definition: entry.definition,
+                        });
+                      }}
                     />
                   );
                 }
@@ -1809,6 +1956,22 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           insertPublishedFromPageLibrary(template);
           setDetailPreview(null);
         } : undefined}
+      />
+    ) : null}
+    {coverEditor ? (
+      <TemplateCatalogCoverEditor
+        templateId={coverEditor.templateId}
+        name={coverEditor.name}
+        definition={coverEditor.definition}
+        catalogCoverUrl={coverEditor.catalogCoverUrl}
+        saving={coverSaving}
+        onClose={() => {
+          if (!coverSaving) setCoverEditor(null);
+        }}
+        onClear={() => { void persistCatalogCover(coverEditor.templateId, null).catch(() => undefined); }}
+        onSaved={async (catalogCoverUrl) => {
+          await persistCatalogCover(coverEditor.templateId, catalogCoverUrl);
+        }}
       />
     ) : null}
     </>

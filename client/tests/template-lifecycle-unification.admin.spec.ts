@@ -11,6 +11,8 @@ import {
   isPageEditorLibraryTemplate,
   isTemplateDesignLibraryTemplate,
 } from "../src/page-builder/templates/pageEditorCatalog";
+import { deriveTemplatePersistencePresentation } from "../src/page-builder/template-editor/templatePublishWorkflow";
+import { DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT } from "../src/page-builder/template-editor/templateCatalogEvents";
 import type { TemplateEditorDraft } from "../src/page-builder/template-editor/types";
 import type {
   DynamicTemplateResource,
@@ -220,6 +222,7 @@ async function installLifecycleServer(
     deleteSucceeds?: boolean;
     createDraftFromPublishedGate?: Promise<void>;
     createDraftFromPublishedResult?: "success" | "conflict" | "malformed";
+    draftReadFails?: boolean;
     includeStandardRecords?: boolean;
     includePublishedWithoutDraft?: boolean;
     consultationStarters?: boolean;
@@ -449,6 +452,9 @@ async function installLifecycleServer(
     if (draftMatch && method === "GET") {
       const templateId = decodeURIComponent(draftMatch[1]);
       server.draftRequests.push(templateId);
+      if (options.draftReadFails) {
+        return route.fulfill(json(null, 503));
+      }
       return route.fulfill(json(
         structuredClone(server.records.find((item) => item.templateId === templateId) ?? null),
       ));
@@ -968,6 +974,36 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
 
     const pageCard = pageLibrary.locator(`[data-template-name="${previewTemplateId}"]`);
     await expect(pageCard).toBeVisible();
+    const actionFooter = pageCard.locator(".template-editor__catalog-card-action");
+    const previewAction = actionFooter.getByRole("button", { name: `放大预览：目录预览互通` });
+    const addAction = actionFooter.locator(".homepage-editor__template-upgrade-action").first();
+    await expect(actionFooter).toBeVisible();
+    await expect(previewAction).toContainText("预览");
+    await expect(addAction).toBeVisible();
+    await expect(addAction).toContainText("添加到页面");
+    const actionLayout = await pageCard.evaluate((card) => {
+      const main = card.querySelector<HTMLElement>(".homepage-editor__template-card-main");
+      const footer = card.querySelector<HTMLElement>(".template-editor__catalog-card-action");
+      const preview = card.querySelector<HTMLElement>(".template-editor__catalog-preview-action");
+      const add = card.querySelector<HTMLElement>(".homepage-editor__template-upgrade-action");
+      if (!main || !footer || !preview || !add) return null;
+      const mainRect = main.getBoundingClientRect();
+      const footerRect = footer.getBoundingClientRect();
+      return {
+        addPosition: getComputedStyle(add).position,
+        footerPosition: getComputedStyle(footer).position,
+        footerTop: footerRect.top,
+        mainBottom: mainRect.bottom,
+        previewPosition: getComputedStyle(preview).position,
+      };
+    });
+    expect(actionLayout).not.toBeNull();
+    expect(actionLayout).toMatchObject({
+      addPosition: "static",
+      footerPosition: "static",
+      previewPosition: "static",
+    });
+    expect(actionLayout!.footerTop).toBeGreaterThanOrEqual(actionLayout!.mainBottom - 1);
     const pageShell = pageCard.locator("[data-template-catalog-preview-shell]");
     await expect(pageShell).toHaveAttribute("data-preview-status", "ready");
     await pageCard.hover();
@@ -993,6 +1029,21 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     expect(pageRect.y).toBeGreaterThanOrEqual(pageClip.y - 1);
     expect(pageRect.x + pageRect.width).toBeLessThanOrEqual(pageClip.x + pageClip.width + 1);
     expect(pageRect.y + pageRect.height).toBeLessThanOrEqual(pageClip.y + pageClip.height + 1);
+
+    await page.getByRole("button", { name: "模板设计", exact: true }).click();
+    const designLibrary = page.getByRole("complementary", { name: "模板组件库" });
+    const designCard = designLibrary.locator(`[data-template-name="${previewTemplateId}"]`);
+    await expect(designCard).toBeVisible();
+    const designFooter = designCard.locator(".template-editor__catalog-card-action");
+    await expect(designFooter.getByRole("button", { name: `放大预览：目录预览互通` })).toContainText("预览");
+    await expect(designFooter.getByRole("button", { name: `更多模板操作：目录预览互通` })).toContainText("管理");
+    await expect.poll(async () => designCard.evaluate((card) => {
+      const footer = card.querySelector<HTMLElement>(".template-editor__catalog-card-action");
+      const more = card.querySelector<HTMLElement>(".template-editor__template-more");
+      return footer && more
+        ? { footer: getComputedStyle(footer).position, more: getComputedStyle(more).position }
+        : null;
+    })).toEqual({ footer: "static", more: "static" });
   });
 
   test("咨询起步身份识别覆盖标签、来源和模板 ID", () => {
@@ -1372,6 +1423,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
   });
 
   test("服务端草稿的干净与修改中状态在顶部准确显示，编辑区不出现制作任务链", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await installLifecycleServer(page, { includeStandardRecords: true });
     await openDesignCatalog(page);
     await activeTemplateCard(page, DRAFT_TEMPLATE_NAME, "草稿").click();
@@ -1382,6 +1434,13 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     })).toContainText("服务端草稿已保存");
     const productionGuide = page.getByRole("region", { name: "模板制作步骤", exact: true });
     await expect(productionGuide).toHaveCount(0);
+
+    await expect(page.getByRole("button", { name: "顶部新建模板", exact: true })).toBeHidden();
+    await expect(page.getByRole("button", { name: "新建模板", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "打开模板设置", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "更多模板操作", exact: true }).click();
+    await menuItemByAction(page, "模板设置").click();
+    await expect(page.locator('[data-template-inspector-field="name"] input')).toBeFocused();
 
     await markCurrentTemplateDirty(page);
     await expect(page.getByRole("status", {
@@ -1394,6 +1453,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
   test("已物化模板归档只发送当前草稿版本与校验和，不混入兼容 seed", async ({ page }) => {
     const server = await installLifecycleServer(page, { includeStandardRecords: true });
     await openDesignCatalog(page);
+    const catalogRequestsBefore = server.catalogRequests;
 
     await (await openCardAction(page, DRAFT_TEMPLATE_NAME, "移入回收站")).click();
     const dialog = page.getByRole("dialog", {
@@ -1413,6 +1473,11 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     });
     expect(write.body).not.toHaveProperty("definition");
     expect(write.body).not.toHaveProperty("sourceReference");
+    await expect.poll(() => server.catalogRequests).toBeGreaterThan(catalogRequestsBefore);
+    expect(server.records.find((item) => item.templateId === DRAFT_TEMPLATE_ID)).toMatchObject({
+      status: "ARCHIVED",
+      archivedAt: NOW,
+    });
     await page.getByRole("button", { name: "打开模板回收站", exact: true }).click();
     await expect(archivedTemplateCard(page, DRAFT_TEMPLATE_NAME)).toBeVisible();
   });
@@ -1519,32 +1584,66 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     await openDesignCatalog(page);
 
     await confirmCreateDraftFromPublished(page);
-    const reason = "正式版本已变化，未建立编辑草稿；请重新读取目录后重试";
+    const reason = "正式版本或草稿状态已变化，写入结果待确认；为避免重复创建，请重新读取目录";
     await expect(page.getByText(reason, { exact: true }).first()).toBeVisible();
     const card = publishedWithoutDraftCard(page).locator("..");
     await expect(card).toContainText(reason);
     expect((await readTemplateSession(page)).definition).toBeNull();
     expect(dynamicWrites(server, "/draft/from-published")).toHaveLength(1);
+    expect(server.draftRequests).toContain(PUBLISHED_NO_DRAFT_TEMPLATE_ID);
     expect(server.allWrites.filter((item) => item.path.endsWith("/publish"))).toHaveLength(0);
     expect(server.allWrites.filter((item) => item.path.includes("/document/"))).toHaveLength(0);
   });
 
-  test("建立草稿接口返回畸形身份时拒绝打开，卡片保留并可重试", async ({ page }) => {
+  test("建立草稿接口返回畸形身份时通过精确 GET 恢复且不重复 POST", async ({ page }) => {
     const server = await installLifecycleServer(page, {
       createDraftFromPublishedResult: "malformed",
       includePublishedWithoutDraft: true,
     });
     await openDesignCatalog(page);
+    const published = server.published.find((item) => item.templateId === PUBLISHED_NO_DRAFT_TEMPLATE_ID);
+    if (!published) throw new Error("畸形响应恢复测试缺少正式版本");
 
     await confirmCreateDraftFromPublished(page);
-    const reason = "服务端返回的编辑草稿不完整或身份不一致，当前会话未改变；请重新读取目录后重试";
-    await expect(page.getByText(reason, { exact: true }).first()).toBeVisible();
-    const card = publishedWithoutDraftCard(page).locator("..");
-    await expect(card).toContainText(reason);
-    expect((await readTemplateSession(page)).definition).toBeNull();
+    await expect(page.getByText(
+      `已从正式版本 v${published.version} 建立编辑草稿；未发布模板，也未修改任何页面`,
+      { exact: true },
+    )).toBeVisible();
+    const session = await readTemplateSession(page);
+    expect(session).toMatchObject({
+      dirty: false,
+      sourceType: "persisted",
+      remote: {
+        revision: 1,
+        baseVersion: published.version,
+      },
+    });
     expect(dynamicWrites(server, "/draft/from-published")).toHaveLength(1);
+    expect(server.draftRequests).toContain(PUBLISHED_NO_DRAFT_TEMPLATE_ID);
     expect(server.allWrites.filter((item) => item.path.endsWith("/publish"))).toHaveLength(0);
     expect(server.allWrites.filter((item) => item.path.includes("/document/"))).toHaveLength(0);
+  });
+
+  test("建立草稿响应不可信且 GET 不可用时冻结重复创建并只允许重读目录", async ({ page }) => {
+    const server = await installLifecycleServer(page, {
+      createDraftFromPublishedResult: "malformed",
+      draftReadFails: true,
+      includePublishedWithoutDraft: true,
+    });
+    await openDesignCatalog(page);
+
+    await confirmCreateDraftFromPublished(page);
+    const reason = "编辑草稿写入结果无法确认；当前会话未改变。为避免重复创建，请重新读取目录";
+    await expect(page.getByText(reason, { exact: true }).first()).toBeVisible();
+    await expect(publishedWithoutDraftCard(page).locator("..")).toContainText(reason);
+    expect((await readTemplateSession(page)).definition).toBeNull();
+    expect(dynamicWrites(server, "/draft/from-published")).toHaveLength(1);
+    expect(server.draftRequests).toContain(PUBLISHED_NO_DRAFT_TEMPLATE_ID);
+
+    const catalogRequestsBefore = server.catalogRequests;
+    await publishedWithoutDraftCard(page).click();
+    await expect.poll(() => server.catalogRequests).toBeGreaterThan(catalogRequestsBefore);
+    expect(dynamicWrites(server, "/draft/from-published")).toHaveLength(1);
   });
 
   test("建立草稿请求中切换并继续编辑时只发一个请求，迟到响应不覆盖新会话", async ({ page }) => {
@@ -1594,8 +1693,22 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
       message: "模板已有发布版本或页面引用，需保留历史数据。",
     }];
     const requestsBefore = server.catalogRequests;
-    await notifyCatalogChanged(page);
-    await expect.poll(() => server.catalogRequests).toBeGreaterThan(requestsBefore);
+    const archivedResource = structuredClone(resource);
+    if (!archivedResource.draft) throw new Error("恢复测试缺少草稿身份");
+    await page.evaluate(({ eventName, template }) => {
+      window.dispatchEvent(new CustomEvent(eventName, {
+        detail: {
+          kind: "editable-upsert",
+          identity: {
+            templateId: template.templateId,
+            revision: template.draft!.revision,
+            definitionChecksum: template.draft!.definitionChecksum,
+          },
+          template,
+        },
+      }));
+    }, { eventName: DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, template: archivedResource });
+    expect(server.catalogRequests).toBe(requestsBefore);
     await page.getByRole("button", { name: "打开模板回收站", exact: true }).click();
     await expect(archivedTemplateCard(page, DRAFT_TEMPLATE_NAME)).toBeVisible();
 

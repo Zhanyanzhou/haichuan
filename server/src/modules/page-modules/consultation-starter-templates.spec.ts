@@ -36,11 +36,16 @@ test("ensureConsultationStarters 对已发布起步模板幂等，不为他人�
     status: "ACTIVE",
   }));
   const createCalls: unknown[] = [];
-  const service = new DynamicTemplatesService({
+  const prisma = {
+    $queryRaw: async () => [{ id: 17, role: "SUPER_ADMIN" }],
     dynamicTemplate: {
       findMany: async () => published,
     },
-  } as never);
+  } as any;
+  prisma.$transaction = async (callback: (transaction: any) => Promise<unknown>) => (
+    callback(prisma)
+  );
+  const service = new DynamicTemplatesService(prisma as never);
   service.create = async (...args: unknown[]) => {
     createCalls.push(args);
     throw new Error("已发布起步模板不应再次创建");
@@ -56,13 +61,18 @@ test("ensureConsultationStarters 对已发布起步模板幂等，不为他人�
 test("ensureConsultationStarters 会为缺失起步模板创建并发布", async () => {
   const created: string[] = [];
   const published: string[] = [];
-  const service = new DynamicTemplatesService({
+  const prisma = {
+    $queryRaw: async () => [{ id: 17, role: "SUPER_ADMIN" }],
     dynamicTemplate: {
       findMany: async () => [],
       updateMany: async () => ({ count: 1 }),
     },
-  } as never);
-  service.create = async (_ownerId: number, input: { definition: { templateId: string } }) => {
+  } as any;
+  prisma.$transaction = async (callback: (transaction: any) => Promise<unknown>) => (
+    callback(prisma)
+  );
+  const service = new DynamicTemplatesService(prisma as never);
+  service.create = async (_actor: any, input: { definition: { templateId: string } }) => {
     created.push(input.definition.templateId);
     return {
       templateId: input.definition.templateId,
@@ -70,7 +80,7 @@ test("ensureConsultationStarters 会为缺失起步模板创建并发布", async
       draft: { revision: 1 },
     } as never;
   };
-  service.publish = async (_ownerId: number, templateId: string) => {
+  service.publish = async (_actor: any, templateId: string) => {
     published.push(templateId);
     return {} as never;
   };

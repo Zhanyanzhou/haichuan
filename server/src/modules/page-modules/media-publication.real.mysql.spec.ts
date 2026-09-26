@@ -115,6 +115,8 @@ test(
         puckData,
         metadata,
         "ci-real-mysql",
+        undefined,
+        submitter.id,
       );
       assert.ok(saved);
       const submitted = await pages.submitLocalizedPageDocumentReview(
@@ -228,6 +230,8 @@ test(
         { content: [], root: { props: {} }, zones: {} },
         { seoTitle: `自审并发 ${marker}`, seoDescription: "隔离数据库事务验证" },
         "ci-real-mysql-self-review",
+        undefined,
+        actor.id,
       );
       const submitted = await pages.submitLocalizedPageDocumentReview(
         "about",

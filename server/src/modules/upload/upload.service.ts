@@ -4,11 +4,13 @@ import { constants as fsConstants, existsSync, mkdirSync } from 'fs';
 import { copyFile, readFile, readdir, rename, stat, unlink, writeFile } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
 import dayjs from 'dayjs';
-import type { MediaAsset, MediaAssetAuthorization, MediaAssetStatus, Prisma } from '@prisma/client';
+import { Prisma, type MediaAsset, type MediaAssetAuthorization, type MediaAssetStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { validateImageContent } from '../../common/media/image-content-validation';
 import { resolveMediaStorageRoots } from './media-storage-paths';
 import { MediaAuthorizationService } from './media-authorization.service';
 import { evaluateMediaPublicEligibility, MediaPublicEligibility } from './media-public-eligibility';
+import { normalizedCropToPixels, type NormalizedCropRect } from './crop-geometry';
 import {
   assertSafeDesignFile,
   readVerifiedDesignMediaAsset,
@@ -19,6 +21,15 @@ import {
   isResponsivePublicImageWidth,
   resizePublicImageBuffer,
 } from './responsive-public-media';
+import type { CustomerPrincipal, StaffPrincipal } from '../../common/security/authenticated-principal';
+import { lockAuthorizedStaffForPayment } from '../../common/security/staff-payment-authorization';
+import { lockActiveCustomerForRead } from '../customers/customer-write-gate';
+import {
+  lockAuthorizedMediaStaff,
+  normalizeMediaStaffActor,
+  type MediaStaffAccess,
+  type MediaStaffActorInput,
+} from './media-staff-authorization';
 const sharp = require('sharp');
 
 const CHECKSUM_MISMATCH_QUARANTINE_REASON = 'CHECKSUM_MISMATCH';
@@ -101,7 +112,7 @@ export class UploadService implements OnModuleInit {
     return join(this.uploadDir, dayjs().format('YYYY/MM/DD'));
   }
 
-  async uploadFile(file: Express.Multer.File, uploadedBy?: number): Promise<StoredPageMedia> {
+  async uploadFile(file: Express.Multer.File, actor?: MediaStaffActorInput): Promise<StoredPageMedia> {
     if (!file) throw new BadRequestException('未选择文件');
 
     const expectedType = this.allowedTypes.get(file.mimetype);
@@ -115,11 +126,11 @@ export class UploadService implements OnModuleInit {
 
     this.assertSafeOriginalName(file.originalname, expectedType.extension, ['.jpg', '.jpeg', '.png', '.webp', '.gif']);
 
-    const metadata = await this.validateImageContent(file.buffer, expectedType.format);
+    const metadata = await validateImageContent(file.buffer, expectedType.format);
 
     return this.registerPublicPageMedia({
       file,
-      uploadedBy,
+      actor,
       extension: expectedType.extension,
       width: metadata.width,
       height: metadata.height,
@@ -175,70 +186,49 @@ export class UploadService implements OnModuleInit {
     }
   }
 
-  async uploadMultiple(files: Express.Multer.File[], uploadedBy?: number): Promise<StoredPageMedia[]> {
+  async uploadMultiple(files: Express.Multer.File[], actor?: MediaStaffActorInput): Promise<StoredPageMedia[]> {
     if (!files || files.length === 0) throw new BadRequestException('未选择文件');
     const results: StoredPageMedia[] = [];
     for (const file of files) {
-      const result = await this.uploadFile(file, uploadedBy);
+      const result = await this.uploadFile(file, actor);
       results.push(result);
     }
     return results;
   }
 
-  /**
-   * 付款凭证属于交易敏感资料：新文件只能保存到服务端私有目录，
-   * 上传完成后仅返回存储键，禁止生成 /uploads 公共 URL。
-   */
-  async uploadPrivatePaymentProof(customerId: number, file: Express.Multer.File): Promise<{
-    storageKey: string;
-    width?: number;
-    height?: number;
-    mimeType: string;
-    fileSize: number;
-  }> {
-    if (!file) throw new BadRequestException('未选择文件');
-    const expectedType = this.allowedTypes.get(file.mimetype);
-    if (!expectedType) throw new BadRequestException(`不支持的文件类型: ${file.mimetype}`);
-    if (file.size > this.maxSize) throw new BadRequestException('文件大小不能超过 10MB');
-
-    const metadata = await this.validateImageContent(file.buffer, expectedType.format);
-
-    const dateSeg = dayjs().format('YYYY/MM/DD');
-    const dir = join(this.paymentProofRoot, String(customerId), dateSeg);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
-    const filename = `${randomUUID()}${expectedType.extension}`;
-    await writeFile(join(dir, filename), file.buffer);
-    return {
-      storageKey: join(String(customerId), dateSeg, filename).replace(/\\/g, '/'),
-      width: metadata.width,
-      height: metadata.height,
-      mimeType: file.mimetype,
-      fileSize: file.size,
-    };
+  async getPaymentProofForStaff(
+    paymentId: number,
+    principal: Pick<StaffPrincipal, 'id'>,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockAuthorizedStaffForPayment(transaction, principal, 'PAYMENT_QUERY');
+      const payment = await transaction.payment.findUnique({
+        where: { id: paymentId },
+        select: { proofUrl: true },
+      });
+      if (!payment?.proofUrl) throw new NotFoundException('付款凭证不存在');
+      return this.readPaymentProof(payment.proofUrl);
+    });
   }
 
-  async getPaymentProofForStaff(paymentId: number) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
-      select: { proofUrl: true },
-    });
-    if (!payment?.proofUrl) throw new NotFoundException('付款凭证不存在');
-    return this.readPaymentProof(payment.proofUrl);
-  }
-
-  async getPaymentProofForCustomer(customerId: number, orderId: number) {
-    const payment = await this.prisma.payment.findFirst({
-      where: {
-        orderId,
-        order: { customerId },
-        proofUrl: { not: null },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { proofUrl: true },
-    });
-    if (!payment?.proofUrl) throw new NotFoundException('付款凭证不存在');
-    return this.readPaymentProof(payment.proofUrl);
+  async getPaymentProofForCustomer(
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+    orderId: number,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, principal);
+      const payment = await transaction.payment.findFirst({
+        where: {
+          orderId,
+          order: { customerId: principal.id },
+          proofUrl: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { proofUrl: true },
+      });
+      if (!payment?.proofUrl) throw new NotFoundException('付款凭证不存在');
+      return this.readPaymentProof(payment.proofUrl);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   /** 仅被已完成权限校验的接口调用；凭证只存于私有目录 private-media/payment-proofs。 */
@@ -266,7 +256,7 @@ export class UploadService implements OnModuleInit {
     }
   }
 
-  async registerStoredVideo(file: Express.Multer.File, uploadedBy?: number): Promise<StoredPageMedia> {
+  async registerStoredVideo(file: Express.Multer.File, actor?: MediaStaffActorInput): Promise<StoredPageMedia> {
     if (!file) throw new BadRequestException('未选择视频文件');
     if (!['video/mp4', 'video/webm'].includes(file.mimetype)) {
       throw new BadRequestException('仅支持 MP4 或 WebM 视频');
@@ -284,7 +274,7 @@ export class UploadService implements OnModuleInit {
     }
     return this.registerPublicPageMedia({
       file,
-      uploadedBy,
+      actor,
       extension,
     });
   }
@@ -345,6 +335,7 @@ export class UploadService implements OnModuleInit {
         accessLevel: 'PRIVATE',
         storageKey: { startsWith: 'design-assets/' },
         designFileVersions: { none: {} },
+        productImages: { none: {} },
       },
       select: { id: true, storageKey: true },
     });
@@ -355,12 +346,59 @@ export class UploadService implements OnModuleInit {
         id: asset.id,
         uploadedBy,
         designFileVersions: { none: {} },
+        productImages: { none: {} },
       },
     });
     if (removed.count === 1 && filePath) {
       await unlink(filePath).catch(() => undefined);
     }
     return removed.count === 1;
+  }
+
+  /**
+   * 回收本次裁图生成但未挂载的商品派生资产。
+   * 保留媒体授权及不可变事件，仅归档资产并移除私有文件；媒体资产行锁与商品挂载共用。
+   */
+  async archiveUnattachedProductDerivative(mediaAssetId: number, uploadedBy: number) {
+    const asset = await this.prisma.$transaction(async (transaction) => {
+      const locked = await transaction.$queryRaw<Array<{ id: number }>>(
+        Prisma.sql`SELECT id FROM media_assets WHERE id = ${mediaAssetId} FOR UPDATE`,
+      );
+      if (locked.length === 0) return null;
+      const candidate = await transaction.mediaAsset.findFirst({
+        where: {
+          id: mediaAssetId,
+          uploadedBy,
+          accessLevel: 'PUBLIC',
+          status: 'READY',
+          storageKey: { startsWith: 'product-assets/derived/' },
+          productImages: { none: {} },
+        },
+        select: { id: true, storageKey: true },
+      });
+      if (!candidate) return null;
+      const archived = await transaction.mediaAsset.updateMany({
+        where: {
+          id: candidate.id,
+          uploadedBy,
+          status: 'READY',
+          productImages: { none: {} },
+        },
+        data: {
+          status: 'ARCHIVED',
+          lifecycleRevision: { increment: 1 },
+        },
+      });
+      return archived.count === 1 ? candidate : null;
+    });
+    if (!asset) return false;
+
+    const filePath = this.resolveWithinRoot(
+      this.storageRoots.productMediaRoot,
+      asset.storageKey,
+    );
+    if (filePath) await unlink(filePath).catch(() => undefined);
+    return true;
   }
 
   async listPageMedia(options: {
@@ -370,7 +408,7 @@ export class UploadService implements OnModuleInit {
     includeArchived?: boolean;
     status?: 'READY' | 'ARCHIVED' | 'QUARANTINED';
     keyword?: string;
-  }): Promise<{ list: PageMediaItem[]; total: number; page: number; pageSize: number }> {
+  }, actor?: MediaStaffActorInput): Promise<{ list: PageMediaItem[]; total: number; page: number; pageSize: number }> {
     const mimeFilter = options.type === 'image'
       ? { startsWith: 'image/' }
       : options.type === 'video'
@@ -387,16 +425,22 @@ export class UploadService implements OnModuleInit {
       ...(mimeFilter ? { mimeType: mimeFilter } : {}),
       ...(options.keyword ? { originalName: { contains: options.keyword } } : {}),
     };
-    const [rows, total] = await this.prisma.$transaction([
-      this.prisma.mediaAsset.findMany({
+    const read = async (client: Prisma.TransactionClient | PrismaService) => Promise.all([
+      client.mediaAsset.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (options.page - 1) * options.pageSize,
         take: options.pageSize,
         include: { authorization: true },
       }),
-      this.prisma.mediaAsset.count({ where }),
+      client.mediaAsset.count({ where }),
     ]);
+    const [rows, total] = actor
+      ? await this.prisma.$transaction(async (transaction) => {
+          await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'read');
+          return read(transaction);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      : await read(this.prisma);
     return {
       list: rows.map((row) => this.toPageMediaItem(row, row.authorization)),
       total,
@@ -405,8 +449,13 @@ export class UploadService implements OnModuleInit {
     };
   }
 
-  async archivePageMedia(id: number): Promise<PageMediaItem> {
-    const initial = await this.findPageMedia(id, this.prisma);
+  async archivePageMedia(id: number, actor?: MediaStaffActorInput): Promise<PageMediaItem> {
+    const initial = actor
+      ? await this.prisma.$transaction(async (transaction) => {
+          await lockAuthorizedMediaStaff(transaction, actor, 'REVIEW', 'read');
+          return this.findPageMedia(id, transaction);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      : await this.findPageMedia(id, this.prisma);
     try {
       return await this.withStorageKeyLock(initial.storageKey, async (transaction) => {
         let asset = await this.findPageMedia(id, transaction);
@@ -423,16 +472,13 @@ export class UploadService implements OnModuleInit {
         if (hasStoredFile) {
           await this.moveStoredAsset(this.uploadDir, this.archivedPageMediaRoot, asset.storageKey);
         }
-        const updated = await transaction.mediaAsset.update({
-          where: { id },
-          data: {
-            status: 'ARCHIVED',
-            lifecycleRevision: { increment: 1 },
-            quarantineReason: null,
-          },
+        const updated = await this.updateMediaAssetLifecycle(transaction, id, {
+          status: 'ARCHIVED',
+          lifecycleRevision: { increment: 1 },
+          quarantineReason: null,
         });
         return this.toPageMediaItem(updated);
-      }).then((item) => {
+      }, actor, 'REVIEW').then((item) => {
         if (item.status === 'QUARANTINED') {
           throw new ConflictException('素材完整性校验失败，已隔离');
         }
@@ -444,8 +490,13 @@ export class UploadService implements OnModuleInit {
     }
   }
 
-  async restorePageMedia(id: number): Promise<PageMediaItem> {
-    const initial = await this.findPageMedia(id, this.prisma);
+  async restorePageMedia(id: number, actor?: MediaStaffActorInput): Promise<PageMediaItem> {
+    const initial = actor
+      ? await this.prisma.$transaction(async (transaction) => {
+          await lockAuthorizedMediaStaff(transaction, actor, 'REVIEW', 'read');
+          return this.findPageMedia(id, transaction);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      : await this.findPageMedia(id, this.prisma);
     try {
       return await this.withStorageKeyLock(initial.storageKey, async (transaction) => {
         let asset = await this.findPageMedia(id, transaction);
@@ -463,17 +514,14 @@ export class UploadService implements OnModuleInit {
           return this.toPageMediaItem(asset);
         }
         await this.moveStoredAsset(this.archivedPageMediaRoot, this.uploadDir, asset.storageKey);
-        const updated = await transaction.mediaAsset.update({
-          where: { id },
-          data: {
-            status: 'READY',
-            lifecycleRevision: { increment: 1 },
-            integrityCheckedAt: new Date(),
-            quarantineReason: null,
-          },
+        const updated = await this.updateMediaAssetLifecycle(transaction, id, {
+          status: 'READY',
+          lifecycleRevision: { increment: 1 },
+          integrityCheckedAt: new Date(),
+          quarantineReason: null,
         });
         return this.toPageMediaItem(updated);
-      }).then((item) => {
+      }, actor, 'REVIEW').then((item) => {
         if (item.status === 'QUARANTINED') {
           throw new ConflictException('素材完整性校验失败，已隔离');
         }
@@ -489,12 +537,15 @@ export class UploadService implements OnModuleInit {
 
   private async registerPublicPageMedia(input: {
     file: Express.Multer.File;
-    uploadedBy?: number;
+    actor?: MediaStaffActorInput;
     extension: string;
     width?: number;
     height?: number;
     format?: string;
   }): Promise<StoredPageMedia> {
+    const uploadedBy = input.actor === undefined
+      ? undefined
+      : normalizeMediaStaffActor(input.actor).id;
     const checksum = createHash('sha256').update(input.file.buffer).digest('hex');
     const storageKey = `page-assets/${checksum}${input.extension}`;
     const target = this.resolveWithinRoot(this.uploadDir, storageKey);
@@ -522,7 +573,7 @@ export class UploadService implements OnModuleInit {
         throw new ConflictException('相同素材当前不可上传，请稍后重试');
       }
       if (existing) {
-        await this.mediaAuthorizationService.ensureUploadAuthorization(transaction, existing.id, input.uploadedBy);
+        await this.mediaAuthorizationService.ensureUploadAuthorization(transaction, existing.id, uploadedBy);
         return existing;
       }
       const created = await transaction.mediaAsset.create({
@@ -536,12 +587,12 @@ export class UploadService implements OnModuleInit {
           height: input.height,
           accessLevel: 'PUBLIC',
           status: 'PENDING',
-          uploadedBy: input.uploadedBy,
+          uploadedBy,
         },
       });
-      await this.mediaAuthorizationService.ensureUploadAuthorization(transaction, created.id, input.uploadedBy);
+      await this.mediaAuthorizationService.ensureUploadAuthorization(transaction, created.id, uploadedBy);
       return created;
-    });
+    }, input.actor, 'LIBRARY');
 
     if (prepared.status === 'QUARANTINED') {
       throw new ConflictException('相同素材完整性校验失败，已隔离');
@@ -576,18 +627,15 @@ export class UploadService implements OnModuleInit {
           } else {
             await this.moveAbsoluteFile(stagingPath, target);
           }
-          current = await transaction.mediaAsset.update({
-            where: { id: current.id },
-            data: {
-              status: 'READY',
-              lifecycleRevision: { increment: 1 },
-              integrityCheckedAt: new Date(),
-              quarantineReason: null,
-            },
+          current = await this.updateMediaAssetLifecycle(transaction, current.id, {
+            status: 'READY',
+            lifecycleRevision: { increment: 1 },
+            integrityCheckedAt: new Date(),
+            quarantineReason: null,
           });
         }
         return current;
-      });
+      }, input.actor, 'LIBRARY');
 
       if (asset.status === 'QUARANTINED') {
         throw new ConflictException('素材完整性校验失败，已隔离');
@@ -620,15 +668,29 @@ export class UploadService implements OnModuleInit {
     return asset;
   }
 
-  async getPageMediaContent(id: number, requirePublicAuthorization: boolean) {
-    const initial = await this.prisma.mediaAsset.findFirst({
+  async getPageMediaContent(
+    id: number,
+    requirePublicAuthorization: boolean,
+    actor?: MediaStaffActorInput,
+  ) {
+    const findInitial = (client: Prisma.TransactionClient | PrismaService) => client.mediaAsset.findFirst({
       where: { id, storageKey: { startsWith: 'page-assets/' } },
     });
+    const initial = actor !== undefined
+      ? await this.prisma.$transaction(async (transaction) => {
+          await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'read');
+          return findInitial(transaction);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      : await findInitial(this.prisma);
     if (!initial) throw new NotFoundException('素材不存在');
-    return this.readPageMediaContent(initial.id, initial.storageKey, requirePublicAuthorization);
+    return this.readPageMediaContent(initial.id, initial.storageKey, requirePublicAuthorization, actor);
   }
 
-  async getPageMediaContentByStorageKey(storageKey: string, requirePublicAuthorization: boolean) {
+  async getPageMediaContentByStorageKey(
+    storageKey: string,
+    requirePublicAuthorization: boolean,
+    actor?: MediaStaffActorInput,
+  ) {
     const segments = storageKey.split('/');
     if (
       !storageKey.startsWith('page-assets/')
@@ -639,9 +701,16 @@ export class UploadService implements OnModuleInit {
     ) {
       throw new NotFoundException('素材不存在');
     }
-    const initial = await this.prisma.mediaAsset.findUnique({ where: { storageKey } });
+    const findInitial = (client: Prisma.TransactionClient | PrismaService) =>
+      client.mediaAsset.findUnique({ where: { storageKey } });
+    const initial = actor !== undefined
+      ? await this.prisma.$transaction(async (transaction) => {
+          await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'read');
+          return findInitial(transaction);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      : await findInitial(this.prisma);
     if (!initial || initial.accessLevel !== 'PUBLIC') throw new NotFoundException('素材不存在');
-    return this.readPageMediaContent(initial.id, initial.storageKey, requirePublicAuthorization);
+    return this.readPageMediaContent(initial.id, initial.storageKey, requirePublicAuthorization, actor);
   }
 
   /** 历史商品媒体必须经商品媒体控制器读取，禁止匿名静态路径返回同一原文件。 */
@@ -720,6 +789,7 @@ export class UploadService implements OnModuleInit {
     id: number,
     storageKey: string,
     requirePublicAuthorization: boolean,
+    actor?: MediaStaffActorInput,
   ) {
     const result = await this.withStorageKeyLock(storageKey, async (transaction) => {
       const found = await transaction.mediaAsset.findFirst({
@@ -751,7 +821,7 @@ export class UploadService implements OnModuleInit {
         mimeType: asset.mimeType,
         fingerprint: asset.checksumSha256,
       };
-    });
+    }, actor, 'LIBRARY');
     if (result.kind === 'CONTENT') {
       return {
         buffer: result.buffer,
@@ -821,38 +891,6 @@ export class UploadService implements OnModuleInit {
     }
   }
 
-  private async validateImageContent(buffer: Buffer, expectedFormat: string): Promise<{
-    format?: string;
-    width?: number;
-    height?: number;
-  }> {
-    try {
-      const image = sharp(buffer, {
-        failOn: 'error',
-        animated: true,
-        // 除文件字节上限外再限制解码像素，避免小体积压缩炸弹占满内存。
-        limitInputPixels: 25_000_000,
-      });
-      const metadata = await image.metadata();
-      if (metadata.format !== expectedFormat) {
-        throw new BadRequestException('文件内容与声明的图片类型不一致');
-      }
-      if (!metadata.width || !metadata.height || metadata.width > 12_000 || metadata.height > 12_000) {
-        throw new BadRequestException('图片尺寸无效或超出限制');
-      }
-      const pages = metadata.pages || 1;
-      if (pages > 100 || metadata.width * metadata.height * pages > 25_000_000) {
-        throw new BadRequestException('动画图片帧数或总像素超出限制');
-      }
-      // metadata() 只读取头部；animated + raw 强制 libvips 解码完整帧像素流并验证截断内容。
-      await image.clone().raw().toBuffer();
-      return metadata;
-    } catch (error) {
-      if (error instanceof BadRequestException) throw error;
-      throw new BadRequestException('文件内容不是有效图片');
-    }
-  }
-
   private isStructurallyValidMp4(buffer: Buffer) {
     if (buffer.length < 32) return false;
     const requiredBoxes = new Set(['ftyp', 'moov', 'mdat']);
@@ -890,10 +928,16 @@ export class UploadService implements OnModuleInit {
   private async withStorageKeyLock<T>(
     storageKey: string,
     action: (transaction: Prisma.TransactionClient) => Promise<T>,
+    actor?: MediaStaffActorInput,
+    access: MediaStaffAccess = 'LIBRARY',
   ): Promise<T> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await this.prisma.$transaction(async (transaction) => {
+          // 所有员工锁必须先于素材行锁，保持跨模块一致的 users -> session -> domain 顺序。
+          if (actor !== undefined) {
+            await lockAuthorizedMediaStaff(transaction, actor, access, 'write');
+          }
           // 锁定 storage_key 唯一索引上的现有记录或缺失键间隙。锁随事务提交释放，
           // 因而上传、归档、恢复跨实例串行，不存在“先解锁、后提交”的可见性窗口。
           await transaction.$queryRaw<Array<{ id: number }>>`
@@ -912,6 +956,33 @@ export class UploadService implements OnModuleInit {
   private isPrismaWriteConflict(error: unknown) {
     return error instanceof Error && 'code' in error &&
       ['P2002', 'P2034'].includes(String((error as { code?: unknown }).code));
+  }
+
+  /**
+   * lifecycleRevision 是商品发布质量 hash 的组成部分。资产生命周期变更与引用商品
+   * 退出 READY 必须处于同一数据库事务，避免新 revision 配上旧质量快照。
+   */
+  private async updateMediaAssetLifecycle(
+    transaction: Prisma.TransactionClient,
+    assetId: number,
+    data: Prisma.MediaAssetUpdateInput,
+  ): Promise<MediaAsset> {
+    const updated = await transaction.mediaAsset.update({
+      where: { id: assetId },
+      data,
+    });
+    await transaction.product.updateMany({
+      where: {
+        publicationQualityStatus: 'READY',
+        images: { some: { mediaAssetId: assetId } },
+      },
+      data: {
+        publicationQualityStatus: 'QUARANTINED',
+        publicationQualityHash: null,
+        publicationQualityCheckedAt: null,
+      },
+    });
+    return updated;
   }
 
   private async reconcileAfterFailedTransition(storageKey: string) {
@@ -981,37 +1052,28 @@ export class UploadService implements OnModuleInit {
         if (await this.fileChecksum(archivedPath) !== asset.checksumSha256) {
           return this.quarantinePageAsset(transaction, asset);
         }
-        return transaction.mediaAsset.update({
-          where: { id: asset.id },
-          data: {
-            status: 'ARCHIVED',
-            lifecycleRevision: { increment: 1 },
-            integrityCheckedAt: new Date(),
-            quarantineReason: null,
-          },
-        });
-      }
-      return transaction.mediaAsset.update({
-        where: { id: asset.id },
-        data: {
+        return this.updateMediaAssetLifecycle(transaction, asset.id, {
           status: 'ARCHIVED',
           lifecycleRevision: { increment: 1 },
+          integrityCheckedAt: new Date(),
           quarantineReason: null,
-        },
+        });
+      }
+      return this.updateMediaAssetLifecycle(transaction, asset.id, {
+        status: 'ARCHIVED',
+        lifecycleRevision: { increment: 1 },
+        quarantineReason: null,
       });
     }
 
     if (asset.status === 'PENDING') {
       if (activeExists) {
         if (await this.fileChecksum(activePath) === asset.checksumSha256) {
-          return transaction.mediaAsset.update({
-            where: { id: asset.id },
-            data: {
-              status: 'READY',
-              lifecycleRevision: { increment: 1 },
-              integrityCheckedAt: new Date(),
-              quarantineReason: null,
-            },
+          return this.updateMediaAssetLifecycle(transaction, asset.id, {
+            status: 'READY',
+            lifecycleRevision: { increment: 1 },
+            integrityCheckedAt: new Date(),
+            quarantineReason: null,
           });
         }
         return this.quarantinePageAsset(transaction, asset);
@@ -1021,14 +1083,11 @@ export class UploadService implements OnModuleInit {
           return this.quarantinePageAsset(transaction, asset);
         }
         await this.moveStoredAsset(this.archivedPageMediaRoot, this.uploadDir, asset.storageKey);
-        return transaction.mediaAsset.update({
-          where: { id: asset.id },
-          data: {
-            status: 'READY',
-            lifecycleRevision: { increment: 1 },
-            integrityCheckedAt: new Date(),
-            quarantineReason: null,
-          },
+        return this.updateMediaAssetLifecycle(transaction, asset.id, {
+          status: 'READY',
+          lifecycleRevision: { increment: 1 },
+          integrityCheckedAt: new Date(),
+          quarantineReason: null,
         });
       }
     }
@@ -1040,14 +1099,11 @@ export class UploadService implements OnModuleInit {
     asset: MediaAsset,
   ): Promise<MediaAsset> {
     await this.hidePublicAsset(asset.storageKey, asset.checksumSha256);
-    return transaction.mediaAsset.update({
-      where: { id: asset.id },
-      data: {
-        status: 'QUARANTINED',
-        lifecycleRevision: { increment: 1 },
-        integrityCheckedAt: new Date(),
-        quarantineReason: CHECKSUM_MISMATCH_QUARANTINE_REASON,
-      },
+    return this.updateMediaAssetLifecycle(transaction, asset.id, {
+      status: 'QUARANTINED',
+      lifecycleRevision: { increment: 1 },
+      integrityCheckedAt: new Date(),
+      quarantineReason: CHECKSUM_MISMATCH_QUARANTINE_REASON,
     });
   }
 
@@ -1155,7 +1211,7 @@ export class UploadService implements OnModuleInit {
    * 受控产品库要求：新上传产品图片直接进入私有存储，仅通过鉴权媒体端点访问。
    * 返回 storageKey（相对私有根的安全键）与图片元数据，供 ProductImage 持久化。
    */
-  async uploadPrivateImage(file: Express.Multer.File, uploadedBy?: number): Promise<{
+  async uploadPrivateImage(file: Express.Multer.File, actor?: MediaStaffActorInput): Promise<{
     mediaAssetId: number;
     storageKey: string;
     width?: number;
@@ -1170,7 +1226,8 @@ export class UploadService implements OnModuleInit {
 
     this.assertSafeOriginalName(file.originalname, expectedType.extension, ['.jpg', '.jpeg', '.png', '.webp', '.gif']);
 
-    const metadata = await this.validateImageContent(file.buffer, expectedType.format);
+    const metadata = await validateImageContent(file.buffer, expectedType.format);
+    const uploadedBy = actor === undefined ? undefined : normalizeMediaStaffActor(actor).id;
 
     const privateRoot = resolve(
       process.env.PRODUCT_MEDIA_ROOT || join(process.cwd(), 'private-media', 'products'),
@@ -1187,6 +1244,9 @@ export class UploadService implements OnModuleInit {
     const storageKey = join(dateSeg, filename).replace(/\\/g, '/');
     try {
       const mediaAsset = await this.prisma.$transaction(async (transaction) => {
+        if (actor !== undefined) {
+          await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'write');
+        }
         const created = await transaction.mediaAsset.create({
           data: {
             storageKey,
@@ -1225,7 +1285,7 @@ export class UploadService implements OnModuleInit {
   async uploadPrivateProductImages(
     files: Express.Multer.File[],
     imageTypes: string[],
-    uploadedBy?: number,
+    actor?: MediaStaffActorInput,
   ): Promise<
     {
       mediaAssetId: number;
@@ -1248,10 +1308,96 @@ export class UploadService implements OnModuleInit {
       fileSize: number;
     }> = [];
     for (let i = 0; i < files.length; i++) {
-      const result = await this.uploadPrivateImage(files[i], uploadedBy);
+      const result = await this.uploadPrivateImage(files[i], actor);
       results.push({ ...result, type: imageTypes[i] || 'FRONT' });
     }
     return results;
+  }
+
+  /**
+   * 按运营选定的矩形裁切页面素材，登记为新的 page-assets 图片。
+   * 只缩小、不二次 cover 裁切，避免覆盖用户刚确认的构图。
+   */
+  async cropPublicPageMedia(
+    sourceUrl: string,
+    crop: NormalizedCropRect,
+    actor?: MediaStaffActorInput,
+  ): Promise<StoredPageMedia> {
+    const storageKey = this.parsePageAssetStorageKey(sourceUrl);
+    const source = await this.getPageMediaContentByStorageKey(storageKey, false, actor);
+    if (!source.mimeType.startsWith('image/')) {
+      throw new BadRequestException('只能裁切图片');
+    }
+    const metadata = await sharp(source.buffer).metadata();
+    const pixels = normalizedCropToPixels(crop, metadata.width ?? 0, metadata.height ?? 0);
+    if (!pixels) {
+      throw new BadRequestException('裁切区域无效');
+    }
+    let cropped: Buffer;
+    try {
+      cropped = await sharp(source.buffer)
+        .extract({
+          left: pixels.left,
+          top: pixels.top,
+          width: pixels.width,
+          height: pixels.height,
+        })
+        .resize({
+          width: 1920,
+          height: 1920,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: 88 })
+        .toBuffer();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      throw new BadRequestException(`图片裁切失败: ${message}`);
+    }
+    const croppedMeta = await sharp(cropped).metadata();
+    return this.registerPublicPageMedia({
+      file: {
+        buffer: cropped,
+        originalname: 'catalog-cover.jpg',
+        mimetype: 'image/jpeg',
+        size: cropped.length,
+      } as Express.Multer.File,
+      actor,
+      extension: '.jpg',
+      width: croppedMeta.width,
+      height: croppedMeta.height,
+      format: 'jpeg',
+    });
+  }
+
+  private parsePageAssetStorageKey(value: string): string {
+    if (typeof value !== 'string') {
+      throw new BadRequestException('请选择素材库中的图片再裁切');
+    }
+    const path = value.trim().split(/[?#]/, 1)[0];
+    let decoded = path;
+    try {
+      decoded = decodeURIComponent(path);
+    } catch {
+      throw new BadRequestException('请选择素材库中的图片再裁切');
+    }
+    if (
+      decoded !== path
+      || !path.startsWith('/uploads/page-assets/')
+      || path.includes('\\')
+      || /[\u0000-\u001f\u007f]/.test(path)
+    ) {
+      throw new BadRequestException('请选择素材库中的图片再裁切');
+    }
+    const storageKey = path.slice('/uploads/'.length);
+    const segments = storageKey.split('/');
+    if (
+      segments.length < 2
+      || segments.some((segment) => !segment || segment === '.' || segment === '..')
+    ) {
+      throw new BadRequestException('请选择素材库中的图片再裁切');
+    }
+    return storageKey;
   }
 
   /**
@@ -1314,7 +1460,7 @@ export class UploadService implements OnModuleInit {
     crop: { left: number; top: number; width: number; height: number },
     outputSize = 1200,
     format: 'webp' | 'jpeg' = 'webp',
-    uploadedBy?: number,
+    actor?: MediaStaffActorInput,
   ): Promise<{
     mediaAssetId: number;
     storageKey: string;
@@ -1326,6 +1472,7 @@ export class UploadService implements OnModuleInit {
     const privateRoot = resolve(
       process.env.PRODUCT_MEDIA_ROOT || join(process.cwd(), 'private-media', 'products'),
     );
+    const uploadedBy = actor === undefined ? undefined : normalizeMediaStaffActor(actor).id;
     const fullSource = this.resolveWithinRoot(privateRoot, storageKey);
     if (!fullSource || !existsSync(fullSource)) {
       throw new BadRequestException('原始图片不存在');
@@ -1362,6 +1509,9 @@ export class UploadService implements OnModuleInit {
     try {
       const outputBuffer = await readFile(outputPath);
       const asset = await this.prisma.$transaction(async (transaction) => {
+        if (actor !== undefined) {
+          await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'write');
+        }
         const created = await transaction.mediaAsset.create({
           data: {
             storageKey: outKey,

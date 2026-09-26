@@ -31,6 +31,7 @@ import {
   type PromoteDynamicTemplateInstanceRequest,
 } from "./promoteToTemplate";
 import ImageFocusField from "../inspector/controls/ImageFocusField";
+import InspectorDisclosure from "../inspector/InspectorDisclosure";
 import InspectorFooterBar from "../inspector/InspectorFooterBar";
 import { resolvePublishIssueReviewAction } from "../inspector/publishReminderDialog";
 import {
@@ -92,6 +93,7 @@ function visualKindForField(field: DynamicTemplatePageFieldDescriptor): VisualNo
 
 export default function DynamicTemplateInstanceInspector({
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   publishIssues,
   validationStatus,
@@ -102,6 +104,7 @@ export default function DynamicTemplateInstanceInspector({
   onPromoteToTemplate,
 }: {
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   publishIssues: PublishValidationIssue[];
   validationStatus?: PublishValidationStatus;
@@ -162,11 +165,6 @@ export default function DynamicTemplateInstanceInspector({
     content,
     hidden,
   );
-  const publicVisibilityState = props.isVisible === false
-    ? "hidden"
-    : hasPublicImage
-      ? "ready"
-      : "empty";
   const designOverrideCount = Object.values(layoutOverrides).reduce((total, devices) => (
     total + Object.values(devices ?? {}).reduce((deviceTotal, override) => (
       deviceTotal + Object.keys(override ?? {}).length
@@ -180,9 +178,21 @@ export default function DynamicTemplateInstanceInspector({
   const currentPublishErrorCount = currentPublishIssues.filter(
     (issue) => issue.severity === "error",
   ).length;
+  // 页脚汇总整页阻断；对象状态必须区分当前实例与页面其他问题。
+  const instancePublishErrorCount = currentPublishIssues.filter((issue) => (
+    issue.severity === "error"
+    && (issue.blockId === editorBlockId || issue.blockId === props.instanceId)
+  )).length;
   const currentPublishWarningCount = currentPublishIssues.filter(
     (issue) => issue.severity === "warning",
   ).length;
+  const publicVisibilityState = props.isVisible === false
+    ? "hidden"
+    : currentPublishErrorCount > 0
+      ? "blocked"
+      : hasPublicImage
+        ? "ready"
+        : "empty";
   const hasTemplateValueOverrides = designOverrideCount > 0
     || hidden.length > 0
     || props.isVisible === false;
@@ -452,6 +462,10 @@ export default function DynamicTemplateInstanceInspector({
             previewFit={objectFit}
             previewFocus={focus}
             previewZoom={(imageLayout.imageScalePercent ?? 100) / 100}
+            onFocusChange={imageNode && imagePolicy?.imageFocus ? ({ x, y }) => updateMediaPresentation(imageNode.nodeId, {
+              focusXPercent: x === defaultFocus.x ? undefined : x,
+              focusYPercent: y === defaultFocus.y ? undefined : y,
+            }) : undefined}
             onChange={(src) => updateContent(
               slot.slotId,
               src.trim()
@@ -463,6 +477,19 @@ export default function DynamicTemplateInstanceInspector({
             <p className="homepage-editor__properties-hint" data-image-asset-guidance={slot.slotId}>
               {assetGuidance}
             </p>
+          ) : null}
+          {imageNode && imagePolicy?.imageFocus ? (
+            <ImageFocusField
+              inspectorFieldKeys={{ x: "focusXPercent", y: "focusYPercent" }}
+              inspectorDevice={editor.device}
+              label={`${field.label}画面焦点 · ${editor.device === "desktop" ? "桌面端" : "移动端"}`}
+              value={focus}
+              showPad={false}
+              onChange={({ x, y }) => updateMediaPresentation(imageNode.nodeId, {
+                focusXPercent: x === defaultFocus.x ? undefined : x,
+                focusYPercent: y === defaultFocus.y ? undefined : y,
+              })}
+            />
           ) : null}
           <label>
             <span className="homepage-editor__properties-hint">替代文字</span>
@@ -511,18 +538,6 @@ export default function DynamicTemplateInstanceInspector({
                 imageScalePercent: imageScalePercent === 100 ? undefined : imageScalePercent,
               })}
               onClear={() => updateMediaPresentation(imageNode.nodeId, { imageScalePercent: undefined })}
-            />
-          ) : null}
-          {imageNode && imagePolicy?.imageFocus ? (
-            <ImageFocusField
-              inspectorFieldKeys={{ x: "focusXPercent", y: "focusYPercent" }}
-              inspectorDevice={editor.device}
-              label={`${field.label}画面焦点 · ${editor.device === "desktop" ? "桌面端" : "移动端"}`}
-              value={focus}
-              onChange={({ x, y }) => updateMediaPresentation(imageNode.nodeId, {
-                focusXPercent: x === defaultFocus.x ? undefined : x,
-                focusYPercent: y === defaultFocus.y ? undefined : y,
-              })}
             />
           ) : null}
           {imageNode && (imagePolicy?.imageFit || imagePolicy?.imageFocus) ? (
@@ -703,11 +718,17 @@ export default function DynamicTemplateInstanceInspector({
           >
             <strong>{publicVisibilityState === "hidden"
               ? "前台已关闭"
+              : publicVisibilityState === "blocked"
+                ? instancePublishErrorCount > 0
+                  ? `当前实例有 ${instancePublishErrorCount} 项发布阻断`
+                  : `页面有 ${currentPublishErrorCount} 项发布阻断`
               : publicVisibilityState === "ready"
                 ? "图片已添加"
                 : "前台自动隐藏"}</strong>
             <span>{publicVisibilityState === "hidden"
               ? "重新开启后仍需点击页面“发布”，前台才会更新。"
+              : publicVisibilityState === "blocked"
+                ? "请打开下方发布检查定位问题。保存草稿不会更新客户前台。"
               : publicVisibilityState === "ready"
                 ? "保存只保留草稿；点击页面“发布”后，前台才会显示或更新。"
                 : "尚未上传页面图片。保存只保留草稿；上传图片并点击页面“发布”后才会显示。"}</span>
@@ -740,7 +761,7 @@ export default function DynamicTemplateInstanceInspector({
                 </button>
               ))}
             </div>
-            <span className="homepage-editor__properties-hint">点击画布只选择整个模板；需要调整某个实例属性时从这里明确选择。</span>
+            <span className="homepage-editor__properties-hint">选择“全部内容”查看整份实例；选择具体字段时，面板只显示该字段与允许的页面覆盖。</span>
           </div>
         </div>
         <div style={{ borderTop: "1px solid var(--adm-line)", padding: 14 }}>
@@ -878,19 +899,21 @@ export default function DynamicTemplateInstanceInspector({
             </div>
           ) : null}
         </div>
-        <div aria-label={`优先填写：${PAGE_FIELD_TASK_LABELS[slotGroups.task]}`}>
+        <div aria-label={`${selectedPageField ? "当前字段" : "优先填写"}：${PAGE_FIELD_TASK_LABELS[slotGroups.task]}`}>
           <p className="homepage-editor__properties-hint" style={{ margin: "12px 14px 4px" }}>
-            优先填写 · {PAGE_FIELD_TASK_LABELS[slotGroups.task]}
+            {selectedPageField ? "当前字段" : "优先填写"} · {PAGE_FIELD_TASK_LABELS[slotGroups.task]}
           </p>
           {slotGroups.primary.map(renderSlotFieldset)}
         </div>
         {slotGroups.secondary.length > 0 ? (
-          <div className="homepage-editor__dynamic-instance-secondary" aria-label="补充内容">
-            <p className="homepage-editor__properties-hint">
-              补充内容 · {slotGroups.secondary.length} 项
-            </p>
+          <InspectorDisclosure
+            key={props.instanceId}
+            className="homepage-editor__dynamic-instance-secondary"
+            label={`补充内容 · ${slotGroups.secondary.length} 项`}
+            defaultOpen={slotGroups.secondary.some((field) => field.required) || lockedLeftoverCount > 0 || instancePublishErrorCount > 0}
+          >
             {slotGroups.secondary.map(renderSlotFieldset)}
-          </div>
+          </InspectorDisclosure>
         ) : null}
         <section className="homepage-editor__inspector-section homepage-editor__dynamic-instance-management" aria-label="实例管理">
           <div className="homepage-editor__inspector-section-head">
@@ -928,6 +951,8 @@ export default function DynamicTemplateInstanceInspector({
             <DynamicTemplateUpgradePanel
               definition={definition}
               instance={props}
+              currentSchemaVersion={resolved.schemaVersion}
+              currentDefinitionChecksum={resolved.definitionChecksum}
               onApply={(next, analysis, target) => {
                 editor.updateHistoryTransaction({
                   templateVersion: next.templateVersion,
@@ -983,6 +1008,7 @@ export default function DynamicTemplateInstanceInspector({
       </div>
       <InspectorFooterBar
         hasUnsavedChanges={hasUnsavedChanges}
+        hasPersistedDraft={hasPersistedDraft}
         saving={saving}
         errorCount={currentPublishErrorCount}
         warningCount={currentPublishWarningCount}

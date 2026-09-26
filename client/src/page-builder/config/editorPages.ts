@@ -98,7 +98,7 @@ export const editorPages: EditorPageDefinition[] = [
       description:
         "我们正在完成作品资料与材质工艺内容的审核。您可以先浏览当前已公开款式，或预约珠宝顾问获得协助。",
       primaryAction: { label: "进入选款中心", href: "/catalog" },
-      secondaryAction: { label: "预约珠宝顾问", href: "/contact" },
+      secondaryAction: { label: "预约珠宝顾问", href: "/contact?type=product" },
     },
   },
   {

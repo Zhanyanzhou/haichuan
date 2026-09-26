@@ -58,6 +58,7 @@ import {
 interface SchemaInspectorPanelProps {
   schema: ModuleInspectorSchema;
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   onSaveDraft: () => void;
   templateDesignEnabled?: boolean;
@@ -315,6 +316,7 @@ function getTaskGroup(
 export default function SchemaInspectorPanel({
   schema,
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   publishIssues,
   templateDesignEnabled = true,
@@ -1195,6 +1197,7 @@ export default function SchemaInspectorPanel({
       </div>
       <InspectorFooterBar
         hasUnsavedChanges={hasUnsavedChanges}
+        hasPersistedDraft={hasPersistedDraft}
         saving={saving}
         errorCount={currentPublishErrorCount}
         warningCount={currentPublishWarningCount}

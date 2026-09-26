@@ -93,6 +93,7 @@ function createStatefulService(mediaAuthorizationResolver?: {
   let draft: any = null;
   const versions: any[] = [];
   const operationLogs: any[] = [];
+  let mediaAssets: Array<{ storageKey: string; status: string; mimeType: string }> = [];
   let pageDocuments: any[] = [];
   let pageSchemes: any[] = [];
   let activationCount = 0;
@@ -369,6 +370,14 @@ function createStatefulService(mediaAuthorizationResolver?: {
     },
   };
   const prisma: any = {
+    $queryRaw: async (query: { sql?: string; values?: unknown[] }) => {
+      calls.push({ operation: "authorization.query", args: query });
+      if (query.sql?.includes("FROM users")) {
+        return [{ id: Number(query.values?.[0]), role: "SUPER_ADMIN" }];
+      }
+      if (query.sql?.includes("FROM admin_refresh_sessions")) return [{ id: 1 }];
+      return [];
+    },
     dynamicTemplate,
     dynamicTemplateDraft,
     dynamicTemplateVersion,
@@ -404,6 +413,20 @@ function createStatefulService(mediaAuthorizationResolver?: {
         calls.push({ operation: "operationLog.create", args: clone(args) });
         operationLogs.push(clone(args.data));
         return { id: calls.length, ...clone(args.data) };
+      },
+    },
+    mediaAsset: {
+      findFirst: async (args: any) => {
+        calls.push({ operation: "mediaAsset.findFirst", args: clone(args) });
+        const storageKey = args.where?.storageKey;
+        const status = args.where?.status;
+        const mimePrefix = args.where?.mimeType?.startsWith;
+        const found = mediaAssets.find((asset) => (
+          asset.storageKey === storageKey
+          && (status === undefined || asset.status === status)
+          && (typeof mimePrefix !== "string" || asset.mimeType.startsWith(mimePrefix))
+        ));
+        return found ? clone(found) : null;
       },
     },
   };
@@ -590,6 +613,9 @@ function createStatefulService(mediaAuthorizationResolver?: {
     removeDraft: () => {
       draft = null;
     },
+    setMediaAsset: (asset: { storageKey: string; status: string; mimeType: string } | null) => {
+      mediaAssets = asset ? [asset] : [];
+    },
     getState: () => ({
       template: clone(template),
       draft: clone(draft),
@@ -640,6 +666,10 @@ function catalogVersion(
 function createPublishedCatalogService(templates: any[], versions: any[]) {
   const calls: Array<{ operation: string; args: any }> = [];
   const prisma: any = {
+    $queryRaw: async (query: { sql?: string; values?: unknown[] }) => {
+      calls.push({ operation: "authorization.query", args: query });
+      return [{ id: Number(query.values?.[0]), role: "SUPER_ADMIN" }];
+    },
     dynamicTemplate: {
       findMany: async (args: any) => {
         calls.push({ operation: "template.findMany", args: clone(args) });
@@ -653,6 +683,9 @@ function createPublishedCatalogService(templates: any[], versions: any[]) {
       },
     },
   };
+  prisma.$transaction = async (callback: (transaction: any) => Promise<unknown>) => (
+    callback(prisma)
+  );
   return {
     service: new DynamicTemplatesService(prisma as unknown as PrismaService),
     calls,
@@ -983,6 +1016,7 @@ test("正式版本向 EDITOR 开放，设计操作只允许超级管理员且旧
     prototype.create,
     prototype.getDraft,
     prototype.updateDraft,
+    prototype.updateCatalogCover,
     prototype.publish,
     prototype.rebuildDraftFromPublished,
     prototype.listVersions,
@@ -1004,8 +1038,9 @@ test("正式版本向 EDITOR 开放，设计操作只允许超级管理员且旧
       return { templateId: "tpl_publish", version: 2 };
     },
   } as unknown as DynamicTemplatesService);
-  void controller.publish("tpl_publish", { expectedRevision: 3 }, { user: { id: 17 } } as any);
-  assert.deepEqual(publishCalls, [[17, "tpl_publish", { expectedRevision: 3 }]]);
+  const principal = { id: 17, role: "SUPER_ADMIN", sessionFamilyId: "staff-family-17" };
+  void controller.publish("tpl_publish", { expectedRevision: 3 }, { user: principal } as any);
+  assert.deepEqual(publishCalls, [[principal, "tpl_publish", { expectedRevision: 3 }]]);
   assert.deepEqual(
     Reflect.getMetadata(MODULE_METADATA.EXPORTS, PageModulesModule),
     [PageModulesService],
@@ -1013,13 +1048,18 @@ test("正式版本向 EDITOR 开放，设计操作只允许超级管理员且旧
 });
 
 test("统一母模板目录只返回 Repository 正式版本与可编辑草稿", async () => {
-  const listMineCalls: number[] = [];
+  const catalogCalls: Array<{ id: number; role: string }> = [];
   const controller = new DynamicTemplatesController({
-    ensureConsultationStarters: async () => ({ items: [] }),
-    listPublished: async () => [{ templateId: "tpl_published" }],
-    listMine: async (ownerId: number) => {
-      listMineCalls.push(ownerId);
-      return [{ templateId: "tpl_editable" }];
+    listCatalog: async (actor: { id: number; role: string }) => {
+      catalogCalls.push(actor);
+      return {
+        items: [
+          { kind: "published" as const, template: { templateId: "tpl_published" } },
+          ...(actor.role === "SUPER_ADMIN"
+            ? [{ kind: "editable" as const, template: { templateId: "tpl_editable" } }]
+            : []),
+        ],
+      };
     },
   } as unknown as DynamicTemplatesService);
 
@@ -1030,7 +1070,7 @@ test("统一母模板目录只返回 Repository 正式版本与可编辑草稿",
     superAdminCatalog.items.map((item) => item.kind),
     ["published", "editable"],
   );
-  assert.deepEqual(listMineCalls, [17]);
+  assert.deepEqual(catalogCalls, [{ id: 17, role: "SUPER_ADMIN" }]);
 
   const adminCatalog = await controller.listCatalog({
     user: { id: 23, role: "ADMIN" },
@@ -1039,7 +1079,10 @@ test("统一母模板目录只返回 Repository 正式版本与可编辑草稿",
     adminCatalog.items.map((item) => item.kind),
     ["published"],
   );
-  assert.deepEqual(listMineCalls, [17]);
+  assert.deepEqual(catalogCalls, [
+    { id: 17, role: "SUPER_ADMIN" },
+    { id: 23, role: "ADMIN" },
+  ]);
 });
 
 test("创建母模板只写当前所有者私有草稿并保存服务端校验摘要", async () => {
@@ -1417,7 +1460,7 @@ test("发布生成不可变正式版本、开放 STAFF 读取并保留下一版�
   assert.equal((getState().versions[1].definition as any).name, changed.name);
   assert.equal(getState().versions[1].versionNote, null);
 
-  const published = await service.listPublished();
+  const published = await service.listPublished(17);
   assert.equal(published.length, 1);
   assert.equal(published[0].version, 2);
   assert.equal(published[0].sourceReference, undefined);
@@ -1431,7 +1474,7 @@ test("正式目录资料只随发布推进，保存下一版草稿不改变正�
   const first = await service.publish(17, original.templateId, {
     expectedRevision: created.draft!.revision,
   });
-  const beforeDraftEdit = await service.listPublished();
+  const beforeDraftEdit = await service.listPublished(17);
   const changed = clone(original);
   changed.name = "下一版模板名称";
   changed.description = "下一版说明";
@@ -1453,8 +1496,8 @@ test("正式目录资料只随发布推进，保存下一版草稿不改变正�
   assert.equal(editable.category, changed.metadata.category);
   assert.equal(editable.purpose, changed.metadata.purpose);
   assert.deepEqual(editable.draft!.definition, changed);
-  assert.deepEqual(await service.listPublished(), beforeDraftEdit);
-  const historicalBeforePublish = await service.getPublishedVersion(original.templateId, 1);
+  assert.deepEqual(await service.listPublished(17), beforeDraftEdit);
+  const historicalBeforePublish = await service.getPublishedVersion(17, original.templateId, 1);
   assert.equal(historicalBeforePublish.name, original.name);
   assert.equal(historicalBeforePublish.category, original.metadata.category);
   assert.equal(historicalBeforePublish.purpose, original.metadata.purpose);
@@ -1465,7 +1508,7 @@ test("正式目录资料只随发布推进，保存下一版草稿不改变正�
   await service.publish(17, original.templateId, {
     expectedRevision: updated.draft!.revision,
   });
-  const [published] = await service.listPublished();
+  const [published] = await service.listPublished(17);
   assert.equal(published.version, 2);
   assert.equal(published.name, changed.name);
   assert.equal(published.description, changed.description);
@@ -1476,7 +1519,7 @@ test("正式目录资料只随发布推进，保存下一版草稿不改变正�
   assert.deepEqual(published.recommendedFor, changed.metadata.recommendedFor);
   assert.deepEqual(published.tags, changed.metadata.tags);
   assert.deepEqual(published.definition, changed);
-  const historical = await service.getPublishedVersion(original.templateId, 1);
+  const historical = await service.getPublishedVersion(17, original.templateId, 1);
   assert.deepEqual(historical.definition, original);
 });
 
@@ -1490,7 +1533,7 @@ test("正式目录保留模板身份上的历史来源引用", async () => {
     [template],
     [catalogVersion(21, 1, 1, definition)],
   );
-  const [published] = await service.listPublished();
+  const [published] = await service.listPublished(17);
   assert.equal(published.sourceReference, template.sourceReference);
   assert.equal(published.templateId, template.templateId);
   assert.deepEqual(published.definition, definition);
@@ -1512,7 +1555,7 @@ test("发布目录以模板和版本组合键解析双模板指针并抵抗乱�
     ],
   );
 
-  const published = await catalog.service.listPublished();
+  const published = await catalog.service.listPublished(17);
 
   assert.deepEqual(
     published.map((item) => ({ templateId: item.templateId, version: item.version })),
@@ -1547,7 +1590,7 @@ test("发布目录混合缺指针项时省略坏项并保留合法项", async ()
     ],
   );
 
-  const published = await catalog.service.listPublished();
+  const published = await catalog.service.listPublished(17);
 
   assert.deepEqual(
     published.map((item) => ({ templateId: item.templateId, version: item.version })),
@@ -1563,14 +1606,14 @@ test("发布目录在指针版本 checksum 或 definition 完整性失败时省�
   await checksumFailure.service.create(17, { definition: checksumDefinition });
   await checksumFailure.service.publish(17, checksumDefinition.templateId, { expectedRevision: 1 });
   checksumFailure.corruptVersionChecksum(1);
-  assert.deepEqual(await checksumFailure.service.listPublished(), []);
+  assert.deepEqual(await checksumFailure.service.listPublished(17), []);
 
   const definitionFailure = createStatefulService();
   const invalidDefinition = definitionFixture();
   await definitionFailure.service.create(17, { definition: invalidDefinition });
   await definitionFailure.service.publish(17, invalidDefinition.templateId, { expectedRevision: 1 });
   definitionFailure.corruptVersionDefinition(1);
-  assert.deepEqual(await definitionFailure.service.listPublished(), []);
+  assert.deepEqual(await definitionFailure.service.listPublished(17), []);
 });
 
 test("严格发布以规范化版本说明参与首次发布和事务内同说明重放身份", async () => {
@@ -1693,7 +1736,7 @@ test("严格重放拒绝发布指针或可见性未覆盖的孤立版本，并�
   const orphanChecksum = orphanCreated.draft!.definitionChecksum;
   orphan.insertOrphanVersion();
   await assert.rejects(
-    () => orphan.service.getPublishedVersion(orphanDefinition.templateId, 1),
+    () => orphan.service.getPublishedVersion(17, orphanDefinition.templateId, 1),
     NotFoundException,
   );
   await assertApiConflict(
@@ -1747,7 +1790,7 @@ test("严格重放拒绝发布指针或可见性未覆盖的孤立版本，并�
     draftIdentity({ draft: historical.getState().draft }),
   );
   assert.equal(
-    (await historical.service.getPublishedVersion(historicalDefinition.templateId, 1)).version,
+    (await historical.service.getPublishedVersion(17, historicalDefinition.templateId, 1)).version,
     1,
   );
   const archivedReplay = await historical.service.publish(17, historicalDefinition.templateId, {
@@ -2065,14 +2108,14 @@ test("严格发布保留 v1/v2，不改 v1，并由精确 GET 区分成功、404
   assert.equal(getState().versions.length, 2);
   assert.equal((getState().versions[0].definition as any).name, firstDefinition.name);
   assert.equal((getState().versions[1].definition as any).name, secondDefinition.name);
-  assert.equal((await service.getPublishedVersion(firstDefinition.templateId, 1)).version, 1);
+  assert.equal((await service.getPublishedVersion(17, firstDefinition.templateId, 1)).version, 1);
   await assert.rejects(
-    () => service.getPublishedVersion(firstDefinition.templateId, 3),
+    () => service.getPublishedVersion(17, firstDefinition.templateId, 3),
     NotFoundException,
   );
   corruptVersionChecksum(2);
   await assert.rejects(
-    () => service.getPublishedVersion(firstDefinition.templateId, 2),
+    () => service.getPublishedVersion(17, firstDefinition.templateId, 2),
     ConflictException,
   );
 });
@@ -2099,7 +2142,7 @@ test("模板版本列表分页只返回摘要，详情仍通过可信正式版�
   assert.deepEqual(query?.args.where.version, { lt: 2 });
   assert.equal(query?.args.select.definition, undefined);
 
-  const detail = await service.getPublishedVersion(definition.templateId, 1);
+  const detail = await service.getPublishedVersion(17, definition.templateId, 1);
   assert.equal(detail.version, 1);
   assert.equal(detail.definition.templateId, definition.templateId);
 });
@@ -2203,7 +2246,7 @@ test("历史版本只在显式保存时以同模板可信来源越过结构锁�
 
   corruptVersionChecksum(1);
   await assert.rejects(
-    () => service.getPublishedVersion(first.templateId, 1),
+    () => service.getPublishedVersion(17, first.templateId, 1),
     ConflictException,
   );
   const writesBeforeRestore = calls.filter((call) => (
@@ -2322,15 +2365,15 @@ test("新建、发布版本与归档生命周期保留按轴尺寸兼容状态",
   });
 
   await service.publish(17, created.templateId, { expectedRevision: 1 });
-  const publishedCompatibility = (await service.getPublishedVersion(created.templateId, 1)
+  const publishedCompatibility = (await service.getPublishedVersion(17, created.templateId, 1)
     .then((version) => version.definition as any)).nodes.node_hero_template
     .props.contentTemplateLayoutData.nodes.action.sizeCompatibilityByViewport.desktop;
   assert.deepEqual(publishedCompatibility, createdCompatibility);
   await service.archive(17, created.templateId, draftIdentity({ draft: getState().draft }));
   assert.equal(getState().template.status, "ARCHIVED");
   assert.equal(getState().versions.length, 1);
-  assert.equal((await service.listPublished()).length, 0);
-  const archivedVersion = await service.getPublishedVersion(created.templateId, 1);
+  assert.equal((await service.listPublished(17)).length, 0);
+  const archivedVersion = await service.getPublishedVersion(17, created.templateId, 1);
   assert.equal(archivedVersion.version, 1);
   assert.equal(archivedVersion.status, "ARCHIVED");
   await service.restore(17, created.templateId);
@@ -2700,4 +2743,109 @@ test("母模板持久化拒绝无身份、非法 JSON 定义和越界版本说�
     () => service.create(17, { definition: definitionFixture(), versionNote: "x".repeat(501) }),
     BadRequestException,
   );
+});
+
+test("组件库预览图写入模板身份并复制，不脏草稿", async () => {
+  const coverUrl = "/uploads/page-assets/catalog-cover.jpg";
+  const harness = createStatefulService();
+  const definition = definitionFixture();
+  const created = await harness.service.create(17, { definition });
+  assert.equal(created.catalogCoverUrl ?? null, null);
+  harness.setMediaAsset({
+    storageKey: "page-assets/catalog-cover.jpg",
+    status: "READY",
+    mimeType: "image/jpeg",
+  });
+
+  const updated = await harness.service.updateCatalogCover(17, definition.templateId, {
+    catalogCoverUrl: `${coverUrl}?cache=1`,
+  });
+  assert.equal(updated.catalogCoverUrl, coverUrl);
+  assert.equal(updated.draft?.revision, created.draft?.revision);
+  assert.equal(harness.getState().template.catalogCoverUrl, coverUrl);
+  const coverLog = harness.getState().operationLogs.at(-1);
+  assert.equal(coverLog.action, "TEMPLATE_CATALOG_COVER_UPDATED");
+  assert.equal(JSON.parse(coverLog.detail).toCatalogCoverUrl, coverUrl);
+
+  const same = await harness.service.updateCatalogCover(17, definition.templateId, {
+    catalogCoverUrl: coverUrl,
+  });
+  assert.equal(same.catalogCoverUrl, coverUrl);
+  assert.equal(
+    harness.getState().operationLogs.filter((item: { action: string }) => (
+      item.action === "TEMPLATE_CATALOG_COVER_UPDATED"
+    )).length,
+    1,
+  );
+
+  const cleared = await harness.service.updateCatalogCover(17, definition.templateId, {
+    catalogCoverUrl: null,
+  });
+  assert.equal(cleared.catalogCoverUrl, null);
+  const restored = await harness.service.updateCatalogCover(17, definition.templateId, {
+    catalogCoverUrl: coverUrl,
+  });
+  assert.equal(restored.catalogCoverUrl, coverUrl);
+
+  await harness.service.publish(17, definition.templateId, {
+    expectedRevision: created.draft!.revision,
+  });
+  const [published] = await harness.service.listPublished(17);
+  assert.equal(published.catalogCoverUrl, coverUrl);
+
+  const copySource = {
+    templateId: definition.templateId,
+    revision: harness.getState().draft.revision,
+    definitionChecksum: harness.getState().draft.definitionChecksum,
+  };
+  const copiedDefinition = {
+    ...structuredClone(harness.getState().draft.definition),
+    templateId: "tpl_cover_copy",
+    name: "预览图副本",
+  };
+  const copied = await harness.service.create(17, {
+    definition: copiedDefinition,
+    copySource,
+  });
+  assert.equal(copied.catalogCoverUrl, coverUrl);
+  assert.equal(copied.templateId, "tpl_cover_copy");
+});
+
+test("组件库预览图拒绝外链、穿越路径、未入库图片和已归档模板", async () => {
+  const harness = createStatefulService();
+  const definition = definitionFixture();
+  await harness.service.create(17, { definition });
+  harness.setMediaAsset({
+    storageKey: "page-assets/catalog-cover.jpg",
+    status: "READY",
+    mimeType: "image/jpeg",
+  });
+
+  await assert.rejects(
+    () => harness.service.updateCatalogCover(17, definition.templateId, {
+      catalogCoverUrl: "https://cdn.example/cover.jpg",
+    }),
+    BadRequestException,
+  );
+  await assert.rejects(
+    () => harness.service.updateCatalogCover(17, definition.templateId, {
+      catalogCoverUrl: "/uploads/page-assets/%2e%2e/secret.jpg",
+    }),
+    BadRequestException,
+  );
+  await assert.rejects(
+    () => harness.service.updateCatalogCover(17, definition.templateId, {
+      catalogCoverUrl: "/uploads/page-assets/missing.jpg",
+    }),
+    BadRequestException,
+  );
+
+  harness.setTemplateStatus("ARCHIVED");
+  await assert.rejects(
+    () => harness.service.updateCatalogCover(17, definition.templateId, {
+      catalogCoverUrl: "/uploads/page-assets/catalog-cover.jpg",
+    }),
+    ConflictException,
+  );
+  assert.equal(harness.getState().template.catalogCoverUrl ?? null, null);
 });

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   Patch,
   Post,
@@ -22,6 +23,7 @@ import {
   CreateDynamicTemplateDto,
   PublishDynamicTemplateDto,
   RebuildDynamicTemplateDraftFromPublishedDto,
+  UpdateDynamicTemplateCatalogCoverDto,
   UpdateDynamicTemplateDraftDto,
 } from "./dto";
 import { DynamicTemplatesService } from "./dynamic-templates.service";
@@ -38,66 +40,80 @@ export class DynamicTemplatesController {
   constructor(private readonly service: DynamicTemplatesService) {}
 
   @Get("catalog")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取统一母模板目录（正式版本与可编辑草稿）" })
   async listCatalog(@Req() req: StaffRequest) {
-    const [published, editable] = await Promise.all([
-      this.service.listPublished(),
-      req.user.role === "SUPER_ADMIN" ? this.service.listMine(req.user.id) : Promise.resolve([]),
-    ]);
-    return {
-      items: [
-        ...published.map((template) => ({ kind: "published" as const, template })),
-        ...editable.map((template) => ({ kind: "editable" as const, template })),
-      ],
-    };
+    return this.service.listCatalog(req.user);
   }
 
   @Roles("SUPER_ADMIN")
   @Post("consultation-starters")
   @ApiOperation({ summary: "安装咨询站页面装修起步模板（幂等）" })
   ensureConsultationStarters(@Req() req: StaffRequest) {
-    return this.service.ensureConsultationStarters(req.user.id);
+    return this.service.ensureConsultationStarters(req.user);
   }
 
   @Get("published")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取后台可用的母模板正式版本" })
-  listPublished() {
-    return this.service.listPublished();
+  listPublished(@Req() req: StaffRequest) {
+    return this.service.listPublished(req.user);
   }
 
   @Get("published/:templateId/versions/:version")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取指定母模板正式版本" })
   getPublishedVersion(
     @Param("templateId") templateId: string,
     @Param("version") version: string,
+    @Req() req: StaffRequest,
   ) {
-    return this.service.getPublishedVersion(templateId, Number(version));
+    return this.service.getPublishedVersion(req.user, templateId, Number(version));
   }
 
   @Roles("SUPER_ADMIN")
   @Get("mine")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取当前管理员拥有的母模板与草稿" })
   listMine(@Req() req: StaffRequest) {
-    return this.service.listMine(req.user.id);
+    return this.service.listMine(req.user);
   }
 
   @Roles("SUPER_ADMIN")
   @Post()
   @ApiOperation({ summary: "通过统一的新建模板流程创建母模板草稿" })
   create(@Body() body: CreateDynamicTemplateDto, @Req() req: StaffRequest) {
-    return this.service.create(req.user.id, body);
+    return this.service.create(req.user, body);
   }
 
   @Roles("SUPER_ADMIN")
   @Get(":templateId/draft")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取当前管理员拥有的母模板草稿" })
   getDraft(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
-    return this.service.getDraft(req.user.id, templateId);
+    return this.service.getDraft(req.user, templateId);
+  }
+
+  @Roles("SUPER_ADMIN")
+  @Patch(":templateId/catalog-cover")
+  @SkipGenericAudit()
+  @ApiOperation({ summary: "更新模板组件库卡片预览图；不改变草稿或正式版本" })
+  updateCatalogCover(
+    @Param("templateId") templateId: string,
+    @Body() body: UpdateDynamicTemplateCatalogCoverDto,
+    @Req() req: StaffRequest,
+  ) {
+    return this.service.updateCatalogCover(req.user, templateId, body);
   }
 
   @Roles("SUPER_ADMIN")
@@ -108,7 +124,7 @@ export class DynamicTemplatesController {
     @Body() body: UpdateDynamicTemplateDraftDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.updateDraft(req.user.id, templateId, body);
+    return this.service.updateDraft(req.user, templateId, body);
   }
 
   @Roles("SUPER_ADMIN")
@@ -120,7 +136,7 @@ export class DynamicTemplatesController {
     @Body() body: RebuildDynamicTemplateDraftFromPublishedDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.rebuildDraftFromPublished(req.user.id, templateId, body);
+    return this.service.rebuildDraftFromPublished(req.user, templateId, body);
   }
 
   @Roles("SUPER_ADMIN")
@@ -132,11 +148,13 @@ export class DynamicTemplatesController {
     @Body() body: PublishDynamicTemplateDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.publish(req.user.id, templateId, body);
+    return this.service.publish(req.user, templateId, body);
   }
 
   @Roles("SUPER_ADMIN")
   @Get(":templateId/versions")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @Throttle(STAFF_TEMPLATE_READ_THROTTLE)
   @ApiOperation({ summary: "获取当前管理员模板的版本历史" })
   listVersions(
@@ -146,7 +164,7 @@ export class DynamicTemplatesController {
     @Query("limit") limit?: string,
   ) {
     return this.service.listVersions(
-      req.user.id,
+      req.user,
       templateId,
       beforeVersion === undefined ? undefined : Number(beforeVersion),
       limit === undefined ? undefined : Number(limit),
@@ -162,7 +180,7 @@ export class DynamicTemplatesController {
     @Body() body: ArchiveDynamicTemplateDto,
     @Req() req: StaffRequest,
   ) {
-    return this.service.archive(req.user.id, templateId, body);
+    return this.service.archive(req.user, templateId, body);
   }
 
   @Roles("SUPER_ADMIN")
@@ -170,7 +188,7 @@ export class DynamicTemplatesController {
   @SkipGenericAudit()
   @ApiOperation({ summary: "从回收站恢复当前管理员可编辑的母模板" })
   restore(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
-    return this.service.restore(req.user.id, templateId);
+    return this.service.restore(req.user, templateId);
   }
 
   @Roles("SUPER_ADMIN")
@@ -178,6 +196,6 @@ export class DynamicTemplatesController {
   @SkipGenericAudit()
   @ApiOperation({ summary: "永久删除回收站中从未发布且未被引用的 CUSTOM 模板草稿" })
   deleteDraft(@Param("templateId") templateId: string, @Req() req: StaffRequest) {
-    return this.service.deleteDraft(req.user.id, templateId);
+    return this.service.deleteDraft(req.user, templateId);
   }
 }

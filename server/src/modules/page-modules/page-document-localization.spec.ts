@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { HEADERS_METADATA } from "@nestjs/common/constants";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import {
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
@@ -100,9 +101,48 @@ test("公开页面接口在读取事实源前拒绝 en，缺省 locale 仍为 zh
   ]);
 });
 
+test("公开 PageDocument JSON 禁止缓存和独立搜索索引", () => {
+  const headers = Reflect.getMetadata(
+    HEADERS_METADATA,
+    PageModulesController.prototype.getPublishedDocument,
+  ) as Array<{ name: string; value: string }>;
+
+  assert.ok(headers.some(
+    (header) => header.name === "Cache-Control" && header.value === "no-store",
+  ));
+  assert.ok(headers.some(
+    (header) => header.name === "X-Robots-Tag" && header.value === "noindex, nofollow",
+  ));
+});
+
+test("公开页面服务在读取数据库前拒绝合同外 pageKey", async () => {
+  let databaseReads = 0;
+  const prisma = new Proxy({}, {
+    get() {
+      databaseReads += 1;
+      throw new Error("公开读取不应访问合同外记录");
+    },
+  });
+  const service = new PageModulesService(prisma as PrismaService);
+
+  assert.equal(
+    await service.getLocalizedPublishedPageDocument("legacy-hidden-page", "zh-CN"),
+    null,
+  );
+  assert.equal(databaseReads, 0);
+});
+
 test("稀疏语言历史单次请求限制扫描批次并返回续扫游标", async () => {
   let findManyCalls = 0;
-  const prisma = {
+  const prisma: Record<string, unknown> & {
+    pageDocumentRevision: {
+      findMany: (args: {
+        where: { version?: { lt: number } };
+        take: number;
+      }) => Promise<unknown[]>;
+    };
+  } = {
+    $queryRaw: async () => [{ id: 1 }],
     pageDocumentRevision: {
       findMany: async (args: {
         where: { version?: { lt: number } };
@@ -125,6 +165,7 @@ test("稀疏语言历史单次请求限制扫描批次并返回续扫游标", as
       },
     },
   };
+  prisma.$transaction = async (run: (tx: typeof prisma) => Promise<unknown>) => run(prisma);
   const service = new PageModulesService(prisma as unknown as PrismaService);
   Object.defineProperty(service, "getLocalizedPageDraft", {
     value: async () => ({
@@ -133,7 +174,7 @@ test("稀疏语言历史单次请求限制扫描批次并返回续扫游标", as
     }),
   });
 
-  const result = await service.getLocalizedPageDocumentRevisions("home", "en", undefined, 20);
+  const result = await service.getLocalizedPageDocumentRevisions("home", "en", undefined, 20, 1);
 
   assert.equal(findManyCalls, 10);
   assert.deepEqual(result.items, []);
@@ -202,7 +243,7 @@ test("放弃语言草稿拒绝 marker 哈希与发布正文不一致的 revision
   });
 
   await assert.rejects(
-    () => service.discardLocalizedPageDocumentDraft("about", "en", updatedAt.toISOString()),
+    () => service.discardLocalizedPageDocumentDraft("about", "en", updatedAt.toISOString(), 1),
     (error: unknown) => error instanceof ConflictException
       && error.message.includes("完整性校验失败"),
   );
@@ -1032,7 +1073,12 @@ test("中英文公开读取各自精确发布指针，不读取另一语言或�
   const enPuckData = { content: [{ type: "hero", props: { title: "English live" } }], root: { props: {} }, zones: {} };
   const publishedAt = new Date("2026-09-12T07:00:00.000Z");
   const makeRevision = (id: number, locale: "zh-CN" | "en", puckData: unknown) => {
-    const plainMetadata = { seoTitle: locale === "en" ? "English live" : "中文线上" };
+    const plainMetadata = {
+      seoTitle: locale === "en" ? "English live" : "中文线上",
+      contentOwner: "仅后台内容责任人",
+      mediaRights: [{ assetUrl: "/images/internal.jpg", source: "内部登记" }],
+      internalReviewNote: "不得进入匿名响应",
+    };
     const contentHash = createPageLocaleContentHash(puckData, plainMetadata);
     return {
       id,
@@ -1097,6 +1143,9 @@ test("中英文公开读取各自精确发布指针，不读取另一语言或�
   assert.equal((english?.puckData as any).content[0].props.title, "English live");
   assert.equal(chinese?.version, 41);
   assert.equal((chinese?.puckData as any).content[0].props.title, "中文线上");
+  assert.deepEqual(chinese?.metadata, { seoTitle: "中文线上" });
+  assert.equal("publishedBy" in (chinese ?? {}), false);
+  assert.equal("review" in (chinese ?? {}), false);
 });
 
 test("英文发布指针若指向中文 revision，公开读取失败关闭且不返回中文正文", async () => {

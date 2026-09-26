@@ -209,8 +209,12 @@ async function mockEditorApis(
     publishFailure?: boolean;
     publishFailureStatus?: number;
     publishFailuresBeforeSuccess?: number;
+    publishResponseLostAfterCommit?: boolean;
     remoteDraftAfterPublishConflict?: Record<string, unknown>;
     publishDelayMs?: number;
+    publishedVerificationFailuresBeforeSuccess?: number;
+    publishedSnapshotAfterPublish?: Record<string, unknown>;
+    publishedReadOmitsDraftFields?: boolean;
     saveDelayMs?: number;
     validateFailuresBeforeSuccess?: number;
     beforeValidateResponse?: (call: number) => Promise<void>;
@@ -223,7 +227,12 @@ async function mockEditorApis(
   let persistentWriteCalls = 0;
   let saveCalls = 0;
   let publishCalls = 0;
+  let publishedReadCalls = 0;
+  let publishedVerificationCalls = 0;
   let mediaAuthorizeCalls = 0;
+  let publishedDocument = opts.publishedDocument
+    ? structuredClone(opts.publishedDocument)
+    : null;
   const publishBodies: Array<Record<string, unknown>> = [];
   const reviewBodies: Array<Record<string, unknown>> = [];
   let mediaAuthorized = false;
@@ -290,7 +299,27 @@ async function mockEditorApis(
       return route.fulfill(json(draft));
     }
     if (url.includes("/published")) {
-      return route.fulfill(json(opts.publishedDocument ?? null));
+      publishedReadCalls += 1;
+      if (publishCalls > 0) {
+        publishedVerificationCalls += 1;
+        if (
+          publishedVerificationCalls
+          <= (opts.publishedVerificationFailuresBeforeSuccess ?? 0)
+        ) {
+          return route.fulfill({
+            status: 503,
+            contentType: "application/json",
+            body: JSON.stringify({ code: 503, message: "published read unavailable" }),
+          });
+        }
+      }
+      if (publishedDocument && opts.publishedReadOmitsDraftFields && publishCalls > 0) {
+        const publishedSnapshot = structuredClone(publishedDocument);
+        delete publishedSnapshot.reviewStatus;
+        delete publishedSnapshot.publishedHash;
+        return route.fulfill(json(publishedSnapshot));
+      }
+      return route.fulfill(json(publishedDocument));
     }
     if (url.includes("/publish")) {
       // 发布接口（PUT）：返回已发布快照
@@ -321,16 +350,18 @@ async function mockEditorApis(
           }),
         });
       }
-      return route.fulfill(
-        json({
+      publishedDocument = structuredClone(opts.publishedSnapshotAfterPublish ?? {
           ...draft,
           status: "PUBLISHED",
           reviewStatus: "PUBLISHED",
           publishedHash: draft.contentHash,
           version: 1,
           updatedAt: "2026-08-14T00:00:02.000Z",
-        }),
-      );
+        });
+      if (opts.publishResponseLostAfterCommit) {
+        return route.abort("failed");
+      }
+      return route.fulfill(json(publishedDocument));
     }
     if (method === "PUT" && url.includes("/document/review")) {
       const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -383,6 +414,8 @@ async function mockEditorApis(
     persistentWriteCalls: () => persistentWriteCalls,
     saveCalls: () => saveCalls,
     publishCalls: () => publishCalls,
+    publishedReadCalls: () => publishedReadCalls,
+    publishedVerificationCalls: () => publishedVerificationCalls,
     publishBodies: () => publishBodies,
     mediaAuthorizeCalls: () => mediaAuthorizeCalls,
     reviewBodies: () => reviewBodies,
@@ -468,6 +501,67 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     expect(requests.publishBodies()[0]).toMatchObject({
       selfReviewAcknowledged: true,
     });
+  });
+
+  test("发布后以管理端线上快照权威回读确认，不依赖草稿审核字段", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishedReadOmitsDraftFields: true,
+    });
+
+    await page.goto("/admin/editor/home");
+    await page.locator(".homepage-editor__toolbar-publish").click();
+
+    await expect(page.getByText("店铺首页已发布，并已确认前台读取的线上版本")).toBeVisible({
+      timeout: 8000,
+    });
+    await expect.poll(requests.publishCalls).toBe(1);
+    await expect.poll(requests.publishedVerificationCalls).toBeGreaterThanOrEqual(1);
+  });
+
+  test("发布写请求成功但线上回读失败时，重试只做 GET 不重复 PUT", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishedVerificationFailuresBeforeSuccess: 1,
+    });
+
+    await page.goto("/admin/editor/home");
+    await page.locator(".homepage-editor__toolbar-publish").click();
+
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await expect(review).toContainText("发布已请求，但暂时无法确认线上版本");
+    await expect.poll(requests.publishCalls).toBe(1);
+    await expect.poll(requests.publishedVerificationCalls).toBe(1);
+
+    await review.locator(":scope > footer button").click();
+    await expect(page.getByText("店铺首页已发布，并已确认前台读取的线上版本")).toBeVisible({
+      timeout: 8000,
+    });
+    await expect.poll(requests.publishedVerificationCalls).toBeGreaterThanOrEqual(2);
+    expect(requests.publishCalls()).toBe(1);
+  });
+
+  test("发布已提交但 PUT 回包丢失时转为 GET-only 核验且不重复发布", async ({ page }) => {
+    const requests = await mockEditorApis(page, {
+      valid: true,
+      publishResponseLostAfterCommit: true,
+      publishedVerificationFailuresBeforeSuccess: 1,
+    });
+
+    await page.goto("/admin/editor/home");
+    await page.locator(".homepage-editor__toolbar-publish").click();
+
+    const review = page.getByRole("region", { name: "本次发布检查" });
+    await expect(review).toContainText("发布已请求，但暂时无法确认线上版本");
+    await expect.poll(requests.publishCalls).toBe(1);
+    await expect.poll(requests.publishedVerificationCalls).toBe(1);
+
+    await review.locator(":scope > footer button").click();
+    await expect(page.getByText("店铺首页已发布，并已确认前台读取的线上版本")).toBeVisible({
+      timeout: 8000,
+    });
+    await expect.poll(requests.publishedVerificationCalls).toBeGreaterThanOrEqual(2);
+    expect(requests.publishCalls()).toBe(1);
   });
 
   test("已发布且无待发布更改时发布按钮仍可点，并提示已是最新线上版本", async ({ page }) => {
@@ -735,7 +829,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     );
     await expect(publishButton).toHaveAttribute(
       "title",
-      "保存当前草稿并发布页面；只有此操作会更新客户前台，无图片模板会自动隐藏",
+      "保存当前草稿并发布到前台网站",
     );
     await publishButton.click();
     await expect(page.getByRole("dialog").filter({ hasText: "确认发布首页" })).toHaveCount(0);
@@ -826,7 +920,8 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       expect(requests.publishCalls()).toBe(0);
       expect(requests.persistentWriteCalls()).toBe(1);
 
-      const stableEntry = page.getByRole("button", { name: "查看本次发布检查（0 项错误）" });
+      await expect(page.getByRole("button", { name: /查看本次发布检查/ })).toHaveCount(0);
+      const publishEntry = page.getByRole("button", { name: "发布到前台网站" });
       if (viewport.width <= 1024) {
         const inspectorDialog = page.getByRole("dialog", { name: "属性面板" });
         await expect(inspectorDialog).toBeVisible();
@@ -840,28 +935,13 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
         await page.keyboard.press("Escape");
         await expect(review).toBeHidden();
         await expect(inspectorDialog).toHaveCount(0);
-        await expect(stableEntry).toBeFocused();
-
-        await stableEntry.press("Space");
-        await expect(review).toBeVisible();
-        await expect(page.getByRole("dialog", { name: "属性面板" })).toBeVisible();
-        await review.getByRole("button", { name: "关闭本次发布检查" }).click();
-        await expect(review).toBeHidden();
-        await expect(page.getByRole("dialog", { name: "属性面板" })).toHaveCount(0);
-        await expect(stableEntry).toBeFocused();
-
-        await stableEntry.press("Space");
-        await expect(page.getByRole("dialog", { name: "属性面板" })).toBeVisible();
+        await expect(publishEntry).toBeFocused();
       } else {
         await review.focus();
         await page.keyboard.press("Escape");
         await expect(review).toBeHidden();
-        await expect(stableEntry).toBeVisible();
-        await stableEntry.press("Space");
+        await expect(publishEntry).toBeFocused();
       }
-      await expect(review).toBeVisible();
-      await expect(review).toContainText("不会自动发布");
-      await expect(review.getByRole("button", { name: "发布页面", exact: true })).toBeVisible();
 
       await page.getByRole("button", { name: "保存当前装修草稿" }).click();
       await expect.poll(requests.persistentWriteCalls).toBe(2);
@@ -889,7 +969,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       const publishButton = page.locator(".homepage-editor__toolbar-publish");
       await expect(publishButton).toHaveAttribute(
         "title",
-        "保存当前草稿并发布页面；只有此操作会更新客户前台，无图片模板会自动隐藏",
+        "保存当前草稿并发布到前台网站",
       );
       await expect(publishButton).toBeEnabled();
       await expect(page.getByText("internal validation service path must never reach the browser"))
@@ -1002,7 +1082,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     { name: "桌面", width: 1440, height: 900 },
     { name: "移动窄屏", width: 390, height: 844 },
   ]) {
-    test(`${viewport.name}明确提示旧线上版本需重新校验并说明页面资料全部可选`, async ({ page }) => {
+    test(`${viewport.name}直接展示旧线上版本健康状态并保留页面工具入口`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       const draft = validDraft();
       await mockEditorApis(page, {
@@ -1023,17 +1103,37 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       });
 
       await page.goto("/admin/editor/home");
-      const more = page.getByRole("button", { name: /更多编辑操作，线上版本需重新校验/ });
-      await expect(more).toBeVisible();
-      await more.click();
-      await page.getByRole("menuitem", { name: "线上版本需重新校验" }).click();
+      const liveHealth = page.getByTestId("published-live-health-alert");
+      await expect(liveHealth).toBeVisible();
+      await expect(liveHealth).toContainText("线上版本异常 · 1 项");
+      await expect(liveHealth).toHaveAccessibleName(
+        "线上已发布版本未通过公开校验，共 1 项；打开页面设置查看",
+      );
+      const liveHealthBox = await liveHealth.boundingBox();
+      expect(liveHealthBox).not.toBeNull();
+      expect(liveHealthBox!.x).toBeGreaterThanOrEqual(0);
+      expect(liveHealthBox!.x + liveHealthBox!.width).toBeLessThanOrEqual(viewport.width);
+      await expect(page.getByRole("button", { name: /发布未通过/ })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "预览当前画布" })).toBeVisible();
 
+      await liveHealth.click();
       const drawer = page.getByRole("dialog", { name: "页面展示设置" });
       await expect(drawer).toBeVisible();
       await expect(drawer.getByRole("status", { name: "当前页面可选展示资料说明" })).toContainText(
         "素材授权在页面素材库集中维护",
       );
       await expect(drawer).toContainText("实际可见素材的公开资格由服务端统一检查");
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden();
+
+      const more = page.getByRole("button", {
+        name: "更多编辑操作，线上版本未通过公开校验，共 1 项",
+      });
+      await expect(more).toBeVisible();
+      await more.click();
+      await page.getByRole("menuitem", { name: "线上版本未通过公开校验 · 1 项" }).click();
+
+      await expect(drawer).toBeVisible();
     });
   }
 
@@ -1129,7 +1229,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     await titleInput.fill("403 后仍保留的发布草稿");
 
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
-    await expect(publishButton).toBeDisabled();
+    await expect(publishButton).toBeEnabled();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
@@ -1195,7 +1295,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     await titleInput.fill("冲突后保留的本地修改");
 
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
-    await expect(publishButton).toBeDisabled();
+    await expect(publishButton).toBeEnabled();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
@@ -1233,7 +1333,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     );
     await titleInput.fill("确认前不能丢失的本地修改");
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
-    await expect(publishButton).toBeDisabled();
+    await expect(publishButton).toBeEnabled();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
     await expect(publishButton).toBeEnabled();
     await publishButton.click();
@@ -1375,7 +1475,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
 
       await review.press("Escape");
       await expect(review).toBeHidden();
-      await expect(failureStatus).toBeFocused();
+      await expect(publishButton).toBeFocused();
     }
 
     expect(requests.publishCalls()).toBe(viewports.length);

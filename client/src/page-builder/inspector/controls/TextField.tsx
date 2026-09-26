@@ -2,8 +2,9 @@
  * TextField.tsx — 文本 / 多行文本控件（薄封装 antd Input）。
  * 复用 homepage-editor__inspector-field 样式体系，与专属面板观感一致。
  */
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import { Input } from "antd";
+import { registerPendingCommittedInput, unregisterPendingCommittedInput } from "./NumberField";
 
 interface TextFieldProps {
   label: string;
@@ -50,6 +51,16 @@ export default function TextField({
   const editingRef = useRef(false);
   const baselineRef = useRef(value || "");
   const skipNextBlurRef = useRef(false);
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const commitRef = useRef<() => boolean>(() => true);
+  const registerInput = useCallback((input: HTMLInputElement | HTMLTextAreaElement) => {
+    if (inputRef.current && inputRef.current !== input) unregisterPendingCommittedInput(inputRef.current);
+    inputRef.current = input;
+    registerPendingCommittedInput(input, () => commitRef.current());
+  }, []);
+  useEffect(() => () => {
+    if (inputRef.current) unregisterPendingCommittedInput(inputRef.current);
+  }, []);
   useEffect(() => {
     if (!editingRef.current) {
       setDraftValue(value || "");
@@ -57,8 +68,9 @@ export default function TextField({
     }
   }, [value]);
   const displayedValue = transactional ? draftValue : value || "";
-  const beginEditing = () => {
+  const beginEditing = (event: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (!transactional || readOnly) return;
+    registerInput(event.currentTarget);
     if (editingRef.current) return;
     editingRef.current = true;
     baselineRef.current = value || "";
@@ -78,6 +90,7 @@ export default function TextField({
     if (next !== value) onChange(next);
     return true;
   };
+  commitRef.current = commitEditing;
   const cancelEditing = (target: HTMLInputElement | HTMLTextAreaElement) => {
     if (!transactional || !editingRef.current) return;
     skipNextBlurRef.current = true;
@@ -130,6 +143,7 @@ export default function TextField({
           aria-required={required || undefined}
           aria-invalid={error || validationError ? true : undefined}
           aria-describedby={validationError ? errorId : undefined}
+          data-committed-text-input={transactional ? "true" : undefined}
           value={displayedValue}
           readOnly={readOnly}
           onFocus={beginEditing}
@@ -154,6 +168,7 @@ export default function TextField({
           aria-required={required || undefined}
           aria-invalid={error || validationError ? true : undefined}
           aria-describedby={validationError ? errorId : undefined}
+          data-committed-text-input={transactional ? "true" : undefined}
           value={displayedValue}
           readOnly={readOnly}
           onFocus={beginEditing}

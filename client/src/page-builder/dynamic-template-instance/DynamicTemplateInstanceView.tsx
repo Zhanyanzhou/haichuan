@@ -38,6 +38,7 @@ export default function DynamicTemplateInstanceView({
   deviceOverride,
   mode = "public",
   primaryHeadingLevel = 2,
+  priority = false,
 }: {
   props: DynamicTemplateInstanceProps;
   definition?: TemplateDefinitionV2;
@@ -45,6 +46,8 @@ export default function DynamicTemplateInstanceView({
   deviceOverride?: TemplateBreakpoint;
   mode?: "public" | "editor" | "preview";
   primaryHeadingLevel?: 1 | 2;
+  /** 公开页首个实际可渲染主舞台的首图获得加载优先语义。 */
+  priority?: boolean;
 }) {
   const registered = useResolvedDynamicTemplate(props.templateId, props.templateVersion);
   const resolvedDefinition = definition ?? registered?.definition;
@@ -109,6 +112,7 @@ export default function DynamicTemplateInstanceView({
         mode={mode}
         editorSurface={mode === "editor" ? "page-instance" : undefined}
         primaryHeadingLevel={primaryHeadingLevel}
+        priority={priority}
       />
     </section>
   );

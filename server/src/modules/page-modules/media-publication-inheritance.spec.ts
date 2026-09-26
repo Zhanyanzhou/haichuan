@@ -201,7 +201,7 @@ test("页面发布遇受管素材无有效授权时失败关闭且不写清单",
       "home",
     ),
     (error: unknown) => error instanceof BadRequestException
-      && JSON.stringify(error.getResponse()).includes("AUTHORIZATION_MISSING"),
+      && JSON.stringify(error.getResponse()).includes("page-validation-managed-media-authorization-missing"),
   );
 });
 

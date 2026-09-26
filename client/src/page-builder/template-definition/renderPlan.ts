@@ -56,6 +56,29 @@ export interface CompileDynamicTemplateRenderPlanOptions {
   showEmptySlots?: boolean;
 }
 
+/** 与公开 Renderer 共用：只从当前断点实际可达的渲染计划中选择页面级标题槽位。 */
+export function findFirstReachableHeadingSlotId(
+  node: DynamicTemplateRenderPlanNode,
+): string | undefined {
+  if (node.hidden) return undefined;
+  if (
+    node.slotId
+    && (node.slot?.type === "heading"
+      || (node.slot?.type === "heroTemplate"
+        && node.content
+        && typeof node.content === "object"
+        && !Array.isArray(node.content)
+        && typeof (node.content as Record<string, unknown>).title === "string"
+        && Boolean(((node.content as Record<string, unknown>).title as string).trim())))
+    && (node.slot?.type === "heroTemplate"
+      || (typeof node.content === "string" && Boolean(node.content.trim())))
+  ) return node.slotId;
+  return node.children.reduce<string | undefined>(
+    (found, child) => found ?? findFirstReachableHeadingSlotId(child),
+    undefined,
+  );
+}
+
 function hasMeaningfulTemplateContent(value: unknown): boolean {
   if (typeof value === "string") return value.trim().length > 0;
   if (Array.isArray(value)) return value.some(hasMeaningfulTemplateContent);

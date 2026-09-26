@@ -187,7 +187,7 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
     ).toEqual([]);
   });
 
-  test("线上回滚只发送 revision 指针切换，草稿与历史快照保持不变", async ({ page }) => {
+  test("线上回滚创建新的不可变版本，草稿与来源历史快照保持不变", async ({ page }) => {
     await authenticateAdmin(page);
     const catalog = publishedPageTemplateCatalog();
     const draftPuckData = {
@@ -223,6 +223,9 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
       isPublished: true,
     };
     let publishedRevisionId = 39;
+    let revision40: typeof revision37 | null = null;
+    let failNextRollbackReadback = true;
+    let rollbackReadbackCount = 0;
     const rollbackPayloads: Array<Record<string, unknown>> = [];
     const unexpectedWrites: string[] = [];
     const draftDocument = {
@@ -237,7 +240,7 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
       updatedAt: CURRENT_UPDATED_AT,
     };
     const publishedDocument = () => {
-      const revision = publishedRevisionId === 37 ? revision37 : revision39;
+      const revision = publishedRevisionId === 40 && revision40 ? revision40 : revision39;
       return {
         ...draftDocument,
         puckData: revision.puckData,
@@ -262,7 +265,15 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
         && request.method() === "PUT"
       ) {
         rollbackPayloads.push(request.postDataJSON());
-        publishedRevisionId = 37;
+        revision40 = {
+          ...revision37,
+          id: 40,
+          version: 40,
+          publishedAt: "2026-08-23T08:01:00.000Z",
+          createdAt: "2026-08-23T08:01:00.000Z",
+          isPublished: true,
+        };
+        publishedRevisionId = 40;
         return route.fulfill(ok({
           ...draftDocument,
           publishedRevisionId,
@@ -281,11 +292,26 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
           return { ...item, isPublished: publishedRevisionId === revision.id };
         };
         return route.fulfill(ok({
-          items: [summary(revision39), summary(revision37)],
+          items: [
+            ...(revision40 ? [summary(revision40)] : []),
+            summary(revision39),
+            summary(revision37),
+          ],
           nextBeforeVersion: null,
         }));
       }
       if (path === "/api/page-modules/document/published/admin") {
+        if (publishedRevisionId === 40) {
+          rollbackReadbackCount += 1;
+          if (failNextRollbackReadback) {
+            failNextRollbackReadback = false;
+            return route.fulfill({
+              status: 503,
+              contentType: "application/json",
+              body: JSON.stringify({ code: 503, message: "线上读模型暂不可用" }),
+            });
+          }
+        }
         return route.fulfill(ok(publishedDocument()));
       }
       if (path === "/api/page-modules/document/published") {
@@ -314,18 +340,32 @@ test.describe("页面历史版本载入与保存乐观锁", () => {
     await expect(version37.getByText("当前线上版本")).toHaveCount(0);
     await version37.getByRole("button", { name: "回滚线上" }).click();
     const confirmation = page.getByRole("dialog", { name: "回滚线上到版本 37？" });
-    await expect(confirmation).toContainText("不会覆盖当前页面草稿");
+    await expect(confirmation).toContainText("创建新的不可变线上版本");
     await confirmation.getByRole("button", { name: "确认回滚线上" }).click();
 
-    await expect(page.getByText("线上页面已回滚到版本 37；当前草稿保持不变")).toBeVisible();
-    await expect(version37.getByText("当前线上版本")).toBeVisible();
+    await expect(drawer.getByRole("alert")).toContainText(
+      "回滚已请求，但暂时无法确认新的线上版本",
+    );
+    expect(rollbackPayloads).toHaveLength(1);
+    await drawer.getByRole("button", { name: "重新加载" }).click();
+
+    await expect(page.getByText(
+      "已从历史版本 37 创建并切换到新线上版本 40；当前草稿与历史版本保持不变",
+    )).toBeVisible();
+    await expect(version37.getByText("当前线上版本")).toHaveCount(0);
+    const version40 = drawer.locator(".homepage-editor__revision-item", {
+      hasText: "版本 40",
+    });
+    await expect(version40.getByText("当前线上版本")).toBeVisible();
     expect(rollbackPayloads).toEqual([{
       pageKey: "home",
       locale: "zh-CN",
       expectedPublishedRevisionId: 39,
     }]);
+    expect(rollbackReadbackCount).toBe(2);
     expect(unexpectedWrites).toEqual([]);
     expect(draftDocument.puckData).toEqual(draftPuckData);
+    expect(revision37.puckData.content[0].props.title).toBe("线上版本 37");
     expect(revision39.puckData.content[0].props.title).toBe("线上版本 39");
   });
 });

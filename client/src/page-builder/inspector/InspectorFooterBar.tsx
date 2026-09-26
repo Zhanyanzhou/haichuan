@@ -16,6 +16,7 @@ export interface EditorAction {
 
 interface InspectorFooterBarProps {
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   errorCount?: number;
   warningCount?: number;
@@ -26,6 +27,7 @@ interface InspectorFooterBarProps {
 
 export default function InspectorFooterBar({
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   errorCount = 0,
   warningCount = 0,
@@ -34,17 +36,25 @@ export default function InspectorFooterBar({
   onRetryValidation,
 }: InspectorFooterBarProps) {
   // 草稿持久化与发布资格是两条独立状态流。保存中的反馈不能被发布提醒覆盖。
-  const status = saving ? "saving" : hasUnsavedChanges ? "dirty" : "saved";
+  const status = saving
+    ? "saving"
+    : hasUnsavedChanges || !hasPersistedDraft
+      ? "dirty"
+      : "saved";
   const statusTitle = saving
     ? "正在保存页面草稿"
     : hasUnsavedChanges
       ? "修改已更新，尚未保存页面草稿"
-      : "页面草稿已保存";
+      : hasPersistedDraft
+        ? "页面草稿已保存"
+        : "页面草稿尚未保存";
   const statusDescription = saving
     ? "完成后可在预览中检查结果"
     : hasUnsavedChanges
       ? "请在顶部工具栏保存整页草稿"
-      : "预览可查看当前草稿结果";
+      : hasPersistedDraft
+        ? "预览可查看当前草稿结果"
+        : "当前显示默认内容；保存后才会写入服务端";
   const issueCount = errorCount + warningCount;
   const validationLabel = validationStatus === "validating"
     ? "正在检查发布资格…"

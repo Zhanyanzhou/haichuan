@@ -105,7 +105,7 @@ export default function RecipeImageAppearance({ recipe, selectedId, onSelect, on
         <Input aria-label={`${imageLabel}圆角大小`} inputMode="numeric" autoComplete="off"
           style={{ width: 148, maxWidth: "100%" }}
           value={background ? "0" : circle ? String(selected.borderRadius) : radiusRaw}
-          disabled={background || circle} addonAfter="px" status={radiusInvalid ? "error" : undefined}
+          disabled={background || circle} suffix="px" status={radiusInvalid ? "error" : undefined}
           aria-invalid={radiusInvalid} aria-describedby={radiusHintId}
           onChange={(event) => {
             const raw = event.target.value;

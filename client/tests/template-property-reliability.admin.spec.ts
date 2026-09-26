@@ -90,6 +90,59 @@ test("背景预设覆盖生成颜色，手机选择只改手机且恢复继承�
   await expect(node).toHaveCSS("background-color", "rgb(24, 26, 27)");
 });
 
+test("手机背景图片替换或显式清空后可恢复桌面继承并保存稀疏覆盖", async ({ page }) => {
+  const { server, ids } = await openGenerated(page);
+  await page.evaluate(async (nodeId) => {
+    const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const responsivePath = "/src/page-builder/template-definition/responsive.ts";
+    const [{ useTemplateEditorSession }, { setTemplateNodeRule }] = await Promise.all([
+      import(/* @vite-ignore */ sessionPath), import(/* @vite-ignore */ responsivePath),
+    ]);
+    useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "建立双端背景图片前置", update: (next: any) => {
+      setTemplateNodeRule(next, nodeId, "desktop", "backgroundImage", "/images/system/launch-short-page-desktop.svg");
+      setTemplateNodeRule(next, nodeId, "mobile", "backgroundImage", "/images/system/launch-short-page-mobile.svg");
+    } });
+  }, ids.root);
+  await select(page, ids.root, "mobile");
+  const node = page.frameLocator("iframe.template-editor__viewport-frame").locator(`[data-template-node-id="${ids.root}"]`);
+  const restore = page.getByRole("button", { name: "背景图片恢复继承", exact: true });
+  await expect(node).toHaveCSS("background-image", /launch-short-page-mobile\.svg/);
+  const replacement = await readSession(page);
+  await restore.click();
+  let restored = await readSession(page);
+  expect(restored.definition!.nodes[ids.root].responsive.mobile.backgroundImage).toBeUndefined();
+  expect(restored.historyPast.length).toBe(replacement.historyPast.length + 1);
+  await expect(node).toHaveCSS("background-image", /launch-short-page-desktop\.svg/);
+  await undo(page);
+  expect((await readSession(page)).definition).toEqual(replacement.definition);
+  await expect(node).toHaveCSS("background-image", /launch-short-page-mobile\.svg/);
+
+  await page.evaluate(async (nodeId) => {
+    const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
+    useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "手机明确清空背景图片", update: (next: any) => {
+      next.nodes[nodeId].responsive.mobile.backgroundImage = "";
+    } });
+  }, ids.root);
+  await expect(node).toHaveCSS("background-image", "none");
+  const explicitEmpty = await readSession(page);
+  await restore.click();
+  restored = await readSession(page);
+  expect(restored.definition!.nodes[ids.root].responsive.mobile.backgroundImage).toBeUndefined();
+  expect(restored.historyPast.length).toBe(explicitEmpty.historyPast.length + 1);
+  await expect(restore).toHaveCount(0);
+  await expect(node).toHaveCSS("background-image", /launch-short-page-desktop\.svg/);
+
+  await saveTemplate(page);
+  await expect.poll(() => server.saveResults.length).toBe(1);
+  expect(server.persisted!.draft!.definition.nodes[ids.root].responsive.mobile.backgroundImage).toBeUndefined();
+  await openTemplateDesignWithoutDraft(page);
+  await page.locator(`[data-template-name="${ids.templateId}"]`).getByRole("button", { name: /^打开属性可靠性模板/ }).click();
+  await select(page, ids.root, "mobile");
+  expect((await readSession(page)).definition!.nodes[ids.root].responsive.mobile.backgroundImage).toBeUndefined();
+  await expect(node).toHaveCSS("background-image", /launch-short-page-desktop\.svg/);
+});
+
 test("自由主图外框比例预览取消与确认写真实矩形，边界内缩放且焦点不变", async ({ page }) => {
   const { ids } = await openGenerated(page);
   await select(page, ids.image);
@@ -240,6 +293,42 @@ test("图片默认内容只保存地址和说明，属性含本页图片入口",
     return useTemplateEditorSession.getState().draft?.definition.defaultContent[slotId];
   }, { slotId: ids.imageSlot });
   expect(stored).toEqual({ src: "/uploads/page-assets/new.jpg", alt: "旧图" });
+});
+
+test("模板默认图片可直接选择服务端共享素材", async ({ page }) => {
+  const { ids } = await openGenerated(page);
+  const sharedAsset = {
+    id: 42,
+    url: "/uploads/page-assets/template-shared.png",
+    name: "模板共享素材.png",
+    type: "image",
+    mimeType: "image/png",
+    size: 2048,
+    width: 1600,
+    height: 900,
+    createdAt: "2026-09-22T08:30:00.000Z",
+    status: "READY",
+    available: true,
+  };
+  await page.route(/\/api\/upload\/media(?:\?.*)?$/, (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      code: 200,
+      message: "success",
+      data: { list: [sharedAsset], total: 1, page: 1, pageSize: 100 },
+    }),
+  }));
+
+  await select(page, ids.image);
+  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  await defaults.getByRole("button", { name: "本页图片", exact: true }).click();
+  await defaults.getByRole("button", { name: `使用素材：${sharedAsset.name}` }).click();
+
+  expect((await readSession(page)).definition!.defaultContent[ids.imageSlot]).toEqual({
+    src: sharedAsset.url,
+    alt: "",
+  });
 });
 
 test("模板库按真实画幅自适应完整预览，并以只读放大入口查看长页", async ({ page }, testInfo) => {

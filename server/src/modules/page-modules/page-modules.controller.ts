@@ -52,6 +52,8 @@ export class PageModulesController {
   @Get("document/published")
   // 发布后立即回读必须拿到新版本，禁止浏览器/中间代理启发式缓存该 JSON。
   @Header("Cache-Control", "no-store")
+  // 页面 HTML 承担公开索引；原始 PageDocument JSON 不应成为独立搜索结果。
+  @Header("X-Robots-Tag", "noindex, nofollow")
   @ApiOperation({ summary: "获取已发布页面文档（前台）" })
   getPublishedDocument(
     @Query("pageKey") pageKey: string,
@@ -66,15 +68,18 @@ export class PageModulesController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Get("document/published/admin")
-  @Header("Cache-Control", "no-store")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @ApiOperation({ summary: "获取已发布页面文档（后台完整快照）" })
   getPublishedAdminDocument(
     @Query("pageKey") pageKey: string,
     @Query("locale") locale?: string,
+    @Req() req?: StaffRequest,
   ) {
     return this.service.getLocalizedPublishedPageDocumentForAdmin(
       pageKey || "home",
       parsePublicContentLocale(locale),
+      req?.user,
     );
   }
 
@@ -91,15 +96,18 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Get("document/admin")
   // 草稿回读同样禁止缓存，编辑器重开必须看到最新草稿。
-  @Header("Cache-Control", "no-store")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @ApiOperation({ summary: "获取页面文档（后台，含草稿）" })
   getAdminDocument(
     @Query("pageKey") pageKey: string,
     @Query("locale") locale?: string,
+    @Req() req?: StaffRequest,
   ) {
     return this.service.getLocalizedPageDocument(
       pageKey || "home",
       parsePublicContentLocale(locale),
+      req?.user,
     );
   }
 
@@ -109,6 +117,7 @@ export class PageModulesController {
   @ApiOperation({ summary: "保存页面文档草稿" })
   saveDocument(
     @Body() body: SavePageDocumentDto,
+    @Req() req: StaffRequest,
   ) {
     return this.service.saveLocalizedPageDocument(
       body.pageKey,
@@ -117,6 +126,7 @@ export class PageModulesController {
       body.metadata,
       body.editorVersion,
       body.expectedUpdatedAt,
+      req.user,
     );
   }
 
@@ -133,7 +143,7 @@ export class PageModulesController {
     return this.service.publishLocalizedPageDocument(
       body?.pageKey || "home",
       requireEditablePublicContentLocale(body.locale),
-      req.user.id,
+      req.user,
       body.expectedUpdatedAt,
       body.expectedContentHash,
       body.selfReviewAcknowledged ?? false,
@@ -148,11 +158,13 @@ export class PageModulesController {
     @Query("pageKey") pageKey: string,
     @Query("expectedUpdatedAt") expectedUpdatedAt: string,
     @Query("locale") locale?: string,
+    @Req() req?: StaffRequest,
   ) {
     return this.service.discardLocalizedPageDocumentDraft(
       pageKey || "home",
       requireEditablePublicContentLocale(locale),
       expectedUpdatedAt,
+      req?.user,
     );
   }
 
@@ -160,24 +172,31 @@ export class PageModulesController {
   @ApiBearerAuth()
   @Post("document/validate")
   @ApiOperation({ summary: "预检页面文档是否可发布（发布前校验）" })
-  validateDocument(@Body() body: ValidatePageDocumentDto) {
+  validateDocument(
+    @Body() body: ValidatePageDocumentDto,
+    @Req() req: StaffRequest,
+  ) {
     return this.service.validateLocalizedPageDocument(
       body?.pageKey || "home",
       requireEditablePublicContentLocale(body.locale),
       body?.puckData,
       body?.metadata,
+      req.user,
     );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Get("document/revisions")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @ApiOperation({ summary: "获取页面文档版本历史" })
   getDocumentRevisions(
     @Query("pageKey") pageKey: string,
     @Query("beforeVersion") beforeVersion?: string,
     @Query("limit") limit?: string,
     @Query("locale") locale?: string,
+    @Req() req?: StaffRequest,
   ) {
     const args = [
       pageKey || "home",
@@ -189,23 +208,27 @@ export class PageModulesController {
       parsePublicContentLocale(locale),
       args[1],
       args[2],
+      req?.user,
     );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth()
   @Get("document/revisions/:version")
-  @Header("Cache-Control", "no-store")
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
   @ApiOperation({ summary: "获取可信页面文档单版本详情" })
   getDocumentRevision(
     @Query("pageKey") pageKey: string,
     @Query("locale") locale: string | undefined,
     @Param("version") version: string,
+    @Req() req?: StaffRequest,
   ) {
     return this.service.getLocalizedPageDocumentRevision(
       pageKey || "home",
       parsePublicContentLocale(locale),
       Number(version),
+      req?.user,
     );
   }
 
@@ -224,7 +247,7 @@ export class PageModulesController {
       requireEditablePublicContentLocale(body.locale),
       Number(version),
       body.expectedUpdatedAt,
-      req.user.id,
+      req.user,
     );
   }
 
@@ -244,7 +267,7 @@ export class PageModulesController {
       requireEditablePublicContentLocale(body.locale),
       Number(revisionId),
       body.expectedPublishedRevisionId,
-      req.user.id,
+      req.user,
     );
   }
 
@@ -262,7 +285,7 @@ export class PageModulesController {
       requireEditablePublicContentLocale(body.locale),
       body.expectedUpdatedAt,
       body.expectedContentHash,
-      req.user.id,
+      req.user,
     );
   }
 
@@ -282,7 +305,7 @@ export class PageModulesController {
       body.action,
       body.expectedUpdatedAt,
       body.expectedContentHash,
-      req.user.id,
+      req.user,
       body.reviewNote,
       body.selfReviewAcknowledged ?? false,
     );

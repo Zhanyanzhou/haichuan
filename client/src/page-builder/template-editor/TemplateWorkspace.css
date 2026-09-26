@@ -1768,6 +1768,13 @@
   }
 }
 
+/* 停靠布局以组件库底部入口为主；窄屏才保留顶部快捷入口。 */
+@media (min-width: 1440px) {
+  .template-editor__toolbar-new {
+    display: none;
+  }
+}
+
 .template-editor__mobile-settings {
   text-align: left;
   font: inherit;
@@ -1790,7 +1797,7 @@
   }
 }
 
-@media (min-width: 521px) {
+@media (min-width: 521px) and (max-width: 1439px) {
   .template-editor__toolbar-new-menu-item {
     display: none !important;
   }
@@ -1975,77 +1982,10 @@
   color: var(--adm-muted);
 }
 
-.template-editor__catalog-card-action {
-  position: absolute;
-  z-index: 20;
-  top: 6px;
-  right: 6px;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  pointer-events: none;
-}
-
-.template-editor__catalog-card-action > .template-editor__template-more,
-.template-editor__catalog-card-action > .homepage-editor__template-upgrade-action {
-  position: static;
-  pointer-events: auto;
-}
-
-.template-editor__template-more {
-  position: absolute;
-  z-index: 3;
-  top: 6px;
-  right: 6px;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  color: var(--adm-muted);
-  background: rgb(255 255 255 / 86%);
-  box-shadow: 0 1px 4px rgb(24 26 27 / 8%);
-  cursor: pointer;
-  opacity: 0;
-  transition:
-    opacity 160ms ease,
-    color 160ms ease,
-    border-color 160ms ease,
-    background 160ms ease;
-}
-
-/* 目录卡片本身覆盖完整预览区域；显式建立同级层叠顺序，避免卡片主操作
- * 在 iframe 完成渲染后重新取得命中区域，遮住右上角的生命周期菜单。 */
+/* 目录卡片本身覆盖完整预览区域；操作区统一由 editor.css 的卡片页脚承载。 */
 .homepage-editor__template-card-main {
   position: relative;
   z-index: 1;
-}
-
-.homepage-editor__template-card:hover .template-editor__template-more,
-.homepage-editor__template-card:focus-within .template-editor__template-more,
-.template-editor__template-more[aria-expanded="true"] {
-  opacity: 0.96;
-}
-
-@media (hover: none), (pointer: coarse) {
-  .template-editor__template-more {
-    opacity: 0.96;
-  }
-}
-
-.template-editor__template-more:hover,
-.template-editor__template-more:focus-visible {
-  border-color: var(--adm-neutral-border);
-  color: var(--adm-ink);
-  background: #fff;
-}
-
-.template-editor__template-more:focus-visible {
-  outline: 2px solid var(--adm-focus);
-  outline-offset: 2px;
 }
 
 .homepage-editor__template-card.is-disabled.is-trash-template {
@@ -3179,41 +3119,6 @@
   font-weight: 500;
 }
 .unified-template-library__scroll .unified-template-library__primary-action { display: none; }
-.template-editor__catalog-card-action {
-  top: 14px;
-  right: 14px;
-  width: auto;
-  height: 34px;
-}
-.template-editor__catalog-card-actions {
-  display: flex;
-  gap: 4px;
-  pointer-events: auto;
-}
-.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more) {
-  position: static;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid var(--adm-neutral-border);
-  border-radius: 50%;
-  color: var(--adm-text-strong);
-  background: rgb(255 255 255 / 94%);
-  box-shadow: 0 1px 4px rgb(24 26 27 / 10%);
-  cursor: pointer;
-  opacity: 0.96;
-}
-.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more):hover,
-.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more):focus-visible {
-  border-color: var(--adm-action);
-  color: var(--adm-action);
-  outline: 0;
-}
-.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more):focus-visible {
-  box-shadow: 0 0 0 2px var(--adm-focus);
-}
 .template-editor__inspector .homepage-editor__inspector-header {
   grid-template-columns: 36px minmax(0, 1fr) auto;
   min-height: 72px;

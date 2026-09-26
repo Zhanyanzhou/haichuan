@@ -713,7 +713,7 @@ export default function TemplateWorkspace({
       if (!state.draft || state.previewMode || focusFirstInvalidNumberField()) return;
       if (inspectorOverlay.compact) {
         // 菜单项关闭后会卸载，使用稳定的菜单触发按钮作为关闭面板后的焦点归处。
-        if (event.type === "template-editor:open-metadata") {
+        if (event.type === "template-editor:open-metadata" || event.type === "template-editor:open-settings") {
           document.querySelector<HTMLButtonElement>('.homepage-editor__toolbar [data-workspace-action="more"]')?.focus({ preventScroll: true });
         }
         inspectorOverlay.requestOpen();

@@ -121,3 +121,11 @@ export class ArchiveDynamicTemplateDto {
   @Matches(/^[a-f0-9]{64}$/)
   expectedChecksum!: string;
 }
+
+export class UpdateDynamicTemplateCatalogCoverDto {
+  @IsDefined()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  @MaxLength(500)
+  catalogCoverUrl!: string | null;
+}

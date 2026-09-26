@@ -35,11 +35,19 @@ export function groupDynamicTemplatePageFields(
   selectedSlotId?: string,
 ) {
   const selected = fields.find((field) => field.slotId === selectedSlotId);
+  if (selected) {
+    return {
+      task: selected.task,
+      primary: [selected],
+      secondary: [] as DynamicTemplatePageFieldDescriptor[],
+    };
+  }
   const firstBusinessField = fields.find((field) => field.task !== "content");
+  const task = firstBusinessField?.task ?? fields[0]?.task ?? "content";
   return {
-    task: selected?.task ?? firstBusinessField?.task ?? fields[0]?.task ?? "content",
-    primary: fields,
-    secondary: [] as DynamicTemplatePageFieldDescriptor[],
+    task,
+    primary: fields.filter((field) => field.task === task),
+    secondary: fields.filter((field) => field.task !== task),
   };
 }
 

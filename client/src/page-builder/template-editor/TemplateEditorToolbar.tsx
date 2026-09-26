@@ -196,6 +196,12 @@ export default function TemplateEditorToolbar({
     },
     ...(draft
       ? [{
+          key: "template-settings",
+          icon: <SettingOutlined />,
+          label: "模板设置",
+          disabled: busy || previewMode || (Boolean(publishReview) && !publishIssueEditing),
+          onClick: () => window.dispatchEvent(new Event("template-editor:open-settings")),
+        }, {
           key: "template-metadata",
           icon: <InfoCircleOutlined />,
           label: "模板资料与使用限制",
@@ -400,7 +406,7 @@ export default function TemplateEditorToolbar({
             >
               新建模板
             </Button>
-            {draft && !previewMode ? (
+            {draft && !previewMode && (!draftName.trim() || draftName === "未命名模板") ? (
               <Button
                 className="template-editor__toolbar-settings"
                 size="small"
@@ -410,7 +416,7 @@ export default function TemplateEditorToolbar({
                 aria-label="打开模板设置"
                 title="修改模板名称、画布尺寸与整体样式"
               >
-                {!draftName.trim() || draftName === "未命名模板" ? "填写模板名称" : "模板设置"}
+                填写模板名称
               </Button>
             ) : null}
             {previewMode && draft ? (

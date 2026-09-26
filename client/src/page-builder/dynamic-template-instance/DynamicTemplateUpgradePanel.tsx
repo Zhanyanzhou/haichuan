@@ -89,16 +89,21 @@ type TemplateVersionCheckState =
   | { status: "loading" }
   | { status: "catalog-error"; message: string }
   | { status: "catalog-missing" }
+  | { status: "identity-conflict"; latest: PublishedDynamicTemplateResource }
   | { status: "current"; latest: PublishedDynamicTemplateResource }
   | { status: "upgrade-available"; latest: PublishedDynamicTemplateResource };
 
 export default function DynamicTemplateUpgradePanel({
   definition,
   instance,
+  currentSchemaVersion,
+  currentDefinitionChecksum,
   onApply,
 }: {
   definition: TemplateDefinitionV2;
   instance: DynamicTemplateInstanceProps;
+  currentSchemaVersion: number;
+  currentDefinitionChecksum: string;
   onApply: (
     next: DynamicTemplateInstanceProps,
     analysis: DynamicTemplateUpgradeAnalysis,
@@ -120,6 +125,16 @@ export default function DynamicTemplateUpgradePanel({
           const latest = templates.find((item) => item.templateId === instance.templateId);
           if (!latest) {
             setVersionCheck({ status: "catalog-missing" });
+            return;
+          }
+          if (
+            latest.version === instance.templateVersion
+            && (
+              latest.schemaVersion !== currentSchemaVersion
+              || latest.definitionChecksum !== currentDefinitionChecksum
+            )
+          ) {
+            setVersionCheck({ status: "identity-conflict", latest });
             return;
           }
           setVersionCheck({
@@ -151,7 +166,13 @@ export default function DynamicTemplateUpgradePanel({
       cancelled = true;
       window.removeEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
     };
-  }, [instance.templateId, instance.templateVersion, reloadRequest]);
+  }, [
+    currentDefinitionChecksum,
+    currentSchemaVersion,
+    instance.templateId,
+    instance.templateVersion,
+    reloadRequest,
+  ]);
 
   const latest = versionCheck.status === "current" || versionCheck.status === "upgrade-available"
     ? versionCheck.latest
@@ -187,6 +208,17 @@ export default function DynamicTemplateUpgradePanel({
         type="warning"
         showIcon
         message="目录未找到当前模板，无法判断是否最新"
+        description={`当前页面继续锁定 ${instance.templateId} v${instance.templateVersion}，页面草稿未修改。`}
+        action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
+      />
+    );
+  }
+  if (versionCheck.status === "identity-conflict") {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message={`目录中的 v${versionCheck.latest.version} 身份与页面锁定版本不一致，无法确认是否最新`}
         description={`当前页面继续锁定 ${instance.templateId} v${instance.templateVersion}，页面草稿未修改。`}
         action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
       />

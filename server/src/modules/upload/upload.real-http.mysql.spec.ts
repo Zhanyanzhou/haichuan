@@ -27,6 +27,10 @@ import { UploadService } from './upload.service';
 import { MediaAuthorizationService } from './media-authorization.service';
 import { MediaAuthorizationResolverService } from './media-authorization-resolver.service';
 import { PublicUploadsGateway } from './public-uploads.gateway';
+import { PaymentProofsController } from '../payment-proofs/payment-proofs.controller';
+import { PaymentProofsService } from '../payment-proofs/payment-proofs.service';
+import { OrdersService } from '../orders/orders.service';
+import { IdempotencyService } from '../../common/idempotency/idempotency-key';
 
 const sharp = require('sharp');
 const databaseUrl = process.env.MEDIA_REAL_MYSQL_URL?.trim();
@@ -43,7 +47,7 @@ const { validateTarget: validateSharedTarget } = require('../../../scripts/run-r
     }),
     MulterModule.register({ storage: memoryStorage() }),
   ],
-  controllers: [UploadController],
+  controllers: [UploadController, PaymentProofsController],
   providers: [
     UploadService,
     PublicUploadsGateway,
@@ -54,6 +58,19 @@ const { validateTarget: validateSharedTarget } = require('../../../scripts/run-r
     RolesGuard,
     CustomerAuthGuard,
     CustomerCommerceGuard,
+    PaymentProofsService,
+    IdempotencyService,
+    {
+      provide: OrdersService,
+      useValue: {
+        submitOfflinePaymentProof: async (
+          _principal: unknown,
+          _orderId: number,
+          _assetId: number,
+          proofKey: string,
+        ) => ({ storageKey: proofKey }),
+      },
+    },
   ],
 })
 class MediaUploadRealHttpModule {}
@@ -309,7 +326,7 @@ test(
       assert.equal((await call('/api/upload/media', editorToken)).status, 200, '编辑可读取媒体库');
       assert.equal((await upload(png, 'customer-domain.png', 'image/png', customerDomainToken)).status, 401, '客户令牌不能进入员工上传域');
       assert.equal((await upload(png, 'anonymous.png', 'image/png', '')).status, 401, '匿名不能上传');
-      assert.equal((await call('/api/upload/payment-proof', undefined, {
+      assert.equal((await call('/api/upload/payment-proof/1', undefined, {
         method: 'POST',
         body: formWith(png, 'image/png', 'anonymous-proof.png'),
       })).status, 401, '匿名不能上传客户私有凭证');
@@ -466,8 +483,9 @@ test(
       assert.equal(searched.status, 200);
       assert.equal(searched.data?.total, 1);
       assert.equal(((searched.data?.list ?? []) as Array<Record<string, unknown>>)[0]?.url, persistentUrl);
-      const proofUpload = await call('/api/upload/payment-proof', customerToken, {
+      const proofUpload = await call('/api/upload/payment-proof/1', customerToken, {
         method: 'POST',
+        headers: { 'Idempotency-Key': `media-proof-${runId}` },
         body: formWith(png, 'image/png', 'customer-proof.png'),
       });
       assert.equal(proofUpload.status, 201, JSON.stringify(proofUpload.body));

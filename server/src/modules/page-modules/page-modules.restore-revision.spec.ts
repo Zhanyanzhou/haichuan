@@ -292,7 +292,7 @@ test("修订列表、详情和草稿恢复继承后台角色边界，恢复传�
     "zh-CN",
     3,
     CURRENT_UPDATED_AT.toISOString(),
-    17,
+    { id: 17 },
   ]]);
 });
 
