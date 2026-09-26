@@ -27,7 +27,7 @@
     "test:real-mysql": "node server/scripts/run-real-mysql-tests.cjs",
     "audit:template-v2-gate-a": "node scripts/audit-template-v2-gate-a-readiness.mjs",
     "audit:template-v2-gate-d:static": "node scripts/audit-template-v2-gate-d-readiness.mjs",
-    "test": "npm run test:contracts && npm run test:content-templates && npm run test:template-v2-gate-d && npm run test:decision-governance && npm run test:client-public-env && npm run test:server && npm run test:public-assets && npm run test:runtime-ownership && npm run test:release-supply-chain && npm run test:admin-ui-standards",
+    "test": "npm run test:contracts && npm run test:content-templates && npm run test:template-v2-gate-d && npm run test:decision-governance && npm run test:client-public-env && npm run test:server && npm run test:public-assets && npm run test:runtime-ownership && npm run test:release-supply-chain && npm run test:admin-ui-standards && npm run test:ui-colors",
     "test:template-v2-gate-d": "node --test scripts/template-v2-gate-d-rules.spec.mjs && npm run audit:template-v2-gate-d:static",
     "test:decision-governance": "node --test scripts/verify-product-decision-governance.spec.mjs && node scripts/verify-product-decision-governance.mjs",
     "test:client-public-env": "npm run test:public-env --prefix client",

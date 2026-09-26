@@ -184,7 +184,7 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
               display: "grid",
               justifyItems: "center",
               gap: 18,
-              color: "#4A4A47",
+              color: "#5F6568",
               textAlign: "center",
             }}
           >
@@ -194,7 +194,7 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
                 display: "block",
                 width: "clamp(56px, 5vw, 76px)",
                 height: 1,
-                background: "rgba(143, 112, 58, 0.72)",
+                background: "#B8BEC1",
               }}
             />
             <span

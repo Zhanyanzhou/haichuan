@@ -627,7 +627,7 @@ export default function CustomerOrdersPanel({
                       </p>
                     ) : trackingError ? (
                       <div role="alert">
-                        <p style={{ color: "#8a2c2c", margin: "0 0 8px" }}>
+                        <p style={{ color: "#8c3f3b", margin: "0 0 8px" }}>
                           {trackingError}
                         </p>
                         <button

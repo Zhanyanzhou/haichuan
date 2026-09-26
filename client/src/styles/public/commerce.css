@@ -381,15 +381,15 @@
 
 .product-detail-page__sku-option:disabled {
   border-color: #dde1e2;
-  color: #747a7d;
-  background: #f5f6f6;
+  color: #6e7477;
+  background: #f4f5f5;
   cursor: not-allowed;
   opacity: 1;
 }
 
 .product-detail-page__sku-status {
   padding-left: 8px;
-  border-left: 1px solid #c9cdcf;
+  border-left: 1px solid #b8bec1;
   color: #6e7477;
   font-size: 11px;
   white-space: nowrap;
@@ -430,7 +430,7 @@
 
 .product-detail-page__decision-facts dd {
   margin: 0;
-  color: #282b2d;
+  color: #181a1b;
   font-size: 13px;
   line-height: 1.65;
   overflow-wrap: anywhere;
@@ -495,7 +495,7 @@
   min-height: 44px;
   display: inline-flex;
   align-items: center;
-  color: #966f33;
+  color: #181a1b;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
