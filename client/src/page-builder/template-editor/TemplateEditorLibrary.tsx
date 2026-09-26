@@ -1398,9 +1398,11 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   useEffect(() => {
     if (catalogActive) void refreshCatalog();
     const handleDynamicCatalogChanged = (event: Event) => {
+      // 非活跃目录（如模板设计打开时页面装修的模板库）不得消费事件载荷或改写本地状态。
+      if (!catalogActive) return;
       const detail = readDynamicCatalogChange(event);
       if (detail && applyDynamicCatalogChange(detail)) return;
-      if (catalogActive) void refreshCatalog();
+      void refreshCatalog();
     };
     const handleLocalChanged = () => setLocalDrafts(localOnly ? listLocalDynamicTemplateDrafts() : []);
     window.addEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, handleDynamicCatalogChanged);
