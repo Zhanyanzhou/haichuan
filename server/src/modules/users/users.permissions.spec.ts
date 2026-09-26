@@ -29,6 +29,7 @@ test("员工删除接口仅 SUPER_ADMIN，服务端实际执行 DISABLED 而非�
   let disabled = false;
   let deleted = false;
   const tx = {
+    $queryRaw: async () => [{ id: 1, role: "SUPER_ADMIN" }],
     user: {
       findUnique: async () => ({ id: 2, role: "ADMIN", status: "ACTIVE" }),
       count: async () => 2,

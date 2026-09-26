@@ -275,10 +275,15 @@ export class RefreshSessionService {
     userId: number,
     familyId: string,
   ): Promise<void> {
-    await this.prisma.adminRefreshSession.updateMany({
-      where: { userId, familyId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await this.prisma.$transaction(async (transaction) => {
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`,
+      );
+      await transaction.adminRefreshSession.updateMany({
+        where: { userId, familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async revokeCustomerFamilyForCustomer(

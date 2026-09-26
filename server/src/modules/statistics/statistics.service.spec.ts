@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { StatisticsService } from "./statistics.service";
 
+const staffActor = { id: 29 };
+
 function withAnalyticsEnvironment(
   nodeEnv: string | undefined,
   dataset: string | undefined,
@@ -26,19 +28,25 @@ test("经营趋势：pageViews 只查询生产环境配置的 dataset", async ()
   await withAnalyticsEnvironment("production", "production", async () => {
     let queryStrings: readonly string[] | undefined;
     let queryValues: readonly unknown[] | undefined;
-    const prisma = {
+    const prisma: any = {
       $queryRaw: async (
-        strings: TemplateStringsArray,
+        query: TemplateStringsArray | { sql?: string },
         ...values: unknown[]
       ) => {
-        queryStrings = strings;
+        if ((query as { sql?: string }).sql?.includes("FROM users")) {
+          return [{ id: staffActor.id }];
+        }
+        queryStrings = query as TemplateStringsArray;
         queryValues = values;
         return [];
       },
     };
-    const service = new StatisticsService(prisma as never);
+    prisma.$transaction = async (operation: (transaction: any) => Promise<unknown>) => (
+      operation(prisma)
+    );
+    const service = new StatisticsService(prisma);
 
-    const result = await service.getTrend(1, "pageViews");
+    const result = await service.getTrend(1, "pageViews", staffActor);
 
     assert.ok(queryStrings);
     assert.ok(queryValues);
@@ -52,15 +60,19 @@ test("经营趋势：pageViews 只查询生产环境配置的 dataset", async ()
 test("经营趋势：生产环境 dataset 配置不安全时拒绝查询分析表", async () => {
   await withAnalyticsEnvironment("production", "test", async () => {
     let queryCount = 0;
-    const prisma = {
-      $queryRaw: async () => {
+    const prisma: any = {
+      $queryRaw: async (query: { sql?: string }) => {
+        if (query.sql?.includes("FROM users")) return [{ id: staffActor.id }];
         queryCount += 1;
         return [];
       },
     };
-    const service = new StatisticsService(prisma as never);
+    prisma.$transaction = async (operation: (transaction: any) => Promise<unknown>) => (
+      operation(prisma)
+    );
+    const service = new StatisticsService(prisma);
 
-    const result = await service.getTrend(2, "pageViews");
+    const result = await service.getTrend(2, "pageViews", staffActor);
 
     assert.equal(queryCount, 0);
     assert.deepEqual(result.map((item) => item.count), [0, 0]);

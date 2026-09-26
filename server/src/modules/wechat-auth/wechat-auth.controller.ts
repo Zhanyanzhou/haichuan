@@ -185,7 +185,7 @@ export class WechatAuthController {
       "Set-Cookie",
       buildClearWechatOAuthBindingCookie(),
     );
-    return this.wechatAuth.unbindWechat(request.customer.id);
+    return this.wechatAuth.unbindWechat(request.customer);
   }
 }
 

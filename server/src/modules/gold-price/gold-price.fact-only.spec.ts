@@ -15,10 +15,13 @@ const accessInternals = (service: GoldPriceService) =>
 test("手动金价写入只创建金价记录且不读取或改写商品价格", async () => {
   let goldPriceWrites = 0;
   let productPriceCalls = 0;
-  const prisma = {
+  let recordedOperatorId: number | null = null;
+  const transaction = {
+    $queryRaw: async () => [{ id: 1 }],
     goldPrice: {
-      create: async (args: { data: { price: number } }) => {
+      create: async (args: { data: { price: number; operatorId: number } }) => {
         goldPriceWrites += 1;
+        recordedOperatorId = args.data.operatorId;
         return {
           price: args.data.price,
           source: "MANUAL",
@@ -26,6 +29,11 @@ test("手动金价写入只创建金价记录且不读取或改写商品价格",
         };
       },
     },
+  };
+  const prisma = {
+    $transaction: async <T>(
+      callback: (client: typeof transaction) => Promise<T>,
+    ) => callback(transaction),
     product: {
       findMany: async () => {
         productPriceCalls += 1;
@@ -38,10 +46,11 @@ test("手动金价写入只创建金价记录且不读取或改写商品价格",
     {} as ProductsService,
   );
 
-  const result = await service.updateManually({ price: 888, operatorId: 1 });
+  const result = await service.updateManually({ price: 888 }, { id: 1 });
 
   assert.equal(result.price, 888);
   assert.equal(goldPriceWrites, 1);
+  assert.equal(recordedOperatorId, 1);
   assert.equal(productPriceCalls, 0);
 });
 
@@ -97,19 +106,24 @@ test("行情响应只从受支持的直接、嵌套或数组价格字段提取�
   assert.equal(internals.extractPrice(null), null);
 });
 
-test("自动化状态只在配置行情地址后开启", () => {
+test("自动化状态只在配置行情地址后开启", async () => {
   const original = process.env.GOLD_PRICE_API_URL;
+  const transaction = { $queryRaw: async () => [{ id: 1 }] };
   const service = new GoldPriceService(
-    {} as PrismaService,
+    {
+      $transaction: async <T>(
+        callback: (client: typeof transaction) => Promise<T>,
+      ) => callback(transaction),
+    } as unknown as PrismaService,
     {} as ProductsService,
   );
   try {
     delete process.env.GOLD_PRICE_API_URL;
-    assert.deepEqual(service.getAutomationStatus(), {
+    assert.deepEqual(await service.getAutomationStatus({ id: 1 }), {
       autoFetchConfigured: false,
     });
     process.env.GOLD_PRICE_API_URL = "https://example.test/gold-price";
-    assert.deepEqual(service.getAutomationStatus(), {
+    assert.deepEqual(await service.getAutomationStatus({ id: 1 }), {
       autoFetchConfigured: true,
     });
   } finally {

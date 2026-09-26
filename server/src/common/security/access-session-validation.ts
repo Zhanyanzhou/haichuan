@@ -45,7 +45,7 @@ export async function findActiveStaffPrincipal(
   prisma: PrismaService,
   payload: AdminAccessTokenPayload,
 ): Promise<StaffPrincipal | null> {
-  return prisma.user.findFirst({
+  const user = await prisma.user.findFirst({
     where: {
       id: payload.sub,
       status: { not: 'DISABLED' },
@@ -76,6 +76,13 @@ export async function findActiveStaffPrincipal(
       updatedAt: true,
     },
   });
+  if (!user) return null;
+  return {
+    ...user,
+    ...(payload.sessionFamilyId
+      ? { sessionFamilyId: payload.sessionFamilyId }
+      : {}),
+  };
 }
 
 export async function findActiveCustomerPrincipal(
@@ -106,6 +113,7 @@ export async function findActiveCustomerPrincipal(
       name: true,
       phone: true,
       email: true,
+      authVersion: true,
       accountType: true,
       partnerStatus: true,
     },

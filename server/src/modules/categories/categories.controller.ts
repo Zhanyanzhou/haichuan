@@ -8,7 +8,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { requirePublishedPublicContentLocale } from '../../common/content-locale';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 
 @ApiTags('分类管理')
 @Controller('categories')
@@ -36,8 +38,8 @@ export class CategoriesController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
   @Get('admin/tree')
   @ApiOperation({ summary: '获取管理端一级/二级分类树' })
-  findManageTree() {
-    return this.categoriesService.findManageTree();
+  findManageTree(@CurrentUser() actor: StaffPrincipal) {
+    return this.categoriesService.findManageTree(actor);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -45,8 +47,11 @@ export class CategoriesController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
   @Post('admin/resolve-references')
   @ApiOperation({ summary: '按稳定 slug 解析店铺装修分类引用' })
-  resolveReferences(@Body() dto: ResolveCategoryReferencesDto) {
-    return this.categoriesService.resolveReferences(dto.slugs ?? []);
+  resolveReferences(
+    @Body() dto: ResolveCategoryReferencesDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.categoriesService.resolveReferences(dto.slugs ?? [], actor);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -54,8 +59,11 @@ export class CategoriesController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
   @Post()
   @ApiOperation({ summary: '新增分类' })
-  create(@Body() body: CreateCategoryDto) {
-    return this.categoriesService.create(body);
+  create(
+    @Body() body: CreateCategoryDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.categoriesService.create(body, actor);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -63,8 +71,11 @@ export class CategoriesController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
   @Post('reorder')
   @ApiOperation({ summary: '批量调整分类排序' })
-  reorder(@Body() dto: ReorderCategoriesDto) {
-    return this.categoriesService.reorder(dto.items);
+  reorder(
+    @Body() dto: ReorderCategoriesDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.categoriesService.reorder(dto.items, actor);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -72,8 +83,12 @@ export class CategoriesController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
   @Put(':id')
   @ApiOperation({ summary: '编辑分类' })
-  update(@Param('id', ParseIntPipe) id: number, @Body() body: UpdateCategoryDto) {
-    return this.categoriesService.update(id, body);
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: UpdateCategoryDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.categoriesService.update(id, body, actor);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -81,7 +96,10 @@ export class CategoriesController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'EDITOR')
   @Delete(':id')
   @ApiOperation({ summary: '删除分类' })
-  delete(@Param('id', ParseIntPipe) id: number) {
-    return this.categoriesService.delete(id);
+  delete(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.categoriesService.delete(id, actor);
   }
 }

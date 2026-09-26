@@ -17,6 +17,7 @@ async function transformQuery(value: Record<string, unknown>) {
 function createAuditLogHarness() {
   const calls: Array<{ operation: string; args: Record<string, unknown> }> = [];
   const prisma = {
+    $queryRaw: async () => [{ id: 9 }],
     operationLog: {
       findMany: async (args: Record<string, unknown>) => {
         calls.push({ operation: 'findMany', args: structuredClone(args) });
@@ -28,9 +29,13 @@ function createAuditLogHarness() {
       },
     },
   };
+  const root = {
+    ...prisma,
+    $transaction: async (run: (tx: typeof prisma) => Promise<unknown>) => run(prisma),
+  };
   return {
     calls,
-    service: new SettingsService(prisma as unknown as PrismaService),
+    service: new SettingsService(root as unknown as PrismaService),
   };
 }
 
@@ -61,7 +66,7 @@ test('操作日志服务组合模块、动作和关键词筛选，并保持分�
     keyword: ' 模板 ',
     module: ' page-builder-template ',
     action: ' TEMPLATE_ARCHIVED ',
-  });
+  }, 9);
 
   const findMany = calls.find((call) => call.operation === 'findMany');
   const count = calls.find((call) => call.operation === 'count');

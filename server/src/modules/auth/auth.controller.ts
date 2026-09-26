@@ -27,7 +27,11 @@ import {
   requestSessionMetadata,
 } from "../../common/security/session-security";
 import { RefreshSessionService } from "../../common/security/refresh-session.service";
-import type { StaffRequest } from "../../common/security/authenticated-principal";
+import type {
+  StaffPrincipal,
+  StaffRequest,
+} from "../../common/security/authenticated-principal";
+import { CurrentUser } from "../../common/decorators/current-user.decorator";
 
 @ApiTags("认证")
 @Controller("auth")
@@ -136,8 +140,11 @@ export class AuthController {
   @Roles("SUPER_ADMIN")
   @Post("register")
   @ApiOperation({ summary: "用户注册" })
-  async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  async register(
+    @Body() dto: RegisterDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.authService.register(dto, actor);
   }
 
   @UseGuards(JwtAuthGuard)

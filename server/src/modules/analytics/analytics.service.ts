@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
@@ -6,6 +6,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { PUBLIC_ANALYTICS_CONSENT_VERSION } from "./dto/track-event.dto";
 import { getConfiguredAnalyticsDataset } from "./analytics-dataset";
+import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 
 const MAX_METADATA_BYTES = 2048;
 const BUSINESS_TIME_ZONE_OFFSET = "+08:00";
@@ -17,10 +18,6 @@ const METADATA_FIELDS_BY_EVENT: Record<string, string[]> = {
   remove_from_cart: ["quantity"],
   view_cart: ["itemCount", "amount"],
   begin_checkout: ["itemCount", "amount"],
-  add_payment_info: ["orderId", "amount", "paymentMethod"],
-  order_created: ["orderId", "amount"],
-  purchase: ["orderId", "amount"],
-  refund: ["refundId", "orderId", "amount"],
   submit_selection: ["count"],
   cta_click: ["label"],
 };
@@ -154,9 +151,44 @@ export interface AnalyticsOverview {
   }>;
 }
 
+type AnalyticsStaffActor = Pick<StaffPrincipal, "id" | "sessionFamilyId">;
+
 @Injectable()
 export class AnalyticsService {
   constructor(private prisma: PrismaService) {}
+
+  private async lockAuthorizedStaff(
+    transaction: Prisma.TransactionClient,
+    actor: AnalyticsStaffActor,
+  ): Promise<void> {
+    if (!actor || !Number.isInteger(actor.id) || actor.id <= 0) {
+      throw new ForbiddenException("当前员工无权查看访问分析");
+    }
+    const staff = await transaction.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR SHARE`,
+    );
+    if (staff.length !== 1) {
+      throw new ForbiddenException("当前员工无权查看访问分析");
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = await transaction.$queryRaw<Array<{ id: number }>>(
+        Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+      );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException("当前登录设备已失效");
+      }
+    }
+  }
+
+  private withAuthorizedStaffRead<T>(
+    actor: AnalyticsStaffActor,
+    operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (transaction) => {
+      await this.lockAuthorizedStaff(transaction, actor);
+      return operation(transaction);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
 
   async track(event: {
     consentGranted: true;
@@ -223,98 +255,103 @@ export class AnalyticsService {
     page?: number;
     pageSize?: number;
     hours?: number;
-  }) {
-    const { eventName, page = 1, pageSize = 50, hours = 24 } = params;
-    const _p = +page,
-      _ps = +pageSize;
-    const where: Prisma.AnalyticsEventWhereInput = {};
-    const dataset = getConfiguredAnalyticsDataset();
-    if (!dataset) return { list: [], total: 0, page: _p, pageSize: _ps };
-    where.dataset = dataset;
-    if (eventName) where.eventName = eventName;
-    if (hours > 0) {
-      where.occurredAt = { gte: new Date(Date.now() - hours * 3600000) };
-    }
+  }, actor: AnalyticsStaffActor) {
+    return this.withAuthorizedStaffRead(actor, async (transaction) => {
+      const { eventName, page = 1, pageSize = 50, hours = 24 } = params;
+      const _p = +page,
+        _ps = +pageSize;
+      const where: Prisma.AnalyticsEventWhereInput = {};
+      const dataset = getConfiguredAnalyticsDataset();
+      if (!dataset) return { list: [], total: 0, page: _p, pageSize: _ps };
+      where.dataset = dataset;
+      if (eventName) where.eventName = eventName;
+      if (hours > 0) {
+        where.occurredAt = { gte: new Date(Date.now() - hours * 3600000) };
+      }
 
-    const [rows, total] = await Promise.all([
-      this.prisma.analyticsEvent.findMany({
-        where,
-        select: {
-          id: true,
-          occurredAt: true,
-          eventName: true,
-          pagePath: true,
-          productId: true,
-          searchTerm: true,
-          source: true,
-          deviceType: true,
-          sessionId: true,
-          visitorIdHash: true,
-        },
-        orderBy: { occurredAt: "desc" },
-        skip: (_p - 1) * _ps,
-        take: _ps,
-      }),
-      this.prisma.analyticsEvent.count({ where }),
-    ]);
+      const [rows, total] = await Promise.all([
+        transaction.analyticsEvent.findMany({
+          where,
+          select: {
+            id: true,
+            occurredAt: true,
+            eventName: true,
+            pagePath: true,
+            productId: true,
+            searchTerm: true,
+            source: true,
+            deviceType: true,
+            sessionId: true,
+            visitorIdHash: true,
+          },
+          orderBy: { occurredAt: "desc" },
+          skip: (_p - 1) * _ps,
+          take: _ps,
+        }),
+        transaction.analyticsEvent.count({ where }),
+      ]);
 
-    const list = rows.map(({ visitorIdHash: hash, ...row }) => ({
-      ...row,
-      visitorKey: hash ? hash.slice(0, 8).toUpperCase() : null,
-    }));
-    return { list, total, page: _p, pageSize: _ps };
+      const list = rows.map(({ visitorIdHash: hash, ...row }) => ({
+        ...row,
+        visitorKey: hash ? hash.slice(0, 8).toUpperCase() : null,
+      }));
+      return { list, total, page: _p, pageSize: _ps };
+    });
   }
 
-  async getOverview(days = 30): Promise<AnalyticsOverview> {
-    const window = analyticsWindow(days);
-    const dataset = getConfiguredAnalyticsDataset();
-    const collection = {
-      ingestionEnabled: process.env.ANALYTICS_INGESTION_ENABLED === "true",
-      geoHeadersEnabled: process.env.ANALYTICS_TRUSTED_GEO_HEADERS === "true",
-      dataset,
-      retentionDays: retentionDays(),
-      consentRequired: true as const,
-    };
-    const empty: AnalyticsOverview = {
-      collection,
-      period: {
-        days: window.days,
-        startDate: window.startDate,
-        endDate: window.endDate,
-      },
-      totals: {
-        pageViews: 0,
-        visitors: 0,
-        sessions: 0,
-        newVisitors: 0,
-        returningVisitors: 0,
-        returnRate: 0,
-        pagesPerSession: 0,
-      },
-      trend: Array.from({ length: window.days }, (_, index) => ({
-        date: analyticsDateKey(new Date(window.start.getTime() + index * DAY_MS)),
-        pageViews: 0,
-        visitors: 0,
-        sessions: 0,
-      })),
-      topPages: [],
-      devices: [],
-      sources: [],
-      regions: [],
-    };
-    if (!dataset) return empty;
+  async getOverview(
+    days: number,
+    actor: AnalyticsStaffActor,
+  ): Promise<AnalyticsOverview> {
+    return this.withAuthorizedStaffRead(actor, async (transaction) => {
+      const window = analyticsWindow(days);
+      const dataset = getConfiguredAnalyticsDataset();
+      const collection = {
+        ingestionEnabled: process.env.ANALYTICS_INGESTION_ENABLED === "true",
+        geoHeadersEnabled: process.env.ANALYTICS_TRUSTED_GEO_HEADERS === "true",
+        dataset,
+        retentionDays: retentionDays(),
+        consentRequired: true as const,
+      };
+      const empty: AnalyticsOverview = {
+        collection,
+        period: {
+          days: window.days,
+          startDate: window.startDate,
+          endDate: window.endDate,
+        },
+        totals: {
+          pageViews: 0,
+          visitors: 0,
+          sessions: 0,
+          newVisitors: 0,
+          returningVisitors: 0,
+          returnRate: 0,
+          pagesPerSession: 0,
+        },
+        trend: Array.from({ length: window.days }, (_, index) => ({
+          date: analyticsDateKey(new Date(window.start.getTime() + index * DAY_MS)),
+          pageViews: 0,
+          visitors: 0,
+          sessions: 0,
+        })),
+        topPages: [],
+        devices: [],
+        sources: [],
+        regions: [],
+      };
+      if (!dataset) return empty;
 
-    const [
-      summaryRows,
-      returningRows,
-      trendRows,
-      topPageRows,
-      deviceRows,
-      sourceRows,
-      regionRows,
-    ] =
-      await Promise.all([
-        this.prisma.$queryRaw<
+      const [
+        summaryRows,
+        returningRows,
+        trendRows,
+        topPageRows,
+        deviceRows,
+        sourceRows,
+        regionRows,
+      ] = await Promise.all([
+        transaction.$queryRaw<
           Array<{ pageViews: bigint; visitors: bigint; sessions: bigint }>
         >`
           SELECT COUNT(*) AS pageViews,
@@ -326,7 +363,7 @@ export class AnalyticsService {
             AND occurred_at >= ${window.start}
             AND occurred_at < ${window.end}
         `,
-        this.prisma.$queryRaw<Array<{ visitors: bigint; returningVisitors: bigint }>>`
+        transaction.$queryRaw<Array<{ visitors: bigint; returningVisitors: bigint }>>`
           SELECT COUNT(*) AS visitors,
                  COALESCE(SUM(CASE WHEN first_seen < ${window.start} THEN 1 ELSE 0 END), 0) AS returningVisitors
           FROM (
@@ -341,7 +378,7 @@ export class AnalyticsService {
           ) AS visitor_activity
           WHERE active_in_period = 1
         `,
-        this.prisma.$queryRaw<
+        transaction.$queryRaw<
           Array<{ date: string; pageViews: bigint; visitors: bigint; sessions: bigint }>
         >`
           SELECT DATE_FORMAT(CONVERT_TZ(occurred_at, '+00:00', '+08:00'), '%Y-%m-%d') AS date,
@@ -356,7 +393,7 @@ export class AnalyticsService {
           GROUP BY DATE_FORMAT(CONVERT_TZ(occurred_at, '+00:00', '+08:00'), '%Y-%m-%d')
           ORDER BY date ASC
         `,
-        this.prisma.$queryRaw<
+        transaction.$queryRaw<
           Array<{ pagePath: string; pageViews: bigint; visitors: bigint }>
         >`
           SELECT COALESCE(NULLIF(page_path, ''), '/') AS pagePath,
@@ -371,7 +408,7 @@ export class AnalyticsService {
           ORDER BY pageViews DESC
           LIMIT 20
         `,
-        this.prisma.$queryRaw<
+        transaction.$queryRaw<
           Array<{ deviceType: string; pageViews: bigint; visitors: bigint }>
         >`
           SELECT COALESCE(NULLIF(device_type, ''), 'unknown') AS deviceType,
@@ -385,7 +422,7 @@ export class AnalyticsService {
           GROUP BY COALESCE(NULLIF(device_type, ''), 'unknown')
           ORDER BY visitors DESC, pageViews DESC
         `,
-        this.prisma.$queryRaw<
+        transaction.$queryRaw<
           Array<{ source: string; pageViews: bigint; visitors: bigint }>
         >`
           SELECT COALESCE(NULLIF(source, ''), 'direct') AS source,
@@ -400,7 +437,7 @@ export class AnalyticsService {
           ORDER BY visitors DESC, pageViews DESC
           LIMIT 20
         `,
-        this.prisma.$queryRaw<
+        transaction.$queryRaw<
           Array<{
             countryCode: string;
             region: string;
@@ -427,80 +464,82 @@ export class AnalyticsService {
         `,
       ]);
 
-    const summary = summaryRows[0];
-    const visitorSummary = returningRows[0];
-    const pageViews = numeric(summary?.pageViews);
-    const visitors = numeric(visitorSummary?.visitors ?? summary?.visitors);
-    const sessions = numeric(summary?.sessions);
-    const returningVisitors = numeric(visitorSummary?.returningVisitors);
-    const trendByDate = new Map(trendRows.map((row) => [row.date, row]));
+      const summary = summaryRows[0];
+      const visitorSummary = returningRows[0];
+      const pageViews = numeric(summary?.pageViews);
+      const visitors = numeric(visitorSummary?.visitors ?? summary?.visitors);
+      const sessions = numeric(summary?.sessions);
+      const returningVisitors = numeric(visitorSummary?.returningVisitors);
+      const trendByDate = new Map(trendRows.map((row) => [row.date, row]));
 
-    return {
-      ...empty,
-      totals: {
-        pageViews,
-        visitors,
-        sessions,
-        newVisitors: Math.max(0, visitors - returningVisitors),
-        returningVisitors,
-        returnRate: visitors > 0 ? roundedRatio((returningVisitors / visitors) * 100) : 0,
-        pagesPerSession: sessions > 0 ? roundedRatio(pageViews / sessions) : 0,
-      },
-      trend: empty.trend.map((point) => {
-        const row = trendByDate.get(point.date);
-        return row
-          ? {
-              date: point.date,
-              pageViews: numeric(row.pageViews),
-              visitors: numeric(row.visitors),
-              sessions: numeric(row.sessions),
-            }
-          : point;
-      }),
-      topPages: topPageRows.map((row) => ({
-        pagePath: row.pagePath,
-        pageViews: numeric(row.pageViews),
-        visitors: numeric(row.visitors),
-      })),
-      devices: deviceRows.map((row) => ({
-        deviceType: row.deviceType,
-        pageViews: numeric(row.pageViews),
-        visitors: numeric(row.visitors),
-      })),
-      sources: sourceRows.map((row) => ({
-        source: row.source,
-        pageViews: numeric(row.pageViews),
-        visitors: numeric(row.visitors),
-      })),
-      regions: regionRows.map((row) => ({
-        countryCode: row.countryCode,
-        region: row.region,
-        city: row.city,
-        pageViews: numeric(row.pageViews),
-        visitors: numeric(row.visitors),
-      })),
-    };
+      return {
+        ...empty,
+        totals: {
+          pageViews,
+          visitors,
+          sessions,
+          newVisitors: Math.max(0, visitors - returningVisitors),
+          returningVisitors,
+          returnRate: visitors > 0 ? roundedRatio((returningVisitors / visitors) * 100) : 0,
+          pagesPerSession: sessions > 0 ? roundedRatio(pageViews / sessions) : 0,
+        },
+        trend: empty.trend.map((point) => {
+          const row = trendByDate.get(point.date);
+          return row
+            ? {
+                date: point.date,
+                pageViews: numeric(row.pageViews),
+                visitors: numeric(row.visitors),
+                sessions: numeric(row.sessions),
+              }
+            : point;
+        }),
+        topPages: topPageRows.map((row) => ({
+          pagePath: row.pagePath,
+          pageViews: numeric(row.pageViews),
+          visitors: numeric(row.visitors),
+        })),
+        devices: deviceRows.map((row) => ({
+          deviceType: row.deviceType,
+          pageViews: numeric(row.pageViews),
+          visitors: numeric(row.visitors),
+        })),
+        sources: sourceRows.map((row) => ({
+          source: row.source,
+          pageViews: numeric(row.pageViews),
+          visitors: numeric(row.visitors),
+        })),
+        regions: regionRows.map((row) => ({
+          countryCode: row.countryCode,
+          region: row.region,
+          city: row.city,
+          pageViews: numeric(row.pageViews),
+          visitors: numeric(row.visitors),
+        })),
+      };
+    });
   }
 
-  async getVisitors(days = 30) {
-    const window = analyticsWindow(days);
-    const dataset = getConfiguredAnalyticsDataset();
-    if (!dataset) return { list: [], total: 0, days: window.days };
+  async getVisitors(days: number, actor: AnalyticsStaffActor) {
+    return this.withAuthorizedStaffRead(actor, async (transaction) => {
+      const window = analyticsWindow(days);
+      const dataset = getConfiguredAnalyticsDataset();
+      if (!dataset) return { list: [], total: 0, days: window.days };
 
-    const rows = await this.prisma.$queryRaw<
-      Array<{
-        visitorKey: string;
-        firstSeen: Date;
-        lastSeen: Date;
-        activeDays: bigint;
-        sessions: bigint;
-        pageViews: bigint;
-        countryCode: string | null;
-        region: string | null;
-        city: string | null;
-        deviceType: string | null;
-      }>
-    >`
+      const rows = await transaction.$queryRaw<
+        Array<{
+          visitorKey: string;
+          firstSeen: Date;
+          lastSeen: Date;
+          activeDays: bigint;
+          sessions: bigint;
+          pageViews: bigint;
+          countryCode: string | null;
+          region: string | null;
+          city: string | null;
+          deviceType: string | null;
+        }>
+      >`
       SELECT UPPER(SUBSTRING(e.visitor_id_hash, 1, 8)) AS visitorKey,
              (
                SELECT MIN(first_event.occurred_at)
@@ -528,20 +567,21 @@ export class AnalyticsService {
       LIMIT 100
     `;
 
-    const list = rows.map((row) => ({
-      visitorKey: row.visitorKey,
-      firstSeen: row.firstSeen,
-      lastSeen: row.lastSeen,
-      activeDays: numeric(row.activeDays),
-      sessions: numeric(row.sessions),
-      pageViews: numeric(row.pageViews),
-      returning: row.firstSeen < window.start,
-      countryCode: row.countryCode,
-      region: row.region,
-      city: row.city,
-      deviceType: row.deviceType,
-    }));
-    return { list, total: list.length, days: window.days };
+      const list = rows.map((row) => ({
+        visitorKey: row.visitorKey,
+        firstSeen: row.firstSeen,
+        lastSeen: row.lastSeen,
+        activeDays: numeric(row.activeDays),
+        sessions: numeric(row.sessions),
+        pageViews: numeric(row.pageViews),
+        returning: row.firstSeen < window.start,
+        countryCode: row.countryCode,
+        region: row.region,
+        city: row.city,
+        deviceType: row.deviceType,
+      }));
+      return { list, total: list.length, days: window.days };
+    });
   }
 
   @Cron("0 0 3 * * *")

@@ -39,6 +39,16 @@ const LEGACY_PLACEHOLDER_LOGOS = new Set([
   "/favicon.svg",
   "/images/brand-logo.svg",
 ]);
+const FORMAL_CONTENT_PLACEHOLDER_MARKERS = [
+  "待确认",
+  "待配置",
+  "请填写",
+  "正在准备",
+  "正在整理",
+  "正在完善",
+  "内容建设中",
+  "即将上线",
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -50,6 +60,11 @@ function hasText(value: unknown): value is string {
 
 function isEmail(value: unknown): boolean {
   return hasText(value) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function isFormalContentPlaceholder(value: unknown): boolean {
+  return hasText(value)
+    && FORMAL_CONTENT_PLACEHOLDER_MARKERS.some((marker) => value.includes(marker));
 }
 
 export function normalizeHttpsBaseUrl(value: unknown): string | null {
@@ -235,6 +250,30 @@ export function evaluateSitePublicationReadiness(
       "siteSettings.seoReviewReference",
       "SEO 标题、摘要与 canonical 尚无正式复核凭据；请记录内容负责人批准的版本或复核编号。",
     );
+  }
+
+  if (requireLaunchDetails) {
+    for (const [area, field, label] of [
+      ["brand", "siteName", "站点名称"],
+      ["brand", "brandReviewReference", "品牌审核记录"],
+      ["contact", "contactPhone", "联系电话"],
+      ["contact", "contactEmail", "联系邮箱"],
+      ["contact", "contactAddress", "联系地址"],
+      ["contact", "businessHours", "营业时间"],
+      ["legal", "legalEntityReviewReference", "经营主体审核记录"],
+      ["legal", "privacyPolicyReviewReference", "隐私说明审核记录"],
+      ["seo", "seoTitle", "默认 SEO 标题"],
+      ["seo", "seoDescription", "默认 SEO 描述"],
+      ["seo", "seoReviewReference", "SEO 审核记录"],
+    ] as const) {
+      if (!isFormalContentPlaceholder(settings[field])) continue;
+      add(
+        area,
+        `SITE_${field.replace(/[A-Z]/g, (match) => `_${match}`).toUpperCase()}_PLACEHOLDER`,
+        `siteSettings.${field}`,
+        `${label}仍是“${String(settings[field]).trim()}”等占位内容，不能用作正式上线事实。`,
+      );
+    }
   }
   if (!hasText(settings.canonicalBaseUrl)) {
     add(

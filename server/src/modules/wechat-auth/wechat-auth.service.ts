@@ -24,6 +24,8 @@ import {
   WECHAT_OAUTH_STATE_TTL_MS,
   WechatOAuthStateStore,
 } from "./wechat-oauth-state.store";
+import type { CustomerPrincipal } from "../../common/security/authenticated-principal";
+import { lockActiveCustomerForWrite } from "../customers/customer-write-gate";
 
 const WECHAT_QR_CONNECT = "https://open.weixin.qq.com/connect/qrconnect";
 const BIND_TTL_MS = 10 * 60 * 1000; // 绑定令牌 10 分钟有效
@@ -594,17 +596,22 @@ export class WechatAuthService {
   }
 
   /** 客户本人解除微信绑定；重复调用保持成功且不影响其它账户。 */
-  async unbindWechat(customerId: number) {
-    const result = await this.prisma.customer.updateMany({
-      where: {
-        id: customerId,
-        OR: [
-          { wechatOpenId: { not: null } },
-          { wechatUnionId: { not: null } },
-        ],
-      },
-      data: { wechatOpenId: null, wechatUnionId: null },
-    });
-    return { bound: false, changed: result.count === 1 };
+  async unbindWechat(
+    customer: Pick<CustomerPrincipal, "id" | "authVersion">,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockActiveCustomerForWrite(tx, customer);
+      const result = await tx.customer.updateMany({
+        where: {
+          id: customer.id,
+          OR: [
+            { wechatOpenId: { not: null } },
+            { wechatUnionId: { not: null } },
+          ],
+        },
+        data: { wechatOpenId: null, wechatUnionId: null },
+      });
+      return { bound: false, changed: result.count === 1 };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 }

@@ -5,7 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import type { User } from '@prisma/client';
 import { ApiError } from '../../common/errors/api-error';
-import type { AdminAccessTokenPayload } from '../../common/security/authenticated-principal';
+import type { AdminAccessTokenPayload, StaffPrincipal } from '../../common/security/authenticated-principal';
 
 type SafeStaff = Omit<User, 'password'>;
 
@@ -184,7 +184,10 @@ export class AuthService {
     }
   }
 
-  async register(data: { username: string; password: string; realName?: string; phone?: string }) {
-    return this.usersService.create({ ...data, role: 'EDITOR' });
+  async register(
+    data: { username: string; password: string; realName?: string; phone?: string },
+    actor: StaffPrincipal,
+  ) {
+    return this.usersService.create({ ...data, role: 'EDITOR' }, actor);
   }
 }
