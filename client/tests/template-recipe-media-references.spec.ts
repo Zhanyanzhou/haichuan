@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { AxiosError, AxiosHeaders } from "axios";
+import api from "../src/services/httpClient";
+import { advanceSessionEpoch } from "../src/services/sessionEpoch";
 import {
   getDynamicTemplateDocumentMediaReferences as clientReferences,
   hasExplicitDynamicTemplateInstanceImage,
@@ -147,32 +150,45 @@ test("编辑器 page-assets 由宿主拉取对象 URL，不把预览地址直接
   expect(isStaffManagedMediaPreviewUrl(previewUrl)).toBe(true);
   expect(previewUrl).toBe("/api/upload/media/preview-by-storage-key?storageKey=page-assets%2Fhero.jpg");
 
-  const fetchCalls: Array<{ url: string; credentials?: RequestCredentials; sessionDomain?: string | null }> = [];
-  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url?: string; responseType?: string; sessionDomain?: string; withCredentials?: boolean; header?: unknown }> = [];
+  const originalAdapter = api.defaults.adapter;
   const originalCreateObjectURL = URL.createObjectURL.bind(URL);
-  URL.createObjectURL = () => "blob:http://127.0.0.1/managed-hero";
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    fetchCalls.push({
-      url,
-      credentials: init?.credentials,
-      sessionDomain: new Headers(init?.headers).get("X-Session-Domain"),
+  let blobSequence = 0;
+  URL.createObjectURL = () => `blob:http://127.0.0.1/managed-hero-${++blobSequence}`;
+  api.defaults.adapter = async (config) => {
+    requests.push({
+      url: config.url,
+      responseType: config.responseType,
+      sessionDomain: config.sessionDomain,
+      withCredentials: config.withCredentials,
+      header: config.headers.get("X-Session-Domain"),
     });
-    return new Response(new Blob(["hero"], { type: "image/jpeg" }), { status: 200 });
-  }) as typeof fetch;
+    return {
+      config,
+      data: new Blob(["hero"], { type: "image/jpeg" }),
+      headers: new AxiosHeaders(),
+      status: 200,
+      statusText: "OK",
+    };
+  };
 
   try {
     expect(await loadManagedTemplateMediaObjectUrl("/uploads/legacy.png")).toBe("/uploads/legacy.png");
-    expect(fetchCalls).toEqual([]);
-    expect(await loadManagedTemplateMediaObjectUrl("/uploads/page-assets/hero.jpg")).toBe("blob:http://127.0.0.1/managed-hero");
-    expect(await loadManagedTemplateMediaObjectUrl(previewUrl)).toBe("blob:http://127.0.0.1/managed-hero");
-    expect(fetchCalls).toEqual([{
-      url: previewUrl,
-      credentials: "same-origin",
+    expect(requests).toEqual([]);
+    expect(await loadManagedTemplateMediaObjectUrl("/uploads/page-assets/hero.jpg")).toBe("blob:http://127.0.0.1/managed-hero-1");
+    expect(await loadManagedTemplateMediaObjectUrl(previewUrl)).toBe("blob:http://127.0.0.1/managed-hero-1");
+    expect(requests).toEqual([{
+      url: "/upload/media/preview-by-storage-key?storageKey=page-assets%2Fhero.jpg",
+      responseType: "blob",
       sessionDomain: "admin",
+      withCredentials: true,
+      header: "admin",
     }]);
+    advanceSessionEpoch("admin");
+    expect(await loadManagedTemplateMediaObjectUrl(previewUrl)).toBe("blob:http://127.0.0.1/managed-hero-2");
+    expect(requests).toHaveLength(2);
   } finally {
-    globalThis.fetch = originalFetch;
+    api.defaults.adapter = originalAdapter;
     URL.createObjectURL = originalCreateObjectURL;
     resetManagedTemplateMediaObjectUrlCacheForTests();
   }
@@ -180,15 +196,55 @@ test("编辑器 page-assets 由宿主拉取对象 URL，不把预览地址直接
 
 test("宿主预览取图失败不缓存，公开地址仍保持原样", async () => {
   resetManagedTemplateMediaObjectUrlCacheForTests();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => new Response("missing", { status: 404 })) as typeof fetch;
+  const originalAdapter = api.defaults.adapter;
+  api.defaults.adapter = async (config) => {
+    const response = {
+      config,
+      data: { message: "missing" },
+      headers: new AxiosHeaders(),
+      status: 404,
+      statusText: "Not Found",
+    };
+    throw new AxiosError("missing", "ERR_BAD_RESPONSE", config, undefined, response);
+  };
   try {
     await expect(loadManagedTemplateMediaObjectUrl("/uploads/page-assets/missing.jpg")).rejects.toThrow("managed-media-preview:404");
     expect(resolveManagedTemplateMediaPreviewUrl("/uploads/page-assets/missing.jpg")).toBe(
       "/api/upload/media/preview-by-storage-key?storageKey=page-assets%2Fmissing.jpg",
     );
   } finally {
-    globalThis.fetch = originalFetch;
+    api.defaults.adapter = originalAdapter;
     resetManagedTemplateMediaObjectUrlCacheForTests();
   }
+});
+
+test("后台媒体预览首次 401 后沿现有会话刷新链路重试取图（route-Mock）", async ({ page }) => {
+  let previewRequests = 0;
+  let refreshRequests = 0;
+  await page.route("**/api/upload/media/preview-by-storage-key**", async (route) => {
+    previewRequests += 1;
+    expect(route.request().headers()["x-session-domain"]).toBe("admin");
+    await route.fulfill(previewRequests === 1
+      ? { status: 401, contentType: "application/json", body: '{"message":"Unauthorized"}' }
+      : { status: 200, contentType: "image/png", body: Buffer.from("image-bytes") });
+  });
+  await page.route("**/api/auth/session/refresh", async (route) => {
+    refreshRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: '{"code":200,"data":{},"message":"ok"}',
+    });
+  });
+  await page.goto("/admin/login");
+
+  const result = await page.evaluate(async () => {
+    const media = await import("/src/page-builder/template-definition/managedMediaPreview.ts");
+    media.resetManagedTemplateMediaObjectUrlCacheForTests();
+    const url = await media.loadManagedTemplateMediaObjectUrl("/uploads/page-assets/recover.png");
+    return { protocol: new URL(url).protocol, size: (await fetch(url).then((response) => response.blob())).size };
+  });
+  expect(result).toEqual({ protocol: "blob:", size: "image-bytes".length });
+  expect(previewRequests).toBe(2);
+  expect(refreshRequests).toBe(1);
 });

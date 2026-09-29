@@ -27,6 +27,7 @@ import type {
 // “渲染器缺失”和“仍在完成首帧”。保留有限等待，避免短暂拥塞被永久误报。
 const PREVIEW_RENDER_TIMEOUT_MS = 3_000;
 const CATALOG_PREVIEW_MAX_HEIGHT = 220;
+const CATALOG_THUMBNAIL_MIN_WIDTH_RATIO = 0.6;
 const CATALOG_STYLE_RESYNC_DEBOUNCE_MS = 160;
 
 function catalogStylesheetSignature(doc: Document): string {
@@ -39,7 +40,7 @@ function catalogStylesheetSignature(doc: Document): string {
     .join("|");
 }
 
-export type TemplateCatalogPreviewPresentation = "thumbnail" | "detail";
+export type TemplateCatalogPreviewPresentation = "thumbnail" | "detail" | "structure";
 
 interface TemplateCatalogViewportPreviewProps {
   children?: ReactNode;
@@ -105,7 +106,7 @@ export default function TemplateCatalogViewportPreview({
   const mediaSourceSignatureRef = useRef("");
   const lastParentStyleSignatureRef = useRef("");
   const initialNaturalHeight = heightMode === "auto"
-    ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, fallbackHeight)
+    ? AUTO_ARTBOARD_MIN_HEIGHT
     : fallbackHeight;
   const [frameDocument, setFrameDocument] = useState<Document | null>(null);
   const [styleRevision, setStyleRevision] = useState(0);
@@ -127,6 +128,7 @@ export default function TemplateCatalogViewportPreview({
   const [measurement, setMeasurement] = useState({
     naturalHeight: initialNaturalHeight,
     scale: viewport === "mobile" ? 0.25 : 0.1,
+    longPage: false,
   });
   const syncFrameStyles = useCallback((nextDocument: Document) => {
     const parentSignature = catalogStylesheetSignature(document);
@@ -182,6 +184,7 @@ export default function TemplateCatalogViewportPreview({
     setMeasurement((current) => ({
       ...current,
       naturalHeight: initialNaturalHeight,
+      longPage: false,
     }));
     setRenderFailed(false);
     setRendererReady(false);
@@ -239,21 +242,27 @@ export default function TemplateCatalogViewportPreview({
     let animationFrameId: number | null = null;
     const measureScale = () => {
       const availableWidth = stage.clientWidth;
-      let scale = presentation === "detail" && zoom
+      const widthFitScale = availableWidth > 0 ? availableWidth / sourceWidth : 0;
+      let scale = presentation !== "thumbnail" && zoom
         ? zoom
-        : availableWidth > 0 ? availableWidth / sourceWidth : 0;
+        : widthFitScale;
+      let longPage = false;
       if (presentation === "thumbnail") {
-        // 目录只限制通用最大高度，不改变任一模板的比例。超高模板同时缩小
-        // 宽高并居中，横幅、方形、竖版和长页因此保留各自形状。
-        scale = Math.min(scale, CATALOG_PREVIEW_MAX_HEIGHT / measurement.naturalHeight);
+        const heightFitScale = CATALOG_PREVIEW_MAX_HEIGHT / measurement.naturalHeight;
+        // 长页完整等比缩放会让槽位无法辨认。保留 Renderer 原始几何，
+        // 仅把卡片变为明确标注的可滚动局部视窗；分类只由设计画幅决定，
+        // 不能随目录栏宽度变化而让同一份模板在“全貌／滚动”之间跳动。
+        const heightFitWidth = sourceWidth * heightFitScale;
+        longPage = heightFitWidth < CATALOG_PREVIEW_MAX_HEIGHT * CATALOG_THUMBNAIL_MIN_WIDTH_RATIO;
+        scale = longPage ? widthFitScale : Math.min(widthFitScale, heightFitScale);
       } else if (!zoom) {
         // “适合宽度”不放大低分辨率设计；用户仍可显式选择 100% 或更高倍率。
         scale = Math.min(1, scale);
       }
       if (scale <= 0) return;
-      setMeasurement((current) => Math.abs(current.scale - scale) < 0.0001
+      setMeasurement((current) => Math.abs(current.scale - scale) < 0.0001 && current.longPage === longPage
         ? current
-        : { ...current, scale });
+        : { ...current, scale, longPage });
     };
     const scheduleWidthMeasurement = () => {
       if (animationFrameId !== null) return;
@@ -464,9 +473,19 @@ export default function TemplateCatalogViewportPreview({
   ]);
 
   const scaledHeight = measurement.naturalHeight * measurement.scale;
-  const dimensionLabel = `${viewport === "desktop" ? "桌面设计" : "手机预览"} · ${Math.round(sourceWidth)} × ${Math.round(measurement.naturalHeight)} px · ${heightMode === "auto" ? "随内容变化" : heightMode === "fixed" ? "固定高度" : ratioLabel}`;
+  const scrollableThumbnail = presentation === "thumbnail" && measurement.longPage && !isUnavailable;
+  const visibleSlots = slots.filter((slot) => !slot.hidden);
+  const imageSlotCount = visibleSlots.filter((slot) => slot.kind === "media").length;
+  const textSlotCount = visibleSlots.filter((slot) => ["title", "description", "text"].includes(slot.kind)).length;
+  const actionSlotCount = visibleSlots.filter((slot) => slot.kind === "button").length;
+  const otherSlotCount = Math.max(0, visibleSlots.length - imageSlotCount - textSlotCount - actionSlotCount);
+  const hiddenSlotCount = slots.length - visibleSlots.length;
+  const deviceLabel = viewport === "desktop" ? "桌面端" : "移动端";
+  const dimensionLabel = heightMode === "auto"
+    ? `${deviceLabel} · 宽 ${Math.round(sourceWidth)} px · 高随内容`
+    : `${deviceLabel} · ${Math.round(sourceWidth)} × ${Math.round(measurement.naturalHeight)} px · ${heightMode === "fixed" ? "固定高度" : ratioLabel}`;
   const failureLabel = unavailable ? "预览数据不可用" : "预览生成失败";
-  const fixedDetailWidth = presentation === "detail" && zoom
+  const fixedDetailWidth = presentation !== "thumbnail" && zoom
     ? Math.round(sourceWidth * zoom)
     : null;
 
@@ -481,18 +500,19 @@ export default function TemplateCatalogViewportPreview({
       data-preview-slot-box-count={slotBoxCount}
       data-preview-source-size={`${Math.round(sourceWidth)}x${Math.round(measurement.naturalHeight)}`}
       data-preview-content-status={contentIssue ?? "ready"}
+      data-preview-thumbnail-mode={scrollableThumbnail ? "scroll" : "overview"}
       style={fixedDetailWidth ? { width: `max(100%, ${fixedDetailWidth}px)` } : undefined}
     >
       <div
         ref={stageRef}
-        className="template-editor__catalog-artboard-stage"
-        style={{ height: isUnavailable ? undefined : scaledHeight }}
+        className={`template-editor__catalog-artboard-stage${scrollableThumbnail ? " is-long-page" : ""}`}
+        style={{ height: isUnavailable ? undefined : scrollableThumbnail ? CATALOG_PREVIEW_MAX_HEIGHT : scaledHeight }}
       >
         <div
           ref={hostRef}
           className={`homepage-editor__template-preview-img template-editor__catalog-viewport-preview is-${viewport}`}
           data-content-template-preview={templateKey}
-          data-preview-art-direction="neutral-template-preview-v1"
+          data-preview-art-direction={presentation === "detail" ? "actual-template-content" : "neutral-template-preview-v1"}
           data-preview-height-mode={heightMode}
           data-preview-natural-height={Math.round(measurement.naturalHeight)}
           data-preview-ratio={heightMode === "auto" ? "auto" : ratioLabel}
@@ -564,7 +584,7 @@ export default function TemplateCatalogViewportPreview({
                     position: "relative",
                     inset: "auto",
                     transform: "none",
-                    minHeight: fallbackHeight,
+                    minHeight: heightMode === "auto" ? AUTO_ARTBOARD_MIN_HEIGHT : fallbackHeight,
                     width: sourceWidth,
                   } as CSSProperties}
                 >
@@ -597,10 +617,31 @@ export default function TemplateCatalogViewportPreview({
           : null}
         </div>
       </div>
+      {scrollableThumbnail ? (
+        <span className="template-editor__catalog-long-page-hint" aria-hidden="true">
+          长页局部 · 滚动查看
+        </span>
+      ) : null}
       <span className="template-editor__catalog-dimensions">
         {dimensionLabel}
       </span>
-      {contentIssue ? (
+      {presentation !== "detail" ? (
+        <div
+          className="template-editor__catalog-slot-key"
+          data-image-slot-count={imageSlotCount}
+          data-text-slot-count={textSlotCount}
+          data-action-slot-count={actionSlotCount}
+          data-hidden-slot-count={hiddenSlotCount}
+          aria-label={`当前画幅可见槽位：图片 ${imageSlotCount} 个，文字 ${textSlotCount} 个，按钮 ${actionSlotCount} 个；隐藏槽位 ${hiddenSlotCount} 个${otherSlotCount ? `；其他可见槽位 ${otherSlotCount} 个` : ""}`}
+        >
+          <span className="is-media">图片 {imageSlotCount}</span>
+          <span className="is-text">文字 {textSlotCount}</span>
+          <span className="is-action">按钮 {actionSlotCount}</span>
+          <span className="is-hidden">隐藏 {hiddenSlotCount}</span>
+          {otherSlotCount ? <span className="is-other">其他 {otherSlotCount}</span> : null}
+        </div>
+      ) : null}
+      {contentIssue && presentation === "detail" ? (
         <span className={`template-editor__catalog-preview-issue is-${contentIssue}`} role="status">
           {contentIssue === "media-failed" ? "素材加载失败" : "素材未配置"}
         </span>

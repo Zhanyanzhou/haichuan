@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import "./templateNativeDesignControls.css";
 import NumberField, { focusFirstInvalidNumberField } from "../inspector/controls/NumberField";
 import {
@@ -489,7 +489,6 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
     {groupOrder.filter((group) => propertiesForGroup(group).length > 0).map((group) => <PropertyGroup key={`${selectionKey}:${group}`} name={group}
       title={isRootSelection && group === "尺寸与位置" ? "模板整体尺寸与比例" : group === "文字或媒体" ? allImages ? "图片适配与焦点" : allText ? "文字排版" : "文字或媒体" : group === "文字细节" ? "字体与换行" : group === "外观" ? "背景与边框" : group === "布局" && allContainers ? "排列与分栏" : group}
       summary={groupSummary(group)} secondary={group === "尺寸限制" || group === "外观" || group === "文字细节" || (group === "间距与对齐" && !allContainers)}>
-      {group === "文字或媒体" && allText && nodeIds.length === 1 && !isRootSelection ? <TemplateDefaultContentControls section="text-color" embedded key={`color:${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
       {group === "文字细节" && nodeIds.length === 1 ? <TemplateDefaultContentControls section="text-font" embedded key={`font:${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
       {group === "外观" && nodeIds.length === 1 && !isRootSelection ? <TemplateDefaultContentControls section="background" key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
       {group === "文字或媒体" && allImages && imageFocusValue ? <>
@@ -617,7 +616,11 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
         }
         const propertyDisabled = !ids.length || Boolean(pendingRatio) || Boolean(pendingLayout && pendingLayout.property.key !== property.key) || foreignInteraction;
         const quickValues = property.path === "gap" ? GAP_QUICK_VALUES : property.path === "radius" ? RADIUS_QUICK_VALUES : null;
-        return <div className={`template-native__property ${property.group === "尺寸与位置" ? "template-native__size-property" : ""}`} key={property.key} data-template-design-property={property.key}>
+        return <Fragment key={property.key}>
+          {group === "文字或媒体" && property.path === "textAlign" && allText && nodeIds.length === 1 && !isRootSelection
+            ? <TemplateDefaultContentControls section="text-color" embedded nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} />
+            : null}
+          <div className={`template-native__property ${property.group === "尺寸与位置" ? "template-native__size-property" : ""}`} data-template-design-property={property.key}>
           <PropertyInput property={property} value={values[0]} mixed={mixed} disabled={propertyDisabled}
             interactionStartValue={interactionStartValue}
             optionDisabledReason={(value) => ids.map((id) => getTemplateSizeOptionDisabledReason(original, id, targetBreakpoint, property.path, value)
@@ -672,7 +675,8 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
             } }); setOperationError(result.ok ? null : result.message); if (result.ok) setPendingAll(null); }}>确认统一</button><button type="button" onClick={() => setPendingAll(null)}>取消</button>
           </div> : null}
           </PropertyMetadata>
-        </div>;
+          </div>
+        </Fragment>;
       })}
       {group === "文字或媒体" && !allText && nodeIds.length === 1 && !isRootSelection ? <TemplateDefaultContentControls section="text-style" key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
       {group === "尺寸与位置" && isRootSelection ? <TemplateDefaultContentControls key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}

@@ -65,13 +65,14 @@ test("确定性 UI：旧模板自定义图片比例保留非法文本、Enter/�
   const ids = await mountLegacyDesign(page, 240);
   const inspector = page.getByRole("complementary", { name: "模板属性", exact: true });
   const input = inspector.getByRole("textbox", { name: "自定义图片比例", exact: true });
+  const ratioError = inspector.locator('.homepage-editor__field-error[role="alert"]');
   const before = await snapshot(page);
 
   await input.fill("0:3");
   await input.press("Enter");
   await expect(input).toHaveValue("0:3");
   await expect(input).toHaveAttribute("aria-invalid", "true");
-  await expect(inspector.getByRole("alert")).toHaveText("请输入有效图片比例，例如 12:5。");
+  await expect(ratioError).toHaveText("请输入有效图片比例，例如 12:5。");
   expect(await snapshot(page)).toEqual(before);
 
   await input.press("Escape");
@@ -103,7 +104,7 @@ test("确定性 UI：旧模板自定义图片比例保留非法文本、Enter/�
   const layout = await inspector.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
   const inputBox = await input.boundingBox();
-  const errorBox = await inspector.getByRole("alert").boundingBox();
+  const errorBox = await ratioError.boundingBox();
   const inspectorBox = await inspector.boundingBox();
   if (!inputBox || !errorBox || !inspectorBox) throw new Error("缺少比例输入或就近错误布局");
   expect(errorBox.x).toBeGreaterThanOrEqual(inputBox.x - 1);

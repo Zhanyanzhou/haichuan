@@ -20,6 +20,7 @@ import type { DynamicTemplatePreviewScenario } from "./types";
 const previewPortrait = new URL("../preview-assets/neutral-template-preview-v1/template-preview-portrait.svg", import.meta.url).href;
 const previewSquare = new URL("../preview-assets/neutral-template-preview-v1/template-preview-square.svg", import.meta.url).href;
 const previewWide = new URL("../preview-assets/neutral-template-preview-v1/template-preview-wide.svg", import.meta.url).href;
+const neutralCatalogMedia = "/template-previews/catalog-structure-media.svg";
 
 export type TemplateCatalogSlotKind =
   | "media"
@@ -37,6 +38,7 @@ export interface TemplateCatalogSlotDescriptor {
   slotId: string;
   roleId?: string;
   kind: TemplateCatalogSlotKind;
+  hidden: boolean;
   label: string;
   compactLabel: string;
   locator: EditableTargetDescriptor["locator"];
@@ -149,6 +151,13 @@ function createTemplateCatalogSlotDescriptors(
     showEmptySlots: true,
   });
   if (!compiled.ok) return [];
+  const hiddenNodeIds = new Set<string>();
+  const visitVisibility = (node: typeof compiled.plan.root, ancestorHidden = false) => {
+    const hidden = ancestorHidden || node.hidden;
+    if (hidden) hiddenNodeIds.add(node.nodeId);
+    node.children.forEach((child) => visitVisibility(child, hidden));
+  };
+  visitVisibility(compiled.plan.root);
   const targets = resolveEditableTargets(
     definition,
     compiled.plan,
@@ -171,6 +180,7 @@ function createTemplateCatalogSlotDescriptors(
       slotId: target.slotId,
       ...(target.contractRoleId ? { roleId: target.contractRoleId } : {}),
       kind,
+      hidden: hiddenNodeIds.has(target.ownerNodeId),
       label: target.label,
       compactLabel: getEditableTargetCompactLabel(target),
       locator: target.locator,
@@ -214,6 +224,14 @@ function getGenericSlotExample(slotType: string): unknown {
   return {};
 }
 
+function getNeutralCatalogSlotExample(slotType: string): unknown {
+  if (slotType === "heading") return "主标题";
+  if (["text", "richText"].includes(slotType)) return "正文示例文字";
+  if (["badge", "icon"].includes(slotType)) return "标签";
+  if (["button", "link"].includes(slotType)) return { label: "按钮" };
+  return getGenericSlotExample(slotType);
+}
+
 /**
  * 模板目录、设计画布与只读预览共用的系统示例内容。
  * 新方案模板展示持久默认内容；旧版本继续使用中性示例。
@@ -247,6 +265,59 @@ export function createTemplateCatalogPreviewContentBySlotId(
     ...createTemplateRecipePreviewContent(definition),
     ...persisted,
   };
+}
+
+function withNeutralCatalogMedia(value: unknown, path: string[] = []): unknown {
+  if (Array.isArray(value)) return value.map((item) => withNeutralCatalogMedia(item, path));
+  if (typeof value === "string") {
+    const key = path[path.length - 1] ?? "";
+    if (MEDIA_FIELD_NAMES.has(key)
+      || key === "images"
+      || (key === "url" && path.some((part) => part === "images" || part === "items"))) {
+      return neutralCatalogMedia;
+    }
+    if (["title", "heading", "name"].includes(key)) return "标题";
+    if (["subtitle", "description", "body", "text", "content"].includes(key)) return "正文示例文字";
+    if (["eyebrow", "caption", "badge"].includes(key)) return "标签";
+    if (["label", "actionText", "buttonText"].includes(key)) return "按钮";
+    if (["alt", "altText"].includes(key)) return "";
+    return value;
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [
+    childKey,
+    withNeutralCatalogMedia(child, [...path, childKey]),
+  ]));
+}
+
+/** 目录只读投影：沿用真实节点几何，不读取正式或归档图片，不写回模板定义。 */
+export function createNeutralTemplateCatalogPreview(definition: TemplateDefinitionV2): {
+  definition: TemplateDefinitionV2;
+  contentBySlotId: Record<string, unknown>;
+} {
+  const projected = structuredClone(definition);
+  for (const node of Object.values(projected.nodes)) {
+    for (const device of ["desktop", "mobile", "tablet"] as const) {
+      const rules = node.responsive[device];
+      if (rules?.backgroundImage) rules.backgroundImage = neutralCatalogMedia;
+    }
+  }
+  const sourceContent = createTemplateCatalogPreviewContentBySlotId(definition);
+  const contentBySlotId: Record<string, unknown> = {};
+  for (const slot of Object.values(definition.slots)) {
+    if (slot.type === "image") {
+      contentBySlotId[slot.slotId] = { src: neutralCatalogMedia, alt: "" };
+    } else if (isMatureContentTemplateSlotType(slot.type)) {
+      contentBySlotId[slot.slotId] = withNeutralCatalogMedia(getExamplePreviewContentForSlot(slot.type));
+    } else if (["heading", "text", "richText", "badge", "icon", "button", "link"].includes(slot.type)) {
+      contentBySlotId[slot.slotId] = getNeutralCatalogSlotExample(slot.type);
+    } else {
+      contentBySlotId[slot.slotId] = withNeutralCatalogMedia(
+        sourceContent[slot.slotId] ?? getGenericSlotExample(slot.type),
+      );
+    }
+  }
+  return { definition: projected, contentBySlotId };
 }
 
 function hasConfiguredCatalogMedia(value: unknown): boolean {

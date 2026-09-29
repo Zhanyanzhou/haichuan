@@ -948,6 +948,15 @@ export default function EditableTargetOverlay({
     } else onPlacementGesture(projected);
   };
 
+  const catalogTextLeadKey = surface === "catalog"
+    ? boxes.filter((box) => ["title", "description", "text"].includes(box.target.kind))
+      .sort((left, right) => left.hostRect.top - right.hostRect.top || left.hostRect.left - right.hostRect.left)[0]?.key
+    : undefined;
+  const catalogActionLeadKey = surface === "catalog"
+    ? boxes.filter((box) => box.target.kind === "button")
+      .sort((left, right) => left.hostRect.top - right.hostRect.top || left.hostRect.left - right.hostRect.left)[0]?.key
+    : undefined;
+
   return (
     <div
       className={`template-editor__editable-overlay is-${surface}${interactive ? " is-interactive" : " is-read-only"}`}
@@ -1023,11 +1032,20 @@ export default function EditableTargetOverlay({
       ) : null}
       {boxes.map((box, index) => {
         const selectionTarget = getSelectionTarget(box.target);
+        const catalogTextLead = box.key === catalogTextLeadKey;
+        const catalogActionLead = box.key === catalogActionLeadKey
+          && (box.hostRect.width < 48 || box.hostRect.height < 24);
         return <div
           key={box.key}
           className="template-editor__editable-overlay-box"
           data-editable-target-id={box.target.targetId}
           data-editable-target-kind={box.target.kind}
+          data-overlay-label={box.target.label}
+          data-overlay-can-label={box.hostRect.width >= 48 && box.hostRect.height >= 24 ? "true" : "false"}
+          data-overlay-catalog-text-lead={catalogTextLead ? "true" : undefined}
+          data-overlay-catalog-action-lead={catalogActionLead ? "true" : undefined}
+          data-overlay-catalog-action-side={catalogActionLead && box.hostRect.top + box.hostRect.height + 19 > (hostRoot?.clientHeight ?? Infinity) ? "above" : undefined}
+          data-overlay-label-side={catalogTextLead && box.hostRect.top < 20 ? "below" : undefined}
           data-overlay-selected={isBoxSelected(box) ? "true" : undefined}
           data-selection-target-id={selectionTarget.targetId}
           data-selection-role-id={selectionTarget.roleId}

@@ -2040,8 +2040,11 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
     publishedVersion: 1,
     revision: 4,
   });
-  await expect(sameCatalogEntry, "同一模板的 v2 草稿保存后必须明确显示未发布修改")
-    .toContainText("有未发布修改 · 线上 v1");
+  await expect(sameCatalogEntry.locator(".template-editor__catalog-published-state")).toHaveText("已发布 · v1");
+  await expect(sameCatalogEntry.locator(".template-editor__catalog-draft-state"), "同一模板的 v2 草稿保存后必须明确显示未发布修改")
+    .toHaveText("草稿有未发布修改");
+  await expect(sameCatalogEntry.locator(".template-editor__catalog-draft-state"))
+    .toHaveCSS("color", "rgb(122, 83, 26)");
   expect(server.publishedVersions.find((version) => version.version === 1))
     .toEqual(immutableV1);
 

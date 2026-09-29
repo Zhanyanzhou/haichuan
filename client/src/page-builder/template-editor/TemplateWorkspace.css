@@ -3114,6 +3114,10 @@
   color: var(--adm-text);
   font-weight: 600;
 }
+.homepage-editor__template-card-status [data-template-publication-status="published-with-unpublished-changes"] .template-editor__catalog-draft-state,
+.homepage-editor__template-card-status [data-template-publication-status="unverifiable"] .template-editor__catalog-draft-state {
+  color: var(--adm-warning);
+}
 .template-editor__catalog-published-state {
   color: var(--adm-muted);
   font-weight: 500;

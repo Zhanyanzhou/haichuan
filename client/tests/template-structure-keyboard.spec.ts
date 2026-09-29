@@ -1,6 +1,7 @@
 import { expect, test as base, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { addDynamicTemplateNode } from "../src/page-builder/template-definition";
+import { resolveTemplateNodeRules } from "../src/page-builder/template-definition/responsive";
 import { createNewDynamicTemplateDraft } from "../src/page-builder/template-editor/dynamicTemplateDraftRepository";
 import type { TemplateCatalogItemResource } from "../src/services/clients/dynamicTemplateClient";
 import { installAdminSession } from "./fixtures/session-auth";
@@ -121,7 +122,11 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
     expect((await readSession(page)).selectedObjectId).toBe(regionId);
     await issue.getByRole("button", { name: "修复", exact: true }).click();
     const after = await readSession(page);
-    expect(after.definition!.nodes[regionId].responsive.mobile).toMatchObject({ hidden: false, display: "flex" });
+    expect(after.definition!.nodes[regionId].responsive.mobile).toEqual({
+      ...before.definition!.nodes[regionId].responsive.mobile,
+      hidden: false,
+    });
+    expect(resolveTemplateNodeRules(after.definition!, regionId, "mobile")).toMatchObject({ hidden: false, display: "flex" });
     expect(after.definition!.nodes[regionId].responsive.tablet).toEqual(before.definition!.nodes[regionId].responsive.tablet);
     await expect(issue).toHaveCount(0);
     await expect(structurePanel(page).getByRole("listitem").filter({ hasText: /在平板不可见/ })).toHaveCount(0);
@@ -624,7 +629,9 @@ test.describe("TD-3C1 模板结构树键盘合同（真实前端 + Mock API）",
     const layoutRow = layout.locator("..");
     await layoutRow.hover();
     await layoutRow.locator(".template-editor__structure-more").click();
-    await page.getByRole("menuitem", { name: /^排列与分组/ }).hover();
+    const groupingMenu = page.getByRole("menuitem", { name: /^排列与分组/ });
+    await groupingMenu.focus();
+    await page.keyboard.press("ArrowRight");
     const disabledGrouping = page.getByRole("menuitem", {
       name: /组合为上下布局组（不可用：当前对象已锁定）/,
     }).first();

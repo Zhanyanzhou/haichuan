@@ -1301,6 +1301,11 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
       await expect(card).toBeEnabled();
     }
     await expect(publishedCard).toHaveAccessibleName(/线上 v2$/);
+    await page.getByRole("button", { name: `放大预览：${PUBLISHED_TEMPLATE_NAME}` }).click();
+    const publishedPreview = page.getByRole("dialog", { name: `放大预览：${PUBLISHED_TEMPLATE_NAME}` });
+    await expect(publishedPreview.locator(".template-editor__catalog-preview-dialog-summary"))
+      .toContainText("草稿预览 · 已发布 · v2 · 草稿已保存");
+    await publishedPreview.getByRole("button", { name: "关闭预览", exact: true }).click();
     const library = page.getByRole("complementary", { name: "模板组件库" });
     await expect(library.locator('[data-template-identity^="source:"]')).toHaveCount(0);
     await expect(library.locator('[data-template-catalog-card]:not([data-template-identity^="template:"])'))
