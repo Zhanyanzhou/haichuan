@@ -5,6 +5,7 @@ import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
 import { AdminErrorState } from '@/components/common/AdminDataStates';
 import { useAuthStore } from '@/store/authStore';
+import { SecureImage } from '@/components/common/SecureImage';
 
 // 评价审核（PUT /reviews/:id/moderate）在服务端限 SUPER_ADMIN/ADMIN；
 // 客服仅查看列表与只读详情（与 adminRouteAccess 中 reviews 页面口径注释一致）。
@@ -148,10 +149,12 @@ export default function ReviewManage() {
                 {Array.isArray(r.images) && r.images.length > 0 ? (
                   <div className="flex gap-1 mt-1 flex-wrap">
                     {r.images.slice(0, 6).map((url) => (
-                      <img
+                      <SecureImage
                         key={url}
                         src={url}
                         alt="晒单图"
+                        tokenKind="staff"
+                        deferUntilVisible
                         className="w-10 h-10 object-cover border border-brand-line"
                       />
                     ))}

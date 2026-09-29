@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { isIP } from "node:net";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -29,6 +30,33 @@ const sbomPredicateType = "https://spdx.dev/Document";
 const sigstoreBundleMediaType = "application/vnd.dev.sigstore.bundle.v0.3+json";
 const githubRepositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const githubRefPattern = /^refs\/(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const minCertificateRemainingSeconds = 24 * 60 * 60;
+const standardCertificateRemainingSeconds = 7 * 24 * 60 * 60;
+const minCertificateRemainingRatio = 0.2;
+const minHstsMaxAgeSeconds = 365 * 24 * 60 * 60;
+const observabilityFactKeys = Object.freeze([
+  "healthProbeVerified",
+  "readyProbeVerified",
+  "frontendOriginVerified",
+  "backupHealthVerified",
+  "metricsScrapeVerified",
+  "inquiryServerErrorSeriesVerified",
+  "outboxSeriesVerified",
+  "notificationDeliveryWorkerSeriesVerified",
+  "accountRecoveryWorkerSeriesVerified",
+  "alertDrillKind",
+  "monitorIdentitySha256",
+  "alertEventSha256",
+  "triggeredAt",
+  "receivedAt",
+  "acknowledgedAt",
+  "acknowledgedBy",
+]);
+const alertDrillKinds = Object.freeze([
+  "synthetic-backup-unhealthy",
+  "synthetic-readiness-failure",
+  "synthetic-consumer-heartbeat-stale",
+]);
 
 function fail(code) {
   throw new Error(code);
@@ -66,7 +94,7 @@ function normalizeKey(key) {
 function rejectSensitiveKeys(value, path = "evidence") {
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value)) {
-    if (forbiddenNormalizedKeyPattern.test(normalizeKey(key))) {
+    if (key !== "releaseAuthorization" && forbiddenNormalizedKeyPattern.test(normalizeKey(key))) {
       fail(`PRODUCTION_EVIDENCE_SENSITIVE_KEY_FORBIDDEN:${path}.${key}`);
     }
     rejectSensitiveKeys(child, `${path}.${key}`);
@@ -75,6 +103,54 @@ function rejectSensitiveKeys(value, path = "evidence") {
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function canonicalJson(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function requiredCertificateRemainingSeconds(notBeforeMs, notAfterMs) {
+  const lifetimeSeconds = Math.floor((notAfterMs - notBeforeMs) / 1000);
+  if (lifetimeSeconds <= 0) return Number.POSITIVE_INFINITY;
+  return Math.min(
+    standardCertificateRemainingSeconds,
+    Math.max(minCertificateRemainingSeconds, Math.ceil(lifetimeSeconds * minCertificateRemainingRatio)),
+  );
+}
+
+function validateObservabilityFacts(value, incidentOwner, generatedAtMs) {
+  assertExactKeys(value, observabilityFactKeys, "PRODUCTION_EVIDENCE_OBSERVABILITY_SCHEMA_INVALID");
+  for (const key of [
+    "healthProbeVerified",
+    "readyProbeVerified",
+    "frontendOriginVerified",
+    "backupHealthVerified",
+    "metricsScrapeVerified",
+    "inquiryServerErrorSeriesVerified",
+    "outboxSeriesVerified",
+    "notificationDeliveryWorkerSeriesVerified",
+    "accountRecoveryWorkerSeriesVerified",
+  ]) {
+    if (value[key] !== true) fail(`PRODUCTION_EVIDENCE_OBSERVABILITY_CHECK_FAILED:${key}`);
+  }
+  if (!alertDrillKinds.includes(value.alertDrillKind)) {
+    fail("PRODUCTION_EVIDENCE_OBSERVABILITY_DRILL_INVALID");
+  }
+  requireSha256(value.monitorIdentitySha256, "PRODUCTION_EVIDENCE_OBSERVABILITY_MONITOR_INVALID");
+  requireSha256(value.alertEventSha256, "PRODUCTION_EVIDENCE_OBSERVABILITY_EVENT_INVALID");
+  for (const key of ["triggeredAt", "receivedAt", "acknowledgedAt"]) {
+    requireIsoUtc(value[key], "PRODUCTION_EVIDENCE_OBSERVABILITY_TIME_INVALID");
+  }
+  const triggeredAtMs = Date.parse(value.triggeredAt);
+  const receivedAtMs = Date.parse(value.receivedAt);
+  const acknowledgedAtMs = Date.parse(value.acknowledgedAt);
+  if (triggeredAtMs > receivedAtMs || receivedAtMs > acknowledgedAtMs || acknowledgedAtMs > generatedAtMs) {
+    fail("PRODUCTION_EVIDENCE_OBSERVABILITY_TIME_INVALID");
+  }
+  if (value.acknowledgedBy !== incidentOwner) {
+    fail("PRODUCTION_EVIDENCE_OBSERVABILITY_OWNER_MISMATCH");
+  }
+  return Object.fromEntries(observabilityFactKeys.map((key) => [key, value[key]]));
 }
 
 function isWithin(parent, child) {
@@ -176,12 +252,16 @@ function validateTrustedContext(trusted) {
 
 function assertStrictManifestSchema(manifest) {
   assertExactKeys(manifest, [
-    "schemaVersion", "releaseStage", "imageTag", "gitSha", "migrationBundleSha256", "source", "qualityGate",
-    "attestationPolicy", "publicSeo", "server", "client", "operations",
+    "schemaVersion", "assuranceLevel", "releaseStage", "imageTag", "gitSha", "migrationBundleSha256", "source", "qualityGate",
+    "releaseAuthorization", "attestationPolicy", "publicSeo", "server", "client", "operations",
   ], "PRODUCTION_EVIDENCE_MANIFEST_SCHEMA_INVALID");
   assertExactKeys(manifest.qualityGate, [
-    "workflow", "runId", "runUrl", "headSha", "event", "conclusion",
+    "workflow", "runId", "runUrl", "headSha", "headRef", "runAttempt", "profile", "event", "conclusion",
+    "proofArtifactId", "proofArtifactDigest", "proofSha256", "jobSet",
   ], "PRODUCTION_EVIDENCE_MANIFEST_QUALITY_SCHEMA_INVALID");
+  assertExactKeys(manifest.releaseAuthorization, [
+    "mode", "approvalSha256", "sourceSha", "actor", "runId",
+  ], "PRODUCTION_EVIDENCE_MANIFEST_AUTHORIZATION_SCHEMA_INVALID");
   assertExactKeys(manifest.attestationPolicy, [
     "signingSystem", "cosignVersion", "bundleMediaType", "signerWorkflow", "signerIdentity",
     "certificateOidcIssuer", "sourceRef", "sourceDigest", "imageSignaturesVerified",
@@ -189,8 +269,8 @@ function assertStrictManifestSchema(manifest) {
     "manifestPredicateType",
   ], "PRODUCTION_EVIDENCE_MANIFEST_ATTESTATION_SCHEMA_INVALID");
   assertExactKeys(manifest.publicSeo, [
-    "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest",
-    "sourceKind", "contentReady",
+    "origin", "sourceStage", "snapshotHash", "prerenderManifestSha256", "sourceArtifactId", "sourceArtifactDigest",
+    "sourceKind", "contentReady", "pageDocuments",
   ], "PRODUCTION_EVIDENCE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
   for (const component of ["server", "client", "operations"]) {
     const allowedImageKeys = [
@@ -214,7 +294,7 @@ export function validateProductionEvidenceStructure(evidence, trusted) {
     "schemaVersion", "generatedAt", "environment", "release", "database", "admin", "storage",
     "recovery", "edge", "observability", "featureGates", "externalServices", "rollback",
   ], "PRODUCTION_EVIDENCE_SCHEMA_UNKNOWN_FIELD");
-  if (evidence.schemaVersion !== 3) fail("PRODUCTION_EVIDENCE_SCHEMA_INVALID");
+  if (evidence.schemaVersion !== 5) fail("PRODUCTION_EVIDENCE_SCHEMA_INVALID");
   requireIsoUtc(evidence.generatedAt, "PRODUCTION_EVIDENCE_GENERATED_AT_INVALID");
 
   const environment = requireObject(evidence.environment, "PRODUCTION_EVIDENCE_ENVIRONMENT_MISSING");
@@ -239,11 +319,16 @@ export function validateProductionEvidenceStructure(evidence, trusted) {
   }
   rejectSensitiveKeys(manifest, "manifest");
   assertStrictManifestSchema(manifest);
+  if (manifest.assuranceLevel !== "high") fail("PRODUCTION_EVIDENCE_HIGH_ASSURANCE_REQUIRED");
   validateReleaseManifest(manifest, {
     gitSha: trusted.releaseGitSha,
     migrationBundleSha256: trusted.migrationBundleSha256,
     releaseStage: "production",
   });
+  if (manifest.releaseAuthorization.mode === "explicit-unprotected-ref" &&
+      manifest.releaseAuthorization.approvalSha256 !== trusted.approvalReferenceSha256) {
+    fail("PRODUCTION_EVIDENCE_RELEASE_AUTHORIZATION_MISMATCH");
+  }
   if (manifest.source !== trusted.releaseSource) fail("PRODUCTION_EVIDENCE_RELEASE_SOURCE_MISMATCH");
   if (manifest.attestationPolicy.signerWorkflow.toLowerCase() !== trusted.manifestSignerWorkflow.toLowerCase()) {
     fail("PRODUCTION_EVIDENCE_MANIFEST_SIGNER_MISMATCH");
@@ -326,13 +411,71 @@ export function validateProductionEvidenceStructure(evidence, trusted) {
     }, trusted, manifestSha256);
   }
 
-  for (const [sectionName, kind, provider] of [
-    ["edge", "edge-security", "edge-audit"],
-    ["observability", "observability-alert-drill", "monitor-audit"],
-  ]) {
-    const section = requireObject(evidence[sectionName], `PRODUCTION_EVIDENCE_${sectionName.toUpperCase()}_MISSING`);
-    assertExactKeys(section, ["receipt"], `PRODUCTION_EVIDENCE_${sectionName.toUpperCase()}_SCHEMA_INVALID`);
-    validateReceipt(section.receipt, sectionName, { kind, provider, outcome: "verified", ...manifestSubject }, trusted, manifestSha256);
+  const edge = requireObject(evidence.edge, "PRODUCTION_EVIDENCE_EDGE_MISSING");
+  const edgeFactKeys = [
+    "origin", "dnsResolved", "httpsReachable", "httpRedirectStatus", "httpRedirectTargetOrigin",
+    "certificateChainValid", "certificateNotBefore", "certificateNotAfter", "certificateRenewalOutcome",
+    "hstsMaxAgeSeconds", "hstsIncludeSubDomains", "contentSecurityPolicyPresent", "trustedProxyVerified",
+  ];
+  assertExactKeys(edge, [...edgeFactKeys, "receipt"], "PRODUCTION_EVIDENCE_EDGE_SCHEMA_INVALID");
+  let edgeOrigin;
+  try {
+    edgeOrigin = new URL(edge.origin);
+  } catch {
+    fail("PRODUCTION_EVIDENCE_EDGE_ORIGIN_INVALID");
+  }
+  if (edgeOrigin.protocol !== "https:" || edgeOrigin.origin !== edge.origin || edgeOrigin.username || edgeOrigin.password ||
+      edgeOrigin.pathname !== "/" || edgeOrigin.search || edgeOrigin.hash || edge.origin !== manifest.publicSeo.origin) {
+    fail("PRODUCTION_EVIDENCE_EDGE_ORIGIN_INVALID");
+  }
+  if (isIP(edgeOrigin.hostname) !== 0 || edgeOrigin.hostname === "localhost" || !edgeOrigin.hostname.includes(".")) {
+    fail("PRODUCTION_EVIDENCE_EDGE_DOMAIN_REQUIRED");
+  }
+  if (edge.dnsResolved !== true || edge.httpsReachable !== true || edge.certificateChainValid !== true ||
+      edge.contentSecurityPolicyPresent !== true || edge.trustedProxyVerified !== true) {
+    fail("PRODUCTION_EVIDENCE_EDGE_REQUIRED_CHECK_FAILED");
+  }
+  if (edge.httpRedirectStatus !== 308 || edge.httpRedirectTargetOrigin !== edge.origin) {
+    fail("PRODUCTION_EVIDENCE_EDGE_REDIRECT_INVALID");
+  }
+  requireIsoUtc(edge.certificateNotBefore, "PRODUCTION_EVIDENCE_EDGE_CERTIFICATE_TIME_INVALID");
+  requireIsoUtc(edge.certificateNotAfter, "PRODUCTION_EVIDENCE_EDGE_CERTIFICATE_TIME_INVALID");
+  const generatedAtMs = Date.parse(evidence.generatedAt);
+  const certificateNotBeforeMs = Date.parse(edge.certificateNotBefore);
+  const certificateNotAfterMs = Date.parse(edge.certificateNotAfter);
+  const requiredRemainingSeconds = requiredCertificateRemainingSeconds(certificateNotBeforeMs, certificateNotAfterMs);
+  if (certificateNotBeforeMs > generatedAtMs ||
+      certificateNotAfterMs - generatedAtMs < requiredRemainingSeconds * 1000) {
+    fail("PRODUCTION_EVIDENCE_EDGE_CERTIFICATE_VALIDITY_INSUFFICIENT");
+  }
+  if (edge.certificateRenewalOutcome !== "verified") fail("PRODUCTION_EVIDENCE_EDGE_CERTIFICATE_RENEWAL_UNVERIFIED");
+  if (!Number.isSafeInteger(edge.hstsMaxAgeSeconds) || edge.hstsMaxAgeSeconds < minHstsMaxAgeSeconds ||
+      edge.hstsIncludeSubDomains !== true) {
+    fail("PRODUCTION_EVIDENCE_EDGE_HSTS_INVALID");
+  }
+  const edgeFacts = Object.fromEntries(edgeFactKeys.map((key) => [key, edge[key]]));
+  validateReceipt(edge.receipt, "edge", {
+    kind: "edge-security", provider: "edge-audit", outcome: "verified",
+    subjectSha256: sha256(Buffer.from(canonicalJson(edgeFacts))),
+  }, trusted, manifestSha256);
+
+  const observability = requireObject(evidence.observability, "PRODUCTION_EVIDENCE_OBSERVABILITY_MISSING");
+  const observabilityFacts = validateObservabilityFacts(
+    Object.fromEntries(observabilityFactKeys.map((key) => [key, observability[key]])),
+    environment.incidentOwner,
+    generatedAtMs,
+  );
+  assertExactKeys(observability, [...observabilityFactKeys, "receipt"], "PRODUCTION_EVIDENCE_OBSERVABILITY_SCHEMA_INVALID");
+  const observabilityReceipt = validateReceipt(observability.receipt, "observability", {
+    kind: "observability-alert-drill",
+    provider: "monitor-audit",
+    outcome: "verified",
+    subjectSha256: sha256(Buffer.from(canonicalJson(observabilityFacts))),
+  }, trusted, manifestSha256);
+  const observabilityReceiptAtMs = Date.parse(observabilityReceipt.observedAt);
+  if (observabilityReceiptAtMs < Date.parse(observabilityFacts.acknowledgedAt) ||
+      observabilityReceiptAtMs > generatedAtMs) {
+    fail("PRODUCTION_EVIDENCE_OBSERVABILITY_RECEIPT_TIME_INVALID");
   }
 
   const featureGates = requireObject(evidence.featureGates, "PRODUCTION_EVIDENCE_FEATURE_GATES_MISSING");
@@ -541,12 +684,14 @@ function parseManifestProvenanceOutput(stdout, spec) {
   const predicate = matched?.predicate;
   const parameters = predicate?.buildDefinition?.externalParameters;
   const expectedBuilder = `https://${spec.trusted.manifestSignerWorkflow}@${spec.trusted.sourceRef}`;
-  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v6`;
+  const expectedBuildType = `${spec.trusted.releaseSource}/blob/${spec.trusted.releaseGitSha}/.github/workflows/release-images.yml#release-manifest-v9`;
   if (predicate?.buildDefinition?.buildType !== expectedBuildType ||
       parameters?.gitSha !== spec.trusted.releaseGitSha ||
       parameters?.sourceRef !== spec.trusted.sourceRef ||
       parameters?.qualityGateRunId !== spec.manifest.qualityGate.runId ||
       parameters?.schemaVersion !== spec.manifest.schemaVersion ||
+      parameters?.publicSeoOrigin !== spec.manifest.publicSeo.origin ||
+      parameters?.assuranceLevel !== "high" ||
       parameters?.releaseStage !== "production" ||
       parameters?.imageTag !== spec.manifest.imageTag ||
       predicate?.runDetails?.builder?.id?.toLowerCase() !== expectedBuilder.toLowerCase()) {

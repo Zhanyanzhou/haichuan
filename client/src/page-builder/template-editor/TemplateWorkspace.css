@@ -906,18 +906,16 @@
 /* 空结构仍保留真实 auto 高度；这里只扩大模板设计画布中的操作面。
    根节点由独立空白起步区承接，因此仅处理根节点内部的空区域/分组。 */
 .hc-dynamic-template[data-dynamic-template-mode="editor"][data-dynamic-template-editor-surface="template-definition"]
-  [data-template-node-id]
-  [data-template-empty-structure="true"] {
+  [data-template-node-id][data-template-empty-structure="true"] {
   position: relative;
-  min-height: clamp(120px, 14vw, 240px);
+  min-height: clamp(256px, 14vw, 320px);
   outline: 1px dashed rgb(51 95 125 / 45%);
   outline-offset: -1px;
   background: rgb(238 244 247 / 28%);
 }
 
 .hc-dynamic-template[data-dynamic-template-mode="editor"][data-dynamic-template-editor-surface="template-definition"]
-  [data-template-node-id]
-  [data-template-empty-structure="true"]::before {
+  [data-template-node-id][data-template-empty-structure="true"]::before {
   position: absolute;
   inset: 50% auto auto 50%;
   max-width: calc(100% - 32px);
@@ -1770,6 +1768,13 @@
   }
 }
 
+/* 停靠布局以组件库底部入口为主；窄屏才保留顶部快捷入口。 */
+@media (min-width: 1440px) {
+  .template-editor__toolbar-new {
+    display: none;
+  }
+}
+
 .template-editor__mobile-settings {
   text-align: left;
   font: inherit;
@@ -1792,7 +1797,7 @@
   }
 }
 
-@media (min-width: 521px) {
+@media (min-width: 521px) and (max-width: 1439px) {
   .template-editor__toolbar-new-menu-item {
     display: none !important;
   }
@@ -1977,77 +1982,10 @@
   color: var(--adm-muted);
 }
 
-.template-editor__catalog-card-action {
-  position: absolute;
-  z-index: 20;
-  top: 6px;
-  right: 6px;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  pointer-events: none;
-}
-
-.template-editor__catalog-card-action > .template-editor__template-more,
-.template-editor__catalog-card-action > .homepage-editor__template-upgrade-action {
-  position: static;
-  pointer-events: auto;
-}
-
-.template-editor__template-more {
-  position: absolute;
-  z-index: 3;
-  top: 6px;
-  right: 6px;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  color: var(--adm-muted);
-  background: rgb(255 255 255 / 86%);
-  box-shadow: 0 1px 4px rgb(24 26 27 / 8%);
-  cursor: pointer;
-  opacity: 0;
-  transition:
-    opacity 160ms ease,
-    color 160ms ease,
-    border-color 160ms ease,
-    background 160ms ease;
-}
-
-/* 目录卡片本身覆盖完整预览区域；显式建立同级层叠顺序，避免卡片主操作
- * 在 iframe 完成渲染后重新取得命中区域，遮住右上角的生命周期菜单。 */
+/* 目录卡片本身覆盖完整预览区域；操作区统一由 editor.css 的卡片页脚承载。 */
 .homepage-editor__template-card-main {
   position: relative;
   z-index: 1;
-}
-
-.homepage-editor__template-card:hover .template-editor__template-more,
-.homepage-editor__template-card:focus-within .template-editor__template-more,
-.template-editor__template-more[aria-expanded="true"] {
-  opacity: 0.96;
-}
-
-@media (hover: none), (pointer: coarse) {
-  .template-editor__template-more {
-    opacity: 0.96;
-  }
-}
-
-.template-editor__template-more:hover,
-.template-editor__template-more:focus-visible {
-  border-color: var(--adm-neutral-border);
-  color: var(--adm-ink);
-  background: #fff;
-}
-
-.template-editor__template-more:focus-visible {
-  outline: 2px solid var(--adm-focus);
-  outline-offset: 2px;
 }
 
 .homepage-editor__template-card.is-disabled.is-trash-template {
@@ -2151,7 +2089,7 @@
   font-size: 13px;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .template-editor__recovery-banner {
     left: 52px;
     right: 52px;
@@ -3142,167 +3080,49 @@
 @media (min-width: 1200px) {
   .template-editor__canvas-scroll.homepage-editor__canvas-scroll { padding-top: 48px; }
 }
-[data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-preview-wrap {
-  aspect-ratio: auto;
-  min-height: 0;
-  overflow: visible;
-  border: 0;
-  background: transparent;
-}
-[data-unified-template-library="design"] .template-editor__catalog-preview-shell {
-  position: relative;
-  box-sizing: border-box;
-  display: grid;
-  grid-template-rows: 112px auto;
-  gap: 6px;
-  width: 100%;
-  height: auto;
-  padding: 0;
-  overflow: visible;
-  background: transparent;
-}
-[data-unified-template-library="design"] .template-editor__catalog-artboard-stage {
-  position: relative;
+/* 目录预览画板、占位和放大预览样式改由 TemplateCatalogPreview.css 提供，页面装修与模板设计共用。 */
+.template-editor__catalog-card-info {
   display: grid;
   min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  place-items: center;
-  border: 1px solid var(--adm-line);
-  border-radius: 4px;
-  background: var(--adm-neutral-bg);
+  gap: 3px;
+  padding: 9px 3px 2px;
 }
-[data-unified-template-library="design"] .template-editor__catalog-preview-placeholder {
-  min-height: 0;
-  height: 136px;
-}
-.template-editor__catalog-dimensions {
-  position: static;
-  display: block;
+.unified-template-library__scroll .homepage-editor__template-name,
+.unified-template-library__scroll :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
   min-width: 0;
-  max-width: 100%;
+  margin: 0;
   padding: 0;
+}
+.unified-template-library__scroll .homepage-editor__template-name {
   overflow: hidden;
-  color: var(--adm-muted);
-  background: transparent;
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
-}
-[data-unified-template-library="design"] .unified-template-library__scroll.is-double .template-editor__catalog-preview-shell {
-  grid-template-rows: 72px auto;
-}
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-card {
-  padding-bottom: 0;
-}
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-card-main {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  gap: 4px 10px;
-  align-content: center;
-  min-height: 78px;
-  padding: 8px;
-}
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-preview-wrap {
-  grid-column: 1;
-  grid-row: 1 / span 4;
-  width: 96px;
-  height: auto;
-  align-self: center;
-}
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-name {
-  grid-column: 2;
-  padding: 0 20px 0 0;
+  color: var(--adm-text-strong);
   font-size: 14px;
   line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
-  grid-column: 2;
-  padding: 0;
-  font-size: 12px;
-  line-height: 18px;
+.unified-template-library__scroll :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
+  font-size: 11px;
+  line-height: 17px;
 }
-[data-unified-template-library="design"] .template-editor__catalog-version-state {
+.template-editor__catalog-version-state {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
-[data-unified-template-library="design"] .template-editor__catalog-draft-state {
+.template-editor__catalog-draft-state {
   color: var(--adm-text);
   font-weight: 600;
 }
-[data-unified-template-library="design"] .template-editor__catalog-published-state {
+.homepage-editor__template-card-status [data-template-publication-status="published-with-unpublished-changes"] .template-editor__catalog-draft-state,
+.homepage-editor__template-card-status [data-template-publication-status="unverifiable"] .template-editor__catalog-draft-state {
+  color: var(--adm-warning);
+}
+.template-editor__catalog-published-state {
   color: var(--adm-muted);
   font-weight: 500;
 }
-[data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .unified-template-library__primary-action { display: none; }
-@container template-library (max-width: 235px) {
-  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-card-main {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto;
-    gap: 6px;
-    align-content: start;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-preview-wrap {
-    grid-column: 1;
-    grid-row: 1;
-    width: 100%;
-    height: auto;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) .homepage-editor__template-name,
-  [data-unified-template-library="design"] .unified-template-library__scroll:not(.is-double) :is(.homepage-editor__template-card-status, .unified-template-library__metadata, .unified-template-library__disabled-reason) {
-    grid-column: 1;
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    overflow-wrap: normal;
-    word-break: normal;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll .homepage-editor__template-card-status {
-    overflow: visible;
-    white-space: normal;
-    overflow-wrap: normal;
-    word-break: normal;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll :is(.unified-template-library__metadata, .unified-template-library__disabled-reason) {
-    display: -webkit-box;
-    max-height: 36px;
-    overflow: hidden;
-    white-space: normal;
-    overflow-wrap: break-word;
-    word-break: normal;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll .template-editor__catalog-card-action {
-    top: 14px;
-    right: 14px;
-    width: 32px;
-    height: 32px;
-    min-height: 0;
-    padding: 0;
-    border: 0;
-  }
-
-  [data-unified-template-library="design"] .unified-template-library__scroll .template-editor__catalog-card-action > .template-editor__template-more {
-    opacity: 0.96;
-  }
-}
+.unified-template-library__scroll .unified-template-library__primary-action { display: none; }
 .template-editor__inspector .homepage-editor__inspector-header {
   grid-template-columns: 36px minmax(0, 1fr) auto;
   min-height: 72px;
@@ -3699,15 +3519,14 @@ button.template-editor__toolbar-state {
   .template-editor__toolbar-subject { display: none; }
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .template-editor__canvas-controls--minimal {
     left: 50%;
     bottom: 20px;
   }
 }
 
-/* 1200px 桌面窗口下第四区仅 240px：只收紧属性区内部排版，
- * 不改动 editor.css 统一维护的 12% / 8% / 60% / 20% 四区合同。 */
+/* 属性区低于紧凑表单宽度时收紧内部排版；不复制外壳断点与宽度。 */
 @container (max-width: 260px) {
   .template-editor__inspector .homepage-editor__inspector-header {
     grid-template-columns: 34px minmax(0, 1fr);
@@ -3949,10 +3768,10 @@ button.template-editor__toolbar-state {
   font: inherit;
 }
 
-/* 压力预览只替换四区内部内容。桌面 dock 的 12% / 8% / 60% / 20%
- * 几何继续由 editor.css 唯一合同控制；这里仅撤销旧公开预览的隐藏侧栏，
+/* 压力预览只替换四区内部内容。宽屏 dock 几何继续由 editor.css
+ * 唯一合同控制；这里仅撤销旧公开预览的隐藏侧栏，
  * 并让中央画布继续消费同一组 dock 变量，不另建模式宽度。 */
-@media (min-width: 1200px) {
+@media (min-width: 1440px) {
   .homepage-editor__body.template-editor__body.is-previewing
     > .homepage-editor__library.template-editor__library,
   .homepage-editor__body.template-editor__body.is-previewing
@@ -3973,7 +3792,4 @@ button.template-editor__toolbar-state {
     );
     padding-right: var(--editor-inspector-dock-width);
   }
-}
-.template-editor__catalog-preview-shell[data-preview-annotations="false"] .template-editor__editable-overlay.is-catalog {
-  visibility: hidden;
 }

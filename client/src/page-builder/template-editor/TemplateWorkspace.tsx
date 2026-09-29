@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from "react";
 import "./TemplateWorkspace.css";
+import "./TemplateCatalogPreview.css";
 import DynamicTemplateCanvas from "./DynamicTemplateCanvas";
 import DynamicTemplateInspectorPanel from "./DynamicTemplateInspectorPanel";
 import { TemplateTrialPreviewControls } from "./TemplateTrialContentControls";
@@ -20,7 +21,10 @@ import {
 } from "./dynamicTemplateDraftRepository";
 import WorkspacePanelHeader from "../workspace/WorkspacePanelHeader";
 import WorkspacePanelCollapseButton from "../workspace/WorkspacePanelCollapseButton";
-import useCompactWorkspaceOverlay from "../workspace/useCompactWorkspaceOverlay";
+import useCompactWorkspaceOverlay, {
+  COMPACT_WORKSPACE_QUERY,
+  DOCKED_WORKSPACE_QUERY,
+} from "../workspace/useCompactWorkspaceOverlay";
 import { AppstoreOutlined, BlockOutlined, ControlOutlined } from "@ant-design/icons";
 import TemplateEditorLibrary, {
   type ArchivableTemplateEditorLibraryTarget,
@@ -288,7 +292,7 @@ export default function TemplateWorkspace({
   const activeTemplateId = draft?.definition.templateId;
   const [structureCollapsed, setStructureCollapsed] = useState(() => {
     try {
-      if (window.matchMedia("(min-width: 1200px)").matches) return false;
+      if (window.matchMedia(DOCKED_WORKSPACE_QUERY).matches) return false;
       const stored = sessionStorage.getItem("template-editor-structure-collapsed");
       if (stored === "1") return true;
       if (stored === "0") return false;
@@ -299,7 +303,7 @@ export default function TemplateWorkspace({
   });
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => {
     try {
-      if (window.matchMedia("(min-width: 1200px)").matches) return false;
+      if (window.matchMedia(DOCKED_WORKSPACE_QUERY).matches) return false;
       return sessionStorage.getItem("template-editor-inspector-collapsed") === "1";
     } catch {
       return false;
@@ -413,7 +417,7 @@ export default function TemplateWorkspace({
     panel: "structure" | "inspector",
     open: boolean,
   ) => {
-    if (!window.matchMedia("(max-width: 1199px)").matches) return;
+    if (!window.matchMedia(COMPACT_WORKSPACE_QUERY).matches) return;
     const state = useTemplateEditorSession.getState();
     if (!state.sessionId || !state.draft || state.previewMode) return;
     const owner = {
@@ -709,7 +713,7 @@ export default function TemplateWorkspace({
       if (!state.draft || state.previewMode || focusFirstInvalidNumberField()) return;
       if (inspectorOverlay.compact) {
         // 菜单项关闭后会卸载，使用稳定的菜单触发按钮作为关闭面板后的焦点归处。
-        if (event.type === "template-editor:open-metadata") {
+        if (event.type === "template-editor:open-metadata" || event.type === "template-editor:open-settings") {
           document.querySelector<HTMLButtonElement>('.homepage-editor__toolbar [data-workspace-action="more"]')?.focus({ preventScroll: true });
         }
         inspectorOverlay.requestOpen();
@@ -1287,6 +1291,7 @@ export default function TemplateWorkspace({
             modalOverlay={structureOverlay.compact && compactOverlayModal}
             publishIssueEditing={controller.publishIssueEditing}
             onOpenPublishReview={openPublishReviewWithFocusLifecycle}
+            onSelectTarget={inspectorOverlay.compact ? inspectorOverlay.requestOpen : undefined}
             onPanelKeyDown={structureOverlay.onPanelKeyDown}
             onCollapse={structureOverlay.compact ? structureOverlay.requestClose : undefined}
           />
@@ -1429,6 +1434,7 @@ export default function TemplateWorkspace({
         onCancel={closeVersionHistory}
       >
         <Alert
+          data-template-version-history-policy="read-only-version-pinned"
           type="info"
           showIcon
           message="历史读取与载入都不会自动写入"

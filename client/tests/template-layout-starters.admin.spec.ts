@@ -33,7 +33,7 @@ async function addFirstRegionForCurrentViewport(page: Page) {
 }
 
 for (const option of TEMPLATE_LAYOUT_STARTERS) {
-  test(`常用布局 ${option.label}：同一事务维护结构、字段和三端规则`, () => {
+  test(`常用布局 ${option.label}：同一事务维护结构、字段和双端规则`, () => {
     const draft = createNewDynamicTemplateDraft();
     const baseline = structuredClone(draft.definition);
     const session = useTemplateEditorSession.getState();
@@ -63,7 +63,7 @@ for (const option of TEMPLATE_LAYOUT_STARTERS) {
     expect(definition.previewContent).toEqual({});
     if (option.id !== "stacked") {
       expect(resolveTemplateNodeRules(definition, layoutId, "mobile").columns).toEqual([1]);
-      expect(resolveTemplateNodeRules(definition, layoutId, "tablet").columns).toEqual([1, 1]);
+      expect(resolveTemplateNodeRules(definition, layoutId, "desktop").columns).toEqual(option.id === "cards" ? [1, 1, 1] : [1, 1]);
     }
     state.undo();
     expect(useTemplateEditorSession.getState().draft!.definition).toEqual(baseline);
@@ -122,7 +122,7 @@ for (const width of [390, 1200, 1600]) {
   });
 }
 
-test("确定性 UI：三张卡片实际呈现三列、平板两列和手机单列，设备查看不改草稿", async ({ page }, testInfo) => {
+test("确定性 UI：三张卡片实际呈现桌面三列和手机单列，设备查看不改草稿", async ({ page }, testInfo) => {
   const server = await installNewTemplateServer(page);
   await page.setViewportSize({ width: 1600, height: 1000 });
   await createBlankTemplate(page);
@@ -142,11 +142,6 @@ test("确定性 UI：三张卡片实际呈现三列、平板两列和手机单�
     return boxes[0].y === boxes[1].y && boxes[1].y === boxes[2].y && boxes[0].x < boxes[1].x && boxes[1].x < boxes[2].x;
   }).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("cards-desktop.png") });
-  await page.getByRole("button", { name: /^平板端模板布局/ }).click();
-  await expect.poll(async () => {
-    const boxes = await readPositions();
-    return boxes[0].y === boxes[1].y && boxes[2].y > boxes[0].y;
-  }).toBe(true);
   await page.getByRole("button", { name: /^移动端模板布局/ }).click();
   await expect.poll(async () => {
     const boxes = await readPositions();

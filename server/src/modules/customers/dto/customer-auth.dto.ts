@@ -45,10 +45,9 @@ export class CustomerRegisterDto extends AccountPasswordDto {
   @MaxLength(100)
   email?: string;
 
-  @IsOptional()
   @IsString()
   @Matches(/^\d{6}$/, { message: '短信验证码格式不正确' })
-  smsCode?: string;
+  smsCode!: string;
 }
 
 export class CustomerLoginDto extends CustomerPhoneDto {
@@ -105,8 +104,13 @@ export class UpdateCustomerProfileDto {
 }
 
 export class CloseCustomerAccountDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: '请输入登录密码确认' })
   @MaxLength(128)
-  password!: string;
+  password?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: '短信验证码格式不正确' })
+  currentSmsCode?: string;
 }

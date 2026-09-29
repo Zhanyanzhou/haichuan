@@ -38,12 +38,12 @@ const sources = new Map(
 );
 const failures = [];
 
-// 页面装修与模板设计的桌面四区是产品级不变量，不是可调主题值。
-// 只允许 editor.css 声明一次，防止任一模式用更高特异性覆盖。
-const fixedEditorLayout = [
-  ["--editor-library-dock-width", 12],
-  ["--editor-structure-dock-width", 8],
-  ["--editor-inspector-dock-width", 20],
+// 页面装修与模板设计共用一个响应式外壳。宽屏 dock 使用可读的最小宽度，
+// 窄于 1440px 时由共享 Hook 切换覆盖层；不再把一次设计比例永久化。
+const editorDockProperties = [
+  "--editor-library-dock-width",
+  "--editor-structure-dock-width",
+  "--editor-inspector-dock-width",
 ];
 const editorLayoutCssFiles = collectAdminFiles(
   resolve(root, "client/src"),
@@ -52,9 +52,21 @@ const editorLayoutCssFiles = collectAdminFiles(
 const editorLayoutSources = new Map(
   editorLayoutCssFiles.map((file) => [file, readFileSync(resolve(root, file), "utf8")]),
 );
-const editorLayoutRuleSource = readFileSync(resolve(root, "PROJECT_RULES.md"), "utf8");
+const compactWorkspaceSource = readFileSync(
+  resolve(root, "client/src/page-builder/workspace/useCompactWorkspaceOverlay.ts"),
+  "utf8",
+);
 
-for (const [property, ratio] of fixedEditorLayout) {
+export function isResponsiveDockWidth(value) {
+  const match = value.match(
+    /^clamp\(\s*(\d+(?:\.\d+)?)px\s*,\s*(\d+(?:\.\d+)?)vw\s*,\s*(\d+(?:\.\d+)?)px\s*\)$/,
+  );
+  if (!match) return false;
+  const [, minPx, fluidVw, maxPx] = match.map(Number);
+  return minPx > 0 && fluidVw > 0 && maxPx > minPx;
+}
+
+for (const property of editorDockProperties) {
   const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const declarations = editorLayoutCssFiles.flatMap((file) => (
     [...editorLayoutSources.get(file).matchAll(new RegExp(`${escapedProperty}\\s*:\\s*([^;]+);`, "g"))]
@@ -63,32 +75,31 @@ for (const [property, ratio] of fixedEditorLayout) {
   if (
     declarations.length !== 1
     || declarations[0].file !== "client/src/pages/admin/HomepageConfig/editor.css"
-    || declarations[0].value !== `${ratio}% !important`
+    || !isResponsiveDockWidth(declarations[0].value)
   ) {
     failures.push(
-      `${property}: 必须仅在 editor.css 声明一次且固定为 ${ratio}% !important（当前 ${JSON.stringify(declarations)}）`,
+      `${property}: 必须仅在 editor.css 声明一次，并使用“像素下限 + vw 弹性值 + 像素上限”的有效 clamp（当前 ${JSON.stringify(declarations)}）`,
     );
   }
 }
 
-if (fixedEditorLayout.reduce((sum, [, ratio]) => sum + ratio, 0) !== 40) {
-  failures.push("桌面编辑器三个 dock 必须合计 40%，为居中画布保留 60%");
+if (
+  !/COMPACT_WORKSPACE_MAX_WIDTH\s*=\s*1439/.test(compactWorkspaceSource)
+  || !/COMPACT_WORKSPACE_QUERY\s*=/.test(compactWorkspaceSource)
+  || !/DOCKED_WORKSPACE_QUERY\s*=/.test(compactWorkspaceSource)
+) {
+  failures.push("共享工作区必须由唯一 1439px 覆盖层断点导出 compact 与 docked 查询");
 }
 
-if (
-  !editorLayoutRuleSource.includes(
-    "模板组件库 `12%`、图层/结构面板 `8%`、居中画布 `60%`、属性面板 `20%`",
-  )
-) {
-  failures.push("PROJECT_RULES.md: 缺少桌面编辑器 12% / 8% / 60% / 20% 硬规则");
+const editorLayoutCss = readFileSync(
+  resolve(root, "client/src/pages/admin/HomepageConfig/editor.css"),
+  "utf8",
+);
+if (!/@media\s*\(min-width:\s*1440px\)[\s\S]*--editor-library-dock-width/.test(editorLayoutCss)) {
+  failures.push("editor.css: 宽屏 dock 必须从 1440px 起消费共享最小宽度");
 }
-
-if (
-  !editorLayoutRuleSource.includes(
-    "除非用户再次明确批准修改本条硬规则",
-  )
-) {
-  failures.push("PROJECT_RULES.md: 四区比例硬规则必须保留用户明确批准边界");
+if (/--editor-(?:library|structure|inspector)-dock-width\s*:\s*\d+%/.test(editorLayoutCss)) {
+  failures.push("editor.css: 不得恢复百分比 dock 硬编码");
 }
 
 const rules = {

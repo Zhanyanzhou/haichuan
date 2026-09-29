@@ -1,10 +1,12 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { QuotationsService, type QuotationActor } from './quotations.service';
+import { IdempotencyKey } from '../../common/idempotency/idempotency-key';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
+import { QuotationsService } from './quotations.service';
 import { CreateQuotationDto, UpdateQuotationDto, ConvertQuotationDto, QuotationCustomerLookupQueryDto, QuotationListQueryDto } from './dto/quotation.dto';
 import { IssueQuotationDto } from './dto/quotation-commerce.dto';
 
@@ -20,38 +22,50 @@ export class QuotationsController {
   constructor(private readonly quotationsService: QuotationsService) {}
 
   @Get()
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
   @ApiOperation({ summary: '报价单列表（服务端分页与筛选）' })
-  findAll(@Query() query: QuotationListQueryDto, @CurrentUser() user: QuotationActor) {
+  findAll(@Query() query: QuotationListQueryDto, @CurrentUser() user: StaffPrincipal) {
     return this.quotationsService.findAll(query, user);
   }
 
   @Get('issue-customers')
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
   @ApiOperation({ summary: '报价绑定客户最小字段搜索' })
-  searchIssueCustomers(@Query() query: QuotationCustomerLookupQueryDto) {
-    return this.quotationsService.searchIssueCustomers(query);
+  searchIssueCustomers(@Query() query: QuotationCustomerLookupQueryDto, @CurrentUser() user: StaffPrincipal) {
+    return this.quotationsService.searchIssueCustomers(query, user);
   }
 
   @Get(':id')
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
   @ApiOperation({ summary: '报价单详情' })
-  findById(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
+  findById(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
     return this.quotationsService.findById(id, user);
   }
 
   @Get(':id/issue-options')
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
   @ApiOperation({ summary: '按报价范围读取当前有效的发出选项' })
-  issueOptions(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
+  issueOptions(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
     return this.quotationsService.getIssueOptions(id, user);
   }
 
   @Post()
   @ApiOperation({ summary: '创建报价单（草稿）' })
-  create(@Body() dto: CreateQuotationDto, @CurrentUser() user: QuotationActor) {
-    return this.quotationsService.create(dto, user);
+  create(
+    @Body() dto: CreateQuotationDto,
+    @CurrentUser() user: StaffPrincipal,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
+    return this.quotationsService.create(dto, user, idempotencyKey);
   }
 
   @Put(':id')
   @ApiOperation({ summary: '编辑报价单（仅草稿可改）' })
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateQuotationDto, @CurrentUser() user: QuotationActor) {
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateQuotationDto, @CurrentUser() user: StaffPrincipal) {
     return this.quotationsService.update(id, dto, user);
   }
 
@@ -60,7 +74,7 @@ export class QuotationsController {
   submit(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: IssueQuotationDto,
-    @CurrentUser() user: QuotationActor,
+    @CurrentUser() user: StaffPrincipal,
   ) {
     return this.quotationsService.issue(id, dto, user);
   }
@@ -70,26 +84,26 @@ export class QuotationsController {
   issue(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: IssueQuotationDto,
-    @CurrentUser() user: QuotationActor,
+    @CurrentUser() user: StaffPrincipal,
   ) {
     return this.quotationsService.issue(id, dto, user);
   }
 
   @Post(':id/revisions')
   @ApiOperation({ summary: '将待确认版本作废并创建下一版草稿' })
-  revise(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
+  revise(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
     return this.quotationsService.revise(id, user);
   }
 
   @Put(':id/confirm')
   @ApiOperation({ summary: '员工确认报价（安全暂停：员工不得代客户确认）' })
-  confirm(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
+  confirm(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
     return this.quotationsService.changeStatus(id, 'CONFIRMED', user);
   }
 
   @Put(':id/cancel')
   @ApiOperation({ summary: '取消报价' })
-  cancel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
+  cancel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
     return this.quotationsService.changeStatus(id, 'CANCELLED', user);
   }
 
@@ -101,7 +115,7 @@ export class QuotationsController {
 
   @Delete(':id')
   @ApiOperation({ summary: '删除报价单（仅从未提交的草稿）' })
-  remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: QuotationActor) {
+  remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
     return this.quotationsService.remove(id, user);
   }
 }

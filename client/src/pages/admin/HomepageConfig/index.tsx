@@ -32,7 +32,6 @@ import {
   BLOCK_META,
   isContentTemplateInsertable,
 } from "@/page-builder/config/blockMeta";
-import { type SystemContentTemplateCurrent } from "@/services/api";
 import {
   RESPONSIVE_CANVAS,
   isMobileCanvasWidth,
@@ -46,6 +45,8 @@ import {
 } from "@/hooks/usePublicSiteSettings";
 import SchemaInspectorPanel from "@/page-builder/inspector/SchemaInspectorPanel";
 import InspectorFooterBar from "@/page-builder/inspector/InspectorFooterBar";
+import { resolvePublishIssueReviewAction } from "@/page-builder/inspector/publishReminderDialog";
+import { isPageEditorLibraryTemplate } from "@/page-builder/templates/pageEditorCatalog";
 import type {
   PagePublishIssueTarget,
   PublishValidationIssue,
@@ -84,7 +85,8 @@ import {
   useVisualEditorSession,
 } from "@/page-builder/visual-editor/visualEditorSession";
 import { UnifiedTemplateLibrary } from "@/page-builder/template-editor/TemplateEditorLibrary";
-import { getSystemTemplatePublicationBlockReason } from "@/page-builder/template-editor/templatePublicationStatus";
+import { notifyPageTemplateInserted } from "@/page-builder/template-editor/templateCatalogEvents";
+import { resolvePublishedTemplateInsertionIndex } from "@/page-builder/template-editor/pageTemplateHandoff";
 import WorkspaceCanvasControls from "@/page-builder/template-editor/WorkspaceCanvasControls";
 import { useTemplateWorkspaceController } from "@/page-builder/template-editor/TemplateWorkspaceController";
 import { USE_MOCK } from "@/services/mockData";
@@ -105,20 +107,21 @@ import {
   type DynamicTemplateInstanceProps,
   type DynamicTemplateDocumentUpgradePlan,
   type ResolvedDynamicTemplateDefinitionMap,
+  stripNonEditableSlotContentFromPageDocument,
 } from "@/page-builder/dynamic-template-instance";
 import DynamicTemplateInstanceInspector from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceInspector";
 import { DynamicTemplateUpgradeReviewModal } from "@/page-builder/dynamic-template-instance/DynamicTemplateUpgradePanel";
 import type { PromoteDynamicTemplateInstanceRequest } from "@/page-builder/dynamic-template-instance/promoteToTemplate";
 import type { PublishedDynamicTemplateResource } from "@/services/clients/dynamicTemplateClient";
 import type { EditorWorkspaceMode } from "@/page-builder/template-editor/types";
-import {
-  countUpgradeableSystemTemplateInstances,
-  upgradeSystemTemplateInstances,
-} from "@/page-builder/templates/templateOrigin";
 import WorkspacePanelHeader from "@/page-builder/workspace/WorkspacePanelHeader";
 import WorkspacePanelCollapseButton from "@/page-builder/workspace/WorkspacePanelCollapseButton";
-import useCompactWorkspaceOverlay from "@/page-builder/workspace/useCompactWorkspaceOverlay";
+import { copyEditorLocalConflictSnapshot } from "@/page-builder/workspace/editorLifecycleErrors";
+import useCompactWorkspaceOverlay, {
+  DOCKED_WORKSPACE_QUERY,
+} from "@/page-builder/workspace/useCompactWorkspaceOverlay";
 import "./editor.css";
+import "@/page-builder/template-editor/TemplateCatalogPreview.css";
 import EditorToolbar, { VIEWPORT_PRESETS } from "./components/EditorToolbar";
 import UnsavedChangesGuard from "./components/UnsavedChangesGuard";
 import { usePageWorkspaceController } from "./PageWorkspaceController";
@@ -394,9 +397,9 @@ function EditorCanvasShell({
 }
 
 /**
- * 画布素材守卫（2026-08-21）：与公开端 GuardedBlock 共用同一套 /uploads/ 探测规则。
- * 素材被删除后，画布与前台一致显示占位（避免"前台占位、画布破图"的两张面孔），
- * 同时提示可在右侧属性面板重新选择素材；选中/编辑能力不受影响。
+ * 画布素材守卫（2026-08-21）：与公开端 GuardedBlock 共用本地 /uploads/ 缺失语义。
+ * 受治理的 page-assets 在编辑器走登录预览端点探测，避免尚未公开授权的新图
+ * 被公开地址 404 误判为文件已删除；真正删除后仍显示占位，选中/编辑不受影响。
  */
 function CanvasMediaGuard({
   blockType,
@@ -802,11 +805,19 @@ function getPageTemplateUpgradeRuleBlockers(
 function PageTemplateLibraryAdapter({
   active,
   pageKey,
+  obscuredByInspector,
+  onRequestCompactOpen,
+  onPageActionComplete,
+  onRetainLibraryAfterSelection,
   onTemplateDragStart,
   onTemplateDragEnd,
 }: {
   active: boolean;
   pageKey: EditorPageKey;
+  obscuredByInspector: boolean;
+  onRequestCompactOpen: () => void;
+  onPageActionComplete: () => void;
+  onRetainLibraryAfterSelection: () => void;
   onTemplateDragStart: (label: string, insertAt: (insertionIndex: number) => void) => void;
   onTemplateDragEnd: () => void;
 }) {
@@ -814,6 +825,16 @@ function PageTemplateLibraryAdapter({
   const appData = useHomepagePuck((state) => state.appState.data);
   const appDataRef = useRef(appData);
   appDataRef.current = appData;
+  const itemSelector = useHomepagePuck((state) => state.appState.ui.itemSelector);
+  const itemSelectorRef = useRef(itemSelector);
+  itemSelectorRef.current = itemSelector;
+  const pageHasBlocks = (appData.content?.length ?? 0) > 0;
+  const hasRootSelection = Boolean(
+    itemSelector?.zone === ROOT_ZONE
+    && typeof itemSelector.index === "number"
+    && itemSelector.index >= 0
+    && itemSelector.index < (appData.content?.length ?? 0),
+  );
   const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const [dynamicUpgradeReview, setDynamicUpgradeReview] = useState<{
@@ -920,8 +941,9 @@ function PageTemplateLibraryAdapter({
       }));
     }
     setDynamicUpgradeReview(null);
+    onPageActionComplete();
     message.success(`已升级 ${plan.upgradedCount} 个模板实例；保存页面草稿后才会持久化`);
-  }, [dispatch, dynamicUpgradeReview, message]);
+  }, [dispatch, dynamicUpgradeReview, message, onPageActionComplete]);
 
   const insertPublishedDynamicTemplate = useCallback((
     template: PublishedDynamicTemplateResource,
@@ -943,9 +965,14 @@ function PageTemplateLibraryAdapter({
       ? existingResolved as ResolvedDynamicTemplateDefinitionMap
       : {};
     const content = currentDocument.content ?? [];
-    const insertionIndex = Math.min(
+    const selectedRootIndex = itemSelectorRef.current?.zone === ROOT_ZONE
+      && typeof itemSelectorRef.current.index === "number"
+      ? itemSelectorRef.current.index
+      : null;
+    const insertionIndex = resolvePublishedTemplateInsertionIndex(
       content.length,
-      Math.max(0, requestedInsertionIndex ?? content.length),
+      selectedRootIndex,
+      requestedInsertionIndex,
     );
     const instance = {
       type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
@@ -971,12 +998,22 @@ function PageTemplateLibraryAdapter({
       } as typeof currentDocument,
       recordHistory: true,
     });
+    if (requestedInsertionIndex !== undefined) {
+      onRetainLibraryAfterSelection();
+    }
     dispatch({
       type: "setUi",
       ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
     });
+    if (requestedInsertionIndex === undefined) {
+      onPageActionComplete();
+    }
+    notifyPageTemplateInserted({
+      templateId: template.templateId,
+      version: template.version,
+    });
     message.success(`已添加“${template.name}”v${template.version}，可在右侧填写页面内容`);
-  }, [dispatch, message]);
+  }, [dispatch, message, onPageActionComplete, onRetainLibraryAfterSelection]);
 
   return (
     <>
@@ -984,7 +1021,11 @@ function PageTemplateLibraryAdapter({
       mode="page"
       active={active}
       device={previewViewport}
-      isPublishedTemplateAllowed={() => true}
+      obscuredByInspector={obscuredByInspector}
+      onRequestCompactOpen={onRequestCompactOpen}
+      isPublishedTemplateAllowed={isPageEditorLibraryTemplate}
+      pageHasBlocks={pageHasBlocks}
+      hasRootSelection={hasRootSelection}
       onInsertPublished={insertPublishedDynamicTemplate}
       onPublishedDragStart={(template) => onTemplateDragStart(
         template.name,
@@ -1020,6 +1061,7 @@ function PageTemplateLibraryAdapter({
 
 function InspectorPanel({
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   onSaveDraft,
   publishIssues,
@@ -1031,6 +1073,7 @@ function InspectorPanel({
   onPromoteToTemplate,
 }: {
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   onSaveDraft: () => void;
   publishIssues: PublishValidationIssue[];
@@ -1044,6 +1087,9 @@ function InspectorPanel({
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const content = useHomepagePuck((state) => state.appState.data.content);
   const dispatch = useHomepagePuck((state) => state.dispatch);
+  const { modal } = AntdApp.useApp();
+  const publishErrorCount = publishIssues.filter((issue) => issue.severity === "error").length;
+  const publishWarningCount = publishIssues.filter((issue) => issue.severity === "warning").length;
   if (!selectedItem) {
     return (
       <section
@@ -1083,12 +1129,19 @@ function InspectorPanel({
         </div>
         <InspectorFooterBar
           hasUnsavedChanges={hasUnsavedChanges}
+          hasPersistedDraft={hasPersistedDraft}
           saving={saving}
-          errorCount={publishIssues.filter((issue) => issue.severity === "error").length}
-          warningCount={publishIssues.filter((issue) => issue.severity === "warning").length}
+          errorCount={publishErrorCount}
+          warningCount={publishWarningCount}
           validationStatus={validationStatus}
           onRetryValidation={onRetryValidation}
-          onReviewIssues={publishIssues.length > 0 ? onOpenPublishReview : undefined}
+          onReviewIssues={resolvePublishIssueReviewAction({
+            errorCount: publishErrorCount,
+            warningCount: publishWarningCount,
+            issues: publishIssues,
+            onOpenPublishReview,
+            modal,
+          })}
         />
       </section>
     );
@@ -1099,6 +1152,7 @@ function InspectorPanel({
     return (
       <DynamicTemplateInstanceInspector
         hasUnsavedChanges={hasUnsavedChanges}
+        hasPersistedDraft={hasPersistedDraft}
         saving={saving}
         publishIssues={publishIssues}
         validationStatus={validationStatus}
@@ -1116,6 +1170,7 @@ function InspectorPanel({
       <SchemaInspectorPanel
         schema={inspectorSchema}
         hasUnsavedChanges={hasUnsavedChanges}
+        hasPersistedDraft={hasPersistedDraft}
         saving={saving}
         onSaveDraft={onSaveDraft}
         templateDesignEnabled={false}
@@ -1211,6 +1266,7 @@ function EditorBody({
   pageLabel,
   pageMode,
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   previewMode,
   viewingPublished,
@@ -1231,6 +1287,9 @@ function EditorBody({
   onOpenPageSettings,
   canPromoteToTemplate,
   onPromoteToTemplate,
+  canAuthorizePublicMedia,
+  authorizingPublicMedia,
+  onAuthorizePublicMedia,
 }: {
   workspaceActive: boolean;
   pageKey: EditorPageKey;
@@ -1238,6 +1297,7 @@ function EditorBody({
   pageLabel: string;
   pageMode: "brand" | "commerce";
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   previewMode: boolean;
   viewingPublished: boolean;
@@ -1261,6 +1321,9 @@ function EditorBody({
     request: PromoteDynamicTemplateInstanceRequest,
     viewport: { width: number; height: number },
   ) => void | Promise<void>;
+  canAuthorizePublicMedia?: boolean;
+  authorizingPublicMedia?: boolean;
+  onAuthorizePublicMedia?: (assetIds: number[]) => void;
 }) {
   const { message } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
@@ -1288,7 +1351,7 @@ function EditorBody({
   // 右侧属性面板手动收起（2026-08-16）：点选模块仍自动弹出(is-inspecting)，手动收起后保持收起
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() => {
     try {
-      if (window.matchMedia("(min-width: 1200px)").matches) return false;
+      if (window.matchMedia(DOCKED_WORKSPACE_QUERY).matches) return false;
       return (
         sessionStorage.getItem("homepage-editor-inspector-collapsed") === "1"
       );
@@ -1318,6 +1381,23 @@ function EditorBody({
     onClose: closeInspector,
   });
   const requestInspectorOpen = inspectorOverlay.requestOpen;
+  const suppressNextInspectorAutoOpenRef = useRef(false);
+  const retainLibraryAfterSelection = useCallback(() => {
+    suppressNextInspectorAutoOpenRef.current = true;
+  }, []);
+  const selectedItemId = selectedItem?.props?.id;
+  const previousSelectedItemIdRef = useRef(selectedItemId);
+  useEffect(() => {
+    const previousSelectedItemId = previousSelectedItemIdRef.current;
+    previousSelectedItemIdRef.current = selectedItemId;
+    if (selectedItemId && selectedItemId !== previousSelectedItemId) {
+      if (suppressNextInspectorAutoOpenRef.current) {
+        suppressNextInspectorAutoOpenRef.current = false;
+        return;
+      }
+      requestInspectorOpen();
+    }
+  }, [requestInspectorOpen, selectedItemId]);
   const publishReviewRef = useRef<HTMLElement>(null);
   const publishReviewTargets = useMemo(() => publishReviewIssues
     .filter((issue) => issue.severity === "error")
@@ -1352,7 +1432,7 @@ function EditorBody({
     onClosePublishReview();
     if (inspectorOverlay.compact) closeInspector();
     window.requestAnimationFrame(() => {
-      document.getElementById("homepage-page-publish-review-entry")?.focus();
+      document.querySelector<HTMLButtonElement>(".homepage-editor__toolbar-publish")?.focus();
     });
   }, [closeInspector, inspectorOverlay.compact, onClosePublishReview]);
 
@@ -2044,6 +2124,10 @@ function EditorBody({
         <PageTemplateLibraryAdapter
           active={workspaceActive}
           pageKey={pageKey}
+          obscuredByInspector={!inspectorCollapsed}
+          onRequestCompactOpen={closeInspector}
+          onPageActionComplete={requestInspectorOpen}
+          onRetainLibraryAfterSelection={retainLibraryAfterSelection}
           onTemplateDragStart={handleTemplateDragStart}
           onTemplateDragEnd={handleTemplateDragEnd}
         />
@@ -2094,7 +2178,9 @@ function EditorBody({
             <span>
               {hasUnsavedChanges
                 ? "正在预览尚未保存的修改；预览本身不会保存或发布。"
-                : "正在预览已保存草稿；预览本身不会再次保存或发布。"}
+                : hasPersistedDraft
+                  ? "正在预览已保存草稿；预览本身不会再次保存或发布。"
+                  : "正在预览尚未保存的默认内容；预览本身不会保存或发布。"}
             </span>
           </div>
         ) : null}
@@ -2196,10 +2282,38 @@ function EditorBody({
                 validationStatus={validationStatus}
                 publishAttemptFailed={publishAttemptFailed}
                 reviewRef={publishReviewRef}
+                canAuthorizePublicMedia={canAuthorizePublicMedia}
+                authorizingPublicMedia={authorizingPublicMedia}
+                onAuthorizePublicMedia={onAuthorizePublicMedia}
                 onLocate={locatePublishIssue}
                 onClose={closePublishReview}
                 onRetry={onRetryValidation}
                 onRetryPublish={() => onRetryPublish(appData)}
+                onCopyLocalDraft={() => {
+                  void copyEditorLocalConflictSnapshot({
+                    pageKey,
+                    puckData: appData,
+                  }).then((copied) => {
+                    if (copied) message.success("已复制本地整页草稿");
+                    else message.warning("无法写入剪贴板，请留在本地核对");
+                  });
+                }}
+                onRemoveLockedPageValues={() => {
+                  const nextData = stripNonEditableSlotContentFromPageDocument(
+                    appData as Record<string, unknown>,
+                    resolvedDynamicTemplateDefinitions,
+                  );
+                  dispatch({
+                    type: "setData",
+                    data: nextData as Partial<Data>,
+                    recordHistory: true,
+                  });
+                  if (publishAttemptFailed) {
+                    onRetryPublish(nextData);
+                    return;
+                  }
+                  onSaveDraft(nextData);
+                }}
               />
             ) : null}
             {viewingPublished ? (
@@ -2211,6 +2325,7 @@ function EditorBody({
             ) : (
               <InspectorPanel
                 hasUnsavedChanges={hasUnsavedChanges}
+                hasPersistedDraft={hasPersistedDraft}
                 saving={saving}
                 onSaveDraft={() => onSaveDraft(appData)}
                 publishIssues={publishIssues}
@@ -2243,16 +2358,18 @@ export default function StoreDecorationWorkbench({
   const adminUser = useAuthStore((state) => state.user);
   const adminRole = adminUser?.role;
   const canPublish = adminRole === "SUPER_ADMIN" || adminRole === "ADMIN";
+  const canPublishWithSelfReview = adminRole === "SUPER_ADMIN";
   // 页面装修可由编辑与管理员完成；母模板设计是全站级结构权限，
   // 前后端统一只向 SUPER_ADMIN 开放。
   const canManageTemplates = adminRole === "SUPER_ADMIN";
-  const [contentLocale, setContentLocale] = useState<PublicContentLocale>("zh-CN");
+  const contentLocale: PublicContentLocale = "zh-CN";
   const [workspaceMode, setWorkspaceMode] = useState<EditorWorkspaceMode>("page");
   const pageViewportBeforeTemplateRef = useRef<{ width: number; height: number } | null>(null);
   const pageWorkspaceController = usePageWorkspaceController({
     pageKey,
     locale: contentLocale,
     canPublish,
+    canPublishWithSelfReview,
   });
   const {
     data,
@@ -2271,6 +2388,7 @@ export default function StoreDecorationWorkbench({
     publishReviewOpen,
     publishReviewIssueKey,
     hasUnsavedChanges,
+    hasPersistedDraft,
     hasProtectedUnsavedChanges,
     previewMode,
     revisionsOpen,
@@ -2287,6 +2405,7 @@ export default function StoreDecorationWorkbench({
     rollingBackRevisionId,
     revisionFailure,
     draftDiscardError,
+    draftDiscardVerificationPending,
     draftSnapshot,
     initialLoading,
     loadedPageKey,
@@ -2301,6 +2420,7 @@ export default function StoreDecorationWorkbench({
     reviewSubmittedBy,
     canDiscardDraft,
     publishedNeedsRevalidation,
+    publishedRevalidationErrors,
     viewingPublished,
     draftSavedAtLabel,
     commitPuckData,
@@ -2332,6 +2452,9 @@ export default function StoreDecorationWorkbench({
     submitForReview,
     reviewDraft,
     publishHome,
+    authorizePublicMedia,
+    authorizingPublicMedia,
+    switchEditorPage,
     trackEditorData,
     syncCanvasDataWithoutAdvancingSavedBaseline,
     saveProtectedChanges,
@@ -2502,23 +2625,34 @@ export default function StoreDecorationWorkbench({
         <div className="homepage-editor__draft-action-error" role="alert">
           <ExclamationCircleOutlined aria-hidden="true" />
           <div>
-            <strong>草稿仍然保留</strong>
+            <strong>
+              {draftDiscardVerificationPending ? "草稿已放弃，状态待确认" : "草稿仍然保留"}
+            </strong>
             <span>{draftDiscardError}</span>
           </div>
-          <Button size="small" onClick={discardDraftToPublished}>
-            重新放弃草稿
-          </Button>
           <Button
+            size="small"
+            onClick={draftDiscardVerificationPending ? retryLoad : discardDraftToPublished}
+          >
+            {draftDiscardVerificationPending ? "重新读取放弃结果" : "重新放弃草稿"}
+          </Button>
+          {!draftDiscardVerificationPending ? <Button
             size="small"
             type="text"
             onClick={dismissDraftDiscardError}
           >
             关闭
-          </Button>
+          </Button> : null}
         </div>
       ) : null}
 
-      {loadError ? (
+      {draftDiscardVerificationPending ? (
+        <div className="homepage-editor__load-error" role="status" aria-live="polite">
+          <Spin size="large" />
+          <strong>草稿已放弃，等待重新读取当前权威状态</strong>
+          <span>恢复前编辑器保持只读，避免在未确认基线上继续写入。</span>
+        </div>
+      ) : loadError ? (
         <div className="homepage-editor__load-error" role="alert">
           <ExclamationCircleOutlined />
           <strong>无法打开店铺装修</strong>
@@ -2570,9 +2704,8 @@ export default function StoreDecorationWorkbench({
               : { drag: false, duplicate: false }
           }
           iframe={{ enabled: true, waitForStyles: true, syncHostStyles: true }}
-          onPublish={(nextData) => {
-            commitPuckData(nextData);
-          }}
+          // Puck onPublish 只提交画布数据到编辑会话，不发布页面。
+          onPublish={commitPuckData}
           overrides={HOMEPAGE_EDITOR_OVERRIDES}
         >
           <CanvasPageDataSynchronizer
@@ -2588,7 +2721,6 @@ export default function StoreDecorationWorkbench({
           {workspaceMode === "page" ? (
             <EditorToolbar
             pageKey={pageKey}
-            locale={contentLocale}
             reviewStatus={reviewStatus ?? "DRAFT"}
             publishing={publishing}
             saving={saving}
@@ -2596,19 +2728,18 @@ export default function StoreDecorationWorkbench({
             hasPendingDraft={hasPendingDraft}
             canDiscardDraft={canDiscardDraft}
             publishedNeedsRevalidation={publishedNeedsRevalidation}
+            publishedRevalidationErrors={publishedRevalidationErrors}
             viewingPublished={viewingPublished}
             previewMode={previewMode}
             hasUnsavedChanges={hasUnsavedChanges}
             canPublish={canPublish}
+            canPublishWithSelfReview={canPublishWithSelfReview}
             canManageTemplates={canManageTemplates}
             draftSavedAtLabel={draftSavedAtLabel}
             publishValidationStatus={publishValidationStatus}
             publishAttemptFailed={Boolean(publishAttemptFailure)}
-            publishReviewActive={publishReviewActive}
             publishReviewErrorCount={publishReviewIssues.filter((issue) => issue.severity === "error").length}
             onOpenPublishReview={openPublishReview}
-            onLocaleChange={setContentLocale}
-            localeSwitchDisabled={hasProtectedUnsavedChanges || saving || publishing}
             onSubmitReview={() => { void submitForReview(); }}
             onApproveReview={() => { void reviewDraft("APPROVE"); }}
             isOwnReviewSubmission={reviewSubmittedBy === adminUser?.id}
@@ -2631,12 +2762,17 @@ export default function StoreDecorationWorkbench({
             onPageHistoryNavigation={navigatePageHistoryCommand}
             onExitViewing={returnToEditingDraft}
             onEnterTemplateMode={templateWorkspaceController.enter}
+            onSwitchPage={(nextPageKey) => {
+              void switchEditorPage(getEditorPage(nextPageKey).publicPath);
+            }}
             restoreViewport={pageViewportBeforeTemplateRef.current}
             />
           ) : null}
           <div
             className={`homepage-editor__page-workspace${workspaceMode === "template" ? " is-inactive" : ""}`}
+            hidden={workspaceMode === "template"}
             aria-hidden={workspaceMode === "template" || undefined}
+            {...(workspaceMode === "template" ? ({ inert: "" } as Record<string, string>) : {})}
           >
             <EditorBody
               workspaceActive={workspaceMode === "page"}
@@ -2645,6 +2781,7 @@ export default function StoreDecorationWorkbench({
               pageLabel={getEditorPage(pageKey).label}
               pageMode={getEditorPage(pageKey).mode}
               hasUnsavedChanges={hasUnsavedChanges}
+              hasPersistedDraft={hasPersistedDraft}
               saving={saving}
               previewMode={previewMode}
               viewingPublished={viewingPublished}
@@ -2667,6 +2804,9 @@ export default function StoreDecorationWorkbench({
               onOpenPageSettings={openPageSettingsForEditing}
               canPromoteToTemplate={canManageTemplates && !USE_MOCK}
               onPromoteToTemplate={templateWorkspaceController.promoteFromPage}
+              canAuthorizePublicMedia={canPublishWithSelfReview}
+              authorizingPublicMedia={authorizingPublicMedia}
+              onAuthorizePublicMedia={authorizePublicMedia}
             />
           </div>
           {workspaceMode === "template" ? (

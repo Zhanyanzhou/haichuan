@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import "./templateNativeDesignControls.css";
 import NumberField, { focusFirstInvalidNumberField } from "../inspector/controls/NumberField";
 import {
@@ -8,6 +8,7 @@ import {
 import {
   resolveTemplateNodeRules, resolveTemplateSlotRules, getTemplateNodeRuleSource,
   setTemplateNodeRule, setTemplateSlotRule, resetTemplateNodeRule, resetTemplateSlotRule,
+  toTemplateContentBreakpoint,
   type TemplateBreakpoint,
 } from "../template-definition/responsive";
 import { objectPositionToPercent, percentToExactObjectPosition } from "../template-definition/imagePosition";
@@ -15,6 +16,7 @@ import { useTemplateEditorSession } from "./templateEditorSession";
 import TemplateAnchorControls from "./TemplateAnchorControls";
 import TemplateNativeResponsiveControls from "./TemplateNativeResponsiveControls";
 import TemplateDefaultContentControls from "./TemplateDefaultContentControls";
+import ImageFocusField from "../inspector/controls/ImageFocusField";
 import { setTemplateLogicalDesignWidth } from "./templateDesignWidth";
 import { isRenderedTypographyProperty, useTemplateRenderedPropertyValues } from "./useTemplateRenderedPropertyValues";
 import {
@@ -41,8 +43,18 @@ export type NativeDesignProperty = {
   encode: (value: unknown, context: Context) => unknown;
 };
 type Property = NativeDesignProperty;
-const BP_LABELS = { desktop: "Desktop 主值", tablet: "Tablet 覆盖", mobile: "Mobile 覆盖", system: "系统默认" };
-const DEVICE_NAMES = { desktop: "桌面", tablet: "平板", mobile: "手机" };
+// tablet 仍可能出现在历史规则来源与合同联合类型中，UI 文案需可索引。
+const BP_LABELS: Record<TemplateBreakpoint | "system", string> = {
+  desktop: "桌面基础",
+  tablet: "平板覆盖",
+  mobile: "手机覆盖",
+  system: "系统默认",
+};
+const DEVICE_NAMES: Record<TemplateBreakpoint, string> = {
+  desktop: "桌面",
+  tablet: "平板",
+  mobile: "手机",
+};
 const BACKGROUND_COLORS: Record<string, string> = { surface: "#FFFFFF", "surface-muted": "#F4F5F5", "brand-ink": "#181A1B", "brand-soft": "#ECEEEF" };
 function setNodeDesignRule(definition: TemplateDefinitionV2, nodeId: string, breakpoint: TemplateBreakpoint, path: string, value: unknown) {
   setTemplateNodeRule(definition, nodeId, breakpoint, path, value);
@@ -53,7 +65,11 @@ function setNodeDesignRule(definition: TemplateDefinitionV2, nodeId: string, bre
 }
 const RESETTABLE_NODE_PROPERTIES = new Set(["minWidth", "maxWidth", "minHeight", "maxHeight", "radius", "backgroundToken", "borderToken", "gap"]);
 const RESETTABLE_TEXT_PROPERTIES = new Set(["fontSize", "fontWeight", "lineHeight", "textAlign", "fontRole", "maxLines", "overflow", "objectFit", "objectPosition"]);
+const GAP_QUICK_VALUES = [12, 16, 24, 32] as const;
+const RADIUS_QUICK_VALUES = [0, 8, 16, 24, 32] as const;
 const canResetSystemValue = (property: Property) => (property.slot ? RESETTABLE_TEXT_PROPERTIES : RESETTABLE_NODE_PROPERTIES).has(property.path);
+const TEXT_PRIMARY_PATHS = new Set(["fontSize", "fontWeight", "textAlign", "color"]);
+const TEXT_DETAIL_PATHS = new Set(["lineHeight", "fontRole", "overflow", "maxLines", "fontFamily", "letterSpacing"]);
 const resizeGridColumns = (columns: readonly number[] | undefined, count: number) => {
   const current = columns?.length ? [...columns] : [1];
   if (count <= current.length) return current.slice(0, count);
@@ -246,7 +262,8 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
   const baseline = useTemplateEditorSession((state) => state.baseline);
   const previewDocument = useTemplateEditorSession((state) => state.previewDocument);
   const activeInteraction = useTemplateEditorSession((state) => state.activeInteraction);
-  const breakpoint = useTemplateEditorSession((state) => state.breakpoint);
+  const sessionBreakpoint = useTemplateEditorSession((state) => state.breakpoint);
+  const breakpoint = toTemplateContentBreakpoint(sessionBreakpoint);
   const previewWidth = useTemplateEditorSession((state) => state.previewWidth);
   const renderedValues = useTemplateRenderedPropertyValues(nodeIds, breakpoint, previewDocument ?? draft?.definition, previewWidth);
   const [scope, setScope] = useState<"current" | "base">("current");
@@ -351,7 +368,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
     const result = useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: isSystemReset ? `${property.label}恢复系统默认` : `恢复${property.label}继承`, update: (next) => {
       for (const id of ids) {
         if (isSystemReset) {
-          // 白名单仅含可选顶层字段；删除主值不触碰 Tablet/Mobile 的有意覆盖。
+          // 白名单仅含可选顶层字段；删除主值不触碰 Mobile 的有意覆盖。
           const rules = property.slot ? next.slots[next.nodes[id].slotId!].desktopRules : next.nodes[id].responsive.desktop;
           delete (rules as unknown as Record<string, unknown>)[property.path];
         } else if (property.slot) resetTemplateSlotRule(next, next.nodes[id].slotId!, targetBreakpoint, property.path);
@@ -367,8 +384,8 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
   const source = (property: Property, id: string) => {
     if (!property.slot) return getTemplateNodeRuleSource(original, id, targetBreakpoint, property.path);
     const slot = original.slots[original.nodes[id].slotId!];
-    const candidates: TemplateBreakpoint[] = targetBreakpoint === "mobile" ? ["mobile", "tablet", "desktop"] : targetBreakpoint === "tablet" ? ["tablet", "desktop"] : ["desktop"];
-    return candidates.find((bp) => readPath(bp === "desktop" ? slot.desktopRules : bp === "tablet" ? slot.tabletRules : slot.mobileRules, property.path) !== undefined) ?? "system";
+    const candidates: TemplateBreakpoint[] = targetBreakpoint === "mobile" ? ["mobile", "desktop"] : ["desktop"];
+    return candidates.find((bp) => readPath(bp === "desktop" ? slot.desktopRules : slot.mobileRules, property.path) !== undefined) ?? "system";
   };
   const changeVisibility = (hidden?: boolean) => {
     cancel();
@@ -380,7 +397,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
         if (!hide && next.nodes[id].hidden) throw new Error("对象在结构中隐藏，请先取消结构隐藏；该操作影响所有设备。");
         setTemplateNodeRule(next, id, breakpoint, "hidden", hide);
         if (!hide && rules.display === "none") {
-          const upstream: TemplateBreakpoint[] = breakpoint === "mobile" ? ["tablet", "desktop"] : breakpoint === "tablet" ? ["desktop"] : [];
+          const upstream: TemplateBreakpoint[] = breakpoint === "mobile" ? ["desktop"] : [];
           const display = upstream.map((bp) => resolveTemplateNodeRules(next, id, bp).display).find((value) => value !== "none")
             ?? createDefaultDynamicTemplateResponsiveRules(next.nodes[id].type).display;
           setTemplateNodeRule(next, id, breakpoint, "display", display);
@@ -401,18 +418,46 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
   const isRootSelection = nodeIds.length === 1 && firstId === original.rootNodeId;
   const emptyContainerSelection = ids.length > 0 && ids.every((id) => !original.nodes[id].childIds.length && !original.nodes[id].slotId);
   const groupOrder = isRootSelection ? ["尺寸与位置", "间距与对齐", "布局", "尺寸限制", "外观"]
-    : allText || allImages ? ["文字或媒体", "尺寸与位置", "间距与对齐", "布局", "尺寸限制", "外观"]
+    : allText ? ["文字或媒体", "尺寸与位置", "文字细节", "间距与对齐", "布局", "尺寸限制", "外观"]
+    : allImages ? ["文字或媒体", "尺寸与位置", "间距与对齐", "布局", "尺寸限制", "外观"]
     : allContainers ? ["布局", "尺寸与位置", "间距与对齐", "文字或媒体", "尺寸限制", "外观"]
       : ["尺寸与位置", "文字或媒体", "间距与对齐", "布局", "尺寸限制", "外观"];
+  const propertiesForGroup = (group: string) => {
+    if (group === "文字细节") return allText ? descriptors.filter((property) => property.group === "文字或媒体" && TEXT_DETAIL_PATHS.has(property.path)) : [];
+    if (group === "文字或媒体" && allText) return descriptors.filter((property) => property.group === "文字或媒体" && TEXT_PRIMARY_PATHS.has(property.path));
+    // 单选图片：焦点改由拖点控件承担，不再并排两行百分比。
+    if (group === "文字或媒体" && allImages && nodeIds.length === 1) {
+      return descriptors.filter((property) => property.group === group && !property.key.startsWith("focus."));
+    }
+    return descriptors.filter((property) => property.group === group);
+  };
+  const imageFocusEnabled = allImages && nodeIds.length === 1 && descriptors.some((property) => property.key.startsWith("focus."));
+  const imageFocusValue = imageFocusEnabled
+    ? objectPositionToPercent(context(effective, firstId).slot.objectPosition)
+    : null;
+  const imagePreviewSrc = (() => {
+    if (!imageFocusEnabled) return undefined;
+    const slotId = original.nodes[firstId]?.slotId;
+    if (!slotId) return undefined;
+    const content = original.defaultContent[slotId];
+    if (typeof content === "string") return content;
+    if (content && typeof content === "object" && typeof (content as { src?: unknown }).src === "string") {
+      return (content as { src: string }).src;
+    }
+    return undefined;
+  })();
+  const imagePreviewFit = imageFocusEnabled
+    ? ((context(effective, firstId).slot.objectFit ?? "cover") as "cover" | "contain" | "fill")
+    : undefined;
   const storedValue = (definition: TemplateDefinitionV2, id: string, property: Property) => {
     const node = definition.nodes[id];
     if (!node) return undefined;
     const slot = node.slotId ? definition.slots[node.slotId] : undefined;
-    return readPath(property.slot ? targetBreakpoint === "desktop" ? slot?.desktopRules : targetBreakpoint === "tablet" ? slot?.tabletRules : slot?.mobileRules : node.responsive[targetBreakpoint], property.path);
+    return readPath(property.slot ? targetBreakpoint === "desktop" ? slot?.desktopRules : slot?.mobileRules : node.responsive[targetBreakpoint], property.path);
   };
   const changedSinceSave = (property: Property) => Boolean(baseline && ids.some((id) => JSON.stringify(storedValue(original, id, property)) !== JSON.stringify(storedValue(baseline.definition, id, property))));
   const groupSummary = (group: string) => {
-    const properties = descriptors.filter((property) => property.group === group);
+    const properties = propertiesForGroup(group);
     const configured = properties.filter((property) => ids.some((id) => storedValue(original, id, property) !== undefined)).length;
     const changed = properties.filter(changedSinceSave).length;
     return [configured ? `${configured} 项已设置` : "未单独设置", changed ? `${changed} 项未保存` : !baseline ? "新草稿" : ""].filter(Boolean).join(" · ");
@@ -428,7 +473,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
     {operationError ? <p role="alert">{operationError}</p> : null}
     <div className="template-native__editing-context" aria-label="当前编辑范围">
     <p className="template-native__context" role="status"><span>当前设备</span><strong>{DEVICE_NAMES[breakpoint]}</strong>{nodeIds.length > 1 ? <small>已选 {nodeIds.length} 个 · 可改 {ids.length} 个</small> : null}{ids.length < nodeIds.length ? <small>{nodeIds.length - ids.length} 个锁定对象不参与修改</small> : null}</p>
-    {breakpoint === "desktop" ? <p className="template-native__scope-summary" role="status">正在修改桌面基础，保留手机和平板的独立设置。</p> : <label className="template-editor__simple-select template-native__scope"><span>修改范围</span><select aria-label="修改作用域" value={scope} disabled={Boolean(pendingRatio || pendingLayout) || foreignInteraction} onChange={(event) => { if (focusFirstInvalidNumberField()) return; cancel(); setScope(event.target.value as "current" | "base"); }}>
+    {breakpoint === "desktop" ? <p className="template-native__scope-summary" role="status">正在修改桌面基础，保留手机的独立设置。</p> : <label className="template-editor__simple-select template-native__scope"><span>修改范围</span><select aria-label="修改作用域" value={scope} disabled={Boolean(pendingRatio || pendingLayout) || foreignInteraction} onChange={(event) => { if (focusFirstInvalidNumberField()) return; cancel(); setScope(event.target.value as "current" | "base"); }}>
       <option value="current">仅{DEVICE_NAMES[breakpoint]}独立设置</option><option value="base">桌面基础（保留各端覆盖）</option>
     </select></label>}
     </div>
@@ -440,11 +485,48 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
       setOperationError(result.ok ? null : result.message);
     }}>取消结构隐藏（所有设备）</button></p> : null}
     {(resolveTemplateNodeRules(original, firstId, breakpoint).display === "none" || resolveTemplateNodeRules(original, firstId, breakpoint).hidden) ? <p role="status">此对象在当前断点隐藏，可恢复显示或选择父级。<button type="button" disabled={controlsDisabled || selectedNodes.some((node) => node.hidden)} onClick={() => changeVisibility(false)}>在当前设备显示</button></p> : null}
-    {allContainers && nodeIds.length === 1 && !isRootSelection ? <>{layoutScopeNotice}{layoutControls?.({ disabled: layoutDisabled })}</> : null}
-    {groupOrder.filter((group) => descriptors.some((property) => property.group === group)).map((group) => <PropertyGroup key={`${selectionKey}:${group}`} name={group}
-      title={isRootSelection && group === "尺寸与位置" ? "模板整体尺寸与比例" : group === "文字或媒体" ? allImages ? "图片适配与焦点" : allText ? "文字排版" : "文字或媒体" : group === "外观" ? "背景与边框" : group}
-      summary={groupSummary(group)} secondary={group === "尺寸限制" || group === "外观" || (group === "间距与对齐" && !allContainers)}>
+    {allContainers && nodeIds.length === 1 ? <>{layoutScopeNotice}{layoutControls?.({ disabled: layoutDisabled })}</> : null}
+    {groupOrder.filter((group) => propertiesForGroup(group).length > 0).map((group) => <PropertyGroup key={`${selectionKey}:${group}`} name={group}
+      title={isRootSelection && group === "尺寸与位置" ? "模板整体尺寸与比例" : group === "文字或媒体" ? allImages ? "图片适配与焦点" : allText ? "文字排版" : "文字或媒体" : group === "文字细节" ? "字体与换行" : group === "外观" ? "背景与边框" : group === "布局" && allContainers ? "排列与分栏" : group}
+      summary={groupSummary(group)} secondary={group === "尺寸限制" || group === "外观" || group === "文字细节" || (group === "间距与对齐" && !allContainers)}>
+      {group === "文字细节" && nodeIds.length === 1 ? <TemplateDefaultContentControls section="text-font" embedded key={`font:${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
       {group === "外观" && nodeIds.length === 1 && !isRootSelection ? <TemplateDefaultContentControls section="background" key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
+      {group === "文字或媒体" && allImages && imageFocusValue ? <>
+        <ImageFocusField
+          key={`focus:${selectionKey}:${targetBreakpoint}`}
+          label="画面焦点"
+          value={imageFocusValue}
+          disabled={controlsDisabled}
+          previewSrc={imagePreviewSrc}
+          previewFit={imagePreviewFit}
+          onRequestCanvasAdjust={() => {
+            if (focusFirstInvalidNumberField()) return;
+            useTemplateEditorSession.getState().setImageFocusEditing(firstId);
+          }}
+          onChange={(focus) => {
+            cancel();
+            const result = useTemplateEditorSession.getState().executeCommand({
+              type: "update-definition",
+              label: "调整图片焦点",
+              update: (next) => {
+                const slotId = next.nodes[firstId]?.slotId;
+                if (!slotId) return;
+                setTemplateSlotRule(next, slotId, targetBreakpoint, "objectPosition", percentToExactObjectPosition(focus));
+              },
+            });
+            setOperationError(result.ok ? null : result.message);
+          }}
+        />
+        {(() => {
+          const focusProperty = descriptors.find((property) => property.key === "focus.x");
+          if (!focusProperty) return null;
+          const hasOwnValue = ids.some((id) => source(focusProperty, id) === targetBreakpoint);
+          if (!hasOwnValue || (targetBreakpoint === "desktop" && !canResetSystemValue(focusProperty))) return null;
+          return <button type="button" aria-label={targetBreakpoint === "desktop" ? "图片焦点恢复系统默认" : "恢复继承"} disabled={controlsDisabled} onClick={() => reset(focusProperty)}>
+            {targetBreakpoint === "desktop" ? "恢复系统默认" : "恢复继承"}
+          </button>;
+        })()}
+      </> : null}
       {group === "尺寸与位置" ? <div className="template-native__measured" aria-label="当前画布对象外框尺寸"><span>实际宽 <strong>{sizeLabel("borderWidth")}</strong></span><span>{emptyContainerSelection ? "画布占位高" : "实际高"} <strong>{sizeLabel("borderHeight")}</strong>{emptyContainerSelection ? <small>（非输出高度）</small> : null}</span></div> : null}
       {group === "尺寸与位置" && descriptors.some((property) => property.path.startsWith("placement.")) ? <p>位置与尺寸按父区域可用宽高的百分比设置；上方显示画布实际像素尺寸。</p> : null}
       {group === "尺寸与位置" && isRootSelection ? <div className="template-native__overall-explanation">
@@ -470,7 +552,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
         </details>
       </div> : null}
       {group === "尺寸与位置" && ids.some((id) => !original.nodes[id].childIds.length && !original.nodes[id].slotId) ? <p className="template-native__measured" role="status">当前为空，画布使用编辑占位；模板仍按所选高度规则输出，添加内容后按实际内容重测。</p> : null}
-      {group === "尺寸与位置" ? <div className="template-native__ratio" role="group" aria-label={isRootSelection ? "模板整体比例预设" : "对象外框比例预设"}>
+      {group === "尺寸与位置" && !allText ? <div className="template-native__ratio" role="group" aria-label={isRootSelection ? "模板整体比例预设" : "对象外框比例预设"}>
         <span title="调整对象高度与宽度的关系，不修改图片内容焦点">{isRootSelection ? "整体比例" : "外框比例"}</span>
         {ratioMeasurementMissing ? <small>请先聚焦修改范围对应的设备并显示对象，才能按实际尺寸调整比例。</small> : null}
         {(isRootSelection ? [[1, 1], [4, 3], [16, 9], [4, 5]] : [[1, 1], [4, 5], [16, 9]]).map(([width, height]) => <button type="button" key={`${width}:${height}`} aria-pressed={ids.length > 0 && ids.every((id) => {
@@ -487,7 +569,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
           setPendingAll(null); setOperationError(result && !result.ok ? result.message : null);
           setPendingRatio(result?.ok ? value : null);
         }}>{width}:{height}</button>)}
-        {pendingRatio ? <div role="group" aria-label="确认对象比例"><p>画布正在预览{isRootSelection ? "整体" : ""} {pendingRatio.width}:{pendingRatio.height}；确认后写入{targetBreakpoint === "desktop" ? " Desktop 主值" : ` ${targetBreakpoint === "tablet" ? "Tablet" : "Mobile"} 覆盖`}，可一次撤销。</p>
+        {pendingRatio ? <div role="group" aria-label="确认对象比例"><p>画布正在预览{isRootSelection ? "整体" : ""} {pendingRatio.width}:{pendingRatio.height}；确认后写入{targetBreakpoint === "desktop" ? "桌面基础" : "手机覆盖"}，可一次撤销。</p>
           <button type="button" onClick={() => {
             const result = edit(OBJECT_RATIO_PROPERTY, pendingRatio, false);
             ratioParentSizes.current = {};
@@ -513,7 +595,7 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
           }))}
         </div>
       </div> : null}
-      {descriptors.filter((property) => property.group === group).map((property) => {
+      {propertiesForGroup(group).map((property) => {
         const values = (ids.length ? ids : [firstId]).map((id) => property.read(context(effective, id)));
         // 长度相同但单位不同仍是混合值；否则 1px 与 1rem 会被错误当成共同值。
         const comparableValues = property.unit === "px" ? (ids.length ? ids : [firstId]).map((id) => readPath(property.slot ? context(effective, id).slot : context(effective, id).rules, property.path)) : values;
@@ -532,8 +614,14 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
             if (ratios.every((ratio) => ratio === ratios[0])) interactionStartValue = ratios[0];
           } else if (!property.slot && (["gap", "radius", "minWidth"].includes(property.path) || property.path.startsWith("padding.") || property.path.startsWith("margin."))) interactionStartValue = 0;
         }
-        return <div className={`template-native__property ${property.group === "尺寸与位置" ? "template-native__size-property" : ""}`} key={property.key} data-template-design-property={property.key}>
-          <PropertyInput property={property} value={values[0]} mixed={mixed} disabled={!ids.length || Boolean(pendingRatio) || Boolean(pendingLayout && pendingLayout.property.key !== property.key) || foreignInteraction}
+        const propertyDisabled = !ids.length || Boolean(pendingRatio) || Boolean(pendingLayout && pendingLayout.property.key !== property.key) || foreignInteraction;
+        const quickValues = property.path === "gap" ? GAP_QUICK_VALUES : property.path === "radius" ? RADIUS_QUICK_VALUES : null;
+        return <Fragment key={property.key}>
+          {group === "文字或媒体" && property.path === "textAlign" && allText && nodeIds.length === 1 && !isRootSelection
+            ? <TemplateDefaultContentControls section="text-color" embedded nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} />
+            : null}
+          <div className={`template-native__property ${property.group === "尺寸与位置" ? "template-native__size-property" : ""}`} data-template-design-property={property.key}>
+          <PropertyInput property={property} value={values[0]} mixed={mixed} disabled={propertyDisabled}
             interactionStartValue={interactionStartValue}
             optionDisabledReason={(value) => ids.map((id) => getTemplateSizeOptionDisabledReason(original, id, targetBreakpoint, property.path, value)
               ?? ((property.path === "width" && value === "fixed" && typeof context(original, id).rules.width !== "object") || (property.path === "height" && ["fixed", "min-height"].includes(value) && context(original, id).rules.height.mode !== value)
@@ -548,13 +636,22 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
                 return result;
               }
             }} cancel={cancel} />
+          {quickValues ? <div className="template-editor__composition-segments" role="group" aria-label={`${property.label}快捷值`}>
+            {quickValues.map((quickValue) => <button type="button" key={quickValue} disabled={propertyDisabled}
+              aria-pressed={comparableValues.length > 0 && comparableValues.every((current) => current && typeof current === "object"
+                && (current as { value?: unknown }).value === quickValue && (current as { unit?: unknown }).unit === "px")}
+              onClick={() => {
+                const result = edit(property, { value: quickValue, unit: "px" }, false);
+                setOperationError(result && !result.ok ? result.message : null);
+              }}>{quickValue} px</button>)}
+          </div> : null}
           {property.path === "columns" ? <small>列数不变时保留全部列比例；增加列时在末尾补 1；减少列时从末尾移除，其余比例不变。</small> : null}
           {pendingLayout?.property.key === property.key ? <div role="group" aria-label="确认布局转换"><p>画布正在预览布局变化。确认后写入当前作用域，可一次撤销。</p>
             <button type="button" onClick={() => { edit(property, pendingLayout.value, false); setPendingLayout(null); }}>确认布局</button>
             <button type="button" onClick={() => { cancel(); setPendingLayout(null); }}>取消转换</button>
           </div> : null}
           <div className="template-native__property-status">
-          {property.key !== "focus.y" && hasOwnValue && (targetBreakpoint !== "desktop" || canResetSystemValue(property)) ? <button type="button" aria-label={targetBreakpoint === "desktop" ? `${actionLabel}恢复系统默认` : "恢复继承"} title={`${actionLabel}：${targetBreakpoint === "desktop" ? "移除此项显式值，保留下级覆盖" : "移除此项当前设备覆盖，重新使用上级值"}`} disabled={controlsDisabled} onClick={() => reset(property)}>{targetBreakpoint === "desktop" ? "恢复系统默认" : "恢复继承"}</button> : null}</div>
+          {property.key !== "focus.y" && hasOwnValue && (targetBreakpoint !== "desktop" || canResetSystemValue(property)) ? <button type="button" aria-label={targetBreakpoint === "desktop" ? `${actionLabel}恢复系统默认` : "恢复继承"} title={`${actionLabel}：${targetBreakpoint === "desktop" ? "移除此项显式值，保留手机覆盖" : "移除此项当前设备覆盖，重新使用上级值"}`} disabled={controlsDisabled} onClick={() => reset(property)}>{targetBreakpoint === "desktop" ? "恢复系统默认" : "恢复继承"}</button> : null}</div>
           <PropertyMetadata label={`${sourceLabel}${mixed ? " · 混合值" : ""}${changedSinceSave(property) ? " · 未保存" : ""}`}>
           <small>来源：{new Set(sources).size === 1 ? BP_LABELS[sources[0]] : "多个来源"}{sources.every((item) => item === "desktop") ? " · 对象显式值" : sources.every((item) => item === targetBreakpoint) ? " · 当前断点显式覆盖" : sources.every((item) => item !== targetBreakpoint && item !== "system") ? " · 继承值" : ""}{mixed ? " · 混合值" : ""}</small>
           <small data-template-effective-value>实际生效：{property.slot && isRenderedTypographyProperty(property.path)
@@ -563,37 +660,35 @@ export default function TemplateNativeDesignControls({ nodeIds, layoutControls, 
           {["backgroundToken", "borderToken"].includes(property.path) ? <small>预设固定保存于当前对象；重开后沿用已选值。</small> : null}
           {property.key === "focus.x" ? <small>图片焦点为一项设计值；重置或恢复继承会同时处理横纵焦点。</small> : null}
           {property.key !== "focus.y" ? <>
-          <button type="button" disabled={!ids.length || mixed || values[0] === undefined || Boolean(pendingRatio || pendingLayout) || foreignInteraction} onClick={() => setPendingAll(property)}>应用到所有断点</button></> : null}
-          {pendingAll?.key === property.key ? <div role="group" aria-label={`确认统一${property.label}`}><p>将当前有效值写入 Desktop，并清除 Tablet、Mobile 的此项覆盖。可撤销。</p>
-            <button type="button" onClick={() => { cancel(); const result = useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: `所有断点统一${property.label}`, update: (next) => {
+          <button type="button" disabled={!ids.length || mixed || values[0] === undefined || Boolean(pendingRatio || pendingLayout) || foreignInteraction} onClick={() => setPendingAll(property)}>应用到电脑与手机</button></> : null}
+          {pendingAll?.key === property.key ? <div role="group" aria-label={`确认统一${property.label}`}><p>将当前有效值写入桌面，并清除手机的此项覆盖。可撤销。</p>
+            <button type="button" onClick={() => { cancel(); const result = useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: `电脑与手机统一${property.label}`, update: (next) => {
               for (const id of ids) {
                 const encoded = property.encode(property.read(context(next, id)), context(next, id));
-                if (property.slot) { const slotId = next.nodes[id].slotId!; setTemplateSlotRule(next, slotId, "desktop", property.path, encoded); resetTemplateSlotRule(next, slotId, "tablet", property.path); resetTemplateSlotRule(next, slotId, "mobile", property.path); }
+                if (property.slot) { const slotId = next.nodes[id].slotId!; setTemplateSlotRule(next, slotId, "desktop", property.path, encoded); resetTemplateSlotRule(next, slotId, "mobile", property.path); }
                 else {
                   setNodeDesignRule(next, id, "desktop", property.path, encoded);
-                  for (const bp of ["tablet", "mobile"] as const) {
-                    resetTemplateNodeRule(next, id, bp, property.path);
-                    if (property.path === "backgroundToken" && Number(next.schemaVersion) >= 3) resetTemplateNodeRule(next, id, bp, "backgroundColor");
-                  }
+                  resetTemplateNodeRule(next, id, "mobile", property.path);
+                  if (property.path === "backgroundToken" && Number(next.schemaVersion) >= 3) resetTemplateNodeRule(next, id, "mobile", "backgroundColor");
                 }
               }
             } }); setOperationError(result.ok ? null : result.message); if (result.ok) setPendingAll(null); }}>确认统一</button><button type="button" onClick={() => setPendingAll(null)}>取消</button>
           </div> : null}
           </PropertyMetadata>
-        </div>;
+          </div>
+        </Fragment>;
       })}
-      {group === "文字或媒体" && nodeIds.length === 1 && !isRootSelection ? <TemplateDefaultContentControls section="text-style" key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
-      {group === "尺寸与位置" && isRootSelection ? <div className="template-native__layout-after-size">{layoutScopeNotice}{layoutControls?.({ disabled: layoutDisabled })}</div> : null}
+      {group === "文字或媒体" && !allText && nodeIds.length === 1 && !isRootSelection ? <TemplateDefaultContentControls section="text-style" key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
       {group === "尺寸与位置" && isRootSelection ? <TemplateDefaultContentControls key={`${firstId}:${targetBreakpoint}`} nodeId={firstId} breakpoint={targetBreakpoint} disabled={controlsDisabled} /> : null}
     </PropertyGroup>)}
-    <details className="template-native__breakpoint-actions"><summary><span>断点显示与继承</span><small>{targetBreakpoint === "desktop" ? "当前改桌面基础" : `当前改${DEVICE_NAMES[targetBreakpoint]}覆盖`}</small></summary>
-    <p>{targetBreakpoint === "desktop" ? "无独立覆盖的平板、手机会跟随基础值。" : targetBreakpoint === "tablet" ? "修改形成平板独立设置，手机继承项可能跟随。" : "修改只作用于手机，不改变桌面和平板。"}</p>
+    <details className="template-native__breakpoint-actions"><summary><span>设备覆盖</span><small>断点显示与继承</small></summary>
+    <p>{targetBreakpoint === "desktop" ? "无独立覆盖的手机会跟随基础值。" : "修改只作用于手机，不改变桌面。"}</p>
     {nodeIds.length > 1 ? <div role="group" aria-label="多选断点可见性"><button type="button" disabled={controlsDisabled} onClick={() => changeVisibility(false)}>当前断点全部显示</button><button type="button" disabled={controlsDisabled} onClick={() => changeVisibility(true)}>当前断点全部隐藏</button></div> : !isRootSelection ? <button type="button" disabled={controlsDisabled} onClick={() => changeVisibility()}>显示／隐藏当前断点</button> : <small>模板整体在所有设备保留；可分别调整内部区域的显示。</small>}
     {targetBreakpoint !== "desktop" ? <button type="button" disabled={controlsDisabled} onClick={() => { cancel(); const result = useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "恢复所选对象全部继承", update: (next) => {
-      for (const id of ids) { next.nodes[id].responsive[targetBreakpoint] = {}; const slotId = next.nodes[id].slotId; if (slotId) { if (targetBreakpoint === "tablet") next.slots[slotId].tabletRules = {}; else next.slots[slotId].mobileRules = {}; } }
+      for (const id of ids) { next.nodes[id].responsive[targetBreakpoint] = {}; const slotId = next.nodes[id].slotId; if (slotId) next.slots[slotId].mobileRules = {}; }
     } }); setOperationError(result.ok ? null : result.message); }}>全部恢复继承</button> : null}
-    </details>
     {nodeIds.length === 1 ? <TemplateAnchorControls nodeId={firstId} disabled={controlsDisabled || targetBreakpoint !== breakpoint} /> : null}
     <TemplateNativeResponsiveControls nodeIds={nodeIds} breakpoint={targetBreakpoint} disabled={controlsDisabled} getProperties={getNativeDesignProperties} />
+    </details>
   </section>;
 }

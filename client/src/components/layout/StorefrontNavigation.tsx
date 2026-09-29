@@ -378,24 +378,24 @@ export default function StorefrontNavigation({
             </Link>
           </div>
         </div>
-      </header>
 
-      <div className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}>
-        <button
-          ref={menuToggleRef}
-          type="button"
-          className="site-menu-toggle"
-          onClick={() => setMenuOpen(!isMenuOpen)}
-          aria-expanded={isMenuOpen}
-          aria-controls={menuId}
-          aria-label={isMenuOpen ? "关闭菜单" : "打开菜单"}
-        >
-          {isMenuOpen ? <><CloseIcon /><span className="site-menu-toggle__label">关闭</span></> : <><MenuIcon /><span className="site-menu-toggle__label">菜单</span></>}
-        </button>
-        <Link to="/catalog#catalog-search-input" aria-label="搜索" className="site-header__nav-item" onClick={handlePreviewLink}>
-          <SearchIcon /><span className="site-header__nav-label hidden sm:inline">搜索</span>
-        </Link>
-      </div>
+        <nav aria-label="菜单与搜索" className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}>
+          <button
+            ref={menuToggleRef}
+            type="button"
+            className="site-menu-toggle"
+            onClick={() => setMenuOpen(!isMenuOpen)}
+            aria-expanded={isMenuOpen}
+            aria-controls={menuId}
+            aria-label={isMenuOpen ? "关闭菜单" : "打开菜单"}
+          >
+            {isMenuOpen ? <><CloseIcon /><span className="site-menu-toggle__label">关闭</span></> : <><MenuIcon /><span className="site-menu-toggle__label">菜单</span></>}
+          </button>
+          <Link to="/catalog#catalog-search-input" aria-label="搜索" className="site-header__nav-item site-header__nav-item--search" onClick={handlePreviewLink}>
+            <SearchIcon /><span className="site-header__nav-label hidden sm:inline">搜索</span>
+          </Link>
+        </nav>
+      </header>
 
       <StorefrontMenuDrawer
         open={isMenuOpen}

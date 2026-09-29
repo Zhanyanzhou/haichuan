@@ -1,16 +1,37 @@
-import { useCallback, useRef, useState, type CSSProperties } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
 import type { CatalogProduct } from "@/data/catalogData";
 import { getListingImage } from "@/utils/productImage";
 import { SecureImage } from "@/components/common/SecureImage";
 import { selectionInquiryApi } from "@/services/api";
-import { createIdempotencyKey } from "@/utils/idempotency";
 import { trackSubmitSelection } from "@/hooks/useAnalytics";
 import { catalogTokens as T } from "./catalogTokens";
 import useCatalogDialog from "./useCatalogDialog";
 import { useCustomerAuthStore } from "@/store/customerAuthStore";
+import { unwrapResponse } from "@/utils/unwrap";
+import { isStaleSessionResponseError } from "@/services/sessionEpoch";
+import { requestStatus } from "@/services/httpClient";
+import {
+  PRIVACY_CONSENT_CONTENT_HASH,
+  PRIVACY_CONSENT_VERSION,
+} from "@/config/privacyConsent";
+import {
+  getConsultationSubmissionStatusCopy,
+  parseConsultationSubmissionReceipt,
+  type ConsultationSubmissionReceipt,
+} from "@/services/clients/consultationSubmissionReceipt";
+import {
+  clearConsultationSubmissionAttempt,
+  clearSelectionConsultationDraft,
+  consultationDraftOwner,
+  createConsultationSubmissionFingerprint,
+  readSelectionConsultationDraft,
+  readConsultationSubmissionAttempt,
+  reserveConsultationSubmissionAttempt,
+  saveSelectionConsultationDraft,
+} from "@/utils/consultationJourneyState";
 export type SelectionLookupState = "loading" | "error" | "ready";
 
 export default function SelectionTray({
@@ -23,9 +44,15 @@ export default function SelectionTray({
   onRetry: () => void;
 }) {
   const { message } = AntdApp.useApp();
+  const location = useLocation();
   const ids = useSelectionStore((s) => s.selectedIds);
   const clear = useSelectionStore((s) => s.clear);
-  const [open, setOpen] = useState(false);
+  const removeMany = useSelectionStore((s) => s.removeMany);
+  const account = useCustomerAuthStore((state) => state.customer);
+  const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
+  const draftOwner = consultationDraftOwner(account?.id);
+  const [restoredDraft] = useState(() => readSelectionConsultationDraft(draftOwner));
+  const [open, setOpen] = useState(Boolean(restoredDraft));
   const trayButtonRef = useRef<HTMLButtonElement>(null);
   const closeDialog = useCallback(() => setOpen(false), []);
   const resolveTrayButton = useCallback(() => trayButtonRef.current, []);
@@ -36,19 +63,58 @@ export default function SelectionTray({
     resolveTrayButton,
   );
   const [submitting, setSubmitting] = useState(false);
+  const [receipt, setReceipt] = useState<ConsultationSubmissionReceipt | null>(null);
+  const receiptHeadingRef = useRef<HTMLHeadingElement>(null);
   const [submitError, setSubmitError] = useState("");
   const submitPendingRef = useRef(false);
-  const idempotencyKeyRef = useRef(createIdempotencyKey());
-  const [form, setForm] = useState({
-    customerName: "",
-    phone: "",
-    email: "",
-    wechat: "",
-    message: "",
+  const submitOperationRef = useRef(0);
+  const formOwnerRef = useRef(draftOwner);
+  const [pendingSubmission, setPendingSubmission] = useState(() => Boolean(
+    readConsultationSubmissionAttempt("selection", draftOwner),
+  ));
+  const [form, setForm] = useState(() => ({
+    customerName: restoredDraft?.customerName || "",
+    phone: restoredDraft?.phone || "",
+    email: restoredDraft?.email || "",
+    wechat: restoredDraft?.wechat || "",
+    message: restoredDraft?.message || "",
     privacyConsent: false,
-  });
-  const account = useCustomerAuthStore((state) => state.customer);
-  const isSignedIn = useCustomerAuthStore((state) => state.isLoggedIn);
+  }));
+
+  useEffect(() => {
+    if (receipt) receiptHeadingRef.current?.focus({ preventScroll: true });
+  }, [receipt]);
+
+  useEffect(() => {
+    if (restoredDraft) clearSelectionConsultationDraft();
+  }, [restoredDraft]);
+
+  useEffect(() => {
+    if (formOwnerRef.current === draftOwner) return;
+    submitOperationRef.current += 1;
+    formOwnerRef.current = draftOwner;
+    clearSelectionConsultationDraft();
+    submitPendingRef.current = false;
+    setSubmitting(false);
+    setReceipt(null);
+    setSubmitError("");
+    setPendingSubmission(Boolean(
+      readConsultationSubmissionAttempt("selection", draftOwner),
+    ));
+    setForm({
+      customerName: "",
+      phone: "",
+      email: "",
+      wechat: "",
+      message: "",
+      privacyConsent: false,
+    });
+    setOpen(false);
+  }, [draftOwner]);
+
+  useEffect(() => () => {
+    submitOperationRef.current += 1;
+  }, []);
 
   if (!ids.size) return null;
 
@@ -126,50 +192,130 @@ export default function SelectionTray({
       message.warning("请阅读并同意隐私说明");
       return;
     }
+    const operationId = ++submitOperationRef.current;
+    const requestOwner = formOwnerRef.current;
+    const isCurrentOperation = () =>
+      submitOperationRef.current === operationId
+      && formOwnerRef.current === requestOwner;
     submitPendingRef.current = true;
     setSubmitting(true);
     setSubmitError("");
+    let attemptReserved = false;
     try {
-      await selectionInquiryApi.submit(
-        {
-          customerName: isSignedIn ? undefined : form.customerName.trim(),
-          phone: isSignedIn ? undefined : form.phone.trim(),
-          email: form.email.trim() || undefined,
-          wechat: form.wechat.trim() || undefined,
-          message: form.message.trim() || undefined,
-          privacyConsent: form.privacyConsent,
-          items: selected.map((p) => ({
-            productId: p.id,
-            productNameSnapshot: p.name || p.sku,
-            productSkuSnapshot: p.sku,
-            productImageSnapshot: p.images?.[0] || "",
-          })),
-        },
-        idempotencyKeyRef.current,
-      );
-      idempotencyKeyRef.current = createIdempotencyKey();
-      trackSubmitSelection(selected.length);
-      message.success(
-        `已提交 ${selected.length} 款作品的选款咨询，我们的珠宝顾问将尽快与您联系`,
-      );
-      clear();
-      closeDialog();
-      setSubmitError("");
-      setForm({
-        customerName: "",
-        phone: "",
-        email: "",
-        wechat: "",
-        message: "",
-        privacyConsent: false,
+      const submission = {
+        customerName: isSignedIn ? undefined : form.customerName.trim(),
+        phone: isSignedIn ? undefined : form.phone.trim(),
+        email: form.email.trim() || undefined,
+        wechat: form.wechat.trim() || undefined,
+        message: form.message.trim() || undefined,
+        privacyConsent: form.privacyConsent,
+        items: selected.map((p) => ({
+          productId: p.id,
+          productNameSnapshot: p.name || p.sku,
+          productSkuSnapshot: p.sku,
+          productImageSnapshot: p.images?.[0] || "",
+        })),
+      };
+      const fingerprint = await createConsultationSubmissionFingerprint({
+        version: 1,
+        customerId: account?.id ?? null,
+        customerName: account?.name?.trim() || submission.customerName || null,
+        phone: account?.phone || submission.phone || null,
+        email: account?.email?.trim() || submission.email || null,
+        wechat: submission.wechat || null,
+        message: submission.message || null,
+        items: submission.items
+          .map((item) => ({
+            productId: item.productId,
+            productSkuSnapshot: item.productSkuSnapshot?.trim() || null,
+          }))
+          .sort((left, right) => left.productId - right.productId),
+        privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+        privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
       });
-    } catch {
-      setSubmitError("提交失败，已保留本次选款与填写内容，请重新提交。");
-      message.error("选款咨询提交失败，内容已保留");
+      const reservation = reserveConsultationSubmissionAttempt(
+        "selection",
+        requestOwner,
+        fingerprint,
+      );
+      if (reservation.status === "conflict") {
+        setPendingSubmission(true);
+        setSubmitError(
+          "当前内容与一笔结果待确认的选款咨询不同。请恢复原内容重试，或先明确放弃恢复。",
+        );
+        return;
+      }
+      attemptReserved = true;
+      if (reservation.recovered) setPendingSubmission(true);
+      const response = await selectionInquiryApi.submit(
+        submission,
+        reservation.attempt.key,
+      );
+      if (!isCurrentOperation()) return;
+      const nextReceipt = parseConsultationSubmissionReceipt(
+        unwrapResponse<unknown>(response),
+      );
+      if (!nextReceipt) throw new Error("选款咨询回执响应不完整");
+      clearConsultationSubmissionAttempt("selection", requestOwner);
+      setPendingSubmission(false);
+      trackSubmitSelection(selected.length);
+      clearSelectionConsultationDraft();
+      setReceipt(nextReceipt);
+      message.success(
+        `已提交 ${selected.length} 款作品的选款咨询，回执编号 #${nextReceipt.sourceId}`,
+      );
+      setSubmitError("");
+    } catch (error: unknown) {
+      if (!isCurrentOperation() || isStaleSessionResponseError(error)) return;
+      if (!attemptReserved) {
+        setPendingSubmission(false);
+        setSubmitError("浏览器暂时无法准备安全提交，请刷新页面后重试。");
+        message.error("暂时无法准备安全提交");
+        return;
+      }
+      const status = requestStatus(error);
+      if (status && status >= 400 && status < 500 && status !== 409 && status !== 429) {
+        clearConsultationSubmissionAttempt("selection", requestOwner);
+        setPendingSubmission(false);
+        setSubmitError("提交信息未通过校验，请检查作品与联系方式后重试。");
+        message.error("选款咨询未提交，请检查内容");
+      } else {
+        setPendingSubmission(true);
+        setSubmitError(
+          status === 409
+            ? "幂等凭据与既有提交冲突，请先放弃恢复再发起新咨询。"
+            : "提交结果待确认。请保持内容不变并重试，系统会复用原请求查回回执。",
+        );
+        message.error("选款咨询结果待确认，内容与恢复凭据已保留");
+      }
     } finally {
-      submitPendingRef.current = false;
-      setSubmitting(false);
+      if (isCurrentOperation()) {
+        submitPendingRef.current = false;
+        setSubmitting(false);
+      }
     }
+  };
+
+  const abandonPendingSubmission = () => {
+    clearConsultationSubmissionAttempt("selection", formOwnerRef.current);
+    setPendingSubmission(false);
+    setSubmitError(
+      "已放弃恢复；这不会撤销服务器上可能已生效的选款咨询。确认确需新建后可再次提交。",
+    );
+  };
+
+  const finishReceipt = () => {
+    clear();
+    setReceipt(null);
+    setForm({
+      customerName: "",
+      phone: "",
+      email: "",
+      wechat: "",
+      message: "",
+      privacyConsent: false,
+    });
+    closeDialog();
   };
 
   const inputStyle: CSSProperties = {
@@ -300,6 +446,83 @@ export default function SelectionTray({
               ✕
             </button>
 
+            {receipt ? (
+              <div role="status" aria-live="polite" style={{ textAlign: "center" }}>
+                <h2
+                  id="selection-inquiry-title"
+                  ref={receiptHeadingRef}
+                  tabIndex={-1}
+                  style={{
+                    margin: "12px 0 8px",
+                    color: T.txt,
+                    fontSize: 20,
+                    fontWeight: 400,
+                    outline: "none",
+                  }}
+                >
+                  选款咨询已提交
+                </h2>
+                <p style={{ margin: "0 0 20px", color: T.sec, fontSize: 13, lineHeight: 1.7 }}>
+                  已收到 {selected.length} 款作品，珠宝顾问会按您提供的方式联系。
+                </p>
+                <dl
+                  aria-label="选款咨询回执"
+                  style={{
+                    margin: "0 0 24px",
+                    padding: "16px 18px",
+                    border: `1px solid ${T.line}`,
+                    display: "grid",
+                    gridTemplateColumns: "auto 1fr",
+                    gap: "8px 18px",
+                    textAlign: "left",
+                    fontSize: 13,
+                  }}
+                >
+                  <dt style={{ color: T.sec }}>咨询编号</dt>
+                  <dd style={{ margin: 0, color: T.txt }}>#{receipt.sourceId}</dd>
+                  <dt style={{ color: T.sec }}>当前状态</dt>
+                  <dd style={{ margin: 0, color: T.txt }}>
+                    {getConsultationSubmissionStatusCopy(receipt.status)}
+                  </dd>
+                  <dt style={{ color: T.sec }}>提交时间</dt>
+                  <dd style={{ margin: 0, color: T.txt }}>
+                    {new Date(receipt.createdAt).toLocaleString("zh-CN")}
+                  </dd>
+                </dl>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {isSignedIn ? (
+                    <Link
+                      to={`/customer?section=consultations&leadId=${receipt.leadId}`}
+                      onClick={finishReceipt}
+                      style={{
+                        minHeight: 44,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        border: `1px solid ${T.txt}`,
+                        color: T.txt,
+                        textDecoration: "none",
+                      }}
+                    >
+                      查看本次咨询
+                    </Link>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={finishReceipt}
+                    style={{
+                      minHeight: 44,
+                      border: 0,
+                      background: T.txt,
+                      color: "#FFFFFF",
+                      cursor: "pointer",
+                    }}
+                  >
+                    完成并清空选款
+                  </button>
+                </div>
+              </div>
+            ) : <>
             <h2
               id="selection-inquiry-title"
               style={{
@@ -316,45 +539,81 @@ export default function SelectionTray({
               款作品，请填写联系方式，珠宝顾问将为您提供一对一服务
             </p>
 
-            {/* 已选作品缩略图 */}
-            <div
+            {/* 提交前以可识别清单核对全部作品，并允许逐项纠错。 */}
+            <ul
+              aria-label="本次选款作品"
               style={{
-                display: "flex",
-                gap: 8,
-                marginBottom: 20,
-                flexWrap: "wrap",
+                display: "grid",
+                gap: 10,
+                margin: "0 0 20px",
+                padding: 0,
+                maxHeight: 220,
+                overflowY: "auto",
+                listStyle: "none",
               }}
             >
-              {selected.slice(0, 6).map((p) => (
-                <div
+              {selected.map((p) => (
+                <li
                   key={p.id}
                   style={{
-                    width: 52,
-                    height: 52,
-                    background: T.imgBg,
-                    overflow: "hidden",
-                    flexShrink: 0,
+                    display: "grid",
+                    gridTemplateColumns: "52px minmax(0, 1fr) auto",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "8px 0",
+                    borderBottom: `1px solid ${T.line}`,
                   }}
                 >
-                  <SecureImage
-                    src={p.images?.[0] || getListingImage(p)}
-                    alt={p.sku}
+                  <div
                     style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "contain",
+                      width: 52,
+                      height: 52,
+                      background: T.imgBg,
+                      overflow: "hidden",
                     }}
-                  />
-                </div>
+                  >
+                    <SecureImage
+                      src={p.images?.[0] || getListingImage(p)}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                    />
+                  </div>
+                  <span style={{ minWidth: 0 }}>
+                    <strong
+                      style={{
+                        display: "block",
+                        color: T.txt,
+                        fontSize: 13,
+                        fontWeight: 400,
+                        lineHeight: 1.5,
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {p.name || p.sku}
+                    </strong>
+                    <span style={{ display: "block", color: T.sec, fontSize: 11, lineHeight: 1.5 }}>
+                      作品编号 {p.sku}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`移除 ${p.name || p.sku}`}
+                    onClick={() => removeMany([p.id])}
+                    style={{
+                      minWidth: 44,
+                      minHeight: 44,
+                      border: 0,
+                      background: "transparent",
+                      color: T.sec,
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}
+                  >
+                    移除
+                  </button>
+                </li>
               ))}
-              {selected.length > 6 && (
-                <span
-                  style={{ fontSize: 11, color: T.sec, alignSelf: "center" }}
-                >
-                  +{selected.length - 6} 款
-                </span>
-              )}
-            </div>
+            </ul>
 
             {/* 表单 */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -527,7 +786,19 @@ export default function SelectionTray({
                 我已阅读并同意
                 <Link
                   to="/privacy"
-                  onClick={(e) => e.stopPropagation()}
+                  state={{
+                    privacyReturnTo: `${location.pathname}${location.search}`,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    saveSelectionConsultationDraft(draftOwner, {
+                      customerName: form.customerName,
+                      phone: form.phone,
+                      email: form.email,
+                      wechat: form.wechat,
+                      message: form.message,
+                    });
+                  }}
                   style={{ color: T.txt, textDecoration: "underline" }}
                 >
                   隐私说明
@@ -535,6 +806,40 @@ export default function SelectionTray({
                 ，提交的信息仅用于选款咨询与顾问联系。
               </span>
             </label>
+
+            {pendingSubmission ? (
+              <div
+                role="status"
+                style={{
+                  marginTop: 16,
+                  border: `1px solid ${T.line}`,
+                  background: T.bgWarm,
+                  color: T.sec,
+                  padding: "10px 12px",
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                }}
+              >
+                <p style={{ margin: "0 0 8px" }}>
+                  存在一笔结果待确认的选款咨询。保持原内容重试可安全查回原回执；新建前请先明确放弃恢复。
+                </p>
+                <button
+                  type="button"
+                  onClick={abandonPendingSubmission}
+                  style={{
+                    minHeight: 44,
+                    border: 0,
+                    padding: "0 8px",
+                    background: "transparent",
+                    color: T.txt,
+                    textDecoration: "underline",
+                    cursor: "pointer",
+                  }}
+                >
+                  放弃恢复并准备新建
+                </button>
+              </div>
+            ) : null}
 
             {submitError ? (
               <div
@@ -573,6 +878,7 @@ export default function SelectionTray({
                 ? "提交中…"
                 : `${submitError ? "重新" : ""}提交选款咨询（${selected.length} 款）`}
             </button>
+            </>}
           </div>
         </>
       )}

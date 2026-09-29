@@ -1,11 +1,24 @@
 /**
  * renderParity.tsx — 公开端与编辑器画布共享的渲染一致性规则。
  *
- * 公开端与编辑器共同使用本地素材缺失检测，保证"画布≈前台"。
+ * 编辑器主动检测本地素材缺失；公开端由实际图片请求处理失败，避免重复占用首屏连接。
+ * 受治理的 `/uploads/page-assets/` 在未完成公开授权前，公开地址会 404；
+ * 编辑器探测必须走登录预览端点，否则画布会把刚替换的图误判为已删除。
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
 
 export const LOCAL_UPLOAD_PREFIX = "/uploads/";
+
+/** 编辑器 HEAD 探测地址：page-assets 改走需登录的预览端点。 */
+export function resolveEditorMediaProbeUrl(url: string): string {
+  return resolveManagedTemplateMediaPreviewUrl(url) || url;
+}
+
+/** 只有确认文件不存在时才把画布整块换成占位；429/5xx 是拥塞，不是素材已删除。 */
+export function editorMediaProbeIndicatesMissing(status: number): boolean {
+  return status === 404 || status === 410;
+}
 
 /** 保留调用边界；当前不再为已删除模板做色值兼容转换。 */
 export function normalizeLegacyRenderColors(value: unknown): unknown {
@@ -47,7 +60,7 @@ export function getLocalUploadUrls(props: AssetRecord): string[] {
   return [...urls];
 }
 
-/** HEAD 探测区块引用的本地素材是否仍然存在（素材被删后两端都显示占位）。 */
+/** 编辑态 HEAD 探测区块引用的本地素材是否仍然存在。 */
 export function useHasMissingAssets(props: AssetRecord): boolean {
   const urlsKey = useMemo(
     () => getLocalUploadUrls(props || {}).join("\n"),
@@ -65,12 +78,15 @@ export function useHasMissingAssets(props: AssetRecord): boolean {
 
     void Promise.all(
       urls.map((url) =>
-        fetch(url, { method: "HEAD" })
-          .then((response) => response.ok)
+        fetch(resolveEditorMediaProbeUrl(url), {
+          method: "HEAD",
+          credentials: "same-origin",
+        })
+          .then((response) => editorMediaProbeIndicatesMissing(response.status))
           .catch(() => false),
       ),
-    ).then((available) => {
-      if (!cancelled) setHasMissingAsset(available.some((value) => !value));
+    ).then((missingFlags) => {
+      if (!cancelled) setHasMissingAsset(missingFlags.some(Boolean));
     });
 
     return () => {

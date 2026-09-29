@@ -1,11 +1,22 @@
-import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpStatus,
+  Injectable,
+} from '@nestjs/common';
 import { ApiError } from '../../common/errors/api-error';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { PRIVACY_CONSENT_VERSION } from '../../common/privacy/privacy-consent';
+import {
+  PRIVACY_CONSENT_CONTENT_HASH,
+  PRIVACY_CONSENT_VERSION,
+} from '../../common/privacy/privacy-consent';
 import { ProductsService } from '../products/products.service';
 import { Prisma } from '@prisma/client';
 import { CreateInquiryDto } from './dto/create-inquiry.dto';
-import type { CustomerPrincipal } from '../../common/security/authenticated-principal';
+import type {
+  CustomerPrincipal,
+  StaffPrincipal,
+} from '../../common/security/authenticated-principal';
 import {
   assertMatchingSubmission,
   isUniqueConstraintError,
@@ -16,6 +27,7 @@ import {
   CUSTOMER_INQUIRY_SUBMISSION_SELECT,
   toCustomerInquirySubmission,
 } from './customer-inquiry.response';
+import { lockActiveCustomerForWrite } from '../customers/customer-write-gate';
 
 @Injectable()
 export class InquiriesService {
@@ -25,19 +37,81 @@ export class InquiriesService {
     private readonly leadsService: LeadsService,
   ) {}
 
+  private requireStaffActor(
+    actor: Pick<StaffPrincipal, 'id' | 'sessionFamilyId'> | number | undefined,
+  ) {
+    const principal = typeof actor === 'number' ? { id: actor } : actor;
+    if (!principal || !Number.isInteger(principal.id) || principal.id <= 0) {
+      throw new ForbiddenException('无法确认咨询记录查看人');
+    }
+    return principal;
+  }
+
+  private async lockStaffReader(
+    transaction: Prisma.TransactionClient,
+    actor: Pick<StaffPrincipal, 'id' | 'sessionFamilyId'>,
+  ) {
+    const user = await transaction.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE') FOR SHARE`,
+    );
+    if (user.length !== 1) {
+      throw new ForbiddenException('当前员工已停用或无权查看咨询记录');
+    }
+    if (!actor.sessionFamilyId) return;
+    const session = await transaction.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+    );
+    if (session.length !== 1) {
+      throw new ForbiddenException('当前员工会话已失效，不能继续查看咨询记录');
+    }
+  }
+
+  private async findIdempotentSubmission(
+    client: Pick<Prisma.TransactionClient, 'lead' | 'inquiry'>,
+    idempotencyKeyHash: string,
+    submissionFingerprint: string,
+  ) {
+    const existing = await client.lead.findUnique({
+      where: { idempotencyKeyHash },
+      select: {
+        sourceType: true,
+        submissionFingerprint: true,
+        inquiryId: true,
+      },
+    });
+    if (!existing) return null;
+
+    assertMatchingSubmission(
+      existing,
+      'INQUIRY',
+      submissionFingerprint,
+    );
+    if (!existing.inquiryId) {
+      throw new BadRequestException('幂等提交记录不完整');
+    }
+    return client.inquiry.findUniqueOrThrow({
+      where: { id: existing.inquiryId },
+      select: CUSTOMER_INQUIRY_SUBMISSION_SELECT,
+    });
+  }
+
   async findAll(params: {
     page?: number;
     pageSize?: number;
     status?: string;
-  }) {
+  }, actorInput?: Pick<StaffPrincipal, 'id' | 'sessionFamilyId'> | number) {
+    const actor = this.requireStaffActor(actorInput);
     const { page = 1, pageSize = 20, status } = params;
     const where: Prisma.InquiryWhereInput = {};
     if (status) where.status = status;
-    const [list, total] = await Promise.all([
-      this.prisma.inquiry.findMany({ where, skip: (+page - 1) * +pageSize, take: +pageSize, orderBy: { createdAt: 'desc' }, include: { product: { select: { name: true } }, assignee: { select: { realName: true } } } }),
-      this.prisma.inquiry.count({ where }),
-    ]);
-    return { list, total, page: +page, pageSize: +pageSize };
+    return this.prisma.$transaction(async (transaction) => {
+      await this.lockStaffReader(transaction, actor);
+      const [list, total] = await Promise.all([
+        transaction.inquiry.findMany({ where, skip: (+page - 1) * +pageSize, take: +pageSize, orderBy: { createdAt: 'desc' }, include: { product: { select: { name: true } }, assignee: { select: { realName: true } } } }),
+        transaction.inquiry.count({ where }),
+      ]);
+      return { list, total, page: +page, pageSize: +pageSize };
+    });
   }
 
   async create(
@@ -66,21 +140,6 @@ export class InquiriesService {
     ) {
       throw new BadRequestException('作品信息不正确，请返回作品页后重试');
     }
-    if (productId !== undefined) {
-      // 只信任已验证令牌派生出的 customer；游客仅可关联 PUBLIC，
-      // 会员和已审核合作客户沿用商品目录的同一套可见性边界。
-      const visibleProductIds = await this.productsService.filterVisibleProductIds(
-        [productId],
-        customer,
-      );
-      if (!visibleProductIds.has(productId)) {
-        throw new ApiError(
-          HttpStatus.BAD_REQUEST,
-          'INQUIRY_PRODUCT_NOT_AVAILABLE',
-          '作品当前不可咨询，请移除作品后提交普通咨询',
-        );
-      }
-    }
     const customerEmail = customer?.email || data.customerEmail?.trim() || data.email?.trim() || null;
     const idempotency = prepareLeadIdempotency(data.idempotencyKey, {
       sourceType: 'INQUIRY',
@@ -94,33 +153,62 @@ export class InquiriesService {
       preferredTime: data.preferredTime || null,
       budgetRange: data.budgetRange || null,
       message: data.message,
-      privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+      privacyConsentVersion: data.privacyConsentVersion,
+      privacyConsentContentHash: data.privacyConsentContentHash,
     });
+
+    if (idempotency.idempotencyKeyHash) {
+      // 已提交请求的安全重放必须先于作品当前可见性校验。否则首次提交已落库、
+      // 响应丢失后作品恰好下架，客户端用同一键恢复时会被错误拒绝并失去 canonical Lead 回执。
+      // 已登录客户仍在同一事务中锁定并复核 ACTIVE/authVersion，不能借重放绕过注销。
+      const replay = await this.prisma.$transaction(async (transaction) => {
+        if (customer) {
+          await lockActiveCustomerForWrite(transaction, customer);
+        }
+        return this.findIdempotentSubmission(
+          transaction,
+          idempotency.idempotencyKeyHash as string,
+          idempotency.submissionFingerprint,
+        );
+      });
+      if (replay) return toCustomerInquirySubmission(replay);
+    }
+
+    if (
+      data.privacyConsentVersion !== PRIVACY_CONSENT_VERSION
+      || data.privacyConsentContentHash !== PRIVACY_CONSENT_CONTENT_HASH
+    ) {
+      throw new BadRequestException('隐私说明已更新，请刷新页面后重新提交');
+    }
+
     const privacyConsentedAt = new Date();
 
     const create = async () => this.prisma.$transaction(async (transaction) => {
+      const lockedCustomer = customer
+        ? await lockActiveCustomerForWrite(transaction, customer)
+        : undefined;
       if (idempotency.idempotencyKeyHash) {
-        const existing = await transaction.lead.findUnique({
-          where: { idempotencyKeyHash: idempotency.idempotencyKeyHash },
-          select: {
-            sourceType: true,
-            submissionFingerprint: true,
-            inquiryId: true,
-          },
-        });
-        if (existing) {
-          assertMatchingSubmission(
-            existing,
-            'INQUIRY',
-            idempotency.submissionFingerprint,
+        const existing = await this.findIdempotentSubmission(
+          transaction,
+          idempotency.idempotencyKeyHash,
+          idempotency.submissionFingerprint,
+        );
+        if (existing) return existing;
+      }
+      if (productId !== undefined) {
+        // 作品资格与咨询写入共用一个 Serializable 事务。合作资格审核与本路径
+        // 竞争同一客户行锁，因此不能用 Guard 时刻的旧 partnerStatus 创建新咨询。
+        const visibleProductIds = await this.productsService.filterVisibleProductIds(
+          [productId],
+          lockedCustomer,
+          transaction,
+        );
+        if (!visibleProductIds.has(productId)) {
+          throw new ApiError(
+            HttpStatus.BAD_REQUEST,
+            'INQUIRY_PRODUCT_NOT_AVAILABLE',
+            '作品当前不可咨询，请移除作品后提交普通咨询',
           );
-          if (!existing.inquiryId) {
-            throw new BadRequestException('幂等提交记录不完整');
-          }
-          return transaction.inquiry.findUniqueOrThrow({
-            where: { id: existing.inquiryId },
-            select: CUSTOMER_INQUIRY_SUBMISSION_SELECT,
-          });
         }
       }
 
@@ -138,6 +226,7 @@ export class InquiriesService {
           message: data.message,
           privacyConsent: true,
           privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+          privacyConsentHash: PRIVACY_CONSENT_CONTENT_HASH,
           privacyConsentedAt,
           status: 'PENDING',
           lead: {
@@ -167,13 +256,14 @@ export class InquiriesService {
           purpose: 'SERVICE_PRIVACY',
           decision: 'GRANTED',
           policyVersion: PRIVACY_CONSENT_VERSION,
+          policyContentHash: PRIVACY_CONSENT_CONTENT_HASH,
           locale: 'ZH_CN',
           source: `inquiry:${inquiry.id}`,
           decidedAt: privacyConsentedAt,
         },
       });
       return inquiry;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     try {
       return toCustomerInquirySubmission(await create());
@@ -181,40 +271,47 @@ export class InquiriesService {
       if (!idempotency.idempotencyKeyHash || !isUniqueConstraintError(error)) {
         throw error;
       }
-      const existing = await this.prisma.lead.findUnique({
-        where: { idempotencyKeyHash: idempotency.idempotencyKeyHash },
-        select: {
-          sourceType: true,
-          submissionFingerprint: true,
-          inquiryId: true,
-        },
+      const existing = await this.prisma.$transaction(async (transaction) => {
+        if (customer) {
+          await lockActiveCustomerForWrite(transaction, customer);
+        }
+        return this.findIdempotentSubmission(
+          transaction,
+          idempotency.idempotencyKeyHash as string,
+          idempotency.submissionFingerprint,
+        );
       });
       if (!existing) throw error;
-      assertMatchingSubmission(
-        existing,
-        'INQUIRY',
-        idempotency.submissionFingerprint,
-      );
-      if (!existing.inquiryId) throw error;
-      const inquiry = await this.prisma.inquiry.findUniqueOrThrow({
-        where: { id: existing.inquiryId },
-        select: CUSTOMER_INQUIRY_SUBMISSION_SELECT,
-      });
-      return toCustomerInquirySubmission(inquiry);
+      return toCustomerInquirySubmission(existing);
     }
   }
 
-  async assign(id: number, assignedTo: number, createdBy?: number) {
+  async assign(
+    id: number,
+    assignedTo: number,
+    idempotencyKey: string | undefined,
+    createdBy?: Pick<StaffPrincipal, 'id' | 'sessionFamilyId'> | number,
+  ) {
     return this.leadsService.updateBySource(
       'inquiry',
       id,
       { assignedTo },
+      idempotencyKey,
       createdBy,
     );
   }
 
-  async reply(id: number, reply: string, createdBy?: number) {
-    // 回复是审计活动，不自动宣称已经完成首次联系；状态由客服显式流转。
-    return this.leadsService.recordInquiryReply(id, reply, createdBy);
+  async reply(
+    sourceId: number,
+    data: { reply: string; expectedUpdatedAt: string },
+    idempotencyKey: string | undefined,
+    createdBy?: Pick<StaffPrincipal, 'id' | 'sessionFamilyId'> | number,
+  ) {
+    return this.leadsService.replyToInquirySource(
+      sourceId,
+      data,
+      idempotencyKey,
+      createdBy,
+    );
   }
 }

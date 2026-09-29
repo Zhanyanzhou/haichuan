@@ -1,10 +1,10 @@
 /**
  * UnsavedChangesGuard.tsx — SPA 路由级未保存拦截（2026-08-16 批次 D）。
  * 依赖数据路由（createBrowserRouter，见 main.tsx），声明式 BrowserRouter 下 useBlocker 不可用。
- * 两个直接选项：保存并离开（主）/ 继续编辑。
+ * 三个直接选项：保存并离开（主）/ 放弃修改 / 继续编辑。
  * 仅拦截 pathname 变化（编辑器状态按路径隔离，search 变化无需拦截）。
  */
-import { Modal, message } from "antd";
+import { Button, Modal, message } from "antd";
 import { useState } from "react";
 import { useBlocker } from "react-router-dom";
 
@@ -52,22 +52,34 @@ export default function UnsavedChangesGuard({
     setSaving(false);
   };
 
+  const handleDiscardAndLeave = () => {
+    if (saving) return;
+    blocker.proceed();
+  };
+
   return (
     <>
       {messageContext}
       <Modal
         open
         rootClassName={rootClassName}
-        title="保存后离开？"
-        okText="保存并离开"
-        cancelText="继续编辑"
-        confirmLoading={saving}
-        closable={false}
+        title="离开当前编辑？"
+        closable={!saving}
         maskClosable={false}
-        onOk={() => void handleSaveAndLeave()}
         onCancel={blocker.reset}
+        footer={[
+          <Button key="continue" disabled={saving} onClick={blocker.reset}>
+            继续编辑
+          </Button>,
+          <Button key="discard" danger disabled={saving} onClick={handleDiscardAndLeave}>
+            放弃修改
+          </Button>,
+          <Button key="save" type="primary" loading={saving} onClick={() => void handleSaveAndLeave()}>
+            保存并离开
+          </Button>,
+        ]}
       >
-        {subject}有未保存修改。保存成功后将直接离开；保存失败会留在当前页面。
+        {subject}有未保存修改。你可以先保存，也可以放弃这些修改后离开；保存失败会留在当前页面。
       </Modal>
     </>
   );

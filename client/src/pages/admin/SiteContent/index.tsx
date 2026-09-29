@@ -100,6 +100,40 @@ function hasSiteContent(values: SiteContentValues | null): values is SiteContent
   });
 }
 
+function projectSiteContentResource(value: unknown): SiteContentValues {
+  if (value === null || value === undefined) return {};
+  if (!isRecord(value)) throw new Error("站点资料响应无效");
+  const projected: SiteContentValues = {};
+  for (const field of SITE_CONTENT_FIELDS) {
+    const fieldValue = value[field];
+    if (fieldValue === undefined) continue;
+    if (field === "publishedLocales") {
+      if (!Array.isArray(fieldValue) || fieldValue.some((locale) => typeof locale !== "string")) {
+        throw new Error("站点公开语言响应无效");
+      }
+      projected.publishedLocales = [...fieldValue];
+      continue;
+    }
+    if (field === "brandPresentationMode") {
+      if (fieldValue === "") continue;
+      if (fieldValue !== "logo" && fieldValue !== "text-only") {
+        throw new Error("站点品牌展示方式响应无效");
+      }
+      projected.brandPresentationMode = fieldValue;
+      continue;
+    }
+    if (typeof fieldValue !== "string") {
+      throw new Error(`站点资料字段 ${field} 响应无效`);
+    }
+    projected[field] = fieldValue;
+  }
+  return projected;
+}
+
+function readSiteContentResponse(response: unknown): SiteContentValues {
+  return projectSiteContentResource(unwrapResponse<unknown>(response));
+}
+
 export default function SiteContent() {
   const { message } = AntdApp.useApp();
   const [form] = Form.useForm();
@@ -113,8 +147,19 @@ export default function SiteContent() {
   const [dirty, setDirty] = useState(false);
   const [readiness, setReadiness] = useState<SitePublicationReadiness | null>(null);
   const [readinessState, setReadinessState] = useState<"loading" | "ready" | "error">("loading");
+  const [saveReadbackPending, setSaveReadbackPending] = useState(false);
+  const [saveReadbackLoading, setSaveReadbackLoading] = useState(false);
   const readinessRequestRef = useRef(0);
   const savingRef = useRef(false);
+
+  const applyPersistedSettings = useCallback((values: SiteContentValues) => {
+    setLoadedValues(values);
+    form.setFieldsValue(Object.fromEntries(
+      SITE_CONTENT_FIELDS.map((field) => [field, values[field]]),
+    ));
+    setLoadState(hasSiteContent(values) ? "ready" : "empty");
+    setDirty(false);
+  }, [form]);
 
   const loadReadiness = useCallback(async () => {
     const requestId = ++readinessRequestRef.current;
@@ -142,19 +187,14 @@ export default function SiteContent() {
     setLoadError(null);
     try {
       const res = await settingsApi.getSettings();
-      const data = unwrapResponse<SiteContentValues | null>(res);
-      setLoadedValues({
-        ...data,
-        brandPresentationMode: data?.brandPresentationMode === "logo" || data?.brandPresentationMode === "text-only"
-          ? data.brandPresentationMode : undefined,
-      });
-      setLoadState(hasSiteContent(data) ? "ready" : "empty");
+      applyPersistedSettings(readSiteContentResponse(res));
+      setSaveReadbackPending(false);
       void loadReadiness();
     } catch (error) {
       setLoadError(error);
       setLoadState("error");
     }
-  }, [loadReadiness]);
+  }, [applyPersistedSettings, loadReadiness]);
 
   useEffect(() => {
     void loadSettings();
@@ -200,6 +240,23 @@ export default function SiteContent() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
 
+  const retrySaveReadback = useCallback(async () => {
+    if (!saveReadbackPending || saveReadbackLoading) return;
+    setSaveReadbackLoading(true);
+    try {
+      const response = await settingsApi.getSettings();
+      applyPersistedSettings(readSiteContentResponse(response));
+      setSaveReadbackPending(false);
+      message.success("已重新读取保存结果");
+      void loadReadiness();
+    } catch {
+      readinessRequestRef.current += 1;
+      setReadinessState("error");
+    } finally {
+      setSaveReadbackLoading(false);
+    }
+  }, [applyPersistedSettings, loadReadiness, message, saveReadbackLoading, saveReadbackPending]);
+
   const saveCurrentValues = async (): Promise<boolean> => {
     if (savingRef.current) return false;
     if (loadState !== "empty" && loadState !== "ready") {
@@ -208,31 +265,58 @@ export default function SiteContent() {
     }
     savingRef.current = true;
     setSaving(true);
+    let values: SiteContentValues;
     try {
-      const values = await form.validateFields();
-      await settingsApi.updateSettings(values);
-      setLoadedValues(values);
-      setLoadState(hasSiteContent(values) ? "ready" : "empty");
-      setDirty(false);
+      values = await form.validateFields();
+    } catch (error) {
+      const invalid = hasFormErrorFields(error)
+        ? ((error as { errorFields: Array<{ name?: string[] }> }).errorFields)[0]?.name?.[0]
+        : undefined;
+      const field = getSitePublicationField(invalid ?? null);
+      if (field) focusField(field);
+      savingRef.current = false;
+      setSaving(false);
+      return false;
+    }
+
+    let writeResponse: unknown;
+    try {
+      writeResponse = await settingsApi.updateSettings(values);
+    } catch (error) {
+      message.error(
+        getSafeAdminErrorMessage(error, "店铺资料保存失败，请检查填写内容后重试。"),
+      );
+      savingRef.current = false;
+      setSaving(false);
+      return false;
+    }
+
+    let writeResource: SiteContentValues;
+    try {
+      writeResource = readSiteContentResponse(writeResponse);
+    } catch {
+      // PUT 已明确成功时不得再次写入；若响应异常，先保留已校验的提交值，随后只用 GET 核验。
+      writeResource = projectSiteContentResource(values);
+    }
+
+    try {
+      const readbackResponse = await settingsApi.getSettings();
+      applyPersistedSettings(readSiteContentResponse(readbackResponse));
+      setSaveReadbackPending(false);
       message.success("店铺资料已保存");
       void loadReadiness();
-      return true;
-    } catch (error) {
-      // 校验失败由 antd 字段内提示；提交失败保持留在页面等待重试。
-      if (!hasFormErrorFields(error)) {
-        message.error(
-          getSafeAdminErrorMessage(error, "店铺资料保存失败，请检查填写内容后重试。"),
-        );
-      } else {
-        const invalid = ((error as { errorFields: Array<{ name?: string[] }> }).errorFields)[0]?.name?.[0];
-        const field = getSitePublicationField(invalid ?? null);
-        if (field) focusField(field);
-      }
-      return false;
+    } catch {
+      applyPersistedSettings(writeResource);
+      setSaveReadbackPending(true);
+      readinessRequestRef.current += 1;
+      setReadiness(null);
+      setReadinessState("error");
+      message.warning("店铺资料已保存，但重新读取与发布准备度确认暂时失败");
     } finally {
       savingRef.current = false;
       setSaving(false);
     }
+    return true;
   };
 
   const onFinish = async () => {
@@ -255,7 +339,7 @@ export default function SiteContent() {
     return false; // 阻止默认上传行为
   };
 
-  const canEdit = loadState === "empty" || loadState === "ready";
+  const canEdit = (loadState === "empty" || loadState === "ready") && !saveReadbackPending;
 
   return (
     <div>
@@ -287,6 +371,24 @@ export default function SiteContent() {
             message="这些资料会用于网站页眉、页脚、联系入口及浏览器默认搜索信息。"
             style={{ maxWidth: 680, marginBottom: 20 }}
           />
+          {saveReadbackPending ? (
+            <Alert
+              type="warning"
+              showIcon
+              message="店铺资料已保存，但重新读取与发布准备度确认暂时失败"
+              description="当前显示保存接口返回的权威结果。为避免重复写入，资料编辑已暂停；重新读取只会查询服务端，不会再次保存。"
+              action={(
+                <Button
+                  size="small"
+                  loading={saveReadbackLoading}
+                  onClick={() => void retrySaveReadback()}
+                >
+                  重新读取已保存资料
+                </Button>
+              )}
+              style={{ maxWidth: 680, marginBottom: 20 }}
+            />
+          ) : null}
           <section aria-label="站点发布准备度" style={{ maxWidth: 680, marginBottom: 20 }}>
             <Alert
               showIcon
@@ -297,7 +399,9 @@ export default function SiteContent() {
                     : readiness?.ready ? "站点资料已满足发布要求" : `站点资料还有 ${readiness?.blockers.length ?? 0} 项待完善`}
               description={<>
                 <p>{readinessState === "error"
-                  ? "表单仍可编辑和保存。准备度尚未确认，请重新检查后再返回装修页发布。"
+                  ? saveReadbackPending
+                    ? "保存已成功，但当前还无法确认服务端回读和发布准备度。请先重新读取已保存资料。"
+                    : "表单仍可编辑和保存。准备度尚未确认，请重新检查后再返回装修页发布。"
                   : "检查结果只针对已保存的站点资料；页面内容仍需在装修页单独检查并发布。"}</p>
                 {readinessState === "ready" && readiness && !readiness.ready ? <ul style={{ paddingLeft: 20, marginBottom: 12 }}>
                   {readiness.blockers.map((blocker) => {
@@ -310,7 +414,7 @@ export default function SiteContent() {
                     </li>;
                   })}
                 </ul> : null}
-                <Button size="small" loading={readinessState === "loading"} disabled={saving}
+                <Button size="small" loading={readinessState === "loading"} disabled={saving || saveReadbackPending}
                   onClick={() => void loadReadiness()}>重新检查发布准备度</Button>
                 <Link to="/admin/editor/home" style={{ marginLeft: 12 }}>返回店铺装修</Link>
               </>}
@@ -319,7 +423,7 @@ export default function SiteContent() {
           <Form
             name="site-content"
             form={form}
-            disabled={saving}
+            disabled={saving || saveReadbackPending}
             onFinish={onFinish}
             onValuesChange={() => setDirty(true)}
             scrollToFirstError={{ block: "center", focus: true }}

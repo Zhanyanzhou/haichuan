@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   MessageEvent,
   NotFoundException,
@@ -14,7 +15,6 @@ import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 import {
   CONTENT_TEMPLATE_ASSET_POLICY,
   CONTENT_TEMPLATE_BY_MODULE_TYPE,
-  CONTENT_TEMPLATE_REGISTRY,
   CONTENT_TEMPLATE_PAGE_METADATA,
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
   createContentTemplatePublicationAttestation,
@@ -31,7 +31,6 @@ import {
   sanitizeContentTemplateLayoutData,
   withoutContentTemplatePublicationAttestation,
   type ContentTemplateIssue,
-  type ContentTemplateContract,
 } from "./content-template-contract";
 import { customerFacingProductWhereForVisibilities } from "../products/product-eligibility";
 import {
@@ -63,6 +62,7 @@ import {
 } from "./page-document-localization";
 import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
 import { resolveMediaStorageRoots } from "../upload/media-storage-paths";
+import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 import {
   buildManagedMediaShadowReport,
   buildMediaPublicationManifestRows,
@@ -185,6 +185,10 @@ type PageValidationDb = Pick<
   "siteSetting" | "product" | "category" | "dynamicTemplateVersion"
 >;
 
+type PageDocumentStaffActor = Pick<StaffPrincipal, "id" | "sessionFamilyId">;
+type PageDocumentStaffActorInput = PageDocumentStaffActor | number | undefined;
+type PageDocumentStaffRole = "SUPER_ADMIN" | "ADMIN" | "EDITOR";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -230,11 +234,72 @@ export class PageModulesService {
     this.publicEvents.setMaxListeners(0);
   }
 
-  private requirePersonalTemplateOwner(ownerId?: number) {
-    if (!Number.isInteger(ownerId) || Number(ownerId) <= 0) {
-      throw new BadRequestException("当前登录身份无效");
+  private requireStaffActor(actor: PageDocumentStaffActorInput): PageDocumentStaffActor {
+    const id = typeof actor === "number" ? actor : actor?.id;
+    if (!Number.isInteger(id) || Number(id) <= 0) {
+      throw new BadRequestException("缺少有效的页面装修员工身份");
     }
-    return Number(ownerId);
+    return {
+      id: Number(id),
+      ...(typeof actor === "object" && actor?.sessionFamilyId
+        ? { sessionFamilyId: actor.sessionFamilyId }
+        : {}),
+    };
+  }
+
+  private async lockActiveStaffSession(
+    transaction: Prisma.TransactionClient,
+    actor: PageDocumentStaffActor,
+    mode: "read" | "write",
+  ): Promise<void> {
+    if (!actor.sessionFamilyId) return;
+    const sessions = mode === "write"
+      ? await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+        )
+      : await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+        );
+    if (sessions.length !== 1) {
+      throw new ForbiddenException("当前员工会话已失效，不能继续访问页面装修");
+    }
+  }
+
+  private async lockAuthorizedStaff(
+    transaction: Prisma.TransactionClient,
+    actorInput: PageDocumentStaffActorInput,
+    mode: "read" | "write",
+    allowedRoles: readonly PageDocumentStaffRole[],
+  ): Promise<PageDocumentStaffActor> {
+    const actor = this.requireStaffActor(actorInput);
+    const roleList = Prisma.join(allowedRoles.map((role) => Prisma.sql`${role}`));
+    const staff = mode === "write"
+      ? await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN (${roleList}) FOR UPDATE`,
+        )
+      : await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN (${roleList}) FOR SHARE`,
+        );
+    if (staff.length !== 1) {
+      throw new ForbiddenException("当前员工已停用或无权访问页面装修");
+    }
+    await this.lockActiveStaffSession(transaction, actor, mode);
+    return actor;
+  }
+
+  private withAuthorizedStaffRead<T>(
+    actor: PageDocumentStaffActorInput,
+    operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (transaction) => {
+      await this.lockAuthorizedStaff(
+        transaction,
+        actor,
+        "read",
+        ["SUPER_ADMIN", "ADMIN", "EDITOR"],
+      );
+      return operation(transaction);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   private normalizeFixedTemplateOrigin(moduleType: string, value: unknown) {
@@ -267,102 +332,6 @@ export class PageModulesService {
       };
     }
     return undefined;
-  }
-
-  private getSystemContentTemplateContract(contractKey: string): ContentTemplateContract {
-    const registryItem = CONTENT_TEMPLATE_REGISTRY.find((item) => item.key === contractKey);
-    const contract = registryItem
-      ? CONTENT_TEMPLATE_BY_MODULE_TYPE[registryItem.moduleType]
-      : undefined;
-    if (!contract) throw new NotFoundException("系统母模板合同不存在");
-    return contract;
-  }
-
-  private isMissingLegacyPersonalTemplateRevision(error: unknown): boolean {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2022") {
-      return false;
-    }
-    const details = `${error.message} ${JSON.stringify(error.meta ?? {})}`;
-    return /personal_content_templates[^\n]*revision|revision[^\n]*personal_content_templates/i.test(details);
-  }
-
-  private toSystemContentTemplateCurrent(contract: ContentTemplateContract) {
-    const baseline = sanitizeContentTemplateLayoutData(contract.moduleType, { version: 2 });
-    if (!baseline) throw new ConflictException("系统母模板代码合同基线无效");
-    return {
-      contractKey: contract.key,
-      moduleType: contract.moduleType,
-      displayName: contract.displayName,
-      contractVersion: contract.version,
-      activeVersion: 0,
-      layoutData: baseline,
-      source: "code" as const,
-      changeNote: null,
-      updatedAt: null,
-    };
-  }
-
-  async getSystemContentTemplates() {
-    return CONTENT_TEMPLATE_REGISTRY.map((item) => {
-      const contract = CONTENT_TEMPLATE_BY_MODULE_TYPE[item.moduleType];
-      if (!contract) throw new ConflictException(`系统模板合同缺失：${item.moduleType}`);
-      return this.toSystemContentTemplateCurrent(contract);
-    });
-  }
-
-  async getSystemContentTemplate(contractKey: string) {
-    const contract = this.getSystemContentTemplateContract(contractKey);
-    return this.toSystemContentTemplateCurrent(contract);
-  }
-
-  async getSystemContentTemplateHistory(contractKey: string) {
-    const contract = this.getSystemContentTemplateContract(contractKey);
-    const baseline = sanitizeContentTemplateLayoutData(contract.moduleType, { version: 2 });
-    if (!baseline) throw new ConflictException("系统母模板代码合同基线无效");
-    return [
-      {
-        version: 0,
-        contractKey: contract.key,
-        moduleType: contract.moduleType,
-        contractVersion: contract.version,
-        layoutData: baseline,
-        changeNote: "代码机器合同基线",
-        createdById: null,
-        createdAt: null,
-        active: true,
-        source: "code" as const,
-      },
-    ];
-  }
-
-  async getPersonalContentTemplates(ownerId?: number) {
-    const resolvedOwnerId = this.requirePersonalTemplateOwner(ownerId);
-    const orderBy = [{ updatedAt: "desc" as const }, { id: "desc" as const }];
-    try {
-      return await this.prisma.personalContentTemplate.findMany({
-        where: { ownerId: resolvedOwnerId },
-        orderBy,
-      });
-    } catch (error) {
-      if (!this.isMissingLegacyPersonalTemplateRevision(error)) throw error;
-      const legacyRows = await this.prisma.personalContentTemplate.findMany({
-        where: { ownerId: resolvedOwnerId },
-        orderBy,
-        select: {
-          id: true,
-          ownerId: true,
-          name: true,
-          moduleType: true,
-          contractKey: true,
-          contractVersion: true,
-          layoutData: true,
-          contentDefaults: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-      return legacyRows.map((row) => ({ ...row, revision: 1 }));
-    }
   }
 
   publicChangeStream(): Observable<MessageEvent> {
@@ -443,7 +412,10 @@ export class PageModulesService {
    * 草稿允许内容未填完，但实例身份、槽位授权、隐藏状态与构图覆盖必须在保存前
    * 通过页面绑定的精确模板版本。内容完整性与业务引用仍由发布预检处理。
    */
-  private async assertDynamicTemplateDraftInstancesAuthorized(puckData: unknown) {
+  private async assertDynamicTemplateDraftInstancesAuthorized(
+    puckData: unknown,
+    db: PageValidationDb = this.prisma,
+  ) {
     if (!isRecord(puckData)) return;
     const blocks = [
       ...(Array.isArray(puckData.content) ? puckData.content : []),
@@ -463,7 +435,7 @@ export class PageModulesService {
       });
     }
     if (instances.length === 0) return;
-    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData);
+    const hydrated = await this.hydrateDynamicTemplateDefinitions(puckData, db);
     if (!isRecord(hydrated)) return;
     const resolved = isRecord(hydrated[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY])
       ? hydrated[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]
@@ -606,6 +578,7 @@ export class PageModulesService {
   private async toLocalizedPageResource(
     document: NonNullable<Awaited<ReturnType<PrismaService["pageDocument"]["findUnique"]>>>,
     draft: LocalizedPageDraft,
+    db: PageValidationDb = this.prisma,
   ) {
     return {
       id: document.id,
@@ -616,7 +589,7 @@ export class PageModulesService {
       templateId: document.templateId,
       templateVersion: document.templateVersion,
       locale: draft.locale,
-      puckData: await this.hydrateDynamicTemplateDefinitions(draft.puckData),
+      puckData: await this.hydrateDynamicTemplateDefinitions(draft.puckData, db),
       metadata: stripPageLocaleRevisionMetadata(
         withoutContentTemplatePublicationAttestation(draft.metadata),
       ),
@@ -642,11 +615,14 @@ export class PageModulesService {
   async getLocalizedPageDocument(
     pageKey: string,
     locale: PublicContentLocale,
+    actor: PageDocumentStaffActorInput,
   ) {
-    const localized = await this.getLocalizedPageDraft(pageKey, locale);
-    return localized
-      ? this.toLocalizedPageResource(localized.document!, localized.draft)
-      : null;
+    return this.withAuthorizedStaffRead(actor, async (tx) => {
+      const localized = await this.getLocalizedPageDraft(pageKey, locale, tx);
+      return localized
+        ? this.toLocalizedPageResource(localized.document!, localized.draft, tx)
+        : null;
+    });
   }
 
   private assertLocalizedPageInput(
@@ -698,10 +674,10 @@ export class PageModulesService {
     metadata?: Record<string, unknown>,
     editorVersion?: string,
     expectedUpdatedAt?: string,
+    actor?: PageDocumentStaffActorInput,
   ) {
     this.assertLocalizedPageInput(pageKey, puckData, metadata);
     const normalizedPuckData = this.normalizePageDocumentPuckData(puckData);
-    await this.assertDynamicTemplateDraftInstancesAuthorized(normalizedPuckData);
     const persistableMetadata = this.getPersistablePageMetadata(metadata);
     const contentHash = createPageLocaleContentHash(
       normalizedPuckData,
@@ -710,6 +686,13 @@ export class PageModulesService {
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedStaff(
+        tx,
+        actor,
+        "write",
+        ["SUPER_ADMIN", "ADMIN", "EDITOR"],
+      );
+      await this.assertDynamicTemplateDraftInstancesAuthorized(normalizedPuckData, tx);
       let document = await tx.pageDocument.findUnique({ where: { pageKey } });
       const documentExisted = Boolean(document);
       if (!document) {
@@ -825,11 +808,17 @@ export class PageModulesService {
     locale: PublicContentLocale,
     expectedUpdatedAt: string,
     expectedContentHash: string,
-    userId: number,
+    actor: PageDocumentStaffActorInput,
   ) {
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
     if (!expected) throw new BadRequestException("提交审核时缺少页面版本标识");
     const result = await this.prisma.$transaction(async (tx) => {
+      const staff = await this.lockAuthorizedStaff(
+        tx,
+        actor,
+        "write",
+        ["SUPER_ADMIN", "ADMIN", "EDITOR"],
+      );
       const document = await tx.pageDocument.findUnique({ where: { pageKey } });
       if (!document) throw new NotFoundException("页面草稿不存在");
       await tx.$queryRaw<Array<{ id: number }>>`
@@ -866,7 +855,7 @@ export class PageModulesService {
           )),
           contentHash: current.draft.contentHash,
           reviewStatus: "IN_REVIEW",
-          submittedBy: userId,
+          submittedBy: staff.id,
           submittedAt,
           publishedRevisionId: current.draft.publishedRevisionId,
           publishedHash: current.draft.publishedHash,
@@ -883,7 +872,7 @@ export class PageModulesService {
           )),
           contentHash: current.draft.contentHash,
           reviewStatus: "IN_REVIEW",
-          submittedBy: userId,
+          submittedBy: staff.id,
           submittedAt,
           reviewedBy: null,
           reviewedAt: null,
@@ -892,14 +881,14 @@ export class PageModulesService {
       });
       await tx.operationLog.create({
         data: {
-          userId,
+          userId: staff.id,
           action: "PAGE_LOCALE_REVIEW_SUBMITTED",
           module: "page-builder",
           targetId: document.id,
           detail: JSON.stringify({
             schemaVersion: 1,
             event: "PAGE_LOCALE_REVIEW_SUBMITTED",
-            actor: userId,
+            actor: staff.id,
             pageKey,
             locale,
             contentHash: current.draft.contentHash,
@@ -924,13 +913,19 @@ export class PageModulesService {
     action: "APPROVE" | "REQUEST_CHANGES",
     expectedUpdatedAt: string,
     expectedContentHash: string,
-    userId: number,
+    actor: PageDocumentStaffActorInput,
     reviewNote?: string,
     selfReviewAcknowledged = false,
   ) {
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
     if (!expected) throw new BadRequestException("审核页面时缺少页面版本标识");
     const result = await this.prisma.$transaction(async (tx) => {
+      const staff = await this.lockAuthorizedStaff(
+        tx,
+        actor,
+        "write",
+        ["SUPER_ADMIN", "ADMIN"],
+      );
       const document = await tx.pageDocument.findUnique({ where: { pageKey } });
       if (!document) throw new NotFoundException("页面草稿不存在");
       await tx.$queryRaw<Array<{ id: number }>>`
@@ -949,13 +944,13 @@ export class PageModulesService {
       if (current.draft.reviewStatus !== "IN_REVIEW") {
         throw new BadRequestException("只有审核中的草稿可以复核");
       }
-      const isSelfReview = current.draft.submittedBy === userId;
+      const isSelfReview = current.draft.submittedBy === staff.id;
       if (isSelfReview) {
         if (action !== "APPROVE" || !selfReviewAcknowledged) {
           throw new BadRequestException("页面内容提交人与审核人必须分离；超级管理员自审须单独明确确认");
         }
         const actor = await tx.user.findUnique({
-          where: { id: userId },
+          where: { id: staff.id },
           select: { role: true, status: true },
         });
         if (actor?.role !== "SUPER_ADMIN" || actor.status !== "ACTIVE") {
@@ -973,14 +968,14 @@ export class PageModulesService {
         where: { id: current.draft.id },
         data: {
           reviewStatus: action === "APPROVE" ? "APPROVED" : "CHANGES_REQUESTED",
-          reviewedBy: userId,
+          reviewedBy: staff.id,
           reviewedAt,
           reviewNote: reviewNote?.trim() || null,
         },
       });
       await tx.operationLog.create({
         data: {
-          userId,
+          userId: staff.id,
           action: isSelfReview
             ? PAGE_LOCALE_SELF_REVIEW_ACTION
             : action === "APPROVE"
@@ -995,7 +990,7 @@ export class PageModulesService {
               : action === "APPROVE"
               ? "PAGE_LOCALE_REVIEW_APPROVED"
               : "PAGE_LOCALE_CHANGES_REQUESTED",
-            actor: userId,
+            actor: staff.id,
             ...(isSelfReview ? { actorRole: "SUPER_ADMIN" } : {}),
             pageKey,
             locale,
@@ -1023,10 +1018,11 @@ export class PageModulesService {
   private async getLocalizedPublishedPageSnapshot(
     pageKey: string,
     locale: PublicContentLocale,
+    db: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
-    const current = await this.getLocalizedPageDraft(pageKey, locale);
+    const current = await this.getLocalizedPageDraft(pageKey, locale, db);
     if (!current?.draft.publishedRevisionId) return null;
-    const revision = await this.prisma.pageDocumentRevision.findFirst({
+    const revision = await db.pageDocumentRevision.findFirst({
       where: {
         id: current.draft.publishedRevisionId,
         documentId: current.document!.id,
@@ -1096,6 +1092,9 @@ export class PageModulesService {
     pageKey: string,
     locale: PublicContentLocale,
   ) {
+    // 公开读取只接受页面合同登记的 key。即使历史导入或人工数据库操作
+    // 留下额外记录，也不能把它们作为公开 PageDocument 暴露。
+    if (!getContentTemplatePageRule(pageKey)) return null;
     const snapshot = await this.getLocalizedPublishedPageSnapshot(pageKey, locale);
     if (!snapshot || snapshot.status === "INVALID") return snapshot;
     if (!hasCurrentContentTemplatePublicationAttestation(snapshot.metadata)) {
@@ -1155,43 +1154,46 @@ export class PageModulesService {
   async getLocalizedPublishedPageDocumentForAdmin(
     pageKey: string,
     locale: PublicContentLocale,
+    actor: PageDocumentStaffActorInput,
   ) {
-    const snapshot = await this.getLocalizedPublishedPageSnapshot(pageKey, locale);
-    if (!snapshot || snapshot.status === "INVALID") return snapshot;
-    const publicationAttested = hasCurrentContentTemplatePublicationAttestation(
-      snapshot.metadata,
-    );
-    const pageReadiness = await this.collectPageDocumentValidation(
-      this.prisma,
-      snapshot.puckData,
-      snapshot.metadata,
-      pageKey,
-    );
-    const attestationIssues: ContentTemplateIssue[] = publicationAttested
-      ? []
-      : [{
-          code: "page-validation-publication-attestation-stale",
-          severity: "error",
-          layer: "page",
-          path: "metadata",
-          message: "线上版本缺少当前发布合同签认，必须重新校验并发布。",
-        }];
-    const publicationIssues = [...attestationIssues, ...pageReadiness.issues];
-    return {
-      ...snapshot,
-      puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
-      metadata: stripPageLocaleRevisionMetadata(
-        withoutContentTemplatePublicationAttestation(snapshot.metadata),
-      ),
-      publicationAttested,
-      publicationReadiness: {
-        valid: publicationIssues.every((issue) => issue.severity !== "error"),
-        errors: publicationIssues
-          .filter((issue) => issue.severity === "error")
-          .map((issue) => issue.message),
-        issues: publicationIssues,
-      },
-    };
+    return this.withAuthorizedStaffRead(actor, async (tx) => {
+      const snapshot = await this.getLocalizedPublishedPageSnapshot(pageKey, locale, tx);
+      if (!snapshot || snapshot.status === "INVALID") return snapshot;
+      const publicationAttested = hasCurrentContentTemplatePublicationAttestation(
+        snapshot.metadata,
+      );
+      const pageReadiness = await this.collectPageDocumentValidation(
+        tx,
+        snapshot.puckData,
+        snapshot.metadata,
+        pageKey,
+      );
+      const attestationIssues: ContentTemplateIssue[] = publicationAttested
+        ? []
+        : [{
+            code: "page-validation-publication-attestation-stale",
+            severity: "error",
+            layer: "page",
+            path: "metadata",
+            message: "线上版本缺少当前发布合同签认，必须重新校验并发布。",
+          }];
+      const publicationIssues = [...attestationIssues, ...pageReadiness.issues];
+      return {
+        ...snapshot,
+        puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData, tx),
+        metadata: stripPageLocaleRevisionMetadata(
+          withoutContentTemplatePublicationAttestation(snapshot.metadata),
+        ),
+        publicationAttested,
+        publicationReadiness: {
+          valid: publicationIssues.every((issue) => issue.severity !== "error"),
+          errors: publicationIssues
+            .filter((issue) => issue.severity === "error")
+            .map((issue) => issue.message),
+          issues: publicationIssues,
+        },
+      };
+    });
   }
 
   private async resolvePageSelfReviewEvidence(
@@ -1290,16 +1292,122 @@ export class PageModulesService {
     };
   }
 
+  private async completeSuperAdminSelfReviewForPublish(
+    tx: Prisma.TransactionClient,
+    current: { document: { id: number }; draft: LocalizedPageDraft },
+    pageKey: string,
+    locale: PublicContentLocale,
+    userId: number,
+  ) {
+    if (current.draft.id === null) {
+      throw new NotFoundException("该语言草稿不存在");
+    }
+    const actor = await tx.user.findUnique({
+      where: { id: userId },
+      select: { role: true, status: true },
+    });
+    if (actor?.role !== "SUPER_ADMIN" || actor.status !== "ACTIVE") {
+      throw new BadRequestException("只有超级管理员可以在发布时明确确认并完成本人审核");
+    }
+    const reviewStatus = current.draft.reviewStatus;
+    if (reviewStatus !== "DRAFT" && reviewStatus !== "CHANGES_REQUESTED" && reviewStatus !== "IN_REVIEW") {
+      throw new BadRequestException("该语言草稿尚未审核通过，不能发布");
+    }
+    if (
+      reviewStatus === "IN_REVIEW"
+      && current.draft.submittedBy !== null
+      && current.draft.submittedBy !== userId
+    ) {
+      throw new BadRequestException("当前草稿由其他人员提交审核，请先批准后再发布");
+    }
+    const now = new Date();
+    let submittedBy = current.draft.submittedBy;
+    let submittedAt = current.draft.submittedAt;
+    if (reviewStatus === "DRAFT" || reviewStatus === "CHANGES_REQUESTED") {
+      submittedBy = userId;
+      submittedAt = now;
+      await tx.operationLog.create({
+        data: {
+          userId,
+          action: "PAGE_LOCALE_REVIEW_SUBMITTED",
+          module: "page-builder",
+          targetId: current.document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_LOCALE_REVIEW_SUBMITTED",
+            actor: userId,
+            pageKey,
+            locale,
+            contentHash: current.draft.contentHash,
+            fromStatus: reviewStatus,
+            toStatus: "IN_REVIEW",
+            result: "succeeded",
+          }),
+        },
+      });
+    }
+    if (submittedBy === null || submittedAt === null) {
+      throw new BadRequestException("当前页面缺少可绑定的提交版本，不能执行自审");
+    }
+    await tx.pageDocumentLocalization.update({
+      where: { id: current.draft.id },
+      data: {
+        reviewStatus: "APPROVED",
+        submittedBy,
+        submittedAt,
+        reviewedBy: userId,
+        reviewedAt: now,
+        reviewNote: null,
+      },
+    });
+    await tx.operationLog.create({
+      data: {
+        userId,
+        action: PAGE_LOCALE_SELF_REVIEW_ACTION,
+        module: "page-builder",
+        targetId: current.document.id,
+        detail: JSON.stringify({
+          schemaVersion: 1,
+          event: PAGE_LOCALE_SELF_REVIEW_ACTION,
+          actor: userId,
+          actorRole: "SUPER_ADMIN",
+          pageKey,
+          locale,
+          revision: submittedAt.toISOString(),
+          reviewedAt: now.toISOString(),
+          contentHash: current.draft.contentHash,
+          fromStatus: "IN_REVIEW",
+          toStatus: "APPROVED",
+          reviewNote: null,
+          result: "succeeded",
+        }),
+      },
+    });
+    current.draft.reviewStatus = "APPROVED";
+    current.draft.submittedBy = submittedBy;
+    current.draft.submittedAt = submittedAt;
+    current.draft.reviewedBy = userId;
+    current.draft.reviewedAt = now;
+    current.draft.reviewNote = null;
+  }
+
   async publishLocalizedPageDocument(
     pageKey: string,
     locale: PublicContentLocale,
-    userId: number | undefined,
+    actor: PageDocumentStaffActorInput,
     expectedUpdatedAt: string,
     expectedContentHash?: string,
+    selfReviewAcknowledged = false,
   ) {
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
     if (!expected) throw new BadRequestException("发布页面时缺少页面版本标识");
     const result = await this.prisma.$transaction(async (tx) => {
+      const staff = await this.lockAuthorizedStaff(
+        tx,
+        actor,
+        "write",
+        ["SUPER_ADMIN", "ADMIN"],
+      );
       const document = await tx.pageDocument.findUnique({ where: { pageKey } });
       if (!document) throw new NotFoundException("页面草稿不存在");
       await tx.$queryRaw<Array<{ id: number }>>`
@@ -1315,8 +1423,28 @@ export class PageModulesService {
       if (!expectedContentHash || current.draft.contentHash !== expectedContentHash) {
         throw new ConflictException("该语言草稿内容哈希已变化，请重新加载后再发布");
       }
+      if (
+        current.draft.reviewStatus === "PUBLISHED"
+        && current.draft.publishedRevisionId
+        && current.draft.publishedHash === expectedContentHash
+      ) {
+        return {
+          document,
+          localization: current.draft,
+          revision: null,
+        };
+      }
       if (current.draft.reviewStatus !== "APPROVED") {
-        throw new BadRequestException("该语言草稿尚未审核通过，不能发布");
+        if (!selfReviewAcknowledged) {
+          throw new BadRequestException("该语言草稿尚未审核通过，不能发布");
+        }
+        await this.completeSuperAdminSelfReviewForPublish(
+          tx,
+          { document, draft: current.draft },
+          pageKey,
+          locale,
+          staff.id,
+        );
       }
       if (
         current.draft.submittedBy === null
@@ -1388,7 +1516,7 @@ export class PageModulesService {
           puckData: toInputJsonValue(normalizedPuckData),
           metadata: toInputJsonValue(revisionMetadata),
           status: "published",
-          publishedBy: userId,
+          publishedBy: staff.id,
           publishedAt,
         },
       });
@@ -1405,7 +1533,7 @@ export class PageModulesService {
           reviewStatus: "PUBLISHED",
           publishedRevisionId: revision.id,
           publishedHash: contentHash,
-          publishedBy: userId,
+          publishedBy: staff.id,
           publishedAt,
         },
       });
@@ -1416,37 +1544,37 @@ export class PageModulesService {
             status: "PUBLISHED",
             publishedRevisionId: revision.id,
             publishedAt,
-            publishedBy: userId,
+            publishedBy: staff.id,
           },
         });
       }
-      if (userId !== undefined) {
-        await tx.operationLog.create({
-          data: {
-            userId,
-            action: "PAGE_LOCALE_PUBLISHED",
-            module: "page-builder",
-            targetId: document.id,
-            detail: JSON.stringify({
-              schemaVersion: 1,
-              event: "PAGE_LOCALE_PUBLISHED",
-              actor: userId,
-              timestamp: publishedAt.toISOString(),
-              pageKey,
-              locale,
-              contentHash,
-              fromRevision: current.draft.publishedRevisionId,
-              toRevision: revision.id,
-              toRevisionVersion: revision.version,
-              ...(managedMediaAuthorization ? { managedMediaAuthorization } : {}),
-              result: "succeeded",
-            }),
-          },
-        });
-      }
+      await tx.operationLog.create({
+        data: {
+          userId: staff.id,
+          action: "PAGE_LOCALE_PUBLISHED",
+          module: "page-builder",
+          targetId: document.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "PAGE_LOCALE_PUBLISHED",
+            actor: staff.id,
+            timestamp: publishedAt.toISOString(),
+            pageKey,
+            locale,
+            contentHash,
+            fromRevision: current.draft.publishedRevisionId,
+            toRevision: revision.id,
+            toRevisionVersion: revision.version,
+            ...(managedMediaAuthorization ? { managedMediaAuthorization } : {}),
+            result: "succeeded",
+          }),
+        },
+      });
       return { document, localization, revision };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    this.notifyPublicChange(pageKey, "page-document-published", result.revision.version, locale);
+    if (result.revision) {
+      this.notifyPublicChange(pageKey, "page-document-published", result.revision.version, locale);
+    }
     return this.toLocalizedPageResource(result.document, {
       ...result.localization,
       locale,
@@ -1459,6 +1587,7 @@ export class PageModulesService {
     locale: PublicContentLocale,
     beforeVersion?: number,
     requestedLimit = 20,
+    actor?: PageDocumentStaffActorInput,
   ) {
     if (!getContentTemplatePageRule(pageKey)) {
       throw new BadRequestException(`页面标识「${pageKey}」未在页面合同注册`);
@@ -1470,7 +1599,8 @@ export class PageModulesService {
       throw new BadRequestException("历史版本分页数量无效");
     }
     const limit = Math.min(requestedLimit, 50);
-    const current = await this.getLocalizedPageDraft(pageKey, locale);
+    return this.withAuthorizedStaffRead(actor, async (tx) => {
+    const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
     if (!current) return { items: [], nextBeforeVersion: null };
     type RevisionSummaryRow = {
       id: number;
@@ -1487,7 +1617,7 @@ export class PageModulesService {
     let exhausted = false;
     let scannedBatches = 0;
     while (localized.length <= limit && scannedBatches < LOCALIZED_REVISION_SCAN_BATCHES) {
-      const revisions: RevisionSummaryRow[] = await this.prisma.pageDocumentRevision.findMany({
+      const revisions: RevisionSummaryRow[] = await tx.pageDocumentRevision.findMany({
         where: {
           documentId: current.document!.id,
           status: "published",
@@ -1543,19 +1673,22 @@ export class PageModulesService {
           ? null
           : scanBeforeVersion ?? null,
     };
+    });
   }
 
   async getLocalizedPageDocumentRevision(
     pageKey: string,
     locale: PublicContentLocale,
     version: number,
+    actor?: PageDocumentStaffActorInput,
   ) {
     if (!Number.isInteger(version) || version <= 0) {
       throw new BadRequestException("版本号不正确");
     }
-    const current = await this.getLocalizedPageDraft(pageKey, locale);
+    return this.withAuthorizedStaffRead(actor, async (tx) => {
+    const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
     if (!current) throw new NotFoundException("该语言页面文档不存在");
-    const revision = await this.prisma.pageDocumentRevision.findFirst({
+    const revision = await tx.pageDocumentRevision.findFirst({
       where: { documentId: current.document!.id, version, status: "published" },
     });
     if (!revision || !revisionBelongsToLocale(revision.metadata, locale)) {
@@ -1566,7 +1699,7 @@ export class PageModulesService {
     return {
       ...revision,
       locale,
-      puckData: await this.hydrateDynamicTemplateDefinitions(normalizedPuckData),
+      puckData: await this.hydrateDynamicTemplateDefinitions(normalizedPuckData, tx),
       metadata: stripPageLocaleRevisionMetadata(
         withoutContentTemplatePublicationAttestation(revision.metadata),
       ),
@@ -1584,6 +1717,7 @@ export class PageModulesService {
       } : null,
       isPublished: revision.id === current.draft.publishedRevisionId,
     };
+    });
   }
 
   async restoreLocalizedPageDocumentRevision(
@@ -1591,7 +1725,7 @@ export class PageModulesService {
     locale: PublicContentLocale,
     version: number,
     expectedUpdatedAt: string,
-    userId: number,
+    actor: PageDocumentStaffActorInput,
   ) {
     if (!Number.isInteger(version) || version <= 0) {
       throw new BadRequestException("版本号不正确");
@@ -1599,6 +1733,12 @@ export class PageModulesService {
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
     if (!expected) throw new BadRequestException("恢复版本时缺少页面版本标识");
     const result = await this.prisma.$transaction(async (tx) => {
+      const staff = await this.lockAuthorizedStaff(
+        tx,
+        actor,
+        "write",
+        ["SUPER_ADMIN", "ADMIN", "EDITOR"],
+      );
       const document = await tx.pageDocument.findUnique({ where: { pageKey } });
       if (!document) throw new NotFoundException("页面文档不存在");
       await tx.$queryRaw<Array<{ id: number }>>`
@@ -1653,14 +1793,14 @@ export class PageModulesService {
       }
       await tx.operationLog.create({
         data: {
-          userId,
+          userId: staff.id,
           action: "PAGE_LOCALE_REVISION_RESTORED_TO_DRAFT",
           module: "page-builder",
           targetId: document.id,
           detail: JSON.stringify({
             schemaVersion: 1,
             event: "PAGE_LOCALE_REVISION_RESTORED_TO_DRAFT",
-            actor: userId,
+            actor: staff.id,
             pageKey,
             locale,
             sourceRevision: revision.id,
@@ -1685,7 +1825,7 @@ export class PageModulesService {
     locale: PublicContentLocale,
     revisionId: number,
     expectedPublishedRevisionId: number,
-    userId: number,
+    actor: PageDocumentStaffActorInput,
   ) {
     if (!Number.isInteger(revisionId) || revisionId <= 0) {
       throw new BadRequestException("发布版本标识不正确");
@@ -1694,6 +1834,12 @@ export class PageModulesService {
       throw new BadRequestException("当前线上版本标识不正确");
     }
     const result = await this.prisma.$transaction(async (tx) => {
+      const staff = await this.lockAuthorizedStaff(
+        tx,
+        actor,
+        "write",
+        ["SUPER_ADMIN", "ADMIN"],
+      );
       const document = await tx.pageDocument.findUnique({ where: { pageKey } });
       if (!document) throw new NotFoundException("页面文档不存在");
       await tx.$queryRaw<Array<{ id: number }>>`
@@ -1797,7 +1943,7 @@ export class PageModulesService {
           puckData: toInputJsonValue(puckData),
           metadata: toInputJsonValue(restoredMetadata),
           status: "published",
-          publishedBy: userId,
+          publishedBy: staff.id,
           publishedAt: restoredAt,
         },
       });
@@ -1813,7 +1959,7 @@ export class PageModulesService {
         data: {
           publishedRevisionId: revision.id,
           publishedHash: contentHash,
-          publishedBy: userId,
+          publishedBy: staff.id,
           publishedAt: restoredAt,
           reviewStatus: current.draft.contentHash === contentHash
             ? "PUBLISHED"
@@ -1829,20 +1975,20 @@ export class PageModulesService {
             status: "PUBLISHED",
             publishedRevisionId: revision.id,
             publishedAt: restoredAt,
-            publishedBy: userId,
+            publishedBy: staff.id,
           },
         });
       }
       await tx.operationLog.create({
         data: {
-          userId,
+          userId: staff.id,
           action: "PAGE_LOCALE_PUBLICATION_ROLLED_BACK",
           module: "page-builder",
           targetId: document.id,
           detail: JSON.stringify({
             schemaVersion: 1,
             event: "PAGE_LOCALE_PUBLICATION_ROLLED_BACK",
-            actor: userId,
+            actor: staff.id,
             pageKey,
             locale,
             fromRevision: expectedPublishedRevisionId,
@@ -1869,10 +2015,17 @@ export class PageModulesService {
     pageKey: string,
     locale: PublicContentLocale,
     expectedUpdatedAt: string,
+    actor?: PageDocumentStaffActorInput,
   ) {
     const expected = this.parseExpectedUpdatedAt(expectedUpdatedAt);
     if (!expected) throw new BadRequestException("放弃草稿时缺少页面版本标识");
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedStaff(
+        tx,
+        actor,
+        "write",
+        ["SUPER_ADMIN", "ADMIN", "EDITOR"],
+      );
       const document = await tx.pageDocument.findUnique({ where: { pageKey } });
       if (!document) throw new NotFoundException("页面文档不存在");
       await tx.$queryRaw<Array<{ id: number }>>`
@@ -2168,15 +2321,39 @@ export class PageModulesService {
       }
       return this.prisma.pageDocument.findUnique({ where: { pageKey } });
     }
-    return this.prisma.pageDocument.create({
-      data: {
-        pageKey,
-        puckData: toInputJsonValue(normalizedPuckData),
-        metadata: toInputJsonValue(metadataWithoutContract),
-        editorVersion,
-        schemaVersion: 1,
-      },
-    });
+    try {
+      return await this.prisma.pageDocument.create({
+        data: {
+          pageKey,
+          puckData: toInputJsonValue(normalizedPuckData),
+          metadata: toInputJsonValue(metadataWithoutContract),
+          editorVersion,
+          schemaVersion: 1,
+        },
+      });
+    } catch (error) {
+      const isCreationRace =
+        error instanceof Prisma.PrismaClientKnownRequestError
+        && (error.code === "P2002" || error.code === "P2034");
+      if (!isCreationRace) throw error;
+
+      // 首次创建不携带版本标识，失败后不能把本次草稿自动重放到赢家记录上。
+      // 只有确认同 pageKey 已出现赢家时才收敛为可操作的 409；否则保留
+      // Prisma 原始异常，避免把无关唯一键或事务故障误报为编辑冲突。
+      let winner: { id: number } | null;
+      try {
+        winner = await this.prisma.pageDocument.findUnique({
+          where: { pageKey },
+          select: { id: true },
+        });
+      } catch {
+        throw error;
+      }
+      if (!winner) throw error;
+      throw new ConflictException(
+        "该页面已由其他编辑者创建，请重新加载后再保存",
+      );
+    }
   }
 
   async publishPageDocument(
@@ -2334,11 +2511,13 @@ export class PageModulesService {
     locale: PublicContentLocale,
     puckDataOverride?: unknown,
     metadataOverride?: unknown,
+    actor?: PageDocumentStaffActorInput,
   ) {
+    return this.withAuthorizedStaffRead(actor, async (tx) => {
     let puckData = puckDataOverride;
     let metadata = metadataOverride;
     if (puckData === undefined || metadata === undefined) {
-      const current = await this.getLocalizedPageDraft(pageKey, locale);
+      const current = await this.getLocalizedPageDraft(pageKey, locale, tx);
       if (!current) {
         const issues: ContentTemplateIssue[] = [
           this.createServerValidationIssue("该语言页面草稿不存在"),
@@ -2351,11 +2530,12 @@ export class PageModulesService {
       }
     }
     return this.collectPageDocumentValidation(
-      this.prisma,
+      tx,
       puckData,
       metadata,
       pageKey,
     );
+    });
   }
 
   /** 模板原子激活在同一事务内复用页面发布的完整校验规则。 */
@@ -2471,8 +2651,13 @@ export class PageModulesService {
       severity: issue.severity === "ERROR" ? "error" : "warning",
       layer: "page",
       path: issue.path ?? "puckData",
-      message: `${issue.message}：${issue.url}`,
-    }));
+      message: issue.message,
+      ...(issue.assetId ? { assetId: issue.assetId } : {}),
+      ...(issue.url ? { assetUrl: issue.url } : {}),
+      ...(issue.authorizationRevision != null
+        ? { authorizationRevision: issue.authorizationRevision }
+        : {}),
+    } as ContentTemplateIssue));
   }
 
   private async writePagePublicationMediaManifest(
@@ -2493,10 +2678,17 @@ export class PageModulesService {
       (issue) => issue.severity === "ERROR",
     );
     if (blocking.length > 0) {
-      throw new BadRequestException({
-        message: `页面素材校验失败：${blocking.slice(0, 8).map((issue) => issue.message).join("；")}`,
-        valid: false,
+      const issues = this.managedMediaIssues({
+        ...publicationMedia.resolution,
         issues: blocking,
+      });
+      throw new BadRequestException({
+        message: `页面素材校验失败：${issues.slice(0, 8).map((issue) => issue.message).join("；")}`,
+        valid: false,
+        errors: issues
+          .filter((issue) => issue.severity === "error")
+          .map((issue) => issue.message),
+        issues,
         shadowReport: buildManagedMediaShadowReport(publicationMedia.resolution),
       });
     }

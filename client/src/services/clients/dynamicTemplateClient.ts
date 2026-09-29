@@ -40,6 +40,7 @@ export interface DynamicTemplateResource {
   definitionSchemaVersion: number;
   publishedVersion: number;
   sourceReference: string | null;
+  catalogCoverUrl?: string | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -54,6 +55,7 @@ export interface DynamicTemplateResource {
 export interface PublishedDynamicTemplateResource {
   templateId: string;
   sourceReference: string | null;
+  catalogCoverUrl?: string | null;
   name: string;
   category: string;
   purpose: string;
@@ -142,6 +144,12 @@ export const dynamicTemplateApi = {
       dedupe: options.dedupe,
     });
   },
+  ensureConsultationStarters: async () => {
+    if (USE_MOCK) unavailableMockWrite();
+    return api.post("/page-modules/dynamic-templates/consultation-starters", undefined, {
+      suppressGlobalError: true,
+    });
+  },
   getPublishedVersion: async (templateId: string, version: number) => {
     if (USE_MOCK) {
       await mockDelay(80);
@@ -194,6 +202,17 @@ export const dynamicTemplateApi = {
     return api.patch(`/page-modules/dynamic-templates/${encodeURIComponent(templateId)}/draft`, data, {
       suppressGlobalError: true,
     });
+  },
+  updateCatalogCover: async (
+    templateId: string,
+    data: { catalogCoverUrl: string | null },
+  ) => {
+    if (USE_MOCK) unavailableMockWrite();
+    return api.patch<ApiResponse<DynamicTemplateResource>>(
+      `/page-modules/dynamic-templates/${encodeURIComponent(templateId)}/catalog-cover`,
+      data,
+      { suppressGlobalError: true },
+    );
   },
   publish: async (
     templateId: string,

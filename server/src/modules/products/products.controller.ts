@@ -7,12 +7,14 @@ import {
   Param,
   Query,
   Body,
+  Header,
   Req,
   Res,
   UseGuards,
   BadRequestException,
   NotFoundException,
   MessageEvent,
+  Logger,
   Sse,
   ParseIntPipe,
 } from "@nestjs/common";
@@ -30,7 +32,9 @@ import { CustomerAuthGuard } from "../customers/customer-auth.guard";
 import { CustomerOrStaffGuard } from "./customer-or-staff.guard";
 import { ProductMediaService } from "./product-media.service";
 import { Public } from "../../common/decorators/public.decorator";
+import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { SkipGenericAudit } from "../../common/decorators/skip-generic-audit.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import {
   CreateProductDto,
@@ -45,15 +49,19 @@ import {
   AddProductImageDto,
   UpdateProductImageDto,
   CropListingImageDto,
+  SetProductImagePointerDto,
+  UpdateProductAttributesDto,
+  UpdateProductTagsDto,
 } from "./dto";
 import { Observable } from "rxjs";
-import { ProductStatus, type ProductImage } from "@prisma/client";
+import { ProductStatus } from "@prisma/client";
 import type { Response } from "express";
 import { requirePublishedPublicContentLocale } from "../../common/content-locale";
 import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
 import type {
   CustomerOrStaffRequest,
   CustomerRequest,
+  StaffPrincipal,
   StaffRequest,
 } from "../../common/security/authenticated-principal";
 const sharp = require("sharp");
@@ -63,6 +71,8 @@ const sharp = require("sharp");
 @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
 @Controller("products")
 export class ProductsController {
+  private readonly logger = new Logger(ProductsController.name);
+
   constructor(
     private productsService: ProductsService,
     private uploadService: UploadService,
@@ -79,33 +89,43 @@ export class ProductsController {
   @ApiQuery({ name: "pageSize", required: false, description: "每页数量" })
   @ApiQuery({ name: "categoryId", required: false, description: "分类ID" })
   @ApiQuery({ name: "keyword", required: false, description: "搜索关键词" })
-  findAll(@Query() query: AdminProductQueryDto) {
-    return this.productsService.findAll(query);
+  findAll(
+    @Query() query: AdminProductQueryDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.findAll(query, actor);
   }
 
   @Post("admin/resolve-references")
   @ApiBearerAuth()
   @ApiOperation({ summary: "按稳定 code 或旧 id 解析店铺装修商品引用" })
-  resolveReferences(@Body() body: ResolveProductReferencesDto) {
-    return this.productsService.resolveReferences(body);
+  resolveReferences(
+    @Body() body: ResolveProductReferencesDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.resolveReferences(body, actor);
   }
 
   @Get("admin/publication-quality-report")
   @ApiBearerAuth()
   @ApiOperation({ summary: "只读评估存量已发布商品的发布质量" })
-  getPublicationQualityReport() {
-    return this.productsService.getPublicationQualityReport();
+  getPublicationQualityReport(@CurrentUser() actor: StaffPrincipal) {
+    return this.productsService.getPublicationQualityReport(actor);
   }
 
   @Get("admin/media")
   @ApiBearerAuth()
   @ApiOperation({ summary: "分页获取商品媒体库" })
-  listMedia(@Query() query: BoundedListQueryDto) {
-    return this.productsService.listMedia(query);
+  listMedia(
+    @Query() query: BoundedListQueryDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.listMedia(query, actor);
   }
 
   @Public()
   @Get("public")
+  @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "公开商品列表（仅 PUBLIC + PUBLISHED 安全字段）" })
   findPublic(@Query() query: PublicProductQueryDto) {
     requirePublishedPublicContentLocale(query.locale);
@@ -122,6 +142,7 @@ export class ProductsController {
 
   @Public()
   @Get("public/:id")
+  @Header("Cache-Control", "no-store")
   @ApiOperation({ summary: "公开商品详情（仅 PUBLIC + PUBLISHED 安全字段）" })
   async findPublicById(
     @Param("id") id: string,
@@ -171,7 +192,14 @@ export class ProductsController {
     required: false,
     description: "按 id 集合拉取（首页/区块用）",
   })
-  findCatalog(@Req() request: CustomerRequest, @Query() query: PublicProductQueryDto) {
+  findCatalog(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Query() query: PublicProductQueryDto,
+  ) {
+    response.setHeader("Cache-Control", "private, no-store, max-age=0");
+    response.vary("Cookie");
+    response.vary("Authorization");
     requirePublishedPublicContentLocale(query.locale);
     return this.productsService.findCatalog(query, request.customer);
   }
@@ -191,9 +219,13 @@ export class ProductsController {
   @ApiOperation({ summary: "受控商品详情（登录后访问，按可见范围过滤）" })
   async findCatalogById(
     @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
     @Param("id") id: string,
     @Query("locale") locale?: string,
   ) {
+    response.setHeader("Cache-Control", "private, no-store, max-age=0");
+    response.vary("Cookie");
+    response.vary("Authorization");
     requirePublishedPublicContentLocale(locale);
     const product = await this.productsService.findCatalogById(
       id,
@@ -231,15 +263,18 @@ export class ProductsController {
   @Get("counts")
   @ApiBearerAuth()
   @ApiOperation({ summary: "获取各状态商品数量统计" })
-  getCounts() {
-    return this.productsService.getCounts();
+  getCounts(@CurrentUser() actor: StaffPrincipal) {
+    return this.productsService.getCounts(actor);
   }
 
   @Get(":id")
   @ApiBearerAuth()
   @ApiOperation({ summary: "获取产品详情" })
-  findById(@Param("id") id: string) {
-    return this.productsService.findById(+id);
+  findById(
+    @Param("id") id: string,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.findById(+id, actor);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -261,6 +296,7 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(":id/archive")
+  @SkipGenericAudit()
   @ApiOperation({ summary: "将商品移入回收站" })
   archive(@Req() request: StaffRequest, @Param("id") id: string) {
     return this.productsService.archive(+id, request.user);
@@ -270,13 +306,14 @@ export class ProductsController {
   @ApiBearerAuth()
   @Put(":id/restore")
   @ApiOperation({ summary: "从回收站恢复商品（恢复为草稿）" })
-  restore(@Param("id") id: string) {
-    return this.productsService.restore(+id);
+  restore(@Req() request: StaffRequest, @Param("id") id: string) {
+    return this.productsService.restore(+id, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Post(":id/submit-review")
+  @SkipGenericAudit()
   @ApiOperation({ summary: "提交商品草稿审核（不直接发布）" })
   submitForReview(@Req() request: StaffRequest, @Param("id") id: string) {
     return this.productsService.submitForReview(+id, request.user);
@@ -286,6 +323,7 @@ export class ProductsController {
   @ApiBearerAuth()
   @Put(":id/status")
   @Roles("SUPER_ADMIN", "ADMIN")
+  @SkipGenericAudit()
   @ApiOperation({ summary: "更新产品状态" })
   async updateStatus(@Req() request: StaffRequest, @Param("id") id: string, @Body("status") status: string) {
     const validStatuses = ["DRAFT", "PUBLISHED", "OFFLINE", "ARCHIVED"];
@@ -302,16 +340,19 @@ export class ProductsController {
   @ApiBearerAuth()
   @Get(":id/completeness")
   @ApiOperation({ summary: "检查产品完整性" })
-  checkCompleteness(@Param("id") id: string) {
-    return this.productsService.checkCompleteness(+id);
+  checkCompleteness(
+    @Param("id") id: string,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.checkCompleteness(+id, actor);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Delete(":id")
   @ApiOperation({ summary: "移除回收站商品（已停用：回收站只读，仅支持恢复为草稿）" })
-  delete(@Param("id") id: string) {
-    return this.productsService.delete(+id);
+  delete(@Req() request: StaffRequest, @Param("id") id: string) {
+    return this.productsService.delete(+id, request.user);
   }
 
   /* ═══ 产品图片管理 ═══ */
@@ -330,16 +371,24 @@ export class ProductsController {
   @ApiBearerAuth()
   @Put(":id/images/primary")
   @ApiOperation({ summary: "设置详情主图" })
-  setPrimaryImage(@Req() request: StaffRequest, @Param("id") id: string, @Body() body: { imageId: number }) {
-    return this.productsService.setPrimaryImage(+id, body.imageId, request.user);
+  setPrimaryImage(
+    @Req() request: StaffRequest,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: SetProductImagePointerDto,
+  ) {
+    return this.productsService.setPrimaryImage(id, body.imageId, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(":id/images/listing")
   @ApiOperation({ summary: "直接设置列表图（不裁切）" })
-  setListingImage(@Req() request: StaffRequest, @Param("id") id: string, @Body() body: { imageId: number }) {
-    return this.productsService.setListingImage(+id, body.imageId, request.user);
+  setListingImage(
+    @Req() request: StaffRequest,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: SetProductImagePointerDto,
+  ) {
+    return this.productsService.setListingImage(id, body.imageId, request.user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -382,7 +431,7 @@ export class ProductsController {
     @Param("sourceImageId") sourceImageId: string,
     @Body() dto: CropListingImageDto,
   ) {
-    const product = await this.productsService.findById(+id);
+    const product = await this.productsService.findById(+id, request.user);
     if (!product) throw new NotFoundException("商品不存在");
 
     const sourceImg = product.images?.find(
@@ -424,30 +473,43 @@ export class ProductsController {
       cropPx,
       1200,
       "webp",
-      request.user.id,
+      request.user,
     );
-    const derived: ProductImage = await this.productsService.addImage(+id, {
-      mediaAssetId: result.mediaAssetId,
-      storageKey: result.storageKey,
-      type: "FRONT",
-      sortOrder: 0,
-      sourceImageId: +sourceImageId,
-      cropData: {
-        x: dto.x,
-        y: dto.y,
-        width: dto.width,
-        height: dto.height,
-      },
-      width: result.width,
-      height: result.height,
-      mimeType: result.mimeType,
-      fileSize: result.fileSize,
-    }, request.user);
-
-    // 切换 listingImageId
-    await this.productsService.setListingImage(+id, derived.id, request.user);
-
-    return { id: derived.id, listingImageId: derived.id };
+    try {
+      const derived = await this.productsService.addListingImage(+id, {
+        mediaAssetId: result.mediaAssetId,
+        storageKey: result.storageKey,
+        type: "FRONT",
+        sortOrder: 0,
+        sourceImageId: +sourceImageId,
+        cropData: {
+          x: dto.x,
+          y: dto.y,
+          width: dto.width,
+          height: dto.height,
+        },
+        width: result.width,
+        height: result.height,
+        mimeType: result.mimeType,
+        fileSize: result.fileSize,
+      }, request.user);
+      return { id: derived.id, listingImageId: derived.id };
+    } catch (error) {
+      try {
+        await this.uploadService.archiveUnattachedProductDerivative(
+          result.mediaAssetId,
+          request.user.id,
+        );
+      } catch (cleanupError) {
+        const message = cleanupError instanceof Error
+          ? cleanupError.message
+          : String(cleanupError);
+        this.logger.error(
+          `裁图派生资产补偿失败 mediaAssetId=${result.mediaAssetId}: ${message}`,
+        );
+      }
+      throw error;
+    }
   }
 
   /* ═══ 商品标签管理 ═══ */
@@ -455,16 +517,23 @@ export class ProductsController {
   @ApiBearerAuth()
   @Get(":id/tags")
   @ApiOperation({ summary: "获取商品标签列表" })
-  getTags(@Param("id") id: string) {
-    return this.productsService.getTags(+id);
+  getTags(
+    @Param("id") id: string,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.getTags(+id, actor);
   }
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @Put(":id/tags")
   @ApiOperation({ summary: "批量更新商品标签" })
-  updateTags(@Req() request: StaffRequest, @Param("id") id: string, @Body() body: { tags: string[] }) {
-    return this.productsService.updateTags(+id, body.tags || [], request.user);
+  updateTags(
+    @Req() request: StaffRequest,
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: UpdateProductTagsDto,
+  ) {
+    return this.productsService.updateTags(id, body.tags, request.user);
   }
 
   /* ═══ 商品属性管理 ═══ */
@@ -472,8 +541,11 @@ export class ProductsController {
   @ApiBearerAuth()
   @Get(":id/attributes")
   @ApiOperation({ summary: "获取商品属性值列表" })
-  getAttributes(@Param("id") id: string) {
-    return this.productsService.getAttributes(+id);
+  getAttributes(
+    @Param("id") id: string,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.getAttributes(+id, actor);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -482,12 +554,12 @@ export class ProductsController {
   @ApiOperation({ summary: "批量设置商品属性值（按 attributeValueId）" })
   updateAttributes(
     @Req() request: StaffRequest,
-    @Param("id") id: string,
-    @Body() body: { attributeValueIds: number[] },
+    @Param("id", ParseIntPipe) id: number,
+    @Body() body: UpdateProductAttributesDto,
   ) {
     return this.productsService.setAttributes(
-      +id,
-      body.attributeValueIds || [],
+      id,
+      body.attributeValueIds,
       request.user,
     );
   }
@@ -527,8 +599,11 @@ export class ProductsController {
   @ApiBearerAuth()
   @Get(":id/skus")
   @ApiOperation({ summary: "获取商品SKU列表" })
-  getSkus(@Param("id") id: string) {
-    return this.productsService.getSkus(+id);
+  getSkus(
+    @Param("id") id: string,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.productsService.getSkus(+id, actor);
   }
 
   @UseGuards(JwtAuthGuard)

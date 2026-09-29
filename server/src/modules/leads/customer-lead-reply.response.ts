@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 export const CUSTOMER_LEAD_REPLY_SELECT = {
   id: true,
   status: true,
+  assignedTo: true,
   updatedAt: true,
   activities: {
     where: { type: "REPLY" },
@@ -48,12 +49,54 @@ type CustomerConsultationDetailSource = Prisma.LeadGetPayload<{
   select: typeof CUSTOMER_CONSULTATION_DETAIL_SELECT;
 }>;
 
+export type CustomerConsultationHandlingState =
+  | "WAITING_ASSIGNMENT"
+  | "ADVISOR_ASSIGNED"
+  | "IN_PROGRESS"
+  | "CLOSED";
+
+export type CustomerConsultationNextAction =
+  | "WAIT_FOR_ADVISOR"
+  | "REVIEW_ADVISOR_REPLY"
+  | "START_NEW_CONSULTATION";
+
+function toCustomerConsultationProgress(
+  lead: CustomerLeadReplySource,
+  hasReply: boolean,
+): {
+  handlingState: CustomerConsultationHandlingState;
+  nextAction: CustomerConsultationNextAction;
+} {
+  if (lead.status === "COMPLETED" || lead.status === "INVALID") {
+    return {
+      handlingState: "CLOSED",
+      nextAction: "START_NEW_CONSULTATION",
+    };
+  }
+  if (lead.status === "CONTACTED" || lead.status === "FOLLOWING") {
+    return {
+      handlingState: "IN_PROGRESS",
+      nextAction: hasReply ? "REVIEW_ADVISOR_REPLY" : "WAIT_FOR_ADVISOR",
+    };
+  }
+  return {
+    handlingState: lead.assignedTo === null
+      ? "WAITING_ASSIGNMENT"
+      : "ADVISOR_ASSIGNED",
+    nextAction: "WAIT_FOR_ADVISOR",
+  };
+}
+
 export function toCustomerLeadReply(lead: CustomerLeadReplySource | null) {
   const activity = lead?.activities[0];
+  const progress = lead
+    ? toCustomerConsultationProgress(lead, Boolean(activity?.content))
+    : { handlingState: null, nextAction: null };
   return {
     leadId: lead?.id ?? null,
     status: lead?.status ?? null,
     updatedAt: lead?.updatedAt ?? null,
+    ...progress,
     reply: activity?.content
       ? {
           id: activity.id,

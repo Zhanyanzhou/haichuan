@@ -5,10 +5,11 @@ import { ReliableNotificationDeliveryWorker } from "./reliable-notification-deli
 import { ReliableNotificationOperationsController } from "./reliable-notification-operations.controller";
 import { ReliableNotificationOperationsService } from "./reliable-notification-operations.service";
 import { NotificationDeliveryPolicyService } from "./notification-delivery-policy.service";
+import { ObservabilityModule } from "../observability/observability.module";
 
 @Global()
 @Module({
-  imports: [OutboxModule],
+  imports: [OutboxModule, ObservabilityModule],
   providers: [
     ReliableNotificationIntentService,
     ReliableNotificationDeliveryWorker,

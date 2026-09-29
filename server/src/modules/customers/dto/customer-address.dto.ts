@@ -41,10 +41,3 @@ export class CustomerAddressDto {
   @IsBoolean()
   isDefault?: boolean;
 }
-
-/** 付款凭证提交 DTO */
-export class SubmitPaymentProofDto {
-  @IsString()
-  @MaxLength(500)
-  proofKey!: string;
-}

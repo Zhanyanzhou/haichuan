@@ -26,7 +26,7 @@ type AccountExperienceProps = {
     name: string;
     email?: string;
     smsCode?: string;
-  }) => void;
+  }) => void | Promise<unknown>;
   onWechatAuth: (result: { customer: CustomerAccount }) => void;
 };
 
@@ -333,43 +333,72 @@ function MemberAccess({
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  // 手机验真：是否强制验证码由服务端开关决定（SMS 凭据接入后打开）
+  // 手机号作为账户身份时必须验真；要求接口异常时保持失败关闭。
   const [smsCode, setSmsCode] = useState("");
-  const [smsRequired, setSmsRequired] = useState(false);
   const [smsCooldown, setSmsCooldown] = useState(0);
   const [sendingSms, setSendingSms] = useState(false);
   // 登录分级挑战：3 次失败要求图形验证码，5 次失败升级短信验证码（服务端判定）
   const [loginChallenge, setLoginChallenge] = useState<"none" | "captcha" | "sms">("none");
+  const [loginChallengeError, setLoginChallengeError] = useState<string | null>(null);
   const [captcha, setCaptcha] = useState<{ captchaId: string; svg: string } | null>(null);
   const [captchaCode, setCaptchaCode] = useState("");
   const [loginSmsCode, setLoginSmsCode] = useState("");
   const [loginSmsCooldown, setLoginSmsCooldown] = useState(0);
   const [sendingLoginSms, setSendingLoginSms] = useState(false);
+  const [authPreparing, setAuthPreparing] = useState(false);
+  const authPreparingRef = useRef(false);
+  const authAttemptRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      authAttemptRef.current += 1;
+      authPreparingRef.current = false;
+    };
+  }, []);
 
   const loadLoginCaptcha = async () => {
+    // 每次换图都立即丢弃旧挑战，避免刷新失败时继续提交已消费的 captchaId。
+    setCaptcha(null);
+    setCaptchaCode("");
     try {
       const res = await customerApi.loginCaptcha();
+      if (!mountedRef.current) return;
       const data = unwrapResponse<{ captchaId: string; svg: string }>(res);
       if (data?.captchaId) {
         setCaptcha({ captchaId: data.captchaId, svg: data.svg });
-        setCaptchaCode("");
       }
     } catch {
       // 验证码加载失败不打断表单；提交时服务端会再次要求
     }
   };
 
-  const refreshLoginChallenge = async () => {
-    if (!/^1\d{10}$/.test(phone)) return "none" as const;
+  const refreshLoginChallenge = async (forceCaptchaRefresh = false) => {
+    if (!/^1\d{10}$/.test(phone)) {
+      setLoginChallengeError(null);
+      return "none" as const;
+    }
     try {
       const res = await customerApi.loginChallenge(phone);
+      if (!mountedRef.current) return "none" as const;
       const data = unwrapResponse<{ level: "none" | "captcha" | "sms" }>(res);
       const level = data?.level ?? "none";
+      setLoginChallengeError(null);
       setLoginChallenge(level);
-      if (level === "captcha" && !captcha) await loadLoginCaptcha();
+      if (level === "captcha" && (forceCaptchaRefresh || !captcha)) {
+        await loadLoginCaptcha();
+      } else if (level !== "captcha") {
+        setCaptcha(null);
+        setCaptchaCode("");
+      }
       return level;
     } catch {
-      return "none" as const;
+      if (mountedRef.current) {
+        setLoginChallengeError("登录验证暂时不可用，请稍后重试。");
+      }
+      return "unavailable" as const;
     }
   };
 
@@ -394,16 +423,6 @@ function MemberAccess({
       setSendingLoginSms(false);
     }
   };
-
-  useEffect(() => {
-    customerApi
-      .smsRequirements()
-      .then((res: unknown) => {
-        const data = unwrapResponse<{ registerRequired?: boolean }>(res);
-        setSmsRequired(Boolean(data?.registerRequired));
-      })
-      .catch(() => setSmsRequired(false));
-  }, []);
 
   useEffect(() => {
     if (smsCooldown <= 0) return;
@@ -434,39 +453,54 @@ function MemberAccess({
       className="account-member-access"
       onSubmit={(event) => {
         event.preventDefault();
-        if (mode === "login") {
-          void (async () => {
-            // 提交前按服务端失败计数刷新挑战等级；缺失挑战输入时先补齐再提交
-            const level = await refreshLoginChallenge();
-            if (level === "captcha" && !captchaCode.trim()) {
-              if (!captcha) await loadLoginCaptcha();
-              return;
+        if (authLoading || authPreparingRef.current) return;
+        authPreparingRef.current = true;
+        setAuthPreparing(true);
+        const attempt = authAttemptRef.current + 1;
+        authAttemptRef.current = attempt;
+        void (async () => {
+          try {
+            if (mode === "login") {
+              // 提交前按服务端失败计数刷新挑战等级；缺失挑战输入时先补齐再提交
+              const level = await refreshLoginChallenge();
+              if (!mountedRef.current || authAttemptRef.current !== attempt) return;
+              if (level === "unavailable") return;
+              if (level === "captcha" && !captchaCode.trim()) return;
+              if (level === "sms" && !loginSmsCode.trim()) return;
+              await onLogin({
+                phone,
+                password,
+                captchaId: level === "captcha" ? captcha?.captchaId : undefined,
+                captchaCode: level === "captcha" ? captchaCode.trim() : undefined,
+                smsCode: level === "sms" ? loginSmsCode.trim() : undefined,
+              });
+              if (!mountedRef.current || authAttemptRef.current !== attempt) return;
+              // 图形验证码在每次登录尝试后都会被服务端消费；失败时必须换取新挑战。
+              // 登录成功时组件会卸载，因此这里不会覆盖已认证界面。
+              await refreshLoginChallenge(level === "captcha");
+            } else {
+              await onRegister({
+                phone,
+                password,
+                name,
+                email: email || undefined,
+                smsCode: smsCode.trim(),
+              });
             }
-            if (level === "sms" && !loginSmsCode.trim()) return;
-            await onLogin({
-              phone,
-              password,
-              captchaId: level === "captcha" ? captcha?.captchaId : undefined,
-              captchaCode: level === "captcha" ? captchaCode.trim() : undefined,
-              smsCode: level === "sms" ? loginSmsCode.trim() : undefined,
-            });
-            // 失败后等级可能升级；成功时组件已卸载，刷新无副作用
-            await refreshLoginChallenge();
-          })();
-        } else
-          onRegister({
-            phone,
-            password,
-            name,
-            email: email || undefined,
-            smsCode: smsRequired ? smsCode.trim() : undefined,
-          });
+          } finally {
+            if (mountedRef.current && authAttemptRef.current === attempt) {
+              authPreparingRef.current = false;
+              setAuthPreparing(false);
+            }
+          }
+        })();
       }}
     >
       <div className="account-access-tabs">
         <button
           type="button"
           className={mode === "login" ? "is-active" : ""}
+          disabled={authLoading || authPreparing}
           onClick={() => setMode("login")}
         >
           会员登录
@@ -474,6 +508,7 @@ function MemberAccess({
         <button
           type="button"
           className={mode === "register" ? "is-active" : ""}
+          disabled={authLoading || authPreparing}
           onClick={() => setMode("register")}
         >
           注册会员
@@ -484,6 +519,11 @@ function MemberAccess({
           ? "登录后，提交咨询无需重复填写联系方式。"
           : "注册后，为您保存作品偏好、咨询与订单档案。"}
       </p>
+      {mode === "login" && loginChallengeError ? (
+        <p role="alert" style={{ color: "#8C3F3B" }}>
+          {loginChallengeError}
+        </p>
+      ) : null}
       {mode === "register" && (
         <label>
           称呼
@@ -516,7 +556,7 @@ function MemberAccess({
           />
         </label>
       )}
-      {mode === "register" && smsRequired && (
+      {mode === "register" && (
         <label>
           短信验证码
           <span
@@ -554,7 +594,7 @@ function MemberAccess({
             />
             {captcha ? (
               <img
-                src={`data:image/svg+xml;base64,${btoa(captcha.svg)}`}
+                src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(captcha.svg)}`}
                 alt="图形验证码"
                 title="点击刷新"
                 onClick={() => void loadLoginCaptcha()}
@@ -619,9 +659,9 @@ function MemberAccess({
       <button
         type="submit"
         className="account-button account-button--dark"
-        disabled={authLoading}
+        disabled={authLoading || authPreparing}
       >
-        {authLoading
+        {authLoading || authPreparing
           ? "处理中…"
           : mode === "login"
             ? "登录我的账户"

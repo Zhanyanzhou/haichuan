@@ -109,7 +109,6 @@ test("母模板发布保留同一 URL 的每个断点背景与槽位路径", () 
     "defaultContent.slot_image_duplicate",
     "nodes.node_root.responsive.desktop.backgroundImage",
     "nodes.node_root.responsive.mobile.backgroundImage",
-    "nodes.node_root.responsive.tablet.backgroundImage",
   ]);
 });
 
@@ -150,7 +149,7 @@ function documentWithDefinition(
   };
 }
 
-test("schema2 仅 Tablet 可见素材仍进入公开授权检查", () => {
+test("schema2 仅 Tablet 可见素材不再进入公开授权检查", () => {
   const definition = imageDefinition();
   definition.schemaVersion = 2;
   definition.nodes.node_image_duplicate.hidden = true;
@@ -158,8 +157,7 @@ test("schema2 仅 Tablet 可见素材仍进入公开授权检查", () => {
   definition.nodes.node_image.responsive.tablet = { display: "block" };
   definition.nodes.node_image.responsive.mobile = { display: "none" };
   const references = getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition));
-  assert.equal(references.length, 1);
-  assert.equal(references[0].url, "/uploads/mobile-only.jpg");
+  assert.deepEqual(references, []);
 });
 
 test("schema3 背景图片从当前定义各断点收集，忽略隐藏祖先、空槽与实例隐藏", () => {
@@ -171,7 +169,7 @@ test("schema3 背景图片从当前定义各断点收集，忽略隐藏祖先、
   definition.nodes.node_container.responsive.mobile = { display: "none" };
   definition.nodes.node_heading.responsive.desktop.backgroundImage = "/uploads/empty-heading.jpg";
   const document = documentWithDefinition(definition);
-  assert.deepEqual(getDynamicTemplateDocumentMediaReferences(document).map((item) => item.url).sort(), ["/uploads/mobile-only.jpg", "/uploads/root.jpg", "/uploads/tablet.jpg"]);
+  assert.deepEqual(getDynamicTemplateDocumentMediaReferences(document).map((item) => item.url).sort(), ["/uploads/root.jpg"]);
   const backgrounds = getDynamicTemplateDocumentMediaReferences(document).filter((item) => item.field.endsWith("backgroundImage"));
   assert.ok(backgrounds.every((item) => item.blockId === "puck-instance-1"));
   assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition, { isVisible: false })), []);

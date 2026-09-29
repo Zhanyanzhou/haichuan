@@ -5,7 +5,7 @@ import type {
   DynamicTemplateResponsiveRules,
   TemplateDefinitionV2,
 } from "./generated/templateDefinition.generated";
-import { resolveTemplateNodeRules, setTemplateNodeRule } from "./responsive";
+import { resolveTemplateNodeRules, setTemplateNodeRule, toTemplateContentBreakpoint } from "./responsive";
 
 export type TemplateDesignHeightMode = "fixed" | "aspect-ratio" | "auto";
 
@@ -46,8 +46,7 @@ export function parseTemplateRatio(
 }
 
 function getDesignWidth(definition: TemplateDefinitionV2, device: TemplateBreakpoint): number {
-  if (device === "tablet") return definition.metadata.previewTabletWidth ?? 834;
-  return device === "desktop"
+  return toTemplateContentBreakpoint(device) === "desktop"
     ? definition.metadata.canvasSize?.width ?? definition.metadata.previewDesktopWidth ?? RESPONSIVE_CANVAS.desktop.width
     : definition.metadata.previewMobileWidth ?? RESPONSIVE_CANVAS.mobile.width;
 }
@@ -95,7 +94,7 @@ export function resolveTemplateDesignFrame(
 ): TemplateDesignFrame {
   const sourceWidth = getDesignWidth(definition, device);
   const rootRules = getEffectiveTemplateRootRules(definition, device);
-  const baseline = RESPONSIVE_CANVAS[device === "tablet" ? "desktop" : device];
+  const baseline = RESPONSIVE_CANVAS[toTemplateContentBreakpoint(device)];
   const heightMode = resolveHeightMode(rootRules.height);
   if (heightMode === "fixed") {
     const fixedHeight = rootRules.height.value?.unit === "px"
@@ -147,16 +146,16 @@ export function setTemplateDesignWidth(
   width: number,
 ): TemplateDefinitionV2 {
   const next = structuredClone(definition);
+  const contentDevice = toTemplateContentBreakpoint(device);
   const safeWidth = Math.round(width);
-  if (device === "desktop" && next.metadata.canvasSize) {
+  if (contentDevice === "desktop" && next.metadata.canvasSize) {
     const boundedWidth = Math.max(1, Math.min(4096, safeWidth));
     next.metadata.canvasSize.width = boundedWidth;
     next.metadata.canvasSize.aspectRatio = boundedWidth / next.metadata.canvasSize.height;
     next.metadata.previewDesktopWidth = Math.max(768, Math.min(2560, boundedWidth));
-  } else if (device === "desktop") next.metadata.previewDesktopWidth = safeWidth;
-  else if (device === "tablet") next.metadata.previewTabletWidth = safeWidth;
+  } else if (contentDevice === "desktop") next.metadata.previewDesktopWidth = safeWidth;
   else next.metadata.previewMobileWidth = safeWidth;
-  synchronizeCompatibilityRatio(next, device);
+  synchronizeCompatibilityRatio(next, contentDevice);
   return next;
 }
 

@@ -1,4 +1,12 @@
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsDefined,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -15,6 +23,13 @@ export class UpdateStockDto {
   @IsInt({ message: '数量必须是整数' })
   @Min(0, { message: '数量必须为非负整数' })
   quantity!: number;
+
+  @ApiProperty({ description: '操作者看到的当前库存；所有写入都用它拒绝陈旧或重复调整', example: 8 })
+  @IsDefined({ message: '库存调整必须提供调整前数量' })
+  @Type(() => Number)
+  @IsInt({ message: '调整前数量必须是整数' })
+  @Min(0, { message: '调整前数量必须为非负整数' })
+  expectedQuantity!: number;
 
   @ApiPropertyOptional({ description: '备注' })
   @IsOptional()

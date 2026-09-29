@@ -9,7 +9,25 @@ import { trackAddToSelection, trackRemoveFromSelection } from "@/hooks/useAnalyt
 import { salesModeCta } from "@/store/featureFlags";
 import { catalogTokens as T } from "./catalogTokens";
 import useCatalogDialog from "./useCatalogDialog";
+import { recordCatalogDeparture } from "./catalogReturnContext";
 import { App as AntdApp } from "antd";
+
+function rememberDetailEntry(
+  product: CatalogProduct,
+  productIndex: number,
+  catalogUrl: string | null,
+  focusTarget: "detail" | "quick-view" = "detail",
+) {
+  if (!catalogUrl) return;
+  recordCatalogDeparture({
+    catalogUrl,
+    productReference: product.code?.trim() || String(product.id),
+    productId: product.id,
+    productIndex,
+    focusTarget,
+    scrollY: window.scrollY,
+  });
+}
 /* ══════════════════════════════════════
    组件：产品卡片（梵克雅宝矩阵风格）
    ══════════════════════════════════════ */
@@ -18,11 +36,15 @@ function CatalogProductAction({
   selected,
   onToggle,
   commerceAllowed,
+  productIndex,
+  catalogUrl,
 }: {
   product: CatalogProduct;
   selected: boolean;
   onToggle: () => void;
   commerceAllowed: boolean;
+  productIndex: number;
+  catalogUrl: string | null;
 }) {
   const commonStyle: CSSProperties = {
     display: "inline-flex",
@@ -67,7 +89,12 @@ function CatalogProductAction({
   }
 
   return (
-    <Link to={publicProductPath(product)} style={commonStyle}>
+    <Link
+      to={publicProductPath(product)}
+      data-catalog-detail-entry
+      onClick={() => rememberDetailEntry(product, productIndex, catalogUrl)}
+      style={commonStyle}
+    >
       {commerceAllowed &&
       product.salesMode === "DIRECT_PURCHASE" &&
       product.isAvailableForPurchase === true
@@ -81,10 +108,14 @@ function ProductCard({
   product,
   onQuickView,
   commerceAllowed,
+  productIndex,
+  catalogUrl,
 }: {
   product: CatalogProduct;
   onQuickView: (p: CatalogProduct, trigger: HTMLButtonElement) => void;
   commerceAllowed: boolean;
+  productIndex: number;
+  catalogUrl: string | null;
 }) {
   const { message } = AntdApp.useApp();
   const toggle = useSelectionStore((s) => s.toggle);
@@ -92,6 +123,7 @@ function ProductCard({
 
   const handleToggle = () => {
     const result = toggle(product.id);
+    if (result === "unavailable") return;
     if (result === "limit") {
       message.warning("每次最多选择 20 款作品");
       return;
@@ -150,6 +182,7 @@ function ProductCard({
         <button
           type="button"
           className="catalog-image-trigger"
+          data-catalog-product-focus
           aria-label={`快速预览 ${product.name || product.sku}`}
           onClick={(event) => onQuickView(product, event.currentTarget)}
           onMouseMove={handleMouseMove}
@@ -274,6 +307,8 @@ function ProductCard({
           selected={sel}
           onToggle={handleToggle}
           commerceAllowed={commerceAllowed}
+          productIndex={productIndex}
+          catalogUrl={catalogUrl}
         />
       </div>
     </div>
@@ -290,10 +325,14 @@ export function ProductGrid({
   products,
   onQuickView,
   commerceAllowed,
+  catalogUrl,
+  startIndex = 0,
 }: {
   products: CatalogProduct[];
   onQuickView: (p: CatalogProduct, trigger: HTMLButtonElement) => void;
   commerceAllowed: boolean;
+  catalogUrl: string | null;
+  startIndex?: number;
 }) {
   const resultCount = Math.min(products.length, 3);
   const sparseMaxWidth = resultCount === 1 ? 560 : resultCount === 2 ? 960 : 1280;
@@ -356,12 +395,19 @@ export function ProductGrid({
         data-result-count={resultCount}
         style={{ maxWidth: `${sparseMaxWidth}px`, margin: "0 auto" }}
       >
-        {products.map((p) => (
-          <div key={p.id} className="catalog-cell">
+        {products.map((p, index) => (
+          <div
+            key={p.id}
+            className="catalog-cell"
+            data-catalog-product-id={p.id}
+            data-catalog-product-index={startIndex + index}
+          >
             <ProductCard
               product={p}
               onQuickView={onQuickView}
               commerceAllowed={commerceAllowed}
+              productIndex={startIndex + index}
+              catalogUrl={catalogUrl}
             />
           </div>
         ))}
@@ -389,11 +435,15 @@ export function QuickView({
   onClose,
   returnFocusRef,
   commerceAllowed,
+  productIndex,
+  catalogUrl,
 }: {
   product: CatalogProduct | null;
   onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
   commerceAllowed: boolean;
+  productIndex: number;
+  catalogUrl: string | null;
 }) {
   const { message } = AntdApp.useApp();
   const toggle = useSelectionStore((s) => s.toggle);
@@ -403,6 +453,7 @@ export function QuickView({
   const sel = isSelected(product.id);
   const handleToggle = () => {
     const result = toggle(product.id);
+    if (result === "unavailable") return;
     if (result === "limit") {
       message.warning("每次最多选择 20 款作品");
       return;
@@ -528,8 +579,15 @@ export function QuickView({
             selected={sel}
             onToggle={handleToggle}
             commerceAllowed={commerceAllowed}
+            productIndex={productIndex}
+            catalogUrl={catalogUrl}
           />
-          <Link className="catalog-quick-view__detail-link" to={publicProductPath(product)}>
+          <Link
+            className="catalog-quick-view__detail-link"
+            to={publicProductPath(product)}
+            data-catalog-detail-entry
+            onClick={() => rememberDetailEntry(product, productIndex, catalogUrl, "quick-view")}
+          >
             查看完整信息
           </Link>
         </div>

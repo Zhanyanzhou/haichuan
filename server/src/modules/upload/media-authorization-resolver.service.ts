@@ -35,7 +35,15 @@ export type MediaReferenceIssue = {
   code: MediaReferenceIssueCode;
   severity: 'WARNING' | 'ERROR';
   message: string;
+  assetId?: number;
+  authorizationRevision?: number | null;
 };
+
+const PUBLIC_USE_CLUSTER = new Set<MediaReferenceIssueCode>([
+  'AUTHORIZATION_MISSING',
+  'AUTHORIZATION_NOT_APPROVED',
+  'PUBLIC_WEB_USE_NOT_ALLOWED',
+]);
 
 export type ResolvedMediaReferenceItem = {
   url: string;
@@ -72,9 +80,9 @@ const ISSUE_MESSAGES: Record<MediaReferenceIssueCode, string> = {
   ASSET_INTEGRITY_MISMATCH: '素材文件内容与登记校验和不一致',
   ASSET_NOT_READY: '素材文件当前不可公开读取',
   ASSET_NOT_PUBLIC: '素材访问级别不是公开',
-  AUTHORIZATION_MISSING: '素材缺少集中授权记录',
-  AUTHORIZATION_NOT_APPROVED: '素材授权尚未批准',
-  PUBLIC_WEB_USE_NOT_ALLOWED: '素材授权未允许公网使用',
+  AUTHORIZATION_MISSING: '素材尚未批准公开使用',
+  AUTHORIZATION_NOT_APPROVED: '素材尚未批准公开使用',
+  PUBLIC_WEB_USE_NOT_ALLOWED: '素材尚未允许公网使用',
   AUTHORIZATION_NOT_STARTED: '素材授权尚未开始生效',
   AUTHORIZATION_EXPIRED: '素材授权已过期',
   AUTHORIZATION_REVOKED: '素材授权已撤销',
@@ -144,7 +152,7 @@ export class MediaAuthorizationResolverService {
       const asset = 'id' in reference.lookup
         ? byId.get(reference.lookup.id)
         : byStorageKey.get(reference.lookup.storageKey);
-      if (!asset || !asset.storageKey.startsWith('page-assets/')) {
+      if (!asset || !this.isManagedStorageKey(asset.storageKey)) {
         issues.push(this.issue(reference, 'UNREGISTERED_MEDIA', 'ERROR'));
         items.push({
           url: reference.url,
@@ -169,10 +177,11 @@ export class MediaAuthorizationResolverService {
           ...(fileIssue ? [fileIssue] : []),
         ] as MediaReferenceIssueCode[],
       };
-      for (const reason of eligibility.reasons) {
-        const severity = mode === 'SHADOW' && AUTHORIZATION_REASONS.has(reason) ? 'WARNING' : 'ERROR';
-        issues.push(this.issue(reference, reason, severity));
-      }
+      this.pushEligibilityIssues(issues, reference, eligibility.reasons, {
+        mode,
+        assetId: asset.id,
+        authorizationRevision: asset.authorization?.revision ?? null,
+      });
       items.push({
         url: reference.url,
         context: this.contextOf(reference),
@@ -191,10 +200,41 @@ export class MediaAuthorizationResolverService {
 
     return {
       items,
-      issues,
+      issues: collapsePublicUseIssues(issues),
       eligible: issues.every((issue) => issue.severity !== 'ERROR'),
       mode,
     };
+  }
+
+  private pushEligibilityIssues(
+    issues: MediaReferenceIssue[],
+    reference: MediaReferenceInput,
+    reasons: readonly MediaReferenceIssueCode[],
+    extras: {
+      mode: MediaAuthorizationResolutionMode;
+      assetId?: number;
+      authorizationRevision?: number | null;
+    },
+  ) {
+    const clustered: MediaReferenceIssueCode[] = [];
+    const rest: MediaReferenceIssueCode[] = [];
+    for (const reason of reasons) {
+      if (PUBLIC_USE_CLUSTER.has(reason)) clustered.push(reason);
+      else rest.push(reason);
+    }
+    if (clustered.length > 0) {
+      const code = clustered.includes('AUTHORIZATION_MISSING')
+        ? 'AUTHORIZATION_MISSING'
+        : clustered.includes('AUTHORIZATION_NOT_APPROVED')
+          ? 'AUTHORIZATION_NOT_APPROVED'
+          : 'PUBLIC_WEB_USE_NOT_ALLOWED';
+      const severity = extras.mode === 'SHADOW' ? 'WARNING' : 'ERROR';
+      issues.push(this.issue(reference, code, severity, extras));
+    }
+    for (const reason of rest) {
+      const severity = extras.mode === 'SHADOW' && AUTHORIZATION_REASONS.has(reason) ? 'WARNING' : 'ERROR';
+      issues.push(this.issue(reference, reason, severity, extras));
+    }
   }
 
   private cachedFileIssue(
@@ -213,10 +253,10 @@ export class MediaAuthorizationResolverService {
     expectedChecksum: string,
   ): Promise<'ASSET_FILE_UNAVAILABLE' | 'ASSET_INTEGRITY_MISMATCH' | null> {
     try {
-      const publicRoot = resolveMediaStorageRoots().publicRoot;
+      const storageRoot = this.storageRootFor(storageKey);
       const [physicalRoot, physicalTarget] = await Promise.all([
-        realpath(publicRoot),
-        realpath(resolve(publicRoot, storageKey)),
+        realpath(storageRoot),
+        realpath(resolve(storageRoot, storageKey)),
       ]);
       const pathFromRoot = relative(physicalRoot, physicalTarget);
       if (
@@ -243,7 +283,7 @@ export class MediaAuthorizationResolverService {
 
   private classify(reference: MediaReferenceInput):
     | { kind: 'MANAGED'; lookup: ManagedReference['lookup'] }
-    | { kind: 'ISSUE'; code: 'DANGEROUS_URL' | 'EXTERNAL_UNMANAGED' }
+    | { kind: 'ISSUE'; code: 'DANGEROUS_URL' | 'EXTERNAL_UNMANAGED' | 'UNREGISTERED_MEDIA' }
     | { kind: 'PASSTHROUGH' } {
     const value = reference.url.trim();
     if (!value || /^(?:data|blob|javascript|vbscript|file):/i.test(value) || /[\u0000-\u001f\u007f]/u.test(value)) {
@@ -254,7 +294,7 @@ export class MediaAuthorizationResolverService {
     }
     const controlled = value.match(/^\/api\/upload\/public-media\/(\d+)(?:[?#].*)?$/);
     if (controlled) return { kind: 'MANAGED', lookup: { id: Number(controlled[1]) } };
-    const stored = value.match(/^\/uploads\/(page-assets\/[^?#]+)(?:[?#].*)?$/);
+    const stored = value.match(/^\/uploads\/([^?#]+)(?:[?#].*)?$/);
     if (stored) {
       let storageKey: string;
       try {
@@ -270,9 +310,21 @@ export class MediaAuthorizationResolverService {
       ) {
         return { kind: 'ISSUE', code: 'DANGEROUS_URL' };
       }
+      if (!this.isManagedStorageKey(storageKey)) {
+        return { kind: 'ISSUE', code: 'UNREGISTERED_MEDIA' };
+      }
       return { kind: 'MANAGED', lookup: { storageKey } };
     }
     return { kind: 'PASSTHROUGH' };
+  }
+
+  private isManagedStorageKey(storageKey: string) {
+    return storageKey.startsWith('page-assets/') || storageKey.startsWith('product-assets/');
+  }
+
+  private storageRootFor(storageKey: string) {
+    const roots = resolveMediaStorageRoots();
+    return storageKey.startsWith('page-assets/') ? roots.publicRoot : roots.productMediaRoot;
   }
 
   private contextOf(reference: MediaReferenceInput): MediaReferenceContext {
@@ -287,6 +339,10 @@ export class MediaAuthorizationResolverService {
     reference: MediaReferenceInput,
     code: MediaReferenceIssueCode,
     severity: 'WARNING' | 'ERROR',
+    extras: {
+      assetId?: number;
+      authorizationRevision?: number | null;
+    } = {},
   ): MediaReferenceIssue {
     return {
       url: reference.url,
@@ -294,6 +350,32 @@ export class MediaAuthorizationResolverService {
       code,
       severity,
       message: ISSUE_MESSAGES[code],
+      ...(extras.assetId ? { assetId: extras.assetId } : {}),
+      ...(extras.authorizationRevision !== undefined
+        ? { authorizationRevision: extras.authorizationRevision }
+        : {}),
     };
   }
+}
+
+const PUBLIC_USE_COLLAPSE_CODES = new Set<MediaReferenceIssueCode>([
+  'AUTHORIZATION_MISSING',
+  'AUTHORIZATION_NOT_APPROVED',
+  'PUBLIC_WEB_USE_NOT_ALLOWED',
+]);
+
+function collapsePublicUseIssues(issues: MediaReferenceIssue[]): MediaReferenceIssue[] {
+  const collapsed: MediaReferenceIssue[] = [];
+  const seenPublicUse = new Set<string>();
+  for (const issue of issues) {
+    if (!PUBLIC_USE_COLLAPSE_CODES.has(issue.code)) {
+      collapsed.push(issue);
+      continue;
+    }
+    const key = String(issue.assetId ?? issue.url);
+    if (seenPublicUse.has(key)) continue;
+    seenPublicUse.add(key);
+    collapsed.push(issue);
+  }
+  return collapsed;
 }

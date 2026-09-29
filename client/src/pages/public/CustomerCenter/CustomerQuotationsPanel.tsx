@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App as AntdApp, Button, Modal, Select, Spin } from "antd";
 import type {
   CooperationDesignFileVersionSummary,
@@ -17,13 +17,18 @@ import {
   requestErrorCode,
   requestStatus,
 } from "@/services/httpClient";
+import {
+  currentSessionEpoch,
+  isCurrentSessionEpoch,
+} from "@/services/sessionEpoch";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useQuotationOrderingEnabled } from "@/store/featureFlags";
 import type { CustomerAddress } from "./types";
 
 type CustomerQuotationsPanelProps = {
   addresses: CustomerAddress[];
-  onOrderCreated?: () => void;
+  onOrderCreated?: (order: ConfirmQuotationOrderResult["order"]) => void | Promise<void>;
+  onLocateOrder: (orderId: number) => void;
 };
 
 const CHANNEL_LABEL = {
@@ -94,6 +99,24 @@ function currentVersionOf(quotation: Quotation | null): QuotationVersion | null 
       (version) => version.version === quotation.currentVersion,
     ) ?? quotation.versions?.[0] ?? null
   );
+}
+
+function quotationJourney(quotation: Quotation, orderingEnabled: boolean) {
+  if (quotation.status === "PENDING_CONFIRM") {
+    return orderingEnabled
+      ? { owner: "当前由您确认", next: "核对最新版本、费用与地址后，由本人确认并创建订单。" }
+      : { owner: "当前由海川顾问跟进", next: "报价确认尚未开放；您可先核对版本，开放后再由本人确认。" };
+  }
+  if (quotation.status === "CONVERTED") {
+    return { owner: "当前由海川顾问与履约团队跟进", next: "前往唯一对应订单查看付款、生产与交付状态。" };
+  }
+  if (quotation.status === "EXPIRED") {
+    return { owner: "当前由海川顾问跟进", next: "报价已过有效期，请等待顾问重新发出新版本。" };
+  }
+  if (quotation.status === "CONFIRMED") {
+    return { owner: "当前由系统与海川顾问核对", next: "确认结果尚未形成订单，请勿重复确认并联系顾问核对。" };
+  }
+  return { owner: "当前由海川顾问跟进", next: "请核对当前状态；如需继续，请联系顾问。" };
 }
 
 function normalizeQuotationPage(value: unknown): CustomerQuotationPage {
@@ -247,6 +270,7 @@ function DesignFileSummary({
 export default function CustomerQuotationsPanel({
   addresses,
   onOrderCreated,
+  onLocateOrder,
 }: CustomerQuotationsPanelProps) {
   const { message, modal } = AntdApp.useApp();
   const orderingEnabled = useQuotationOrderingEnabled();
@@ -262,6 +286,11 @@ export default function CustomerQuotationsPanel({
   const [selectedAddressId, setSelectedAddressId] = useState<number>();
   const [confirmingOrder, setConfirmingOrder] = useState(false);
   const [confirmingFile, setConfirmingFile] = useState(false);
+  const detailRequestGeneration = useRef(0);
+
+  const focusCanonicalOrder = (orderId: number) => {
+    onLocateOrder(orderId);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -300,14 +329,17 @@ export default function CustomerQuotationsPanel({
   }, [load]);
 
   const openDetail = async (id: number) => {
+    const generation = ++detailRequestGeneration.current;
     setDetailId(id);
     setDetail(null);
     setDetailError(null);
     setDetailLoading(true);
     try {
       const response = await customerQuotationApi.detail(id);
+      if (generation !== detailRequestGeneration.current) return;
       setDetail(unwrapResponse<Quotation>(response));
     } catch (error) {
+      if (generation !== detailRequestGeneration.current) return;
       setDetailError(
         quotationErrorMessage(
           error,
@@ -315,7 +347,9 @@ export default function CustomerQuotationsPanel({
         ),
       );
     } finally {
-      setDetailLoading(false);
+      if (generation === detailRequestGeneration.current) {
+        setDetailLoading(false);
+      }
     }
   };
 
@@ -426,6 +460,9 @@ export default function CustomerQuotationsPanel({
       message.warning("旧版报价仅供查看，请联系顾问复制或修订后重发 v2。");
       return;
     }
+    const quotationId = detail.id;
+    const quotationVersion = version.version;
+    const requestEpoch = currentSessionEpoch("customer");
     const fullAddress = [
       selectedAddress.recipientName,
       selectedAddress.recipientPhone,
@@ -450,34 +487,40 @@ export default function CustomerQuotationsPanel({
       okText: "确认报价并创建订单",
       cancelText: "返回核对",
       onOk: async () => {
+        if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
         const idempotencyKey = getOrCreateIdempotencyKey(
-          detail.id,
-          version.version,
+          quotationId,
+          quotationVersion,
         );
         setConfirmingOrder(true);
         try {
           const response = await customerQuotationApi.confirmAndOrder(
-            detail.id,
+            quotationId,
             {
-              quotationVersion: version.version,
+              quotationVersion,
               addressId: selectedAddress.id,
             },
             idempotencyKey,
           );
+          if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
           const result = unwrapResponse<ConfirmQuotationOrderResult>(response);
-          clearIdempotencyKey(detail.id, version.version);
-          message.success(
-            result?.order?.orderNo
-              ? `订单 ${result.order.orderNo} 已创建`
-              : "订单已创建",
-          );
+          clearIdempotencyKey(quotationId, quotationVersion);
           await load();
+          if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
           setDetailId(null);
           setDetail(null);
-          onOrderCreated?.();
+          if (result?.order) {
+            await onOrderCreated?.(result.order);
+            if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
+            message.success(`订单 ${result.order.orderNo} 已创建`);
+            focusCanonicalOrder(result.order.id);
+          } else {
+            message.success("订单已创建");
+          }
         } catch (error) {
+          if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
           if (requestErrorCode(error) === "IDEMPOTENCY_KEY_REUSED") {
-            clearIdempotencyKey(detail.id, version.version);
+            clearIdempotencyKey(quotationId, quotationVersion);
           }
           message.error(
             quotationErrorMessage(
@@ -486,7 +529,9 @@ export default function CustomerQuotationsPanel({
             ),
           );
         } finally {
-          setConfirmingOrder(false);
+          if (isCurrentSessionEpoch("customer", requestEpoch)) {
+            setConfirmingOrder(false);
+          }
         }
       },
     });
@@ -626,6 +671,7 @@ export default function CustomerQuotationsPanel({
         destroyOnHidden
         onCancel={() => {
           if (confirmingOrder || confirmingFile) return;
+          detailRequestGeneration.current += 1;
           setDetailId(null);
           setDetail(null);
           setDetailError(null);
@@ -662,6 +708,22 @@ export default function CustomerQuotationsPanel({
               </p>
             ) : null}
 
+            {(() => {
+              const journey = quotationJourney(detail, orderingEnabled);
+              return (
+                <section className="my-account__quote-subsection" aria-label="报价当前责任与下一步">
+                  <h4>当前责任与下一步</h4>
+                  <p><strong>{journey.owner}</strong></p>
+                  <p>{journey.next}</p>
+                  {detail.convertedOrder ? (
+                    <Button onClick={() => focusCanonicalOrder(detail.convertedOrder!.id)}>
+                      查看订单 {detail.convertedOrder.orderNo}
+                    </Button>
+                  ) : null}
+                </section>
+              );
+            })()}
+
             <dl className="my-account__quote-facts">
               <div>
                 <dt>报价版本</dt>
@@ -681,6 +743,10 @@ export default function CustomerQuotationsPanel({
                   <dd>{version.pricingSource.label}</dd>
                 </div>
               ) : null}
+              <div>
+                <dt>本版变更</dt>
+                <dd>{version.changeSummary || (version.version === 1 ? "首次报价" : "历史版本未记录变更说明")}</dd>
+              </div>
             </dl>
 
             <section className="my-account__quote-subsection">

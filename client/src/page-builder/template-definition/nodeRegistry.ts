@@ -3,7 +3,6 @@ import {
   DYNAMIC_TEMPLATE_SLOT_TYPES,
   getDynamicTemplateNodeRegistryEntry,
   type TemplateDefinitionV2,
-  type DynamicTemplateInstanceEditPolicy,
   type DynamicTemplateNode,
   type DynamicTemplateNodeType,
   type DynamicTemplateResponsiveRules,
@@ -11,6 +10,17 @@ import {
   type DynamicTemplateSlotType,
 } from "./generated/templateDefinition.generated";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
+import { isDynamicTemplateSlotNode } from "./instanceEditPolicy";
+
+export {
+  defaultDynamicTemplateInstanceEditPolicy,
+  getEffectiveDynamicTemplateInstanceEditPolicy,
+  isDynamicTemplateSlotNode,
+  isLayoutOverrideCapabilityEnabled,
+  isTextLayoutSlotType,
+  LAYOUT_OVERRIDE_FIELDS,
+  TEXT_LAYOUT_SLOT_TYPES,
+} from "./instanceEditPolicy";
 
 export const DYNAMIC_TEMPLATE_STRUCTURE_NODE_TYPES = DYNAMIC_TEMPLATE_NODE_TYPES.filter(
   (type) => getDynamicTemplateNodeRegistryEntry(type).kind === "structure",
@@ -19,40 +29,6 @@ export const DYNAMIC_TEMPLATE_STRUCTURE_NODE_TYPES = DYNAMIC_TEMPLATE_NODE_TYPES
 export const DYNAMIC_TEMPLATE_CONTENT_NODE_TYPES = DYNAMIC_TEMPLATE_NODE_TYPES.filter(
   (type) => getDynamicTemplateNodeRegistryEntry(type).kind === "slot",
 );
-
-function defaultInstanceEditPolicy(slot: DynamicTemplateSlotDefinition): DynamicTemplateInstanceEditPolicy {
-  const image = slot.type === "image";
-  return {
-    position: false,
-    size: false,
-    zIndex: false,
-    imageFit: image,
-    imageFocus: image,
-    typography: false,
-    spacing: false,
-    minWidthPercent: 25,
-    maxWidthPercent: 150,
-    maxOffsetPercent: 30,
-    minFontSizePx: 12,
-    maxFontSizePx: 96,
-    maxSpacingPx: 120,
-  };
-}
-
-export function getEffectiveDynamicTemplateInstanceEditPolicy(
-  node: DynamicTemplateNode,
-  slot?: DynamicTemplateSlotDefinition,
-): DynamicTemplateInstanceEditPolicy | null {
-  if (!slot?.editable || !isDynamicTemplateSlotNode(node.type)) return null;
-  return {
-    ...defaultInstanceEditPolicy(slot),
-    ...(node.instanceEditPolicy ?? {}),
-  };
-}
-
-export function isDynamicTemplateSlotNode(type: DynamicTemplateNodeType): boolean {
-  return getDynamicTemplateNodeRegistryEntry(type).kind === "slot";
-}
 
 export function canNestDynamicTemplateNode(
   parentType: DynamicTemplateNodeType,
@@ -174,7 +150,6 @@ export function createBlankDynamicTemplateDefinition(
       mobileRatio: "auto",
       previewDesktopWidth: RESPONSIVE_CANVAS.desktop.width,
       previewMobileWidth: RESPONSIVE_CANVAS.mobile.width,
-      previewTabletWidth: 834,
       mobileBreakpoint: 767,
       minViewportWidth: 320,
       maxViewportWidth: 1920,

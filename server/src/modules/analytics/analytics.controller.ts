@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Header,
   Controller,
   Post,
   Get,
@@ -20,6 +21,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Throttle } from '@nestjs/throttler';
 import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 
 @Controller('analytics')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,17 +54,32 @@ export class AnalyticsController {
   }
 
   @Get('overview')
-  async getOverview(@Query('days') days?: string) {
-    return this.service.getOverview(this.reportDays(days));
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  async getOverview(
+    @Query('days') days: string | undefined,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.service.getOverview(this.reportDays(days), actor);
   }
 
   @Get('visitors')
-  async getVisitors(@Query('days') days?: string) {
-    return this.service.getVisitors(this.reportDays(days));
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  async getVisitors(
+    @Query('days') days: string | undefined,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.service.getVisitors(this.reportDays(days), actor);
   }
 
   @Get('events')
-  async getEvents(@Query() q: BoundedListQueryDto) {
-    return this.service.getEvents(q);
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  async getEvents(
+    @Query() q: BoundedListQueryDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.service.getEvents(q, actor);
   }
 }

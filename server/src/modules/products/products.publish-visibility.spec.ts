@@ -4,6 +4,8 @@ import { BadRequestException, ConflictException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "./products.service";
 
+const adminActor = { id: 1, role: "ADMIN" } as const;
+
 type Status = "DRAFT" | "PUBLISHED" | "OFFLINE" | "ARCHIVED";
 type Visibility = "PUBLIC" | "MEMBER" | "PARTNER" | "INTERNAL";
 type PublicationQualityStatus = "QUARANTINED" | "READY";
@@ -11,6 +13,8 @@ type PublicationQualityStatus = "QUARANTINED" | "READY";
 interface SkuRecord {
   id: number;
   isActive: boolean;
+  material?: string;
+  size?: string | null;
   price: number;
   goldWeight?: number | null;
   inventories?: Array<{ quantity: number }>;
@@ -18,6 +22,8 @@ interface SkuRecord {
 
 interface ImageRecord {
   id: number;
+  type?: string;
+  sortOrder?: number;
   url?: string;
   storageKey?: string | null;
   isVideo?: boolean;
@@ -43,6 +49,8 @@ interface ImageRecord {
 function authorizedImage(image: ImageRecord): ImageRecord {
   const mediaAssetId = image.mediaAssetId ?? image.id;
   return {
+    type: "FRONT",
+    sortOrder: 0,
     ...image,
     mediaAssetId,
     mediaAsset: image.mediaAsset === undefined ? {
@@ -80,11 +88,26 @@ interface ProductRecord {
   materialType: string;
   goldWeight: number | null;
   weight: number | null;
+  size: string | null;
+  gemInfo: unknown;
+  craftTechnique: unknown;
   category: { isActive: boolean; deletedAt: Date | null };
   salesMode: "DISPLAY_ONLY" | "SELECTION" | "APPOINTMENT" | "DIRECT_PURCHASE" | "CUSTOM_INQUIRY";
   inventoryPolicy: "STANDARD" | "SINGLE_UNIT";
+  fulfillmentType: "IN_STOCK" | "PREORDER" | "CUSTOM";
+  dispatchTime: "SAME_DAY" | "WITHIN_24_HOURS" | "WITHIN_48_HOURS" | "OVER_48_HOURS" | "CUSTOM";
   deliveryMethods: string[];
   shippingTemplate: { isActive: boolean } | null;
+  requiresInsuredShipping: boolean;
+  requiresSignature: boolean;
+  includesCertificate: boolean;
+  packageType: string | null;
+  customLeadTime: string | null;
+  isHot: boolean;
+  isNew: boolean;
+  isRecommended: boolean;
+  isLimited: boolean;
+  isCustom: boolean;
   price: number;
   primaryImageId: number | null;
   listingImageId: number | null;
@@ -92,6 +115,12 @@ interface ProductRecord {
   listingImage?: ImageRecord | null;
   images: ImageRecord[];
   skus: SkuRecord[];
+  certificates: Array<{
+    id: number;
+    certType: string;
+    certNumber: string;
+    expireDate: Date | null;
+  }>;
   publishedAt?: Date | null;
 }
 
@@ -158,11 +187,26 @@ function product(
     materialType: "GOLD_999",
     goldWeight: 10,
     weight: 12,
+    size: "圈口 14",
+    gemInfo: null,
+    craftTechnique: ["古法"],
     category: { isActive: true, deletedAt: null },
     salesMode: "DIRECT_PURCHASE",
     inventoryPolicy: "STANDARD",
+    fulfillmentType: "IN_STOCK",
+    dispatchTime: "WITHIN_48_HOURS",
     deliveryMethods: ["EXPRESS"],
     shippingTemplate: null,
+    requiresInsuredShipping: true,
+    requiresSignature: true,
+    includesCertificate: true,
+    packageType: null,
+    customLeadTime: null,
+    isHot: false,
+    isNew: false,
+    isRecommended: false,
+    isLimited: false,
+    isCustom: false,
     price: 0,
     primaryImageId: null,
     listingImageId:
@@ -171,6 +215,7 @@ function product(
         : partial.listingImageId,
     images: [],
     skus: [],
+    certificates: [],
     ...partial,
   };
   if (record.primaryImageId && record.images.length === 0) {
@@ -192,6 +237,8 @@ function product(
   record.listingImage =
     record.images.find((image) => image.id === record.listingImageId) || null;
   record.skus = record.skus.map((sku) => ({
+    material: "GOLD_999",
+    size: null,
     ...sku,
     inventories: sku.inventories ?? [{ quantity: 0 }],
   }));
@@ -335,6 +382,27 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
         return (record?.skus || []).filter((sku) => sku.isActive).length;
       },
     },
+    productImage: {
+      findFirst: async ({ where }: any) => {
+        for (const record of records) {
+          const image = record.images.find((item) =>
+            item.id === where.id && record.id === where.productId
+          );
+          if (image) return { ...image, productId: record.id };
+        }
+        return null;
+      },
+      update: async ({ where, data }: any) => {
+        for (const record of records) {
+          const image = record.images.find((item) => item.id === where.id);
+          if (image) {
+            Object.assign(image, data);
+            return { ...image, productId: record.id };
+          }
+        }
+        throw new Error("测试图片不存在");
+      },
+    },
     inventory: {
       aggregate: async ({ where }: any) => {
         const record = records.find((r) => r.id === where.sku.productId);
@@ -345,7 +413,11 @@ function createService(initial: ProductRecord[], mediaReadable = true) {
         return { _sum: { quantity } };
       },
     },
-    $queryRaw: async () => [{ id: 1 }],
+    operationLog: {
+      findFirst: async () => null,
+      create: async ({ data }: any) => data,
+    },
+    $queryRaw: async () => [{ id: 1, role: "ADMIN" }],
     $transaction: async (callback: (tx: any) => Promise<any>) => {
       const snapshot = structuredClone(records);
       try {
@@ -458,6 +530,101 @@ test("canPublish：价格、图片、有价启用 SKU 齐备时允许发布", as
   assert.match(records[0].publicationQualityHash || "", /^[a-f0-9]{64}$/);
 });
 
+test("发布质量快照覆盖公开规格、履约服务、SKU 与证书事实", async () => {
+  async function qualityHash(overrides: Partial<ProductRecord> = {}) {
+    const { service, records } = createService([
+      product({
+        id: 1,
+        status: "DRAFT",
+        price: 100,
+        primaryImageId: 1,
+        skus: [{ id: 1, isActive: true, size: "圈口 14", price: 100 }],
+        ...overrides,
+      }),
+    ]);
+    await service.canPublish(1);
+    return records[0].publicationQualityHash;
+  }
+
+  const baseline = await qualityHash();
+  assert.notEqual(await qualityHash({
+    images: [authorizedImage({ id: 1, type: "DETAIL", sortOrder: 0 })],
+  }), baseline);
+  assert.notEqual(await qualityHash({
+    images: [authorizedImage({ id: 1, type: "FRONT", sortOrder: 9 })],
+  }), baseline);
+  assert.notEqual(await qualityHash({ size: "圈口 15" }), baseline);
+  assert.notEqual(await qualityHash({
+    dispatchTime: "CUSTOM",
+    customLeadTime: "确认规格后 15 个工作日",
+  }), baseline);
+  assert.notEqual(await qualityHash({ requiresInsuredShipping: false }), baseline);
+  assert.notEqual(await qualityHash({
+    skus: [{ id: 1, isActive: true, size: "圈口 15", price: 100 }],
+  }), baseline);
+  assert.notEqual(await qualityHash({
+    certificates: [{
+      id: 9,
+      certType: "NATIONAL",
+      certNumber: "NGTC-0009",
+      expireDate: null,
+    }],
+  }), baseline);
+});
+
+test("已发布商品修改公开图片类型或排序后在同一事务重算 v3 质量 hash", async () => {
+  const { service, records } = createService([
+    product({
+      id: 10,
+      status: "PUBLISHED",
+      price: 100,
+      primaryImageId: 1,
+      skus: [{ id: 10, isActive: true, price: 100 }],
+    }),
+  ]);
+  const baseline = await service.canPublish(10);
+
+  await service.updateImage(10, 1, { type: "DETAIL", sortOrder: 4 }, { id: 1, role: "ADMIN" });
+
+  assert.equal(records[0].publicationQualityStatus, "READY");
+  assert.notEqual(records[0].publicationQualityHash, baseline.qualityHash);
+  assert.equal(records[0].images[0].type, "DETAIL");
+  assert.equal(records[0].images[0].sortOrder, 4);
+});
+
+test("canPublish：拒绝未知提取方式与缺少真实周期的按约定发出", async () => {
+  const invalidDelivery = createService([
+    product({
+      id: 11,
+      status: "DRAFT",
+      salesMode: "SELECTION",
+      primaryImageId: 1,
+      deliveryMethods: ["SAME_CITY_COURIER"],
+    }),
+  ]);
+  await assert.rejects(
+    () => invalidDelivery.service.canPublish(11),
+    (error: unknown) =>
+      error instanceof BadRequestException && /系统支持的配送方式/.test(error.message),
+  );
+
+  const missingLeadTime = createService([
+    product({
+      id: 12,
+      status: "DRAFT",
+      salesMode: "SELECTION",
+      primaryImageId: 1,
+      dispatchTime: "CUSTOM",
+      customLeadTime: null,
+    }),
+  ]);
+  await assert.rejects(
+    () => missingLeadTime.service.canPublish(12),
+    (error: unknown) =>
+      error instanceof BadRequestException && /真实备货时间/.test(error.message),
+  );
+});
+
 test("canPublish：媒体缺少授权、撤权、未生效、过期或普通附图失效时一律拒绝发布", async () => {
   const scenarios: Array<[string, (record: ProductRecord) => void]> = [
     ["缺少授权", (record) => {
@@ -516,6 +683,14 @@ test("存量质量报告复用发布门禁并保持严格只读", async () => {
     product({
       id: 22,
       status: "PUBLISHED",
+      price: 100,
+      primaryImageId: 2,
+      publicationQualityHash: "b".repeat(64),
+      skus: [{ id: 221, isActive: true, price: 100 }],
+    }),
+    product({
+      id: 23,
+      status: "PUBLISHED",
       visibility: "MEMBER",
       publicationQualityStatus: "QUARANTINED",
       name: "E2E 占位商品",
@@ -524,7 +699,7 @@ test("存量质量报告复用发布门禁并保持严格只读", async () => {
       listingImageId: null,
     }),
     product({
-      id: 23,
+      id: 24,
       status: "PUBLISHED",
       visibility: "PARTNER",
       publicationQualityStatus: "QUARANTINED",
@@ -536,13 +711,13 @@ test("存量质量报告复用发布门禁并保持严格只读", async () => {
         { id: 232, isActive: true, price: 120, inventories: [{ quantity: 1 }] },
       ],
     }),
-    product({ id: 24, status: "DRAFT", visibility: "INTERNAL" }),
+    product({ id: 25, status: "DRAFT", visibility: "INTERNAL" }),
   ]);
 
   // 先用正式发布入口生成一个可核对的新鲜 READY 快照。
   await service.canPublish(21);
   const writesBeforeReport = getProductUpdateCount();
-  const report = await service.getPublicationQualityReport();
+  const report = await service.getPublicationQualityReport({ id: 1, role: "ADMIN" });
 
   assert.equal(getProductUpdateCount(), writesBeforeReport);
   assert.deepEqual(report.scope, {
@@ -550,6 +725,7 @@ test("存量质量报告复用发布门禁并保持严格只读", async () => {
     deletedAt: null,
     writeMode: "READ_ONLY",
   });
+  assert.equal(report.gateVersion, "p0-product-quality-v3");
   assert.deepEqual(
     {
       total: report.summary.total,
@@ -560,24 +736,27 @@ test("存量质量报告复用发布门禁并保持严格只读", async () => {
       freshReady: report.summary.freshReady,
     },
     {
-      total: 3,
-      readyByCurrentFacts: 1,
+      total: 4,
+      readyByCurrentFacts: 2,
       needsRemediation: 2,
-      storedReady: 1,
+      storedReady: 2,
       storedQuarantined: 2,
       freshReady: 1,
     },
   );
   assert.deepEqual(report.summary.byVisibility, {
-    PUBLIC: 1,
+    PUBLIC: 2,
     MEMBER: 1,
     PARTNER: 1,
     INTERNAL: 0,
   });
   assert.equal(report.items[0].assessment, "READY");
   assert.equal(report.items[0].storedStateFresh, true);
-  assert.match(report.items[1].issues.join("、"), /名称|货号|图片|主图|列表图/);
-  assert.match(report.items[2].issues.join("、"), /一物一件商品/);
+  assert.equal(report.items[1].assessment, "READY");
+  assert.equal(report.items[1].storedStateFresh, false);
+  assert.deepEqual(report.items[1].issues, []);
+  assert.match(report.items[2].issues.join("、"), /名称|货号|图片|主图|列表图/);
+  assert.match(report.items[3].issues.join("、"), /一物一件商品/);
 });
 
 test("canPublish：拒绝 E2E、乱码、重复占位文案与 0g 商品", async () => {
@@ -615,7 +794,7 @@ test("状态接口写入 PUBLISHED 必须经过 canPublish 门禁", async () => 
     product({ id: 1, status: "DRAFT", price: 0, primaryImageId: 1 }),
   ]);
   await assert.rejects(
-    () => failing.service.updateStatus(1, "PUBLISHED"),
+    () => failing.service.updateStatus(1, "PUBLISHED", adminActor),
     BadRequestException,
   );
   assert.equal(failing.records[0].status, "DRAFT");
@@ -630,7 +809,7 @@ test("状态接口写入 PUBLISHED 必须经过 canPublish 门禁", async () => 
     }),
   ]);
   await assert.doesNotReject(() =>
-    passing.service.updateStatus(2, "PUBLISHED"),
+    passing.service.updateStatus(2, "PUBLISHED", adminActor),
   );
   assert.equal(passing.records[0].status, "PUBLISHED");
 });
@@ -647,7 +826,7 @@ test("普通内容更新不会改变已发布商品状态", async () => {
     }),
   ]);
 
-  await service.update(9, { price: 120 } as never);
+  await service.update(9, { price: 120 } as never, adminActor);
   assert.equal(records[0].price, 120);
   assert.equal(records[0].status, "PUBLISHED");
 });
@@ -665,7 +844,7 @@ test("重复校验已上架商品不会重写首次发布时间", async () => {
     }),
   ]);
 
-  await service.updateStatus(10, "PUBLISHED");
+  await service.updateStatus(10, "PUBLISHED", adminActor);
   assert.equal(records[0].publishedAt, firstPublishedAt);
 });
 
@@ -800,7 +979,7 @@ test("已发布商品 SKU 更新破坏门禁时返回 409，并由事务回滚�
   ]);
 
   await assert.rejects(
-    () => service.updateSku(320, 41, { price: 0 }),
+    () => service.updateSku(320, 41, { price: 0 }, { id: 1, role: "ADMIN" }),
     ConflictException,
   );
   assert.equal(records[0].skus[0].price, 100);
@@ -848,14 +1027,14 @@ test("已发布商品改为 OFFLINE 或 ARCHIVED 后公开查询不再返回", a
   ]);
   assert.equal((await service.findPublic({})).total, 1);
 
-  await service.updateStatus(1, "OFFLINE");
+  await service.updateStatus(1, "OFFLINE", adminActor);
   assert.equal(records[0].status, "OFFLINE");
   assert.equal((await service.findPublic({})).total, 0);
 
-  await service.updateStatus(1, "PUBLISHED");
+  await service.updateStatus(1, "PUBLISHED", adminActor);
   assert.equal((await service.findPublic({})).total, 1);
 
-  await service.archive(1);
+  await service.archive(1, adminActor);
   assert.equal(records[0].status, "ARCHIVED");
   assert.equal((await service.findPublic({})).total, 0);
 });
@@ -865,7 +1044,7 @@ test("归档商品不可通过普通更新接口修改业务字段", async () =>
     product({ id: 1, status: "ARCHIVED", visibility: "PUBLIC", price: 100 }),
   ]);
   await assert.rejects(
-    () => service.update(1, { price: 999 } as never),
+    () => service.update(1, { price: 999 } as never, adminActor),
     ConflictException,
   );
   assert.equal(records[0].price, 100);
@@ -883,15 +1062,15 @@ test("归档商品不可直接发布或改为其他状态", async () => {
     }),
   ]);
   await assert.rejects(
-    () => service.updateStatus(1, "PUBLISHED"),
+    () => service.updateStatus(1, "PUBLISHED", adminActor),
     ConflictException,
   );
   await assert.rejects(
-    () => service.updateStatus(1, "OFFLINE"),
+    () => service.updateStatus(1, "OFFLINE", adminActor),
     ConflictException,
   );
   await assert.rejects(
-    () => service.updateStatus(1, "DRAFT"),
+    () => service.updateStatus(1, "DRAFT", adminActor),
     ConflictException,
   );
 });
@@ -900,7 +1079,7 @@ test("恢复操作将 ARCHIVED 恢复为 DRAFT", async () => {
   const { service, records } = createService([
     product({ id: 1, status: "ARCHIVED", visibility: "PUBLIC" }),
   ]);
-  await service.restore(1);
+  await service.restore(1, adminActor);
   assert.equal(records[0].status, "DRAFT");
 });
 
@@ -915,10 +1094,10 @@ test("恢复为草稿后仍需通过正常发布门禁", async () => {
       skus: [],
     }),
   ]);
-  await incomplete.service.restore(1);
+  await incomplete.service.restore(1, adminActor);
   assert.equal(incomplete.records[0].status, "DRAFT");
   await assert.rejects(
-    () => incomplete.service.updateStatus(1, "PUBLISHED"),
+    () => incomplete.service.updateStatus(1, "PUBLISHED", adminActor),
     BadRequestException,
   );
 
@@ -932,8 +1111,8 @@ test("恢复为草稿后仍需通过正常发布门禁", async () => {
       skus: [{ id: 1, isActive: true, price: 100 }],
     }),
   ]);
-  await complete.service.restore(2);
-  await complete.service.updateStatus(2, "PUBLISHED");
+  await complete.service.restore(2, adminActor);
+  await complete.service.updateStatus(2, "PUBLISHED", adminActor);
   assert.equal(complete.records[0].status, "PUBLISHED");
 });
 
@@ -942,7 +1121,7 @@ test("回收站商品不可软删除，deletedAt 不被写入", async () => {
     product({ id: 1, status: "ARCHIVED", visibility: "PUBLIC" }),
   ]);
   await assert.rejects(
-    () => service.delete(1),
+    () => service.delete(1, adminActor),
     (err: unknown) =>
       err instanceof ConflictException && /恢复为草稿/.test(err.message),
   );

@@ -7,9 +7,9 @@ async function mount(page: Page) {
 }
 const snapshot = async (page: Page) => JSON.parse(await page.getByTestId("state").textContent() ?? "{}");
 
-test("确定性属性：三断点分组复制预览与取消零写入，确认一次历史且可以撤销", async ({ page }) => {
+test("确定性属性：双端分组复制预览与取消零写入，确认一次历史且可以撤销", async ({ page }) => {
   await mount(page);
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   const before = await snapshot(page);
   await page.getByRole("checkbox", { name: "布局", exact: true }).check();
   await page.getByRole("button", { name: "检查所选组差异", exact: true }).click();
@@ -21,18 +21,12 @@ test("确定性属性：三断点分组复制预览与取消零写入，确认�
   await page.getByRole("button", { name: "确认应用", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   const after = await snapshot(page), id = before.ids.grid;
-  expect(after.definition.nodes[id].responsive.tablet.columns).toEqual([1, 1, 1]);
-  expect(after.definition.nodes[id].responsive.tablet.gap).toEqual(before.definition.nodes[id].responsive.tablet.gap);
-  expect(after.definition.nodes[id].responsive.mobile).toEqual(before.definition.nodes[id].responsive.mobile);
+  expect(after.definition.nodes[id].responsive.mobile.columns).toEqual([1, 1, 1]);
+  expect(after.definition.nodes[id].responsive.mobile.gap).toEqual(before.definition.nodes[id].responsive.mobile.gap);
+  expect(after.definition.nodes[id].responsive.desktop).toEqual(before.definition.nodes[id].responsive.desktop);
   expect(after.history).toBe(before.history + 1);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await snapshot(page)).definition).toEqual(before.definition);
-  await page.getByRole("button", { name: "mobile", exact: true }).click();
-  await page.getByRole("combobox", { name: "复制设计的来源设备" }).selectOption("tablet");
-  await page.getByRole("checkbox", { name: "布局", exact: true }).check();
-  await page.getByRole("button", { name: "检查所选组差异", exact: true }).click();
-  await page.getByRole("button", { name: "确认应用", exact: true }).click();
-  expect((await snapshot(page)).definition.nodes[id].responsive.mobile.columns).toEqual([1, 1]);
 });
 
 test("确定性属性：按组恢复最近保存，保留未选组及其他断点", async ({ page }) => {
@@ -51,7 +45,7 @@ test("确定性属性：按组恢复最近保存，保留未选组及其他断�
   expect(restored.definition.nodes[id].responsive.mobile.gap).toEqual(saved.definition.nodes[id].responsive.mobile.gap);
   expect(restored.definition.nodes[id].responsive.mobile.padding).toEqual(saved.definition.nodes[id].responsive.mobile.padding);
   expect(restored.definition.nodes[id].responsive.mobile.height).toEqual(changed.definition.nodes[id].responsive.mobile.height);
-  expect(restored.definition.nodes[id].responsive.tablet).toEqual(saved.definition.nodes[id].responsive.tablet);
+  expect(restored.definition.nodes[id].responsive.desktop).toEqual(saved.definition.nodes[id].responsive.desktop);
   expect(restored.history).toBe(changed.history + 1);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await snapshot(page)).definition).toEqual(changed.definition);
@@ -60,7 +54,7 @@ test("确定性属性：按组恢复最近保存，保留未选组及其他断�
 test("确定性属性：多选排除结构锁，取消与确认均保留锁定对象", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "多选含锁定网格", exact: true }).click();
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   const before = await snapshot(page);
   await page.getByRole("checkbox", { name: "布局", exact: true }).check();
   await page.getByRole("button", { name: "检查所选组差异", exact: true }).click();
@@ -72,7 +66,7 @@ test("确定性属性：多选排除结构锁，取消与确认均保留锁定�
   await page.getByRole("button", { name: "确认应用", exact: true }).click();
   const after = await snapshot(page);
   expect(after.definition.nodes[before.ids.locked]).toEqual(before.definition.nodes[before.ids.locked]);
-  expect(after.definition.nodes[before.ids.grid].responsive.tablet.columns).toEqual([1, 1, 1]);
+  expect(after.definition.nodes[before.ids.grid].responsive.mobile.columns).toEqual([1, 1, 1]);
   expect(after.history).toBe(before.history + 1);
 });
 
@@ -81,14 +75,17 @@ test("确定性属性：文字组复制影响只读Renderer，复制到桌面不
   await mount(page);
   await page.getByRole("button", { name: "选择标题", exact: true }).click();
   await page.getByRole("button", { name: "mobile", exact: true }).click();
-  await page.getByRole("combobox", { name: "复制设计的来源设备" }).selectOption("tablet");
+  await page.getByRole("combobox", { name: "复制设计的来源设备" }).selectOption("desktop");
   await page.getByRole("checkbox", { name: "文字或媒体", exact: true }).check();
   await page.getByRole("button", { name: "检查所选组差异", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("dialog")).not.toHaveClass(/ant-zoom/);
   await page.screenshot({ path: "test-results/native-responsive/narrow-confirmation.png", fullPage: true });
   await page.getByRole("button", { name: "确认应用", exact: true }).click();
-  await expect(page.getByTestId("render").getByText("中性测试标题", { exact: true })).toHaveCSS("font-size", "24px");
+  await expect(page.getByTestId("render").getByText("中性测试标题", { exact: true })).toHaveCSS("font-size", "32px");
+  // 撤销上一笔复制，让手机恢复独立字号 18，第二阶段才有真实差异可复制到桌面。
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  await expect(page.getByTestId("render").getByText("中性测试标题", { exact: true })).toHaveCSS("font-size", "18px");
   await page.getByRole("button", { name: "desktop", exact: true }).click();
   await page.getByRole("combobox", { name: "复制设计的来源设备" }).selectOption("mobile");
   const before = await snapshot(page), slotId = before.definition.nodes[before.ids.heading].slotId;
@@ -96,10 +93,9 @@ test("确定性属性：文字组复制影响只读Renderer，复制到桌面不
   await page.getByRole("button", { name: "检查所选组差异", exact: true }).click();
   await page.getByRole("button", { name: "确认应用", exact: true }).click();
   const after = await snapshot(page);
-  expect(after.definition.slots[slotId].desktopRules.fontSize).toEqual({ value: 24, unit: "px" });
-  expect(after.definition.slots[slotId].tabletRules).toEqual(before.definition.slots[slotId].tabletRules);
+  expect(after.definition.slots[slotId].desktopRules.fontSize).toEqual({ value: 18, unit: "px" });
   expect(after.definition.slots[slotId].mobileRules).toEqual(before.definition.slots[slotId].mobileRules);
-  expect(after.definition.slots[slotId]).toEqual({ ...before.definition.slots[slotId], desktopRules: { ...before.definition.slots[slotId].desktopRules, fontSize: { value: 24, unit: "px" } } });
+  expect(after.definition.slots[slotId]).toEqual({ ...before.definition.slots[slotId], desktopRules: { ...before.definition.slots[slotId].desktopRules, fontSize: { value: 18, unit: "px" } } });
   expect(after.definition.defaultContent).toEqual(before.definition.defaultContent);
   expect(await page.locator("aside").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await expect(page.locator(".ant-modal-wrap")).toBeHidden();

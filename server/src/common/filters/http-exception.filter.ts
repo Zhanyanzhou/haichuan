@@ -11,6 +11,13 @@ import { Prisma } from '@prisma/client';
 import { ApiError, type ApiErrorDetails } from '../errors/api-error';
 import { requestPathOnly } from '../observability/request-path';
 
+function readExplicitHttpErrorCode(exceptionResponse: string | object): string | null {
+  if (typeof exceptionResponse !== 'object' || exceptionResponse === null) return null;
+  if (!('code' in exceptionResponse)) return null;
+  const code = (exceptionResponse as { code: unknown }).code;
+  return typeof code === 'string' && code.trim().length > 0 ? code : null;
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -51,9 +58,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       } else {
         message = exception.message;
       }
-      errorCode = status === HttpStatus.BAD_REQUEST
-        ? 'VALIDATION_ERROR'
-        : `HTTP_${status}`;
+      errorCode = readExplicitHttpErrorCode(exceptionResponse)
+        ?? (status === HttpStatus.BAD_REQUEST ? 'VALIDATION_ERROR' : `HTTP_${status}`);
     }
     // Prisma 已知异常映射
     else if (exception instanceof Prisma.PrismaClientKnownRequestError) {

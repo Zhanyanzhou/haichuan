@@ -118,12 +118,24 @@ interface LeadNotificationFailure {
   updatedAt: string;
 }
 
+interface LeadNotificationRetryResult {
+  id: number;
+  leadId: number;
+  status: string;
+}
+
 interface LeadClaimFeedback {
   key: string;
   type: "success" | "warning" | "error";
   message: string;
   leadType: LeadType;
   leadId: number;
+}
+
+interface LeadUpdateAttempt {
+  leadKey: string;
+  fingerprint: string;
+  idempotencyKey: string;
 }
 
 const NOTIFICATION_ERROR_LABELS: Record<string, string> = {
@@ -209,8 +221,45 @@ function createReplyIdempotencyKey() {
     ?? `lead-reply-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function createFollowUpIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `lead-follow-up-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createLeadUpdateIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `lead-update-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createNotificationRetryIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `lead-notification-retry-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function leadKey(type: LeadType, id: number) {
   return `${type}:${id}`;
+}
+
+function resolveLeadUpdateAttempt(
+  current: LeadUpdateAttempt | null,
+  target: { type: LeadType; id: number },
+  payload: Record<string, unknown>,
+) {
+  const targetKey = leadKey(target.type, target.id);
+  const fingerprint = JSON.stringify(payload);
+  if (current?.leadKey === targetKey && current.fingerprint === fingerprint) {
+    return current;
+  }
+  return {
+    leadKey: targetKey,
+    fingerprint,
+    idempotencyKey: createLeadUpdateIdempotencyKey(),
+  };
+}
+
+function isUncertainWriteResult(error: unknown) {
+  const status = requestStatus(error);
+  return status === undefined || status === 408 || status >= 500;
 }
 
 function isClaimableLead(lead: {
@@ -251,6 +300,8 @@ export default function LeadManage() {
   const [followUpContactMethod, setFollowUpContactMethod] = useState("phone");
   const [followUpNextAt, setFollowUpNextAt] = useState("");
   const [saving, setSaving] = useState(false);
+  const [followUpIdempotencyKey, setFollowUpIdempotencyKey] = useState<string | null>(null);
+  const [followUpResultUncertain, setFollowUpResultUncertain] = useState(false);
   const [statusReason, setStatusReason] = useState("");
   const [staff, setStaff] = useState<AssignableStaff[]>([]);
   const [staffLoading, setStaffLoading] = useState(false);
@@ -262,6 +313,14 @@ export default function LeadManage() {
   );
   const claimInFlightRef = useRef<string | null>(null);
   const detailIdRef = useRef<{ type: LeadType; id: number } | null>(null);
+  const listRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
+  const statusUpdateAttemptRef = useRef<LeadUpdateAttempt | null>(null);
+  const noteUpdateAttemptRef = useRef<LeadUpdateAttempt | null>(null);
+  const assignmentUpdateAttemptRef = useRef<LeadUpdateAttempt | null>(null);
+  const legalHoldAttemptRef = useRef<LeadUpdateAttempt | null>(null);
+  const savingOperationIdRef = useRef(0);
+  const assigningOperationIdRef = useRef(0);
   const [notificationFailures, setNotificationFailures] = useState<
     LeadNotificationFailure[]
   >([]);
@@ -271,11 +330,16 @@ export default function LeadManage() {
   const [retryingNotificationId, setRetryingNotificationId] = useState<
     number | null
   >(null);
+  const notificationRetryIdempotencyKeysRef = useRef(new Map<number, string>());
+  const [notificationRetryUncertainIds, setNotificationRetryUncertainIds] =
+    useState<Set<number>>(() => new Set());
   const [legalHoldReason, setLegalHoldReason] = useState<string>();
   const [privacyUpdating, setPrivacyUpdating] = useState(false);
+  const [legalHoldResultUncertain, setLegalHoldResultUncertain] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [replying, setReplying] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
+  const [replyResultUncertain, setReplyResultUncertain] = useState(false);
   const [replyIdempotencyKey, setReplyIdempotencyKey] = useState<string | null>(null);
   const role = useAuthStore((s) => s.user?.role);
   const isSuperAdmin = role === "SUPER_ADMIN";
@@ -307,6 +371,7 @@ export default function LeadManage() {
   const pageSize = 15;
 
   const fetchList = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setLoading(true);
     setError(false);
     try {
@@ -321,12 +386,14 @@ export default function LeadManage() {
         },
       });
       const data = unwrapResponse<PaginatedResult<LeadListRow>>(res);
+      if (requestId !== listRequestIdRef.current) return;
       setList(data.list ?? []);
       setTotal(data.total ?? 0);
     } catch {
+      if (requestId !== listRequestIdRef.current) return;
       setError(true);
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setLoading(false);
     }
   }, [keyword, leadType, page, pageSize, requestedRetentionDue, status]);
 
@@ -352,21 +419,58 @@ export default function LeadManage() {
     void fetchNotificationFailures();
   }, [fetchNotificationFailures]);
 
+  const isActiveDetailRequest = (
+    target: { type: LeadType; id: number },
+    requestId: number,
+  ) => {
+    const active = detailIdRef.current;
+    return requestId === detailRequestIdRef.current
+      && active?.type === target.type
+      && active.id === target.id;
+  };
+
+  const clearUpdateAttemptsForOtherLeads = (targetKey: string) => {
+    for (const attemptRef of [
+      statusUpdateAttemptRef,
+      noteUpdateAttemptRef,
+      assignmentUpdateAttemptRef,
+      legalHoldAttemptRef,
+    ]) {
+      if (attemptRef.current?.leadKey !== targetKey) attemptRef.current = null;
+    }
+  };
+
+  const resetLeadWriteLoading = () => {
+    savingOperationIdRef.current += 1;
+    assigningOperationIdRef.current += 1;
+    setSaving(false);
+    setAssigning(false);
+  };
+
   const openDetail = async (type: LeadType, id: number) => {
-    const isSameLead = detailId?.type === type && detailId.id === id;
+    const requestId = ++detailRequestIdRef.current;
+    const activeDetail = detailIdRef.current;
+    const isSameLead = activeDetail?.type === type && activeDetail.id === id;
     if (!isSameLead) {
       setReplyText("");
       setReplyError(null);
+      setReplyResultUncertain(false);
       setReplyIdempotencyKey(null);
+      setFollowUpResultUncertain(false);
+      setFollowUpIdempotencyKey(null);
+      setLegalHoldResultUncertain(false);
+      setLegalHoldReason(undefined);
+      resetLeadWriteLoading();
+      clearUpdateAttemptsForOtherLeads(leadKey(type, id));
     }
     detailIdRef.current = { type, id };
     setDetailId({ type, id });
     setDetailError(false);
     setDetail(null);
     setStatusReason("");
-    setLegalHoldReason(undefined);
     try {
       const res = await api.get(`/leads/${type}/${id}`);
+      if (requestId !== detailRequestIdRef.current) return;
       const loaded = unwrapResponse<LeadDetail>(res);
       setDetail(loaded);
       setFollowUpNextAt(toLocalDateTimeInput(loaded.nextFollowUpAt));
@@ -375,13 +479,34 @@ export default function LeadManage() {
       )?.contactMethod;
       setFollowUpContactMethod(latestRecordedMethod || "phone");
     } catch {
+      if (requestId !== detailRequestIdRef.current) return;
       // P1-39：详情加载失败标记错误态，避免抽屉永久 loading 无法区分加载中/失败
       setDetailError(true);
     }
   };
 
+  const closeDetail = () => {
+    detailRequestIdRef.current += 1;
+    detailIdRef.current = null;
+    setDetailId(null);
+    setDetail(null);
+    setDetailError(false);
+    setReplyText("");
+    setReplyError(null);
+    setReplyResultUncertain(false);
+    setReplyIdempotencyKey(null);
+    setFollowUpResultUncertain(false);
+    setFollowUpIdempotencyKey(null);
+    setLegalHoldResultUncertain(false);
+    setLegalHoldReason(undefined);
+    legalHoldAttemptRef.current = null;
+    resetLeadWriteLoading();
+  };
+
   const submitReply = async () => {
     if (!detailId || !detail?.updatedAt) return;
+    const target = detailId;
+    const detailRequestId = detailRequestIdRef.current;
     const reply = replyText.trim();
     if (!reply) {
       setReplyError("请输入客户可见的回复内容。");
@@ -393,12 +518,16 @@ export default function LeadManage() {
     setReplyError(null);
     try {
       const response = await leadApi.reply(
-        detailId.type,
-        detailId.id,
+        target.type,
+        target.id,
         { reply, expectedUpdatedAt: detail.updatedAt },
         idempotencyKey,
       );
       const result = unwrapResponse<LeadReplyResult>(response);
+      if (!isActiveDetailRequest(target, detailRequestId)) {
+        await fetchList();
+        return;
+      }
       setDetail((current) => current
         ? {
             ...current,
@@ -409,18 +538,27 @@ export default function LeadManage() {
           }
         : current);
       setReplyText("");
+      setReplyResultUncertain(false);
       setReplyIdempotencyKey(null);
       message.success("客户回复已提交，站内通知已生成");
-      await Promise.all([fetchList(), openDetail(detailId.type, detailId.id)]);
+      await Promise.all([fetchList(), openDetail(target.type, target.id)]);
     } catch (error) {
-      const safeMessage = getSafeAdminErrorMessage(
-        error,
-        "客户回复提交失败，内容已保留，请稍后重新提交。",
-      );
-      setReplyError(safeMessage);
+      if (!isActiveDetailRequest(target, detailRequestId)) return;
+      if (isUncertainWriteResult(error)) {
+        setReplyResultUncertain(true);
+        setReplyError(
+          "客户回复结果待确认；内容与原凭据已保留。请使用原凭据恢复；如需放弃，请关闭详情后重新进入。系统不会自动重复提交。",
+        );
+      } else {
+        setReplyResultUncertain(false);
+        setReplyError(getSafeAdminErrorMessage(
+          error,
+          "客户回复提交失败，内容已保留，请检查后重试。",
+        ));
+      }
       if (requestStatus(error) === 409) {
         setReplyIdempotencyKey(null);
-        await openDetail(detailId.type, detailId.id);
+        await openDetail(target.type, target.id);
       }
     } finally {
       setReplying(false);
@@ -428,25 +566,69 @@ export default function LeadManage() {
   };
 
   const retryNotification = async (event: LeadNotificationFailure) => {
+    const idempotencyKey = notificationRetryIdempotencyKeysRef.current.get(event.id)
+      ?? createNotificationRetryIdempotencyKey();
+    notificationRetryIdempotencyKeysRef.current.set(event.id, idempotencyKey);
     setRetryingNotificationId(event.id);
     try {
-      await api.post(`/leads/notification-failures/${event.id}/retry`);
-      message.success("已加入重新投递队列，处理结果会继续记录在系统中");
+      const response = await api.post(
+        `/leads/notification-failures/${event.id}/retry`,
+        undefined,
+        {
+          headers: { "Idempotency-Key": idempotencyKey },
+          suppressGlobalError: true,
+        },
+      );
+      const result = unwrapResponse<LeadNotificationRetryResult>(response);
+      notificationRetryIdempotencyKeysRef.current.delete(event.id);
+      setNotificationRetryUncertainIds((current) => {
+        if (!current.has(event.id)) return current;
+        const next = new Set(current);
+        next.delete(event.id);
+        return next;
+      });
+      if (result.status === "FAILED") {
+        message.warning("原重投请求已生效，但通知当前仍失败；请查看最新失败码后再决定是否再次重投。");
+      } else {
+        message.success("已确认重新投递请求，处理结果会继续记录在系统中");
+      }
       await fetchNotificationFailures();
+      const activeDetail = detailIdRef.current;
       if (
-        detailId
-        && event.leadId === detailId.id
-        && event.leadType === detailId.type
+        activeDetail
+        && event.leadId === activeDetail.id
+        && event.leadType === activeDetail.type
       ) {
-        await openDetail(detailId.type, detailId.id);
+        await openDetail(activeDetail.type, activeDetail.id);
       }
     } catch (error) {
-      message.error(
-        getSafeAdminErrorMessage(
-          error,
-          "通知重投失败，请刷新状态并确认邮件服务配置。",
-        ),
-      );
+      const uncertain = isUncertainWriteResult(error);
+      if (uncertain) {
+        setNotificationRetryUncertainIds((current) => {
+          if (current.has(event.id)) return current;
+          const next = new Set(current);
+          next.add(event.id);
+          return next;
+        });
+        message.warning(
+          "通知重投请求结果待确认；原凭据已保留，系统不会自动再次入队。请使用原凭据恢复。",
+        );
+      } else {
+        notificationRetryIdempotencyKeysRef.current.delete(event.id);
+        setNotificationRetryUncertainIds((current) => {
+          if (!current.has(event.id)) return current;
+          const next = new Set(current);
+          next.delete(event.id);
+          return next;
+        });
+        message.error(
+          getSafeAdminErrorMessage(
+            error,
+            "通知重投失败，请刷新状态并确认邮件服务配置。",
+          ),
+        );
+        if (requestStatus(error) === 409) await fetchNotificationFailures();
+      }
     } finally {
       setRetryingNotificationId(null);
     }
@@ -454,31 +636,69 @@ export default function LeadManage() {
 
   const updateLegalHold = async (release: boolean) => {
     if (!detailId || !legalHoldReason) return;
+    const target = detailId;
+    const detailRequestId = detailRequestIdRef.current;
+    const payload = { reason: legalHoldReason };
+    const attempt = resolveLeadUpdateAttempt(
+      legalHoldAttemptRef.current,
+      target,
+      { action: release ? "RELEASE" : "SET", ...payload },
+    );
+    legalHoldAttemptRef.current = attempt;
     setPrivacyUpdating(true);
     try {
-      const payload = { reason: legalHoldReason };
       if (release) {
         await api.post(
-          `/leads/${detailId.type}/${detailId.id}/legal-hold/release`,
+          `/leads/${target.type}/${target.id}/legal-hold/release`,
           payload,
+          {
+            headers: { "Idempotency-Key": attempt.idempotencyKey },
+            suppressGlobalError: true,
+          },
         );
       } else {
         await api.post(
-          `/leads/${detailId.type}/${detailId.id}/legal-hold`,
+          `/leads/${target.type}/${target.id}/legal-hold`,
           payload,
+          {
+            headers: { "Idempotency-Key": attempt.idempotencyKey },
+            suppressGlobalError: true,
+          },
         );
       }
+      if (legalHoldAttemptRef.current === attempt) {
+        legalHoldAttemptRef.current = null;
+      }
+      if (!isActiveDetailRequest(target, detailRequestId)) {
+        await fetchList();
+        return;
+      }
+      setLegalHoldResultUncertain(false);
       message.success(release ? "法律保留已解除" : "法律保留已设置");
       setLegalHoldReason(undefined);
-      await openDetail(detailId.type, detailId.id);
+      await openDetail(target.type, target.id);
       await fetchList();
     } catch (error) {
-      message.error(
-        getSafeAdminErrorMessage(
-          error,
-          release ? "解除法律保留失败，请刷新后重试。" : "设置法律保留失败，请刷新后重试。",
-        ),
-      );
+      const uncertain = isUncertainWriteResult(error);
+      if (!uncertain && legalHoldAttemptRef.current === attempt) {
+        legalHoldAttemptRef.current = null;
+      }
+      if (!isActiveDetailRequest(target, detailRequestId)) return;
+      if (uncertain) {
+        setLegalHoldResultUncertain(true);
+        message.warning(
+          "法律保留操作结果待确认；原因与原凭据已保留。请使用原凭据恢复；如需放弃，请关闭详情后重新进入。系统不会自动重复提交。",
+        );
+      } else {
+        setLegalHoldResultUncertain(false);
+        message.error(
+          getSafeAdminErrorMessage(
+            error,
+            release ? "解除法律保留失败，请刷新后重试。" : "设置法律保留失败，请刷新后重试。",
+          ),
+        );
+        if (requestStatus(error) === 409) await openDetail(target.type, target.id);
+      }
     } finally {
       setPrivacyUpdating(false);
     }
@@ -486,6 +706,8 @@ export default function LeadManage() {
 
   const updateStatus = async (newStatus: string) => {
     if (!detailId) return;
+    const target = detailId;
+    const detailRequestId = detailRequestIdRef.current;
     const needsClosureReason = newStatus === "COMPLETED" || newStatus === "INVALID";
     const needsReopenReason =
       (detail?.status === "COMPLETED" || detail?.status === "INVALID") &&
@@ -495,59 +717,136 @@ export default function LeadManage() {
       message.warning(needsReopenReason ? "请填写重新打开原因" : "请填写完成或无效原因");
       return;
     }
+    const payload = {
+      status: newStatus,
+      ...(needsClosureReason ? { closureReason: reason } : {}),
+      ...(needsReopenReason ? { reopenReason: reason } : {}),
+    };
+    const attempt = resolveLeadUpdateAttempt(
+      statusUpdateAttemptRef.current,
+      target,
+      payload,
+    );
+    statusUpdateAttemptRef.current = attempt;
+    const savingOperationId = ++savingOperationIdRef.current;
     setSaving(true);
     try {
-      await api.put(`/leads/${detailId.type}/${detailId.id}`, {
-        status: newStatus,
-        ...(needsClosureReason ? { closureReason: reason } : {}),
-        ...(needsReopenReason ? { reopenReason: reason } : {}),
+      await api.put(`/leads/${target.type}/${target.id}`, payload, {
+        headers: { "Idempotency-Key": attempt.idempotencyKey },
+        suppressGlobalError: true,
       });
+      if (statusUpdateAttemptRef.current === attempt) {
+        statusUpdateAttemptRef.current = null;
+      }
+      if (!isActiveDetailRequest(target, detailRequestId)) {
+        await fetchList();
+        return;
+      }
       message.success("状态已更新");
       setStatusReason("");
-      openDetail(detailId.type, detailId.id);
+      openDetail(target.type, target.id);
       fetchList();
     } catch (error) {
-      message.error(getSafeAdminErrorMessage(error, "线索状态更新失败，请重新加载后重试。"));
+      const uncertain = isUncertainWriteResult(error);
+      if (!uncertain && statusUpdateAttemptRef.current === attempt) {
+        statusUpdateAttemptRef.current = null;
+      }
+      if (!isActiveDetailRequest(target, detailRequestId)) return;
+      if (uncertain) {
+        message.warning("状态更新结果待确认；保持当前操作不变后重试，系统会沿用同一凭据安全恢复。");
+      } else {
+        message.error(getSafeAdminErrorMessage(error, "线索状态更新失败，请重新加载后重试。"));
+        if (requestStatus(error) === 409) await openDetail(target.type, target.id);
+      }
     } finally {
-      setSaving(false);
+      if (savingOperationIdRef.current === savingOperationId) setSaving(false);
     }
   };
 
   const saveNote = async () => {
     if (!detailId) return;
+    const target = detailId;
+    const detailRequestId = detailRequestIdRef.current;
+    const payload = { internalNote: noteText };
+    const attempt = resolveLeadUpdateAttempt(
+      noteUpdateAttemptRef.current,
+      target,
+      payload,
+    );
+    noteUpdateAttemptRef.current = attempt;
+    const savingOperationId = ++savingOperationIdRef.current;
     setSaving(true);
     try {
-      await api.put(`/leads/${detailId.type}/${detailId.id}`, {
-        internalNote: noteText,
+      await api.put(`/leads/${target.type}/${target.id}`, payload, {
+        headers: { "Idempotency-Key": attempt.idempotencyKey },
+        suppressGlobalError: true,
       });
+      if (noteUpdateAttemptRef.current === attempt) {
+        noteUpdateAttemptRef.current = null;
+      }
+      if (!isActiveDetailRequest(target, detailRequestId)) return;
       message.success("备注已保存");
-      openDetail(detailId.type, detailId.id);
+      openDetail(target.type, target.id);
     } catch (error) {
-      message.error(getSafeAdminErrorMessage(error, "内部备注保存失败，请检查内容后重试。"));
+      const uncertain = isUncertainWriteResult(error);
+      if (!uncertain && noteUpdateAttemptRef.current === attempt) {
+        noteUpdateAttemptRef.current = null;
+      }
+      if (!isActiveDetailRequest(target, detailRequestId)) return;
+      if (uncertain) {
+        message.warning("备注保存结果待确认；保持当前内容不变后重试，系统会沿用同一凭据安全恢复。");
+      } else {
+        message.error(getSafeAdminErrorMessage(error, "内部备注保存失败，请检查内容后重试。"));
+        if (requestStatus(error) === 409) await openDetail(target.type, target.id);
+      }
     } finally {
-      setSaving(false);
+      if (savingOperationIdRef.current === savingOperationId) setSaving(false);
     }
   };
 
   const addFollowUp = async () => {
     if (!detailId || !noteText) return;
+    const target = detailId;
+    const detailRequestId = detailRequestIdRef.current;
     const nextFollowUpAt = followUpNextAt
       ? new Date(followUpNextAt).toISOString()
       : null;
+    const idempotencyKey = followUpIdempotencyKey ?? createFollowUpIdempotencyKey();
+    setFollowUpIdempotencyKey(idempotencyKey);
+    const savingOperationId = ++savingOperationIdRef.current;
     setSaving(true);
     try {
-      await api.post(`/leads/${detailId.type}/${detailId.id}/follow-up`, {
+      await api.post(`/leads/${target.type}/${target.id}/follow-up`, {
         content: noteText,
         contactMethod: followUpContactMethod,
         nextFollowUpAt,
+      }, {
+        headers: { "Idempotency-Key": idempotencyKey },
+        suppressGlobalError: true,
       });
+      if (!isActiveDetailRequest(target, detailRequestId)) return;
       message.success("跟进已添加");
       setNoteText("");
-      openDetail(detailId.type, detailId.id);
+      setFollowUpResultUncertain(false);
+      setFollowUpIdempotencyKey(null);
+      openDetail(target.type, target.id);
     } catch (error) {
-      message.error(getSafeAdminErrorMessage(error, "跟进记录添加失败，请检查内容后重试。"));
+      if (!isActiveDetailRequest(target, detailRequestId)) return;
+      if (isUncertainWriteResult(error)) {
+        setFollowUpResultUncertain(true);
+        message.warning(
+          "跟进记录结果待确认；内容与原凭据已保留。请使用原凭据恢复；如需放弃，请关闭详情后重新进入。系统不会自动重复提交。",
+        );
+      } else {
+        setFollowUpResultUncertain(false);
+        message.error(getSafeAdminErrorMessage(error, "跟进记录添加失败，请检查内容后重试。"));
+      }
+      if (requestStatus(error) === 409) {
+        setFollowUpIdempotencyKey(null);
+        await openDetail(target.type, target.id);
+      }
     } finally {
-      setSaving(false);
+      if (savingOperationIdRef.current === savingOperationId) setSaving(false);
     }
   };
 
@@ -566,19 +865,47 @@ export default function LeadManage() {
 
   const handleAssign = async () => {
     if (!detailId || !assignTo) return;
+    const target = detailId;
+    const detailRequestId = detailRequestIdRef.current;
+    const payload = { assignedTo: assignTo };
+    const attempt = resolveLeadUpdateAttempt(
+      assignmentUpdateAttemptRef.current,
+      target,
+      payload,
+    );
+    assignmentUpdateAttemptRef.current = attempt;
+    const assigningOperationId = ++assigningOperationIdRef.current;
     setAssigning(true);
     try {
-      await api.put(`/leads/${detailId.type}/${detailId.id}`, {
-        assignedTo: assignTo,
+      await api.put(`/leads/${target.type}/${target.id}`, payload, {
+        headers: { "Idempotency-Key": attempt.idempotencyKey },
+        suppressGlobalError: true,
       });
+      if (assignmentUpdateAttemptRef.current === attempt) {
+        assignmentUpdateAttemptRef.current = null;
+      }
+      if (!isActiveDetailRequest(target, detailRequestId)) {
+        await fetchList();
+        return;
+      }
       message.success("已指派");
       setAssignTo(undefined);
-      openDetail(detailId.type, detailId.id);
+      openDetail(target.type, target.id);
       fetchList();
     } catch (error) {
-      message.error(getSafeAdminErrorMessage(error, "线索指派失败，请重新加载人员列表后重试。"));
+      const uncertain = isUncertainWriteResult(error);
+      if (!uncertain && assignmentUpdateAttemptRef.current === attempt) {
+        assignmentUpdateAttemptRef.current = null;
+      }
+      if (!isActiveDetailRequest(target, detailRequestId)) return;
+      if (uncertain) {
+        message.warning("线索指派结果待确认；保持当前负责人不变后重试，系统会沿用同一凭据安全恢复。");
+      } else {
+        message.error(getSafeAdminErrorMessage(error, "线索指派失败，请重新加载人员列表后重试。"));
+        if (requestStatus(error) === 409) await openDetail(target.type, target.id);
+      }
     } finally {
-      setAssigning(false);
+      if (assigningOperationIdRef.current === assigningOperationId) setAssigning(false);
     }
   };
 
@@ -613,20 +940,23 @@ export default function LeadManage() {
       await refreshLeadViews(type, id);
     } catch (error) {
       const isConflict = requestStatus(error) === 409;
+      const isUncertain = isUncertainWriteResult(error);
       const feedbackMessage = isConflict
         ? "线索已被其他员工领取。请重新加载后确认负责人。"
-        : getSafeAdminErrorMessage(
-            error,
-            "线索领取失败，请重新加载后重试。",
-          );
+        : isUncertain
+          ? "线索领取结果待确认。请先重新加载确认负责人；若仍未分配，再次领取即可。"
+          : getSafeAdminErrorMessage(
+              error,
+              "线索领取失败，请重新加载后重试。",
+            );
       setClaimFeedback({
         key,
-        type: isConflict ? "warning" : "error",
+        type: isConflict || isUncertain ? "warning" : "error",
         message: feedbackMessage,
         leadType: type,
         leadId: id,
       });
-      if (isConflict) {
+      if (isConflict || isUncertain) {
         message.warning(feedbackMessage);
       } else {
         message.error(feedbackMessage);
@@ -850,9 +1180,21 @@ export default function LeadManage() {
                     )}
                     {event.retryable ? (
                       <Popconfirm
-                        title="确认重新投递这条回复通知？"
-                        description="系统会在投递服务可用时再次向客户邮箱发送原回复。"
-                        okText="确认重投"
+                        title={
+                          notificationRetryUncertainIds.has(event.id)
+                            ? "确认使用原凭据恢复？"
+                            : "确认重新投递这条回复通知？"
+                        }
+                        description={
+                          notificationRetryUncertainIds.has(event.id)
+                            ? "系统会恢复同一次重投意图，不会建立第二次入队请求。"
+                            : "系统会在投递服务可用时再次向客户邮箱发送原回复。"
+                        }
+                        okText={
+                          notificationRetryUncertainIds.has(event.id)
+                            ? "确认恢复"
+                            : "确认重投"
+                        }
                         cancelText="取消"
                         onConfirm={() => retryNotification(event)}
                       >
@@ -861,7 +1203,9 @@ export default function LeadManage() {
                           type="primary"
                           loading={retryingNotificationId === event.id}
                         >
-                          重新投递
+                          {notificationRetryUncertainIds.has(event.id)
+                            ? "使用原凭据恢复"
+                            : "重新投递"}
                         </Button>
                       </Popconfirm>
                     ) : (
@@ -869,6 +1213,14 @@ export default function LeadManage() {
                     )}
                   </Space>
                 ))}
+                {notificationRetryUncertainIds.size > 0 && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="通知重投结果待确认"
+                    description="待确认事件保留原凭据且不会自动再次入队；请在对应事件上使用原凭据恢复。"
+                  />
+                )}
                 {notificationFailureTotal > notificationFailures.length && (
                   <span>
                     当前显示最近 {notificationFailures.length} 条，请处理后刷新查看其余记录。
@@ -967,14 +1319,7 @@ export default function LeadManage() {
       <Drawer
         title={`线索详情`}
         open={detailId !== null}
-        onClose={() => {
-          detailIdRef.current = null;
-          setDetailId(null);
-          setDetail(null);
-          setReplyText("");
-          setReplyError(null);
-          setReplyIdempotencyKey(null);
-        }}
+        onClose={closeDetail}
         width={640}
       >
         {detail ? (
@@ -1084,12 +1429,26 @@ export default function LeadManage() {
                   }
                   style={{ marginBottom: 12 }}
                 />
+                {legalHoldResultUncertain && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="法律保留操作结果待确认"
+                    description="当前原因与原凭据已保留；请使用原凭据恢复。如需放弃，请关闭详情后重新进入。系统不会自动重复提交。"
+                    style={{ marginBottom: 12 }}
+                  />
+                )}
                 <Space wrap>
                   <Select<string>
                     style={{ minWidth: 240 }}
                     placeholder={detail.legalHoldAt ? "选择解除原因" : "选择保留原因"}
                     value={legalHoldReason}
-                    onChange={setLegalHoldReason}
+                    disabled={legalHoldResultUncertain}
+                    onChange={(value) => {
+                      setLegalHoldReason(value);
+                      setLegalHoldResultUncertain(false);
+                      legalHoldAttemptRef.current = null;
+                    }}
                     options={
                       detail.legalHoldAt
                         ? [...LEGAL_HOLD_RELEASE_REASONS]
@@ -1112,7 +1471,11 @@ export default function LeadManage() {
                       loading={privacyUpdating}
                       disabled={!legalHoldReason}
                     >
-                      {detail.legalHoldAt ? "解除法律保留" : "设置法律保留"}
+                      {legalHoldResultUncertain
+                        ? "使用原凭据恢复"
+                        : detail.legalHoldAt
+                          ? "解除法律保留"
+                          : "设置法律保留"}
                     </Button>
                   </Popconfirm>
                 </Space>
@@ -1181,28 +1544,20 @@ export default function LeadManage() {
                     value={replyText}
                     maxLength={5000}
                     showCount
-                    disabled={replying}
+                    disabled={replying || replyResultUncertain}
                     placeholder="输入将展示在客户中心的回复内容"
                     onChange={(event) => {
                       setReplyText(event.target.value);
                       setReplyError(null);
+                      setReplyResultUncertain(false);
                       setReplyIdempotencyKey(null);
                     }}
                   />
                   {replyError ? (
                     <Alert
-                      type="error"
+                      type={replyResultUncertain ? "warning" : "error"}
                       showIcon
                       message={replyError}
-                      action={
-                        <Button
-                          size="small"
-                          onClick={() => void submitReply()}
-                          loading={replying}
-                        >
-                          重新提交
-                        </Button>
-                      }
                     />
                   ) : null}
                   <Button
@@ -1211,7 +1566,11 @@ export default function LeadManage() {
                     loading={replying}
                     disabled={!replyText.trim() || !detail.updatedAt}
                   >
-                    提交回复
+                    {replyResultUncertain
+                      ? "使用原凭据恢复"
+                      : replyError
+                        ? "重新提交"
+                        : "提交回复"}
                   </Button>
                 </Space>
               )}
@@ -1257,14 +1616,33 @@ export default function LeadManage() {
                 aria-label="内部备注或跟进内容"
                 rows={3}
                 value={noteText}
-                onChange={(e) => setNoteText(e.target.value)}
+                disabled={followUpResultUncertain}
+                onChange={(e) => {
+                  setNoteText(e.target.value);
+                  setFollowUpResultUncertain(false);
+                  setFollowUpIdempotencyKey(null);
+                }}
                 placeholder="添加内部备注或跟进记录..."
               />
+              {followUpResultUncertain ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginTop: 8 }}
+                  message="跟进记录结果待确认"
+                  description="当前内容与原凭据已保留；请使用原凭据恢复。如需放弃，请关闭详情后重新进入。系统不会自动重复提交。"
+                />
+              ) : null}
               <Space wrap style={{ marginTop: 8, width: "100%" }}>
                 <Select
                   aria-label="跟进渠道"
                   value={followUpContactMethod}
-                  onChange={setFollowUpContactMethod}
+                  disabled={followUpResultUncertain}
+                  onChange={(value) => {
+                    setFollowUpContactMethod(value);
+                    setFollowUpResultUncertain(false);
+                    setFollowUpIdempotencyKey(null);
+                  }}
                   options={CONTACT_METHOD_OPTIONS.map((option) => ({ ...option }))}
                   style={{ width: 140 }}
                 />
@@ -1272,10 +1650,19 @@ export default function LeadManage() {
                   aria-label="下次跟进时间"
                   type="datetime-local"
                   value={followUpNextAt}
-                  onChange={(event) => setFollowUpNextAt(event.target.value)}
+                  disabled={followUpResultUncertain}
+                  onChange={(event) => {
+                    setFollowUpNextAt(event.target.value);
+                    setFollowUpResultUncertain(false);
+                    setFollowUpIdempotencyKey(null);
+                  }}
                   style={{ width: 210 }}
                 />
-                <Button onClick={saveNote} loading={saving}>
+                <Button
+                  onClick={saveNote}
+                  loading={saving}
+                  disabled={followUpResultUncertain}
+                >
                   保存备注
                 </Button>
                 <Button
@@ -1283,7 +1670,7 @@ export default function LeadManage() {
                   loading={saving}
                   type="primary"
                 >
-                  添加跟进
+                  {followUpResultUncertain ? "使用原凭据恢复" : "添加跟进"}
                 </Button>
               </Space>
             </div>

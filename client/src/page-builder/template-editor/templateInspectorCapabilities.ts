@@ -80,9 +80,24 @@ const INSTANCE_POLICY_FIELDS = [
   "maxFontSizePx", "maxSpacingPx",
 ] as const;
 
+export const TEMPLATE_INSPECTOR_INTERNAL_IDENTITY_FIELDS = new Set([
+  "schemaVersion",
+  "templateId",
+  "rootNodeId",
+  "nodeId",
+  "slotId",
+  "slot.slotId",
+  "slot.key",
+]);
+
+export function isTemplateInspectorInternalIdentityField(field: string) {
+  return TEMPLATE_INSPECTOR_INTERNAL_IDENTITY_FIELDS.has(field);
+}
+
 /**
  * Inspector 的 schema 能力表。它只按根、节点类型和槽位类型分派，不依赖模板名称或目录清单。
  * `managed` 表示只能通过结构/画布/兼容清理命令修改，不能暴露原始 JSON 输入。
+ * schemaVersion / nodeId / slotId 等内部标识只作兼容能力登记，不进入日常表单。
  */
 export const TEMPLATE_INSPECTOR_CAPABILITIES: readonly TemplateInspectorCapability[] = [
   { field: "schemaVersion", label: "Schema 版本", group: "definition", access: "read-only", scopes: ROOT_SCOPE, reason: "由合同版本固定，不能在 Inspector 中改写。" },

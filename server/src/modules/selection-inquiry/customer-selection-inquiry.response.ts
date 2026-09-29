@@ -8,6 +8,7 @@ export const CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT = {
   id: true,
   status: true,
   createdAt: true,
+  lead: { select: { id: true } },
 } satisfies Prisma.SelectionInquirySelect;
 
 export const CUSTOMER_SELECTION_INQUIRY_LIST_SELECT = {
@@ -21,13 +22,18 @@ export const CUSTOMER_SELECTION_INQUIRY_LIST_SELECT = {
 } satisfies Prisma.SelectionInquirySelect;
 
 export const CUSTOMER_SELECTION_INQUIRY_EXPORT_SELECT = {
+  id: true,
   message: true,
   status: true,
   createdAt: true,
+  updatedAt: true,
+  items: { select: { productNameSnapshot: true } },
+  lead: { select: CUSTOMER_LEAD_REPLY_SELECT },
 } satisfies Prisma.SelectionInquirySelect;
 
 export const CUSTOMER_SELECTION_INQUIRY_DEDUPE_SELECT = {
   ...CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
+  lead: { select: { id: true, submissionFingerprint: true } },
   items: { select: { productId: true } },
 } satisfies Prisma.SelectionInquirySelect;
 
@@ -45,6 +51,8 @@ export function toCustomerSelectionInquirySubmission(
 ) {
   return {
     id: inquiry.id,
+    sourceId: inquiry.id,
+    leadId: inquiry.lead?.id ?? null,
     status: inquiry.status,
     createdAt: inquiry.createdAt,
   };
@@ -61,6 +69,8 @@ export function toCustomerSelectionInquiryListItem(
     message: inquiry.message,
     createdAt: inquiry.createdAt,
     updatedAt: lead.updatedAt ?? inquiry.updatedAt,
+    handlingState: lead.handlingState,
+    nextAction: lead.nextAction,
     items: inquiry.items.map((item) => ({
       productNameSnapshot: item.productNameSnapshot,
     })),

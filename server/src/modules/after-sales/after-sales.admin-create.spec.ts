@@ -4,6 +4,7 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { IdempotencyService } from '../../common/idempotency/idempotency-key';
 import { AfterSalesService } from './after-sales.service';
 import { CreateAfterSalesDto } from './dto/after-sales.dto';
 
@@ -27,7 +28,11 @@ function createHarness(options?: {
   let transactionTail = Promise.resolve();
   let lockCalls = 0;
   const tx: any = {
-    $queryRaw: async () => {
+    $queryRaw: async (query: any) => {
+      const sql = (query?.strings ?? []).join(' ');
+      if (sql.includes('FROM users')) {
+        return [{ id: 1, username: 'admin', realName: '售后管理员' }];
+      }
       lockCalls += 1;
       return orderExists ? [{ id: order.id }] : [];
     },
@@ -42,6 +47,12 @@ function createHarness(options?: {
       },
     },
     afterSalesCase: {
+      findUnique: async ({ where }: any) => {
+        if (where.idempotencyKeyHash) {
+          return cases.find((record) => record.idempotencyKeyHash === where.idempotencyKeyHash) ?? null;
+        }
+        return cases.find((record) => record.id === where.id) ?? null;
+      },
       findFirst: async ({ where }: any) =>
         cases.find((record) =>
           record.orderId === where.orderId
@@ -74,6 +85,7 @@ function createHarness(options?: {
         events.push(event);
       },
     } as never,
+    new IdempotencyService(),
   );
   return { service, cases, events, get lockCalls() { return lockCalls; } };
 }
@@ -117,21 +129,26 @@ test('后台售后 DTO 强制订单、商品和客户三个正整数关联', asy
 test('后台只为匹配订单、客户、商品且状态合格的标准零售订单创建售后', async () => {
   const harness = createHarness();
 
-  const result = await harness.service.create(validInput);
+  const result = await harness.service.create(validInput, 'admin-after-sales-create-0001');
 
   assert.equal(result.orderId, 9);
   assert.equal(result.orderItemId, 21);
   assert.equal(result.customerId, 7);
   assert.equal(harness.cases.length, 1);
   assert.equal(harness.events[0]?.eventType, 'AFTER_SALES_REQUESTED');
+  assert.deepEqual(harness.events[0]?.operator, {
+    type: 'ADMIN',
+    id: 1,
+    name: '售后管理员',
+  });
   assert.equal(harness.lockCalls, 1);
 });
 
 test('不存在订单、跨客户和错误商品统一返回不泄露关联事实的 404', async () => {
   const attempts = [
-    createHarness({ orderExists: false }).service.create(validInput),
-    createHarness({ customerId: 8 }).service.create(validInput),
-    createHarness({ itemId: 99 }).service.create(validInput),
+    createHarness({ orderExists: false }).service.create(validInput, 'admin-after-sales-create-404a'),
+    createHarness({ customerId: 8 }).service.create(validInput, 'admin-after-sales-create-404b'),
+    createHarness({ itemId: 99 }).service.create(validInput, 'admin-after-sales-create-404c'),
   ];
 
   for (const attempt of attempts) {
@@ -149,7 +166,10 @@ test('后台售后拒绝未付款、已取消和高级定制订单', async () =>
     createHarness({ status: 'CANCELLED' }),
     createHarness({ orderType: 'CUSTOM' }),
   ]) {
-    await assert.rejects(() => harness.service.create(validInput), BadRequestException);
+    await assert.rejects(
+      () => harness.service.create(validInput, 'admin-after-sales-create-invalid'),
+      BadRequestException,
+    );
     assert.equal(harness.cases.length, 0);
   }
 });
@@ -158,8 +178,8 @@ test('后台同一订单商品并发重复创建只有一个成功', async () =>
   const harness = createHarness();
 
   const results = await Promise.allSettled([
-    harness.service.create(validInput),
-    harness.service.create(validInput),
+    harness.service.create(validInput, 'admin-after-sales-create-concurrent-a'),
+    harness.service.create(validInput, 'admin-after-sales-create-concurrent-b'),
   ]);
 
   assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
@@ -169,4 +189,37 @@ test('后台同一订单商品并发重复创建只有一个成功', async () =>
   assert.equal(harness.cases.length, 1);
   assert.equal(harness.events.length, 1);
   assert.equal(harness.lockCalls, 2);
+});
+
+test('后台售后同键同内容恢复原工单且事件保持单写', async () => {
+  const harness = createHarness();
+  const key = 'admin-after-sales-create-replay';
+
+  const first = await harness.service.create(validInput, key);
+  const replayed = await harness.service.create(validInput, key);
+
+  assert.equal(replayed.id, first.id);
+  assert.equal(harness.cases.length, 1);
+  assert.equal(harness.events.length, 1);
+  assert.equal(harness.lockCalls, 2);
+  assert.match(String(harness.cases[0]?.idempotencyKeyHash), /^[a-f0-9]{64}$/);
+  assert.match(String(harness.cases[0]?.submissionFingerprint), /^[a-f0-9]{64}$/);
+});
+
+test('后台售后同键异内容在任何第二次业务写入前冲突', async () => {
+  const harness = createHarness();
+  const key = 'admin-after-sales-create-conflict';
+  await harness.service.create(validInput, key);
+
+  await assert.rejects(
+    () => harness.service.create({ ...validInput, reason: '另一项检修需求' }, key),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.match(error.message, /已用于不同/);
+      return true;
+    },
+  );
+
+  assert.equal(harness.cases.length, 1);
+  assert.equal(harness.events.length, 1);
 });

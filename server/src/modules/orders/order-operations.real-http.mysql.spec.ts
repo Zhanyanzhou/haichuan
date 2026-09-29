@@ -9,6 +9,7 @@ import { HttpExceptionFilter } from '../../common/filters/http-exception.filter'
 import { TransformInterceptor } from '../../common/interceptors/transform.interceptor';
 
 const databaseUrl = process.env.ORDER_OPS_REAL_MYSQL_URL?.trim();
+const { validateTarget: validateSharedTarget } = require('../../../scripts/run-real-mysql-tests.cjs');
 
 type ApiResult = {
   status: number;
@@ -23,6 +24,12 @@ function validateIsolatedTarget(value: string | undefined) {
     '必须显式声明 ORDER_OPS_REAL_MYSQL_TEST=1',
   );
   assert.ok(value, '必须显式提供 ORDER_OPS_REAL_MYSQL_URL');
+  if (
+    process.env.REAL_MYSQL_TEST_ISOLATED === '1'
+    && value === process.env.REAL_MYSQL_TEST_DATABASE_URL
+  ) {
+    return validateSharedTarget(process.env);
+  }
   const target = new URL(value);
   assert.equal(target.protocol, 'mysql:');
   assert.match(
@@ -262,6 +269,7 @@ test(
 
       const receipt = await call('/payments/receipt', adminToken, {
         method: 'POST',
+        headers: { 'Idempotency-Key': `manual-receipt-${runId}` },
         body: JSON.stringify({
           orderId: order.id,
           amount: 100,
@@ -286,6 +294,7 @@ test(
 
       const duplicateReceipt = await call('/payments/receipt', adminToken, {
         method: 'POST',
+        headers: { 'Idempotency-Key': `manual-receipt-duplicate-${runId}` },
         body: JSON.stringify({
           orderId: order.id,
           amount: 100,
@@ -369,7 +378,10 @@ test(
       assertStatus(
         await call(`/customers/me/orders/${order.id}/after-sales`, customerBToken, {
           method: 'POST',
-          headers: { 'X-Session-Domain': 'customer' },
+          headers: {
+            'X-Session-Domain': 'customer',
+            'Idempotency-Key': `cross-customer-after-sales-${runId}`,
+          },
           body: JSON.stringify({ orderItemId: orderItem.id, type: 'REFUND', reason: '越权售后' }),
         }),
         404,
@@ -378,7 +390,10 @@ test(
 
       const createdCase = await call(`/customers/me/orders/${order.id}/after-sales`, customerAToken, {
         method: 'POST',
-        headers: { 'X-Session-Domain': 'customer' },
+        headers: {
+          'X-Session-Domain': 'customer',
+          'Idempotency-Key': `customer-after-sales-${runId}`,
+        },
         body: JSON.stringify({
           orderItemId: orderItem.id,
           type: 'REFUND',
@@ -390,7 +405,10 @@ test(
       assertStatus(
         await call(`/customers/me/orders/${order.id}/after-sales`, customerAToken, {
           method: 'POST',
-          headers: { 'X-Session-Domain': 'customer' },
+          headers: {
+            'X-Session-Domain': 'customer',
+            'Idempotency-Key': `duplicate-after-sales-${runId}`,
+          },
           body: JSON.stringify({
             orderItemId: orderItem.id,
             type: 'REFUND',

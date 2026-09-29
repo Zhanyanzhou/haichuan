@@ -19,6 +19,7 @@ export interface CommerceFlags {
   paymentEnabled: boolean;
   quotationOrderingEnabled: boolean;
   partnerApplicationsWriteEnabled: boolean;
+  partnerAgreementVersion: string | null;
 }
 
 const SAFE_FLAGS: CommerceFlags = {
@@ -27,20 +28,23 @@ const SAFE_FLAGS: CommerceFlags = {
   paymentEnabled: false,
   quotationOrderingEnabled: false,
   partnerApplicationsWriteEnabled: false,
+  partnerAgreementVersion: null,
 };
 
 interface CommerceFlagsState {
   flags: CommerceFlags | null;
   loading: boolean;
+  error: boolean;
   load: () => Promise<void>;
 }
 
 export const useCommerceFlags = create<CommerceFlagsState>((set, get) => ({
   flags: null,
   loading: false,
+  error: false,
   load: async () => {
     if (get().loading) return;
-    set({ loading: true });
+    set({ loading: true, error: false });
     try {
       const res = await settingsApi.getFlags();
       const data = unwrapResponse<Partial<CommerceFlags>>(res) || {};
@@ -51,11 +55,16 @@ export const useCommerceFlags = create<CommerceFlagsState>((set, get) => ({
           paymentEnabled: Boolean(data.paymentEnabled),
           quotationOrderingEnabled: Boolean(data.quotationOrderingEnabled),
           partnerApplicationsWriteEnabled: Boolean(data.partnerApplicationsWriteEnabled),
+          partnerAgreementVersion:
+            typeof data.partnerAgreementVersion === "string"
+              ? data.partnerAgreementVersion
+              : null,
         },
+        error: false,
       });
     } catch {
       // 请求失败保持关闭，避免向访客暴露不可用的交易入口
-      set({ flags: SAFE_FLAGS });
+      set({ flags: SAFE_FLAGS, error: true });
     } finally {
       set({ loading: false });
     }
@@ -88,14 +97,17 @@ export function useQuotationOrderingEnabled(): boolean {
 export function useCommerceCapabilities(): {
   flags: CommerceFlags | null;
   loading: boolean;
+  error: boolean;
+  reload: () => Promise<void>;
 } {
   const flags = useCommerceFlags((s) => s.flags);
   const loading = useCommerceFlags((s) => s.loading);
+  const error = useCommerceFlags((s) => s.error);
   const load = useCommerceFlags((s) => s.load);
   useEffect(() => {
     if (!flags && !loading) void load();
   }, [flags, loading, load]);
-  return { flags, loading };
+  return { flags, loading, error, reload: load };
 }
 
 /** 统一规则：全站交易开关开启且商品为“直接购买”时，才允许加购/下单。 */

@@ -70,14 +70,13 @@ test("本站静态背景缺少来源记录时只提醒，补齐后消除提醒",
   assert.deepEqual(await fixture.validate(), { valid: true, errors: [], issues: [] });
 });
 
-test("仅 Tablet 可见背景仍受资源门禁，全断点隐藏后不阻断", async () => {
+test("仅 Tablet 可见背景不再进入公开资源门禁", async () => {
   const fixture = publicationFixture();
   const node = fixture.definition.nodes.node_container;
   node.responsive.desktop.display = "none";
   node.responsive.mobile = { display: "none" };
   node.responsive.tablet = { display: "block", backgroundImage: "https://example.invalid/tablet.jpg" };
-  fixture.grant("https://example.invalid/tablet.jpg");
-  assert.equal((await fixture.validate()).valid, false);
+  assert.equal((await fixture.validate()).valid, true);
   node.responsive.tablet.display = "none";
   assert.equal((await fixture.validate()).valid, true);
 });
@@ -98,20 +97,14 @@ test("显式隐藏或全断点不可达的可选图片不再检查 alt、资源�
   }
 });
 
-test("图片只在 Tablet 可见时仍须完整，重新隐藏 Tablet 后通过", async () => {
+test("图片只在 Tablet 可见时不再阻断公开校验", async () => {
   const fixture = publicationFixture();
   fixture.props.contentBySlotId.slot_heading = { src: "https://example.invalid/tablet.jpg", alt: "" };
   const node = fixture.definition.nodes.node_container;
   node.responsive.desktop.display = "none";
   node.responsive.mobile.display = "none";
   node.responsive.tablet = { display: "block" };
-  const result = await fixture.validate();
-  assert.equal(result.valid, false);
-  assert.ok(result.issues.some(
-    (issue) => issue.severity === "warning" && issue.message.includes("替代文字不能为空"),
-  ));
-  assert.equal(result.errors.some((message) => message.includes("替代文字不能为空")), false);
-  assert.ok(result.errors.some((message) => message.includes("外部素材地址")));
+  assert.equal((await fixture.validate()).valid, true);
   node.responsive.tablet.display = "none";
   assert.equal((await fixture.validate()).valid, true);
 });

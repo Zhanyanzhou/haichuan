@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { CHECKSUM, makeResource, installNewTemplateServer, openTemplateDesignWithoutDraft, readSession, saveTemplate } from "./fixtures/template-authoring-main-route";
+import { CHECKSUM, clickNewTemplateEntry, makeResource, installNewTemplateServer, openTemplateDesignWithoutDraft, readSession, saveTemplate } from "./fixtures/template-authoring-main-route";
 
 async function openInsertionScenario(page: Page, scenario: "space" | "full" | "background" | "legacy" | "anchored") {
   const server = await installNewTemplateServer(page);
@@ -14,7 +14,6 @@ async function openInsertionScenario(page: Page, scenario: "space" | "full" | "b
     const parent = Object.values(definition.nodes).find((node: any) => node.type === "Stack" && node.responsive.desktop.layoutMode === "free") as any;
     parent.childIds.forEach((id: string, index: number) => {
       definition.nodes[id].responsive.desktop.placement = { x: 0, y: index * .47, width: .45, height: .45, zIndex: 1 };
-      definition.nodes[id].responsive.tablet = { placement: { x: index * .47, y: 0, width: .45, height: .45, zIndex: 1 } };
     });
     if (scenario === "full" || scenario === "legacy") {
       const container = parent.childIds.find((id: string) => !definition.nodes[id].slotId);
@@ -23,7 +22,7 @@ async function openInsertionScenario(page: Page, scenario: "space" | "full" | "b
     if (scenario === "background") {
       const image = parent.childIds.find((id: string) => definition.nodes[id].slotId);
       definition.nodes[image].responsive.desktop.placement = { x: 0, y: 0, width: 1, height: 1, zIndex: 0 };
-      definition.nodes[image].responsive.tablet = {};
+      definition.nodes[image].responsive.mobile = {};
     }
     if (scenario === "anchored") definition.nodes[parent.childIds[0]].responsive.desktop.anchor = {
       horizontal: "right", vertical: "bottom", offsetX: { value: 0, unit: "px" }, offsetY: { value: 0, unit: "px" },
@@ -47,9 +46,6 @@ test("新增图片按各设备寻找空位，保留旧元素和流式手机，�
   const node = after.definition!.nodes[after.selectedObjectId!];
   expect(node.responsive.desktop.placement).toMatchObject({ y: 0, width: .5, height: .5 });
   expect(node.responsive.desktop.placement!.x).toBeCloseTo(.47, 6);
-  expect(node.responsive.tablet!.placement).toMatchObject({ width: .5, height: .5 });
-  expect(node.responsive.tablet!.placement!.x).toBeCloseTo(.47, 6);
-  expect(node.responsive.tablet!.placement!.y).toBeCloseTo(.47, 6);
   expect(node.responsive.mobile.placement).toBeNull();
   for (const id of siblings) expect(after.definition!.nodes[id]).toEqual(before.definition!.nodes[id]);
   const frame = page.frameLocator("iframe.template-editor__viewport-frame");
@@ -125,7 +121,7 @@ for (const scenario of ["background", "legacy"] as const) test(`新增放置保�
 });
 
 async function configure(page: Page) {
-  await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+  await clickNewTemplateEntry(page);
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();

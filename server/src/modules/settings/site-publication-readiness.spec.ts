@@ -56,6 +56,29 @@ test("正式上线预检仍要求完整审核和运营资料", () => {
   assert.equal(result.areas.seo.ready, false);
 });
 
+test("正式上线预检拒绝非空但仍是筹备态的站点事实与复核记录", () => {
+  const result = evaluateSitePublicationReadiness({
+    ...readySettings,
+    contactPhone: "正在完善",
+    contactAddress: "地址待确认",
+    seoDescription: "网站内容正在整理。",
+    legalEntityReviewReference: "请填写法务复核编号",
+  }, { persisted: true, requireLaunchDetails: true });
+
+  assert.equal(result.status, "BLOCKED");
+  assert.deepEqual(
+    result.blockers
+      .filter((blocker) => blocker.code.endsWith("_PLACEHOLDER"))
+      .map((blocker) => blocker.field),
+    [
+      "siteSettings.contactPhone",
+      "siteSettings.contactAddress",
+      "siteSettings.legalEntityReviewReference",
+      "siteSettings.seoDescription",
+    ],
+  );
+});
+
 test("正式上线品牌预检要求签认，并要求正式 Logo 或显式纯文字模式", () => {
   const missingEvidence = evaluateSitePublicationReadiness({
     ...readySettings,

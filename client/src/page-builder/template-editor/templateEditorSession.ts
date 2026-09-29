@@ -245,6 +245,33 @@ export interface TemplateWorkspaceScrollState {
   inspector: number;
 }
 
+function finiteScrollOffset(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+/** 模板目录属于共享面板：切换模板时保留目录滚动，只重置当前模板文档内的面板。 */
+export function nextTemplateWorkspaceScrollForOpen(
+  previous: TemplateWorkspaceScrollState,
+): TemplateWorkspaceScrollState {
+  return {
+    library: finiteScrollOffset(previous.library),
+    structure: 0,
+    canvas: 0,
+    inspector: 0,
+  };
+}
+
+/** 目录列表未卸载时，优先保住当前滚动，避免切模板把列表拽回第一项。 */
+export function resolveTemplateLibraryScrollRestore(
+  currentScrollTop: number,
+  savedScrollTop: number,
+  rememberedScrollTop = 0,
+) {
+  const current = finiteScrollOffset(currentScrollTop);
+  if (current > 0) return current;
+  return Math.max(finiteScrollOffset(savedScrollTop), finiteScrollOffset(rememberedScrollTop));
+}
+
 export type TemplateInspectorTask = "design" | "page-scope";
 export type TemplateInspectorView = "context" | "page-fields";
 
@@ -330,6 +357,7 @@ interface TemplateEditorSessionState {
   workspaceScroll: TemplateWorkspaceScrollState;
   saveStatus: TemplateSaveStatus;
   lastCommandResult: DynamicTemplateCommandResult | null;
+  imageFocusEditingNodeId: string | null;
   open: (draft: TemplateEditorDraft, options?: { isNew?: boolean }) => void;
   close: () => void;
   restoreBaseline: () => boolean;
@@ -365,6 +393,7 @@ interface TemplateEditorSessionState {
   setContentLayer: (contentLayer: TemplateEditorContentLayer) => void;
   setInspectorTask: (inspectorTask: TemplateInspectorTask) => void;
   setInspectorView: (inspectorView: TemplateInspectorView) => void;
+  setImageFocusEditing: (nodeId: string | null) => void;
   confirmDeviceReview: (device: TemplateEditorDevice) => void;
   confirmPageScopeReview: (source?: "publish-review") => void;
   confirmStressPreviewScenarioReview: (scenario: TemplateStressPreviewScenario) => void;
@@ -421,6 +450,7 @@ const EMPTY_STATE = {
   },
   saveStatus: "idle" as const,
   lastCommandResult: null as DynamicTemplateCommandResult | null,
+  imageFocusEditingNodeId: null as string | null,
 };
 
 export const useTemplateEditorSession = create<TemplateEditorSessionState>((set, get) => ({
@@ -434,8 +464,9 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set,
         ...EMPTY_STATE,
         productionReviewFacts: createTemplateProductionReviewFacts(),
         device: state.device,
-        breakpoint: state.breakpoint === "tablet" && Number(draft.definition.schemaVersion) < 2
-          ? "desktop" : state.breakpoint,
+        breakpoint: state.breakpoint === "tablet"
+          ? (state.device === "mobile" ? "mobile" : "desktop") : state.breakpoint,
+        workspaceScroll: nextTemplateWorkspaceScrollForOpen(state.workspaceScroll),
         sessionId: createSessionId(),
         draft: cloneDraft(draft),
         editingScopeId: draft.definition.rootNodeId,
@@ -908,7 +939,7 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set,
   setBreakpoint: (breakpoint) => {
     if (focusFirstInvalidNumberField()) return false;
     const state = get();
-    if (breakpoint === "tablet" && (!state.draft || Number(state.draft.definition.schemaVersion) < 2)) return false;
+    if (breakpoint === "tablet") return false;
     const device = breakpoint === "mobile" ? "mobile" : "desktop";
     set({
       breakpoint, device, previewWidth: null, activeInteraction: null, previewDocument: null,
@@ -926,6 +957,9 @@ export const useTemplateEditorSession = create<TemplateEditorSessionState>((set,
   )),
   setInspectorView: (inspectorView) => set((state) => (
     state.previewMode ? state : { inspectorView }
+  )),
+  setImageFocusEditing: (nodeId) => set((state) => (
+    state.previewMode ? state : { imageFocusEditingNodeId: nodeId }
   )),
   confirmDeviceReview: (device) => set((state) => (
     state.draft && !state.previewMode && state.device === device

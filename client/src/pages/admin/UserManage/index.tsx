@@ -11,6 +11,7 @@ import {
   Select,
   App as AntdApp,
   Popconfirm,
+  Tooltip,
 } from "antd";
 import {
   PlusOutlined,
@@ -110,6 +111,10 @@ export default function UserManage() {
   };
 
   const openEdit = (u: User) => {
+    if (!isSuperAdmin && u.role === "SUPER_ADMIN") {
+      message.warning("仅超级管理员可编辑超级管理员账号。");
+      return;
+    }
     setEditing(u);
     form.setFieldsValue(u);
     setModalOpen(true);
@@ -272,16 +277,23 @@ export default function UserManage() {
             },
             {
               title: "操作",
-              render: (_: unknown, r: User) => (
+              render: (_: unknown, r: User) => {
+                const editRestricted = !isSuperAdmin && r.role === "SUPER_ADMIN";
+                return (
                 <Space>
-                  <Button
-                    size="small"
-                    icon={<EditOutlined />}
-                    type="text"
-                    onClick={() => openEdit(r)}
-                  >
-                    编辑
-                  </Button>
+                  <Tooltip title={editRestricted ? "仅超级管理员可编辑超级管理员账号" : undefined}>
+                    <span>
+                      <Button
+                        size="small"
+                        icon={<EditOutlined />}
+                        type="text"
+                        disabled={editRestricted}
+                        onClick={() => openEdit(r)}
+                      >
+                        编辑
+                      </Button>
+                    </span>
+                  </Tooltip>
                   {isSuperAdmin && (
                     <>
                       <Button
@@ -317,7 +329,8 @@ export default function UserManage() {
                     </>
                   )}
                 </Space>
-              ),
+                );
+              },
             },
           ]}
             />

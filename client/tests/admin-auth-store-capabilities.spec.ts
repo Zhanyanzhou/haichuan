@@ -387,3 +387,253 @@ test.describe("后台页面统一从 authStore 读取角色", () => {
     await expect(createDialog.getByText("密码需为 6–18 位")).toHaveCount(0);
   });
 });
+
+test("后台 A 的慢 GET 返回旧 401 时不会刷新或退出重登后的 B", async ({ page }) => {
+  let adminRequests = 0;
+  let refreshRequests = 0;
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/auth/session/refresh") {
+      refreshRequests += 1;
+      return route.fulfill({ status: 401, contentType: "application/json", body: "{}" });
+    }
+    if (path !== "/api/__admin-session-epoch") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data: {}, message: "ok" }),
+      });
+    }
+    adminRequests += 1;
+    const requestNumber = adminRequests;
+    if (requestNumber === 1) await firstGate;
+    await route.fulfill({
+      status: requestNumber === 1 ? 401 : 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: requestNumber === 1 ? 401 : 200,
+        data: requestNumber === 1 ? null : { owner: "B" },
+        message: requestNumber === 1 ? "expired" : "ok",
+      }),
+    });
+  });
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const [{ useAuthStore }, { REQUEST_ERROR_EVENT }] = await Promise.all([
+      import("/src/store/authStore.ts"),
+      import("/src/services/requestErrorEvents.ts"),
+    ]);
+    useAuthStore.getState().logout();
+    useAuthStore.getState().setAuth({
+      id: 1,
+      username: "admin-a",
+      realName: "管理员 A",
+      role: "ADMIN",
+      status: "ACTIVE",
+      createdAt: "2026-09-21T00:00:00.000Z",
+    });
+    (window as typeof window & { __adminEpochGlobalErrors?: number })
+      .__adminEpochGlobalErrors = 0;
+    window.addEventListener(REQUEST_ERROR_EVENT, () => {
+      const target = window as typeof window & { __adminEpochGlobalErrors?: number };
+      target.__adminEpochGlobalErrors = (target.__adminEpochGlobalErrors ?? 0) + 1;
+    });
+  });
+
+  const staleResultPromise = page.evaluate(async () => {
+    const { default: api } = await import("/src/services/httpClient.ts");
+    try {
+      const response = await api.get("/__admin-session-epoch");
+      return { kind: "resolved", owner: response.data.data.owner };
+    } catch (error) {
+      return { kind: "rejected", name: error instanceof Error ? error.name : "unknown" };
+    }
+  });
+  await expect.poll(() => adminRequests).toBe(1);
+
+  const currentResult = await page.evaluate(async () => {
+    const [{ default: api }, { useAuthStore }] = await Promise.all([
+      import("/src/services/httpClient.ts"),
+      import("/src/store/authStore.ts"),
+    ]);
+    useAuthStore.getState().logout();
+    useAuthStore.getState().setAuth({
+      id: 2,
+      username: "admin-b",
+      realName: "管理员 B",
+      role: "ADMIN",
+      status: "ACTIVE",
+      createdAt: "2026-09-21T00:00:00.000Z",
+    });
+    const response = await api.get("/__admin-session-epoch");
+    return response.data.data.owner;
+  });
+  expect(currentResult).toBe("B");
+  expect(adminRequests).toBe(2);
+
+  releaseFirst();
+  await expect(staleResultPromise).resolves.toEqual({
+    kind: "rejected",
+    name: "StaleSessionResponseError",
+  });
+  await expect(page.evaluate(async () => {
+    const { useAuthStore } = await import("/src/store/authStore.ts");
+    const target = window as typeof window & { __adminEpochGlobalErrors?: number };
+    return {
+      userId: useAuthStore.getState().user?.id,
+      authStatus: useAuthStore.getState().status,
+      globalErrors: target.__adminEpochGlobalErrors ?? 0,
+    };
+  })).resolves.toEqual({ userId: 2, authStatus: "authenticated", globalErrors: 0 });
+  expect(refreshRequests).toBe(0);
+});
+
+test("后台 A 的旧 500 在切换到 B 后不会触发全局错误提示", async ({ page }) => {
+  let requestObserved = false;
+  let releaseRequest!: () => void;
+  const responseGate = new Promise<void>((resolve) => { releaseRequest = resolve; });
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/__admin-stale-500") {
+      requestObserved = true;
+      await responseGate;
+      return route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 500, message: "old A failure" }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: {}, message: "ok" }),
+    });
+  });
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const [{ useAuthStore }, { REQUEST_ERROR_EVENT }] = await Promise.all([
+      import("/src/store/authStore.ts"),
+      import("/src/services/requestErrorEvents.ts"),
+    ]);
+    useAuthStore.getState().setAuth({
+      id: 1,
+      username: "admin-a",
+      role: "ADMIN",
+      status: "ACTIVE",
+      createdAt: "2026-09-21T00:00:00.000Z",
+    });
+    const target = window as typeof window & { __adminStale500Errors?: number };
+    target.__adminStale500Errors = 0;
+    window.addEventListener(REQUEST_ERROR_EVENT, () => {
+      target.__adminStale500Errors = (target.__adminStale500Errors ?? 0) + 1;
+    });
+  });
+  const staleResult = page.evaluate(async () => {
+    const { default: api } = await import("/src/services/httpClient.ts");
+    try {
+      await api.get("/__admin-stale-500");
+      return "resolved";
+    } catch (error) {
+      return error instanceof Error ? error.name : "unknown";
+    }
+  });
+  await expect.poll(() => requestObserved).toBe(true);
+  await page.evaluate(async () => {
+    const { useAuthStore } = await import("/src/store/authStore.ts");
+    useAuthStore.getState().setAuth({
+      id: 2,
+      username: "admin-b",
+      role: "ADMIN",
+      status: "ACTIVE",
+      createdAt: "2026-09-21T00:00:00.000Z",
+    });
+  });
+  releaseRequest();
+  await expect(staleResult).resolves.toBe("StaleSessionResponseError");
+  await expect(page.evaluate(async () => {
+    const { useAuthStore } = await import("/src/store/authStore.ts");
+    const target = window as typeof window & { __adminStale500Errors?: number };
+    return {
+      userId: useAuthStore.getState().user?.id,
+      authStatus: useAuthStore.getState().status,
+      globalErrors: target.__adminStale500Errors ?? 0,
+    };
+  })).resolves.toEqual({ userId: 2, authStatus: "authenticated", globalErrors: 0 });
+});
+
+test("后台 A 的写请求成功响应在切换到 B 后不会进入新身份业务处理", async ({ page }) => {
+  let writeRequests = 0;
+  let releaseWrite!: () => void;
+  const writeGate = new Promise<void>((resolve) => { releaseWrite = resolve; });
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path === "/api/__admin-stale-write" && request.method() === "PUT") {
+      writeRequests += 1;
+      await writeGate;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: 200,
+          data: { owner: "A", updated: true },
+          message: "ok",
+        }),
+      });
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ code: 200, data: {}, message: "ok" }),
+    });
+  });
+  await page.goto("/");
+  await page.evaluate(async () => {
+    const { useAuthStore } = await import("/src/store/authStore.ts");
+    useAuthStore.getState().setAuth({
+      id: 1,
+      username: "admin-a",
+      role: "ADMIN",
+      status: "ACTIVE",
+      createdAt: "2026-09-21T00:00:00.000Z",
+    });
+  });
+
+  const staleResult = page.evaluate(async () => {
+    const { default: api } = await import("/src/services/httpClient.ts");
+    try {
+      const response = await api.put("/__admin-stale-write", { status: "DONE" });
+      return { kind: "resolved", owner: response.data.data.owner };
+    } catch (error) {
+      return { kind: "rejected", name: error instanceof Error ? error.name : "unknown" };
+    }
+  });
+  await expect.poll(() => writeRequests).toBe(1);
+
+  await page.evaluate(async () => {
+    const { useAuthStore } = await import("/src/store/authStore.ts");
+    useAuthStore.getState().setAuth({
+      id: 2,
+      username: "admin-b",
+      role: "ADMIN",
+      status: "ACTIVE",
+      createdAt: "2026-09-21T00:00:00.000Z",
+    });
+  });
+  releaseWrite();
+
+  await expect(staleResult).resolves.toEqual({
+    kind: "rejected",
+    name: "StaleSessionResponseError",
+  });
+  expect(writeRequests).toBe(1);
+  await expect(page.evaluate(async () => {
+    const { useAuthStore } = await import("/src/store/authStore.ts");
+    return {
+      userId: useAuthStore.getState().user?.id,
+      authStatus: useAuthStore.getState().status,
+    };
+  })).resolves.toEqual({ userId: 2, authStatus: "authenticated" });
+});

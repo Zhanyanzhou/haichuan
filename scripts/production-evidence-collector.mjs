@@ -12,6 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { isIP } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -22,6 +23,38 @@ const GIT_SHA = /^[a-f0-9]{40}$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SOURCE_REF = /^refs\/(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const MIN_CERTIFICATE_REMAINING_SECONDS = 24 * 60 * 60;
+const STANDARD_CERTIFICATE_REMAINING_SECONDS = 7 * 24 * 60 * 60;
+const MIN_CERTIFICATE_REMAINING_RATIO = 0.2;
+const MIN_HSTS_MAX_AGE_SECONDS = 365 * 24 * 60 * 60;
+const EDGE_FACT_KEYS = Object.freeze([
+  "origin", "dnsResolved", "httpsReachable", "httpRedirectStatus", "httpRedirectTargetOrigin",
+  "certificateChainValid", "certificateNotBefore", "certificateNotAfter", "certificateRenewalOutcome",
+  "hstsMaxAgeSeconds", "hstsIncludeSubDomains", "contentSecurityPolicyPresent", "trustedProxyVerified",
+]);
+const OBSERVABILITY_FACT_KEYS = Object.freeze([
+  "healthProbeVerified",
+  "readyProbeVerified",
+  "frontendOriginVerified",
+  "backupHealthVerified",
+  "metricsScrapeVerified",
+  "inquiryServerErrorSeriesVerified",
+  "outboxSeriesVerified",
+  "notificationDeliveryWorkerSeriesVerified",
+  "accountRecoveryWorkerSeriesVerified",
+  "alertDrillKind",
+  "monitorIdentitySha256",
+  "alertEventSha256",
+  "triggeredAt",
+  "receivedAt",
+  "acknowledgedAt",
+  "acknowledgedBy",
+]);
+const ALERT_DRILL_KINDS = Object.freeze([
+  "synthetic-backup-unhealthy",
+  "synthetic-readiness-failure",
+  "synthetic-consumer-heartbeat-stale",
+]);
 const FORBIDDEN_KEY = /(?:password|secret|token|databaseurl|connectionstring|privatekey|apikey|credential|auth)/;
 const EXTERNAL_SERVICES = [
   "email",
@@ -97,6 +130,94 @@ function canonicalJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function requiredCertificateRemainingSeconds(notBeforeMs, notAfterMs) {
+  const lifetimeSeconds = Math.floor((notAfterMs - notBeforeMs) / 1000);
+  if (lifetimeSeconds <= 0) return Number.POSITIVE_INFINITY;
+  return Math.min(
+    STANDARD_CERTIFICATE_REMAINING_SECONDS,
+    Math.max(MIN_CERTIFICATE_REMAINING_SECONDS, Math.ceil(lifetimeSeconds * MIN_CERTIFICATE_REMAINING_RATIO)),
+  );
+}
+
+function validateEdgeFacts(edge, request, nowMs) {
+  exactKeys(edge, EDGE_FACT_KEYS, "PRODUCTION_EVIDENCE_COLLECTOR_EDGE_FACTS_INVALID");
+  let origin;
+  try {
+    origin = new URL(edge.origin);
+  } catch {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_ORIGIN_INVALID");
+  }
+  if (origin.protocol !== "https:" || origin.origin !== edge.origin || origin.username || origin.password ||
+      origin.pathname !== "/" || origin.search || origin.hash || edge.origin !== request.manifest.publicSeo?.origin) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_ORIGIN_INVALID");
+  }
+  if (isIP(origin.hostname) !== 0 || origin.hostname === "localhost" || !origin.hostname.includes(".")) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_DOMAIN_REQUIRED");
+  }
+  if (edge.dnsResolved !== true || edge.httpsReachable !== true || edge.certificateChainValid !== true ||
+      edge.contentSecurityPolicyPresent !== true || edge.trustedProxyVerified !== true) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_REQUIRED_CHECK_FAILED");
+  }
+  if (edge.httpRedirectStatus !== 308 || edge.httpRedirectTargetOrigin !== edge.origin) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_REDIRECT_INVALID");
+  }
+  if (!ISO_UTC.test(edge.certificateNotBefore ?? "") || !ISO_UTC.test(edge.certificateNotAfter ?? "")) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_CERTIFICATE_TIME_INVALID");
+  }
+  const notBeforeMs = Date.parse(edge.certificateNotBefore);
+  const notAfterMs = Date.parse(edge.certificateNotAfter);
+  const requiredRemainingSeconds = requiredCertificateRemainingSeconds(notBeforeMs, notAfterMs);
+  if (!Number.isFinite(notBeforeMs) || !Number.isFinite(notAfterMs) || notBeforeMs > nowMs ||
+      notAfterMs - nowMs < requiredRemainingSeconds * 1000) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_CERTIFICATE_VALIDITY_INSUFFICIENT");
+  }
+  if (edge.certificateRenewalOutcome !== "verified") {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_CERTIFICATE_RENEWAL_UNVERIFIED");
+  }
+  if (!Number.isSafeInteger(edge.hstsMaxAgeSeconds) || edge.hstsMaxAgeSeconds < MIN_HSTS_MAX_AGE_SECONDS ||
+      edge.hstsIncludeSubDomains !== true) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_EDGE_HSTS_INVALID");
+  }
+  return Object.fromEntries(EDGE_FACT_KEYS.map((key) => [key, edge[key]]));
+}
+
+function validateObservabilityFacts(value, request, nowMs, maxAgeSeconds) {
+  exactKeys(value, OBSERVABILITY_FACT_KEYS, "PRODUCTION_EVIDENCE_COLLECTOR_OBSERVABILITY_FACTS_INVALID");
+  for (const key of [
+    "healthProbeVerified",
+    "readyProbeVerified",
+    "frontendOriginVerified",
+    "backupHealthVerified",
+    "metricsScrapeVerified",
+    "inquiryServerErrorSeriesVerified",
+    "outboxSeriesVerified",
+    "notificationDeliveryWorkerSeriesVerified",
+    "accountRecoveryWorkerSeriesVerified",
+  ]) {
+    if (value[key] !== true) fail(`PRODUCTION_EVIDENCE_COLLECTOR_OBSERVABILITY_CHECK_FAILED:${key}`);
+  }
+  if (!ALERT_DRILL_KINDS.includes(value.alertDrillKind)) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_OBSERVABILITY_DRILL_INVALID");
+  }
+  requireSha(value.monitorIdentitySha256, "PRODUCTION_EVIDENCE_COLLECTOR_OBSERVABILITY_MONITOR_INVALID");
+  requireSha(value.alertEventSha256, "PRODUCTION_EVIDENCE_COLLECTOR_OBSERVABILITY_EVENT_INVALID");
+  for (const key of ["triggeredAt", "receivedAt", "acknowledgedAt"]) {
+    if (!ISO_UTC.test(value[key] ?? "")) fail("PRODUCTION_EVIDENCE_COLLECTOR_OBSERVABILITY_TIME_INVALID");
+  }
+  const triggeredAtMs = Date.parse(value.triggeredAt);
+  const receivedAtMs = Date.parse(value.receivedAt);
+  const acknowledgedAtMs = Date.parse(value.acknowledgedAt);
+  if (!Number.isFinite(triggeredAtMs) || !Number.isFinite(receivedAtMs) || !Number.isFinite(acknowledgedAtMs) ||
+      triggeredAtMs > receivedAtMs || receivedAtMs > acknowledgedAtMs || acknowledgedAtMs > nowMs + 60_000 ||
+      nowMs - triggeredAtMs > maxAgeSeconds * 1000) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_OBSERVABILITY_TIME_INVALID");
+  }
+  if (value.acknowledgedBy !== request.incidentOwner) {
+    fail("PRODUCTION_EVIDENCE_COLLECTOR_OBSERVABILITY_OWNER_MISMATCH");
+  }
+  return Object.fromEntries(OBSERVABILITY_FACT_KEYS.map((key) => [key, value[key]]));
+}
+
 function readBoundedStdin(stream, limit = 2 * 1024 * 1024) {
   const chunks = [];
   let size = 0;
@@ -159,7 +280,7 @@ function validateRequest(request) {
     }
   }
   const manifest = request.manifest;
-  if (!manifest || manifest.schemaVersion !== 5 || manifest.releaseStage !== "production" || manifest.gitSha !== request.releaseGitSha ||
+  if (!manifest || manifest.schemaVersion !== 9 || manifest.releaseStage !== "production" || manifest.gitSha !== request.releaseGitSha ||
       manifest.migrationBundleSha256 !== request.migrationBundleSha256 || manifest.source !== request.releaseSource ||
       manifest.attestationPolicy?.sourceRef !== request.sourceRef) {
     fail("PRODUCTION_EVIDENCE_COLLECTOR_REQUEST_MANIFEST_BINDING_INVALID");
@@ -319,7 +440,7 @@ function loadEvidenceInputs(config, request, { nowMs, enforceOwnership }) {
   const factsInput = read("facts.json");
   const facts = exactKeys(factsInput.value, [
     "schemaVersion", "generatedAt", "environmentIdSha256", "approvalReferenceSha256", "releaseGitSha", "manifestSha256",
-    "database", "admin", "recovery", "externalServices",
+    "database", "admin", "recovery", "edge", "externalServices",
   ], "PRODUCTION_EVIDENCE_COLLECTOR_FACTS_SCHEMA_INVALID");
   if (facts.schemaVersion !== 1 || facts.environmentIdSha256 !== request.environmentIdSha256 ||
       facts.approvalReferenceSha256 !== request.approvalReferenceSha256 || facts.releaseGitSha !== request.releaseGitSha ||
@@ -342,6 +463,14 @@ function loadEvidenceInputs(config, request, { nowMs, enforceOwnership }) {
   if (facts.recovery.consistencyMode !== "quiesced" || facts.recovery.latestBackupAgeSeconds > facts.recovery.rpoSeconds || recoveryTotal > facts.recovery.rtoSeconds) {
     fail("PRODUCTION_EVIDENCE_COLLECTOR_RECOVERY_OBJECTIVE_NOT_MET");
   }
+  const edgeFacts = validateEdgeFacts(facts.edge, request, nowMs);
+  const observabilityInput = read("observability-facts.json");
+  const observabilityFacts = validateObservabilityFacts(
+    observabilityInput.value,
+    request,
+    nowMs,
+    config.maxReceiptAgeSeconds,
+  );
   if (!Array.isArray(facts.externalServices) || facts.externalServices.length !== EXTERNAL_SERVICES.length) fail("PRODUCTION_EVIDENCE_COLLECTOR_EXTERNAL_FACTS_INVALID");
   const external = new Map();
   for (const item of facts.externalServices) {
@@ -355,7 +484,10 @@ function loadEvidenceInputs(config, request, { nowMs, enforceOwnership }) {
 
   const preflight = read("database-preflight-report.json", 1024 * 1024);
   if (!preflight.value || typeof preflight.value !== "object") fail("PRODUCTION_EVIDENCE_COLLECTOR_PREFLIGHT_REPORT_INVALID");
-  const inputs = new Map([["database-preflight-report.json", preflight.bytes]]);
+  const inputs = new Map([
+    ["database-preflight-report.json", preflight.bytes],
+    ["observability-facts.json", observabilityInput.bytes],
+  ]);
   const receipt = (name, kind, provider, outcome, subject = request.manifestSha256) => {
     const input = read(`${name}.json`);
     validateReceipt(input.value, { request, kind, provider, outcome, subjectSha256: subject, nowMs, maxAgeSeconds: config.maxReceiptAgeSeconds, label: name });
@@ -370,8 +502,13 @@ function loadEvidenceInputs(config, request, { nowMs, enforceOwnership }) {
     restoreDrill: receipt("restore-drill", ...RECEIPT_SPECS["restore-drill"], "verified"),
     writeQuiesce: receipt("write-quiesce", ...RECEIPT_SPECS["write-quiesce"], "verified"),
     offsiteReplication: receipt("offsite-replication", ...RECEIPT_SPECS["offsite-replication"], "verified"),
-    edge: receipt("edge", ...RECEIPT_SPECS.edge, "verified"),
-    observability: receipt("observability", ...RECEIPT_SPECS.observability, "verified"),
+    edge: receipt("edge", ...RECEIPT_SPECS.edge, "verified", sha256(Buffer.from(canonicalJson(edgeFacts)))),
+    observability: receipt(
+      "observability",
+      ...RECEIPT_SPECS.observability,
+      "verified",
+      sha256(Buffer.from(canonicalJson(observabilityFacts))),
+    ),
     featureGates: receipt("feature-gates", ...RECEIPT_SPECS["feature-gates"], request.releaseProfile),
     rollback: receipt("rollback", ...RECEIPT_SPECS.rollback, "verified", request.rollbackRunbookSha256),
   };
@@ -383,7 +520,14 @@ function loadEvidenceInputs(config, request, { nowMs, enforceOwnership }) {
       receipt: receipt(`external-${name}`, `external-service-${name}`, status === "verified" ? "external-service-audit" : "release-policy", status),
     };
   });
-  return { facts, inputs, descriptors, preflightDescriptor: receiptDescriptor("database-preflight-report.json", preflight.bytes) };
+  return {
+    facts,
+    edgeFacts,
+    observabilityFacts,
+    inputs,
+    descriptors,
+    preflightDescriptor: receiptDescriptor("database-preflight-report.json", preflight.bytes),
+  };
 }
 
 export function collectProductionEvidence({ request, config, selfPath, run = execute, now = () => new Date(), enforceOwnership = true }) {
@@ -423,13 +567,20 @@ export function collectProductionEvidence({ request, config, selfPath, run = exe
     const bundlePath = join(trustedConfig.receiptRoot, "release-manifest.attestation.json");
     assertRegularTrustedFile(bundlePath, { enforceOwnership, maxBytes: 2 * 1024 * 1024, code: "PRODUCTION_EVIDENCE_COLLECTOR_MANIFEST_BUNDLE_UNTRUSTED" });
     const manifestBundleSha256 = sha256(readFileSync(bundlePath));
-    const { facts, inputs, descriptors, preflightDescriptor } = loadEvidenceInputs(trustedConfig, request, { nowMs, enforceOwnership });
+    const {
+      facts,
+      edgeFacts,
+      observabilityFacts,
+      inputs,
+      descriptors,
+      preflightDescriptor,
+    } = loadEvidenceInputs(trustedConfig, request, { nowMs, enforceOwnership });
     const runtimeBytes = Buffer.from(canonicalJson(makeReceipt(request, generatedAt, "runtime-identity", "docker-cli", "verified", request.manifestSha256)));
     const composeBytes = Buffer.from(canonicalJson(makeReceipt(request, generatedAt, "compose-contract", "docker-compose", "verified", request.manifestSha256)));
     inputs.set("runtime-identity.json", runtimeBytes);
     inputs.set("compose-contract.json", composeBytes);
     const evidence = {
-      schemaVersion: 3,
+      schemaVersion: 5,
       generatedAt,
       environment: {
         approvalReferenceSha256: request.approvalReferenceSha256,
@@ -452,8 +603,8 @@ export function collectProductionEvidence({ request, config, selfPath, run = exe
         writeQuiesce: descriptors.writeQuiesce,
         offsiteReplication: descriptors.offsiteReplication,
       } },
-      edge: { receipt: descriptors.edge },
-      observability: { receipt: descriptors.observability },
+      edge: { ...edgeFacts, receipt: descriptors.edge },
+      observability: { ...observabilityFacts, receipt: descriptors.observability },
       featureGates: { receipt: descriptors.featureGates },
       externalServices: descriptors.externalServices,
       rollback: { runbook: { path: "rollback-runbook.md", sha256: request.rollbackRunbookSha256 }, receipt: descriptors.rollback },

@@ -136,7 +136,7 @@ test("所有新预设及重复自定义文字的系统样例不进入正式内�
   expect(definition.previewContent).toEqual({});
 });
 
-test("向导样例保持三端文字层级和几何，序列化重开后的公开内容仍为空", () => {
+test("向导样例保持桌面与手机文字层级和几何，序列化重开后的公开内容仍为空", () => {
   const recipe = createRecommendedRecipe("general");
   recipe.canvas = { width: 1920, height: 1080, aspectRatio: 16 / 9 };
   recipe.layout = "leftImageRightContent";
@@ -145,7 +145,7 @@ test("向导样例保持三端文字层级和几何，序列化重开后的公�
   const definition = generateTemplateFromRecipe(recipe);
   const beforePreview = JSON.stringify(definition);
   const flatten = (node: DynamicTemplateRenderPlanNode): DynamicTemplateRenderPlanNode[] => [node, ...node.children.flatMap(flatten)];
-  for (const breakpoint of ["desktop", "tablet", "mobile"] as const) {
+  for (const breakpoint of ["desktop", "mobile"] as const) {
     const device = breakpoint === "mobile" ? "mobile" : "desktop";
     const preview = compileDynamicTemplateRenderPlan(definition, {
       device, breakpoint, contentBySlotId: createTemplateRecipePreviewContent(definition), showEmptySlots: true,

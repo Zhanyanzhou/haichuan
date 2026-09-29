@@ -606,6 +606,16 @@ export const CONTENT_TEMPLATE_PAGE_RULES = {
   }
 } as const satisfies Record<string, ContentTemplatePageRule>;
 
+export const CONTENT_TEMPLATE_PAGE_KEYS = [
+  "home",
+  "products",
+  "catalog",
+  "custom",
+  "about",
+  "contact"
+] as const;
+export type ContentTemplatePageKey = (typeof CONTENT_TEMPLATE_PAGE_KEYS)[number];
+
 export const CONTENT_TEMPLATE_PAGE_PATHS = {
   "about": "/about",
   "catalog": "/catalog",

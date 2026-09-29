@@ -4,10 +4,23 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { ReliableNotificationIntentService } from '../../common/notifications/reliable-notification-intent.service';
 import { FulfillmentService } from './fulfillment.service';
 
+const WAREHOUSE = { type: 'ADMIN' as const, id: 3 };
+
+function authorizedPrisma<T extends object>(domain: T): PrismaService {
+  const tx = {
+    ...domain,
+    $queryRaw: async () => [{ id: WAREHOUSE.id, username: 'current-warehouse' }],
+  };
+  return {
+    ...tx,
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  } as unknown as PrismaService;
+}
+
 test('仓储履约列表只查询最小订单投影并脱敏手机号', async () => {
   let query: any;
   const service = new FulfillmentService(
-    {
+    authorizedPrisma({
       fulfillment: {
         findMany: async (args: any) => {
           query = args;
@@ -35,12 +48,12 @@ test('仓储履约列表只查询最小订单投影并脱敏手机号', async ()
         },
         count: async () => 1,
       },
-    } as unknown as PrismaService,
+    }),
     { record: async () => undefined } as never,
     { enqueueOrderLifecycle: async () => undefined } as never,
   );
 
-  const result = await service.findAll({});
+  const result = await service.findAll({}, WAREHOUSE);
   assert.equal(result.list[0]?.order.customerPhone, '138****5678');
   assert.equal(query.include, undefined);
   assert.equal(query.select.order.select.finalAmount, undefined);
@@ -53,7 +66,7 @@ test('仓储履约列表只查询最小订单投影并脱敏手机号', async ()
 test('仓储履约详情不查询金额支付字段，终态隐藏完整联系方式', async () => {
   let query: any;
   const service = new FulfillmentService(
-    {
+    authorizedPrisma({
       fulfillment: {
         findUnique: async (args: any) => {
           query = args;
@@ -92,12 +105,12 @@ test('仓储履约详情不查询金额支付字段，终态隐藏完整联系�
           };
         },
       },
-    } as unknown as PrismaService,
+    }),
     { record: async () => undefined } as never,
     { enqueueOrderLifecycle: async () => undefined } as never,
   );
 
-  const result = await service.findById(1);
+  const result = await service.findById(1, WAREHOUSE);
   assert.equal(result.order.customerPhone, '138****5678');
   assert.equal(result.order.address, null);
   assert.equal(result.warehouseNote, '已复核证书');
@@ -112,7 +125,7 @@ test('仓储履约详情不查询金额支付字段，终态隐藏完整联系�
 
 test('仓储履约详情仅在未送达时返回完成发货所需联系方式', async () => {
   const service = new FulfillmentService(
-    {
+    authorizedPrisma({
       fulfillment: {
         findUnique: async () => ({
           id: 1,
@@ -139,12 +152,12 @@ test('仓储履约详情仅在未送达时返回完成发货所需联系方式',
           },
         }),
       },
-    } as unknown as PrismaService,
+    }),
     { record: async () => undefined } as never,
     { enqueueOrderLifecycle: async () => undefined } as never,
   );
 
-  const result = await service.findById(1);
+  const result = await service.findById(1, WAREHOUSE);
   assert.equal(result.order.customerPhone, '13812345678');
   assert.equal(result.order.address, '隔离测试地址');
 });
@@ -167,6 +180,8 @@ test('履约中心发货同时同步订单主状态与发货维度', async () =>
       customerId: 7,
       customerEmail: null,
       finalAmount: 100,
+      paidAmount: 100,
+      refundedAmount: 0,
       status: 'PENDING_SHIP',
       deliveryStatus: 'PENDING_SHIP',
       shippedAt: null as Date | null,
@@ -228,7 +243,13 @@ test('并发发货抢占失败时拒绝继续更新订单', async () => {
     orderId: 9,
     status: 'PENDING_PICK',
     internalNote: null,
-    order: { id: 9, status: 'PENDING_SHIP' },
+    order: {
+      id: 9,
+      status: 'PENDING_SHIP',
+      finalAmount: 100,
+      paidAmount: 100,
+      refundedAmount: 0,
+    },
   };
   const tx = {
     $queryRaw: async () => [{ id: fulfillment.orderId }],
@@ -276,6 +297,8 @@ function createDeliveryHarness() {
     finalAmount: 100,
     status: 'SHIPPED',
     deliveryStatus: 'SHIPPED',
+    orderType: 'SPOT',
+    customStage: null as string | null,
     shippedAt: new Date('2026-09-07T00:00:00.000Z'),
     receivedAt: null as Date | null,
     logisticsCompany: '顺丰',
@@ -365,6 +388,46 @@ test('履约送达在同一事务同步订单签收维度且不推进订单主�
   assert.equal(harness.events[1]?.eventType, 'ORDER_RECEIVED');
 });
 
+test('定制订单全部送达时由权威履约事务同步已交付阶段', async () => {
+  const harness = createDeliveryHarness();
+  harness.order.orderType = 'CUSTOM';
+  harness.order.customStage = 'PENDING_DELIVERY';
+
+  await harness.service.updateStatus(
+    1,
+    { status: 'DELIVERED' },
+    { type: 'ADMIN', id: 1 },
+  );
+
+  assert.equal(harness.order.deliveryStatus, 'RECEIVED');
+  assert.equal(harness.order.customStage, 'DELIVERED');
+  assert.deepEqual(
+    harness.events.map((event) => event.eventType),
+    ['FULFILLMENT_DELIVERED', 'ORDER_RECEIVED', 'ORDER_CUSTOM_STAGE_CHANGED'],
+  );
+  assert.equal(harness.events[2]?.fromStatus, 'PENDING_DELIVERY');
+  assert.equal(harness.events[2]?.toStatus, 'DELIVERED');
+});
+
+test('重复送达不会把历史定制完成阶段回退为已交付', async () => {
+  const harness = createDeliveryHarness();
+  harness.order.orderType = 'CUSTOM';
+  harness.order.customStage = 'COMPLETED';
+  harness.order.deliveryStatus = 'RECEIVED';
+  harness.order.receivedAt = new Date('2026-09-07T01:00:00.000Z');
+  harness.fulfillment.status = 'DELIVERED';
+  harness.fulfillment.deliveredAt = harness.order.receivedAt;
+
+  await harness.service.updateStatus(
+    1,
+    { status: 'DELIVERED' },
+    { type: 'ADMIN', id: 1 },
+  );
+
+  assert.equal(harness.order.customStage, 'COMPLETED');
+  assert.equal(harness.events.length, 0);
+});
+
 test('并发或重复送达幂等且只记录一次送达事件', async () => {
   const harness = createDeliveryHarness();
 
@@ -406,6 +469,8 @@ function createMultiPackageHarness(
   options: {
     refundStatus?: string;
     afterSalesStatus?: string;
+    paidAmount?: number;
+    refundedAmount?: number;
     failEvent?: boolean;
     failNotification?: boolean;
   } = {},
@@ -421,6 +486,8 @@ function createMultiPackageHarness(
     customerId: 7,
     customerEmail: 'customer@example.com',
     finalAmount: 300,
+    paidAmount: options.paidAmount ?? 300,
+    refundedAmount: options.refundedAmount ?? 0,
     status: hasPending ? 'PENDING_SHIP' : 'SHIPPED',
     deliveryStatus: hasAbnormal
       ? 'ABNORMAL'
@@ -703,7 +770,6 @@ test('活动退款或售后只阻断新增发货', async () => {
   }
 
   for (const options of [
-    { refundStatus: 'COMPLETED' },
     { refundStatus: 'REJECTED' },
     { refundStatus: 'FAILED' },
     { afterSalesStatus: 'REJECTED' },
@@ -718,6 +784,36 @@ test('活动退款或售后只阻断新增发货', async () => {
     );
     assert.equal(terminal.fulfillments[0].status, 'SHIPPED');
   }
+
+  for (const options of [
+    { refundStatus: 'COMPLETED', refundedAmount: 300 },
+    { refundStatus: 'COMPLETED', refundedAmount: 100 },
+  ]) {
+    const refunded = createMultiPackageHarness(['PENDING_PICK'], options);
+    await assert.rejects(
+      () => refunded.service.dispatch(
+        1,
+        { carrier: '顺丰速运', trackingNo: 'SF-1' },
+        { type: 'ADMIN', id: 1 },
+      ),
+      /退款后净收不足/,
+    );
+    assert.equal(refunded.fulfillments[0].status, 'PENDING_PICK');
+    assert.equal(refunded.events.length, 0);
+    assert.equal(refunded.notifications.length, 0);
+  }
+
+  const overpaidAfterRefund = createMultiPackageHarness(['PENDING_PICK'], {
+    refundStatus: 'COMPLETED',
+    paidAmount: 350,
+    refundedAmount: 50,
+  });
+  await overpaidAfterRefund.service.dispatch(
+    1,
+    { carrier: '顺丰速运', trackingNo: 'SF-1' },
+    { type: 'ADMIN', id: 1 },
+  );
+  assert.equal(overpaidAfterRefund.fulfillments[0].status, 'SHIPPED');
 
   const inTransit = createMultiPackageHarness(['SHIPPED'], { refundStatus: 'PENDING' });
   await inTransit.service.updateStatus(

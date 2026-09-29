@@ -1,9 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BadRequestException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { PrismaService } from "../../common/prisma/prisma.service";
-import { ROLES_KEY } from "../../common/decorators/roles.decorator";
 import { PageModulesController } from "./page-modules.controller";
 import { PageModulesService } from "./page-modules.service";
 import {
@@ -14,156 +10,22 @@ import {
   sanitizeContentTemplateLayoutData,
 } from "./generated/contentTemplates.generated";
 
-function createService(overrides: {
-  personalContentTemplate?: Record<string, unknown>;
-  product?: Record<string, unknown>;
-  category?: Record<string, unknown>;
-} = {}) {
-  const calls: Array<{ operation: string; args: any }> = [];
-  const personalContentTemplate = {
-    findMany: async (args: any) => {
-      calls.push({ operation: "findMany", args });
-      return [];
-    },
-    create: async (args: any) => {
-      calls.push({ operation: "create", args });
-      return { id: 1, revision: 1, ...args.data };
-    },
-    findFirst: async (args: any) => {
-      calls.push({ operation: "findFirst", args });
-      return null;
-    },
-    updateMany: async (args: any) => {
-      calls.push({ operation: "updateMany", args });
-      return { count: 1 };
-    },
-    findUnique: async (args: any) => {
-      calls.push({ operation: "findUnique", args });
-      return { id: args.where.id, ownerId: 17, moduleType: "首屏主视觉", revision: 2 };
-    },
-    deleteMany: async (args: any) => {
-      calls.push({ operation: "deleteMany", args });
-      return { count: 0 };
-    },
-    ...overrides.personalContentTemplate,
-  };
-  const product = {
-    findMany: async (args: any) => {
-      calls.push({ operation: "product.findMany", args });
-      const rows: Array<{ id: number; code: string }> = [];
-      for (const clause of args.where.OR ?? []) {
-        for (const code of clause.code?.in ?? []) rows.push({ id: rows.length + 1, code });
-        for (const id of clause.id?.in ?? []) rows.push({ id, code: `ID-${id}` });
-      }
-      return rows;
-    },
-    ...overrides.product,
-  };
-  const category = {
-    findMany: async (args: any) => {
-      calls.push({ operation: "category.findMany", args });
-      return (args.where.slug?.in ?? []).map((slug: string) => ({ slug }));
-    },
-    ...overrides.category,
-  };
-  const prisma = { personalContentTemplate, product, category } as unknown as PrismaService;
-  return { service: new PageModulesService(prisma), calls };
-}
-
-test("旧个人模板只保留按账号读取，控制器与服务不再暴露写入口", () => {
-  const controllerRoles = Reflect.getMetadata(ROLES_KEY, PageModulesController) as string[];
-  assert.deepEqual(controllerRoles, ["SUPER_ADMIN", "ADMIN", "EDITOR"]);
-
-  const prototype = PageModulesController.prototype;
-  assert.equal(
-    Reflect.getMetadata(ROLES_KEY, prototype.getPersonalContentTemplates),
-    undefined,
-  );
-  assert.equal((prototype as any).createPersonalContentTemplate, undefined);
-  assert.equal((prototype as any).updatePersonalContentTemplate, undefined);
-  assert.equal((prototype as any).deletePersonalContentTemplate, undefined);
-  assert.equal((PageModulesService.prototype as any).createPersonalContentTemplate, undefined);
-  assert.equal((PageModulesService.prototype as any).updatePersonalContentTemplate, undefined);
-  assert.equal((PageModulesService.prototype as any).deletePersonalContentTemplate, undefined);
-});
-test("个人模板只读列表始终绑定当前账号", async () => {
-  const { service, calls } = createService();
-  await service.getPersonalContentTemplates(23);
-  assert.deepEqual(calls[0].args.where, { ownerId: 23 });
-});
-
-test("个人模板 revision 列尚未迁移时旧读取适配器返回只读基线 revision", async () => {
-  let attempts = 0;
-  const legacyRow = {
-    id: 31,
-    ownerId: 23,
-    name: "历史布局",
-    moduleType: "首屏主视觉",
-    contractKey: "hero",
-    contractVersion: 1,
-    layoutData: { version: 2 },
-    contentDefaults: null,
-    createdAt: new Date("2026-08-01T00:00:00.000Z"),
-    updatedAt: new Date("2026-08-01T00:00:00.000Z"),
-  };
-  const { service, calls } = createService({
-    personalContentTemplate: {
-      findMany: async (args: any) => {
-        calls.push({ operation: "findMany", args });
-        attempts += 1;
-        if (attempts === 1) {
-          throw new Prisma.PrismaClientKnownRequestError(
-            "The column `personal_content_templates.revision` does not exist",
-            {
-              code: "P2022",
-              clientVersion: "test",
-              meta: { column: "personal_content_templates.revision" },
-            },
-          );
-        }
-        return [legacyRow];
-      },
-    },
-  });
-
-  const rows = await service.getPersonalContentTemplates(23);
-
-  assert.equal(attempts, 2);
-  assert.equal(calls[1]?.args.select.revision, undefined);
-  assert.deepEqual(rows, [{ ...legacyRow, revision: 1 }]);
-});
-
-test("个人模板回退不吞掉其他列的 P2022", async () => {
-  const unrelatedError = new Prisma.PrismaClientKnownRequestError(
-    "The column `personal_content_templates.layout_data` does not exist",
-    {
-      code: "P2022",
-      clientVersion: "test",
-      meta: { column: "personal_content_templates.layout_data" },
-    },
-  );
-  const { service } = createService({
-    personalContentTemplate: {
-      findMany: async () => { throw unrelatedError; },
-    },
-  });
-
-  await assert.rejects(
-    () => service.getPersonalContentTemplates(23),
-    (error) => error === unrelatedError,
-  );
-});
-
-test("个人模板读取拒绝缺失登录身份，且不会触发任何旧写操作", async () => {
-  const { service, calls } = createService();
-  await assert.rejects(
-    () => service.getPersonalContentTemplates(undefined),
-    BadRequestException,
-  );
-  assert.equal(
-    calls.some((call) => ["create", "findFirst", "updateMany", "findUnique", "deleteMany"].includes(call.operation)),
-    false,
-  );
+test("旧系统与个人模板读写入口均已从控制器和服务移除", () => {
+  const retiredMethods = [
+    "getSystemContentTemplates",
+    "getSystemContentTemplateHistory",
+    "getSystemContentTemplate",
+    "getPersonalContentTemplates",
+    "overwriteSystemContentTemplate",
+    "rollbackSystemContentTemplate",
+    "createPersonalContentTemplate",
+    "updatePersonalContentTemplate",
+    "deletePersonalContentTemplate",
+  ];
+  for (const method of retiredMethods) {
+    assert.equal((PageModulesController.prototype as any)[method], undefined);
+    assert.equal((PageModulesService.prototype as any)[method], undefined);
+  }
 });
 
 test("旧模板采用新版默认构图，合法双端覆盖保留且越界几何拒绝持久化", () => {

@@ -17,8 +17,17 @@ import type { PartnerApplicationInput, PartnerApplicationStatus } from "@/servic
 import { unwrapResponse } from "@/utils/unwrap";
 import { useCommerceCapabilities } from "@/store/featureFlags";
 
-// 合作商家入驻协议（草案，待法务终审；页面内可读，供申请人勾选同意）
-const AGREEMENT_TEXT = `合作商家入驻协议（草案 v0.1）
+type PartnerAgreementArtifact = {
+  status: "draft" | "published";
+  version: string;
+  text: string;
+};
+
+// 当前仍是草案；只有内容改为 published 且版本与服务端正式快照精确一致时才允许提交。
+const PARTNER_AGREEMENT: PartnerAgreementArtifact = {
+  status: "draft",
+  version: "partner-agreement-draft-v0.1",
+  text: `合作商家入驻协议（草案 v0.1）
 
 一、协议说明
 本协议由海川珠宝（以下简称“甲方”）与提交合作申请的商家或个人（以下简称“乙方”）共同订立。乙方提交申请并勾选同意，即视为认可本协议全部条款。
@@ -45,10 +54,11 @@ const AGREEMENT_TEXT = `合作商家入驻协议（草案 v0.1）
 1. 本协议为草案版本，最终条款以甲方正式发布并完成法务复核的版本为准；正式版本发布后自动取代本草案。
 2. 因本协议产生的争议，双方应友好协商解决；协商不成的，提交甲方所在地有管辖权的人民法院处理。
 
-版本：v0.1（草案，待法务终审）`;
+版本：v0.1（草案，待法务终审）`,
+};
 
 const STATUS_HINT: Record<string, string> = {
-  PENDING: "您的合作申请正在审核中，我们将在 3 个工作日内与您联系。",
+  PENDING: "您的合作申请正在审核中。审核状态更新后，我们会按您预留的联系方式与您联系。",
   NEEDS_SUPPLEMENT: "您的申请需要补充资料，请完善以下信息后重新提交。",
   REJECTED: "很抱歉，您的上次申请未通过，可修改资料后重新提交。",
   SUSPENDED: "您的合作资格目前处于暂停状态，如需恢复请先联系您的专属顾问。",
@@ -77,6 +87,10 @@ export default function PartnerApplication() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const partnerStatus = state?.customer?.partnerStatus || "NONE";
+  const agreementReady =
+    flags?.partnerApplicationsWriteEnabled === true
+    && flags.partnerAgreementVersion === PARTNER_AGREEMENT.version
+    && PARTNER_AGREEMENT.status === "published";
   // 后台审核说明（驳回/要求补充/暂停时回显给客户）
   const latestReviewNote = state?.latest?.reviewNote as
     string | null | undefined;
@@ -114,7 +128,7 @@ export default function PartnerApplication() {
   }, [load]);
 
   const onSubmit = async (values: PartnerApplicationInput) => {
-    if (flags?.partnerApplicationsWriteEnabled !== true) {
+    if (!agreementReady) {
       message.info("合作申请暂未开放，请通过联系页面咨询");
       return;
     }
@@ -234,7 +248,7 @@ export default function PartnerApplication() {
     );
   }
 
-  if (!flags.partnerApplicationsWriteEnabled) {
+  if (!agreementReady) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-8">
         <Result
@@ -432,7 +446,7 @@ export default function PartnerApplication() {
         width={640}
       >
         <div className="max-h-[60vh] overflow-y-auto text-sm leading-6 text-gray-600 whitespace-pre-wrap">
-          {AGREEMENT_TEXT}
+          {PARTNER_AGREEMENT.text}
         </div>
       </Modal>
     </div>

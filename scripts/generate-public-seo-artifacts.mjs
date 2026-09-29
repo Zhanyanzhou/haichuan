@@ -44,6 +44,8 @@ function parseArguments(argv) {
     prerenderManifest: "",
     nginxMap: "",
     nginxPolicy: "",
+    nginxOriginRedirect: "",
+    nginxOriginHost: "",
     outputDirectory: defaultOutputDirectory,
     origin: process.env.PUBLIC_SITE_ORIGIN || process.env.VITE_PUBLIC_SITE_ORIGIN || "",
   };
@@ -56,6 +58,8 @@ function parseArguments(argv) {
     else if (argument === "--prerender-manifest") result.prerenderManifest = resolve(argv[++index] || "");
     else if (argument === "--nginx-map") result.nginxMap = resolve(argv[++index] || "");
     else if (argument === "--nginx-policy") result.nginxPolicy = resolve(argv[++index] || "");
+    else if (argument === "--nginx-origin-redirect") result.nginxOriginRedirect = resolve(argv[++index] || "");
+    else if (argument === "--nginx-origin-host") result.nginxOriginHost = resolve(argv[++index] || "");
     else if (argument === "--out-dir") result.outputDirectory = resolve(argv[++index] || "");
     else fail(`Unknown argument: ${argument}`);
   }
@@ -175,7 +179,11 @@ async function verifyPrerenderManifest(pathname, snapshot) {
     if (!hashPattern.test(html) || !rootHashPattern.test(html)) {
       fail(`Pre-rendered HTML does not bind the published content hash for route ${entry.path}.`);
     }
-    if (!html.includes(route.renderedBodyHtml)) {
+    const hasPublishedHomeFirstFold = route.bootstrapPageDocument
+      && route.path === "/"
+      && /data-public-first-fold=["']published["']/i.test(html)
+      && /<script\b(?=[^>]*id=["']hc-published-page-document["'])(?=[^>]*type=["']application\/json["'])[^>]*>/i.test(html);
+    if (!hasPublishedHomeFirstFold && !html.includes(route.renderedBodyHtml)) {
       fail(`Pre-rendered HTML does not contain the immutable published body for route ${entry.path}.`);
     }
     const canonicalHref = escapeHtmlAttribute(new URL(route.canonicalPath, snapshot.origin).href);
@@ -301,6 +309,28 @@ export function renderPublicSeoPolicy(contentReady = true) {
   ].join("\n");
 }
 
+export function renderCanonicalOriginRedirect(origin) {
+  const canonicalOrigin = normalizeProductionOrigin(origin);
+  return [
+    "# Generated from the immutable SEO snapshot; included inside the public HTTP redirect location.",
+    `return 308 "${canonicalOrigin}$request_uri";`,
+    "",
+  ].join("\n");
+}
+
+export function renderCanonicalOriginHostMap(origin) {
+  const canonicalOrigin = normalizeProductionOrigin(origin);
+  const canonicalHostname = new URL(canonicalOrigin).hostname;
+  return [
+    "# Generated from the immutable SEO snapshot; included inside the Nginx http context.",
+    "map $host $hc_public_origin_host_allowed {",
+    "  default 0;",
+    `  "${canonicalHostname}" 1;`,
+    "}",
+    "",
+  ].join("\n");
+}
+
 export function renderPublicSeoNginxMap(routes, { contentReady = true } = {}) {
   if (!contentReady) {
     const safePaths = ["/", "/products", "/catalog", "/custom", "/about", "/contact", "/privacy", "/business-info"];
@@ -364,8 +394,8 @@ async function main() {
   if (options.strict && (!published.origin || published.schemaVersion !== 3 || (published.contentReady !== false && published.routes.length === 0))) {
     fail("Strict mode requires an immutable schema v3 snapshot and verified pre-render evidence; reviewed snapshots require at least one route.");
   }
-  if (options.strict && !options.nginxMap) {
-    fail("Strict mode requires --nginx-map so only verified pre-rendered routes can be served as indexable HTML.");
+  if (options.strict && (!options.nginxMap || !options.nginxOriginRedirect || !options.nginxOriginHost)) {
+    fail("Strict mode requires --nginx-map, --nginx-origin-redirect, and --nginx-origin-host so indexable routes, redirects, and trusted origin hosts are snapshot-bound.");
   }
   const artifacts = renderPublicSeoArtifacts(published.origin, published.routes, {
     schemaVersion: published.schemaVersion,
@@ -380,6 +410,12 @@ async function main() {
       : []),
     ...(options.nginxPolicy
       ? [checkOrWrite(options.nginxPolicy, renderPublicSeoPolicy(published.contentReady), options.check)]
+      : []),
+    ...(options.nginxOriginRedirect
+      ? [checkOrWrite(options.nginxOriginRedirect, renderCanonicalOriginRedirect(published.origin), options.check)]
+      : []),
+    ...(options.nginxOriginHost
+      ? [checkOrWrite(options.nginxOriginHost, renderCanonicalOriginHostMap(published.origin), options.check)]
       : []),
   ]);
   process.stdout.write(

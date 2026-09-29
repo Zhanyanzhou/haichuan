@@ -19,8 +19,12 @@ function createHarness(conflicts: number, target = 'quotations_quote_no_key') {
   let createAttempts = 0;
   let committed = 0;
   const tx = {
-    $queryRaw: async () => [{ max_sequence: 0n }],
+    $queryRaw: async (query: { strings?: readonly string[] }) =>
+      query.strings?.join('').includes('FROM users')
+        ? [{ id: actor.id, role: actor.role }]
+        : [{ max_sequence: 0n }],
     quotation: {
+      findUnique: async () => null,
       create: async ({ data }: any) => {
         createAttempts += 1;
         if (createAttempts <= conflicts) throw p2002(target);
@@ -47,7 +51,7 @@ const quotation = {
 
 test('报价号冲突以完整事务为单位重试并只提交一次', async () => {
   const harness = createHarness(3);
-  await harness.service.create(quotation, actor);
+  await harness.service.create(quotation, actor, 'quotation-retry-0001');
   assert.deepEqual(harness.state(), {
     transactionAttempts: 4,
     createAttempts: 4,
@@ -57,7 +61,10 @@ test('报价号冲突以完整事务为单位重试并只提交一次', async ()
 
 test('报价创建不吞掉其他唯一键冲突', async () => {
   const harness = createHarness(1, 'customers_phone_key');
-  await assert.rejects(() => harness.service.create(quotation, actor), /synthetic unique conflict/);
+  await assert.rejects(
+    () => harness.service.create(quotation, actor, 'quotation-retry-0002'),
+    /synthetic unique conflict/,
+  );
   assert.deepEqual(harness.state(), {
     transactionAttempts: 1,
     createAttempts: 1,

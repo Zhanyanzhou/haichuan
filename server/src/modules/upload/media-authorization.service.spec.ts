@@ -13,6 +13,7 @@ const incremented = (current: number, value: unknown) => {
 test('授权草稿、提交、独立审核在 Serializable 事务内形成连续事件哈希与 OperationLog', async () => {
   const events: Array<Record<string, any>> = [];
   const operationLogs: Array<Record<string, any>> = [];
+  const productQualityInvalidations: Array<Record<string, any>> = [];
   const isolationLevels: string[] = [];
   let authorization: Record<string, any> = {
     assetId: 17,
@@ -29,6 +30,7 @@ test('授权草稿、提交、独立审核在 Serializable 事务内形成连续
     reviewedById: null,
     reviewedAt: null,
     reviewNote: null,
+    selfReviewAcknowledged: false,
     validFrom: null,
     validUntil: null,
     revocationStatus: 'ACTIVE',
@@ -60,6 +62,13 @@ test('授权草稿、提交、独立审核在 Serializable 事务内形成连续
     updatedAt: new Date('2026-09-13T00:00:00Z'),
   };
   const transaction = {
+    $queryRaw: async () => [{ id: 2, role: 'SUPER_ADMIN' }],
+    product: {
+      updateMany: async (args: Record<string, any>) => {
+        productQualityInvalidations.push(args);
+        return { count: 1 };
+      },
+    },
     mediaAsset: {
       findFirst: async () => ({ ...asset, authorization: { ...authorization } }),
     },
@@ -91,6 +100,12 @@ test('授权草稿、提交、独立审核在 Serializable 事务内形成连续
     },
   };
   const prisma = {
+    user: {
+      findUnique: async ({ where }: any) => ({
+        role: where.id === 2 ? 'SUPER_ADMIN' : 'ADMIN',
+        status: 'ACTIVE',
+      }),
+    },
     $transaction: async (action: (tx: any) => Promise<unknown>, options: { isolationLevel: string }) => {
       isolationLevels.push(options.isolationLevel);
       return action(transaction);
@@ -131,6 +146,18 @@ test('授权草稿、提交、独立审核在 Serializable 事务内形成连续
   assert.equal(events[2].previousEventHash, events[1].eventHash);
   assert.equal(operationLogs.length, 3);
   assert.equal(operationLogs.every((log) => !log.detail.includes('internal://evidence')), true);
+  assert.equal(productQualityInvalidations.length, 3);
+  assert.deepEqual(productQualityInvalidations[0], {
+    where: {
+      publicationQualityStatus: 'READY',
+      images: { some: { mediaAssetId: 17 } },
+    },
+    data: {
+      publicationQualityStatus: 'QUARANTINED',
+      publicationQualityHash: null,
+      publicationQualityCheckedAt: null,
+    },
+  });
   await assert.rejects(
     () => service.revoke(17, 3, { expectedRevision: 4, reason: '\t  ' }),
     BadRequestException,
@@ -155,12 +182,14 @@ test('授权草稿、提交、独立审核在 Serializable 事务内形成连续
   assert.equal(events.length, 3);
   assert.equal(operationLogs.length, 3);
   await assert.rejects(() => service.submit(17, 2, 2), ConflictException);
+  assert.equal(productQualityInvalidations.length, 3, '失败或过期操作不得额外改写商品质量状态');
 });
 
 test('自动建档使用 DRAFT/LEGACY_UNVERIFIED 并写入第一个 SHA-256 事件', async () => {
   const createdRecords: Array<Record<string, any>> = [];
   const eventRecords: Array<Record<string, any>> = [];
   const transaction = {
+    product: { updateMany: async () => ({ count: 0 }) },
     mediaAssetAuthorization: {
       findUnique: async () => null,
       create: async ({ data }: any) => {
@@ -209,10 +238,280 @@ test('自动建档使用 DRAFT/LEGACY_UNVERIFIED 并写入第一个 SHA-256 事�
   assert.match(event.eventHash, /^[a-f0-9]{64}$/);
 });
 
+test('上传入库只登记未核验草稿，不隐式代替版权确认和审核', async () => {
+  let current: Record<string, any> | null = null;
+  const events: Array<Record<string, any>> = [];
+  const operationLogs: Array<Record<string, any>> = [];
+  const transaction = {
+    product: { updateMany: async () => ({ count: 0 }) },
+    mediaAssetAuthorization: {
+      findUnique: async () => current,
+      findUniqueOrThrow: async () => {
+        assert.ok(current);
+        return current;
+      },
+      create: async ({ data }: any) => {
+        current = {
+          ...data,
+          revision: 1,
+          publicUseEpoch: 0,
+          submittedById: null,
+          submittedAt: null,
+          reviewedById: null,
+          reviewedAt: null,
+          reviewNote: null,
+          selfReviewAcknowledged: false,
+          validFrom: null,
+          validUntil: null,
+          revokedById: null,
+          revokedAt: null,
+          revocationReason: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        return current;
+      },
+      updateMany: async ({ where, data }: any) => {
+        assert.equal(where.assetId, current?.assetId);
+        assert.equal(where.revision, current?.revision);
+        current = {
+          ...current,
+          ...data,
+          revision: incremented(current!.revision, data.revision),
+          publicUseEpoch: incremented(current!.publicUseEpoch, data.publicUseEpoch),
+        };
+        return { count: 1 };
+      },
+    },
+    mediaAssetAuthorizationEvent: {
+      findFirst: async () => events.at(-1) ?? null,
+      create: async ({ data }: any) => {
+        events.push(data);
+        return data;
+      },
+    },
+    operationLog: {
+      create: async ({ data }: any) => {
+        operationLogs.push(data);
+        return data;
+      },
+    },
+  };
+  const service = new MediaAuthorizationService({} as never);
+  const result = await service.ensureUploadAuthorization(transaction as never, 12, 3);
+  assert.equal(result.sourceType, 'LEGACY_UNVERIFIED');
+  assert.equal(result.reviewStatus, 'DRAFT');
+  assert.equal(result.publicWebUseAllowed, false);
+  assert.equal(result.submittedById, null);
+  assert.equal(result.reviewedById, null);
+  assert.deepEqual(events.map((event) => event.eventType), ['CREATED']);
+  assert.equal(operationLogs.some((log) => log.action === 'media.authorization.ingest.approve'), false);
+});
+
+test('在职 SUPER_ADMIN 只有明确确认后才能自审素材授权并留下标记', async () => {
+  let authorization: Record<string, any> = {
+    assetId: 21,
+    revision: 3,
+    publicUseEpoch: 2,
+    sourceType: 'BRAND_OWNED',
+    authorizationBasis: '品牌自有拍摄档案',
+    evidenceReference: 'internal://evidence/media-21',
+    publicWebUseAllowed: true,
+    reviewStatus: 'IN_REVIEW',
+    preparedById: 5,
+    submittedById: 5,
+    submittedAt: new Date(),
+    reviewedById: null,
+    reviewedAt: null,
+    reviewNote: null,
+    selfReviewAcknowledged: false,
+    validFrom: null,
+    validUntil: null,
+    revocationStatus: 'ACTIVE',
+    revokedById: null,
+    revokedAt: null,
+    revocationReason: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const events: Array<Record<string, any>> = [];
+  const asset = {
+    id: 21,
+    storageKey: 'page-assets/self-review.png',
+    originalName: 'self-review.png',
+    mimeType: 'image/png',
+    accessLevel: 'PUBLIC',
+    status: 'READY',
+    lifecycleRevision: 1,
+  };
+  const transaction = {
+    $queryRaw: async () => [{ id: 5, role: 'SUPER_ADMIN' }],
+    product: { updateMany: async () => ({ count: 0 }) },
+    mediaAsset: { findFirst: async () => ({ ...asset, authorization: { ...authorization } }) },
+    mediaAssetAuthorization: {
+      updateMany: async ({ data }: any) => {
+        authorization = {
+          ...authorization,
+          ...data,
+          revision: incremented(authorization.revision, data.revision),
+          publicUseEpoch: incremented(authorization.publicUseEpoch, data.publicUseEpoch),
+        };
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async () => ({ ...authorization }),
+    },
+    mediaAssetAuthorizationEvent: {
+      findFirst: async () => events.at(-1) ?? null,
+      findMany: async () => [...events],
+      create: async ({ data }: any) => {
+        const event = { id: 1n, occurredAt: new Date(), ...data };
+        events.push(event);
+        return event;
+      },
+    },
+    operationLog: { create: async () => undefined },
+  };
+  const service = new MediaAuthorizationService({
+    user: { findUnique: async () => ({ role: 'SUPER_ADMIN', status: 'ACTIVE' }) },
+    $transaction: async (action: (tx: any) => Promise<unknown>) => action(transaction),
+  } as never);
+
+  await assert.rejects(() => service.approve(21, 5, 3), ForbiddenException);
+  const approved = await service.approve(21, 5, 3, '已核实品牌自有及公网使用权', true);
+  assert.equal(approved.authorization?.reviewStatus, 'APPROVED');
+  assert.equal(approved.authorization?.selfReviewAcknowledged, true);
+  assert.equal(approved.authorization?.submittedById, 5);
+  assert.equal(approved.authorization?.reviewedById, 5);
+  assert.equal(events[0]?.eventType, 'APPROVED');
+});
+
+test('在职 SUPER_ADMIN 可从装修页一次确认草稿素材公开使用', async () => {
+  let authorization: Record<string, any> = {
+    assetId: 44,
+    revision: 1,
+    publicUseEpoch: 0,
+    sourceType: 'LEGACY_UNVERIFIED',
+    authorizationBasis: null,
+    evidenceReference: null,
+    publicWebUseAllowed: false,
+    reviewStatus: 'DRAFT',
+    preparedById: 5,
+    submittedById: null,
+    submittedAt: null,
+    reviewedById: null,
+    reviewedAt: null,
+    reviewNote: null,
+    selfReviewAcknowledged: false,
+    validFrom: null,
+    validUntil: null,
+    revocationStatus: 'ACTIVE',
+    revokedById: null,
+    revokedAt: null,
+    revocationReason: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  const events: Array<Record<string, any>> = [];
+  const asset = {
+    id: 44,
+    storageKey: 'page-assets/editor.png',
+    originalName: 'editor.png',
+    mimeType: 'image/png',
+    accessLevel: 'PUBLIC',
+    status: 'READY',
+    lifecycleRevision: 1,
+  };
+  const transaction = {
+    $queryRaw: async () => [{ id: 5, role: 'SUPER_ADMIN' }],
+    product: { updateMany: async () => ({ count: 0 }) },
+    mediaAsset: { findFirst: async () => ({ ...asset, authorization: { ...authorization } }) },
+    mediaAssetAuthorization: {
+      updateMany: async ({ data }: any) => {
+        authorization = {
+          ...authorization,
+          ...data,
+          revision: incremented(authorization.revision, data.revision),
+          publicUseEpoch: incremented(authorization.publicUseEpoch, data.publicUseEpoch),
+        };
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async () => ({ ...authorization }),
+    },
+    mediaAssetAuthorizationEvent: {
+      findFirst: async () => events.at(-1) ?? null,
+      findMany: async () => [...events],
+      create: async ({ data }: any) => {
+        const event = { id: BigInt(events.length + 1), occurredAt: new Date(), ...data };
+        events.push(event);
+        return event;
+      },
+    },
+    operationLog: { create: async () => undefined },
+  };
+  const service = new MediaAuthorizationService({
+    user: { findUnique: async () => ({ role: 'SUPER_ADMIN', status: 'ACTIVE' }) },
+    $transaction: async (action: (tx: any) => Promise<unknown>) => action(transaction),
+  } as never);
+
+  await assert.rejects(() => service.authorizePublicUse(44, 5, false), ForbiddenException);
+  const result = await service.authorizePublicUse(44, 5, true);
+  assert.equal(result.authorization?.reviewStatus, 'APPROVED');
+  assert.equal(result.authorization?.publicWebUseAllowed, true);
+  assert.equal(result.authorization?.selfReviewAcknowledged, true);
+  assert.equal(result.authorization?.sourceType, 'BRAND_OWNED');
+  assert.deepEqual(events.map((event) => event.eventType), ['UPDATED', 'SUBMITTED', 'APPROVED']);
+});
+
+test('EDITOR 入库仍保持未核验草稿，不自动批准公开', async () => {
+  const createdRecords: Array<Record<string, any>> = [];
+  const transaction = {
+    product: { updateMany: async () => ({ count: 0 }) },
+    user: {
+      findUnique: async () => ({ role: 'EDITOR' }),
+    },
+    mediaAssetAuthorization: {
+      findUnique: async () => null,
+      create: async ({ data }: any) => {
+        const created = {
+          ...data,
+          revision: 1,
+          publicUseEpoch: 0,
+          submittedById: null,
+          submittedAt: null,
+          reviewedById: null,
+          reviewedAt: null,
+          reviewNote: null,
+          selfReviewAcknowledged: false,
+          validFrom: null,
+          validUntil: null,
+          revokedById: null,
+          revokedAt: null,
+          revocationReason: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+        createdRecords.push(created);
+        return created;
+      },
+    },
+    mediaAssetAuthorizationEvent: {
+      findFirst: async () => null,
+      create: async ({ data }: any) => data,
+    },
+    operationLog: { create: async () => undefined },
+  };
+  const service = new MediaAuthorizationService({} as never);
+  const result = await service.ensureUploadAuthorization(transaction as never, 15, 8);
+  assert.equal(result.sourceType, 'LEGACY_UNVERIFIED');
+  assert.equal(result.reviewStatus, 'DRAFT');
+  assert.equal(result.publicWebUseAllowed, false);
+});
+
 test('旧素材可用 expectedRevision=0 首次显式建立草稿，但不能覆盖并发或既有记录', async () => {
   let authorization: Record<string, any> | null = null;
   const events: Array<Record<string, any>> = [];
   const operationLogs: Array<Record<string, any>> = [];
+  const productQualityInvalidations: Array<Record<string, any>> = [];
   const asset = {
     id: 31,
     storageKey: 'page-assets/legacy.png',
@@ -235,6 +534,13 @@ test('旧素材可用 expectedRevision=0 首次显式建立草稿，但不能覆
     updatedAt: new Date(),
   };
   const transaction = {
+    $queryRaw: async () => [{ id: 8, role: 'EDITOR' }],
+    product: {
+      updateMany: async (args: Record<string, any>) => {
+        productQualityInvalidations.push(args);
+        return { count: 1 };
+      },
+    },
     mediaAsset: {
       findFirst: async () => ({ ...asset, authorization }),
     },
@@ -296,6 +602,11 @@ test('旧素材可用 expectedRevision=0 首次显式建立草稿，但不能覆
   assert.match(events[0].eventHash, /^[a-f0-9]{64}$/);
   assert.equal(operationLogs.length, 1);
   assert.equal(operationLogs[0].detail.includes('internal://legacy/31'), false);
+  assert.equal(productQualityInvalidations.length, 1);
+  assert.equal(
+    productQualityInvalidations[0]?.where?.images?.some?.mediaAssetId,
+    31,
+  );
   await assert.rejects(
     () => service.saveDraft(31, 9, {
       expectedRevision: 0,
@@ -309,6 +620,8 @@ test('旧素材可用 expectedRevision=0 首次显式建立草稿，但不能覆
 test('首次显式建档的并发唯一冲突映射为 409', async () => {
   const uniqueConflict = Object.assign(new Error('duplicate'), { code: 'P2002' });
   const transaction = {
+    $queryRaw: async () => [{ id: 8, role: 'EDITOR' }],
+    product: { updateMany: async () => ({ count: 0 }) },
     mediaAsset: {
       findFirst: async () => ({
         id: 41,

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { load as parseYaml } from "js-yaml";
@@ -8,6 +9,8 @@ import {
   verifyContentReadinessArtifact,
   writeContentReadinessEvidence,
 } from "./verify-release-images-content-readiness.mjs";
+import { normalizeProductionOrigin } from "./export-public-seo-snapshot.mjs";
+import { isReleaseProfile } from "./release-profile-contract.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
@@ -39,6 +42,178 @@ function isRecord(value) {
 function hasExactKeys(value, expectedKeys) {
   return isRecord(value) &&
     Object.keys(value).sort().join("\0") === [...expectedKeys].sort().join("\0");
+}
+
+function workflowSteps(job, code) {
+  if (!isRecord(job) || !Array.isArray(job.steps)) fail(code);
+  return job.steps;
+}
+
+function findWorkflowStep(job, name, code) {
+  const matches = workflowSteps(job, code).filter((step) => isRecord(step) && step.name === name);
+  if (matches.length !== 1) fail(code);
+  return matches[0];
+}
+
+function assertRootNodeVersionGate(job, installStepName, beforeStepName, codePrefix) {
+  const install = findWorkflowStep(job, installStepName, `${codePrefix}_ROOT_INSTALL_MISSING`);
+  const gate = findWorkflowStep(job, "校验 Node.js 发布基线", `${codePrefix}_NODE_VERSION_GATE_MISSING`);
+  const before = findWorkflowStep(job, beforeStepName, `${codePrefix}_NODE_VERSION_GATE_BOUNDARY_MISSING`);
+  const steps = workflowSteps(job, `${codePrefix}_STEPS_INVALID`);
+  if (steps.indexOf(install) >= steps.indexOf(gate) || steps.indexOf(gate) >= steps.indexOf(before)) {
+    fail(`${codePrefix}_NODE_VERSION_GATE_ORDER_INVALID`);
+  }
+  if (Object.hasOwn(gate, "working-directory") || executableRun(gate).trim() !== "npm run verify:node-version") {
+    fail(`${codePrefix}_NODE_VERSION_GATE_INVALID`);
+  }
+}
+
+function executableRun(step) {
+  if (typeof step?.run !== "string") return "";
+  return step.run.split(/\r?\n/).filter((line) => !line.trimStart().startsWith("#")).join("\n");
+}
+
+function parseWorkflow(source, code) {
+  try {
+    const workflow = parseYaml(source, { json: false });
+    if (!isRecord(workflow) || !isRecord(workflow.on) || !isRecord(workflow.jobs)) fail(code);
+    return workflow;
+  } catch (error) {
+    if (error instanceof Error && error.message === code) throw error;
+    fail(code);
+  }
+}
+
+export function validateQualityWorkflowStructure(source) {
+  const workflow = parseWorkflow(source, "QUALITY_WORKFLOW_YAML_OR_SCHEMA_INVALID");
+  const verify = workflow.jobs.verify;
+  if (!isRecord(verify)) fail("QUALITY_VERIFY_JOB_MISSING");
+  assertRootNodeVersionGate(verify, "安装根目录依赖", "安装服务端依赖", "QUALITY");
+  const proof = workflow.jobs["full-proof"];
+  if (!isRecord(proof) || JSON.stringify(proof.needs) !== JSON.stringify(["verify", "e2e-deterministic", "real-mysql"]) ||
+      proof.if !== "always() && (github.event_name == 'pull_request' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || startsWith(github.ref, 'refs/heads/release/'))") {
+    fail("QUALITY_FULL_PROOF_JOB_BINDING_INVALID");
+  }
+  const generate = findWorkflowStep(proof, "生成完整档机器证明", "QUALITY_FULL_PROOF_GENERATOR_MISSING");
+  const upload = findWorkflowStep(proof, "上传完整档机器证明", "QUALITY_FULL_PROOF_UPLOAD_MISSING");
+  const run = executableRun(generate);
+  for (const required of [
+    'profile: "full"', 'workflow: "quality.yml"', "gitSha: process.env.GITHUB_SHA",
+    "ref: process.env.GITHUB_REF", "runId: Number(process.env.GITHUB_RUN_ID)",
+    'jobSet: ["verify", "e2e-deterministic", "real-mysql"]', 'result !== "success"',
+  ]) if (!run.includes(required)) fail(`QUALITY_FULL_PROOF_GENERATOR_CONTRACT_MISSING:${required}`);
+  if (upload.uses !== "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" ||
+      upload.with?.name !== "quality-full-proof-${{ github.sha }}-${{ github.run_id }}" ||
+      upload.with?.path !== "quality-proof/quality-full-proof.json" || upload.with?.["if-no-files-found"] !== "error") {
+    fail("QUALITY_FULL_PROOF_UPLOAD_CONTRACT_INVALID");
+  }
+  return { ok: true };
+}
+
+export function validateReleaseWorkflowStructure(source) {
+  const workflow = parseWorkflow(source, "RELEASE_WORKFLOW_YAML_INVALID");
+  if (!hasExactKeys(workflow.on, ["workflow_dispatch"]) || !hasExactKeys(workflow.on.workflow_dispatch?.inputs, [
+    "release_stage", "assurance_level", "public_site_origin", "public_seo_snapshot_artifact_id",
+     "api_base_url", "analytics_enabled", "sigstore_public_log_acknowledged",
+     "unprotected_ref_authorized", "release_authorization_sha256", "authorized_source_sha",
+  ])) fail("RELEASE_WORKFLOW_NOT_MANUAL_ONLY");
+  if (!hasExactKeys(workflow.jobs, ["quality-proof", "build-push", "package-baseline", "sign-release"])) {
+    fail("RELEASE_WORKFLOW_JOB_SET_INVALID");
+  }
+  if (workflow.jobs["package-baseline"].if !== "inputs.assurance_level == 'baseline'" ||
+      workflow.jobs["sign-release"].if !== "inputs.assurance_level == 'high'") {
+    fail("RELEASE_WORKFLOW_ASSURANCE_BRANCH_INVALID");
+  }
+  for (const job of Object.values(workflow.jobs)) {
+    for (const step of workflowSteps(job, "RELEASE_WORKFLOW_STEPS_INVALID")) {
+      if (typeof step.uses === "string" && typeof step.run === "string") {
+        fail("RELEASE_WORKFLOW_STEP_USES_AND_RUN_CONFLICT");
+      }
+      if (typeof step.uses === "string" && !/@[a-f0-9]{40}$/.test(step.uses)) {
+        fail(`RELEASE_WORKFLOW_ACTION_NOT_PINNED:${step.uses}`);
+      }
+      if (step.uses?.startsWith("actions/checkout@") && step.with?.["persist-credentials"] !== false) {
+        fail("RELEASE_WORKFLOW_CHECKOUT_CREDENTIALS_PERSIST");
+      }
+    }
+  }
+  const qualityJob = workflow.jobs["quality-proof"];
+  const sourceAuth = findWorkflowStep(qualityJob, "拒绝未获明确授权的发布来源", "RELEASE_WORKFLOW_SOURCE_AUTHORIZATION_MISSING");
+  const lookup = findWorkflowStep(qualityJob, "查找同一 SHA 的成功质量门禁", "RELEASE_WORKFLOW_QUALITY_LOOKUP_MISSING");
+  const steps = workflowSteps(qualityJob, "RELEASE_WORKFLOW_STEPS_INVALID");
+  if (steps.indexOf(sourceAuth) >= steps.indexOf(lookup) || sourceAuth.id !== "source-authorization" || lookup.id !== "quality") {
+    fail("RELEASE_WORKFLOW_SOURCE_AUTHORIZATION_ORDER_INVALID");
+  }
+  const authRun = executableRun(sourceAuth);
+  for (const required of [
+     'test "$UNPROTECTED_REF_AUTHORIZED" = "true"',
+     '[[ "$RELEASE_AUTHORIZATION_SHA256" =~ ^[a-f0-9]{64}$ ]]',
+     '[[ "$AUTHORIZED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]',
+     'test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA"',
+     'echo "actor=$GITHUB_ACTOR"', 'echo "run_id=$GITHUB_RUN_ID"',
+  ]) if (!authRun.includes(required)) fail(`RELEASE_WORKFLOW_SOURCE_AUTHORIZATION_CONTRACT_MISSING:${required}`);
+  const lookupRun = executableRun(lookup);
+  for (const required of [
+    "head_sha=${GITHUB_SHA}", 'run.head_sha === process.env.GITHUB_SHA',
+    'run.head_branch === process.env.EXPECTED_QUALITY_BRANCH', 'run.event === "push"',
+    'run.conclusion === "success"', "QUALITY_FULL_PROOF_ARTIFACT_NOT_FOUND",
+  ]) if (!lookupRun.includes(required)) fail(`RELEASE_WORKFLOW_QUALITY_LOOKUP_CONTRACT_MISSING:${required}`);
+  const download = findWorkflowStep(qualityJob, "下载固定完整档机器证明", "RELEASE_WORKFLOW_QUALITY_DOWNLOAD_MISSING");
+  if (download.with?.["artifact-ids"] !== "${{ steps.quality.outputs.proof_artifact_id }}" ||
+      download.with?.["run-id"] !== "${{ steps.quality.outputs.run_id }}" ||
+      download.with?.repository !== "${{ github.repository }}") fail("RELEASE_WORKFLOW_QUALITY_DOWNLOAD_BINDING_INVALID");
+  const verify = findWorkflowStep(qualityJob, "验证完整档机器证明", "RELEASE_WORKFLOW_QUALITY_VERIFY_MISSING");
+  const verifyRun = executableRun(verify);
+  for (const required of [
+    'proof.profile !== "full"', "proof.gitSha !== process.env.EXPECTED_HEAD_SHA",
+    "proof.ref !== process.env.GITHUB_REF", "proof.runId !== Number(process.env.EXPECTED_RUN_ID)",
+    'JSON.stringify(proof.jobSet) !== JSON.stringify(expectedJobs)',
+    'Object.values(proof.results).some((result) => result !== "success")',
+  ]) if (!verifyRun.includes(required)) fail(`RELEASE_WORKFLOW_QUALITY_PROOF_VALIDATION_MISSING:${required}`);
+  const signingJob = workflow.jobs["sign-release"];
+  const provenanceStep = findWorkflowStep(
+    signingJob,
+    "校验上游摘要并构造独立 SLSA v1 provenance",
+    "RELEASE_SIGNING_PROVENANCE_STEP_MISSING",
+  );
+  if (!executableRun(provenanceStep).includes(
+    "buildkitProvenancePredicateType: buildkitPredicateType",
+  )) {
+    fail("RELEASE_SIGNING_BUILDKIT_PREDICATE_BINDING_INVALID");
+  }
+  assertRootNodeVersionGate(
+    workflow.jobs["build-push"],
+    "安装发布验证依赖",
+    "构建并推送服务端镜像",
+    "RELEASE_WORKFLOW",
+  );
+  return workflow;
+}
+
+export function validateDockerNpmInstallBoundary(dockerfileSource, manifestSource, buildContext) {
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestSource);
+  } catch {
+    fail(`DOCKER_BUILD_CONTEXT_PACKAGE_MANIFEST_INVALID:${buildContext}`);
+  }
+  const escapingLifecycleScripts = ["preinstall", "install", "postinstall"]
+    .filter((name) => typeof manifest?.scripts?.[name] === "string" && /\.\.[\\/]/.test(manifest.scripts[name]));
+  const normalizedDockerfile = dockerfileSource.replace(/\\\r?\n\s*/g, " ");
+  const npmCiInstructions = [...normalizedDockerfile.matchAll(/^RUN\s+([^\r\n]*\bnpm\s+ci\b[^\r\n]*)$/gim)]
+    .map((match) => match[1]);
+  if (npmCiInstructions.length === 0) {
+    fail(`DOCKER_NPM_CI_MISSING:${buildContext}`);
+  }
+  if (escapingLifecycleScripts.length > 0 &&
+      npmCiInstructions.some((instruction) => !/(?:^|\s)--ignore-scripts(?:\s|$)/.test(instruction))) {
+    fail(`DOCKER_INSTALL_SCRIPT_ESCAPES_BUILD_CONTEXT:${buildContext}:${escapingLifecycleScripts[0]}`);
+  }
+  return {
+    buildContext,
+    npmCiCount: npmCiInstructions.length,
+    isolatedLifecycleScripts: escapingLifecycleScripts,
+  };
 }
 
 export function findComposeBuildServices(source) {
@@ -143,7 +318,7 @@ function assertOperationsDockerStage() {
   const runtimeDependencies = /^FROM\s+node:22-bookworm-slim@sha256:[a-f0-9]{64}\s+AS\s+runtime-deps\s*$/im.exec(source);
   if (
     !runtimeDependencies
-    || !source.includes("npm ci --omit=dev --include=optional --legacy-peer-deps")
+    || !source.includes("npm ci --ignore-scripts --omit=dev --include=optional --legacy-peer-deps")
     || !source.includes("rm -rf node_modules/prisma node_modules/.bin/prisma")
   ) {
     fail("RUNTIME_DEPENDENCIES_STAGE_INVALID");
@@ -215,14 +390,21 @@ function assertNodeAndClientRuntimeBaseline() {
     }
   }
 
+  const serverInstallBoundary = validateDockerNpmInstallBoundary(
+    readProjectFile("server/Dockerfile"),
+    readProjectFile("server/package.json"),
+    "server",
+  );
+
   const compose = readProjectFile("docker-compose.yml");
   const clientNginx = readProjectFile("client/nginx.conf");
   const clientMainNginx = readProjectFile("client/nginx-main.conf");
   if (!compose.includes('- "80:8080"') ||
       !compose.includes('- "127.0.0.1:8081:8081"') ||
-      !compose.includes("http://127.0.0.1:8081/") ||
+      !compose.includes("http://127.0.0.1:8082/healthz") ||
       !/^\s*listen\s+8080;\s*$/m.test(clientNginx) ||
       !/^\s*listen\s+8081;\s*$/m.test(clientNginx) ||
+      !/^\s*listen\s+127\.0\.0\.1:8082;\s*$/m.test(clientNginx) ||
       !/^EXPOSE\s+8080\s+8081\s*$/m.test(readProjectFile("client/Dockerfile"))) {
     fail("CLIENT_NON_ROOT_PORT_CONTRACT_INVALID");
   }
@@ -239,7 +421,27 @@ function assertNodeAndClientRuntimeBaseline() {
     packageCount: 3,
     workflowCount: releaseStaticWorkflowPaths.length,
     dockerfileCount: 2,
+    serverDockerNpmCiCount: serverInstallBoundary.npmCiCount,
   };
+}
+
+export function validateComposeImagePinning(source) {
+  const imageValues = [...source.matchAll(/^\s+image:\s*["']?([^"'\r\n]+)["']?\s*$/gm)]
+    .map((match) => match[1].trim());
+  if (imageValues.length === 0) fail("COMPOSE_PRODUCTION_IMAGE_MISSING");
+  for (const value of imageValues) {
+    if (/(?:latest|:-local|:-2-(?:server|client))/i.test(value)) {
+      fail("COMPOSE_PRODUCTION_IMAGE_FALLBACK_FORBIDDEN");
+    }
+    if (value.startsWith("${SERVER_IMAGE_NAME:?") || value.startsWith("${CLIENT_IMAGE_NAME:?") ||
+        value.startsWith("${OPERATIONS_IMAGE_NAME:?")) {
+      continue;
+    }
+    if (!/@sha256:[a-f0-9]{64}$/.test(value)) {
+      fail(`COMPOSE_EXTERNAL_IMAGE_NOT_PINNED:${value}`);
+    }
+  }
+  return imageValues;
 }
 
 function assertComposeImages() {
@@ -257,21 +459,7 @@ function assertComposeImages() {
   ]) {
     validateComposeBuildPolicy(readProjectFile(path));
   }
-  if (/(?:latest|:-local|:-2-(?:server|client))/i.test(source)) {
-    fail("COMPOSE_PRODUCTION_IMAGE_FALLBACK_FORBIDDEN");
-  }
-
-  const imageValues = [...source.matchAll(/^\s+image:\s*["']?([^"'\r\n]+)["']?\s*$/gm)]
-    .map((match) => match[1].trim());
-  for (const value of imageValues) {
-    if (value.startsWith("${SERVER_IMAGE_NAME:?") || value.startsWith("${CLIENT_IMAGE_NAME:?") ||
-        value.startsWith("${OPERATIONS_IMAGE_NAME:?")) {
-      continue;
-    }
-    if (!/@sha256:[a-f0-9]{64}$/.test(value)) {
-      fail(`COMPOSE_EXTERNAL_IMAGE_NOT_PINNED:${value}`);
-    }
-  }
+  const imageValues = validateComposeImagePinning(source);
   for (const required of [
     "read_only: true",
     "no-new-privileges:true",
@@ -312,26 +500,8 @@ function assertComposeImages() {
 function assertReleaseWorkflow() {
   const path = ".github/workflows/release-images.yml";
   const source = readProjectFile(path);
-  let workflow;
-  try {
-    workflow = parseYaml(source, { json: false });
-  } catch {
-    fail("RELEASE_WORKFLOW_YAML_INVALID");
-  }
-  if (!isRecord(workflow) || !isRecord(workflow.jobs)) fail("RELEASE_WORKFLOW_SCHEMA_INVALID");
-  const header = source.split(/^jobs:/m, 1)[0];
-  if (!/^on:\s*\r?\n\s{2}workflow_dispatch:/m.test(header)) {
-    fail("RELEASE_WORKFLOW_NOT_MANUAL_ONLY");
-  }
-  if (/^\s{2}(push|pull_request|schedule):/m.test(header)) {
-    fail("RELEASE_WORKFLOW_AUTOMATIC_TRIGGER_FORBIDDEN");
-  }
-  for (const match of source.matchAll(/^\s+uses:\s+([^\s]+)\s*$/gm)) {
-    const reference = match[1];
-    if (!/@[a-f0-9]{40}$/.test(reference)) {
-      fail(`RELEASE_WORKFLOW_ACTION_NOT_PINNED:${reference}`);
-    }
-  }
+  const workflow = validateReleaseWorkflowStructure(source);
+  validateQualityWorkflowStructure(readProjectFile(".github/workflows/quality.yml"));
   if (!/^\s+provenance:\s+mode=max\s*$/m.test(source)) {
     fail("RELEASE_WORKFLOW_PROVENANCE_MISSING");
   }
@@ -398,12 +568,20 @@ function assertReleaseWorkflow() {
   for (const required of [
     "actions/workflows/quality.yml/runs?head_sha=${GITHUB_SHA}",
     'run.head_sha === process.env.GITHUB_SHA',
+    'run.head_branch === process.env.EXPECTED_QUALITY_BRANCH',
     'run.event === "push"',
     'run.conclusion === "success"',
     "QUALITY_GATE_SAME_SHA_SUCCESS_NOT_FOUND",
-    "schemaVersion: 6",
+    "schemaVersion: 9",
+    "assurance_level:",
+    "assuranceLevel: \"baseline\"",
+    "assuranceLevel: \"high\"",
+    "if: inputs.assurance_level == 'baseline'",
+    "if: inputs.assurance_level == 'high'",
     "release_stage:",
     "PUBLIC_SEO_SOURCE_STAGE_MISMATCH",
+    "EXPECTED_PUBLIC_SEO_ORIGIN",
+    "publicSeoOrigin: manifest.publicSeo.origin",
     "qualityGate:",
     "operations_image=ghcr.io/${GITHUB_REPOSITORY,,}${repository_stage_suffix}-operations",
     "target: operations",
@@ -429,6 +607,8 @@ function assertReleaseWorkflow() {
     "RELEASE_MANIFEST_PROVENANCE_CONTENT_INVALID",
     "RELEASE_MANIFEST_PROVENANCE_DEPENDENCIES_INVALID",
     "release-manifest.attestation.json",
+    "github-actions-private-artifact",
+    "publicTransparencyLog: false",
     "runtimeExecutables",
     "OPERATIONS_RUNTIME_EXECUTABLE_INVALID",
     "SERVER_RUNTIME_NATIVE_DEPENDENCY_INVALID:sharp",
@@ -460,15 +640,18 @@ function assertReleaseWorkflow() {
 }
 
 export function validateProductionEvidenceVerificationWorkflow(source) {
-  let workflow;
-  try {
-    workflow = parseYaml(source, { json: false });
-  } catch {
-    fail("PRODUCTION_EVIDENCE_WORKFLOW_YAML_INVALID");
-  }
-  if (!isRecord(workflow) || !isRecord(workflow.permissions) || !isRecord(workflow.jobs)) {
+  const workflow = parseWorkflow(source, "PRODUCTION_EVIDENCE_WORKFLOW_YAML_INVALID");
+  if (!isRecord(workflow.permissions)) {
     fail("PRODUCTION_EVIDENCE_WORKFLOW_SCHEMA_INVALID");
   }
+  if (!hasExactKeys(workflow.on, ["workflow_dispatch"]) ||
+      !hasExactKeys(workflow.on.workflow_dispatch?.inputs, [
+        "evidence_run_id", "evidence_artifact_name", "environment_id_sha256",
+         "approval_reference_sha256", "release_git_sha", "migration_bundle_sha256",
+         "source_ref", "release_profile", "unprotected_ref_authorized", "authorization_sha256",
+         "authorized_source_sha",
+      ])) fail("PRODUCTION_EVIDENCE_WORKFLOW_NOT_MANUAL_ONLY");
+  if (!hasExactKeys(workflow.jobs, ["verify"])) fail("PRODUCTION_EVIDENCE_WORKFLOW_JOB_SET_INVALID");
   if (Object.keys(workflow.permissions).length !== 0) {
     fail("PRODUCTION_EVIDENCE_WORKFLOW_ROOT_PERMISSIONS_INVALID");
   }
@@ -482,20 +665,54 @@ export function validateProductionEvidenceVerificationWorkflow(source) {
       expectedPermissions.some((name) => verifyJob.permissions[name] !== "read")) {
     fail("PRODUCTION_EVIDENCE_WORKFLOW_PERMISSIONS_INVALID");
   }
-  const header = source.split(/^jobs:/m, 1)[0];
-  if (!/^on:\s*\r?\n\s{2}workflow_dispatch:/m.test(header)) {
-    fail("PRODUCTION_EVIDENCE_WORKFLOW_NOT_MANUAL_ONLY");
+  for (const step of workflowSteps(verifyJob, "PRODUCTION_EVIDENCE_WORKFLOW_STEPS_INVALID")) {
+    if (typeof step.uses === "string" && typeof step.run === "string") {
+      fail("PRODUCTION_EVIDENCE_WORKFLOW_STEP_USES_AND_RUN_CONFLICT");
+    }
+    if (typeof step.uses === "string" && !/@[a-f0-9]{40}$/.test(step.uses)) {
+      fail(`PRODUCTION_EVIDENCE_WORKFLOW_ACTION_NOT_PINNED:${step.uses}`);
+    }
+    if (step.uses?.startsWith("actions/checkout@") && step.with?.["persist-credentials"] !== false) {
+      fail("PRODUCTION_EVIDENCE_WORKFLOW_CHECKOUT_CREDENTIALS_PERSIST");
+    }
   }
-  if (/^\s{2}(push|pull_request|schedule):/m.test(header)) {
-    fail("PRODUCTION_EVIDENCE_WORKFLOW_AUTOMATIC_TRIGGER_FORBIDDEN");
+  const authorization = findWorkflowStep(verifyJob, "校验验证来源与显式批准绑定", "PRODUCTION_EVIDENCE_WORKFLOW_AUTHORIZATION_MISSING");
+  const authorizationRun = executableRun(authorization);
+  for (const required of [
+    'test "$UNPROTECTED_REF_AUTHORIZED" = "true"',
+     '[[ "$AUTHORIZATION_SHA256" =~ ^[a-f0-9]{64}$ ]]',
+     'test "$AUTHORIZATION_SHA256" = "$APPROVAL_REFERENCE_SHA256"',
+     '[[ "$AUTHORIZED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]',
+     'test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA"',
+     'echo "- actor: $GITHUB_ACTOR"', 'echo "- run: $GITHUB_RUN_ID"',
+  ]) if (!authorizationRun.includes(required)) fail(`PRODUCTION_EVIDENCE_WORKFLOW_AUTHORIZATION_CONTRACT_MISSING:${required}`);
+  const download = findWorkflowStep(verifyJob, "下载受信 evidence artifact", "PRODUCTION_EVIDENCE_WORKFLOW_DOWNLOAD_MISSING");
+  if (download.with?.["run-id"] !== "${{ inputs.evidence_run_id }}" ||
+      download.with?.repository !== "${{ github.repository }}" ||
+      download.with?.name !== "${{ inputs.evidence_artifact_name }}") {
+    fail("PRODUCTION_EVIDENCE_WORKFLOW_DOWNLOAD_BINDING_INVALID");
   }
+  const evidenceVerify = findWorkflowStep(verifyJob, "重验 production evidence 与完整签名链", "PRODUCTION_EVIDENCE_WORKFLOW_VERIFY_STEP_MISSING");
+  const evidenceVerifyRun = executableRun(evidenceVerify);
+  for (const required of [
+    "node scripts/verify-production-evidence.mjs",
+    '--evidence .codex-tmp/production-evidence/production-evidence.json',
+    '--evidence-bundle .codex-tmp/production-evidence/production-evidence.attestation.json',
+    '--environment-id-sha256 "$ENVIRONMENT_ID_SHA256"',
+    '--approval-reference-sha256 "$APPROVAL_REFERENCE_SHA256"',
+    '--release-git-sha "$RELEASE_GIT_SHA"',
+    '--migration-bundle-sha256 "$MIGRATION_BUNDLE_SHA256"',
+    '--source-ref "$SOURCE_REF"',
+    '--manifest-signer-workflow "$MANIFEST_SIGNER_WORKFLOW"',
+    '--evidence-signer-workflow "$EVIDENCE_SIGNER_WORKFLOW"',
+  ]) if (!evidenceVerifyRun.includes(required)) fail(`PRODUCTION_EVIDENCE_WORKFLOW_VERIFY_CONTRACT_MISSING:${required}`);
   for (const required of [
     "actions: read",
     "contents: read",
     "packages: read",
     "permissions: {}",
-    "拒绝未受保护的验证来源",
-    "RELEASE_REF_NOT_PROTECTED",
+    "校验验证来源与显式批准绑定",
+    "UNPROTECTED_EVIDENCE_VERIFY_REF_CONFIRMATION_REQUIRED",
     "actions/download-artifact@",
     "run-id: ${{ inputs.evidence_run_id }}",
     "repository: ${{ github.repository }}",
@@ -568,7 +785,7 @@ function assertReleaseSupplyChainTests() {
       !rootTest.includes("npm run test:release-supply-chain")) {
     fail("RELEASE_SUPPLY_CHAIN_TEST_NOT_IN_QUALITY_SUITE");
   }
-  if (releaseTest !== "node --test scripts/release-profile-contract.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs scripts/production-evidence-collector.spec.mjs") {
+  if (releaseTest !== "node --test scripts/release-profile-contract.spec.mjs scripts/verify-dependency-licenses.spec.mjs scripts/verify-migration-integrity.spec.mjs scripts/verify-node-version.spec.mjs scripts/verify-public-page-sync.spec.mjs scripts/verify-release-images.spec.mjs scripts/verify-production-evidence.spec.mjs scripts/production-evidence-collector.spec.mjs") {
     fail("RELEASE_SUPPLY_CHAIN_TEST_COMMAND_INVALID");
   }
   return {
@@ -642,12 +859,14 @@ function verifyStaticContract() {
   };
 }
 
-function validateImageEntry(name, entry) {
+function validateImageEntry(name, entry, assuranceLevel) {
   if (!entry || typeof entry !== "object") fail(`RELEASE_MANIFEST_${name.toUpperCase()}_MISSING`);
-  const requiredKeys = [
-    "image", "digest", "reference", "signatureBundle", "provenanceBundle", "sbomBundle",
-    "provenancePredicateType", "sbomPredicateType",
-  ];
+  const requiredKeys = assuranceLevel === "high"
+    ? [
+        "image", "digest", "reference", "signatureBundle", "provenanceBundle", "sbomBundle",
+        "provenancePredicateType", "sbomPredicateType",
+      ]
+    : ["image", "digest", "reference", "buildkitProvenance", "sbom"];
   if (name === "operations") requiredKeys.push("runtimeExecutables");
   if (!hasExactKeys(entry, requiredKeys)) fail(`RELEASE_MANIFEST_${name.toUpperCase()}_SCHEMA_INVALID`);
   if (!imageNamePattern.test(entry.image ?? "")) {
@@ -660,31 +879,48 @@ function validateImageEntry(name, entry) {
       entry.reference !== `${entry.image}@${entry.digest}`) {
     fail(`RELEASE_MANIFEST_${name.toUpperCase()}_REFERENCE_INVALID`);
   }
-  if (entry.provenancePredicateType !== "https://slsa.dev/provenance/v1") {
+  if (assuranceLevel === "high" && entry.provenancePredicateType !== "https://slsa.dev/provenance/v1") {
     fail(`RELEASE_MANIFEST_${name.toUpperCase()}_PROVENANCE_POLICY_INVALID`);
   }
-  if (entry.sbomPredicateType !== "https://spdx.dev/Document") {
+  if (assuranceLevel === "high" && entry.sbomPredicateType !== "https://spdx.dev/Document") {
     fail(`RELEASE_MANIFEST_${name.toUpperCase()}_SBOM_POLICY_INVALID`);
   }
-  for (const [kind, expectedPath] of [
-    ["signature", `attestations/${name}-image.sigstore.json`],
-    ["provenance", `attestations/${name}-provenance.sigstore.json`],
-    ["sbom", `attestations/${name}-sbom.sigstore.json`],
-  ]) {
-    const descriptor = entry[`${kind}Bundle`];
+  const descriptors = assuranceLevel === "high"
+    ? [
+        ["signatureBundle", `attestations/${name}-image.sigstore.json`],
+        ["provenanceBundle", `attestations/${name}-provenance.sigstore.json`],
+        ["sbomBundle", `attestations/${name}-sbom.sigstore.json`],
+      ]
+    : [
+        ["buildkitProvenance", `provenance/${name}.buildkit.json`],
+        ["sbom", `sbom/${name}.spdx.json`],
+      ];
+  for (const [kind, expectedPath] of descriptors) {
+    const descriptor = entry[kind];
     if (!hasExactKeys(descriptor, ["path", "sha256"]) ||
         descriptor.path !== expectedPath ||
         !/^[a-f0-9]{64}$/.test(descriptor.sha256 ?? "")) {
-      fail(`RELEASE_MANIFEST_${name.toUpperCase()}_${kind.toUpperCase()}_BUNDLE_INVALID`);
+      const errorKind = kind.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase();
+      fail(`RELEASE_MANIFEST_${name.toUpperCase()}_${errorKind}_INVALID`);
     }
   }
 }
 
 export function validateReleaseManifest(manifest, expected) {
-  if (manifest?.schemaVersion !== 6) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest?.schemaVersion !== 9) fail("RELEASE_MANIFEST_SCHEMA_INVALID");
+  if (manifest.assuranceLevel !== "baseline" && manifest.assuranceLevel !== "high") {
+    fail("RELEASE_MANIFEST_ASSURANCE_LEVEL_INVALID");
+  }
   if (manifest.releaseStage !== "preproduction" && manifest.releaseStage !== "production") {
     fail("RELEASE_MANIFEST_STAGE_INVALID");
   }
+  const topLevelKeys = [
+    "schemaVersion", "assuranceLevel", "releaseStage", "imageTag", "gitSha",
+    "migrationBundleSha256", "source", "qualityGate", "releaseAuthorization",
+    "publicSeo", "server", "client", "operations",
+    manifest.assuranceLevel === "high" ? "attestationPolicy" : "baselinePolicy",
+  ];
+  if (!hasExactKeys(manifest, topLevelKeys)) fail("RELEASE_MANIFEST_TOP_LEVEL_SCHEMA_INVALID");
   if (!gitShaPattern.test(manifest.gitSha ?? "")) fail("RELEASE_MANIFEST_GIT_SHA_INVALID");
   if (manifest.gitSha !== expected.gitSha) fail("RELEASE_MANIFEST_GIT_SHA_MISMATCH");
   const expectedImageTag = manifest.releaseStage === "production"
@@ -705,52 +941,77 @@ export function validateReleaseManifest(manifest, expected) {
   }
   const quality = manifest.qualityGate;
   if (!quality || typeof quality !== "object") fail("RELEASE_MANIFEST_QUALITY_GATE_MISSING");
+  if (!hasExactKeys(quality, [
+    "workflow", "runId", "runUrl", "headSha", "headRef", "runAttempt", "profile",
+    "event", "conclusion", "proofArtifactId", "proofArtifactDigest", "proofSha256", "jobSet",
+  ])) fail("RELEASE_MANIFEST_QUALITY_GATE_SCHEMA_INVALID");
   if (quality.workflow !== "quality.yml") fail("RELEASE_MANIFEST_QUALITY_WORKFLOW_INVALID");
   if (!Number.isSafeInteger(quality.runId) || quality.runId <= 0) {
     fail("RELEASE_MANIFEST_QUALITY_RUN_ID_INVALID");
   }
   if (quality.headSha !== manifest.gitSha) fail("RELEASE_MANIFEST_QUALITY_SHA_MISMATCH");
-  if (quality.event !== "push" || quality.conclusion !== "success") {
+  if (!/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(quality.headRef ?? "") ||
+      !Number.isSafeInteger(quality.runAttempt) || quality.runAttempt <= 0 ||
+      quality.profile !== "full" || quality.event !== "push" || quality.conclusion !== "success" ||
+      !Number.isSafeInteger(quality.proofArtifactId) || quality.proofArtifactId <= 0 ||
+      !digestPattern.test(quality.proofArtifactDigest ?? "") ||
+      !/^[a-f0-9]{64}$/.test(quality.proofSha256 ?? "") ||
+      JSON.stringify(quality.jobSet) !== JSON.stringify(["verify", "e2e-deterministic", "real-mysql"])) {
     fail("RELEASE_MANIFEST_QUALITY_RESULT_INVALID");
   }
   if (quality.runUrl !== `${manifest.source}/actions/runs/${quality.runId}`) {
     fail("RELEASE_MANIFEST_QUALITY_RUN_URL_INVALID");
   }
-  const policy = manifest.attestationPolicy;
-  if (!policy || typeof policy !== "object") fail("RELEASE_MANIFEST_ATTESTATION_POLICY_MISSING");
-  if (!hasExactKeys(policy, [
-    "signingSystem", "cosignVersion", "bundleMediaType", "signerWorkflow", "signerIdentity",
-    "certificateOidcIssuer", "sourceRef", "sourceDigest", "imageSignaturesVerified",
-    "imageAttestationsVerified", "provenancePredicateType", "sbomPredicateType",
-    "manifestPredicateType",
-  ])) fail("RELEASE_MANIFEST_ATTESTATION_POLICY_SCHEMA_INVALID");
   const sourceUrl = new URL(manifest.source);
   const repositoryPath = sourceUrl.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
-  const expectedSigner = `github.com/${repositoryPath}/.github/workflows/release-images.yml`;
-  if (policy.signerWorkflow?.toLowerCase() !== expectedSigner) {
-    fail("RELEASE_MANIFEST_SIGNER_WORKFLOW_INVALID");
+  const authorization = manifest.releaseAuthorization;
+  if (!hasExactKeys(authorization, ["mode", "approvalSha256", "sourceSha", "actor", "runId"]) ||
+       !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(authorization.actor ?? "") ||
+       !Number.isSafeInteger(authorization.runId) || authorization.runId <= 0 ||
+       (authorization.mode === "explicit-unprotected-ref"
+         ? !/^[a-f0-9]{64}$/.test(authorization.approvalSha256 ?? "") || authorization.sourceSha !== manifest.gitSha
+         : authorization.mode !== "protected-ref" || authorization.approvalSha256 !== null || authorization.sourceSha !== null)) {
+    fail("RELEASE_MANIFEST_AUTHORIZATION_INVALID");
   }
-  if (!/^refs\/(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(policy.sourceRef ?? "") ||
-      policy.sourceRef.includes("..") || policy.sourceRef.includes("//")) {
-    fail("RELEASE_MANIFEST_SOURCE_REF_INVALID");
-  }
-  if (policy.signerIdentity?.toLowerCase() !== `https://${expectedSigner}@${policy.sourceRef}`) {
-    fail("RELEASE_MANIFEST_SIGNER_IDENTITY_INVALID");
-  }
-  if (policy.sourceDigest !== manifest.gitSha) fail("RELEASE_MANIFEST_ATTESTATION_SHA_MISMATCH");
-  if (policy.signingSystem !== "sigstore-cosign-keyless" ||
-      policy.cosignVersion !== "v3.1.3" ||
-      policy.bundleMediaType !== "application/vnd.dev.sigstore.bundle.v0.3+json" ||
-      policy.certificateOidcIssuer !== "https://token.actions.githubusercontent.com" ||
-      policy.imageSignaturesVerified !== true ||
-      policy.imageAttestationsVerified !== true ||
-      policy.provenancePredicateType !== "https://slsa.dev/provenance/v1" ||
-      policy.sbomPredicateType !== "https://spdx.dev/Document" ||
-      policy.manifestPredicateType !== "https://slsa.dev/provenance/v1") {
-    fail("RELEASE_MANIFEST_ATTESTATION_POLICY_INVALID");
+  if (manifest.assuranceLevel === "high") {
+    if (manifest.baselinePolicy !== undefined) fail("RELEASE_MANIFEST_HIGH_BASELINE_POLICY_FORBIDDEN");
+    const policy = manifest.attestationPolicy;
+    if (!policy || typeof policy !== "object") fail("RELEASE_MANIFEST_ATTESTATION_POLICY_MISSING");
+    if (!hasExactKeys(policy, [
+      "signingSystem", "cosignVersion", "bundleMediaType", "signerWorkflow", "signerIdentity",
+      "certificateOidcIssuer", "sourceRef", "sourceDigest", "imageSignaturesVerified",
+      "imageAttestationsVerified", "provenancePredicateType", "sbomPredicateType",
+      "manifestPredicateType",
+    ])) fail("RELEASE_MANIFEST_ATTESTATION_POLICY_SCHEMA_INVALID");
+    const expectedSigner = `github.com/${repositoryPath}/.github/workflows/release-images.yml`;
+    if (policy.signerWorkflow?.toLowerCase() !== expectedSigner) fail("RELEASE_MANIFEST_SIGNER_WORKFLOW_INVALID");
+    if (!/^refs\/(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(policy.sourceRef ?? "") ||
+        policy.sourceRef.includes("..") || policy.sourceRef.includes("//")) fail("RELEASE_MANIFEST_SOURCE_REF_INVALID");
+    if (policy.signerIdentity?.toLowerCase() !== `https://${expectedSigner}@${policy.sourceRef}`) fail("RELEASE_MANIFEST_SIGNER_IDENTITY_INVALID");
+    if (quality.headRef !== policy.sourceRef) fail("RELEASE_MANIFEST_QUALITY_REF_MISMATCH");
+    if (policy.sourceDigest !== manifest.gitSha) fail("RELEASE_MANIFEST_ATTESTATION_SHA_MISMATCH");
+    if (policy.signingSystem !== "sigstore-cosign-keyless" || policy.cosignVersion !== "v3.1.3" ||
+        policy.bundleMediaType !== "application/vnd.dev.sigstore.bundle.v0.3+json" ||
+        policy.certificateOidcIssuer !== "https://token.actions.githubusercontent.com" ||
+        policy.imageSignaturesVerified !== true || policy.imageAttestationsVerified !== true ||
+        policy.provenancePredicateType !== "https://slsa.dev/provenance/v1" ||
+        policy.sbomPredicateType !== "https://spdx.dev/Document" ||
+        policy.manifestPredicateType !== "https://slsa.dev/provenance/v1") fail("RELEASE_MANIFEST_ATTESTATION_POLICY_INVALID");
+  } else {
+    if (manifest.attestationPolicy !== undefined) fail("RELEASE_MANIFEST_BASELINE_ATTESTATION_FORBIDDEN");
+    const policy = manifest.baselinePolicy;
+    if (!hasExactKeys(policy, [
+      "artifactSystem", "publicTransparencyLog", "immutableImageDigests",
+      "buildkitProvenanceIncluded", "sbomIncluded",
+    ]) || policy.artifactSystem !== "github-actions-private-artifact" ||
+        policy.publicTransparencyLog !== false || policy.immutableImageDigests !== true ||
+        policy.buildkitProvenanceIncluded !== true || policy.sbomIncluded !== true) {
+      fail("RELEASE_MANIFEST_BASELINE_POLICY_INVALID");
+    }
   }
   const publicSeo = manifest.publicSeo;
   if (!hasExactKeys(publicSeo, [
+    "origin",
     "sourceStage",
     "snapshotHash",
     "prerenderManifestSha256",
@@ -758,8 +1019,18 @@ export function validateReleaseManifest(manifest, expected) {
     "sourceArtifactDigest",
     "sourceKind",
     "contentReady",
+    "pageDocuments",
   ])) {
     fail("RELEASE_MANIFEST_PUBLIC_SEO_SCHEMA_INVALID");
+  }
+  let normalizedPublicSeoOrigin;
+  try {
+    normalizedPublicSeoOrigin = normalizeProductionOrigin(publicSeo.origin);
+  } catch {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_ORIGIN_INVALID");
+  }
+  if (normalizedPublicSeoOrigin !== publicSeo.origin) {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_ORIGIN_INVALID");
   }
   if (publicSeo.sourceStage !== manifest.releaseStage ||
       !/^[a-f0-9]{64}$/.test(publicSeo.snapshotHash) ||
@@ -783,9 +1054,35 @@ export function validateReleaseManifest(manifest, expected) {
   if (manifest.releaseStage === "production" && (!publicSeo.contentReady || publicSeo.sourceKind !== "approved-snapshot")) {
     fail("RELEASE_MANIFEST_PRODUCTION_CONTENT_NOT_READY");
   }
-  validateImageEntry("server", manifest.server);
-  validateImageEntry("client", manifest.client);
-  validateImageEntry("operations", manifest.operations);
+  const requiredPagePaths = {
+    about: "/about",
+    catalog: "/catalog",
+    contact: "/contact",
+    custom: "/custom",
+    home: "/",
+    products: "/products",
+  };
+  const expectedPageKeys = Object.keys(requiredPagePaths);
+  if (!Array.isArray(publicSeo.pageDocuments)) {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_PAGES_INVALID");
+  }
+  if (!publicSeo.contentReady) {
+    if (publicSeo.pageDocuments.length !== 0) fail("RELEASE_MANIFEST_PUBLIC_SEO_PAGES_INVALID");
+  } else if (
+    publicSeo.pageDocuments.length !== expectedPageKeys.length
+    || publicSeo.pageDocuments.some((page, index) => {
+      const pageKey = expectedPageKeys[index];
+      return !hasExactKeys(page, ["pageKey", "path", "contentHash"])
+        || page.pageKey !== pageKey
+        || page.path !== requiredPagePaths[pageKey]
+        || !/^[a-f0-9]{64}$/.test(page.contentHash ?? "");
+    })
+  ) {
+    fail("RELEASE_MANIFEST_PUBLIC_SEO_PAGES_INVALID");
+  }
+  validateImageEntry("server", manifest.server, manifest.assuranceLevel);
+  validateImageEntry("client", manifest.client, manifest.assuranceLevel);
+  validateImageEntry("operations", manifest.operations, manifest.assuranceLevel);
   if (!Array.isArray(manifest.operations.runtimeExecutables) ||
       manifest.operations.runtimeExecutables.length !== operationsRuntimeExecutables.length ||
       manifest.operations.runtimeExecutables.some(
@@ -802,6 +1099,54 @@ export function validateReleaseManifest(manifest, expected) {
   return manifest;
 }
 
+export function verifyReleaseBundleDescriptors(manifest, releaseRoot) {
+  const root = resolve(releaseRoot);
+  let canonicalRoot;
+  try {
+    canonicalRoot = realpathSync(root);
+  } catch {
+    fail("RELEASE_BUNDLE_ROOT_INVALID");
+  }
+  let verifiedFileCount = 0;
+  for (const component of ["server", "client", "operations"]) {
+    const descriptors = manifest.assuranceLevel === "high"
+      ? [
+          ["signatureBundle", manifest[component].signatureBundle],
+          ["provenanceBundle", manifest[component].provenanceBundle],
+          ["sbomBundle", manifest[component].sbomBundle],
+        ]
+      : [
+          ["buildkitProvenance", manifest[component].buildkitProvenance],
+          ["sbom", manifest[component].sbom],
+        ];
+    for (const [kind, descriptor] of descriptors) {
+      const code = `RELEASE_BUNDLE_${component.toUpperCase()}_${kind.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}`;
+      const absolutePath = resolve(root, descriptor.path);
+      const relativePath = relative(root, absolutePath);
+      if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+        fail(`${code}_PATH_INVALID`);
+      }
+      let stat;
+      let canonicalPath;
+      try {
+        stat = lstatSync(absolutePath);
+        canonicalPath = realpathSync(absolutePath);
+      } catch {
+        fail(`${code}_FILE_INVALID`);
+      }
+      if (!stat.isFile() || stat.isSymbolicLink()) fail(`${code}_FILE_INVALID`);
+      const canonicalRelativePath = relative(canonicalRoot, canonicalPath);
+      if (!canonicalRelativePath || canonicalRelativePath.startsWith("..") || isAbsolute(canonicalRelativePath)) {
+        fail(`${code}_PATH_INVALID`);
+      }
+      const actualSha256 = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
+      if (actualSha256 !== descriptor.sha256) fail(`${code}_HASH_MISMATCH`);
+      verifiedFileCount += 1;
+    }
+  }
+  return { verifiedFileCount };
+}
+
 function readAndValidateManifest(path) {
   const absolutePath = resolve(projectRoot, path);
   const relativePath = relative(projectRoot, absolutePath);
@@ -810,11 +1155,13 @@ function readAndValidateManifest(path) {
   }
   if (!existsSync(absolutePath)) fail(`RELEASE_MANIFEST_MISSING:${path}`);
   const manifest = JSON.parse(readFileSync(absolutePath, "utf8"));
-  return validateReleaseManifest(manifest, {
+  const validated = validateReleaseManifest(manifest, {
     gitSha: currentGitSha(),
     migrationBundleSha256: repositoryMigrationBundleSha256(),
     releaseStage: "production",
   });
+  verifyReleaseBundleDescriptors(validated, dirname(absolutePath));
+  return validated;
 }
 
 function inspectImageField(reference, format) {
@@ -897,6 +1244,7 @@ function imageReferenceFromEnvironment(env, component) {
 }
 
 export function validateReleaseEnvironment(env, manifest) {
+  if (!isReleaseProfile(env.RELEASE_PROFILE)) fail("ENV_RELEASE_PROFILE_INVALID");
   for (const component of ["server", "client", "operations"]) {
     const reference = imageReferenceFromEnvironment(env, component);
     if (reference !== manifest[component].reference) fail(`ENV_${component.toUpperCase()}_IMAGE_MANIFEST_MISMATCH`);

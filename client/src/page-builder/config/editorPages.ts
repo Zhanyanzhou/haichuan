@@ -14,7 +14,8 @@ import {
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   dynamicTemplateVersionKey,
   readResolvedDynamicTemplateDefinitions,
-} from "@/page-builder/dynamic-template-instance";
+} from "@/page-builder/dynamic-template-instance/types";
+import { hasExplicitDynamicTemplateInstanceImage } from "@/page-builder/dynamic-template-instance/mediaReferences";
 import type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
 export const EDITOR_PAGE_KEYS = [
@@ -61,7 +62,7 @@ export const editorPages: EditorPageDefinition[] = [
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
-      eyebrow: "HAICHUAN JEWELRY",
+      eyebrow: "海川珠宝",
       title: "首页正在准备",
       description: "首页内容正在整理。您可以先进入选款中心浏览当前公开款式，或了解珠宝定制服务。",
       primaryAction: { label: "进入选款中心", href: "/catalog" },
@@ -76,7 +77,7 @@ export const editorPages: EditorPageDefinition[] = [
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
-      eyebrow: "ABOUT HAICHUAN",
+      eyebrow: "关于海川",
       title: "关于海川",
       description:
         "品牌、作品与工艺资料正在核验。您可以先浏览当前公开款式，或预约珠宝顾问了解更多。",
@@ -92,12 +93,12 @@ export const editorPages: EditorPageDefinition[] = [
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
-      eyebrow: "CURATED EXHIBITION",
+      eyebrow: "作品展陈",
       title: "珠宝作品正在策展",
       description:
         "我们正在完成作品资料与材质工艺内容的审核。您可以先浏览当前已公开款式，或预约珠宝顾问获得协助。",
       primaryAction: { label: "进入选款中心", href: "/catalog" },
-      secondaryAction: { label: "预约珠宝顾问", href: "/contact" },
+      secondaryAction: { label: "预约珠宝顾问", href: "/contact?type=product" },
     },
   },
   {
@@ -122,7 +123,7 @@ export const editorPages: EditorPageDefinition[] = [
     mode: "brand",
     headerMode: "overlay-light",
     publicFallback: {
-      eyebrow: "BESPOKE SERVICE",
+      eyebrow: "定制服务",
       title: "珠宝定制",
       description:
         "定制内容正在整理。您可以先提交咨询需求，由珠宝顾问了解您的佩戴场景与偏好。",
@@ -184,12 +185,32 @@ export function isContentTemplateBlockPublicReady(block: {
 }
 
 /** 判断区块是否至少具备一项会在前台形成可见输出的合同内容。 */
-export function isContentTemplateBlockPublicRenderable(block: {
-  type?: string;
-  props?: Record<string, unknown>;
-} | undefined) {
+export function isContentTemplateBlockPublicRenderable(
+  block: {
+    type?: string;
+    props?: Record<string, unknown>;
+  } | undefined,
+  document?: {
+    [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]?: unknown;
+  } | null,
+) {
   if (!block || !isContentTemplateBlockPublicReady(block)) return false;
-  if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) return true;
+  if (block.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+    const templateId = typeof block.props?.templateId === "string" ? block.props.templateId : "";
+    const templateVersion = Number(block.props?.templateVersion);
+    const resolved = readResolvedDynamicTemplateDefinitions(
+      document?.[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
+    )[dynamicTemplateVersionKey(templateId, templateVersion)];
+    if (!resolved) return false;
+    const hiddenSlotIds = Array.isArray(block.props?.hiddenSlotIds)
+      ? block.props.hiddenSlotIds.filter((id): id is string => typeof id === "string")
+      : [];
+    return hasExplicitDynamicTemplateInstanceImage(
+      resolved.definition,
+      block.props?.contentBySlotId,
+      hiddenSlotIds,
+    );
+  }
   const contract = getContentTemplateContract(block.type || "");
   if (!contract) return false;
   const props = block.props ?? {};
@@ -230,6 +251,9 @@ export function resolvePageHeaderMode(
     (block) => block?.props?.isVisible !== false && block?.type !== "业务功能区",
   );
   if (firstVisible?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+    if (!isContentTemplateBlockPublicRenderable(firstVisible, data)) {
+      return rule.headerMode.fallback;
+    }
     const templateId = typeof firstVisible.props?.templateId === "string"
       ? firstVisible.props.templateId
       : "";
@@ -243,7 +267,7 @@ export function resolvePageHeaderMode(
   }
   const contract = getContentTemplateContract(firstVisible?.type || "");
   return contract?.key === rule.headerMode.overlayRequiresFirstTemplate
-    && isContentTemplateBlockPublicRenderable(firstVisible)
+    && isContentTemplateBlockPublicRenderable(firstVisible, data)
     ? "overlay-light"
     : rule.headerMode.fallback;
 }

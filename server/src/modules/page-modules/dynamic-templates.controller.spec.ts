@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import {
   GUARDS_METADATA,
+  HEADERS_METADATA,
   METHOD_METADATA,
   PATH_METADATA,
   ROUTE_ARGS_METADATA,
@@ -25,6 +26,7 @@ import {
   CreateDynamicTemplateDto,
   PublishDynamicTemplateDto,
   RebuildDynamicTemplateDraftFromPublishedDto,
+  UpdateDynamicTemplateCatalogCoverDto,
   UpdateDynamicTemplateDraftDto,
 } from "./dto/dynamic-template.dto";
 import { definitionFixture } from "./dynamic-template-test-fixture";
@@ -33,12 +35,15 @@ import { DynamicTemplatesController } from "./dynamic-templates.controller";
 type ServiceMethod =
   | "archive"
   | "create"
+  | "ensureConsultationStarters"
   | "getDraft"
   | "getPublishedVersion"
+  | "listCatalog"
   | "listMine"
   | "listPublished"
   | "publish"
   | "rebuildDraftFromPublished"
+  | "updateCatalogCover"
   | "updateDraft";
 
 type RecordedCall = {
@@ -62,17 +67,26 @@ function createHarness(options: {
   const service = {
     archive: record("archive", options.service?.archive),
     create: record("create", options.service?.create),
+    ensureConsultationStarters: record(
+      "ensureConsultationStarters",
+      options.service?.ensureConsultationStarters,
+    ),
     getDraft: record("getDraft", options.service?.getDraft),
     getPublishedVersion: record(
       "getPublishedVersion",
       options.service?.getPublishedVersion,
     ),
+    listCatalog: record("listCatalog", options.service?.listCatalog),
     listMine: record("listMine", options.service?.listMine),
     listPublished: record("listPublished", options.service?.listPublished),
     publish: record("publish", options.service?.publish),
     rebuildDraftFromPublished: record(
       "rebuildDraftFromPublished",
       options.service?.rebuildDraftFromPublished,
+    ),
+    updateCatalogCover: record(
+      "updateCatalogCover",
+      options.service?.updateCatalogCover,
     ),
     updateDraft: record("updateDraft", options.service?.updateDraft),
   };
@@ -82,8 +96,12 @@ function createHarness(options: {
   };
 }
 
+function staffPrincipal(id: number, role: "SUPER_ADMIN" | "ADMIN" | "EDITOR") {
+  return { id, role, sessionFamilyId: `staff-family-${id}` };
+}
+
 function staffRequest(id: number, role: "SUPER_ADMIN" | "ADMIN" | "EDITOR") {
-  return { user: { id, role } } as never;
+  return { user: staffPrincipal(id, role) } as never;
 }
 
 function callsFor(calls: RecordedCall[], method: RecordedCall["method"]) {
@@ -129,8 +147,10 @@ test("动态模板 Controller 保持模板草稿、发布与目录路由形状",
       RequestMethod.GET,
     ],
     ["listMine", "mine", RequestMethod.GET],
+    ["ensureConsultationStarters", "consultation-starters", RequestMethod.POST],
     ["create", "/", RequestMethod.POST],
     ["getDraft", ":templateId/draft", RequestMethod.GET],
+    ["updateCatalogCover", ":templateId/catalog-cover", RequestMethod.PATCH],
     ["updateDraft", ":templateId/draft", RequestMethod.PATCH],
     [
       "rebuildDraftFromPublished",
@@ -181,12 +201,18 @@ test("create、updateDraft、publish、archive 使用明确 DTO 与 Param/Body �
     DynamicTemplatesController.prototype,
     "archive",
   ) as unknown[];
+  const coverTypes = Reflect.getMetadata(
+    "design:paramtypes",
+    DynamicTemplatesController.prototype,
+    "updateCatalogCover",
+  ) as unknown[];
 
   assert.equal(createTypes[0], CreateDynamicTemplateDto);
   assert.equal(updateTypes[1], UpdateDynamicTemplateDraftDto);
   assert.equal(rebuildTypes[1], RebuildDynamicTemplateDraftFromPublishedDto);
   assert.equal(publishTypes[1], PublishDynamicTemplateDto);
   assert.equal(archiveTypes[1], ArchiveDynamicTemplateDto);
+  assert.equal(coverTypes[1], UpdateDynamicTemplateCatalogCoverDto);
   assertRouteArgument("create", BODY, 0);
   assertRouteArgument("updateDraft", PARAM, 0, "templateId");
   assertRouteArgument("updateDraft", BODY, 1);
@@ -201,6 +227,8 @@ test("create、updateDraft、publish、archive 使用明确 DTO 与 Param/Body �
   assertRouteArgument("listVersions", QUERY, 3, "limit");
   assertRouteArgument("archive", PARAM, 0, "templateId");
   assertRouteArgument("archive", BODY, 1);
+  assertRouteArgument("updateCatalogCover", PARAM, 0, "templateId");
+  assertRouteArgument("updateCatalogCover", BODY, 1);
   assert.equal((DynamicTemplatesController.prototype as any).saveAs, undefined);
   assertRouteArgument("restore", PARAM, 0, "templateId");
   assertRouteArgument("deleteDraft", PARAM, 0, "templateId");
@@ -223,8 +251,64 @@ test("archive 将 Repository 草稿身份原样委托 service", async () => {
     response,
   );
   assert.deepEqual(callsFor(harness.calls, "archive"), [
-    { method: "archive", args: [41, "tpl_archive", body] },
+    { method: "archive", args: [staffPrincipal(41, "SUPER_ADMIN"), "tpl_archive", body] },
   ]);
+});
+
+test("updateCatalogCover 将预览图原样委托 service", async () => {
+  const response = {
+    templateId: "tpl_cover",
+    catalogCoverUrl: "/uploads/page-assets/cover.jpg",
+  };
+  const harness = createHarness({
+    service: { updateCatalogCover: async () => response },
+  });
+  const body = Object.assign(new UpdateDynamicTemplateCatalogCoverDto(), {
+    catalogCoverUrl: "/uploads/page-assets/cover.jpg",
+  });
+
+  assert.equal(
+    await harness.controller.updateCatalogCover(
+      "tpl_cover",
+      body,
+      staffRequest(41, "SUPER_ADMIN"),
+    ),
+    response,
+  );
+  assert.deepEqual(callsFor(harness.calls, "updateCatalogCover"), [
+    { method: "updateCatalogCover", args: [staffPrincipal(41, "SUPER_ADMIN"), "tpl_cover", body] },
+  ]);
+});
+
+test("组件库预览图 DTO 接受本站路径或清空，拒绝缺字段", async () => {
+  const pipe = new ValidationPipe({
+    transform: true,
+    transformOptions: { enableImplicitConversion: true },
+    whitelist: true,
+  });
+  const cleared = await pipe.transform({
+    catalogCoverUrl: null,
+  }, {
+    data: undefined,
+    metatype: UpdateDynamicTemplateCatalogCoverDto,
+    type: "body",
+  });
+  assert.equal(cleared.catalogCoverUrl, null);
+
+  const uploaded = await pipe.transform({
+    catalogCoverUrl: "/uploads/page-assets/cover.jpg",
+  }, {
+    data: undefined,
+    metatype: UpdateDynamicTemplateCatalogCoverDto,
+    type: "body",
+  });
+  assert.equal(uploaded.catalogCoverUrl, "/uploads/page-assets/cover.jpg");
+
+  await assert.rejects(() => pipe.transform({}, {
+    data: undefined,
+    metatype: UpdateDynamicTemplateCatalogCoverDto,
+    type: "body",
+  }));
 });
 
 test("类级员工守卫与角色、mine/draft 的 SUPER_ADMIN 加严边界保持不变", () => {
@@ -247,9 +331,11 @@ test("类级员工守卫与角色、mine/draft 的 SUPER_ADMIN 加严边界保�
   );
   for (const handler of [
     DynamicTemplatesController.prototype.listMine,
+    DynamicTemplatesController.prototype.ensureConsultationStarters,
     DynamicTemplatesController.prototype.getDraft,
     DynamicTemplatesController.prototype.create,
     DynamicTemplatesController.prototype.updateDraft,
+    DynamicTemplatesController.prototype.updateCatalogCover,
     DynamicTemplatesController.prototype.publish,
     DynamicTemplatesController.prototype.rebuildDraftFromPublished,
     DynamicTemplatesController.prototype.listVersions,
@@ -258,6 +344,28 @@ test("类级员工守卫与角色、mine/draft 的 SUPER_ADMIN 加严边界保�
     DynamicTemplatesController.prototype.deleteDraft,
   ]) {
     assert.deepEqual(Reflect.getMetadata(ROLES_KEY, handler), ["SUPER_ADMIN"]);
+  }
+});
+
+test("员工母模板读取禁止共享缓存并按身份区分", () => {
+  for (const method of [
+    DynamicTemplatesController.prototype.listCatalog,
+    DynamicTemplatesController.prototype.listPublished,
+    DynamicTemplatesController.prototype.getPublishedVersion,
+    DynamicTemplatesController.prototype.listMine,
+    DynamicTemplatesController.prototype.getDraft,
+    DynamicTemplatesController.prototype.listVersions,
+  ]) {
+    const headers = Reflect.getMetadata(HEADERS_METADATA, method) as Array<{
+      name: string;
+      value: string;
+    }>;
+    assert.ok(headers.some((header) => (
+      header.name === "Cache-Control" && header.value === "private, no-store, max-age=0"
+    )));
+    assert.ok(headers.some((header) => (
+      header.name === "Vary" && header.value === "Cookie, Authorization"
+    )));
   }
 });
 
@@ -291,10 +399,10 @@ test("create/updateDraft 把同一 TemplateDefinitionV2 DTO 交给 service，不
     updated,
   );
   assert.deepEqual(callsFor(harness.calls, "create"), [
-    { method: "create", args: [41, createBody] },
+    { method: "create", args: [staffPrincipal(41, "SUPER_ADMIN"), createBody] },
   ]);
   assert.deepEqual(callsFor(harness.calls, "updateDraft"), [
-    { method: "updateDraft", args: [41, definition.templateId, updateBody] },
+    { method: "updateDraft", args: [staffPrincipal(41, "SUPER_ADMIN"), definition.templateId, updateBody] },
   ]);
   assert.equal(createBody.definition, definition);
   assert.equal(updateBody.definition, definition);
@@ -329,7 +437,7 @@ test("重建草稿端点只委托客户端提供的精确正式版本身份", as
   );
   assert.deepEqual(callsFor(harness.calls, "rebuildDraftFromPublished"), [{
     method: "rebuildDraftFromPublished",
-    args: [41, "tpl_rebuild", body],
+    args: [staffPrincipal(41, "SUPER_ADMIN"), "tpl_rebuild", body],
   }]);
 });
 
@@ -369,8 +477,12 @@ test("catalog 只组合统一 Repository 的正式版本与可编辑草稿", asy
   const editable = { templateId: "tpl_editable", draft: { revision: 2 } };
   const harness = createHarness({
     service: {
-      listMine: async () => [editable],
-      listPublished: async () => [published],
+      listCatalog: async () => ({
+        items: [
+          { kind: "published", template: published },
+          { kind: "editable", template: editable },
+        ],
+      }),
     },
   });
 
@@ -381,10 +493,10 @@ test("catalog 只组合统一 Repository 的正式版本与可编辑草稿", asy
       { kind: "editable", template: editable },
     ],
   });
-  assert.equal(callsFor(harness.calls, "listPublished").length, 1);
-  assert.deepEqual(callsFor(harness.calls, "listMine"), [
-    { method: "listMine", args: [52] },
+  assert.deepEqual(callsFor(harness.calls, "listCatalog"), [
+    { method: "listCatalog", args: [staffPrincipal(52, "SUPER_ADMIN")] },
   ]);
+  assert.equal(callsFor(harness.calls, "ensureConsultationStarters").length, 0);
 
   const interceptor = new TransformInterceptor({ get: () => false } as never);
   const context = {
@@ -409,15 +521,17 @@ test("catalog 只组合统一 Repository 的正式版本与可编辑草稿", asy
 
 test("ADMIN 目录不读取 SUPER_ADMIN 私有草稿", async () => {
   const harness = createHarness({
-    service: { listPublished: async () => [] },
+    service: { listCatalog: async () => ({ items: [] }) },
   });
 
   assert.deepEqual(
     await harness.controller.listCatalog(staffRequest(63, "ADMIN")),
     { items: [] },
   );
-  assert.equal(callsFor(harness.calls, "listMine").length, 0);
-  assert.equal(callsFor(harness.calls, "listPublished").length, 1);
+  assert.equal(callsFor(harness.calls, "ensureConsultationStarters").length, 0);
+  assert.deepEqual(callsFor(harness.calls, "listCatalog"), [
+    { method: "listCatalog", args: [staffPrincipal(63, "ADMIN")] },
+  ]);
 });
 
 test("published/exact-version/mine/draft 保留 service 返回的精确资源身份", async () => {
@@ -439,21 +553,34 @@ test("published/exact-version/mine/draft 保留 service 返回的精确资源身
     },
   });
 
-  assert.equal(await harness.controller.listPublished(), published);
-  assert.equal(await harness.controller.getPublishedVersion("tpl_precise", "7"), exact);
+  assert.equal(
+    await harness.controller.listPublished(staffRequest(74, "SUPER_ADMIN")),
+    published,
+  );
+  assert.equal(
+    await harness.controller.getPublishedVersion(
+      "tpl_precise",
+      "7",
+      staffRequest(74, "SUPER_ADMIN"),
+    ),
+    exact,
+  );
   assert.equal(await harness.controller.listMine(staffRequest(74, "SUPER_ADMIN")), mine);
   assert.equal(
     await harness.controller.getDraft("tpl_mine", staffRequest(74, "SUPER_ADMIN")),
     draft,
   );
   assert.deepEqual(callsFor(harness.calls, "getPublishedVersion"), [
-    { method: "getPublishedVersion", args: ["tpl_precise", 7] },
+    {
+      method: "getPublishedVersion",
+      args: [staffPrincipal(74, "SUPER_ADMIN"), "tpl_precise", 7],
+    },
   ]);
   assert.deepEqual(callsFor(harness.calls, "listMine"), [
-    { method: "listMine", args: [74] },
+    { method: "listMine", args: [staffPrincipal(74, "SUPER_ADMIN")] },
   ]);
   assert.deepEqual(callsFor(harness.calls, "getDraft"), [
-    { method: "getDraft", args: [74, "tpl_mine"] },
+    { method: "getDraft", args: [staffPrincipal(74, "SUPER_ADMIN"), "tpl_mine"] },
   ]);
 });
 
@@ -489,7 +616,7 @@ test("publish 原样委托 strict payload，并允许 draft:null 保留 publishe
   assert.equal(result.published.definitionChecksum, expectedChecksum);
   assert.equal(result.published.definition.templateId, "tpl_publish");
   assert.deepEqual(callsFor(harness.calls, "publish"), [
-    { method: "publish", args: [85, "tpl_publish", body] },
+    { method: "publish", args: [staffPrincipal(85, "SUPER_ADMIN"), "tpl_publish", body] },
   ]);
 });
 
@@ -515,8 +642,8 @@ test("Controller 不把双次 publish 调用伪装成幂等，仅逐次委托 se
     { attempt: 2 },
   );
   assert.deepEqual(callsFor(harness.calls, "publish"), [
-    { method: "publish", args: [96, "tpl_twice", body] },
-    { method: "publish", args: [96, "tpl_twice", body] },
+    { method: "publish", args: [staffPrincipal(96, "SUPER_ADMIN"), "tpl_twice", body] },
+    { method: "publish", args: [staffPrincipal(96, "SUPER_ADMIN"), "tpl_twice", body] },
   ]);
 });
 
@@ -558,7 +685,11 @@ test("service 的 403/409/NotFound 异常不被 Controller 折叠成成功", asy
     (error) => error === conflict,
   );
   await assert.rejects(
-    harness.controller.getPublishedVersion("tpl_errors", "9"),
+    harness.controller.getPublishedVersion(
+      "tpl_errors",
+      "9",
+      staffRequest(107, "SUPER_ADMIN"),
+    ),
     (error) => error === missing,
   );
   assert.equal(callsFor(harness.calls, "publish").length, 1);
@@ -628,7 +759,10 @@ test("生产 ValidationPipe 剥离未知 checksum 字段且 service 只收到官
     published,
   );
   assert.deepEqual(callsFor(harness.calls, "publish"), [
-    { method: "publish", args: [118, "tpl_whitelist", expectedBody] },
+    {
+      method: "publish",
+      args: [staffPrincipal(118, "SUPER_ADMIN"), "tpl_whitelist", expectedBody],
+    },
   ]);
 });
 

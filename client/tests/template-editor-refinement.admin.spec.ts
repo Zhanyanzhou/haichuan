@@ -116,7 +116,7 @@ test("并排预览收在视图辅助，布局导航为中文且查看不改草�
   await expect(page.getByRole("button", { name: "多设备并排预览", exact: true })).toBeHidden();
   await page.getByRole("button", { name: /^视图辅助/ }).click();
   await page.getByRole("group", { name: "画布视图辅助" }).getByRole("button", { name: "多设备并排预览", exact: true }).click();
-  await expect(page.locator(".template-breakpoint-comparison__card iframe")).toHaveCount(3);
+  await expect(page.locator(".template-breakpoint-comparison__card iframe")).toHaveCount(2);
   await page.getByRole("button", { name: "返回单画布编辑", exact: true }).click();
   await expect(page.locator("iframe.template-editor__viewport-frame")).toHaveCount(1);
   expect(stableAuthoringFacts(await readSession(page))).toEqual(before);

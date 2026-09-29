@@ -51,6 +51,7 @@ import { SessionSecurityModule } from "./common/security/session-security.module
 import { validateRuntimeEnvironment } from "./common/config/runtime-environment";
 import { createPinoHttpOptions } from "./common/observability/pino-http-options";
 import { HealthModule } from "./common/health/health.module";
+import { PaymentProofsModule } from "./modules/payment-proofs/payment-proofs.module";
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { HealthModule } from "./common/health/health.module";
     AttributesModule,
     ProductsModule,
     UploadModule,
+    PaymentProofsModule,
     GoldPriceModule,
     InventoryModule,
     OrdersModule,

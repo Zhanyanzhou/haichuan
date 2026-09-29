@@ -412,10 +412,18 @@ export default function EditableTargetOverlay({
   const marqueeRef = useRef<{ pointerId: number; start: { x: number; y: number }; end: { x: number; y: number }; additive: boolean } | null>(null);
   const [marquee, setMarquee] = useState<GeometryRect | null>(null);
   const [overlapPoint, setOverlapPoint] = useState<{ x: number; y: number } | null>(null);
-  const [imageEditing, setImageEditing] = useState(false);
+  const [imageEditingNodeId, setImageEditingNodeId] = useState<string | null>(null);
+  const selectedImageNodeIdRef = useRef<string | null>(null);
   const breakpoint = useTemplateEditorSession((state) => state.breakpoint);
   const overlapTrigger = useRef<HTMLElement | null>(null);
-  useEffect(() => { setOverlapPoint(null); setImageEditing(false); }, [selectedTargetId, editingScopeId, breakpoint, interactive]);
+  const handleImageEditingChange = useCallback((next: boolean, nodeId?: string) => {
+    setImageEditingNodeId(next ? nodeId ?? selectedImageNodeIdRef.current : null);
+    if (!next) useTemplateEditorSession.getState().setImageFocusEditing(null);
+  }, []);
+  useEffect(() => {
+    setOverlapPoint(null);
+    handleImageEditingChange(false);
+  }, [selectedTargetId, editingScopeId, breakpoint, interactive, handleImageEditingChange]);
   const targetSignature = useMemo(() => targets.map((target) => [
     target.targetId,
     target.locator.value,
@@ -707,6 +715,8 @@ export default function EditableTargetOverlay({
   }, [hostRoot, onMeasurementChange, sourceFrame, sourceRoot, targetSignature, targets]);
 
   const selectedBox = boxes.find((box) => box.target.targetId === selectedTargetId) ?? null;
+  selectedImageNodeIdRef.current = selectedBox?.target.ownerNodeId ?? null;
+  const imageEditing = imageEditingNodeId !== null && imageEditingNodeId === selectedBox?.target.ownerNodeId;
   const hitBoxes = boxes.filter((box) => isCanvasTargetInScope(box.target, editingScopeId));
   // 缩放时只描绘真正渲染结果，不能用自由坐标框冒充流式布局、比例或约束后的尺寸。
   const renderedSelectionRect = gestureRef.current?.operation === "resize"
@@ -875,28 +885,16 @@ export default function EditableTargetOverlay({
     event.preventDefault();
     event.stopPropagation();
     if (commit && gesture.activated && gesture.resizeLimits) reconcileRenderedResize(gesture);
-    const hostDelta = gestureDeltaFromPreview(gesture);
+    const projected = gesture.projectedGesture;
     cancelActiveGesture(!commit);
     if (!commit || !gesture.activated) return;
-    if (Math.abs(hostDelta.x) < 0.01 && Math.abs(hostDelta.y) < 0.01) {
+    if (!projected || (!projected.dropTarget && Math.abs(projected.deltaSourceX) < 0.01 && Math.abs(projected.deltaSourceY) < 0.01)) {
       previewCallbacks.current.onPlacementGestureCancel?.();
       return;
     }
-    const sourceDelta = hostDeltaToSource(
-      hostDelta,
-      gesture.box.transform,
-    );
-    onPlacementGesture?.({
-      target: gesture.box.target,
-      operation: gesture.operation,
-      direction: gesture.direction,
-      deltaSourceX: sourceDelta.x,
-      deltaSourceY: sourceDelta.y,
-      parentSourceWidth: gesture.box.parentSourceWidth,
-      parentSourceHeight: gesture.box.parentSourceHeight,
-      sourceRect: gesture.box.sourceRectInParent,
-      dropTarget: gesture.dropTarget,
-    });
+    // 提交最后一次真实预览；流式重排会改变 DOM 顺序，mouseup 时重新按宿主几何计算
+    // 可能得到零位移并误取消已经展示给用户的关系变更。
+    onPlacementGesture?.(projected);
   };
 
   const commitKeyboardGesture = (
@@ -949,6 +947,15 @@ export default function EditableTargetOverlay({
       scheduleResizeReconciliation(gesture, true);
     } else onPlacementGesture(projected);
   };
+
+  const catalogTextLeadKey = surface === "catalog"
+    ? boxes.filter((box) => ["title", "description", "text"].includes(box.target.kind))
+      .sort((left, right) => left.hostRect.top - right.hostRect.top || left.hostRect.left - right.hostRect.left)[0]?.key
+    : undefined;
+  const catalogActionLeadKey = surface === "catalog"
+    ? boxes.filter((box) => box.target.kind === "button")
+      .sort((left, right) => left.hostRect.top - right.hostRect.top || left.hostRect.left - right.hostRect.left)[0]?.key
+    : undefined;
 
   return (
     <div
@@ -1025,11 +1032,20 @@ export default function EditableTargetOverlay({
       ) : null}
       {boxes.map((box, index) => {
         const selectionTarget = getSelectionTarget(box.target);
+        const catalogTextLead = box.key === catalogTextLeadKey;
+        const catalogActionLead = box.key === catalogActionLeadKey
+          && (box.hostRect.width < 48 || box.hostRect.height < 24);
         return <div
           key={box.key}
           className="template-editor__editable-overlay-box"
           data-editable-target-id={box.target.targetId}
           data-editable-target-kind={box.target.kind}
+          data-overlay-label={box.target.label}
+          data-overlay-can-label={box.hostRect.width >= 48 && box.hostRect.height >= 24 ? "true" : "false"}
+          data-overlay-catalog-text-lead={catalogTextLead ? "true" : undefined}
+          data-overlay-catalog-action-lead={catalogActionLead ? "true" : undefined}
+          data-overlay-catalog-action-side={catalogActionLead && box.hostRect.top + box.hostRect.height + 19 > (hostRoot?.clientHeight ?? Infinity) ? "above" : undefined}
+          data-overlay-label-side={catalogTextLead && box.hostRect.top < 20 ? "below" : undefined}
           data-overlay-selected={isBoxSelected(box) ? "true" : undefined}
           data-selection-target-id={selectionTarget.targetId}
           data-selection-role-id={selectionTarget.roleId}
@@ -1092,7 +1108,7 @@ export default function EditableTargetOverlay({
           onClick={(event) => {
             event.stopPropagation();
             if (suppressClickRef.current) { suppressClickRef.current = false; return; }
-            if (event.detail === 2 && !event.altKey) { if (box.target.imageEditable && box.target.imageHasContent !== false) setImageEditing(true); else onEnterTarget?.(box.target); return; }
+            if (event.detail === 2 && !event.altKey) { if (box.target.imageEditable && box.target.imageHasContent !== false) handleImageEditingChange(true, box.target.ownerNodeId); else onEnterTarget?.(box.target); return; }
             const bounds = hostRoot?.getBoundingClientRect();
             const target = event.altKey && bounds
               ? cycleCanvasHit(hitBoxes, { x: event.clientX - bounds.left, y: event.clientY - bounds.top }, selectedTargetId)?.target ?? box.target
@@ -1103,7 +1119,7 @@ export default function EditableTargetOverlay({
               shiftKey: event.shiftKey,
             });
           }}
-          onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); if (!event.altKey) { if (box.target.imageEditable && box.target.imageHasContent !== false) setImageEditing(true); else onEnterTarget?.(box.target); } }}
+          onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); if (!event.altKey) { if (box.target.imageEditable && box.target.imageHasContent !== false) handleImageEditingChange(true, box.target.ownerNodeId); else onEnterTarget?.(box.target); } }}
           onContextMenu={(event) => {
             event.preventDefault(); event.stopPropagation();
             const bounds = hostRoot?.getBoundingClientRect();
@@ -1134,6 +1150,7 @@ export default function EditableTargetOverlay({
         <div
           className="template-editor__editable-overlay-selection"
           data-overlay-selection-for={selectedBox.target.targetId}
+          data-overlay-text-editable={selectedBox.target.textEditable ? "true" : undefined}
           data-spacing-editing={spacingEditing}
           data-gesture-operation={gestureRef.current?.activated ? gestureRef.current.operation : undefined}
           style={{
@@ -1144,7 +1161,7 @@ export default function EditableTargetOverlay({
           }}
         >
           {inlineTextEditor ? <CanvasInlineTextEditor {...inlineTextEditor} /> : null}
-          {selectedBox.target.imageEditable && selectedBox.target.imageHasContent !== false && !selectedBox.target.locked && !spacingEditing ? <CanvasImageFocusEditor key={selectedBox.target.ownerNodeId} nodeId={selectedBox.target.ownerNodeId} sourceElement={selectedBox.element} editing={imageEditing} onEditingChange={setImageEditing} /> : null}
+          {selectedBox.target.imageEditable && selectedBox.target.imageHasContent !== false && !selectedBox.target.locked && !spacingEditing ? <CanvasImageFocusEditor key={selectedBox.target.ownerNodeId} nodeId={selectedBox.target.ownerNodeId} sourceElement={selectedBox.element} editing={imageEditing} onEditingChange={handleImageEditingChange} /> : null}
           {!selectedBox.target.locked && !spacingEditing && !imageEditing && selectedBox.target.source === "definition-node" ? <CanvasGridDividers nodeId={selectedBox.target.ownerNodeId} sourceElement={selectedBox.element} scale={selectedBox.transform.scaleX} /> : null}
           {!imageEditing ? <div
             className="template-editor__selection-toolbar"
@@ -1157,6 +1174,7 @@ export default function EditableTargetOverlay({
             <strong title={selectedBox.target.label}>{selectedBox.target.label}</strong>
             <span className="template-editor__selection-toolbar-size">{Math.round(selectedBox.sourceRect.width)} × {Math.round(selectedBox.sourceRect.height)}</span>
             {selectedBox.target.imageEditable && !selectedBox.target.locked && !spacingEditing ? <button type="button" onClick={(event) => { event.stopPropagation(); onEnterTarget?.(selectedBox.target); }}>{selectedBox.target.imageContentEditLabel ?? "设置图片"}</button> : null}
+            {selectedBox.target.imageEditable && selectedBox.target.imageHasContent !== false && !selectedBox.target.locked && !spacingEditing ? <button type="button" onClick={(event) => { event.stopPropagation(); handleImageEditingChange(true); }}>调整画面</button> : null}
             {selectedBox.target.textEditable && !selectedBox.target.locked && !inlineTextEditor ? <button type="button" onClick={(event) => { event.stopPropagation(); onEnterTarget?.(selectedBox.target); }}>{selectedBox.target.textEditLabel ?? "编辑试排文字"}</button> : null}
             {!spacingEditing && !selectedBox.target.locked && movableTargetIds?.has(selectedBox.target.targetId) ? (
               <button

@@ -45,6 +45,9 @@ test("确定性 UI：空白模板先显示整体尺寸与比例，模板设置�
   await expect(page.getByText(/仅用于目录推荐，不限制其他页面使用/)).toBeVisible();
   await expect(page.locator('[data-template-inspector-field="metadata.visualRole"]')).toHaveCount(1);
   await expect(page.locator('[data-template-inspector-field="metadata.headerCompatibility"]')).toHaveCount(1);
+  await expect(page.getByText(/Tablet|平板端/)).toHaveCount(0);
+  await expect(page.locator('[data-template-inspector-field="metadata.mobileBreakpoint"]')).toHaveCount(0);
+  await expect(page.getByRole("spinbutton", { name: "小屏布局切换宽度", exact: true })).toHaveCount(0);
 });
 
 test("确定性 UI：切换当前设备不改变完整定义的制作检查结果", async ({ page }) => {
@@ -65,7 +68,7 @@ test("确定性 UI：切换当前设备不改变完整定义的制作检查结�
     const state = window.__templateScopeSession.getState();
     return { definition: state.draft!.definition, history: state.historyPast.length, dirty: state.dirty };
   });
-  for (const breakpoint of ["desktop", "tablet", "mobile"] as const) {
+  for (const breakpoint of ["desktop", "mobile"] as const) {
     await page.evaluate((value) => window.__templateScopeSession.getState().setBreakpoint(value), breakpoint);
     const validation = page.getByRole("region", { name: "模板制作检查", exact: true });
     await expect(validation).toContainText("必填槽位“工艺主图”在移动端布局中已隐藏");

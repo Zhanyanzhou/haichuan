@@ -72,7 +72,7 @@ test("SLSA predicate binds source, exact workflows, runs and every descriptor", 
   const descriptors = [{ path: "receipt.json", sha256: digest("3") }];
   const predicate = buildProductionEvidenceProvenance(
     context,
-    { schemaVersion: 3 },
+    { schemaVersion: 5 },
     digest("4"),
     descriptors,
   );

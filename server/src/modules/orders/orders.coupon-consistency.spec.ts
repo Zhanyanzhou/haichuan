@@ -5,6 +5,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OrdersService } from './orders.service';
 
+const ADMIN = { type: 'ADMIN' as const, id: 1 };
+
 function coupon(type: 'fixed' | 'percent', value: number) {
   return {
     id: 7,
@@ -284,8 +286,8 @@ test('未付款订单并发重复取消只归还一次优惠券容量并保留�
   const harness = makeCouponReleaseHarness();
 
   const results = await Promise.allSettled([
-    harness.service.updateStatus(1, { status: 'CANCELLED' }),
-    harness.service.updateStatus(1, { status: 'CANCELLED' }),
+    harness.service.updateStatus(1, { status: 'CANCELLED' }, ADMIN),
+    harness.service.updateStatus(1, { status: 'CANCELLED' }, ADMIN),
   ]);
 
   assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
@@ -326,7 +328,7 @@ test('已有确认收款的订单拒绝取消且不返还优惠券', async () =>
   const harness = makeCouponReleaseHarness({ paidAmount: 100, confirmedPayment: true });
 
   await assert.rejects(
-    () => harness.service.updateStatus(1, { status: 'CANCELLED' }),
+    () => harness.service.updateStatus(1, { status: 'CANCELLED' }, ADMIN),
     ConflictException,
   );
 

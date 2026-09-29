@@ -58,6 +58,100 @@ function buildStructuredData(route, canonicalUrl) {
   };
 }
 
+function text(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
+  "/images/system/product-placeholder.svg",
+  "/images/system/launch-short-page-desktop.svg",
+  "/images/system/launch-short-page-mobile.svg",
+]);
+
+function isHeroRoleEnabled(content, roleId) {
+  const overrides = content?.__instanceOverrides;
+  if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) return true;
+  const collection = overrides.version === 2 ? overrides.nodes : overrides.textRoles;
+  if (!collection || typeof collection !== "object" || Array.isArray(collection)) return true;
+  const node = collection[roleId];
+  return !node || typeof node !== "object" || Array.isArray(node) || node.enabled !== false;
+}
+
+function heroImageAtWidth(source, width, origin) {
+  if (!source) return "";
+  try {
+    const url = new URL(source, origin);
+    if (
+      url.protocol !== "https:"
+      || url.origin !== origin
+      || !/^\/uploads\//.test(url.pathname)
+      || !/\.(?:jpe?g|png|webp)$/i.test(url.pathname)
+    ) return url.protocol === "https:" && url.origin === origin ? url.href : "";
+    url.searchParams.set("width", String(width));
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function publicHomeHero(route, origin) {
+  const blocks = route.bootstrapPageDocument?.puckData?.content;
+  if (!Array.isArray(blocks)) return null;
+  const hero = blocks.find((block) => block?.type === "首屏主视觉" && block?.props?.isVisible !== false);
+  // 发布的 Puck Hero 将内容字段直接保存在 props，和客户端 Renderer 使用
+  // 同一文档结构；不要为静态首屏另设 content 嵌套层。
+  const content = hero?.props && typeof hero.props === "object" && !Array.isArray(hero.props)
+    ? hero.props
+    : {};
+  const desktopImage = isHeroRoleEnabled(content, "desktopImage")
+    ? text(content?.desktopImage)
+    : "";
+  const mobileImage = isHeroRoleEnabled(content, "mobileImage")
+    ? text(content?.mobileImage)
+    : "";
+  const publishableDesktop = NON_PUBLISHABLE_SYSTEM_MEDIA.has(desktopImage) ? "" : desktopImage;
+  const publishableMobile = NON_PUBLISHABLE_SYSTEM_MEDIA.has(mobileImage) ? "" : mobileImage;
+  const image = heroImageAtWidth(publishableDesktop || publishableMobile, 1680, origin);
+  const mobile = heroImageAtWidth(publishableMobile || publishableDesktop, 480, origin);
+  if (!image) return null;
+  return {
+    image,
+    mobile,
+    title: isHeroRoleEnabled(content, "title") ? text(content?.title) : "",
+    subtitle: isHeroRoleEnabled(content, "subtitle") ? text(content?.subtitle) : "",
+    eyebrow: isHeroRoleEnabled(content, "eyebrow") ? text(content?.eyebrow) : "",
+  };
+}
+
+function renderHomeFirstFold(route, origin) {
+  const hero = publicHomeHero(route, origin);
+  if (!hero) return route.renderedBodyHtml;
+  const copy = [
+    hero.eyebrow ? `<p class="hc-prerendered-home__eyebrow">${escapeHtml(hero.eyebrow)}</p>` : "",
+    hero.title ? `<h1>${escapeHtml(hero.title)}</h1>` : "",
+    hero.subtitle ? `<p class="hc-prerendered-home__subtitle">${escapeHtml(hero.subtitle)}</p>` : "",
+  ].join("");
+  return [
+    '<main class="hc-prerendered-home" data-public-first-fold="published">',
+    '<picture>',
+    hero.mobile ? `<source media="(max-width: 767px)" srcset="${escapeHtml(hero.mobile)}">` : "",
+    `<img src="${escapeHtml(hero.image)}" alt="" aria-hidden="true" width="3360" height="1470" fetchpriority="high" decoding="async">`,
+    "</picture>",
+    copy ? `<div class="hc-prerendered-home__shade"></div><div class="hc-prerendered-home__copy">${copy}</div>` : "",
+    "</main>",
+  ].join("");
+}
+
+const HOME_FIRST_FOLD_CSS = `
+  <style data-public-first-fold="home">
+    .hc-prerendered-home{position:relative;isolation:isolate;min-height:max(620px,100svh);overflow:hidden;background:#181A1B;color:#fff}
+    .hc-prerendered-home picture,.hc-prerendered-home img{position:absolute;inset:0;width:100%;height:100%}
+    .hc-prerendered-home img{object-fit:cover}
+    .hc-prerendered-home__shade{position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(16,18,19,.58) 0%,rgba(16,18,19,.24) 42%,rgba(16,18,19,0) 72%)}
+    .hc-prerendered-home__copy{position:relative;z-index:2;display:grid;align-content:end;min-height:max(620px,100svh);width:min(100%,1440px);margin:0 auto;padding:clamp(128px,16vw,236px) clamp(24px,7vw,136px)}
+    .hc-prerendered-home__copy>div{max-width:620px}.hc-prerendered-home h1{max-width:620px;margin:0;font-family:"Noto Serif SC",serif;font-size:clamp(42px,5.2vw,76px);font-weight:400;line-height:1.14}.hc-prerendered-home__eyebrow{margin:0 0 18px;font-size:11px;letter-spacing:.18em;line-height:1.4}.hc-prerendered-home__subtitle{max-width:620px;margin:20px 0 0;font-family:"Noto Serif SC",serif;font-size:clamp(17px,1.45vw,22px);font-style:italic;line-height:1.7}
+  </style>`;
+
 export function renderPrerenderedHtml(baseHtml, snapshot, route) {
   if (typeof baseHtml !== "string" || !/<html\b/i.test(baseHtml) || !/<head\b/i.test(baseHtml) || !/<\/head\s*>/i.test(baseHtml)) {
     fail("Base HTML must contain html and head elements.");
@@ -77,6 +171,14 @@ export function renderPrerenderedHtml(baseHtml, snapshot, route) {
   const jsonLdNodes = (Array.isArray(structuredData) ? structuredData : [structuredData]).map(
     (node) => `  <script data-public-seo="managed" type="application/ld+json">${safeJson(node)}</script>`,
   );
+  const homeHero = route.path === "/" ? publicHomeHero(route, snapshot.origin) : null;
+  const firstFoldHead = homeHero
+    ? [
+      HOME_FIRST_FOLD_CSS,
+      `  <link data-public-first-fold="home" rel="preload" as="image" href="${escapeHtml(homeHero.mobile)}" media="(max-width: 767px)" fetchpriority="high">`,
+      `  <link data-public-first-fold="home" rel="preload" as="image" href="${escapeHtml(homeHero.image)}" media="(min-width: 768px)" fetchpriority="high">`,
+    ]
+    : [];
   const managedHead = [
     `  <title>${escapeHtml(route.title)}</title>`,
     `  <meta data-public-seo="managed" name="description" content="${escapeHtml(route.description)}">`,
@@ -96,6 +198,7 @@ export function renderPrerenderedHtml(baseHtml, snapshot, route) {
     `  <meta data-public-seo="managed" name="twitter:description" content="${escapeHtml(route.description)}">`,
     `  <meta data-public-seo="managed" name="twitter:image" content="${escapeHtml(route.shareImage)}">`,
     ...jsonLdNodes,
+    ...firstFoldHead,
   ].join("\n");
 
   let html = stripManagedHead(baseHtml);
@@ -106,7 +209,7 @@ export function renderPrerenderedHtml(baseHtml, snapshot, route) {
   html = html.replace(/<\/head\s*>/i, `${managedHead}\n</head>`);
   html = html.replace(
     rootPattern,
-    `<div id="root" data-prerendered="true" data-prerendered-path="${escapeHtml(route.path)}" data-published-content-hash="${route.contentHash}">${route.renderedBodyHtml}</div>`,
+    `<div id="root" data-prerendered="true" data-prerendered-path="${escapeHtml(route.path)}" data-published-content-hash="${route.contentHash}">${route.path === "/" ? renderHomeFirstFold(route, snapshot.origin) : route.renderedBodyHtml}${route.bootstrapPageDocument ? `<script id="hc-published-page-document" type="application/json">${safeJson(route.bootstrapPageDocument)}</script>` : ""}</div>`,
   );
   return html;
 }

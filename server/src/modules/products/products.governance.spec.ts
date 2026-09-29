@@ -48,7 +48,10 @@ function serviceWithProduct(status: "DRAFT" | "PUBLISHED" | "OFFLINE") {
       },
       findMany: async () => [...audits].reverse(),
     },
-    $queryRaw: async () => [{ id: 6 }],
+    $queryRaw: async (query: { values?: unknown[] }) => {
+      const id = Number(query.values?.[0] ?? 6);
+      return [{ id, role: id === editor.id ? "EDITOR" : "ADMIN" }];
+    },
     $transaction: async (callback: (tx: any) => Promise<unknown>) =>
       callback(prisma),
   };

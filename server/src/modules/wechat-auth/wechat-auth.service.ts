@@ -8,6 +8,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
+import { Prisma } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -23,6 +24,8 @@ import {
   WECHAT_OAUTH_STATE_TTL_MS,
   WechatOAuthStateStore,
 } from "./wechat-oauth-state.store";
+import type { CustomerPrincipal } from "../../common/security/authenticated-principal";
+import { lockActiveCustomerForWrite } from "../customers/customer-write-gate";
 
 const WECHAT_QR_CONNECT = "https://open.weixin.qq.com/connect/qrconnect";
 const BIND_TTL_MS = 10 * 60 * 1000; // 绑定令牌 10 分钟有效
@@ -250,7 +253,7 @@ export type WechatCallbackResult =
 export type WechatCallbackOutcome = {
   result: WechatCallbackResult;
   parentOrigin: string | null;
-  session?: { accessToken: string; customerId: number; authVersion: number };
+  session?: { customerId: number; authVersion: number };
 };
 
 @Injectable()
@@ -273,9 +276,15 @@ export class WechatAuthService {
     }
   }
 
-  private issueAccessToken(customerId: number, authVersion = 1) {
+  issueSessionAccessToken(customerId: number, authVersion = 1, sessionFamilyId?: string) {
     return this.jwtService.sign(
-      { sub: customerId, type: "customer", tokenUse: "access", authVersion },
+      {
+        sub: customerId,
+        type: "customer",
+        tokenUse: "access",
+        authVersion,
+        ...(sessionFamilyId ? { sessionFamilyId } : {}),
+      },
       { expiresIn: "15m" },
     );
   }
@@ -288,7 +297,7 @@ export class WechatAuthService {
     authVersion?: number;
   }) {
     return {
-      accessToken: this.issueAccessToken(customer.id, customer.authVersion ?? 1),
+      accessToken: this.issueSessionAccessToken(customer.id, customer.authVersion ?? 1),
       customer: {
         id: customer.id,
         phone: customer.phone,
@@ -406,7 +415,6 @@ export class WechatAuthService {
           result: { kind: "success", customer: account.customer },
           parentOrigin,
           session: {
-            accessToken: account.accessToken,
             customerId: existing.id,
             authVersion: existing.authVersion ?? 1,
           },
@@ -474,7 +482,7 @@ export class WechatAuthService {
       throw new BadRequestException("微信登录已过期，请重新扫码");
     }
     const phone = data.phone?.trim();
-    if (!/^1\d{10}$/.test(phone)) {
+    if (!/^1[3-9]\d{9}$/.test(phone)) {
       throw new BadRequestException("请提供有效的手机号码");
     }
     const password = data.password ?? "";
@@ -553,19 +561,21 @@ export class WechatAuthService {
       if (!data.smsCode?.trim()) {
         throw new BadRequestException("请输入该手机号收到的短信验证码后再创建账户");
       }
-      await consumeCustomerSmsCode(this.prisma, phone, data.smsCode, new Date(), "REGISTER");
       assertAccountPassword(password);
       const passwordHash = await bcrypt.hash(password, 12);
       try {
-        customer = await this.prisma.customer.create({
-          data: {
-            phone,
-            passwordHash,
-            name: data.name?.trim() || null,
-            wechatOpenId: record.openid,
-            wechatUnionId: record.unionid,
-          },
-        });
+        customer = await this.prisma.$transaction(async (tx) => {
+          await consumeCustomerSmsCode(tx, phone, data.smsCode!, new Date(), "REGISTER");
+          return tx.customer.create({
+            data: {
+              phone,
+              passwordHash,
+              name: data.name?.trim() || null,
+              wechatOpenId: record.openid,
+              wechatUnionId: record.unionid,
+            },
+          });
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       } catch (error) {
         if (
           secureBrowserFlow &&
@@ -586,17 +596,22 @@ export class WechatAuthService {
   }
 
   /** 客户本人解除微信绑定；重复调用保持成功且不影响其它账户。 */
-  async unbindWechat(customerId: number) {
-    const result = await this.prisma.customer.updateMany({
-      where: {
-        id: customerId,
-        OR: [
-          { wechatOpenId: { not: null } },
-          { wechatUnionId: { not: null } },
-        ],
-      },
-      data: { wechatOpenId: null, wechatUnionId: null },
-    });
-    return { bound: false, changed: result.count === 1 };
+  async unbindWechat(
+    customer: Pick<CustomerPrincipal, "id" | "authVersion">,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockActiveCustomerForWrite(tx, customer);
+      const result = await tx.customer.updateMany({
+        where: {
+          id: customer.id,
+          OR: [
+            { wechatOpenId: { not: null } },
+            { wechatUnionId: { not: null } },
+          ],
+        },
+        data: { wechatOpenId: null, wechatUnionId: null },
+      });
+      return { bound: false, changed: result.count === 1 };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 }

@@ -17,6 +17,7 @@ type HttpMetric = {
   route: string;
   count: number;
   errorCount: number;
+  serverErrorCount: number;
   sumSeconds: number;
   buckets: number[];
 };
@@ -44,6 +45,7 @@ type QueueSnapshot = {
   processing: number;
   failed: number;
   oldestAvailableAgeSeconds: number;
+  oldestProcessingAgeSeconds: number;
 };
 
 type BackupSnapshot = {
@@ -53,6 +55,19 @@ type BackupSnapshot = {
   markerValid: boolean;
   lastSuccessTimestampSeconds: number;
   ageSeconds: number;
+};
+
+export type OperationalWorkerName =
+  | "notification_delivery"
+  | "password_reset_delivery";
+
+type WorkerSnapshot = {
+  enabled: boolean;
+  running: boolean;
+  lastStartedTimestampSeconds: number;
+  lastCompletedTimestampSeconds: number;
+  lastSuccessTimestampSeconds: number;
+  failures: number;
 };
 
 function escapeLabel(value: string): string {
@@ -81,6 +96,7 @@ export class OperationalMetricsService
   private draining = false;
   private databaseUp = false;
   private databaseLatencySeconds = 0;
+  private readonly workers = new Map<OperationalWorkerName, WorkerSnapshot>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -113,6 +129,41 @@ export class OperationalMetricsService
     this.databaseLatencySeconds = Math.max(0, finiteMetric(latencySeconds));
   }
 
+  registerWorker(worker: OperationalWorkerName, enabled: boolean): void {
+    const current = this.workers.get(worker);
+    this.workers.set(worker, {
+      enabled,
+      running: current?.running ?? false,
+      lastStartedTimestampSeconds: current?.lastStartedTimestampSeconds ?? 0,
+      lastCompletedTimestampSeconds: current?.lastCompletedTimestampSeconds ?? 0,
+      lastSuccessTimestampSeconds: current?.lastSuccessTimestampSeconds ?? 0,
+      failures: current?.failures ?? 0,
+    });
+  }
+
+  recordWorkerRunStarted(worker: OperationalWorkerName): void {
+    const current = this.workers.get(worker);
+    if (!current) return;
+    current.running = true;
+    current.lastStartedTimestampSeconds = Date.now() / 1000;
+  }
+
+  recordWorkerRunCompleted(
+    worker: OperationalWorkerName,
+    outcome: "success" | "failure",
+  ): void {
+    const current = this.workers.get(worker);
+    if (!current) return;
+    const completedAt = Date.now() / 1000;
+    current.running = false;
+    current.lastCompletedTimestampSeconds = completedAt;
+    if (outcome === "success") {
+      current.lastSuccessTimestampSeconds = completedAt;
+    } else {
+      current.failures += 1;
+    }
+  }
+
   recordHttpRequest(input: {
     method: string;
     route: string;
@@ -125,6 +176,7 @@ export class OperationalMetricsService
       route: input.route,
       count: 0,
       errorCount: 0,
+      serverErrorCount: 0,
       sumSeconds: 0,
       buckets: LATENCY_BUCKETS_SECONDS.map(() => 0),
     };
@@ -132,6 +184,9 @@ export class OperationalMetricsService
     metric.count += 1;
     metric.sumSeconds += duration;
     if (input.statusCode >= 400) metric.errorCount += 1;
+    if (input.statusCode >= 500 && input.statusCode < 600) {
+      metric.serverErrorCount += 1;
+    }
     LATENCY_BUCKETS_SECONDS.forEach((bucket, index) => {
       if (duration <= bucket) metric.buckets[index] += 1;
     });
@@ -159,17 +214,25 @@ export class OperationalMetricsService
 
   private async queueSnapshot(): Promise<QueueSnapshot> {
     try {
-      const [pending, processing, failed, oldest] = await Promise.all([
+      const [pending, processing, failed, oldestAvailable, oldestProcessing] = await Promise.all([
         this.prisma.outboxEvent.count({ where: { status: "PENDING" } }),
         this.prisma.outboxEvent.count({ where: { status: "PROCESSING" } }),
         this.prisma.outboxEvent.count({ where: { status: "FAILED" } }),
         this.prisma.outboxEvent.findFirst({
           where: {
-            status: { in: ["PENDING", "FAILED"] },
+            status: "PENDING",
             availableAt: { lte: new Date() },
           },
           orderBy: { availableAt: "asc" },
           select: { availableAt: true },
+        }),
+        this.prisma.outboxEvent.findFirst({
+          where: {
+            status: "PROCESSING",
+            lockedAt: { not: null },
+          },
+          orderBy: { lockedAt: "asc" },
+          select: { lockedAt: true },
         }),
       ]);
       return {
@@ -177,8 +240,11 @@ export class OperationalMetricsService
         pending,
         processing,
         failed,
-        oldestAvailableAgeSeconds: oldest
-          ? Math.max(0, (Date.now() - oldest.availableAt.getTime()) / 1000)
+        oldestAvailableAgeSeconds: oldestAvailable
+          ? Math.max(0, (Date.now() - oldestAvailable.availableAt.getTime()) / 1000)
+          : 0,
+        oldestProcessingAgeSeconds: oldestProcessing?.lockedAt
+          ? Math.max(0, (Date.now() - oldestProcessing.lockedAt.getTime()) / 1000)
           : 0,
       };
     } catch {
@@ -188,6 +254,7 @@ export class OperationalMetricsService
         processing: 0,
         failed: 0,
         oldestAvailableAgeSeconds: 0,
+        oldestProcessingAgeSeconds: 0,
       };
     }
   }
@@ -257,6 +324,9 @@ export class OperationalMetricsService
       "# HELP haichuan_outbox_oldest_available_age_seconds Age of the oldest dispatchable queue item.",
       "# TYPE haichuan_outbox_oldest_available_age_seconds gauge",
       `haichuan_outbox_oldest_available_age_seconds ${queue.oldestAvailableAgeSeconds}`,
+      "# HELP haichuan_outbox_oldest_processing_age_seconds Age of the oldest in-flight queue lock.",
+      "# TYPE haichuan_outbox_oldest_processing_age_seconds gauge",
+      `haichuan_outbox_oldest_processing_age_seconds ${queue.oldestProcessingAgeSeconds}`,
       "# HELP haichuan_backup_healthy Whether the latest complete backup and execution marker are healthy.",
       "# TYPE haichuan_backup_healthy gauge",
       `haichuan_backup_healthy ${backup.healthy ? 1 : 0}`,
@@ -278,12 +348,44 @@ export class OperationalMetricsService
       `haichuan_metrics_source_available{source="backup"} ${backup.available ? 1 : 0}`,
     ];
 
+    if (this.workers.size > 0) {
+      lines.push(
+        "# HELP haichuan_worker_enabled Whether the in-process worker is configured to consume events.",
+        "# TYPE haichuan_worker_enabled gauge",
+        "# HELP haichuan_worker_running Whether the in-process worker currently has a drain in progress.",
+        "# TYPE haichuan_worker_running gauge",
+        "# HELP haichuan_worker_last_started_timestamp_seconds Unix timestamp of the latest drain start.",
+        "# TYPE haichuan_worker_last_started_timestamp_seconds gauge",
+        "# HELP haichuan_worker_last_completed_timestamp_seconds Unix timestamp of the latest completed drain, regardless of outcome.",
+        "# TYPE haichuan_worker_last_completed_timestamp_seconds gauge",
+        "# HELP haichuan_worker_last_success_timestamp_seconds Unix timestamp of the latest successful drain.",
+        "# TYPE haichuan_worker_last_success_timestamp_seconds gauge",
+        "# HELP haichuan_worker_failures_total Total failed scheduled drains since process start.",
+        "# TYPE haichuan_worker_failures_total counter",
+      );
+      for (const [worker, state] of [...this.workers.entries()].sort(([left], [right]) =>
+        left.localeCompare(right)
+      )) {
+        const labels = `worker="${worker}"`;
+        lines.push(
+          `haichuan_worker_enabled{${labels}} ${state.enabled ? 1 : 0}`,
+          `haichuan_worker_running{${labels}} ${state.running ? 1 : 0}`,
+          `haichuan_worker_last_started_timestamp_seconds{${labels}} ${state.lastStartedTimestampSeconds}`,
+          `haichuan_worker_last_completed_timestamp_seconds{${labels}} ${state.lastCompletedTimestampSeconds}`,
+          `haichuan_worker_last_success_timestamp_seconds{${labels}} ${state.lastSuccessTimestampSeconds}`,
+          `haichuan_worker_failures_total{${labels}} ${state.failures}`,
+        );
+      }
+    }
+
     if (this.httpMetrics.size > 0) {
       lines.push(
         "# HELP haichuan_http_requests_total HTTP requests observed by method and route.",
         "# TYPE haichuan_http_requests_total counter",
         "# HELP haichuan_http_request_errors_total HTTP responses with status 4xx or 5xx.",
         "# TYPE haichuan_http_request_errors_total counter",
+        "# HELP haichuan_http_server_errors_total HTTP responses with status 5xx.",
+        "# TYPE haichuan_http_server_errors_total counter",
         "# HELP haichuan_http_request_duration_seconds HTTP request latency.",
         "# TYPE haichuan_http_request_duration_seconds histogram",
       );
@@ -294,6 +396,7 @@ export class OperationalMetricsService
         lines.push(
           `haichuan_http_requests_total{${labels}} ${metric.count}`,
           `haichuan_http_request_errors_total{${labels}} ${metric.errorCount}`,
+          `haichuan_http_server_errors_total{${labels}} ${metric.serverErrorCount}`,
         );
         LATENCY_BUCKETS_SECONDS.forEach((bucket, index) => {
           lines.push(`haichuan_http_request_duration_seconds_bucket{${labels},le="${bucket}"} ${metric.buckets[index]}`);
@@ -328,4 +431,3 @@ export class OperationalMetricsService
     return `${lines.join("\n")}\n`;
   }
 }
-

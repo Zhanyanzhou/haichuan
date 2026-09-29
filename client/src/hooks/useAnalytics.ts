@@ -13,10 +13,23 @@ const ANALYTICS_VISITOR_KEY = "hc.analytics-visitor";
 const ANALYTICS_SOURCE_KEY = "hc.analytics-source";
 const ANALYTICS_CONSENT_VERSION = "analytics-v1";
 const ANALYTICS_CONSENT_MAX_AGE_SECONDS = 60 * 60 * 24 * 180;
-const ANALYTICS_VISITOR_MAX_AGE_MS = ANALYTICS_CONSENT_MAX_AGE_SECONDS * 1000;
 const ANALYTICS_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+const pending = new Map<string, number>();
+const sentOnce = new Set<string>();
 
 export type AnalyticsConsentDecision = "granted" | "denied" | "withdrawn";
+
+function clearLegacyAnalyticsVisitorStorage() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(ANALYTICS_VISITOR_KEY);
+  } catch {
+    // 旧版 localStorage 不可用时，不影响当前会话按 sessionStorage 运行。
+  }
+}
+
+// 旧版本曾跨会话保存匿名访客标识；模块加载即尽力清理，避免继续超出隐私说明范围。
+clearLegacyAnalyticsVisitorStorage();
 
 export function isAnalyticsConfigured(): boolean {
   return ANALYTICS_CONFIGURED;
@@ -51,17 +64,16 @@ export function setAnalyticsConsent(decision: AnalyticsConsentDecision) {
   if (decision !== "granted") {
     try {
       sessionStorage.removeItem(ANALYTICS_SESSION_KEY);
+      sessionStorage.removeItem(ANALYTICS_VISITOR_KEY);
       sessionStorage.removeItem(ANALYTICS_SOURCE_KEY);
     } catch {
       // sessionStorage 不可用时仍继续清理其他标识。
     }
-    try {
-      localStorage.removeItem(ANALYTICS_VISITOR_KEY);
-    } catch {
-      // localStorage 不可用时仍以内存清空保证当前页面停止复用标识。
-    }
+    clearLegacyAnalyticsVisitorStorage();
     sessionId = "";
     visitorId = "";
+    pending.clear();
+    sentOnce.clear();
   }
   window.dispatchEvent(
     new CustomEvent("haichuan:analytics-consent-changed", {
@@ -101,20 +113,21 @@ function parseTimedIdentifier(value: string | null): TimedAnalyticsIdentifier | 
   }
 }
 
-// 匿名访客标识仅在同意后创建，最多沿用 180 天；撤回同意时立即删除。
+// 匿名访客标识仅在同意后创建并保留于当前浏览器会话；撤回同意时立即删除。
 let visitorId = "";
 function ensureVisitorId(): string {
   if (visitorId) return visitorId;
   if (typeof window === "undefined") return "";
+  clearLegacyAnalyticsVisitorStorage();
   const now = Date.now();
   try {
-    const stored = parseTimedIdentifier(localStorage.getItem(ANALYTICS_VISITOR_KEY));
-    if (stored && now - stored.createdAt < ANALYTICS_VISITOR_MAX_AGE_MS) {
+    const stored = parseTimedIdentifier(sessionStorage.getItem(ANALYTICS_VISITOR_KEY));
+    if (stored) {
       visitorId = stored.id;
       return visitorId;
     }
     const next = { id: createAnalyticsId("v"), createdAt: now };
-    localStorage.setItem(ANALYTICS_VISITOR_KEY, JSON.stringify(next));
+    sessionStorage.setItem(ANALYTICS_VISITOR_KEY, JSON.stringify(next));
     visitorId = next.id;
   } catch {
     visitorId = createAnalyticsId("v");
@@ -170,9 +183,6 @@ function trafficSource(): string {
   }
 }
 
-const pending = new Map<string, number>();
-const ANALYTICS_ONCE_PREFIX = "hc.analytics-once:";
-
 /** 同一事件 1 秒节流，避免重复埋点刷屏 */
 function shouldSend(key: string, throttleMs = 1000): boolean {
   const now = Date.now();
@@ -226,18 +236,11 @@ function fireOnce(
   payload?: Record<string, unknown>,
 ) {
   if (!ANALYTICS_CONFIGURED || !hasAnalyticsConsent()) return;
-  const storageKey = `${ANALYTICS_ONCE_PREFIX}${eventName}:${eventKey}`;
-  try {
-    if (sessionStorage.getItem(storageKey) === "1") return;
-  } catch {
-    // 存储不可用时仍允许本次事件；带业务键的节流继续防止瞬时重复。
-  }
+  const onceKey = `${eventName}:${eventKey}`;
+  if (sentOnce.has(onceKey)) return;
   if (!fire(eventName, payload, `${eventName}:${eventKey}`)) return;
-  try {
-    sessionStorage.setItem(storageKey, "1");
-  } catch {
-    // 请求已经发出；不因去重标记无法持久化而回退业务。
-  }
+  // 业务标识只在当前 JS 生命周期内参与去重，不进入请求或浏览器存储。
+  sentOnce.add(onceKey);
 }
 
 export function isTrackableAnalyticsPath(pathname: string): boolean {
@@ -289,30 +292,22 @@ export function trackBeginCheckout(itemCount: number, amount: number) {
   fire("begin_checkout", { metadata: { itemCount, amount } });
 }
 
-export function trackOrderCreated(orderId: number, amount: number) {
-  fire("order_created", { metadata: { orderId, amount } });
+export function trackOrderCreated() {
+  fire("order_created");
 }
 
-export function trackAddPaymentInfo(
-  orderId: number,
-  amount: number,
-  paymentMethod: string,
-) {
-  fireOnce("add_payment_info", String(orderId), {
-    metadata: { orderId, amount, paymentMethod },
-  });
+export function trackAddPaymentInfo(orderId: number) {
+  fireOnce("add_payment_info", String(orderId));
 }
 
 /** purchase 只允许在服务端已确认 PAID 后触发，不能由订单创建或前端跳转替代。 */
-export function trackPurchase(orderId: number, amount: number) {
-  fireOnce("purchase", String(orderId), { metadata: { orderId, amount } });
+export function trackPurchase(orderId: number) {
+  fireOnce("purchase", String(orderId));
 }
 
 /** 客户看见服务端 COMPLETED 退款事实时按会话去重记录。 */
-export function trackRefund(refundId: number, orderId: number, amount: number) {
-  fireOnce("refund", String(refundId), {
-    metadata: { refundId, orderId, amount },
-  });
+export function trackRefund(refundId: number) {
+  fireOnce("refund", String(refundId));
 }
 
 export function trackRemoveFromSelection(productId: number) {

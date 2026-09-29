@@ -6,7 +6,7 @@ import {
 import { useResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import { hasExplicitDynamicTemplateInstanceImage } from "./mediaReferences";
-import { resolveTemplateBreakpoint, type TemplateBreakpoint } from "../template-definition/responsive";
+import { resolveTemplateBreakpoint, toTemplateContentBreakpoint, type TemplateBreakpoint } from "../template-definition/responsive";
 
 function useDynamicTemplateDevice(
   mobileBreakpoint = 767,
@@ -24,12 +24,10 @@ function useDynamicTemplateDevice(
   useEffect(() => {
     if (!enabled) return undefined;
     const media = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const tablet = window.matchMedia("(max-width: 1023px)");
     const update = () => setDevice(current());
     update();
     media.addEventListener("change", update);
-    tablet.addEventListener("change", update);
-    return () => { media.removeEventListener("change", update); tablet.removeEventListener("change", update); };
+    return () => { media.removeEventListener("change", update); };
   }, [breakpoint, current, enabled]);
   return device;
 }
@@ -40,6 +38,7 @@ export default function DynamicTemplateInstanceView({
   deviceOverride,
   mode = "public",
   primaryHeadingLevel = 2,
+  priority = false,
 }: {
   props: DynamicTemplateInstanceProps;
   definition?: TemplateDefinitionV2;
@@ -47,6 +46,8 @@ export default function DynamicTemplateInstanceView({
   deviceOverride?: TemplateBreakpoint;
   mode?: "public" | "editor" | "preview";
   primaryHeadingLevel?: 1 | 2;
+  /** 公开页首个实际可渲染主舞台的首图获得加载优先语义。 */
+  priority?: boolean;
 }) {
   const registered = useResolvedDynamicTemplate(props.templateId, props.templateVersion);
   const resolvedDefinition = definition ?? registered?.definition;
@@ -55,7 +56,7 @@ export default function DynamicTemplateInstanceView({
     deviceOverride === undefined,
     resolvedDefinition?.schemaVersion,
   );
-  const device = deviceOverride ?? responsiveDevice;
+  const device = toTemplateContentBreakpoint(deviceOverride ?? responsiveDevice);
   if (props.isVisible === false) {
     if (mode !== "editor") return null;
     return (
@@ -90,6 +91,7 @@ export default function DynamicTemplateInstanceView({
       resolvedDefinition,
       props.contentBySlotId,
       props.hiddenSlotIds,
+      device,
     )
   ) {
     return null;
@@ -102,7 +104,7 @@ export default function DynamicTemplateInstanceView({
     >
       <DynamicTemplateRenderer
         definition={resolvedDefinition}
-        device={device === "tablet" ? "desktop" : device}
+        device={device}
         breakpoint={device}
         contentBySlotId={props.contentBySlotId}
         hiddenSlotIds={props.hiddenSlotIds}
@@ -110,6 +112,7 @@ export default function DynamicTemplateInstanceView({
         mode={mode}
         editorSurface={mode === "editor" ? "page-instance" : undefined}
         primaryHeadingLevel={primaryHeadingLevel}
+        priority={priority}
       />
     </section>
   );

@@ -100,7 +100,7 @@ export default function GoldPrice() {
     setUpdating(true);
     try {
       await goldPriceApi.updateManually({ price: newPrice });
-      message.success('金价已更新');
+      message.success('金价已记录，商品售价未改动');
       setModalOpen(false);
       void load();
     } catch (error: unknown) {
@@ -113,9 +113,9 @@ export default function GoldPrice() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="font-semibold text-brand-text">金价管理</h1><p className="text-sm text-brand-muted mt-1">手动更新金价；更新后同步按金重调价</p></div>
+        <div><h1 className="font-semibold text-brand-text">金价管理</h1><p className="text-sm text-brand-muted mt-1">只记录金价事实，不会改写商品售价</p></div>
         <Button type="primary" icon={<EditOutlined />} disabled={loading} onClick={() => { setNewPrice(currentPrice?.price ?? null); setModalOpen(true); }}>
-          手动调价
+          更新金价
         </Button>
       </div>
       {loading ? (
@@ -135,7 +135,7 @@ export default function GoldPrice() {
               showIcon
               type="warning"
               message="自动抓取未配置，当前金价需手动维护"
-              description="系统不会生成模拟报价。手动更新后仍会按现有规则同步关联商品价格。"
+              description="系统不会生成模拟报价，也不会根据金价改写商品售价。"
             />
           ) : null}
 
@@ -178,14 +178,14 @@ export default function GoldPrice() {
         </>
       )}
 
-      <Modal title="手动调整金价" open={modalOpen} onCancel={() => setModalOpen(false)} onOk={handleUpdate}
-        confirmLoading={updating} okText="更新金价" cancelText="取消">
+      <Modal title="记录金价" open={modalOpen} onCancel={() => setModalOpen(false)} onOk={handleUpdate}
+        confirmLoading={updating} okText="保存金价" cancelText="取消">
         <div className="py-4">
           <p className="text-sm text-brand-muted mb-3">请输入新的金价（元/克）</p>
           <InputNumber min={0} max={10000} step={0.01} value={newPrice} onChange={(v) => setNewPrice(v || 0)}
             className="w-full" size="large" prefix="¥" />
           <p className="text-xs text-brand-muted mt-3">
-            更新后将自动按「金重 × 金价 × 系数 + 工费」重算全店已关联金重商品的 SKU 售价与起价，无需逐件调整。
+            保存后只新增一条金价记录，供查询和后续计价政策使用。当前不会按金重重算 SKU 售价或商品起价。
           </p>
         </div>
       </Modal>

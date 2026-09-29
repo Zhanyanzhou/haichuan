@@ -26,19 +26,38 @@ import type {
 // 同屏目录卡片会并行建立 iframe 与同步样式；低性能设备上 1.2 秒不足以区分
 // “渲染器缺失”和“仍在完成首帧”。保留有限等待，避免短暂拥塞被永久误报。
 const PREVIEW_RENDER_TIMEOUT_MS = 3_000;
+const CATALOG_PREVIEW_MAX_HEIGHT = 220;
+const CATALOG_THUMBNAIL_MIN_WIDTH_RATIO = 0.6;
+const CATALOG_STYLE_RESYNC_DEBOUNCE_MS = 160;
+
+function catalogStylesheetSignature(doc: Document): string {
+  return Array.from(doc.head.querySelectorAll('link[rel="stylesheet"], style'))
+    .map((node) => (
+      node instanceof HTMLLinkElement
+        ? `link:${node.href}`
+        : `style:${node.getAttribute("data-vite-dev-id") ?? node.id}:${(node.textContent ?? "").length}`
+    ))
+    .join("|");
+}
+
+export type TemplateCatalogPreviewPresentation = "thumbnail" | "detail" | "structure";
 
 interface TemplateCatalogViewportPreviewProps {
   children?: ReactNode;
   fallbackHeight: number;
+  hasUnconfiguredMedia?: boolean;
   heightMode: "fixed" | "aspect-ratio" | "auto";
   ratioLabel: string;
+  renderRevision?: string;
   slots: TemplateCatalogSlotDescriptor[];
   sourceWidth: number;
   templateKey: string;
   title: string;
   unavailable?: boolean;
   showSlotAnnotations?: boolean;
+  presentation?: TemplateCatalogPreviewPresentation;
   viewport: "desktop" | "mobile";
+  zoom?: number | null;
 }
 
 class TemplateCatalogPreviewErrorBoundary extends Component<{
@@ -63,15 +82,19 @@ class TemplateCatalogPreviewErrorBoundary extends Component<{
 export default function TemplateCatalogViewportPreview({
   children,
   fallbackHeight,
+  hasUnconfiguredMedia = false,
   heightMode,
   ratioLabel,
+  renderRevision = "initial",
   slots,
   sourceWidth,
   templateKey,
   title,
   unavailable = false,
   showSlotAnnotations = false,
+  presentation = "thumbnail",
   viewport,
+  zoom = null,
 }: TemplateCatalogViewportPreviewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -80,8 +103,10 @@ export default function TemplateCatalogViewportPreview({
   const portalStyleSyncDocumentRef = useRef<Document | null>(null);
   const styleSyncIdRef = useRef(0);
   const previewTimedOutRef = useRef(false);
+  const mediaSourceSignatureRef = useRef("");
+  const lastParentStyleSignatureRef = useRef("");
   const initialNaturalHeight = heightMode === "auto"
-    ? Math.max(AUTO_ARTBOARD_MIN_HEIGHT, fallbackHeight)
+    ? AUTO_ARTBOARD_MIN_HEIGHT
     : fallbackHeight;
   const [frameDocument, setFrameDocument] = useState<Document | null>(null);
   const [styleRevision, setStyleRevision] = useState(0);
@@ -93,6 +118,9 @@ export default function TemplateCatalogViewportPreview({
   );
   const [rendererReady, setRendererReady] = useState(false);
   const [slotBoxCount, setSlotBoxCount] = useState(0);
+  const [contentIssue, setContentIssue] = useState<"media-unconfigured" | "media-failed" | null>(
+    hasUnconfiguredMedia ? "media-unconfigured" : null,
+  );
   const overlayTargets = useMemo(() => slots.map((slot) => ({
     ...slot,
     label: slot.compactLabel,
@@ -100,8 +128,17 @@ export default function TemplateCatalogViewportPreview({
   const [measurement, setMeasurement] = useState({
     naturalHeight: initialNaturalHeight,
     scale: viewport === "mobile" ? 0.25 : 0.1,
+    longPage: false,
   });
   const syncFrameStyles = useCallback((nextDocument: Document) => {
+    const parentSignature = catalogStylesheetSignature(document);
+    if (
+      parentSignature === lastParentStyleSignatureRef.current
+      && nextDocument.head.childElementCount > 0
+    ) {
+      return;
+    }
+    lastParentStyleSignatureRef.current = parentSignature;
     const syncId = styleSyncIdRef.current + 1;
     styleSyncIdRef.current = syncId;
     setStylesReady(false);
@@ -147,29 +184,33 @@ export default function TemplateCatalogViewportPreview({
     setMeasurement((current) => ({
       ...current,
       naturalHeight: initialNaturalHeight,
+      longPage: false,
     }));
     setRenderFailed(false);
     setRendererReady(false);
     setSlotBoxCount(0);
+    mediaSourceSignatureRef.current = "";
+    lastParentStyleSignatureRef.current = "";
+    setContentIssue(hasUnconfiguredMedia ? "media-unconfigured" : null);
     setPreviewStatus(unavailable ? "unavailable" : "loading");
-  }, [initialNaturalHeight, templateKey, unavailable, viewport]);
+  }, [hasUnconfiguredMedia, initialNaturalHeight, renderRevision, templateKey, unavailable, viewport]);
 
   useLayoutEffect(() => {
     if (!frameDocument || isUnavailable) return undefined;
-    let animationFrameId: number | null = null;
+    let debounceTimer: number | null = null;
     const observer = new MutationObserver(() => {
-      if (animationFrameId !== null) return;
-      animationFrameId = window.requestAnimationFrame(() => {
-        animationFrameId = null;
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
         if (frameRef.current?.contentDocument === frameDocument) {
           syncFrameStyles(frameDocument);
         }
-      });
+      }, CATALOG_STYLE_RESYNC_DEBOUNCE_MS);
     });
     observer.observe(document.head, { childList: true });
     return () => {
       observer.disconnect();
-      if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
+      if (debounceTimer !== null) window.clearTimeout(debounceTimer);
     };
   }, [frameDocument, isUnavailable, syncFrameStyles]);
 
@@ -201,15 +242,27 @@ export default function TemplateCatalogViewportPreview({
     let animationFrameId: number | null = null;
     const measureScale = () => {
       const availableWidth = stage.clientWidth;
-      let scale = availableWidth > 0 ? availableWidth / sourceWidth : 0;
-      // 外层相框保持统一尺寸，真正的画布按自身宽高完整缩放并居中。
-      const designStage = stage.closest('[data-unified-template-library="design"]');
-      const availableHeight = designStage ? stage.clientHeight : 0;
-      if (availableHeight > 0) scale = Math.min(scale, availableHeight / measurement.naturalHeight);
+      const widthFitScale = availableWidth > 0 ? availableWidth / sourceWidth : 0;
+      let scale = presentation !== "thumbnail" && zoom
+        ? zoom
+        : widthFitScale;
+      let longPage = false;
+      if (presentation === "thumbnail") {
+        const heightFitScale = CATALOG_PREVIEW_MAX_HEIGHT / measurement.naturalHeight;
+        // 长页完整等比缩放会让槽位无法辨认。保留 Renderer 原始几何，
+        // 仅把卡片变为明确标注的可滚动局部视窗；分类只由设计画幅决定，
+        // 不能随目录栏宽度变化而让同一份模板在“全貌／滚动”之间跳动。
+        const heightFitWidth = sourceWidth * heightFitScale;
+        longPage = heightFitWidth < CATALOG_PREVIEW_MAX_HEIGHT * CATALOG_THUMBNAIL_MIN_WIDTH_RATIO;
+        scale = longPage ? widthFitScale : Math.min(widthFitScale, heightFitScale);
+      } else if (!zoom) {
+        // “适合宽度”不放大低分辨率设计；用户仍可显式选择 100% 或更高倍率。
+        scale = Math.min(1, scale);
+      }
       if (scale <= 0) return;
-      setMeasurement((current) => Math.abs(current.scale - scale) < 0.0001
+      setMeasurement((current) => Math.abs(current.scale - scale) < 0.0001 && current.longPage === longPage
         ? current
-        : { ...current, scale });
+        : { ...current, scale, longPage });
     };
     const scheduleWidthMeasurement = () => {
       if (animationFrameId !== null) return;
@@ -229,7 +282,86 @@ export default function TemplateCatalogViewportPreview({
       listObserver.disconnect();
       if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
     };
-  }, [isUnavailable, sourceWidth, measurement.naturalHeight]);
+  }, [isUnavailable, measurement.naturalHeight, presentation, sourceWidth, zoom]);
+
+  useLayoutEffect(() => {
+    const content = contentElement;
+    const ownerWindow = frameDocument?.defaultView;
+    if (!content || !ownerWindow || content.ownerDocument !== frameDocument || isUnavailable) {
+      return undefined;
+    }
+    let animationFrameId: number | null = null;
+    const detectUnconfiguredMedia = () => {
+      const mediaElements = Array.from(content.querySelectorAll("img, video, source"));
+      const mediaSourceSignature = mediaElements
+        .map((node) => `${node.tagName}:${node.getAttribute("src") ?? ""}`)
+        .join("|");
+      const hasFailedMedia = mediaElements.some((node) => (
+        node.tagName === "IMG"
+        && Boolean(node.getAttribute("src"))
+        && node.getAttribute("data-template-media-state") !== "loading"
+        && (node as HTMLImageElement).complete
+        && (node as HTMLImageElement).naturalWidth === 0
+      ));
+      // 任一图片已成功解码时，清除早先瞬时 error / 竞态造成的粘滞失败态。
+      const hasLoadedMedia = mediaElements.some((node) => (
+        node.tagName === "IMG"
+        && (node as HTMLImageElement).complete
+        && (node as HTMLImageElement).naturalWidth > 0
+      ));
+      const renderedUnconfiguredMedia = Array.from(content.querySelectorAll(".hc-dynamic-template__empty-slot"))
+        .some((node) => /图片待填写|商品待选择|集合待选择/.test(node.textContent ?? ""));
+      const sourceChanged = mediaSourceSignature !== mediaSourceSignatureRef.current;
+      mediaSourceSignatureRef.current = mediaSourceSignature;
+      setContentIssue((current) => {
+        if (hasFailedMedia && !hasLoadedMedia) return "media-failed";
+        if (hasLoadedMedia) {
+          return hasUnconfiguredMedia || renderedUnconfiguredMedia ? "media-unconfigured" : null;
+        }
+        if (current === "media-failed" && !sourceChanged) return current;
+        return hasUnconfiguredMedia || renderedUnconfiguredMedia ? "media-unconfigured" : null;
+      });
+    };
+    const scheduleDetection = () => {
+      if (animationFrameId !== null) return;
+      animationFrameId = ownerWindow.requestAnimationFrame(() => {
+        animationFrameId = null;
+        detectUnconfiguredMedia();
+      });
+    };
+    const handleMediaError = (event: Event) => {
+      const tagName = (event.target as Element | null)?.tagName;
+      if (tagName === "IMG" || tagName === "VIDEO" || tagName === "SOURCE") {
+        scheduleDetection();
+      }
+    };
+    const handleMediaLoad = (event: Event) => {
+      const tagName = (event.target as Element | null)?.tagName;
+      if (tagName === "IMG" || tagName === "VIDEO" || tagName === "SOURCE") {
+        scheduleDetection();
+      }
+    };
+    const observer = new ownerWindow.MutationObserver(scheduleDetection);
+    observer.observe(content, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["src"],
+    });
+    content.addEventListener("error", handleMediaError, true);
+    content.addEventListener("load", handleMediaLoad, true);
+    scheduleDetection();
+    const detectionTimers = [50, 250, 1_000]
+      .map((delay) => ownerWindow.setTimeout(scheduleDetection, delay));
+    return () => {
+      observer.disconnect();
+      content.removeEventListener("error", handleMediaError, true);
+      content.removeEventListener("load", handleMediaLoad, true);
+      detectionTimers.forEach((timer) => ownerWindow.clearTimeout(timer));
+      if (animationFrameId !== null) ownerWindow.cancelAnimationFrame(animationFrameId);
+    };
+  }, [contentElement, frameDocument, hasUnconfiguredMedia, isUnavailable]);
 
   useLayoutEffect(() => {
     const content = contentElement;
@@ -341,11 +473,25 @@ export default function TemplateCatalogViewportPreview({
   ]);
 
   const scaledHeight = measurement.naturalHeight * measurement.scale;
-  const dimensionLabel = `${viewport === "desktop" ? "桌面" : "手机"} · ${Math.round(sourceWidth)} × ${Math.round(measurement.naturalHeight)} · ${heightMode === "auto" ? "随内容变化" : heightMode === "fixed" ? "固定高度" : ratioLabel}`;
+  const scrollableThumbnail = presentation === "thumbnail" && measurement.longPage && !isUnavailable;
+  const visibleSlots = slots.filter((slot) => !slot.hidden);
+  const imageSlotCount = visibleSlots.filter((slot) => slot.kind === "media").length;
+  const textSlotCount = visibleSlots.filter((slot) => ["title", "description", "text"].includes(slot.kind)).length;
+  const actionSlotCount = visibleSlots.filter((slot) => slot.kind === "button").length;
+  const otherSlotCount = Math.max(0, visibleSlots.length - imageSlotCount - textSlotCount - actionSlotCount);
+  const hiddenSlotCount = slots.length - visibleSlots.length;
+  const deviceLabel = viewport === "desktop" ? "桌面端" : "移动端";
+  const dimensionLabel = heightMode === "auto"
+    ? `${deviceLabel} · 宽 ${Math.round(sourceWidth)} px · 高随内容`
+    : `${deviceLabel} · ${Math.round(sourceWidth)} × ${Math.round(measurement.naturalHeight)} px · ${heightMode === "fixed" ? "固定高度" : ratioLabel}`;
+  const failureLabel = unavailable ? "预览数据不可用" : "预览生成失败";
+  const fixedDetailWidth = presentation !== "thumbnail" && zoom
+    ? Math.round(sourceWidth * zoom)
+    : null;
 
   return (
     <div
-      className={`template-editor__catalog-preview-shell is-${viewport}${isUnavailable || previewStatus === "unavailable" ? " is-unavailable" : ""}`}
+      className={`template-editor__catalog-preview-shell is-${viewport} is-${presentation}${isUnavailable || previewStatus === "unavailable" ? " is-unavailable" : ""}`}
       data-template-catalog-preview-shell
       data-preview-annotations={showSlotAnnotations ? "true" : "false"}
       data-preview-status={previewStatus}
@@ -353,13 +499,20 @@ export default function TemplateCatalogViewportPreview({
       data-preview-styles-ready={stylesReady ? "true" : "false"}
       data-preview-slot-box-count={slotBoxCount}
       data-preview-source-size={`${Math.round(sourceWidth)}x${Math.round(measurement.naturalHeight)}`}
+      data-preview-content-status={contentIssue ?? "ready"}
+      data-preview-thumbnail-mode={scrollableThumbnail ? "scroll" : "overview"}
+      style={fixedDetailWidth ? { width: `max(100%, ${fixedDetailWidth}px)` } : undefined}
     >
-      <div ref={stageRef} className="template-editor__catalog-artboard-stage">
+      <div
+        ref={stageRef}
+        className={`template-editor__catalog-artboard-stage${scrollableThumbnail ? " is-long-page" : ""}`}
+        style={{ height: isUnavailable ? undefined : scrollableThumbnail ? CATALOG_PREVIEW_MAX_HEIGHT : scaledHeight }}
+      >
         <div
           ref={hostRef}
           className={`homepage-editor__template-preview-img template-editor__catalog-viewport-preview is-${viewport}`}
           data-content-template-preview={templateKey}
-          data-preview-art-direction="neutral-template-preview-v1"
+          data-preview-art-direction={presentation === "detail" ? "actual-template-content" : "neutral-template-preview-v1"}
           data-preview-height-mode={heightMode}
           data-preview-natural-height={Math.round(measurement.naturalHeight)}
           data-preview-ratio={heightMode === "auto" ? "auto" : ratioLabel}
@@ -368,15 +521,15 @@ export default function TemplateCatalogViewportPreview({
             height: isUnavailable ? undefined : scaledHeight,
             overflow: "hidden",
             position: "relative",
-            width: "100%",
+            width: isUnavailable ? "100%" : sourceWidth * measurement.scale,
           }}
         >
         {isUnavailable ? (
-          <span className="template-editor__catalog-preview-state" role="status">预览不可用</span>
+          <span className="template-editor__catalog-preview-state" role="status">{failureLabel}</span>
         ) : (
           <>
             <iframe
-              key={`${templateKey}:${viewport}`}
+              key={`${templateKey}:${viewport}:${renderRevision}`}
               ref={frameRef}
               aria-hidden="true"
               className="template-editor__catalog-viewport-frame"
@@ -387,7 +540,7 @@ export default function TemplateCatalogViewportPreview({
               style={{
                 border: 0,
                 height: measurement.naturalHeight,
-                left: `calc(50% - ${sourceWidth * measurement.scale / 2}px)`,
+                left: 0,
                 pointerEvents: "none",
                 position: "absolute",
                 top: 0,
@@ -411,7 +564,7 @@ export default function TemplateCatalogViewportPreview({
             ) : null}
             {previewStatus !== "ready" ? (
               <span className="template-editor__catalog-preview-state" role="status">
-                {previewStatus === "unavailable" ? "预览不可用" : "正在生成预览"}
+                {previewStatus === "unavailable" ? failureLabel : "正在生成预览"}
               </span>
             ) : null}
           </>
@@ -419,7 +572,7 @@ export default function TemplateCatalogViewportPreview({
         {frameDocument?.getElementById("template-viewport-root") && !isUnavailable
           ? createPortal(
               <TemplateCatalogPreviewErrorBoundary
-                key={`${templateKey}:${viewport}`}
+                key={`${templateKey}:${viewport}:${renderRevision}`}
                 onError={() => setRenderFailed(true)}
               >
                 <div
@@ -431,7 +584,7 @@ export default function TemplateCatalogViewportPreview({
                     position: "relative",
                     inset: "auto",
                     transform: "none",
-                    minHeight: fallbackHeight,
+                    minHeight: heightMode === "auto" ? AUTO_ARTBOARD_MIN_HEIGHT : fallbackHeight,
                     width: sourceWidth,
                   } as CSSProperties}
                 >
@@ -464,9 +617,35 @@ export default function TemplateCatalogViewportPreview({
           : null}
         </div>
       </div>
+      {scrollableThumbnail ? (
+        <span className="template-editor__catalog-long-page-hint" aria-hidden="true">
+          长页局部 · 滚动查看
+        </span>
+      ) : null}
       <span className="template-editor__catalog-dimensions">
         {dimensionLabel}
       </span>
+      {presentation !== "detail" ? (
+        <div
+          className="template-editor__catalog-slot-key"
+          data-image-slot-count={imageSlotCount}
+          data-text-slot-count={textSlotCount}
+          data-action-slot-count={actionSlotCount}
+          data-hidden-slot-count={hiddenSlotCount}
+          aria-label={`当前画幅可见槽位：图片 ${imageSlotCount} 个，文字 ${textSlotCount} 个，按钮 ${actionSlotCount} 个；隐藏槽位 ${hiddenSlotCount} 个${otherSlotCount ? `；其他可见槽位 ${otherSlotCount} 个` : ""}`}
+        >
+          <span className="is-media">图片 {imageSlotCount}</span>
+          <span className="is-text">文字 {textSlotCount}</span>
+          <span className="is-action">按钮 {actionSlotCount}</span>
+          <span className="is-hidden">隐藏 {hiddenSlotCount}</span>
+          {otherSlotCount ? <span className="is-other">其他 {otherSlotCount}</span> : null}
+        </div>
+      ) : null}
+      {contentIssue && presentation === "detail" ? (
+        <span className={`template-editor__catalog-preview-issue is-${contentIssue}`} role="status">
+          {contentIssue === "media-failed" ? "素材加载失败" : "素材未配置"}
+        </span>
+      ) : null}
     </div>
   );
 }

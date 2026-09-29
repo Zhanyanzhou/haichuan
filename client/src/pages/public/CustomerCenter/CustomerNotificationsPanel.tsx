@@ -12,13 +12,55 @@ type Props = {
 };
 
 function safeActionUrl(value?: string | null) {
-  return value?.startsWith("/customer") ? value : null;
+  if (!value?.startsWith("/") || value.startsWith("//")) return null;
+
+  let url: URL;
+  try {
+    url = new URL(value, "https://customer-action.invalid");
+  } catch {
+    return null;
+  }
+
+  if (
+    url.origin !== "https://customer-action.invalid"
+    || url.pathname !== "/customer"
+    || url.hash
+  ) {
+    return null;
+  }
+
+  const keys = Array.from(url.searchParams.keys());
+  if (new Set(keys).size !== keys.length) return null;
+  if (keys.some((key) => !["section", "orderId", "leadId"].includes(key))) return null;
+  if (keys.length === 0) return "/customer";
+
+  const section = url.searchParams.get("section");
+  if (section === "orders" && keys.length === 1) {
+    return "/customer?section=orders";
+  }
+
+  const parsePositiveInteger = (key: "orderId" | "leadId") => {
+    const raw = url.searchParams.get(key);
+    if (!raw || !/^[1-9]\d*$/.test(raw)) return null;
+    const id = Number(raw);
+    return Number.isSafeInteger(id) ? id : null;
+  };
+
+  if (section === "orders" && keys.length === 2 && keys.includes("orderId")) {
+    const orderId = parsePositiveInteger("orderId");
+    return orderId === null ? null : `/customer?section=orders&orderId=${orderId}`;
+  }
+  if (section === "consultations" && keys.length === 2 && keys.includes("leadId")) {
+    const leadId = parsePositiveInteger("leadId");
+    return leadId === null ? null : `/customer?section=consultations&leadId=${leadId}`;
+  }
+  return null;
 }
 
 function actionLabel(value: string) {
-  return value.includes("section=consultations")
-    ? "查看咨询详情 →"
-    : "查看详情 →";
+  if (value.includes("section=consultations")) return "查看咨询详情 →";
+  if (value.includes("section=orders")) return "查看对应订单 →";
+  return "查看详情 →";
 }
 
 export default function CustomerNotificationsPanel({

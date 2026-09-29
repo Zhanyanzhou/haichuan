@@ -80,7 +80,14 @@ function product(
     isAvailableForPurchase: direct ? options.available ?? true : false,
     images: [],
     skus: direct
-      ? [{ id: id * 10, productId: id, material: "AU750", price: 12800, isActive: true }]
+      ? [{
+        id: id * 10,
+        productId: id,
+        material: "AU750",
+        price: 12800,
+        isActive: true,
+        isAvailableForPurchase: options.available ?? true,
+      }]
       : [],
     craftTechnique: [],
     detailContent: [],
@@ -102,6 +109,8 @@ async function mockPublicSales(
     products: ReturnType<typeof product>[];
     flags?: { commerceEnabled: boolean; cartEnabled: boolean; paymentEnabled: boolean };
     flagsStatus?: number;
+    flagsStatuses?: number[];
+    flagsRequestCount?: { value: number };
     flagsBarrier?: RouteBarrier;
     cartItems?: unknown[];
     cartStatus?: number;
@@ -116,6 +125,7 @@ async function mockPublicSales(
     (item) => item.code === reference || String(item.id) === reference,
   );
   let cartGetCount = 0;
+  let flagsGetCount = 0;
   const flags = options.flags ?? {
     commerceEnabled: true,
     cartEnabled: true,
@@ -133,12 +143,17 @@ async function mockPublicSales(
     if (path.endsWith("/stream")) return route.abort();
     if (path.endsWith("/settings/flags")) {
       if (options.flagsBarrier) await options.flagsBarrier.waitUntilReleased();
+      const flagsStatus = options.flagsStatuses?.[flagsGetCount]
+        ?? options.flagsStatus
+        ?? 200;
+      flagsGetCount += 1;
+      if (options.flagsRequestCount) options.flagsRequestCount.value = flagsGetCount;
       return fulfill(
         route,
-        options.flagsStatus === 500
+        flagsStatus === 500
           ? { statusCode: 500, message: "交易能力暂时无法读取" }
           : flags,
-        options.flagsStatus,
+        flagsStatus,
       );
     }
     if (path.endsWith("/settings/public")) return fulfill(route, { siteName: "海川珠宝" });
@@ -271,6 +286,67 @@ test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) =
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 });
 
+for (const viewport of [
+  { name: "desktop", width: 1440, height: 900 },
+  { name: "mobile", width: 390, height: 844 },
+]) {
+  test(`${viewport.name} Catalog 交易能力瞬时失败后可页内重试恢复`, async ({ page }) => {
+    const flagsRequestCount = { value: 0 };
+    await mockPublicSales(page, {
+      products: [product(6, "DIRECT_PURCHASE", { available: true })],
+      flagsStatuses: [500, 200],
+      flagsRequestCount,
+    });
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto("/catalog");
+
+    const recovery = page.getByRole("alert").filter({ hasText: "购买状态暂时无法确认" });
+    await expect(recovery).toBeVisible();
+    await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
+    await expect(page.getByText("购买暂未开放，联系顾问")).toHaveCount(0);
+    expect(flagsRequestCount.value).toBe(1);
+
+    const retry = recovery.getByRole("button", { name: "重新检查购买状态" });
+    const retryBox = await retry.boundingBox();
+    expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await retry.click();
+    await expect(page.getByRole("link", { name: "查看并购买" }).first())
+      .toHaveAttribute("href", "/products/HC-6");
+    await expect(recovery).toHaveCount(0);
+    expect(flagsRequestCount.value).toBe(2);
+    await expect.poll(() => page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    )).toBe(true);
+  });
+
+  test(`${viewport.name} 作品详情区分交易能力读取失败与明确关闭`, async ({ page }) => {
+    const flagsRequestCount = { value: 0 };
+    await mockPublicSales(page, {
+      products: [product(7, "DIRECT_PURCHASE", { available: true })],
+      flagsStatuses: [500, 200],
+      flagsRequestCount,
+    });
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.goto("/products/7");
+
+    const recovery = page.getByRole("alert").filter({ hasText: "购买状态暂时无法确认" });
+    await expect(recovery).toBeVisible();
+    await recovery.scrollIntoViewIfNeeded();
+    await expect(page.getByRole("link", { name: "购买暂未开放，联系顾问" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /加入购物车/ })).toHaveCount(0);
+    expect(flagsRequestCount.value).toBe(1);
+
+    await recovery.getByRole("button", { name: "重新检查购买状态" }).click();
+    await page.getByRole("button", { name: /18K金/ }).click();
+    await expect(page.getByRole("button", { name: /加入购物车/ })).toBeEnabled();
+    await expect(recovery).toHaveCount(0);
+    expect(flagsRequestCount.value).toBe(2);
+    await expect.poll(() => page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    )).toBe(true);
+  });
+}
+
 test("DIRECT_PURCHASE 有货时使用 SKU 价格且重复点击只提交一次", async ({ page }) => {
   const antdConsoleProblems = captureAntdConsoleProblems(page);
   const requestCounts = { add: 0, update: 0, checkout: 0 };
@@ -280,6 +356,7 @@ test("DIRECT_PURCHASE 有货时使用 SKU 价格且重复点击只提交一次",
   });
   await page.goto("/products/10");
 
+  await page.getByRole("button", { name: /18K金/ }).click();
   await expect(page.getByText("¥12,800", { exact: true })).toBeVisible();
   const addButton = page.getByRole("button", { name: /加入购物车/ });
   await expect(addButton).toBeEnabled();
@@ -300,7 +377,7 @@ test("DIRECT_PURCHASE 0 库存明确售罄且不发加购请求", async ({ page 
   });
   await page.goto("/products/11");
 
-  const soldOut = page.getByRole("button", { name: "已售罄" });
+  const soldOut = page.getByRole("button", { name: "已售罄", exact: true });
   await expect(soldOut).toBeDisabled();
   await expect(page.getByText("该作品已售罄，仍可继续浏览作品信息或联系珠宝顾问。")).toBeVisible();
   expect(requestCounts.add).toBe(0);
@@ -325,6 +402,7 @@ test("SINGLE_UNIT 在详情和购物车都固定数量上限 1", async ({ page }
   });
 
   await page.goto("/products/12");
+  await page.getByRole("button", { name: /18K金/ }).click();
   await expect(page.getByRole("button", { name: "增加数量" })).toBeDisabled();
   await expect(page.getByText("一物一件，每位顾客的购物车最多保留 1 件。")).toBeVisible();
 
@@ -366,6 +444,7 @@ test("详情加购 409 显示服务端原因且不伪造成功", async ({ page }
     requestCounts,
   });
   await page.goto("/products/30");
+  await page.getByRole("button", { name: /18K金/ }).click();
   await page.getByRole("button", { name: /加入购物车/ }).click();
 
   await expect(page.getByRole("alert")).toContainText("一物一件商品在购物车中最多保留 1 件");
@@ -551,10 +630,15 @@ for (const viewport of [
     ];
     for (const check of checks) {
       await page.goto(check.path);
+      if (check.path.startsWith("/products/")) {
+        await page.getByRole("button", { name: /18K金/ }).click();
+      }
       const target = page.getByRole(check.role, { name: check.name }).first();
       await target.focus();
       await expect(target).toBeFocused();
-      await expect(target).toHaveCSS("outline-width", "2px");
+      await expect.poll(async () => Number.parseFloat(
+        await target.evaluate((element) => getComputedStyle(element).outlineWidth),
+      )).toBeGreaterThanOrEqual(2);
       await expect.poll(() => page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       )).toBe(true);

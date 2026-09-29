@@ -166,23 +166,14 @@ test("领取冲突保留明确状态，并可重新加载确认实际负责人",
   await expect(drawer.getByRole("button", { name: "领取线索" })).toHaveCount(0);
 });
 
-test("领取失败后恢复原操作，重试成功不会产生重复请求", async ({ page }) => {
+test("领取响应丢失时标记结果待确认，并先只读回查权威负责人", async ({ page }) => {
   const state: LeadState = { assignedTo: null, assigneeName: null };
   let claimRequests = 0;
   await installLeadRoutes(page, state, async (route) => {
     claimRequests += 1;
-    if (claimRequests === 1) {
-      await fulfillJson(route, { code: 503, message: "temporary failure" }, 503);
-      return;
-    }
     state.assignedTo = 7;
     state.assigneeName = "客服七号";
-    await fulfillJson(route, {
-      id: 17,
-      assignedTo: 7,
-      status: "PENDING",
-      updatedAt: "2026-09-12T01:00:00.000Z",
-    });
+    await fulfillJson(route, { code: 503, message: "response lost" }, 503);
   });
 
   const drawer = await openLeadDetail(page);
@@ -190,12 +181,16 @@ test("领取失败后恢复原操作，重试成功不会产生重复请求", as
   await claimButton.click();
 
   await expect(
-    drawer.getByText("线索领取失败，请重新加载后重试。", { exact: true }),
+    drawer.getByText(
+      "线索领取结果待确认。请先重新加载确认负责人；若仍未分配，再次领取即可。",
+      { exact: true },
+    ),
   ).toBeVisible();
+  expect(claimRequests).toBe(1);
   await expect(claimButton).toBeEnabled();
-  await claimButton.click();
+  await drawer.getByRole("button", { name: "重新加载" }).click();
 
-  await expect(drawer.getByText("线索已领取。", { exact: true })).toBeVisible();
   await expect(drawer.getByText("客服七号", { exact: true })).toBeVisible();
-  expect(claimRequests).toBe(2);
+  await expect(drawer.getByRole("button", { name: "领取线索" })).toHaveCount(0);
+  expect(claimRequests).toBe(1);
 });

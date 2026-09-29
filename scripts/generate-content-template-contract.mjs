@@ -965,6 +965,7 @@ const registry = activeTemplates.map(({ key, moduleType, displayName, category, 
 const contractMap = Object.fromEntries(source.templates.map(({ category: _category, implementationStatus: _status, skeleton: _skeleton, ...contract }) => [contract.key, contract]));
 const pageRuleMap = Object.fromEntries(source.pageRules.map((rule) => [rule.pageKey, rule]));
 const pagePathMap = Object.fromEntries(source.pageRules.map((rule) => [rule.pageKey, rule.publicPath]));
+const pageKeyList = source.pageRules.map((rule) => rule.pageKey);
 const templateSkeletonMap = Object.fromEntries(source.templates.map(({ key, moduleType, displayName, category, skeleton }) => [key, {
   key,
   moduleType,
@@ -1122,6 +1123,9 @@ export type ContentTemplatePageRule = {
 };
 
 export const CONTENT_TEMPLATE_PAGE_RULES = ${JSON.stringify(pageRuleMap, sortReplacer, 2)} as const satisfies Record<string, ContentTemplatePageRule>;
+
+export const CONTENT_TEMPLATE_PAGE_KEYS = ${JSON.stringify(pageKeyList, null, 2)} as const;
+export type ContentTemplatePageKey = (typeof CONTENT_TEMPLATE_PAGE_KEYS)[number];
 
 export const CONTENT_TEMPLATE_PAGE_PATHS = ${JSON.stringify(pagePathMap, sortReplacer, 2)} as const;
 export type ContentTemplatePagePath =

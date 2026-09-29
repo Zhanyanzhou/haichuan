@@ -7,11 +7,15 @@ import {
   resolveCustomerProductVisibilities,
   type CustomerProductAccess,
 } from '../products/product-eligibility';
+import type { CustomerPrincipal } from '../../common/security/authenticated-principal';
+import {
+  lockActiveCustomerForRead,
+  lockActiveCustomerForWrite,
+} from '../customers/customer-write-gate';
 
 type Owner = {
-  userId?: number;
   sessionId?: string;
-  customer?: CustomerProductAccess;
+  customer?: CustomerPrincipal;
 };
 
 @Injectable()
@@ -28,8 +32,7 @@ export class CartService {
 
   /** 解析购物车归属：登录客户优先，否则使用会话标识 */
   private resolveOwner(owner: Owner): { userId: number } | { sessionId: string } {
-    const userId = owner.userId;
-    if (userId) return { userId };
+    if (owner.customer) return { userId: owner.customer.id };
     if (this.validSessionId(owner.sessionId)) {
       return { sessionId: owner.sessionId };
     }
@@ -44,8 +47,9 @@ export class CartService {
    * 登录客户携带原游客会话时，原子地把该会话购物车归并到客户。
    * 只认领 userId 为空的行，不会改动其他客户的购物车。
    */
-  private async mergeSessionCart(userId: number, sessionId: string) {
+  private async mergeSessionCart(customer: CustomerPrincipal, sessionId: string) {
     await this.prisma.$transaction(async (tx) => {
+      await lockActiveCustomerForWrite(tx, customer);
       const guestItems = await tx.cart.findMany({
         where: { userId: null, sessionId },
         include: {
@@ -61,7 +65,7 @@ export class CartService {
 
       const customerItems = await tx.cart.findMany({
         where: {
-          userId,
+          userId: customer.id,
           skuId: { in: [...new Set(guestItems.map((item) => item.skuId))] },
         },
         select: { id: true, skuId: true, quantity: true },
@@ -90,7 +94,7 @@ export class CartService {
         const quantity = Math.min(maxQuantity, Math.max(1, guestItem.quantity));
         const claimed = await tx.cart.updateMany({
           where: { id: guestItem.id, userId: null, sessionId },
-          data: { userId, sessionId: null, quantity },
+          data: { userId: customer.id, sessionId: null, quantity },
         });
         if (claimed.count === 1) {
           customerItemBySku.set(guestItem.skuId, {
@@ -105,8 +109,8 @@ export class CartService {
 
   private async prepareOwner(owner: Owner) {
     const resolved = this.resolveOwner(owner);
-    if ('userId' in resolved && owner.sessionId && this.validSessionId(owner.sessionId)) {
-      await this.mergeSessionCart(resolved.userId, owner.sessionId);
+    if (owner.customer && owner.sessionId && this.validSessionId(owner.sessionId)) {
+      await this.mergeSessionCart(owner.customer, owner.sessionId);
     }
     return resolved;
   }
@@ -120,7 +124,21 @@ export class CartService {
 
   async getCart(owner: Owner) {
     const where = await this.prepareOwner(owner);
-    const items = await this.prisma.cart.findMany({
+    if (!owner.customer) {
+      return this.readCart(this.prisma, where, undefined);
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const lockedAccess = await lockActiveCustomerForRead(tx, owner.customer!);
+      return this.readCart(tx, where, lockedAccess);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  private async readCart(
+    client: Pick<Prisma.TransactionClient, 'cart'>,
+    where: Prisma.CartWhereInput,
+    access?: CustomerProductAccess,
+  ) {
+    const items = await client.cart.findMany({
       where,
       include: {
         product: {
@@ -156,7 +174,7 @@ export class CartService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const visibleVisibilities = resolveCustomerProductVisibilities(owner.customer);
+    const visibleVisibilities = resolveCustomerProductVisibilities(access);
     return items.map((item) => {
       const productUnavailable =
         item.product.deletedAt !== null ||
@@ -221,12 +239,15 @@ export class CartService {
     const owner = await this.prepareOwner(data);
     const quantity = this.requireQuantity(Number(data.quantity));
     const run = () => this.prisma.$transaction(async (tx) => {
+      const lockedAccess = data.customer
+        ? await lockActiveCustomerForWrite(tx, data.customer)
+        : undefined;
       const sku = await tx.productSKU.findFirst({
         where: {
           id: data.skuId,
           productId: data.productId,
           isActive: true,
-          product: directPurchaseProductWhere(data.customer),
+          product: directPurchaseProductWhere(lockedAccess),
         },
         select: {
           id: true,
@@ -290,51 +311,66 @@ export class CartService {
 
   async updateQuantity(id: number, quantity: number, owner: Owner) {
     const where = await this.prepareOwner(owner);
-    const item = await this.prisma.cart.findFirst({
-      where: {
-        id,
-        ...where,
-        sku: {
-          isActive: true,
-          product: directPurchaseProductWhere(owner.customer),
-        },
-      },
-      include: {
-        sku: {
-          select: {
-            inventories: { select: { quantity: true } },
-            product: { select: { inventoryPolicy: true } },
+    return this.prisma.$transaction(async (tx) => {
+      const lockedAccess = owner.customer
+        ? await lockActiveCustomerForWrite(tx, owner.customer)
+        : undefined;
+      const item = await tx.cart.findFirst({
+        where: {
+          id,
+          ...where,
+          sku: {
+            isActive: true,
+            product: directPurchaseProductWhere(lockedAccess),
           },
         },
-      },
-    });
-    if (!item) throw new NotFoundException('购物车商品不存在');
-    if (quantity <= 0) {
-      return this.prisma.cart.delete({ where: { id: item.id } });
-    }
-    const normalized = this.requireQuantity(Number(quantity));
-    if (item.sku.product.inventoryPolicy === 'SINGLE_UNIT' && normalized !== 1) {
-      throw new ConflictException('一物一件商品在购物车中最多保留 1 件');
-    }
-    const availableStock = item.sku.inventories.reduce(
-      (sum, inventory) => sum + Math.max(0, inventory.quantity),
-      0,
-    );
-    if (availableStock < normalized) {
-      throw new ConflictException('商品库存不足，请刷新后重试');
-    }
-    return this.prisma.cart.update({ where: { id: item.id }, data: { quantity: normalized } });
+        include: {
+          sku: {
+            select: {
+              inventories: { select: { quantity: true } },
+              product: { select: { inventoryPolicy: true } },
+            },
+          },
+        },
+      });
+      if (!item) throw new NotFoundException('购物车商品不存在');
+      if (quantity <= 0) {
+        return tx.cart.delete({ where: { id: item.id } });
+      }
+      const normalized = this.requireQuantity(Number(quantity));
+      if (item.sku.product.inventoryPolicy === 'SINGLE_UNIT' && normalized !== 1) {
+        throw new ConflictException('一物一件商品在购物车中最多保留 1 件');
+      }
+      const availableStock = item.sku.inventories.reduce(
+        (sum, inventory) => sum + Math.max(0, inventory.quantity),
+        0,
+      );
+      if (availableStock < normalized) {
+        throw new ConflictException('商品库存不足，请刷新后重试');
+      }
+      return tx.cart.update({ where: { id: item.id }, data: { quantity: normalized } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async removeItem(id: number, owner: Owner) {
     const where = await this.prepareOwner(owner);
-    const item = await this.prisma.cart.findFirst({ where: { id, ...where } });
-    if (!item) throw new NotFoundException('购物车商品不存在');
-    return this.prisma.cart.delete({ where: { id: item.id } });
+    return this.prisma.$transaction(async (tx) => {
+      if (owner.customer) {
+        await lockActiveCustomerForWrite(tx, owner.customer);
+      }
+      const item = await tx.cart.findFirst({ where: { id, ...where } });
+      if (!item) throw new NotFoundException('购物车商品不存在');
+      return tx.cart.delete({ where: { id: item.id } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async clearCart(owner: Owner) {
     const where = await this.prepareOwner(owner);
-    return this.prisma.cart.deleteMany({ where });
+    return this.prisma.$transaction(async (tx) => {
+      if (owner.customer) {
+        await lockActiveCustomerForWrite(tx, owner.customer);
+      }
+      return tx.cart.deleteMany({ where });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 }

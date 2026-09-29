@@ -7,6 +7,10 @@
   line-height: 1.5;
 }
 .template-editor__native-design { container-type: inline-size; }
+.template-editor__native-design [data-image-focus-field] {
+  grid-column: 1 / -1;
+  margin-bottom: 8px;
+}
 .template-editor__native-design button:not(.ant-btn):not(.ant-switch),
 .template-native__layout button:not(.ant-btn):not(.ant-switch),
 .template-native__anchor button:not(.ant-btn):not(.ant-switch) {
@@ -47,6 +51,8 @@
 .template-native__breakpoint-actions > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .template-native__breakpoint-actions > summary > small { color: var(--adm-muted); font-size: 12px; font-weight: 400; }
 .template-native__breakpoint-actions > p { margin: 4px 0 8px; color: var(--adm-muted); font-size: 12px; line-height: 18px; }
+.template-native__breakpoint-actions .template-native__anchor,
+.template-native__breakpoint-actions .template-native-responsive { margin: 8px 0 0; border-top: 1px solid var(--adm-line); }
 .template-editor__native-design summary,
 .template-native__anchor summary { min-height: 32px; padding: 5px 0; cursor: pointer; }
 .template-editor__native-design .template-native__section { padding: 16px 0; margin: 0; }
@@ -91,6 +97,10 @@
 .template-native__layout-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .template-native__layout-choices button { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .template-native__layout-choices button span[aria-hidden] { font-size: 18px; }
+.template-native__layout-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.template-native__layout-heading > h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.template-native__layout-heading > p { margin: 0; font-size: 12px; white-space: nowrap; }
+.template-native__layout .template-native__layout-help { margin-top: 3px; }
 .template-native__layout p,
 .template-native__anchor p { margin: 8px 0; font-size: 13px; color: var(--adm-muted); }
 .template-native__layout table { width: 100%; font-size: 12px; overflow-wrap: anywhere; border-collapse: collapse; }
@@ -117,7 +127,7 @@
 @container (min-width: 330px) {
   [data-template-property-group="文字或媒体"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   [data-template-property-group="文字或媒体"] > h3,
-  [data-template-design-property="slot.fontRole"],
+  [data-template-property-group="文字或媒体"] > .homepage-editor__inspector-field,
   [data-template-design-property="slot.objectFit"] { grid-column: 1 / -1; }
 }
 

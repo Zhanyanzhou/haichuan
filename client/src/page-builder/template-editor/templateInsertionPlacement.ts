@@ -1,9 +1,9 @@
 import type { DynamicTemplatePlacement, TemplateDefinitionV2 } from "../template-definition/generated/templateDefinition.generated";
-import { resolveTemplateNodeRules, setTemplateNodeRule, type TemplateBreakpoint } from "../template-definition/responsive";
+import { resolveTemplateNodeRules, setTemplateNodeRule, TEMPLATE_CONTENT_BREAKPOINTS, type TemplateBreakpoint } from "../template-definition/responsive";
 
 const GAP = 0.02;
 const EPSILON = 0.000001;
-const DEVICES = { desktop: "桌面", tablet: "平板", mobile: "手机" } as const;
+const DEVICES = { desktop: "桌面", mobile: "手机" } as const;
 type Box = Pick<DynamicTemplatePlacement, "x" | "y" | "width" | "height">;
 
 function fits(box: Box, occupied: Box[]) {
@@ -38,7 +38,7 @@ export function placeInsertedTemplateNode(definition: TemplateDefinitionV2, pare
   const slot = node.slotId ? definition.slots[node.slotId] : undefined;
   const text = slot && ["heading", "text", "richText", "badge", "button", "link"].includes(slot.type);
   const index = parent.childIds.indexOf(nodeId);
-  for (const device of Object.keys(DEVICES) as TemplateBreakpoint[]) {
+  for (const device of TEMPLATE_CONTENT_BREAKPOINTS) {
     if (parent.type !== "Stack" || resolveTemplateNodeRules(definition, parentId, device).layoutMode !== "free") continue;
     const placement = resolveTemplateNodeRules(definition, nodeId, device).placement;
     if (!placement) continue;

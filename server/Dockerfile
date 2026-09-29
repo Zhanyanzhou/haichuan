@@ -7,7 +7,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts
 
 COPY prisma ./prisma
 COPY tsconfig.json nest-cli.json ./
@@ -19,7 +19,7 @@ FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3e
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --include=optional --legacy-peer-deps \
+RUN npm ci --ignore-scripts --omit=dev --include=optional --legacy-peer-deps \
     && rm -rf node_modules/prisma node_modules/.bin/prisma
 
 # 受签名运维镜像：从锁文件安装出的构建层仅复制 Prisma CLI 的闭包，

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { UnauthorizedException } from '@nestjs/common';
 import { ApiError } from '../../common/errors/api-error';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
@@ -13,6 +14,9 @@ type Channel = 'RETAIL' | 'CUSTOM' | 'PARTNER_WAX';
 const hasErrorCode = (code: string) => (error: unknown) =>
   error instanceof ApiError && error.errorCode === code;
 
+const CUSTOMER = { id: 7, authVersion: 1 };
+const OTHER_CUSTOMER = { id: 8, authVersion: 1 };
+
 function createHarness(channel: Channel, options?: {
   orderFailure?: Error;
   tamperItemDescription?: boolean;
@@ -20,10 +24,17 @@ function createHarness(channel: Channel, options?: {
   activeAgreements?: Array<{ id: number; redWaxRate: Prisma.Decimal; purpleWaxRate: Prisma.Decimal }>;
   reverseRows?: boolean;
   tamperPlanSplit?: boolean;
+  omitSnapshotCurrency?: boolean;
+  snapshotCurrency?: string;
+  versionCurrency?: string;
+  planCurrency?: string;
 }) {
   const customerId = 7;
   const snapshot = {
     schemaVersion: 2,
+    ...(options?.omitSnapshotCurrency
+      ? {}
+      : { currency: options?.snapshotCurrency ?? 'CNY' }),
     customer: { customerId, customerName: '客户', customerPhone: '13800000000', depositAmount: '0' },
     pricing: channel === 'PARTNER_WAX'
       ? { method: 'WAX_WEIGHT_RATE', waxType: 'RED', confirmedWaxWeight: '4.000', rate: '25.00', rateSource: 'SYSTEM_DEFAULT_D19_V1' }
@@ -84,7 +95,7 @@ function createHarness(channel: Channel, options?: {
     version: 2,
     channel,
     status: 'ISSUED',
-    currency: 'CNY',
+    currency: options?.versionCurrency ?? 'CNY',
     subtotalAmount: new Prisma.Decimal(100),
     discountAmount: new Prisma.Decimal(0),
     feeAmount: new Prisma.Decimal(0),
@@ -131,6 +142,7 @@ function createHarness(channel: Channel, options?: {
     paymentPlans: [{
       id: 91,
       status: 'DRAFT',
+      currency: options?.planCurrency ?? 'CNY',
       totalAmount: new Prisma.Decimal(100),
       installments: options?.tamperPlanSplit
         ? [
@@ -243,7 +255,7 @@ for (const channel of ['RETAIL', 'CUSTOM', 'PARTNER_WAX'] as const) {
   test(`${channel} 客户确认在单一事务内选择正确资源通道且不创建 Payment`, async () => {
     const harness = createHarness(channel);
     const order = await harness.service.confirmAndCreateOrder(
-      7,
+      CUSTOMER,
       11,
       `key-${channel}-12345678`,
       { quotationVersion: 2, address: '上海市测试路 1 号' },
@@ -286,7 +298,7 @@ test('同一幂等键和请求返回既有订单且不进入交易写链路', as
   } as unknown as OrdersService);
 
   assert.deepEqual(
-    (await service.confirmAndCreateOrder(7, 11, key, { quotationVersion: 2, address: '上海市测试路 1 号' })).order,
+    (await service.confirmAndCreateOrder(CUSTOMER, 11, key, { quotationVersion: 2, address: '上海市测试路 1 号' })).order,
     { ...existingOrder, finalAmount: undefined, quoteChannel: null },
   );
   assert.equal(orderWrites, 0);
@@ -296,7 +308,7 @@ test('订单创建失败时不推进报价、版本、转换记录或付款计�
   const harness = createHarness('CUSTOM', { orderFailure: new Error('injected rollback') });
   await assert.rejects(
     harness.service.confirmAndCreateOrder(
-      7,
+      CUSTOMER,
       11,
       'rollback-key-12345678',
       { quotationVersion: 2, address: '上海市测试路 1 号' },
@@ -309,11 +321,161 @@ test('订单创建失败时不推进报价、版本、转换记录或付款计�
   assert.equal(harness.writes.includes('plan'), false);
 });
 
+test('合作设计文件列表在共享客户锁内读取并保留安全下载投影', async () => {
+  const events: string[] = [];
+  let isolationLevel: unknown;
+  const tx = {
+    $queryRaw: async () => {
+      events.push('customer-lock');
+      return [{ id: 7 }];
+    },
+    cooperationDesignFile: {
+      findMany: async ({ where }: { where: Record<string, unknown> }) => {
+        events.push('design-list-read');
+        assert.deepEqual(where, { customerId: 7 });
+        return [{
+          id: 31,
+          referenceNo: 'DESIGN-31',
+          productId: 21,
+          currentVersion: 4,
+          versions: [{
+            id: 81,
+            version: 4,
+            status: 'SUBMITTED',
+            checksumSha256: 'aa'.repeat(32),
+            redWaxWeight: 1.2,
+            purpleWaxWeight: null,
+            confirmedAt: null,
+            mediaAsset: { originalName: 'design.step', byteSize: 12 },
+          }],
+        }];
+      },
+    },
+  };
+  const service = new QuotationTransactionService({
+    $transaction: async (
+      action: (transaction: typeof tx) => Promise<unknown>,
+      options: { isolationLevel?: unknown },
+    ) => {
+      isolationLevel = options.isolationLevel;
+      return action(tx);
+    },
+  } as unknown as PrismaService, {} as OrdersService);
+
+  const result = await service.listDesignFilesForCustomer(CUSTOMER);
+
+  assert.deepEqual(events, ['customer-lock', 'design-list-read']);
+  assert.equal(isolationLevel, Prisma.TransactionIsolationLevel.Serializable);
+  assert.equal(result[0]?.versions[0]?.fileName, 'design.step');
+  assert.equal(
+    result[0]?.versions[0]?.downloadUrl,
+    '/api/customers/me/cooperation-design-files/31/versions/4/content',
+  );
+});
+
+test('旧 authVersion 的合作设计文件列表在任何文件元数据查询前失败关闭', async () => {
+  let designListReads = 0;
+  const tx = {
+    $queryRaw: async () => [],
+    cooperationDesignFile: {
+      findMany: async () => {
+        designListReads += 1;
+        return [];
+      },
+    },
+  };
+  const service = new QuotationTransactionService({
+    $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => action(tx),
+  } as unknown as PrismaService, {} as OrdersService);
+
+  await assert.rejects(
+    service.listDesignFilesForCustomer({ id: 7, authVersion: 2 }),
+    UnauthorizedException,
+  );
+  assert.equal(designListReads, 0);
+});
+
+test('合作设计文件读取在认证版本失效后不查询文件记录', async () => {
+  let designRecordRead = false;
+  let mediaRead = false;
+  const tx = {
+    $queryRaw: async () => [],
+    cooperationDesignFileVersion: {
+      findFirst: async () => {
+        designRecordRead = true;
+        return null;
+      },
+    },
+  };
+  const service = new QuotationTransactionService({
+    $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => action(tx),
+  } as unknown as PrismaService, {} as OrdersService, {
+    readVerifiedDesignFile: async () => {
+      mediaRead = true;
+      throw new Error('不应读取设计文件');
+    },
+  } as never);
+
+  await assert.rejects(
+    service.getDesignFileContentForCustomer({ id: 7, authVersion: 2 }, 31, 4),
+    /重新登录/,
+  );
+  assert.equal(designRecordRead, false);
+  assert.equal(mediaRead, false);
+});
+
+test('合作设计文件在共享锁内按本人归属读取并校验媒体', async () => {
+  let recordWhere: Record<string, unknown> | undefined;
+  let receivedChecksum: string | undefined;
+  const mediaAsset = {
+    id: 81,
+    storageKey: 'design-assets/design.step',
+    originalName: 'design.step',
+    mimeType: 'model/step',
+    byteSize: 12,
+    checksumSha256: 'aa'.repeat(32),
+    accessLevel: 'PRIVATE',
+    status: 'READY',
+  };
+  const tx = {
+    $queryRaw: async () => [{ id: 7 }],
+    cooperationDesignFileVersion: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        recordWhere = where;
+        return { checksumSha256: 'aa'.repeat(32), mediaAsset };
+      },
+    },
+  };
+  const service = new QuotationTransactionService({
+    $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => action(tx),
+  } as unknown as PrismaService, {} as OrdersService, {
+    readVerifiedDesignFile: async (_asset: unknown, checksum: string) => {
+      receivedChecksum = checksum;
+      return { buffer: Buffer.from('design'), originalName: 'design.step' };
+    },
+  } as never);
+
+  const result = await service.getDesignFileContentForCustomer(
+    { id: 7, authVersion: 2 },
+    31,
+    4,
+  );
+
+  assert.deepEqual(recordWhere, {
+    designFileId: 31,
+    version: 4,
+    status: { in: ['SUBMITTED', 'CONFIRMED'] },
+    designFile: { customerId: 7 },
+  });
+  assert.equal(receivedChecksum, 'aa'.repeat(32));
+  assert.deepEqual(result, { buffer: Buffer.from('design'), originalName: 'design.step' });
+});
+
 test('数据库报价行即使总额不变但内容被改写也因快照不一致失败关闭', async () => {
   const harness = createHarness('CUSTOM', { tamperItemDescription: true });
   await assert.rejects(
     harness.service.confirmAndCreateOrder(
-      7,
+      CUSTOMER,
       11,
       'tampered-row-12345678',
       { quotationVersion: 2, address: '上海市测试路 1 号' },
@@ -326,7 +488,7 @@ test('数据库报价行即使总额不变但内容被改写也因快照不一�
 test('资源关系返回顺序扰动不会误判不可变快照', async () => {
   const harness = createHarness('CUSTOM', { reverseRows: true });
   const result = await harness.service.confirmAndCreateOrder(
-    7,
+    CUSTOMER,
     11,
     'reordered-rows-12345678',
     { quotationVersion: 2, address: '上海市测试路 1 号' },
@@ -344,7 +506,7 @@ test('默认价报价发出后客户专属价开始生效时要求重新报价',
   });
   await assert.rejects(
     harness.service.confirmAndCreateOrder(
-      7,
+      CUSTOMER,
       11,
       'new-agreement-12345678',
       { quotationVersion: 2, address: '上海市测试路 1 号' },
@@ -363,7 +525,7 @@ test('确认时发现两条同时生效的合作价协议必须失败关闭而�
   const harness = createHarness('PARTNER_WAX', { activeAgreements: agreements });
   await assert.rejects(
     harness.service.confirmAndCreateOrder(
-      7,
+      CUSTOMER,
       11,
       'overlap-agreement-12345678',
       { quotationVersion: 2, address: '上海市测试路 1 号' },
@@ -377,7 +539,7 @@ test('付款计划即使合计未变但定金分拆被改写仍失败关闭', as
   const harness = createHarness('CUSTOM', { tamperPlanSplit: true });
   await assert.rejects(
     harness.service.confirmAndCreateOrder(
-      7,
+      CUSTOMER,
       11,
       'tampered-plan-12345678',
       { quotationVersion: 2, address: '上海市测试路 1 号' },
@@ -386,6 +548,50 @@ test('付款计划即使合计未变但定金分拆被改写仍失败关闭', as
   );
   assert.equal(harness.writes.includes('order'), false);
 });
+
+test('付款计划币种与报价版本不一致时在建单前失败关闭', async () => {
+  const harness = createHarness('CUSTOM', { planCurrency: 'USD' });
+  await assert.rejects(
+    harness.service.confirmAndCreateOrder(
+      CUSTOMER,
+      11,
+      'plan-currency-mismatch-12345678',
+      { quotationVersion: 2, address: '上海市测试路 1 号' },
+    ),
+    /付款计划与报价版本币种不一致/,
+  );
+  assert.equal(harness.writes.includes('order'), false);
+  assert.equal(harness.writes.includes('conversion'), false);
+  assert.equal(harness.writes.includes('version'), false);
+  assert.equal(harness.writes.includes('quotation'), false);
+  assert.equal(harness.writes.includes('plan'), false);
+});
+
+for (const [name, options] of [
+  ['报价快照缺少币种', { omitSnapshotCurrency: true }],
+  [
+    '报价快照、版本和计划同时漂移为非 CNY',
+    { snapshotCurrency: 'USD', versionCurrency: 'USD', planCurrency: 'USD' },
+  ],
+] as const) {
+  test(`${name}时拒绝创建硬编码 CNY 的订单`, async () => {
+    const harness = createHarness('CUSTOM', options);
+    await assert.rejects(
+      harness.service.confirmAndCreateOrder(
+        CUSTOMER,
+        11,
+        `snapshot-currency-${options.omitSnapshotCurrency ? 'missing' : 'usd'}-12345678`,
+        { quotationVersion: 2, address: '上海市测试路 1 号' },
+      ),
+      hasErrorCode('QUOTE_SNAPSHOT_MISMATCH'),
+    );
+    assert.equal(harness.writes.includes('order'), false);
+    assert.equal(harness.writes.includes('conversion'), false);
+    assert.equal(harness.writes.includes('version'), false);
+    assert.equal(harness.writes.includes('quotation'), false);
+    assert.equal(harness.writes.includes('plan'), false);
+  });
+}
 
 test('同一幂等键复用于不同请求时失败关闭', async () => {
   const tx = {
@@ -398,7 +604,7 @@ test('同一幂等键复用于不同请求时失败关闭', async () => {
     $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
   } as unknown as PrismaService, {} as OrdersService);
   await assert.rejects(
-    service.confirmAndCreateOrder(7, 11, 'reused-key-12345678', { quotationVersion: 2, address: 'A' }),
+    service.confirmAndCreateOrder(CUSTOMER, 11, 'reused-key-12345678', { quotationVersion: 2, address: 'A' }),
     hasErrorCode('IDEMPOTENCY_KEY_REUSED'),
   );
 });
@@ -416,7 +622,7 @@ test('其他客户不能读取或确认不属于自己的报价', async () => {
     createOrderFromQuotationInTx: async () => { writes += 1; },
   } as unknown as OrdersService);
   await assert.rejects(
-    service.confirmAndCreateOrder(8, 11, 'isolated-key-12345678', { quotationVersion: 2, address: 'A' }),
+    service.confirmAndCreateOrder(OTHER_CUSTOMER, 11, 'isolated-key-12345678', { quotationVersion: 2, address: 'A' }),
   );
   assert.equal(writes, 0);
 });
@@ -478,7 +684,47 @@ test('客户只能确认本人当前 3D 文件版本且响应不含内部目标�
       checksumSha256: asset.checksumSha256,
     }),
   } as never);
-  const result = await service.confirmDesignFileVersion(7, 1, 2);
+  const result = await service.confirmDesignFileVersion(CUSTOMER, 1, 2);
   assert.equal('targetGoldWeight' in result, false);
-  await assert.rejects(service.confirmDesignFileVersion(8, 1, 2));
+  await assert.rejects(service.confirmDesignFileVersion(OTHER_CUSTOMER, 1, 2));
+});
+
+test('注销先提交后旧 principal 不能确认报价文件且领域记录零写回', async () => {
+  let designReads = 0;
+  let orderCreates = 0;
+  const service = new QuotationTransactionService(
+    {
+      $transaction: async (callback: (tx: any) => Promise<unknown>) => callback({
+        $queryRaw: async () => [],
+        cooperationDesignFile: {
+          findFirst: async () => {
+            designReads += 1;
+            return null;
+          },
+        },
+      }),
+    } as unknown as PrismaService,
+    {
+      createOrderFromQuotationInTx: async () => {
+        orderCreates += 1;
+        return {};
+      },
+    } as unknown as OrdersService,
+  );
+
+  await assert.rejects(
+    () => service.confirmDesignFileVersion(CUSTOMER, 1, 2),
+    UnauthorizedException,
+  );
+  await assert.rejects(
+    () => service.confirmAndCreateOrder(
+      CUSTOMER,
+      11,
+      'closed-account-key-0001',
+      { quotationVersion: 2, address: '合成地址' },
+    ),
+    UnauthorizedException,
+  );
+  assert.equal(designReads, 0);
+  assert.equal(orderCreates, 0);
 });

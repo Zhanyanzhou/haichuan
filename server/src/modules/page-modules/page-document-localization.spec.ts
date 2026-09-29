@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BadRequestException, ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { HEADERS_METADATA } from "@nestjs/common/constants";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import {
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
@@ -73,28 +74,75 @@ test("无语言标记的旧 revision 只属于中文，不能成为英文回退"
   }, "zh-CN"), false);
 });
 
-test("公开页面接口把 en 原样交给本地化读取，缺省 locale 仍为 zh-CN", async () => {
+test("公开页面接口在读取事实源前拒绝 en，缺省 locale 仍为 zh-CN", async () => {
   const calls: Array<{ pageKey: string; locale: string }> = [];
   const service = {
     getLocalizedPublishedPageDocument: async (pageKey: string, locale: string) => {
       calls.push({ pageKey, locale });
       return { pageKey, locale, status: "PUBLISHED" };
     },
+    getLocalizedPageDocument: async (pageKey: string, locale: string) => {
+      calls.push({ pageKey, locale });
+      return { pageKey, locale, status: "HISTORICAL" };
+    },
   };
   const controller = new PageModulesController(service as any);
 
-  await controller.getPublishedDocument("home", "en");
+  await assert.rejects(
+    async () => controller.getPublishedDocument("home", "en"),
+    (error: unknown) => error instanceof NotFoundException,
+  );
   await controller.getPublishedDocument("about", undefined);
+  await controller.getAdminDocument("about", "en");
 
   assert.deepEqual(calls, [
-    { pageKey: "home", locale: "en" },
     { pageKey: "about", locale: "zh-CN" },
+    { pageKey: "about", locale: "en" },
   ]);
+});
+
+test("公开 PageDocument JSON 禁止缓存和独立搜索索引", () => {
+  const headers = Reflect.getMetadata(
+    HEADERS_METADATA,
+    PageModulesController.prototype.getPublishedDocument,
+  ) as Array<{ name: string; value: string }>;
+
+  assert.ok(headers.some(
+    (header) => header.name === "Cache-Control" && header.value === "no-store",
+  ));
+  assert.ok(headers.some(
+    (header) => header.name === "X-Robots-Tag" && header.value === "noindex, nofollow",
+  ));
+});
+
+test("公开页面服务在读取数据库前拒绝合同外 pageKey", async () => {
+  let databaseReads = 0;
+  const prisma = new Proxy({}, {
+    get() {
+      databaseReads += 1;
+      throw new Error("公开读取不应访问合同外记录");
+    },
+  });
+  const service = new PageModulesService(prisma as PrismaService);
+
+  assert.equal(
+    await service.getLocalizedPublishedPageDocument("legacy-hidden-page", "zh-CN"),
+    null,
+  );
+  assert.equal(databaseReads, 0);
 });
 
 test("稀疏语言历史单次请求限制扫描批次并返回续扫游标", async () => {
   let findManyCalls = 0;
-  const prisma = {
+  const prisma: Record<string, unknown> & {
+    pageDocumentRevision: {
+      findMany: (args: {
+        where: { version?: { lt: number } };
+        take: number;
+      }) => Promise<unknown[]>;
+    };
+  } = {
+    $queryRaw: async () => [{ id: 1 }],
     pageDocumentRevision: {
       findMany: async (args: {
         where: { version?: { lt: number } };
@@ -117,6 +165,7 @@ test("稀疏语言历史单次请求限制扫描批次并返回续扫游标", as
       },
     },
   };
+  prisma.$transaction = async (run: (tx: typeof prisma) => Promise<unknown>) => run(prisma);
   const service = new PageModulesService(prisma as unknown as PrismaService);
   Object.defineProperty(service, "getLocalizedPageDraft", {
     value: async () => ({
@@ -125,7 +174,7 @@ test("稀疏语言历史单次请求限制扫描批次并返回续扫游标", as
     }),
   });
 
-  const result = await service.getLocalizedPageDocumentRevisions("home", "en", undefined, 20);
+  const result = await service.getLocalizedPageDocumentRevisions("home", "en", undefined, 20, 1);
 
   assert.equal(findManyCalls, 10);
   assert.deepEqual(result.items, []);
@@ -194,7 +243,7 @@ test("放弃语言草稿拒绝 marker 哈希与发布正文不一致的 revision
   });
 
   await assert.rejects(
-    () => service.discardLocalizedPageDocumentDraft("about", "en", updatedAt.toISOString()),
+    () => service.discardLocalizedPageDocumentDraft("about", "en", updatedAt.toISOString(), 1),
     (error: unknown) => error instanceof ConflictException
       && error.message.includes("完整性校验失败"),
   );
@@ -545,6 +594,266 @@ test("英文超级管理员自审发布绑定同一审计记录并只切换英�
   assert.equal(independentMarker?.selfReview, undefined);
 });
 
+test("超级管理员可在发布时明确自审并直接发布草稿", async () => {
+  const updatedAt = new Date("2026-09-16T10:00:00.000Z");
+  const puckData = { content: [], root: { props: {} }, zones: {} };
+  const metadata = { seoTitle: "待发布中文页" };
+  const contentHash = createPageLocaleContentHash(puckData, metadata);
+  const document = {
+    id: 9,
+    pageKey: "home",
+    schemaVersion: 1,
+    editorType: "puck",
+    editorVersion: "test",
+    templateId: null,
+    templateVersion: null,
+    puckData,
+    metadata,
+    status: "DRAFT",
+    publishedRevisionId: null,
+    publishedAt: null,
+    publishedBy: null,
+    createdAt: updatedAt,
+    updatedAt,
+  };
+  const draft = {
+    id: 31,
+    documentId: 9,
+    locale: "zh-CN" as const,
+    puckData,
+    metadata: withPageLocaleDraftMetadata(metadata, "zh-CN"),
+    reviewStatus: "DRAFT" as const,
+    contentHash,
+    submittedBy: null,
+    submittedAt: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    reviewNote: null,
+    publishedRevisionId: null,
+    publishedHash: null,
+    publishedBy: null,
+    publishedAt: null,
+    createdAt: updatedAt,
+    updatedAt,
+    legacy: false,
+  };
+  const audits: Array<{
+    id: number;
+    userId: number;
+    action: string;
+    module: string;
+    targetId: number;
+    detail: string;
+  }> = [];
+  const calls: Array<{ operation: string; args: any }> = [];
+  const transaction: any = {
+    $queryRaw: async () => [{ id: 9 }],
+    pageDocument: {
+      findUnique: async () => structuredClone(document),
+      update: async (args: any) => {
+        calls.push({ operation: "document.update", args: structuredClone(args) });
+        return { ...structuredClone(document), ...structuredClone(args.data) };
+      },
+    },
+    user: { findUnique: async () => ({ role: "SUPER_ADMIN", status: "ACTIVE" }) },
+    pageDocumentRevision: {
+      findFirst: async () => null,
+      create: async (args: any) => {
+        calls.push({ operation: "revision.create", args: structuredClone(args) });
+        return {
+          id: 77,
+          ...structuredClone(args.data),
+          createdAt: new Date("2026-09-16T10:01:00.000Z"),
+        };
+      },
+    },
+    pageDocumentLocalization: {
+      update: async (args: any) => {
+        calls.push({ operation: "localization.update", args: structuredClone(args) });
+        Object.assign(draft, args.data);
+        return {
+          ...structuredClone(draft),
+          ...structuredClone(args.data),
+          updatedAt: new Date("2026-09-16T10:01:00.000Z"),
+        };
+      },
+    },
+    operationLog: {
+      findMany: async () => audits.filter((row) => row.action === "PAGE_LOCALE_SELF_REVIEW_APPROVED"),
+      create: async (args: any) => {
+        const row = {
+          id: audits.length + 200,
+          ...structuredClone(args.data),
+        };
+        audits.push(row);
+        calls.push({ operation: "operationLog.create", args: structuredClone(args) });
+        return row;
+      },
+    },
+  };
+  const prisma = {
+    $transaction: async (run: (tx: typeof transaction) => Promise<unknown>) => run(transaction),
+  };
+  const service = new PageModulesService(
+    prisma as unknown as PrismaService,
+    {
+      resolveReferences: async () => ({ eligible: true, issues: [], items: [] }),
+    } as any,
+  );
+  Object.defineProperty(service, "getLocalizedPageDraft", {
+    value: async () => ({ document, draft }),
+  });
+  Object.defineProperty(service, "collectPageDocumentValidation", {
+    value: async () => ({ valid: true, errors: [], issues: [] }),
+  });
+  Object.defineProperty(service, "hydrateDynamicTemplateDefinitions", {
+    value: async (value: unknown) => value,
+  });
+
+  await assert.rejects(
+    () => service.publishLocalizedPageDocument(
+      "home",
+      "zh-CN",
+      12,
+      updatedAt.toISOString(),
+      contentHash,
+    ),
+    (error: unknown) => error instanceof BadRequestException
+      && String((error as BadRequestException).message).includes("尚未审核通过"),
+  );
+
+  const published = await service.publishLocalizedPageDocument(
+    "home",
+    "zh-CN",
+    12,
+    updatedAt.toISOString(),
+    contentHash,
+    true,
+  );
+  const marker = readPageLocaleRevisionMarker(
+    calls.find((call) => call.operation === "revision.create")?.args.data.metadata,
+  );
+  assert.equal(published.reviewStatus, "PUBLISHED");
+  assert.equal(draft.reviewStatus, "PUBLISHED");
+  assert.equal(marker?.submittedBy, 12);
+  assert.equal(marker?.reviewedBy, 12);
+  assert.equal(marker?.selfReview?.actor, 12);
+  assert.equal(marker?.selfReview?.actorRole, "SUPER_ADMIN");
+  assert.deepEqual(
+    calls
+      .filter((call) => call.operation === "operationLog.create")
+      .map((call) => call.args.data.action),
+    [
+      "PAGE_LOCALE_REVIEW_SUBMITTED",
+      "PAGE_LOCALE_SELF_REVIEW_APPROVED",
+      "PAGE_LOCALE_PUBLISHED",
+    ],
+  );
+});
+
+test("已发布且内容哈希未变时重复发布返回当前线上版本且不新建 revision", async () => {
+  const updatedAt = new Date("2026-09-17T02:25:31.611Z");
+  const puckData = { content: [], root: { props: {} }, zones: {} };
+  const metadata = { seoTitle: "已发布中文页" };
+  const contentHash = createPageLocaleContentHash(puckData, metadata);
+  const document = {
+    id: 9,
+    pageKey: "home",
+    schemaVersion: 1,
+    editorType: "puck",
+    editorVersion: "test",
+    templateId: null,
+    templateVersion: null,
+    puckData,
+    metadata,
+    status: "PUBLISHED",
+    publishedRevisionId: 49,
+    publishedAt: updatedAt,
+    publishedBy: 1,
+    createdAt: updatedAt,
+    updatedAt,
+  };
+  const draft = {
+    id: 31,
+    documentId: 9,
+    locale: "zh-CN" as const,
+    puckData,
+    metadata: withPageLocaleDraftMetadata(metadata, "zh-CN"),
+    reviewStatus: "PUBLISHED" as const,
+    contentHash,
+    submittedBy: 1,
+    submittedAt: updatedAt,
+    reviewedBy: 1,
+    reviewedAt: updatedAt,
+    reviewNote: null,
+    publishedRevisionId: 49,
+    publishedHash: contentHash,
+    publishedBy: 1,
+    publishedAt: updatedAt,
+    createdAt: updatedAt,
+    updatedAt,
+    legacy: false,
+  };
+  const calls: Array<{ operation: string; args: any }> = [];
+  const transaction: any = {
+    $queryRaw: async () => [{ id: 9 }],
+    pageDocument: {
+      findUnique: async () => structuredClone(document),
+    },
+    pageDocumentRevision: {
+      findFirst: async () => {
+        throw new Error("already-published publish must not query revisions");
+      },
+      create: async () => {
+        throw new Error("already-published publish must not create a revision");
+      },
+    },
+    pageDocumentLocalization: {
+      update: async () => {
+        throw new Error("already-published publish must not update localization");
+      },
+    },
+    operationLog: {
+      create: async () => {
+        throw new Error("already-published publish must not write operation logs");
+      },
+    },
+  };
+  const prisma = {
+    $transaction: async (run: (tx: typeof transaction) => Promise<unknown>) => run(transaction),
+  };
+  const service = new PageModulesService(
+    prisma as unknown as PrismaService,
+    {
+      resolveReferences: async () => ({ eligible: true, issues: [], items: [] }),
+    } as any,
+  );
+  Object.defineProperty(service, "getLocalizedPageDraft", {
+    value: async () => ({ document, draft }),
+  });
+  Object.defineProperty(service, "hydrateDynamicTemplateDefinitions", {
+    value: async (value: unknown) => value,
+  });
+  Object.defineProperty(service, "notifyPublicChange", {
+    value: () => {
+      calls.push({ operation: "notifyPublicChange", args: {} });
+    },
+  });
+
+  const published = await service.publishLocalizedPageDocument(
+    "home",
+    "zh-CN",
+    1,
+    updatedAt.toISOString(),
+    contentHash,
+    true,
+  );
+  assert.equal(published.reviewStatus, "PUBLISHED");
+  assert.equal(published.contentHash, contentHash);
+  assert.equal(published.publishedRevisionId, 49);
+  assert.deepEqual(calls, []);
+});
+
 test("自审发布拒绝失配的 revision、hash 与已停用或降级的审核人", async () => {
   const submittedAt = new Date("2026-09-12T08:00:00.000Z");
   const reviewedAt = new Date("2026-09-12T09:00:00.000Z");
@@ -764,7 +1073,12 @@ test("中英文公开读取各自精确发布指针，不读取另一语言或�
   const enPuckData = { content: [{ type: "hero", props: { title: "English live" } }], root: { props: {} }, zones: {} };
   const publishedAt = new Date("2026-09-12T07:00:00.000Z");
   const makeRevision = (id: number, locale: "zh-CN" | "en", puckData: unknown) => {
-    const plainMetadata = { seoTitle: locale === "en" ? "English live" : "中文线上" };
+    const plainMetadata = {
+      seoTitle: locale === "en" ? "English live" : "中文线上",
+      contentOwner: "仅后台内容责任人",
+      mediaRights: [{ assetUrl: "/images/internal.jpg", source: "内部登记" }],
+      internalReviewNote: "不得进入匿名响应",
+    };
     const contentHash = createPageLocaleContentHash(puckData, plainMetadata);
     return {
       id,
@@ -829,6 +1143,9 @@ test("中英文公开读取各自精确发布指针，不读取另一语言或�
   assert.equal((english?.puckData as any).content[0].props.title, "English live");
   assert.equal(chinese?.version, 41);
   assert.equal((chinese?.puckData as any).content[0].props.title, "中文线上");
+  assert.deepEqual(chinese?.metadata, { seoTitle: "中文线上" });
+  assert.equal("publishedBy" in (chinese ?? {}), false);
+  assert.equal("review" in (chinese ?? {}), false);
 });
 
 test("英文发布指针若指向中文 revision，公开读取失败关闭且不返回中文正文", async () => {

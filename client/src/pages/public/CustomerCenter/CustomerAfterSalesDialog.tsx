@@ -17,6 +17,71 @@ const customerAfterSalesTypes = [
   { value: "REPAIR", label: "申请维修" },
 ] as const;
 
+type AfterSalesAttempt = {
+  fingerprint: string;
+  key: string;
+};
+
+const afterSalesAttemptStorageKey = (orderId: number) =>
+  `hc:customer-after-sales-attempt:${orderId}`;
+
+async function hashAfterSalesRequest(
+  orderId: number,
+  payload: {
+    orderItemId: number;
+    type: "REFUND" | "EXCHANGE" | "REPAIR";
+    reason: string;
+  },
+) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify({ orderId, ...payload })),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+function readAfterSalesAttempt(orderId: number): AfterSalesAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(afterSalesAttemptStorageKey(orderId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AfterSalesAttempt>;
+    return typeof parsed.fingerprint === "string" && typeof parsed.key === "string"
+      ? { fingerprint: parsed.fingerprint, key: parsed.key }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistAfterSalesAttempt(orderId: number, attempt: AfterSalesAttempt) {
+  try {
+    const serialized = JSON.stringify(attempt);
+    sessionStorage.setItem(afterSalesAttemptStorageKey(orderId), serialized);
+    return sessionStorage.getItem(afterSalesAttemptStorageKey(orderId)) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+function clearAfterSalesAttempt(orderId: number) {
+  try {
+    sessionStorage.removeItem(afterSalesAttemptStorageKey(orderId));
+  } catch {
+    // 已得到权威成功或确定拒绝，不让存储清理失败覆盖业务结果。
+  }
+}
+
+function getRequestStatus(error: unknown) {
+  const candidate = error as {
+    status?: unknown;
+    response?: { status?: unknown };
+  };
+  const status = candidate?.status ?? candidate?.response?.status;
+  return typeof status === "number" ? status : null;
+}
+
 export function getRequestableAfterSalesItems(order: CustomerOrder) {
   const activeItemIds = new Set(
     (order.afterSalesCases || [])
@@ -86,18 +151,47 @@ export default function CustomerAfterSalesDialog({
 
     setSubmitting(true);
     setError(null);
+    let requestSent = false;
     try {
-      await customerApi.createAfterSales(order.id, {
+      const payload = {
         ...values,
         reason: values.reason.trim(),
-      });
+      };
+      const fingerprint = await hashAfterSalesRequest(order.id, payload);
+      const storedAttempt = readAfterSalesAttempt(order.id);
+      const attempt = storedAttempt?.fingerprint === fingerprint
+        ? storedAttempt
+        : { fingerprint, key: `after-sales-${crypto.randomUUID()}` };
+      if (
+        storedAttempt?.fingerprint !== fingerprint &&
+        !persistAfterSalesAttempt(order.id, attempt)
+      ) {
+        setError(
+          "浏览器无法安全保存本次售后申请的重试凭据，系统未发送申请。请恢复会话存储后再试。",
+        );
+        return;
+      }
+
+      requestSent = true;
+      await customerApi.createAfterSales(order.id, payload, attempt.key);
+      clearAfterSalesAttempt(order.id);
       message.success("售后申请已提交，我们会尽快处理");
       onSubmitted();
     } catch (requestError) {
+      if (!requestSent) {
+        setError(
+          "浏览器无法准备本次售后申请的安全重试凭据，系统未发送申请。请刷新页面后再试。",
+        );
+        return;
+      }
+      const status = getRequestStatus(requestError);
+      if (status !== null && status >= 400 && status < 500) {
+        clearAfterSalesAttempt(order.id);
+      }
       setError(
         getCustomerAfterSalesError(
           requestError,
-          "售后申请暂时无法提交，请稍后重试。",
+          "售后申请结果待确认；请保持当前内容不变并重试，系统会沿用同一凭据恢复结果。",
         ),
       );
     } finally {

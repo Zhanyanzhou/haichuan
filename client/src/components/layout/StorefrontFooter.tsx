@@ -42,7 +42,7 @@ export default function StorefrontFooter({
       <div className="site-footer__inner">
         {showService ? (
           <div className="site-footer__service">
-            <p className="site-footer__service-label">PRIVATE APPOINTMENT</p>
+            <p className="site-footer__service-label">私人预约</p>
             <Link
               to="/contact"
               className="site-footer__service-link"
@@ -63,7 +63,7 @@ export default function StorefrontFooter({
         </nav>
 
         <div className="site-footer__signature">
-          <span className="site-footer__brandmark">HAICHUAN JEWELRY</span>
+          <span className="site-footer__brandmark">{siteName}</span>
           <span aria-hidden="true" className="site-footer__signature-divider" />
           <span>© {new Date().getFullYear()} {siteName}</span>
         </div>

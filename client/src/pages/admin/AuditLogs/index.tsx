@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Alert,
   App as AntdApp,
   Button,
   Card,
@@ -15,6 +16,7 @@ import {
 import type { TableColumnsType, TagProps } from "antd";
 import { ReloadOutlined, UndoOutlined } from "@ant-design/icons";
 import api, { settingsApi } from "@/services/api";
+import { requestStatus } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import AdminPageHeader from "@/components/common/AdminPageHeader";
 import {
@@ -47,6 +49,12 @@ interface NotificationFailureRow {
   lastErrorCode: string | null;
   retryable: boolean;
   updatedAt: string;
+}
+
+interface NotificationRetryResult {
+  eventId: number;
+  notificationId: number;
+  status: string;
 }
 
 interface ActionMeta {
@@ -101,6 +109,11 @@ const ACTION_META: Record<string, ActionMeta> = {
     color: "error",
     module: "notifications",
   },
+  LEAD_RETENTION_DISPOSITION_EXECUTED: {
+    label: "线索留存处置已执行",
+    color: "warning",
+    module: "leads",
+  },
   create: { label: "已创建", color: "processing" },
   update: { label: "已更新", color: "default" },
   delete: { label: "已删除", color: "error" },
@@ -118,6 +131,7 @@ const MODULE_OPTIONS = [
   { value: "orders", label: "订单导出" },
   { value: "inventory", label: "库存" },
   { value: "notifications", label: "通知投递" },
+  { value: "leads", label: "线索运营" },
   { value: "user", label: "后台员工" },
   { value: "gold_price", label: "金价" },
 ];
@@ -131,6 +145,12 @@ const STATUS_LABELS: Record<string, string> = {
   ARCHIVED: "回收站",
   DELETED: "已永久删除",
   succeeded: "成功",
+};
+
+const DETAIL_VALUE_LABELS: Record<string, string> = {
+  in: "入库",
+  out: "出库",
+  adjust: "直接调整",
 };
 
 const DETAIL_FIELD_LABELS: Record<string, string> = {
@@ -154,8 +174,25 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   toRevision: "新页面修订",
   toRevisionVersion: "新修订版本号",
   result: "结果",
+  asOf: "处置时间基线",
+  requested: "本批候选数",
+  anonymized: "已匿名化数",
+  skipped: "状态变化跳过数",
+  eligibleRemaining: "剩余到期候选数",
+  complete: "当前候选已清空",
+  candidateSetSha256: "候选集合摘要",
+  firstCandidateId: "首个线索 ID",
+  lastCandidateId: "末个线索 ID",
+  policyApprovalReferenceSha256: "政策批准引用摘要",
+  policyVersion: "留存政策版本",
+  policyFingerprintSha256: "留存政策指纹",
   method: "请求方法",
   path: "请求路径",
+  type: "调整方式",
+  quantity: "操作数量",
+  before: "调整前库存",
+  after: "调整后库存",
+  remark: "备注",
 };
 
 function parseDetail(value: string | null): Record<string, unknown> | null {
@@ -221,14 +258,34 @@ function detailTransition(detail: Record<string, unknown> | null) {
     return `修订 #${detail.fromRevision} → #${detail.toRevision}`;
   }
   if (typeof detail.publishedVersion === "number") return `正式版本 v${detail.publishedVersion}`;
+  if (
+    typeof detail.type === "string"
+    && ["in", "out", "adjust"].includes(detail.type)
+    && typeof detail.before === "number"
+    && typeof detail.after === "number"
+  ) {
+    return `库存 ${detail.before} → ${detail.after}`;
+  }
   return "—";
 }
 
 function detailValue(value: unknown): ReactNode {
-  if (typeof value === "string") return STATUS_LABELS[value] ?? value;
+  if (typeof value === "string") {
+    return DETAIL_VALUE_LABELS[value] ?? STATUS_LABELS[value] ?? value;
+  }
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return <pre className="audit-logs__structured-value">{JSON.stringify(value, null, 2)}</pre>;
+}
+
+function createNotificationRetryIdempotencyKey() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `notification-retry-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isUncertainWriteResult(error: unknown) {
+  const status = requestStatus(error);
+  return status === undefined || status === 408 || status >= 500;
 }
 
 export default function AuditLogs() {
@@ -247,7 +304,17 @@ export default function AuditLogs() {
   const [notificationFailuresLoading, setNotificationFailuresLoading] = useState(true);
   const [notificationFailuresError, setNotificationFailuresError] = useState("");
   const [retryingEventIds, setRetryingEventIds] = useState<Set<number>>(new Set());
+  const notificationRetryKeysRef = useRef(new Map<number, string>());
+  const notificationRetryUncertainIdsRef = useRef(new Set<number>());
+  const [notificationRetryUncertainIds, setNotificationRetryUncertainIds] =
+    useState<Set<number>>(new Set());
   const requestSequence = useRef(0);
+
+  const setNotificationRetryUncertain = (eventId: number, uncertain: boolean) => {
+    if (uncertain) notificationRetryUncertainIdsRef.current.add(eventId);
+    else notificationRetryUncertainIdsRef.current.delete(eventId);
+    setNotificationRetryUncertainIds(new Set(notificationRetryUncertainIdsRef.current));
+  };
 
   const load = useCallback(async () => {
     const requestId = ++requestSequence.current;
@@ -285,7 +352,19 @@ export default function AuditLogs() {
         params: { page: 1, pageSize: 20 },
       });
       const data = unwrapResponse<PaginatedResult<NotificationFailureRow>>(response);
-      setNotificationFailures(data?.list ?? []);
+      setNotificationFailures((current) => {
+        const next = [...(data?.list ?? [])];
+        const nextIds = new Set(next.map(({ id }) => id));
+        for (const row of current) {
+          if (
+            notificationRetryUncertainIdsRef.current.has(row.id)
+            && !nextIds.has(row.id)
+          ) {
+            next.push(row);
+          }
+        }
+        return next;
+      });
     } catch (loadError: unknown) {
       setNotificationFailuresError(getSafeAdminErrorMessage(
         loadError,
@@ -301,16 +380,43 @@ export default function AuditLogs() {
   }, [loadNotificationFailures]);
 
   const retryNotificationFailure = async (eventId: number) => {
+    const idempotencyKey = notificationRetryKeysRef.current.get(eventId)
+      ?? createNotificationRetryIdempotencyKey();
+    notificationRetryKeysRef.current.set(eventId, idempotencyKey);
     setRetryingEventIds((current) => new Set(current).add(eventId));
     try {
-      await api.post(`/notification-operations/failures/${eventId}/retry`);
-      message.success("已重新进入投递队列，最终结果将写入操作日志");
+      const response = await api.post(
+        `/notification-operations/failures/${eventId}/retry`,
+        undefined,
+        {
+          headers: { "Idempotency-Key": idempotencyKey },
+          suppressGlobalError: true,
+        },
+      );
+      const result = unwrapResponse<NotificationRetryResult>(response);
+      notificationRetryKeysRef.current.delete(eventId);
+      setNotificationRetryUncertain(eventId, false);
+      if (result.status === "FAILED") {
+        message.warning("原重投请求已生效，但通知当前仍失败；请查看最新失败码后再决定是否再次重投。");
+      } else {
+        message.success("已确认重新进入投递队列，最终结果将写入操作日志");
+      }
       await Promise.all([loadNotificationFailures(), load()]);
     } catch (retryError: unknown) {
-      message.error(getSafeAdminErrorMessage(
-        retryError,
-        "通知重投失败。请刷新状态后重试。",
-      ));
+      if (isUncertainWriteResult(retryError)) {
+        setNotificationRetryUncertain(eventId, true);
+        message.warning(
+          "通知重投请求结果待确认；原凭据已保留，系统不会自动再次入队。请使用原凭据恢复。",
+        );
+      } else {
+        notificationRetryKeysRef.current.delete(eventId);
+        setNotificationRetryUncertain(eventId, false);
+        message.error(getSafeAdminErrorMessage(
+          retryError,
+          "通知重投失败。请刷新状态后重试。",
+        ));
+        if (requestStatus(retryError) === 409) await loadNotificationFailures();
+      }
     } finally {
       setRetryingEventIds((current) => {
         const next = new Set(current);
@@ -428,18 +534,24 @@ export default function AuditLogs() {
       fixed: "right",
       render: (_value, row) => row.retryable ? (
         <Popconfirm
-          title="重新投递这条通知？"
-          description="仅对明确失败的邮件重投；发送结果未知的记录不会开放此操作。"
-          okText="重新投递"
+          title={notificationRetryUncertainIds.has(row.id)
+            ? "确认使用原凭据恢复？"
+            : "重新投递这条通知？"}
+          description={notificationRetryUncertainIds.has(row.id)
+            ? "只会核对或恢复上一请求，不会以新凭据重复入队。"
+            : "仅对明确失败的邮件重投；发送结果未知的记录不会开放此操作。"}
+          okText={notificationRetryUncertainIds.has(row.id) ? "确认恢复" : "重新投递"}
           cancelText="取消"
           onConfirm={() => retryNotificationFailure(row.id)}
         >
           <Button
             type="link"
             loading={retryingEventIds.has(row.id)}
-            aria-label={`重投通知事件 ${row.id}`}
+            aria-label={notificationRetryUncertainIds.has(row.id)
+              ? `使用原凭据恢复通知事件 ${row.id}`
+              : `重投通知事件 ${row.id}`}
           >
-            安全重投
+            {notificationRetryUncertainIds.has(row.id) ? "使用原凭据恢复" : "安全重投"}
           </Button>
         </Popconfirm>
       ) : <Tag color="warning">需人工核对</Tag>,
@@ -481,6 +593,14 @@ export default function AuditLogs() {
             刷新故障
           </Button>
         </div>
+        {notificationRetryUncertainIds.size > 0 ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="通知重投结果待确认"
+            description="待确认事件保留原凭据且不会自动再次入队；请在对应事件上使用原凭据恢复。"
+          />
+        ) : null}
         {notificationFailuresLoading ? (
           <AdminLoadingState subject="通知投递故障" />
         ) : notificationFailuresError ? (

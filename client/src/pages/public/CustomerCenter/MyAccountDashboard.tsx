@@ -1,5 +1,5 @@
 // 客户中心登录态主面板：账户总览/心愿单/订单(可视化进度+物流轨迹+评价)/个人资料(导出与注销)/地址管理
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   App as AntdApp,
@@ -8,16 +8,22 @@ import {
   Form,
   Input,
   Button,
+  Checkbox,
   Pagination,
   Radio,
+  Tag,
 } from "antd";
-import { customerApi } from "@/services/api";
+import { customerApi, type CustomerAddressInput } from "@/services/api";
 import {
   customerProfileApi,
   type ContactChangeChallenge,
   type ContactChangeType,
 } from "@/services/clients/customerProfileClient";
 import { getRequestErrorMessage } from "@/services/httpClient";
+import {
+  currentSessionEpoch,
+  isCurrentSessionEpoch,
+} from "@/services/sessionEpoch";
 import { unwrapResponse } from "@/utils/unwrap";
 import {
   useCommerceCapabilities,
@@ -45,6 +51,8 @@ import {
 import type {
   CustomerAfterSalesCase,
   CustomerConsultationDetail,
+  CustomerConsultationHandlingState,
+  CustomerConsultationNextAction,
   CustomerConsultationReply,
   CustomerNotificationPage,
   CustomerOrder,
@@ -66,6 +74,7 @@ type AccountDashboardProps = {
   selectionInquiryError: string | null;
   onRetrySelectionInquiries: () => Promise<void>;
   selectedLeadId: number | null;
+  invalidSelectedLeadTarget: boolean;
   consultationDetail: CustomerConsultationDetail | null;
   consultationLoading: boolean;
   consultationError: "not-found" | "error" | null;
@@ -83,7 +92,7 @@ type AccountDashboardProps = {
   onReadNotification: (id: number) => Promise<void>;
   onReadAllNotifications: () => Promise<void>;
   onSignOut: () => void;
-  onRefresh?: () => void;
+  onRefresh?: () => void | Promise<void>;
 };
 
 type AccountAddress = AccountDashboardProps["addresses"][number];
@@ -99,6 +108,19 @@ const inquiryStatus: Record<string, string> = {
   CLOSED: "已结束",
 };
 
+const consultationHandlingState: Record<CustomerConsultationHandlingState, string> = {
+  WAITING_ASSIGNMENT: "当前责任：顾问团队正在接收",
+  ADVISOR_ASSIGNED: "当前责任：海川顾问已接手",
+  IN_PROGRESS: "当前责任：海川顾问持续跟进",
+  CLOSED: "当前责任：本次咨询已结束",
+};
+
+const consultationNextAction: Record<CustomerConsultationNextAction, string> = {
+  WAIT_FOR_ADVISOR: "下一步：请留意客户中心的服务通知。",
+  REVIEW_ADVISOR_REPLY: "下一步：请查看最新回复，并留意后续服务通知。",
+  START_NEW_CONSULTATION: "下一步：如仍需服务，请重新发起咨询。",
+};
+
 // 合作商家身份状态文案（与后端 PartnerStatus 对齐）
 const PARTNER_STATUS_LABEL: Record<string, string> = {
   NONE: "尚未申请合作商家身份",
@@ -107,6 +129,211 @@ const PARTNER_STATUS_LABEL: Record<string, string> = {
   REJECTED: "合作申请未通过",
   SUSPENDED: "合作资格已暂停",
 };
+
+type AddressCreateAttempt = {
+  fingerprint: string;
+  key: string;
+};
+
+type AvatarUploadAttempt = {
+  fingerprint: string;
+  key: string;
+};
+
+const avatarUploadAttemptStorageKey = (customerId: number) =>
+  `hc:customer-avatar-upload-attempt:${customerId}`;
+
+async function hashAvatarUploadFile(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+function readAvatarUploadAttempt(customerId: number): AvatarUploadAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(avatarUploadAttemptStorageKey(customerId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AvatarUploadAttempt>;
+    return typeof parsed.fingerprint === "string" && typeof parsed.key === "string"
+      ? { fingerprint: parsed.fingerprint, key: parsed.key }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistAvatarUploadAttempt(
+  customerId: number,
+  attempt: AvatarUploadAttempt,
+) {
+  try {
+    const serialized = JSON.stringify(attempt);
+    const key = avatarUploadAttemptStorageKey(customerId);
+    sessionStorage.setItem(key, serialized);
+    return sessionStorage.getItem(key) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+function clearAvatarUploadAttempt(customerId: number) {
+  try {
+    sessionStorage.removeItem(avatarUploadAttemptStorageKey(customerId));
+  } catch {
+    // 已取得权威结论，不让浏览器存储清理失败覆盖业务结果。
+  }
+}
+
+const addressCreateAttemptStorageKey = (customerId: number) =>
+  `hc:customer-address-create-attempt:${customerId}`;
+
+function normalizeAddressCreatePayload(values: CustomerAddressInput): CustomerAddressInput {
+  return {
+    recipientName: values.recipientName.trim(),
+    recipientPhone: values.recipientPhone.trim(),
+    province: values.province?.trim() || undefined,
+    city: values.city?.trim() || undefined,
+    district: values.district?.trim() || undefined,
+    detail: values.detail.trim(),
+    postalCode: values.postalCode?.trim() || undefined,
+    isDefault: values.isDefault === true,
+  };
+}
+
+async function hashAddressCreateRequest(
+  customerId: number,
+  payload: CustomerAddressInput,
+) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify({ customerId, ...payload })),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+function readAddressCreateAttempt(customerId: number): AddressCreateAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(addressCreateAttemptStorageKey(customerId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AddressCreateAttempt>;
+    return typeof parsed.fingerprint === "string" && typeof parsed.key === "string"
+      ? { fingerprint: parsed.fingerprint, key: parsed.key }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistAddressCreateAttempt(
+  customerId: number,
+  attempt: AddressCreateAttempt,
+) {
+  try {
+    const serialized = JSON.stringify(attempt);
+    const key = addressCreateAttemptStorageKey(customerId);
+    sessionStorage.setItem(key, serialized);
+    return sessionStorage.getItem(key) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+function clearAddressCreateAttempt(customerId: number) {
+  try {
+    sessionStorage.removeItem(addressCreateAttemptStorageKey(customerId));
+  } catch {
+    // 已取得权威成功或确定拒绝，不让清理失败覆盖业务结果。
+  }
+}
+
+function getAddressRequestStatus(error: unknown) {
+  const candidate = error as {
+    status?: unknown;
+    response?: { status?: unknown };
+  };
+  const status = candidate?.status ?? candidate?.response?.status;
+  return typeof status === "number" ? status : null;
+}
+
+type SecurityWriteReconciliation =
+  | { kind: "ACTIVE"; profile: CustomerProfile }
+  | { kind: "SESSION_INVALID" }
+  | { kind: "UNKNOWN" }
+  | { kind: "STALE" };
+
+async function reconcileSecurityWrite(
+  operationEpoch: number,
+): Promise<SecurityWriteReconciliation> {
+  try {
+    const response = await customerApi.getProfile();
+    if (!isCurrentSessionEpoch("customer", operationEpoch)) {
+      return { kind: "STALE" };
+    }
+    return {
+      kind: "ACTIVE",
+      profile: unwrapResponse<CustomerProfile>(response),
+    };
+  } catch (error: unknown) {
+    // 401 的响应拦截器会先清理失效会话并推进 epoch；先识别该确定状态，
+    // 再把真正属于其他新身份的迟到响应按 STALE 丢弃。
+    if (getAddressRequestStatus(error) === 401) {
+      return { kind: "SESSION_INVALID" };
+    }
+    if (!isCurrentSessionEpoch("customer", operationEpoch)) {
+      return { kind: "STALE" };
+    }
+    return { kind: "UNKNOWN" };
+  }
+}
+
+function getAddressCreateError(error: unknown) {
+  const candidate = error as {
+    status?: unknown;
+    response?: { status?: unknown; data?: { message?: unknown } };
+  };
+  const status = getAddressRequestStatus(error);
+  const responseMessage = candidate?.response?.data?.message;
+  return status !== null
+    && status >= 400
+    && status < 500
+    && typeof responseMessage === "string"
+    && responseMessage.trim()
+    ? responseMessage
+    : "地址保存结果待确认；请保持当前内容不变并重试，系统会沿用同一凭据恢复结果。";
+}
+
+function getAddressDeleteError(error: unknown) {
+  const candidate = error as {
+    response?: { data?: { message?: unknown } };
+  };
+  const status = getAddressRequestStatus(error);
+  const responseMessage = candidate?.response?.data?.message;
+  return status !== null
+    && status >= 400
+    && status < 500
+    && typeof responseMessage === "string"
+    && responseMessage.trim()
+    ? responseMessage
+    : "地址删除结果待确认；请重试，重复删除不会影响其他地址。";
+}
+
+function addressMatchesUpdate(
+  address: CustomerAddress,
+  payload: CustomerAddressInput,
+) {
+  const optionalText = (value: string | null | undefined) => value?.trim() || null;
+  return address.recipientName === payload.recipientName
+    && address.recipientPhone === payload.recipientPhone
+    && optionalText(address.province) === optionalText(payload.province)
+    && optionalText(address.city) === optionalText(payload.city)
+    && optionalText(address.district) === optionalText(payload.district)
+    && address.detail === payload.detail
+    && optionalText(address.postalCode) === optionalText(payload.postalCode)
+    && address.isDefault === (payload.isDefault === true);
+}
 
 // 合作商家区块入口动作：按状态给出可操作目标
 const PARTNER_ACTION: Record<string, { label: string; to: string }> = {
@@ -120,6 +347,57 @@ const PARTNER_ACTION: Record<string, { label: string; to: string }> = {
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="my-account-empty">{children}</p>;
+}
+
+function parseCanonicalOrderTarget(search: string): {
+  orderId: number | null;
+  invalid: boolean;
+} {
+  const params = new URLSearchParams(search);
+  const orderIds = params.getAll("orderId");
+  if (orderIds.length === 0) return { orderId: null, invalid: false };
+
+  const keys = Array.from(params.keys());
+  const sections = params.getAll("section");
+  const hasExactShape = keys.length === 2
+    && new Set(keys).size === 2
+    && keys.includes("section")
+    && keys.includes("orderId")
+    && sections.length === 1
+    && orderIds.length === 1
+    && sections[0] === "orders";
+  const rawOrderId = orderIds[0];
+  if (!hasExactShape || !/^[1-9]\d*$/.test(rawOrderId)) {
+    return { orderId: null, invalid: true };
+  }
+
+  const orderId = Number(rawOrderId);
+  return Number.isSafeInteger(orderId)
+    ? { orderId, invalid: false }
+    : { orderId: null, invalid: true };
+}
+
+function ConsultationProgress({
+  handlingState,
+  nextAction,
+  restartTo,
+}: {
+  handlingState?: CustomerConsultationHandlingState | null;
+  nextAction?: CustomerConsultationNextAction | null;
+  restartTo: "/catalog" | "/contact";
+}) {
+  if (!handlingState || !nextAction) return null;
+  return (
+    <div className="my-account__service-status" aria-label="咨询处理进度">
+      <span>{consultationHandlingState[handlingState]}</span>
+      <span>{consultationNextAction[nextAction]}</span>
+      {nextAction === "START_NEW_CONSULTATION" ? (
+        <Link className="my-account__inline-retry" to={restartTo}>
+          {restartTo === "/catalog" ? "重新进入选款中心" : "重新发起预约咨询"}
+        </Link>
+      ) : null}
+    </div>
+  );
 }
 
 function ConsultationDetail({
@@ -205,6 +483,7 @@ export default function MyAccountDashboard({
   selectionInquiryError,
   onRetrySelectionInquiries,
   selectedLeadId,
+  invalidSelectedLeadTarget,
   consultationDetail,
   consultationLoading,
   consultationError,
@@ -234,6 +513,14 @@ export default function MyAccountDashboard({
   const partnerStatus = partner?.customer?.partnerStatus || "NONE";
   const partnerApprovedAt = partner?.customer?.partnerApprovedAt || null;
   const [selectionPage, setSelectionPage] = useState(1);
+  const [targetOrderId, setTargetOrderId] = useState<number | null>(null);
+  const [targetOrder, setTargetOrder] = useState<CustomerOrder | null>(null);
+  const [targetOrderLoading, setTargetOrderLoading] = useState(false);
+  const [targetOrderError, setTargetOrderError] = useState<"not-found" | "error" | null>(null);
+  const targetOrderRequestRef = useRef(0);
+  const canonicalOrderTarget = parseCanonicalOrderTarget(location.search);
+  const canonicalOrderId = canonicalOrderTarget.orderId;
+  const invalidCanonicalOrderTarget = canonicalOrderTarget.invalid;
   const selectionPageSize = 3;
   const selectionPageCount = Math.max(
     1,
@@ -250,16 +537,128 @@ export default function MyAccountDashboard({
   }, [selectionPage, selectionPageCount]);
 
   useEffect(() => {
-    if (selectedLeadId === null) return;
+    setTargetOrderId(canonicalOrderId);
+  }, [canonicalOrderId, invalidCanonicalOrderTarget]);
+
+  const loadCanonicalTargetOrder = useCallback(async (orderId: number) => {
+    const requestVersion = ++targetOrderRequestRef.current;
+    const requestEpoch = currentSessionEpoch("customer");
+    setTargetOrder((current) => current?.id === orderId ? current : null);
+    setTargetOrderLoading(true);
+    setTargetOrderError(null);
+    try {
+      const response = await customerApi.getOrder(orderId);
+      if (
+        targetOrderRequestRef.current !== requestVersion
+        || !isCurrentSessionEpoch("customer", requestEpoch)
+      ) return;
+      const exactOrder = unwrapResponse<CustomerOrder>(response);
+      if (!exactOrder || exactOrder.id !== orderId) {
+        throw new Error("订单定位响应不完整");
+      }
+      setTargetOrder(exactOrder);
+    } catch (error) {
+      if (
+        targetOrderRequestRef.current !== requestVersion
+        || !isCurrentSessionEpoch("customer", requestEpoch)
+      ) return;
+      const status = (error as { response?: { status?: unknown }; status?: unknown }).response?.status
+        ?? (error as { status?: unknown }).status;
+      setTargetOrder(null);
+      setTargetOrderError(status === 404 ? "not-found" : "error");
+    } finally {
+      if (
+        targetOrderRequestRef.current === requestVersion
+        && isCurrentSessionEpoch("customer", requestEpoch)
+      ) {
+        setTargetOrderLoading(false);
+      }
+    }
+  }, []);
+
+  const targetOrderInList = canonicalOrderId !== null
+    && orders.some((order) => order.id === canonicalOrderId);
+
+  useEffect(() => {
+    if (
+      canonicalOrderId === null
+      || invalidCanonicalOrderTarget
+      || targetOrderInList
+    ) {
+      targetOrderRequestRef.current += 1;
+      setTargetOrder(null);
+      setTargetOrderLoading(false);
+      setTargetOrderError(null);
+      return;
+    }
+    void loadCanonicalTargetOrder(canonicalOrderId);
+    return () => {
+      targetOrderRequestRef.current += 1;
+    };
+  }, [
+    canonicalOrderId,
+    invalidCanonicalOrderTarget,
+    loadCanonicalTargetOrder,
+    targetOrderInList,
+  ]);
+
+  const locatedOrders = targetOrder && !orders.some((order) => order.id === targetOrder.id)
+    ? [...orders, targetOrder]
+    : orders;
+
+  const retryCanonicalOrderTarget = useCallback(() => {
+    if (canonicalOrderId !== null && !invalidCanonicalOrderTarget) {
+      void loadCanonicalTargetOrder(canonicalOrderId);
+    }
+  }, [canonicalOrderId, invalidCanonicalOrderTarget, loadCanonicalTargetOrder]);
+
+  const locateCanonicalOrder = useCallback((orderId: number) => {
+    if (!Number.isSafeInteger(orderId) || orderId <= 0) return;
+    const params = new URLSearchParams();
+    params.set("section", "orders");
+    params.set("orderId", String(orderId));
+    setTargetOrderId(orderId);
+    navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+  }, [location.pathname, navigate]);
+
+  const clearCanonicalOrderTarget = useCallback(() => {
+    setTargetOrderId(null);
+    navigate(`${location.pathname}?section=orders`, {
+      replace: true,
+    });
+    requestAnimationFrame(() => {
+      document.getElementById("my-orders")?.focus({ preventScroll: true });
+    });
+  }, [location.pathname, navigate]);
+
+  const handleOrderLocated = useCallback((orderId: number) => {
+    setTargetOrderId((current) => current === orderId ? null : current);
+  }, []);
+
+  useEffect(() => {
+    if (selectedLeadId === null && !invalidSelectedLeadTarget) return;
     const frame = requestAnimationFrame(() => {
       const target = document.getElementById("consultation-focus");
       target?.scrollIntoView({ block: "center" });
       target?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [consultationDetail, consultationError, consultationLoading, selectedLeadId]);
+  }, [
+    consultationDetail,
+    consultationError,
+    consultationLoading,
+    invalidSelectedLeadTarget,
+    selectedLeadId,
+  ]);
 
   const clearConsultationUrl = (focusTargetId: string) => {
+    if (invalidSelectedLeadTarget) {
+      navigate(location.pathname, { replace: true });
+      requestAnimationFrame(() => {
+        document.getElementById(focusTargetId)?.focus({ preventScroll: true });
+      });
+      return;
+    }
     const params = new URLSearchParams(location.search);
     params.delete("leadId");
     if (params.get("section") === "consultations") params.delete("section");
@@ -308,7 +707,7 @@ export default function MyAccountDashboard({
 
   const removeFavorite = (productId: number) => {
     customerApi
-      .toggleFavorite(productId)
+      .setFavorite(productId, false)
       .then(() => {
         setFavorites((list) => list.filter((f) => f.productId !== productId));
       })
@@ -339,6 +738,7 @@ export default function MyAccountDashboard({
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordForm] = Form.useForm();
   const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordResultUncertain, setPasswordResultUncertain] = useState(false);
   const [passwordProof, setPasswordProof] = useState<"PASSWORD" | "SMS">("PASSWORD");
   const [contactOpen, setContactOpen] = useState(false);
   const [contactForm] = Form.useForm();
@@ -346,6 +746,7 @@ export default function MyAccountDashboard({
   const [contactProof, setContactProof] = useState<"PASSWORD" | "SMS">("PASSWORD");
   const [contactChallenge, setContactChallenge] = useState<ContactChangeChallenge | null>(null);
   const [savingContact, setSavingContact] = useState(false);
+  const [contactResultUncertain, setContactResultUncertain] = useState(false);
   const [sendingSecurityCode, setSendingSecurityCode] = useState(false);
   const [securityCodeCooldown, setSecurityCodeCooldown] = useState(0);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -364,8 +765,11 @@ export default function MyAccountDashboard({
   // 合规：数据导出 + 注销
   const [exportingData, setExportingData] = useState(false);
   const [closeOpen, setCloseOpen] = useState(false);
+  const [closeProof, setCloseProof] = useState<"PASSWORD" | "SMS">("PASSWORD");
   const [closePassword, setClosePassword] = useState("");
+  const [closeSmsCode, setCloseSmsCode] = useState("");
   const [closing, setClosing] = useState(false);
+  const [closeResultUncertain, setCloseResultUncertain] = useState(false);
 
   const handleExportData = async () => {
     setExportingData(true);
@@ -389,13 +793,26 @@ export default function MyAccountDashboard({
   };
 
   const handleCloseAccount = async () => {
-    if (!closePassword) {
+    if (closeResultUncertain) {
+      message.warning("注销结果仍待确认，请刷新页面或重新登录确认后再操作。");
+      return;
+    }
+    if (closeProof === "PASSWORD" && !closePassword) {
       message.warning("请输入登录密码确认");
       return;
     }
+    if (closeProof === "SMS" && !/^\d{6}$/.test(closeSmsCode)) {
+      message.warning("请输入 6 位当前手机号验证码");
+      return;
+    }
+    const operationEpoch = currentSessionEpoch("customer");
     setClosing(true);
     try {
-      const response = await customerApi.closeAccount({ password: closePassword });
+      const response = await customerProfileApi.closeAccount(
+        closeProof === "PASSWORD"
+          ? { password: closePassword }
+          : { currentSmsCode: closeSmsCode },
+      );
       const result = unwrapResponse<{ retainedUnderLegalHold?: number }>(response);
       if ((result.retainedUnderLegalHold ?? 0) > 0) {
         message.warning("账户已注销；依法需要保留的咨询记录将在保留依据结束后继续处理");
@@ -404,10 +821,45 @@ export default function MyAccountDashboard({
       }
       onSignOut();
     } catch (error: unknown) {
+      const status = getAddressRequestStatus(error);
+      if (status === 401) {
+        message.warning("注销结果待确认；当前登录状态已失效，请重新登录确认账户状态。");
+        setCloseOpen(false);
+        onSignOut();
+        return;
+      }
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+      if (status === null || status >= 500) {
+        const reconciliation = await reconcileSecurityWrite(operationEpoch);
+        if (reconciliation.kind === "SESSION_INVALID") {
+          message.warning("注销结果待确认；当前登录状态已失效，请重新登录确认账户状态。");
+          setCloseOpen(false);
+          onSignOut();
+          return;
+        }
+        if (reconciliation.kind === "ACTIVE") {
+          message.warning("注销未生效，账户仍处于登录状态；您可以安全重试。");
+          return;
+        }
+        if (reconciliation.kind === "UNKNOWN") {
+          setCloseResultUncertain(true);
+          message.warning("注销结果待确认；系统不会自动重复注销，请刷新页面或重新登录确认。");
+        }
+        return;
+      }
       message.error(getRequestErrorMessage(error, "注销失败"));
     } finally {
-      setClosing(false);
+      if (isCurrentSessionEpoch("customer", operationEpoch)) {
+        setClosing(false);
+      }
     }
+  };
+
+  const openAccountClosure = () => {
+    setCloseProof(profile?.hasPassword === false ? "SMS" : "PASSWORD");
+    setClosePassword("");
+    setCloseSmsCode("");
+    setCloseOpen(true);
   };
 
   const openReview = (order: CustomerReviewOrder) => {
@@ -423,7 +875,10 @@ export default function MyAccountDashboard({
     setAfterSalesOrder(order);
   };
 
-  const cancelAfterSales = (caseRecord: CustomerAfterSalesCase) => {
+  const cancelAfterSales = (
+    caseRecord: CustomerAfterSalesCase,
+    orderId: number,
+  ) => {
     modal.confirm({
       title: "撤销售后申请？",
       content: "撤销后本次申请将结束；如仍需服务，可以重新提交。",
@@ -436,6 +891,31 @@ export default function MyAccountDashboard({
           message.success("售后申请已撤销");
           onRefresh?.();
         } catch (error) {
+          const status = (error as { status?: unknown; response?: { status?: unknown } })?.response?.status
+            ?? (error as { status?: unknown })?.status;
+          if (typeof status !== "number" || status >= 500) {
+            try {
+              const response = await customerApi.getOrder(orderId);
+              const order = unwrapResponse<CustomerOrder>(response);
+              const authoritative = order.afterSalesCases?.find(
+                (candidate) => candidate.id === caseRecord.id,
+              );
+              onRefresh?.();
+              if (authoritative?.status === "CANCELLED") {
+                message.success("售后申请已撤销并完成权威核验");
+                return;
+              }
+              if (authoritative?.status === "REQUESTED") {
+                message.warning("撤销结果未确认，已刷新权威状态，可以安全重试。");
+                return;
+              }
+              message.warning("售后申请状态已变化，已刷新权威状态。");
+              return;
+            } catch {
+              message.warning("撤销结果待确认，暂未读取到权威状态，可以安全重试。");
+              return;
+            }
+          }
           message.error(
             getCustomerAfterSalesError(
               error,
@@ -454,12 +934,7 @@ export default function MyAccountDashboard({
     if (proofOrderId == null) return;
     setUploading(true);
     try {
-      const upRes = await customerApi.uploadPaymentProof(file);
-      const proofKey = unwrapResponse<{ storageKey?: string }>(
-        upRes,
-      )?.storageKey;
-      if (!proofKey) throw new Error("凭证上传失败");
-      await customerApi.submitPaymentProof(proofOrderId, proofKey);
+      await customerApi.uploadAndSubmitPaymentProof(proofOrderId, file);
       message.success("付款凭证已提交，等待审核");
       setProofOrderId(null);
       onRefresh?.();
@@ -477,16 +952,46 @@ export default function MyAccountDashboard({
   const saveProfile = async () => {
     const values = await profileForm.validateFields().catch(() => null);
     if (!values) return;
+    const intendedName = String(values.name).trim().replace(/\s+/g, " ");
+    const operationEpoch = currentSessionEpoch("customer");
     setSavingProfile(true);
     try {
-      await customerProfileApi.updateName(values.name);
+      await customerProfileApi.updateName(intendedName);
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
       message.success("资料已更新");
       setProfileEditOpen(false);
-      onRefresh?.();
+      await onRefresh?.();
     } catch (error: unknown) {
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+      const status = getAddressRequestStatus(error);
+      if (status === null || status >= 500) {
+        const reconciliation = await reconcileSecurityWrite(operationEpoch);
+        if (reconciliation.kind === "STALE") return;
+        if (reconciliation.kind === "SESSION_INVALID") {
+          message.warning("称呼更新结果待确认；当前登录状态已失效，请重新登录核对。");
+          setProfileEditOpen(false);
+          onSignOut();
+          return;
+        }
+        if (reconciliation.kind === "ACTIVE") {
+          const authoritativeName = reconciliation.profile.name?.trim().replace(/\s+/g, " ") ?? "";
+          if (authoritativeName === intendedName) {
+            message.success("称呼已更新并完成权威核验");
+            setProfileEditOpen(false);
+            await onRefresh?.();
+            return;
+          }
+          message.warning("称呼更新未生效；系统已读取权威资料，您可以安全重试。");
+          return;
+        }
+        message.error("称呼更新结果待确认；系统不会自动重复保存，请保留当前输入并稍后重试。");
+        return;
+      }
       message.error(getRequestErrorMessage(error, "保存失败"));
     } finally {
-      setSavingProfile(false);
+      if (isCurrentSessionEpoch("customer", operationEpoch)) {
+        setSavingProfile(false);
+      }
     }
   };
 
@@ -512,9 +1017,27 @@ export default function MyAccountDashboard({
     }
   };
 
+  const sendAccountClosureCode = async () => {
+    setSendingSecurityCode(true);
+    try {
+      await customerProfileApi.requestAccountClosureCode();
+      setSecurityCodeCooldown(60);
+      message.success("注销验证码已发送至当前绑定手机号");
+    } catch (error: unknown) {
+      message.error(getRequestErrorMessage(error, "注销验证码发送失败"));
+    } finally {
+      setSendingSecurityCode(false);
+    }
+  };
+
   const savePassword = async () => {
+    if (passwordResultUncertain) {
+      message.warning("密码修改结果仍待确认，请刷新页面或重新登录确认后再操作。");
+      return;
+    }
     const values = await passwordForm.validateFields().catch(() => null);
     if (!values) return;
+    const operationEpoch = currentSessionEpoch("customer");
     setSavingPassword(true);
     try {
       const verification = passwordProof === "PASSWORD"
@@ -526,9 +1049,39 @@ export default function MyAccountDashboard({
       setPasswordOpen(false);
       onSignOut();
     } catch (error: unknown) {
+      const status = getAddressRequestStatus(error);
+      if (status === 401) {
+        message.warning("密码修改结果待确认；当前登录状态已失效，请使用预期密码重新登录确认。");
+        passwordForm.resetFields();
+        setPasswordOpen(false);
+        onSignOut();
+        return;
+      }
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+      if (status === null || status >= 500) {
+        const reconciliation = await reconcileSecurityWrite(operationEpoch);
+        if (reconciliation.kind === "SESSION_INVALID") {
+          message.warning("密码修改结果待确认；当前登录状态已失效，请使用预期密码重新登录确认。");
+          passwordForm.resetFields();
+          setPasswordOpen(false);
+          onSignOut();
+          return;
+        }
+        if (reconciliation.kind === "ACTIVE") {
+          message.warning("密码修改未生效，当前会话仍有效；您可以安全重试。");
+          return;
+        }
+        if (reconciliation.kind === "UNKNOWN") {
+          setPasswordResultUncertain(true);
+          message.warning("密码修改结果待确认；系统不会自动重复修改，请刷新页面或重新登录确认。");
+        }
+        return;
+      }
       message.error(getRequestErrorMessage(error, "密码修改失败"));
     } finally {
-      setSavingPassword(false);
+      if (isCurrentSessionEpoch("customer", operationEpoch)) {
+        setSavingPassword(false);
+      }
     }
   };
 
@@ -547,8 +1100,17 @@ export default function MyAccountDashboard({
   };
 
   const submitContactChange = async () => {
+    if (contactResultUncertain) {
+      message.warning("换绑结果仍待确认，请刷新页面或重新登录确认后再操作。");
+      return;
+    }
     const values = await contactForm.validateFields().catch(() => null);
     if (!values) return;
+    const operationEpoch = currentSessionEpoch("customer");
+    const confirmingChallenge = contactChallenge !== null;
+    const expectedValue = String(
+      values.newValue ?? contactForm.getFieldValue("newValue") ?? "",
+    ).trim();
     setSavingContact(true);
     try {
       if (!contactChallenge) {
@@ -574,9 +1136,54 @@ export default function MyAccountDashboard({
       setContactOpen(false);
       onSignOut();
     } catch (error: unknown) {
+      const status = getAddressRequestStatus(error);
+      if (status === 401) {
+        message.warning("换绑结果待确认；当前登录状态已失效，请重新登录确认绑定信息。");
+        contactForm.resetFields();
+        setContactOpen(false);
+        setContactChallenge(null);
+        onSignOut();
+        return;
+      }
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+      if (confirmingChallenge && (status === null || status >= 500)) {
+        const reconciliation = await reconcileSecurityWrite(operationEpoch);
+        if (reconciliation.kind === "SESSION_INVALID") {
+          message.warning("换绑结果待确认；当前登录状态已失效，请重新登录确认绑定信息。");
+          contactForm.resetFields();
+          setContactOpen(false);
+          setContactChallenge(null);
+          onSignOut();
+          return;
+        }
+        if (reconciliation.kind === "ACTIVE") {
+          const authoritativeValue = contactType === "PHONE"
+            ? reconciliation.profile.phone
+            : reconciliation.profile.email;
+          const normalizedAuthoritative = String(authoritativeValue ?? "").trim().toLowerCase();
+          const normalizedExpected = expectedValue.toLowerCase();
+          if (normalizedExpected && normalizedAuthoritative === normalizedExpected) {
+            message.success("绑定信息已更新并完成权威核验，请重新登录。");
+            contactForm.resetFields();
+            setContactOpen(false);
+            setContactChallenge(null);
+            onSignOut();
+            return;
+          }
+          message.warning("换绑未生效，当前绑定信息未改变；您可以安全重试验证码确认。");
+          return;
+        }
+        if (reconciliation.kind === "UNKNOWN") {
+          setContactResultUncertain(true);
+          message.warning("换绑结果待确认；系统不会自动重复确认，请刷新页面或重新登录确认。");
+        }
+        return;
+      }
       message.error(getRequestErrorMessage(error, "换绑失败"));
     } finally {
-      setSavingContact(false);
+      if (isCurrentSessionEpoch("customer", operationEpoch)) {
+        setSavingContact(false);
+      }
     }
   };
 
@@ -590,15 +1197,69 @@ export default function MyAccountDashboard({
       message.error("头像图片不能超过 5MB");
       return Upload.LIST_IGNORE;
     }
+    const customerId = profile?.id;
+    if (!customerId) {
+      message.error("客户资料尚未加载，请刷新后重试");
+      return Upload.LIST_IGNORE;
+    }
+    const operationEpoch = currentSessionEpoch("customer");
     setUploadingAvatar(true);
     try {
-      await customerProfileApi.uploadAvatar(file);
+      const fingerprint = await hashAvatarUploadFile(file);
+      let attempt = readAvatarUploadAttempt(customerId);
+      if (attempt && attempt.fingerprint !== fingerprint) {
+        try {
+          await customerProfileApi.getAvatarUploadStatus(attempt.key);
+          if (!isCurrentSessionEpoch("customer", operationEpoch)) return Upload.LIST_IGNORE;
+          clearAvatarUploadAttempt(customerId);
+          attempt = null;
+        } catch {
+          if (!isCurrentSessionEpoch("customer", operationEpoch)) return Upload.LIST_IGNORE;
+          message.warning("上次头像上传结果尚未确认；请稍后再选择其他图片，避免覆盖仍在处理的结果。");
+          return Upload.LIST_IGNORE;
+        }
+      }
+      if (!attempt) {
+        attempt = { fingerprint, key: crypto.randomUUID() };
+        if (!persistAvatarUploadAttempt(customerId, attempt)) {
+          message.error("浏览器无法保存本次上传凭据；为避免重复写入，当前图片未上传。");
+          return Upload.LIST_IGNORE;
+        }
+      }
+      await customerProfileApi.uploadAvatar(file, attempt.key);
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return Upload.LIST_IGNORE;
+      clearAvatarUploadAttempt(customerId);
       message.success("头像已更新");
-      onRefresh?.();
+      await onRefresh?.();
     } catch (error: unknown) {
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return Upload.LIST_IGNORE;
+      const status = getAddressRequestStatus(error);
+      const attempt = readAvatarUploadAttempt(customerId);
+      if ((status === null || status >= 500) && attempt) {
+        try {
+          const response = await customerProfileApi.getAvatarUploadStatus(attempt.key);
+          if (!isCurrentSessionEpoch("customer", operationEpoch)) return Upload.LIST_IGNORE;
+          const result = unwrapResponse<{ status: "CURRENT" | "NOT_CURRENT" }>(response);
+          if (result.status === "CURRENT") {
+            clearAvatarUploadAttempt(customerId);
+            message.success("头像已更新并完成权威核验");
+            await onRefresh?.();
+            return Upload.LIST_IGNORE;
+          }
+          message.warning("本次图片尚未成为当前头像；请重新选择同一图片安全重试。");
+          return Upload.LIST_IGNORE;
+        } catch {
+          if (!isCurrentSessionEpoch("customer", operationEpoch)) return Upload.LIST_IGNORE;
+          message.warning("头像上传结果待确认；系统不会自动重复上传，请稍后重新选择同一图片恢复。");
+          return Upload.LIST_IGNORE;
+        }
+      }
+      clearAvatarUploadAttempt(customerId);
       message.error(getRequestErrorMessage(error, "头像上传失败"));
     } finally {
-      setUploadingAvatar(false);
+      if (isCurrentSessionEpoch("customer", operationEpoch)) {
+        setUploadingAvatar(false);
+      }
     }
     return Upload.LIST_IGNORE;
   };
@@ -611,15 +1272,39 @@ export default function MyAccountDashboard({
       cancelText: "保留头像",
       okButtonProps: { danger: true },
       onOk: async () => {
+        const operationEpoch = currentSessionEpoch("customer");
         setDeletingAvatar(true);
         try {
           await customerProfileApi.deleteAvatar();
+          if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
           message.success("头像已删除");
           onRefresh?.();
-        } catch {
-          message.error("头像删除失败，当前头像已保留，请重试");
+        } catch (error: unknown) {
+          if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+          const status = getAddressRequestStatus(error);
+          if (status === null || status >= 500) {
+            try {
+              const response = await customerApi.getProfile();
+              if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+              const authoritative = unwrapResponse<CustomerProfile>(response);
+              if (authoritative.avatarUrl == null) {
+                message.success("头像已删除并完成权威核验");
+                onRefresh?.();
+                return;
+              }
+              message.error("头像删除未生效，当前头像仍保留，请重试。");
+              return;
+            } catch {
+              if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+              message.error("头像删除结果待确认；系统不会自动重复删除，请稍后重试。");
+              return;
+            }
+          }
+          message.error(getRequestErrorMessage(error, "头像删除失败，请重试"));
         } finally {
-          setDeletingAvatar(false);
+          if (isCurrentSessionEpoch("customer", operationEpoch)) {
+            setDeletingAvatar(false);
+          }
         }
       },
     });
@@ -637,28 +1322,111 @@ export default function MyAccountDashboard({
   };
 
   const openAddressCreate = () => {
+    addressForm.resetFields();
+    addressForm.setFieldsValue({ isDefault: false });
     setEditingAddressId(null);
     setAddressOpen(true);
   };
 
   const openAddressEdit = (addr: AccountAddress) => {
+    addressForm.resetFields();
+    addressForm.setFieldsValue(addr);
     setEditingAddressId(addr.id);
     setAddressOpen(true);
   };
 
   const saveAddress = async () => {
-    const values = await addressForm.validateFields();
+    const values = await addressForm.validateFields() as CustomerAddressInput;
+    const payload = normalizeAddressCreatePayload(values);
+    const operationEpoch = currentSessionEpoch("customer");
     setSavingAddress(true);
+    let createRequestSent = false;
     try {
       if (editingAddressId) {
-        await customerApi.updateAddress(editingAddressId, values);
+        await customerApi.updateAddress(editingAddressId, payload);
       } else {
-        await customerApi.createAddress(values);
+        if (!profile?.id) {
+          message.error("客户身份尚未确认，系统未发送地址。请刷新后再试。");
+          return;
+        }
+        const fingerprint = await hashAddressCreateRequest(profile.id, payload);
+        const storedAttempt = readAddressCreateAttempt(profile.id);
+        const attempt = storedAttempt?.fingerprint === fingerprint
+          ? storedAttempt
+          : { fingerprint, key: `address-create-${crypto.randomUUID()}` };
+        if (
+          storedAttempt?.fingerprint !== fingerprint
+          && !persistAddressCreateAttempt(profile.id, attempt)
+        ) {
+          message.error(
+            "浏览器无法安全保存新增地址的重试凭据，系统未发送地址。请恢复会话存储后再试。",
+          );
+          return;
+        }
+        createRequestSent = true;
+        await customerApi.createAddress(payload, attempt.key);
+        clearAddressCreateAttempt(profile.id);
       }
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
       message.success(editingAddressId ? "地址已更新" : "地址已添加");
       setAddressOpen(false);
       onRefresh?.();
     } catch (error: unknown) {
+      if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+      if (!editingAddressId && profile?.id) {
+        if (!createRequestSent) {
+          message.error(
+            "浏览器无法准备新增地址的安全重试凭据，系统未发送地址。请刷新后再试。",
+          );
+          return;
+        }
+        const status = getAddressRequestStatus(error);
+        if (status !== null && status >= 400 && status < 500) {
+          clearAddressCreateAttempt(profile.id);
+        }
+        message.error(getAddressCreateError(error));
+        return;
+      }
+      if (editingAddressId) {
+        const status = getAddressRequestStatus(error);
+        if (status === null || status >= 500) {
+          try {
+            const response = await customerApi.getAddresses({ suppressGlobalError: true });
+            if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+            const authoritativeValue = unwrapResponse<unknown>(response);
+            if (!Array.isArray(authoritativeValue)) {
+              throw new Error("地址权威响应格式不正确");
+            }
+            const authoritativeAddresses = authoritativeValue as CustomerAddress[];
+            const authoritative = authoritativeAddresses.find(
+              (address) => address.id === editingAddressId,
+            );
+            if (!authoritative) {
+              message.error("该地址已不存在，系统未重复保存并已刷新地址列表。");
+              setAddressOpen(false);
+              onRefresh?.();
+              return;
+            }
+            const defaultStateConsistent = payload.isDefault !== true
+              || authoritativeAddresses.every(
+                (address) => address.id === editingAddressId || !address.isDefault,
+              );
+            if (addressMatchesUpdate(authoritative, payload) && defaultStateConsistent) {
+              message.success("地址已更新并完成权威核验");
+              setAddressOpen(false);
+              onRefresh?.();
+              return;
+            }
+            message.warning("地址更新未生效；系统已读取权威状态，请核对当前内容后重试。");
+            onRefresh?.();
+            return;
+          } catch {
+            if (!isCurrentSessionEpoch("customer", operationEpoch)) return;
+            message.error("地址更新结果待确认；系统不会自动重复保存，请稍后保持当前内容并重试。");
+            return;
+          }
+        }
+      }
       message.error(getRequestErrorMessage(error, "保存失败"));
     } finally {
       setSavingAddress(false);
@@ -671,7 +1439,7 @@ export default function MyAccountDashboard({
       message.success("地址已删除");
       onRefresh?.();
     } catch (error: unknown) {
-      message.error(getRequestErrorMessage(error, "删除失败"));
+      message.error(getAddressDeleteError(error));
     }
   };
 
@@ -737,7 +1505,31 @@ export default function MyAccountDashboard({
         </section>
 
         <div className="my-account__grid">
-          {selectedLeadId !== null ? (
+          {invalidSelectedLeadTarget ? (
+            <section
+              id="consultation-focus"
+              className="my-account__panel my-account__panel--wide"
+              aria-labelledby="consultation-invalid-title"
+              tabIndex={-1}
+            >
+              <div className="my-account__panel-head">
+                <div>
+                  <p>CONSULTATION LINK</p>
+                  <h2 id="consultation-invalid-title">咨询定位无效</h2>
+                </div>
+              </div>
+              <div className="my-account__records-state" role="alert">
+                <p>咨询定位信息无效，系统未发起咨询详情请求。您仍可查看本人咨询列表。</p>
+                <button
+                  type="button"
+                  className="my-account__inline-retry"
+                  onClick={() => clearConsultationUrl("my-appointments")}
+                >
+                  返回咨询列表
+                </button>
+              </div>
+            </section>
+          ) : selectedLeadId !== null ? (
             <section
               id="consultation-focus"
               className="my-account__panel my-account__panel--wide"
@@ -803,6 +1595,11 @@ export default function MyAccountDashboard({
                         || consultationDetail.status}
                     </em>
                   </div>
+                  <ConsultationProgress
+                    handlingState={consultationDetail.handlingState}
+                    nextAction={consultationDetail.nextAction}
+                    restartTo={consultationDetail.type === "selection" ? "/catalog" : "/contact"}
+                  />
                   <ConsultationDetail
                     detailId="consultation-focus-content"
                     message={consultationDetail.message}
@@ -865,6 +1662,11 @@ export default function MyAccountDashboard({
                         </div>
                         <em>{inquiryStatus[record.status] || record.status}</em>
                       </div>
+                      <ConsultationProgress
+                        handlingState={record.handlingState}
+                        nextAction={record.nextAction}
+                        restartTo="/catalog"
+                      />
                       <ConsultationDetail
                         detailId={`consultation-${record.leadId ?? `selection-${record.id}`}`}
                         message={record.message}
@@ -948,6 +1750,11 @@ export default function MyAccountDashboard({
                         </div>
                         <em>{inquiryStatus[record.status] || record.status}</em>
                       </div>
+                      <ConsultationProgress
+                        handlingState={record.handlingState}
+                        nextAction={record.nextAction}
+                        restartTo="/contact"
+                      />
                       <ConsultationDetail
                         detailId={`consultation-${record.leadId ?? `inquiry-${record.id}`}`}
                         message={record.message}
@@ -1133,10 +1940,11 @@ export default function MyAccountDashboard({
           <CustomerQuotationsPanel
             addresses={addresses}
             onOrderCreated={onRefresh}
+            onLocateOrder={locateCanonicalOrder}
           />
 
           <CustomerOrdersPanel
-            orders={orders}
+            orders={locatedOrders}
             commerceEnabled={commerceEnabled}
             paymentEnabled={paymentEnabled}
             uploadingProof={uploading}
@@ -1147,6 +1955,13 @@ export default function MyAccountDashboard({
             onOpenProof={setProofOrderId}
             onOpenPayment={setPaymentOrder}
             onRefresh={onRefresh}
+            targetOrderId={targetOrderId}
+            invalidTargetOrderId={invalidCanonicalOrderTarget}
+            targetOrderLoading={targetOrderLoading}
+            targetOrderError={targetOrderError}
+            onRetryTargetOrder={retryCanonicalOrderTarget}
+            onOrderLocated={handleOrderLocated}
+            onClearOrderTarget={clearCanonicalOrderTarget}
           />
 
           <section
@@ -1322,7 +2137,7 @@ export default function MyAccountDashboard({
                 >
                   导出我的数据
                 </Button>
-                <Button size="small" danger onClick={() => setCloseOpen(true)}>
+                <Button size="small" danger onClick={openAccountClosure}>
                   注销账户
                 </Button>
               </span>
@@ -1334,6 +2149,7 @@ export default function MyAccountDashboard({
                   <div key={addr.id} style={{ marginBottom: 10 }}>
                     <span>
                       {addr.recipientName} · {addr.recipientPhone}
+                      {addr.isDefault ? <Tag bordered={false}>默认</Tag> : null}
                       <br />
                       {[addr.province, addr.city, addr.district, addr.detail]
                         .filter(Boolean)
@@ -1429,16 +2245,18 @@ export default function MyAccountDashboard({
       />
 
       <Modal
+        rootClassName="customer-account-modal"
         open={closeOpen}
         title="注销账户"
         onCancel={() => {
           setCloseOpen(false);
           setClosePassword("");
+          setCloseSmsCode("");
         }}
         onOk={handleCloseAccount}
         confirmLoading={closing}
         okText="确认注销"
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, disabled: closeResultUncertain }}
         cancelText="再想想"
         destroyOnHidden
       >
@@ -1447,18 +2265,50 @@ export default function MyAccountDashboard({
             注销后您的姓名、邮箱、地址与收藏将被清除，账户将永久无法登录，此操作不可恢复。
           </p>
           <p style={{ color: "#5f6568", fontSize: 13 }}>
-            依据法律要求，历史订单与收款记录将留存；您发布且已公开展示的评价将继续匿名展示。建议先"导出我的数据"留档。
+            依据法律要求，历史订单与收款记录，以及处于法律保留状态的咨询事实将继续留存；您发布且已公开展示的评价将继续匿名展示。建议先"导出我的数据"留档。
           </p>
-          <Input.Password
-            placeholder="输入登录密码确认注销"
-            value={closePassword}
-            maxLength={EXISTING_PASSWORD_MAX_LENGTH}
-            onChange={(e) => setClosePassword(e.target.value)}
-          />
+          {closeResultUncertain ? (
+            <p role="alert" className="my-account__security-note">
+              上次注销结果尚未确认。为避免重复操作，请刷新页面或重新登录确认账户状态。
+            </p>
+          ) : null}
+          {closeProof === "PASSWORD" ? (
+            <Input.Password
+              aria-label="登录密码"
+              placeholder="输入登录密码确认注销"
+              value={closePassword}
+              maxLength={EXISTING_PASSWORD_MAX_LENGTH}
+              onChange={(e) => setClosePassword(e.target.value)}
+            />
+          ) : (
+            <>
+              <p className="my-account__security-note">
+                当前账户尚未设置密码，请使用绑定手机号验证码确认注销。
+              </p>
+              <div className="my-account__code-row">
+                <Input
+                  aria-label="当前手机号验证码"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="6 位验证码"
+                  value={closeSmsCode}
+                  onChange={(event) => setCloseSmsCode(event.target.value)}
+                />
+                <Button
+                  onClick={sendAccountClosureCode}
+                  loading={sendingSecurityCode}
+                  disabled={closeResultUncertain || securityCodeCooldown > 0}
+                >
+                  {securityCodeCooldown > 0 ? `${securityCodeCooldown}s` : "发送注销验证码"}
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 
       <Modal
+        rootClassName="customer-account-modal"
         open={profileEditOpen}
         title="修改称呼"
         onCancel={() => setProfileEditOpen(false)}
@@ -1493,6 +2343,7 @@ export default function MyAccountDashboard({
       </Modal>
 
       <Modal
+        rootClassName="customer-account-modal"
         open={passwordOpen}
         title="修改登录密码"
         onCancel={() => {
@@ -1501,6 +2352,7 @@ export default function MyAccountDashboard({
         }}
         onOk={savePassword}
         confirmLoading={savingPassword}
+        okButtonProps={{ disabled: passwordResultUncertain }}
         okText="确认修改"
         cancelText="取消"
         forceRender
@@ -1510,6 +2362,11 @@ export default function MyAccountDashboard({
             ? "当前账户尚未设置密码，请先验证绑定手机号。设置成功后将退出所有设备。"
             : "修改成功后将退出所有设备上的登录会话，请使用新密码重新登录。"}
         </p>
+        {passwordResultUncertain ? (
+          <p role="alert" className="my-account__security-note">
+            上次密码修改结果尚未确认。为避免重复修改，请刷新页面或重新登录后再操作。
+          </p>
+        ) : null}
         <Form form={passwordForm} layout="vertical">
           <Form.Item label="验证当前身份">
             <Radio.Group
@@ -1536,7 +2393,7 @@ export default function MyAccountDashboard({
                 <Button
                   onClick={sendCurrentPhoneCode}
                   loading={sendingSecurityCode}
-                  disabled={securityCodeCooldown > 0}
+                  disabled={passwordResultUncertain || securityCodeCooldown > 0}
                 >
                   {securityCodeCooldown > 0 ? `${securityCodeCooldown}s` : "发送验证码"}
                 </Button>
@@ -1573,6 +2430,7 @@ export default function MyAccountDashboard({
       </Modal>
 
       <Modal
+        rootClassName="customer-account-modal"
         open={contactOpen}
         title={`${profile?.[contactType === "PHONE" ? "phone" : "email"] ? "更换" : "绑定"}${contactType === "PHONE" ? "手机号" : "邮箱"}`}
         onCancel={() => {
@@ -1582,6 +2440,7 @@ export default function MyAccountDashboard({
         }}
         onOk={submitContactChange}
         confirmLoading={savingContact}
+        okButtonProps={{ disabled: contactResultUncertain }}
         okText={contactChallenge ? "完成换绑" : "验证并发送新验证码"}
         cancelText="取消"
         forceRender
@@ -1591,6 +2450,11 @@ export default function MyAccountDashboard({
             ? `验证码已发送至 ${contactChallenge.maskedTarget}，10 分钟内有效。`
             : "先验证当前身份，再验证新的联系方式。换绑成功后 7 天内不能再次修改，并会退出所有设备。"}
         </p>
+        {contactResultUncertain ? (
+          <p role="alert" className="my-account__security-note">
+            上次换绑确认结果尚未确认。为避免重复确认，请刷新页面或重新登录后再操作。
+          </p>
+        ) : null}
         <Form form={contactForm} layout="vertical">
           {!contactChallenge ? (
             <>
@@ -1632,7 +2496,7 @@ export default function MyAccountDashboard({
                     <Button
                       onClick={sendCurrentPhoneCode}
                       loading={sendingSecurityCode}
-                      disabled={securityCodeCooldown > 0}
+                      disabled={contactResultUncertain || securityCodeCooldown > 0}
                     >
                       {securityCodeCooldown > 0 ? `${securityCodeCooldown}s` : "发送验证码"}
                     </Button>
@@ -1654,6 +2518,7 @@ export default function MyAccountDashboard({
 
       {/* 地址新增/编辑 */}
       <Modal
+        rootClassName="customer-account-modal"
         open={addressOpen}
         title={editingAddressId ? "编辑地址" : "新增地址"}
         onCancel={() => setAddressOpen(false)}
@@ -1661,14 +2526,6 @@ export default function MyAccountDashboard({
         confirmLoading={savingAddress}
         okText="保存"
         cancelText="取消"
-        afterOpenChange={(open) => {
-          if (!open) return;
-          const address = editingAddressId
-            ? addresses.find((item) => item.id === editingAddressId)
-            : undefined;
-          if (address) addressForm.setFieldsValue(address);
-          else addressForm.resetFields();
-        }}
       >
         <Form form={addressForm} layout="vertical">
           <div
@@ -1703,12 +2560,18 @@ export default function MyAccountDashboard({
           <Form.Item name="district" label="区/县">
             <Input />
           </Form.Item>
+          <Form.Item name="postalCode" label="邮政编码">
+            <Input maxLength={20} />
+          </Form.Item>
           <Form.Item
             name="detail"
             label="详细地址"
             rules={[{ required: true, message: "请填写详细地址" }]}
           >
             <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="isDefault" valuePropName="checked" initialValue={false}>
+            <Checkbox>设为默认收货地址</Checkbox>
           </Form.Item>
         </Form>
       </Modal>

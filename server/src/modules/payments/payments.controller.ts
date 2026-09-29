@@ -11,6 +11,7 @@ import { UploadService } from '../upload/upload.service';
 import type { OnlinePayProvider } from '../../common/payment-gateway/payment-gateway.service';
 import { CreateChannelPaymentDto, CreateManualReceiptDto, PaymentQueryDto, ReviewPaymentDto } from './dto/payment.dto';
 import type { RawBodyRequest, StaffPrincipal } from '../../common/security/authenticated-principal';
+import { IdempotencyKey } from '../../common/idempotency/idempotency-key';
 
 function normalizedRequestHeaders(
   headers: Request['headers'],
@@ -37,8 +38,11 @@ export class PaymentsController {
   ) {}
 
   @Get()
-  findAll(@Query() query: PaymentQueryDto) {
-    return this.paymentsService.findAll(query);
+  findAll(
+    @Query() query: PaymentQueryDto,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.paymentsService.findAll(query, user);
   }
 
   // ===== 在线支付（交易解冻筹备：具体字面量路由须置于 @Get(':id') 之前）=====
@@ -100,11 +104,7 @@ export class PaymentsController {
     @Body() dto: CreateChannelPaymentDto,
     @CurrentUser() user: StaffPrincipal,
   ) {
-    return this.paymentsService.createChannelPayment(orderId, dto.method, {
-      type: 'ADMIN' as const,
-      id: user?.id,
-      name: user?.realName || user?.username,
-    });
+    return this.paymentsService.createChannelPayment(orderId, dto.method, user);
   }
 
   // 客服/管理员的掉单与对账工具：主动查渠道状态并按回调同源管线核销。
@@ -114,16 +114,16 @@ export class PaymentsController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: StaffPrincipal,
   ) {
-    return this.paymentsService.queryChannelPayment(id, {
-      type: 'ADMIN' as const,
-      id: user?.id,
-      name: user?.realName || user?.username,
-    });
+    return this.paymentsService.queryChannelPayment(id, user);
   }
 
   @Get(':id/proof')
-  async getProof(@Param('id', ParseIntPipe) id: number, @Res() response: Response) {
-    const proof = await this.uploadService.getPaymentProofForStaff(id);
+  async getProof(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: StaffPrincipal,
+    @Res() response: Response,
+  ) {
+    const proof = await this.uploadService.getPaymentProofForStaff(id, user);
     response.setHeader('Cache-Control', 'private, no-store');
     response.setHeader('Content-Disposition', 'inline');
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -131,38 +131,33 @@ export class PaymentsController {
   }
 
   @Get(':id')
-  findById(@Param('id', ParseIntPipe) id: number) {
-    return this.paymentsService.findById(id);
+  findById(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.paymentsService.findById(id, user);
   }
 
   @Put(':id/approve')
   @Roles('SUPER_ADMIN', 'ADMIN')
   approve(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewPaymentDto, @CurrentUser() user: StaffPrincipal) {
-    return this.paymentsService.approve(id, user.id, dto.reviewNote, {
-      type: 'ADMIN' as const,
-      id: user?.id,
-      name: user?.realName || user?.username,
-    });
+    return this.paymentsService.approve(id, user.id, dto.reviewNote, user);
   }
 
   @Put(':id/reject')
   @Roles('SUPER_ADMIN', 'ADMIN')
   reject(@Param('id', ParseIntPipe) id: number, @Body() dto: ReviewPaymentDto, @CurrentUser() user: StaffPrincipal) {
-    return this.paymentsService.reject(id, user.id, dto.reviewNote, {
-      type: 'ADMIN' as const,
-      id: user?.id,
-      name: user?.realName || user?.username,
-    });
+    return this.paymentsService.reject(id, user.id, dto.reviewNote, user);
   }
 
   // 异常线下实收登记；不得用此入口伪造微信/支付宝网关到账。
   @Post('receipt')
   @Roles('SUPER_ADMIN', 'ADMIN', 'FINANCE')
-  createReceipt(@Body() body: CreateManualReceiptDto, @CurrentUser() user: StaffPrincipal) {
-    return this.paymentsService.createReceipt(body, {
-      type: 'ADMIN' as const,
-      id: user?.id,
-      name: user?.realName || user?.username,
-    });
+  createReceipt(
+    @Body() body: CreateManualReceiptDto,
+    @CurrentUser() user: StaffPrincipal,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
+    return this.paymentsService.createReceipt(body, idempotencyKey, user);
   }
 }

@@ -3,6 +3,11 @@ import test from "node:test";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ProductsService } from "../products/products.service";
 import { LeadsService } from "../leads/leads.service";
+import { prepareLeadIdempotency } from "../leads/lead-submission";
+import {
+  PRIVACY_CONSENT_CONTENT_HASH,
+  PRIVACY_CONSENT_VERSION,
+} from "../../common/privacy/privacy-consent";
 import {
   CUSTOMER_SELECTION_INQUIRY_DEDUPE_SELECT,
   CUSTOMER_SELECTION_INQUIRY_SUBMISSION_SELECT,
@@ -13,6 +18,8 @@ const request = {
   customerName: "测试顾客",
   phone: "13800138000",
   privacyConsent: true,
+  privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+  privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
   items: [{ productId: 11 }, { productId: 22 }],
 };
 
@@ -33,6 +40,7 @@ test("选款咨询创建与幂等重放统一返回客户安全字段", async ()
     id: 31,
     status: "PENDING",
     createdAt,
+    lead: { id: 301 },
     internalNote: "内部备注",
     handledBy: 5,
     nextFollowUpAt: new Date("2026-09-07T03:00:00.000Z"),
@@ -83,7 +91,13 @@ test("选款咨询创建与幂等重放统一返回客户安全字段", async ()
 
   const first = await service.create({ ...request, idempotencyKey: "selection-safe-0001" });
   const replay = await service.create({ ...request, idempotencyKey: "selection-safe-0001" });
-  const expected = { id: 31, status: "PENDING", createdAt };
+  const expected = {
+    id: 31,
+    sourceId: 31,
+    leadId: 301,
+    status: "PENDING",
+    createdAt,
+  };
 
   assert.deepEqual(first, expected);
   assert.deepEqual(replay, expected);
@@ -94,8 +108,24 @@ test("选款咨询创建与幂等重放统一返回客户安全字段", async ()
   assert.equal("nextFollowUpAt" in replay, false);
 });
 
-test("旧客户端十分钟去重只用商品标识比对且不透传内部字段", async () => {
+test("旧客户端十分钟去重要求完整请求摘要一致且不透传内部字段", async () => {
   const createdAt = new Date("2026-09-06T04:00:00.000Z");
+  const submissionFingerprint = prepareLeadIdempotency(undefined, {
+    sourceType: "SELECTION_INQUIRY",
+    customerId: null,
+    customerName: request.customerName,
+    phone: request.phone,
+    email: null,
+    wechat: null,
+    message: null,
+    productIds: [11, 22],
+    productSkuSnapshots: [
+      { productId: 11, productSkuSnapshot: null },
+      { productId: 22, productSkuSnapshot: null },
+    ],
+    privacyConsentVersion: PRIVACY_CONSENT_VERSION,
+    privacyConsentContentHash: PRIVACY_CONSENT_CONTENT_HASH,
+  }).submissionFingerprint;
   let dedupeSelect: unknown;
   let createCount = 0;
   const prisma = {
@@ -109,6 +139,7 @@ test("旧客户端十分钟去重只用商品标识比对且不透传内部字�
           id: 41,
           status: "PROCESSING",
           createdAt,
+          lead: { id: 401, submissionFingerprint },
           items: [{ productId: 22 }, { productId: 11 }],
           internalNote: "不得返回",
           handledBy: 6,
@@ -129,8 +160,20 @@ test("旧客户端十分钟去重只用商品标识比对且不透传内部字�
 
   const result = await service.create(request);
 
-  assert.deepEqual(result, { id: 41, status: "PROCESSING", createdAt });
+  assert.deepEqual(result, {
+    id: 41,
+    sourceId: 41,
+    leadId: 401,
+    status: "PROCESSING",
+    createdAt,
+  });
   assert.deepEqual(dedupeSelect, CUSTOMER_SELECTION_INQUIRY_DEDUPE_SELECT);
   assert.equal(createCount, 0);
-  assert.deepEqual(Object.keys(result), ["id", "status", "createdAt"]);
+  assert.deepEqual(Object.keys(result), [
+    "id",
+    "sourceId",
+    "leadId",
+    "status",
+    "createdAt",
+  ]);
 });

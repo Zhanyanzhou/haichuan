@@ -4,6 +4,8 @@ import test from 'node:test';
 
 test('CategoriesService resolveReferences preserves order and reasons', async () => {
     const prisma = {
+      $transaction: async (callback: (tx: any) => unknown) => callback(prisma),
+      $queryRaw: async () => [{ id: 7 }],
       category: {
         findMany: async () => ([
           { id: 1, parentId: null, slug: 'parent', name: '父分类', level: 1, coverImage: '/parent.jpg', isActive: true, deletedAt: null, products: [] },
@@ -24,7 +26,7 @@ test('CategoriesService resolveReferences preserves order and reasons', async ()
       'empty',
       'no-cover',
       'missing',
-    ]);
+    ], { id: 7 } as never);
 
     assert.deepEqual(result.map((item) => [item.slug, item.reason]), [
       ['parent', 'AVAILABLE'],
@@ -40,9 +42,9 @@ test('CategoriesService resolveReferences preserves order and reasons', async ()
 // 避免前台分类树隐藏该类目但商品在目录/搜索中仍可见可购的口径分裂。
 function createUpdatePrisma(counts: { children: number; products: number }) {
   const calls: Array<Record<string, unknown>> = [];
-  return {
-    calls,
-    prisma: {
+  const prisma = {
+      $transaction: async (callback: (tx: any) => unknown) => callback(prisma),
+      $queryRaw: async () => [{ id: 7 }],
       category: {
         findUnique: async (args: { include?: unknown }) => {
           if (!args?.include) {
@@ -57,8 +59,8 @@ function createUpdatePrisma(counts: { children: number; products: number }) {
           return { id: 2, ...args };
         },
       },
-    } as never,
-  };
+    } as never;
+  return { calls, prisma };
 }
 
 test('update 停用仍关联未删商品时拒绝', async () => {
@@ -66,7 +68,7 @@ test('update 停用仍关联未删商品时拒绝', async () => {
   const service = new CategoriesService(prisma);
 
   await assert.rejects(
-    service.update(2, { isActive: false } as never),
+    service.update(2, { isActive: false } as never, { id: 7 } as never),
     /该类目仍关联下级分类或商品，不能停用/,
   );
 });
@@ -75,7 +77,7 @@ test('update 停用无关联时放行并写入停用状态', async () => {
   const { prisma, calls } = createUpdatePrisma({ children: 0, products: 0 });
   const service = new CategoriesService(prisma);
 
-  await service.update(2, { isActive: false } as never);
+  await service.update(2, { isActive: false } as never, { id: 7 } as never);
 
   assert.equal(calls.length, 1);
   assert.equal((calls[0].data as { isActive?: boolean }).isActive, false);

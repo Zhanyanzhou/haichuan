@@ -26,9 +26,13 @@ async function signInCustomer(page: Page) {
 
 test("商品详情以客户 Cookie 会话请求 8 条相似作品并渲染结果", async ({ page }) => {
   const detail = publicProduct(12, "DISPLAY_ONLY");
-  const similar = {
+  const displayOnlySimilar = {
     ...publicProduct(22, "DISPLAY_ONLY"),
     name: "相似推荐合同作品",
+  };
+  const directPurchaseSimilar = {
+    ...publicProduct(23, "DIRECT_PURCHASE", { available: true }),
+    name: "直购推荐合同作品",
   };
 
   await page.route("**/api/**", async (route) => {
@@ -36,7 +40,7 @@ test("商品详情以客户 Cookie 会话请求 8 条相似作品并渲染结果
     const path = url.pathname;
     if (path.endsWith("/products/catalog/12")) return fulfill(route, detail);
     if (path.endsWith("/recommendations/similar/12")) {
-      return fulfill(route, [similar]);
+      return fulfill(route, [displayOnlySimilar, directPurchaseSimilar]);
     }
     if (path.endsWith("/reviews/product/12")) {
       return fulfill(route, { list: [], total: 0, averageRating: null });
@@ -65,6 +69,10 @@ test("商品详情以客户 Cookie 会话请求 8 条相似作品并渲染结果
   expect(request.headers()["x-session-domain"]).toBe("customer");
   await expect(page.getByText("相关作品", { exact: true })).toBeVisible();
   await expect(page.getByText("相似推荐合同作品", { exact: true })).toBeVisible();
+  const displayOnlyCard = page.getByRole("link", { name: /相似推荐合同作品/ });
+  const directPurchaseCard = page.getByRole("link", { name: /直购推荐合同作品/ });
+  await expect(displayOnlyCard).not.toContainText("¥");
+  await expect(directPurchaseCard).toContainText("¥12,800");
 });
 
 test("客户中心以客户 Cookie 会话请求 6 条猜你喜欢并渲染结果", async ({ page }) => {

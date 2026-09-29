@@ -107,7 +107,12 @@ test("员工新建和重置服务执行长度与弱口令检查，成功只保�
   const updatedHashes: string[] = [];
   let revokedSessions = 0;
   const transaction = {
+    $queryRaw: async () => [{ id: 1, role: "SUPER_ADMIN" }],
     user: {
+      create: async ({ data }: { data: { password: string } }) => {
+        createdHashes.push(data.password);
+        return { id: 8 };
+      },
       findUnique: async () => ({ id: 8, role: "EDITOR", status: "ACTIVE" }),
       update: async ({ data }: { data: { password: string } }) => {
         updatedHashes.push(data.password);
@@ -119,22 +124,17 @@ test("员工新建和重置服务执行长度与弱口令检查，成功只保�
     },
   };
   const service = new UsersService({
-    user: {
-      create: async ({ data }: { data: { password: string } }) => {
-        createdHashes.push(data.password);
-        return { id: 8 };
-      },
-    },
     $transaction: async (action: (tx: typeof transaction) => Promise<unknown>) => action(transaction),
   } as never);
+  const actor = { id: 1, role: "SUPER_ADMIN" as const };
   for (const password of ["x".repeat(5), "x".repeat(19), "password2024!"]) {
-    await assert.rejects(service.create({ username: "test-staff", password }), BadRequestException);
-    await assert.rejects(service.update(8, { password }, { id: 1, role: "SUPER_ADMIN" }), BadRequestException);
+    await assert.rejects(service.create({ username: "test-staff", password }, actor), BadRequestException);
+    await assert.rejects(service.update(8, { password }, actor), BadRequestException);
   }
   assert.equal(createdHashes.length + updatedHashes.length + revokedSessions, 0);
   for (const password of ["aB3!xy", "x".repeat(18)]) {
-    await service.create({ username: "test-staff", password });
-    await service.update(8, { password }, { id: 1, role: "SUPER_ADMIN" });
+    await service.create({ username: "test-staff", password }, actor);
+    await service.update(8, { password }, actor);
     assert.equal(await bcrypt.compare(password, createdHashes.at(-1)!), true);
     assert.equal(await bcrypt.compare(password, updatedHashes.at(-1)!), true);
   }

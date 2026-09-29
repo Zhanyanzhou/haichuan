@@ -27,10 +27,15 @@ import { UploadService } from './upload.service';
 import { MediaAuthorizationService } from './media-authorization.service';
 import { MediaAuthorizationResolverService } from './media-authorization-resolver.service';
 import { PublicUploadsGateway } from './public-uploads.gateway';
+import { PaymentProofsController } from '../payment-proofs/payment-proofs.controller';
+import { PaymentProofsService } from '../payment-proofs/payment-proofs.service';
+import { OrdersService } from '../orders/orders.service';
+import { IdempotencyService } from '../../common/idempotency/idempotency-key';
 
 const sharp = require('sharp');
 const databaseUrl = process.env.MEDIA_REAL_MYSQL_URL?.trim();
 const nginxUrl = process.env.MEDIA_REAL_NGINX_URL?.trim();
+const { validateTarget: validateSharedTarget } = require('../../../scripts/run-real-mysql-tests.cjs');
 
 @Module({
   imports: [
@@ -42,7 +47,7 @@ const nginxUrl = process.env.MEDIA_REAL_NGINX_URL?.trim();
     }),
     MulterModule.register({ storage: memoryStorage() }),
   ],
-  controllers: [UploadController],
+  controllers: [UploadController, PaymentProofsController],
   providers: [
     UploadService,
     PublicUploadsGateway,
@@ -53,6 +58,19 @@ const nginxUrl = process.env.MEDIA_REAL_NGINX_URL?.trim();
     RolesGuard,
     CustomerAuthGuard,
     CustomerCommerceGuard,
+    PaymentProofsService,
+    IdempotencyService,
+    {
+      provide: OrdersService,
+      useValue: {
+        submitOfflinePaymentProof: async (
+          _principal: unknown,
+          _orderId: number,
+          _assetId: number,
+          proofKey: string,
+        ) => ({ storageKey: proofKey }),
+      },
+    },
   ],
 })
 class MediaUploadRealHttpModule {}
@@ -62,6 +80,12 @@ type ApiResult = { status: number; body: unknown; data: Record<string, unknown> 
 function validateTarget(value: string | undefined) {
   assert.equal(process.env.MEDIA_REAL_MYSQL_TEST, '1', '必须显式声明 MEDIA_REAL_MYSQL_TEST=1');
   assert.ok(value, '必须显式提供 MEDIA_REAL_MYSQL_URL');
+  if (
+    process.env.REAL_MYSQL_TEST_ISOLATED === '1'
+    && value === process.env.REAL_MYSQL_TEST_DATABASE_URL
+  ) {
+    return validateSharedTarget(process.env);
+  }
   const target = new URL(value);
   assert.equal(target.protocol, 'mysql:');
   assert.ok(['127.0.0.1', 'localhost'].includes(target.hostname));
@@ -302,7 +326,7 @@ test(
       assert.equal((await call('/api/upload/media', editorToken)).status, 200, '编辑可读取媒体库');
       assert.equal((await upload(png, 'customer-domain.png', 'image/png', customerDomainToken)).status, 401, '客户令牌不能进入员工上传域');
       assert.equal((await upload(png, 'anonymous.png', 'image/png', '')).status, 401, '匿名不能上传');
-      assert.equal((await call('/api/upload/payment-proof', undefined, {
+      assert.equal((await call('/api/upload/payment-proof/1', undefined, {
         method: 'POST',
         body: formWith(png, 'image/png', 'anonymous-proof.png'),
       })).status, 401, '匿名不能上传客户私有凭证');
@@ -459,8 +483,9 @@ test(
       assert.equal(searched.status, 200);
       assert.equal(searched.data?.total, 1);
       assert.equal(((searched.data?.list ?? []) as Array<Record<string, unknown>>)[0]?.url, persistentUrl);
-      const proofUpload = await call('/api/upload/payment-proof', customerToken, {
+      const proofUpload = await call('/api/upload/payment-proof/1', customerToken, {
         method: 'POST',
+        headers: { 'Idempotency-Key': `media-proof-${runId}` },
         body: formWith(png, 'image/png', 'customer-proof.png'),
       });
       assert.equal(proofUpload.status, 201, JSON.stringify(proofUpload.body));

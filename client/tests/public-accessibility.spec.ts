@@ -61,6 +61,28 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
       await mockPublicApis(page);
       await page.goto("/contact");
       await expect(page.locator("#cf-name")).toBeVisible();
+      const [supportBox, requestBox] = await Promise.all([
+        page.locator(".contact-support").boundingBox(),
+        page.locator(".contact-request").boundingBox(),
+      ]);
+      const requestPrecedesSupport = await page.evaluate(() => {
+        const request = document.querySelector(".contact-request");
+        const support = document.querySelector(".contact-support");
+        return Boolean(
+          request
+          && support
+          && (request.compareDocumentPosition(support) & Node.DOCUMENT_POSITION_FOLLOWING),
+        );
+      });
+      expect(supportBox).not.toBeNull();
+      expect(requestBox).not.toBeNull();
+      expect(requestPrecedesSupport).toBe(true);
+      if (viewport.name === "mobile") {
+        expect(requestBox!.y).toBeLessThan(supportBox!.y);
+        expect(requestBox!.y).toBeLessThan(viewport.height);
+      } else {
+        expect(requestBox!.x).toBeLessThan(supportBox!.x);
+      }
       await scan(page, testInfo, "contact");
 
       await page.getByRole("button", { name: "提交需求" }).press("Enter");
@@ -75,6 +97,14 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
       await mockPublicApis(page);
       await page.goto("/privacy");
       await expect(page.getByRole("heading", { name: "隐私说明", exact: true })).toBeVisible();
+      const headerActions = page.getByRole("banner").getByRole("navigation", { name: "菜单与搜索" });
+      await expect(headerActions).toBeAttached();
+      await expect(headerActions.getByRole("button", { name: "打开菜单", exact: true })).toBeVisible();
+      if (viewport.name === "desktop") {
+        await expect(headerActions.getByRole("link", { name: "搜索", exact: true })).toBeVisible();
+      } else {
+        await expect(headerActions.getByRole("link", { name: "搜索", exact: true })).toBeHidden();
+      }
       await scan(page, testInfo, "privacy");
 
       const toggle = page.getByRole("button", { name: "打开菜单", exact: true });
@@ -86,7 +116,7 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
       await expect(toggle).toBeFocused();
     });
 
-    test(`${viewport.name} 中英文首页安全短页保持 AA 对比度与键盘可达`, async ({ page }, testInfo) => {
+    test(`${viewport.name} 中文首页安全短页保持 AA 对比度与键盘可达`, async ({ page }, testInfo) => {
       await page.setViewportSize(viewport);
       await mockPublicApis(page);
 
@@ -95,11 +125,6 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
           path: "/",
           title: "首页正在准备",
           description: "首页内容正在整理。您可以先进入选款中心浏览当前公开款式，或了解珠宝定制服务。",
-        },
-        {
-          path: "/en",
-          title: "English home is not published",
-          description: "This language version is unavailable until an approved English page is published.",
         },
       ]) {
         await page.goto(locale.path);
@@ -145,6 +170,17 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
           .toBeGreaterThanOrEqual(3);
         await scan(page, testInfo, `home-fallback-${locale.path === "/" ? "zh" : "en"}`);
       }
+    });
+
+    test(`${viewport.name} 404 保留真实标题与恢复入口且无装饰文本告警`, async ({ page }, testInfo) => {
+      await page.setViewportSize(viewport);
+      await mockPublicApis(page);
+      await page.goto("/definitely-missing");
+
+      await expect(page.getByRole("heading", { level: 1, name: "此页未被找到" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "返回首页" })).toBeVisible();
+      await expect(page.locator(".not-found-page__code")).toHaveCount(0);
+      await scan(page, testInfo, "not-found");
     });
   }
 });

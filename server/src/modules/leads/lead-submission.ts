@@ -21,6 +21,25 @@ function stableValue(value: unknown): unknown {
   return value;
 }
 
+export const LEAD_RETENTION_POLICY = Object.freeze({
+  version: "lead-retention-v1",
+  completedMonths: 12,
+  invalidDays: 30,
+  disposition: "ANONYMIZE",
+  activeLegalHold: "EXCLUDE",
+} as const);
+
+export const LEAD_RETENTION_POLICY_FINGERPRINT_SHA256 = hash(
+  JSON.stringify(stableValue(LEAD_RETENTION_POLICY)),
+);
+
+export function leadRetentionPolicyEvidence() {
+  return {
+    ...LEAD_RETENTION_POLICY,
+    fingerprintSha256: LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+  };
+}
+
 /**
  * 公开写入的幂等键只保存 SHA-256，不把客户端原值写入数据库或日志。
  * 键是可选的，以兼容旧客户端；新客户端每次用户提交意图生成一个 UUID，
@@ -95,13 +114,18 @@ export function retentionForStatus(
 ) {
   if (status === "COMPLETED") {
     const retentionUntil = new Date(now);
-    retentionUntil.setUTCMonth(retentionUntil.getUTCMonth() + 12);
+    retentionUntil.setUTCMonth(
+      retentionUntil.getUTCMonth() + LEAD_RETENTION_POLICY.completedMonths,
+    );
     return { closedAt: now, retentionUntil };
   }
   if (status === "INVALID") {
     return {
       closedAt: now,
-      retentionUntil: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+      retentionUntil: new Date(
+        now.getTime()
+          + LEAD_RETENTION_POLICY.invalidDays * 24 * 60 * 60 * 1000,
+      ),
     };
   }
   return { closedAt: null, retentionUntil: null };

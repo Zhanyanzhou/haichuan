@@ -56,7 +56,6 @@ const ROUTE_RULES: RouteRule[] = [
   { prefix: "/admin/marketing", roles: ADMIN_ONLY },
   { prefix: "/admin/ai-classify", roles: ADMIN_ONLY },
   { prefix: "/admin/gold-price", roles: ADMIN_ONLY },
-  { prefix: "/admin/finance", roles: ADMIN_ONLY },
   { prefix: "/admin/inventory", roles: WAREHOUSE },
   { prefix: "/admin/warehouses", roles: WAREHOUSE },
   // 交易域：订单中心对管理员与客服可见；仓储使用履约中心的最小数据投影

@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
+import { ForbiddenException } from '@nestjs/common';
 import type { MediaAsset } from '@prisma/client';
 import type { PrismaService } from '../../common/prisma/prisma.service';
 import { UploadService } from './upload.service';
@@ -31,6 +32,8 @@ function uploadFile(overrides: Partial<Express.Multer.File> = {}): Express.Multe
 
 function createPrismaDouble() {
   const rows = new Map<number, MediaAsset>();
+  const productQualityInvalidations: Array<Record<string, unknown>> = [];
+  let rejectProductQualityInvalidation = false;
   let nextId = 1;
   const matchingRows = (where: Record<string, unknown>) => [...rows.values()]
     .filter((row) => row.accessLevel === 'PUBLIC' && row.storageKey.startsWith('page-assets/'))
@@ -99,6 +102,15 @@ function createPrismaDouble() {
   let transactionTail = Promise.resolve();
   const prisma: Record<string, unknown> = {
     mediaAsset,
+    product: {
+      updateMany: async (args: Record<string, unknown>) => {
+        productQualityInvalidations.push(args);
+        if (rejectProductQualityInvalidation) {
+          throw new Error('synthetic product quality invalidation failure');
+        }
+        return { count: 0 };
+      },
+    },
     $queryRaw: async (strings: TemplateStringsArray) => strings[0]?.includes('RELEASE_LOCK')
       ? [{ released: 1 }]
       : [{ acquired: 1 }],
@@ -109,24 +121,50 @@ function createPrismaDouble() {
     let release: () => void = () => {};
     transactionTail = new Promise<void>((resolvePromise) => { release = resolvePromise; });
     await previous;
+    const rowsBefore = new Map(
+      [...rows].map(([id, row]) => [id, { ...row }]),
+    );
     try {
       return await input(prisma);
+    } catch (error) {
+      rows.clear();
+      for (const [id, row] of rowsBefore) rows.set(id, row);
+      throw error;
     } finally {
       release();
     }
   };
-  return { prisma: prisma as unknown as PrismaService, rows };
+  return {
+    prisma: prisma as unknown as PrismaService,
+    rows,
+    productQualityInvalidations,
+    rejectProductQualityInvalidation(value: boolean) {
+      rejectProductQualityInvalidation = value;
+    },
+  };
 }
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'haichuan-page-media-'));
-  const { prisma, rows } = createPrismaDouble();
+  const {
+    prisma,
+    rows,
+    productQualityInvalidations,
+    rejectProductQualityInvalidation,
+  } = createPrismaDouble();
   const service = new UploadService(prisma, {
     ensureLegacyDraft: async () => undefined,
+    ensureUploadAuthorization: async () => undefined,
   } as never);
   Object.defineProperty(service, 'uploadDir', { value: join(root, 'uploads') });
   Object.defineProperty(service, 'archivedPageMediaRoot', { value: join(root, 'private-media', 'page-assets-archive') });
-  return { root, rows, service };
+  return {
+    root,
+    rows,
+    service,
+    productQualityInvalidations,
+    rejectProductQualityInvalidation,
+  };
 }
 
 test('页面图片上传会登记、按内容去重，并在并发后只保留一个稳定引用', async () => {
@@ -163,7 +201,7 @@ test('商品图片上传会登记 MediaAsset 并以旧素材默认拒绝策略�
   const { prisma, rows } = createPrismaDouble();
   const authorizationCalls: Array<{ assetId: number; uploadedBy?: number }> = [];
   const service = new UploadService(prisma, {
-    ensureLegacyDraft: async (_transaction: unknown, assetId: number, uploadedBy?: number) => {
+    ensureUploadAuthorization: async (_transaction: unknown, assetId: number, uploadedBy?: number) => {
       authorizationCalls.push({ assetId, uploadedBy });
     },
   } as never);
@@ -184,6 +222,266 @@ test('商品图片上传会登记 MediaAsset 并以旧素材默认拒绝策略�
     else process.env.PRODUCT_MEDIA_ROOT = previousRoot;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('商品裁图登记先复核当前员工与 refresh family，再写媒体资产', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'haichuan-product-crop-authorization-'));
+  const previousRoot = process.env.PRODUCT_MEDIA_ROOT;
+  process.env.PRODUCT_MEDIA_ROOT = root;
+  const sourceKey = 'product-assets/source.png';
+  await mkdir(join(root, 'product-assets'), { recursive: true });
+  await writeFile(join(root, sourceKey), PNG);
+  const events: string[] = [];
+  let queryCount = 0;
+  let createdData: Record<string, unknown> | null = null;
+  const transaction = {
+    $queryRaw: async () => {
+      queryCount += 1;
+      if (queryCount === 1) {
+        events.push('staff-lock');
+        return [{ id: 77, role: 'EDITOR' }];
+      }
+      events.push('session-lock');
+      return [{ id: 770 }];
+    },
+    mediaAsset: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        events.push('media-create');
+        createdData = data;
+        return { id: 91, ...data };
+      },
+    },
+  };
+  const service = new UploadService({
+    $transaction: async (action: (client: typeof transaction) => Promise<unknown>) =>
+      action(transaction),
+  } as never, {
+    ensureUploadAuthorization: async () => {
+      events.push('authorization-create');
+    },
+  } as never);
+
+  try {
+    const result = await service.cropPrivateImage(
+      sourceKey,
+      { left: 0, top: 0, width: 1, height: 1 },
+      1,
+      'webp',
+      {
+        id: 77,
+        sessionFamilyId: '00000000-0000-4000-8000-000000000077',
+      },
+    );
+
+    assert.equal(result.mediaAssetId, 91);
+    const recordedData = createdData as Record<string, unknown> | null;
+    assert.ok(recordedData);
+    assert.equal(recordedData.uploadedBy, 77);
+    assert.deepEqual(events, [
+      'staff-lock',
+      'session-lock',
+      'media-create',
+      'authorization-create',
+    ]);
+  } finally {
+    if (previousRoot === undefined) delete process.env.PRODUCT_MEDIA_ROOT;
+    else process.env.PRODUCT_MEDIA_ROOT = previousRoot;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('私有设计文件清理的查找与删除条件都要求不存在商品图片引用', async () => {
+  const lookups: Array<Record<string, unknown>> = [];
+  const deletes: Array<Record<string, unknown>> = [];
+  const service = Object.create(UploadService.prototype) as UploadService;
+  Object.defineProperty(service, 'prisma', {
+    value: {
+      mediaAsset: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+          lookups.push(where);
+          return { id: 71, storageKey: 'design-assets/2026/09/22/design.3dm' };
+        },
+        deleteMany: async ({ where }: { where: Record<string, unknown> }) => {
+          deletes.push(where);
+          return { count: 1 };
+        },
+      },
+    },
+  });
+
+  assert.equal(await service.discardUnattachedDesignFile(71, 9), true);
+  assert.deepEqual((lookups[0]?.productImages as Record<string, unknown>)?.none, {});
+  assert.deepEqual((deletes[0]?.productImages as Record<string, unknown>)?.none, {});
+});
+
+test('未挂载商品派生图在媒体行锁内归档并移除文件，保留资产记录', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'haichuan-product-derived-cleanup-'));
+  const storageKey = 'product-assets/derived/2026/09/24/orphan.webp';
+  const filePath = join(root, storageKey);
+  await mkdir(join(root, 'product-assets', 'derived', '2026', '09', '24'), { recursive: true });
+  await writeFile(filePath, PNG);
+  let status = 'READY';
+  let revision = 1;
+  let transactionCalls = 0;
+  const tx = {
+    $queryRaw: async () => [{ id: 91 }],
+    mediaAsset: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        assert.deepEqual((where.productImages as Record<string, unknown>).none, {});
+        return status === 'READY' ? { id: 91, storageKey } : null;
+      },
+      updateMany: async ({ where }: { where: Record<string, unknown> }) => {
+        assert.deepEqual((where.productImages as Record<string, unknown>).none, {});
+        status = 'ARCHIVED';
+        revision += 1;
+        return { count: 1 };
+      },
+    },
+  };
+  const service = Object.create(UploadService.prototype) as UploadService;
+  Object.defineProperty(service, 'prisma', {
+    value: {
+      $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => {
+        transactionCalls += 1;
+        return action(tx);
+      },
+    },
+  });
+  Object.defineProperty(service, 'storageRoots', {
+    value: { productMediaRoot: root },
+  });
+
+  try {
+    assert.equal(await service.archiveUnattachedProductDerivative(91, 7), true);
+    assert.equal(transactionCalls, 1);
+    assert.equal(status, 'ARCHIVED');
+    assert.equal(revision, 2);
+    assert.equal(existsSync(filePath), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('客户付款凭证读取在认证版本失效后不查询付款记录', async () => {
+  let paymentRead = false;
+  const tx = {
+    $queryRaw: async () => [],
+    payment: {
+      findFirst: async () => {
+        paymentRead = true;
+        return null;
+      },
+    },
+  };
+  const service = Object.create(UploadService.prototype) as UploadService;
+  Object.defineProperty(service, 'prisma', {
+    value: {
+      $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => action(tx),
+    },
+  });
+
+  await assert.rejects(
+    service.getPaymentProofForCustomer({ id: 17, authVersion: 3 }, 71),
+    /重新登录/,
+  );
+  assert.equal(paymentRead, false);
+});
+
+test('客户付款凭证在共享锁内按本人订单读取并返回受控文件', async () => {
+  let paymentWhere: Record<string, unknown> | undefined;
+  let proofReference: string | undefined;
+  const tx = {
+    $queryRaw: async () => [{ id: 17 }],
+    payment: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        paymentWhere = where;
+        return { proofUrl: '2026/09/proof.png' };
+      },
+    },
+  };
+  const service = Object.create(UploadService.prototype) as UploadService;
+  Object.defineProperty(service, 'prisma', {
+    value: {
+      $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => action(tx),
+    },
+  });
+  Object.defineProperty(service, 'readPaymentProof', {
+    value: async (reference: string) => {
+      proofReference = reference;
+      return { buffer: Buffer.from('proof'), mimeType: 'image/png' };
+    },
+  });
+
+  const result = await service.getPaymentProofForCustomer({ id: 17, authVersion: 3 }, 71);
+
+  assert.deepEqual(paymentWhere, {
+    orderId: 71,
+    order: { customerId: 17 },
+    proofUrl: { not: null },
+  });
+  assert.equal(proofReference, '2026/09/proof.png');
+  assert.deepEqual(result, { buffer: Buffer.from('proof'), mimeType: 'image/png' });
+});
+
+test('后台付款凭证在员工撤权后不查询付款记录', async () => {
+  let paymentRead = false;
+  const tx = {
+    $queryRaw: async () => [],
+    payment: {
+      findUnique: async () => {
+        paymentRead = true;
+        return null;
+      },
+    },
+  };
+  const service = Object.create(UploadService.prototype) as UploadService;
+  Object.defineProperty(service, 'prisma', {
+    value: {
+      $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => action(tx),
+    },
+  });
+
+  await assert.rejects(
+    service.getPaymentProofForStaff(71, { id: 51 }),
+    ForbiddenException,
+  );
+  assert.equal(paymentRead, false);
+});
+
+test('后台付款凭证在员工锁内读取并返回受控文件', async () => {
+  const sequence: string[] = [];
+  let proofReference: string | undefined;
+  const tx = {
+    $queryRaw: async () => {
+      sequence.push('staff-lock');
+      return [{ id: 51, username: 'payment-admin', realName: '付款管理员' }];
+    },
+    payment: {
+      findUnique: async () => {
+        sequence.push('payment-read');
+        return { proofUrl: '2026/09/proof.png' };
+      },
+    },
+  };
+  const service = Object.create(UploadService.prototype) as UploadService;
+  Object.defineProperty(service, 'prisma', {
+    value: {
+      $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => action(tx),
+    },
+  });
+  Object.defineProperty(service, 'readPaymentProof', {
+    value: async (reference: string) => {
+      sequence.push('proof-read');
+      proofReference = reference;
+      return { buffer: Buffer.from('proof'), mimeType: 'image/png' };
+    },
+  });
+
+  const result = await service.getPaymentProofForStaff(71, { id: 51 });
+
+  assert.deepEqual(sequence, ['staff-lock', 'payment-read', 'proof-read']);
+  assert.equal(proofReference, '2026/09/proof.png');
+  assert.deepEqual(result, { buffer: Buffer.from('proof'), mimeType: 'image/png' });
 });
 
 test('图片上传对内容、MIME、扩展名、大小和危险文件名失败关闭', async () => {
@@ -306,6 +604,74 @@ test('受控读取发现 checksum 错配会在锁事务内撤下文件并持久�
   }
 });
 
+test('页面素材生命周期变化在同一事务使引用它的 READY 商品质量失效，纯读取与重复操作不重复改写', async () => {
+  const { root, service, productQualityInvalidations } = await fixture();
+  try {
+    const uploaded = await service.uploadFile(uploadFile(), 18);
+    productQualityInvalidations.length = 0;
+
+    await service.getPageMediaContent(uploaded.id, false);
+    assert.equal(productQualityInvalidations.length, 0, '只刷新完整性检查时间不应失效商品质量');
+
+    await service.archivePageMedia(uploaded.id);
+    assert.equal(productQualityInvalidations.length, 1);
+    assert.deepEqual(productQualityInvalidations[0], {
+      where: {
+        publicationQualityStatus: 'READY',
+        images: { some: { mediaAssetId: uploaded.id } },
+      },
+      data: {
+        publicationQualityStatus: 'QUARANTINED',
+        publicationQualityHash: null,
+        publicationQualityCheckedAt: null,
+      },
+    });
+
+    await service.archivePageMedia(uploaded.id);
+    assert.equal(productQualityInvalidations.length, 1, '重复归档没有生命周期变化，不应重复失效');
+
+    await service.restorePageMedia(uploaded.id);
+    assert.equal(productQualityInvalidations.length, 2, '恢复递增 revision，也必须校验引用商品的 READY 状态');
+
+    const publicPath = join(root, uploaded.url.replace(/^\//, ''));
+    await writeFile(publicPath, Buffer.from('tampered-product-media'));
+    await assert.rejects(service.getPageMediaContent(uploaded.id, false), /已隔离/);
+    assert.equal(productQualityInvalidations.length, 3, 'checksum 错配隔离必须同步失效质量快照');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('商品质量失效写入失败时资产生命周期事务回滚并保持公开读取失败关闭', async () => {
+  const {
+    root,
+    rows,
+    service,
+    productQualityInvalidations,
+    rejectProductQualityInvalidation,
+  } = await fixture();
+  try {
+    const uploaded = await service.uploadFile(uploadFile(), 19);
+    productQualityInvalidations.length = 0;
+    const revision = rows.get(uploaded.id)?.lifecycleRevision;
+    rejectProductQualityInvalidation(true);
+
+    await assert.rejects(
+      service.archivePageMedia(uploaded.id),
+      /synthetic product quality invalidation failure/,
+    );
+    assert.equal(rows.get(uploaded.id)?.status, 'READY');
+    assert.equal(rows.get(uploaded.id)?.lifecycleRevision, revision);
+    assert.equal(
+      existsSync(join(root, uploaded.url.replace(/^\//, ''))),
+      false,
+      '数据库事务失败时物理公开副本仍必须先撤下',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('旧 /uploads/page-assets URL 按 storageKey 进入集中读取且危险键失败关闭', async () => {
   const { root, service } = await fixture();
   try {
@@ -389,20 +755,6 @@ test('视频声明类型必须匹配完整容器骨架，截断或跨类型伪�
       buffer: validMp4,
       size: validMp4.length,
     })), /不是有效的 WebM/);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test('客户付款凭证只生成私有存储键，不生成或写入公开页面素材目录', async () => {
-  const { root, rows, service } = await fixture();
-  try {
-    Object.defineProperty(service, 'paymentProofRoot', { value: join(root, 'private-media', 'payment-proofs') });
-    const proof = await service.uploadPrivatePaymentProof(23, uploadFile({ originalname: 'proof.png' }));
-    assert.doesNotMatch(proof.storageKey, /^\/uploads\//);
-    assert.equal(existsSync(join(root, 'private-media', 'payment-proofs', proof.storageKey)), true);
-    assert.equal(existsSync(join(root, 'uploads', proof.storageKey)), false);
-    assert.equal(rows.size, 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

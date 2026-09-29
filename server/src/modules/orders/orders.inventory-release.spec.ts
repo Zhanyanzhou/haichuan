@@ -41,7 +41,9 @@ test("并发释放同一预占时只有一个调用恢复库存", async () => {
         inventoryQuantity += args.data.quantity.increment;
       },
     },
-    productSKU: { update: async () => undefined },
+    productSKU: {
+      update: async () => assert.fail("正常库存释放不得回写 ProductSKU.stock"),
+    },
   };
 
   const release = (service as any).releaseStockReservations.bind(service);
@@ -87,7 +89,9 @@ test("预占后切换为 SINGLE_UNIT 时最多只恢复 1 件", async () => {
         inventoryQuantity = args.data.quantity;
       },
     },
-    productSKU: { update: async () => undefined },
+    productSKU: {
+      update: async () => assert.fail("正常库存释放不得回写 ProductSKU.stock"),
+    },
   };
 
   const count = await (service as any).releaseStockReservations(
@@ -99,6 +103,62 @@ test("预占后切换为 SINGLE_UNIT 时最多只恢复 1 件", async () => {
   assert.equal(count, 1);
   assert.equal(inventoryQuantity, 1);
 });
+
+for (const inventoryPolicy of ["STANDARD", "SINGLE_UNIT"] as const) {
+  test(`${inventoryPolicy} 历史预占缺失 Inventory 归属时在标记释放前失败关闭`, async () => {
+    const service = createService();
+    let lockCalls = 0;
+    let releaseClaimCalls = 0;
+    let inventoryUpdateCalls = 0;
+    let skuUpdateCalls = 0;
+    const tx = {
+      $queryRaw: async () => {
+        lockCalls += 1;
+        return [{ id: 41, inventoryPolicy }];
+      },
+      inventoryReservation: {
+        findMany: async () => [
+          {
+            id: 11,
+            inventoryId: null,
+            skuId: 31,
+            quantity: 1,
+            sku: { productId: 41 },
+          },
+        ],
+        updateMany: async () => {
+          releaseClaimCalls += 1;
+          return { count: 1 };
+        },
+      },
+      inventory: {
+        update: async () => {
+          inventoryUpdateCalls += 1;
+        },
+      },
+      productSKU: {
+        update: async () => {
+          skuUpdateCalls += 1;
+        },
+      },
+    };
+
+    await assert.rejects(
+      () =>
+        (service as any).releaseStockReservations(
+          tx,
+          1,
+          new Date("2026-09-20T00:00:00Z"),
+        ),
+      /订单库存归属异常，暂时无法释放库存，请联系管理员核对后重试/,
+    );
+
+    assert.equal(lockCalls, 0);
+    assert.equal(releaseClaimCalls, 0);
+    assert.equal(inventoryUpdateCalls, 0);
+    assert.equal(skuUpdateCalls, 0);
+  });
+}
 
 test("订单取消调用统一原子释放入口", async () => {
   let releaseCalls = 0;
@@ -144,7 +204,7 @@ test("订单取消调用统一原子释放入口", async () => {
     return 1;
   };
 
-  await service.updateStatus(1, { status: "CANCELLED" });
+  await service.updateStatus(1, { status: "CANCELLED" }, { type: "ADMIN", id: 1 });
 
   assert.equal(releaseCalls, 1);
   assert.equal(updatedStatus, "CANCELLED");

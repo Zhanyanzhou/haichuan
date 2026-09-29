@@ -24,6 +24,14 @@ test("路由标签只使用受信任的模板，不把用户路径带入指标",
     baseUrl: "/api",
   } as never), "/api/orders/:id");
   assert.equal(resolveMetricRoute({
+    route: { path: "/inquiries" },
+    baseUrl: "/api",
+  } as never), "/api/inquiries");
+  assert.equal(resolveMetricRoute({
+    route: { path: "/selection-inquiries" },
+    baseUrl: "/api",
+  } as never), "/api/selection-inquiries");
+  assert.equal(resolveMetricRoute({
     originalUrl: "/api/orders/customer-secret",
   } as never), "unmatched");
 });
@@ -100,4 +108,3 @@ test("未处理异常按 5xx 失败计入指标", async () => {
   );
   assert.equal(http[0].statusCode, 500);
 });
-

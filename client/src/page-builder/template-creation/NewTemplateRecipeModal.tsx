@@ -55,6 +55,11 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
   const heading = useRef<HTMLHeadingElement>(null);
   const customSizeFields = useRef<HTMLDivElement>(null);
   const [trigger] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  const close = () => {
+    setOpen(false);
+    onCancel();
+    requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus(); });
+  };
   const recommendation = recommendedFor(recipe.purpose);
   const dimensionsValid = dimensionValid(recipe.canvas.width) && dimensionValid(recipe.canvas.height);
   const purposeValid = selected.purpose && (recipe.purpose !== "custom" || Boolean(recipe.customPurpose?.trim()));
@@ -185,13 +190,12 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
     style={{ maxWidth: "calc(100vw - 24px)", "--recipe-bg": token.colorBgContainer, "--recipe-ink": token.colorText,
       "--recipe-border": token.colorBorder, "--recipe-muted": token.colorTextSecondary, "--recipe-fill": token.colorFillSecondary,
       "--recipe-primary": token.colorPrimary } as CSSProperties}
-    onCancel={() => setOpen(false)} afterClose={() => {
-      onCancel();
+    onCancel={close} afterClose={() => {
       // 动态挂载的 Modal 没有稳定 trigger 节点，显式恢复本次打开前的键盘位置。
       requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus(); });
     }}
     footer={<div className="template-recipe__footer">
-      <Button className="template-recipe__cancel" aria-label="取消" disabled={submitting} onClick={() => setOpen(false)}>取消</Button>
+      <Button className="template-recipe__cancel" aria-label="取消" disabled={submitting} onClick={close}>取消</Button>
       <span className="template-recipe__footer-spacer" />
       {step > 0 && <Button className="template-recipe__previous" disabled={submitting} onClick={() => setStep(step - 1)}>上一步</Button>}
       {!returnToConfirm && step >= 2 && step < 5 && <Button className="template-recipe__skip" type="text" title="未配置项使用推荐值，已修改项保留。" disabled={!stepValid || !canConfirm} onClick={() => setStep(6)}>前往确认（未配置项用推荐值）</Button>}

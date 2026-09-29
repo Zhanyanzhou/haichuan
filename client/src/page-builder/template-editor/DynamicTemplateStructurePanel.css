@@ -936,13 +936,14 @@
   }
 
   .template-editor__structure--reference.template-editor__structure .template-editor__structure-scroll {
-    padding: 6px 4px 16px;
+    --template-structure-indent-step: 8px;
+    padding: 6px 2px 16px;
     scrollbar-gutter: auto;
   }
 
   .template-editor__structure--reference.template-editor__structure .template-editor__region-list {
     gap: 6px;
-    padding-inline: 2px;
+    padding-inline: 0;
   }
 
   .template-editor__structure--reference.template-editor__structure .template-editor__region {
@@ -1078,7 +1079,7 @@
   }
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .template-editor__structure--reference .template-editor__structure-scroll {
     padding-inline: 12px;
   }

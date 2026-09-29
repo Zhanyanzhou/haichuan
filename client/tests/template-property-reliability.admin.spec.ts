@@ -90,6 +90,59 @@ test("背景预设覆盖生成颜色，手机选择只改手机且恢复继承�
   await expect(node).toHaveCSS("background-color", "rgb(24, 26, 27)");
 });
 
+test("手机背景图片替换或显式清空后可恢复桌面继承并保存稀疏覆盖", async ({ page }) => {
+  const { server, ids } = await openGenerated(page);
+  await page.evaluate(async (nodeId) => {
+    const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const responsivePath = "/src/page-builder/template-definition/responsive.ts";
+    const [{ useTemplateEditorSession }, { setTemplateNodeRule }] = await Promise.all([
+      import(/* @vite-ignore */ sessionPath), import(/* @vite-ignore */ responsivePath),
+    ]);
+    useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "建立双端背景图片前置", update: (next: any) => {
+      setTemplateNodeRule(next, nodeId, "desktop", "backgroundImage", "/images/system/launch-short-page-desktop.svg");
+      setTemplateNodeRule(next, nodeId, "mobile", "backgroundImage", "/images/system/launch-short-page-mobile.svg");
+    } });
+  }, ids.root);
+  await select(page, ids.root, "mobile");
+  const node = page.frameLocator("iframe.template-editor__viewport-frame").locator(`[data-template-node-id="${ids.root}"]`);
+  const restore = page.getByRole("button", { name: "背景图片恢复继承", exact: true });
+  await expect(node).toHaveCSS("background-image", /launch-short-page-mobile\.svg/);
+  const replacement = await readSession(page);
+  await restore.click();
+  let restored = await readSession(page);
+  expect(restored.definition!.nodes[ids.root].responsive.mobile.backgroundImage).toBeUndefined();
+  expect(restored.historyPast.length).toBe(replacement.historyPast.length + 1);
+  await expect(node).toHaveCSS("background-image", /launch-short-page-desktop\.svg/);
+  await undo(page);
+  expect((await readSession(page)).definition).toEqual(replacement.definition);
+  await expect(node).toHaveCSS("background-image", /launch-short-page-mobile\.svg/);
+
+  await page.evaluate(async (nodeId) => {
+    const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
+    useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "手机明确清空背景图片", update: (next: any) => {
+      next.nodes[nodeId].responsive.mobile.backgroundImage = "";
+    } });
+  }, ids.root);
+  await expect(node).toHaveCSS("background-image", "none");
+  const explicitEmpty = await readSession(page);
+  await restore.click();
+  restored = await readSession(page);
+  expect(restored.definition!.nodes[ids.root].responsive.mobile.backgroundImage).toBeUndefined();
+  expect(restored.historyPast.length).toBe(explicitEmpty.historyPast.length + 1);
+  await expect(restore).toHaveCount(0);
+  await expect(node).toHaveCSS("background-image", /launch-short-page-desktop\.svg/);
+
+  await saveTemplate(page);
+  await expect.poll(() => server.saveResults.length).toBe(1);
+  expect(server.persisted!.draft!.definition.nodes[ids.root].responsive.mobile.backgroundImage).toBeUndefined();
+  await openTemplateDesignWithoutDraft(page);
+  await page.locator(`[data-template-name="${ids.templateId}"]`).getByRole("button", { name: /^打开属性可靠性模板/ }).click();
+  await select(page, ids.root, "mobile");
+  expect((await readSession(page)).definition!.nodes[ids.root].responsive.mobile.backgroundImage).toBeUndefined();
+  await expect(node).toHaveCSS("background-image", /launch-short-page-desktop\.svg/);
+});
+
 test("自由主图外框比例预览取消与确认写真实矩形，边界内缩放且焦点不变", async ({ page }) => {
   const { ids } = await openGenerated(page);
   await select(page, ids.image);
@@ -126,7 +179,7 @@ test("新增颜色字体共用修改范围；内容共享；关闭替换后裁�
   const { ids } = await openGenerated(page);
   await select(page, ids.title);
   await expect(page.getByRole("combobox", { name: "修改作用域" })).toHaveCount(0);
-  await expect(page.getByText("正在修改桌面基础，保留手机和平板的独立设置。", { exact: true })).toBeVisible();
+  await expect(page.getByText("正在修改桌面基础，保留手机的独立设置。", { exact: true })).toBeVisible();
   await select(page, ids.title, "mobile");
   await page.getByRole("combobox", { name: "修改作用域" }).selectOption("base");
   await select(page, ids.title);
@@ -135,6 +188,7 @@ test("新增颜色字体共用修改范围；内容共享；关闭替换后裁�
   await expect(page.getByRole("combobox", { name: "修改作用域" })).toHaveValue("base");
   const beforeMobile = (await readSession(page)).definition!.slots[ids.titleSlot].mobileRules;
   await fill(page, "文字颜色", "#123456");
+  await page.locator('details[data-template-property-group="文字细节"] > summary').click();
   await page.getByRole("combobox", { name: "字体", exact: true }).selectOption("serif");
   await fill(page, "默认文字", "各端共享的精修文字");
   let definition = (await readSession(page)).definition!;
@@ -167,6 +221,7 @@ test("schema 3 外观与文字设计组复制和恢复包含新字段，不改�
   const { ids } = await openGenerated(page);
   await select(page, ids.title);
   await fill(page, "文字颜色", "#123456");
+  await page.locator('details[data-template-property-group="文字细节"] > summary').click();
   await page.getByRole("combobox", { name: "字体", exact: true }).selectOption("serif");
   await page.locator('details[data-template-property-group="外观"] > summary').click();
   await fill(page, "背景颜色", "#EEEEEE");
@@ -204,7 +259,10 @@ test("背景图片槽位保留唯一默认图片入口，容器仍可配置 CSS 
     useTemplateEditorSession.getState().executeCommand({ type: "update-definition", label: "背景槽位兼容前置", update: (next: { slots: Record<string, { semanticRole: string }> }) => { next.slots[slotId].semanticRole = "backgroundImage"; } });
   }, ids.imageSlot);
   await select(page, ids.image);
-  await expect(page.getByRole("region", { name: "模板默认内容" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
+  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  await expect(defaults.getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(1);
+  await expect(defaults.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
+  await expect(defaults.locator("[data-media-field]")).toHaveAttribute("data-has-page-media", "true");
   await expect(page.getByRole("region", { name: "模板颜色与背景" }).getByRole("button", { name: "或粘贴图片链接" })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("image-properties-1600.png"), fullPage: true });
   await select(page, ids.root);
@@ -212,14 +270,88 @@ test("背景图片槽位保留唯一默认图片入口，容器仍可配置 CSS 
   await page.screenshot({ path: testInfo.outputPath("root-size-first-1600.png"), fullPage: true });
 });
 
-test("生成方案目录缩略图保留自然高度与真实文字，按根画幅缩放且零写入", async ({ page }, testInfo) => {
+test("图片默认内容只保存地址和说明，属性含本页图片入口", async ({ page }) => {
+  const { ids } = await openGenerated(page);
+  await page.evaluate(async ({ slotId }) => {
+    const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
+    useTemplateEditorSession.getState().executeCommand({
+      type: "update-definition",
+      label: "写入模板默认图",
+      update: (next: { defaultContent: Record<string, unknown> }) => {
+        next.defaultContent[slotId] = { src: "/uploads/page-assets/old.jpg", alt: "旧图" };
+      },
+    });
+  }, { slotId: ids.imageSlot });
+  await select(page, ids.image);
+  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  await expect(defaults.getByRole("button", { name: "本页图片", exact: true })).toBeVisible();
+  await defaults.getByRole("button", { name: "图片链接" }).click();
+  await defaults.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片").fill("/uploads/page-assets/new.jpg");
+  await defaults.getByRole("button", { name: /确\s*认/ }).click();
+  const stored = await page.evaluate(async ({ slotId }) => {
+    const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
+    return useTemplateEditorSession.getState().draft?.definition.defaultContent[slotId];
+  }, { slotId: ids.imageSlot });
+  expect(stored).toEqual({ src: "/uploads/page-assets/new.jpg", alt: "旧图" });
+});
+
+test("模板默认图片可直接选择服务端共享素材", async ({ page }) => {
+  const { ids } = await openGenerated(page);
+  const sharedAsset = {
+    id: 42,
+    url: "/uploads/page-assets/template-shared.png",
+    name: "模板共享素材.png",
+    type: "image",
+    mimeType: "image/png",
+    size: 2048,
+    width: 1600,
+    height: 900,
+    createdAt: "2026-09-22T08:30:00.000Z",
+    status: "READY",
+    available: true,
+  };
+  await page.route(/\/api\/upload\/media(?:\?.*)?$/, (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      code: 200,
+      message: "success",
+      data: { list: [sharedAsset], total: 1, page: 1, pageSize: 100 },
+    }),
+  }));
+
+  await select(page, ids.image);
+  const defaults = page.getByRole("region", { name: "模板默认内容" });
+  await defaults.getByRole("button", { name: "本页图片", exact: true }).click();
+  await defaults.getByRole("button", { name: `使用素材：${sharedAsset.name}` }).click();
+
+  expect((await readSession(page)).definition!.defaultContent[ids.imageSlot]).toEqual({
+    src: sharedAsset.url,
+    alt: "",
+  });
+});
+
+test("模板库按真实画幅自适应完整预览，并以只读放大入口查看长页", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const { ids, server } = await openGenerated(page);
   const card = page.locator(`[data-template-name="${ids.templateId}"]`);
-  await expect(card.locator('[data-template-catalog-preview-shell]')).toHaveAttribute("data-preview-status", "ready");
-  await expect(card.locator('[data-overlay-label-for]')).toHaveCount(0);
-  await expect(card.locator('.template-editor__editable-overlay.is-catalog')).toHaveCount(0);
+  const previewShell = card.locator('[data-template-catalog-preview-shell]');
+  await expect(previewShell).toHaveAttribute("data-preview-status", "ready");
+  await expect(previewShell).toHaveAttribute("data-preview-annotations", "true");
+  await expect(card.locator(".template-editor__catalog-preview-issue")).toHaveCount(0);
+  const overlay = card.locator('.template-editor__editable-overlay.is-catalog');
+  await expect(overlay).toHaveCSS("visibility", "visible");
+  expect(await overlay.locator('[data-editable-target-kind="media"]').count()).toBeGreaterThan(0);
+  expect(await overlay.locator('[data-editable-target-kind="title"]').count()).toBeGreaterThan(0);
+  await expect(overlay.locator('[data-editable-target-kind="title"]').first()).toHaveCSS("position", "absolute");
+  const textLead = overlay.locator('[data-overlay-catalog-text-lead="true"]');
+  await expect(textLead).toHaveCount(1);
+  expect(await textLead.evaluate((element) => getComputedStyle(element, "::before").content)).toBe('"文字"');
+  await expect(card.locator('.template-editor__catalog-slot-key')).toHaveAttribute("data-image-slot-count", /[1-9]/);
+  await expect(card.locator('.template-editor__catalog-slot-key')).toHaveAttribute("data-text-slot-count", /[1-9]/);
   const frame = card.locator("iframe[data-template-catalog-viewport]");
   const thumbnail = frame.contentFrame();
   const title = thumbnail.locator(`[data-template-node-id="${ids.title}"] h1, [data-template-node-id="${ids.title}"] h2`);
@@ -240,52 +372,44 @@ test("生成方案目录缩略图保留自然高度与真实文字，按根画�
   const viewport = await card.locator('[data-content-template-preview]').boundingBox();
   expect(displayedFrame!.height).toBeCloseTo(viewport!.height, 0);
   const cardViewport = await card.locator('.template-editor__catalog-artboard-stage').boundingBox();
-  expect(cardViewport!.height, "目录使用固定高度的中性预览舞台").toBeCloseTo(112, 0);
+  expect(cardViewport!.height, "卡片高度应跟随当前模板比例").toBeCloseTo(displayedFrame!.height, 0);
+  expect(cardViewport!.height).toBeLessThanOrEqual(221);
   const textBottomOnScreen = displayedFrame!.y + metrics.title.bottom * displayedFrame!.height / metrics.viewportHeight;
   expect(displayedFrame!.y + displayedFrame!.height, "完整画幅必须落在固定卡片视窗内").toBeLessThanOrEqual(cardViewport!.y + cardViewport!.height);
   expect(displayedFrame!.x, "真实画幅在相框内水平居中").toBeCloseTo(cardViewport!.x + (cardViewport!.width - displayedFrame!.width) / 2, 0);
   expect(textBottomOnScreen, "iframe 内有文字还不够，映射到宿主后不能被目录卡裁掉").toBeLessThanOrEqual(cardViewport!.y + cardViewport!.height);
   const dimensions = card.locator(".template-editor__catalog-dimensions");
-  await expect(dimensions).toHaveText(/桌面 · \d+ × \d+ · 固定高度/);
+  await expect(dimensions).toHaveText(/桌面端 · \d+ × \d+ px · 固定高度/);
   const dimensionBox = await dimensions.boundingBox();
   expect(dimensionBox!.y).toBeGreaterThanOrEqual(cardViewport!.y + cardViewport!.height);
-  await expect(card.locator(".homepage-editor__template-card-status")).toContainText("当前草稿");
+  await expect(card.locator(".template-editor__catalog-published-state")).toHaveText("本机草稿 · 尚未发布");
+  await expect(card.locator(".template-editor__catalog-draft-state")).toHaveText("尚未保存");
   const moreAction = card.locator('button[aria-label^="更多模板操作："]');
+  const actionFooter = card.locator(".template-editor__catalog-card-action");
   const moreBox = await moreAction.boundingBox();
-  expect(moreBox!.y, "更多操作收进预览右上角，不再单占底栏").toBeGreaterThanOrEqual(cardViewport!.y);
-  expect(moreBox!.y + moreBox!.height).toBeLessThanOrEqual(cardViewport!.y + cardViewport!.height);
+  const actionFooterBox = await actionFooter.boundingBox();
+  expect(actionFooterBox!.y, "目录操作固定在预览下方的卡片操作区").toBeGreaterThanOrEqual(cardViewport!.y + cardViewport!.height);
+  expect(moreBox!.y).toBeGreaterThanOrEqual(actionFooterBox!.y);
+  expect(moreBox!.y + moreBox!.height).toBeLessThanOrEqual(actionFooterBox!.y + actionFooterBox!.height);
   expect(server.writes).toEqual([]);
   await testInfo.attach("catalog-geometry", { body: JSON.stringify(metrics, null, 2), contentType: "application/json" });
   await page.mouse.move(1000, 80);
   await page.screenshot({ path: testInfo.outputPath("catalog-visible-content-1600.png") });
-  await page.getByRole("button", { name: "切换为双列查看", exact: true }).click();
-  await expect.poll(async () => {
-    const rect = (await frame.boundingBox())!;
-    const clip = (await card.locator('.template-editor__catalog-artboard-stage').boundingBox())!;
-    return {
-      contained: rect.x >= clip.x && rect.y >= clip.y
-        && rect.x + rect.width <= clip.x + clip.width
-        && rect.y + rect.height <= clip.y + clip.height,
-      height: clip.height,
-    };
-  }).toEqual({ contained: true, height: expect.closeTo(72, 0) });
-  await page.getByRole("button", { name: "切换为单列查看", exact: true }).click();
-  await expect.poll(async () => { const rect = (await frame.boundingBox())!; const clip = (await card.locator('.template-editor__catalog-artboard-stage').boundingBox())!; return rect.y + rect.height <= clip.y + clip.height; }).toBe(true);
+  await expect(page.getByRole("group", { name: "模板目录视图模式" })).toHaveCount(0);
   const stableHeights = await frame.evaluate(async (element) => {
     const heights: number[] = [];
     for (let index = 0; index < 8; index += 1) { await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))); heights.push(element.getBoundingClientRect().height); }
     return heights;
   });
   expect(Math.max(...stableHeights) - Math.min(...stableHeights)).toBeLessThan(.1);
-  for (const viewportSize of [{ width: 1200, height: 900 }, { width: 1920, height: 1080 }]) {
+  for (const viewportSize of [{ width: 1440, height: 900 }, { width: 1920, height: 1080 }]) {
     await page.setViewportSize(viewportSize);
     await expect.poll(async () => {
       const rect = (await frame.boundingBox())!;
       const clip = (await card.locator('.template-editor__catalog-artboard-stage').boundingBox())!;
       const centered = Math.abs(rect.x + rect.width / 2 - clip.x - clip.width / 2) < 1
         && Math.abs(rect.y + rect.height / 2 - clip.y - clip.height / 2) < 1;
-      return Math.abs(clip.height - 112) < 1
-        && rect.x >= clip.x
+      return rect.x >= clip.x
         && rect.y >= clip.y
         && rect.x + rect.width <= clip.x + clip.width
         && rect.y + rect.height <= clip.y + clip.height
@@ -299,33 +423,185 @@ test("生成方案目录缩略图保留自然高度与真实文字，按根画�
   await expect(page.getByRole("menu")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
-  await page.evaluate(async () => {
+  const shapes = [
+    { name: "超宽横幅", width: 2400, height: 400 },
+    { name: "普通横版", width: 1600, height: 900 },
+    { name: "方形小尺寸", width: 800, height: 800 },
+    { name: "方形大尺寸", width: 1600, height: 1600 },
+    { name: "竖版", width: 1000, height: 1600 },
+    { name: "超长页面", width: 1200, height: 4000 },
+  ];
+  const observedHeights = new Map<string, number>();
+  for (const shape of shapes) {
+    await page.evaluate(async ({ width, height, name }) => {
+      const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+      const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
+      useTemplateEditorSession.getState().executeCommand({
+        type: "update-definition",
+        label: `目录${name}验收`,
+        update: (next: any) => {
+          next.metadata.canvasSize = { width, height, aspectRatio: width / height };
+          next.nodes[next.rootNodeId].responsive.desktop.height = {
+            mode: "fixed",
+            value: { value: height, unit: "px" },
+          };
+        },
+      });
+    }, shape);
+    await expect(dimensions).toHaveText(`桌面端 · ${shape.width} × ${shape.height} px · 固定高度`);
+    await expect(card.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-status", "ready");
+    expect(await thumbnail.locator("html").evaluate(() => innerWidth), `${shape.name}先按真实设计视口排版`).toBe(shape.width);
+    await expect.poll(async () => {
+      const rect = await frame.boundingBox();
+      const clip = await card.locator('.template-editor__catalog-artboard-stage').boundingBox();
+      if (!rect || !clip) return null;
+      return { rect, clip };
+    }).not.toBeNull();
+    const rect = (await frame.boundingBox())!;
+    const clip = (await card.locator('.template-editor__catalog-artboard-stage').boundingBox())!;
+    const scrollable = shape.name === "超长页面";
+    await expect(card.locator("[data-template-catalog-preview-shell]"))
+      .toHaveAttribute("data-preview-thumbnail-mode", scrollable ? "scroll" : "overview");
+    const expectedScale = scrollable
+      ? clip.width / shape.width
+      : Math.min(clip.width / shape.width, 220 / shape.height);
+    expect(rect.width / rect.height, `${shape.name}保持真实比例`).toBeCloseTo(shape.width / shape.height, 2);
+    expect(rect.width, `${shape.name}宽度同步缩放`).toBeCloseTo(shape.width * expectedScale, 0);
+    expect(rect.height, `${shape.name}高度同步缩放`).toBeCloseTo(shape.height * expectedScale, 0);
+    expect(rect.x + rect.width / 2, `${shape.name}水平居中`).toBeCloseTo(clip.x + clip.width / 2, 0);
+    expect(rect.x).toBeGreaterThanOrEqual(clip.x - 1);
+    expect(rect.x + rect.width).toBeLessThanOrEqual(clip.x + clip.width + 1);
+    if (scrollable) {
+      expect(rect.y, `${shape.name}从滚动视窗顶部开始`).toBeCloseTo(clip.y, 0);
+      expect(rect.height, `${shape.name}保留完整可滚动几何`).toBeGreaterThan(clip.height);
+      expect(clip.height, `${shape.name}使用固定目录视窗`).toBeCloseTo(220, 0);
+    } else {
+      expect(rect.y + rect.height / 2, `${shape.name}垂直居中`).toBeCloseTo(clip.y + clip.height / 2, 0);
+      expect(rect.y).toBeGreaterThanOrEqual(clip.y - 1);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(clip.y + clip.height + 1);
+    }
+    observedHeights.set(shape.name, clip.height);
+  }
+  expect(observedHeights.get("超宽横幅")).toBeLessThan(observedHeights.get("普通横版")!);
+  expect(observedHeights.get("普通横版")).toBeLessThan(observedHeights.get("方形小尺寸")!);
+  expect(observedHeights.get("方形小尺寸")).toBeCloseTo(observedHeights.get("方形大尺寸")!, 0);
+  expect(observedHeights.get("超长页面")).toBeCloseTo(220, 0);
+
+  const sessionBeforePreview = await readSession(page);
+  const previewButton = card.getByRole("button", { name: `放大预览：${sessionBeforePreview.definition!.name}`, exact: true });
+  await previewButton.click();
+  const dialog = page.getByRole("dialog", { name: new RegExp(`放大预览：${sessionBeforePreview.definition!.name}`) });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("只读查看；不会切换当前编辑对象、修改内容或保存草稿。", { exact: true })).toBeVisible();
+  const detailScroller = dialog.locator("[data-template-preview-scroll-region]");
+  await expect.poll(() => detailScroller.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await dialog.getByRole("button", { name: "100%", exact: true }).click();
+  const detailFrame = dialog.locator('iframe[data-template-catalog-viewport="desktop"]');
+  await expect.poll(async () => (await detailFrame.boundingBox())?.width ?? 0).toBeCloseTo(1200, 0);
+  await expect.poll(() => detailScroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  await expect(dialog.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-status", "ready");
+  await expect(dialog.locator(".template-editor__catalog-preview-issue")).toHaveText("素材未配置");
+  const detailTitle = detailFrame.contentFrame().locator(`[data-template-node-id="${ids.title}"] h1, [data-template-node-id="${ids.title}"] h2`);
+  await expect(detailTitle).toHaveText("主标题");
+  await detailTitle.scrollIntoViewIfNeeded();
+  await expect.poll(() => detailScroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await page.screenshot({ path: testInfo.outputPath("catalog-detail-long-page.png"), animations: "disabled" });
+  await dialog.getByRole("button", { name: "移动端", exact: true }).click();
+  await expect(dialog.locator('[data-template-catalog-preview-shell].is-mobile')).toHaveAttribute("data-preview-status", "ready");
+  await dialog.getByRole("button", { name: "关闭预览", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(previewButton).toBeFocused();
+  expect(await readSession(page)).toEqual(sessionBeforePreview);
+  expect(server.writes).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("目录图只标出当前可见图文槽位，隐藏与撤销同步更新且不保存", async ({ page }) => {
+  const { ids, server } = await openGenerated(page);
+  const card = page.locator(`[data-template-name="${ids.templateId}"]`);
+  const key = card.locator(".template-editor__catalog-slot-key");
+  await expect(card.locator('[data-template-catalog-preview-shell]')).toHaveAttribute("data-preview-status", "ready");
+  const initialTextCount = Number(await key.getAttribute("data-text-slot-count"));
+  const initialHiddenCount = Number(await key.getAttribute("data-hidden-slot-count"));
+  expect(initialTextCount).toBeGreaterThan(0);
+  await page.evaluate(async (nodeId) => {
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ "/src/page-builder/template-editor/templateEditorSession.ts");
+    useTemplateEditorSession.getState().executeCommand({
+      type: "update-definition",
+      label: "仅隐藏目录标题验收",
+      update: (next: any) => { next.nodes[nodeId].hidden = true; },
+    });
+  }, ids.title);
+  await expect(key).toHaveAttribute("data-text-slot-count", String(initialTextCount - 1));
+  await expect(key).toHaveAttribute("data-hidden-slot-count", String(initialHiddenCount + 1));
+  await expect(card.locator(`.template-editor__editable-overlay-box[data-editable-target-kind="title"]`)).toHaveCount(0);
+  const textLead = card.locator('[data-overlay-catalog-text-lead="true"]');
+  if (initialTextCount > 1) {
+    await expect(textLead).toHaveCount(1);
+    await expect(textLead).not.toHaveAttribute("data-editable-target-kind", "title");
+  } else {
+    await expect(textLead).toHaveCount(0);
+  }
+  await undo(page);
+  await expect(key).toHaveAttribute("data-text-slot-count", String(initialTextCount));
+  await expect(key).toHaveAttribute("data-hidden-slot-count", String(initialHiddenCount));
+  await expect(textLead).toHaveCount(1);
+  expect(server.writes).toEqual([]);
+});
+
+test("中性目录图不读取真实素材，放大预览保留失效诊断且不产生写入", async ({ page }) => {
+  const { ids, server } = await openGenerated(page);
+  const card = page.locator(`[data-template-name="${ids.templateId}"]`);
+  const previewShell = card.locator("[data-template-catalog-preview-shell]");
+  await expect(previewShell).toHaveAttribute("data-preview-status", "ready");
+  await expect(previewShell).toHaveAttribute("data-preview-content-status", "ready");
+  await expect(card.locator(".template-editor__catalog-preview-issue")).toHaveCount(0);
+
+  let failedMediaRequests = 0;
+  await page.route("https://template-preview.invalid/**", (route) => {
+    failedMediaRequests += 1;
+    return route.abort();
+  });
+  await page.evaluate(async ({ slotId }) => {
     const path = "/src/page-builder/template-editor/templateEditorSession.ts";
     const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
     useTemplateEditorSession.getState().executeCommand({
       type: "update-definition",
-      label: "目录宽屏画幅验收",
+      label: "设置不可达预览素材",
       update: (next: any) => {
-        next.metadata.canvasSize = { width: 1920, height: 1080, aspectRatio: 16 / 9 };
-        next.nodes[next.rootNodeId].responsive.desktop.height = {
-          mode: "fixed",
-          value: { value: 1080, unit: "px" },
+        next.defaultContent[slotId] = { src: "https://template-preview.invalid/missing.jpg", alt: "不可达预览素材" };
+      },
+    });
+  }, { slotId: ids.imageSlot });
+  await expect(previewShell).toHaveAttribute("data-preview-content-status", "ready");
+  await expect(card.locator(".template-editor__catalog-preview-issue")).toHaveCount(0);
+  const thumbnail = card.locator("iframe[data-template-catalog-viewport]").contentFrame();
+  await expect(thumbnail.locator('img[src*="catalog-structure-media.svg"]').first()).toBeVisible();
+  await expect(thumbnail.locator('img[src*="template-preview.invalid"]')).toHaveCount(0);
+  const requestsBeforeDetail = failedMediaRequests;
+  await card.getByRole("button", { name: /放大预览/ }).click();
+  const detailPreview = page.getByRole("dialog", { name: /放大预览/ });
+  await expect(detailPreview.locator(".template-editor__catalog-preview-issue")).toHaveText("素材加载失败");
+  expect(failedMediaRequests).toBeGreaterThan(requestsBeforeDetail);
+  await detailPreview.getByRole("button", { name: "关闭预览", exact: true }).click();
+
+  await page.evaluate(async ({ slotId }) => {
+    const path = "/src/page-builder/template-editor/templateEditorSession.ts";
+    const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
+    useTemplateEditorSession.getState().executeCommand({
+      type: "update-definition",
+      label: "恢复可达预览素材",
+      update: (next: any) => {
+        next.defaultContent[slotId] = {
+          src: "/src/page-builder/preview-assets/neutral-template-preview-v1/template-preview-square.svg",
+          alt: "可达预览素材",
         };
       },
     });
-  });
-  await expect(dimensions).toHaveText("桌面 · 1920 × 1080 · 固定高度");
-  await expect.poll(async () => {
-    const rect = (await frame.boundingBox())!;
-    const clip = (await card.locator('.template-editor__catalog-artboard-stage').boundingBox())!;
-    return rect.x >= clip.x
-      && rect.y >= clip.y
-      && rect.x + rect.width <= clip.x + clip.width
-      && rect.y + rect.height <= clip.y + clip.height
-      && Math.abs(rect.x + rect.width / 2 - clip.x - clip.width / 2) < 1
-      && Math.abs(rect.y + rect.height / 2 - clip.y - clip.height / 2) < 1;
-  }).toBe(true);
-  expect(errors).toEqual([]);
+  }, { slotId: ids.imageSlot });
+  await expect(previewShell).toHaveAttribute("data-preview-content-status", "ready");
+  await expect(card.locator(".template-editor__catalog-preview-issue")).toHaveCount(0);
+  expect(server.writes).toEqual([]);
 });
 
 test("模板设计卡片实时镜像当前草稿，而不是同身份的线上版本", async ({ page }, testInfo) => {
@@ -365,21 +641,36 @@ test("模板设计卡片实时镜像当前草稿，而不是同身份的线上�
   const card = page.locator(`.homepage-editor__template-card[data-template-name="${prepared.templateId}"]`);
   await card.getByRole("button", { name: /^打开首屏模板/ }).click();
   const activeCard = page.locator(`.homepage-editor__template-card.is-active[data-template-name="${prepared.templateId}"]`);
-  await expect(activeCard.locator(".template-editor__catalog-published-state")).toHaveText("线上 v1");
+  await expect(activeCard.locator(".template-editor__catalog-published-state")).toHaveText("已发布 · v1");
   await page.evaluate(async ({ slotId }) => {
     const path = "/src/page-builder/template-editor/templateEditorSession.ts";
     const { useTemplateEditorSession } = await import(/* @vite-ignore */ path);
     useTemplateEditorSession.getState().executeCommand({
       type: "update-definition",
-      label: "修改当前草稿标题",
-      update: (next: any) => { next.defaultContent[slotId] = "当前草稿标题"; },
+      label: "修改当前草稿结构与标题",
+      update: (next: any) => {
+        next.metadata.canvasSize = { width: 1600, height: 1000, aspectRatio: 8 / 5 };
+        next.nodes[next.rootNodeId].responsive.desktop.height = {
+          mode: "fixed",
+          value: { value: 1000, unit: "px" },
+        };
+        next.defaultContent[slotId] = "当前草稿标题";
+      },
     });
   }, { slotId: prepared.titleSlot });
   const thumbnail = activeCard.locator("iframe[data-template-catalog-viewport]").contentFrame();
-  await expect(thumbnail.getByText("当前草稿标题", { exact: true })).toBeVisible();
+  await expect(activeCard.locator(".template-editor__catalog-dimensions")).toHaveText("桌面端 · 1600 × 1000 px · 固定高度");
+  expect(await thumbnail.locator("html").evaluate(() => innerWidth)).toBe(1600);
+  await expect(thumbnail.getByText("当前草稿标题", { exact: true })).toHaveCount(0);
   await expect(thumbnail.getByText("线上版本标题", { exact: true })).toHaveCount(0);
-  await expect(activeCard.locator(".template-editor__catalog-draft-state")).toHaveText("当前草稿 · 有未保存修改");
+  await expect(activeCard.locator(".template-editor__catalog-draft-state")).toHaveText("有未保存修改");
   await expect(activeCard.locator('[data-template-catalog-preview-shell]')).toHaveAttribute("data-preview-status", "ready");
+  await activeCard.getByRole("button", { name: /放大预览/ }).click();
+  const detail = page.getByRole("dialog", { name: /放大预览/ });
+  await expect(detail.locator(".template-editor__catalog-preview-dialog-summary"))
+    .toContainText("草稿预览 · 已发布 · v1 · 有未保存修改");
+  await expect(detail.locator("iframe[data-template-catalog-viewport]").contentFrame().getByText("当前草稿标题", { exact: true })).toBeVisible();
+  await detail.getByRole("button", { name: "关闭预览", exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath("catalog-draft-mirror-1912x952.png"), animations: "disabled" });
   expect(consoleErrors).toEqual([]);
   expect(server.writes).toEqual([]);

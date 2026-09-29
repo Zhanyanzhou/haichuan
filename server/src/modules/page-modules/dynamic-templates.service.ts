@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpStatus,
   Injectable,
   NotFoundException,
@@ -8,6 +9,7 @@ import {
 import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 import { ApiError } from "../../common/errors/api-error";
 import {
   getDynamicTemplateStructureLockViolation,
@@ -23,6 +25,10 @@ import {
   collectDynamicTemplateInstanceReferences,
   getDynamicTemplateDefinitionMediaReferences,
 } from "./dynamic-template-instance";
+import {
+  buildConsultationStarterDefinition,
+  CONSULTATION_STARTER_SPECS,
+} from "./consultation-starter-templates";
 import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
 import {
   buildManagedMediaShadowReport,
@@ -34,6 +40,8 @@ import {
 const TEMPLATE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 const MAX_DEFINITION_BYTES = 1024 * 1024;
 const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
+const CATALOG_COVER_PREFIX = "/uploads/page-assets/";
+const MAX_CATALOG_COVER_URL_LENGTH = 500;
 
 interface ValidatedDefinition {
   definition: TemplateDefinitionV2;
@@ -50,6 +58,10 @@ interface ExpectedDraftIdentity {
   expectedRevision: number;
   expectedChecksum: string;
 }
+
+type DynamicTemplateStaffActor = Pick<StaffPrincipal, "id" | "role" | "sessionFamilyId">;
+type DynamicTemplateStaffActorInput = DynamicTemplateStaffActor | number | undefined;
+type ActiveDynamicTemplateStaff = Pick<StaffPrincipal, "id" | "role">;
 
 class DynamicTemplatePublishRaceError extends Error {}
 
@@ -150,11 +162,83 @@ export class DynamicTemplatesService {
     return { references, resolution };
   }
 
-  private requireOwnerId(ownerId: number | undefined): number {
-    if (!Number.isInteger(ownerId) || Number(ownerId) <= 0) {
+  private requireStaffActor(actor: DynamicTemplateStaffActorInput): DynamicTemplateStaffActor {
+    const id = typeof actor === "number" ? actor : actor?.id;
+    if (!Number.isInteger(id) || Number(id) <= 0) {
       throw new BadRequestException("缺少有效的模板所有者身份");
     }
-    return Number(ownerId);
+    return {
+      id: Number(id),
+      role: typeof actor === "object" && actor ? actor.role : "SUPER_ADMIN",
+      ...(typeof actor === "object" && actor?.sessionFamilyId
+        ? { sessionFamilyId: actor.sessionFamilyId }
+        : {}),
+    } as DynamicTemplateStaffActor;
+  }
+
+  private async lockActiveStaffSession(
+    transaction: Prisma.TransactionClient,
+    actor: DynamicTemplateStaffActor,
+    mode: "read" | "write",
+  ): Promise<void> {
+    if (!actor.sessionFamilyId) return;
+    const sessions = mode === "write"
+      ? await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+        )
+      : await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+        );
+    if (sessions.length !== 1) {
+      throw new ForbiddenException("当前员工会话已失效，不能继续访问母模板");
+    }
+  }
+
+  private async lockAuthorizedStaff(
+    transaction: Prisma.TransactionClient,
+    actorInput: DynamicTemplateStaffActorInput,
+    mode: "read" | "write",
+    ownerOnly: boolean,
+  ): Promise<ActiveDynamicTemplateStaff> {
+    const actor = this.requireStaffActor(actorInput);
+    const staff = ownerOnly
+      ? mode === "write"
+        ? await transaction.$queryRaw<Array<ActiveDynamicTemplateStaff>>(
+            Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role = 'SUPER_ADMIN' FOR UPDATE`,
+          )
+        : await transaction.$queryRaw<Array<ActiveDynamicTemplateStaff>>(
+            Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role = 'SUPER_ADMIN' FOR SHARE`,
+          )
+      : mode === "write"
+        ? await transaction.$queryRaw<Array<ActiveDynamicTemplateStaff>>(
+            Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'EDITOR') FOR UPDATE`,
+          )
+        : await transaction.$queryRaw<Array<ActiveDynamicTemplateStaff>>(
+            Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'EDITOR') FOR SHARE`,
+          );
+    if (staff.length !== 1) {
+      throw new ForbiddenException(
+        ownerOnly
+          ? "当前员工已停用或不再拥有母模板管理权限"
+          : "当前员工已停用或无权访问母模板",
+      );
+    }
+    await this.lockActiveStaffSession(transaction, actor, mode);
+    return staff[0];
+  }
+
+  private withAuthorizedStaffRead<T>(
+    actor: DynamicTemplateStaffActorInput,
+    ownerOnly: boolean,
+    operation: (
+      transaction: Prisma.TransactionClient,
+      staff: ActiveDynamicTemplateStaff,
+    ) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (transaction) => {
+      const staff = await this.lockAuthorizedStaff(transaction, actor, "read", ownerOnly);
+      return operation(transaction, staff);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   private normalizeVersionNote(value: string | undefined): string | null | undefined {
@@ -289,58 +373,61 @@ export class DynamicTemplatesService {
   }
 
   private async resolveStrictPublishRace(
-    ownerId: number,
+    actor: DynamicTemplateStaffActorInput,
     templateId: string,
     identity: StrictPublishIdentity,
     raceError: unknown,
   ) {
-    const template = await this.prisma.dynamicTemplate.findFirst({
-      where: {
-        templateId: this.assertTemplateId(templateId),
-        ...this.editableTemplateScope(ownerId),
-      },
-      include: { draft: true },
-    });
-    if (!template) {
-      if (raceError instanceof Prisma.PrismaClientKnownRequestError) throw raceError;
-      throw this.publishConflict(
-        "DYNAMIC_TEMPLATE_PUBLISH_CONCURRENT_CONFLICT",
-        "模板在并发发布期间已变化，请刷新后核对",
-      );
-    }
-    const published = await this.prisma.dynamicTemplateVersion.findUnique({
-      where: {
-        dynamicTemplateId_version: {
-          dynamicTemplateId: template.id,
-          version: identity.targetVersion,
+    return this.prisma.$transaction(async (transaction) => {
+      const staff = await this.lockAuthorizedStaff(transaction, actor, "read", true);
+      const template = await transaction.dynamicTemplate.findFirst({
+        where: {
+          templateId: this.assertTemplateId(templateId),
+          ...this.editableTemplateScope(staff.id),
         },
-      },
-    });
-    if (!published) {
-      if (raceError instanceof Prisma.PrismaClientKnownRequestError) throw raceError;
-      throw this.publishConflict(
-        "DYNAMIC_TEMPLATE_PUBLISH_CONCURRENT_CONFLICT",
-        "并发发布结果尚未形成，请重新核对目标版本",
-        { targetVersion: identity.targetVersion },
-      );
-    }
-    this.assertReplayPublicationState(template, identity.targetVersion);
-    if (published.definitionChecksum !== identity.expectedChecksum) {
-      throw this.publishConflict(
-        "DYNAMIC_TEMPLATE_TARGET_VERSION_CONFLICT",
-        "目标版本已被其他发布占用，校验值与本次发布不一致",
-        { targetVersion: identity.targetVersion },
-      );
-    }
-    this.assertReplayVersionIntegrity(template.templateId, published);
-    this.assertReplayVersionNote(published, identity);
-    return {
-      templateId: template.templateId,
-      version: published.version,
-      published,
-      draft: template.draft,
-      outcome: "already-published" as const,
-    };
+        include: { draft: true },
+      });
+      if (!template) {
+        if (raceError instanceof Prisma.PrismaClientKnownRequestError) throw raceError;
+        throw this.publishConflict(
+          "DYNAMIC_TEMPLATE_PUBLISH_CONCURRENT_CONFLICT",
+          "模板在并发发布期间已变化，请刷新后核对",
+        );
+      }
+      const published = await transaction.dynamicTemplateVersion.findUnique({
+        where: {
+          dynamicTemplateId_version: {
+            dynamicTemplateId: template.id,
+            version: identity.targetVersion,
+          },
+        },
+      });
+      if (!published) {
+        if (raceError instanceof Prisma.PrismaClientKnownRequestError) throw raceError;
+        throw this.publishConflict(
+          "DYNAMIC_TEMPLATE_PUBLISH_CONCURRENT_CONFLICT",
+          "并发发布结果尚未形成，请重新核对目标版本",
+          { targetVersion: identity.targetVersion },
+        );
+      }
+      this.assertReplayPublicationState(template, identity.targetVersion);
+      if (published.definitionChecksum !== identity.expectedChecksum) {
+        throw this.publishConflict(
+          "DYNAMIC_TEMPLATE_TARGET_VERSION_CONFLICT",
+          "目标版本已被其他发布占用，校验值与本次发布不一致",
+          { targetVersion: identity.targetVersion },
+        );
+      }
+      this.assertReplayVersionIntegrity(template.templateId, published);
+      this.assertReplayVersionNote(published, identity);
+      return {
+        templateId: template.templateId,
+        version: published.version,
+        published,
+        draft: template.draft,
+        outcome: "already-published" as const,
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   private validateDefinition(input: unknown): ValidatedDefinition {
@@ -486,6 +573,59 @@ export class DynamicTemplatesService {
     return templateId;
   }
 
+  private normalizeCatalogCoverUrl(value: unknown): string | null {
+    if (value == null) return null;
+    if (typeof value !== "string") {
+      throw new BadRequestException("组件库预览图必须是本站素材库中的图片");
+    }
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (trimmed.length > MAX_CATALOG_COVER_URL_LENGTH) {
+      throw new BadRequestException("组件库预览图路径过长");
+    }
+    const path = trimmed.split(/[?#]/, 1)[0];
+    let decoded = path;
+    try {
+      decoded = decodeURIComponent(path);
+    } catch {
+      throw new BadRequestException("组件库预览图必须选择本站素材库中的图片");
+    }
+    if (
+      decoded !== path
+      || !path.startsWith(CATALOG_COVER_PREFIX)
+      || path.includes("\\")
+      || /[\u0000-\u001f\u007f]/.test(path)
+    ) {
+      throw new BadRequestException("组件库预览图必须选择本站素材库中的图片");
+    }
+    const storageKey = path.slice("/uploads/".length);
+    const segments = storageKey.split("/");
+    if (
+      segments.length < 2
+      || segments.some((segment) => !segment || segment === "." || segment === "..")
+    ) {
+      throw new BadRequestException("组件库预览图必须选择本站素材库中的图片");
+    }
+    return `/uploads/${storageKey}`;
+  }
+
+  private async assertCatalogCoverAsset(
+    client: Pick<Prisma.TransactionClient, "mediaAsset">,
+    url: string,
+  ) {
+    const asset = await client.mediaAsset.findFirst({
+      where: {
+        storageKey: url.slice("/uploads/".length),
+        status: "READY",
+        mimeType: { startsWith: "image/" },
+      },
+      select: { id: true },
+    });
+    if (!asset) {
+      throw new BadRequestException("请选择已上传到素材库且可读取的图片");
+    }
+  }
+
   private editableTemplateScope(ownerId: number): Prisma.DynamicTemplateWhereInput {
     return { ownerId, sourceType: "CUSTOM" };
   }
@@ -622,28 +762,133 @@ export class DynamicTemplatesService {
     status: string;
     publishedVersion: number;
     templateId: string;
-  }>(template: T) {
-    const evidence = await this.collectDeleteEvidence([template]);
+  }>(
+    template: T,
+    client: Pick<
+      Prisma.TransactionClient,
+      "dynamicTemplate" | "dynamicTemplateVersion" | "dynamicTemplateActivation" | "pageDocument" | "pageScheme"
+    > = this.prisma,
+  ) {
+    const evidence = await this.collectDeleteEvidence([template], client);
     const deleteBlockers = this.catalogDeleteBlockers(template, evidence);
     return { ...template, canDelete: deleteBlockers.length === 0, deleteBlockers };
   }
 
-  async listMine(ownerId?: number) {
-    const resolvedOwnerId = this.requireOwnerId(ownerId);
-    const templates = await this.prisma.dynamicTemplate.findMany({
-      where: this.editableTemplateScope(resolvedOwnerId),
+  private async listMineWithClient(ownerId: number, client: Prisma.TransactionClient) {
+    const templates = await client.dynamicTemplate.findMany({
+      where: this.editableTemplateScope(ownerId),
       include: { draft: true },
       orderBy: [{ status: "asc" }, { updatedAt: "desc" }, { id: "desc" }],
     });
-    const evidence = await this.collectDeleteEvidence(templates);
+    const evidence = await this.collectDeleteEvidence(templates, client);
     return templates.map((template) => {
       const deleteBlockers = this.catalogDeleteBlockers(template, evidence);
       return { ...template, canDelete: deleteBlockers.length === 0, deleteBlockers };
     });
   }
 
-  async listPublished() {
-    const templates = await this.prisma.dynamicTemplate.findMany({
+  async listMine(actor: DynamicTemplateStaffActorInput) {
+    return this.withAuthorizedStaffRead(actor, true, (transaction, staff) => (
+      this.listMineWithClient(staff.id, transaction)
+    ));
+  }
+
+  async ensureConsultationStarters(actor: DynamicTemplateStaffActorInput) {
+    const resolvedActor = this.requireStaffActor(actor);
+    const { existing, ownerId: resolvedOwnerId } = await this.withAuthorizedStaffRead(
+      resolvedActor,
+      true,
+      async (transaction, staff) => ({
+        ownerId: staff.id,
+        existing: await transaction.dynamicTemplate.findMany({
+          where: {
+            sourceReference: {
+              in: CONSULTATION_STARTER_SPECS.map((spec) => spec.sourceReference),
+            },
+            status: "ACTIVE",
+          },
+          include: { draft: true },
+        }),
+      }),
+    );
+    const existingByReference = new Map(
+      existing.flatMap((template) => (
+        template.sourceReference ? [[template.sourceReference, template] as const] : []
+      )),
+    );
+    const results: Array<{
+      sourceReference: string;
+      templateId: string;
+      outcome: "already-published" | "published-existing-draft" | "created" | "skipped-foreign";
+    }> = [];
+    for (const spec of CONSULTATION_STARTER_SPECS) {
+      const found = existingByReference.get(spec.sourceReference);
+      if (found && found.publishedVersion > 0) {
+        results.push({
+          sourceReference: spec.sourceReference,
+          templateId: found.templateId,
+          outcome: "already-published",
+        });
+        continue;
+      }
+      if (found && found.ownerId === resolvedOwnerId && found.draft && found.publishedVersion === 0) {
+        await this.publish(resolvedActor, found.templateId, {
+          expectedRevision: found.draft.revision,
+        });
+        results.push({
+          sourceReference: spec.sourceReference,
+          templateId: found.templateId,
+          outcome: "published-existing-draft",
+        });
+        continue;
+      }
+      if (found) {
+        results.push({
+          sourceReference: spec.sourceReference,
+          templateId: found.templateId,
+          outcome: "skipped-foreign",
+        });
+        continue;
+      }
+      let created;
+      try {
+        created = await this.create(resolvedActor, {
+          definition: buildConsultationStarterDefinition(spec),
+          versionNote: "咨询站页面装修起步模板",
+        });
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+        created = await this.getDraft(resolvedActor, spec.templateId);
+      }
+      if (!created.draft) throw new ConflictException("起步模板草稿创建失败");
+      await this.prisma.$transaction(async (transaction) => {
+        const staff = await this.lockAuthorizedStaff(transaction, resolvedActor, "write", true);
+        await transaction.dynamicTemplate.updateMany({
+          where: {
+            templateId: created.templateId,
+            ownerId: staff.id,
+            sourceType: "CUSTOM",
+            status: "ACTIVE",
+          },
+          data: { sourceReference: spec.sourceReference },
+        });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      if (created.publishedVersion === 0) {
+        await this.publish(resolvedActor, created.templateId, {
+          expectedRevision: created.draft.revision,
+        });
+      }
+      results.push({
+        sourceReference: spec.sourceReference,
+        templateId: created.templateId,
+        outcome: "created",
+      });
+    }
+    return { items: results };
+  }
+
+  private async listPublishedWithClient(client: Prisma.TransactionClient) {
+    const templates = await client.dynamicTemplate.findMany({
       where: {
         status: "ACTIVE",
         visibility: "STAFF",
@@ -654,7 +899,7 @@ export class DynamicTemplatesService {
     });
     const publishedVersions = templates.length === 0
       ? []
-      : await this.prisma.dynamicTemplateVersion.findMany({
+      : await client.dynamicTemplateVersion.findMany({
         where: {
           OR: templates.map((template) => ({
             dynamicTemplateId: template.id,
@@ -696,6 +941,7 @@ export class DynamicTemplatesService {
         recommendedFor: publishedMetadata.recommendedFor,
         tags: publishedMetadata.tags,
         sourceReference: template.sourceReference,
+        catalogCoverUrl: template.catalogCoverUrl ?? null,
         version: published.version,
         schemaVersion: published.schemaVersion,
         definition,
@@ -706,9 +952,94 @@ export class DynamicTemplatesService {
     });
   }
 
-  async getDraft(ownerId: number | undefined, templateId: string) {
-    const template = await this.getOwnedTemplate(this.requireOwnerId(ownerId), templateId);
-    return this.withDeleteCapability(template);
+  async listPublished(actor: DynamicTemplateStaffActorInput) {
+    return this.withAuthorizedStaffRead(actor, false, (transaction) => (
+      this.listPublishedWithClient(transaction)
+    ));
+  }
+
+  async listCatalog(actor: DynamicTemplateStaffActorInput) {
+    return this.withAuthorizedStaffRead(actor, false, async (transaction, staff) => {
+      const published = await this.listPublishedWithClient(transaction);
+      const editable = staff.role === "SUPER_ADMIN"
+        ? await this.listMineWithClient(staff.id, transaction)
+        : [];
+      return {
+        items: [
+          ...published.map((template) => ({ kind: "published" as const, template })),
+          ...editable.map((template) => ({ kind: "editable" as const, template })),
+        ],
+      };
+    });
+  }
+
+  async getDraft(actor: DynamicTemplateStaffActorInput, templateId: string) {
+    return this.withAuthorizedStaffRead(actor, true, async (transaction, staff) => {
+      const template = await this.getOwnedTemplate(staff.id, templateId, transaction);
+      return this.withDeleteCapability(template, transaction);
+    });
+  }
+
+  async updateCatalogCover(
+    actor: DynamicTemplateStaffActorInput,
+    templateId: string,
+    input: { catalogCoverUrl: string | null },
+  ) {
+    const canonicalTemplateId = this.assertTemplateId(templateId);
+    const catalogCoverUrl = this.normalizeCatalogCoverUrl(input.catalogCoverUrl);
+    return this.prisma.$transaction(async (tx) => {
+      const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
+      const resolvedOwnerId = staff.id;
+      const template = await this.getOwnedTemplate(resolvedOwnerId, canonicalTemplateId, tx);
+      if (template.status !== "ACTIVE") {
+        throw new ConflictException("已归档模板不能修改组件库预览图");
+      }
+      if (catalogCoverUrl) {
+        await this.assertCatalogCoverAsset(tx, catalogCoverUrl);
+      }
+      const previous = template.catalogCoverUrl ?? null;
+      if (previous === catalogCoverUrl) {
+        return this.withDeleteCapability(template, tx);
+      }
+      const updatedAt = new Date();
+      const updated = await tx.dynamicTemplate.updateMany({
+        where: {
+          id: template.id,
+          templateId: canonicalTemplateId,
+          ...this.editableTemplateScope(resolvedOwnerId),
+          status: "ACTIVE",
+        },
+        data: { catalogCoverUrl },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException("模板状态已变化，请刷新目录后重试");
+      }
+      await tx.operationLog.create({
+        data: {
+          userId: resolvedOwnerId,
+          action: "TEMPLATE_CATALOG_COVER_UPDATED",
+          module: "page-builder-template",
+          targetId: template.id,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            event: "TEMPLATE_CATALOG_COVER_UPDATED",
+            actor: resolvedOwnerId,
+            timestamp: updatedAt.toISOString(),
+            templateId: template.templateId,
+            fromCatalogCoverUrl: previous,
+            toCatalogCoverUrl: catalogCoverUrl,
+            result: "succeeded",
+          }),
+        },
+      });
+      return this.withDeleteCapability({
+        ...template,
+        catalogCoverUrl,
+        updatedAt,
+      }, tx);
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
   }
 
   private isExactRebuiltDraft(
@@ -745,11 +1076,10 @@ export class DynamicTemplatesService {
   }
 
   async rebuildDraftFromPublished(
-    ownerId: number | undefined,
+    actor: DynamicTemplateStaffActorInput,
     templateId: string,
     input: { expectedVersion: number; expectedChecksum: string },
   ) {
-    const resolvedOwnerId = this.requireOwnerId(ownerId);
     const canonicalTemplateId = this.assertTemplateId(templateId);
     if (!Number.isInteger(input.expectedVersion) || input.expectedVersion <= 0) {
       throw new BadRequestException("正式版本号无效");
@@ -763,6 +1093,8 @@ export class DynamicTemplatesService {
     };
     try {
       const rebuilt = await this.prisma.$transaction(async (tx) => {
+        const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
+        const resolvedOwnerId = staff.id;
         const template = await tx.dynamicTemplate.findFirst({
           where: {
             templateId: canonicalTemplateId,
@@ -854,34 +1186,44 @@ export class DynamicTemplatesService {
             }),
           },
         });
-        return { ...template, draft };
+        return this.withDeleteCapability({ ...template, draft }, tx);
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
-      return this.withDeleteCapability(rebuilt);
+      return rebuilt;
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError)
         || (error.code !== "P2002" && error.code !== "P2034")) throw error;
-      const winner = await this.prisma.dynamicTemplate.findFirst({
-        where: {
-          templateId: canonicalTemplateId,
-          ...this.editableTemplateScope(resolvedOwnerId),
-          status: "ACTIVE",
-        },
-        include: { draft: true },
-      });
-      const published = winner
-        ? await this.prisma.dynamicTemplateVersion.findUnique({
-            where: {
-              dynamicTemplateId_version: {
-                dynamicTemplateId: winner.id,
-                version: identity.expectedVersion,
+      const { winner, published, authorizedWinner } = await this.prisma.$transaction(async (tx) => {
+        const staff = await this.lockAuthorizedStaff(tx, actor, "read", true);
+        const winner = await tx.dynamicTemplate.findFirst({
+          where: {
+            templateId: canonicalTemplateId,
+            ...this.editableTemplateScope(staff.id),
+            status: "ACTIVE",
+          },
+          include: { draft: true },
+        });
+        const published = winner
+          ? await tx.dynamicTemplateVersion.findUnique({
+              where: {
+                dynamicTemplateId_version: {
+                  dynamicTemplateId: winner.id,
+                  version: identity.expectedVersion,
+                },
               },
-            },
-          })
-        : null;
-      if (winner && this.isExactRebuiltDraft(winner, published, identity)) {
-        return this.withDeleteCapability(winner);
+            })
+          : null;
+        return {
+          winner,
+          published,
+          authorizedWinner: winner && this.isExactRebuiltDraft(winner, published, identity)
+            ? await this.withDeleteCapability(winner, tx)
+            : null,
+        };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      if (winner && authorizedWinner && this.isExactRebuiltDraft(winner, published, identity)) {
+        return authorizedWinner;
       }
       throw this.publishConflict(
         "DYNAMIC_TEMPLATE_DRAFT_REBUILD_CONCURRENT_CONFLICT",
@@ -897,6 +1239,7 @@ export class DynamicTemplatesService {
     tx: Pick<Prisma.TransactionClient, "dynamicTemplate">,
   ): Promise<DynamicTemplateWithDraft> {
     const validated = this.validateDefinition(input.definition);
+    let copiedCatalogCoverUrl: string | null | undefined;
     if (input.copySource !== undefined) {
       const identity = input.copySource;
       if (!identity || typeof identity !== "object" || Array.isArray(identity)
@@ -918,6 +1261,7 @@ export class DynamicTemplatesService {
       if (validated.definition.templateId === source.templateId || canonicalJson(expected) !== canonicalJson(validated.definition)) {
         throw new BadRequestException("复制只能更换模板身份与名称；请先完成复制，再调整设计");
       }
+      copiedCatalogCoverUrl = source.catalogCoverUrl ?? null;
     } else {
       this.assertNewTemplateContentEmpty(validated.definition);
       this.assertNewTemplateUsesCurrentEmptyPolicies(validated.definition);
@@ -931,6 +1275,7 @@ export class DynamicTemplatesService {
         visibility: "PRIVATE",
         status: "ACTIVE",
         ...this.definitionProjection(validated.definition),
+        ...(copiedCatalogCoverUrl !== undefined ? { catalogCoverUrl: copiedCatalogCoverUrl } : {}),
         draft: {
           create: {
             revision: 1,
@@ -946,17 +1291,18 @@ export class DynamicTemplatesService {
   }
 
   async create(
-    ownerId: number | undefined,
+    actor: DynamicTemplateStaffActorInput,
     input: { definition: unknown; versionNote?: string; copySource?: DynamicTemplateCopySource },
   ) {
-    const resolvedOwnerId = this.requireOwnerId(ownerId);
     try {
-      const created = await this.prisma.$transaction((tx) => (
-        this.createInTransaction(resolvedOwnerId, input, tx)
-      ), {
+      const created = await this.prisma.$transaction(async (tx) => {
+        const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
+        const created = await this.createInTransaction(staff.id, input, tx);
+        return this.withDeleteCapability(created, tx);
+      }, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
-      return this.withDeleteCapability(created);
+      return created;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("当前账号已存在同名模板，或模板 ID 已被使用");
@@ -966,7 +1312,7 @@ export class DynamicTemplatesService {
   }
 
   async updateDraft(
-    ownerId: number | undefined,
+    actor: DynamicTemplateStaffActorInput,
     templateId: string,
     input: {
       expectedRevision: number;
@@ -976,28 +1322,15 @@ export class DynamicTemplatesService {
       restoreFromChecksum?: string;
     },
   ) {
-    const resolvedOwnerId = this.requireOwnerId(ownerId);
     if (!Number.isInteger(input.expectedRevision) || input.expectedRevision <= 0) {
       throw new BadRequestException("草稿 revision 无效");
     }
-    const existing = await this.getOwnedTemplate(resolvedOwnerId, templateId);
-    if (existing.status !== "ACTIVE") throw new ConflictException("已归档模板不能保存草稿");
-    if (!existing.draft) throw new ConflictException("模板草稿不存在");
-    if (existing.draft.revision !== input.expectedRevision) {
-      throw new ConflictException("模板草稿已被其他会话更新，请刷新后重试");
-    }
     const validated = this.validateDefinition(input.definition);
-    if (validated.definition.templateId !== existing.templateId) {
-      throw new BadRequestException("草稿不能改变 templateId；如需新身份，请使用“新建模板”");
-    }
     const hasRestoreVersion = input.restoreFromVersion !== undefined;
     const hasRestoreChecksum = input.restoreFromChecksum !== undefined;
     if (hasRestoreVersion !== hasRestoreChecksum) {
       throw new BadRequestException("历史恢复来源必须同时包含版本号和校验值");
     }
-    let structureBaseline = this.validateDefinition(existing.draft.definition).definition;
-    const existingSchemaVersion = structureBaseline.schemaVersion;
-    let historicalContentBaseline: unknown = existing.draft.definition;
     if (hasRestoreVersion && hasRestoreChecksum) {
       if (!Number.isInteger(input.restoreFromVersion) || Number(input.restoreFromVersion) <= 0) {
         throw new BadRequestException("历史恢复版本无效");
@@ -1005,51 +1338,67 @@ export class DynamicTemplatesService {
       if (!/^[a-f0-9]{64}$/.test(input.restoreFromChecksum!)) {
         throw new BadRequestException("历史恢复校验值无效");
       }
-      const sourceVersion = await this.prisma.dynamicTemplateVersion.findUnique({
-        where: {
-          dynamicTemplateId_version: {
-            dynamicTemplateId: existing.id,
-            version: input.restoreFromVersion!,
-          },
-        },
-      });
-      if (!sourceVersion) throw new NotFoundException("历史恢复来源版本不存在");
-      const trustedSource = this.trustedPublishedDefinition({
-        templateId: existing.templateId,
-        schemaVersion: sourceVersion.schemaVersion,
-        definition: sourceVersion.definition,
-        definitionChecksum: sourceVersion.definitionChecksum,
-      });
-      if (!trustedSource) {
-        throw new ConflictException("历史恢复来源完整性校验失败，已拒绝保存");
-      }
-      if (sourceVersion.definitionChecksum !== input.restoreFromChecksum) {
-        throw new ConflictException("历史恢复来源已变化，请重新选择版本");
-      }
-      structureBaseline = trustedSource;
-      const crossesDefaultContentSchema = (existingSchemaVersion >= 3)
-        !== (trustedSource.schemaVersion >= 3);
-      if (crossesDefaultContentSchema && validated.definition.schemaVersion === trustedSource.schemaVersion) {
-        // 跨默认内容语义恢复只信任已核验历史版本；不把当前 schema3 文案混进旧结构。
-        historicalContentBaseline = trustedSource;
-      }
     }
-    const structureLockViolation = getDynamicTemplateStructureLockViolation(
-      structureBaseline,
-      validated.definition,
-      { mode: "persistenceSnapshot" },
-    );
-    if (structureLockViolation) {
-      throw new BadRequestException({
-        message: structureLockViolation,
-        code: "TEMPLATE_STRUCTURE_LOCKED",
-      });
-    }
-    this.assertHistoricalTemplateContentPreserved(historicalContentBaseline, validated.definition);
-    this.assertHistoricalEmptyPoliciesPreserved(historicalContentBaseline, validated.definition);
     const note = this.normalizeVersionNote(input.versionNote);
     try {
       const updated = await this.prisma.$transaction(async (tx) => {
+        const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
+        const resolvedOwnerId = staff.id;
+        const existing = await this.getOwnedTemplate(resolvedOwnerId, templateId, tx);
+        if (existing.status !== "ACTIVE") throw new ConflictException("已归档模板不能保存草稿");
+        if (!existing.draft) throw new ConflictException("模板草稿不存在");
+        if (existing.draft.revision !== input.expectedRevision) {
+          throw new ConflictException("模板草稿已被其他会话更新，请刷新后重试");
+        }
+        if (validated.definition.templateId !== existing.templateId) {
+          throw new BadRequestException("草稿不能改变 templateId；如需新身份，请使用“新建模板”");
+        }
+        let structureBaseline = this.validateDefinition(existing.draft.definition).definition;
+        const existingSchemaVersion = structureBaseline.schemaVersion;
+        let historicalContentBaseline: unknown = existing.draft.definition;
+        if (hasRestoreVersion && hasRestoreChecksum) {
+          const sourceVersion = await tx.dynamicTemplateVersion.findUnique({
+            where: {
+              dynamicTemplateId_version: {
+                dynamicTemplateId: existing.id,
+                version: input.restoreFromVersion!,
+              },
+            },
+          });
+          if (!sourceVersion) throw new NotFoundException("历史恢复来源版本不存在");
+          const trustedSource = this.trustedPublishedDefinition({
+            templateId: existing.templateId,
+            schemaVersion: sourceVersion.schemaVersion,
+            definition: sourceVersion.definition,
+            definitionChecksum: sourceVersion.definitionChecksum,
+          });
+          if (!trustedSource) {
+            throw new ConflictException("历史恢复来源完整性校验失败，已拒绝保存");
+          }
+          if (sourceVersion.definitionChecksum !== input.restoreFromChecksum) {
+            throw new ConflictException("历史恢复来源已变化，请重新选择版本");
+          }
+          structureBaseline = trustedSource;
+          const crossesDefaultContentSchema = (existingSchemaVersion >= 3)
+            !== (trustedSource.schemaVersion >= 3);
+          if (crossesDefaultContentSchema && validated.definition.schemaVersion === trustedSource.schemaVersion) {
+            // 跨默认内容语义恢复只信任已核验历史版本；不把当前 schema3 文案混进旧结构。
+            historicalContentBaseline = trustedSource;
+          }
+        }
+        const structureLockViolation = getDynamicTemplateStructureLockViolation(
+          structureBaseline,
+          validated.definition,
+          { mode: "persistenceSnapshot" },
+        );
+        if (structureLockViolation) {
+          throw new BadRequestException({
+            message: structureLockViolation,
+            code: "TEMPLATE_STRUCTURE_LOCKED",
+          });
+        }
+        this.assertHistoricalTemplateContentPreserved(historicalContentBaseline, validated.definition);
+        this.assertHistoricalEmptyPoliciesPreserved(historicalContentBaseline, validated.definition);
         const updatedDraft = await tx.dynamicTemplateDraft.updateMany({
           where: { id: existing.draft!.id, revision: input.expectedRevision },
           data: {
@@ -1074,13 +1423,15 @@ export class DynamicTemplatesService {
         if (updatedTemplate.count !== 1) {
           throw new ConflictException("模板状态已变化，请刷新目录后重试");
         }
-        return tx.dynamicTemplate.findUnique({
+        const refreshed = await tx.dynamicTemplate.findUnique({
           where: { id: existing.id },
           include: { draft: true },
         });
-      });
+        if (!refreshed) throw new ConflictException("模板草稿保存后无法回读，请刷新后重试");
+        return this.withDeleteCapability(refreshed, tx);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       if (!updated) throw new ConflictException("模板草稿保存后无法回读，请刷新后重试");
-      return this.withDeleteCapability(updated);
+      return updated;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         throw new ConflictException("当前账号已存在同名模板");
@@ -1090,7 +1441,7 @@ export class DynamicTemplatesService {
   }
 
   async publish(
-    ownerId: number | undefined,
+    actor: DynamicTemplateStaffActorInput,
     templateId: string,
     input: {
       expectedRevision: number;
@@ -1099,13 +1450,14 @@ export class DynamicTemplatesService {
       targetVersion?: number;
     },
   ) {
-    const resolvedOwnerId = this.requireOwnerId(ownerId);
     if (!Number.isInteger(input.expectedRevision) || input.expectedRevision <= 0) {
       throw new BadRequestException("草稿 revision 无效");
     }
     const strictIdentity = this.strictPublishIdentity(input);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
+        const resolvedOwnerId = staff.id;
         const template = await tx.dynamicTemplate.findFirst({
           where: {
             templateId: this.assertTemplateId(templateId),
@@ -1338,7 +1690,7 @@ export class DynamicTemplatesService {
     } catch (error) {
       if (strictIdentity && this.isPublishRaceError(error)) {
         return this.resolveStrictPublishRace(
-          resolvedOwnerId,
+          actor,
           templateId,
           strictIdentity,
           error,
@@ -1359,12 +1711,11 @@ export class DynamicTemplatesService {
   }
 
   async listVersions(
-    ownerId: number | undefined,
+    actor: DynamicTemplateStaffActorInput,
     templateId: string,
     beforeVersion?: number,
     requestedLimit = 20,
   ) {
-    const template = await this.getOwnedTemplate(this.requireOwnerId(ownerId), templateId);
     if (beforeVersion !== undefined && (!Number.isInteger(beforeVersion) || beforeVersion <= 0)) {
       throw new BadRequestException("模板版本游标无效");
     }
@@ -1372,83 +1723,93 @@ export class DynamicTemplatesService {
       throw new BadRequestException("模板版本分页大小无效");
     }
     const limit = Math.min(requestedLimit, 50);
-    const rows = await this.prisma.dynamicTemplateVersion.findMany({
-      where: {
-        dynamicTemplateId: template.id,
-        ...(beforeVersion === undefined ? {} : { version: { lt: beforeVersion } }),
-      },
-      orderBy: { version: "desc" },
-      take: limit + 1,
-      select: {
-        id: true,
-        dynamicTemplateId: true,
-        version: true,
-        schemaVersion: true,
-        definitionChecksum: true,
-        versionNote: true,
-        publishedAt: true,
-      },
+    return this.withAuthorizedStaffRead(actor, true, async (transaction, staff) => {
+      const template = await this.getOwnedTemplate(staff.id, templateId, transaction);
+      const rows = await transaction.dynamicTemplateVersion.findMany({
+        where: {
+          dynamicTemplateId: template.id,
+          ...(beforeVersion === undefined ? {} : { version: { lt: beforeVersion } }),
+        },
+        orderBy: { version: "desc" },
+        take: limit + 1,
+        select: {
+          id: true,
+          dynamicTemplateId: true,
+          version: true,
+          schemaVersion: true,
+          definitionChecksum: true,
+          versionNote: true,
+          publishedAt: true,
+        },
+      });
+      const items = rows.slice(0, limit);
+      return {
+        items,
+        nextBeforeVersion: rows.length > limit ? items.at(-1)?.version ?? null : null,
+      };
     });
-    const items = rows.slice(0, limit);
-    return {
-      items,
-      nextBeforeVersion: rows.length > limit ? items.at(-1)?.version ?? null : null,
-    };
   }
 
-  async getPublishedVersion(templateId: string, version: number) {
+  async getPublishedVersion(
+    actor: DynamicTemplateStaffActorInput,
+    templateId: string,
+    version: number,
+  ) {
     if (!Number.isInteger(version) || version <= 0) throw new BadRequestException("模板版本无效");
-    const template = await this.prisma.dynamicTemplate.findFirst({
-      where: {
-        templateId: this.assertTemplateId(templateId),
-        visibility: "STAFF",
-        publishedVersion: { gte: version },
-      },
+    return this.withAuthorizedStaffRead(actor, false, async (transaction) => {
+      const template = await transaction.dynamicTemplate.findFirst({
+        where: {
+          templateId: this.assertTemplateId(templateId),
+          visibility: "STAFF",
+          publishedVersion: { gte: version },
+        },
+      });
+      if (!template) throw new NotFoundException("正式模板不存在或无权访问");
+      const published = await transaction.dynamicTemplateVersion.findUnique({
+        where: { dynamicTemplateId_version: { dynamicTemplateId: template.id, version } },
+      });
+      if (!published) throw new NotFoundException("模板版本不存在");
+      const definition = this.trustedPublishedDefinition({
+        templateId: template.templateId,
+        schemaVersion: published.schemaVersion,
+        definition: published.definition,
+        definitionChecksum: published.definitionChecksum,
+      });
+      if (!definition) throw new ConflictException("正式模板版本完整性校验失败，已拒绝加载");
+      const publishedMetadata = this.definitionProjection(definition);
+      return {
+        templateId: template.templateId,
+        name: publishedMetadata.name,
+        category: publishedMetadata.category,
+        status: template.status,
+        purpose: publishedMetadata.purpose,
+        layoutType: publishedMetadata.layoutType,
+        description: publishedMetadata.description,
+        slotSummary: publishedMetadata.slotSummary,
+        recommendedFor: publishedMetadata.recommendedFor,
+        tags: publishedMetadata.tags,
+        sourceReference: template.sourceReference,
+        ...published,
+        definition,
+        definitionChecksum: calculateDynamicTemplateDefinitionChecksum(definition),
+      };
     });
-    if (!template) throw new NotFoundException("正式模板不存在或无权访问");
-    const published = await this.prisma.dynamicTemplateVersion.findUnique({
-      where: { dynamicTemplateId_version: { dynamicTemplateId: template.id, version } },
-    });
-    if (!published) throw new NotFoundException("模板版本不存在");
-    const definition = this.trustedPublishedDefinition({
-      templateId: template.templateId,
-      schemaVersion: published.schemaVersion,
-      definition: published.definition,
-      definitionChecksum: published.definitionChecksum,
-    });
-    if (!definition) throw new ConflictException("正式模板版本完整性校验失败，已拒绝加载");
-    const publishedMetadata = this.definitionProjection(definition);
-    return {
-      templateId: template.templateId,
-      name: publishedMetadata.name,
-      category: publishedMetadata.category,
-      status: template.status,
-      purpose: publishedMetadata.purpose,
-      layoutType: publishedMetadata.layoutType,
-      description: publishedMetadata.description,
-      slotSummary: publishedMetadata.slotSummary,
-      recommendedFor: publishedMetadata.recommendedFor,
-      tags: publishedMetadata.tags,
-      sourceReference: template.sourceReference,
-      ...published,
-      definition,
-      definitionChecksum: calculateDynamicTemplateDefinitionChecksum(definition),
-    };
   }
 
   async archive(
-    ownerId: number | undefined,
+    actor: DynamicTemplateStaffActorInput,
     templateId: string,
     input: {
       expectedRevision?: number;
       expectedChecksum?: string;
     },
   ) {
-    const resolvedOwnerId = this.requireOwnerId(ownerId);
     const canonicalTemplateId = this.assertTemplateId(templateId);
     const expectedIdentity = this.requireDraftIdentity(input);
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
+        const resolvedOwnerId = staff.id;
         const template = await tx.dynamicTemplate.findFirst({
           where: {
             templateId: canonicalTemplateId,
@@ -1503,13 +1864,16 @@ export class DynamicTemplatesService {
     } catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError)
         || (error.code !== "P2002" && error.code !== "P2034")) throw error;
-      const winner = await this.prisma.dynamicTemplate.findFirst({
-        where: {
-          templateId: canonicalTemplateId,
-          ...this.editableTemplateScope(resolvedOwnerId),
-        },
-        include: { draft: true },
-      });
+      const winner = await this.prisma.$transaction(async (transaction) => {
+        const staff = await this.lockAuthorizedStaff(transaction, actor, "read", true);
+        return transaction.dynamicTemplate.findFirst({
+          where: {
+            templateId: canonicalTemplateId,
+            ...this.editableTemplateScope(staff.id),
+          },
+          include: { draft: true },
+        });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       if (
         winner
         && winner.status === "ARCHIVED"
@@ -1527,9 +1891,10 @@ export class DynamicTemplatesService {
     }
   }
 
-  async restore(ownerId: number | undefined, templateId: string) {
-    const resolvedOwnerId = this.requireOwnerId(ownerId);
+  async restore(actor: DynamicTemplateStaffActorInput, templateId: string) {
     return this.prisma.$transaction(async (tx) => {
+      const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
+      const resolvedOwnerId = staff.id;
       const template = await this.getOwnedTemplate(resolvedOwnerId, templateId, tx);
       if (template.status !== "ARCHIVED") {
         throw new NotFoundException("模板不存在、未归档或无权访问");
@@ -1570,9 +1935,10 @@ export class DynamicTemplatesService {
     });
   }
 
-  async deleteDraft(ownerId: number | undefined, templateId: string) {
-    const resolvedOwnerId = this.requireOwnerId(ownerId);
+  async deleteDraft(actor: DynamicTemplateStaffActorInput, templateId: string) {
     return this.prisma.$transaction(async (tx) => {
+      const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
+      const resolvedOwnerId = staff.id;
       const template = await this.getOwnedTemplate(resolvedOwnerId, templateId, tx);
       const evidence = await this.collectDeleteEvidence([template], tx);
       const blockers = this.catalogDeleteBlockers(template, evidence);

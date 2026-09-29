@@ -147,6 +147,15 @@ test(
       await prisma.mediaAssetAuthorization.create({
         data: {
           ...approvedAuthorization,
+          submittedById: reviewer.id,
+          reviewedById: reviewer.id,
+          selfReviewAcknowledged: true,
+        },
+      });
+      await prisma.mediaAssetAuthorization.delete({ where: { assetId: asset.id } });
+      await prisma.mediaAssetAuthorization.create({
+        data: {
+          ...approvedAuthorization,
           submittedById: submitter.id,
           reviewedById: reviewer.id,
         },

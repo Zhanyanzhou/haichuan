@@ -7,8 +7,10 @@ import {
   ServiceUnavailableException,
   ValidationPipe,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ConvertQuotationDto, QuotationListQueryDto } from './dto/quotation.dto';
+import { IssueQuotationDto } from './dto/quotation-commerce.dto';
 import { QuotationsService } from './quotations.service';
 
 const salesActor = { id: 17, role: 'SALES_CONSULTANT' as const };
@@ -52,7 +54,8 @@ test('报价列表查询 DTO 白名单化并转换分页与负责人 ID', async 
 test('销售顾问列表强制本人范围且不能用查询参数伪造负责人', async () => {
   let listWhere: any;
   let countWhere: any;
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => [{ id: salesActor.id, role: salesActor.role }],
     quotation: {
       findMany: async ({ where }: any) => {
         listWhere = where;
@@ -64,6 +67,9 @@ test('销售顾问列表强制本人范围且不能用查询参数伪造负责�
       },
     },
   };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  };
   const service = new QuotationsService(prisma as unknown as PrismaService);
 
   await service.findAll({ salesConsultantId: 99, keyword: '测试' }, salesActor);
@@ -73,7 +79,8 @@ test('销售顾问列表强制本人范围且不能用查询参数伪造负责�
 
 test('管理员保留全局访问并可显式筛选销售顾问', async () => {
   let where: any;
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => [{ id: adminActor.id, role: adminActor.role }],
     quotation: {
       findMany: async (args: any) => {
         where = args.where;
@@ -81,6 +88,9 @@ test('管理员保留全局访问并可显式筛选销售顾问', async () => {
       },
       count: async () => 0,
     },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
   };
   const service = new QuotationsService(prisma as unknown as PrismaService);
   await service.findAll({ salesConsultantId: 22, channel: 'CUSTOM' }, adminActor);
@@ -91,7 +101,8 @@ test('管理员保留全局访问并可显式筛选销售顾问', async () => {
 test('销售读取发出选项必须命中本人报价且设计文件固定为该报价客户', async () => {
   let quotationWhere: Record<string, unknown> | undefined;
   let designWhere: Record<string, unknown> | undefined;
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => [{ id: salesActor.id, role: salesActor.role }],
     quotation: {
       findFirst: async ({ where }: { where: Record<string, unknown> }) => {
         quotationWhere = where;
@@ -106,6 +117,9 @@ test('销售读取发出选项必须命中本人报价且设计文件固定为�
         return [];
       },
     },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
   };
   const options = await new QuotationsService(prisma as unknown as PrismaService)
     .getIssueOptions(8, salesActor);
@@ -124,7 +138,8 @@ test('发出选项每个费用代码只认当前版本，停用新版本会遮�
     currency: 'CNY',
     displayText: '服务费',
   };
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => [{ id: salesActor.id, role: salesActor.role }],
     quotation: {
       findFirst: async () => ({ id: 8, channel: 'CUSTOM', customerId: 31 }),
     },
@@ -137,6 +152,9 @@ test('发出选项每个费用代码只认当前版本，停用新版本会遮�
     },
     tradeResourceBucket: { findMany: async () => [] },
   };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  };
   const options = await new QuotationsService(prisma as unknown as PrismaService)
     .getIssueOptions(8, salesActor);
 
@@ -146,7 +164,8 @@ test('发出选项每个费用代码只认当前版本，停用新版本会遮�
 
 test('报价域客户搜索仅返回绑定所需最小字段并限制条数', async () => {
   let query: Record<string, unknown> | undefined;
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => [{ id: salesActor.id, role: salesActor.role }],
     customer: {
       findMany: async (args: Record<string, unknown>) => {
         query = args;
@@ -162,8 +181,11 @@ test('报价域客户搜索仅返回绑定所需最小字段并限制条数', as
       },
     },
   };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  };
   const result = await new QuotationsService(prisma as unknown as PrismaService)
-    .searchIssueCustomers({ keyword: '测试', pageSize: 999 });
+    .searchIssueCustomers({ keyword: '测试', pageSize: 999 }, salesActor);
 
   assert.equal(query?.take, 50);
   assert.deepEqual(query?.select, {
@@ -183,6 +205,8 @@ test('报价域客户搜索仅返回绑定所需最小字段并限制条数', as
 test('客户报价列表与详情显式返回 v2/v1 快照版本供前端失败关闭', async () => {
   let listVersionSelect: Record<string, unknown> | undefined;
   let detailVersionSelect: Record<string, unknown> | undefined;
+  let lockCount = 0;
+  const isolationLevels: unknown[] = [];
   const baseVersion = {
     id: 21,
     version: 2,
@@ -197,13 +221,18 @@ test('客户报价列表与详情显式返回 v2/v1 快照版本供前端失败�
     validUntil: null,
     issuedAt: new Date(),
     acceptedAt: null,
+    businessSnapshot: { schemaVersion: 2, changeSummary: '调整主石规格与交付周期' },
     items: [],
     feeLines: [],
     resourceRequirements: [],
     designFileVersion: null,
     paymentPlans: [],
   };
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => {
+      lockCount += 1;
+      return [{ id: 7 }];
+    },
     quotation: {
       findMany: async ({ select }: { select: { versions: { select: Record<string, unknown> } } }) => {
         listVersionSelect = select.versions.select;
@@ -226,6 +255,7 @@ test('客户报价列表与详情显式返回 v2/v1 快照版本供前端失败�
             validUntil: null,
             issuedAt: new Date(),
             acceptedAt: null,
+            businessSnapshot: { schemaVersion: 2, changeSummary: '调整主石规格与交付周期' },
           }],
         }];
       },
@@ -246,25 +276,126 @@ test('客户报价列表与详情显式返回 v2/v1 快照版本供前端失败�
       },
     },
   };
+  const prisma = {
+    $transaction: async (
+      action: (transaction: typeof tx) => Promise<unknown>,
+      options: { isolationLevel?: unknown },
+    ) => {
+      isolationLevels.push(options.isolationLevel);
+      return action(tx);
+    },
+  };
   const service = new QuotationsService(prisma as unknown as PrismaService);
-  const [listed] = await service.findForCustomer(7);
-  const detail = await service.findForCustomerById(7, 9);
+  const principal = { id: 7, authVersion: 4 };
+  const [listed] = await service.findForCustomer(principal);
+  const detail = await service.findForCustomerById(principal, 9);
 
+  assert.equal(lockCount, 2);
+  assert.deepEqual(isolationLevels, [
+    Prisma.TransactionIsolationLevel.Serializable,
+    Prisma.TransactionIsolationLevel.Serializable,
+  ]);
   assert.equal(listVersionSelect?.snapshotSchemaVersion, true);
+  assert.equal(listVersionSelect?.businessSnapshot, true);
   assert.equal(detailVersionSelect?.snapshotSchemaVersion, true);
+  assert.equal(detailVersionSelect?.businessSnapshot, true);
   assert.equal(listed.currentVersionRecord?.snapshotSchemaVersion, 2);
+  assert.equal(listed.currentVersionRecord?.changeSummary, '调整主石规格与交付周期');
   assert.equal(detail.currentVersionRecord?.snapshotSchemaVersion, 1);
+  assert.equal(detail.currentVersionRecord?.changeSummary, '调整主石规格与交付周期');
+});
+
+test('旧 authVersion 的客户报价列表与详情在任何报价查询前失败关闭', async () => {
+  let quotationReads = 0;
+  const tx = {
+    $queryRaw: async () => [],
+    quotation: {
+      findMany: async () => {
+        quotationReads += 1;
+        return [];
+      },
+      findFirst: async () => {
+        quotationReads += 1;
+        return null;
+      },
+    },
+  };
+  const service = new QuotationsService({
+    $transaction: async (action: (transaction: typeof tx) => Promise<unknown>) => action(tx),
+  } as unknown as PrismaService);
+  const principal = { id: 7, authVersion: 3 };
+
+  await assert.rejects(service.findForCustomer(principal), /重新登录/);
+  await assert.rejects(service.findForCustomerById(principal, 9), /重新登录/);
+  assert.equal(quotationReads, 0);
+});
+
+test('修订版发出前必须提供客户可见变更说明且不进入版本写入', async () => {
+  let versionWrites = 0;
+  const tx = {
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join('') ?? '';
+      return sql.includes('FROM users')
+        ? [{ id: adminActor.id, role: adminActor.role }]
+        : [{ id: 1 }];
+    },
+    quotation: {
+      findFirst: async () => ({
+        id: 1,
+        quoteNo: 'QT-REVISION',
+        status: 'DRAFT',
+        channel: 'CUSTOM',
+        currentVersion: 1,
+        customerId: 7,
+        customerName: '合成客户',
+        customerPhone: '13800000000',
+        customerEmail: null,
+        salesConsultantId: 17,
+        depositAmount: 0,
+        validUntil: null,
+        items: [],
+        customer: {
+          id: 7,
+          status: 'ACTIVE',
+          accountType: 'MEMBER',
+          partnerStatus: 'NONE',
+        },
+      }),
+    },
+    quotationVersion: {
+      create: async () => {
+        versionWrites += 1;
+        return {};
+      },
+    },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+  };
+  const service = new QuotationsService(prisma as unknown as PrismaService);
+
+  await assert.rejects(
+    () => service.issue(1, {} as IssueQuotationDto, adminActor),
+    (error: unknown) =>
+      error instanceof BadRequestException &&
+      error.message === '修订报价必须说明本版本相对上一版本的变更',
+  );
+  assert.equal(versionWrites, 0);
 });
 
 test('员工报价详情显式加载版本、费用、资源和设计版本供修订预览', async () => {
   let include: Record<string, unknown> | undefined;
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => [{ id: adminActor.id, role: adminActor.role }],
     quotation: {
       findFirst: async (args: { include: Record<string, unknown> }) => {
         include = args.include;
         return { id: 1, currentVersion: 2, versions: [{ id: 5, version: 2 }] };
       },
     },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
   };
   const result = await new QuotationsService(prisma as unknown as PrismaService).findById(1, adminActor);
   assert.ok(include?.versions);
@@ -277,13 +408,17 @@ test('员工报价详情显式加载版本、费用、资源和设计版本供�
 
 test('跨销售详情读取按本人范围返回不存在且不暴露客户信息', async () => {
   let where: any;
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => [{ id: salesActor.id, role: salesActor.role }],
     quotation: {
       findFirst: async (args: any) => {
         where = args.where;
         return null;
       },
     },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
   };
   const service = new QuotationsService(prisma as unknown as PrismaService);
   await assert.rejects(() => service.findById(99, salesActor), NotFoundException);
@@ -294,12 +429,16 @@ test('销售创建与更新报价时负责人由服务端强制为本人', async
   let createData: any;
   let updateData: any;
   let updateWhere: any;
-  let rawCalls = 0;
   const tx = {
-    $queryRaw: async () =>
-      ++rawCalls === 1 ? [{ max_sequence: 0n }] : [{ id: 1 }],
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join('') ?? '';
+      if (sql.includes('FROM users')) return [{ id: salesActor.id, role: salesActor.role }];
+      if (sql.includes('MAX(CAST')) return [{ max_sequence: 0n }];
+      return [{ id: 1 }];
+    },
     quotation: {
       findFirst: async () => ({ id: 1, status: 'DRAFT', customerId: null }),
+      findUnique: async () => null,
       create: async ({ data }: any) => {
         createData = data;
         return { id: 1, ...data, items: [] };
@@ -339,7 +478,7 @@ test('销售创建与更新报价时负责人由服务端强制为本人', async
       unitPrice: 100,
       quotedPrice: 90,
     }],
-  }, salesActor);
+  }, salesActor, 'quotation-scope-0001');
   assert.equal(createData.salesConsultantId, salesActor.id);
 
   await service.update(1, { salesConsultantId: 999, remark: '本人跟进' }, salesActor);
@@ -355,8 +494,13 @@ test('销售创建与更新报价时负责人由服务端强制为本人', async
 test('报价更新在同一事务锁后重读，状态已提交时不写入', async () => {
   const sequence: string[] = [];
   const tx = {
-    $queryRaw: async () => {
-      sequence.push('lock');
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join('') ?? '';
+      if (sql.includes('FROM users')) {
+        sequence.push('staff-lock');
+        return [{ id: salesActor.id, role: salesActor.role }];
+      }
+      sequence.push('quotation-lock');
       return [{ id: 1 }];
     },
     quotation: {
@@ -385,7 +529,7 @@ test('报价更新在同一事务锁后重读，状态已提交时不写入', as
     () => service.update(1, { remark: '竞态写入' }, salesActor),
     ConflictException,
   );
-  assert.deepEqual(sequence, ['transaction', 'lock', 'reread']);
+  assert.deepEqual(sequence, ['transaction', 'staff-lock', 'quotation-lock', 'reread']);
 });
 
 test('报价创建和更新在数据库写入前拒绝重复 SKU', async () => {
@@ -405,7 +549,7 @@ test('报价创建和更新在数据库写入前拒绝重复 SKU', async () => {
       customerName: '合成客户',
       customerPhone: '13800000000',
       items: duplicateItems,
-    }, salesActor),
+    }, salesActor, 'quotation-scope-0002'),
     BadRequestException,
   );
   await assert.rejects(
@@ -418,7 +562,12 @@ test('报价创建和更新在数据库写入前拒绝重复 SKU', async () => {
 test('提交版本在创建快照前拒绝存量重复 SKU', async () => {
   let versionCreates = 0;
   const tx = {
-    $queryRaw: async () => [{ id: 1 }],
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join('') ?? '';
+      return sql.includes('FROM users')
+        ? [{ id: salesActor.id, role: salesActor.role }]
+        : [{ id: 1 }];
+    },
     quotation: {
       findFirst: async () => ({
         id: 1,
@@ -472,12 +621,19 @@ test('报价转单地址 DTO 修剪并拒绝纯空白，服务层绕过 DTO 时�
 
 test('管理员只能把报价分配给启用中的销售顾问', async () => {
   let transactionCalled = false;
-  const prisma = {
+  const tx = {
+    $queryRaw: async () => [{ id: adminActor.id, role: adminActor.role }],
     user: {
       findUnique: async () => ({ id: 22, role: 'EDITOR', status: 'ACTIVE' }),
     },
-    $transaction: async () => {
+    quotation: {
+      findUnique: async () => null,
+    },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => {
       transactionCalled = true;
+      return callback(tx);
     },
   };
   const service = new QuotationsService(prisma as unknown as PrismaService);
@@ -488,21 +644,30 @@ test('管理员只能把报价分配给启用中的销售顾问', async () => {
       customerPhone: '13800000000',
       salesConsultantId: 22,
       items: [{ productName: '测试商品', quantity: 1, unitPrice: 100, quotedPrice: 90 }],
-    }, adminActor),
+    }, adminActor, 'quotation-scope-0003'),
     BadRequestException,
   );
-  assert.equal(transactionCalled, false);
+  assert.equal(transactionCalled, true);
 });
 
 test('已取消报价作为商业记录保留，不允许物理删除', async () => {
   let deleted = false;
-  const prisma = {
+  const tx = {
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join('') ?? '';
+      return sql.includes('FROM users')
+        ? [{ id: salesActor.id, role: salesActor.role }]
+        : [{ id: 1 }];
+    },
     quotation: {
       findFirst: async () => ({ id: 1, status: 'CANCELLED', salesConsultantId: salesActor.id }),
       delete: async () => {
         deleted = true;
       },
     },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
   };
   const service = new QuotationsService(prisma as unknown as PrismaService);
 
@@ -512,7 +677,13 @@ test('已取消报价作为商业记录保留，不允许物理删除', async ()
 
 test('已提交报价不能退回可物理删除的草稿状态', async () => {
   let updated = false;
-  const prisma = {
+  const tx = {
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      const sql = query.strings?.join('') ?? '';
+      return sql.includes('FROM users')
+        ? [{ id: salesActor.id, role: salesActor.role }]
+        : [{ id: 1 }];
+    },
     quotation: {
       findFirst: async () => ({
         id: 1,
@@ -524,6 +695,9 @@ test('已提交报价不能退回可物理删除的草稿状态', async () => {
         return { count: 1 };
       },
     },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
   };
   const service = new QuotationsService(prisma as unknown as PrismaService);
 

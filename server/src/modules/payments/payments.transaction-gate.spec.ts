@@ -52,6 +52,8 @@ test("资金交易与退款开关不能绕过 lead-generation 发布档位", () 
     get: (key: string) =>
       key === "RELEASE_PROFILE"
         ? "commerce"
+        : key === "PAYMENT_PROVIDER_MODE"
+          ? "live"
         : key === "PAYMENT_GATEWAY_TRANSACTIONS_ENABLED" ||
             key === "PAYMENT_GATEWAY_REFUNDS_ENABLED"
           ? "true"

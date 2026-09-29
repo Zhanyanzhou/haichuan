@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useGetPuck, type Data, type UiState } from "@puckeditor/core";
-import { App as AntdApp } from "antd";
+import { App as AntdApp, Input, Modal } from "antd";
 import {
   DeleteOutlined,
   DesktopOutlined,
@@ -16,7 +16,6 @@ import {
   EyeOutlined,
   ExclamationCircleOutlined,
   HistoryOutlined,
-  LayoutOutlined,
   MobileOutlined,
   SettingOutlined,
   UploadOutlined,
@@ -24,7 +23,7 @@ import {
 import type { EditorPageKey } from "@/page-builder/config/editorPages";
 import type { PuckDocument } from "@/page-builder/types";
 import {
-  createEditorPageDefault,
+  editorPages,
   ensureEditorPageStructure,
   getEditorPage,
 } from "@/page-builder/config/editorPages";
@@ -43,7 +42,6 @@ import {
   type VisualNodeSelection,
 } from "@/page-builder/visual-editor/visualEditorSession";
 import type { PublishValidationStatus } from "@/page-builder/inspector/publishValidation";
-import type { PublicContentLocale } from "@/i18n/publicLocale";
 import { formatViewportSize, type ViewportPreset } from "../editor-utils";
 import WorkspaceContextControls from "@/page-builder/template-editor/WorkspaceContextControls";
 import useWorkspaceHistoryShortcuts from "@/page-builder/template-editor/useWorkspaceHistoryShortcuts";
@@ -61,7 +59,6 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
 
 export default function EditorToolbar({
   pageKey,
-  locale,
   reviewStatus,
   publishing,
   saving,
@@ -69,19 +66,18 @@ export default function EditorToolbar({
   draftSaveFailed,
   canDiscardDraft,
   publishedNeedsRevalidation,
+  publishedRevalidationErrors = [],
   viewingPublished,
   previewMode,
   hasUnsavedChanges,
   canPublish,
+  canPublishWithSelfReview = false,
   canManageTemplates,
   draftSavedAtLabel,
   publishValidationStatus,
   publishAttemptFailed,
-  publishReviewActive,
   publishReviewErrorCount,
   onOpenPublishReview,
-  onLocaleChange,
-  localeSwitchDisabled,
   onSubmitReview,
   onApproveReview,
   isOwnReviewSubmission,
@@ -102,10 +98,10 @@ export default function EditorToolbar({
   onCanvasDataSync,
   onPageHistoryNavigation,
   onEnterTemplateMode,
+  onSwitchPage,
   restoreViewport,
 }: {
   pageKey: EditorPageKey;
-  locale: PublicContentLocale;
   reviewStatus: "DRAFT" | "IN_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
   publishing: boolean;
   saving: boolean;
@@ -113,19 +109,18 @@ export default function EditorToolbar({
   draftSaveFailed: boolean;
   canDiscardDraft: boolean;
   publishedNeedsRevalidation: boolean;
+  publishedRevalidationErrors?: string[];
   viewingPublished: boolean;
   previewMode: boolean;
   hasUnsavedChanges: boolean;
   canPublish: boolean;
+  canPublishWithSelfReview?: boolean;
   canManageTemplates: boolean;
   draftSavedAtLabel: string | null;
   publishValidationStatus: PublishValidationStatus;
   publishAttemptFailed: boolean;
-  publishReviewActive: boolean;
   publishReviewErrorCount: number;
   onOpenPublishReview: () => void;
-  onLocaleChange: (locale: PublicContentLocale) => void;
-  localeSwitchDisabled: boolean;
   onSubmitReview: () => void;
   onApproveReview: () => void;
   isOwnReviewSubmission: boolean;
@@ -152,10 +147,13 @@ export default function EditorToolbar({
     data: PuckDocument;
   }) => boolean;
   onEnterTemplateMode: (viewport: { width: number; height: number }) => void;
+  onSwitchPage?: (pageKey: EditorPageKey) => void;
   restoreViewport?: { width: number; height: number } | null;
 }) {
   const { message, modal } = AntdApp.useApp();
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null);
+  const [requestChangesOpen, setRequestChangesOpen] = useState(false);
+  const [requestChangesNote, setRequestChangesNote] = useState("");
   const getPuck = useGetPuck();
   const appData = useHomepagePuck((state) => state.appState.data);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
@@ -174,7 +172,7 @@ export default function EditorToolbar({
   const currentViewport = viewports.current;
   // 服务端会在保存任何内容变化时撤销旧审核并回到 DRAFT。
   // 本地修改尚未保存时也必须立即呈现这一事实，否则已发布/已批准页面会
-  // 继续隐藏“提交审核”，用户只能看到一个永远不可用的发布按钮。
+  // 继续按旧审核状态禁用发布。超级管理员可从草稿直接发布；其他角色仍显示提交审核。
   const effectiveReviewStatus = hasUnsavedChanges ? "DRAFT" : reviewStatus;
   const publishUnavailableReason = USE_MOCK
       ? "Mock 模式未连接真实发布服务"
@@ -182,9 +180,9 @@ export default function EditorToolbar({
       ? "正在查看线上版本，无需重复发布"
     : !canPublish
       ? "当前账号可提交审核，发布需由管理员完成"
-    : effectiveReviewStatus === "PUBLISHED" && !hasPendingDraft
-      ? "当前语言版本已发布，没有待发布更改"
-    : effectiveReviewStatus !== "APPROVED" && !hasUnsavedChanges
+    : effectiveReviewStatus !== "APPROVED"
+      && effectiveReviewStatus !== "PUBLISHED"
+      && !canPublishWithSelfReview
       ? "当前语言版本需先通过审核"
       : null;
   const publishActionLabel = publishUnavailableReason
@@ -236,6 +234,19 @@ export default function EditorToolbar({
           : publishReviewErrorCount > 0
             ? `发布未通过 · ${publishReviewErrorCount} 项`
             : "已满足发布门禁";
+  // 发布资格错误由发布按钮打开右侧“本次发布检查”统一承载，避免在工具栏
+  // 重复展示错误摘要；实际发布失败和检查不可用仍保留可重试入口。
+  const showPublishReviewStatus = publishAttemptFailed
+    || publishValidationStatus === "unavailable";
+  const publishedLiveHealthLabel = publishedRevalidationErrors.length > 0
+    ? `线上版本异常 · ${publishedRevalidationErrors.length} 项`
+    : "线上版本待校验";
+  const publishedLiveHealthAriaLabel = publishedRevalidationErrors.length > 0
+    ? `线上已发布版本未通过公开校验，共 ${publishedRevalidationErrors.length} 项；打开页面设置查看`
+    : "线上已发布版本需要重新校验；打开页面设置查看";
+  const publishedLiveHealthTitle = publishedRevalidationErrors.length > 0
+    ? `线上版本未通过公开校验：${publishedRevalidationErrors.slice(0, 3).join("；")}`
+    : "线上版本需要重新校验；打开页面设置查看详情";
 
   useEffect(() => {
     onDataChange(appData);
@@ -513,29 +524,6 @@ export default function EditorToolbar({
     [dispatch, message, modal, onCanvasDataSync, pageKey],
   );
 
-  /* ── 套用首屏测试结构：整页替换为唯一保留的可编辑首屏种子。 ── */
-
-  const applyRecommendedStructure = useCallback(() => {
-    const recommended = createEditorPageDefault(pageKey);
-    modal.confirm({
-      title: "套用首屏测试结构？",
-      content:
-        "当前画布将被统一的首屏测试结构整体替换；尚未保存的修改会丢失，发布前不影响线上页面。",
-      okText: "套用并替换画布",
-      cancelText: "取消",
-      onOk: () => {
-        dispatch({
-          type: "setData",
-          data: recommended as Partial<Data>,
-          recordHistory: true,
-        });
-        onCanvasDataSync(recommended);
-        dispatch({ type: "setUi", ui: { itemSelector: null } });
-        message.success("首屏测试结构已套用，可继续调整并保存草稿");
-      },
-    });
-  }, [dispatch, message, modal, onCanvasDataSync, pageKey]);
-
   const draftMenuItems = viewingPublished
     ? hasPendingDraft
       ? [
@@ -581,7 +569,9 @@ export default function EditorToolbar({
       ? [{
           key: "publication-revalidation",
           icon: <SettingOutlined />,
-          label: "线上版本需重新校验",
+          label: publishedRevalidationErrors.length > 0
+            ? `线上版本未通过公开校验 · ${publishedRevalidationErrors.length} 项`
+            : "线上版本需重新校验",
           danger: true,
           onClick: onOpenPageSettings,
         }]
@@ -591,14 +581,6 @@ export default function EditorToolbar({
       : []),
     ...draftMenuItems,
     ...(draftMenuItems.length > 0 ? [{ type: "divider" as const }] : []),
-    ...(!viewingPublished
-      ? [{
-          key: "recommended",
-          icon: <LayoutOutlined />,
-          label: "套用首屏测试结构",
-          onClick: applyRecommendedStructure,
-        }]
-      : []),
     {
       key: "revisions",
       icon: <HistoryOutlined />,
@@ -695,7 +677,10 @@ export default function EditorToolbar({
         activeMode="page"
         subjectLabel="当前页面"
         subjectValue={getEditorPage(pageKey).label}
-        status={publishReviewActive ? (
+        pageValue={pageKey}
+        pageOptions={editorPages.map((page) => ({ value: page.key, label: page.label }))}
+        onChangePage={onSwitchPage ? (value) => onSwitchPage(value as EditorPageKey) : undefined}
+        status={showPublishReviewStatus ? (
           <button
             id="homepage-page-publish-review-entry"
             type="button"
@@ -769,19 +754,19 @@ export default function EditorToolbar({
               </span>
             ) : null}
             <div className="homepage-editor__locale-review-controls" aria-label="内容语言与审核状态">
-              <label>
-                <span className="sr-only">内容语言</span>
-                <select
-                  value={locale}
-                  disabled={localeSwitchDisabled}
-                  onChange={(event) => onLocaleChange(event.target.value as PublicContentLocale)}
-                  title={localeSwitchDisabled ? "请先保存当前修改再切换语言" : "切换独立的中文或英文页面草稿"}
-                  aria-label="内容语言"
+              {publishedNeedsRevalidation ? (
+                <button
+                  type="button"
+                  className="homepage-editor__published-live-health"
+                  data-testid="published-live-health-alert"
+                  onClick={() => onOpenPageSettings()}
+                  aria-label={publishedLiveHealthAriaLabel}
+                  title={publishedLiveHealthTitle}
                 >
-                  <option value="zh-CN">中文</option>
-                  <option value="en">English</option>
-                </select>
-              </label>
+                  {publishedLiveHealthLabel}
+                </button>
+              ) : null}
+              <span className="homepage-editor__locale-label" aria-label="内容语言">中文</span>
               <span role="status" data-testid="page-review-status">
                 {effectiveReviewStatus === "DRAFT" ? "草稿"
                   : effectiveReviewStatus === "IN_REVIEW" ? "待审核"
@@ -790,12 +775,14 @@ export default function EditorToolbar({
                         : effectiveReviewStatus === "PUBLISHED" ? "已发布"
                           : "已归档"}
               </span>
-              {(effectiveReviewStatus === "DRAFT" || effectiveReviewStatus === "CHANGES_REQUESTED") && !viewingPublished ? (
+              {(effectiveReviewStatus === "DRAFT" || effectiveReviewStatus === "CHANGES_REQUESTED")
+                && !viewingPublished
+                && !canPublishWithSelfReview ? (
                 <button type="button" onClick={onSubmitReview} disabled={saving || publishing}>
                   提交审核
                 </button>
               ) : null}
-              {canPublish && effectiveReviewStatus === "IN_REVIEW" ? (
+              {canPublish && effectiveReviewStatus === "IN_REVIEW" && !canPublishWithSelfReview ? (
                 <>
                   {!isOwnReviewSubmission ? (
                     <button type="button" onClick={onApproveReview} disabled={saving || publishing}>
@@ -831,8 +818,8 @@ export default function EditorToolbar({
                   <button
                     type="button"
                     onClick={() => {
-                      const note = window.prompt("请输入退回修改原因");
-                      if (note?.trim()) onRequestChanges(note.trim());
+                      setRequestChangesNote("");
+                      setRequestChangesOpen(true);
                     }}
                     disabled={saving || publishing}
                   >
@@ -870,24 +857,61 @@ export default function EditorToolbar({
           items: menuItems,
           onClick: handleMenuClick,
           ariaLabel: publishedNeedsRevalidation
-            ? "更多编辑操作，线上版本需重新校验"
+            ? publishedRevalidationErrors.length > 0
+              ? `更多编辑操作，线上版本未通过公开校验，共 ${publishedRevalidationErrors.length} 项`
+              : "更多编辑操作，线上版本需重新校验"
             : "更多编辑操作",
           title: publishedNeedsRevalidation
-            ? "页面工具；线上版本需重新校验"
+            ? publishedRevalidationErrors.length > 0
+              ? `页面工具；线上版本未通过公开校验：${publishedRevalidationErrors.slice(0, 3).join("；")}`
+              : "页面工具；线上版本需重新校验"
             : "页面设置、发布历史与方案工具",
         }}
         publish={{
-          label: "发布",
+          label: "发布页面",
           loading: publishing,
           disabled: Boolean(publishUnavailableReason),
           onClick: publishCurrentPage,
           ariaLabel: publishActionLabel,
           title: publishUnavailableReason
-            ?? "保存当前草稿并发布页面；只有此操作会更新客户前台，无图片模板会自动隐藏",
+            ?? "保存当前草稿并发布到前台网站",
         }}
       />
     </header>
   );
 
-  return toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar;
+  return (
+    <>
+      {toolbarHost ? createPortal(toolbar, toolbarHost) : toolbar}
+      <Modal
+        title="退回修改？"
+        open={requestChangesOpen}
+        okText="确认退回修改"
+        cancelText="取消"
+        okButtonProps={{ danger: true, disabled: !requestChangesNote.trim() }}
+        destroyOnHidden
+        onCancel={() => {
+          setRequestChangesOpen(false);
+          setRequestChangesNote("");
+        }}
+        onOk={() => {
+          const note = requestChangesNote.trim();
+          if (!note) return Promise.reject();
+          onRequestChanges(note);
+          setRequestChangesOpen(false);
+          setRequestChangesNote("");
+        }}
+      >
+        <p style={{ margin: "0 0 8px" }}>请填写退回原因，便于提交人继续修改。</p>
+        <Input.TextArea
+          value={requestChangesNote}
+          placeholder="例如：主标题过长，请改到 20 字以内"
+          autoSize={{ minRows: 3, maxRows: 6 }}
+          maxLength={500}
+          showCount
+          onChange={(event) => setRequestChangesNote(event.target.value)}
+        />
+      </Modal>
+    </>
+  );
 }

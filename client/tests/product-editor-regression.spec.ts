@@ -14,6 +14,7 @@ test.describe("商品编辑器关键回归", () => {
   });
 
   test("新建状态、核心字段过滤、预览和物流条件一致", async ({ page }) => {
+    await expect(page.getByRole("button", { name: "返回商品列表" })).toBeVisible();
     await expect(page.getByText("尚未保存", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "品牌" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "批量导入" })).toHaveCount(0);

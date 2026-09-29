@@ -6,6 +6,7 @@ import {
   canNestDynamicTemplateNode,
   getDynamicTemplateNodeRegistryEntry,
   resolveDynamicTemplateMoveLanding,
+  resolveDynamicTemplateMoveShortcutLanding,
   moveDynamicTemplateNodeToLanding,
   duplicateDynamicTemplateNode,
   DynamicTemplateRenderer,
@@ -245,7 +246,7 @@ export default function DynamicTemplateCanvas() {
     resolveTemplateDefinitionForBreakpoint(dynamicDraft.definition, breakpoint),
     device,
   );
-  const displayWidth = previewWidth ?? (breakpoint === "tablet" ? 834 : sourceWidth);
+  const displayWidth = previewWidth ?? sourceWidth;
   const displayHeightMode = directResizePreview?.heightMode ?? heightMode;
   const displayFallbackHeight = directResizePreview?.height
     ?? (heightMode === "aspect-ratio"
@@ -335,7 +336,7 @@ export default function DynamicTemplateCanvas() {
         && !resolveTemplateNodeRules(dynamicDraft.definition, target.ownerNodeId, breakpoint).anchor
         && !resolveTemplateNodeRules(dynamicDraft.definition, target.ownerNodeId, breakpoint).placement
         ? ["e", "s", "se"] as const : undefined,
-      resizeContextLabel: `${breakpoint === "desktop" ? "Desktop 主值" : breakpoint === "tablet" ? "Tablet 覆盖" : "Mobile 覆盖"}`,
+      resizeContextLabel: `${breakpoint === "desktop" ? "桌面基础" : "手机覆盖"}`,
       parentTargetId: target.source === "builtin-contract-role"
         ? `node:${target.ownerNodeId}`
         : `node:${findDynamicTemplateParentId(dynamicDraft.definition, target.ownerNodeId) ?? ""}`,
@@ -416,13 +417,17 @@ export default function DynamicTemplateCanvas() {
     if (sourceDefinition && sourceRules && gesture.target.source === "definition-node" && !sourceRules.placement && !sourceRules.anchor && gesture.operation === "move") {
       const drop = gesture.dropTarget;
       const hovered = drop ? sourceDefinition.nodes[drop.nodeId] : null;
-      const parentId = hovered ? findDynamicTemplateParentId(sourceDefinition, hovered.nodeId) : null;
+      const parentId = hovered ? findDynamicTemplateParentId(sourceDefinition, hovered.nodeId) : findDynamicTemplateParentId(sourceDefinition, gesture.target.ownerNodeId);
       const parentRules = parentId ? resolveTemplateNodeRules(sourceDefinition, parentId, breakpoint) : null;
       const canEnter = hovered && getDynamicTemplateNodeRegistryEntry(hovered.type).canHaveChildren && drop && drop.x > .2 && drop.x < .8 && drop.y > .2 && drop.y < .8;
-      const landing = hovered && drop ? resolveDynamicTemplateMoveLanding(sourceDefinition, gesture.target.ownerNodeId, {
+      const pointerLanding = hovered && drop ? resolveDynamicTemplateMoveLanding(sourceDefinition, gesture.target.ownerNodeId, {
         targetNodeId: hovered.nodeId,
         placement: canEnter ? "inside" : (parentRules?.direction === "row" ? drop.x : drop.y) < .5 ? "before" : "after",
       }) : null;
+      const keyboardDelta = parentRules?.direction === "row" ? gesture.deltaSourceX : gesture.deltaSourceY;
+      const landing = pointerLanding ?? (!drop && phase === "commit" && keyboardDelta
+        ? resolveDynamicTemplateMoveShortcutLanding(sourceDefinition, gesture.target.ownerNodeId, keyboardDelta < 0 ? "up" : "down")
+        : null);
       const blocked = !landing ? "当前位置没有可用落点" : landing.disabledReason;
       setFlowDropLabel(blocked ?? `${landing!.parentId === findDynamicTemplateParentId(sourceDefinition, gesture.target.ownerNodeId) ? "重排" : "跨容器移动"}：${landing!.pathLabel}`);
       if (phase === "preview" && placementTokenRef.current) {
@@ -669,7 +674,7 @@ export default function DynamicTemplateCanvas() {
     if (Number(currentDraft.definition.schemaVersion) >= 2 && (action === "forward" || action === "backward")) {
       const parentId = findDynamicTemplateParentId(currentDraft.definition, nodeId);
       if (!parentId) return;
-      const result = executeCommand({ type: "update-definition", label: action === "forward" ? "对象上移一层（所有断点）" : "对象下移一层（所有断点）", update: (next) => {
+      const result = executeCommand({ type: "update-definition", label: action === "forward" ? "对象上移一层（电脑与手机）" : "对象下移一层（电脑与手机）", update: (next) => {
         const siblings = next.nodes[parentId].childIds;
         const from = siblings.indexOf(nodeId);
         const to = from + (action === "forward" ? 1 : -1);
@@ -856,7 +861,7 @@ export default function DynamicTemplateCanvas() {
             aria-label={id === dynamicDraft.definition.rootNodeId ? `选择模板目标 ${dynamicDraft.definition.nodes[id]?.name ?? "模板"}` : undefined}
             onClick={() => { enterEditingScope(id); selectObject(id); }}>{dynamicDraft.definition.nodes[id]?.name ?? "模板"}</Button>
         </span>)}
-        <span role="status">{layoutLabel} · {breakpoint === "desktop" ? "桌面端" : breakpoint === "tablet" ? "平板端" : "手机端"}</span>
+        <span role="status">{layoutLabel} · {breakpoint === "desktop" ? "桌面端" : "手机端"}</span>
         {selectedNodeId && selectedNodeId !== scopeId && getDynamicTemplateNodeRegistryEntry(dynamicDraft.definition.nodes[selectedNodeId].type).canHaveChildren ? <Button size="small" disabled={Boolean(getDynamicTemplateStructureLockOwnerId(dynamicDraft.definition, selectedNodeId))} onClick={() => enterEditingScope(selectedNodeId)}>进入选中容器</Button> : null}
         <details className="template-editor__canvas-add"><summary>＋ 添加内容</summary><div>
           <strong>添加到：{dynamicDraft.definition.nodes[scopeId]?.name}</strong>

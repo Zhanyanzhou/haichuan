@@ -35,6 +35,20 @@ test("共享错误边界使用中性降级并阻止异常页面进入索引", ()
   expect(errorBoundarySource).toContain("当前页面暂时无法显示，请刷新后重试。");
   expect(errorBoundarySource).not.toContain("可通过联系页面提交需求");
   expect(errorBoundarySource).not.toContain("页面加载异常｜海川珠宝");
+  expect(errorBoundarySource).toContain('<main');
+  expect(errorBoundarySource).toContain('aria-labelledby="fatal-error-title"');
+  expect(errorBoundarySource).toContain('id="fatal-error-title"');
+  expect(errorBoundarySource).toContain('tabIndex={-1}');
+  expect(errorBoundarySource).toContain('recoveryHeadingRef.current?.focus({ preventScroll: true })');
+  expect(errorBoundarySource).toContain('aria-hidden="true">⚠️');
+});
+
+test("公共页面主内容在键盘跳转后保留可见焦点", () => {
+  expect(publicLayoutSource).toContain('id="main-content"');
+  expect(publicLayoutSource).toContain('tabIndex={-1}');
+  expect(publicLayoutSource).toContain("focus-visible:outline");
+  expect(publicLayoutSource).toContain("focus-visible:outline-[#181A1B]");
+  expect(publicLayoutSource).not.toContain('style={{ outline: "none" }}');
 });
 
 test("生产构建关闭开发画廊、mock mode 与静态首页 fallback", () => {
@@ -60,7 +74,9 @@ test("分析必须显式配置并获得访客同意", () => {
   expect(analyticsSource).toContain("hc_analytics_consent");
   expect(analyticsSource).toContain("sessionStorage");
   expect(analyticsSource).toContain('const ANALYTICS_VISITOR_KEY = "hc.analytics-visitor"');
-  expect(analyticsSource).toContain("localStorage.removeItem(ANALYTICS_VISITOR_KEY)");
+  expect(analyticsSource).toContain("sessionStorage.setItem(ANALYTICS_VISITOR_KEY");
+  expect(analyticsSource).toContain("window.localStorage.removeItem(ANALYTICS_VISITOR_KEY)");
+  expect(analyticsSource).not.toContain("localStorage.setItem(ANALYTICS_VISITOR_KEY");
   expect(analyticsSource.indexOf("hasAnalyticsConsent()")).toBeLessThan(
     analyticsSource.indexOf("void send"),
   );

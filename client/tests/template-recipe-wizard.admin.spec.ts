@@ -1,15 +1,10 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { installNewTemplateServer, openTemplateDesignWithoutDraft, readSession } from "./fixtures/template-authoring-main-route";
+import { clickNewTemplateEntry, installNewTemplateServer, openTemplateDesignWithoutDraft, readSession } from "./fixtures/template-authoring-main-route";
 import { TEMPLATE_RECIPE_SCHEMA } from "../src/page-builder/template-definition/generated/templateDefinition.generated";
 
 async function openWizard(page: Page) {
   await openTemplateDesignWithoutDraft(page);
-  if ((page.viewportSize()?.width ?? 1280) < 600) {
-    await page.getByRole("button", { name: "更多模板操作", exact: true }).click();
-    await page.getByRole("menuitem", { name: /新建模板$/ }).click();
-  } else {
-    await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
-  }
+  await clickNewTemplateEntry(page);
   return page.getByRole("dialog", { name: "创建模板", exact: true });
 }
 
@@ -531,6 +526,8 @@ test("内容共用合同上限且达到后可取消替换，创建不超限（�
   const node = Object.values(created.nodes).find((item) => item.slotId && created.slots[item.slotId].semanticRole === "subtitle")!;
   const parent = Object.values(created.nodes).find((item) => item.childIds.includes(node.nodeId))!;
   const index = parent.childIds.indexOf(node.nodeId);
+  const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
+  if (await structureTrigger.isVisible()) await structureTrigger.click();
   await page.getByRole("treeitem", { name: "副标题 文字区域 可选", exact: true }).hover();
   await page.getByRole("button", { name: "副标题节点操作", exact: true }).click();
   const up = page.getByRole("menuitem", { name: "上移", exact: true });
@@ -628,9 +625,9 @@ test("Escape 与关闭按钮恢复新建入口焦点且不建立草稿（自有 
   const server = await installNewTemplateServer(page);
   await page.setViewportSize({ width: 1600, height: 1000 });
   await openTemplateDesignWithoutDraft(page);
-  const trigger = page.getByRole("button", { name: "顶部新建模板", exact: true });
+  const trigger = await clickNewTemplateEntry(page);
   for (const close of ["escape", "button"] as const) {
-    await trigger.click();
+    if (close === "button") await trigger.click();
     const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
     await expect(dialog).toBeVisible();
     if (close === "escape") await page.keyboard.press("Escape");
@@ -687,7 +684,7 @@ test("七步只做选择、即时预览、返回保留、确认生成与取消�
   expect(snapshot.definition!.templateRecipe!.content.find((slot) => slot.role === "customText")?.name).toBe("商品卖点");
   expect(Object.keys(snapshot.definition!.slots)).toHaveLength(9);
   expect(server.writes).toEqual([]);
-  await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+  await clickNewTemplateEntry(page);
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: /正方形 1:1/ }).click();
@@ -708,9 +705,7 @@ test("390px 自定义锁比、预览切换与取消保护（自有 API Mock）",
   const server = await installNewTemplateServer(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await openTemplateDesignWithoutDraft(page);
-  const direct = page.getByRole("button", { name: "顶部新建模板", exact: true });
-  if (await direct.isVisible()) await direct.click();
-  else { await page.getByRole("button", { name: "更多模板操作", exact: true }).click(); await page.getByRole("menuitem", { name: /新建模板$/ }).click(); }
+  await clickNewTemplateEntry(page);
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
   await dialog.getByRole("button", { name: "通用模板", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();

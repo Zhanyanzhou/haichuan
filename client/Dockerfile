@@ -5,6 +5,8 @@ WORKDIR /release
 COPY .release-seo/public-seo-snapshot.json ./public-seo-snapshot.json
 COPY .release-seo/public-seo-routes.conf ./public-seo-routes.conf
 COPY .release-seo/public-seo-policy.conf ./public-seo-policy.conf
+COPY .release-seo/public-origin-redirect.conf ./public-origin-redirect.conf
+COPY .release-seo/public-origin-host.conf ./public-origin-host.conf
 COPY .release-seo/tools/ ./tools/
 COPY dist/ ./dist/
 
@@ -33,6 +35,8 @@ RUN test -n "$VITE_API_BASE_URL" \
       --out-dir ./dist \
       --nginx-map ./public-seo-routes.conf \
       --nginx-policy ./public-seo-policy.conf \
+      --nginx-origin-redirect ./public-origin-redirect.conf \
+      --nginx-origin-host ./public-origin-host.conf \
     && test "$(node -e 'const value=require("./public-seo-snapshot.json"); process.stdout.write(value.snapshotHash || "")')" = "$PUBLIC_SEO_SNAPSHOT_HASH" \
     && test "$(sha256sum ./dist/prerendered-routes.json | cut -d ' ' -f 1)" = "$PUBLIC_SEO_PRERENDER_MANIFEST_SHA256" \
     && rm ./dist/prerendered-routes.json
@@ -69,6 +73,8 @@ COPY --chown=nginx:nginx nginx-main.conf /etc/nginx/nginx.conf
 COPY --chown=nginx:nginx nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=verify --chown=nginx:nginx /release/public-seo-routes.conf /etc/nginx/public-seo-routes.conf
 COPY --from=verify --chown=nginx:nginx /release/public-seo-policy.conf /etc/nginx/public-seo-policy.conf
+COPY --from=verify --chown=nginx:nginx /release/public-origin-redirect.conf /etc/nginx/public-origin-redirect.conf
+COPY --from=verify --chown=nginx:nginx /release/public-origin-host.conf /etc/nginx/public-origin-host.conf
 COPY --from=verify --chown=nginx:nginx /release/dist /usr/share/nginx/html
 
 USER nginx

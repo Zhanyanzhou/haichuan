@@ -23,6 +23,8 @@ test('合作申请正文会先规范化并剥离客户不可写字段', async ()
     companyName: '  测试商户  ',
     businessDescription: '  主营珠宝蜡模  ',
     agreementAccepted: true,
+    agreementVersion: 'partner-agreement-v999',
+    agreementHash: 'f'.repeat(64),
     status: 'APPROVED',
     accountType: 'PARTNER',
   }, 'body');

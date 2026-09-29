@@ -1,7 +1,17 @@
-import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { KimiService } from "../../common/kimi/kimi.service";
+import type { StaffPrincipal } from "../../common/security/authenticated-principal";
+import type OpenAI from "openai";
+
+type AiClassifyActor = Pick<StaffPrincipal, "id" | "sessionFamilyId">;
 
 type CategoryCandidate = { id: number; name: string; level: number };
 
@@ -53,35 +63,102 @@ export class AiClassifyService {
     private kimiService: KimiService,
   ) {}
 
+  private async lockAuthorizedActor(
+    transaction: Prisma.TransactionClient,
+    actor: AiClassifyActor,
+    mode: "read" | "write",
+  ): Promise<{ id: number }> {
+    if (!actor || !Number.isSafeInteger(actor.id) || actor.id <= 0) {
+      throw new ForbiddenException("当前员工已停用或无权使用 AI 分类");
+    }
+    const locked = mode === "read"
+      ? await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR SHARE`,
+        )
+      : await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR UPDATE`,
+        );
+    if (locked.length !== 1) {
+      throw new ForbiddenException("当前员工已停用或无权使用 AI 分类");
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = mode === "read"
+        ? await transaction.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+          )
+        : await transaction.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+          );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException("当前员工会话已失效，不能使用 AI 分类");
+      }
+    }
+    return locked[0];
+  }
+
+  private withAuthorizedActor<T>(
+    actor: AiClassifyActor,
+    mode: "read" | "write",
+    work: (
+      transaction: Prisma.TransactionClient,
+      lockedActor: { id: number },
+    ) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (transaction) => {
+      const lockedActor = await this.lockAuthorizedActor(transaction, actor, mode);
+      return work(transaction, lockedActor);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  private assertKimiAvailable() {
+    if (!this.kimiService.isAvailable()) {
+      throw new ServiceUnavailableException(
+        "AI 服务未配置，请先设置 KIMI_API_KEY 环境变量",
+      );
+    }
+  }
+
   /**
    * AI 图片分类 - 优先使用 Kimi Vision API，不可用时回退到 mock
    */
-  async classifyImage(imageUrl: string): Promise<ClassifyResult> {
+  async classifyImage(
+    imageUrl: string,
+    actor: AiClassifyActor,
+  ): Promise<ClassifyResult> {
     this.logger.log(`开始分类图片: ${imageUrl}`);
 
-    // 获取所有启用的分类作为候选
-    const categories = await this.prisma.category.findMany({
-      where: { isActive: true },
-      select: { id: true, name: true, level: true },
-    });
+    // 外部调用前先在短事务内复核员工与会话，并读取当前候选分类。
+    const categories = await this.withAuthorizedActor(
+      actor,
+      "read",
+      (transaction) => transaction.category.findMany({
+        where: { isActive: true },
+        select: { id: true, name: true, level: true },
+      }),
+    );
 
     const categoryNames = categories.map((c) => c.name).join("、");
-
-    // 尝试使用 Kimi 真实 API
-    if (this.kimiService.isAvailable()) {
-      try {
-        return await this.realClassify(imageUrl, categories, categoryNames);
-      } catch (error: unknown) {
-        this.logger.warn(
-          `Kimi API 调用失败: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        throw error;
-      }
+    this.assertKimiAvailable();
+    try {
+      const classified = await this.realClassify(
+        imageUrl,
+        categories,
+        categoryNames,
+      );
+      // 外部结果返回后再次复核，旧会话的迟到结果不得写回分类记录。
+      await this.withAuthorizedActor(actor, "write", (transaction) =>
+        transaction.aIClassifyRecord.create({ data: classified.record }),
+      );
+      this.logger.log(
+        `分类完成: ${classified.result.predictedCategoryName} (${classified.result.confidence}%)`,
+      );
+      return classified.result;
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Kimi API 调用或分类结果落库失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
     }
-
-    // Kimi 未配置，不静默回退 mock
-    this.logger.warn("AI 分类服务不可用：Kimi API Key 未配置");
-    throw new Error("AI 分类服务未配置，请先设置 KIMI_API_KEY 环境变量");
   }
 
   /**
@@ -91,7 +168,15 @@ export class AiClassifyService {
     imageUrl: string,
     categories: CategoryCandidate[],
     categoryNames: string,
-  ): Promise<ClassifyResult> {
+  ): Promise<{
+    result: ClassifyResult;
+    record: {
+      imageUrl: string;
+      predictedCategoryId: number | null;
+      confidence: number;
+      status: string;
+    };
+  }> {
     const prompt = `你是一个专业的珠宝首饰分类专家。请仔细观察这张珠宝图片，从以下候选分类中选择最匹配的分类：
 
 可选的分类有：${categoryNames}
@@ -120,21 +205,15 @@ ${this.classifyOutputSchema}`;
     if (finalResult.confidence >= 90) status = "auto_confirmed";
     else if (finalResult.confidence >= 70) status = "pending_confirm";
 
-    // 保存记录
-    await this.prisma.aIClassifyRecord.create({
-      data: {
+    return {
+      result: finalResult,
+      record: {
         imageUrl,
         predictedCategoryId: finalResult.predictedCategoryId,
         confidence: finalResult.confidence,
         status,
       },
-    });
-
-    this.logger.log(
-      `分类完成: ${finalResult.predictedCategoryName} (${finalResult.confidence}%)`,
-    );
-
-    return finalResult;
+    };
   }
 
   /**
@@ -213,10 +292,13 @@ ${this.classifyOutputSchema}`;
   /**
    * Batch classify multiple images
    */
-  async batchClassify(imageUrls: string[]): Promise<BatchClassifyResult[]> {
+  async batchClassify(
+    imageUrls: string[],
+    actor: AiClassifyActor,
+  ): Promise<BatchClassifyResult[]> {
     const results: BatchClassifyResult[] = [];
     for (const url of imageUrls) {
-      const result = await this.classifyImage(url);
+      const result = await this.classifyImage(url, actor);
       results.push({ imageUrl: url, ...result });
     }
     return results;
@@ -229,25 +311,27 @@ ${this.classifyOutputSchema}`;
     page?: number;
     pageSize?: number;
     status?: string;
-  }) {
-    const { page = 1, pageSize = 20, status } = params;
-    const where: Prisma.AIClassifyRecordWhereInput = {};
-    if (status && status !== "all") where.status = status;
+  }, actor: AiClassifyActor) {
+    return this.withAuthorizedActor(actor, "read", async (transaction) => {
+      const { page = 1, pageSize = 20, status } = params;
+      const where: Prisma.AIClassifyRecordWhereInput = {};
+      if (status && status !== "all") where.status = status;
 
-    const [list, total] = await Promise.all([
-      this.prisma.aIClassifyRecord.findMany({
-        where,
-        skip: (+page - 1) * +pageSize,
-        take: +pageSize,
-        orderBy: { createdAt: "desc" },
-        include: {
-          operator: { select: { id: true, username: true, realName: true } },
-        },
-      }),
-      this.prisma.aIClassifyRecord.count({ where }),
-    ]);
+      const [list, total] = await Promise.all([
+        transaction.aIClassifyRecord.findMany({
+          where,
+          skip: (+page - 1) * +pageSize,
+          take: +pageSize,
+          orderBy: { createdAt: "desc" },
+          include: {
+            operator: { select: { id: true, username: true, realName: true } },
+          },
+        }),
+        transaction.aIClassifyRecord.count({ where }),
+      ]);
 
-    return { list, total, page: +page, pageSize: +pageSize };
+      return { list, total, page: +page, pageSize: +pageSize };
+    });
   }
 
   /**
@@ -258,93 +342,141 @@ ${this.classifyOutputSchema}`;
     data: {
       status: "confirmed" | "rejected";
       confirmedCategoryId?: number;
-      operatorId: number;
     },
+    actor: AiClassifyActor,
   ) {
-    // 驳回：仅落驳回状态，不写人工确认分类
-    if (data.status === "rejected") {
-      return this.prisma.aIClassifyRecord.update({
+    return this.withAuthorizedActor(actor, "write", async (transaction, lockedActor) => {
+      // 驳回：仅落驳回状态，不写人工确认分类
+      if (data.status === "rejected") {
+        return transaction.aIClassifyRecord.update({
+          where: { id },
+          data: {
+            status: "rejected",
+            operatorId: lockedActor.id,
+          },
+        });
+      }
+
+      // 确认：未显式传人工分类时沿用预测分类，保证 confirmedCategoryId 有值
+      const confirmedCategoryId =
+        data.confirmedCategoryId ??
+        (
+          await transaction.aIClassifyRecord.findUnique({
+            where: { id },
+            select: { predictedCategoryId: true },
+          })
+        )?.predictedCategoryId;
+
+      if (!confirmedCategoryId) {
+        throw new BadRequestException("无法确认：请先选择有效分类");
+      }
+
+      const record = await transaction.aIClassifyRecord.update({
         where: { id },
         data: {
-          status: "rejected",
-          operatorId: data.operatorId,
+          confirmedCategoryId,
+          operatorId: lockedActor.id,
+          status: "confirmed",
         },
       });
-    }
 
-    // 确认：未显式传人工分类时沿用预测分类，保证 confirmedCategoryId 有值
-    const confirmedCategoryId =
-      data.confirmedCategoryId ??
-      (
-        await this.prisma.aIClassifyRecord.findUnique({
-          where: { id },
-          select: { predictedCategoryId: true },
-        })
-      )?.predictedCategoryId;
+      if (
+        record.predictedCategoryId != null &&
+        record.predictedCategoryId !== confirmedCategoryId
+      ) {
+        this.logger.log(
+          `Classification corrected: ${record.predictedCategoryId} → ${confirmedCategoryId}. Feedback recorded.`,
+        );
+      }
 
-    if (!confirmedCategoryId) {
-      throw new BadRequestException("无法确认：请先选择有效分类");
-    }
-
-    const record = await this.prisma.aIClassifyRecord.update({
-      where: { id },
-      data: {
-        confirmedCategoryId,
-        operatorId: data.operatorId,
-        status: "confirmed",
-      },
+      return record;
     });
-
-    // Feedback loop: if the confirmed category differs from prediction,
-    // this data could be used to retrain the model in production
-    if (
-      record.predictedCategoryId != null &&
-      record.predictedCategoryId !== confirmedCategoryId
-    ) {
-      this.logger.log(
-        `Classification corrected: ${record.predictedCategoryId} → ${confirmedCategoryId}. Feedback recorded.`,
-      );
-    }
-
-    return record;
   }
 
   /**
    * Get accuracy report
    */
-  async getAccuracyReport() {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const [total, autoConfirmed, confirmed, todayCount, correctRows] =
-      await Promise.all([
-        this.prisma.aIClassifyRecord.count(),
-        this.prisma.aIClassifyRecord.count({
+  async getAccuracyReport(actor: AiClassifyActor) {
+    return this.withAuthorizedActor(actor, "read", async (transaction) => {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const [total, autoConfirmed, confirmed, todayCount, correctRows] =
+        await Promise.all([
+        transaction.aIClassifyRecord.count(),
+        transaction.aIClassifyRecord.count({
           where: { status: "auto_confirmed" },
         }),
-        this.prisma.aIClassifyRecord.count({ where: { status: "confirmed" } }),
-        this.prisma.aIClassifyRecord.count({
+        transaction.aIClassifyRecord.count({ where: { status: "confirmed" } }),
+        transaction.aIClassifyRecord.count({
           where: { createdAt: { gte: todayStart } },
         }),
-        // P1-21：准确率必须比较 predictedCategoryId === confirmedCategoryId（Prisma 不支持列间比较，用参数化 raw SQL）
-        this.prisma.$queryRaw<{ count: bigint }[]>`
+        transaction.$queryRaw<{ count: bigint }[]>`
         SELECT COUNT(*) AS count FROM ai_classify_records
         WHERE status = 'confirmed' AND predicted_category_id IS NOT NULL
           AND predicted_category_id = confirmed_category_id
       `,
       ]);
 
-    const correctPredictions = Number(correctRows[0]?.count ?? 0);
+      const correctPredictions = Number(correctRows[0]?.count ?? 0);
 
-    return {
-      total,
-      autoConfirmed,
-      autoConfirmRate:
-        total > 0 ? ((autoConfirmed / total) * 100).toFixed(1) : "0",
-      accuracy:
-        confirmed > 0
-          ? ((correctPredictions / confirmed) * 100).toFixed(1)
-          : "N/A",
-      todayCount,
-    };
+      return {
+        total,
+        autoConfirmed,
+        autoConfirmRate:
+          total > 0 ? ((autoConfirmed / total) * 100).toFixed(1) : "0",
+        accuracy:
+          confirmed > 0
+            ? ((correctPredictions / confirmed) * 100).toFixed(1)
+            : "N/A",
+        todayCount,
+      };
+    });
+  }
+
+  async chat(
+    data: { message: string; systemPrompt?: string },
+    actor: AiClassifyActor,
+  ) {
+    await this.withAuthorizedActor(actor, "read", async () => undefined);
+    this.assertKimiAvailable();
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+    if (data.systemPrompt) {
+      messages.push({ role: "system", content: data.systemPrompt });
+    }
+    messages.push({ role: "user", content: data.message });
+    return this.kimiService.chat(messages);
+  }
+
+  async generateDescription(
+    data: {
+      productName: string;
+      category: string;
+      material: string;
+      style?: string;
+    },
+    actor: AiClassifyActor,
+  ) {
+    await this.withAuthorizedActor(actor, "read", async () => undefined);
+    this.assertKimiAvailable();
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      {
+        role: "system",
+        content: "你是一位专业的珠宝首饰文案策划师，擅长撰写精美的产品描述。请用优雅、专业的语言描述产品。",
+      },
+      {
+        role: "user",
+        content: `请为一款名为"${data.productName}"的${data.category}撰写一段产品描述文案（150字左右）。材质：${data.material}。${data.style ? `风格：${data.style}。` : ""}请包含：设计灵感、材质特点、适合场合。`,
+      },
+    ];
+    return this.kimiService.chat(messages, { temperature: 0.8, maxTokens: 600 });
+  }
+
+  getKimiStatus(actor: AiClassifyActor) {
+    return this.withAuthorizedActor(actor, "read", async () => ({
+      available: this.kimiService.isAvailable(),
+      message: this.kimiService.isAvailable()
+        ? "Kimi API 已连接"
+        : "AI 服务未配置，请设置 KIMI_API_KEY",
+    }));
   }
 }

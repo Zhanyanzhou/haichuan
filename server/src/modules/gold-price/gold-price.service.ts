@@ -1,11 +1,16 @@
 import {
+  ForbiddenException,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 import { ProductsService } from "../products/products.service";
+
+type GoldPriceActor = Pick<StaffPrincipal, "id" | "sessionFamilyId">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -19,6 +24,39 @@ export class GoldPriceService {
     private prisma: PrismaService,
     private readonly productsService: ProductsService,
   ) {}
+
+  private async lockAuthorizedActor(
+    transaction: Prisma.TransactionClient,
+    actor: GoldPriceActor,
+    mode: "read" | "write" = "write",
+  ): Promise<{ id: number }> {
+    if (!actor || !Number.isSafeInteger(actor.id) || actor.id <= 0) {
+      throw new ForbiddenException("当前员工已停用或无权管理金价");
+    }
+    const locked = mode === "read"
+      ? await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR SHARE`,
+        )
+      : await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR UPDATE`,
+        );
+    if (locked.length !== 1) {
+      throw new ForbiddenException("当前员工已停用或无权管理金价");
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = mode === "read"
+        ? await transaction.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+          )
+        : await transaction.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+          );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException("当前员工会话已失效，不能管理金价");
+      }
+    }
+    return locked[0];
+  }
 
   /**
    * Get latest gold price
@@ -73,10 +111,13 @@ export class GoldPriceService {
   }
 
   /** 仅供后台提示自动行情能力，绝不返回行情源地址或其他配置值。 */
-  getAutomationStatus() {
-    return {
-      autoFetchConfigured: Boolean(process.env.GOLD_PRICE_API_URL?.trim()),
-    };
+  getAutomationStatus(actor: GoldPriceActor) {
+    return this.prisma.$transaction(async (transaction) => {
+      await this.lockAuthorizedActor(transaction, actor, "read");
+      return {
+        autoFetchConfigured: Boolean(process.env.GOLD_PRICE_API_URL?.trim()),
+      };
+    });
   }
 
   /**
@@ -84,17 +125,19 @@ export class GoldPriceService {
    */
   async updateManually(data: {
     price: number;
-    operatorId: number;
     remark?: string;
-  }) {
-    const record = await this.prisma.goldPrice.create({
-      data: {
-        price: data.price,
-        source: "MANUAL",
-        operatorId: data.operatorId,
-        remark: data.remark,
-        recordDate: new Date(),
-      },
+  }, actor: GoldPriceActor) {
+    const record = await this.prisma.$transaction(async (transaction) => {
+      const lockedActor = await this.lockAuthorizedActor(transaction, actor);
+      return transaction.goldPrice.create({
+        data: {
+          price: data.price,
+          source: "MANUAL",
+          operatorId: lockedActor.id,
+          remark: data.remark,
+          recordDate: new Date(),
+        },
+      });
     });
 
     this.logger.log(`Gold price manually updated to ¥${data.price}/g`);

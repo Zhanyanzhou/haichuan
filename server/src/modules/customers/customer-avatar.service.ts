@@ -1,11 +1,15 @@
 import { HttpStatus, Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { ApiError } from '../../common/errors/api-error';
+import { IdempotencyService } from '../../common/idempotency/idempotency-key';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import type { SessionMetadata } from '../../common/security/refresh-session.service';
+import type { CustomerPrincipal } from '../../common/security/authenticated-principal';
+import { Prisma } from '@prisma/client';
+import { lockActiveCustomerForRead } from './customer-write-gate';
 
 const sharp = require('sharp');
 
@@ -24,6 +28,8 @@ type PendingAvatarRemoval = {
   queuedAt: string;
 };
 
+type AvatarCustomer = Pick<CustomerPrincipal, 'id' | 'authVersion'>;
+
 function optionalHash(value: string | null | undefined): string | null {
   const normalized = value?.trim();
   return normalized ? createHash('sha256').update(normalized).digest('hex') : null;
@@ -34,17 +40,22 @@ export class CustomerAvatarService implements OnModuleInit {
   private readonly logger = new Logger(CustomerAvatarService.name);
   private readonly root = resolve(process.cwd(), 'private-media', 'customer-avatars');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly idempotency: IdempotencyService,
+  ) {}
 
   async onModuleInit(): Promise<void> {
     await this.retryPendingRemovals();
   }
 
   async replace(
-    customerId: number,
+    principal: AvatarCustomer,
     file: Express.Multer.File,
+    idempotencyKey: string,
     metadata: SessionMetadata = {},
   ) {
+    const customerId = principal.id;
     if (!file) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'AVATAR_FILE_REQUIRED', '请选择头像图片');
     }
@@ -92,17 +103,24 @@ export class CustomerAvatarService implements OnModuleInit {
     }
 
     const directory = join(this.root, String(customerId));
-    const storageKey = `${customerId}/${randomUUID()}.webp`;
+    const storageKey = this.replaceStorageKey(customerId, idempotencyKey);
     const outputPath = this.resolveStorageKey(storageKey);
     if (!outputPath) {
       throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'AVATAR_STORAGE_ERROR', '头像保存失败，请稍后重试');
     }
     const previous = await this.prisma.customer.findUnique({
       where: { id: customerId },
-      select: { avatarStorageKey: true },
+      select: { avatarStorageKey: true, status: true, authVersion: true },
     });
     if (!previous) {
       throw new ApiError(HttpStatus.NOT_FOUND, 'CUSTOMER_NOT_FOUND', '客户不存在');
+    }
+    if (previous.status !== 'ACTIVE' || previous.authVersion !== principal.authVersion) {
+      throw this.avatarAuthenticationChanged();
+    }
+    if (previous.avatarStorageKey === storageKey) {
+      await this.assertReplayContent(outputPath, output);
+      return { avatarUrl: '/api/customers/me/avatar', updatedAt: new Date() };
     }
     const previousOwnedStorageKey = previous.avatarStorageKey
       && this.resolveStorageKey(previous.avatarStorageKey, customerId)
@@ -116,23 +134,42 @@ export class CustomerAvatarService implements OnModuleInit {
       }
       newRemovalPrepared = await this.prepareRemoval(storageKey);
       await mkdir(directory, { recursive: true });
-      await writeFile(outputPath, output, { flag: 'wx' });
-    } catch {
+      try {
+        await writeFile(outputPath, output, { flag: 'wx' });
+      } catch (error) {
+        if (!isExistingFileError(error)) throw error;
+        await this.assertReplayContent(outputPath, output);
+      }
+    } catch (error) {
       if (previousRemovalPrepared && previousOwnedStorageKey) {
         await this.cancelPreparedRemoval(previousOwnedStorageKey);
       }
-      if (newRemovalPrepared) await this.completePreparedRemoval(storageKey);
+      // 同一幂等键的并发请求可能正在使用该文件；失败路径保留删除标记，
+      // 由后续同键重试接管，或在进程启动恢复时按数据库当前引用安全清理。
+      if (!newRemovalPrepared || !(error instanceof ApiError)) {
+        await this.cancelPreparedRemoval(storageKey);
+      }
+      if (error instanceof ApiError) throw error;
       throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'AVATAR_STORAGE_ERROR', '头像保存失败，请稍后重试');
     }
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        const current = await this.lockActiveCustomer(tx, principal);
+        if (current.avatarStorageKey !== previous.avatarStorageKey) {
+          throw this.avatarStateChanged();
+        }
         const claimed = await tx.customer.updateMany({
-          where: { id: customerId, avatarStorageKey: previous.avatarStorageKey },
+          where: {
+            id: customerId,
+            status: 'ACTIVE',
+            authVersion: principal.authVersion,
+            avatarStorageKey: previous.avatarStorageKey,
+          },
           data: { avatarStorageKey: storageKey },
         });
         if (claimed.count !== 1) {
-          throw new ApiError(HttpStatus.CONFLICT, 'AVATAR_UPDATE_CONFLICT', '头像已发生变化，请重新选择后再试');
+          throw this.avatarStateChanged();
         }
         await tx.customerSecurityEvent.create({
           data: {
@@ -144,10 +181,18 @@ export class CustomerAvatarService implements OnModuleInit {
         });
       });
     } catch (error) {
-      await this.completePreparedRemoval(storageKey);
       if (previousRemovalPrepared && previousOwnedStorageKey) {
         await this.cancelPreparedRemoval(previousOwnedStorageKey);
       }
+      if (await this.isCurrentReplay(principal, storageKey, outputPath, output)) {
+        await this.cancelPreparedRemoval(storageKey);
+        if (previousOwnedStorageKey && previousOwnedStorageKey !== storageKey) {
+          await this.completePreparedRemoval(previousOwnedStorageKey);
+        }
+        return { avatarUrl: '/api/customers/me/avatar', updatedAt: new Date() };
+      }
+      // 不能立即删除确定性文件：同一幂等键的另一请求可能已取得或正在等待客户行锁。
+      // 删除标记会在后续重试或启动恢复时根据数据库引用完成清理。
       throw error;
     }
     await this.cancelPreparedRemoval(storageKey);
@@ -157,13 +202,45 @@ export class CustomerAvatarService implements OnModuleInit {
     return { avatarUrl: '/api/customers/me/avatar', updatedAt: new Date() };
   }
 
-  async delete(customerId: number, metadata: SessionMetadata) {
+  async replaceStatus(principal: AvatarCustomer, idempotencyKey: string) {
     const customer = await this.prisma.customer.findUnique({
-      where: { id: customerId },
-      select: { avatarStorageKey: true },
+      where: { id: principal.id },
+      select: { avatarStorageKey: true, status: true, authVersion: true },
     });
     if (!customer) {
       throw new ApiError(HttpStatus.NOT_FOUND, 'CUSTOMER_NOT_FOUND', '客户不存在');
+    }
+    if (customer.status !== 'ACTIVE' || customer.authVersion !== principal.authVersion) {
+      throw this.avatarAuthenticationChanged();
+    }
+    const expectedStorageKey = this.replaceStorageKey(principal.id, idempotencyKey);
+    if (customer.avatarStorageKey !== expectedStorageKey) {
+      return { status: 'NOT_CURRENT' as const };
+    }
+    const filePath = this.resolveStorageKey(expectedStorageKey, principal.id);
+    if (!filePath) {
+      throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'AVATAR_STORAGE_ERROR', '头像状态核验失败');
+    }
+    try {
+      const fileStat = await stat(filePath);
+      if (!fileStat.isFile()) throw new Error('not a file');
+    } catch {
+      throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'AVATAR_STORAGE_ERROR', '头像状态核验失败');
+    }
+    return { status: 'CURRENT' as const };
+  }
+
+  async delete(principal: AvatarCustomer, metadata: SessionMetadata) {
+    const customerId = principal.id;
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { avatarStorageKey: true, status: true, authVersion: true },
+    });
+    if (!customer) {
+      throw new ApiError(HttpStatus.NOT_FOUND, 'CUSTOMER_NOT_FOUND', '客户不存在');
+    }
+    if (customer.status !== 'ACTIVE' || customer.authVersion !== principal.authVersion) {
+      throw this.avatarAuthenticationChanged();
     }
     if (!customer.avatarStorageKey) {
       return { avatarUrl: null, updatedAt: new Date() };
@@ -179,12 +256,21 @@ export class CustomerAvatarService implements OnModuleInit {
     const now = new Date();
     try {
       await this.prisma.$transaction(async (tx) => {
+        const current = await this.lockActiveCustomer(tx, principal);
+        if (current.avatarStorageKey !== customer.avatarStorageKey) {
+          throw this.avatarStateChanged();
+        }
         const claimed = await tx.customer.updateMany({
-          where: { id: customerId, avatarStorageKey: customer.avatarStorageKey },
+          where: {
+            id: customerId,
+            status: 'ACTIVE',
+            authVersion: principal.authVersion,
+            avatarStorageKey: customer.avatarStorageKey,
+          },
           data: { avatarStorageKey: null },
         });
         if (claimed.count !== 1) {
-          throw new ApiError(HttpStatus.CONFLICT, 'AVATAR_UPDATE_CONFLICT', '头像已发生变化，请刷新后再试');
+          throw this.avatarStateChanged();
         }
         await tx.customerSecurityEvent.create({
           data: {
@@ -207,24 +293,27 @@ export class CustomerAvatarService implements OnModuleInit {
     return { avatarUrl: null, updatedAt: now };
   }
 
-  async read(customerId: number): Promise<Buffer> {
-    const customer = await this.prisma.customer.findUnique({
-      where: { id: customerId },
-      select: { avatarStorageKey: true },
-    });
-    const filePath = customer?.avatarStorageKey
-      ? this.resolveStorageKey(customer.avatarStorageKey, customerId)
-      : null;
-    if (!filePath || !existsSync(filePath)) {
-      throw new ApiError(HttpStatus.NOT_FOUND, 'AVATAR_NOT_FOUND', '头像不存在');
-    }
-    try {
-      const fileStat = await stat(filePath);
-      if (!fileStat.isFile()) throw new Error('not a file');
-      return await readFile(filePath);
-    } catch {
-      throw new ApiError(HttpStatus.NOT_FOUND, 'AVATAR_NOT_FOUND', '头像不存在');
-    }
+  async read(principal: AvatarCustomer): Promise<Buffer> {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, principal);
+      const customer = await transaction.customer.findUnique({
+        where: { id: principal.id },
+        select: { avatarStorageKey: true },
+      });
+      const filePath = customer?.avatarStorageKey
+        ? this.resolveStorageKey(customer.avatarStorageKey, principal.id)
+        : null;
+      if (!filePath || !existsSync(filePath)) {
+        throw new ApiError(HttpStatus.NOT_FOUND, 'AVATAR_NOT_FOUND', '头像不存在');
+      }
+      try {
+        const fileStat = await stat(filePath);
+        if (!fileStat.isFile()) throw new Error('not a file');
+        return await readFile(filePath);
+      } catch {
+        throw new ApiError(HttpStatus.NOT_FOUND, 'AVATAR_NOT_FOUND', '头像不存在');
+      }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async remove(
@@ -321,6 +410,94 @@ export class CustomerAvatarService implements OnModuleInit {
     return join(this.root, '.pending-delete');
   }
 
+  private async lockActiveCustomer(
+    tx: Prisma.TransactionClient,
+    principal: AvatarCustomer,
+  ): Promise<{ avatarStorageKey: string | null }> {
+    const customerId = principal.id;
+    const locked = await tx.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM customers WHERE id = ${customerId} FOR UPDATE`,
+    );
+    if (locked.length !== 1) {
+      throw new ApiError(HttpStatus.NOT_FOUND, 'CUSTOMER_NOT_FOUND', '客户不存在');
+    }
+    const customer = await tx.customer.findUnique({
+      where: { id: customerId },
+      select: { status: true, avatarStorageKey: true, authVersion: true },
+    });
+    if (
+      !customer
+      || customer.status !== 'ACTIVE'
+      || customer.authVersion !== principal.authVersion
+    ) {
+      throw this.avatarAuthenticationChanged();
+    }
+    return { avatarStorageKey: customer.avatarStorageKey };
+  }
+
+  private avatarStateChanged() {
+    return new ApiError(
+      HttpStatus.CONFLICT,
+      'AVATAR_UPDATE_CONFLICT',
+      '账户或头像状态已发生变化，请重新登录后再试',
+    );
+  }
+
+  private avatarAuthenticationChanged() {
+    return new ApiError(
+      HttpStatus.UNAUTHORIZED,
+      'CUSTOMER_AUTH_CHANGED',
+      '登录状态已发生变化，请重新登录后再试',
+    );
+  }
+
+  private replaceStorageKey(customerId: number, idempotencyKey: string): string {
+    const digest = this.idempotency.scopedHash(`customer-avatar-${customerId}`, idempotencyKey);
+    const uuid = digest.slice(0, 32).split('');
+    uuid[12] = '5';
+    uuid[16] = ['8', '9', 'a', 'b'][Number.parseInt(uuid[16], 16) % 4];
+    return `${customerId}/${uuid.slice(0, 8).join('')}-${uuid.slice(8, 12).join('')}-${uuid.slice(12, 16).join('')}-${uuid.slice(16, 20).join('')}-${uuid.slice(20).join('')}.webp`;
+  }
+
+  private async assertReplayContent(outputPath: string, output: Buffer): Promise<void> {
+    try {
+      const existing = await readFile(outputPath);
+      if (existing.equals(output)) return;
+    } catch {
+      throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, 'AVATAR_STORAGE_ERROR', '头像保存状态异常，请稍后重试');
+    }
+    throw new ApiError(
+      HttpStatus.CONFLICT,
+      'AVATAR_IDEMPOTENCY_KEY_REUSED',
+      '本次上传凭据已用于不同图片，请重新选择后再试',
+    );
+  }
+
+  private async isCurrentReplay(
+    principal: AvatarCustomer,
+    storageKey: string,
+    outputPath: string,
+    output: Buffer,
+  ): Promise<boolean> {
+    try {
+      const current = await this.prisma.customer.findUnique({
+        where: { id: principal.id },
+        select: { avatarStorageKey: true, status: true, authVersion: true },
+      });
+      if (
+        current?.status !== 'ACTIVE'
+        || current.authVersion !== principal.authVersion
+        || current.avatarStorageKey !== storageKey
+      ) {
+        return false;
+      }
+      const existing = await readFile(outputPath);
+      return existing.equals(output);
+    } catch {
+      return false;
+    }
+  }
+
   private removalMarkerId(storageKey: string): string {
     return createHash('sha256').update(storageKey).digest('hex');
   }
@@ -391,4 +568,10 @@ function isMissingFileError(error: unknown): boolean {
   return error instanceof Error
     && 'code' in error
     && error.code === 'ENOENT';
+}
+
+function isExistingFileError(error: unknown): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && error.code === 'EEXIST';
 }

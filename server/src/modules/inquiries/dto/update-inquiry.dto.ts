@@ -1,5 +1,6 @@
 import { Transform, Type } from "class-transformer";
 import {
+  IsDateString,
   IsInt,
   IsNotEmpty,
   IsString,
@@ -24,4 +25,7 @@ export class ReplyInquiryDto {
   @Matches(/\S/, { message: "回复内容不能为空" })
   @MaxLength(5000, { message: "回复内容不能超过5000个字符" })
   reply!: string;
+
+  @IsDateString({}, { message: "线索版本必须是 ISO 8601 时间" })
+  expectedUpdatedAt!: string;
 }

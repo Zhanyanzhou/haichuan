@@ -10,7 +10,11 @@ import { DynamicTemplateRenderer, type TemplateDefinitionV2 } from "../template-
 import { registerResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import { analyzeDynamicTemplateUpgrade } from "./upgrade";
-import { DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT } from "../template-editor/templateCatalogEvents";
+import { dropPublishedTemplatesById, publishedCatalogIdentity } from "./publishedTemplateCatalogCache";
+import {
+  DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT,
+  type DynamicTemplateCatalogChangeDetail,
+} from "../template-editor/templateCatalogEvents";
 import type {
   DynamicTemplateUpgradeAnalysis,
   DynamicTemplateUpgradeInstancePlan,
@@ -19,48 +23,87 @@ import "./DynamicTemplateUpgradePanel.css";
 
 const CATALOG_CACHE_TTL_MS = 30_000;
 let publishedTemplatesCache: PublishedDynamicTemplateResource[] | null = null;
+let publishedTemplatesCacheKey = "";
 let publishedTemplatesCachedAt = 0;
 let publishedTemplatesRequest: Promise<PublishedDynamicTemplateResource[]> | null = null;
+let publishedTemplatesLoadGeneration = 0;
 
-type TemplateVersionCheckState =
-  | { status: "loading" }
-  | { status: "catalog-error"; message: string }
-  | { status: "catalog-missing" }
-  | { status: "current"; latest: PublishedDynamicTemplateResource }
-  | { status: "upgrade-available"; latest: PublishedDynamicTemplateResource };
+export function invalidatePublishedTemplateCatalogCache() {
+  publishedTemplatesCache = null;
+  publishedTemplatesCacheKey = "";
+  publishedTemplatesCachedAt = 0;
+  publishedTemplatesRequest = null;
+  publishedTemplatesLoadGeneration += 1;
+}
+
+function dropPublishedTemplateFromCache(templateId: string) {
+  // 抬升世代并丢弃在途 Promise，避免归档前的 listCatalog 回包把已移除模板写回缓存。
+  publishedTemplatesRequest = null;
+  publishedTemplatesLoadGeneration += 1;
+  if (!publishedTemplatesCache) return;
+  publishedTemplatesCache = dropPublishedTemplatesById(publishedTemplatesCache, templateId);
+  publishedTemplatesCacheKey = publishedCatalogIdentity(publishedTemplatesCache);
+}
+
+function readRemovedCatalogTemplateId(event: Event): string | null {
+  const detail = (event as CustomEvent<DynamicTemplateCatalogChangeDetail | undefined>).detail;
+  return detail?.kind === "removed" ? detail.identity.templateId : null;
+}
 
 async function loadPublishedTemplates(forceRefresh = false) {
-  if (publishedTemplatesRequest) return publishedTemplatesRequest;
-  if (
-    !forceRefresh
-    && publishedTemplatesCache
+  if (forceRefresh) {
+    invalidatePublishedTemplateCatalogCache();
+  } else if (publishedTemplatesRequest) {
+    return publishedTemplatesRequest;
+  } else if (
+    publishedTemplatesCache
     && Date.now() - publishedTemplatesCachedAt < CATALOG_CACHE_TTL_MS
   ) {
     return publishedTemplatesCache;
   }
-  publishedTemplatesRequest = dynamicTemplateApi.listCatalog()
+  const generation = publishedTemplatesLoadGeneration;
+  const request = dynamicTemplateApi.listCatalog({ dedupe: false })
     .then((response) => {
+      if (generation !== publishedTemplatesLoadGeneration) {
+        return publishedTemplatesCache ?? [];
+      }
       const catalog = unwrapResponse<TemplateCatalogResource>(response);
       const templates = catalog?.items.flatMap((item) => (
         item.kind === "published" ? [item.template] : []
       )) ?? [];
       publishedTemplatesCache = templates;
+      publishedTemplatesCacheKey = publishedCatalogIdentity(templates);
       publishedTemplatesCachedAt = Date.now();
       return templates;
     })
     .finally(() => {
-      publishedTemplatesRequest = null;
+      if (publishedTemplatesRequest === request) {
+        publishedTemplatesRequest = null;
+      }
     });
-  return publishedTemplatesRequest;
+  publishedTemplatesRequest = request;
+  return request;
 }
+
+type TemplateVersionCheckState =
+  | { status: "loading" }
+  | { status: "catalog-error"; message: string }
+  | { status: "catalog-missing" }
+  | { status: "identity-conflict"; latest: PublishedDynamicTemplateResource }
+  | { status: "current"; latest: PublishedDynamicTemplateResource }
+  | { status: "upgrade-available"; latest: PublishedDynamicTemplateResource };
 
 export default function DynamicTemplateUpgradePanel({
   definition,
   instance,
+  currentSchemaVersion,
+  currentDefinitionChecksum,
   onApply,
 }: {
   definition: TemplateDefinitionV2;
   instance: DynamicTemplateInstanceProps;
+  currentSchemaVersion: number;
+  currentDefinitionChecksum: string;
   onApply: (
     next: DynamicTemplateInstanceProps,
     analysis: DynamicTemplateUpgradeAnalysis,
@@ -84,6 +127,16 @@ export default function DynamicTemplateUpgradePanel({
             setVersionCheck({ status: "catalog-missing" });
             return;
           }
+          if (
+            latest.version === instance.templateVersion
+            && (
+              latest.schemaVersion !== currentSchemaVersion
+              || latest.definitionChecksum !== currentDefinitionChecksum
+            )
+          ) {
+            setVersionCheck({ status: "identity-conflict", latest });
+            return;
+          }
           setVersionCheck({
             status: latest.version > instance.templateVersion ? "upgrade-available" : "current",
             latest,
@@ -98,14 +151,28 @@ export default function DynamicTemplateUpgradePanel({
           }
         });
     };
-    refreshLatest(reloadRequest > 0);
-    const refreshAfterCatalogChange = () => refreshLatest(true);
+    refreshLatest(true);
+    const refreshAfterCatalogChange = (event: Event) => {
+      const removedTemplateId = readRemovedCatalogTemplateId(event);
+      if (removedTemplateId) {
+        dropPublishedTemplateFromCache(removedTemplateId);
+        refreshLatest(false);
+        return;
+      }
+      refreshLatest(true);
+    };
     window.addEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
     return () => {
       cancelled = true;
       window.removeEventListener(DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT, refreshAfterCatalogChange);
     };
-  }, [instance.templateId, instance.templateVersion, reloadRequest]);
+  }, [
+    currentDefinitionChecksum,
+    currentSchemaVersion,
+    instance.templateId,
+    instance.templateVersion,
+    reloadRequest,
+  ]);
 
   const latest = versionCheck.status === "current" || versionCheck.status === "upgrade-available"
     ? versionCheck.latest
@@ -141,6 +208,17 @@ export default function DynamicTemplateUpgradePanel({
         type="warning"
         showIcon
         message="目录未找到当前模板，无法判断是否最新"
+        description={`当前页面继续锁定 ${instance.templateId} v${instance.templateVersion}，页面草稿未修改。`}
+        action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
+      />
+    );
+  }
+  if (versionCheck.status === "identity-conflict") {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message={`目录中的 v${versionCheck.latest.version} 身份与页面锁定版本不一致，无法确认是否最新`}
         description={`当前页面继续锁定 ${instance.templateId} v${instance.templateVersion}，页面草稿未修改。`}
         action={<Button size="small" onClick={() => setReloadRequest((value) => value + 1)}>重新检查</Button>}
       />

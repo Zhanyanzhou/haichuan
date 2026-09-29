@@ -31,6 +31,7 @@ test("员工 access token 带 session family 时只接受仍启用的服务端�
     sessionFamilyId: FAMILY_ID,
   });
   assert.equal(result.id, 7);
+  assert.equal(result.sessionFamilyId, FAMILY_ID);
   assert.deepEqual((where as any).adminRefreshSessions.some, {
     familyId: FAMILY_ID,
     revokedAt: null,

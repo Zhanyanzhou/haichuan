@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { getDynamicTemplatePageFieldDescriptors } from "../src/page-builder/dynamic-template-instance/pageFieldDescriptors";
 import { completeProductionReviews, createBlankTemplate, fillTemplateIdentity, installNewTemplateServer, readSession, saveTemplate, type NewTemplateMockServer } from "./fixtures/template-authoring-main-route";
 
 // 主路由真实 UI + 自有 API 内存夹具。没有真实模板、页面或发布写入。
@@ -55,6 +56,12 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     else await page.getByRole("button", { name: "进入选中容器", exact: true }).click();
   }
   async function number(page: Page, label: string, value: number) {
+    if (label === "水平焦点" || label === "垂直焦点") {
+      const precise = page.getByRole("button", { name: "精确百分比", exact: true });
+      if (await precise.count() && (await precise.getAttribute("aria-expanded")) !== "true") {
+        await precise.click();
+      }
+    }
     const field = page.getByRole("spinbutton", { name: label, exact: true });
     await field.fill(String(value)); await field.press("Enter");
     await expect(field).toHaveValue(String(value));
@@ -81,8 +88,16 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await page.getByRole("button", { name: "页面装修", exact: true }).click();
     await page.getByRole("button", { name: `添加到页面：${name} v1`, exact: true }).click();
     const inspector = page.getByRole("region", { name: "模板实例属性", exact: true });
+    const pageFields = getDynamicTemplatePageFieldDescriptors(saved);
+    expect(pageFields.map((field) => field.slotId).sort()).toEqual(Object.keys(saved.slots).sort());
+    await expect(inspector.locator("fieldset[data-slot-id]")).toHaveCount(pageFields.length);
+    const supplementaryFields = inspector.getByRole("button", { name: /^补充内容 · \d+ 项$/ });
+    if (await supplementaryFields.count() && (await supplementaryFields.getAttribute("aria-expanded")) !== "true") {
+      await supplementaryFields.click();
+    }
     for (const slot of Object.values(saved.slots)) {
       const field = inspector.locator(`fieldset[data-slot-id="${slot.slotId}"]`);
+      await expect(field).toBeVisible();
       if (slot.type === "image") {
         await field.getByRole("button", { name: /粘贴图片链接/ }).click();
         const urlInput = field.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片");
@@ -102,8 +117,9 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
         if (!(await urlInput.isVisible())) await field.getByRole("button", { name: /图片链接$/ }).click();
         await urlInput.fill("/images/system/product-placeholder.svg");
         await field.getByRole("button", { name: /^确\s*认$/ }).click();
-        await expect.poll(async () => field.locator(".homepage-editor__media-preview-img img").evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-        await expect(field.locator(".homepage-editor__media-preview-img img")).toBeVisible();
+        const previewImage = field.locator(".homepage-editor__media-preview-img img, [data-image-focus-pad] img").first();
+        await expect.poll(async () => previewImage.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+        await expect(previewImage).toBeVisible();
         await expect(field.getByRole("alert").filter({ hasText: "当前图片暂不可用" })).toHaveCount(0);
       } else if (["heading", "text", "button"].includes(slot.type)) {
         await field.getByRole("textbox").first().fill(`${name} · ${slot.label}`);
@@ -118,12 +134,11 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     expect(server.pageDocument.puckData.content[0]).toMatchObject({ type: "动态模板实例", props: { templateId: saved.templateId, templateVersion: 1 } });
     const pageReviewStatus = page.getByTestId("page-review-status");
     await expect(pageReviewStatus).toHaveText("草稿");
-    await page.getByRole("button", { name: "提交审核", exact: true }).click();
-    await expect(pageReviewStatus).toHaveText("待审核");
-    await page.getByRole("button", { name: "批准", exact: true }).click();
-    await expect(pageReviewStatus).toHaveText("已批准");
-    await expect(page.getByRole("button", { name: "发布到前台网站", exact: true })).toBeEnabled();
-    await page.getByRole("button", { name: "发布到前台网站", exact: true }).click();
+    await expect(page.getByRole("button", { name: "提交审核", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "本人提交：确认自审", exact: true })).toHaveCount(0);
+    const publishPage = page.getByRole("button", { name: "发布到前台网站", exact: true });
+    await expect(publishPage).toBeEnabled();
+    await publishPage.click();
     await expect.poll(() => server.publishedPage).not.toBeNull();
     await page.goto("/");
     await expect(page.locator(`[data-template-node-id="${saved.rootNodeId}"]`)).toBeVisible();
@@ -156,6 +171,7 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     const afterTrial = await readSession(page);
     expect(afterTrial.definition).toEqual(beforeTrial.definition);
     expect(afterTrial.historyPast).toEqual(beforeTrial.historyPast);
+    await page.getByText("断点显示与继承", { exact: true }).click();
     await page.getByText("高级定位 · 改为局部叠放", { exact: true }).click();
     await page.getByRole("button", { name: "锚点 left top", exact: true }).click();
     await page.getByRole("button", { name: "确认定位", exact: true }).click();
@@ -252,19 +268,16 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     expect(dragged.definition!.nodes[grid].responsive.desktop.gap?.value).toBeGreaterThan(24);
     await expect(page.getByRole("spinbutton", { name: "对象间距", exact: true })).toHaveValue(String(dragged.definition!.nodes[grid].responsive.desktop.gap!.value));
     await number(page, "对象间距", 24);
-    await breakpoint(page, "平板");
-    await number(page, "网格列数", 2);
     await breakpoint(page, "移动");
     await number(page, "网格列数", 1);
     const beforeReset = (await readSession(page)).definition!;
-    expect(beforeReset.nodes[grid].responsive.tablet?.columns).toHaveLength(2);
     expect(beforeReset.nodes[grid].responsive.mobile.columns).toHaveLength(1);
     await page.locator('[data-template-design-property="node.columns"]').getByRole("button", { name: "恢复继承", exact: true }).click();
-    await expect(page.getByRole("spinbutton", { name: "网格列数", exact: true })).toHaveValue("2");
+    await expect(page.getByRole("spinbutton", { name: "网格列数", exact: true })).toHaveValue("3");
     await number(page, "网格列数", 1);
     const saved = await savedReopenAndUse(page, server, "黄金卡片");
     expect(saved.nodes[grid].childIds).toEqual(cards);
-    for (const [width, columns] of [[1280, 3], [834, 2], [390, 1]]) {
+    for (const [width, columns] of [[1280, 3], [834, 3], [390, 1]]) {
       await page.setViewportSize({ width, height: 900 });
       const renderedGrid = page.locator(`[data-template-node-id="${grid}"]`);
       await expect.poll(async () => renderedGrid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(columns);

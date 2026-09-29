@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Logger,
   NotFoundException,
   Optional,
@@ -21,6 +22,7 @@ import {
   type RefundGatewayResult,
 } from '../../common/payment-gateway/payment-gateway.service';
 import { ReliableNotificationIntentService } from '../../common/notifications/reliable-notification-intent.service';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 
 const CONFIRMED_PAYMENT_STATUSES = ['PAID', 'PARTIAL_REFUND', 'REFUNDED'] as const;
 const ACTIVE_REFUND_STATUSES = ['PENDING', 'APPROVED', 'PROCESSING', 'COMPLETED'] as const;
@@ -28,6 +30,28 @@ type RefundTx = Prisma.TransactionClient | PrismaService;
 type RefundWithPayment = Prisma.RefundGetPayload<{
   include: { payment: true };
 }>;
+type RefundOrderPlanContext = {
+  status: string;
+  quotationVersionId: number | null;
+  paymentPlans: Array<{ id: number }>;
+};
+type RefundInstallmentContext = {
+  label?: string;
+  sequence?: number;
+  paymentPlan: {
+    status: string;
+    installments: Array<{ status: string }>;
+  };
+} | null;
+type RefundPaymentPlanContext = {
+  order?: RefundOrderPlanContext | null;
+  installment?: RefundInstallmentContext;
+};
+type RefundStaffActor = Pick<StaffPrincipal, 'id' | 'sessionFamilyId'>;
+type RefundStaffAuthorization =
+  | 'REFUND_MANAGE'
+  | 'REFUND_MANAGE_READ'
+  | 'REFUND_QUERY';
 
 /**
  * 退款服务：申请→审核→原渠道或线下执行→完成/拒绝。
@@ -56,6 +80,77 @@ export class RefundsService {
   private createRefundNo(): string {
     const date = businessDateKey();
     return `RFD${date}${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
+  }
+
+  private async lockAuthorizedRefundActor(
+    tx: Prisma.TransactionClient,
+    actor: RefundStaffActor,
+    authorization: RefundStaffAuthorization = 'REFUND_MANAGE',
+  ): Promise<OperatorContext> {
+    const actorId = Number(actor.id);
+    if (!Number.isInteger(actorId) || actorId <= 0) {
+      throw new ForbiddenException('当前员工身份无效');
+    }
+    const isRead = authorization !== 'REFUND_MANAGE';
+    const rows = authorization === 'REFUND_QUERY'
+      ? await tx.$queryRaw<Array<{
+          id: number;
+          username?: string;
+          realName?: string | null;
+        }>>(
+          Prisma.sql`SELECT id, username, real_name AS realName FROM users WHERE id = ${actorId} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE') FOR SHARE`,
+        )
+      : isRead
+        ? await tx.$queryRaw<Array<{
+            id: number;
+            username?: string;
+            realName?: string | null;
+          }>>(
+            Prisma.sql`SELECT id, username, real_name AS realName FROM users WHERE id = ${actorId} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR SHARE`,
+          )
+        : await tx.$queryRaw<Array<{
+            id: number;
+            username?: string;
+            realName?: string | null;
+          }>>(
+            Prisma.sql`SELECT id, username, real_name AS realName FROM users WHERE id = ${actorId} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR UPDATE`,
+          );
+    const lockedActor = rows[0];
+    if (!lockedActor) {
+      throw new ForbiddenException('当前员工已停用或无权处理退款');
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = isRead
+        ? await tx.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actorId} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+          )
+        : await tx.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actorId} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+          );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException('当前员工会话已失效，不能处理退款');
+      }
+    }
+    return {
+      type: 'ADMIN',
+      id: lockedActor.id,
+      name: lockedActor.realName || lockedActor.username,
+    };
+  }
+
+  /**
+   * 渠道调用期间持有员工与当前 refresh family 行锁：撤权或设备登出若先完成
+   * 则不会触达渠道；调用若先开始，撤权会等待该有界外调结束。渠道事实落库
+   * 仍会在独立事务中再次复核员工与会话族。
+   */
+  private withAuthorizedRefundActor<T>(
+    actor: RefundStaffActor,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedRefundActor(tx, actor);
+      return action();
+    });
   }
 
   private moneyToCents(value: Prisma.Decimal | number | string, fieldName = '金额') {
@@ -219,7 +314,10 @@ export class RefundsService {
     }
   }
 
-  async findAll(params: { page?: number; pageSize?: number; status?: string; keyword?: string }) {
+  async findAll(
+    params: { page?: number; pageSize?: number; status?: string; keyword?: string },
+    actor: RefundStaffActor,
+  ) {
     const page = Math.max(Number(params.page) || 1, 1);
     const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
     const where: Prisma.RefundWhereInput = {};
@@ -233,38 +331,155 @@ export class RefundsService {
       ];
     }
 
-    const [list, total] = await Promise.all([
-      this.prisma.refund.findMany({
-        where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedRefundActor(tx, actor, 'REFUND_QUERY');
+      const [list, total] = await Promise.all([
+        tx.refund.findMany({
+          where,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: {
+            order: { select: { id: true, orderNo: true, customerName: true, customerPhone: true, finalAmount: true, status: true } },
+            payment: { select: { id: true, paymentNo: true, method: true, status: true, amount: true } },
+            requester: { select: { id: true, realName: true, username: true } },
+            reviewer: { select: { id: true, realName: true, username: true } },
+            processor: { select: { id: true, realName: true, username: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        tx.refund.count({ where }),
+      ]);
+      return { list, total, page, pageSize };
+    });
+  }
+
+  async findById(id: number, actor: RefundStaffActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedRefundActor(tx, actor, 'REFUND_QUERY');
+      const refund = await tx.refund.findUnique({
+        where: { id },
         include: {
-          order: { select: { id: true, orderNo: true, customerName: true, customerPhone: true, finalAmount: true, status: true } },
-          payment: { select: { id: true, paymentNo: true, method: true, status: true, amount: true } },
+          order: { include: { items: true, payments: true } },
+          payment: true,
           requester: { select: { id: true, realName: true, username: true } },
           reviewer: { select: { id: true, realName: true, username: true } },
           processor: { select: { id: true, realName: true, username: true } },
         },
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.refund.count({ where }),
-    ]);
-    return { list, total, page, pageSize };
+      });
+      if (!refund) throw new NotFoundException('退款记录不存在');
+      return refund;
+    });
   }
 
-  async findById(id: number) {
-    const refund = await this.prisma.refund.findUnique({
-      where: { id },
-      include: {
-        order: { include: { items: true, payments: true } },
-        payment: true,
-        requester: { select: { id: true, realName: true, username: true } },
-        reviewer: { select: { id: true, realName: true, username: true } },
-        processor: { select: { id: true, realName: true, username: true } },
-      },
+  /**
+   * 退款创建前读取权威原付款及其剩余可退额度。
+   *
+   * 这只是运营预检；create() 仍会在订单行锁内重新校验，不能把此快照当作
+   * 金额或分期状态的最终事实。
+   */
+  async getCreateEligibility(orderId: number, actor: RefundStaffActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedRefundActor(tx, actor, 'REFUND_MANAGE_READ');
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        select: {
+          id: true,
+          orderNo: true,
+          status: true,
+          orderType: true,
+          currency: true,
+          quotationVersionId: true,
+          paymentPlans: { select: { id: true } },
+          payments: {
+            where: { status: { in: [...CONFIRMED_PAYMENT_STATUSES] } },
+            select: {
+              id: true,
+              paymentNo: true,
+              amount: true,
+              method: true,
+              status: true,
+              type: true,
+              paidAt: true,
+              createdAt: true,
+              installment: {
+                select: {
+                  label: true,
+                  sequence: true,
+                  paymentPlan: {
+                    select: {
+                      status: true,
+                      installments: { select: { status: true } },
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+          },
+          refunds: {
+            where: { status: { in: [...ACTIVE_REFUND_STATUSES] } },
+            select: { paymentId: true, amount: true },
+          },
+        },
+      });
+      if (!order) throw new NotFoundException('订单不存在');
+
+      const occupiedByPayment = new Map<number, number>();
+      for (const refund of order.refunds) {
+        if (refund.paymentId === null) continue;
+        occupiedByPayment.set(
+          refund.paymentId,
+          (occupiedByPayment.get(refund.paymentId) ?? 0) +
+            this.moneyToCents(refund.amount),
+        );
+      }
+      const planContext: RefundOrderPlanContext = {
+        status: order.status,
+        quotationVersionId: order.quotationVersionId,
+        paymentPlans: order.paymentPlans,
+      };
+      let totalAvailableCents = 0;
+      const payments = order.payments.map((payment) => {
+        const amountCents = this.moneyToCents(payment.amount, '原支付金额');
+        const occupiedCents = occupiedByPayment.get(payment.id) ?? 0;
+        const availableCents = Math.max(amountCents - occupiedCents, 0);
+        const planBlockReason = this.getPaymentPlanRefundBlockReason({
+          order: planContext,
+          installment: payment.installment,
+        });
+        const reason =
+          planBlockReason ??
+          (availableCents <= 0 ? '该笔原付款已无可退余额' : null);
+        const eligible = reason === null;
+        if (eligible) totalAvailableCents += availableCents;
+        return {
+          id: payment.id,
+          paymentNo: payment.paymentNo,
+          method: payment.method,
+          status: payment.status,
+          type: payment.type,
+          installmentLabel: payment.installment?.label ?? null,
+          installmentSequence: payment.installment?.sequence ?? null,
+          amount: (amountCents / 100).toFixed(2),
+          occupiedRefundAmount: (occupiedCents / 100).toFixed(2),
+          availableRefundAmount: (availableCents / 100).toFixed(2),
+          eligible,
+          reason,
+        };
+      });
+
+      return {
+        order: {
+          id: order.id,
+          orderNo: order.orderNo,
+          status: order.status,
+          orderType: order.orderType,
+          currency: order.currency,
+        },
+        totalAvailableRefundAmount: (totalAvailableCents / 100).toFixed(2),
+        payments,
+      };
     });
-    if (!refund) throw new NotFoundException('退款记录不存在');
-    return refund;
   }
 
   /** 创建退款申请 */
@@ -275,7 +490,7 @@ export class RefundsService {
     reason: string;
     idempotencyKey: string;
     afterSalesCaseId?: number;
-    operator: OperatorContext;
+    operator: RefundStaffActor;
   }) {
     const amountCents = this.moneyToCents(data.amount, '退款金额');
     if (amountCents <= 0) {
@@ -284,24 +499,20 @@ export class RefundsService {
     const reason = data.reason?.trim();
     if (!reason) throw new BadRequestException('请填写退款原因');
 
-    const existing = await this.prisma.refund.findUnique({
-      where: { idempotencyKey: data.idempotencyKey },
-    });
-    if (existing) {
-      this.assertSameIdempotentRequest(existing, data);
-      return existing;
-    }
-
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const operator = await this.lockAuthorizedRefundActor(tx, data.operator);
+
+        // 必须先取得订单串行锁，再建立普通读取快照。MySQL 默认 REPEATABLE READ 下，
+        // 若先查幂等键，等待订单锁后的额度查询仍可能停留在竞争请求提交前的旧快照。
         await this.lockOrder(tx, data.orderId);
 
-        const duplicate = await tx.refund.findUnique({
+        const existing = await tx.refund.findUnique({
           where: { idempotencyKey: data.idempotencyKey },
         });
-        if (duplicate) {
-          this.assertSameIdempotentRequest(duplicate, data);
-          return duplicate;
+        if (existing) {
+          this.assertSameIdempotentRequest(existing, data);
+          return existing;
         }
 
         await this.assertAfterSalesRefundRequest(tx, data);
@@ -377,7 +588,7 @@ export class RefundsService {
             status: 'PENDING',
             idempotencyKey: data.idempotencyKey,
             afterSalesCaseId: data.afterSalesCaseId ?? null,
-            requestedBy: data.operator.id ?? null,
+            requestedBy: operator.id ?? null,
           },
         });
 
@@ -387,7 +598,7 @@ export class RefundsService {
           entityId: refund.id,
           eventType: TRADE_EVENT_TYPE.REFUND_REQUESTED,
           toStatus: 'PENDING',
-          operator: data.operator,
+          operator,
           metadata: {
             amount: refund.amount.toString(),
             paymentId: payment.id,
@@ -398,8 +609,11 @@ export class RefundsService {
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const duplicate = await this.prisma.refund.findUnique({
-          where: { idempotencyKey: data.idempotencyKey },
+        const duplicate = await this.prisma.$transaction(async (tx) => {
+          await this.lockAuthorizedRefundActor(tx, data.operator);
+          return tx.refund.findUnique({
+            where: { idempotencyKey: data.idempotencyKey },
+          });
         });
         if (duplicate) {
           this.assertSameIdempotentRequest(duplicate, data);
@@ -411,8 +625,11 @@ export class RefundsService {
   }
 
   /** 审核退款：通过/拒绝 */
-  async review(refundId: number, action: 'APPROVED' | 'REJECTED', reviewNote: string | undefined, operator: OperatorContext) {
-    const reviewed = await this.prisma.$transaction(async (tx) => {
+  async review(refundId: number, action: 'APPROVED' | 'REJECTED', reviewNote: string | undefined, actor: RefundStaffActor) {
+    const normalizedReviewNote = reviewNote?.trim() || null;
+    const reviewedStatus = action === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+    const reviewResult = await this.prisma.$transaction(async (tx) => {
+      const operator = await this.lockAuthorizedRefundActor(tx, actor);
       const refundRef = await tx.refund.findUnique({
         where: { id: refundId },
         select: { orderId: true },
@@ -420,8 +637,21 @@ export class RefundsService {
       if (!refundRef) throw new NotFoundException('退款记录不存在');
       await this.lockOrder(tx, refundRef.orderId);
 
-      const refund = await tx.refund.findUnique({ where: { id: refundId } });
+      const refund = await tx.refund.findUnique({
+        where: { id: refundId },
+        include: { payment: { select: { method: true } } },
+      });
       if (!refund) throw new NotFoundException('退款记录不存在');
+      const sameReviewReplay = operator.id != null
+        && refund.reviewedBy === operator.id
+        && (refund.reviewNote ?? null) === normalizedReviewNote
+        && (action === 'REJECTED'
+          ? refund.status === 'REJECTED'
+          : ['APPROVED', 'PROCESSING', 'COMPLETED', 'FAILED'].includes(refund.status));
+      if (sameReviewReplay) {
+        const { payment, ...refundWithoutPayment } = refund;
+        return { refund: refundWithoutPayment, paymentMethod: payment?.method ?? null };
+      }
       if (refund.status !== 'PENDING') {
         throw new BadRequestException('只有待审核的退款可以审核');
       }
@@ -479,14 +709,13 @@ export class RefundsService {
       }
 
       // 乐观锁推进
-      const newStatus = action === 'APPROVED' ? 'APPROVED' : 'REJECTED';
       const updated = await tx.refund.updateMany({
         where: { id: refundId, status: 'PENDING' },
         data: {
-          status: newStatus,
+          status: reviewedStatus,
           reviewedBy: operator.id ?? null,
           reviewedAt: new Date(),
-          reviewNote: reviewNote?.trim() || null,
+          reviewNote: normalizedReviewNote,
         },
       });
       if (updated.count === 0) throw new ConflictException('退款记录已被处理，请刷新后重试');
@@ -494,21 +723,19 @@ export class RefundsService {
       const eventType = action === 'APPROVED' ? TRADE_EVENT_TYPE.REFUND_APPROVED : TRADE_EVENT_TYPE.REFUND_REJECTED;
       await this.tradeEvents.record(tx, {
         orderId: refund.orderId, entityType: TRADE_ENTITY_TYPE.REFUND, entityId: refundId,
-        eventType, fromStatus: 'PENDING', toStatus: newStatus, operator, reason: reviewNote?.trim() || null,
+        eventType, fromStatus: 'PENDING', toStatus: reviewedStatus, operator, reason: normalizedReviewNote,
       });
 
-      return tx.refund.findUnique({ where: { id: refundId } });
+      const updatedRefund = await tx.refund.findUnique({ where: { id: refundId } });
+      return { refund: updatedRefund, paymentMethod: refund.payment?.method ?? null };
     });
 
+    const reviewed = reviewResult.refund;
     if (action !== 'APPROVED' || !reviewed) return reviewed;
-    const detail = await this.prisma.refund.findUnique({
-      where: { id: refundId },
-      include: { payment: true },
-    });
-    if (!detail?.payment || !this.isOnlineMethod(detail.payment.method)) {
+    if (!reviewResult.paymentMethod || !this.isOnlineMethod(reviewResult.paymentMethod)) {
       return reviewed;
     }
-    if (detail.payment.method !== 'wechat') {
+    if (reviewResult.paymentMethod !== 'wechat') {
       return {
         ...reviewed,
         channelAction: {
@@ -536,17 +763,23 @@ export class RefundsService {
       };
     }
     try {
-      const channel = await this.startOnlineRefund(refundId, operator);
+      const channel = await this.startOnlineRefund(refundId, actor);
       return { ...channel.refund, channelAction: channel };
     } catch (error) {
       this.logger.error(
-        `退款 ${detail.refundNo} 审核后自动发起渠道退款未确认：${error instanceof Error ? error.message : error}`,
+        `退款 ${reviewed.refundNo} 审核后自动发起渠道退款未确认：${error instanceof Error ? error.message : error}`,
       );
-      const current = await this.prisma.refund.findUnique({
-        where: { id: refundId },
-      });
+      let current = reviewed;
+      try {
+        current = await this.prisma.$transaction(async (tx) => {
+          await this.lockAuthorizedRefundActor(tx, actor);
+          return (await tx.refund.findUnique({ where: { id: refundId } })) ?? reviewed;
+        });
+      } catch (authorizationError) {
+        if (!(authorizationError instanceof ForbiddenException)) throw authorizationError;
+      }
       return {
-        ...(current ?? reviewed),
+        ...current,
         channelAction: {
           state: 'ATTENTION' as const,
           message: '退款已审核通过，但渠道结果尚未确认，请按原退款单查询或重试',
@@ -750,9 +983,10 @@ export class RefundsService {
 
   private async prepareOnlineRefund(
     refundId: number,
-    operator: OperatorContext,
+    actor: RefundStaffActor,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      const operator = await this.lockAuthorizedRefundActor(tx, actor);
       const refundRef = await tx.refund.findUnique({
         where: { id: refundId },
         select: { orderId: true },
@@ -843,8 +1077,10 @@ export class RefundsService {
     refundId: number,
     fact: RefundGatewayResult,
     source: 'create' | 'query' | 'callback',
+    actor?: RefundStaffActor,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      if (actor) await this.lockAuthorizedRefundActor(tx, actor);
       const refundRef = await tx.refund.findUnique({
         where: { id: refundId },
         select: { orderId: true },
@@ -987,7 +1223,7 @@ export class RefundsService {
   }
 
   /** 审核后的微信退款发起；相同 refundNo 的所有重试保持渠道幂等。 */
-  async startOnlineRefund(refundId: number, operator: OperatorContext) {
+  async startOnlineRefund(refundId: number, actor: RefundStaffActor) {
     if (!this.paymentGateway.isRefundCreationEnabled()) {
       throw new ServiceUnavailableException('真实原路退款当前已关闭');
     }
@@ -995,7 +1231,7 @@ export class RefundsService {
       throw new ServiceUnavailableException('微信原路退款通道配置尚未就绪');
     }
     const notifyUrl = this.getRefundNotifyUrl();
-    const prepared = await this.prepareOnlineRefund(refundId, operator);
+    const prepared = await this.prepareOnlineRefund(refundId, actor);
     if (prepared.alreadyCompleted) {
       return { refund: prepared.refund, state: 'SUCCESS' as const };
     }
@@ -1003,17 +1239,20 @@ export class RefundsService {
     if (!payment?.gatewayTradeNo) {
       throw new BadRequestException('原微信付款缺少渠道交易号');
     }
+    const gatewayTradeNo = payment.gatewayTradeNo;
     try {
-      const fact = await this.paymentGateway.createRefund('wechat', {
-        refundNo: prepared.refund.refundNo,
-        paymentNo: payment.paymentNo,
-        gatewayTradeNo: payment.gatewayTradeNo,
-        refundAmountYuan: Number(prepared.refund.amount).toFixed(2),
-        totalAmountYuan: Number(payment.amount).toFixed(2),
-        reason: prepared.refund.reason || undefined,
-        notifyUrl,
-      });
-      return this.applyOnlineRefundFact(refundId, fact, 'create');
+      const fact = await this.withAuthorizedRefundActor(actor, () =>
+        this.paymentGateway.createRefund('wechat', {
+          refundNo: prepared.refund.refundNo,
+          paymentNo: payment.paymentNo,
+          gatewayTradeNo,
+          refundAmountYuan: Number(prepared.refund.amount).toFixed(2),
+          totalAmountYuan: Number(payment.amount).toFixed(2),
+          reason: prepared.refund.reason || undefined,
+          notifyUrl,
+        }),
+      );
+      return this.applyOnlineRefundFact(refundId, fact, 'create', actor);
     } catch (error) {
       await this.recordOnlineRefundAttention(
         refundId,
@@ -1025,11 +1264,19 @@ export class RefundsService {
   }
 
   /** 查询已发起微信退款；不受“发起新退款”门禁影响。 */
-  async queryOnlineRefund(refundId: number) {
-    const refund = await this.prisma.refund.findUnique({
-      where: { id: refundId },
-      include: { payment: true },
-    });
+  async queryOnlineRefund(refundId: number, actor?: RefundStaffActor) {
+    const refund = actor
+      ? await this.prisma.$transaction(async (tx) => {
+          await this.lockAuthorizedRefundActor(tx, actor);
+          return tx.refund.findUnique({
+            where: { id: refundId },
+            include: { payment: true },
+          });
+        })
+      : await this.prisma.refund.findUnique({
+          where: { id: refundId },
+          include: { payment: true },
+        });
     if (!refund) throw new NotFoundException('退款记录不存在');
     if (!refund.payment || refund.payment.method !== 'wechat') {
       throw new BadRequestException('该退款不是微信原路退款');
@@ -1040,36 +1287,42 @@ export class RefundsService {
     if (!['PROCESSING', 'APPROVED', 'FAILED'].includes(refund.status)) {
       throw new BadRequestException('当前退款状态不支持渠道查询');
     }
-    const fact = await this.paymentGateway.queryRefund(
-      'wechat',
-      refund.refundNo,
-    );
-    return this.applyOnlineRefundFact(refundId, fact, 'query');
+    const fact = actor
+      ? await this.withAuthorizedRefundActor(actor, () =>
+          this.paymentGateway.queryRefund('wechat', refund.refundNo),
+        )
+      : await this.paymentGateway.queryRefund('wechat', refund.refundNo);
+    return this.applyOnlineRefundFact(refundId, fact, 'query', actor);
   }
 
-  private assertPaymentPlanRefundEligible(payment: any) {
+  private getPaymentPlanRefundBlockReason(
+    payment: RefundPaymentPlanContext,
+  ): string | null {
     const orderHasPlan =
       payment.order?.quotationVersionId != null ||
       (payment.order?.paymentPlans?.length ?? 0) > 0;
     if (!payment.installment) {
       if (orderHasPlan) {
-        throw new BadRequestException(
-          '付款计划订单的原付款未绑定分期，当前已暂停退款',
-        );
+        return '付款计划订单的原付款未绑定分期，当前已暂停退款';
       }
-      return;
+      return null;
     }
     const plan = payment.installment.paymentPlan;
     if (
       !plan ||
       plan.status !== 'COMPLETED' ||
-      plan.installments.some((installment: any) => installment.status !== 'PAID') ||
-      !['SHIPPED', 'COMPLETED'].includes(payment.order?.status)
+      plan.installments.some((installment) => installment.status !== 'PAID') ||
+      !payment.order ||
+      !['SHIPPED', 'COMPLETED'].includes(payment.order.status)
     ) {
-      throw new BadRequestException(
-        '付款计划尚未全部实收并进入已发货阶段，退款会造成应收与履约不一致，当前已暂停',
-      );
+      return '付款计划尚未全部实收并进入已发货阶段，退款会造成应收与履约不一致，当前已暂停';
     }
+    return null;
+  }
+
+  private assertPaymentPlanRefundEligible(payment: RefundPaymentPlanContext) {
+    const reason = this.getPaymentPlanRefundBlockReason(payment);
+    if (reason) throw new BadRequestException(reason);
   }
 
   /**
@@ -1175,10 +1428,11 @@ export class RefundsService {
     refundId: number,
     action: 'COMPLETED' | 'FAILED',
     gatewayRefundNo: string | undefined,
-    operator: OperatorContext,
+    actor: RefundStaffActor,
     reviewNote?: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      const operator = await this.lockAuthorizedRefundActor(tx, actor);
       const refundRef = await tx.refund.findUnique({
         where: { id: refundId },
         select: { orderId: true },
@@ -1209,6 +1463,25 @@ export class RefundsService {
         throw new BadRequestException(
           '在线支付必须通过原支付渠道退款，不能使用线下执行入口',
         );
+      }
+
+      if (action === 'FAILED' && executionNote && operator.id != null) {
+        const latestFailure = await tx.tradeEvent.findFirst({
+          where: {
+            entityType: TRADE_ENTITY_TYPE.REFUND,
+            entityId: refundId,
+            eventType: TRADE_EVENT_TYPE.REFUND_EXECUTE_FAILED,
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { operatorId: true, reason: true },
+        });
+        if (
+          refund.processedBy === operator.id &&
+          latestFailure?.operatorId === operator.id &&
+          latestFailure.reason === executionNote
+        ) {
+          return refund;
+        }
       }
 
       const now = new Date();

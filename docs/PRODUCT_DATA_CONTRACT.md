@@ -56,6 +56,11 @@
 | `status`                                                     | 商品状态                      | enum `ProductStatus`（4 值） | 可选     | `DRAFT`                          | 状态流转                                 | 任何进入 `PUBLISHED` 的路径必须经过同一销售模式发布门禁                                                            |
 | `salesMode`                                                  | 销售模式                      | enum `SalesMode`（5 值）     | 可选     | `DISPLAY_ONLY`                   | 业务                                     | 决定发布要求与是否允许购物车/下单，见第 1、9 节                                                                    |
 | `inventoryPolicy`                                            | 库存策略                      | enum `InventoryPolicy`       | 可选     | `STANDARD`                       | 业务                                     | `STANDARD` 为普通库存；`SINGLE_UNIT` 只允许一个有效 SKU，库存总量与单次购买量不超过 1                               |
+| `fulfillmentType`                                            | 备货类型                      | enum `ProductFulfillmentType` | 可选    | `IN_STOCK`                       | 业务核实                                 | `IN_STOCK` / `PREORDER` / `CUSTOM` 是客户可见履约事实；当前默认值不能代替运营确认                                  |
+| `dispatchTime` / `customLeadTime`                             | 发出时间与约定备货周期        | enum + VarChar(100)          | 可选     | `WITHIN_48_HOURS` / `null`       | 业务核实                                 | `CUSTOM` 发布时必须填写真实周期；固定时效不得继续公开旧的 `customLeadTime`                                         |
+| `deliveryMethods` / `shippingTemplateId`                      | 提取方式与运费模板            | Json + Int FK?               | 可选     | `['EXPRESS']` / `null`           | 业务核实                                 | 提取方式只允许 `EXPRESS` / `STORE_PICKUP` / `DEDICATED`；运费模板只承载配送计费与覆盖事实，不等于其他服务费用      |
+| `requiresInsuredShipping` / `requiresSignature`               | 保价与签收要求                | Boolean                      | 可选     | `true` / `true`                  | 业务核实                                 | 客户可见的正向服务事实；现有默认值不能单独证明运营已确认                                                           |
+| `includesCertificate` / `packageType`                          | 随附证书与包装类型            | Boolean + VarChar(100)       | 可选     | `true` / `null`                  | 业务核实                                 | 证书公开展示仍以实际有效 `Certificate` 记录为准；编辑器不再预填“品牌礼盒”                                         |
 | `isHot/isNew/isRecommended/isLimited/isCustom/multiDiscount` | 展示标记                      | Boolean                      | 可选     | `false`                          | 运营                                     | —                                                                                                                  |
 | `sortOrder`                                                  | 排序                          | Int                          | 可选     | `0`                              | 运营                                     | `sortBy='sortOrder'` 时按其 asc                                                                                    |
 | `primaryImageId`                                             | 主图指针                      | Int FK?                      | 系统     | `null`                           | `setPrimaryImage` 维护                   | ⚠️ `setPrimaryImage` 会**改写图片 type**（FRONT↔SIDE），破坏视角语义                                               |
@@ -65,6 +70,13 @@
 | `deletedAt`                                                  | 软删除标记                    | DateTime?                    | 系统     | `null`                           | `delete()` 写                            | `findAll` 默认 `where deletedAt:null`                                                                              |
 
 **`findAll` 默认不返回的字段**（需 `findById`）：`description`、`gemInfo`、`craftTechnique`、`publishedAt`。导入校验/导出若需这些字段须走 `findById`。
+
+当前事实边界：
+
+- `Product.size` 与 `ProductSKU.size` 只表达当前作品/规格的尺寸文本，不是尺寸测量、适配、改圈或选择指导；把后者塞进自由文本会失去可识别语义与发布校验。
+- `ShippingTemplate` 只表达配送计费、偏远附加、免邮门槛和排除区域；报价附加费用继续使用既有报价费用合同，不能写入商品运费字段。
+- 当前没有专用的养护、保修、改圈、售后或通用服务说明字段。`description` / `detailContent` 可承载已核实的展示内容，但不能冒充可结构化校验的经营政策。若这些事实要作为统一商品合同、筛选条件或发布必填项，需要单独确定字段、适用分类、责任人和历史数据迁移。
+- 发布质量快照 v3 覆盖当前公开规格、宝石/工艺、履约、交付、服务标记、运费模板、SKU、证书，以及公开图片类型/排序事实；这些事实变化会使既有 READY 哈希失效。升级 migration 会先把旧 READY 全部隔离并清空 hash/核验时间，v2 哈希在当前报告与 SEO 导出中也视为不新鲜，须重新执行发布质量核验；哈希只能证明“复核后未变化”，不能证明默认值曾由运营明确确认。
 
 ---
 

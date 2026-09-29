@@ -16,8 +16,8 @@ const requireFromServer = createRequire(path.join(root, "server", "package.json"
 const ts = requireFromServer("typescript");
 const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
 const PAYMENT_METHOD_HASHES = Object.freeze({
-  rejectOfflinePayment: "4b758682b661bed4caabb62c82394837d12522a4e264edccf5139b2231fa62e6",
-  failPendingPaymentAttempt: "8a614374cbde041fd39f1eaa504370f90006f546f5bc9339c2bfb289f4f033de",
+  rejectOfflinePayment: "b158f4d2f9ab48db2363d4a9e3fff5177bf1870f3a07bb0659e917f95b7c9380",
+  failPendingPaymentAttempt: "6614ff28edab754ec8af62505f222956aab9b9453f8b3da605e5e1bafa1cb97c",
 });
 const LEGACY_INLINE_REJECT_METHOD = `async rejectOfflinePayment(paymentId: number, reviewerId: number, reviewNote?: string, operator?: OperatorContext) {
   const actor: OperatorContext = operator ?? { type: OPERATOR_TYPE.ADMIN, id: reviewerId }; return this.prisma.$transaction(async (tx) => {
@@ -160,11 +160,14 @@ function runPaymentPinSelfTest(source) {
     ["wrapper helper 调用", "rejectOfflinePayment", replaceOnce("this.failPendingPaymentAttempt(", "this.failPendingPaymentAttempt.bind(this)(")],
     ["wrapper status guard", "rejectOfflinePayment", replaceOnce('result.status !== "FAILED"', 'result.status === "FAILED"')],
     ["helper transaction receiver", "failPendingPaymentAttempt", replaceOnce("this.prisma.$transaction", "this.prismaRead.$transaction")],
-    ["helper paymentId", "failPendingPaymentAttempt", replaceOnce("where: { id: paymentId },\n      select", "where: { id: paymentId + 1 },\n      select")],
+    ["helper customer principal lock", "failPendingPaymentAttempt", replaceOnce("await lockActiveCustomerForWrite(tx, options.customerPrincipal);", "void options.customerPrincipal;")],
+    ["helper paymentId", "failPendingPaymentAttempt", replaceOnce("where: { id: paymentId },\n        select", "where: { id: paymentId + 1 },\n        select")],
     ["helper order lock", "failPendingPaymentAttempt", replaceOnce("this.lockOrderForTrade(tx, paymentRef.orderId)", "this.lockOrderForTrade(tx, paymentRef.orderId + 1)")],
     ["helper transaction reread", "failPendingPaymentAttempt", replaceOnce("const payment = await tx.payment.findUnique", "const payment = await tx.payment.findFirst")],
     ["helper method guard", "failPendingPaymentAttempt", replaceOnce("payment.method !== options.expectedMethod", "payment.method === options.expectedMethod")],
     ["helper status guard", "failPendingPaymentAttempt", replaceOnce('payment.status !== "PENDING"', 'payment.status === "PENDING"')],
+    ["helper manual replay reviewer", "failPendingPaymentAttempt", replaceOnce("payment.reviewedBy === options.reviewerId", "payment.reviewedBy !== options.reviewerId")],
+    ["helper manual replay reason", "failPendingPaymentAttempt", replaceOnce("(payment.reviewNote?.trim() || \"\") === reason.trim()", "(payment.reviewNote?.trim() || \"\") !== reason.trim()")],
     ["helper CAS status", "failPendingPaymentAttempt", replaceOnce('where: { id: paymentId, status: "PENDING" }', 'where: { id: paymentId, status: "FAILED" }')],
     ["helper CAS count", "failPendingPaymentAttempt", replaceOnce("failed.count !== 1", "failed.count === 1")],
     ["helper reviewer", "failPendingPaymentAttempt", replaceOnce("reviewedBy: options.reviewerId ?? null", "reviewedBy: null")],
@@ -264,6 +267,18 @@ check("库存为唯一来源：reserveStock 无库存时不 fallback 到 SKU.sto
   assert.ok(reserveMatch, "未找到 reserveStock 方法");
   assert.ok(reserveMatch[0].includes("Inventory 为唯一库存来源"), "reserveStock 必须明确 Inventory 单一来源");
   assert.ok(!/productSKU\.update[\s\S]*stock:\s*\{\s*decrement/.test(reserveMatch[0]), "reserveStock 不可写 SKU.stock");
+});
+
+check("库存为唯一来源：releaseStockReservations 缺少 Inventory 归属时先失败关闭", () => {
+  const releaseMatch = ordersSrc.match(/private async releaseStockReservations[\s\S]*?\n {2}\}/);
+  assert.ok(releaseMatch, "未找到 releaseStockReservations 方法");
+  const releaseSrc = releaseMatch[0];
+  const missingInventoryGuard = releaseSrc.indexOf("reservation.inventoryId === null");
+  const releaseClaim = releaseSrc.indexOf("inventoryReservation.updateMany");
+  assert.ok(missingInventoryGuard >= 0, "releaseStockReservations 必须拒绝 inventoryId=null 的历史预占");
+  assert.ok(releaseClaim >= 0, "releaseStockReservations 必须原子抢占释放权");
+  assert.ok(missingInventoryGuard < releaseClaim, "空 Inventory 归属必须在写 releasedAt 前失败关闭");
+  assert.ok(!/productSKU\.update[\s\S]*stock:\s*\{\s*increment/.test(releaseSrc), "releaseStockReservations 不可回写 SKU.stock");
 });
 
 check("订单金额：使用整数分累加（Math.round(unitPrice*100)）", () => {

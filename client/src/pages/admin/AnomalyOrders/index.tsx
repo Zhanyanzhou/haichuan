@@ -7,16 +7,9 @@ import { orderApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import { canAccessAdminRoute } from "@/config/adminRouteAccess";
+import { ORDER_STATUS_META } from "@/constants/tradeStatusCopy";
 import { useAuthStore } from "@/store/authStore";
 import type { Order } from "@/types";
-
-const STATUS_LABEL: Record<string, { c: string; t: string }> = {
-  PENDING_PAYMENT: { c: "gold", t: "待付款" },
-  PENDING_SHIP: { c: "blue", t: "待发货" },
-  SHIPPED: { c: "cyan", t: "已发货" },
-  COMPLETED: { c: "green", t: "已完成" },
-  CANCELLED: { c: "red", t: "已取消" },
-};
 
 const ORDER_TYPE_LABEL: Record<string, string> = {
   SPOT: "现货",
@@ -66,7 +59,7 @@ export default function AnomalyOrders() {
           </h1>
           <p className="text-sm text-brand-muted mt-1">
             自动归集：长时间未付款（&gt;24h）· 超时未发货（&gt;48h）·
-            定制超期（&gt;30 天）· 物流异常 · 退款处理中
+            定制超期（&gt;30 天）· 物流异常 · 退款处理中 · 付款角色异常
           </p>
         </div>
         <Space>
@@ -128,8 +121,8 @@ export default function AnomalyOrders() {
                 dataIndex: "status",
                 width: 90,
                 render: (v: string) => {
-                  const m = STATUS_LABEL[v];
-                  return <Tag color={m?.c}>{m?.t || v}</Tag>;
+                  const m = ORDER_STATUS_META[v as keyof typeof ORDER_STATUS_META];
+                  return <Tag color={m?.color}>{m?.label || v}</Tag>;
                 },
               },
               {
