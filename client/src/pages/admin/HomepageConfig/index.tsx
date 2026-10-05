@@ -89,7 +89,10 @@ import { notifyPageTemplateInserted } from "@/page-builder/template-editor/templ
 import { resolvePublishedTemplateInsertionIndex } from "@/page-builder/template-editor/pageTemplateHandoff";
 import WorkspaceCanvasControls from "@/page-builder/template-editor/WorkspaceCanvasControls";
 import { useTemplateWorkspaceController } from "@/page-builder/template-editor/TemplateWorkspaceController";
+import { replaceExactStringValues } from "@/page-builder/inspector/replaceExactStringValues";
+import { uploadApi } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
+import { unwrapResponse } from "@/utils/unwrap";
 import {
   getEffectiveDynamicTemplateInstanceEditPolicy,
   type TemplateDefinitionV2,
@@ -1338,6 +1341,7 @@ function EditorBody({
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const isInspecting = Boolean(selectedItem);
   const [draggingTemplate, setDraggingTemplate] = useState<string | null>(null);
+  const [adoptingDatedUploads, setAdoptingDatedUploads] = useState(false);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const draggingTemplateRef = useRef<{
     label: string;
@@ -2285,6 +2289,39 @@ function EditorBody({
                 canAuthorizePublicMedia={canAuthorizePublicMedia}
                 authorizingPublicMedia={authorizingPublicMedia}
                 onAuthorizePublicMedia={onAuthorizePublicMedia}
+                adoptingDatedUploads={adoptingDatedUploads}
+                onAdoptDatedUploads={(urls) => {
+                  if (adoptingDatedUploads || urls.length === 0) return;
+                  setAdoptingDatedUploads(true);
+                  void (async () => {
+                    try {
+                      const replacements = new Map<string, string>();
+                      for (const url of urls) {
+                        const response = await uploadApi.adoptDatedUpload(url);
+                        const nextUrl = unwrapResponse<{ url?: string }>(response)?.url?.trim() ?? "";
+                        if (!nextUrl.startsWith("/uploads/page-assets/")) {
+                          throw new Error("登记结果缺少页面素材地址");
+                        }
+                        replacements.set(url, nextUrl);
+                      }
+                      const nextData = replaceExactStringValues(appData, replacements);
+                      dispatch({
+                        type: "setData",
+                        data: nextData as Partial<Data>,
+                        recordHistory: true,
+                      });
+                      onSaveDraft(nextData);
+                      message.success("已登记为页面素材。请确认这些图片可以公开，然后再发布。");
+                    } catch (error) {
+                      const apiMessage = error instanceof Error ? error.message : "";
+                      message.error(apiMessage && !/[A-Za-z]{8,}/.test(apiMessage)
+                        ? apiMessage
+                        : "旧图片登记失败。原文件仍在，草稿没有改写。");
+                    } finally {
+                      setAdoptingDatedUploads(false);
+                    }
+                  })();
+                }}
                 onLocate={locatePublishIssue}
                 onClose={closePublishReview}
                 onRetry={onRetryValidation}

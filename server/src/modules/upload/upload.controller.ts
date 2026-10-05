@@ -9,6 +9,7 @@ import { memoryStorage } from 'multer';
 import { extname } from 'path';
 import { UploadService } from './upload.service';
 import { PageMediaQueryDto } from './dto/page-media-query.dto';
+import { AdoptDatedUploadDto } from './dto/adopt-dated-upload.dto';
 import { CropPageMediaDto } from './dto/crop-page-media.dto';
 import {
   ExpectedMediaAuthorizationRevisionDto,
@@ -179,6 +180,13 @@ export class UploadController {
       { x: dto.x, y: dto.y, width: dto.width, height: dto.height },
       request.user,
     );
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '把 YYYY/MM/DD 旧图片复制登记为页面素材，不改页面引用' })
+  @Post('media/adopt-dated-upload')
+  adoptDatedUpload(@Req() request: StaffRequest, @Body() dto: AdoptDatedUploadDto) {
+    return this.uploadService.adoptDatedPublicUpload(dto.sourceUrl, request.user);
   }
 
   @ApiBearerAuth()

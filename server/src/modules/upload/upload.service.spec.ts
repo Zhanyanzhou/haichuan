@@ -167,6 +167,32 @@ async function fixture() {
   };
 }
 
+test('日期路径旧图片可以复制登记为页面素材，原文件保留且不批准公开', async () => {
+  const { root, rows, service } = await fixture();
+  try {
+    const datedDir = join(root, 'uploads', '2026', '09', '01');
+    await mkdir(datedDir, { recursive: true });
+    const source = join(datedDir, 'hero.png');
+    await writeFile(source, PNG);
+    const stored = await service.adoptDatedPublicUpload('/uploads/2026/09/01/hero.png', 7);
+    assert.match(stored.url, /^\/uploads\/page-assets\/[a-f0-9]{64}\.png$/);
+    assert.notEqual(stored.url, '/uploads/2026/09/01/hero.png');
+    assert.equal(existsSync(source), true);
+    assert.equal(rows.size, 1);
+    assert.equal([...rows.values()][0]?.status, 'READY');
+    await assert.rejects(
+      service.adoptDatedPublicUpload('/uploads/page-assets/not-dated.png', 7),
+      /只能登记/,
+    );
+    await assert.rejects(
+      service.adoptDatedPublicUpload('/uploads/2026/09/01/missing.png', 7),
+      /找不到这张历史上传图片/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('页面图片上传会登记、按内容去重，并在并发后只保留一个稳定引用', async () => {
   const { root, rows, service } = await fixture();
   try {

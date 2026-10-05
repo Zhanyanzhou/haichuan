@@ -1246,6 +1246,15 @@ export const uploadApi = {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
+  adoptDatedUpload: async (sourceUrl: string) => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockRes({ url: sourceUrl, id: 1 });
+    }
+    return api.post("/upload/media/adopt-dated-upload", { sourceUrl }, {
+      suppressGlobalError: true,
+    });
+  },
   cropPageMedia: async (data: {
     sourceUrl: string;
     x: number;

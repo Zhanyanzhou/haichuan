@@ -1315,6 +1315,77 @@ export class UploadService implements OnModuleInit {
   }
 
   /**
+   * 把仍留在 /uploads/YYYY/MM/DD/ 的旧图片复制登记为 page-assets。
+   * 不删除原文件，不改写页面草稿，也不批准公网使用。
+   */
+  async adoptDatedPublicUpload(
+    sourceUrl: string,
+    actor?: MediaStaffActorInput,
+  ): Promise<StoredPageMedia> {
+    const storageKey = this.parseDatedUploadStorageKey(sourceUrl);
+    const physical = this.resolveWithinRoot(this.uploadDir, storageKey);
+    if (!physical || !existsSync(physical)) {
+      throw new NotFoundException('找不到这张历史上传图片，不能登记');
+    }
+    const buffer = await readFile(physical);
+    if (buffer.length > this.maxSize) {
+      throw new BadRequestException('文件大小不能超过 10MB');
+    }
+    const sourceExtension = extname(storageKey).toLowerCase();
+    const mimeType = ({
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+    } as Record<string, string>)[sourceExtension];
+    const expectedType = mimeType ? this.allowedTypes.get(mimeType) : undefined;
+    if (!mimeType || !expectedType) {
+      throw new BadRequestException('仅支持 JPEG、PNG、WebP 或 GIF 图片');
+    }
+    const metadata = await validateImageContent(buffer, expectedType.format);
+    return this.registerPublicPageMedia({
+      file: {
+        buffer,
+        size: buffer.length,
+        mimetype: mimeType,
+        originalname: basename(storageKey),
+      } as Express.Multer.File,
+      actor,
+      extension: expectedType.extension,
+      width: metadata.width,
+      height: metadata.height,
+      format: metadata.format,
+    });
+  }
+
+  private parseDatedUploadStorageKey(sourceUrl: string): string {
+    const match = sourceUrl.trim().match(/^\/uploads\/(\d{4}\/\d{2}\/\d{2}\/[^/?#]+)(?:[?#].*)?$/);
+    if (!match) throw new BadRequestException('只能登记 YYYY/MM/DD 路径上的本站旧图片');
+    let storageKey: string;
+    try {
+      storageKey = decodeURIComponent(match[1]);
+    } catch {
+      throw new BadRequestException('素材地址无效');
+    }
+    const segments = storageKey.split('/');
+    if (
+      segments.length !== 4
+      || !/^\d{4}$/.test(segments[0] ?? '')
+      || !/^\d{2}$/.test(segments[1] ?? '')
+      || !/^\d{2}$/.test(segments[2] ?? '')
+      || !segments[3]
+      || segments[3] === '.'
+      || segments[3] === '..'
+      || storageKey.includes('\\')
+      || /[\u0000-\u001f\u007f]/u.test(storageKey)
+    ) {
+      throw new BadRequestException('素材地址无效');
+    }
+    return storageKey;
+  }
+
+  /**
    * 按运营选定的矩形裁切页面素材，登记为新的 page-assets 图片。
    * 只缩小、不二次 cover 裁切，避免覆盖用户刚确认的构图。
    */

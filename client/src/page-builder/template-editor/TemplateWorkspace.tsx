@@ -1315,8 +1315,8 @@ export default function TemplateWorkspace({
         {draft ? <DynamicTemplateCanvas /> : (
           <section className="homepage-editor__stage template-editor__stage template-editor__empty-stage" aria-label="空模板画布">
             <div className="template-editor__empty-stage-card">
-              <strong>从左侧选择模板进行设计</strong>
-              <span>打开现有模板继续精修，或新建模板，选择用途、尺寸与布局后自动生成设计。</span>
+              <strong>尚未打开模板</strong>
+              <span>这里改的是可复用模板，不是当前页面的图片和文字。从左侧打开一个模板继续设计，或回到页面装修修改首页。</span>
             </div>
           </section>
         )}

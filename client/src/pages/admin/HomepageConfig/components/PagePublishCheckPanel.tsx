@@ -11,11 +11,25 @@ import {
   getManagedMediaAssetId,
   isManagedMediaAuthorizationIssue,
 } from "@/page-builder/inspector/managedMediaPublishIssues";
+import { isDatedUploadUrl } from "@/page-builder/inspector/replaceExactStringValues";
 import type {
   PagePublishIssueTarget,
   PublishValidationIssue,
   PublishValidationStatus,
 } from "@/page-builder/inspector/publishValidation";
+
+function datedUploadUrls(issues: readonly PublishValidationIssue[]) {
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const issue of issues) {
+    if (issue.code !== "page-validation-managed-media-unregistered-media") continue;
+    const url = issue.assetUrl?.trim() ?? "";
+    if (!isDatedUploadUrl(url) || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+  return urls;
+}
 
 const DEVICE_LABEL = {
   desktop: "桌面端",
@@ -33,6 +47,8 @@ export default function PagePublishCheckPanel({
   canAuthorizePublicMedia = false,
   authorizingPublicMedia = false,
   onAuthorizePublicMedia,
+  adoptingDatedUploads = false,
+  onAdoptDatedUploads,
   onLocate,
   onClose,
   onRetry,
@@ -49,6 +65,8 @@ export default function PagePublishCheckPanel({
   canAuthorizePublicMedia?: boolean;
   authorizingPublicMedia?: boolean;
   onAuthorizePublicMedia?: (assetIds: number[]) => void;
+  adoptingDatedUploads?: boolean;
+  onAdoptDatedUploads?: (urls: string[]) => void;
   onLocate: (target: PagePublishIssueTarget) => void;
   onClose: () => void;
   onRetry: () => void;
@@ -66,6 +84,7 @@ export default function PagePublishCheckPanel({
   const mediaOnlyErrors = errorCount > 0 && issues.every((issue) => (
     issue.severity !== "error" || isManagedMediaAuthorizationIssue(issue)
   ));
+  const legacyDatedUploadUrls = datedUploadUrls(issues);
   const lockedPageValueIssues = issues.filter((issue) => (
     issue.severity === "error"
     && typeof issue.path === "string"
@@ -173,7 +192,16 @@ export default function PagePublishCheckPanel({
                     <span>{target.groupLabel} / {target.fieldLabel}</span>
                     {target.reason ? <small>{target.reason}</small> : null}
                   </button>
-                  {issue && isManagedMediaAuthorizationIssue(issue)
+                  {issue?.code === "page-validation-managed-media-unregistered-media"
+                    && issue.assetUrl && isDatedUploadUrl(issue.assetUrl) && onAdoptDatedUploads ? (
+                    <button
+                      type="button"
+                      disabled={adoptingDatedUploads}
+                      onClick={() => onAdoptDatedUploads([issue.assetUrl!.trim()])}
+                    >
+                      登记这张旧图片
+                    </button>
+                  ) : issue && isManagedMediaAuthorizationIssue(issue)
                     && !(canAuthorizePublicMedia && mediaOnlyErrors) ? (
                     <button
                       type="button"
@@ -247,10 +275,23 @@ export default function PagePublishCheckPanel({
                     ? "正在检查当前草稿…"
                     : errorCount === 0
                       ? "资格已就绪。点击发布页面才会更新前台。"
-                      : mediaOnlyErrors
+                      : legacyDatedUploadUrls.length > 0
+                        ? "这些图片还在旧上传目录，登记后才会进入页面素材库。登记不会自动公开，也不会发布。"
+                        : mediaOnlyErrors
                         ? "这些图尚未批准公开使用；确认权利后不会自动发布。"
                         : "修改草稿后会自动重验，仅清除已解决的问题。"}
           </span>
+          {legacyDatedUploadUrls.length > 1 && onAdoptDatedUploads ? (
+            <button
+              type="button"
+              disabled={adoptingDatedUploads}
+              onClick={() => onAdoptDatedUploads(legacyDatedUploadUrls)}
+            >
+              {adoptingDatedUploads
+                ? "正在登记旧图片…"
+                : `登记全部 ${legacyDatedUploadUrls.length} 张旧图片`}
+            </button>
+          ) : null}
           {canAuthorizePublicMedia && mediaOnlyErrors && mediaAssetIds.length > 0 ? (
             <button
               type="button"
@@ -287,7 +328,7 @@ export default function PagePublishCheckPanel({
             <button
               type="button"
               onClick={publishAttemptFailed ? onRetryPublish : onRetry}
-              disabled={authorizingPublicMedia || (!publishAttemptFailed && validationStatus === "validating")}
+              disabled={authorizingPublicMedia || adoptingDatedUploads || (!publishAttemptFailed && validationStatus === "validating")}
             >
               <ReloadOutlined /> {publishAttemptFailed ? "重新发布页面" : "重新检查"}
             </button>
