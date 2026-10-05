@@ -24,7 +24,7 @@
     "@fontsource/noto-serif-sc": "^5.2.8",
     "@puckeditor/core": "^0.22.4",
     "antd": "^5.13.0",
-    "axios": "^1.6.5",
+    "axios": "^1.20.0",
     "dayjs": "^1.11.10",
     "framer-motion": "^10.18.0",
     "react": "^18.3.0",
