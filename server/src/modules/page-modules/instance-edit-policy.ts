@@ -89,7 +89,8 @@ export function isLayoutOverrideCapabilityEnabled(
       return Boolean(policy.imageFit) && slot.type === "image";
     case "focusXPercent":
     case "focusYPercent":
-      return Boolean(policy.imageFocus) && slot.type === "image";
+      // 与客户端一致：图片槽位上传后都可保存画面焦点。
+      return slot.type === "image";
     case "fontSizePx":
     case "textAlign":
       return Boolean(policy.typography) && isTextLayoutSlotType(slot.type);

@@ -46,15 +46,6 @@ const INTERNAL_OBJECT_LABELS: Record<string, string> = {
   collection: "内容集合",
 };
 
-const LAYER_SUMMARY_KEYS = [
-  "title",
-  "heading",
-  "eyebrow",
-  "subtitle",
-  "description",
-  "text",
-] as const;
-
 function normalizeLayerSummary(value: unknown) {
   if (typeof value !== "string") return null;
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -62,26 +53,38 @@ function normalizeLayerSummary(value: unknown) {
   return normalized.length > 28 ? `${normalized.slice(0, 28)}…` : normalized;
 }
 
-function getLayerContentSummary(props: PuckProps) {
-  for (const key of LAYER_SUMMARY_KEYS) {
-    const summary = normalizeLayerSummary(props[key]);
-    if (summary) return summary;
-  }
-  const contentBySlotId = props.contentBySlotId;
+function readSlotSummaries(
+  contentBySlotId: unknown,
+  keys: readonly string[],
+) {
   if (!contentBySlotId || typeof contentBySlotId !== "object" || Array.isArray(contentBySlotId)) {
     return null;
   }
   for (const value of Object.values(contentBySlotId)) {
-    const directSummary = normalizeLayerSummary(value);
-    if (directSummary) return directSummary;
+    const directSummary = typeof value === "string" ? normalizeLayerSummary(value) : null;
+    if (directSummary && keys.includes("text")) return directSummary;
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const record = value as Record<string, unknown>;
-    for (const key of ["title", "label", "alt", "description"] as const) {
+    for (const key of keys) {
       const nestedSummary = normalizeLayerSummary(record[key]);
       if (nestedSummary) return nestedSummary;
     }
   }
   return null;
+}
+
+function getLayerContentSummary(props: PuckProps) {
+  for (const key of ["title", "heading"] as const) {
+    const summary = normalizeLayerSummary(props[key]);
+    if (summary) return summary;
+  }
+  const visibleCopy = readSlotSummaries(props.contentBySlotId, ["title", "label", "text"]);
+  if (visibleCopy) return visibleCopy;
+  for (const key of ["subtitle", "description", "text"] as const) {
+    const summary = normalizeLayerSummary(props[key]);
+    if (summary) return summary;
+  }
+  return readSlotSummaries(props.contentBySlotId, ["alt", "description"]);
 }
 
 export default function LayerRail({

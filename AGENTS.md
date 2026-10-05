@@ -22,7 +22,7 @@
 
 - CI 与发布验证基线使用 Node.js `22.12+` 的 `22.x` 和 npm，以各包 `engines`、质量工作流和发布配置为权威。本机其他 Node 版本只可做不会产生误导的辅助诊断，不能替代 Node 22 的完成或发布证据。根目录、`client/`、`server/` 是独立包，各自维护清单和 lockfile；不得混用包管理器。代码标识符用英文，注释默认中文；命令、错误和协议名保留原文。
 - `client/` 为 React/TypeScript/Vite，Playwright 在 `client/tests/`；`server/` 为 NestJS/TypeScript/Prisma/MySQL，须从 `server/` 启动，数据库模型只认 `server/prisma/schema.prisma`。门禁以包脚本、`.github/workflows/quality.yml` 和 `WORKFLOW.md` 为准。
-- 模板设计唯一产品执行标准是 `docs/page-builder/template-creation-rules.md`；新建、预设、生成、编辑、管理和验收均先读该标准。`template-design-framework.md` 只作从属编辑与页面交接细则，旧计划、归档和 Skill 不得另立模板规则。页面装修只使用 Puck `PageDocument`；模板结构、版本和页面实例分别由对应合同与 Repository 承载，技术边界见 `PROJECT_RULES.md` §7，不得建立平行来源。
+- 店铺装修先读 `docs/PROJECT_GUARDRAILS.md` 第 2 节的公开页目的，再读产品合同 `docs/page-builder/store-decoration.md`。模板设计（新建、预设、生成、精调、管理）再读 `docs/page-builder/template-creation-rules.md`。`template-design-framework.md` 只作从属编辑与页面交接细则，旧计划、归档和 Skill 不得另立模板或装修规则。页面装修只使用 Puck `PageDocument`；模板结构、版本和页面实例分别由对应合同与 Repository 承载，技术边界见 `PROJECT_RULES.md` §7，不得建立平行来源。
 - “自动生成，禁止手改”的文件只改 `contracts/page-builder/` 源合同，再运行 `npm run contracts:generate` 和 `npm run contracts:check`。
 - `server/prisma/migrations/*/migration.sql` 是不可变历史，不改已有文件或 `migration_lock.toml`。已授权功能所需、向后兼容且可回退的本地 Schema 和新增 migration 源文件可按 `PROJECT_RULES.md` 实施；执行到共享、真实或生产数据库仍须单独批准。
 

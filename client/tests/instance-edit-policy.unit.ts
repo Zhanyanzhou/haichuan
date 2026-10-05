@@ -83,6 +83,13 @@ test("字号与间距只对文字槽生效，图片适配只对图片槽生效",
   expect(isLayoutOverrideCapabilityEnabled(policy!, headingSlot(), "objectFit")).toBe(false);
   expect(isLayoutOverrideCapabilityEnabled(policy!, buttonSlot(), "fontSizePx")).toBe(false);
   expect(isLayoutOverrideCapabilityEnabled(policy!, buttonSlot(), "marginTopPx")).toBe(false);
+  const imageSlot = { ...headingSlot(), slotId: "slot_image", key: "image", type: "image" as const, label: "主图片" };
+  const lockedFocus = getEffectiveDynamicTemplateInstanceEditPolicy(headingNode({
+    imageFocus: false,
+  }), imageSlot);
+  expect(isLayoutOverrideCapabilityEnabled(lockedFocus!, imageSlot, "focusXPercent")).toBe(true);
+  expect(isLayoutOverrideCapabilityEnabled(lockedFocus!, imageSlot, "focusYPercent")).toBe(true);
+  expect(isLayoutOverrideCapabilityEnabled(policy!, headingSlot(), "focusXPercent")).toBe(false);
 });
 
 test("日常属性入口不把内部标识当表单字段", () => {

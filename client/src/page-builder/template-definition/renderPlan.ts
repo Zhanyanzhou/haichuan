@@ -54,6 +54,14 @@ export interface CompileDynamicTemplateRenderPlanOptions {
   layoutOverridesByNodeId?: TemplateInstanceLayoutOverridesByNodeId;
   /** 编辑器与预览可保留空槽位占位；公开渲染必须保持 false。 */
   showEmptySlots?: boolean;
+  /**
+   * 公开与预览按 D.38 消费：默认图片不进入前台，未获准的价格文字不进入前台。
+   * 编辑画布不传此项，以便继续查看模板默认图和设计用文案。
+   */
+  publicSurface?: {
+    omitDefaultImages: true;
+    suppressedSemanticRoles?: readonly string[];
+  };
 }
 
 /** 与公开 Renderer 共用：只从当前断点实际可达的渲染计划中选择页面级标题槽位。 */
@@ -125,13 +133,22 @@ export function compileDynamicTemplateRenderPlan(
       ? instanceContent[node.slotId]
       : undefined;
     const defaultValue = node.slotId ? definition.defaultContent[node.slotId] : undefined;
-    const content = slot && hasInstanceContent
+    const suppressedRoles = new Set(options.publicSurface?.suppressedSemanticRoles ?? []);
+    let content = slot && hasInstanceContent
       && slot.emptyPolicy === "use-default"
       && !hasMeaningfulSlotContent(slot, instanceValue)
       ? defaultValue
       : hasInstanceContent
         ? instanceValue
         : defaultValue;
+    if (slot && options.publicSurface?.omitDefaultImages && slot.type === "image") {
+      content = hasInstanceContent && hasMeaningfulSlotContent(slot, instanceValue)
+        ? instanceValue
+        : undefined;
+    }
+    if (slot?.semanticRole && suppressedRoles.has(slot.semanticRole)) {
+      content = undefined;
+    }
     const emptySlotHidden = Boolean(slot
       && !options.showEmptySlots
       && !hasMeaningfulSlotContent(slot, content));
@@ -159,10 +176,10 @@ export function compileDynamicTemplateRenderPlan(
       ...(policy.imageFit && slot?.type === "image" && typeof rawLayoutOverride.imageScalePercent === "number" && Number.isFinite(rawLayoutOverride.imageScalePercent)
         ? { imageScalePercent: Math.max(100, Math.min(200, rawLayoutOverride.imageScalePercent)) }
         : {}),
-      ...(policy.imageFocus && slot?.type === "image" && typeof rawLayoutOverride.focusXPercent === "number" && Number.isFinite(rawLayoutOverride.focusXPercent)
+      ...(slot?.type === "image" && typeof rawLayoutOverride.focusXPercent === "number" && Number.isFinite(rawLayoutOverride.focusXPercent)
         ? { focusXPercent: Math.max(0, Math.min(100, rawLayoutOverride.focusXPercent)) }
         : {}),
-      ...(policy.imageFocus && slot?.type === "image" && typeof rawLayoutOverride.focusYPercent === "number" && Number.isFinite(rawLayoutOverride.focusYPercent)
+      ...(slot?.type === "image" && typeof rawLayoutOverride.focusYPercent === "number" && Number.isFinite(rawLayoutOverride.focusYPercent)
         ? { focusYPercent: Math.max(0, Math.min(100, rawLayoutOverride.focusYPercent)) }
         : {}),
       ...(policy.typography && slot && ["heading", "text", "richText", "badge"].includes(slot.type)

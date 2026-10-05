@@ -2,18 +2,18 @@ import type { TemplateRecipe } from "../template-definition/generated/templateDe
 
 export const PURPOSES = [
   ["productPromotion", "商品促销"], ["newProduct", "新品发布"], ["event", "活动宣传"],
-  ["brand", "品牌宣传"], ["social", "社交媒体"], ["news", "新闻 / 资讯"],
+  ["brand", "品牌故事"], ["social", "社交媒体"], ["news", "新闻 / 资讯"],
   ["profile", "人物介绍"], ["general", "通用模板"], ["custom", "自定义"],
 ] as const;
+/** 创建界面只展示网站模板类型。social 仅供历史配方读取，不再推荐。 */
+export const CREATION_PURPOSES = PURPOSES.filter(([id]) => id !== "social");
 export const CANVAS_PRESETS = [
-  { name: "正方形", ratio: "1:1", width: 1080, height: 1080 },
-  { name: "竖版", ratio: "4:5", width: 1080, height: 1350 },
-  { name: "手机全屏", ratio: "9:16", width: 1080, height: 1920 },
-  { name: "宽屏", ratio: "16:9", width: 1920, height: 1080 },
-  { name: "标准竖版", ratio: "3:4", width: 1080, height: 1440 },
-  { name: "海报竖版", ratio: "2:3", width: 1200, height: 1800 },
-  { name: "标准横版", ratio: "4:3", width: 1200, height: 900 },
-  { name: "社交横图", ratio: "1.91:1", width: 1200, height: 628 },
+  { name: "随内容增长", ratio: "auto", width: 1440, height: 900 },
+  { name: "宽幅主视觉", ratio: "16:9", width: 1440, height: 810 },
+  { name: "编辑横版", ratio: "3:2", width: 1440, height: 960 },
+  { name: "均衡横版", ratio: "4:3", width: 1440, height: 1080 },
+  { name: "方形卡片", ratio: "1:1", width: 1080, height: 1080 },
+  { name: "竖向卡片", ratio: "4:5", width: 1080, height: 1350 },
 ] as const;
 export const LAYOUTS = [
   ["topImageBottomContent", "上图下文"], ["topContentBottomImage", "上文下图"],
@@ -90,13 +90,13 @@ export function createContentSlot(role: TemplateRecipe["content"][number]["role"
 }
 export function recommendedFor(purpose: TemplateRecipe["purpose"]) {
   const choices: Record<TemplateRecipe["purpose"], { ratios: string[]; layouts: TemplateRecipe["layout"][]; mediaPreset: string; contents: TemplateRecipe["content"][number]["role"][] }> = {
-    productPromotion: { ratios: ["4:5"], layouts: ["topImageBottomContent"], mediaPreset: "hero", contents: ["title", "subtitle", "price", "originalPrice", "cta"] },
-    newProduct: { ratios: ["4:5"], layouts: ["centerSubject"], mediaPreset: "heroLogo", contents: ["brandName", "title", "subtitle", "cta"] },
-    event: { ratios: ["9:16"], layouts: ["fullImageOverlay"], mediaPreset: "background", contents: ["title", "time", "location", "cta"] },
-    brand: { ratios: ["1:1"], layouts: ["centerSubject"], mediaPreset: "heroLogo", contents: ["brandName", "customText", "description"] },
+    productPromotion: { ratios: ["16:9"], layouts: ["topImageBottomContent"], mediaPreset: "hero", contents: ["title", "subtitle", "price", "originalPrice", "cta"] },
+    newProduct: { ratios: ["3:2"], layouts: ["centerSubject"], mediaPreset: "heroLogo", contents: ["brandName", "title", "subtitle", "cta"] },
+    event: { ratios: ["16:9"], layouts: ["fullImageOverlay"], mediaPreset: "background", contents: ["title", "time", "location", "cta"] },
+    brand: { ratios: ["auto"], layouts: ["centerSubject"], mediaPreset: "heroLogo", contents: ["brandName", "customText", "description"] },
     social: { ratios: ["1:1"], layouts: ["centerSubject"], mediaPreset: "hero", contents: ["title", "description"] },
-    news: { ratios: ["4:5"], layouts: ["topImageBottomContent"], mediaPreset: "hero", contents: ["tag", "title", "description", "date"] },
-    profile: { ratios: ["4:5"], layouts: ["leftImageRightContent", "topImageBottomContent"], mediaPreset: "hero", contents: ["personName", "position", "biography"] },
+    news: { ratios: ["auto"], layouts: ["topImageBottomContent"], mediaPreset: "hero", contents: ["tag", "title", "description", "date"] },
+    profile: { ratios: ["3:2"], layouts: ["leftImageRightContent", "topImageBottomContent"], mediaPreset: "hero", contents: ["personName", "position", "biography"] },
     general: { ratios: [], layouts: [], mediaPreset: "", contents: [] },
     custom: { ratios: [], layouts: [], mediaPreset: "", contents: [] },
   };

@@ -16,7 +16,7 @@ const DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT = "haichuan:dynamic-template-server
 const NOW = "2026-09-09T08:00:00.000Z";
 
 // 结构与生命周期集成用例验证业务闭环，不重复依赖紧凑覆盖层的收放时序；
-// 1439px 及以下的真实命中与响应式合同由专门的 responsive 用例覆盖。
+// 1024px 及以下的真实命中与响应式合同由专门的 responsive 用例覆盖。
 test.use({ viewport: { width: 1440, height: 900 } });
 
 type DynamicWrite = { body: unknown; method: string; path: string };
@@ -808,7 +808,7 @@ async function expectWorkspaceViewport(
 ) {
   const requestsBefore = readServerCounters(server);
   await page.setViewportSize(viewport);
-  const compact = viewport.width <= 1439;
+  const compact = viewport.width <= 1024;
   const body = page.locator(".template-editor__body");
   await expect(body).toHaveAttribute("data-template-workspace-compact", String(compact));
   await expect(page.getByRole("region", { name: /模板(?:设计)?画布/ })).toBeVisible();
@@ -973,7 +973,7 @@ async function expectPageFieldSummary(
       expect(policyAttribute).not.toBeNull();
       expect(JSON.parse(validationAttribute!)).toEqual(item.validation);
       expect(JSON.parse(policyAttribute!)).toEqual(item.policy);
-      await expect(field).toContainText(`${item.required ? "必填" : "可选"} · 可填写 · ${item.hideable ? "可隐藏" : "固定显示"}`);
+      await expect(field).toContainText(`${item.required ? "必须由页面填写" : "建议填写"} · 可填写 · ${item.hideable ? "可隐藏" : "固定显示"}`);
       await expect(field).toContainText(`控件：${item.controlLabel}`);
       await expect(field).toContainText(`限制：${item.limit}`);
       await expect(field).toContainText(item.overrideCopy);
@@ -1285,7 +1285,7 @@ test("自建单区域图文组可跨组移动、双端重排，并原子取消�
 
   await openPageField(page, /标题槽位/, "工艺标题");
   await page.getByLabel("页面可隐藏").uncheck();
-  await page.getByLabel("页面必须填写").check();
+  await page.getByLabel("公开时必须有内容").check();
   const requiredBaseline = await readSessionSnapshot(page);
   if (!requiredBaseline.definition) throw new Error("设置必填后缺少模板定义");
   const requiredHistoryCount = requiredBaseline.historyPast.length;
@@ -1360,9 +1360,9 @@ test("自建单区域图文组可跨组移动、双端重排，并原子取消�
   await blockedContainerDelete.click();
   await expect(requiredItem).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tab", { name: "页面开放范围", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByLabel("页面必须填写")).toBeFocused();
+  await expect(page.getByLabel("公开时必须有内容")).toBeFocused();
   expect(readServerCounters(server), "从字段总览定位必填设置不得发出请求").toEqual(containerDeleteNetwork);
-  await page.getByLabel("页面必须填写").uncheck();
+  await page.getByLabel("公开时必须有内容").uncheck();
 
   await textGroupRow.hover();
   await textGroupRow.locator(".template-editor__structure-more").click();
@@ -1492,7 +1492,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   await expect(systemIdentity).toBeVisible();
   await systemIdentity.click();
   await expect(page.getByText("字段标识", { exact: true })).toBeVisible();
-  await page.getByLabel("页面必须填写").uncheck();
+  await page.getByLabel("公开时必须有内容").uncheck();
   await expect(page.getByLabel("页面可填写内容")).toBeChecked();
   await page.getByLabel("页面可隐藏").check();
   await page.getByLabel("建议图片宽").fill("1600");
@@ -1501,14 +1501,14 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
 
   await openPageField(page, /标题槽位/, "工艺标题");
   await page.getByLabel("页面可隐藏").uncheck();
-  await page.getByLabel("页面必须填写").check();
+  await page.getByLabel("公开时必须有内容").check();
   await page.getByLabel("页面可填写内容").check();
   await page.getByLabel("最小字数").fill("2");
   await page.getByLabel("最大字数").fill("36");
   await page.getByLabel("允许调整文字样式").check();
 
   await openPageField(page, /正文槽位/, "正文槽位");
-  await page.getByLabel("页面必须填写").uncheck();
+  await page.getByLabel("公开时必须有内容").uncheck();
   await page.getByLabel("页面可填写内容").check();
   await page.getByLabel("页面可隐藏").check();
   await page.getByLabel("最小字数").fill("0");
@@ -1516,7 +1516,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   await page.getByLabel("允许调整间距").check();
 
   await openPageField(page, /按钮槽位/, "了解工艺");
-  await page.getByLabel("页面必须填写").uncheck();
+  await page.getByLabel("公开时必须有内容").uncheck();
   await page.getByLabel("页面可填写内容").check();
   await page.getByLabel("页面可隐藏").check();
   await page.getByLabel("允许调整位置").check();
@@ -2177,7 +2177,7 @@ test("TD-6B 完整模板的取消、非法落点、结构锁定和发布阻断�
   await setSwitch(page, "锁定位置、尺寸和层级", false);
   await tree.getByRole("treeitem", { name: /标题槽位/ }).click();
   await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
-  await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).toBeDisabled();
+  await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "设为必填、允许填写并关闭隐藏", exact: true }).click();
   await expect(page.getByRole("switch", { name: "页面可填写内容", exact: true })).toBeDisabled();
   await expect(page.getByRole("switch", { name: "页面可隐藏", exact: true })).toBeDisabled();

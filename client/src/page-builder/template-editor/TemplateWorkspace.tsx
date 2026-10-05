@@ -24,6 +24,7 @@ import WorkspacePanelCollapseButton from "../workspace/WorkspacePanelCollapseBut
 import useCompactWorkspaceOverlay, {
   COMPACT_WORKSPACE_QUERY,
   DOCKED_WORKSPACE_QUERY,
+  WIDE_DOCK_QUERY,
 } from "../workspace/useCompactWorkspaceOverlay";
 import { AppstoreOutlined, BlockOutlined, ControlOutlined } from "@ant-design/icons";
 import TemplateEditorLibrary, {
@@ -460,6 +461,22 @@ export default function TemplateWorkspace({
       updateInspectorCollapsed(true);
     },
   });
+  const collapseStructure = useCallback(() => {
+    if (structureOverlay.compact) structureOverlay.requestClose();
+    else updateStructureCollapsed(true);
+  }, [structureOverlay, updateStructureCollapsed]);
+  const expandStructure = useCallback(() => {
+    if (structureOverlay.compact) structureOverlay.requestOpen();
+    else updateStructureCollapsed(false);
+  }, [structureOverlay, updateStructureCollapsed]);
+  const collapseInspector = useCallback(() => {
+    if (inspectorOverlay.compact) inspectorOverlay.requestClose();
+    else updateInspectorCollapsed(true);
+  }, [inspectorOverlay, updateInspectorCollapsed]);
+  const expandInspector = useCallback(() => {
+    if (inspectorOverlay.compact) inspectorOverlay.requestOpen();
+    else updateInspectorCollapsed(false);
+  }, [inspectorOverlay, updateInspectorCollapsed]);
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
   const compactPanelOwner = sessionId && activeTemplateId && !previewMode
     ? { sessionId, templateId: activeTemplateId }
@@ -805,6 +822,16 @@ export default function TemplateWorkspace({
     updateInspectorCollapsed,
     updateStructureCollapsed,
   ]);
+  useEffect(() => {
+    const wideDock = window.matchMedia(WIDE_DOCK_QUERY);
+    const keepRailsOpen = (event: MediaQueryListEvent) => {
+      if (!event.matches) return;
+      updateStructureCollapsed(false);
+      updateInspectorCollapsed(false);
+    };
+    wideDock.addEventListener("change", keepRailsOpen);
+    return () => wideDock.removeEventListener("change", keepRailsOpen);
+  }, [updateInspectorCollapsed, updateStructureCollapsed]);
   useEffect(() => {
     if (!sessionId || !activeTemplateId) {
       compactOverlayPreferenceRef.current = null;
@@ -1280,7 +1307,7 @@ export default function TemplateWorkspace({
               action="expand"
               panel="structure"
               panelLabel="模板结构面板"
-              onClick={structureOverlay.requestOpen}
+              onClick={expandStructure}
             />
           </aside>
         ) : draft ? (
@@ -1293,21 +1320,21 @@ export default function TemplateWorkspace({
             onOpenPublishReview={openPublishReviewWithFocusLifecycle}
             onSelectTarget={inspectorOverlay.compact ? inspectorOverlay.requestOpen : undefined}
             onPanelKeyDown={structureOverlay.onPanelKeyDown}
-            onCollapse={structureOverlay.compact ? structureOverlay.requestClose : undefined}
+            onCollapse={collapseStructure}
           />
         ) : (
           <aside className="homepage-editor__structure-workspace template-editor__structure template-editor__empty-panel" aria-label="模板结构">
             <WorkspacePanelHeader
               icon={<BlockOutlined />}
               title="模板结构"
-              actions={inspectorOverlay.compact ? (
+              actions={(
                 <WorkspacePanelCollapseButton
                   action="collapse"
                   panel="structure"
                   panelLabel="模板结构面板"
-                  onClick={structureOverlay.requestClose}
+                  onClick={collapseStructure}
                 />
-              ) : undefined}
+              )}
             />
             <p>从左侧选择母模板后，这里会显示模板整体、图片槽位、文字槽位和行动对象。</p>
           </aside>
@@ -1332,14 +1359,14 @@ export default function TemplateWorkspace({
           data-compact-overlay-open={!inspectorCollapsed || undefined}
           onKeyDown={inspectorOverlay.onPanelKeyDown}
         >
-          {inspectorCollapsed && draft ? (
+          {inspectorCollapsed ? (
             <WorkspacePanelCollapseButton
               ref={inspectorOverlay.openButtonRef}
               action="expand"
               panel="inspector"
               panelLabel="模板属性面板"
               compactLabel={selectedObjectLabel ? `属性 · ${selectedObjectLabel}` : "属性"}
-              onClick={inspectorOverlay.requestOpen}
+              onClick={expandInspector}
             />
           ) : null}
             <div
@@ -1350,16 +1377,16 @@ export default function TemplateWorkspace({
               <WorkspacePanelHeader
                 icon={<ControlOutlined />}
                 title="模板属性"
-                actions={inspectorOverlay.compact ? (
+                actions={(
                   <WorkspacePanelCollapseButton
                     ref={inspectorOverlay.closeButtonRef}
                     action="collapse"
                     panel="inspector"
                     panelLabel="模板属性面板"
                     compactLabel="关闭"
-                    onClick={inspectorOverlay.requestClose}
+                    onClick={collapseInspector}
                   />
-                ) : undefined}
+                )}
               />
               {draft && previewMode ? (
                 <div

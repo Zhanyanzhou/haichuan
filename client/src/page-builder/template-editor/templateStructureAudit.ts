@@ -56,6 +56,7 @@ export function buildTemplateStructureAudit(
       message: issue.message,
       nodeId: issue.nodeId ?? (issue.slotId ? nodeIdBySlotId.get(issue.slotId) : undefined),
       repair: issue.code === "REQUIRED_SLOT_MUST_BE_EDITABLE"
+        || issue.code === "REQUIRED_SLOT_NEEDS_FIXED_SOURCE"
         ? "enable-required-slot-page-edit" as const
         : undefined,
     }];

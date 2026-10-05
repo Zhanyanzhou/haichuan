@@ -9,6 +9,7 @@ import type {
 import {
   compileDynamicTemplateRenderPlan,
   findFirstReachableHeadingSlotId,
+  type CompileDynamicTemplateRenderPlanOptions,
   type DynamicTemplateRenderPlanNode,
 } from "./renderPlan";
 import {
@@ -51,6 +52,7 @@ export interface DynamicTemplateRendererProps {
    * 只读预览、目录缩略图和公开页默认都按公开折叠语义处理空内容。
    */
   showEmptySlots?: boolean;
+  publicSurface?: CompileDynamicTemplateRenderPlanOptions["publicSurface"];
   /**
    * 编辑态的交互边界。页面实例只负责整体预览，只有母模板定义工作面
    * 可以注册内部节点选择和直接布局手势；未声明时按无内部交互处理。
@@ -1031,6 +1033,7 @@ export default function DynamicTemplateRenderer({
   layoutOverridesByNodeId,
   mode = "public",
   showEmptySlots,
+  publicSurface,
   editorSurface,
   interactionOwner,
   templateEditorSessionId,
@@ -1064,6 +1067,7 @@ export default function DynamicTemplateRenderer({
     hiddenSlotIds,
     layoutOverridesByNodeId,
     showEmptySlots: showEmptySlots ?? mode === "editor",
+    publicSurface,
   });
   if (!result.ok) {
     if (mode === "public") return null;

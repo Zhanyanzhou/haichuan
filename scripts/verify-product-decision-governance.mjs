@@ -18,6 +18,8 @@ export const REQUIRED_DECISION_STATUSES = Object.freeze({
   "D.35": "RETIRED",
   "D.36": "RETIRED",
   "D.37": "ENABLED",
+  "D.38": "ENABLED",
+  "D.39": "ENABLED",
 });
 
 export const REQUIRED_DECISION_CONTRACTS = Object.freeze({
@@ -65,6 +67,27 @@ export const REQUIRED_DECISION_CONTRACTS = Object.freeze({
       "client/tests/template-native-design.admin.spec.ts",
       "client/tests/template-canvas-golden-closure.admin.spec.ts",
     ],
+  }),
+  "D.38": Object.freeze({
+    scope: ["dynamic-template", "page-publication", "public-renderer"],
+    activation: ["published-page-revision", "template-definition-publish"],
+    supersedes: [
+      "D.28:required-visible-content-block",
+      "D.30:image-only-public-visibility",
+      "D.30:missing-text-always-advisory",
+      "D.31:image-only-primary-stage-visibility",
+    ],
+    validation: [
+      "test:decision-governance",
+      "server/src/modules/page-modules/dynamic-template-publication-visibility.spec.ts",
+      "client/tests/dynamic-template-public-visibility.unit.ts",
+    ],
+  }),
+  "D.39": Object.freeze({
+    scope: ["store-decoration", "page-role-fitness", "template-creation-boundary"],
+    activation: ["page-editor-opened", "template-recipe-created"],
+    supersedes: ["store-decoration:seven-step-as-daily-flow", "template-type-as-page-admission"],
+    validation: ["test:decision-governance", "docs/page-builder/store-decoration.md"],
   }),
 });
 

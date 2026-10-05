@@ -216,7 +216,7 @@ function isDynamicLayoutFieldEditable(
     return slot?.type === "image" && policy.imageFit;
   }
   if (field === "focusXPercent" || field === "focusYPercent") {
-    return slot?.type === "image" && policy.imageFocus;
+    return slot?.type === "image";
   }
   if (field === "fontSizePx" || field === "textAlign") {
     return Boolean(textSlot && policy.typography);
@@ -288,7 +288,7 @@ function dynamicObjectForIssue(
     groupLabel: "页面内容",
     access: slot && slot.editable === false ? "read-only" as const : "editable" as const,
     reason: slot && slot.editable === false
-      ? "此内容由模板锁定。请恢复为模板内容，或在本次发布检查中移除锁定字段的页面覆盖。"
+      ? "此内容由模板锁定。请恢复模板文案，或在本次发布检查中移除锁定字段的页面覆盖。"
       : undefined,
   };
 }

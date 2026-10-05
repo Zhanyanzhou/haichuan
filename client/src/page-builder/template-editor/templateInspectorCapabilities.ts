@@ -155,7 +155,7 @@ export const TEMPLATE_INSPECTOR_CAPABILITIES: readonly TemplateInspectorCapabili
   { field: "slot.key", label: "槽位键", group: "definition", access: "read-only", scopes: SLOT_SCOPE, reason: "页面实例按稳定键关联内容，不能在 Inspector 中改名。" },
   { field: "slot.type", label: "槽位类型", group: "definition", access: "read-only", scopes: SLOT_SCOPE, reason: "内容类型由槽位节点类型决定。" },
   { field: "slot.label", label: "槽位名称", group: "definition", access: "editable", scopes: SLOT_SCOPE },
-  { field: "slot.required", label: "页面必须填写", group: "rules", access: "editable", scopes: SLOT_SCOPE },
+  { field: "slot.required", label: "公开时必须有内容", group: "rules", access: "editable", scopes: SLOT_SCOPE },
   { field: "slot.editable", label: "页面可编辑内容", group: "rules", access: "editable", scopes: SLOT_SCOPE },
   { field: "slot.hideable", label: "页面可隐藏", group: "rules", access: "editable", scopes: SLOT_SCOPE },
   { field: "slot.emptyPolicy", label: "空内容策略", group: "rules", access: "read-only", scopes: SLOT_SCOPE, reason: "新模板固定为空则隐藏；历史 use-default 只能显式清理。" },

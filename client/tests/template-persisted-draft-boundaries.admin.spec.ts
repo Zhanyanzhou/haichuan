@@ -694,7 +694,7 @@ async function createUnsavedTemplate(page: Page) {
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: /竖版 4:5/ }).click();
+  await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: /上图下文/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();

@@ -69,7 +69,7 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
             readOnly={locked} placeholder="选择默认图片" spec={mediaSpecFromRecommendation(slot.validation.recommendedWidth, slot.validation.recommendedHeight, slotRules?.aspectRatio, slot.label)}
             previewAspectRatio={slotRules?.aspectRatio?.replace(":", " / ")} previewFit={slotRules?.objectFit}
             previewFocus={objectPositionToPercent(slotRules?.objectPosition)}
-            onFocusChange={(slotRules?.objectFit ?? "cover") === "cover" ? (focus) => textStyle("objectPosition", percentToExactObjectPosition(focus)) : undefined}
+            onFocusChange={(slotRules?.objectFit ?? "cover") === "fill" ? undefined : (focus) => textStyle("objectPosition", percentToExactObjectPosition(focus))}
             onChange={(src) => content(src.trim()
               ? { src, alt: typeof record.alt === "string" ? record.alt : "" }
               : "")} />

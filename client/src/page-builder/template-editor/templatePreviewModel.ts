@@ -232,6 +232,31 @@ function getNeutralCatalogSlotExample(slotType: string): unknown {
   return getGenericSlotExample(slotType);
 }
 
+function readImageSource(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const src = (value as { src?: unknown }).src;
+  return typeof src === "string" ? src.trim() : "";
+}
+
+/**
+ * 设计画布编辑的是模板结构。没有真实图片时，图片槽使用与目录相同的中性图形，
+ * 标出图片位置和比例；不写回默认内容。已保存的真实图片仍原样显示。
+ */
+export function createTemplateDesignCanvasContent(
+  definition: TemplateDefinitionV2,
+): Record<string, unknown> {
+  const content = createTemplatePreviewContentBySlotId(definition);
+  for (const slot of Object.values(definition.slots)) {
+    if (slot.type !== "image" || readImageSource(content[slot.slotId])) continue;
+    const current = content[slot.slotId];
+    content[slot.slotId] = current && typeof current === "object" && !Array.isArray(current)
+      ? { ...current, src: neutralCatalogMedia, alt: "结构示意" }
+      : { src: neutralCatalogMedia, alt: "结构示意" };
+  }
+  return content;
+}
+
 /**
  * 模板目录、设计画布与只读预览共用的系统示例内容。
  * 新方案模板展示持久默认内容；旧版本继续使用中性示例。

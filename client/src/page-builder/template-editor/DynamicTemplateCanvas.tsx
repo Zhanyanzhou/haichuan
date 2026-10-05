@@ -68,7 +68,7 @@ import {
   sourceDeltaToNormalized,
 } from "./editableTargetGeometry";
 import {
-  createTemplatePreviewContentBySlotId,
+  createTemplateDesignCanvasContent,
   resolveTemplatePreviewViewport,
 } from "./templatePreviewModel";
 import { createTemplateStressPreviewContentBySlotId } from "./templateStressPreviewEngine";
@@ -106,7 +106,7 @@ function compatibilityForMaterializedRect(
 function createEditingContent(
   definition: TemplateDefinitionV2,
 ): Record<string, unknown> {
-  return createTemplatePreviewContentBySlotId(definition);
+  return createTemplateDesignCanvasContent(definition);
 }
 
 export default function DynamicTemplateCanvas() {

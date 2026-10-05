@@ -28,7 +28,7 @@ npm run
 - `docs/DEVELOPMENT_WORKFLOW.md`：当前开发运行方式；
 - `WORKFLOW.md` 第 5 节与当前 `package.json` 脚本：当前验证范围与命令选择；
 - `docs/PUBLIC_ACCESS_MATRIX.md`：身份、行动与字段访问边界；
-- [模板设计唯一标准](docs/page-builder/template-creation-rules.md)：步骤创建、预设生成、自由精调与验收的唯一产品执行入口；[文档导航](docs/page-builder/README.md)补充编辑细则、页面交接、实现与历史证据。
+- [店铺装修产品合同](docs/page-builder/store-decoration.md)：页面职责、选用与发页验收；[模板设计标准](docs/page-builder/template-creation-rules.md)只覆盖母模板创建与精调；[文档导航](docs/page-builder/README.md)补充编辑细则、实现与历史证据。
 
 ## 项目结构
 

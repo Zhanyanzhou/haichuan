@@ -1964,13 +1964,16 @@ async function mockCustomerWechatCheckout(
     orderFinalAmount?: number;
     paymentAmount?: number;
     paymentType?: 'DEPOSIT' | 'BALANCE' | 'FULL' | 'SUPPLEMENT';
+    orderLookupFailures?: number;
   } = {},
 ) {
   const checkoutKeys: string[] = [];
   let remainingCheckoutFailures = options.checkoutFailures ?? 0;
+  let remainingOrderLookupFailures = options.orderLookupFailures ?? 0;
   let remainingPaymentStatusFailures = options.paymentStatusFailures ?? 0;
   let paymentCreateRequests = 0;
   let paymentStatusRequests = 0;
+  let orderLookupRequests = 0;
   let customerId = 7;
   await page.route('**/api/**', async (route) => {
     const request = route.request();
@@ -2001,6 +2004,25 @@ async function mockCustomerWechatCheckout(
         name: customerId === 7 ? '甲账户客户' : '乙账户客户',
         phone: customerId === 7 ? '13800000007' : '13800000008',
       });
+    }
+    if (path.endsWith('/customers/me/orders/9') && method === 'GET') {
+      orderLookupRequests += 1;
+      if (customerId !== 7) {
+        return route.fulfill({
+          status: 404,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 404, message: '订单不存在' }),
+        });
+      }
+      if (remainingOrderLookupFailures > 0) {
+        remainingOrderLookupFailures -= 1;
+        return route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 503, message: '订单读取暂时失败' }),
+        });
+      }
+      return data({ id: 9, orderNo: 'ORD-WX-9', finalAmount: options.orderFinalAmount ?? 8800 });
     }
     if (path.endsWith('/customers/checkout') && method === 'POST') {
       const idempotencyKey = request.headers()['idempotency-key'] ?? '';
@@ -2154,6 +2176,7 @@ async function mockCustomerWechatCheckout(
     },
     getPaymentCreateRequests: () => paymentCreateRequests,
     getPaymentStatusRequests: () => paymentStatusRequests,
+    getOrderLookupRequests: () => orderLookupRequests,
   };
 }
 
@@ -2307,6 +2330,53 @@ test.describe('客户标准零售使用微信在线支付主链', () => {
 
     await expect(page).toHaveURL(/wx\.tenpay\.com\/cgi-bin\/mmpayweb-bin\/checkmweb/);
     await expect(page.getByRole('heading', { name: '微信 H5 收银台跳转测试' })).toBeVisible();
+  });
+
+  test('H5 回跳在新会话中按本人订单恢复并先查支付结果', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const state = await mockCustomerWechatCheckout(page, 'h5', { paymentStatusState: 'PAID' });
+    await page.goto('/checkout?paymentReturn=1&orderId=9');
+
+    await expect(page.locator('#main-content').getByText('订单号：ORD-WX-9')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '支付已确认' })).toBeVisible();
+    expect(state.getOrderLookupRequests()).toBe(1);
+    expect(state.getPaymentStatusRequests()).toBeGreaterThan(0);
+    expect(state.getPaymentCreateRequests()).toBe(0);
+  });
+
+  test('H5 回跳拒绝无效订单编号且不发起支付', async ({ page }) => {
+    const state = await mockCustomerWechatCheckout(page, 'h5');
+    await page.goto('/checkout?paymentReturn=1&orderId=9&orderId=8');
+
+    await expect(page.getByRole('heading', { name: '无法核实支付返回的订单' })).toBeVisible();
+    await expect(page.getByText('支付返回链接中的订单编号无效，请从我的订单查看支付结果。')).toBeVisible();
+    expect(state.getOrderLookupRequests()).toBe(0);
+    expect(state.getPaymentStatusRequests()).toBe(0);
+    expect(state.getPaymentCreateRequests()).toBe(0);
+  });
+
+  test('H5 回跳无法读取他人订单时不显示旧订单并允许本人查找', async ({ page }) => {
+    const state = await mockCustomerWechatCheckout(page, 'h5');
+    state.setCustomerId(8);
+    await page.goto('/checkout?paymentReturn=1&orderId=9');
+
+    await expect(page.getByRole('heading', { name: '无法核实支付返回的订单' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '查看我的订单' })).toBeVisible();
+    await expect(page.getByText('ORD-WX-9')).toHaveCount(0);
+    expect(state.getOrderLookupRequests()).toBe(1);
+    expect(state.getPaymentStatusRequests()).toBe(0);
+    expect(state.getPaymentCreateRequests()).toBe(0);
+  });
+
+  test('H5 回跳订单读取短暂失败后可重试查单', async ({ page }) => {
+    const state = await mockCustomerWechatCheckout(page, 'h5', { orderLookupFailures: 1 });
+    await page.goto('/checkout?paymentReturn=1&orderId=9');
+
+    await expect(page.getByRole('heading', { name: '无法核实支付返回的订单' })).toBeVisible();
+    await page.getByRole('button', { name: '重新核实订单' }).click();
+    await expect(page.locator('#main-content').getByText('订单号：ORD-WX-9')).toBeVisible();
+    expect(state.getOrderLookupRequests()).toBe(2);
+    expect(state.getPaymentCreateRequests()).toBe(0);
   });
 
   for (const recoveryCase of [

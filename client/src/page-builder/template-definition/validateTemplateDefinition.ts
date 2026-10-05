@@ -19,6 +19,28 @@ import {
 } from "../generated/contentTemplates.generated";
 import { mergeTemplateResponsiveRecord, resolveTemplateNodeRules, TEMPLATE_CONTENT_BREAKPOINTS } from "./responsive";
 
+const FIXED_PUBLIC_TEXT_EXCLUDED_TYPES = new Set(["image", "product", "collection", "heroTemplate"]);
+const COMMERCIAL_FIXED_CONTENT_ROLES = new Set(["price", "originalPrice", "discount", "offer"]);
+
+/** 与 publicationPromise.hasLegalFixedPublicContent 保持一致。生成物不能引用客户端模块。 */
+function hasLegalFixedPublicContent(
+  slotType: string,
+  semanticRole: string | undefined,
+  value: unknown,
+): boolean {
+  if (semanticRole && COMMERCIAL_FIXED_CONTENT_ROLES.has(semanticRole)) return false;
+  if (FIXED_PUBLIC_TEXT_EXCLUDED_TYPES.has(slotType)) return false;
+  const hasText = (candidate: unknown): boolean => {
+    if (typeof candidate === "string") return candidate.trim().length > 0;
+    if (Array.isArray(candidate)) return candidate.some(hasText);
+    if (candidate && typeof candidate === "object") {
+      return Object.values(candidate as Record<string, unknown>).some(hasText);
+    }
+    return false;
+  };
+  return hasText(value);
+}
+
 export type DynamicTemplateValidationLevel = "error" | "warning" | "info";
 
 export interface DynamicTemplateValidationIssue {
@@ -1608,13 +1630,18 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
         message: "空内容策略只能是 hide 或 use-default。",
       });
     }
-    if (rawSlot.required === true && rawSlot.editable === false) {
+    if (rawSlot.required === true && rawSlot.editable === false
+      && !hasLegalFixedPublicContent(
+        typeof rawSlot.type === "string" ? rawSlot.type : "",
+        typeof rawSlot.semanticRole === "string" ? rawSlot.semanticRole : undefined,
+        defaultContent[slotKey],
+      )) {
       addIssue(issues, {
         level: "error",
-        code: "REQUIRED_SLOT_MUST_BE_EDITABLE",
+        code: "REQUIRED_SLOT_NEEDS_FIXED_SOURCE",
         path: `${path}.editable`,
         slotId: slotKey,
-        message: "必填槽位必须允许页面实例填写真实内容。",
+        message: `公开时必须展示的“${typeof rawSlot.label === "string" ? rawSlot.label : slotKey}”还没有合法固定文案。请写入模板默认内容，或改为允许页面填写。系统示例、模板默认图和价格文字不能充当该内容。`,
       });
     }
     if (!isRecord(rawSlot.validation)) {

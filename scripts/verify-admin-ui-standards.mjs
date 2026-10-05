@@ -38,8 +38,8 @@ const sources = new Map(
 );
 const failures = [];
 
-// 页面装修与模板设计共用一个响应式外壳。宽屏 dock 使用可读的最小宽度，
-// 窄于 1440px 时由共享 Hook 切换覆盖层；不再把一次设计比例永久化。
+// 页面装修与模板设计共用一个响应式外壳。1025px 起停靠，使用可读的最小宽度，
+// 窄于等于 1024px 时由共享 Hook 切换覆盖层；不再把一次设计比例永久化。
 const editorDockProperties = [
   "--editor-library-dock-width",
   "--editor-structure-dock-width",
@@ -84,19 +84,19 @@ for (const property of editorDockProperties) {
 }
 
 if (
-  !/COMPACT_WORKSPACE_MAX_WIDTH\s*=\s*1439/.test(compactWorkspaceSource)
+  !/COMPACT_WORKSPACE_MAX_WIDTH\s*=\s*1024/.test(compactWorkspaceSource)
   || !/COMPACT_WORKSPACE_QUERY\s*=/.test(compactWorkspaceSource)
   || !/DOCKED_WORKSPACE_QUERY\s*=/.test(compactWorkspaceSource)
 ) {
-  failures.push("共享工作区必须由唯一 1439px 覆盖层断点导出 compact 与 docked 查询");
+  failures.push("共享工作区必须由唯一 1024px 覆盖层断点导出 compact 与 docked 查询");
 }
 
 const editorLayoutCss = readFileSync(
   resolve(root, "client/src/pages/admin/HomepageConfig/editor.css"),
   "utf8",
 );
-if (!/@media\s*\(min-width:\s*1440px\)[\s\S]*--editor-library-dock-width/.test(editorLayoutCss)) {
-  failures.push("editor.css: 宽屏 dock 必须从 1440px 起消费共享最小宽度");
+if (!/@media\s*\(min-width:\s*1025px\)[\s\S]*--editor-library-dock-width/.test(editorLayoutCss)) {
+  failures.push("editor.css: 桌面 dock 必须从 1025px 起消费共享最小宽度");
 }
 if (/--editor-(?:library|structure|inspector)-dock-width\s*:\s*\d+%/.test(editorLayoutCss)) {
   failures.push("editor.css: 不得恢复百分比 dock 硬编码");

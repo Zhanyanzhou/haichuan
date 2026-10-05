@@ -16,7 +16,8 @@ import {
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
   DynamicTemplateInstanceView,
   dynamicTemplateVersionKey,
-  hasExplicitDynamicTemplateInstanceImage,
+  buildDynamicTemplatePublicSurface,
+  isDynamicTemplateInstancePubliclyVisible,
   readResolvedDynamicTemplateDefinitions,
   type DynamicTemplateInstanceProps,
   type ResolvedDynamicTemplateDefinitionMap,
@@ -128,6 +129,7 @@ function isPubliclyRenderableBlock(
   block: PuckBlock,
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
   device: TemplateContentBreakpoint,
+  pageKey?: string,
 ) {
   const normalized = normalizeLegacyRenderColors(block.props || {});
   const props: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
@@ -139,12 +141,13 @@ function isPubliclyRenderableBlock(
     const instanceProps = props as DynamicTemplateInstanceProps;
     const resolved = getResolvedDynamicTemplate({ ...block, props }, resolvedDynamicTemplates);
     if (!resolved || resolved.definition.templateId !== instanceProps.templateId) return false;
-    return hasExplicitDynamicTemplateInstanceImage(
-      resolved.definition,
-      instanceProps.contentBySlotId,
-      instanceProps.hiddenSlotIds,
-      device,
-    );
+    return isDynamicTemplateInstancePubliclyVisible({
+      definition: resolved.definition,
+      contentBySlotId: instanceProps.contentBySlotId,
+      hiddenSlotIds: instanceProps.hiddenSlotIds,
+      breakpoint: device,
+      pageKey,
+    });
   }
 
   const templateIssue = getContentTemplateIssues({
@@ -168,6 +171,7 @@ function renderBlock(
   priority: boolean,
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
   deviceOverride?: TemplateContentBreakpoint,
+  pageKey?: string,
 ) {
   const normalized = normalizeLegacyRenderColors(block.props || {});
   const props: PuckProps = normalized && typeof normalized === "object" && !Array.isArray(normalized)
@@ -182,6 +186,7 @@ function renderBlock(
       { ...block, props },
       resolvedDynamicTemplates,
       deviceOverride ?? "desktop",
+      pageKey,
     )
   ) return null;
 
@@ -208,6 +213,7 @@ function renderBlock(
         mode={mode}
         primaryHeadingLevel={heroHeadingLevel}
         priority={mode === "public" && priority}
+        pageKey={pageKey}
       />
     );
   }
@@ -265,6 +271,7 @@ function GuardedBlock({
   priority,
   resolvedDynamicTemplates,
   deviceOverride,
+  pageKey,
 }: {
   block: PuckBlock;
   index: number;
@@ -274,6 +281,7 @@ function GuardedBlock({
   priority: boolean;
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap;
   deviceOverride?: TemplateContentBreakpoint;
+  pageKey?: string;
 }) {
   return renderBlock(
     block,
@@ -284,6 +292,7 @@ function GuardedBlock({
     priority,
     resolvedDynamicTemplates,
     deviceOverride,
+    pageKey,
   );
 }
 
@@ -293,6 +302,7 @@ export default function PuckDocumentRenderer({
   heroHeadingLevel = 1,
   primaryHeading,
   surface,
+  pageKey,
 }: {
   data: PuckDocument;
   mode?: PuckDocumentRenderMode;
@@ -300,6 +310,7 @@ export default function PuckDocumentRenderer({
   /** 纯装修公开页的页面标题；无有效 Hero 标题时补为唯一的视觉隐藏 h1。 */
   primaryHeading?: string;
   surface?: "home";
+  pageKey?: string;
 }) {
   const viewportWidth = usePublicRendererViewportWidth(mode === "public");
   if (!Array.isArray(data?.content)) return null;
@@ -312,6 +323,7 @@ export default function PuckDocumentRenderer({
         )
       : [];
   const homeSurface = surface === "home";
+  const resolvedPageKey = pageKey ?? (homeSurface ? "home" : undefined);
   const resolvedDynamicTemplates = readResolvedDynamicTemplateDefinitions(
     data[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
   );
@@ -329,6 +341,7 @@ export default function PuckDocumentRenderer({
       block,
       resolvedDynamicTemplates,
       deviceForBlock(block),
+      resolvedPageKey,
     ))
   );
   const allBlocks = [...content, ...zoneBlocks];
@@ -349,6 +362,11 @@ export default function PuckDocumentRenderer({
       hiddenSlotIds: instanceProps.hiddenSlotIds,
       layoutOverridesByNodeId: instanceProps.layoutOverridesByNodeId,
       showEmptySlots: false,
+      publicSurface: buildDynamicTemplatePublicSurface(
+        definition,
+        instanceProps.contentBySlotId,
+        resolvedPageKey,
+      ),
     });
     return result.ok && Boolean(findFirstReachableHeadingSlotId(result.plan.root));
   };
@@ -385,6 +403,7 @@ export default function PuckDocumentRenderer({
           priority={index === primaryStageIndex}
           resolvedDynamicTemplates={resolvedDynamicTemplates}
           deviceOverride={mode === "public" ? deviceForBlock(block) : undefined}
+          pageKey={resolvedPageKey}
         />
       </ErrorBoundary>
     );

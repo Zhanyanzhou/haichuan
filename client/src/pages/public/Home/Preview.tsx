@@ -96,7 +96,7 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
 
   return (
     <main style={{ background: LG }}>
-      <PuckDocumentRenderer data={previewData} mode="preview" surface={pageKey === "home" ? "home" : undefined} />
+      <PuckDocumentRenderer data={previewData} mode="preview" pageKey={pageKey} surface={pageKey === "home" ? "home" : undefined} />
     </main>
   );
 }

@@ -326,7 +326,7 @@ test("根与兄弟容器按 DFS 展示 descriptor 可见摘要，纯导航与返
   await expect(inspector.getByRole("tab", { name: "设计", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(inspector.getByText("图片槽位", { exact: true })).toBeVisible();
   await expect(inspector.getByLabel("页面字段名称")).toHaveCount(0);
-  await expect(inspector.getByRole("switch", { name: "页面必须填写" })).toHaveCount(0);
+  await expect(inspector.getByRole("switch", { name: "公开时必须有内容" })).toHaveCount(0);
   await expect(inspector.locator('[data-template-page-scope-field="label"]')).toHaveCount(0);
 
   const beforeNavigation = await readImmutableSessionState(page);

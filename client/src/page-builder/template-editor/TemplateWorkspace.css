@@ -1769,7 +1769,7 @@
 }
 
 /* 停靠布局以组件库底部入口为主；窄屏才保留顶部快捷入口。 */
-@media (min-width: 1440px) {
+@media (min-width: 1025px) {
   .template-editor__toolbar-new {
     display: none;
   }
@@ -1797,7 +1797,7 @@
   }
 }
 
-@media (min-width: 521px) and (max-width: 1439px) {
+@media (min-width: 521px) and (max-width: 1024px) {
   .template-editor__toolbar-new-menu-item {
     display: none !important;
   }
@@ -2089,7 +2089,7 @@
   font-size: 13px;
 }
 
-@media (max-width: 1439px) {
+@media (max-width: 1024px) {
   .template-editor__recovery-banner {
     left: 52px;
     right: 52px;
@@ -3512,14 +3512,14 @@ button.template-editor__toolbar-state {
   gap: 8px;
 }
 
-@media (max-width: 1439px) {
+@media (max-width: 1024px) {
   .template-editor__toolbar-identity { gap: 7px; }
   .template-editor__toolbar-title,
   .template-editor__toolbar-title-divider,
   .template-editor__toolbar-subject { display: none; }
 }
 
-@media (max-width: 1439px) {
+@media (max-width: 1024px) {
   .template-editor__canvas-controls--minimal {
     left: 50%;
     bottom: 20px;
@@ -3771,7 +3771,7 @@ button.template-editor__toolbar-state {
 /* 压力预览只替换四区内部内容。宽屏 dock 几何继续由 editor.css
  * 唯一合同控制；这里仅撤销旧公开预览的隐藏侧栏，
  * 并让中央画布继续消费同一组 dock 变量，不另建模式宽度。 */
-@media (min-width: 1440px) {
+@media (min-width: 1025px) {
   .homepage-editor__body.template-editor__body.is-previewing
     > .homepage-editor__library.template-editor__library,
   .homepage-editor__body.template-editor__body.is-previewing

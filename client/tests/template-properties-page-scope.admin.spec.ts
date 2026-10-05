@@ -54,10 +54,10 @@ test("确定性 UI：页面规则分组、只读字段查看与冲突修复保�
   });
   expect(await snapshot(page)).toEqual(before);
   await panel.getByRole("button", { name: "返回当前结构全部字段", exact: true }).click();
-  await expect(panel.getByText("2 个字段 · 1 项必填 · 1 项规则冲突", { exact: true })).toBeVisible();
+  await expect(panel.getByText("2 个字段 · 1 项公开时必须有内容 · 1 项规则冲突", { exact: true })).toBeVisible();
   await panel.getByText("查看页面字段 · 2 项 · 只读", { exact: true }).click();
   await expect(panel.getByRole("textbox", { name: "工艺标题页面表单示意", exact: true })).toHaveAttribute("readonly", "");
-  await panel.getByRole("button", { name: "工艺标题 可选 · 定位对象", exact: true }).click();
+  await panel.getByRole("button", { name: "工艺标题 建议填写 · 定位对象", exact: true }).click();
   await expect(page.getByRole("complementary", { name: "模板属性", exact: true })).toHaveAttribute("data-template-inspector-object-id", ids.textNodeId);
 });
 
@@ -201,11 +201,11 @@ test("确定性 UI：240px 属性区重排、键盘详情与明确必填组合�
   await page.keyboard.press("Enter");
   await expect(panel.getByText(ids.imageSlotId, { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "允许填写并关闭隐藏", exact: true }).click();
-  await panel.getByRole("switch", { name: "页面必须填写", exact: true }).uncheck();
+  await panel.getByRole("switch", { name: "公开时必须有内容", exact: true }).uncheck();
   await panel.getByRole("switch", { name: "页面可隐藏", exact: true }).check();
   const before = await snapshot(page);
   await panel.getByRole("button", { name: "设为必填、允许填写并关闭隐藏", exact: true }).click();
-  await expect(panel.getByRole("switch", { name: "页面必须填写", exact: true })).toBeChecked();
+  await expect(panel.getByRole("switch", { name: "公开时必须有内容", exact: true })).toBeChecked();
   await expect(panel.getByRole("switch", { name: "页面可隐藏", exact: true })).not.toBeChecked();
   expect((await snapshot(page)).history).toBe(before.history + 1);
   const overflow = await panel.evaluate((element) => ({ width: element.clientWidth, scroll: element.scrollWidth }));

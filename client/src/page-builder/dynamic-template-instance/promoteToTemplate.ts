@@ -298,7 +298,7 @@ export function promoteInstanceOverridesToTemplateDraft(input: {
       }
 
       if ((override.focusXPercent !== undefined || override.focusYPercent !== undefined)
-        && sourcePolicy?.imageFocus && sourceSlot?.type === "image" && targetSlot?.type === "image" && nextSlot) {
+        && sourceSlot?.type === "image" && targetSlot?.type === "image" && nextSlot) {
         const sourceSlotRules = device === "desktop" ? sourceSlot.desktopRules : sourceSlot.mobileRules;
         const targetSlotRules = device === "desktop" ? targetSlot.desktopRules : targetSlot.mobileRules;
         const nextSlotRules = device === "desktop" ? nextSlot.desktopRules : nextSlot.mobileRules;

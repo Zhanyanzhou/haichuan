@@ -53,7 +53,7 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
       const server = await installNewTemplateServer(page);
       await page.setViewportSize({ width: 1600, height: 1000 });
       const dialog = await openSizeDialog(page);
-      await dialog.getByRole("button", { name: /宽屏 16:9/ }).click();
+      await dialog.getByRole("button", { name: /宽幅主视觉 16:9/ }).click();
       await confirmSize(dialog);
       await expect(dialog).toBeHidden();
       const initial = await readSession(page);
@@ -92,31 +92,36 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     });
   }
 
-  for (const [name, width, height] of [
-    ["正方形", 1080, 1080], ["竖版", 1080, 1350], ["手机全屏", 1080, 1920],
-    ["宽屏", 1920, 1080], ["标准竖版", 1080, 1440], ["海报竖版", 1200, 1800],
-    ["标准横版", 1200, 900], ["社交横图", 1200, 628],
+  for (const preset of [
+    { name: "随内容增长", width: 1440, height: 900, grows: true },
+    { name: "宽幅主视觉", width: 1440, height: 810, grows: false },
+    { name: "编辑横版", width: 1440, height: 960, grows: false },
+    { name: "均衡横版", width: 1440, height: 1080, grows: false },
+    { name: "方形卡片", width: 1080, height: 1080, grows: false },
+    { name: "竖向卡片", width: 1080, height: 1350, grows: false },
   ] as const) {
-    test(`尺寸预设 ${name} 创建、选中、列表、逻辑尺寸与等比例适配`, async ({ page }, testInfo) => {
+    test(`尺寸预设 ${preset.name} 创建、选中、列表、逻辑尺寸与等比例适配`, async ({ page }, testInfo) => {
+      const { name, width, height, grows } = preset;
       const server = await installNewTemplateServer(page);
       await page.setViewportSize({ width: 1600, height: 1000 });
       const dialog = await openSizeDialog(page);
-      await expect(dialog).toContainText("选择画布尺寸");
+      await expect(dialog).toContainText("选择网页区块画幅");
       expect((await readSession(page)).definition).toBeNull();
       await expect(dialog.getByRole("button", { name: "下一步", exact: true })).toBeDisabled();
-      if (["标准竖版", "海报竖版", "标准横版", "社交横图"].includes(name)) await dialog.getByRole("button", { name: "更多尺寸", exact: true }).click();
       const option = dialog.getByRole("button", { name: new RegExp(`(?:^|\\s)${name} `) });
       await option.click();
       await expect(option).toHaveAttribute("aria-pressed", "true");
       await expect(dialog.locator('.template-recipe__grid button[aria-pressed="true"]')).toHaveCount(1);
       const preview = await option.locator("i").boundingBox();
       expect(preview!.width / preview!.height).toBeCloseTo(width / height, 1);
-      if (name === "手机全屏") await page.screenshot({ path: testInfo.outputPath("size-modal-desktop.png"), animations: "disabled" });
+      if (name === "竖向卡片") await page.screenshot({ path: testInfo.outputPath("size-modal-desktop.png"), animations: "disabled" });
       await confirmSize(dialog);
       await expect(dialog).toBeHidden();
       await expect(blankTemplateStart(page)).toBeHidden();
       const session = await readSession(page);
       expect(session.definition!.metadata.canvasSize).toEqual({ width, height, aspectRatio: width / height });
+      expect(session.definition!.nodes[session.definition!.rootNodeId].responsive.desktop.height.mode)
+        .toBe(grows ? "auto" : "fixed");
       expect(session.selectedObjectId).toBe(session.definition!.rootNodeId);
       expect(session.definition!.schemaVersion).toBe(3);
       expect(Object.keys(session.definition!.slots).length).toBeGreaterThan(0);
@@ -125,16 +130,18 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
       const card = page.locator(`[data-template-name="${session.definition!.templateId}"]`);
       await expect(card).toContainText("尚未保存");
       await expect(card.getByRole("button", { name: /未命名模板/ }).first()).toHaveAttribute("aria-pressed", "true");
-      await expect.poll(async () => {
-        const canvas = await readCanvasReadout(page);
-        return [canvas.width, canvas.height];
-      }).toEqual([width, height]);
-      const frame = page.locator("iframe[title$='模板隔离画布']:visible");
-      const box = await frame.boundingBox();
-      expect(box!.width / box!.height).toBeCloseTo(width / height, 2);
-      expect(box!.width).toBeLessThan(1600);
-      expect(box!.height).toBeLessThan(1000);
-      if (name === "手机全屏") await page.screenshot({ path: testInfo.outputPath("portrait-canvas-desktop.png"), animations: "disabled" });
+      if (!grows) {
+        await expect.poll(async () => {
+          const canvas = await readCanvasReadout(page);
+          return [canvas.width, canvas.height];
+        }).toEqual([width, height]);
+        const frame = page.locator("iframe[title$='模板隔离画布']:visible");
+        const box = await frame.boundingBox();
+        expect(box!.width / box!.height).toBeCloseTo(width / height, 2);
+        expect(box!.width).toBeLessThan(1600);
+        expect(box!.height).toBeLessThan(1000);
+      }
+      if (name === "竖向卡片") await page.screenshot({ path: testInfo.outputPath("portrait-canvas-desktop.png"), animations: "disabled" });
       expect(server.writes).toEqual([]);
       await card.click();
       expect((await readSession(page)).sessionId).toBe(session.sessionId);
@@ -145,15 +152,15 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1600, height: 1000 });
     const dialog = await openSizeDialog(page);
-    await dialog.getByRole("button", { name: /手机全屏 9:16/ }).click();
+    await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
     await dialog.getByRole("button", { name: "自定义尺寸", exact: true }).click();
     const width = dialog.getByRole("spinbutton", { name: "宽度", exact: true });
     const height = dialog.getByRole("spinbutton", { name: "高度", exact: true });
     await dialog.getByRole("switch", { name: "锁定比例" }).click();
     await width.fill("540");
-    await expect(height).toHaveValue("960");
+    await expect(height).toHaveValue("675");
     await height.fill("1600");
-    await expect(width).toHaveValue("900");
+    await expect(width).toHaveValue("1280");
     await dialog.getByRole("switch", { name: "锁定比例" }).click();
     for (const invalid of ["", "0", "-1", "4097", "12.5"]) {
       await width.fill(invalid);
@@ -173,7 +180,7 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     await clickNewTemplateEntry(page);
     await dialog.getByRole("button", { name: "通用模板", exact: true }).click();
     await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-    await dialog.getByRole("button", { name: /正方形 1:1/ }).click();
+    await dialog.getByRole("button", { name: /方形卡片 1:1/ }).click();
     await confirmSize(dialog);
     const guard = page.getByRole("dialog", { name: "新建模板？", exact: true });
     await expect(guard).toBeVisible();
@@ -203,7 +210,7 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1600, height: 1000 });
     const dialog = await openSizeDialog(page);
-    await dialog.getByRole("button", { name: /手机全屏 9:16/ }).click();
+    await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
     await confirmSize(dialog);
     await expect(dialog).toBeHidden();
     await expect(blankTemplateStart(page)).toBeHidden();
@@ -215,11 +222,11 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     const card = page.locator(`[data-template-name="${created.templateId}"]`);
     await card.getByRole("button", { name: /^打开未命名模板/ }).click();
     await expect.poll(async () => (await readSession(page)).definition?.metadata.canvasSize)
-      .toEqual({ width: 1080, height: 1920, aspectRatio: 1080 / 1920 });
+      .toEqual({ width: 1080, height: 1350, aspectRatio: 1080 / 1350 });
     await expect.poll(async () => {
       const result = await readCanvasReadout(page);
       return [result.width, result.height];
-    }).toEqual([1080, 1920]);
+    }).toEqual([1080, 1350]);
   });
 
   test("画布尺寸合同拒绝非法值并兼容旧模板", async ({ page }) => {
@@ -707,23 +714,23 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     await field.click();
     await setSwitch(page, "页面可填写内容", true);
     await setSwitch(page, "页面可隐藏", false);
-    await setSwitch(page, "页面必须填写", true);
+    await setSwitch(page, "公开时必须有内容", true);
     const requiredState = await readSession(page);
     await expect(page.getByRole("switch", { name: "页面可填写内容", exact: true })).toBeDisabled();
     await expect(page.getByRole("switch", { name: "页面可隐藏", exact: true })).toBeDisabled();
-    await expect(page.getByText("必填字段必须允许填写；先关闭“页面必须填写”，才能改为只读。", { exact: true })).toBeVisible();
-    await expect(page.getByText("必填字段不可允许页面隐藏；先关闭“页面必须填写”，才能开放隐藏。", { exact: true })).toBeVisible();
+    await expect(page.getByText("这项必须由页面填写。先关闭“公开时必须有内容”，才能改为只读。", { exact: true })).toBeVisible();
+    await expect(page.getByText("公开时必须有内容的字段不能由页面隐藏。先关闭“公开时必须有内容”，才能开放隐藏。", { exact: true })).toBeVisible();
     expect((await readSession(page)).historyPast).toEqual(requiredState.historyPast);
 
-    await setSwitch(page, "页面必须填写", false);
+    await setSwitch(page, "公开时必须有内容", false);
     await setSwitch(page, "页面可填写内容", false);
-    await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).toBeDisabled();
-    await expect(page.getByText("先允许页面填写内容并关闭页面隐藏，再设为必填；不会自动更改其他开关。", { exact: true })).toBeVisible();
+    await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).toBeDisabled();
+    await expect(page.getByText("先允许页面填写内容并关闭页面隐藏，再要求公开时必须有内容；不会自动更改其他开关。", { exact: true })).toBeVisible();
     await setSwitch(page, "页面可填写内容", true);
     await setSwitch(page, "页面可隐藏", true);
-    await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).toBeDisabled();
+    await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).toBeDisabled();
     await setSwitch(page, "页面可隐藏", false);
-    await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).toBeEnabled();
+    await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).toBeEnabled();
 
     // 仅测试夹具模拟已载入的历史坏稿；新命令不得被用于制造非法 required/readonly 组合。
     await page.evaluate(async (slotId) => {
@@ -739,11 +746,11 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
       });
     }, snapshot.pageFields[0].slotId);
     await expect(page.getByRole("tabpanel", { name: "页面开放范围", exact: true })
-      .getByText("必填字段必须可填写且不可隐藏", { exact: true })).toBeVisible();
+      .getByText("公开时必须有内容的字段必须可填写且不可隐藏，或改用已有固定文案并关闭隐藏", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: /^发布模板/ }).click();
     const locate = page.getByRole("region", { name: "本次发布检查", exact: true })
       .locator("[data-template-issue-object]")
-      .filter({ hasText: "必填槽位必须允许页面实例填写真实内容" })
+      .filter({ hasText: "还没有合法固定文案" })
       .getByRole("button", { name: "定位并返回编辑", exact: true });
     await expect(locate).toHaveCount(1);
     await locate.click();
@@ -755,7 +762,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
       required: true, editable: true, hideable: false,
     });
     expect(repaired.historyPast).toHaveLength(beforeRepair.historyPast.length + 1);
-    await expect(page.getByText("必填字段必须可填写且不可隐藏", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("公开时必须有内容的字段必须可填写且不可隐藏，或改用已有固定文案并关闭隐藏", { exact: true })).toHaveCount(0);
   });
 
   test("五态压力预览切换零请求、零 history，退出恢复 dirty、设备、scope 与选择", async ({ page }) => {
@@ -961,7 +968,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     expect(server.writes.filter((write) => write.path.endsWith("/publish"))).toHaveLength(1);
   });
 
-  test("1200px 使用可达覆盖层，1440px 起按最小可用宽度停靠四区", async ({ page }) => {
+  test("1200px 与 1366px 保持四区停靠，1440px 起按最小可用宽度缩放", async ({ page }) => {
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1200, height: 900 });
     await createBlankTemplate(page);
@@ -970,12 +977,10 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
 
     const body = page.locator(".homepage-editor__body.template-editor__body:visible");
     await expect(body).toHaveCount(1);
-    await expect(body).toHaveAttribute("data-template-workspace-compact", "true");
-    const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
-    await expect(structureTrigger).toBeVisible();
-    await structureTrigger.click();
-    await expect(page.getByRole("button", { name: "收起模板结构面板", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "展开模板属性面板", exact: true })).toBeVisible();
+    await expect(body).toHaveAttribute("data-template-workspace-compact", "false");
+    await expect(page.getByRole("button", { name: "展开模板结构面板", exact: true })).toBeHidden();
+    await expect(structurePanel(page)).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "模板属性", exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1201);
 
     const expectReadableStructureNames = async (compact = false) => {
@@ -1017,7 +1022,18 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
         expect(layout.itemScrollWidth).toBeLessThanOrEqual(layout.itemClientWidth + 1);
       }
     };
-    await expectReadableStructureNames(true);
+    await expectReadableStructureNames();
+    await expect(page.getByRole("button", { name: "收起模板组件库", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "收起模板属性面板", exact: true })).toBeVisible();
+    const readStagePadding = () => body.locator(".homepage-editor__stage").evaluate((element) => (
+      Math.round(parseFloat(getComputedStyle(element).paddingLeft))
+    ));
+    const paddingBeforeCollapse = await readStagePadding();
+    await page.getByRole("button", { name: "收起模板结构面板", exact: true }).click();
+    await expect.poll(readStagePadding).toBeLessThan(paddingBeforeCollapse - 80);
+    await page.getByRole("button", { name: "展开模板结构面板", exact: true }).click();
+    await expect.poll(readStagePadding).toBe(paddingBeforeCollapse);
+    await expect(structurePanel(page)).toBeVisible();
     const editableLayout = structurePanel(page).getByRole("treeitem", { name: /文字组 布局容器/ }).first();
     await editableLayout.focus();
     const editableLayoutRow = editableLayout.locator("..");
@@ -1038,11 +1054,12 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     await page.keyboard.press("Escape");
     await page.setViewportSize({ width: 1366, height: 900 });
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1366);
-    await expect(body).toHaveAttribute("data-template-workspace-compact", "true");
+    await expect(body).toHaveAttribute("data-template-workspace-compact", "false");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1367);
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1440);
     await expect(body).toHaveAttribute("data-template-workspace-compact", "false");
+    await expect(page.getByRole("button", { name: "收起模板结构面板", exact: true })).toBeHidden();
     await expectReadableStructureNames();
     for (const viewport of [
       { width: 1440, height: 900, expected: [230, 158, 691, 360] },
@@ -1158,7 +1175,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     test(`${viewport.width}×${viewport.height} 长中文与无空格 token 不造成页面横向溢出，覆盖层关闭后焦点返回`, async ({ page }) => {
       const server = await installNewTemplateServer(page);
       await page.setViewportSize(viewport);
-      if (viewport.width < 1440) {
+      if (viewport.width <= 1024) {
         await openTemplateDesignWithoutDraft(page);
         const more = page.getByRole("button", { name: "更多模板操作", exact: true });
         await more.focus();
@@ -1178,7 +1195,7 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
       }
 
       const longName = "长中文模板制作流程焦点与溢出验证-UNBROKEN_TOKEN_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      if (viewport.width < 1440) {
+      if (viewport.width <= 1024) {
         const identityEntry = await fillTemplateIdentity(page, longName, "移动端长内容与焦点返回验证");
         const inspector = page.getByRole("dialog", { name: "模板属性工作区", exact: true });
         await expect(inspector).toBeVisible();

@@ -170,8 +170,10 @@ test("R9 页面字段 descriptor 保持 Definition 树序且无 V1 或任务排�
   const descriptors = getDynamicTemplatePageFieldDescriptors(definition);
   const expectedOrder = expectedFields.map(({ result }) => result.slotId!);
   expect(descriptors.map((field) => field.slotId)).toEqual(expectedOrder);
-  expect(groupDynamicTemplatePageFields(descriptors, image.slotId).primary.map((field) => field.slotId))
-    .toEqual([image.slotId]);
+  const grouped = groupDynamicTemplatePageFields(descriptors, image.slotId);
+  expect(grouped.selectedSlotId).toBe(image.slotId);
+  expect(grouped.sections.flatMap((section) => section.fields.map((field) => field.slotId)))
+    .toEqual(expectedOrder);
   expect(descriptors).toHaveLength(4);
   descriptors.forEach((descriptor, index) => {
     const expected = expectedFields[index];

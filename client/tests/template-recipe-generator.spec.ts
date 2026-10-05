@@ -194,7 +194,7 @@ test("旧显式配方与编辑后的正式默认内容保持原样，包括与�
 });
 
 for (const [layout, label] of LAYOUTS) {
-  test(`${label} × 八种画幅 × 媒体数量均合法且保持手机阅读顺序`, () => {
+  test(`${label} × 六种网页画幅 × 媒体数量均合法且保持手机阅读顺序`, () => {
     for (const canvas of CANVAS_PRESETS) for (const media of MEDIA_PRESETS) {
       const recipe = createRecommendedRecipe();
       recipe.layout = layout;
@@ -325,7 +325,7 @@ test("全幅布局主图铺满画布并承载前景内容，显式背景优先",
   const definition = generateTemplateFromRecipe(recipe);
   const image = Object.values(definition.nodes).find((node) => node.type === "ImageSlot")!;
   expect(image.responsive.desktop.placement).toEqual({ x: 0, y: 0, width: 1, height: 1, zIndex: 0 });
-  expect(definition.slots[image.slotId!].desktopRules.aspectRatio).toBe("4:5");
+  expect(definition.slots[image.slotId!].desktopRules.aspectRatio).toBe("16:9");
   const group = Object.values(definition.nodes).find((node) => node.name === "内容区域")!;
   expect(group.responsive.desktop.backgroundColor).toBe(recipe.style.backgroundColor);
   expect(group.responsive.desktop.placement?.zIndex).toBeGreaterThan(0);

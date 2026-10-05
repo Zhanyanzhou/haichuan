@@ -110,6 +110,8 @@ interface ToolbarButtonConfig {
 interface PreviewButtonConfig extends ToolbarButtonConfig {
   active: boolean;
   buttonRef?: Ref<HTMLButtonElement>;
+  note?: string;
+  noteDetail?: string;
 }
 
 interface MoreButtonConfig {
@@ -127,6 +129,7 @@ export function WorkspaceToolbarActions({
   save,
   more,
   publish,
+  compareLive,
 }: {
   leading?: ReactNode;
   history: {
@@ -139,6 +142,7 @@ export function WorkspaceToolbarActions({
   save: ToolbarButtonConfig;
   more?: MoreButtonConfig;
   publish: ToolbarButtonConfig;
+  compareLive?: ToolbarButtonConfig;
 }) {
   const moreControl = more ? (
     <Dropdown
@@ -157,6 +161,21 @@ export function WorkspaceToolbarActions({
         title={more.title}
       />
     </Dropdown>
+  ) : null;
+  const compareLiveControl = compareLive ? (
+    <Button
+      className="homepage-editor__toolbar-compare-live"
+      size="small"
+      icon={compareLive.icon ?? <EyeOutlined />}
+      data-workspace-action="compare-live"
+      loading={compareLive.loading}
+      disabled={compareLive.disabled}
+      onClick={compareLive.onClick}
+      aria-label={compareLive.ariaLabel}
+      title={compareLive.title}
+    >
+      {compareLive.label}
+    </Button>
   ) : null;
   const publishControl = (
     <Button
@@ -197,6 +216,15 @@ export function WorkspaceToolbarActions({
           title="重做（Ctrl+Shift+Z）"
         />
       </div>
+      {preview.active && preview.note ? (
+        <span
+          className="homepage-editor__preview-mode-note"
+          role="status"
+          title={preview.noteDetail ?? preview.note}
+        >
+          {preview.note}
+        </span>
+      ) : null}
       <Button
         ref={preview.buttonRef}
         className="homepage-editor__toolbar-preview"
@@ -228,6 +256,7 @@ export function WorkspaceToolbarActions({
           {save.label}
         </Button>
       </div>
+      {compareLiveControl}
       {publishControl}
       {moreControl}
     </div>

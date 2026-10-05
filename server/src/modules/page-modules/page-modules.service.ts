@@ -2770,8 +2770,9 @@ export class PageModulesService {
   }
 
   /**
-   * “发布页面”是草稿进入客户前台的唯一入口。内容完整度只作运营提醒；
-   * 未上传图片的模板由公开 Renderer 自动隐藏。结构损坏、危险地址、
+   * “发布页面”是草稿进入客户前台的唯一入口。建议填写只作运营提醒。
+   * D.38：明确要求且当前适用的内容仍阻断；纯文字按有效文字公开，
+   * 可选图片缺失时收起图片区，必填图片缺失时不公开。结构损坏、危险地址、
    * 不可解析引用、权限与版本冲突仍然阻断，不能用“少规则”绕过安全边界。
    */
   private toUsablePublicationIssue(
@@ -2801,7 +2802,9 @@ export class PageModulesService {
       /最多允许 \d+ (?:个字符|项)/,
       /数量应为 \d+–\d+ 项/,
       /发布前必须确认/,
-      /为必填内容/,
+      /发布后客户前台不会显示此区块/,
+      /尚未绑定商品，公开页面不会展示该价格/,
+      /在品牌叙事页不会公开/,
       /未满足公开内容合同/,
       /已启用.*(?:角色|文字角色).*填写/,
       /必须填写行动文案/,
@@ -3727,6 +3730,25 @@ export class PageModulesService {
             field: issue.field,
             index: issue.index,
           };
+        }
+        if (
+          result.definition
+          && ["home", "products", "about", "custom", "contact"].includes(pageKey)
+        ) {
+          for (const slot of Object.values(result.definition.slots)) {
+            if (!slot.semanticRole || !["price", "originalPrice", "discount", "offer"].includes(slot.semanticRole)) {
+              continue;
+            }
+            const message = slot.required
+              ? `${instance.label}：品牌叙事页不能公开“${slot.label}”。价格、原价、折扣和优惠只能在选款中心绑定商品后展示`
+              : `${instance.label}：“${slot.label}”在品牌叙事页不会公开`;
+            const errorIndex = errors.push(message) - 1;
+            errorContexts[errorIndex] = {
+              blockId: instance.blockId,
+              path: `${instance.path}.props.contentBySlotId.${slot.slotId}`,
+              field: slot.slotId,
+            };
+          }
         }
         for (const asset of result.assets) {
           const assetLabel = `${instance.label}：${result.definition?.slots[asset.slotId]?.label ?? asset.slotId} 素材`;

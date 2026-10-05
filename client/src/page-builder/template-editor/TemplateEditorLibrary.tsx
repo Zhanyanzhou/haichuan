@@ -38,6 +38,7 @@ import {
 import WorkspacePanelHeader from "../workspace/WorkspacePanelHeader";
 import useCompactWorkspaceOverlay, {
   DOCKED_WORKSPACE_QUERY,
+  WIDE_DOCK_QUERY,
 } from "../workspace/useCompactWorkspaceOverlay";
 import {
   DYNAMIC_TEMPLATE_LOCAL_DRAFT_CHANGED_EVENT,
@@ -223,6 +224,7 @@ const DynamicTemplateCatalogPreview = memo(function DynamicTemplateCatalogPrevie
   presentation = "thumbnail",
   previewModel,
   previewKey = definition.templateId,
+  basisLabel,
   zoom = null,
 }: {
   definition: TemplateDefinitionV2;
@@ -230,6 +232,7 @@ const DynamicTemplateCatalogPreview = memo(function DynamicTemplateCatalogPrevie
   presentation?: "thumbnail" | "detail" | "structure";
   previewModel: TemplateCatalogPreviewModel;
   previewKey?: string;
+  basisLabel?: string;
   zoom?: number | null;
 }) {
   const neutralPreview = useMemo(
@@ -258,6 +261,7 @@ const DynamicTemplateCatalogPreview = memo(function DynamicTemplateCatalogPrevie
       sourceWidth={previewModel.sourceWidth}
       templateKey={previewKey}
       title={definition.name}
+      basisLabel={basisLabel}
       viewport={device}
       presentation={presentation}
       zoom={zoom}
@@ -405,6 +409,7 @@ function renderDynamicTemplatePreview(
   definition: TemplateDefinitionV2,
   device: "desktop" | "mobile",
   previewKey = definition.templateId,
+  basisLabel?: string,
 ): Pick<CatalogEntryBase, "preview"> {
   const previewModel = createTemplateCatalogPreviewModel(definition, device);
   return {
@@ -413,6 +418,7 @@ function renderDynamicTemplatePreview(
         definition={definition}
         device={device}
         previewKey={previewKey}
+        basisLabel={basisLabel}
         previewModel={previewModel}
       />
     ),
@@ -422,6 +428,7 @@ function renderDynamicTemplatePreview(
 function renderUnifiedTemplatePreview(
   presentation: UnifiedTemplateCatalogPresentation,
   device: "desktop" | "mobile",
+  basisLabel?: string,
 ): Pick<CatalogEntryBase, "preview"> {
   const resolved = resolveUnifiedTemplatePreviewDefinition(presentation);
   if (resolved) {
@@ -429,6 +436,7 @@ function renderUnifiedTemplatePreview(
       resolved.definition,
       device,
       resolved.previewKey,
+      basisLabel,
     );
   }
   const viewport = RESPONSIVE_CANVAS[device];
@@ -1215,6 +1223,14 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       setLibraryCollapsed(true);
     }
   }, [libraryOverlayCompact, props.mode, setLibraryCollapsed]);
+  useEffect(() => {
+    const wideDock = window.matchMedia(WIDE_DOCK_QUERY);
+    const keepLibraryOpen = (event: MediaQueryListEvent) => {
+      if (event.matches) setLibraryCollapsed(false);
+    };
+    wideDock.addEventListener("change", keepLibraryOpen);
+    return () => wideDock.removeEventListener("change", keepLibraryOpen);
+  }, [setLibraryCollapsed]);
 
   useEffect(() => {
     if (libraryOverlayCompact && obscuredByInspector) {
@@ -1390,6 +1406,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             ...renderUnifiedTemplatePreview(
             presentation,
             props.device,
+            `将插入已发布 v${presentation.published.version}`,
           ),
             template: presentation.published,
           });
@@ -1435,6 +1452,20 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           template: ordinaryEditable,
           ...(entry.published ? { published: entry.published } : {}),
         };
+        const lifecycle = resolveTemplatePublicationStatus({
+          status: ordinaryEditable.status,
+          publishedVersion: ordinaryEditable.publishedVersion,
+          draftDefinitionChecksum: ordinaryEditable.draft.definitionChecksum,
+          publishedDefinitionChecksum: entry.published?.version === ordinaryEditable.publishedVersion
+            ? entry.published.definitionChecksum
+            : null,
+        });
+        const publishedVersion = ordinaryEditable.publishedVersion;
+        const basisLabel = lifecycle === "published-with-unpublished-changes" && publishedVersion
+          ? `正在看草稿，已发布 v${publishedVersion} 的可见内容不同`
+          : publishedVersion
+            ? `正在看草稿，与已发布 v${publishedVersion} 一致`
+            : "正在看尚未发布的草稿";
         entries.push({
           kind: "design",
           key: entry.key,
@@ -1449,20 +1480,14 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                 ? "modified"
                 : "saved"
             : undefined,
-          lifecycle: resolveTemplatePublicationStatus({
-            status: ordinaryEditable.status,
-            publishedVersion: ordinaryEditable.publishedVersion,
-            draftDefinitionChecksum: ordinaryEditable.draft.definitionChecksum,
-            publishedDefinitionChecksum: entry.published?.version === ordinaryEditable.publishedVersion
-              ? entry.published.definitionChecksum
-              : null,
-          }),
+          lifecycle,
           name: ordinaryEditable.name,
           target,
           ...renderDynamicTemplatePreview(
             currentDefinition,
             props.device,
             `${ordinaryEditable.templateId}:draft`,
+            basisLabel,
           ),
         });
         continue;
@@ -1487,6 +1512,9 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           ...renderUnifiedTemplatePreview(
             presentation,
             props.device,
+            ordinaryEditable.publishedVersion
+              ? `正在看已发布 v${ordinaryEditable.publishedVersion}`
+              : "正在看已发布版本",
           ),
         });
       }
@@ -1672,7 +1700,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         <WorkspacePanelHeader
           icon={<AppstoreOutlined />}
           title="模板组件库"
-          actions={libraryOverlay.compact ? (
+          actions={(
             <button
               ref={libraryOverlay.closeButtonRef}
               type="button"
@@ -1683,7 +1711,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             >
               <LeftOutlined />
             </button>
-          ) : undefined}
+          )}
           />
           <TemplateCatalogControls
             keyword={keyword}

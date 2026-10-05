@@ -108,3 +108,35 @@ test("已卸载守卫的迟到 profile 不会清空刚登录的新管理员", as
   })).toEqual({ status: "authenticated", username: "bootstrap-admin" });
   await expect(page).toHaveURL(/\/admin\/dashboard$/);
 });
+
+test("会话刷新后写请求重试使用轮换后的 CSRF token", async ({ page }) => {
+  const headers: string[] = [];
+  let refreshCount = 0;
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/upload/media/26/restore") {
+      headers.push(route.request().headers()["x-csrf-token"] || "");
+      return fulfill(route, null, headers.length === 1 ? 401 : 200);
+    }
+    if (path === "/api/auth/session/refresh") {
+      refreshCount += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "set-cookie": "hc_csrf=fresh-token; Path=/; SameSite=Lax" },
+        body: JSON.stringify({ code: 200, data: { user: adminUser }, message: "ok" }),
+      });
+    }
+    return fulfill(route, { list: [], total: 0 });
+  });
+
+  await page.goto("/");
+  await page.evaluate(() => { document.cookie = "hc_csrf=old-token; Path=/"; });
+  await page.evaluate(async () => {
+    const { default: api } = await import("/src/services/httpClient.ts");
+    await api.post("/upload/media/26/restore");
+  });
+
+  expect(refreshCount).toBe(1);
+  expect(headers).toEqual(["old-token", "fresh-token"]);
+});

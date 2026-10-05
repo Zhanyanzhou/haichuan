@@ -12,7 +12,7 @@ async function openRecipeConfirmation(page: Page, layout = "上图下文") {
   const dialog = await openWizard(page);
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: "竖版 4:5", exact: true }).click();
+  await dialog.getByRole("button", { name: "竖向卡片 4:5", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: layout, exact: true }).click();
   await dialog.getByRole("button", { name: "前往确认（未配置项用推荐值）", exact: true }).click();
@@ -72,10 +72,10 @@ test("4:3 双图并排的单图特点跨内容风格返回及创建保持一致�
   const dialog = await openWizard(page);
   const next = () => dialog.getByRole("button", { name: "下一步", exact: true }).click();
   const previous = () => dialog.getByRole("button", { name: "上一步", exact: true }).click();
-  await dialog.getByRole("button", { name: "品牌宣传", exact: true }).click();
+  await dialog.getByRole("button", { name: "品牌故事", exact: true }).click();
   await next();
   await dialog.getByRole("button", { name: "更多尺寸", exact: true }).click();
-  await dialog.getByRole("button", { name: "标准横版 4:3", exact: true }).click();
+  await dialog.getByRole("button", { name: "均衡横版 4:3", exact: true }).click();
   await next();
   await dialog.getByRole("button", { name: "上图下文", exact: true }).click();
   await dialog.getByRole("button", { name: "2 张图片", exact: true }).click();
@@ -140,10 +140,10 @@ for (const viewport of [{ width: 1600, height: 1000 }, { width: 1200, height: 90
     await page.setViewportSize(viewport);
     const dialog = await openWizard(page);
     const next = dialog.getByRole("button", { name: "下一步", exact: true });
-    await dialog.getByRole("button", { name: "品牌宣传", exact: true }).click();
+    await dialog.getByRole("button", { name: "品牌故事", exact: true }).click();
     await next.click();
     await dialog.getByRole("button", { name: "更多尺寸", exact: true }).click();
-    await dialog.getByRole("button", { name: "标准横版 4:3", exact: true }).click();
+    await dialog.getByRole("button", { name: "均衡横版 4:3", exact: true }).click();
     await next.click();
     await expect(dialog.locator(".template-recipe__composition-grid").first().getByRole("button")).toHaveCount(6);
     await dialog.getByRole("button", { name: "更多布局", exact: true }).click();
@@ -198,7 +198,7 @@ test("确认摘要分项修改与错误定位保留输入，修复后直接返�
   const dialog = await openRecipeConfirmation(page);
   for (const section of ["用途", "尺寸", "布局", "图片", "内容", "风格"]) await expect(dialog.getByRole("button", { name: `修改${section}`, exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "修改尺寸", exact: true }).click();
-  await expect(dialog.getByRole("heading", { name: "选择画布尺寸", exact: true })).toBeFocused();
+  await expect(dialog.getByRole("heading", { name: "选择网页区块画幅", exact: true })).toBeFocused();
   await dialog.getByRole("button", { name: "自定义尺寸", exact: true }).click();
   await dialog.getByRole("spinbutton", { name: "宽度", exact: true }).fill("10");
   await expect(dialog.getByRole("button", { name: "返回确认", exact: true })).toBeDisabled();
@@ -329,13 +329,13 @@ test("用途推荐按勾选覆盖，保留未选段与图片圆角并清理对�
   for (const section of ["尺寸", "布局", "风格"]) await recommendations.getByRole("checkbox", { name: `应用${section}推荐`, exact: true }).check();
   await recommendations.getByRole("button", { name: "确认应用已选推荐", exact: true }).click();
   await dialog.getByRole("button", { name: "返回确认", exact: true }).click();
-  await expect(dialog.locator('[data-template-recipe-confirmation-summary="true"]')).toContainText("1080 × 1920 px");
+  await expect(dialog.locator('[data-template-recipe-confirmation-summary="true"]')).toContainText("1440 × 810 px");
   await dialog.getByRole("button", { name: "修改风格", exact: true }).click();
   await dialog.getByRole("button", { name: "科技", exact: true }).click();
   await dialog.getByRole("button", { name: "返回确认", exact: true }).click();
   await dialog.getByRole("button", { name: "创建模板", exact: true }).click();
   const recipe = (await readSession(page)).definition!.templateRecipe!;
-  expect(recipe).toMatchObject({ purpose: "event", layout: "fullImageOverlay", canvas: { width: 1080, height: 1920 }, rules: { aspectLocked: false }, style: { variant: "tech", primaryColor: "#181A1B" } });
+  expect(recipe).toMatchObject({ purpose: "event", layout: "fullImageOverlay", canvas: { width: 1440, height: 810 }, rules: { aspectLocked: false }, style: { variant: "tech", primaryColor: "#181A1B" } });
   expect(recipe.media[0]).toMatchObject({ name: "保留图片", borderRadius: 24 });
   expect(recipe.content.map((slot) => slot.role)).toEqual(["title", "time", "location", "cta"]);
   expect(server.writes).toEqual([]);
@@ -346,7 +346,7 @@ test("切换不同用途只更新方案，创建向导外框保持稳定（自�
   await page.setViewportSize({ width: 1600, height: 1000 });
   const dialog = await openWizard(page);
   await expect.poll(async () => (await dialog.boundingBox())?.width ?? 0).toBeCloseTo(1320, 0);
-  const purposes = ["商品促销", "新品发布", "活动宣传", "品牌宣传", "社交媒体", "新闻 / 资讯", "人物介绍", "通用模板", "自定义"];
+  const purposes = ["商品促销", "新品发布", "活动宣传", "品牌故事", "新闻 / 资讯", "人物介绍", "通用模板", "自定义"];
   const boxes = [];
 
   for (const purpose of purposes) {
@@ -445,7 +445,7 @@ test("自定义尺寸保留非法原输入并阻止前进，修正与锁比往�
     await width.fill(input);
     await expect(next).toBeDisabled();
     await expect(width).toHaveAttribute("aria-invalid", "true");
-    await dialog.getByRole("heading", { name: "选择画布尺寸", exact: true }).click();
+    await dialog.getByRole("heading", { name: "选择网页区块画幅", exact: true }).click();
     await expect(width).toHaveValue(input);
     await expect(dialog.getByText("宽度和高度须为 1–4096 px 的整数。", { exact: true })).toHaveAttribute("role", "alert");
   }
@@ -548,7 +548,7 @@ test("返回布局新增图片继承当前圆角并保留已有手动形态（�
   const dialog = await openWizard(page);
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: "竖版 4:5", exact: true }).click();
+  await dialog.getByRole("button", { name: "竖向卡片 4:5", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: "上图下文", exact: true }).click();
   await dialog.getByRole("button", { name: "自定义", exact: true }).click();
@@ -578,8 +578,8 @@ test("只选用途尺寸布局即可确认，生成后没有第二套制作步�
   const dialog = await openWizard(page);
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: /标准横版 4:3/ })).toHaveCount(0);
-  await dialog.getByRole("button", { name: /竖版 4:5/ }).click();
+  await expect(dialog.getByRole("button", { name: /均衡横版 4:3/ })).toBeVisible();
+  await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
   const preview = dialog.getByLabel("生成方案预览");
   const size = await preview.boundingBox();
   expect(size!.width / size!.height).toBeCloseTo(4 / 5, 2);
@@ -603,7 +603,7 @@ test("布局自定义图片最多六个，普通组合恢复简洁选择（自�
   const dialog = await openWizard(page);
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: /竖版 4:5/ }).click();
+  await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: /上图下文/ }).click();
   await dialog.getByRole("button", { name: "1 张主图 + 1 张副图", exact: true }).click();
@@ -647,7 +647,7 @@ test("七步只做选择、即时预览、返回保留、确认生成与取消�
   await expect(dialog.getByRole("button", { name: "下一步", exact: true })).toBeDisabled();
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: /竖版 4:5/ }).click();
+  await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: /上图下文/ }).click();
   await dialog.getByRole("button", { name: "1 张主图 + 2 张副图", exact: true }).click();
@@ -687,7 +687,7 @@ test("七步只做选择、即时预览、返回保留、确认生成与取消�
   await clickNewTemplateEntry(page);
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: /正方形 1:1/ }).click();
+  await dialog.getByRole("button", { name: /方形卡片 1:1/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: /上图下文/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
@@ -709,7 +709,7 @@ test("390px 自定义锁比、预览切换与取消保护（自有 API Mock）",
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
   await dialog.getByRole("button", { name: "通用模板", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: /正方形 1:1/ }).click();
+  await dialog.getByRole("button", { name: /方形卡片 1:1/ }).click();
   await dialog.getByRole("button", { name: "自定义尺寸", exact: true }).click();
   await dialog.getByRole("switch", { name: "锁定比例" }).click();
   await dialog.getByRole("spinbutton", { name: "宽度", exact: true }).fill("1200");
@@ -740,7 +740,7 @@ test("图片独立设置与显式风格参数保留，Logo 仅在布局增删（
   };
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await next();
-  await dialog.getByRole("button", { name: "竖版 4:5", exact: true }).click();
+  await dialog.getByRole("button", { name: "竖向卡片 4:5", exact: true }).click();
   await next();
   await dialog.getByRole("button", { name: "上图下文", exact: true }).click();
   await dialog.getByRole("button", { name: "1 张主图 + Logo", exact: true }).click();
@@ -869,10 +869,10 @@ test("4:3 布局线框和图片区结构线框使用实际几何，点击后与�
   await page.setViewportSize({ width: 1600, height: 1000 });
   const dialog = await openWizard(page);
   const next = () => dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: "品牌宣传", exact: true }).click();
+  await dialog.getByRole("button", { name: "品牌故事", exact: true }).click();
   await next();
   await dialog.getByRole("button", { name: "更多尺寸", exact: true }).click();
-  await dialog.getByRole("button", { name: "标准横版 4:3", exact: true }).click();
+  await dialog.getByRole("button", { name: "均衡横版 4:3", exact: true }).click();
   await next();
   const main = dialog.getByLabel("生成方案预览");
   const expectChoiceGeometry = async (name: string) => {
@@ -901,10 +901,10 @@ test("图片重复选择、尺寸往返和自定义 Logo 往返保留配置，�
   const dialog = await openWizard(page);
   const next = () => dialog.getByRole("button", { name: "下一步", exact: true }).click();
   const previous = () => dialog.getByRole("button", { name: "上一步", exact: true }).click();
-  await dialog.getByRole("button", { name: "品牌宣传", exact: true }).click();
+  await dialog.getByRole("button", { name: "品牌故事", exact: true }).click();
   await next();
   await dialog.getByRole("button", { name: "更多尺寸", exact: true }).click();
-  await dialog.getByRole("button", { name: "标准横版 4:3", exact: true }).click();
+  await dialog.getByRole("button", { name: "均衡横版 4:3", exact: true }).click();
   await next();
   await dialog.getByRole("button", { name: "左文右图", exact: true }).click();
   const two = dialog.getByRole("button", { name: "2 张图片", exact: true });
@@ -927,11 +927,11 @@ test("图片重复选择、尺寸往返和自定义 Logo 往返保留配置，�
   await expectImageAppearance(dialog, 2, "形状", "圆形");
   await previous();
   await previous();
-  await dialog.getByRole("button", { name: "正方形 1:1", exact: true }).click();
+  await dialog.getByRole("button", { name: "方形卡片 1:1", exact: true }).click();
   await next();
   await expectDiagramRatio(dialog.getByRole("button", { name: "左文右图", exact: true }).locator("[data-recipe-layout-diagram]"), 1080, 1080);
   await previous();
-  await dialog.getByRole("button", { name: "标准横版 4:3", exact: true }).click();
+  await dialog.getByRole("button", { name: "均衡横版 4:3", exact: true }).click();
   await next();
   await next();
   await expectImageAppearance(dialog, 1, "比例", "4:5");

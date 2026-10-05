@@ -15,7 +15,7 @@ import {
   dynamicTemplateVersionKey,
   readResolvedDynamicTemplateDefinitions,
 } from "@/page-builder/dynamic-template-instance/types";
-import { hasExplicitDynamicTemplateInstanceImage } from "@/page-builder/dynamic-template-instance/mediaReferences";
+import { isDynamicTemplateInstancePubliclyVisible } from "@/page-builder/dynamic-template-instance/publicVisibility";
 import type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
 export const EDITOR_PAGE_KEYS = [
@@ -205,11 +205,11 @@ export function isContentTemplateBlockPublicRenderable(
     const hiddenSlotIds = Array.isArray(block.props?.hiddenSlotIds)
       ? block.props.hiddenSlotIds.filter((id): id is string => typeof id === "string")
       : [];
-    return hasExplicitDynamicTemplateInstanceImage(
-      resolved.definition,
-      block.props?.contentBySlotId,
+    return isDynamicTemplateInstancePubliclyVisible({
+      definition: resolved.definition,
+      contentBySlotId: block.props?.contentBySlotId,
       hiddenSlotIds,
-    );
+    });
   }
   const contract = getContentTemplateContract(block.type || "");
   if (!contract) return false;

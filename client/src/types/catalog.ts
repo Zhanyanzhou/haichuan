@@ -139,11 +139,12 @@ export interface ShippingTemplate {
   id: number;
   name: string;
   carrier?: string;
-  feeMode: "FREE" | "FIXED" | "CONDITIONAL";
+  feeMode: "FREE" | "FIXED" | "CONDITIONAL" | "REGIONAL";
   baseFee: number;
   remoteSurcharge: number;
   freeShippingThreshold?: number | null;
   excludedRegions?: string[];
+  provinceFees?: Record<string, number> | null;
   insured: boolean;
   signatureRequired: boolean;
   isDefault: boolean;

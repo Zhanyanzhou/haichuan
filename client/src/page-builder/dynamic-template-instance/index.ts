@@ -12,4 +12,5 @@ export {
 export * from "./types";
 export * from "./upgrade";
 export * from "./mediaReferences";
+export * from "./publicVisibility";
 export * from "./unauthorizedSlotContent";

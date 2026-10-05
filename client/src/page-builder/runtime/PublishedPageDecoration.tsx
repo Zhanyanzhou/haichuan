@@ -315,6 +315,7 @@ export default function PublishedPageDecoration({
           <AntdProvider>
             <PuckDocumentRenderer
               data={data}
+              pageKey={pageKey}
               primaryHeading={replaceChildren ? pageLabel : undefined}
             />
           </AntdProvider>

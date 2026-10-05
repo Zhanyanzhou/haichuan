@@ -1400,7 +1400,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
     const hideable = page.getByRole("switch", { name: "页面可隐藏", exact: true });
     if (await hideable.getAttribute("aria-checked") === "true") await hideable.click();
-    await page.getByRole("switch", { name: "页面必须填写", exact: true }).check();
+    await page.getByRole("switch", { name: "公开时必须有内容", exact: true }).check();
     await page.getByRole("button", { name: "返回当前结构全部字段", exact: true }).click();
 
     const containerRow = container.locator("..");
@@ -1414,8 +1414,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(templateWrites).toEqual([]);
     await recovery.getByRole("button", { name: "定位并取消必填", exact: true }).click();
     await expect(heading).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).toBeFocused();
-    await page.getByRole("switch", { name: "页面必须填写", exact: true }).uncheck();
+    await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).toBeFocused();
+    await page.getByRole("switch", { name: "公开时必须有内容", exact: true }).uncheck();
     expect(templateWrites).toEqual([]);
 
     await containerRow.hover();
@@ -1434,7 +1434,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(treeNodeOrderAfterUndo).toEqual(treeNodeOrderBeforeDelete);
     await tree.locator(`[data-selection-target-id="${headingNodeId}"]`).click();
     await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
-    await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).not.toBeChecked();
+    await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).not.toBeChecked();
     expect(templateWrites).toEqual([]);
 
     const createResponse = page.waitForResponse((response) => {

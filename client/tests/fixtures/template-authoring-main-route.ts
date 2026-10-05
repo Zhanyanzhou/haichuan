@@ -524,18 +524,18 @@ export async function openTemplateDesignWithoutDraft(page: Page) {
 }
 
 /**
- * 新建模板入口随布局切换：521–1439px 用顶部快捷按钮；≥1440px 停靠布局以
+ * 新建模板入口随布局切换：521–1024px 用顶部快捷按钮；≥1025px 停靠布局以
  * 组件库底部主入口为准；≤520px 收进“更多模板操作”菜单。返回实际使用的入口，
  * 供焦点恢复断言复用。
  */
 export async function clickNewTemplateEntry(page: Page) {
   const width = page.viewportSize()?.width ?? 1280;
-  if (width > 520 && width < 1440) {
+  if (width > 520 && width <= 1024) {
     const top = page.getByRole("button", { name: "顶部新建模板", exact: true });
     await top.click();
     return top;
   }
-  if (width >= 1440) {
+  if (width >= 1025) {
     const library = page.getByRole("button", { name: "新建模板", exact: true });
     await library.click();
     return library;

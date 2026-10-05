@@ -76,7 +76,12 @@ const RefundManage = lazy(() => import("@/pages/admin/RefundManage"));
 const AfterSalesManage = lazy(() => import("@/pages/admin/AfterSalesManage"));
 const UserManage = lazy(() => import("@/pages/admin/UserManage"));
 const Settings = lazy(() => import("@/pages/admin/Settings"));
-const EditorWorkbench = lazy(() => import("@/pages/admin/EditorWorkbench"));
+const loadEditorWorkbench = () => import("@/pages/admin/EditorWorkbench");
+const EditorWorkbench = lazy(loadEditorWorkbench);
+// 刷新装修页时，路由守卫要先等登录校验。编辑器脚本不读运营数据，可以和这次校验同时下载。
+if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin/editor")) {
+  void loadEditorWorkbench();
+}
 
 const MediaLibrary = lazy(() => import("@/pages/admin/MediaLibrary"));
 const AuditLogs = lazy(() => import("@/pages/admin/AuditLogs"));

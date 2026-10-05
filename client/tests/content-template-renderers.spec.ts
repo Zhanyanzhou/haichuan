@@ -104,7 +104,7 @@ test("公开 Renderer 只渲染首屏合同并保留真实渲染标记", async (
   await expect(fixture.locator("img")).toHaveAttribute("sizes", "100vw");
 });
 
-test("公开 Renderer 只展示页面实例明确上传图片的动态模板", async ({ page }) => {
+test("公开 Renderer 展示无图文字并只渲染页面上传的图片", async ({ page }) => {
   await page.route(/\/__content-template-renderer(?:\?.*)?$/, (route) => route.fulfill({
     status: 200,
     contentType: "text/html; charset=utf-8",
@@ -127,9 +127,12 @@ test("公开 Renderer 只展示页面实例明确上传图片的动态模板", a
     '[data-renderer-fixture="fixed-hero-without-image"] [data-content-template="hero"]',
   )).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "缺图时不应公开的标题" })).toHaveCount(0);
-  await expect(page.locator(
+  const imagelessInstance = page.locator(
     '[data-renderer-fixture="dynamic-without-image"] [data-dynamic-template-instance-id]',
-  )).toHaveCount(0);
+  );
+  await expect(imagelessInstance).toHaveCount(1);
+  await expect(imagelessInstance.getByRole("heading", { name: "无页面图片的动态首屏" })).toBeVisible();
+  await expect(imagelessInstance.locator("img")).toHaveCount(0);
   const publishedInstance = page.locator(
     '[data-renderer-fixture="dynamic-with-image"] [data-dynamic-template-instance-id="instance_with_image"]',
   );
@@ -176,7 +179,7 @@ test("公开 Renderer 按页面顺序展示多个有图首屏", async ({ page })
   await expect(fixture.locator("picture")).toHaveCount(2);
 });
 
-test("公开 Renderer 跳过无图首屏并把唯一 H1 与首图优先级交给实际可见首屏", async ({ page }) => {
+test("无图文字首屏保持唯一 H1，模板默认图不进入公开页面", async ({ page }) => {
   await page.route(/\/__content-template-renderer(?:\?.*)?$/, (route) => route.fulfill({
     status: 200,
     contentType: "text/html; charset=utf-8",
@@ -195,16 +198,17 @@ test("公开 Renderer 跳过无图首屏并把唯一 H1 与首图优先级交给
   await page.goto("/__content-template-renderer");
 
   const dynamicSequence = page.locator('[data-renderer-fixture="hidden-dynamic-before-visible-dynamic"]');
-  await expect(dynamicSequence.locator('[data-dynamic-template-instance-id="instance_hidden_dynamic"]')).toHaveCount(0);
+  await expect(dynamicSequence.locator('[data-dynamic-template-instance-id="instance_hidden_dynamic"]')).toBeVisible();
   await expect(dynamicSequence.locator("h1")).toHaveCount(1);
   await expect(dynamicSequence.getByRole("heading", {
     level: 1,
+    name: "无图动态首屏",
+  })).toBeVisible();
+  await expect(dynamicSequence.locator('img[alt="模板默认图"]')).toHaveCount(0);
+  await expect(dynamicSequence.getByRole("heading", {
+    level: 2,
     name: "无图动态首屏后的可见首屏",
   })).toBeVisible();
-  const dynamicPriorityImage = dynamicSequence.locator('img[fetchpriority="high"]');
-  await expect(dynamicPriorityImage).toHaveCount(1);
-  await expect(dynamicPriorityImage).toHaveAttribute("alt", "无图动态首屏后的可见首屏图片");
-  await expect(dynamicPriorityImage).toHaveAttribute("loading", "eager");
 
   const fixedSequence = page.locator('[data-renderer-fixture="empty-fixed-before-visible-dynamic"]');
   await expect(fixedSequence.locator('[data-content-template="hero"]')).toHaveCount(0);
@@ -218,7 +222,7 @@ test("公开 Renderer 跳过无图首屏并把唯一 H1 与首图优先级交给
   await expect(fixedSequencePriorityImage).toHaveAttribute("alt", "无图固定首屏后的可见首屏图片");
 });
 
-test("手机 Renderer 按当前断点跳过仅桌面有图的首屏", async ({ page }) => {
+test("手机端隐藏可选图片后保留文字和原有 H1", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.route(/\/__content-template-renderer(?:\?.*)?$/, (route) => route.fulfill({
     status: 200,
@@ -247,16 +251,18 @@ test("手机 Renderer 按当前断点跳过仅桌面有图的首屏", async ({ p
   await expect(desktopPriorityImage).toHaveAttribute("alt", "仅桌面可见首屏图片");
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(fixture.locator('[data-dynamic-template-instance-id="instance_desktop_only"]')).toHaveCount(0);
+  await expect(fixture.locator('[data-dynamic-template-instance-id="instance_desktop_only"]')).toBeVisible();
+  await expect(fixture.getByRole("heading", { name: "仅桌面可见首屏" })).toBeVisible();
+  await expect(fixture.locator('img[alt="仅桌面可见首屏图片"]')).toHaveCount(0);
   await expect(fixture.locator("h1")).toHaveCount(1);
   await expect(fixture.getByRole("heading", {
     level: 1,
+    name: "仅桌面可见首屏",
+  })).toBeVisible();
+  await expect(fixture.getByRole("heading", {
+    level: 2,
     name: "手机实际可见首屏",
   })).toBeVisible();
-  const priorityImage = fixture.locator('img[fetchpriority="high"]');
-  await expect(priorityImage).toHaveCount(1);
-  await expect(priorityImage).toHaveAttribute("alt", "手机实际可见首屏图片");
-  await expect(priorityImage).toHaveAttribute("loading", "eager");
 
   const hiddenHeadingFixture = page.locator(
     '[data-renderer-fixture="mobile-hidden-heading-before-visible-heading"]',

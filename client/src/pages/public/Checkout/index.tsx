@@ -132,6 +132,13 @@ function restorePendingPaymentOrder(ownerId: number | null): PendingPaymentOrder
   }
 }
 
+function paymentReturnOrderId(search: string): number | null {
+  const values = new URLSearchParams(search).getAll("orderId");
+  if (values.length !== 1 || !/^[1-9]\d*$/.test(values[0])) return null;
+  const orderId = Number(values[0]);
+  return Number.isSafeInteger(orderId) ? orderId : null;
+}
+
 export default function Checkout() {
   const authenticatedCustomerId = useCustomerAuthStore(
     (state) => state.customer?.id ?? null,
@@ -159,6 +166,13 @@ function CheckoutSession({
   const returnedFromPayment =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("paymentReturn") === "1";
+  const returnedOrderId = returnedFromPayment
+    ? paymentReturnOrderId(window.location.search)
+    : null;
+  const [returnOrderState, setReturnOrderState] = useState<"idle" | "loading" | "invalid" | "failed">(
+    returnedFromPayment ? "loading" : "idle",
+  );
+  const [returnRetry, setReturnRetry] = useState(0);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentInitialAction, setPaymentInitialAction] = useState<
     "create" | "query"
@@ -172,12 +186,61 @@ function CheckoutSession({
     : null;
 
   useEffect(() => {
-    const restored = restorePendingPaymentOrder(authenticatedCustomerId);
-    setPendingPaymentOrder(restored);
     setPaymentConfirmed(false);
     setPaymentInitialAction(returnedFromPayment ? "query" : "create");
-    setPaymentOpen(Boolean(returnedFromPayment && restored));
-  }, [authenticatedCustomerId, returnedFromPayment]);
+    if (!returnedFromPayment) {
+      setPendingPaymentOrder(restorePendingPaymentOrder(authenticatedCustomerId));
+      setPaymentOpen(false);
+      setReturnOrderState("idle");
+      return;
+    }
+
+    // 回跳 URL 只是查找线索；必须由本人订单接口核实，不能信任旧 sessionStorage 或 URL 中的金额。
+    setPendingPaymentOrder(null);
+    setPaymentOpen(false);
+    if (!isSignedIn || authenticatedCustomerId === null) return;
+    if (returnedOrderId === null) {
+      setReturnOrderState("invalid");
+      return;
+    }
+    let cancelled = false;
+    setReturnOrderState("loading");
+    customerApi.getOrder(returnedOrderId)
+      .then((response) => {
+        const order = unwrapResponse<{ id: number; orderNo: string; finalAmount: number | string }>(response);
+        const amount = Number(order?.finalAmount);
+        if (
+          order?.id !== returnedOrderId ||
+          typeof order.orderNo !== "string" ||
+          !order.orderNo.trim() ||
+          (typeof order.finalAmount !== "number" && typeof order.finalAmount !== "string") ||
+          (typeof order.finalAmount === "string" && !order.finalAmount.trim()) ||
+          !Number.isFinite(amount) ||
+          amount < 0
+        ) {
+          throw new Error("订单响应不完整");
+        }
+        if (cancelled) return;
+        const restored = {
+          ownerId: authenticatedCustomerId,
+          order: { id: order.id, orderNo: order.orderNo, finalAmount: amount },
+        };
+        setPendingPaymentOrder(restored);
+        try {
+          sessionStorage.setItem(PENDING_PAYMENT_ORDER_KEY, JSON.stringify(restored));
+        } catch {
+          // 私密浏览模式中存储不可用时仍可在本页查单。
+        }
+        setReturnOrderState("idle");
+        setPaymentOpen(true);
+      })
+      .catch(() => {
+        if (!cancelled) setReturnOrderState("failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticatedCustomerId, isSignedIn, returnedFromPayment, returnedOrderId, returnRetry]);
 
   // 结算契约对齐（P0 修复）：后端 checkout 仅接受 { address, items, customerEmail? }，
   // 客户身份（姓名/手机号）来自登录态；订单创建后由客户本人发起微信支付。
@@ -356,6 +419,33 @@ function CheckoutSession({
             <Link to="/customer" className="btn btn-primary">前往登录 / 注册</Link>
             <Link to="/cart" className="text-sm text-brand-muted hover:text-brand-gold transition-colors">← 返回购物车</Link>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (returnedFromPayment && returnOrderState === "loading") {
+    return (
+      <div className="min-h-screen bg-brand-bg flex items-center justify-center">
+        <div role="status" aria-label="正在核实返回的订单"><Spin size="large" /></div>
+      </div>
+    );
+  }
+
+  if (returnedFromPayment && (returnOrderState === "invalid" || returnOrderState === "failed")) {
+    return (
+      <div className="min-h-screen bg-brand-bg flex items-center justify-center px-6">
+        <div className="max-w-lg w-full text-center bg-brand-surface border border-brand-line p-10" role="alert">
+          <h1 className="text-2xl font-display mb-3">无法核实支付返回的订单</h1>
+          <p className="text-brand-muted mb-6 leading-6">
+            {returnOrderState === "invalid"
+              ? "支付返回链接中的订单编号无效，请从我的订单查看支付结果。"
+              : "暂时无法读取这笔订单，请稍后重试，或从我的订单查看支付结果。"}
+          </p>
+          {returnOrderState === "failed" ? (
+            <button type="button" onClick={() => setReturnRetry((value) => value + 1)} className="btn btn-primary w-full mb-3">重新核实订单</button>
+          ) : null}
+          <Link to="/customer" className="btn btn-secondary w-full">查看我的订单</Link>
         </div>
       </div>
     );

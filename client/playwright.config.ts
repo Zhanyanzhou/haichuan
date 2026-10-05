@@ -52,6 +52,7 @@ const testBoundaryFiles = {
     "recipe-radius-input.test.ts",
     "template-inline-text-guard.unit.ts",
     "published-page-readiness.unit.ts",
+    "dynamic-template-public-visibility.unit.ts",
     "instance-edit-policy.unit.ts",
     "page-template-handoff.unit.ts",
     "published-template-catalog-cache.unit.ts",

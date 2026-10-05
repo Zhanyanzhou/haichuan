@@ -828,5 +828,49 @@ export function validateDynamicTemplateInstance(
     }
   }
 
+  const commercialRoles = new Set(["price", "originalPrice", "discount", "offer"]);
+  const hasBusinessBinding = Object.values(definition.slots).some((slot) => (
+    (slot.type === "product" || slot.type === "collection")
+    && hasRenderableSlotContent(slot, contentBySlotId[slot.slotId])
+  ));
+  for (const slot of Object.values(definition.slots)) {
+    if (!slot.semanticRole || !commercialRoles.has(slot.semanticRole)) continue;
+    if (!slot.required && !visibleSlotIds.has(slot.slotId)) continue;
+    if (hasBusinessBinding) continue;
+    issues.push({
+      message: slot.required
+        ? `${slot.label}必须先绑定商品，模板里的价格文字不能公开`
+        : `${slot.label}尚未绑定商品，公开页面不会展示该价格`,
+      field: slot.slotId,
+      pathSuffix: `.contentBySlotId.${slot.slotId}`,
+    });
+  }
+  const hasPageImage = Object.values(definition.slots).some((slot) => (
+    slot.type === "image"
+    && visibleSlotIds.has(slot.slotId)
+    && hasRenderableSlotContent(slot, contentBySlotId[slot.slotId])
+  ));
+  const hasPublicText = Object.values(definition.slots).some((slot) => {
+    if (!["heading", "text", "richText", "badge", "button", "link"].includes(slot.type)) return false;
+    if (!visibleSlotIds.has(slot.slotId)) return false;
+    if (slot.semanticRole && commercialRoles.has(slot.semanticRole) && !hasBusinessBinding) return false;
+    const hasInstanceValue = Object.prototype.hasOwnProperty.call(contentBySlotId, slot.slotId);
+    if (hasInstanceValue && isEmptyContent(contentBySlotId[slot.slotId]) && slot.emptyPolicy !== "use-default") {
+      return false;
+    }
+    const value = hasInstanceValue ? contentBySlotId[slot.slotId] : definition.defaultContent[slot.slotId];
+    return hasRenderableSlotContent(slot, value);
+  });
+  const hasRequiredGap = issues.some((issue) => (
+    issue.message.includes("为必填内容") || issue.message.includes("必须先绑定商品")
+  ));
+  if (!hasPageImage && !hasPublicText && !hasRequiredGap && visibleSlotIds.size > 0) {
+    issues.push({
+      message: "发布后客户前台不会显示此区块，因为没有有效文字或页面图片",
+      field: "contentBySlotId",
+      pathSuffix: ".contentBySlotId",
+    });
+  }
+
   return { definition, issues, assets, productCodes, categorySlugs, actions };
 }

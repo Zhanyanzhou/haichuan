@@ -18,6 +18,7 @@ interface MediaFieldProps {
   device: "desktop" | "mobile" | "shared";
   onChange: (value: string) => void;
   onAdjustComposition?: () => void;
+  onFocusChange?: (next: { x: number; y: number }) => void;
   /** 继承来源键的当前值（inheritFrom 配置时由 FieldRenderer 传入） */
   inheritBaseValue?: string;
   previewFit?: "cover" | "contain" | "fill";
@@ -32,6 +33,7 @@ export default function MediaField({
   device,
   onChange,
   onAdjustComposition,
+  onFocusChange,
   inheritBaseValue,
   previewFit,
   previewZoom,
@@ -90,6 +92,7 @@ export default function MediaField({
           previewFocus={focus}
           previewFit={previewFit}
           previewZoom={previewZoom}
+          onFocusChange={onFocusChange}
           onOpenPageMedia={() => setPageMediaOpen((open) => !open)}
           pageMediaOpen={pageMediaOpen}
           taskPresentation={taskPresentation === "media"}

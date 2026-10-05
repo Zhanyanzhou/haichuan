@@ -3,7 +3,7 @@
 > 本文件规定**现在必须遵守什么**（技术实现硬规则），不按模型或工具分别建立规则。
 > 架构决策与【待决策】事项见 `docs/DECISIONS.md`；AI 执行流程见 `WORKFLOW.md`。
 > 安全、工作区、敏感信息与审批见 `AGENTS.md`；项目与品牌边界见 `docs/PROJECT_GUARDRAILS.md`；共享工作区协作见 `docs/AI_COLLABORATION_STANDARD.md`。
-> 最近核对：2026-09-18（§7 固定模板四区协同编辑闭环；其余既有技术不变量不变）。
+> 最近核对：2026-10-05（§7 收束为技术不变量，页面职责改由店铺装修产品合同定义）。
 
 ---
 
@@ -91,11 +91,11 @@
 
 ## 7. 店铺装修（硬规则）
 
-本节只保留长期技术不变量。模板设计唯一产品标准是 `docs/page-builder/template-creation-rules.md`，编辑与页面交接按需读取其从属 `template-design-framework.md`；当前实现与迁移状态见 `docs/CURRENT_STATE.md`，不得反向充当产品要求；验证按 `WORKFLOW.md` 第 5 节执行。
+本节只保留长期技术不变量。六个公开 URL 的产品目的只认 `docs/PROJECT_GUARDRAILS.md` 第 2 节；装修如何选用、分层、成篇和发页只认 `docs/page-builder/store-decoration.md`；模板创建、预设与精调只认 `docs/page-builder/template-creation-rules.md`；编辑与页面交接按需读取 `template-design-framework.md`。当前实现与迁移状态见 `docs/CURRENT_STATE.md`，不得反向充当产品要求；验证按 `WORKFLOW.md` 第 5 节执行。
 
 - 前台页面装修唯一采用 Puck `PageDocument`，母模板唯一采用版本化 `TemplateDefinitionV2`；不得恢复旧装修体系、创建平行内容系统，或把“固定模板”“动态模板”“新版模板”发展为并列产品模型。
 - 模板事实按职责分源：`template-definition.schema.json` 定义结构与能力边界，`DynamicTemplate` 草稿和不可变版本承载实际模板定义与目录状态，`content-templates.contract.json` 只负责当前活动的 `hero` 首屏测试样例及页面级规则，`PageDocument` 只保存页面实例内容与允许覆盖。Renderer、Inspector、目录、适配器和校验器都是消费者，不得自行建立第二份模板事实。
-- 模板设计 V2 主流程通过七步配置形成 Template Recipe，选择即时更新临时画布预览，确认后由统一 Generator 生成完整母模板，再进入四区精修、保存与独立发布。用途、画布和基础风格是单一可修改设置，区域、图片和内容可重复添加；预设只决定初始值，不限制后续编辑或重新覆盖精修。创建选项、操作次数、数值与验收只认 `docs/page-builder/template-creation-rules.md`。模板目录管理 Repository 中的普通模板，未保存会话独立呈现，复制保持独立身份。代码内仅保留 `hero` 首屏测试样例；它不是普通动态模板目录项，不能替代 Repository 中已保存、已发布的模板。注册节点能力、合法嵌套、页面角色与固定业务区校验继续有效。
+- 模板设计通过统一 Generator 把 Template Recipe 生成完整母模板，再进入四区精修、保存与独立发布。创建选项、操作次数、数值与模板侧验收只认 `docs/page-builder/template-creation-rules.md`。用途、画布和基础风格是单一可修改设置，区域、图片和内容可重复添加；预设只决定初始值。模板目录管理 Repository 中的普通模板，未保存会话独立呈现，复制保持独立身份。代码内仅保留 `hero` 首屏测试样例；它不是普通动态模板目录项，不能替代 Repository 中已保存、已发布的模板。注册节点能力、合法嵌套、页面角色与固定业务区校验继续有效。页面可插入项与装修落实只认 `docs/page-builder/store-decoration.md`。
 - 页面装修与模板设计建立在同一 Shared Editor Core 上，共享 Repository、Renderer 和通用编辑基础设施，但严格隔离会话、写入对象和发布结果。母模板是完整根构图；模板设计负责结构、槽位、样式、响应式和页面可编辑范围，页面装修负责当前实例的真实内容与受控覆盖，任何模式都不得注入任意 HTML/CSS。
 - 页面装修与模板设计必须共用同一响应式四区外壳，不得按模式建立第二套布局、持久化个性宽度，或在模式/断点切换时丢失选择、输入和未保存状态。具体断点、覆盖/停靠方式、侧栏可用宽度和画布分配只认 `docs/UI_GUIDE.md` 的后台装修工作区规则；本文件不复制易漂移的视觉数值。
 - 模板设计必须保留 D.37 的四区协同编辑闭环：模板组件库建立并切换当前模板、草稿/版本和保存状态等编辑上下文；中心画布负责理解实际构图、直接选择与适用的可视操作；模板结构按真实名称、层级和状态精确定位普通、嵌套、重叠、隐藏或锁定对象；模板属性根据当前对象、设备、作用范围和约束提供适用的精确调整。画布与结构是互补且同步的对象定位入口，属性不建立另一份选择或数据状态；合法修改使用同一命令、历史和未保存状态即时回到画布与结构。切换模板、对象、设备、模式或临时视图前必须按既有规则处理未提交输入并保护草稿，选择和查看本身不得冒充保存或发布。

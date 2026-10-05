@@ -122,6 +122,7 @@ import WorkspacePanelCollapseButton from "@/page-builder/workspace/WorkspacePane
 import { copyEditorLocalConflictSnapshot } from "@/page-builder/workspace/editorLifecycleErrors";
 import useCompactWorkspaceOverlay, {
   DOCKED_WORKSPACE_QUERY,
+  WIDE_DOCK_QUERY,
 } from "@/page-builder/workspace/useCompactWorkspaceOverlay";
 import "./editor.css";
 import "@/page-builder/template-editor/TemplateCatalogPreview.css";
@@ -202,10 +203,12 @@ function CanvasDynamicTemplateInstance({
   props,
   definition,
   mode,
+  pageKey,
 }: {
   props: DynamicTemplateInstanceProps;
   definition?: TemplateDefinitionV2;
   mode: "editor" | "preview";
+  pageKey?: string;
 }) {
   const currentViewport = useHomepagePuck(
     (state) => state.appState.ui.viewports.current,
@@ -220,6 +223,7 @@ function CanvasDynamicTemplateInstance({
       definition={definition}
       deviceOverride={device}
       mode={mode}
+      pageKey={pageKey}
     />
   );
 }
@@ -1074,6 +1078,7 @@ function InspectorPanel({
   onOpenPageSettings,
   canPromoteToTemplate,
   onPromoteToTemplate,
+  pageKey,
 }: {
   hasUnsavedChanges: boolean;
   hasPersistedDraft: boolean;
@@ -1086,6 +1091,7 @@ function InspectorPanel({
   onOpenPageSettings: (field?: string) => void;
   canPromoteToTemplate: boolean;
   onPromoteToTemplate: (request: PromoteDynamicTemplateInstanceRequest) => void | Promise<void>;
+  pageKey?: EditorPageKey;
 }) {
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const content = useHomepagePuck((state) => state.appState.data.content);
@@ -1163,6 +1169,7 @@ function InspectorPanel({
         onOpenPublishReview={onOpenPublishReview}
         onOpenPageSettings={onOpenPageSettings}
         canPromoteToTemplate={canPromoteToTemplate}
+        pageKey={pageKey}
         onPromoteToTemplate={onPromoteToTemplate}
       />
     );
@@ -1189,6 +1196,31 @@ function InspectorPanel({
   // 理论不可达:registry 全量覆盖。新增组件未注册 schema 时在此显式暴露,不静默渲染旧面板。
   console.warn(`[InspectorPanel] 未注册 Schema 的模块类型: ${selectedItem.type}`);
   return null;
+}
+
+function clampScroll(value: number, max: number) {
+  return Math.min(Math.max(0, max), Math.max(0, value));
+}
+
+function iframeWheelTargetCanScroll(target: Element, deltaY: number, deltaX: number) {
+  let node: Element | null = target;
+  while (node && node !== node.ownerDocument.body && node !== node.ownerDocument.documentElement) {
+    const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+    if (style) {
+      const canY = (style.overflowY === "auto" || style.overflowY === "scroll")
+        && node.scrollHeight > node.clientHeight + 1;
+      const canX = (style.overflowX === "auto" || style.overflowX === "scroll")
+        && node.scrollWidth > node.clientWidth + 1;
+      if (
+        (canY && ((deltaY < 0 && node.scrollTop > 0) || (deltaY > 0 && node.scrollTop + node.clientHeight < node.scrollHeight - 1)))
+        || (canX && ((deltaX < 0 && node.scrollLeft > 0) || (deltaX > 0 && node.scrollLeft + node.clientWidth < node.scrollWidth - 1)))
+      ) {
+        return true;
+      }
+    }
+    node = node.parentElement;
+  }
+  return false;
 }
 
 function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
@@ -1582,6 +1614,16 @@ function EditorBody({
       compactWorkspace.removeEventListener("change", syncStructureRail);
     };
   }, []);
+  useEffect(() => {
+    const wideDock = window.matchMedia(WIDE_DOCK_QUERY);
+    const keepRailsOpen = (event: MediaQueryListEvent) => {
+      if (!event.matches || primaryNavigationOpenRef.current) return;
+      setStructureCollapsed(false);
+      updateInspectorCollapsed(false);
+    };
+    wideDock.addEventListener("change", keepRailsOpen);
+    return () => wideDock.removeEventListener("change", keepRailsOpen);
+  }, [updateInspectorCollapsed]);
   const autoSelectedPageRef = useRef<EditorPageKey | null>(null);
   useEffect(() => {
     if (
@@ -2041,6 +2083,64 @@ function EditorBody({
     return () => iframe.removeEventListener("load", syncEditorUiScale);
   }, [canvasZoom, viewportWidth, appData.content.length]);
 
+  // 预览画在同源 iframe 里。指针停在画面上时，滚轮只进入 iframe，
+  // 外层画布滚动容器收不到事件；iframe 自身又通常没有可滚距离，所以滚轮像失效。
+  useEffect(() => {
+    const frameHost = previewFrameRef.current;
+    const scroller = stageRef.current;
+    if (!frameHost || !scroller) return undefined;
+
+    let detachWheel = () => {};
+    let boundDocument: Document | null = null;
+    const bindWheel = () => {
+      const iframe = frameHost.querySelector("iframe");
+      const doc = iframe?.contentDocument;
+      if (!doc || doc === boundDocument) return;
+      detachWheel();
+      boundDocument = doc;
+      const onWheel = (event: WheelEvent) => {
+        if (event.ctrlKey) return;
+        const target = event.target;
+        if (target instanceof Element && iframeWheelTargetCanScroll(target, event.deltaY, event.deltaX)) {
+          return;
+        }
+        const pixel = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? 16
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? scroller.clientHeight
+            : 1;
+        const pageX = event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? scroller.clientWidth
+          : pixel;
+        const nextTop = clampScroll(
+          scroller.scrollTop + event.deltaY * pixel,
+          scroller.scrollHeight - scroller.clientHeight,
+        );
+        const nextLeft = clampScroll(
+          scroller.scrollLeft + event.deltaX * pageX,
+          scroller.scrollWidth - scroller.clientWidth,
+        );
+        if (nextTop === scroller.scrollTop && nextLeft === scroller.scrollLeft) return;
+        scroller.scrollTop = nextTop;
+        scroller.scrollLeft = nextLeft;
+        event.preventDefault();
+      };
+      doc.addEventListener("wheel", onWheel, { capture: true, passive: false });
+      detachWheel = () => doc.removeEventListener("wheel", onWheel, { capture: true });
+    };
+
+    bindWheel();
+    const observer = new MutationObserver(bindWheel);
+    observer.observe(frameHost, { childList: true, subtree: true });
+    const iframe = frameHost.querySelector("iframe");
+    iframe?.addEventListener("load", bindWheel);
+    return () => {
+      detachWheel();
+      observer.disconnect();
+      iframe?.removeEventListener("load", bindWheel);
+    };
+  }, [appData.content.length, canvasZoom, viewportWidth]);
+
   const adjustCanvasZoom = (delta: number) => {
     setIsFitView(false);
     setCanvasZoom((current) => Math.min(1, Math.max(0.16, current + delta)));
@@ -2153,14 +2253,14 @@ function EditorBody({
             <WorkspacePanelHeader
               icon={<BlockOutlined />}
               title="图层面板"
-              actions={inspectorOverlay.compact ? (
+              actions={(
                 <WorkspacePanelCollapseButton
                   action="collapse"
                   panel="structure"
                   panelLabel="图层面板"
                   onClick={() => setStructureCollapsed(true)}
                 />
-              ) : undefined}
+              )}
             />
             <LayerRail
               navigationPreviewOpen={navigationPreviewOpen}
@@ -2176,18 +2276,6 @@ function EditorBody({
         className="homepage-editor__stage"
         aria-label={`${pageLabel}画布`}
       >
-        {previewMode ? (
-          <div className="homepage-editor__preview-mode-bar" role="status">
-            <strong>当前画布预览 · {canvasViewportLabel}</strong>
-            <span>
-              {hasUnsavedChanges
-                ? "正在预览尚未保存的修改；预览本身不会保存或发布。"
-                : hasPersistedDraft
-                  ? "正在预览已保存草稿；预览本身不会再次保存或发布。"
-                  : "正在预览尚未保存的默认内容；预览本身不会保存或发布。"}
-            </span>
-          </div>
-        ) : null}
         <WorkspaceCanvasControls
           isFitView={isFitView}
           zoom={canvasZoom}
@@ -2250,7 +2338,7 @@ function EditorBody({
         data-compact-overlay-open={!inspectorCollapsed || undefined}
         onKeyDown={inspectorOverlay.onPanelKeyDown}
       >
-        {inspectorCollapsed && selectedItem ? (
+        {inspectorCollapsed ? (
           <WorkspacePanelCollapseButton
             ref={inspectorOverlay.openButtonRef}
             action="expand"
@@ -2267,7 +2355,7 @@ function EditorBody({
             <WorkspacePanelHeader
               icon={<ControlOutlined />}
               title="属性面板"
-              actions={inspectorOverlay.compact ? (
+              actions={(
                 <WorkspacePanelCollapseButton
                   ref={inspectorOverlay.closeButtonRef}
                   action="collapse"
@@ -2276,7 +2364,7 @@ function EditorBody({
                   compactLabel="关闭"
                   onClick={inspectorOverlay.requestClose}
                 />
-              ) : undefined}
+              )}
             />
             {publishReviewActive && publishReviewOpen ? (
               <PagePublishCheckPanel
@@ -2371,6 +2459,7 @@ function EditorBody({
                 onOpenPublishReview={onOpenPublishReview}
                 onOpenPageSettings={onOpenPageSettings}
                 canPromoteToTemplate={canPromoteToTemplate}
+                pageKey={pageKey}
                 onPromoteToTemplate={(request) => onPromoteToTemplate(request, {
                   width: typeof currentViewport.width === "number"
                     ? currentViewport.width
@@ -2570,6 +2659,7 @@ export default function StoreDecorationWorkbench({
                       ];
                       return (
                         <CanvasDynamicTemplateInstance
+                          pageKey={pageKey}
                           props={instanceProps}
                           definition={resolved?.definition}
                           mode={previewMode ? "preview" : "editor"}
@@ -2768,6 +2858,7 @@ export default function StoreDecorationWorkbench({
             publishedRevalidationErrors={publishedRevalidationErrors}
             viewingPublished={viewingPublished}
             previewMode={previewMode}
+            hasPersistedDraft={hasPersistedDraft}
             hasUnsavedChanges={hasUnsavedChanges}
             canPublish={canPublish}
             canPublishWithSelfReview={canPublishWithSelfReview}

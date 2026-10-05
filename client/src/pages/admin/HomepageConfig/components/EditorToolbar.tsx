@@ -69,6 +69,7 @@ export default function EditorToolbar({
   publishedRevalidationErrors = [],
   viewingPublished,
   previewMode,
+  hasPersistedDraft,
   hasUnsavedChanges,
   canPublish,
   canPublishWithSelfReview = false,
@@ -112,6 +113,7 @@ export default function EditorToolbar({
   publishedRevalidationErrors?: string[];
   viewingPublished: boolean;
   previewMode: boolean;
+  hasPersistedDraft: boolean;
   hasUnsavedChanges: boolean;
   canPublish: boolean;
   canPublishWithSelfReview?: boolean;
@@ -216,6 +218,12 @@ export default function EditorToolbar({
     ? `，已保存 ${draftSavedAtLabel}`
     : "";
   const draftStatusAriaLabel = `草稿状态：${draftStatusLabel}${savedAtDescription}${draftSaveFailed ? "，请重试" : ""}`;
+  const previewNoteDetail = hasUnsavedChanges
+    ? "正在预览尚未保存的修改；预览本身不会保存或发布。"
+    : hasPersistedDraft
+      ? "正在预览已保存草稿；预览本身不会再次保存或发布。"
+      : "正在预览尚未保存的默认内容；预览本身不会保存或发布。";
+  const previewNote = previewNoteDetail;
   const toolbarPublishReviewMode = publishing
     ? "pending"
     : publishAttemptFailed
@@ -767,6 +775,9 @@ export default function EditorToolbar({
                 </button>
               ) : null}
               <span className="homepage-editor__locale-label" aria-label="内容语言">中文</span>
+              {!viewingPublished && draftStatusMode === "clean" ? (
+                <span role="status" data-draft-match="same">草稿与线上一致</span>
+              ) : null}
               <span role="status" data-testid="page-review-status">
                 {effectiveReviewStatus === "DRAFT" ? "草稿"
                   : effectiveReviewStatus === "IN_REVIEW" ? "待审核"
@@ -835,6 +846,8 @@ export default function EditorToolbar({
           label: previewMode ? "退出预览" : "预览",
           onClick: togglePreviewMode,
           ariaLabel: previewMode ? "退出当前画布预览" : "预览当前画布",
+          note: previewMode ? previewNote : undefined,
+          noteDetail: previewMode ? previewNoteDetail : undefined,
           title:
             previewMode
               ? "退出当前画布预览（Esc）"
@@ -867,6 +880,12 @@ export default function EditorToolbar({
               : "页面工具；线上版本需重新校验"
             : "页面设置、发布历史与方案工具",
         }}
+        compareLive={!viewingPublished && hasPendingDraft ? {
+          label: "查看线上",
+          ariaLabel: "查看线上版本",
+          title: "只读查看当前线上版本，返回后草稿和未保存修改仍在",
+          onClick: onViewPublishedVersion,
+        } : undefined}
         publish={{
           label: "发布页面",
           loading: publishing,

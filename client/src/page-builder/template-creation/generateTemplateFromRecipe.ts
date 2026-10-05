@@ -3,7 +3,7 @@ import {
 } from "../template-definition/nodeRegistry";
 import { validateDynamicTemplateDefinition, validateTemplateRecipe } from "../template-definition/validateTemplateDefinition";
 import type { DynamicTemplateNodeType, DynamicTemplateSlotType, TemplateDefinitionV2, TemplateRecipe } from "../template-definition/generated/templateDefinition.generated";
-import { isCanvasBackground, LAYOUTS, PURPOSES, RADIUS_VALUES, SPACING_VALUES, MARGIN_VALUES, readableText, recommendedAlignment } from "./presets";
+import { CANVAS_PRESETS, isCanvasBackground, LAYOUTS, PURPOSES, RADIUS_VALUES, SPACING_VALUES, MARGIN_VALUES, readableText, recommendedAlignment } from "./presets";
 import { layoutRegions, subdivide, type Rect } from "./layoutGeometry";
 import { arrangeMedia, fitMedia } from "./mediaGeometry";
 import { getTemplateRecipeSampleText } from "./previewContent";
@@ -56,7 +56,15 @@ export function generateTemplateFromRecipe(recipe: TemplateRecipe, options: { te
     slotSummary: `${recipe.media.length} 个图片槽位，${recipe.content.length} 个内容槽位`,
   };
   root.responsive.desktop.backgroundColor = recipe.style.backgroundColor;
-  root.responsive.desktop.height = { mode: "fixed", value: px(height) };
+  const contentHeightPreset = CANVAS_PRESETS.find((preset) => preset.ratio === "auto");
+  const rootGrowsWithContent = Boolean(
+    contentHeightPreset
+    && width === contentHeightPreset.width
+    && height === contentHeightPreset.height,
+  );
+  root.responsive.desktop.height = rootGrowsWithContent
+    ? { mode: "auto" }
+    : { mode: "fixed", value: px(height) };
   root.responsive.mobile = { height: { mode: "auto" } };
   const stage = createDynamicTemplateNode("Stack", "布局结构");
   stage.nodeId = `${templateId}_layout`;

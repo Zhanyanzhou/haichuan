@@ -42,8 +42,8 @@
 @media (min-width: 768px) and (max-width: 1023px) {
   .site-main[data-page-key="products"] .hc-products-page-frame {
     /* Hero：min-height 75svh，内容超出时增高——媒体 16:9 + 文案带
-       （上下内边距 40/56 + 四行内容 150.8px + 标题行高 1.04 倍字号）。 */
-    min-height: max(75svh, calc(100vw * 9 / 16 + 246.8px + clamp(42px, 4.4vw, 76px) * 1.04));
+       （上下内边距 40/56 + 四行内容 150.8px + 标题行高 1.2 倍字号）。 */
+    min-height: max(75svh, calc(100vw * 9 / 16 + 246.8px + clamp(42px, 4.4vw, 76px) * 1.2));
   }
 }
 
@@ -96,7 +96,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 28px;
+  gap: 44px;
   justify-self: end;
 }
 

@@ -30,25 +30,49 @@ const SLOT_TYPE_LABELS: Partial<Record<DynamicTemplateSlotDefinition["type"], st
   button: "按钮", link: "链接", product: "商品", collection: "商品集合",
 };
 
+export type PageFieldDisplayGroup = "text" | "image" | "action" | "product" | "other";
+
+export const PAGE_FIELD_DISPLAY_GROUP_LABELS: Record<PageFieldDisplayGroup, string> = {
+  text: "文字",
+  image: "图片",
+  action: "按钮",
+  product: "商品",
+  other: "其他",
+};
+
+export interface DynamicTemplatePageFieldSection {
+  group: PageFieldDisplayGroup;
+  label: string;
+  fields: DynamicTemplatePageFieldDescriptor[];
+}
+
+export function pageFieldDisplayGroup(
+  field: DynamicTemplatePageFieldDescriptor,
+): PageFieldDisplayGroup {
+  if (field.controlKind === "image") return "image";
+  if (field.controlKind === "link") return "action";
+  if (field.controlKind === "product") return "product";
+  if (field.controlKind === "text") return "text";
+  return "other";
+}
+
+/** 按模板树顺序分组。选中字段只用于定位，不隐藏其余内容。 */
 export function groupDynamicTemplatePageFields(
   fields: DynamicTemplatePageFieldDescriptor[],
   selectedSlotId?: string,
 ) {
-  const selected = fields.find((field) => field.slotId === selectedSlotId);
-  if (selected) {
-    return {
-      task: selected.task,
-      primary: [selected],
-      secondary: [] as DynamicTemplatePageFieldDescriptor[],
-    };
+  const sections: DynamicTemplatePageFieldSection[] = [];
+  for (const field of fields) {
+    const group = pageFieldDisplayGroup(field);
+    const current = sections[sections.length - 1];
+    if (current?.group === group) current.fields.push(field);
+    else sections.push({
+      group,
+      label: PAGE_FIELD_DISPLAY_GROUP_LABELS[group],
+      fields: [field],
+    });
   }
-  const firstBusinessField = fields.find((field) => field.task !== "content");
-  const task = firstBusinessField?.task ?? fields[0]?.task ?? "content";
-  return {
-    task,
-    primary: fields.filter((field) => field.task === task),
-    secondary: fields.filter((field) => field.task !== task),
-  };
+  return { selectedSlotId, sections };
 }
 
 function controlKindForSlot(slot: DynamicTemplateSlotDefinition): PageFieldControlKind {

@@ -63,11 +63,12 @@ test("本站静态背景缺少来源记录时只提醒，补齐后消除提醒",
   const advisory = await fixture.validate();
   assert.equal(advisory.valid, true);
   assert.equal(advisory.errors.length, 0);
-  assert.equal(advisory.issues.length, 1);
-  assert.equal(advisory.issues[0]?.severity, "warning");
-  assert.match(advisory.issues[0]?.message || "", /不影响本次页面发布/);
+  assert.ok(advisory.issues.some((issue) => issue.severity === "warning" && /不影响本次页面发布/.test(issue.message)));
   fixture.grant("/images/formal-background.jpg");
-  assert.deepEqual(await fixture.validate(), { valid: true, errors: [], issues: [] });
+  const granted = await fixture.validate();
+  assert.equal(granted.valid, true);
+  assert.deepEqual(granted.errors, []);
+  assert.ok(granted.issues.every((issue) => issue.severity === "warning" && issue.message.includes("发布后客户前台不会显示此区块")));
 });
 
 test("仅 Tablet 可见背景不再进入公开资源门禁", async () => {
@@ -109,16 +110,26 @@ test("图片只在 Tablet 可见时不再阻断公开校验", async () => {
   assert.equal((await fixture.validate()).valid, true);
 });
 
-test("模板只有结构、没有页面上传图片时允许发布并给出内容提醒", async () => {
+test("必须由页面填写的内容缺失时阻断发布", async () => {
   const fixture = publicationFixture();
   fixture.definition.slots.slot_heading.required = true;
+
+  const result = await fixture.validate();
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((message) => message.includes("为必填内容")));
+});
+
+test("没有有效文字也没有页面图片时允许发布并说明前台不会显示", async () => {
+  const fixture = publicationFixture();
+  fixture.definition.slots.slot_heading.required = false;
 
   const result = await fixture.validate();
 
   assert.equal(result.valid, true);
   assert.deepEqual(result.errors, []);
   assert.ok(result.issues.some(
-    (issue) => issue.severity === "warning" && issue.message.includes("为必填内容"),
+    (issue) => issue.severity === "warning" && issue.message.includes("发布后客户前台不会显示此区块"),
   ));
 });
 

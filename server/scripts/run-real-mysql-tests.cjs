@@ -109,6 +109,24 @@ const isolatedTestSuites = [
     }),
   },
   {
+    name: "customer-payment-commerce",
+    file: "src/modules/payments/customer-payment.real-http.mysql.spec.ts",
+    timeoutMs: 300_000,
+    environment: ({ databaseUrl, port, runId }) => ({
+      CUSTOMER_PAYMENT_REAL_MYSQL_TEST: "1",
+      CUSTOMER_PAYMENT_REAL_MYSQL_URL: databaseUrl,
+      CUSTOMER_PAYMENT_RUN_ID: runId,
+      CUSTOMER_PAYMENT_API_PORT: String(port),
+      JWT_SECRET: `customer-payment-${runId}-isolated-secret`,
+      RELEASE_PROFILE: "commerce",
+      CUSTOMER_COMMERCE_ENABLED: "true",
+      PAYMENT_PROVIDER_MODE: "simulator",
+      PAYMENT_GATEWAY_TRANSACTIONS_ENABLED: "true",
+      PAYMENT_GATEWAY_REFUNDS_ENABLED: "true",
+      NOTIFICATION_DELIVERY_ENABLED: "false",
+    }),
+  },
+  {
     name: "media-http",
     file: "src/modules/upload/upload.real-http.mysql.spec.ts",
     environment: ({ databaseUrl, port, runId }) => ({

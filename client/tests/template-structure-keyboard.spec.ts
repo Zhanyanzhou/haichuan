@@ -334,7 +334,7 @@ async function openTemplateStructure(
   await expect(page.locator('.template-editor__toolbar [role="status"]'))
     .toHaveAttribute("aria-label", "模板状态：未选择模板");
   expect(requestMonitor.draftReads, "首次进入模板工作区只显示目录，不得自动读取历史模板草稿").toEqual([]);
-  const compact = viewport.width <= 1439;
+  const compact = viewport.width <= 1024;
   const modalOverlay = viewport.width <= 1024;
   if (compact) {
     const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });

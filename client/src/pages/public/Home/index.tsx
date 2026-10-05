@@ -304,6 +304,7 @@ export default function Home() {
         <PuckDocumentRenderer
           data={readiness.data as PuckDocument}
           surface="home"
+          pageKey="home"
           primaryHeading="海川珠宝"
         />
       </Suspense>

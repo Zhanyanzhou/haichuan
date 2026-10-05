@@ -336,6 +336,11 @@
   line-height: 18px;
 }
 
+.template-editor__catalog-slot-key > .is-basis {
+  grid-column: 1 / -1;
+  color: var(--adm-muted, #5c6166);
+  font-size: 11px;
+}
 .template-editor__catalog-slot-key > span {
   display: inline-flex;
   align-items: center;
@@ -371,6 +376,11 @@
 .template-editor__catalog-slot-key > .is-hidden::before {
   border: 1px dashed #B8BEC1;
   background: transparent;
+}
+
+.template-editor__catalog-slot-key > .is-basis::before {
+  display: none;
+  content: none;
 }
 
 .template-editor__catalog-preview-issue {

@@ -31,7 +31,6 @@ import {
   type PromoteDynamicTemplateInstanceRequest,
 } from "./promoteToTemplate";
 import ImageFocusField from "../inspector/controls/ImageFocusField";
-import InspectorDisclosure from "../inspector/InspectorDisclosure";
 import InspectorFooterBar from "../inspector/InspectorFooterBar";
 import { resolvePublishIssueReviewAction } from "../inspector/publishReminderDialog";
 import {
@@ -43,10 +42,10 @@ import {
   getDynamicTemplatePageFieldDataAttributes,
   getDynamicTemplatePageFieldDescriptors,
   groupDynamicTemplatePageFields,
-  PAGE_FIELD_TASK_LABELS,
   type DynamicTemplatePageFieldDescriptor,
 } from "./pageFieldDescriptors";
-import { hasExplicitDynamicTemplateInstanceImage } from "./mediaReferences";
+import { publicationPromiseLabel } from "./publicationPromise";
+import { resolveDynamicTemplatePublicVisibility } from "./publicVisibility";
 
 const { TextArea } = Input;
 
@@ -98,10 +97,10 @@ export default function DynamicTemplateInstanceInspector({
   publishIssues,
   validationStatus,
   onRetryValidation,
-  onOpenPageSettings,
   onOpenPublishReview,
   canPromoteToTemplate = false,
   onPromoteToTemplate,
+  pageKey,
 }: {
   hasUnsavedChanges: boolean;
   hasPersistedDraft: boolean;
@@ -113,6 +112,7 @@ export default function DynamicTemplateInstanceInspector({
   onOpenPublishReview?: () => void;
   canPromoteToTemplate?: boolean;
   onPromoteToTemplate?: (request: PromoteDynamicTemplateInstanceRequest) => void | Promise<void>;
+  pageKey?: string;
 }) {
   const editor = useInspectorModuleEditor();
   const props = (editor?.props ?? {}) as DynamicTemplateInstanceProps;
@@ -160,11 +160,13 @@ export default function DynamicTemplateInstanceInspector({
     layoutOverridesByNodeId: props.layoutOverridesByNodeId,
   });
   const contentOverrideCount = Object.keys(content).length + hidden.length + (props.isVisible === false ? 1 : 0);
-  const hasPublicImage = hasExplicitDynamicTemplateInstanceImage(
+  const publicDecision = resolveDynamicTemplatePublicVisibility({
     definition,
-    content,
-    hidden,
-  );
+    contentBySlotId: content,
+    hiddenSlotIds: hidden,
+    breakpoint: editor.device === "mobile" ? "mobile" : "desktop",
+    pageKey,
+  });
   const designOverrideCount = Object.values(layoutOverrides).reduce((total, devices) => (
     total + Object.values(devices ?? {}).reduce((deviceTotal, override) => (
       deviceTotal + Object.keys(override ?? {}).length
@@ -190,12 +192,9 @@ export default function DynamicTemplateInstanceInspector({
     ? "hidden"
     : currentPublishErrorCount > 0
       ? "blocked"
-      : hasPublicImage
+      : publicDecision.visible
         ? "ready"
         : "empty";
-  const hasTemplateValueOverrides = designOverrideCount > 0
-    || hidden.length > 0
-    || props.isVisible === false;
   const nodeBySlotId = new Map(
     Object.values(definition.nodes).flatMap((candidate) => candidate.slotId ? [[candidate.slotId, candidate] as const] : []),
   );
@@ -232,6 +231,12 @@ export default function DynamicTemplateInstanceInspector({
       kind: visualKindForField(nextField),
       canAdjustLayout: Boolean(policy && (policy.position || policy.size)),
       canAdjustMedia: Boolean(nextSlot.type === "image" && policy && (policy.imageFit || policy.imageFocus)),
+    });
+    const slotId = nextSlot.slotId;
+    requestAnimationFrame(() => {
+      propertyScrollRef.current
+        ?.querySelector<HTMLElement>(`[data-slot-id="${CSS.escape(slotId)}"]`)
+        ?.scrollIntoView({ block: "nearest" });
     });
   };
 
@@ -441,13 +446,21 @@ export default function DynamicTemplateInstanceInspector({
         x: imageLayout.focusXPercent ?? defaultFocus.x,
         y: imageLayout.focusYPercent ?? defaultFocus.y,
       };
+      const canDragImageFocus = Boolean(imageNode) && objectFit !== "fill";
+      const updateImageFocus = ({ x, y }: { x: number; y: number }) => {
+        if (!imageNode) return;
+        updateMediaPresentation(imageNode.nodeId, {
+          focusXPercent: x === defaultFocus.x ? undefined : x,
+          focusYPercent: y === defaultFocus.y ? undefined : y,
+        });
+      };
       const hasImageLayoutOverride = imageLayout.objectFit !== undefined
         || imageLayout.imageScalePercent !== undefined
         || imageLayout.focusXPercent !== undefined
         || imageLayout.focusYPercent !== undefined;
       const assetGuidance = getImageAssetGuidance(slot, field.validation);
       return (
-        <div style={{ display: "grid", gap: 10 }}>
+        <div className="homepage-editor__media-controls">
           <MediaPickerField
             fieldKey={slot.slotId}
             value={typeof image.src === "string" ? image.src : ""}
@@ -462,10 +475,7 @@ export default function DynamicTemplateInstanceInspector({
             previewFit={objectFit}
             previewFocus={focus}
             previewZoom={(imageLayout.imageScalePercent ?? 100) / 100}
-            onFocusChange={imageNode && imagePolicy?.imageFocus ? ({ x, y }) => updateMediaPresentation(imageNode.nodeId, {
-              focusXPercent: x === defaultFocus.x ? undefined : x,
-              focusYPercent: y === defaultFocus.y ? undefined : y,
-            }) : undefined}
+            onFocusChange={canDragImageFocus ? updateImageFocus : undefined}
             onChange={(src) => updateContent(
               slot.slotId,
               src.trim()
@@ -478,20 +488,17 @@ export default function DynamicTemplateInstanceInspector({
               {assetGuidance}
             </p>
           ) : null}
-          {imageNode && imagePolicy?.imageFocus ? (
+          {canDragImageFocus ? (
             <ImageFocusField
               inspectorFieldKeys={{ x: "focusXPercent", y: "focusYPercent" }}
               inspectorDevice={editor.device}
               label={`${field.label}画面焦点 · ${editor.device === "desktop" ? "桌面端" : "移动端"}`}
               value={focus}
               showPad={false}
-              onChange={({ x, y }) => updateMediaPresentation(imageNode.nodeId, {
-                focusXPercent: x === defaultFocus.x ? undefined : x,
-                focusYPercent: y === defaultFocus.y ? undefined : y,
-              })}
+              onChange={updateImageFocus}
             />
           ) : null}
-          <label>
+          <label className="homepage-editor__inspector-field">
             <span className="homepage-editor__properties-hint">替代文字</span>
             <Input
               aria-label={`${field.label}替代文字`}
@@ -509,14 +516,14 @@ export default function DynamicTemplateInstanceInspector({
               data-inspector-field="objectFit"
               data-inspector-device={editor.device}
             >
-              <span className="homepage-editor__properties-hint">图片适配 · {editor.device === "desktop" ? "桌面端" : "移动端"}</span>
+              <span className="homepage-editor__properties-hint">图片适配 · 仅{editor.device === "desktop" ? "桌面端" : "移动端"}</span>
               <Select
                 aria-label={`${field.label}图片适配`}
-                value={objectFit}
+                value={objectFit === "fill" ? undefined : objectFit}
+                placeholder={objectFit === "fill" ? "当前为拉伸，请改为裁切或完整显示" : undefined}
                 options={[
                   { value: "cover", label: "填满并裁切" },
                   { value: "contain", label: "完整显示" },
-                  { value: "fill", label: "拉伸填满" },
                 ]}
                 onChange={(nextObjectFit) => updateMediaPresentation(imageNode.nodeId, {
                   objectFit: nextObjectFit === (slotRules.objectFit ?? "cover") ? undefined : nextObjectFit,
@@ -528,9 +535,8 @@ export default function DynamicTemplateInstanceInspector({
             <NumberField
               inspectorField="imageScalePercent"
               inspectorDevice={editor.device}
-              label={`${field.label}图片缩放`}
+              label={`${field.label}缩放`}
               unit="%"
-              hint="只缩放图片内容，不改变母模板区域尺寸"
               min={100}
               max={200}
               value={imageLayout.imageScalePercent}
@@ -540,17 +546,26 @@ export default function DynamicTemplateInstanceInspector({
               onClear={() => updateMediaPresentation(imageNode.nodeId, { imageScalePercent: undefined })}
             />
           ) : null}
-          {imageNode && (imagePolicy?.imageFit || imagePolicy?.imageFocus) ? (
-            <RestoreDefaultButton
-              label="恢复当前设备图片构图"
-              disabled={!hasImageLayoutOverride}
-              onClick={() => updateMediaPresentation(imageNode.nodeId, {
-                objectFit: undefined,
-                imageScalePercent: undefined,
-                focusXPercent: undefined,
-                focusYPercent: undefined,
-              })}
-            />
+          {imageNode && (imagePolicy?.imageFit || canDragImageFocus) ? (
+            <>
+              {hasImageLayoutOverride ? null : (
+                <p className="homepage-editor__properties-hint">
+                  {editor.device === "mobile"
+                    ? "手机沿用桌面构图，尚未单独设置。"
+                    : "当前沿用模板构图，尚未单独设置。"}
+                </p>
+              )}
+              <RestoreDefaultButton
+                label="清除这一端的构图"
+                disabled={!hasImageLayoutOverride}
+                onClick={() => updateMediaPresentation(imageNode.nodeId, {
+                  objectFit: undefined,
+                  imageScalePercent: undefined,
+                  focusXPercent: undefined,
+                  focusYPercent: undefined,
+                })}
+              />
+            </>
           ) : null}
         </div>
       );
@@ -633,20 +648,13 @@ export default function DynamicTemplateInstanceInspector({
       data-slot-id={slot.slotId}
       data-slot-task={field.task}
       data-inspector-field={slot.slotId}
+      data-page-field-selected={selectedPageField?.slotId === slot.slotId ? "true" : undefined}
       {...getDynamicTemplatePageFieldDataAttributes(field, "page")}
       style={{ border: 0, borderTop: "1px solid var(--adm-line)", margin: 0, padding: "14px" }}
     >
       <legend style={{ width: "100%", padding: 0, marginBottom: 10 }}>
-        <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <strong>{field.label}</strong>
-          <span>
-            {field.required ? <Tag color="red">必填</Tag> : null}
-            <Tag>{field.slotTypeLabel}</Tag>
-            <Tag color={hasPageValue ? "gold" : "default"}>
-              {hasPageValue ? "页面内容" : "模板内容"}
-            </Tag>
-          </span>
-        </span>
+        <strong>{field.label}</strong>
+        <Tag color={field.required ? "red" : "default"} style={{ marginLeft: 8 }}>{publicationPromiseLabel(field)}</Tag>
       </legend>
       {renderSlotControl(field)}
       {hasPageValue && (!field.required || !field.editable) ? (
@@ -654,22 +662,59 @@ export default function DynamicTemplateInstanceInspector({
           <Button
             type="link"
             size="small"
-            aria-label="恢复为模板内容"
+            aria-label={field.controlKind === "image" ? "恢复模板图片" : "恢复模板文案"}
             onClick={() => resetContent(slot.slotId)}
             style={{ height: 24, paddingInline: 0 }}
           >
-            恢复模板内容
+            {field.controlKind === "image" ? "恢复模板图片" : "恢复模板文案"}
           </Button>
+          {field.controlKind === "image" ? (
+            <p className="homepage-editor__properties-hint">
+              {field.required
+                ? "恢复后如果当前设备没有页面图片，整个区块在前台会隐藏。模板默认图不会公开。可撤销。"
+                : "恢复后公开页面会收起这张图，有效文字仍保留。模板默认图不会公开。可撤销。"}
+            </p>
+          ) : (
+            <p className="homepage-editor__properties-hint">移除这项的页面内容，改读锁定版本的模板文案。可撤销。</p>
+          )}
+        </div>
+      ) : null}
+      {field.editable && ["image", "heading", "text", "richText", "badge"].includes(slot.type) ? (
+        <div style={{ marginTop: 6 }}>
+          <Button
+            type="link"
+            size="small"
+            aria-label="清空并隐藏"
+            onClick={() => editor.updateFromCurrent((current) => {
+              const nextContent = { ...asRecord(current.contentBySlotId) };
+              nextContent[slot.slotId] = slot.type === "image" ? { src: "", alt: "" } : "";
+              const currentHidden = Array.isArray(current.hiddenSlotIds)
+                ? current.hiddenSlotIds.filter((value): value is string => typeof value === "string")
+                : [];
+              return {
+                contentBySlotId: nextContent,
+                hiddenSlotIds: slot.hideable
+                  ? [...new Set([...currentHidden, slot.slotId])]
+                  : currentHidden,
+              };
+            })}
+            style={{ height: 24, paddingInline: 0 }}
+          >
+            清空并隐藏
+          </Button>
+          <p className="homepage-editor__properties-hint">
+            {field.required
+              ? "保留明确清空，不会自动填回模板文案。这项是公开必须内容，清空后不能发布。可撤销。"
+              : "保留明确清空，不会自动填回模板文案。可撤销。"}
+          </p>
         </div>
       ) : null}
       {field.hideable && !field.required ? (
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 6 }}>
-          <SwitchField
-            label={visualKindForField(field) === "text" ? "显示这段文字" : "显示此内容"}
-            value={!hidden.includes(slot.slotId)}
-            onChange={(checked) => toggleHidden(slot.slotId, !checked)}
-          />
-      </div>
+        <SwitchField
+          label={`${field.label}可见`}
+          value={!hidden.includes(slot.slotId)}
+          onChange={(checked) => toggleHidden(slot.slotId, !checked)}
+        />
       ) : null}
     </fieldset>
     );
@@ -679,16 +724,7 @@ export default function DynamicTemplateInstanceInspector({
     <section className="homepage-editor__properties" aria-label="模板实例属性">
       <div className="homepage-editor__properties-scroll" ref={propertyScrollRef}>
         <div className="homepage-editor__dynamic-instance-overview">
-          <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <strong>{definition.name}</strong>
-            <button
-              type="button"
-              className="homepage-editor__edit-scope-badge"
-              onClick={() => onOpenPageSettings?.()}
-            >
-              页面覆盖
-            </button>
-          </span>
+          <strong>{definition.name}</strong>
           <SwitchField
             label="在页面显示"
             value={props.isVisible !== false}
@@ -723,18 +759,16 @@ export default function DynamicTemplateInstanceInspector({
                   ? `当前实例有 ${instancePublishErrorCount} 项发布阻断`
                   : `页面有 ${currentPublishErrorCount} 项发布阻断`
               : publicVisibilityState === "ready"
-                ? "图片已添加"
-                : "前台自动隐藏"}</strong>
+                ? publicDecision.summary
+                : publicDecision.summary}</strong>
             <span>{publicVisibilityState === "hidden"
               ? "重新开启后仍需点击页面“发布”，前台才会更新。"
               : publicVisibilityState === "blocked"
                 ? "请打开下方发布检查定位问题。保存草稿不会更新客户前台。"
-              : publicVisibilityState === "ready"
-                ? "保存只保留草稿；点击页面“发布”后，前台才会显示或更新。"
-                : "尚未上传页面图片。保存只保留草稿；上传图片并点击页面“发布”后才会显示。"}</span>
+                : publicDecision.detail}</span>
           </div>
           <div className="homepage-editor__inspector-field">
-            <span id={`dynamic-instance-property-scope-${props.instanceId}`}>页面实例属性范围</span>
+            <span id={`dynamic-instance-property-scope-${props.instanceId}`} className="homepage-editor__sr-only">页面实例属性范围</span>
             <div
               className="homepage-editor__dynamic-instance-scope-list"
               role="group"
@@ -761,24 +795,10 @@ export default function DynamicTemplateInstanceInspector({
                 </button>
               ))}
             </div>
-            <span className="homepage-editor__properties-hint">选择“全部内容”查看整份实例；选择具体字段时，面板只显示该字段与允许的页面覆盖。</span>
           </div>
         </div>
-        <div style={{ borderTop: "1px solid var(--adm-line)", padding: 14 }}>
-          <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <strong>{selectedNode ? `当前选择：${selectedNode.name}` : "页面实例编辑边界"}</strong>
-            {selectedNode ? (
-              <Tag color={Object.keys(selectedLayout).length > 0 ? "blue" : "default"}>
-                {Object.keys(selectedLayout).length > 0 ? "页面已覆盖" : "模板控制"}
-              </Tag>
-            ) : null}
-          </span>
-          <p className="homepage-editor__properties-hint">
-            {selectedPolicy
-              ? "页面装修只修改当前实例。下方仅开放母模板授权的属性，并且只通过右侧输入调整；画布不会进入内部节点拖拽。"
-              : "当前显示整个模板的内容属性；页面装修不能在画布中选择或改变模板节点树。"}
-          </p>
-          {selectedNode && selectedPolicy ? (
+        {selectedNode && selectedPolicy ? (
+          <div style={{ borderTop: "1px solid var(--adm-line)", padding: 14 }}>
             <div style={{ display: "grid", gap: 10 }}>
               {selectedPolicy.position ? (
                 <>
@@ -891,43 +911,43 @@ export default function DynamicTemplateInstanceInspector({
                   />
                 </>
               ) : null}
+              <p className="homepage-editor__properties-hint">字号、对齐、间距和位置回到模板，文字内容保留。</p>
               <RestoreDefaultButton
-                label="恢复当前设备节点默认值"
+                label="清除这一端的排版"
                 disabled={Object.keys(selectedLayout).length === 0}
                 onClick={resetSelectedPresentation}
               />
             </div>
-          ) : null}
-        </div>
-        <div aria-label={`${selectedPageField ? "当前字段" : "优先填写"}：${PAGE_FIELD_TASK_LABELS[slotGroups.task]}`}>
-          <p className="homepage-editor__properties-hint" style={{ margin: "12px 14px 4px" }}>
-            {selectedPageField ? "当前字段" : "优先填写"} · {PAGE_FIELD_TASK_LABELS[slotGroups.task]}
-          </p>
-          {slotGroups.primary.map(renderSlotFieldset)}
-        </div>
-        {slotGroups.secondary.length > 0 ? (
-          <InspectorDisclosure
-            key={props.instanceId}
-            className="homepage-editor__dynamic-instance-secondary"
-            label={`补充内容 · ${slotGroups.secondary.length} 项`}
-            defaultOpen={slotGroups.secondary.some((field) => field.required) || lockedLeftoverCount > 0 || instancePublishErrorCount > 0}
+          </div>
+        ) : (
+          <span className="homepage-editor__sr-only">页面实例编辑边界</span>
+        )}
+        {slotGroups.sections.map((section) => (
+          <section
+            key={`${section.group}:${section.fields[0]?.slotId ?? section.label}`}
+            aria-label={section.label}
           >
-            {slotGroups.secondary.map(renderSlotFieldset)}
-          </InspectorDisclosure>
-        ) : null}
+            <div className="homepage-editor__inspector-section-head">
+              <strong>{section.label}</strong>
+              <span className="homepage-editor__properties-hint">
+                {section.group === "image" ? "图片文件两端共用；构图仅当前端" : "两端共用"}
+              </span>
+            </div>
+            {section.fields.map(renderSlotFieldset)}
+          </section>
+        ))}
         <section className="homepage-editor__inspector-section homepage-editor__dynamic-instance-management" aria-label="实例管理">
           <div className="homepage-editor__inspector-section-head">
-            <strong>实例管理</strong>
-            <span>版本、母模板同步与整体恢复</span>
+            <strong>版本</strong>
           </div>
           <div className="homepage-editor__inspector-section-body">
             <span className="homepage-editor__properties-hint">固定版本 {props.templateId} v{props.templateVersion}</span>
             <div aria-label="当前字段来源" className="homepage-editor__dynamic-instance-sources">
-              <Tag>模板基线 · 固定版本</Tag>
-              <Tag color="gold">页面内容覆盖 {contentOverrideCount}</Tag>
-              <Tag color="blue">页面设计覆盖 {designOverrideCount}</Tag>
+              <span>模板基线 · 固定版本</span>
+              <span>页面内容覆盖 {contentOverrideCount}</span>
+              <span>页面设计覆盖 {designOverrideCount}</span>
             </div>
-            {designOverrideCount > 0 ? (
+            {designOverrideCount > 0 && promotionPreview.promoted.length > 0 ? (
               <div className="homepage-editor__dynamic-instance-promote">
                 <Button
                   type="default"
@@ -988,18 +1008,17 @@ export default function DynamicTemplateInstanceInspector({
                 }));
               }}
             />
+            <p className="homepage-editor__properties-hint">文字、图片、商品和链接会保留。</p>
             <RestoreDefaultButton
-              label="恢复模板值"
-              disabled={!hasTemplateValueOverrides}
+              label="恢复模板样式"
+              disabled={designOverrideCount === 0}
               onClick={() => modal.confirm({
-                title: "恢复当前实例的模板值？",
-                content: `将清除当前实例的构图、隐藏和显示状态覆盖，并继续读取锁定版本 ${props.templateId} v${props.templateVersion}。文字、图片、商品、链接等页面内容会完整保留；母模板、其他实例与其他页面不会改变，可立即使用页面撤销恢复。`,
-                okText: "恢复模板值",
+                title: "恢复模板样式？",
+                content: `将清除当前实例的字号、颜色、位置和缩放等设计覆盖，并继续读取锁定版本 ${props.templateId} v${props.templateVersion}。文字、图片、商品、链接和显隐会完整保留；母模板、其他实例与其他页面不会改变，可立即使用页面撤销恢复。`,
+                okText: "恢复模板样式",
                 cancelText: "取消",
                 onOk: () => editor.updateHistoryTransaction({
                   layoutOverridesByNodeId: {},
-                  hiddenSlotIds: [],
-                  isVisible: true,
                 }),
               })}
             />

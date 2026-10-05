@@ -3,7 +3,7 @@ import { Alert, Button, Checkbox, Input, Modal, Select, Switch, Tag, theme } fro
 import { createDynamicTemplateStableId } from "../template-definition/nodeRegistry";
 import { TEMPLATE_RECIPE_SCHEMA, type TemplateDefinitionV2, type TemplateRecipe } from "../template-definition/generated/templateDefinition.generated";
 import { validateTemplateRecipe } from "../template-definition/validateTemplateDefinition";
-import { isCanvasBackground, imageRatioLabel, ALIGNMENTS, MARGINS, MARGIN_VALUES, RADIUS_VALUES, SPACING_VALUES, paletteFor, recommendedAlignment, BACKGROUNDS, CANVAS_PRESETS, CONTENTS, LAYOUTS, MEDIA_PRESETS, MEDIA_ROLES, PURPOSES, RADII, SPACINGS, STYLES, changeRecipePurpose, createContentSlot, createMediaSlots, createRecommendedRecipe, recommendedFor, styleFor, type RecipeSection } from "./presets";
+import { isCanvasBackground, imageRatioLabel, ALIGNMENTS, MARGINS, MARGIN_VALUES, RADIUS_VALUES, SPACING_VALUES, paletteFor, recommendedAlignment, BACKGROUNDS, CANVAS_PRESETS, CONTENTS, CREATION_PURPOSES, LAYOUTS, MEDIA_PRESETS, MEDIA_ROLES, PURPOSES, RADII, SPACINGS, STYLES, changeRecipePurpose, createContentSlot, createMediaSlots, createRecommendedRecipe, recommendedFor, styleFor, type RecipeSection } from "./presets";
 import { generateTemplateFromRecipe } from "./generateTemplateFromRecipe";
 import TemplateRecipePreview from "./TemplateRecipePreview";
 import RecipeOptionPreview from "./RecipeOptionPreview";
@@ -35,7 +35,6 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
   const [dirty, setDirty] = useState<Partial<Record<RecipeSection, boolean>>>({});
   const [customSize, setCustomSize] = useState(false);
   const [dimensionInputs, setDimensionInputs] = useState<Partial<Record<"width" | "height", string>>>({});
-  const [moreSizes, setMoreSizes] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [mediaPreset, setMediaPreset] = useState("hero");
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
@@ -211,11 +210,11 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
     <button type="button" className="template-recipe__preview-toggle" aria-expanded={previewOpen} onClick={() => setPreviewOpen(!previewOpen)}>{previewOpen ? "返回选项" : "查看预览"}</button>
     <div className="template-recipe__workspace" data-preview-open={previewOpen}>
     <div className="template-recipe__body">
-      <h3 ref={heading} tabIndex={-1}>{["你准备创建什么类型的模板？", "选择画布尺寸", "选择布局结构", "设置每张图片的外观", "这个模板需要展示哪些内容？", "选择基础视觉风格", "确认模板方案"][step]}</h3>
+      <h3 ref={heading} tabIndex={-1}>{["你准备创建什么类型的模板？", "选择网页区块画幅", "选择布局结构", "设置每张图片的外观", "这个模板需要展示哪些内容？", "选择基础视觉风格", "确认模板方案"][step]}</h3>
       {step === 0 && <>
-        <p>用途只影响推荐，后续仍可选择任意尺寸和布局。</p>
+        <p>类型只改变后面的推荐，不决定页面角色。后续仍可选择任意画幅和布局。</p>
         <p>通用模板：逐项选择配置；自定义：还可填写自己的用途名称。</p>
-        <div className="template-recipe__grid">{PURPOSES.map(([id, label]) => card(id, label, selected.purpose && recipe.purpose === id, () => {
+        <div className="template-recipe__grid">{CREATION_PURPOSES.map(([id, label]) => card(id, label, selected.purpose && recipe.purpose === id, () => {
           setRecipe((previous) => { const next = changeRecipePurpose(previous, id, dirty); return { ...next, media: applyInheritedMediaRadius(next.media, RADIUS_VALUES[next.style.radius], mediaRadiusEdited), rules: { ...next.rules, mediaArrangement: next.rules.mediaArrangement ?? "row" } }; });
           if (!dirty.media) setMediaPreset(recommendedFor(id).mediaPreset);
           setSelected((previous) => ({ ...previous, purpose: true }));
@@ -239,16 +238,16 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
         </details>}
       </>}
       {step === 1 && <>
-        {["常用", "更多"].map((group, index) => (index === 0 || moreSizes) && <section key={group}><h4>{group}</h4><div className="template-recipe__grid template-recipe__grid--four">
-          {CANVAS_PRESETS.slice(index * 4, index * 4 + 4).map((preset) => card(preset.name, `${preset.name} ${preset.ratio}`, selected.canvas && !customSize && recipe.canvas.width === preset.width && recipe.canvas.height === preset.height, () => {
+        <p>这是网页区块的高度方式，不是社交图片导出尺寸。模板宽度适应页面。</p>
+        <section><h4>常用</h4><div className="template-recipe__grid template-recipe__grid--four">
+          {CANVAS_PRESETS.map((preset) => card(preset.name, `${preset.name} ${preset.ratio === "auto" ? "高度随内容" : preset.ratio}`, selected.canvas && !customSize && recipe.canvas.width === preset.width && recipe.canvas.height === preset.height, () => {
             update("canvas", { width: preset.width, height: preset.height, aspectRatio: preset.width / preset.height });
             setSelected((previous) => ({ ...previous, canvas: true })); setCustomSize(false); setLockedRatio(null); setDimensionInputs({});
             setRecipe((previous) => ({ ...previous, rules: { ...previous.rules, aspectLocked: false } }));
-          }, <><span className="template-recipe__ratio"><i style={{ width: 64 * Math.min(1, preset.width / preset.height), height: 64 * Math.min(1, preset.height / preset.width) }} /></span><small>{preset.width} × {preset.height} px</small></>, recommendation.ratios.includes(preset.ratio)))}
-        </div></section>)}
-        <Button type="text" aria-expanded={moreSizes} onClick={() => setMoreSizes(!moreSizes)}>{moreSizes ? "收起更多尺寸" : "更多尺寸"}</Button>
+          }, <><span className="template-recipe__ratio"><i style={{ width: 64 * Math.min(1, preset.width / preset.height), height: 64 * Math.min(1, preset.height / preset.width) }} /></span><small>{preset.ratio === "auto" ? "高度随内容" : `${preset.width} × ${preset.height} px`}</small></>, recommendation.ratios.includes(preset.ratio)))}
+        </div></section>
         <Button block aria-pressed={customSize} aria-expanded={customSize} onClick={() => {
-          setCustomSize(true); setMoreSizes(false);
+          setCustomSize(true);
           setSelected((previous) => ({ ...previous, canvas: true })); setDirty({ ...dirty, canvas: true });
           requestAnimationFrame(() => {
             customSizeFields.current?.scrollIntoView({ block: "nearest" });

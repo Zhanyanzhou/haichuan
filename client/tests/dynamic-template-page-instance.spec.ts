@@ -2365,15 +2365,14 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       },
     ];
     const grouped = groupDynamicTemplatePageFields(fields);
-    expect(grouped.task).toBe("media");
-    expect(grouped.primary.map((field) => field.slotId)).toEqual(["slot_media"]);
-    expect(grouped.secondary.map((field) => field.slotId)).toEqual(["slot_content", "slot_commerce"]);
+    expect(grouped.sections.map((section) => section.label)).toEqual(["文字", "图片", "商品"]);
+    expect(grouped.sections.flatMap((section) => section.fields.map((field) => field.slotId)))
+      .toEqual(["slot_content", "slot_media", "slot_commerce"]);
     const selectedContent = groupDynamicTemplatePageFields(fields, "slot_content");
-    expect(selectedContent.task).toBe("content");
-    expect(selectedContent.primary.map((field) => field.slotId)).toEqual(["slot_content"]);
-    expect(selectedContent.secondary).toEqual([]);
-    expect(groupDynamicTemplatePageFields([contentField]).task).toBe("content");
-    expect(groupDynamicTemplatePageFields([]).task).toBe("content");
+    expect(selectedContent.selectedSlotId).toBe("slot_content");
+    expect(selectedContent.sections).toHaveLength(3);
+    expect(groupDynamicTemplatePageFields([contentField]).sections[0]?.group).toBe("text");
+    expect(groupDynamicTemplatePageFields([]).sections).toEqual([]);
 
     const { inspector, currentDocument, pageWrites, templateWrites } = await prepareEditor(page, {
       descriptorPolicy: true,
@@ -2383,11 +2382,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const resolved = currentDocument().puckData.resolvedDynamicTemplates["tpl_page_upgrade@1"];
     await expect(page.locator('.homepage-editor__layer-item .homepage-editor__layer-select').first())
       .toContainText("内容展示｜版本升级");
-    const supplementaryToggle = inspector.getByRole("button", { name: /^补充内容 ·/ });
-    // 必填字段所在组首开可见，运营仍可主动收起；通过字段范围可直接回到该字段。
-    await expect(supplementaryToggle).toHaveAttribute("aria-expanded", "true");
-    await supplementaryToggle.click();
-    await expect(inspector.getByRole("textbox", { name: "标题", exact: true })).toBeHidden();
+    await expect(inspector.getByRole("button", { name: /^补充内容 ·/ })).toHaveCount(0);
+    await expect(inspector.getByRole("region", { name: "文字", exact: true }).first()).toBeVisible();
+    await expect(inspector.getByRole("textbox", { name: "标题", exact: true })).toBeVisible();
     expect(resolved).toBeDefined();
     const descriptors = getDynamicTemplatePageFieldDescriptors(resolved.definition);
     const descriptorBySlotId = Object.fromEntries(descriptors.map((field) => [field.slotId, field]));
@@ -2461,11 +2458,11 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(lockedField).toContainText("此内容由模板锁定，页面不能修改。");
     await expect(lockedField).toContainText("当前草稿仍保留旧的页面覆盖，发布前需要移除。");
     await expect(inspector.getByRole("button", { name: "移除锁定字段的页面覆盖" })).toBeVisible();
-    await expect(lockedField.getByRole("button", { name: "恢复为模板内容" })).toBeVisible();
+    await expect(lockedField.getByRole("button", { name: "恢复模板文案" })).toBeVisible();
     expect(currentDocument().puckData.content[0].props.contentBySlotId.slot_locked_copy).toBe("旧页面覆盖说明");
 
-    await lockedField.getByRole("button", { name: "恢复为模板内容" }).click();
-    await expect(lockedField.getByRole("button", { name: "恢复为模板内容" })).toHaveCount(0);
+    await lockedField.getByRole("button", { name: "恢复模板文案" }).click();
+    await expect(lockedField.getByRole("button", { name: "恢复模板文案" })).toHaveCount(0);
     await expect(lockedField).not.toContainText("当前草稿仍保留旧的页面覆盖，发布前需要移除。");
     await expect(inspector.getByRole("button", { name: "移除锁定字段的页面覆盖" })).toHaveCount(0);
     expect(currentDocument().puckData.content[0].props.contentBySlotId.slot_locked_copy).toBe("旧页面覆盖说明");
@@ -2552,7 +2549,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(inspector.getByLabel("当前字段来源")).toContainText("模板基线 · 固定版本");
     await expect(inspector.getByLabel("当前字段来源")).toContainText("页面内容覆盖 1");
     await expect(inspector.getByLabel("当前字段来源")).toContainText("页面设计覆盖 8");
-    await expect(inspector.locator('[data-slot-id="slot_heading"]')).toContainText("页面内容");
+    await expect(inspector.locator('[data-slot-id="slot_heading"]')).toContainText("标题");
 
     const promote = inspector.getByRole("button", { name: "应用设计覆盖到母模板草稿" });
     await expect(promote).toBeEnabled();
@@ -2631,9 +2628,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(publicStatus).toHaveAttribute("data-state", "empty");
     await expect(publicStatus).toContainText("尚未上传页面图片");
     await expect(publicStatus).toContainText("上传图片并点击页面“发布”后才会显示");
-    await expect(inspector.getByText("优先填写 · 媒体与画面", { exact: true })).toBeVisible();
-    await expect(inspector.getByText("其他模板内容", { exact: false })).toHaveCount(0);
-    await expect(inspector.locator('[data-slot-id="slot_image"]')).toContainText("图片");
+    await expect(inspector.locator('[data-slot-id="slot_image"]')).toContainText("主图");
     await expect(inspector.locator('[data-image-asset-guidance="slot_image"]'))
       .toHaveText("建议素材：1200 × 900 像素 · 桌面端 4:3 · 移动端 4:5");
     const canvas = page.frameLocator(".homepage-editor__canvas-scale iframe");
@@ -2643,11 +2638,11 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
     await expect(inspector.locator('[data-media-field="slot_image"]'))
       .toHaveAttribute("data-workspace-field-shared", "true");
-    await expect(inspector.getByRole("spinbutton", { name: "主图图片缩放" }).locator("xpath=../.."))
+    await expect(inspector.getByRole("spinbutton", { name: "主图缩放" }).locator("xpath=../.."))
       .toHaveAttribute("data-workspace-field-control", "number");
     await expect(inspector.locator('[data-image-focus-field]'))
       .toHaveAttribute("data-workspace-field-control", "image-focus");
-    await expect(inspector.getByRole("button", { name: "恢复当前设备图片构图" }))
+    await expect(inspector.getByRole("button", { name: "清除这一端的构图" }))
       .toHaveAttribute("data-workspace-field-shared", "true");
 
     const mediaField = inspector.locator('[data-media-field="slot_image"]');
@@ -2663,7 +2658,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
     await inspector.getByRole("combobox", { name: "主图图片适配" }).locator("xpath=../..").click();
     await page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter({ hasText: "完整显示" }).click();
-    await inspector.getByRole("spinbutton", { name: "主图图片缩放" }).fill("130");
+    await inspector.getByRole("spinbutton", { name: "主图缩放" }).fill("130");
     const focusPad = inspector.getByRole("slider", { name: "拖动调整画面焦点" });
     await expect(focusPad).toBeVisible();
     const focusPadBox = await focusPad.boundingBox();
@@ -2847,8 +2842,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const { inspector, pageWrites, templateWrites } = await prepareEditor(page);
     await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
     await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue("页面实例填写内容");
-    await expect(inspector.getByRole("button", { name: "恢复模板值" })).toBeDisabled();
-    await expect(page.getByRole("dialog", { name: "恢复当前实例的模板值？" })).toHaveCount(0);
+    await expect(inspector.getByRole("button", { name: "恢复模板样式" })).toBeDisabled();
+    await expect(page.getByRole("dialog", { name: "恢复模板样式？" })).toHaveCount(0);
     expect(pageWrites).toEqual([]);
     expect(templateWrites).toEqual([]);
   });
@@ -2866,9 +2861,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const secondHeading = canvas
       .locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance-2"]')
       .locator('[data-template-node-id="node_heading"]');
-    const restoreTemplateValue = inspector.getByRole("button", { name: "恢复模板值" });
+    const restoreTemplateValue = inspector.getByRole("button", { name: "恢复模板样式" });
     const visibility = inspector.getByRole("switch", { name: "在页面显示" });
-    const headingVisibility = inspector.getByRole("switch", { name: "显示这段文字" });
+    const headingVisibility = inspector.getByRole("switch", { name: "标题可见" });
     const headingContent = "页面原文：戒指 & 项链｜编号 A-01（逐字保留）";
     const undo = page.getByRole("button", { name: "撤销" });
     const redo = page.getByRole("button", { name: "重做" });
@@ -2884,9 +2879,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(restoreTemplateValue).toHaveAttribute("data-workspace-field-control", "restore-default");
 
     await restoreTemplateValue.click();
-    const cancelled = page.getByRole("dialog", { name: "恢复当前实例的模板值？" });
+    const cancelled = page.getByRole("dialog", { name: "恢复模板样式？" });
     await expect(cancelled).toContainText("继续读取锁定版本 tpl_page_upgrade v1");
-    await expect(cancelled).toContainText("文字、图片、商品、链接等页面内容会完整保留");
+    await expect(cancelled).toContainText("文字、图片、商品、链接和显隐会完整保留");
     await cancelled.getByRole("button", { name: /取\s*消/ }).click();
     await expect(restoreTemplateValue).toBeEnabled();
     await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue(headingContent);
@@ -2897,14 +2892,14 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     expect(templateWrites).toEqual([]);
 
     await restoreTemplateValue.click();
-    const confirm = page.getByRole("dialog", { name: "恢复当前实例的模板值？" });
-    await confirm.getByRole("button", { name: "恢复模板值" }).click();
+    const confirm = page.getByRole("dialog", { name: "恢复模板样式？" });
+    await confirm.getByRole("button", { name: "恢复模板样式" }).click();
     await expect(inspector).toContainText("固定版本 tpl_page_upgrade v1");
     await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue(headingContent);
-    await expect(visibility).toBeChecked();
-    await expect(headingVisibility).toBeChecked();
-    await expect(firstHeading).toContainText(headingContent);
-    await expect(firstHeading).not.toHaveAttribute("style", /translate/);
+    await expect(visibility).not.toBeChecked();
+    await expect(headingVisibility).not.toBeChecked();
+    await expect(canvas.getByText("当前页面中已隐藏")).toBeVisible();
+    await expect(firstHeading).toHaveCount(0);
     await expect(secondHeading).toContainText("第二实例保持原值");
     await expect(secondHeading).toHaveAttribute("style", /translate\(8%, -4%\)/);
     await expect(restoreTemplateValue).toBeDisabled();
@@ -2921,8 +2916,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
     await redo.click();
     await expect(inspector.getByRole("textbox", { name: "标题" })).toHaveValue(headingContent);
-    await expect(visibility).toBeChecked();
-    await expect(headingVisibility).toBeChecked();
+    await expect(visibility).not.toBeChecked();
+    await expect(headingVisibility).not.toBeChecked();
     await expect(restoreTemplateValue).toBeDisabled();
     await expect(redo).toBeDisabled();
     await page.getByRole("button", { name: "保存当前装修草稿" }).click();
@@ -2933,8 +2928,8 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       templateVersion: 1,
       contentBySlotId: { slot_heading: headingContent },
       layoutOverridesByNodeId: {},
-      hiddenSlotIds: [],
-      isVisible: true,
+      hiddenSlotIds: ["slot_heading"],
+      isVisible: false,
     });
     expect(payload.puckData.content[1].props).toMatchObject({
       instanceId: "dynamic-upgrade-instance-2",
@@ -2995,7 +2990,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(headings.nth(1)).not.toHaveAttribute("style", /translate/);
 
     await page.getByRole("button", { name: "预览当前画布" }).click();
-    await expect(page.locator(".homepage-editor__preview-mode-bar")).toContainText("正在预览尚未保存的修改");
+    await expect(page.locator(".homepage-editor__preview-mode-note")).toContainText("正在预览尚未保存的修改");
     await expect(canvas.getByText("只修改第一个页面实例", { exact: true })).toHaveCount(1);
     await expect(canvas.getByText("第二实例保持原值", { exact: true })).toHaveCount(1);
     await page.getByRole("button", { name: "退出当前画布预览" }).click();
@@ -3149,17 +3144,16 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
 
   test("直接商品、集合和行动槽位复用运营选择器并只保存稳定引用", async ({ page }) => {
     const { inspector, savedPayload, templateWrites } = await prepareEditor(page, { directBusiness: true });
-    await expect(inspector.getByText("优先填写 · 商品与分类", { exact: true })).toBeVisible();
-    await expect(inspector.locator("fieldset:visible").first()).toHaveAttribute("data-slot-id", "slot_product");
+    await expect(inspector.locator("fieldset:visible").first()).toHaveAttribute("data-slot-id", "slot_heading");
     await expect(inspector.getByText("其他模板内容", { exact: false })).toHaveCount(0);
     await expect(inspector.locator("fieldset:visible")).toHaveCount(5);
     await expect(inspector.getByRole("textbox", { name: "补充说明" })).toBeVisible();
-    await expect(inspector.locator('[data-slot-id="slot_product"]')).toContainText("商品");
-    await expect(inspector.locator('[data-slot-id="slot_action"]')).toContainText("按钮");
+    await expect(inspector.locator('[data-slot-id="slot_product"]')).toContainText("主商品");
+    await expect(inspector.locator('[data-slot-id="slot_action"]')).toContainText("主行动");
     await expect(inspector.locator('[data-slot-id="slot_heading"]')
-      .getByRole("button", { name: "恢复为模板内容" })).toHaveCount(0);
+      .getByRole("button", { name: "恢复模板文案" })).toHaveCount(0);
     await expect(inspector.locator('[data-slot-id="slot_summary"]')
-      .getByRole("button", { name: "恢复为模板内容" })).toHaveCount(0);
+      .getByRole("button", { name: "恢复模板文案" })).toHaveCount(0);
 
     const productField = inspector.locator("fieldset").filter({ hasText: "主商品" });
     await productField.getByRole("button", { name: "选择商品" }).click();

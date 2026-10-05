@@ -337,6 +337,8 @@ api.interceptors.response.use(
       try {
         await refreshSession(domain);
         error.config._sessionRetry = true;
+        // 刷新会话会轮换 CSRF cookie；重试时必须重新读取，不能沿用原请求头。
+        error.config.headers.delete("X-CSRF-Token");
         return api.request(error.config);
       } catch (refreshError) {
         // 旧代次的 refresh 已经失去处置当前身份的资格；尤其不能在用户退出后

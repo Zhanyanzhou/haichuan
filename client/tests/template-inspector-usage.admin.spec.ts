@@ -96,12 +96,12 @@ test("确定性 UI：页面表单顺序和填写规则来自现有字段，查�
   const fields = preview.locator(".template-editor__page-form-field");
   await expect(fields).toHaveCount(2);
   await expect(fields.nth(0).getByText(/当前查看范围第 1 项/)).toBeVisible();
-  await expect(fields.nth(0).getByRole("button", { name: "工艺主图 必填 · 定位对象", exact: true })).toBeVisible();
+  await expect(fields.nth(0).getByRole("button", { name: "工艺主图 固定展示 · 定位对象", exact: true })).toBeVisible();
   await expect(fields.nth(0).getByText("内容只读 · 页面可隐藏", { exact: true })).toBeVisible();
   await expect(fields.nth(1).getByText("页面可填写 · 页面不可手动隐藏", { exact: true })).toBeVisible();
   await expect(fields.nth(1).getByRole("textbox", { name: "工艺标题页面表单示意", exact: true })).toHaveAttribute("readonly", "");
   expect(await snapshot()).toEqual(before);
-  await fields.nth(1).getByRole("button", { name: "工艺标题 可选 · 定位对象", exact: true }).click();
+  await fields.nth(1).getByRole("button", { name: "工艺标题 建议填写 · 定位对象", exact: true }).click();
   expect(await snapshot()).toEqual(before);
   await expect(page.locator('[data-template-page-scope-field="label"] input')).toHaveValue("工艺标题");
 });

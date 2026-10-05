@@ -53,6 +53,7 @@ interface TemplateCatalogViewportPreviewProps {
   sourceWidth: number;
   templateKey: string;
   title: string;
+  basisLabel?: string;
   unavailable?: boolean;
   showSlotAnnotations?: boolean;
   presentation?: TemplateCatalogPreviewPresentation;
@@ -90,6 +91,7 @@ export default function TemplateCatalogViewportPreview({
   sourceWidth,
   templateKey,
   title,
+  basisLabel,
   unavailable = false,
   showSlotAnnotations = false,
   presentation = "thumbnail",
@@ -632,8 +634,9 @@ export default function TemplateCatalogViewportPreview({
           data-text-slot-count={textSlotCount}
           data-action-slot-count={actionSlotCount}
           data-hidden-slot-count={hiddenSlotCount}
-          aria-label={`当前画幅可见槽位：图片 ${imageSlotCount} 个，文字 ${textSlotCount} 个，按钮 ${actionSlotCount} 个；隐藏槽位 ${hiddenSlotCount} 个${otherSlotCount ? `；其他可见槽位 ${otherSlotCount} 个` : ""}`}
+          aria-label={`${basisLabel ? `${basisLabel}。` : ""}当前画幅可见槽位：图片 ${imageSlotCount} 个，文字 ${textSlotCount} 个，按钮 ${actionSlotCount} 个；隐藏槽位 ${hiddenSlotCount} 个${otherSlotCount ? `；其他可见槽位 ${otherSlotCount} 个` : ""}`}
         >
+          {basisLabel ? <span className="is-basis">{basisLabel}</span> : null}
           <span className="is-media">图片 {imageSlotCount}</span>
           <span className="is-text">文字 {textSlotCount}</span>
           <span className="is-action">按钮 {actionSlotCount}</span>
