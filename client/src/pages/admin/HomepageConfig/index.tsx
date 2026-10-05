@@ -120,6 +120,7 @@ import type { EditorWorkspaceMode } from "@/page-builder/template-editor/types";
 import WorkspacePanelHeader from "@/page-builder/workspace/WorkspacePanelHeader";
 import WorkspacePanelCollapseButton from "@/page-builder/workspace/WorkspacePanelCollapseButton";
 import { copyEditorLocalConflictSnapshot } from "@/page-builder/workspace/editorLifecycleErrors";
+import { bindWheelToScroller } from "@/page-builder/workspace/iframeWheelBridge";
 import useCompactWorkspaceOverlay, {
   DOCKED_WORKSPACE_QUERY,
   WIDE_DOCK_QUERY,
@@ -1198,31 +1199,6 @@ function InspectorPanel({
   return null;
 }
 
-function clampScroll(value: number, max: number) {
-  return Math.min(Math.max(0, max), Math.max(0, value));
-}
-
-function iframeWheelTargetCanScroll(target: Element, deltaY: number, deltaX: number) {
-  let node: Element | null = target;
-  while (node && node !== node.ownerDocument.body && node !== node.ownerDocument.documentElement) {
-    const style = node.ownerDocument.defaultView?.getComputedStyle(node);
-    if (style) {
-      const canY = (style.overflowY === "auto" || style.overflowY === "scroll")
-        && node.scrollHeight > node.clientHeight + 1;
-      const canX = (style.overflowX === "auto" || style.overflowX === "scroll")
-        && node.scrollWidth > node.clientWidth + 1;
-      if (
-        (canY && ((deltaY < 0 && node.scrollTop > 0) || (deltaY > 0 && node.scrollTop + node.clientHeight < node.scrollHeight - 1)))
-        || (canX && ((deltaX < 0 && node.scrollLeft > 0) || (deltaX > 0 && node.scrollLeft + node.clientWidth < node.scrollWidth - 1)))
-      ) {
-        return true;
-      }
-    }
-    node = node.parentElement;
-  }
-  return false;
-}
-
 function CanvasPreview({ frameRef }: { frameRef: RefObject<HTMLDivElement> }) {
   const content = useHomepagePuck((state) => state.appState.data.content);
   const currentViewport = useHomepagePuck(
@@ -2098,35 +2074,7 @@ function EditorBody({
       if (!doc || doc === boundDocument) return;
       detachWheel();
       boundDocument = doc;
-      const onWheel = (event: WheelEvent) => {
-        if (event.ctrlKey) return;
-        const target = event.target;
-        if (target instanceof Element && iframeWheelTargetCanScroll(target, event.deltaY, event.deltaX)) {
-          return;
-        }
-        const pixel = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-          ? 16
-          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-            ? scroller.clientHeight
-            : 1;
-        const pageX = event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-          ? scroller.clientWidth
-          : pixel;
-        const nextTop = clampScroll(
-          scroller.scrollTop + event.deltaY * pixel,
-          scroller.scrollHeight - scroller.clientHeight,
-        );
-        const nextLeft = clampScroll(
-          scroller.scrollLeft + event.deltaX * pageX,
-          scroller.scrollWidth - scroller.clientWidth,
-        );
-        if (nextTop === scroller.scrollTop && nextLeft === scroller.scrollLeft) return;
-        scroller.scrollTop = nextTop;
-        scroller.scrollLeft = nextLeft;
-        event.preventDefault();
-      };
-      doc.addEventListener("wheel", onWheel, { capture: true, passive: false });
-      detachWheel = () => doc.removeEventListener("wheel", onWheel, { capture: true });
+      detachWheel = bindWheelToScroller(doc, scroller);
     };
 
     bindWheel();

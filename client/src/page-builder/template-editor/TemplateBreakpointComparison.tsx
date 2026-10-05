@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { DynamicTemplateRenderer, resolveTemplateDesignFrame, type TemplateDefinitionV2 } from "../template-definition";
 import type { TemplateBreakpoint } from "../template-definition/responsive";
 import { syncTemplateViewportStyles } from "./TemplateViewportFrame";
+import { bindWheelToScroller } from "../workspace/iframeWheelBridge";
 import "./TemplateBreakpointComparison.css";
 
 export interface TemplateBreakpointComparisonProps {
@@ -58,6 +59,13 @@ function ComparisonViewport({ definition, contentBySlotId, selectedNodeId, onFoc
     return () => observer.disconnect();
   }, []);
   useLayoutEffect(() => { measure(); }, [measure, definition, contentBySlotId]);
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    const doc = iframe?.contentDocument;
+    const scroller = iframe?.closest(".template-breakpoint-comparison");
+    if (!doc || !(scroller instanceof HTMLElement)) return undefined;
+    return bindWheelToScroller(doc, scroller);
+  }, [root]);
   useEffect(() => {
     const ownerWindow = root?.ownerDocument.defaultView;
     if (!root?.isConnected || !ownerWindow || root.ownerDocument !== iframeRef.current?.contentDocument) return;

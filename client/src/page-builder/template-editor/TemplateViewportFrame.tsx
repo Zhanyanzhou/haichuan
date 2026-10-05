@@ -32,6 +32,7 @@ import {
 } from "./editableTargetGeometry";
 import { findElementsByEditableTargetLocator } from "./editableTargetDomLocator";
 import { useTemplateEditorSession } from "./templateEditorSession";
+import { bindWheelToScroller } from "../workspace/iframeWheelBridge";
 import {
   parseFiniteCanvasPadding,
   resolveFiniteCanvasScale,
@@ -324,6 +325,19 @@ export default function TemplateViewportFrame({
     syncTemplateViewportStyles(nextDocument, () => setStyleRevision((value) => value + 1));
     setFrameDocument(nextDocument);
   }, []);
+
+  // 画布滚动条被隐藏，平移靠 scrollTop/scrollLeft。滚轮停在 iframe 上到不了外层，
+  // 停在画布灰边上时 overflow:hidden 也不会自己滚。两边都转给同一个滚动容器。
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return undefined;
+    const detachStage = bindWheelToScroller(stage, stage);
+    const detachFrame = frameDocument ? bindWheelToScroller(frameDocument, stage) : undefined;
+    return () => {
+      detachStage();
+      detachFrame?.();
+    };
+  }, [frameDocument]);
 
   useLayoutEffect(() => {
     const stage = stageRef.current;
