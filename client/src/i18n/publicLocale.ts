@@ -4,8 +4,8 @@ export type PublicContentLocale = (typeof PUBLIC_CONTENT_LOCALES)[number];
 
 export const DEFAULT_PUBLIC_CONTENT_LOCALE: PublicContentLocale = "zh-CN";
 
-/** 英文路由已接入独立草稿、审核、发布指针与内容哈希；具体页面仍以英文发布事实为准。 */
-export const PUBLIC_ENGLISH_ROUTES_ENABLED = true;
+/** D.35：公开英文站已退役；类型与解析只保留历史数据和旧链接兼容。 */
+export const PUBLIC_ENGLISH_ROUTES_ENABLED = false;
 
 export type PublicLocalePath = {
   locale: PublicContentLocale;
@@ -32,6 +32,18 @@ export function resolvePublicLocalePath(pathname: string): PublicLocalePath {
     };
   }
   return { locale: DEFAULT_PUBLIC_CONTENT_LOCALE, pathname: normalized };
+}
+
+/** 旧英文站链接只允许回到同源中文路径；危险或歧义路径统一回首页。 */
+export function resolveRetiredEnglishRedirect(pathname: string): string {
+  const remainder = pathname.replace(/^\/en(?=\/|$)/i, "") || "/";
+  if (
+    !remainder.startsWith("/")
+    || remainder.startsWith("//")
+    || remainder.includes("\\")
+    || /%(?:2f|5c)/i.test(remainder)
+  ) return "/";
+  return remainder;
 }
 
 export function getBrowserPublicContentLocale(): PublicContentLocale {

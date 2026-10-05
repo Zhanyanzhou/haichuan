@@ -1,6 +1,6 @@
 import * as assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import * as bcrypt from 'bcrypt';
 import { WechatAuthService } from './wechat-auth.service';
@@ -400,28 +400,55 @@ test('微信回调禁止缓存和 Referer，并在回传前清除 code/state 历
   assert.equal(body.includes('state-must-not-survive'), false);
 });
 
-test('解绑接口由客户守卫保护且服务端按当前客户幂等清除', async () => {
+test('解绑接口由客户守卫保护、传递完整身份并在客户锁内幂等清除', async () => {
   const guards = Reflect.getMetadata(
     GUARDS_METADATA,
     WechatAuthController.prototype.unbind,
   ) as unknown[];
   assert.ok(guards.includes(CustomerAuthGuard));
 
+  const principal = { id: 19, authVersion: 4 };
   const writes: number[] = [];
+  let active = true;
+  const tx = {
+    $queryRaw: async () => active ? [{ id: principal.id }] : [],
+    customer: {
+      updateMany: async ({ where }: { where: { id: number } }) => {
+        writes.push(where.id);
+        return { count: writes.length === 1 ? 1 : 0 };
+      },
+    },
+  };
   const service = new WechatAuthService(
     {
-      customer: {
-        updateMany: async ({ where }: { where: { id: number } }) => {
-          writes.push(where.id);
-          return { count: writes.length === 1 ? 1 : 0 };
-        },
-      },
+      $transaction: async (operation: (client: typeof tx) => unknown) => operation(tx),
     } as any,
     {} as any,
     {} as any,
   );
 
-  assert.deepEqual(await service.unbindWechat(19), { bound: false, changed: true });
-  assert.deepEqual(await service.unbindWechat(19), { bound: false, changed: false });
+  assert.deepEqual(await service.unbindWechat(principal), { bound: false, changed: true });
+  assert.deepEqual(await service.unbindWechat(principal), { bound: false, changed: false });
   assert.deepEqual(writes, [19, 19]);
+
+  active = false;
+  await assert.rejects(
+    () => service.unbindWechat(principal),
+    UnauthorizedException,
+  );
+  assert.deepEqual(writes, [19, 19]);
+
+  const received: unknown[] = [];
+  const controller = new WechatAuthController(
+    { unbindWechat: async (customer: unknown) => {
+      received.push(customer);
+      return { bound: false, changed: false };
+    } } as any,
+    {} as any,
+  );
+  await controller.unbind(
+    { customer: principal } as any,
+    { setHeader: () => undefined } as any,
+  );
+  assert.deepEqual(received, [principal]);
 });

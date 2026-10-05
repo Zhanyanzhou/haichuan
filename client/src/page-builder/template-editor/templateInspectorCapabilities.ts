@@ -80,9 +80,24 @@ const INSTANCE_POLICY_FIELDS = [
   "maxFontSizePx", "maxSpacingPx",
 ] as const;
 
+export const TEMPLATE_INSPECTOR_INTERNAL_IDENTITY_FIELDS = new Set([
+  "schemaVersion",
+  "templateId",
+  "rootNodeId",
+  "nodeId",
+  "slotId",
+  "slot.slotId",
+  "slot.key",
+]);
+
+export function isTemplateInspectorInternalIdentityField(field: string) {
+  return TEMPLATE_INSPECTOR_INTERNAL_IDENTITY_FIELDS.has(field);
+}
+
 /**
  * Inspector 的 schema 能力表。它只按根、节点类型和槽位类型分派，不依赖模板名称或目录清单。
  * `managed` 表示只能通过结构/画布/兼容清理命令修改，不能暴露原始 JSON 输入。
+ * schemaVersion / nodeId / slotId 等内部标识只作兼容能力登记，不进入日常表单。
  */
 export const TEMPLATE_INSPECTOR_CAPABILITIES: readonly TemplateInspectorCapability[] = [
   { field: "schemaVersion", label: "Schema 版本", group: "definition", access: "read-only", scopes: ROOT_SCOPE, reason: "由合同版本固定，不能在 Inspector 中改写。" },
@@ -140,7 +155,7 @@ export const TEMPLATE_INSPECTOR_CAPABILITIES: readonly TemplateInspectorCapabili
   { field: "slot.key", label: "槽位键", group: "definition", access: "read-only", scopes: SLOT_SCOPE, reason: "页面实例按稳定键关联内容，不能在 Inspector 中改名。" },
   { field: "slot.type", label: "槽位类型", group: "definition", access: "read-only", scopes: SLOT_SCOPE, reason: "内容类型由槽位节点类型决定。" },
   { field: "slot.label", label: "槽位名称", group: "definition", access: "editable", scopes: SLOT_SCOPE },
-  { field: "slot.required", label: "页面必须填写", group: "rules", access: "editable", scopes: SLOT_SCOPE },
+  { field: "slot.required", label: "公开时必须有内容", group: "rules", access: "editable", scopes: SLOT_SCOPE },
   { field: "slot.editable", label: "页面可编辑内容", group: "rules", access: "editable", scopes: SLOT_SCOPE },
   { field: "slot.hideable", label: "页面可隐藏", group: "rules", access: "editable", scopes: SLOT_SCOPE },
   { field: "slot.emptyPolicy", label: "空内容策略", group: "rules", access: "read-only", scopes: SLOT_SCOPE, reason: "新模板固定为空则隐藏；历史 use-default 只能显式清理。" },

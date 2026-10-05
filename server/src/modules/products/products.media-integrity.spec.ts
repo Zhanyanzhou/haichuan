@@ -13,6 +13,7 @@ const readableMedia = {
     image.storageKey === "readable.jpg",
   invalidate: () => undefined,
 };
+const adminActor = { id: 6, role: "ADMIN" } as const;
 
 function authorizedMedia(id: number) {
   return {
@@ -53,7 +54,7 @@ test("新增图片在落库前拒绝不可读来源", async () => {
       service.addImage(6, {
         url: "data:image/png;base64,AA==",
         type: "FRONT",
-      }),
+      }, adminActor),
     /缺少受控存储键/,
   );
   assert.equal(transactionCalls, 0);
@@ -101,7 +102,7 @@ test("更新图片 DTO 只接受现有类型与非负整数排序", async () => 
 test("新增可读图片在同一事务内创建并回填受控端点", async () => {
   const calls: string[] = [];
   const tx = {
-    $queryRaw: async () => [{ id: 6 }],
+    $queryRaw: async () => [{ id: 6, role: "ADMIN" }],
     product: { findUnique: async () => ({ status: "DRAFT" }) },
     mediaAsset: { findFirst: async () => ({ id: 912 }) },
     productImage: {
@@ -129,12 +130,75 @@ test("新增可读图片在同一事务内创建并回填受控端点", async ()
     storageKey: "readable.jpg",
     mediaAssetId: 912,
     type: "FRONT",
-  });
+  }, adminActor);
   assert.deepEqual(calls, [
     "create:readable.jpg",
     "update:/products/catalog/6/media/12",
   ]);
   assert.equal(image.url, "/products/catalog/6/media/12");
+});
+
+test("裁图派生图的创建与列表图指针在单一媒体行锁事务内提交", async () => {
+  const events: string[] = [];
+  let transactionCalls = 0;
+  const tx = {
+    $queryRaw: async () => {
+      events.push(`lock:${events.filter((event) => event.startsWith("lock:")).length + 1}`);
+      return [{ id: 6, role: "ADMIN" }];
+    },
+    product: {
+      findUnique: async () => ({ status: "DRAFT" }),
+      update: async ({ data }: any) => {
+        events.push(`listing:${data.listingImageId}`);
+        return { id: 6, ...data };
+      },
+    },
+    mediaAsset: {
+      findFirst: async () => ({ id: 913 }),
+    },
+    productImage: {
+      create: async ({ data }: any) => {
+        events.push(`create:${data.mediaAssetId}`);
+        return { id: 13, ...data };
+      },
+      update: async ({ data }: any) => {
+        events.push(`url:${data.url}`);
+        return { id: 13, productId: 6, ...data };
+      },
+    },
+  };
+  const prisma = {
+    $transaction: async (callback: (client: typeof tx) => Promise<any>) => {
+      transactionCalls += 1;
+      return callback(tx);
+    },
+  };
+  const service = new ProductsService(
+    prisma as unknown as PrismaService,
+    {
+      isProductMediaReadable: ({ storageKey }: { storageKey?: string | null }) =>
+        storageKey === "product-assets/derived/2026/09/24/listing.webp",
+      invalidate: () => undefined,
+    } as never,
+    {} as never,
+  );
+
+  const image = await service.addListingImage(6, {
+    storageKey: "product-assets/derived/2026/09/24/listing.webp",
+    mediaAssetId: 913,
+    sourceImageId: 12,
+  }, adminActor);
+
+  assert.equal(transactionCalls, 1);
+  assert.equal(image.id, 13);
+  assert.deepEqual(events, [
+    "lock:1",
+    "lock:2",
+    "lock:3",
+    "create:913",
+    "url:/products/catalog/6/media/13",
+    "listing:13",
+  ]);
 });
 
 test("旧本机媒体没有资产登记时默认拒绝新增", async () => {
@@ -160,7 +224,7 @@ test("旧本机媒体没有资产登记时默认拒绝新增", async () => {
       url: "/uploads/legacy.mp4",
       type: "DETAIL",
       isVideo: true,
-    }),
+    }, adminActor),
     /缺少受控存储键/,
   );
   assert.equal(transactionCalls, 0);
@@ -223,7 +287,7 @@ test("公开商品过滤遗留坏媒体且不泄漏内部存储字段", async ()
 test("不可读图片和视频都不能被设置为主图或列表图", async () => {
   const updates: unknown[] = [];
   const tx = {
-    $queryRaw: async () => [{ id: 6 }],
+    $queryRaw: async () => [{ id: 6, role: "ADMIN" }],
     productImage: {
       findFirst: async ({ where }: any) =>
         where.id === 8
@@ -244,14 +308,14 @@ test("不可读图片和视频都不能被设置为主图或列表图", async ()
     {} as never,
   );
 
-  await assert.rejects(() => service.setPrimaryImage(6, 8), /非视频图片/);
-  await assert.rejects(() => service.setListingImage(6, 9), /可读取/);
+  await assert.rejects(() => service.setPrimaryImage(6, 8, adminActor), /非视频图片/);
+  await assert.rejects(() => service.setListingImage(6, 9, adminActor), /可读取/);
   assert.deepEqual(updates, []);
 });
 
 test("普通图片排序仍允许处理视频，不误套主图门禁", async () => {
   const tx = {
-    $queryRaw: async () => [{ id: 6 }],
+    $queryRaw: async () => [{ id: 6, role: "ADMIN" }],
     product: { findUnique: async () => ({ status: "DRAFT" }) },
     productImage: {
       findFirst: async () => ({ id: 8, productId: 6, isVideo: true }),
@@ -272,7 +336,7 @@ test("普通图片排序仍允许处理视频，不误套主图门禁", async ()
     {} as never,
   );
 
-  const image = await service.updateImage(6, 8, { sortOrder: 2 });
+  const image = await service.updateImage(6, 8, { sortOrder: 2 }, adminActor);
   assert.equal(image.sortOrder, 2);
 });
 
@@ -319,6 +383,9 @@ test("装修引用与咨询快照只为可读媒体生成受控地址", async ()
         return [referenceProduct];
       },
     },
+    $queryRaw: async () => [{ id: 6 }],
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback(prisma),
   };
   const service = new ProductsService(
     prisma as unknown as PrismaService,
@@ -326,7 +393,10 @@ test("装修引用与咨询快照只为可读媒体生成受控地址", async ()
     {} as never,
   );
 
-  const references = await service.resolveReferences({ codes: ["TEST-REF-6"] });
+  const references = await service.resolveReferences(
+    { codes: ["TEST-REF-6"] },
+    { id: 6, role: "ADMIN" },
+  );
   assert.equal(
     (references[0] as { thumbnail?: string }).thumbnail,
     "/products/catalog/6/media/2?width=480",

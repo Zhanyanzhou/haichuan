@@ -24,17 +24,17 @@ test("隔离布局：自由转换扣除内边距保持位置、取消零写入�
   await page.getByRole("button", { name: "重做", exact: true }).click();
   await page.getByRole("button", { name: "保存格式往返" }).click(); expect((await read(page)).definition).toEqual(saved.definition);
 });
-test("隔离布局：Tablet从自由转网格仅写覆盖并自动回流，列比例走同一事务", async ({ page }) => {
+test("隔离布局：手机从自由转网格仅写覆盖并自动回流，列比例走同一事务", async ({ page }) => {
   await mount(page);
   await page.getByRole("button", { name: "预览自由排列", exact: true }).click(); await page.getByRole("button", { name: "确认排列转换" }).click();
-  await page.getByRole("button", { name: "tablet", exact: true }).click();
+  await page.getByRole("button", { name: "mobile", exact: true }).click();
   await page.getByRole("button", { name: "预览网格排列", exact: true }).click(); await page.getByRole("button", { name: "确认排列转换" }).click();
-  const state = await read(page); expect(state.definition.nodes[state.stack].responsive.desktop.layoutMode).toBe("free"); expect(state.definition.nodes[state.stack].responsive.tablet.layoutMode).toBe("flow");
-  for (const id of state.cards) expect(state.definition.nodes[id].responsive.tablet.placement).toBeNull();
+  const state = await read(page); expect(state.definition.nodes[state.stack].responsive.desktop.layoutMode).toBe("free"); expect(state.definition.nodes[state.stack].responsive.mobile.layoutMode).toBe("flow");
+  for (const id of state.cards) expect(state.definition.nodes[id].responsive.mobile.placement).toBeNull();
   const ratio = page.getByRole("spinbutton", { name: "第 1 列比例" }); await ratio.fill("2"); expect((await read(page)).history).toBe(2); await ratio.press("Enter"); expect((await read(page)).history).toBe(3);
-  const changed = await read(page); expect(changed.definition.nodes[changed.stack].responsive.tablet.columns).toEqual([2, 1, 1]);
+  const changed = await read(page); expect(changed.definition.nodes[changed.stack].responsive.mobile.columns).toEqual([2, 1, 1]);
   await page.getByRole("button", { name: "模拟列分隔线意图" }).click();
-  const resized = await read(page); const columns = resized.definition.nodes[resized.stack].responsive.tablet.columns; expect(columns[0] + columns[1]).toBeCloseTo(3); expect(columns[0]).toBeGreaterThan(2);
+  const resized = await read(page); const columns = resized.definition.nodes[resized.stack].responsive.mobile.columns; expect(columns[0] + columns[1]).toBeCloseTo(3); expect(columns[0]).toBeGreaterThan(2);
 });
 test("隔离布局：未呈现容器不猜测自由几何，横纵换行转换均可取消", async ({ page }) => {
   await mount(page); const before = await read(page);

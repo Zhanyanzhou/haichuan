@@ -4,10 +4,15 @@ import { PrismaClient } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import { OutboxService } from "../../common/outbox/outbox.service";
 import { CustomersService } from "../customers/customers.service";
+import {
+  LEAD_RETENTION_POLICY,
+  LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+} from "./lead-submission";
 import { LeadsService } from "./leads.service";
 const { validateTarget } = require("../../../scripts/run-real-mysql-tests.cjs");
 
 const databaseUrl = process.env.PRIVACY_TEST_DATABASE_URL;
+const POLICY_APPROVAL_REFERENCE_SHA256 = "a".repeat(64);
 
 test(
   "真实 MySQL：到期匿名化、法律保留、并发 CAS 与账户注销保持隐私边界",
@@ -94,21 +99,91 @@ test(
       const service = new LeadsService(prisma as never, new OutboxService());
       const preview = await service.previewRetentionDisposition({ limit: 20 });
       assert.ok(preview.candidates.some((candidate) => candidate.id === lead.id));
+      assert.equal(
+        preview.policy.fingerprintSha256,
+        LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+      );
       const beforeDryRun = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
       assert.equal(beforeDryRun.customerName, "待匿名化客户");
       assert.equal(beforeDryRun.privacyDisposedAt, null);
 
-      await service.setLegalHold("inquiry", lead.id, "LEGAL_REQUIREMENT", actor.id);
-      const heldExecution = await service.dispositionDueLeads({ limit: 20, actorId: actor.id });
+      await service.setLegalHold(
+        "inquiry",
+        lead.id,
+        "LEGAL_REQUIREMENT",
+        `privacy-hold-set-${lead.id}-${actor.id}`,
+        actor.id,
+      );
+      const heldExecution = await service.dispositionDueLeads({
+        limit: 20,
+        actorId: actor.id,
+        idempotencyKey: `privacy-retention-held-${lead.id}-${actor.id}`,
+        policyApprovalReferenceSha256: POLICY_APPROVAL_REFERENCE_SHA256,
+        policyFingerprintSha256: LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+      });
       assert.equal(heldExecution.anonymized, 0);
       assert.equal((await prisma.inquiry.findUniqueOrThrow({ where: { id: inquiry.id } })).customerPhone, "13800000041");
-      await service.releaseLegalHold("inquiry", lead.id, "REQUIREMENT_ENDED", actor.id);
+      await service.releaseLegalHold(
+        "inquiry",
+        lead.id,
+        "REQUIREMENT_ENDED",
+        `privacy-hold-release-${lead.id}-${actor.id}`,
+        actor.id,
+      );
 
+      const recoveryKey = `privacy-retention-batch-${lead.id}-${actor.id}`;
       const [left, right] = await Promise.all([
-        service.dispositionDueLeads({ limit: 20, actorId: actor.id }),
-        service.dispositionDueLeads({ limit: 20, actorId: actor.id }),
+        service.dispositionDueLeads({
+          limit: 20,
+          actorId: actor.id,
+          idempotencyKey: recoveryKey,
+          policyApprovalReferenceSha256: POLICY_APPROVAL_REFERENCE_SHA256,
+          policyFingerprintSha256: LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+        }),
+        service.dispositionDueLeads({
+          limit: 20,
+          actorId: actor.id,
+          idempotencyKey: recoveryKey,
+          policyApprovalReferenceSha256: POLICY_APPROVAL_REFERENCE_SHA256,
+          policyFingerprintSha256: LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+        }),
       ]);
-      assert.equal(left.anonymized + right.anonymized, 1);
+      assert.equal(left.anonymized, 1);
+      assert.deepEqual(right, left);
+      const batchAudits = await prisma.operationLog.findMany({
+        where: {
+          userId: actor.id,
+          action: "LEAD_RETENTION_DISPOSITION_EXECUTED",
+          module: "leads",
+        },
+        orderBy: { id: "asc" },
+        select: { detail: true },
+      });
+      assert.equal(batchAudits.length, 2);
+      const batchDetails = batchAudits.map(({ detail }) =>
+        JSON.parse(detail || "{}") as Record<string, unknown>);
+      assert.equal(
+        batchDetails.reduce((total, detail) => total + Number(detail.anonymized || 0), 0),
+        1,
+      );
+      assert.ok(batchDetails.every((detail) =>
+        detail.policyApprovalReferenceSha256 === POLICY_APPROVAL_REFERENCE_SHA256
+        && detail.policyFingerprintSha256 === LEAD_RETENTION_POLICY_FINGERPRINT_SHA256
+        && /^[a-f0-9]{64}$/.test(String(detail.candidateSetSha256))));
+      assert.doesNotMatch(
+        JSON.stringify(batchDetails),
+        /待匿名化客户|13800000041|privacy41@example\.com|测试预算|周末上午/,
+      );
+      const persistedRuns = await prisma.leadRetentionDispositionRun.findMany({
+        where: { actorId: actor.id },
+        orderBy: { id: "asc" },
+      });
+      assert.equal(persistedRuns.length, 2);
+      assert.equal(
+        persistedRuns.filter((run) => run.anonymized === 1).length,
+        1,
+      );
+      assert.doesNotMatch(JSON.stringify(persistedRuns), new RegExp(recoveryKey));
 
       const [anonymizedLead, anonymizedInquiry, activities, followUps, outbox] = await Promise.all([
         prisma.lead.findUniqueOrThrow({ where: { id: lead.id } }),
@@ -127,6 +202,25 @@ test(
       assert.equal(anonymizedLead.submissionFingerprint, null);
       assert.equal(anonymizedLead.privacyDisposition, "ANONYMIZED");
       assert.equal(anonymizedLead.privacyDisposedBy, actor.id);
+      const privacyAudit = activities.find((activity) => {
+        const metadata = activity.metadata as Record<string, unknown> | null;
+        return metadata?.action === "PRIVACY_ANONYMIZED";
+      });
+      assert.equal(
+        (privacyAudit?.metadata as Record<string, unknown> | null)
+          ?.policyApprovalReferenceSha256,
+        POLICY_APPROVAL_REFERENCE_SHA256,
+      );
+      assert.equal(
+        (privacyAudit?.metadata as Record<string, unknown> | null)
+          ?.policyVersion,
+        LEAD_RETENTION_POLICY.version,
+      );
+      assert.equal(
+        (privacyAudit?.metadata as Record<string, unknown> | null)
+          ?.policyFingerprintSha256,
+        LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+      );
       assert.equal(anonymizedInquiry.customerName, "已匿名化");
       assert.equal(anonymizedInquiry.customerPhone, "已匿名化");
       assert.equal(anonymizedInquiry.customerEmail, null);
@@ -141,7 +235,13 @@ test(
       const scrubbedJson = JSON.stringify({ anonymizedLead, anonymizedInquiry, activities, followUps, outbox });
       assert.doesNotMatch(scrubbedJson, /待匿名化客户|13800000041|privacy41@example\.com|待清理|测试预算|周末上午/);
       await assert.rejects(
-        service.updateLead("inquiry", lead.id, { internalNote: "不得重新写入" }, actor.id),
+        service.updateLead(
+          "inquiry",
+          lead.id,
+          { internalNote: "不得重新写入" },
+          `lead-privacy-disposed-${lead.id}`,
+          actor.id,
+        ),
         /线索已匿名化/,
       );
 
@@ -205,7 +305,7 @@ test(
         {} as never,
         {} as never,
       );
-      await customerService.closeAccount(customer.id, customerPassword);
+      await customerService.closeAccount(customer, { password: customerPassword });
 
       const [closedCustomer, closedLead, closedInquiry, consent, smsCode] = await Promise.all([
         prisma.customer.findUniqueOrThrow({ where: { id: customer.id } }),
@@ -226,6 +326,82 @@ test(
       assert.equal(consent.anonymousIdHash, null);
       assert.equal(smsCode.phone, `closed-${customer.id}`);
       assert.ok(smsCode.usedAt);
+    } finally {
+      await prisma.$disconnect();
+    }
+  },
+);
+
+test(
+  "真实 MySQL：个人数据导出与账户注销并发时只返回完整快照或稳定冲突",
+  { skip: databaseUrl ? false : "需要显式提供一次性 PRIVACY_TEST_DATABASE_URL" },
+  async () => {
+    assert.equal(databaseUrl, validateTarget(process.env), "隐私测试必须使用显式隔离库");
+    const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+    await prisma.$connect();
+    try {
+      const password = "export-race-123";
+      const customer = await prisma.customer.create({
+        data: {
+          phone: "13800000043",
+          name: "导出注销竞态客户",
+          email: "privacy43@example.com",
+          passwordHash: await bcrypt.hash(password, 4),
+        },
+      });
+      await prisma.customerAddress.create({
+        data: {
+          customerId: customer.id,
+          recipientName: "导出注销竞态客户",
+          recipientPhone: customer.phone,
+          province: "广东省",
+          city: "深圳市",
+          district: "罗湖区",
+          detail: "隔离测试地址",
+          isDefault: true,
+        },
+      });
+      const service = new CustomersService(
+        prisma as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      );
+
+      const exportAttempt = service.exportMyData(customer);
+      const closeAttempt = service.closeAccount(customer, { password });
+      const [exportResult, closeResult] = await Promise.allSettled([
+        exportAttempt,
+        closeAttempt,
+      ]);
+
+      assert.equal(closeResult.status, "fulfilled");
+      if (exportResult.status === "fulfilled") {
+        assert.equal(exportResult.value.profile.status, "ACTIVE");
+        assert.equal(exportResult.value.profile.phone, "13800000043");
+        assert.equal(exportResult.value.addresses.length, 1);
+        assert.equal(exportResult.value.addresses[0].detail, "隔离测试地址");
+      } else {
+        assert.equal(
+          (exportResult.reason as { errorCode?: string }).errorCode,
+          "ACCOUNT_DATA_EXPORT_STATE_CHANGED",
+        );
+      }
+
+      const [closedCustomer, addressCount] = await Promise.all([
+        prisma.customer.findUniqueOrThrow({ where: { id: customer.id } }),
+        prisma.customerAddress.count({ where: { customerId: customer.id } }),
+      ]);
+      assert.equal(closedCustomer.status, "DISABLED");
+      assert.equal(addressCount, 0);
+      await assert.rejects(
+        () => service.exportMyData(customer),
+        (error: unknown) => (
+          (error as { errorCode?: string }).errorCode === "ACCOUNT_DATA_EXPORT_STATE_CHANGED"
+        ),
+      );
     } finally {
       await prisma.$disconnect();
     }

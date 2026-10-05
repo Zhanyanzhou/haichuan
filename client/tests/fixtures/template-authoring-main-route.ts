@@ -9,13 +9,16 @@ import type {
   PublishedDynamicTemplateResource,
 } from "../../src/services/clients/dynamicTemplateClient";
 import { installAdminSession } from "./session-auth";
-import { systemTemplateCatalogItems } from "./template-catalog";
 
 // 主路由确定性 UI 共用夹具。所有 /api 请求均被截获，模板与页面只保存在测试进程内。
 // 默认仍拒绝页面写入；黄金闭环必须显式开启 pageLifecycle，不能冒充真实持久化证据。
 
 export const NOW = "2026-09-09T10:00:00.000Z";
 export const CHECKSUM = "c".repeat(64);
+const STAFF_MEDIA_PREVIEW_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
 export const MAX_CANVAS_VIEWPORT_MULTIPLIER = 4;
 export const NEW_TEMPLATE_NAME = "未命名模板";
 export const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -125,6 +128,7 @@ export function makeResource(
     definitionSchemaVersion: definition.schemaVersion,
     publishedVersion,
     sourceReference: null,
+    catalogCoverUrl: null,
     archivedAt: null,
     createdAt: NOW,
     updatedAt: NOW,
@@ -149,6 +153,7 @@ export function makePublished(
   return {
     templateId: resource.templateId,
     sourceReference: null,
+    catalogCoverUrl: resource.catalogCoverUrl ?? null,
     name: definition.name,
     category: definition.metadata.category,
     purpose: definition.metadata.purpose,
@@ -197,9 +202,18 @@ export async function installNewTemplateServer(
     const path = new URL(request.url()).pathname;
 
     if (path === "/api/auth/profile") return route.fallback();
+    if (
+      (method === "GET" || method === "HEAD")
+      && path === "/api/upload/media/preview-by-storage-key"
+    ) {
+      return route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: STAFF_MEDIA_PREVIEW_PNG,
+      });
+    }
     if (path === "/api/page-modules/dynamic-templates/catalog" && method === "GET") {
       const items = [
-        ...systemTemplateCatalogItems(),
         ...(server.persisted
           ? [{ kind: "editable" as const, template: server.persisted }]
           : []),
@@ -248,7 +262,11 @@ export async function installNewTemplateServer(
       if (!server.persisted?.draft || body.expectedRevision !== server.persisted.draft.revision) {
         return route.fulfill(json(null, 409));
       }
-      server.persisted = makeResource(body.definition, body.expectedRevision + 1);
+      const catalogCoverUrl = server.persisted.catalogCoverUrl ?? null;
+      server.persisted = {
+        ...makeResource(body.definition, body.expectedRevision + 1, server.persisted.publishedVersion),
+        catalogCoverUrl,
+      };
       server.saveResults.push({
         checksum: server.persisted.draft!.definitionChecksum,
         revision: server.persisted.draft!.revision,
@@ -272,8 +290,12 @@ export async function installNewTemplateServer(
         return route.fulfill(json(null, 409));
       }
       const definition = server.persisted.draft.definition;
-      server.published = makePublished(server.persisted, definition);
-      server.persisted = makeResource(definition, body.expectedRevision + 1, body.targetVersion);
+      const catalogCoverUrl = server.persisted.catalogCoverUrl ?? null;
+      server.published = makePublished({ ...server.persisted, catalogCoverUrl }, definition);
+      server.persisted = {
+        ...makeResource(definition, body.expectedRevision + 1, body.targetVersion),
+        catalogCoverUrl,
+      };
       return route.fulfill(json({
         templateId: definition.templateId,
         version: body.targetVersion,
@@ -337,6 +359,7 @@ export async function installNewTemplateServer(
       server.pageDocument = {
         ...server.pageDocument,
         reviewStatus: "IN_REVIEW",
+        submittedBy: 1,
       };
       return route.fulfill(json(server.pageDocument));
     }
@@ -372,6 +395,34 @@ export async function installNewTemplateServer(
         reviewStatus: "PUBLISHED",
       };
       return route.fulfill(json(server.publishedPage));
+    }
+
+    if (path === "/api/upload/media/crop-page-asset" && method === "POST") {
+      recordWrite(route, path);
+      return route.fulfill(json({
+        url: "/uploads/page-assets/catalog-cover-cropped.jpg",
+        storageKey: "page-assets/catalog-cover-cropped.jpg",
+      }));
+    }
+
+    const catalogCoverMatch = path.match(
+      /^\/api\/page-modules\/dynamic-templates\/([^/]+)\/catalog-cover$/,
+    );
+    if (catalogCoverMatch && method === "PATCH") {
+      const write = recordWrite(route, path);
+      const templateId = decodeURIComponent(catalogCoverMatch[1]);
+      if (!server.persisted || server.persisted.templateId !== templateId) {
+        return route.fulfill(json(null, 404));
+      }
+      const body = write.body as { catalogCoverUrl?: string | null };
+      const nextUrl = typeof body.catalogCoverUrl === "string"
+        ? body.catalogCoverUrl.trim().split(/[?#]/, 1)[0] || null
+        : null;
+      server.persisted = { ...server.persisted, catalogCoverUrl: nextUrl };
+      if (server.published?.templateId === templateId) {
+        server.published = { ...server.published, catalogCoverUrl: nextUrl };
+      }
+      return route.fulfill(json(server.persisted));
     }
 
     if (WRITE_METHODS.has(method)) {
@@ -470,6 +521,29 @@ export async function openTemplateDesignWithoutDraft(page: Page) {
   await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
   await page.getByRole("button", { name: "模板设计", exact: true }).click();
   await expect(page.getByRole("region", { name: "空模板画布", exact: true })).toBeVisible();
+}
+
+/**
+ * 新建模板入口随布局切换：521–1024px 用顶部快捷按钮；≥1025px 停靠布局以
+ * 组件库底部主入口为准；≤520px 收进“更多模板操作”菜单。返回实际使用的入口，
+ * 供焦点恢复断言复用。
+ */
+export async function clickNewTemplateEntry(page: Page) {
+  const width = page.viewportSize()?.width ?? 1280;
+  if (width > 520 && width <= 1024) {
+    const top = page.getByRole("button", { name: "顶部新建模板", exact: true });
+    await top.click();
+    return top;
+  }
+  if (width >= 1025) {
+    const library = page.getByRole("button", { name: "新建模板", exact: true });
+    await library.click();
+    return library;
+  }
+  await page.getByRole("button", { name: "更多模板操作", exact: true }).click();
+  const menuItem = page.getByRole("menuitem", { name: /新建模板$/ });
+  await menuItem.click();
+  return menuItem;
 }
 
 export async function createBlankTemplate(page: Page) {

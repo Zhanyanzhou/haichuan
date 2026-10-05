@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from "react";
+import { Component, createRef, type ReactNode } from "react";
 import { getBrowserPublicContentLocale } from "@/i18n/publicLocale";
 
 interface Props {
@@ -13,6 +13,7 @@ interface State {
 
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false, error: null };
+  private readonly recoveryHeadingRef = createRef<HTMLHeadingElement>();
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error(
@@ -33,6 +34,7 @@ export class ErrorBoundary extends Component<Props, State> {
       document.head.querySelector('meta[property="og:url"]')?.remove();
       document.title = english ? "Page unavailable" : "页面加载异常";
     }
+    this.recoveryHeadingRef.current?.focus({ preventScroll: true });
   }
 
   static getDerivedStateFromError(error: Error): State {
@@ -44,15 +46,21 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback !== undefined) return this.props.fallback;
       const english = getBrowserPublicContentLocale() === "en";
       return (
-        <div className="min-h-screen flex items-center justify-center bg-brand-bg">
+        <main
+          className="min-h-screen flex items-center justify-center bg-brand-bg"
+          aria-labelledby="fatal-error-title"
+        >
           <div className="text-center max-w-md px-6">
-            <p className="text-5xl mb-4">⚠️</p>
-            <h2
+            <p className="text-5xl mb-4" aria-hidden="true">⚠️</p>
+            <h1
+              ref={this.recoveryHeadingRef}
+              id="fatal-error-title"
+              tabIndex={-1}
               className="text-2xl font-medium mb-2"
               style={{ color: "#181A1B" }}
             >
               {english ? "Page unavailable" : "页面加载异常"}
-            </h2>
+            </h1>
             <p className="text-sm text-brand-muted mb-6">
               {english
                 ? "This page cannot be displayed right now. Refresh and try again."
@@ -69,7 +77,7 @@ export class ErrorBoundary extends Component<Props, State> {
               {english ? "Refresh page" : "刷新页面"}
             </button>
           </div>
-        </div>
+        </main>
       );
     }
     return this.props.children;

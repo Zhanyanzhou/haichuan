@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Header,
   Res,
   ServiceUnavailableException,
 } from "@nestjs/common";
@@ -22,19 +23,20 @@ export class HealthController {
   /** 进程存活不依赖外部服务；draining 期间仍存活，但不再视为可接流量。 */
   @Public()
   @Get("health")
+  @Header("Cache-Control", "no-store")
   health() {
     const lifecycle = this.metrics.lifecycle();
     return {
       status: "alive",
       acceptingTraffic: !lifecycle.draining,
-      lifecycle,
-      timestamp: new Date().toISOString(),
+      release: lifecycle.release,
     };
   }
 
   /** 启动探针只表达 Nest 生命周期已完成，不把数据库瞬时波动误判为启动失败。 */
   @Public()
   @Get("startup")
+  @Header("Cache-Control", "no-store")
   startup() {
     const lifecycle = this.metrics.lifecycle();
     if (!lifecycle.startupComplete) {
@@ -42,14 +44,14 @@ export class HealthController {
     }
     return {
       status: "started",
-      lifecycle,
-      timestamp: new Date().toISOString(),
+      release: lifecycle.release,
     };
   }
 
   /** 就绪探针拒绝 draining 进程，并以有界数据库探测决定是否接收业务流量。 */
   @Public()
   @Get("ready")
+  @Header("Cache-Control", "no-store")
   async ready() {
     const lifecycle = this.metrics.lifecycle();
     if (lifecycle.draining) {
@@ -73,19 +75,12 @@ export class HealthController {
       this.metrics.recordDatabaseHealth(true, latencySeconds);
       return {
         status: "ready",
-        lifecycle,
-        dependencies: {
-          database: {
-            status: "up",
-            latencyMs: Math.round(latencySeconds * 100_000) / 100,
-          },
-        },
-        timestamp: new Date().toISOString(),
+        release: lifecycle.release,
       };
     } catch {
       const latencySeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
       this.metrics.recordDatabaseHealth(false, latencySeconds);
-      throw new ServiceUnavailableException("数据库暂不可用");
+      throw new ServiceUnavailableException("服务暂不可用");
     } finally {
       if (timeout) clearTimeout(timeout);
     }

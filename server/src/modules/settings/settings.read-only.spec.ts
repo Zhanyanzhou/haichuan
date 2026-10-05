@@ -5,9 +5,20 @@ import { SettingsController } from "./settings.controller";
 import { SettingsService } from "./settings.service";
 import { UpdateSettingsDto } from "./dto/update-settings.dto";
 
+function withStaffAuthorization<T extends Record<string, unknown>>(domain: T) {
+  const transaction = {
+    ...domain,
+    $queryRaw: async () => [{ id: 9 }],
+  };
+  return {
+    ...transaction,
+    $transaction: async (run: (tx: typeof transaction) => Promise<unknown>) => run(transaction),
+  };
+}
+
 test("读取缺失的 SiteSettings 返回安全默认值且不写数据库", async () => {
   let upsertCalls = 0;
-  const service = new SettingsService({
+  const service = new SettingsService(withStaffAuthorization({
     siteSetting: {
       findUnique: async () => null,
       upsert: async () => {
@@ -15,9 +26,9 @@ test("读取缺失的 SiteSettings 返回安全默认值且不写数据库", asy
         throw new Error("GET 不应写入 SiteSetting");
       },
     },
-  } as any);
+  }) as any);
 
-  const settings = await service.getSettings();
+  const settings = await service.getSettings(9);
 
   assert.equal(settings.siteName, "海川珠宝");
   assert.equal(settings.siteDescription, "珠宝作品与顾问服务");
@@ -29,7 +40,7 @@ test("读取缺失的 SiteSettings 返回安全默认值且不写数据库", asy
 
 test("首次显式更新只执行一次 create 并合并安全默认值", async () => {
   const calls: any[] = [];
-  const service = new SettingsService({
+  const service = new SettingsService(withStaffAuthorization({
     siteSetting: {
       findUnique: async () => null,
       create: async (args: any) => {
@@ -37,7 +48,7 @@ test("首次显式更新只执行一次 create 并合并安全默认值", async 
         return { value: args.data.value };
       },
     },
-  } as any);
+  }) as any);
 
   const settings = await service.updateSettings({ contactPhone: "400-123-4567" }, 9);
 
@@ -51,7 +62,7 @@ test("首次显式更新只执行一次 create 并合并安全默认值", async 
 test("并发更新冲突后重新读取最新设置并保留其他管理员已写入的签认", async () => {
   const updates: any[] = [];
   let reads = 0;
-  const service = new SettingsService({
+  const service = new SettingsService(withStaffAuthorization({
     siteSetting: {
       findUnique: async () => {
         reads += 1;
@@ -70,7 +81,7 @@ test("并发更新冲突后重新读取最新设置并保留其他管理员已�
         return { count: updates.length === 1 ? 0 : 1 };
       },
     },
-  } as any);
+  }) as any);
 
   const settings = await service.updateSettings({ contactPhone: "400-123-4567" }, 9);
 
@@ -86,13 +97,13 @@ test("并发更新冲突后重新读取最新设置并保留其他管理员已�
 });
 
 test("发布准备度绕过默认回退并只认持久化设置", async () => {
-  const service = new SettingsService({
+  const service = new SettingsService(withStaffAuthorization({
     siteSetting: {
       findUnique: async () => null,
     },
-  } as any);
+  }) as any);
 
-  const result = await service.getPublicationReadiness();
+  const result = await service.getPublicationReadiness(9);
 
   assert.equal(result.ready, false);
   assert.equal(result.persisted, false);
@@ -169,10 +180,10 @@ test("必要资料通过后公开设置可读取，未选择品牌模式安全�
     publishedLocales: ["zh-CN"],
     logo: "/uploads/legacy-logo.svg",
   };
-  const service = new SettingsService({
+  const service = new SettingsService(withStaffAuthorization({
     siteSetting: { findUnique: async () => ({ value }) },
-  } as any);
-  assert.equal((await service.getPublicationReadiness()).ready, true);
+  }) as any);
+  assert.equal((await service.getPublicationReadiness(9)).ready, true);
   const result = await service.getPublishedSettings();
   assert.equal(result.siteName, value.siteName);
   assert.equal(result.brandPresentationMode, "text-only");
@@ -187,7 +198,7 @@ test("联系邮箱可清空保存，非空无效邮箱仍被写接口校验拒�
   for (const contactEmail of ["", "   ", "service@example.invalid"]) {
     const dto = await pipe.transform({ contactEmail }, metadata);
     let saved: Record<string, unknown> | undefined;
-    const service = new SettingsService({
+    const service = new SettingsService(withStaffAuthorization({
       siteSetting: {
         findUnique: async () => ({ value: { contactEmail: "previous@example.invalid" }, version: 1 }),
         updateMany: async (args: { data: Record<string, unknown> }) => {
@@ -195,7 +206,7 @@ test("联系邮箱可清空保存，非空无效邮箱仍被写接口校验拒�
           return { count: 1 };
         },
       },
-    } as any);
+    }) as any);
     const result = await service.updateSettings(dto, 9);
     assert.ok(saved);
     assert.equal(result.contactEmail, contactEmail.trim());

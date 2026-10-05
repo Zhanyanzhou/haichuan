@@ -1,5 +1,9 @@
+import { createHash } from "node:crypto";
 import { OutboxService } from "../common/outbox/outbox.service";
 import { PrismaService } from "../common/prisma/prisma.service";
+import {
+  LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+} from "../modules/leads/lead-submission";
 import { LeadsService } from "../modules/leads/leads.service";
 
 export const LEAD_RETENTION_CONFIRMATION = "ANONYMIZE_DUE_LEADS";
@@ -17,6 +21,22 @@ type LeadRetentionDispositionPort = Pick<
 
 function enabled(value: string | undefined) {
   return value?.trim().toLowerCase() === "true";
+}
+
+function policyApprovalReferenceSha256(value: string | undefined) {
+  const reference = value?.trim() ?? "";
+  if (reference.length < 3 || reference.length > 200) {
+    throw new Error("LEAD_RETENTION_POLICY_APPROVAL_REQUIRED");
+  }
+  return createHash("sha256").update(reference, "utf8").digest("hex");
+}
+
+function dispositionIdempotencyKey(value: string | undefined) {
+  const key = value?.trim() ?? "";
+  if (key.length < 8 || key.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(key)) {
+    throw new Error("LEAD_RETENTION_IDEMPOTENCY_KEY_INVALID");
+  }
+  return key;
 }
 
 export function parseLeadRetentionDispositionArgs(
@@ -66,7 +86,25 @@ export async function runLeadRetentionDisposition(
   if (!Number.isInteger(actorId) || actorId <= 0) {
     throw new Error("LEAD_RETENTION_ACTOR_REQUIRED");
   }
-  return service.dispositionDueLeads({ limit: args.limit, actorId });
+  const approvalReferenceSha256 = policyApprovalReferenceSha256(
+    environment.LEAD_RETENTION_POLICY_APPROVAL_REFERENCE,
+  );
+  if (
+    environment.LEAD_RETENTION_POLICY_APPROVAL_FINGERPRINT?.trim()
+      !== LEAD_RETENTION_POLICY_FINGERPRINT_SHA256
+  ) {
+    throw new Error("LEAD_RETENTION_POLICY_FINGERPRINT_MISMATCH");
+  }
+  const idempotencyKey = dispositionIdempotencyKey(
+    environment.LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_KEY,
+  );
+  return service.dispositionDueLeads({
+    limit: args.limit,
+    actorId,
+    idempotencyKey,
+    policyApprovalReferenceSha256: approvalReferenceSha256,
+    policyFingerprintSha256: LEAD_RETENTION_POLICY_FINGERPRINT_SHA256,
+  });
 }
 
 async function main() {
@@ -82,6 +120,12 @@ async function main() {
           process.env.LEAD_RETENTION_DISPOSITION_ENABLED,
         LEAD_RETENTION_DISPOSITION_ACTOR_ID:
           process.env.LEAD_RETENTION_DISPOSITION_ACTOR_ID,
+        LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_KEY:
+          process.env.LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_KEY,
+        LEAD_RETENTION_POLICY_APPROVAL_REFERENCE:
+          process.env.LEAD_RETENTION_POLICY_APPROVAL_REFERENCE,
+        LEAD_RETENTION_POLICY_APPROVAL_FINGERPRINT:
+          process.env.LEAD_RETENTION_POLICY_APPROVAL_FINGERPRINT,
       },
     );
     console.log(JSON.stringify(result, null, 2));

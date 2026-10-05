@@ -8,9 +8,14 @@ import type {
 } from "./generated/templateDefinition.generated";
 import {
   compileDynamicTemplateRenderPlan,
+  findFirstReachableHeadingSlotId,
+  type CompileDynamicTemplateRenderPlanOptions,
   type DynamicTemplateRenderPlanNode,
 } from "./renderPlan";
-import { getContentTemplateContract } from "../generated/contentTemplates.generated";
+import {
+  getContentTemplateContract,
+  getContentTemplateMediaReferences,
+} from "../generated/contentTemplates.generated";
 import { resolveEditableTargets } from "./editableTargets";
 import { getDynamicTemplateNodeAdapter } from "./dynamicTemplateNodeAdapters";
 import { objectPositionToPercent } from "./imagePosition";
@@ -19,12 +24,20 @@ import { TEMPLATE_MEDIA_DEFAULTS, TEMPLATE_TEXT_DEFAULTS } from "./designPropert
 import {
   moveFreePlacement,
 } from "./freePlacementGeometry";
-import { getDynamicTemplateStructureProtectedNodeIds, isSafeTemplateMediaUrl } from "./validateTemplateDefinition";
+import {
+  getContentTemplateModuleTypeForSlotType,
+  getDynamicTemplateStructureProtectedNodeIds,
+  isSafeTemplateMediaUrl,
+} from "./validateTemplateDefinition";
 import {
   CONTENT_TEMPLATE_RENDER_SURFACE,
   useContentTemplateRenderSurface,
   type ContentTemplateRenderMode,
 } from "../runtime/ContentTemplateRenderSurface";
+import {
+  resolveManagedTemplateMediaPreviewUrl,
+  useManagedTemplateMediaDisplayUrl,
+} from "./managedMediaPreview";
 
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
@@ -39,6 +52,7 @@ export interface DynamicTemplateRendererProps {
    * 只读预览、目录缩略图和公开页默认都按公开折叠语义处理空内容。
    */
   showEmptySlots?: boolean;
+  publicSurface?: CompileDynamicTemplateRenderPlanOptions["publicSurface"];
   /**
    * 编辑态的交互边界。页面实例只负责整体预览，只有母模板定义工作面
    * 可以注册内部节点选择和直接布局手势；未声明时按无内部交互处理。
@@ -59,6 +73,8 @@ export interface DynamicTemplateRendererProps {
   ) => void;
   /** 公开页主舞台可把首个可见标题槽位提升为页面唯一 h1。 */
   primaryHeadingLevel?: 1 | 2;
+  /** 仅公开页首个实际可渲染主舞台的首个可达图片槽位使用。 */
+  priority?: boolean;
   layoutEditMode?: boolean;
   onLayoutOverrideCommit?: (
     nodeId: string,
@@ -83,15 +99,22 @@ function safeColor(value: string | undefined): string | undefined {
   return value && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value) ? value : undefined;
 }
 
-function backgroundImageToCss(rules: DynamicTemplateRenderPlanNode["rules"]): string | undefined {
+function isDisplayableTemplateMediaUrl(value: string | undefined): value is string {
+  return Boolean(value && (value.startsWith("blob:") || isSafeTemplateMediaUrl(value)));
+}
+
+function backgroundImageToCss(
+  rules: DynamicTemplateRenderPlanNode["rules"],
+  imageUrl?: string,
+): string | undefined {
   const layers: string[] = [];
   const gradient = rules.backgroundGradient;
   if (gradient && safeColor(gradient.from) && safeColor(gradient.to)
     && Number.isFinite(gradient.angle) && gradient.angle >= 0 && gradient.angle <= 360) {
     layers.push(`linear-gradient(${gradient.angle}deg, ${gradient.from}, ${gradient.to})`);
   }
-  if (rules.backgroundImage && isSafeTemplateMediaUrl(rules.backgroundImage)) {
-    layers.push(`url(${JSON.stringify(rules.backgroundImage)})`);
+  if (isDisplayableTemplateMediaUrl(imageUrl)) {
+    layers.push(`url(${JSON.stringify(imageUrl)})`);
   }
   return layers.length ? layers.join(", ") : undefined;
 }
@@ -127,6 +150,48 @@ function ratioToCss(ratio: string | undefined): string | undefined {
     : undefined;
 }
 
+/** 解析 "4:5" 这类比例；无法解析时返回 undefined。 */
+function parseAspectRatio(ratio: string | undefined): { width: number; height: number } | undefined {
+  if (!ratio || !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(ratio)) return undefined;
+  const [width, height] = ratio.split(":").map(Number);
+  if (!(width > 0) || !(height > 0)) return undefined;
+  return { width, height };
+}
+
+/**
+ * 移动端竖框 + cover 会裁掉横图内嵌标题。
+ * 仅在槽位显式声明竖版比例（如 4:5）且未做实例覆盖时改为 contain；
+ * 素材本身已是竖版时与 cover 视觉等价。不根据流式容器高度推断，避免误伤作品集等布局。
+ */
+export function resolveImageObjectFit(
+  node: Pick<DynamicTemplateRenderPlanNode, "layoutOverride" | "slot" | "slotRules">,
+  viewport: "desktop" | "mobile" | undefined,
+): NonNullable<CSSProperties["objectFit"]> {
+  const explicitOverride = node.layoutOverride?.objectFit;
+  const requested = explicitOverride
+    ?? node.slotRules?.objectFit
+    ?? TEMPLATE_MEDIA_DEFAULTS.objectFit;
+  if (explicitOverride || requested !== "cover" || viewport !== "mobile") return requested;
+  // 只处理通栏背景图：竖框 cover 会裁掉横图内嵌标题。作品集等竖图槽位保持原 cover。
+  if (node.slot?.semanticRole !== "backgroundImage") return requested;
+  const frame = parseAspectRatio(node.slotRules?.aspectRatio);
+  if (frame && frame.width / frame.height < 1) return "contain";
+  return requested;
+}
+
+/** 竖框 contain 会留下大块上下空白；首屏改回桌面横图比例，让内嵌标题完整可见。 */
+function resolveImageFrameAspectRatio(
+  node: DynamicTemplateRenderPlanNode,
+  viewport: "desktop" | "mobile" | undefined,
+): string | undefined {
+  if (resolveImageObjectFit(node, viewport) !== "contain" || viewport !== "mobile") return undefined;
+  const desktop = parseAspectRatio(node.slot?.desktopRules?.aspectRatio);
+  if (desktop && desktop.width / desktop.height >= 1) {
+    return `${desktop.width} / ${desktop.height}`;
+  }
+  return undefined;
+}
+
 function rulesToStyle(
   node: DynamicTemplateRenderPlanNode,
   previewOverride?: TemplateInstanceLayoutOverride,
@@ -134,6 +199,8 @@ function rulesToStyle(
   parentFree = false,
   parentRules?: DynamicTemplateRenderPlanNode["rules"],
   relationalLayout = false,
+  backgroundDisplayUrl?: string,
+  viewport?: "desktop" | "mobile",
 ): CSSProperties {
   const { rules } = node;
   const alignsOwnChildren = rules.display === "flex" || rules.display === "grid";
@@ -161,7 +228,7 @@ function rulesToStyle(
     backgroundColor: safeColor(rules.backgroundColor) ?? (rules.backgroundToken
       ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[rules.backgroundToken]
       : undefined),
-    backgroundImage: backgroundImageToCss(rules),
+    backgroundImage: backgroundImageToCss(rules, backgroundDisplayUrl),
     backgroundSize: rules.backgroundImage ? "cover" : undefined,
     backgroundPosition: rules.backgroundImage ? "center" : undefined,
     opacity: Number.isFinite(rules.opacity) ? Math.max(0, Math.min(1, rules.opacity!)) : undefined,
@@ -197,13 +264,14 @@ function rulesToStyle(
     if (rules.height.mode === "fill" && parentRules?.display !== "flex") style.height = "100%";
   }
   const height = rules.height;
+  const landscapeSafeRatio = resolveImageFrameAspectRatio(node, viewport);
   if (height.mode === "min-height") style.minHeight = lengthToCss(height.value);
   if (height.mode === "fixed" || height.mode === "viewport") style.height = lengthToCss(height.value);
   if (height.mode === "aspect-ratio" && height.ratio) {
-    style.aspectRatio = `${height.ratio.width} / ${height.ratio.height}`;
+    style.aspectRatio = landscapeSafeRatio ?? `${height.ratio.width} / ${height.ratio.height}`;
   }
   const imageSlotAspectRatio = node.slot?.type === "image" && height.mode === "auto"
-    ? ratioToCss(node.slotRules?.aspectRatio)
+    ? landscapeSafeRatio ?? ratioToCss(node.slotRules?.aspectRatio)
     : undefined;
   if (imageSlotAspectRatio) {
     style.aspectRatio = imageSlotAspectRatio;
@@ -318,6 +386,52 @@ function getSafeActionContent(content: unknown): { label: string; href?: string 
   return { label };
 }
 
+function ManagedTemplateSlotImage({
+  src,
+  alt,
+  objectFit,
+  objectPosition,
+  transform,
+  transformOrigin,
+  hostFetch,
+  priority,
+}: {
+  src: string;
+  alt: string;
+  objectFit: NonNullable<CSSProperties["objectFit"]>;
+  objectPosition: string;
+  transform?: string;
+  transformOrigin?: string;
+  hostFetch: boolean;
+  priority: boolean;
+}) {
+  const media = useManagedTemplateMediaDisplayUrl(src, hostFetch);
+  const previewUrl = hostFetch ? resolveManagedTemplateMediaPreviewUrl(src) : src;
+  const displaySrc = hostFetch
+    ? (media.status === "error" ? previewUrl : media.displaySrc)
+    : src;
+  const style: CSSProperties = {
+    width: "100%",
+    height: "100%",
+    objectFit,
+    objectPosition,
+    transform,
+    transformOrigin,
+  };
+  return (
+    <img
+      src={displaySrc || undefined}
+      alt={alt}
+      data-template-image-fit={objectFit}
+      data-template-media-state={media.status}
+      data-template-managed-preview={hostFetch ? previewUrl : undefined}
+      loading={priority ? "eager" : undefined}
+      {...(priority ? { fetchpriority: "high" } : {})}
+      style={style}
+    />
+  );
+}
+
 function renderSlotContent(
   node: DynamicTemplateRenderPlanNode,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
@@ -326,6 +440,7 @@ function renderSlotContent(
   editorViewport?: "desktop" | "mobile",
   interactionOwner?: DynamicTemplateRendererProps["interactionOwner"],
   relationalLayout = false,
+  priority = false,
 ): ReactNode {
   const { slot, content } = node;
   if (!slot) return null;
@@ -343,6 +458,7 @@ function renderSlotContent(
     mode,
     nodeProps: node.props,
     headingLevel,
+    priority,
   });
   const textOverflow = node.slotRules?.overflow ?? TEMPLATE_TEXT_DEFAULTS.overflow;
   const textStyle: CSSProperties = {
@@ -386,20 +502,19 @@ function renderSlotContent(
     const alt = typeof record?.alt === "string" ? record.alt : "";
     const defaultFocus = objectPositionToPercent(node.slotRules?.objectPosition ?? TEMPLATE_MEDIA_DEFAULTS.objectPosition);
     if (!src) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">图片待填写</span>;
+    const objectFit = resolveImageObjectFit(node, editorViewport);
     return (
-      <img
+      <ManagedTemplateSlotImage
         src={src}
         alt={alt}
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: node.layoutOverride?.objectFit ?? node.slotRules?.objectFit ?? TEMPLATE_MEDIA_DEFAULTS.objectFit,
-          objectPosition: `${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`,
-          transform: node.layoutOverride?.imageScalePercent && node.layoutOverride.imageScalePercent !== 100
-            ? `scale(${node.layoutOverride.imageScalePercent / 100})`
-            : undefined,
-          transformOrigin: `${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`,
-        }}
+        hostFetch={mode !== "public"}
+        priority={priority}
+        objectFit={objectFit}
+        objectPosition={`${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`}
+        transform={node.layoutOverride?.imageScalePercent && node.layoutOverride.imageScalePercent !== 100
+          ? `scale(${node.layoutOverride.imageScalePercent / 100})`
+          : undefined}
+        transformOrigin={`${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`}
       />
     );
   }
@@ -466,6 +581,7 @@ function RenderNode({
   onSelectContractRole,
   onNodeAction,
   primaryHeadingSlotId,
+  primaryImageSlotId,
   primaryHeadingLevel,
   device,
   layoutEditMode,
@@ -491,6 +607,7 @@ function RenderNode({
   onSelectContractRole?: DynamicTemplateRendererProps["onSelectContractRole"];
   onNodeAction?: DynamicTemplateRendererProps["onNodeAction"];
   primaryHeadingSlotId?: string;
+  primaryImageSlotId?: string;
   primaryHeadingLevel: 1 | 2;
   device: "desktop" | "mobile";
   layoutEditMode?: boolean;
@@ -509,6 +626,19 @@ function RenderNode({
   siblingIndex?: number;
 }) {
   const layoutElement = useRef<HTMLElement | null>(null);
+  const backgroundSource = !node.hidden && node.rules.backgroundImage && isSafeTemplateMediaUrl(node.rules.backgroundImage)
+    ? node.rules.backgroundImage
+    : "";
+  const backgroundMedia = useManagedTemplateMediaDisplayUrl(backgroundSource, mode !== "public");
+  const backgroundDisplayUrl = !backgroundSource
+    ? undefined
+    : mode === "public"
+      ? backgroundSource
+      : backgroundMedia.status === "ready"
+        ? backgroundMedia.displaySrc
+        : backgroundMedia.status === "error"
+          ? resolveManagedTemplateMediaPreviewUrl(backgroundSource)
+          : undefined;
   const hasPositionedChildren = relationalLayout && node.children.some((child) => child.rules.anchor || child.rules.placement);
   useLayoutEffect(() => {
     const element = layoutElement.current;
@@ -730,6 +860,7 @@ function RenderNode({
       device,
       interactionOwner,
       relationalLayout,
+      node.slotId === primaryImageSlotId,
     )
     : null;
   return (
@@ -746,7 +877,19 @@ function RenderNode({
       data-template-background-token={node.rules.backgroundToken}
       data-template-border-token={node.rules.borderToken}
       style={{
-        ...rulesToStyle(node, layoutPreview, placementPreview, parentFree, parentRules, relationalLayout),
+        ...rulesToStyle(
+          node,
+          layoutPreview,
+          placementPreview,
+          parentFree,
+          parentRules,
+          relationalLayout,
+          backgroundDisplayUrl,
+          device,
+        ),
+        ...(showEmptyStructure && !node.slot && node.children.length === 0
+          ? { minHeight: "256px" }
+          : {}),
         // 新合同的阅读顺序与叠放层序共用 childIds，断点不维护第二套排序。
         ...(relationalLayout ? { order: siblingIndex, zIndex: layoutPreview?.zIndex ?? node.layoutOverride?.zIndex ?? siblingIndex } : {}),
         ...(layoutEditable || freePlacementEditable ? {
@@ -856,6 +999,7 @@ function RenderNode({
           onSelectContractRole={onSelectContractRole}
           onNodeAction={onNodeAction}
           primaryHeadingSlotId={primaryHeadingSlotId}
+          primaryImageSlotId={primaryImageSlotId}
           primaryHeadingLevel={primaryHeadingLevel}
           device={device}
           layoutEditMode={layoutEditMode}
@@ -889,6 +1033,7 @@ export default function DynamicTemplateRenderer({
   layoutOverridesByNodeId,
   mode = "public",
   showEmptySlots,
+  publicSurface,
   editorSurface,
   interactionOwner,
   templateEditorSessionId,
@@ -898,6 +1043,7 @@ export default function DynamicTemplateRenderer({
   onSelectContractRole,
   onNodeAction,
   primaryHeadingLevel = 2,
+  priority = false,
   layoutEditMode = false,
   onLayoutOverrideCommit,
   onTemplatePlacementCommit,
@@ -921,6 +1067,7 @@ export default function DynamicTemplateRenderer({
     hiddenSlotIds,
     layoutOverridesByNodeId,
     showEmptySlots: showEmptySlots ?? mode === "editor",
+    publicSurface,
   });
   if (!result.ok) {
     if (mode === "public") return null;
@@ -941,29 +1088,37 @@ export default function DynamicTemplateRenderer({
     roles.add(target.contractRoleId);
     editableContractRoleIdsByNode.set(target.ownerNodeId, roles);
   });
-  const findPrimaryHeadingSlotId = (
+  const primaryHeadingSlotId = primaryHeadingLevel === 1
+    ? findFirstReachableHeadingSlotId(result.plan.root)
+    : undefined;
+  const findPrimaryImageSlotId = (
     node: DynamicTemplateRenderPlanNode,
   ): string | undefined => {
     if (node.hidden) return undefined;
-    if (
-      (node.slot?.type === "heading"
-        || (node.slot?.type === "heroTemplate"
-          && node.content
-          && typeof node.content === "object"
-          && !Array.isArray(node.content)
-          && typeof (node.content as Record<string, unknown>).title === "string"
-          && Boolean((node.content as Record<string, unknown>).title as string)))
-      && node.slotId
-      && (node.slot?.type === "heroTemplate"
-        || (typeof node.content === "string" && node.content.trim()))
-    ) return node.slotId;
+    if (node.slot && node.slotId) {
+      if (node.slot.type === "image") {
+        const value = node.content;
+        const source = typeof value === "string"
+          ? value
+          : value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>).src
+            : undefined;
+        if (typeof source === "string" && source.trim()) return node.slotId;
+      }
+      const moduleType = getContentTemplateModuleTypeForSlotType(node.slot.type);
+      if (moduleType && getContentTemplateMediaReferences(
+        moduleType,
+        node.content,
+        `contentBySlotId.${node.slotId}`,
+      ).length > 0) return node.slotId;
+    }
     return node.children.reduce<string | undefined>(
-      (found, child) => found ?? findPrimaryHeadingSlotId(child),
+      (found, child) => found ?? findPrimaryImageSlotId(child),
       undefined,
     );
   };
-  const primaryHeadingSlotId = primaryHeadingLevel === 1
-    ? findPrimaryHeadingSlotId(result.plan.root)
+  const primaryImageSlotId = priority
+    ? findPrimaryImageSlotId(result.plan.root)
     : undefined;
   return (
     <div
@@ -997,6 +1152,7 @@ export default function DynamicTemplateRenderer({
         onSelectContractRole={allowsNodeInteraction ? onSelectContractRole : undefined}
         onNodeAction={allowsNodeInteraction ? onNodeAction : undefined}
         primaryHeadingSlotId={primaryHeadingSlotId}
+        primaryImageSlotId={primaryImageSlotId}
         primaryHeadingLevel={primaryHeadingLevel}
         device={device}
         layoutEditMode={allowsNodeInteraction && layoutEditMode}

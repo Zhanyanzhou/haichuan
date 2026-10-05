@@ -5,8 +5,8 @@ import {
 } from "../template-definition";
 import { useResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
-import { hasExplicitDynamicTemplateInstanceImage } from "./mediaReferences";
-import { resolveTemplateBreakpoint, type TemplateBreakpoint } from "../template-definition/responsive";
+import { resolveDynamicTemplatePublicVisibility } from "./publicVisibility";
+import { resolveTemplateBreakpoint, toTemplateContentBreakpoint, type TemplateBreakpoint } from "../template-definition/responsive";
 
 function useDynamicTemplateDevice(
   mobileBreakpoint = 767,
@@ -24,12 +24,10 @@ function useDynamicTemplateDevice(
   useEffect(() => {
     if (!enabled) return undefined;
     const media = window.matchMedia(`(max-width: ${breakpoint}px)`);
-    const tablet = window.matchMedia("(max-width: 1023px)");
     const update = () => setDevice(current());
     update();
     media.addEventListener("change", update);
-    tablet.addEventListener("change", update);
-    return () => { media.removeEventListener("change", update); tablet.removeEventListener("change", update); };
+    return () => { media.removeEventListener("change", update); };
   }, [breakpoint, current, enabled]);
   return device;
 }
@@ -40,6 +38,8 @@ export default function DynamicTemplateInstanceView({
   deviceOverride,
   mode = "public",
   primaryHeadingLevel = 2,
+  priority = false,
+  pageKey,
 }: {
   props: DynamicTemplateInstanceProps;
   definition?: TemplateDefinitionV2;
@@ -47,6 +47,9 @@ export default function DynamicTemplateInstanceView({
   deviceOverride?: TemplateBreakpoint;
   mode?: "public" | "editor" | "preview";
   primaryHeadingLevel?: 1 | 2;
+  /** 公开页首个实际可渲染主舞台的首图获得加载优先语义。 */
+  priority?: boolean;
+  pageKey?: string;
 }) {
   const registered = useResolvedDynamicTemplate(props.templateId, props.templateVersion);
   const resolvedDefinition = definition ?? registered?.definition;
@@ -55,7 +58,7 @@ export default function DynamicTemplateInstanceView({
     deviceOverride === undefined,
     resolvedDefinition?.schemaVersion,
   );
-  const device = deviceOverride ?? responsiveDevice;
+  const device = toTemplateContentBreakpoint(deviceOverride ?? responsiveDevice);
   if (props.isVisible === false) {
     if (mode !== "editor") return null;
     return (
@@ -84,15 +87,29 @@ export default function DynamicTemplateInstanceView({
     if (mode === "public") return null;
     return <section className="hc-dynamic-template__invalid" role="alert">模板身份不匹配</section>;
   }
-  if (
-    mode === "public"
-    && !hasExplicitDynamicTemplateInstanceImage(
-      resolvedDefinition,
-      props.contentBySlotId,
-      props.hiddenSlotIds,
-    )
-  ) {
-    return null;
+  const publicDecision = mode === "editor"
+    ? null
+    : resolveDynamicTemplatePublicVisibility({
+      definition: resolvedDefinition,
+      contentBySlotId: props.contentBySlotId,
+      hiddenSlotIds: props.hiddenSlotIds,
+      breakpoint: device,
+      pageKey,
+    });
+  if (publicDecision && !publicDecision.visible) {
+    if (mode === "public") return null;
+    return (
+      <section
+        className="hc-dynamic-template__invalid"
+        data-dynamic-template-instance-id={props.instanceId}
+        data-dynamic-template-version={props.templateVersion}
+        data-dynamic-template-render-mode={mode}
+        role="status"
+      >
+        <strong>{publicDecision.summary}</strong>
+        <span>{publicDecision.detail}</span>
+      </section>
+    );
   }
   return (
     <section
@@ -102,14 +119,16 @@ export default function DynamicTemplateInstanceView({
     >
       <DynamicTemplateRenderer
         definition={resolvedDefinition}
-        device={device === "tablet" ? "desktop" : device}
+        device={device}
         breakpoint={device}
         contentBySlotId={props.contentBySlotId}
         hiddenSlotIds={props.hiddenSlotIds}
         layoutOverridesByNodeId={props.layoutOverridesByNodeId}
+        publicSurface={publicDecision?.publicSurface}
         mode={mode}
         editorSurface={mode === "editor" ? "page-instance" : undefined}
         primaryHeadingLevel={primaryHeadingLevel}
+        priority={priority}
       />
     </section>
   );

@@ -1,5 +1,6 @@
 import {
   ArrowDownOutlined,
+  ArrowLeftOutlined,
   ArrowUpOutlined,
   DeleteOutlined,
   EyeOutlined,
@@ -27,8 +28,8 @@ import {
   Upload,
 } from "antd";
 import dayjs from "dayjs";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AdminErrorState } from "@/components/common/AdminDataStates";
 import { SecureImage } from "@/components/common/SecureImage";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
@@ -53,12 +54,14 @@ import type {
   ShippingTemplate,
 } from "@/types";
 import { unwrapResponse } from "@/utils/unwrap";
+import { normalizeAdminReturnPath } from "@/utils/adminReturnPath";
 import UnsavedChangesGuard from "../HomepageConfig/components/UnsavedChangesGuard";
 import "./ProfessionalProductEditor.css";
 
 type DetailDraft = ProductDetailBlock & { key: string; pendingMediaKey?: string };
 type PendingMedia = { key: string; file: File; preview: string };
 type MediaChoice = { key: string; label: string; src?: string; imageId?: number; pending?: boolean };
+type PendingSaveVerification = { productId: number };
 class EditorUserError extends Error {}
 
 type EditorRequestError = Error & { status?: number; response?: { status?: number } };
@@ -202,6 +205,12 @@ function getProductSubmitFailure(error: unknown): ProductSubmitFailure<
   return { message: getSafeAdminErrorMessage(error, "商品保存失败，请检查填写内容后重试。") };
 }
 
+function isAmbiguousProductWriteFailure(error: unknown): boolean {
+  const requestError = error as EditorRequestError | undefined;
+  const status = requestError?.status ?? requestError?.response?.status;
+  return status === undefined || status >= 500;
+}
+
 function getSkuSubmitFailure(error: unknown): ProductSubmitFailure<"skuCode"> {
   const requestError = error as EditorRequestError | undefined;
   const status = requestError?.status ?? requestError?.response?.status;
@@ -252,7 +261,6 @@ const defaultValues: Partial<ProductEditorFormValues> = {
   requiresInsuredShipping: true,
   requiresSignature: true,
   includesCertificate: true,
-  packageType: "品牌礼盒",
 };
 
 function flattenCategories(nodes: Category[], prefix = ""): { value: number; label: string }[] {
@@ -268,6 +276,12 @@ export default function ProfessionalProductEditor() {
   const parsedEditingId = Number(id);
   const editingId = id && Number.isInteger(parsedEditingId) && parsedEditingId > 0 ? parsedEditingId : null;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedReturnPath = searchParams.get("returnTo");
+  const returnPath = normalizeAdminReturnPath(requestedReturnPath) || "/admin/products";
+  const returnPathQuery = requestedReturnPath
+    ? `?returnTo=${encodeURIComponent(returnPath)}`
+    : "";
   const commerceEnabled = useCommerceEnabled();
   const role = useAuthStore((state) => state.user?.role);
   const canGovernPublic = role === "SUPER_ADMIN" || role === "ADMIN";
@@ -279,6 +293,8 @@ export default function ProfessionalProductEditor() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string>();
+  const [pendingSaveVerification, setPendingSaveVerification] = useState<PendingSaveVerification | null>(null);
+  const [saveVerificationLoading, setSaveVerificationLoading] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState<string>();
@@ -304,6 +320,7 @@ export default function ProfessionalProductEditor() {
   const saveRef = useRef<() => Promise<boolean>>(async () => false);
   const savingRef = useRef(false);
   const pendingMediaRef = useRef<PendingMedia[]>([]);
+  const activeEditorRef = useRef(true);
   const [currentProductId, setCurrentProductId] = useState<number | null>(editingId);
 
   const mediaChoices = useMemo<MediaChoice[]>(() => [
@@ -322,6 +339,45 @@ export default function ProfessionalProductEditor() {
   const isReviewLocked = currentReviewStatus === "IN_REVIEW";
   const isRoleReadOnly = isReviewLocked || (!canGovernPublic && currentStatus !== "DRAFT");
   const selectedCategoryLabel = categories.find((item) => item.value === selectedCategoryId)?.label;
+
+  const applyCanonicalProduct = useCallback((product: ProductEditorRecord) => {
+    const loadedStatus = (product.status || "DRAFT") as ProductStatus;
+    setCurrentStatus(loadedStatus);
+    setCurrentReviewStatus(product.reviewStatus || "DRAFT");
+    setImages(product.images || []);
+    setPrimaryImageId(product.primaryImageId ?? product.primaryImage?.id ?? null);
+    setSkus(product.skus || []);
+    setDetail((product.detailContent || []).map((block: ProductDetailBlock, index: number) => ({
+      ...block,
+      key: `detail-${index}-${Date.now()}`,
+    })));
+    // 保存后的权威 GET 可能规范化或清空字段；先重置，避免缺失字段沿用提交前的本地值。
+    form.resetFields();
+    form.setFieldsValue({
+      ...defaultValues,
+      ...product,
+      derivedPrice: product.price,
+      initialSkuPrice: undefined,
+      price: undefined,
+      publishMode: loadedStatus === "PUBLISHED" ? "IMMEDIATE" : product.publishMode || "WAREHOUSE",
+      scheduledPublishAt: product.scheduledPublishAt ? dayjs(product.scheduledPublishAt) : null,
+      gemType: product.gemInfo?.type,
+      gemCarat: product.gemInfo?.carat,
+      gemClarity: product.gemInfo?.clarity,
+      gemColor: product.gemInfo?.color,
+      gemCut: product.gemInfo?.cut,
+      gemQuantity: product.gemInfo?.quantity,
+      certificateAuthority: product.gemInfo?.certificateAuthority,
+      certificateNumber: product.gemInfo?.certificateNumber,
+      certificateQueryUrl: product.gemInfo?.certificateQueryUrl,
+      brand: product.gemInfo?.brand,
+      collection: product.gemInfo?.collection,
+      style: product.gemInfo?.style,
+      occasion: product.gemInfo?.occasion,
+      condition: product.gemInfo?.condition || "NEW",
+      craftTechnique: Array.isArray(product.craftTechnique) ? product.craftTechnique : [],
+    });
+  }, [form]);
 
   useEffect(() => {
     let mounted = true;
@@ -353,37 +409,7 @@ export default function ProfessionalProductEditor() {
           if (preferred) form.setFieldValue("shippingTemplateId", preferred.id);
         } else if (productRes) {
           const product = unwrapResponse<ProductEditorRecord>(productRes);
-          const loadedStatus = (product.status || "DRAFT") as ProductStatus;
-          setCurrentStatus(loadedStatus);
-          setCurrentReviewStatus(product.reviewStatus || "DRAFT");
-          setImages(product.images || []);
-          setPrimaryImageId(product.primaryImageId ?? product.primaryImage?.id ?? null);
-          setSkus(product.skus || []);
-          setDetail((product.detailContent || []).map((block: ProductDetailBlock, index: number) => ({ ...block, key: `detail-${index}-${Date.now()}` })));
-          form.setFieldsValue({
-            ...defaultValues,
-            ...product,
-            derivedPrice: product.price,
-            initialSkuPrice: undefined,
-            price: undefined,
-            publishMode: loadedStatus === "PUBLISHED" ? "IMMEDIATE" : product.publishMode || "WAREHOUSE",
-            scheduledPublishAt: product.scheduledPublishAt ? dayjs(product.scheduledPublishAt) : null,
-            gemType: product.gemInfo?.type,
-            gemCarat: product.gemInfo?.carat,
-            gemClarity: product.gemInfo?.clarity,
-            gemColor: product.gemInfo?.color,
-            gemCut: product.gemInfo?.cut,
-            gemQuantity: product.gemInfo?.quantity,
-            certificateAuthority: product.gemInfo?.certificateAuthority,
-            certificateNumber: product.gemInfo?.certificateNumber,
-            certificateQueryUrl: product.gemInfo?.certificateQueryUrl,
-            brand: product.gemInfo?.brand,
-            collection: product.gemInfo?.collection,
-            style: product.gemInfo?.style,
-            occasion: product.gemInfo?.occasion,
-            condition: product.gemInfo?.condition || "NEW",
-            craftTechnique: Array.isArray(product.craftTechnique) ? product.craftTechnique : [],
-          });
+          applyCanonicalProduct(product);
         }
         setDirty(false);
         setLoading(false);
@@ -395,11 +421,18 @@ export default function ProfessionalProductEditor() {
         setLoading(false);
       });
     return () => { mounted = false; };
-  }, [editingId, form, id, loadAttempt]);
+  }, [applyCanonicalProduct, editingId, form, id, loadAttempt]);
 
   useEffect(() => {
     pendingMediaRef.current = pendingMedia;
   }, [pendingMedia]);
+
+  useEffect(() => {
+    activeEditorRef.current = true;
+    return () => {
+      activeEditorRef.current = false;
+    };
+  }, []);
 
   useEffect(() => () => {
     pendingMediaRef.current.forEach((item) => URL.revokeObjectURL(item.preview));
@@ -514,7 +547,9 @@ export default function ProfessionalProductEditor() {
     requiresSignature: values.requiresSignature,
     includesCertificate: values.includesCertificate,
     packageType: values.packageType || null,
-    customLeadTime: values.customLeadTime || null,
+    customLeadTime: values.dispatchTime === "CUSTOM"
+      ? values.customLeadTime?.trim() || null
+      : null,
     isHot: values.isHot || false,
     isNew: values.isNew || false,
     isRecommended: values.isRecommended || false,
@@ -524,21 +559,36 @@ export default function ProfessionalProductEditor() {
 
   const refreshProduct = async (productId: number) => {
     const refreshed = unwrapResponse<ProductEditorRecord>(await productApi.getById(productId));
-    setCurrentStatus((refreshed.status || "DRAFT") as ProductStatus);
-    setCurrentReviewStatus(refreshed.reviewStatus || "DRAFT");
-    setImages(refreshed.images || []);
-    setPrimaryImageId(refreshed.primaryImageId ?? refreshed.primaryImage?.id ?? null);
-    setSkus(refreshed.skus || []);
-    setDetail((refreshed.detailContent || []).map((block: ProductDetailBlock, index: number) => ({
-      ...block,
-      key: `detail-${index}-${Date.now()}`,
-    })));
-    form.setFieldsValue({
-      publishMode: refreshed.status === "PUBLISHED" ? "IMMEDIATE" : refreshed.publishMode || "WAREHOUSE",
-      scheduledPublishAt: refreshed.scheduledPublishAt ? dayjs(refreshed.scheduledPublishAt) : null,
-      derivedPrice: refreshed.price,
-    });
+    if (refreshed.id !== productId) {
+      throw new Error("product-save-readback-identity-mismatch");
+    }
+    if (activeEditorRef.current) applyCanonicalProduct(refreshed);
     return refreshed;
+  };
+
+  const retrySaveVerification = async () => {
+    const pending = pendingSaveVerification;
+    if (!pending || saveVerificationLoading) return;
+    try {
+      setSaveVerificationLoading(true);
+      await refreshProduct(pending.productId);
+      if (!activeEditorRef.current) return;
+      setPendingSaveVerification(null);
+      setSubmitError(undefined);
+      setDirty(false);
+      setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
+      messageApi.success("商品保存结果已确认");
+      if (!editingId) {
+        navigate(`/admin/products/${pending.productId}/edit${returnPathQuery}`, {
+          replace: true,
+        });
+      }
+    } catch {
+      if (!activeEditorRef.current) return;
+      messageApi.warning("仍无法读取商品最新状态；请稍后继续重试，系统不会重复写入");
+    } finally {
+      if (activeEditorRef.current) setSaveVerificationLoading(false);
+    }
   };
 
   const setPrimaryImage = async (imageId: number) => {
@@ -595,6 +645,10 @@ export default function ProfessionalProductEditor() {
 
   const save = async (intent: "draft" | "primary" = "draft") => {
     if (savingRef.current) return false;
+    if (pendingSaveVerification) {
+      messageApi.warning("请先重新读取并确认上一次保存结果；系统不会重复写入");
+      return false;
+    }
     if (isRoleReadOnly) {
       messageApi.warning(isReviewLocked
         ? "作品正在审核中；管理员须先通过上架或退回修改"
@@ -603,6 +657,7 @@ export default function ProfessionalProductEditor() {
     }
     savingRef.current = true;
     let productId = currentProductId;
+    const startedWithoutProductId = !productId;
     const requiresFullValidation = intent === "primary" || currentStatus === "PUBLISHED";
     try {
       setSubmitError(undefined);
@@ -659,7 +714,18 @@ export default function ProfessionalProductEditor() {
         await productApi.updateStatus(productId, "OFFLINE");
       }
       setPendingMedia([]);
-      const refreshed = await refreshProduct(productId);
+      let refreshed: ProductEditorRecord;
+      try {
+        refreshed = await refreshProduct(productId);
+      } catch {
+        if (activeEditorRef.current) {
+          setPendingSaveVerification({ productId });
+          setSubmitError(undefined);
+          messageApi.warning("商品已写入，最新状态待确认；请重新读取保存结果");
+        }
+        return false;
+      }
+      if (!activeEditorRef.current) return false;
       setDirty(false);
       setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
       const successMessage = !canGovernPublic && intent === "primary"
@@ -672,7 +738,11 @@ export default function ProfessionalProductEditor() {
           ? "已保存定时上架计划"
           : "商品已保存至仓库";
       messageApi.success(successMessage);
-      if (!editingId) navigate(`/admin/products/${productId}/edit`, { replace: true });
+      if (!editingId) {
+        navigate(`/admin/products/${productId}/edit${returnPathQuery}`, {
+          replace: true,
+        });
+      }
       return true;
     } catch (error: unknown) {
       if (isFormValidationError(error)) {
@@ -686,6 +756,12 @@ export default function ProfessionalProductEditor() {
       }
       if (error instanceof EditorUserError) {
         messageApi.warning(error.message);
+        return false;
+      }
+      if (startedWithoutProductId && !productId && isAmbiguousProductWriteFailure(error)) {
+        const message = "商品创建结果待确认；当前货号和内容已保留。请再次点击保存，服务端只会恢复完全相同的创建意图，不会重复创建。";
+        setSubmitError(message);
+        messageApi.warning(message);
         return false;
       }
       const failure = getProductSubmitFailure(error);
@@ -915,12 +991,31 @@ export default function ProfessionalProductEditor() {
     <div className="pro-editor">
       <h1 className="pro-editor__sr-only">{editingId ? "编辑商品" : "新建商品"}</h1>
       <header className="pro-editor__tabs">
-        <nav aria-label="商品编辑步骤">{tabs.map(([key, label]) => <button key={key} aria-current={active === key ? "step" : undefined} className={active === key ? "is-active" : ""} onClick={() => { setActive(key); document.getElementById(key)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>{label}</button>)}</nav>
+        <div className="pro-editor__tabs-main">
+          <Button
+            type="text"
+            className="pro-editor__back"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate(returnPath)}
+          >
+            返回商品列表
+          </Button>
+          <nav aria-label="商品编辑步骤">{tabs.map(([key, label]) => <button key={key} aria-current={active === key ? "step" : undefined} className={active === key ? "is-active" : ""} onClick={() => { setActive(key); document.getElementById(key)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>{label}</button>)}</nav>
+        </div>
         <label className="pro-editor__required"><Switch checked={requiredOnly} onChange={setRequiredOnly} /> 只看核心字段</label>
       </header>
 
       {isReviewLocked ? <Alert type="info" showIcon message={canGovernPublic ? "这是编辑提交的审核版本，内容、SKU、图片、标签、属性与证书均已冻结；请直接通过上架或退回修改。" : "作品已提交审核，审核完成或管理员退回前不可继续修改。"} /> : isRoleReadOnly ? <Alert type="info" showIcon message="当前作品为已发布或已下架状态，编辑角色仅可查看；修改、下架与归档请交由管理员处理。" /> : null}
-      <Form name="product-editor-main" form={form} initialValues={defaultValues} layout="vertical" disabled={saving || isRoleReadOnly} onValuesChange={() => { markDirty(); setSubmitError(undefined); }} className="pro-editor__form">
+      {pendingSaveVerification && <Alert
+        type="warning"
+        showIcon
+        message="商品已写入，最新状态待确认"
+        description={<Space direction="vertical" size={8}>
+          <span>保存写入和状态动作已经完成，但暂时无法读取服务端权威结果。当前内容已保留；系统不会重复保存或重新执行发布动作。</span>
+          <Button type="link" loading={saveVerificationLoading} onClick={() => void retrySaveVerification()}>重新读取保存结果</Button>
+        </Space>}
+      />}
+      <Form name="product-editor-main" form={form} initialValues={defaultValues} layout="vertical" disabled={saving || isRoleReadOnly || Boolean(pendingSaveVerification)} onValuesChange={() => { markDirty(); setSubmitError(undefined); }} className="pro-editor__form">
         <Alert className="pro-editor__notice" type="info" showIcon message="完整、准确的珠宝信息有助于提升客户信任与商品转化；库存统一按下单预占、确认收款后扣减。" />
         {submitError && <Alert className="pro-editor__submit-error" type="error" showIcon message="商品保存未完成" description={submitError} closable onClose={() => setSubmitError(undefined)} />}
         <div className="pro-editor__category"><strong>当前类目 <i>*</i></strong><span>{selectedCategoryLabel || "珠宝 / 请选择具体类目"}</span><Tag color={statusMeta[currentStatus].color}>{statusMeta[currentStatus].label}</Tag><button type="button" onClick={() => { setActive("basic"); document.getElementById("basic")?.scrollIntoView({ behavior: "smooth" }); }}>切换类目</button></div>
@@ -1058,7 +1153,7 @@ export default function ProfessionalProductEditor() {
           <div className="pro-editor__delivery-grid">
             <Form.Item name="fulfillmentType" label="备货类型"><Radio.Group><Radio value="IN_STOCK">现货</Radio><Radio value="PREORDER">预售</Radio><Radio value="CUSTOM">定制</Radio></Radio.Group></Form.Item>
             <Form.Item name="dispatchTime" label="发货时间"><Radio.Group><Radio value="SAME_DAY">今日发</Radio><Radio value="WITHIN_24_HOURS">24小时内</Radio><Radio value="WITHIN_48_HOURS">48小时内</Radio><Radio value="OVER_48_HOURS">大于48小时</Radio><Radio value="CUSTOM">按约定</Radio></Radio.Group></Form.Item>
-            <Form.Item noStyle shouldUpdate={(prev, next) => prev.dispatchTime !== next.dispatchTime}>{({ getFieldValue }) => getFieldValue("dispatchTime") === "CUSTOM" ? <Form.Item name="customLeadTime" label="约定备货时间"><Input placeholder="如：确认款式后 15 个工作日" /></Form.Item> : null}</Form.Item>
+            <Form.Item noStyle shouldUpdate={(prev, next) => prev.dispatchTime !== next.dispatchTime}>{({ getFieldValue }) => getFieldValue("dispatchTime") === "CUSTOM" ? <Form.Item name="customLeadTime" label="约定备货时间" rules={[{ required: true, whitespace: true, message: "请填写经核实的备货时间" }]}><Input maxLength={100} placeholder="如：确认款式后 15 个工作日" /></Form.Item> : null}</Form.Item>
             <Form.Item name="deliveryMethods" label="提取方式"><Checkbox.Group options={[{ value: "EXPRESS", label: "物流配送" }, { value: "STORE_PICKUP", label: "到店自提" }, { value: "DEDICATED", label: "专人配送" }]} /></Form.Item>
             <Form.Item noStyle shouldUpdate={(prev, next) => prev.deliveryMethods !== next.deliveryMethods || prev.shippingTemplateId !== next.shippingTemplateId}>{({ getFieldValue }) => {
               const usesExpress = (getFieldValue("deliveryMethods") || []).includes("EXPRESS");
@@ -1073,7 +1168,7 @@ export default function ProfessionalProductEditor() {
         </section>
       </Form>
 
-      <footer className="pro-editor__footer"><div>{isReviewLocked && canGovernPublic ? <><Button type="primary" loading={saving} onClick={() => void approveReviewedProduct()}>{primaryActionLabel}</Button><Button disabled={saving} onClick={() => void returnReviewedProduct()}>退回修改</Button></> : !isRoleReadOnly ? <Button type="primary" loading={saving} onClick={() => void save("primary")}>{primaryActionLabel}</Button> : null}{!isReviewLocked && canGovernPublic && currentStatus === "PUBLISHED" ? <Button danger disabled={saving} onClick={confirmOffline}>下架</Button> : !isReviewLocked && !isRoleReadOnly && (currentStatus !== "OFFLINE" || selectedPublishMode !== "WAREHOUSE") ? <Button icon={<SaveOutlined />} loading={saving} onClick={() => void save("draft")}>{currentStatus === "OFFLINE" ? "保存内容" : "保存草稿"}</Button> : null}<Button icon={<EyeOutlined />} disabled={saving} onClick={() => { setPreviewValues(form.getFieldsValue(true)); setPreviewOpen(true); }}>预览</Button><span role="status" aria-live="polite" className={dirty ? "is-dirty" : ""}>{savedStatusText}</span></div></footer>
+      <footer className="pro-editor__footer"><div>{isReviewLocked && canGovernPublic ? <><Button type="primary" loading={saving} disabled={Boolean(pendingSaveVerification)} onClick={() => void approveReviewedProduct()}>{primaryActionLabel}</Button><Button disabled={saving || Boolean(pendingSaveVerification)} onClick={() => void returnReviewedProduct()}>退回修改</Button></> : !isRoleReadOnly ? <Button type="primary" loading={saving} disabled={Boolean(pendingSaveVerification)} onClick={() => void save("primary")}>{primaryActionLabel}</Button> : null}{!isReviewLocked && canGovernPublic && currentStatus === "PUBLISHED" ? <Button danger disabled={saving || Boolean(pendingSaveVerification)} onClick={confirmOffline}>下架</Button> : !isReviewLocked && !isRoleReadOnly && (currentStatus !== "OFFLINE" || selectedPublishMode !== "WAREHOUSE") ? <Button icon={<SaveOutlined />} loading={saving} disabled={Boolean(pendingSaveVerification)} onClick={() => void save("draft")}>{currentStatus === "OFFLINE" ? "保存内容" : "保存草稿"}</Button> : null}<Button icon={<EyeOutlined />} disabled={saving} onClick={() => { setPreviewValues(form.getFieldsValue(true)); setPreviewOpen(true); }}>预览</Button><span role="status" aria-live="polite" className={dirty ? "is-dirty" : ""}>{savedStatusText}</span></div></footer>
 
       <Modal rootClassName="pro-editor-modal" title="新建运费模板" open={templateOpen} forceRender confirmLoading={templateSaving} onCancel={() => setTemplateOpen(false)} onOk={() => void saveTemplate()} okText="保存模板" cancelText="取消">
         <Form name="shipping-template-form" form={templateForm} layout="vertical" initialValues={{ feeMode: "FREE", baseFee: 0, remoteSurcharge: 0, insured: true, signatureRequired: true }}>

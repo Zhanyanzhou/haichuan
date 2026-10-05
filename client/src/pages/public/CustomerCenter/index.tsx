@@ -19,6 +19,10 @@ import type {
 import { useCustomerAuthStore } from "@/store/customerAuthStore";
 import type { CustomerAccount } from "@/store/customerAuthStore";
 import { getRequestErrorMessage } from "@/services/httpClient";
+import {
+  currentSessionEpoch,
+  isCurrentSessionEpoch,
+} from "@/services/sessionEpoch";
 
 const EMPTY_NOTIFICATIONS: CustomerNotificationPage = {
   list: [],
@@ -29,12 +33,39 @@ const EMPTY_NOTIFICATIONS: CustomerNotificationPage = {
 };
 
 const INQUIRY_PAGE_SIZE = 3;
+const CUSTOMER_RETURN_PATH_MAX_LENGTH = 2048;
+const CUSTOMER_RETURN_PATH_BASE = "https://customer-return.invalid";
 const EMPTY_INQUIRIES: CustomerInquiryPage = {
   list: [],
   total: 0,
   page: 1,
   pageSize: INQUIRY_PAGE_SIZE,
 };
+
+export function normalizeCustomerReturnPath(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const candidate = value.trim();
+  const hasControlCharacter = Array.from(candidate).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127;
+  });
+  if (
+    !candidate
+    || candidate.length > CUSTOMER_RETURN_PATH_MAX_LENGTH
+    || !candidate.startsWith("/")
+    || candidate.startsWith("//")
+    || candidate.includes("\\")
+    || hasControlCharacter
+  ) return null;
+
+  try {
+    const parsed = new URL(candidate, CUSTOMER_RETURN_PATH_BASE);
+    if (parsed.origin !== CUSTOMER_RETURN_PATH_BASE) return null;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeInquiryPage(
   value: unknown,
@@ -68,6 +99,34 @@ function getRequestStatus(error: unknown): number | undefined {
   return typeof status === "number" ? status : undefined;
 }
 
+function parseCanonicalConsultationTarget(search: string): {
+  leadId: number | null;
+  invalid: boolean;
+} {
+  const params = new URLSearchParams(search);
+  const leadIds = params.getAll("leadId");
+  if (leadIds.length === 0) return { leadId: null, invalid: false };
+
+  const keys = Array.from(params.keys());
+  const sections = params.getAll("section");
+  const hasExactShape = keys.length === 2
+    && new Set(keys).size === 2
+    && keys.includes("section")
+    && keys.includes("leadId")
+    && sections.length === 1
+    && leadIds.length === 1
+    && sections[0] === "consultations";
+  const rawLeadId = leadIds[0];
+  if (!hasExactShape || !/^[1-9]\d*$/.test(rawLeadId)) {
+    return { leadId: null, invalid: true };
+  }
+
+  const leadId = Number(rawLeadId);
+  return Number.isSafeInteger(leadId)
+    ? { leadId, invalid: false }
+    : { leadId: null, invalid: true };
+}
+
 export default function CustomerCenter() {
   const { message } = AntdApp.useApp();
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
@@ -91,20 +150,32 @@ export default function CustomerCenter() {
   const [authLoading, setAuthLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const hasSuccessfulSnapshotRef = useRef(false);
+  const snapshotRequestRef = useRef(0);
+  const identityReloadRef = useRef<number | null>(null);
   const consultationRequestRef = useRef(0);
+  const authAttemptRef = useRef(0);
+  const mountedRef = useRef(true);
 
   const location = useLocation();
-  const requestedLeadIdValue = Number(
-    new URLSearchParams(location.search).get("leadId"),
-  );
-  const requestedLeadId = Number.isInteger(requestedLeadIdValue)
-    && requestedLeadIdValue > 0
-    ? requestedLeadIdValue
-    : null;
+  const consultationTarget = parseCanonicalConsultationTarget(location.search);
+  const requestedLeadId = consultationTarget.leadId;
+  const invalidConsultationTarget = consultationTarget.invalid;
   const navigate = useNavigate();
   const authStatus = useCustomerAuthStore((state) => state.status);
+  const customerIdentityId = useCustomerAuthStore(
+    (state) => state.customer?.id ?? null,
+  );
   const setCustomerAuth = useCustomerAuthStore((state) => state.setAuth);
+  const updateCustomerAuth = useCustomerAuthStore((state) => state.updateCustomer);
   const markCustomerAnonymous = useCustomerAuthStore((state) => state.markAnonymous);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      authAttemptRef.current += 1;
+    };
+  }, []);
 
   // 安全恢复来源路径：仅允许内部路径（/开头且非 //），防开放重定向
   const consumeReturnTo = (): string | null => {
@@ -114,18 +185,10 @@ export default function CustomerCenter() {
         : null;
     const raw = locationState?.returnTo
       ?? new URLSearchParams(location.search).get("returnTo");
-    if (
-      typeof raw === "string" &&
-      raw.startsWith("/") &&
-      !raw.startsWith("//")
-    ) {
-      return raw;
-    }
-    return null;
+    return normalizeCustomerReturnPath(raw);
   };
 
-  const clearSession = useCallback(() => {
-    markCustomerAnonymous();
+  const resetPrivateState = useCallback(() => {
     setOrders([]);
     setSelectionInquiries([]);
     setSelectionInquiryLoading(false);
@@ -145,17 +208,25 @@ export default function CustomerCenter() {
     setNotificationLoading(false);
     setNotificationError(null);
     hasSuccessfulSnapshotRef.current = false;
-  }, [markCustomerAnonymous]);
+  }, []);
+
+  const clearSession = useCallback(() => {
+    markCustomerAnonymous();
+    resetPrivateState();
+  }, [markCustomerAnonymous, resetPrivateState]);
 
   const loadNotifications = useCallback(async () => {
+    const requestEpoch = currentSessionEpoch("customer");
     setNotificationLoading(true);
     try {
       const response = await customerApi.getNotifications({ pageSize: 20 });
+      if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
       setNotifications(
         unwrapResponse<CustomerNotificationPage>(response) || EMPTY_NOTIFICATIONS,
       );
       setNotificationError(null);
     } catch (error) {
+      if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
       if (getRequestStatus(error) === 401) {
         clearSession();
         return;
@@ -166,20 +237,25 @@ export default function CustomerCenter() {
           : "服务通知暂时无法加载，订单和账户功能不受影响。",
       );
     } finally {
-      setNotificationLoading(false);
+      if (isCurrentSessionEpoch("customer", requestEpoch)) {
+        setNotificationLoading(false);
+      }
     }
   }, [clearSession]);
 
   const loadInquiryPage = useCallback(async (page: number) => {
+    const requestEpoch = currentSessionEpoch("customer");
     setInquiryLoading(true);
     try {
       const response = await customerApi.getInquiries({
         page,
         pageSize: INQUIRY_PAGE_SIZE,
       });
+      if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
       setInquiries(normalizeInquiryPage(unwrapResponse<unknown>(response), page));
       setInquiryError(null);
     } catch (error) {
+      if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
       if (getRequestStatus(error) === 401) {
         clearSession();
         return;
@@ -190,19 +266,24 @@ export default function CustomerCenter() {
           : "预约记录暂时无法加载，请稍后重试。",
       );
     } finally {
-      setInquiryLoading(false);
+      if (isCurrentSessionEpoch("customer", requestEpoch)) {
+        setInquiryLoading(false);
+      }
     }
   }, [clearSession]);
 
   const loadSelectionInquiries = useCallback(async () => {
+    const requestEpoch = currentSessionEpoch("customer");
     setSelectionInquiryLoading(true);
     try {
       const response = await customerApi.getSelectionInquiries();
+      if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
       setSelectionInquiries(
         unwrapResponse<CustomerSelectionInquiry[]>(response) || [],
       );
       setSelectionInquiryError(null);
     } catch (error) {
+      if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
       if (getRequestStatus(error) === 401) {
         clearSession();
         return;
@@ -213,12 +294,15 @@ export default function CustomerCenter() {
           : "选款咨询暂时无法加载，请稍后重试。",
       );
     } finally {
-      setSelectionInquiryLoading(false);
+      if (isCurrentSessionEpoch("customer", requestEpoch)) {
+        setSelectionInquiryLoading(false);
+      }
     }
   }, [clearSession]);
 
   const loadConsultation = useCallback(async (leadId: number) => {
     const requestVersion = ++consultationRequestRef.current;
+    const requestEpoch = currentSessionEpoch("customer");
     setConsultationLoading(true);
     setConsultationError(null);
     setConsultationDetail((current) =>
@@ -226,14 +310,20 @@ export default function CustomerCenter() {
     );
     try {
       const response = await customerApi.getConsultation(leadId);
-      if (consultationRequestRef.current !== requestVersion) return;
+      if (
+        consultationRequestRef.current !== requestVersion
+        || !isCurrentSessionEpoch("customer", requestEpoch)
+      ) return;
       const detail = unwrapResponse<CustomerConsultationDetail>(response);
       if (!detail || detail.leadId !== leadId) {
         throw new Error("咨询详情响应不完整");
       }
       setConsultationDetail(detail);
     } catch (error) {
-      if (consultationRequestRef.current !== requestVersion) return;
+      if (
+        consultationRequestRef.current !== requestVersion
+        || !isCurrentSessionEpoch("customer", requestEpoch)
+      ) return;
       if (getRequestStatus(error) === 401) {
         clearSession();
         return;
@@ -243,13 +333,17 @@ export default function CustomerCenter() {
         getRequestStatus(error) === 404 ? "not-found" : "error",
       );
     } finally {
-      if (consultationRequestRef.current === requestVersion) {
+      if (
+        consultationRequestRef.current === requestVersion
+        && isCurrentSessionEpoch("customer", requestEpoch)
+      ) {
         setConsultationLoading(false);
       }
     }
   }, [clearSession]);
 
   const load = useCallback(async () => {
+    const requestVersion = ++snapshotRequestRef.current;
     if (useCustomerAuthStore.getState().status === 'anonymous') {
       setLoadError(null);
       setLoading(false);
@@ -257,46 +351,121 @@ export default function CustomerCenter() {
     }
     if (!hasSuccessfulSnapshotRef.current) setLoading(true);
     setLoadError(null);
+    let requestEpoch = currentSessionEpoch("customer");
+    const isCurrentRequest = () =>
+      snapshotRequestRef.current === requestVersion
+      && isCurrentSessionEpoch("customer", requestEpoch);
     try {
       const profileRes = await customerApi.getProfile();
+      if (!isCurrentRequest()) return;
       const nextProfile = unwrapResponse<CustomerProfile>(profileRes);
       // 身份恢复与业务快照分开提交：profile 已确认后即可保持登录态；
       // 订单等核心资源仍需全部成功才写入，避免失败被伪装成空数据。
-      setCustomerAuth(nextProfile);
+      const currentAuth = useCustomerAuthStore.getState();
+      identityReloadRef.current = nextProfile.id;
+      if (
+        currentAuth.status === "authenticated"
+        && currentAuth.customer?.id === nextProfile.id
+      ) {
+        // 同一客户的权威 profile 回读只刷新资料，不应推进会话代次；否则从咨询
+        // 回执 SPA 跳入本页时，并发的 canonical Lead 详情会被误判为旧身份响应。
+        updateCustomerAuth(nextProfile);
+      } else {
+        if (
+          currentAuth.status === "authenticated"
+          && currentAuth.customer?.id !== nextProfile.id
+        ) {
+          // Cookie 会话可能在另一个标签页切换客户。权威 profile 已确认身份变化后，
+          // 必须在读取新客户订单前丢弃上一客户的全部私有快照；若后续请求失败，
+          // 页面只能显示“尚无可确认数据”，不能继续渲染旧账户记录。
+          resetPrivateState();
+          setLoading(true);
+        }
+        setCustomerAuth(nextProfile);
+      }
+      requestEpoch = currentSessionEpoch("customer");
       const [ordersRes, addressesRes] =
         await Promise.all([
           customerApi.getOrders(),
           customerApi.getAddresses(),
         ]);
+      if (!isCurrentRequest()) return;
       setProfile(nextProfile);
       setOrders(unwrapResponse<CustomerOrder[]>(ordersRes) || []);
       setAddresses(unwrapResponse<CustomerAddress[]>(addressesRes) || []);
       hasSuccessfulSnapshotRef.current = true;
       await Promise.all([loadInquiryPage(1), loadSelectionInquiries()]);
-      if (useCustomerAuthStore.getState().status === "anonymous") return;
+      if (
+        !isCurrentRequest()
+        || useCustomerAuthStore.getState().status === "anonymous"
+      ) return;
       void loadNotifications();
       // 合作商家状态独立容错：接口不可用（如后端未部署）时不影响账号页整体加载
       try {
         const partnerRes = await partnerApi.getMine();
+        if (!isCurrentRequest()) return;
         setPartner(unwrapResponse<CustomerPartnerState>(partnerRes) || null);
         setPartnerError(null);
       } catch {
+        if (!isCurrentRequest()) return;
         setPartnerError("合作状态暂时无法确认，请重新加载后再继续。");
       }
     } catch (error) {
+      if (!isCurrentRequest()) return;
       if (getRequestStatus(error) === 401) {
         clearSession();
       } else {
         setLoadError("账户数据暂时无法加载，请稍后重试。");
       }
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) {
+        setLoading(false);
+      }
     }
-  }, [clearSession, loadInquiryPage, loadNotifications, loadSelectionInquiries, setCustomerAuth]);
+  }, [
+    clearSession,
+    loadInquiryPage,
+    loadNotifications,
+    loadSelectionInquiries,
+    resetPrivateState,
+    setCustomerAuth,
+    updateCustomerAuth,
+  ]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // refresh 可能在当前页面存活期间确认 Cookie 已切换到另一客户。状态仍是
+  // authenticated，不能因此继续展示上一客户已经加载的报价、订单或弹窗。
+  useEffect(() => {
+    if (authStatus !== "authenticated" || customerIdentityId === null) return;
+    if (profile?.id === customerIdentityId) {
+      identityReloadRef.current = customerIdentityId;
+      return;
+    }
+    if (identityReloadRef.current === customerIdentityId) return;
+    identityReloadRef.current = customerIdentityId;
+    resetPrivateState();
+    setLoading(true);
+    void load();
+  }, [
+    authStatus,
+    customerIdentityId,
+    load,
+    profile?.id,
+    resetPrivateState,
+  ]);
+
+  // 共享 HTTP 层会在真实 401 时先推进会话代次并清空认证状态；此时原请求会被
+  // 判定为旧代次，不能再依赖它的 catch/finally 收尾，否则页面可能永久停在 loading。
+  useEffect(() => {
+    if (authStatus !== "anonymous") return;
+    identityReloadRef.current = null;
+    resetPrivateState();
+    setLoadError(null);
+    setLoading(false);
+  }, [authStatus, resetPrivateState]);
 
   useEffect(() => {
     if (authStatus !== "authenticated" || requestedLeadId === null) {
@@ -310,19 +479,32 @@ export default function CustomerCenter() {
   }, [authStatus, loadConsultation, requestedLeadId]);
 
   const signOut = () => {
-    void customerApi.logout().finally(clearSession);
+    // 本地身份和私有快照必须先失效；远端注销是随后立即发起的 best-effort
+    // 清理，不能让网络挂起继续暴露客户私有界面。
+    clearSession();
+    void customerApi.logout().catch(() => undefined);
   };
 
   const completeAuth = async (request: Promise<unknown>) => {
+    const attempt = authAttemptRef.current + 1;
+    authAttemptRef.current = attempt;
     setAuthLoading(true);
     try {
       const result = unwrapResponse<{ customer: CustomerAccount }>(
         await request,
       );
+      if (!mountedRef.current || authAttemptRef.current !== attempt) return;
       if (!result?.customer) throw new Error("账户认证失败");
+      identityReloadRef.current = result.customer.id;
       setCustomerAuth(result.customer);
       setLoading(true);
       await load();
+      if (!mountedRef.current || authAttemptRef.current !== attempt) return;
+      const currentAuth = useCustomerAuthStore.getState();
+      if (
+        currentAuth.status !== "authenticated"
+        || currentAuth.customer?.id !== result.customer.id
+      ) return;
       message.success("已登录您的会员账户");
       // 登录/注册成功后恢复来源路径（安全：仅内部路径）
       const returnTo = consumeReturnTo();
@@ -331,14 +513,20 @@ export default function CustomerCenter() {
         return;
       }
     } catch (error: unknown) {
+      if (!mountedRef.current || authAttemptRef.current !== attempt) return;
       message.error(getRequestErrorMessage(error, "账户认证失败，请稍后重试"));
     } finally {
-      setAuthLoading(false);
+      if (mountedRef.current && authAttemptRef.current === attempt) {
+        setAuthLoading(false);
+      }
     }
   };
 
   // 微信回调只回传非敏感账户摘要；真实会话已由回调响应写入 HttpOnly Cookie。
   const applyWechatAuth = (result: { customer: CustomerAccount }) => {
+    authAttemptRef.current += 1;
+    setAuthLoading(false);
+    identityReloadRef.current = result.customer.id;
     setCustomerAuth(result.customer);
     setLoading(true);
     void load();
@@ -355,7 +543,17 @@ export default function CustomerCenter() {
     );
 
   const isSignedIn = authStatus === 'authenticated';
+  const privateSnapshotMatchesIdentity =
+    profile?.id === customerIdentityId;
   const accountSection = new URLSearchParams(location.search).get("section");
+
+  if (isSignedIn && !privateSnapshotMatchesIdentity && !loadError) {
+    return (
+      <div className="min-h-screen bg-brand-bg flex items-center justify-center">
+        <Spin size="large" />
+      </div>
+    );
+  }
 
   if (isSignedIn) {
     if (accountSection === "partner") {
@@ -396,6 +594,7 @@ export default function CustomerCenter() {
           </div>
         )}
         <MyAccountDashboard
+          key={`customer-${customerIdentityId}`}
           profile={profile}
           partner={partner}
           partnerError={partnerError}
@@ -406,6 +605,7 @@ export default function CustomerCenter() {
           selectionInquiryError={selectionInquiryError}
           onRetrySelectionInquiries={loadSelectionInquiries}
           selectedLeadId={requestedLeadId}
+          invalidSelectedLeadTarget={invalidConsultationTarget}
           consultationDetail={consultationDetail}
           consultationLoading={consultationLoading}
           consultationError={consultationError}
@@ -421,18 +621,24 @@ export default function CustomerCenter() {
           notificationError={notificationError}
           onRetryNotifications={loadNotifications}
           onReadNotification={async (id) => {
+            const requestEpoch = currentSessionEpoch("customer");
             try {
               await customerApi.markNotificationRead(id);
+              if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
               await loadNotifications();
             } catch {
+              if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
               message.error("通知状态更新失败，请稍后重试");
             }
           }}
           onReadAllNotifications={async () => {
+            const requestEpoch = currentSessionEpoch("customer");
             try {
               await customerApi.markAllNotificationsRead();
+              if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
               await loadNotifications();
             } catch {
+              if (!isCurrentSessionEpoch("customer", requestEpoch)) return;
               message.error("通知状态更新失败，请稍后重试");
             }
           }}

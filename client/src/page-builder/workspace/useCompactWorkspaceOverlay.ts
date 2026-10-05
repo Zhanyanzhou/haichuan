@@ -6,7 +6,11 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
-const COMPACT_WORKSPACE_QUERY = "(max-width: 1199px)";
+export const COMPACT_WORKSPACE_MAX_WIDTH = 1024;
+export const COMPACT_WORKSPACE_QUERY = `(max-width: ${COMPACT_WORKSPACE_MAX_WIDTH}px)`;
+export const DOCKED_WORKSPACE_QUERY = `(min-width: ${COMPACT_WORKSPACE_MAX_WIDTH + 1}px)`;
+/** 画布已有宽屏余量时隐藏收起控件；1025–1439 仍允许手动收起并把宽度还给画布。 */
+export const WIDE_DOCK_QUERY = "(min-width: 1440px)";
 const FOCUSABLE_SELECTOR = [
   "a[href]",
   "button:not([disabled])",

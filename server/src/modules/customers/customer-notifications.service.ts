@@ -14,6 +14,13 @@ import {
   NOTIFICATION_TOPICS,
 } from "../../common/notifications/notification-delivery.constants";
 import { UpdateCustomerNotificationPreferenceDto } from "./dto/customer-notification-preference.dto";
+import type { CustomerPrincipal } from "../../common/security/authenticated-principal";
+import {
+  lockActiveCustomerForRead,
+  lockActiveCustomerForWrite,
+} from "./customer-write-gate";
+
+type NotificationCustomer = Pick<CustomerPrincipal, "id" | "authVersion">;
 
 const CUSTOMER_NOTIFICATION_SELECT = {
   id: true,
@@ -32,116 +39,128 @@ const CUSTOMER_NOTIFICATION_SELECT = {
 export class CustomerNotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(customerId: number, query: CustomerNotificationQueryDto) {
+  async list(customer: NotificationCustomer, query: CustomerNotificationQueryDto) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
     const now = new Date();
     const where: Prisma.NotificationWhereInput = {
-      customerId,
+      customerId: customer.id,
       availableAt: { lte: now },
       status: query.unreadOnly === "true"
         ? "AVAILABLE" as const
         : { in: ["AVAILABLE", "READ"] },
     };
-    const [list, total, unreadCount] = await Promise.all([
-      this.prisma.notification.findMany({
-        where,
-        select: CUSTOMER_NOTIFICATION_SELECT,
-        orderBy: [{ availableAt: "desc" }, { id: "desc" }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      this.prisma.notification.count({ where }),
-      this.prisma.notification.count({
-        where: { customerId, status: "AVAILABLE", availableAt: { lte: now } },
-      }),
-    ]);
-    return { list, total, unreadCount, page, pageSize };
+    return this.prisma.$transaction(async (tx) => {
+      await lockActiveCustomerForRead(tx, customer);
+      const [list, total, unreadCount] = await Promise.all([
+        tx.notification.findMany({
+          where,
+          select: CUSTOMER_NOTIFICATION_SELECT,
+          orderBy: [{ availableAt: "desc" }, { id: "desc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        tx.notification.count({ where }),
+        tx.notification.count({
+          where: { customerId: customer.id, status: "AVAILABLE", availableAt: { lte: now } },
+        }),
+      ]);
+      return { list, total, unreadCount, page, pageSize };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async markRead(customerId: number, notificationId: number) {
+  async markRead(customer: NotificationCustomer, notificationId: number) {
     if (!Number.isInteger(notificationId) || notificationId <= 0) {
       throw new BadRequestException("无效的通知编号");
     }
     const now = new Date();
-    await this.prisma.notification.updateMany({
-      where: {
-        id: notificationId,
-        customerId,
-        status: "AVAILABLE",
-        availableAt: { lte: now },
-      },
-      data: { status: "READ", readAt: now },
-    });
-    const notification = await this.prisma.notification.findFirst({
-      where: {
-        id: notificationId,
-        customerId,
-        status: { in: ["AVAILABLE", "READ"] },
-        availableAt: { lte: now },
-      },
-      select: CUSTOMER_NOTIFICATION_SELECT,
-    });
-    if (!notification) throw new NotFoundException("通知不存在");
-    return notification;
-  }
-
-  async markAllRead(customerId: number) {
-    const now = new Date();
-    const result = await this.prisma.notification.updateMany({
-      where: { customerId, status: "AVAILABLE", availableAt: { lte: now } },
-      data: { status: "READ", readAt: now },
-    });
-    return { updated: result.count };
-  }
-
-  async listPreferences(customerId: number) {
-    const now = new Date();
-    const [records, latestMarketingConsent] = await Promise.all([
-      this.prisma.notificationPreference.findMany({
+    return this.prisma.$transaction(async (tx) => {
+      await lockActiveCustomerForWrite(tx, customer);
+      await tx.notification.updateMany({
         where: {
-          customerId,
-          channel: { in: [...EXTERNAL_NOTIFICATION_CHANNELS] },
-          topic: { in: [...NOTIFICATION_TOPICS] },
+          id: notificationId,
+          customerId: customer.id,
+          status: "AVAILABLE",
+          availableAt: { lte: now },
         },
-        select: {
-          channel: true,
-          topic: true,
-          enabled: true,
-          updatedAt: true,
+        data: { status: "READ", readAt: now },
+      });
+      const notification = await tx.notification.findFirst({
+        where: {
+          id: notificationId,
+          customerId: customer.id,
+          status: { in: ["AVAILABLE", "READ"] },
+          availableAt: { lte: now },
         },
-      }),
-      this.prisma.consentRecord.findFirst({
-        where: { customerId, purpose: "MARKETING", decidedAt: { lte: now } },
-        orderBy: [{ decidedAt: "desc" }, { id: "desc" }],
-        select: { decision: true, expiresAt: true },
-      }),
-    ]);
-    const recordByKey = new Map(
-      records.map((record) => [`${record.channel}:${record.topic}`, record]),
-    );
-    const marketingConsentGranted = latestMarketingConsent?.decision === "GRANTED"
-      && (!latestMarketingConsent.expiresAt || latestMarketingConsent.expiresAt > now);
-    return {
-      list: EXTERNAL_NOTIFICATION_CHANNELS.flatMap((channel) =>
-        NOTIFICATION_TOPICS.map((topic) => {
-          const record = recordByKey.get(`${channel}:${topic}`);
-          return {
-            channel,
-            topic,
-            enabled: record?.enabled ?? defaultNotificationPreference(topic),
-            defaulted: !record,
-            updatedAt: record?.updatedAt ?? null,
-            requiresMarketingConsent: isMarketingNotificationTopic(topic),
-          };
+        select: CUSTOMER_NOTIFICATION_SELECT,
+      });
+      if (!notification) throw new NotFoundException("通知不存在");
+      return notification;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async markAllRead(customer: NotificationCustomer) {
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      await lockActiveCustomerForWrite(tx, customer);
+      const result = await tx.notification.updateMany({
+        where: { customerId: customer.id, status: "AVAILABLE", availableAt: { lte: now } },
+        data: { status: "READ", readAt: now },
+      });
+      return { updated: result.count };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async listPreferences(customer: NotificationCustomer) {
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      await lockActiveCustomerForRead(tx, customer);
+      const [records, latestMarketingConsent] = await Promise.all([
+        tx.notificationPreference.findMany({
+          where: {
+            customerId: customer.id,
+            channel: { in: [...EXTERNAL_NOTIFICATION_CHANNELS] },
+            topic: { in: [...NOTIFICATION_TOPICS] },
+          },
+          select: {
+            channel: true,
+            topic: true,
+            enabled: true,
+            updatedAt: true,
+          },
         }),
-      ),
-      marketingConsentGranted,
-    };
+        tx.consentRecord.findFirst({
+          where: { customerId: customer.id, purpose: "MARKETING", decidedAt: { lte: now } },
+          orderBy: [{ decidedAt: "desc" }, { id: "desc" }],
+          select: { decision: true, expiresAt: true },
+        }),
+      ]);
+      const recordByKey = new Map(
+        records.map((record) => [`${record.channel}:${record.topic}`, record]),
+      );
+      const marketingConsentGranted = latestMarketingConsent?.decision === "GRANTED"
+        && (!latestMarketingConsent.expiresAt || latestMarketingConsent.expiresAt > now);
+      return {
+        list: EXTERNAL_NOTIFICATION_CHANNELS.flatMap((channel) =>
+          NOTIFICATION_TOPICS.map((topic) => {
+            const record = recordByKey.get(`${channel}:${topic}`);
+            return {
+              channel,
+              topic,
+              enabled: record?.enabled ?? defaultNotificationPreference(topic),
+              defaulted: !record,
+              updatedAt: record?.updatedAt ?? null,
+              requiresMarketingConsent: isMarketingNotificationTopic(topic),
+            };
+          }),
+        ),
+        marketingConsentGranted,
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   async updatePreference(
-    customerId: number,
+    customer: NotificationCustomer,
     dto: UpdateCustomerNotificationPreferenceDto,
   ) {
     const expectedUpdatedAt = dto.expectedUpdatedAt
@@ -149,10 +168,11 @@ export class CustomerNotificationsService {
       : null;
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveCustomerForWrite(tx, customer);
         const current = await tx.notificationPreference.findUnique({
           where: {
             customerId_channel_topic: {
-              customerId,
+              customerId: customer.id,
               channel: dto.channel,
               topic: dto.topic,
             },
@@ -184,7 +204,7 @@ export class CustomerNotificationsService {
           }
           preference = await tx.notificationPreference.create({
             data: {
-              customerId,
+              customerId: customer.id,
               channel: dto.channel,
               topic: dto.topic,
               enabled: dto.enabled,
@@ -194,7 +214,7 @@ export class CustomerNotificationsService {
         }
         await tx.customerSecurityEvent.create({
           data: {
-            customerId,
+            customerId: customer.id,
             eventType: `NOTIFY_PREF_${dto.channel}_${dto.topic}_${dto.enabled ? "ON" : "OFF"}`,
           },
         });

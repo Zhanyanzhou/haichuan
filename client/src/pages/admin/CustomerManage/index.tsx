@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
   Card,
@@ -22,6 +22,7 @@ import {
   AdminLoadingState,
 } from "@/components/common/AdminDataStates";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
+import { ORDER_STATUS_META } from "@/constants/tradeStatusCopy";
 
 /**
  * 客户档案管理（只读运营视图）
@@ -96,14 +97,6 @@ const PARTNER_STATUS_TEXT: Record<string, { label: string; color: string }> = {
   SUSPENDED: { label: "已暂停", color: "red" },
 };
 
-const ORDER_STATUS_TEXT: Record<string, { label: string; color: string }> = {
-  PENDING_PAYMENT: { label: "待付款", color: "orange" },
-  PENDING_SHIP: { label: "待发货", color: "gold" },
-  SHIPPED: { label: "已发货", color: "blue" },
-  COMPLETED: { label: "已完成", color: "green" },
-  CANCELLED: { label: "已取消", color: "default" },
-};
-
 const ORDER_TYPE_TEXT: Record<string, string> = {
   SPOT: "现货",
   CUSTOM: "定制",
@@ -139,7 +132,10 @@ export default function CustomerManage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  const listRequestIdRef = useRef(0);
+  const detailRequestIdRef = useRef(0);
   const fetchList = useCallback(async () => {
+    const requestId = ++listRequestIdRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -150,9 +146,11 @@ export default function CustomerManage() {
         status: status === "ALL" ? undefined : status,
       });
       const data = unwrapResponse<{ list: AdminCustomerRow[]; total: number }>(res);
+      if (requestId !== listRequestIdRef.current) return;
       setRows(data?.list ?? []);
       setTotal(data?.total ?? 0);
     } catch (error: unknown) {
+      if (requestId !== listRequestIdRef.current) return;
       setError(
         getSafeAdminErrorMessage(
           error,
@@ -160,7 +158,7 @@ export default function CustomerManage() {
         ),
       );
     } finally {
-      setLoading(false);
+      if (requestId === listRequestIdRef.current) setLoading(false);
     }
   }, [page, pageSize, keyword, status]);
 
@@ -169,6 +167,7 @@ export default function CustomerManage() {
   }, [fetchList]);
 
   const openDetail = async (id: number) => {
+    const requestId = ++detailRequestIdRef.current;
     setDetailOpen(true);
     // 记录当前查看的客户 ID：详情加载失败时据此提供重试入口
     setDetailId(id);
@@ -177,8 +176,10 @@ export default function CustomerManage() {
     setDetail(null);
     try {
       const res = await customerAdminApi.detail(id);
+      if (requestId !== detailRequestIdRef.current) return;
       setDetail(unwrapResponse<AdminCustomerDetail>(res));
     } catch (error: unknown) {
+      if (requestId !== detailRequestIdRef.current) return;
       setDetailError(
         getSafeAdminErrorMessage(
           error,
@@ -186,8 +187,17 @@ export default function CustomerManage() {
         ),
       );
     } finally {
-      setDetailLoading(false);
+      if (requestId === detailRequestIdRef.current) setDetailLoading(false);
     }
+  };
+
+  const closeDetail = () => {
+    detailRequestIdRef.current += 1;
+    setDetailOpen(false);
+    setDetailId(null);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(false);
   };
 
   const columns = [
@@ -370,7 +380,7 @@ export default function CustomerManage() {
         placement="right"
         width="min(640px, calc(100vw - 16px))"
         open={detailOpen}
-        onClose={() => setDetailOpen(false)}
+        onClose={closeDetail}
       >
         {detailLoading ? (
           <div className="py-20 text-center">
@@ -485,7 +495,7 @@ export default function CustomerManage() {
                       dataIndex: "status",
                       width: 90,
                       render: (v: string) => {
-                        const s = ORDER_STATUS_TEXT[v];
+                        const s = ORDER_STATUS_META[v as keyof typeof ORDER_STATUS_META];
                         return <Tag color={s?.color}>{s?.label ?? v}</Tag>;
                       },
                     },

@@ -15,13 +15,31 @@ async function installPublicationSettings(page: import("@playwright/test").Page)
   await authenticateAdmin(page);
   const state = {
     settings: { siteName: "发布资料测试站点", defaultLocale: "zh-CN", publishedLocales: ["zh-CN"] } as Record<string, unknown>,
-    writes: [] as Record<string, unknown>[], failSave: false, failReadiness: false,
+    writes: [] as Record<string, unknown>[],
+    settingsReads: 0,
+    failSave: false,
+    failReadiness: false,
+    failNextSettingsRead: false,
+    normalizeContactEmail: false,
   };
   await page.route("**/api/settings", async (route) => {
     if (route.request().method() === "PUT") {
       state.writes.push(route.request().postDataJSON());
       if (state.failSave) return route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
-      state.settings = { ...state.settings, ...route.request().postDataJSON() };
+      const submitted = route.request().postDataJSON() as Record<string, unknown>;
+      state.settings = {
+        ...state.settings,
+        ...submitted,
+        ...(state.normalizeContactEmail && typeof submitted.contactEmail === "string"
+          ? { contactEmail: submitted.contactEmail.trim() }
+          : {}),
+      };
+    } else {
+      state.settingsReads += 1;
+      if (state.failNextSettingsRead) {
+        state.failNextSettingsRead = false;
+        return route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+      }
     }
     return route.fulfill({ contentType: "application/json", body: JSON.stringify({ code: 200, data: state.settings }) });
   });
@@ -136,6 +154,56 @@ test.describe("站点发布资料入口（自有 API Mock）", () => {
     await page.reload();
     await expect(page.getByText("公开语言：简体中文（zh-CN）", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "恢复中文发布设置", exact: true })).toHaveCount(0);
+  });
+
+  test("保存后重新读取服务端权威资料并立即回显规范化结果", async ({ page }) => {
+    const state = await installPublicationSettings(page);
+    state.normalizeContactEmail = true;
+    await page.goto("/admin/site-content");
+    const email = page.getByLabel("联系邮箱", { exact: true });
+    await email.fill("  service@example.com  ");
+    const readsBeforeSave = state.settingsReads;
+
+    await page.getByRole("button", { name: /保存设置$/ }).click();
+
+    await expect(page.getByText("店铺资料已保存", { exact: true })).toBeVisible();
+    await expect(email).toHaveValue("service@example.com");
+    await expect.poll(() => state.settingsReads).toBeGreaterThan(readsBeforeSave);
+    expect(state.writes).toHaveLength(1);
+
+    await page.reload();
+    await expect(page.getByLabel("联系邮箱", { exact: true })).toHaveValue("service@example.com");
+    expect(state.writes).toHaveLength(1);
+  });
+
+  test("PUT 已成功但写后读取失败时只允许 GET 恢复且不重复保存", async ({ page }) => {
+    const state = await installPublicationSettings(page);
+    state.normalizeContactEmail = true;
+    await page.goto("/admin/site-content");
+    const email = page.getByLabel("联系邮箱", { exact: true });
+    await email.fill("  recovery@example.com  ");
+    state.failNextSettingsRead = true;
+
+    await page.getByRole("button", { name: /保存设置$/ }).click();
+
+    const recoveryAlert = page.locator(".ant-alert").filter({
+      hasText: "店铺资料已保存，但重新读取与发布准备度确认暂时失败",
+    });
+    await expect(recoveryAlert).toBeVisible();
+    await expect(page.getByText("店铺资料保存失败，请检查填写内容后重试。", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("表单仍可编辑和保存。准备度尚未确认，请重新检查后再返回装修页发布。", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("保存已成功，但当前还无法确认服务端回读和发布准备度。请先重新读取已保存资料。", { exact: true })).toBeVisible();
+    await expect(email).toHaveValue("recovery@example.com");
+    await expect(email).toBeDisabled();
+    expect(state.writes).toHaveLength(1);
+
+    const readsBeforeRetry = state.settingsReads;
+    await recoveryAlert.getByRole("button", { name: "重新读取已保存资料", exact: true }).click();
+    await expect(recoveryAlert).toHaveCount(0);
+    await expect(page.getByText("已重新读取保存结果", { exact: true })).toBeVisible();
+    await expect.poll(() => state.settingsReads).toBeGreaterThan(readsBeforeRetry);
+    await expect(email).toBeEnabled();
+    expect(state.writes).toHaveLength(1);
   });
 });
 

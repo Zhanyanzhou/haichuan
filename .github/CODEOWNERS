@@ -1,0 +1,9 @@
+# 建议关键规则的改动请求项目负责人复核。本文件只表达评审建议；是否强制以及由谁评审，以远端分支保护和仓库权限的当前配置为准。
+/AGENTS.md @Zhanyanzhou
+/WORKFLOW.md @Zhanyanzhou
+/PROJECT_RULES.md @Zhanyanzhou
+/docs/DECISIONS.md @Zhanyanzhou
+/docs/PROJECT_GUARDRAILS.md @Zhanyanzhou
+/.github/workflows/quality.yml @Zhanyanzhou
+/scripts/verify-product-decision-governance.mjs @Zhanyanzhou
+/scripts/verify-product-decision-governance.spec.mjs @Zhanyanzhou

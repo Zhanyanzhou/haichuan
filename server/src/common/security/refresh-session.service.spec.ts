@@ -18,6 +18,7 @@ type Row = {
 
 function adminFixture() {
   const rows: Row[] = [];
+  const transactionEvents: string[] = [];
   const delegate = {
     create: async ({ data }: any) => {
       const row: Row = {
@@ -53,9 +54,21 @@ function adminFixture() {
   };
   const prisma = {
     adminRefreshSession: delegate,
-    $transaction: async (callback: (tx: any) => Promise<any>) => callback({ adminRefreshSession: delegate }),
+    $transaction: async (callback: (tx: any) => Promise<any>) => callback({
+      $queryRaw: async () => {
+        transactionEvents.push('user-lock');
+        return [{ id: 7 }];
+      },
+      adminRefreshSession: {
+        ...delegate,
+        updateMany: async (args: any) => {
+          transactionEvents.push('session-update');
+          return delegate.updateMany(args);
+        },
+      },
+    }),
   };
-  return { service: new RefreshSessionService(prisma as any), rows };
+  return { service: new RefreshSessionService(prisma as any), rows, transactionEvents };
 }
 
 test('refresh token 只以哈希落库，轮换沿用同一 family 并作废旧 token', async () => {
@@ -87,6 +100,7 @@ test('员工 access family 可按员工与 family 精确吊销', async () => {
   assert.equal(fixture.rows[0].revokedAt instanceof Date, true);
   assert.equal(fixture.rows[1].revokedAt, null);
   assert.equal(fixture.rows[2].revokedAt, null);
+  assert.deepEqual(fixture.transactionEvents, ['user-lock', 'session-update']);
 });
 
 test('重复使用已轮换 refresh token 会撤销整个 family', async () => {

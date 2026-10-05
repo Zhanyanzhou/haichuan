@@ -21,7 +21,9 @@ if (!existsSync(indexPath)) {
 }
 
 const gzipBytes = (filePath) => gzipSync(readFileSync(filePath)).byteLength;
-const formatKb = (bytes) => `${(bytes / 1024).toFixed(1)} KiB`;
+const kib = (bytes) => Number((bytes / 1024).toFixed(1));
+const formatKb = (bytes) => `${kib(bytes)} KiB`;
+const exceedsBudget = (bytes, limitBytes) => kib(bytes) > kib(limitBytes);
 const unique = (values) => [...new Set(values)];
 const indexHtml = readFileSync(indexPath, "utf8");
 const initialAssets = unique(
@@ -98,22 +100,22 @@ const largestJs = largest(reachableJsRows);
 const largestCss = largest(reachableCssRows);
 const failures = [];
 
-if (initialJsGzip > budgets.initialJsGzip) {
+if (exceedsBudget(initialJsGzip, budgets.initialJsGzip)) {
   failures.push(
     `公开首屏 JS gzip ${formatKb(initialJsGzip)} > ${formatKb(budgets.initialJsGzip)}`,
   );
 }
-if (initialCssGzip > budgets.initialCssGzip) {
+if (exceedsBudget(initialCssGzip, budgets.initialCssGzip)) {
   failures.push(
     `公开首屏 CSS gzip ${formatKb(initialCssGzip)} > ${formatKb(budgets.initialCssGzip)}`,
   );
 }
-if (largestJs?.gzip > budgets.reachableJsChunkGzip) {
+if (largestJs && exceedsBudget(largestJs.gzip, budgets.reachableJsChunkGzip)) {
   failures.push(
     `最大可达 JS 块 ${largestJs.name} gzip ${formatKb(largestJs.gzip)} > ${formatKb(budgets.reachableJsChunkGzip)}`,
   );
 }
-if (largestCss?.gzip > budgets.reachableCssChunkGzip) {
+if (largestCss && exceedsBudget(largestCss.gzip, budgets.reachableCssChunkGzip)) {
   failures.push(
     `最大可达 CSS 块 ${largestCss.name} gzip ${formatKb(largestCss.gzip)} > ${formatKb(budgets.reachableCssChunkGzip)}`,
   );

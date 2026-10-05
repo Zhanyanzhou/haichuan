@@ -23,7 +23,7 @@ import {
   getContentTemplateContract,
   getContentTemplateEditableObject,
 } from "../generated/contentTemplates.generated";
-import { resolveVisualNode } from "../runtime/visualLayout";
+import { resolveVisualNode, setVisualOverridePath } from "../runtime/visualLayout";
 import type { PuckProps } from "../types";
 
 interface FieldRendererProps {
@@ -197,10 +197,10 @@ export default function FieldRenderer({
           ? `${visualNode.ratio} / 1`
           : def.previewAspectRatio;
       const slotCapability = slotCapabilities?.find((slot) => slot.roleId === slotRole);
-      const focus = def.focusKeys
+      const focus = def.focusKeys || slotCapability?.focusByViewport
         ? {
-            x: Number(visualNode.focus?.x ?? ctx.props[def.focusKeys.x] ?? 50),
-            y: Number(visualNode.focus?.y ?? ctx.props[def.focusKeys.y] ?? 50),
+            x: Number(visualNode.focus?.x ?? (def.focusKeys ? ctx.props[def.focusKeys.x] : undefined) ?? 50),
+            y: Number(visualNode.focus?.y ?? (def.focusKeys ? ctx.props[def.focusKeys.y] : undefined) ?? 50),
           }
         : undefined;
       let inheritBaseValue: string | undefined;
@@ -221,6 +221,25 @@ export default function FieldRenderer({
             visualNode.zoom
           }
           onChange={(next) => update({ [def.key]: next })}
+          onFocusChange={
+            def.focusKeys || slotCapability?.focusByViewport
+              ? (next) => {
+                  const patch: Record<string, unknown> = {};
+                  if (def.focusKeys) {
+                    patch[def.focusKeys.x] = next.x;
+                    patch[def.focusKeys.y] = next.y;
+                  }
+                  if (slotCapability?.focusByViewport) {
+                    patch.__instanceOverrides = setVisualOverridePath(
+                      ctx.props.__instanceOverrides,
+                      ["nodes", slotRole, "mediaView", "focusByViewport", viewportKey],
+                      next,
+                    );
+                  }
+                  update(patch);
+                }
+              : undefined
+          }
           onAdjustComposition={
             slotCapability && onRequestVisualEdit
               ? () => onRequestVisualEdit(slotRole)

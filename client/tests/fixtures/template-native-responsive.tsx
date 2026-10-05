@@ -23,7 +23,7 @@ const container = add(definition.rootNodeId, "Container");
 const heading = add(container, "HeadingSlot");
 const locked = add(definition.rootNodeId, "Grid");
 const slotId = definition.nodes[heading].slotId!;
-for (const [bp, columns, gap, font] of [["desktop", 3, 24, 32], ["tablet", 2, 12, 24], ["mobile", 1, 6, 18]] as const) {
+for (const [bp, columns, gap, font] of [["desktop", 3, 24, 32], ["mobile", 1, 6, 18]] as const) {
   setTemplateNodeRule(definition, grid, bp, "columns", Array.from({ length: columns }, () => 1));
   setTemplateNodeRule(definition, grid, bp, "gap", { value: gap, unit: "px" });
   setTemplateSlotRule(definition, slotId, bp, "fontSize", { value: font, unit: "px" });
@@ -32,7 +32,7 @@ setTemplateNodeRule(definition, container, "mobile", "width", "fit");
 setTemplateNodeRule(definition, heading, "mobile", "width", { value: 180, unit: "px" });
 setTemplateNodeRule(definition, image, "desktop", "height", { mode: "fixed", value: { value: 80, unit: "px" } });
 setTemplateNodeRule(definition, locked, "desktop", "columns", [1, 1, 1]);
-setTemplateNodeRule(definition, locked, "tablet", "columns", [1]);
+setTemplateNodeRule(definition, locked, "mobile", "columns", [1]);
 definition.nodes[locked].authoring = { structureLocked: true };
 draft.definition = definition;
 useTemplateEditorSession.getState().open(draft);
@@ -41,7 +41,7 @@ function Fixture() {
   const state = useTemplateEditorSession();
   const [ids, setIds] = React.useState([grid]);
   return <App><main style={{ padding: 16 }}>
-    <nav>{(["desktop", "tablet", "mobile"] as const).map((bp) => <button key={bp} onClick={() => state.setBreakpoint(bp)}>{bp}</button>)}
+    <nav>{(["desktop", "mobile"] as const).map((bp) => <button key={bp} onClick={() => state.setBreakpoint(bp)}>{bp}</button>)}
       <button onClick={() => setIds([grid])}>选择网格</button><button onClick={() => setIds([heading])}>选择标题</button>
       <button onClick={() => setIds([grid, locked])}>多选含锁定网格</button>
       <button onClick={() => { state.executeCommand({ type: "update-definition", label: "测试前置修改", update: (next) => {

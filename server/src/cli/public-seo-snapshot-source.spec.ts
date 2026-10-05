@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { computeProductPublicationQualityHash } from "../modules/products/product-publication-quality-hash";
 import test from "node:test";
 import {
+  CONTENT_TEMPLATE_PAGE_KEYS,
   CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY,
   createContentTemplatePublicationAttestation,
 } from "../modules/page-modules/generated/contentTemplates.generated";
 import {
   createPageLocaleContentHash,
+  PAGE_LOCALE_SELF_REVIEW_ACTION,
   withPageLocaleRevisionMetadata,
 } from "../modules/page-modules/page-document-localization";
 import { createPublicSeoExportConfig } from "./export-public-seo-snapshot";
@@ -17,7 +20,7 @@ import {
 } from "./public-seo-snapshot-source";
 
 const NOW = new Date("2026-09-13T08:00:00.000Z");
-const PAGE_KEYS = ["home", "products", "catalog", "custom", "about", "contact"];
+const PAGE_KEYS = CONTENT_TEMPLATE_PAGE_KEYS;
 const LEGAL_SOURCE_HASHES = {
   privacy: "6".repeat(64),
   businessInfo: "7".repeat(64),
@@ -102,6 +105,14 @@ function settings(includeEnglish = false) {
     value: {
       siteName: "Haichuan Jewelry",
       canonicalBaseUrl: "https://shop.example.invalid",
+      brandPresentationMode: "text-only",
+      brandReviewReference: "brand-approved-3",
+      contactPhone: "400-123-4567",
+      contactEmail: "service@example.invalid",
+      contactAddress: "深圳市罗湖区珠宝园区",
+      businessHours: "周一至周六 10:00-18:00",
+      seoTitle: "海川珠宝",
+      seoDescription: "了解海川珠宝作品、高级定制与咨询服务。",
       seoReviewReference: "seo-approved-7",
       legalEntityReviewReference: `legal-approved-4|sha256:${LEGAL_SOURCE_HASHES.businessInfo}`,
       privacyPolicyReviewReference: `privacy-v2-approved|sha256:${LEGAL_SOURCE_HASHES.privacy}`,
@@ -111,7 +122,14 @@ function settings(includeEnglish = false) {
   };
 }
 
-function database(options: { includeEnglish?: boolean; products?: any[]; secondSettings?: any } = {}) {
+function database(options: {
+  includeEnglish?: boolean;
+  products?: any[];
+  secondSettings?: any;
+  documents?: any[];
+  audit?: any;
+  actor?: any;
+} = {}) {
   const calls: string[] = [];
   let settingsRead = 0;
   return {
@@ -127,7 +145,7 @@ function database(options: { includeEnglish?: boolean; products?: any[]; secondS
       pageDocument: {
         findMany: async () => {
           calls.push("pageDocument.findMany");
-          return structuredClone(documents(options.includeEnglish));
+          return structuredClone(options.documents ?? documents(options.includeEnglish));
         },
       },
       product: {
@@ -135,6 +153,12 @@ function database(options: { includeEnglish?: boolean; products?: any[]; secondS
           calls.push("product.findMany");
           return structuredClone(options.products ?? []);
         },
+      },
+      operationLog: {
+        findUnique: async () => structuredClone(options.audit ?? null),
+      },
+      user: {
+        findUnique: async () => structuredClone(options.actor ?? null),
       },
     } as PublicSeoSnapshotDatabase,
   };
@@ -154,29 +178,9 @@ const config = {
 const validatePage = async () => ({ valid: true });
 
 function qualityHash(product: any) {
-  return hash({
-    version: "p0-product-quality-v1",
-    code: product.code,
-    name: product.name,
-    shortDescription: product.shortDescription,
-    description: product.description,
-    detailContent: product.detailContent,
-    materialType: product.materialType,
-    goldWeight: product.goldWeight == null ? null : String(product.goldWeight),
-    weight: product.weight == null ? null : String(product.weight),
-    salesMode: product.salesMode,
-    inventoryPolicy: product.inventoryPolicy,
-    primaryImageId: product.primaryImage?.id ?? null,
-    listingImageId: product.listingImage?.id ?? null,
-    imageIds: product.images.map((image: any) => image.id).sort((a: number, b: number) => a - b),
-    skus: product.skus
-      .filter((sku: any) => sku.isActive)
-      .map((sku: any) => ({
-        id: sku.id,
-        price: String(sku.price),
-        goldWeight: sku.goldWeight == null ? null : String(sku.goldWeight),
-        inventoryRecords: sku.inventories.length,
-      })),
+  return computeProductPublicationQualityHash({
+    ...product,
+    skus: product.skus.filter((sku: any) => sku.isActive),
   });
 }
 
@@ -191,8 +195,25 @@ function product() {
     materialType: "GOLD_999",
     goldWeight: "8.20",
     weight: "8.20",
+    size: "圈口 14",
+    gemInfo: null,
+    craftTechnique: ["古法"],
     salesMode: "DISPLAY_ONLY",
     inventoryPolicy: "STANDARD",
+    fulfillmentType: "IN_STOCK",
+    dispatchTime: "WITHIN_48_HOURS",
+    deliveryMethods: ["STORE_PICKUP"],
+    requiresInsuredShipping: false,
+    requiresSignature: true,
+    includesCertificate: false,
+    packageType: null,
+    customLeadTime: null,
+    isHot: false,
+    isNew: false,
+    isRecommended: false,
+    isLimited: false,
+    isCustom: false,
+    shippingTemplate: null,
     status: "PUBLISHED",
     visibility: "PUBLIC",
     publicationQualityStatus: "READY",
@@ -222,8 +243,12 @@ function product() {
       },
     },
     listingImage: { id: 402 },
-    images: [{ id: 401 }, { id: 402 }],
-    skus: [{ id: 501, isActive: true, price: "9999", goldWeight: "8.20", inventories: [{ quantity: 1 }] }],
+    images: [
+      { id: 401, type: "FRONT", sortOrder: 0, mediaAssetId: 801, mediaAsset: { lifecycleRevision: 1, authorization: { revision: 3, publicUseEpoch: 2 } } },
+      { id: 402, type: "DETAIL", sortOrder: 1, mediaAssetId: null, mediaAsset: null },
+    ],
+    skus: [{ id: 501, isActive: true, material: "GOLD_999", size: "圈口 14", price: "9999", goldWeight: "8.20", inventories: [{ quantity: 1 }] }],
+    certificates: [],
     translations: [],
   };
   value.publicationQualityHash = qualityHash(value);
@@ -243,6 +268,102 @@ test("producer 只读取显式 locale 发布 revision，并生成六个中文页
     "siteSetting.findUnique", "pageDocument.findMany", "product.findMany",
     "siteSetting.findUnique", "pageDocument.findMany", "product.findMany",
   ]);
+});
+
+test("producer 只接受与发布 revision 精确绑定的超级管理员自审审计", async () => {
+  const rows = documents();
+  const page = rows[0];
+  const row = page.localizations[0];
+  const reviewedAt = new Date("2026-09-12T09:00:00.000Z");
+  const revision = "2026-09-12T08:00:00.000Z";
+  const marker = withPageLocaleRevisionMetadata(
+    row.publishedRevision.metadata,
+    "zh-CN",
+    row.publishedHash,
+    {
+      submittedBy: 10,
+      submittedAt: new Date("2026-09-12T08:00:00.000Z"),
+      reviewedBy: 10,
+      reviewedAt,
+      selfReview: {
+        action: PAGE_LOCALE_SELF_REVIEW_ACTION,
+        auditLogId: 501,
+        actor: 10,
+        actorRole: "SUPER_ADMIN",
+        revision,
+        reviewedAt: reviewedAt.toISOString(),
+      },
+    },
+  );
+  row.publishedRevision.metadata = marker;
+  const audit = {
+    id: 501,
+    userId: 10,
+    action: PAGE_LOCALE_SELF_REVIEW_ACTION,
+    module: "page-builder",
+    targetId: page.id,
+    detail: JSON.stringify({
+      schemaVersion: 1,
+      event: PAGE_LOCALE_SELF_REVIEW_ACTION,
+      actor: 10,
+      actorRole: "SUPER_ADMIN",
+      pageKey: page.pageKey,
+      locale: "zh-CN",
+      revision,
+      contentHash: row.publishedHash,
+      reviewedAt: reviewedAt.toISOString(),
+      result: "succeeded",
+    }),
+  };
+  const accepted = database({ documents: rows, audit, actor: { role: "SUPER_ADMIN", status: "ACTIVE" } });
+  await assert.doesNotReject(
+    () => createPublicSeoExportInput(accepted.value, config, validatePage, NOW),
+  );
+
+  const rejected = database({ documents: rows, audit, actor: { role: "ADMIN", status: "ACTIVE" } });
+  await assert.rejects(
+    () => createPublicSeoExportInput(rejected.value, config, validatePage, NOW),
+    /SELF_REVIEW_EVIDENCE_INVALID/,
+  );
+
+  const disabled = database({
+    documents: rows,
+    audit,
+    actor: { role: "SUPER_ADMIN", status: "DISABLED" },
+  });
+  await assert.rejects(
+    () => createPublicSeoExportInput(disabled.value, config, validatePage, NOW),
+    /SELF_REVIEW_EVIDENCE_INVALID/,
+  );
+
+  const driftedAudit = {
+    ...audit,
+    detail: JSON.stringify({
+      ...JSON.parse(audit.detail),
+      contentHash: "f".repeat(64),
+    }),
+  };
+  const hashDrift = database({
+    documents: rows,
+    audit: driftedAudit,
+    actor: { role: "SUPER_ADMIN", status: "ACTIVE" },
+  });
+  await assert.rejects(
+    () => createPublicSeoExportInput(hashDrift.value, config, validatePage, NOW),
+    /SELF_REVIEW_EVIDENCE_INVALID/,
+  );
+
+  (row.publishedRevision.metadata as any).__pageLocaleRevision.selfReview.revision =
+    "2026-09-12T08:30:00.000Z";
+  const revisionDrift = database({
+    documents: rows,
+    audit,
+    actor: { role: "SUPER_ADMIN", status: "ACTIVE" },
+  });
+  await assert.rejects(
+    () => createPublicSeoExportInput(revisionDrift.value, config, validatePage, NOW),
+    /(?:SELF_REVIEW_EVIDENCE_INVALID|REVIEW_EVIDENCE_MISSING)/,
+  );
 });
 
 test("静态 SEO 正文只使用已审核 SEO 字段，不收集隐藏或内部 Puck 文案", async () => {
@@ -274,20 +395,26 @@ test("静态 SEO 正文只使用已审核 SEO 字段，不收集隐藏或内部 
   });
   fake.value.pageDocument.findMany = async () => structuredClone(rows);
   const result = await createPublicSeoExportInput(fake.value, config, validatePage, NOW);
-  const serialized = JSON.stringify(result.routes.find((route) => route.path === "/"));
+  const home = result.routes.find((route) => route.path === "/");
+  assert.ok(home?.bootstrapPageDocument);
+  assert.equal(home.bootstrapPageDocument.pageKey, "home");
+  const serialized = JSON.stringify(home);
   assert.doesNotMatch(serialized, /供应商内部备注不得公开|网站内容正在完善/);
+  assert.match(serialized, /published zh-CN content/);
+  assert.doesNotMatch(home.renderedBodyHtml, /供应商内部备注不得公开|网站内容正在完善/);
 });
 
-test("只有完整且独立审核的四个英文页面才能进入快照", async () => {
-  const result = await createPublicSeoExportInput(database({ includeEnglish: true }).value, config, validatePage, NOW);
-  assert.equal(result.routes.filter((route) => route.locale === "en").length, 4);
-  assert.ok(result.routes.some((route) => route.path === "/en/about"));
-
-  const incomplete = database({ includeEnglish: true });
-  const rows = await incomplete.value.pageDocument.findMany({});
-  rows.find((entry) => entry.pageKey === "about").localizations = rows.find((entry) => entry.pageKey === "about").localizations.filter((entry: any) => entry.locale !== "EN");
-  incomplete.value.pageDocument.findMany = async () => structuredClone(rows);
-  await assert.rejects(() => createPublicSeoExportInput(incomplete.value, config, validatePage, NOW), /ENGLISH_PUBLISHED_PAGE_SET_INCOMPLETE/);
+test("历史英文页面记录保留但不会进入中文快照", async () => {
+  const rows = documents(true);
+  const result = await createPublicSeoExportInput(
+    database({ documents: rows }).value,
+    config,
+    validatePage,
+    NOW,
+  );
+  assert.doesNotMatch(JSON.stringify(result.routes), /\"locale\":\"en\"/);
+  assert.ok(result.routes.some((route) => route.path === "/about"));
+  assert.ok(rows.some((document) => document.localizations.some((entry) => entry.locale === "EN")));
 });
 
 test("草稿、缺失审核、中文 fallback 与 hash 漂移均失败关闭", async () => {
@@ -307,6 +434,45 @@ test("草稿、缺失审核、中文 fallback 与 hash 漂移均失败关闭", a
   rows[0].localizations = [];
   fallback.value.pageDocument.findMany = async () => structuredClone(rows);
   await assert.rejects(() => createPublicSeoExportInput(fallback.value, config, validatePage, NOW), /NOT_PUBLISHED/);
+});
+
+test("静态 SEO 快照拒绝页面验证中的正式内容占位警告", async () => {
+  await assert.rejects(
+    () => createPublicSeoExportInput(
+      database().value,
+      config,
+      async (pageKey) => pageKey === "home"
+        ? {
+            valid: true,
+            issues: [{
+              severity: "warning",
+              message: "首页主视觉：标题“首页正在准备”仍是占位内容，请填写正式文案",
+            }],
+          }
+        : { valid: true, issues: [] },
+      NOW,
+    ),
+    /PAGE_home_zh-CN_PLACEHOLDER_CONTENT/,
+  );
+});
+
+test("静态 SEO 快照生成前复用正式站点准备度并拒绝占位事实", async () => {
+  const blockedSettings = settings();
+  blockedSettings.value.contactPhone = "正在完善";
+  blockedSettings.value.brandReviewReference = "";
+
+  await assert.rejects(
+    () => createPublicSeoExportInput(
+      database({ secondSettings: blockedSettings }).value,
+      config,
+      validatePage,
+      NOW,
+    ),
+    (error: unknown) => error instanceof Error
+      && error.message.startsWith("PUBLIC_SEO_EXPORT_SITE_PUBLICATION_READINESS_BLOCKED:")
+      && error.message.includes("BRAND_REVIEW_MISSING")
+      && error.message.includes("SITE_CONTACT_PHONE_PLACEHOLDER"),
+  );
 });
 
 test("商品投影重算质量 hash、要求公开主图授权且不泄漏内部字段", async () => {
@@ -329,6 +495,20 @@ test("商品投影重算质量 hash、要求公开主图授权且不泄漏内部
   await assert.rejects(() => createPublicSeoExportInput(database({ products: [value] }).value, config, validatePage, NOW), /QUALITY_HASH_DRIFT/);
 });
 
+test("静态 SEO 快照拒绝沿用图片类型或排序已变化的旧质量 hash", async () => {
+  for (const mutate of [
+    (value: any) => { value.images[0].type = "DETAIL"; },
+    (value: any) => { value.images[0].sortOrder = 9; },
+  ]) {
+    const value = product();
+    mutate(value);
+    await assert.rejects(
+      () => createPublicSeoExportInput(database({ products: [value] }).value, config, validatePage, NOW),
+      /QUALITY_HASH_DRIFT/,
+    );
+  }
+});
+
 test("当前页面校验器或商品分类不满足发布资格时失败关闭", async () => {
   await assert.rejects(
     () => createPublicSeoExportInput(database().value, config, async () => ({ valid: false }), NOW),
@@ -349,10 +529,17 @@ test("当前页面校验器或商品分类不满足发布资格时失败关闭",
   }
 });
 
-test("英文商品无发布审核模型，存在翻译时拒绝导出", async () => {
+test("历史英文商品翻译不阻断中文快照且不会被导出", async () => {
   const value = product();
   value.translations = [{ locale: "EN" }];
-  await assert.rejects(() => createPublicSeoExportInput(database({ products: [value] }).value, config, validatePage, NOW), /ENGLISH_REVIEW_EVIDENCE_UNAVAILABLE/);
+  const result = await createPublicSeoExportInput(
+    database({ products: [value] }).value,
+    config,
+    validatePage,
+    NOW,
+  );
+  assert.ok(result.routes.some((route) => route.path === "/products/HC-RING-01"));
+  assert.doesNotMatch(JSON.stringify(result.routes), /translations|\"locale\":\"en\"/);
 });
 
 test("不稳定货号、缺失主图、撤销授权和不完整 SEO 均失败关闭", async () => {

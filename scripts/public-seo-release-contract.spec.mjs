@@ -17,11 +17,16 @@ test("client image requires immutable SEO inputs and carries their evidence labe
   for (const required of [
     "COPY .release-seo/public-seo-snapshot.json",
     "COPY .release-seo/public-seo-routes.conf",
+    "COPY .release-seo/public-origin-redirect.conf",
+    "COPY .release-seo/public-origin-host.conf",
     "COPY dist/",
     "--prerender-manifest ./dist/prerendered-routes.json",
     "--nginx-map ./public-seo-routes.conf",
+    "--nginx-origin-redirect ./public-origin-redirect.conf",
+    "--nginx-origin-host ./public-origin-host.conf",
     "--strict",
     "--check",
+    "./dist/spa-shell.html",
     "rm ./dist/prerendered-routes.json",
     "io.haichuan.public-seo-snapshot-sha256",
     "io.haichuan.public-seo-prerender-manifest-sha256",
@@ -36,14 +41,28 @@ test("Nginx serves only generated indexable routes while preserving protected SP
   const nginxMain = read("client/nginx-main.conf");
   const generator = read("scripts/generate-public-seo-artifacts.mjs");
   assert.ok(nginx.includes("include /etc/nginx/public-seo-routes.conf;"));
+  assert.match(nginx, /location \/ \{[\s\S]*?include \/etc\/nginx\/public-origin-redirect\.conf;/);
+  assert.doesNotMatch(nginx, /return 308 https:\/\/\$host\$request_uri;/);
   assert.ok(nginxMain.includes("include /etc/nginx/public-seo-policy.conf;"));
+  assert.ok(nginxMain.includes("include /etc/nginx/public-origin-host.conf;"));
+  assert.match(nginx, /listen 127\.0\.0\.1:8082;[\s\S]*?location = \/healthz \{\s+return 204;/);
+  assert.match(nginx, /listen 8081;[\s\S]*?if \(\$hc_public_origin_host_allowed = 0\) \{ return 421; \}/);
   assert.match(nginx, /location = \/search \{\s+return 308 \/catalog\$is_args\$args;/);
-  assert.match(nginx, /location ~\* \^\/en\(\?:\/\|\$\) \{\s+error_page 404 =404 \/404-en\.html;\s+return 404;/);
+  assert.match(nginx, /location = \/en \{\s+return 308 \/\$is_args\$args;\s+absolute_redirect off;/);
+  assert.ok(nginx.includes("location ~* ^/en/([^/].*)$ {"));
+  assert.match(nginx, /location ~\* \^\/en\(\?:\/\|\$\) \{\s+return 404;/);
+  assert.match(nginx, /location ~\* \^\/en\/\/ \{\s+return 404;/);
+  assert.match(nginx, /location ~\* \^\/en\/\.\+%2f \{\s+return 404;/);
+  assert.match(nginx, /location ~\* \^\/en\/\.\+%5c \{\s+return 404;/);
+  assert.match(nginxMain, /merge_slashes off;/);
+  assert.doesNotMatch(nginx, /404-en\.html/);
   assert.match(nginx, /location \/ \{[\s\S]*?try_files \$uri =404;/);
   assert.ok(generator.includes("renderPublicSeoPolicy"));
   assert.ok(generator.includes("admin|preview|customer|cart|checkout|partner"));
   assert.ok(generator.includes('"noindex, nofollow"'));
-  assert.match(nginx, /location ~\* \^\/\(admin\|preview\|customer\|cart\|checkout\|partner\)\(\/\|\$\) \{[\s\S]*?try_files \/index\.html =404;/);
+  assert.match(nginx, /location = \/spa-shell\.html \{\s+internal;/);
+  assert.match(nginx, /location ~\* \^\/\(admin\|preview\|customer\|cart\|checkout\|partner\)\(\/\|\$\) \{[\s\S]*?try_files \/spa-shell\.html =404;/);
+  assert.match(nginx, /location ~ \^\/\(\?:products\|catalog\|custom\|about\|contact\|privacy\|business-info\)\?\$ \{[\s\S]*?try_files \/spa-shell\.html =404;/);
   assert.match(nginx, /location \/uploads\/page-assets\/ \{[\s\S]*?proxy_cache off;[\s\S]*?expires off;/);
   assert.match(nginx, /location \/uploads\/page-assets\/ \{[\s\S]*?Cache-Control: public, no-store/);
 });
@@ -68,7 +87,10 @@ test("release workflow validates a same-SHA artifact before build and performs r
     "PUBLIC_SPA_FALLBACK_NOINDEX_MISSING",
     "node scripts/prerender-public-routes.mjs",
     "node scripts/generate-public-seo-artifacts.mjs",
+    "--nginx-origin-redirect client/.release-seo/public-origin-redirect.conf",
+    "--nginx-origin-host client/.release-seo/public-origin-host.conf",
     "node scripts/verify-public-seo-http.mjs",
+    'Host: ${canonical_host}',
     "publicSeo: {",
     "snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH",
     "prerenderManifestSha256: process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256",
@@ -138,16 +160,24 @@ test("SEO tunnel overlay exposes MySQL only on an explicit loopback high port", 
   assert.doesNotMatch(overlay, /^\s*build:/m);
 });
 
+test("HTTP SEO probe treats historical English unpublished paths as same-origin 308", () => {
+  const verifier = read("scripts/verify-public-seo-http.mjs");
+  assert.match(verifier, /retiredEnglishPath = "\/en\/__seo-unpublished-probe__"/);
+  assert.match(verifier, /retiredEnglish\.status !== 308/);
+  assert.match(verifier, /assertLocation\(retiredEnglish, "\/__seo-unpublished-probe__", ""\)/);
+  assert.doesNotMatch(verifier, /\["\/en\/__seo-unpublished-probe__", 404, "en"\]/);
+});
+
 test("runbook keeps PageDocument publication separate from immutable public-route activation", () => {
   const runbook = read("docs/PRODUCTION_RELEASE_RUNBOOK.md");
   for (const required of [
-    "后台把 PageDocument 标记为已发布，只会更新数据库中的已审核发布事实",
-    "直接访问尚未进入当前镜像的英文路由仍应为 404",
+    "后台把 PageDocument 标记为已发布，只会更新数据库中的已审核中文发布事实",
+    "历史 `/en` 与 `/en/<path>` 只允许同源 `308` 到对应中文路径",
     "手动运行 `Export Public SEO Snapshot`",
     "不得手工编辑 snapshot，也不得复用发布前的 artifact",
     "运行 `Release Images`",
     "数据库发布本身不授权构建、部署或切流",
-    "至少一个未发布英文路径和一个未知英文路径仍为 404",
+    "`/en//...`、编码斜杠和反斜杠必须失败关闭",
     "取消发布和内容回滚遵循同一方向",
   ]) {
     assert.ok(runbook.includes(required), `missing explicit PageDocument activation contract: ${required}`);

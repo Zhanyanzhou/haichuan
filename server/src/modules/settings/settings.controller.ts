@@ -9,11 +9,13 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { requirePublishedPublicContentLocale } from "../../common/content-locale";
 import { AuditLogQueryDto } from "./dto/audit-log-query.dto";
+import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 import {
   isCustomerCommerceEnabled,
   isCustomerQuotationOrderingEnabled,
-  isPartnerApplicationsWriteEnabled,
+  isPartnerApplicationsWriteReady,
   isPaymentGatewayTransactionsEnabled,
+  resolvePartnerAgreementContract,
 } from "../../common/release/release-profile";
 
 @ApiTags("系统设置")
@@ -49,35 +51,46 @@ export class SettingsController {
 
   @ApiOperation({ summary: "获取系统设置" })
   @Get()
-  getSettings() {
-    return this.settingsService.getSettings();
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
+  getSettings(@CurrentUser() actor: StaffPrincipal) {
+    return this.settingsService.getSettings(actor);
   }
 
   @ApiOperation({ summary: "更新系统设置" })
   @Put()
   updateSettings(
     @Body() dto: UpdateSettingsDto,
-    @CurrentUser() user: { id: number },
+    @CurrentUser() actor: StaffPrincipal,
   ) {
-    return this.settingsService.updateSettings(dto, user.id);
+    return this.settingsService.updateSettings(dto, actor);
   }
 
   @ApiOperation({ summary: "获取公开站点机器可读发布准备度" })
   @Get("publication-readiness")
-  getPublicationReadiness() {
-    return this.settingsService.getPublicationReadiness();
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
+  getPublicationReadiness(@CurrentUser() actor: StaffPrincipal) {
+    return this.settingsService.getPublicationReadiness(actor);
   }
 
   @ApiOperation({ summary: "获取备份状态" })
   @Get("backup")
-  getBackupStatus() {
-    return this.settingsService.getBackupStatus();
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
+  getBackupStatus(@CurrentUser() actor: StaffPrincipal) {
+    return this.settingsService.getBackupStatus(actor);
   }
 
   @ApiOperation({ summary: "获取系统日志" })
   @Get("logs")
-  getLogs(@Query() query: AuditLogQueryDto) {
-    return this.settingsService.getLogs(query);
+  @Header("Cache-Control", "private, no-store, max-age=0")
+  @Header("Vary", "Cookie, Authorization")
+  getLogs(
+    @Query() query: AuditLogQueryDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.settingsService.getLogs(query, actor);
   }
 
   @Public()
@@ -90,12 +103,17 @@ export class SettingsController {
     // 行为分析后台：默认开启；显式设置 ANALYTICS_DASHBOARD_ENABLED=false 才关闭。
     const analyticsDashboardEnabled =
       process.env.ANALYTICS_DASHBOARD_ENABLED?.trim().toLowerCase() !== "false";
+    const partnerApplicationsWriteEnabled = isPartnerApplicationsWriteReady();
+    const partnerAgreementContract = partnerApplicationsWriteEnabled
+      ? resolvePartnerAgreementContract()
+      : null;
     return {
       commerceEnabled,
       cartEnabled: commerceEnabled,
       paymentEnabled: isPaymentGatewayTransactionsEnabled(),
       quotationOrderingEnabled: isCustomerQuotationOrderingEnabled(),
-      partnerApplicationsWriteEnabled: isPartnerApplicationsWriteEnabled(),
+      partnerApplicationsWriteEnabled,
+      partnerAgreementVersion: partnerAgreementContract?.version ?? null,
       analyticsDashboardEnabled,
     };
   }

@@ -1,10 +1,28 @@
-import type { FulfillmentStatus, Payment } from "@/types";
+import type { FulfillmentStatus, OrderStatus, Payment } from "@/types";
 
 /**
  * 交易域状态的中文标签与视觉语义单一来源（ADMIN_COPY_GUIDE §3：同一业务域的
- * 列表、详情、筛选项共用同一映射）。订单状态映射仍属 OrderManage 页面私有，
- * 因其未跨页消费；履约与付款状态在订单详情与履约中心两页共用。
+ * 列表、详情、筛选项共用同一映射）。
  */
+
+export const ORDER_STATUS_META: Record<
+  OrderStatus,
+  { color: string; label: string }
+> = {
+  PENDING_PAYMENT: { color: "gold", label: "待付款" },
+  PENDING_SHIP: { color: "blue", label: "待发货" },
+  SHIPPED: { color: "cyan", label: "已发货" },
+  COMPLETED: { color: "green", label: "已完成" },
+  CANCELLED: { color: "red", label: "已取消" },
+};
+
+export function orderStatusLabel(
+  status: OrderStatus | string | null | undefined,
+): string {
+  if (!status) return "—";
+  return ORDER_STATUS_META[status as OrderStatus]?.label ?? status;
+}
+
 export const FULFILLMENT_STATUS_META: Record<
   FulfillmentStatus,
   { color: string; label: string }

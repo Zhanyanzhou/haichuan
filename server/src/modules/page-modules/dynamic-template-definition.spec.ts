@@ -109,8 +109,12 @@ test("服务端使用与客户端同源的动态模板语义校验器", () => {
   requiredReadOnly.slots.slot_heading.required = true;
   requiredReadOnly.slots.slot_heading.editable = false;
   assert.ok(validateDynamicTemplateDefinition(requiredReadOnly).issues.some(
-    (issue) => issue.code === "REQUIRED_SLOT_MUST_BE_EDITABLE",
+    (issue) => issue.code === "REQUIRED_SLOT_NEEDS_FIXED_SOURCE",
   ));
+  requiredReadOnly.defaultContent.slot_heading = "固定品牌标题";
+  assert.equal(validateDynamicTemplateDefinition(requiredReadOnly).issues.some(
+    (issue) => issue.code === "REQUIRED_SLOT_NEEDS_FIXED_SOURCE",
+  ), false);
 });
 
 test("双图片槽位比例属于可保存的通用模板设计字段", () => {

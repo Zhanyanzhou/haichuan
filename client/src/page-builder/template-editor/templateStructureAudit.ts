@@ -8,7 +8,7 @@ import {
   validateDynamicTemplateDefinition,
 } from "../template-definition/validateTemplateDefinition";
 import { resolveVisualNode } from "../runtime/visualLayout";
-import { resolveTemplateNodeRules, type TemplateBreakpoint } from "../template-definition/responsive";
+import { resolveTemplateNodeRules, TEMPLATE_CONTENT_BREAKPOINTS, type TemplateBreakpoint } from "../template-definition/responsive";
 
 export type TemplateStructureIssueLevel = "error" | "warning";
 
@@ -56,13 +56,13 @@ export function buildTemplateStructureAudit(
       message: issue.message,
       nodeId: issue.nodeId ?? (issue.slotId ? nodeIdBySlotId.get(issue.slotId) : undefined),
       repair: issue.code === "REQUIRED_SLOT_MUST_BE_EDITABLE"
+        || issue.code === "REQUIRED_SLOT_NEEDS_FIXED_SOURCE"
         ? "enable-required-slot-page-edit" as const
         : undefined,
     }];
   });
   const root = definition.nodes[definition.rootNodeId];
-  const breakpoints: TemplateBreakpoint[] = definition.schemaVersion === 1
-    ? ["desktop", "mobile"] : ["desktop", "tablet", "mobile"];
+  const breakpoints = TEMPLATE_CONTENT_BREAKPOINTS;
   const parentByNodeId = new Map(Object.values(definition.nodes).flatMap((node) => (
     node.childIds.map((childId) => [childId, node.nodeId] as const)
   )));
@@ -130,7 +130,7 @@ export function buildTemplateStructureAudit(
           issues.push({
             code: "REQUIRED_SLOT_DEVICE_HIDDEN",
             level: "error",
-            message: `必填槽位“${slot.label}”在${({ desktop: "桌面", tablet: "平板", mobile: "手机" })[device]}不可见${hiddenNodeId === node.nodeId ? "" : `，隐藏来源为上级“${definition.nodes[hiddenNodeId].name}”`}。`,
+            message: `必填槽位“${slot.label}”在${({ desktop: "桌面", mobile: "手机" })[device]}不可见${hiddenNodeId === node.nodeId ? "" : `，隐藏来源为上级“${definition.nodes[hiddenNodeId].name}”`}。`,
             nodeId: hiddenNodeId,
             device,
             repair: "restore-required-slot-device",

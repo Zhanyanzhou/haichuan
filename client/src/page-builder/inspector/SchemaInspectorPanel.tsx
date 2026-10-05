@@ -20,6 +20,7 @@ import InspectorObjectContext, {
 } from "./InspectorObjectContext";
 import InspectorDisclosure from "./InspectorDisclosure";
 import InspectorFooterBar from "./InspectorFooterBar";
+import { resolvePublishIssueReviewAction } from "./publishReminderDialog";
 import {
   getInspectorPublishIssues,
   isPagePublishIssue,
@@ -57,6 +58,7 @@ import {
 interface SchemaInspectorPanelProps {
   schema: ModuleInspectorSchema;
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   onSaveDraft: () => void;
   templateDesignEnabled?: boolean;
@@ -314,6 +316,7 @@ function getTaskGroup(
 export default function SchemaInspectorPanel({
   schema,
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   publishIssues,
   templateDesignEnabled = true,
@@ -1194,28 +1197,19 @@ export default function SchemaInspectorPanel({
       </div>
       <InspectorFooterBar
         hasUnsavedChanges={hasUnsavedChanges}
+        hasPersistedDraft={hasPersistedDraft}
         saving={saving}
         errorCount={currentPublishErrorCount}
         warningCount={currentPublishWarningCount}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
-        onReviewIssues={currentPublishErrorCount > 0
-          ? onOpenPublishReview
-          : currentPublishWarningCount > 0
-            ? () => modal.warning({
-                title: `当前模块与页面发布检查 · ${currentPublishWarningCount} 项待检查`,
-                content: (
-                  <div className="homepage-editor__publish-issue-list">
-                    {currentPublishIssues.map((issue, index) => (
-                      <p key={`${issue.path ?? ""}-${issue.message}-${index}`}>
-                        <strong>提醒：</strong>{issue.message}
-                      </p>
-                    ))}
-                  </div>
-                ),
-                okText: "知道了",
-              })
-            : undefined}
+        onReviewIssues={resolvePublishIssueReviewAction({
+          errorCount: currentPublishErrorCount,
+          warningCount: currentPublishWarningCount,
+          issues: currentPublishIssues,
+          onOpenPublishReview,
+          modal,
+        })}
       />
     </section>
   );

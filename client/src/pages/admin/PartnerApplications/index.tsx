@@ -16,7 +16,12 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { TagProps } from "antd";
-import { partnerApi, type PartnerApplicationStatus } from "@/services/api";
+import {
+  partnerApi,
+  type PartnerApplicationReviewEligibility,
+  type PartnerApplicationStatus,
+  type PartnerReviewAction,
+} from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import {
@@ -37,13 +42,34 @@ const STATUS_OPTIONS = [
 const STATUS_META: Record<string, { label: string; color: TagProps["color"] }> =
   Object.fromEntries(STATUS_OPTIONS.map((o) => [o.value, o]));
 
+interface PartnerReviewValues {
+  action: PartnerReviewAction;
+  reviewNote?: string;
+}
+
+const REVIEW_ACTION_META: Record<
+  PartnerReviewAction,
+  { label: string; successMessage: string }
+> = {
+  APPROVED: { label: "通过（授予合作权限）", successMessage: "审核已提交" },
+  NEEDS_SUPPLEMENT: { label: "要求补充资料", successMessage: "审核已提交" },
+  REJECTED: { label: "驳回", successMessage: "审核已提交" },
+  SUSPENDED: { label: "暂停合作资格", successMessage: "合作资格已暂停" },
+};
+
+function getReviewButtonLabel(status: PartnerApplicationStatus): string {
+  if (status === "APPROVED") return "暂停";
+  if (status === "SUSPENDED") return "恢复";
+  return "审核";
+}
+
 /** 手机号掩码：138****1234（列表中不必要暴露完整号码） */
 function maskPhone(phone?: string | null): string {
   if (!phone || phone.length < 7) return phone || "-";
   return `${phone.slice(0, 3)}****${phone.slice(-4)}`;
 }
 
-interface ApplicationRow {
+interface ApplicationRow extends PartnerApplicationReviewEligibility {
   id: number;
   customerId: number;
   applicantName: string;
@@ -55,7 +81,10 @@ interface ApplicationRow {
   businessDescription?: string | null;
   expectedPurchaseRange?: string | null;
   contactWechat?: string | null;
-  status: string;
+  status: PartnerApplicationStatus;
+  agreementAcceptedAt?: string | null;
+  agreementVersion?: string | null;
+  agreementHash?: string | null;
   reviewNote?: string | null;
   submittedAt: string;
   reviewedAt?: string | null;
@@ -65,7 +94,7 @@ interface ApplicationRow {
 }
 
 export default function PartnerApplications() {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const { flags, loading: flagsLoading } = useCommerceCapabilities();
   const writeEnabled = flags?.partnerApplicationsWriteEnabled === true;
   const [data, setData] = useState<ApplicationRow[]>([]);
@@ -82,6 +111,7 @@ export default function PartnerApplications() {
   const [reviewing, setReviewing] = useState<ApplicationRow | null>(null);
   const [reviewForm] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,10 +127,12 @@ export default function PartnerApplications() {
       );
       setData(res?.list || []);
       setTotal(res?.total || 0);
+      return true;
     } catch (e: unknown) {
       setData([]);
       setTotal(0);
       setError(getSafeAdminErrorMessage(e, "合作申请列表加载失败，请稍后重新加载。"));
+      return false;
     } finally {
       setLoading(false);
     }
@@ -113,6 +145,7 @@ export default function PartnerApplications() {
   useEffect(() => {
     if (!writeEnabled) {
       setReviewing(null);
+      setReviewError("");
       reviewForm.resetFields();
     }
   }, [reviewForm, writeEnabled]);
@@ -130,25 +163,81 @@ export default function PartnerApplications() {
     }
   };
 
+  const closeReview = () => {
+    setReviewing(null);
+    setReviewError("");
+    reviewForm.resetFields();
+  };
+
+  const openReview = (row: ApplicationRow) => {
+    const actions = row.allowedReviewActions ?? [];
+    if (actions.length === 0) return;
+    setReviewing(row);
+    setReviewError("");
+    reviewForm.setFieldsValue({ action: actions[0], reviewNote: undefined });
+  };
+
+  const performReview = async (values: PartnerReviewValues) => {
+    if (!reviewing) return;
+    setSubmitting(true);
+    setReviewError("");
+    try {
+      await partnerApi.adminReview(reviewing.id, values);
+      const successMessage =
+        reviewing.status === "SUSPENDED" && values.action === "APPROVED"
+          ? "合作资格已恢复"
+          : REVIEW_ACTION_META[values.action].successMessage;
+      message.success(successMessage);
+      closeReview();
+      await load();
+    } catch (e: unknown) {
+      setReviewError(
+        getSafeAdminErrorMessage(e, "审核提交失败，请检查审核意见后重试。"),
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const submitReview = async () => {
     if (!reviewing) return;
     if (!writeEnabled) {
       message.info("合作申请写能力当前关闭，仅可查看历史申请");
       return;
     }
-    const values = await reviewForm.validateFields();
-    setSubmitting(true);
-    try {
-      await partnerApi.adminReview(reviewing.id, values);
-      message.success("审核已提交");
-      setReviewing(null);
-      reviewForm.resetFields();
-      await load();
-    } catch (e: unknown) {
-      message.error(getSafeAdminErrorMessage(e, "审核提交失败，请检查审核意见后重试。"));
-    } finally {
-      setSubmitting(false);
+    const values = (await reviewForm.validateFields()) as PartnerReviewValues;
+    const legalActions = reviewing.allowedReviewActions ?? [];
+    if (!legalActions.includes(values.action)) {
+      setReviewError("当前状态或角色已不允许执行该操作，请重新加载后再试。");
+      return;
     }
+
+    const isSuspending = reviewing.status === "APPROVED" && values.action === "SUSPENDED";
+    const isRestoring = reviewing.status === "SUSPENDED" && values.action === "APPROVED";
+    if (isSuspending || isRestoring) {
+      modal.confirm({
+        title: isSuspending ? "确认暂停合作资格？" : "确认恢复合作资格？",
+        content: isSuspending
+          ? "暂停后客户会立即失去 PARTNER 商品访问权；之后可由管理员从本记录恢复。"
+          : "恢复后客户会立即重新获得 PARTNER 商品访问权。",
+        okText: isSuspending ? "确认暂停" : "确认恢复",
+        okButtonProps: { danger: isSuspending },
+        cancelText: "取消",
+        onOk: () => performReview(values),
+      });
+      return;
+    }
+
+    await performReview(values);
+  };
+
+  const reloadReviewState = async () => {
+    const reloaded = await load();
+    if (reloaded) {
+      closeReview();
+      return;
+    }
+    setReviewError("当前状态重新加载失败，审核内容已保留，请稍后重试。");
   };
 
   const columns: ColumnsType<ApplicationRow> = [
@@ -180,25 +269,36 @@ export default function PartnerApplications() {
     },
     {
       title: "操作",
-      width: 160,
-      render: (_, r) => (
-        <Space>
-          <Button size="small" loading={detailLoading} onClick={() => openDetail(r)}>
-            详情
-          </Button>
-          <Button
-            size="small"
-            type="primary"
-            disabled={!writeEnabled || r.status === "APPROVED" || r.status === "REJECTED"}
-            onClick={() => {
-              setReviewing(r);
-              reviewForm.resetFields();
-            }}
-          >
-            审核
-          </Button>
-        </Space>
-      ),
+      width: 300,
+      render: (_, r) => {
+        const actions = r.allowedReviewActions ?? [];
+        return (
+          <Space>
+            <Button size="small" loading={detailLoading} onClick={() => openDetail(r)}>
+              详情
+            </Button>
+            {actions.length > 0 && (
+              <Button
+                size="small"
+                type="primary"
+                disabled={!writeEnabled}
+                onClick={() => openReview(r)}
+              >
+                {getReviewButtonLabel(r.status)}
+              </Button>
+            )}
+            {!r.isLatest && (
+              <Tag>历史只读 · 已被后续申请替代</Tag>
+            )}
+            {r.isLatest && !r.isCurrent && (
+              <Tag color="warning">当前资格状态待核对</Tag>
+            )}
+            {r.isLatest && r.isCurrent && actions.length === 0 && (
+              <Tag>只读</Tag>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -291,6 +391,23 @@ export default function PartnerApplications() {
             <Descriptions.Item label="微信">{detail.contactWechat || "-"}</Descriptions.Item>
             <Descriptions.Item label="业务简介">{detail.businessDescription || "-"}</Descriptions.Item>
             <Descriptions.Item label="申请时间">{detail.submittedAt?.replace("T", " ").slice(0, 19)}</Descriptions.Item>
+            <Descriptions.Item label="协议接受时间">
+              {detail.agreementAcceptedAt
+                ? detail.agreementAcceptedAt.replace("T", " ").slice(0, 19)
+                : "历史记录未绑定"}
+            </Descriptions.Item>
+            <Descriptions.Item label="协议版本">
+              {detail.agreementVersion || "历史记录未绑定"}
+            </Descriptions.Item>
+            <Descriptions.Item label="协议正文摘要">
+              {detail.agreementHash ? (
+                <code className="break-all" title={detail.agreementHash}>
+                  {detail.agreementHash}
+                </code>
+              ) : (
+                "历史记录未绑定"
+              )}
+            </Descriptions.Item>
             <Descriptions.Item label="审核人">
               {detail.reviewer ? detail.reviewer.realName || detail.reviewer.username : "-"}
             </Descriptions.Item>
@@ -302,25 +419,36 @@ export default function PartnerApplications() {
       <Modal
         title={`审核申请 #${reviewing?.id || ""}`}
         open={!!reviewing}
-        onCancel={() => setReviewing(null)}
+        forceRender
+        onCancel={closeReview}
         onOk={submitReview}
         confirmLoading={submitting}
         okText="提交审核"
         cancelText="取消"
       >
-        <Form form={reviewForm} layout="vertical" initialValues={{ action: "APPROVED" }}>
+        {reviewError && (
+          <Alert
+            type="error"
+            showIcon
+            className="mb-4"
+            message={reviewError}
+            action={
+              <Button size="small" onClick={reloadReviewState}>
+                重新加载当前状态
+              </Button>
+            }
+          />
+        )}
+        <Form form={reviewForm} layout="vertical">
           <Form.Item
             name="action"
             label="审核动作"
             rules={[{ required: true, message: "请选择审核动作" }]}
           >
             <Select
-              options={[
-                { value: "APPROVED", label: "通过（授予合作权限）" },
-                { value: "NEEDS_SUPPLEMENT", label: "要求补充资料" },
-                { value: "REJECTED", label: "驳回" },
-                { value: "SUSPENDED", label: "暂停（仅管理员）" },
-              ]}
+              options={(reviewing?.allowedReviewActions ?? []).map(
+                (action) => ({ value: action, label: REVIEW_ACTION_META[action].label }),
+              )}
             />
           </Form.Item>
           <Form.Item name="reviewNote" label="审核说明">

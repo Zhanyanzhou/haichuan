@@ -161,6 +161,24 @@ test("必填槽位必须由页面实例提供，母模板正式默认内容只�
   assert.equal(populated.issues.length, 0);
 });
 
+test("锁定槽位没有页面覆盖时使用母模板默认内容，残留覆盖仍失败", () => {
+  const definition = definitionFixture();
+  definition.slots.slot_heading.editable = false;
+  definition.slots.slot_heading.hideable = false;
+  definition.defaultContent.slot_heading = "母模板锁定标题";
+
+  const usesDefault = validateDynamicTemplateInstance(instanceProps({ contentBySlotId: {} }), definition);
+  assert.equal(usesDefault.issues.length, 0);
+
+  const leftover = validateDynamicTemplateInstance(instanceProps({
+    contentBySlotId: { slot_heading: "页面残留覆盖" },
+  }), definition);
+  assert.ok(leftover.issues.some((issue) => (
+    issue.field === "slot_heading" && issue.message.includes("不允许在页面中修改")
+  )));
+  assert.equal(leftover.issues.some((issue) => issue.message.includes("必填内容")), false);
+});
+
 test("可选图片兼容保留 alt 的旧清空值，必填图片仍明确阻断", () => {
   const definition = definitionFixture();
   addComplexSlot(definition, "image", "ImageSlot", "image");
@@ -608,4 +626,38 @@ test("页面发布校验拒绝结构、Schema 或 checksum 漂移的精确模板
   storedChecksum = "0".repeat(64);
   const corrupted = await collect(db, puckData, "home");
   assert.ok(corrupted.some((issue) => issue.message.includes("结构或校验和已损坏")));
+});
+
+test("页面实例构图覆盖拒绝结构节点、按钮字号与文字槽图片适配", () => {
+  const definition = definitionFixture();
+  addComplexSlot(definition, "cta", "ButtonSlot", "button");
+  definition.nodes.node_cta.instanceEditPolicy = {
+    position: true,
+    size: true,
+    zIndex: false,
+    imageFit: true,
+    imageFocus: true,
+    typography: true,
+    spacing: true,
+    minWidthPercent: 25,
+    maxWidthPercent: 150,
+    maxOffsetPercent: 30,
+    minFontSizePx: 12,
+    maxFontSizePx: 96,
+    maxSpacingPx: 120,
+  };
+  const result = validateDynamicTemplateInstance(instanceProps({
+    layoutOverridesByNodeId: {
+      node_container: { desktop: { widthPercent: 120 } },
+      node_cta: { desktop: { fontSizePx: 24, textAlign: "center", marginTopPx: 16 } },
+      node_heading: { desktop: { objectFit: "cover", focusXPercent: 40 } },
+    },
+  }), definition);
+  const messages = result.issues.map((issue) => issue.message);
+  assert.ok(messages.some((message) => message.includes("node_container") && message.includes("未开放")));
+  assert.ok(messages.some((message) => message.includes("cta") && message.includes("字号")));
+  assert.ok(messages.some((message) => message.includes("cta") && message.includes("文字对齐")));
+  assert.ok(messages.some((message) => message.includes("cta") && message.includes("上下间距")));
+  assert.ok(messages.some((message) => message.includes("主标题") && message.includes("图片适配")));
+  assert.ok(messages.some((message) => message.includes("主标题") && message.includes("图片焦点")));
 });

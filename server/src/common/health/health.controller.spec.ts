@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { HEADERS_METADATA } from "@nestjs/common/constants";
 import { ServiceUnavailableException } from "@nestjs/common";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
 import { HealthController } from "./health.controller";
@@ -46,8 +47,11 @@ function buildController(options?: { startup?: boolean; draining?: boolean; data
 test("liveness 不访问数据库并明确 draining 接流状态", () => {
   const harness = buildController({ draining: true });
   const response = harness.controller.health();
-  assert.equal(response.status, "alive");
-  assert.equal(response.acceptingTraffic, false);
+  assert.deepEqual(response, {
+    status: "alive",
+    acceptingTraffic: false,
+    release,
+  });
   assert.equal(harness.databaseChecks(), 0);
 });
 
@@ -60,8 +64,7 @@ test("startup 在生命周期完成前返回 503", () => {
 test("readiness 以数据库探测结果决定接流并记录依赖延迟", async () => {
   const harness = buildController();
   const response = await harness.controller.ready();
-  assert.equal(response.status, "ready");
-  assert.equal(response.dependencies.database.status, "up");
+  assert.deepEqual(response, { status: "ready", release });
   assert.equal(harness.databaseChecks(), 1);
   assert.equal(harness.databaseHealth.length, 1);
   assert.equal((harness.databaseHealth[0] as unknown[])[0], true);
@@ -107,8 +110,36 @@ test("探针公开而指标端点继续受全局员工认证", () => {
   assert.equal(Reflect.getMetadata(IS_PUBLIC_KEY, HealthController.prototype.prometheus), undefined);
 });
 
+test("公开探针不暴露运行时长、启动时间或数据库延迟，并禁止缓存", async () => {
+  const harness = buildController();
+  const responses = [
+    harness.controller.health(),
+    harness.controller.startup(),
+    await harness.controller.ready(),
+  ];
+
+  for (const response of responses) {
+    const serialized = JSON.stringify(response);
+    assert.doesNotMatch(serialized, /startedAt|startupCompletedAt|uptimeSeconds|latencyMs|dependencies/);
+    assert.deepEqual(response.release, release);
+  }
+
+  for (const handler of [
+    HealthController.prototype.health,
+    HealthController.prototype.startup,
+    HealthController.prototype.ready,
+  ]) {
+    const headers = Reflect.getMetadata(HEADERS_METADATA, handler) as Array<{
+      name: string;
+      value: string;
+    }>;
+    assert.ok(headers.some(
+      (header) => header.name === "Cache-Control" && header.value === "no-store",
+    ));
+  }
+});
+
 test("应用入口启用 SIGTERM 和 SIGINT 优雅停机钩子", () => {
   const mainSource = readFileSync(resolve(__dirname, "../../main.ts"), "utf8");
   assert.match(mainSource, /enableShutdownHooks\(\["SIGTERM", "SIGINT"\]\)/);
 });
-

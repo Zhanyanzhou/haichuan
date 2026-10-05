@@ -195,8 +195,10 @@ check("复核时机：在 selectionInquiry.create 之前调用 resolveVisiblePro
 
 check("逐个复核：productId 去重后整体校验，入参为 distinctIds + 令牌 customer（覆盖混合 ID）", () => {
   assert.ok(/new\s+Set\(validItems\.map\([\s\S]*?productId/.test(selectionService), "必须从已收窄条目提取 productId 并去重");
-  assert.ok(/resolveVisibleProductSnapshots\(\s*distinctIds\s*,\s*data\.customer\s*,?\s*\)/.test(selectionService),
-    "复核入参必须是 productId 去重得到的 distinctIds 与令牌派生的 data.customer，不得使用客户端快照作为可见性依据");
+  assert.ok(/resolveVisibleProductSnapshots\(\s*distinctIds\s*,\s*lockedCustomer\s*,\s*transaction\s*,?\s*\)/.test(selectionService),
+    "复核入参必须是 productId 去重得到的 distinctIds 与事务内锁定复核的 lockedCustomer，不得使用客户端快照作为可见性依据");
+  assert.ok(/lockActiveCustomerForWrite\(\s*transaction\s*,\s*data\.customer\s*\)/.test(selectionService),
+    "lockedCustomer 必须由令牌派生的 data.customer 在 Serializable 事务内锁定复核，不得绕过锁内资格校验");
 });
 
 check("拒绝整次提交：任一 ID 不可见即抛错（snapshots.size !== distinctIds.length）", () => {
@@ -216,7 +218,7 @@ check("不泄露内部信息：拒绝错误不含 INTERNAL/PARTNER/visibility/st
 });
 
 check("快照由服务端规范覆盖：写入用 snap.name / snap.mediaUrl，不接受客户端名称/图片作为快照真相", () => {
-  const snapshotBlock = selectionService.match(/const createItems = distinctIds\.map\([\s\S]*?\n    \}\);/);
+  const snapshotBlock = selectionService.match(/const createItems = distinctIds\.map\([\s\S]*?\n\s*\}\);/);
   assert.ok(snapshotBlock, "未定位服务端快照到 createItems 的映射");
   assert.ok(/productNameSnapshot:\s*snap\.name/.test(snapshotBlock[0]), "productNameSnapshot 应以服务端 snap.name 覆盖客户端值");
   assert.ok(/productImageSnapshot:\s*snap\.mediaUrl/.test(snapshotBlock[0]), "productImageSnapshot 应以服务端 snap.mediaUrl 覆盖客户端值");
@@ -227,7 +229,7 @@ check("快照由服务端规范覆盖：写入用 snap.name / snap.mediaUrl，�
 });
 
 check("productSkuSnapshot 保留为客户端展示文本（trim 后落库，不作为可见性或安全依据）", () => {
-  const snapshotBlock = selectionService.match(/const createItems = distinctIds\.map\([\s\S]*?\n    \}\);/);
+  const snapshotBlock = selectionService.match(/const createItems = distinctIds\.map\([\s\S]*?\n\s*\}\);/);
   assert.ok(snapshotBlock, "未定位服务端快照到 createItems 的映射");
   assert.ok(/productSkuSnapshot:\s*item\.productSkuSnapshot\?\.trim\(\)/.test(snapshotBlock[0]), "productSkuSnapshot 作为展示性文本保留客户端值");
 });
@@ -247,7 +249,7 @@ check("限流保留：公开提交仍受 5/min 限流约束", () => {
 
 check("草稿、内部、已删除商品不能用客户端快照绕过", () => {
   assert.ok(snapshotMethod, "未定位 resolveVisibleProductSnapshots 方法体");
-  const query = snapshotMethod[0].match(/this\.prisma\.product\.findMany\(\{([\s\S]*?)\}\)/);
+  const query = snapshotMethod[0].match(/client\.product\.findMany\(\{([\s\S]*?)\}\)/);
   assert.ok(query, "未定位实际商品可见性查询");
   assert.ok(
     /customerFacingProductWhereForVisibilities\(visibilities\)/.test(query[1]),
@@ -261,8 +263,8 @@ check("草稿、内部、已删除商品不能用客户端快照绕过", () => {
 
   const createMethod = methodBody(selectionService, "create");
   assert.ok(createMethod, "未定位 SelectionInquiryService.create 方法体");
-  assert.ok(/resolveVisibleProductSnapshots\(\s*distinctIds\s*,\s*data\.customer\s*,?\s*\)/.test(createMethod[0]),
-    "可见性复核只能以 productId 和已验证身份为输入，不能以客户端快照为依据");
+  assert.ok(/resolveVisibleProductSnapshots\(\s*distinctIds\s*,\s*lockedCustomer\s*,\s*transaction\s*,?\s*\)/.test(createMethod[0]),
+    "可见性复核只能以 productId 和锁内复核身份为输入，不能以客户端快照为依据");
   assert.ok(/snapshots\.size\s*!==\s*distinctIds\.length/.test(createMethod[0]),
     "未产生服务端规范快照的商品必须拒绝整次提交");
   assert.ok(/productNameSnapshot:\s*snap\.name/.test(createMethod[0]),

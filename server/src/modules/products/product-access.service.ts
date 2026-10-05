@@ -1,12 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, ProductAccessEventType } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type { CustomerPrincipal } from '../../common/security/authenticated-principal';
+import { PUBLIC_ANALYTICS_CONSENT_VERSION } from '../analytics/dto/track-event.dto';
+import { lockActiveCustomerForWrite } from '../customers/customer-write-gate';
 
 /**
- * 商品访问审计服务（服务端可信日志）
+ * 客户商品行为与受控媒体安全审计服务
  *
  * 安全约束：
- * - customerId 必须由调用方从已验证的客户令牌派生，本服务不接受客户端提交的 customerId；
+ * - 必须传入守卫实时复核后的完整 CustomerPrincipal，并在写事务内再次复核 ACTIVE + authVersion；
+ * - MEDIA_VIEW 仅作受控媒体安全审计，不进入推荐；其余行为只有分析/保留开关均开启、
+ *   且客户存在当前版本的有效 ANALYTICS 同意后才写入；
  * - DETAIL_VIEW 对同一 customer+product 在 30 分钟内只计一次有效浏览，并原子递增 Product.viewCount；
  * - metadata 严格限制大小，防止滥用。
  *
@@ -27,16 +32,22 @@ export class ProductAccessService {
    * 去重 + 原子递增 viewCount，事务保证不会出现"只写日志没更新计数"的半完成状态。
    */
   async recordDetailView(
-    customerId: number,
+    customer: CustomerPrincipal,
     productId: number,
     source: string = 'product_detail',
   ): Promise<{ counted: boolean }> {
-    const dedupeSince = new Date(Date.now() - this.DEDUPE_WINDOW_MS);
+    if (!this.analyticsBehaviorEnabled()) return { counted: false };
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await lockActiveCustomerForWrite(tx, customer);
+        const now = new Date();
+        if (!(await this.hasCurrentAnalyticsConsent(tx, customer.id, now))) {
+          return { counted: false };
+        }
+        const dedupeSince = new Date(now.getTime() - this.DEDUPE_WINDOW_MS);
         const recent = await tx.productAccessLog.findFirst({
           where: {
-            customerId,
+            customerId: customer.id,
             productId,
             eventType: 'DETAIL_VIEW',
             occurredAt: { gte: dedupeSince },
@@ -46,11 +57,12 @@ export class ProductAccessService {
         if (recent) return { counted: false };
         await tx.productAccessLog.create({
           data: {
-            customerId,
+            customerId: customer.id,
             productId,
             eventType: 'DETAIL_VIEW',
             source,
-            occurredAt: new Date(),
+            occurredAt: now,
+            metadata: this.consentBoundMetadata(),
           },
         });
         // 原子递增历史总浏览字段（仅有效浏览才计数）
@@ -59,11 +71,11 @@ export class ProductAccessService {
           data: { viewCount: { increment: 1 } },
         });
         return { counted: true };
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error: unknown) {
-      // 审计日志失败不应阻断商品浏览主流程，仅记录错误
+      // 行为采集失败不应阻断商品浏览主流程，但必须保持零写入或事务回滚。
       this.logger.error(
-        `recordDetailView 失败 customer=${customerId} product=${productId}: ${error instanceof Error ? error.message : String(error)}`,
+        `recordDetailView 失败 customer=${customer.id} product=${productId}: ${error instanceof Error ? error.message : String(error)}`,
       );
       return { counted: false };
     }
@@ -74,28 +86,99 @@ export class ProductAccessService {
    * 用于 MEDIA_VIEW / ADD_TO_CART / INQUIRY_SUBMITTED / ORDER_COMPLETED / ADD_TO_SELECTION / RECOMMENDATION_IMPRESSION。
    */
   async recordEvent(
-    customerId: number,
+    customer: CustomerPrincipal,
     productId: number,
     eventType: ProductAccessEventType,
     source?: string,
     metadata?: Record<string, unknown>,
   ): Promise<void> {
+    const isSecurityAudit = eventType === 'MEDIA_VIEW';
+    if (!isSecurityAudit && !this.analyticsBehaviorEnabled()) return;
     try {
-      const safeMetadata = this.sanitizeMetadata(metadata);
-      await this.prisma.productAccessLog.create({
-        data: {
-          customerId,
-          productId,
-          eventType,
-          source: source ?? null,
-          metadata: safeMetadata as Prisma.InputJsonValue | undefined,
-          occurredAt: new Date(),
-        },
-      });
+      await this.prisma.$transaction(async (tx) => {
+        await lockActiveCustomerForWrite(tx, customer);
+        const now = new Date();
+        if (
+          !isSecurityAudit
+          && !(await this.hasCurrentAnalyticsConsent(tx, customer.id, now))
+        ) return;
+        await tx.productAccessLog.create({
+          data: {
+            customerId: customer.id,
+            productId,
+            eventType,
+            source: source ?? null,
+            metadata: isSecurityAudit
+              ? this.securityAuditMetadata(metadata)
+              : this.consentBoundMetadata(metadata),
+            occurredAt: now,
+          },
+        });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error: unknown) {
       this.logger.error(
-        `recordEvent 失败 customer=${customerId} product=${productId} event=${eventType}: ${error instanceof Error ? error.message : String(error)}`,
+        `recordEvent 失败 customer=${customer.id} product=${productId} event=${eventType}: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+
+  /**
+   * 客户行已由调用方以共享或排他锁复核后，在同一事务写入受控媒体安全审计。
+   * 仅供需要把“资格复核、文件读取、审计写入”保持在一个授权窗口内的媒体路径使用。
+   */
+  async recordMediaViewWithinLockedCustomer(
+    transaction: Pick<Prisma.TransactionClient, 'productAccessLog'>,
+    customerId: number,
+    productId: number,
+    source = 'product_detail',
+  ): Promise<void> {
+    await transaction.productAccessLog.create({
+      data: {
+        customerId,
+        productId,
+        eventType: 'MEDIA_VIEW',
+        source,
+        metadata: this.securityAuditMetadata(),
+        occurredAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * 仅向当前仍同意分析的有效客户返回其本人、且带当前同意版本标记的浏览历史。
+   * 推荐服务通过该入口读取，避免绕过行为数据的采集边界。
+   */
+  async getRecentViewedProductIds(
+    customer: CustomerPrincipal,
+    windowDays = 30,
+    limit = 50,
+  ): Promise<number[]> {
+    if (!this.analyticsBehaviorEnabled()) return [];
+    const safeWindowDays = Math.max(1, Math.min(365, Math.trunc(windowDays)));
+    const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await lockActiveCustomerForWrite(tx, customer);
+        const now = new Date();
+        if (!(await this.hasCurrentAnalyticsConsent(tx, customer.id, now))) return [];
+        const since = new Date(now.getTime() - safeWindowDays * 24 * 60 * 60 * 1000);
+        const rows = await tx.$queryRaw<Array<{ productId: number }>>(Prisma.sql`
+          SELECT access_log.product_id AS productId
+          FROM product_access_logs AS access_log
+          WHERE access_log.customer_id = ${customer.id}
+            AND access_log.event_type = 'DETAIL_VIEW'
+            AND access_log.occurred_at >= ${since}
+            AND JSON_UNQUOTE(JSON_EXTRACT(access_log.metadata, '$.analyticsConsentVersion')) = ${PUBLIC_ANALYTICS_CONSENT_VERSION}
+          ORDER BY access_log.occurred_at DESC, access_log.id DESC
+          LIMIT ${safeLimit}
+        `);
+        return rows.map((row) => Number(row.productId)).filter(Number.isSafeInteger);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error: unknown) {
+      this.logger.error(
+        `getRecentViewedProductIds 失败 customer=${customer.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return [];
     }
   }
 
@@ -106,13 +189,16 @@ export class ProductAccessService {
   async getHotScores(
     productIds: number[],
     windowDays = 14,
+    client: Pick<Prisma.TransactionClient, '$queryRaw'> = this.prisma,
   ): Promise<Map<number, number>> {
-    if (!productIds || productIds.length === 0) return new Map();
+    if (!this.analyticsBehaviorEnabled() || !productIds || productIds.length === 0) {
+      return new Map();
+    }
     const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
     try {
-      const rows: Array<{ productId: number; score: number }> = await this.prisma.$queryRaw`
-        SELECT product_id AS productId,
-               SUM(CASE event_type
+      const rows = await client.$queryRaw<Array<{ productId: number; score: number }>>(Prisma.sql`
+        SELECT access_log.product_id AS productId,
+               SUM(CASE access_log.event_type
                  WHEN 'ORDER_COMPLETED' THEN 8
                  WHEN 'ADD_TO_CART' THEN 5
                  WHEN 'INQUIRY_SUBMITTED' THEN 4
@@ -122,11 +208,14 @@ export class ProductAccessService {
                  WHEN 'RECOMMENDATION_IMPRESSION' THEN 0.2
                  ELSE 0
                END) AS score
-        FROM product_access_logs
-        WHERE occurred_at >= ${since}
-          AND product_id IN (${Prisma.join(productIds)})
-        GROUP BY product_id
-      `;
+        FROM product_access_logs AS access_log
+        INNER JOIN customers AS customer
+          ON customer.id = access_log.customer_id AND customer.status = 'ACTIVE'
+        WHERE access_log.occurred_at >= ${since}
+          AND access_log.product_id IN (${Prisma.join(productIds)})
+          AND JSON_UNQUOTE(JSON_EXTRACT(access_log.metadata, '$.analyticsConsentVersion')) = ${PUBLIC_ANALYTICS_CONSENT_VERSION}
+        GROUP BY access_log.product_id
+      `);
       const map = new Map<number, number>();
       for (const row of rows) map.set(Number(row.productId), Number(row.score));
       return map;
@@ -136,6 +225,44 @@ export class ProductAccessService {
       );
       return new Map();
     }
+  }
+
+  private analyticsBehaviorEnabled(): boolean {
+    return process.env.ANALYTICS_INGESTION_ENABLED === 'true'
+      && process.env.ANALYTICS_RETENTION_ENABLED === 'true';
+  }
+
+  private async hasCurrentAnalyticsConsent(
+    transaction: Pick<Prisma.TransactionClient, 'consentRecord'>,
+    customerId: number,
+    now: Date,
+  ): Promise<boolean> {
+    const consent = await transaction.consentRecord.findFirst({
+      where: { customerId, purpose: 'ANALYTICS' },
+      select: { decision: true, policyVersion: true, expiresAt: true },
+      orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
+    });
+    return consent?.decision === 'GRANTED'
+      && consent.policyVersion === PUBLIC_ANALYTICS_CONSENT_VERSION
+      && (!consent.expiresAt || consent.expiresAt.getTime() > now.getTime());
+  }
+
+  private consentBoundMetadata(
+    metadata?: Record<string, unknown>,
+  ): Prisma.InputJsonValue {
+    return {
+      ...(this.sanitizeMetadata(metadata) ?? {}),
+      analyticsConsentVersion: PUBLIC_ANALYTICS_CONSENT_VERSION,
+    };
+  }
+
+  private securityAuditMetadata(
+    metadata?: Record<string, unknown>,
+  ): Prisma.InputJsonValue {
+    return {
+      ...(this.sanitizeMetadata(metadata) ?? {}),
+      processingPurpose: 'SECURITY_AUDIT',
+    };
   }
 
   private sanitizeMetadata(metadata?: Record<string, unknown>): Record<string, unknown> | null {

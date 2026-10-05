@@ -1,6 +1,16 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import type { Role } from '@prisma/client';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { ROLES_KEY } from '../../common/decorators/roles.decorator';
+import {
+  findActiveCustomerPrincipal,
+  findActiveStaffPrincipal,
+  isAdminAccessTokenPayload,
+  isCustomerAccessTokenPayload,
+  staffHasAnyRole,
+} from '../../common/security/access-session-validation';
 import {
   extractBearerToken,
   extractSessionCookieToken,
@@ -21,6 +31,7 @@ export class CustomerOrStaffGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly reflector: Reflector,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -41,14 +52,11 @@ export class CustomerOrStaffGuard implements CanActivate {
     if (!token) throw new UnauthorizedException('请先登录后查看商品资料');
 
     try {
-      const payload = await this.jwtService.verifyAsync<{ sub: number; type?: string; tokenUse?: string }>(token);
-      if (!Number.isInteger(payload.sub) || payload.tokenUse !== 'access') {
-        throw new UnauthorizedException('访问令牌无效');
-      }
+      const payload = await this.jwtService.verifyAsync<Record<string, unknown>>(token);
 
-      if (payload.type === 'customer') {
-        const customer = await this.prisma.customer.findUnique({ where: { id: payload.sub } });
-        if (!customer || customer.status === 'DISABLED') {
+      if (isCustomerAccessTokenPayload(payload)) {
+        const customer = await findActiveCustomerPrincipal(this.prisma, payload);
+        if (!customer) {
           throw new UnauthorizedException('客户访问身份无效');
         }
         request.customer = customer;
@@ -56,20 +64,25 @@ export class CustomerOrStaffGuard implements CanActivate {
         return true;
       }
 
-      if (payload.type !== 'admin') {
+      if (!isAdminAccessTokenPayload(payload)) {
         throw new UnauthorizedException('访问令牌类型无效');
       }
-      // 员工令牌：复用后台 User 体系（JwtStrategy.validate 同样执行正向类型匹配，此处独立校验）
-      const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
-      if (!user || user.status === 'DISABLED') {
+      const user = await findActiveStaffPrincipal(this.prisma, payload);
+      if (!user) {
         throw new UnauthorizedException('账号无效或已被禁用');
       }
-      const { password: _, ...safeUser } = user;
-      request.user = safeUser;
+      const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!staffHasAnyRole(user, requiredRoles)) {
+        throw new ForbiddenException('无权访问该资源');
+      }
+      request.user = user;
       request.authKind = 'staff';
       return true;
     } catch (error) {
-      if (error instanceof UnauthorizedException) throw error;
+      if (error instanceof UnauthorizedException || error instanceof ForbiddenException) throw error;
       throw new UnauthorizedException('访问令牌已失效');
     }
   }

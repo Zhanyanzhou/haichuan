@@ -30,7 +30,7 @@ test("真实 MySQL：模板版本、页面保存发布回读、草稿隔离与�
       data: {
         username: `template_ci_${suffix}`,
         password: "isolated-fixture-no-login",
-        role: "ADMIN",
+        role: "SUPER_ADMIN",
         status: "ACTIVE",
       },
     });
@@ -164,7 +164,10 @@ test("真实 MySQL：模板版本、页面保存发布回读、草稿隔离与�
       contentOwner: "自动化测试",
     });
     assert.equal(archivedValidation.valid, true, JSON.stringify(archivedValidation.issues));
-    assert.equal((await templates.listPublished()).some((item) => item.templateId === templateId), false);
+    assert.equal(
+      (await templates.listPublished(owner.id)).some((item) => item.templateId === templateId),
+      false,
+    );
     const publishedAfterArchive = await reopenedPages.getPublishedPageDocument("products");
     assert.ok(publishedAfterArchive && "puckData" in publishedAfterArchive);
     assert.equal(publishedAfterArchive.status, "PUBLISHED");

@@ -1,3 +1,8 @@
+import {
+  parsePaymentProviderMode,
+  type PaymentProviderMode,
+} from "../payment-gateway/payment-provider-mode";
+
 export const RELEASE_PROFILES = ["lead-generation", "commerce"] as const;
 export type ReleaseProfile = (typeof RELEASE_PROFILES)[number];
 export const DEFAULT_RELEASE_PROFILE: ReleaseProfile = RELEASE_PROFILES[0];
@@ -16,6 +21,7 @@ export type ReleaseRuntimeGateEnvironment = {
   CUSTOMER_QUOTATION_ORDERING_ENABLED?: string;
   PAYMENT_GATEWAY_TRANSACTIONS_ENABLED?: string;
   PAYMENT_GATEWAY_REFUNDS_ENABLED?: string;
+  PAYMENT_PROVIDER_MODE?: string;
 };
 
 export type ReleaseRuntimeGateEvaluation = {
@@ -24,6 +30,12 @@ export type ReleaseRuntimeGateEvaluation = {
   configuredEnabled: boolean;
   effectiveEnabled: boolean;
   requiredEnabled: boolean;
+  ready: boolean;
+};
+
+export type ReleasePaymentProviderModeEvaluation = {
+  configuredMode: PaymentProviderMode | "invalid";
+  allowedModes: PaymentProviderMode[];
   ready: boolean;
 };
 
@@ -145,6 +157,33 @@ export function evaluateReleaseRuntimeGates(
   });
 }
 
+/**
+ * 部署预检只接受不会把 simulator 带入发布环境的 provider mode。
+ * commerce 候选必须显式 live；lead-generation 可 disabled，或以 live
+ * 继续处理既有交易的查询/通知，但所有新资金写仍由独立布尔门禁关闭。
+ */
+export function evaluateReleasePaymentProviderMode(
+  releaseProfile: ReleaseProfile,
+  environment: ReleaseRuntimeGateEnvironment = process.env,
+): ReleasePaymentProviderModeEvaluation {
+  const allowedModes: PaymentProviderMode[] =
+    releaseProfile === COMMERCE_RELEASE_PROFILE
+      ? ["live"]
+      : ["disabled", "live"];
+  try {
+    const configuredMode = parsePaymentProviderMode(
+      environment.PAYMENT_PROVIDER_MODE,
+    );
+    return {
+      configuredMode,
+      allowedModes,
+      ready: allowedModes.includes(configuredMode),
+    };
+  } catch {
+    return { configuredMode: "invalid", allowedModes, ready: false };
+  }
+}
+
 export function isCustomerCommerceEnabled(
   releaseProfile = process.env.RELEASE_PROFILE,
   commerceFlag = process.env.CUSTOMER_COMMERCE_ENABLED,
@@ -179,6 +218,42 @@ export function isPartnerApplicationsWriteEnabled(
   value = process.env.PARTNER_APPLICATIONS_WRITE_ENABLED,
 ) {
   return value?.trim().toLowerCase() === "true";
+}
+
+export type PartnerAgreementContract = {
+  version: string;
+  hash: string;
+};
+
+const PARTNER_AGREEMENT_VERSION_PATTERN = /^partner-agreement-v[1-9]\d*$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+
+/**
+ * 合作申请只接受由服务端绑定的正式协议快照；客户端勾选不能声明版本或正文哈希。
+ * 实际版本值和正文仍由业务/法务批准，本函数只固定机器可校验的命名与摘要格式。
+ */
+export function resolvePartnerAgreementContract(
+  version = process.env.PARTNER_AGREEMENT_VERSION,
+  hash = process.env.PARTNER_AGREEMENT_SHA256,
+  status = process.env.PARTNER_AGREEMENT_STATUS,
+): PartnerAgreementContract | null {
+  const normalizedVersion = version?.trim() ?? "";
+  const normalizedHash = hash?.trim().toLowerCase() ?? "";
+  if (status?.trim().toLowerCase() !== "published") return null;
+  if (!PARTNER_AGREEMENT_VERSION_PATTERN.test(normalizedVersion)) return null;
+  if (!SHA256_PATTERN.test(normalizedHash)) return null;
+  return { version: normalizedVersion, hash: normalizedHash };
+}
+
+/** 客户前台只在写开关和正式协议快照同时有效时展示申请入口。 */
+export function isPartnerApplicationsWriteReady(
+  writeFlag = process.env.PARTNER_APPLICATIONS_WRITE_ENABLED,
+  version = process.env.PARTNER_AGREEMENT_VERSION,
+  hash = process.env.PARTNER_AGREEMENT_SHA256,
+  status = process.env.PARTNER_AGREEMENT_STATUS,
+) {
+  return isPartnerApplicationsWriteEnabled(writeFlag)
+    && resolvePartnerAgreementContract(version, hash, status) !== null;
 }
 
 export function customerFacingReleaseWhere() {

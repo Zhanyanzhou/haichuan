@@ -1,0 +1,106 @@
+import {
+  getDynamicTemplateNodeRegistryEntry,
+  type DynamicTemplateInstanceEditPolicy,
+  type DynamicTemplateNode,
+  type DynamicTemplateNodeType,
+  type DynamicTemplateSlotDefinition,
+  type DynamicTemplateSlotType,
+  type TemplateInstanceLayoutOverride,
+} from "./generated/templateDefinition.generated";
+
+/** 页面实例字号/间距覆盖只作用于这些槽位；按钮与链接走行动字段，不开放构图字号。 */
+export const TEXT_LAYOUT_SLOT_TYPES: readonly DynamicTemplateSlotType[] = [
+  "heading",
+  "text",
+  "richText",
+  "badge",
+];
+
+export const LAYOUT_OVERRIDE_FIELDS = [
+  "offsetXPercent",
+  "offsetYPercent",
+  "widthPercent",
+  "zIndex",
+  "objectFit",
+  "imageScalePercent",
+  "focusXPercent",
+  "focusYPercent",
+  "fontSizePx",
+  "textAlign",
+  "marginTopPx",
+  "marginBottomPx",
+] as const satisfies ReadonlyArray<keyof TemplateInstanceLayoutOverride>;
+
+export type LayoutOverrideField = (typeof LAYOUT_OVERRIDE_FIELDS)[number];
+
+export function isDynamicTemplateSlotNode(type: DynamicTemplateNodeType): boolean {
+  return getDynamicTemplateNodeRegistryEntry(type).kind === "slot";
+}
+
+export function defaultDynamicTemplateInstanceEditPolicy(
+  slot: DynamicTemplateSlotDefinition,
+): DynamicTemplateInstanceEditPolicy {
+  const image = slot.type === "image";
+  return {
+    position: false,
+    size: false,
+    zIndex: false,
+    imageFit: image,
+    imageFocus: image,
+    typography: false,
+    spacing: false,
+    minWidthPercent: 25,
+    maxWidthPercent: 150,
+    maxOffsetPercent: 30,
+    minFontSizePx: 12,
+    maxFontSizePx: 96,
+    maxSpacingPx: 120,
+  };
+}
+
+export function getEffectiveDynamicTemplateInstanceEditPolicy(
+  node: DynamicTemplateNode,
+  slot?: DynamicTemplateSlotDefinition,
+): DynamicTemplateInstanceEditPolicy | null {
+  if (!slot?.editable || !isDynamicTemplateSlotNode(node.type)) return null;
+  return {
+    ...defaultDynamicTemplateInstanceEditPolicy(slot),
+    ...(node.instanceEditPolicy ?? {}),
+  };
+}
+
+export function isTextLayoutSlotType(type: DynamicTemplateSlotType): boolean {
+  return (TEXT_LAYOUT_SLOT_TYPES as readonly string[]).includes(type);
+}
+
+/** 升级预检与发布校验共用：字段是否被母模板授权。范围检查仍由调用方执行。 */
+export function isLayoutOverrideCapabilityEnabled(
+  policy: DynamicTemplateInstanceEditPolicy,
+  slot: DynamicTemplateSlotDefinition,
+  field: string,
+): boolean {
+  switch (field) {
+    case "offsetXPercent":
+    case "offsetYPercent":
+      return policy.position === true;
+    case "widthPercent":
+      return policy.size === true;
+    case "zIndex":
+      return policy.zIndex === true;
+    case "objectFit":
+    case "imageScalePercent":
+      return Boolean(policy.imageFit) && slot.type === "image";
+    case "focusXPercent":
+    case "focusYPercent":
+      // 上传图片后都可拖动画面焦点；不再受母模板 imageFocus 开关限制。
+      return slot.type === "image";
+    case "fontSizePx":
+    case "textAlign":
+      return Boolean(policy.typography) && isTextLayoutSlotType(slot.type);
+    case "marginTopPx":
+    case "marginBottomPx":
+      return Boolean(policy.spacing) && isTextLayoutSlotType(slot.type);
+    default:
+      return false;
+  }
+}

@@ -26,6 +26,11 @@ import {
   sortSnapshotRows,
 } from './quotation-snapshot';
 import { UploadService } from '../upload/upload.service';
+import type { CustomerPrincipal } from '../../common/security/authenticated-principal';
+import {
+  lockActiveCustomerForRead,
+  lockActiveCustomerForWrite,
+} from '../customers/customer-write-gate';
 
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,200}$/;
 
@@ -42,9 +47,13 @@ export class QuotationTransactionService {
     return this.uploadService;
   }
 
-  listDesignFilesForCustomer(customerId: number) {
-    return this.prisma.cooperationDesignFile.findMany({
-      where: { customerId },
+  listDesignFilesForCustomer(
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, principal);
+      const files = await transaction.cooperationDesignFile.findMany({
+      where: { customerId: principal.id },
       select: {
         id: true,
         referenceNo: true,
@@ -66,28 +75,33 @@ export class QuotationTransactionService {
         },
       },
       orderBy: { updatedAt: 'desc' },
-    }).then((files) => files.map((file) => ({
-      ...file,
-      versions: file.versions.map((version) => ({
-        id: version.id,
-        version: version.version,
-        status: version.status,
-        fileName: version.mediaAsset.originalName,
-        byteSize: version.mediaAsset.byteSize,
-        checksumSha256: version.checksumSha256,
-        redWaxWeight: version.redWaxWeight,
-        purpleWaxWeight: version.purpleWaxWeight,
-        confirmedAt: version.confirmedAt,
-        downloadUrl: `/api/customers/me/cooperation-design-files/${file.id}/versions/${version.version}/content`,
-      })),
-    })));
+      });
+      return files.map((file) => ({
+        ...file,
+        versions: file.versions.map((version) => ({
+          id: version.id,
+          version: version.version,
+          status: version.status,
+          fileName: version.mediaAsset.originalName,
+          byteSize: version.mediaAsset.byteSize,
+          checksumSha256: version.checksumSha256,
+          redWaxWeight: version.redWaxWeight,
+          purpleWaxWeight: version.purpleWaxWeight,
+          confirmedAt: version.confirmedAt,
+          downloadUrl: `/api/customers/me/cooperation-design-files/${file.id}/versions/${version.version}/content`,
+        })),
+      }));
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async confirmDesignFileVersion(customerId: number, designFileId: number, version: number) {
+  async confirmDesignFileVersion(
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+    designFileId: number,
+    version: number,
+  ) {
+    const customerId = principal.id;
     return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(
-        Prisma.sql`SELECT id FROM customers WHERE id = ${customerId} FOR UPDATE`,
-      );
+      await lockActiveCustomerForWrite(tx, principal);
       const customer = await tx.customer.findFirst({
         where: {
           id: customerId,
@@ -191,11 +205,12 @@ export class QuotationTransactionService {
   }
 
   async confirmAndCreateOrder(
-    customerId: number,
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
     quotationId: number,
     rawIdempotencyKey: string | undefined,
     dto: ConfirmQuotationOrderDto,
   ) {
+    const customerId = principal.id;
     const idempotencyKey = rawIdempotencyKey?.trim() ?? '';
     if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
       throw new BadRequestException('Idempotency-Key 必须为 8 至 200 位安全字符');
@@ -219,6 +234,7 @@ export class QuotationTransactionService {
       ],
       documentLabel: '报价订单',
       runTransaction: () => this.prisma.$transaction(async (tx) => {
+        await lockActiveCustomerForWrite(tx, principal);
         await tx.$queryRaw(Prisma.sql`SELECT id FROM quotations WHERE id = ${quotationId} FOR UPDATE`);
         const previous = await tx.quotationConversion.findUnique({
           where: { idempotencyKeyHash },
@@ -276,9 +292,6 @@ export class QuotationTransactionService {
         if (!quotation || !quotation.customer || quotation.customer.status !== 'ACTIVE') {
           throw new NotFoundException('报价单不存在或无权操作');
         }
-        await tx.$queryRaw(
-          Prisma.sql`SELECT id FROM customers WHERE id = ${customerId} FOR UPDATE`,
-        );
         const liveCustomer = await tx.customer.findUnique({
           where: { id: customerId },
           select: {
@@ -320,6 +333,16 @@ export class QuotationTransactionService {
         const businessSnapshot = requireBusinessSnapshot(version.businessSnapshot);
         if (hashBusinessSnapshot(businessSnapshot) !== version.contentHash) {
           throw new ApiError(HttpStatus.CONFLICT, 'QUOTE_SNAPSHOT_MISMATCH', '报价快照校验失败');
+        }
+        if (
+          businessSnapshot.currency !== 'CNY' ||
+          version.currency !== businessSnapshot.currency
+        ) {
+          throw new ApiError(
+            HttpStatus.CONFLICT,
+            'QUOTE_SNAPSHOT_MISMATCH',
+            '报价快照币种与报价版本不一致',
+          );
         }
         const snapshotItems = asSnapshotArray(businessSnapshot.items, '报价版本缺少行项目快照');
         const actualItems = version.items.map((item) => ({
@@ -581,6 +604,9 @@ export class QuotationTransactionService {
         if (!plan || version.paymentPlans.length !== 1 || plan.status !== 'DRAFT') {
           throw new ConflictException('报价版本缺少唯一待激活付款计划');
         }
+        if (plan.currency !== version.currency) {
+          throw new ConflictException('付款计划与报价版本币种不一致');
+        }
         const installmentTotal = plan.installments.reduce(
           (sum, item) => sum.plus(item.amount),
           new Prisma.Decimal(0),
@@ -717,37 +743,40 @@ export class QuotationTransactionService {
   }
 
   async getDesignFileContentForCustomer(
-    customerId: number,
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
     designFileId: number,
     version: number,
   ) {
-    const record = await this.prisma.cooperationDesignFileVersion.findFirst({
-      where: {
-        designFileId,
-        version,
-        status: { in: ['SUBMITTED', 'CONFIRMED'] },
-        designFile: { customerId },
-      },
-      select: {
-        checksumSha256: true,
-        mediaAsset: {
-          select: {
-            id: true,
-            storageKey: true,
-            originalName: true,
-            mimeType: true,
-            byteSize: true,
-            checksumSha256: true,
-            accessLevel: true,
-            status: true,
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, principal);
+      const record = await transaction.cooperationDesignFileVersion.findFirst({
+        where: {
+          designFileId,
+          version,
+          status: { in: ['SUBMITTED', 'CONFIRMED'] },
+          designFile: { customerId: principal.id },
+        },
+        select: {
+          checksumSha256: true,
+          mediaAsset: {
+            select: {
+              id: true,
+              storageKey: true,
+              originalName: true,
+              mimeType: true,
+              byteSize: true,
+              checksumSha256: true,
+              accessLevel: true,
+              status: true,
+            },
           },
         },
-      },
-    });
-    if (!record) throw new NotFoundException('3D 文件版本不存在或无权读取');
-    return this.designMediaAuthority().readVerifiedDesignFile(
-      record.mediaAsset,
-      record.checksumSha256,
-    );
+      });
+      if (!record) throw new NotFoundException('3D 文件版本不存在或无权读取');
+      return this.designMediaAuthority().readVerifiedDesignFile(
+        record.mediaAsset,
+        record.checksumSha256,
+      );
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 }

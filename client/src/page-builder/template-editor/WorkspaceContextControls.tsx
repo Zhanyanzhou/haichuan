@@ -8,18 +8,24 @@ export default function WorkspaceContextControls({
   templateDisabledReason,
   subjectLabel,
   subjectValue,
+  pageValue,
+  pageOptions,
   status,
   onSelectPage,
   onSelectTemplate,
+  onChangePage,
 }: {
   activeMode: WorkspaceMode;
   canEnterTemplate?: boolean;
   templateDisabledReason?: string;
   subjectLabel?: string;
   subjectValue?: string;
+  pageValue?: string;
+  pageOptions?: ReadonlyArray<{ value: string; label: string }>;
   status?: ReactNode;
   onSelectPage?: () => void;
   onSelectTemplate?: () => void;
+  onChangePage?: (value: string) => void;
 }) {
   const currentLabel = activeMode === "page" ? "页面装修" : "模板设计";
   const subjectAriaLabel = subjectValue
@@ -67,7 +73,28 @@ export default function WorkspaceContextControls({
             模板设计
           </button>
         </div>
-        {subjectValue ? (
+        {pageOptions && pageOptions.length > 0 && onChangePage ? (
+          <>
+            <span className="template-editor__workspace-context-divider" aria-hidden="true" />
+            <div className="template-editor__workspace-identity">
+              <label className="template-editor__workspace-page-switcher">
+                <span className="template-editor__workspace-page-switcher-label">页面</span>
+                <select
+                  className="template-editor__workspace-page-select"
+                  aria-label="切换装修页面"
+                  value={pageValue ?? pageOptions[0]?.value}
+                  onChange={(event) => onChangePage(event.target.value)}
+                >
+                  {pageOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </>
+        ) : subjectValue ? (
           <>
             <span className="template-editor__workspace-context-divider" aria-hidden="true" />
             <div className="template-editor__workspace-identity">

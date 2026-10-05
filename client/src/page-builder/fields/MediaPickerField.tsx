@@ -22,16 +22,36 @@ import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
 import { sizeMatchStatus, useImageNaturalSize } from "./specCheck";
-import { addPageMediaItem } from "./pageMediaLibrary";
+import {
+  addPageMediaItem,
+} from "./pageMediaLibrary";
+import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
+import ImageFocusPad from "../inspector/controls/ImageFocusPad";
+import SharedPageMediaPicker from "./SharedPageMediaPicker";
 
 export const SESSION_MEDIA_UPLOADED_EVENT = "page-builder:media-uploaded";
-export const sessionUploadedMedia = new Set<string>();
 
 export interface MediaSpec {
   width: number;
   height: number;
   ratio: string;
   label: string;
+}
+
+/** 槽位建议宽高转为上传规格；缺任一尺寸时不显示比例检查。 */
+export function mediaSpecFromRecommendation(
+  width?: number,
+  height?: number,
+  aspectRatio?: string,
+  label = "建议尺寸",
+): MediaSpec | undefined {
+  if (!width || !height || width <= 0 || height <= 0) return undefined;
+  return {
+    width,
+    height,
+    ratio: aspectRatio ? aspectRatio.replace(":", " / ") : `${width} / ${height}`,
+    label,
+  };
 }
 
 interface MediaPickerFieldProps {
@@ -57,6 +77,9 @@ interface MediaPickerFieldProps {
   previewFocus?: { x: number; y: number };
   previewFit?: "cover" | "contain" | "fill";
   previewZoom?: number;
+  /** 在预览上拖动焦点；提供后预览不再兼作更换图片入口。 */
+  onFocusChange?: (next: { x: number; y: number }) => void;
+  focusDisabled?: boolean;
   /** 打开页面素材选择区。 */
   onOpenPageMedia?: () => void;
   pageMediaOpen?: boolean;
@@ -79,6 +102,8 @@ export default function MediaPickerField({
   previewFocus,
   previewFit,
   previewZoom,
+  onFocusChange,
+  focusDisabled = false,
   onOpenPageMedia,
   pageMediaOpen = false,
   taskPresentation = false,
@@ -91,7 +116,14 @@ export default function MediaPickerField({
   const [urlMode, setUrlMode] = useState(false);
   const [urlInput, setUrlInput] = useState(value || "");
   const [uploading, setUploading] = useState(false);
-  const imgSize = useImageNaturalSize(value);
+  const [builtinPageMediaOpen, setBuiltinPageMediaOpen] = useState(false);
+  const usesBuiltinPageMedia = !sessionOnly && !onOpenPageMedia;
+  const openPageMedia = onOpenPageMedia ?? (usesBuiltinPageMedia
+    ? () => setBuiltinPageMediaOpen((open) => !open)
+    : undefined);
+  const pageMediaExpanded = onOpenPageMedia ? pageMediaOpen : builtinPageMediaOpen;
+  const previewSrc = resolveManagedTemplateMediaPreviewUrl(value);
+  const imgSize = useImageNaturalSize(previewSrc);
   const matchStatus = sizeMatchStatus(spec, imgSize.width, imgSize.height);
   const resolutionTooSmall = Boolean(
     spec && imgSize.loaded &&
@@ -124,6 +156,11 @@ export default function MediaPickerField({
     setUrlMode(false);
     setUrlInput(value || "");
   }, [value]);
+
+  const selectPageMedia = (nextValue: string) => {
+    setBuiltinPageMediaOpen(false);
+    onChange?.(nextValue);
+  };
 
   /* ── 上传 ── */
   const handleUpload = async (file: File) => {
@@ -162,7 +199,6 @@ export default function MediaPickerField({
           name: file.name || "未命名图片",
           createdAt: new Date().toISOString(),
         });
-        sessionUploadedMedia.add(finalUrl);
         window.dispatchEvent(new CustomEvent(SESSION_MEDIA_UPLOADED_EVENT));
         onChange?.(finalUrl);
         message.success("上传成功");
@@ -245,6 +281,7 @@ export default function MediaPickerField({
       data-media-device={device}
       data-workspace-field-control="media-picker"
       data-workspace-field-shared="true"
+      data-has-page-media={!sessionOnly && Boolean(openPageMedia) ? "true" : "false"}
       data-media-session-only={sessionOnly ? "true" : undefined}
       tabIndex={fieldKey ? -1 : undefined}
     >
@@ -260,6 +297,22 @@ export default function MediaPickerField({
       {/* ═══ 预览（有图时的默认态） ═══ */}
       {hasValue && (
         <div>
+          {onFocusChange && !imgSize.error ? (
+            <>
+              <ImageFocusPad
+                value={{ x: focusX, y: focusY }}
+                disabled={Boolean(readOnly || uploading || focusDisabled)}
+                previewSrc={value}
+                previewAlt="预览"
+                previewFit={previewFit ?? (hasCropPreview ? "cover" : "contain")}
+                previewZoom={previewZoom}
+                previewAspectRatio={previewAspectRatio}
+                ariaLabel="拖动调整画面焦点"
+                onChange={onFocusChange}
+              />
+              <p className="image-focus-pad__hint">拖动画面中的点调整构图；更换图片请用下方按钮。</p>
+            </>
+          ) : (
           <button
             type="button"
             className="homepage-editor__media-preview-trigger"
@@ -273,7 +326,7 @@ export default function MediaPickerField({
               style={hasCropPreview ? { aspectRatio: previewAspectRatio } : undefined}
             >
               <img
-                src={value}
+                src={previewSrc}
                 alt="预览"
                 style={{
                   objectFit: hasCropPreview ? "cover" : "contain",
@@ -300,6 +353,7 @@ export default function MediaPickerField({
               ) : null}
             </div>
           </button>
+          )}
           {taskPresentation && spec ? (
             <p className="homepage-editor__media-recommendation">
               建议 {spec.width} × {spec.height} · {spec.ratio} · 2K+
@@ -308,7 +362,7 @@ export default function MediaPickerField({
           {!readOnly && (
             <div
               className="homepage-editor__media-preview-actions"
-              data-has-page-media={!taskPresentation && onOpenPageMedia ? "true" : "false"}
+              data-has-page-media={!taskPresentation && openPageMedia ? "true" : "false"}
             >
               <Button
                 size="small"
@@ -319,14 +373,15 @@ export default function MediaPickerField({
               >
                 {taskPresentation ? "更换图片" : "替换图片"}
               </Button>
-              {taskPresentation || onOpenPageMedia ? (
+              {taskPresentation || openPageMedia ? (
                 <Button
                   size="small"
                   icon={<PictureOutlined />}
-                  className={pageMediaOpen ? "is-active" : undefined}
-                  aria-pressed={pageMediaOpen}
-                  disabled={!onOpenPageMedia}
-                  onClick={onOpenPageMedia}
+                  className={pageMediaExpanded ? "is-active" : undefined}
+                  aria-label={taskPresentation ? "选择本页图片" : "本页图片"}
+                  aria-pressed={pageMediaExpanded}
+                  disabled={!openPageMedia}
+                  onClick={openPageMedia}
                 >
                   {taskPresentation ? "选择本页图片" : "本页图片"}
                 </Button>
@@ -469,8 +524,11 @@ export default function MediaPickerField({
               <Button
                 size="small"
                 icon={<PictureOutlined />}
-                disabled={!onOpenPageMedia}
-                onClick={onOpenPageMedia}
+                disabled={!openPageMedia}
+                className={pageMediaExpanded ? "is-active" : undefined}
+                aria-label="选择本页图片"
+                aria-pressed={pageMediaExpanded}
+                onClick={openPageMedia}
               >
                 选择本页图片
               </Button>
@@ -487,6 +545,18 @@ export default function MediaPickerField({
               className="homepage-editor__media-alt-actions"
               style={{ marginTop: 6 }}
             >
+              {openPageMedia ? (
+                <Button
+                  size="small"
+                  icon={<PictureOutlined />}
+                  className={pageMediaExpanded ? "is-active" : undefined}
+                  aria-label="本页图片"
+                  aria-pressed={pageMediaExpanded}
+                  onClick={openPageMedia}
+                >
+                  本页图片
+                </Button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setUrlMode(true)}
@@ -522,6 +592,13 @@ export default function MediaPickerField({
             <p>当前 {imgSize.width} × {imgSize.height}；建议 {spec.width} × {spec.height}（{spec.ratio}）。</p>
           </details>
         </div>
+      ) : null}
+      {usesBuiltinPageMedia && !readOnly ? (
+        <SharedPageMediaPicker
+          open={pageMediaExpanded}
+          currentValue={value}
+          onSelect={selectPageMedia}
+        />
       ) : null}
     </div>
   );

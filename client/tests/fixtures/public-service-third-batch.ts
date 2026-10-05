@@ -9,6 +9,13 @@ export type ServiceWriteObservation = {
 export type ServiceFixtureOptions = {
   settingsState?: "empty" | "error";
   onInquiry?: (route: Route) => Promise<void>;
+  publishedDocument?: unknown;
+  customer?: {
+    id: number;
+    phone: string;
+    name: string;
+    email: string | null;
+  };
 };
 
 const wrapped = (data: unknown) => ({
@@ -86,8 +93,12 @@ export async function mockPublicServiceThirdBatch(
       });
     }
 
+    if (path.endsWith("/customers/me")) {
+      return fulfillServiceApi(route, options.customer ?? null);
+    }
+
     if (path.endsWith("/page-modules/document/published")) {
-      return fulfillServiceApi(route, null);
+      return fulfillServiceApi(route, options.publishedDocument ?? null);
     }
 
     return fulfillServiceApi(route, null);

@@ -44,36 +44,48 @@ test('AI 分类查询与人工分类 ID 在 DTO 边界拒绝非法值', async ()
 
 test('AI 服务未配置时不写分类记录也不静默返回 Mock', async () => {
   let writes = 0;
+  const transaction = {
+    $queryRaw: async () => [{ id: 3 }],
+    category: { findMany: async () => [] },
+    aIClassifyRecord: {
+      create: async () => {
+        writes += 1;
+      },
+    },
+  };
   const service = new AiClassifyService(
     {
-      category: { findMany: async () => [] },
-      aIClassifyRecord: {
-        create: async () => {
-          writes += 1;
-        },
-      },
+      $transaction: async (
+        callback: (client: typeof transaction) => Promise<unknown>,
+      ) => callback(transaction),
     } as never,
     { isAvailable: () => false } as never,
   );
 
   await assert.rejects(
-    service.classifyImage('/uploads/test.jpg'),
-    /AI 分类服务未配置/,
+    service.classifyImage('/uploads/test.jpg', { id: 3 }),
+    /AI 服务未配置/,
   );
   assert.equal(writes, 0);
 });
 
 test('人工确认在预测分类为空且未选择分类时 fail closed', async () => {
   let updates = 0;
+  const transaction = {
+    $queryRaw: async () => [{ id: 3 }],
+    aIClassifyRecord: {
+      findUnique: async () => ({ predictedCategoryId: null }),
+      update: async () => {
+        updates += 1;
+        return {};
+      },
+    },
+  };
   const service = new AiClassifyService(
     {
-      aIClassifyRecord: {
-        findUnique: async () => ({ predictedCategoryId: null }),
-        update: async () => {
-          updates += 1;
-          return {};
-        },
-      },
+      $transaction: async (
+        callback: (client: typeof transaction) => Promise<unknown>,
+      ) => callback(transaction),
     } as never,
     {} as never,
   );
@@ -81,8 +93,7 @@ test('人工确认在预测分类为空且未选择分类时 fail closed', async
   await assert.rejects(
     service.confirmClassification(7, {
       status: 'confirmed',
-      operatorId: 3,
-    }),
+    }, { id: 3 }),
     BadRequestException,
   );
   assert.equal(updates, 0);

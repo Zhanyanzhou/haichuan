@@ -14,7 +14,12 @@ import type {
   TemplateBreakpoint,
   TemplateDefinitionV2,
 } from "./generated/templateDefinition.generated";
-import { resolveTemplateNodeRules } from "./generated/templateResponsive.generated";
+import { resolveTemplateNodeRules, TEMPLATE_CONTENT_BREAKPOINTS } from "./generated/templateResponsive.generated";
+import {
+  getEffectiveDynamicTemplateInstanceEditPolicy,
+  isLayoutOverrideCapabilityEnabled,
+  LAYOUT_OVERRIDE_FIELDS,
+} from "./instance-edit-policy";
 export type { TemplateInstanceV2 } from "./generated/templateDefinition.generated";
 
 export const DYNAMIC_TEMPLATE_BLOCK_TYPE = "动态模板实例";
@@ -104,8 +109,7 @@ function getPubliclyReachableDynamicTemplateSlotIds(
       visit(childId, breakpoint, nextAncestors);
     });
   };
-  const breakpoints: TemplateBreakpoint[] = definition.schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"];
-  for (const breakpoint of breakpoints) visit(definition.rootNodeId, breakpoint, new Set());
+  for (const breakpoint of TEMPLATE_CONTENT_BREAKPOINTS) visit(definition.rootNodeId, breakpoint, new Set());
   return visibleSlotIds;
 }
 
@@ -340,22 +344,6 @@ function readStructuredAction(value: Record<string, unknown>, prefix = "") {
   return { targetType, targetValue };
 }
 
-const DEFAULT_INSTANCE_EDIT_POLICY = {
-  position: false,
-  size: false,
-  zIndex: false,
-  imageFit: false,
-  imageFocus: false,
-  typography: false,
-  spacing: false,
-  minWidthPercent: 25,
-  maxWidthPercent: 150,
-  maxOffsetPercent: 30,
-  minFontSizePx: 12,
-  maxFontSizePx: 96,
-  maxSpacingPx: 120,
-};
-
 function validateLayoutOverrides(
   input: unknown,
   definition: TemplateDefinitionV2,
@@ -372,14 +360,7 @@ function validateLayoutOverrides(
   for (const [nodeId, rawNodeOverrides] of Object.entries(input)) {
     const node = definition.nodes[nodeId];
     const slot = node?.slotId ? definition.slots[node.slotId] : undefined;
-    const policy = node && slot?.editable
-      ? {
-          ...DEFAULT_INSTANCE_EDIT_POLICY,
-          imageFit: slot.type === 'image',
-          imageFocus: slot.type === 'image',
-          ...(node.instanceEditPolicy ?? {}),
-        }
-      : null;
+    const policy = node ? getEffectiveDynamicTemplateInstanceEditPolicy(node, slot) : null;
     if (!node || !slot || !policy) {
       issues.push({ message: `节点 ${nodeId} 未开放页面实例构图调整`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}` });
       continue;
@@ -401,22 +382,18 @@ function validateLayoutOverrides(
         continue;
       }
       for (const key of Object.keys(rawDevice)) {
-        if (![
-          'offsetXPercent', 'offsetYPercent', 'widthPercent', 'zIndex',
-          'objectFit', 'imageScalePercent', 'focusXPercent', 'focusYPercent',
-          'fontSizePx', 'textAlign', 'marginTopPx', 'marginBottomPx',
-        ].includes(key)) {
+        if (!(LAYOUT_OVERRIDE_FIELDS as readonly string[]).includes(key)) {
           issues.push({ message: `${node.name}包含未知构图字段 ${key}`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}.${key}` });
         }
       }
       const offsetValues = [rawDevice.offsetXPercent, rawDevice.offsetYPercent].filter((value) => value !== undefined);
-      if (!policy.position && offsetValues.length > 0) {
+      if (offsetValues.length > 0 && !isLayoutOverrideCapabilityEnabled(policy, slot, "offsetXPercent")) {
         issues.push({ message: `${node.name}不允许调整位置`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}` });
       }
       if (offsetValues.some((value) => typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > policy.maxOffsetPercent)) {
         issues.push({ message: `${node.name}位置偏移超出允许范围`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}` });
       }
-      if (rawDevice.widthPercent !== undefined && (!policy.size
+      if (rawDevice.widthPercent !== undefined && (!isLayoutOverrideCapabilityEnabled(policy, slot, "widthPercent")
         || typeof rawDevice.widthPercent !== 'number'
         || !Number.isFinite(rawDevice.widthPercent)
         || rawDevice.widthPercent < policy.minWidthPercent
@@ -424,20 +401,18 @@ function validateLayoutOverrides(
         issues.push({ message: `${node.name}宽度超出母模板允许范围`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}.widthPercent` });
       }
       const zIndex = rawDevice.zIndex;
-      if (zIndex !== undefined && (!policy.zIndex
+      if (zIndex !== undefined && (!isLayoutOverrideCapabilityEnabled(policy, slot, "zIndex")
         || typeof zIndex !== 'number'
         || !Number.isInteger(zIndex)
         || zIndex < -10
         || zIndex > 10)) {
         issues.push({ message: `${node.name}层级超出允许范围`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}.zIndex` });
       }
-      if (rawDevice.objectFit !== undefined && (!policy.imageFit
-        || slot.type !== 'image'
+      if (rawDevice.objectFit !== undefined && (!isLayoutOverrideCapabilityEnabled(policy, slot, "objectFit")
         || !['cover', 'contain', 'fill'].includes(String(rawDevice.objectFit)))) {
         issues.push({ message: `${node.name}图片适配方式未获母模板授权`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}.objectFit` });
       }
-      if (rawDevice.imageScalePercent !== undefined && (!policy.imageFit
-        || slot.type !== 'image'
+      if (rawDevice.imageScalePercent !== undefined && (!isLayoutOverrideCapabilityEnabled(policy, slot, "imageScalePercent")
         || typeof rawDevice.imageScalePercent !== 'number'
         || !Number.isFinite(rawDevice.imageScalePercent)
         || rawDevice.imageScalePercent < 100
@@ -445,28 +420,23 @@ function validateLayoutOverrides(
         issues.push({ message: `${node.name}图片缩放超出母模板授权范围`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}.imageScalePercent` });
       }
       const focusValues = [rawDevice.focusXPercent, rawDevice.focusYPercent].filter((value) => value !== undefined);
-      if (focusValues.length > 0 && (!policy.imageFocus
-        || slot.type !== 'image'
+      if (focusValues.length > 0 && (!isLayoutOverrideCapabilityEnabled(policy, slot, "focusXPercent")
         || focusValues.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100))) {
         issues.push({ message: `${node.name}图片焦点超出母模板授权范围`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}` });
       }
-      const textSlot = ['heading', 'text', 'richText', 'badge'].includes(slot.type);
-      if (rawDevice.fontSizePx !== undefined && (!policy.typography
-        || !textSlot
+      if (rawDevice.fontSizePx !== undefined && (!isLayoutOverrideCapabilityEnabled(policy, slot, "fontSizePx")
         || typeof rawDevice.fontSizePx !== 'number'
         || !Number.isFinite(rawDevice.fontSizePx)
         || rawDevice.fontSizePx < (policy.minFontSizePx ?? 12)
         || rawDevice.fontSizePx > (policy.maxFontSizePx ?? 96))) {
         issues.push({ message: `${node.name}字号超出母模板授权范围`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}.fontSizePx` });
       }
-      if (rawDevice.textAlign !== undefined && (!policy.typography
-        || !textSlot
+      if (rawDevice.textAlign !== undefined && (!isLayoutOverrideCapabilityEnabled(policy, slot, "textAlign")
         || !['left', 'center', 'right'].includes(String(rawDevice.textAlign)))) {
         issues.push({ message: `${node.name}文字对齐未获母模板授权`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}.textAlign` });
       }
       const spacingValues = [rawDevice.marginTopPx, rawDevice.marginBottomPx].filter((value) => value !== undefined);
-      if (spacingValues.length > 0 && (!policy.spacing
-        || !textSlot
+      if (spacingValues.length > 0 && (!isLayoutOverrideCapabilityEnabled(policy, slot, "marginTopPx")
         || spacingValues.some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > (policy.maxSpacingPx ?? 120)))) {
         issues.push({ message: `${node.name}上下间距超出母模板授权范围`, field: nodeId, pathSuffix: `.layoutOverridesByNodeId.${nodeId}.${device}` });
       }
@@ -693,11 +663,12 @@ export function validateDynamicTemplateInstance(
       continue;
     }
     const instanceValue = contentBySlotId[slot.slotId];
-    const useDefault = definition.schemaVersion >= 3 && slot.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue);
+    const useDefault = !slot.editable
+      || (definition.schemaVersion >= 3 && slot.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue));
     const value = hasInstanceValue && !useDefault ? instanceValue : definition.defaultContent[slot.slotId];
     if (slot.required && (hiddenSlotIds.includes(slot.slotId)
-      || !hasInstanceValue
-      || isEmptyContent(contentBySlotId[slot.slotId]))) {
+      || (slot.editable && (!hasInstanceValue || isEmptyContent(contentBySlotId[slot.slotId])))
+      || (!slot.editable && (isEmptyContent(value) || !hasRenderableSlotContent(slot, value))))) {
       issues.push({
         message: `${slot.label}为必填内容`,
         field: slot.slotId,
@@ -855,6 +826,50 @@ export function validateDynamicTemplateInstance(
       visit(content);
       continue;
     }
+  }
+
+  const commercialRoles = new Set(["price", "originalPrice", "discount", "offer"]);
+  const hasBusinessBinding = Object.values(definition.slots).some((slot) => (
+    (slot.type === "product" || slot.type === "collection")
+    && hasRenderableSlotContent(slot, contentBySlotId[slot.slotId])
+  ));
+  for (const slot of Object.values(definition.slots)) {
+    if (!slot.semanticRole || !commercialRoles.has(slot.semanticRole)) continue;
+    if (!slot.required && !visibleSlotIds.has(slot.slotId)) continue;
+    if (hasBusinessBinding) continue;
+    issues.push({
+      message: slot.required
+        ? `${slot.label}必须先绑定商品，模板里的价格文字不能公开`
+        : `${slot.label}尚未绑定商品，公开页面不会展示该价格`,
+      field: slot.slotId,
+      pathSuffix: `.contentBySlotId.${slot.slotId}`,
+    });
+  }
+  const hasPageImage = Object.values(definition.slots).some((slot) => (
+    slot.type === "image"
+    && visibleSlotIds.has(slot.slotId)
+    && hasRenderableSlotContent(slot, contentBySlotId[slot.slotId])
+  ));
+  const hasPublicText = Object.values(definition.slots).some((slot) => {
+    if (!["heading", "text", "richText", "badge", "button", "link"].includes(slot.type)) return false;
+    if (!visibleSlotIds.has(slot.slotId)) return false;
+    if (slot.semanticRole && commercialRoles.has(slot.semanticRole) && !hasBusinessBinding) return false;
+    const hasInstanceValue = Object.prototype.hasOwnProperty.call(contentBySlotId, slot.slotId);
+    if (hasInstanceValue && isEmptyContent(contentBySlotId[slot.slotId]) && slot.emptyPolicy !== "use-default") {
+      return false;
+    }
+    const value = hasInstanceValue ? contentBySlotId[slot.slotId] : definition.defaultContent[slot.slotId];
+    return hasRenderableSlotContent(slot, value);
+  });
+  const hasRequiredGap = issues.some((issue) => (
+    issue.message.includes("为必填内容") || issue.message.includes("必须先绑定商品")
+  ));
+  if (!hasPageImage && !hasPublicText && !hasRequiredGap && visibleSlotIds.size > 0) {
+    issues.push({
+      message: "发布后客户前台不会显示此区块，因为没有有效文字或页面图片",
+      field: "contentBySlotId",
+      pathSuffix: ".contentBySlotId",
+    });
   }
 
   return { definition, issues, assets, productCodes, categorySlugs, actions };

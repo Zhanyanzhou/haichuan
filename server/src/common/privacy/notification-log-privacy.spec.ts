@@ -102,7 +102,8 @@ test("短信降级、拒绝与异常日志不泄露手机号或提供商原始�
   };
   assert.deepEqual(await service.sendVerificationCode(phone, "123456"), {
     delivered: false,
-    reason: "send_failed",
+    // 外部调用已开始但抛出网络类异常，送达事实不明，调用方不得自动重发。
+    reason: "result_unknown",
   });
 
   const output = [...logs.warnings, ...logs.errors].join("\n");

@@ -236,18 +236,32 @@ test("隔离画布：流式拖动重排保存关系，连续拖宽不修改模�
   await mountCanvas(page, true); await enterStack(page);
   await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 10, y: 60 } });
   const before = await snapshot(page);
-  const move = await page.getByRole("button", { name: "拖动移动前图", exact: true }).boundingBox();
-  const target = await page.getByRole("button", { name: "选择模板目标 后图", exact: true }).boundingBox();
-  if (!move || !target) throw new Error("缺少移动源或落点");
-  await page.mouse.move(move.x + move.width / 2, move.y + move.height / 2); await page.mouse.down();
-  await page.mouse.move(target.x + target.width * .85, target.y + target.height * .7);
-  await expect(page.getByRole("status").filter({ hasText: "重排：" })).toBeVisible();
-  await expect(page.locator("[data-overlay-flow-insertion]")).toBeVisible();
-  expect((await snapshot(page)).childIds).toEqual(before.childIds);
-  expect((await snapshot(page)).history).toBe(0);
-  await expect.poll(() => page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.stack}"] > [data-template-node-id]`).first().getAttribute("data-template-node-id")).toBe(before.ids.second);
+  const beginReorder = async () => {
+    const move = await page.getByRole("button", { name: "拖动移动前图", exact: true }).boundingBox();
+    const target = await page.getByRole("button", { name: "选择模板目标 后图", exact: true }).boundingBox();
+    if (!move || !target) throw new Error("缺少移动源或落点");
+    await page.mouse.move(move.x + move.width / 2, move.y + move.height / 2); await page.mouse.down();
+    await page.mouse.move(target.x + target.width * .85, target.y + target.height * .7);
+    await expect(page.getByRole("status").filter({ hasText: "重排：" })).toBeVisible();
+    await expect(page.locator("[data-overlay-flow-insertion]")).toBeVisible();
+    expect((await snapshot(page)).childIds).toEqual(before.childIds);
+    expect((await snapshot(page)).history).toBe(0);
+    await expect.poll(() => page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.stack}"] > [data-template-node-id]`).first().getAttribute("data-template-node-id")).toBe(before.ids.second);
+    expect((await snapshot(page)).preview).toBe(true);
+  };
+  await beginReorder();
   await page.mouse.up();
   await expect.poll(async () => (await snapshot(page)).childIds[0]).toBe(before.ids.second);
+  expect((await snapshot(page)).history).toBe(1);
+  await page.getByRole("button", { name: "撤销", exact: true }).click();
+  expect((await snapshot(page)).childIds).toEqual(before.childIds);
+  await beginReorder(); await page.keyboard.press("Escape"); await page.mouse.up();
+  expect((await snapshot(page)).childIds).toEqual(before.childIds);
+  expect((await snapshot(page)).history).toBe(0);
+  expect((await snapshot(page)).preview).toBe(false);
+  await page.getByRole("button", { name: "拖动移动前图", exact: true }).press("ArrowRight");
+  await expect.poll(async () => (await snapshot(page)).childIds[0]).toBe(before.ids.second);
+  expect((await snapshot(page)).history).toBe(1);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await snapshot(page)).childIds).toEqual(before.childIds);
   const width = await page.getByRole("button", { name: /^拖动预览宽度/ }).boundingBox();
@@ -478,6 +492,14 @@ test("隔离画布新增：取景可持续编辑、取消零写入、确认一�
   await page.getByRole("button", { name: "取消取景", exact: true }).click();
   expect((await snapshot(page)).firstSlotRules).toEqual(before.firstSlotRules);
   await page.getByRole("button", { name: "调整画面", exact: true }).click();
+  await focus.press("ArrowRight");
+  await page.getByRole("button", { name: "选择模板目标 后图", exact: true }).click({ position: { x: 12, y: 55 } });
+  await expect(editor).toHaveCount(0);
+  expect((await snapshot(page)).firstSlotRules).toEqual(before.firstSlotRules);
+  expect((await snapshot(page)).history).toBe(0);
+  expect((await snapshot(page)).preview).toBe(false);
+  await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 12, y: 55 } });
+  await page.getByRole("button", { name: "调整画面", exact: true }).click();
   await focus.press("Shift+ArrowRight"); await page.getByRole("button", { name: "确认取景", exact: true }).click();
   await expect(editor).toHaveCount(0); expect((await snapshot(page)).history).toBe(1);
   expect((await snapshot(page)).firstSlotRules.objectPosition).toBe("60% 50%");
@@ -613,7 +635,7 @@ test("间距实际交互：三列网格column规则仍以横向真实间隙放�
   await page.getByRole("button", { name: "撤销", exact: true }).click(); await expect.poll(actualGap).toBeCloseTo(20, 0);
 });
 
-test("隔离画布新增：三断点观察菜单只改预览宽度，不改根尺寸和保存状态", async ({ page }) => {
+test("隔离画布新增：观察菜单只改预览宽度，不改根尺寸和保存状态", async ({ page }) => {
   await mountCanvas(page);
   const before = await snapshot(page);
   await page.getByRole("button", { name: /^预览宽度：/ }).click();
@@ -624,7 +646,7 @@ test("隔离画布新增：三断点观察菜单只改预览宽度，不改根�
   await expect(panel.getByRole("button", { name: "恢复已保存尺寸" })).toHaveCount(0);
   const width = panel.getByRole("spinbutton", { name: "预览宽度", exact: true });
   await width.fill("834"); await width.press("Enter");
-  const after = await snapshot(page); expect(after.breakpoint).toBe("tablet"); expect(after.previewWidth).toBe(834); expect(after.rootResponsive).toEqual(before.rootResponsive); expect(after.history).toBe(0); expect(after.dirty).toBe(false);
+  const after = await snapshot(page); expect(after.breakpoint).toBe("desktop"); expect(after.previewWidth).toBe(834); expect(after.rootResponsive).toEqual(before.rootResponsive); expect(after.history).toBe(0); expect(after.dirty).toBe(false);
 });
 
 test("隔离画布新增：旧合同仍保留原模板高度与比例菜单", async ({ page }) => {

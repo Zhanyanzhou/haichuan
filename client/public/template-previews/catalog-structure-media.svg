@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">中性图片区域</title>
+  <desc id="description">仅表示模板中的图片位置与比例，不代表实际素材</desc>
+  <rect width="1600" height="900" fill="#D9DEE0"/>
+  <path d="M0 0h1600v900H0z" fill="none" stroke="#A3ADB1" stroke-width="12"/>
+  <path d="M0 900 650 250l950 650M1600 0 900 700" fill="none" stroke="#ABB5B9" stroke-width="10"/>
+  <circle cx="800" cy="450" r="96" fill="none" stroke="#A3ADB1" stroke-width="12"/>
+</svg>

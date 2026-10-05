@@ -27,7 +27,11 @@ import {
   requestSessionMetadata,
 } from "../../common/security/session-security";
 import { RefreshSessionService } from "../../common/security/refresh-session.service";
-import type { StaffRequest } from "../../common/security/authenticated-principal";
+import type {
+  StaffPrincipal,
+  StaffRequest,
+} from "../../common/security/authenticated-principal";
+import { CurrentUser } from "../../common/decorators/current-user.decorator";
 
 @ApiTags("认证")
 @Controller("auth")
@@ -113,21 +117,19 @@ export class AuthController {
     @Req() request: ExpressRequest,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const refreshToken = extractRefreshCookieToken(
-      request.headers?.cookie,
-      "admin",
-    );
-    await this.refreshSessions.revokeAdmin(refreshToken);
     const bearerToken = extractBearerToken(request.headers?.authorization);
     if (bearerToken) {
       const accessSession =
         await this.authService.resolveRevocableAccessSession(bearerToken);
-      if (accessSession) {
-        await this.refreshSessions.revokeAdminFamilyForUser(
-          accessSession.userId,
-          accessSession.familyId,
-        );
-      }
+      if (!accessSession) throw new UnauthorizedException("后台会话无效");
+      await this.refreshSessions.revokeAdminFamilyForUser(
+        accessSession.userId,
+        accessSession.familyId,
+      );
+    } else {
+      await this.refreshSessions.revokeAdmin(
+        extractRefreshCookieToken(request.headers?.cookie, "admin"),
+      );
     }
     response.setHeader("Set-Cookie", buildClearSessionCookieHeaders("admin"));
     return { success: true };
@@ -138,8 +140,11 @@ export class AuthController {
   @Roles("SUPER_ADMIN")
   @Post("register")
   @ApiOperation({ summary: "用户注册" })
-  async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  async register(
+    @Body() dto: RegisterDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.authService.register(dto, actor);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -1,6 +1,9 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import type { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -10,11 +13,87 @@ import { ReviewsService } from './reviews.service';
 import { CreateReviewDto, ModerateReviewDto, ReviewListQueryDto } from './dto/review.dto';
 import type { CustomerRequest } from '../../common/security/authenticated-principal';
 import { BoundedListQueryDto } from '../../common/dto/bounded-list-query.dto';
+import { ReviewMediaService } from './review-media.service';
+import { IdempotencyKey } from '../../common/idempotency/idempotency-key';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 
 @ApiTags('商品评价')
 @Controller('reviews')
 export class ReviewsController {
-  constructor(private readonly reviewsService: ReviewsService) {}
+  constructor(
+    private readonly reviewsService: ReviewsService,
+    private readonly reviewMedia: ReviewMediaService,
+  ) {}
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 12, ttl: 60000 } })
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  }))
+  @Post('media')
+  @ApiOperation({ summary: '上传客户晒单图（私有暂存，审核通过后受控展示）' })
+  uploadMedia(
+    @Req() request: CustomerRequest,
+    @UploadedFile() file: Express.Multer.File,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
+    return this.reviewMedia.upload(request.customer, file, idempotencyKey);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @Get('media/status')
+  @ApiOperation({ summary: '核验晒单图上传结果' })
+  uploadMediaStatus(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @IdempotencyKey() idempotencyKey: string,
+  ) {
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.vary('Cookie');
+    response.vary('Authorization');
+    return this.reviewMedia.uploadStatus(request.customer, idempotencyKey);
+  }
+
+  @Public()
+  @Get('media/public/:reviewId/:index')
+  @ApiOperation({ summary: '读取已审核通过的晒单图' })
+  async readPublicMedia(
+    @Param('reviewId', ParseIntPipe) reviewId: number,
+    @Param('index', ParseIntPipe) index: number,
+    @Res() response: Response,
+  ) {
+    const image = await this.reviewMedia.readPublic(reviewId, index);
+    response
+      .type('image/webp')
+      .set('Cache-Control', 'public, max-age=3600')
+      .set('X-Content-Type-Options', 'nosniff')
+      .send(image);
+  }
+
+  @Public()
+  @UseGuards(CustomerAuthGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @Get('me/:reviewId/media/:index')
+  @ApiOperation({ summary: '客户读取本人评价中的晒单图' })
+  async readCustomerMedia(
+    @Req() request: CustomerRequest,
+    @Param('reviewId', ParseIntPipe) reviewId: number,
+    @Param('index', ParseIntPipe) index: number,
+    @Res() response: Response,
+  ) {
+    const image = await this.reviewMedia.readForCustomer(request.customer, reviewId, index);
+    response
+      .type('image/webp')
+      .set('Cache-Control', 'private, no-store, max-age=0')
+      .set('Vary', 'Cookie, Authorization')
+      .set('X-Content-Type-Options', 'nosniff')
+      .send(image);
+  }
 
   /**
    * 客户提交评价。@Public 旁通全局 JwtAuthGuard/RolesGuard（客户令牌会被 JwtStrategy 拒绝），
@@ -26,15 +105,21 @@ export class ReviewsController {
   @Post()
   @ApiOperation({ summary: '提交评价（订单完成后，先审后展）' })
   submit(@Req() request: CustomerRequest, @Body() dto: CreateReviewDto) {
-    return this.reviewsService.submit(request.customer.id, dto);
+    return this.reviewsService.submit(request.customer, dto);
   }
 
   @Public()
   @UseGuards(CustomerAuthGuard)
   @Get('me')
   @ApiOperation({ summary: '我的评价（含审核状态）' })
-  mine(@Req() request: CustomerRequest) {
-    return this.reviewsService.listMine(request.customer.id);
+  mine(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.vary('Cookie');
+    response.vary('Authorization');
+    return this.reviewsService.listMine(request.customer);
   }
 
   // 注意：product/:productId 为公开读（仅 APPROVED + 昵称脱敏），
@@ -59,8 +144,36 @@ export class ReviewsController {
   @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiOperation({ summary: '评价管理列表（按状态筛选）' })
-  listAll(@Query() query: ReviewListQueryDto) {
-    return this.reviewsService.listAll(query);
+  listAll(
+    @Query() query: ReviewListQueryDto,
+    @CurrentUser() actor: StaffPrincipal,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.vary('Cookie');
+    response.vary('Authorization');
+    return this.reviewsService.listAll(query, actor);
+  }
+
+  @Get(':id/media/:index')
+  @ApiBearerAuth()
+  @Roles('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiOperation({ summary: '后台读取待审/历史晒单图' })
+  async readStaffMedia(
+    @CurrentUser() actor: StaffPrincipal,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('index', ParseIntPipe) index: number,
+    @Res() response: Response,
+  ) {
+    response
+      .set('Cache-Control', 'private, no-store, max-age=0')
+      .set('Vary', 'Cookie, Authorization')
+      .set('X-Content-Type-Options', 'nosniff');
+    const image = await this.reviewMedia.readForStaff(actor, id, index);
+    response
+      .type('image/webp')
+      .send(image);
   }
 
   @Put(':id/moderate')
@@ -69,9 +182,10 @@ export class ReviewsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiOperation({ summary: '审核评价（通过/驳回）+ 商家回复' })
   moderate(
+    @CurrentUser() actor: StaffPrincipal,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ModerateReviewDto,
   ) {
-    return this.reviewsService.moderate(id, dto);
+    return this.reviewsService.moderate(id, dto, actor);
   }
 }

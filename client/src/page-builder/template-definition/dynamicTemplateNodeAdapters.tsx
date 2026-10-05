@@ -16,6 +16,7 @@ export interface DynamicTemplateNodeAdapterContext {
   mode: ContentTemplateRenderMode;
   nodeProps?: DynamicTemplateNodeProps;
   headingLevel?: 1 | 2;
+  priority?: boolean;
 }
 
 export interface DynamicTemplateNodeAdapter {
@@ -28,7 +29,7 @@ for (const slotType of Object.keys(
   MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
 ) as MatureContentTemplateSlotType[]) {
   DYNAMIC_TEMPLATE_NODE_ADAPTERS[slotType] = {
-    render: ({ content, mode, nodeProps, headingLevel }) => (
+    render: ({ content, mode, nodeProps, headingLevel, priority }) => (
       <Suspense fallback={<div className="hc-dynamic-template__adapter-loading" aria-busy="true" />}>
         <MatureContentTemplateRenderer
           slotType={slotType}
@@ -37,6 +38,7 @@ for (const slotType of Object.keys(
           designProps={nodeProps?.contentTemplateDesignProps}
           mode={mode}
           headingLevel={headingLevel}
+          priority={priority}
         />
       </Suspense>
     ),

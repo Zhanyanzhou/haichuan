@@ -9,6 +9,21 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateCouponDto, UpdateCouponDto } from './dto/coupon.dto';
 import { MarketingService } from './marketing.service';
 
+const adminActor = { id: 31 };
+
+function authorizedPrisma(coupon: Record<string, unknown>) {
+  const transaction = {
+    $queryRaw: async () => [{ id: adminActor.id }],
+    coupon,
+  };
+  return {
+    coupon,
+    $transaction: async <T>(
+      callback: (client: typeof transaction) => Promise<T>,
+    ) => callback(transaction),
+  };
+}
+
 const pipe = new ValidationPipe({
   whitelist: true,
   transform: true,
@@ -101,50 +116,44 @@ test('优惠券 DTO 拒绝非法比例 金额精度 数量 时间和布尔输入
 
 test('已使用优惠券冻结经济条款但仍允许显式停用', async () => {
   let updateData: unknown;
-  const prisma = {
-    coupon: {
-      findUnique: async () => ({ ...baseCoupon, usedCount: 1 }),
-      update: async ({ data }: { data: unknown }) => {
-        updateData = data;
-        return { ...baseCoupon, usedCount: 1, ...(data as Record<string, unknown>) };
-      },
+  const prisma = authorizedPrisma({
+    findUnique: async () => ({ ...baseCoupon, usedCount: 1 }),
+    update: async ({ data }: { data: unknown }) => {
+      updateData = data;
+      return { ...baseCoupon, usedCount: 1, ...(data as Record<string, unknown>) };
     },
-  };
+  });
   const service = new MarketingService(prisma as unknown as PrismaService);
 
   await assert.rejects(
-    () => service.updateCoupon(1, { name: '改名后的券' }),
+    () => service.updateCoupon(1, { name: '改名后的券' }, adminActor),
     BadRequestException,
   );
-  const result = await service.updateCoupon(1, { isActive: false });
+  const result = await service.updateCoupon(1, { isActive: false }, adminActor);
   assert.deepEqual(updateData, { isActive: false });
   assert.equal(result.isActive, false);
 });
 
 test('未使用券编辑若并发出现核销则安全失败', async () => {
   let updateCalled = false;
-  const prisma = {
-    coupon: {
-      findUnique: async () => baseCoupon,
-      updateMany: async () => {
-        updateCalled = true;
-        return { count: 0 };
-      },
+  const prisma = authorizedPrisma({
+    findUnique: async () => baseCoupon,
+    updateMany: async () => {
+      updateCalled = true;
+      return { count: 0 };
     },
-  };
+  });
   const service = new MarketingService(prisma as unknown as PrismaService);
 
   await assert.rejects(
-    () => service.updateCoupon(1, { value: 20 }),
+    () => service.updateCoupon(1, { value: 20 }, adminActor),
     ConflictException,
   );
   assert.equal(updateCalled, true);
 });
 
 test('更新 DTO 未携带类型时仍由服务端按存量 percent 语义复核', async () => {
-  const prisma = {
-    coupon: { findUnique: async () => baseCoupon },
-  };
+  const prisma = authorizedPrisma({ findUnique: async () => baseCoupon });
   const service = new MarketingService(prisma as unknown as PrismaService);
   const dto = await pipe.transform(
     { value: 9.5 },
@@ -152,7 +161,7 @@ test('更新 DTO 未携带类型时仍由服务端按存量 percent 语义复核
   );
 
   await assert.rejects(
-    () => service.updateCoupon(1, dto),
+    () => service.updateCoupon(1, dto, adminActor),
     BadRequestException,
   );
 });

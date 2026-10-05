@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomInt, randomUUID } from 'node:crypto';
 import { AddressInfo } from 'node:net';
-import { Module, ValidationPipe } from '@nestjs/common';
+import { Module, UnauthorizedException, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaClient } from '@prisma/client';
@@ -32,7 +32,11 @@ test(
   async () => {
     assert.equal(databaseUrl, validateTarget(process.env), '客户隔离测试必须使用显式隔离库');
     const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
+    const staleNotificationPrisma = new PrismaClient({ datasourceUrl: databaseUrl });
     const prismaService = prisma as unknown as PrismaService;
+    const staleNotifications = new CustomerNotificationsService(
+      staleNotificationPrisma as unknown as PrismaService,
+    );
     const jwt = new JwtService({ secret: `customer-isolation-${randomUUID()}` });
     const refreshSessions = new RefreshSessionService(prismaService);
     const mailer = {
@@ -112,7 +116,7 @@ test(
       const port = (app.getHttpServer().address() as AddressInfo).port;
       baseUrl = `http://127.0.0.1:${port}/api/customers`;
     };
-    await prisma.$connect();
+    await Promise.all([prisma.$connect(), staleNotificationPrisma.$connect()]);
     try {
       const passwordHash = await bcrypt.hash('Oldpass1', 4);
       const [customerA, customerB] = await Promise.all([
@@ -417,7 +421,7 @@ test(
           enabled: false,
         },
       });
-      await customers.closeAccount(customerB.id, 'Oldpass1');
+      await customers.closeAccount(customerB, { password: 'Oldpass1' });
       const cancelled = await prisma.notificationDelivery.findUniqueOrThrow({ where: { id: delivery.id } });
       assert.equal(cancelled.status, 'CANCELLED');
       assert.equal(cancelled.destinationHash, null);
@@ -448,6 +452,111 @@ test(
         'PROCESSED',
       );
       await prisma.outboxEvent.delete({ where: { id: outboxEvent.id } });
+
+      const staleRaceCustomer = await prisma.customer.create({
+        data: {
+          phone: `138${phoneBase}`,
+          name: `通知注销竞态-${marker}`,
+          passwordHash,
+        },
+      });
+      createdCustomerIds.push(staleRaceCustomer.id);
+      const staleRaceNotification = await prisma.notification.create({
+        data: {
+          customerId: staleRaceCustomer.id,
+          type: 'TEST',
+          locale: 'ZH_CN',
+          title: '注销竞态通知',
+          body: '不得被旧会话改写',
+          status: 'AVAILABLE',
+        },
+      });
+      let staleAttempts: Promise<unknown>[] = [];
+      await prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<Array<{ id: number }>>`
+          SELECT id
+          FROM customers
+          WHERE id = ${staleRaceCustomer.id}
+            AND status = 'ACTIVE'
+            AND auth_version = ${staleRaceCustomer.authVersion}
+          FOR UPDATE
+        `;
+        assert.deepEqual(locked, [{ id: staleRaceCustomer.id }]);
+
+        const stalePrincipal = {
+          id: staleRaceCustomer.id,
+          authVersion: staleRaceCustomer.authVersion,
+        };
+        staleAttempts = [
+          staleNotifications.markRead(stalePrincipal, staleRaceNotification.id),
+          staleNotifications.markAllRead(stalePrincipal),
+          staleNotifications.updatePreference(stalePrincipal, {
+            channel: 'EMAIL',
+            topic: 'SERVICE_ORDER_CREATED',
+            enabled: false,
+            expectedUpdatedAt: null,
+          }),
+        ];
+        const earlyOutcomes = await Promise.all(staleAttempts.map((attempt) => Promise.race([
+          attempt.then(() => 'settled', () => 'settled'),
+          new Promise<string>((resolve) => setTimeout(() => resolve('pending'), 200)),
+        ])));
+        assert.deepEqual(
+          earlyOutcomes,
+          ['pending', 'pending', 'pending'],
+          '旧会话通知写必须等待注销持有的客户行锁',
+        );
+
+        const disabled = await tx.customer.updateMany({
+          where: {
+            id: staleRaceCustomer.id,
+            status: 'ACTIVE',
+            authVersion: staleRaceCustomer.authVersion,
+          },
+          data: { status: 'DISABLED', authVersion: { increment: 1 } },
+        });
+        assert.equal(disabled.count, 1);
+        await tx.notificationPreference.deleteMany({
+          where: { customerId: staleRaceCustomer.id },
+        });
+        await tx.notification.updateMany({
+          where: { customerId: staleRaceCustomer.id },
+          data: { status: 'ARCHIVED' },
+        });
+      });
+
+      const staleOutcomes = await Promise.all(staleAttempts.map((attempt) => attempt.then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (error: unknown) => ({ status: 'rejected' as const, error }),
+      )));
+      assert.equal(staleOutcomes.length, 3);
+      for (const outcome of staleOutcomes) {
+        assert.equal(outcome.status, 'rejected');
+        if (outcome.status === 'rejected') {
+          assert.ok(outcome.error instanceof UnauthorizedException);
+        }
+      }
+      assert.equal(
+        await prisma.notificationPreference.count({
+          where: { customerId: staleRaceCustomer.id },
+        }),
+        0,
+      );
+      assert.equal(
+        await prisma.customerSecurityEvent.count({
+          where: {
+            customerId: staleRaceCustomer.id,
+            eventType: 'NOTIFY_PREF_EMAIL_SERVICE_ORDER_CREATED_OFF',
+          },
+        }),
+        0,
+      );
+      assert.equal(
+        (await prisma.notification.findUniqueOrThrow({
+          where: { id: staleRaceNotification.id },
+        })).status,
+        'ARCHIVED',
+      );
     } finally {
       if (appStarted) await app.close();
       await prisma.lead.deleteMany({ where: { customerId: { in: createdCustomerIds } } });
@@ -460,6 +569,7 @@ test(
         await prisma.product.deleteMany({ where: { categoryId } });
         await prisma.category.deleteMany({ where: { id: categoryId } });
       }
+      await staleNotificationPrisma.$disconnect();
       await prisma.$disconnect();
     }
   },

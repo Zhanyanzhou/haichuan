@@ -1,7 +1,7 @@
 # 页面装修实现边界
 
 > 2026-09-08 文档整理与局部源码复核；本轮未重跑界面、真实 API 或数据库验收。
-> 本文只描述页面数据与运行链路。模板产品行为、内容与版本边界服从[模板设计唯一标准](../page-builder/template-creation-rules.md)，具体编辑和页面消费操作见[从属交接细则](../page-builder/template-design-framework.md)；本文不得用当前实现反向定义产品规则。
+> 本文只描述页面数据与运行链路。页面职责、选用和内容分层服从[店铺装修产品合同](../page-builder/store-decoration.md)；模板生成与版本边界服从[模板设计标准](../page-builder/template-creation-rules.md)；具体编辑和页面消费操作见[从属交接细则](../page-builder/template-design-framework.md)。本文不得用当前实现反向定义产品规则。
 
 ## 1. 实现入口
 
@@ -44,7 +44,7 @@
 
 公开 metadata 只返回 `seoTitle`、`seoDescription`、`ogImage`；内部主键、发布账号、编辑器版本、验收印记、负责人和授权资料不得进入公开响应。
 
-页面预检、正式发布、线上版本读取和线上回滚只合并当前 `PageDocument` 的可公开性问题，不读取整站上线准备度。缺图、缺文案、替代文字、占位内容和 SEO 完整度只返回 warning；动态模板页面实例没有明确上传且当前断点可达的图片时，公开 Renderer 返回 `null`，不会输出文字兜底或空外壳。危险地址、未纳管外链、缺失文件、结构和引用错误仍失败关闭。站点名称、正式域名、Logo、语言、默认 SEO、联系资料与审核记录由 `/admin/site-content` 和独立 Release Preflight 维护。前端角色能力必须与控制器一致：页面发布仅开放给 `ADMIN / SUPER_ADMIN`，`EDITOR` 的发布动作禁用。
+页面预检、正式发布、线上版本读取和线上回滚只合并当前 `PageDocument` 的可公开性问题，不读取整站上线准备度。建议填写、替代文字、占位内容和 SEO 完整度只返回 warning；必须由页面填写的内容缺失会失败关闭。动态模板按 D.38 公开：有效文字可以单独展示，可选图片缺失只收起图片区，作为成立前提的必填图片缺失时该断点不渲染。模板默认图不能代替页面图片。危险地址、未纳管外链、缺失文件、结构和引用错误仍失败关闭。站点名称、正式域名、Logo、语言、默认 SEO、联系资料与审核记录由 `/admin/site-content` 和独立 Release Preflight 维护。前端角色能力必须与控制器一致：页面发布仅开放给 `ADMIN / SUPER_ADMIN`，`EDITOR` 的发布动作禁用。
 
 ## 4. 行动、内容位置与业务事实
 

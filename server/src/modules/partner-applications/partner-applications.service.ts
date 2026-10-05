@@ -8,15 +8,33 @@ import {
 } from '@nestjs/common';
 import { PartnerStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type {
+  CustomerPrincipal,
+  StaffPrincipal,
+} from '../../common/security/authenticated-principal';
 import { CreatePartnerApplicationDto } from './dto/create-partner-application.dto';
 import { PartnerApplicationQueryDto } from './dto/partner-application-query.dto';
-import { isPartnerApplicationsWriteEnabled } from '../../common/release/release-profile';
+import {
+  isPartnerApplicationsWriteEnabled,
+  resolvePartnerAgreementContract,
+  type PartnerAgreementContract,
+} from '../../common/release/release-profile';
+import {
+  lockActiveCustomerForRead,
+  lockActiveCustomerForWrite,
+} from '../customers/customer-write-gate';
 
 const SUBMITTABLE_PARTNER_STATUSES: PartnerStatus[] = [
   'NONE',
   'NEEDS_SUPPLEMENT',
   'REJECTED',
 ];
+
+const PARTNER_REVIEW_AUDIT_NOTE_LIMIT = 500;
+
+type PartnerReviewAction = 'APPROVED' | 'NEEDS_SUPPLEMENT' | 'REJECTED' | 'SUSPENDED';
+type PartnerStaffActor = Pick<StaffPrincipal, 'id' | 'role' | 'sessionFamilyId'>;
+type ActivePartnerStaff = Pick<StaffPrincipal, 'id' | 'role'>;
 
 /**
  * 合作商家申请服务
@@ -44,13 +62,78 @@ export class PartnerApplicationsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private assertWriteEnabled() {
+  private async lockActiveStaffSession(
+    transaction: Prisma.TransactionClient,
+    actor: PartnerStaffActor,
+    mode: 'read' | 'write',
+  ): Promise<void> {
+    if (!actor.sessionFamilyId) return;
+    const sessions = mode === 'write'
+      ? await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+        )
+      : await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+        );
+    if (sessions.length !== 1) {
+      throw new ForbiddenException('当前员工会话已失效，不能继续访问合作申请');
+    }
+  }
+
+  private async lockAuthorizedStaff(
+    transaction: Prisma.TransactionClient,
+    actor: PartnerStaffActor,
+    mode: 'read' | 'write',
+  ): Promise<ActivePartnerStaff> {
+    const staff = mode === 'write'
+      ? await transaction.$queryRaw<Array<ActivePartnerStaff>>(
+          Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE') FOR UPDATE`,
+        )
+      : await transaction.$queryRaw<Array<ActivePartnerStaff>>(
+          Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'CUSTOMER_SERVICE') FOR SHARE`,
+        );
+    if (staff.length !== 1) {
+      throw new ForbiddenException('当前员工已停用或无权访问合作申请');
+    }
+    await this.lockActiveStaffSession(transaction, actor, mode);
+    return staff[0];
+  }
+
+  private withAuthorizedStaffRead<T>(
+    actor: PartnerStaffActor,
+    operation: (
+      transaction: Prisma.TransactionClient,
+      staff: ActivePartnerStaff,
+    ) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (transaction) => {
+      const staff = await this.lockAuthorizedStaff(transaction, actor, 'read');
+      return operation(transaction, staff);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  private allowedReviewActions(status: string, reviewerRole: string): PartnerReviewAction[] {
+    const allowed = (this.transitions[status] || []) as PartnerReviewAction[];
+    if (['ADMIN', 'SUPER_ADMIN'].includes(reviewerRole)) return allowed;
+    if (status === 'SUSPENDED') return [];
+    return allowed.filter((action) => action !== 'SUSPENDED');
+  }
+
+  private requireWriteContract(): PartnerAgreementContract {
     if (!isPartnerApplicationsWriteEnabled()) {
       throw new ServiceUnavailableException({
         code: 'PARTNER_APPLICATIONS_WRITE_DISABLED',
         message: '合作申请服务正在准备中，当前仅可查看已有申请状态',
       });
     }
+    const contract = resolvePartnerAgreementContract();
+    if (!contract) {
+      throw new ServiceUnavailableException({
+        code: 'PARTNER_AGREEMENT_CONTRACT_NOT_READY',
+        message: '合作协议尚未完成正式版本绑定，当前仅可查看已有申请状态',
+      });
+    }
+    return contract;
   }
 
   /**
@@ -77,33 +160,48 @@ export class PartnerApplicationsService {
   }
 
   /** 客户：获取自己最近一次申请与当前有效合作状态 */
-  async findMyLatest(customerId: number) {
-    const customer = await this.prisma.customer.findUnique({
-      where: { id: customerId },
-      select: {
-        accountType: true,
-        partnerStatus: true,
-        partnerApprovedAt: true,
-      },
-    });
-    const latest = await this.prisma.partnerApplication.findFirst({
-      where: { customerId },
-      orderBy: { createdAt: 'desc' },
-    });
-    return { customer, latest };
+  async findMyLatest(
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+  ) {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockActiveCustomerForRead(transaction, principal);
+      const customer = await transaction.customer.findUnique({
+        where: { id: principal.id },
+        select: {
+          accountType: true,
+          partnerStatus: true,
+          partnerApprovedAt: true,
+        },
+      });
+      const latest = await transaction.partnerApplication.findFirst({
+        where: { customerId: principal.id },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      return { customer, latest };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
   /** 客户：提交/重新提交申请（新增历史记录，保留旧版本） */
-  async submit(customerId: number, dto: CreatePartnerApplicationDto) {
-    this.assertWriteEnabled();
+  async submit(
+    customerId: number,
+    dto: CreatePartnerApplicationDto,
+    expectedAuthVersion: number,
+  ) {
+    const agreementContract = this.requireWriteContract();
     if (!dto.agreementAccepted) {
       throw new BadRequestException('请先阅读并同意合作协议');
     }
     return this.runSerializable(async (tx) => {
+      await lockActiveCustomerForWrite(tx, {
+        id: customerId,
+        authVersion: expectedAuthVersion,
+      });
       // Customer.partnerStatus 是无 Schema 变更下的并发闸门：只有一个请求能把可提交状态推进为 PENDING。
       const claimed = await tx.customer.updateMany({
         where: {
           id: customerId,
+          status: 'ACTIVE',
+          authVersion: expectedAuthVersion,
           partnerStatus: { in: SUBMITTABLE_PARTNER_STATUSES },
         },
         data: { partnerStatus: 'PENDING' },
@@ -149,13 +247,15 @@ export class PartnerApplicationsService {
           contactWechat: dto.contactWechat || null,
           status: 'PENDING',
           agreementAcceptedAt: new Date(),
+          agreementVersion: agreementContract.version,
+          agreementHash: agreementContract.hash,
         },
       });
     }, '申请提交冲突，请刷新后重试');
   }
 
   /** 后台：分页列表（按状态筛选） */
-  async findAll(params: PartnerApplicationQueryDto) {
+  async findAll(params: PartnerApplicationQueryDto, reviewer: PartnerStaffActor) {
     const page = Math.max(1, Number(params.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 20));
     const where: Prisma.PartnerApplicationWhereInput = {};
@@ -167,36 +267,65 @@ export class PartnerApplicationsService {
         { companyName: { contains: params.keyword } },
       ];
     }
-    const [list, total] = await Promise.all([
-      this.prisma.partnerApplication.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: {
-          customer: {
-            select: { id: true, phone: true, name: true, partnerStatus: true },
+    return this.withAuthorizedStaffRead(reviewer, async (transaction, activeReviewer) => {
+      const [list, total] = await Promise.all([
+        transaction.partnerApplication.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: {
+            customer: {
+              select: {
+                id: true,
+                phone: true,
+                name: true,
+                partnerStatus: true,
+                partnerApplications: {
+                  orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                  take: 1,
+                  select: { id: true },
+                },
+              },
+            },
           },
-        },
-      }),
-      this.prisma.partnerApplication.count({ where }),
-    ]);
-    return { list, total, page, pageSize };
+        }),
+        transaction.partnerApplication.count({ where }),
+      ]);
+      const annotatedList = list.map(({ customer, ...application }) => {
+        const { partnerApplications, ...customerResource } = customer;
+        const isLatest = partnerApplications[0]?.id === application.id;
+        const isCurrent = isLatest && customer.partnerStatus === application.status;
+        return {
+          ...application,
+          customer: customerResource,
+          isLatest,
+          isCurrent,
+          currentPartnerStatus: customer.partnerStatus,
+          allowedReviewActions: isCurrent
+            ? this.allowedReviewActions(application.status, activeReviewer.role)
+            : [],
+        };
+      });
+      return { list: annotatedList, total, page, pageSize };
+    });
   }
 
   /** 后台：详情 */
-  async findById(id: number) {
-    const app = await this.prisma.partnerApplication.findUnique({
-      where: { id },
-      include: {
-        customer: {
-          select: { id: true, phone: true, name: true, partnerStatus: true, accountType: true },
+  async findById(id: number, reviewer: PartnerStaffActor) {
+    return this.withAuthorizedStaffRead(reviewer, async (transaction) => {
+      const app = await transaction.partnerApplication.findUnique({
+        where: { id },
+        include: {
+          customer: {
+            select: { id: true, phone: true, name: true, partnerStatus: true, accountType: true },
+          },
+          reviewer: { select: { id: true, username: true, realName: true } },
         },
-        reviewer: { select: { id: true, username: true, realName: true } },
-      },
+      });
+      if (!app) throw new NotFoundException('申请记录不存在');
+      return app;
     });
-    if (!app) throw new NotFoundException('申请记录不存在');
-    return app;
   }
 
   /**
@@ -205,25 +334,46 @@ export class PartnerApplicationsService {
    */
   async review(
     applicationId: number,
-    action: 'APPROVED' | 'NEEDS_SUPPLEMENT' | 'REJECTED' | 'SUSPENDED',
+    action: PartnerReviewAction,
     reviewNote: string | undefined,
-    reviewer: { id: number; role: string },
+    reviewer: PartnerStaffActor,
   ) {
-    this.assertWriteEnabled();
+    this.requireWriteContract();
     return this.runSerializable(async (tx) => {
-      // 审核和客户当前资格必须在同一事务内重读，不能信任事务外快照。
+      const activeReviewer = await this.lockAuthorizedStaff(tx, reviewer, 'write');
+      const candidate = await tx.partnerApplication.findUnique({
+        where: { id: applicationId },
+        select: { customerId: true },
+      });
+      if (!candidate) throw new NotFoundException('申请记录不存在');
+
+      // 客户是合作资格与申请版本的串行点；提交、审核、暂停和恢复必须先竞争同一行锁。
+      const lockedCustomers = await tx.$queryRaw<Array<{ id: number }>>(
+        Prisma.sql`SELECT id FROM customers WHERE id = ${candidate.customerId} FOR UPDATE`,
+      );
+      if (lockedCustomers.length !== 1) throw new NotFoundException('客户不存在');
+
+      // 加锁后重读申请、客户资格和最新申请，不能信任锁前或前端快照。
       const app = await tx.partnerApplication.findUnique({
         where: { id: applicationId },
         include: { customer: { select: { partnerStatus: true } } },
       });
       if (!app) throw new NotFoundException('申请记录不存在');
+      const latest = await tx.partnerApplication.findFirst({
+        where: { customerId: app.customerId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { id: true },
+      });
+      if (!latest || latest.id !== app.id || app.customer.partnerStatus !== app.status) {
+        throw new ConflictException('申请状态已变化，请刷新后重试');
+      }
 
       const allowed = this.transitions[app.status] || [];
       if (!allowed.includes(action)) {
-        throw new BadRequestException(`当前状态 ${app.status} 不允许执行 ${action}`);
+        throw new ConflictException('申请状态已变化，请刷新后重试');
       }
 
-      const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(reviewer.role);
+      const isAdmin = ['ADMIN', 'SUPER_ADMIN'].includes(activeReviewer.role);
       const restoresOriginalSuspension = app.status === 'SUSPENDED' && action === 'APPROVED';
 
       // 暂停只能通过原暂停记录恢复；历史遗留的新 PENDING 记录也不能成为恢复通道。
@@ -239,12 +389,13 @@ export class PartnerApplicationsService {
       }
 
       const now = new Date();
+      const normalizedReviewNote = reviewNote?.trim() || null;
       // 乐观锁：仅当状态仍是审核前读到的值时推进，防止并发审核致 Application 与 Customer 合作权限不一致
       const updated = await tx.partnerApplication.updateMany({
         where: { id: applicationId, status: app.status },
         data: {
           status: action,
-          reviewNote: reviewNote?.trim() || null,
+          reviewNote: normalizedReviewNote,
           reviewerId: reviewer.id,
           reviewedAt: now,
         },
@@ -252,31 +403,53 @@ export class PartnerApplicationsService {
       if (updated.count === 0) throw new ConflictException('申请状态已变化，请刷新后重试');
 
       // 同步 Customer 合作权限（事务内，避免半完成状态）
+      let customerData: Prisma.CustomerUpdateManyMutationInput;
       if (action === 'APPROVED') {
-        await tx.customer.update({
-          where: { id: app.customerId },
-          data: {
-            accountType: 'PARTNER',
-            partnerStatus: 'APPROVED',
-            partnerApprovedAt: now,
-          },
-        });
+        customerData = {
+          accountType: 'PARTNER',
+          partnerStatus: 'APPROVED',
+          partnerApprovedAt: now,
+        };
       } else if (action === 'SUSPENDED') {
-        await tx.customer.update({
-          where: { id: app.customerId },
-          data: { partnerStatus: 'SUSPENDED' },
-        });
+        customerData = { partnerStatus: 'SUSPENDED' };
       } else if (action === 'NEEDS_SUPPLEMENT') {
-        await tx.customer.update({
-          where: { id: app.customerId },
-          data: { partnerStatus: 'NEEDS_SUPPLEMENT' },
-        });
+        customerData = { partnerStatus: 'NEEDS_SUPPLEMENT' };
       } else if (action === 'REJECTED') {
-        await tx.customer.update({
-          where: { id: app.customerId },
-          data: { partnerStatus: 'REJECTED' },
-        });
+        customerData = { partnerStatus: 'REJECTED' };
+      } else {
+        throw new ConflictException('申请状态已变化，请刷新后重试');
       }
+
+      const customerUpdated = await tx.customer.updateMany({
+        where: { id: app.customerId, partnerStatus: app.status },
+        data: customerData,
+      });
+      if (customerUpdated.count !== 1) {
+        throw new ConflictException('申请状态已变化，请刷新后重试');
+      }
+
+      const auditReviewNote = normalizedReviewNote?.slice(0, PARTNER_REVIEW_AUDIT_NOTE_LIMIT) || null;
+      await tx.operationLog.create({
+        data: {
+          userId: reviewer.id,
+          action: 'PARTNER_APPLICATION_REVIEWED',
+          module: 'partner-applications',
+          targetId: applicationId,
+          detail: JSON.stringify({
+            schemaVersion: 1,
+            applicationId,
+            customerId: app.customerId,
+            fromStatus: app.status,
+            toStatus: action,
+            action,
+            reviewNote: auditReviewNote,
+            reviewNoteTruncated: Boolean(
+              normalizedReviewNote && normalizedReviewNote.length > PARTNER_REVIEW_AUDIT_NOTE_LIMIT,
+            ),
+            reviewerId: reviewer.id,
+          }),
+        },
+      });
       return tx.partnerApplication.findUnique({ where: { id: applicationId } });
     }, '申请状态已变化，请刷新后重试');
   }

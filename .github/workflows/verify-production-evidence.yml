@@ -39,6 +39,24 @@ on:
         options:
           - lead-generation
           - commerce
+      unprotected_ref_authorized:
+        description: "当前 ref 未受保护时，已人工确认从该 ref 执行独立复验"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      authorization_sha256:
+        description: "未保护 ref 的批准记录 SHA-256；必须与 approval_reference_sha256 一致"
+        required: false
+        default: ""
+        type: string
+      authorized_source_sha:
+        description: "未保护 ref 必填：人工批准的精确 40 位 source SHA；必须等于本次 GITHUB_SHA"
+        required: false
+        default: ""
+        type: string
 
 permissions: {}
 
@@ -51,33 +69,45 @@ jobs:
       contents: read
       packages: read
     steps:
-      - name: 拒绝未受保护的验证来源
+      - name: 校验验证来源与显式批准绑定
         shell: bash
         env:
           DEFAULT_BRANCH_REF: refs/heads/${{ github.event.repository.default_branch }}
           RELEASE_REF: ${{ github.ref }}
           RELEASE_REF_PROTECTED: ${{ github.ref_protected }}
+          UNPROTECTED_REF_AUTHORIZED: ${{ inputs.unprotected_ref_authorized }}
+          AUTHORIZATION_SHA256: ${{ inputs.authorization_sha256 }}
+          APPROVAL_REFERENCE_SHA256: ${{ inputs.approval_reference_sha256 }}
+          AUTHORIZED_SOURCE_SHA: ${{ inputs.authorized_source_sha }}
         run: |
           set -euo pipefail
-          if [ "$RELEASE_REF" = "$DEFAULT_BRANCH_REF" ]; then
-            exit 0
+          case "$RELEASE_REF" in "$DEFAULT_BRANCH_REF"|refs/heads/release/*) ;; *) echo "RELEASE_REF_NOT_DEFAULT_OR_RELEASE_BRANCH" >&2; exit 1 ;; esac
+          if [ "$RELEASE_REF_PROTECTED" = "true" ]; then
+            authorization_mode="protected-ref"
+          else
+            test "$UNPROTECTED_REF_AUTHORIZED" = "true" || { echo "UNPROTECTED_EVIDENCE_VERIFY_REF_CONFIRMATION_REQUIRED" >&2; exit 1; }
+            [[ "$AUTHORIZATION_SHA256" =~ ^[a-f0-9]{64}$ ]] || { echo "EVIDENCE_VERIFY_AUTHORIZATION_SHA256_INVALID" >&2; exit 1; }
+            test "$AUTHORIZATION_SHA256" = "$APPROVAL_REFERENCE_SHA256" || { echo "EVIDENCE_VERIFY_AUTHORIZATION_APPROVAL_MISMATCH" >&2; exit 1; }
+            [[ "$AUTHORIZED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || { echo "EVIDENCE_VERIFY_AUTHORIZED_SOURCE_SHA_INVALID" >&2; exit 1; }
+            test "$AUTHORIZED_SOURCE_SHA" = "$GITHUB_SHA" || { echo "EVIDENCE_VERIFY_AUTHORIZED_SOURCE_SHA_MISMATCH" >&2; exit 1; }
+            authorization_mode="explicit-unprotected-ref"
           fi
-          case "$RELEASE_REF" in
-            refs/heads/release/*) ;;
-            *) echo "RELEASE_REF_NOT_DEFAULT_OR_RELEASE_BRANCH" >&2; exit 1 ;;
-          esac
-          if [ "$RELEASE_REF_PROTECTED" != "true" ]; then
-            echo "RELEASE_REF_NOT_PROTECTED" >&2
-            exit 1
-          fi
+          {
+            echo "### Production evidence verification authorization"
+            echo "- mode: $authorization_mode"
+            echo "- actor: $GITHUB_ACTOR"
+            echo "- run: $GITHUB_RUN_ID"
+            echo "- ref: $RELEASE_REF"
+            echo "- source-sha: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 检出验证器
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
       - name: 配置 Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22
           cache: npm
@@ -99,7 +129,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: 下载受信 evidence artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ${{ inputs.evidence_artifact_name }}
           path: .codex-tmp/production-evidence
@@ -146,7 +176,7 @@ jobs:
 
       - name: 保存脱敏验证结果
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: production-evidence-verification-${{ github.run_id }}
           path: .codex-tmp/production-evidence-verification/result.json

@@ -23,7 +23,29 @@ import {
   sanitizeContentTemplateDefaultContent,
   sanitizeContentTemplateLayoutData,
 } from "./contentTemplates.generated";
-import { mergeTemplateResponsiveRecord, resolveTemplateNodeRules } from "./templateResponsive.generated";
+import { mergeTemplateResponsiveRecord, resolveTemplateNodeRules, TEMPLATE_CONTENT_BREAKPOINTS } from "./templateResponsive.generated";
+
+const FIXED_PUBLIC_TEXT_EXCLUDED_TYPES = new Set(["image", "product", "collection", "heroTemplate"]);
+const COMMERCIAL_FIXED_CONTENT_ROLES = new Set(["price", "originalPrice", "discount", "offer"]);
+
+/** 与 publicationPromise.hasLegalFixedPublicContent 保持一致。生成物不能引用客户端模块。 */
+function hasLegalFixedPublicContent(
+  slotType: string,
+  semanticRole: string | undefined,
+  value: unknown,
+): boolean {
+  if (semanticRole && COMMERCIAL_FIXED_CONTENT_ROLES.has(semanticRole)) return false;
+  if (FIXED_PUBLIC_TEXT_EXCLUDED_TYPES.has(slotType)) return false;
+  const hasText = (candidate: unknown): boolean => {
+    if (typeof candidate === "string") return candidate.trim().length > 0;
+    if (Array.isArray(candidate)) return candidate.some(hasText);
+    if (candidate && typeof candidate === "object") {
+      return Object.values(candidate as Record<string, unknown>).some(hasText);
+    }
+    return false;
+  };
+  return hasText(value);
+}
 
 export type DynamicTemplateValidationLevel = "error" | "warning" | "info";
 
@@ -43,6 +65,14 @@ export interface DynamicTemplateValidationResult {
 }
 
 export type DynamicTemplatePublishValidationResult = DynamicTemplateValidationResult;
+
+/** 历史平板字段只保留读取兼容，不得进入草稿或发布检查。 */
+export function isRetiredTabletContentPath(path: string): boolean {
+  return /(?:^|\.)responsive\.tablet(?:\.|$)/.test(path)
+    || /(?:^|\.)tabletRules(?:\.|$)/.test(path)
+    || path === "metadata.previewTabletWidth"
+    || path.endsWith(".previewTabletWidth");
+}
 
 export const DYNAMIC_TEMPLATE_METADATA_TEXT_MAX_LENGTH = {
   category: 50,
@@ -1213,7 +1243,7 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
       addIssue(issues, { level: "error", code: "UNSUPPORTED_TABLET_METADATA", path: "metadata.previewTabletWidth", message: "旧模板没有平板断点。" });
     }
     if (schemaVersion >= 2 && input.metadata.mobileBreakpoint !== undefined && input.metadata.mobileBreakpoint !== 767) {
-      addIssue(issues, { level: "error", code: "INVALID_V2_BREAKPOINT", path: "metadata.mobileBreakpoint", message: "新模板使用 767/1023 固定断点边界。" });
+      addIssue(issues, { level: "error", code: "INVALID_V2_BREAKPOINT", path: "metadata.mobileBreakpoint", message: "新模板固定使用 767 作为手机与电脑的内容边界。" });
     }
   }
 
@@ -1483,16 +1513,14 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
         validateResponsiveRules(rawNode.responsive.mobile, `${path}.responsive.mobile`, issues, nodeKey);
       } else {
         let effective = isRecord(rawNode.responsive.desktop) ? rawNode.responsive.desktop : {};
-        for (const breakpoint of ["tablet", "mobile"] as const) {
-          const override = rawNode.responsive[breakpoint];
-          if (breakpoint === "tablet" && override === undefined) continue;
-          if (!isRecord(override)) {
-            addIssue(issues, { level: "error", code: "INVALID_RESPONSIVE_OVERRIDE", path: `${path}.responsive.${breakpoint}`, nodeId: nodeKey, message: "断点覆盖必须是属性对象。" });
-            continue;
-          }
-          effective = mergeTemplateResponsiveRecord(effective, override);
-          validateResponsiveRules(effective, `${path}.responsive.${breakpoint}`, issues, nodeKey, schemaVersion);
+        const mobileOverride = rawNode.responsive.mobile;
+        if (!isRecord(mobileOverride)) {
+          addIssue(issues, { level: "error", code: "INVALID_RESPONSIVE_OVERRIDE", path: `${path}.responsive.mobile`, nodeId: nodeKey, message: "断点覆盖必须是属性对象。" });
+        } else {
+          effective = mergeTemplateResponsiveRecord(effective, mobileOverride);
+          validateResponsiveRules(effective, `${path}.responsive.mobile`, issues, nodeKey, schemaVersion);
         }
+        // 历史平板覆盖只保留读取兼容，不校验、不并入手机继承链、不参与发布。
       }
     }
     if (registry.kind === "slot") {
@@ -1608,13 +1636,18 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
         message: "空内容策略只能是 hide 或 use-default。",
       });
     }
-    if (rawSlot.required === true && rawSlot.editable === false) {
+    if (rawSlot.required === true && rawSlot.editable === false
+      && !hasLegalFixedPublicContent(
+        typeof rawSlot.type === "string" ? rawSlot.type : "",
+        typeof rawSlot.semanticRole === "string" ? rawSlot.semanticRole : undefined,
+        defaultContent[slotKey],
+      )) {
       addIssue(issues, {
         level: "error",
-        code: "REQUIRED_SLOT_MUST_BE_EDITABLE",
+        code: "REQUIRED_SLOT_NEEDS_FIXED_SOURCE",
         path: `${path}.editable`,
         slotId: slotKey,
-        message: "必填槽位必须允许页面实例填写真实内容。",
+        message: `公开时必须展示的“${typeof rawSlot.label === "string" ? rawSlot.label : slotKey}”还没有合法固定文案。请写入模板默认内容，或改为允许页面填写。系统示例、模板默认图和价格文字不能充当该内容。`,
       });
     }
     if (!isRecord(rawSlot.validation)) {
@@ -1684,7 +1717,6 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
     }
     validateSlotRules(rawSlot.desktopRules, `${path}.desktopRules`, issues, slotKey, schemaVersion);
     validateSlotRules(rawSlot.mobileRules, `${path}.mobileRules`, issues, slotKey, schemaVersion);
-    if (rawSlot.tabletRules !== undefined) validateSlotRules(rawSlot.tabletRules, `${path}.tabletRules`, issues, slotKey, schemaVersion);
   }
 
   const rootNodeId = typeof input.rootNodeId === "string" ? input.rootNodeId : "";
@@ -1724,15 +1756,14 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
     if (schemaVersion === 1) return isRecord(rawNode.responsive[breakpoint]) ? rawNode.responsive[breakpoint] : undefined;
     if (!isRecord(rawNode.responsive.desktop)) return undefined;
     let result = rawNode.responsive.desktop;
-    if (breakpoint !== "desktop" && isRecord(rawNode.responsive.tablet)) result = mergeTemplateResponsiveRecord(result, rawNode.responsive.tablet);
-    if (breakpoint === "mobile" && isRecord(rawNode.responsive.mobile)) result = mergeTemplateResponsiveRecord(result, rawNode.responsive.mobile);
+    if (breakpoint !== "desktop" && isRecord(rawNode.responsive.mobile)) result = mergeTemplateResponsiveRecord(result, rawNode.responsive.mobile);
     return result;
   };
   for (const [nodeId, rawNode] of Object.entries(nodes)) {
     if (!isRecord(rawNode) || !isDynamicTemplateNodeType(rawNode.type)) continue;
     const parents = parentIds.get(nodeId) ?? [];
     const registry = getDynamicTemplateNodeRegistryEntry(rawNode.type);
-    for (const device of (schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"]) as Array<"desktop" | "tablet" | "mobile">) {
+    for (const device of TEMPLATE_CONTENT_BREAKPOINTS) {
       const responsive = readRules(rawNode, device);
       if (!responsive) continue;
       if (schemaVersion >= 2 && nodeId === rootNodeId && isRecord(responsive.height) && responsive.height.mode === "fill") {
@@ -2148,7 +2179,7 @@ export function validateDynamicTemplatePublishDefinition(
       });
       continue;
     }
-    for (const device of (definition.schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"]) as Array<"desktop" | "tablet" | "mobile">) {
+    for (const device of TEMPLATE_CONTENT_BREAKPOINTS) {
       const hiddenNodeId = requiredAncestors.find((candidateId) => {
         const requiredRules = resolveTemplateNodeRules(definition, candidateId, device);
         return requiredRules.display === "none" || requiredRules.hidden;
@@ -2160,7 +2191,7 @@ export function validateDynamicTemplatePublishDefinition(
         path: `nodes.${hiddenNodeId}.responsive.${device}.display`,
         nodeId: hiddenNodeId,
         slotId: slot.slotId,
-        message: `必填槽位“${slot.label}”在${device === "desktop" ? "桌面端" : device === "tablet" ? "平板端" : "移动端"}布局中${hiddenNodeId === nodeId ? "已隐藏" : `因上级“${definition.nodes[hiddenNodeId].name}”隐藏而不可见`}，恢复显示后才能发布模板。`,
+        message: `必填槽位“${slot.label}”在${device === "desktop" ? "桌面端" : "移动端"}布局中${hiddenNodeId === nodeId ? "已隐藏" : `因上级“${definition.nodes[hiddenNodeId].name}”隐藏而不可见`}，恢复显示后才能发布模板。`,
       });
     }
 
@@ -2171,7 +2202,7 @@ export function validateDynamicTemplatePublishDefinition(
     const parentId = parentByNodeId.get(nodeId);
     const parent = parentId ? definition.nodes[parentId] : undefined;
     if (!parent) continue;
-    for (const device of (definition.schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"]) as Array<"desktop" | "tablet" | "mobile">) {
+    for (const device of TEMPLATE_CONTENT_BREAKPOINTS) {
       const rules = resolveTemplateNodeRules(definition, nodeId, device);
       const parentRules = resolveTemplateNodeRules(definition, parent.nodeId, device);
       const parentHasBoundedHeight = ["fixed", "aspect-ratio", "viewport"].includes(
@@ -2190,7 +2221,7 @@ export function validateDynamicTemplatePublishDefinition(
           path: `nodes.${nodeId}.responsive.${device}.height`,
           nodeId,
           slotId: slot.slotId,
-          message: `“${slot.label}”在${device === "desktop" ? "桌面" : device === "tablet" ? "平板" : "手机"}端随图片比例自动调整高度。若预览超出区域，可在“尺寸与位置”设置图片高度或比例；此建议不影响发布。`,
+          message: `“${slot.label}”在${device === "desktop" ? "桌面" : "手机"}端随图片比例自动调整高度。若预览超出区域，可在“尺寸与位置”设置图片高度或比例；此建议不影响发布。`,
         });
       }
     }

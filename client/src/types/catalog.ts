@@ -139,11 +139,12 @@ export interface ShippingTemplate {
   id: number;
   name: string;
   carrier?: string;
-  feeMode: "FREE" | "FIXED" | "CONDITIONAL";
+  feeMode: "FREE" | "FIXED" | "CONDITIONAL" | "REGIONAL";
   baseFee: number;
   remoteSurcharge: number;
   freeShippingThreshold?: number | null;
   excludedRegions?: string[];
+  provinceFees?: Record<string, number> | null;
   insured: boolean;
   signatureRequired: boolean;
   isDefault: boolean;
@@ -176,6 +177,8 @@ export interface ProductSKU {
   size?: string;
   goldWeight?: number;
   price: number;
+  /** 公开详情按实时库存派生的规格级可售状态；不得暴露库存数量。 */
+  isAvailableForPurchase?: boolean;
   /** 仅旧 Mock 商品数据可能携带；真实库存以 Inventory 接口为准。 */
   stock?: number;
   safetyStock?: number;

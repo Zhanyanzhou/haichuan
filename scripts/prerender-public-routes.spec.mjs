@@ -18,7 +18,7 @@ import {
 const exportScriptPath = fileURLToPath(new URL("./export-public-seo-snapshot.mjs", import.meta.url));
 const prerenderScriptPath = fileURLToPath(new URL("./prerender-public-routes.mjs", import.meta.url));
 
-test("pre-renders Chinese, English, legal, and product routes with full SEO metadata", async (t) => {
+test("pre-renders Chinese, legal, and product routes with full SEO metadata", async (t) => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-"));
   t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
   const snapshot = createPublicSeoSnapshot(makeSnapshotInput(makeRepresentativeRoutes()));
@@ -32,7 +32,7 @@ test("pre-renders Chinese, English, legal, and product routes with full SEO meta
   assert.equal(manifest.snapshotHash, snapshot.snapshotHash);
   assert.deepEqual(
     manifest.routes.map((route) => route.file),
-    ["about/index.html", "en/about/index.html", "privacy/index.html", "products/HC-001/index.html"],
+    ["about/index.html", "privacy/index.html", "products/HC-001/index.html"],
   );
   assert.ok(manifest.routes.every((route) => /^[a-f0-9]{64}$/.test(route.htmlHash)));
 
@@ -42,7 +42,7 @@ test("pre-renders Chinese, English, legal, and product routes with full SEO meta
   assert.match(chineseHtml, /<main><h1>关于我们<\/h1><p>Published body\.<\/p><\/main>/);
   assert.match(chineseHtml, /rel="canonical" href="https:\/\/jewelry\.example\.test\/about"/);
   assert.match(chineseHtml, /hreflang="zh-CN" href="https:\/\/jewelry\.example\.test\/about"/);
-  assert.match(chineseHtml, /hreflang="en" href="https:\/\/jewelry\.example\.test\/en\/about"/);
+  assert.doesNotMatch(chineseHtml, /hreflang="en"|\/en\/about/);
   assert.match(chineseHtml, /hreflang="x-default"/);
   assert.match(chineseHtml, /property="og:image"/);
   assert.match(chineseHtml, /name="twitter:card" content="summary_large_image"/);
@@ -53,12 +53,6 @@ test("pre-renders Chinese, English, legal, and product routes with full SEO meta
   assert.match(chineseHtml, new RegExp(snapshot.routes.find((route) => route.path === "/about").contentHash));
   assert.equal((chineseHtml.match(/<title>/g) ?? []).length, 1);
 
-  const englishHtml = readFileSync(join(temporaryDirectory, "en", "about", "index.html"), "utf8");
-  assert.match(englishHtml, /<html lang="en">/);
-  assert.match(englishHtml, /<h1>About<\/h1>/);
-  assert.doesNotMatch(englishHtml, /name="keywords"/);
-  assert.doesNotMatch(englishHtml, /中文基础壳关键词/);
-
   const productHtml = readFileSync(join(temporaryDirectory, "products", "HC-001", "index.html"), "utf8");
   assert.match(productHtml, /property="og:type" content="product"/);
   assert.match(productHtml, /"@type":"Product"/);
@@ -66,6 +60,93 @@ test("pre-renders Chinese, English, legal, and product routes with full SEO meta
 
   const onDiskManifest = JSON.parse(readFileSync(join(temporaryDirectory, "prerendered-routes.json"), "utf8"));
   assert.deepEqual(onDiskManifest, manifest);
+  assert.equal(readFileSync(join(temporaryDirectory, "spa-shell.html"), "utf8"), BASE_HTML);
+});
+
+test("home injects the reviewed first-fold document and preloads its same-origin hero", async (t) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-home-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const home = makeRoute({
+    path: "/",
+    alternateKey: "page:home",
+    title: "海川珠宝",
+    renderedBodyHtml: "<main><h1>首页语义正文</h1></main>",
+    bootstrapPageDocument: {
+      pageKey: "home",
+      puckData: {
+        content: [{
+          type: "首屏主视觉",
+          props: {
+            desktopImage: "/uploads/hero.jpg",
+            mobileImage: "/uploads/hero-mobile.jpg",
+            eyebrow: "海川珠宝",
+            title: "光映新姿",
+            subtitle: "以珠宝记录此刻。",
+          },
+        }],
+      },
+      metadata: {},
+      status: "PUBLISHED",
+    },
+  });
+  const snapshot = createPublicSeoSnapshot(makeSnapshotInput([home]));
+  await prerenderPublicRoutes({ snapshot, baseHtml: BASE_HTML, outDir: temporaryDirectory });
+
+  const html = readFileSync(join(temporaryDirectory, "index.html"), "utf8");
+  const spaShell = readFileSync(join(temporaryDirectory, "spa-shell.html"), "utf8");
+  assert.match(spaShell, /name="robots" content="noindex, nofollow"/);
+  assert.doesNotMatch(spaShell, /data-prerendered|光映新姿/);
+  assert.match(html, /data-public-first-fold="published"/);
+  assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero-mobile\.jpg\?width=480" media="\(max-width: 767px\)" fetchpriority="high"/);
+  assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero\.jpg\?width=1680" media="\(min-width: 768px\)" fetchpriority="high"/);
+  assert.match(html, /<source media="\(max-width: 767px\)" srcset="https:\/\/jewelry\.example\.test\/uploads\/hero-mobile\.jpg\?width=480">/);
+  assert.match(html, /<img src="https:\/\/jewelry\.example\.test\/uploads\/hero\.jpg\?width=1680"/);
+  assert.match(html, /id="hc-published-page-document" type="application\/json"/);
+  assert.match(html, /光映新姿/);
+  assert.doesNotMatch(html, /首页语义正文/);
+});
+
+test("home first fold follows instance visibility and ignores editor-only media", async (t) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-home-overrides-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const home = makeRoute({
+    path: "/",
+    alternateKey: "page:home",
+    title: "海川珠宝",
+    bootstrapPageDocument: {
+      pageKey: "home",
+      puckData: {
+        content: [{
+          type: "首屏主视觉",
+          props: {
+            desktopImage: "/uploads/hero.jpg",
+            mobileImage: "/images/system/launch-short-page-mobile.svg",
+            eyebrow: "不应闪现的眉题",
+            title: "不应闪现的标题",
+            subtitle: "可见副标题",
+            __instanceOverrides: {
+              version: 2,
+              nodes: {
+                eyebrow: { enabled: false },
+                title: { enabled: false },
+              },
+            },
+          },
+        }],
+      },
+      metadata: {},
+      status: "PUBLISHED",
+    },
+  });
+  const snapshot = createPublicSeoSnapshot(makeSnapshotInput([home]));
+  await prerenderPublicRoutes({ snapshot, baseHtml: BASE_HTML, outDir: temporaryDirectory });
+
+  const html = readFileSync(join(temporaryDirectory, "index.html"), "utf8");
+  const visibleFirstFold = html.match(/<main class="hc-prerendered-home"[\s\S]*?<\/main>/)?.[0] ?? "";
+  assert.doesNotMatch(visibleFirstFold, /不应闪现的眉题|不应闪现的标题/);
+  assert.match(visibleFirstFold, /可见副标题/);
+  assert.doesNotMatch(visibleFirstFold, /launch-short-page-mobile/);
+  assert.match(visibleFirstFold, /hero\.jpg\?width=480/);
 });
 
 test("invalid or tampered snapshots produce no output", async (t) => {
@@ -82,6 +163,22 @@ test("invalid or tampered snapshots produce no output", async (t) => {
   assert.equal(existsSync(outputDirectory), false);
 });
 
+test("pre-render refuses an indexable SPA shell before writing any route", async (t) => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "haichuan-prerender-shell-"));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+  const outputDirectory = join(temporaryRoot, "dist");
+  const snapshot = createPublicSeoSnapshot(makeSnapshotInput([makeRoute()]));
+  await assert.rejects(
+    prerenderPublicRoutes({
+      snapshot,
+      baseHtml: BASE_HTML.replace('name="robots" content="noindex, nofollow"', 'name="robots" content="index, follow"'),
+      outDir: outputDirectory,
+    }),
+    /SPA shell must remain noindex,nofollow/,
+  );
+  assert.equal(existsSync(outputDirectory), false);
+});
+
 test("missing mount points and document-level body markup fail before writing", async (t) => {
   const temporaryRoot = mkdtempSync(join(tmpdir(), "haichuan-prerender-contract-"));
   t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
@@ -91,7 +188,7 @@ test("missing mount points and document-level body markup fail before writing", 
   await assert.rejects(
     prerenderPublicRoutes({
       snapshot,
-      baseHtml: "<!doctype html><html><head></head><body></body></html>",
+      baseHtml: '<!doctype html><html><head><meta name="robots" content="noindex, nofollow"></head><body></body></html>',
       outDir: outputDirectory,
     }),
     /mount point/i,

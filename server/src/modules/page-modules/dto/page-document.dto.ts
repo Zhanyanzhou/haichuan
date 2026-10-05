@@ -53,6 +53,10 @@ export class PublishPageDocumentDto extends LocalizedPageDocumentDto {
 
   @Matches(/^[a-f0-9]{64}$/)
   expectedContentHash!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  selfReviewAcknowledged?: boolean;
 }
 
 export class ValidatePageDocumentDto extends LocalizedPageDocumentDto {

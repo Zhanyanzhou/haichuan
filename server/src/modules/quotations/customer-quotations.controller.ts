@@ -20,6 +20,12 @@ import { QuotationOrderingGuard } from './quotation-ordering.guard';
 import { QuotationTransactionService } from './quotation-transaction.service';
 import { QuotationsService } from './quotations.service';
 
+function setPrivateNoStore(response: Response) {
+  response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  response.vary('Cookie');
+  response.vary('Authorization');
+}
+
 @ApiTags('客户报价')
 @Public()
 @UseGuards(CustomerAuthGuard)
@@ -32,23 +38,33 @@ export class CustomerQuotationsController {
 
   @Get('quotations')
   @ApiOperation({ summary: '当前客户的报价列表' })
-  findAll(@Req() request: CustomerRequest) {
-    return this.quotations.findForCustomer(request.customer.id);
+  findAll(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setPrivateNoStore(response);
+    return this.quotations.findForCustomer(request.customer);
   }
 
   @Get('quotations/:id')
   @ApiOperation({ summary: '当前客户的报价详情' })
   findById(
     @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.quotations.findForCustomerById(request.customer.id, id);
+    setPrivateNoStore(response);
+    return this.quotations.findForCustomerById(request.customer, id);
   }
 
   @Get('cooperation-design-files')
   @ApiOperation({ summary: '当前客户可确认的 3D 文件版本' })
-  listDesignFiles(@Req() request: CustomerRequest) {
-    return this.transactions.listDesignFilesForCustomer(request.customer.id);
+  listDesignFiles(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    setPrivateNoStore(response);
+    return this.transactions.listDesignFilesForCustomer(request.customer);
   }
 
   @Get('cooperation-design-files/:fileId/versions/:version/content')
@@ -59,13 +75,13 @@ export class CustomerQuotationsController {
     @Param('version', ParseIntPipe) version: number,
     @Res() response: Response,
   ) {
+    setPrivateNoStore(response);
     const file = await this.transactions.getDesignFileContentForCustomer(
-      request.customer.id,
+      request.customer,
       fileId,
       version,
     );
     const safeAsciiName = file.originalName.replace(/[^A-Za-z0-9._-]+/g, '_') || `design-v${version}`;
-    response.setHeader('Cache-Control', 'private, no-store');
     response.setHeader('Content-Type', file.mimeType);
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader(
@@ -86,7 +102,7 @@ export class CustomerQuotationsController {
     @Body() dto: ConfirmQuotationOrderDto,
   ) {
     return this.transactions.confirmAndCreateOrder(
-      request.customer.id,
+      request.customer,
       id,
       idempotencyKey,
       dto,
@@ -102,7 +118,7 @@ export class CustomerQuotationsController {
     @Param('version', ParseIntPipe) version: number,
   ) {
     return this.transactions.confirmDesignFileVersion(
-      request.customer.id,
+      request.customer,
       fileId,
       version,
     );

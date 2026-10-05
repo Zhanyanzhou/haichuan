@@ -1,7 +1,9 @@
 import TemplateSlotControls, { SIMPLE_SLOT_TYPES } from "./TemplateSlotControls";
 import TemplateNativeDesignControls from "./TemplateNativeDesignControls";
+import TemplateDefaultContentControls from "./TemplateDefaultContentControls";
 import TemplateLayoutConversionControls from "./TemplateLayoutConversionControls";
 import "./templatePageScopeControls.css";
+import { hasLegalFixedPublicContent, publicationPromiseLabel } from "../dynamic-template-instance/publicationPromise";
 import { resolveTemplateDefinitionForBreakpoint, type ResolvedTemplateDefinition } from "../template-definition/responsive";
 import { adaptLegacyResponsiveUpdate } from "../template-definition/operations";
 import {
@@ -72,6 +74,7 @@ import {
   setDynamicTemplateNodeStructureLocked,
   validateDynamicTemplateDefinition,
   validateDynamicTemplatePublishDefinition,
+  isRetiredTabletContentPath,
   type TemplateDefinitionV2,
   type DynamicTemplateBoxSpacing,
   type DynamicTemplateLength,
@@ -124,10 +127,12 @@ import {
 } from "./contractRolePresentation";
 import { editorPages } from "../config/editorPages";
 import { TEMPLATE_NODE_NAME_MAX_LENGTH } from "./templateEditorLimits";
+import { describePublishedTemplateAvailability } from "./templatePublishWorkflow";
 import {
   getTemplateInspectorCapabilities,
   getTemplateResponsiveSource,
   hasTemplateInspectorCapability,
+  isTemplateInspectorInternalIdentityField,
   resolveTemplateInspectorDesignFields,
   resolveTemplateInspectorIssueTarget,
 } from "./templateInspectorCapabilities";
@@ -217,7 +222,7 @@ function PageFieldFormPreview({ fields, onLocate }: {
     {fields.map((field, index) => <div key={field.slotId} className="template-editor__page-form-field">
       <span className="template-editor__page-form-order">当前查看范围第 {index + 1} 项 · {PAGE_FIELD_CONTROL_KIND_LABELS[field.controlKind]}</span>
       <button type="button" className="template-editor__page-form-label" onClick={() => onLocate(field.nodeId)}>
-        {field.label}<span>{field.required ? "必填" : "可选"} · 定位对象</span>
+        {field.label}<span>{publicationPromiseLabel(field)} · 定位对象</span>
       </button>
       {field.controlKind === "text"
         ? <input aria-label={`${field.label}页面表单示意`} readOnly value="" placeholder="文字输入（只读示意）" />
@@ -227,7 +232,7 @@ function PageFieldFormPreview({ fields, onLocate }: {
       <span>{field.editable ? "页面可填写" : "内容只读"} · {field.hideable ? "页面可隐藏" : "页面不可手动隐藏"}</span>
       <span>{describePageFieldValidation(field)}</span>
       <span>{describePageFieldOverrides(field)}</span>
-      {field.required && (!field.editable || field.hideable) ? <strong className="template-editor__page-field-conflict">规则冲突：必填字段必须可填写且不可隐藏</strong> : null}
+      {field.required && (field.hideable || !field.editable) ? <strong className="template-editor__page-field-conflict">规则冲突：公开时必须有内容的字段必须可填写且不可隐藏，或改用已有固定文案</strong> : null}
     </div>)}
   </details>;
 }
@@ -1555,9 +1560,9 @@ export default function DynamicTemplateInspectorPanel({
         ? { scope: "slot" as const, node, slot }
         : { scope: "node" as const, node };
   const inspectorCapabilities = getTemplateInspectorCapabilities(inspectorObjectContext);
-  const hasCapability = (field: string) => hasTemplateInspectorCapability(
-    inspectorCapabilities,
-    field,
+  const hasCapability = (field: string) => (
+    !isTemplateInspectorInternalIdentityField(field)
+    && hasTemplateInspectorCapability(inspectorCapabilities, field)
   );
   const isLayoutContainer = registry.canHaveChildren;
   const registrySlotType = registry.kind === "slot" ? registry.slotType : undefined;
@@ -1783,7 +1788,7 @@ export default function DynamicTemplateInspectorPanel({
         setMetadataDetailsOpen(true);
       }
       const session = useTemplateEditorSession.getState();
-      if (switchDevice && (issueBreakpoint === "desktop" || issueBreakpoint === "tablet" || issueBreakpoint === "mobile")) session.setBreakpoint(issueBreakpoint);
+      if (switchDevice && (issueBreakpoint === "desktop" || issueBreakpoint === "mobile")) session.setBreakpoint(issueBreakpoint);
       else if (switchDevice && target.device) session.setDevice(target.device);
       session.selectObject(target.objectId);
       session.setInspectorTask(target.task);
@@ -1882,8 +1887,12 @@ export default function DynamicTemplateInspectorPanel({
     : nodeIssues.length
       ? nodeIssues
       : activeValidation.issues;
-  const displayedValidationIssues = contextValidationIssues.filter((issue) => issue.level === "error");
-  const designSuggestions = contextValidationIssues.filter((issue) => issue.level === "warning");
+  const displayedValidationIssues = contextValidationIssues.filter((issue) => (
+    issue.level === "error" && !isRetiredTabletContentPath(issue.path)
+  ));
+  const designSuggestions = contextValidationIssues.filter((issue) => (
+    issue.level === "warning" && !isRetiredTabletContentPath(issue.path)
+  ));
   const currentIssueIndex = Math.max(0, Math.min(publishReview?.currentIndex ?? 0, displayedValidationIssues.length - 1));
   const remainingValidationIssues = publishReview ? [] : displayedValidationIssues.slice(12);
   const recommendedPageOptions = [
@@ -1941,7 +1950,7 @@ export default function DynamicTemplateInspectorPanel({
                   <div><dt>模板</dt><dd>{reviewedSnapshot.reviewedDefinition.name}</dd></div>
                   <div><dt>保存状态</dt><dd>{reviewedSnapshot.baseline ? "已有草稿，本次修改将在发布时保存" : "本次发布会先保存草稿"}</dd></div>
                   <div><dt>目标版本</dt><dd>v{reviewedSnapshot.targetVersion}</dd></div>
-                  <div><dt>适用范围</dt><dd>{reviewedSnapshot.reviewedDefinition.metadata.recommendedFor.join("、") || "未限制页面"}</dd></div>
+                  <div><dt>适用范围</dt><dd>{reviewedSnapshot.reviewedDefinition.metadata.recommendedFor.map((pageKey) => editorPages.find((page) => page.key === pageKey)?.label ?? pageKey).join("、") || "未限制页面"}</dd></div>
                   <div><dt>版本说明</dt><dd>{reviewedSnapshot.reviewedVersionNote || "未填写"}</dd></div>
                 </dl>
               ) : null}
@@ -1965,7 +1974,7 @@ export default function DynamicTemplateInspectorPanel({
                   </div>
                 ))}
               </section>
-              <p>{displayedValidationIssues.length > 0 ? `${displayedValidationIssues.length} 项需要修改，点击问题可进入对应设置。` : "必填项目与模板结构检查通过。"}</p>
+              <p>{displayedValidationIssues.length > 0 ? `${displayedValidationIssues.length} 项需要修改，点击问题可进入对应设置。` : "必填项目与模板结构检查通过。留白、风格和无法自动判断的可读性仍需人工核对，这次通过不是视觉验收。"}</p>
               <details><summary>预览与核对（可选）</summary>
               <span className="template-editor__validation-actions" role="group" aria-label="本次发布检查设备">
                 <Button
@@ -1983,7 +1992,7 @@ export default function DynamicTemplateInspectorPanel({
                 <summary>页面开放范围 · {Object.keys(definition.slots).length} 个字段</summary>
                 <ul aria-label="发布检查页面字段范围">
                   {Object.values(definition.slots).map((slot) => (
-                    <li key={slot.slotId}>{slot.label} · {slot.editable ? "允许修改" : "固定内容"} · {slot.required ? "必填" : "选填"} · {slot.hideable ? "允许隐藏" : "不可隐藏"}</li>
+                    <li key={slot.slotId}>{slot.label} · {slot.editable ? "允许修改" : "固定内容"} · {publicationPromiseLabel(slot)} · {slot.hideable ? "允许隐藏" : "不可隐藏"}</li>
                   ))}
                 </ul>
               </details>
@@ -1996,7 +2005,7 @@ export default function DynamicTemplateInspectorPanel({
                 </Button>
               </span>
               </details>
-              {publishWorkflow?.status === "review-ready" ? <p>确认后保存当前设计并发布为模板版本。</p> : null}
+              {publishWorkflow?.status === "review-ready" ? <p>确认后保存当前设计并发布为模板版本。已使用旧版本的页面会继续锁定旧版，直到在页面装修里单独升级。</p> : null}
               {publishWorkflow?.status === "review-blocked" ? <p>请完成下面的必要修改，再重新检查并发布。</p> : null}
               {publishWorkflow?.status === "review-stale" ? <p>本次检查已过期，请重新检查。已审阅快照不会被当前新输入替换。</p> : null}
               {publishWorkflow?.status === "saving-reviewed-snapshot" ? <p>正在保存本次已审阅快照；保存成功后才会发布同一版本。</p> : null}
@@ -2009,7 +2018,7 @@ export default function DynamicTemplateInspectorPanel({
                     ? "保存结果与服务端草稿不一致。当前输入仍保留，未继续发布。"
                     : "草稿已保存，模板未发布。当前输入与正式版本事实均未被覆盖。"}</p>
               ) : null}
-              {publishWorkflow?.status === "published" ? <p>模板 v{publishWorkflow.published.version} 已发布；{publishWorkflow.catalogStatus === "fresh" ? "目录已确认可用" : "正在核对页面装修目录"}。已有页面继续锁定原版本。</p> : null}
+              {publishWorkflow?.status === "published" ? <p>{describePublishedTemplateAvailability(publishWorkflow.published.version, publishWorkflow.catalogStatus)}</p> : null}
               {publishFailureText ? <p className="template-editor__publish-failure-copy">{publishFailureText}</p> : null}
               {publishedDraftAvailability?.templateId === publishReview.templateId && publishedDraftAvailability.status === "checking" ? <p>正式版本已确认，正在重新读取可编辑草稿…</p> : null}
               {publishedDraftAvailability?.templateId === publishReview.templateId && publishedDraftAvailability.status === "unavailable" ? (
@@ -2188,7 +2197,7 @@ export default function DynamicTemplateInspectorPanel({
   ) : null;
   const renderInspectorPanel = (activePanel: TemplateInspectorPanel, label: string) => (
           <div key={activePanel} id={`template-inspector-panel-${activePanel}`} role="group" aria-label={label} data-template-inspector-section={activePanel}>
-        {hasCapability("nodeId") && activePanel === "definition" ? (
+        {activePanel === "definition" ? (
           <section className="homepage-editor__inspector-section template-editor__canvas-measurement-section">
             <div className="homepage-editor__inspector-section-head">
               <strong>当前画布数值</strong>
@@ -2960,7 +2969,7 @@ export default function DynamicTemplateInspectorPanel({
           </section>
         ) : null}
 
-        {(hasCapability("slot.slotId") || inspectorContext === "role") && slot && ["layout"].includes(activePanel) && !(selectedRoleObject && activePanel === "layout") && !(isLocked && activePanel === "layout") ? (
+        {(Boolean(slot) || inspectorContext === "role") && slot && ["layout"].includes(activePanel) && !(selectedRoleObject && activePanel === "layout") && !(isLocked && activePanel === "layout") ? (
           <section
             className="homepage-editor__inspector-section template-editor__slot-properties-section"
           >
@@ -3047,7 +3056,9 @@ export default function DynamicTemplateInspectorPanel({
             <div className="homepage-editor__inspector-section-body">
               <TextField transactional label="版本说明" value={dynamicDraft.versionNote} maxLength={500} rows={3} showCount placeholder="说明本次结构、响应式或槽位变化；发布时随版本保存。" onChange={setDynamicVersionNote} />
               <div className="template-editor__geometry-grid">
-                <div data-template-inspector-field="metadata.mobileBreakpoint"><NumberField label="小屏布局切换宽度" unit="像素" min={480} max={1024} disabled={Number(definition.schemaVersion) >= 2} hint={Number(definition.schemaVersion) >= 2 ? "新模板固定为 Mobile ≤767、Tablet 768–1023、Desktop ≥1024；这里只读显示。" : undefined} value={definition.metadata.mobileBreakpoint ?? 767} onChange={(mobileBreakpoint) => updateDefinition((next) => { next.metadata.mobileBreakpoint = mobileBreakpoint; })} /></div>
+                {Number(definition.schemaVersion) < 2 ? (
+                  <div data-template-inspector-field="metadata.mobileBreakpoint"><NumberField label="小屏布局切换宽度" unit="像素" min={480} max={1024} value={definition.metadata.mobileBreakpoint ?? 767} onChange={(mobileBreakpoint) => updateDefinition((next) => { next.metadata.mobileBreakpoint = mobileBreakpoint; })} /></div>
+                ) : null}
                 <div data-template-inspector-field="metadata.minViewportWidth"><NumberField label="最小适用宽度" unit="像素" min={280} max={3840} value={definition.metadata.minViewportWidth ?? 320} onChange={(minViewportWidth) => updateDefinition((next) => { next.metadata.minViewportWidth = minViewportWidth; })} /></div>
                 <div data-template-inspector-field="metadata.maxViewportWidth"><NumberField label="最大适用宽度" unit="像素" min={280} max={3840} value={definition.metadata.maxViewportWidth ?? 1920} onChange={(maxViewportWidth) => updateDefinition((next) => { next.metadata.maxViewportWidth = maxViewportWidth; })} /></div>
               </div>
@@ -3125,6 +3136,14 @@ export default function DynamicTemplateInspectorPanel({
         <strong className="homepage-editor__inspector-title" title={inspectorTitle}>{inspectorTitle}</strong>
         <span className="template-editor__inspector-breadcrumb" title={inspectorBreadcrumb}>{inspectorBreadcrumb}</span>
         {isLocked ? <span className="template-editor__object-lock-status">结构已锁定 · 属性只读</span> : null}
+        {Number(definition.schemaVersion) < 2 ? (
+          <Alert
+            type="info"
+            showIcon
+            message="这是旧模板草稿"
+            description="日常设计请建立新草稿升级到当前模板格式。此处仅保留兼容查看与必要修复；内部标识不是日常表单。"
+          />
+        ) : null}
       </div>
       {selectedRoleObject && !selectedRoleApplicable ? (
         <span className="homepage-editor__inspector-device is-inapplicable">当前画布不显示</span>
@@ -3207,7 +3226,14 @@ export default function DynamicTemplateInspectorPanel({
     }));
   };
   const pageDeclarationConflict = Boolean(
-    pageField?.required && (!pageField.editable || pageField.hideable),
+    pageField?.required && (
+      pageField.hideable
+      || (!pageField.editable && !hasLegalFixedPublicContent(
+        pageField.slotType,
+        definition.slots[pageField.slotId]?.semanticRole,
+        definition.defaultContent[pageField.slotId],
+      ))
+    ),
   );
 
   if (inspectorTask === "page-scope") {
@@ -3233,7 +3259,7 @@ export default function DynamicTemplateInspectorPanel({
             <strong>交付给页面装修的字段</strong>
             <p>{pageField && inspectorView === "context"
               ? `${pageField.editable ? "运营可以填写内容" : "运营不能修改内容"}，${pageField.hideable ? "可以隐藏此字段" : "此字段固定显示"}。${describePageFieldOverrides(pageField)}。`
-              : `${scopedPageFields.length} 个字段 · ${scopedPageFields.filter((field) => field.required).length} 项必填 · ${scopedPageFields.filter((field) => field.required && (!field.editable || field.hideable)).length} 项规则冲突`}</p>
+              : `${scopedPageFields.length} 个字段 · ${scopedPageFields.filter((field) => field.required).length} 项公开时必须有内容 · ${scopedPageFields.filter((field) => field.required && (field.hideable || (!field.editable && !hasLegalFixedPublicContent(field.slotType, definition.slots[field.slotId]?.semanticRole, definition.defaultContent[field.slotId])))).length} 项规则冲突`}</p>
           </div>
           {validation.issues.some((issue) => issue.level === "error") ? (
             <Alert
@@ -3292,11 +3318,11 @@ export default function DynamicTemplateInspectorPanel({
               <div className="template-editor__page-rule-switches">
                 <div data-template-page-scope-field="required" data-template-inspector-field="slot.required">
                   <SwitchField
-                    label="页面必须填写"
+                    label="公开时必须有内容"
                     value={pageField.required}
                     disabled={isLocked || (!pageField.required && (!pageField.editable || pageField.hideable))}
                     hint={!pageField.required && (!pageField.editable || pageField.hideable)
-                      ? "先允许页面填写内容并关闭页面隐藏，再设为必填；不会自动更改其他开关。"
+                      ? "先允许页面填写内容并关闭页面隐藏，再要求公开时必须有内容；不会自动更改其他开关。"
                       : undefined}
                     onChange={(required) => updateSlot((next) => { next.required = required; })}
                   />
@@ -3307,7 +3333,7 @@ export default function DynamicTemplateInspectorPanel({
                     value={pageField.editable}
                     disabled={isLocked || (pageField.required && pageField.editable)}
                     hint={pageField.required && pageField.editable
-                      ? "必填字段必须允许填写；先关闭“页面必须填写”，才能改为只读。"
+                      ? "这项必须由页面填写。先关闭“公开时必须有内容”，才能改为只读。"
                       : undefined}
                     onChange={(editable) => updateSlot((next) => { next.editable = editable; })}
                   />
@@ -3318,7 +3344,7 @@ export default function DynamicTemplateInspectorPanel({
                     value={pageField.hideable}
                     disabled={isLocked || (pageField.required && !pageField.hideable)}
                     hint={pageField.required && !pageField.hideable
-                      ? "必填字段不可允许页面隐藏；先关闭“页面必须填写”，才能开放隐藏。"
+                      ? "公开时必须有内容的字段不能由页面隐藏。先关闭“公开时必须有内容”，才能开放隐藏。"
                       : undefined}
                     onChange={(hideable) => updateSlot((next) => { next.hideable = hideable; })}
                   />
@@ -3328,7 +3354,7 @@ export default function DynamicTemplateInspectorPanel({
                 <Alert
                   type="error"
                   showIcon
-                  message="必填字段必须可填写且不可隐藏"
+                  message="公开时必须有内容的字段必须可填写且不可隐藏，或改用已有固定文案并关闭隐藏"
                   description={(
                     <Button
                       size="small"
@@ -3424,6 +3450,7 @@ export default function DynamicTemplateInspectorPanel({
                   {pageField.controlKind === "image" ? <>
                     <SwitchField label="可调整图片适配" value={instancePolicy.imageFit === true} disabled={isLocked || !pageField.editable} onChange={(imageFit) => updateInstancePolicy((next) => { next.imageFit = imageFit; })} />
                     <SwitchField label="可调整画面焦点" value={instancePolicy.imageFocus === true} disabled={isLocked || !pageField.editable} onChange={(imageFocus) => updateInstancePolicy((next) => { next.imageFocus = imageFocus; })} />
+                    <p className="homepage-editor__inspector-hint">页面上传图片后，预览里始终可以拖动画面中的点调整构图。</p>
                   </> : null}
                 </div>
                 {instancePolicy.position || instancePolicy.size || (supportsPageTextStyles && (instancePolicy.typography || instancePolicy.spacing)) ? <div className="template-editor__geometry-grid" aria-label="页面设计调整边界">
@@ -3452,11 +3479,11 @@ export default function DynamicTemplateInspectorPanel({
                   {...getDynamicTemplatePageFieldDataAttributes(field, "full")}
                 >
                   <span><strong>{field.label}</strong><small>{field.slotTypeLabel}</small></span>
-                  <span>{field.required ? "必填" : "可选"} · {field.editable ? "可填写" : "只读"} · {field.hideable ? "可隐藏" : "固定显示"}</span>
+                  <span>{publicationPromiseLabel(field)} · {field.editable ? "可填写" : "只读"} · {field.hideable ? "可隐藏" : "固定显示"}</span>
                   <span>控件：{PAGE_FIELD_CONTROL_KIND_LABELS[field.controlKind]}</span>
                   <span>限制：{describePageFieldValidation(field)}</span>
                   <span>页面设计覆盖：{describePageFieldOverrides(field)}</span>
-                  {field.required && (!field.editable || field.hideable) ? <strong className="template-editor__page-field-conflict">规则冲突 · 点击修复</strong> : null}
+                  {field.required && (field.hideable || (!field.editable && !hasLegalFixedPublicContent(field.slotType, definition.slots[field.slotId]?.semanticRole, definition.defaultContent[field.slotId]))) ? <strong className="template-editor__page-field-conflict">规则冲突 · 点击修复</strong> : null}
                 </button>
               )) : (
                 <Alert
@@ -3501,7 +3528,8 @@ export default function DynamicTemplateInspectorPanel({
         role="tabpanel"
         aria-label="模板属性功能区"
       >
-        {publishReview ? validationSection : null}
+        {publishReview ? validationSection : (
+        <>
         {isRoot && !publishReview ? <div className="template-editor__pinned-name" data-template-inspector-field="name">
           <TextField transactional label="模板名称" hint="发布前必填；用于在模板列表中识别这份设计。" value={definition.name} maxLength={100} onChange={(name) => updateDefinition((next) => { next.name = name; })} />
         </div> : null}
@@ -3549,6 +3577,14 @@ export default function DynamicTemplateInspectorPanel({
           </div>
         ) : null}
         {nativeDesign ? <TemplateNativeDesignControls nodeIds={[activeNodeId]} onOpenPageScope={pageField ? openCurrentPageScope : undefined} layoutControls={({ disabled }) => <TemplateLayoutConversionControls nodeId={activeNodeId} disabled={disabled} />} /> : null}
+        {!nativeDesign && selectedRoleObject && Number(definition.schemaVersion) >= 3 ? (
+          <TemplateDefaultContentControls
+            section="content"
+            nodeId={activeNodeId}
+            disabled={isLocked}
+            onOpenPageScope={pageField ? openCurrentPageScope : undefined}
+          />
+        ) : null}
         {isRoot ? <details open={rootSettingsOpen} onToggle={(event) => {
           if (!event.currentTarget.open && focusFirstInvalidNumberField()) { event.currentTarget.open = true; return; }
           setRootSettingsOpen(event.currentTarget.open);
@@ -3585,7 +3621,9 @@ export default function DynamicTemplateInspectorPanel({
             {renderInspectorPanel("rules", TEMPLATE_INSPECTOR_PANELS[inspectorContext].find((entry) => entry.panel === "rules")!.label)}
           </section>
         ) : null}
-        {!publishReview && (validationOpenRequest > 0 || (Number(definition.schemaVersion) < 3 && displayedValidationIssues.length > 0)) ? validationSection : null}
+        {(validationOpenRequest > 0 || (Number(definition.schemaVersion) < 3 && displayedValidationIssues.length > 0)) ? validationSection : null}
+        </>
+        )}
       </div>
     </aside>
   );

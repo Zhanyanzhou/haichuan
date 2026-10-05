@@ -5,6 +5,8 @@ import {
   extractTrustedAnalyticsGeo,
 } from "./analytics.service";
 
+const staffActor = { id: 9 };
+
 test("分析入库服务端开关默认关闭", async () => {
   const previous = process.env.ANALYTICS_INGESTION_ENABLED;
   delete process.env.ANALYTICS_INGESTION_ENABLED;
@@ -77,6 +79,57 @@ test("显式开启且携带同意版本时才接受白名单事件写入", async
   }
 });
 
+test("匿名交易分析拒绝订单和退款标识但保留事件计数", async () => {
+  const previousIngestion = process.env.ANALYTICS_INGESTION_ENABLED;
+  const previousDataset = process.env.ANALYTICS_DATASET;
+  process.env.ANALYTICS_INGESTION_ENABLED = "true";
+  process.env.ANALYTICS_DATASET = "test";
+  const writes: Array<Record<string, unknown>> = [];
+  const service = new AnalyticsService({
+    analyticsEvent: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        writes.push(data);
+      },
+    },
+  } as never);
+
+  try {
+    for (const eventName of [
+      "order_created",
+      "add_payment_info",
+      "purchase",
+      "refund",
+    ]) {
+      assert.equal(await service.track({
+        consentGranted: true,
+        consentVersion: "analytics-v1",
+        eventName,
+        metadata: {
+          orderId: 987654,
+          refundId: 876543,
+          amount: 12800,
+          paymentMethod: "WECHAT",
+        },
+      }), true);
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      writes.map(({ eventName, metadata }) => ({ eventName, metadata })),
+      [
+        { eventName: "order_created", metadata: undefined },
+        { eventName: "add_payment_info", metadata: undefined },
+        { eventName: "purchase", metadata: undefined },
+        { eventName: "refund", metadata: undefined },
+      ],
+    );
+  } finally {
+    if (previousIngestion === undefined) delete process.env.ANALYTICS_INGESTION_ENABLED;
+    else process.env.ANALYTICS_INGESTION_ENABLED = previousIngestion;
+    if (previousDataset === undefined) delete process.env.ANALYTICS_DATASET;
+    else process.env.ANALYTICS_DATASET = previousDataset;
+  }
+});
+
 test("地域只读取显式信任的 Cloudflare 头，并过滤未知国家代码", () => {
   const previous = process.env.ANALYTICS_TRUSTED_GEO_HEADERS;
   try {
@@ -124,12 +177,19 @@ test("访问概览按数据集聚合 PV、UV、会话、回访和维度", async 
     [{ source: "direct", pageViews: 9n, visitors: 3n }],
     [{ countryCode: "CN", region: "Guangdong", city: "Shenzhen", pageViews: 9n, visitors: 3n }],
   ];
-  const service = new AnalyticsService({
-    $queryRaw: async () => queryResults[queryIndex++] ?? [],
-  } as never);
+  const prisma: any = {
+    $queryRaw: async (query: { sql?: string }) => {
+      if (query.sql?.includes("FROM users")) return [{ id: staffActor.id }];
+      return queryResults[queryIndex++] ?? [];
+    },
+  };
+  prisma.$transaction = async (operation: (transaction: any) => Promise<unknown>) => (
+    operation(prisma)
+  );
+  const service = new AnalyticsService(prisma);
 
   try {
-    const result = await service.getOverview(7);
+    const result = await service.getOverview(7, staffActor);
     assert.deepEqual(result.totals, {
       pageViews: 9,
       visitors: 3,
@@ -159,7 +219,7 @@ test("错误同意版本不会写入，查询按当前数据集隔离", async ()
   process.env.ANALYTICS_DATASET = "test";
   let writes = 0;
   let queryWhere: Record<string, unknown> | undefined;
-  const service = new AnalyticsService({
+  const prisma: any = {
     analyticsEvent: {
       create: async () => {
         writes += 1;
@@ -170,8 +230,14 @@ test("错误同意版本不会写入，查询按当前数据集隔离", async ()
       },
       count: async () => 0,
     },
-    $transaction: async (queries: Array<Promise<unknown>>) => Promise.all(queries),
-  } as never);
+    $queryRaw: async (query: { sql?: string }) => (
+      query.sql?.includes("FROM users") ? [{ id: staffActor.id }] : []
+    ),
+  };
+  prisma.$transaction = async (operation: (transaction: any) => Promise<unknown>) => (
+    operation(prisma)
+  );
+  const service = new AnalyticsService(prisma);
   try {
     const accepted = await service.track({
       consentGranted: true,
@@ -180,7 +246,7 @@ test("错误同意版本不会写入，查询按当前数据集隔离", async ()
     });
     assert.equal(accepted, false);
     assert.equal(writes, 0);
-    await service.getEvents({ page: 1, pageSize: 20 });
+    await service.getEvents({ page: 1, pageSize: 20 }, staffActor);
     assert.equal(queryWhere?.dataset, "TEST");
   } finally {
     if (previousIngestion === undefined) delete process.env.ANALYTICS_INGESTION_ENABLED;

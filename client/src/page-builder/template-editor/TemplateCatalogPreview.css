@@ -1,0 +1,465 @@
+/* 页面装修与模板设计共用的目录预览画板。必须在 editor.css 之后加载，
+   才能覆盖旧缩略图裁切规则；不得再只挂在模板设计工作台里。 */
+
+.unified-template-library__scroll .homepage-editor__template-preview-wrap,
+.unified-template-library__card .homepage-editor__template-preview-wrap {
+  aspect-ratio: auto;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+
+.unified-template-library__scroll .template-editor__catalog-preview-shell,
+.template-editor__catalog-preview-shell:is(.is-detail, .is-structure) {
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+}
+
+.template-editor__catalog-artboard-stage {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 4px;
+  background: var(--adm-neutral-bg);
+  box-shadow: inset 0 0 0 1px var(--adm-line);
+}
+
+.template-editor__catalog-artboard-stage.is-long-page {
+  align-items: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+
+.template-editor__catalog-long-page-hint {
+  display: block;
+  color: var(--adm-muted);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.unified-template-library__card .homepage-editor__template-preview-img.template-editor__catalog-viewport-preview {
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  object-fit: unset;
+}
+
+.unified-template-library__scroll .template-editor__catalog-preview-placeholder {
+  min-height: 0;
+  height: 132px;
+}
+
+.template-editor__catalog-cover-preview {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--adm-neutral-bg);
+  box-shadow: inset 0 0 0 1px var(--adm-line);
+}
+
+.template-editor__catalog-cover-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.template-editor__catalog-cover-dialog .homepage-editor__inspector-hint {
+  margin: 0 0 12px;
+}
+
+.template-editor__catalog-cover-crop {
+  margin-top: 16px;
+}
+
+.template-editor__catalog-cover-cropper {
+  position: relative;
+  width: min(100%, calc(var(--catalog-cover-width, 4) * 52vh / var(--catalog-cover-height, 3)));
+  aspect-ratio: var(--catalog-cover-width, 4) / var(--catalog-cover-height, 3);
+  margin-inline: auto;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--adm-neutral-bg);
+}
+
+.template-editor__catalog-cover-slots {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.template-editor__catalog-cover-slots rect {
+  fill: rgb(255 255 255 / 0.08);
+  stroke: #fff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.template-editor__catalog-cover-zoom {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.template-editor__catalog-cover-zoom span {
+  flex: none;
+  color: var(--adm-muted);
+}
+
+.template-editor__catalog-cover-zoom .ant-slider {
+  flex: 1;
+  margin: 0;
+}
+
+.template-editor__catalog-dimensions {
+  position: static;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
+  color: var(--adm-muted);
+  background: transparent;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 目录图是结构示意，不依赖缩到 1/10 后仍可阅读的真实字号。标注框始终
+   使用同一 Renderer 测得的槽位矩形，图文类别由固定图例说明。 */
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay.is-catalog {
+  position: absolute;
+  z-index: 12;
+  inset: 0;
+  overflow: visible;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: none;
+  transition: none;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-label {
+  display: none;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1.5px solid #6E7477;
+  background: rgb(238 244 247 / 16%);
+  pointer-events: none;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box[data-editable-target-kind="media"] {
+  border-color: #335F7D;
+  background: rgb(238 244 247 / 12%);
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box:is(
+    [data-editable-target-kind="title"],
+    [data-editable-target-kind="description"],
+    [data-editable-target-kind="text"]
+  ) {
+  overflow: visible;
+  border-color: #7A531A;
+  background: transparent;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box:is(
+    [data-editable-target-kind="title"],
+    [data-editable-target-kind="description"],
+    [data-editable-target-kind="text"]
+  )::after {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: max(100%, 8px);
+  transform: translateY(-50%);
+  background: #D4BD96;
+  content: "";
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box[data-editable-target-kind="title"]::after {
+  background: #7A531A;
+  opacity: 0.82;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box[data-editable-target-kind="button"] {
+  overflow: visible;
+  border-color: #181A1B;
+  background: transparent;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box[data-editable-target-kind="button"]::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 8px);
+  height: max(100%, 8px);
+  transform: translate(-50%, -50%);
+  background: #181A1B;
+  content: "";
+  pointer-events: none;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box:is(
+    [data-overlay-can-label="true"],
+    [data-overlay-catalog-text-lead="true"],
+    [data-overlay-catalog-action-lead="true"]
+  )::before {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  display: block;
+  max-width: calc(100% - 6px);
+  overflow: hidden;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: #335F7D;
+  color: #fff;
+  content: attr(data-overlay-label);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box:is(
+    [data-overlay-can-label="true"],
+    [data-overlay-catalog-text-lead="true"]
+  ):is(
+    [data-editable-target-kind="title"],
+    [data-editable-target-kind="description"],
+    [data-editable-target-kind="text"]
+  )::before {
+  background: #7A531A;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box[data-overlay-catalog-text-lead="true"]::before {
+  top: -20px;
+  left: 0;
+  max-width: none;
+  content: "文字";
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box[data-overlay-catalog-text-lead="true"][data-overlay-label-side="below"]::before {
+  top: calc(100% + 3px);
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box:is([data-overlay-can-label="true"], [data-overlay-catalog-action-lead="true"])[data-editable-target-kind="button"]::before {
+  background: #181A1B;
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box[data-overlay-catalog-action-lead="true"]::before {
+  top: calc(100% + 3px);
+  left: 50%;
+  max-width: none;
+  transform: translateX(-50%);
+  content: "按钮";
+}
+
+.template-editor__catalog-preview-shell:is(.is-thumbnail, .is-structure)
+  .template-editor__editable-overlay-box[data-overlay-catalog-action-lead="true"][data-overlay-catalog-action-side="above"]::before {
+  top: -20px;
+}
+
+/* 放大结构图保留完整槽位边界，文字只用底部短带提示类型，避免遮住中性示例。 */
+.template-editor__catalog-preview-shell.is-structure
+  .template-editor__editable-overlay-box:is(
+    [data-editable-target-kind="title"],
+    [data-editable-target-kind="description"],
+    [data-editable-target-kind="text"]
+  )::after {
+  top: auto;
+  bottom: 0;
+  height: 8px;
+  transform: none;
+}
+
+.template-editor__catalog-slot-key {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  min-height: 18px;
+  color: #5F6568;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.template-editor__catalog-slot-key > .is-basis {
+  grid-column: 1 / -1;
+  color: var(--adm-muted, #5c6166);
+  font-size: 11px;
+}
+.template-editor__catalog-slot-key > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.template-editor__catalog-slot-key > span::before {
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  border: 1px solid #335F7D;
+  background: #ADC3D0;
+  content: "";
+}
+
+.template-editor__catalog-slot-key > .is-text::before {
+  border-color: #7A531A;
+  background: #D4BD96;
+}
+
+.template-editor__catalog-slot-key > .is-action::before {
+  border-color: #181A1B;
+  background: #181A1B;
+}
+
+.template-editor__catalog-slot-key > .is-other::before {
+  border-color: #6E7477;
+  background: #EEF4F7;
+}
+
+.template-editor__catalog-slot-key > .is-hidden::before {
+  border: 1px dashed #B8BEC1;
+  background: transparent;
+}
+
+.template-editor__catalog-slot-key > .is-basis::before {
+  display: none;
+  content: none;
+}
+
+.template-editor__catalog-preview-issue {
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 3px;
+  color: var(--adm-warning);
+  background: var(--adm-warning-bg);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.template-editor__catalog-preview-issue.is-media-failed {
+  color: var(--adm-danger);
+  background: var(--adm-error-bg);
+}
+
+.unified-template-library__scroll .homepage-editor__template-card {
+  margin: 0;
+  padding: 0;
+}
+
+.unified-template-library__scroll .homepage-editor__template-card-main {
+  display: block;
+  min-height: 0;
+  padding: 8px;
+}
+
+.template-editor__catalog-preview-dialog-body {
+  display: grid;
+  gap: 12px;
+}
+
+.template-editor__catalog-preview-dialog-summary,
+.template-editor__catalog-preview-dialog-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.template-editor__catalog-preview-dialog-summary {
+  color: var(--adm-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.template-editor__catalog-preview-dialog-summary > :first-child {
+  color: var(--adm-text-strong);
+  font-weight: 600;
+}
+
+.template-editor__catalog-preview-dialog-toolbar > [role="group"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.template-editor__catalog-preview-dialog-scroller {
+  max-height: min(68vh, calc(100vh - 240px));
+  min-height: 180px;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  background: var(--adm-neutral-bg);
+  overscroll-behavior: contain;
+}
+
+.template-editor__catalog-preview-shell:is(.is-detail, .is-structure) {
+  min-width: 100%;
+}
+
+.template-editor__catalog-preview-shell:is(.is-detail, .is-structure) .template-editor__catalog-artboard-stage {
+  background: color-mix(in srgb, var(--adm-neutral-bg) 88%, var(--adm-content-bg));
+}
+
+.template-editor__catalog-preview-shell[data-preview-annotations="false"] .template-editor__editable-overlay.is-catalog {
+  visibility: hidden;
+}

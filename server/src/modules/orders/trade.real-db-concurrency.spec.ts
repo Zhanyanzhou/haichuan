@@ -150,6 +150,14 @@ test(
           paidAt: new Date(),
         },
       });
+      const refundableFulfillment = await prisma.fulfillment.create({
+        data: {
+          fulfillmentNo: `${prefix}-REFUND-FUL`,
+          orderId: refundable.id,
+          warehouseId: warehouse.id,
+          status: 'PENDING_PICK',
+        },
+      });
       const refundResults = await Promise.allSettled([
         refunds.create({
           orderId: refundable.id,
@@ -157,7 +165,7 @@ test(
           amount: 70,
           reason: '并发退款 A',
           idempotencyKey: `${prefix}-A`,
-          operator: { type: 'ADMIN', id: actors[0].id },
+          operator: actors[0],
         }),
         refunds.create({
           orderId: refundable.id,
@@ -165,12 +173,44 @@ test(
           amount: 70,
           reason: '并发退款 B',
           idempotencyKey: `${prefix}-B`,
-          operator: { type: 'ADMIN', id: actors[1].id },
+          operator: actors[1],
         }),
       ]);
       assert.equal(refundResults.filter((result) => result.status === 'fulfilled').length, 1);
       assert.equal(refundResults.filter((result) => result.status === 'rejected').length, 1);
       assert.equal(await prisma.refund.count({ where: { orderId: refundable.id } }), 1);
+      const completedRefund = await prisma.refund.findFirstOrThrow({
+        where: { orderId: refundable.id },
+      });
+      await refunds.review(
+        completedRefund.id,
+        'APPROVED',
+        '隔离库验证退款后拒绝发货',
+        actors[0],
+      );
+      await refunds.execute(
+        completedRefund.id,
+        'COMPLETED',
+        `${prefix}-BANK-REFUND`,
+        actors[0],
+      );
+      await assert.rejects(
+        () => fulfillment.dispatch(
+          refundableFulfillment.id,
+          { carrier: 'TEST', trackingNo: `${prefix}-REFUNDED-TRACK` },
+          { type: 'ADMIN', id: actors[1].id },
+        ),
+        /退款后净收不足/,
+      );
+      const refundedOrder = await prisma.order.findUniqueOrThrow({
+        where: { id: refundable.id },
+      });
+      const blockedFulfillment = await prisma.fulfillment.findUniqueOrThrow({
+        where: { id: refundableFulfillment.id },
+      });
+      assert.equal(Number(refundedOrder.refundedAmount), 70);
+      assert.equal(blockedFulfillment.status, 'PENDING_PICK');
+      assert.equal(blockedFulfillment.trackingNo, null);
 
       const editable = await prisma.order.create({
         data: {

@@ -18,8 +18,7 @@ export function parsePublicContentLocale(value: unknown): PublicContentLocale {
 }
 
 /**
- * EN-A 安全门禁：英文修订、发布指针与内容哈希尚未形成同语言事实前，
- * 所有公开内容接口必须在查询中文事实源之前拒绝英文请求。
+ * D.35：公网只发布中文；所有公开内容接口必须在查询事实源之前拒绝英文请求。
  */
 export function requirePublishedPublicContentLocale(
   value: unknown,
@@ -29,6 +28,21 @@ export function requirePublishedPublicContentLocale(
     throw new NotFoundException({
       code: "CONTENT_LOCALE_UNAVAILABLE",
       message: "Requested locale is not published",
+      locale,
+    });
+  }
+  return locale;
+}
+
+/** D.35：后台只允许继续编辑和推进中文；英文仅保留受保护的历史只读能力。 */
+export function requireEditablePublicContentLocale(
+  value: unknown,
+): PublicContentLocale {
+  const locale = parsePublicContentLocale(value);
+  if (locale !== DEFAULT_PUBLIC_CONTENT_LOCALE) {
+    throw new BadRequestException({
+      code: "CONTENT_LOCALE_RETIRED",
+      message: "This content locale is retired",
       locale,
     });
   }

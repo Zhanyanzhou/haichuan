@@ -12,6 +12,7 @@ test("Idempotency-Key 缺失返回 428，非法格式返回 400", () => {
     () => parseIdempotencyKey("short"),
     (error: unknown) => error instanceof HttpException && error.getStatus() === 400,
   );
+  assert.equal(parseIdempotencyKey(undefined, false), undefined);
 });
 test("幂等键按业务作用域稳定散列且互不碰撞", () => {
   const service = new IdempotencyService();

@@ -78,7 +78,8 @@ test.describe("模板响应式合同：纯函数与客户端校验边界", () =>
     expect(added.definition.nodes[added.nodeId].responsive.mobile.placement).toBeNull();
     expect(validateDynamicTemplateDefinition(added.definition).valid).toBe(true);
     const flowed = moveDynamicTemplateNode(added.definition, added.nodeId, flow.nodeId);
-    for (const device of ["desktop", "tablet", "mobile"] as const) expect(resolveTemplateNodeRules(flowed, added.nodeId, device).placement).toBeUndefined();
+    for (const device of ["desktop", "mobile"] as const) expect(resolveTemplateNodeRules(flowed, added.nodeId, device).placement).toBeUndefined();
+    expect(resolveTemplateNodeRules(flowed, added.nodeId, "tablet").placement).toBeUndefined();
     const returned = moveDynamicTemplateNode(flowed, added.nodeId, stage.nodeId);
     expect(resolveTemplateNodeRules(returned, added.nodeId, "desktop").placement).toBeDefined();
     expect(resolveTemplateNodeRules(returned, added.nodeId, "mobile").placement).toBeUndefined();
@@ -105,6 +106,8 @@ test.describe("模板响应式合同：纯函数与客户端校验边界", () =>
     const definition = createBlankDynamicTemplateDefinition();
     expect(definition.schemaVersion).toBe(2);
     expect(definition.nodes[definition.rootNodeId].responsive.mobile).toEqual({});
+    expect(definition.nodes[definition.rootNodeId].responsive.tablet).toBeUndefined();
+    expect(definition.metadata.previewTabletWidth).toBeUndefined();
     expect(definition.defaultContent).toEqual({});
     expect(validateDynamicTemplateDefinition(definition).valid).toBe(true);
   });
@@ -123,24 +126,38 @@ test.describe("模板响应式合同：纯函数与客户端校验边界", () =>
     expect(() => setTemplateNodeRule(definition, root.nodeId, "tablet", "width", "fill")).toThrow("旧模板");
   });
 
-  test("新断点在 767/768/1023/1024 精确切换", () => {
+  test("新断点在 767/768/1023/1024 只切桌面与手机", () => {
     const { definition } = fixture();
-    expect([767, 768, 1023, 1024].map((width) => resolveTemplateBreakpoint(definition, width))).toEqual(["mobile", "tablet", "tablet", "desktop"]);
+    expect([767, 768, 1023, 1024].map((width) => resolveTemplateBreakpoint(definition, width))).toEqual(["mobile", "desktop", "desktop", "desktop"]);
     expect(() => resolveTemplateBreakpoint(definition, Number.NaN)).toThrow();
   });
 
-  test("Tablet 与 Mobile 按属性继承，四边间距不复制无关成员", () => {
+  test("历史平板覆盖不参与继承，手机只叠自身覆盖", () => {
     const { definition, regionId } = fixture();
     setTemplateNodeRule(definition, regionId, "desktop", "gap", { value: 24, unit: "px" });
-    setTemplateNodeRule(definition, regionId, "tablet", "padding", { top: { value: 16, unit: "px" } });
+    definition.nodes[regionId].responsive.tablet = { padding: { top: { value: 16, unit: "px" } } };
     setTemplateNodeRule(definition, regionId, "mobile", "padding.bottom", { value: 8, unit: "px" });
     const effective = resolveTemplateNodeRules(definition, regionId, "mobile");
-    expect(effective.padding).toEqual({ top: { value: 16, unit: "px" }, right: { value: 0, unit: "px" }, bottom: { value: 8, unit: "px" }, left: { value: 0, unit: "px" } });
+    expect(effective.padding).toEqual({ top: { value: 0, unit: "px" }, right: { value: 0, unit: "px" }, bottom: { value: 8, unit: "px" }, left: { value: 0, unit: "px" } });
     expect(effective.gap).toEqual({ value: 24, unit: "px" });
+    expect(resolveTemplateNodeRules(definition, regionId, "tablet").gap).toEqual({ value: 24, unit: "px" });
+    expect(resolveTemplateNodeRules(definition, regionId, "tablet").padding).toBeUndefined();
     expect(definition.nodes[regionId].responsive.mobile).toEqual({ padding: { bottom: { value: 8, unit: "px" } } });
-    expect(getTemplateNodeRuleSource(definition, regionId, "mobile", "padding.top")).toBe("tablet");
+    expect(getTemplateNodeRuleSource(definition, regionId, "mobile", "padding.top")).toBe("system");
     expect(getTemplateNodeRuleSource(definition, regionId, "mobile", "padding.bottom")).toBe("mobile");
     expect(validateDynamicTemplateDefinition(definition).valid).toBe(true);
+    expect(() => setTemplateNodeRule(definition, regionId, "tablet", "gap", { value: 12, unit: "px" })).toThrow("不提供独立平板内容");
+  });
+
+  test("历史平板字段不进入草稿或发布检查", () => {
+    const { definition, regionId, slotId } = fixture();
+    definition.nodes[regionId].responsive.tablet = { notARealRule: true } as never;
+    definition.slots[slotId].tabletRules = { notARealRule: true } as never;
+    const draft = validateDynamicTemplateDefinition(definition);
+    const publish = validateDynamicTemplatePublishDefinition(definition);
+    expect(draft.issues.some((issue) => issue.path.includes("tablet") || issue.message.includes("平板"))).toBe(false);
+    expect(publish.issues.some((issue) => issue.path.includes("tablet") || issue.message.includes("平板"))).toBe(false);
+    expect(draft.valid).toBe(true);
   });
 
   test("显式等值覆盖保留意图，恢复继承后才跟随基础值", () => {
@@ -157,8 +174,8 @@ test.describe("模板响应式合同：纯函数与客户端校验边界", () =>
   test("恢复本来就继承的字段不创建空对象或改变文档", () => {
     const { definition, regionId, slotId } = fixture();
     const before = JSON.stringify(definition);
-    resetTemplateNodeRule(definition, regionId, "tablet", "gap");
-    resetTemplateSlotRule(definition, slotId, "tablet", "fontSize");
+    resetTemplateNodeRule(definition, regionId, "mobile", "gap");
+    resetTemplateSlotRule(definition, slotId, "mobile", "fontSize");
     expect(JSON.stringify(definition)).toBe(before);
   });
 
@@ -176,24 +193,24 @@ test.describe("模板响应式合同：纯函数与客户端校验边界", () =>
     const { definition, regionId } = fixture();
     setTemplateNodeRule(definition, regionId, "desktop", "display", "grid");
     setTemplateNodeRule(definition, regionId, "desktop", "columns", [1, 1, 1]);
-    setTemplateNodeRule(definition, regionId, "tablet", "hidden", true);
+    definition.nodes[regionId].responsive.tablet = { hidden: true };
     setTemplateNodeRule(definition, regionId, "mobile", "hidden", false);
     const tablet = compileDynamicTemplateRenderPlan(definition, { device: "desktop", breakpoint: "tablet", showEmptySlots: true });
     const mobile = compileDynamicTemplateRenderPlan(definition, { device: "mobile", breakpoint: "mobile", showEmptySlots: true });
-    expect(tablet.ok && tablet.plan.root.children[0].hidden).toBe(true);
+    expect(tablet.ok && tablet.plan.root.children[0].hidden).toBe(false);
     expect(mobile.ok && mobile.plan.root.children[0].hidden).toBe(false);
     expect(resolveTemplateNodeRules(definition, regionId, "mobile").display).toBe("grid");
-    resetTemplateNodeRule(definition, regionId, "tablet", "hidden");
     expect(resolveTemplateNodeRules(definition, regionId, "tablet").display).toBe("grid");
+    expect(definition.nodes[regionId].responsive.tablet).toEqual({ hidden: true });
   });
 
   test("图片精确焦点继承与恢复，v1 继续限制为旧预设", () => {
     const { definition, slotId } = fixture();
-    setTemplateSlotRule(definition, slotId, "tablet", "objectPosition", "37.5% 80%");
-    expect(resolveTemplateSlotRules(definition, slotId, "mobile").objectPosition).toBe("37.5% 80%");
+    definition.slots[slotId].tabletRules = { objectPosition: "37.5% 80%" };
+    expect(resolveTemplateSlotRules(definition, slotId, "mobile").objectPosition).toBe("center center");
     setTemplateSlotRule(definition, slotId, "mobile", "objectPosition", "10% 20%");
     resetTemplateSlotRule(definition, slotId, "mobile", "objectPosition");
-    expect(resolveTemplateSlotRules(definition, slotId, "mobile").objectPosition).toBe("37.5% 80%");
+    expect(resolveTemplateSlotRules(definition, slotId, "mobile").objectPosition).toBe("center center");
     expect(validateDynamicTemplateDefinition(definition).valid).toBe(true);
     definition.slots[slotId].mobileRules.objectPosition = "101% 20%";
     expect(validateDynamicTemplateDefinition(definition).valid).toBe(false);
@@ -204,9 +221,9 @@ test.describe("模板响应式合同：纯函数与客户端校验边界", () =>
 
   test("稀疏覆盖非法值和未知字段由客户端合同拒绝", () => {
     const { definition, regionId } = fixture();
-    definition.nodes[regionId].responsive.tablet = { width: { value: -2, unit: "px" } };
+    definition.nodes[regionId].responsive.mobile = { width: { value: -2, unit: "px" } };
     expect(validateDynamicTemplateDefinition(definition).valid).toBe(false);
-    (definition.nodes[regionId].responsive.tablet as Record<string, unknown>).position = "fixed";
+    (definition.nodes[regionId].responsive.mobile as Record<string, unknown>).position = "fixed";
     expect(validateDynamicTemplateDefinition(definition).issues.some((issue) => issue.path.endsWith("position"))).toBe(true);
     expect(() => setTemplateNodeRule(definition, regionId, "mobile", "__proto__.value", 1)).toThrow();
   });
@@ -242,7 +259,7 @@ test.describe("模板响应式合同：纯函数与客户端校验边界", () =>
     const { definition, regionId } = fixture();
     setTemplateNodeRule(definition, regionId, "desktop", "display", "flex");
     setTemplateNodeRule(definition, regionId, "desktop", "wrap", "wrap");
-    setTemplateNodeRule(definition, regionId, "tablet", "minWidth", { value: 100, unit: "px" });
+    setTemplateNodeRule(definition, regionId, "desktop", "minWidth", { value: 100, unit: "px" });
     setTemplateNodeRule(definition, regionId, "mobile", "height", { mode: "fit" });
     setTemplateNodeRule(definition, regionId, "mobile", "maxHeight", { value: 400, unit: "px" });
     expect(validateDynamicTemplateDefinition(definition).valid).toBe(true);
@@ -255,39 +272,47 @@ test.describe("模板响应式合同：纯函数与客户端校验边界", () =>
     const { definition, regionId } = fixture();
     setTemplateNodeRule(definition, regionId, "desktop", "display", "grid");
     setTemplateNodeRule(definition, regionId, "desktop", "columns", [1, 1, 1]);
-    setTemplateNodeRule(definition, regionId, "tablet", "columns", [1, 1]);
+    definition.nodes[regionId].responsive.tablet = { columns: [1, 1] };
     setTemplateNodeRule(definition, regionId, "mobile", "columns", [1]);
     const before = JSON.stringify(definition);
     const projected = resolveTemplateDefinitionForBreakpoint(definition, "tablet");
-    expect(projected.nodes[regionId].responsive.mobile.columns).toEqual([1, 1]);
+    expect(projected.nodes[regionId].responsive.mobile.columns).toEqual([1, 1, 1]);
     const plan = compileDynamicTemplateRenderPlan(definition, { device: "desktop", breakpoint: "tablet", showEmptySlots: true });
-    expect(plan.ok && plan.plan.root.children[0].rules.columns).toEqual([1, 1]);
+    expect(plan.ok && plan.plan.root.children[0].rules.columns).toEqual([1, 1, 1]);
     expect(JSON.stringify(normalizeTemplateDimensionContract(definition))).toBe(before);
     expect(JSON.stringify(definition)).toBe(before);
   });
 
-  test("新定义拒绝试排内容和未知 schema，发布检查覆盖 Tablet 隐藏", () => {
+  test("新定义拒绝试排内容和未知 schema，历史平板隐藏不进入发布检查", () => {
     const { definition, imageId, slotId } = fixture();
     definition.slots[slotId].required = true;
     definition.slots[slotId].hideable = false;
-    setTemplateNodeRule(definition, imageId, "tablet", "display", "none");
-    expect(validateDynamicTemplatePublishDefinition(definition).issues.some((issue) => issue.path.includes("tablet.display"))).toBe(true);
+    definition.nodes[imageId].responsive.tablet = { display: "none" };
+    expect(validateDynamicTemplatePublishDefinition(definition).issues.some((issue) => issue.path.includes("tablet.display"))).toBe(false);
+    setTemplateNodeRule(definition, imageId, "mobile", "display", "none");
+    expect(validateDynamicTemplatePublishDefinition(definition).issues.some((issue) => issue.path.includes("mobile.display"))).toBe(true);
     definition.defaultContent[slotId] = { src: "/trial-only.jpg" };
     expect(validateDynamicTemplateDefinition(definition).valid).toBe(false);
     expect(validateDynamicTemplateDefinition({ ...definition, defaultContent: {}, schemaVersion: 3 }).valid).toBe(true);
     expect(validateDynamicTemplateDefinition({ ...definition, defaultContent: {}, schemaVersion: 999 }).valid).toBe(false);
   });
 
-  test("必填槽位被上级隐藏时客户端发布门禁定位同一上级和三端", () => {
-    const tabletCase = fixture();
-    tabletCase.definition.slots[tabletCase.slotId].required = true;
-    tabletCase.definition.slots[tabletCase.slotId].hideable = false;
-    setTemplateNodeRule(tabletCase.definition, tabletCase.regionId, "tablet", "hidden", true);
-    const clientTablet = validateDynamicTemplatePublishDefinition(tabletCase.definition).issues
+  test("必填槽位被上级隐藏时客户端发布门禁只定位桌面与手机", () => {
+    const leftoverTablet = fixture();
+    leftoverTablet.definition.slots[leftoverTablet.slotId].required = true;
+    leftoverTablet.definition.slots[leftoverTablet.slotId].hideable = false;
+    leftoverTablet.definition.nodes[leftoverTablet.regionId].responsive.tablet = { hidden: true };
+    expect(validateDynamicTemplatePublishDefinition(leftoverTablet.definition).issues
+      .filter((issue) => issue.code === "PUBLISH_REQUIRED_SLOT_DEVICE_HIDDEN")).toEqual([]);
+
+    const mobileCase = fixture();
+    mobileCase.definition.slots[mobileCase.slotId].required = true;
+    mobileCase.definition.slots[mobileCase.slotId].hideable = false;
+    setTemplateNodeRule(mobileCase.definition, mobileCase.regionId, "mobile", "hidden", true);
+    const clientMobile = validateDynamicTemplatePublishDefinition(mobileCase.definition).issues
       .filter((issue) => issue.code === "PUBLISH_REQUIRED_SLOT_DEVICE_HIDDEN");
-    expect(clientTablet.map((issue) => [issue.nodeId, issue.path])).toEqual([
-      [tabletCase.regionId, `nodes.${tabletCase.regionId}.responsive.tablet.display`],
-      [tabletCase.regionId, `nodes.${tabletCase.regionId}.responsive.mobile.display`],
+    expect(clientMobile.map((issue) => [issue.nodeId, issue.path])).toEqual([
+      [mobileCase.regionId, `nodes.${mobileCase.regionId}.responsive.mobile.display`],
     ]);
 
     const globalCase = fixture();

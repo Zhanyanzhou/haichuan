@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, ParseIntPipe, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -21,21 +21,44 @@ export class RefundsController {
 
   @ApiBearerAuth()
   @Get()
-  findAll(@Query() query: RefundQueryDto) {
-    return this.refundsService.findAll(query);
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  findAll(
+    @Query() query: RefundQueryDto,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.refundsService.findAll(query, user);
+  }
+
+  /** 退款创建前核对权威原付款、分期门禁和每笔剩余可退额度。 */
+  @ApiBearerAuth()
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @Get('orders/:orderId/eligible-payments')
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  getCreateEligibility(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.refundsService.getCreateEligibility(orderId, user);
   }
 
   @ApiBearerAuth()
   @Get(':id')
-  findById(@Param('id', ParseIntPipe) id: number) {
-    return this.refundsService.findById(id);
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  findById(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: StaffPrincipal,
+  ) {
+    return this.refundsService.findById(id, user);
   }
 
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Post()
   create(@Body() dto: CreateRefundDto, @CurrentUser() user: StaffPrincipal) {
-    return this.refundsService.create({ ...dto, operator: { type: 'ADMIN', id: user.id, name: user.realName || user.username } });
+    return this.refundsService.create({ ...dto, operator: user });
   }
 
   @ApiBearerAuth()
@@ -46,7 +69,7 @@ export class RefundsController {
       id,
       dto.action as 'APPROVED' | 'REJECTED',
       dto.reviewNote,
-      { type: 'ADMIN', id: user.id, name: user.realName || user.username },
+      user,
     );
   }
 
@@ -58,7 +81,7 @@ export class RefundsController {
       id,
       dto.action as 'COMPLETED' | 'FAILED',
       dto.gatewayRefundNo,
-      { type: 'ADMIN', id: user.id, name: user.realName || user.username },
+      user,
       dto.reviewNote,
     );
   }
@@ -68,18 +91,16 @@ export class RefundsController {
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Put(':id/channel')
   startChannel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
-    return this.refundsService.startOnlineRefund(id, {
-      type: 'ADMIN',
-      id: user.id,
-      name: user.realName || user.username,
-    });
+    return this.refundsService.startOnlineRefund(id, user);
   }
 
   /** 主动查询原渠道退款状态；查询到成功时会走与通知相同的核销管线。 */
   @ApiBearerAuth()
   @Roles('SUPER_ADMIN', 'ADMIN')
   @Get(':id/channel')
-  queryChannel(@Param('id', ParseIntPipe) id: number) {
-    return this.refundsService.queryOnlineRefund(id);
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  queryChannel(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: StaffPrincipal) {
+    return this.refundsService.queryOnlineRefund(id, user);
   }
 }

@@ -255,12 +255,37 @@ test.describe("HC-PUB-01 /products Hero 媒体状态与层叠", () => {
         if (viewport.width <= 767 && mediaState !== "absent") {
           await expect(page.getByRole("button", { name: "打开菜单" })).toHaveCSS(
             "color",
-            "rgb(24, 26, 27)",
+            "rgb(247, 248, 248)",
           );
           await expect(page.getByRole("link", { name: "我的账户" })).toHaveCSS(
             "color",
-            "rgb(24, 26, 27)",
+            "rgb(247, 248, 248)",
           );
+          if (mediaState === "loaded") {
+            const hero = page.locator(".hc-phase1-hero");
+            const media = page.locator(".hc-phase1-hero__media");
+            const copyBand = page.locator(".hc-phase1-hero__copy-band");
+            const footer = page.getByRole("contentinfo");
+            const [heroBox, mediaBox, copyBandBox, headingBox, actionBox, footerBox] = await Promise.all([
+              hero.boundingBox(),
+              media.boundingBox(),
+              copyBand.boundingBox(),
+              contentTarget.boundingBox(),
+              interactionTarget.boundingBox(),
+              footer.boundingBox(),
+            ]);
+            expect(heroBox).not.toBeNull();
+            expect(mediaBox).not.toBeNull();
+            expect(copyBandBox).not.toBeNull();
+            expect(headingBox).not.toBeNull();
+            expect(actionBox).not.toBeNull();
+            expect(footerBox).not.toBeNull();
+            expect(copyBandBox!.y).toBeGreaterThanOrEqual(mediaBox!.y + mediaBox!.height - 1);
+            expect(actionBox!.y).toBeGreaterThanOrEqual(headingBox!.y + headingBox!.height);
+            expect(footerBox!.y).toBeGreaterThanOrEqual(heroBox!.y + heroBox!.height - 1);
+            await expect(media).toHaveCSS("position", "relative");
+            await expect(interactionTarget).toHaveCSS("position", "static");
+          }
         }
         const targetIsTopmost = await interactionTarget.evaluate((element) => {
           const rect = element.getBoundingClientRect();
@@ -618,11 +643,13 @@ test.describe("公开页面导航一致性", () => {
     expect(accountBox).not.toBeNull();
     expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(brandBox!.x);
     expect(brandBox!.x + brandBox!.width).toBeLessThanOrEqual(accountBox!.x);
-    for (const box of [menuBox!, accountBox!]) {
+    for (const box of [menuBox!, brandBox!, accountBox!]) {
       expect(box.width).toBeGreaterThanOrEqual(44);
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
-    await expect(page.getByRole("banner").getByRole("link", { name: "搜索" })).toBeHidden();
+    const headerActions = page.getByRole("banner").getByRole("navigation", { name: "菜单与搜索" });
+    await expect(headerActions).toBeVisible();
+    await expect(headerActions.getByRole("link", { name: "搜索" })).toBeHidden();
     await expectNoHorizontalOverflow(page);
   });
 

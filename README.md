@@ -7,13 +7,13 @@
 本 README 只提供项目导航，不授予任何环境或数据操作权限。按 `AGENTS.md` 第 7 节和 `WORKFLOW.md` 的任务模式启动：纯问答与只读检查只取所需证据；实施任务读取执行流程，任务依赖工作树或准备修改时才检查状态与目标差异。
 
 - 读取代码、`git status`、`git diff` 和已批准的开发检查可直接进行。
-- 安装或升级依赖、修改 `package.json`、运行 Prisma migration 或 seed、启动或变更 Docker/数据库、修改环境变量、初始化管理员，以及任何部署或生产操作，都必须按 `AGENTS.md` 的对应审批要求执行。
+- 已授权实现所需的普通依赖、兼容 `package.json` / lockfile 修改，以及隔离、可丢弃本地环境中的常规验证可由 Codex 直接完成。框架迁移、major 或大范围 lockfile 变化、高权限/许可不明依赖、破坏性数据库变更、真实数据、敏感配置、管理员初始化、部署和生产操作仍按 `AGENTS.md` 分层审批。
 - 文档中的历史命令、端口、账号或完成状态不是授权，也不能替代对当前 `package.json`、`docker-compose.yml`、`.env.example`、迁移目录和运行进程的核验。
 - 不读取 `.env` 真值，不输出密钥、密码、客户、订单或支付敏感信息。
 
 ## 开发入口
 
-在依赖和本地环境已经由用户确认准备完成的前提下，从仓库根目录查看当前状态和已定义脚本：
+从仓库根目录查看当前状态和已定义脚本；Codex 在任务授权内自行完成常规准备与验证，不要求用户手动代跑：
 
 ```powershell
 git status --short
@@ -28,7 +28,7 @@ npm run
 - `docs/DEVELOPMENT_WORKFLOW.md`：当前开发运行方式；
 - `WORKFLOW.md` 第 5 节与当前 `package.json` 脚本：当前验证范围与命令选择；
 - `docs/PUBLIC_ACCESS_MATRIX.md`：身份、行动与字段访问边界；
-- [模板设计唯一标准](docs/page-builder/template-creation-rules.md)：步骤创建、预设生成、自由精调与验收的唯一产品执行入口；[文档导航](docs/page-builder/README.md)补充编辑细则、页面交接、实现与历史证据。
+- [店铺装修产品合同](docs/page-builder/store-decoration.md)：页面职责、选用与发页验收；[模板设计标准](docs/page-builder/template-creation-rules.md)只覆盖母模板创建与精调；[文档导航](docs/page-builder/README.md)补充编辑细则、实现与历史证据。
 
 ## 项目结构
 

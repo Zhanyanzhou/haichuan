@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Prisma } from '@prisma/client';
-import { ApiError } from '../../common/errors/api-error';
 import { OrdersService } from './orders.service';
 import { hashBusinessSnapshot } from '../quotations/quotation-snapshot';
 
@@ -107,7 +106,9 @@ type TradeResourceLifecycle = {
       id: number;
       status: 'PENDING_PAYMENT';
       quoteChannel: 'CUSTOM' | 'PARTNER_WAX';
+      customStage?: 'PENDING_BALANCE' | null;
       finalAmount: Prisma.Decimal;
+      balanceAmount: Prisma.Decimal;
       items: [];
     },
     paymentMethod: string,
@@ -117,10 +118,10 @@ type TradeResourceLifecycle = {
   ): Promise<unknown>;
 };
 
-function createService() {
+function createService(record: (tx: unknown, event: Record<string, unknown>) => Promise<void> = async () => undefined) {
   return new OrdersService(
     {} as never,
-    { record: async () => undefined } as never,
+    { record } as never,
     {} as never,
     {} as never,
     {} as never,
@@ -209,45 +210,123 @@ test('全额收款核销定制资源时同时扣减总可用额与已预占额',
 });
 
 for (const quoteChannel of ['CUSTOM', 'PARTNER_WAX'] as const) {
-  test(`${quoteChannel} 全额收款在生产交付模型缺失时先失败关闭且不变更资源或订单`, async () => {
+  test(`${quoteChannel} 全额收款核销报价资源并进入定制履约但不创建零售履约单`, async () => {
     const writes: string[] = [];
+    const events: Record<string, unknown>[] = [];
+    let reservationStatus = 'RESERVED';
+    let orderUpdate: Record<string, unknown> | undefined;
     const tx = {
       payment: {
         findMany: async () => [{ amount: new Prisma.Decimal('100.00') }],
       },
       order: {
-        updateMany: async () => { writes.push('order'); return { count: 1 }; },
+        updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+          writes.push('order');
+          orderUpdate = data;
+          return { count: 1 };
+        },
       },
       orderResourceReservation: {
-        findMany: async () => { writes.push('resource-read'); return []; },
-        updateMany: async () => { writes.push('resource-write'); return { count: 1 }; },
+        findMany: async () => {
+          writes.push('resource-read');
+          return [{ id: 1, resourceBucketId: 7, quantity: new Prisma.Decimal('1.000') }];
+        },
+        updateMany: async () => {
+          writes.push('resource-write');
+          reservationStatus = 'CONSUMED';
+          return { count: 1 };
+        },
+      },
+      $queryRaw: async () => [{ id: 7 }],
+      tradeResourceBucket: {
+        updateMany: async () => { writes.push('bucket'); return { count: 1 }; },
       },
       fulfillment: {
-        create: async () => { writes.push('fulfillment'); return { id: 1 }; },
+        create: async () => { throw new Error('定制订单不应创建零售履约单'); },
       },
     };
 
-    await assert.rejects(
-      createService().applyConfirmedPaymentToOrder(
-        tx,
-        {
-          id: 9,
-          status: 'PENDING_PAYMENT',
-          quoteChannel,
-          finalAmount: new Prisma.Decimal('100.00'),
-          items: [],
-        },
-        'BANK_TRANSFER',
-        new Date(),
-        { type: 'ADMIN', id: 1 },
-        'test',
-      ),
-      (error: unknown) => error instanceof ApiError
-        && error.errorCode === 'NON_RETAIL_FULFILLMENT_MODEL_REQUIRED',
+    const result = await createService(async (_tx, event) => { events.push(event); })
+      .applyConfirmedPaymentToOrder(
+      tx,
+      {
+        id: 9,
+        status: 'PENDING_PAYMENT',
+        quoteChannel,
+        customStage: 'PENDING_BALANCE',
+        finalAmount: new Prisma.Decimal('100.00'),
+        balanceAmount: new Prisma.Decimal('70.00'),
+        items: [],
+      },
+      'BANK_TRANSFER',
+      new Date(),
+      { type: 'ADMIN', id: 1 },
+      'test',
     );
-    assert.deepEqual(writes, []);
+
+    assert.deepEqual(result, { fullyPaid: true, paidCents: 10_000 });
+    assert.equal(reservationStatus, 'CONSUMED');
+    assert.deepEqual(writes, ['resource-read', 'resource-write', 'bucket', 'order']);
+    assert.equal(orderUpdate?.status, 'PENDING_SHIP');
+    assert.equal(orderUpdate?.deliveryStatus, 'NONE');
+    assert.equal((orderUpdate?.paidBalance as Prisma.Decimal).toFixed(2), '70.00');
+    assert.equal(orderUpdate?.customStage, 'BALANCE_PAID');
+    assert.equal(orderUpdate?.reservedAt, null);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].eventType, 'ORDER_CUSTOM_STAGE_CHANGED');
+    assert.equal(events[0].fromStatus, 'PENDING_BALANCE');
+    assert.equal(events[0].toStatus, 'BALANCE_PAID');
   });
 }
+
+test('定制全额收款缺少有效资源预占时失败关闭且不推进订单', async () => {
+  let orderWrites = 0;
+  const tx = {
+    payment: { findMany: async () => [{ amount: new Prisma.Decimal('100.00') }] },
+    orderResourceReservation: { findMany: async () => [] },
+    order: { updateMany: async () => { orderWrites += 1; return { count: 1 }; } },
+  };
+
+  await assert.rejects(
+    createService().applyConfirmedPaymentToOrder(
+      tx,
+      {
+        id: 9,
+        status: 'PENDING_PAYMENT',
+        quoteChannel: 'CUSTOM',
+        finalAmount: new Prisma.Decimal('100.00'),
+        balanceAmount: new Prisma.Decimal('100.00'),
+        items: [],
+      },
+      'BANK_TRANSFER',
+      new Date(),
+      { type: 'ADMIN', id: 1 },
+      'test',
+    ),
+    /缺少可核销的定制资源预占/,
+  );
+  assert.equal(orderWrites, 0);
+});
+
+test('定制资源预占在锁后被其他流程抢占时失败关闭且不扣资源桶', async () => {
+  let bucketWrites = 0;
+  const tx = {
+    orderResourceReservation: {
+      findMany: async () => [{ id: 1, resourceBucketId: 7, quantity: new Prisma.Decimal('1.000') }],
+      updateMany: async () => ({ count: 0 }),
+    },
+    $queryRaw: async () => [{ id: 7 }],
+    tradeResourceBucket: {
+      updateMany: async () => { bucketWrites += 1; return { count: 1 }; },
+    },
+  };
+
+  await assert.rejects(
+    createService().consumeTradeResourceReservations(tx, 9, new Date()),
+    /资源预占状态已变化/,
+  );
+  assert.equal(bucketWrites, 0);
+});
 
 test('后台订单详情回读报价行、资源和双向关联并校验交易快照', async () => {
   const transactionSnapshot = { schemaVersion: 2, quotation: { id: 1, version: 2 } };
@@ -263,14 +342,19 @@ test('后台订单详情回读报价行、资源和双向关联并校验交易�
     quotationSource: { id: 1, quoteNo: 'Q1' },
     quotationConversion: { id: 3, quotationVersionId: 2 },
   };
+  const tx = {
+    $queryRaw: async () => [{ id: 7, username: 'order-reader' }],
+    order: {
+      findUnique: async ({ include }: { include: Record<string, unknown> }) => {
+        capturedInclude = include;
+        return order;
+      },
+    },
+  };
   const service = new OrdersService(
     {
-      order: {
-        findUnique: async ({ include }: { include: Record<string, unknown> }) => {
-          capturedInclude = include;
-          return order;
-        },
-      },
+      ...tx,
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
     } as never,
     {} as never,
     {} as never,
@@ -278,7 +362,7 @@ test('后台订单详情回读报价行、资源和双向关联并校验交易�
     {} as never,
     {} as never,
   );
-  const result = await service.findById(9);
+  const result = await service.findById(9, { id: 7 });
   assert.ok(capturedInclude?.quotedLines);
   assert.ok(capturedInclude?.resourceReservations);
   assert.ok(capturedInclude?.quotationVersion);
@@ -288,16 +372,21 @@ test('后台订单详情回读报价行、资源和双向关联并校验交易�
 });
 
 test('后台订单详情对被篡改的交易快照失败关闭', async () => {
+  const tx = {
+    $queryRaw: async () => [{ id: 7, username: 'order-reader' }],
+    order: {
+      findUnique: async () => ({
+        id: 9,
+        transactionSnapshot: { schemaVersion: 2, quotation: { id: 99 } },
+        transactionSnapshotHash: hashBusinessSnapshot({ schemaVersion: 2, quotation: { id: 1 } }),
+        snapshotSchemaVersion: 2,
+      }),
+    },
+  };
   const service = new OrdersService(
     {
-      order: {
-        findUnique: async () => ({
-          id: 9,
-          transactionSnapshot: { schemaVersion: 2, quotation: { id: 99 } },
-          transactionSnapshotHash: hashBusinessSnapshot({ schemaVersion: 2, quotation: { id: 1 } }),
-          snapshotSchemaVersion: 2,
-        }),
-      },
+      ...tx,
+      $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
     } as never,
     {} as never,
     {} as never,
@@ -306,7 +395,7 @@ test('后台订单详情对被篡改的交易快照失败关闭', async () => {
     {} as never,
   );
   await assert.rejects(
-    () => service.findById(9),
+    () => service.findById(9, { id: 7 }),
     /订单交易快照完整性校验失败/,
   );
 });

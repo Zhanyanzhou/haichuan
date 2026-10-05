@@ -1,7 +1,6 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalogItems } from "./fixtures/template-catalog";
 import { saveTemplate } from "./fixtures/template-authoring-main-route";
 
 const NOW = "2026-09-09T09:00:00.000Z";
@@ -58,7 +57,10 @@ type DraftResource = {
   };
 };
 
-type SystemCompatibilityCatalogItem = ReturnType<typeof systemTemplateCatalogItems>[number];
+type RetiredSystemCompatibilityPayload = {
+  kind: "system-compatibility";
+  template: { contractKey: string };
+};
 
 type SessionSnapshot = {
   compatibilityRecovery: unknown;
@@ -224,7 +226,7 @@ function pageDraft() {
 async function installBoundaryServer(
   page: Page,
   catalogResources?: DraftResource[],
-  compatibilityItems: SystemCompatibilityCatalogItem[] = [],
+  retiredCompatibilityPayloads: RetiredSystemCompatibilityPayload[] = [],
 ): Promise<BoundaryServer> {
   const resources = new Map<string, DraftResource>(
     (catalogResources ?? [
@@ -260,7 +262,7 @@ async function installBoundaryServer(
             kind: "editable" as const,
             template: structuredClone(template),
           })),
-          ...compatibilityItems.map((item) => structuredClone(item)),
+          ...retiredCompatibilityPayloads.map((item) => structuredClone(item)),
         ],
       }));
     }
@@ -623,15 +625,17 @@ test.describe("TD6 exact draft GET：并发与离开边界", () => {
 });
 
 test("TD6 历史来源标记不触发恢复转换，exact GET 草稿原样打开且不产生 dirty 或写入", async ({ page }) => {
-  const [systemCompatibility] = systemTemplateCatalogItems();
-  if (!systemCompatibility) throw new Error("缺少系统兼容目录夹具");
+  const retiredCompatibilityPayload: RetiredSystemCompatibilityPayload = {
+    kind: "system-compatibility",
+    template: { contractKey: "hero" },
+  };
   const catalogA = makeResource(TEMPLATE_A, "TD6 边界模板 A", CHECKSUM_A, 11);
-  catalogA.sourceReference = `legacy_system_${systemCompatibility.template.contractKey}`;
+  catalogA.sourceReference = `legacy_system_${retiredCompatibilityPayload.template.contractKey}`;
   const catalogB = makeResource(TEMPLATE_B, "TD6 边界模板 B", CHECKSUM_B, 22);
   const server = await installBoundaryServer(
     page,
     [catalogA, catalogB],
-    [systemCompatibility],
+    [retiredCompatibilityPayload],
   );
   const exactA = structuredClone(catalogA);
   exactA.description = "仅来自 exact GET 的新鲜描述";
@@ -683,11 +687,14 @@ async function editTemplateName(page: Page, name: string) {
 }
 
 async function createUnsavedTemplate(page: Page) {
-  await page.getByRole("button", { name: "顶部新建模板", exact: true }).click();
+  await page
+    .getByRole("complementary", { name: "模板组件库" })
+    .getByRole("button", { name: "新建模板", exact: true })
+    .click();
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
   await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
-  await dialog.getByRole("button", { name: /竖版 4:5/ }).click();
+  await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: /上图下文/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
@@ -812,8 +819,9 @@ test.describe("普通保存响应恢复（自有 API Mock）", () => {
         expect((await readSessionSnapshot(page)).dirty).toBe(false);
         expect(server.resources.get(templateId)?.draft.definition.name).toBe("换一个模板名称");
       } else if (newTemplate) {
-        await expect(page.locator(".ant-message-notice-content").last()).not.toContainText("修改模板名称");
-        await expect(page.locator(".ant-message-notice-content").last()).toContainText(
+        const conflictDialog = page.getByRole("dialog", { name: "模板保存发生冲突" });
+        await expect(conflictDialog).not.toContainText("修改模板名称");
+        await expect(conflictDialog).toContainText(
           scenario === "同ID内容冲突" ? "服务端模板身份或版本与本次保存不一致" : "暂时无法确认服务端保存结果",
         );
       }

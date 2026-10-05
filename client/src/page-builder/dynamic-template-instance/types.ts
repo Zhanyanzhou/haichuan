@@ -115,12 +115,26 @@ export function readResolvedDynamicTemplateDefinitions(
     const record = candidate as Record<string, unknown>;
     if (
       typeof record.templateId !== "string"
-      || !Number.isInteger(record.version)
+      || !record.templateId.trim()
       || typeof record.version !== "number"
+      || !Number.isInteger(record.version)
+      || record.version <= 0
+      || typeof record.schemaVersion !== "number"
+      || !Number.isInteger(record.schemaVersion)
+      || record.schemaVersion <= 0
+      || typeof record.definitionChecksum !== "string"
+      || !record.definitionChecksum.trim()
       || !record.definition
+      || typeof record.definition !== "object"
+      || Array.isArray(record.definition)
     ) return [];
     const expectedKey = dynamicTemplateVersionKey(record.templateId, record.version);
     if (key !== expectedKey) return [];
+    const definition = record.definition as Record<string, unknown>;
+    if (
+      definition.templateId !== record.templateId
+      || definition.schemaVersion !== record.schemaVersion
+    ) return [];
     return [[key, candidate as ResolvedDynamicTemplateDefinition]];
   }));
 }

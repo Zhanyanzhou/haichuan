@@ -8,8 +8,10 @@ import {
   ParseIntPipe,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { PartnerApplicationsService } from './partner-applications.service';
@@ -19,6 +21,7 @@ import { PartnerApplicationQueryDto } from './dto/partner-application-query.dto'
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { SkipGenericAudit } from '../../common/decorators/skip-generic-audit.decorator';
 import type {
   CustomerRequest,
   StaffRequest,
@@ -37,8 +40,14 @@ export class PartnerApplicationsController {
   @UseGuards(CustomerAuthGuard)
   @Get('me')
   @ApiOperation({ summary: '获取我的最近申请与当前合作状态' })
-  getMyApplication(@Req() request: CustomerRequest) {
-    return this.service.findMyLatest(request.customer.id);
+  getMyApplication(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.vary('Cookie');
+    response.vary('Authorization');
+    return this.service.findMyLatest(request.customer);
   }
 
   @Public()
@@ -47,7 +56,7 @@ export class PartnerApplicationsController {
   @Post()
   @ApiOperation({ summary: '提交合作申请' })
   submit(@Req() request: CustomerRequest, @Body() dto: CreatePartnerApplicationDto) {
-    return this.service.submit(request.customer.id, dto);
+    return this.service.submit(request.customer.id, dto, request.customer.authVersion);
   }
 
   @Public()
@@ -57,7 +66,7 @@ export class PartnerApplicationsController {
   @ApiOperation({ summary: '补充资料 / 被驳回后重新提交（新建历史版本）' })
   resubmit(@Req() request: CustomerRequest, @Body() dto: CreatePartnerApplicationDto) {
     // 与 submit 同逻辑：新增一条历史记录，保留旧版本
-    return this.service.submit(request.customer.id, dto);
+    return this.service.submit(request.customer.id, dto, request.customer.authVersion);
   }
 
   /* ═══ 后台（员工）═══ */
@@ -67,21 +76,36 @@ export class PartnerApplicationsController {
   @Roles('CUSTOMER_SERVICE', 'ADMIN', 'SUPER_ADMIN')
   @Get()
   @ApiOperation({ summary: '合作申请列表（按状态筛选、分页）' })
-  list(@Query() query: PartnerApplicationQueryDto) {
-    return this.service.findAll(query);
+  list(
+    @Req() request: StaffRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Query() query: PartnerApplicationQueryDto,
+  ) {
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.vary('Cookie');
+    response.vary('Authorization');
+    return this.service.findAll(query, request.user);
   }
 
   @ApiBearerAuth()
   @Roles('CUSTOMER_SERVICE', 'ADMIN', 'SUPER_ADMIN')
   @Get(':id')
   @ApiOperation({ summary: '合作申请详情' })
-  detail(@Param('id', ParseIntPipe) id: number) {
-    return this.service.findById(id);
+  detail(
+    @Req() request: StaffRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    response.vary('Cookie');
+    response.vary('Authorization');
+    return this.service.findById(id, request.user);
   }
 
   @ApiBearerAuth()
   @Roles('CUSTOMER_SERVICE', 'ADMIN', 'SUPER_ADMIN')
   @Put(':id/review')
+  @SkipGenericAudit()
   @ApiOperation({ summary: '审核合作申请（通过/补充/驳回/暂停）' })
   review(
     @Req() request: StaffRequest,

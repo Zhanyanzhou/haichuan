@@ -1,7 +1,6 @@
 export const SOURCE_HASH = "1".repeat(64);
 export const CONTENT_HASHES = {
   aboutZh: "2".repeat(64),
-  aboutEn: "3".repeat(64),
   legalZh: "4".repeat(64),
   productZh: "5".repeat(64),
 };
@@ -12,6 +11,7 @@ export const BASE_HTML = `<!doctype html>
     <meta charset="UTF-8">
     <meta name="description" content="SPA fallback">
     <meta name="keywords" content="中文基础壳关键词">
+    <meta name="robots" content="noindex, nofollow">
     <title>SPA fallback</title>
   </head>
   <body>
@@ -22,7 +22,7 @@ export const BASE_HTML = `<!doctype html>
 
 export function makeRoute(overrides = {}) {
   const path = overrides.path ?? "/about";
-  const locale = overrides.locale ?? (path === "/en" || path.startsWith("/en/") ? "en" : "zh-CN");
+  const locale = overrides.locale ?? "zh-CN";
   const kind = overrides.kind ?? "page";
   const productCode = overrides.productCode;
   const hash = overrides.hash ?? CONTENT_HASHES.aboutZh;
@@ -39,10 +39,11 @@ export function makeRoute(overrides = {}) {
     contentHashAfter: overrides.contentHashAfter ?? hash,
     lastModified: overrides.lastModified ?? "2026-09-13",
     siteName: overrides.siteName ?? "Haichuan Jewelry",
-    title: overrides.title ?? (locale === "en" ? "About Haichuan" : "关于海川"),
-    description: overrides.description ?? (locale === "en" ? "Human-reviewed English introduction." : "经人工审核的品牌介绍。"),
+    title: overrides.title ?? "关于海川",
+    description: overrides.description ?? "经人工审核的品牌介绍。",
     shareImage: overrides.shareImage ?? "https://cdn.example.test/seo/share.jpg",
-    renderedBodyHtml: overrides.renderedBodyHtml ?? `<main><h1>${locale === "en" ? "About" : "关于我们"}</h1><p>Published body.</p></main>`,
+    renderedBodyHtml: overrides.renderedBodyHtml ?? "<main><h1>关于我们</h1><p>Published body.</p></main>",
+    ...(overrides.bootstrapPageDocument === undefined ? {} : { bootstrapPageDocument: overrides.bootstrapPageDocument }),
     structuredData: overrides.structuredData ?? (kind === "product"
       ? {
         "@context": "https://schema.org",
@@ -73,12 +74,6 @@ export function makeRepresentativeRoutes() {
       alternateKey: "page:about",
       hash: CONTENT_HASHES.aboutZh,
       title: "关于海川 <珠宝>",
-    }),
-    makeRoute({
-      path: "/en/about",
-      locale: "en",
-      alternateKey: "page:about",
-      hash: CONTENT_HASHES.aboutEn,
     }),
     makeRoute({
       path: "/privacy",

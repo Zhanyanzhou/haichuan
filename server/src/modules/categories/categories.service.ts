@@ -1,6 +1,7 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Category } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, type Category } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
 import { customerFacingProductWhereForVisibilities } from '../products/product-eligibility';
 
@@ -15,9 +16,35 @@ type AnnotatedManageCategoryNode = Omit<ManageCategoryNode, 'products' | 'childr
   hasPublicProduct: boolean;
 };
 
+type CategoryActor = Pick<StaffPrincipal, 'id' | 'sessionFamilyId'>;
+type CategoryDb = Prisma.TransactionClient | PrismaService;
+
 @Injectable()
 export class CategoriesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async lockAuthorizedActor(
+    tx: Prisma.TransactionClient,
+    actor: CategoryActor,
+  ): Promise<void> {
+    if (!actor || !Number.isSafeInteger(actor.id) || actor.id <= 0) {
+      throw new ForbiddenException('当前员工已停用或无权访问分类管理');
+    }
+    const locked = await tx.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN', 'EDITOR') FOR UPDATE`,
+    );
+    if (locked.length !== 1) {
+      throw new ForbiddenException('当前员工已停用或无权访问分类管理');
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = await tx.$queryRaw<Array<{ id: number }>>(
+        Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+      );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException('当前员工会话已失效，不能访问分类管理');
+      }
+    }
+  }
 
   private retainPublicBranches<T extends { id: number; children?: T[] }>(
     nodes: T[],
@@ -106,115 +133,125 @@ export class CategoriesService {
   }
 
   /** 管理端分类树：保留已停用的二、三级类目，便于重新启用。 */
-  async findManageTree() {
-    const publicProducts = {
-      where: customerFacingProductWhereForVisibilities(['PUBLIC']),
-      take: 1,
-      select: { id: true },
-    };
-    const categories = await this.prisma.category.findMany({
-      where: { level: 1 },
-      orderBy: { sortOrder: 'asc' },
-      include: {
-        products: publicProducts,
-        children: {
-          orderBy: { sortOrder: 'asc' },
-          include: {
-            products: publicProducts,
-            _count: { select: { children: true, products: true } },
-            children: {
-              orderBy: { sortOrder: 'asc' },
-              include: {
-                products: publicProducts,
-                _count: { select: { children: true, products: true } },
+  async findManageTree(actor: CategoryActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedActor(tx, actor);
+      const publicProducts = {
+        where: customerFacingProductWhereForVisibilities(['PUBLIC']),
+        take: 1,
+        select: { id: true },
+      };
+      const categories = await tx.category.findMany({
+        where: { level: 1 },
+        orderBy: { sortOrder: 'asc' },
+        include: {
+          products: publicProducts,
+          children: {
+            orderBy: { sortOrder: 'asc' },
+            include: {
+              products: publicProducts,
+              _count: { select: { children: true, products: true } },
+              children: {
+                orderBy: { sortOrder: 'asc' },
+                include: {
+                  products: publicProducts,
+                  _count: { select: { children: true, products: true } },
+                },
               },
             },
           },
         },
-      },
+      });
+      const annotate = (node: ManageCategoryNode): AnnotatedManageCategoryNode => {
+        const children = (node.children ?? []).map(annotate);
+        const hasPublicProduct =
+          (node.products?.length ?? 0) > 0 ||
+          children.some((child) => child.hasPublicProduct);
+        const { products: _products, ...rest } = node;
+        return { ...rest, children, hasPublicProduct };
+      };
+      return categories.map(annotate);
     });
-    const annotate = (node: ManageCategoryNode): AnnotatedManageCategoryNode => {
-      const children = (node.children ?? []).map(annotate);
-      const hasPublicProduct =
-        (node.products?.length ?? 0) > 0 ||
-        children.some((child) => child.hasPublicProduct);
-      const { products: _products, ...rest } = node;
-      return { ...rest, children, hasPublicProduct };
-    };
-    return categories.map(annotate);
   }
 
-  async resolveReferences(inputSlugs: string[]) {
+  async resolveReferences(inputSlugs: string[], actor: CategoryActor) {
     const slugs = inputSlugs
       .map((slug) => slug.trim())
       .filter(Boolean)
       .slice(0, 20);
-    if (slugs.length === 0) return [];
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedActor(tx, actor);
+      if (slugs.length === 0) return [];
 
-    const categories = await this.prisma.category.findMany({
-      select: {
-        id: true,
-        parentId: true,
-        slug: true,
-        name: true,
-        level: true,
-        coverImage: true,
-        isActive: true,
-        deletedAt: true,
-        products: {
-          where: {
-            ...customerFacingProductWhereForVisibilities(['PUBLIC']),
+      const categories = await tx.category.findMany({
+        select: {
+          id: true,
+          parentId: true,
+          slug: true,
+          name: true,
+          level: true,
+          coverImage: true,
+          isActive: true,
+          deletedAt: true,
+          products: {
+            where: {
+              ...customerFacingProductWhereForVisibilities(['PUBLIC']),
+            },
+            take: 1,
+            select: { id: true },
           },
-          take: 1,
-          select: { id: true },
         },
-      },
-    });
-    const byId = new Map(categories.map((category) => [category.id, category]));
-    const publicBranchIds = new Set<number>();
-    for (const category of categories) {
-      if (category.deletedAt || !category.isActive || category.products.length === 0) continue;
-      let current: (typeof categories)[number] | undefined = category;
-      while (current) {
-        publicBranchIds.add(current.id);
-        current = current.parentId ? byId.get(current.parentId) : undefined;
+      });
+      const byId = new Map(categories.map((category) => [category.id, category]));
+      const publicBranchIds = new Set<number>();
+      for (const category of categories) {
+        if (category.deletedAt || !category.isActive || category.products.length === 0) continue;
+        let current: (typeof categories)[number] | undefined = category;
+        while (current) {
+          publicBranchIds.add(current.id);
+          current = current.parentId ? byId.get(current.parentId) : undefined;
+        }
       }
-    }
-    const bySlug = new Map(categories.map((category) => [category.slug, category]));
+      const bySlug = new Map(categories.map((category) => [category.slug, category]));
 
-    return slugs.map((slug) => {
-      const category = bySlug.get(slug);
-      if (!category) {
-        return { slug, eligible: false, reason: 'NOT_FOUND' as const };
-      }
-      const reason = category.deletedAt
-        ? 'DELETED'
-        : !category.isActive
-          ? 'INACTIVE'
-          : !publicBranchIds.has(category.id)
-            ? 'NO_PUBLIC_PRODUCT'
-            : !category.coverImage
-              ? 'MISSING_COVER'
-              : 'AVAILABLE';
-      return {
-        slug,
-        id: category.id,
-        name: category.name,
-        level: category.level,
-        coverImage: category.coverImage,
-        eligible: reason === 'AVAILABLE',
-        reason,
-      };
+      return slugs.map((slug) => {
+        const category = bySlug.get(slug);
+        if (!category) {
+          return { slug, eligible: false, reason: 'NOT_FOUND' as const };
+        }
+        const reason = category.deletedAt
+          ? 'DELETED'
+          : !category.isActive
+            ? 'INACTIVE'
+            : !publicBranchIds.has(category.id)
+              ? 'NO_PUBLIC_PRODUCT'
+              : !category.coverImage
+                ? 'MISSING_COVER'
+                : 'AVAILABLE';
+        return {
+          slug,
+          id: category.id,
+          name: category.name,
+          level: category.level,
+          coverImage: category.coverImage,
+          eligible: reason === 'AVAILABLE',
+          reason,
+        };
+      });
     });
   }
 
-  private async getParentCategory(parentId: unknown, expectedLevel: 1 | 2) {
+  private async getParentCategory(
+    parentId: unknown,
+    expectedLevel: 1 | 2,
+    db: CategoryDb,
+  ) {
     const id = Number(parentId);
     if (!Number.isInteger(id)) {
       throw new BadRequestException(`请选择${expectedLevel === 1 ? '一级' : '二级'}类目`);
     }
 
-    const parent = await this.prisma.category.findUnique({ where: { id } });
+    const parent = await db.category.findUnique({ where: { id } });
     if (!parent || parent.level !== expectedLevel) {
       throw new BadRequestException(
         `${expectedLevel === 1 ? '二级' : '三级'}类目只能归属到${expectedLevel === 1 ? '一级' : '二级'}类目`,
@@ -252,100 +289,110 @@ export class CategoriesService {
     };
   }
 
-  private async ensureSlugAvailable(slug: string | undefined, excludeId?: number) {
+  private async ensureSlugAvailable(
+    slug: string | undefined,
+    db: CategoryDb,
+    excludeId?: number,
+  ) {
     if (!slug) return;
-    const existing = await this.prisma.category.findUnique({ where: { slug } });
+    const existing = await db.category.findUnique({ where: { slug } });
     if (existing && existing.id !== excludeId) {
       throw new ConflictException('该 Slug 已被其他类目使用');
     }
   }
 
-  async create(data: CreateCategoryDto) {
+  async create(data: CreateCategoryDto, actor: CategoryActor) {
     const hasParent = data.parentId !== undefined && data.parentId !== null;
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedActor(tx, actor);
 
-    // 创建一级类目（parentId 为空）
-    if (!hasParent) {
-      const level = 1 as const;
+      // 创建一级类目（parentId 为空）
+      if (!hasParent) {
+        const level = 1 as const;
+        const categoryData = this.categoryData(data, level);
+        if (!categoryData.name || !categoryData.slug) {
+          throw new BadRequestException('请填写一级类目名称和 Slug');
+        }
+        await this.ensureSlugAvailable(categoryData.slug, tx);
+        return tx.category.create({
+          data: {
+            ...categoryData,
+            name: categoryData.name!,
+            slug: categoryData.slug!,
+            level: 1,
+            parentId: null,
+          },
+        });
+      }
+
+      // 创建二/三级类目
+      const parentId = Number(data.parentId);
+      const parent = await tx.category.findUnique({ where: { id: parentId } });
+      if (!parent || ![1, 2].includes(parent.level)) {
+        throw new BadRequestException('请选择一级或二级类目作为归属');
+      }
+      const level = (parent.level + 1) as 2 | 3;
       const categoryData = this.categoryData(data, level);
       if (!categoryData.name || !categoryData.slug) {
-        throw new BadRequestException('请填写一级类目名称和 Slug');
+        throw new BadRequestException(`请填写${level === 2 ? '二级' : '三级'}类目名称和 Slug`);
       }
-      await this.ensureSlugAvailable(categoryData.slug);
-      return this.prisma.category.create({
+      await this.ensureSlugAvailable(categoryData.slug, tx);
+      return tx.category.create({
         data: {
           ...categoryData,
           name: categoryData.name!,
           slug: categoryData.slug!,
-          level: 1,
-          parentId: null,
+          parentId: parent.id,
+          level,
         },
       });
-    }
-
-    // 创建二/三级类目
-    const parentId = Number(data.parentId);
-    const parent = await this.prisma.category.findUnique({ where: { id: parentId } });
-    if (!parent || ![1, 2].includes(parent.level)) {
-      throw new BadRequestException('请选择一级或二级类目作为归属');
-    }
-    const level = (parent.level + 1) as 2 | 3;
-    const categoryData = this.categoryData(data, level);
-    if (!categoryData.name || !categoryData.slug) {
-      throw new BadRequestException(`请填写${level === 2 ? '二级' : '三级'}类目名称和 Slug`);
-    }
-    await this.ensureSlugAvailable(categoryData.slug);
-    return this.prisma.category.create({
-      data: {
-        ...categoryData,
-        name: categoryData.name!,
-        slug: categoryData.slug!,
-        parentId: parent.id,
-        level,
-      },
     });
   }
 
-  async update(id: number, data: UpdateCategoryDto) {
-    const category = await this.prisma.category.findUnique({ where: { id } });
-    if (!category) throw new NotFoundException('类目不存在');
-    if (data.level !== undefined && Number(data.level) !== category.level) {
-      throw new BadRequestException('不支持调整类目层级');
-    }
-    // 一级类目不支持调整归属（本轮不做跨级迁移）
-    if (
-      category.level === 1 &&
-      data.parentId !== undefined &&
-      data.parentId !== null
-    ) {
-      throw new BadRequestException('一级类目不支持调整归属');
-    }
+  async update(id: number, data: UpdateCategoryDto, actor: CategoryActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedActor(tx, actor);
+      const category = await tx.category.findUnique({ where: { id } });
+      if (!category) throw new NotFoundException('类目不存在');
+      if (data.level !== undefined && Number(data.level) !== category.level) {
+        throw new BadRequestException('不支持调整类目层级');
+      }
+      // 一级类目不支持调整归属（本轮不做跨级迁移）
+      if (
+        category.level === 1 &&
+        data.parentId !== undefined &&
+        data.parentId !== null
+      ) {
+        throw new BadRequestException('一级类目不支持调整归属');
+      }
 
-    const level = category.level as 1 | 2 | 3;
-    const categoryData = this.categoryData(data, level);
-    await this.ensureSlugAvailable(categoryData.slug, id);
+      const level = category.level as 1 | 2 | 3;
+      const categoryData = this.categoryData(data, level);
+      await this.ensureSlugAvailable(categoryData.slug, tx, id);
 
-    // 停用与 delete() 同口径：仍有未软删除子分类或商品时拒绝，
-    // 避免前台分类树隐藏该类目但商品在目录/搜索中仍可见可购的口径分裂。
-    if (categoryData.isActive === false) {
-      await this.assertDeactivatable(id);
-    }
+      // 停用与 delete() 同口径：仍有未软删除子分类或商品时拒绝，
+      // 避免前台分类树隐藏该类目但商品在目录/搜索中仍可见可购的口径分裂。
+      if (categoryData.isActive === false) {
+        await this.assertDeactivatable(id, tx);
+      }
 
-    const parent =
-      category.level === 1 || data.parentId === undefined
-        ? undefined
-        : await this.getParentCategory(data.parentId, (level - 1) as 1 | 2);
-    return this.prisma.category.update({
-      where: { id },
-      data: {
-        ...categoryData,
-        ...(parent ? { parentId: parent.id } : {}),
-      },
+      const parent =
+        category.level === 1 || data.parentId === undefined
+          ? undefined
+          : await this.getParentCategory(data.parentId, (level - 1) as 1 | 2, tx);
+      return tx.category.update({
+        where: { id },
+        data: {
+          ...categoryData,
+          ...(parent ? { parentId: parent.id } : {}),
+        },
+      });
     });
   }
 
   /** 停用前检查：仍有关联的未软删除子分类或商品时拒绝。 */
-  private async assertDeactivatable(id: number) {
-    const category = await this.prisma.category.findUnique({
+  private async assertDeactivatable(id: number, db: CategoryDb) {
+    const category = await db.category.findUnique({
       where: { id },
       include: {
         _count: {
@@ -362,15 +409,21 @@ export class CategoriesService {
     }
   }
 
-  async delete(id: number) {
-    const category = await this.prisma.category.findUnique({ where: { id } });
-    if (!category) throw new NotFoundException('类目不存在');
-    await this.assertDeactivatable(id);
-    return this.prisma.category.update({ where: { id }, data: { isActive: false } });
+  async delete(id: number, actor: CategoryActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedActor(tx, actor);
+      const category = await tx.category.findUnique({ where: { id } });
+      if (!category) throw new NotFoundException('类目不存在');
+      await this.assertDeactivatable(id, tx);
+      return tx.category.update({ where: { id }, data: { isActive: false } });
+    });
   }
 
   /** 批量调整分类排序（仅同级 sortOrder，事务保证原子性）。 */
-  async reorder(items: { id: number; sortOrder: number }[]) {
+  async reorder(
+    items: { id: number; sortOrder: number }[],
+    actor: CategoryActor,
+  ) {
     if (!Array.isArray(items) || items.length === 0) {
       throw new BadRequestException('排序数据不能为空');
     }
@@ -387,14 +440,15 @@ export class CategoriesService {
       }
       seen.add(it.id);
     }
-    await this.prisma.$transaction(
-      items.map((it) =>
-        this.prisma.category.update({
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockAuthorizedActor(tx, actor);
+      for (const it of items) {
+        await tx.category.update({
           where: { id: it.id },
           data: { sortOrder: it.sortOrder },
-        }),
-      ),
-    );
+        });
+      }
+    });
     return { success: true, updated: items.length };
   }
 }

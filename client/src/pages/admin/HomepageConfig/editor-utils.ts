@@ -7,6 +7,8 @@ import type { ReactNode } from "react";
 import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { isMobileCanvasWidth } from "@/page-builder/config/blockContracts";
 import type { PublishValidationIssue } from "@/page-builder/inspector/publishValidation";
+import { collapseManagedMediaAuthorizationIssues } from "@/page-builder/inspector/managedMediaPublishIssues";
+import { DYNAMIC_TEMPLATE_BLOCK_TYPE } from "@/page-builder/dynamic-template-instance/types";
 import { isPuckDocument, type PuckDocument, type PuckProps } from "@/page-builder/types";
 
 export type ViewportPreset = {
@@ -187,15 +189,24 @@ export function resolvePublishValidationIssues(result: {
   const fallbackErrors = (result.errors ?? [])
     .filter((message) => !structuredErrorMessages.has(message))
     .map((message) => ({ message, severity: "error" as const }));
-  return [...structuredIssues, ...fallbackErrors];
+  return collapseManagedMediaAuthorizationIssues([
+    ...structuredIssues,
+    ...fallbackErrors,
+  ]);
 }
 
 export function getModuleDisplayName(
   type: string,
-  // 保留第二参以兼容历史调用签名；模块名固定取模板显示名，不再读取 props。
-  _props?: Record<string, unknown>,
+  props?: Record<string, unknown>,
 ) {
-  // 2026-08-16 用户决策：模块名固定为模板显示名，忽略历史自定义 moduleName。
+  // 普通模块继续使用固定模板名；动态模板实例的 moduleName 由固定模板版本写入，
+  // 表达当前实例引用的模板身份，不是运营可随意填写的历史自定义名称。
+  if (type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
+    const templateName = typeof props?.moduleName === "string"
+      ? props.moduleName.trim()
+      : "";
+    if (templateName) return templateName;
+  }
   return BLOCK_META[type]?.name ?? type;
 }
 

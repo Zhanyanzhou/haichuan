@@ -1,6 +1,6 @@
 import {
   IsString, IsOptional, IsInt, IsBoolean, IsEnum, IsNumber,
-  Min, MaxLength, IsNotEmpty, ValidateNested, IsArray, ArrayMaxSize,
+  Min, MaxLength, IsNotEmpty, ValidateNested, IsArray, ArrayMaxSize, ArrayUnique,
   IsIn, IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -153,7 +153,12 @@ export class CreateProductDto {
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(5)
+  @ArrayUnique()
   @IsString({ each: true })
+  @IsIn(['EXPRESS', 'STORE_PICKUP', 'DEDICATED'], {
+    each: true,
+    message: '提取方式不正确，请重新选择',
+  })
   deliveryMethods?: string[];
 
   @IsOptional()

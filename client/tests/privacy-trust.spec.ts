@@ -146,11 +146,90 @@ test.describe("隐私页面", () => {
     await expectNoHorizontalOverflow(page);
   });
 
-  test("咨询表单隐私链接跳转到 /privacy", async ({ page }) => {
+  test("咨询表单阅读隐私说明后恢复短时填写状态且不恢复同意", async ({ page }) => {
     await page.goto("/contact");
-    const privacyLink = page.getByRole("link", { name: "隐私说明" }).first();
+    await page.locator("#cf-name").fill("本地回填验收用户");
+    await page.locator("#cf-phone").fill("13800000000");
+    await page.locator("#cf-message").fill("只用于本地隐私返回链路验收");
+    await page.locator("#cf-privacy-consent").check();
+
+    const privacyLink = page.locator("form").getByRole("link", { name: "隐私说明" });
+    const privacyLinkBox = await privacyLink.boundingBox();
+    expect(privacyLinkBox).not.toBeNull();
+    expect(privacyLinkBox!.width).toBeGreaterThanOrEqual(44);
+    expect(privacyLinkBox!.height).toBeGreaterThanOrEqual(44);
     await privacyLink.click();
     await expect.poll(() => new URL(page.url()).pathname).toBe("/privacy");
+    await page.getByRole("link", { name: "返回继续填写" }).click();
+
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/contact");
+    await expect(page.locator("#cf-name")).toHaveValue("本地回填验收用户");
+    await expect(page.locator("#cf-phone")).toHaveValue("13800000000");
+    await expect(page.locator("#cf-message")).toHaveValue("只用于本地隐私返回链路验收");
+    await expect(page.locator("#cf-privacy-consent")).not.toBeChecked();
+
+    const browserStorage = await page.evaluate(() => ({
+      local: { ...localStorage },
+      session: { ...sessionStorage },
+    }));
+    expect(JSON.stringify(browserStorage)).not.toContain("本地回填验收用户");
+    expect(JSON.stringify(browserStorage)).not.toContain("13800000000");
+    expect(JSON.stringify(browserStorage)).not.toContain("只用于本地隐私返回链路验收");
+  });
+
+  test("客户身份切换后不会恢复上一客户的咨询草稿", async ({ page }) => {
+    await page.goto("/contact");
+    await page.evaluate(async () => {
+      const { useCustomerAuthStore } = await import("/src/store/customerAuthStore.ts");
+      useCustomerAuthStore.getState().setAuth({
+        id: 101,
+        name: "客户甲",
+        phone: "13800000101",
+        email: "a-owner@example.test",
+      });
+    });
+
+    await expect(page.locator("#cf-name")).toHaveValue("客户甲");
+    await page.locator("#cf-email").fill("a-private@example.test");
+    await page.locator("#cf-message").fill("客户甲的私密咨询内容");
+    await page.locator("form").getByRole("link", { name: "隐私说明" }).click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/privacy");
+
+    await page.evaluate(async () => {
+      const { useCustomerAuthStore } = await import("/src/store/customerAuthStore.ts");
+      useCustomerAuthStore.getState().setAuth({
+        id: 202,
+        name: "客户乙",
+        phone: "13800000202",
+        email: "b-owner@example.test",
+      });
+    });
+    await page.getByRole("link", { name: "返回继续填写" }).click();
+
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/contact");
+    await expect(page.locator("#cf-name")).toHaveValue("客户乙");
+    await expect(page.locator("#cf-phone")).toHaveValue("13800000202");
+    await expect(page.locator("#cf-email")).toHaveValue("b-owner@example.test");
+    await expect(page.locator("#cf-message")).toHaveValue("");
+    await expect(page.locator("#cf-privacy-consent")).not.toBeChecked();
+    await expect(page.locator("form")).not.toContainText("客户甲的私密咨询内容");
+
+    const selectionDraftForAnotherOwner = await page.evaluate(async () => {
+      const {
+        consultationDraftOwner,
+        readSelectionConsultationDraft,
+        saveSelectionConsultationDraft,
+      } = await import("/src/utils/consultationJourneyState.ts");
+      saveSelectionConsultationDraft(consultationDraftOwner(101), {
+        customerName: "客户甲",
+        phone: "13800000101",
+        email: "a-private@example.test",
+        wechat: "a-private-wechat",
+        message: "客户甲的选款咨询内容",
+      });
+      return readSelectionConsultationDraft(consultationDraftOwner(202));
+    });
+    expect(selectionDraftForAnotherOwner).toBeNull();
   });
 
   test("页脚隐私链接跳转到 /privacy", async ({ page }) => {
@@ -183,7 +262,11 @@ test.describe("匿名行为分析", () => {
     await page.context().clearCookies();
     await page.addInitScript(() => {
       sessionStorage.removeItem("hc.analytics-session");
-      localStorage.removeItem("hc.analytics-visitor");
+      sessionStorage.removeItem("hc.analytics-visitor");
+      localStorage.setItem("hc.analytics-visitor", JSON.stringify({
+        id: "v_legacy-cross-session-id",
+        createdAt: Date.now(),
+      }));
       localStorage.removeItem("_asid");
     });
     await page.route("**/api/analytics/track", async (route) => {
@@ -207,8 +290,9 @@ test.describe("匿名行为分析", () => {
       await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
     ).toBeNull();
     expect(
-      await page.evaluate(() => localStorage.getItem("hc.analytics-visitor")),
+      await page.evaluate(() => sessionStorage.getItem("hc.analytics-visitor")),
     ).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem("hc.analytics-visitor"))).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem("_asid"))).toBeNull();
   });
 
@@ -218,7 +302,11 @@ test.describe("匿名行为分析", () => {
     await page.context().clearCookies();
     await page.addInitScript(() => {
       sessionStorage.removeItem("hc.analytics-session");
-      localStorage.removeItem("hc.analytics-visitor");
+      sessionStorage.removeItem("hc.analytics-visitor");
+      localStorage.setItem("hc.analytics-visitor", JSON.stringify({
+        id: "v_legacy-cross-session-id",
+        createdAt: Date.now(),
+      }));
       localStorage.removeItem("_asid");
     });
     await page.route("**/api/analytics/track", async (route) => {
@@ -241,8 +329,9 @@ test.describe("匿名行为分析", () => {
       await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
     ).toBeNull();
     expect(
-      await page.evaluate(() => localStorage.getItem("hc.analytics-visitor")),
+      await page.evaluate(() => sessionStorage.getItem("hc.analytics-visitor")),
     ).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem("hc.analytics-visitor"))).toBeNull();
 
     await page.getByRole("button", { name: "同意匿名分析" }).click();
     await expect.poll(() => analyticsRequests.length).toBe(1);
@@ -265,11 +354,12 @@ test.describe("匿名行为分析", () => {
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const stored = localStorage.getItem("hc.analytics-visitor");
+          const stored = sessionStorage.getItem("hc.analytics-visitor");
           return stored ? JSON.parse(stored).id : null;
         }),
       )
       .toMatch(/^v_[a-z0-9-]+$/i);
+    expect(await page.evaluate(() => localStorage.getItem("hc.analytics-visitor"))).toBeNull();
 
     await page
       .getByRole("button", { name: "打开分析数据偏好设置" })
@@ -279,8 +369,9 @@ test.describe("匿名行为分析", () => {
       await page.evaluate(() => sessionStorage.getItem("hc.analytics-session")),
     ).toBeNull();
     expect(
-      await page.evaluate(() => localStorage.getItem("hc.analytics-visitor")),
+      await page.evaluate(() => sessionStorage.getItem("hc.analytics-visitor")),
     ).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem("hc.analytics-visitor"))).toBeNull();
     await expect
       .poll(() => page.evaluate(() => decodeURIComponent(document.cookie)))
       .toContain("hc_analytics_consent=analytics-v1:withdrawn");

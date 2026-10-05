@@ -489,6 +489,15 @@ const uploadController = await readSrc(
 const uploadService = await readSrc(
   "server/src/modules/upload/upload.service.ts",
 );
+const paymentProofsController = await readSrc(
+  "server/src/modules/payment-proofs/payment-proofs.controller.ts",
+);
+const paymentProofsService = await readSrc(
+  "server/src/modules/payment-proofs/payment-proofs.service.ts",
+);
+const paymentProofStorage = await readSrc(
+  "server/src/modules/payment-proofs/payment-proof-storage.ts",
+);
 const mediaStoragePaths = await readSrc(
   "server/src/modules/upload/media-storage-paths.ts",
 );
@@ -596,12 +605,13 @@ check("客户售后：服务端校验归属、商品、状态并串行化重复�
 });
 
 check("付款凭证：新上传文件使用私有存储且读取需要鉴权", () => {
-  const paymentProofUpload = uploadController.match(
-    /@Post\('payment-proof'\)[\s\S]*?async uploadPaymentProof[\s\S]*?\n  \}/,
+  const paymentProofUpload = paymentProofsController.match(
+    /@Public\(\)[\s\S]*?@UseGuards\(CustomerAuthGuard, CustomerCommerceGuard\)[\s\S]*?@Post\('payment-proof\/:orderId'\)[\s\S]*?uploadAndSubmit\([\s\S]*?\n  \}/,
   );
   assert.ok(
-    paymentProofUpload?.[0].includes("uploadPrivatePaymentProof"),
-    "付款凭证上传必须进入私有存储方法",
+    paymentProofUpload?.[0].includes("this.paymentProofs.uploadAndSubmit(")
+      && paymentProofUpload[0].includes("request.customer"),
+    "付款凭证上传必须携带已认证客户主体进入专用服务",
   );
   assert.ok(
     uploadController.includes("@Get('payment-proofs/:orderId')"),
@@ -610,11 +620,16 @@ check("付款凭证：新上传文件使用私有存储且读取需要鉴权", (
   assert.ok(
     mediaStoragePaths.includes(
       "paymentProofRoot: resolve(process.env.PAYMENT_PROOF_MEDIA_ROOT || resolve(cwd, 'private-media', 'payment-proofs'))",
-    ) && uploadService.includes("this.paymentProofRoot"),
+    )
+      && paymentProofsService.includes("resolveMediaStorageRoots().paymentProofRoot")
+      && paymentProofsService.includes("await writeFile(createdAbsolutePath, file.buffer)")
+      && paymentProofStorage.includes("resolveMediaStorageRoots().paymentProofRoot")
+      && uploadService.includes("this.paymentProofRoot"),
     "付款凭证不可保存到公开 uploads 目录",
   );
   assert.ok(
-    !paymentProofUpload?.[0].includes("uploadFile(file)"),
+    !paymentProofUpload?.[0].includes("uploadFile(")
+      && !paymentProofsService.includes("uploadFile("),
     "付款凭证不可复用公开上传接口",
   );
 });
@@ -981,11 +996,18 @@ const checkoutPage = await readSrc(
   "client/src/pages/public/Checkout/index.tsx",
 );
 check("结算页：前端不再提交后端忽略的 customerName/phone/paymentMethod", () => {
-  // checkout 调用仅传 address/customerEmail/items
-  const callMatch = checkoutPage.match(/customerApi\.checkout\(\{[\s\S]*?\}\)/);
-  assert.ok(callMatch, "未找到 checkout 调用");
-  assert.ok(callMatch[0].includes("address"), "前端必须提交 address");
-  assert.ok(callMatch[0].includes("items"), "前端必须提交 items");
+  // 请求对象还参与幂等哈希，因此允许先赋给局部变量再提交，但字段边界仍需静态校验。
+  const requestMatch = checkoutPage.match(/const request = \{[\s\S]*?\n\s*\};/);
+  assert.ok(requestMatch, "未找到 checkout 请求对象");
+  assert.ok(
+    checkoutPage.includes("customerApi.checkout(request, idempotencyKey)"),
+    "未找到携带幂等键的 checkout 调用",
+  );
+  assert.ok(requestMatch[0].includes("address"), "前端必须提交 address");
+  assert.ok(requestMatch[0].includes("items"), "前端必须提交 items");
+  for (const field of ["customerName", "customerPhone", "paymentMethod"]) {
+    assert.ok(!requestMatch[0].includes(field), `前端 checkout 请求不可含 ${field}`);
+  }
   assert.ok(
     !/values\.customerName/.test(checkoutPage),
     "前端不应传 customerName",
@@ -1085,6 +1107,19 @@ check("后台建单：POST /orders 限 SUPER_ADMIN/ADMIN（不含 EDITOR）", ()
   assert.ok(
     !/@Roles\([^)]*EDITOR/.test(manualCreateBlock[0]),
     "create 不可含 EDITOR",
+  );
+});
+
+check("后台建单：控制器与前端 API 强制传递同一幂等键", () => {
+  assert.match(
+    ordersController,
+    /create\([\s\S]*?@IdempotencyKey\(\)\s+idempotencyKey:\s*string[\s\S]*?adminCreation:\s*\{\s*actorId:\s*user\.id,\s*idempotencyKey\s*\}/,
+    "后台建单控制器必须强制读取 Idempotency-Key 并绑定当前员工",
+  );
+  assert.match(
+    customerApi,
+    /create:\s*\(data:\s*CreateOrderInput,\s*idempotencyKey:\s*string\)[\s\S]*?api\.post\("\/orders",\s*data,[\s\S]*?"Idempotency-Key":\s*idempotencyKey/,
+    "前端后台建单 API 必须要求并发送 Idempotency-Key",
   );
 });
 

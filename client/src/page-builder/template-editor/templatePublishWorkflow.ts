@@ -416,6 +416,17 @@ export interface PublishedTemplateFact {
   outcome: "published" | "already-published";
 }
 
+export function describePublishedTemplateAvailability(
+  version: number,
+  catalogStatus: "refreshing" | "fresh",
+) {
+  const catalog = catalogStatus === "fresh" ? "目录已确认可用" : "正在核对页面装修目录";
+  const consequence = version <= 1
+    ? "可在页面装修中选用，不会改任何现有页面。"
+    : "已有页面继续锁定原版本。";
+  return `模板 v${version} 已发布；${catalog}。${consequence}`;
+}
+
 export interface EditingPublishState {
   status: "editing";
   context: LivePublishContext;

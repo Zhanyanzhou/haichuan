@@ -83,7 +83,7 @@ const anomalyOrder = {
   customerPhone: "13900000000",
   orderType: "SPOT",
   status: "PENDING_PAYMENT",
-  anomalyReasons: ["长时间未付款"],
+  anomalyReasons: ["长时间未付款", "付款角色与分期不一致"],
   createdAt: new Date().toISOString(),
 };
 
@@ -139,6 +139,7 @@ test.describe("非管理员角色的页面渲染行为", () => {
     });
     await page.goto("/admin/trade/anomalies");
     await expect(page.getByText("HC2026090200002")).toBeVisible();
+    await expect(page.getByText("付款角色与分期不一致")).toBeVisible();
     await expect(page.getByRole("button", { name: "查看" })).toHaveCount(0);
   });
 

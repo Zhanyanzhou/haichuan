@@ -15,6 +15,12 @@ import {
   type PublicContentLocale,
 } from "@/i18n/publicLocale";
 import { buildAdminLoginPath } from "@/utils/adminReturnPath";
+import {
+  currentSessionEpoch,
+  isCurrentSessionEpoch,
+  StaleSessionResponseError,
+  type SessionDomain,
+} from "@/services/sessionEpoch";
 
 declare module "axios" {
   interface AxiosRequestConfig {
@@ -24,20 +30,28 @@ declare module "axios" {
     sessionDomain?: "admin" | "customer";
     /** 显式刷新必须读取新状态时，可关闭进行中的相同 GET 合并。 */
     dedupe?: boolean;
+    /** 匿名公开流程不绑定身份代次，也不得因异常 401 刷新或清理任一登录身份。 */
+    sessionIndependent?: boolean;
     _sessionRetry?: boolean;
+    _sessionEpoch?: number;
+    _sessionEpochDomain?: SessionDomain;
   }
 
   interface InternalAxiosRequestConfig {
     suppressGlobalError?: boolean;
     sessionDomain?: "admin" | "customer";
     dedupe?: boolean;
+    sessionIndependent?: boolean;
     _sessionRetry?: boolean;
+    _sessionEpoch?: number;
+    _sessionEpochDomain?: SessionDomain;
   }
 }
 
 export type NormalizedRequestError = Error & {
   status?: number;
   errorCode?: string;
+  retryAfterSeconds?: number;
 };
 
 // Vite 浏览器构建会注入 env；Playwright 的 Node 侧静态合同可能直接加载本模块，
@@ -72,12 +86,31 @@ api.defaults.adapter = async (config) => {
   if ((config.method || "get").toLowerCase() !== "get" || config.dedupe === false) {
     return baseAdapter(config);
   }
-  const key = `${config.url}|${JSON.stringify(config.params ?? {})}`;
+  const domain = config._sessionEpochDomain ?? requestDomain(config);
+  const epoch = config._sessionEpoch ?? currentSessionEpoch(domain);
+  const key = `${domain}|${epoch}|${config.url}|${JSON.stringify(config.params ?? {})}`;
   const hit = inflightGets.get(key);
   if (hit) return hit as never;
-  const pending = Promise.resolve(baseAdapter(config)).finally(() =>
-    inflightGets.delete(key),
-  );
+  const assertCurrentSession = () => {
+    if (!isCurrentSessionEpoch(domain, epoch)) {
+      throw new StaleSessionResponseError(domain);
+    }
+  };
+  const pending = Promise.resolve(baseAdapter(config))
+    .then(
+      (response) => {
+        assertCurrentSession();
+        return response;
+      },
+      (error: unknown) => {
+        // Axios adapter 会在非 2xx、超时或网络失败时直接 reject。旧身份的失败
+        // 也必须在响应拦截器之前截断，否则旧 401 会刷新/清空新身份，旧 5xx
+        // 还可能触发全局错误提示。
+        assertCurrentSession();
+        throw error;
+      },
+    )
+    .finally(() => inflightGets.delete(key));
   inflightGets.set(key, pending);
   return pending as never;
 };
@@ -96,6 +129,10 @@ export function requestStatus(error: unknown): number | undefined {
 
 export function requestErrorCode(error: unknown): string | undefined {
   return (error as NormalizedRequestError | undefined)?.errorCode;
+}
+
+export function requestRetryAfterSeconds(error: unknown): number | undefined {
+  return (error as NormalizedRequestError | undefined)?.retryAfterSeconds;
 }
 
 const apiBaseUrl = (clientEnv?.VITE_API_BASE_URL || "/api").replace(
@@ -133,6 +170,11 @@ api.interceptors.request.use((config) => {
     const csrf = readCookie("hc_csrf");
     if (csrf) config.headers["X-CSRF-Token"] = csrf;
   }
+  if (!config.sessionIndependent) {
+    const domain = requestDomain(config);
+    config._sessionEpochDomain = domain;
+    config._sessionEpoch = currentSessionEpoch(domain);
+  }
   return config;
 });
 
@@ -143,8 +185,13 @@ const sessionClient = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-let adminRefresh: Promise<void> | null = null;
-let customerRefresh: Promise<void> | null = null;
+type SessionRefresh = {
+  epoch: number;
+  promise: Promise<void>;
+};
+
+let adminRefresh: SessionRefresh | null = null;
+let customerRefresh: SessionRefresh | null = null;
 
 function responsePayload<T>(body: unknown): T {
   const envelope = body as { data?: T } | undefined;
@@ -171,6 +218,20 @@ function requestDomain(
     : "admin";
 }
 
+function assertCurrentRequestSession(
+  config: InternalAxiosRequestConfig | undefined,
+) {
+  const domain = config?._sessionEpochDomain;
+  const epoch = config?._sessionEpoch;
+  if (
+    domain
+    && typeof epoch === "number"
+    && !isCurrentSessionEpoch(domain, epoch)
+  ) {
+    throw new StaleSessionResponseError(domain);
+  }
+}
+
 function isSessionBootstrapRequest(url: string): boolean {
   return [
     "/auth/login",
@@ -184,9 +245,26 @@ function isSessionBootstrapRequest(url: string): boolean {
   ].some((path) => url.endsWith(path));
 }
 
+function parseRetryAfterSeconds(headers: unknown): number | undefined {
+  const source = headers as {
+    get?: (name: string) => unknown;
+    [key: string]: unknown;
+  } | undefined;
+  const raw = source?.get?.("retry-after")
+    ?? source?.["retry-after"]
+    ?? source?.["Retry-After"];
+  if (typeof raw !== "string" && typeof raw !== "number") return undefined;
+  const value = String(raw).trim();
+  if (/^\d+$/.test(value)) return Math.min(3600, Math.max(1, Number(value)));
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return undefined;
+  return Math.min(3600, Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)));
+}
+
 async function refreshSession(domain: "admin" | "customer"): Promise<void> {
+  const requestEpoch = currentSessionEpoch(domain);
   const running = domain === "customer" ? customerRefresh : adminRefresh;
-  if (running) return running;
+  if (running?.epoch === requestEpoch) return running.promise;
   const path = domain === "customer"
     ? "/customers/session/refresh"
     : "/auth/session/refresh";
@@ -199,6 +277,11 @@ async function refreshSession(domain: "admin" | "customer"): Promise<void> {
       },
     })
     .then((response) => {
+      // 刷新请求不经过 api adapter，必须在这里绑定其发起身份。用户可能在等待
+      // refresh 时主动退出或登录另一账户，迟到结果不得复活或覆盖旧身份。
+      if (!isCurrentSessionEpoch(domain, requestEpoch)) {
+        throw new StaleSessionResponseError(domain);
+      }
       if (domain === "customer") {
         const payload = responsePayload<{ customer: CustomerAccount }>(
           response.data,
@@ -209,18 +292,25 @@ async function refreshSession(domain: "admin" | "customer"): Promise<void> {
         if (payload?.user) useAuthStore.getState().setAuth(payload.user);
       }
     });
-  if (domain === "customer") customerRefresh = pending;
-  else adminRefresh = pending;
+  const refresh = { epoch: requestEpoch, promise: pending };
+  if (domain === "customer") customerRefresh = refresh;
+  else adminRefresh = refresh;
   try {
     await pending;
   } finally {
-    if (domain === "customer") customerRefresh = null;
-    else adminRefresh = null;
+    if (domain === "customer") {
+      if (customerRefresh?.promise === pending) customerRefresh = null;
+    } else if (adminRefresh?.promise === pending) {
+      adminRefresh = null;
+    }
   }
 }
 
 api.interceptors.response.use(
   (response) => {
+    // GET 会在共享适配器层先做同一检查；写请求不能共享，但同样必须在任何
+    // 成功处理、401 refresh 或全局错误提示之前证明仍属于发起时的身份。
+    assertCurrentRequestSession(response.config);
     const data = response.data as ApiResponse<unknown>;
     if (data && typeof data.code === "number" && data.code !== 200) {
       if (!response.config.suppressGlobalError) {
@@ -233,11 +323,13 @@ api.interceptors.response.use(
   async (caught: unknown) => {
     if (!axios.isAxiosError(caught)) return Promise.reject(caught);
     const error = caught as AxiosError<{ message?: string; errorCode?: string }>;
+    assertCurrentRequestSession(error.config);
     const suppressGlobalError = Boolean(error.config?.suppressGlobalError);
     const requestUrl = String(error.config?.url || "");
     if (
       error.response?.status === 401 &&
       error.config &&
+      !error.config.sessionIndependent &&
       !error.config._sessionRetry &&
       !isSessionBootstrapRequest(requestUrl)
     ) {
@@ -245,8 +337,15 @@ api.interceptors.response.use(
       try {
         await refreshSession(domain);
         error.config._sessionRetry = true;
+        // 刷新会话会轮换 CSRF cookie；重试时必须重新读取，不能沿用原请求头。
+        error.config.headers.delete("X-CSRF-Token");
         return api.request(error.config);
-      } catch {
+      } catch (refreshError) {
+        // 旧代次的 refresh 已经失去处置当前身份的资格；尤其不能在用户退出后
+        // 复活旧客户，也不能在新登录后把新身份再次清空。
+        if (refreshError instanceof StaleSessionResponseError) {
+          return Promise.reject(refreshError);
+        }
         if (domain === "customer") clearCustomerSession();
         else useAuthStore.getState().logout();
 
@@ -268,7 +367,10 @@ api.interceptors.response.use(
           window.location.href = `/customer?returnTo=${encodeURIComponent(returnTo)}`;
         }
       }
-    } else if (error.response?.status === 401) {
+    } else if (
+      error.response?.status === 401
+      && !error.config?.sessionIndependent
+    ) {
       const domain = requestDomain(error.config);
       if (domain === "customer") clearCustomerSession();
       else useAuthStore.getState().logout();
@@ -288,6 +390,7 @@ api.interceptors.response.use(
     const normalized = new Error(message) as NormalizedRequestError;
     normalized.status = error.response?.status;
     normalized.errorCode = error.response?.data?.errorCode;
+    normalized.retryAfterSeconds = parseRetryAfterSeconds(error.response?.headers);
     return Promise.reject(normalized);
   },
 );

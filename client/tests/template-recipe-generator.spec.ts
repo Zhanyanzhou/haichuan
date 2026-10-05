@@ -136,7 +136,7 @@ test("所有新预设及重复自定义文字的系统样例不进入正式内�
   expect(definition.previewContent).toEqual({});
 });
 
-test("向导样例保持三端文字层级和几何，序列化重开后的公开内容仍为空", () => {
+test("向导样例保持桌面与手机文字层级和几何，序列化重开后的公开内容仍为空", () => {
   const recipe = createRecommendedRecipe("general");
   recipe.canvas = { width: 1920, height: 1080, aspectRatio: 16 / 9 };
   recipe.layout = "leftImageRightContent";
@@ -145,7 +145,7 @@ test("向导样例保持三端文字层级和几何，序列化重开后的公�
   const definition = generateTemplateFromRecipe(recipe);
   const beforePreview = JSON.stringify(definition);
   const flatten = (node: DynamicTemplateRenderPlanNode): DynamicTemplateRenderPlanNode[] => [node, ...node.children.flatMap(flatten)];
-  for (const breakpoint of ["desktop", "tablet", "mobile"] as const) {
+  for (const breakpoint of ["desktop", "mobile"] as const) {
     const device = breakpoint === "mobile" ? "mobile" : "desktop";
     const preview = compileDynamicTemplateRenderPlan(definition, {
       device, breakpoint, contentBySlotId: createTemplateRecipePreviewContent(definition), showEmptySlots: true,
@@ -194,7 +194,7 @@ test("旧显式配方与编辑后的正式默认内容保持原样，包括与�
 });
 
 for (const [layout, label] of LAYOUTS) {
-  test(`${label} × 八种画幅 × 媒体数量均合法且保持手机阅读顺序`, () => {
+  test(`${label} × 六种网页画幅 × 媒体数量均合法且保持手机阅读顺序`, () => {
     for (const canvas of CANVAS_PRESETS) for (const media of MEDIA_PRESETS) {
       const recipe = createRecommendedRecipe();
       recipe.layout = layout;
@@ -325,7 +325,7 @@ test("全幅布局主图铺满画布并承载前景内容，显式背景优先",
   const definition = generateTemplateFromRecipe(recipe);
   const image = Object.values(definition.nodes).find((node) => node.type === "ImageSlot")!;
   expect(image.responsive.desktop.placement).toEqual({ x: 0, y: 0, width: 1, height: 1, zIndex: 0 });
-  expect(definition.slots[image.slotId!].desktopRules.aspectRatio).toBe("4:5");
+  expect(definition.slots[image.slotId!].desktopRules.aspectRatio).toBe("16:9");
   const group = Object.values(definition.nodes).find((node) => node.name === "内容区域")!;
   expect(group.responsive.desktop.backgroundColor).toBe(recipe.style.backgroundColor);
   expect(group.responsive.desktop.placement?.zIndex).toBeGreaterThan(0);

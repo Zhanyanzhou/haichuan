@@ -8,10 +8,12 @@
     "node": "22.x"
   },
   "scripts": {
+    "preinstall": "node ../scripts/verify-node-version.mjs",
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "test:public-env": "node --test vite-public-env.spec.mjs",
     "test:e2e": "playwright test",
     "test:a11y": "playwright test public-accessibility.spec.ts --project=public-chromium"
   },
@@ -22,7 +24,7 @@
     "@fontsource/noto-serif-sc": "^5.2.8",
     "@puckeditor/core": "^0.22.4",
     "antd": "^5.13.0",
-    "axios": "^1.6.5",
+    "axios": "^1.20.0",
     "dayjs": "^1.11.10",
     "framer-motion": "^10.18.0",
     "react": "^18.3.0",

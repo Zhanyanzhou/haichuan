@@ -5,6 +5,14 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RefundsService } from './refunds.service';
 
+const admin = {
+  id: 1,
+  username: 'admin',
+  realName: '管理员',
+  role: 'ADMIN',
+  status: 'ACTIVE',
+} as any;
+
 function matchesStatus(value: string, condition: any) {
   if (typeof condition === 'string') return value === condition;
   if (condition?.in) return condition.in.includes(value);
@@ -177,7 +185,7 @@ test('在线退款审核通过后自动按原退款单号发起，渠道受理�
     3,
     'APPROVED',
     '审核通过',
-    { type: 'ADMIN', id: 1 },
+    admin,
   );
 
   assert.equal(state.createCalls.length, 1);
@@ -198,14 +206,14 @@ test('真实退款门禁关闭时审核保留 APPROVED，且不调用渠道', as
     3,
     'APPROVED',
     undefined,
-    { type: 'ADMIN', id: 1 },
+    admin,
   );
 
   assert.equal(state.refund.status, 'APPROVED');
   assert.equal(state.createCalls.length, 0);
   assert.equal(result.channelAction.state, 'DISABLED');
   await assert.rejects(
-    () => service.startOnlineRefund(3, { type: 'ADMIN', id: 1 }),
+    () => service.startOnlineRefund(3, admin),
     ServiceUnavailableException,
   );
 });
@@ -214,7 +222,7 @@ test('未完成付款计划在已发货前禁止退款，避免净收不足却�
   const { service, state } = createOnlineHarness({ activePlan: true });
 
   await assert.rejects(
-    () => service.review(3, 'APPROVED', undefined, { type: 'ADMIN', id: 1 }),
+    () => service.review(3, 'APPROVED', undefined, admin),
     /付款计划尚未全部实收/,
   );
   assert.equal(state.refund.status, 'PENDING');
@@ -225,7 +233,7 @@ test('付款计划订单的未绑定分期付款禁止退款', async () => {
   const { service, state } = createOnlineHarness({ independentPlan: true });
 
   await assert.rejects(
-    () => service.review(3, 'APPROVED', undefined, { type: 'ADMIN', id: 1 }),
+    () => service.review(3, 'APPROVED', undefined, admin),
     /原付款未绑定分期/,
   );
   assert.equal(state.refund.status, 'PENDING');
@@ -236,7 +244,7 @@ test('报价标记存在但计划关系缺失时未绑定分期付款仍禁止�
   const { service, state } = createOnlineHarness({ quotationMarked: true });
 
   await assert.rejects(
-    () => service.review(3, 'APPROVED', undefined, { type: 'ADMIN', id: 1 }),
+    () => service.review(3, 'APPROVED', undefined, admin),
     /原付款未绑定分期/,
   );
   assert.equal(state.refund.status, 'PENDING');
@@ -258,7 +266,7 @@ test('主动查询 SUCCESS 后才完成退款，并同步原 Payment 与订单�
     raw: { status: 'SUCCESS' },
   });
 
-  const result = await service.queryOnlineRefund(3);
+  const result = await service.queryOnlineRefund(3, admin);
 
   assert.equal(result.state, 'SUCCESS');
   assert.equal(state.refund.status, 'COMPLETED');

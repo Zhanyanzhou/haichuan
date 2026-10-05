@@ -6,6 +6,7 @@ import {
   buildStrictPublishPayload,
   catalogRefreshFailed,
   catalogRefreshSucceeded,
+  describePublishedTemplateAvailability,
   deriveTemplateProductionReadiness,
   markPublishReviewChanged,
   openPublishReview,
@@ -30,6 +31,11 @@ import {
   type ReviewReadyState,
   type SavingReviewedSnapshotState,
 } from "../src/page-builder/template-editor/templatePublishWorkflow";
+import {
+  describePageTemplateAddAction,
+  describePageTemplateHandoff,
+  resolvePublishedTemplateInsertionIndex,
+} from "../src/page-builder/template-editor/pageTemplateHandoff";
 import {
   addDynamicTemplateNode,
   createBlankDynamicTemplateDefinition,
@@ -987,5 +993,82 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
     expect(matched.effects[0]).toMatchObject({
       kind: "refresh-template-catalog",
       checksum: CHECKSUM_B,
+    });
+  });
+
+  test("发布成功文案按版本区分页面影响", () => {
+    expect(describePublishedTemplateAvailability(1, "fresh"))
+      .toBe("模板 v1 已发布；目录已确认可用。可在页面装修中选用，不会改任何现有页面。");
+    expect(describePublishedTemplateAvailability(1, "refreshing"))
+      .toBe("模板 v1 已发布；正在核对页面装修目录。可在页面装修中选用，不会改任何现有页面。");
+    expect(describePublishedTemplateAvailability(2, "fresh"))
+      .toBe("模板 v2 已发布；目录已确认可用。已有页面继续锁定原版本。");
+  });
+
+  test("点击添加按空画布、选中项和页尾决定落点", () => {
+    expect(resolvePublishedTemplateInsertionIndex(0, null)).toBe(0);
+    expect(resolvePublishedTemplateInsertionIndex(3, null)).toBe(3);
+    expect(resolvePublishedTemplateInsertionIndex(3, 1)).toBe(2);
+    expect(resolvePublishedTemplateInsertionIndex(3, 2)).toBe(3);
+    expect(resolvePublishedTemplateInsertionIndex(3, 9)).toBe(3);
+    expect(resolvePublishedTemplateInsertionIndex(3, 1, 0)).toBe(0);
+    expect(describePageTemplateAddAction({
+      name: "工艺区",
+      version: 1,
+      pageHasBlocks: false,
+      hasSelection: false,
+    })).toMatchObject({
+      label: "添加到页面",
+      title: "添加到页面",
+      ariaLabel: "添加到页面：工艺区 v1",
+    });
+    expect(describePageTemplateAddAction({
+      name: "工艺区",
+      version: 1,
+      pageHasBlocks: true,
+      hasSelection: true,
+    }).title).toBe("添加到所选模块之后");
+    expect(describePageTemplateAddAction({
+      name: "工艺区",
+      version: 1,
+      pageHasBlocks: true,
+      hasSelection: false,
+    })).toMatchObject({
+      title: "添加到页面末尾",
+      ariaLabel: "添加到页面：工艺区 v1",
+    });
+  });
+
+  test("刚发布交接在空画布、已有模块和旧实例上给出不同主动作", () => {
+    expect(describePageTemplateHandoff({
+      name: "工艺区",
+      version: 1,
+      pageHasBlocks: false,
+      upgradeCount: 0,
+      hasSelection: false,
+    })).toMatchObject({
+      liveStatus: "刚发布的“工艺区”v1 已定位到模板组件库，可预览或添加到当前页面。",
+      focusTarget: "add",
+    });
+    expect(describePageTemplateHandoff({
+      name: "工艺区",
+      version: 2,
+      pageHasBlocks: true,
+      upgradeCount: 0,
+      hasSelection: false,
+    })).toMatchObject({
+      liveStatus: "刚发布的“工艺区”v2 已定位到模板组件库。请拖到目标位置，或添加到页面末尾。",
+      focusTarget: "none",
+    });
+    expect(describePageTemplateHandoff({
+      name: "工艺区",
+      version: 2,
+      pageHasBlocks: true,
+      upgradeCount: 2,
+      hasSelection: false,
+    })).toMatchObject({
+      liveStatus: "刚发布的“工艺区”v2 已定位到模板组件库。当前页面有 2 处旧实例可升级；也可拖到目标位置添加新实例。",
+      upgradeLabel: "升级 2 处",
+      focusTarget: "upgrade",
     });
   });

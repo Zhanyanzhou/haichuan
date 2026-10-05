@@ -12,6 +12,8 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
 import { AttributesService } from "./attributes.service";
 import { Public } from "../../common/decorators/public.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { CurrentUser } from "../../common/decorators/current-user.decorator";
+import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 import {
   CreateAttributeDto,
   CreateAttributeValueDto,
@@ -35,16 +37,19 @@ export class AttributesController {
   @ApiBearerAuth()
   @Get("admin")
   @ApiOperation({ summary: "获取管理端全部属性（含停用）" })
-  findAll() {
-    return this.attributesService.findAll();
+  findAll(@CurrentUser() actor: StaffPrincipal) {
+    return this.attributesService.findAll(actor);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
   @ApiBearerAuth()
   @Post()
   @ApiOperation({ summary: "新增属性" })
-  create(@Body() body: CreateAttributeDto) {
-    return this.attributesService.create(body);
+  create(
+    @Body() body: CreateAttributeDto,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.attributesService.create(body, actor);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
@@ -54,16 +59,20 @@ export class AttributesController {
   update(
     @Param("id", ParseIntPipe) id: number,
     @Body() body: UpdateAttributeDto,
+    @CurrentUser() actor: StaffPrincipal,
   ) {
-    return this.attributesService.update(id, body);
+    return this.attributesService.update(id, body, actor);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
   @ApiBearerAuth()
   @Delete(":id")
   @ApiOperation({ summary: "停用属性" })
-  remove(@Param("id", ParseIntPipe) id: number) {
-    return this.attributesService.remove(id);
+  remove(
+    @Param("id", ParseIntPipe) id: number,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.attributesService.remove(id, actor);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
@@ -73,8 +82,9 @@ export class AttributesController {
   addValue(
     @Param("id", ParseIntPipe) id: number,
     @Body() body: CreateAttributeValueDto,
+    @CurrentUser() actor: StaffPrincipal,
   ) {
-    return this.attributesService.addValue(id, body);
+    return this.attributesService.addValue(id, body, actor);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
@@ -84,15 +94,19 @@ export class AttributesController {
   updateValue(
     @Param("valueId", ParseIntPipe) valueId: number,
     @Body() body: UpdateAttributeValueDto,
+    @CurrentUser() actor: StaffPrincipal,
   ) {
-    return this.attributesService.updateValue(valueId, body);
+    return this.attributesService.updateValue(valueId, body, actor);
   }
 
   @Roles("SUPER_ADMIN", "ADMIN", "EDITOR")
   @ApiBearerAuth()
   @Delete("values/:valueId")
   @ApiOperation({ summary: "停用属性值" })
-  removeValue(@Param("valueId", ParseIntPipe) valueId: number) {
-    return this.attributesService.removeValue(valueId);
+  removeValue(
+    @Param("valueId", ParseIntPipe) valueId: number,
+    @CurrentUser() actor: StaffPrincipal,
+  ) {
+    return this.attributesService.removeValue(valueId, actor);
   }
 }

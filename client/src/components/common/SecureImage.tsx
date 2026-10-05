@@ -44,13 +44,17 @@ function pickSessionDomain(kind: SecureImageProps["tokenKind"]): "admin" | "cust
 }
 
 function isPublicProductMedia(src: string): boolean {
-  return src.startsWith("/products/public/") && src.includes("/media/");
+  return (
+    (src.startsWith("/products/public/") && src.includes("/media/")) ||
+    src.startsWith("/reviews/media/public/")
+  );
 }
 
 function isPrivateControlledMedia(src: string): boolean {
   return (
     (src.startsWith("/products/catalog/") && src.includes("/media/")) ||
-    /^\/(payments|upload\/payment-proofs)\/\d+(\/proof)?$/.test(src)
+    /^\/(payments|upload\/payment-proofs)\/\d+(\/proof)?$/.test(src) ||
+    /^\/reviews\/\d+\/media\/\d+$/.test(src)
   );
 }
 

@@ -252,6 +252,8 @@ export interface QuotationVersion {
   issuedAt?: string | null;
   acceptedAt?: string | null;
   snapshotSchemaVersion?: number;
+  /** 修订版相对上一版的客户可见变更说明；首版可为空。 */
+  changeSummary?: string | null;
   items?: Array<{
     id: number;
     productId?: number | null;

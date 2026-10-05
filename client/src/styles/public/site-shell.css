@@ -18,6 +18,8 @@
   --site-content-max: 1280px;
   --site-content-gutter: clamp(20px, 5.55vw, 80px);
   --site-header-height: 88px;
+  --site-header-action-size: 44px;
+  --site-header-action-top: 21.5px;
   /* 宽屏页头保留贴近画布边缘的品牌式留白，左右严格镜像。 */
   --site-header-edge: 48px;
   --site-header-utility-width: 375px;
@@ -25,6 +27,32 @@
 
 .site-main--overlay {
   padding-top: 0 !important;
+}
+
+/* 产品 PageDocument 的 loading 与 published 共用首屏关键几何，避免 Renderer
+   样式接管瞬间主区塌陷。预留高度须与 Hero 自身尺寸规则逐断点一致（桌面文案
+   压图不增高；平板与手机为媒体区 + 实色文案带），盒模型依据见
+   contentTemplateLayouts.tsx 的 .hc-phase1-hero 规则；文案带按眉题/标题/副标题/
+   行动各一行的标准内容校准，指标变化时按 public-catalog-detail-foundation.spec.ts
+   的 /products CLS 用例重新校准。 */
+.site-main[data-page-key="products"] .hc-products-page-frame {
+  min-height: max(620px, 100svh);
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .site-main[data-page-key="products"] .hc-products-page-frame {
+    /* Hero：min-height 75svh，内容超出时增高——媒体 16:9 + 文案带
+       （上下内边距 40/56 + 四行内容 150.8px + 标题行高 1.2 倍字号）。 */
+    min-height: max(75svh, calc(100vw * 9 / 16 + 246.8px + clamp(42px, 4.4vw, 76px) * 1.2));
+  }
+}
+
+@media (max-width: 767px) {
+  .site-main[data-page-key="products"] .hc-products-page-frame {
+    /* Hero：媒体 4:5 + 文案带（上下内边距 32/48 + 四行内容 194.5px，
+       移动端标题字号恒为 clamp 下限 42px）。 */
+    min-height: calc(100vw * 5 / 4 + 274.5px);
+  }
 }
 
 /* ═══════ Header ═══════ */
@@ -68,7 +96,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 28px;
+  gap: 44px;
   justify-self: end;
 }
 
@@ -84,8 +112,8 @@
   align-items: center;
   justify-content: center;
   gap: 9px;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: var(--site-header-action-size);
+  min-height: var(--site-header-action-size);
   padding: 0;
   border: 0;
   background: transparent;
@@ -143,6 +171,7 @@
 
 .site-header__nav-item svg,
 .site-menu-toggle svg {
+  display: block;
   width: 24px;
   height: 24px;
   stroke-width: 1.25;
@@ -196,26 +225,9 @@
   text-shadow: 0 1px 16px rgba(255, 255, 255, 0.18);
 }
 
-.site-header__brand-text::after {
-  content: "HAICHUAN JEWELRY";
-  margin-top: 9px;
-  color: rgba(24, 26, 27, 0.72);
-  font-family: var(--brand-serif);
-  font-size: 9.5px;
-  font-weight: 500;
-  letter-spacing: 0.34em;
-  line-height: 1;
-  transform: translateX(-0.02em);
-}
-
 .site-header.is-overlay-light .site-header__brand-text {
   color: #F7F8F8;
   text-shadow: 0 2px 22px rgba(0, 0, 0, 0.28);
-}
-
-.site-header.is-overlay-light .site-header__brand-text::after {
-  color: rgba(247, 248, 248, 0.82);
-  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.22);
 }
 
 .site-header.is-overlay-light .site-header__logo {
@@ -240,13 +252,27 @@
 /* ═══════ 左侧组合：菜单 + 搜索 ═══════ */
 .site-header__left-group {
   position: fixed;
-  top: 23px;
+  top: var(--site-header-action-top);
   left: var(--site-header-edge, 48px);
   z-index: 130;
   display: inline-flex;
   align-items: center;
   gap: 44px;
-  height: 44px;
+  height: var(--site-header-action-size);
+}
+
+/* 左侧入口统一使用同一 44px 居中盒；不再用控件级位移补偿不同 padding。 */
+.site-header__left-group > .site-menu-toggle,
+.site-header__left-group > .site-header__nav-item {
+  height: var(--site-header-action-size);
+  padding-block: 0;
+}
+
+/* 放大镜斜柄令墨迹中心比画布中心低 1/30；aria-label 选择器兼容旧预发布壳。 */
+.site-header__left-group > .site-header__nav-item--search > svg,
+.site-header__left-group > .site-header__nav-item:is([aria-label="搜索"], [aria-label="Collection"]) > svg,
+.brand-menu__top > a > svg {
+  transform: translateY(-3.333%);
 }
 
 .site-menu-toggle {
@@ -255,8 +281,8 @@
   align-items: center;
   justify-content: flex-start;
   gap: 9px;
-  min-height: 44px;
-  padding: 0 0 5px;
+  min-height: var(--site-header-action-size);
+  padding: 0;
   margin: 0;
   border: 0;
   background: transparent;
@@ -332,6 +358,7 @@
   .editorial-shell,
   .storefront-navigation {
     --site-header-height: 108px;
+    --site-header-action-top: 31.5px;
   }
   .site-header__inner {
     width: calc(100% - (2 * var(--site-header-edge)));
@@ -358,9 +385,6 @@
     justify-content: flex-start;
     gap: 44px;
   }
-  .site-header__left-group {
-    top: 32px;
-  }
 }
 
 /* Tablet: 768–1199 */
@@ -369,6 +393,7 @@
   .editorial-shell,
   .storefront-navigation {
     --site-header-height: 72px;
+    --site-header-action-top: 13.5px;
   }
   .site-main {
     padding-top: var(--site-header-height);
@@ -411,7 +436,6 @@
     font-size: 13px;
   }
   .site-header__left-group {
-    top: 15px;
     left: 36px;
     gap: 22px;
   }
@@ -437,6 +461,7 @@
   .editorial-shell,
   .storefront-navigation {
     --site-header-height: 64px;
+    --site-header-action-top: 9.5px;
   }
   .site-header__inner {
     width: calc(100% - 36px);
@@ -488,28 +513,8 @@
     height: 22px;
   }
   .site-header__left-group {
-    top: 11px;
     left: 18px;
     gap: 14px;
-  }
-  .site-main--overlay[data-page-key="products"] .hc-phase1-hero__copy-band {
-    padding-top: 44px;
-  }
-  /* 作品 Hero 在手机端以独立浅色文案带开场，页头必须使用深色控件。 */
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand,
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand-text,
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__nav-item,
-  .site-shell[data-page-key="products"] .site-header__left-group.is-overlay-light .site-menu-toggle,
-  .site-shell[data-page-key="products"] .site-header__left-group.is-overlay-light .site-header__nav-item {
-    color: #181a1b;
-    text-shadow: none;
-  }
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__brand-text::after {
-    color: rgba(24, 26, 27, 0.58);
-    text-shadow: none;
-  }
-  .site-shell[data-page-key="products"] .site-header.is-overlay-light .site-header__logo {
-    filter: none;
   }
   .home-brand-signature {
     margin-bottom: 20px;
@@ -942,7 +947,6 @@
     letter-spacing: 0.2em;
   }
   .site-header__left-group {
-    top: 11px;
     left: 18px;
     gap: 14px;
   }
@@ -1117,8 +1121,13 @@
   }
 }
 
-/* ═══ 移动端触控目标补强（2026-08-16）：页脚导航与备案链接 ≥44px 高 ═══ */
+/* ═══ 移动端触控目标补强：品牌入口、页脚导航与备案链接 ≥44px ═══ */
 @media (max-width: 767px) {
+  .site-header__brand {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .site-footer__links a,
   .site-footer__filing {
     display: flex;
@@ -1135,7 +1144,6 @@
   }
 
   .site-header__left-group {
-    top: 10px;
     left: 16px;
     width: 44px;
     gap: 0;
@@ -1152,7 +1160,7 @@
   }
 
   .site-header__brand {
-    min-width: 0;
+    min-width: 44px;
     max-width: 100%;
   }
 

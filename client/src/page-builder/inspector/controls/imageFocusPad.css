@@ -1,0 +1,152 @@
+.image-focus-pad {
+  position: relative;
+  width: 100%;
+  min-height: 132px;
+  overflow: hidden;
+  border: 1px solid var(--inspector-line, #dde1e2);
+  border-radius: 4px;
+  background: #f4f5f5;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.image-focus-pad[data-disabled="true"] {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.image-focus-pad:focus-visible {
+  outline: 2px solid var(--inspector-action, #181a1b);
+  outline-offset: 2px;
+}
+
+.image-focus-pad > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 132px;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.image-focus-pad__empty {
+  display: grid;
+  place-items: center;
+  min-height: 132px;
+  padding: 12px;
+  color: var(--inspector-muted, #6e7477);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.image-focus-pad__handle {
+  position: absolute;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #fff;
+  outline: 1px solid #181a1b;
+  border-radius: 50%;
+  background: #181a1b;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.image-focus-pad__hint {
+  margin: 6px 0 0;
+  color: var(--inspector-muted, #6e7477);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.image-focus-pad__status {
+  margin: 0 0 8px;
+  color: var(--inspector-muted, #6e7477);
+  font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-image-focus-mode="assist"] .homepage-editor__inspector-disclosure {
+  margin-top: 4px;
+}
+
+.image-focus-pad__canvas-action {
+  width: 100%;
+  min-height: 36px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--inspector-line, #dde1e2);
+  border-radius: 4px;
+  background: #fff;
+  color: #181a1b;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.image-focus-pad__canvas-action:focus-visible {
+  outline: 2px solid var(--inspector-action, #181a1b);
+  outline-offset: 2px;
+}
+
+.image-focus-pad__canvas-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.image-focus-pad__presets {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+  padding: 5px;
+  border: 1px solid var(--inspector-line, #dde1e2);
+  border-radius: 4px;
+  background: var(--adm-surface-muted, #f4f5f5);
+}
+
+.image-focus-pad__presets > button {
+  position: relative;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: var(--inspector-muted, #6e7477);
+  background: transparent;
+  cursor: pointer;
+}
+
+.image-focus-pad__presets > button > i {
+  width: 7px;
+  height: 7px;
+  display: block;
+  margin: auto;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.image-focus-pad__presets > button:is(.is-active, [aria-pressed="true"]) {
+  color: var(--ed-on-accent, #fff);
+  background: var(--inspector-action, #181a1b);
+}
+
+.image-focus-pad__presets > button:focus-visible {
+  outline: 2px solid var(--inspector-action, #181a1b);
+  outline-offset: 1px;
+}
+
+.image-focus-pad__presets > button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalog } from "./fixtures/template-catalog";
+import type { TemplateCatalogResource } from "../src/services/clients/dynamicTemplateClient";
 import { createBlankTemplate, firstRegionAction, makeResource, productionStageAction } from "./fixtures/template-authoring-main-route";
 import { createBlankDynamicTemplateDefinition } from "../src/page-builder/template-definition";
 
@@ -98,7 +98,7 @@ function editableTemplateCatalog() {
 async function installTemplateDesignFixture(
   page: Page,
   dangerousWrites: string[],
-  templateCatalog: ReturnType<typeof systemTemplateCatalog> = { items: [] },
+  templateCatalog: TemplateCatalogResource = { items: [] },
 ) {
   await installAdminSession(page, {
     username: "td3c2-compact-overlay",
@@ -120,11 +120,7 @@ async function installTemplateDesignFixture(
     if (pathname === "/api/page-modules/dynamic-templates/catalog") {
       return route.fulfill(json(templateCatalog));
     }
-    if (
-      pathname === "/api/page-modules/personal-content-templates"
-      || pathname === "/api/page-modules/system-content-templates"
-      || pathname === "/api/page-modules/document/revisions"
-    ) {
+    if (pathname === "/api/page-modules/document/revisions") {
       return route.fulfill(json([]));
     }
     if (pathname === "/api/page-modules/document/published") {
@@ -625,24 +621,18 @@ test.describe("TD-3C2 模板设计紧凑覆盖层（Mock Chromium）", () => {
     await page.getByLabel("用途", { exact: true }).press("Tab");
 
     await page.setViewportSize({ width: 1056, height: 858 });
-    const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
-    await clickCenterWithRealMouse(page, structureTrigger, "1056 结构入口");
-    await expect(page.locator(".template-editor__structure:not(.is-collapsed)")).toBeVisible();
-
-    const inspectorTrigger = page.getByRole("button", { name: "展开模板属性面板", exact: true });
-    await clickCenterWithRealMouse(page, inspectorTrigger, "1056 属性入口");
-    const inspectorWorkspace = page.locator(
-      '.template-editor__right-workspace[data-compact-overlay-open="true"]',
-    );
+    await expect(page.locator(".template-editor__body")).toHaveAttribute("data-template-workspace-compact", "false");
+    const structureWorkspace = page.locator(".template-editor__structure:not(.is-collapsed)");
+    await expect(structureWorkspace).toBeVisible();
+    const inspectorWorkspace = page.locator(".template-editor__right-workspace:not(.is-inspector-collapsed)");
     await expect(inspectorWorkspace).toBeVisible();
     await expect(inspectorWorkspace).not.toHaveAttribute("aria-modal", "true");
-    await expect(page.locator(".template-editor__structure.is-collapsed")).toBeVisible();
     await expect(page.locator(".template-editor__toolbar")).not.toHaveAttribute("inert", "");
     await expect(page.locator(".template-editor__stage")).not.toHaveAttribute("inert", "");
     expect(
       (await page.locator(".template-editor__stage").boundingBox())?.width ?? 0,
-      "1056 属性 dock 打开后仍须保留至少 600px 可用画布",
-    ).toBeGreaterThanOrEqual(600);
+      "1056 四区停靠后画布仍须留下可操作宽度",
+    ).toBeGreaterThanOrEqual(320);
 
     const compactSkeleton = firstRegionAction(page);
     const compactGeometry = await Promise.all([
@@ -653,7 +643,7 @@ test.describe("TD-3C2 模板设计紧凑覆盖层（Mock Chromium）", () => {
     expect(compactGeometry[1]?.x).toBeDefined();
     expect(
       (compactGeometry[0]?.x ?? 0) + (compactGeometry[0]?.width ?? 0),
-      "1056 主操作不能伸入属性 dock",
+      "1056 主操作不能伸入属性栏",
     ).toBeLessThanOrEqual((compactGeometry[1]?.x ?? 0) + 1);
     await clickCenterWithRealMouse(page, compactSkeleton, "1056 添加区域操作");
     await expect(compactSkeleton).toBeHidden();
@@ -858,9 +848,9 @@ test.describe("TD-3C3 模板设计四区高频操作（Mock Chromium）", () => 
     await page.goto("/admin/editor/home");
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "模板设计", exact: true }).click();
-    const expandLibrary = page.getByRole("button", { name: "展开模板组件库", exact: true });
-    if (await expandLibrary.isVisible()) await expandLibrary.click();
+    await expect(page.locator(".template-editor__toolbar")).toBeVisible();
     const library = page.locator('[data-unified-template-library="design"]');
+    await expect(library).toBeVisible();
     const card = library.locator(".homepage-editor__template-card").first();
     const cardMain = card.locator(".homepage-editor__template-card-main");
     const name = card.locator(".homepage-editor__template-name");
@@ -869,6 +859,25 @@ test.describe("TD-3C3 模板设计四区高频操作（Mock Chromium）", () => 
     expect(await cardMain.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length))
       .toBe(1);
     expect(await name.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(80);
+    const slotKey = card.locator(".template-editor__catalog-slot-key");
+    const slotMetrics = slotKey.locator(":scope > span:not(.is-basis)");
+    await expect(slotMetrics).toHaveCount(4);
+    const slotLayout = await slotKey.evaluate((element) => {
+      const frame = element.getBoundingClientRect();
+      const items = Array.from(
+        element.querySelectorAll<HTMLElement>(":scope > span:not(.is-basis)"),
+        (child) => child.getBoundingClientRect(),
+      );
+      return {
+        oneRow: items.every((item) => Math.abs(item.top - items[0].top) < 1),
+        insideCard: items.every((item) => item.left >= frame.left - 1 && item.right <= frame.right + 1),
+        legible: Array.from(
+          element.querySelectorAll<HTMLElement>(":scope > span:not(.is-basis)"),
+          (child) => child.scrollWidth <= child.clientWidth + 1,
+        ),
+      };
+    });
+    expect(slotLayout).toEqual({ oneRow: true, insideCard: true, legible: [true, true, true, true] });
     const moreHitTarget = await more.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const owner = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -894,8 +903,8 @@ test.describe("TD-3C3 模板设计四区高频操作（Mock Chromium）", () => 
     const library = page.locator('[data-unified-template-library="design"]');
     const firstCard = library.locator(".homepage-editor__template-card").first();
     await expect(firstCard).toBeVisible();
-    await expect(firstCard).toContainText("草稿");
-    await expect(firstCard).toContainText("已保存");
+    await expect(firstCard.locator('[data-template-publication-status="draft"]')).toBeVisible();
+    await expect(firstCard).toContainText("尚未发布");
     await expect(library).not.toContainText(/内置模板|系统模板|动态模板|个人模板|自定义模板/);
     await expect(library.locator('[aria-label*="动态模板"], [title*="动态模板"]')).toHaveCount(0);
     const templateList = library.getByRole("region", { name: "模板列表", exact: true });

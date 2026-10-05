@@ -3,6 +3,7 @@
  * 整页保存与发布统一留在编辑器顶部；此处只反馈草稿同步状态。
  */
 
+import { formatPublishReminderLabel } from "./publishReminderDialog";
 import type { PublishValidationStatus } from "./publishValidation";
 
 /** 更多菜单可挂载的模块级操作（复制/隐藏/恢复默认/删除等，P5 逐步补齐） */
@@ -15,6 +16,7 @@ export interface EditorAction {
 
 interface InspectorFooterBarProps {
   hasUnsavedChanges: boolean;
+  hasPersistedDraft: boolean;
   saving: boolean;
   errorCount?: number;
   warningCount?: number;
@@ -25,6 +27,7 @@ interface InspectorFooterBarProps {
 
 export default function InspectorFooterBar({
   hasUnsavedChanges,
+  hasPersistedDraft,
   saving,
   errorCount = 0,
   warningCount = 0,
@@ -33,17 +36,25 @@ export default function InspectorFooterBar({
   onRetryValidation,
 }: InspectorFooterBarProps) {
   // 草稿持久化与发布资格是两条独立状态流。保存中的反馈不能被发布提醒覆盖。
-  const status = saving ? "saving" : hasUnsavedChanges ? "dirty" : "saved";
+  const status = saving
+    ? "saving"
+    : hasUnsavedChanges || !hasPersistedDraft
+      ? "dirty"
+      : "saved";
   const statusTitle = saving
     ? "正在保存页面草稿"
     : hasUnsavedChanges
       ? "修改已更新，尚未保存页面草稿"
-      : "页面草稿已保存";
+      : hasPersistedDraft
+        ? "页面草稿已保存"
+        : "页面草稿尚未保存";
   const statusDescription = saving
     ? "完成后可在预览中检查结果"
     : hasUnsavedChanges
       ? "请在顶部工具栏保存整页草稿"
-      : "预览可查看当前草稿结果";
+      : hasPersistedDraft
+        ? "预览可查看当前草稿结果"
+        : "当前显示默认内容；保存后才会写入服务端";
   const issueCount = errorCount + warningCount;
   const validationLabel = validationStatus === "validating"
     ? "正在检查发布资格…"
@@ -54,10 +65,12 @@ export default function InspectorFooterBar({
       : errorCount > 0
         ? `${errorCount} 项发布阻断`
         : warningCount > 0
-          ? `${warningCount} 项待检查`
+          ? formatPublishReminderLabel(warningCount)
           : validationStatus === "valid"
             ? "发布检查已通过"
             : null;
+  const issueKind = errorCount > 0 ? "error" : warningCount > 0 ? "warning" : undefined;
+  const issueTitle = issueKind === "warning" ? "这些提示不影响本次发布" : undefined;
 
   return (
     <footer className="homepage-editor__properties-actions">
@@ -81,11 +94,22 @@ export default function InspectorFooterBar({
             {validationLabel}
           </button>
         ) : issueCount > 0 && onReviewIssues ? (
-          <button type="button" onClick={onReviewIssues} data-validation-status={validationStatus}>
+          <button
+            type="button"
+            onClick={onReviewIssues}
+            data-validation-status={validationStatus}
+            data-issue-kind={issueKind}
+            title={issueTitle}
+          >
             {validationLabel}
           </button>
         ) : (
-          <span className="homepage-editor__properties-validation" data-validation-status={validationStatus}>
+          <span
+            className="homepage-editor__properties-validation"
+            data-validation-status={validationStatus}
+            data-issue-kind={issueKind}
+            title={issueTitle}
+          >
             {validationLabel}
           </span>
         )

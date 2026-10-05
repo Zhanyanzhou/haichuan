@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ConflictException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { PageModulesService } from "./page-modules.service";
 
@@ -157,6 +159,99 @@ test("首次创建页面允许没有 expectedUpdatedAt", async () => {
   await service.savePageDocument("custom", makeLegacyHeroDocument(), {});
 
   assert.equal(created.pageKey, "custom");
+});
+
+for (const code of ["P2002", "P2034"] as const) {
+  test(`首次创建页面遇到 ${code} 且回读到赢家时返回明确冲突且不覆盖赢家`, async () => {
+    const originalError = new Prisma.PrismaClientKnownRequestError(
+      "模拟首次页面创建竞争",
+      { code, clientVersion: "test" },
+    );
+    const winner = { id: 27, pageKey: "custom" };
+    let reads = 0;
+    let creates = 0;
+    let updates = 0;
+    const prisma = {
+      pageDocument: {
+        findUnique: async () => {
+          reads += 1;
+          return reads === 1 ? null : winner;
+        },
+        create: async () => {
+          creates += 1;
+          throw originalError;
+        },
+        updateMany: async () => {
+          updates += 1;
+          return { count: 1 };
+        },
+      },
+    };
+    const service = new PageModulesService(prisma as unknown as PrismaService);
+
+    await assert.rejects(
+      () => service.savePageDocument("custom", makeLegacyHeroDocument(), {}),
+      (error: unknown) =>
+        error instanceof ConflictException
+        && error.getStatus() === 409
+        && /其他编辑者创建/.test(error.message),
+    );
+    assert.equal(creates, 1);
+    assert.equal(reads, 2);
+    assert.equal(updates, 0);
+  });
+
+  test(`首次创建页面遇到 ${code} 但没有赢家时保留 Prisma 原异常`, async () => {
+    const originalError = new Prisma.PrismaClientKnownRequestError(
+      "模拟无赢家数据库故障",
+      { code, clientVersion: "test" },
+    );
+    let reads = 0;
+    const prisma = {
+      pageDocument: {
+        findUnique: async () => {
+          reads += 1;
+          return null;
+        },
+        create: async () => {
+          throw originalError;
+        },
+      },
+    };
+    const service = new PageModulesService(prisma as unknown as PrismaService);
+
+    await assert.rejects(
+      () => service.savePageDocument("custom", makeLegacyHeroDocument(), {}),
+      (error: unknown) => error === originalError,
+    );
+    assert.equal(reads, 2);
+  });
+}
+
+test("首次创建页面遇到其它 Prisma 错误时不回读且保持原语义", async () => {
+  const originalError = new Prisma.PrismaClientKnownRequestError(
+    "模拟其它数据库错误",
+    { code: "P2024", clientVersion: "test" },
+  );
+  let reads = 0;
+  const prisma = {
+    pageDocument: {
+      findUnique: async () => {
+        reads += 1;
+        return null;
+      },
+      create: async () => {
+        throw originalError;
+      },
+    },
+  };
+  const service = new PageModulesService(prisma as unknown as PrismaService);
+
+  await assert.rejects(
+    () => service.savePageDocument("custom", makeLegacyHeroDocument(), {}),
+    (error: unknown) => error === originalError,
+  );
+  assert.equal(reads, 1);
 });
 
 test("PageDocument 只保留合法固定模板来源标记，布局快照仍随页面保存", async () => {

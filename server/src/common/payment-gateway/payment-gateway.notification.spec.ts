@@ -28,6 +28,7 @@ test('支付宝 urlencoded 回调保留已解码字段并通过真实 RSA2 验�
     .sign(privateKey, 'base64');
 
   const config = new Map<string, string>([
+    ['PAYMENT_PROVIDER_MODE', 'live'],
     ['ALIPAY_APP_ID', 'test-app-id'],
     ['ALIPAY_PRIVATE_KEY', privateKey],
     ['ALIPAY_PUBLIC_KEY', publicKey],

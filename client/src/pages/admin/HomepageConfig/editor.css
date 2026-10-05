@@ -5,8 +5,8 @@
  * 本文件是多轮改版的地层堆积，同属性可能有多处声明，生效规则=特异性优先、同特异性看源顺序。
  * 现行有效层只有三处，其余为历史地层（勿在其上"再补一条覆盖"，直接改对应有效层）：
  *   1. body grid 变量意图层：搜 `--editor-library-dock-width`（四区比例唯一定义点）。
- *   2. 响应式覆盖层：≤1199 面板覆盖化 / ≤767 手机层。
- *   3. 桌面收敛层：搜 `@media (min-width: 1200px)`（12%/8%/60%/20% 固定比例，含 is-inspecting 同值对偶）。
+ *   2. 响应式覆盖层：≤1024 面板覆盖化 / ≤767 手机层。
+ *   3. 桌面停靠层：搜 `@media (min-width: 1025px)`（共享最小可用宽度，含 is-inspecting 同值对偶）。
  * 历史教训：不要在 `.is-inspecting` 等更高特异性选择器下重复声明 body grid/宽度（会压过意图层引发整页抖动）；
  * 2026-08-19 已清 10 处 is-inspecting grid 残留与 inspector 440/520/480 三个被收敛层压死的旧值。 */
 .homepage-editor {
@@ -627,6 +627,7 @@ body:has(.homepage-editor)
 }
 
 .homepage-editor__locale-review-controls select,
+.homepage-editor__locale-review-controls .homepage-editor__locale-label,
 .homepage-editor__locale-review-controls button,
 .homepage-editor__locale-review-controls [role="status"] {
   min-height: 30px;
@@ -638,6 +639,11 @@ body:has(.homepage-editor)
   font: inherit;
 }
 
+.homepage-editor__locale-review-controls .homepage-editor__locale-label {
+  display: inline-flex;
+  align-items: center;
+}
+
 .homepage-editor__locale-review-controls [role="status"] {
   display: inline-flex;
   align-items: center;
@@ -646,6 +652,13 @@ body:has(.homepage-editor)
 
 .homepage-editor__locale-review-controls button:not(:disabled) {
   cursor: pointer;
+}
+
+.homepage-editor__locale-review-controls .homepage-editor__published-live-health {
+  border-color: var(--adm-error-border);
+  color: var(--adm-error);
+  background: var(--adm-error-bg);
+  font-weight: 600;
 }
 
 /* 店铺装修专注模式：将装修工具栏挂入后台顶栏。 */
@@ -1303,7 +1316,7 @@ body:has(.homepage-editor)
   padding: 0 0 6px;
   border-color: var(--adm-line);
 }
-.homepage-editor__template-preview-img {
+.homepage-editor__template-preview-img:not(.template-editor__catalog-viewport-preview) {
   display: block;
   width: 100%;
   /* 缩略图按合同比例出图(横版横框/竖版竖框),SVG viewBox 决定高度,上限夹取防极宽模板拉长卡片 */
@@ -2307,11 +2320,18 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 }
 .homepage-editor__properties-hint {
   display: block;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--adm-line);
+  margin: 0;
+  padding: 0;
+  border: 0;
   color: var(--adm-muted);
   font-size: 12px;
   font-weight: 400;
+  line-height: 18px;
+  text-align: start;
+}
+.homepage-editor__properties > .homepage-editor__properties-hint {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--adm-line);
   text-align: center;
 }
 .homepage-editor__properties-scroll {
@@ -2328,7 +2348,15 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   border-top: 0;
 }
 .homepage-editor__properties .homepage-editor__inspector-section-head {
-  padding: 12px 0;
+  display: grid;
+  gap: 2px;
+  padding: 12px 0 8px;
+}
+.homepage-editor__properties .homepage-editor__inspector-section-head > span {
+  color: var(--adm-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
 }
 .homepage-editor__properties .homepage-editor__inspector-section-body {
   gap: 12px;
@@ -2779,6 +2807,14 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 .homepage-editor__body.is-previewing .homepage-editor__preview-frame iframe {
   pointer-events: none;
 }
+.homepage-editor__preview-mode-note {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--adm-muted);
+  font-size: 12px;
+}
 .homepage-editor__preview-mode-bar {
   position: sticky;
   z-index: 8;
@@ -2804,7 +2840,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   color: var(--adm-muted);
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .homepage-editor__workspace-status {
     display: none;
   }
@@ -3894,12 +3930,8 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   min-height: 0;
 }
 
-/* 窄桌面/平板：模板库成为覆盖式抽屉，不再持续挤压画布。
- * 2026-08-19 修正：条件由 max-1599 收窄为 max-1199——1200-1599 区间此层的
- * is-inspecting 分支(0-2-0)会压过桌面收敛层(0-1-0)的 240px，点选模块时
- * library 列 240→0 突跳 240px（笔记本宽度点选抖动的病灶）。≥1200 一律由
- * 桌面收敛层管三栏固定列，抽屉化只在 ≤1199 生效。 */
-@media (max-width: 1199px) {
+/* 窄于平板宽度时，模板库成为覆盖式抽屉，不持续挤压画布。 */
+@media (max-width: 1024px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
     --editor-library-width: 0px;
@@ -3919,10 +3951,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
     width: 40px;
     box-shadow: none;
   }
-}
-
-/* 平板：属性面板覆盖在画布右侧，图层面板默认收为 40px 导航条。 */
-@media (max-width: 1199px) {
+  /* 平板：属性面板覆盖在画布右侧，图层面板默认收为 40px 导航条。 */
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
     --editor-inspector-width: 0px;
@@ -4015,7 +4044,7 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   text-overflow: ellipsis;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .homepage-editor__workspace-status {
     display: inline-flex !important;
     flex: 0 1 auto;
@@ -4091,7 +4120,8 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 
   [data-compact-overlay="library-trigger"]
     .homepage-editor__library-expand-btn.admin-panel-collapse-toggle {
-    left: 12px;
+    /* 一级导航收起入口占用左侧 8–36px；模板目录按面板顺序排在其后。 */
+    left: 52px;
   }
 
   [data-compact-overlay="inspector"].is-inspector-collapsed
@@ -4248,8 +4278,9 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   display: contents;
 }
 
-.homepage-editor__page-workspace.is-inactive {
-  display: none;
+.homepage-editor__page-workspace.is-inactive,
+.homepage-editor__page-workspace[hidden] {
+  display: none !important;
 }
 
 .template-editor__body {
@@ -4613,6 +4644,36 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
   font-weight: 500;
 }
 
+.template-editor__workspace-page-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.template-editor__workspace-page-switcher-label {
+  color: var(--adm-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 28px;
+  white-space: nowrap;
+}
+
+.template-editor__workspace-page-select {
+  max-width: 168px;
+  min-width: 112px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--adm-line);
+  border-radius: 6px;
+  color: var(--adm-text-strong);
+  background: var(--adm-content-bg);
+  font-size: 13px;
+  line-height: 26px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
 .template-editor__workspace-context-divider {
   flex: 0 0 auto;
   width: 1px;
@@ -4745,7 +4806,7 @@ button.template-editor__toolbar-state:focus-visible {
   outline-offset: 2px;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .template-editor__workspace-context {
     gap: 6px;
   }
@@ -4770,6 +4831,26 @@ button.template-editor__toolbar-state:focus-visible {
   .template-editor__workspace-identity,
   .template-editor__workspace-identity + .template-editor__workspace-context-divider {
     display: none;
+  }
+
+  .template-editor__workspace-identity:has(.template-editor__workspace-page-select) {
+    display: inline-flex;
+  }
+
+  .template-editor__workspace-context-divider:has(+ .template-editor__workspace-identity .template-editor__workspace-page-select) {
+    display: block;
+  }
+
+  .template-editor__workspace-page-switcher-label {
+    display: none;
+  }
+
+  .template-editor__workspace-page-select {
+    max-width: 88px;
+    min-width: 72px;
+    height: 26px;
+    padding-inline: 4px;
+    font-size: 11px;
   }
 
   .template-editor__workspace-context .template-editor__toolbar-state {
@@ -4811,15 +4892,111 @@ button.template-editor__toolbar-state:focus-visible {
   box-shadow: 0 0 0 2px rgb(24 26 27 / 10%);
 }
 
+.unified-template-library__card.is-handoff {
+  border-color: var(--adm-gold);
+  box-shadow: 0 0 0 2px rgb(24 26 27 / 28%);
+}
+
+.homepage-editor__template-upgrade-action.is-handoff-upgrade {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 页面装修与模板设计共用同一目录卡片。操作区必须由始终加载的编辑器样式承载，
+   不能依赖进入模板设计后才加载的 TemplateWorkspace.css。 */
+.template-editor__catalog-card-action {
+  position: static;
+  z-index: auto;
+  display: block;
+  width: auto;
+  height: auto;
+  padding: 8px;
+  border-top: 1px solid var(--adm-line);
+  pointer-events: auto;
+}
+
+.template-editor__catalog-card-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  pointer-events: auto;
+}
+
+.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more, .homepage-editor__template-upgrade-action) {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 9px;
+  gap: 5px;
+  border: 1px solid var(--adm-neutral-border);
+  border-radius: 4px;
+  color: var(--adm-text-strong);
+  background: var(--adm-content-bg);
+  box-shadow: none;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.template-editor__catalog-card-actions > .homepage-editor__template-upgrade-action {
+  flex: 1 1 auto;
+}
+
+/* 目录常用操作保持同一行；已有实例升级独立成行，避免三个同权重按钮挤压。 */
+.template-editor__catalog-card-actions.template-editor__catalog-page-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.template-editor__catalog-page-actions > [data-catalog-action="primary"] {
+  background: var(--adm-action);
+  border-color: var(--adm-action);
+  color: #fff;
+}
+
+.template-editor__catalog-page-actions > [data-catalog-action="secondary"] {
+  grid-column: 1 / -1;
+  height: auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  white-space: normal;
+  border-color: transparent;
+  color: var(--adm-muted);
+}
+
+.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more, .homepage-editor__template-upgrade-action):hover,
+.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more, .homepage-editor__template-upgrade-action):focus-visible {
+  border-color: var(--adm-action);
+  color: var(--adm-action);
+  outline: 0;
+}
+
+.template-editor__catalog-card-actions > :is(.template-editor__catalog-preview-action, .template-editor__template-more, .homepage-editor__template-upgrade-action):focus-visible {
+  box-shadow: 0 0 0 2px var(--adm-focus);
+}
+
+.template-editor__catalog-page-actions > [data-catalog-action="primary"]:hover,
+.template-editor__catalog-page-actions > [data-catalog-action="primary"]:focus-visible {
+  color: #fff;
+}
+
 .unified-template-library__card .homepage-editor__template-preview-wrap {
   min-height: 0;
   max-height: none;
-  overflow: hidden;
-  background: var(--adm-neutral-bg);
+  overflow: visible;
+  background: transparent;
   pointer-events: none;
 }
 
 .unified-template-library__card .homepage-editor__template-preview-img {
+  width: auto;
   max-height: none;
 }
 
@@ -4851,8 +5028,8 @@ button.template-editor__toolbar-state:focus-visible {
 .template-editor__catalog-preview-shell {
   display: grid;
   min-width: 0;
-  padding: 7px;
-  background: var(--adm-neutral-bg);
+  padding: 0;
+  background: transparent;
 }
 
 .template-editor__catalog-viewport-preview {
@@ -5397,7 +5574,7 @@ button.template-editor__toolbar-state:focus-visible {
   color: var(--adm-action);
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .template-editor__body,
   .template-editor__body.is-inspecting {
     --editor-library-width: 220px;
@@ -6218,7 +6395,7 @@ button.template-editor__toolbar-state:focus-visible {
   background: var(--adm-neutral-bg);
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .homepage-editor__right-workspace,
   .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
     width: min(480px, calc(100% - var(--editor-structure-width)));
@@ -6304,7 +6481,7 @@ button.template-editor__toolbar-state:focus-visible {
 
 /* 中等工作区保留预览、保存、更多和发布四项能力，但收起文字，
  * 为固定在页面中心轴的设备切换器留出真实空间。 */
-@media (min-width: 521px) and (max-width: 1439px) {
+@media (min-width: 521px) and (max-width: 1024px) {
   .homepage-editor__toolbar-secondary-actions {
     display: flex;
   }
@@ -7943,6 +8120,126 @@ button.template-editor__toolbar-state:focus-visible {
   outline-offset: 2px;
 }
 
+/* 页面装修属性：图片操作、数据、构图和数值共用同一套左对齐字段。 */
+.homepage-editor__properties .homepage-editor__media-controls {
+  display: grid;
+  gap: 12px;
+}
+.homepage-editor__properties .homepage-editor__inspector-field > label,
+.homepage-editor__properties .homepage-editor__media-controls > label {
+  display: grid;
+  justify-content: stretch;
+  align-items: start;
+  gap: 4px;
+  min-height: 0;
+}
+.homepage-editor__properties [data-workspace-field-control="switch"] > label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+}
+.homepage-editor__properties .homepage-editor__inspector-field > label .homepage-editor__inspector-hint,
+.homepage-editor__properties .homepage-editor__media-controls .homepage-editor__inspector-hint {
+  display: block;
+  max-width: none;
+  line-height: 18px;
+}
+.homepage-editor__properties .homepage-editor__inspector-field > .homepage-editor__properties-hint,
+.homepage-editor__properties .homepage-editor__media-controls > label > .homepage-editor__properties-hint {
+  color: var(--adm-text-strong, #181a1b);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.homepage-editor__properties .homepage-editor__media-preview-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.homepage-editor__properties .homepage-editor__media-preview-actions .ant-btn {
+  width: 100%;
+  min-height: 36px;
+  justify-content: center;
+}
+.homepage-editor__properties .homepage-editor__media-more-actions > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 36px;
+  box-sizing: border-box;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  color: var(--adm-text, #181a1b);
+  background: #fff;
+}
+.homepage-editor__properties .homepage-editor__media-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 10px 0 0;
+  border: 1px solid var(--adm-line);
+  border-radius: 4px;
+  background: #fff;
+}
+.homepage-editor__properties .homepage-editor__media-facts > div {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-right: 1px solid var(--adm-line);
+}
+.homepage-editor__properties .homepage-editor__media-facts > div:last-child {
+  border-right: 0;
+}
+.homepage-editor__properties .homepage-editor__media-facts :is(dt, dd) {
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.homepage-editor__properties .homepage-editor__media-facts dt {
+  color: var(--adm-muted);
+}
+.homepage-editor__properties .homepage-editor__media-facts dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--adm-text-strong, #181a1b);
+  font-variant-numeric: tabular-nums;
+}
+.homepage-editor__properties .homepage-editor__media-facts dd > i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--adm-success, #356348);
+}
+.homepage-editor__properties .homepage-editor__media-facts[data-media-quality="warning"] dd > i {
+  background: var(--adm-warning, #7a531a);
+}
+.homepage-editor__properties .homepage-editor__media-facts[data-media-quality="error"] dd > i {
+  background: var(--adm-error, #8c3f3b);
+}
+.homepage-editor__properties .homepage-editor__media-facts[data-media-quality="loading"] dd > i {
+  background: var(--adm-info, #335f7d);
+}
+.homepage-editor__properties [data-image-focus-field] > label .homepage-editor__inspector-hint,
+.homepage-editor__properties [data-image-focus-field] .image-focus-pad__status,
+.homepage-editor__properties .homepage-editor__media-picker .image-focus-pad__hint {
+  display: none;
+}
+.homepage-editor__properties .homepage-editor__number-input,
+.homepage-editor__properties .homepage-editor__number-input input,
+.homepage-editor__properties .homepage-editor__media-controls .ant-input,
+.homepage-editor__properties .homepage-editor__media-controls .ant-select {
+  width: 100%;
+}
 .homepage-editor__dynamic-instance-overview {
   display: grid;
   gap: 12px;
@@ -7968,13 +8265,23 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 .homepage-editor__dynamic-instance-public-status[data-state="ready"] {
-  border-color: rgb(53 99 72 / 28%);
-  background: rgb(53 99 72 / 6%);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .homepage-editor__dynamic-instance-public-status[data-state="empty"] {
   border-color: color-mix(in srgb, #7A531A 28%, transparent);
   background: color-mix(in srgb, #7A531A 6%, transparent);
+}
+
+.homepage-editor__dynamic-instance-public-status[data-state="blocked"] {
+  border-color: var(--adm-error-border);
+  background: var(--adm-error-bg);
+}
+
+.homepage-editor__dynamic-instance-public-status[data-state="blocked"] strong {
+  color: var(--adm-error);
 }
 
 .homepage-editor__dynamic-instance-overview
@@ -8028,12 +8335,6 @@ button.template-editor__toolbar-state:focus-visible {
   border-top: 1px solid var(--inspector-line, #dde1e2);
 }
 
-.homepage-editor__dynamic-instance-secondary > .homepage-editor__properties-hint {
-  display: block;
-  margin: 12px 14px 4px;
-  font-weight: 600;
-}
-
 .homepage-editor__dynamic-instance-management {
   margin-top: 8px;
   border-top: 1px solid var(--inspector-line, #dde1e2);
@@ -8042,7 +8343,13 @@ button.template-editor__toolbar-state:focus-visible {
 .homepage-editor__dynamic-instance-sources {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 0;
+  color: var(--adm-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.homepage-editor__dynamic-instance-sources > span:not(:last-child)::after {
+  content: " · ";
 }
 
 .homepage-editor__dynamic-instance-promote {
@@ -8132,18 +8439,8 @@ button.template-editor__toolbar-state:focus-visible {
   cursor: pointer;
 }
 
-/* 窄桌面打开属性面板时收起覆盖式模板库，避免两个抽屉同时遮住画布。 */
-@media (max-width: 1199px) {
-  .homepage-editor__body.is-inspecting
-    .homepage-editor__library:not(.homepage-editor__library--collapsed) {
-    visibility: hidden;
-    transform: translateX(-100%);
-    pointer-events: none;
-  }
-}
-
 /* 页面装修的平板图层入口保留在模板抽屉右侧；模板设计使用末尾独立的窄屏覆盖定位。 */
-@media (min-width: 768px) and (max-width: 1199px) {
+@media (min-width: 768px) and (max-width: 1024px) {
   .homepage-editor__body:not(.is-inspecting, .template-editor__body):has(
       .homepage-editor__library:not(.homepage-editor__library--collapsed)
     )
@@ -8266,15 +8563,16 @@ button.template-editor__toolbar-state:focus-visible {
   writing-mode: horizontal-tb;
 }
 
-@media (min-width: 1200px) {
+@media (min-width: 1025px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
-    /* 桌面四区硬合同：页面装修与模板设计均为 12% / 8% / 60% / 20%。
-     * important 与唯一声明门禁共同防止模式样式或收起态覆盖。 */
-    --editor-library-dock-width: 12% !important;
-    --editor-structure-dock-width: 8% !important;
-    --editor-inspector-dock-width: 20% !important;
-    display: grid;
+    /* 页面装修与模板设计共用一组可用宽度；画布消费剩余空间。 */
+    --editor-library-dock-width: clamp(220px, 16vw, 280px);
+    --editor-structure-dock-width: clamp(144px, 11vw, 184px);
+    --editor-inspector-dock-width: clamp(300px, 25vw, 440px);
+    --editor-library-span: var(--editor-library-dock-width);
+    --editor-structure-span: var(--editor-structure-dock-width);
+    --editor-inspector-span: var(--editor-inspector-dock-width);
     grid-template-columns: minmax(0, 1fr);
   }
   .homepage-editor__body .homepage-editor__library {
@@ -8282,50 +8580,72 @@ button.template-editor__toolbar-state:focus-visible {
     inset: 0 auto 0 0;
     grid-column: auto;
     z-index: 30;
-    width: var(--editor-library-dock-width);
+    width: var(--editor-library-span);
     transition: left 160ms ease;
-  }
-  .homepage-editor__body .homepage-editor__library--collapsed {
-    width: var(--editor-library-dock-width);
   }
   .homepage-editor__body .homepage-editor__structure-workspace {
     position: absolute;
-    inset: 0 auto 0 var(--editor-library-dock-width);
+    inset: 0 auto 0 var(--editor-library-span);
     grid-column: auto;
     z-index: 29;
-    width: var(--editor-structure-dock-width);
+    width: var(--editor-structure-span);
     container-type: inline-size;
     container-name: editor-structure-dock;
     transition:
       left 160ms ease,
       width 160ms ease;
   }
-  .homepage-editor__body .homepage-editor__structure-workspace.is-collapsed {
-    width: var(--editor-structure-dock-width);
-  }
   .homepage-editor__body .homepage-editor__stage {
     grid-column: 1;
     width: 100%;
     box-sizing: border-box;
-    padding-left: calc(
-      var(--editor-library-dock-width) + var(--editor-structure-dock-width)
-    );
-    padding-right: var(--editor-inspector-dock-width);
-    transition: padding-left 160ms ease;
+    padding-left: calc(var(--editor-library-span) + var(--editor-structure-span));
+    padding-right: var(--editor-inspector-span);
+    transition:
+      padding-left 160ms ease,
+      padding-right 160ms ease;
   }
   .homepage-editor__body .homepage-editor__right-workspace,
-  .homepage-editor__body.is-inspecting .homepage-editor__right-workspace {
+  .homepage-editor__body.is-inspecting .homepage-editor__right-workspace,
+  .homepage-editor__body .homepage-editor__right-workspace.is-inspector-collapsed,
+  .homepage-editor__body.is-inspecting
+    .homepage-editor__right-workspace.is-inspector-collapsed {
     position: absolute;
     inset: 0 0 0 auto;
     grid-column: auto;
     z-index: 28;
-    width: var(--editor-inspector-dock-width);
+    width: var(--editor-inspector-span);
   }
-  .homepage-editor__body .homepage-editor__right-workspace.is-inspector-collapsed,
-  .homepage-editor__body.is-inspecting
-    .homepage-editor__right-workspace.is-inspector-collapsed {
-    width: var(--editor-inspector-dock-width);
+  .admin-shell-v7.is-editor-navigation-open .homepage-editor__library {
+    left: var(--adm-sidebar-w);
   }
+  .admin-shell-v7.is-editor-navigation-open
+    .homepage-editor__structure-workspace {
+    left: calc(var(--adm-sidebar-w) + var(--editor-library-span));
+    width: 0;
+    border-right: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .admin-shell-v7.is-editor-navigation-open .homepage-editor__stage {
+    padding-left: calc(var(--adm-sidebar-w) + var(--editor-library-span));
+  }
+}
+
+/* 普通窗口画布偏紧时允许收成 40px 导轨；1440 起恢复满宽并隐藏收起控件。 */
+@media (min-width: 1025px) and (max-width: 1439px) {
+  .homepage-editor__body:has(> .homepage-editor__library--collapsed) {
+    --editor-library-span: 40px;
+  }
+  .homepage-editor__body:has(> .homepage-editor__structure-workspace.is-collapsed) {
+    --editor-structure-span: 40px;
+  }
+  .homepage-editor__body:has(> .homepage-editor__right-workspace.is-inspector-collapsed) {
+    --editor-inspector-span: 40px;
+  }
+}
+
+@media (min-width: 1440px) {
   .homepage-editor__body .homepage-editor__library-collapse-btn,
   .homepage-editor__body .homepage-editor__library-expand-btn,
   .homepage-editor__body .homepage-editor__structure-collapse-btn,
@@ -8333,17 +8653,6 @@ button.template-editor__toolbar-state:focus-visible {
   .homepage-editor__body .homepage-editor__inspector-collapse-btn,
   .homepage-editor__body .homepage-editor__inspector-expand-btn {
     display: none !important;
-  }
-  .admin-shell-v7.is-editor-navigation-open .homepage-editor__library {
-    left: var(--adm-sidebar-w);
-  }
-  .admin-shell-v7.is-editor-navigation-open
-    .homepage-editor__structure-workspace {
-    left: calc(var(--adm-sidebar-w) + var(--editor-library-dock-width));
-    width: 0;
-    border-right: 0;
-    visibility: hidden;
-    pointer-events: none;
   }
 }
 
@@ -8356,7 +8665,7 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 /* 窄屏本来就是覆盖式面板；固定画布矩形，避免任何抽屉状态触发布局重排。 */
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .homepage-editor__body,
   .homepage-editor__body.is-inspecting {
     display: block;
@@ -8370,7 +8679,7 @@ button.template-editor__toolbar-state:focus-visible {
   }
 }
 
-@media (min-width: 901px) and (max-width: 1199px) {
+@media (min-width: 901px) and (max-width: 1024px) {
   .homepage-editor__body.is-inspecting
     .homepage-editor__structure-workspace {
     position: absolute;
@@ -8393,564 +8702,6 @@ button.template-editor__toolbar-state:focus-visible {
   .admin-header--editor .admin-header__editor-preview span {
     display: none;
   }
-}
-
-/* ═══ 双图文对象化面板（实验，仅 .homepage-editor__dp-panel 作用域） ═══ */
-/* 小型对象画布：Renderer 实测几何优先，合同几何只承担首帧回退。 */
-.homepage-editor__dp-mini {
-  display: grid;
-  gap: 0;
-  padding: 0;
-  border-bottom: 1px solid var(--inspector-line, #dde1e2);
-  background: var(--inspector-card, #fff);
-}
-
-.homepage-editor__dp-object-rail {
-  min-width: 0;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(82px, 1fr);
-  overflow-x: auto;
-  border-bottom: 1px solid var(--inspector-line, #dde1e2);
-  scrollbar-width: thin;
-}
-
-.homepage-editor__dp-object-rail > button {
-  position: relative;
-  min-width: 0;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 4px 8px;
-  border: 0;
-  border-right: 1px solid var(--inspector-line, #dde1e2);
-  color: var(--inspector-text, #5f6568);
-  background: #fff;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.homepage-editor__dp-object-rail > button:is(:hover, :focus-visible) {
-  color: var(--inspector-ink, #181a1b);
-  background: var(--adm-surface-muted, #f4f5f5);
-}
-
-.homepage-editor__dp-object-rail > button:focus-visible {
-  z-index: 1;
-  outline: 2px solid var(--inspector-action, #181a1b);
-  outline-offset: -3px;
-}
-
-.homepage-editor__dp-object-rail > button.is-active {
-  color: var(--inspector-action, #181a1b);
-  background: var(--inspector-action-soft, #eceeef);
-  box-shadow: inset 0 -2px 0 var(--inspector-action, #181a1b);
-}
-
-.homepage-editor__dp-object-rail > button > i {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--adm-warning, #7a531a);
-}
-
-.homepage-editor__dp-mini-toolbar,
-.homepage-editor__dp-mini-toolbar > span,
-.homepage-editor__dp-mini-tools {
-  display: flex;
-  align-items: center;
-}
-
-.homepage-editor__dp-mini-toolbar {
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 12px 5px;
-}
-
-.homepage-editor__dp-mini-toolbar > span:first-child {
-  gap: 6px;
-  color: var(--inspector-muted, #5f6568);
-  font-size: 11px;
-  line-height: 18px;
-}
-
-.homepage-editor__dp-mini-tools {
-  gap: 4px;
-}
-
-.homepage-editor__dp-mini-tools > button {
-  min-height: 24px;
-  padding: 0 5px;
-  border: 0;
-  color: var(--inspector-muted, #5f6568);
-  background: transparent;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.homepage-editor__dp-mini-tools > button:is(:hover, :focus-visible),
-.homepage-editor__dp-mini-tools > button.is-active {
-  color: var(--inspector-ink, #181a1b);
-  background: var(--inspector-action-soft, #eceeef);
-}
-
-.homepage-editor__dp-mini-tools > button:focus-visible {
-  outline: 2px solid var(--inspector-action, #181a1b);
-  outline-offset: 1px;
-}
-
-.homepage-editor__dp-mini-frame {
-  --dp-mini-ratio: 1.5;
-  position: relative;
-  width: 100%;
-  aspect-ratio: var(--dp-mini-ratio);
-  justify-self: center;
-  overflow: hidden;
-  border: 1px solid var(--inspector-line-strong, #b8bec1);
-  border-radius: 4px;
-  box-shadow: 0 8px 22px rgba(24, 26, 27, 0.1);
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="design"]
-  .homepage-editor__dp-mini-frame {
-  width: calc(100% - 24px);
-  margin: 0 12px;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"]
-  .homepage-editor__dp-mini-frame {
-  width: auto;
-  min-width: 0;
-  height: 82px;
-  justify-self: center;
-  align-self: center;
-  margin: 5px 12px 7px 0;
-  box-shadow: none;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"] {
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto auto;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"]
-  .homepage-editor__dp-object-rail {
-  grid-column: 1 / -1;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"]
-  .homepage-editor__dp-mini-toolbar {
-  grid-column: 1;
-  grid-row: 2;
-  align-self: end;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"]
-  .homepage-editor__dp-mini-tools {
-  display: none;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"]
-  .homepage-editor__dp-mini-frame {
-  grid-column: 2;
-  grid-row: 2 / span 2;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"]
-  .homepage-editor__dp-mini-status {
-  grid-column: 1;
-  grid-row: 3;
-  align-self: start;
-}
-
-.homepage-editor__dp-mini[data-device="mobile"] .homepage-editor__dp-mini-frame {
-  width: min(46%, 154px);
-  min-width: 128px;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"][data-device="mobile"]
-  .homepage-editor__dp-mini-frame {
-  width: auto;
-  min-width: 0;
-  height: 82px;
-}
-
-.homepage-editor__dp-mini-object {
-  position: absolute;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  cursor: pointer;
-}
-
-.homepage-editor__dp-mini-object {
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  outline: 1px solid rgba(24, 26, 27, 0.22);
-  outline-offset: -1px;
-  color: #181a1b;
-  background: #f4f5f5;
-  transition: outline-color 120ms ease, box-shadow 120ms ease, filter 120ms ease;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="design"]
-  .homepage-editor__dp-mini-object.is-layout-enabled {
-  cursor: move;
-  touch-action: none;
-}
-
-.homepage-editor__dp-mini-object:is(:hover, :focus-visible),
-.homepage-editor__dp-mini-object.is-active {
-  z-index: 20 !important;
-  outline: 3px solid var(--inspector-action, #181a1b);
-  outline-offset: -3px;
-  box-shadow: inset 0 0 0 1px #fff;
-}
-
-.homepage-editor__dp-mini-object > img {
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.homepage-editor__dp-mini-object.is-disabled-object {
-  filter: grayscale(1);
-  opacity: 0.48;
-}
-
-.homepage-editor__dp-mini-placeholder {
-  color: #6e7477;
-  font-size: clamp(16px, 2.4vw, 28px);
-}
-
-.homepage-editor__dp-mini-content-action,
-.homepage-editor__dp-mini-move {
-  position: absolute;
-  z-index: 8;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(24, 26, 27, 0.24);
-  color: #181a1b;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 2px 8px rgba(24, 26, 27, 0.12);
-  pointer-events: none;
-}
-
-.homepage-editor__dp-mini-content-action {
-  left: 50%;
-  top: 50%;
-  width: 28px;
-  height: 28px;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.homepage-editor__dp-mini[data-mini-canvas-mode="content"]
-  .homepage-editor__dp-mini-object:is(:hover, :focus-visible, .is-active)
-  .homepage-editor__dp-mini-content-action {
-  opacity: 1;
-}
-
-.homepage-editor__dp-mini-move {
-  left: 4px;
-  top: 4px;
-  width: 22px;
-  height: 22px;
-  font-size: 11px;
-}
-
-.homepage-editor__dp-mini-resize {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  z-index: 9;
-  width: 18px;
-  height: 18px;
-  border-top: 1px solid #fff;
-  border-left: 1px solid #fff;
-  background: linear-gradient(135deg, transparent 45%, #181a1b 46%, #181a1b 58%, transparent 59%);
-  cursor: nwse-resize;
-}
-
-.homepage-editor__dp-mini-copy {
-  width: 100%;
-  display: grid;
-  gap: 3px;
-  padding: 8%;
-  overflow: hidden;
-  text-align: left;
-}
-
-.homepage-editor__dp-mini-copy :is(small, strong, i) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.homepage-editor__dp-mini-copy small {
-  color: #6e7477;
-  font-size: clamp(4px, 1.2vw, 9px);
-  letter-spacing: 0.08em;
-}
-
-.homepage-editor__dp-mini-copy strong {
-  font-family: var(--hc-font-display, serif);
-  font-size: clamp(8px, 2vw, 18px);
-  font-weight: 500;
-}
-
-.homepage-editor__dp-mini-copy i {
-  color: #5f6568;
-  font-size: clamp(5px, 1.1vw, 9px);
-  font-style: normal;
-}
-
-.homepage-editor__dp-mini-action {
-  max-width: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 4px 8px;
-  overflow: hidden;
-  border-bottom: 1px solid currentColor;
-  font-size: clamp(6px, 1.2vw, 10px);
-  white-space: nowrap;
-}
-
-.homepage-editor__dp-mini-object.is-action:has(.anticon-link) {
-  border: 1px dashed var(--adm-neutral-border);
-  background: repeating-linear-gradient(135deg, #fff, #fff 6px, #f4f5f5 6px, #f4f5f5 12px);
-}
-
-.homepage-editor__dp-mini-issue {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  color: #fff;
-  background: var(--adm-warning);
-  font-size: 10px;
-  box-shadow: 0 0 0 2px #fff;
-}
-
-.homepage-editor__dp-mini-ratios {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.homepage-editor__dp-mini-ratios > button {
-  width: 34px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  padding: 3px;
-  border: 1px solid var(--inspector-line, #dde1e2);
-  border-radius: 3px;
-  background: #fff;
-  cursor: pointer;
-}
-
-.homepage-editor__dp-mini-ratios > button:is(:hover, :focus-visible, .is-active) {
-  border-color: var(--inspector-action, #181a1b);
-  background: var(--inspector-action-soft, #eceeef);
-}
-
-.homepage-editor__dp-mini-ratios > button:focus-visible {
-  outline: 2px solid var(--inspector-action, #181a1b);
-  outline-offset: 1px;
-}
-
-.homepage-editor__dp-mini-ratios i {
-  width: 18px;
-  max-height: 18px;
-  border: 1px solid #5f6568;
-  background: #dde1e2;
-}
-
-.homepage-editor__dp-mini-status {
-  min-height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 0;
-  padding: 5px 12px 8px;
-  color: var(--inspector-ink, #181a1b);
-  font-size: 11px;
-  line-height: 18px;
-}
-
-.homepage-editor__dp-mini-status > span {
-  padding: 0 6px;
-  border-radius: 999px;
-  color: #7a531a;
-  background: #fbf4e8;
-  font-size: 10px;
-}
-
-.homepage-editor__geometry-visual-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(88px, 0.7fr) minmax(0, 1.3fr);
-  gap: 10px;
-  align-items: stretch;
-}
-
-.homepage-editor__geometry-readout {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  margin: 0;
-}
-
-.homepage-editor__geometry-readout > div {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  align-items: center;
-  border: 1px solid var(--inspector-line, #dde1e2);
-  border-radius: 3px;
-  background: #fff;
-}
-
-.homepage-editor__geometry-readout :is(dt, dd) {
-  margin: 0;
-  padding: 4px 5px;
-  font-size: 10px;
-  line-height: 16px;
-}
-
-.homepage-editor__geometry-readout dt {
-  color: var(--inspector-muted, #6e7477);
-  background: var(--adm-surface-muted, #f4f5f5);
-}
-
-.homepage-editor__geometry-readout dd {
-  overflow: hidden;
-  color: var(--inspector-ink, #181a1b);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 面包屑：双图文 › 当前对象 */
-.homepage-editor__dp-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--adm-muted);
-}
-.homepage-editor__dp-breadcrumb > button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--inspector-action, #181a1b);
-  font-size: 12px;
-  cursor: pointer;
-}
-.homepage-editor__dp-breadcrumb > button:hover,
-.homepage-editor__dp-breadcrumb > button:focus-visible {
-  text-decoration: underline;
-}
-.homepage-editor__dp-breadcrumb > strong {
-  color: var(--inspector-ink, #181a1b);
-  font-weight: 600;
-}
-
-/* 对象切换 chips：整个模块 / 主图 / 细节图 / 文案（高频直出） */
-.homepage-editor__dp-object-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 16px 10px;
-  border-bottom: 1px solid var(--inspector-line, #DDE1E2);
-}
-.homepage-editor__dp-object-chips > button {
-  min-height: 28px;
-  padding: 0 10px;
-  border: 1px solid #dde1e2;
-  border-radius: 14px;
-  background: #fff;
-  color: var(--adm-text-strong);
-  font-size: 12px;
-  cursor: pointer;
-}
-.homepage-editor__dp-object-chips > button:is(:hover, :focus-visible) {
-  border-color: #181a1b;
-}
-.homepage-editor__dp-object-chips > button.is-active {
-  border-color: #181a1b;
-  color: var(--inspector-action, #181a1b);
-  background: var(--inspector-action-soft, #eceeef);
-}
-
-/* 本面板内放开图形示意（全局 L302/L347 隐藏规则不动，其他模块不受影响） */
-.homepage-editor__dp-panel .homepage-editor__ratio-cards i {
-  display: block;
-  width: 100%;
-  max-width: 64px;
-  margin: 0 auto 4px;
-  border: 1px solid #6e7477;
-  border-radius: 2px;
-  background: #dde1e2;
-}
-.homepage-editor__dp-panel .homepage-editor__ratio-cards > button {
-  flex-direction: column;
-  padding-top: 8px;
-}
-.homepage-editor__dp-panel .homepage-editor__choice-cards i {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 36px;
-  margin-bottom: 4px;
-}
-.homepage-editor__dp-panel .homepage-editor__choice-cards > button {
-  flex-direction: column;
-  padding: 6px 8px;
-}
-
-/* 构图卡片补齐：main-led 主图占大（左宽右窄）、detail-led 细节图占大（左窄右宽） */
-.homepage-editor__dp-panel
-  .homepage-editor__choice-cards.is-composition
-  i[data-choice="main-led"]
-  b {
-  right: 34%;
-}
-.homepage-editor__dp-panel
-  .homepage-editor__choice-cards.is-composition
-  i[data-choice="main-led"]::after {
-  left: 70%;
-}
-.homepage-editor__dp-panel
-  .homepage-editor__choice-cards.is-composition
-  i[data-choice="detail-led"]
-  b {
-  right: 62%;
-}
-.homepage-editor__dp-panel
-  .homepage-editor__choice-cards.is-composition
-  i[data-choice="detail-led"]::after {
-  left: 42%;
 }
 
 /* ═══ Inspector 图形化属性层（图 1 对齐） ═══ */
@@ -10144,6 +9895,21 @@ button.template-editor__toolbar-state:focus-visible {
   border-color: #181a1b;
   outline: 0;
 }
+.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"] {
+  color: var(--adm-muted);
+  border-color: var(--adm-line);
+  background: transparent;
+  font-weight: 400;
+}
+.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"]:hover,
+.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="warning"]:focus-visible {
+  border-color: var(--adm-muted);
+  color: #181a1b;
+}
+.homepage-editor__inspector .homepage-editor__properties-actions > button[data-issue-kind="error"] {
+  color: var(--adm-error);
+  border-color: currentColor;
+}
 
 /* 参考图硬对齐：媒体对象在内容编辑中是一条完整任务，不再回退到通用字段堆叠。 */
 .homepage-editor__task-group[data-selected-task="media"]
@@ -10472,7 +10238,7 @@ button.template-editor__toolbar-state:focus-visible {
   line-height: 1.5;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1439px) {
   .homepage-editor__mode-slot {
     left: calc(50% + 132px);
     width: 160px;
@@ -10496,7 +10262,7 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 /* T1 最终级联：历史模板专属规则之后仍保持覆盖式属性区。 */
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .homepage-editor__body.template-editor__body
     > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
     position: absolute;
@@ -10718,7 +10484,7 @@ button.template-editor__toolbar-state:focus-visible {
 
 /* T1 收纳入口必须处于画布之上，并保留可读的横排标签；旧桌面 dock 的 28px
  * 图标尺寸不能重新压缩窄屏入口。父层不接管画布命中，只让真实按钮接管。 */
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .homepage-editor__body > [data-compact-overlay="library-trigger"],
   .homepage-editor__body > [data-compact-overlay="inspector"].is-inspector-collapsed {
     position: absolute;
@@ -10749,14 +10515,16 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 /* 模板窄屏结构覆盖层位于画布之上、目录/属性抽屉之下，避开顶部恢复入口。 */
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .homepage-editor__body.template-editor__body
     > .homepage-editor__structure-workspace {
     position: absolute;
     inset: 60px auto 0 12px;
     z-index: 59;
-    width: min(208px, calc(100% - 24px));
+    width: min(176px, calc(100% - 24px));
     height: auto;
+    container-name: editor-structure-dock;
+    container-type: inline-size;
   }
 
   .homepage-editor__body.template-editor__body
@@ -10774,7 +10542,7 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 /* 最终级联：页面窄屏属性覆盖层位于画布选区工具之上。 */
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .homepage-editor__body:not(.template-editor__body)
     > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
     position: absolute;
@@ -10811,6 +10579,7 @@ button.template-editor__toolbar-state:focus-visible {
 .unified-template-library__filter-summary { display: flex; align-items: center; gap: 6px; font-size: 11px; padding-top: 6px; }
 .unified-template-library__filter-summary span { flex: 1; overflow-wrap: anywhere; }
 .unified-template-library__filter-summary button { flex: 0 0 auto; padding: 4px; border: 1px solid var(--adm-line); border-radius: 4px; background: var(--adm-content-bg); }
+.unified-template-library__handoff-status { padding-top: 6px; color: var(--adm-muted); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 
 @media (max-width: 767px) {
   .homepage-editor__body.template-editor__body
@@ -10819,69 +10588,7 @@ button.template-editor__toolbar-state:focus-visible {
   }
 }
 
-/* 1025-1199px 已有固定后台导航，模板侧栏改为非模态窄桌面 dock。
- * 打开的次要面板占用自己的边缘带，画布和悬浮主操作使用剩余矩形；
- * 这样可见按钮不会继续显示在面板下方，也无需用 inert 阻断顶部历史操作。 */
-@media (min-width: 1025px) and (max-width: 1199px) {
-  .homepage-editor__body.template-editor__body {
-    --template-editor-compact-inspector-width: clamp(360px, 38vw, 420px);
-    --template-editor-compact-structure-width: 208px;
-  }
-
-  .homepage-editor__body.template-editor__body
-    > [data-compact-overlay="inspector"][data-compact-overlay-open="true"] {
-    width: var(--template-editor-compact-inspector-width);
-  }
-
-  .homepage-editor__body.template-editor__body:has(
-      > [data-compact-overlay="inspector"][data-compact-overlay-open="true"]
-    )
-    > .homepage-editor__stage {
-    right: var(--template-editor-compact-inspector-width);
-    width: auto;
-  }
-
-  .homepage-editor__body.template-editor__body:has(
-      > .homepage-editor__structure-workspace:not(.is-collapsed)
-    )
-    > .homepage-editor__stage {
-    left: var(--template-editor-compact-structure-width);
-    width: auto;
-  }
-
-  .homepage-editor__body.template-editor__body:has(
-      > [data-compact-overlay="inspector"][data-compact-overlay-open="true"]
-    )
-    > :is(.template-editor__production-guide, .template-editor__new-template-empty-start) {
-    right: calc(var(--template-editor-compact-inspector-width) + 12px);
-    left: 12px;
-  }
-
-  .homepage-editor__body.template-editor__body:has(
-      > .homepage-editor__structure-workspace:not(.is-collapsed)
-    )
-    > :is(.template-editor__production-guide, .template-editor__new-template-empty-start) {
-    right: 12px;
-    left: calc(var(--template-editor-compact-structure-width) + 12px);
-  }
-
-  .homepage-editor__body.template-editor__body:has(
-      > [data-compact-overlay="inspector"][data-compact-overlay-open="true"]
-    )
-    .template-editor__canvas-controls--minimal {
-    left: calc((100% - var(--template-editor-compact-inspector-width)) / 2);
-  }
-
-  .homepage-editor__body.template-editor__body:has(
-      > .homepage-editor__structure-workspace:not(.is-collapsed)
-    )
-    .template-editor__canvas-controls--minimal {
-    left: calc(
-      var(--template-editor-compact-structure-width)
-      + (100% - var(--template-editor-compact-structure-width)) / 2
-    );
-  }
-}
+/* 1025px 起与宽屏共用同一套停靠，不再在普通窗口里把侧栏改成另一套窄 dock。 */
 
 /* 两种工作模式共享唯一操作栏；业务差异只体现在主操作文案与可用状态。 */
 .homepage-editor__toolbar .homepage-editor__toolbar-history .ant-btn {
@@ -10969,7 +10676,7 @@ button.template-editor__toolbar-state:focus-visible {
   flex: 0 0 auto;
 }
 
-@media (max-width: 1199px) {
+@media (max-width: 1024px) {
   .admin-header__editor-slot
     .homepage-editor__toolbar:not(.template-editor__toolbar) {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -11031,6 +10738,9 @@ button.template-editor__toolbar-state:focus-visible {
   .admin-header__editor-slot
     .homepage-editor__toolbar:not(.template-editor__toolbar)
     .homepage-editor__locale-review-controls select,
+  .admin-header__editor-slot
+    .homepage-editor__toolbar:not(.template-editor__toolbar)
+    .homepage-editor__locale-review-controls .homepage-editor__locale-label,
   .admin-header__editor-slot
     .homepage-editor__toolbar:not(.template-editor__toolbar)
     .homepage-editor__locale-review-controls button,

@@ -38,6 +38,12 @@ export class ResourceRequirementInputDto {
 
 export class IssueQuotationDto {
   @IsOptional()
+  @Transform(trimString)
+  @IsString()
+  @MaxLength(1000)
+  changeSummary?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)

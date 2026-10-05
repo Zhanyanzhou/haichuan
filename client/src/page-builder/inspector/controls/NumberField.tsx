@@ -185,6 +185,9 @@ export function useCommittedNumberInput({
         }
       } else if (event.key === "Escape") {
         event.preventDefault();
+        // Escape 在数值编辑器内表示放弃本次草稿；不能继续冒泡到紧凑工作区，
+        // 否则同一次按键会把承载该输入框的属性面板也关闭。
+        event.stopPropagation();
         restore();
         skipNextBlurRef.current = true;
         event.currentTarget.blur();
@@ -309,6 +312,8 @@ export default function NumberField({
           onBlur={() => transaction.commit()}
           onKeyDown={(event) => {
             if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            event.stopPropagation();
             transaction.restore();
             event.currentTarget.blur();
           }}

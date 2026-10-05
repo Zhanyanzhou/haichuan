@@ -5,6 +5,7 @@ import { unwrapResponse } from "@/utils/unwrap";
 import type { PuckBlock, PuckDocument } from "./PuckDocumentRenderer";
 import {
   getBrowserPublicContentLocale,
+  isPublicContentLocaleAvailable,
   type PublicContentLocale,
 } from "@/i18n/publicLocale";
 
@@ -29,6 +30,10 @@ type PublishedPageDocumentState = {
   status: PublishedPageDocumentStatus;
   /** 刷新失败时仍在使用最后一次有效发布快照。 */
   stale: boolean;
+};
+
+type PublishedPageDocumentInternalState = PublishedPageDocumentState & {
+  resourceKey?: string;
 };
 
 export type PublishedPageDocumentResource = PublishedPageDocumentState & {
@@ -80,6 +85,23 @@ export function isPublishedPageDocument(
 }
 
 /**
+ * 发布流程会把首页的同一份已发布 PageDocument 随静态首屏一同输出。
+ * 浏览器只在首个挂载周期读取它；后续仍由既有公开接口和发布事件校准。
+ * 解析失败或页面键不匹配时安全忽略，绝不把静态 HTML 当作新的内容来源。
+ */
+function readPrerenderedPublishedPageDocument(pageKey?: string): PublishedPageDocument | null {
+  if (!pageKey || typeof document === "undefined") return null;
+  const node = document.getElementById("hc-published-page-document");
+  if (!node?.textContent) return null;
+  try {
+    const value = JSON.parse(node.textContent) as unknown;
+    return isPublishedPageDocument(value, pageKey) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 统一公开发布态语义：
  * - 200 + null = 从未发布；
  * - 非空但结构不合法 = invalid；
@@ -91,12 +113,23 @@ export function usePublishedPageDocument(
   localeOverride?: PublicContentLocale,
 ): PublishedPageDocumentResource {
   const locale = localeOverride ?? getBrowserPublicContentLocale();
-  const [state, setState] = useState<PublishedPageDocumentState>({
-    pageKey: undefined,
-    pageDocument: null,
-    status: pageKey ? "loading" : "idle",
+  const publishedLocaleAvailable = isPublicContentLocaleAvailable(locale);
+  const initialBootstrapRef = useRef<PublishedPageDocument | null | undefined>(undefined);
+  if (initialBootstrapRef.current === undefined) {
+    initialBootstrapRef.current = publishedLocaleAvailable
+      ? readPrerenderedPublishedPageDocument(pageKey)
+      : null;
+  }
+  const initialBootstrap = initialBootstrapRef.current;
+  const [state, setState] = useState<PublishedPageDocumentInternalState>(() => ({
+    resourceKey: initialBootstrap && pageKey ? `${locale}:${pageKey}` : undefined,
+    pageKey: initialBootstrap?.pageKey,
+    pageDocument: initialBootstrap ?? null,
+    status: initialBootstrap
+      ? "published"
+      : (pageKey ? (publishedLocaleAvailable ? "loading" : "invalid") : "idle"),
     stale: false,
-  });
+  }));
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
   const activeRefreshRef = useRef<{ key: string; pending: boolean } | null>(null);
@@ -104,7 +137,9 @@ export function usePublishedPageDocument(
     key: string;
     pageKey: string;
     pageDocument: PublishedPageDocument;
-  } | null>(null);
+  } | null>(initialBootstrap && pageKey
+    ? { key: `${locale}:${pageKey}`, pageKey, pageDocument: initialBootstrap }
+    : null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -119,9 +154,24 @@ export function usePublishedPageDocument(
       activeRefreshRef.current = null;
       lastValidRef.current = null;
       setState({
+        resourceKey: undefined,
         pageKey: undefined,
         pageDocument: null,
         status: "idle",
+        stale: false,
+      });
+      return;
+    }
+
+    if (!publishedLocaleAvailable) {
+      requestIdRef.current += 1;
+      activeRefreshRef.current = null;
+      lastValidRef.current = null;
+      setState({
+        resourceKey: `${locale}:${pageKey}`,
+        pageKey,
+        pageDocument: null,
+        status: "invalid",
         stale: false,
       });
       return;
@@ -143,6 +193,7 @@ export function usePublishedPageDocument(
 
     if (showLoading && !lastValid) {
       setState({
+        resourceKey: key,
         pageKey,
         pageDocument: null,
         status: "loading",
@@ -160,6 +211,7 @@ export function usePublishedPageDocument(
         // 必须清除旧内存快照，避免撤销发布后继续展示历史正文。
         lastValidRef.current = null;
         setState({
+          resourceKey: key,
           pageKey,
           pageDocument: null,
           status: "unpublished",
@@ -173,6 +225,7 @@ export function usePublishedPageDocument(
       if (isExplicitlyInvalidPublishedPageDocument(pageDocument, pageKey)) {
         lastValidRef.current = null;
         setState({
+          resourceKey: key,
           pageKey,
           pageDocument: null,
           status: "invalid",
@@ -184,6 +237,7 @@ export function usePublishedPageDocument(
       if (!isPublishedPageDocument(pageDocument, pageKey)) {
         if (lastValid) {
           setState({
+            resourceKey: key,
             pageKey,
             pageDocument: lastValid,
             status: "published",
@@ -191,6 +245,7 @@ export function usePublishedPageDocument(
           });
         } else {
           setState({
+            resourceKey: key,
             pageKey,
             pageDocument: null,
             status: "invalid",
@@ -202,6 +257,7 @@ export function usePublishedPageDocument(
 
       lastValidRef.current = { key, pageKey, pageDocument };
       setState({
+        resourceKey: key,
         pageKey,
         pageDocument,
         status: "published",
@@ -211,6 +267,7 @@ export function usePublishedPageDocument(
       if (!mountedRef.current || requestIdRef.current !== requestId) return;
       if (lastValid) {
         setState({
+          resourceKey: key,
           pageKey,
           pageDocument: lastValid,
           status: "published",
@@ -218,6 +275,7 @@ export function usePublishedPageDocument(
         });
       } else {
         setState({
+          resourceKey: key,
           pageKey,
           pageDocument: null,
           status: "error",
@@ -230,7 +288,11 @@ export function usePublishedPageDocument(
         if (operation.pending && mountedRef.current) void refresh(false);
       }
     }
-  }, [locale, pageKey]);
+  }, [locale, pageKey, publishedLocaleAvailable]);
+
+  usePagePublishStream(publishedLocaleAvailable ? pageKey : undefined, () => {
+    void refresh(false);
+  }, locale);
 
   useEffect(() => {
     if (lastValidRef.current?.key !== `${locale}:${pageKey ?? ""}`) {
@@ -238,10 +300,6 @@ export function usePublishedPageDocument(
     }
     void refresh(true);
   }, [locale, pageKey, refresh]);
-
-  usePagePublishStream(pageKey, () => {
-    void refresh(false);
-  }, locale);
 
   // 页面重新可见时主动对齐 revision，弥补断网、合盖或后台标签页期间错过的发布事件。
   useEffect(() => {
@@ -257,5 +315,21 @@ export function usePublishedPageDocument(
     };
   }, [pageKey, refresh]);
 
-  return { ...state, refresh };
+  const currentResourceKey = pageKey ? `${locale}:${pageKey}` : undefined;
+  const scopedState: PublishedPageDocumentInternalState = state.resourceKey === currentResourceKey
+    ? state
+    : {
+        resourceKey: currentResourceKey,
+        pageKey,
+        pageDocument: null,
+        status: pageKey ? (publishedLocaleAvailable ? "loading" : "invalid") : "idle",
+        stale: false,
+      };
+  return {
+    pageKey: scopedState.pageKey,
+    pageDocument: scopedState.pageDocument,
+    status: scopedState.status,
+    stale: scopedState.stale,
+    refresh,
+  };
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import {
+  CONTENT_TEMPLATE_PAGE_KEYS,
   CONTENT_TEMPLATE_PAGE_PATHS,
   CONTENT_TEMPLATE_PAGE_METADATA,
   getPageDocumentMediaReferences,
@@ -9,14 +10,16 @@ import {
 } from "../modules/page-modules/generated/contentTemplates.generated";
 import {
   createPageLocaleContentHash,
+  PAGE_LOCALE_SELF_REVIEW_ACTION,
   readPageLocaleRevisionMarker,
   stripPageLocaleRevisionMetadata,
 } from "../modules/page-modules/page-document-localization";
 import { createMediaPublicationReferenceKey } from "../modules/page-modules/media-publication-manifest";
 import { evaluateMediaPublicEligibility } from "../modules/upload/media-public-eligibility";
+import { computeProductPublicationQualityHash } from "../modules/products/product-publication-quality-hash";
+import { evaluateSitePublicationReadiness } from "../modules/settings/site-publication-readiness";
 
-const PAGE_KEYS = ["home", "products", "catalog", "custom", "about", "contact"] as const;
-const ENGLISH_PAGE_KEYS = new Set<string>(["home", "products", "custom", "about"]);
+const PAGE_KEYS = CONTENT_TEMPLATE_PAGE_KEYS;
 const PRODUCT_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,49}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REQUIRED_SETTINGS = [
@@ -27,7 +30,7 @@ const REQUIRED_SETTINGS = [
   "privacyPolicyReviewReference",
 ] as const;
 
-type PublicLocale = "zh-CN" | "en";
+type PublicLocale = "zh-CN";
 type ReleaseProfile = "lead-generation" | "commerce";
 type SourceStage = "preproduction" | "production";
 type LegalSourceHashes = {
@@ -39,6 +42,8 @@ export interface PublicSeoSnapshotDatabase {
   siteSetting: { findUnique(args: unknown): Promise<any> };
   pageDocument: { findMany(args: unknown): Promise<any[]> };
   product: { findMany(args: unknown): Promise<any[]> };
+  operationLog: { findUnique(args: unknown): Promise<any> };
+  user: { findUnique(args: unknown): Promise<any> };
 }
 
 export type PublicSeoSourceConfig = {
@@ -57,7 +62,20 @@ export type PublicSeoPageValidator = (
   pageKey: string,
   puckData: unknown,
   metadata: unknown,
-) => Promise<{ valid: boolean }>;
+) => Promise<{
+  valid: boolean;
+  issues?: Array<{ severity?: string; message?: string }>;
+}>;
+
+function hasFormalPlaceholderIssue(
+  validation: Awaited<ReturnType<PublicSeoPageValidator>>,
+): boolean {
+  return (validation.issues ?? []).some((issue) =>
+    issue.severity === "warning"
+      && typeof issue.message === "string"
+      && issue.message.includes("仍是占位内容")
+  );
+}
 
 type SnapshotRouteInput = {
   path: string;
@@ -76,6 +94,13 @@ type SnapshotRouteInput = {
   description: string;
   shareImage: string;
   renderedBodyHtml: string;
+  /** 首页首次访问可读取的同源、已发布 PageDocument；仅用于客户端首屏接管。 */
+  bootstrapPageDocument?: {
+    pageKey: "home";
+    puckData: unknown;
+    metadata: unknown;
+    status: "PUBLISHED";
+  };
   structuredData?: unknown;
   productCode?: string;
 };
@@ -91,6 +116,40 @@ function fail(code: string): never {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function publicPageMetadata(metadata: unknown): Record<string, string> {
+  if (!isRecord(metadata)) return {};
+  return Object.fromEntries(
+    CONTENT_TEMPLATE_PAGE_METADATA.publicFields.flatMap((field) => {
+      const value = metadata[field];
+      return typeof value === "string" && value.trim()
+        ? [[field, value.trim()]]
+        : [];
+    }),
+  );
+}
+
+function disabledOverrideNodes(overrides: unknown): Set<string> {
+  const disabled = new Set<string>();
+  if (!isRecord(overrides) || !isRecord(overrides.nodes)) return disabled;
+  for (const [nodeId, node] of Object.entries(overrides.nodes)) {
+    if (isRecord(node) && node.enabled === false) disabled.add(nodeId);
+  }
+  return disabled;
+}
+
+/** 静态首屏只嵌入公开可见 Puck 字段，不写出内部备注或已关闭节点文案。 */
+function toPublicBootstrapPuckData(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(toPublicBootstrapPuckData);
+  if (!isRecord(value)) return value;
+  const disabled = disabledOverrideNodes(value.__instanceOverrides);
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, child]) => {
+      if (key === "internal" || disabled.has(key)) return [];
+      return [[key, toPublicBootstrapPuckData(child)]];
+    }),
+  );
 }
 
 function text(value: unknown): string {
@@ -246,8 +305,18 @@ function requireSettings(settingsRow: any, config: PublicSeoSourceConfig) {
   if (settings.defaultLocale !== "zh-CN") fail("DEFAULT_LOCALE_INVALID");
   if (!Array.isArray(settings.publishedLocales)) fail("PUBLISHED_LOCALES_INVALID");
   const locales: string[] = settings.publishedLocales.map(text);
-  if (new Set(locales).size !== locales.length || !locales.includes("zh-CN") || locales.some((locale) => locale !== "zh-CN" && locale !== "en")) {
+  if (locales.length !== 1 || locales[0] !== "zh-CN") {
     fail("PUBLISHED_LOCALES_INVALID");
+  }
+  const readiness = evaluateSitePublicationReadiness(settings, {
+    persisted: true,
+    requireLaunchDetails: true,
+  });
+  if (!readiness.ready) {
+    const blockerCodes = [...new Set(
+      readiness.blockers.map((blocker) => blocker.code),
+    )].sort();
+    fail(`SITE_PUBLICATION_READINESS_BLOCKED:${blockerCodes.join(",")}`);
   }
   return { settings, origin, locales, version: settingsRow.version, updatedAt: settingsRow.updatedAt };
 }
@@ -289,7 +358,15 @@ function assertMediaManifestCurrent(revision: any, pageKey: string, publicMetada
   }
 }
 
-function projectPage(document: any, localization: any, locale: PublicLocale, origin: string, siteName: string, now: Date): SnapshotRouteInput {
+async function projectPage(
+  database: PublicSeoSnapshotDatabase,
+  document: any,
+  localization: any,
+  locale: PublicLocale,
+  origin: string,
+  siteName: string,
+  now: Date,
+): Promise<SnapshotRouteInput> {
   if (!localization || localization.reviewStatus !== "PUBLISHED") fail(`PAGE_${document.pageKey}_${locale}_NOT_PUBLISHED`);
   if (!localization.publishedRevisionId || !text(localization.publishedHash) || !localization.publishedAt) {
     fail(`PAGE_${document.pageKey}_${locale}_PUBLISHED_POINTER_MISSING`);
@@ -314,7 +391,55 @@ function projectPage(document: any, localization: any, locale: PublicLocale, ori
     || !marker.submittedAt
     || !marker.reviewedAt
   ) fail(`PAGE_${document.pageKey}_${locale}_REVIEW_EVIDENCE_MISSING`);
-  if (marker.submittedBy === marker.reviewedBy) fail(`PAGE_${document.pageKey}_${locale}_REVIEW_NOT_INDEPENDENT`);
+  if (marker.submittedBy === marker.reviewedBy) {
+    const selfReview = marker.selfReview;
+    if (
+      !selfReview
+      || selfReview.actor !== marker.reviewedBy
+      || selfReview.actorRole !== "SUPER_ADMIN"
+      || selfReview.revision !== marker.submittedAt
+      || selfReview.reviewedAt !== marker.reviewedAt
+    ) fail(`PAGE_${document.pageKey}_${locale}_SELF_REVIEW_EVIDENCE_INVALID`);
+    const [audit, actor] = await Promise.all([
+      database.operationLog.findUnique({
+        where: { id: selfReview.auditLogId },
+        select: { id: true, userId: true, action: true, module: true, targetId: true, detail: true },
+      }),
+      database.user.findUnique({
+        where: { id: selfReview.actor },
+        select: { role: true, status: true },
+      }),
+    ]);
+    let detail: Record<string, unknown> | null = null;
+    try {
+      detail = audit && typeof audit.detail === "string"
+        ? JSON.parse(audit.detail) as Record<string, unknown>
+        : null;
+    } catch {
+      detail = null;
+    }
+    if (
+      actor?.role !== "SUPER_ADMIN"
+      || actor.status !== "ACTIVE"
+      || !audit
+      || audit.userId !== selfReview.actor
+      || audit.action !== PAGE_LOCALE_SELF_REVIEW_ACTION
+      || audit.module !== "page-builder"
+      || audit.targetId !== document.id
+      || detail?.schemaVersion !== 1
+      || detail.event !== PAGE_LOCALE_SELF_REVIEW_ACTION
+      || detail.actor !== selfReview.actor
+      || detail.actorRole !== "SUPER_ADMIN"
+      || detail.pageKey !== document.pageKey
+      || detail.locale !== locale
+      || detail.revision !== selfReview.revision
+      || detail.contentHash !== marker.contentHash
+      || detail.reviewedAt !== marker.reviewedAt
+      || detail.result !== "succeeded"
+    ) fail(`PAGE_${document.pageKey}_${locale}_SELF_REVIEW_EVIDENCE_INVALID`);
+  } else if (marker.selfReview) {
+    fail(`PAGE_${document.pageKey}_${locale}_SELF_REVIEW_EVIDENCE_INVALID`);
+  }
   const submittedAt = timestamp(marker.submittedAt);
   const reviewedAt = timestamp(marker.reviewedAt);
   const publishedAt = new Date(revision.publishedAt).getTime();
@@ -343,8 +468,7 @@ function projectPage(document: any, localization: any, locale: PublicLocale, ori
   }
   const basePath = CONTENT_TEMPLATE_PAGE_PATHS[document.pageKey as keyof typeof CONTENT_TEMPLATE_PAGE_PATHS];
   if (typeof basePath !== "string") fail("PAGE_ROUTE_UNSUPPORTED");
-  if (locale === "en" && !ENGLISH_PAGE_KEYS.has(document.pageKey)) fail("ENGLISH_PAGE_ROUTE_UNSUPPORTED");
-  const path = locale === "en" ? (basePath === "/" ? "/en" : `/en${basePath}`) : basePath;
+  const path = basePath;
   return {
     path,
     canonicalPath: path,
@@ -362,6 +486,16 @@ function projectPage(document: any, localization: any, locale: PublicLocale, ori
     description,
     shareImage,
     renderedBodyHtml: semanticBody(title, description),
+    ...(document.pageKey === "home" ? {
+      // 该快照与 SEO 路由使用同一份不可变 revision 和 contentHash；不是额外的
+      // 首页配置。客户端只在首个挂载周期使用，随后照常向公开接口校准。
+      bootstrapPageDocument: {
+        pageKey: "home" as const,
+        puckData: toPublicBootstrapPuckData(revision.puckData),
+        metadata: publicPageMetadata(metadata),
+        status: "PUBLISHED" as const,
+      },
+    } : {}),
   };
 }
 
@@ -412,34 +546,6 @@ function projectLegalRoutes(
   });
 }
 
-function productQualityHash(product: any): string {
-  const snapshot = {
-    version: "p0-product-quality-v1",
-    code: product.code,
-    name: product.name,
-    shortDescription: product.shortDescription,
-    description: product.description,
-    detailContent: product.detailContent,
-    materialType: product.materialType,
-    goldWeight: product.goldWeight == null ? null : String(product.goldWeight),
-    weight: product.weight == null ? null : String(product.weight),
-    salesMode: product.salesMode,
-    inventoryPolicy: product.inventoryPolicy,
-    primaryImageId: product.primaryImage?.id ?? null,
-    listingImageId: product.listingImage?.id ?? null,
-    imageIds: (product.images ?? []).map((image: any) => image.id).sort((left: number, right: number) => left - right),
-    skus: (product.skus ?? [])
-      .filter((sku: any) => sku.isActive)
-      .map((sku: any) => ({
-        id: sku.id,
-        price: String(sku.price),
-        goldWeight: sku.goldWeight == null ? null : String(sku.goldWeight),
-        inventoryRecords: (sku.inventories ?? []).length,
-      })),
-  };
-  return sha256(snapshot);
-}
-
 function assertProductImagePublic(product: any, now: Date) {
   const image = product.primaryImage;
   if (!image || image.productId !== product.id || image.isVideo || !image.mediaAsset) {
@@ -466,13 +572,12 @@ function projectProduct(product: any, origin: string, siteName: string, now: Dat
   if (!product.category || !product.category.isActive || product.category.deletedAt) {
     fail(`PRODUCT_${code}_CATEGORY_NOT_PUBLIC`);
   }
-  const currentQualityHash = productQualityHash(product);
+  const currentQualityHash = computeProductPublicationQualityHash({
+    ...product,
+    skus: product.skus.filter((sku: any) => sku.isActive),
+  });
   if (product.publicationQualityHash !== currentQualityHash) fail(`PRODUCT_${code}_QUALITY_HASH_DRIFT`);
   const image = assertProductImagePublic(product, now);
-  const translations = Array.isArray(product.translations) ? product.translations : [];
-  if (translations.some((translation: any) => translation.locale === "EN")) {
-    fail(`PRODUCT_${code}_ENGLISH_REVIEW_EVIDENCE_UNAVAILABLE`);
-  }
   const title = text(product.name);
   const description = text(product.shortDescription);
   if (!title || !description) fail(`PRODUCT_${code}_SEO_INCOMPLETE`);
@@ -575,8 +680,24 @@ const PRODUCT_SELECT = {
   materialType: true,
   goldWeight: true,
   weight: true,
+  size: true,
+  gemInfo: true,
+  craftTechnique: true,
   salesMode: true,
   inventoryPolicy: true,
+  fulfillmentType: true,
+  dispatchTime: true,
+  deliveryMethods: true,
+  requiresInsuredShipping: true,
+  requiresSignature: true,
+  includesCertificate: true,
+  packageType: true,
+  customLeadTime: true,
+  isHot: true,
+  isNew: true,
+  isRecommended: true,
+  isLimited: true,
+  isCustom: true,
   status: true,
   visibility: true,
   publicationQualityStatus: true,
@@ -596,21 +717,50 @@ const PRODUCT_SELECT = {
     },
   },
   listingImage: { select: { id: true } },
-  images: { where: { isVideo: false }, orderBy: { id: "asc" }, select: { id: true } },
+  images: {
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      type: true,
+      sortOrder: true,
+      mediaAssetId: true,
+      mediaAsset: {
+        select: {
+          lifecycleRevision: true,
+          authorization: { select: { revision: true, publicUseEpoch: true } },
+        },
+      },
+    },
+  },
+  shippingTemplate: {
+    select: {
+      id: true,
+      feeMode: true,
+      baseFee: true,
+      remoteSurcharge: true,
+      freeShippingThreshold: true,
+      excludedRegions: true,
+      insured: true,
+      signatureRequired: true,
+      isActive: true,
+      updatedAt: true,
+    },
+  },
   skus: {
     orderBy: { id: "asc" },
     select: {
       id: true,
       isActive: true,
+      material: true,
+      size: true,
       price: true,
       goldWeight: true,
       inventories: { select: { quantity: true } },
     },
   },
-  translations: {
-    where: { locale: { in: ["ZH_CN", "EN"] } },
-    orderBy: { locale: "asc" },
-    select: { locale: true },
+  certificates: {
+    orderBy: { id: "asc" },
+    select: { id: true, certType: true, certNumber: true, expireDate: true },
   },
 } satisfies Prisma.ProductSelect;
 
@@ -637,30 +787,12 @@ async function readProjection(
   for (const pageKey of PAGE_KEYS) {
     const document = documentByKey.get(pageKey);
     const chinese = document.localizations.find((entry: any) => entry.locale === "ZH_CN");
-    routes.push(projectPage(document, chinese, "zh-CN", site.origin, text(site.settings.siteName), now));
+    routes.push(await projectPage(database, document, chinese, "zh-CN", site.origin, text(site.settings.siteName), now));
     const validation = await validatePage(pageKey, chinese.publishedRevision.puckData, chinese.publishedRevision.metadata);
     if (!validation.valid) fail(`PAGE_${pageKey}_zh-CN_CURRENT_VALIDATION_FAILED`);
-  }
-
-  const englishRows = documents.flatMap((document) =>
-    document.localizations
-      .filter((entry: any) => entry.locale === "EN")
-      .map((entry: any) => ({ document, entry })),
-  );
-  const englishEnabled = site.locales.includes("en");
-  if (englishEnabled) {
-    if (englishRows.length !== ENGLISH_PAGE_KEYS.size || englishRows.some(({ document }) => !ENGLISH_PAGE_KEYS.has(document.pageKey))) {
-      fail("ENGLISH_PUBLISHED_PAGE_SET_INCOMPLETE");
+    if (hasFormalPlaceholderIssue(validation)) {
+      fail(`PAGE_${pageKey}_zh-CN_PLACEHOLDER_CONTENT`);
     }
-    for (const pageKey of PAGE_KEYS.filter((key) => ENGLISH_PAGE_KEYS.has(key))) {
-      const document = documentByKey.get(pageKey);
-      const english = document.localizations.find((entry: any) => entry.locale === "EN");
-      routes.push(projectPage(document, english, "en", site.origin, text(site.settings.siteName), now));
-      const validation = await validatePage(pageKey, english.publishedRevision.puckData, english.publishedRevision.metadata);
-      if (!validation.valid) fail(`PAGE_${pageKey}_en_CURRENT_VALIDATION_FAILED`);
-    }
-  } else if (englishRows.length > 0) {
-    fail("ENGLISH_CONTENT_EXISTS_BUT_LOCALE_UNPUBLISHED");
   }
 
   const chineseHome = routes.find((route) => route.path === "/");

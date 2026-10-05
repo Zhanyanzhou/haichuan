@@ -54,6 +54,8 @@ export default function TemplateAnchorControls({ nodeId, disabled }: { nodeId: s
   if (!parent) return null;
   const rules = resolveTemplateNodeRules(definition, nodeId, breakpoint);
   const parentRules = resolveTemplateNodeRules(definition, parent.nodeId, breakpoint);
+  // 自由布局里已经用百分比定位，不再提供“改为局部叠放”，避免和常用文字属性抢位置。
+  if (parentRules.layoutMode === "free" && !rules.anchor) return null;
   const parentHasHeight = ["fixed", "min-height", "aspect-ratio", "viewport"].includes(parentRules.height.mode) || Boolean(parentRules.minHeight?.value);
   const start = (label: string, update: (next: TemplateDefinitionV2) => void) => {
     cancel();

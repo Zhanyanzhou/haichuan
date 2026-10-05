@@ -6,9 +6,13 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { ROLES_KEY } from "../../common/decorators/roles.decorator";
+import { InquiriesController } from "../inquiries/inquiries.controller";
+import { ReplyInquiryDto } from "../inquiries/dto/update-inquiry.dto";
+import { InquiriesService } from "../inquiries/inquiries.service";
 import { CreateLeadReplyDto } from "./dto/lead.dto";
 import { LeadsController } from "./leads.controller";
 import { LeadsService } from "./leads.service";
@@ -20,6 +24,11 @@ type HarnessOptions = {
   privacyDisposedAt?: Date | null;
   forceConflict?: boolean;
   notificationFails?: boolean;
+  customerEmail?: string | null;
+  outboxFails?: boolean;
+  customerStatus?: "ACTIVE" | "DISABLED";
+  customerExists?: boolean;
+  actorAuthorized?: boolean;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -39,7 +48,12 @@ function createHarness(options: HarnessOptions = {}) {
     updatedAt: initialUpdatedAt,
     privacyDisposedAt: options.privacyDisposedAt ?? null,
     inquiry: sourceType === "INQUIRY"
-      ? { id: 17, message: "预约需求", product: null }
+      ? {
+          id: 17,
+          message: "预约需求",
+          product: null,
+          customerEmail: options.customerEmail ?? null,
+        }
       : null,
     selectionInquiry: sourceType === "SELECTION_INQUIRY"
       ? { id: 18, message: "选款需求", items: [] }
@@ -51,12 +65,31 @@ function createHarness(options: HarnessOptions = {}) {
   const inquiryUpdates: Array<Record<string, unknown>> = [];
   const selectionUpdates: Array<Record<string, unknown>> = [];
   const notificationCalls: Array<Record<string, unknown>> = [];
+  const outboxCalls: Array<Record<string, unknown>> = [];
+  const leadQueries: Array<Record<string, unknown>> = [];
+  const transactionOperations: string[] = [];
   const activityByKey = new Map<string, Record<string, unknown>>();
   let nextActivityId = 91;
+  let lockCount = 0;
 
   const transactionClient = {
+    $queryRaw: async () => {
+      lockCount += 1;
+      if (lockCount === 1) {
+        transactionOperations.push("actor-lock");
+        return options.actorAuthorized === false ? [] : [{ id: 7 }];
+      }
+      transactionOperations.push("customer-lock");
+      if (options.customerExists === false) return [];
+      return [{
+        id: lead.customerId,
+        status: options.customerStatus ?? "ACTIVE",
+      }];
+    },
     lead: {
       findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        transactionOperations.push("lead-read");
+        leadQueries.push(where);
         if (where.sourceType !== lead.sourceType) return null;
         if ("id" in where) return where.id === lead.id ? { ...lead } : null;
         if ("inquiryId" in where) return where.inquiryId === lead.inquiryId ? { ...lead } : null;
@@ -69,6 +102,7 @@ function createHarness(options: HarnessOptions = {}) {
         where: { id: number; status: string; updatedAt: Date; privacyDisposedAt: null };
         data: { status: typeof lead.status };
       }) => {
+        transactionOperations.push("lead-update");
         if (
           options.forceConflict
           || where.id !== lead.id
@@ -164,16 +198,24 @@ function createHarness(options: HarnessOptions = {}) {
   };
   const reliableNotifications = {
     enqueueLeadReply: async (_transaction: unknown, input: Record<string, unknown>) => {
+      transactionOperations.push("notification-intent");
       if (options.notificationFails) throw new Error("notification unavailable");
       notificationCalls.push(input);
       return { id: 71 };
+    },
+  };
+  const outbox = {
+    enqueue: async (_transaction: unknown, input: Record<string, unknown>) => {
+      if (options.outboxFails) throw new Error("outbox unavailable");
+      outboxCalls.push(input);
+      return { id: 72 };
     },
   };
 
   return {
     service: new LeadsService(
       prisma as never,
-      {} as never,
+      outbox as never,
       reliableNotifications as never,
     ),
     lead,
@@ -183,6 +225,9 @@ function createHarness(options: HarnessOptions = {}) {
     inquiryUpdates,
     selectionUpdates,
     notificationCalls,
+    outboxCalls,
+    leadQueries,
+    transactionOperations,
   };
 }
 
@@ -201,6 +246,16 @@ test("回复 DTO 会裁剪正文并拒绝空值、超长正文和无效版本", 
   ]) {
     assert.ok((await validate(plainToInstance(CreateLeadReplyDto, input))).length > 0);
   }
+
+  const legacyValid = plainToInstance(ReplyInquiryDto, {
+    reply: "  旧入口仍使用统一回复。  ",
+    expectedUpdatedAt: "2026-09-07T01:00:00.000Z",
+  });
+  assert.equal((await validate(legacyValid)).length, 0);
+  assert.equal(legacyValid.reply, "旧入口仍使用统一回复。");
+  assert.ok((await validate(plainToInstance(ReplyInquiryDto, {
+    reply: "缺少版本",
+  }))).length > 0);
 });
 
 test("服务边界同样拒绝非字符串和超长回复", async () => {
@@ -236,14 +291,45 @@ test("回复控制器沿用后台角色守卫并只传递认证员工和幂等�
     expectedUpdatedAt: "2026-09-07T01:00:00.000Z",
   };
 
-  await controller.replyToLead("inquiry", 41, body, "reply-key-0001", { id: 7 });
+  const actor = {
+    id: 7,
+    sessionFamilyId: "00000000-0000-4000-8000-000000000001",
+  };
+  await controller.replyToLead("inquiry", 41, body, "reply-key-0001", actor);
 
   assert.deepEqual(Reflect.getMetadata(ROLES_KEY, LeadsController), [
     "SUPER_ADMIN",
     "ADMIN",
     "CUSTOMER_SERVICE",
   ]);
-  assert.deepEqual(calls, [["inquiry", 41, body, "reply-key-0001", 7]]);
+  assert.deepEqual(calls, [["inquiry", 41, body, "reply-key-0001", actor]]);
+});
+
+test("旧 Inquiry 回复控制器透传 source id、显式版本、幂等键和认证员工", async () => {
+  const calls: unknown[] = [];
+  const inquiries = new InquiriesService(
+    {} as never,
+    {} as never,
+    {
+      replyToInquirySource: async (...args: unknown[]) => {
+        calls.push(args);
+        return { leadId: 41 };
+      },
+    } as never,
+  );
+  const controller = new InquiriesController(inquiries);
+  const body = {
+    reply: "已转入统一回复事务。",
+    expectedUpdatedAt: "2026-09-07T01:00:00.000Z",
+  };
+
+  const actor = {
+    id: 7,
+    sessionFamilyId: "00000000-0000-4000-8000-000000000001",
+  };
+  await controller.reply(17, body, "legacy-reply-key-0001", actor);
+
+  assert.deepEqual(calls, [[17, body, "legacy-reply-key-0001", actor]]);
 });
 
 test("Inquiry 回复、状态、活动、兼容跟进和站内通知原子写入并可安全重放", async () => {
@@ -273,14 +359,162 @@ test("Inquiry 回复、状态、活动、兼容跟进和站内通知原子写入
   assert.equal(harness.activities.length, 1);
   assert.equal(harness.activities[0].type, "REPLY");
   assert.equal(harness.activities[0].createdBy, 7);
+  assert.equal(harness.activities[0].contactMethod, "other");
   assert.equal(harness.followUps.length, 1);
   assert.equal(harness.followUps[0].content, "已通过客户中心回复客户");
+  assert.equal(harness.followUps[0].contactMethod, "other");
   assert.equal(harness.inquiryUpdates.length, 1);
   assert.equal(harness.inquiryUpdates[0].reply, request.reply);
   assert.equal(harness.inquiryUpdates[0].status, "REPLIED");
   assert.equal(harness.notificationCalls.length, 1);
   assert.equal(harness.notificationCalls[0].customerId, 7);
   assert.equal(harness.notificationCalls[0].activityId, 91);
+  assert.equal(harness.outboxCalls.length, 0);
+  assert.deepEqual(harness.transactionOperations.slice(0, 4), [
+    "actor-lock",
+    "lead-read",
+    "customer-lock",
+    "lead-update",
+  ]);
+  assert.equal(harness.transactionOperations[4], "notification-intent");
+});
+
+test("Guard 后被停用或撤权的员工在任何客户锁与客户可见写入前失败关闭", async () => {
+  const harness = createHarness({ actorAuthorized: false });
+
+  await assert.rejects(
+    harness.service.replyToLead(
+      "inquiry",
+      41,
+      {
+        reply: "不应由已撤权员工提交",
+        expectedUpdatedAt: harness.initialUpdatedAt.toISOString(),
+      },
+      "revoked-actor-reply-0001",
+      7,
+    ),
+    ForbiddenException,
+  );
+
+  assert.deepEqual(harness.transactionOperations, ["actor-lock"]);
+  assert.equal(harness.leadQueries.length, 0);
+  assert.equal(harness.lead.status, "PENDING");
+  assert.equal(harness.activities.length, 0);
+  assert.equal(harness.followUps.length, 0);
+  assert.equal(harness.inquiryUpdates.length, 0);
+  assert.equal(harness.selectionUpdates.length, 0);
+  assert.equal(harness.notificationCalls.length, 0);
+  assert.equal(harness.outboxCalls.length, 0);
+});
+
+test("已停用或不存在的关联客户会在回复首写前失败关闭", async () => {
+  for (const [index, options] of [
+    { customerStatus: "DISABLED" as const },
+    { customerExists: false },
+  ].entries()) {
+    const harness = createHarness(options);
+
+    await assert.rejects(
+      harness.service.replyToLead(
+        "inquiry",
+        41,
+        {
+          reply: "不应形成任何回复事实",
+          expectedUpdatedAt: harness.initialUpdatedAt.toISOString(),
+        },
+        `inactive-customer-reply-000${index + 1}`,
+        7,
+      ),
+      ConflictException,
+    );
+
+    assert.deepEqual(harness.transactionOperations, [
+      "actor-lock",
+      "lead-read",
+      "customer-lock",
+    ]);
+    assert.equal(harness.lead.status, "PENDING");
+    assert.equal(harness.activities.length, 0);
+    assert.equal(harness.followUps.length, 0);
+    assert.equal(harness.inquiryUpdates.length, 0);
+    assert.equal(harness.selectionUpdates.length, 0);
+    assert.equal(harness.notificationCalls.length, 0);
+    assert.equal(harness.outboxCalls.length, 0);
+  }
+});
+
+test("匿名普通 Inquiry 使用同一回复事务写入无 PII 邮件 Outbox 并可幂等重放", async () => {
+  const harness = createHarness({
+    customerId: null,
+    customerEmail: " anonymous@example.invalid ",
+  });
+  const request = {
+    reply: "已通过邮件回复您的咨询。",
+    expectedUpdatedAt: harness.initialUpdatedAt.toISOString(),
+  };
+
+  const first = await harness.service.replyToInquirySource(
+    17,
+    request,
+    "anonymous-reply-key-0001",
+    7,
+  );
+  const replay = await harness.service.replyToInquirySource(
+    17,
+    request,
+    "anonymous-reply-key-0001",
+    7,
+  );
+
+  assert.deepEqual(replay, first);
+  assert.equal(harness.activities.length, 1);
+  assert.equal(harness.activities[0].contactMethod, "email");
+  assert.equal(harness.followUps.length, 1);
+  assert.equal(harness.followUps[0].content, "已通过电子邮件回复客户");
+  assert.equal(harness.followUps[0].contactMethod, "email");
+  assert.equal(harness.inquiryUpdates.length, 1);
+  assert.equal(harness.notificationCalls.length, 0);
+  assert.equal(harness.outboxCalls.length, 1);
+  assert.deepEqual(harness.outboxCalls[0], {
+    aggregateType: "Lead",
+    aggregateId: "41",
+    eventType: "lead.reply.notification.requested",
+    payload: { leadId: 41, activityId: 91 },
+    deduplicationKey: "lead.reply:91",
+    occurredAt: harness.activities[0].createdAt,
+  });
+  assert.doesNotMatch(
+    JSON.stringify(harness.outboxCalls[0]),
+    /anonymous@example\.invalid|已通过邮件回复您的咨询/,
+  );
+});
+
+test("匿名 Inquiry 邮件 Outbox 写入失败时回复事务完整回滚", async () => {
+  const harness = createHarness({
+    customerId: null,
+    customerEmail: "anonymous@example.invalid",
+    outboxFails: true,
+  });
+
+  await assert.rejects(
+    harness.service.replyToInquirySource(
+      17,
+      {
+        reply: "不应形成部分写入",
+        expectedUpdatedAt: harness.initialUpdatedAt.toISOString(),
+      },
+      "anonymous-reply-key-rollback",
+      7,
+    ),
+    /outbox unavailable/,
+  );
+
+  assert.equal(harness.lead.status, "PENDING");
+  assert.equal(harness.activities.length, 0);
+  assert.equal(harness.followUps.length, 0);
+  assert.equal(harness.inquiryUpdates.length, 0);
+  assert.equal(harness.notificationCalls.length, 0);
+  assert.equal(harness.outboxCalls.length, 0);
 });
 
 test("SelectionInquiry 回复保持唯一活动正文且不创建平行 reply 字段", async () => {
@@ -392,16 +626,25 @@ test("通知意图失败会回滚回复、状态、活动和兼容跟进", async
   assert.equal(harness.inquiryUpdates.length, 0);
 });
 
-test("终态、游客、匿名化、未知类型和缺失员工身份均安全拒绝", async () => {
+test("终态、无客户且无可用渠道、匿名化、未知类型和缺失员工身份均安全拒绝", async () => {
   const cases = [
-    createHarness({ status: "COMPLETED" }),
-    createHarness({ customerId: null }),
-    createHarness({ privacyDisposedAt: new Date("2026-09-07T02:00:00.000Z") }),
-  ];
-  for (const [index, harness] of cases.entries()) {
+    { type: "inquiry", harness: createHarness({ status: "COMPLETED" }) },
+    { type: "inquiry", harness: createHarness({ customerId: null }) },
+    {
+      type: "selection",
+      harness: createHarness({ sourceType: "SELECTION_INQUIRY", customerId: null }),
+    },
+    {
+      type: "inquiry",
+      harness: createHarness({
+        privacyDisposedAt: new Date("2026-09-07T02:00:00.000Z"),
+      }),
+    },
+  ] as const;
+  for (const [index, { type, harness }] of cases.entries()) {
     await assert.rejects(
       harness.service.replyToLead(
-        "inquiry",
+        type,
         41,
         {
           reply: "不应写入",
@@ -410,7 +653,9 @@ test("终态、游客、匿名化、未知类型和缺失员工身份均安全�
         `reply-key-00${index + 8}`,
         7,
       ),
-      index === 1 ? UnprocessableEntityException : ConflictException,
+      index === 1 || index === 2
+        ? UnprocessableEntityException
+        : ConflictException,
     );
     assert.equal(harness.activities.length, 0);
   }
@@ -438,11 +683,101 @@ test("终态、游客、匿名化、未知类型和缺失员工身份均安全�
   );
 });
 
-test("已登录客户不能绕过统一入口走旧 Inquiry 邮件回复路径", async () => {
+test("旧 Inquiry 回复按 source id 解析 canonical Lead 并复用统一幂等结果", async () => {
   const harness = createHarness();
-  await assert.rejects(
-    harness.service.recordInquiryReply(17, "旧入口回复", 7),
-    ConflictException,
+  const request = {
+    reply: "旧入口也必须形成唯一回复。",
+    expectedUpdatedAt: harness.initialUpdatedAt.toISOString(),
+  };
+
+  const first = await harness.service.replyToInquirySource(
+    17,
+    request,
+    "legacy-reply-key-0002",
+    7,
   );
+  const replay = await harness.service.replyToInquirySource(
+    17,
+    request,
+    "legacy-reply-key-0002",
+    7,
+  );
+
+  assert.deepEqual(replay, first);
+  assert.deepEqual(harness.leadQueries, [
+    { sourceType: "INQUIRY", inquiryId: 17 },
+    { sourceType: "INQUIRY", inquiryId: 17 },
+  ]);
+  assert.equal(harness.activities.length, 1);
+  assert.equal(harness.inquiryUpdates.length, 1);
+  assert.equal(harness.notificationCalls.length, 1);
+});
+
+test("旧 Inquiry 回复缺少 Idempotency-Key 时在任何写入前拒绝", async () => {
+  const harness = createHarness();
+
+  await assert.rejects(
+    harness.service.replyToInquirySource(
+      17,
+      {
+        reply: "不能缺少幂等键。",
+        expectedUpdatedAt: harness.initialUpdatedAt.toISOString(),
+      },
+      undefined,
+      7,
+    ),
+    BadRequestException,
+  );
+
+  assert.deepEqual(harness.leadQueries, []);
   assert.equal(harness.activities.length, 0);
+  assert.equal(harness.inquiryUpdates.length, 0);
+  assert.equal(harness.notificationCalls.length, 0);
+});
+
+test("旧 Inquiry 回复绝不把 source id 当作 canonical Lead.id", async () => {
+  const harness = createHarness();
+
+  await assert.rejects(
+    harness.service.replyToInquirySource(
+      41,
+      {
+        reply: "不应误命中同号 canonical Lead。",
+        expectedUpdatedAt: harness.initialUpdatedAt.toISOString(),
+      },
+      "legacy-reply-key-0041",
+      7,
+    ),
+    NotFoundException,
+  );
+
+  assert.deepEqual(harness.leadQueries, [
+    { sourceType: "INQUIRY", inquiryId: 41 },
+  ]);
+  assert.equal(harness.activities.length, 0);
+  assert.equal(harness.notificationCalls.length, 0);
+});
+
+test("统一回复入口不把来源 ID 猜成 Lead.id，拒绝前不写活动或通知", async () => {
+  const harness = createHarness();
+
+  await assert.rejects(
+    harness.service.replyToLead(
+      "inquiry",
+      17,
+      {
+        reply: "不应回复到来源 ID 对应的记录",
+        expectedUpdatedAt: harness.initialUpdatedAt.toISOString(),
+      },
+      "reply-source-id-0017",
+      7,
+    ),
+    NotFoundException,
+  );
+
+  assert.deepEqual(harness.leadQueries, [{ id: 17, sourceType: "INQUIRY" }]);
+  assert.equal(harness.activities.length, 0);
+  assert.equal(harness.followUps.length, 0);
+  assert.equal(harness.inquiryUpdates.length, 0);
+  assert.equal(harness.notificationCalls.length, 0);
 });

@@ -15,49 +15,47 @@ import {
   readSession,
 } from "./fixtures/template-authoring-main-route";
 
-test.describe("结构审查的三端有效显隐", () => {
+test.describe("结构审查的双端有效显隐", () => {
   function fixture() {
-    const blank = createBlankDynamicTemplateDefinition("三端审查");
+    const blank = createBlankDynamicTemplateDefinition("双端审查");
     const region = addDynamicTemplateNode(blank, blank.rootNodeId, "Container");
     const text = addDynamicTemplateNode(region.definition, region.nodeId, "TextSlot");
     Object.assign(text.definition.slots[text.slotId!], { required: true, editable: true, hideable: false });
     return { definition: text.definition, regionId: region.nodeId, nodeId: text.nodeId };
   }
-  test("平板 hidden 及手机继承均报告，手机显式恢复后只剩平板", () => {
+  test("历史平板 hidden 不报告，手机显式隐藏才进入审查", () => {
     const { definition, nodeId } = fixture();
     definition.nodes[nodeId].responsive.tablet = { hidden: true };
     const before = structuredClone(definition);
     const audit = buildTemplateStructureAudit(definition);
-    expect(audit.issues.filter((issue) => issue.code === "REQUIRED_SLOT_DEVICE_HIDDEN").map((issue) => issue.device)).toEqual(["tablet", "mobile"]);
-    expect(audit.requiredComplete).toBe(0);
+    expect(audit.issues.filter((issue) => issue.code === "REQUIRED_SLOT_DEVICE_HIDDEN")).toEqual([]);
     expect(definition).toEqual(before);
-    definition.nodes[nodeId].responsive.mobile = { hidden: false };
-    expect(buildTemplateStructureAudit(definition).issues.filter((issue) => issue.code === "REQUIRED_SLOT_DEVICE_HIDDEN").map((issue) => issue.device)).toEqual(["tablet"]);
+    definition.nodes[nodeId].responsive.mobile = { hidden: true };
+    expect(buildTemplateStructureAudit(definition).issues.filter((issue) => issue.code === "REQUIRED_SLOT_DEVICE_HIDDEN").map((issue) => issue.device)).toEqual(["mobile"]);
   });
-  test("桌面 display none 向三端继承，必填完成度不能变绿", () => {
+  test("桌面 display none 向手机继承，必填完成度不能变绿", () => {
     const { definition, nodeId } = fixture();
     definition.nodes[nodeId].responsive.desktop.display = "none";
     const audit = buildTemplateStructureAudit(definition);
-    expect(audit.issues.filter((issue) => issue.code === "REQUIRED_SLOT_DEVICE_HIDDEN").map((issue) => issue.device)).toEqual(["desktop", "tablet", "mobile"]);
+    expect(audit.issues.filter((issue) => issue.code === "REQUIRED_SLOT_DEVICE_HIDDEN").map((issue) => issue.device)).toEqual(["desktop", "mobile"]);
     expect(audit.requiredComplete).toBe(0);
   });
   test("定位实际隐藏祖先；全局隐藏优先于断点隐藏", () => {
     const { definition, regionId, nodeId } = fixture();
-    definition.nodes[regionId].responsive.tablet = { hidden: true };
-    expect(buildTemplateStructureAudit(definition).issues.filter((issue) => issue.code === "REQUIRED_SLOT_DEVICE_HIDDEN").map((issue) => issue.nodeId)).toEqual([regionId, regionId]);
+    definition.nodes[regionId].responsive.mobile = { hidden: true };
+    expect(buildTemplateStructureAudit(definition).issues.filter((issue) => issue.code === "REQUIRED_SLOT_DEVICE_HIDDEN").map((issue) => issue.nodeId)).toEqual([regionId]);
     const publishIssues = validateDynamicTemplatePublishDefinition(definition).issues
       .filter((issue) => issue.code === "PUBLISH_REQUIRED_SLOT_DEVICE_HIDDEN");
     expect(publishIssues.map((issue) => [issue.nodeId, issue.path])).toEqual([
-      [regionId, `nodes.${regionId}.responsive.tablet.display`],
       [regionId, `nodes.${regionId}.responsive.mobile.display`],
     ]);
-    const tabletTarget = resolveTemplateInspectorIssueTarget(definition, publishIssues[0]);
-    expect(tabletTarget).toMatchObject({
+    const mobileTarget = resolveTemplateInspectorIssueTarget(definition, publishIssues[0]);
+    expect(mobileTarget).toMatchObject({
       objectId: regionId,
       field: "responsive.*.display",
+      device: "mobile",
       destination: "inspector-field",
     });
-    expect(tabletTarget.device).toBeUndefined();
     expect(publishIssues[0].slotId).toBe(definition.nodes[nodeId].slotId);
     definition.nodes[regionId].hidden = true;
     const audit = buildTemplateStructureAudit(definition);

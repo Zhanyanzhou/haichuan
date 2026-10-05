@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PaymentStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -13,8 +13,22 @@ import {
 import type { WechatPayScene } from '../../common/payment-gateway/wechat-pay.client';
 import type { OperatorContext } from '../trade-events/trade-events.constants';
 import { businessDateKey } from '../../common/time/business-date';
+import type { CustomerPrincipal, StaffPrincipal } from '../../common/security/authenticated-principal';
+import {
+  lockAuthorizedStaffForPayment,
+  type StaffPaymentAuthorization,
+} from '../../common/security/staff-payment-authorization';
+import {
+  CUSTOMER_GATEWAY_OPERATION_LEASE_MS,
+  lockActiveCustomerForWrite,
+  releaseCustomerGatewayOperation,
+  reserveCustomerGatewayOperation,
+  type CustomerGatewayOperationLease,
+} from '../customers/customer-write-gate';
+import { resolveInstallmentPaymentType } from './payment-plan-installment-type';
 
 const ONLINE_PAYMENT_METHODS = ['wechat', 'alipay'] as const;
+type StaffPaymentActor = StaffPrincipal | OperatorContext;
 
 @Injectable()
 export class PaymentsService {
@@ -26,6 +40,24 @@ export class PaymentsService {
     private readonly paymentGateway: PaymentGatewayService,
     private readonly configService: ConfigService,
   ) {}
+
+  private requireStaffActor(actor: StaffPaymentActor): Pick<StaffPrincipal, 'id'> {
+    if (!Number.isInteger(actor.id) || Number(actor.id) <= 0) {
+      throw new ForbiddenException('当前员工身份无效');
+    }
+    return { id: Number(actor.id) };
+  }
+
+  private withAuthorizedStaffActor<T>(
+    actor: Pick<StaffPrincipal, 'id'>,
+    authorization: StaffPaymentAuthorization,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForPayment(tx, actor, authorization);
+      return action();
+    });
+  }
 
   /** 商户单号生成（与 orders.service.createPaymentNo 同格式：PAY+日期+随机段） */
   private createPaymentNo(): string {
@@ -42,6 +74,73 @@ export class PaymentsService {
     return cents;
   }
 
+  private async assertActiveQuotedResourceReservations(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: number;
+      quoteChannel: 'CUSTOM' | 'PARTNER_WAX';
+      quotationVersionId: number | null;
+    },
+  ) {
+    if (order.quotationVersionId === null) {
+      throw new BadRequestException('订单缺少报价版本，不能发起在线收款');
+    }
+
+    // 与订单行锁同一事务内锁住资源预占，防止校验后、渠道预下单前被并发释放或核销。
+    await tx.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM order_resource_reservations WHERE order_id = ${order.id} FOR UPDATE`,
+    );
+    const [requirements, reservations] = await Promise.all([
+      tx.quotationVersionResourceRequirement.findMany({
+        where: { quotationVersionId: order.quotationVersionId },
+        select: {
+          id: true,
+          resourceBucketId: true,
+          requiredQuantity: true,
+          resourceBucket: { select: { channel: true } },
+        },
+      }),
+      tx.orderResourceReservation.findMany({
+        where: { orderId: order.id },
+        select: {
+          orderId: true,
+          quotationRequirementId: true,
+          resourceBucketId: true,
+          quantity: true,
+          status: true,
+        },
+      }),
+    ]);
+
+    const reservationsByRequirement = new Map(
+      reservations.map((reservation) => [
+        reservation.quotationRequirementId,
+        reservation,
+      ]),
+    );
+    const reservationsMatch =
+      requirements.length > 0 &&
+      reservations.length === requirements.length &&
+      requirements.every((requirement) => {
+        const reservation = reservationsByRequirement.get(requirement.id);
+        return Boolean(
+          reservation &&
+          reservation.orderId === order.id &&
+          reservation.status === 'RESERVED' &&
+          reservation.resourceBucketId === requirement.resourceBucketId &&
+          requirement.resourceBucket.channel === order.quoteChannel &&
+          new Prisma.Decimal(reservation.quantity).equals(
+            requirement.requiredQuantity,
+          ),
+        );
+      });
+    if (!reservationsMatch) {
+      throw new BadRequestException(
+        '订单资源预占缺失或状态已变化，请刷新后重试',
+      );
+    }
+  }
+
   /** 在线支付通道可用性（后台收款按钮按此渲染可选项） */
   availableChannels() {
     return this.paymentGateway.availableChannels();
@@ -54,7 +153,10 @@ export class PaymentsService {
       .filter((channel) => channel.provider === 'wechat');
   }
 
-  async findAll(params: { page?: number; pageSize?: number; status?: string; type?: string; method?: string; keyword?: string; startDate?: string; endDate?: string }) {
+  async findAll(
+    params: { page?: number; pageSize?: number; status?: string; type?: string; method?: string; keyword?: string; startDate?: string; endDate?: string },
+    actor: StaffPaymentActor,
+  ) {
     const page = Math.max(Number(params.page) || 1, 1);
     const pageSize = Math.min(Math.max(Number(params.pageSize) || 20, 1), 100);
     const where: Prisma.PaymentWhereInput = {};
@@ -88,42 +190,64 @@ export class PaymentsService {
         where.paidAt.lt = exclusiveEnd;
       }
     }
-    const [list, total] = await Promise.all([
-      this.prisma.payment.findMany({
-        where,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+    const staffPrincipal = this.requireStaffActor(actor);
+    return this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForPayment(tx, staffPrincipal, 'PAYMENT_QUERY');
+      const [list, total] = await Promise.all([
+        tx.payment.findMany({
+          where,
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: {
+            order: { select: { id: true, orderNo: true, customerName: true, customerPhone: true, finalAmount: true, status: true } },
+            // 审核人信息（审核页需展示审核人/审核时间/审核备注）
+            reviewer: { select: { id: true, realName: true, username: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        tx.payment.count({ where }),
+      ]);
+      return { list, total, page, pageSize };
+    });
+  }
+
+  async findById(id: number, actor: StaffPaymentActor) {
+    const staffPrincipal = this.requireStaffActor(actor);
+    return this.prisma.$transaction(async (tx) => {
+      await lockAuthorizedStaffForPayment(tx, staffPrincipal, 'PAYMENT_QUERY');
+      const payment = await tx.payment.findUnique({
+        where: { id },
         include: {
-          order: { select: { id: true, orderNo: true, customerName: true, customerPhone: true, finalAmount: true, status: true } },
-          // 审核人信息（审核页需展示审核人/审核时间/审核备注）
+          order: { include: { items: true } },
+          refunds: { orderBy: { createdAt: 'desc' } },
           reviewer: { select: { id: true, realName: true, username: true } },
         },
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.prisma.payment.count({ where }),
-    ]);
-    return { list, total, page, pageSize };
-  }
-
-  async findById(id: number) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id },
-      include: {
-        order: { include: { items: true } },
-        refunds: { orderBy: { createdAt: 'desc' } },
-        reviewer: { select: { id: true, realName: true, username: true } },
-      },
+      });
+      if (!payment) throw new NotFoundException('付款记录不存在');
+      return payment;
     });
-    if (!payment) throw new NotFoundException('付款记录不存在');
-    return payment;
   }
 
-  approve(id: number, reviewerId: number, reviewNote?: string, operator?: OperatorContext) {
-    return this.ordersService.confirmPaymentSettlement(id, reviewerId, reviewNote, operator);
+  approve(id: number, reviewerId: number, reviewNote: string | undefined, actor: StaffPaymentActor) {
+    const staffPrincipal = this.requireStaffActor(actor);
+    return this.ordersService.confirmPaymentSettlement(
+      id,
+      reviewerId,
+      reviewNote,
+      undefined,
+      undefined,
+      { staffPrincipal, staffAuthorization: 'PAYMENT_ADMIN' },
+    );
   }
 
-  reject(id: number, reviewerId: number, reviewNote?: string, operator?: OperatorContext) {
-    return this.ordersService.rejectOfflinePayment(id, reviewerId, reviewNote, operator);
+  reject(id: number, reviewerId: number, reviewNote: string | undefined, actor: StaffPaymentActor) {
+    return this.ordersService.rejectOfflinePayment(
+      id,
+      reviewerId,
+      reviewNote,
+      undefined,
+      this.requireStaffActor(actor),
+    );
   }
 
   /** 异常线下实收登记；在线渠道到账只由 settleFromGateway 核销。 */
@@ -137,9 +261,14 @@ export class PaymentsService {
       gatewayTradeNo?: string;
       reviewNote?: string;
     },
-    operator?: OperatorContext,
+    idempotencyKey: string,
+    actor: StaffPaymentActor,
   ) {
-    return this.ordersService.recordManualReceipt({ ...data, operator });
+    return this.ordersService.recordManualReceipt({
+      ...data,
+      idempotencyKey,
+      staffPrincipal: this.requireStaffActor(actor),
+    });
   }
 
   /**
@@ -150,16 +279,18 @@ export class PaymentsService {
   async createChannelPayment(
     orderId: number,
     method: OnlinePayProvider,
-    operator: OperatorContext,
+    actor: StaffPaymentActor,
   ) {
-    return this.createOnlinePayment(orderId, method, operator, {
+    const staffPrincipal = this.requireStaffActor(actor);
+    return this.createOnlinePayment(orderId, method, { type: 'ADMIN', id: staffPrincipal.id }, {
       scene: 'native',
+      staffPrincipal,
     });
   }
 
   /** 客户本人从自己的订单发起微信支付；终端场景与 IP 只由服务端请求上下文决定。 */
   async createCustomerPayment(
-    customerId: number,
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
     orderId: number,
     context: {
       scene: WechatPayScene;
@@ -167,11 +298,12 @@ export class PaymentsService {
       h5Type?: 'Wap' | 'iOS' | 'Android';
     },
   ) {
+    const customerId = principal.id;
     return this.createOnlinePayment(
       orderId,
       'wechat',
       { type: 'CUSTOMER', id: customerId },
-      { ...context, customerId },
+      { ...context, customerId, customerPrincipal: principal },
     );
   }
 
@@ -182,6 +314,8 @@ export class PaymentsService {
     context: {
       scene: WechatPayScene;
       customerId?: number;
+      customerPrincipal?: Pick<CustomerPrincipal, 'id' | 'authVersion'>;
+      staffPrincipal?: Pick<StaffPrincipal, 'id'>;
       clientIp?: string;
       h5Type?: 'Wap' | 'iOS' | 'Android';
     },
@@ -217,6 +351,17 @@ export class PaymentsService {
     }
 
     const prepared = await this.prisma.$transaction(async (tx) => {
+      const staffOperator = context.staffPrincipal
+        ? await lockAuthorizedStaffForPayment(tx, context.staffPrincipal, 'PAYMENT_ADMIN')
+        : undefined;
+      const gatewayOperation = context.customerPrincipal
+        ? await reserveCustomerGatewayOperation(
+          tx,
+          context.customerPrincipal,
+          'CREATE_PAYMENT',
+          orderId,
+        )
+        : undefined;
       const locked = await tx.$queryRaw<Array<{ id: number }>>(
         Prisma.sql`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`,
       );
@@ -242,6 +387,35 @@ export class PaymentsService {
         await tx.$queryRaw<Array<{ id: number }>>(
           Prisma.sql`SELECT id FROM payment_plans WHERE order_id = ${orderId} FOR UPDATE`,
         );
+      }
+      let timeExpire: string | undefined;
+      if (
+        order.quoteChannel === 'CUSTOM' ||
+        order.quoteChannel === 'PARTNER_WAX'
+      ) {
+        await this.assertActiveQuotedResourceReservations(tx, {
+          id: order.id,
+          quoteChannel: order.quoteChannel,
+          quotationVersionId: order.quotationVersionId,
+        });
+        // 非零售资源没有库存 expiresAt；省略可选 timeExpire，使用渠道自身的技术支付窗口。
+      } else {
+        await tx.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM inventory_reservations WHERE order_id = ${orderId} AND consumed_at IS NULL AND released_at IS NULL ORDER BY expires_at ASC FOR UPDATE`,
+        );
+        const reservation = await tx.inventoryReservation.findFirst({
+          where: {
+            orderId,
+            consumedAt: null,
+            releasedAt: null,
+          },
+          orderBy: { expiresAt: 'asc' },
+          select: { expiresAt: true },
+        });
+        if (!reservation || reservation.expiresAt.getTime() <= Date.now()) {
+          throw new BadRequestException('订单库存保留已到期，请重新下单');
+        }
+        timeExpire = reservation.expiresAt.toISOString();
       }
       let payment;
       let dueCents: number;
@@ -293,6 +467,21 @@ export class PaymentsService {
         if (dueCents <= 0) {
           throw new BadRequestException('下一期付款金额无效');
         }
+        const installmentTypes = plan.installments.map((planInstallment) =>
+          resolveInstallmentPaymentType({
+            finalCents: this.moneyToCents(order.finalAmount),
+            depositCents: this.moneyToCents(order.depositAmount),
+            balanceCents: this.moneyToCents(order.balanceAmount),
+            installmentCount: plan.installments.length,
+            sequence: planInstallment.sequence,
+            label: planInstallment.label,
+            amountCents: this.moneyToCents(planInstallment.amount),
+          }),
+        );
+        if (installmentTypes.some((type) => type === null)) {
+          throw new BadRequestException('付款计划与订单冻结金额拆分不一致，不能发起在线收款');
+        }
+        const installmentType = installmentTypes[nextIndex]!;
         const pendingPayments = await tx.payment.findMany({
           where: { orderId, status: 'PENDING' },
           take: 2,
@@ -304,6 +493,7 @@ export class PaymentsService {
             boundPayment.status !== 'PENDING' ||
             boundPayment.orderId !== orderId ||
             boundPayment.method !== method ||
+            boundPayment.type !== installmentType ||
             this.moneyToCents(boundPayment.amount) !== dueCents ||
             pendingPayments.length !== 1 ||
             pendingPayments[0].id !== boundPayment.id
@@ -324,12 +514,7 @@ export class PaymentsService {
               orderId,
               amount: installment.amount,
               method,
-              type:
-                plan.installments.length === 1
-                  ? 'FULL'
-                  : installment.sequence === 1
-                    ? 'DEPOSIT'
-                    : 'BALANCE',
+              type: installmentType,
               status: 'PENDING',
             },
           });
@@ -391,73 +576,104 @@ export class PaymentsService {
         where: { id: orderId },
         data: { paymentMethod: method },
       });
-      const reservation = await tx.inventoryReservation.findFirst({
-        where: {
-          orderId,
-          consumedAt: null,
-          releasedAt: null,
-        },
-        orderBy: { expiresAt: 'asc' },
-        select: { expiresAt: true },
-      });
-      if (!reservation || reservation.expiresAt.getTime() <= Date.now()) {
-        throw new BadRequestException('订单库存保留已到期，请重新下单');
+      if (gatewayOperation) {
+        await tx.customerGatewayOperation.update({
+          where: { id: gatewayOperation.id },
+          data: { paymentId: payment.id },
+        });
       }
       return {
         order,
         payment,
         dueCents,
-        timeExpire: reservation.expiresAt.toISOString(),
+        timeExpire,
         reused,
+        gatewayOperation,
+        staffOperator,
       };
     });
 
-    let result;
     try {
-      result = await this.paymentGateway.createPayment(method, {
-        paymentNo: prepared.payment.paymentNo,
-        amountYuan: (prepared.dueCents / 100).toFixed(2),
-        subject: `海川珠宝订单 ${prepared.order.orderNo}`,
-        notifyUrl: `${siteBase}/api/payments/notify/${method}`,
-        scene: context.scene,
-        clientIp: context.clientIp,
-        h5Type: context.h5Type,
-        appName: '海川珠宝',
-        appUrl: siteBase,
-        timeExpire: prepared.timeExpire,
-      });
-    } catch (error) {
-      // 预下单发生网络异常时无法证明渠道未受理。保留同一个 PENDING 商户单号，
-      // 后续只能用原单号重试/查单/关单，避免生成第二个可支付单号导致重复付款。
-      await this.prisma.payment.updateMany({
-        where: { id: prepared.payment.id, status: 'PENDING' },
-        data: {
-          reviewNote: '渠道预下单结果未确认；必须复用原商户单号查单、重试或关单',
+      if (prepared.gatewayOperation) {
+        // 准备事务提交到真正外调之间仍可能发生账户注销。再次以精确 token CAS
+        // 续租；注销若已先线性化会级联删除 operation，此处失败且绝不触达渠道。
+        await this.bindGatewayOperationPayment(
+          prepared.gatewayOperation,
+          prepared.payment.id,
+        );
+      }
+      let result;
+      try {
+        const createPayment = () => this.paymentGateway.createPayment(method, {
+            paymentNo: prepared.payment.paymentNo,
+            amountYuan: (prepared.dueCents / 100).toFixed(2),
+            subject: `海川珠宝订单 ${prepared.order.orderNo}`,
+            notifyUrl: `${siteBase}/api/payments/notify/${method}`,
+            scene: context.scene,
+            clientIp: context.clientIp,
+            h5Type: context.h5Type,
+            appName: '海川珠宝',
+            appUrl: siteBase,
+            timeExpire: prepared.timeExpire,
+          });
+        result = context.staffPrincipal
+          ? await this.withAuthorizedStaffActor(
+              context.staffPrincipal,
+              'PAYMENT_ADMIN',
+              createPayment,
+            )
+          : await createPayment();
+        if (context.staffPrincipal) {
+          await this.prisma.$transaction((tx) =>
+            lockAuthorizedStaffForPayment(tx, context.staffPrincipal!, 'PAYMENT_ADMIN'),
+          );
+        }
+      } catch (error) {
+        // 预下单发生网络异常时无法证明渠道未受理。保留同一个 PENDING 商户单号，
+        // 后续只能用原单号重试/查单/关单，避免生成第二个可支付单号导致重复付款。
+        if (prepared.gatewayOperation) {
+          await this.markCustomerGatewayResultUnknown(
+            prepared.gatewayOperation,
+            prepared.payment.id,
+            '渠道预下单结果未确认；必须复用原商户单号查单、重试或关单',
+          );
+        } else {
+          await this.prisma.payment.updateMany({
+            where: { id: prepared.payment.id, status: 'PENDING' },
+            data: {
+              reviewNote: '渠道预下单结果未确认；必须复用原商户单号查单、重试或关单',
+            },
+          });
+        }
+        throw error;
+      }
+
+      const payUrl =
+        result.scene === 'h5' && result.payUrl
+          ? `${result.payUrl}${result.payUrl.includes('?') ? '&' : '?'}redirect_url=${encodeURIComponent(`${siteBase}/checkout?paymentReturn=1&orderId=${orderId}`)}`
+          : result.payUrl;
+
+      this.logger.log(
+        `订单 #${orderId} 发起 ${method} 收款 ${prepared.payment.paymentNo}，金额 ${(prepared.dueCents / 100).toFixed(2)} 元（操作者 ${(prepared.staffOperator ?? operator).type}:${(prepared.staffOperator ?? operator).id ?? '-'}）`,
+      );
+      return {
+        payment: {
+          id: prepared.payment.id,
+          paymentNo: prepared.payment.paymentNo,
+          amount: prepared.payment.amount,
+          type: prepared.payment.type,
         },
-      });
-      throw error;
+        provider: method,
+        scene: result.scene,
+        qrCode: result.qrCode,
+        payUrl,
+        reused: prepared.reused,
+      };
+    } finally {
+      if (prepared.gatewayOperation) {
+        await this.releaseGatewayOperation(prepared.gatewayOperation);
+      }
     }
-
-    const payUrl =
-      result.scene === 'h5' && result.payUrl
-        ? `${result.payUrl}${result.payUrl.includes('?') ? '&' : '?'}redirect_url=${encodeURIComponent(`${siteBase}/checkout?paymentReturn=1&orderId=${orderId}`)}`
-        : result.payUrl;
-
-    this.logger.log(
-      `订单 #${orderId} 发起 ${method} 收款 ${prepared.payment.paymentNo}，金额 ${(prepared.dueCents / 100).toFixed(2)} 元（操作者 ${operator.type}:${operator.id ?? '-'}）`,
-    );
-    return {
-      payment: {
-        id: prepared.payment.id,
-        paymentNo: prepared.payment.paymentNo,
-        amount: prepared.payment.amount,
-      },
-      provider: method,
-      scene: result.scene,
-      qrCode: result.qrCode,
-      payUrl,
-      reused: prepared.reused,
-    };
   }
 
   private customerPaymentState(status: string) {
@@ -486,14 +702,35 @@ export class PaymentsService {
   }
 
   /** 仅填充空备注，保留预下单不确定等更早形成的对账事实。 */
-  private async setAttentionReviewNoteIfEmpty(paymentId: number, reviewNote: string) {
-    await this.prisma.payment.updateMany({
-      where: {
-        id: paymentId,
-        OR: [{ reviewNote: null }, { reviewNote: '' }],
-      },
-      data: { reviewNote },
-    }).catch(() => undefined);
+  private async setAttentionReviewNoteIfEmpty(
+    paymentId: number,
+    reviewNote: string,
+    customerPrincipal?: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+    staffPrincipal?: Pick<StaffPrincipal, 'id'>,
+  ) {
+    const update = (client: Pick<Prisma.TransactionClient, 'payment'>) =>
+      client.payment.updateMany({
+        where: {
+          id: paymentId,
+          OR: [{ reviewNote: null }, { reviewNote: '' }],
+        },
+        data: { reviewNote },
+      });
+    if (staffPrincipal) {
+      await this.prisma.$transaction(async (tx) => {
+        await lockAuthorizedStaffForPayment(tx, staffPrincipal, 'PAYMENT_QUERY');
+        await update(tx);
+      });
+      return;
+    }
+    if (customerPrincipal) {
+      await this.prisma.$transaction(async (tx) => {
+        await lockActiveCustomerForWrite(tx, customerPrincipal);
+        await update(tx);
+      });
+      return;
+    }
+    await update(this.prisma).catch(() => undefined);
   }
 
   private async settleVerifiedPayment(
@@ -505,10 +742,21 @@ export class PaymentsService {
       raw?: unknown;
     },
     source: 'callback' | 'query',
+    customerPrincipal?: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+    staffPrincipal?: Pick<StaffPrincipal, 'id'>,
   ): Promise<'PAID' | 'ATTENTION' | 'MISSING'> {
-    const payment = await this.prisma.payment.findUnique({
-      where: { paymentNo: fact.paymentNo },
-    });
+    const readFacts = async (client: Pick<Prisma.TransactionClient, 'payment'>) => {
+      const payment = await client.payment.findUnique({
+        where: { paymentNo: fact.paymentNo },
+      });
+      return { payment };
+    };
+    const { payment } = staffPrincipal
+      ? await this.prisma.$transaction(async (tx) => {
+          await lockAuthorizedStaffForPayment(tx, staffPrincipal, 'PAYMENT_QUERY');
+          return readFacts(tx);
+        })
+      : await readFacts(this.prisma);
     if (!payment) {
       this.logger.error(`${provider} ${source} 商户单号 ${fact.paymentNo} 无对应 Payment，疑似环境不匹配`);
       return 'MISSING';
@@ -518,6 +766,8 @@ export class PaymentsService {
       await this.setAttentionReviewNoteIfEmpty(
         payment.id,
         `渠道不符告警：${provider} 事实不能核销 ${payment.method} 付款`,
+        customerPrincipal,
+        staffPrincipal,
       );
       return 'ATTENTION';
     }
@@ -531,6 +781,8 @@ export class PaymentsService {
       await this.setAttentionReviewNoteIfEmpty(
         payment.id,
         `金额不符告警：渠道 ${fact.amountYuan ?? '缺失'} 元 ≠ 本地 ${payment.amount} 元，请人工对账`,
+        customerPrincipal,
+        staffPrincipal,
       );
       return 'ATTENTION';
     }
@@ -541,6 +793,8 @@ export class PaymentsService {
       await this.setAttentionReviewNoteIfEmpty(
         payment.id,
         '渠道已返回支付成功但缺少渠道交易号，请人工对账',
+        customerPrincipal,
+        staffPrincipal,
       );
       return 'ATTENTION';
     }
@@ -554,16 +808,25 @@ export class PaymentsService {
       await this.setAttentionReviewNoteIfEmpty(
         payment.id,
         "渠道交易号与既存付款事实不一致，请人工对账",
+        customerPrincipal,
+        staffPrincipal,
       );
       return "ATTENTION";
     }
-    const reusedGatewayTrade = await this.prisma.payment.findFirst({
-      where: {
-        id: { not: payment.id },
-        gatewayTradeNo: fact.gatewayTradeNo,
-      },
-      select: { id: true, paymentNo: true },
-    });
+    const readReusedGatewayTrade = (client: Pick<Prisma.TransactionClient, 'payment'>) =>
+      client.payment.findFirst({
+        where: {
+          id: { not: payment.id },
+          gatewayTradeNo: fact.gatewayTradeNo,
+        },
+        select: { id: true, paymentNo: true },
+      });
+    const reusedGatewayTrade = staffPrincipal
+      ? await this.prisma.$transaction(async (tx) => {
+          await lockAuthorizedStaffForPayment(tx, staffPrincipal, 'PAYMENT_QUERY');
+          return readReusedGatewayTrade(tx);
+        })
+      : await readReusedGatewayTrade(this.prisma);
     if (reusedGatewayTrade) {
       this.logger.error(
         `${provider} ${source} 渠道交易号已绑定另一付款：${reusedGatewayTrade.paymentNo}`,
@@ -571,6 +834,8 @@ export class PaymentsService {
       await this.setAttentionReviewNoteIfEmpty(
         payment.id,
         "渠道交易号已绑定另一付款，请人工对账",
+        customerPrincipal,
+        staffPrincipal,
       );
       return "ATTENTION";
     }
@@ -579,6 +844,8 @@ export class PaymentsService {
         await this.setAttentionReviewNoteIfEmpty(
           payment.id,
           "已付款记录缺少渠道交易号，请人工对账",
+          customerPrincipal,
+          staffPrincipal,
         );
         return "ATTENTION";
       }
@@ -595,14 +862,33 @@ export class PaymentsService {
           tradeNo: fact.gatewayTradeNo,
           notify: (fact.raw ?? {}) as Prisma.InputJsonValue,
         },
+        {
+          customerPrincipal,
+          staffPrincipal,
+          staffAuthorization: staffPrincipal ? 'PAYMENT_QUERY' : undefined,
+        },
       );
       this.logger.log(`${provider} ${source} 核销成功：${payment.paymentNo}`);
       return 'PAID';
     } catch (error) {
-      const current = await this.prisma.payment.findUnique({
-        where: { id: payment.id },
-        select: { status: true, gatewayTradeNo: true },
-      });
+      if (
+        (customerPrincipal && error instanceof UnauthorizedException)
+        || (staffPrincipal && error instanceof ForbiddenException)
+      ) {
+        throw error;
+      }
+      const current = staffPrincipal
+        ? await this.prisma.$transaction(async (tx) => {
+            await lockAuthorizedStaffForPayment(tx, staffPrincipal, 'PAYMENT_QUERY');
+            return tx.payment.findUnique({
+              where: { id: payment.id },
+              select: { status: true, gatewayTradeNo: true },
+            });
+          })
+        : await this.prisma.payment.findUnique({
+            where: { id: payment.id },
+            select: { status: true, gatewayTradeNo: true },
+          });
       if (
         current &&
         ['PAID', 'PARTIAL_REFUND', 'REFUNDED'].includes(current.status) &&
@@ -617,6 +903,8 @@ export class PaymentsService {
         await this.setAttentionReviewNoteIfEmpty(
           payment.id,
           '并发核销后的渠道交易号与本次渠道事实不一致，请人工对账',
+          customerPrincipal,
+          staffPrincipal,
         );
       }
       this.logger.error(
@@ -629,6 +917,8 @@ export class PaymentsService {
   private async applyCustomerQuery(
     payment: { id: number; paymentNo: string; method: string; status: string },
     query: QueryPayResult,
+    customerPrincipal?: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+    staffPrincipal?: Pick<StaffPrincipal, 'id'>,
   ) {
     if (query.state === 'SUCCESS') {
       const state = await this.settleVerifiedPayment(
@@ -640,6 +930,8 @@ export class PaymentsService {
           raw: query.raw,
         },
         'query',
+        customerPrincipal,
+        staffPrincipal,
       );
       return state === 'PAID' ? 'PAID' as const : 'ATTENTION' as const;
     }
@@ -648,7 +940,12 @@ export class PaymentsService {
         payment.id,
         `微信支付状态：${query.state}`,
         { type: 'SYSTEM' },
-        { expectedMethod: 'wechat' },
+        {
+          expectedMethod: 'wechat',
+          customerPrincipal,
+          staffPrincipal,
+          staffAuthorization: staffPrincipal ? 'PAYMENT_QUERY' : undefined,
+        },
       );
       return this.customerPaymentState(failed?.status ?? 'FAILED');
     }
@@ -659,68 +956,172 @@ export class PaymentsService {
   }
 
   /** 客户查自己的订单付款；成功事实会复用与异步回调相同的核销管线。 */
-  async queryCustomerPayment(customerId: number, orderId: number) {
-    const { order, payment } = await this.getCustomerOnlinePayment(customerId, orderId);
-    if (!payment) return { orderId: order.id, state: 'NONE' as const };
-    const localState = this.customerPaymentState(payment.status);
-    if (localState !== 'PENDING') {
+  async queryCustomerPayment(
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+    orderId: number,
+  ) {
+    const gatewayOperation = await this.prisma.$transaction((tx) =>
+      reserveCustomerGatewayOperation(tx, principal, 'QUERY_PAYMENT', orderId),
+    );
+    try {
+      const { order, payment } = await this.getCustomerOnlinePayment(principal.id, orderId);
+      if (!payment) return { orderId: order.id, state: 'NONE' as const };
+      const localState = this.customerPaymentState(payment.status);
+      if (localState !== 'PENDING') {
+        return {
+          orderId: order.id,
+          state: localState,
+          payment: {
+            id: payment.id,
+            paymentNo: payment.paymentNo,
+            amount: payment.amount,
+          },
+        };
+      }
+      if (payment.method !== 'wechat') {
+        return { orderId: order.id, state: 'ATTENTION' as const };
+      }
+      await this.bindGatewayOperationPayment(gatewayOperation, payment.id);
+      const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
+      // 外调期间可能发生改密、换绑、注销或 lease 过期；任何本地结算写入前
+      // 必须再次复核当前身份和 operation，旧会话只能交给回调/系统查单收敛。
+      await this.bindGatewayOperationPayment(gatewayOperation, payment.id);
+      const state = await this.applyCustomerQuery(payment, query, principal);
       return {
         orderId: order.id,
-        state: localState,
+        state,
+        gatewayState: query.state,
         payment: {
           id: payment.id,
           paymentNo: payment.paymentNo,
           amount: payment.amount,
         },
       };
+    } finally {
+      await this.releaseGatewayOperation(gatewayOperation);
     }
-    if (payment.method !== 'wechat') {
-      return { orderId: order.id, state: 'ATTENTION' as const };
-    }
-    const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
-    const state = await this.applyCustomerQuery(payment, query);
-    return {
-      orderId: order.id,
-      state,
-      gatewayState: query.state,
-      payment: {
-        id: payment.id,
-        paymentNo: payment.paymentNo,
-        amount: payment.amount,
-      },
-    };
   }
 
   /** 关单前必须先查单；正在支付或已成功时绝不直接关闭。 */
-  async closeCustomerPayment(customerId: number, orderId: number) {
-    const { order, payment } = await this.getCustomerOnlinePayment(customerId, orderId);
-    if (!payment) return { orderId: order.id, state: 'NONE' as const };
-    const localState = this.customerPaymentState(payment.status);
-    if (localState !== 'PENDING') return { orderId: order.id, state: localState };
-    if (payment.method !== 'wechat') {
-      throw new BadRequestException('当前支付渠道不支持客户关单');
+  async closeCustomerPayment(
+    principal: Pick<CustomerPrincipal, 'id' | 'authVersion'>,
+    orderId: number,
+  ) {
+    const customerId = principal.id;
+    const gatewayOperation = await this.prisma.$transaction((tx) =>
+      reserveCustomerGatewayOperation(tx, principal, 'CLOSE_PAYMENT', orderId),
+    );
+    try {
+      const { order, payment } = await this.getCustomerOnlinePayment(customerId, orderId);
+      if (!payment) return { orderId: order.id, state: 'NONE' as const };
+      const localState = this.customerPaymentState(payment.status);
+      if (localState !== 'PENDING') return { orderId: order.id, state: localState };
+      if (payment.method !== 'wechat') {
+        throw new BadRequestException('当前支付渠道不支持客户关单');
+      }
+      await this.bindGatewayOperationPayment(gatewayOperation, payment.id);
+      const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
+      await this.bindGatewayOperationPayment(gatewayOperation, payment.id);
+      const reconciled = await this.applyCustomerQuery(payment, query, principal);
+      if (reconciled === 'PAID') return { orderId: order.id, state: 'PAID' as const };
+      if (query.state === 'USERPAYING') {
+        throw new BadRequestException('微信正在处理该笔支付，请稍后查单，不要重复支付');
+      }
+      if (query.state === 'NOTPAY') {
+        try {
+          await this.paymentGateway.closePayment('wechat', payment.paymentNo);
+        } catch (error) {
+          // 渠道可能已受理关单但响应丢失；本地继续保持 PENDING，交给系统查单确认真实终态。
+          await this.markCustomerGatewayResultUnknown(
+            gatewayOperation,
+            payment.id,
+            '渠道关单结果未确认；必须主动查单后再决定本地终态',
+            'wechat',
+          );
+          throw error;
+        }
+        await this.bindGatewayOperationPayment(gatewayOperation, payment.id);
+        const failed = await this.ordersService.failPendingPaymentAttempt(
+          payment.id,
+          '客户在有效会话中发起关单，渠道确认关单成功',
+          { type: 'SYSTEM' },
+          { expectedMethod: 'wechat', customerPrincipal: principal },
+        );
+        return {
+          orderId: order.id,
+          state: this.customerPaymentState(failed?.status ?? 'FAILED'),
+        };
+      }
+      if (reconciled === 'FAILED') return { orderId: order.id, state: 'FAILED' as const };
+      throw new BadRequestException('当前渠道状态需要对账，暂不能关闭支付');
+    } finally {
+      await this.releaseGatewayOperation(gatewayOperation);
     }
-    const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
-    const reconciled = await this.applyCustomerQuery(payment, query);
-    if (reconciled === 'PAID') return { orderId: order.id, state: 'PAID' as const };
-    if (query.state === 'USERPAYING') {
-      throw new BadRequestException('微信正在处理该笔支付，请稍后查单，不要重复支付');
-    }
-    if (query.state === 'NOTPAY') {
-      await this.paymentGateway.closePayment('wechat', payment.paymentNo);
-      const failed = await this.ordersService.failPendingPaymentAttempt(
-        payment.id,
-        '客户结束本次微信支付，渠道关单成功',
-        { type: 'CUSTOMER', id: customerId },
-        { expectedMethod: 'wechat' },
+  }
+
+  private async releaseGatewayOperation(lease: CustomerGatewayOperationLease) {
+    try {
+      await releaseCustomerGatewayOperation(this.prisma, lease);
+    } catch (error) {
+      this.logger.warn(
+        `客户 #${lease.customerId} 的支付操作 lease 释放失败，将等待自动过期：${error instanceof Error ? error.message : error}`,
       );
-      return {
-        orderId: order.id,
-        state: this.customerPaymentState(failed?.status ?? 'FAILED'),
-      };
     }
-    if (reconciled === 'FAILED') return { orderId: order.id, state: 'FAILED' as const };
-    throw new BadRequestException('当前渠道状态需要对账，暂不能关闭支付');
+  }
+
+  private async bindGatewayOperationPayment(
+    lease: CustomerGatewayOperationLease,
+    paymentId: number,
+  ) {
+    await this.prisma.$transaction((tx) =>
+      this.bindGatewayOperationPaymentInTransaction(tx, lease, paymentId),
+    );
+  }
+
+  private async bindGatewayOperationPaymentInTransaction(
+    tx: Prisma.TransactionClient,
+    lease: CustomerGatewayOperationLease,
+    paymentId: number,
+  ) {
+    await lockActiveCustomerForWrite(tx, {
+      id: lease.customerId,
+      authVersion: lease.authVersion,
+    });
+    const now = new Date();
+    const bound = await tx.customerGatewayOperation.updateMany({
+      where: {
+        id: lease.id,
+        customerId: lease.customerId,
+        authVersion: lease.authVersion,
+        expiresAt: { gt: now },
+      },
+      data: {
+        paymentId,
+        expiresAt: new Date(now.getTime() + CUSTOMER_GATEWAY_OPERATION_LEASE_MS),
+      },
+    });
+    if (bound.count !== 1) {
+      throw new ConflictException('支付操作凭据已过期，请刷新后重试');
+    }
+  }
+
+  private async markCustomerGatewayResultUnknown(
+    lease: CustomerGatewayOperationLease,
+    paymentId: number,
+    reviewNote: string,
+    expectedMethod?: string,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      await this.bindGatewayOperationPaymentInTransaction(tx, lease, paymentId);
+      await tx.payment.updateMany({
+        where: {
+          id: paymentId,
+          status: 'PENDING',
+          ...(expectedMethod ? { method: expectedMethod } : {}),
+        },
+        data: { reviewNote },
+      });
+    });
   }
 
   /**
@@ -800,11 +1201,20 @@ export class PaymentsService {
    * FAILED 状态也允许查询：预下单结果不确定被标 FAILED 的在线交易，
    * 渠道 SUCCESS 事实可以经 confirmPaymentSettlement 恢复核销。
    */
-  async queryChannelPayment(paymentId: number, operator?: OperatorContext) {
-    const payment = await this.prisma.payment.findUnique({
-      where: { id: paymentId },
-      select: { id: true, paymentNo: true, method: true, status: true },
-    });
+  async queryChannelPayment(paymentId: number, actor?: StaffPaymentActor) {
+    const staffPrincipal = actor ? this.requireStaffActor(actor) : undefined;
+    const payment = staffPrincipal
+      ? await this.prisma.$transaction(async (tx) => {
+          await lockAuthorizedStaffForPayment(tx, staffPrincipal, 'PAYMENT_QUERY');
+          return tx.payment.findUnique({
+            where: { id: paymentId },
+            select: { id: true, paymentNo: true, method: true, status: true },
+          });
+        })
+      : await this.prisma.payment.findUnique({
+          where: { id: paymentId },
+          select: { id: true, paymentNo: true, method: true, status: true },
+        });
     if (!payment) throw new NotFoundException('付款记录不存在');
     if (!(ONLINE_PAYMENT_METHODS as readonly string[]).includes(payment.method)) {
       throw new BadRequestException('线下付款没有渠道状态可查询');
@@ -815,10 +1225,18 @@ export class PaymentsService {
     if (!['PENDING', 'FAILED'].includes(payment.status)) {
       return { paymentId, state: this.customerPaymentState(payment.status), gatewayState: null };
     }
-    const query = await this.paymentGateway.queryPayment('wechat', payment.paymentNo);
-    const state = await this.applyCustomerQuery(payment, query);
+    const queryPayment = () => this.paymentGateway.queryPayment('wechat', payment.paymentNo);
+    const query = staffPrincipal
+      ? await this.withAuthorizedStaffActor(staffPrincipal, 'PAYMENT_QUERY', queryPayment)
+      : await queryPayment();
+    const state = await this.applyCustomerQuery(
+      payment,
+      query,
+      undefined,
+      staffPrincipal,
+    );
     this.logger.log(
-      `付款 #${paymentId} 人工查单 ${payment.paymentNo}：渠道 ${query.state} / 本地 ${state}（操作者 ${operator?.type ?? 'ADMIN'}:${operator?.id ?? '-'}）`,
+      `付款 #${paymentId} 人工查单 ${payment.paymentNo}：渠道 ${query.state} / 本地 ${state}（操作者 ${actor ? 'ADMIN' : 'SYSTEM'}:${actor?.id ?? '-'}）`,
     );
     return { paymentId, state, gatewayState: query.state };
   }

@@ -4,20 +4,26 @@ import {
   Param,
   Post,
   Req,
+  Res,
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
 import { CustomerCommerceGuard } from '../../common/guards/customer-commerce.guard';
+import type { CustomerRequest } from '../../common/security/authenticated-principal';
 import { CustomerAuthGuard } from '../customers/customer-auth.guard';
 import { PaymentsService } from './payments.service';
 
-type CustomerRequest = Request & { customer: { id: number } };
-
 function clientIp(request: Request) {
   return request.ip?.replace(/^::ffff:/, '');
+}
+
+function setPrivateNoStore(response: Response) {
+  response.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  response.vary('Cookie');
+  response.vary('Authorization');
 }
 
 export function resolveCustomerPaymentContext(
@@ -54,7 +60,8 @@ export class CustomerPaymentsController {
 
   @Get('payment-channels')
   @UseGuards(CustomerCommerceGuard)
-  channels() {
+  channels(@Res({ passthrough: true }) response: Response) {
+    setPrivateNoStore(response);
     return this.paymentsService.availableCustomerChannels();
   }
 
@@ -63,7 +70,7 @@ export class CustomerPaymentsController {
   @Post('orders/:orderId/payment')
   create(@Req() request: CustomerRequest, @Param('orderId') orderId: string) {
     return this.paymentsService.createCustomerPayment(
-      request.customer.id,
+      request.customer,
       +orderId,
       resolveCustomerPaymentContext(
         request.get('user-agent') || '',
@@ -75,9 +82,14 @@ export class CustomerPaymentsController {
 
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @Get('orders/:orderId/payment')
-  query(@Req() request: CustomerRequest, @Param('orderId') orderId: string) {
+  query(
+    @Req() request: CustomerRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Param('orderId') orderId: string,
+  ) {
+    setPrivateNoStore(response);
     return this.paymentsService.queryCustomerPayment(
-      request.customer.id,
+      request.customer,
       +orderId,
     );
   }
@@ -87,7 +99,7 @@ export class CustomerPaymentsController {
   @Post('orders/:orderId/payment/close')
   close(@Req() request: CustomerRequest, @Param('orderId') orderId: string) {
     return this.paymentsService.closeCustomerPayment(
-      request.customer.id,
+      request.customer,
       +orderId,
     );
   }

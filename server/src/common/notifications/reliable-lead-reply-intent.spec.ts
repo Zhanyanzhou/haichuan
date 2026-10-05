@@ -1,5 +1,6 @@
 import * as assert from "node:assert/strict";
 import { test } from "node:test";
+import { ConflictException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { OutboxService } from "../outbox/outbox.service";
@@ -126,6 +127,56 @@ test("客户有邮箱且偏好允许时咨询回复同时生成待发送邮件�
   assert.doesNotMatch(JSON.stringify(outboxEvents), /customer@example\.com/i);
 });
 
+test("已停用或不存在的客户不会生成咨询回复通知、投递或 Outbox", async () => {
+  for (const customer of [
+    { email: "disabled@example.com", status: "DISABLED" },
+    null,
+  ]) {
+    const notifications: Array<Record<string, unknown>> = [];
+    const deliveries: Array<Record<string, unknown>> = [];
+    const outboxEvents: Array<Record<string, unknown>> = [];
+    const tx = {
+      customer: { findUnique: async () => customer },
+      notification: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          notifications.push(data);
+          return { id: 91, ...data };
+        },
+      },
+      notificationDelivery: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          deliveries.push(data);
+          return { id: 92, ...data };
+        },
+      },
+      outboxEvent: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          outboxEvents.push(data);
+          return { id: 93, ...data };
+        },
+      },
+    };
+    const service = new ReliableNotificationIntentService(
+      new OutboxService(),
+      new NotificationDeliveryPolicyService(),
+    );
+
+    await assert.rejects(
+      service.enqueueLeadReply(tx as unknown as Prisma.TransactionClient, {
+        leadId: 41,
+        activityId: 91,
+        customerId: 7,
+        occurredAt: new Date("2026-09-07T01:00:00.000Z"),
+      }),
+      ConflictException,
+    );
+
+    assert.equal(notifications.length, 0);
+    assert.equal(deliveries.length, 0);
+    assert.equal(outboxEvents.length, 0);
+  }
+});
+
 test("只有站内投递的 Outbox 不要求伪造 orderId 且不会调用外部发送", async () => {
   let completed = 0;
   let orderReads = 0;
@@ -186,6 +237,7 @@ test("客户咨询回复邮件从当前客户邮箱投递且不依赖订单载�
   let deliveryStatus = "PENDING";
   let outboxStatus = "PROCESSING";
   const tx = {
+    $queryRaw: async () => [{ id: 8, email: " Customer@Example.com " }],
     outboxEvent: {
       updateMany: async ({ data }: { data: { status?: string } }) => {
         if (data.status) outboxStatus = data.status;

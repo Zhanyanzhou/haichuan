@@ -45,6 +45,9 @@ test("确定性 UI：空白模板先显示整体尺寸与比例，模板设置�
   await expect(page.getByText(/仅用于目录推荐，不限制其他页面使用/)).toBeVisible();
   await expect(page.locator('[data-template-inspector-field="metadata.visualRole"]')).toHaveCount(1);
   await expect(page.locator('[data-template-inspector-field="metadata.headerCompatibility"]')).toHaveCount(1);
+  await expect(page.getByText(/Tablet|平板端/)).toHaveCount(0);
+  await expect(page.locator('[data-template-inspector-field="metadata.mobileBreakpoint"]')).toHaveCount(0);
+  await expect(page.getByRole("spinbutton", { name: "小屏布局切换宽度", exact: true })).toHaveCount(0);
 });
 
 test("确定性 UI：切换当前设备不改变完整定义的制作检查结果", async ({ page }) => {
@@ -65,7 +68,7 @@ test("确定性 UI：切换当前设备不改变完整定义的制作检查结�
     const state = window.__templateScopeSession.getState();
     return { definition: state.draft!.definition, history: state.historyPast.length, dirty: state.dirty };
   });
-  for (const breakpoint of ["desktop", "tablet", "mobile"] as const) {
+  for (const breakpoint of ["desktop", "mobile"] as const) {
     await page.evaluate((value) => window.__templateScopeSession.getState().setBreakpoint(value), breakpoint);
     const validation = page.getByRole("region", { name: "模板制作检查", exact: true });
     await expect(validation).toContainText("必填槽位“工艺主图”在移动端布局中已隐藏");
@@ -93,12 +96,12 @@ test("确定性 UI：页面表单顺序和填写规则来自现有字段，查�
   const fields = preview.locator(".template-editor__page-form-field");
   await expect(fields).toHaveCount(2);
   await expect(fields.nth(0).getByText(/当前查看范围第 1 项/)).toBeVisible();
-  await expect(fields.nth(0).getByRole("button", { name: "工艺主图 必填 · 定位对象", exact: true })).toBeVisible();
+  await expect(fields.nth(0).getByRole("button", { name: "工艺主图 固定展示 · 定位对象", exact: true })).toBeVisible();
   await expect(fields.nth(0).getByText("内容只读 · 页面可隐藏", { exact: true })).toBeVisible();
   await expect(fields.nth(1).getByText("页面可填写 · 页面不可手动隐藏", { exact: true })).toBeVisible();
   await expect(fields.nth(1).getByRole("textbox", { name: "工艺标题页面表单示意", exact: true })).toHaveAttribute("readonly", "");
   expect(await snapshot()).toEqual(before);
-  await fields.nth(1).getByRole("button", { name: "工艺标题 可选 · 定位对象", exact: true }).click();
+  await fields.nth(1).getByRole("button", { name: "工艺标题 建议填写 · 定位对象", exact: true }).click();
   expect(await snapshot()).toEqual(before);
   await expect(page.locator('[data-template-page-scope-field="label"] input')).toHaveValue("工艺标题");
 });

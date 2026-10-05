@@ -1,20 +1,62 @@
-import { Injectable } from "@nestjs/common";
-import { OrderStatus } from "@prisma/client";
+import { ForbiddenException, Injectable } from "@nestjs/common";
+import { OrderStatus, Prisma } from "@prisma/client";
 import {
   LEAD_PRIVACY_DISPOSITION_ERROR_CODE,
   LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
 } from "../../common/notifications/notification-delivery.constants";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { getConfiguredAnalyticsDataset } from "../analytics/analytics-dataset";
+import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 
 // 首页经营趋势保留核心四指标；完整 UV、会话、回访与地域分析由 analytics 模块提供。
 export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews";
+type StatisticsStaffActor = Pick<StaffPrincipal, "id" | "sessionFamilyId">;
 
 @Injectable()
 export class StatisticsService {
   constructor(private prisma: PrismaService) {}
 
-  async getDashboard() {
+  private async lockAuthorizedStaff(
+    transaction: Prisma.TransactionClient,
+    actor: StatisticsStaffActor,
+  ): Promise<void> {
+    if (!actor || !Number.isInteger(actor.id) || actor.id <= 0) {
+      throw new ForbiddenException("当前员工无权查看经营统计");
+    }
+    const staff = await transaction.$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR SHARE`,
+    );
+    if (staff.length !== 1) {
+      throw new ForbiddenException("当前员工无权查看经营统计");
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = await transaction.$queryRaw<Array<{ id: number }>>(
+        Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+      );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException("当前登录设备已失效");
+      }
+    }
+  }
+
+  private withAuthorizedStaffRead<T>(
+    actor: StatisticsStaffActor,
+    operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (transaction) => {
+      await this.lockAuthorizedStaff(transaction, actor);
+      return operation(transaction);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async getDashboard(actor: StatisticsStaffActor) {
+    return this.withAuthorizedStaffRead(
+      actor,
+      (transaction) => this.getDashboardAuthorized(transaction),
+    );
+  }
+
+  private async getDashboardAuthorized(transaction: Prisma.TransactionClient) {
     const now = new Date();
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
@@ -27,7 +69,7 @@ export class StatisticsService {
     const notCancelled = { not: "CANCELLED" as OrderStatus };
     const analyticsDataset = getConfiguredAnalyticsDataset();
     const pageViewsTodayQuery = analyticsDataset
-      ? this.prisma.analyticsEvent.count({
+      ? transaction.analyticsEvent.count({
           where: {
             dataset: analyticsDataset,
             eventName: "page_view",
@@ -36,7 +78,7 @@ export class StatisticsService {
         })
       : Promise.resolve(0);
     const pageViewsYesterdayQuery = analyticsDataset
-      ? this.prisma.analyticsEvent.count({
+      ? transaction.analyticsEvent.count({
           where: {
             dataset: analyticsDataset,
             eventName: "page_view",
@@ -68,63 +110,63 @@ export class StatisticsService {
       failedLeadReplyNotifications,
       retentionDueLeads,
     ] = await Promise.all([
-      this.prisma.product.count(),
-      this.prisma.product.count({ where: { status: "PUBLISHED" } }),
-      this.prisma.order.count({
+      transaction.product.count(),
+      transaction.product.count({ where: { status: "PUBLISHED" } }),
+      transaction.order.count({
         where: { createdAt: { gte: todayStart }, status: notCancelled },
       }),
-      this.prisma.order.count({
+      transaction.order.count({
         where: { createdAt: yesterdayRange, status: notCancelled },
       }),
-      this.prisma.order.aggregate({
+      transaction.order.aggregate({
         where: {
           createdAt: { gte: todayStart },
           status: notCancelled,
         },
         _sum: { finalAmount: true },
       }),
-      this.prisma.order.aggregate({
+      transaction.order.aggregate({
         where: {
           createdAt: yesterdayRange,
           status: notCancelled,
         },
         _sum: { finalAmount: true },
       }),
-      this.prisma.order.aggregate({
+      transaction.order.aggregate({
         where: {
           createdAt: { gte: monthStart },
           status: notCancelled,
         },
         _sum: { finalAmount: true },
       }),
-      this.prisma.customer.count({ where: { status: "ACTIVE" } }),
-      this.prisma.product.count({ where: { status: "DRAFT" } }),
-      this.prisma.order.count({ where: { status: "PENDING_SHIP" } }),
-      this.prisma.inventory.count({ where: { quantity: { lte: 0 } } }),
+      transaction.customer.count({ where: { status: "ACTIVE" } }),
+      transaction.product.count({ where: { status: "DRAFT" } }),
+      transaction.order.count({ where: { status: "PENDING_SHIP" } }),
+      transaction.inventory.count({ where: { quantity: { lte: 0 } } }),
       pageViewsTodayQuery,
       pageViewsYesterdayQuery,
-      this.prisma.inquiry.count({ where: { createdAt: { gte: todayStart } } }),
-      this.prisma.selectionInquiry.count({
+      transaction.inquiry.count({ where: { createdAt: { gte: todayStart } } }),
+      transaction.selectionInquiry.count({
         where: { createdAt: { gte: todayStart } },
       }),
-      this.prisma.inquiry.count({ where: { createdAt: yesterdayRange } }),
-      this.prisma.selectionInquiry.count({
+      transaction.inquiry.count({ where: { createdAt: yesterdayRange } }),
+      transaction.selectionInquiry.count({
         where: { createdAt: yesterdayRange },
       }),
-      this.prisma.lead.count({
+      transaction.lead.count({
         where: { sourceType: "INQUIRY", status: "PENDING" },
       }),
-      this.prisma.lead.count({
+      transaction.lead.count({
         where: { sourceType: "SELECTION_INQUIRY", status: "PENDING" },
       }),
-      this.prisma.outboxEvent.count({
+      transaction.outboxEvent.count({
         where: {
           eventType: LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
           status: "FAILED",
           lastErrorCode: { not: LEAD_PRIVACY_DISPOSITION_ERROR_CODE },
         },
       }),
-      this.prisma.lead.count({
+      transaction.lead.count({
         where: {
           status: { in: ["COMPLETED", "INVALID"] },
           retentionUntil: { lte: now },
@@ -161,7 +203,22 @@ export class StatisticsService {
    * 经营趋势：按日聚合指定指标，返回近 N 日序列(含 0 值日期，保证连续)。
    * UV、会话和回访使用 analytics/overview，避免首页接口承担完整分析查询。
    */
-  async getTrend(days = 7, metric: TrendMetric = "orders") {
+  async getTrend(
+    days: number,
+    metric: TrendMetric,
+    actor: StatisticsStaffActor,
+  ) {
+    return this.withAuthorizedStaffRead(
+      actor,
+      (transaction) => this.getTrendAuthorized(transaction, days, metric),
+    );
+  }
+
+  private async getTrendAuthorized(
+    transaction: Prisma.TransactionClient,
+    days: number,
+    metric: TrendMetric,
+  ) {
     const now = new Date();
     const start = new Date(now);
     start.setDate(start.getDate() - (days - 1));
@@ -173,7 +230,7 @@ export class StatisticsService {
 
     if (metric === "revenue") {
       // 成交额按日聚合：仅已结算订单(SHIPPED/COMPLETED)的 final_amount 之和
-      const rows = await this.prisma.$queryRaw<
+      const rows = await transaction.$queryRaw<
         { date: string; total: string | bigint | null }[]
       >`
         SELECT DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COALESCE(SUM(final_amount), 0) AS total
@@ -186,7 +243,7 @@ export class StatisticsService {
       const dataset = getConfiguredAnalyticsDataset();
       if (dataset) {
         // 注意：analytics_events 的事件名列在 schema 中无 @map，DB 列名即 eventName
-        const rows = await this.prisma.$queryRaw<
+        const rows = await transaction.$queryRaw<
           { date: string; count: bigint }[]
         >`
           SELECT DATE_FORMAT(CONVERT_TZ(occurred_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count
@@ -199,13 +256,13 @@ export class StatisticsService {
     } else if (metric === "inquiries") {
       // 咨询跨两表：分别按日聚合后合并同日
       const [appointmentRows, selectionRows] = await Promise.all([
-        this.prisma.$queryRaw<{ date: string; count: bigint }[]>`
+        transaction.$queryRaw<{ date: string; count: bigint }[]>`
           SELECT DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count
           FROM inquiries
           WHERE created_at >= ${start} AND created_at < UTC_TIMESTAMP()
           GROUP BY DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d')
         `,
-        this.prisma.$queryRaw<{ date: string; count: bigint }[]>`
+        transaction.$queryRaw<{ date: string; count: bigint }[]>`
           SELECT DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count
           FROM selection_inquiries
           WHERE created_at >= ${start} AND created_at < UTC_TIMESTAMP()
@@ -217,7 +274,7 @@ export class StatisticsService {
       }
     } else {
       // 订单数(默认)：所有状态订单按日计数
-      const rows = await this.prisma.$queryRaw<
+      const rows = await transaction.$queryRaw<
         { date: string; count: bigint }[]
       >`
         SELECT DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count

@@ -65,11 +65,20 @@ export class SaveMediaAuthorizationDraftDto {
   validUntil?: string | null;
 }
 
+export class AuthorizeMediaPublicUseDto {
+  @IsBoolean()
+  selfReviewAcknowledged!: boolean;
+}
+
 export class ReviewMediaAuthorizationDto extends ExpectedMediaAuthorizationRevisionDto {
   @IsOptional()
   @IsString()
   @MaxLength(1000)
   reviewNote?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  selfReviewAcknowledged?: boolean;
 }
 
 export class RejectMediaAuthorizationDto extends ExpectedMediaAuthorizationRevisionDto {

@@ -1,10 +1,10 @@
 import { expect, test as base, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { addDynamicTemplateNode } from "../src/page-builder/template-definition";
+import { resolveTemplateNodeRules } from "../src/page-builder/template-definition/responsive";
 import { createNewDynamicTemplateDraft } from "../src/page-builder/template-editor/dynamicTemplateDraftRepository";
 import type { TemplateCatalogItemResource } from "../src/services/clients/dynamicTemplateClient";
 import { installAdminSession } from "./fixtures/session-auth";
-import { systemTemplateCatalog } from "./fixtures/template-catalog";
 import {
   addTwoRegions, createBlankTemplate, installNewTemplateServer,
   readSession, structurePanel,
@@ -86,7 +86,7 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
     expect(server.writes).toEqual([]);
   });
 
-  base("平板隐藏问题定位真实上级，修复保留排列和手机独立隐藏", async ({ page }) => {
+  base("手机隐藏问题定位真实上级，修复保留排列", async ({ page }) => {
     const server = await installNewTemplateServer(page);
     await page.setViewportSize({ width: 1600, height: 1000 });
     await createBlankTemplate(page);
@@ -110,7 +110,7 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
       return parentId;
     });
     const before = await readSession(page);
-    const issue = structurePanel(page).getByRole("listitem").filter({ hasText: /在平板不可见.*上级/ });
+    const issue = structurePanel(page).getByRole("listitem").filter({ hasText: /在手机不可见.*上级/ });
     await issue.getByRole("button", { name: "定位", exact: true }).click();
     const breakpoint = await page.evaluate(async () => {
       const { useTemplateEditorSession } = await import(
@@ -118,14 +118,18 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
       );
       return useTemplateEditorSession.getState().breakpoint;
     });
-    expect(breakpoint).toBe("tablet");
+    expect(breakpoint).toBe("mobile");
     expect((await readSession(page)).selectedObjectId).toBe(regionId);
     await issue.getByRole("button", { name: "修复", exact: true }).click();
     const after = await readSession(page);
-    expect(after.definition!.nodes[regionId].responsive.tablet).toMatchObject({ hidden: false, display: "flex" });
-    expect(after.definition!.nodes[regionId].responsive.mobile).toEqual(before.definition!.nodes[regionId].responsive.mobile);
+    expect(after.definition!.nodes[regionId].responsive.mobile).toEqual({
+      ...before.definition!.nodes[regionId].responsive.mobile,
+      hidden: false,
+    });
+    expect(resolveTemplateNodeRules(after.definition!, regionId, "mobile")).toMatchObject({ hidden: false, display: "flex" });
+    expect(after.definition!.nodes[regionId].responsive.tablet).toEqual(before.definition!.nodes[regionId].responsive.tablet);
     await expect(issue).toHaveCount(0);
-    await expect(structurePanel(page).getByRole("listitem").filter({ hasText: /在手机不可见.*上级/ })).toHaveCount(1);
+    await expect(structurePanel(page).getByRole("listitem").filter({ hasText: /在平板不可见/ })).toHaveCount(0);
     expect(after.historyPast).toHaveLength(before.historyPast.length + 1);
     expect(server.writes).toEqual([]);
   });
@@ -264,8 +268,7 @@ async function installMockEditorApis(
       return route.fulfill({ status: 409, contentType: "application/json", body: "{}" });
     }
     if (pathname === "/api/page-modules/dynamic-templates/catalog") {
-      const catalog = systemTemplateCatalog();
-      return route.fulfill(json({ ...catalog, items: [deepTemplate, ...catalog.items] }));
+      return route.fulfill(json({ source: "unified", items: [deepTemplate] }));
     }
     const draftMatch = pathname.match(/^\/api\/page-modules\/dynamic-templates\/([^/]+)\/draft$/);
     if (draftMatch && method === "GET") {
@@ -322,6 +325,8 @@ async function openTemplateStructure(
   await expect(page.locator(".homepage-editor__toolbar")).toBeVisible();
   // development 页面首次加载必经 650ms 防抖校验；先等初始化收尾，避免把它计入键盘行为。
   await expect.poll(() => requestMonitor.validationRequests).toBeGreaterThanOrEqual(1);
+  const pageInspectorClose = page.getByRole("button", { name: "收起属性面板", exact: true });
+  if (await pageInspectorClose.isVisible()) await pageInspectorClose.click();
   await page.getByRole("button", { name: "模板设计", exact: true }).click();
   await expect(page.getByRole("group", { name: "店铺装修工作模式切换" }))
     .toHaveAttribute("data-active-mode", "template");
@@ -329,7 +334,9 @@ async function openTemplateStructure(
   await expect(page.locator('.template-editor__toolbar [role="status"]'))
     .toHaveAttribute("aria-label", "模板状态：未选择模板");
   expect(requestMonitor.draftReads, "首次进入模板工作区只显示目录，不得自动读取历史模板草稿").toEqual([]);
-  if (viewport.width < 1200) {
+  const compact = viewport.width <= 1024;
+  const modalOverlay = viewport.width <= 1024;
+  if (compact) {
     const expandLibrary = page.getByRole("button", { name: "展开模板组件库" });
     await expect(expandLibrary).toBeVisible();
     await expandLibrary.focus();
@@ -351,14 +358,14 @@ async function openTemplateStructure(
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
 
-  if (viewport.width < 1200) {
+  if (compact) {
     const expand = page.getByRole("button", { name: "展开模板结构面板" });
     await expect(expand).toBeVisible();
     await expand.focus();
     await page.keyboard.press("Enter");
   }
 
-  const structure = viewport.width < 1200
+  const structure = modalOverlay
     ? page.getByRole("dialog", { name: "模板结构", exact: true })
     : page.getByRole("complementary", { name: "模板结构", exact: true });
   const tree = structure.getByRole("tree", { name: "模板区域与槽位" });
@@ -622,7 +629,9 @@ test.describe("TD-3C1 模板结构树键盘合同（真实前端 + Mock API）",
     const layoutRow = layout.locator("..");
     await layoutRow.hover();
     await layoutRow.locator(".template-editor__structure-more").click();
-    await page.getByRole("menuitem", { name: /^排列与分组/ }).hover();
+    const groupingMenu = page.getByRole("menuitem", { name: /^排列与分组/ });
+    await groupingMenu.focus();
+    await page.keyboard.press("ArrowRight");
     const disabledGrouping = page.getByRole("menuitem", {
       name: /组合为上下布局组（不可用：当前对象已锁定）/,
     }).first();

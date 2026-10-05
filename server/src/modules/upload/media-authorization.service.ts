@@ -20,6 +20,12 @@ import {
   SaveMediaAuthorizationDraftDto,
 } from './dto/media-authorization.dto';
 import { evaluateMediaPublicEligibility } from './media-public-eligibility';
+import {
+  lockAuthorizedMediaStaff,
+  type AuthorizedMediaStaff,
+  type MediaStaffAccess,
+  type MediaStaffActorInput,
+} from './media-staff-authorization';
 
 const AUTHORIZATION_INCLUDE = { authorization: true } as const;
 
@@ -36,19 +42,24 @@ type AuthorizationMutation = {
 export class MediaAuthorizationService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getDetail(assetId: number) {
-    const asset = await this.findAsset(this.prisma, assetId);
-    const events = await this.prisma.mediaAssetAuthorizationEvent.findMany({
-      where: { assetId },
-      orderBy: { authorizationRevision: 'asc' },
+  async getDetail(assetId: number, actor: MediaStaffActorInput) {
+    return this.withSerializable(async (transaction) => {
+      await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'read');
+      const asset = await this.findAsset(transaction, assetId);
+      const events = await transaction.mediaAssetAuthorizationEvent.findMany({
+        where: { assetId },
+        orderBy: { authorizationRevision: 'asc' },
+      });
+      return this.toDetail(asset, events);
     });
-    return this.toDetail(asset, events);
   }
 
-  async saveDraft(assetId: number, actorId: number, dto: SaveMediaAuthorizationDraftDto) {
+  async saveDraft(assetId: number, actor: MediaStaffActorInput, dto: SaveMediaAuthorizationDraftDto) {
+    const actorId = typeof actor === 'number' ? actor : actor.id;
     if (dto.expectedRevision === 0) {
       this.assertDateRange(dto.validFrom, dto.validUntil);
       return this.withSerializable(async (transaction) => {
+        await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'write');
         const asset = await this.findAsset(transaction, assetId);
         if (asset.authorization) {
           throw this.revisionConflict(0, asset.authorization.revision);
@@ -67,6 +78,7 @@ export class MediaAuthorizationService {
             preparedById: actorId,
           },
         });
+        await this.invalidateReferencedProductQuality(transaction, assetId);
         await this.appendEvent(transaction, created, 'CREATED', actorId);
         await this.writeOperationLog(transaction, actorId, assetId, 'media.authorization.create', created);
         const events = await transaction.mediaAssetAuthorizationEvent.findMany({
@@ -76,7 +88,7 @@ export class MediaAuthorizationService {
         return this.toDetail({ ...asset, authorization: created }, events);
       });
     }
-    return this.mutate(assetId, actorId, dto.expectedRevision, (authorization) => {
+    return this.mutate(assetId, actor, 'LIBRARY', dto.expectedRevision, (authorization) => {
       if (!['DRAFT', 'REJECTED'].includes(authorization.reviewStatus)) {
         throw new ConflictException('只有草稿或已拒绝授权可以继续编辑');
       }
@@ -98,6 +110,7 @@ export class MediaAuthorizationService {
           reviewedById: null,
           reviewedAt: null,
           reviewNote: null,
+          selfReviewAcknowledged: false,
           revocationStatus: 'ACTIVE',
           revokedById: null,
           revokedAt: null,
@@ -107,8 +120,9 @@ export class MediaAuthorizationService {
     });
   }
 
-  async submit(assetId: number, actorId: number, expectedRevision: number) {
-    return this.mutate(assetId, actorId, expectedRevision, (authorization) => {
+  async submit(assetId: number, actor: MediaStaffActorInput, expectedRevision: number) {
+    const actorId = typeof actor === 'number' ? actor : actor.id;
+    return this.mutate(assetId, actor, 'LIBRARY', expectedRevision, (authorization) => {
       if (!['DRAFT', 'REJECTED'].includes(authorization.reviewStatus)) {
         throw new ConflictException('只有草稿或已拒绝授权可以提交审核');
       }
@@ -123,14 +137,29 @@ export class MediaAuthorizationService {
           reviewedById: null,
           reviewedAt: null,
           reviewNote: null,
+          selfReviewAcknowledged: false,
         },
       };
     });
   }
 
-  async approve(assetId: number, actorId: number, expectedRevision: number, reviewNote?: string | null) {
-    return this.mutate(assetId, actorId, expectedRevision, (authorization) => {
-      this.assertIndependentReviewer(authorization, actorId);
+  async approve(
+    assetId: number,
+    actor: MediaStaffActorInput,
+    expectedRevision: number,
+    reviewNote?: string | null,
+    selfReviewAcknowledged = false,
+  ) {
+    const actorId = typeof actor === 'number' ? actor : actor.id;
+    return this.mutate(assetId, actor, 'REVIEW', expectedRevision, (authorization, operator) => {
+      if (!authorization.submittedById) throw new ConflictException('授权尚未记录提交人');
+      const isSelfReview = authorization.submittedById === actorId;
+      if (isSelfReview && (
+        !selfReviewAcknowledged
+        || operator.role !== 'SUPER_ADMIN'
+      )) {
+        throw new ForbiddenException('素材自审仅允许在职超级管理员明确确认后执行');
+      }
       if (authorization.reviewStatus !== 'IN_REVIEW') {
         throw new ConflictException('只有审核中的授权可以批准');
       }
@@ -150,13 +179,134 @@ export class MediaAuthorizationService {
           reviewedById: actorId,
           reviewedAt: new Date(),
           reviewNote: this.nullableTrim(reviewNote),
+          selfReviewAcknowledged: isSelfReview,
         },
       };
     });
   }
 
-  async reject(assetId: number, actorId: number, dto: RejectMediaAuthorizationDto) {
-    return this.mutate(assetId, actorId, dto.expectedRevision, (authorization) => {
+  async authorizePublicUse(assetId: number, actor: MediaStaffActorInput, selfReviewAcknowledged: boolean) {
+    if (!selfReviewAcknowledged) {
+      throw new ForbiddenException('素材自审仅允许在职超级管理员明确确认后执行');
+    }
+    const actorId = typeof actor === 'number' ? actor : actor.id;
+    const publicUseBasis = '店铺装修发布前超级管理员确认品牌拥有公开网站使用权';
+    const publicUseEvidence = `page-editor:super-admin-self-review:${assetId}`;
+    return this.withSerializable(async (transaction) => {
+      await lockAuthorizedMediaStaff(transaction, actor, 'SUPER_REVIEW', 'write');
+      const asset = await this.findAsset(transaction, assetId);
+      let authorization = asset.authorization ?? await this.ensureLegacyDraft(transaction, assetId, actorId);
+      if (
+        authorization.reviewStatus === 'APPROVED'
+        && authorization.revocationStatus === 'ACTIVE'
+        && authorization.publicWebUseAllowed
+      ) {
+        const events = await transaction.mediaAssetAuthorizationEvent.findMany({
+          where: { assetId },
+          orderBy: { authorizationRevision: 'asc' },
+        });
+        return this.toDetail({ ...asset, authorization }, events);
+      }
+      if (authorization.revocationStatus === 'REVOKED') {
+        throw new ConflictException('已撤权素材不能在装修页直接恢复公开使用');
+      }
+      const sourceType = authorization.sourceType === 'LEGACY_UNVERIFIED'
+        ? 'BRAND_OWNED'
+        : authorization.sourceType;
+      if (
+        authorization.reviewStatus === 'APPROVED'
+        && authorization.revocationStatus === 'ACTIVE'
+        && !authorization.publicWebUseAllowed
+      ) {
+        authorization = await this.applyAuthorizationStep(transaction, asset.id, authorization, actorId, {
+          eventType: 'UPDATED',
+          action: 'media.authorization.public-use.enable',
+          data: { publicWebUseAllowed: true },
+        });
+        const events = await transaction.mediaAssetAuthorizationEvent.findMany({
+          where: { assetId },
+          orderBy: { authorizationRevision: 'asc' },
+        });
+        return this.toDetail({ ...asset, authorization }, events);
+      }
+      if (['DRAFT', 'REJECTED'].includes(authorization.reviewStatus)) {
+        authorization = await this.applyAuthorizationStep(transaction, asset.id, authorization, actorId, {
+          eventType: 'UPDATED',
+          action: 'media.authorization.draft.update',
+          data: {
+            sourceType,
+            authorizationBasis: authorization.authorizationBasis?.trim() || publicUseBasis,
+            evidenceReference: authorization.evidenceReference?.trim() || publicUseEvidence,
+            publicWebUseAllowed: true,
+            reviewStatus: 'DRAFT',
+            preparedById: actorId,
+            submittedById: null,
+            submittedAt: null,
+            reviewedById: null,
+            reviewedAt: null,
+            reviewNote: null,
+            selfReviewAcknowledged: false,
+          },
+        });
+        authorization = await this.applyAuthorizationStep(transaction, asset.id, authorization, actorId, {
+          eventType: 'SUBMITTED',
+          action: 'media.authorization.submit',
+          data: {
+            reviewStatus: 'IN_REVIEW',
+            submittedById: actorId,
+            submittedAt: new Date(),
+            reviewedById: null,
+            reviewedAt: null,
+            reviewNote: null,
+            selfReviewAcknowledged: false,
+          },
+        });
+      } else if (authorization.reviewStatus === 'IN_REVIEW') {
+        if (!authorization.publicWebUseAllowed || authorization.sourceType === 'LEGACY_UNVERIFIED') {
+          authorization = await this.applyAuthorizationStep(transaction, asset.id, authorization, actorId, {
+            eventType: 'UPDATED',
+            action: 'media.authorization.public-use.enable',
+            data: {
+              sourceType,
+              publicWebUseAllowed: true,
+              authorizationBasis: authorization.authorizationBasis?.trim() || publicUseBasis,
+              evidenceReference: authorization.evidenceReference?.trim() || publicUseEvidence,
+            },
+          });
+        }
+        if (authorization.submittedById && authorization.submittedById !== actorId) {
+          throw new ForbiddenException('该素材已由其他员工提交审核，请在页面素材中处理');
+        }
+      }
+      this.assertDateRange(authorization.validFrom, authorization.validUntil);
+      if (authorization.validUntil && authorization.validUntil.getTime() <= Date.now()) {
+        throw new ConflictException('授权有效期已结束，不能批准');
+      }
+      authorization = await this.applyAuthorizationStep(transaction, asset.id, authorization, actorId, {
+        eventType: 'APPROVED',
+        action: 'media.authorization.approve',
+        data: {
+          reviewStatus: 'APPROVED',
+          revocationStatus: 'ACTIVE',
+          publicWebUseAllowed: true,
+          submittedById: authorization.submittedById ?? actorId,
+          reviewedById: actorId,
+          reviewedAt: new Date(),
+          reviewNote: '店铺装修发布前超级管理员自审并允许公网使用',
+          selfReviewAcknowledged: true,
+        },
+      });
+      const events = await transaction.mediaAssetAuthorizationEvent.findMany({
+        where: { assetId },
+        orderBy: { authorizationRevision: 'asc' },
+      });
+      return this.toDetail({ ...asset, authorization }, events);
+    });
+  }
+
+  async reject(assetId: number, actor: MediaStaffActorInput, dto: RejectMediaAuthorizationDto) {
+    const actorId = typeof actor === 'number' ? actor : actor.id;
+    return this.mutate(assetId, actor, 'REVIEW', dto.expectedRevision, (authorization) => {
       this.assertIndependentReviewer(authorization, actorId);
       if (authorization.reviewStatus !== 'IN_REVIEW') {
         throw new ConflictException('只有审核中的授权可以拒绝');
@@ -175,8 +325,9 @@ export class MediaAuthorizationService {
     });
   }
 
-  async revoke(assetId: number, actorId: number, dto: RevokeMediaAuthorizationDto) {
-    return this.mutate(assetId, actorId, dto.expectedRevision, (authorization) => {
+  async revoke(assetId: number, actor: MediaStaffActorInput, dto: RevokeMediaAuthorizationDto) {
+    const actorId = typeof actor === 'number' ? actor : actor.id;
+    return this.mutate(assetId, actor, 'REVIEW', dto.expectedRevision, (authorization) => {
       if (authorization.reviewStatus !== 'APPROVED' || authorization.revocationStatus === 'REVOKED') {
         throw new ConflictException('只有当前有效的已批准授权可以撤权');
       }
@@ -194,8 +345,9 @@ export class MediaAuthorizationService {
     });
   }
 
-  async renew(assetId: number, actorId: number, dto: RenewMediaAuthorizationDto) {
-    return this.mutate(assetId, actorId, dto.expectedRevision, (authorization) => {
+  async renew(assetId: number, actor: MediaStaffActorInput, dto: RenewMediaAuthorizationDto) {
+    const actorId = typeof actor === 'number' ? actor : actor.id;
+    return this.mutate(assetId, actor, 'REVIEW', dto.expectedRevision, (authorization) => {
       this.assertIndependentReviewer(authorization, actorId);
       if (authorization.reviewStatus !== 'APPROVED' || authorization.revocationStatus !== 'ACTIVE') {
         throw new ConflictException('只有未撤权的已批准授权可以续期');
@@ -228,49 +380,52 @@ export class MediaAuthorizationService {
     });
   }
 
-  async impactPreview(dto: MediaAuthorizationImpactPreviewDto) {
-    const ids = [...new Set(dto.assetIds)];
-    const assets = await this.prisma.mediaAsset.findMany({
-      where: { id: { in: ids } },
-      include: AUTHORIZATION_INCLUDE,
-    });
-    const byId = new Map(assets.map((asset) => [asset.id, asset]));
-    const items = ids.map((assetId) => {
-      const asset = byId.get(assetId);
-      const publicEligibility = asset
-        ? evaluateMediaPublicEligibility({
-          assetStatus: asset.status,
-          accessLevel: asset.accessLevel,
-          authorization: asset.authorization,
-        })
-        : { eligible: false, reasons: ['ASSET_NOT_FOUND'] as const };
+  async impactPreview(dto: MediaAuthorizationImpactPreviewDto, actor: MediaStaffActorInput) {
+    return this.withSerializable(async (transaction) => {
+      await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'read');
+      const ids = [...new Set(dto.assetIds)];
+      const assets = await transaction.mediaAsset.findMany({
+        where: { id: { in: ids } },
+        include: AUTHORIZATION_INCLUDE,
+      });
+      const byId = new Map(assets.map((asset) => [asset.id, asset]));
+      const items = ids.map((assetId) => {
+        const asset = byId.get(assetId);
+        const publicEligibility = asset
+          ? evaluateMediaPublicEligibility({
+            assetStatus: asset.status,
+            accessLevel: asset.accessLevel,
+            authorization: asset.authorization,
+          })
+          : { eligible: false, reasons: ['ASSET_NOT_FOUND'] as const };
+        return {
+          assetId,
+          found: Boolean(asset),
+          reviewStatus: asset?.authorization?.reviewStatus ?? null,
+          revocationStatus: asset?.authorization?.revocationStatus ?? null,
+          publicEligibility,
+          eligibleForPublic: publicEligibility.eligible,
+          blockingReasons: [...publicEligibility.reasons],
+          affectedPublishedPages: [],
+          affectedDraftPages: [],
+          pageImpact: { complete: false, reason: 'PAGE_MANIFEST_NOT_AVAILABLE' as const },
+        };
+      });
       return {
-        assetId,
-        found: Boolean(asset),
-        reviewStatus: asset?.authorization?.reviewStatus ?? null,
-        revocationStatus: asset?.authorization?.revocationStatus ?? null,
-        publicEligibility,
-        eligibleForPublic: publicEligibility.eligible,
-        blockingReasons: [...publicEligibility.reasons],
-        affectedPublishedPages: [],
-        affectedDraftPages: [],
-        pageImpact: { complete: false, reason: 'PAGE_MANIFEST_NOT_AVAILABLE' as const },
-      };
-    });
-    return {
-      complete: false,
-      reason: 'PAGE_MANIFEST_NOT_AVAILABLE' as const,
-      items,
-      summary: {
-        total: items.length,
-        eligible: items.filter((item) => item.publicEligibility.eligible).length,
-        blocked: items.filter((item) => !item.publicEligibility.eligible).length,
-        publishedAffected: 0,
-        draftAffected: 0,
         complete: false,
         reason: 'PAGE_MANIFEST_NOT_AVAILABLE' as const,
-      },
-    };
+        items,
+        summary: {
+          total: items.length,
+          eligible: items.filter((item) => item.publicEligibility.eligible).length,
+          blocked: items.filter((item) => !item.publicEligibility.eligible).length,
+          publishedAffected: 0,
+          draftAffected: 0,
+          complete: false,
+          reason: 'PAGE_MANIFEST_NOT_AVAILABLE' as const,
+        },
+      };
+    });
   }
 
   async ensureLegacyDraft(
@@ -290,41 +445,90 @@ export class MediaAuthorizationService {
         preparedById: actorId,
       },
     });
+    await this.invalidateReferencedProductQuality(transaction, assetId);
     await this.appendEvent(transaction, created, 'CREATED', actorId);
     if (actorId) await this.writeOperationLog(transaction, actorId, assetId, 'media.authorization.create', created);
     return created;
   }
 
+  async ensureUploadAuthorization(
+    transaction: Prisma.TransactionClient,
+    assetId: number,
+    actorId?: number,
+  ): Promise<AuthorizationRecord> {
+    return this.ensureLegacyDraft(transaction, assetId, actorId);
+  }
+
+  private async applyAuthorizationStep(
+    transaction: Prisma.TransactionClient,
+    assetId: number,
+    authorization: AuthorizationRecord,
+    actorId: number,
+    mutation: AuthorizationMutation,
+  ): Promise<AuthorizationRecord> {
+    const result = await transaction.mediaAssetAuthorization.updateMany({
+      where: { assetId: authorization.assetId, revision: authorization.revision },
+      data: {
+        ...mutation.data,
+        revision: { increment: 1 },
+        publicUseEpoch: { increment: 1 },
+      },
+    });
+    if (result.count !== 1) {
+      throw new ConflictException('授权记录已被其他人修改，请刷新后重试');
+    }
+    const updated = await transaction.mediaAssetAuthorization.findUniqueOrThrow({
+      where: { assetId: authorization.assetId },
+    });
+    await this.invalidateReferencedProductQuality(transaction, assetId);
+    await this.appendEvent(transaction, updated, mutation.eventType, actorId);
+    await this.writeOperationLog(transaction, actorId, assetId, mutation.action, updated);
+    return updated;
+  }
+
+  private async invalidateReferencedProductQuality(
+    transaction: Prisma.TransactionClient,
+    assetId: number,
+  ) {
+    await transaction.product.updateMany({
+      where: {
+        publicationQualityStatus: 'READY',
+        images: { some: { mediaAssetId: assetId } },
+      },
+      data: {
+        publicationQualityStatus: 'QUARANTINED',
+        publicationQualityHash: null,
+        publicationQualityCheckedAt: null,
+      },
+    });
+  }
+
   private async mutate(
     assetId: number,
-    actorId: number,
+    actor: MediaStaffActorInput,
+    access: MediaStaffAccess,
     expectedRevision: number,
-    decide: (authorization: AuthorizationRecord) => AuthorizationMutation,
+    decide: (
+      authorization: AuthorizationRecord,
+      operator: AuthorizedMediaStaff,
+    ) => AuthorizationMutation,
   ) {
+    const actorId = typeof actor === 'number' ? actor : actor.id;
     return this.withSerializable(async (transaction) => {
+      const operator = await lockAuthorizedMediaStaff(transaction, actor, access, 'write');
       const asset = await this.findAsset(transaction, assetId);
       const authorization = asset.authorization;
       if (!authorization) throw new ConflictException('素材尚未建立授权记录');
       if (authorization.revision !== expectedRevision) {
         throw this.revisionConflict(expectedRevision, authorization.revision);
       }
-      const mutation = decide(authorization);
-      const result = await transaction.mediaAssetAuthorization.updateMany({
-        where: { assetId: authorization.assetId, revision: expectedRevision },
-        data: {
-          ...mutation.data,
-          revision: { increment: 1 },
-          publicUseEpoch: { increment: 1 },
-        },
-      });
-      if (result.count !== 1) {
-        throw new ConflictException('授权记录已被其他人修改，请刷新后重试');
-      }
-      const updated = await transaction.mediaAssetAuthorization.findUniqueOrThrow({
-        where: { assetId: authorization.assetId },
-      });
-      await this.appendEvent(transaction, updated, mutation.eventType, actorId);
-      await this.writeOperationLog(transaction, actorId, assetId, mutation.action, updated);
+      const updated = await this.applyAuthorizationStep(
+        transaction,
+        assetId,
+        authorization,
+        actorId,
+        decide(authorization, operator),
+      );
       const events = await transaction.mediaAssetAuthorizationEvent.findMany({
         where: { assetId },
         orderBy: { authorizationRevision: 'asc' },
@@ -472,6 +676,7 @@ export class MediaAuthorizationService {
       reviewedById: authorization.reviewedById,
       reviewedAt: authorization.reviewedAt?.toISOString() ?? null,
       reviewNote: authorization.reviewNote,
+      selfReviewAcknowledged: authorization.selfReviewAcknowledged,
       validFrom: authorization.validFrom?.toISOString() ?? null,
       validUntil: authorization.validUntil?.toISOString() ?? null,
       revocationStatus: authorization.revocationStatus,

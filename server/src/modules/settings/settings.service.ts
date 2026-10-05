@@ -1,5 +1,7 @@
 import {
   ConflictException,
+  BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -13,6 +15,7 @@ import {
   normalizePublishedBrandLogo,
 } from './site-publication-readiness';
 import { DEFAULT_PUBLIC_CONTENT_LOCALE } from '../../common/content-locale';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 
 const SETTINGS_FILE = path.resolve(__dirname, '..', '..', '..', 'settings.json');
 const SETTINGS_KEY = 'site';
@@ -48,7 +51,11 @@ const DEFAULT_BACKUP_HEALTH_GRACE_SECONDS = 3600;
 const SETTINGS_UPDATE_MAX_ATTEMPTS = 3;
 const BACKUP_RETENTION_DAYS_PATTERN = /^[1-9][0-9]{0,8}$/;
 
+class SettingsUpdateRaceError extends Error {}
+
 type BackupArtifact = { name: string; size: number; mtime: Date };
+type SettingsStaffActor = Pick<StaffPrincipal, 'id' | 'sessionFamilyId'>;
+type SettingsStaffActorInput = SettingsStaffActor | number | undefined;
 
 type BackupSet = {
   timestamp: string;
@@ -228,6 +235,60 @@ export class SettingsService {
 
   constructor(private prisma: PrismaService) {}
 
+  private requireStaffActor(actor: SettingsStaffActorInput): SettingsStaffActor {
+    const id = typeof actor === 'number' ? actor : actor?.id;
+    if (!Number.isInteger(id) || Number(id) <= 0) {
+      throw new BadRequestException('缺少有效的系统设置员工身份');
+    }
+    return {
+      id: Number(id),
+      ...(typeof actor === 'object' && actor?.sessionFamilyId
+        ? { sessionFamilyId: actor.sessionFamilyId }
+        : {}),
+    };
+  }
+
+  private async lockAuthorizedStaff(
+    transaction: Prisma.TransactionClient,
+    actorInput: SettingsStaffActorInput,
+    mode: 'read' | 'write',
+  ): Promise<SettingsStaffActor> {
+    const actor = this.requireStaffActor(actorInput);
+    const staff = mode === 'write'
+      ? await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR UPDATE`,
+        )
+      : await transaction.$queryRaw<Array<{ id: number }>>(
+          Prisma.sql`SELECT id FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR SHARE`,
+        );
+    if (staff.length !== 1) {
+      throw new ForbiddenException('当前员工已停用或无权访问系统设置');
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = mode === 'write'
+        ? await transaction.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+          )
+        : await transaction.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+          );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException('当前员工会话已失效，不能继续访问系统设置');
+      }
+    }
+    return actor;
+  }
+
+  private withAuthorizedStaffRead<T>(
+    actor: SettingsStaffActorInput,
+    operation: (transaction: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma.$transaction(async (transaction) => {
+      await this.lockAuthorizedStaff(transaction, actor, 'read');
+      return operation(transaction);
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
   /**
    * 只在首次初始化时读取旧 JSON 文件，随后所有读写均以数据库为准。
    * Docker 镜像和重建容器不再依赖该文件，保留读取逻辑用于本地旧配置平滑迁移。
@@ -244,55 +305,62 @@ export class SettingsService {
     return normalizeSettings({ ...DEFAULT_SETTINGS }) as Prisma.InputJsonObject;
   }
 
-  async getSettings(): Promise<Record<string, unknown>> {
-    const stored = await this.prisma.siteSetting.findUnique({
-      where: { key: SETTINGS_KEY },
-    });
-    if (stored) return normalizeSettings(stored.value) as Record<string, unknown>;
+  async getSettings(actor?: SettingsStaffActorInput): Promise<Record<string, unknown>> {
+    return this.withAuthorizedStaffRead(actor, async (transaction) => {
+      const stored = await transaction.siteSetting.findUnique({
+        where: { key: SETTINGS_KEY },
+      });
+      if (stored) return normalizeSettings(stored.value) as Record<string, unknown>;
 
-    // GET（包括公开 settings）必须保持只读。首次持久化只发生在显式 PUT；
-    // 这样目标环境的只读盘点不会因为空库读取而创建 SiteSetting 记录。
-    return normalizeSettings(this.loadLegacyFile()) as Record<string, unknown>;
+      // GET 必须保持只读。首次持久化只发生在显式 PUT；
+      // 这样目标环境的只读盘点不会因为空库读取而创建 SiteSetting 记录。
+      return normalizeSettings(this.loadLegacyFile()) as Record<string, unknown>;
+    });
   }
 
-  async updateSettings(data: object, userId?: number) {
+  async updateSettings(data: object, actor?: SettingsStaffActorInput) {
     for (let attempt = 0; attempt < SETTINGS_UPDATE_MAX_ATTEMPTS; attempt += 1) {
-      const stored = await this.prisma.siteSetting.findUnique({
-        where: { key: SETTINGS_KEY },
-        select: { value: true, version: true },
-      });
-      const current = stored
-        ? normalizeSettings(stored.value)
-        : normalizeSettings(this.loadLegacyFile());
-      const updated = { ...current, ...data } as Prisma.InputJsonObject;
-
-      if (!stored) {
-        try {
-          const created = await this.prisma.siteSetting.create({
-            data: { key: SETTINGS_KEY, value: updated, updatedBy: userId },
+      try {
+        return await this.prisma.$transaction(async (transaction) => {
+          const staff = await this.lockAuthorizedStaff(transaction, actor, 'write');
+          const stored = await transaction.siteSetting.findUnique({
+            where: { key: SETTINGS_KEY },
+            select: { value: true, version: true },
           });
-          return normalizeSettings(created.value) as Record<string, unknown>;
-        } catch (error) {
-          if (
-            error instanceof Prisma.PrismaClientKnownRequestError
-            && error.code === 'P2002'
-          ) {
-            continue;
-          }
-          throw error;
-        }
-      }
+          const current = stored
+            ? normalizeSettings(stored.value)
+            : normalizeSettings(this.loadLegacyFile());
+          const updated = { ...current, ...data } as Prisma.InputJsonObject;
 
-      const saved = await this.prisma.siteSetting.updateMany({
-        where: { key: SETTINGS_KEY, version: stored.version },
-        data: {
-          value: updated,
-          updatedBy: userId,
-          version: { increment: 1 },
-        },
-      });
-      if (saved.count === 1) {
-        return normalizeSettings(updated) as Record<string, unknown>;
+          if (!stored) {
+            const created = await transaction.siteSetting.create({
+              data: { key: SETTINGS_KEY, value: updated, updatedBy: staff.id },
+            });
+            return normalizeSettings(created.value) as Record<string, unknown>;
+          }
+
+          const saved = await transaction.siteSetting.updateMany({
+            where: { key: SETTINGS_KEY, version: stored.version },
+            data: {
+              value: updated,
+              updatedBy: staff.id,
+              version: { increment: 1 },
+            },
+          });
+          if (saved.count !== 1) {
+            throw new SettingsUpdateRaceError();
+          }
+          return normalizeSettings(updated) as Record<string, unknown>;
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      } catch (error) {
+        if (error instanceof SettingsUpdateRaceError) continue;
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError
+          && (error.code === 'P2002' || error.code === 'P2034')
+        ) {
+          continue;
+        }
+        throw error;
       }
     }
 
@@ -302,18 +370,20 @@ export class SettingsService {
   /**
    * 发布准备度只读取已持久化的正式配置；默认回退值不能让门禁误判为已准备。
    */
-  async getPublicationReadiness() {
-    const stored = await this.prisma.siteSetting.findUnique({
-      where: { key: SETTINGS_KEY },
-      select: { value: true, version: true, updatedAt: true },
+  async getPublicationReadiness(actor?: SettingsStaffActorInput) {
+    return this.withAuthorizedStaffRead(actor, async (transaction) => {
+      const stored = await transaction.siteSetting.findUnique({
+        where: { key: SETTINGS_KEY },
+        select: { value: true, version: true, updatedAt: true },
+      });
+      return {
+        ...evaluateSitePublicationReadiness(stored?.value, {
+          persisted: Boolean(stored),
+        }),
+        settingsVersion: stored?.version ?? null,
+        settingsUpdatedAt: stored?.updatedAt ?? null,
+      };
     });
-    return {
-      ...evaluateSitePublicationReadiness(stored?.value, {
-        persisted: Boolean(stored),
-      }),
-      settingsVersion: stored?.version ?? null,
-      settingsUpdatedAt: stored?.updatedAt ?? null,
-    };
   }
 
   /** 公开端不消费默认回退或部分资料；未通过正式准备度时整份设置失败关闭。 */
@@ -334,7 +404,11 @@ export class SettingsService {
       : published;
   }
 
-  async getBackupStatus() {
+  async getBackupStatus(actor?: SettingsStaffActorInput) {
+    return this.withAuthorizedStaffRead(actor, async () => this.readBackupStatus());
+  }
+
+  private async readBackupStatus() {
     // OR-1 备份容器产物目录（compose 将宿主 ./backups 只读挂载到 server 容器 /backups）。
     // 本地开发未挂载该目录时诚实说明，不返回误导性的"未接入"。
     const dir = process.env.BACKUP_DIR || '/backups';
@@ -468,7 +542,7 @@ export class SettingsService {
     keyword?: string;
     module?: string;
     action?: string;
-  }) {
+  }, actor?: SettingsStaffActorInput) {
     const page = Math.max(1, Math.trunc(Number(params.page) || 1));
     const pageSize = Math.min(100, Math.max(1, Math.trunc(Number(params.pageSize) || 50)));
     const keyword = params.keyword?.trim();
@@ -485,16 +559,18 @@ export class SettingsService {
         { user: { realName: { contains: keyword } } },
       ];
     }
+    return this.withAuthorizedStaffRead(actor, async (transaction) => {
     const [list, total] = await Promise.all([
-      this.prisma.operationLog.findMany({
+      transaction.operationLog.findMany({
         where,
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy: { createdAt: 'desc' },
         include: { user: { select: { username: true, realName: true } } },
       }),
-      this.prisma.operationLog.count({ where }),
+      transaction.operationLog.count({ where }),
     ]);
     return { list, total, page, pageSize };
+    });
   }
 }

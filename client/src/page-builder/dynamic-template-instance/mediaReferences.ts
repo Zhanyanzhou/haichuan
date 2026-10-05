@@ -13,6 +13,7 @@ import type {
   TemplateDefinitionV2,
 } from "../template-definition/generated/templateDefinition.generated";
 import { getContentTemplateModuleTypeForSlotType } from "../template-definition/validateTemplateDefinition";
+import { TEMPLATE_CONTENT_BREAKPOINTS } from "../template-definition/responsive";
 import {
   DYNAMIC_TEMPLATE_BLOCK_TYPE,
   DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY,
@@ -67,18 +68,20 @@ function collectReachableSlotIds(
 
 /**
  * 客户前台只展示运营人员在页面实例中明确上传过图片的模板。
+ * 传入当前断点时只判断该断点是否可达；不传则任一断点有明确图片即视为可公开。
  * 母模板默认图和节点背景只负责后台设计/预览，不能让“刚加入但未填写”的模板自动公开。
  */
 export function hasExplicitDynamicTemplateInstanceImage(
   definition: TemplateDefinitionV2,
   contentBySlotId: unknown,
   hiddenSlotIds: readonly string[] = [],
+  breakpoint?: TemplateBreakpoint,
 ): boolean {
   if (!isRecord(contentBySlotId)) return false;
   const reachableSlotIds = new Set<string>();
-  const breakpoints: TemplateBreakpoint[] = definition.schemaVersion >= 2
-    ? ["desktop", "tablet", "mobile"]
-    : ["desktop", "mobile"];
+  const breakpoints: TemplateBreakpoint[] = breakpoint
+    ? [breakpoint === "mobile" ? "mobile" : "desktop"]
+    : [...TEMPLATE_CONTENT_BREAKPOINTS];
 
   for (const breakpoint of breakpoints) {
     const result = compileDynamicTemplateRenderPlan(definition, {
@@ -146,7 +149,7 @@ export function getDynamicTemplateDocumentMediaReferences(
       const hiddenSlotIds = Array.isArray(props.hiddenSlotIds)
         ? props.hiddenSlotIds.filter((item): item is string => typeof item === "string")
         : [];
-      const breakpoints: TemplateBreakpoint[] = resolved.definition.schemaVersion >= 2 ? ["desktop", "tablet", "mobile"] : ["desktop", "mobile"];
+      const breakpoints = TEMPLATE_CONTENT_BREAKPOINTS;
       const plans = breakpoints
         .map((breakpoint) => ({
           breakpoint,

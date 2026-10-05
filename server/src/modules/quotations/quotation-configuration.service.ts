@@ -1,12 +1,14 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import type { StaffPrincipal } from '../../common/security/authenticated-principal';
 import {
   CreateCooperationDesignFileDto,
   CreateCooperationDesignFileVersionDto,
@@ -16,6 +18,13 @@ import {
   UpdateTradeResourceBucketDto,
 } from './dto/quotation-commerce.dto';
 import { UploadService } from '../upload/upload.service';
+
+type ConfigurationActor = Pick<StaffPrincipal, 'id' | 'role' | 'sessionFamilyId'>;
+
+type LockedConfigurationActor = {
+  id: number;
+  role: 'SUPER_ADMIN' | 'ADMIN';
+};
 
 @Injectable()
 export class QuotationConfigurationService {
@@ -29,20 +38,63 @@ export class QuotationConfigurationService {
     return this.uploadService;
   }
 
-  listPartnerPrices(customerId: number) {
-    return this.prisma.partnerPriceAgreement.findMany({
-      where: { customerId },
-      orderBy: [{ version: 'desc' }, { id: 'desc' }],
+  private async lockActiveConfigurationActor(
+    tx: Prisma.TransactionClient,
+    actor: ConfigurationActor,
+    mode: 'read' | 'write',
+  ): Promise<LockedConfigurationActor> {
+    if (!actor || !Number.isSafeInteger(actor.id) || actor.id <= 0) {
+      throw new ForbiddenException('当前员工已停用或无权管理报价配置');
+    }
+    const actors = mode === 'read'
+      ? await tx.$queryRaw<LockedConfigurationActor[]>(
+          Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR SHARE`,
+        )
+      : await tx.$queryRaw<LockedConfigurationActor[]>(
+          Prisma.sql`SELECT id, role FROM users WHERE id = ${actor.id} AND status = 'ACTIVE' AND role IN ('SUPER_ADMIN', 'ADMIN') FOR UPDATE`,
+        );
+    if (actors.length !== 1) {
+      throw new ForbiddenException('当前员工已停用或无权管理报价配置');
+    }
+    if (actor.sessionFamilyId) {
+      const sessions = mode === 'read'
+        ? await tx.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR SHARE`,
+          )
+        : await tx.$queryRaw<Array<{ id: number }>>(
+            Prisma.sql`SELECT id FROM admin_refresh_sessions WHERE user_id = ${actor.id} AND family_id = ${actor.sessionFamilyId} AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP LIMIT 1 FOR UPDATE`,
+          );
+      if (sessions.length !== 1) {
+        throw new ForbiddenException('当前员工会话已失效，不能管理报价配置');
+      }
+    }
+    return actors[0];
+  }
+
+  private async assertActiveConfigurationActor(actor: ConfigurationActor): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockActiveConfigurationActor(tx, actor, 'read');
     });
   }
 
-  async createPartnerPrice(dto: CreatePartnerPriceAgreementDto, actorId: number) {
+  listPartnerPrices(customerId: number, actor: ConfigurationActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockActiveConfigurationActor(tx, actor, 'read');
+      return tx.partnerPriceAgreement.findMany({
+        where: { customerId },
+        orderBy: [{ version: 'desc' }, { id: 'desc' }],
+      });
+    });
+  }
+
+  async createPartnerPrice(dto: CreatePartnerPriceAgreementDto, actor: ConfigurationActor) {
     const effectiveFrom = new Date(dto.effectiveFrom);
     const effectiveUntil = dto.effectiveUntil ? new Date(dto.effectiveUntil) : null;
     if (effectiveUntil && effectiveUntil <= effectiveFrom) {
       throw new BadRequestException('双蜡价失效时间必须晚于生效时间');
     }
     return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveConfigurationActor(tx, actor, 'write');
       await tx.$queryRaw(Prisma.sql`SELECT id FROM customers WHERE id = ${dto.customerId} FOR UPDATE`);
       const customer = await tx.customer.findFirst({
         where: {
@@ -77,20 +129,23 @@ export class QuotationConfigurationService {
           effectiveFrom,
           effectiveUntil,
           reason: dto.reason,
-          createdBy: actorId,
+          createdBy: lockedActor.id,
           previousAgreementId: previous?.id ?? null,
         },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  listFeeRules() {
-    return this.prisma.quotationFeeRule.findMany({
-      orderBy: [{ code: 'asc' }, { version: 'desc' }],
+  listFeeRules(actor: ConfigurationActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockActiveConfigurationActor(tx, actor, 'read');
+      return tx.quotationFeeRule.findMany({
+        orderBy: [{ code: 'asc' }, { version: 'desc' }],
+      });
     });
   }
 
-  async createFeeRule(dto: CreateQuotationFeeRuleDto, actorId: number) {
+  async createFeeRule(dto: CreateQuotationFeeRuleDto, actor: ConfigurationActor) {
     const effectiveFrom = new Date(dto.effectiveFrom);
     const effectiveUntil = dto.effectiveUntil ? new Date(dto.effectiveUntil) : null;
     if (effectiveUntil && effectiveUntil <= effectiveFrom) {
@@ -100,6 +155,7 @@ export class QuotationConfigurationService {
       throw new BadRequestException('按克费用仅适用于合作蜡模报价');
     }
     return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveConfigurationActor(tx, actor, 'write');
       const latest = await tx.quotationFeeRule.findFirst({
         where: { code: dto.code, channel: dto.channel },
         orderBy: [{ version: 'desc' }, { id: 'desc' }],
@@ -118,36 +174,42 @@ export class QuotationConfigurationService {
           effectiveUntil,
           displayText: dto.displayText,
           reason: dto.reason ?? null,
-          createdBy: actorId,
+          createdBy: lockedActor.id,
         },
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  listResourceBuckets() {
-    return this.prisma.tradeResourceBucket.findMany({
-      orderBy: [{ channel: 'asc' }, { kind: 'asc' }, { code: 'asc' }, { bucketKey: 'asc' }],
+  listResourceBuckets(actor: ConfigurationActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockActiveConfigurationActor(tx, actor, 'read');
+      return tx.tradeResourceBucket.findMany({
+        orderBy: [{ channel: 'asc' }, { kind: 'asc' }, { code: 'asc' }, { bucketKey: 'asc' }],
+      });
     });
   }
 
-  listDesignFiles(customerId: number) {
-    return this.prisma.cooperationDesignFile.findMany({
-      where: { customerId },
-      select: {
-        id: true,
-        customerId: true,
-        productId: true,
-        referenceNo: true,
-        currentVersion: true,
-        createdAt: true,
-        updatedAt: true,
-        versions: { orderBy: { version: 'desc' } },
-      },
-      orderBy: { updatedAt: 'desc' },
+  listDesignFiles(customerId: number, actor: ConfigurationActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockActiveConfigurationActor(tx, actor, 'read');
+      return tx.cooperationDesignFile.findMany({
+        where: { customerId },
+        select: {
+          id: true,
+          customerId: true,
+          productId: true,
+          referenceNo: true,
+          currentVersion: true,
+          createdAt: true,
+          updatedAt: true,
+          versions: { orderBy: { version: 'desc' } },
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
     });
   }
 
-  async createResourceBucket(dto: CreateTradeResourceBucketDto, actorId: number) {
+  async createResourceBucket(dto: CreateTradeResourceBucketDto, actor: ConfigurationActor) {
     if (dto.channel === 'RETAIL') {
       throw new BadRequestException('零售库存只能使用 Inventory，不能创建资源桶');
     }
@@ -156,28 +218,32 @@ export class QuotationConfigurationService {
     if (bucketStart && bucketEnd && bucketEnd <= bucketStart) {
       throw new BadRequestException('资源桶结束时间必须晚于开始时间');
     }
-    return this.prisma.tradeResourceBucket.create({
-      data: {
-        channel: dto.channel,
-        kind: dto.kind,
-        code: dto.code,
-        bucketKey: dto.bucketKey,
-        displayName: dto.displayName,
-        unit: dto.unit,
-        bucketStart,
-        bucketEnd,
-        availableQuantity: new Prisma.Decimal(dto.availableQuantity).toDecimalPlaces(3),
-        createdBy: actorId,
-        updatedBy: actorId,
-      },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveConfigurationActor(tx, actor, 'write');
+      return tx.tradeResourceBucket.create({
+        data: {
+          channel: dto.channel,
+          kind: dto.kind,
+          code: dto.code,
+          bucketKey: dto.bucketKey,
+          displayName: dto.displayName,
+          unit: dto.unit,
+          bucketStart,
+          bucketEnd,
+          availableQuantity: new Prisma.Decimal(dto.availableQuantity).toDecimalPlaces(3),
+          createdBy: lockedActor.id,
+          updatedBy: lockedActor.id,
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async updateResourceBucket(id: number, dto: UpdateTradeResourceBucketDto, actorId: number) {
+  async updateResourceBucket(id: number, dto: UpdateTradeResourceBucketDto, actor: ConfigurationActor) {
     if (dto.availableQuantity === undefined && dto.isActive === undefined) {
       throw new BadRequestException('至少提供一项资源桶变更');
     }
     return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveConfigurationActor(tx, actor, 'write');
       await tx.$queryRaw(Prisma.sql`SELECT id FROM trade_resource_buckets WHERE id = ${id} FOR UPDATE`);
       const current = await tx.tradeResourceBucket.findUnique({ where: { id } });
       if (!current) throw new NotFoundException('资源桶不存在');
@@ -196,7 +262,7 @@ export class QuotationConfigurationService {
           availableQuantity,
           ...(dto.isActive === undefined ? {} : { isActive: dto.isActive }),
           version: { increment: 1 },
-          updatedBy: actorId,
+          updatedBy: lockedActor.id,
         },
       });
       if (updated.count !== 1) throw new ConflictException('资源桶已发生变化，请刷新后重试');
@@ -204,35 +270,39 @@ export class QuotationConfigurationService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async createDesignFile(dto: CreateCooperationDesignFileDto, _actorId: number) {
-    const customer = await this.prisma.customer.findFirst({
-      where: {
-        id: dto.customerId,
-        status: 'ACTIVE',
-        accountType: 'PARTNER',
-        partnerStatus: 'APPROVED',
-      },
-      select: { id: true },
-    });
-    if (!customer) throw new BadRequestException('仅可为已通过的有效合作客户创建文件');
-    return this.prisma.cooperationDesignFile.create({
-      data: {
-        customerId: dto.customerId,
-        productId: dto.productId ?? null,
-        referenceNo: dto.referenceNo,
-      },
+  async createDesignFile(dto: CreateCooperationDesignFileDto, actor: ConfigurationActor) {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockActiveConfigurationActor(tx, actor, 'write');
+      const customer = await tx.customer.findFirst({
+        where: {
+          id: dto.customerId,
+          status: 'ACTIVE',
+          accountType: 'PARTNER',
+          partnerStatus: 'APPROVED',
+        },
+        select: { id: true },
+      });
+      if (!customer) throw new BadRequestException('仅可为已通过的有效合作客户创建文件');
+      return tx.cooperationDesignFile.create({
+        data: {
+          customerId: dto.customerId,
+          productId: dto.productId ?? null,
+          referenceNo: dto.referenceNo,
+        },
+      });
     });
   }
 
   async createDesignFileVersion(
     designFileId: number,
     dto: CreateCooperationDesignFileVersionDto,
-    actorId: number,
+    actor: ConfigurationActor,
   ) {
     if (dto.redWaxWeight == null && dto.purpleWaxWeight == null) {
       throw new BadRequestException('至少提供一种蜡的确认重量');
     }
     return this.prisma.$transaction(async (tx) => {
+      const lockedActor = await this.lockActiveConfigurationActor(tx, actor, 'write');
       await tx.$queryRaw(Prisma.sql`SELECT id FROM cooperation_design_files WHERE id = ${designFileId} FOR UPDATE`);
       const file = await tx.cooperationDesignFile.findUnique({
         where: { id: designFileId },
@@ -287,7 +357,7 @@ export class QuotationConfigurationService {
             ? null
             : new Prisma.Decimal(dto.purpleWaxWeight).toDecimalPlaces(3),
           checksumSha256: mediaAsset.checksumSha256,
-          createdBy: actorId,
+          createdBy: lockedActor.id,
         },
       });
       await tx.cooperationDesignFile.update({
@@ -302,19 +372,20 @@ export class QuotationConfigurationService {
     designFileId: number,
     file: Express.Multer.File,
     dto: Omit<CreateCooperationDesignFileVersionDto, 'mediaAssetId' | 'checksumSha256'>,
-    actorId: number,
+    actor: ConfigurationActor,
   ) {
-    const mediaAsset = await this.designMediaAuthority().uploadPrivateDesignFile(file, actorId);
+    await this.assertActiveConfigurationActor(actor);
+    const mediaAsset = await this.designMediaAuthority().uploadPrivateDesignFile(file, actor.id);
     try {
       return await this.createDesignFileVersion(designFileId, {
         ...dto,
         mediaAssetId: mediaAsset.mediaAssetId,
         checksumSha256: mediaAsset.checksumSha256,
-      }, actorId);
+      }, actor);
     } catch (error) {
       await this.designMediaAuthority().discardUnattachedDesignFile(
         mediaAsset.mediaAssetId,
-        actorId,
+        actor.id,
       );
       throw error;
     }

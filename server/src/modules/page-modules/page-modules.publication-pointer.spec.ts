@@ -519,3 +519,33 @@ test("Rollback Publication 在历史版本当前准备度失败时保持线上�
     false,
   );
 });
+
+test("Rollback Publication 拒绝未登记媒体的历史 revision 且不切换线上指针", async () => {
+  const { service, writes } = createRollbackHarness();
+  (service as any).collectPageDocumentValidation = async () => ({
+    valid: false,
+    errors: ["本站上传素材没有对应的媒体登记：/uploads/2026/09/01/hero.png"],
+    issues: [{
+      code: "page-validation-managed-media-unregistered-media",
+      severity: "error",
+      layer: "page",
+      path: "content[0].props.desktopImage",
+      message: "本站上传素材没有对应的媒体登记：/uploads/2026/09/01/hero.png",
+    }],
+  });
+
+  await assert.rejects(
+    () => service.rollbackPagePublication("home", 37, 39, 17),
+    (error: unknown) => error instanceof BadRequestException
+      && error.message.includes("当前不可公开")
+      && error.message.includes("本站上传素材没有对应的媒体登记"),
+  );
+  assert.equal(
+    writes.some((write) => write.operation === "pageDocument.updateMany"),
+    false,
+  );
+  assert.equal(
+    writes.some((write) => write.operation === "operationLog.create"),
+    false,
+  );
+});

@@ -1,5 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, Outlet, useLocation, useOutletContext } from "react-router-dom";
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { getPageDocumentMeta, usePageMetaStore } from "@/store/pageMetaStore";
 import {
   PublicSiteSettingsProvider,
@@ -26,17 +33,15 @@ import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 import StorefrontFooter from "./StorefrontFooter";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
-import {
-  DEFAULT_PUBLIC_CONTENT_LOCALE,
-  resolvePublicLocalePath,
-  withPublicLocalePath,
-} from "@/i18n/publicLocale";
+import { resolvePublicLocalePath, withPublicLocalePath } from "@/i18n/publicLocale";
 import { useCustomerAuthStore, type CustomerAccount } from "@/store/customerAuthStore";
 import { customerApi } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
+import RouteLoading from "@/components/common/RouteLoading";
+import { clearCatalogReturnContext } from "@/pages/public/Catalog/catalogReturnContext";
 
 const NON_PUBLIC_SYSTEM_HERO_MEDIA = new Set([
   "/images/system/product-placeholder.svg",
@@ -221,13 +226,6 @@ const publicSiteOrigin = normalizePublicSiteOrigin(
   { allowHttp: import.meta.env.DEV },
 );
 
-const ENGLISH_PUBLIC_CONTENT_PAGE_KEYS = new Set([
-  "home",
-  "products",
-  "about",
-  "custom",
-]);
-
 /* ═══════ 内联图标 ═══════ */
 const MenuIcon = () => (
   <svg
@@ -319,12 +317,7 @@ const AccountIcon = () => (
 
 export default function PublicLayout() {
   const location = useLocation();
-  const parentOutletContext = useOutletContext<{
-    englishPublication?: {
-      pageKey: string;
-      documentResource: PublishedPageDocumentResource;
-    };
-  } | null>();
+  const navigate = useNavigate();
   const localizedPath = resolvePublicLocalePath(location.pathname);
   const english = localizedPath.locale === "en";
   const contentPathname = localizedPath.pathname;
@@ -352,40 +345,18 @@ export default function PublicLayout() {
     : undefined;
   const isHome = contentPathname === "/" || previewPage?.key === "home";
   const pageDefinition = getEditorPageByPath(contentPathname) ?? previewPage;
-  const parentEnglishPublication = parentOutletContext?.englishPublication;
-  const inheritedEnglishPublication = english
-    && parentEnglishPublication
-    && parentEnglishPublication?.pageKey === pageDefinition?.key
-      ? parentEnglishPublication.documentResource
-      : null;
   const standalonePublishedHeaderDocumentResource = usePublishedPageDocument(
-    previewPage || inheritedEnglishPublication ? undefined : pageDefinition?.key,
+    previewPage ? undefined : pageDefinition?.key,
     localizedPath.locale,
   );
-  const publishedHeaderDocumentResource = inheritedEnglishPublication
-    ?? standalonePublishedHeaderDocumentResource;
+  const publishedHeaderDocumentResource = standalonePublishedHeaderDocumentResource;
   const publishedHeaderDocument = omitNonPublicProductsHeroes(
     publishedHeaderDocumentResource,
     pageDefinition?.key,
   );
-  const supportsEnglishContent = Boolean(
-    pageDefinition && ENGLISH_PUBLIC_CONTENT_PAGE_KEYS.has(pageDefinition.key),
-  );
-  const alternateDocument = usePublishedPageDocument(
-    !previewPage
-      && supportsEnglishContent
-      && publishedHeaderDocument.status === "published"
-      ? pageDefinition?.key
-      : undefined,
-    english ? DEFAULT_PUBLIC_CONTENT_LOCALE : "en",
-  );
   const publishedHeaderReadiness = getPublishedPageReadiness(
     pageDefinition?.key,
     publishedHeaderDocument.pageDocument?.puckData,
-  );
-  const alternateReadiness = getPublishedPageReadiness(
-    pageDefinition?.key,
-    alternateDocument.pageDocument?.puckData,
   );
   const pageDocumentUnavailable = Boolean(
     !previewPage
@@ -394,6 +365,8 @@ export default function PublicLayout() {
   );
   const fallbackHasContactAction = Boolean(
     pageDocumentUnavailable
+    && publishedHeaderDocument.status !== "idle"
+    && publishedHeaderDocument.status !== "loading"
     && [
       pageDefinition?.publicFallback?.primaryAction,
       pageDefinition?.publicFallback?.secondaryAction,
@@ -406,14 +379,6 @@ export default function PublicLayout() {
   // 预览页由 PagePreview 读取草稿；不能再套一层公开发布文档装饰器。
   const decorationPage = previewPage ? undefined : isHome ? undefined : pageDefinition;
   const decorationFallback = (() => {
-    if (english && decorationPage) {
-      return {
-        eyebrow: "HAICHUAN JEWELRY",
-        title: `${decorationPage.key.charAt(0).toUpperCase()}${decorationPage.key.slice(1)} is not published`,
-        description: "This language version is unavailable until an approved English page is published.",
-        primaryAction: { label: "Back to English home", href: "/en" },
-      };
-    }
     const fallback = decorationPage?.publicFallback;
     if (!fallback || decorationPage?.key !== "custom") return fallback;
     const productRef = normalizePublicProductReference(
@@ -429,6 +394,25 @@ export default function PublicLayout() {
       },
     };
   })();
+  const customProductRef = contentPathname === "/custom"
+    ? normalizePublicProductReference(
+        new URLSearchParams(location.search).get("productRef"),
+      )
+    : null;
+  const preserveCustomInquiryContext = (event: ReactMouseEvent<HTMLElement>) => {
+    if (!customProductRef || !(event.target instanceof Element)) return;
+    const anchor = event.target.closest("a[href]");
+    if (!(anchor instanceof HTMLAnchorElement)) return;
+    if (anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
+    const target = new URL(anchor.href, window.location.origin);
+    if (target.origin !== window.location.origin || target.pathname !== "/contact") return;
+    if (target.searchParams.get("type") !== "custom") return;
+    if (normalizePublicProductReference(target.searchParams.get("productRef"))) return;
+    target.searchParams.set("productRef", customProductRef);
+    event.preventDefault();
+    event.stopPropagation();
+    navigate(`${target.pathname}${target.search}${target.hash}`);
+  };
   const [menuOpen, setMenuOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const [scrolled, setScrolled] = useState(false);
@@ -439,7 +423,9 @@ export default function PublicLayout() {
   const setCustomerAuth = useCustomerAuthStore((state) => state.setAuth);
   const markCustomerAnonymous = useCustomerAuthStore((state) => state.markAnonymous);
   const needsCustomerIdentity =
-    contentPathname === "/catalog" || /^\/products\/[^/]+$/.test(contentPathname);
+    contentPathname === "/catalog"
+    || contentPathname === "/contact"
+    || /^\/products\/[^/]+$/.test(contentPathname);
   const pageMeta = usePageMetaStore((state) => state.meta);
   const nonIndexableRoute = isNonIndexablePublicRoute(location.pathname);
   const publishedPageMeta = getPageDocumentMeta(
@@ -489,8 +475,9 @@ export default function PublicLayout() {
       : null;
   useStructuredData("organization", organizationStructuredData);
 
-  // 选款和作品详情会根据客户身份选择公开/会员事实。HttpOnly Cookie 无法由
-  // JavaScript 自行探测，因此刷新这两类页面时通过最小 profile 请求恢复会话。
+  // 选款、作品详情和咨询表单会根据客户身份选择会员事实或预填联系方式。
+  // HttpOnly Cookie 无法由 JavaScript 自行探测，因此刷新这些页面时通过最小
+  // profile 请求恢复会话。
   useEffect(() => {
     if (!needsCustomerIdentity || customerAuthStatus !== "unknown") return;
 
@@ -617,37 +604,7 @@ export default function PublicLayout() {
         upsertMeta("name", "robots", "noindex, nofollow");
       };
     }
-    const alternateBasePath = contentPathname;
-    const currentLocaleReady = !pageDefinition
-      ? indexableSeoReady
-      : publishedHeaderDocument.status === "published" && publishedHeaderReadiness?.ready;
-    const counterpartReady = supportsEnglishContent
-      && alternateDocument.status === "published"
-      && alternateReadiness?.ready;
-    const chineseReady = english ? counterpartReady : currentLocaleReady;
-    const englishReady = english ? currentLocaleReady : counterpartReady;
-    const alternateLocales = [
-      ...(chineseReady
-        ? [{ locale: DEFAULT_PUBLIC_CONTENT_LOCALE, hrefLang: "zh-CN" }]
-        : []),
-      ...(englishReady
-        ? [{ locale: "en" as const, hrefLang: "en" }]
-        : []),
-    ];
-    const alternates = alternateLocales.flatMap(({ locale, hrefLang }) => {
-      const href = buildPublicUrl(
-        publicSiteOrigin,
-        withPublicLocalePath(alternateBasePath, locale),
-      );
-      return href ? [{ hrefLang, href }] : [];
-    });
-    const defaultHref = chineseReady
-      ? buildPublicUrl(
-          publicSiteOrigin,
-          withPublicLocalePath(alternateBasePath, DEFAULT_PUBLIC_CONTENT_LOCALE),
-        )
-      : null;
-    if (defaultHref) alternates.push({ hrefLang: "x-default", href: defaultHref });
+    const alternates = [{ hrefLang: "zh-CN", href: canonicalUrl }, { hrefLang: "x-default", href: canonicalUrl }];
     const immutableAlternates = new Set(
       initialPrerenderedSeoRef.current?.alternates.map(
         ({ hrefLang, href }) => `${hrefLang}\u0000${href}`,
@@ -678,9 +635,6 @@ export default function PublicLayout() {
     contentPathname,
     localizedPath.locale,
     english,
-    supportsEnglishContent,
-    alternateDocument.status,
-    alternateReadiness?.ready,
     publishedHeaderDocument.status,
     publishedHeaderReadiness?.ready,
   ]);
@@ -697,6 +651,16 @@ export default function PublicLayout() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  useLayoutEffect(() => {
+    const remainsInCatalogDetailChain = contentPathname === "/catalog"
+      || /^\/products\/[^/]+$/.test(contentPathname);
+    if (!remainsInCatalogDetailChain) {
+      // 持久页头允许用户在新页面的被动 effect 执行前立刻再次导航。
+      // 在提交阶段清除一次性返回位置，避免“目录 → 详情 → 首页 → 目录”误恢复旧滚动。
+      clearCatalogReturnContext();
+    }
+  }, [contentPathname]);
+
   useEffect(() => {
     const pathChanged = previousPathRef.current !== location.pathname;
     previousPathRef.current = location.pathname;
@@ -708,7 +672,7 @@ export default function PublicLayout() {
       mainRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [location.pathname]);
+  }, [contentPathname, location.pathname]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("home-route", isHome);
@@ -820,42 +784,43 @@ export default function PublicLayout() {
             </Link> : null}
           </nav>
         </div>
-      </header>
 
-      {/* ═══════ 左侧组合：菜单 + 搜索 ═══════ */}
-      <div
-        className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
-      >
-        {!english ? <button
-          ref={menuToggleRef}
-          type="button"
-          className="site-menu-toggle"
-          onClick={() => setMenuOpen((o) => !o)}
-          aria-expanded={menuOpen}
-          aria-controls="brand-menu"
-          aria-label={menuOpen ? "关闭菜单" : "打开菜单"}
+        {/* ═══════ 左侧组合：菜单 + 搜索 ═══════ */}
+        <nav
+          aria-label={english ? "Menu and search" : "菜单与搜索"}
+          className={`site-header__left-group${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
         >
-          {menuOpen ? (
-            <>
-              <CloseIcon />
-              <span className="site-menu-toggle__label">关闭</span>
-            </>
-          ) : (
-            <>
-              <MenuIcon />
-              <span className="site-menu-toggle__label">菜单</span>
-            </>
-          )}
-        </button> : null}
-        <Link
-          to={withPublicLocalePath(english ? "/products" : "/catalog#catalog-search-input", localizedPath.locale)}
-          aria-label={english ? "Collection" : "搜索"}
-          className="site-header__nav-item"
-        >
-          <SearchIcon />
-          <span className="site-header__nav-label hidden sm:inline">{english ? "Collection" : "搜索"}</span>
-        </Link>
-      </div>
+          {!english ? <button
+            ref={menuToggleRef}
+            type="button"
+            className="site-menu-toggle"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-expanded={menuOpen}
+            aria-controls="brand-menu"
+            aria-label={menuOpen ? "关闭菜单" : "打开菜单"}
+          >
+            {menuOpen ? (
+              <>
+                <CloseIcon />
+                <span className="site-menu-toggle__label">关闭</span>
+              </>
+            ) : (
+              <>
+                <MenuIcon />
+                <span className="site-menu-toggle__label">菜单</span>
+              </>
+            )}
+          </button> : null}
+          <Link
+            to={withPublicLocalePath(english ? "/products" : "/catalog#catalog-search-input", localizedPath.locale)}
+            aria-label={english ? "Collection" : "搜索"}
+            className="site-header__nav-item site-header__nav-item--search"
+          >
+            <SearchIcon />
+            <span className="site-header__nav-label hidden sm:inline">{english ? "Collection" : "搜索"}</span>
+          </Link>
+        </nav>
+      </header>
 
       {/* ═══════ 菜单面板 ═══════ */}
       {!english ? <StorefrontMenuDrawer
@@ -873,10 +838,10 @@ export default function PublicLayout() {
         id="main-content"
         tabIndex={-1}
         data-page-key={pageDefinition?.key}
-        style={{ outline: "none" }}
         className={isHome
-          ? `editorial-main site-main${overlaysPageContent ? " site-main--overlay" : ""}`
-          : `site-main${overlaysPageContent ? " site-main--overlay" : ""}`}
+          ? `editorial-main site-main focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#181A1B]${overlaysPageContent ? " site-main--overlay" : ""}`
+          : `site-main focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#181A1B]${overlaysPageContent ? " site-main--overlay" : ""}`}
+        onClickCapture={preserveCustomInquiryContext}
       >
         {USE_MOCK && (
           <aside
@@ -898,13 +863,9 @@ export default function PublicLayout() {
           replaceChildren={Boolean(decorationPage && !decorationPage.dynamic)}
           publicFallback={decorationFallback}
         >
-          {needsCustomerIdentity && customerAuthStatus === "unknown" ? (
-            <div className="flex min-h-[40vh] items-center justify-center" role="status">
-              {english ? "Checking account status…" : "正在确认账户状态…"}
-            </div>
-          ) : (
+          <Suspense fallback={<RouteLoading />}>
             <Outlet context={publishedHeaderDocument} />
-          )}
+          </Suspense>
         </PublishedPageDecoration>
       </main>
 

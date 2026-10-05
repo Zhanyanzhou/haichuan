@@ -113,6 +113,7 @@ export const settingsApi = {
         paymentEnabled: false,
         quotationOrderingEnabled: false,
         partnerApplicationsWriteEnabled: false,
+        partnerAgreementVersion: null,
         analyticsDashboardEnabled: true,
       });
     }

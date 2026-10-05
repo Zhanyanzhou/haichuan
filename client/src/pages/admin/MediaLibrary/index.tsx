@@ -19,6 +19,7 @@ import { AdminLoadingState, AdminEmptyState, AdminErrorState } from '@/component
 import type { PaginatedResult } from '@/types';
 import { SecureImage } from '@/components/common/SecureImage';
 import { readPageMediaLibrary, writePageMediaLibrary } from '@/page-builder/fields/pageMediaLibrary';
+import { resolveManagedTemplateMediaPreviewUrl } from '@/page-builder/template-definition/managedMediaPreview';
 import { useAuthStore } from '@/store/authStore';
 
 type ProductMediaRow = {
@@ -88,9 +89,10 @@ function getAuthorizationDisplay(item: PageMediaAsset) {
 }
 
 export default function MediaLibrary() {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
   const role = useAuthStore((state) => state.user?.role);
+  const currentUserId = useAuthStore((state) => state.user?.id);
   const canEditAuthorization = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'EDITOR';
   const canManagePageMedia = role === 'SUPER_ADMIN' || role === 'ADMIN';
   const [loading, setLoading] = useState(true);
@@ -327,6 +329,32 @@ export default function MediaLibrary() {
     }
   };
 
+  const approveAuthorization = () => {
+    const authorization = authorizationResource?.authorization;
+    if (!authorization) return;
+    const isSelfReview = authorization.submittedById === currentUserId;
+    const execute = () => runAuthorizationAction(
+      '素材授权审核已通过',
+      (assetId, revision) => uploadApi.approveMediaAuthorization(
+        assetId,
+        revision,
+        reviewNote.trim() || undefined,
+        isSelfReview,
+      ),
+    );
+    if (!isSelfReview) {
+      void execute();
+      return;
+    }
+    modal.confirm({
+      title: '确认以超级管理员身份自审',
+      content: '请仅在你已核实素材来源、拥有公开网站使用权，并愿意以当前账号留下审核记录时继续。',
+      okText: '确认权利并通过',
+      cancelText: '取消',
+      onOk: execute,
+    });
+  };
+
   const handleUpload = async (
     options: Parameters<NonNullable<UploadProps['customRequest']>>[0],
     type: 'image' | 'video',
@@ -503,7 +531,7 @@ export default function MediaLibrary() {
                       <div key={m.id} style={{ border: '1px solid var(--adm-line)', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
                         {m.status === 'READY' && m.available && m.type === 'image' ? (
                           <button type="button" aria-label={`预览 ${m.name}`} onClick={() => setPreview(m)} style={{ display: 'block', width: '100%', padding: 0, border: 0, background: 'transparent', cursor: 'pointer' }}>
-                            <Image src={m.url} alt="" width="100%" height={120} style={{ objectFit: 'cover', display: 'block' }} preview={false} />
+                            <Image src={resolveManagedTemplateMediaPreviewUrl(m.url)} alt="" width="100%" height={120} style={{ objectFit: 'cover', display: 'block' }} preview={false} />
                           </button>
                         ) : m.status === 'READY' && m.available ? (
                           <button type="button" aria-label={`预览 ${m.name}`} onClick={() => setPreview(m)} style={{ display: 'block', width: '100%', padding: 0, border: 0, background: 'transparent', cursor: 'pointer' }}>
@@ -596,7 +624,7 @@ export default function MediaLibrary() {
       {/* 素材预览 */}
       <Modal open={!!preview} footer={null} onCancel={() => setPreview(null)} width={720} title={preview?.name || '预览'}>
         {preview && (preview.type === 'image'
-          ? <Image src={preview.url} width="100%" style={{ objectFit: 'contain' }} />
+          ? <Image src={resolveManagedTemplateMediaPreviewUrl(preview.url)} width="100%" style={{ objectFit: 'contain' }} />
           : <video src={preview.url} controls style={{ width: '100%', maxHeight: '60vh', display: 'block' }} />
         )}
       </Modal>
@@ -761,10 +789,7 @@ export default function MediaLibrary() {
                   <Button
                     type="primary"
                     loading={authorizationSaving}
-                    onClick={() => void runAuthorizationAction(
-                      '素材授权审核已通过',
-                      (assetId, revision) => uploadApi.approveMediaAuthorization(assetId, revision, reviewNote.trim() || undefined),
-                    )}
+                    onClick={approveAuthorization}
                   >
                     通过审核
                   </Button>

@@ -1,0 +1,42 @@
+---
+description: 管理后台增量开发：复用现有能力、保持一致性、禁止平行建设与无收益重构。后台页面、接口、权限、状态和运营交互必须应用。
+globs: client/src/pages/admin/**/*,client/src/components/**/Admin*.tsx,client/src/config/adminRouteAccess.ts,client/src/constants/adminCopy.ts,client/src/styles/admin*.css,client/src/utils/admin*.ts,client/src/services/clients/*Admin*
+alwaysApply: false
+---
+
+# 后台增量开发
+
+完整规则只认 `docs/ADMIN_INCREMENTAL_DEVELOPMENT.md`。文案认 `docs/ADMIN_COPY_GUIDE.md`，视觉认 `docs/UI_GUIDE.md` 附录 A。
+
+决策顺序：兼容现有业务 > 复用现有能力 > 保持一致性 > 提升运营效率 > 降低维护成本 > 新功能丰富度 > 视觉创新。
+
+实现前必须能回答：现有能力能否复用；会不会破坏现有行为；是否应升级为公共能力。
+
+## 必须
+
+- 先找相同业务、交互、组件、状态、权限和数据服务；能扩展就扩展，禁止第二套实现。
+- 沿用现有列表、表单、保存、删除、发布、筛选、分页、上传、反馈、弹窗、校验和日志。
+- 同一业务对象只保留一个主维护入口；其他模块用跳转、关联、快捷操作或只读。
+- 后端规则复用现有 Service / Domain，不复制判断。
+- 高风险操作接入既有权限、确认、审计和校验。
+- 小改 → 验证 → 再扩展。只修与当前功能直接相关的问题。
+
+## 禁止
+
+- 把多一个字段、状态或入口做成新系统。
+- 为展示方便新增伪状态或数据库字段。
+- 局部换一套操作、状态、权限或错误处理。
+- 无收益重构、大爆炸改写、只改页面视觉。
+- 隐式改变旧数据、旧接口或旧页面语义。
+- 技术能力进入普通运营界面；低频能力默认铺在一级入口。
+
+```tsx
+// ❌ 商品管理旁再做一套独立维护台
+// ✅ 在现有 ProductManage / 对应 Service 上扩展字段、筛选或快捷操作
+
+// ❌ 页面内自写分页、上传、Toast、权限判断
+// ✅ 复用现有公共能力；不足则升级公共层
+
+// ❌ 为标签新增业务伪状态
+// ✅ 沿用真实状态机，展示标签不等于新状态
+```

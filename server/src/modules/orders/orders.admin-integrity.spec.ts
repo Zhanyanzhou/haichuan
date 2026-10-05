@@ -46,9 +46,11 @@ function createHarness() {
         ? expected.in.includes(actual)
         : true;
   const tx: any = {
-    $queryRaw: async () => {
-      amountFlowSequence.push('orderLock');
-      return [{ id: order.id }];
+    $queryRaw: async (query: { strings?: readonly string[]; values?: readonly unknown[] }) => {
+      amountFlowSequence.push(
+        query.strings?.join('').includes('FROM users') ? 'staffLock' : 'orderLock',
+      );
+      return [{ id: Number(query.values?.[0] ?? order.id), username: 'current-admin' }];
     },
     order: {
       fields: { finalAmount: Symbol('finalAmount') },
@@ -198,7 +200,11 @@ test('存量订单存在反向报价来源时订单中心不能独立改价', as
   assert.equal(Number(harness.order.finalAmount), 100);
   assert.equal(harness.amountUpdateCount, 0);
   assert.equal(harness.quotationSourceChecks, 1);
-  assert.deepEqual(harness.amountFlowSequence, ['orderLock', 'quotationSourceRead']);
+  assert.deepEqual(harness.amountFlowSequence, [
+    'staffLock',
+    'orderLock',
+    'quotationSourceRead',
+  ]);
 });
 
 test('已有失败付款历史也属于资金事实，订单中心不能改写应收', async () => {
@@ -219,7 +225,7 @@ test('订单中心签收同步履约单，完成订单必须以送达事实为�
   harness.order.deliveryStatus = 'SHIPPED';
 
   await assert.rejects(
-    () => harness.service.updateStatus(1, { status: 'COMPLETED', operator: admin }),
+    () => harness.service.updateStatus(1, { status: 'COMPLETED' }, admin),
     BadRequestException,
   );
 
@@ -227,9 +233,30 @@ test('订单中心签收同步履约单，完成订单必须以送达事实为�
   assert.equal(harness.order.deliveryStatus, 'RECEIVED');
   assert.equal(harness.fulfillment.status, 'DELIVERED');
 
-  await harness.service.updateStatus(1, { status: 'COMPLETED', operator: admin });
+  await harness.service.updateStatus(1, { status: 'COMPLETED' }, admin);
   assert.equal(harness.order.status, 'COMPLETED');
   assert.equal(harness.events.at(-1)?.eventType, 'ORDER_COMPLETED');
+});
+
+test('定制订单完成时由订单完成事务同步定制完成阶段', async () => {
+  const harness = createHarness();
+  harness.order.status = 'SHIPPED';
+  harness.order.deliveryStatus = 'RECEIVED';
+  harness.order.receivedAt = new Date('2026-08-26T01:00:00.000Z');
+  harness.order.orderType = 'CUSTOM';
+  harness.order.customStage = 'DELIVERED';
+  harness.fulfillment.status = 'DELIVERED';
+
+  await harness.service.updateStatus(1, { status: 'COMPLETED' }, admin);
+
+  assert.equal(harness.order.status, 'COMPLETED');
+  assert.equal(harness.order.customStage, 'COMPLETED');
+  assert.deepEqual(
+    harness.events.slice(-2).map((event) => event.eventType),
+    ['ORDER_CUSTOM_STAGE_CHANGED', 'ORDER_COMPLETED'],
+  );
+  assert.equal(harness.events.at(-2)?.fromStatus, 'DELIVERED');
+  assert.equal(harness.events.at(-2)?.toStatus, 'COMPLETED');
 });
 
 test('订单导出与操作日志同一事务，并拒绝缺少审计操作人', async () => {

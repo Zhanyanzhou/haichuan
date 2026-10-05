@@ -24,6 +24,7 @@ import { ProductsService } from "./products.service";
 
 const databaseUrl = process.env.PRODUCT_GOV_REAL_MYSQL_URL?.trim();
 const jwtSecret = "isolated-product-governance-http-secret";
+const { validateTarget: validateSharedTarget } = require("../../../scripts/run-real-mysql-tests.cjs");
 
 @Module({
   imports: [
@@ -50,6 +51,12 @@ class ProductGovernanceRealHttpModule {}
 function validateTarget(value: string | undefined) {
   assert.equal(process.env.PRODUCT_GOV_REAL_MYSQL_TEST, "1");
   assert.ok(value);
+  if (
+    process.env.REAL_MYSQL_TEST_ISOLATED === "1"
+    && value === process.env.REAL_MYSQL_TEST_DATABASE_URL
+  ) {
+    return validateSharedTarget(process.env);
+  }
   const target = new URL(value);
   assert.equal(target.protocol, "mysql:");
   assert.ok(["127.0.0.1", "localhost"].includes(target.hostname));

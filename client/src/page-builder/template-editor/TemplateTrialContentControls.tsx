@@ -172,7 +172,7 @@ export default function TemplateTrialContentControls({
                 className="homepage-editor__properties-hint"
                 data-template-trial-image-target={breakpoint}
               >
-                目标构图：{breakpoint === "tablet" ? "平板端" : breakpoint === "desktop" ? "桌面端" : "移动端"} · {imageAspectRatio ?? "自适应比例"} · {imageFit}
+                目标构图：{breakpoint === "desktop" ? "桌面端" : "移动端"} · {imageAspectRatio ?? "自适应比例"} · {imageFit}
               </p>
             </div>
             <TextField

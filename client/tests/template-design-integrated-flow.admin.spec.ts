@@ -15,6 +15,10 @@ const DIFFERENT_CHECKSUM = "b".repeat(64);
 const DYNAMIC_TEMPLATE_CATALOG_CHANGED_EVENT = "haichuan:dynamic-template-server-changed";
 const NOW = "2026-09-09T08:00:00.000Z";
 
+// 结构与生命周期集成用例验证业务闭环，不重复依赖紧凑覆盖层的收放时序；
+// 1024px 及以下的真实命中与响应式合同由专门的 responsive 用例覆盖。
+test.use({ viewport: { width: 1440, height: 900 } });
+
 type DynamicWrite = { body: unknown; method: string; path: string };
 type TemplateSessionSnapshot = {
   definition: TemplateDefinitionV2 | null;
@@ -804,7 +808,7 @@ async function expectWorkspaceViewport(
 ) {
   const requestsBefore = readServerCounters(server);
   await page.setViewportSize(viewport);
-  const compact = viewport.width < 1200;
+  const compact = viewport.width <= 1024;
   const body = page.locator(".template-editor__body");
   await expect(body).toHaveAttribute("data-template-workspace-compact", String(compact));
   await expect(page.getByRole("region", { name: /模板(?:设计)?画布/ })).toBeVisible();
@@ -813,19 +817,23 @@ async function expectWorkspaceViewport(
   )).toHaveCount(1);
   if (compact) {
     for (const panel of [
-      { dialog: "模板设计模板目录", label: "模板组件库", trigger: "展开模板组件库" },
-      { dialog: "模板结构", label: "模板结构面板", trigger: "展开模板结构面板" },
-      { dialog: "模板属性工作区", label: "模板属性面板", trigger: "展开模板属性面板" },
+      { dialog: "模板设计模板目录", label: "模板组件库", trigger: "展开模板组件库", alwaysModal: true },
+      { dialog: "模板结构", complementary: "模板结构", label: "模板结构面板", trigger: "展开模板结构面板" },
+      { dialog: "模板属性工作区", complementary: "模板属性", label: "模板属性面板", trigger: "展开模板属性面板" },
     ]) {
       const trigger = page.getByRole("button", { name: panel.trigger, exact: true });
       await trigger.focus();
       await page.keyboard.press("Enter");
-      const dialog = page.getByRole("dialog", { name: panel.dialog, exact: true });
-      await expect(dialog, `${viewport.width}px 必须可恢复打开${panel.label}`).toBeVisible();
-      await expect(dialog).toHaveAttribute("aria-modal", "true");
-      await expect(dialog.getByRole("button", { name: `收起${panel.label}`, exact: true })).toBeFocused();
+      const modal = panel.alwaysModal || viewport.width <= 1024;
+      const openedPanel = modal
+        ? page.getByRole("dialog", { name: panel.dialog, exact: true })
+        : page.getByRole("complementary", { name: panel.complementary!, exact: true });
+      await expect(openedPanel, `${viewport.width}px 必须可恢复打开${panel.label}`).toBeVisible();
+      if (modal) await expect(openedPanel).toHaveAttribute("aria-modal", "true");
+      else await expect(openedPanel).not.toHaveAttribute("aria-modal", "true");
+      await expect(page.getByRole("button", { name: `收起${panel.label}`, exact: true })).toBeFocused();
       await page.keyboard.press("Escape");
-      await expect(dialog).toHaveCount(0);
+      await expect(openedPanel).toHaveCount(0);
       await expect(trigger, `${viewport.width}px 关闭${panel.label}后焦点必须返回入口`).toBeFocused();
     }
   } else {
@@ -848,6 +856,8 @@ async function setSwitch(page: Page, name: string, checked: boolean) {
 }
 
 async function openPageField(page: Page, treeItemName: RegExp, label: string) {
+  const structureTrigger = page.getByRole("button", { name: "展开模板结构面板", exact: true });
+  if (await structureTrigger.isVisible()) await structureTrigger.click();
   const tree = page.getByRole("tree", { name: "模板区域与槽位" });
   await tree.getByRole("treeitem", { name: treeItemName }).click();
   await page.getByRole("tab", { name: "页面开放范围" }).click();
@@ -963,7 +973,7 @@ async function expectPageFieldSummary(
       expect(policyAttribute).not.toBeNull();
       expect(JSON.parse(validationAttribute!)).toEqual(item.validation);
       expect(JSON.parse(policyAttribute!)).toEqual(item.policy);
-      await expect(field).toContainText(`${item.required ? "必填" : "可选"} · 可填写 · ${item.hideable ? "可隐藏" : "固定显示"}`);
+      await expect(field).toContainText(`${item.required ? "必须由页面填写" : "建议填写"} · 可填写 · ${item.hideable ? "可隐藏" : "固定显示"}`);
       await expect(field).toContainText(`控件：${item.controlLabel}`);
       await expect(field).toContainText(`限制：${item.limit}`);
       await expect(field).toContainText(item.overrideCopy);
@@ -1275,7 +1285,7 @@ test("自建单区域图文组可跨组移动、双端重排，并原子取消�
 
   await openPageField(page, /标题槽位/, "工艺标题");
   await page.getByLabel("页面可隐藏").uncheck();
-  await page.getByLabel("页面必须填写").check();
+  await page.getByLabel("公开时必须有内容").check();
   const requiredBaseline = await readSessionSnapshot(page);
   if (!requiredBaseline.definition) throw new Error("设置必填后缺少模板定义");
   const requiredHistoryCount = requiredBaseline.historyPast.length;
@@ -1350,9 +1360,9 @@ test("自建单区域图文组可跨组移动、双端重排，并原子取消�
   await blockedContainerDelete.click();
   await expect(requiredItem).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("tab", { name: "页面开放范围", exact: true })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByLabel("页面必须填写")).toBeFocused();
+  await expect(page.getByLabel("公开时必须有内容")).toBeFocused();
   expect(readServerCounters(server), "从字段总览定位必填设置不得发出请求").toEqual(containerDeleteNetwork);
-  await page.getByLabel("页面必须填写").uncheck();
+  await page.getByLabel("公开时必须有内容").uncheck();
 
   await textGroupRow.hover();
   await textGroupRow.locator(".template-editor__structure-more").click();
@@ -1482,7 +1492,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   await expect(systemIdentity).toBeVisible();
   await systemIdentity.click();
   await expect(page.getByText("字段标识", { exact: true })).toBeVisible();
-  await page.getByLabel("页面必须填写").uncheck();
+  await page.getByLabel("公开时必须有内容").uncheck();
   await expect(page.getByLabel("页面可填写内容")).toBeChecked();
   await page.getByLabel("页面可隐藏").check();
   await page.getByLabel("建议图片宽").fill("1600");
@@ -1491,14 +1501,14 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
 
   await openPageField(page, /标题槽位/, "工艺标题");
   await page.getByLabel("页面可隐藏").uncheck();
-  await page.getByLabel("页面必须填写").check();
+  await page.getByLabel("公开时必须有内容").check();
   await page.getByLabel("页面可填写内容").check();
   await page.getByLabel("最小字数").fill("2");
   await page.getByLabel("最大字数").fill("36");
   await page.getByLabel("允许调整文字样式").check();
 
   await openPageField(page, /正文槽位/, "正文槽位");
-  await page.getByLabel("页面必须填写").uncheck();
+  await page.getByLabel("公开时必须有内容").uncheck();
   await page.getByLabel("页面可填写内容").check();
   await page.getByLabel("页面可隐藏").check();
   await page.getByLabel("最小字数").fill("0");
@@ -1506,7 +1516,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   await page.getByLabel("允许调整间距").check();
 
   await openPageField(page, /按钮槽位/, "了解工艺");
-  await page.getByLabel("页面必须填写").uncheck();
+  await page.getByLabel("公开时必须有内容").uncheck();
   await page.getByLabel("页面可填写内容").check();
   await page.getByLabel("页面可隐藏").check();
   await page.getByLabel("允许调整位置").check();
@@ -1892,11 +1902,9 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   const catalogCard = page.locator(`[data-template-catalog-card="shared"][data-template-identity="template:${savedDefinition.templateId}"][data-template-name="${savedDefinition.templateId}"]`);
   await expect(catalogCard).toHaveAttribute("data-template-name", savedDefinition.templateId);
   await expect(catalogCard).toContainText("TD-6A 工艺介绍专用模板");
-  await expect(catalogCard).toContainText("当前草稿 · 已保存");
-  await expect(catalogCard).toContainText("线上 v1");
   await expect(page.getByRole("button", {
-    name: "正在编辑TD-6A 工艺介绍专用模板，当前草稿，已保存",
-  })).toContainText("线上 v1");
+    name: /正在编辑TD-6A 工艺介绍专用模板，当前草稿，已保存，线上 v1/,
+  })).toBeVisible();
   expect(server.catalogEntries[server.catalogEntries.length - 1]).toEqual([
     { kind: "editable", templateId: savedDefinition.templateId, version: 1 },
     { kind: "published", templateId: savedDefinition.templateId, version: 1 },
@@ -1989,9 +1997,11 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
     + `[data-template-name="${savedDefinition.templateId}"]`,
   );
   await expect(sameCatalogEntry).toHaveCount(1);
-  await expect(sameCatalogEntry).toContainText("草稿已保存");
-  await expect(sameCatalogEntry).toContainText("线上 v1");
-  await sameCatalogEntry.getByRole("button", { name: /打开TD-6A 工艺介绍专用模板/ }).click();
+  const reopenPublishedTemplate = sameCatalogEntry.getByRole("button", {
+    name: /打开TD-6A 工艺介绍专用模板，草稿已保存，线上 v1/,
+  });
+  await expect(reopenPublishedTemplate).toBeVisible();
+  await reopenPublishedTemplate.click();
   const continuedV1 = await readSessionSnapshot(page);
   expect(continuedV1.definition).toEqual(savedDefinition);
   expect(continuedV1.remote).toMatchObject({
@@ -2030,9 +2040,11 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
     publishedVersion: 1,
     revision: 4,
   });
-  await expect(sameCatalogEntry, "同一模板的 v2 草稿保存后必须明确显示未发布修改")
-    .toContainText("当前草稿 · 已保存");
-  await expect(sameCatalogEntry).toContainText("线上 v1");
+  await expect(sameCatalogEntry.locator(".template-editor__catalog-published-state")).toHaveText("已发布 · v1");
+  await expect(sameCatalogEntry.locator(".template-editor__catalog-draft-state"), "同一模板的 v2 草稿保存后必须明确显示未发布修改")
+    .toHaveText("草稿有未发布修改");
+  await expect(sameCatalogEntry.locator(".template-editor__catalog-draft-state"))
+    .toHaveCSS("color", "rgb(122, 83, 26)");
   expect(server.publishedVersions.find((version) => version.version === 1))
     .toEqual(immutableV1);
 
@@ -2087,8 +2099,9 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   });
   await expect(sameCatalogEntry).toHaveCount(1);
   await expect(sameCatalogEntry).toContainText(v2Name);
-  await expect(sameCatalogEntry).toContainText("当前草稿 · 已保存");
-  await expect(sameCatalogEntry).toContainText("线上 v2");
+  await expect(sameCatalogEntry.getByRole("button", {
+    name: /当前草稿，已保存，线上 v2/,
+  })).toBeVisible();
   expect(server.catalogEntries[server.catalogEntries.length - 1]).toEqual([
     { kind: "editable", templateId: savedDefinition.templateId, version: 2 },
     { kind: "published", templateId: savedDefinition.templateId, version: 2 },
@@ -2164,7 +2177,7 @@ test("TD-6B 完整模板的取消、非法落点、结构锁定和发布阻断�
   await setSwitch(page, "锁定位置、尺寸和层级", false);
   await tree.getByRole("treeitem", { name: /标题槽位/ }).click();
   await page.getByRole("tab", { name: "页面开放范围", exact: true }).click();
-  await expect(page.getByRole("switch", { name: "页面必须填写", exact: true })).toBeDisabled();
+  await expect(page.getByRole("switch", { name: "公开时必须有内容", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "设为必填、允许填写并关闭隐藏", exact: true }).click();
   await expect(page.getByRole("switch", { name: "页面可填写内容", exact: true })).toBeDisabled();
   await expect(page.getByRole("switch", { name: "页面可隐藏", exact: true })).toBeDisabled();
@@ -2525,8 +2538,9 @@ test("TD-6A 保存成功但发布 403 时明确保留完整草稿且未发布", 
   };
   await dispatchChange(verifiedCatalogDetail);
   expect(server.catalogReads, "已核验目录载荷必须直接应用且不再读取").toBe(catalogReadsAfterSave);
-  await expect(card).toContainText("当前草稿 · 已保存");
-  await expect(card).toContainText("线上 v1");
+  await expect(card.getByRole("button", {
+    name: /正在编辑TD-6A 发布失败恢复模板，当前草稿，已保存，线上 v1/,
+  })).toBeVisible();
   await expect(page.locator(
     `[data-unified-template-library="page"] [data-template-name="${templateId}"]`,
   ), "非活跃页面目录不得消费事件载荷或改写本地状态").toHaveCount(0);

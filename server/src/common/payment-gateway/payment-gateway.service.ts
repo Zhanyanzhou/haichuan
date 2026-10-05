@@ -27,6 +27,12 @@ import {
   createAlipayPayAdapter,
   type AlipaySdkConstructor,
 } from './alipay-pay.adapter';
+import {
+  parsePaymentProviderMode,
+  parsePaymentSimulatorScenario,
+  type PaymentProviderMode,
+} from './payment-provider-mode';
+import { createSimulatedPaymentGatewayAdapter } from './simulated-payment-gateway.adapter';
 
 export type OnlinePayProvider = 'alipay' | 'wechat';
 
@@ -218,6 +224,7 @@ export function mapWechatRefundNotification(
 export class PaymentGatewayService {
   private readonly logger = new Logger(PaymentGatewayService.name);
   private readonly adapters = new Map<OnlinePayProvider, PaymentGatewayAdapter>();
+  private readonly providerMode: PaymentProviderMode;
 
   constructor(
     private readonly configService: ConfigService,
@@ -227,12 +234,23 @@ export class PaymentGatewayService {
       Record<OnlinePayProvider, PaymentGatewayAdapter>
     > | null = null,
   ) {
-    if (!adapterOverrides?.alipay) this.initAlipay();
-    if (!adapterOverrides?.wechat) this.initWechatPay();
+    this.providerMode = parsePaymentProviderMode(
+      this.configService.get<string>('PAYMENT_PROVIDER_MODE'),
+    );
+    if (this.providerMode === 'simulator') {
+      this.initSimulatorAdapters();
+    } else if (this.providerMode === 'live') {
+      if (!adapterOverrides?.alipay) this.initAlipay();
+      if (!adapterOverrides?.wechat) this.initWechatPay();
+    }
     for (const provider of ['alipay', 'wechat'] as const) {
       const override = adapterOverrides?.[provider];
       if (override) this.adapters.set(provider, override);
     }
+  }
+
+  getProviderMode(): PaymentProviderMode {
+    return this.providerMode;
   }
 
   /**
@@ -240,18 +258,59 @@ export class PaymentGatewayService {
    * 回调验签不读取该门禁，确保关闭期间仍能安全处理关闭前已创建的有效交易。
    */
   isTransactionCreationEnabled(): boolean {
-    return isCommerceFeatureEnabled(
-      this.configService.get<string>('RELEASE_PROFILE'),
-      this.configService.get<string>('PAYMENT_GATEWAY_TRANSACTIONS_ENABLED'),
+    return (
+      this.providerMode !== 'disabled' &&
+      isCommerceFeatureEnabled(
+        this.configService.get<string>('RELEASE_PROFILE'),
+        this.configService.get<string>('PAYMENT_GATEWAY_TRANSACTIONS_ENABLED'),
+      )
     );
   }
 
   /** 真实退款独立门禁：关闭新退款不影响已发起退款的查询和通知处理。 */
   isRefundCreationEnabled(): boolean {
-    return isCommerceFeatureEnabled(
-      this.configService.get<string>('RELEASE_PROFILE'),
-      this.configService.get<string>('PAYMENT_GATEWAY_REFUNDS_ENABLED'),
+    return (
+      this.providerMode !== 'disabled' &&
+      isCommerceFeatureEnabled(
+        this.configService.get<string>('RELEASE_PROFILE'),
+        this.configService.get<string>('PAYMENT_GATEWAY_REFUNDS_ENABLED'),
+      )
     );
+  }
+
+  private initSimulatorAdapters() {
+    const signingSecret = this.configService.get<string>(
+      'PAYMENT_SIMULATOR_SIGNING_SECRET',
+    );
+    const scenarioValue = this.configService.get<string>(
+      'PAYMENT_SIMULATOR_SCENARIO',
+    );
+    const baseUrl = this.configService.get<string>('PAYMENT_SIMULATOR_BASE_URL');
+    if (!signingSecret || !scenarioValue || !baseUrl) {
+      this.logger.warn(
+        '支付 simulator 缺少回环地址、签名密钥或场景配置，模拟通道不可用',
+      );
+      return;
+    }
+    let scenario;
+    try {
+      scenario = parsePaymentSimulatorScenario(scenarioValue);
+    } catch {
+      this.logger.warn('支付 simulator 场景无效，模拟通道不可用');
+      return;
+    }
+    for (const provider of ['alipay', 'wechat'] as const) {
+      this.adapters.set(
+        provider,
+        createSimulatedPaymentGatewayAdapter({
+          provider,
+          scenario,
+          signingSecret,
+          baseUrl,
+        }),
+      );
+    }
+    this.logger.log(`支付 simulator 已启用（场景：${scenario}）`);
   }
 
   private initAlipay() {

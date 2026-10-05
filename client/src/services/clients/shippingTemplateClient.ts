@@ -2,7 +2,7 @@ import api from "../httpClient";
 import { mockDelay, USE_MOCK } from "../mockData";
 import { mockResponse } from "../mockResponse";
 
-export type ShippingFeeMode = "FREE" | "FIXED" | "CONDITIONAL";
+export type ShippingFeeMode = "FREE" | "FIXED" | "CONDITIONAL" | "REGIONAL";
 
 export interface ShippingTemplateCreateInput {
   name: string;
@@ -12,6 +12,7 @@ export interface ShippingTemplateCreateInput {
   remoteSurcharge?: number;
   freeShippingThreshold?: number | null;
   excludedRegions?: string[];
+  provinceFees?: Record<string, number>;
   insured?: boolean;
   signatureRequired?: boolean;
   isDefault?: boolean;
