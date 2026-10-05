@@ -742,6 +742,7 @@ jobs:
           PUBLIC_SEO_SOURCE_ARTIFACT_DIGEST: ${{ steps.seo-source.outputs.source_artifact_digest }}
           PUBLIC_SEO_SOURCE_KIND: ${{ steps.seo-source.outputs.source_kind }}
           PUBLIC_SEO_CONTENT_READY: ${{ steps.seo-source.outputs.content_ready }}
+          PUBLIC_SEO_ORIGIN: ${{ steps.seo-source.outputs.origin }}
           RELEASE_STAGE: ${{ steps.release.outputs.release_stage }}
           IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
         run: |
