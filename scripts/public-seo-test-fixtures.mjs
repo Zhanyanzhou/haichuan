@@ -11,6 +11,7 @@ export const BASE_HTML = `<!doctype html>
     <meta charset="UTF-8">
     <meta name="description" content="SPA fallback">
     <meta name="keywords" content="中文基础壳关键词">
+    <meta name="robots" content="noindex, nofollow">
     <title>SPA fallback</title>
   </head>
   <body>

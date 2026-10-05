@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
+import { fetchManual } from "./verify-public-seo-http.mjs";
+
 const SHA256 = /^[a-f0-9]{64}$/;
 const REQUIRED_PAGE_PATHS = Object.freeze({
   about: "/about",
@@ -95,18 +97,33 @@ export async function verifyPublicPageSync({
   manifest,
   baseUrl,
   mode = "full",
-  fetchImpl = fetch,
+  fetchImpl,
 }) {
   if (mode !== "api" && mode !== "full") fail("PUBLIC_PAGE_SYNC_MODE_INVALID");
   const pages = validateManifestPageDocuments(manifest);
   if (pages.length === 0) return { pageCount: 0, mode, skipped: true };
   const base = normalizeBaseUrl(baseUrl);
+  let request = fetchImpl;
+  if (!request && base.protocol === "http:" && ["127.0.0.1", "localhost"].includes(base.hostname)) {
+    let canonicalHost;
+    try {
+      const origin = new URL(manifest.publicSeo.origin);
+      if (origin.protocol !== "https:" || origin.username || origin.password) throw new Error("invalid origin");
+      canonicalHost = origin.host;
+    } catch {
+      fail("PUBLIC_PAGE_SYNC_ORIGIN_INVALID");
+    }
+    request = (url, options) => fetchManual(base.origin, `${url.pathname}${url.search}`, canonicalHost, {
+      headers: options?.headers,
+    });
+  }
+  request ??= fetch;
 
   for (const page of pages) {
     const apiUrl = new URL("/api/page-modules/document/published", base);
     apiUrl.searchParams.set("pageKey", page.pageKey);
     apiUrl.searchParams.set("locale", "zh-CN");
-    const apiResponse = await fetchChecked(fetchImpl, apiUrl, "api");
+    const apiResponse = await fetchChecked(request, apiUrl, "api");
     let payload;
     try {
       payload = apiDocument(await apiResponse.json());
@@ -123,7 +140,7 @@ export async function verifyPublicPageSync({
     ) fail(`PUBLIC_PAGE_SYNC_API_HASH_MISMATCH:${page.pageKey}`);
 
     if (mode === "full") {
-      const htmlResponse = await fetchChecked(fetchImpl, new URL(page.path, base), "html");
+      const htmlResponse = await fetchChecked(request, new URL(page.path, base), "html");
       const html = await htmlResponse.text();
       if (
         !html.includes(`name="published-content-hash" content="${page.contentHash}"`)

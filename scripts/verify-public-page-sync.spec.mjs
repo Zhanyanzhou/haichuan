@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import test from "node:test";
 
 import { verifyPublicPageSync } from "./verify-public-page-sync.mjs";
@@ -17,11 +18,50 @@ function manifest(contentReady = true) {
   return {
     schemaVersion: 9,
     publicSeo: {
+      origin: "https://jewelry.example.test",
       contentReady,
       pageDocuments: contentReady ? structuredClone(pageDocuments) : [],
     },
   };
 }
+
+test("default loopback page synchronization uses the signed canonical Host", async (t) => {
+  const seenHosts = [];
+  const server = createServer((request, response) => {
+    seenHosts.push(request.headers.host);
+    if (request.headers.host !== "jewelry.example.test") {
+      response.statusCode = 421;
+      response.end();
+      return;
+    }
+    const url = new URL(request.url, "http://localhost");
+    if (url.pathname === "/api/page-modules/document/published") {
+      const page = pageDocuments.find((entry) => entry.pageKey === url.searchParams.get("pageKey"));
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({ data: {
+        pageKey: page.pageKey,
+        locale: "zh-CN",
+        status: "PUBLISHED",
+        version: 1,
+        contentHash: page.contentHash,
+      } }));
+      return;
+    }
+    const page = pageDocuments.find((entry) => entry.path === url.pathname);
+    response.setHeader("Content-Type", "text/html");
+    response.end(`<meta name="published-content-hash" content="${page.contentHash}"><div data-prerendered-path="${page.path}" data-published-content-hash="${page.contentHash}"></div>`);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const result = await verifyPublicPageSync({
+    manifest: manifest(),
+    baseUrl: `http://127.0.0.1:${server.address().port}`,
+    mode: "full",
+  });
+  assert.deepEqual(result, { pageCount: 6, mode: "full", skipped: false });
+  assert.equal(seenHosts.length, 12);
+  assert.ok(seenHosts.every((host) => host === "jewelry.example.test"));
+});
 
 function synchronizedFetch(overrides = {}) {
   return async (url) => {
@@ -133,6 +173,8 @@ test("deployment checks the API before mutation and API plus HTML after replacem
   const postDeploy = deploy.indexOf('--mode full');
   assert.ok(preflight >= 0 && preflight < preMutation && preMutation < mutation);
   assert.ok(mutation < replacement && replacement < postDeploy);
+  assert.match(deploy, /public_seo_host=.*publicSeo\.origin/);
+  assert.equal((deploy.match(/curl [^\n]*--header "Host: \$\{public_seo_host\}"/g) ?? []).length, 3);
   for (const pageKey of ["HOME", "ABOUT", "PRODUCTS", "CATALOG", "CUSTOM", "CONTACT"]) {
     assert.match(deploy, new RegExp(`export [^\\n]*PUBLIC_SEO_PAGE_HASH_${pageKey}|export PUBLIC_SEO_PAGE_HASH_${pageKey}`));
     assert.match(operationsCompose, new RegExp(`PUBLIC_SEO_PAGE_HASH_${pageKey}:`));

@@ -57,6 +57,7 @@ while IFS='=' read -r key value; do
     *) echo "DEPLOY_PREPARE_OUTPUT_INVALID" >&2; exit 1 ;;
   esac
 done <<< "$prepare_output"
+public_seo_host="$(node -e 'const {readFileSync}=require("node:fs"); const origin=new URL(JSON.parse(readFileSync(process.argv[1],"utf8")).publicSeo.origin); if(origin.protocol!=="https:") process.exit(1); process.stdout.write(origin.host)' "$manifest")"
 
 if [ "$ASSURANCE_LEVEL" = "high" ]; then
   manifest_bundle="$release_dir/release-manifest.attestation.json"
@@ -174,8 +175,8 @@ fi
 
 mutation_started="true"
 "${compose[@]}" up -d --no-deps --wait server client backup
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8081/ >"$safe_home_file"
-curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8081/api/ready >/dev/null
+curl --fail --silent --show-error --max-time 10 --header "Host: ${public_seo_host}" http://127.0.0.1:8081/ >"$safe_home_file"
+curl --fail --silent --show-error --max-time 10 --header "Host: ${public_seo_host}" http://127.0.0.1:8081/api/ready >/dev/null
 if [ "$PUBLIC_SEO_CONTENT_READY" = "true" ]; then
   node "$project_root/scripts/verify-public-page-sync.mjs" \
     --manifest "$manifest" \
@@ -184,7 +185,7 @@ if [ "$PUBLIC_SEO_CONTENT_READY" = "true" ]; then
 else
   grep -F 'data-content-ready="false"' "$safe_home_file" >/dev/null \
     || { echo "DEPLOY_SAFE_FALLBACK_MARKER_MISSING" >&2; exit 1; }
-  curl --fail --silent --show-error --head --max-time 10 http://127.0.0.1:8081/ \
+  curl --fail --silent --show-error --head --max-time 10 --header "Host: ${public_seo_host}" http://127.0.0.1:8081/ \
     | tr -d '\r' | grep -i '^X-Robots-Tag:.*noindex' >/dev/null \
     || { echo "DEPLOY_SAFE_FALLBACK_NOINDEX_MISSING" >&2; exit 1; }
 fi

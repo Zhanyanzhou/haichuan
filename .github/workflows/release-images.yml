@@ -507,8 +507,9 @@ jobs:
           trap cleanup_client EXIT
           client_port="$(docker port "$client_container" 8081/tcp | awk -F: 'NR==1 { print $NF }')"
           test -n "$client_port" || { echo "CLIENT_HTTP_PORT_MISSING" >&2; exit 1; }
+          canonical_host="$(node -e 'process.stdout.write(new URL(process.env.PUBLIC_SEO_ORIGIN).host)')"
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --output /dev/null "http://127.0.0.1:${client_port}/"; then
+            if curl --fail --silent --output /dev/null --header "Host: ${canonical_host}" "http://127.0.0.1:${client_port}/"; then
               break
             fi
             test "$attempt" -lt 30 || { docker logs "$client_container"; exit 1; }

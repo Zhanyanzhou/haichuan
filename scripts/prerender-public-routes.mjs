@@ -217,6 +217,12 @@ export function renderPrerenderedHtml(baseHtml, snapshot, route) {
 export async function prerenderPublicRoutes({ snapshot: uncheckedSnapshot, baseHtml, outDir }) {
   const snapshot = validatePublicSeoSnapshot(uncheckedSnapshot);
   if (typeof outDir !== "string" || !outDir.trim()) fail("A pre-render output directory is required.");
+  const robotsTag = String(baseHtml).match(/<meta\b(?=[^>]*\bname\s*=\s*["']robots["'])[^>]*>/i)?.[0];
+  const robotsContent = robotsTag?.match(/\bcontent\s*=\s*["']([^"']*)["']/i)?.[1] ?? "";
+  const robotsDirectives = new Set(robotsContent.toLowerCase().split(/[\s,]+/).filter(Boolean));
+  if (!robotsDirectives.has("noindex") || !robotsDirectives.has("nofollow")) {
+    fail("Base SPA shell must remain noindex,nofollow before pre-rendering.");
+  }
 
   // Render and validate every route before creating any output.
   const outputs = snapshot.routes.map((route) => {
@@ -231,6 +237,8 @@ export async function prerenderPublicRoutes({ snapshot: uncheckedSnapshot, baseH
     };
   });
 
+  await mkdir(resolve(outDir), { recursive: true });
+  await writeFile(resolve(outDir, "spa-shell.html"), baseHtml, "utf8");
   for (const output of outputs) {
     await mkdir(resolve(output.absoluteFile, ".."), { recursive: true });
     await writeFile(output.absoluteFile, output.html, "utf8");
@@ -245,7 +253,6 @@ export async function prerenderPublicRoutes({ snapshot: uncheckedSnapshot, baseH
       htmlHash: output.htmlHash,
     })),
   };
-  await mkdir(resolve(outDir), { recursive: true });
   await writeFile(
     resolve(outDir, "prerendered-routes.json"),
     `${JSON.stringify(manifest, null, 2)}\n`,

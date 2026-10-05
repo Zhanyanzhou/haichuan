@@ -26,6 +26,7 @@ test("client image requires immutable SEO inputs and carries their evidence labe
     "--nginx-origin-host ./public-origin-host.conf",
     "--strict",
     "--check",
+    "./dist/spa-shell.html",
     "rm ./dist/prerendered-routes.json",
     "io.haichuan.public-seo-snapshot-sha256",
     "io.haichuan.public-seo-prerender-manifest-sha256",
@@ -59,7 +60,9 @@ test("Nginx serves only generated indexable routes while preserving protected SP
   assert.ok(generator.includes("renderPublicSeoPolicy"));
   assert.ok(generator.includes("admin|preview|customer|cart|checkout|partner"));
   assert.ok(generator.includes('"noindex, nofollow"'));
-  assert.match(nginx, /location ~\* \^\/\(admin\|preview\|customer\|cart\|checkout\|partner\)\(\/\|\$\) \{[\s\S]*?try_files \/index\.html =404;/);
+  assert.match(nginx, /location = \/spa-shell\.html \{\s+internal;/);
+  assert.match(nginx, /location ~\* \^\/\(admin\|preview\|customer\|cart\|checkout\|partner\)\(\/\|\$\) \{[\s\S]*?try_files \/spa-shell\.html =404;/);
+  assert.match(nginx, /location ~ \^\/\(\?:products\|catalog\|custom\|about\|contact\|privacy\|business-info\)\?\$ \{[\s\S]*?try_files \/spa-shell\.html =404;/);
   assert.match(nginx, /location \/uploads\/page-assets\/ \{[\s\S]*?proxy_cache off;[\s\S]*?expires off;/);
   assert.match(nginx, /location \/uploads\/page-assets\/ \{[\s\S]*?Cache-Control: public, no-store/);
 });
@@ -87,6 +90,7 @@ test("release workflow validates a same-SHA artifact before build and performs r
     "--nginx-origin-redirect client/.release-seo/public-origin-redirect.conf",
     "--nginx-origin-host client/.release-seo/public-origin-host.conf",
     "node scripts/verify-public-seo-http.mjs",
+    'Host: ${canonical_host}',
     "publicSeo: {",
     "snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH",
     "prerenderManifestSha256: process.env.PUBLIC_SEO_PRERENDER_MANIFEST_SHA256",

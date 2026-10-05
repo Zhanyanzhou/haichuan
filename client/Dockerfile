@@ -39,6 +39,8 @@ RUN test -n "$VITE_API_BASE_URL" \
       --nginx-origin-host ./public-origin-host.conf \
     && test "$(node -e 'const value=require("./public-seo-snapshot.json"); process.stdout.write(value.snapshotHash || "")')" = "$PUBLIC_SEO_SNAPSHOT_HASH" \
     && test "$(sha256sum ./dist/prerendered-routes.json | cut -d ' ' -f 1)" = "$PUBLIC_SEO_PRERENDER_MANIFEST_SHA256" \
+    && test -f ./dist/spa-shell.html \
+    && grep -F '<meta name="robots" content="noindex, nofollow"' ./dist/spa-shell.html >/dev/null \
     && rm ./dist/prerendered-routes.json
 
 FROM nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10

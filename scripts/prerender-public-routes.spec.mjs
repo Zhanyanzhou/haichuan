@@ -60,6 +60,7 @@ test("pre-renders Chinese, legal, and product routes with full SEO metadata", as
 
   const onDiskManifest = JSON.parse(readFileSync(join(temporaryDirectory, "prerendered-routes.json"), "utf8"));
   assert.deepEqual(onDiskManifest, manifest);
+  assert.equal(readFileSync(join(temporaryDirectory, "spa-shell.html"), "utf8"), BASE_HTML);
 });
 
 test("home injects the reviewed first-fold document and preloads its same-origin hero", async (t) => {
@@ -92,6 +93,9 @@ test("home injects the reviewed first-fold document and preloads its same-origin
   await prerenderPublicRoutes({ snapshot, baseHtml: BASE_HTML, outDir: temporaryDirectory });
 
   const html = readFileSync(join(temporaryDirectory, "index.html"), "utf8");
+  const spaShell = readFileSync(join(temporaryDirectory, "spa-shell.html"), "utf8");
+  assert.match(spaShell, /name="robots" content="noindex, nofollow"/);
+  assert.doesNotMatch(spaShell, /data-prerendered|光映新姿/);
   assert.match(html, /data-public-first-fold="published"/);
   assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero-mobile\.jpg\?width=480" media="\(max-width: 767px\)" fetchpriority="high"/);
   assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero\.jpg\?width=1680" media="\(min-width: 768px\)" fetchpriority="high"/);
@@ -159,6 +163,22 @@ test("invalid or tampered snapshots produce no output", async (t) => {
   assert.equal(existsSync(outputDirectory), false);
 });
 
+test("pre-render refuses an indexable SPA shell before writing any route", async (t) => {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "haichuan-prerender-shell-"));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+  const outputDirectory = join(temporaryRoot, "dist");
+  const snapshot = createPublicSeoSnapshot(makeSnapshotInput([makeRoute()]));
+  await assert.rejects(
+    prerenderPublicRoutes({
+      snapshot,
+      baseHtml: BASE_HTML.replace('name="robots" content="noindex, nofollow"', 'name="robots" content="index, follow"'),
+      outDir: outputDirectory,
+    }),
+    /SPA shell must remain noindex,nofollow/,
+  );
+  assert.equal(existsSync(outputDirectory), false);
+});
+
 test("missing mount points and document-level body markup fail before writing", async (t) => {
   const temporaryRoot = mkdtempSync(join(tmpdir(), "haichuan-prerender-contract-"));
   t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
@@ -168,7 +188,7 @@ test("missing mount points and document-level body markup fail before writing", 
   await assert.rejects(
     prerenderPublicRoutes({
       snapshot,
-      baseHtml: "<!doctype html><html><head></head><body></body></html>",
+      baseHtml: '<!doctype html><html><head><meta name="robots" content="noindex, nofollow"></head><body></body></html>',
       outDir: outputDirectory,
     }),
     /mount point/i,
