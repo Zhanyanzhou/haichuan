@@ -6,6 +6,8 @@
 | --- | --- |
 | 店铺装修的页面职责、选用、内容分层与发页验收 | [店铺装修产品合同](store-decoration.md) |
 | 模板设计的创建、预设、生成、精调与模板侧验收 | [模板设计标准](template-creation-rules.md) |
+| 桌面到手机的比例过渡、目录与页面预览图 | [模板设计标准第 3.1 节](template-creation-rules.md#31-双端呈现与预览图) |
+| 一节模板在整页中该出现什么、不能出现什么 | [店铺装修产品合同第 4 节](store-decoration.md) |
 | 两种模式、四区任务、编辑与页面交接操作 | [从属编辑与交接细则](template-design-framework.md) |
 | 源码入口、接口、预览、导入与公开读取 | [实现边界](../architecture/page-builder-boundary.md) |
 | 当前能力、差距与待复验问题 | [CURRENT_STATE](../CURRENT_STATE.md) 的页面装修章节 |

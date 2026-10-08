@@ -26,7 +26,7 @@
 
 | 入口 | 适配文件 | 项目级 MCP 配置 | 已发现 MCP | 说明 |
 | --- | --- | --- | --- | --- |
-| Codex（OpenAI） | `AGENTS.md` | `.codex/config.toml` | playwright、chrome-devtools、context7 | Codex 的项目指令以 `AGENTS.md` 为入口；按 `WORKFLOW.md` 最小启动，只读取任务相关规则。 |
+| Codex（OpenAI） | `AGENTS.md` | `.codex/config.toml` | playwright、chrome-devtools、context7 | Codex 的项目指令以 `AGENTS.md` 为入口；按 `WORKFLOW.md` 最小启动，只读取任务相关规则。店铺装修与模板的双端、分节和预览不在本文件或 `.codex/` 复述，从 `AGENTS.md` 进入 `docs/page-builder/store-decoration.md` 第 4 节和 `template-creation-rules.md` 第 3.1 节。 |
 | Claude Code | `CLAUDE.md` | `.mcp.json` | playwright、context7 | `.claude/agents/` 有审查代理；仅在当前会话确实提供该能力时使用。chrome-devtools 原经用户级 `~/.claude.json` 挂载（历史会话高频使用），2026-08-19 用户级清理后**项目级挂载待批准**（见 DECISIONS A.11）。 |
 | VS Code 智能体 | `.github/copilot-instructions.md` | `.vscode/mcp.json` | playwright、context7 | 是否加载该指令、实际模型和可用 MCP 取决于用户安装的扩展与当前会话，需以运行界面为准。2026-08-19 起 github/figma/tavily/chrome-devtools/prisma 移除（VS Code 会话全量注入 MCP schema，多服务器是上下文开销大头；figma/tavily/github 历史引用各仅 3 处，近乎未用）；恢复须按第 3 节流程批准。 |
 
