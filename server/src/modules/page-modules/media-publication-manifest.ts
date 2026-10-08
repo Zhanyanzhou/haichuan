@@ -18,6 +18,8 @@ export interface ResolvedPublicationMediaItem {
   lifecycleRevision?: number;
   authorizationRevision?: number | null;
   publicUseEpoch?: number | null;
+  /** 受控素材源文件字节数，用于发布期媒体字节预算门禁。 */
+  sourceBytes?: number;
   eligibility: { eligible: boolean; reasons: readonly string[] };
 }
 

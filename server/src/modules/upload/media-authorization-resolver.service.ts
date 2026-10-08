@@ -57,6 +57,8 @@ export type ResolvedMediaReferenceItem = {
   publicUseEpoch?: number | null;
   reviewStatus?: string | null;
   revocationStatus?: string | null;
+  /** 受控素材源文件字节数（授权可读时统计，用于发布期媒体字节预算门禁）。 */
+  sourceBytes?: number;
   eligibility: {
     eligible: boolean;
     reasons: MediaReferenceIssueCode[];
@@ -90,6 +92,11 @@ const ISSUE_MESSAGES: Record<MediaReferenceIssueCode, string> = {
 
 type ManagedReference = MediaReferenceInput & {
   lookup: { id: number } | { storageKey: string };
+};
+
+type ManagedFileVerification = {
+  issue: 'ASSET_FILE_UNAVAILABLE' | 'ASSET_INTEGRITY_MISMATCH' | null;
+  sourceBytes?: number;
 };
 
 @Injectable()
@@ -144,9 +151,7 @@ export class MediaAuthorizationResolverService {
     });
     const byId = new Map(assets.map((asset) => [asset.id, asset]));
     const byStorageKey = new Map(assets.map((asset) => [asset.storageKey, asset]));
-    const fileIssueByAssetId = new Map<number, Promise<
-      'ASSET_FILE_UNAVAILABLE' | 'ASSET_INTEGRITY_MISMATCH' | null
-    >>();
+    const fileVerificationByAssetId = new Map<number, Promise<ManagedFileVerification>>();
 
     for (const reference of managed) {
       const asset = 'id' in reference.lookup
@@ -167,9 +172,10 @@ export class MediaAuthorizationResolverService {
         accessLevel: asset.accessLevel,
         authorization: asset.authorization,
       }, now);
-      const fileIssue = authorizationEligibility.eligible
-        ? await this.cachedFileIssue(fileIssueByAssetId, asset)
-        : null;
+      const verification = authorizationEligibility.eligible
+        ? await this.cachedFileVerification(fileVerificationByAssetId, asset)
+        : undefined;
+      const fileIssue = verification?.issue ?? null;
       const eligibility = {
         eligible: authorizationEligibility.eligible && fileIssue === null,
         reasons: [
@@ -194,6 +200,9 @@ export class MediaAuthorizationResolverService {
         publicUseEpoch: asset.authorization?.publicUseEpoch ?? null,
         reviewStatus: asset.authorization?.reviewStatus ?? null,
         revocationStatus: asset.authorization?.revocationStatus ?? null,
+        ...(verification?.sourceBytes !== undefined
+          ? { sourceBytes: verification.sourceBytes }
+          : {}),
         eligibility,
       });
     }
@@ -237,8 +246,8 @@ export class MediaAuthorizationResolverService {
     }
   }
 
-  private cachedFileIssue(
-    cache: Map<number, Promise<'ASSET_FILE_UNAVAILABLE' | 'ASSET_INTEGRITY_MISMATCH' | null>>,
+  private cachedFileVerification(
+    cache: Map<number, Promise<ManagedFileVerification>>,
     asset: { id: number; storageKey: string; checksumSha256: string },
   ) {
     const cached = cache.get(asset.id);
@@ -251,7 +260,7 @@ export class MediaAuthorizationResolverService {
   private async verifyManagedFile(
     storageKey: string,
     expectedChecksum: string,
-  ): Promise<'ASSET_FILE_UNAVAILABLE' | 'ASSET_INTEGRITY_MISMATCH' | null> {
+  ): Promise<ManagedFileVerification> {
     try {
       const storageRoot = this.storageRootFor(storageKey);
       const [physicalRoot, physicalTarget] = await Promise.all([
@@ -264,20 +273,26 @@ export class MediaAuthorizationResolverService {
         || pathFromRoot === '..'
         || pathFromRoot.startsWith(`..${sep}`)
         || isAbsolute(pathFromRoot)
-      ) return 'ASSET_FILE_UNAVAILABLE';
+      ) return { issue: 'ASSET_FILE_UNAVAILABLE' };
 
-      const actualChecksum = await new Promise<string>((resolveChecksum, reject) => {
-        const hash = createHash('sha256');
-        const stream = createReadStream(physicalTarget);
-        stream.on('data', (chunk) => hash.update(chunk));
-        stream.once('error', reject);
-        stream.once('end', () => resolveChecksum(hash.digest('hex')));
-      });
-      return actualChecksum === expectedChecksum.toLowerCase()
-        ? null
-        : 'ASSET_INTEGRITY_MISMATCH';
+      const result = await new Promise<{ checksum: string; sourceBytes: number }>(
+        (resolveChecksum, reject) => {
+          const hash = createHash('sha256');
+          const stream = createReadStream(physicalTarget);
+          let sourceBytes = 0;
+          stream.on('data', (chunk) => {
+            hash.update(chunk);
+            sourceBytes += chunk.length;
+          });
+          stream.once('error', reject);
+          stream.once('end', () => resolveChecksum({ checksum: hash.digest('hex'), sourceBytes }));
+        },
+      );
+      return result.checksum === expectedChecksum.toLowerCase()
+        ? { issue: null, sourceBytes: result.sourceBytes }
+        : { issue: 'ASSET_INTEGRITY_MISMATCH', sourceBytes: result.sourceBytes };
     } catch {
-      return 'ASSET_FILE_UNAVAILABLE';
+      return { issue: 'ASSET_FILE_UNAVAILABLE' };
     }
   }
 

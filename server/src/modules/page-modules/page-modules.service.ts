@@ -71,6 +71,7 @@ import {
   type MediaPublicationResolution,
   type PublicationMediaReference,
 } from "./media-publication-manifest";
+import { collectMediaByteBudgetIssues } from "./media-byte-budget";
 
 /**
  * 页面构建器区块类型契约 — 与前端 puckConfig MyComponents 严格一致,
@@ -2749,16 +2750,21 @@ export class PageModulesService {
     metadata: unknown,
     pageKey: string,
   ): Promise<{ valid: boolean; errors: string[]; issues: ContentTemplateIssue[] }> {
+    const publicationMedia = await this.resolvePagePublicationMedia(
+      db,
+      puckData,
+      metadata,
+      pageKey,
+    );
+    const resolution = publicationMedia?.resolution;
     const issues = [
       ...this.collectContentTemplateIssues(puckData, pageKey),
       ...(await this.collectPuckDataErrors(db, puckData, pageKey)),
       ...(await this.collectSiteSettingsReadinessIssues(db, puckData, pageKey)),
       ...this.collectMetadataIssues(metadata),
       ...(await this.collectMediaRightsIssues(db, puckData, metadata, pageKey)),
-      ...this.managedMediaIssues(
-        (await this.resolvePagePublicationMedia(db, puckData, metadata, pageKey))
-          ?.resolution,
-      ),
+      ...this.managedMediaIssues(resolution),
+      ...collectMediaByteBudgetIssues(resolution?.items),
     ];
     const publicationIssues = issues.map((issue) =>
       this.toUsablePublicationIssue(issue),

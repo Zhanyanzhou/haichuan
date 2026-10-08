@@ -14,6 +14,7 @@ import {
   templateLayoutVars,
 } from "@/page-builder/layout/contentTemplateLayouts";
 import { hasRenderableImageDimensions } from "@/utils/imageLoad";
+import { resolveMediaSlotImage } from "@/page-builder/config/mediaSlotContract";
 
 interface Props {
   module?: PageModule;
@@ -29,26 +30,10 @@ const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
 ]);
 
 const DEFERRED_MEDIA_ROOT_MARGIN = "200px 0px";
-const RESPONSIVE_HERO_IMAGE_WIDTHS = [480, 800, 1200, 1680] as const;
 
 function publicHeroMedia(value: unknown, editMode: boolean | undefined) {
   const source = typeof value === "string" ? value.trim() : "";
   return !editMode && NON_PUBLISHABLE_SYSTEM_MEDIA.has(source) ? "" : source;
-}
-
-function buildResponsiveHeroSrcSet(source: string): string | undefined {
-  if (!/^\/uploads\//.test(source) || !/\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(source)) {
-    return undefined;
-  }
-  try {
-    const parsed = new URL(source, "https://public-media.local");
-    return RESPONSIVE_HERO_IMAGE_WIDTHS.map((width) => {
-      parsed.searchParams.set("width", String(width));
-      return `${parsed.pathname}${parsed.search}${parsed.hash} ${width}w`;
-    }).join(", ");
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -73,8 +58,15 @@ export default function HeroSection({
   const desktopImg = configuredDesktopImg || configuredMobileImg;
   const mobileImg = configuredMobileImg || configuredDesktopImg;
   const imageSourceKey = `${desktopImg}\u0000${mobileImg}`;
-  const desktopSrcSet = buildResponsiveHeroSrcSet(desktopImg);
-  const mobileSrcSet = buildResponsiveHeroSrcSet(mobileImg);
+  // 固有尺寸/纵横比/加载策略由媒体槽契约统一派生，Hero 不再手写 srcset/sizes/width/height。
+  const desktopMedia = resolveMediaSlotImage(
+    { ratio: IMAGE_SPECS.hero.desktop.ratio, viewport: "desktop", priority, referenceWidth: IMAGE_SPECS.hero.desktop.width },
+    desktopImg,
+  );
+  const mobileMedia = resolveMediaSlotImage(
+    { ratio: IMAGE_SPECS.hero.mobile.ratio, viewport: "mobile", priority, referenceWidth: IMAGE_SPECS.hero.mobile.width },
+    mobileImg,
+  );
   const [failedImageSourceKey, setFailedImageSourceKey] = useState<string | null>(null);
   const [readyImageSourceKey, setReadyImageSourceKey] = useState<string | null>(null);
   const imageFailed = failedImageSourceKey === imageSourceKey;
@@ -178,18 +170,18 @@ export default function HeroSection({
             {mobileImg ? (
               <source
                 media={RESPONSIVE_CANVAS.mobileMediaQuery}
-                srcSet={mobileSrcSet || mobileImg}
-                sizes={mobileSrcSet ? "100vw" : undefined}
+                srcSet={mobileMedia.srcSet || mobileImg}
+                sizes={mobileMedia.sizes}
               />
             ) : null}
             <img
               src={desktopImg}
-              srcSet={desktopSrcSet}
-              sizes={desktopSrcSet ? "100vw" : undefined}
+              srcSet={desktopMedia.srcSet}
+              sizes={desktopMedia.sizes}
               alt={c?.altText || title}
-              loading={editMode || priority ? "eager" : "lazy"}
-              {...(priority ? { fetchpriority: "high" } : {})}
-              decoding="async"
+              loading={editMode ? "eager" : desktopMedia.loading}
+              {...(desktopMedia.fetchPriority ? { fetchpriority: desktopMedia.fetchPriority } : {})}
+              decoding={desktopMedia.decoding}
               onLoad={(event) => {
                 const renderable = hasRenderableImageDimensions(event.currentTarget);
                 setFailedImageSourceKey(renderable ? null : imageSourceKey);
@@ -199,8 +191,8 @@ export default function HeroSection({
                 setFailedImageSourceKey(imageSourceKey);
                 setReadyImageSourceKey(null);
               }}
-              width={3360}
-              height={1470}
+              width={desktopMedia.width}
+              height={desktopMedia.height}
               className="hc-hero__image absolute inset-0 h-full w-full object-cover"
               style={{
                 opacity: imageReady && !imageFailed ? 1 : 0,

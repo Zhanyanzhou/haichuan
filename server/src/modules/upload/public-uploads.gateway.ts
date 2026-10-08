@@ -41,15 +41,35 @@ function parseSingleByteRange(value: string, size: number): { start: number; end
   return { start, end: Math.min(requestedEnd, size - 1) };
 }
 
+function matchesIfNoneMatch(ifNoneMatch: string | undefined, etag: string): boolean {
+  if (!ifNoneMatch) return false;
+  const trimmed = ifNoneMatch.trim();
+  if (trimmed === '*') return true;
+  return trimmed
+    .split(',')
+    .map((token) => token.trim())
+    .some((token) => token === `"${etag}"` || token === `W/"${etag}"`);
+}
+
 export function sendPublicMedia(
   request: Pick<Request, 'method' | 'headers'>,
   response: Response,
   media: MediaResponse,
   cacheControl = 'public, no-store',
+  etag?: string,
 ) {
-  const size = media.buffer.byteLength;
   response.setHeader('Cache-Control', cacheControl);
   response.setHeader('X-Content-Type-Options', 'nosniff');
+  if (etag) {
+    response.setHeader('ETag', `"${etag}"`);
+    // 命中条件请求时授权门禁已在上游执行，这里只省 body，不省校验。
+    if (matchesIfNoneMatch(request.headers['if-none-match'], etag)) {
+      response.status(304);
+      return response.end();
+    }
+  }
+
+  const size = media.buffer.byteLength;
   response.setHeader('Accept-Ranges', 'bytes');
   response.type(media.mimeType);
 
@@ -160,8 +180,9 @@ export class PublicUploadsGateway implements OnModuleInit {
             response,
             media,
             requirePublicAuthorization
-              ? 'public, no-store'
+              ? 'public, max-age=0, must-revalidate'
               : 'public, max-age=604800, stale-while-revalidate=86400',
+            media.etag,
           ))
           .catch(next);
         return;
@@ -190,7 +211,13 @@ export class PublicUploadsGateway implements OnModuleInit {
           if (blocked) throw new NotFoundException('素材不存在');
           return this.uploadService.getPageMediaContentByStorageKey(pageAsset.storageKey, true);
         })
-        .then((media) => sendPublicMedia(request, response, media))
+        .then((media) => sendPublicMedia(
+          request,
+          response,
+          media,
+          'public, max-age=0, must-revalidate',
+          media.fingerprint,
+        ))
         .catch(next);
     });
   }

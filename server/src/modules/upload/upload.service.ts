@@ -85,13 +85,19 @@ export class UploadService implements OnModuleInit {
   ]);
   private readonly maxSize = 10 * 1024 * 1024; // 10MB
   private readonly maxVideoSize = 100 * 1024 * 1024;
+  /** 派生图磁盘缓存根，位于私有根内，避免落入公开静态根绕过授权门禁。 */
+  private readonly responsivePublicDiskRoot = join(
+    this.storageRoots.privateMediaRoot,
+    'responsive-public',
+  );
+
   private readonly responsivePublicMediaCache = new Map<
     string,
-    { expiresAt: number; value: { buffer: Buffer; mimeType: string } }
+    { expiresAt: number; value: { buffer: Buffer; mimeType: string; etag: string } }
   >();
   private readonly responsivePublicMediaInFlight = new Map<
     string,
-    Promise<{ buffer: Buffer; mimeType: string }>
+    Promise<{ buffer: Buffer; mimeType: string; etag: string }>
   >();
 
   constructor(
@@ -730,7 +736,7 @@ export class UploadService implements OnModuleInit {
     storageKey: string,
     width: number,
     requirePublicAuthorization: boolean,
-  ): Promise<{ buffer: Buffer; mimeType: string }> {
+  ): Promise<{ buffer: Buffer; mimeType: string; etag: string }> {
     if (!isResponsivePublicImageWidth(width)) throw new NotFoundException('素材不存在');
     const source = requirePublicAuthorization
       ? await this.getPageMediaContentByStorageKey(storageKey, true)
@@ -743,7 +749,7 @@ export class UploadService implements OnModuleInit {
     const existing = this.responsivePublicMediaInFlight.get(cacheKey);
     if (existing) return existing;
 
-    const pending = resizePublicImageBuffer(source.buffer, width, source.mimeType);
+    const pending = this.getOrPersistResponsiveImage(storageKey, width, source);
     this.responsivePublicMediaInFlight.set(cacheKey, pending);
 
     try {
@@ -761,6 +767,63 @@ export class UploadService implements OnModuleInit {
       if (this.responsivePublicMediaInFlight.get(cacheKey) === pending) {
         this.responsivePublicMediaInFlight.delete(cacheKey);
       }
+    }
+  }
+
+  /**
+   * 派生图先落私有根下的磁盘缓存（不落入公开静态根，避免绕过授权门禁），
+   * 命中时直接复用，省去重启、TTL 过期或多进程下的重复 sharp 转码。
+   * 文件名带原图指纹，原图变化后生成新文件，并即时清理同一宽度下的旧指纹文件。
+   */
+  private async getOrPersistResponsiveImage(
+    storageKey: string,
+    width: number,
+    source: { buffer: Buffer; mimeType: string; fingerprint: string },
+  ): Promise<{ buffer: Buffer; mimeType: string; etag: string }> {
+    const fingerprintHash = createHash('sha1').update(source.fingerprint).digest('hex').slice(0, 16);
+    // ETag 与磁盘文件名同源：同一原图指纹 + 宽度 => 同一派生图内容，可安全用于条件请求。
+    const etag = `w${width}-${fingerprintHash}`;
+    const diskDir = this.resolveWithinRoot(this.responsivePublicDiskRoot, storageKey);
+    const diskPath = diskDir ? join(diskDir, `${etag}.webp`) : null;
+    if (diskPath && existsSync(diskPath)) {
+      try {
+        return { buffer: await readFile(diskPath), mimeType: 'image/webp', etag };
+      } catch {
+        // 读取失败按未命中处理，重新转码覆盖。
+      }
+    }
+
+    const rendered = await resizePublicImageBuffer(source.buffer, width, source.mimeType);
+    // 仅当确实转成 WebP 才落盘；转码失败回退原图时不写，避免污染磁盘缓存。
+    if (diskPath && rendered.mimeType === 'image/webp') {
+      try {
+        mkdirSync(dirname(diskPath), { recursive: true });
+        await writeFile(diskPath, rendered.buffer);
+        await this.pruneStaleResponsiveFiles(diskPath, width, fingerprintHash);
+      } catch {
+        // 磁盘不可写时仍返回内存结果，正确性不受影响。
+      }
+    }
+    return { ...rendered, etag };
+  }
+
+  /** 清理同一宽度下旧指纹的派生文件，防止原图替换后磁盘孤儿无界增长。 */
+  private async pruneStaleResponsiveFiles(
+    diskPath: string,
+    width: number,
+    keepHash: string,
+  ): Promise<void> {
+    const dir = dirname(diskPath);
+    const prefix = `w${width}-`;
+    try {
+      const entries = await readdir(dir);
+      await Promise.all(
+        entries
+          .filter((name) => name.startsWith(prefix) && name.endsWith('.webp') && !name.startsWith(`${prefix}${keepHash}`))
+          .map((name) => unlink(join(dir, name))),
+      );
+    } catch {
+      // 清理失败不影响正确性，最多留下旧文件待下次覆盖清理。
     }
   }
 

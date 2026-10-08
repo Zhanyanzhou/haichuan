@@ -166,6 +166,45 @@ test('历史 UUID 公开图可以按版本 URL 缓存，受控页面素材默认
   assert.equal(controlled.state.headers.get('cache-control'), 'public, no-store');
 });
 
+test('带 ETag 的受控响应命中 If-None-Match 返回 304，不命中照常传 body', () => {
+  const media = { buffer: Buffer.from('image'), mimeType: 'image/webp' };
+
+  const notModified = responseDouble();
+  sendPublicMedia(
+    { method: 'GET', headers: { 'if-none-match': '"w480-abc"' } },
+    notModified.response,
+    media,
+    'public, max-age=0, must-revalidate',
+    'w480-abc',
+  );
+  assert.equal(notModified.state.status, 304);
+  assert.equal(notModified.state.headers.get('etag'), '"w480-abc"');
+  assert.equal(notModified.state.body, undefined);
+  assert.equal(notModified.state.ended, true);
+
+  const star = responseDouble();
+  sendPublicMedia(
+    { method: 'GET', headers: { 'if-none-match': '*' } },
+    star.response,
+    media,
+    'public, max-age=0, must-revalidate',
+    'w480-abc',
+  );
+  assert.equal(star.state.status, 304);
+
+  const mismatch = responseDouble();
+  sendPublicMedia(
+    { method: 'GET', headers: { 'if-none-match': '"w480-other"' } },
+    mismatch.response,
+    media,
+    'public, max-age=0, must-revalidate',
+    'w480-abc',
+  );
+  assert.equal(mismatch.state.status, 200);
+  assert.equal(mismatch.state.headers.get('content-length'), '5');
+  assert.deepEqual(mismatch.state.body, Buffer.from('image'));
+});
+
 test('uploads 网关只缓存非页面素材的公开响应式图片，页面素材与历史商品媒体保持受控', async () => {
   let middleware: ((request: any, response: Response, next: (error?: unknown) => void) => void) | undefined;
   const app = {
@@ -186,7 +225,7 @@ test('uploads 网关只缓存非页面素材的公开响应式图片，页面素
       requirePublicAuthorization: boolean,
     ) {
       responsiveCalls.push({ storageKey, width, requirePublicAuthorization });
-      return { buffer: Buffer.from('responsive-image'), mimeType: 'image/webp' };
+      return { buffer: Buffer.from('responsive-image'), mimeType: 'image/webp', etag: 'w480-testetag' };
     },
   };
   new PublicUploadsGateway(
@@ -220,7 +259,8 @@ test('uploads 网关只缓存非页面素材的公开响应式图片，页面素
   });
 
   const pageAsset = await request('/page-assets/hero.png?width=480');
-  assert.equal(pageAsset.state.headers.get('cache-control'), 'public, no-store');
+  assert.equal(pageAsset.state.headers.get('cache-control'), 'public, max-age=0, must-revalidate');
+  assert.equal(pageAsset.state.headers.get('etag'), '"w480-testetag"');
   assert.deepEqual(responsiveCalls.at(-1), {
     storageKey: 'page-assets/hero.png',
     width: 480,

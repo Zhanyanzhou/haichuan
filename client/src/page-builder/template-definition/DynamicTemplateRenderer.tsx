@@ -38,6 +38,8 @@ import {
   resolveManagedTemplateMediaPreviewUrl,
   useManagedTemplateMediaDisplayUrl,
 } from "./managedMediaPreview";
+import { resolveMediaSlotImage } from "../config/mediaSlotContract";
+import { RESPONSIVE_CANVAS } from "../config/blockContracts";
 
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
@@ -386,6 +388,42 @@ function getSafeActionContent(content: unknown): { label: string; href?: string 
   return { label };
 }
 
+/** 按动态模板节点几何推导桌面宽度系数（%）；无法确定返回 undefined。 */
+function resolveDesktopWidthFraction(node: DynamicTemplateRenderPlanNode): number | undefined {
+  const rules = node.rules;
+  if (rules.layoutMode === "free" && rules.placement) {
+    const fraction = rules.placement.width;
+    if (Number.isFinite(fraction) && fraction > 0 && fraction <= 1) {
+      return Math.round(fraction * 100);
+    }
+    return undefined;
+  }
+  const width = rules.width;
+  if (width === "fill") return 100;
+  // "auto"/"fit" 是内容自适应（CSS fit-content/auto，见 lengthToCss）：渲染宽度 = min(图片固有宽度, 容器宽度)，
+  // 固有宽度在派生 sizes 的渲染前拿不到，故返回 undefined 兜底 100vw（宁可高估不低估），不尝试收紧以免欠采样发虚。
+  if (typeof width === "object") {
+    if (width.unit === "vw" && Number.isFinite(width.value) && width.value > 0 && width.value <= 100) return width.value;
+    if (width.unit === "%" && Number.isFinite(width.value) && width.value > 0 && width.value <= 100) return width.value;
+  }
+  return undefined;
+}
+
+/**
+ * 图片槽 sizes：首屏/移动通栏取 100vw；桌面非首屏按节点几何推导宽度系数，
+ * 推导不出时退回 100vw（宁可高估不低估），避免候选宽度小于实际渲染宽度而发虚。
+ */
+function resolveTemplateImageSizes(
+  node: DynamicTemplateRenderPlanNode,
+  viewport: "desktop" | "mobile",
+  priority: boolean,
+): string {
+  if (priority || viewport === "mobile") return "100vw";
+  const fraction = resolveDesktopWidthFraction(node);
+  if (fraction === undefined || fraction >= 100) return "100vw";
+  return `(max-width: ${RESPONSIVE_CANVAS.mobileMaxWidth}px) 100vw, ${fraction}vw`;
+}
+
 function ManagedTemplateSlotImage({
   src,
   alt,
@@ -395,6 +433,9 @@ function ManagedTemplateSlotImage({
   transformOrigin,
   hostFetch,
   priority,
+  ratio,
+  viewport,
+  sizes,
 }: {
   src: string;
   alt: string;
@@ -404,12 +445,20 @@ function ManagedTemplateSlotImage({
   transformOrigin?: string;
   hostFetch: boolean;
   priority: boolean;
+  ratio?: string;
+  viewport: "desktop" | "mobile";
+  sizes?: string;
 }) {
   const media = useManagedTemplateMediaDisplayUrl(src, hostFetch);
   const previewUrl = hostFetch ? resolveManagedTemplateMediaPreviewUrl(src) : src;
   const displaySrc = hostFetch
     ? (media.status === "error" ? previewUrl : media.displaySrc)
     : src;
+  // 公开态才接派生图与固有尺寸；后台态走 blob 预览，保持即时显示与既有会话语义。
+  const resolved = hostFetch
+    ? undefined
+    : resolveMediaSlotImage({ ratio: ratio ?? "", viewport, priority, sizes }, displaySrc);
+  const loading = priority ? "eager" : hostFetch ? undefined : "lazy";
   const style: CSSProperties = {
     width: "100%",
     height: "100%",
@@ -425,8 +474,14 @@ function ManagedTemplateSlotImage({
       data-template-image-fit={objectFit}
       data-template-media-state={media.status}
       data-template-managed-preview={hostFetch ? previewUrl : undefined}
-      loading={priority ? "eager" : undefined}
+      loading={loading}
+      decoding="async"
       {...(priority ? { fetchpriority: "high" } : {})}
+      {...(resolved?.srcSet ? { srcSet: resolved.srcSet } : {})}
+      {...(resolved?.srcSet && resolved.sizes ? { sizes: resolved.sizes } : {})}
+      {...(resolved?.width !== undefined && resolved.height !== undefined
+        ? { width: resolved.width, height: resolved.height }
+        : {})}
       style={style}
     />
   );
@@ -509,6 +564,9 @@ function renderSlotContent(
         alt={alt}
         hostFetch={mode !== "public"}
         priority={priority}
+        ratio={node.slotRules?.aspectRatio}
+        viewport={editorViewport ?? "desktop"}
+        sizes={resolveTemplateImageSizes(node, editorViewport ?? "desktop", priority)}
         objectFit={objectFit}
         objectPosition={`${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`}
         transform={node.layoutOverride?.imageScalePercent && node.layoutOverride.imageScalePercent !== 100
