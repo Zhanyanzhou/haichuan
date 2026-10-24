@@ -1,14 +1,22 @@
 import type { TrendMetric } from "@/services/api";
 
+export interface StorefrontTrafficStatus {
+  enabled: boolean;
+  earliestDate: string | null;
+}
+
 export interface DashboardStats {
   orderToday: number;
   revenueToday: number | string;
   inquiriesToday: number;
+  visitorsToday?: number;
+  visitorsYesterday?: number;
   pageViewsToday: number;
   orderYesterday?: number;
   revenueYesterday?: number | string;
   inquiriesYesterday?: number;
   pageViewsYesterday?: number;
+  storefrontTraffic?: StorefrontTrafficStatus;
   publishedProductCount?: number;
   pendingShip: number;
   pendingAppointmentInquiries: number;
@@ -22,6 +30,7 @@ export interface DashboardStats {
 export interface TrendPoint {
   date: string;
   count: number;
+  counted?: boolean;
 }
 
 export type RefreshState = "idle" | "loading" | "done" | "error";
@@ -44,6 +53,28 @@ export function formatCurrency(value: number | string | null | undefined) {
         maximumFractionDigits: 2,
       })}`
     : "—";
+}
+
+export function trafficNote(stats: DashboardStats): string | null {
+  const traffic = stats.storefrontTraffic;
+  if (!traffic) return null;
+  if (!traffic.enabled) return "公网访问未采集";
+  if (!traffic.earliestDate) return "尚无访问数据";
+  return null;
+}
+
+export function comparisonDisplay(
+  today: number | string | undefined,
+  yesterday: number | string | undefined,
+  blockedNote?: string | null,
+): { change: Change; note: string | null } {
+  if (blockedNote) return { change: null, note: blockedNote };
+  const change = buildChange(today, yesterday);
+  if (change) return { change, note: null };
+  if (yesterday !== undefined && Number(yesterday) === 0) {
+    return { change: null, note: "昨日为 0" };
+  }
+  return { change: null, note: "暂无可比数据" };
 }
 
 export function buildChange(
@@ -71,10 +102,11 @@ export const TREND_METRICS: ReadonlyArray<{
   label: string;
   format: "number" | "currency";
 }> = [
+  { key: "visitors", label: "访客", format: "number" },
+  { key: "pageViews", label: "浏览", format: "number" },
   { key: "orders", label: "订单数", format: "number" },
-  { key: "revenue", label: "成交金额", format: "currency" },
+  { key: "revenue", label: "下单金额", format: "currency" },
   { key: "inquiries", label: "咨询数", format: "number" },
-  { key: "pageViews", label: "页面浏览", format: "number" },
 ];
 
 export const TREND_RANGES = [

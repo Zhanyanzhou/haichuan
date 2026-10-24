@@ -6,7 +6,7 @@ import { generateTemplateFromRecipe } from "../src/page-builder/template-creatio
 import { useTemplateEditorSession } from "../src/page-builder/template-editor/templateEditorSession";
 
 test("非法内联文字阻止切换，修正后只提交一次，取消会释放守卫", () => {
-const definition = generateTemplateFromRecipe(createRecommendedRecipe("productPromotion"));
+const definition = generateTemplateFromRecipe(createRecommendedRecipe("collection-story"));
 const title = Object.values(definition.slots).find((slot) => slot.semanticRole === "title")!;
 const original = structuredClone(definition);
 const session = useTemplateEditorSession;

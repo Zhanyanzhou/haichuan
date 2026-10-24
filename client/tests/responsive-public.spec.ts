@@ -401,6 +401,8 @@ test.describe("公开页面导航一致性", () => {
     await page.goto("/contact");
     await page.getByRole("button", { name: "打开菜单" }).click();
     const drawer = page.getByRole("dialog", { name: "品牌菜单" });
+    await expect(drawer.getByText("探索", { exact: true })).toBeVisible();
+    await expect(drawer.getByText("Explore / 探索")).toHaveCount(0);
     const searchLink = drawer.getByRole("link", { name: "搜索" });
     await expect(searchLink).toHaveAttribute("href", "/catalog#catalog-search-input");
     await searchLink.click();
@@ -657,8 +659,8 @@ test.describe("公开页面导航一致性", () => {
     await page.setViewportSize({ width: 390, height: 844 });
 
     for (const { path, eyebrow } of [
-      { path: "/catalog", eyebrow: "SELECTION CENTER" },
-      { path: "/contact", eyebrow: "CONSULTATION REQUEST" },
+      { path: "/catalog", eyebrow: "公开款式" },
+      { path: "/contact", eyebrow: "预约咨询" },
     ]) {
       await page.goto(path);
       const banner = page.getByRole("banner");

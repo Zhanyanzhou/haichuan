@@ -2042,7 +2042,7 @@ test("TD-6A 同一个专用模板从真正空白制作到目录精确 v1", async
   });
   await expect(sameCatalogEntry.locator(".template-editor__catalog-published-state")).toHaveText("已发布 · v1");
   await expect(sameCatalogEntry.locator(".template-editor__catalog-draft-state"), "同一模板的 v2 草稿保存后必须明确显示未发布修改")
-    .toHaveText("草稿有未发布修改");
+    .toHaveText("草稿还有修改");
   await expect(sameCatalogEntry.locator(".template-editor__catalog-draft-state"))
     .toHaveCSS("color", "rgb(122, 83, 26)");
   expect(server.publishedVersions.find((version) => version.version === 1))
@@ -2138,7 +2138,7 @@ test("TD-6B 完整模板的取消、非法落点、结构锁定和发布阻断�
   await structure.getByRole("button", { name: "添加区域", exact: true }).click();
   const regionDialog = page.getByRole("dialog", { name: "添加区域", exact: true });
   await expect(regionDialog).toBeVisible();
-  await page.keyboard.press("Escape");
+  await regionDialog.getByRole("button", { name: "关闭添加区域", exact: true }).click();
   await expect(regionDialog).toBeHidden();
   expect(await readSessionSnapshot(page), "取消添加区域必须保持完整模板事实不变").toEqual(beforeCancel);
   expect(readServerCounters(server), "取消添加区域不得产生请求").toEqual(cancelNetwork);
@@ -2152,6 +2152,7 @@ test("TD-6B 完整模板的取消、非法落点、结构锁定和发布阻断�
   const invalidPanel = page.getByRole("dialog", { name: "添加槽位", exact: true });
   await expect(invalidPanel.getByLabel("添加目标")).toHaveValue("");
   await expect(invalidPanel.getByRole("button", { name: "添加图片槽位", exact: true })).toBeDisabled();
+  await expect(invalidPanel.getByRole("button", { name: "关闭添加槽位", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(invalidPanel).toBeHidden();
   expect(await readSessionSnapshot(page), "非法根级槽位落点必须零 definition/history 变化").toEqual(beforeInvalid);

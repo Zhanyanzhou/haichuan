@@ -1448,7 +1448,7 @@ export default function MyAccountDashboard({
       <div className="my-account">
         <section className="my-account__intro">
           <div>
-            <p className="my-account__eyebrow">HAICHUAN PRIVATE CLIENT</p>
+            <p className="my-account__eyebrow">会员账户</p>
             <h1>我的账号</h1>
             <p className="my-account__greeting">
               您好，{name}。您的作品、咨询与服务记录都在这里。
@@ -1514,7 +1514,7 @@ export default function MyAccountDashboard({
             >
               <div className="my-account__panel-head">
                 <div>
-                  <p>CONSULTATION LINK</p>
+                  <p>咨询记录</p>
                   <h2 id="consultation-invalid-title">咨询定位无效</h2>
                 </div>
               </div>
@@ -1538,7 +1538,7 @@ export default function MyAccountDashboard({
             >
               <div className="my-account__panel-head">
                 <div>
-                  <p>CONSULTATION DETAIL</p>
+                  <p>咨询记录</p>
                   <h2 id="consultation-focus-title">咨询详情</h2>
                 </div>
                 <button
@@ -1623,7 +1623,7 @@ export default function MyAccountDashboard({
           <section id="my-selections" className="my-account__panel" tabIndex={-1}>
             <div className="my-account__panel-head">
               <div>
-                <p>PRIVATE SELECTION</p>
+                <p>选款记录</p>
                 <h2>我的选款</h2>
               </div>
               <Link to="/catalog">进入选款中心 →</Link>
@@ -1709,7 +1709,7 @@ export default function MyAccountDashboard({
           <section id="my-appointments" className="my-account__panel" tabIndex={-1}>
             <div className="my-account__panel-head">
               <div>
-                <p>PERSONAL SERVICE</p>
+                <p>预约记录</p>
                 <h2>我的预约</h2>
               </div>
               <Link to="/contact">预约咨询 →</Link>
@@ -1811,7 +1811,7 @@ export default function MyAccountDashboard({
           >
             <div className="my-account__panel-head">
               <div>
-                <p>WISHLIST</p>
+                <p>心愿记录</p>
                 <h2 id="my-favorites-title">我的心愿单</h2>
               </div>
               <strong>
@@ -1970,7 +1970,7 @@ export default function MyAccountDashboard({
           >
             <div className="my-account__panel-head">
               <div>
-                <p>ACCOUNT PROFILE</p>
+                <p>账户资料</p>
                 <h2>个人资料</h2>
               </div>
             </div>

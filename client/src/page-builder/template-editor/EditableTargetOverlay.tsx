@@ -368,6 +368,8 @@ export default function EditableTargetOverlay({
   flowDropLabel,
   inlineTextEditor,
   onMeasurementChange,
+  onDeleteTarget,
+  deleteTargetLabel = "删除",
 }: {
   sourceFrame: HTMLIFrameElement | null;
   sourceRoot: HTMLElement | null;
@@ -400,6 +402,8 @@ export default function EditableTargetOverlay({
   flowDropLabel?: string | null;
   inlineTextEditor?: OverlayInlineTextEditor | null;
   onMeasurementChange?: (count: number) => void;
+  onDeleteTarget?: (target: OverlayTargetDescriptor) => void;
+  deleteTargetLabel?: string;
 }) {
   const selectionSnapshot = useTemplateEditorSession((state) => state.selectionSnapshot);
   const [boxes, setBoxes] = useState<MeasuredOverlayTarget[]>([]);
@@ -1202,6 +1206,18 @@ export default function EditableTargetOverlay({
               >{spacingEditing ? "完成间距调整" : "调整间距"}</button>
             ) : null}
             {spacingEditing ? <span className="template-editor__selection-toolbar-help">拖边线调留白 · 点数值精确输入</span> : null}
+            {onDeleteTarget ? (
+              <button
+                type="button"
+                className="template-editor__selection-toolbar-delete"
+                aria-label={`${deleteTargetLabel}${selectedBox.target.label}`}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDeleteTarget(selectedBox.target);
+                }}
+              >{deleteTargetLabel}</button>
+            ) : null}
             {selectedBox.target.locked ? <span>已锁定</span> : null}
           </div> : null}
           {gesturePreview && gestureRef.current?.operation === "resize" ? <span className="template-editor__resize-feedback" data-resize-feedback role="status">

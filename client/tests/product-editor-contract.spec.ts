@@ -65,20 +65,17 @@ test.describe("商品编辑器现有接口契约", () => {
     await page.goto("/admin/products/new");
     await expect(page.getByText("正在加载商品信息…")).toBeVisible();
     releaseInitialCategoryRequest();
-    await expect(page.getByText("商品编辑所需的类目或物流模板加载失败。请重新加载后重试。")).toBeVisible();
+    await expect(page.getByText("商品编辑所需的类目加载失败。请重新加载后重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
     await expect(page.locator('form[name="product-editor-main"]')).toHaveCount(0);
 
     await page.getByRole("button", { name: "重新加载" }).click();
     await expect(page.getByRole("heading", { name: "图文描述" })).toBeVisible();
-    await expect(page.getByRole("radio", { name: "标准库存" })).toBeChecked();
-    await expect(page.getByText(/当前销售方式发布时不要求交易价格、SKU 或正库存/)).toBeVisible();
-    const directPurchase = page.getByRole("radio", { name: "直接购买" });
-    await expect(directPurchase).toBeEnabled();
-    await directPurchase.click();
-    await expect(page.getByText(/仍可维护直购商品事实，公开端不会开放加购或支付/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "前往库存管理" })).toBeVisible();
-    await page.getByRole("radio", { name: "仅展示" }).click();
+    await expect(page.getByRole("radio", { name: "直接销售" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "立刻上架" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "二手" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "物流服务" })).toHaveCount(0);
+    await expect(page.getByText(/直接销售需要一个大于 0 的成交价/)).toBeVisible();
     await page.getByRole("button", { name: "基础信息" }).click();
     await page.getByRole("textbox", { name: "货号" }).fill("DUPLICATE-001");
     await page.getByRole("combobox", { name: "当前类目" }).click();
@@ -109,7 +106,7 @@ test.describe("商品编辑器现有接口契约", () => {
       price: 6999,
       status: "OFFLINE",
       visibility: "MEMBER",
-      salesMode: "DISPLAY_ONLY",
+      salesMode: "DIRECT_PURCHASE",
       inventoryPolicy: "STANDARD",
       purchaseRegion: "MAINLAND",
       publishMode: "WAREHOUSE",
@@ -175,10 +172,10 @@ test.describe("商品编辑器现有接口契约", () => {
     });
 
     await page.goto("/admin/products/9/edit");
-    await expect(page.getByText("SKU 派生最低价", { exact: true })).toBeVisible();
+    await expect(page.getByText("当前最低价", { exact: true })).toBeVisible();
     await expect(page.locator(".pro-editor__derived-price")).toHaveText("¥ 6999.00");
-    await expect(page.getByText("系统按已启用且价格大于 0 的 SKU 自动派生")).toBeVisible();
-    await expect(page.getByText(/2 个有效 SKU；SKU 价格是直购成交价/)).toBeVisible();
+    await expect(page.getByText("有多个规格时，页面显示其中的最低价。")).toBeVisible();
+    await expect(page.getByText(/2 个有效规格/)).toBeVisible();
 
     await page.locator(".pro-editor__upload-actions").nth(1).getByRole("button", { name: "设为主图" }).click();
     await expect(page.getByText("商品主图已更新")).toBeVisible();
@@ -259,16 +256,16 @@ test.describe("商品编辑器现有接口契约", () => {
     const title = page.getByRole("textbox", { name: "商品标题" });
     await expect(title).toHaveValue("初始标题");
     await title.fill("仅存在于提交前的本地标题");
-    await page.getByRole("radio", { name: "24小时内" }).click();
     await page.getByRole("button", { name: "保存更改" }).click();
 
     await expect(page.getByText("商品已保存至仓库")).toBeVisible();
-    expect(updatePayload?.customLeadTime).toBeNull();
+    expect(updatePayload?.dispatchTime).toBe("CUSTOM");
+    expect(updatePayload?.customLeadTime).toBe("确认规格后 15 个工作日");
+    expect(updatePayload?.deliveryMethods).toEqual(["EXPRESS"]);
+    expect(updatePayload?.shippingTemplateId).toBe(7);
     await expect(title).toHaveValue("服务端规范化标题");
     await expect(page.getByRole("radio", { name: "预约到店" })).toBeChecked();
-    await expect(page.getByRole("radio", { name: "24小时内" })).toBeChecked();
-    await expect(page.getByRole("checkbox", { name: "到店自提" })).toBeChecked();
-    await expect(page.getByRole("checkbox", { name: "物流配送" })).not.toBeChecked();
+    await expect(page.getByRole("button", { name: "物流服务" })).toHaveCount(0);
     await expect(page.locator(".pro-editor__footer [role='status']")).toContainText("最后保存于");
   });
 
@@ -618,23 +615,22 @@ test.describe("商品编辑器现有接口契约", () => {
     });
 
     await page.goto("/admin/products/21/edit");
+    await expect(page.getByRole("radio", { name: "直接销售" })).toBeChecked();
+    await expect(page.getByText(/直接销售需要一个大于 0 的成交价/)).toBeVisible();
     await page.getByRole("radio", { name: "一物一件" }).click();
     await expect(page.getByText(/库存总量只能为 0 或 1/)).toBeVisible();
     await expect(page.getByText(/购买数量上限为 1/)).toBeVisible();
     await expect(page.getByText(/当前有 2 个有效 SKU/)).toBeVisible();
-
-    for (const mode of ["仅展示", "选款咨询", "预约到店", "定制咨询"]) {
-      await page.getByRole("radio", { name: mode }).click();
-      await expect(page.getByText(/当前销售方式发布时不要求交易价格、SKU 或正库存/)).toBeVisible();
-    }
-    await page.getByRole("radio", { name: "直接购买" }).click();
-    await expect(page.getByText(/所有有效 SKU 的交易价格、库存记录、配送方式和库存策略/)).toBeVisible();
-
     await page.getByRole("button", { name: "保存更改" }).click();
     await expect(page.getByText("商品保存未完成")).toBeVisible();
     await expect(page.locator(".pro-editor__submit-error").getByText(/一物一件商品必须且只能有一个有效 SKU/)).toBeVisible();
     await expect(page.getByText("商品已保存至仓库")).toHaveCount(0);
     expect(updateAttempts).toBe(1);
+
+    for (const mode of ["仅展示", "选款咨询", "预约到店", "定制咨询"]) {
+      await page.getByRole("radio", { name: mode }).click();
+      await expect(page.getByText(/当前销售方式发布时不要求交易价格、SKU 或正库存/)).toBeVisible();
+    }
   });
 
   test("首次创建响应丢失后由操作者显式重试并恢复同一货号，不重复创建业务对象", async ({ page }) => {

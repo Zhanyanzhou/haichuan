@@ -13,7 +13,7 @@ import {
   ReloadOutlined,
   RightOutlined,
 } from "@ant-design/icons";
-import { Button, Dropdown, Modal, Spin, type MenuProps } from "antd";
+import { App as AntdApp, Button, Dropdown, Modal, Spin, type MenuProps } from "antd";
 import {
   memo,
   useCallback,
@@ -25,8 +25,8 @@ import {
   type ReactNode,
 } from "react";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
+import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
 import {
-  DynamicTemplateRenderer,
   validateDynamicTemplateDefinition,
   type TemplateDefinitionV2,
 } from "../template-definition";
@@ -36,6 +36,8 @@ import {
   type UnifiedTemplateCatalogPresentation,
 } from "../templates/unifiedTemplateCatalog";
 import WorkspacePanelHeader from "../workspace/WorkspacePanelHeader";
+import LaunchMasterPickerModal from "../template-creation/LaunchMasterPickerModal";
+import { catalogCardName } from "./catalogCardName";
 import useCompactWorkspaceOverlay, {
   DOCKED_WORKSPACE_QUERY,
   WIDE_DOCK_QUERY,
@@ -69,6 +71,7 @@ import {
   createTemplateCatalogPreviewModel,
   createTemplateCatalogPreviewContentBySlotId,
   createNeutralTemplateCatalogPreview,
+  withNeutralTemplateImages,
   hasUnconfiguredTemplateCatalogMedia,
   type TemplateCatalogPreviewModel,
 } from "./templatePreviewModel";
@@ -83,6 +86,12 @@ import {
   type PublishedDynamicTemplateResource,
   type TemplateCatalogItemResource,
 } from "@/services/clients/dynamicTemplateClient";
+import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
+import TemplateCatalogCoverEditor from "./TemplateCatalogCoverEditor";
+import {
+  getEditorApiErrorMessage,
+  getEditorErrorMessage,
+} from "../workspace/editorLifecycleErrors";
 import { requestStatus } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
 
@@ -178,7 +187,12 @@ interface DesignModeProps {
   currentDraft?: TemplateEditorDraft | null;
   currentDraftDirty: boolean;
   currentDraftHasBaseline: boolean;
-  onOpen: (target: TemplateEditorLibraryTarget) => void;
+  /**
+   * 打开目录里的某个目标。可选第二参数在目标**真正打开之后**才调用：当前草稿有未保存修改时，
+   * `openTarget` 会先弹确认框，用户点取消就什么都不会打开。需要"打开成功再收起自己"的入口
+   * （七步向导、首发母版选择器）据此决定关闭时机。
+   */
+  onOpen: (target: TemplateEditorLibraryTarget, onOpened?: (draft: TemplateEditorDraft) => void) => void;
   onManage?: (target: TemplateEditorLibraryTarget, action: "copy" | "copy-published" | "rename") => void;
   onCreateDraftFromPublished: (
     template: DynamicTemplateResource,
@@ -186,7 +200,9 @@ interface DesignModeProps {
   ) => void;
   publishedDraftCreation?: PublishedDraftCreationState | null;
   onArchive: (target: ArchivableTemplateEditorLibraryTarget, name: string) => void;
+  onArchiveUnsaved?: (name: string) => void;
   onDelete: (template: DynamicTemplateResource) => void;
+  onExplainDeleteBlock?: (template: DynamicTemplateResource, reason: string) => void;
   onRestore: (template: DynamicTemplateResource) => void;
 }
 
@@ -224,7 +240,6 @@ const DynamicTemplateCatalogPreview = memo(function DynamicTemplateCatalogPrevie
   presentation = "thumbnail",
   previewModel,
   previewKey = definition.templateId,
-  basisLabel,
   zoom = null,
 }: {
   definition: TemplateDefinitionV2;
@@ -232,17 +247,22 @@ const DynamicTemplateCatalogPreview = memo(function DynamicTemplateCatalogPrevie
   presentation?: "thumbnail" | "detail" | "structure";
   previewModel: TemplateCatalogPreviewModel;
   previewKey?: string;
-  basisLabel?: string;
   zoom?: number | null;
 }) {
   const neutralPreview = useMemo(
     () => presentation !== "detail" ? createNeutralTemplateCatalogPreview(definition) : null,
     [definition, presentation],
   );
-  const renderDefinition = neutralPreview?.definition ?? definition;
+  const detailPreview = useMemo(
+    () => presentation === "detail"
+      ? withNeutralTemplateImages(definition, createTemplateCatalogPreviewContentBySlotId(definition))
+      : null,
+    [definition, presentation],
+  );
+  const renderDefinition = neutralPreview?.definition ?? detailPreview?.definition ?? definition;
   const contentBySlotId = useMemo(
-    () => neutralPreview?.contentBySlotId ?? createTemplateCatalogPreviewContentBySlotId(definition),
-    [definition, neutralPreview],
+    () => neutralPreview?.contentBySlotId ?? detailPreview?.contentBySlotId ?? createTemplateCatalogPreviewContentBySlotId(definition),
+    [definition, detailPreview, neutralPreview],
   );
   const hasUnconfiguredMedia = useMemo(
     () => presentation === "detail" && hasUnconfiguredTemplateCatalogMedia(definition),
@@ -261,7 +281,6 @@ const DynamicTemplateCatalogPreview = memo(function DynamicTemplateCatalogPrevie
       sourceWidth={previewModel.sourceWidth}
       templateKey={previewKey}
       title={definition.name}
-      basisLabel={basisLabel}
       viewport={device}
       presentation={presentation}
       zoom={zoom}
@@ -405,12 +424,69 @@ function resolveUnifiedTemplatePreviewDefinition(
   return { definition: presentation.definition, previewKey: presentation.templateId };
 }
 
+function CatalogCardPreview({
+  definition,
+  device,
+  previewKey,
+  catalogCoverUrl,
+}: {
+  definition: TemplateDefinitionV2;
+  device: "desktop" | "mobile";
+  previewKey: string;
+  catalogCoverUrl?: string | null;
+}) {
+  const [coverFailed, setCoverFailed] = useState(false);
+  const cover = catalogCoverUrl?.trim() ?? "";
+  const previewModel = useMemo(
+    () => createTemplateCatalogPreviewModel(definition, device),
+    [definition, device],
+  );
+  if (!cover || coverFailed) {
+    return (
+      <DynamicTemplateCatalogPreview
+        definition={definition}
+        device={device}
+        previewKey={previewKey}
+        previewModel={previewModel}
+      />
+    );
+  }
+  const ratio = previewModel.heightMode === "auto"
+    ? undefined
+    : `${previewModel.sourceWidth} / ${Math.max(previewModel.fallbackHeight, 1)}`;
+  return (
+    <div
+      className="template-editor__catalog-cover-preview"
+      data-catalog-cover=""
+      style={ratio ? { aspectRatio: ratio } : undefined}
+    >
+      <img
+        src={resolveManagedTemplateMediaPreviewUrl(cover)}
+        alt=""
+        onError={() => setCoverFailed(true)}
+      />
+    </div>
+  );
+}
+
 function renderDynamicTemplatePreview(
   definition: TemplateDefinitionV2,
   device: "desktop" | "mobile",
   previewKey = definition.templateId,
-  basisLabel?: string,
+  catalogCoverUrl?: string | null,
 ): Pick<CatalogEntryBase, "preview"> {
+  if (catalogCoverUrl?.trim()) {
+    return {
+      preview: (
+        <CatalogCardPreview
+          definition={definition}
+          device={device}
+          previewKey={previewKey}
+          catalogCoverUrl={catalogCoverUrl}
+        />
+      ),
+    };
+  }
   const previewModel = createTemplateCatalogPreviewModel(definition, device);
   return {
     preview: (
@@ -418,7 +494,6 @@ function renderDynamicTemplatePreview(
         definition={definition}
         device={device}
         previewKey={previewKey}
-        basisLabel={basisLabel}
         previewModel={previewModel}
       />
     ),
@@ -428,15 +503,17 @@ function renderDynamicTemplatePreview(
 function renderUnifiedTemplatePreview(
   presentation: UnifiedTemplateCatalogPresentation,
   device: "desktop" | "mobile",
-  basisLabel?: string,
 ): Pick<CatalogEntryBase, "preview"> {
   const resolved = resolveUnifiedTemplatePreviewDefinition(presentation);
   if (resolved) {
+    const cover = presentation.source === "published"
+      ? presentation.published.catalogCoverUrl
+      : presentation.editable.catalogCoverUrl;
     return renderDynamicTemplatePreview(
       resolved.definition,
       device,
       resolved.previewKey,
-      basisLabel,
+      cover,
     );
   }
   const viewport = RESPONSIVE_CANVAS[device];
@@ -712,7 +789,7 @@ function describeDesignCatalogStatus(entry: DesignCatalogEntry) {
         : entry.draftState === "unsaved"
           ? "尚未保存"
           : entry.lifecycle === "published-with-unpublished-changes"
-            ? "草稿有未发布修改"
+            ? "草稿还有修改"
             : entry.lifecycle === null
               ? "草稿差异待确认"
               : "草稿已保存";
@@ -724,6 +801,7 @@ function DesignTemplateCard({
   entry,
   onArchive,
   onDelete,
+  onExplainDeleteBlock,
   onOpen,
   onPreview,
   onManage,
@@ -731,11 +809,15 @@ function DesignTemplateCard({
   publishedDraftCreation,
   onRefresh,
   onRestore,
+  onArchiveUnsaved,
+  onUploadCover,
 }: {
   device: "desktop" | "mobile";
   entry: DesignCatalogEntry;
   onArchive?: (target: ArchivableTemplateEditorLibraryTarget, name: string) => void;
+  onArchiveUnsaved?: (name: string) => void;
   onDelete?: (template: DynamicTemplateResource) => void;
+  onExplainDeleteBlock?: (template: DynamicTemplateResource, reason: string) => void;
   onOpen: (target: TemplateEditorLibraryTarget) => void;
   onPreview: (entry: DesignCatalogEntry) => void;
   onManage?: (target: TemplateEditorLibraryTarget, action: "copy" | "copy-published" | "rename") => void;
@@ -746,6 +828,7 @@ function DesignTemplateCard({
   publishedDraftCreation?: PublishedDraftCreationState | null;
   onRefresh: () => void;
   onRestore: (template: DynamicTemplateResource) => void;
+  onUploadCover?: () => void;
 }) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const archivedTemplate = entry.target.kind === "dynamic-persisted"
@@ -808,17 +891,18 @@ function DesignTemplateCard({
           label: "恢复模板",
         },
         { type: "divider" },
-        {
-          key: "permanently-delete",
-          icon: <DeleteOutlined />,
-          danger: true,
-          disabled: !archivedTemplate.canDelete,
-          label: (
-            <span title={archivedTemplate.canDelete ? "永久删除后无法恢复" : deleteBlockedReason}>
-              {archivedTemplate.canDelete ? "永久删除模板" : "永久删除不可用"}
-            </span>
-          ),
-        },
+        archivedTemplate.canDelete
+          ? {
+              key: "permanently-delete",
+              icon: <DeleteOutlined />,
+              danger: true,
+              label: <span title="永久删除后无法恢复">永久删除模板</span>,
+            }
+          : {
+              key: "explain-delete-block",
+              icon: <DeleteOutlined />,
+              label: <span title={deleteBlockedReason}>不能永久删除</span>,
+            },
       ]
     : [
         {
@@ -826,7 +910,13 @@ function DesignTemplateCard({
           icon: <EditOutlined />,
           label: "打开编辑",
         },
-        onArchive && entry.target.kind !== "dynamic-local" && entry.target.kind !== "dynamic-new"
+        ...(onUploadCover ? [{
+          key: "upload-cover",
+          icon: <EyeOutlined />,
+          label: persistedTemplate?.catalogCoverUrl ? "更换预览图" : "上传预览图",
+        }] : []),
+        (onArchive && entry.target.kind === "dynamic-persisted")
+          || (onArchiveUnsaved && (entry.target.kind === "dynamic-local" || entry.target.kind === "dynamic-new"))
           ? {
               key: "move-to-trash",
               icon: <InboxOutlined />,
@@ -844,19 +934,25 @@ function DesignTemplateCard({
     setActionsOpen(false);
     if (key === "copy" || key === "copy-published" || key === "rename") onManage?.(entry.target, key);
     if (key === "open") onOpen(entry.target);
+    if (key === "upload-cover") onUploadCover?.();
     if (
       key === "create-draft-from-published"
       && persistedTemplate
       && publishedTemplate
     ) onCreateDraftFromPublished(persistedTemplate, publishedTemplate);
     if (key === "reload-catalog") onRefresh();
+    if (key === "move-to-trash" && entry.target.kind === "dynamic-persisted") {
+      onArchive?.(entry.target, entry.name);
+    }
     if (
       key === "move-to-trash"
-      && entry.target.kind !== "dynamic-local"
-      && entry.target.kind !== "dynamic-new"
-    ) onArchive?.(entry.target, entry.name);
+      && (entry.target.kind === "dynamic-local" || entry.target.kind === "dynamic-new")
+    ) onArchiveUnsaved?.(entry.name);
     if (key === "restore" && archivedTemplate) onRestore(archivedTemplate);
     if (key === "permanently-delete" && archivedTemplate?.canDelete) onDelete?.(archivedTemplate);
+    if (key === "explain-delete-block" && archivedTemplate) {
+      onExplainDeleteBlock?.(archivedTemplate, deleteBlockedReason);
+    }
   };
   return (
     <TemplateCatalogCard
@@ -871,7 +967,7 @@ function DesignTemplateCard({
       dataTemplateIdentity={entry.identity}
       dataTemplateName={dataTemplateNameForTarget(entry.target)}
       disabled={Boolean(archivedTemplate) || creatingEditableDraft}
-      name={entry.name}
+      name={catalogCardName(entry.definition.metadata.sectionRole, entry.name)}
       disabledReason={missingEditableDraft
         ? creatingEditableDraft
           ? "正在建立编辑草稿"
@@ -885,7 +981,9 @@ function DesignTemplateCard({
           data-template-publication-status={entry.lifecycle ?? "unverifiable"}
         >
           <span className="template-editor__catalog-published-state">{publicationStatus}</span>
-          {draftStatus ? <span className="template-editor__catalog-draft-state">{draftStatus}</span> : null}
+          {draftStatus && draftStatus !== "草稿已保存" ? (
+            <span className="template-editor__catalog-draft-state">{draftStatus}</span>
+          ) : null}
         </span>
       )}
       onClick={archivedTemplate || creatingEditableDraft
@@ -922,7 +1020,13 @@ function DesignTemplateCard({
               ...(!missingEditableDraft ? [{ key: "rename", label: "重命名" }] : []),
             ] : actionItems, onClick: handleActionClick }}
             open={actionsOpen}
-            onOpenChange={setActionsOpen}
+            onOpenChange={(open) => {
+              setActionsOpen(open);
+              if (!open || !archivedTemplate) return;
+              // #region agent log
+              fetch('http://127.0.0.1:7582/ingest/a1219585-d788-4382-98dc-02ef5e6f81fa',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'370af6'},body:JSON.stringify({sessionId:'370af6',runId:'post-fix',hypothesisId:'G',location:'TemplateEditorLibrary.tsx:trash-menu',message:'unified trash delete availability',data:{name:entry.name,canDelete:archivedTemplate.canDelete,blocker:deleteBlockedReason,publishedVersion:persistedTemplate?.publishedVersion??null},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+            }}
             placement="bottomRight"
             transitionName=""
             trigger={["click"]}
@@ -990,7 +1094,7 @@ function PagePublishedTemplateCard({
       dataTemplateIdentity={entry.identity}
       dataTemplateName={entry.template.templateId}
       draggable
-      name={entry.name}
+      name={catalogCardName(entry.template.definition.metadata.sectionRole, entry.name)}
       preview={entry.preview}
       statusLabel={handoff
         ? `刚发布 · 已发布 · v${entry.template.version}`
@@ -1073,7 +1177,16 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const detailPreviewTriggerRef = useRef<HTMLElement | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [coverTarget, setCoverTarget] = useState<{
+    templateId: string;
+    name: string;
+    definition: TemplateDefinitionV2;
+    catalogCoverUrl: string | null;
+  } | null>(null);
+  const [coverSaving, setCoverSaving] = useState(false);
+  const { message } = AntdApp.useApp();
   const [detailPreview, setDetailPreview] = useState<TemplateCatalogDetailPreview | null>(null);
+  const [launchMasterPickerOpen, setLaunchMasterPickerOpen] = useState(false);
   const [pageHandoff, setPageHandoff] = useState<PageTemplateLibraryHandoff | null>(null);
   const focusedHandoffKeyRef = useRef<string | null>(null);
   const pageHandoffRef = useRef<PageTemplateLibraryHandoff | null>(null);
@@ -1107,7 +1220,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       : null;
     setDetailPreview({
       definition: template.definition,
-      name: template.name,
+      name: catalogCardName(template.definition.metadata.sectionRole, template.name),
       previewKey: `${template.templateId}@${template.version}`,
       versionLabel: `已发布 · 精确版本 v${template.version}`,
       insertTemplate: template,
@@ -1123,7 +1236,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       : "草稿预览";
     setDetailPreview({
       definition: entry.definition,
-      name: entry.name,
+      name: catalogCardName(entry.definition.metadata.sectionRole, entry.name),
       previewKey: `${entry.identity}:draft`,
       versionLabel: `${previewSource} · ${publicationStatus}${draftStatus ? ` · ${draftStatus}` : ""}`,
     });
@@ -1247,9 +1360,22 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
     return () => mobileWorkspace.removeEventListener("change", collapseForMobile);
   }, []);
 
-  const openDesignTarget = (target: TemplateEditorLibraryTarget) => {
+  const openDesignTarget = (
+    target: TemplateEditorLibraryTarget,
+    onOpened?: (draft: TemplateEditorDraft) => void,
+  ) => {
     if (props.mode !== "design") return;
-    props.onOpen(target);
+    if (libraryOverlay.compact && onOpened) {
+      // 紧凑宽度下模板目录是覆盖面板，收起等于整块卸载——放在选择器里的那个选择会跟着没。
+      // 所以带 onOpened 的入口（首发母版选择器）要等目标真正打开之后再收：未保存确认框
+      // 一旦弹出来，用户点"继续编辑"得回到原样，而不是回到一个空了的画布。
+      props.onOpen(target, (draft) => {
+        onOpened(draft);
+        libraryOverlay.requestClose();
+      });
+      return;
+    }
+    props.onOpen(target, onOpened);
     if (libraryOverlay.compact) {
       libraryOverlay.requestClose();
     }
@@ -1291,6 +1417,22 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       if (requestId === catalogRequestIdRef.current) setCatalogLoading(false);
     }
   }, [localOnly]);
+
+  const persistCatalogCover = useCallback(async (catalogCoverUrl: string | null) => {
+    if (!coverTarget) return;
+    setCoverSaving(true);
+    try {
+      unwrapResponse(await dynamicTemplateApi.updateCatalogCover(coverTarget.templateId, { catalogCoverUrl }));
+      setCoverTarget(null);
+      await refreshCatalog();
+    } catch (error) {
+      const apiMessage = getEditorApiErrorMessage(error);
+      message.error(getEditorErrorMessage(error, apiMessage || "预览图没有保存。请重试。"));
+      throw error;
+    } finally {
+      setCoverSaving(false);
+    }
+  }, [coverTarget, message, refreshCatalog]);
 
   const applyCatalogItems = useCallback((items: TemplateCatalogItemResource[]) => {
     catalogRequestIdRef.current += 1;
@@ -1406,7 +1548,6 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             ...renderUnifiedTemplatePreview(
             presentation,
             props.device,
-            `将插入已发布 v${presentation.published.version}`,
           ),
             template: presentation.published,
           });
@@ -1460,12 +1601,6 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             ? entry.published.definitionChecksum
             : null,
         });
-        const publishedVersion = ordinaryEditable.publishedVersion;
-        const basisLabel = lifecycle === "published-with-unpublished-changes" && publishedVersion
-          ? `正在看草稿，已发布 v${publishedVersion} 的可见内容不同`
-          : publishedVersion
-            ? `正在看草稿，与已发布 v${publishedVersion} 一致`
-            : "正在看尚未发布的草稿";
         entries.push({
           kind: "design",
           key: entry.key,
@@ -1487,7 +1622,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             currentDefinition,
             props.device,
             `${ordinaryEditable.templateId}:draft`,
-            basisLabel,
+            ordinaryEditable.catalogCoverUrl,
           ),
         });
         continue;
@@ -1512,9 +1647,6 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           ...renderUnifiedTemplatePreview(
             presentation,
             props.device,
-            ordinaryEditable.publishedVersion
-              ? `正在看已发布 v${ordinaryEditable.publishedVersion}`
-              : "正在看已发布版本",
           ),
         });
       }
@@ -1720,7 +1852,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           searchAriaLabel="搜索模板"
           tip={props.mode === "design"
             ? designView === "trash"
-              ? "回收站中的模板只能恢复或永久删除"
+              ? "回收站里可以恢复模板。只有从未发布、也没有被页面用过的模板，才能永久删除"
               : "点击编辑模板；更多操作在卡片右侧"
             : "点击卡片预览；拖到目标位置，或使用“添加到页面”"}
           countLabel={String(visibleEntryCount)}
@@ -1820,7 +1952,9 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       device={props.device}
                       entry={entry}
                       onArchive={localOnly ? undefined : props.onArchive}
+                      onArchiveUnsaved={localOnly ? undefined : props.onArchiveUnsaved}
                       onDelete={localOnly ? undefined : props.onDelete}
+                      onExplainDeleteBlock={props.onExplainDeleteBlock}
                       onOpen={openDesignTarget}
                       onPreview={openDesignPreview}
                       onManage={props.onManage}
@@ -1828,6 +1962,16 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       publishedDraftCreation={props.publishedDraftCreation}
                       onRefresh={() => { void refreshCatalog(); }}
                       onRestore={props.onRestore}
+                      onUploadCover={entry.target.kind === "dynamic-persisted" && entry.target.template.status !== "ARCHIVED"
+                        ? () => setCoverTarget({
+                          templateId: entry.target.kind === "dynamic-persisted" ? entry.target.template.templateId : "",
+                          name: catalogCardName(entry.definition.metadata.sectionRole, entry.name),
+                          definition: entry.definition,
+                          catalogCoverUrl: entry.target.kind === "dynamic-persisted"
+                            ? entry.target.template.catalogCoverUrl ?? null
+                            : null,
+                        })
+                        : undefined}
                     />
                   );
                 }
@@ -1859,7 +2003,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       dataTemplateIdentity={entry.identity}
                       dataTemplateName={entry.template.templateId}
                       disabled
-                      name={entry.name}
+                      name={catalogCardName(entry.template.draft?.definition.metadata.sectionRole, entry.name)}
                       preview={entry.preview}
                       metadata={entry.group}
                       statusLabel="草稿 · 尚未首次发布"
@@ -1895,6 +2039,14 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
             <PlusOutlined />
             <span>新建模板</span>
           </button>
+          <button
+            type="button"
+            aria-label="从首发母版开始"
+            onClick={() => setLaunchMasterPickerOpen(true)}
+          >
+            <AppstoreOutlined />
+            <span>从首发母版开始</span>
+          </button>
         </footer>
       ) : null}
     </aside>
@@ -1910,6 +2062,28 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         } : undefined}
       />
     ) : null}
+    {coverTarget ? (
+      <TemplateCatalogCoverEditor
+        templateId={coverTarget.templateId}
+        name={coverTarget.name}
+        definition={coverTarget.definition}
+        catalogCoverUrl={coverTarget.catalogCoverUrl}
+        saving={coverSaving}
+        onClose={() => { if (!coverSaving) setCoverTarget(null); }}
+        onClear={() => { void persistCatalogCover(null); }}
+        onSaved={(catalogCoverUrl) => persistCatalogCover(catalogCoverUrl)}
+      />
+    ) : null}
+    {launchMasterPickerOpen ? (
+      <LaunchMasterPickerModal
+        onCancel={() => setLaunchMasterPickerOpen(false)}
+        // 选中后不立刻收起：目标要等未保存确认框走完才真正打开，此处收起等于把用户的选择丢掉。
+        onSelect={(definition) => openDesignTarget(
+          { kind: "dynamic-new", definition },
+          () => setLaunchMasterPickerOpen(false),
+        )}
+      />
+    ) : null}
     </>
   );
 }
@@ -1923,7 +2097,9 @@ export default function TemplateEditorLibrary({
   readWorkspaceScroll,
   updateWorkspaceScroll,
   onArchive,
+  onArchiveUnsaved,
   onDelete,
+  onExplainDeleteBlock,
   onCreateDraftFromPublished,
   onOpen,
   onManage,
@@ -1942,12 +2118,14 @@ export default function TemplateEditorLibrary({
     updates: Partial<TemplateWorkspaceScrollState>,
   ) => void;
   onArchive: (target: ArchivableTemplateEditorLibraryTarget, name: string) => void;
+  onArchiveUnsaved?: (name: string) => void;
   onDelete: (template: DynamicTemplateResource) => void;
+  onExplainDeleteBlock?: (template: DynamicTemplateResource, reason: string) => void;
   onCreateDraftFromPublished: (
     template: DynamicTemplateResource,
     published: PublishedDynamicTemplateResource,
   ) => void;
-  onOpen: (target: TemplateEditorLibraryTarget) => void;
+  onOpen: (target: TemplateEditorLibraryTarget, onOpened?: (draft: TemplateEditorDraft) => void) => void;
   onManage?: (target: TemplateEditorLibraryTarget, action: "copy" | "copy-published" | "rename") => void;
   publishedDraftCreation?: PublishedDraftCreationState | null;
   onRestore: (template: DynamicTemplateResource) => void;
@@ -1969,7 +2147,9 @@ export default function TemplateEditorLibrary({
       activePersistedTemplateId={draft?.sourceType === "persisted" ? draft.definition.templateId : null}
       activeLocalDraftId={draft?.sourceType === "local" ? draft.localDraftId : null}
       onArchive={onArchive}
+      onArchiveUnsaved={onArchiveUnsaved}
       onDelete={onDelete}
+      onExplainDeleteBlock={onExplainDeleteBlock}
       onCreateDraftFromPublished={onCreateDraftFromPublished}
       onOpen={onOpen}
       onManage={onManage}

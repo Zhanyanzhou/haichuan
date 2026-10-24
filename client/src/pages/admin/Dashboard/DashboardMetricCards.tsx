@@ -2,19 +2,18 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   AccountBookOutlined,
-  CarOutlined,
   CaretDownOutlined,
   CaretUpOutlined,
   EyeOutlined,
-  MessageOutlined,
   ShoppingOutlined,
-  ShopOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
 import { ADMIN_COPY } from "@/constants/adminCopy";
 import {
-  buildChange,
+  comparisonDisplay,
   formatCurrency,
   formatNumber,
+  trafficNote,
   type Change,
   type DashboardStats,
 } from "./dashboardModel";
@@ -30,56 +29,55 @@ interface MetricCard {
 }
 
 function buildMetricCards(stats: DashboardStats): MetricCard[] {
+  const blocked = trafficNote(stats);
+  const visitors = comparisonDisplay(
+    stats.visitorsToday,
+    stats.visitorsYesterday,
+    blocked,
+  );
+  const views = comparisonDisplay(
+    stats.pageViewsToday,
+    stats.pageViewsYesterday,
+    blocked,
+  );
+  const orders = comparisonDisplay(stats.orderToday, stats.orderYesterday);
+  const amount = comparisonDisplay(stats.revenueToday, stats.revenueYesterday);
   return [
+    {
+      key: "visitors",
+      label: "今日访客",
+      icon: <UserOutlined />,
+      value: blocked ? "—" : formatNumber(stats.visitorsToday ?? 0),
+      change: visitors.change,
+      stockNote: visitors.note || undefined,
+      route: "/admin/analytics",
+    },
+    {
+      key: "pageView",
+      label: "今日浏览",
+      icon: <EyeOutlined />,
+      value: blocked ? "—" : formatNumber(stats.pageViewsToday),
+      change: views.change,
+      stockNote: views.note || undefined,
+      route: "/admin/analytics",
+    },
     {
       key: "order",
       label: "今日订单",
       icon: <ShoppingOutlined />,
       value: formatNumber(stats.orderToday),
-      change: buildChange(stats.orderToday, stats.orderYesterday),
+      change: orders.change,
+      stockNote: orders.note || undefined,
       route: "/admin/orders",
     },
     {
       key: "revenue",
-      label: "成交金额",
+      label: "下单金额",
       icon: <AccountBookOutlined />,
       value: formatCurrency(stats.revenueToday),
-      change: buildChange(stats.revenueToday, stats.revenueYesterday),
+      change: amount.change,
+      stockNote: amount.note || undefined,
       route: "/admin/orders",
-    },
-    {
-      key: "inquiry",
-      label: "新增咨询",
-      icon: <MessageOutlined />,
-      value: formatNumber(stats.inquiriesToday),
-      change: buildChange(stats.inquiriesToday, stats.inquiriesYesterday),
-      route: "/admin/leads?type=inquiry",
-    },
-    {
-      key: "pageView",
-      label: "页面浏览量",
-      icon: <EyeOutlined />,
-      value: formatNumber(stats.pageViewsToday),
-      change: buildChange(stats.pageViewsToday, stats.pageViewsYesterday),
-      route: "/admin/analytics",
-    },
-    {
-      key: "product",
-      label: "在售商品数",
-      icon: <ShopOutlined />,
-      value: formatNumber(stats.publishedProductCount ?? 0),
-      change: null,
-      stockNote: "上架中商品",
-      route: "/admin/products",
-    },
-    {
-      key: "ship",
-      label: "待发货订单",
-      icon: <CarOutlined />,
-      value: formatNumber(stats.pendingShip),
-      change: null,
-      stockNote: "当前待发货",
-      route: "/admin/orders?status=PENDING_SHIP",
     },
   ];
 }
@@ -97,11 +95,11 @@ export function DashboardMetricCards({
     <section className="admin-dashboard__section" aria-labelledby="cards-title">
       <div className="admin-dashboard__section-head">
         <h2 id="cards-title">今日核心数据</h2>
-        <span>与昨日同口径对比</span>
+        <span>与昨日同一时刻对比</span>
       </div>
       <div className="admin-dashboard__cards">
         {loading || cards.length === 0
-          ? Array.from({ length: 6 }).map((_, index) => (
+          ? Array.from({ length: 4 }).map((_, index) => (
               <div
                 key={index}
                 className="admin-dashboard__card is-skeleton"

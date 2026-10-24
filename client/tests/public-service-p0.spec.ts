@@ -65,7 +65,7 @@ async function fillRequiredContactFields(page: Page) {
   await page.locator("#cf-name").fill("测试访客");
   await page.locator("#cf-phone").fill("13800000000");
   await page.locator("#cf-type").selectOption("高级定制");
-  await page.locator("#cf-time").selectOption("下午 (14:00-18:00)");
+  await page.locator("#cf-time").selectOption("下午 (13:00-18:00)");
   await page.locator("#cf-message").fill("希望了解适合日常佩戴的珠宝定制方案。\n");
   await page.locator("#cf-privacy-consent").check();
 }

@@ -64,7 +64,7 @@ export const editorPages: EditorPageDefinition[] = [
     publicFallback: {
       eyebrow: "海川珠宝",
       title: "首页正在准备",
-      description: "首页内容正在整理。您可以先进入选款中心浏览当前公开款式，或了解珠宝定制服务。",
+      description: "首页内容正在整理。您可以先进入选款中心，或了解珠宝定制服务。",
       primaryAction: { label: "进入选款中心", href: "/catalog" },
       secondaryAction: { label: "了解珠宝定制", href: "/custom" },
     },
@@ -80,7 +80,7 @@ export const editorPages: EditorPageDefinition[] = [
       eyebrow: "关于海川",
       title: "关于海川",
       description:
-        "品牌、作品与工艺资料正在核验。您可以先浏览当前公开款式，或预约珠宝顾问了解更多。",
+        "品牌与工艺资料仍在核验，这里不提前写出未经确认的故事。您可以进入选款中心查看当前可浏览的款式，或预约顾问了解服务。",
       primaryAction: { label: "进入选款中心", href: "/catalog" },
       secondaryAction: { label: "预约珠宝顾问", href: "/contact" },
     },
@@ -96,7 +96,7 @@ export const editorPages: EditorPageDefinition[] = [
       eyebrow: "作品展陈",
       title: "珠宝作品正在策展",
       description:
-        "我们正在完成作品资料与材质工艺内容的审核。您可以先浏览当前已公开款式，或预约珠宝顾问获得协助。",
+        "正式作品尚未上架。选款中心先展示一组演示款式，用来查看版式；这些款式不是在售作品。您仍可预约珠宝顾问说明需求。",
       primaryAction: { label: "进入选款中心", href: "/catalog" },
       secondaryAction: { label: "预约珠宝顾问", href: "/contact?type=product" },
     },
@@ -126,7 +126,7 @@ export const editorPages: EditorPageDefinition[] = [
       eyebrow: "定制服务",
       title: "珠宝定制",
       description:
-        "定制内容正在整理。您可以先提交咨询需求，由珠宝顾问了解您的佩戴场景与偏好。",
+        "珠宝定制的范围、流程和交期仍在核验，这里不提前写出未确认的服务承诺。您可以提交咨询，说明佩戴场景与偏好。深圳门店可以到店接待，线上咨询不限地区。",
       primaryAction: { label: "提交定制咨询", href: "/contact?type=custom" },
       secondaryAction: { label: "浏览公开款式", href: "/catalog" },
     },

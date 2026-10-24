@@ -3,7 +3,7 @@ import { Alert, Button, Checkbox, Input, Modal, Select, Switch, Tag, theme } fro
 import { createDynamicTemplateStableId } from "../template-definition/nodeRegistry";
 import { TEMPLATE_RECIPE_SCHEMA, type TemplateDefinitionV2, type TemplateRecipe } from "../template-definition/generated/templateDefinition.generated";
 import { validateTemplateRecipe } from "../template-definition/validateTemplateDefinition";
-import { isCanvasBackground, imageRatioLabel, ALIGNMENTS, MARGINS, MARGIN_VALUES, RADIUS_VALUES, SPACING_VALUES, paletteFor, recommendedAlignment, BACKGROUNDS, CANVAS_PRESETS, CONTENTS, CREATION_PURPOSES, LAYOUTS, MEDIA_PRESETS, MEDIA_ROLES, PURPOSES, RADII, SPACINGS, STYLES, changeRecipePurpose, createContentSlot, createMediaSlots, createRecommendedRecipe, recommendedFor, styleFor, type RecipeSection } from "./presets";
+import { isCanvasBackground, imageRatioLabel, ALIGNMENTS, MARGINS, MARGIN_VALUES, RADIUS_VALUES, SPACING_VALUES, paletteFor, recommendedAlignment, BACKGROUNDS, CANVAS_PRESETS, CONTENTS, LAYOUTS, MEDIA_PRESETS, MEDIA_ROLES, RADII, SECTION_ROLES, SPACINGS, STYLES, changeRecipeSectionRole, createContentSlot, createMediaSlots, createRecommendedRecipe, recommendedFor, styleFor, type RecipeSection } from "./presets";
 import { generateTemplateFromRecipe } from "./generateTemplateFromRecipe";
 import TemplateRecipePreview from "./TemplateRecipePreview";
 import RecipeOptionPreview from "./RecipeOptionPreview";
@@ -13,7 +13,7 @@ import { hasInvalidRecipeRadiusInputs } from "./recipeRadiusInput";
 import "./NewTemplateRecipeModal.css";
 
 const popupContainer = (trigger: HTMLElement) => trigger.closest<HTMLElement>(".ant-modal-content") ?? document.body;
-const STEPS = ["用途", "尺寸", "布局", "图片", "内容", "风格", "确认"];
+const STEPS = ["角色", "尺寸", "布局", "图片", "内容", "风格", "确认"];
 const dimensionValid = (value: number) => Number.isInteger(value) && value >= 1 && value <= 4096;
 const CONTENT_LIMIT = TEMPLATE_RECIPE_SCHEMA.properties.content.maxItems;
 const RECOMMENDATION_SECTIONS = [["canvas", "尺寸"], ["layout", "布局"], ["media", "图片"], ["content", "内容"], ["style", "风格"]] as const;
@@ -24,14 +24,14 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
   onCreate: (definition: TemplateDefinitionV2) => void;
 }) {
   const { token } = theme.useToken();
-  const [recipe, setRecipe] = useState<TemplateRecipe>(() => ({ ...createRecommendedRecipe("general"), layout: "topImageBottomContent",
+  const [recipe, setRecipe] = useState<TemplateRecipe>(() => ({ ...createRecommendedRecipe(), layout: "topImageBottomContent",
     media: createMediaSlots(["heroImage"]), content: [createContentSlot("title"), createContentSlot("description")], rules: { aspectLocked: false, mediaArrangement: "row" } }));
   const [step, setStep] = useState(0);
   const [returnToConfirm, setReturnToConfirm] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
   const [recommendationSections, setRecommendationSections] = useState<RecipeSection[]>([]);
   const [recommendationNotice, setRecommendationNotice] = useState("");
-  const [selected, setSelected] = useState({ purpose: false, canvas: false, layout: false });
+  const [selected, setSelected] = useState({ sectionRole: false, canvas: false, layout: false });
   const [dirty, setDirty] = useState<Partial<Record<RecipeSection, boolean>>>({});
   const [customSize, setCustomSize] = useState(false);
   const [dimensionInputs, setDimensionInputs] = useState<Partial<Record<"width" | "height", string>>>({});
@@ -59,17 +59,17 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
     onCancel();
     requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus(); });
   };
-  const recommendation = recommendedFor(recipe.purpose);
+  const recommendation = recommendedFor(recipe.sectionRole);
   const dimensionsValid = dimensionValid(recipe.canvas.width) && dimensionValid(recipe.canvas.height);
-  const purposeValid = selected.purpose && (recipe.purpose !== "custom" || Boolean(recipe.customPurpose?.trim()));
+  const roleValid = selected.sectionRole;
   const radiusInputsInvalid = hasInvalidRecipeRadiusInputs(recipe, radiusInputs);
-  const stepValid = step === 0 ? purposeValid : step === 1 ? selected.canvas && dimensionsValid : step === 2 ? selected.layout && recipe.media.every((slot) => slot.name.trim())
+  const stepValid = step === 0 ? roleValid : step === 1 ? selected.canvas && dimensionsValid : step === 2 ? selected.layout && recipe.media.every((slot) => slot.name.trim())
     : step === 3 ? !radiusInputsInvalid && recipe.media.every((slot) => slot.name.trim()) : step === 4 ? recipe.content.length <= CONTENT_LIMIT && recipe.content.every((slot) => slot.name.trim() && slot.defaultContent.length <= slot.maxLength) : true;
   const generated = useMemo(() => {
     try { return { definition: generateTemplateFromRecipe(recipe, { templateId, name: name.trim() || "未命名模板" }), error: "" }; }
     catch (error) { return { definition: null, error: error instanceof Error ? error.message : "模板方案无效，请返回检查配置。" }; }
   }, [recipe, templateId, name]);
-  const canConfirm = Boolean(purposeValid && selected.canvas && dimensionsValid && selected.layout && generated.definition && !radiusInputsInvalid);
+  const canConfirm = Boolean(roleValid && selected.canvas && dimensionsValid && selected.layout && generated.definition && !radiusInputsInvalid);
   const errorSteps = useMemo(() => {
     if (!generated.error) return [];
     const steps = new Set<number>();
@@ -85,7 +85,7 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
     if (!recipe.media.length && !recipe.content.length) return [2, 4];
     return [1, 2, 3, 4];
   }, [generated.error, recipe]);
-  const suggestedRecipe = useMemo(() => createRecommendedRecipe(recipe.purpose), [recipe.purpose]);
+  const suggestedRecipe = useMemo(() => createRecommendedRecipe(recipe.sectionRole), [recipe.sectionRole]);
   const editStep = (index: number) => { setReturnToConfirm(true); setSubmitError(""); setStep(index); };
   const applyRecommendations = () => {
     if (!recommendationSections.length) return;
@@ -210,19 +210,18 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
     <button type="button" className="template-recipe__preview-toggle" aria-expanded={previewOpen} onClick={() => setPreviewOpen(!previewOpen)}>{previewOpen ? "返回选项" : "查看预览"}</button>
     <div className="template-recipe__workspace" data-preview-open={previewOpen}>
     <div className="template-recipe__body">
-      <h3 ref={heading} tabIndex={-1}>{["你准备创建什么类型的模板？", "选择网页区块画幅", "选择布局结构", "设置每张图片的外观", "这个模板需要展示哪些内容？", "选择基础视觉风格", "确认模板方案"][step]}</h3>
+      <h3 ref={heading} tabIndex={-1}>{["这一节在页面里承担什么角色？", "选择网页区块画幅", "选择布局结构", "设置每张图片的外观", "这个模板需要展示哪些内容？", "选择基础视觉风格", "确认模板方案"][step]}</h3>
       {step === 0 && <>
-        <p>类型只改变后面的推荐，不决定页面角色。后续仍可选择任意画幅和布局。</p>
-        <p>通用模板：逐项选择配置；自定义：还可填写自己的用途名称。</p>
-        <div className="template-recipe__grid">{CREATION_PURPOSES.map(([id, label]) => card(id, label, selected.purpose && recipe.purpose === id, () => {
-          setRecipe((previous) => { const next = changeRecipePurpose(previous, id, dirty); return { ...next, media: applyInheritedMediaRadius(next.media, RADIUS_VALUES[next.style.radius], mediaRadiusEdited), rules: { ...next.rules, mediaArrangement: next.rules.mediaArrangement ?? "row" } }; });
+        <p>区块角色说明这一节在页面里的用途，只改变后面的推荐，不决定页面结构。后续仍可选择任意画幅和布局。</p>
+        <p>尚未选择角色时按中性示例展示：画幅随内容增长、布局自由、图片与内容为空。</p>
+        <div className="template-recipe__grid">{SECTION_ROLES.map(([id, label]) => card(id, label, selected.sectionRole && recipe.sectionRole === id, () => {
+          setRecipe((previous) => { const next = changeRecipeSectionRole(previous, id, dirty); return { ...next, media: applyInheritedMediaRadius(next.media, RADIUS_VALUES[next.style.radius], mediaRadiusEdited), rules: { ...next.rules, mediaArrangement: next.rules.mediaArrangement ?? "row" } }; });
           if (!dirty.media) setMediaPreset(recommendedFor(id).mediaPreset);
-          setSelected((previous) => ({ ...previous, purpose: true }));
+          setSelected((previous) => ({ ...previous, sectionRole: true }));
           setRecommendationSections([]); setRecommendationNotice("");
         }))}</div>
-        {recipe.purpose === "custom" && <label className="template-recipe__field">自定义用途<Input aria-label="自定义用途" value={recipe.customPurpose} maxLength={80} onChange={(event) => setRecipe({ ...recipe, customPurpose: event.target.value })} /></label>}
-        {selected.purpose && <details className="template-recipe__recommendations">
-          <summary>重新应用当前用途推荐</summary>
+        {selected.sectionRole && <details className="template-recipe__recommendations">
+          <summary>重新应用当前角色推荐</summary>
           <p>只替换勾选的配置。替换尺寸会解除锁比；替换图片会重建槽位与图片设置；替换内容会重建槽位及文案。未勾选部分保持不变，仅替换风格时保留已有图片的独立形态与圆角。</p>
           <div className="template-recipe__recommendation-list">{RECOMMENDATION_SECTIONS.map(([key, label]) => {
             const available = key === "style" || key === "canvas" && recommendation.ratios.length > 0 || key === "layout" && recommendation.layouts.length > 0 || key === "media" && Boolean(recommendation.mediaPreset) || key === "content" && recommendation.contents.length > 0;
@@ -231,7 +230,7 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
               : key === "media" ? suggestedRecipe.media.map((slot) => slot.name).join("、")
               : key === "content" ? suggestedRecipe.content.map((slot) => slot.name).join("、")
               : `${labelOf(STYLES, suggestedRecipe.style.variant)} · ${labelOf(BACKGROUNDS, suggestedRecipe.style.background)} · ${RADIUS_VALUES[suggestedRecipe.style.radius]} px 圆角 · ${labelOf(SPACINGS, suggestedRecipe.style.spacing)}间距（保留已有图片形态）`;
-            return <div key={key}><Checkbox aria-label={`应用${label}推荐`} disabled={!available} checked={recommendationSections.includes(key)} onChange={(event) => setRecommendationSections((previous) => event.target.checked ? [...previous, key] : previous.filter((item) => item !== key))}>{label}</Checkbox><span>{available ? result : "当前用途无推荐，保留你的选择"}</span></div>;
+            return <div key={key}><Checkbox aria-label={`应用${label}推荐`} disabled={!available} checked={recommendationSections.includes(key)} onChange={(event) => setRecommendationSections((previous) => event.target.checked ? [...previous, key] : previous.filter((item) => item !== key))}>{label}</Checkbox><span>{available ? result : "当前角色无推荐，保留你的选择"}</span></div>;
           })}</div>
           <Button disabled={!recommendationSections.length} onClick={applyRecommendations}>确认应用已选推荐</Button>
           {recommendationNotice && <p role="status">{recommendationNotice}</p>}
@@ -285,7 +284,7 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
           }, <RecipeOptionPreview recipe={{ ...recipe, rules: { ...recipe.rules, mediaArrangement: value } }} />))}
         </div><p>排列方向已确定，修改单张图片比例不会自动换成另一种排列。</p></>}
         <p className="template-recipe__selection-summary">已选：{recipe.media.map((slot) => `${slot.name}${isCanvasBackground(recipe, slot) ? "（画布背景）" : ""}`).join("、") || "无图片"}</p>
-        {recipe.layout === "fullImageOverlay" && <p>背景图片铺满画布；没有单独背景图时，首张主图片用作背景，原图片设置会保留。</p>}
+        {recipe.layout === "fullImageOverlay" && <p>背景图铺满画布；没有单独背景图时，首张主图用作背景，原图片设置会保留。</p>}
         {structureNotice && <p role="status">{structureNotice} {previousStructure && <Button size="small" onClick={() => {
           const restored = restoreRecipeMediaStructure(previousStructure, recipe.media, mediaRadiusEdited);
           update("media", applyInheritedMediaRadius(restored.media, RADIUS_VALUES[recipe.style.radius], restored.edited), restored.edited); setMediaPreset(previousStructure.preset); setMediaRadiusEdited(restored.edited); setPreviousStructure(null); setStructureNotice("已恢复上次图片结构，保留现有图片的最新设置。");
@@ -350,7 +349,7 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
       </>}
       {step === 6 && <div className="template-recipe__confirmation">
         <div><label className="template-recipe__field">模板名称<Input aria-label="模板名称" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} /></label>
-          <dl data-template-recipe-confirmation-summary="true"><dt>模板用途<Button type="link" size="small" aria-label="修改用途" onClick={() => editStep(0)}>修改</Button></dt><dd>{recipe.purpose === "custom" ? recipe.customPurpose : labelOf(PURPOSES, recipe.purpose)}</dd>
+          <dl data-template-recipe-confirmation-summary="true"><dt>区块角色<Button type="link" size="small" aria-label="修改角色" onClick={() => editStep(0)}>修改</Button></dt><dd>{recipe.sectionRole ? labelOf(SECTION_ROLES, recipe.sectionRole) : "尚未选择"}</dd>
             <dt>画布<Button type="link" size="small" aria-label="修改尺寸" onClick={() => editStep(1)}>修改</Button></dt><dd>{recipe.canvas.width} × {recipe.canvas.height} px · {CANVAS_PRESETS.find((item) => item.width === recipe.canvas.width && item.height === recipe.canvas.height)?.ratio ?? `${recipe.canvas.width}:${recipe.canvas.height}`}</dd>
             <dt>布局<Button type="link" size="small" aria-label="修改布局" onClick={() => editStep(2)}>修改</Button></dt><dd>{labelOf(LAYOUTS, recipe.layout)}</dd><dt>图片<Button type="link" size="small" aria-label="修改图片" onClick={() => editStep(3)}>修改</Button></dt><dd>{recipe.media.map((slot) => slot.name).join("、") || "无图片"}</dd>
             {ordinaryImages.length > 1 && <><dt>图片排列</dt><dd>{arrangementLabel}</dd></>}
@@ -368,7 +367,7 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
       {generated.error && (step >= 3 || returnToConfirm || errorSteps.includes(step)) && <Alert className="template-recipe__error" type="warning" showIcon message={generated.error} description={<div className="template-recipe__error-actions">{errorSteps.map((index) => <Button key={index} size="small" onClick={() => { setStep(index); setPreviewOpen(false); }}>{`修改${STEPS[index]}`}</Button>)}</div>} />}
     </div>
     <aside className="template-recipe__live-preview" aria-label="当前方案">
-      <div className="template-recipe__preview-heading"><strong>{selected.purpose ? "方案预览" : "中性示例（尚未选择用途）"}</strong><span>{recipe.canvas.width} × {recipe.canvas.height}</span></div>
+      <div className="template-recipe__preview-heading"><strong>{selected.sectionRole ? "方案预览" : "中性示例（尚未选择角色）"}</strong><span>{recipe.canvas.width} × {recipe.canvas.height}</span></div>
       <p>{radiusInputsInvalid ? "圆角尚未更新：预览保留上次有效值，请先修正图片圆角。" : step === 6 ? "确认后进入编辑器，可继续调整。" : "随选择更新，未配置部分使用推荐值。"}</p>
       <p>示例文字仅用于预览，不会保存或发布；正式默认文案请在创建后填写。</p>
       {step === 3 && recipe.media[activeImageIndex] && <p className="template-recipe__active-image" role="status">正在设置：图片 {activeImageIndex + 1} · {recipe.media[activeImageIndex].name}</p>}
@@ -383,7 +382,7 @@ export default function NewTemplateRecipeModal({ onCancel, onCreate }: {
     </aside>
     </div>
     <div className="template-recipe__announcement" aria-live="polite" aria-atomic="true">
-      {selected.purpose ? `${recipe.canvas.width} × ${recipe.canvas.height} px，${labelOf(LAYOUTS, recipe.layout)}，${recipe.media.length} 个图片位置，${recipe.content.length} 项内容。${generated.error || ""}` : "尚未选择模板用途，当前展示中性示例。"}
+      {selected.sectionRole ? `${recipe.canvas.width} × ${recipe.canvas.height} px，${labelOf(LAYOUTS, recipe.layout)}，${recipe.media.length} 个图片位置，${recipe.content.length} 项内容。${generated.error || ""}` : "尚未选择区块角色，当前展示中性示例。"}
     </div>
   </Modal>;
 }

@@ -16,8 +16,13 @@ import {
   buildParentMap,
   buildTreeData,
   filterTree,
+  categorySlugFromName,
+  collectSlugs,
   findNode,
-  getSiblings,
+  nextSortOrder,
+  orderedSiblings,
+  removeNode,
+  withoutRetiredEmpty,
   type CatTreeNode,
   type CategoryDropInfo,
 } from "./categoryManageModel";
@@ -35,17 +40,22 @@ export default function CategoryManage() {
   const [saving, setSaving] = useState(false);
   const [reordering, setReordering] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<CatTreeNode | null>(null);
+  const [createParentId, setCreateParentId] = useState<number | null>(null);
   const [form] = Form.useForm<CategoryInput>();
   const prevTreeRef = useRef<CatTreeNode[] | null>(null);
 
-  const refresh = async () => {
-    setLoading(true);
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true);
     setLoadError(false);
     try {
       const res = await categoryApi.getManageTree();
       const data = unwrapResponse<CatTreeNode[]>(res);
       setTree(data);
+      setSelectedKeys((current) => {
+        const selectedId = current[0];
+        if (selectedId != null && findNode(data, selectedId)) return current;
+        return data[0] ? [data[0].id] : [];
+      });
       // 首次加载默认展开全部一级;后续刷新保留用户已展开状态
       setExpandedKeys((prev) =>
         prev.length
@@ -54,10 +64,14 @@ export default function CategoryManage() {
       );
     } catch (err) {
       console.error("分类树加载失败:", err);
-      setTree([]);
-      setLoadError(true);
+      if (silent) {
+        message.error("分类列表刷新失败，请重新加载。");
+      } else {
+        setTree([]);
+        setLoadError(true);
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -66,12 +80,12 @@ export default function CategoryManage() {
   }, []);
 
   const parentMap = useMemo(() => buildParentMap(tree), [tree]);
-  const filteredTree = useMemo(() => filterTree(tree, keyword.trim()), [tree, keyword]);
-  const treeData = useMemo(() => buildTreeData(filteredTree), [filteredTree]);
-  const primaryCategories = useMemo(
-    () => tree.filter((c) => c.level === 1),
-    [tree],
+  const visibleTree = useMemo(() => withoutRetiredEmpty(tree), [tree]);
+  const filteredTree = useMemo(
+    () => filterTree(visibleTree, keyword.trim()),
+    [visibleTree, keyword],
   );
+  const treeData = useMemo(() => buildTreeData(filteredTree), [filteredTree]);
 
   // 搜索命中:把命中节点及其祖先并入 expandedKeys
   useEffect(() => {
@@ -95,9 +109,15 @@ export default function CategoryManage() {
   }, [keyword, tree]);
 
   const selectedNode = useMemo(
-    () => (selectedKeys[0] != null ? findNode(tree, selectedKeys[0]) : undefined),
-    [tree, selectedKeys],
+    () => (selectedKeys[0] != null ? findNode(visibleTree, selectedKeys[0]) : undefined),
+    [visibleTree, selectedKeys],
   );
+
+  useEffect(() => {
+    const selectedId = selectedKeys[0];
+    if (selectedId == null || findNode(visibleTree, selectedId) || !visibleTree[0]) return;
+    setSelectedKeys([visibleTree[0].id]);
+  }, [visibleTree, selectedKeys]);
 
   /* ───── 拖拽排序 ───── */
   const handleDrop = (info: CategoryDropInfo) => {
@@ -119,9 +139,7 @@ export default function CategoryManage() {
     const posArr = String(info.node.pos || "").split("-");
     const rel = info.dropPosition - Number(posArr[posArr.length - 1]);
     // 4) 兄弟段(按 sortOrder)+ 插入
-    const siblings = getSiblings(tree, dragParent)
-      .slice()
-      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const siblings = orderedSiblings(tree, dragParent);
     const dragNode = siblings.find((s) => s.id === dragKey);
     if (!dragNode) return;
     const withoutDrag = siblings.filter((s) => s.id !== dragKey);
@@ -157,20 +175,41 @@ export default function CategoryManage() {
 
   /* ───── 新增 / 编辑 ───── */
   const openCreate = (parentId?: number | null) => {
-    setEditing(null);
+    const parent = parentId && parentId > 0 ? parentId : null;
+    setCreateParentId(parent);
     form.resetFields();
-    form.setFieldsValue({
-      parentId: parentId ?? 0,
-      sortOrder: 0,
-      isActive: true,
-    });
     setModalOpen(true);
   };
 
-  const openEdit = (node: CatTreeNode) => {
-    setEditing(node);
-    form.setFieldsValue({ ...node, parentId: node.parentId ?? 0 });
-    setModalOpen(true);
+  const createCategory = async (parentId: number | null, rawName: string) => {
+    const name = rawName.trim();
+    if (!name) return false;
+    const payload: CategoryInput = {
+      name,
+      slug: categorySlugFromName(name, collectSlugs(tree)),
+      sortOrder: nextSortOrder(tree, parentId),
+    };
+    if (parentId) payload.parentId = parentId;
+    setSaving(true);
+    try {
+      const res = await categoryApi.create(payload);
+      const created = unwrapResponse<Category>(res);
+      message.success(parentId ? "款式已添加" : "品类已创建");
+      if (created?.id) {
+        setSelectedKeys([created.id]);
+        if (parentId) {
+          setExpandedKeys((current) => Array.from(new Set([...current, parentId])));
+        }
+      }
+      await refresh(true);
+      return true;
+    } catch (err: unknown) {
+      console.error("保存分类失败:", err);
+      message.error(getSafeAdminErrorMessage(err, "分类保存失败，请检查填写内容后重试。"));
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -180,61 +219,98 @@ export default function CategoryManage() {
     } catch {
       return;
     }
-    const payload: CategoryInput = {
-      name: values.name,
-      slug: values.slug,
-      sortOrder: values.sortOrder,
-      isActive: values.isActive,
-      icon: values.icon,
-      coverImage: values.coverImage,
-    };
+    const created = await createCategory(createParentId, values.name ?? "");
+    if (created) setModalOpen(false);
+  };
+
+  const handleShift = (node: CatTreeNode, direction: -1 | 1) => {
+    const parentId = node.parentId ?? null;
+    const siblings = orderedSiblings(tree, parentId);
+    const index = siblings.findIndex((item) => item.id === node.id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= siblings.length) return;
+    const next = siblings.slice();
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    const payload: CategorySortItem[] = next.map((item, position) => ({
+      id: item.id,
+      sortOrder: position + 1,
+    }));
+    prevTreeRef.current = tree;
+    setTree(applySiblingOrder(tree, parentId, next));
+    void commitReorder(payload);
+  };
+
+  const handleDelete = async (node: CatTreeNode) => {
+    const snapshot = tree;
+    const snapshotSelection = selectedKeys;
     setSaving(true);
+    setTree((current) => removeNode(current, node.id));
+    setSelectedKeys((current) => current.filter((id) => id !== node.id));
     try {
-      if (editing) {
-        // 编辑:仅非一级才允许带 parentId(一级不支持改归属)
-        if (editing.level !== 1 && Number(values.parentId) > 0) {
-          payload.parentId = values.parentId;
-        }
-        await categoryApi.update(editing.id, payload);
-        message.success("分类已更新");
-      } else {
-        // 新增:parentId 为 0 → 一级;正整数为二级
-        if (Number(values.parentId) > 0) payload.parentId = values.parentId;
-        const res = await categoryApi.create(payload);
-        const created = unwrapResponse<Category>(res);
-        message.success("分类已创建");
-        if (created?.id) setSelectedKeys([created.id]);
-      }
-      setModalOpen(false);
-      await refresh();
+      await categoryApi.delete(node.id);
+      message.success("分类已删除");
+      await refresh(true);
+      setTree((current) => removeNode(current, node.id));
     } catch (err: unknown) {
-      console.error("保存分类失败:", err);
-      message.error(getSafeAdminErrorMessage(err, "分类保存失败，请检查填写内容后重试。"));
+      console.error("删除分类失败:", err);
+      setTree(snapshot);
+      setSelectedKeys(snapshotSelection);
+      message.error(
+        getSafeAdminErrorMessage(
+          err,
+          "分类还在。没有下级款式和商品时才能删除，请再试一次。",
+        ),
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  /* ───── 启用 / 停用(停用走 delete 接口,自带关联保护) ───── */
-  const handleDisable = async (node: CatTreeNode) => {
+  const handleRename = async (node: CatTreeNode, name: string) => {
+    setSaving(true);
     try {
-      await categoryApi.delete(node.id);
-      message.success("分类已停用");
-      await refresh();
+      await categoryApi.update(node.id, { name });
+      message.success("分类名称已更新");
+      await refresh(true);
     } catch (err: unknown) {
-      console.error("停用失败:", err);
-      message.error(getSafeAdminErrorMessage(err, "分类停用失败，请检查关联商品后重试。"));
+      console.error("更新分类名称失败:", err);
+      message.error(getSafeAdminErrorMessage(err, "分类名称保存失败，请重试。"));
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleEnable = async (node: CatTreeNode) => {
+  const handleCoverChange = async (node: CatTreeNode, coverImage: string) => {
+    setSaving(true);
     try {
-      await categoryApi.update(node.id, { isActive: true });
-      message.success("分类已启用");
-      await refresh();
+      await categoryApi.update(node.id, { coverImage });
+      message.success("分类封面已更新");
+      await refresh(true);
     } catch (err: unknown) {
-      console.error("启用失败:", err);
-      message.error(getSafeAdminErrorMessage(err, "分类启用失败，请重新加载后重试。"));
+      console.error("更新分类封面失败:", err);
+      message.error(getSafeAdminErrorMessage(err, "分类封面保存失败，请重试。"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleMove = async (node: CatTreeNode, parentId: number) => {
+    if (!parentId || node.parentId === parentId) return;
+    setSaving(true);
+    try {
+      await categoryApi.update(node.id, {
+        parentId,
+        sortOrder: nextSortOrder(tree, parentId),
+      });
+      message.success("已改到新的品类下");
+      setExpandedKeys((current) => Array.from(new Set([...current, parentId])));
+      await refresh(true);
+    } catch (err: unknown) {
+      console.error("调整所属品类失败:", err);
+      message.error(getSafeAdminErrorMessage(err, "所属品类修改失败，请重试。"));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -256,10 +332,10 @@ export default function CategoryManage() {
       <header className="cat-manage__header">
         <div className="cat-manage__title">
           <h1>分类管理</h1>
-          <p>维护一、二级分类；拖拽同级节点可调整前后台展示顺序。</p>
+          <p>品类下面是款式。左侧顺序就是前台顺序。商品在商品资料里选择分类。</p>
         </div>
-        <Button type="primary" size="small" onClick={() => openCreate(null)}>
-          <PlusOutlined /> 新建一级分类
+        <Button type="primary" onClick={() => openCreate(null)}>
+          <PlusOutlined /> 新建品类
         </Button>
       </header>
 
@@ -283,21 +359,32 @@ export default function CategoryManage() {
           {!selectedNode ? (
             <div className="cat-manage__detail-empty">
               <FolderOpenOutlined />
-              <span>从左侧选择分类查看详情</span>
+              <span>还没有品类。用右上角的「新建品类」开始。</span>
             </div>
           ) : (
             <CategoryDetailPanel
               key={selectedNode.id}
               node={selectedNode}
-              tree={tree}
+              tree={visibleTree}
+              keyword={keyword}
               reordering={reordering}
-              onEdit={() => openEdit(selectedNode)}
-              onCreateSub={() => openCreate(selectedNode.id)}
-              onDisable={() => void handleDisable(selectedNode)}
-              onEnable={() => void handleEnable(selectedNode)}
-              onViewProducts={() =>
-                navigate(`/admin/products?categoryId=${selectedNode.id}`)
-              }
+              saving={saving}
+              onAddStyle={(name) => createCategory(selectedNode.id, name)}
+              onDelete={() => void handleDelete(selectedNode)}
+              onMove={(parentId) => void handleMove(selectedNode, parentId)}
+              onOpen={(id) => setSelectedKeys([id])}
+              onShift={(direction) => handleShift(selectedNode, direction)}
+              onRename={(name) => void handleRename(selectedNode, name)}
+              onCoverChange={(url) => void handleCoverChange(selectedNode, url)}
+              onViewProducts={() => {
+                const params = new URLSearchParams({
+                  categoryId: String(selectedNode.id),
+                });
+                if (selectedNode.level === 1) {
+                  params.set("includeDescendants", "1");
+                }
+                navigate(`/admin/products?${params.toString()}`);
+              }}
             />
           )}
         </section>
@@ -305,10 +392,8 @@ export default function CategoryManage() {
 
       <CategoryFormModal
         open={modalOpen}
-        editing={editing}
         form={form}
         saving={saving}
-        primaryCategories={primaryCategories}
         onCancel={() => setModalOpen(false)}
         onSave={handleSave}
       />

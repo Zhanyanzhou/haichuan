@@ -146,6 +146,16 @@
   color: #fff;
 }
 .template-editor__selection-toolbar .template-editor__editable-overlay-move { cursor: move; touch-action: none; }
+.template-editor__selection-toolbar .template-editor__selection-toolbar-delete {
+  border-color: #c9a3a0;
+  color: #8a3a32;
+}
+.template-editor__selection-toolbar .template-editor__selection-toolbar-delete:hover,
+.template-editor__selection-toolbar .template-editor__selection-toolbar-delete:focus-visible {
+  border-color: #8a3a32;
+  background: #8a3a32;
+  color: #fff;
+}
 .template-editor__selection-toolbar-help {
   overflow: hidden;
   color: var(--adm-text-secondary, #5F6568);

@@ -4,8 +4,6 @@ import {
   ArrowUpOutlined,
   BlockOutlined,
   CopyOutlined,
-  CaretDownOutlined,
-  CaretRightOutlined,
   DeleteOutlined,
   ExclamationCircleOutlined,
   EyeInvisibleOutlined,
@@ -31,7 +29,6 @@ import {
 } from "react";
 import {
   createDefaultDynamicTemplateResponsiveRules,
-  DynamicTemplateOperationError,
   duplicateDynamicTemplateNode,
   getDynamicTemplateGroupDisabledReason,
   getDynamicTemplateMoveLandings,
@@ -42,7 +39,6 @@ import {
   isDynamicTemplateStructureLocked,
   isDynamicTemplateStructureProtected,
   moveDynamicTemplateNodeToLanding,
-  removeDynamicTemplateNode,
   resolveDynamicTemplateMoveLanding,
   resolveDynamicTemplateMoveShortcutLanding,
   setDynamicTemplateNodeHidden,
@@ -61,9 +57,10 @@ import WorkspacePanelCollapseButton from "../workspace/WorkspacePanelCollapseBut
 import WorkspacePanelHeader from "../workspace/WorkspacePanelHeader";
 import {
   findDynamicTemplateParentId,
-  describeDynamicTemplateRemoval,
   getDynamicTemplateRegionDisplayName,
 } from "./dynamicTemplateEditorUtils";
+import { orderStructureChildIds } from "./structureReadingOrder";
+import { requestDeleteTemplateNode } from "./requestTemplateNodeDeletion";
 import { addConfiguredTemplateRegion } from "./dynamicTemplateDraftRepository";
 import { DynamicTemplateNodePalette } from "./DynamicTemplateToolbox";
 import {
@@ -98,19 +95,6 @@ const GROUP_MENU_KINDS = [
 }>;
 
 const STRUCTURE_COMMAND_FEEDBACK_KEY = "template-structure-command-feedback";
-
-function findRequiredSlotInSubtree(definition: TemplateDefinitionV2, nodeId: string) {
-  const pending = [nodeId];
-  while (pending.length) {
-    const currentId = pending.shift()!;
-    const node = definition.nodes[currentId];
-    if (!node) continue;
-    const slot = node.slotId ? definition.slots[node.slotId] : undefined;
-    if (slot?.required) return { nodeId: currentId, slot };
-    pending.unshift(...node.childIds);
-  }
-  return null;
-}
 
 interface ResponsiveRoleOption {
   device: "desktop" | "mobile" | "all";
@@ -178,6 +162,50 @@ export function resolveStructureVisibility(definition: TemplateDefinitionV2, nod
     currentId = findDynamicTemplateParentId(definition, currentId);
   }
   return { hidden: false, visibilityReason: undefined };
+}
+
+function clearBreakpointHide(
+  definition: TemplateDefinitionV2,
+  nodeId: string,
+  breakpoint: TemplateBreakpoint,
+) {
+  const node = definition.nodes[nodeId];
+  const rules = resolveTemplateNodeRules(definition, nodeId, breakpoint);
+  if (!node || (!rules.hidden && rules.display !== "none")) return definition;
+  const next = structuredClone(definition);
+  setTemplateNodeRule(next, nodeId, breakpoint, "hidden", false);
+  if (rules.display === "none") {
+    const upstream: TemplateBreakpoint[] = breakpoint === "mobile" ? ["desktop"] : [];
+    const display = upstream
+      .map((candidate) => resolveTemplateNodeRules(next, nodeId, candidate).display)
+      .find((value) => value && value !== "none")
+      ?? createDefaultDynamicTemplateResponsiveRules(node.type).display;
+    setTemplateNodeRule(next, nodeId, breakpoint, "display", display);
+  }
+  return next;
+}
+
+/** 取消这项以及仍挡住它的上级隐藏，让它在当前设备上显示。自身的断点规则只在那是最后一层阻挡时才改。 */
+function revealTemplateNode(
+  definition: TemplateDefinitionV2,
+  nodeId: string,
+  breakpoint: TemplateBreakpoint,
+) {
+  let next = definition;
+  let currentId: string | null = nodeId;
+  const visited = new Set<string>();
+  while (currentId && !visited.has(currentId) && currentId !== next.rootNodeId) {
+    visited.add(currentId);
+    const node = next.nodes[currentId];
+    if (!node) break;
+    if (node.hidden) next = setDynamicTemplateNodeHidden(next, currentId, false);
+    if (currentId !== nodeId) next = clearBreakpointHide(next, currentId, breakpoint);
+    if (!resolveStructureVisibility(next, nodeId, breakpoint).hidden) break;
+    if (currentId === nodeId) next = clearBreakpointHide(next, currentId, breakpoint);
+    if (!resolveStructureVisibility(next, nodeId, breakpoint).hidden) break;
+    currentId = findDynamicTemplateParentId(next, currentId);
+  }
+  return next;
 }
 
 function getRegionTreeItemKey(region: Pick<StructureRegion, "nodeId">) {
@@ -397,7 +425,7 @@ function collectRegionEntries(
     });
   }
   const childDepth = includeNode ? depth + 1 : depth;
-  node.childIds.forEach((childId) => collectRegionEntries(
+  orderStructureChildIds(definition, nodeId, node.childIds).forEach((childId) => collectRegionEntries(
     definition,
     childId,
     childDepth,
@@ -410,7 +438,7 @@ function collectRegionEntries(
 function buildStructureRegions(definition: TemplateDefinitionV2): StructureRegion[] {
   const root = definition.nodes[definition.rootNodeId];
   if (!root) return [];
-  return root.childIds.flatMap((nodeId): StructureRegion[] => {
+  return orderStructureChildIds(definition, definition.rootNodeId, root.childIds).flatMap((nodeId): StructureRegion[] => {
     const node = definition.nodes[nodeId];
     if (!node) return [];
     const slotNodeIds = collectSlotNodeIds(definition, nodeId);
@@ -579,6 +607,7 @@ export default function DynamicTemplateStructurePanel({
   const [focusedTreeItemKey, setFocusedTreeItemKey] = useState<string | null>(null);
   const [selectionExclusion, setSelectionExclusion] = useState<TemplateEditorSelectionExclusion | null>(null);
   const treeItemElements = useRef(new Map<string, HTMLDivElement>());
+  const deleteTreeTargetRef = useRef<(target: TemplateEditorSelectionTarget) => void>(() => {});
   const regions = useMemo(
     () => draft ? buildStructureRegions(draft.definition).map((region) => ({ ...region, ...resolveStructureVisibility(draft.definition, region.nodeId, breakpoint), entries: region.entries.map((entry) => ({ ...entry, ...resolveStructureVisibility(draft.definition, entry.nodeId, breakpoint), hidden: entry.hidden || resolveStructureVisibility(draft.definition, entry.nodeId, breakpoint).hidden })) })) : [],
     [draft, breakpoint],
@@ -594,11 +623,6 @@ export default function DynamicTemplateStructurePanel({
       return true;
     }),
   })), [regions, collapsedNodeIds, draft]);
-  const toggleNodeExpanded = (nodeId: string) => setCollapsedNodeIds((current) => {
-    const next = new Set(current);
-    if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
-    return next;
-  });
   useEffect(() => { setCollapsedNodeIds(new Set()); }, [draft?.definition.templateId]);
   useEffect(() => { setOpenedMenuNodeId(null); }, [draft?.definition.templateId, selectedNodeId]);
   useEffect(() => {
@@ -740,6 +764,12 @@ export default function DynamicTemplateStructurePanel({
         selectionTarget,
         event.key === "Enter" ? {} : event,
       );
+      return;
+    }
+    if ((event.key === "Delete" || event.key === "Backspace") && !event.repeat && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      deleteTreeTargetRef.current(selectionTarget);
       return;
     }
     const currentIndex = visibleTreeItemKeys.indexOf(treeItemKey);
@@ -1115,113 +1145,66 @@ export default function DynamicTemplateStructurePanel({
     const node = currentDraft.definition.nodes[nodeId];
     if (!node) return;
     const slot = node.slotId ? currentDraft.definition.slots[node.slotId] : undefined;
-    const requiredDescendant = !slot
-      ? findRequiredSlotInSubtree(currentDraft.definition, nodeId)
-      : null;
-    if (action === "toggle" && !node.hidden && slot?.required) {
+    if (action === "delete") {
+      requestDeleteTemplateNode(nodeId, {
+        confirm: (options) => {
+          modal.confirm({
+            title: options.title,
+            content: options.content,
+            okText: options.okText,
+            cancelText: options.cancelText,
+            okButtonProps: options.danger === false ? undefined : { danger: true },
+            onOk: options.onOk,
+          });
+        },
+        notifyError: showStructureCommandError,
+      });
+      return;
+    }
+    const visibility = resolveStructureVisibility(currentDraft.definition, nodeId, breakpoint);
+    const revealing = Boolean(node.hidden || visibility.hidden);
+    if (action === "toggle" && !revealing && slot?.required) {
       showStructureCommandError(
         `“${slot.label}”是母模板必填槽位，不能隐藏。请保留该槽位，并调整允许的布局或样式。`,
       );
       return;
     }
-    if (action === "delete" && slot?.required) {
-      modal.confirm({
-        title: `删除必填槽位“${slot.label}”？`,
-        content: "该动作会先取消页面必填要求，再删除当前槽位；两步作为一次操作，可一次撤销恢复。",
-        okText: "取消必填并删除",
-        okButtonProps: { danger: true },
-        cancelText: "继续保留",
-        onOk: () => executeStructureTransform("取消必填并删除槽位", (definition) => {
-          const next = structuredClone(definition);
-          const currentSlotId = next.nodes[nodeId]?.slotId;
-          if (!currentSlotId || !next.slots[currentSlotId]) return definition;
-          next.slots[currentSlotId].required = false;
-          return removeDynamicTemplateNode(next, nodeId);
-        }, { onSuccess: () => selectObject(findDynamicTemplateParentId(currentDraft.definition, nodeId)) }),
-      });
+    if (action === "toggle" && revealing) {
+      const next = revealTemplateNode(currentDraft.definition, nodeId, breakpoint);
+      applyStructureDefinition(next, { successMessage: "已取消隐藏，这项会显示在画布上。" });
       return;
     }
-    const apply = () => {
-      try {
-        if (action === "duplicate") {
-          const result = duplicateDynamicTemplateNode(currentDraft.definition, nodeId);
-          applyStructureDefinition(result.definition, { onSuccess: () => selectObject(result.nodeId) });
-          return;
-        }
-        if (action === "toggle") {
-          applyStructureDefinition(setDynamicTemplateNodeHidden(currentDraft.definition, nodeId, !node.hidden));
-          return;
-        }
-        if (action === "lock") {
-          applyStructureDefinition(setDynamicTemplateNodeStructureLocked(
-            currentDraft.definition,
-            nodeId,
-            !isDynamicTemplateStructureLocked(node),
-          ));
-          return;
-        }
-        if (action === "delete") {
-          applyStructureDefinition(removeDynamicTemplateNode(currentDraft.definition, nodeId), {
-            onSuccess: () => selectObject(findDynamicTemplateParentId(currentDraft.definition, nodeId)),
-          });
-          return;
-        }
-        const landing = resolveDynamicTemplateMoveShortcutLanding(
+    try {
+      if (action === "duplicate") {
+        const result = duplicateDynamicTemplateNode(currentDraft.definition, nodeId);
+        applyStructureDefinition(result.definition, { onSuccess: () => selectObject(result.nodeId) });
+        return;
+      }
+      if (action === "toggle") {
+        applyStructureDefinition(setDynamicTemplateNodeHidden(currentDraft.definition, nodeId, !node.hidden));
+        return;
+      }
+      if (action === "lock") {
+        applyStructureDefinition(setDynamicTemplateNodeStructureLocked(
           currentDraft.definition,
           nodeId,
-          action,
-        );
-        if (!landing) return;
-        applyStructureDefinition(
-          moveDynamicTemplateNodeToLanding(currentDraft.definition, nodeId, landing),
-          { onSuccess: () => selectObject(nodeId) },
-        );
-      } catch (error) {
-        if (
-          error instanceof DynamicTemplateOperationError
-          && error.code === "REQUIRED_SLOT_CANNOT_DELETE"
-          && requiredDescendant
-        ) {
-          const lockOwnerId = getDynamicTemplateStructureLockOwnerId(
-            currentDraft.definition,
-            requiredDescendant.nodeId,
-          );
-          modal.confirm({
-            title: `无法删除“${node.name}”`,
-            content: error.message,
-            okText: lockOwnerId ? "定位锁定来源" : "定位并取消必填",
-            cancelText: "继续保留",
-            onOk: () => {
-              const session = useTemplateEditorSession.getState();
-              session.selectObject(lockOwnerId ?? requiredDescendant.nodeId);
-              session.setInspectorTask(lockOwnerId ? "design" : "page-scope");
-              session.setInspectorView("context");
-              window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-                const field = document.querySelector<HTMLElement>(lockOwnerId
-                  ? '[data-template-inspector-field="authoring.structureLocked"]'
-                  : '[data-template-inspector-field="slot.required"]');
-                field?.scrollIntoView({ block: "nearest" });
-                field?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-              }));
-            },
-          });
-          return;
-        }
-        showStructureCommandError(`${error instanceof Error ? error.message : "结构操作失败"} 请检查当前层级和锁定状态后重试。`);
+          !isDynamicTemplateStructureLocked(node),
+        ));
+        return;
       }
-    };
-    if (action !== "delete") {
-      apply();
-      return;
+      const landing = resolveDynamicTemplateMoveShortcutLanding(
+        currentDraft.definition,
+        nodeId,
+        action,
+      );
+      if (!landing) return;
+      applyStructureDefinition(
+        moveDynamicTemplateNodeToLanding(currentDraft.definition, nodeId, landing),
+        { onSuccess: () => selectObject(nodeId) },
+      );
+    } catch (error) {
+      showStructureCommandError(`${error instanceof Error ? error.message : "结构操作失败"} 请检查当前层级和锁定状态后重试。`);
     }
-    modal.confirm({
-      title: slot ? `删除“${node.name}”？` : `删除“${node.name}”及其内容？`,
-      content: slot ? "该槽位将从当前草稿移除，可以撤销。已保存的模板版本保持原样。" : describeDynamicTemplateRemoval(currentDraft.definition, nodeId),
-      okText: "删除节点",
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: apply,
-    });
   };
 
   // 落点校验会模拟移动整个模板，只在打开对应菜单时计算，避免每行渲染都重复克隆。
@@ -1262,6 +1245,8 @@ export default function DynamicTemplateStructurePanel({
     const disabledActionLabel = (label: string, reason: string | null | undefined) => (
       reason ? `${label}（不可用：${reason}）` : label
     );
+    const visibility = resolveStructureVisibility(definition, nodeId, breakpoint);
+    const revealing = Boolean(node.hidden || visibility.hidden);
     const requiredSlotVisible = Boolean(slot?.required && !node.hidden);
     const deleteLabel = region ? "删除区域" : layout ? "删除容器" : "删除槽位";
     return {
@@ -1315,16 +1300,20 @@ export default function DynamicTemplateStructurePanel({
             }] : []),
             {
               key: "toggle",
-              icon: node.hidden ? <EyeOutlined aria-hidden="true" /> : <EyeInvisibleOutlined aria-hidden="true" />,
+              icon: revealing ? <EyeOutlined aria-hidden="true" /> : <EyeInvisibleOutlined aria-hidden="true" />,
               label: node.hidden
                 ? "取消全局隐藏（所有设备）"
-                : requiredSlotVisible
-                  ? "全局隐藏（必填槽位不可用）"
-                  : node.childIds.length > 0 ? "全局隐藏（所有设备及子内容）" : "全局隐藏（所有设备）",
-              title: node.hidden
-                ? "取消此对象的全局隐藏；对象及子内容仍受上级和各断点显隐设置影响，不保证立即可见。"
+                : visibility.visibilityReason?.startsWith("上级隐藏")
+                  ? "取消上级隐藏"
+                  : visibility.hidden
+                    ? "取消本端隐藏"
+                    : requiredSlotVisible
+                      ? "全局隐藏（必填槽位不可用）"
+                      : node.childIds.length > 0 ? "全局隐藏（所有设备及子内容）" : "全局隐藏（所有设备）",
+              title: revealing
+                ? "取消挡住这项的隐藏，让它在当前设备显示。"
                 : "影响所有设备；隐藏容器时，其内部内容一起不可见。各断点显隐设置保持不变。",
-              disabled: locked || requiredSlotVisible,
+              disabled: locked || (!revealing && requiredSlotVisible),
             },
             { type: "divider" },
             {
@@ -1332,7 +1321,6 @@ export default function DynamicTemplateStructurePanel({
               icon: <DeleteOutlined aria-hidden="true" />,
               label: slot?.required ? `${deleteLabel}…` : deleteLabel,
               danger: true,
-              disabled: locked || parentLocked,
             },
           ],
           onClick: ({ key, domEvent }) => {
@@ -1388,6 +1376,53 @@ export default function DynamicTemplateStructurePanel({
         </button>
       </Dropdown>
     );
+  };
+
+  const deleteNodeButton = (nodeId: string, label: string) => (
+    <button
+      type="button"
+      className="template-editor__structure-delete"
+      aria-label={`删除${label}`}
+      title="删除当前对象，可撤销"
+      onClick={(event) => {
+        event.stopPropagation();
+        performAction("delete", nodeId);
+      }}
+    >
+      <DeleteOutlined />
+    </button>
+  );
+
+  const revealNodeButton = (nodeId: string, label: string) => (
+    <button
+      type="button"
+      className="template-editor__structure-reveal"
+      aria-label={`显示${label}`}
+      title="取消隐藏，并在画布上显示"
+      onClick={(event) => {
+        event.stopPropagation();
+        performAction("toggle", nodeId);
+      }}
+    >
+      <EyeOutlined />
+    </button>
+  );
+
+  deleteTreeTargetRef.current = (target) => {
+    if (target.roleId) {
+      const slot = regions.flatMap((region) => region.slots).find((candidate) => (
+        candidate.nodeId === target.targetId && candidate.roleIds.includes(target.roleId!)
+      ));
+      if (slot) {
+        setContractRoleRemoved(slot, !slot.removed);
+        return;
+      }
+    }
+    if (target.targetId === definition.rootNodeId) {
+      window.dispatchEvent(new Event("template-editor:archive-current"));
+      return;
+    }
+    performAction("delete", target.targetId);
   };
 
   return (
@@ -1540,18 +1575,7 @@ export default function DynamicTemplateStructurePanel({
                     }}
                     onDragEnd={() => { setDragMarker(null); setDraggingNodeId(null); }}
                   >
-                    <span
-                      className="template-editor__tree-toggle"
-                      aria-hidden="true"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        event.currentTarget.closest<HTMLElement>('[role="treeitem"]')?.focus();
-                        toggleNodeExpanded(region.nodeId);
-                      }}
-                      onDoubleClick={(event) => event.stopPropagation()}
-                    >
-                      {collapsedNodeIds.has(region.nodeId) ? <CaretRightOutlined /> : <CaretDownOutlined />}
-                    </span>
+                    <span className="template-editor__tree-icon-slot" aria-hidden="true" />
                     {region.contractBacked ? (
                       <strong>{regionLabel}</strong>
                     ) : (
@@ -1565,7 +1589,12 @@ export default function DynamicTemplateStructurePanel({
                         />
                       </>
                     )}
-                    {!region.contractBacked ? nodeMenu(region.nodeId, region.rawName, true) : null}
+                    {!region.contractBacked ? (
+                      <>
+                        {deleteNodeButton(region.nodeId, region.rawName)}
+                        {nodeMenu(region.nodeId, region.rawName, true)}
+                      </>
+                    ) : null}
                   </div>
                 </div>
                 <ul role="group" hidden={collapsedNodeIds.has(region.nodeId)} aria-label={`${regionLabel}内容槽位`}>
@@ -1595,7 +1624,7 @@ export default function DynamicTemplateStructurePanel({
                             ref={(element) => setTreeItemElement(layoutTreeItemKey, element)}
                             tabIndex={rovingTreeItemKey === layoutTreeItemKey ? 0 : -1}
                             {...selectionDataAttributes(layoutSelectionTarget)}
-                            style={{ paddingLeft: `calc(4px + ${entry.depth} * var(--template-structure-indent-step, 12px))` }}
+                            style={{ paddingLeft: "4px" }}
                             draggable={!entry.locked && !layoutParentLocked}
                             onClick={(event) => selectTreeTarget(layoutSelectionTarget, event)}
                             onFocus={(event) => {
@@ -1629,18 +1658,6 @@ export default function DynamicTemplateStructurePanel({
                             }}
                             onDragEnd={() => { setDragMarker(null); setDraggingNodeId(null); }}
                           >
-                            <span
-                              className="template-editor__tree-toggle"
-                              aria-hidden="true"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                event.currentTarget.closest<HTMLElement>('[role="treeitem"]')?.focus();
-                                toggleNodeExpanded(entry.nodeId);
-                              }}
-                              onDoubleClick={(event) => event.stopPropagation()}
-                            >
-                              {collapsedNodeIds.has(entry.nodeId) ? <CaretRightOutlined /> : <CaretDownOutlined />}
-                            </span>
                             <HolderOutlined className="template-editor__drag-handle" aria-hidden="true" />
                             <BlockOutlined className="template-editor__layout-icon" aria-hidden="true" />
                             <InlineStructureName
@@ -1650,6 +1667,8 @@ export default function DynamicTemplateStructurePanel({
                               onCommit={(value) => renameNode(entry.nodeId, value)}
                             />
                             <div className="template-editor__slot-actions">
+                              {entry.hidden ? revealNodeButton(entry.nodeId, entry.label) : null}
+                              {deleteNodeButton(entry.nodeId, entry.label)}
                               {nodeMenu(entry.nodeId, entry.label, false, true)}
                             </div>
                           </div>
@@ -1685,7 +1704,7 @@ export default function DynamicTemplateStructurePanel({
                           ref={(element) => setTreeItemElement(slotTreeItemKey, element)}
                           tabIndex={rovingTreeItemKey === slotTreeItemKey ? 0 : -1}
                           {...selectionDataAttributes(slotSelectionTarget)}
-                          style={{ paddingLeft: `calc(4px + ${slot.depth} * var(--template-structure-indent-step, 12px))` }}
+                          style={{ paddingLeft: "4px" }}
                           draggable={canReorder && !slot.locked}
                           onClick={(event) => selectSlot(slot, event)}
                           onFocus={(event) => {
@@ -1737,17 +1756,20 @@ export default function DynamicTemplateStructurePanel({
                           )}
                         {!slot.virtual ? (
                           <div className="template-editor__slot-actions">
+                            {slot.hidden ? revealNodeButton(slot.nodeId, slot.label) : null}
+                            {deleteNodeButton(slot.nodeId, slot.label)}
                             {nodeMenu(slot.nodeId, slot.label, false)}
                           </div>
                         ) : slot.hideable ? (
                           <div className="template-editor__slot-actions">
                             <button
                               type="button"
-                              aria-label={`${slot.label}${slot.removed ? "恢复到模板" : "移出模板"}`}
-                              title={slot.removed ? "恢复可选内容" : "移出可选内容（可撤销）"}
+                              className={slot.removed ? undefined : "template-editor__structure-delete"}
+                              aria-label={`${slot.label}${slot.removed ? "已移出，恢复到模板" : "移出模板"}`}
+                              title={slot.removed ? "这项已移出模板，点击恢复" : "移出可选内容（可撤销）"}
                               onClick={(event) => { event.stopPropagation(); setContractRoleRemoved(slot, !slot.removed); }}
                             >
-                              {slot.removed ? <EyeOutlined /> : <DeleteOutlined />}
+                              {slot.removed ? <EyeInvisibleOutlined /> : <DeleteOutlined />}
                             </button>
                           </div>
                         ) : slot.virtual ? (
@@ -1779,7 +1801,7 @@ export default function DynamicTemplateStructurePanel({
       <div ref={paletteToolsRef}>
         <DynamicTemplateNodePalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       </div>
-      <p className="template-editor__structure-note">拖动调整顺序 · 右侧设置属性</p>
+      <p className="template-editor__structure-note">按阅读顺序排列 · 右侧设置属性</p>
     </aside>
   );
 }

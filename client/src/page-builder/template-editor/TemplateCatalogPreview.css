@@ -42,10 +42,19 @@
 
 .template-editor__catalog-artboard-stage.is-long-page {
   align-items: start;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-width: thin;
+  overflow: hidden;
+}
+
+.template-editor__catalog-artboard-stage.is-long-page::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  height: 28px;
+  background: linear-gradient(to bottom, transparent, var(--adm-neutral-bg));
+  content: "";
+  pointer-events: none;
 }
 
 .template-editor__catalog-long-page-hint {
@@ -69,8 +78,10 @@
 }
 
 .template-editor__catalog-cover-preview {
+  position: relative;
   display: block;
   width: 100%;
+  min-height: 140px;
   overflow: hidden;
   border-radius: 4px;
   background: var(--adm-neutral-bg);
@@ -78,6 +89,8 @@
 }
 
 .template-editor__catalog-cover-preview img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -312,17 +325,18 @@
   top: -20px;
 }
 
-/* 放大结构图保留完整槽位边界，文字只用底部短带提示类型，避免遮住中性示例。 */
+/* 缩略图不盖色带，也不在画面下排画幅和槽位数量。那些说明在放大预览里。 */
+.template-editor__catalog-preview-shell.is-thumbnail
+  .template-editor__editable-overlay.is-catalog {
+  display: none;
+}
+
+/* 结构视图保留细框，不再用色带和“文字／按钮”标签冒充内容。 */
 .template-editor__catalog-preview-shell.is-structure
-  .template-editor__editable-overlay-box:is(
-    [data-editable-target-kind="title"],
-    [data-editable-target-kind="description"],
-    [data-editable-target-kind="text"]
-  )::after {
-  top: auto;
-  bottom: 0;
-  height: 8px;
-  transform: none;
+  .template-editor__editable-overlay-box::before,
+.template-editor__catalog-preview-shell.is-structure
+  .template-editor__editable-overlay-box::after {
+  content: none;
 }
 
 .template-editor__catalog-slot-key {

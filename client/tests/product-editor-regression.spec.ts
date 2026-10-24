@@ -17,15 +17,18 @@ test.describe("商品编辑器关键回归", () => {
     await expect(page.getByRole("button", { name: "返回商品列表" })).toBeVisible();
     await expect(page.getByText("尚未保存", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "品牌" })).toHaveCount(0);
+    await expect(page.getByRole("radio", { name: "二手" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "批量导入" })).toHaveCount(0);
-    await expect(page.getByRole("combobox", { name: "可见范围" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "添加 SKU" })).toBeDisabled();
+    await expect(page.locator(".ant-form-item").filter({ hasText: "可见范围" }).locator(".ant-select-selection-item")).toHaveText("全部人可见");
+    await expect(page.getByRole("button", { name: "添加 SKU" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "直接销售" })).toBeChecked();
+    await expect(page.getByRole("radio", { name: "立刻上架" })).toBeChecked();
 
     const primaryTextColor = await page.locator(".pro-editor__footer .ant-btn-primary > span").evaluate((element) => getComputedStyle(element).color);
     expect(primaryTextColor).toBe("rgb(255, 255, 255)");
 
-    await page.getByRole("switch", { name: "只看核心字段" }).click();
-    await expect(page.getByRole("textbox", { name: "品牌" })).toBeVisible();
+    await page.getByRole("button", { name: "基础信息" }).click();
+    await expect(page.getByRole("spinbutton", { name: "金重（g）" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "证书编号" })).toBeVisible();
 
     await page.getByRole("button", { name: "预览" }).click();
@@ -33,18 +36,12 @@ test.describe("商品编辑器关键回归", () => {
     await expect(page.getByText("尚未上传主图")).toBeVisible();
     await page.getByRole("button", { name: "Close" }).click();
 
-    await page.getByRole("button", { name: "物流服务" }).click();
-    const expressDelivery = page.getByRole("checkbox", { name: "物流配送" });
-    await expect(expressDelivery).toBeVisible();
-    await expressDelivery.uncheck();
-    await page.getByText("到店自提", { exact: true }).click();
-    await expect(page.getByRole("checkbox", { name: "到店自提" })).toBeChecked();
-    await expect(page.getByText("当前未选择物流配送，无需设置运费模板。" )).toBeVisible();
+    await expect(page.getByRole("button", { name: "物流服务" })).toHaveCount(0);
   });
 
   test("校验提示准确，草稿允许标题未完成", async ({ page }) => {
-    await page.getByRole("button", { name: "保存到仓库" }).click();
-    await expect(page.getByText("请检查并修正标红字段")).toBeVisible();
+    await page.getByRole("button", { name: "保存草稿" }).click();
+    await expect(page.getByText("保存草稿至少需要选择类目并填写货号")).toBeVisible();
     await expect(page.getByText("保存失败，请检查后重试")).toHaveCount(0);
 
     await page.getByRole("button", { name: "基础信息" }).click();
@@ -67,9 +64,8 @@ test.describe("商品编辑器关键回归", () => {
   });
 
   test("桌面金额输入宽度和平板重排可用", async ({ page }) => {
-    await page.getByRole("switch", { name: "只看核心字段" }).click();
-    await page.getByRole("button", { name: "销售信息" }).click();
-    const priceWidth = await page.getByRole("spinbutton", { name: "工费" }).evaluate((element) => element.closest(".ant-input-number-affix-wrapper")?.getBoundingClientRect().width || 0);
+    await page.getByRole("button", { name: "基础信息" }).click();
+    const priceWidth = await page.locator("#basic").getByRole("spinbutton", { name: "金重（g）" }).evaluate((element) => element.closest(".ant-input-number-affix-wrapper")?.getBoundingClientRect().width || 0);
     expect(priceWidth).toBeGreaterThanOrEqual(300);
 
     await page.setViewportSize({ width: 720, height: 720 });

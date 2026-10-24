@@ -3,8 +3,7 @@ import type { Key } from "react";
 import ScifiButton from "@/components/ui/ScifiButton";
 import { ADMIN_COPY, getAdminEmptyText } from "@/constants/adminCopy";
 import {
-  catIcon,
-  countProductsRecursive,
+  visibleProductCount,
   type CatTreeDataNode,
   type CatTreeNode,
   type CategoryDropInfo,
@@ -33,24 +32,17 @@ function TreeTitle({
   selected: boolean;
   busy: boolean;
 }>) {
-  const inactive = node.isActive === false;
-  const count =
-    node.level === 1
-      ? countProductsRecursive(node)
-      : (node._count?.products ?? 0);
+  const count = visibleProductCount(node);
 
   return (
     <div
-      className={`cat-tree-title${selected ? " is-selected" : ""}${inactive ? " is-inactive" : ""}${busy ? " is-busy" : ""}`}
+      className={`cat-tree-title is-l${node.level}${selected ? " is-selected" : ""}${busy ? " is-busy" : ""}`}
     >
-      <span className="cat-tree-title__icon">{catIcon(node)}</span>
-      <span
-        className={`cat-tree-title__name cat-tree-title__name--l${node.level}`}
-      >
+      {node.icon ? <span className="cat-tree-title__icon">{node.icon}</span> : null}
+      <span className={`cat-tree-title__name cat-tree-title__name--l${node.level}`}>
         {node.name}
       </span>
-      {inactive && <span className="cat-tree-title__dot" title="已停用" />}
-      <span className="cat-tree-title__count">{count}</span>
+      <span className="cat-tree-title__count">{count} 件</span>
     </div>
   );
 }
@@ -75,7 +67,7 @@ export default function CategoryTreePanel({
           allowClear
           value={keyword}
           onChange={(event) => onKeywordChange(event.target.value)}
-          placeholder="搜索分类名称或 Slug"
+          placeholder="搜索分类名称"
           size="middle"
         />
       </div>

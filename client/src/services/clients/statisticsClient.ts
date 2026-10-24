@@ -1,6 +1,6 @@
 import api from "../httpClient";
 
-export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews";
+export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews" | "visitors";
 
 export const statisticsApi = {
   getDashboard: () => api.get("/statistics/dashboard"),

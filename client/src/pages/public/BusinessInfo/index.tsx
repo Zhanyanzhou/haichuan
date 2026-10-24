@@ -41,8 +41,8 @@ export default function BusinessInfo() {
       <section className="border-b border-brand-line">
         <div className="mx-auto grid max-w-[1180px] grid-cols-1 gap-12 px-5 py-12 md:px-8 md:py-14 lg:grid-cols-12 lg:gap-x-10 lg:px-12 lg:py-16">
           <header className="lg:col-span-4">
-            <p className="font-sans text-[10px] uppercase tracking-[0.24em] text-brand-muted">
-              Legal disclosure
+            <p className="font-sans text-[10px] tracking-[0.08em] text-brand-muted">
+              公开登记
             </p>
             <h1 className="mt-5 font-body text-[38px] font-normal leading-[1.16] tracking-[0.04em] text-brand-text md:text-[44px]">
               经营主体信息
@@ -52,8 +52,8 @@ export default function BusinessInfo() {
             </p>
 
             <div className="mt-10 border-t border-brand-text pt-5">
-              <p className="font-sans text-[10px] uppercase tracking-[0.18em] text-brand-muted">
-                Current status
+              <p className="font-sans text-[10px] tracking-[0.08em] text-brand-muted">
+                当前状态
               </p>
               <p className="mt-3 font-body text-[24px] font-normal text-brand-text">
                 {LEGAL_ENTITY.registrationStatus}
@@ -72,8 +72,8 @@ export default function BusinessInfo() {
             className="lg:col-span-7 lg:col-start-6"
           >
             <div className="border-b border-brand-text pb-5">
-              <p className="font-sans text-[10px] uppercase tracking-[0.22em] text-brand-muted">
-                Registered entity
+              <p className="font-sans text-[10px] tracking-[0.08em] text-brand-muted">
+                登记主体
               </p>
               <h2
                 id="registration-details"
@@ -114,8 +114,8 @@ export default function BusinessInfo() {
       >
         <div className="mx-auto grid max-w-[1180px] grid-cols-1 gap-8 px-5 py-10 md:px-8 md:py-12 lg:grid-cols-12 lg:items-center lg:gap-x-10 lg:px-12">
           <div className="lg:col-span-3">
-            <p className="font-sans text-[10px] uppercase tracking-[0.22em] text-white/50">
-              Verification
+            <p className="font-sans text-[10px] tracking-[0.08em] text-white/50">
+              对外核验
             </p>
             <h2
               id="verification-heading"

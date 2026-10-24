@@ -240,21 +240,39 @@ function readImageSource(value: unknown): string {
 }
 
 /**
- * 设计画布编辑的是模板结构。没有真实图片时，图片槽使用与目录相同的中性图形，
- * 标出图片位置和比例；不写回默认内容。已保存的真实图片仍原样显示。
+ * 设计画布和放大预览只看结构。中性图片图标只放进图片槽，不铺到背景或其他槽位。
+ * 背景图从这张预览里拿掉，避免回放已保存的照片。不写回默认内容。
+ * 目录上的照片只来自管理员单独上传的预览图。
  */
-export function createTemplateDesignCanvasContent(
+export function withNeutralTemplateImages(
   definition: TemplateDefinitionV2,
-): Record<string, unknown> {
-  const content = createTemplatePreviewContentBySlotId(definition);
+  content: Record<string, unknown>,
+): { definition: TemplateDefinitionV2; contentBySlotId: Record<string, unknown> } {
+  const projected = structuredClone(definition);
+  for (const node of Object.values(projected.nodes)) {
+    for (const device of ["desktop", "mobile", "tablet"] as const) {
+      const rules = node.responsive[device];
+      if (rules?.backgroundImage) rules.backgroundImage = "";
+    }
+  }
+  const contentBySlotId = structuredClone(content);
   for (const slot of Object.values(definition.slots)) {
-    if (slot.type !== "image" || readImageSource(content[slot.slotId])) continue;
-    const current = content[slot.slotId];
-    content[slot.slotId] = current && typeof current === "object" && !Array.isArray(current)
+    if (slot.type !== "image") continue;
+    const current = contentBySlotId[slot.slotId];
+    contentBySlotId[slot.slotId] = current && typeof current === "object" && !Array.isArray(current)
       ? { ...current, src: neutralCatalogMedia, alt: "结构示意" }
       : { src: neutralCatalogMedia, alt: "结构示意" };
   }
-  return content;
+  return { definition: projected, contentBySlotId };
+}
+
+export function createTemplateDesignCanvasContent(
+  definition: TemplateDefinitionV2,
+): Record<string, unknown> {
+  return withNeutralTemplateImages(
+    definition,
+    createTemplatePreviewContentBySlotId(definition),
+  ).contentBySlotId;
 }
 
 /**
@@ -299,7 +317,7 @@ function withNeutralCatalogMedia(value: unknown, path: string[] = []): unknown {
     if (MEDIA_FIELD_NAMES.has(key)
       || key === "images"
       || (key === "url" && path.some((part) => part === "images" || part === "items"))) {
-      return neutralCatalogMedia;
+      return "";
     }
     if (["title", "heading", "name"].includes(key)) return "标题";
     if (["subtitle", "description", "body", "text", "content"].includes(key)) return "正文示例文字";
@@ -324,7 +342,7 @@ export function createNeutralTemplateCatalogPreview(definition: TemplateDefiniti
   for (const node of Object.values(projected.nodes)) {
     for (const device of ["desktop", "mobile", "tablet"] as const) {
       const rules = node.responsive[device];
-      if (rules?.backgroundImage) rules.backgroundImage = neutralCatalogMedia;
+      if (rules?.backgroundImage) rules.backgroundImage = "";
     }
   }
   const sourceContent = createTemplateCatalogPreviewContentBySlotId(definition);

@@ -26,7 +26,7 @@ const DEFAULT_SETTINGS = {
   logo: '',
   brandPresentationMode: '',
   brandReviewReference: '',
-  seoTitle: '海川珠宝',
+  seoTitle: '海川珠宝官方网站',
   seoDescription: '浏览珠宝作品，了解定制与顾问服务。',
   seoKeywords: '珠宝,首饰,黄金,钻石,手镯,吊坠,戒指,耳饰',
   contactPhone: '',

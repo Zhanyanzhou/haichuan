@@ -11,7 +11,8 @@ test("圆角解析保留错误边界，不把空值、小数或越界值变成�
 });
 
 test("所有仍适用的图片按稳定身份校验，切换顺序不会丢失错误", () => {
-  const recipe = createRecommendedRecipe("general");
+  // 角色未定的中性配方；图片段由下一行整体替换，这里只借一个合法配方壳。
+  const recipe = createRecommendedRecipe();
   recipe.media = createMediaSlots(["heroImage", "secondaryImage"]);
   const radiusInputs = { [recipe.media[0].id]: "201", [recipe.media[1].id]: "24" };
   assert.equal(hasInvalidRecipeRadiusInputs(recipe, radiusInputs), true);
@@ -22,7 +23,7 @@ test("所有仍适用的图片按稳定身份校验，切换顺序不会丢失�
 });
 
 test("背景和圆形暂不校验圆角，切回普通图片仍能恢复原错误", () => {
-  const recipe = createRecommendedRecipe("general");
+  const recipe = createRecommendedRecipe();
   recipe.media = createMediaSlots(["custom"]);
   const slot = recipe.media[0];
   const radiusInputs = { [slot.id]: "" };

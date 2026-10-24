@@ -4,6 +4,10 @@ import { settingsApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
+import {
+  preferSiteSetting,
+  SIGNED_PUBLIC_CONTACT,
+} from "@/config/publicContact";
 
 const T = {
   bg: "#FFFFFF",
@@ -46,7 +50,7 @@ const SECTIONS = [
     title: "信息保存",
     items: [
       "待处理、已联系和跟进中的咨询与选款记录，在提供顾问服务所需期间保存。",
-      "已完成的咨询与选款记录自完成之日起保存 12 个月；标记为无效的记录自标记之日起保存 30 天。到期后进入受控清理流程；法律法规要求继续保留的除外。",
+      "已完成的咨询与选款记录自完成之日起保存 12 个月；标记为无效的记录自标记之日起保存 30 天。到期后匿名化姓名和联系方式，保留不可识别的统计。投诉、争议、诉讼或监管调查期间暂停到期处理。转为订单或合同后的资料按相应法定期限另行保存。备份不单独改写，随备份轮换过期；从备份恢复后会重新执行到期处理。",
       "会员账户信息在账户有效期间保存；账户删除后，我们会在合理期限内移除或匿名化您的可识别信息。",
       "技术日志仅用于安全与稳定性目的，保存期限不超过排查所需的合理周期。",
       "法律法规另有要求的，依照相应要求执行。",
@@ -59,6 +63,7 @@ const SECTIONS = [
       "更正：您可以在个人中心更正姓名、联系方式与地址等资料；如需修改其他信息，可通过咨询表单联系顾问协助。",
       "删除：您可以请求删除您的账户和相关咨询记录；法律法规要求保留的除外。",
       "撤回同意：您可以不再勾选服务隐私同意；这会影响顾问与您联系，但不影响您浏览公开作品。",
+      "答复：收到查询、更正或删除请求后，15 个工作日内答复。",
     ],
   },
   {
@@ -75,10 +80,13 @@ export default function Privacy() {
   const location = useLocation();
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
-  const [contact, setContact] = useState<{
-    phone?: string;
-    email?: string;
-  }>({});
+  const [contactStatus, setContactStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [contact, setContact] = useState({
+    phone: "",
+    email: "",
+    address: "",
+    hours: "",
+  });
 
   // SEO：隐私页独立标题与描述
   useEffect(() => {
@@ -99,22 +107,26 @@ export default function Privacy() {
         const s = unwrapResponse<{
           contactPhone?: string | null;
           contactEmail?: string | null;
+          contactAddress?: string | null;
+          businessHours?: string | null;
         }>(res);
         setContact({
-          phone: s?.contactPhone?.trim() || "",
-          email: s?.contactEmail?.trim() || "",
+          phone: preferSiteSetting(s?.contactPhone, SIGNED_PUBLIC_CONTACT.phone),
+          email: preferSiteSetting(s?.contactEmail, SIGNED_PUBLIC_CONTACT.email),
+          address: preferSiteSetting(s?.contactAddress, SIGNED_PUBLIC_CONTACT.address),
+          hours: preferSiteSetting(s?.businessHours, SIGNED_PUBLIC_CONTACT.hours),
         });
+        setContactStatus("ready");
       })
       .catch(() => {
         if (cancelled) return;
-        setContact({});
+        setContactStatus("error");
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const hasContact = contact.phone || contact.email;
   const locationState = typeof location.state === "object" && location.state !== null
     ? location.state as Record<string, unknown>
     : null;
@@ -154,13 +166,12 @@ export default function Privacy() {
           <p
             style={{
               fontSize: 10,
-              letterSpacing: "0.16em",
+              letterSpacing: "0.08em",
               color: T.light,
               marginBottom: 6,
-              textTransform: "uppercase",
             }}
           >
-            PRIVACY NOTICE
+            个人信息
           </p>
           <h1
             style={{
@@ -267,30 +278,30 @@ export default function Privacy() {
                 查看经营主体信息
               </Link>
             </p>
-            {hasContact ? (
-              <div style={{ display: "grid", gap: 6, fontSize: 14, color: T.txt }}>
-                {contact.phone && (
-                  <a
-                    href={`tel:${contact.phone}`}
-                    style={{ color: T.txt, textDecoration: "none" }}
-                  >
-                    电话：{contact.phone}
-                  </a>
-                )}
-                {contact.email && (
-                  <a
-                    href={`mailto:${contact.email}`}
-                    style={{ color: T.txt, textDecoration: "none" }}
-                  >
-                    邮箱：{contact.email}
-                  </a>
-                )}
-              </div>
-            ) : (
+            {contactStatus === "loading" ? (
               <p style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: 0 }}>
-                公开联系方式正在完善。
+                正在加载联系方式…
               </p>
-            )}
+            ) : null}
+            {contactStatus === "error" ? (
+              <p role="alert" style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: 0 }}>
+                联系信息暂时无法加载。您仍可提交隐私与个人信息请求。
+              </p>
+            ) : null}
+            {contactStatus === "ready" ? (
+              <div style={{ display: "grid", gap: 6, fontSize: 14, color: T.txt }}>
+                <a href={`tel:${contact.phone}`} style={{ color: T.txt, textDecoration: "none" }}>
+                  电话：{contact.phone}
+                </a>
+                <a href={`mailto:${contact.email}`} style={{ color: T.txt, textDecoration: "none" }}>
+                  邮箱：{contact.email}
+                </a>
+                <p style={{ margin: 0 }}>接待地址：{contact.address}</p>
+                <p style={{ margin: 0 }}>服务时间：{contact.hours}</p>
+                <p style={{ margin: 0 }}>{SIGNED_PUBLIC_CONTACT.holidayNotice}</p>
+                <p style={{ margin: 0 }}>服务范围：{SIGNED_PUBLIC_CONTACT.serviceArea}</p>
+              </div>
+            ) : null}
             <p style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: "12px 0 0" }}>
               如需行使查询、更正、删除或撤回同意等权利，可
               <Link
@@ -311,7 +322,7 @@ export default function Privacy() {
               lineHeight: 1.7,
             }}
           >
-            隐私说明版本：privacy-v2；最后更新于 2026-08-27。
+            隐私说明版本：privacy-v2；保存期限与权利请求条款核对于 2026-10-05。
           </p>
         </div>
       </section>

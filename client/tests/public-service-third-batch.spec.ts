@@ -43,7 +43,7 @@ async function fillRequiredContactFields(page: Page) {
   if (await page.locator("#cf-type").inputValue() === "") {
     await page.locator("#cf-type").selectOption("高级定制");
   }
-  await page.locator("#cf-time").selectOption("下午 (14:00-18:00)");
+  await page.locator("#cf-time").selectOption("下午 (13:00-18:00)");
   await page.locator("#cf-message").fill("希望说明设计与尺寸需求并确认可提供的安排。");
   await page.locator("#cf-privacy-consent").check();
 }
@@ -137,7 +137,7 @@ for (const viewport of viewports) {
     await expect(fallback).toHaveAttribute("data-page-document-state", "unpublished");
     await expect(fallback.getByRole("heading", { name: "珠宝定制" })).toBeVisible();
     await expect(fallback).toContainText(
-      "定制内容正在整理。您可以先提交咨询需求，由珠宝顾问了解您的佩戴场景与偏好。",
+      "珠宝定制的范围、流程和交期仍在核验，这里不提前写出未确认的服务承诺。您可以提交咨询，说明佩戴场景与偏好。深圳门店可以到店接待，线上咨询不限地区。",
     );
     await expect(main).not.toContainText("HAICHUAN seed");
     const cta = fallback.getByRole("link", { name: "提交定制咨询", exact: true });
@@ -229,10 +229,11 @@ for (const viewport of viewports) {
     await page.goto(viewport.name === "desktop" ? "/contact" : "/contact?type=unknown");
     await expect(page.locator("#cf-type")).toHaveValue("");
 
+    await expect(page.getByRole("link", { name: "15918549866", exact: true })).toBeVisible();
     await expect(page.getByText(
       "公开联系方式正在完善，您仍可通过本页表单提交需求。",
       { exact: true },
-    )).toBeVisible();
+    )).toHaveCount(0);
     await expect(page.getByText("PRIVATE APPOINTMENT", { exact: true })).toHaveCount(0);
     await expect(page.getByText(/尽快/)).toHaveCount(0);
 
@@ -304,6 +305,7 @@ for (const viewport of viewports) {
       { exact: true },
     );
     await expect(settingsAlert).toHaveAttribute("role", "alert");
+    await expect(page.getByRole("link", { name: "15918549866", exact: true })).toHaveCount(0);
     await expect(main.getByRole("alert")).toHaveCount(1);
 
     await fillRequiredContactFields(page);

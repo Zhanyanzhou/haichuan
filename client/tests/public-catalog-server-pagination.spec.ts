@@ -480,7 +480,8 @@ test("Catalog 权威查询确认作品失效后清理旧选款且空目录不显
   });
   await page.goto("/catalog");
 
-  await expect(page.getByText("珠宝作品正在筹备中")).toBeVisible();
+  await expect(page.getByText("以下为演示款式，只用于查看选款版式。它们不是在售作品，也不代表库存、价格或证书。")).toBeVisible();
+  await expect(page.getByText("当前没有可公开的作品")).toHaveCount(0);
   await expect(page.getByText("已移除 1 款当前不可用的作品")).toBeVisible();
   await expect(page.getByText("已选 1 款")).toHaveCount(0);
   await expect

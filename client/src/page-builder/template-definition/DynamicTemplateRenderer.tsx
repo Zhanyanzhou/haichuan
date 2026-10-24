@@ -25,6 +25,15 @@ import {
   moveFreePlacement,
 } from "./freePlacementGeometry";
 import {
+  ZERO_MOBILE_BLEED,
+  extendMobileBleedInset,
+  imageBleedsOnMobile,
+  mobileBleedBox,
+  mobileFreeFrameStyle,
+  subtreeHasMobileBleedImage,
+  type MobileBleedInset,
+} from "./mobileImageBleed";
+import {
   getContentTemplateModuleTypeForSlotType,
   getDynamicTemplateStructureProtectedNodeIds,
   isSafeTemplateMediaUrl,
@@ -38,8 +47,10 @@ import {
   resolveManagedTemplateMediaPreviewUrl,
   useManagedTemplateMediaDisplayUrl,
 } from "./managedMediaPreview";
+import { attachMobileWorkCaptions, partitionMobileWorkUnits, resolveMobileImageFrame } from "./mobileWorkGrid";
 import { resolveMediaSlotImage } from "../config/mediaSlotContract";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
+import "./DynamicTemplateRenderer.css";
 
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
@@ -161,9 +172,9 @@ function parseAspectRatio(ratio: string | undefined): { width: number; height: n
 }
 
 /**
- * 移动端竖框 + cover 会裁掉横图内嵌标题。
- * 仅在槽位显式声明竖版比例（如 4:5）且未做实例覆盖时改为 contain；
- * 素材本身已是竖版时与 cover 视觉等价。不根据流式容器高度推断，避免误伤作品集等布局。
+ * 手机首屏没有单独竖图时，外框用 4:5，图片铺满。
+ * 「完整放入」配上更高的竖框会把横图衬在深色底上，所以这种情况改为铺满。
+ * 页面标题仍是槽位里的文字。实例里明确选择的适配方式保持不变。
  */
 export function resolveImageObjectFit(
   node: Pick<DynamicTemplateRenderPlanNode, "layoutOverride" | "slot" | "slotRules">,
@@ -173,19 +184,27 @@ export function resolveImageObjectFit(
   const requested = explicitOverride
     ?? node.slotRules?.objectFit
     ?? TEMPLATE_MEDIA_DEFAULTS.objectFit;
-  if (explicitOverride || requested !== "cover" || viewport !== "mobile") return requested;
-  // 只处理通栏背景图：竖框 cover 会裁掉横图内嵌标题。作品集等竖图槽位保持原 cover。
-  if (node.slot?.semanticRole !== "backgroundImage") return requested;
+  if (explicitOverride || viewport !== "mobile" || node.slot?.semanticRole !== "backgroundImage") {
+    return requested;
+  }
   const frame = parseAspectRatio(node.slotRules?.aspectRatio);
-  if (frame && frame.width / frame.height < 1) return "contain";
+  const desktop = parseAspectRatio(node.slot?.desktopRules?.aspectRatio);
+  const portraitFrame = Boolean(frame && frame.width / frame.height < 1);
+  const sharedLandscape = !desktop || desktop.width / desktop.height >= 1;
+  if (portraitFrame && sharedLandscape && requested === "contain") return "cover";
   return requested;
 }
 
-/** 竖框 contain 会留下大块上下空白；首屏改回桌面横图比例，让内嵌标题完整可见。 */
+/**
+ * 历史 Schema 1/2 的竖框 contain 曾改回桌面横图比例；Schema 3 必须尊重手机槽位比例。
+ * 兼容分支只服务旧模板，不能覆盖新合同解析出的 mobileRules。
+ */
 function resolveImageFrameAspectRatio(
   node: DynamicTemplateRenderPlanNode,
   viewport: "desktop" | "mobile" | undefined,
+  preserveResolvedMobileRatio: boolean,
 ): string | undefined {
+  if (preserveResolvedMobileRatio) return undefined;
   if (resolveImageObjectFit(node, viewport) !== "contain" || viewport !== "mobile") return undefined;
   const desktop = parseAspectRatio(node.slot?.desktopRules?.aspectRatio);
   if (desktop && desktop.width / desktop.height >= 1) {
@@ -203,6 +222,7 @@ function rulesToStyle(
   relationalLayout = false,
   backgroundDisplayUrl?: string,
   viewport?: "desktop" | "mobile",
+  preserveResolvedMobileRatio = false,
 ): CSSProperties {
   const { rules } = node;
   const alignsOwnChildren = rules.display === "flex" || rules.display === "grid";
@@ -266,7 +286,7 @@ function rulesToStyle(
     if (rules.height.mode === "fill" && parentRules?.display !== "flex") style.height = "100%";
   }
   const height = rules.height;
-  const landscapeSafeRatio = resolveImageFrameAspectRatio(node, viewport);
+  const landscapeSafeRatio = resolveImageFrameAspectRatio(node, viewport, preserveResolvedMobileRatio);
   if (height.mode === "min-height") style.minHeight = lengthToCss(height.value);
   if (height.mode === "fixed" || height.mode === "viewport") style.height = lengthToCss(height.value);
   if (height.mode === "aspect-ratio" && height.ratio) {
@@ -333,6 +353,13 @@ function rulesToStyle(
     if (instance.zIndex !== undefined) style.zIndex = instance.zIndex;
     if (instance.marginTopPx !== undefined) style.marginTop = instance.marginTopPx;
     if (instance.marginBottomPx !== undefined) style.marginBottom = instance.marginBottomPx;
+  }
+  if (node.slot?.type === "image" && style.position !== "absolute") {
+    style.position = "relative";
+  }
+  // 流式手机布局里 Logo 是品牌标记，固定窄宽时居中，避免贴在左缘像多出来的图片碎片。
+  if (node.slot?.semanticRole === "logo" && style.position !== "absolute") {
+    style.alignSelf = "center";
   }
   return style;
 }
@@ -487,6 +514,13 @@ function ManagedTemplateSlotImage({
   );
 }
 
+function readRenderedImageSource(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!content || typeof content !== "object" || Array.isArray(content)) return "";
+  const src = (content as { src?: unknown }).src;
+  return typeof src === "string" ? src.trim() : "";
+}
+
 function renderSlotContent(
   node: DynamicTemplateRenderPlanNode,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
@@ -496,6 +530,7 @@ function renderSlotContent(
   interactionOwner?: DynamicTemplateRendererProps["interactionOwner"],
   relationalLayout = false,
   priority = false,
+  imageFit?: NonNullable<CSSProperties["objectFit"]>,
 ): ReactNode {
   const { slot, content } = node;
   if (!slot) return null;
@@ -556,8 +591,50 @@ function renderSlotContent(
     const src = typeof content === "string" ? content : typeof record?.src === "string" ? record.src : "";
     const alt = typeof record?.alt === "string" ? record.alt : "";
     const defaultFocus = objectPositionToPercent(node.slotRules?.objectPosition ?? TEMPLATE_MEDIA_DEFAULTS.objectPosition);
-    if (!src) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">图片待填写</span>;
-    const objectFit = resolveImageObjectFit(node, editorViewport);
+    // 对外页面没有图片就不留外框。编辑和方案预览仍铺满比例框，标出图片位置。
+    if (!src.trim()) {
+      if (mode === "public") return null;
+      return (
+        <span
+          className="hc-dynamic-template__empty-slot"
+          data-template-empty-image="true"
+          style={{ position: "absolute", inset: 0, minHeight: 0, background: "#ECEEEF" }}
+        >
+          图片待填写
+        </span>
+      );
+    }
+    if (src.includes("catalog-structure-media.svg")) {
+      // 目录卡片把整页缩进 iframe。流式槽位的高度来自比例，cqmin 会算成 0，
+      // 图标和边框都消失，只剩灰块。这里用槽位自身的百分比，缩小时图标仍在框内。
+      return (
+        <span
+          data-template-neutral-media="true"
+          style={{
+            position: "absolute",
+            inset: 0,
+            boxSizing: "border-box",
+            background: "#E4E7E8",
+            boxShadow: "inset 0 0 0 8px #5F6568",
+          }}
+        >
+          <span style={{ position: "absolute", left: "16%", top: "16%", width: "68%", height: "68%" }}>
+            <ManagedTemplateSlotImage
+              src={src}
+              alt={alt}
+              hostFetch={mode !== "public"}
+              priority={priority}
+              ratio={node.slotRules?.aspectRatio}
+              viewport={editorViewport ?? "desktop"}
+              sizes={resolveTemplateImageSizes(node, editorViewport ?? "desktop", priority)}
+              objectFit="contain"
+              objectPosition="center"
+            />
+          </span>
+        </span>
+      );
+    }
+    const objectFit = imageFit ?? resolveImageObjectFit(node, editorViewport);
     return (
       <ManagedTemplateSlotImage
         src={src}
@@ -630,6 +707,105 @@ function nodeElementType(node: DynamicTemplateRenderPlanNode): ElementType {
   return "div";
 }
 
+function renderTemplateChildren({
+  node,
+  sectionRole,
+  device,
+  parentFree,
+  constrainWorkCell = false,
+  inheritedCanvasColor,
+  bleedInset = ZERO_MOBILE_BLEED,
+  bleedAtStart = true,
+  bleedAtEnd = true,
+  ...shared
+}: {
+  node: DynamicTemplateRenderPlanNode;
+  sectionRole?: string;
+  device: "desktop" | "mobile";
+  parentFree: boolean;
+  constrainWorkCell?: boolean;
+  inheritedCanvasColor?: string;
+  bleedInset?: MobileBleedInset;
+  bleedAtStart?: boolean;
+  bleedAtEnd?: boolean;
+} & Omit<Parameters<typeof RenderNode>[0], "node" | "sectionRole" | "device" | "parentFree" | "parentRules" | "siblingIndex" | "siblingPlacements" | "workCardFrame" | "constrainWorkCell" | "inheritedCanvasColor" | "bleedInset" | "bleedAtStart" | "bleedAtEnd">) {
+  const childInset = extendMobileBleedInset(
+    bleedInset,
+    node.rules.padding,
+    device === "mobile" && !parentFree && !constrainWorkCell && node.rules.layoutMode !== "free",
+  );
+  const visibleChildren = node.children.filter((child) => !child.hidden);
+  const firstVisibleId = visibleChildren[0]?.nodeId;
+  const lastVisibleId = visibleChildren[visibleChildren.length - 1]?.nodeId;
+  const groups = attachMobileWorkCaptions(partitionMobileWorkUnits(node.children, {
+    device,
+    sectionRole,
+    layoutMode: node.rules.layoutMode,
+    display: node.rules.display,
+    columnCount: node.rules.columns?.length,
+  }));
+  const renderChild = (
+    child: DynamicTemplateRenderPlanNode,
+    childIndex: number,
+    inWorkGrid: boolean,
+  ) => (
+    <RenderNode
+      key={child.nodeId}
+      node={child}
+      device={device}
+      sectionRole={sectionRole}
+      constrainWorkCell={constrainWorkCell || inWorkGrid}
+      workCardFrame={(constrainWorkCell || inWorkGrid) && child.slot?.type === "image"}
+      parentFree={parentFree}
+      parentRules={node.rules}
+      siblingIndex={childIndex}
+      siblingPlacements={node.children
+        .filter((sibling) => sibling.nodeId !== child.nodeId)
+        .flatMap((sibling) => sibling.rules.placement ? [sibling.rules.placement] : [])}
+      {...shared}
+      inheritedCanvasColor={inheritedCanvasColor}
+      bleedInset={childInset}
+      bleedAtStart={bleedAtStart && child.nodeId === firstVisibleId}
+      bleedAtEnd={bleedAtEnd && child.nodeId === lastVisibleId}
+    />
+  );
+  return groups.map((group) => {
+    if (group.kind === "node") {
+      const childIndex = node.children.findIndex((child) => child.nodeId === group.node.nodeId);
+      return renderChild(group.node, childIndex, false);
+    }
+    if (group.nodes.length < 2) {
+      const child = group.nodes[0];
+      const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
+      return renderChild(child, childIndex, false);
+    }
+    return (
+      <div
+        key={group.nodes.map((child) => child.nodeId).join(":")}
+        data-template-mobile-work-grid="true"
+        style={{
+          display: "grid",
+          gap: "16px",
+          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+          width: "100%",
+        }}
+      >
+        {group.nodes.map((child, cardIndex) => {
+          const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
+          const caption = group.captions[cardIndex];
+          const captionIndex = caption ? node.children.findIndex((item) => item.nodeId === caption.nodeId) : -1;
+          return (
+            <div key={child.nodeId} data-template-mobile-work-card="true" style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0 }}>
+              {renderChild(child, childIndex, true)}
+              {caption ? renderChild(caption, captionIndex, true) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  });
+}
+
 function RenderNode({
   node,
   mode,
@@ -656,6 +832,14 @@ function RenderNode({
   siblingIndex = 0,
   parentRules,
   relationalLayout = false,
+  preserveResolvedMobileRatio = false,
+  sectionRole,
+  workCardFrame = false,
+  constrainWorkCell = false,
+  inheritedCanvasColor,
+  bleedInset = ZERO_MOBILE_BLEED,
+  bleedAtStart = true,
+  bleedAtEnd = true,
 }: {
   node: DynamicTemplateRenderPlanNode;
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>;
@@ -680,8 +864,16 @@ function RenderNode({
   parentFree?: boolean;
   parentRules?: DynamicTemplateRenderPlanNode["rules"];
   relationalLayout?: boolean;
+  preserveResolvedMobileRatio?: boolean;
   siblingPlacements?: DynamicTemplatePlacement[];
   siblingIndex?: number;
+  sectionRole?: string;
+  workCardFrame?: boolean;
+  constrainWorkCell?: boolean;
+  inheritedCanvasColor?: string;
+  bleedInset?: MobileBleedInset;
+  bleedAtStart?: boolean;
+  bleedAtEnd?: boolean;
 }) {
   const layoutElement = useRef<HTMLElement | null>(null);
   const backgroundSource = !node.hidden && node.rules.backgroundImage && isSafeTemplateMediaUrl(node.rules.backgroundImage)
@@ -899,6 +1091,10 @@ function RenderNode({
     setLayoutPreview(undefined);
   };
   if (node.hidden) return null;
+  const emptyPublicImage = mode === "public"
+    && node.slot?.type === "image"
+    && !readRenderedImageSource(node.content);
+  if (emptyPublicImage) return null;
   if (node.type === "Spacer") {
     return <div data-template-node-id={node.nodeId} aria-hidden="true" style={{ height: lengthToCss(node.props.spacerSize) ?? "1rem" }} />;
   }
@@ -907,6 +1103,35 @@ function RenderNode({
   }
   // 页面实例沿用预览渲染（链接与业务交互保持非活动），但不能把合同内部
   // 编辑事件、标签、会话或 Overlay 带进 Puck 画布。
+  const ownCanvas = safeColor(node.rules.backgroundColor)
+    ?? (node.rules.backgroundToken
+      ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[node.rules.backgroundToken]
+      : undefined);
+  const canvasColor = ownCanvas ?? inheritedCanvasColor;
+  const bleeds = imageBleedsOnMobile(node, {
+    device,
+    constrainWorkCell,
+    sectionRole,
+    canvasColor,
+  });
+  const placement = placementPreview ?? node.rules.placement;
+  const heightRatio = node.rules.height.mode === "aspect-ratio" && node.rules.height.ratio
+    ? node.rules.height.ratio.width / node.rules.height.ratio.height
+    : undefined;
+  const slotRatio = parseAspectRatio(node.slotRules?.aspectRatio);
+  const mobileFrame = resolveMobileImageFrame({
+    device,
+    inWorkGrid: workCardFrame,
+    slotType: node.slot?.type,
+    semanticRole: node.slot?.semanticRole,
+    sectionRole,
+    ratio: heightRatio ?? (slotRatio ? slotRatio.width / slotRatio.height : undefined),
+  });
+  const bleedStyle = parentFree && placement
+    ? mobileFreeFrameStyle(placement, bleeds, node.slot?.semanticRole)
+    : bleeds
+      ? mobileBleedBox(bleedInset, { top: bleedAtStart, bottom: bleedAtEnd })
+      : undefined;
   const slotContent = node.slot
     ? renderSlotContent(
       node,
@@ -919,6 +1144,7 @@ function RenderNode({
       interactionOwner,
       relationalLayout,
       node.slotId === primaryImageSlotId,
+      bleedStyle && !node.layoutOverride?.objectFit ? "cover" : undefined,
     )
     : null;
   return (
@@ -934,6 +1160,8 @@ function RenderNode({
       data-template-selected-contract-role={selectedContractRole?.nodeId === node.nodeId ? selectedContractRole.roleId : undefined}
       data-template-background-token={node.rules.backgroundToken}
       data-template-border-token={node.rules.borderToken}
+      data-template-semantic-role={node.slot?.semanticRole}
+      data-template-mobile-bleed={bleedStyle ? "true" : undefined}
       style={{
         ...rulesToStyle(
           node,
@@ -944,12 +1172,19 @@ function RenderNode({
           relationalLayout,
           backgroundDisplayUrl,
           device,
+          preserveResolvedMobileRatio,
         ),
         ...(showEmptyStructure && !node.slot && node.children.length === 0
           ? { minHeight: "256px" }
           : {}),
         // 新合同的阅读顺序与叠放层序共用 childIds，断点不维护第二套排序。
+        ...(constrainWorkCell ? { width: "100%", maxWidth: "100%", minWidth: 0 } : {}),
+        ...(mobileFrame ? { aspectRatio: mobileFrame } : {}),
         ...(relationalLayout ? { order: siblingIndex, zIndex: layoutPreview?.zIndex ?? node.layoutOverride?.zIndex ?? siblingIndex } : {}),
+        ...(device === "mobile" && node.slot?.type !== "image" && node.rules.overflow === "hidden" && subtreeHasMobileBleedImage(node, { device, sectionRole, canvasColor })
+          ? { overflow: "visible" as const }
+          : {}),
+        ...bleedStyle,
         ...(layoutEditable || freePlacementEditable ? {
           ...(layoutEditable ? { position: "relative" as const } : {}),
           cursor: freePlacementEditable || node.instanceEditPolicy?.position ? "move" : undefined,
@@ -1046,38 +1281,37 @@ function RenderNode({
       } : {})}
     >
       {slotContent}
-      {node.children.map((child, childIndex) => (
-        <RenderNode
-          key={child.nodeId}
-          node={child}
-          mode={mode}
-          selectedNodeId={selectedNodeId}
-          selectedContractRole={selectedContractRole}
-          onSelectNode={onSelectNode}
-          onSelectContractRole={onSelectContractRole}
-          onNodeAction={onNodeAction}
-          primaryHeadingSlotId={primaryHeadingSlotId}
-          primaryImageSlotId={primaryImageSlotId}
-          primaryHeadingLevel={primaryHeadingLevel}
-          device={device}
-          layoutEditMode={layoutEditMode}
-          onLayoutOverrideCommit={onLayoutOverrideCommit}
-          onTemplatePlacementCommit={onTemplatePlacementCommit}
-          templateEditorSessionId={templateEditorSessionId}
-          interactionOwner={interactionOwner}
-          contentRenderMode={contentRenderMode}
-          structureProtectedNodeIds={structureProtectedNodeIds}
-          editableContractRoleIdsByNode={editableContractRoleIdsByNode}
-          showEmptyStructure={showEmptyStructure}
-          parentFree={node.type === "Stack" && node.rules.layoutMode === "free"}
-          parentRules={node.rules}
-          relationalLayout={relationalLayout}
-          siblingIndex={childIndex}
-          siblingPlacements={node.children
-            .filter((sibling) => sibling.nodeId !== child.nodeId)
-            .flatMap((sibling) => sibling.rules.placement ? [sibling.rules.placement] : [])}
-        />
-      ))}
+      {renderTemplateChildren({
+        node,
+        mode,
+        selectedNodeId,
+        selectedContractRole,
+        onSelectNode,
+        onSelectContractRole,
+        onNodeAction,
+        primaryHeadingSlotId,
+        primaryImageSlotId,
+        primaryHeadingLevel,
+        device,
+        layoutEditMode,
+        onLayoutOverrideCommit,
+        onTemplatePlacementCommit,
+        templateEditorSessionId,
+        interactionOwner,
+        contentRenderMode,
+        structureProtectedNodeIds,
+        editableContractRoleIdsByNode,
+        showEmptyStructure,
+        parentFree: node.type === "Stack" && node.rules.layoutMode === "free",
+        relationalLayout,
+        preserveResolvedMobileRatio,
+        sectionRole,
+        constrainWorkCell,
+        inheritedCanvasColor: canvasColor,
+        bleedInset,
+        bleedAtStart,
+        bleedAtEnd,
+      })}
     </Element>
   );
 }
@@ -1125,7 +1359,9 @@ export default function DynamicTemplateRenderer({
     hiddenSlotIds,
     layoutOverridesByNodeId,
     showEmptySlots: showEmptySlots ?? mode === "editor",
-    publicSurface,
+    publicSurface: mode === "public" && definition.schemaVersion >= 3
+      ? { ...publicSurface, omitDefaultImages: true, omitDefaultContent: true }
+      : publicSurface,
   });
   if (!result.ok) {
     if (mode === "public") return null;
@@ -1203,6 +1439,7 @@ export default function DynamicTemplateRenderer({
       <RenderNode
         node={result.plan.root}
         relationalLayout={Number(definition.schemaVersion) >= 2}
+        preserveResolvedMobileRatio={Number(definition.schemaVersion) >= 3}
         mode={mode}
         selectedNodeId={allowsNodeInteraction ? selectedNodeId : null}
         selectedContractRole={allowsNodeInteraction ? selectedContractRole : null}
@@ -1222,6 +1459,10 @@ export default function DynamicTemplateRenderer({
         structureProtectedNodeIds={structureProtectedNodeIds}
         editableContractRoleIdsByNode={editableContractRoleIdsByNode}
         showEmptyStructure={mode === "editor" && editorSurface === "template-definition"}
+        sectionRole={definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole}
+        inheritedCanvasColor={result.plan.metadata.defaultBackgroundToken
+          ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[result.plan.metadata.defaultBackgroundToken]
+          : undefined}
       />
     </div>
   );

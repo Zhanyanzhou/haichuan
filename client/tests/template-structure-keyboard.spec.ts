@@ -77,7 +77,7 @@ base.describe("结构问题修复入口与全局显隐（自有 API Mock）", ()
     await structure.getByRole("treeitem", { name: /^内容区域 2/ }).hover();
     await more.click();
     const show = page.getByRole("menuitem", { name: "取消全局隐藏（所有设备）", exact: true });
-    await expect(show).toHaveAttribute("title", /不保证立即可见/);
+    await expect(show).toHaveAttribute("title", /当前设备显示/);
     await show.click();
     const after = await readSession(page);
     expect(after.definition!.nodes[regionId].hidden).toBe(false);
@@ -436,11 +436,7 @@ test.describe("TD-3C1 模板结构树键盘合同（真实前端 + Mock API）",
       await expect(container).toHaveAttribute("aria-expanded", "true");
       await expect(container).toBeFocused();
       await expect(tree.getByRole("treeitem")).toHaveCount(expandedCount);
-      await container.locator(".template-editor__tree-toggle").click();
-      await expect(container).toHaveAttribute("aria-expanded", "false");
-      await expect(container).toBeFocused();
-      await page.keyboard.press("ArrowRight");
-      await expect(container).toHaveAttribute("aria-expanded", "true");
+      await expect(container.locator(".template-editor__tree-toggle")).toHaveCount(0);
     }
     expect(await editorStateSnapshot(page)).toEqual(beforeState);
     expect(await selectionSnapshot(page)).toEqual(beforeSelection);

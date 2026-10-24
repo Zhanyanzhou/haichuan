@@ -10,6 +10,7 @@ export const materialLabels: Record<string, string> = {
   PEARL: '珍珠',
   GEMSTONE: '宝石',
   COLOR_GEM: '彩宝',
+  OTHER: '其他',
 };
 
 const materialCodesByLabel = new Map(

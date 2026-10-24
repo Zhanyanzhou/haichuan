@@ -115,6 +115,12 @@ test("服务端使用与客户端同源的动态模板语义校验器", () => {
   assert.equal(validateDynamicTemplateDefinition(requiredReadOnly).issues.some(
     (issue) => issue.code === "REQUIRED_SLOT_NEEDS_FIXED_SOURCE",
   ), false);
+
+  const schema3ReadOnly = structuredClone(requiredReadOnly);
+  schema3ReadOnly.schemaVersion = 3;
+  assert.ok(validateDynamicTemplateDefinition(schema3ReadOnly).issues.some(
+    (issue) => issue.code === "REQUIRED_SLOT_NEEDS_FIXED_SOURCE",
+  ));
 });
 
 test("双图片槽位比例属于可保存的通用模板设计字段", () => {

@@ -33,10 +33,9 @@ import TemplateEditorLibrary, {
 } from "./TemplateEditorLibrary";
 import type { TemplateWorkspaceController } from "./TemplateWorkspaceController";
 import type { TemplateInspectorIssueTarget } from "./templateInspectorCapabilities";
-import {
-  DynamicTemplateRenderer,
-  type TemplateDefinitionV2,
-} from "../template-definition";
+import type { TemplateEditorDraft } from "./types";
+import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
+import type { TemplateDefinitionV2 } from "../template-definition";
 import {
   type DynamicTemplateResource,
   type PublishedDynamicTemplateResource,
@@ -900,15 +899,22 @@ export default function TemplateWorkspace({
     versionDetailRequestsRef.current.clear();
   }, [activeTemplateId, sessionId]);
 
-  const openTemplateTarget = useCallback((target: TemplateEditorLibraryTarget) => {
+  const openTemplateTarget = useCallback((
+    target: TemplateEditorLibraryTarget,
+    onOpened?: (draft: TemplateEditorDraft) => void,
+  ) => {
     if (target.kind === "dynamic-new" && !target.definition) {
       setNewTemplateSizeOpen(true);
       return;
     }
     const currentDraft = useTemplateEditorSession.getState().draft;
     if (target.kind === "dynamic-local" && currentDraft?.sourceType === "local"
-      && currentDraft.localDraftId === target.localDraftId) return;
-    controller.openTarget(target);
+      && currentDraft.localDraftId === target.localDraftId) {
+      // 要打开的东西已经在编辑中：对调用者而言它确实"打开了"，照常回调，免得入口一直等在门外。
+      if (currentDraft) onOpened?.(currentDraft);
+      return;
+    }
+    controller.openTarget(target, onOpened);
   }, [controller]);
 
   const manageTemplate = async (target: TemplateEditorLibraryTarget, action: "copy" | "copy-published" | "rename") => {
@@ -935,7 +941,11 @@ export default function TemplateWorkspace({
     target: ArchivableTemplateEditorLibraryTarget | Pick<DynamicTemplateResource, "templateId" | "name">,
     name: string,
   ) => {
-    if (localOnly || lifecycleBusy) return;
+    if (localOnly) return;
+    if (lifecycleBusy) {
+      message.warning("上一项模板操作还在进行，请稍候再试。");
+      return;
+    }
     let archiveDialog: { destroy: () => void } | null = null;
     archiveDialog = modal.confirm({
       title: `将模板“${name}”移入回收站？`,
@@ -945,9 +955,65 @@ export default function TemplateWorkspace({
       cancelText: "取消",
       onOk: async () => {
         const archived = await controller.archive(target);
-        if (archived) {
+        if (archived.ok) {
           archiveDialog?.destroy();
+          return;
         }
+        modal.warning({
+          title: `“${name}”还没有移入回收站`,
+          content: archived.reason,
+          okText: "知道了",
+        });
+      },
+    });
+  };
+
+  const moveUnsavedTemplateToTrash = (name: string) => {
+    if (localOnly) return;
+    if (lifecycleBusy) {
+      message.warning("上一项模板操作还在进行，请稍候再试。");
+      return;
+    }
+    let archiveDialog: { destroy: () => void } | null = null;
+    archiveDialog = modal.confirm({
+      title: `将模板“${name}”移入回收站？`,
+      content: "这个模板还在当前会话里，尚未写入服务端。确认后会先保存，再移入回收站。页面装修不能再新增它，可在模板回收站恢复。",
+      okText: "移入回收站",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        const saved = await controller.persist({ silent: true });
+        const current = useTemplateEditorSession.getState();
+        const persisted = current.draft;
+        const ready = Boolean(
+          saved
+          && persisted
+          && persisted.sourceType === "persisted"
+          && !current.dirty
+          && persisted.remote
+        );
+        if (!saved) return;
+        if (!ready || !persisted || persisted.sourceType !== "persisted") {
+          modal.warning({
+            title: `“${name}”还没有移入回收站`,
+            content: "模板已保存，但还有未保存修改或缺少可归档草稿。请先处理后再移入回收站。",
+            okText: "知道了",
+          });
+          return;
+        }
+        const archived = await controller.archive({
+          templateId: persisted.definition.templateId,
+          name: persisted.definition.name,
+        });
+        if (archived.ok) {
+          archiveDialog?.destroy();
+          return;
+        }
+        modal.warning({
+          title: `“${name}”还没有移入回收站`,
+          content: archived.reason,
+          okText: "知道了",
+        });
       },
     });
   };
@@ -968,16 +1034,66 @@ export default function TemplateWorkspace({
   };
 
   const permanentlyDeleteTemplate = (template: Pick<DynamicTemplateResource, "templateId" | "name">) => {
-    if (localOnly || lifecycleBusy) return;
+    if (localOnly) return;
+    if (lifecycleBusy) {
+      message.warning("上一项模板操作还在进行，请稍候再试。");
+      return;
+    }
     modal.confirm({
       title: `永久删除模板“${template.name}”？`,
-      content: "永久删除后无法恢复。仅当模板从未发布、没有版本历史、没有页面引用且没有其他需要保留的数据时才可永久删除。",
+      content: "永久删除后，模板会从组件库和回收站消失，不能恢复。已经随页面发布的内容会保留。",
       okText: "永久删除模板",
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
-        await controller.deleteDraft(template);
+        const deleted = await controller.deleteDraft(template);
+        if (deleted.ok) return;
+        modal.warning({
+          title: `“${template.name}”没有被永久删除`,
+          content: deleted.reason,
+          okText: "知道了",
+        });
       },
+    });
+  };
+
+  useEffect(() => {
+    const archiveCurrent = () => {
+      const state = useTemplateEditorSession.getState();
+      const current = state.draft;
+      if (!current || state.previewMode) return;
+      if (localOnly) {
+        message.warning("本机测试草稿不能移入回收站。请先保存到服务端，或关闭这个草稿。");
+        return;
+      }
+      if (current.sourceType !== "persisted") {
+        moveUnsavedTemplateToTrash(current.definition.name);
+        return;
+      }
+      moveTemplateToTrash(
+        { templateId: current.definition.templateId, name: current.definition.name },
+        current.definition.name,
+      );
+    };
+    window.addEventListener("template-editor:archive-current", archiveCurrent);
+    return () => window.removeEventListener("template-editor:archive-current", archiveCurrent);
+  });
+
+  const explainDeleteBlock = (
+    template: Pick<DynamicTemplateResource, "name">,
+    reason: string,
+  ) => {
+    modal.info({
+      title: `“${template.name}”不能永久删除`,
+      content: (
+        <div className="template-editor__transition-confirm">
+          <p className="template-editor__transition-summary">{reason}</p>
+          <p className="template-editor__transition-note">
+            它会留在回收站，不会出现在选用列表里。已经放进页面的内容保持原样。若要继续修改，请先点“恢复模板”。
+          </p>
+        </div>
+      ),
+      okText: "知道了",
     });
   };
 
@@ -1227,14 +1343,20 @@ export default function TemplateWorkspace({
         onOpenVersionHistory={draft?.sourceType === "persisted"
           ? () => { void openVersionHistory(); }
           : undefined}
-        onArchive={!previewMode && draft?.sourceType === "persisted" && !localOnly
-          ? () => moveTemplateToTrash(
-              {
-                templateId: draft.definition.templateId,
-                name: draft.definition.name,
-              },
-              draft.definition.name,
-            )
+        onArchive={!previewMode && draft && !localOnly
+          ? () => {
+              if (draft.sourceType === "persisted") {
+                moveTemplateToTrash(
+                  {
+                    templateId: draft.definition.templateId,
+                    name: draft.definition.name,
+                  },
+                  draft.definition.name,
+                );
+                return;
+              }
+              moveUnsavedTemplateToTrash(draft.definition.name);
+            }
           : undefined}
         onDiscard={!previewMode && draft && dirty && hasBaseline
           ? discardCurrentDraft
@@ -1280,8 +1402,10 @@ export default function TemplateWorkspace({
             readWorkspaceScroll={readWorkspaceScroll}
             updateWorkspaceScroll={updateWorkspaceScroll}
             onArchive={moveTemplateToTrash}
+            onArchiveUnsaved={moveUnsavedTemplateToTrash}
             onCreateDraftFromPublished={confirmCreateDraftFromPublished}
             onDelete={permanentlyDeleteTemplate}
+            onExplainDeleteBlock={explainDeleteBlock}
             onOpen={openTemplateTarget}
             onManage={(target, action) => { void manageTemplate(target, action); }}
             publishedDraftCreation={controller.publishedDraftCreation}

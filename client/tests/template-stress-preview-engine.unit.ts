@@ -6,7 +6,7 @@ import { createTemplatePreviewContentBySlotId } from "../src/page-builder/templa
 import { createTemplateStressPreviewContentBySlotId, TEMPLATE_STRESS_PREVIEW_SCENARIOS } from "../src/page-builder/template-editor/templateStressPreviewEngine";
 
 test("压力预览隔离默认值、显式清空、试排覆盖与旧版兼容", () => {
-const definition = generateTemplateFromRecipe(createRecommendedRecipe("brand"));
+const definition = generateTemplateFromRecipe(createRecommendedRecipe("collection-story"));
 const original = structuredClone(definition);
 const slots = Object.values(definition.slots);
 const image = slots.find((slot) => slot.type === "image")!;
@@ -48,8 +48,11 @@ const withRequired = structuredClone(definition);
 withRequired.slots[text.slotId].required = true;
 assert.equal(createTemplateStressPreviewContentBySlotId(withRequired, "required-missing")[text.slotId], "");
 assert.ok(createTemplateStressPreviewContentBySlotId(withRequired, "optional-missing")[text.slotId]);
-const actionRecipe = createRecommendedRecipe("brand");
-actionRecipe.content.push(createContentSlot("cta"));
+// 按钮资格只给主行动角色（不变量 F）：用页面首屏取得一个 ButtonSlot，
+// 再追加的第二个 cta 会降级为 LinkSlot，但主行动仍是按钮。
+// 两个 cta 必须给不同的槽位标识：createContentSlot 默认拿角色当 id，同名会被方案校验判为重复。
+const actionRecipe = createRecommendedRecipe("page-hero");
+actionRecipe.content.push(createContentSlot("cta", "cta_secondary"));
 const actionDefinition = generateTemplateFromRecipe(actionRecipe);
 const actionSlot = Object.values(actionDefinition.slots).find((slot) => slot.type === "button")!;
 const action = createTemplateStressPreviewContentBySlotId(actionDefinition, "short-text")[actionSlot.slotId] as { label: string; targetType: string };

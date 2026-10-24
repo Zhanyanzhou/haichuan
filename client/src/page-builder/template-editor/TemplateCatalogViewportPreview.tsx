@@ -53,7 +53,6 @@ interface TemplateCatalogViewportPreviewProps {
   sourceWidth: number;
   templateKey: string;
   title: string;
-  basisLabel?: string;
   unavailable?: boolean;
   showSlotAnnotations?: boolean;
   presentation?: TemplateCatalogPreviewPresentation;
@@ -91,7 +90,6 @@ export default function TemplateCatalogViewportPreview({
   sourceWidth,
   templateKey,
   title,
-  basisLabel,
   unavailable = false,
   showSlotAnnotations = false,
   presentation = "thumbnail",
@@ -252,8 +250,7 @@ export default function TemplateCatalogViewportPreview({
       if (presentation === "thumbnail") {
         const heightFitScale = CATALOG_PREVIEW_MAX_HEIGHT / measurement.naturalHeight;
         // 长页完整等比缩放会让槽位无法辨认。保留 Renderer 原始几何，
-        // 仅把卡片变为明确标注的可滚动局部视窗；分类只由设计画幅决定，
-        // 不能随目录栏宽度变化而让同一份模板在“全貌／滚动”之间跳动。
+        // 卡片窗口只显示顶部，并标明下面还有；分类只由设计画幅决定。
         const heightFitWidth = sourceWidth * heightFitScale;
         longPage = heightFitWidth < CATALOG_PREVIEW_MAX_HEIGHT * CATALOG_THUMBNAIL_MIN_WIDTH_RATIO;
         scale = longPage ? widthFitScale : Math.min(widthFitScale, heightFitScale);
@@ -475,7 +472,7 @@ export default function TemplateCatalogViewportPreview({
   ]);
 
   const scaledHeight = measurement.naturalHeight * measurement.scale;
-  const scrollableThumbnail = presentation === "thumbnail" && measurement.longPage && !isUnavailable;
+  const clippedLongPage = presentation === "thumbnail" && measurement.longPage && !isUnavailable;
   const visibleSlots = slots.filter((slot) => !slot.hidden);
   const imageSlotCount = visibleSlots.filter((slot) => slot.kind === "media").length;
   const textSlotCount = visibleSlots.filter((slot) => ["title", "description", "text"].includes(slot.kind)).length;
@@ -496,19 +493,23 @@ export default function TemplateCatalogViewportPreview({
       className={`template-editor__catalog-preview-shell is-${viewport} is-${presentation}${isUnavailable || previewStatus === "unavailable" ? " is-unavailable" : ""}`}
       data-template-catalog-preview-shell
       data-preview-annotations={showSlotAnnotations ? "true" : "false"}
+      data-image-slot-count={imageSlotCount}
+      data-text-slot-count={textSlotCount}
+      data-action-slot-count={actionSlotCount}
+      data-hidden-slot-count={hiddenSlotCount}
       data-preview-status={previewStatus}
       data-preview-renderer-ready={rendererReady ? "true" : "false"}
       data-preview-styles-ready={stylesReady ? "true" : "false"}
       data-preview-slot-box-count={slotBoxCount}
       data-preview-source-size={`${Math.round(sourceWidth)}x${Math.round(measurement.naturalHeight)}`}
       data-preview-content-status={contentIssue ?? "ready"}
-      data-preview-thumbnail-mode={scrollableThumbnail ? "scroll" : "overview"}
+      data-preview-thumbnail-mode={clippedLongPage ? "top" : "overview"}
       style={fixedDetailWidth ? { width: `max(100%, ${fixedDetailWidth}px)` } : undefined}
     >
       <div
         ref={stageRef}
-        className={`template-editor__catalog-artboard-stage${scrollableThumbnail ? " is-long-page" : ""}`}
-        style={{ height: isUnavailable ? undefined : scrollableThumbnail ? CATALOG_PREVIEW_MAX_HEIGHT : scaledHeight }}
+        className={`template-editor__catalog-artboard-stage${clippedLongPage ? " is-long-page" : ""}`}
+        style={{ height: isUnavailable ? undefined : clippedLongPage ? CATALOG_PREVIEW_MAX_HEIGHT : scaledHeight }}
       >
         <div
           ref={hostRef}
@@ -619,31 +620,28 @@ export default function TemplateCatalogViewportPreview({
           : null}
         </div>
       </div>
-      {scrollableThumbnail ? (
-        <span className="template-editor__catalog-long-page-hint" aria-hidden="true">
-          长页局部 · 滚动查看
+      {clippedLongPage ? (
+        <span className="template-editor__catalog-long-page-hint">
+          下面还有
         </span>
       ) : null}
-      <span className="template-editor__catalog-dimensions">
-        {dimensionLabel}
-      </span>
-      {presentation !== "detail" ? (
-        <div
-          className="template-editor__catalog-slot-key"
-          data-image-slot-count={imageSlotCount}
-          data-text-slot-count={textSlotCount}
-          data-action-slot-count={actionSlotCount}
-          data-hidden-slot-count={hiddenSlotCount}
-          aria-label={`${basisLabel ? `${basisLabel}。` : ""}当前画幅可见槽位：图片 ${imageSlotCount} 个，文字 ${textSlotCount} 个，按钮 ${actionSlotCount} 个；隐藏槽位 ${hiddenSlotCount} 个${otherSlotCount ? `；其他可见槽位 ${otherSlotCount} 个` : ""}`}
-        >
-          {basisLabel ? <span className="is-basis">{basisLabel}</span> : null}
-          <span className="is-media">图片 {imageSlotCount}</span>
-          <span className="is-text">文字 {textSlotCount}</span>
-          <span className="is-action">按钮 {actionSlotCount}</span>
-          <span className="is-hidden">隐藏 {hiddenSlotCount}</span>
-          {otherSlotCount ? <span className="is-other">其他 {otherSlotCount}</span> : null}
-        </div>
-      ) : null}
+      {presentation === "thumbnail" ? null : (
+        <>
+          <span className="template-editor__catalog-dimensions">
+            {dimensionLabel}
+          </span>
+          <div
+            className="template-editor__catalog-slot-key"
+            aria-label={`当前画幅可见槽位：图片 ${imageSlotCount} 个，文字 ${textSlotCount} 个，按钮 ${actionSlotCount} 个；隐藏槽位 ${hiddenSlotCount} 个${otherSlotCount ? `；其他可见槽位 ${otherSlotCount} 个` : ""}`}
+          >
+            <span className="is-media">图片 {imageSlotCount}</span>
+            <span className="is-text">文字 {textSlotCount}</span>
+            <span className="is-action">按钮 {actionSlotCount}</span>
+            <span className="is-hidden">隐藏 {hiddenSlotCount}</span>
+            {otherSlotCount ? <span className="is-other">其他 {otherSlotCount}</span> : null}
+          </div>
+        </>
+      )}
       {contentIssue && presentation === "detail" ? (
         <span className={`template-editor__catalog-preview-issue is-${contentIssue}`} role="status">
           {contentIssue === "media-failed" ? "素材加载失败" : "素材未配置"}

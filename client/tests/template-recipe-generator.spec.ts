@@ -1,14 +1,50 @@
 import { expect, test } from "@playwright/test";
 import { generateTemplateFromRecipe } from "../src/page-builder/template-creation/generateTemplateFromRecipe";
-import { CANVAS_PRESETS, CONTENTS, LAYOUTS, MEDIA_PRESETS, PURPOSES, STYLES, changeRecipePurpose, createContentSlot, createMediaSlots, createRecommendedRecipe, styleFor } from "../src/page-builder/template-creation/presets";
+import { partitionMobileWorkUnits, type MobileWorkNode } from "../src/page-builder/template-definition/mobileWorkGrid";
+import { CANVAS_PRESETS, CONTENTS, LAYOUTS, MEDIA_PRESETS, SECTION_ROLES, STYLES, changeRecipeSectionRole, createContentSlot, createMediaSlots, createRecommendedRecipe, styleFor } from "../src/page-builder/template-creation/presets";
 import { validateDynamicTemplateDefinition, validateDynamicTemplatePublishDefinition } from "../src/page-builder/template-definition/validateTemplateDefinition";
 import { resolveTemplateNodeRules } from "../src/page-builder/template-definition/responsive";
 import { arrangeMedia } from "../src/page-builder/template-creation/mediaGeometry";
 import { createTemplateRecipePreviewContent } from "../src/page-builder/template-creation/previewContent";
 import { compileDynamicTemplateRenderPlan, type DynamicTemplateRenderPlanNode } from "../src/page-builder/template-definition/renderPlan";
 
+function workNode(nodeId: string, slot?: MobileWorkNode["slot"], children: MobileWorkNode[] = []): MobileWorkNode {
+  return { nodeId, type: slot ? "ImageSlot" : "Container", slot, children };
+}
+
+test("连续三张作品卡在手机上并成两列，主图和两张叙事图保持单列", () => {
+  const image = (id: string, role?: string) => workNode(id, { type: "image", semanticRole: role });
+  const cards = [1, 2, 3].map((index) => workNode(`card-${index}`, undefined, [image(`img-${index}`)]));
+  const grouped = partitionMobileWorkUnits(cards, { device: "mobile", layoutMode: "flow" });
+  expect(grouped.map((group) => group.kind)).toEqual(["works"]);
+  const direct = partitionMobileWorkUnits(
+    [image("a"), image("b"), image("c")],
+    { device: "mobile", layoutMode: "flow", sectionRole: "creation-grid" },
+  );
+  expect(direct[0]?.kind).toBe("works");
+  const narrative = partitionMobileWorkUnits(
+    [image("hero", "heroImage"), image("one"), image("two")],
+    { device: "mobile", layoutMode: "flow" },
+  );
+  expect(narrative.every((group) => group.kind === "node")).toBe(true);
+  const desktop = partitionMobileWorkUnits(cards, { device: "desktop", layoutMode: "flow" });
+  expect(desktop.every((group) => group.kind === "node")).toBe(true);
+});
+
+test("作品网格的作品卡在手机上保持 4:5，并带上区块角色", () => {
+  const recipe = createRecommendedRecipe("creation-grid");
+  const definition = generateTemplateFromRecipe(recipe, { name: "作品网格验收" });
+  expect(definition.metadata.sectionRole).toBe("creation-grid");
+  const images = Object.values(definition.nodes)
+    .map((node) => definition.slots[node.slotId ?? ""])
+    .filter((slot) => slot?.type === "image" && slot.semanticRole !== "backgroundImage" && slot.semanticRole !== "logo");
+  expect(images.length).toBeGreaterThanOrEqual(2);
+  for (const slot of images) expect(slot.mobileRules?.aspectRatio).toBe("4:5");
+  expect(validateDynamicTemplatePublishDefinition(definition).issues.filter((issue) => issue.level === "error")).toEqual([]);
+});
+
 test("三图自由布局的已有外框通过客户端发布校验，未命名仍须补填", () => {
-  const recipe = createRecommendedRecipe("news");
+  const recipe = createRecommendedRecipe("editorial-media");
   recipe.canvas = { width: 1920, height: 1080, aspectRatio: 16 / 9 };
   recipe.layout = "leftImageRightContent";
   recipe.media = createMediaSlots(["custom", "custom", "custom"]);
@@ -24,7 +60,7 @@ test("三图自由布局的已有外框通过客户端发布校验，未命名�
 });
 
 test("1200×900 左文右图的双图充分展开，保留方形和同级关系", () => {
-  const recipe = createRecommendedRecipe("brand");
+  const recipe = createRecommendedRecipe("maison-fact");
   recipe.canvas = { width: 1200, height: 900, aspectRatio: 4 / 3 };
   recipe.layout = "leftContentRightImage";
   recipe.media = createMediaSlots(["custom", "custom"]);
@@ -85,19 +121,25 @@ test("长文扩大文字区而不缩字号，同级分栏仍保持等宽", () =>
   recipe.canvas = { width: 1200, height: 900, aspectRatio: 4 / 3 };
   recipe.layout = "leftContentRightImage";
   recipe.media = createMediaSlots(["custom", "custom"]);
-  recipe.content = [createContentSlot("title"), ...["description-one", "description-two"].map((id) => ({ ...createContentSlot("description", id), defaultContent: "图".repeat(300) }))];
+  // 字号改从 UI_GUIDE 第 2.3 节取固定层级后，300 字的两段描述在 40% 分栏里仍放得下；
+  // 这里把描述写到 600 字，让容纳校验真的走到 50% 分栏——验证的是分栏机制，不是某个字号。
+  recipe.content = [createContentSlot("title"), ...["description-one", "description-two"].map((id) => ({
+    ...createContentSlot("description", id), defaultContent: "图".repeat(600), maxLength: 2000,
+  }))];
   const definition = generateTemplateFromRecipe(recipe);
   const contentWidth = definition.nodes[`${definition.templateId}_content`].responsive.desktop.placement!.width * 1200;
   expect(contentWidth).toBeGreaterThan((1200 - 108 - 32) * .4);
   const title = Object.values(definition.slots).find((slot) => slot.semanticRole === "title")!;
-  expect(title.desktopRules.fontSize).toEqual({ value: 54, unit: "px" });
+  expect(title.desktopRules.fontSize).toEqual({ value: 34, unit: "px" });
   recipe.layout = "splitColumns";
   const columns = generateTemplateFromRecipe(recipe);
   expect(columns.nodes[`${columns.templateId}_content`].responsive.desktop.placement!.width * 1200).toBeCloseTo((1200 - 108 - 32) / 2, 5);
 });
 
 test("Recipe 独立生成稳定身份，预览和创建可复用同一定义", () => {
-  const recipe = createRecommendedRecipe();
+  // 价格已退出九个区块角色的默认推荐，这里显式加一个价格槽，验证的是身份稳定而不是推荐内容。
+  const recipe = createRecommendedRecipe("collection-story");
+  recipe.content = [...recipe.content, createContentSlot("price")];
   const original = structuredClone(recipe);
   const definition = generateTemplateFromRecipe(recipe, { templateId: "tpl_recipe_stable" });
   expect(generateTemplateFromRecipe(recipe, { templateId: "tpl_recipe_stable" })).toEqual(definition);
@@ -111,11 +153,9 @@ test("Recipe 独立生成稳定身份，预览和创建可复用同一定义", (
 });
 
 test("所有新预设及重复自定义文字的系统样例不进入正式内容", () => {
-  for (const [purpose] of PURPOSES) {
-    const recipe = createRecommendedRecipe(purpose);
+  for (const [sectionRole] of SECTION_ROLES) {
+    const recipe = createRecommendedRecipe(sectionRole);
     expect(recipe.content.every((item) => item.defaultContent === "")).toBe(true);
-    if (!recipe.content.length && !recipe.media.length) recipe.content = [createContentSlot("title")];
-    if (purpose === "custom") recipe.customPurpose = "自定义用途";
     const definition = generateTemplateFromRecipe(recipe);
     const beforePreview = structuredClone(definition);
     createTemplateRecipePreviewContent(definition);
@@ -124,7 +164,7 @@ test("所有新预设及重复自定义文字的系统样例不进入正式内�
     expect(definition.previewContent).toEqual({});
     expect(definition.templateRecipe?.content.every((item) => item.defaultContent === "")).toBe(true);
   }
-  const recipe = createRecommendedRecipe("general");
+  const recipe = createRecommendedRecipe();
   recipe.canvas = { width: 1080, height: 4096, aspectRatio: 1080 / 4096 };
   recipe.content = [...CONTENTS.map(([role]) => createContentSlot(role)),
     { ...createContentSlot("customText", "second-custom"), name: "另一个自定义字段" }];
@@ -137,7 +177,7 @@ test("所有新预设及重复自定义文字的系统样例不进入正式内�
 });
 
 test("向导样例保持桌面与手机文字层级和几何，序列化重开后的公开内容仍为空", () => {
-  const recipe = createRecommendedRecipe("general");
+  const recipe = createRecommendedRecipe();
   recipe.canvas = { width: 1920, height: 1080, aspectRatio: 16 / 9 };
   recipe.layout = "leftImageRightContent";
   recipe.media = createMediaSlots(["heroImage"]);
@@ -166,7 +206,7 @@ test("向导样例保持桌面与手机文字层级和几何，序列化重开�
 
 test("旧显式配方与编辑后的正式默认内容保持原样，包括与系统样例相同的文字", () => {
   for (const presetVersion of [1, 2]) {
-    const recipe = createRecommendedRecipe("general");
+    const recipe = createRecommendedRecipe();
     recipe.presetVersion = presetVersion;
     recipe.content = [
       { ...createContentSlot("title"), defaultContent: "主标题" },
@@ -182,7 +222,7 @@ test("旧显式配方与编辑后的正式默认内容保持原样，包括与�
     expect(definition.defaultContent[slotFor("title").slotId]).toBe("主标题");
     expect(definition.defaultContent[slotFor("description").slotId]).toBe("经确认的作品说明");
     expect(definition.defaultContent[slotFor("cta").slotId]).toEqual({ label: "了解详情", targetType: "none" });
-    expect(definition.defaultContent[slotFor("heroImage").slotId]).toEqual({ src: "/images/approved.jpg", alt: "主图片" });
+    expect(definition.defaultContent[slotFor("heroImage").slotId]).toEqual({ src: "/images/approved.jpg", alt: "主图" });
     expect(createTemplateRecipePreviewContent(definition)).toEqual({});
     definition.defaultContent[slotFor("description").slotId] = "编辑后保存的真实说明";
     const reopened = JSON.parse(JSON.stringify(definition));
@@ -200,15 +240,26 @@ for (const [layout, label] of LAYOUTS) {
       recipe.layout = layout;
       recipe.canvas = { width: canvas.width, height: canvas.height, aspectRatio: canvas.width / canvas.height };
       recipe.media = createMediaSlots(media.roles);
+      // 媒体组合里有「不要图片」一项，配方必须另有内容槽位才成立。
+      recipe.content = [createContentSlot("title")];
       const definition = generateTemplateFromRecipe(recipe);
       expect(validateDynamicTemplateDefinition(definition).issues.filter((issue) => issue.level === "error")).toEqual([]);
       expect(validateDynamicTemplateDefinition(definition).valid).toBe(true);
       const stage = Object.values(definition.nodes).find((node) => node.type === "Stack")!;
       expect(resolveTemplateNodeRules(definition, stage.nodeId, "mobile").layoutMode).toBe("flow");
+      // 随内容增长的画布在桌面端也必须是流式：自由坐标没有高度分母，会把根容器压成 0。
+      expect(resolveTemplateNodeRules(definition, stage.nodeId, "desktop").layoutMode).toBe(canvas.ratio === "auto" ? "flow" : "free");
+      if (canvas.ratio === "auto") expect(resolveTemplateNodeRules(definition, definition.rootNodeId, "desktop").height.mode).toBe("auto");
       for (const node of Object.values(definition.nodes).filter((item) => item.slotId)) {
         expect(resolveTemplateNodeRules(definition, node.nodeId, "mobile").placement).toBeUndefined();
         const placement = node.responsive.desktop.placement;
-        if (!placement) { expect(Object.values(definition.nodes).some((parent) => parent.childIds.includes(node.nodeId) && parent.type === "Container")).toBe(true); continue; }
+        if (!placement) {
+          // 没有自由坐标的槽位必须落在流式父级里：内容区容器，或 auto 画布下已转为 flow 的 Stack。
+          const parent = Object.values(definition.nodes).find((item) => item.childIds.includes(node.nodeId)
+            && (item.type === "Container" || resolveTemplateNodeRules(definition, item.nodeId, "desktop").layoutMode === "flow"));
+          expect(Boolean(parent), `${label} / ${canvas.name} / ${media.name}：无坐标槽位缺少流式父级`).toBe(true);
+          continue;
+        }
         expect(placement.width).toBeGreaterThan(0);
         expect(placement.height).toBeGreaterThan(0);
         expect(placement.x + placement.width).toBeLessThanOrEqual(1.00001);
@@ -218,10 +269,9 @@ for (const [layout, label] of LAYOUTS) {
   });
 }
 
-test("不同用途与风格可生成纯图片、纯文字，充足空间容纳全部内容", () => {
-  for (const [purpose] of PURPOSES) for (const [variant] of STYLES) {
-    const recipe = createRecommendedRecipe(purpose);
-    if (purpose === "custom") recipe.customPurpose = "自定义主题";
+test("不同区块角色与风格可生成纯图片、纯文字，充足空间容纳全部内容", () => {
+  for (const [sectionRole] of SECTION_ROLES) for (const [variant] of STYLES) {
+    const recipe = createRecommendedRecipe(sectionRole);
     recipe.style = styleFor(variant);
     recipe.content = [];
     recipe.media = createMediaSlots(["heroImage"]);
@@ -236,7 +286,7 @@ test("不同用途与风格可生成纯图片、纯文字，充足空间容纳�
 });
 
 test("空方案与放不下的内容明确拒绝，保留完整配置", () => {
-  const empty = createRecommendedRecipe("general");
+  const empty = createRecommendedRecipe();
   expect(() => generateTemplateFromRecipe(empty)).toThrow("至少选择一个");
   const crowded = createRecommendedRecipe();
   crowded.canvas = { width: 200, height: 200, aspectRatio: 1 };
@@ -246,28 +296,31 @@ test("空方案与放不下的内容明确拒绝，保留完整配置", () => {
   expect(crowded).toEqual(before);
 });
 
-test("新推荐准确，标题按短边计算，主副图有层级且卡片只有一组", () => {
-  expect(createRecommendedRecipe().media.map((item) => item.role)).toEqual(["heroImage"]);
-  expect(createRecommendedRecipe("event").content.map((item) => item.role)).toEqual(["title", "time", "location", "cta"]);
-  expect(createRecommendedRecipe("profile").content.map((item) => item.role)).toEqual(["personName", "position", "biography"]);
+test("新推荐准确，字号按 UI_GUIDE 排印层级，主副图有层级且卡片只有一组", () => {
+  expect(createRecommendedRecipe("page-hero").media.map((item) => item.role)).toEqual(["backgroundImage", "logo"]);
+  expect(createRecommendedRecipe("service-invitation").content.map((item) => item.role)).toEqual(["title", "time", "location", "cta"]);
+  expect(createRecommendedRecipe("creation-grid").canvas).toEqual({ width: 1080, height: 1350, aspectRatio: .8 });
+  expect(createRecommendedRecipe("editorial-media").layout).toBe("fullImageOverlay");
+  expect(createRecommendedRecipe("editorial-split").presetVersion).toBe(3);
   const recipe = createRecommendedRecipe();
   recipe.canvas = { width: 1920, height: 1080, aspectRatio: 16 / 9 };
   recipe.layout = "cards";
   recipe.media = createMediaSlots(["heroImage", "secondaryImage", "secondaryImage"]);
   recipe.media[0].borderRadius = 0;
+  recipe.content = [createContentSlot("title"), createContentSlot("subtitle"), createContentSlot("originalPrice"), createContentSlot("price")];
   const definition = generateTemplateFromRecipe(recipe);
   const role = (name: string) => Object.values(definition.slots).find((item) => item.semanticRole === name)!;
-  expect(role("title").desktopRules.fontSize).toEqual({ value: 65, unit: "px" });
-  expect(role("subtitle").desktopRules.fontSize).toEqual({ value: 34, unit: "px" });
-  expect(role("originalPrice").desktopRules.fontSize).toEqual({ value: 18, unit: "px" });
-  expect(role("price").desktopRules.fontSize).toEqual({ value: 68, unit: "px" });
+  expect(role("title").desktopRules.fontSize).toEqual({ value: 34, unit: "px" });
+  expect(role("subtitle").desktopRules.fontSize).toEqual({ value: 18, unit: "px" });
+  expect(role("originalPrice").desktopRules.fontSize).toEqual({ value: 12, unit: "px" });
+  expect(role("price").desktopRules.fontSize).toEqual({ value: 36, unit: "px" });
   expect(Object.values(definition.nodes).filter((node) => node.name === "主内容卡片")).toHaveLength(1);
   const imageNode = (name: string) => Object.values(definition.nodes).find((node) => node.slotId === role(name).slotId)!;
   expect(imageNode("heroImage").responsive.desktop.radius).toEqual({ value: 0, unit: "px" });
   const hero = imageNode("heroImage").responsive.desktop.placement!;
   const secondary = imageNode("secondaryImage").responsive.desktop.placement!;
   expect(hero.width * hero.height).toBeGreaterThan(secondary.width * secondary.height * 2);
-  expect(definition.templateRecipe?.presetVersion).toBe(2);
+  expect(definition.templateRecipe?.presetVersion).toBe(3);
 });
 
 test("图片圆形、完整显示和自由比例使用最终生成参数，旧配方仍可读取", () => {
@@ -285,48 +338,64 @@ test("图片圆形、完整显示和自由比例使用最终生成参数，旧�
   expect(() => generateTemplateFromRecipe(recipe)).toThrow("Logo 只需一个");
 });
 
-test("改用途只更新未手改段，返回上一步不重置内容", () => {
-  const recipe = createRecommendedRecipe();
-  recipe.content[0].defaultContent = "保留我的标题";
+test("改区块角色只更新未手改段，返回上一步不重置内容", () => {
+  const recipe = createRecommendedRecipe("editorial-split");
+  recipe.content.find((item) => item.role === "title")!.defaultContent = "保留我的标题";
   recipe.layout = "free";
-  const updated = changeRecipePurpose(recipe, "news", { content: true, layout: true });
+  const updated = changeRecipeSectionRole(recipe, "editorial-media", { content: true, layout: true });
   expect(updated.content).toEqual(recipe.content);
   expect(updated.layout).toBe("free");
-  expect(updated.canvas).toEqual(createRecommendedRecipe("news").canvas);
+  expect(updated.canvas).toEqual(createRecommendedRecipe("editorial-media").canvas);
+  expect(updated.sectionRole).toBe("editorial-media");
 });
 
 test("拒绝无效尺寸、重复身份和默认文字超限", () => {
   const recipe = createRecommendedRecipe();
   recipe.canvas.width = 0;
   expect(() => generateTemplateFromRecipe(recipe)).toThrow();
-  const duplicate = createRecommendedRecipe();
-  duplicate.media.push({ ...duplicate.media[0] });
+  const duplicate = createRecommendedRecipe("editorial-media");
+  duplicate.media = createMediaSlots(["backgroundImage", "backgroundImage"]);
   expect(() => generateTemplateFromRecipe(duplicate)).toThrow();
-  const long = createRecommendedRecipe();
-  long.content[0].defaultContent = "长".repeat(1000);
+  const long = createRecommendedRecipe("collection-story");
+  long.content.find((item) => item.role === "title")!.defaultContent = "长".repeat(1000);
   expect(() => generateTemplateFromRecipe(long)).toThrow();
 });
 
+test("新配方的结构名称与首发母版同一套词", () => {
+  const namesOf = (sectionRole: Parameters<typeof createRecommendedRecipe>[0]) =>
+    Object.values(generateTemplateFromRecipe(createRecommendedRecipe(sectionRole)).nodes).map((node) => node.name);
+  const hero = namesOf("page-hero");
+  expect(hero).toEqual(expect.arrayContaining(["背景图", "Logo", "文字列", "主标题", "副标题", "主行动"]));
+  expect(hero).not.toContain("按钮 / CTA");
+  const split = namesOf("editorial-split");
+  expect(split).toEqual(expect.arrayContaining(["主图", "副图 1", "副图 2", "文字列"]));
+  const story = namesOf("collection-story");
+  expect(story).toContain("次级链接");
+  expect(story).not.toContain("主行动");
+});
+
 test("同类内容多次添加仍是独立槽位，中央标题只提取第一个", () => {
-  const recipe = createRecommendedRecipe("newProduct");
+  // 中央标题只在中部/底部布局里被抽成页眉；角色的首推布局不含它，这里显式指定。
+  const recipe = createRecommendedRecipe("collection-story");
+  recipe.layout = "centerSubject";
   recipe.content = [createContentSlot("title", "first"), createContentSlot("title", "second"), createContentSlot("customText", "custom-one"), createContentSlot("customText", "custom-two")];
   const definition = generateTemplateFromRecipe(recipe);
   const titles = Object.values(definition.nodes).filter((node) => definition.slots[node.slotId!]?.semanticRole === "title");
   expect(titles).toHaveLength(2);
   expect(titles.filter((node) => node.responsive.desktop.placement)).toHaveLength(1);
-  const group = Object.values(definition.nodes).find((node) => node.name === "内容区域")!;
+  const group = Object.values(definition.nodes).find((node) => node.name === "文字列")!;
   expect(group.childIds).toHaveLength(3);
   expect(new Set(Object.keys(definition.slots)).size).toBe(6);
 });
 
 test("全幅布局主图铺满画布并承载前景内容，显式背景优先", () => {
-  const recipe = createRecommendedRecipe();
+  const recipe = createRecommendedRecipe("video-story");
   recipe.layout = "fullImageOverlay";
   const definition = generateTemplateFromRecipe(recipe);
   const image = Object.values(definition.nodes).find((node) => node.type === "ImageSlot")!;
   expect(image.responsive.desktop.placement).toEqual({ x: 0, y: 0, width: 1, height: 1, zIndex: 0 });
   expect(definition.slots[image.slotId!].desktopRules.aspectRatio).toBe("16:9");
-  const group = Object.values(definition.nodes).find((node) => node.name === "内容区域")!;
+  const group = Object.values(definition.nodes).find((node) => node.name === "文字列")!;
   expect(group.responsive.desktop.backgroundColor).toBe(recipe.style.backgroundColor);
   expect(group.responsive.desktop.placement?.zIndex).toBeGreaterThan(0);
   recipe.media = createMediaSlots(["backgroundImage", "heroImage"]);
@@ -372,4 +441,65 @@ test("自定义图片删除后再添加不产生重名，圆角恢复与圆形�
   expect(resolveMediaShapeChange(media[0], "rounded")).toEqual({ shape: "rectangle", borderRadius: 24 });
   expect(resolveMediaShapeChange(media[0], "square")).toEqual({ shape: "rectangle", borderRadius: 0 });
   expect(media[0]).toEqual(original);
+});
+
+test("手机深色画布上的通栏图贴边，浅色普通图和作品网格保留边距", async () => {
+  const { extendMobileBleedInset, imageBleedsOnMobile, mobileBleedBox, mobileFreeFrameStyle } = await import("../src/page-builder/template-definition/mobileImageBleed");
+  const image = (semanticRole: string, width: "fill" | { value: number; unit: "px" } = "fill") => ({
+    slot: { type: "image" as const, semanticRole },
+    rules: { width },
+  });
+  const dark = { device: "mobile" as const, constrainWorkCell: false, canvasColor: "#111315" };
+  const light = { device: "mobile" as const, constrainWorkCell: false, canvasColor: "#FFFFFF", sectionRole: "collection-story" };
+  expect(imageBleedsOnMobile(image("heroImage"), dark)).toBe(true);
+  expect(imageBleedsOnMobile(image("heroImage"), light)).toBe(false);
+  expect(imageBleedsOnMobile(image("heroImage"), { ...light, sectionRole: "page-hero" })).toBe(true);
+  expect(imageBleedsOnMobile(image("backgroundImage"), light)).toBe(true);
+  expect(imageBleedsOnMobile(image("logo", { value: 72, unit: "px" }), dark)).toBe(false);
+  expect(imageBleedsOnMobile(image("heroImage"), { ...dark, sectionRole: "creation-grid" })).toBe(false);
+  expect(imageBleedsOnMobile(image("heroImage"), { ...dark, device: "desktop" })).toBe(false);
+  const inset = extendMobileBleedInset(
+    { top: 0, right: 0, bottom: 0, left: 0 },
+    { top: { value: 24, unit: "px" }, right: { value: 20, unit: "px" }, bottom: { value: 24, unit: "px" }, left: { value: 20, unit: "px" } },
+    true,
+  );
+  expect(mobileBleedBox(inset, { top: true, bottom: false })).toMatchObject({
+    marginTop: "-24px", marginLeft: "-20px", marginRight: "-20px", width: "calc(100% + 40px)", borderRadius: 0,
+  });
+  expect(mobileBleedBox(inset, { top: false, bottom: false })?.marginTop).toBeUndefined();
+  expect(mobileFreeFrameStyle({ x: 0.06, y: 0.06, width: 0.88, height: 0.88 }, true, "heroImage")).toMatchObject({ left: 0, width: "100%" });
+  expect(mobileFreeFrameStyle({ x: 0.3, y: 0.3, width: 0.4, height: 0.4 }, true, "heroImage")).toBeUndefined();
+  expect(mobileFreeFrameStyle({ x: 0.3, y: 0.3, width: 0.4, height: 0.4 }, true, "backgroundImage")).toMatchObject({ width: "100%", height: "100%" });
+});
+
+test("作品卡的品名跟到图片下面，横图在手机上改成 4:5", async () => {
+  const { attachMobileWorkCaptions, resolveMobileImageFrame } = await import("../src/page-builder/template-definition/mobileWorkGrid");
+  const image = (nodeId: string) => ({ kind: "node" as const, node: { nodeId, type: "ImageSlot", slot: { type: "image", semanticRole: "custom" }, children: [] } });
+  const name = (nodeId: string) => ({ kind: "node" as const, node: { nodeId, type: "TextSlot", slot: { type: "text", semanticRole: "productName" }, children: [] } });
+  const title = { kind: "node" as const, node: { nodeId: "title", type: "HeadingSlot", slot: { type: "heading", semanticRole: "title" }, children: [] } };
+  const attached = attachMobileWorkCaptions([
+    title,
+    { kind: "works", nodes: [image("a").node, image("b").node, image("c").node] },
+    name("n1"),
+    name("n2"),
+    name("n3"),
+  ]);
+  expect(attached).toHaveLength(2);
+  expect(attached[1]).toMatchObject({ kind: "works", captions: [{ nodeId: "n1" }, { nodeId: "n2" }, { nodeId: "n3" }] });
+  const unmatched = attachMobileWorkCaptions([
+    { kind: "works", nodes: [image("a").node, image("b").node, image("c").node] },
+    name("only"),
+  ]);
+  expect(unmatched[1]).toMatchObject({ kind: "node", node: { nodeId: "only" } });
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: true, slotType: "image", semanticRole: "custom", ratio: 0.4 })).toBe("4 / 5");
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "heroImage", ratio: 4 / 3 })).toBe("4 / 5");
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "backgroundImage", sectionRole: "page-hero", ratio: 16 / 9 })).toBe("4 / 5");
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "backgroundImage", sectionRole: "page-hero" })).toBe("4 / 5");
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "backgroundImage", ratio: 16 / 9 })).toBeUndefined();
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "backgroundImage", sectionRole: "editorial-media", ratio: 16 / 9 })).toBeUndefined();
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "backgroundImage", sectionRole: "video-story", ratio: 3 })).toBeUndefined();
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "custom", ratio: 0.8 })).toBeUndefined();
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "custom", ratio: 1 })).toBeUndefined();
+  expect(resolveMobileImageFrame({ device: "mobile", inWorkGrid: false, slotType: "image", semanticRole: "logo", ratio: 3 })).toBeUndefined();
+  expect(resolveMobileImageFrame({ device: "desktop", inWorkGrid: true, slotType: "image", semanticRole: "custom", ratio: 0.4 })).toBeUndefined();
 });

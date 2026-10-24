@@ -20,7 +20,7 @@
   color: var(--gold);
   font-family: "Cormorant Garamond", "Noto Serif SC", serif;
   font-size: 12px;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.08em;
 }
 
 .account-hero {
@@ -232,7 +232,7 @@
   .account-kicker {
     margin-bottom: 10px;
     font-size: 11px;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.08em;
   }
 
   .account-hero h1 {

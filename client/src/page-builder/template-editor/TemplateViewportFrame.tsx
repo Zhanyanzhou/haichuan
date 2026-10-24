@@ -214,6 +214,8 @@ export default function TemplateViewportFrame({
   onPropertyCommit,
   flowDropLabel,
   inlineTextEditor,
+  onOverlayDeleteTarget,
+  overlayDeleteLabel,
 }: {
   children: ReactNode;
   toolbarStart?: ReactNode;
@@ -263,6 +265,8 @@ export default function TemplateViewportFrame({
   onPropertyCommit?: (key: string, value: number) => void;
   flowDropLabel?: string | null;
   inlineTextEditor?: OverlayInlineTextEditor | null;
+  onOverlayDeleteTarget?: (target: OverlayTargetDescriptor) => void;
+  overlayDeleteLabel?: string;
 }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -1009,6 +1013,8 @@ export default function TemplateViewportFrame({
                 onPropertyCommit={onPropertyCommit}
                 flowDropLabel={flowDropLabel}
                 inlineTextEditor={inlineTextEditor}
+                onDeleteTarget={onOverlayDeleteTarget}
+                deleteTargetLabel={overlayDeleteLabel}
               />
             ) : null}
           </div>

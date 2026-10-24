@@ -324,6 +324,8 @@ export interface DynamicTemplateCanvasSize {
 export interface DynamicTemplateMetadata {
   category: string;
   purpose: string;
+  /** 九个区块角色之一；历史模板未声明时缺省。 */
+  sectionRole?: "page-hero" | "collection-story" | "editorial-split" | "craft-detail" | "editorial-media" | "creation-grid" | "maison-fact" | "service-invitation" | "video-story";
   layoutType: string;
   slotSummary: string;
   recommendedFor: string[];

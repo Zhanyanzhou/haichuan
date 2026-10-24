@@ -116,7 +116,7 @@ export default function TemplateCatalogCoverEditor({
       footer={[
         catalogCoverUrl && !pendingSelection ? (
           <Button key="clear" disabled={busy} onClick={onClear}>
-            改回实时预览
+            改回中性预览
           </Button>
         ) : null,
         pendingSelection ? (
@@ -142,7 +142,7 @@ export default function TemplateCatalogCoverEditor({
       ]}
     >
       <p className="homepage-editor__inspector-hint">
-        {`裁切框按当前模板画幅 ${Math.round(frame.width)} × ${Math.round(frame.height)}（${frame.ratioLabel}）来定。白框标出图片槽位，方便把主体放到对应位置；系统不会再改成 4:3 或自动裁切。这张图只出现在模板组件库卡片上。没有图片或图片失效时，仍显示实时预览。放大预览和页面内容不受影响。`}
+        {`裁切框按当前模板画幅 ${Math.round(frame.width)} × ${Math.round(frame.height)}（${frame.ratioLabel}）来定。这张图只替换模板组件库卡片上的预览，不写入模板默认图，也不出现在设计画布或客户前台。没有这张图时，卡片和画布都用中性图。`}
       </p>
       <MediaPickerField
         fieldKey={`catalog-cover:${templateId}`}

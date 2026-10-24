@@ -109,7 +109,7 @@ export default function CatalogSearch({
 
   return (
     <div className="catalog-search" aria-label="选款搜索">
-      <p className="catalog-search__eyebrow">SEARCH THE COLLECTION</p>
+      <p className="catalog-search__eyebrow">名称或货号</p>
       <h2 className="catalog-search__title">查找作品</h2>
       <div
         className="catalog-search__field"

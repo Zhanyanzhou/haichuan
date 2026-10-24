@@ -70,7 +70,7 @@ const MOJIBAKE_OR_REPLACEMENT = /[\u00c0-\u00ff]|\uFFFD/;
 
 function hasRepeatedPlaceholderText(value: string): boolean {
   const compact = value.replace(/\s+/g, "");
-  return /(.)\1{3,}/u.test(compact) || /(.{2,4})\1{2,}/u.test(compact);
+  return /^(.)\1{3,}$/u.test(compact);
 }
 
 function isMeaningfulPublicText(value: unknown, minimumLength: number): boolean {
@@ -80,6 +80,48 @@ function isMeaningfulPublicText(value: unknown, minimumLength: number): boolean 
   if (FORBIDDEN_PUBLIC_CONTENT.test(text) || MOJIBAKE_OR_REPLACEMENT.test(text)) return false;
   if (/^[\d\s\p{P}\p{S}]+$/u.test(text)) return false;
   return !hasRepeatedPlaceholderText(text);
+}
+
+const MISLEADING_JEWELRY_CLAIMS: Array<[RegExp, string]> = [
+  [/18\s*k\s*足金|足金\s*18\s*k/i, "纯度写法不能是18K足金"],
+  [/辟邪|镇宅|化太岁|赌石/, "不能使用辟邪、镇宅、化太岁或赌石"],
+  [/保值增值|稳赚|升值潜力|必然升值/, "不能承诺保值或升值"],
+  [/杀菌|防过敏|远离过敏/, "不能宣称杀菌或防过敏"],
+];
+
+function misleadingJewelryClaims(parts: unknown[]): string[] {
+  const text = parts.filter((part): part is string => typeof part === "string").join("\n");
+  if (!text.trim()) return [];
+  return MISLEADING_JEWELRY_CLAIMS.filter(([pattern]) => pattern.test(text)).map(([, message]) => message);
+}
+
+function isBlankPublicText(value: unknown): boolean {
+  return typeof value !== "string" || value.trim().length === 0;
+}
+
+function isEmptyPublicDetail(value: unknown): boolean {
+  if (value == null) return true;
+  if (typeof value === "string") return value.trim().length === 0;
+  return Array.isArray(value) && value.length === 0;
+}
+
+function detailTextIsPlaceholder(value: unknown): boolean {
+  const texts: string[] = [];
+  const visit = (node: unknown) => {
+    if (typeof node === "string") {
+      texts.push(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (node && typeof node === "object" && "text" in node) {
+      visit((node as { text: unknown }).text);
+    }
+  };
+  visit(value);
+  return texts.some((text) => text.trim().length > 0 && !isMeaningfulPublicText(text, 1));
 }
 
 function hasMeaningfulDetailContent(value: unknown): boolean {
@@ -1017,6 +1059,25 @@ export class ProductsService {
     }
   }
 
+  private async collectCategoryBranchIds(
+    tx: Prisma.TransactionClient,
+    rootId: number,
+  ): Promise<number[]> {
+    const ids = [rootId];
+    let frontier = [rootId];
+    for (let depth = 0; depth < 4 && frontier.length > 0; depth += 1) {
+      const children = await tx.category.findMany({
+        where: { parentId: { in: frontier } },
+        select: { id: true },
+      });
+      frontier = children
+        .map((child) => child.id)
+        .filter((id) => !ids.includes(id));
+      ids.push(...frontier);
+    }
+    return ids;
+  }
+
   async findAll(params: AdminProductQueryDto, actor: ProductMutationActor) {
     return this.withAuthorizedProductRead(actor, (tx) =>
       this.findAllFromDb(params, tx),
@@ -1031,6 +1092,7 @@ export class ProductsService {
       page = 1,
       pageSize = 20,
       categoryId,
+      includeDescendants,
       status,
       keyword,
       materialType,
@@ -1058,7 +1120,13 @@ export class ProductsService {
         .slice(0, 50);
       if (codeList.length > 0) where.code = { in: codeList };
     }
-    if (categoryId) where.categoryId = +categoryId;
+    if (categoryId) {
+      const rootId = +categoryId;
+      where.categoryId =
+        includeDescendants === "true"
+          ? { in: await this.collectCategoryBranchIds(tx, rootId) }
+          : rootId;
+    }
     // 后台默认工作列表不包含回收站；回收站通过显式 ARCHIVED 状态单独查询。
     // 这里在服务端收敛口径，避免前端对单页数组过滤导致 total/分页与列表不一致。
     where.status = status ? (status as ProductStatus) : { not: "ARCHIVED" };
@@ -1355,12 +1423,8 @@ export class ProductsService {
           ? this.productMedia.isProductMediaReadable(image) && this.isPublicImageEligible(image)
           : false,
       )?.id;
-      const allMediaEligible = Boolean(
-        product.primaryImage &&
-        product.listingImage &&
-        this.isPublicImageEligible(product.primaryImage) &&
-        this.isPublicImageEligible(product.listingImage) &&
-        product.images.every((image) => this.isPublicImageEligible(image)),
+      const coverEligible = [product.listingImage, product.primaryImage].some(
+        (image) => Boolean(image && this.isPublicImageEligible(image)),
       );
       const reason = product.deletedAt
         ? "DELETED"
@@ -1378,7 +1442,7 @@ export class ProductsService {
                     ? "RELEASE_HIDDEN"
                     : !imageId
                       ? "MISSING_IMAGE"
-                      : !allMediaEligible
+                      : !coverEligible
                         ? "NOT_READY"
                         : "AVAILABLE";
       return {
@@ -2228,8 +2292,6 @@ export class ProductsService {
       requirements.push(
         ["derivedPrice", Number(product.price) > 0],
         ["activeSku", activeSkus.length > 0 && activeSkus.every((sku) => Number(sku.price) > 0)],
-        ["inventoryRecord", activeSkus.length > 0 && activeSkus.every((sku) => (sku.inventories?.length ?? 0) > 0)],
-        ["deliveryMethods", hasNonEmptyLength(product.deliveryMethods)],
       );
       if (product.inventoryPolicy === "SINGLE_UNIT") {
         const totalStock = activeSkus.reduce(
@@ -2460,8 +2522,8 @@ export class ProductsService {
   }
 
   /**
-   * 上架门禁唯一入口。五种销售模式共用基础事实与媒体门禁；只有直接购买追加价格、
-   * SKU、库存记录、配送方式与库存策略约束。0 库存不阻止展示，由购物车/结算拒绝购买。
+   * 上架门禁唯一入口。五种销售模式共用基础事实与媒体门禁；直接销售只追加成交价和有效规格。
+   * 未填写的配送不阻断上架。已填写的配送方式仍须是系统支持的值。
    */
   async canPublish(
     productId: number,
@@ -2485,6 +2547,9 @@ export class ProductsService {
         publicationQualityStatus: "READY",
         publicationQualityHash: assessment.qualityHash,
         publicationQualityCheckedAt: new Date(),
+        ...(!product.listingImage && product.primaryImage
+          ? { listingImageId: product.primaryImage.id }
+          : {}),
       },
     });
     return { status: "READY" as const, qualityHash: assessment.qualityHash };
@@ -2588,67 +2653,79 @@ export class ProductsService {
     const errors: string[] = [];
     const conflicts: string[] = [];
     const activeSkus = product.skus.filter((sku) => sku.isActive);
-    if (!isMeaningfulPublicText(product.name, 2) || !product.code.trim())
-      errors.push("有效且非测试/乱码的商品名称与货号");
-    if (FORBIDDEN_PUBLIC_CONTENT.test(product.code) || MOJIBAKE_OR_REPLACEMENT.test(product.code))
+    if (!isMeaningfulPublicText(product.name, 2))
+      errors.push("商品标题不能是纯数字、整段同一个字、测试词或乱码");
+    if (!product.code.trim()) errors.push("商品货号");
+    else if (FORBIDDEN_PUBLIC_CONTENT.test(product.code) || MOJIBAKE_OR_REPLACEMENT.test(product.code))
       errors.push("正式商品货号（禁止 E2E、Mock、Seed 或乱码标记）");
-    if (!isMeaningfulPublicText(product.shortDescription, 8))
-      errors.push("至少 8 个有效字符的正式商品简介");
-    if (!isMeaningfulPublicText(product.description, 20))
-      errors.push("至少 20 个有效字符的正式商品说明");
-    if (!hasMeaningfulDetailContent(product.detailContent))
-      errors.push("非测试且非空的商品详情内容");
+    if (!isBlankPublicText(product.shortDescription) && !isMeaningfulPublicText(product.shortDescription, 1))
+      errors.push("商品简介不能整段都是数字、同一个字、测试词或乱码");
+    if (!isBlankPublicText(product.description) && !isMeaningfulPublicText(product.description, 1))
+      errors.push("商品说明不能整段都是数字、同一个字、测试词或乱码");
+    if (
+      !isEmptyPublicDetail(product.detailContent)
+      && (
+        !hasMeaningfulDetailContent(product.detailContent)
+        || detailTextIsPlaceholder(product.detailContent)
+      )
+    ) {
+      errors.push("商品详情不能整段都是数字、同一个字或测试词");
+    }
     if (!product.category.isActive || product.category.deletedAt)
       errors.push("有效且启用的商品分类");
+    const publicCopy: unknown[] = [product.name, product.shortDescription, product.description];
+    const visitPublicCopy = (node: unknown) => {
+      if (typeof node === "string") publicCopy.push(node);
+      else if (Array.isArray(node)) node.forEach(visitPublicCopy);
+      else if (node && typeof node === "object" && "text" in node) {
+        visitPublicCopy((node as { text: unknown }).text);
+      }
+    };
+    visitPublicCopy(product.detailContent);
+    errors.push(...misleadingJewelryClaims(publicCopy));
+    if (/秒杀|限时折扣|满减/.test(product.name)) errors.push("标题不要写秒杀、限时折扣或满减");
 
-    const deliveryMethods = Array.isArray(product.deliveryMethods)
-      ? product.deliveryMethods
-      : [];
-    if (deliveryMethods.some(
-      (method) => typeof method !== "string" || !CUSTOMER_DELIVERY_METHODS.has(method),
-    )) {
-      errors.push("仅使用系统支持的配送方式");
-    }
-    if (
-      product.dispatchTime === "CUSTOM" &&
-      !isMeaningfulPublicText(product.customLeadTime, 2)
-    ) {
-      errors.push("按约定发出时填写真实备货时间");
-    }
-
-    const hasPositiveWeight = [
-      product.goldWeight,
-      product.weight,
-      ...activeSkus.map((sku) => sku.goldWeight),
-    ].some((value) => Number(value) > 0);
-    if (!hasPositiveWeight) errors.push("与材质一致且大于 0g 的商品或 SKU 重量");
-
-    const hasReadableImage = product.images.some(
-      (image) =>
-        !image.isVideo &&
-        this.productMedia.isProductMediaReadable(image) &&
-        this.isPublicImageEligible(image),
-    );
-    if (!hasReadableImage) errors.push("至少一张已登记且授权有效的非视频商品图片");
-    if (!product.primaryImage || !this.productMedia.isProductMediaReadable(product.primaryImage) || !this.isPublicImageEligible(product.primaryImage))
-      errors.push("已指定、可读取且授权有效的详情主图");
-    if (!product.listingImage || !this.productMedia.isProductMediaReadable(product.listingImage) || !this.isPublicImageEligible(product.listingImage))
-      errors.push("已指定、可读取且授权有效的列表图");
-    if (product.images.some((image) => !this.isPublicImageEligible(image))) {
-      errors.push("全部商品附图均已登记且授权有效");
+    if (product.visibility !== "INTERNAL") {
+      const coverReady = Boolean(
+        product.primaryImage
+        && !product.primaryImage.isVideo
+        && this.productMedia.isProductMediaReadable(product.primaryImage)
+        && this.isPublicImageEligible(product.primaryImage),
+      );
+      if (!coverReady) errors.push("已指定、可读取且授权有效的商品图片作为主图");
+      if (
+        product.listingImage
+        && (
+          product.listingImage.isVideo
+          || !this.productMedia.isProductMediaReadable(product.listingImage)
+          || !this.isPublicImageEligible(product.listingImage)
+        )
+      ) {
+        errors.push("列表图如已指定，须可读取且授权有效");
+      }
     }
 
     switch (product.salesMode) {
       case "DIRECT_PURCHASE": {
+        const deliveryMethods = Array.isArray(product.deliveryMethods)
+          ? product.deliveryMethods
+          : [];
+        if (deliveryMethods.some(
+          (method) => typeof method !== "string" || !CUSTOMER_DELIVERY_METHODS.has(method),
+        )) {
+          errors.push("仅使用系统支持的配送方式");
+        }
+        if (
+          product.dispatchTime === "CUSTOM" &&
+          !isMeaningfulPublicText(product.customLeadTime, 2)
+        ) {
+          errors.push("按约定发出时填写真实备货时间");
+        }
         if (activeSkus.length === 0) errors.push("至少一个有效规格 (SKU)");
         if (activeSkus.some((sku) => Number(sku.price) <= 0))
           errors.push("所有有效 SKU 均设置大于 0 的交易价格");
-        if (activeSkus.some((sku) => sku.inventories.length === 0))
-          errors.push("所有有效 SKU 均建立库存记录");
         if (!product.price || Number(product.price) <= 0)
-          errors.push("SKU 派生最低价大于 0");
-        if (!Array.isArray(product.deliveryMethods) || product.deliveryMethods.length === 0)
-          errors.push("至少一种配送方式");
+          errors.push("成交价大于 0");
         if (product.shippingTemplate && !product.shippingTemplate.isActive)
           errors.push("启用中的运费模板");
         if (product.inventoryPolicy === "SINGLE_UNIT") {
@@ -2679,7 +2756,11 @@ export class ProductsService {
     return {
       errors,
       conflicts,
-      qualityHash: computeProductPublicationQualityHash({ ...product, skus: activeSkus }),
+      qualityHash: computeProductPublicationQualityHash({
+        ...product,
+        listingImage: product.listingImage ?? product.primaryImage,
+        skus: activeSkus,
+      }),
     };
   }
 

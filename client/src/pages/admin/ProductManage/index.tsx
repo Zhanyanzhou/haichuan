@@ -134,6 +134,9 @@ export default function ProductManage() {
     const cid = searchParams.get("categoryId");
     return cid && /^\d+$/.test(cid) ? Number(cid) : undefined;
   });
+  const [includeDescendants, setIncludeDescendants] = useState(
+    () => searchParams.get("includeDescendants") === "1",
+  );
   const [categoryOptions, setCategoryOptions] = useState<
     { value: number; label: string }[]
   >([]);
@@ -164,12 +167,14 @@ export default function ProductManage() {
     if (titleKeyword.trim()) next.set("title", titleKeyword.trim());
     if (codeKeyword.trim()) next.set("code", codeKeyword.trim());
     if (categoryId) next.set("categoryId", String(categoryId));
+    if (categoryId && includeDescendants) next.set("includeDescendants", "1");
     if (sortBy !== DEFAULT_PRODUCT_SORT) next.set("sort", sortBy);
     if (isAdvancedOpen) next.set("advanced", "1");
     return next.toString();
   }, [
     activeStatus,
     categoryId,
+    includeDescendants,
     codeKeyword,
     isAdvancedOpen,
     page,
@@ -275,7 +280,10 @@ export default function ProductManage() {
         const s = overrides?.status ?? activeStatus;
         if (s) params.status = s;
         const cid = overrides?.categoryId ?? categoryId;
-        if (cid) params.categoryId = cid;
+        if (cid) {
+          params.categoryId = cid;
+          if (includeDescendants) params.includeDescendants = "true";
+        }
         const kw = overrides?.keyword ?? debouncedKeyword;
         if (isProductIdSearch && !titleKeyword) {
           params.ids = productIdSearch.join(",");
@@ -306,6 +314,7 @@ export default function ProductManage() {
     [
       activeStatus,
       categoryId,
+      includeDescendants,
       debouncedKeyword,
       isProductIdSearch,
       page,
@@ -336,12 +345,13 @@ export default function ProductManage() {
   useEffect(() => {
     void loadProductsRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, sortBy, activeStatus, categoryId, debouncedKeyword]);
+  }, [page, pageSize, sortBy, activeStatus, categoryId, includeDescendants, debouncedKeyword]);
 
   const resetFilters = () => {
     setTitleKeyword("");
     setCodeKeyword("");
     setCategoryId(undefined);
+    setIncludeDescendants(false);
     setActiveStatus(undefined);
     setSortBy("updated_desc");
     setIsAdvancedOpen(false);
@@ -877,6 +887,7 @@ export default function ProductManage() {
             value={categoryId}
             onChange={(value) => {
               setCategoryId(value);
+              setIncludeDescendants(false);
               setPage(1);
             }}
             allowClear
@@ -884,7 +895,7 @@ export default function ProductManage() {
             optionFilterProp="label"
             options={categoryOptions}
           />
-          <span>资料完整度按当前页返回的商品信息展示；直接购买商品还会检查 SKU、库存和提取方式。</span>
+          <span>资料完整度按当前页返回的商品信息展示；直接销售还会检查成交价。</span>
         </div>
       )}
 

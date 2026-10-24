@@ -9,12 +9,12 @@ function dynamicHomeDocument(options: {
   includeResolved: boolean;
   includeImage: boolean;
 }) {
-  const definition = generateTemplateFromRecipe(createRecommendedRecipe("productPromotion"), {
+  const definition = generateTemplateFromRecipe(createRecommendedRecipe("collection-story"), {
     name: "公开就绪测试",
     templateId: "tpl_public_readiness",
   });
   const imageSlot = Object.values(definition.slots).find((slot) => slot.type === "image");
-  expect(imageSlot, "推荐用途应包含图片槽").toBeTruthy();
+  expect(imageSlot, "推荐角色应包含图片槽").toBeTruthy();
   const contentBySlotId = options.includeImage && imageSlot
     ? { [imageSlot.slotId]: { src: "/uploads/page-assets/explicit.jpg", alt: "页面主图" } }
     : {};

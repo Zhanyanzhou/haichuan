@@ -9,7 +9,7 @@ import { setTemplateLogicalDesignWidth } from "../src/page-builder/template-edit
 import { getTemplateLayoutPresentation } from "../src/page-builder/template-editor/templateLayoutPresentation";
 
 test("设计宽度修改保留原生节点、初始配方与设备独立设置，拒绝非法输入而不夹紧", () => {
-  const recipe = createRecommendedRecipe("productPromotion");
+  const recipe = createRecommendedRecipe("editorial-split");
   recipe.canvas = { width: 1200, height: 900, aspectRatio: 4 / 3 };
   const definition = generateTemplateFromRecipe(recipe);
   definition.metadata.previewTabletWidth = 820;
@@ -29,7 +29,7 @@ test("设计宽度修改保留原生节点、初始配方与设备独立设置�
 });
 
 test("设计宽度经统一事务预览不改草稿，提交只产生一次历史并可撤销重做", () => {
-  const recipe = createRecommendedRecipe("productPromotion");
+  const recipe = createRecommendedRecipe("editorial-split");
   recipe.canvas = { width: 1200, height: 900, aspectRatio: 4 / 3 };
   const draft = createNewDynamicTemplateDraft();
   draft.definition = generateTemplateFromRecipe(recipe);

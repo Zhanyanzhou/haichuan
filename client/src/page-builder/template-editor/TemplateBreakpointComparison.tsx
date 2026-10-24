@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { DynamicTemplateRenderer, resolveTemplateDesignFrame, type TemplateDefinitionV2 } from "../template-definition";
+import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
+import { resolveTemplateDesignFrame, type TemplateDefinitionV2 } from "../template-definition";
 import type { TemplateBreakpoint } from "../template-definition/responsive";
 import { syncTemplateViewportStyles } from "./TemplateViewportFrame";
 import { bindWheelToScroller } from "../workspace/iframeWheelBridge";

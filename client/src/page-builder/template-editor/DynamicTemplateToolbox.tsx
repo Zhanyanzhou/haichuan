@@ -181,8 +181,21 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
       event.preventDefault();
       closePanel();
     };
+    const pointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const element = target instanceof Element ? target : target.parentElement;
+      if (!element) return;
+      if (element.closest(".template-editor__add-popover-overlay")) return;
+      if (regionTriggerRef.current?.contains(element) || slotTriggerRef.current?.contains(element)) return;
+      closePanel();
+    };
     document.addEventListener("keydown", escape);
-    return () => document.removeEventListener("keydown", escape);
+    document.addEventListener("pointerdown", pointerDown);
+    return () => {
+      document.removeEventListener("keydown", escape);
+      document.removeEventListener("pointerdown", pointerDown);
+    };
   });
 
   if (!draft) return null;
@@ -264,6 +277,10 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
   const openRegionPanel = () => {
     const current = useTemplateEditorSession.getState();
     if (!current.draft || rootLocked) return;
+    if (open && panelMode === "region") {
+      closePanel();
+      return;
+    }
     activeTriggerRef.current = regionTriggerRef.current;
     const currentDefinition = current.draft.definition;
     const currentSelectedNodeId = current.selectedObjectId;
@@ -287,6 +304,10 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
   const openContentPanel = () => {
     const current = useTemplateEditorSession.getState();
     if (!current.draft) return;
+    if (open && panelMode === "content") {
+      closePanel();
+      return;
+    }
     const currentDefinition = current.draft.definition;
     const currentSelectedNodeId = current.selectedObjectId;
     const currentLandings = getComponentInsertionLandings(currentDefinition, currentSelectedNodeId);
@@ -373,8 +394,17 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
       : "添加目标已失效";
   };
 
+  const panelTitle = (title: string, closeLabel: string) => (
+    <div className="template-editor__add-popover-titlebar">
+      <h3>{title}</h3>
+      <button type="button" className="template-editor__add-popover-close" aria-label={closeLabel} onClick={closePanel}>
+        关闭
+      </button>
+    </div>
+  );
+
   const regionPanel = <div className="template-editor__add-popover template-editor__simple-palette" role="dialog" aria-label="添加区域">
-    <h3>添加区域</h3>
+    {panelTitle("添加区域", "关闭添加区域")}
     <label className="template-editor__add-field">
       <span>插入位置</span>
       <select aria-label="区域插入位置" value={selectedRegionLanding?.placement ?? ""} onChange={(event) => {
@@ -393,7 +423,7 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
   </div>;
 
   const contentPanel = <div className="template-editor__add-popover template-editor__simple-palette" role="dialog" aria-label="添加槽位">
-    <h3>添加槽位</h3>
+    {panelTitle("添加槽位", "关闭添加槽位")}
     <p className="template-editor__add-target-note">
       当前选择：{selectedNodeId ? definition.nodes[selectedNodeId]?.name ?? "未知对象" : "未选择"}
     </p>

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const PRODUCT_QUALITY_GATE_VERSION = "p0-product-quality-v3";
+export const PRODUCT_QUALITY_GATE_VERSION = "p0-product-quality-v4";
 
 type PublicationQualityHashInput = {
   code: string;

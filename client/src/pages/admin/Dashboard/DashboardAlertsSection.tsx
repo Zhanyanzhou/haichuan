@@ -57,7 +57,53 @@ export function DashboardAlertsSection({
 }) {
   const alerts = buildAlerts(stats);
 
+  const backlog = stats
+    ? [
+        {
+          key: "published",
+          label: "在售商品",
+          count: stats.publishedProductCount ?? 0,
+          detail: "当前上架",
+          route: "/admin/products",
+        },
+        {
+          key: "ship",
+          label: "待发货订单",
+          count: stats.pendingShip,
+          detail: "当前待发货",
+          route: "/admin/orders?status=PENDING_SHIP",
+        },
+      ]
+    : [];
+
   return (
+    <>
+    {backlog.length > 0 ? (
+      <section className="admin-dashboard__section" aria-labelledby="backlog-title">
+        <div className="admin-dashboard__section-head">
+          <h2 id="backlog-title">当前待办</h2>
+          <span>不按今天清零</span>
+        </div>
+        <div className="admin-dashboard__alerts">
+          {backlog.map((item) => (
+            <Link
+              key={item.key}
+              to={item.route}
+              className="admin-dashboard__backlog-item"
+            >
+              <span className="admin-dashboard__alert-count">
+                {formatNumber(item.count)}
+              </span>
+              <div className="admin-dashboard__alert-text">
+                <strong>{item.label}</strong>
+                <span>{item.detail}</span>
+              </div>
+              <RightOutlined className="admin-dashboard__alert-arrow" />
+            </Link>
+          ))}
+        </div>
+      </section>
+    ) : null}
     <section className="admin-dashboard__section" aria-labelledby="alert-title">
       <div className="admin-dashboard__section-head">
         <h2 id="alert-title">重要提醒</h2>
@@ -90,5 +136,6 @@ export function DashboardAlertsSection({
         </div>
       )}
     </section>
+    </>
   );
 }

@@ -69,12 +69,11 @@ export default function ForYouRecommendations() {
         <span
           style={{
             fontSize: 11,
-            letterSpacing: ".18em",
+            letterSpacing: "0.08em",
             color: "#5f6568",
-            textTransform: "uppercase",
           }}
         >
-          For You
+          作品推荐
         </span>
       </div>
       {loading ? (

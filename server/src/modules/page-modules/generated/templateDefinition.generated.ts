@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 来源：contracts/page-builder/template-definition.schema.json
- * SHA-256：7866f528ebea4b32659659dbbe765ec0d9ceb545f9776bf52f7496811d2813bd
+ * SHA-256：a1917c5eb28c0e039ca161c23695c018cc8b76572c901d3bcdba74165aae4527
  */
 
 export const DYNAMIC_TEMPLATE_SCHEMA_VERSION = 3;
@@ -12,14 +12,13 @@ export const DYNAMIC_TEMPLATE_SUPPORTED_SCHEMA_VERSIONS = [
 ] as const;
 /** 统一模板产品模型版本；JSON Schema 自身仍独立按 schemaVersion 演进。 */
 export const TEMPLATE_DEFINITION_MODEL_VERSION = 2 as const;
-export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "7866f528ebea4b32659659dbbe765ec0d9ceb545f9776bf52f7496811d2813bd";
+export const DYNAMIC_TEMPLATE_SCHEMA_HASH = "a1917c5eb28c0e039ca161c23695c018cc8b76572c901d3bcdba74165aae4527";
 export const TEMPLATE_RECIPE_SCHEMA = {
   "type": "object",
   "additionalProperties": false,
   "required": [
     "recipeVersion",
     "presetVersion",
-    "purpose",
     "canvas",
     "layout",
     "media",
@@ -34,7 +33,21 @@ export const TEMPLATE_RECIPE_SCHEMA = {
     "presetVersion": {
       "enum": [
         1,
-        2
+        2,
+        3
+      ]
+    },
+    "sectionRole": {
+      "enum": [
+        "page-hero",
+        "collection-story",
+        "editorial-split",
+        "craft-detail",
+        "editorial-media",
+        "creation-grid",
+        "maison-fact",
+        "service-invitation",
+        "video-story"
       ]
     },
     "purpose": {
@@ -340,8 +353,9 @@ export const TEMPLATE_RECIPE_SCHEMA = {
 } as const;
 export interface TemplateRecipe {
   recipeVersion: 1;
-  presetVersion: 1 | 2;
-  purpose: "productPromotion" | "newProduct" | "event" | "brand" | "social" | "news" | "profile" | "general" | "custom";
+  presetVersion: 1 | 2 | 3;
+  sectionRole?: "page-hero" | "collection-story" | "editorial-split" | "craft-detail" | "editorial-media" | "creation-grid" | "maison-fact" | "service-invitation" | "video-story";
+  purpose?: "productPromotion" | "newProduct" | "event" | "brand" | "social" | "news" | "profile" | "general" | "custom";
   customPurpose?: string;
   canvas: {
   width: number;
@@ -671,6 +685,7 @@ export const DYNAMIC_TEMPLATE_NODE_REGISTRY = {
 export const DYNAMIC_TEMPLATE_METADATA_FIELDS = [
   "category",
   "purpose",
+  "sectionRole",
   "layoutType",
   "slotSummary",
   "recommendedFor",
@@ -901,6 +916,8 @@ export interface DynamicTemplateCanvasSize {
 export interface DynamicTemplateMetadata {
   category: string;
   purpose: string;
+  /** 九个区块角色之一；历史模板未声明时缺省。 */
+  sectionRole?: "page-hero" | "collection-story" | "editorial-split" | "craft-detail" | "editorial-media" | "creation-grid" | "maison-fact" | "service-invitation" | "video-story";
   layoutType: string;
   slotSummary: string;
   recommendedFor: string[];

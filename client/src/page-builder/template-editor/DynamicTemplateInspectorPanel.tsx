@@ -94,6 +94,7 @@ import {
   resolveContractRoleForDevice,
   useTemplateEditorSession,
 } from "./templateEditorSession";
+import { requestDeleteTemplateNode, requestRemoveContractRole } from "./requestTemplateNodeDeletion";
 import {
   isSameTemplateEditorSelectionTarget,
   type TemplateEditorSelectionSnapshot,
@@ -212,8 +213,9 @@ function supportsPageTextDesign(field: DynamicTemplatePageFieldDescriptor) {
 }
 
 /** 只读取共同字段描述，不创建页面实例或样例内容。 */
-function PageFieldFormPreview({ fields, onLocate }: {
+function PageFieldFormPreview({ fields, schemaVersion, onLocate }: {
   fields: DynamicTemplatePageFieldDescriptor[];
+  schemaVersion: number;
   onLocate: (nodeId: string) => void;
 }) {
   return <details className="template-editor__page-form-preview">
@@ -222,7 +224,7 @@ function PageFieldFormPreview({ fields, onLocate }: {
     {fields.map((field, index) => <div key={field.slotId} className="template-editor__page-form-field">
       <span className="template-editor__page-form-order">当前查看范围第 {index + 1} 项 · {PAGE_FIELD_CONTROL_KIND_LABELS[field.controlKind]}</span>
       <button type="button" className="template-editor__page-form-label" onClick={() => onLocate(field.nodeId)}>
-        {field.label}<span>{publicationPromiseLabel(field)} · 定位对象</span>
+        {field.label}<span>{publicationPromiseLabel(field, schemaVersion)} · 定位对象</span>
       </button>
       {field.controlKind === "text"
         ? <input aria-label={`${field.label}页面表单示意`} readOnly value="" placeholder="文字输入（只读示意）" />
@@ -1992,7 +1994,7 @@ export default function DynamicTemplateInspectorPanel({
                 <summary>页面开放范围 · {Object.keys(definition.slots).length} 个字段</summary>
                 <ul aria-label="发布检查页面字段范围">
                   {Object.values(definition.slots).map((slot) => (
-                    <li key={slot.slotId}>{slot.label} · {slot.editable ? "允许修改" : "固定内容"} · {publicationPromiseLabel(slot)} · {slot.hideable ? "允许隐藏" : "不可隐藏"}</li>
+                    <li key={slot.slotId}>{slot.label} · {slot.editable ? "允许修改" : "固定内容"} · {publicationPromiseLabel(slot, definition.schemaVersion)} · {slot.hideable ? "允许隐藏" : "不可隐藏"}</li>
                   ))}
                 </ul>
               </details>
@@ -3148,6 +3150,43 @@ export default function DynamicTemplateInspectorPanel({
       {selectedRoleObject && !selectedRoleApplicable ? (
         <span className="homepage-editor__inspector-device is-inapplicable">当前画布不显示</span>
       ) : null}
+      <button
+        type="button"
+        className="template-editor__inspector-delete"
+        onClick={() => {
+          const ui = {
+            confirm: (options: {
+              title: string;
+              content: string;
+              okText: string;
+              cancelText: string;
+              danger?: boolean;
+              onOk: () => void;
+            }) => {
+              modal.confirm({
+                title: options.title,
+                content: options.content,
+                okText: options.okText,
+                cancelText: options.cancelText,
+                okButtonProps: options.danger === false ? undefined : { danger: true },
+                onOk: options.onOk,
+              });
+            },
+            notifyError: (content: string) => {
+              modal.warning({ title: "这一步没有完成", content, okText: "知道了" });
+            },
+          };
+          if (isRoot && !selectedRoleObject) {
+            window.dispatchEvent(new Event("template-editor:archive-current"));
+            return;
+          }
+          if (selectedRoleObject) {
+            requestRemoveContractRole(activeNodeId, selectedRoleObject.roleId, inspectorTitle, ui);
+            return;
+          }
+          requestDeleteTemplateNode(activeNodeId, ui);
+        }}
+      >{isRoot && !selectedRoleObject ? "移入回收站" : selectedRoleObject ? "移出" : "删除"}</button>
     </header>
   );
   const inspectorTaskTabs = (
@@ -3232,6 +3271,7 @@ export default function DynamicTemplateInspectorPanel({
         pageField.slotType,
         definition.slots[pageField.slotId]?.semanticRole,
         definition.defaultContent[pageField.slotId],
+        definition.schemaVersion,
       ))
     ),
   );
@@ -3259,7 +3299,7 @@ export default function DynamicTemplateInspectorPanel({
             <strong>交付给页面装修的字段</strong>
             <p>{pageField && inspectorView === "context"
               ? `${pageField.editable ? "运营可以填写内容" : "运营不能修改内容"}，${pageField.hideable ? "可以隐藏此字段" : "此字段固定显示"}。${describePageFieldOverrides(pageField)}。`
-              : `${scopedPageFields.length} 个字段 · ${scopedPageFields.filter((field) => field.required).length} 项公开时必须有内容 · ${scopedPageFields.filter((field) => field.required && (field.hideable || (!field.editable && !hasLegalFixedPublicContent(field.slotType, definition.slots[field.slotId]?.semanticRole, definition.defaultContent[field.slotId])))).length} 项规则冲突`}</p>
+              : `${scopedPageFields.length} 个字段 · ${scopedPageFields.filter((field) => field.required).length} 项公开时必须有内容 · ${scopedPageFields.filter((field) => field.required && (field.hideable || (!field.editable && !hasLegalFixedPublicContent(field.slotType, definition.slots[field.slotId]?.semanticRole, definition.defaultContent[field.slotId], definition.schemaVersion)))).length} 项规则冲突`}</p>
           </div>
           {validation.issues.some((issue) => issue.level === "error") ? (
             <Alert
@@ -3466,11 +3506,11 @@ export default function DynamicTemplateInspectorPanel({
                   {supportsPageTextStyles && instancePolicy.spacing ? <NumberField label="最大间距" unit="px" min={0} max={200} value={instancePolicy.maxSpacingPx} disabled={isLocked || !pageField.editable} onChange={(maxSpacingPx) => updateInstancePolicy((next) => { next.maxSpacingPx = maxSpacingPx; })} /> : null}
                 </div> : null}
               </section>
-              <PageFieldFormPreview fields={[pageField]} onLocate={activatePageField} />
+              <PageFieldFormPreview fields={[pageField]} schemaVersion={definition.schemaVersion} onLocate={activatePageField} />
             </section>
           ) : (
             <section className="template-editor__page-field-list" aria-label="当前结构页面字段">
-              {scopedPageFields.length ? <PageFieldFormPreview fields={scopedPageFields} onLocate={activatePageField} /> : null}
+              {scopedPageFields.length ? <PageFieldFormPreview fields={scopedPageFields} schemaVersion={definition.schemaVersion} onLocate={activatePageField} /> : null}
               {scopedPageFields.length ? scopedPageFields.map((field) => (
                 <button
                   key={field.slotId}
@@ -3479,11 +3519,11 @@ export default function DynamicTemplateInspectorPanel({
                   {...getDynamicTemplatePageFieldDataAttributes(field, "full")}
                 >
                   <span><strong>{field.label}</strong><small>{field.slotTypeLabel}</small></span>
-                  <span>{publicationPromiseLabel(field)} · {field.editable ? "可填写" : "只读"} · {field.hideable ? "可隐藏" : "固定显示"}</span>
+                  <span>{publicationPromiseLabel(field, definition.schemaVersion)} · {field.editable ? "可填写" : "只读"} · {field.hideable ? "可隐藏" : "固定显示"}</span>
                   <span>控件：{PAGE_FIELD_CONTROL_KIND_LABELS[field.controlKind]}</span>
                   <span>限制：{describePageFieldValidation(field)}</span>
                   <span>页面设计覆盖：{describePageFieldOverrides(field)}</span>
-                  {field.required && (field.hideable || (!field.editable && !hasLegalFixedPublicContent(field.slotType, definition.slots[field.slotId]?.semanticRole, definition.defaultContent[field.slotId]))) ? <strong className="template-editor__page-field-conflict">规则冲突 · 点击修复</strong> : null}
+                  {field.required && (field.hideable || (!field.editable && !hasLegalFixedPublicContent(field.slotType, definition.slots[field.slotId]?.semanticRole, definition.defaultContent[field.slotId], definition.schemaVersion))) ? <strong className="template-editor__page-field-conflict">规则冲突 · 点击修复</strong> : null}
                 </button>
               )) : (
                 <Alert

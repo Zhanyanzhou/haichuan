@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { SIGNED_PUBLIC_CONTACT } from "@/config/publicContact";
 
 /**
  * P0-C 公开信息真实性与隐私 测试
@@ -92,9 +93,21 @@ test.describe("联系信息真实性", () => {
       }),
     );
     await page.goto("/contact");
-    await expect(page.getByText("公开联系方式正在完善")).toBeVisible();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("link", { name: SIGNED_PUBLIC_CONTACT.phone, exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: SIGNED_PUBLIC_CONTACT.email, exact: true })).toBeVisible();
+    await expect(main.getByText(SIGNED_PUBLIC_CONTACT.address, { exact: true })).toBeVisible();
+    await expect(main.getByText(SIGNED_PUBLIC_CONTACT.hours, { exact: true })).toBeVisible();
+    await expect(main.getByText("公开联系方式正在完善")).toHaveCount(0);
     await expectNoForbiddenFakeValues(page);
     await expectNoHorizontalOverflow(page);
+
+    await page.goto("/privacy");
+    const privacy = page.getByRole("main");
+    await expect(privacy.getByRole("link", { name: `电话：${SIGNED_PUBLIC_CONTACT.phone}`, exact: true })).toBeVisible();
+    await expect(privacy.getByRole("link", { name: `邮箱：${SIGNED_PUBLIC_CONTACT.email}`, exact: true })).toBeVisible();
+    await expect(privacy.getByText(`接待地址：${SIGNED_PUBLIC_CONTACT.address}`, { exact: true })).toBeVisible();
+    await expect(privacy.getByText("公开联系方式正在完善")).toHaveCount(0);
   });
 
   test("真实设置只展示后台返回的值", async ({ page }) => {
@@ -117,6 +130,8 @@ test.describe("联系信息真实性", () => {
     await expect(main.getByRole("link", { name: "service@example.org", exact: true })).toBeVisible();
     await expect(main.getByText("测试门店地址", { exact: true })).toBeVisible();
     await expect(main.getByText("工作日 10:00-18:00", { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: SIGNED_PUBLIC_CONTACT.phone, exact: true })).toHaveCount(0);
+    await expect(main.getByText(SIGNED_PUBLIC_CONTACT.address, { exact: true })).toHaveCount(0);
     await expectNoForbiddenFakeValues(page);
   });
 
@@ -124,8 +139,8 @@ test.describe("联系信息真实性", () => {
     test.skip(!useMock, "仅在模拟数据模式验证 mock 默认值");
     await page.goto("/contact");
     await expectNoForbiddenFakeValues(page);
-    // mock 默认联系信息为空，应出现空态
-    await expect(page.getByText("公开联系方式正在完善")).toBeVisible();
+    await expect(page.getByRole("link", { name: SIGNED_PUBLIC_CONTACT.phone, exact: true })).toBeVisible();
+    await expect(page.getByText("公开联系方式正在完善")).toHaveCount(0);
   });
 });
 
@@ -429,7 +444,7 @@ test.describe("SEO 与索引", () => {
   test("旧搜索深链进入选款中心并使用不拼搜索词的中性标题", async ({ page }) => {
     await page.goto("/search?query=平安扣");
     await expect(page).toHaveURL(/\/catalog\?query=%E5%B9%B3%E5%AE%89%E6%89%A3/);
-    await expect(page).toHaveTitle(/选款中心 \| 海川珠宝/);
+    await expect(page).toHaveTitle(/选款中心 \| 海川珠宝官方网站/);
     await expect(page).not.toHaveTitle(/平安扣/);
   });
 

@@ -325,8 +325,9 @@
   min-width: 0;
   display: grid;
   gap: 6px;
-  padding-left: 8px;
-  border-left: 1px solid var(--template-structure-line);
+  margin: 0;
+  padding-left: 0;
+  border-left: 0;
 }
 
 .template-editor__structure--reference .template-editor__region:first-child {
@@ -614,11 +615,44 @@
 .template-editor__structure--reference .template-editor__slot-actions {
   position: static;
   grid-column: 2;
-  display: none;
+  display: flex;
   justify-self: auto;
   padding: 0 4px 0 2px;
   background: transparent;
   transform: none;
+}
+
+.template-editor__structure-delete {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: #8a3a32;
+  background: transparent;
+  cursor: pointer;
+}
+
+.template-editor__structure-delete:hover,
+.template-editor__structure-delete:focus-visible {
+  color: #fff;
+  background: #8a3a32;
+}
+
+.template-editor__structure--reference .template-editor__slot-actions .template-editor__structure-more {
+  display: none;
+}
+
+.template-editor__structure--reference .template-editor__slot-row:hover .template-editor__slot-actions .template-editor__structure-more,
+.template-editor__structure--reference .template-editor__slot-row:focus-within .template-editor__slot-actions .template-editor__structure-more,
+.template-editor__structure--reference .template-editor__slot-row.is-active .template-editor__slot-actions .template-editor__structure-more,
+.template-editor__structure--reference .template-editor__layout-row:hover .template-editor__slot-actions .template-editor__structure-more,
+.template-editor__structure--reference .template-editor__layout-row:focus-within .template-editor__slot-actions .template-editor__structure-more,
+.template-editor__structure--reference .template-editor__layout-row.is-active .template-editor__slot-actions .template-editor__structure-more {
+  display: inline-grid;
 }
 
 .template-editor__structure--reference .template-editor__slot-row:hover .template-editor__slot-actions,
@@ -884,6 +918,40 @@
   background: #fff;
 }
 
+.template-editor__add-popover-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--adm-line);
+}
+
+.template-editor__add-popover-titlebar h3 {
+  margin: 0;
+  color: var(--adm-ink);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.template-editor__add-popover-close {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--adm-text);
+  background: transparent;
+  cursor: pointer;
+}
+
+.template-editor__add-popover-close:hover,
+.template-editor__add-popover-close:focus-visible {
+  color: var(--adm-ink);
+  background: var(--template-structure-accent-bg);
+}
+
 .template-editor__add-popover > h3,
 .template-editor__add-popover > h4,
 .template-editor__add-popover > p {
@@ -953,7 +1021,7 @@
 
   .template-editor__structure--reference.template-editor__structure .template-editor__region > ul {
     gap: 4px;
-    padding-left: 2px;
+    padding-left: 0;
   }
 
   .template-editor__structure--reference.template-editor__structure :is(
@@ -1151,4 +1219,112 @@
 }
 .template-editor__structure--reference.template-editor__structure [role="treeitem"][draggable="true"]:active {
   cursor: grabbing;
+}
+
+/* 压过槽位图标 22px 和文字 normal 换行，让每一行都是 16 图标 + 单行文字。 */
+.template-editor__structure--reference.template-editor__structure :is(
+  .template-editor__region-select,
+  .template-editor__layout-select,
+  .template-editor__slot-select
+) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px 0 4px;
+}
+
+.template-editor__structure--reference.template-editor__structure .template-editor__drag-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 0;
+}
+
+.template-editor__structure--reference.template-editor__structure :is(
+  .template-editor__tree-toggle,
+  .template-editor__tree-toggle-spacer,
+  .template-editor__tree-icon-slot
+) {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.template-editor__structure--reference.template-editor__structure .template-editor__layout-icon,
+.template-editor__structure--reference.template-editor__structure .template-editor__slot-row .template-editor__contract-role-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  max-width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 0;
+  font-size: 14px;
+  line-height: 16px;
+  background: transparent;
+}
+
+.template-editor__structure--reference.template-editor__structure :is(
+  .template-editor__region-select,
+  .template-editor__layout-select,
+  .template-editor__slot-select
+) :is(strong, .template-editor__slot-copy) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-editor__structure--reference.template-editor__structure .template-editor__slot-copy {
+  display: block;
+}
+
+.template-editor__structure--reference.template-editor__structure .template-editor__slot-copy small {
+  display: none;
+}
+
+.template-editor__structure-reveal {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--adm-info);
+  background: transparent;
+  cursor: pointer;
+}
+
+.template-editor__structure--reference .template-editor__structure-delete {
+  display: none;
+}
+
+.template-editor__structure--reference :is(
+  .template-editor__region-header,
+  .template-editor__layout-row,
+  .template-editor__slot-row
+):hover .template-editor__structure-delete {
+  display: inline-grid;
+}
+
+.template-editor__structure--reference.template-editor__structure .template-editor__slot-copy strong,
+.template-editor__structure--reference.template-editor__structure .template-editor__layout-select strong,
+.template-editor__structure--reference.template-editor__structure .template-editor__region-select strong {
+  display: block;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

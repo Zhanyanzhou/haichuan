@@ -82,3 +82,60 @@ test('update 停用无关联时放行并写入停用状态', async () => {
   assert.equal(calls.length, 1);
   assert.equal((calls[0].data as { isActive?: boolean }).isActive, false);
 });
+
+function createDeletePrisma(counts: { children: number; products: number }) {
+  const calls: string[] = [];
+  const prisma = {
+    $transaction: async (callback: (tx: any) => unknown) => callback(prisma),
+    $queryRaw: async () => [{ id: 7 }],
+    category: {
+      findUnique: async () => ({
+        id: 4,
+        slug: 'ruyi',
+        name: '如意',
+        level: 2,
+        _count: counts,
+      }),
+      delete: async () => {
+        calls.push('delete');
+        return { id: 4 };
+      },
+      update: async () => {
+        calls.push('update');
+        return { id: 4 };
+      },
+    },
+  } as never;
+  return { calls, prisma };
+}
+
+test('delete 空分类时物理删除并释放记录', async () => {
+  const { prisma, calls } = createDeletePrisma({ children: 0, products: 0 });
+  const service = new CategoriesService(prisma);
+
+  await service.delete(4, { id: 7 } as never);
+
+  assert.deepEqual(calls, ['delete']);
+});
+
+test('delete 仍有商品时拒绝，且不把分类改成停用', async () => {
+  const { prisma, calls } = createDeletePrisma({ children: 0, products: 2 });
+  const service = new CategoriesService(prisma);
+
+  await assert.rejects(
+    service.delete(4, { id: 7 } as never),
+    /这个分类下还有商品/,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test('delete 仍有下级款式时拒绝', async () => {
+  const { prisma, calls } = createDeletePrisma({ children: 3, products: 0 });
+  const service = new CategoriesService(prisma);
+
+  await assert.rejects(
+    service.delete(4, { id: 7 } as never),
+    /请先删除下级款式/,
+  );
+  assert.deepEqual(calls, []);
+});

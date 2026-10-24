@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
-  <title id="title">中性图片区域</title>
-  <desc id="description">仅表示模板中的图片位置与比例，不代表实际素材</desc>
-  <rect width="1600" height="900" fill="#D9DEE0"/>
-  <path d="M0 0h1600v900H0z" fill="none" stroke="#A3ADB1" stroke-width="12"/>
-  <path d="M0 900 650 250l950 650M1600 0 900 700" fill="none" stroke="#ABB5B9" stroke-width="10"/>
-  <circle cx="800" cy="450" r="96" fill="none" stroke="#A3ADB1" stroke-width="12"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-labelledby="title description">
+  <title id="title">图片区域</title>
+  <desc id="description">图片槽里的图片图标。方框、太阳和山形都在框内，不代表实际照片</desc>
+  <rect x="32" y="32" width="176" height="176" fill="none" stroke="#5F6568" stroke-width="8" stroke-linejoin="miter"/>
+  <g fill="none" stroke="#5F6568" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="74" cy="74" r="14"/>
+    <path d="M60 180 96 138l24 22 28-38 32 58"/>
+  </g>
 </svg>

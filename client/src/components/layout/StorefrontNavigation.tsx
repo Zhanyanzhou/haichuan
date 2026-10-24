@@ -243,7 +243,7 @@ export function StorefrontMenuDrawer({
           </Link>
         </div>
 
-        <p className="brand-menu__eyebrow">Explore / 探索</p>
+        <p className="brand-menu__eyebrow">探索</p>
         <nav className="brand-menu__primary" aria-label="品牌菜单">
           {storefrontMenuLinks.map((item) => (
             <Link

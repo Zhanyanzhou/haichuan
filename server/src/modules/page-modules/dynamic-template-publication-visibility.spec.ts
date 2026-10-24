@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { calculateDynamicTemplateDefinitionChecksum } from "./dynamic-template-definition-integrity";
+import { validateDynamicTemplateInstance } from "./dynamic-template-instance";
 import { definitionFixture } from "./dynamic-template-test-fixture";
 import { PageModulesService } from "./page-modules.service";
 import { makeFormalPageMetadata } from "./page-modules.spec-fixtures";
@@ -151,12 +152,46 @@ test("隐藏不能绕过必填、不允许隐藏、编辑授权或槽位内容�
   }
 });
 
-test("空图片节点的背景不可达，默认内容回退后恢复背景门禁", async () => {
+test("Schema 3 空图片节点不会因模板默认内容恢复背景门禁", async () => {
   const fixture = publicationFixture();
   fixture.definition.nodes.node_heading.responsive.desktop.backgroundImage = "https://example.invalid/slot-background.jpg";
   assert.equal((await fixture.validate()).valid, true);
   fixture.definition.defaultContent.slot_heading = { src: "/images/formal.jpg", alt: "正式图片" };
   fixture.grant("/images/formal.jpg");
   fixture.grant("https://example.invalid/slot-background.jpg");
-  assert.equal((await fixture.validate()).valid, false);
+  const withDefault = await fixture.validate();
+  assert.equal(withDefault.valid, true);
+  assert.ok(withDefault.issues.some((issue) => issue.message.includes("发布后客户前台不会显示此区块")));
+});
+
+test("Schema 3 默认行动不会成为页面公开行动引用", () => {
+  const fixture = publicationFixture();
+  fixture.definition.nodes.node_heading.type = "ButtonSlot";
+  Object.assign(fixture.definition.slots.slot_heading, {
+    type: "button",
+    semanticRole: "action",
+    validation: { allowedProtocols: ["https"] },
+    desktopRules: {},
+    mobileRules: {},
+  });
+  fixture.definition.defaultContent.slot_heading = {
+    label: "模板默认行动",
+    targetType: "external",
+    url: "https://example.com/default-action",
+  };
+
+  const withoutPageValue = validateDynamicTemplateInstance(fixture.props, fixture.definition);
+  assert.deepEqual(withoutPageValue.actions, []);
+
+  fixture.props.contentBySlotId.slot_heading = {
+    label: "页面行动",
+    targetType: "external",
+    url: "https://example.com/page-action",
+  };
+  const withPageValue = validateDynamicTemplateInstance(fixture.props, fixture.definition);
+  assert.deepEqual(withPageValue.actions, [{
+    slotId: "slot_heading",
+    targetType: "external",
+    value: "https://example.com/page-action",
+  }]);
 });

@@ -92,7 +92,8 @@ function multiHeroDraft() {
   return draft;
 }
 
-const supportRecipe = createRecommendedRecipe("general");
+// 角色未定的中性配方：画幅随内容增长、无图片、无内容，由下一行显式给出唯一槽位。
+const supportRecipe = createRecommendedRecipe();
 supportRecipe.content = [createContentSlot("title")];
 const supportDefinition = generateTemplateFromRecipe(supportRecipe, {
   templateId: "tpl_publish_support", name: "内容说明",
@@ -1548,7 +1549,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
 
   test("正式资料提示不打断一键发布", async ({ page }) => {
     const warning =
-      "统一联系资料尚未配置；公开联系页仍可提交咨询，但不会显示服务热线、邮箱、地址或服务时间。请先到「店铺资料」维护。";
+      "店铺资料尚未保存联系电话、邮箱、地址或服务时间。公开联系页会先显示已签认的公开联系事实，访客仍可提交咨询。如需更换，请到「店铺资料」保存。";
     const requests = await mockEditorApis(page, {
       valid: true,
       issues: [{

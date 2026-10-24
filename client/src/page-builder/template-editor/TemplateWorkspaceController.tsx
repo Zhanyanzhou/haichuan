@@ -94,6 +94,7 @@ import {
 
 export interface PersistTemplateOptions {
   overwriteCurrent?: boolean;
+  silent?: boolean;
 }
 
 type TemplateLifecycleTarget = Pick<DynamicTemplateResource, "templateId" | "name">;
@@ -174,6 +175,10 @@ export type PublishedDraftAvailability =
   | { status: "available"; templateId: string }
   | { status: "unavailable"; templateId: string; failure?: PublishFailure };
 
+export type TemplateLifecycleOutcome =
+  | { ok: true }
+  | { ok: false; reason: string };
+
 export interface TemplateWorkspaceController {
   active: boolean;
   canManageTemplates: boolean;
@@ -233,9 +238,9 @@ export interface TemplateWorkspaceController {
     request: PromoteDynamicTemplateInstanceRequest,
     pageViewport: { width: number; height: number },
   ) => Promise<void>;
-  archive: (target: TemplateArchiveRequest) => Promise<boolean>;
+  archive: (target: TemplateArchiveRequest) => Promise<TemplateLifecycleOutcome>;
   restore: (template: TemplateLifecycleTarget) => Promise<boolean>;
-  deleteDraft: (template: TemplateLifecycleTarget) => Promise<boolean>;
+  deleteDraft: (template: TemplateLifecycleTarget) => Promise<TemplateLifecycleOutcome>;
   listVersions: (options?: { beforeVersion?: number; limit?: number }) => Promise<DynamicTemplateVersionPageResource>;
   getVersion: (version: number) => Promise<DynamicTemplateVersionResource>;
   stageVersion: (version: DynamicTemplateVersionResource) => boolean;
@@ -813,6 +818,9 @@ export function useTemplateWorkspaceController({
     let requestedDraft = structuredClone(currentDraft);
     session.setSaveStatus("saving");
     const savePromise = (async (): Promise<boolean> => {
+      const notifySaved = (text: string) => {
+        if (!options.silent) message.success(text);
+      };
       try {
         let savedDraft: TemplateEditorDraft;
         if (localOnly) {
@@ -857,7 +865,7 @@ export function useTemplateWorkspaceController({
             // 首次创建已落地：立即保留真实 revision，后续精修保存失败只重试 update。
             const current = useTemplateEditorSession.getState();
             if (JSON.stringify(requestedDraft.definition) === JSON.stringify(original)) {
-              message.success(initialResult === "newer-changes" ? "模板副本已保存；你还有新的未保存修改。" : "模板副本已保存，可继续编辑。");
+              notifySaved(initialResult === "newer-changes" ? "模板副本已保存；你还有新的未保存修改。" : "模板副本已保存，可继续编辑。");
               return true;
             }
             requestedDraft = { ...initialSaved, definition: requestedDraft.definition, versionNote: requestedDraft.versionNote };
@@ -906,11 +914,11 @@ export function useTemplateWorkspaceController({
         });
         if (reconciliation === "stale-session") return true;
         if (reconciliation === "newer-changes") {
-          message.success(localOnly
+          notifySaved(localOnly
             ? "本机测试草稿已保存；你还有新的未保存修改"
             : "模板草稿已保存；你还有新的未保存修改");
         } else {
-          message.success(localOnly
+          notifySaved(localOnly
             ? "已保存为本机测试草稿；未写入服务端模板"
             : "模板草稿已保存，可继续设计或发布");
         }
@@ -2202,12 +2210,12 @@ export function useTemplateWorkspaceController({
     }
   }, [localOnly]);
 
-  const archive = useCallback(async (target: TemplateArchiveRequest) => {
+  const archive = useCallback(async (target: TemplateArchiveRequest): Promise<TemplateLifecycleOutcome> => {
+    const blocked = (reason: string): TemplateLifecycleOutcome => ({ ok: false, reason });
     try {
       const template = resolveTemplateArchiveTarget(target);
       if (!template) {
-        message.error("当前模板缺少可归档的有效定义，原记录未被修改");
-        return false;
+        return blocked("当前模板缺少可归档的有效定义，原记录未被修改");
       }
       const current = useTemplateEditorSession.getState();
       const matchesCurrent = current.draft && (
@@ -2216,8 +2224,7 @@ export function useTemplateWorkspaceController({
           : targetMatchesDraft(target, current.draft)
       );
       if (matchesCurrent && current.dirty) {
-        message.warning("请先保存草稿或放弃未保存修改，再将当前模板移入回收站。");
-        return false;
+        return blocked("请先保存草稿或放弃未保存修改，再将当前模板移入回收站。");
       }
       const sourceSession = matchesCurrent
         ? {
@@ -2237,11 +2244,10 @@ export function useTemplateWorkspaceController({
         : null;
       const archiveRequest = currentIdentity ?? template.request;
       if (!archiveRequest) {
-        message.error("当前模板缺少可核对的草稿版本，请重新读取后再移入回收站");
-        return false;
+        return blocked("当前模板缺少可核对的草稿版本，请重新读取后再移入回收站");
       }
       const ok = await runLifecycle(() => dynamicTemplateApi.archive(template.templateId, archiveRequest));
-      if (!ok) return false;
+      if (!ok) return blocked("上一项模板操作还在进行，请稍候再试。");
       const latest = useTemplateEditorSession.getState();
       const latestMatches = latest.draft && draftMatchesPersistedIdentity(
         latest.draft,
@@ -2260,10 +2266,9 @@ export function useTemplateWorkspaceController({
       } else {
         message.success(`模板“${template.name}”已移入回收站`);
       }
-      return true;
+      return { ok: true };
     } catch (error) {
-      message.error(getEditorErrorMessage(error, "移入回收站失败，当前模板仍保留"));
-      return false;
+      return blocked(getEditorErrorMessage(error, "移入回收站失败，当前模板仍保留"));
     }
   }, [closeTemplateSession, message, runLifecycle]);
 
@@ -2280,13 +2285,13 @@ export function useTemplateWorkspaceController({
     }
   }, [message, runLifecycle]);
 
-  const deleteDraft = useCallback(async (template: TemplateLifecycleTarget) => {
+  const deleteDraft = useCallback(async (template: TemplateLifecycleTarget): Promise<TemplateLifecycleOutcome> => {
+    const blocked = (reason: string): TemplateLifecycleOutcome => ({ ok: false, reason });
     const current = useTemplateEditorSession.getState();
     const matchesCurrent = current.draft?.sourceType === "persisted"
       && current.draft.definition.templateId === template.templateId;
     if (matchesCurrent && current.dirty) {
-      message.warning("请先保存草稿或放弃未保存修改，再永久删除当前模板。");
-      return false;
+      return blocked("请先保存草稿或放弃未保存修改，再永久删除当前模板。");
     }
     const sourceSession = matchesCurrent
       ? {
@@ -2296,7 +2301,7 @@ export function useTemplateWorkspaceController({
       : null;
     try {
       const ok = await runLifecycle(() => dynamicTemplateApi.deleteDraft(template.templateId));
-      if (!ok) return false;
+      if (!ok) return blocked("上一项模板操作还在进行，请稍候再试。");
       const latest = useTemplateEditorSession.getState();
       const latestMatches = latest.draft?.sourceType === "persisted"
         && latest.draft.definition.templateId === template.templateId;
@@ -2313,10 +2318,9 @@ export function useTemplateWorkspaceController({
       } else {
         message.success(`模板“${template.name}”已永久删除`);
       }
-      return true;
+      return { ok: true };
     } catch (error) {
-      message.error(getEditorErrorMessage(error, "永久删除失败；模板和页面数据均未改变"));
-      return false;
+      return blocked(getEditorErrorMessage(error, "永久删除失败；模板和页面数据均未改变"));
     }
   }, [closeTemplateSession, message, runLifecycle]);
 

@@ -6,10 +6,15 @@ async function sourceDefinition(page: Page, legacy = false) {
     const generatorPath = "/src/page-builder/template-creation/generateTemplateFromRecipe.ts";
     const presetsPath = "/src/page-builder/template-creation/presets.ts";
     const definitionPath = "/src/page-builder/template-definition/index.ts";
-    const [{ generateTemplateFromRecipe }, { createRecommendedRecipe }, definitions] = await Promise.all([
+    const [{ generateTemplateFromRecipe }, { createRecommendedRecipe, createContentSlot }, definitions] = await Promise.all([
       import(/* @vite-ignore */ generatorPath), import(/* @vite-ignore */ presetsPath), import(/* @vite-ignore */ definitionPath),
     ]);
-    if (!old) return generateTemplateFromRecipe(createRecommendedRecipe(), { name: "管理验收" });
+    if (!old) {
+      // 角色未定的中性配方不产出任何槽位；本文件要断言标题槽与其父容器在结构树上的本端/上级隐藏。
+      const recipe = createRecommendedRecipe();
+      recipe.content = [createContentSlot("title")];
+      return generateTemplateFromRecipe(recipe, { name: "管理验收" });
+    }
     let definition = definitions.createBlankDynamicTemplateDefinition("旧模板复制验收");
     const region = definitions.addDynamicTemplateNode(definition, definition.rootNodeId, "Container");
     const text = definitions.addDynamicTemplateNode(region.definition, region.nodeId, "HeadingSlot");
@@ -136,8 +141,9 @@ test("结构树反映本端与上级隐藏，折叠后画布选择自动展开�
   }, targets);
   await expect(tree.getByRole("treeitem", { name: /主标题.*上级隐藏/ })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("structure-visibility-1600.png"), fullPage: false });
-  const parentTreeItem = tree.getByRole("treeitem").filter({ has: page.locator(".template-editor__tree-toggle") }).and(page.locator(`[data-selection-target-id="${targets.parentId}"]`));
-  await parentTreeItem.locator(".template-editor__tree-toggle").click();
+  const parentTreeItem = tree.locator(`[data-selection-target-id="${targets.parentId}"][role="treeitem"]`);
+  await parentTreeItem.focus();
+  await page.keyboard.press("ArrowLeft");
   await expect(parentTreeItem).toHaveAttribute("aria-expanded", "false");
   await expect(tree.getByRole("treeitem", { name: /^主标题 / })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("structure-collapsed-1600.png"), fullPage: false });

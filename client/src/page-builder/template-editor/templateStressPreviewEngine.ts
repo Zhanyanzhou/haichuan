@@ -10,7 +10,7 @@ import {
 const previewPortrait = new URL("../preview-assets/neutral-template-preview-v1/template-preview-portrait.svg", import.meta.url).href;
 const previewSquare = new URL("../preview-assets/neutral-template-preview-v1/template-preview-square.svg", import.meta.url).href;
 const previewWide = new URL("../preview-assets/neutral-template-preview-v1/template-preview-wide.svg", import.meta.url).href;
-import { createTemplatePreviewContentBySlotId } from "./templatePreviewModel";
+import { createTemplatePreviewContentBySlotId, withNeutralTemplateImages } from "./templatePreviewModel";
 import { getTemplateRecipeSampleText } from "../template-creation/previewContent";
 
 export const TEMPLATE_STRESS_PREVIEW_SCENARIOS = [
@@ -185,7 +185,10 @@ export function createTemplateStressPreviewContentBySlotId(
   scenario: TemplateStressPreviewScenario,
   sessionContentBySlotId: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const shortContent = createTemplatePreviewContentBySlotId(definition);
+  const shortContent = withNeutralTemplateImages(
+    definition,
+    createTemplatePreviewContentBySlotId(definition),
+  ).contentBySlotId;
   // 新建模板没有正式默认内容，压力预览仍需可见的临时构图。
   // 仅补未配置槽位，显式清空、正式默认值和本次试排均保留其优先级。
   if (Number(definition.schemaVersion) >= 3) {

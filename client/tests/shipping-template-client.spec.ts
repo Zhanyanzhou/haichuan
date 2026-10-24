@@ -8,7 +8,7 @@ async function authenticateProductEditor(page: Page) {
   });
 }
 
-test("商品编辑器加载并新建运费模板时保持请求合同", async ({ page }) => {
+test("商品发布页不加载运费模板，也不提供物流入口", async ({ page }) => {
   await authenticateProductEditor(page);
   let listRequests = 0;
   const writes: Array<{
@@ -64,36 +64,8 @@ test("商品编辑器加载并新建运费模板时保持请求合同", async ({
 
   await page.goto("/admin/products/new");
   await expect(page.getByRole("heading", { name: "图文描述" })).toBeVisible();
-  await expect.poll(() => listRequests).toBe(1);
-
-  await page.getByRole("button", { name: "物流服务" }).click();
-  await page.getByRole("checkbox", { name: "物流配送" }).check();
-  await page.evaluate(() => {
-    document.cookie = "hc_csrf=shipping-template-csrf; path=/";
-  });
-  await page
-    .locator(".pro-editor__template-line")
-    .getByRole("button", { name: /新建/ })
-    .click();
-
-  const dialog = page.getByRole("dialog", { name: "新建运费模板" });
-  await dialog.getByLabel("模板名称").fill("珠宝顺丰保价模板");
-  await dialog.getByLabel("承运商").fill("顺丰速运");
-  await dialog.getByRole("button", { name: /保\s*存\s*模\s*板/ }).click();
-
-  await expect.poll(() => writes.length).toBe(1);
-  expect(writes[0].headers.authorization).toBeUndefined();
-  expect(writes[0].headers["x-csrf-token"]).toBe("shipping-template-csrf");
-  expect(writes[0].body).toEqual({
-    name: "珠宝顺丰保价模板",
-    carrier: "顺丰速运",
-    feeMode: "FREE",
-    baseFee: 0,
-    insured: true,
-    signatureRequired: true,
-  });
-  await expect(page.getByText("运费模板已创建并选中")).toBeVisible();
-  await expect(
-    page.locator(".pro-editor__template-card").getByText("珠宝顺丰保价模板"),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "物流服务" })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "新建运费模板" })).toHaveCount(0);
+  expect(listRequests).toBe(0);
+  expect(writes).toEqual([]);
 });

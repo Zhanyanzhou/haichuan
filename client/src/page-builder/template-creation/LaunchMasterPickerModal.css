@@ -1,0 +1,19 @@
+.launch-master-picker .ant-modal-content { padding: 24px; display: flex; flex-direction: column; max-height: min(760px, calc(100dvh - 48px)); }
+.launch-master-picker .ant-modal-header, .launch-master-picker .ant-modal-footer { flex: none; }
+.launch-master-picker .ant-modal-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.launch-master-picker__intro { margin: 4px 0 16px; color: var(--picker-muted); }
+.launch-master-picker__list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 2px; }
+.launch-master-picker__card { display: flex; flex-direction: column; gap: 6px; width: 100%; height: 100%; padding: 14px 16px; border: 1px solid var(--picker-border); border-radius: 6px; color: var(--picker-ink); background: var(--picker-bg); font: inherit; text-align: left; cursor: pointer; }
+.launch-master-picker__card[aria-pressed=true] { border-color: var(--picker-primary); box-shadow: inset 0 0 0 1px var(--picker-primary); background: var(--picker-fill); }
+.launch-master-picker__card:focus-visible { outline: 2px solid var(--picker-primary); outline-offset: 3px; }
+.launch-master-picker__role { color: var(--picker-muted); font-size: 12px; letter-spacing: 0.08em; }
+.launch-master-picker__name { font-size: 15px; font-weight: 600; }
+.launch-master-picker__meta { color: var(--picker-muted); font-size: 12px; }
+.launch-master-picker__slots { color: var(--picker-ink); font-size: 12px; line-height: 1.6; }
+.launch-master-picker__why { color: var(--picker-muted); font-size: 12px; line-height: 1.7; }
+.launch-master-picker__note { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--picker-border); color: var(--picker-muted); font-size: 12px; line-height: 1.7; }
+.launch-master-picker__footer { display: flex; justify-content: flex-end; gap: 8px; }
+
+@media (max-width: 720px) {
+  .launch-master-picker__list { grid-template-columns: minmax(0, 1fr); }
+}

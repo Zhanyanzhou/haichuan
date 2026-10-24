@@ -5516,13 +5516,14 @@ button.template-editor__toolbar-state:focus-visible {
 }
 
 .template-editor__dynamic-canvas-renderer .hc-dynamic-template__empty-slot {
-  min-height: 72px;
+  min-height: 44px;
   display: grid;
   place-items: center;
-  padding: 18px;
+  padding: 10px 12px;
   color: var(--adm-muted);
   background: var(--adm-neutral-bg);
   font-size: 13px;
+  line-height: 20px;
 }
 
 .template-editor__dynamic-canvas-renderer [data-template-background-token="surface-muted"] {

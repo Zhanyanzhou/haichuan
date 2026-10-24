@@ -13,6 +13,7 @@ import {
   usePublicSiteSettingsResource,
 } from "@/hooks/usePublicSiteSettings";
 import AnalyticsConsentBanner from "@/components/privacy/AnalyticsConsentBanner";
+import StorefrontTrafficBeacon from "@/components/privacy/StorefrontTrafficBeacon";
 import {
   buildPublicUrl,
   normalizePublicSiteOrigin,
@@ -33,6 +34,7 @@ import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
 import StorefrontFooter from "./StorefrontFooter";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
+import { applyOfficialSiteTitle } from "@/utils/publicSiteTitle";
 import { resolvePublicLocalePath, withPublicLocalePath } from "@/i18n/publicLocale";
 import { useCustomerAuthStore, type CustomerAccount } from "@/store/customerAuthStore";
 import { customerApi } from "@/services/api";
@@ -539,7 +541,11 @@ export default function PublicLayout() {
       || routeDescription
       || (english ? undefined : siteSettings?.seoDescription || siteSettings?.siteDescription);
     const keywords = english ? undefined : siteSettings?.seoKeywords;
-    const normalizedTitle = normalizeMetadataText(title);
+    const normalizedTitle = applyOfficialSiteTitle(
+      normalizeMetadataText(title),
+      siteName,
+      english ? undefined : normalizeMetadataText(siteSettings?.seoTitle),
+    );
     const normalizedDescription = normalizeMetadataText(description);
     const image = resolvePublicSocialImage(
       publicSiteOrigin,
@@ -874,6 +880,7 @@ export default function PublicLayout() {
           © {new Date().getFullYear()} Haichuan Jewelry
         </footer>
       ) : <StorefrontFooter siteName={siteName} showService={!hideFooterService} />}
+      <StorefrontTrafficBeacon />
       {!english ? <AnalyticsConsentBanner /> : null}
     </div>
     </PublicSiteSettingsProvider>

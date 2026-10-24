@@ -1,0 +1,20 @@
+/*
+ * 公开模板页的焦点可见性。
+ *
+ * 模板渲染面此前没有任何项目级焦点样式，行动槽落在浏览器默认的 `outline: auto`
+ * 上——计算宽度约 `1px`，颜色由引擎的 `-webkit-focus-ring-color` 决定。
+ * 站点其余部分（页头 `site-shell.css`、导航 `navigation.css`、商品详情 `commerce.css`）
+ * 都用 `2px` 墨色环，于是同一页里出现两种焦点语言。
+ * UI_GUIDE §6.2 要求交互状态包含 `focus-visible`，§9.2 要求焦点样式清晰且不能被移除。
+ *
+ * 用 `currentColor` 而不是写死 `#181A1B`：深色按钮或影像上的反色按钮会自动拿到浅色环
+ * （UI_GUIDE §A.6：深色背景使用 `#F7F8F8`）。`outline-offset: 2px` 按 §A.6 的 `2px` 间隔。
+ *
+ * 选择器只落在行动槽（带 `data-template-slot-id` 的 `<a>`/`<button>`）上：
+ * 编辑器画布的行动槽渲染成不可聚焦的 `div`（`actionHref` 在 `editor` 模式下恒为 `undefined`），
+ * 所以这条规则不参与画布的选择与点选反馈。
+ */
+.hc-dynamic-template :is(a, button, [role="button"])[data-template-slot-id]:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

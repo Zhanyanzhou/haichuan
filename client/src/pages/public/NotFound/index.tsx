@@ -20,10 +20,10 @@ export default function NotFound() {
   return (
     <section className="not-found-page" aria-labelledby="not-found-title">
       <div className="not-found-page__content">
-        <p className="not-found-page__eyebrow">PAGE NOT FOUND</p>
+        <p className="not-found-page__eyebrow">页面不存在</p>
         <h1 id="not-found-title">此页未被找到</h1>
         <p className="not-found-page__description">
-          页面可能已移动、尚未公开，或链接已经失效。您可以返回首页，继续探索海川珠宝作品。
+          页面可能已移动、尚未公开，或链接已经失效。您可以返回首页，或前往选款中心查看当前公开内容。
         </p>
         <div className="not-found-page__actions">
           <Link className="not-found-page__primary" to="/">

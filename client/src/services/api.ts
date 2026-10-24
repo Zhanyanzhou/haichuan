@@ -496,14 +496,12 @@ export const cartApi = {
 
 export type CustomerCheckoutRequest = {
   address: string;
-  province: string;
-  expectedFinalCents: number;
   customerEmail?: string;
   couponId?: number;
   items: Array<{ skuId: number; quantity: number }>;
 };
 
-export type CustomerCheckoutPreviewRequest = Omit<CustomerCheckoutRequest, "expectedFinalCents">;
+export type CustomerCheckoutPreviewRequest = CustomerCheckoutRequest;
 export type CustomerCheckoutPreview = {
   itemSubtotalCents: number;
   discountCents: number;

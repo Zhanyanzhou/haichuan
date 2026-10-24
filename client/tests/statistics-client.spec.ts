@@ -30,7 +30,10 @@ test.describe("后台统计客户端现有合同", () => {
           orderToday: 3,
           revenueToday: 16800,
           inquiriesToday: 2,
+          visitorsToday: 12,
+          visitorsYesterday: 8,
           pageViewsToday: 88,
+          storefrontTraffic: { enabled: true, earliestDate: "2026-08-01" },
           orderYesterday: 2,
           revenueYesterday: 12000,
           inquiriesYesterday: 1,
@@ -70,15 +73,16 @@ test.describe("后台统计客户端现有合同", () => {
     await page.goto("/admin/dashboard");
     await expect(page.getByRole("heading", { name: "今日经营" })).toBeVisible();
     await expect(page.getByText("¥16,800", { exact: true })).toBeVisible();
-    await expect(page.locator(".admin-dashboard__card")).toHaveCount(6);
+    await expect(page.getByText("88", { exact: true })).toBeVisible();
+    await expect(page.getByText("页面浏览未在采集")).toHaveCount(0);
+    await expect(page.locator(".admin-dashboard__card")).toHaveCount(4);
     await expect(page.locator(".admin-dashboard__card-label")).toHaveText([
+      "今日访客",
+      "今日浏览",
       "今日订单",
-      "成交金额",
-      "新增咨询",
-      "页面浏览量",
-      "在售商品数",
-      "待发货订单",
+      "下单金额",
     ]);
+    await expect(page.getByRole("link", { name: /在售商品/ })).toContainText("24");
     const pendingInquiry = page.locator(".admin-dashboard__alert-item");
     await expect(pendingInquiry).toHaveCount(1);
     await expect(pendingInquiry).toContainText("待处理咨询");
@@ -101,9 +105,9 @@ test.describe("后台统计客户端现有合同", () => {
       )
       .toBe(true);
 
-    await page.getByRole("tab", { name: "成交金额" }).click();
+    await page.getByRole("tab", { name: "下单金额" }).click();
     await page.getByRole("tab", { name: "近 30 日" }).click();
-    await expect(page.getByRole("tab", { name: "成交金额" })).toHaveAttribute(
+    await expect(page.getByRole("tab", { name: "下单金额" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -121,6 +125,65 @@ test.describe("后台统计客户端现有合同", () => {
       .toBe(true);
     expect(trendRequests.every((request) => request.authorization === undefined))
       .toBe(true);
+  });
+
+  test("店内访问计数关闭时，今日访客和今日浏览显示未采集", async ({ page }) => {
+    await authenticateDashboardAdmin(page);
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/api/auth/profile") return route.fallback();
+      let data: unknown = {};
+      if (url.pathname === "/api/statistics/dashboard") {
+        data = {
+          orderToday: 0,
+          revenueToday: 0,
+          inquiriesToday: 0,
+          visitorsToday: 0,
+          visitorsYesterday: 0,
+          pageViewsToday: 0,
+          pageViewsYesterday: 0,
+          publishedProductCount: 5,
+          pendingShip: 0,
+          pendingAppointmentInquiries: 1,
+          pendingSelectionInquiries: 0,
+          lowStock: 1,
+          pendingReview: 1,
+          storefrontTraffic: {
+            enabled: false,
+            earliestDate: null,
+          },
+        };
+      } else if (url.pathname === "/api/statistics/trend") {
+        data = [
+          { date: "2026-10-22", count: 0 },
+          { date: "2026-10-23", count: 0 },
+        ];
+      } else if (url.pathname === "/api/settings/flags") {
+        data = { analyticsDashboardEnabled: true };
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ code: 200, data, message: "ok" }),
+      });
+    });
+
+    await page.goto("/admin/dashboard");
+    await expect(page.getByRole("status")).toContainText("公网访问未采集");
+    await expect(page.getByRole("link", { name: "查看访问分析" })).toHaveAttribute(
+      "href",
+      "/admin/analytics",
+    );
+    const pageViewCard = page.locator(".admin-dashboard__card", {
+      hasText: "今日浏览",
+    });
+    await expect(pageViewCard).toContainText("—");
+    await expect(pageViewCard).toContainText("公网访问未采集");
+    await expect(pageViewCard).not.toContainText("暂无可比数据");
+    await expect(page.getByRole("link", { name: /在售商品/ })).toContainText("5");
+
+    await page.getByRole("tab", { name: "浏览" }).click();
+    await expect(page.getByText("这条折线不能代表真实访问")).toBeVisible();
   });
 
   test("访问分析展示匿名回访、地域与多周期指标并适配手机宽度", async ({

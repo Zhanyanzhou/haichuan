@@ -78,7 +78,7 @@ export default function RecipeImageAppearance({ recipe, selectedId, onSelect, on
       <strong>{imageLabel} · {selected.name}</strong><span>用途：{roleLabel}</span>
     </div>
     <p id={hintId} className="recipe-image-appearance__hint">
-      {background ? "背景图片跟随画布，形状和比例由画布决定。可设置图片填充方式。"
+      {background ? "背景图跟随画布，形状和比例由画布决定。可设置图片填充方式。"
         : circle ? "圆形图片固定为 1:1。切换直角或圆角后可调整比例。"
           : "以下设置只影响当前图片，可随时切换其他图片继续调整。"}
     </p>

@@ -34,6 +34,11 @@ export class AdminProductQueryDto {
   @Min(1)
   categoryId?: number;
 
+  /** 为 true 时，categoryId 包含其全部下级分类。分类管理「查看商品」对品类使用。 */
+  @IsOptional()
+  @IsIn(["true", "false"])
+  includeDescendants?: string;
+
   @IsOptional()
   @IsIn(["DRAFT", "PUBLISHED", "OFFLINE", "ARCHIVED"])
   status?: string;

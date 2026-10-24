@@ -6,6 +6,10 @@ import { useSelectionStore } from "@/store/selectionStore";
 import { useCustomerAuthStore } from "@/store/customerAuthStore";
 import type { CatalogProduct } from "@/data/catalogData";
 import {
+  selectVirtualCatalog,
+  VIRTUAL_PUBLIC_WORK_NOTICE,
+} from "@/data/virtualPublicWorks";
+import {
   expandCategoryIds,
   useProductData,
   useProductCategories,
@@ -49,6 +53,20 @@ import {
 const DESKTOP_HEADER_H = 108;
 const PAGE_SIZE = 32;
 const SKU_RE = /^[A-Z]{2,3}-[A-Z]{2,3}-\d{3,4}$/i;
+
+function namesForCategoryIds(categories: RealCategory[], ids: string): string[] {
+  if (!ids) return [];
+  const wanted = new Set(ids.split(",").filter(Boolean));
+  const names: string[] = [];
+  const walk = (nodes: RealCategory[]) => {
+    for (const node of nodes) {
+      if (wanted.has(String(node.id)) && node.name.trim()) names.push(node.name.trim());
+      if (node.children?.length) walk(node.children);
+    }
+  };
+  walk(categories);
+  return names;
+}
 
 /* ══════════════════════════════════════
    组件：分页
@@ -429,12 +447,89 @@ export default function Catalog({
   const selCount = selectionLookupState === "ready"
     ? selectionProducts.filter((product) => selectedIds.has(product.id)).length
     : 0;
+  const hasActiveFilters = Boolean(
+    params.category ||
+      params.subcategory ||
+      params.query.trim() ||
+      params.materials.length ||
+      params.crafts.length ||
+      params.weights.length ||
+      params.sizes.length,
+  );
+  const selectedCategoryNames = useMemo(
+    () => namesForCategoryIds(categories, categoryIds),
+    [categories, categoryIds],
+  );
+  const baselineQuery = useMemo<ProductQuery | null>(() => {
+    if (editorPreview || !hasActiveFilters) return null;
+    return { page: 1, pageSize: 1, sortBy: "sortOrder" };
+  }, [editorPreview, hasActiveFilters]);
+  const {
+    total: baselineTotal,
+    loading: baselineLoading,
+    error: baselineError,
+    queryKey: baselineQueryKey,
+    dataQueryKey: baselineDataQueryKey,
+  } = useProductData(baselineQuery, {
+    loadCategories: false,
+    subscribe: false,
+    refreshKey: catalogAudience,
+  });
+  const baselineReady = baselineDataQueryKey === baselineQueryKey && !baselineLoading && !baselineError;
+  const serverCatalogEmpty = !editorPreview && (
+    (
+      !hasActiveFilters
+      && catalogResponseCurrent
+      && !apiLoading
+      && !apiError
+      && total === 0
+    ) || (
+      hasActiveFilters
+      && !categoriesError
+      && !(categoryTarget && categoriesLoading)
+      && baselineReady
+      && baselineTotal === 0
+    )
+  );
+  const virtualCatalog = useMemo(
+    () => serverCatalogEmpty
+      ? selectVirtualCatalog({
+          keyword: params.query,
+          categoryNames: selectedCategoryNames,
+          categorySelected: Boolean(categoryTarget),
+          materials: params.materials,
+          crafts: params.crafts,
+          weights: params.weights,
+          sizes: params.sizes,
+          sort: params.sort === "newest" || params.sort === "sku" ? params.sort : "recommended",
+          page: params.page,
+          pageSize: PAGE_SIZE,
+        })
+      : null,
+    [
+      categoryTarget,
+      params.crafts,
+      params.materials,
+      params.page,
+      params.query,
+      params.sort,
+      params.sizes,
+      params.weights,
+      selectedCategoryNames,
+      serverCatalogEmpty,
+    ],
+  );
+  const displayProducts = virtualCatalog?.pageItems ?? mergedProducts;
+  const displayTotal = virtualCatalog?.total ?? total;
+  const suggestionProducts = virtualCatalog?.matches ?? mergedProducts;
+  const showingVirtualWorks = virtualCatalog !== null && displayTotal > 0;
+  const showCatalogTools = apiLoading || displayTotal > 0 || hasActiveFilters;
 
   useEffect(() => {
-    if (!apiLoading && params.page > tp && tp > 0) {
-      update("page", String(tp), { replace: true });
-    }
-  }, [apiLoading, tp, params.page, update]);
+    const pageCount = Math.ceil(displayTotal / PAGE_SIZE);
+    if ((apiLoading && !virtualCatalog) || params.page <= pageCount || pageCount <= 0) return;
+    update("page", String(pageCount), { replace: true });
+  }, [apiLoading, displayTotal, params.page, update, virtualCatalog]);
 
   const currentCatalogUrl = `${location.pathname}${location.search}${location.hash}`;
   const catalogUrlForDetail = editorPreview ? null : currentCatalogUrl;
@@ -608,17 +703,6 @@ export default function Catalog({
       size: [],
     });
   };
-  const hasActiveFilters = Boolean(
-    params.category ||
-      params.subcategory ||
-      params.query.trim() ||
-      params.materials.length ||
-      params.crafts.length ||
-      params.weights.length ||
-      params.sizes.length,
-  );
-  const showCatalogTools =
-    apiLoading || total > 0 || hasActiveFilters;
   const toggleArray = (key: URLParamKey, arr: string[], val: string) => {
     const newArr = arr.includes(val)
       ? arr.filter((x) => x !== val)
@@ -633,9 +717,9 @@ export default function Catalog({
   }, [editorPreview]);
 
   useEffect(() => {
-    if (editorPreview || apiLoading || apiError) return;
-    trackViewItemList(mergedProducts.length, "catalog");
-  }, [apiError, apiLoading, editorPreview, mergedProducts]);
+    if (editorPreview || ((apiLoading || apiError) && !virtualCatalog)) return;
+    trackViewItemList(displayProducts.length, "catalog");
+  }, [apiError, apiLoading, displayProducts.length, editorPreview, virtualCatalog]);
 
   return (
     <div
@@ -678,7 +762,7 @@ export default function Catalog({
           color: #5F6568;
           font-size: 11px;
           line-height: 1;
-          letter-spacing: .2em;
+          letter-spacing: .08em;
         }
         .catalog-page__intro h1 {
           margin: 0;
@@ -706,7 +790,7 @@ export default function Catalog({
           color: #5F6568;
           font-size: 12px;
           line-height: 1;
-          letter-spacing: .18em;
+          letter-spacing: .08em;
         }
         .catalog-search__title {
           margin: 0 0 24px;
@@ -937,7 +1021,7 @@ export default function Catalog({
             <h1 className="sr-only">选款中心</h1>
           ) : (
             <header className="catalog-page__intro">
-            <p className="catalog-page__intro-eyebrow">SELECTION CENTER</p>
+            <p className="catalog-page__intro-eyebrow">公开款式</p>
             <h1 id="catalog-page-title">选款中心</h1>
             <p className="catalog-page__intro-copy">
               按关键词、货号与当前公开属性查找作品，并将意向款式加入选款清单。
@@ -946,7 +1030,7 @@ export default function Catalog({
           )}
           <CatalogSearch
             query={params.query}
-            products={mergedProducts}
+            products={suggestionProducts}
             categories={categories}
             materials={materialOptions}
             onSearch={(value) => update("query", value)}
@@ -973,7 +1057,7 @@ export default function Catalog({
           <div ref={sentinelRef}>
             <Toolbar
               category={params.category}
-              total={total}
+              total={displayTotal}
               materials={params.materials}
               materialOptions={materialOptions}
               sort={params.sort}
@@ -992,7 +1076,7 @@ export default function Catalog({
           {stickyVisible ? (
             <StickyBar
               category={params.category}
-              total={total}
+              total={displayTotal}
               sort={params.sort}
               selCount={selCount}
               onSort={(s) => update("sort", s)}
@@ -1109,7 +1193,7 @@ export default function Catalog({
         aria-busy={apiLoading}
         style={{ scrollMarginTop: DESKTOP_HEADER_H + 16 }}
       >
-      {apiLoading ? (
+      {apiLoading && !virtualCatalog ? (
         <div
           className="catalog-state"
           role="status"
@@ -1126,7 +1210,7 @@ export default function Catalog({
         >
           <p style={{ fontSize: 14, color: T.sec }}>正在加载珠宝作品…</p>
         </div>
-      ) : apiError ? (
+      ) : apiError && !virtualCatalog ? (
         <div
           className="catalog-state"
           style={{
@@ -1177,7 +1261,7 @@ export default function Catalog({
             </Link>
           </div>
         </div>
-      ) : mergedProducts.length === 0 ? (
+      ) : displayTotal === 0 ? (
         <div
           className="catalog-state"
           style={{
@@ -1211,7 +1295,7 @@ export default function Catalog({
           ) : (
             <>
               <p style={{ fontSize: 15, color: T.txt, marginBottom: 8 }}>
-                珠宝作品正在筹备中
+                当前没有可公开的作品
               </p>
               <p
                 style={{
@@ -1245,8 +1329,25 @@ export default function Catalog({
           )}
         </div>
       ) : (
+        <>
+        {showingVirtualWorks ? (
+          <p
+            className="catalog-state"
+            style={{
+              maxWidth: 720,
+              margin: "28px auto 0",
+              paddingInline: "clamp(24px,5vw,80px)",
+              color: T.sec,
+              fontSize: 13,
+              lineHeight: 1.7,
+              textAlign: "center",
+            }}
+          >
+            {VIRTUAL_PUBLIC_WORK_NOTICE}
+          </p>
+        ) : null}
         <ProductGrid
-          products={mergedProducts}
+          products={displayProducts}
           commerceAllowed={commerceAllowed}
           catalogUrl={catalogUrlForDetail}
           startIndex={(params.page - 1) * PAGE_SIZE}
@@ -1255,10 +1356,11 @@ export default function Catalog({
             setQuickView(product);
           }}
         />
+        </>
       )}
       </section>
       <Pagination
-        total={total}
+        total={displayTotal}
         page={params.page}
         onPage={goToPage}
       />
@@ -1270,7 +1372,7 @@ export default function Catalog({
           commerceAllowed={commerceAllowed}
           productIndex={
             (params.page - 1) * PAGE_SIZE
-            + Math.max(0, mergedProducts.findIndex((product) => product.id === quickView.id))
+            + Math.max(0, displayProducts.findIndex((product) => product.id === quickView.id))
           }
           catalogUrl={catalogUrlForDetail}
         />
@@ -1295,7 +1397,7 @@ export default function Catalog({
             size: [],
           })}
           onClose={closeFilter}
-          total={total}
+          total={displayTotal}
           returnFocusRef={filterTriggerRef}
         />
       )}

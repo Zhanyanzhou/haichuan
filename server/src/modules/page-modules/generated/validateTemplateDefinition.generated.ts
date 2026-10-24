@@ -1,7 +1,7 @@
 /**
  * 自动生成，禁止手改。
  * 语义校验单一源：client/src/page-builder/template-definition/validateTemplateDefinition.ts
- * TemplateDefinition Schema SHA-256：7866f528ebea4b32659659dbbe765ec0d9ceb545f9776bf52f7496811d2813bd
+ * TemplateDefinition Schema SHA-256：a1917c5eb28c0e039ca161c23695c018cc8b76572c901d3bcdba74165aae4527
  */
 
 import {
@@ -33,7 +33,9 @@ function hasLegalFixedPublicContent(
   slotType: string,
   semanticRole: string | undefined,
   value: unknown,
+  schemaVersion: number,
 ): boolean {
+  if (schemaVersion >= 3) return false;
   if (semanticRole && COMMERCIAL_FIXED_CONTENT_ROLES.has(semanticRole)) return false;
   if (FIXED_PUBLIC_TEXT_EXCLUDED_TYPES.has(slotType)) return false;
   const hasText = (candidate: unknown): boolean => {
@@ -462,6 +464,13 @@ function isNonEmptyString(value: unknown, maxLength: number): value is string {
 
 function isStableId(value: unknown): value is string {
   return typeof value === "string" && STABLE_ID_PATTERN.test(value);
+}
+
+function readQualificationRatio(value: unknown): { width: number; height: number } | undefined {
+  if (typeof value !== "string" || !/^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(value)) return undefined;
+  const [width, height] = value.split(":").map(Number);
+  if (!(width > 0) || !(height > 0)) return undefined;
+  return { width, height };
 }
 
 function addIssue(
@@ -1641,13 +1650,16 @@ export function validateDynamicTemplateDefinition(input: unknown): DynamicTempla
         typeof rawSlot.type === "string" ? rawSlot.type : "",
         typeof rawSlot.semanticRole === "string" ? rawSlot.semanticRole : undefined,
         defaultContent[slotKey],
+        schemaVersion,
       )) {
       addIssue(issues, {
         level: "error",
         code: "REQUIRED_SLOT_NEEDS_FIXED_SOURCE",
         path: `${path}.editable`,
         slotId: slotKey,
-        message: `公开时必须展示的“${typeof rawSlot.label === "string" ? rawSlot.label : slotKey}”还没有合法固定文案。请写入模板默认内容，或改为允许页面填写。系统示例、模板默认图和价格文字不能充当该内容。`,
+        message: schemaVersion >= 3
+          ? `公开时必须展示的“${typeof rawSlot.label === "string" ? rawSlot.label : slotKey}”必须允许页面填写。Schema 3 的模板默认内容只供设计与预览，不能代替页面自己的公开值。`
+          : `公开时必须展示的“${typeof rawSlot.label === "string" ? rawSlot.label : slotKey}”还没有合法固定文案。请写入模板默认内容，或改为允许页面填写。系统示例、模板默认图和价格文字不能充当该内容。`,
       });
     }
     if (!isRecord(rawSlot.validation)) {
@@ -2245,6 +2257,39 @@ export function validateDynamicTemplatePublishDefinition(
         message: `${slot.label} 已禁止内容编辑，不能继续开放页面实例布局或样式权限。`,
       });
     }
+  }
+
+  const hasVisibleTitle = Object.values(definition.nodes).some((node) => {
+    if (node.hidden || !node.slotId) return false;
+    const slot = definition.slots[node.slotId];
+    return Boolean(slot && (slot.type === "heading" || slot.semanticRole === "title"));
+  });
+  if (Object.keys(definition.slots).length > 0 && !hasVisibleTitle) {
+    addIssue(issues, {
+      level: "error",
+      code: "SECTION_REQUIRES_VISIBLE_TITLE",
+      path: `nodes.${definition.rootNodeId}`,
+      nodeId: definition.rootNodeId,
+      message: "这一节需要一个可见标题。照片里的字不能代替页面标题；被隐藏的标题可以在结构树里重新打开。",
+    });
+  }
+  for (const slot of Object.values(definition.slots)) {
+    if (slot.type !== "image" || slot.semanticRole !== "backgroundImage") continue;
+    const mobileRatio = readQualificationRatio(slot.mobileRules?.aspectRatio);
+    const desktopRatio = readQualificationRatio(slot.desktopRules?.aspectRatio);
+    const fit = slot.mobileRules?.objectFit ?? slot.desktopRules?.objectFit;
+    const portraitFrame = Boolean(mobileRatio && mobileRatio.width / mobileRatio.height < 1);
+    const sharedLandscape = !desktopRatio || desktopRatio.width / desktopRatio.height >= 1;
+    if (fit !== "contain" || !portraitFrame || !sharedLandscape) continue;
+    const nodeId = Object.values(definition.nodes).find((node) => node.slotId === slot.slotId)?.nodeId;
+    addIssue(issues, {
+      level: "warning",
+      code: "SECTION_HERO_CONTAIN_LETTERBOX",
+      path: `slots.${slot.slotId}.mobileRules.objectFit`,
+      nodeId,
+      slotId: slot.slotId,
+      message: `“${slot.label}”在手机上使用完整放入，外框却比横图更高，会露出深色边。请改为铺满，或让外框跟这张图的比例一致。`,
+    });
   }
 
   const valid = !issues.some((issue) => issue.level === "error");

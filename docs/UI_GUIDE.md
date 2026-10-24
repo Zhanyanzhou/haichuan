@@ -7,7 +7,7 @@
 > 参考说明：成熟珠宝品牌官网只作为可复验的研究样本，不是规范权威；不得复刻其版式、商标、文案、交互或受保护素材，也不得把其他品牌的历史与地位投射给海川珠宝。
 > 本文件是全站视觉与体验数值的唯一详细规范：正文定义客户前台，附录 A 定义管理后台；它只负责把项目与品牌基线落实为视觉与交互标准，其他规则文件不得另建第二套视觉标准。
 
-2026-09-11 模板创建补充；2026-10-05 按 D.39 收束：[模板设计标准](page-builder/template-creation-rules.md)中的画布、文字层级、圆角和间距数值是写入单个模板的可编辑初值，不是全站令牌或后台组件样式。配色必须解析为本文件 §4.1 共享底盘，模板风格不得另建平行色盘或发明第二品牌色。六个公开 URL 的产品目的只认 `PROJECT_GUARDRAILS.md` 第 2 节；装修如何落实与整页成篇只认 [店铺装修产品合同](page-builder/store-decoration.md)。
+2026-09-11 模板创建补充；2026-10-05 按 D.39 收束：模板里的画布和文字层级是写入单个模板的可编辑初值，不是全站令牌或后台组件样式。配色必须解析为本文件 §4.1 共享底盘，不得另建平行色盘或发明第二品牌色。六个公开 URL 的产品目的只认 `PROJECT_GUARDRAILS.md` 第 2 节；装修如何落实与整页成篇只认 [店铺装修产品合同](page-builder/store-decoration.md)。2026-10-08 按 D.40：本文件第 2.3、2.4 节是排印唯一权威。2026-10-12 按 D.41：区块模板的第三层只引用本文件令牌，不再使用风格名和圆角像素预设；在本文件 300～500 的标题字重内，展示标题、页面标题和区块标题不超过 400；区块叙事正文每行不超过 40 字，本文件第 2.6 节的 45 字仍是其他场景的上限。竞品观察不构成字号、字重或底色依据。
 
 ---
 
@@ -112,6 +112,8 @@
 | 正文 | 15 | 14 | 正文 |
 | 辅助 | 12 | 11 | 注释、辅助 |
 
+> 本表是**字号权威**。模板生成、页面装修和前台渲染都从这里取语义层级，不另设第二套换算表，也不把“画布短边 × 百分比”当作主标题的唯一算法。生成时把层级解析成明确可编辑的数值，并用 `clamp(下限, 推荐值, 上限)` 表达，桌面与手机各有一条可覆盖的初值；下限不得低于该层级在本表的手机取值。字号变小不解除本表约束，也不允许把正文压到辅助级以下来凑版式。
+
 ### 2.4 字重
 
 | 场景 | 字重 |
@@ -135,7 +137,7 @@
 | --- | --- |
 | 标题行距 | `1.2 ~ 1.4`（字越大越紧） |
 | 正文行距 | `1.6 ~ 2.0`（字越小越松） |
-| 正文行长 | 每行 ≤ 45 字 |
+| 正文行长 | 每行 ≤ 45 字。区块模板里的叙事正文按 D.41 再收到每行 ≤ 40 字 |
 
 ### 2.7 对齐三法
 
@@ -479,7 +481,7 @@
 
 - [WCAG 2.2](https://www.w3.org/TR/WCAG22/)、[文本对比度](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum)、[文本间距](https://www.w3.org/WAI/WCAG22/Understanding/text-spacing)、[重排](https://www.w3.org/WAI/WCAG22/Understanding/reflow)、[点击目标最小尺寸](https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum)、[非文本对比度](https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast)。
 - [Ant Design 主题令牌](https://ant.design/docs/react/customize-theme/)、[表格组件](https://ant.design/components/table/)、[数据展示规范](https://ant.design/docs/spec/data-display/)、[布局规范](https://ant.design/docs/spec/layout/)。
-- 艺术参考仅取官方站点：[Cartier 珠宝系列](https://www.cartier.com/en-us/jewelry/all-collections/)、[Van Cleef & Arpels 珠宝系列](https://www.vancleefarpels.com/us/en/collections/jewelry.html)、[Tiffany 珠宝](https://www.tiffany.com/jewelry/)、[Bvlgari 珠宝](https://www.bulgari.com/en-us/jewelry)。由这些样本归纳的“少量强调色、稳定对齐、明确主次、克制装饰”属于艺术观察，不复制其文案或具体像素。
+- 艺术参考仅取官方站点：[Cartier 珠宝系列](https://www.cartier.com/en-us/jewelry/all-collections/)、[Van Cleef & Arpels 珠宝系列](https://www.vancleefarpels.com/us/en/collections/jewelry.html)、[Tiffany 珠宝](https://www.tiffany.com/jewelry/)、[Bvlgari 珠宝](https://www.bulgari.com/en-us/jewelry)。由这些样本归纳的“稳定对齐、明确主次、克制装饰”只属艺术观察，不复制其文案或具体像素；**色值不在此列**——任何底色与强调色只认本文第 4.1 节共享底盘，竞品观察不构成底色依据（D.40）。
 
 ### A.2 后台排版层级
 

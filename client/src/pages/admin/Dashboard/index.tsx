@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { ReloadOutlined } from "@ant-design/icons";
 import { statisticsApi, type TrendMetric } from "@/services/api";
 import { ADMIN_COPY, getAdminLoadError } from "@/constants/adminCopy";
@@ -130,6 +131,15 @@ export default function Dashboard() {
         </div>
       )}
 
+      {stats?.storefrontTraffic?.enabled === false && (
+        <div className="admin-dashboard__data-notice" role="status">
+          <span>
+            公网访问未采集。打开店内访问计数后，别人打开正式页面会计入今日访客和今日浏览；后台、预览和已登录员工不计。
+          </span>
+          <Link to="/admin/analytics">查看访问分析</Link>
+        </div>
+      )}
+
       <DashboardMetricCards loading={loading} stats={stats} />
 
       <DashboardTrendSection
@@ -138,6 +148,7 @@ export default function Dashboard() {
         data={trendData}
         loading={trendLoading}
         error={trendError}
+        trafficClosed={stats?.storefrontTraffic?.enabled === false}
         onMetricChange={setTrendMetric}
         onDaysChange={setTrendDays}
         onRetry={() => loadTrend(trendMetric, trendDays)}

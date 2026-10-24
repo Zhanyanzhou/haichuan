@@ -10,12 +10,16 @@ async function openImageDefaults(page: Page, width: number) {
     const generatorPath = "/src/page-builder/template-creation/generateTemplateFromRecipe.ts";
     const repositoryPath = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
     const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
-    const [{ createRecommendedRecipe }, { generateTemplateFromRecipe }, { createNewDynamicTemplateDraft }, { useTemplateEditorSession }] = await Promise.all([
+    const [{ createRecommendedRecipe, createMediaSlots }, { generateTemplateFromRecipe }, { createNewDynamicTemplateDraft }, { useTemplateEditorSession }] = await Promise.all([
       import(/* @vite-ignore */ presetsPath), import(/* @vite-ignore */ generatorPath),
       import(/* @vite-ignore */ repositoryPath), import(/* @vite-ignore */ sessionPath),
     ]);
     const draft = createNewDynamicTemplateDraft("默认图片属性布局");
-    draft.definition = generateTemplateFromRecipe(createRecommendedRecipe(), {
+    // 角色未定的中性配方：画幅随内容增长、无图片、无内容。本文件只编辑默认图片，
+    // 因此显式给出唯一一个没有默认图的图片槽。
+    const recipe = createRecommendedRecipe();
+    recipe.media = createMediaSlots(["heroImage"]);
+    draft.definition = generateTemplateFromRecipe(recipe, {
       templateId: draft.definition.templateId, name: "默认图片属性布局",
     });
     const image = (Object.values(draft.definition.nodes) as Array<{ nodeId: string; slotId?: string }>).find(

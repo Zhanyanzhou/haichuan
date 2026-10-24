@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { inquiriesApi, productApi } from "@/services/api";
+import { inquiriesApi } from "@/services/api";
 import { requestErrorCode, requestStatus } from "@/services/httpClient";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackPageView, trackSubmitInquiry } from "@/hooks/useAnalytics";
 import { usePageMetaStore } from "@/store/pageMetaStore";
 import { usePageDecorationState } from "@/page-builder/runtime/PublishedPageDecoration";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
+import { lookupPublicWork } from "@/data/publicWorkLookup";
 import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { useCustomerAuthStore } from "@/store/customerAuthStore";
@@ -15,6 +16,10 @@ import {
   PRIVACY_CONSENT_CONTENT_HASH,
   PRIVACY_CONSENT_VERSION,
 } from "@/config/privacyConsent";
+import {
+  preferSiteSetting,
+  SIGNED_PUBLIC_CONTACT,
+} from "@/config/publicContact";
 import {
   getConsultationSubmissionStatusCopy,
   parseConsultationSubmissionReceipt,
@@ -55,8 +60,8 @@ const CONSULT_TYPES = [
 const CONTACT_METHODS = ["电话", "短信", "电子邮件"];
 const TIME_OPTIONS = [
   "上午 (9:00-12:00)",
-  "下午 (14:00-18:00)",
-  "晚上 (18:00-20:00)",
+  "下午 (13:00-18:00)",
+  "晚上 (18:00-21:00)",
 ];
 const BUDGET_OPTIONS = [
   "",
@@ -82,6 +87,8 @@ type InquirySourceProduct = {
   id: number;
   code?: string | null;
   name: string;
+  /** 演示款只带名称和货号，不提交数据库作品 ID。 */
+  virtual?: boolean;
 };
 
 type ProductContextStatus = "none" | "loading" | "ready" | "unavailable" | "error";
@@ -209,11 +216,20 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     return () => clearPageMeta();
   }, [editorPreview, setPageMeta, clearPageMeta]);
   const { settings: siteSettings, status: settingsStatus } = usePublicSiteSettings();
-  // SiteSettings 是联系信息唯一真实来源；空值不显示，不使用假电话/邮箱/地址兜底。
-  const contactPhone = siteSettings?.contactPhone?.trim() || "";
-  const contactEmail = siteSettings?.contactEmail?.trim() || "";
-  const contactAddress = siteSettings?.contactAddress?.trim() || "";
-  const businessHours = siteSettings?.businessHours?.trim() || "";
+  // 店铺资料非空时覆盖；未保存时使用已签认公开联系事实。读取失败时不猜测。
+  const settingsReady = settingsStatus === "loaded";
+  const contactPhone = settingsReady
+    ? preferSiteSetting(siteSettings?.contactPhone, SIGNED_PUBLIC_CONTACT.phone)
+    : "";
+  const contactEmail = settingsReady
+    ? preferSiteSetting(siteSettings?.contactEmail, SIGNED_PUBLIC_CONTACT.email)
+    : "";
+  const contactAddress = settingsReady
+    ? preferSiteSetting(siteSettings?.contactAddress, SIGNED_PUBLIC_CONTACT.address)
+    : "";
+  const businessHours = settingsReady
+    ? preferSiteSetting(siteSettings?.businessHours, SIGNED_PUBLIC_CONTACT.hours)
+    : "";
 
   const CONTACT_INFO = [
     {
@@ -226,9 +242,10 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
       value: contactEmail,
       href: contactEmail ? `mailto:${contactEmail}` : undefined,
     },
-    { label: "总部地址", value: contactAddress },
+    { label: "接待地址", value: contactAddress },
     { label: "服务时间", value: businessHours },
-  ].filter((c) => c.value); // 只显示有真实值的条目
+    { label: "服务范围", value: settingsReady ? SIGNED_PUBLIC_CONTACT.serviceArea : "" },
+  ].filter((c) => c.value);
 
   const authenticatedCustomer = useCustomerAuthStore((state) => state.customer);
   const savedCustomer = editorPreview ? null : authenticatedCustomer;
@@ -395,26 +412,37 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     let cancelled = false;
     setSourceProduct(null);
     setProductContextStatus("loading");
-    productApi
-      .getPublicById(productRef, { suppressGlobalError: true })
-      .then((response) => {
+    lookupPublicWork(productRef)
+      .then((resolution) => {
         if (cancelled) return;
-        const product = unwrapResponse<InquirySourceProduct>(response);
-        if (
-          !product
-          || !Number.isInteger(product.id)
-          || product.id <= 0
-          || !product.name?.trim()
-        ) {
-          setProductContextStatus("unavailable");
+        if (resolution.kind === "virtual") {
+          setSourceProduct({
+            id: resolution.product.id,
+            code: resolution.product.code,
+            name: resolution.product.name,
+            virtual: true,
+          });
+          setProductContextStatus("ready");
           return;
         }
-        setSourceProduct(product);
-        setProductContextStatus("ready");
+        if (resolution.kind === "published") {
+          const product = resolution.product;
+          if (!product.name?.trim()) {
+            setProductContextStatus("unavailable");
+            return;
+          }
+          setSourceProduct({
+            id: product.id,
+            code: product.code,
+            name: product.name,
+          });
+          setProductContextStatus("ready");
+          return;
+        }
+        setProductContextStatus(resolution.kind === "error" ? "error" : "unavailable");
       })
-      .catch((error) => {
-        if (cancelled) return;
-        setProductContextStatus(requestStatus(error) === 404 ? "unavailable" : "error");
+      .catch(() => {
+        if (!cancelled) setProductContextStatus("error");
       });
     return () => {
       cancelled = true;
@@ -497,6 +525,17 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
     });
   };
 
+  const virtualInquiryPrefix = sourceProduct?.virtual
+    ? `【演示款式 ${sourceProduct.name} ${sourceProduct.code || ""}】`.trim()
+    : "";
+  const messageLimit = virtualInquiryPrefix
+    ? Math.max(0, 2000 - virtualInquiryPrefix.length - 1)
+    : 2000;
+  const consultationMessage = () => {
+    const body = form.message.trim();
+    return virtualInquiryPrefix ? `${virtualInquiryPrefix}\n${body}` : body;
+  };
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (!form.name.trim()) e.name = "请输入姓名";
@@ -508,7 +547,7 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
       e.email = "选择电子邮件联系时请填写邮箱";
     if (!form.consultationType) e.consultationType = "请选择咨询类型";
     if (!form.message.trim()) e.message = "请描述您的需求";
-    else if (form.message.trim().length > 2000) e.message = "需求描述不能超过2000个字符";
+    else if (form.message.trim().length > messageLimit) e.message = "需求描述不能超过2000个字符";
     if (!form.privacyConsent) e.privacyConsent = "请阅读并同意隐私说明";
     setErrors(e);
     const firstInvalidField = REQUIRED_FIELDS.find((field) => e[field]);
@@ -539,8 +578,8 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
         preferredContact: form.preferredContact,
         preferredTime: form.preferredTime || undefined,
         budgetRange: form.budgetRange || undefined,
-        productId: sourceProduct?.id,
-        message: form.message.trim(),
+        productId: sourceProduct?.virtual ? undefined : sourceProduct?.id,
+        message: consultationMessage(),
         privacyConsent: form.privacyConsent,
       };
       const fingerprint = await createConsultationSubmissionFingerprint({
@@ -787,16 +826,15 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
         }}
       >
         <div style={{ maxWidth: MW, marginInline: "auto", paddingInline: PX }}>
-          <p
+            <p
             style={{
               fontSize: 10,
-              letterSpacing: "0.16em",
+              letterSpacing: "0.08em",
               color: T.light,
               marginBottom: 6,
-              textTransform: "uppercase",
             }}
           >
-            CONSULTATION REQUEST
+            预约咨询
           </p>
           <h1
             style={{
@@ -878,6 +916,11 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                     <p style={{ margin: "4px 0 12px", color: T.sec, fontSize: 12 }}>
                       货号：{sourceProduct.code || "未提供"}
                     </p>
+                    {sourceProduct.virtual ? (
+                      <p style={{ margin: "0 0 12px", color: T.sec, fontSize: 13, lineHeight: 1.7 }}>
+                        演示款式，不是在售作品。顾问会按这个款式名称了解需求。
+                      </p>
+                    ) : null}
                     <button type="button" onClick={removeProductContext} className="contact-product-context__action">
                       移除作品，改为普通咨询
                     </button>
@@ -1433,6 +1476,11 @@ export default function Contact({ mode = "public" }: ContactProps = {}) {
                     )}
                   </div>
                 ))}
+              {settingsStatus === "loaded" ? (
+                <p style={{ fontSize: 12, color: T.sec, margin: "4px 0 0", lineHeight: 1.6 }}>
+                  {SIGNED_PUBLIC_CONTACT.holidayNotice}
+                </p>
+              ) : null}
             </div>
             <div style={{ borderTop: `1px solid ${T.line}`, paddingTop: 20 }}>
               <p

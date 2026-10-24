@@ -55,11 +55,14 @@ export interface CompileDynamicTemplateRenderPlanOptions {
   /** 编辑器与预览可保留空槽位占位；公开渲染必须保持 false。 */
   showEmptySlots?: boolean;
   /**
-   * 公开与预览按 D.38 消费：默认图片不进入前台，未获准的价格文字不进入前台。
+   * 公开与预览按 D.38 / D.40 消费：默认图片不进入前台，Schema 3 默认内容不代替页面值，
+   * 未获准的价格文字也不进入前台。
    * 编辑画布不传此项，以便继续查看模板默认图和设计用文案。
    */
   publicSurface?: {
     omitDefaultImages: true;
+    /** Schema 3 公开面只认页面实例自己的值；模板默认内容仅供设计与后台预览。 */
+    omitDefaultContent?: true;
     suppressedSemanticRoles?: readonly string[];
   };
 }
@@ -134,13 +137,15 @@ export function compileDynamicTemplateRenderPlan(
       : undefined;
     const defaultValue = node.slotId ? definition.defaultContent[node.slotId] : undefined;
     const suppressedRoles = new Set(options.publicSurface?.suppressedSemanticRoles ?? []);
-    let content = slot && hasInstanceContent
-      && slot.emptyPolicy === "use-default"
-      && !hasMeaningfulSlotContent(slot, instanceValue)
-      ? defaultValue
-      : hasInstanceContent
-        ? instanceValue
-        : defaultValue;
+    let content = options.publicSurface?.omitDefaultContent
+      ? (hasInstanceContent ? instanceValue : undefined)
+      : slot && hasInstanceContent
+        && slot.emptyPolicy === "use-default"
+        && !hasMeaningfulSlotContent(slot, instanceValue)
+        ? defaultValue
+        : hasInstanceContent
+          ? instanceValue
+          : defaultValue;
     if (slot && options.publicSurface?.omitDefaultImages && slot.type === "image") {
       content = hasInstanceContent && hasMeaningfulSlotContent(slot, instanceValue)
         ? instanceValue

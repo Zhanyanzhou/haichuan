@@ -56,11 +56,11 @@ export const settingsApi = {
       if (locale === "en") {
         return mockResponse(null);
       }
-      // 联系信息以后台 SiteSettings 为唯一真实来源；mock 默认返回空，不编造电话/邮箱/地址。
-      // 测试需要具体值时在测试内拦截此接口注入。
+      // mock 不编造店铺资料。字段为空时，公开页再使用已签认联系事实。
+      // 测试需要覆盖值时在测试内拦截此接口注入。
       return mockResponse({
         siteName: "海川珠宝",
-        seoTitle: "海川珠宝",
+        seoTitle: "海川珠宝官方网站",
         seoDescription: "浏览珠宝作品，了解定制与顾问服务。",
         contactPhone: "",
         contactEmail: "",

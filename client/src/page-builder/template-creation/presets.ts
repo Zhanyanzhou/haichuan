@@ -1,12 +1,21 @@
 import type { TemplateRecipe } from "../template-definition/generated/templateDefinition.generated";
 
+/**
+ * 旧母版 key 与标签。按 store-decoration 第 2 节，它只作**历史配方的兼容读取与显示回退**，
+ * 不再作为创建推荐目录的信息架构；创建界面按下面的九种区块角色组织。
+ */
 export const PURPOSES = [
   ["productPromotion", "商品促销"], ["newProduct", "新品发布"], ["event", "活动宣传"],
   ["brand", "品牌故事"], ["social", "社交媒体"], ["news", "新闻 / 资讯"],
   ["profile", "人物介绍"], ["general", "通用模板"], ["custom", "自定义"],
 ] as const;
-/** 创建界面只展示网站模板类型。social 仅供历史配方读取，不再推荐。 */
-export const CREATION_PURPOSES = PURPOSES.filter(([id]) => id !== "social");
+export type TemplateSectionRole = NonNullable<TemplateRecipe["sectionRole"]>;
+/** 九个区块角色；标签与顺序取自 store-decoration 第 2 节的表，不另立第二份名单。 */
+export const SECTION_ROLES = [
+  ["page-hero", "页面首屏"], ["collection-story", "系列叙事"], ["editorial-split", "左右图文"],
+  ["craft-detail", "工艺细节"], ["editorial-media", "编辑媒体"], ["creation-grid", "作品网格"],
+  ["maison-fact", "品牌事实"], ["service-invitation", "服务邀请"], ["video-story", "视频叙事"],
+] as const satisfies readonly (readonly [TemplateSectionRole, string])[];
 export const CANVAS_PRESETS = [
   { name: "随内容增长", ratio: "auto", width: 1440, height: 900 },
   { name: "宽幅主视觉", ratio: "16:9", width: 1440, height: 810 },
@@ -27,14 +36,14 @@ export const CONTENTS = [
   ["description", "描述", "在这里介绍内容亮点，文字可以在创建后继续调整。"],
   ["brandName", "品牌名称", "品牌名称"], ["tag", "标签", "精选"], ["date", "日期", "活动日期"],
   ["price", "价格", "价格待填写"], ["originalPrice", "原价", "原价待填写"],
-  ["offer", "优惠信息", "限时礼遇"], ["cta", "按钮 / CTA", "了解详情"],
+  ["offer", "优惠信息", "限时礼遇"], ["cta", "主行动", "了解详情"],
   ["contact", "联系信息", "联系信息"], ["customText", "自定义文字", "自定义文字"],
   ["time", "时间", "时间待填写"], ["location", "地点", "地点待填写"],
   ["productName", "商品名称", "商品名称"], ["sellingPoint", "商品卖点", "商品卖点"],
   ["discount", "折扣", "折扣待填写"], ["personName", "姓名", "姓名"],
   ["position", "职位", "职位"], ["biography", "简介", "人物简介"], ["socialInfo", "社交信息", "社交信息"],
 ] as const;
-export const MEDIA_ROLES = [["heroImage", "主图片"], ["logo", "Logo"], ["backgroundImage", "背景图片"], ["secondaryImage", "副图片"], ["custom", "自定义图片"]] as const;
+export const MEDIA_ROLES = [["heroImage", "主图"], ["logo", "Logo"], ["backgroundImage", "背景图"], ["secondaryImage", "副图"], ["custom", "自定义图片"]] as const;
 export const MEDIA_PRESETS = [
   { id: "none", name: "无图片", roles: [] },
   { id: "hero", name: "1 张主图", roles: ["heroImage"] },
@@ -44,7 +53,8 @@ export const MEDIA_PRESETS = [
   { id: "two", name: "2 张图片", roles: ["custom", "custom"] },
   { id: "three", name: "3 张图片", roles: ["custom", "custom", "custom"] },
   { id: "background", name: "背景图", roles: ["backgroundImage"] },
-  { id: "backgroundHero", name: "背景图片 + 主图", roles: ["backgroundImage", "heroImage"] },
+  { id: "backgroundHero", name: "背景图 + 主图", roles: ["backgroundImage", "heroImage"] },
+  { id: "backgroundLogo", name: "背景图 + Logo", roles: ["backgroundImage", "logo"] },
   { id: "custom", name: "自定义", roles: ["custom"] },
 ] satisfies Array<{ id: string; name: string; roles: TemplateRecipe["media"][number]["role"][] }>;
 export const STYLES = [["minimal", "简约"], ["business", "商务"], ["premium", "高端"], ["vibrant", "活力"], ["tech", "科技"], ["warm", "温暖"], ["ultraMinimal", "极简"], ["custom", "自定义"]] as const;
@@ -88,19 +98,35 @@ export function createContentSlot(role: TemplateRecipe["content"][number]["role"
   const entry = CONTENTS.find(([key]) => key === role)!;
   return { id, role, name: entry[1], defaultContent: "", maxLength: role === "description" ? 400 : role === "title" ? 80 : 120, editable: true };
 }
-export function recommendedFor(purpose: TemplateRecipe["purpose"]) {
-  const choices: Record<TemplateRecipe["purpose"], { ratios: string[]; layouts: TemplateRecipe["layout"][]; mediaPreset: string; contents: TemplateRecipe["content"][number]["role"][] }> = {
-    productPromotion: { ratios: ["16:9"], layouts: ["topImageBottomContent"], mediaPreset: "hero", contents: ["title", "subtitle", "price", "originalPrice", "cta"] },
-    newProduct: { ratios: ["3:2"], layouts: ["centerSubject"], mediaPreset: "heroLogo", contents: ["brandName", "title", "subtitle", "cta"] },
-    event: { ratios: ["16:9"], layouts: ["fullImageOverlay"], mediaPreset: "background", contents: ["title", "time", "location", "cta"] },
-    brand: { ratios: ["auto"], layouts: ["centerSubject"], mediaPreset: "heroLogo", contents: ["brandName", "customText", "description"] },
-    social: { ratios: ["1:1"], layouts: ["centerSubject"], mediaPreset: "hero", contents: ["title", "description"] },
-    news: { ratios: ["auto"], layouts: ["topImageBottomContent"], mediaPreset: "hero", contents: ["tag", "title", "description", "date"] },
-    profile: { ratios: ["3:2"], layouts: ["leftImageRightContent", "topImageBottomContent"], mediaPreset: "hero", contents: ["personName", "position", "biography"] },
-    general: { ratios: [], layouts: [], mediaPreset: "", contents: [] },
-    custom: { ratios: [], layouts: [], mediaPreset: "", contents: [] },
-  };
-  return choices[purpose];
+export interface SectionRoleRecommendation {
+  ratios: string[];
+  layouts: TemplateRecipe["layout"][];
+  mediaPreset: string;
+  contents: TemplateRecipe["content"][number]["role"][];
+}
+/** 角色未定时不给任何推荐：画幅落“随内容增长”，布局自由，图片与内容为空。 */
+const NEUTRAL_RECOMMENDATION: SectionRoleRecommendation = { ratios: [], layouts: [], mediaPreset: "", contents: [] };
+/**
+ * 九个区块角色的创建初值，逐行取自 template-creation-rules 第 2 节的推荐表。
+ * 表中同列给出两种画幅或布局时，第一项落在与首发母模板一致的那一种上
+ * （launch-template-set 第 3 节；全幅主视觉的角色按该文件第 3.1 节的过渡优先全幅背景）。
+ * 价格、原价、折扣不属于任何角色的默认推荐，仍可在创建第 5 步自行勾选。
+ */
+const SECTION_RECOMMENDATIONS: Record<TemplateSectionRole, SectionRoleRecommendation> = {
+  "page-hero": { ratios: ["16:9"], layouts: ["fullImageOverlay"], mediaPreset: "backgroundLogo", contents: ["title", "subtitle", "cta"] },
+  "collection-story": { ratios: ["3:2"], layouts: ["leftImageRightContent", "leftContentRightImage"], mediaPreset: "heroOne", contents: ["subtitle", "title", "description", "cta"] },
+  "editorial-split": { ratios: ["3:2"], layouts: ["leftImageRightContent", "leftContentRightImage"], mediaPreset: "heroTwo", contents: ["subtitle", "title", "description", "cta"] },
+  "craft-detail": { ratios: ["4:5"], layouts: ["leftImageRightContent", "topImageBottomContent"], mediaPreset: "heroTwo", contents: ["subtitle", "title", "description"] },
+  "editorial-media": { ratios: ["16:9"], layouts: ["fullImageOverlay", "centerSubject"], mediaPreset: "hero", contents: ["title", "description"] },
+  // 卡片比例取 4:5 而不是本表写作时的 1:1：4:5 是 UI_GUIDE 的商品卡比例，
+  // 被 template-creation-rules 第 3.1 节的商品卡组过渡引用为两端不变的不变量（launch-template-set 第 3 节说明 2）。
+  "creation-grid": { ratios: ["4:5"], layouts: ["cards"], mediaPreset: "three", contents: ["title", "description"] },
+  "maison-fact": { ratios: ["auto"], layouts: ["topImageBottomContent", "splitColumns"], mediaPreset: "heroLogo", contents: ["brandName", "title", "description", "cta"] },
+  "service-invitation": { ratios: ["16:9"], layouts: ["topImageBottomContent", "leftContentRightImage"], mediaPreset: "heroLogo", contents: ["title", "time", "location", "cta"] },
+  "video-story": { ratios: ["16:9"], layouts: ["fullImageOverlay", "centerSubject"], mediaPreset: "hero", contents: ["title", "description", "cta"] },
+};
+export function recommendedFor(sectionRole?: TemplateSectionRole): SectionRoleRecommendation {
+  return sectionRole ? SECTION_RECOMMENDATIONS[sectionRole] : NEUTRAL_RECOMMENDATION;
 }
 export function styleFor(variant: TemplateRecipe["style"]["variant"]): TemplateRecipe["style"] {
   const spacious = variant === "premium" || variant === "ultraMinimal";
@@ -109,23 +135,29 @@ export function styleFor(variant: TemplateRecipe["style"]["variant"]): TemplateR
     radius: spacious ? "none" : variant === "business" || variant === "tech" ? "small" : variant === "vibrant" ? "large" : "medium",
     spacing: spacious ? "extraRelaxed" : variant === "warm" ? "relaxed" : "standard", margin: spacious ? "relaxed" : "standard" };
 }
-export function createRecommendedRecipe(purpose: TemplateRecipe["purpose"] = "productPromotion"): TemplateRecipe {
-  const recommended = recommendedFor(purpose);
+/**
+ * 按区块角色生成创建初值。角色未定（向导第 0 步尚未选择）时给出中性配方：
+ * 画幅随内容增长、布局自由、图片与内容为空，不预告任何角色倾向。
+ * 不写 `purpose`：它是旧母版 key，按 store-decoration 第 2 节只作历史配方兼容读取，
+ * 新配方一律以 `sectionRole` 表达身份。
+ */
+export function createRecommendedRecipe(sectionRole?: TemplateSectionRole): TemplateRecipe {
+  const recommended = recommendedFor(sectionRole);
   const size = CANVAS_PRESETS.find((item) => item.ratio === recommended.ratios[0]) ?? CANVAS_PRESETS[0];
-  return { recipeVersion: 1, presetVersion: 2, purpose,
+  return { recipeVersion: 1, presetVersion: 3, ...(sectionRole ? { sectionRole } : {}),
     canvas: { width: size.width, height: size.height, aspectRatio: size.width / size.height },
     layout: recommended.layouts[0] ?? "free", media: createMediaSlots(MEDIA_PRESETS.find((item) => item.id === recommended.mediaPreset)?.roles ?? []),
-    content: recommended.contents.map((role) => purpose === "brand" && role === "customText" ? { ...createContentSlot(role), name: "品牌口号" } : createContentSlot(role)), style: styleFor("minimal"), rules: { aspectLocked: false } };
+    content: recommended.contents.map((role) => createContentSlot(role)), style: styleFor("minimal"), rules: { aspectLocked: false } };
 }
 
 export type RecipeSection = "canvas" | "layout" | "media" | "content" | "style";
 /** 只更新用户尚未修改的段；推荐永不收窄可选集合。 */
-export function changeRecipePurpose(recipe: TemplateRecipe, purpose: TemplateRecipe["purpose"], dirty: Partial<Record<RecipeSection, boolean>>): TemplateRecipe {
-  const next = createRecommendedRecipe(purpose);
+export function changeRecipeSectionRole(recipe: TemplateRecipe, sectionRole: TemplateSectionRole, dirty: Partial<Record<RecipeSection, boolean>>): TemplateRecipe {
+  const next = createRecommendedRecipe(sectionRole);
   const style = dirty.style ? recipe.style : next.style;
   // 新推荐图片继承本次最终风格；已编辑的图片段保持原有外观和身份。
   const media = dirty.media ? recipe.media : next.media.map((slot) => ({
     ...slot, borderRadius: slot.role === "logo" || slot.role === "backgroundImage" ? 0 : RADIUS_VALUES[style.radius],
   }));
-  return { ...recipe, purpose, ...Object.fromEntries((["canvas", "layout", "content"] as const).map((key) => [key, dirty[key] ? recipe[key] : next[key]])), media, style };
+  return { ...recipe, sectionRole, ...Object.fromEntries((["canvas", "layout", "content"] as const).map((key) => [key, dirty[key] ? recipe[key] : next[key]])), media, style };
 }

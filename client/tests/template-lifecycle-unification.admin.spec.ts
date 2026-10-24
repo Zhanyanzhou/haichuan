@@ -1839,11 +1839,14 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
       exact: true,
     }).click();
 
-    const unavailable = menuItemByAction(page, "永久删除不可用");
-    await expect(unavailable).toBeVisible();
-    await expect(unavailable).toHaveAttribute("aria-disabled", "true");
-    await expect(unavailable.getByTitle(blockedReason)).toBeVisible();
-    await expect(unavailable).not.toContainText(SOURCE_LEVEL_WORDS);
+    const blocked = menuItemByAction(page, "不能永久删除");
+    await expect(blocked).toBeVisible();
+    await expect(blocked).not.toHaveAttribute("aria-disabled", "true");
+    await blocked.click();
+    const dialog = page.getByRole("dialog", { name: `“${PUBLISHED_TEMPLATE_NAME}”不能永久删除` });
+    await expect(dialog).toContainText(blockedReason);
+    await expect(dialog).toContainText("留在回收站");
+    await expect(dialog).not.toContainText(SOURCE_LEVEL_WORDS);
     await expect(page.getByRole("complementary", { name: "模板组件库" }))
       .not.toContainText(SOURCE_LEVEL_WORDS);
     expect(server.writes.filter((write) => write.method === "DELETE")).toHaveLength(0);

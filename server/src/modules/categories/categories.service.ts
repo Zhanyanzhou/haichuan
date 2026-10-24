@@ -132,10 +132,11 @@ export class CategoriesService {
     return this.retainPublicBranches(categories, publicCategoryIds);
   }
 
-  /** 管理端分类树：保留已停用的二、三级类目，便于重新启用。 */
+  /** 管理端分类树。不在前台且没有下级和商品的分类会先物理删除。 */
   async findManageTree(actor: CategoryActor) {
     return this.prisma.$transaction(async (tx) => {
       await this.lockAuthorizedActor(tx, actor);
+      await this.removeRetiredEmpty(tx);
       const publicProducts = {
         where: customerFacingProductWhereForVisibilities(['PUBLIC']),
         take: 1,
@@ -145,6 +146,7 @@ export class CategoriesService {
         where: { level: 1 },
         orderBy: { sortOrder: 'asc' },
         include: {
+          _count: { select: { children: true, products: true } },
           products: publicProducts,
           children: {
             orderBy: { sortOrder: 'asc' },
@@ -370,8 +372,8 @@ export class CategoriesService {
       const categoryData = this.categoryData(data, level);
       await this.ensureSlugAvailable(categoryData.slug, tx, id);
 
-      // 停用与 delete() 同口径：仍有未软删除子分类或商品时拒绝，
-      // 避免前台分类树隐藏该类目但商品在目录/搜索中仍可见可购的口径分裂。
+      // 旧数据上的停用入口。有下级或商品时不能停用，避免导航消失但商品仍可被找到。
+      // 后台「删除」走 delete()：空分类会删掉记录并释放网址标识。
       if (categoryData.isActive === false) {
         await this.assertDeactivatable(id, tx);
       }
@@ -409,13 +411,47 @@ export class CategoriesService {
     }
   }
 
+  /** 不在前台、且没有下级和商品的分类直接删掉，列表里不再保留。 */
+  private async removeRetiredEmpty(db: CategoryDb) {
+    for (let depth = 0; depth < 4; depth += 1) {
+      const retired = await db.category.findMany({
+        where: {
+          isActive: false,
+          children: { none: {} },
+          products: { none: {} },
+        },
+        select: { id: true },
+      });
+      if (retired.length === 0) return;
+      await db.category.deleteMany({
+        where: { id: { in: retired.map((item) => item.id) } },
+      });
+    }
+  }
+
   async delete(id: number, actor: CategoryActor) {
     return this.prisma.$transaction(async (tx) => {
       await this.lockAuthorizedActor(tx, actor);
-      const category = await tx.category.findUnique({ where: { id } });
-      if (!category) throw new NotFoundException('类目不存在');
-      await this.assertDeactivatable(id, tx);
-      return tx.category.update({ where: { id }, data: { isActive: false } });
+      const category = await tx.category.findUnique({
+        where: { id },
+        include: {
+          _count: {
+            select: {
+              children: true,
+              products: true,
+            },
+          },
+        },
+      });
+      if (!category) throw new NotFoundException('分类不存在');
+      if (category._count.children > 0) {
+        throw new BadRequestException('请先删除下级款式，再删除这个分类');
+      }
+      if (category._count.products > 0) {
+        throw new BadRequestException('这个分类下还有商品，请先改到其他分类后再删除');
+      }
+      await tx.category.delete({ where: { id } });
+      return { success: true };
     });
   }
 

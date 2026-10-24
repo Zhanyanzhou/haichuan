@@ -67,6 +67,31 @@ export type PublicSeoPageValidator = (
   issues?: Array<{ severity?: string; message?: string }>;
 }>;
 
+const OFFICIAL_BROWSER_TITLE = "海川珠宝官方网站";
+
+/** 与 client/src/utils/publicSiteTitle.ts 一致：浏览器标签使用官方网站标题。 */
+function officialBrowserTitle(
+  title: string,
+  siteName: string,
+  officialTitle: string | undefined,
+): string {
+  const brand = siteName.trim();
+  const configured = officialTitle?.trim();
+  const official = configured && configured !== brand
+    ? configured
+    : brand === "海川珠宝"
+      ? OFFICIAL_BROWSER_TITLE
+      : "";
+  const resolved = title.trim() || brand;
+  if (!official || !brand || official === brand) return resolved;
+  if (resolved === brand || resolved === official) return official;
+  const suffix = ` | ${brand}`;
+  if (resolved.endsWith(suffix)) {
+    return `${resolved.slice(0, -suffix.length)} | ${official}`;
+  }
+  return resolved;
+}
+
 function hasFormalPlaceholderIssue(
   validation: Awaited<ReturnType<PublicSeoPageValidator>>,
 ): boolean {
@@ -365,6 +390,7 @@ async function projectPage(
   locale: PublicLocale,
   origin: string,
   siteName: string,
+  officialTitle: string | undefined,
   now: Date,
 ): Promise<SnapshotRouteInput> {
   if (!localization || localization.reviewStatus !== "PUBLISHED") fail(`PAGE_${document.pageKey}_${locale}_NOT_PUBLISHED`);
@@ -482,7 +508,7 @@ async function projectPage(
     contentHashAfter: contentHash,
     lastModified: isoDate(revision.publishedAt, "PAGE_PUBLISHED_AT_INVALID"),
     siteName,
-    title,
+    title: officialBrowserTitle(title, siteName, officialTitle),
     description,
     shareImage,
     renderedBodyHtml: semanticBody(title, description),
@@ -538,7 +564,11 @@ function projectLegalRoutes(
       contentHashAfter: contentHash,
       lastModified: isoDate(site.updatedAt, "LEGAL_SETTINGS_UPDATED_AT_INVALID"),
       siteName: text(site.settings.siteName),
-      title: definition.title,
+      title: officialBrowserTitle(
+        definition.title,
+        text(site.settings.siteName),
+        text(site.settings.seoTitle),
+      ),
       description: definition.description,
       shareImage,
       renderedBodyHtml: definition.renderedBodyHtml,
@@ -787,7 +817,16 @@ async function readProjection(
   for (const pageKey of PAGE_KEYS) {
     const document = documentByKey.get(pageKey);
     const chinese = document.localizations.find((entry: any) => entry.locale === "ZH_CN");
-    routes.push(await projectPage(database, document, chinese, "zh-CN", site.origin, text(site.settings.siteName), now));
+    routes.push(await projectPage(
+      database,
+      document,
+      chinese,
+      "zh-CN",
+      site.origin,
+      text(site.settings.siteName),
+      text(site.settings.seoTitle),
+      now,
+    ));
     const validation = await validatePage(pageKey, chinese.publishedRevision.puckData, chinese.publishedRevision.metadata);
     if (!validation.valid) fail(`PAGE_${pageKey}_zh-CN_CURRENT_VALIDATION_FAILED`);
     if (hasFormalPlaceholderIssue(validation)) {

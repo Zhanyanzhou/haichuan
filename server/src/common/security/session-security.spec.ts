@@ -88,6 +88,20 @@ test("旧 access Cookie 缺少新版 CSRF 时仍可在精确 Origin 下重新登
       "x-session-mode": "cookie",
     };
     assert.equal(guard.canActivate(contextFor(headers, "POST", "/api/auth/login")), true);
+    assert.equal(
+      guard.canActivate(contextFor({
+        origin: "http://localhost:5173",
+        cookie: "hc_customer_access=jwt",
+      }, "POST", "/api/statistics/traffic")),
+      true,
+    );
+    assert.throws(
+      () => guard.canActivate(contextFor({
+        origin: "https://attacker.example",
+        cookie: "hc_customer_access=jwt",
+      }, "POST", "/api/statistics/traffic")),
+      (error: unknown) => error instanceof ApiError && error.errorCode === "SESSION_ORIGIN_REJECTED",
+    );
     assert.throws(
       () => guard.canActivate(contextFor(headers, "POST", "/api/users")),
       (error: unknown) => error instanceof ApiError && error.errorCode === "CSRF_TOKEN_INVALID",

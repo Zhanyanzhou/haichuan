@@ -1,7 +1,7 @@
 /**
- * D.38：把“必填”拆成三种可预测承诺。
- * 建议填写不阻断；公开时必须有内容可以由页面填写或已发布的固定文案满足；
- * 必须由页面填写时，模板默认文案不能代替。
+ * D.38 / D.40：把“必填”拆成可预测承诺。
+ * Schema 1 保留已发布固定文案的历史兼容；Schema 3 公开面只认页面自己的值，
+ * 因此 required + editable:false 是规则冲突。
  * 价格、原价、折扣、优惠不是固定文案，必须绑定业务对象后才可能公开。
  */
 
@@ -30,12 +30,14 @@ function hasMeaningfulFixedText(value: unknown): boolean {
   return false;
 }
 
-/** 锁定字段能否用已发布模板默认内容满足“公开时必须有内容”。图片和经营数字不能。 */
+/** 历史 Schema 的锁定字段能否用已发布模板默认内容满足公开；Schema 3 一律不能。 */
 export function hasLegalFixedPublicContent(
   slotType: string,
   semanticRole: string | undefined,
   value: unknown,
+  schemaVersion = 1,
 ): boolean {
+  if (schemaVersion >= 3) return false;
   if (isCommercialSemanticRole(semanticRole)) return false;
   if (slotType === "image" || slotType === "product" || slotType === "collection" || slotType === "heroTemplate") {
     return false;
@@ -43,14 +45,20 @@ export function hasLegalFixedPublicContent(
   return hasMeaningfulFixedText(value);
 }
 
-export function publicationPromise(slot: { required: boolean; editable: boolean }): PublicationPromise {
+export function publicationPromise(
+  slot: { required: boolean; editable: boolean },
+  schemaVersion = 1,
+): PublicationPromise {
   if (!slot.required) return "suggested";
-  return slot.editable ? "page-authored" : "fixed-source";
+  return slot.editable || schemaVersion >= 3 ? "page-authored" : "fixed-source";
 }
 
-export function publicationPromiseLabel(slot: { required: boolean; editable: boolean }): string {
-  const promise = publicationPromise(slot);
+export function publicationPromiseLabel(
+  slot: { required: boolean; editable: boolean },
+  schemaVersion = 1,
+): string {
+  const promise = publicationPromise(slot, schemaVersion);
   if (promise === "suggested") return "建议填写";
-  if (promise === "page-authored") return "必须由页面填写";
+  if (promise === "page-authored") return slot.editable ? "必须由页面填写" : "规则冲突";
   return "固定展示";
 }

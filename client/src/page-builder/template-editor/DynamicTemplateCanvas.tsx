@@ -9,18 +9,17 @@ import {
   resolveDynamicTemplateMoveShortcutLanding,
   moveDynamicTemplateNodeToLanding,
   duplicateDynamicTemplateNode,
-  DynamicTemplateRenderer,
   editableTargetToVisualKind,
   formatTemplateRatio,
   getExplicitContractRolePresentation,
   getDynamicTemplateStructureLockOwnerId,
-  removeDynamicTemplateNode,
   resolveEditableTargets,
   resolveTemplateDesignFrame,
   setTemplateDesignHeightMode,
   setTemplateDesignWidth,
   setDynamicTemplateNodeHidden,
 } from "../template-definition";
+import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
 import type { TemplateDefinitionV2, DynamicTemplateDefinitionCommand } from "../template-definition";
 import { resolveTemplateDefinitionForBreakpoint, resolveTemplateNodeRules, resolveTemplateSlotRules, setTemplateNodeRule, setTemplateSlotRule } from "../template-definition/responsive";
 import { objectPositionToPercent, percentToExactObjectPosition } from "../template-definition/imagePosition";
@@ -69,6 +68,7 @@ import {
 } from "./editableTargetGeometry";
 import {
   createTemplateDesignCanvasContent,
+  withNeutralTemplateImages,
   resolveTemplatePreviewViewport,
 } from "./templatePreviewModel";
 import { createTemplateStressPreviewContentBySlotId } from "./templateStressPreviewEngine";
@@ -76,7 +76,8 @@ import {
   getTemplateTrialContentForSession,
   useTemplateTrialContentSession,
 } from "./templateTrialContentSession";
-import { describeDynamicTemplateRemoval, findDynamicTemplateParentId } from "./dynamicTemplateEditorUtils";
+import { findDynamicTemplateParentId } from "./dynamicTemplateEditorUtils";
+import { requestDeleteTemplateNode, requestRemoveContractRole, type TemplateDeletionUi } from "./requestTemplateNodeDeletion";
 import {
   addConfiguredTemplateRegion,
 } from "./dynamicTemplateDraftRepository";
@@ -111,6 +112,46 @@ function createEditingContent(
 
 export default function DynamicTemplateCanvas() {
   const { modal } = AntdApp.useApp();
+  const templateDeletionUi: TemplateDeletionUi = {
+    confirm: (options) => {
+      modal.confirm({
+        title: options.title,
+        content: options.content,
+        okText: options.okText,
+        cancelText: options.cancelText,
+        okButtonProps: options.danger === false ? undefined : { danger: true },
+        onOk: options.onOk,
+      });
+    },
+    notifyError: (content) => {
+      modal.warning({ title: "这一步没有完成", content, okText: "知道了" });
+    },
+  };
+  const deleteCurrentCanvasTarget = () => {
+    const state = useTemplateEditorSession.getState();
+    const current = state.draft;
+    if (!current || state.previewMode) return;
+    if (state.selectedContractRole) {
+      const roleTarget = editableTargets.find((target) => (
+        target.ownerNodeId === state.selectedContractRole?.nodeId
+        && target.contractRoleId === state.selectedContractRole.roleId
+      ));
+      requestRemoveContractRole(
+        state.selectedContractRole.nodeId,
+        state.selectedContractRole.roleId,
+        roleTarget?.label ?? "该内容",
+        templateDeletionUi,
+      );
+      return;
+    }
+    const nodeId = state.selectedObjectId;
+    if (!nodeId) return;
+    if (nodeId === current.definition.rootNodeId) {
+      window.dispatchEvent(new Event("template-editor:archive-current"));
+      return;
+    }
+    requestDeleteTemplateNode(nodeId, templateDeletionUi);
+  };
   const draft = useTemplateEditorSession((state) => state.draft);
   const previewDocument = useTemplateEditorSession((state) => state.previewDocument);
   const editingScopeId = useTemplateEditorSession((state) => state.editingScopeId);
@@ -320,9 +361,16 @@ export default function DynamicTemplateCanvas() {
       imageEditable: Number(dynamicDraft.definition.schemaVersion) >= 2 && dynamicDraft.definition.slots[dynamicDraft.definition.nodes[target.ownerNodeId]?.slotId ?? ""]?.type === "image",
       imageContentEditLabel: Number(dynamicDraft.definition.schemaVersion) >= 3 ? "设置默认图片" : "预览图片试排",
       imageHasContent: (() => {
-        const value = previewContent[dynamicDraft.definition.nodes[target.ownerNodeId]?.slotId ?? ""];
-        return typeof value === "string" ? Boolean(value.trim())
-          : Boolean(value && typeof value === "object" && "src" in value && typeof value.src === "string" && value.src.trim());
+        const slotId = dynamicDraft.definition.nodes[target.ownerNodeId]?.slotId ?? "";
+        const value = Number(dynamicDraft.definition.schemaVersion) >= 3
+          ? dynamicDraft.definition.defaultContent[slotId]
+          : previewContent[slotId];
+        const src = typeof value === "string"
+          ? value.trim()
+          : value && typeof value === "object" && "src" in value && typeof value.src === "string"
+            ? value.src.trim()
+            : "";
+        return Boolean(src) && !src.includes("catalog-structure-media.svg");
       })(),
       textEditable: Number(dynamicDraft.definition.schemaVersion) >= 2 && ["heading", "text", "richText", "button", "link"].includes(dynamicDraft.definition.slots[dynamicDraft.definition.nodes[target.ownerNodeId]?.slotId ?? ""]?.type ?? ""),
       textEditLabel: Number(dynamicDraft.definition.schemaVersion) >= 3 ? "编辑默认文字" : "预览文字试排",
@@ -623,7 +671,11 @@ export default function DynamicTemplateCanvas() {
     const node = currentDraft.definition.nodes[nodeId];
     if (!node) return;
     const slot = node?.slotId ? currentDraft.definition.slots[node.slotId] : undefined;
-    if ((action === "hide" || action === "delete") && slot?.required) return;
+    if (action === "hide" && slot?.required) return;
+    if (action === "delete") {
+      requestDeleteTemplateNode(nodeId, templateDeletionUi);
+      return;
+    }
     if (action === "duplicate") {
       let duplicatedNodeId: string | null = null;
       const result = executeCommand({
@@ -636,25 +688,6 @@ export default function DynamicTemplateCanvas() {
         },
       });
       if (result.ok && duplicatedNodeId) selectObject(duplicatedNodeId);
-      return;
-    }
-    if (action === "delete") {
-      modal.confirm({
-        title: `删除“${node.name}”及其子节点？`,
-        content: describeDynamicTemplateRemoval(currentDraft.definition, nodeId),
-        okText: "删除节点",
-        cancelText: "取消",
-        okButtonProps: { danger: true },
-        autoFocusButton: "cancel",
-        onOk: () => {
-          const result = executeCommand({
-            type: "transform-definition",
-            label: "删除节点",
-            transform: (current) => removeDynamicTemplateNode(current, nodeId),
-          });
-          if (result.ok) selectObject(currentDraft.definition.rootNodeId);
-        },
-      });
       return;
     }
     if (action === "hide") {
@@ -882,6 +915,10 @@ export default function DynamicTemplateCanvas() {
           if (leaveEditingScope()) { event.preventDefault(); event.stopPropagation(); }
         } else if (event.key === "Enter" && target.closest('[data-overlay-hit-for]')) {
           if (enterEditingScope()) { event.preventDefault(); event.stopPropagation(); }
+        } else if ((event.key === "Delete" || event.key === "Backspace") && !event.repeat && !event.altKey && !event.ctrlKey && !event.metaKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          deleteCurrentCanvasTarget();
         }
       }}>
       {/* 预览可以导航离开 srcDoc；返回编辑时重建隔离视图，文档/选择/缩放仍由共享会话保留。 */}
@@ -1024,6 +1061,22 @@ export default function DynamicTemplateCanvas() {
           setSelectionExclusion(result?.ok ? null : result?.exclusions[0] ?? null);
         }}
         onOverlaySelectBackground={() => selectTargets([])}
+        onOverlayDeleteTarget={previewMode ? undefined : (target) => {
+          if (target.source === "builtin-contract-role" && target.contractRoleId) {
+            requestRemoveContractRole(target.ownerNodeId, target.contractRoleId, target.label, templateDeletionUi);
+            return;
+          }
+          if (target.ownerNodeId === dynamicDraft.definition.rootNodeId) {
+            window.dispatchEvent(new Event("template-editor:archive-current"));
+            return;
+          }
+          requestDeleteTemplateNode(target.ownerNodeId, templateDeletionUi);
+        }}
+        overlayDeleteLabel={selectedContractRole
+          ? "移出"
+          : selectedNodeId === dynamicDraft.definition.rootNodeId
+            ? "移入回收站"
+            : "删除"}
       >
         <div
           className="template-editor__canvas-renderer template-editor__dynamic-canvas-renderer"
@@ -1038,7 +1091,9 @@ export default function DynamicTemplateCanvas() {
           }}
         >
           <DynamicTemplateRenderer
-            definition={dynamicDraft.definition}
+            definition={previewMode
+              ? dynamicDraft.definition
+              : withNeutralTemplateImages(dynamicDraft.definition, previewContent).definition}
             breakpoint={breakpoint}
             device={device}
             contentBySlotId={previewContent}

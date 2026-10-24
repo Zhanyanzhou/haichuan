@@ -273,11 +273,10 @@
 .brand-menu__eyebrow {
   margin: 26px 0 12px;
   color: var(--hc-text-muted);
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.5px;
 }
 
 .brand-menu__primary {

@@ -279,8 +279,8 @@ export default function PartnerApplication() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       <header className="mb-8 text-center">
-        <p className="text-[#5f6568] text-xs tracking-[0.18em] mb-3">
-          HAICHUAN PARTNER PROGRAM
+        <p className="text-[#5f6568] text-xs tracking-[0.08em] mb-3">
+          合作申请
         </p>
         <h1 className="text-4xl font-serif mb-3">申请成为合作商家</h1>
         <p className="text-gray-500 text-sm">

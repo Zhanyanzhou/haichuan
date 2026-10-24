@@ -124,7 +124,7 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
         {
           path: "/",
           title: "首页正在准备",
-          description: "首页内容正在整理。您可以先进入选款中心浏览当前公开款式，或了解珠宝定制服务。",
+          description: "首页内容正在整理。您可以先进入选款中心，或了解珠宝定制服务。",
         },
       ]) {
         await page.goto(locale.path);

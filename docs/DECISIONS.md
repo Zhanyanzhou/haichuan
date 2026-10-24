@@ -3,7 +3,7 @@
 > 本文件 = **已批准的架构决定及原因**（历史保留），并标注与当前代码冲突的过时条目和尚未确定的【待决策】事项。
 > 本文件不是当前项目方向来源。产品定位、品牌原则与公开页面职责只认 `docs/PROJECT_GUARDRAILS.md`；影响这些方向的新决定获批后，先同步项目与品牌基线，本文件只追加决定、原因与失效关系。
 > 现在必须遵守的硬规则见根目录 `PROJECT_RULES.md`；AI 执行流程见根目录 `WORKFLOW.md`。
-> 最近核对：2026-10-05（D.39 把店铺装修收束为页面职责合同，七步只服务模板创建）。
+> 最近核对：2026-10-12（D.41 采纳区块模板标准的七项推荐：保留 768 内容端点并加几何规则，合并编辑影像、新增无图导语，整页按钮检查，标题字重按角色收窄，第三层改为令牌，页面默认不改几何，叙事正文每行 40 字）。
 
 ## 阅读约定
 
@@ -16,7 +16,7 @@
 
 本文件是已批准产品决定及其生命周期的唯一可编辑记录；代码、测试、归档、候选报告和未经核实的历史聊天都只能提供实现或历史证据，不能自行改变一项决定的状态。当前项目所有者在有效会话中作出的明确决定可以成为批准依据，落档时须同步稳定状态、范围、影响和验证入口。稳定编号只标识决定，不自动证明当前实现或生产环境已经满足它。
 
-- 关键决策（功能 `TARGET`、`ENABLED`、`PAUSED`、`NOT_THIS_CYCLE`、`RETIRED`，以及基线门禁与可选高保证项）须在对应条目内明确：治理状态与范围、批准依据、执行入口、验证入口，以及例外或重新启用条件。批准依据缺失时只能标为 `UNCONFIRMED`，不得将其包装为强制产品规则。HTML 注释中的 `decision-status` 只承载稳定 ID / 状态；需要机器合同的条目（当前为 D.32–D.35、D.37–D.39）另用 `decision-contract` 承载最小范围、启用条件、替代关系和验证入口。两者都不取代正文或实现验收。
+- 关键决策（功能 `TARGET`、`ENABLED`、`PAUSED`、`NOT_THIS_CYCLE`、`RETIRED`，以及基线门禁与可选高保证项）须在对应条目内明确：治理状态与范围、批准依据、执行入口、验证入口，以及例外或重新启用条件。批准依据缺失时只能标为 `UNCONFIRMED`，不得将其包装为强制产品规则。HTML 注释中的 `decision-status` 只承载稳定 ID / 状态；需要机器合同的条目（当前为 D.32–D.35、D.37–D.42）另用 `decision-contract` 承载最小范围、启用条件、替代关系和验证入口。两者都不取代正文或实现验收。
 - `RETIRED` 表示禁止以改名、换路由、测试夹具或兼容路径恢复同一对外能力；保留历史数据、安全兼容或审计代码时，必须写明它不重新开放能力的边界。重新启用只能追加新的产品决定，引用被替代编号，并同步实现与回归验证；不得抹去旧记录。
 - 两条仍有效的产品决定无法由职责边界消解时，不选“功能更多”或“限制更严”的一方。保留受影响行为，记录最小待决事项、范围和需要的批准；纯技术细节仍按 `WORKFLOW.md` 自主解决。
 - 调整关键条目时，同一候选必须同步其实现与验证，或明确说明为什么没有实现变化；不得只删记录、弱化测试或停用检查来取得通过。仓库内 `CODEOWNERS` 会为这些文件请求复核，但远端是否要求复核和检查通过仍取决于实际分支保护，不能由本文件或本地 CI 冒充已强制。
@@ -168,9 +168,9 @@
 - **现状**：后端只做 `@Roles` 角色白名单（粗粒度）；前端 `permissionStore` 有细粒度权限键但后端不校验。
 - **待定**：是否引入后端细粒度权限守卫；前端隐藏与后端拒绝的边界如何统一。
 
-### D.5 🟡 Category 删除语义
-- **现状**：`Category.deletedAt` 是死字段；删除实际只写 `isActive:false`，读查询按 `isActive` 过滤。
-- **待定**：分类采用软删除（启用 `deletedAt`）还是停用（`isActive`）；是否清理 `deletedAt` 字段。
+### D.5 ✅ Category 删除语义（2026-10-23）
+- **决定**：后台删除空分类时物理删除记录，分类会从列表消失，并释放唯一 `slug`。仍有下级分类或商品（含已软删除商品）时拒绝删除，不连带删除商品。已经不在前台、且没有下级和商品的分类，打开分类管理时会一并删除，不再留在列表里。
+- **保留**：`deletedAt` 继续不作为删除实现。`isActive` 只过滤公开读取。后台不再提供停用或重新启用；历史上已经不在前台的分类，没有下级和商品时直接删除，有下级或商品时仍拒绝删除。
 
 ### D.6 🟡 JWT 双域 secret / 全局 Guard
 - **现状（2026-09-14 代码复核）**：admin 与 customer 仍共用 `JWT_SECRET` 并依靠域字段和守卫区分；两域已有独立 refresh session 与刷新/撤销入口，客户会话还通过 `authVersion` 失效。全局 Guard 与公开/客户域路由的精确组合仍须按当前代码复核。
@@ -448,6 +448,46 @@
 - **不在本条改变的取舍**：D.37 四区闭环、D.38 公开条件、D.31 多个主舞台、D.35 中文单语、D.36 无独立平板端均继续有效。不改机器合同 key，不自动迁移已有模板或页面。
 - **治理状态与范围**：`ENABLED`。取代的是“把七步当成日常装修主流程”和“用模板类型代替页面准入”，不是七步工具本身。
 - **批准依据 / 执行 / 验证 / 回退**：依据为 2026-10-05 用户要求按专业审查优化文档。执行入口为店铺装修产品合同、模板设计标准、从属细则、`PROJECT_RULES.md` §7 与 `PROJECT_GUARDRAILS.md` §4。验证为决策治理检查和文档引用一致。回退时恢复“七步即主流程”的旧导航表述，不改历史 revision。
+
+### D.40 ✅ 模板收束为区块角色，默认文案不构成公开内容（2026-10-08）
+<!-- decision-status:D.40=ENABLED -->
+<!-- decision-contract:D.40 {"scope":["template-creation","section-role-governance","publication-required-content","typography-authority"],"activation":["template-recipe-created","page-publication-check"],"supersedes":["D.38:locked-default-copy-satisfies-required-publication","store-decoration:legacy-template-type-taxonomy","template-creation:competitor-pixels-as-product-rules"],"validation":["test:decision-governance","docs/page-builder/template-creation-rules.md","docs/page-builder/store-decoration.md"]} -->
+
+- **用户决定**：采纳 2026-10-08 的文档与规则治理。创建侧的类型收束为**区块角色**，整页治理写成**三层模型**，排印权威收归 UI_GUIDE，竞品观察降级为研究记录，并收窄 D.38 中“锁定默认文案可以满足公开条件”的子范围。本条是文档治理决定，不表示代码、Schema、合同或数据已经符合。
+- **区块角色**：创建向导的“类型”一栏按九个 `sectionRole` 组织：`page-hero`、`collection-story`、`editorial-split`、`craft-detail`、`editorial-media`、`creation-grid`、`maison-fact`、`service-invitation`、`video-story`。角色只提供生成推荐，不构成页面准入、业务权限或固定模板身份；改角色只更新未被用户修改的推荐项。**哪一种角色可被哪些页面推荐，只认 `docs/page-builder/store-decoration.md` 第 2 节**，创建标准不另立第二份准入名单。
+- **三层模型**：第一层全站不变量（色值落点、标题字重 300～500、单页一套影像语言、桌面/手机两套内容端点）由 `UI_GUIDE.md` 与 `PROJECT_GUARDRAILS.md` 规定；第二层区块角色不变量由 `store-decoration.md` 规定；第三层受控变化（构图、画幅、密度、圆角、对齐）由 `template-creation-rules.md` 规定。模板设计只能改变第三层，不得越过前两层的职责与禁区。
+- **首次上线规模**：首次上线只需 **6–8 个已发布区块模板**覆盖最常用角色即可开始页面装修，不是 23 个旧固定模板，也不要求运营先走七步才能换图或发页。旧母版 key（`brand`、`newProduct`、`general`、`event`、`profile`、`news`、`productPromotion`、`social` 等）只作历史配方兼容读取。
+- **取代子范围（不删历史）**：本条取代 D.38 “必填承诺”中的这一子范围——公开时必须有内容**可以由已发布模板中的合法固定文案满足**。此后公开必填只由**页面自己的值**满足；锁定默认文案仍可在后台预览中用于判断层级，但不再充当公开内容。系统示例、模板默认图和价格文字原本就不可用。保留后续“**内容片段（Content Fragment）**”作为独立内容来源扩展点：将来若要允许可复用、可审计、可归属的公开文案，必须另立稳定编号定义其审核、版本与归属，不得借本条静默复活或把模板默认文案改名为内容片段。**D.38 其余条款不变**：区块显隐、三种恢复、价格与促销、检查分级、面板与预览的说明义务继续有效。
+- **排印权威**：模板排印只取 `UI_GUIDE.md` 第 2.3、2.4 节的语义字号角色与字重，不再另设一套最小值或换算表。标题字重落在 **300～500**，前台不出现 700；正文 400，后台标题 600。不把“画布短边 × 百分比”当作主标题的唯一算法；字号以 `clamp(下限, 推荐值, 上限)` 表达并保持可覆盖。无法满足基本可读性时提示调整画布或内容，不靠过度缩小或隐藏正文过边界。
+- **竞品观察降级**：竞品像素、文件名与换片位置迁入 `docs/research/luxury-template-observations-2026-10.md`，只作方法与对照基线。**它们不构成海川的断点、画幅、字号、字重、底色或验收阈值**，“竞品是这么做的”不能单独成为产品理由。海川的内容端点仍是小于 `768px` 为手机内容、`768px` 及以上为桌面内容（D.36），不新增第三条内容端点。
+- **治理状态与范围**：`ENABLED`。只收窄 D.38 的上述子范围，并把创建侧类型收束为区块角色、把竞品测量移出产品规则。D.37 四区闭环、D.38 其余条款、D.39 页面职责中心、D.35 中文单语、D.36 无独立平板端均继续有效。不改机器合同 key，不自动迁移已有模板、页面、草稿或发布状态。
+- **批准依据 / 执行 / 验证 / 回退**：依据为 2026-10-08 用户要求按九项产品方向治理文档。执行入口为 `docs/page-builder/store-decoration.md`、`docs/page-builder/template-creation-rules.md`、`docs/page-builder/template-design-framework.md`、`docs/UI_GUIDE.md` 与 `docs/acceptance/` 两张矩阵。验证为决策治理检查、机器合同检查与人工走查；目标与当前实现的差距记在 `docs/CURRENT_STATE.md`，不得据此宣布功能已验收。回退时恢复 D.38 的“锁定默认文案可满足公开条件”子范围和旧的创建类型分栏，不改历史 revision、模板定义、页面草稿或数据库记录。
+
+### D.41 ✅ 区块模板标准生效，七项推荐已采纳（2026-10-12）
+<!-- decision-status:D.41=ENABLED -->
+<!-- decision-contract:D.41 {"scope":["section-template-standard","template-third-layer","section-role-admission","page-primary-action"],"activation":["template-recipe-created","page-publication-check"],"supersedes":["D.40:third-layer-style-radius-spacing-presets","template-creation:free-layout-entry","template-creation:editorial-media-as-separate-role"],"validation":["test:decision-governance","docs/page-builder/section-template-standard.md","docs/page-builder/store-decoration.md"]} -->
+
+- **用户决定**：采纳 2026-10-12 审查后的七项推荐，并让[区块模板标准](page-builder/section-template-standard.md)生效。本条是文档治理决定，不表示机器合同、生成器、渲染器或已保存模板已经符合。
+- **内容端点**：仍是小于 `768px` 为手机、`768px` 及以上为桌面（D.16、D.36 继续有效，不新增平板内容）。竖屏平板、横屏手机和超宽屏用几何规则处理：文字栏窄于建议初值时分栏改为上下；全幅首屏高度不超过一屏；叠字放不下就移到图下；768～1023 且视口为竖向时，第一个可见全幅主视觉可以继续用已有的手机竖图。这仍是两套素材之一。
+- **角色**：`editorial-media` 并入 `page-hero` 的非首屏影像变体，不再单独创建。新增 `page-intro` 无图导语，尤其给选款中心；合同枚举落地前不能创建。`creation-spotlight` 与 `process-steps` 本轮不新增。`editorial-split` 的 key 和用途本轮不改。页面准入仍只认 `store-decoration.md` 第 2 节，槽位与禁区只认区块模板标准第 3 节。
+- **主要行动**：能放按钮的角色资格保留。整页出现两个及以上按钮时，发布检查提醒并要求确认。
+- **排印**：全站标题字重仍是 UI_GUIDE 的 300～500。展示标题、页面标题和区块标题不超过 400；系列名和副标题可以用到 500。区块叙事正文每行不超过 40 字；UI_GUIDE 第 2.6 节的 45 字仍是其他场景的上限。
+- **第三层**：取消“简约 / 高端 / 温暖 / 极简”、圆角 0/8/16/24/32、间距 12/16、内容边距百分比和自由布局创建入口。第三层只允许变体、画幅、留白密度、影像权重、对齐、配色方案和图片形状，并且只引用 UI_GUIDE 令牌。图片默认直角。这条收窄 D.40 里“第三层由 template-creation-rules 规定密度、圆角、对齐”的归属：操作步骤仍在创建标准，取值只认区块模板标准第 2.3 节。
+- **页面实例**：默认只填写内容、选择规格卡列出的不超过 4 项设置，以及调整图片焦点。不改槽位位置、尺寸、层级和字号。已有页面里的几何覆盖继续读取，不自动清除。
+- **不在本条改变的范围**：不改机器合同 key，不自动迁移已有模板、页面、草稿或发布状态。合同与代码差距留在审查报告附录 A，实施须另行授权。D.36 无独立平板端、D.37 四区闭环、D.38 其余条款、D.39 页面职责、D.40 的公开必填和九角色历史读取继续有效。
+- **治理状态与范围**：`ENABLED`。取代的是第三层风格名与像素预设、自由布局创建入口，以及把 `editorial-media` 当作独立创建角色。
+- **批准依据 / 执行 / 验证 / 回退**：依据为 2026-10-12 用户要求按推荐执行。执行入口为区块模板标准、店铺装修产品合同、模板设计标准和 UI_GUIDE 的交叉引用。验证为决策治理检查和文档引用一致；实现差距记在 CURRENT_STATE，不得据此宣布功能已验收。回退时恢复四个风格名、圆角预设、自由布局入口和 `editorial-media` 独立创建，不改历史 revision。
+
+### D.42 ✅ 区块模板加入受控轮播与横向滑动，目标态（2026-10-12）
+<!-- decision-status:D.42=TARGET -->
+<!-- decision-contract:D.42 {"scope":["section-template-standard","page-hero-carousel-variant","creation-grid-rail-variant","section-interaction-allowlist"],"activation":["template-definition-node-registered","renderer-and-editor-implemented","carousel-accessibility-e2e"],"supersedes":[],"validation":["test:decision-governance","docs/page-builder/section-template-standard.md"]} -->
+
+- **用户决定**：2026-10-12 用户认为模板缺少轮播一类能力，要求适当加入。本条把规则定下来，作为目标态；不表示合同、渲染器或编辑器已经具备。
+- **加入什么**：`page-hero` 增加“影像轮播”变体：2～3 帧，讲同一个系列或同一件作品，只用于首页和作品展陈的第一个可见主视觉；页面标题和主要行动按钮不随帧变化；默认不自动播放，模板设计者打开自动播放时必须有暂停按钮，焦点进入或悬停即停且不自己恢复，播完一轮即停。`creation-grid` 增加“横向滑动”变体（4～6 件），三格在手机上改为横向滑动；横滑永远不自动播放。细则只认[区块模板标准](page-builder/section-template-standard.md) §4.7。
+- **暂缓与不做**：图片灯箱、改款前后对比、图片热点、折叠问答和选项卡暂缓，要用须另立产品决定。跑马灯、Logo 自动滚动墙、视差、滚动劫持、3D 翻转、自动弹窗不做（UI_GUIDE §7）。旧固定模板里的轮播与对比组件已随 A.10 清理删除，本条不恢复它们的代码、合同或数据，新能力按 V2 注册节点另行实现。
+- **启用条件**：在 `template-definition.schema.json` 登记对应节点并经 `contracts:generate` / `contracts:check`；公开渲染、编辑画布与模板预览共用同一渲染器；键盘、读屏、暂停、减少动态效果、CLS 和首帧高优先级按标准 §4.7 取得端到端证据。满足前两种变体不能创建或发布。
+- **治理状态与范围**：`TARGET`。不改变 D.41 的七项结果，不放宽 UI_GUIDE §7 的帧数和暂停要求。
+- **批准依据 / 执行 / 验证 / 回退**：依据为本条用户请求。执行入口为区块模板标准 §4.7、§4.8 与 store-decoration §2 的变体限制。当前验证只有决策治理检查和文档一致性；实现另行授权。回退时删除两种变体，三格在手机上回到单列，不改历史 revision。
 
 ### D.10 🟡 金价与按重动态价政策
 - **已定边界**：标准零售固定价不得被金价采集或定时任务自动改写。

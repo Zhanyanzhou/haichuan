@@ -22,9 +22,10 @@ import {
   matchesDynamicTemplateDefinitionChecksum,
 } from "./dynamic-template-definition-integrity";
 import {
-  collectDynamicTemplateInstanceReferences,
   getDynamicTemplateDefinitionMediaReferences,
+  omitDynamicTemplateInstances,
 } from "./dynamic-template-instance";
+import { createPageLocaleContentHash } from "./page-document-localization";
 import {
   buildConsultationStarterDefinition,
   CONSULTATION_STARTER_SPECS,
@@ -74,15 +75,8 @@ interface DynamicTemplateCopySource {
 type TemplateContentField = (typeof TEMPLATE_CONTENT_FIELDS)[number];
 
 export interface DynamicTemplateDeleteBlocker {
-  code: "NOT_IN_TRASH" | "HAS_PUBLISHED_VERSION" | "HAS_VERSION_HISTORY" | "HAS_ACTIVATION_HISTORY" | "REFERENCED_BY_PAGE" | "REFERENCED_BY_TEMPLATE";
+  code: "NOT_IN_TRASH";
   message: string;
-}
-
-interface DynamicTemplateDeleteEvidence {
-  referencedTemplateIds: ReadonlySet<string>;
-  lineageReferencedTemplateIds: ReadonlySet<string>;
-  versionHistoryTemplateIds: ReadonlySet<number>;
-  activationHistoryTemplateIds: ReadonlySet<number>;
 }
 
 type DynamicTemplateWithDraft = Prisma.DynamicTemplateGetPayload<{
@@ -294,13 +288,11 @@ export class DynamicTemplatesService {
     conflictMessage: string,
   ): ExpectedDraftIdentity {
     const identity = this.requireDraftIdentity(input);
+    // 回收站只核对目录已经签发的 revision 与 checksum。历史草稿里，校验列和定义正文可能已经对不上；
+    // 再按正文重算会把当前身份误判成冲突，导致这些模板永远不能移入回收站。并发修改仍会同时改掉这两列。
     if (
       draft.revision !== identity.expectedRevision
       || draft.definitionChecksum !== identity.expectedChecksum
-      || !matchesDynamicTemplateDefinitionChecksum(
-        draft.definition as TemplateDefinitionV2,
-        identity.expectedChecksum,
-      )
     ) {
       throw new ConflictException(conflictMessage);
     }
@@ -646,131 +638,74 @@ export class DynamicTemplatesService {
     return template;
   }
 
-  private async collectReferencedTemplateIds(
-    client: Pick<Prisma.TransactionClient, "pageDocument" | "pageScheme"> = this.prisma,
-  ): Promise<Set<string>> {
-    const [documents, schemes] = await Promise.all([
-      client.pageDocument.findMany({
-        select: {
-          puckData: true,
-          revisions: { select: { puckData: true } },
-          localizations: { select: { puckData: true } },
-        },
-      }),
-      client.pageScheme.findMany({ select: { puckData: true } }),
-    ]);
-    const referenced = new Set<string>();
-    const collect = (puckData: unknown) => {
-      for (const reference of collectDynamicTemplateInstanceReferences(puckData)) {
-        referenced.add(reference.templateId);
-      }
-    };
-    for (const document of documents) {
-      collect(document.puckData);
-      for (const revision of document.revisions ?? []) collect(revision.puckData);
-      for (const localization of document.localizations ?? []) collect(localization.puckData);
-    }
-    for (const scheme of schemes) collect(scheme.puckData);
-    return referenced;
+  private catalogDeleteBlockers(template: { status: string }): DynamicTemplateDeleteBlocker[] {
+    if (template.status === "ARCHIVED") return [];
+    return [{ code: "NOT_IN_TRASH", message: "请先将模板移入回收站，再永久删除。" }];
   }
 
-  private async collectDeleteEvidence(
-    dynamicTemplates: readonly { id: number; templateId: string }[],
-    client: Pick<
-      Prisma.TransactionClient,
-      "dynamicTemplate" | "dynamicTemplateVersion" | "dynamicTemplateActivation" | "pageDocument" | "pageScheme"
-    > = this.prisma,
-  ): Promise<DynamicTemplateDeleteEvidence> {
-    const uniqueIds = [...new Set(dynamicTemplates.map((template) => template.id))];
-    const uniqueTemplateIds = [...new Set(dynamicTemplates.map((template) => template.templateId))];
-    if (uniqueIds.length === 0) {
-      return {
-        referencedTemplateIds: new Set(),
-        lineageReferencedTemplateIds: new Set(),
-        versionHistoryTemplateIds: new Set(),
-        activationHistoryTemplateIds: new Set(),
-      };
-    }
-    const [referencedTemplateIds, lineageReferences, versions, activations] = await Promise.all([
-      this.collectReferencedTemplateIds(client),
-      client.dynamicTemplate.findMany({
-        where: {
-          sourceReference: { in: uniqueTemplateIds },
-          id: { notIn: uniqueIds },
-        },
-        distinct: ["sourceReference"],
-        select: { sourceReference: true },
-      }),
-      client.dynamicTemplateVersion.findMany({
-        where: { dynamicTemplateId: { in: uniqueIds } },
-        distinct: ["dynamicTemplateId"],
-        select: { dynamicTemplateId: true },
-      }),
-      client.dynamicTemplateActivation.findMany({
-        where: { dynamicTemplateId: { in: uniqueIds } },
-        distinct: ["dynamicTemplateId"],
-        select: { dynamicTemplateId: true },
-      }),
-    ]);
-    return {
-      referencedTemplateIds,
-      lineageReferencedTemplateIds: new Set(lineageReferences.flatMap((item) => (
-        item.sourceReference ? [item.sourceReference] : []
-      ))),
-      versionHistoryTemplateIds: new Set(versions.map((item) => item.dynamicTemplateId)),
-      activationHistoryTemplateIds: new Set(activations.map((item) => item.dynamicTemplateId)),
-    };
-  }
-
-  private catalogDeleteBlockers(
-    template: {
-      id: number;
-      sourceType: string;
-      sourceReference: string | null;
-      status: string;
-      publishedVersion: number;
-      templateId: string;
-    },
-    evidence: DynamicTemplateDeleteEvidence,
-  ): DynamicTemplateDeleteBlocker[] {
-    const blockers: DynamicTemplateDeleteBlocker[] = [];
-    if (template.status !== "ARCHIVED") {
-      blockers.push({ code: "NOT_IN_TRASH", message: "请先将模板移入回收站，再永久删除。" });
-    }
-    if (template.publishedVersion > 0) {
-      blockers.push({ code: "HAS_PUBLISHED_VERSION", message: "模板已生成正式版本，必须保留历史页面；只能留在回收站或恢复。" });
-    }
-    if (evidence.versionHistoryTemplateIds.has(template.id)) {
-      blockers.push({ code: "HAS_VERSION_HISTORY", message: "模板存在正式版本历史，不能永久删除。" });
-    }
-    if (evidence.activationHistoryTemplateIds.has(template.id)) {
-      blockers.push({ code: "HAS_ACTIVATION_HISTORY", message: "模板存在版本激活历史，不能永久删除。" });
-    }
-    if (evidence.referencedTemplateIds.has(template.templateId)) {
-      blockers.push({ code: "REFERENCED_BY_PAGE", message: "已有页面、历史版本、本地化页面或装修方案引用该模板。" });
-    }
-    if (evidence.lineageReferencedTemplateIds.has(template.templateId)) {
-      blockers.push({ code: "REFERENCED_BY_TEMPLATE", message: "已有其他模板引用此模板作为来源，不能永久删除。" });
-    }
-    return blockers;
-  }
-
-  private async withDeleteCapability<T extends {
-    id: number;
-    sourceType: string;
-    sourceReference: string | null;
-    status: string;
-    publishedVersion: number;
-    templateId: string;
-  }>(
-    template: T,
-    client: Pick<
-      Prisma.TransactionClient,
-      "dynamicTemplate" | "dynamicTemplateVersion" | "dynamicTemplateActivation" | "pageDocument" | "pageScheme"
-    > = this.prisma,
+  private async releaseExternalTemplateReferences(
+    tx: Prisma.TransactionClient,
+    template: { id: number; templateId: string },
   ) {
-    const evidence = await this.collectDeleteEvidence([template], client);
-    const deleteBlockers = this.catalogDeleteBlockers(template, evidence);
+    const templateId = template.templateId;
+    const [documents, schemes] = await Promise.all([
+      tx.pageDocument.findMany({
+        select: {
+          id: true,
+          puckData: true,
+          revisions: { select: { id: true, puckData: true } },
+          localizations: { select: { id: true, puckData: true, metadata: true } },
+        },
+      }),
+      tx.pageScheme.findMany({ select: { id: true, puckData: true } }),
+    ]);
+    for (const document of documents) {
+      const current = omitDynamicTemplateInstances(document.puckData, templateId);
+      if (current.changed) {
+        await tx.pageDocument.update({
+          where: { id: document.id },
+          data: { puckData: current.puckData as Prisma.InputJsonValue },
+        });
+      }
+      for (const revision of document.revisions ?? []) {
+        const historical = omitDynamicTemplateInstances(revision.puckData, templateId);
+        if (!historical.changed) continue;
+        await tx.pageDocumentRevision.update({
+          where: { id: revision.id },
+          data: { puckData: historical.puckData as Prisma.InputJsonValue },
+        });
+      }
+      for (const localization of document.localizations ?? []) {
+        const localized = omitDynamicTemplateInstances(localization.puckData, templateId);
+        if (!localized.changed) continue;
+        await tx.pageDocumentLocalization.update({
+          where: { id: localization.id },
+          data: {
+            puckData: localized.puckData as Prisma.InputJsonValue,
+            contentHash: createPageLocaleContentHash(localized.puckData, localization.metadata),
+          },
+        });
+      }
+    }
+    for (const scheme of schemes) {
+      const saved = omitDynamicTemplateInstances(scheme.puckData, templateId);
+      if (!saved.changed) continue;
+      await tx.pageScheme.update({
+        where: { id: scheme.id },
+        data: { puckData: saved.puckData as Prisma.InputJsonValue },
+      });
+    }
+    await tx.dynamicTemplate.updateMany({
+      where: {
+        sourceReference: templateId,
+        id: { not: template.id },
+      },
+      data: { sourceReference: null },
+    });
+  }
+
+  private async withDeleteCapability<T extends { status: string }>(template: T) {
+    const deleteBlockers = this.catalogDeleteBlockers(template);
     return { ...template, canDelete: deleteBlockers.length === 0, deleteBlockers };
   }
 
@@ -780,9 +715,8 @@ export class DynamicTemplatesService {
       include: { draft: true },
       orderBy: [{ status: "asc" }, { updatedAt: "desc" }, { id: "desc" }],
     });
-    const evidence = await this.collectDeleteEvidence(templates, client);
     return templates.map((template) => {
-      const deleteBlockers = this.catalogDeleteBlockers(template, evidence);
+      const deleteBlockers = this.catalogDeleteBlockers(template);
       return { ...template, canDelete: deleteBlockers.length === 0, deleteBlockers };
     });
   }
@@ -976,7 +910,7 @@ export class DynamicTemplatesService {
   async getDraft(actor: DynamicTemplateStaffActorInput, templateId: string) {
     return this.withAuthorizedStaffRead(actor, true, async (transaction, staff) => {
       const template = await this.getOwnedTemplate(staff.id, templateId, transaction);
-      return this.withDeleteCapability(template, transaction);
+      return this.withDeleteCapability(template);
     });
   }
 
@@ -999,7 +933,7 @@ export class DynamicTemplatesService {
       }
       const previous = template.catalogCoverUrl ?? null;
       if (previous === catalogCoverUrl) {
-        return this.withDeleteCapability(template, tx);
+        return this.withDeleteCapability(template);
       }
       const updatedAt = new Date();
       const updated = await tx.dynamicTemplate.updateMany({
@@ -1036,7 +970,7 @@ export class DynamicTemplatesService {
         ...template,
         catalogCoverUrl,
         updatedAt,
-      }, tx);
+      });
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
@@ -1186,7 +1120,7 @@ export class DynamicTemplatesService {
             }),
           },
         });
-        return this.withDeleteCapability({ ...template, draft }, tx);
+        return this.withDeleteCapability({ ...template, draft });
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
@@ -1218,7 +1152,7 @@ export class DynamicTemplatesService {
           winner,
           published,
           authorizedWinner: winner && this.isExactRebuiltDraft(winner, published, identity)
-            ? await this.withDeleteCapability(winner, tx)
+            ? await this.withDeleteCapability(winner)
             : null,
         };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -1298,7 +1232,7 @@ export class DynamicTemplatesService {
       const created = await this.prisma.$transaction(async (tx) => {
         const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
         const created = await this.createInTransaction(staff.id, input, tx);
-        return this.withDeleteCapability(created, tx);
+        return this.withDeleteCapability(created);
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       });
@@ -1428,7 +1362,7 @@ export class DynamicTemplatesService {
           include: { draft: true },
         });
         if (!refreshed) throw new ConflictException("模板草稿保存后无法回读，请刷新后重试");
-        return this.withDeleteCapability(refreshed, tx);
+        return this.withDeleteCapability(refreshed);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       if (!updated) throw new ConflictException("模板草稿保存后无法回读，请刷新后重试");
       return updated;
@@ -1880,10 +1814,6 @@ export class DynamicTemplatesService {
         && winner.draft
         && winner.draft.revision === expectedIdentity.expectedRevision
         && winner.draft.definitionChecksum === expectedIdentity.expectedChecksum
-        && matchesDynamicTemplateDefinitionChecksum(
-          winner.draft.definition as unknown as TemplateDefinitionV2,
-          expectedIdentity.expectedChecksum,
-        )
       ) {
         return { templateId: winner.templateId, status: "ARCHIVED" as const };
       }
@@ -1940,8 +1870,7 @@ export class DynamicTemplatesService {
       const staff = await this.lockAuthorizedStaff(tx, actor, "write", true);
       const resolvedOwnerId = staff.id;
       const template = await this.getOwnedTemplate(resolvedOwnerId, templateId, tx);
-      const evidence = await this.collectDeleteEvidence([template], tx);
-      const blockers = this.catalogDeleteBlockers(template, evidence);
+      const blockers = this.catalogDeleteBlockers(template);
       if (blockers.length > 0) {
         throw new ConflictException({
           message: blockers[0].message,
@@ -1949,19 +1878,83 @@ export class DynamicTemplatesService {
           deleteBlockers: blockers,
         });
       }
+      const versions = await tx.dynamicTemplateVersion.findMany({
+        where: { dynamicTemplateId: template.id },
+        select: { id: true },
+      });
+      const versionIds = versions.map((version) => version.id);
+      const [pageManifests, templateManifests] = versionIds.length === 0
+        ? [0, 0]
+        : await Promise.all([
+          tx.pageDocumentRevisionMediaAsset.count({
+            where: { dynamicTemplateVersionId: { in: versionIds } },
+          }),
+          tx.dynamicTemplateVersionMediaAsset.count({
+            where: { dynamicTemplateVersionId: { in: versionIds } },
+          }),
+        ]);
+      const deletedAt = new Date();
+      if (pageManifests + templateManifests > 0) {
+        await tx.dynamicTemplate.updateMany({
+          where: {
+            sourceReference: template.templateId,
+            id: { not: template.id },
+          },
+          data: { sourceReference: null },
+        });
+        const detached = await tx.dynamicTemplate.updateMany({
+          where: {
+            id: template.id,
+            templateId: this.assertTemplateId(templateId),
+            ...this.editableTemplateScope(resolvedOwnerId),
+            status: "ARCHIVED",
+          },
+          data: { ownerId: null },
+        });
+        if (detached.count !== 1) {
+          throw new ConflictException("模板状态已变化，请刷新目录后重试");
+        }
+        await tx.operationLog.create({
+          data: {
+            userId: resolvedOwnerId,
+            action: "TEMPLATE_DRAFT_DELETED",
+            module: "page-builder-template",
+            targetId: template.id,
+            detail: JSON.stringify({
+              schemaVersion: 1,
+              event: "TEMPLATE_DRAFT_DELETED",
+              actor: resolvedOwnerId,
+              timestamp: deletedAt.toISOString(),
+              templateId: template.templateId,
+              fromStatus: "ARCHIVED",
+              toStatus: "REMOVED_FROM_CATALOG",
+              publishedVersion: template.publishedVersion,
+              result: "succeeded",
+            }),
+          },
+        });
+        return { templateId, deleted: true as const };
+      }
+      await this.releaseExternalTemplateReferences(tx, template);
+      if (versionIds.length > 0) {
+        await tx.dynamicTemplateVersion.deleteMany({
+          where: { id: { in: versionIds } },
+        });
+      }
+      await tx.dynamicTemplateActivation.deleteMany({
+        where: { dynamicTemplateId: template.id },
+      });
       const deleted = await tx.dynamicTemplate.deleteMany({
         where: {
           id: template.id,
           templateId: this.assertTemplateId(templateId),
           ...this.editableTemplateScope(resolvedOwnerId),
           status: "ARCHIVED",
-          publishedVersion: 0,
         },
       });
       if (deleted.count !== 1) {
         throw new ConflictException("模板状态已变化，请刷新目录后重试");
       }
-      const deletedAt = new Date();
       await tx.operationLog.create({
         data: {
           userId: resolvedOwnerId,

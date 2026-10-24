@@ -2,27 +2,38 @@ import { expect, test, type Page } from "@playwright/test";
 import { installNewTemplateServer, makePublished, makeResource, openTemplateDesignWithoutDraft, readSession, saveTemplate } from "./fixtures/template-authoring-main-route";
 
 // 自有 API Mock；直接装入合法生成结果，隔离并行变化的创建选项 UI。
-async function openGenerated(page: Page) {
+// `canvas` 只在需要另一种画幅的用例里传：画幅是生成时写进定义的，测试中途改不回来。
+async function openGenerated(page: Page, canvas?: { width: number; height: number }) {
   const server = await installNewTemplateServer(page);
   await page.setViewportSize({ width: 1600, height: 1050 });
   await openTemplateDesignWithoutDraft(page);
-  const ids = await page.evaluate(async () => {
+  const ids = await page.evaluate(async (canvas) => {
     const presetsPath = "/src/page-builder/template-creation/presets.ts";
     const generatorPath = "/src/page-builder/template-creation/generateTemplateFromRecipe.ts";
     const repoPath = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
     const sessionPath = "/src/page-builder/template-editor/templateEditorSession.ts";
-    const [{ createRecommendedRecipe }, { generateTemplateFromRecipe }, { createNewDynamicTemplateDraft }, { useTemplateEditorSession }] = await Promise.all([
+    const [{ createRecommendedRecipe, createContentSlot, createMediaSlots }, { generateTemplateFromRecipe }, { createNewDynamicTemplateDraft }, { useTemplateEditorSession }] = await Promise.all([
       import(/* @vite-ignore */ presetsPath), import(/* @vite-ignore */ generatorPath), import(/* @vite-ignore */ repoPath), import(/* @vite-ignore */ sessionPath),
     ]);
     const draft = createNewDynamicTemplateDraft("属性可靠性模板");
-    draft.definition = generateTemplateFromRecipe(createRecommendedRecipe(), { templateId: draft.definition.templateId, name: "属性可靠性模板" });
+    // 中性配方不产出任何槽位。本文件用到图片槽、标题槽、自由坐标节点与 ButtonSlot：
+    // 不变量 F 限定 ButtonSlot 只出现在 page-hero 与 service-invitation 上，所以取 page-hero；
+    // 而它的默认布局 fullImageOverlay 会把唯一主图吃成画布背景，这里改成普通图文布局，
+    // 保留可选中、可设默认图的 ImageSlot。默认画幅取角色推荐的固定画幅（16:9）；
+    // 固定画幅下节点才有自由坐标，所以竖幅用例也仍是固定画幅，只是换一组宽高。
+    const recipe = createRecommendedRecipe("page-hero");
+    recipe.layout = "topImageBottomContent";
+    recipe.media = createMediaSlots(["heroImage"]);
+    // 比例必须与宽高一致，否则生成前的方案校验会拒绝。
+    if (canvas) recipe.canvas = { ...canvas, aspectRatio: canvas.width / canvas.height };
+    draft.definition = generateTemplateFromRecipe(recipe, { templateId: draft.definition.templateId, name: "属性可靠性模板" });
     const nodes = Object.values(draft.definition.nodes) as Array<{ nodeId: string; slotId?: string; responsive: { desktop: { placement?: unknown } } }>;
     const image = nodes.find((node) => node.slotId && draft.definition.slots[node.slotId].type === "image")!;
     const title = nodes.find((node) => node.slotId && draft.definition.slots[node.slotId].semanticRole === "title")!;
     const positioned = nodes.find((node) => node.responsive.desktop.placement)!;
     useTemplateEditorSession.getState().open(draft, { isNew: true });
     return { root: draft.definition.rootNodeId, image: image.nodeId, imageSlot: image.slotId!, title: title.nodeId, titleSlot: title.slotId!, positioned: positioned.nodeId, templateId: draft.definition.templateId };
-  });
+  }, canvas);
   return { server, ids };
 }
 async function select(page: Page, nodeId: string, breakpoint: "desktop" | "mobile" = "desktop") {
@@ -336,7 +347,10 @@ test("模板默认图片可直接选择服务端共享素材", async ({ page }) 
 test("模板库按真实画幅自适应完整预览，并以只读放大入口查看长页", async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const { ids, server } = await openGenerated(page);
+  // 目录卡要在“真实画幅”下完整预览，这一条只有竖幅才会被真正施压：
+  // 宽画幅先撞卡片宽度，高度永远够不到 220px 的固定上限，
+  // “完整画幅必须落在固定卡片视窗内”与“卡片高度跟随比例”都会退化为平凡成立。
+  const { ids, server } = await openGenerated(page, { width: 1080, height: 1350 });
   const card = page.locator(`[data-template-name="${ids.templateId}"]`);
   const previewShell = card.locator('[data-template-catalog-preview-shell]');
   await expect(previewShell).toHaveAttribute("data-preview-status", "ready");
@@ -350,8 +364,9 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
   const textLead = overlay.locator('[data-overlay-catalog-text-lead="true"]');
   await expect(textLead).toHaveCount(1);
   expect(await textLead.evaluate((element) => getComputedStyle(element, "::before").content)).toBe('"文字"');
-  await expect(card.locator('.template-editor__catalog-slot-key')).toHaveAttribute("data-image-slot-count", /[1-9]/);
-  await expect(card.locator('.template-editor__catalog-slot-key')).toHaveAttribute("data-text-slot-count", /[1-9]/);
+  await expect(card.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-image-slot-count", /[1-9]/);
+  await expect(card.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-text-slot-count", /[1-9]/);
+  await expect(card.locator(".template-editor__catalog-slot-key")).toHaveCount(0);
   const frame = card.locator("iframe[data-template-catalog-viewport]");
   const thumbnail = frame.contentFrame();
   const title = thumbnail.locator(`[data-template-node-id="${ids.title}"] h1, [data-template-node-id="${ids.title}"] h2`);
@@ -378,10 +393,7 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
   expect(displayedFrame!.y + displayedFrame!.height, "完整画幅必须落在固定卡片视窗内").toBeLessThanOrEqual(cardViewport!.y + cardViewport!.height);
   expect(displayedFrame!.x, "真实画幅在相框内水平居中").toBeCloseTo(cardViewport!.x + (cardViewport!.width - displayedFrame!.width) / 2, 0);
   expect(textBottomOnScreen, "iframe 内有文字还不够，映射到宿主后不能被目录卡裁掉").toBeLessThanOrEqual(cardViewport!.y + cardViewport!.height);
-  const dimensions = card.locator(".template-editor__catalog-dimensions");
-  await expect(dimensions).toHaveText(/桌面端 · \d+ × \d+ px · 固定高度/);
-  const dimensionBox = await dimensions.boundingBox();
-  expect(dimensionBox!.y).toBeGreaterThanOrEqual(cardViewport!.y + cardViewport!.height);
+  await expect(card.locator(".template-editor__catalog-dimensions")).toHaveCount(0);
   await expect(card.locator(".template-editor__catalog-published-state")).toHaveText("本机草稿 · 尚未发布");
   await expect(card.locator(".template-editor__catalog-draft-state")).toHaveText("尚未保存");
   const moreAction = card.locator('button[aria-label^="更多模板操作："]');
@@ -415,7 +427,7 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
         && rect.y + rect.height <= clip.y + clip.height
         && centered;
     }).toBe(true);
-    await expect(dimensions).toBeVisible();
+    await expect(card.locator("[data-template-catalog-preview-shell]")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`catalog-${viewportSize.width}.png`), animations: "disabled" });
   }
   await moreAction.focus();
@@ -448,7 +460,8 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
         },
       });
     }, shape);
-    await expect(dimensions).toHaveText(`桌面端 · ${shape.width} × ${shape.height} px · 固定高度`);
+    await expect(card.locator(".template-editor__catalog-dimensions")).toHaveCount(0);
+    await expect(card.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-source-size", `${shape.width}x${shape.height}`);
     await expect(card.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-status", "ready");
     expect(await thumbnail.locator("html").evaluate(() => innerWidth), `${shape.name}先按真实设计视口排版`).toBe(shape.width);
     await expect.poll(async () => {
@@ -461,7 +474,7 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
     const clip = (await card.locator('.template-editor__catalog-artboard-stage').boundingBox())!;
     const scrollable = shape.name === "超长页面";
     await expect(card.locator("[data-template-catalog-preview-shell]"))
-      .toHaveAttribute("data-preview-thumbnail-mode", scrollable ? "scroll" : "overview");
+      .toHaveAttribute("data-preview-thumbnail-mode", scrollable ? "top" : "overview");
     const expectedScale = scrollable
       ? clip.width / shape.width
       : Math.min(clip.width / shape.width, 220 / shape.height);
@@ -519,7 +532,7 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
 test("目录图只标出当前可见图文槽位，隐藏与撤销同步更新且不保存", async ({ page }) => {
   const { ids, server } = await openGenerated(page);
   const card = page.locator(`[data-template-name="${ids.templateId}"]`);
-  const key = card.locator(".template-editor__catalog-slot-key");
+  const key = card.locator("[data-template-catalog-preview-shell]");
   await expect(card.locator('[data-template-catalog-preview-shell]')).toHaveAttribute("data-preview-status", "ready");
   const initialTextCount = Number(await key.getAttribute("data-text-slot-count"));
   const initialHiddenCount = Number(await key.getAttribute("data-hidden-slot-count"));
@@ -616,11 +629,14 @@ test("模板设计卡片实时镜像当前草稿，而不是同身份的线上�
     const presetsPath = "/src/page-builder/template-creation/presets.ts";
     const generatorPath = "/src/page-builder/template-creation/generateTemplateFromRecipe.ts";
     const repoPath = "/src/page-builder/template-editor/dynamicTemplateDraftRepository.ts";
-    const [{ createRecommendedRecipe }, { generateTemplateFromRecipe }, { createNewDynamicTemplateDraft }] = await Promise.all([
+    const [{ createRecommendedRecipe, createContentSlot }, { generateTemplateFromRecipe }, { createNewDynamicTemplateDraft }] = await Promise.all([
       import(/* @vite-ignore */ presetsPath), import(/* @vite-ignore */ generatorPath), import(/* @vite-ignore */ repoPath),
     ]);
     const draft = createNewDynamicTemplateDraft("首屏");
-    draft.definition = generateTemplateFromRecipe(createRecommendedRecipe(), {
+    // 角色未定的中性配方不产出任何槽位；本用例只需要一个标题槽，画幅在下面改写成固定画幅。
+    const recipe = createRecommendedRecipe();
+    recipe.content = [createContentSlot("title")];
+    draft.definition = generateTemplateFromRecipe(recipe, {
       templateId: draft.definition.templateId,
       name: "首屏",
     });
@@ -659,7 +675,7 @@ test("模板设计卡片实时镜像当前草稿，而不是同身份的线上�
     });
   }, { slotId: prepared.titleSlot });
   const thumbnail = activeCard.locator("iframe[data-template-catalog-viewport]").contentFrame();
-  await expect(activeCard.locator(".template-editor__catalog-dimensions")).toHaveText("桌面端 · 1600 × 1000 px · 固定高度");
+  await expect(activeCard.locator(".template-editor__catalog-dimensions")).toHaveCount(0);
   expect(await thumbnail.locator("html").evaluate(() => innerWidth)).toBe(1600);
   await expect(thumbnail.getByText("当前草稿标题", { exact: true })).toHaveCount(0);
   await expect(thumbnail.getByText("线上版本标题", { exact: true })).toHaveCount(0);
@@ -667,6 +683,7 @@ test("模板设计卡片实时镜像当前草稿，而不是同身份的线上�
   await expect(activeCard.locator('[data-template-catalog-preview-shell]')).toHaveAttribute("data-preview-status", "ready");
   await activeCard.getByRole("button", { name: /放大预览/ }).click();
   const detail = page.getByRole("dialog", { name: /放大预览/ });
+  await expect(detail.locator(".template-editor__catalog-dimensions")).toHaveText("桌面端 · 1600 × 1000 px · 固定高度");
   await expect(detail.locator(".template-editor__catalog-preview-dialog-summary"))
     .toContainText("草稿预览 · 已发布 · v1 · 有未保存修改");
   await expect(detail.locator("iframe[data-template-catalog-viewport]").contentFrame().getByText("当前草稿标题", { exact: true })).toBeVisible();

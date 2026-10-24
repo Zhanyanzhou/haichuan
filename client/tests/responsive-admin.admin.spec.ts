@@ -859,25 +859,8 @@ test.describe("TD-3C3 模板设计四区高频操作（Mock Chromium）", () => 
     expect(await cardMain.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length))
       .toBe(1);
     expect(await name.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThanOrEqual(80);
-    const slotKey = card.locator(".template-editor__catalog-slot-key");
-    const slotMetrics = slotKey.locator(":scope > span:not(.is-basis)");
-    await expect(slotMetrics).toHaveCount(4);
-    const slotLayout = await slotKey.evaluate((element) => {
-      const frame = element.getBoundingClientRect();
-      const items = Array.from(
-        element.querySelectorAll<HTMLElement>(":scope > span:not(.is-basis)"),
-        (child) => child.getBoundingClientRect(),
-      );
-      return {
-        oneRow: items.every((item) => Math.abs(item.top - items[0].top) < 1),
-        insideCard: items.every((item) => item.left >= frame.left - 1 && item.right <= frame.right + 1),
-        legible: Array.from(
-          element.querySelectorAll<HTMLElement>(":scope > span:not(.is-basis)"),
-          (child) => child.scrollWidth <= child.clientWidth + 1,
-        ),
-      };
-    });
-    expect(slotLayout).toEqual({ oneRow: true, insideCard: true, legible: [true, true, true, true] });
+    await expect(card.locator(".template-editor__catalog-slot-key")).toHaveCount(0);
+    await expect(card.locator(".template-editor__catalog-dimensions")).toHaveCount(0);
     const moreHitTarget = await more.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const owner = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);

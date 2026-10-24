@@ -347,7 +347,7 @@ export default function CustomerOrdersPanel({
     >
       <div className="my-account__panel-head">
         <div>
-          <p>ORDER ARCHIVE</p>
+          <p>订单记录</p>
           <h2>我的订单</h2>
         </div>
       </div>

@@ -33,8 +33,12 @@ function TrendTooltip({
   }
 
   const value = payload[0].value;
-  const display =
-    format === "currency" ? formatCurrency(value) : formatNumber(value);
+  const counted = (payload[0] as { payload?: { counted?: boolean } }).payload?.counted;
+  const display = counted === false
+    ? "此日前未计数"
+    : format === "currency"
+      ? formatCurrency(value)
+      : formatNumber(value);
   const [, month = "", day = ""] = (label || "").split("-");
   const dateLabel = label ? `${Number(month)}/${Number(day)}` : "";
 
@@ -52,6 +56,7 @@ interface DashboardTrendSectionProps {
   data: TrendPoint[];
   loading: boolean;
   error: boolean;
+  trafficClosed?: boolean;
   onMetricChange: (metric: TrendMetric) => void;
   onDaysChange: (days: number) => void;
   onRetry: () => void;
@@ -63,12 +68,15 @@ export function DashboardTrendSection({
   data,
   loading,
   error,
+  trafficClosed = false,
   onMetricChange,
   onDaysChange,
   onRetry,
 }: DashboardTrendSectionProps) {
   const format =
     TREND_METRICS.find((item) => item.key === metric)?.format ?? "number";
+  const trafficMetric = metric === "pageViews" || metric === "visitors";
+  const hasUncounted = trafficMetric && data.some((point) => point.counted === false);
 
   return (
     <section className="admin-dashboard__section" aria-labelledby="trend-title">
@@ -113,6 +121,16 @@ export function DashboardTrendSection({
           </div>
         </div>
       </div>
+      {trafficMetric && trafficClosed ? (
+        <p className="admin-dashboard__trend-note">
+          公网访问未采集，这条折线不能代表真实访问。
+        </p>
+      ) : null}
+      {trafficMetric && !trafficClosed && hasUncounted ? (
+        <p className="admin-dashboard__trend-note">
+          此日前未计数。店内访问计数启用之前的日期没有访客和浏览。
+        </p>
+      ) : null}
       <div className="admin-dashboard__trend-chart">
         {error ? (
           <div className="admin-dashboard__empty-chart">

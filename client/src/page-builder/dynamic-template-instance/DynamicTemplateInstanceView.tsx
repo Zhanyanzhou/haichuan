@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  DynamicTemplateRenderer,
-  type TemplateDefinitionV2,
-} from "../template-definition";
+import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
+import type { TemplateDefinitionV2 } from "../template-definition";
 import { useResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import { resolveDynamicTemplatePublicVisibility } from "./publicVisibility";

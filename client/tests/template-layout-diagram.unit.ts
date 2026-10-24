@@ -5,7 +5,7 @@ import { createMediaSlots, createRecommendedRecipe } from "../src/page-builder/t
 import { getRecipeLayoutDiagramRegions } from "../src/page-builder/template-creation/RecipeLayoutDiagram";
 
 test("布局示意图保持嵌套几何、文本空态、背景和确定性", () => {
-const recipe = createRecommendedRecipe("brand");
+const recipe = createRecommendedRecipe("editorial-split");
 recipe.canvas = { width: 1200, height: 900, aspectRatio: 4 / 3 };
 recipe.layout = "topImageBottomContent";
 recipe.media = createMediaSlots(["custom", "custom", "logo"]);

@@ -13,6 +13,7 @@ import {
 
 export interface DynamicTemplatePublicSurface {
   omitDefaultImages: true;
+  omitDefaultContent?: true;
   suppressedSemanticRoles: string[];
 }
 
@@ -77,6 +78,7 @@ export function buildDynamicTemplatePublicSurface(
     : [];
   return {
     omitDefaultImages: true,
+    ...(definition.schemaVersion >= 3 ? { omitDefaultContent: true as const } : {}),
     suppressedSemanticRoles: [...new Set(suppressedSemanticRoles)],
   };
 }

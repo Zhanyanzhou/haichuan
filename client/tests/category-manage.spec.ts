@@ -68,19 +68,21 @@ test.describe("分类管理现有交互合同", () => {
     await page.goto("/admin/categories");
     await expect(page.getByRole("heading", { name: "分类管理" })).toBeVisible();
     await expect(page.getByText("珠宝首饰", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("款式名称")).toBeVisible();
+    await expect(page.getByRole("button", { name: /上\s*移/ })).toBeVisible();
 
-    await page.getByRole("button", { name: "新建一级分类" }).click();
-    const createDialog = page.getByRole("dialog", { name: "新建分类" });
+    await page.getByRole("button", { name: "新建品类" }).click();
+    const createDialog = page.getByRole("dialog", { name: "新建品类" });
     await expect(createDialog.getByLabel("分类名称")).toBeVisible();
-    await expect(createDialog.getByLabel("分类编码（Slug）")).toBeVisible();
+    await expect(createDialog.getByLabel("网址标识")).toHaveCount(0);
     await createDialog.getByRole("button", { name: /取\s*消/ }).click();
 
-    await page.getByPlaceholder("搜索分类名称或 Slug").fill("戒指");
-    await expect(page.getByText("戒指", { exact: true })).toBeVisible();
-    await expect(page.getByText("耳饰", { exact: true })).toHaveCount(0);
+    await page.getByPlaceholder("搜索分类名称").fill("戒指");
+    await expect(page.locator(".cat-tree-title", { hasText: "戒指" })).toBeVisible();
+    await expect(page.locator(".cat-tree-title", { hasText: "耳饰" })).toHaveCount(0);
 
-    await page.getByText("戒指", { exact: true }).click();
-    await expect(page.getByText("二级分类 · rings", { exact: true })).toBeVisible();
+    await page.locator(".cat-tree-title", { hasText: "戒指" }).click();
+    await expect(page.getByText("珠宝首饰下的款式", { exact: true })).toBeVisible();
     await expect(page.locator(".cat-detail__products-count")).toHaveText("3");
 
     await page.getByRole("button", { name: "查看商品列表" }).click();
@@ -124,10 +126,9 @@ test.describe("分类管理现有交互合同", () => {
       document.cookie = "hc_csrf=category-csrf-token; path=/";
     });
 
-    await page.getByRole("button", { name: "新建一级分类" }).click();
-    const createDialog = page.getByRole("dialog", { name: "新建分类" });
+    await page.getByRole("button", { name: "新建品类" }).click();
+    const createDialog = page.getByRole("dialog", { name: "新建品类" });
     await createDialog.getByLabel("分类名称").fill("胸针");
-    await createDialog.getByLabel("分类编码（Slug）").fill("brooches");
     await createDialog.getByRole("button", { name: /保\s*存/ }).click();
 
     await expect.poll(() => categoryWrites.length).toBe(1);
@@ -137,9 +138,9 @@ test.describe("分类管理现有交互合同", () => {
     );
     expect(categoryWrites[0].body).toMatchObject({
       name: "胸针",
-      slug: "brooches",
-      sortOrder: 0,
-      isActive: true,
+      slug: "cat",
+      sortOrder: 2,
     });
+    expect(categoryWrites[0].body.isActive).toBeUndefined();
   });
 });

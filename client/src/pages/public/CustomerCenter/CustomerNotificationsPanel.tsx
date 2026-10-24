@@ -79,7 +79,7 @@ export default function CustomerNotificationsPanel({
     >
       <div className="my-account__panel-head">
         <div>
-          <p>SERVICE UPDATES</p>
+          <p>服务消息</p>
           <h2 id="my-notifications-title">服务通知</h2>
         </div>
         {resource.unreadCount > 0 ? (

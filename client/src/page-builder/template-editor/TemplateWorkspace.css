@@ -1823,6 +1823,28 @@
   gap: 1px;
 }
 
+.template-editor__inspector-delete {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 28px;
+  margin-left: 8px;
+  padding: 0 10px;
+  border: 1px solid #c9a3a0;
+  border-radius: 4px;
+  background: #fff;
+  color: #8a3a32;
+  font-size: 12px;
+  line-height: 26px;
+  cursor: pointer;
+}
+
+.template-editor__inspector-delete:hover,
+.template-editor__inspector-delete:focus-visible {
+  border-color: #8a3a32;
+  background: #8a3a32;
+  color: #fff;
+}
+
 .template-editor__inspector .homepage-editor__inspector-eyebrow {
   color: var(--adm-muted);
   font-size: 11px;
@@ -3275,6 +3297,12 @@ button.template-editor__toolbar-state {
   padding: 8px 12px 108px;
 }
 
+/* 设计模式的页脚现在有两个入口（12+38+8+38+12=108px），列表底部要让出整块页脚并留富余；
+   页面装修模式仍只有一个"新建模板"，不能跟着多出这段空白。 */
+.template-editor__library[data-unified-template-library="design"] .homepage-editor__template-scroll {
+  padding-bottom: 156px;
+}
+
 .template-editor__library .unified-template-library__category {
   display: flex;
   align-items: center;
@@ -3341,6 +3369,10 @@ button.template-editor__toolbar-state {
   background: var(--adm-neutral-bg);
   outline: 2px solid var(--adm-focus);
   outline-offset: 2px;
+}
+
+.template-editor__library-footer > button + button {
+  margin-top: 8px;
 }
 
 .template-editor__structure-scroll { padding-top: 4px; }

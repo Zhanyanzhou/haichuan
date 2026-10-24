@@ -17,12 +17,12 @@ import "yet-another-react-lightbox/styles.css";
 import {
   cartApi,
   customerApi,
-  productApi,
   publicProductStreamUrl,
   reviewApi,
   recommendationApi,
 } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
+import { lookupPublicWork } from "@/data/publicWorkLookup";
 import { unwrapResponse } from "@/utils/unwrap";
 import type { Product, ProductSKU } from "@/types";
 import {
@@ -46,7 +46,7 @@ import {
 } from "@/utils/publicProductPath";
 import { buildPublicUrl, normalizePublicSiteOrigin } from "@/utils/publicSiteUrl";
 import { useStructuredData } from "@/hooks/useStructuredData";
-import { getRequestErrorMessage, requestStatus } from "@/services/httpClient";
+import { getRequestErrorMessage } from "@/services/httpClient";
 import { getCatalogReturnUrl } from "@/pages/public/Catalog/catalogReturnContext";
 
 const productSchemaOrigin = normalizePublicSiteOrigin(
@@ -101,7 +101,7 @@ function SimilarProducts({ productId }: { productId: number }) {
   if (list.length === 0) return null;
   return (
     <div className="mt-12 pt-8 border-t border-brand-line">
-      <p className="text-xs tracking-[.15em] uppercase text-brand-gold mb-5 font-sans">
+      <p className="text-xs tracking-[.08em] text-brand-gold mb-5 font-sans">
         相关作品
       </p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
@@ -357,6 +357,7 @@ export default function ProductDetail() {
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<Product | null>(null);
+  const [isVirtualWork, setIsVirtualWork] = useState(false);
   const [loadFailure, setLoadFailure] = useState<"not-found" | "error" | null>(null);
   const [qty, setQty] = useState(1);
   const [selectedSku, setSelectedSku] = useState<ProductSKU | null>(null);
@@ -415,7 +416,7 @@ export default function ProductDetail() {
   useEffect(() => {
     let cancelled = false;
     setFavorited(false);
-    if (!product?.id || !isSignedIn) return undefined;
+    if (!product?.id || !isSignedIn || isVirtualWork) return undefined;
     customerApi
       .getFavorites()
       .then((res: unknown) => {
@@ -428,10 +429,10 @@ export default function ProductDetail() {
     return () => {
       cancelled = true;
     };
-  }, [product?.id, isSignedIn, customerId]);
+  }, [product?.id, isSignedIn, customerId, isVirtualWork]);
 
   const handleToggleFavorite = async () => {
-    if (favBusy || !product?.id) return;
+    if (favBusy || !product?.id || isVirtualWork) return;
     const operation = favoriteOperationRef.current + 1;
     favoriteOperationRef.current = operation;
     const requestContext = {
@@ -470,6 +471,7 @@ export default function ProductDetail() {
     const load = async () => {
       if (!id) {
         setProduct(null);
+        setIsVirtualWork(false);
         setLoadFailure("not-found");
         setLoading(false);
         return;
@@ -477,19 +479,23 @@ export default function ProductDetail() {
       setLoading(true);
       setLoadFailure(null);
       try {
-        const res = await productApi.getPublicById(id, { suppressGlobalError: true });
-        const data = unwrapResponse<Product>(res);
+        const resolution = await lookupPublicWork(id);
         if (cancelled) return;
-        setProduct(data || null);
-        setLoadFailure(data ? null : "not-found");
+        const data = resolution.kind === "published" || resolution.kind === "virtual"
+          ? resolution.product
+          : null;
+        setProduct(data);
+        setIsVirtualWork(resolution.kind === "virtual");
+        setLoadFailure(data ? null : resolution.kind === "error" ? "error" : "not-found");
         setMainImage(0);
         setSelectedSku(null);
         setQty(1);
         setPurchaseError("");
-      } catch (error) {
+      } catch {
         if (!cancelled) {
           setProduct(null);
-          setLoadFailure(requestStatus(error) === 404 ? "not-found" : "error");
+          setIsVirtualWork(false);
+          setLoadFailure("error");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -502,7 +508,7 @@ export default function ProductDetail() {
   }, [id, productAudience, customerId, revision]);
 
   useEffect(() => {
-    if (!product?.id) {
+    if (!product?.id || isVirtualWork) {
       setReviewsData(null);
       return;
     }
@@ -523,7 +529,7 @@ export default function ProductDetail() {
     return () => {
       cancelled = true;
     };
-  }, [product?.id]);
+  }, [isVirtualWork, product?.id]);
 
   // SEO：商品详情独立标题（不泄露内部编号；未加载时不设误导标题）
   useEffect(() => {
@@ -534,6 +540,7 @@ export default function ProductDetail() {
         // og:image / twitter:image：分享到微信/微博/小红书时展示作品主图
         image: getPrimaryImage(product) || undefined,
         canonicalPath: publicProductPath(product),
+        ...(isVirtualWork ? { noIndex: true } : {}),
       });
     } else if (!loading) {
       setPageMeta({
@@ -548,7 +555,7 @@ export default function ProductDetail() {
       });
     }
     return () => clearPageMeta();
-  }, [loadFailure, loading, product, setPageMeta, clearPageMeta]);
+  }, [isVirtualWork, loadFailure, loading, product, setPageMeta, clearPageMeta]);
 
   const productCanonicalUrl = product
     ? buildPublicUrl(productSchemaOrigin, publicProductPath(product))
@@ -566,7 +573,7 @@ export default function ProductDetail() {
     && schemaPrice > 0
     && typeof product.isAvailableForPurchase === "boolean",
   );
-  useStructuredData("product", product ? {
+  useStructuredData("product", product && !isVirtualWork ? {
     "@context": "https://schema.org",
     "@type": "Product",
     name: product.name,
@@ -628,8 +635,8 @@ export default function ProductDetail() {
   }, [id]);
 
   useEffect(() => {
-    if (product?.id) trackViewItem(product.id);
-  }, [product?.id]);
+    if (product?.id && !isVirtualWork) trackViewItem(product.id);
+  }, [isVirtualWork, product?.id]);
 
   if (loading)
     return (
@@ -793,7 +800,8 @@ export default function ProductDetail() {
   const deliveryMethods = publicStringList(product.deliveryMethods)
     .map((method) => DELIVERY_METHOD_LABELS[method])
     .filter((method): method is string => Boolean(method));
-  const serviceFacts = [
+  const hasDeclaredLogistics = deliveryMethods.length > 0 || product.dispatchTime === "CUSTOM";
+  const serviceFacts = (isDirectPurchase && hasDeclaredLogistics ? [
     product.fulfillmentType
       ? { label: "履约方式", value: FULFILLMENT_LABELS[product.fulfillmentType] }
       : null,
@@ -812,10 +820,11 @@ export default function ProductDetail() {
     product.requiresSignature === true
       ? { label: "签收", value: "需要签收确认" }
       : null,
-    validCertificates.length > 0
-      ? { label: "证书", value: `${validCertificates.length} 份已登记有效证书` }
-      : null,
-  ].filter((fact): fact is { label: string; value: string } => Boolean(fact?.value));
+  ] : []);
+  if (validCertificates.length > 0) {
+    serviceFacts.push({ label: "证书", value: `${validCertificates.length} 份已登记有效证书` });
+  }
+  const visibleServiceFacts = serviceFacts.filter((fact): fact is { label: string; value: string } => Boolean(fact?.value));
   const hasSkuSizeFact = isDirectPurchase
     && activeSkus.some((sku) => hasPublicFact(sku.size));
   const sizeFactValue = currentSize
@@ -984,10 +993,13 @@ export default function ProductDetail() {
             animate={{ y: 0 }}
             transition={{ duration: reduceMotion ? 0 : 0.5, delay: reduceMotion ? 0 : 0.12 }}
           >
-            <p className="text-[10px] tracking-[.2em] text-brand-muted mb-5 font-sans">JEWELRY WORK</p>
+            <p className="text-[10px] tracking-[.08em] text-brand-muted mb-5 font-sans">作品</p>
             <h1 className="text-[clamp(32px,4vw,52px)] leading-[1.15] tracking-[.02em] font-display font-normal mb-3">
               {product.name}
             </h1>
+            {isVirtualWork ? (
+              <p className="mb-4 text-sm leading-7 text-brand-muted">演示款式，不是在售作品。</p>
+            ) : null}
             <p className="text-xs text-brand-muted mb-6 font-sans">
               {product.code}
             </p>
@@ -1022,7 +1034,7 @@ export default function ProductDetail() {
             {/* SKU selection */}
             {isDirectPurchase && activeSkus.length > 0 && (
               <div className="mb-8">
-                <p className="text-xs tracking-[.15em] uppercase text-brand-gold mb-3 font-sans">
+                <p className="text-xs tracking-[.08em] text-brand-gold mb-3 font-sans">
                   规格
                 </p>
                 <div className="flex gap-2 flex-wrap">
@@ -1082,7 +1094,7 @@ export default function ProductDetail() {
                     </dd>
                   </div>
                 ) : null}
-                {serviceFacts.map((fact) => (
+                {visibleServiceFacts.map((fact) => (
                   <div key={`${fact.label}-${fact.value}`}>
                     <dt>{fact.label}</dt>
                     <dd>{fact.value}</dd>
@@ -1242,7 +1254,7 @@ export default function ProductDetail() {
               ]}
               />
             ) : null}
-            {isSignedIn ? (
+            {isSignedIn && !isVirtualWork ? (
               <button
                 type="button"
                 onClick={handleToggleFavorite}
@@ -1253,8 +1265,8 @@ export default function ProductDetail() {
                 <span>{favorited ? "已加入心愿单" : "加入心愿单"}</span>
               </button>
             ) : null}
-            {/* 推荐接口要求客户登录；游客不发必然 401 的请求。 */}
-            {isSignedIn ? <SimilarProducts productId={product.id} /> : null}
+            {/* 推荐接口要求客户登录；游客不发必然 401 的请求。演示款没有真实相似作品。 */}
+            {isSignedIn && !isVirtualWork ? <SimilarProducts productId={product.id} /> : null}
           </motion.div>
         </div>
         {detailBlocks.length > 0 && (

@@ -271,6 +271,7 @@ export interface ProductAdminQuery {
   pageSize?: number;
   keyword?: string;
   categoryId?: number;
+  includeDescendants?: "true" | "false";
   status?: string;
   visibility?: string;
   sortBy?: "updated_desc" | "code_asc" | "sortOrder";

@@ -97,6 +97,8 @@ function createStatefulService(mediaAuthorizationResolver?: {
   let pageDocuments: any[] = [];
   let pageSchemes: any[] = [];
   let activationCount = 0;
+  let pageManifestCount = 0;
+  let templateManifestCount = 0;
   let nextTemplateId = 1;
   let nextDraftId = 11;
   let nextVersionId = 21;
@@ -112,7 +114,7 @@ function createStatefulService(mediaAuthorizationResolver?: {
   let pendingConcurrentArchive: any = null;
   let nextDraftRebuildRace: "same" | "different" | "no-winner" | null = null;
   let pendingDraftRebuildWinner: any = null;
-  let lineageReferences: Array<{ id: number; sourceReference: string }> = [];
+  let lineageReferences: Array<{ id: number; sourceReference: string | null }> = [];
   let nextTransactionConflict: null | {
     error: Prisma.PrismaClientKnownRequestError;
     applyWinner: boolean;
@@ -241,6 +243,15 @@ function createStatefulService(mediaAuthorizationResolver?: {
       versions.push(created);
       return clone(created);
     },
+    deleteMany: async (args: any) => {
+      calls.push({ operation: "version.deleteMany", args: clone(args) });
+      const ids = Array.isArray(args.where?.id?.in) ? args.where.id.in : null;
+      const before = versions.length;
+      for (let index = versions.length - 1; index >= 0; index -= 1) {
+        if (ids?.includes(versions[index].id)) versions.splice(index, 1);
+      }
+      return { count: before - versions.length };
+    },
     findMany: async (args: any) => {
       calls.push({ operation: "version.findMany", args: clone(args) });
       const matchesWhere = (item: any, where: any) => (
@@ -345,10 +356,19 @@ function createStatefulService(mediaAuthorizationResolver?: {
     },
     updateMany: async (args: any) => {
       calls.push({ operation: "template.updateMany", args: clone(args) });
-      if (!template) return { count: 0 };
-      if (!matchesTemplateWhere(template, args.where)) return { count: 0 };
+      let count = 0;
+      if (args.where?.sourceReference !== undefined && args.data?.sourceReference === null) {
+        lineageReferences = lineageReferences.map((item) => {
+          if (item.sourceReference !== args.where.sourceReference) return item;
+          if (args.where.id?.not === item.id) return item;
+          count += 1;
+          return { ...item, sourceReference: null };
+        });
+      }
+      if (!template) return { count };
+      if (!matchesTemplateWhere(template, args.where)) return { count };
       template = { ...template, ...clone(args.data) };
-      return { count: 1 };
+      return { count: count + 1 };
     },
     update: async (args: any) => {
       calls.push({ operation: "template.update", args: clone(args) });
@@ -395,17 +415,88 @@ function createStatefulService(mediaAuthorizationResolver?: {
         ) return [];
         return [{ dynamicTemplateId: template.id }];
       },
+      deleteMany: async (args: any) => {
+        calls.push({ operation: "activation.deleteMany", args: clone(args) });
+        if (!template || args.where?.dynamicTemplateId !== template.id || activationCount <= 0) {
+          return { count: 0 };
+        }
+        const count = activationCount;
+        activationCount = 0;
+        return { count };
+      },
+    },
+    dynamicTemplateVersionMediaAsset: {
+      deleteMany: async (args: any) => {
+        calls.push({ operation: "versionMedia.deleteMany", args: clone(args) });
+        return { count: 0 };
+      },
+      count: async (args: any) => {
+        calls.push({ operation: "versionMedia.count", args: clone(args) });
+        return templateManifestCount;
+      },
+    },
+    pageDocumentRevisionMediaAsset: {
+      findMany: async (args: any) => {
+        calls.push({ operation: "pageRevisionMedia.findMany", args: clone(args) });
+        return [];
+      },
+      updateMany: async (args: any) => {
+        calls.push({ operation: "pageRevisionMedia.updateMany", args: clone(args) });
+        return { count: 0 };
+      },
+      count: async (args: any) => {
+        calls.push({ operation: "pageRevisionMedia.count", args: clone(args) });
+        return pageManifestCount;
+      },
     },
     pageDocument: {
       findMany: async (args: any) => {
         calls.push({ operation: "pageDocument.findMany", args: clone(args) });
         return clone(pageDocuments);
       },
+      update: async (args: any) => {
+        calls.push({ operation: "pageDocument.update", args: clone(args) });
+        const index = pageDocuments.findIndex((item) => item.id === args.where.id);
+        if (index < 0) throw new Error("missing page document");
+        pageDocuments[index] = { ...pageDocuments[index], ...args.data };
+        return clone(pageDocuments[index]);
+      },
+    },
+    pageDocumentRevision: {
+      update: async (args: any) => {
+        calls.push({ operation: "pageDocumentRevision.update", args: clone(args) });
+        for (const document of pageDocuments) {
+          const revision = document.revisions?.find((item: any) => item.id === args.where.id);
+          if (!revision) continue;
+          Object.assign(revision, args.data);
+          return clone(revision);
+        }
+        throw new Error("missing page revision");
+      },
+    },
+    pageDocumentLocalization: {
+      update: async (args: any) => {
+        calls.push({ operation: "pageDocumentLocalization.update", args: clone(args) });
+        for (const document of pageDocuments) {
+          const localization = document.localizations?.find((item: any) => item.id === args.where.id);
+          if (!localization) continue;
+          Object.assign(localization, args.data);
+          return clone(localization);
+        }
+        throw new Error("missing page localization");
+      },
     },
     pageScheme: {
       findMany: async (args: any) => {
         calls.push({ operation: "pageScheme.findMany", args: clone(args) });
         return clone(pageSchemes);
+      },
+      update: async (args: any) => {
+        calls.push({ operation: "pageScheme.update", args: clone(args) });
+        const index = pageSchemes.findIndex((item) => item.id === args.where.id);
+        if (index < 0) throw new Error("missing page scheme");
+        pageSchemes[index] = { ...pageSchemes[index], ...args.data };
+        return clone(pageSchemes[index]);
       },
     },
     operationLog: {
@@ -518,6 +609,10 @@ function createStatefulService(mediaAuthorizationResolver?: {
     setActivationCount: (count: number) => {
       activationCount = count;
     },
+    setImmutablePublicationMedia: (pageCount: number, versionCount = 0) => {
+      pageManifestCount = pageCount;
+      templateManifestCount = versionCount;
+    },
     setTemplateIdentity: (identity: { ownerId: number | null; sourceType: "SYSTEM" | "CUSTOM" }) => {
       if (!template) throw new Error("template not created");
       template = { ...template, ...identity };
@@ -589,7 +684,7 @@ function createStatefulService(mediaAuthorizationResolver?: {
     simulateDraftRebuildRace: (outcome: "same" | "different" | "no-winner") => {
       nextDraftRebuildRace = outcome;
     },
-    setLineageReferences: (references: Array<{ id: number; sourceReference: string }>) => {
+    setLineageReferences: (references: Array<{ id: number; sourceReference: string | null }>) => {
       lineageReferences = clone(references);
     },
     insertOrphanVersion: (
@@ -621,6 +716,8 @@ function createStatefulService(mediaAuthorizationResolver?: {
       draft: clone(draft),
       versions: clone(versions),
       operationLogs: clone(operationLogs),
+      pageDocuments: clone(pageDocuments),
+      lineageReferences: clone(lineageReferences),
     }),
   };
 }
@@ -1316,6 +1413,20 @@ test("物化模板归档必须拒绝陈旧 revision 或 checksum", async () => {
       expectedChecksum: "f".repeat(64),
     } as any),
     ConflictException,
+  );
+
+  const drifted = createStatefulService();
+  const driftedDefinition = definitionFixture();
+  const driftedCreated = await drifted.service.create(17, { definition: driftedDefinition });
+  const driftedDraft = driftedCreated.draft;
+  assert.ok(driftedDraft);
+  drifted.corruptDraftChecksum();
+  assert.deepEqual(
+    await drifted.service.archive(17, driftedDefinition.templateId, {
+      expectedRevision: driftedDraft.revision,
+      expectedChecksum: "0".repeat(64),
+    } as any),
+    { templateId: driftedDefinition.templateId, status: "ARCHIVED" },
   );
 });
 
@@ -2605,6 +2716,7 @@ test("仅真实数据 blocker 决定回收站母模板能否永久删除，不�
   const referenced = createStatefulService();
   const referencedCreated = await referenced.service.create(17, { definition: definitionFixture() });
   referenced.setPageDocuments([{
+    id: 41,
     puckData: {
       content: [{
         type: "动态模板实例",
@@ -2621,16 +2733,14 @@ test("仅真实数据 blocker 决定回收站母模板能否永久删除，不�
   }]);
   await referenced.service.archive(17, definition.templateId, draftIdentity(referencedCreated));
   const referencedCatalog = await referenced.service.listMine(17);
-  assert.equal(referencedCatalog[0].canDelete, false);
-  assert.equal(referencedCatalog[0].deleteBlockers[0].code, "REFERENCED_BY_PAGE");
-  await assert.rejects(
-    () => referenced.service.deleteDraft(17, definition.templateId),
-    ConflictException,
-  );
-  assert.equal(referenced.calls.some((call) => (
-    call.operation === "operationLog.create"
-    && call.args.data.action === "TEMPLATE_DRAFT_DELETED"
-  )), false);
+  assert.equal(referencedCatalog[0].canDelete, true);
+  assert.deepEqual(referencedCatalog[0].deleteBlockers, []);
+  assert.deepEqual(await referenced.service.deleteDraft(17, definition.templateId), {
+    templateId: definition.templateId,
+    deleted: true,
+  });
+  assert.equal(referenced.getState().template, null);
+  assert.deepEqual(referenced.getState().pageDocuments[0].puckData.content, []);
 
   const historicalVersion = createStatefulService();
   const historicalVersionDefinition = definitionFixture();
@@ -2649,17 +2759,15 @@ test("仅真实数据 blocker 决定回收站母模板能否永久删除，不�
     historicalVersionDefinition.templateId,
   );
   for (const resource of [historicalVersionCatalog[0], historicalVersionDraft]) {
-    assert.equal(resource.canDelete, false);
-    assert.deepEqual(
-      resource.deleteBlockers.map((blocker: { code: string }) => blocker.code),
-      ["HAS_VERSION_HISTORY"],
-    );
+    assert.equal(resource.canDelete, true);
+    assert.deepEqual(resource.deleteBlockers, []);
   }
-  await assert.rejects(
-    () => historicalVersion.service.deleteDraft(17, historicalVersionDefinition.templateId),
-    (error: unknown) => error instanceof ConflictException
-      && JSON.stringify(error.getResponse()).includes("HAS_VERSION_HISTORY"),
+  assert.deepEqual(
+    await historicalVersion.service.deleteDraft(17, historicalVersionDefinition.templateId),
+    { templateId: historicalVersionDefinition.templateId, deleted: true },
   );
+  assert.equal(historicalVersion.getState().template, null);
+  assert.deepEqual(historicalVersion.getState().versions, []);
 
   const historicalActivation = createStatefulService();
   const historicalActivationDefinition = definitionFixture();
@@ -2678,17 +2786,14 @@ test("仅真实数据 blocker 决定回收站母模板能否永久删除，不�
     historicalActivationDefinition.templateId,
   );
   for (const resource of [historicalActivationCatalog[0], historicalActivationDraft]) {
-    assert.equal(resource.canDelete, false);
-    assert.deepEqual(
-      resource.deleteBlockers.map((blocker: { code: string }) => blocker.code),
-      ["HAS_ACTIVATION_HISTORY"],
-    );
+    assert.equal(resource.canDelete, true);
+    assert.deepEqual(resource.deleteBlockers, []);
   }
-  await assert.rejects(
-    () => historicalActivation.service.deleteDraft(17, historicalActivationDefinition.templateId),
-    (error: unknown) => error instanceof ConflictException
-      && JSON.stringify(error.getResponse()).includes("HAS_ACTIVATION_HISTORY"),
+  assert.deepEqual(
+    await historicalActivation.service.deleteDraft(17, historicalActivationDefinition.templateId),
+    { templateId: historicalActivationDefinition.templateId, deleted: true },
   );
+  assert.equal(historicalActivation.getState().template, null);
 
   const published = createStatefulService();
   await published.service.create(17, { definition: definitionFixture() });
@@ -2698,17 +2803,21 @@ test("仅真实数据 blocker 决定回收站母模板能否永久删除，不�
     definition.templateId,
     draftIdentity({ draft: published.getState().draft }),
   );
-  await assert.rejects(
-    () => published.service.deleteDraft(17, definition.templateId),
-    ConflictException,
+  const publishedTemplateId = published.getState().template.templateId;
+  assert.ok(published.getState().versions.length > 0);
+  assert.deepEqual(
+    await published.service.deleteDraft(17, publishedTemplateId),
+    { templateId: publishedTemplateId, deleted: true },
   );
+  assert.equal(published.getState().template, null);
+  assert.deepEqual(published.getState().versions, []);
   assert.equal(published.calls.some((call) => (
     call.operation === "operationLog.create"
     && call.args.data.action === "TEMPLATE_DRAFT_DELETED"
-  )), false);
+  )), true);
 });
 
-test("其他母模板以 sourceReference 保留来源时阻断永久删除", async () => {
+test("其他母模板把来源指过来时，永久删除只解除来源标记", async () => {
   const harness = createStatefulService();
   const definition = definitionFixture();
   const created = await harness.service.create(17, { definition });
@@ -2724,13 +2833,53 @@ test("其他母模板以 sourceReference 保留来源时阻断永久删除", asy
   }]);
 
   const catalog = await harness.service.listMine(17);
-  assert.equal(catalog[0].canDelete, false);
-  assert.equal(catalog[0].deleteBlockers[0].code, "REFERENCED_BY_TEMPLATE");
-  await assert.rejects(
-    () => harness.service.deleteDraft(17, definition.templateId),
-    ConflictException,
-  );
-  assert.ok(harness.getState().template);
+  assert.equal(catalog[0].canDelete, true);
+  assert.deepEqual(catalog[0].deleteBlockers, []);
+  assert.deepEqual(await harness.service.deleteDraft(17, definition.templateId), {
+    templateId: definition.templateId,
+    deleted: true,
+  });
+  assert.equal(harness.getState().template, null);
+  assert.equal(harness.getState().lineageReferences[0].sourceReference, null);
+});
+
+test("发布素材清单不可改时，永久删除只从目录移除并保留页面版本", async () => {
+  const harness = createStatefulService();
+  const definition = definitionFixture();
+  const created = await harness.service.create(17, { definition });
+  assert.ok(created.draft);
+  harness.insertOrphanVersion(undefined, 1);
+  harness.setImmutablePublicationMedia(1, 0);
+  await harness.service.archive(17, definition.templateId, {
+    expectedRevision: created.draft.revision,
+    expectedChecksum: created.draft.definitionChecksum,
+  } as any);
+  harness.setPageDocuments([{
+    id: 7,
+    puckData: {
+      content: [{
+        type: "动态模板实例",
+        props: {
+          instanceId: "keep-published-instance",
+          templateId: definition.templateId,
+          templateVersion: 1,
+        },
+      }],
+      zones: {},
+    },
+    revisions: [],
+    localizations: [],
+  }]);
+  assert.deepEqual(await harness.service.deleteDraft(17, definition.templateId), {
+    templateId: definition.templateId,
+    deleted: true,
+  });
+  const state = harness.getState();
+  assert.equal(state.template.ownerId, null);
+  assert.equal(state.template.status, "ARCHIVED");
+  assert.equal(state.versions.length, 1);
+  assert.equal(state.pageDocuments[0].puckData.content.length, 1);
+  assert.deepEqual(await harness.service.listMine(17), []);
 });
 
 test("母模板持久化拒绝无身份、非法 JSON 定义和越界版本说明", async () => {

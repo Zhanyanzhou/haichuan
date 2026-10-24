@@ -6,7 +6,8 @@ import {
   type PublishedDynamicTemplateResource,
   type TemplateCatalogResource,
 } from "@/services/clients/dynamicTemplateClient";
-import { DynamicTemplateRenderer, type TemplateDefinitionV2 } from "../template-definition";
+import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
+import type { TemplateDefinitionV2 } from "../template-definition";
 import { registerResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
 import { analyzeDynamicTemplateUpgrade } from "./upgrade";

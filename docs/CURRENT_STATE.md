@@ -1,6 +1,6 @@
 # 海川珠宝 — 当前状态
 
-> 最后整理：2026-09-27（刷新一次性真实 MySQL、升级恢复与正式内容就绪边界；当日已在 Docker 引擎 29.8.0 与 Node 22.23.2 下独立复跑确认）。本文只保留当前可验证实现、当前差距、当前阻断和证据入口；精确数量、Git 指纹、migration ledger、测试结果和运行状态必须从当前代码、配置、Git 或目标环境重新取得。
+> 最后整理：2026-10-10（补记生产 Renderer 的 Storybook 与本地视觉基线、七母模板真实闭环缺口、RichTextSlot 仍按字符串渲染；未保存到真实数据库、未发布）。上一次整理为 2026-10-09（补记 D.40 默认内容公开边界与首发七母版本地验收）。上一次运行态刷新为 2026-09-27（刷新一次性真实 MySQL、升级恢复与正式内容就绪边界；当日已在 Docker 引擎 29.8.0 与 Node 22.23.2 下独立复跑确认）。本文只保留当前可验证实现、当前差距、当前阻断和证据入口；精确数量、Git 指纹、migration ledger、测试结果和运行状态必须从当前代码、配置、Git 或目标环境重新取得。
 
 ## 证据分层
 
@@ -34,7 +34,26 @@
 
 ### 页面装修与模板
 
-- 规则入口已按 D.39 分层：日常页面职责认[店铺装修产品合同](page-builder/store-decoration.md)，母模板创建与精调认[模板设计标准](page-builder/template-creation-rules.md)，编辑框架仍是从属细则。这是文档治理状态，不能据此认定在建功能或真实联调完成。
+- 规则入口已按 D.39、D.40、D.41 与 D.42 分层：日常页面职责认[店铺装修产品合同](page-builder/store-decoration.md)，区块规格、第三层取值、响应式几何、轮播与对错对照认[区块模板标准](page-builder/section-template-standard.md)，创建步骤与四区精调认[模板设计标准](page-builder/template-creation-rules.md)。这是文档治理状态，不能据此认定在建功能或真实联调完成。
+- **D.41 尚未进入合同和代码（2026-10-12）**：标准已生效，但 `sectionRole` 枚举仍是九个旧角色，生成器仍可能写出旧风格名、圆角和自由布局，页面实例仍可改几何，图片替代文本仍可能因漏填变成空 alt，没有手机独立图源和视频槽位，字号仍不是 clamp。这些差距列在[审查报告附录 A](research/template-standard-review-2026-10.md)。合同变更须另行授权。已保存模板不自动改写。手机区块间距在 UI_GUIDE 补档前，标准暂用 3xl，UI_GUIDE §3.2 还没有这一档。
+- **D.42 是目标态，不是现成功能（2026-10-12）**：标准 §4.7 写了影像轮播和横向滑动，但合同没有对应节点，渲染器和编辑器也没有。落地前不能创建这两种变体，也不能用多个首屏或脚本拼一个临时轮播。旧固定模板里的轮播组件已删除，本条不恢复它们。
+
+- **D.40 目标与当前实现的差距（2026-10-09 更新）**：下列各项分别标明已闭环与剩余范围；未注明闭环的目标规则仍不得用文档代替实现或验收。现有模板记录、草稿和发布状态均未迁移或改写。
+
+  - **创建类型 → 区块角色**：**已于 2026-10-08 闭环（实现批，未提交）**。九个 `sectionRole` 进了机器合同与两端生成物：[template-definition.schema.json](../contracts/page-builder/template-definition.schema.json) 有该字段枚举，`client` 与 `server` 的 `templateDefinition.generated.ts` 同步；创建向导第 1 步改按 [presets.ts](../client/src/page-builder/template-creation/presets.ts) 的 `SECTION_ROLES` 九个角色组织（`page-hero` 页面首屏、`collection-story` 系列叙事、`editorial-split` 左右图文、`craft-detail` 工艺细节、`editorial-media` 编辑媒体、`creation-grid` 作品网格、`maison-fact` 品牌事实、`service-invitation` 服务邀请、`video-story` 视频叙事），旧 `PURPOSES` 降级为历史配方的兼容读取与显示回退、`customPurpose` 从创建路径移除；生成器按角色取排印层级（[typographyScale.ts](../client/src/page-builder/template-creation/typographyScale.ts) 的 `typeLevelFor`）并判定 `ButtonSlot` 资格（`allowsButtonSlot`，只给 `page-hero` 与 `service-invitation`，即 M1 与 M7），产出的定义写 `metadata.sectionRole`。**该条未做的部分单列**：`template-creation-rules.md` §6.1 的 `clamp(下限, 推荐值, 上限)` 未实现，根因是机器合同的 `length` 目前只支持单值 `{value, unit}`，要先扩合同；这是同一批里唯一按原计划没做完的子项，不是漏改。
+  - **风格条目**：D.41 取消了“简约 / 高端 / 温暖 / 极简”以及更早的商务、活力、科技。`presets.ts` 的 `STYLES` 仍是旧列表，新创建还没有改成“留白密度 × 影像权重 × 配色方案”。这是未实现差距，不是现行目标。
+  - **默认文案与公开必填**：**已于 2026-10-09 闭环（本地实现，未提交）**。Schema 3 的公开 Renderer、公开可见性与服务端页面发布校验只采用 `contentBySlotId` 的页面值；缺 key 与显式空值都不会因 `emptyPolicy: use-default` 复活 `definition.defaultContent`，默认行动和媒体也不进入页面公开引用。模板设计、目录/后台预览与模板资产清单继续保留默认内容；Schema 1/2 保持历史兼容。Schema 3 的 `required + editable:false` 现在明确判为合同冲突。Node 22.12.0 下合同生成/检查和两端类型检查通过，目标服务端三文件 `58/58`、Chromium 四文件 `32/32` 通过；这不等于真实页面保存、发布、数据库或生产联调。
+  - **首次上线规模**：6–8 个已发布区块模板是**目标**，不是当前目录事实。页面可插入项仍以 DynamicTemplate Repository 中当前身份可用的已发布版本为准。
+  - **排印**：标题字重 300～500、语义字号角色与 `clamp()` 初值是模板侧目标。生成器一侧已于 2026-10-08 改到合规：字号与字重改从 `typographyScale.ts` 的固定层级按语义角色取值，不再有按画布短边百分比另算的主标题算法（`template-creation-rules.md` §6.1）；**`clamp(下限, 推荐值, 上限)` 仍未实现**，见上一条。但**已存在的模板记录**里的实际字重与字号未逐条核对，不能因为生成器改了就当存量也符合。
+  - **竞品测量**：已从产品规则迁入[研究记录](research/luxury-template-observations-2026-10.md)，这属于文档治理完成项，不涉及实现变化。
+
+- **首发七母版已有机器定义、创建入口与本地浏览器验收（2026-10-09 更新，未提交）**：[launchTemplateSet.ts](../client/src/page-builder/template-creation/launchTemplateSet.ts) 持有 [launch-template-set.md](page-builder/launch-template-set.md) 第 3 节七棵骨架的机器定义（七份 `TemplateDefinitionV2`，`sectionRole` 与七个角色一一对应）；模板库底部新增"从首发母版开始"，选中一块后派生出一份**只换 `templateId`、结构与内容逐字节相同**的新模板草稿进入模板设计器。M1 现在声明桌面 16:9、手机 4:5；Schema 3 Renderer 保留手机竖框，390px 实测媒体框为 390×488，文字与行动移到图下。第 7.1、7.2 节的目标 Chromium 夹具已通过，但母版不会自动进入模板目录，起步不产生服务端草稿，也不写入任何记录；这仍不证明真实保存、发布、运营内容或生产可用。入口自身验收见 `client/tests/template-launch-master-entry.admin.spec.ts`，骨架与双端比例由 `client/tests/launch-template-set.contract.spec.ts` 对照机器注册表。**紧凑宽度（≤1024 px）下的入口缺陷已修**：该宽度下模板目录是覆盖面板，一收起就整块卸载，连带卸载面板里的母版选择器；原先选完母版立即收起，未保存确认框弹出后选择器已经没了，用户点"继续编辑"也回不到原样。现改为带"打开成功后回调"的入口在目标**真正打开之后**才收起。副作用如实记下：目标没能打开时（控制器保存/发布/生命周期正忙，或打开本身失败）紧凑库不再自动收起——比原来多留一步，但不会再吞掉用户的选择。960 px 用例是同一 spec 文件的第 4 条测试。
+
+- **生产 Renderer 的 Storybook 与本地视觉基线（2026-10-10，未提交）**：Storybook 10 只作为开发与视觉回归工具，story 直接使用 [launchTemplateSet.ts](../client/src/page-builder/template-creation/launchTemplateSet.ts) 的母版定义和 [DynamicTemplateInstanceView.tsx](../client/src/page-builder/dynamic-template-instance/DynamicTemplateInstanceView.tsx) 这条生产 Renderer，不复制模板结构。当前故事覆盖 `page-hero` 与 `craft-detail`。本地 Playwright 基线视口是 1440×900 与 390×844，并检查长中文、缺图、极端比例、溢出和无障碍；配置在 `client/playwright.storybook.config.ts`，不进入 `client/playwright.config.ts` 的业务测试边界，静态产物与截图基线不入库。Node 22.23.2 下合同检查、客户端生产构建、Storybook 静态构建和该视觉测试已通过。Storybook 是 devDependency，客户前台生产包不引用它。这只证明本地 Renderer 能画出这两块，不证明模板已保存、已发布、已插入页面或生产可用。
+
+- **七母模板真实闭环仍未跑通（2026-10-10 代码追溯）**：创建草稿停在本地未保存会话（`instantiateLaunchTemplateMaster` → 编辑器 `open(newDraft)`）。保存草稿、发布不可变版本、页面插入和公开渲染走的是通用动态模板接口，不是七母模板专有的第二套链路。没有一条测试把 `tpl_launch_*` 或 `sectionRole` 派生草稿经真实服务端保存、发布、插入页面并在公开 Renderer 上读回。`client/tests/page-builder-real-closure.spec.ts` 在 `PAGE_BUILDER_REAL_QA=true` 且指向一次性环境时覆盖的是七步配方等其他模板；真实库用例另需 `DYNAMIC_TEMPLATE_REAL_DB_TEST=1`，用的也不是七母模板。2026-10-10 未连接数据库，未执行这两组开关。
+
+- **RichTextSlot 仍是普通字符串（2026-10-10）**：M4 `craft-detail` 的描述槽位在 [launch-template-set.md](page-builder/launch-template-set.md) 里要求有序列表。机器合同和两端校验仍只接受 `null` 或字符串；[DynamicTemplateRenderer.tsx](../client/src/page-builder/template-definition/DynamicTemplateRenderer.tsx) 把 `richText` 与普通文本一起渲染成 `<p>`，不解析列表。下一步建议是结构化列表槽位，而不是接入 Lexical。这需要公共 Schema 变更，2026-10-10 没有改 Schema，产品合同里的有序列表要求仍然有效。
 
 - 公开页面装修唯一使用 Puck `PageDocument`；母模板唯一使用版本化 `TemplateDefinitionV2`，两者共享 Renderer/Repository 基础设施但隔离会话和写入对象。
 - `contracts/page-builder/content-templates.contract.json` 当前只登记 1 个活动的 `hero` 首屏测试样例并定义页面规则；`allowedTemplateKeys: ["hero"]` 不定义未来母模板目录。页面可插入项以 DynamicTemplate Repository 的已发布版本为准，页面职责见[店铺装修产品合同](page-builder/store-decoration.md)。`contracts/page-builder/template-definition.schema.json` 定义模板结构能力；创建步骤见[模板设计标准](page-builder/template-creation-rules.md)。合同版本须从源合同和生成物共同核对。

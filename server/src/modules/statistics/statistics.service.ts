@@ -5,11 +5,21 @@ import {
   LEAD_REPLY_NOTIFICATION_EVENT_TYPE,
 } from "../../common/notifications/notification-delivery.constants";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import { getConfiguredAnalyticsDataset } from "../analytics/analytics-dataset";
+import {
+  businessDayStart,
+  businessMonthStart,
+  businessSamePeriod,
+  businessTrendStamps,
+} from "../../common/time/business-date";
 import type { StaffPrincipal } from "../../common/security/authenticated-principal";
+import {
+  isStaffStorefrontRequest,
+  isStorefrontTrafficEnabled,
+  normalizeStorefrontPath,
+} from "./storefront-traffic";
 
-// 首页经营趋势保留核心四指标；完整 UV、会话、回访与地域分析由 analytics 模块提供。
-export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews";
+// 首页趋势：订单、下单金额、咨询，以及无身份的访客和浏览。回访与地域仍由 analytics 模块提供。
+export type TrendMetric = "orders" | "revenue" | "inquiries" | "pageViews" | "visitors";
 type StatisticsStaffActor = Pick<StaffPrincipal, "id" | "sessionFamilyId">;
 
 @Injectable()
@@ -56,36 +66,78 @@ export class StatisticsService {
     );
   }
 
+  async recordStorefrontTraffic(
+    input: { pagePath?: string; visitor?: boolean },
+    cookieHeader: unknown,
+  ): Promise<{ accepted: boolean }> {
+    if (!isStorefrontTrafficEnabled()) return { accepted: false };
+    if (isStaffStorefrontRequest(cookieHeader)) return { accepted: false };
+    const pagePath = normalizeStorefrontPath(input.pagePath);
+    if (!pagePath) return { accepted: false };
+    const { todayStamp: stamp, hour } = businessSamePeriod();
+    const visitors = input.visitor === true ? 1 : 0;
+    await this.prisma.$executeRaw`
+      INSERT INTO storefront_traffic_hourly (traffic_date, hour, page_path, views, visitors)
+      VALUES (${stamp}, ${hour}, ${pagePath}, 1, ${visitors})
+      ON DUPLICATE KEY UPDATE
+        views = views + 1,
+        visitors = visitors + ${visitors}
+    `;
+    return { accepted: true };
+  }
+
+  private async readStorefrontTraffic(
+    transaction: Prisma.TransactionClient,
+    period: { todayStamp: string; yesterdayStamp: string; hour: number },
+  ) {
+    const enabled = isStorefrontTrafficEnabled();
+    const empty = {
+      enabled,
+      earliestDate: null as string | null,
+      visitorsToday: 0,
+      visitorsYesterday: 0,
+      viewsToday: 0,
+      viewsYesterday: 0,
+    };
+    if (!enabled) return empty;
+    const numeric = (value: bigint | number | null | undefined) => Number(value ?? 0);
+    const [todayRows, yesterdayRows, earliestRows] = await Promise.all([
+      transaction.$queryRaw<Array<{ visitors: bigint; views: bigint }>>`
+        SELECT COALESCE(SUM(visitors), 0) AS visitors, COALESCE(SUM(views), 0) AS views
+        FROM storefront_traffic_hourly
+        WHERE traffic_date = ${period.todayStamp} AND hour <= ${period.hour}
+      `,
+      transaction.$queryRaw<Array<{ visitors: bigint; views: bigint }>>`
+        SELECT COALESCE(SUM(visitors), 0) AS visitors, COALESCE(SUM(views), 0) AS views
+        FROM storefront_traffic_hourly
+        WHERE traffic_date = ${period.yesterdayStamp} AND hour <= ${period.hour}
+      `,
+      transaction.$queryRaw<Array<{ earliest: string | null }>>`
+        SELECT MIN(traffic_date) AS earliest FROM storefront_traffic_hourly
+      `,
+    ]);
+    return {
+      enabled,
+      earliestDate: earliestRows[0]?.earliest ?? null,
+      visitorsToday: numeric(todayRows[0]?.visitors),
+      visitorsYesterday: numeric(yesterdayRows[0]?.visitors),
+      viewsToday: numeric(todayRows[0]?.views),
+      viewsYesterday: numeric(yesterdayRows[0]?.views),
+    };
+  }
+
   private async getDashboardAuthorized(transaction: Prisma.TransactionClient) {
     const now = new Date();
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
-    // 昨日全天区间 [yesterdayStart, todayStart)，避免与今日重叠
-    const yesterdayStart = new Date(todayStart);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-    const yesterdayRange = { gte: yesterdayStart, lt: todayStart };
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    // 统一口径：成交额/订单数均排除已取消订单（非 CANCELLED），与交易中心保持一致
+    // 今日、昨日同时段和本月都按中国运营日。
+    const period = businessSamePeriod(now);
+    const todayStart = period.todayStart;
+    const yesterdayRange = { gte: period.yesterdayStart, lt: period.yesterdayEnd };
+    const todayRange = { gte: todayStart, lte: period.todayEnd };
+    const monthStart = businessMonthStart(now);
+    const storefrontTraffic = await this.readStorefrontTraffic(transaction, period);
+    // 下单金额与订单数都排除已取消订单，并只比较到昨日同一时刻。
     const notCancelled = { not: "CANCELLED" as OrderStatus };
-    const analyticsDataset = getConfiguredAnalyticsDataset();
-    const pageViewsTodayQuery = analyticsDataset
-      ? transaction.analyticsEvent.count({
-          where: {
-            dataset: analyticsDataset,
-            eventName: "page_view",
-            occurredAt: { gte: todayStart },
-          },
-        })
-      : Promise.resolve(0);
-    const pageViewsYesterdayQuery = analyticsDataset
-      ? transaction.analyticsEvent.count({
-          where: {
-            dataset: analyticsDataset,
-            eventName: "page_view",
-            occurredAt: yesterdayRange,
-          },
-        })
-      : Promise.resolve(0);
+    const fullYesterday = { gte: businessDayStart(now, -1), lt: todayStart };
 
     const [
       productCount,
@@ -99,8 +151,6 @@ export class StatisticsService {
       pendingReview,
       pendingShip,
       lowStock,
-      pageViewsToday,
-      pageViewsYesterday,
       inquiriesToday,
       selectionInquiriesToday,
       inquiriesYesterday,
@@ -113,14 +163,14 @@ export class StatisticsService {
       transaction.product.count(),
       transaction.product.count({ where: { status: "PUBLISHED" } }),
       transaction.order.count({
-        where: { createdAt: { gte: todayStart }, status: notCancelled },
+        where: { createdAt: todayRange, status: notCancelled },
       }),
       transaction.order.count({
         where: { createdAt: yesterdayRange, status: notCancelled },
       }),
       transaction.order.aggregate({
         where: {
-          createdAt: { gte: todayStart },
+          createdAt: todayRange,
           status: notCancelled,
         },
         _sum: { finalAmount: true },
@@ -143,15 +193,13 @@ export class StatisticsService {
       transaction.product.count({ where: { status: "DRAFT" } }),
       transaction.order.count({ where: { status: "PENDING_SHIP" } }),
       transaction.inventory.count({ where: { quantity: { lte: 0 } } }),
-      pageViewsTodayQuery,
-      pageViewsYesterdayQuery,
       transaction.inquiry.count({ where: { createdAt: { gte: todayStart } } }),
       transaction.selectionInquiry.count({
         where: { createdAt: { gte: todayStart } },
       }),
-      transaction.inquiry.count({ where: { createdAt: yesterdayRange } }),
+      transaction.inquiry.count({ where: { createdAt: fullYesterday } }),
       transaction.selectionInquiry.count({
-        where: { createdAt: yesterdayRange },
+        where: { createdAt: fullYesterday },
       }),
       transaction.lead.count({
         where: { sourceType: "INQUIRY", status: "PENDING" },
@@ -187,8 +235,14 @@ export class StatisticsService {
       pendingReview,
       pendingShip,
       lowStock,
-      pageViewsToday,
-      pageViewsYesterday,
+      visitorsToday: storefrontTraffic.visitorsToday,
+      visitorsYesterday: storefrontTraffic.visitorsYesterday,
+      pageViewsToday: storefrontTraffic.viewsToday,
+      pageViewsYesterday: storefrontTraffic.viewsYesterday,
+      storefrontTraffic: {
+        enabled: storefrontTraffic.enabled,
+        earliestDate: storefrontTraffic.earliestDate,
+      },
       inquiriesToday: inquiriesToday + selectionInquiriesToday,
       inquiriesYesterday: inquiriesYesterday + selectionInquiriesYesterday,
       pendingInquiries: pendingAppointmentLeads + pendingSelectionLeads,
@@ -220,38 +274,43 @@ export class StatisticsService {
     metric: TrendMetric,
   ) {
     const now = new Date();
-    const start = new Date(now);
-    start.setDate(start.getDate() - (days - 1));
-    start.setHours(0, 0, 0, 0);
+    const start = businessDayStart(now, 1 - days);
 
-    // 时区统一（P1-9）：MySQL 以 UTC 存储（docker 默认），CONVERT_TZ 转 +08:00 后按日分桶，
-    // 与 getDashboard 的 Node 本地时区（部署应设 Asia/Shanghai）日界对齐；加 UTC_TIMESTAMP() 上界排除未来/错位记录。
+    // MySQL 以 UTC 存储。查询下界与补齐日期都用中国运营日，
+    // 再由 CONVERT_TZ 转 +08:00 分桶；UTC_TIMESTAMP() 排除未来记录。
     const map = new Map<string, number>();
 
     if (metric === "revenue") {
-      // 成交额按日聚合：仅已结算订单(SHIPPED/COMPLETED)的 final_amount 之和
+      // 下单金额按日聚合：未取消订单的 final_amount 之和，与今日卡片同一口径。
       const rows = await transaction.$queryRaw<
         { date: string; total: string | bigint | null }[]
       >`
         SELECT DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COALESCE(SUM(final_amount), 0) AS total
         FROM orders
-        WHERE created_at >= ${start} AND created_at < UTC_TIMESTAMP() AND status IN ('SHIPPED', 'COMPLETED')
+        WHERE created_at >= ${start} AND created_at < UTC_TIMESTAMP() AND status <> 'CANCELLED'
         GROUP BY DATE_FORMAT(CONVERT_TZ(created_at,'+00:00','+08:00'), '%Y-%m-%d')
       `;
       for (const r of rows) map.set(r.date, Number(r.total));
-    } else if (metric === "pageViews") {
-      const dataset = getConfiguredAnalyticsDataset();
-      if (dataset) {
-        // 注意：analytics_events 的事件名列在 schema 中无 @map，DB 列名即 eventName
-        const rows = await transaction.$queryRaw<
-          { date: string; count: bigint }[]
-        >`
-          SELECT DATE_FORMAT(CONVERT_TZ(occurred_at,'+00:00','+08:00'), '%Y-%m-%d') AS date, COUNT(*) AS count
-          FROM analytics_events
-          WHERE occurred_at >= ${start} AND occurred_at < UTC_TIMESTAMP() AND dataset = ${dataset} AND eventName = 'page_view'
-          GROUP BY DATE_FORMAT(CONVERT_TZ(occurred_at,'+00:00','+08:00'), '%Y-%m-%d')
+    } else if (metric === "pageViews" || metric === "visitors") {
+      if (isStorefrontTrafficEnabled()) {
+        const stamps = businessTrendStamps(now, days);
+        const column = metric === "pageViews" ? Prisma.raw("views") : Prisma.raw("visitors");
+        const rows = await transaction.$queryRaw<{ date: string; count: bigint }[]>`
+          SELECT traffic_date AS date, SUM(${column}) AS count
+          FROM storefront_traffic_hourly
+          WHERE traffic_date >= ${stamps[0]} AND traffic_date <= ${stamps[stamps.length - 1]}
+          GROUP BY traffic_date
         `;
-        for (const r of rows) map.set(r.date, Number(r.count));
+        for (const r of rows) map.set(String(r.date), Number(r.count));
+        const earliestRows = await transaction.$queryRaw<Array<{ earliest: string | null }>>`
+          SELECT MIN(traffic_date) AS earliest FROM storefront_traffic_hourly
+        `;
+        const earliest = earliestRows[0]?.earliest ?? null;
+        return stamps.map((date) => ({
+          date,
+          count: earliest != null && date >= earliest ? (map.get(date) ?? 0) : 0,
+          counted: earliest != null && date >= earliest,
+        }));
       }
     } else if (metric === "inquiries") {
       // 咨询跨两表：分别按日聚合后合并同日
@@ -285,14 +344,11 @@ export class StatisticsService {
       for (const r of rows) map.set(r.date, Number(r.count));
     }
 
-    // 按日补齐缺失日期（Node 本地时区 = 部署 Asia/Shanghai），与上面 +08:00 分桶对齐
-    const results: { date: string; count: number }[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      results.push({ date: key, count: map.get(key) ?? 0 });
-    }
-    return results;
+    const trafficClosed = metric === "pageViews" || metric === "visitors";
+    return businessTrendStamps(now, days).map((date) => ({
+      date,
+      count: map.get(date) ?? 0,
+      ...(trafficClosed ? { counted: false } : {}),
+    }));
   }
 }

@@ -544,7 +544,7 @@ export default function CustomerQuotationsPanel({
     >
       <div className="my-account__panel-head">
         <div>
-          <p>PRIVATE QUOTATIONS</p>
+          <p>报价记录</p>
           <h2>我的报价</h2>
         </div>
         {loadError ? (

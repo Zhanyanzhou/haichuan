@@ -22,7 +22,7 @@ export function placeholderImage(id: number, _text: string = ''): string {
     <!-- 中心点 -->
     <circle cx="200" cy="220" r="3" fill="${accent}" fill-opacity="0.4"/>
     <!-- 底部文字 -->
-    <text x="200" y="410" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#5F6568" fill-opacity="0.72" letter-spacing="2">HAICHUAN</text>
+    <text x="200" y="410" text-anchor="middle" font-family="Noto Serif SC, serif" font-size="13" fill="#5F6568" fill-opacity="0.72">海川</text>
   </svg>`;
   return `data:image/svg+xml;base64,${btoa(encodeURIComponent(svg).replace(/%([0-9A-F]{2})/g, (_: string, p1: string) => String.fromCharCode(parseInt(p1, 16))))}`;
 }

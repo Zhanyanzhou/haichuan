@@ -1806,6 +1806,20 @@ enum AnalyticsDataset {
   TEST
 }
 
+// 正式页面的小时累计。只保存次数和路径，不保存访客身份。
+model StorefrontTrafficHourly {
+  id          Int    @id @default(autoincrement())
+  trafficDate String @map("traffic_date") @db.Char(10)
+  hour        Int    @db.UnsignedTinyInt
+  pagePath    String @map("page_path") @db.VarChar(300)
+  views       Int    @default(0)
+  visitors    Int    @default(0)
+
+  @@unique([trafficDate, hour, pagePath], map: "storefront_traffic_bucket_key")
+  @@index([trafficDate, hour], map: "storefront_traffic_hourly_date_hour_idx")
+  @@map("storefront_traffic_hourly")
+}
+
 // ========== 合作商家申请（受控商家体系）==========
 // 保留完整历史记录：每次提交/补充都新增一行，不覆盖旧记录，便于审计。
 model PartnerApplication {

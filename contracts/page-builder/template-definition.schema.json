@@ -225,7 +225,6 @@
       "required": [
         "recipeVersion",
         "presetVersion",
-        "purpose",
         "canvas",
         "layout",
         "media",
@@ -240,7 +239,21 @@
         "presetVersion": {
           "enum": [
             1,
-            2
+            2,
+            3
+          ]
+        },
+        "sectionRole": {
+          "enum": [
+            "page-hero",
+            "collection-story",
+            "editorial-split",
+            "craft-detail",
+            "editorial-media",
+            "creation-grid",
+            "maison-fact",
+            "service-invitation",
+            "video-story"
           ]
         },
         "purpose": {
@@ -567,6 +580,19 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 100
+        },
+        "sectionRole": {
+          "enum": [
+            "page-hero",
+            "collection-story",
+            "editorial-split",
+            "craft-detail",
+            "editorial-media",
+            "creation-grid",
+            "maison-fact",
+            "service-invitation",
+            "video-story"
+          ]
         },
         "layoutType": {
           "type": "string",

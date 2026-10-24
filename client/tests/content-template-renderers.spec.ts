@@ -19,7 +19,7 @@ window.__vite_plugin_react_preamble_installed__ = true;
 </script><script type="module" src="/tests/fixtures/content-template-renderers.tsx"></script></body></html>`;
 
 const homeDynamicDefinition = generateTemplateFromRecipe(
-  createRecommendedRecipe("productPromotion"),
+  createRecommendedRecipe("editorial-split"),
   { templateId: "tpl_home_dynamic_primary", name: "首页动态主舞台" },
 );
 homeDynamicDefinition.metadata.visualRole = "primary-stage";

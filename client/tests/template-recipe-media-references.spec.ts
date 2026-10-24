@@ -22,7 +22,7 @@ import {
 } from "../src/page-builder/template-definition/managedMediaPreview";
 
 function definitionFixture() {
-  const definition = generateTemplateFromRecipe(createRecommendedRecipe("productPromotion"), {
+  const definition = generateTemplateFromRecipe(createRecommendedRecipe("editorial-split"), {
     name: "媒体引用测试",
     templateId: "tpl_media_reference_test",
   });
@@ -50,7 +50,8 @@ function definitionFixture() {
 test("客户端背景引用覆盖仅手机可见、隐藏父级与空槽位", () => {
   const { definition, containerId, headingId, headingSlotId, rootId, visibleSlotId } = definitionFixture();
   definition.schemaVersion = 3;
-  definition.templateRecipe = createRecommendedRecipe();
+  // 中性配方只表达“配方漂移即失效”：它不含任何推荐，不参与本测试的媒体引用断言。
+  definition.templateRecipe = createRecommendedRecipe("editorial-split");
   definition.nodes[rootId].responsive.desktop.backgroundImage = "/uploads/root.jpg";
   definition.nodes[containerId].responsive.desktop.display = "none";
   definition.nodes[containerId].responsive.tablet = {

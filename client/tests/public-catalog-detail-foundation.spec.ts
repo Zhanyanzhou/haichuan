@@ -372,7 +372,7 @@ async function expectWriteContract(
 async function fillContactForm(page: import("@playwright/test").Page) {
   await page.locator("#cf-name").fill("测试访客");
   await page.locator("#cf-phone").fill("13800000000");
-  await page.locator("#cf-time").selectOption("下午 (14:00-18:00)");
+  await page.locator("#cf-time").selectOption("下午 (13:00-18:00)");
   await page.locator("#cf-message").fill("希望围绕这件作品确认佩戴场景与可提供的咨询安排。");
   await page.locator("#cf-privacy-consent").check();
 }
@@ -386,7 +386,7 @@ for (const viewport of [
     const writes = await mockCatalogDetail(page, { products: fiveModes });
     await page.goto("/catalog");
 
-    await expect(page.getByText("SELECTION CENTER", { exact: true })).toBeVisible();
+    await expect(page.getByText("公开款式", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeVisible();
     await expect(page.getByText("按关键词、货号与当前公开属性查找作品，并将意向款式加入选款清单。"))
       .toBeVisible();
@@ -1105,7 +1105,48 @@ test("Catalog 分类资源失败时保留已成功加载的作品并提供局部
 test("Catalog empty 与 no-results 分离", async ({ page }) => {
   const writes = await mockCatalogDetail(page, { products: [] });
   await page.goto("/catalog");
-  await expect(page.getByText("珠宝作品正在筹备中")).toBeVisible();
+  await expect(page.getByText("以下为演示款式，只用于查看选款版式。它们不是在售作品，也不代表库存、价格或证书。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "素面平安扣" })).toBeVisible();
+  await page.goto("/catalog?query=%E5%B9%B3%E5%AE%89%E6%89%A3");
+  await expect(page.getByRole("heading", { name: "素面平安扣" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "光圈戒指" })).toHaveCount(0);
+  await page.goto("/catalog?query=%E4%B8%8D%E5%AD%98%E5%9C%A8%E7%9A%84%E6%AC%BE%E5%BC%8F");
+  await expect(page.getByText("没有符合当前筛选的作品")).toBeVisible();
+  await expect(page.getByText("以下为演示款式，只用于查看选款版式。它们不是在售作品，也不代表库存、价格或证书。")).toHaveCount(0);
+  await page.goto("/catalog?category=1");
+  await expect(page.getByRole("heading", { name: "光圈戒指" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "素面平安扣" })).toHaveCount(0);
+  await page.goto("/catalog?sort=newest");
+  await expect(page.locator(".catalog-product-card__title").first()).toHaveText("珍珠耳钉");
+  await page.goto("/products/HC-DEMO-001");
+  await expect(page.getByRole("heading", { name: "素面平安扣" })).toBeVisible();
+  await expect(page.getByText("演示款式，不是在售作品。")).toBeVisible();
+  await page.goto("/contact?type=product&productRef=HC-DEMO-001");
+  await expect(page.getByText("素面平安扣", { exact: true })).toBeVisible();
+  await expect(page.getByText("演示款式，不是在售作品。顾问会按这个款式名称了解需求。")).toBeVisible();
+  await expect(page.getByText("作品当前不可咨询。您可以移除作品后继续提交普通咨询。")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "提交需求" })).toBeEnabled();
+  await expectWriteContract(writes);
+});
+
+test("正式目录有作品时演示货号不再覆盖正式作品", async ({ page }) => {
+  const published = {
+    ...publicProduct(42, "DISPLAY_ONLY"),
+    code: "HC-DEMO-001",
+    name: "正式素面扣",
+  };
+  const writes = await mockCatalogDetail(page, { products: [published, ...fiveModes] });
+  await page.goto("/products/HC-DEMO-001");
+  await expect(page.getByRole("heading", { name: "正式素面扣" })).toBeVisible();
+  await expect(page.getByText("演示款式，不是在售作品。")).toHaveCount(0);
+  await page.goto("/products/HC-DEMO-002");
+  await expect(page.getByRole("heading", { name: "作品暂不可浏览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "光圈戒指" })).toHaveCount(0);
+  await page.goto("/contact?type=product&productRef=HC-DEMO-001");
+  await expect(page.getByText("正式素面扣", { exact: true })).toBeVisible();
+  await expect(page.getByText("演示款式，不是在售作品。顾问会按这个款式名称了解需求。")).toHaveCount(0);
+  await page.goto("/contact?type=product&productRef=HC-DEMO-002");
+  await expect(page.getByText("作品当前不可咨询。您可以移除作品后继续提交普通咨询。")).toBeVisible();
   await expectWriteContract(writes);
 });
 

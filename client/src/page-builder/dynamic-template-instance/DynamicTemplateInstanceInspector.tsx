@@ -642,6 +642,9 @@ export default function DynamicTemplateInstanceInspector({
   const renderSlotFieldset = (field: DynamicTemplatePageFieldDescriptor) => {
     const slot = definition.slots[field.slotId];
     const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
+    const resetLabel = definition.schemaVersion >= 3
+      ? field.controlKind === "image" ? "清除页面图片" : "清除页面文案"
+      : field.controlKind === "image" ? "恢复模板图片" : "恢复模板文案";
     return (
     <fieldset
       key={slot.slotId}
@@ -654,7 +657,7 @@ export default function DynamicTemplateInstanceInspector({
     >
       <legend style={{ width: "100%", padding: 0, marginBottom: 10 }}>
         <strong>{field.label}</strong>
-        <Tag color={field.required ? "red" : "default"} style={{ marginLeft: 8 }}>{publicationPromiseLabel(field)}</Tag>
+        <Tag color={field.required ? "red" : "default"} style={{ marginLeft: 8 }}>{publicationPromiseLabel(field, definition.schemaVersion)}</Tag>
       </legend>
       {renderSlotControl(field)}
       {hasPageValue && (!field.required || !field.editable) ? (
@@ -662,11 +665,11 @@ export default function DynamicTemplateInstanceInspector({
           <Button
             type="link"
             size="small"
-            aria-label={field.controlKind === "image" ? "恢复模板图片" : "恢复模板文案"}
+            aria-label={resetLabel}
             onClick={() => resetContent(slot.slotId)}
             style={{ height: 24, paddingInline: 0 }}
           >
-            {field.controlKind === "image" ? "恢复模板图片" : "恢复模板文案"}
+            {resetLabel}
           </Button>
           {field.controlKind === "image" ? (
             <p className="homepage-editor__properties-hint">

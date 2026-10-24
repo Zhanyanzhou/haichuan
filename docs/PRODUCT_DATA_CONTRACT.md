@@ -127,8 +127,8 @@
 | `slug`      | URL slug                       | VarChar(150) `@unique` | **必填**    | 正则 `^[a-z0-9]+(?:-[a-z0-9]+)*$`；**不自动生成，前端必须传**；全局唯一          |
 | `level`     | 层级                           | Int                    | 系统        | 由 `parentId` 推导：无父=1，父1→2，父2→3                                         |
 | `parentId`  | 父分类                         | Int?                   | 可选        | 自关联 `CategoryTree`                                                            |
-| `isActive`  | 启用                           | Boolean                | 默认 `true` | **分类实际停用靠此字段**                                                         |
-| `deletedAt` | （死字段）                     | DateTime?              | —           | ⚠️ `delete()` 只置 `isActive=false`，从不写 `deletedAt`（见 `DECISIONS.md` D.5） |
+| `isActive`  | 公开可见 | Boolean | 默认 `true` | 公开分类树按此过滤。后台不保留停用；历史不在前台且没有下级和商品的分类直接删除 |
+| `deletedAt` | （死字段）                     | DateTime?              | —           | 空分类的 `delete()` 物理删除记录并释放 `slug`；有下级或商品时拒绝（见 D.5）      |
 | SEO 字段    | `seoTitle/seoDesc/seoKeywords` | 可选                   | —           | —                                                                                |
 
 **标准关系与约束**：
@@ -290,7 +290,7 @@
 ## 10. 标准关系图
 
 ```
-Category (1–4级树, isActive 停用)
+Category (1–2级树；空分类可删除，有下级或商品时拒绝)
   │  N—1
 Product ─────────────────────────────────
   │ 1                                     │ 1—1 (指针, 可空)

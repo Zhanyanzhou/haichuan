@@ -682,7 +682,7 @@ export default function AccountExperience({
   return (
     <div className="account-page account-page--guest">
       <section className="account-hero">
-        <p className="account-kicker">HAICHUAN PRIVATE CLIENT</p>
+        <p className="account-kicker">会员账户</p>
         <h1>
           您的珠宝档案，
           <br />
@@ -710,7 +710,7 @@ export default function AccountExperience({
       </section>
       <section className="account-guest-grid">
         <div className="account-benefits">
-          <p className="account-kicker">MEMBER EXPERIENCE</p>
+          <p className="account-kicker">会员服务</p>
           <h2>
             为每一次心动，
             <br />

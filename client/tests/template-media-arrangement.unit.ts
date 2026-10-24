@@ -57,7 +57,7 @@ assert.deepEqual(arrangeMedia(area, [], 16, "row"), []);
 assert.deepEqual(arrangeMedia({ ...area, width: 10 }, createMediaSlots(["custom", "custom"]), 16, "row"), []);
 
 // 源合同接受新规则并拒绝未知值；历史配方保持默认自动排布。
-const recipe = createRecommendedRecipe("productPromotion");
+const recipe = createRecommendedRecipe("editorial-split");
 recipe.canvas = { width: 1200, height: 900, aspectRatio: 4 / 3 };
 recipe.media = createMediaSlots(["custom", "custom"]);
 recipe.content = [];

@@ -34,7 +34,9 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     await openTemplateDesignWithoutDraft(page);
     await clickNewTemplateEntry(page);
     const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
-    await dialog.getByRole("button", { name: "通用模板", exact: true }).click();
+    // 创建向导第 1 步已按区块角色组织（D.40：创建类型即区块角色），"通用模板"不再是选项。
+    // 本组用例只借第 1 步进入尺寸步骤，选哪个角色不参与断言。
+    await dialog.getByRole("button", { name: "页面首屏", exact: true }).click();
     await dialog.getByRole("button", { name: "下一步", exact: true }).click();
     return dialog;
   }
@@ -178,7 +180,7 @@ test.describe("新建方案向导尺寸选择（确定性 UI / route Mock）", (
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
     expect(stableAuthoringFacts(await readSession(page))).toEqual(stableAuthoringFacts(created));
     await clickNewTemplateEntry(page);
-    await dialog.getByRole("button", { name: "通用模板", exact: true }).click();
+    await dialog.getByRole("button", { name: "页面首屏", exact: true }).click();
     await dialog.getByRole("button", { name: "下一步", exact: true }).click();
     await dialog.getByRole("button", { name: /方形卡片 1:1/ }).click();
     await confirmSize(dialog);

@@ -10,7 +10,10 @@ async function openInsertionScenario(page: Page, scenario: "space" | "full" | "b
     const { createRecommendedRecipe } = await load("/src/page-builder/template-creation/presets.ts");
     const { generateTemplateFromRecipe } = await load("/src/page-builder/template-creation/generateTemplateFromRecipe.ts");
     const { useTemplateEditorSession } = await load("/src/page-builder/template-editor/templateEditorSession.ts");
-    const definition = generateTemplateFromRecipe(createRecommendedRecipe("productPromotion"), { templateId: "qa-placement", name: "新增放置验证" });
+    // 角色只决定槽位构成：图片槽（背景）在画布下方，内容槽归到「文字列」组，舞台恰好两个孩子。
+    // 下面会把每个孩子的坐标整体覆写，所以角色自身的推荐布局不进断言；但必须选固定画幅的角色
+    // ——「随内容增长」的画布走流式排版，舞台不是自由定位的 Stack，这一场景就没有空位可算了。
+    const definition = generateTemplateFromRecipe(createRecommendedRecipe("editorial-media"), { templateId: "qa-placement", name: "新增放置验证" });
     const parent = Object.values(definition.nodes).find((node: any) => node.type === "Stack" && node.responsive.desktop.layoutMode === "free") as any;
     parent.childIds.forEach((id: string, index: number) => {
       definition.nodes[id].responsive.desktop.placement = { x: 0, y: index * .47, width: .45, height: .45, zIndex: 1 };
@@ -96,7 +99,7 @@ test("结构区添加槽位共用空位检查，失败后可以更换目标继�
   await expect(page.locator(".ant-alert-description").filter({ hasText: "没有足够空位" })).toContainText("未写入草稿");
   expect((await readSession(page)).definition).toEqual(before.definition);
   expect((await readSession(page)).historyPast).toEqual(before.historyPast);
-  const flow = Object.values(before.definition!.nodes).find((node) => node.name === "内容区域")!;
+  const flow = Object.values(before.definition!.nodes).find((node) => node.name === "文字列")!;
   await palette.getByRole("combobox", { name: "添加目标", exact: true }).selectOption(flow.nodeId);
   await palette.getByRole("button", { name: "添加标题槽位", exact: true }).click();
   await expect.poll(async () => (await readSession(page)).historyPast.length).toBe(before.historyPast.length + 1);
@@ -123,7 +126,9 @@ for (const scenario of ["background", "legacy"] as const) test(`新增放置保�
 async function configure(page: Page) {
   await clickNewTemplateEntry(page);
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
-  await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
+  // 角色决定内容槽构成：只有「页面首屏」与「服务邀请」会产出 type 为 button 的行动槽（不变量 F），
+  // 下面「按钮槽位」用例的 transform 依赖它存在。画幅与布局随后由点击显式指定，不取该角色的推荐值。
+  await dialog.getByRole("button", { name: "页面首屏", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
@@ -144,7 +149,7 @@ for (const [label, field] of [["标题槽位", "默认文字"], ["按钮槽位",
     await page.evaluate(async (label) => {
       const path = "/src/page-builder/template-editor/templateEditorSession.ts";
       const state = (await import(/* @vite-ignore */ path)).useTemplateEditorSession.getState();
-      const region = Object.values(state.draft.definition.nodes).find((node: any) => node.name === "内容区域") as any;
+      const region = Object.values(state.draft.definition.nodes).find((node: any) => node.name === "文字列") as any;
       state.enterEditingScope(region.nodeId);
       if (label === "按钮槽位") state.executeCommand({ type: "transform-definition", label: "设置来源按钮边界", transform: (definition: any) => {
         const slot = Object.values(definition.slots).find((item: any) => item.type === "button") as any;

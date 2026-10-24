@@ -39,6 +39,9 @@ export class SessionSecurityGuard implements CanActivate {
     // 首次登录/注册尚无会话 Cookie；精确 Origin 已阻止跨站登录 CSRF。
     if (!domain) return true;
 
+    // 店内访问计数不改用户状态，也不读取身份。带会话 Cookie 的顾客只要来源精确匹配即可计入。
+    if (this.isStorefrontTraffic(request.url)) return true;
+
     // 旧版浏览器可能仍带有长期 access Cookie，却没有新版共享 CSRF Cookie。
     // 登录/注册/绑定/退出只在调用方显式声明 Cookie 模式且 Origin 精确匹配时允许迁移，
     // 避免用户被旧 Cookie 永久卡在无法重新登录的状态；普通业务写接口和 refresh 仍须双提交。
@@ -56,6 +59,11 @@ export class SessionSecurityGuard implements CanActivate {
       throw new ApiError(403, "CSRF_TOKEN_INVALID", "CSRF 校验失败");
     }
     return true;
+  }
+
+  private isStorefrontTraffic(url: string | undefined): boolean {
+    const path = (url || "").split("?", 1)[0];
+    return path === "/api/statistics/traffic";
   }
 
   private isOriginOnlySessionEndpoint(url: string | undefined): boolean {

@@ -59,8 +59,8 @@ export function applyWheelToScroller(scroller: HTMLElement, event: WheelEvent) {
 }
 
 export function bindWheelToScroller(target: Document | HTMLElement, scroller: HTMLElement) {
-  const onWheel = (event: WheelEvent) => {
-    applyWheelToScroller(scroller, event);
+  const onWheel = (event: Event) => {
+    applyWheelToScroller(scroller, event as WheelEvent);
   };
   target.addEventListener("wheel", onWheel, { capture: true, passive: false });
   return () => target.removeEventListener("wheel", onWheel, { capture: true });

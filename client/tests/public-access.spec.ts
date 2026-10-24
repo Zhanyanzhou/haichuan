@@ -230,6 +230,9 @@ test.describe("游客公开浏览", () => {
 
       await expect(page.getByRole("heading", { level: 1, name: /您的珠宝档案/ }))
         .toBeVisible();
+      await expect(page.getByText("会员账户", { exact: true })).toBeVisible();
+      await expect(page.getByText("会员服务", { exact: true })).toBeVisible();
+      await expect(page.getByText("HAICHUAN PRIVATE CLIENT")).toHaveCount(0);
       await expect(page.locator("#member-access-form")).toBeVisible();
       await expect(page.getByRole("button", { name: "会员登录", exact: true }))
         .toBeVisible();

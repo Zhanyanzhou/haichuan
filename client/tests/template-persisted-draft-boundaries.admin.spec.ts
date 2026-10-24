@@ -692,7 +692,9 @@ async function createUnsavedTemplate(page: Page) {
     .getByRole("button", { name: "新建模板", exact: true })
     .click();
   const dialog = page.getByRole("dialog", { name: "创建模板", exact: true });
-  await dialog.getByRole("button", { name: "商品促销", exact: true }).click();
+  // 创建向导第 1 步已按区块角色组织（D.40：创建类型即区块角色），"商品促销"不再是选项。
+  // 这条用例只借向导造一份未保存草稿，角色本身不参与断言。
+  await dialog.getByRole("button", { name: "页面首屏", exact: true }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();
   await dialog.getByRole("button", { name: /竖向卡片 4:5/ }).click();
   await dialog.getByRole("button", { name: "下一步", exact: true }).click();

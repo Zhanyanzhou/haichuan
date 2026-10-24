@@ -151,7 +151,7 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
         >
           <div style={{ maxWidth: 620 }}>
             {hero.eyebrow ? (
-              <p style={{ margin: "0 0 18px", fontSize: 11, letterSpacing: "0.18em", lineHeight: 1.4 }}>
+              <p style={{ margin: "0 0 18px", fontSize: 12, letterSpacing: "0.5px", lineHeight: 1.4 }}>
                 {hero.eyebrow}
               </p>
             ) : null}
@@ -247,7 +247,7 @@ export default function Home() {
           ...fallback,
           title: isReadFailure ? "首页暂不可用" : "首页正在完善",
           description: isReadFailure
-            ? "首页内容暂时无法载入。您可以重新载入，或先进入选款中心浏览当前公开款式。"
+            ? "首页内容暂时无法载入。您可以重新载入，或先进入选款中心。"
             : "首页现有内容需要重新审核后才能公开。您可以先进入选款中心，或了解珠宝定制服务。",
         } : undefined}
         onRetry={isReadFailure ? () => void refreshDocument(true) : undefined}

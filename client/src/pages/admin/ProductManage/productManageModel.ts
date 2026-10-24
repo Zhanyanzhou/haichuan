@@ -31,7 +31,7 @@ export const salesModeLabels: Record<string, string> = {
   DISPLAY_ONLY: "仅展示",
   SELECTION: "选款咨询",
   APPOINTMENT: "预约到店",
-  DIRECT_PURCHASE: "直接购买",
+  DIRECT_PURCHASE: "直接销售",
   CUSTOM_INQUIRY: "定制咨询",
 };
 

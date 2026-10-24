@@ -597,9 +597,11 @@ test("canPublish：拒绝未知提取方式与缺少真实周期的按约定发�
     product({
       id: 11,
       status: "DRAFT",
-      salesMode: "SELECTION",
+      salesMode: "DIRECT_PURCHASE",
+      price: 100,
       primaryImageId: 1,
       deliveryMethods: ["SAME_CITY_COURIER"],
+      skus: [{ id: 11, isActive: true, price: 100 }],
     }),
   ]);
   await assert.rejects(
@@ -612,10 +614,12 @@ test("canPublish：拒绝未知提取方式与缺少真实周期的按约定发�
     product({
       id: 12,
       status: "DRAFT",
-      salesMode: "SELECTION",
+      salesMode: "DIRECT_PURCHASE",
+      price: 100,
       primaryImageId: 1,
       dispatchTime: "CUSTOM",
       customLeadTime: null,
+      skus: [{ id: 12, isActive: true, price: 100 }],
     }),
   ]);
   await assert.rejects(
@@ -625,7 +629,7 @@ test("canPublish：拒绝未知提取方式与缺少真实周期的按约定发�
   );
 });
 
-test("canPublish：媒体缺少授权、撤权、未生效、过期或普通附图失效时一律拒绝发布", async () => {
+test("canPublish：主图缺少授权、撤权、未生效或过期时拒绝发布", async () => {
   const scenarios: Array<[string, (record: ProductRecord) => void]> = [
     ["缺少授权", (record) => {
       record.images[0].mediaAsset = null;
@@ -640,14 +644,6 @@ test("canPublish：媒体缺少授权、撤权、未生效、过期或普通附�
     }],
     ["已经过期", (record) => {
       record.images[0].mediaAsset!.authorization!.validUntil = new Date("2000-01-01T00:00:00.000Z");
-    }],
-    ["普通附图失效", (record) => {
-      record.images.push(authorizedImage({
-        id: 99,
-        storageKey: "readable-extra.jpg",
-        isVideo: false,
-        mediaAsset: null,
-      }));
     }],
   ];
 
@@ -665,7 +661,7 @@ test("canPublish：媒体缺少授权、撤权、未生效、过期或普通附�
     await assert.rejects(
       () => service.canPublish(1),
       (error: unknown) =>
-        error instanceof BadRequestException && /授权有效|全部商品附图/.test(error.message),
+        error instanceof BadRequestException && /授权有效/.test(error.message),
       name,
     );
   }
@@ -725,7 +721,7 @@ test("存量质量报告复用发布门禁并保持严格只读", async () => {
     deletedAt: null,
     writeMode: "READ_ONLY",
   });
-  assert.equal(report.gateVersion, "p0-product-quality-v3");
+  assert.equal(report.gateVersion, "p0-product-quality-v4");
   assert.deepEqual(
     {
       total: report.summary.total,
@@ -759,12 +755,12 @@ test("存量质量报告复用发布门禁并保持严格只读", async () => {
   assert.match(report.items[3].issues.join("、"), /一物一件商品/);
 });
 
-test("canPublish：拒绝 E2E、乱码、重复占位文案与 0g 商品", async () => {
+test("canPublish：拒绝 E2E、乱码与重复占位文案", async () => {
   const invalidProducts = [
     product({ id: 401, status: "DRAFT", name: "E2E 测试商品", primaryImageId: 1 }),
     product({ id: 402, status: "DRAFT", name: "å®šåˆ¶é¦–é¥°", primaryImageId: 1 }),
-    product({ id: 403, status: "DRAFT", description: "发发发反反复复反反复复", primaryImageId: 1 }),
-    product({ id: 404, status: "DRAFT", goldWeight: 0, weight: 0, primaryImageId: 1 }),
+    product({ id: 403, status: "DRAFT", salesMode: "DISPLAY_ONLY", description: "啊啊啊啊", primaryImageId: 1 }),
+    product({ id: 404, status: "DRAFT", name: "333333", primaryImageId: 1 }),
   ];
   for (const invalid of invalidProducts) {
     const { service } = createService([invalid]);
@@ -772,21 +768,92 @@ test("canPublish：拒绝 E2E、乱码、重复占位文案与 0g 商品", async
   }
 });
 
-test("canPublish：详情主图与列表图必须分别明确且可读取", async () => {
+test("canPublish：展示类作品不要求简介、说明、详情、克重，未指定列表图时沿用主图", async () => {
   const missingListing = createService([
     product({
       id: 405,
       status: "DRAFT",
       salesMode: "DISPLAY_ONLY",
+      shortDescription: "",
+      description: "",
+      detailContent: [],
+      goldWeight: 0,
+      weight: 0,
       primaryImageId: 1,
       listingImageId: null,
     }),
   ]);
+  await assert.doesNotReject(() => missingListing.service.canPublish(405));
+  assert.equal(missingListing.records[0].listingImageId, 1);
+});
+
+test("canPublish：仅内部可见的展示作品不要求主图", async () => {
+  const internal = createService([
+    product({
+      id: 410,
+      status: "DRAFT",
+      visibility: "INTERNAL",
+      salesMode: "DISPLAY_ONLY",
+      name: "内部手镯",
+      primaryImageId: null,
+      listingImageId: null,
+    }),
+  ]);
+  await assert.doesNotReject(() => internal.service.canPublish(410));
+});
+
+test("canPublish：互相打架的纯度和功效承诺不能发布", async () => {
+  const misleading = createService([
+    product({
+      id: 409,
+      status: "DRAFT",
+      salesMode: "DISPLAY_ONLY",
+      name: "18K足金戒指",
+      description: "佩戴可辟邪并保值增值",
+      primaryImageId: 1,
+    }),
+  ]);
   await assert.rejects(
-    () => missingListing.service.canPublish(405),
+    () => misleading.service.canPublish(409),
     (error: unknown) =>
-      error instanceof BadRequestException && /列表图/.test(error.message),
+      error instanceof BadRequestException
+      && /18K足金/.test(error.message)
+      && /辟邪/.test(error.message)
+      && /保值/.test(error.message),
   );
+});
+
+test("canPublish：句子里重复的词语可以发布", async () => {
+  const { service } = createService([
+    product({
+      id: 408,
+      status: "DRAFT",
+      salesMode: "DISPLAY_ONLY",
+      name: "是啊大侃大侃大侃的",
+      shortDescription: "是啊大侃大侃大侃的",
+      description: "是啊大侃大侃大侃的",
+      primaryImageId: 1,
+    }),
+  ]);
+  await assert.doesNotReject(() => service.canPublish(408));
+});
+
+test("canPublish：未授权的附图不阻断已授权主图", async () => {
+  const record = product({
+    id: 407,
+    status: "DRAFT",
+    salesMode: "DISPLAY_ONLY",
+    primaryImageId: 1,
+    listingImageId: 1,
+  });
+  record.images.push(authorizedImage({
+    id: 99,
+    storageKey: "readable-extra.jpg",
+    isVideo: false,
+    mediaAsset: null,
+  }));
+  const { service } = createService([record]);
+  await assert.doesNotReject(() => service.canPublish(407));
 });
 
 test("状态接口写入 PUBLISHED 必须经过 canPublish 门禁", async () => {
@@ -874,8 +941,8 @@ test("资料完整度按销售方式给出可解释的缺失项", () => {
     salesMode: "DIRECT_PURCHASE",
   });
   assert.equal(directPurchase.isComplete, false);
-  assert.deepEqual(directPurchase.missingFields, ["activeSku", "inventoryRecord", "deliveryMethods"]);
-  assert.equal(directPurchase.score, 75);
+  assert.deepEqual(directPurchase.missingFields, ["activeSku"]);
+  assert.equal(directPurchase.score, 90);
 });
 
 test("五种销售模式：四种非直购不要求价格/SKU，DIRECT_PURCHASE 要求交易事实", async () => {
@@ -918,6 +985,18 @@ test("DIRECT_PURCHASE 库存为 0 仍可发布，SINGLE_UNIT 多有效 SKU 返�
     }),
   ]);
   await assert.doesNotReject(() => zeroStock.service.canPublish(300));
+
+  const priceOnly = createService([
+    product({
+      id: 302,
+      status: "DRAFT",
+      price: 100,
+      primaryImageId: 1,
+      deliveryMethods: [],
+      skus: [{ id: 34, isActive: true, price: 100, inventories: [] }],
+    }),
+  ]);
+  await assert.doesNotReject(() => priceOnly.service.canPublish(302));
 
   const invalidSingle = createService([
     product({

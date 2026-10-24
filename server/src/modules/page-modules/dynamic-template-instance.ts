@@ -74,6 +74,7 @@ function getPubliclyReachableDynamicTemplateSlotIds(
   hiddenSlotIds: ReadonlySet<string>,
   contentBySlotId: Record<string, unknown>,
   onBackground?: (nodeId: string, url: string, breakpoint: TemplateBreakpoint) => void,
+  includeTemplateDefaults = false,
 ) {
   const visibleSlotIds = new Set<string>();
   const visitedStates = new Set<string>();
@@ -96,7 +97,14 @@ function getPubliclyReachableDynamicTemplateSlotIds(
     const hasInstanceValue = Boolean(node.slotId && Object.prototype.hasOwnProperty.call(contentBySlotId, node.slotId));
     const instanceValue = node.slotId ? contentBySlotId[node.slotId] : undefined;
     const defaultValue = node.slotId ? definition.defaultContent[node.slotId] : undefined;
-    const value = hasInstanceValue && !(slot?.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue)) ? instanceValue : defaultValue;
+    const allowTemplateDefaults = includeTemplateDefaults || definition.schemaVersion < 3;
+    const value = allowTemplateDefaults
+      ? hasInstanceValue && !(slot?.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue))
+        ? instanceValue
+        : defaultValue
+      : hasInstanceValue
+        ? instanceValue
+        : undefined;
     if ((!slot || hasRenderableSlotContent(slot, value)) && isNonEmptyString(rules.backgroundImage)) {
       onBackground?.(nodeId, rules.backgroundImage, breakpoint);
     }
@@ -219,6 +227,7 @@ export function getDynamicTemplateDefinitionMediaReferences(
       field: `${nodeId}.backgroundImage`,
       moduleType: DYNAMIC_TEMPLATE_BLOCK_TYPE,
     }),
+    true,
   );
   const instance = validateDynamicTemplateInstance({
     instanceSchemaVersion: DYNAMIC_TEMPLATE_INSTANCE_SCHEMA_VERSION,
@@ -229,7 +238,7 @@ export function getDynamicTemplateDefinitionMediaReferences(
     layoutOverridesByNodeId: {},
     hiddenSlotIds: [],
     isVisible: true,
-  }, definition);
+  }, definition, { includeTemplateDefaults: true });
   instance.assets.forEach((asset) => references.push({
     url: asset.url,
     path: `defaultContent.${asset.slotId}`,
@@ -494,6 +503,47 @@ export function readDynamicTemplateInstanceReference(
   };
 }
 
+export function omitDynamicTemplateInstances(
+  puckData: unknown,
+  templateId: string,
+): { puckData: unknown; changed: boolean } {
+  if (!isRecord(puckData)) return { puckData, changed: false };
+  let changed = false;
+  const stripList = (blocks: unknown): unknown => {
+    if (!Array.isArray(blocks)) return blocks;
+    const next = blocks.filter((block) => {
+      if (!isRecord(block) || block.type !== DYNAMIC_TEMPLATE_BLOCK_TYPE || !isRecord(block.props)) {
+        return true;
+      }
+      return block.props.templateId !== templateId;
+    });
+    if (next.length !== blocks.length) changed = true;
+    return next;
+  };
+  const content = stripList(puckData.content);
+  const zones = isRecord(puckData.zones)
+    ? Object.fromEntries(Object.entries(puckData.zones).map(([key, zone]) => [key, stripList(zone)]))
+    : puckData.zones;
+  const resolved = puckData[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY];
+  const nextResolved = isRecord(resolved)
+    ? Object.fromEntries(Object.entries(resolved).filter(([key]) => {
+      if (!key.startsWith(`${templateId}@`)) return true;
+      changed = true;
+      return false;
+    }))
+    : resolved;
+  if (!changed) return { puckData, changed: false };
+  return {
+    changed: true,
+    puckData: {
+      ...puckData,
+      content,
+      ...(isRecord(puckData.zones) ? { zones } : {}),
+      ...(isRecord(resolved) ? { [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: nextResolved } : {}),
+    },
+  };
+}
+
 export function collectDynamicTemplateInstanceReferences(
   puckData: unknown,
 ): DynamicTemplateInstanceReference[] {
@@ -517,6 +567,7 @@ export function collectDynamicTemplateInstanceReferences(
 export function validateDynamicTemplateInstance(
   propsInput: unknown,
   definitionInput: unknown,
+  options: { includeTemplateDefaults?: boolean } = {},
 ): DynamicTemplateInstanceValidation {
   const issues: DynamicTemplateInstanceIssue[] = [];
   const assets: DynamicTemplateAssetReference[] = [];
@@ -538,6 +589,7 @@ export function validateDynamicTemplateInstance(
     };
   }
   const definition = validation.definition;
+  const allowTemplateDefaults = options.includeTemplateDefaults === true || definition.schemaVersion < 3;
   if (!isRecord(propsInput)) {
     return {
       definition,
@@ -651,6 +703,8 @@ export function validateDynamicTemplateInstance(
     definition,
     new Set(hiddenSlotIds),
     contentBySlotId,
+    undefined,
+    options.includeTemplateDefaults === true,
   );
   for (const slot of Object.values(definition.slots)) {
     const hasInstanceValue = Object.prototype.hasOwnProperty.call(contentBySlotId, slot.slotId);
@@ -663,9 +717,15 @@ export function validateDynamicTemplateInstance(
       continue;
     }
     const instanceValue = contentBySlotId[slot.slotId];
-    const useDefault = !slot.editable
-      || (definition.schemaVersion >= 3 && slot.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue));
-    const value = hasInstanceValue && !useDefault ? instanceValue : definition.defaultContent[slot.slotId];
+    const useDefault = allowTemplateDefaults && (
+      !slot.editable
+      || (definition.schemaVersion >= 3 && slot.emptyPolicy === "use-default" && !hasRenderableSlotContent(slot, instanceValue))
+    );
+    const value = hasInstanceValue && !useDefault
+      ? instanceValue
+      : allowTemplateDefaults
+        ? definition.defaultContent[slot.slotId]
+        : undefined;
     if (slot.required && (hiddenSlotIds.includes(slot.slotId)
       || (slot.editable && (!hasInstanceValue || isEmptyContent(contentBySlotId[slot.slotId])))
       || (!slot.editable && (isEmptyContent(value) || !hasRenderableSlotContent(slot, value))))) {
@@ -855,10 +915,15 @@ export function validateDynamicTemplateInstance(
     if (!visibleSlotIds.has(slot.slotId)) return false;
     if (slot.semanticRole && commercialRoles.has(slot.semanticRole) && !hasBusinessBinding) return false;
     const hasInstanceValue = Object.prototype.hasOwnProperty.call(contentBySlotId, slot.slotId);
-    if (hasInstanceValue && isEmptyContent(contentBySlotId[slot.slotId]) && slot.emptyPolicy !== "use-default") {
+    if (hasInstanceValue && isEmptyContent(contentBySlotId[slot.slotId])
+      && (!allowTemplateDefaults || slot.emptyPolicy !== "use-default")) {
       return false;
     }
-    const value = hasInstanceValue ? contentBySlotId[slot.slotId] : definition.defaultContent[slot.slotId];
+    const value = hasInstanceValue
+      ? contentBySlotId[slot.slotId]
+      : allowTemplateDefaults
+        ? definition.defaultContent[slot.slotId]
+        : undefined;
     return hasRenderableSlotContent(slot, value);
   });
   const hasRequiredGap = issues.some((issue) => (

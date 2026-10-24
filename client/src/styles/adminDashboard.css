@@ -37,6 +37,12 @@
   font: var(--adm-type-page);
   letter-spacing: 0;
 }
+.admin-dashboard__trend-note {
+  margin: -4px 0 10px;
+  color: var(--adm-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .admin-dashboard__subtitle {
   margin: 7px 0 0;
   color: var(--adm-muted);
@@ -54,7 +60,8 @@
   color: var(--adm-text);
   font-size: 12px;
 }
-.admin-dashboard__data-notice button {
+.admin-dashboard__data-notice button,
+.admin-dashboard__data-notice a {
   flex-shrink: 0;
   padding: 0;
   border: none;
@@ -138,10 +145,10 @@
 .admin-dashboard__section-head a:hover {
   color: var(--adm-action);
 }
-/* ═══ 今日核心数据卡片：6 张统一白卡，不再单独强调深色卡 ═══ */
+/* 今日四张卡：访客、浏览、订单、下单金额 */
 .admin-dashboard__cards {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 .admin-dashboard__card {
@@ -325,7 +332,8 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
-.admin-dashboard__alert-item {
+.admin-dashboard__alert-item,
+.admin-dashboard__backlog-item {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -339,7 +347,8 @@
     border-color 0.15s ease,
     background 0.15s ease;
 }
-.admin-dashboard__alert-item:hover {
+.admin-dashboard__alert-item:hover,
+.admin-dashboard__backlog-item:hover {
   border-color: var(--adm-subtle);
   background: var(--adm-surface-muted);
 }
@@ -386,10 +395,9 @@
   font-size: 12px;
 }
 
-@media (max-width: 1240px) {
-  /* 宽度不足以容纳 6 卡时，降为每行 3 张、共 2 排 */
+@media (max-width: 1100px) {
   .admin-dashboard__cards {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
