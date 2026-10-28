@@ -61,6 +61,7 @@ test('真实 Nest HTTP + 一次性 MySQL：客户结算、微信模拟支付、�
   process.env.PAYMENT_SIMULATOR_BASE_URL = simulatorUrl;
   process.env.PAYMENT_SIMULATOR_SCENARIO = 'success';
   process.env.PAYMENT_SIMULATOR_SIGNING_SECRET = simulatorSecret;
+  process.env.SITE_BASE_URL = 'https://isolated-payment.test';
   const mediaRoot = await mkdtemp(join(tmpdir(), 'hc-payment-media-'));
   process.env.PRODUCT_MEDIA_ROOT = mediaRoot;
   const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
