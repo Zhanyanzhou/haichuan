@@ -130,6 +130,7 @@ test('真实 Nest HTTP + 一次性 MySQL：客户结算、微信模拟支付、�
         publicWebUseAllowed: true, reviewStatus: 'APPROVED',
         preparedById: admin.id, submittedById: admin.id, submittedAt: new Date(),
         reviewedById: admin.id, reviewedAt: new Date(),
+        selfReviewAcknowledged: true,
       } },
     } });
     const image = await prisma.productImage.create({ data: {

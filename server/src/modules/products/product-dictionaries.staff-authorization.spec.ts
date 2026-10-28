@@ -132,6 +132,8 @@ test("获准员工的三类字典读取均在员工锁建立后访问领域数�
   assert.deepEqual(events, [
     "staff-lock",
     "session-lock",
+    // 先清理不在前台的空分类，再读取分类树，两次读取都在员工锁之后。
+    "category-read",
     "category-read",
     "staff-lock",
     "session-lock",

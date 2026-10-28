@@ -177,21 +177,21 @@ test("schema3 背景图片从当前定义各断点收集，忽略隐藏祖先、
   assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition)), []);
 });
 
-test("schema3 已隐藏或显式清空的槽位背景不收集，默认值回退和 URL 去重与渲染一致", () => {
+test("schema3 页面实例不收集隐藏槽、清空槽和未写入实例的模板默认图", () => {
   const definition = imageDefinition(); definition.schemaVersion = 3;
   definition.nodes.node_image_duplicate.hidden = true;
   definition.nodes.node_image.responsive.desktop = { ...definition.nodes.node_image.responsive.desktop, display: "block", backgroundImage: "/uploads/shared.jpg" };
   definition.nodes.node_image.responsive.mobile = {};
   definition.defaultContent.slot_image = { src: "/uploads/shared.jpg", alt: "默认图片" };
   const current = documentWithDefinition(definition, { contentBySlotId: {} });
-  assert.deepEqual(getDynamicTemplateDocumentMediaReferences(current).map((item) => item.url), ["/uploads/shared.jpg"]);
+  assert.deepEqual(getDynamicTemplateDocumentMediaReferences(current).map((item) => item.url), []);
   assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition, { hiddenSlotIds: ["slot_image"], contentBySlotId: {} })), []);
   assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition, { contentBySlotId: { slot_image: { src: "", alt: "" } } })), []);
   definition.slots.slot_image.emptyPolicy = "use-default";
-  assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition, { contentBySlotId: { slot_image: null } })).map((item) => item.url), ["/uploads/shared.jpg"]);
+  assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition, { contentBySlotId: { slot_image: null } })), []);
   delete definition.nodes.node_image.responsive.desktop.backgroundImage;
   for (const cleared of [null, "", { src: "", alt: "" }]) {
-    assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition, { contentBySlotId: { slot_image: cleared } })).map((item) => item.url), ["/uploads/shared.jpg"]);
+    assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition, { contentBySlotId: { slot_image: cleared } })), []);
   }
   definition.slots.slot_image.emptyPolicy = "hide";
   assert.deepEqual(getDynamicTemplateDocumentMediaReferences(documentWithDefinition(definition, { contentBySlotId: { slot_image: null } })), []);
