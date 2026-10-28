@@ -311,6 +311,7 @@ function runOwnedChild(args, options = {}) {
     cwd,
     env,
     timeoutMs = DEFAULT_TEST_FILE_TIMEOUT_MS,
+    passGraceMs = 8_000,
     exitWithParent = false,
     onLine = () => {},
     writeStdout = (chunk) => process.stdout.write(chunk),
@@ -367,6 +368,7 @@ function runOwnedChild(args, options = {}) {
       }
       if (pendingName === "stdoutPending") stdoutPending = pending;
       else stderrPending = pending;
+      if (channel === "stdout" && tapPassed(stdout)) armPassGrace();
     };
     child.stdout.on("data", (chunk) => emit("stdout", chunk.toString("utf8")));
     child.stderr.on("data", (chunk) => emit("stderr", chunk.toString("utf8")));
@@ -374,19 +376,44 @@ function runOwnedChild(args, options = {}) {
       timedOut = true;
       cleanupSucceeded = terminate(child);
     }, timeoutMs);
+    let releasedAfterPassingTap = false;
+    let passGrace = null;
+    const tapPassed = (text) => {
+      const tests = Number(/^# tests (\d+)$/m.exec(text)?.[1]);
+      const pass = Number(/^# pass (\d+)$/m.exec(text)?.[1]);
+      const fail = Number(/^# fail (\d+)$/m.exec(text)?.[1]);
+      const skipped = Number(/^# skipped (\d+)$/m.exec(text)?.[1]);
+      return Number.isInteger(tests) && tests > 0 && pass === tests && fail === 0 && skipped === 0;
+    };
+    const armPassGrace = () => {
+      if (passGrace || settled) return;
+      passGrace = setTimeout(() => {
+        if (settled) return;
+        releasedAfterPassingTap = true;
+        clearTimeout(timer);
+        cleanupSucceeded = terminate(child);
+      }, passGraceMs);
+    };
     child.once("error", (error) => {
       clearTimeout(timer);
+      clearTimeout(passGrace);
       if (settled) return;
       settled = true;
       reject(error);
     });
     child.once("close", (status, signal) => {
       clearTimeout(timer);
+      clearTimeout(passGrace);
       emit("stdout", "", true);
       emit("stderr", "", true);
+      clearTimeout(passGrace);
       if (settled) return;
       settled = true;
       const durationMs = Date.now() - startedAt;
+      if (releasedAfterPassingTap) {
+        resolve({ status: 0, signal, stdout, durationMs, releasedAfterPassingTap: true });
+        return;
+      }
       if (timedOut) {
         const error = new Error("REAL_MYSQL_TEST_TIMEOUT");
         error.code = "REAL_MYSQL_TEST_TIMEOUT";
@@ -444,6 +471,9 @@ async function main() {
       });
       if (result.status !== 0) throw new Error("REAL_MYSQL_COMMAND_FAILED");
       assertCompleteTap(result.stdout, 1);
+      if (result.releasedAfterPassingTap) {
+        console.log(`REAL_MYSQL_FILE_EXIT_GRACE: ${index}/${testFiles.length} ${file}`);
+      }
       console.log(`REAL_MYSQL_FILE_COMPLETE: ${index}/${testFiles.length} ${file}; status=PASS; elapsed_ms=${Date.now() - startedAt}`);
     } catch (error) {
       const elapsedMs = Date.now() - startedAt;

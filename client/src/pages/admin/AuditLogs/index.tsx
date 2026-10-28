@@ -541,6 +541,9 @@ export default function AuditLogs() {
             ? "只会核对或恢复上一请求，不会以新凭据重复入队。"
             : "仅对明确失败的邮件重投；发送结果未知的记录不会开放此操作。"}
           okText={notificationRetryUncertainIds.has(row.id) ? "确认恢复" : "重新投递"}
+          okButtonProps={{
+            "aria-label": notificationRetryUncertainIds.has(row.id) ? "确认恢复" : "重新投递",
+          }}
           cancelText="取消"
           onConfirm={() => retryNotificationFailure(row.id)}
         >

@@ -349,7 +349,7 @@ function extractPrismaModels(serverFiles, reachable) {
   const modelBlocks = [...schema.matchAll(/^model\s+(\w+)\s*\{([\s\S]*?)^\}/gm)]
     .map((match) => ({ model: match[1], body: match[2] }));
   return modelBlocks
-    .map(({ model }) => {
+    .map(({ model, body }) => {
       const delegate = `${model[0].toLowerCase()}${model.slice(1)}`;
       const pattern = new RegExp(
         `\\b(?:(?:this\\.)?prisma|tx|transaction|database|db)\\.${delegate}\\b`,
@@ -375,17 +375,35 @@ function extractPrismaModels(serverFiles, reachable) {
           field: entry[1],
         })),
       );
+      const mappedTable = /@@map\(\s*"([^"]+)"\s*\)/.exec(body)?.[1] ?? null;
+      const sqlTableReferences = mappedTable
+        ? sources.flatMap((source) => {
+          const tablePattern = new RegExp(`\\b${mappedTable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+          const rows = [];
+          for (const match of source.content.matchAll(tablePattern)) {
+            rows.push({
+              source: projectRelative(source.path),
+              line: source.content.slice(0, match.index).split("\n").length,
+            });
+          }
+          return rows;
+        })
+        : [];
       return {
         model,
         delegate,
+        mappedTable,
         directDelegateReferences: references,
+        sqlTableReferences,
         schemaRelationFields,
         classification:
           references.length > 0
             ? "DIRECT_RUNTIME_DELEGATE_REFERENCE"
-            : schemaRelationFields.length > 0
-              ? "SCHEMA_RELATION_OR_NESTED_WRITE_REVIEW_REQUIRED"
-              : "NO_DIRECT_DELEGATE_OR_SCHEMA_RELATION_REVIEW_REQUIRED",
+            : sqlTableReferences.length > 0
+              ? "RAW_SQL_TABLE_REFERENCE"
+              : schemaRelationFields.length > 0
+                ? "SCHEMA_RELATION_OR_NESTED_WRITE_REVIEW_REQUIRED"
+                : "NO_DIRECT_DELEGATE_OR_SCHEMA_RELATION_REVIEW_REQUIRED",
       };
     })
     .sort((left, right) => compareStable(left.model, right.model));
@@ -492,6 +510,7 @@ function collectAudit() {
       prismaModelsWithoutDelegateOrSchemaRelation: prismaModels.filter(
         (entry) =>
           entry.directDelegateReferences.length === 0 &&
+          entry.sqlTableReferences.length === 0 &&
           entry.schemaRelationFields.length === 0,
       ).length,
       unresolvedServerImports: serverGraph.unresolved.length,

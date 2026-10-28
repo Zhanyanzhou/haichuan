@@ -104,7 +104,7 @@ test.describe("后台经营底座第一批状态", () => {
     expect(retryCalls).toBe(1);
 
     await page.getByRole("button", { name: "使用原凭据恢复通知事件 81" }).click();
-    await page.getByRole("button", { name: "确认恢复", exact: true }).click();
+    await page.getByRole("button", { name: /确认恢复/ }).click();
 
     await expect(page.getByText("已确认重新进入投递队列，最终结果将写入操作日志")).toBeVisible();
     await expect.poll(() => retryCalls).toBe(2);

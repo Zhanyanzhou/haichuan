@@ -501,15 +501,6 @@ export type CustomerCheckoutRequest = {
   items: Array<{ skuId: number; quantity: number }>;
 };
 
-export type CustomerCheckoutPreviewRequest = CustomerCheckoutRequest;
-export type CustomerCheckoutPreview = {
-  itemSubtotalCents: number;
-  discountCents: number;
-  shippingCents: number;
-  finalCents: number;
-  shippingLines: Array<{ templateId: number; templateName: string; feeCents: number }>;
-};
-
 export type CustomerAddressInput = {
   recipientName: string;
   recipientPhone: string;
@@ -629,16 +620,6 @@ export const customerApi = {
         ...customerAuthHeaders(),
         "Idempotency-Key": idempotencyKey,
       },
-    }),
-  previewCheckout: (data: CustomerCheckoutPreviewRequest) =>
-    api.post("/customers/checkout/preview", data, {
-      headers: customerAuthHeaders(),
-      suppressGlobalError: true,
-    }),
-  getCheckoutProvinces: () =>
-    api.get("/customers/checkout/provinces", {
-      headers: customerAuthHeaders(),
-      suppressGlobalError: true,
     }),
   getPaymentChannels: () =>
     api.get("/customers/me/payment-channels", {

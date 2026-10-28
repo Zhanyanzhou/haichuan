@@ -319,3 +319,19 @@ test("真实 MySQL 文件超时必须失败，且只终止入口创建的子进�
       });
   assert.deepEqual(siblingResult, { status: 0, signal: null });
 });
+
+test("真实 MySQL 子进程在测试已经通过后仍不退出时，短宽限后按通过结束", async () => {
+  const result = await runOwnedChild([
+    "-e",
+    "console.log('# tests 1\\n# pass 1\\n# fail 0\\n# skipped 0'); setInterval(() => {}, 1000);",
+  ], {
+    cwd: __dirname,
+    env: process.env,
+    timeoutMs: 5_000,
+    passGraceMs: 50,
+    writeStdout: () => {},
+    writeStderr: () => {},
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.releasedAfterPassingTap, true);
+});
