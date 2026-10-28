@@ -147,13 +147,13 @@
 }
 .template-editor__selection-toolbar .template-editor__editable-overlay-move { cursor: move; touch-action: none; }
 .template-editor__selection-toolbar .template-editor__selection-toolbar-delete {
-  border-color: #c9a3a0;
-  color: #8a3a32;
+  border-color: #D7B6B4;
+  color: #8C3F3B;
 }
 .template-editor__selection-toolbar .template-editor__selection-toolbar-delete:hover,
 .template-editor__selection-toolbar .template-editor__selection-toolbar-delete:focus-visible {
-  border-color: #8a3a32;
-  background: #8a3a32;
+  border-color: #8C3F3B;
+  background: #8C3F3B;
   color: #fff;
 }
 .template-editor__selection-toolbar-help {

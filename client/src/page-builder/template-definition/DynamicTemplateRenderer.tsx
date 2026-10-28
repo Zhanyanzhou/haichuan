@@ -638,7 +638,7 @@ function renderSlotContent(
             position: "absolute",
             inset: 0,
             boxSizing: "border-box",
-            background: "#E4E7E8",
+            background: "#DDE1E2",
             boxShadow: "inset 0 0 0 8px #5F6568",
           }}
         >

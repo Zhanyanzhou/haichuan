@@ -631,7 +631,7 @@
   padding: 0;
   border: 0;
   border-radius: 4px;
-  color: #8a3a32;
+  color: #8C3F3B;
   background: transparent;
   cursor: pointer;
 }
@@ -639,7 +639,7 @@
 .template-editor__structure-delete:hover,
 .template-editor__structure-delete:focus-visible {
   color: #fff;
-  background: #8a3a32;
+  background: #8C3F3B;
 }
 
 .template-editor__structure--reference .template-editor__slot-actions .template-editor__structure-more {

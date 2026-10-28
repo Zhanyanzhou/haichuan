@@ -121,8 +121,8 @@
   border: 1px solid var(--pro-line);
   border-radius: 8px;
 }
-.pro-editor__flow li[data-state="done"] { border-color: #b7c9b4; }
-.pro-editor__flow li[data-state="wait"] { border-color: #e2c7b0; }
+.pro-editor__flow li[data-state="done"] { border-color: #ACC4B4; }
+.pro-editor__flow li[data-state="wait"] { border-color: #D4BD96; }
 .pro-editor__flow b { display: block; font-weight: 500; font-size: 13px; }
 .pro-editor__flow span { display: block; margin-top: 4px; color: var(--pro-muted); font-size: 12px; line-height: 1.45; }
 
@@ -157,7 +157,7 @@
 .pro-editor__uploads { display: flex; gap: 16px; margin: 0 0 18px 160px; flex-wrap: wrap; align-items: flex-start; }
 .pro-editor__upload-card { width: 120px; display: flex; flex-direction: column; gap: 6px; }
 .pro-editor__upload, .pro-editor__upload-item {
-  width: 120px; height: 120px; border: 1px dashed var(--pro-line); border-radius: 8px; background: #f7f7f7;
+  width: 120px; height: 120px; border: 1px dashed var(--pro-line); border-radius: 8px; background: #F7F8F8;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--pro-muted); font-size: 12px;
 }
 .pro-editor__upload { cursor: pointer; background: #fff; }
@@ -167,7 +167,7 @@
 .pro-editor__upload-item[draggable="true"] { cursor: grab; }
 .pro-editor__upload-item.is-dragging { opacity: 0.45; }
 .pro-editor__upload-card.is-drop-target .pro-editor__upload-item { outline: 2px solid var(--pro-action); outline-offset: 2px; }
-.pro-editor__upload-photo { width: 100%; height: 100%; object-fit: contain; background: #f7f7f7; }
+.pro-editor__upload-photo { width: 100%; height: 100%; object-fit: contain; background: #F7F8F8; }
 .pro-editor__cover-badge { position: absolute; top: 0; left: 0; margin: 0; padding: 0 6px; background: rgba(24, 26, 27, .78); color: var(--pro-surface); font-size: 12px; font-style: normal; line-height: 20px; }
 .pro-editor__upload-actions { display: flex; justify-content: center; gap: 4px; min-height: 24px; flex-wrap: wrap; }
 .pro-editor__upload-actions .ant-btn { height: 24px; padding-inline: 4px; font-size: 12px; }
@@ -198,13 +198,13 @@
 .pro-editor__detail-tip { min-height: 44px; margin: -10px 0 0 160px; padding: 8px 14px; display: flex; align-items: center; color: var(--pro-muted); background: var(--pro-info-bg); border-radius: 6px; font-size: 12px; }
 .pro-editor__detail-picker { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0 160px; }
 .pro-editor__detail-picker > span { color: var(--pro-muted); font-size: 12px; }
-.pro-editor__detail-picker button { width: 72px; height: 72px; padding: 0; border: 1px solid var(--pro-line); border-radius: 6px; background: #f7f7f7; overflow: hidden; cursor: pointer; }
+.pro-editor__detail-picker button { width: 72px; height: 72px; padding: 0; border: 1px solid var(--pro-line); border-radius: 6px; background: #F7F8F8; overflow: hidden; cursor: pointer; }
 .pro-editor__detail-grid { min-height: 340px; margin: 12px 0 0 160px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; border: 1px solid var(--pro-line); background: var(--pro-surface); }
 .pro-editor__blocks { padding: 16px; }
 .pro-editor__block { margin-bottom: 12px; padding: 12px; background: #fff; border: 1px solid var(--pro-line); border-radius: 6px; }
 .pro-editor__block-tools { display: flex; justify-content: flex-end; gap: 5px; margin-bottom: 8px; }
-.pro-editor__block-visual { min-height: 120px; display: grid; place-items: center; background: #f7f7f7; border-radius: 6px; color: var(--pro-muted); font-size: 12px; }
-.pro-editor__block-photo { width: 100%; max-height: 280px; object-fit: contain; background: #f7f7f7; }
+.pro-editor__block-visual { min-height: 120px; display: grid; place-items: center; background: #F7F8F8; border-radius: 6px; color: var(--pro-muted); font-size: 12px; }
+.pro-editor__block-photo { width: 100%; max-height: 280px; object-fit: contain; background: #F7F8F8; }
 .pro-editor__empty { height: 280px; display: grid; place-items: center; color: var(--pro-muted); }
 .pro-editor__preview { min-height: 340px; border-left: 18px solid var(--pro-surface-muted); background: #fff; overflow: auto; }
 .pro-editor__preview img, .pro-editor__preview > div:not(.pro-editor__phone-tabs):not(.pro-editor__preview-empty) { width: 100%; display: block; }

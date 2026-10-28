@@ -714,7 +714,7 @@
   box-sizing: border-box;
   overflow: hidden;
   background: #fff;
-  border: 1px solid #e4e2df;
+  border: 1px solid #DDE1E2;
   pointer-events: none;
 }
 
@@ -764,7 +764,7 @@
   justify-content: center;
   overflow: hidden;
   cursor: pointer;
-  border: 1px solid #e4e2df;
+  border: 1px solid #DDE1E2;
   background: #fff;
 }
 

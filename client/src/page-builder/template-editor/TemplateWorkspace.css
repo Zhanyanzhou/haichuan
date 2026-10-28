@@ -1829,10 +1829,10 @@
   min-height: 28px;
   margin-left: 8px;
   padding: 0 10px;
-  border: 1px solid #c9a3a0;
+  border: 1px solid #D7B6B4;
   border-radius: 4px;
   background: #fff;
-  color: #8a3a32;
+  color: #8C3F3B;
   font-size: 12px;
   line-height: 26px;
   cursor: pointer;
@@ -1840,8 +1840,8 @@
 
 .template-editor__inspector-delete:hover,
 .template-editor__inspector-delete:focus-visible {
-  border-color: #8a3a32;
-  background: #8a3a32;
+  border-color: #8C3F3B;
+  background: #8C3F3B;
   color: #fff;
 }
 
