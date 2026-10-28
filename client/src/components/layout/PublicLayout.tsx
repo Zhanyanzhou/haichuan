@@ -1,4 +1,5 @@
 import {
+  lazy,
   Suspense,
   useCallback,
   useEffect,
@@ -32,7 +33,6 @@ import {
 } from "@/page-builder/runtime/usePublishedPageDocument";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
-import SiteSearchDialog from "./SiteSearchDialog";
 import StorefrontFooter from "./StorefrontFooter";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
@@ -47,6 +47,9 @@ import { LEGAL_ENTITY } from "@/config/legalEntity";
 import RouteLoading from "@/components/common/RouteLoading";
 import { clearCatalogReturnContext } from "@/pages/public/Catalog/catalogReturnContext";
 import { useDirectionalSiteHeader } from "./useDirectionalSiteHeader";
+
+const loadSiteSearchDialog = () => import("./SiteSearchDialog");
+const SiteSearchDialog = lazy(loadSiteSearchDialog);
 
 const NON_PUBLIC_SYSTEM_HERO_MEDIA = new Set([
   "/images/system/product-placeholder.svg",
@@ -860,7 +863,10 @@ export default function PublicLayout() {
             aria-expanded={searchOpen}
             aria-controls="site-search-dialog"
             className="site-header__nav-item site-header__nav-item--search"
+            onMouseEnter={() => { void loadSiteSearchDialog(); }}
+            onFocus={() => { void loadSiteSearchDialog(); }}
             onClick={() => {
+              void loadSiteSearchDialog();
               if (searchOpen) closeSearch();
               else revealSearch();
             }}
@@ -870,10 +876,11 @@ export default function PublicLayout() {
           </button>
           )}
         </nav>
-        <SiteSearchDialog
-          open={searchOpen}
-          onClose={closeSearch}
-        />
+        {searchOpen ? (
+          <Suspense fallback={null}>
+            <SiteSearchDialog open onClose={closeSearch} />
+          </Suspense>
+        ) : null}
       </header>
 
       {/* ═══════ 菜单面板 ═══════ */}
