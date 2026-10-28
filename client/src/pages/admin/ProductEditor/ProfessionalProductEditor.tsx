@@ -886,7 +886,7 @@ export default function ProfessionalProductEditor() {
     return Upload.LIST_IGNORE;
   };
 
-  const useGalleryImageInDetail = (choice: MediaChoice) => {
+  const addGalleryImageToDetail = (choice: MediaChoice) => {
     if (detail.filter((block) => block.type === "IMAGE").length >= 20) {
       messageApi.warning("详情图最多 20 张，请先删掉不需要的");
       return;
@@ -1880,7 +1880,7 @@ export default function ProfessionalProductEditor() {
             <Button onClick={addTextBlock}>添加文字</Button>
           </Space></div>
           <div className="pro-editor__detail-tip">可以一次选择多张详情图。文字写工艺、尺寸或佩戴说明。顾客打开商品页后，按这里的顺序往下看。</div>
-          {detailPickerOpen ? <div className="pro-editor__detail-picker">{mediaChoices.length === 0 ? <span>还没有主图。可以先在上面上传，或直接上传详情图。</span> : mediaChoices.map((item) => <button type="button" key={item.key} onClick={() => useGalleryImageInDetail(item)}><SecureImage src={item.src} alt={item.label} tokenKind="staff" style={{ width: "100%", height: "100%", objectFit: "contain" }} /></button>)}</div> : null}
+          {detailPickerOpen ? <div className="pro-editor__detail-picker">{mediaChoices.length === 0 ? <span>还没有主图。可以先在上面上传，或直接上传详情图。</span> : mediaChoices.map((item) => <button type="button" key={item.key} onClick={() => addGalleryImageToDetail(item)}><SecureImage src={item.src} alt={item.label} tokenKind="staff" style={{ width: "100%", height: "100%", objectFit: "contain" }} /></button>)}</div> : null}
           <div className="pro-editor__detail-grid">
             <div className="pro-editor__blocks">
               {detail.length === 0 && <div className="pro-editor__empty">还没有详情。上传详情图，或写一段说明。</div>}
