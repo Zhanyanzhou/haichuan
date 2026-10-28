@@ -4,6 +4,16 @@
    ═══════════════════════════════════════════════ */
 
 /* ═══ Design Tokens ═══ */
+/* 挂到 body 的浮层不在后台壳内，仍要解析同一套语义色。 */
+:root {
+  --adm-ink: #181a1b;
+  --adm-content-bg: #ffffff;
+  --adm-line: #dde1e2;
+  --adm-active-bg: #eceeef;
+  --adm-error: #8c3f3b;
+  --adm-error-bg: #faf0ef;
+}
+
 .admin-shell-v7 {
   /* 背景 */
   --adm-sidebar-bg: #f4f5f5;

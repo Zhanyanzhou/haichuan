@@ -335,3 +335,20 @@ test("真实 MySQL 子进程在测试已经通过后仍不退出时，短宽限�
   assert.equal(result.status, 0);
   assert.equal(result.releasedAfterPassingTap, true);
 });
+
+test("真实 MySQL 子进程在单条通过结果后不再输出时，静默宽限后结束", async () => {
+  const result = await runOwnedChild([
+    "-e",
+    "console.log('ok 1 - finished'); setInterval(() => {}, 1000);",
+  ], {
+    cwd: __dirname,
+    env: process.env,
+    timeoutMs: 5_000,
+    quietAfterPassMs: 50,
+    writeStdout: () => {},
+    writeStderr: () => {},
+  });
+  assert.equal(result.status, 0);
+  assert.equal(result.releasedAfterPassingTap, true);
+  assert.match(result.stdout, /^ok 1 - finished/m);
+});

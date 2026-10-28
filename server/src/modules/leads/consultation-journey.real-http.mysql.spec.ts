@@ -287,13 +287,10 @@ test('真实 HTTP + MySQL：作品咨询/选款回执、后台领取回复、本
       new Promise((resolve) => setTimeout(resolve, 10_000)),
     ]);
     const handles = (process as unknown as {
-      _getActiveHandles?: () => Array<{ constructor?: { name?: string }; unref?: () => void }>;
+      _getActiveHandles?: () => Array<{ unref?: () => void }>;
     })._getActiveHandles?.() ?? [];
     for (const handle of handles) {
-      const name = handle.constructor?.name;
-      if (name === 'Socket' || name === 'MessagePort' || name === 'Server') {
-        try { handle.unref?.(); } catch { /* 残留句柄无法 unref 时不改变已完成的验收结果 */ }
-      }
+      try { handle.unref?.(); } catch { /* 残留句柄无法 unref 时不改变已完成的验收结果 */ }
     }
     // 不清理任何业务库；统一 runner 只在已验证一次性目标中重置或销毁其拥有的容器。
   }

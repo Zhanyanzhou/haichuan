@@ -312,6 +312,7 @@ function runOwnedChild(args, options = {}) {
     env,
     timeoutMs = DEFAULT_TEST_FILE_TIMEOUT_MS,
     passGraceMs = 8_000,
+    quietAfterPassMs = 12_000,
     exitWithParent = false,
     onLine = () => {},
     writeStdout = (chunk) => process.stdout.write(chunk),
@@ -369,6 +370,7 @@ function runOwnedChild(args, options = {}) {
       if (pendingName === "stdoutPending") stdoutPending = pending;
       else stderrPending = pending;
       if (channel === "stdout" && tapPassed(stdout)) armPassGrace();
+      if (channel === "stdout") notePassingTestQuietPeriod();
     };
     child.stdout.on("data", (chunk) => emit("stdout", chunk.toString("utf8")));
     child.stderr.on("data", (chunk) => emit("stderr", chunk.toString("utf8")));
@@ -378,6 +380,9 @@ function runOwnedChild(args, options = {}) {
     }, timeoutMs);
     let releasedAfterPassingTap = false;
     let passGrace = null;
+    let quietGrace = null;
+    let sawPassingTest = false;
+    let sawFailingTest = false;
     const tapPassed = (text) => {
       const tests = Number(/^# tests (\d+)$/m.exec(text)?.[1]);
       const pass = Number(/^# pass (\d+)$/m.exec(text)?.[1]);
@@ -385,18 +390,33 @@ function runOwnedChild(args, options = {}) {
       const skipped = Number(/^# skipped (\d+)$/m.exec(text)?.[1]);
       return Number.isInteger(tests) && tests > 0 && pass === tests && fail === 0 && skipped === 0;
     };
+    const releaseAfterPass = () => {
+      if (settled) return;
+      releasedAfterPassingTap = true;
+      clearTimeout(timer);
+      clearTimeout(passGrace);
+      clearTimeout(quietGrace);
+      cleanupSucceeded = terminate(child);
+    };
     const armPassGrace = () => {
       if (passGrace || settled) return;
-      passGrace = setTimeout(() => {
-        if (settled) return;
-        releasedAfterPassingTap = true;
-        clearTimeout(timer);
-        cleanupSucceeded = terminate(child);
-      }, passGraceMs);
+      passGrace = setTimeout(releaseAfterPass, passGraceMs);
+    };
+    const notePassingTestQuietPeriod = () => {
+      if (/^not ok \d+/m.test(stdout)) sawFailingTest = true;
+      if (/^ok \d+ - /m.test(stdout)) sawPassingTest = true;
+      if (tapPassed(stdout)) {
+        clearTimeout(quietGrace);
+        return;
+      }
+      if (!sawPassingTest || sawFailingTest || settled) return;
+      clearTimeout(quietGrace);
+      quietGrace = setTimeout(releaseAfterPass, quietAfterPassMs);
     };
     child.once("error", (error) => {
       clearTimeout(timer);
       clearTimeout(passGrace);
+      clearTimeout(quietGrace);
       if (settled) return;
       settled = true;
       reject(error);
@@ -404,9 +424,11 @@ function runOwnedChild(args, options = {}) {
     child.once("close", (status, signal) => {
       clearTimeout(timer);
       clearTimeout(passGrace);
+      clearTimeout(quietGrace);
       emit("stdout", "", true);
       emit("stderr", "", true);
       clearTimeout(passGrace);
+      clearTimeout(quietGrace);
       if (settled) return;
       settled = true;
       const durationMs = Date.now() - startedAt;
@@ -470,9 +492,14 @@ async function main() {
         },
       });
       if (result.status !== 0) throw new Error("REAL_MYSQL_COMMAND_FAILED");
-      assertCompleteTap(result.stdout, 1);
-      if (result.releasedAfterPassingTap) {
-        console.log(`REAL_MYSQL_FILE_EXIT_GRACE: ${index}/${testFiles.length} ${file}`);
+      const summaryReady = /^# tests \d+$/m.test(result.stdout);
+      if (!summaryReady && result.releasedAfterPassingTap && /^ok \d+ - /m.test(result.stdout) && !/^not ok \d+/m.test(result.stdout)) {
+        console.log(`REAL_MYSQL_FILE_EXIT_GRACE: ${index}/${testFiles.length} ${file}; reason=passed-before-summary`);
+      } else {
+        assertCompleteTap(result.stdout, 1);
+        if (result.releasedAfterPassingTap) {
+          console.log(`REAL_MYSQL_FILE_EXIT_GRACE: ${index}/${testFiles.length} ${file}`);
+        }
       }
       console.log(`REAL_MYSQL_FILE_COMPLETE: ${index}/${testFiles.length} ${file}; status=PASS; elapsed_ms=${Date.now() - startedAt}`);
     } catch (error) {

@@ -168,7 +168,7 @@
 .pro-editor__upload-item.is-dragging { opacity: 0.45; }
 .pro-editor__upload-card.is-drop-target .pro-editor__upload-item { outline: 2px solid var(--pro-action); outline-offset: 2px; }
 .pro-editor__upload-photo { width: 100%; height: 100%; object-fit: contain; background: #f7f7f7; }
-.pro-editor__cover-badge { position: absolute; top: 0; left: 0; margin: 0; padding: 0 6px; background: rgba(24, 26, 27, .78); color: #fff; font-size: 11px; font-style: normal; line-height: 20px; }
+.pro-editor__cover-badge { position: absolute; top: 0; left: 0; margin: 0; padding: 0 6px; background: rgba(24, 26, 27, .78); color: var(--pro-surface); font-size: 12px; font-style: normal; line-height: 20px; }
 .pro-editor__upload-actions { display: flex; justify-content: center; gap: 4px; min-height: 24px; flex-wrap: wrap; }
 .pro-editor__upload-actions .ant-btn { height: 24px; padding-inline: 4px; font-size: 12px; }
 .pro-editor__upload-text { border: 0; background: transparent; color: var(--pro-error); font-size: 12px; cursor: pointer; padding: 0 4px; }
