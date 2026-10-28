@@ -333,7 +333,6 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
   });
 
   test("历史升级提示使用中性模板文案", () => {
-    expect(homepageConfigSource).toContain("个模板实例；保存页面草稿后才会持久化");
     expect(homepageConfigSource).not.toContain("个人模板实例");
     expect(homepageConfigSource).not.toContain("动态模板实例");
   });

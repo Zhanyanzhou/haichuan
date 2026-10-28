@@ -71,7 +71,6 @@ import {
   createTemplateCatalogPreviewModel,
   createTemplateCatalogPreviewContentBySlotId,
   createNeutralTemplateCatalogPreview,
-  withNeutralTemplateImages,
   hasUnconfiguredTemplateCatalogMedia,
   type TemplateCatalogPreviewModel,
 } from "./templatePreviewModel";
@@ -253,7 +252,7 @@ const DynamicTemplateCatalogPreview = memo(function DynamicTemplateCatalogPrevie
   );
   const detailPreview = useMemo(
     () => presentation === "detail"
-      ? withNeutralTemplateImages(definition, createTemplateCatalogPreviewContentBySlotId(definition))
+      ? { definition, contentBySlotId: createTemplateCatalogPreviewContentBySlotId(definition) }
       : null,
     [definition, presentation],
   );
@@ -1202,7 +1201,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
       : "草稿预览";
     setDetailPreview({
       definition: entry.definition,
-      name: catalogCardName(entry.definition.metadata.sectionRole, entry.name),
+      name: entry.name,
       previewKey: `${entry.identity}:draft`,
       versionLabel: `${previewSource} · ${publicationStatus}${draftStatus ? ` · ${draftStatus}` : ""}`,
     });

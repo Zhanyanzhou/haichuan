@@ -146,6 +146,13 @@ function measuredTargetsEqual(
       && box.target.locked === candidate.target.locked
       && box.target.parentTargetId === candidate.target.parentTargetId
       && box.target.label === candidate.target.label
+      && box.target.imageEditable === candidate.target.imageEditable
+      && box.target.imageHasContent === candidate.target.imageHasContent
+      && box.target.imageContentEditLabel === candidate.target.imageContentEditLabel
+      && box.target.textEditable === candidate.target.textEditable
+      && box.target.textEditLabel === candidate.target.textEditLabel
+      && box.target.movementMode === candidate.target.movementMode
+      && box.target.resizeHandles?.join(",") === candidate.target.resizeHandles?.join(",")
       && box.parentSourceWidth === candidate.parentSourceWidth
       && box.parentSourceHeight === candidate.parentSourceHeight
       && (["x", "y", "width", "height"] as const).every((axis) =>

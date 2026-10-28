@@ -185,15 +185,20 @@ export function createTemplateStressPreviewContentBySlotId(
   scenario: TemplateStressPreviewScenario,
   sessionContentBySlotId: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const shortContent = withNeutralTemplateImages(
-    definition,
-    createTemplatePreviewContentBySlotId(definition),
-  ).contentBySlotId;
+  const previewContent = createTemplatePreviewContentBySlotId(definition);
+  // 旧模板的压力预览必须与原预览内容一致。中性图片只补新模板里尚未配置的槽位。
+  const shortContent = Number(definition.schemaVersion) >= 3
+    ? withNeutralTemplateImages(definition, previewContent).contentBySlotId
+    : previewContent;
   // 新建模板没有正式默认内容，压力预览仍需可见的临时构图。
   // 仅补未配置槽位，显式清空、正式默认值和本次试排均保留其优先级。
   if (Number(definition.schemaVersion) >= 3) {
     for (const slot of Object.values(definition.slots)) {
-      if (Object.prototype.hasOwnProperty.call(definition.defaultContent, slot.slotId)) continue;
+      if (Object.prototype.hasOwnProperty.call(definition.defaultContent, slot.slotId)) {
+        // 中性示意会先填空图片。槽位已有正式默认值时，显式清空也要原样保留。
+        shortContent[slot.slotId] = cloneValue(definition.defaultContent[slot.slotId]);
+        continue;
+      }
       if (slot.type === "image") {
         shortContent[slot.slotId] = { src: previewSquare, alt: NEUTRAL_MEDIA_ALT };
       } else if (SIMPLE_TEXT_SLOT_TYPES.has(slot.type) || slot.type === "button" || slot.type === "link") {

@@ -106,11 +106,11 @@ test("4:3 双图并排的单图特点跨内容风格返回及创建保持一致�
   await next();
   // 推荐项在复选框内额外渲染「推荐」标签，可访问名是「主标题 推荐」，故按前缀匹配。
   await dialog.getByRole("checkbox", { name: /^主标题/ }).check();
-  await dialog.getByRole("checkbox", { name: /^按钮 \/ CTA/ }).check();
+  await dialog.getByRole("checkbox", { name: /^主行动/ }).check();
   await next();
   await dialog.getByRole("button", { name: "高端", exact: true }).click();
   await previous();
-  await expect(dialog.getByRole("checkbox", { name: /^按钮 \/ CTA/ })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: /^主行动/ })).toBeChecked();
   await previous();
   await expectImageAppearance(dialog, 1, "形状", "圆形");
   await expectImageAppearance(dialog, 2, "比例", "3:4");
@@ -833,8 +833,8 @@ test("十种生成布局公开 Renderer 桌面与手机真实几何（隔离界�
       recipe.content=[createContentSlot('title')];
       recipe.media.forEach(item=>item.defaultImage='/recipe-neutral.svg'); const definition=generateTemplateFromRecipe(recipe,{templateId:'tpl_'+layout});
       const heading=Object.values(definition.slots).find(slot=>slot.type==='heading'); if(heading) definition.defaultContent[heading.slotId]='测试标题';
-      return {definition,label,layout};});
-    ReactDOM.createRoot(document.getElementById('fixture')).render(React.createElement(React.Fragment,null,...recipes.map(({definition,label,layout})=>React.createElement('section',{key:layout,'data-layout':layout},React.createElement('h2',null,label),React.createElement('div',{className:'canvas',style:{height:device==='desktop'?width*1.25:undefined}},React.createElement('div',{className:'inner',style:{width:device==='desktop'?1080:390,transform:device==='desktop'?'scale('+width/1080+')':undefined}},React.createElement(DynamicTemplateRenderer,{definition,device,mode:'public'})))))));
+      return {definition,label,layout,content:definition.defaultContent};});
+    ReactDOM.createRoot(document.getElementById('fixture')).render(React.createElement(React.Fragment,null,...recipes.map(({definition,label,layout,content})=>React.createElement('section',{key:layout,'data-layout':layout},React.createElement('h2',null,label),React.createElement('div',{className:'canvas',style:{height:device==='desktop'?width*1.25:undefined}},React.createElement('div',{className:'inner',style:{width:device==='desktop'?1080:390,transform:device==='desktop'?'scale('+width/1080+')':undefined}},React.createElement(DynamicTemplateRenderer,{definition,device,mode:'public',contentBySlotId:content})))))));
     window.__recipeLayoutCount=recipes.length;
     </script></body></html>` }));
   for (const width of [1920, 390]) {

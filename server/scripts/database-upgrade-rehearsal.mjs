@@ -19,7 +19,7 @@ const prismaCli = path.join(serverDirectory, 'node_modules', 'prisma', 'build', 
 export const MYSQL_IMAGE = 'mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b';
 export const MIGRATION_CONNECTION_COLLATION = 'utf8mb4_unicode_ci';
 export const MYSQL_INIT_CONNECT_SQL = `SET collation_connection = ${MIGRATION_CONNECTION_COLLATION}`;
-export const EXPECTED_MIGRATION_COUNT = 70;
+export const EXPECTED_MIGRATION_COUNT = 71;
 export const CHECKPOINT_MIGRATION_COUNT = 51;
 export const MIGRATION_PRIVILEGES = Object.freeze([
   'SELECT',
@@ -52,6 +52,7 @@ export const AFTER_SALES_IDEMPOTENCY_MIGRATION = '20260923170000_add_after_sales
 export const CUSTOMER_ADDRESS_IDEMPOTENCY_MIGRATION = '20260923190000_add_customer_address_idempotency';
 export const QUOTATION_CREATION_IDEMPOTENCY_MIGRATION = '20260924210000_add_quotation_creation_idempotency';
 export const LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_MIGRATION = '20260924220000_add_lead_retention_disposition_idempotency';
+export const STOREFRONT_TRAFFIC_HOURLY_MIGRATION = '20261023160000_add_storefront_traffic_hourly';
 export const EXPECTED_MIGRATION_TAIL = Object.freeze([
   TRADE_MIGRATION,
   PROFILE_MIGRATION,
@@ -72,6 +73,7 @@ export const EXPECTED_MIGRATION_TAIL = Object.freeze([
   CUSTOMER_ADDRESS_IDEMPOTENCY_MIGRATION,
   QUOTATION_CREATION_IDEMPOTENCY_MIGRATION,
   LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_MIGRATION,
+  STOREFRONT_TRAFFIC_HOURLY_MIGRATION,
 ]);
 export const EXPECTED_TRIGGER_COUNT = 15;
 

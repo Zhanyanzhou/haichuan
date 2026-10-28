@@ -30,6 +30,7 @@ import {
   PRODUCT_QUALITY_V3_QUARANTINE_MIGRATION,
   QUOTATION_CREATION_IDEMPOTENCY_MIGRATION,
   SERVICE_PRIVACY_CONSENT_HASH_MIGRATION,
+  STOREFRONT_TRAFFIC_HOURLY_MIGRATION,
   QUOTATION_EXPANSION_MIGRATION,
   QUOTATION_INVARIANTS_MIGRATION,
   TRADE_MIGRATION,
@@ -70,7 +71,18 @@ test('migration inventory is the expected complete ordered set', () => {
     CUSTOMER_ADDRESS_IDEMPOTENCY_MIGRATION,
     QUOTATION_CREATION_IDEMPOTENCY_MIGRATION,
     LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_MIGRATION,
+    STOREFRONT_TRAFFIC_HOURLY_MIGRATION,
   ]);
+});
+
+test('storefront traffic hourly migration only adds an empty aggregate table', () => {
+  const sql = fs.readFileSync(
+    path.join(migrationsDirectory, STOREFRONT_TRAFFIC_HOURLY_MIGRATION, 'migration.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE `storefront_traffic_hourly`/);
+  assert.match(sql, /UNIQUE INDEX `storefront_traffic_bucket_key`/);
+  assert.doesNotMatch(sql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP)\b/i);
 });
 
 test('lead retention disposition recovery migration is additive and stores no raw operation credential', () => {

@@ -4,6 +4,10 @@ import { getDynamicTemplateStructureLockOwnerId, type TemplateDefinitionV2 } fro
 import { useTemplateEditorSession } from "./templateEditorSession";
 import { addTemplateLayoutStarter, getTemplateLayoutStarterUnavailableReason, TEMPLATE_LAYOUT_STARTERS, type TemplateLayoutStarter } from "./templateLayoutStarters";
 
+function popupContainer() {
+  return document.body;
+}
+
 export default function TemplateLayoutStarterPicker({ parentId, index, disabled = false, onAdded }: {
   parentId: string;
   index?: number;
@@ -48,7 +52,7 @@ export default function TemplateLayoutStarterPicker({ parentId, index, disabled 
       close();
     }
   };
-  return <Popover open={open && !unavailable} trigger="click" placement="bottom" afterOpenChange={(visible) => {
+  return <Popover open={open && !unavailable} zIndex={4100} getPopupContainer={popupContainer} trigger="click" placement="bottom" afterOpenChange={(visible) => {
     if (visible) panelRef.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
   }} onOpenChange={(nextOpen) => {
     ownerRef.current = { sessionId, definition: draft?.definition };

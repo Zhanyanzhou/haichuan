@@ -1624,7 +1624,7 @@ export default function DynamicTemplateStructurePanel({
                             ref={(element) => setTreeItemElement(layoutTreeItemKey, element)}
                             tabIndex={rovingTreeItemKey === layoutTreeItemKey ? 0 : -1}
                             {...selectionDataAttributes(layoutSelectionTarget)}
-                            style={{ paddingLeft: "4px" }}
+                            style={{ paddingLeft: `calc(4px + ${entry.depth} * var(--template-structure-indent-step, 12px))` }}
                             draggable={!entry.locked && !layoutParentLocked}
                             onClick={(event) => selectTreeTarget(layoutSelectionTarget, event)}
                             onFocus={(event) => {
@@ -1704,7 +1704,7 @@ export default function DynamicTemplateStructurePanel({
                           ref={(element) => setTreeItemElement(slotTreeItemKey, element)}
                           tabIndex={rovingTreeItemKey === slotTreeItemKey ? 0 : -1}
                           {...selectionDataAttributes(slotSelectionTarget)}
-                          style={{ paddingLeft: "4px" }}
+                          style={{ paddingLeft: `calc(4px + ${slot.depth} * var(--template-structure-indent-step, 12px))` }}
                           draggable={canReorder && !slot.locked}
                           onClick={(event) => selectSlot(slot, event)}
                           onFocus={(event) => {

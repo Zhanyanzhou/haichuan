@@ -51,10 +51,13 @@ export function partitionMobileWorkUnits<T extends MobileWorkNode>(
   },
 ): Array<{ kind: "node"; node: T } | { kind: "works"; nodes: T[] }> {
   const alreadyTwoColumns = options.display === "grid" && (options.columnCount ?? 0) >= 2;
+  // 作者把手机写成单列时，不能再把卡片收成两列。
+  const explicitSingleColumn = options.display === "grid" && options.columnCount === 1;
   const pairable = children.filter((child) => isMobileWorkUnit(child, options.sectionRole));
   const pairWorkCards = options.device === "mobile"
     && options.layoutMode !== "free"
     && !alreadyTwoColumns
+    && !explicitSingleColumn
     && pairable.length >= 2
     && (options.sectionRole === "creation-grid" || pairable.length >= 3);
   const groups: Array<{ kind: "node"; node: T } | { kind: "works"; nodes: T[] }> = [];

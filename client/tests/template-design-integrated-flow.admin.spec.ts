@@ -1331,8 +1331,6 @@ test("自建单区域图文组可跨组移动、双端重排，并原子取消�
   await textGroupRow.hover();
   await textGroupRow.locator(".template-editor__structure-more").click();
   await page.getByRole("menuitem", { name: "删除容器", exact: true }).click();
-  await page.getByRole("dialog", { name: /删除“文字组”及其内容/ })
-    .getByRole("button", { name: "删除节点", exact: true }).click();
   const recoveryDialog = page.getByRole("dialog", { name: "无法删除“文字组”", exact: true });
   const locateLockOwner = recoveryDialog.getByRole("button", { name: "定位锁定来源", exact: true });
   await expect(locateLockOwner).toBeVisible();
@@ -1352,8 +1350,6 @@ test("自建单区域图文组可跨组移动、双端重排，并原子取消�
   await textGroupRow.hover();
   await textGroupRow.locator(".template-editor__structure-more").click();
   await page.getByRole("menuitem", { name: "删除容器", exact: true }).click();
-  await page.getByRole("dialog", { name: /删除“文字组”及其内容/ })
-    .getByRole("button", { name: "删除节点", exact: true }).click();
   const requiredRecoveryDialog = page.getByRole("dialog", { name: "无法删除“文字组”", exact: true });
   const blockedContainerDelete = requiredRecoveryDialog.getByRole("button", { name: "定位并取消必填", exact: true });
   await expect(blockedContainerDelete).toBeVisible();

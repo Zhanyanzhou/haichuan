@@ -2100,7 +2100,7 @@ function EditorBody({
         data-compact-overlay-open={!inspectorCollapsed || undefined}
         onKeyDown={inspectorOverlay.onPanelKeyDown}
       >
-        {inspectorCollapsed ? (
+        {workspaceActive && inspectorCollapsed ? (
           <WorkspacePanelCollapseButton
             ref={inspectorOverlay.openButtonRef}
             action="expand"

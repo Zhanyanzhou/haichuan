@@ -869,7 +869,7 @@ async function markCurrentTemplateDirty(page: Page) {
 
 async function fillNewTemplateIdentity(page: Page) {
   const creator = page.getByRole("dialog", { name: "创建模板", exact: true });
-  await creator.getByRole("button", { name: "通用模板", exact: true }).click();
+  await creator.getByRole("button", { name: "页面首屏", exact: true }).click();
   await creator.getByRole("button", { name: "下一步", exact: true }).click();
   await creator.getByRole("button", { name: /方形卡片 1:1/ }).click();
   await creator.getByRole("button", { name: "下一步", exact: true }).click();

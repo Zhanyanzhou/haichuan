@@ -196,8 +196,9 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
     blank.metadata.purpose = "验证成熟模板使用统一发布门禁";
     const region = addDynamicTemplateNode(blank, blank.rootNodeId, "Container");
     const hero = addDynamicTemplateNode(region.definition, region.nodeId, "HeroTemplate");
+    const titled = addDynamicTemplateNode(hero.definition, region.nodeId, "HeadingSlot");
     const missingReviews = deriveTemplateProductionReadiness({
-      definition: hero.definition,
+      definition: titled.definition,
       reviewFacts: {
         desktop: false,
         mobile: false,
@@ -215,7 +216,7 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
       saveStatus: "success",
     });
     const reviewed = deriveTemplateProductionReadiness({
-      definition: hero.definition,
+      definition: titled.definition,
       reviewFacts: {
         desktop: true,
         mobile: true,
@@ -233,7 +234,7 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
       saveStatus: "success",
     });
 
-    expect(missingReviews.pageFieldCount).toBe(1);
+    expect(missingReviews.pageFieldCount).toBe(2);
     expect(missingReviews.layoutGroupCount).toBe(0);
     expect(missingReviews.organizationReady).toBe(true);
     expect(missingReviews.machineReady).toBe(true);
@@ -248,8 +249,9 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
     const blank = createBlankDynamicTemplateDefinition();
     const region = addDynamicTemplateNode(blank, blank.rootNodeId, "Container");
     const hero = addDynamicTemplateNode(region.definition, region.nodeId, "HeroTemplate");
+    const titled = addDynamicTemplateNode(hero.definition, region.nodeId, "HeadingSlot");
     const readiness = deriveTemplateProductionReadiness({
-      definition: hero.definition,
+      definition: titled.definition,
       reviewFacts: {
         desktop: true,
         mobile: true,
@@ -287,8 +289,9 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
     blank.description = "";
     const region = addDynamicTemplateNode(blank, blank.rootNodeId, "Container");
     const hero = addDynamicTemplateNode(region.definition, region.nodeId, "HeroTemplate");
+    const titled = addDynamicTemplateNode(hero.definition, region.nodeId, "HeadingSlot");
     const readiness = deriveTemplateProductionReadiness({
-      definition: hero.definition,
+      definition: titled.definition,
       reviewFacts: {
         desktop: true,
         mobile: true,

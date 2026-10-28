@@ -277,21 +277,14 @@ function readImageSource(value: unknown): string {
 }
 
 /**
- * 设计画布和放大预览只看结构。中性图片图标只放进图片槽，不铺到背景或其他槽位。
- * 背景图从这张预览里拿掉，避免回放已保存的照片。不写回默认内容。
- * 目录上的照片只来自管理员单独上传的预览图。
+ * 设计画布的图片槽使用中性示意，节点背景保持作者当前规则，方便看见刚设置的背景。
+ * 目录缩略图另行去掉背景和正式图片。这里不写回默认内容。
  */
 export function withNeutralTemplateImages(
   definition: TemplateDefinitionV2,
   content: Record<string, unknown>,
 ): { definition: TemplateDefinitionV2; contentBySlotId: Record<string, unknown> } {
   const projected = structuredClone(definition);
-  for (const node of Object.values(projected.nodes)) {
-    for (const device of ["desktop", "mobile", "tablet"] as const) {
-      const rules = node.responsive[device];
-      if (rules?.backgroundImage) rules.backgroundImage = "";
-    }
-  }
   const contentBySlotId = structuredClone(content);
   for (const slot of Object.values(definition.slots)) {
     if (slot.type !== "image") continue;

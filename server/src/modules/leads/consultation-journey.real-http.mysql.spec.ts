@@ -277,8 +277,24 @@ test('真实 HTTP + MySQL：作品咨询/选款回执、后台领取回复、本
     });
     stage('browser-journey-pass');
   } finally {
-    await stop();
-    await prisma.$disconnect();
+    // 浏览器验收已经结束。Nest 关闭或 Vite/Playwright 残留的套接字、MessagePort
+    // 会把 node:test 事件循环挂住，CI 会在结果已经打印后空等直到文件超时。
+    await Promise.race([
+      (async () => {
+        await stop();
+        await prisma.$disconnect();
+      })(),
+      new Promise((resolve) => setTimeout(resolve, 10_000)),
+    ]);
+    const handles = (process as unknown as {
+      _getActiveHandles?: () => Array<{ constructor?: { name?: string }; unref?: () => void }>;
+    })._getActiveHandles?.() ?? [];
+    for (const handle of handles) {
+      const name = handle.constructor?.name;
+      if (name === 'Socket' || name === 'MessagePort' || name === 'Server') {
+        try { handle.unref?.(); } catch { /* 残留句柄无法 unref 时不改变已完成的验收结果 */ }
+      }
+    }
     // 不清理任何业务库；统一 runner 只在已验证一次性目标中重置或销毁其拥有的容器。
   }
 });

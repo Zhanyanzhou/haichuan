@@ -1382,7 +1382,11 @@ export default function TemplateWorkspace({
             onClick={() => window.dispatchEvent(new Event("template-editor:open-settings"))}
           >
             <small>{previewMode ? "当前模板" : "模板设置 · 名称与尺寸"}</small>
-            <strong>{catalogCardName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)}</strong>
+            <strong>{
+              !draft.definition.name.trim() || draft.definition.name.trim() === "未命名模板"
+                ? "未命名模板"
+                : catalogCardName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)
+            }</strong>
           </button>
         ) : null}
         {previewMode ? (

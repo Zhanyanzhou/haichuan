@@ -852,6 +852,7 @@ function RenderNode({
   structureProtectedNodeIds,
   editableContractRoleIdsByNode,
   showEmptyStructure,
+  showEmptySlots = false,
   parentFree = false,
   siblingPlacements = [],
   siblingIndex = 0,
@@ -886,6 +887,7 @@ function RenderNode({
   structureProtectedNodeIds?: ReadonlySet<string>;
   editableContractRoleIdsByNode?: ReadonlyMap<string, ReadonlySet<string>>;
   showEmptyStructure: boolean;
+  showEmptySlots?: boolean;
   parentFree?: boolean;
   parentRules?: DynamicTemplateRenderPlanNode["rules"];
   relationalLayout?: boolean;
@@ -1117,6 +1119,7 @@ function RenderNode({
   };
   if (node.hidden) return null;
   const emptyPublicImage = mode === "public"
+    && !showEmptySlots
     && node.slot?.type === "image"
     && !readRenderedImageSource(node.content);
   if (emptyPublicImage) return null;
@@ -1327,6 +1330,7 @@ function RenderNode({
         structureProtectedNodeIds,
         editableContractRoleIdsByNode,
         showEmptyStructure,
+        showEmptySlots,
         parentFree: node.type === "Stack" && node.rules.layoutMode === "free",
         relationalLayout,
         preserveResolvedMobileRatio,
@@ -1487,6 +1491,7 @@ export default function DynamicTemplateRenderer({
         contentRenderMode={contentRenderMode}
         structureProtectedNodeIds={structureProtectedNodeIds}
         editableContractRoleIdsByNode={editableContractRoleIdsByNode}
+        showEmptySlots={showEmptySlots ?? mode === "editor"}
         showEmptyStructure={mode === "editor" && editorSurface === "template-definition"}
         sectionRole={definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole}
         inheritedCanvasColor={result.plan.metadata.defaultBackgroundToken

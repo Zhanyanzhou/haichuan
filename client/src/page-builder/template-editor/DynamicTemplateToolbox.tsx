@@ -150,6 +150,10 @@ function selectAddedComponent(nodeId: string) {
   else session.selectObject(nodeId);
 }
 
+function popupContainer() {
+  return document.body;
+}
+
 export function DynamicTemplateNodePalette({ open, onOpenChange }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -186,7 +190,7 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
       if (!(target instanceof Node)) return;
       const element = target instanceof Element ? target : target.parentElement;
       if (!element) return;
-      if (element.closest(".template-editor__add-popover-overlay")) return;
+      if (element.closest(".template-editor__add-popover-overlay, .template-editor__layout-starters")) return;
       if (regionTriggerRef.current?.contains(element) || slotTriggerRef.current?.contains(element)) return;
       closePanel();
     };
@@ -536,7 +540,12 @@ export function DynamicTemplateNodePalette({ open, onOpenChange }: {
 
   return <Popover
     open={open}
-    onOpenChange={(nextOpen) => { if (!nextOpen) closePanel(); }}
+    zIndex={4000}
+    getPopupContainer={popupContainer}
+    onOpenChange={() => {
+      // 面板内容每次重绘都会换成新节点，Popover 会因此上报关闭。
+      // 真正的关闭只走外部指针、Esc 和关闭按钮，避免面板刚打开就被收起。
+    }}
     placement={compactViewport ? "bottomLeft" : "rightBottom"}
     trigger={[]}
     overlayClassName="template-editor__add-popover-overlay"

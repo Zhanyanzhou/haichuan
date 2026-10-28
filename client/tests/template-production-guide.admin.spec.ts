@@ -83,11 +83,12 @@ test.describe("模板编辑简化（隔离接口 Mock）", () => {
       const state = useTemplateEditorSession.getState();
       const region = addDynamicTemplateNode(state.draft.definition, state.draft.definition.rootNodeId, "Container");
       const image = addDynamicTemplateNode(region.definition, region.nodeId, "ImageSlot");
-      image.definition.nodes[region.nodeId].responsive.desktop.height = { mode: "fixed", value: { value: 240, unit: "px" } };
-      image.definition.nodes[region.nodeId].responsive.mobile = { height: { mode: "fixed", value: { value: 240, unit: "px" } } };
-      image.definition.nodes[image.nodeId].responsive.desktop.height = { mode: "auto" };
-      image.definition.nodes[image.nodeId].responsive.mobile = { height: { mode: "auto" } };
-      state.setDynamicDefinition(image.definition);
+      const titled = addDynamicTemplateNode(image.definition, region.nodeId, "HeadingSlot");
+      titled.definition.nodes[region.nodeId].responsive.desktop.height = { mode: "fixed", value: { value: 240, unit: "px" } };
+      titled.definition.nodes[region.nodeId].responsive.mobile = { height: { mode: "fixed", value: { value: 240, unit: "px" } } };
+      titled.definition.nodes[image.nodeId].responsive.desktop.height = { mode: "auto" };
+      titled.definition.nodes[image.nodeId].responsive.mobile = { height: { mode: "auto" } };
+      state.setDynamicDefinition(titled.definition);
       return image.nodeId;
     });
     const publish = page.locator(".homepage-editor__toolbar").getByRole("button", { name: /^发布模板新版本/ });
