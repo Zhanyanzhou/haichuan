@@ -948,7 +948,7 @@ test("登录客户从选款回执按 canonical Lead 进入本人咨询详情", a
   expect(consultationPaths).not.toContain("/api/customers/me/consultations/71");
 });
 
-test("Catalog 在 390px 保持 4:5 媒体、可用对话框宽度并恢复触发焦点", async ({ page }) => {
+test("Catalog 在 390px 保持正方形作品格、可用对话框宽度并恢复触发焦点", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/catalog");
 
@@ -962,10 +962,11 @@ test("Catalog 在 390px 保持 4:5 媒体、可用对话框宽度并恢复触发
   await search.fill("");
   await search.blur();
 
-  const productMedia = page.locator("[data-catalog-product-media]").first();
-  const productMediaBox = await productMedia.boundingBox();
-  expect(productMediaBox).not.toBeNull();
-  expect(productMediaBox!.width / productMediaBox!.height).toBeCloseTo(0.8, 1);
+  const productCell = page.locator(".catalog-cell").first();
+  const productCellBox = await productCell.boundingBox();
+  expect(productCellBox).not.toBeNull();
+  expect(productCellBox!.width / productCellBox!.height).toBeCloseTo(1, 1);
+  await expect(page.locator("[data-catalog-product-media]").first()).toBeVisible();
 
   const openLink = page.locator("[data-catalog-product-focus]").first();
   await openLink.click();

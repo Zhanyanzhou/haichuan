@@ -36,8 +36,7 @@ for (const viewport of [
 
     await page.goto("/catalog");
 
-    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeAttached();
-    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeHidden();
+    await expectCatalogTitleForAssistiveTech(page);
     await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
     await expect(page.locator(".catalog-matrix")).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -63,8 +62,7 @@ test("Catalog 观察器构造异常时不升级为整页错误", async ({ page }
 
   await page.goto("/catalog");
 
-  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeAttached();
-  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeHidden();
+  await expectCatalogTitleForAssistiveTech(page);
   await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
   await expect(page.locator(".catalog-matrix")).toBeVisible();
   expect(pageErrors).toEqual([]);
@@ -146,8 +144,7 @@ test("Catalog 慢鉴权期间先显示公开目录，恢复会员后只刷新一
 
   await page.goto("/catalog");
   await profileBarrier.reached;
-  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeAttached();
-  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeHidden();
+  await expectCatalogTitleForAssistiveTech(page);
   await expect(page.getByText(publicItem.name, { exact: true })).toBeVisible();
   expect(publicReads).toBe(1);
   expect(memberReads).toBe(0);
@@ -257,6 +254,14 @@ const fiveModes = [
   publicProduct(5, "DISPLAY_ONLY"),
   publicProduct(6, "DISPLAY_ONLY"),
 ];
+
+async function expectCatalogTitleForAssistiveTech(page: import("@playwright/test").Page) {
+  const heading = page.getByRole("heading", { level: 1, name: "选款中心" });
+  await expect(heading).toBeAttached();
+  const box = await heading.boundingBox();
+  expect(box?.width ?? 99).toBeLessThanOrEqual(1);
+  expect(box?.height ?? 99).toBeLessThanOrEqual(1);
+}
 
 async function expectNoHorizontalOverflow(page: import("@playwright/test").Page) {
   await expect.poll(() => page.evaluate(
@@ -391,8 +396,7 @@ for (const viewport of [
     const writes = await mockCatalogDetail(page, { products: fiveModes });
     await page.goto("/catalog");
 
-    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeAttached();
-    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeHidden();
+    await expectCatalogTitleForAssistiveTech(page);
     await expect(page.getByRole("navigation", { name: "作品品类" })).toBeVisible();
     await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
     await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
@@ -1711,8 +1715,10 @@ test("DIRECT_PURCHASE 多尺寸规格保持起价，部分售罄与未知库存 
   await expect(page.locator(".product-detail-page__primary-action")).toHaveText("请先选择规格");
   await expect(page.locator(".product-detail-page__quantity")).toHaveCount(0);
   const decision = page.locator(".product-detail-page__decision-panel");
-  await expect(decision).toContainText("选择规格后查看对应尺寸");
-  await expect(decision).toContainText("当前结构化事实中暂无已核实的测量、佩戴适配或改圈指导");
+  const fit = page.locator(".product-detail-page__fit");
+  await expect(decision).toContainText("当前显示有效规格的最低公开价格，选择规格后显示该规格价格。");
+  await expect(decision).toContainText("购买前请核对所选规格与尺寸");
+  await expect(fit).toContainText("选择规格后查看对应尺寸");
 
   const available = page.getByRole("button", { name: /12 号.*可选择/ });
   const soldOut = page.getByRole("button", { name: /14 号.*已售罄/ });
@@ -1724,7 +1730,7 @@ test("DIRECT_PURCHASE 多尺寸规格保持起价，部分售罄与未知库存 
   await available.click();
   await expect(price).toContainText("¥12,800");
   await expect(price).not.toContainText("起");
-  await expect(decision.getByText("12 号", { exact: true })).toBeVisible();
+  await expect(fit.getByText("12 号", { exact: true })).toBeVisible();
   await expect(page.locator(".product-detail-page__primary-action")).toHaveText("加入购物车");
   await expect(page.locator(".product-detail-page__quantity")).toBeVisible();
   await expectWriteContract(writes);

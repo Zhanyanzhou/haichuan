@@ -5,7 +5,8 @@ import TemplateNativeResponsiveControls from "../../src/page-builder/template-ed
 import { getNativeDesignProperties } from "../../src/page-builder/template-editor/TemplateNativeDesignControls";
 import { useTemplateEditorSession } from "../../src/page-builder/template-editor/templateEditorSession";
 import { createNewDynamicTemplateDraft } from "../../src/page-builder/template-editor/dynamicTemplateDraftRepository";
-import { addDynamicTemplateNode, DynamicTemplateRenderer } from "../../src/page-builder/template-definition";
+import { addDynamicTemplateNode } from "../../src/page-builder/template-definition";
+import DynamicTemplateRenderer from "../../src/page-builder/template-definition/DynamicTemplateRenderer";
 import { setTemplateNodeRule, setTemplateSlotRule } from "../../src/page-builder/template-definition/responsive";
 import "../../src/styles/globals.css";
 import "../../src/pages/admin/HomepageConfig/editor.css";

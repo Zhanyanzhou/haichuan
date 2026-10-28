@@ -293,6 +293,10 @@
   background: #ffffff;
 }
 
+.catalog-toolbar__spacer {
+  align-self: stretch;
+}
+
 .catalog-image-trigger {
   display: flex;
   align-items: center;

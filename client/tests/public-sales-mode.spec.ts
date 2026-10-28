@@ -236,16 +236,16 @@ test("Catalog 消费服务端销售模式、派生价格和售罄状态", async 
   });
   await page.goto("/catalog");
 
-  await expect(page.getByText("¥12,800 起")).toBeVisible();
+  await expect(page.getByText("¥ 12,800 起")).toBeVisible();
   await expect(page.getByText("已售罄", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "查看作品" }).first()).toHaveAttribute("href", "/products/HC-1");
+  await expect(page.getByRole("link", { name: "查看作品" }).first()).toHaveAttribute("href", "/products/HC-1?from=%2Fcatalog");
   await expect(page.getByRole("button", { name: "+ 加入选款" })).toBeVisible();
   const displayOnlyCard = page.locator(".catalog-cell").filter({
     has: page.getByRole("heading", { name: "销售模式作品 3" }),
   });
   await expect(displayOnlyCard.getByText("仅展示", { exact: true })).toHaveCount(0);
   await expect(displayOnlyCard.getByRole("link", { name: "查看作品" }))
-    .toHaveAttribute("href", "/products/HC-3");
+    .toHaveAttribute("href", "/products/HC-3?from=%2Fcatalog");
   const placeholderImage = page.locator('img[src="/images/system/product-placeholder.svg"]').first();
   await expect(placeholderImage).toBeVisible();
   await expect.poll(() => placeholderImage.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
@@ -266,12 +266,12 @@ test("Catalog 在交易能力加载中先降级为查看作品，明确开放后
   await flagsBarrier.reached;
 
   await expect(page.getByRole("link", { name: "查看作品" }).first())
-    .toHaveAttribute("href", "/products/HC-4");
+    .toHaveAttribute("href", "/products/HC-4?from=%2Fcatalog");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 
   flagsBarrier.release();
   await expect(page.getByRole("link", { name: "查看并购买" }).first())
-    .toHaveAttribute("href", "/products/HC-4");
+    .toHaveAttribute("href", "/products/HC-4?from=%2Fcatalog");
 });
 
 test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) => {
@@ -282,7 +282,7 @@ test("Catalog 在交易能力读取失败时不承诺购买", async ({ page }) =
   await page.goto("/catalog");
 
   await expect(page.getByRole("link", { name: "查看作品" }).first())
-    .toHaveAttribute("href", "/products/HC-5");
+    .toHaveAttribute("href", "/products/HC-5?from=%2Fcatalog");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 });
 
@@ -311,7 +311,7 @@ for (const viewport of [
     expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await retry.click();
     await expect(page.getByRole("link", { name: "查看并购买" }).first())
-      .toHaveAttribute("href", "/products/HC-6");
+      .toHaveAttribute("href", "/products/HC-6?from=%2Fcatalog");
     await expect(recovery).toHaveCount(0);
     expect(flagsRequestCount.value).toBe(2);
     await expect.poll(() => page.evaluate(
@@ -558,7 +558,7 @@ test("购物车与支付开关关闭时不能进入交易或创建订单", async
   });
   await page.goto("/catalog");
   await expect(page.getByRole("link", { name: "查看作品" }).first())
-    .toHaveAttribute("href", "/products/HC-40");
+    .toHaveAttribute("href", "/products/HC-40?from=%2Fcatalog");
   await expect(page.getByRole("link", { name: "查看并购买" })).toHaveCount(0);
 
   await page.goto("/products/40");

@@ -2,10 +2,8 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 
-import {
-  DynamicTemplateRenderer,
-  validateDynamicTemplateDefinition,
-} from "../../src/page-builder/template-definition";
+import { validateDynamicTemplateDefinition } from "../../src/page-builder/template-definition";
+import DynamicTemplateRenderer from "../../src/page-builder/template-definition/DynamicTemplateRenderer";
 
 const STORAGE_KEY = "dynamic-template-action-public-payload";
 const rawPayload = sessionStorage.getItem(STORAGE_KEY);

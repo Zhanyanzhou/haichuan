@@ -51,9 +51,10 @@
 
 @media (max-width: 767px) {
   .site-main[data-page-key="products"] .hc-products-page-frame {
-    /* Hero：媒体 4:5 + 文案带（上下内边距 32/48 + 四行内容 194.5px，
-       移动端标题字号恒为 clamp 下限 42px）。 */
-    min-height: calc(100vw * 5 / 4 + 274.5px);
+    /* Hero：媒体 4:5 + 文案带。文案带 = 上下内边距 32/48
+       + 眉题 12×1.4 与下边距 12 + 标题 42×1.2 + 副标题上边距 26 与 16×1.5
+       + 行动上边距 28 与最小高度 44 = 281.2px。 */
+    min-height: calc(100vw * 5 / 4 + 281.2px);
   }
 }
 
@@ -287,7 +288,7 @@
 .site-header__left-group > .site-header__nav-item--search > svg,
 .site-header__left-group > .site-header__nav-item:is([aria-label="搜索"], [aria-label="Collection"]) > svg,
 .brand-menu__top > a > svg,
-.brand-menu__top > button > svg {
+.brand-menu__top > [aria-label="搜索"] > svg {
   transform: translateY(-3.333%);
 }
 

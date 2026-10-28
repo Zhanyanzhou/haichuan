@@ -2288,7 +2288,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const visibility = inspector.getByRole("switch", { name: "在页面显示" });
     const publicStatus = inspector.getByRole("status", { name: "前台展示状态" });
     await expect(visibility).toBeChecked();
-    await expect(publicStatus).toHaveAttribute("data-state", "empty");
+    await expect(publicStatus).toHaveAttribute("data-state", "ready");
     await expect(canvas.locator('[data-dynamic-template-instance-id="dynamic-upgrade-instance"]'))
       .toHaveAttribute("data-dynamic-template-render-mode", "editor");
 
@@ -2322,7 +2322,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     await expect(refreshedVisibility).not.toBeChecked();
     await expect(refreshedPublicStatus).toHaveAttribute("data-state", "hidden");
     await refreshedVisibility.click();
-    await expect(refreshedPublicStatus).toHaveAttribute("data-state", "empty");
+    await expect(refreshedPublicStatus).toHaveAttribute("data-state", "ready");
     await expect(refreshedCanvas.getByText("页面实例填写内容", { exact: true })).toBeVisible();
   });
 
@@ -2524,7 +2524,9 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
     const heading = canvas.locator('[data-template-node-id="node_heading"]');
     await inspector.getByRole("group", { name: "页面实例属性范围" })
       .getByRole("button", { name: "标题", exact: true }).click();
-    await expect(inspector).toContainText("当前选择：标题");
+    await expect(inspector.getByRole("group", { name: "页面实例属性范围" })
+      .getByRole("button", { name: "标题", exact: true }))
+      .toHaveAttribute("aria-pressed", "true");
     await expect(inspector.getByRole("button", { name: "调整区域" })).toHaveCount(0);
     await expect(heading).toHaveAttribute("style", /translate\(8%, -4%\)/);
     const horizontalOffset = inspector.getByRole("spinbutton", { name: "水平偏移" });

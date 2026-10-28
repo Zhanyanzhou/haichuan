@@ -702,16 +702,12 @@ body:has(.homepage-editor)
   border-radius: 6px;
   background: var(--adm-neutral-bg);
 }
-/* 中等及以上工作区让设备切换器使用页面中心轴，不受右侧全局操作区挤压。
- * 更窄视口保留紧凑网格位置，避免与发布操作重叠。 */
-@media (min-width: 768px) {
-  .admin-header__editor-slot .homepage-editor__viewport-switcher {
-    position: fixed;
-    top: calc(var(--adm-header-h) / 2);
-    left: 50%;
-    z-index: 2;
-    transform: translate(-50%, -50%);
-  }
+/* 设备切换留在工具栏中列。固定到页面中心会盖住左侧的线上版本提醒。
+ * 切换器在 DOM 中排在工作模式之前，且只指定了第 2 列。不锁在同一行时，
+ * 网格会把后面的第 1 列放到下一行，模式按钮掉出顶栏后会被面板标题挡住。 */
+.admin-header__editor-slot .homepage-editor__toolbar > .homepage-editor__viewport-switcher,
+.admin-header__editor-slot .homepage-editor__toolbar > .homepage-editor__toolbar-left-context {
+  grid-row: 1;
 }
 .homepage-editor__viewport-switcher button {
   display: inline-flex;

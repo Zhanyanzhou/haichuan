@@ -301,7 +301,14 @@ test(
         const response = await fetch(`${origin}${path}`);
         assert.equal(response.status, expectedStatus, `${origin}${path}`);
         if (expectedStatus === 200) {
-          if (requireNoStore) assert.match(response.headers.get('cache-control') || '', /no-store/, `${origin}${path}`);
+          if (requireNoStore) {
+            const cacheControl = response.headers.get('cache-control') || '';
+            // 页面素材走 /uploads 时允许短时复核，接口副本仍禁止缓存。
+            const expectedCache = path.startsWith('/uploads/page-assets/')
+              ? /public,\s*max-age=0,\s*must-revalidate/
+              : /no-store/;
+            assert.match(cacheControl, expectedCache, `${origin}${path}`);
+          }
           assert.match(response.headers.get('x-content-type-options') || '', /(?:^|,\s*)nosniff(?:,|$)/, `${origin}${path}`);
           if (expectedBody) assert.deepEqual(Buffer.from(await response.arrayBuffer()), expectedBody, `${origin}${path}`);
         }

@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client";
 import {
   addDynamicTemplateNode,
   createBlankDynamicTemplateDefinition,
-  DynamicTemplateRenderer,
 } from "../../src/page-builder/template-definition";
+import DynamicTemplateRenderer from "../../src/page-builder/template-definition/DynamicTemplateRenderer";
 import "../../src/page-builder/template-editor/TemplateWorkspace.css";
 
 let definition = createBlankDynamicTemplateDefinition("Renderer 身份边界测试");

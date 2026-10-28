@@ -237,11 +237,25 @@ test("隔离画布：流式拖动重排保存关系，连续拖宽不修改模�
   await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 10, y: 60 } });
   const before = await snapshot(page);
   const beginReorder = async () => {
-    const move = await page.getByRole("button", { name: "拖动移动前图", exact: true }).boundingBox();
+    const moveButton = page.getByRole("button", { name: "拖动移动前图", exact: true });
     const target = await page.getByRole("button", { name: "选择模板目标 后图", exact: true }).boundingBox();
-    if (!move || !target) throw new Error("缺少移动源或落点");
-    await page.mouse.move(move.x + move.width / 2, move.y + move.height / 2); await page.mouse.down();
-    await page.mouse.move(target.x + target.width * .85, target.y + target.height * .7);
+    const start = await moveButton.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      for (let row = 0; row < 8; row += 1) for (let column = 0; column < 8; column += 1) {
+        const point = {
+          x: bounds.left + bounds.width * (column + .5) / 8,
+          y: bounds.top + bounds.height * (row + .5) / 8,
+        };
+        const hit = document.elementFromPoint(point.x, point.y);
+        if (hit === element || (hit && element.contains(hit))) return point;
+      }
+      return null;
+    });
+    if (!start || !target) throw new Error("缺少移动源或落点");
+    const end = { x: target.x + target.width * .85, y: target.y + target.height * .7 };
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 12 });
     await expect(page.getByRole("status").filter({ hasText: "重排：" })).toBeVisible();
     await expect(page.locator("[data-overlay-flow-insertion]")).toBeVisible();
     expect((await snapshot(page)).childIds).toEqual(before.childIds);
@@ -255,6 +269,7 @@ test("隔离画布：流式拖动重排保存关系，连续拖宽不修改模�
   expect((await snapshot(page)).history).toBe(1);
   await page.getByRole("button", { name: "撤销", exact: true }).click();
   expect((await snapshot(page)).childIds).toEqual(before.childIds);
+  await expect.poll(() => page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.stack}"] > [data-template-node-id]`).first().getAttribute("data-template-node-id")).toBe(before.ids.first);
   await beginReorder(); await page.keyboard.press("Escape"); await page.mouse.up();
   expect((await snapshot(page)).childIds).toEqual(before.childIds);
   expect((await snapshot(page)).history).toBe(0);
@@ -476,7 +491,7 @@ test("隔离画布：拖动预览改变真实内容，Esc零历史，提交仅�
 });
 
 test("隔离画布新增：取景可持续编辑、取消零写入、确认一次历史且外框不变", async ({ page }) => {
-  await mountCanvas(page, true); await enterStack(page);
+  await mountCanvas(page, true, false, false, false, false, false, "schema3"); await enterStack(page);
   await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 12, y: 55 } });
   const before = await snapshot(page);
   const node = page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.first}"]`);
@@ -735,7 +750,7 @@ for (const mode of ["root-ratio", "root-auto", "fixed"] as const) {
 }
 
 test("隔离画布新增：鼠标取景遵守屏幕阈值，松手保留预览，Esc恢复原取景", async ({ page }) => {
-  await mountCanvas(page, true); await enterStack(page);
+  await mountCanvas(page, true, false, false, false, false, false, "schema3"); await enterStack(page);
   await page.getByRole("button", { name: "选择模板目标 前图", exact: true }).click({ position: { x: 12, y: 55 } });
   const before = await snapshot(page);
   const image = page.frameLocator("iframe").locator(`[data-template-node-id="${before.ids.first}"] img`);

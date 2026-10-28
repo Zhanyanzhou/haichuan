@@ -4,9 +4,9 @@ import { MemoryRouter } from "react-router-dom";
 
 import {
   compileDynamicTemplateRenderPlan,
-  DynamicTemplateRenderer,
   validateDynamicTemplateDefinition,
 } from "../../src/page-builder/template-definition";
+import DynamicTemplateRenderer from "../../src/page-builder/template-definition/DynamicTemplateRenderer";
 import { createTemplatePreviewContentBySlotId } from "../../src/page-builder/template-editor/templatePreviewModel";
 
 const STORAGE_KEY = "dynamic-template-toolbox-public-definition";

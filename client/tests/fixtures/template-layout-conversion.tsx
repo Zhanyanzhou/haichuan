@@ -5,7 +5,8 @@ import TemplateLayoutConversionControls from "../../src/page-builder/template-ed
 import { createTemplateColumnResizeCommand } from "../../src/page-builder/template-editor/templateLayoutIntent";
 import { useTemplateEditorSession } from "../../src/page-builder/template-editor/templateEditorSession";
 import { createNewDynamicTemplateDraft } from "../../src/page-builder/template-editor/dynamicTemplateDraftRepository";
-import { addDynamicTemplateNode, DynamicTemplateRenderer } from "../../src/page-builder/template-definition";
+import { addDynamicTemplateNode } from "../../src/page-builder/template-definition";
+import DynamicTemplateRenderer from "../../src/page-builder/template-definition/DynamicTemplateRenderer";
 import { setTemplateNodeRule } from "../../src/page-builder/template-definition/responsive";
 import "../../src/styles/globals.css";
 import "../../src/page-builder/template-editor/TemplateWorkspace.css";

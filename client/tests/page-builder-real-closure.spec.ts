@@ -1630,7 +1630,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     );
 
     await page.getByRole("button", { name: "预览当前画布" }).click();
-    await expect(page.getByText("当前画布预览 · 1920 × 1200")).toBeVisible();
+    await expect(page.getByText(/正在预览/)).toBeVisible();
     await expect(
       page.frameLocator(".homepage-editor__canvas-scale iframe").getByText(publishedTitle),
     ).toBeVisible();
@@ -2442,10 +2442,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       await deviceButton.click();
       await expect(deviceButton).toHaveAttribute("aria-pressed", "true");
       await page.getByRole("button", { name: "预览当前画布", exact: true }).click();
-      await expect(page.getByText(
-        `当前画布预览 · ${preview.viewportLabel}`,
-        { exact: true },
-      )).toBeVisible();
+      await expect(page.getByText(/正在预览/)).toBeVisible();
       await expect(previewRenderer).toHaveAttribute(
         "data-dynamic-template-device",
         preview.device,

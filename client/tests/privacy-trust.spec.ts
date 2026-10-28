@@ -297,7 +297,7 @@ test.describe("匿名行为分析", () => {
     ).toHaveCount(0);
 
     await search.fill("戒指");
-    await page.getByRole("button", { name: "搜索" }).click();
+    await page.getByRole("search").getByRole("button", { name: "搜索" }).click();
     await page.waitForTimeout(250);
 
     expect(analyticsRequests).toEqual([]);
@@ -337,7 +337,7 @@ test.describe("匿名行为分析", () => {
     ).toBeVisible();
 
     await search.fill("戒指");
-    await page.getByRole("button", { name: "搜索" }).click();
+    await page.getByRole("search").getByRole("button", { name: "搜索" }).click();
     await page.waitForTimeout(250);
     expect(analyticsRequests).toEqual([]);
     expect(
@@ -394,7 +394,7 @@ test.describe("匿名行为分析", () => {
     const requestCountAfterWithdrawal = analyticsRequests.length;
 
     await search.fill("项链");
-    await page.getByRole("button", { name: "搜索" }).click();
+    await page.getByRole("search").getByRole("button", { name: "搜索" }).click();
     await page.waitForTimeout(250);
     expect(analyticsRequests).toHaveLength(requestCountAfterWithdrawal);
   });

@@ -614,6 +614,7 @@ function renderSlotContent(
     const src = typeof content === "string" ? content : typeof record?.src === "string" ? record.src : "";
     const alt = typeof record?.alt === "string" ? record.alt : "";
     const defaultFocus = objectPositionToPercent(node.slotRules?.objectPosition ?? TEMPLATE_MEDIA_DEFAULTS.objectPosition);
+    const focusPosition = `${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`;
     // 对外页面没有图片就不留外框。编辑和方案预览仍铺满比例框，标出图片位置。
     if (!src.trim()) {
       if (mode === "public") return null;
@@ -651,7 +652,7 @@ function renderSlotContent(
               viewport={editorViewport ?? "desktop"}
               sizes={resolveTemplateImageSizes(node, editorViewport ?? "desktop", priority)}
               objectFit="contain"
-              objectPosition="center"
+              objectPosition={focusPosition}
             />
           </span>
         </span>
@@ -668,11 +669,11 @@ function renderSlotContent(
         viewport={editorViewport ?? "desktop"}
         sizes={resolveTemplateImageSizes(node, editorViewport ?? "desktop", priority)}
         objectFit={objectFit}
-        objectPosition={`${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`}
+        objectPosition={focusPosition}
         transform={node.layoutOverride?.imageScalePercent && node.layoutOverride.imageScalePercent !== 100
           ? `scale(${node.layoutOverride.imageScalePercent / 100})`
           : undefined}
-        transformOrigin={`${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`}
+        transformOrigin={focusPosition}
       />
     );
   }

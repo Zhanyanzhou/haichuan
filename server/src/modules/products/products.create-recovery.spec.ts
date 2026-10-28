@@ -30,7 +30,7 @@ function persistedProduct(overrides: Record<string, unknown> = {}) {
     craftTechnique: null,
     detailContent: null,
     status: "DRAFT",
-    visibility: "MEMBER",
+    visibility: "PUBLIC",
     salesMode: "DISPLAY_ONLY",
     inventoryPolicy: "STANDARD",
     purchaseRegion: "MAINLAND",

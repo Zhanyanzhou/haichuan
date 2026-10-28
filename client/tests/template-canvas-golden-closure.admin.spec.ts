@@ -275,6 +275,8 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await page.locator('[data-template-design-property="node.columns"]').getByRole("button", { name: "恢复继承", exact: true }).click();
     await expect(page.getByRole("spinbutton", { name: "网格列数", exact: true })).toHaveValue("3");
     await number(page, "网格列数", 1);
+    await enter(page, region);
+    await add(page, "标题");
     const saved = await savedReopenAndUse(page, server, "黄金卡片");
     expect(saved.nodes[grid].childIds).toEqual(cards);
     for (const [width, columns] of [[1280, 3], [834, 3], [390, 1]]) {

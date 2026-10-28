@@ -739,7 +739,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await subtitleInput.fill("连续输入后保存的完整副标题");
 
     await page.getByRole("button", { name: "预览当前画布" }).click();
-    await expect(page.getByText("当前画布预览 · 1920 × 1200")).toBeVisible();
+    await expect(page.getByText(/正在预览/)).toBeVisible();
     await expect(
       page
         .frameLocator(".homepage-editor__canvas-scale iframe")
@@ -1788,7 +1788,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     });
     await expect(page).toHaveURL(/\/admin\/editor\/custom$/);
     await expect(page.locator(".homepage-editor__toolbar")).toHaveCount(0);
-    await expect(page.locator(".ant-spin-spinning")).toBeVisible();
+    await expect(page.locator("[role='status']", { hasText: "正在加载店铺装修" })).toBeVisible();
     expect(writes).toEqual([]);
     expect(validations).toEqual([]);
 

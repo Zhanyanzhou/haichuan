@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import DynamicTemplateRenderer from "../../src/page-builder/template-definition/DynamicTemplateRenderer";
 import {
   compileDynamicTemplateRenderPlan,
-  DynamicTemplateRenderer,
   resolveEditableTargets,
   type DynamicTemplateResponsiveRules,
   type TemplateDefinitionV2,

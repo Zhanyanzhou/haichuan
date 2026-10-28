@@ -593,7 +593,7 @@ test.describe("公开页面导航一致性", () => {
     await expect(page.getByRole("dialog", { name: "品牌菜单" })).toBeVisible();
     await expect.poll(() => page.locator(".brand-menu__inner").evaluate((drawer) => drawer.getBoundingClientRect().left)).toBe(0);
     const closeMetrics = await readControlMetrics("[data-menu-close]");
-    const drawerSearchMetrics = await readControlMetrics(".brand-menu__top > a");
+    const drawerSearchMetrics = await readControlMetrics('.brand-menu__top [aria-label="搜索"]');
     expect(closeMetrics).toEqual(menuMetrics);
     expect(drawerSearchMetrics).toEqual(headerSearchMetrics);
   });
@@ -629,6 +629,7 @@ test.describe("公开页面导航一致性", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await mockPublishedHeaderDocuments(page);
     await page.goto("/");
+    await expect(page.getByRole("heading", { name: "已发布品牌页" })).toBeVisible();
     const banner = page.getByRole("banner");
     const menu = page.getByRole("button", { name: "打开菜单" });
     await expect(banner).not.toHaveClass(/is-concealed/);
