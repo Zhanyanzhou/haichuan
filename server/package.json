@@ -46,7 +46,7 @@
     "class-validator": "^0.14.0",
     "dayjs": "^1.11.10",
     "helmet": "^8.3.0",
-    "multer": "^2.3.0",
+    "multer": "^2.5.0",
     "nestjs-pino": "^4.6.1",
     "nodemailer": "^10.0.6",
     "openai": "^7.3.0",
@@ -79,10 +79,12 @@
   },
   "overrides": {
     "@nestjs/platform-express": {
-      "multer": "2.3.0"
+      "multer": "2.5.0"
     },
     "@nestjs/swagger": {
       "js-yaml": "5.2.3"
-    }
+    },
+    "body-parser": "2.4.0",
+    "proxy-addr": "2.0.8"
   }
 }
