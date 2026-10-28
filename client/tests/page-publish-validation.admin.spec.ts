@@ -627,10 +627,10 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
     await expect(pageSwitcher).toHaveValue("home");
     await expect(pageSwitcher.locator("option")).toHaveText([
       "店铺首页",
-      "关于海川",
       "珠宝作品",
       "选款中心",
       "珠宝定制",
+      "关于海川",
       "预约咨询",
     ]);
   });
@@ -910,7 +910,7 @@ test.describe("店铺装修 —— 发布资格与安全边界", () => {
       );
       const mobileImage = page.locator('[data-inspector-field="mobileImage"][data-page-publish-located="true"]');
       await expect(mobileImage).toBeVisible();
-      const enableMobileImage = mobileImage.getByRole("button", { name: "单独设置手机端" });
+      const enableMobileImage = mobileImage.getByRole("button", { name: "上传手机竖图" });
       if (await enableMobileImage.count()) await enableMobileImage.click();
       await mobileImage.getByRole("button", { name: /图片链接|粘贴图片链接/ }).click();
       const imageUrl = mobileImage.getByPlaceholder("输入图片 URL；清空后确认 = 删除图片");

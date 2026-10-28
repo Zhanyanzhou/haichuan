@@ -2865,7 +2865,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       .map((instance) => instance.instanceId);
     const upgradedInstanceIdentities = [
       { instanceId: populatedV1InstanceId, version: 2 },
-      { instanceId: untouchedV1InstanceId, version: 1 },
+      { instanceId: untouchedV1InstanceId, version: 2 },
     ];
     const populatedV1 = v1Instances.find((block) => (
       (block.props?.contentBySlotId as Record<string, unknown> | undefined)?.[slotsByKey.heading.slotId]
@@ -3137,20 +3137,27 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       ),
     );
     expect(dynamicTemplateVersions(draftBeforeUpgrade, createdTemplate.templateId))
-      .toEqual([1, 1]);
+      .toEqual([2, 2]);
     expect(dynamicTemplateVersions(publicBeforeUpgrade, createdTemplate.templateId))
       .toEqual([1, 1]);
-    expect(draftBeforeUpgrade.updatedAt).toBe(draftAfterPageV1Publish.updatedAt);
     expect(draftBeforeUpgrade.publishedRevisionId)
       .toBe(draftAfterPageV1Publish.publishedRevisionId);
     expect(publicBeforeUpgrade.version).toBe(pageRevisionV1.version);
+    const adoptedPopulated = draftBeforeUpgrade.puckData.content.find((block) => (
+      block.props?.instanceId === populatedV1InstanceId
+    ));
+    expect(adoptedPopulated?.props?.contentBySlotId).toMatchObject({
+      [slotsByKey.heading.slotId]: "周年典藏系列",
+      [slotsByKey.description.slotId]: "以克制留白呈现珠宝工艺与佩戴光泽。",
+    });
 
     await page.reload();
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "页面装修", exact: true }).click();
     await recoverTemplateCatalogAfterThrottle(page);
     await populatedV1Layer.click();
-    await expect(instanceInspector).toContainText("发现新版本 v2");
+    await expect(instanceInspector).toContainText(`固定版本 ${createdTemplate.templateId} v2`);
+    await expect(instanceInspector).not.toContainText("发现新版本 v2");
     const pageDocumentWritePaths: string[] = [];
     const capturePageDocumentWrite = (request: import("@playwright/test").Request) => {
       const url = new URL(request.url());
@@ -3161,41 +3168,6 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     };
     page.on("request", capturePageDocumentWrite);
 
-    await instanceInspector.getByRole("button", { name: "查看差异" }).click();
-    const upgradeDialog = page.getByRole("dialog", { name: "模板版本升级：v1 → v2" });
-    await expect(upgradeDialog).toContainText("周年典藏系列");
-    await expect(upgradeDialog).toContainText("确认后只修改当前内存草稿并增加一条页面历史");
-    await upgradeDialog.getByRole("button", { name: "保留当前版本", exact: true }).click();
-    await expect(upgradeDialog).toBeHidden();
-    await expect(instanceInspector).toContainText(`固定版本 ${createdTemplate.templateId} v1`);
-    expect(pageDocumentWritePaths).toEqual([]);
-
-    const draftAfterCancelledUpgrade = await responseData<PageDocumentSnapshot>(
-      await page.request.get(
-        `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`,
-      ),
-    );
-    const publicAfterCancelledUpgrade = await responseData<PageDocumentSnapshot>(
-      await page.request.get(
-        `${apiBaseUrl}/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
-      ),
-    );
-    expect(dynamicTemplateVersions(draftAfterCancelledUpgrade, createdTemplate.templateId))
-      .toEqual([1, 1]);
-    expect(draftAfterCancelledUpgrade.updatedAt).toBe(draftBeforeUpgrade.updatedAt);
-    expect(draftAfterCancelledUpgrade.publishedRevisionId)
-      .toBe(draftBeforeUpgrade.publishedRevisionId);
-    expect(dynamicTemplateVersions(publicAfterCancelledUpgrade, createdTemplate.templateId))
-      .toEqual([1, 1]);
-    expect(publicAfterCancelledUpgrade.version).toBe(publicBeforeUpgrade.version);
-    expect(pageDocumentWritePaths).toEqual([]);
-
-    await instanceInspector.getByRole("button", { name: "查看差异" }).click();
-    await expect(upgradeDialog).toBeVisible();
-    await upgradeDialog.getByRole("button", { name: "确认升级页面草稿", exact: true }).click();
-    await expect(page.getByText("页面实例已升级到 v2；尚未保存页面草稿，可使用页面撤销回退"))
-      .toBeVisible();
-    await expect(instanceInspector).toContainText(`固定版本 ${createdTemplate.templateId} v2`);
     await expect(instanceInspector.getByRole("textbox", { name: "主标题" }))
       .toHaveValue("周年典藏系列");
     await expect(instanceInspector.getByRole("textbox", { name: "描述" }))
@@ -3221,39 +3193,10 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       }))
     ))).toEqual(upgradedInstanceIdentities);
     expect(pageDocumentWritePaths).toEqual([]);
-
-    const draftAfterInMemoryUpgrade = await responseData<PageDocumentSnapshot>(
-      await page.request.get(
-        `${apiBaseUrl}/page-modules/document/admin?pageKey=${pageKey}`,
-      ),
-    );
-    const publicAfterInMemoryUpgrade = await responseData<PageDocumentSnapshot>(
-      await page.request.get(
-        `${apiBaseUrl}/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
-      ),
-    );
-    expect(dynamicTemplateVersions(draftAfterInMemoryUpgrade, createdTemplate.templateId))
-      .toEqual([1, 1]);
-    expect(draftAfterInMemoryUpgrade.updatedAt).toBe(draftBeforeUpgrade.updatedAt);
-    expect(draftAfterInMemoryUpgrade.publishedRevisionId)
-      .toBe(draftBeforeUpgrade.publishedRevisionId);
-    expect(dynamicTemplateVersions(publicAfterInMemoryUpgrade, createdTemplate.templateId))
-      .toEqual([1, 1]);
-    expect(publicAfterInMemoryUpgrade.version).toBe(publicBeforeUpgrade.version);
-    expect(pageDocumentWritePaths).toEqual([]);
     await page.screenshot({
       path: testInfo.outputPath("dynamic-template-explicit-upgrade-v1-to-v2.png"),
       fullPage: true,
     });
-
-    const saveV2PageResponsePromise = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return response.request().method() === "PUT"
-        && url.pathname === "/api/page-modules/document";
-    });
-    await page.getByRole("button", { name: "保存当前装修草稿" }).click();
-    expect((await saveV2PageResponsePromise).ok()).toBe(true);
-    expect(pageDocumentWritePaths).toEqual(["/api/page-modules/document"]);
     await page.reload();
     await expect(page.locator(".homepage-editor__layer-item")).toHaveCount(2);
 
@@ -3263,7 +3206,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     const versionedInstances = draftAfterV2.puckData.content.filter((block) => (
       block.props?.templateId === createdTemplate.templateId
     ));
-    expect(versionedInstances.map((block) => block.props?.templateVersion)).toEqual([2, 1]);
+    expect(versionedInstances.map((block) => block.props?.templateVersion)).toEqual([2, 2]);
     expect(dynamicTemplateInstanceIdentities(draftAfterV2, createdTemplate.templateId))
       .toEqual(upgradedInstanceIdentities);
     const upgradedPopulatedV2 = versionedInstances.find((block) => (
@@ -3335,8 +3278,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       );
       const pageRevisionV2 = phase1Revisions.items.find((revision) => revision.isPublished);
       if (!pageRevisionV2) throw new Error("phase1 页面 v2 发布后缺少线上 revision");
-      expect(dynamicTemplateVersions(phase1Draft, createdTemplate.templateId)).toEqual([2, 1]);
-      expect(dynamicTemplateVersions(phase1Public, createdTemplate.templateId)).toEqual([2, 1]);
+      expect(dynamicTemplateVersions(phase1Draft, createdTemplate.templateId)).toEqual([2, 2]);
+      expect(dynamicTemplateVersions(phase1Public, createdTemplate.templateId)).toEqual([2, 2]);
       expect(pageRevisionV2.id).toBe(phase1Draft.publishedRevisionId);
       expect(pageRevisionV2.version).toBe(pageRevisionV1.version + 1);
       const pageRevisionV2Detail = await responseData<PageDocumentRevisionDetail>(
@@ -3384,9 +3327,9 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       ),
     );
     expect(dynamicTemplateVersions(draftAfterV2Publish, createdTemplate.templateId))
-      .toEqual([2, 1]);
+      .toEqual([2, 2]);
     expect(dynamicTemplateVersions(publicAfterV2Publish, createdTemplate.templateId))
-      .toEqual([2, 1]);
+      .toEqual([2, 2]);
     expect(draftAfterV2Publish.publishedRevisionId).not.toBe(pageRevisionV1.id);
     const pageRevisionsAfterV2Publish = await responseData<{
       items: PageDocumentRevisionSummary[];
@@ -3407,7 +3350,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(pageRevisionV2Detail.id).toBe(draftAfterV2Publish.publishedRevisionId);
     expect(pageRevisionV2Detail.isPublished).toBe(true);
     expect(dynamicTemplateVersions(pageRevisionV2Detail, createdTemplate.templateId))
-      .toEqual([2, 1]);
+      .toEqual([2, 2]);
     expect(dynamicTemplateInstanceIdentities(pageRevisionV2Detail, createdTemplate.templateId))
       .toEqual(upgradedInstanceIdentities);
     const pageRevisionV2PuckDataSnapshot = structuredClone(pageRevisionV2Detail.puckData);
@@ -3434,7 +3377,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     );
     expect(anonymousPublicAfterV2Publish.version).toBe(pageRevisionV2.version);
     expect(dynamicTemplateVersions(anonymousPublicAfterV2Publish, createdTemplate.templateId))
-      .toEqual([2, 1]);
+      .toEqual([2, 2]);
     expect(dynamicTemplateInstanceIdentities(
       anonymousPublicAfterV2Publish,
       createdTemplate.templateId,
@@ -3458,7 +3401,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     const publicUpgradedV2 = publicTemplateInstances.nth(0);
     const publicLockedV1 = publicTemplateInstances.nth(1);
     await expect(publicUpgradedV2).toHaveAttribute("data-dynamic-template-version", "2");
-    await expect(publicLockedV1).toHaveAttribute("data-dynamic-template-version", "1");
+    await expect(publicLockedV1).toHaveAttribute("data-dynamic-template-version", "2");
     const publicUpgradedV2Renderer = publicUpgradedV2.locator(
       `.hc-dynamic-template[data-dynamic-template-id="${createdTemplate.templateId}"]`,
     );
@@ -3473,7 +3416,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     await expect(publicUpgradedV2.getByRole("link", { name: "查看系列" }))
       .toHaveAttribute("href", "/products");
     await expect(publicLockedV1.getByText("经典常青系列", { exact: true })).toBeVisible();
-    await expect(publicLockedV1.locator("h1")).toHaveCount(0);
+    await expect(publicLockedV1.locator("h1").getByText("经典常青系列", { exact: true })).toBeVisible();
     await expect(publicLockedV1.getByRole("link", { name: "浏览经典系列" }))
       .toHaveAttribute("href", "/products");
     const publicV2TextGroup = publicUpgradedV2.locator(
@@ -3483,7 +3426,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       `[data-template-node-id="${textGroupNodeId}"]`,
     );
     await expect(publicV2TextGroup).toHaveCSS("gap", "20px");
-    await expect(publicV1TextGroup).toHaveCSS("gap", "4px");
+    await expect(publicV1TextGroup).toHaveCSS("gap", "20px");
     expect(await publicV2TextGroup.evaluate((node) => (
       node.parentElement?.getAttribute("data-template-node-id")
     ))).toBe(stageNode.nodeId);
@@ -3528,8 +3471,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     const renderedV2Gap = v2SecondChildBox.y - (v2FirstChildBox.y + v2FirstChildBox.height);
     const renderedV1Gap = v1SecondChildBox.y - (v1FirstChildBox.y + v1FirstChildBox.height);
     expect(Math.abs(renderedV2Gap - 20)).toBeLessThanOrEqual(1);
-    expect(Math.abs(renderedV1Gap - 4)).toBeLessThanOrEqual(1);
-    expect(renderedV2Gap).toBeGreaterThan(renderedV1Gap + 10);
+    expect(Math.abs(renderedV1Gap - 20)).toBeLessThanOrEqual(1);
     await publishedV2Page.screenshot({
       path: testInfo.outputPath("dynamic-template-v2-public-1920x1200.png"),
       fullPage: true,
@@ -3634,7 +3576,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     expect(archivedPageRevisionV2.isPublished).toBe(true);
     expect(archivedPageRevisionV2.puckData).toEqual(pageRevisionV2PuckDataSnapshot);
     expect(dynamicTemplateVersions(archivedPageRevisionV2, createdTemplate.templateId))
-      .toEqual([2, 1]);
+      .toEqual([2, 2]);
     expect(dynamicTemplateInstanceIdentities(archivedPageRevisionV2, createdTemplate.templateId))
       .toEqual(upgradedInstanceIdentities);
     const anonymousPublicAfterArchive = await responseData<PageDocumentSnapshot>(
@@ -3644,7 +3586,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     );
     expect(anonymousPublicAfterArchive.version).toBe(pageRevisionV2.version);
     expect(dynamicTemplateVersions(anonymousPublicAfterArchive, createdTemplate.templateId))
-      .toEqual([2, 1]);
+      .toEqual([2, 2]);
     expect(dynamicTemplateInstanceIdentities(
       anonymousPublicAfterArchive,
       createdTemplate.templateId,
@@ -3658,7 +3600,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       }))
     ))).toEqual(upgradedInstanceIdentities);
     await expect(publicV2TextGroup).toHaveCSS("gap", "20px");
-    await expect(publicV1TextGroup).toHaveCSS("gap", "4px");
+    await expect(publicV1TextGroup).toHaveCSS("gap", "20px");
     await expect(publicTemplateInstances.nth(0).getByText("周年典藏系列", { exact: true }))
       .toBeVisible();
     await expect(publicTemplateInstances.nth(0).getByRole("img", {
@@ -3714,7 +3656,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
       `${apiBaseUrl}/page-modules/document/published?pageKey=${pageKey}&locale=zh-CN`,
     ));
     expect(finalPublic.version).toBe(pageRevisionV2.version);
-    expect(dynamicTemplateVersions(finalPublic, createdTemplate.templateId)).toEqual([2, 1]);
+    expect(dynamicTemplateVersions(finalPublic, createdTemplate.templateId)).toEqual([2, 2]);
     expect(dynamicTemplateInstanceIdentities(finalPublic, createdTemplate.templateId))
       .toEqual(upgradedInstanceIdentities);
 
@@ -3755,7 +3697,7 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
     );
     expect(draftAfterRollback.puckData).toEqual(draftBeforeRollback.puckData);
     expect(dynamicTemplateVersions(draftAfterRollback, createdTemplate.templateId))
-      .toEqual([2, 1]);
+      .toEqual([2, 2]);
     expect(dynamicTemplateInstanceIdentities(draftAfterRollback, createdTemplate.templateId))
       .toEqual(upgradedInstanceIdentities);
     expect(draftAfterRollback.publishedRevisionId).not.toBe(pageRevisionV1.id);

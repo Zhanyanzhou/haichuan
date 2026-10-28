@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import BlockEmptyPlaceholder from "@/components/blocks/_shared/BlockEmptyPlaceholder";
 import type { PageModule } from "@/types/pageModule";
-import { resolveLinkTargetUrl } from "@/page-builder/utils/linkTarget";
+import { resolveLinkTargetUrl, resolveStorefrontLinkTargetUrl } from "@/page-builder/utils/linkTarget";
 import { RESPONSIVE_CANVAS } from "@/page-builder/config/blockContracts";
 import { IMAGE_SPECS } from "@/page-builder/config/imageSpecs";
 import { DesignSystemStyles } from "@/page-builder/designSystem/sectionShell";
@@ -15,10 +15,16 @@ import {
 } from "@/page-builder/layout/contentTemplateLayouts";
 import { hasRenderableImageDimensions } from "@/utils/imageLoad";
 import { resolveMediaSlotImage } from "@/page-builder/config/mediaSlotContract";
+import {
+  resolveManagedTemplateMediaPreviewUrl,
+  useManagedTemplateMediaDisplayUrl,
+} from "@/page-builder/template-definition/managedMediaPreview";
 
 interface Props {
   module?: PageModule;
   editMode?: boolean;
+  /** 页面装修：空槽不占高度，选中本节后才在画面边缘显示添加入口。 */
+  emptySlotPlacement?: "overlay";
   headingLevel?: 1 | 2;
   priority?: boolean;
 }
@@ -39,9 +45,21 @@ function publicHeroMedia(value: unknown, editMode: boolean | undefined) {
 /**
  * Hero 模块 — 全屏首屏主视觉
  */
+const INSPECTOR_FIELD_MESSAGE = "hc-canvas-inspector-field";
+
+function focusInspectorField(field: string) {
+  const parentWindow = window.parent;
+  if (!parentWindow || parentWindow === window) return;
+  parentWindow.postMessage(
+    { type: INSPECTOR_FIELD_MESSAGE, field },
+    window.location.origin,
+  );
+}
+
 export default function HeroSection({
   module,
   editMode,
+  emptySlotPlacement,
   headingLevel = 1,
   priority = false,
 }: Props) {
@@ -72,6 +90,10 @@ export default function HeroSection({
   const imageFailed = failedImageSourceKey === imageSourceKey;
   const imageReady = readyImageSourceKey === imageSourceKey;
   const mediaRef = useRef<HTMLDivElement | null>(null);
+  // 编辑画布在 iframe 中。未公开的 /uploads/page-assets 会 404，失败后只会留下空占位。
+  // 预览字节在这块画面所在的文档里生成 blob，替换后的图才能出现在画布上。
+  const desktopPreview = useManagedTemplateMediaDisplayUrl(desktopImg, Boolean(editMode), mediaRef);
+  const mobilePreview = useManagedTemplateMediaDisplayUrl(mobileImg, Boolean(editMode), mediaRef);
   const [loadableImageSourceKey, setLoadableImageSourceKey] = useState<string | null>(
     editMode || priority ? imageSourceKey : null,
   );
@@ -108,13 +130,23 @@ export default function HeroSection({
   const actionText = typeof c?.actionText === "string" ? c.actionText : "";
   const Heading = headingLevel === 2 ? "h2" : "h1";
   const linkUrl = typeof c?.linkUrl === "string" ? c.linkUrl : "";
-  const targetUrl = resolveLinkTargetUrl({
+  const linkTarget = {
     targetType: c?.targetType,
     productCode: c?.productCode,
     productId: c?.productId,
     categorySlug: c?.categorySlug,
     linkUrl,
-  });
+  };
+  const targetUrl = editMode
+    ? resolveLinkTargetUrl(linkTarget)
+    : resolveStorefrontLinkTargetUrl(linkTarget);
+  const overlaySlots = Boolean(editMode && emptySlotPlacement === "overlay");
+  const hasRealCopy = Boolean(
+    eyebrow || title || subtitle || (editMode ? actionText.trim() : actionText && targetUrl),
+  );
+  const mobileFrameUsesDesktopImage = Boolean(
+    editMode && configuredDesktopImg && !configuredMobileImg,
+  );
   const legacyFocusX = s?.focusX ?? 50;
   const legacyFocusY = s?.focusY ?? 50;
   const desktopFocusX = s?.desktopFocusX ?? legacyFocusX;
@@ -126,6 +158,13 @@ export default function HeroSection({
   const rawAlign = l?.alignment || l?.template || "center";
   const alignment = rawAlign === "left" ? "left" : "center";
   const hasConfiguredImage = Boolean(desktopImg || mobileImg);
+  const editorCanvasSrc = (source: string, preview: { displaySrc: string; status: string }) => {
+    if (!editMode) return source;
+    if (preview.status === "error") return resolveManagedTemplateMediaPreviewUrl(source);
+    return preview.displaySrc;
+  };
+  const desktopCanvasSrc = editorCanvasSrc(desktopImg, desktopPreview);
+  const mobileCanvasSrc = editorCanvasSrc(mobileImg, mobilePreview);
   const useNeutralMediaFallback = Boolean(editMode && (!hasConfiguredImage || imageFailed));
   const textTone = useNeutralMediaFallback ? "dark" : "light";
   const heroStyle = {
@@ -141,7 +180,7 @@ export default function HeroSection({
 
   return (
     <section
-      className={`hc-content-template hc-phase1-hero${editMode ? " hc-phase1-hero--edit" : ""} relative w-full overflow-hidden hc-section`}
+      className={`hc-content-template hc-phase1-hero${editMode ? " hc-phase1-hero--edit" : ""}${overlaySlots ? " hc-phase1-hero--overlay-slots" : ""} relative w-full overflow-hidden hc-section`}
       data-content-template={CONTENT_TEMPLATE_LAYOUTS.hero.key}
       data-visual-role={CONTENT_TEMPLATE_LAYOUTS.hero.visualRole}
       data-height-mode-desktop={
@@ -165,22 +204,32 @@ export default function HeroSection({
         data-content-role-desktop="desktopImage"
         data-content-role-mobile="mobileImage"
       >
-        {desktopImg && !imageFailed && shouldLoadImage ? (
+        {desktopCanvasSrc && !imageFailed && shouldLoadImage ? (
           <picture data-editor-field="desktopImage mobileImage">
-            {mobileImg ? (
+            {!editMode && mobileImg ? (
               <source
                 media={RESPONSIVE_CANVAS.mobileMediaQuery}
                 srcSet={mobileMedia.srcSet || mobileImg}
                 sizes={mobileMedia.sizes}
               />
             ) : null}
+            {editMode && mobileCanvasSrc && mobileCanvasSrc !== desktopCanvasSrc ? (
+              <source
+                media={RESPONSIVE_CANVAS.mobileMediaQuery}
+                srcSet={mobileCanvasSrc}
+              />
+            ) : null}
             <img
-              src={desktopImg}
-              srcSet={desktopMedia.srcSet}
-              sizes={desktopMedia.sizes}
+              src={desktopCanvasSrc}
+              {...(editMode ? {} : {
+                srcSet: desktopMedia.srcSet,
+                sizes: desktopMedia.sizes,
+                width: desktopMedia.width,
+                height: desktopMedia.height,
+              })}
               alt={c?.altText || title}
               loading={editMode ? "eager" : desktopMedia.loading}
-              {...(desktopMedia.fetchPriority ? { fetchpriority: desktopMedia.fetchPriority } : {})}
+              {...(!editMode && desktopMedia.fetchPriority ? { fetchpriority: desktopMedia.fetchPriority } : {})}
               decoding={desktopMedia.decoding}
               onLoad={(event) => {
                 const renderable = hasRenderableImageDimensions(event.currentTarget);
@@ -191,8 +240,6 @@ export default function HeroSection({
                 setFailedImageSourceKey(imageSourceKey);
                 setReadyImageSourceKey(null);
               }}
-              width={desktopMedia.width}
-              height={desktopMedia.height}
               className="hc-hero__image absolute inset-0 h-full w-full object-cover"
               style={{
                 opacity: imageReady && !imageFailed ? 1 : 0,
@@ -222,9 +269,12 @@ export default function HeroSection({
             主视觉图片暂不可用
           </div>
         ) : null}
+        {mobileFrameUsesDesktopImage ? (
+          <p className="hc-phase1-hero__mobile-source">桌面宽图铺入手机框</p>
+        ) : null}
       </div>
 
-      {!useNeutralMediaFallback && (title || subtitle || (actionText && targetUrl) || editMode) ? (
+      {!useNeutralMediaFallback && (overlaySlots ? hasRealCopy : title || subtitle || (actionText && targetUrl) || editMode) ? (
         <div
           aria-hidden="true"
           className="hc-phase1-hero__copy-shade"
@@ -233,15 +283,15 @@ export default function HeroSection({
       ) : null}
 
       {/* 桌面位于图片安全区；平板和手机由共享布局移到图片下方。 */}
-      {title || subtitle || (actionText && targetUrl) || editMode ? (
-        <div className="hc-phase1-hero__copy-band">
+      {(overlaySlots ? hasRealCopy : title || subtitle || (actionText && targetUrl) || editMode) ? (
+        <div className="hc-phase1-hero__copy-band" data-has-real-copy={hasRealCopy ? "true" : "false"}>
           <div
             className="hc-content-template__copy hc-phase1-hero__copy"
             data-content-role="copy"
             data-align={alignment}
             data-tone={textTone}
           >
-            {eyebrow || editMode ? (
+            {(overlaySlots ? Boolean(eyebrow) : eyebrow || editMode) ? (
               <p
                 data-editor-field="eyebrow"
                 data-hc-editor-placeholder={!eyebrow && editMode ? "true" : undefined}
@@ -258,7 +308,7 @@ export default function HeroSection({
                 {eyebrow || "点击添加眉题"}
               </p>
             ) : null}
-            {title || editMode ? (
+            {(overlaySlots ? Boolean(title) : title || editMode) ? (
               <Heading
                 data-editor-field="title"
                 data-hc-editor-placeholder={!title && editMode ? "true" : undefined}
@@ -276,7 +326,7 @@ export default function HeroSection({
                 {title || "点击添加主标题"}
               </Heading>
             ) : null}
-            {subtitle || editMode ? (
+            {(overlaySlots ? Boolean(subtitle) : subtitle || editMode) ? (
               <p
                 data-editor-field="subtitle"
                 data-hc-editor-placeholder={!subtitle && editMode ? "true" : undefined}
@@ -294,7 +344,18 @@ export default function HeroSection({
                 {subtitle || "点击添加副标题"}
               </p>
             ) : null}
-            {editMode ? (
+            {overlaySlots ? (
+              actionText.trim() ? (
+                <span
+                  data-content-role="action"
+                  data-editor-field="actionText"
+                  className="hc-content-template__action"
+                  style={{ fontFamily: `var(--hc-font-sans, ${FONT_SANS})` }}
+                >
+                  {actionText} <span>→</span>
+                </span>
+              ) : null
+            ) : editMode ? (
               <span
                 data-content-role="action"
                 data-editor-field="actionText"
@@ -327,6 +388,30 @@ export default function HeroSection({
           </div>
         </div>
       ) : null}
+      {overlaySlots ? (
+        <div className="hc-phase1-hero__slot-affordance">
+          {!eyebrow ? (
+            <button type="button" data-editor-field="eyebrow" className="hc-visual-empty-role" onClick={() => focusInspectorField("eyebrow")}>
+              点击添加眉题
+            </button>
+          ) : null}
+          {!title ? (
+            <button type="button" data-editor-field="title" className="hc-visual-empty-role" onClick={() => focusInspectorField("title")}>
+              点击添加主标题
+            </button>
+          ) : null}
+          {!subtitle ? (
+            <button type="button" data-editor-field="subtitle" className="hc-visual-empty-role" onClick={() => focusInspectorField("subtitle")}>
+              点击添加副标题
+            </button>
+          ) : null}
+          {!actionText.trim() ? (
+            <button type="button" data-editor-field="actionText" className="hc-content-template__action hc-visual-empty-role" onClick={() => focusInspectorField("actionText")}>
+              点击添加行动文字 <span>→</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {/* 静态下滑线：保留方向提示，不用持续动画干扰珠宝影像。 */}
       {desktopImg ? (
         <span
@@ -343,6 +428,34 @@ export default function HeroSection({
         .hc-hero__image { object-position: var(--hc-hero-focus-desktop); }
         .hc-phase1-hero__copy-band {
           z-index: 3;
+        }
+        .hc-phase1-hero__copy > :first-child {
+          margin-top: 0;
+        }
+        .hc-phase1-hero__mobile-source {
+          display: none;
+        }
+        .hc-phase1-hero--overlay-slots .hc-phase1-hero__slot-affordance {
+          position: absolute;
+          z-index: 5;
+          top: 16px;
+          right: 16px;
+          display: none;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 8px;
+          max-width: calc(100% - 32px);
+          pointer-events: none;
+        }
+        [class*="DraggableComponent--isSelected"] .hc-phase1-hero--overlay-slots .hc-phase1-hero__slot-affordance {
+          display: flex;
+        }
+        [class*="DraggableComponent--isSelected"] .hc-phase1-hero--overlay-slots .hc-phase1-hero__slot-affordance,
+        [class*="DraggableComponent--isSelected"] .hc-phase1-hero--overlay-slots .hc-visual-empty-role {
+          pointer-events: auto !important;
+        }
+        .hc-phase1-hero__slot-affordance .hc-visual-empty-role {
+          margin: 0;
         }
         .hc-phase1-hero__copy-shade {
           position: absolute;
@@ -384,6 +497,8 @@ export default function HeroSection({
           margin-block: 0 8px;
           border: 1px dashed currentColor;
           padding: 6px 10px;
+          background: transparent;
+          color: inherit;
           font-family: var(--hc-font-sans, ${FONT_SANS}) !important;
           font-size: 14px !important;
           font-style: normal !important;
@@ -401,6 +516,23 @@ export default function HeroSection({
         }
         @media ${RESPONSIVE_CANVAS.mobileMediaQuery} {
           .hc-hero__image { object-position: var(--hc-hero-focus-mobile); }
+          .hc-phase1-hero__mobile-source {
+            position: absolute;
+            z-index: 4;
+            top: 12px;
+            left: 12px;
+            display: block;
+            margin: 0;
+            padding: 4px 8px;
+            background: rgba(247, 248, 248, 0.92);
+            color: #181A1B;
+            font-family: var(--hc-font-sans, ${FONT_SANS});
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 18px;
+            letter-spacing: 0;
+            pointer-events: none;
+          }
         }
         @media (max-width: 1023px) {
           .hc-phase1-hero__copy-shade { display: none; }

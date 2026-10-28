@@ -423,7 +423,7 @@ export function describePublishedTemplateAvailability(
   const catalog = catalogStatus === "fresh" ? "目录已确认可用" : "正在核对页面装修目录";
   const consequence = version <= 1
     ? "可在页面装修中选用，不会改任何现有页面。"
-    : "已有页面继续锁定原版本。";
+    : "正在使用它的页面草稿会自动沿用这个版本，页面里已填写的内容会保留。客户前台在发布页面后更新。";
   return `模板 v${version} 已发布；${catalog}。${consequence}`;
 }
 

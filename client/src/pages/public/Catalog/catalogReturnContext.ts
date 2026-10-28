@@ -3,7 +3,7 @@ export type CatalogReturnContext = {
   productReference: string;
   productId: number;
   productIndex: number;
-  focusTarget: "detail" | "quick-view";
+  focusTarget: "detail" | "card";
   scrollY: number;
 };
 
@@ -27,6 +27,47 @@ export function recordCatalogDeparture(context: CatalogReturnContext): void {
     productIndex: Math.max(0, Math.trunc(context.productIndex)),
     scrollY: Math.max(0, Number.isFinite(context.scrollY) ? context.scrollY : 0),
   };
+}
+
+const CATALOG_RETURN_BASE = "https://catalog-return.invalid";
+const CATALOG_RETURN_MAX_LENGTH = 512;
+
+/**
+ * 只接受本次选款中心地址。筛选已经在这条地址里，刷新后仍可返回，
+ * 且不把浏览轨迹写入 localStorage 或 sessionStorage。
+ */
+export function sanitizeCatalogReturnUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const candidate = value.trim();
+  const hasControlCharacter = Array.from(candidate).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127;
+  });
+  if (
+    !candidate
+    || candidate.length > CATALOG_RETURN_MAX_LENGTH
+    || !candidate.startsWith("/catalog")
+    || candidate.startsWith("//")
+    || candidate.includes("\\")
+    || hasControlCharacter
+  ) return null;
+
+  try {
+    const parsed = new URL(candidate, CATALOG_RETURN_BASE);
+    if (parsed.origin !== CATALOG_RETURN_BASE) return null;
+    if (parsed.pathname !== "/catalog" && !parsed.pathname.startsWith("/catalog/")) return null;
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+/** 把当前筛选地址带到作品链接上，刷新后面包屑仍能回到同一结果。 */
+export function productPathWithCatalogReturn(productPath: string, catalogUrl: string | null): string {
+  const safeCatalogUrl = sanitizeCatalogReturnUrl(catalogUrl);
+  if (!safeCatalogUrl) return productPath;
+  const separator = productPath.includes("?") ? "&" : "?";
+  return `${productPath}${separator}from=${encodeURIComponent(safeCatalogUrl)}`;
 }
 
 /** 详情页只读取来源链接，不提前消费目录恢复信息。 */

@@ -1,4 +1,4 @@
-/** 全局 Puck 配置：只保留首屏测试模板与两个系统区块。 */
+/** 全局 Puck 配置。新区块从模板组件库加入；这里只负责渲染已有区块。 */
 import type { Config } from "@puckeditor/core";
 import type { ReactNode } from "react";
 import { businessRegionPuckConfig } from "../adapters/businessRegion.puck";
@@ -18,7 +18,6 @@ import {
   CONTENT_TEMPLATE_RENDER_SURFACE,
   useContentTemplateRenderSurface,
 } from "../runtime/ContentTemplateRenderSurface";
-import { getCategoryComponents } from "./blockMeta";
 
 type MyComponents = {
   动态模板实例: DynamicTemplateInstanceProps;
@@ -83,6 +82,7 @@ export const puckConfig: Config<MyComponents> = {
     网站全局设置: siteConfigPuckConfig,
     业务功能区: businessRegionPuckConfig,
   },
-  categories: getCategoryComponents() as Config<MyComponents>["categories"],
+  // 页面区块只从模板组件库添加。这里不提供第二套可插入组件。
+  categories: {},
   root: { render: ({ children }) => <div>{children}</div>, fields: {} },
 };

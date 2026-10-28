@@ -1,6 +1,6 @@
-/** 页面装修目录在发布交接后的定位、添加落点和升级主次，不写入页面。 */
+/** 页面装修目录在发布交接后的定位和添加落点，不写入页面。版本沿用按 D.43，不在这里提供升级。 */
 
-export type PageTemplateHandoffFocus = "add" | "upgrade" | "none";
+export type PageTemplateHandoffFocus = "add" | "none";
 
 export function resolvePublishedTemplateInsertionIndex(
   contentLength: number,
@@ -39,32 +39,17 @@ export function describePageTemplateHandoff(input: {
   name: string;
   version: number;
   pageHasBlocks: boolean;
-  upgradeCount: number;
   hasSelection: boolean;
 }) {
   const quoted = `“${input.name}”`;
   const versionLabel = `v${input.version}`;
   const add = describePageTemplateAddAction(input);
-  const upgradeCount = Math.max(0, input.upgradeCount);
-
-  if (upgradeCount > 0) {
-    return {
-      liveStatus: `刚发布的${quoted}${versionLabel} 已定位到模板组件库。当前页面有 ${upgradeCount} 处旧实例可升级；也可拖到目标位置添加新实例。`,
-      cardAriaLabel: `刚发布的${input.name}版本${input.version}，可升级已有实例，或拖到目标位置添加`,
-      add,
-      upgradeLabel: `升级 ${upgradeCount} 处`,
-      upgradeAriaLabel: `升级页面中的${input.name}模板实例，共 ${upgradeCount} 处`,
-      focusTarget: "upgrade" as const satisfies PageTemplateHandoffFocus,
-    };
-  }
 
   if (input.pageHasBlocks) {
     return {
-      liveStatus: `刚发布的${quoted}${versionLabel} 已定位到模板组件库。请拖到目标位置，或${add.title}。`,
+      liveStatus: `刚发布的${quoted}${versionLabel} 已定位到模板组件库。正在使用它的页面草稿会自动沿用这一版。请拖到目标位置，或${add.title}。`,
       cardAriaLabel: `刚发布的${input.name}版本${input.version}，可拖到目标位置或${add.title}`,
       add,
-      upgradeLabel: null,
-      upgradeAriaLabel: `升级页面中的${input.name}模板实例，共 0 处`,
       focusTarget: "none" as const satisfies PageTemplateHandoffFocus,
     };
   }
@@ -73,8 +58,6 @@ export function describePageTemplateHandoff(input: {
     liveStatus: `刚发布的${quoted}${versionLabel} 已定位到模板组件库，可预览或添加到当前页面。`,
     cardAriaLabel: `刚发布的${input.name}版本${input.version}，可预览或添加到当前页面`,
     add,
-    upgradeLabel: null,
-    upgradeAriaLabel: `升级页面中的${input.name}模板实例，共 0 处`,
     focusTarget: "add" as const satisfies PageTemplateHandoffFocus,
   };
 }

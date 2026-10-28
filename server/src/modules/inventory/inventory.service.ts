@@ -9,6 +9,7 @@ import { PrismaService } from "../../common/prisma/prisma.service";
 import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 import { ProductsService } from "../products/products.service";
 import { Prisma } from "@prisma/client";
+import { parseInventoryProductIds } from "./inventory-product-ids";
 import { CreateWarehouseDto, UpdateWarehouseDto } from "./dto/warehouse.dto";
 
 type InventoryActor = Pick<StaffPrincipal, "id" | "sessionFamilyId">;
@@ -62,10 +63,15 @@ export class InventoryService {
     pageSize?: number;
     warehouseId?: number;
     status?: string;
+    productIds?: string;
   }, actor: InventoryActor) {
-    const { page = 1, pageSize = 20, warehouseId, status } = params;
+    const { page = 1, pageSize = 20, warehouseId, productIds } = params;
     const where: Prisma.InventoryWhereInput = {};
     if (warehouseId) where.warehouseId = warehouseId;
+    const selectedProductIds = parseInventoryProductIds(productIds);
+    if (selectedProductIds) {
+      where.sku = { productId: { in: selectedProductIds } };
+    }
 
     return this.prisma.$transaction(async (tx) => {
       await this.lockAuthorizedInventoryActor(tx, actor, "read");

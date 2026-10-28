@@ -101,9 +101,9 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
       await expect(headerActions).toBeAttached();
       await expect(headerActions.getByRole("button", { name: "打开菜单", exact: true })).toBeVisible();
       if (viewport.name === "desktop") {
-        await expect(headerActions.getByRole("link", { name: "搜索", exact: true })).toBeVisible();
+        await expect(headerActions.getByRole("button", { name: "搜索", exact: true })).toBeVisible();
       } else {
-        await expect(headerActions.getByRole("link", { name: "搜索", exact: true })).toBeHidden();
+        await expect(headerActions.getByRole("button", { name: "搜索", exact: true })).toBeHidden();
       }
       await scan(page, testInfo, "privacy");
 

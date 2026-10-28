@@ -17,8 +17,10 @@ import {
 const PAGE_MODULE_DELETE_RECOVERY_COPY =
   "确认后，当前编辑会话中可用顶部“撤销”恢复；刷新或离开编辑会话后，不能依靠撤销找回。发布历史只包含已发布快照；从未发布的模块内容无法从发布历史恢复。";
 import { ROOT_ZONE, focusCanvasBlock, useHomepagePuck } from "../editor-store";
-import { getModuleDisplayName } from "../editor-utils";
+import { getModuleDisplayName, resolveTemplateSectionRole } from "../editor-utils";
 import { DYNAMIC_TEMPLATE_BLOCK_TYPE } from "@/page-builder/dynamic-template-instance/types";
+import { useResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
+import { usePublishedTemplateSectionRoles } from "@/page-builder/template-editor/publishedTemplateSectionRoles";
 import type { PuckProps } from "@/page-builder/types";
 import { getContentTemplateContract } from "@/page-builder/generated/contentTemplates.generated";
 import { resolveVisualNode } from "@/page-builder/runtime/visualLayout";
@@ -109,6 +111,8 @@ export default function LayerRail({
   const visualSelection = useVisualEditorSession((state) => state.selection);
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
   const content = appData.content as PageModuleData[];
+  const resolvedDefinitions = useResolvedDynamicTemplateDefinitions();
+  const rolesByTemplateId = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   /** 多选下标集合（仅未锁定模块） */
@@ -131,10 +135,14 @@ export default function LayerRail({
       const key = groupKey(item);
       const ordinal = (seen.get(key) || 0) + 1;
       seen.set(key, ordinal);
-      const base = getModuleDisplayName(item.type, item.props);
+      const base = getModuleDisplayName(
+        item.type,
+        item.props,
+        resolveTemplateSectionRole(item.props, { definitions: resolvedDefinitions, rolesByTemplateId }),
+      );
       return (totals.get(key) || 0) > 1 ? `${base} ${ordinal}/${totals.get(key)}` : base;
     });
-  }, [content]);
+  }, [content, resolvedDefinitions, rolesByTemplateId]);
 
   const layerScrollRef = useRef<HTMLDivElement>(null);
   const pageLayerScrollTopRef = useRef(0);

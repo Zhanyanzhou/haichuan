@@ -17,6 +17,7 @@ import {
 } from "@ant-design/icons";
 import {
   categoryApi,
+  inventoryApi,
   productApi,
   type ProductAdminQuery,
 } from "@/services/api";
@@ -32,6 +33,10 @@ import {
   AdminLoadingState,
 } from "@/components/common/AdminDataStates";
 import ProductManageTable from "./ProductManageTable";
+import { ProductBatchPriceModal } from "./ProductBatchPriceModal";
+import { ProductBatchStockModal } from "./ProductBatchStockModal";
+import type { BatchPriceUpdate } from "./productBatchPrice";
+import type { BatchStockSource, BatchStockUpdate } from "./productBatchStock";
 import { useAuthStore } from "@/store/authStore";
 import {
   statusMeta,
@@ -43,6 +48,7 @@ import "./ProductManage.css";
 type ProductActionError = { status?: number };
 
 const DEFAULT_PRODUCT_PAGE_SIZE = 20;
+const MAX_BATCH_SELECTION = 50;
 const DEFAULT_PRODUCT_SORT: NonNullable<ProductAdminQuery["sortBy"]> =
   "updated_desc";
 
@@ -106,6 +112,7 @@ export default function ProductManage() {
   const navigate = useNavigate();
   const role = useAuthStore((state) => state.user?.role);
   const canGovernPublic = role === "SUPER_ADMIN" || role === "ADMIN";
+  const canInventory = role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE";
   const [searchParams, setSearchParams] = useSearchParams();
   const initialTitleKeyword = searchParams.get("title") || "";
   const initialCodeKeyword = searchParams.get("code") || "";
@@ -141,6 +148,15 @@ export default function ProductManage() {
     { value: number; label: string }[]
   >([]);
   const [selectedIds, setSelectedIds] = useState<Key[]>([]);
+  const [priceModalOpen, setPriceModalOpen] = useState(false);
+  const [priceModalLoading, setPriceModalLoading] = useState(false);
+  const [priceTargets, setPriceTargets] = useState<ProductListItem[]>([]);
+  const [priceUnresolvedCount, setPriceUnresolvedCount] = useState(0);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [stockModalLoading, setStockModalLoading] = useState(false);
+  const [stockRecords, setStockRecords] = useState<BatchStockSource[]>([]);
+  const [stockMissingNames, setStockMissingNames] = useState<string[]>([]);
+  const [stockTruncated, setStockTruncated] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [countsAvailable, setCountsAvailable] = useState(false);
   const [debouncedKeyword, setDebouncedKeyword] = useState(
@@ -215,7 +231,7 @@ export default function ProductManage() {
 
   const loadCategories = useCallback(async () => {
     try {
-      // 管理端分类树：返回全部分类（公开树 /categories/tree 只含有公开商品的分类，商品清空后会变空）
+      // 管理端分类树含停用记录。选款中心读 /categories/tree，只含启用中的分类。
       const response = await categoryApi.getManageTree();
       const options: { value: number; label: string }[] = [];
       const walk = (nodes: Category[], parentLabel = "") => {
@@ -522,6 +538,238 @@ export default function ProductManage() {
     };
     await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
     return { succeeded, failed };
+  };
+
+  const selectedProductIds = () => selectedIds
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id > 0);
+
+  const openBatchStock = async () => {
+    const ids = selectedProductIds();
+    if (!ids.length) {
+      message.warning("请先选择商品，再设置库存");
+      return;
+    }
+    const limited = ids.slice(0, MAX_BATCH_SELECTION);
+    if (ids.length > MAX_BATCH_SELECTION) {
+      message.warning(`一次最多为 ${MAX_BATCH_SELECTION} 件商品设置库存，已带上前 ${MAX_BATCH_SELECTION} 件`);
+    }
+    setStockModalOpen(true);
+    setStockModalLoading(true);
+    setStockRecords([]);
+    setStockMissingNames([]);
+    setStockTruncated(false);
+    try {
+      const known = new Map(
+        products
+          .filter((product) => limited.includes(product.id))
+          .map((product) => [product.id, product]),
+      );
+      const missing = limited.filter((id) => !known.has(id));
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < missing.length) {
+          const id = missing[cursor++];
+          try {
+            const product = unwrapResponse<Product>(await productApi.getById(id));
+            if (product?.id) known.set(product.id, product);
+          } catch {
+            // 读不到的商品留在后面的“没有库存记录”之外，由库存接口结果决定。
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, missing.length) }, worker));
+
+      const pageSize = 100;
+      const collected: Array<{
+        id: number;
+        quantity?: number;
+        skuCode?: string;
+        productName?: string;
+        warehouse?: string | { name?: string };
+        sku?: { skuCode?: string; product?: { id?: number; name?: string } };
+      }> = [];
+      let total = 0;
+      for (let page = 1; page <= 5; page += 1) {
+        const data = unwrapResponse<{ list: typeof collected; total: number }>(
+          await inventoryApi.getList({ page, pageSize, productIds: limited.join(",") }),
+        );
+        if (!data || !Array.isArray(data.list) || !Number.isFinite(Number(data.total))) {
+          throw new Error("Invalid inventory response");
+        }
+        total = Number(data.total);
+        collected.push(...data.list);
+        if (collected.length >= total || data.list.length === 0) break;
+      }
+
+      const records: BatchStockSource[] = [];
+      const seenProductIds = new Set<number>();
+      for (const item of collected) {
+        const productId = item.sku?.product?.id;
+        if (!Number.isInteger(productId) || productId == null) continue;
+        const product = known.get(productId);
+        seenProductIds.add(productId);
+        const warehouse = typeof item.warehouse === "string" ? item.warehouse : item.warehouse?.name;
+        records.push({
+          id: item.id,
+          productId,
+          productName: item.sku?.product?.name ?? item.productName ?? product?.name ?? "未命名商品",
+          skuCode: item.sku?.skuCode ?? item.skuCode ?? "",
+          warehouse: warehouse ?? "",
+          quantity: item.quantity ?? 0,
+          inventoryPolicy: product?.inventoryPolicy,
+        });
+      }
+      setStockRecords(records);
+      setStockMissingNames(limited.flatMap((id) => {
+        if (seenProductIds.has(id)) return [];
+        return [known.get(id)?.name ?? `商品 ${id}`];
+      }));
+      setStockTruncated(collected.length < total);
+    } catch (error: unknown) {
+      message.error(getSafeAdminErrorMessage(error, "库存读取失败，请稍后重试。"));
+      setStockModalOpen(false);
+    } finally {
+      setStockModalLoading(false);
+    }
+  };
+
+  const applyBatchStock = async (updates: BatchStockUpdate[], remark: string) => {
+    if (!updates.length || batchProcessing) return;
+    setBatchProcessing(true);
+    message.loading({
+      content: `正在更新 ${updates.length} 条库存…`,
+      key: "batch-stock",
+      duration: 0,
+    });
+    const queue = [...updates];
+    const failed: unknown[] = [];
+    let succeeded = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < queue.length) {
+        const current = queue[cursor++];
+        try {
+          await inventoryApi.update(current.id, {
+            type: "adjust",
+            quantity: current.quantity,
+            expectedQuantity: current.expectedQuantity,
+            remark,
+          });
+          succeeded += 1;
+        } catch (error: unknown) {
+          failed.push(error);
+        }
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+      if (failed.length === 0) {
+        message.success({ content: `已更新 ${succeeded} 条库存`, key: "batch-stock" });
+        setStockModalOpen(false);
+      } else if (succeeded > 0) {
+        message.warning({
+          content: `已更新 ${succeeded} 条库存，${failed.length} 条未完成。${getSafeAdminErrorMessage(failed[0], "请重新打开预览后再试。")}`,
+          key: "batch-stock",
+        });
+        setStockModalOpen(false);
+      } else {
+        message.error({
+          content: getSafeAdminErrorMessage(failed[0], "库存调整失败，请核对后重试。"),
+          key: "batch-stock",
+        });
+      }
+      if (succeeded > 0) void loadProducts();
+    } finally {
+      setBatchProcessing(false);
+    }
+  };
+
+  const openBatchPrice = async () => {
+    const ids = selectedProductIds();
+    if (!ids.length) {
+      message.warning("请先选择商品，再设置成交价");
+      return;
+    }
+    const limited = ids.slice(0, MAX_BATCH_SELECTION);
+    if (ids.length > MAX_BATCH_SELECTION) {
+      message.warning(`一次最多为 ${MAX_BATCH_SELECTION} 件商品设置成交价，已带上前 ${MAX_BATCH_SELECTION} 件`);
+    }
+    setPriceModalOpen(true);
+    setPriceModalLoading(true);
+    setPriceUnresolvedCount(0);
+    const known = new Map(
+      products
+        .filter((product) => limited.includes(product.id))
+        .map((product) => [product.id, product]),
+    );
+    const missing = limited.filter((id) => !known.has(id));
+    let unresolved = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < missing.length) {
+        const id = missing[cursor++];
+        try {
+          const product = unwrapResponse<Product>(await productApi.getById(id));
+          if (product?.id) known.set(product.id, product);
+          else unresolved += 1;
+        } catch {
+          unresolved += 1;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, missing.length) }, worker));
+    setPriceTargets(limited.flatMap((id) => {
+      const product = known.get(id);
+      return product ? [product] : [];
+    }));
+    setPriceUnresolvedCount(unresolved);
+    setPriceModalLoading(false);
+  };
+
+  const applyBatchPrice = async (updates: BatchPriceUpdate[]) => {
+    if (!updates.length || batchProcessing) return;
+    setBatchProcessing(true);
+    message.loading({
+      content: `正在更新 ${updates.length} 个规格的成交价…`,
+      key: "batch-price",
+      duration: 0,
+    });
+    const queue = [...updates];
+    const failed: unknown[] = [];
+    let succeeded = 0;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < queue.length) {
+        const current = queue[cursor++];
+        try {
+          await productApi.updateSku(current.productId, current.skuId, { price: current.price });
+          succeeded += 1;
+        } catch (error: unknown) {
+          failed.push(error);
+        }
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+      if (failed.length === 0) {
+        message.success({ content: `已更新 ${succeeded} 个规格的成交价`, key: "batch-price" });
+        setPriceModalOpen(false);
+      } else if (succeeded > 0) {
+        message.warning({
+          content: `已更新 ${succeeded} 个规格，${failed.length} 个未完成。${getProductActionErrorMessage(failed[0], "改价")}`,
+          key: "batch-price",
+        });
+      } else {
+        message.error({
+          content: getProductActionErrorMessage(failed[0], "改价"),
+          key: "batch-price",
+        });
+      }
+      if (succeeded > 0) void loadProducts();
+    } finally {
+      setBatchProcessing(false);
+    }
   };
 
   const changeSelectedStatus = async (status: ProductStatus) => {
@@ -913,40 +1161,55 @@ export default function ProductManage() {
           <Dropdown
             overlayClassName="product-manage__dropdown"
             menu={{
-              items: canGovernPublic ? [
+              items: [
                 {
-                  key: "published",
-                  label: "批量上架",
+                  key: "price",
+                  label: "批量设置成交价",
                   disabled: batchProcessing || activeStatus === "ARCHIVED",
-                  onClick: () => requestSelectedStatusChange("PUBLISHED"),
+                  onClick: () => void openBatchPrice(),
                 },
-                {
-                  key: "offline",
-                  label: "批量下架",
+                ...(canInventory ? [{
+                  key: "inventory",
+                  label: "批量设置库存",
                   disabled: batchProcessing || activeStatus === "ARCHIVED",
-                  onClick: () => requestSelectedStatusChange("OFFLINE"),
-                },
-                {
-                  key: "delete",
-                  label: "移入回收站",
-                  danger: true,
-                  disabled: batchProcessing || activeStatus === "ARCHIVED",
-                  onClick: confirmBatchArchive,
-                },
-              ] : [
-                {
-                  key: "submit-review",
-                  label: "批量提交审核",
-                  disabled: batchProcessing || activeStatus === "ARCHIVED" || activeStatus === "PUBLISHED" || activeStatus === "OFFLINE",
-                  onClick: () => void submitSelectedForReview(),
-                },
-                {
-                  key: "archive-drafts",
-                  label: "将草稿移入回收站",
-                  danger: true,
-                  disabled: batchProcessing || activeStatus !== "DRAFT",
-                  onClick: confirmBatchArchive,
-                },
+                  onClick: () => void openBatchStock(),
+                }] : []),
+                { type: "divider" },
+                ...(canGovernPublic ? [
+                  {
+                    key: "published",
+                    label: "批量上架",
+                    disabled: batchProcessing || activeStatus === "ARCHIVED",
+                    onClick: () => requestSelectedStatusChange("PUBLISHED"),
+                  },
+                  {
+                    key: "offline",
+                    label: "批量下架",
+                    disabled: batchProcessing || activeStatus === "ARCHIVED",
+                    onClick: () => requestSelectedStatusChange("OFFLINE"),
+                  },
+                  {
+                    key: "delete",
+                    label: "移入回收站",
+                    danger: true,
+                    disabled: batchProcessing || activeStatus === "ARCHIVED",
+                    onClick: confirmBatchArchive,
+                  },
+                ] : [
+                  {
+                    key: "submit-review",
+                    label: "批量提交审核",
+                    disabled: batchProcessing || activeStatus === "ARCHIVED" || activeStatus === "PUBLISHED" || activeStatus === "OFFLINE",
+                    onClick: () => void submitSelectedForReview(),
+                  },
+                  {
+                    key: "archive-drafts",
+                    label: "将草稿移入回收站",
+                    danger: true,
+                    disabled: batchProcessing || activeStatus !== "DRAFT",
+                    onClick: confirmBatchArchive,
+                  },
+                ]),
               ],
             }}
           >
@@ -1002,6 +1265,32 @@ export default function ProductManage() {
           />
         </div>
       )}
+      <ProductBatchPriceModal
+        open={priceModalOpen}
+        loading={priceModalLoading}
+        products={priceTargets}
+        unresolvedCount={priceUnresolvedCount}
+        canChangePublished={canGovernPublic}
+        applying={batchProcessing}
+        onCancel={() => {
+          if (batchProcessing) return;
+          setPriceModalOpen(false);
+        }}
+        onApply={(updates) => void applyBatchPrice(updates)}
+      />
+      <ProductBatchStockModal
+        open={stockModalOpen}
+        loading={stockModalLoading}
+        records={stockRecords}
+        missingProductNames={stockMissingNames}
+        truncated={stockTruncated}
+        applying={batchProcessing}
+        onCancel={() => {
+          if (batchProcessing) return;
+          setStockModalOpen(false);
+        }}
+        onApply={(updates, remark) => void applyBatchStock(updates, remark)}
+      />
     </div>
   );
 }

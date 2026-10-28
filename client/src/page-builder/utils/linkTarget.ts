@@ -67,6 +67,12 @@ export function normalizeCatalogIntentUrl(value: string): string {
 }
 
 /** 统一解析装修模板的点击目标；旧草稿未保存 targetType 时仍兼容 productId/linkUrl。 */
+/** 商品管理中的作品只在选款中心列出。公开装修页不链到单件作品。 */
+export function resolveStorefrontLinkTargetUrl(value: LinkTargetValue): string {
+  if (normalizeLinkTargetType(value) === "product") return "";
+  return resolveLinkTargetUrl(value);
+}
+
 export function resolveLinkTargetUrl(value: LinkTargetValue): string {
   const targetType = normalizeLinkTargetType(value);
   const productCode = typeof value.productCode === "string" ? value.productCode.trim() : "";

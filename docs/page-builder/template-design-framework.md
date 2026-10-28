@@ -535,7 +535,7 @@
 | 复制模板 | 将明确选定的普通模板草稿/版本复制为独立身份的新草稿，来源不变，不复制页面实例真实内容 |
 | 发布模板 | 创建不可变模板版本并更新模板目录；不改变页面 |
 | 替换模板 | 先展示内容、布局和开放范围差异；确认后只改变页面草稿 |
-| 升级模板版本 | 从当前精确版本迁移到所选新版本；取消零副作用，确认后仍需保存和发布页面 |
+| 升级模板版本 | 发布模板新版本时，正在使用旧版本的页面草稿和装修方案自动沿用；页面已填写内容保留。无法无损保留时该页保持旧版。客户前台仍等发布页面。未能自动沿用的实例才在页面装修里确认升级 |
 | 查看线上版本 | 只读比较，返回原编辑会话；不自动恢复或覆盖草稿 |
 
 普通可撤销调整不重复确认；丢弃修改、覆盖目标、跨版本迁移、归档和发布等具有明显后果的动作才使用与风险相称的确认。确认文案必须写清对象、版本和影响，不能只问“是否确定”。
@@ -565,7 +565,7 @@
 | 空内容责任边界 | 缺必填的系统示例不因为“缺真实内容”阻断模板发布；缺必填的真实页面实例按页面发布门禁处理 |
 | 发布前确认 | 打开检查零发布写入；保存并发布使用同一已检查草稿；检查后修改令结果失效；固定业务区限制与角色权限保持 |
 | 保存、发布与重试 | 重开数据一致；保存成功发布失败清楚区分；不确定响应先查证；确认成功且目录刷新失败不重复发布 |
-| 再次迭代 | 发布版本不可变；v1 与同一模板的新草稿并存；历史版本只载入当前身份；页面继续锁旧版直到显式升级 |
+| 再次迭代 | 发布版本不可变；v1 与同一模板的新草稿并存；历史版本只载入当前身份；页面草稿按 D.43 自动沿用新版本，已公开快照保持旧版直到发布页面 |
 | 目录与编辑对象分离 | 搜索排除当前模板、目录读取失败或另一模板加载失败时，现有草稿、选择和未提交输入仍保留；查看已发布版本不载入覆盖草稿 |
 | 整体尺寸与空容器 | 根比例、固定/随内容、尺寸上限、长文和不同媒体比例符合 4.4.1；越界提示可定位，空容器可选且辅助命中区不进入公开布局 |
 | 直接操作中断 | 在缩放与嵌套容器下操作，预览与提交一致；Esc、指针取消及切换前取消不留下半次修改；普通有效手势提交一次、撤销一次，显式预览以整次完成为一个事务，取消零提交 |
@@ -649,9 +649,9 @@
 
 | 官方资料 | 可借鉴机制 | 本项目适配 |
 | --- | --- | --- |
-| [Shopify Templates](https://help.shopify.com/en/manual/online-store/themes/theme-structure/templates) 与 [Theme editor features](https://help.shopify.com/en/manual/online-store/themes/customizing-themes/theme-editor/features-overview) | 模板由 sections/blocks 组成；结构树、实时预览、设置和保存围绕当前模板组织；模板的预览、编辑和分配有明确上下文 | 保留目录、结构、画布、属性的分工；模板发布后才供页面选择；不照搬“编辑模板立即影响所有页面”，继续使用精确版本和页面显式升级 |
+| [Shopify Templates](https://help.shopify.com/en/manual/online-store/themes/theme-structure/templates) 与 [Theme editor features](https://help.shopify.com/en/manual/online-store/themes/customizing-themes/theme-editor/features-overview) | 模板由 sections/blocks 组成；结构树、实时预览、设置和保存围绕当前模板组织；模板的预览、编辑和分配有明确上下文 | 保留目录、结构、画布、属性的分工；模板发布后才供页面选择；不照搬“编辑模板立即改写已公开页面”。页面草稿在模板发布时自动沿用新版本（D.43）；已公开快照保持旧版，直到发布页面 |
 | [Shopify JSON templates](https://shopify.dev/docs/storefronts/themes/architecture/templates/json-templates) | 模板保存有序 section 身份，section 内再包含 block，并通过 Schema 限制可添加能力 | 保留区域、容器、槽位的稳定身份和合法嵌套；不复制 Shopify 的数量上限或主题文件模型 |
-| [Webflow Components](https://help.webflow.com/hc/en-us/articles/33961303934611-Components-overview)、[Component properties](https://help.webflow.com/hc/en-us/articles/33961219350547-Component-properties) 与 [Slots](https://help.webflow.com/hc/en-us/articles/33961195339923-Slots) | 母组件维护结构和样式，实例通过 properties/slots 获得有限的独立内容与设置 | 模板设计维护母模板；页面只编辑开放内容与覆盖。与 Webflow 不同，母模板发布新版本不自动改变既有页面 |
+| [Webflow Components](https://help.webflow.com/hc/en-us/articles/33961303934611-Components-overview)、[Component properties](https://help.webflow.com/hc/en-us/articles/33961219350547-Component-properties) 与 [Slots](https://help.webflow.com/hc/en-us/articles/33961195339923-Slots) | 母组件维护结构和样式，实例通过 properties/slots 获得有限的独立内容与设置 | 模板设计维护母模板；页面只编辑开放内容与覆盖。与 Webflow 不同，母模板发布新版本不改写已公开页面；正在使用的页面草稿按 D.43 自动沿用 |
 | [Puck Component configuration](https://puckeditor.com/docs/integrating-puck/component-configuration)、[Data](https://puckeditor.com/docs/api-reference/data) 与 [Permissions](https://puckeditor.com/docs/api-reference/permissions) | Config 决定可用组件、字段与 Renderer，Data 保存页面实例，权限可在全局、组件和实例上下文动态控制 | 继续分离模板能力声明与 `PageDocument`；共享 Renderer 和字段组件，按模式、对象与权限关闭插入、编辑、复制、拖拽或删除 |
 | [Contentful content models](https://www.contentful.com/help/content-models/) | 内容模型定义结构和字段，具体条目承载唯一内容 | 模板定义只描述槽位和约束，页面实例承载真实内容；不引入新的 CMS 或第二数据源 |
 | [W3C WCAG 2.2 新增准则](https://www.w3.org/WAI/standards-guidelines/wcag/new-in-22/) 与 [Dragging Movements](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements.html) | 拖拽操作提供单指针替代，交互目标具有可操作尺寸或足够间距，焦点与上下文变化可预测 | 结构排序提供上移/下移等点击命令，添加支持点击，尺寸支持输入；验收目标尺寸、焦点可见性和不会仅因聚焦触发模式/对象切换 |

@@ -14,7 +14,7 @@ import {
   MATURE_CONTENT_TEMPLATE_MODULE_BY_SLOT_TYPE,
 } from "../template-definition/validateTemplateDefinition";
 import type { DynamicTemplateSlotType } from "../template-definition/generated/templateDefinition.generated";
-import { createTemplateRecipePreviewContent } from "../template-creation/previewContent";
+import { createTemplateRecipePreviewContent, neutralTemplatePlaceholder } from "../template-creation/previewContent";
 import type { DynamicTemplatePreviewScenario } from "./types";
 
 const previewPortrait = new URL("../preview-assets/neutral-template-preview-v1/template-preview-portrait.svg", import.meta.url).href;
@@ -208,28 +208,65 @@ function getExamplePreviewContentForSlot(slotType: string): Record<string, unkno
   return content;
 }
 
+const TEXT_SLOT_TYPES = new Set(["heading", "text", "richText", "badge", "icon"]);
+const ACTION_SLOT_TYPES = new Set(["button", "link"]);
+
 function getGenericSlotExample(slotType: string): unknown {
-  if (slotType === "heading") return "典藏新作";
-  if (["text", "richText"].includes(slotType)) return "以克制线条呈现珠宝的光泽、比例与细节。";
-  if (["badge", "icon"].includes(slotType)) return "臻选";
-  if (["button", "link"].includes(slotType)) return { label: "查看详情" };
+  if (slotType === "heading") return "标题待填写";
+  if (["text", "richText"].includes(slotType)) return "正文待填写";
+  if (["badge", "icon"].includes(slotType)) return "标签待填写";
+  if (["button", "link"].includes(slotType)) return { label: "按钮待填写" };
   if (slotType === "collection") return ["示例作品 01", "示例作品 02"];
   if (slotType === "image") {
     return {
       src: TEMPLATE_DESIGN_SAMPLE_MEDIA.products[0],
-      alt: "珠宝作品示例",
+      alt: "结构示意",
     };
   }
-  if (slotType === "product") return { mock: true, label: "鎏光戒指" };
+  if (slotType === "product") return { mock: true, label: "商品待选择" };
   return {};
 }
 
-function getNeutralCatalogSlotExample(slotType: string): unknown {
-  if (slotType === "heading") return "主标题";
-  if (["text", "richText"].includes(slotType)) return "正文示例文字";
-  if (["badge", "icon"].includes(slotType)) return "标签";
-  if (["button", "link"].includes(slotType)) return { label: "按钮" };
-  return getGenericSlotExample(slotType);
+function bakedRecipeSentences(definition: TemplateDefinitionV2): Set<string> {
+  const sentences = new Set<string>();
+  for (const item of definition.templateRecipe?.content ?? []) {
+    if (typeof item.defaultContent === "string" && item.defaultContent.trim()) {
+      sentences.add(item.defaultContent.trim());
+    }
+  }
+  return sentences;
+}
+
+function prefersNeutralTemplateText(stored: string, baked: Set<string>): boolean {
+  const text = stored.trim();
+  return text.length === 0 || baked.has(text);
+}
+
+/** 设计画布用槽位名称占位。空文案和配方里写死的句子都换成「名称待填写」。 */
+function withNeutralTemplateText(
+  definition: TemplateDefinitionV2,
+  content: Record<string, unknown>,
+): Record<string, unknown> {
+  const baked = bakedRecipeSentences(definition);
+  for (const slot of Object.values(definition.slots)) {
+    if (TEXT_SLOT_TYPES.has(slot.type)) {
+      const stored = content[slot.slotId];
+      const text = typeof stored === "string" ? stored : "";
+      if (Number(definition.schemaVersion) < 3 || prefersNeutralTemplateText(text, baked)) {
+        content[slot.slotId] = neutralTemplatePlaceholder(slot.label);
+      }
+    } else if (ACTION_SLOT_TYPES.has(slot.type)) {
+      const stored = content[slot.slotId];
+      const record = stored && typeof stored === "object" && !Array.isArray(stored)
+        ? { ...stored as Record<string, unknown> }
+        : {};
+      const label = typeof record.label === "string" ? record.label : "";
+      if (Number(definition.schemaVersion) < 3 || prefersNeutralTemplateText(label, baked)) {
+        content[slot.slotId] = { ...record, label: neutralTemplatePlaceholder(slot.label) };
+      }
+    }
+  }
+  return content;
 }
 
 function readImageSource(value: unknown): string {
@@ -271,7 +308,7 @@ export function createTemplateDesignCanvasContent(
 ): Record<string, unknown> {
   return withNeutralTemplateImages(
     definition,
-    createTemplatePreviewContentBySlotId(definition),
+    withNeutralTemplateText(definition, createTemplatePreviewContentBySlotId(definition)),
   ).contentBySlotId;
 }
 
@@ -319,10 +356,10 @@ function withNeutralCatalogMedia(value: unknown, path: string[] = []): unknown {
       || (key === "url" && path.some((part) => part === "images" || part === "items"))) {
       return "";
     }
-    if (["title", "heading", "name"].includes(key)) return "标题";
-    if (["subtitle", "description", "body", "text", "content"].includes(key)) return "正文示例文字";
-    if (["eyebrow", "caption", "badge"].includes(key)) return "标签";
-    if (["label", "actionText", "buttonText"].includes(key)) return "按钮";
+    if (["title", "heading", "name"].includes(key)) return "标题待填写";
+    if (["subtitle", "description", "body", "text", "content"].includes(key)) return "正文待填写";
+    if (["eyebrow", "caption", "badge"].includes(key)) return "标签待填写";
+    if (["label", "actionText", "buttonText"].includes(key)) return "按钮待填写";
     if (["alt", "altText"].includes(key)) return "";
     return value;
   }
@@ -352,8 +389,10 @@ export function createNeutralTemplateCatalogPreview(definition: TemplateDefiniti
       contentBySlotId[slot.slotId] = { src: neutralCatalogMedia, alt: "" };
     } else if (isMatureContentTemplateSlotType(slot.type)) {
       contentBySlotId[slot.slotId] = withNeutralCatalogMedia(getExamplePreviewContentForSlot(slot.type));
-    } else if (["heading", "text", "richText", "badge", "icon", "button", "link"].includes(slot.type)) {
-      contentBySlotId[slot.slotId] = getNeutralCatalogSlotExample(slot.type);
+    } else if (TEXT_SLOT_TYPES.has(slot.type)) {
+      contentBySlotId[slot.slotId] = neutralTemplatePlaceholder(slot.label);
+    } else if (ACTION_SLOT_TYPES.has(slot.type)) {
+      contentBySlotId[slot.slotId] = { label: neutralTemplatePlaceholder(slot.label), targetType: "none" };
     } else {
       contentBySlotId[slot.slotId] = withNeutralCatalogMedia(
         sourceContent[slot.slotId] ?? getGenericSlotExample(slot.type),

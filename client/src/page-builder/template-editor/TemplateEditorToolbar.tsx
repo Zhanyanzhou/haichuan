@@ -22,6 +22,7 @@ import {
   useVisualEditorSession,
 } from "../visual-editor/visualEditorSession";
 import useWorkspaceHistoryShortcuts from "./useWorkspaceHistoryShortcuts";
+import { catalogCardName } from "./catalogCardName";
 import { resolveTemplatePublicationStatus } from "./templatePublicationStatus";
 import { deriveTemplatePersistencePresentation } from "./templatePublishWorkflow";
 import WorkspaceContextControls from "./WorkspaceContextControls";
@@ -136,7 +137,13 @@ export default function TemplateEditorToolbar({
     return () => window.removeEventListener("message", handleCanvasHistory);
   }, [navigateHistory]);
 
-  const draftName = draft?.definition.name ?? "未选择模板";
+  const storedDraftName = draft?.definition.name ?? "";
+  const draftName = draft
+    ? catalogCardName(
+      draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole,
+      storedDraftName,
+    )
+    : "未选择模板";
   const desktopPreviewWidth = draft?.definition.metadata.previewDesktopWidth
     ?? RESPONSIVE_CANVAS.desktop.width;
   const mobilePreviewWidth = draft?.definition.metadata.previewMobileWidth
@@ -181,7 +188,7 @@ export default function TemplateEditorToolbar({
           ? "正式版本已发布，但当前没有可编辑草稿；请为当前模板重新建立编辑草稿"
         : !draft
           ? "请先从模板目录选择一个模板"
-          : !draftName.trim()
+          : !storedDraftName.trim()
             ? "请先填写模板名称"
             : !dirty && !needsInitialSave
               ? "当前模板没有未保存修改"
@@ -273,7 +280,7 @@ export default function TemplateEditorToolbar({
     ? "请先从模板目录选择一个模板"
     : !onPublish
         ? (localOnly ? "Mock 模式只保存本机测试草稿，不支持服务端发布" : "当前模板暂不支持发布")
-        : !draftName.trim()
+        : !storedDraftName.trim()
           ? "请先填写模板名称"
           : null;
   const publishWillSaveFirst = Boolean(
@@ -406,7 +413,7 @@ export default function TemplateEditorToolbar({
             >
               新建模板
             </Button>
-            {draft && !previewMode && (!draftName.trim() || draftName === "未命名模板") ? (
+            {draft && !previewMode && (!storedDraftName.trim() || storedDraftName.trim() === "未命名模板") ? (
               <Button
                 className="template-editor__toolbar-settings"
                 size="small"

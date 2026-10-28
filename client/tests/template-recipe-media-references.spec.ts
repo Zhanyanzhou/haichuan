@@ -195,6 +195,49 @@ test("编辑器 page-assets 由宿主拉取对象 URL，不把预览地址直接
   }
 });
 
+test("同一页面素材在画布 iframe 里单独生成 blob，不复用父页面地址", async () => {
+  resetManagedTemplateMediaObjectUrlCacheForTests();
+  const requests: string[] = [];
+  const originalAdapter = api.defaults.adapter;
+  let parentSequence = 0;
+  let frameSequence = 0;
+  const parentView = {
+    URL: {
+      createObjectURL: () => `blob:http://127.0.0.1/parent-${++parentSequence}`,
+    },
+  };
+  const frameView = {
+    URL: {
+      createObjectURL: () => `blob:http://127.0.0.1/frame-${++frameSequence}`,
+    },
+  };
+  api.defaults.adapter = async (config) => {
+    requests.push(config.url ?? "");
+    return {
+      config,
+      data: new Blob(["hero"], { type: "image/jpeg" }),
+      headers: new AxiosHeaders(),
+      status: 200,
+      statusText: "OK",
+    };
+  };
+
+  try {
+    const parentUrl = await loadManagedTemplateMediaObjectUrl("/uploads/page-assets/hero.jpg", parentView);
+    const frameUrl = await loadManagedTemplateMediaObjectUrl("/uploads/page-assets/hero.jpg", frameView);
+    expect(parentUrl).toBe("blob:http://127.0.0.1/parent-1");
+    expect(frameUrl).toBe("blob:http://127.0.0.1/frame-1");
+    expect(frameUrl).not.toBe(parentUrl);
+    expect(await loadManagedTemplateMediaObjectUrl("/uploads/page-assets/hero.jpg", frameView)).toBe(frameUrl);
+    expect(requests).toEqual([
+      "/upload/media/preview-by-storage-key?storageKey=page-assets%2Fhero.jpg",
+    ]);
+  } finally {
+    api.defaults.adapter = originalAdapter;
+    resetManagedTemplateMediaObjectUrlCacheForTests();
+  }
+});
+
 test("宿主预览取图失败不缓存，公开地址仍保持原样", async () => {
   resetManagedTemplateMediaObjectUrlCacheForTests();
   const originalAdapter = api.defaults.adapter;
@@ -217,6 +260,52 @@ test("宿主预览取图失败不缓存，公开地址仍保持原样", async ()
     api.defaults.adapter = originalAdapter;
     resetManagedTemplateMediaObjectUrlCacheForTests();
   }
+});
+
+test("画布 iframe 用自己的文档生成 blob 后，图片能在该文档里解码", async ({ page }) => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  await page.route("**/api/upload/media/preview-by-storage-key**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "image/png", body: png });
+  });
+  await page.goto("/admin/login");
+
+  const result = await page.evaluate(async () => {
+    const iframe = document.createElement("iframe");
+    iframe.srcdoc = "<!doctype html><html><body></body></html>";
+    const ready = new Promise((resolve) => {
+      iframe.addEventListener("load", () => resolve(null), { once: true });
+    });
+    document.body.appendChild(iframe);
+    await ready;
+    const frameWindow = iframe.contentWindow;
+    const frameDocument = iframe.contentDocument;
+    if (!frameWindow || !frameDocument) throw new Error("missing frame");
+    const media = await import("/src/page-builder/template-definition/managedMediaPreview.ts");
+    media.resetManagedTemplateMediaObjectUrlCacheForTests();
+    const frameUrl = await media.loadManagedTemplateMediaObjectUrl("/uploads/page-assets/hero.png", frameWindow);
+    const parentUrl = await media.loadManagedTemplateMediaObjectUrl("/uploads/page-assets/hero.png");
+    const image = frameDocument.createElement("img");
+    frameDocument.body.appendChild(image);
+    const decoded = await new Promise<boolean>((resolve) => {
+      image.onload = () => resolve(image.naturalWidth > 0);
+      image.onerror = () => resolve(false);
+      image.src = frameUrl;
+    });
+    return {
+      decoded,
+      sameUrl: frameUrl === parentUrl,
+      frameProtocol: new URL(frameUrl).protocol,
+    };
+  });
+
+  expect(result).toEqual({
+    decoded: true,
+    sameUrl: false,
+    frameProtocol: "blob:",
+  });
 });
 
 test("后台媒体预览首次 401 后沿现有会话刷新链路重试取图（route-Mock）", async ({ page }) => {

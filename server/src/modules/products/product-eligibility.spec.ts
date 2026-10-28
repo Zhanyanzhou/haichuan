@@ -88,7 +88,6 @@ test("客户商品门禁统一要求 READY、实时可见范围与发布档位",
       status: "PUBLISHED",
       publicationQualityStatus: "READY",
       visibility: { in: ["PUBLIC", "MEMBER"] },
-      NOT: { salesMode: "DIRECT_PURCHASE" },
     },
   );
   const previousProfile = process.env.RELEASE_PROFILE;
@@ -162,9 +161,9 @@ test("游客可见面按真实 where 条件接受合规商品并拒绝七类违�
       allowed: false,
     },
     {
-      name: "direct-purchase-under-lead-generation",
+      name: "direct-purchase-remains-browsable",
       product: { ...READY_PUBLIC_CONSULTABLE, salesMode: "DIRECT_PURCHASE" },
-      allowed: false,
+      allowed: true,
     },
   ];
 

@@ -2,7 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=20261027b" />
+    <link rel="apple-touch-icon" href="/loading-mark.png?v=20261027b" />
+    <link rel="stylesheet" href="/route-loading.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- SPA fallback 永远不参与索引；严格发布预渲染会用已核验的逐路由标签替换。 -->
     <meta name="robots" content="noindex, nofollow" />
@@ -28,7 +30,15 @@
     <!-- 品牌字体已本地自托管（Fontsource，经 src/main.tsx 引入），无外部字体请求。 -->
   </head>
   <body class="bg-scifi-bg text-scifi-text">
-    <div id="root"></div>
+    <div id="root">
+      <div class="site-route-loading" role="status" aria-live="polite">
+        <span class="site-route-loading__indicator" aria-hidden="true">
+          <span class="site-route-loading__ring"></span>
+          <img class="site-route-loading__mark" src="/favicon.svg?v=20261027c" alt="" width="32" height="32" />
+        </span>
+        <span class="site-route-loading__text">页面加载中</span>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

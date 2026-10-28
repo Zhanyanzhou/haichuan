@@ -40,7 +40,6 @@ import CustomerAfterSalesDialog, {
 import CustomerOrdersPanel from "./CustomerOrdersPanel";
 import CustomerQuotationsPanel from "./CustomerQuotationsPanel";
 import CustomerReviewDialog from "./CustomerReviewDialog";
-import ForYouRecommendations from "./ForYouRecommendations";
 import CustomerNotificationsPanel from "./CustomerNotificationsPanel";
 import {
   ACCOUNT_PASSWORD_HINT,
@@ -2180,7 +2179,6 @@ export default function MyAccountDashboard({
             </div>
           </section>
         </div>
-        <ForYouRecommendations />
       </div>
       <CustomerPaymentDialog
         open={paymentOrder !== null}

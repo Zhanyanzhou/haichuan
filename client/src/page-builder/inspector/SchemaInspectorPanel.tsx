@@ -14,7 +14,10 @@ import {
 } from "../../pages/admin/HomepageConfig/editor-store";
 import {
   getModuleDisplayName,
+  resolveTemplateSectionRole,
 } from "../../pages/admin/HomepageConfig/editor-utils";
+import { useResolvedDynamicTemplateDefinitions } from "../dynamic-template-instance/registry";
+import { usePublishedTemplateSectionRoles } from "../template-editor/publishedTemplateSectionRoles";
 import InspectorObjectContext, {
   getInspectorResponsiveStates,
 } from "./InspectorObjectContext";
@@ -341,7 +344,23 @@ export default function SchemaInspectorPanel({
   const suppressSelectionAutoScrollRef = useRef<InspectorPrimaryMode | null>(null);
   const dispatch = useHomepagePuck((state) => state.dispatch);
   const appData = useHomepagePuck((state) => state.appState.data);
+  const resolvedDefinitions = useResolvedDynamicTemplateDefinitions();
+  const rolesByTemplateId = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
   const viewports = useHomepagePuck((state) => state.appState.ui.viewports);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as { type?: string; field?: string } | null;
+      if (!data || data.type !== "hc-canvas-inspector-field" || typeof data.field !== "string") return;
+      const field = document.querySelector<HTMLElement>(
+        `[data-inspector-field="${CSS.escape(data.field)}"]`,
+      );
+      const focusable = field?.querySelector<HTMLElement>("input, textarea");
+      (focusable ?? field)?.focus();
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
   const visualSelection = useVisualEditorSession((state) => state.selection);
   const contentActionRequest = useVisualEditorSession((state) => state.contentActionRequest);
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
@@ -745,7 +764,7 @@ export default function SchemaInspectorPanel({
     }
     modal.confirm({
       title: "统一本页同类模板设计？",
-      content: `本页的“${getModuleDisplayName(editor.moduleType, editor.props)}”存在不同设计。进入模板编辑会以当前选中模块为基准，统一全部同类模块；各自图片、文字、链接和业务内容保持不变。`,
+      content: `本页的“${getModuleDisplayName(editor.moduleType, editor.props, resolveTemplateSectionRole(editor.props, { definitions: resolvedDefinitions, rolesByTemplateId }))}”存在不同设计。进入模板编辑会以当前选中模块为基准，统一全部同类模块；各自图片、文字、链接和业务内容保持不变。`,
       okText: "统一并进入",
       cancelText: "取消",
       onOk: () => {

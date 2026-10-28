@@ -147,35 +147,36 @@
   box-shadow: none !important;
 }
 
-/* 浮层会挂载到页面根节点，需用专属类覆盖全局珠宝主题的米色底。 */
+/* 浮层挂在 body，不在后台壳内。这里必须写实色，变量失效时背景会变成透明，菜单就会和表格叠在一起。 */
 .product-manage__quality-dropdown.ant-select-dropdown,
 .product-manage__dropdown.ant-dropdown {
+  z-index: 1100;
   padding: 4px !important;
-  border: 1px solid var(--adm-line) !important;
+  border: 1px solid #dde1e2 !important;
   border-radius: 4px !important;
-  background: var(--adm-content-bg) !important;
-  box-shadow: 0 8px 20px rgba(24,26,27, 0.1) !important;
+  background: #fff !important;
+  box-shadow: 0 8px 20px rgba(24, 26, 27, 0.1) !important;
 }
 
 .product-manage__quality-dropdown .ant-select-item {
   min-height: 32px;
   padding: 6px 12px;
   border-radius: 3px;
-  color: var(--adm-ink);
+  color: #181a1b;
   font-size: 13px;
 }
 
 .product-manage__quality-dropdown .ant-select-item-option-active,
 .product-manage__quality-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
-  color: var(--adm-ink) !important;
-  background: var(--adm-active-bg) !important;
+  color: #181a1b !important;
+  background: #eceeef !important;
   font-weight: 500;
 }
 
 .product-manage__dropdown .ant-dropdown-menu {
   padding: 0 !important;
   border-radius: 3px;
-  background: var(--adm-content-bg) !important;
+  background: #fff !important;
   box-shadow: none !important;
 }
 
@@ -184,24 +185,24 @@
   margin: 0 !important;
   padding: 6px 12px !important;
   border-radius: 3px;
-  color: var(--adm-ink) !important;
+  color: #181a1b !important;
   font-size: 13px;
   line-height: 20px;
 }
 
 .product-manage__dropdown .ant-dropdown-menu-item:hover,
 .product-manage__dropdown .ant-dropdown-menu-item-selected {
-  color: var(--adm-ink) !important;
-  background: var(--adm-active-bg) !important;
+  color: #181a1b !important;
+  background: #eceeef !important;
 }
 
 .product-manage__dropdown .ant-dropdown-menu-item-danger {
-  color: var(--adm-error) !important;
+  color: #8c3f3b !important;
 }
 
 .product-manage__dropdown .ant-dropdown-menu-item-danger:hover {
-  color: var(--adm-error) !important;
-  background: var(--adm-error-bg) !important;
+  color: #8c3f3b !important;
+  background: #faf0ef !important;
 }
 
 .product-manage__search-button.ant-btn-primary,

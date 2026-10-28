@@ -17,6 +17,9 @@ interface DeviceOverrideBadgeProps {
   onOverride: () => void;
   /** 继承值是否存在（不存在时仍允许单独设置） */
   hasBaseValue?: boolean;
+  overriddenLabel?: string;
+  inheritAction?: string;
+  overrideAction?: string;
 }
 
 export default function DeviceOverrideBadge({
@@ -25,6 +28,9 @@ export default function DeviceOverrideBadge({
   onInherit,
   onOverride,
   hasBaseValue = true,
+  overriddenLabel = "已覆盖电脑端设置",
+  inheritAction = "单独设置手机端",
+  overrideAction = "恢复继承",
 }: DeviceOverrideBadgeProps) {
   return (
     <div
@@ -33,16 +39,16 @@ export default function DeviceOverrideBadge({
     >
       {overridden ? (
         <>
-          <span>已覆盖电脑端设置</span>
+          <span>{overriddenLabel}</span>
           <button type="button" onClick={onInherit}>
-            恢复继承
+            {overrideAction}
           </button>
         </>
       ) : (
         <>
           <span>{hasBaseValue ? label : "尚未设置"}</span>
           <button type="button" onClick={onOverride}>
-            单独设置手机端
+            {inheritAction}
           </button>
         </>
       )}

@@ -371,45 +371,63 @@ test.describe("公开页面导航一致性", () => {
       () => document.documentElement.scrollHeight - window.innerHeight,
     )).toBeGreaterThan(200);
 
-    await page.evaluate(() => window.scrollTo(0, 640));
+    await page.evaluate(() => {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      window.scrollTo({ top: max, behavior: "instant" });
+    });
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(40);
+    await expect(page.getByRole("banner")).toHaveClass(/is-concealed/);
+    await page.evaluate(() => {
+      window.scrollTo({ top: Math.max(0, window.scrollY - 80), behavior: "instant" });
+    });
+    await expect(page.getByRole("banner")).not.toHaveClass(/is-concealed/);
+    await expect(brandHomeLink()).toBeVisible();
 
     await brandHomeLink().click();
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   });
 
-  test("旧搜索链接保留查询状态，顶部搜索进入同一选款中心并直接聚焦", async ({ page }) => {
+  test("旧搜索链接保留查询状态，顶部搜索留在当前结果并聚焦搜索框", async ({ page }) => {
     await page.goto("/search?q=戒指&categoryId=17&material=足金");
     await expect(page).toHaveURL(/\/catalog\?query=%E6%88%92%E6%8C%87&category=17&material=%E8%B6%B3%E9%87%91/);
     await expect(page.getByRole("search").getByRole("combobox", { name: "关键词或货号" })).toHaveValue("戒指");
 
-    const headerSearch = page.getByRole("link", { name: "搜索" }).first();
-    await expect(headerSearch).toHaveAttribute("href", "/catalog#catalog-search-input");
+    const headerSearch = page.getByRole("button", { name: "搜索" }).first();
     await headerSearch.click();
-    await expect(page).toHaveURL(/\/catalog#catalog-search-input$/);
+    await expect(page).toHaveURL(/\/catalog\?query=%E6%88%92%E6%8C%87&category=17&material=%E8%B6%B3%E9%87%91$/);
     const searchInput = page.getByRole("search").getByRole("combobox", { name: "关键词或货号" });
     await expect(searchInput).toBeFocused();
 
-    await page.getByRole("heading", { name: "查找作品" }).click();
+    await page.locator(".catalog-toolbar__spacer").click();
     await expect(searchInput).not.toBeFocused();
     await headerSearch.click();
     await expect(searchInput).toBeFocused();
   });
 
-  test("390px 菜单搜索关闭菜单后进入同一搜索框并聚焦", async ({ page }) => {
+  test("390px 菜单搜索可关闭并回到当前页，提交后才进入选款中心", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/contact");
     await page.getByRole("button", { name: "打开菜单" }).click();
     const drawer = page.getByRole("dialog", { name: "品牌菜单" });
     await expect(drawer.getByText("探索", { exact: true })).toBeVisible();
     await expect(drawer.getByText("Explore / 探索")).toHaveCount(0);
-    const searchLink = drawer.getByRole("link", { name: "搜索" });
-    await expect(searchLink).toHaveAttribute("href", "/catalog#catalog-search-input");
-    await searchLink.click();
+    const searchButton = drawer.getByRole("button", { name: "搜索" });
+    await searchButton.click();
     await expect(drawer).toHaveCount(0);
-    await expect(page).toHaveURL(/\/catalog#catalog-search-input$/);
+    const searchDialog = page.getByRole("dialog", { name: "搜索作品" });
+    await expect(searchDialog).toBeVisible();
+    await expect(page).toHaveURL(/\/contact$/);
+    await searchDialog.getByRole("button", { name: "关闭" }).click();
+    await expect(searchDialog).toHaveCount(0);
+    await expect(page).toHaveURL(/\/contact$/);
+
+    await page.getByRole("button", { name: "打开菜单" }).click();
+    await page.getByRole("dialog", { name: "品牌菜单" }).getByRole("button", { name: "搜索" }).click();
+    await page.getByRole("dialog", { name: "搜索作品" }).getByLabel("关键词或货号").fill("戒指");
+    await page.getByRole("button", { name: "查看结果" }).click();
+    await expect(page).toHaveURL(/\/catalog\?query=%E6%88%92%E6%8C%87$/);
     await expect(page.getByRole("search").getByRole("combobox", { name: "关键词或货号" }))
-      .toBeFocused();
+      .toHaveValue("戒指");
     await expectNoHorizontalOverflow(page);
   });
 
@@ -593,14 +611,58 @@ test.describe("公开页面导航一致性", () => {
       await expect(banner).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
       await expect(menuButton).toHaveCSS("color", "rgb(247, 248, 248)");
 
-      await expect.poll(() => page.evaluate(() => {
-        window.scrollTo(0, 80);
-        return window.scrollY;
-      })).toBeGreaterThan(40);
+      await page.evaluate(() => {
+        window.scrollTo({ top: 240, behavior: "instant" });
+      });
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(40);
+      await expect(banner).toHaveClass(/is-concealed/);
+      await page.evaluate(() => {
+        window.scrollTo({ top: Math.max(80, window.scrollY - 80), behavior: "instant" });
+      });
+      await expect(banner).not.toHaveClass(/is-concealed/);
       await expect(banner).not.toHaveClass(/is-transparent/);
       await expect(banner).toHaveCSS("background-color", "rgba(255, 255, 255, 0.92)");
     });
   }
+
+  test("页头向下滚动时收起，向上滚动时回到画面", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await mockPublishedHeaderDocuments(page);
+    await page.goto("/");
+    const banner = page.getByRole("banner");
+    const menu = page.getByRole("button", { name: "打开菜单" });
+    await expect(banner).not.toHaveClass(/is-concealed/);
+
+    await page.evaluate(() => {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      window.scrollTo({ top: max, behavior: "instant" });
+    });
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(120);
+    await expect(banner).toHaveClass(/is-concealed/);
+    await expect.poll(() => banner.evaluate((element) => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
+    await expect.poll(() => menu.evaluate((element) => element.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
+
+    await page.evaluate(() => {
+      window.scrollTo({ top: Math.max(80, window.scrollY - 80), behavior: "instant" });
+    });
+    await expect(banner).not.toHaveClass(/is-concealed/);
+    await expect(banner).not.toHaveClass(/is-transparent/);
+    await expect.poll(() => banner.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBeGreaterThanOrEqual(0);
+    await expect.poll(() => menu.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBeGreaterThanOrEqual(0);
+
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      window.scrollTo({ top: max, behavior: "instant" });
+    });
+    await expect(banner).toHaveClass(/is-concealed/);
+    await menu.focus();
+    await expect(banner).not.toHaveClass(/is-concealed/);
+
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    await expect(banner).toHaveClass(/is-transparent/);
+    await expect(banner).not.toHaveClass(/is-concealed/);
+  });
 
   test("公开页头只由已发布文档的首个可见受支持模板决定覆盖模式", async ({ page }) => {
     await mockPublishedHeaderDocuments(page, () => [
@@ -651,7 +713,7 @@ test.describe("公开页面导航一致性", () => {
     }
     const headerActions = page.getByRole("banner").getByRole("navigation", { name: "菜单与搜索" });
     await expect(headerActions).toBeVisible();
-    await expect(headerActions.getByRole("link", { name: "搜索" })).toBeHidden();
+    await expect(headerActions.getByRole("button", { name: "搜索" })).toBeHidden();
     await expectNoHorizontalOverflow(page);
   });
 
@@ -659,12 +721,14 @@ test.describe("公开页面导航一致性", () => {
     await page.setViewportSize({ width: 390, height: 844 });
 
     for (const { path, eyebrow } of [
-      { path: "/catalog", eyebrow: "公开款式" },
+      { path: "/catalog", eyebrow: "选款中心" },
       { path: "/contact", eyebrow: "预约咨询" },
     ]) {
       await page.goto(path);
       const banner = page.getByRole("banner");
-      const eyebrowLabel = page.getByText(eyebrow, { exact: true });
+      const eyebrowLabel = path === "/catalog"
+        ? page.getByRole("heading", { level: 1, name: eyebrow })
+        : page.getByText(eyebrow, { exact: true });
       await expect(banner).toBeVisible({ timeout: 15_000 });
       await expect(eyebrowLabel).toBeVisible({ timeout: 15_000 });
       const [headerBox, eyebrowBox] = await Promise.all([

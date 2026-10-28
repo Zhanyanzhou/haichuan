@@ -486,7 +486,7 @@ function createInstanceCss(
       return mode === "editor" || (typeof props[roleId] === "string" && props[roleId].trim().length > 0);
     });
     if (!visibleCopyRoles) {
-      rules.push(`${root} :is(.hc-phase1-hero__copy-band,.hc-phase1-hero__copy-shade){display:none!important}`);
+      rules.push(`${root} :is(.hc-phase1-hero__copy-band,.hc-phase1-hero__copy-shade,.hc-phase1-hero__slot-affordance){display:none!important}`);
     }
   }
   if (overrides.version === 2) {
@@ -1072,6 +1072,8 @@ interface ContentTemplateFrameViewProps extends ContentTemplateContractFrameProp
   instanceFrame: InstanceValue;
   childEditMode?: boolean;
   ensureContractActions?: boolean;
+  /** 页面装修画布：空文字不进入文档流，只在选中本节时浮出添加入口。 */
+  overlayEmptySlots?: boolean;
   rootRef?: Ref<HTMLDivElement>;
   editor?: ContractFrameEditorView;
 }
@@ -1093,6 +1095,7 @@ function ContentTemplateFrameView({
   instanceFrame,
   childEditMode,
   ensureContractActions,
+  overlayEmptySlots,
   rootRef,
   editor,
 }: ContentTemplateFrameViewProps) {
@@ -1115,11 +1118,15 @@ function ContentTemplateFrameView({
     const childProps: {
       children?: ReactNode;
       editMode?: boolean;
+      emptySlotPlacement?: "overlay";
       module?: Record<string, unknown>;
     } = {};
     const flatProps = child.props as Record<string, unknown>;
     if (childEditMode !== undefined && (child.props.module || "editMode" in flatProps)) {
       childProps.editMode = childEditMode;
+    }
+    if (overlayEmptySlots && (child.props.module || "editMode" in flatProps)) {
+      childProps.emptySlotPlacement = "overlay";
     }
     if (child.props.children !== undefined) {
       childProps.children = Children.map(child.props.children, renderContractChild);
@@ -1379,7 +1386,8 @@ function ContentTemplateReadOnlyContractFrame({
       instanceLayout={instanceLayout}
       instanceFrame={instanceFrame}
       childEditMode={renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW ? false : undefined}
-      ensureContractActions={mode === "editor" || renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW}
+      ensureContractActions={renderSurface === CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW}
+      overlayEmptySlots={mode === "editor" && renderSurface !== CONTENT_TEMPLATE_RENDER_SURFACE.CATALOG_PREVIEW}
       rootRef={rootRef}
     >
       {children}

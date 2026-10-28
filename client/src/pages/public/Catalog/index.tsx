@@ -35,9 +35,16 @@ import {
   SecondaryNav,
   Toolbar,
 } from "./CatalogFilters";
-import { ProductGrid, QuickView } from "./CatalogProductSurface";
+import { CatalogPathways, ProductGrid } from "./CatalogProductSurface";
 import SelectionTray, { type SelectionLookupState } from "./SelectionTray";
-import { catNameById } from "./catalogCategories";
+import { catNameById, getPrimaryCats } from "./catalogCategories";
+import {
+  applyCategoryDrafts,
+  CatalogCanvasPrimary,
+  CatalogCanvasSecondary,
+  collectCategoryNames,
+  saveCanvasCategoryName,
+} from "./CatalogCanvasCategories";
 import {
   catalogSort,
   serializeWeightRanges,
@@ -50,7 +57,6 @@ import {
   readCatalogReturnContext,
 } from "./catalogReturnContext";
 
-const DESKTOP_HEADER_H = 108;
 const PAGE_SIZE = 32;
 const SKU_RE = /^[A-Z]{2,3}-[A-Z]{2,3}-\d{3,4}$/i;
 
@@ -167,14 +173,18 @@ function StickyBar({
   total,
   sort,
   selCount,
+  filterCount,
   onSort,
+  onOpenFilter,
   categories,
 }: {
   category: string;
   total: number;
   sort: string;
   selCount: number;
+  filterCount: number;
   onSort: (s: string) => void;
+  onOpenFilter: (trigger: HTMLButtonElement) => void;
   categories: RealCategory[];
 }) {
   const parentName = catNameById(categories, Number(category));
@@ -204,8 +214,28 @@ function StickyBar({
         }}
       >
         <span style={{ fontSize: 12, color: T.txt }}>{path}</span>
-        <span style={{ fontSize: 11, color: T.sec }}>{total} 款</span>
+        {total > 0 ? (
+          <span style={{ fontSize: 11, color: T.sec }}>{total} 件</span>
+        ) : null}
         <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={(event) => onOpenFilter(event.currentTarget)}
+          aria-label={filterCount > 0 ? `筛选，已选 ${filterCount} 项` : "筛选"}
+          style={{
+            minHeight: 44,
+            padding: "0 8px",
+            border: 0,
+            background: "transparent",
+            cursor: "pointer",
+            fontSize: 12,
+            color: T.txt,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {filterCount > 0 ? `筛选 ${filterCount}` : "筛选"}
+        </button>
+        <span style={{ fontSize: 12, color: T.txt }}>排序</span>
         <select
           aria-label="作品排序方式"
           value={sort}
@@ -215,7 +245,7 @@ function StickyBar({
             border: 0,
             outline: "none",
             fontSize: 12,
-            color: T.sec,
+            color: T.txt,
             cursor: "pointer",
             WebkitAppearance: "none",
             appearance: "none",
@@ -274,14 +304,11 @@ export default function Catalog({
 
   const { params, update, updateMany } = useURLParams(!editorPreview);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [quickView, setQuickView] = useState<CatalogProduct | null>(null);
   const filterTriggerRef = useRef<HTMLElement | null>(null);
-  const quickViewTriggerRef = useRef<HTMLElement | null>(null);
   const resultsRef = useRef<HTMLElement | null>(null);
   const pendingPageFocusRef = useRef<number | null>(null);
   const pendingCatalogReturnRef = useRef<ReturnType<typeof readCatalogReturnContext>>(null);
   const closeFilter = useCallback(() => setFilterOpen(false), []);
-  const closeQuickView = useCallback(() => setQuickView(null), []);
 
   useEffect(() => {
     if (editorPreview || location.hash !== "#catalog-search-input") return;
@@ -306,6 +333,60 @@ export default function Catalog({
     error: categoriesError,
     reload: reloadCategories,
   } = useProductCategories();
+  const [categoryDrafts, setCategoryDrafts] = useState<Record<number, string>>({});
+  const [categoryEditNote, setCategoryEditNote] = useState("");
+  const displayCategories = useMemo(
+    () => applyCategoryDrafts(categories, editorPreview ? categoryDrafts : {}),
+    [categories, categoryDrafts, editorPreview],
+  );
+  const savedCategoryNames = useMemo(
+    () => collectCategoryNames(categories),
+    [categories],
+  );
+  const setCategoryDraft = useCallback((id: number, name: string | null) => {
+    setCategoryDrafts((current) => {
+      if (name === null) {
+        if (!(id in current)) return current;
+        const next = { ...current };
+        delete next[id];
+        return next;
+      }
+      if (current[id] === name) return current;
+      return { ...current, [id]: name };
+    });
+  }, []);
+  const renameCanvasCategory = useCallback((id: number, savedName: string, value: string) => {
+    const next = value.trim();
+    if (!next || next === savedName) {
+      setCategoryDraft(id, null);
+      return;
+    }
+    setCategoryDraft(id, next);
+    setCategoryEditNote("正在保存…");
+    void saveCanvasCategoryName(id, savedName, next).then((result) => {
+      if (result === "failed") {
+        setCategoryDraft(id, null);
+        setCategoryEditNote("名称没有保存，已恢复原来的名称。");
+        return;
+      }
+      setCategoryEditNote("");
+      reloadCategories();
+    });
+  }, [reloadCategories, setCategoryDraft]);
+  useEffect(() => {
+    if (!editorPreview) return;
+    setCategoryDrafts((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const [id, name] of Object.entries(current)) {
+        if (savedCategoryNames[Number(id)] === name) {
+          delete next[Number(id)];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [editorPreview, savedCategoryNames]);
   const categoryTarget = params.subcategory || params.category;
   const categoryIds = useMemo(
     () =>
@@ -523,7 +604,10 @@ export default function Catalog({
   const displayTotal = virtualCatalog?.total ?? total;
   const suggestionProducts = virtualCatalog?.matches ?? mergedProducts;
   const showingVirtualWorks = virtualCatalog !== null && displayTotal > 0;
-  const showCatalogTools = apiLoading || displayTotal > 0 || hasActiveFilters;
+  const showCatalogTools = apiLoading
+    || categories.length > 0
+    || displayTotal > 0
+    || hasActiveFilters;
 
   useEffect(() => {
     const pageCount = Math.ceil(displayTotal / PAGE_SIZE);
@@ -572,10 +656,10 @@ export default function Catalog({
       // 旧索引只描述离开目录时的快照位置。原作品下架、权限变化或结果重排后，
       // 同一索引可能已属于另一作品，不能把返回焦点错误交给无关项目。
       if (!productCell) return results;
-      const preferredSelector = returnContext.focusTarget === "quick-view"
+      const preferredSelector = returnContext.focusTarget === "card"
         ? "[data-catalog-product-focus]"
         : "[data-catalog-detail-entry]";
-      const fallbackSelector = returnContext.focusTarget === "quick-view"
+      const fallbackSelector = returnContext.focusTarget === "card"
         ? "[data-catalog-detail-entry]"
         : "[data-catalog-product-focus]";
       return productCell?.querySelector<HTMLElement>(preferredSelector)
@@ -677,20 +761,47 @@ export default function Catalog({
       setStickyVisible(false);
       return;
     }
-    let observer: IntersectionObserver;
-    try {
-      observer = new Observer(
-        ([entry]) => setStickyVisible(!entry.isIntersecting),
-        { rootMargin: `-${DESKTOP_HEADER_H}px 0px 0px 0px`, threshold: 0 },
-      );
-    } catch {
-      // 吸顶筛选仅是渐进增强；观察器被禁用或脚本构造异常时，
-      // 保留正常目录、搜索与选款业务，不升级为整页错误。
-      setStickyVisible(false);
-      return;
+    const header = sentinel.ownerDocument.querySelector<HTMLElement>(".site-header");
+    let observer: IntersectionObserver | null = null;
+    let observedOffset = -1;
+    let generation = 0;
+    const connect = () => {
+      const concealed = header?.classList.contains("is-concealed") ?? false;
+      const offset = concealed ? 0 : Math.round(header?.getBoundingClientRect().height || 0);
+      if (observer && offset === observedOffset) return;
+      observedOffset = offset;
+      const current = ++generation;
+      observer?.disconnect();
+      try {
+        observer = new Observer(
+          ([entry]) => {
+            if (current !== generation) return;
+            // 底边越过当前可见页头下沿就换上吸顶条。只看 isIntersecting 时，
+            // 工具条底边贴齐视口仍算相交，页头收起后吸顶条会空缺。
+            setStickyVisible(entry.boundingClientRect.bottom <= offset + 1);
+          },
+          { rootMargin: `-${offset}px 0px 0px 0px`, threshold: 0 },
+        );
+        observer.observe(sentinel);
+      } catch {
+        // 吸顶筛选仅是渐进增强；观察器被禁用或脚本构造异常时，
+        // 保留正常目录、搜索与选款业务，不升级为整页错误。
+        setStickyVisible(false);
+      }
+    };
+    connect();
+    let classObserver: MutationObserver | null = null;
+    if (header) {
+      classObserver = new MutationObserver(connect);
+      classObserver.observe(header, { attributes: true, attributeFilter: ["class"] });
     }
-    observer.observe(sentinel);
-    return () => observer.disconnect();
+    const ownerWindow = sentinel.ownerDocument.defaultView;
+    ownerWindow?.addEventListener("resize", connect);
+    return () => {
+      observer?.disconnect();
+      classObserver?.disconnect();
+      ownerWindow?.removeEventListener("resize", connect);
+    };
   }, [editorPreview]);
 
   const clearAll = () => {
@@ -746,59 +857,16 @@ export default function Catalog({
         .catalog-page__discovery-main {
           max-width: 1440px;
           margin-inline: auto;
-          padding: calc(clamp(64px, 6vw, 88px) + var(--site-header-height)) clamp(32px, 5.55vw, 80px) clamp(56px, 5vw, 72px);
+          padding: calc(32px + var(--site-header-height, 88px)) clamp(32px, 5.55vw, 80px) 20px;
           display: grid;
-          grid-template-columns: minmax(300px, .8fr) minmax(440px, 1fr);
-          align-items: end;
-          gap: clamp(56px, 9vw, 136px);
+          gap: 28px;
         }
         .catalog-page__discovery.is-compact .catalog-page__discovery-main {
-          grid-template-columns: minmax(0, 720px);
-          justify-content: center;
-          padding-block: 48px;
-        }
-        .catalog-page__intro-eyebrow {
-          margin: 0 0 20px;
-          color: #5F6568;
-          font-size: 11px;
-          line-height: 1;
-          letter-spacing: .08em;
-        }
-        .catalog-page__intro h1 {
-          margin: 0;
-          color: #181A1B;
-          font-family: "Cormorant Garamond", "Noto Serif SC", serif;
-          font-size: clamp(48px, 4.7vw, 68px);
-          font-weight: 400;
-          line-height: 1.04;
-          letter-spacing: -.02em;
-        }
-        .catalog-page__intro-copy {
-          max-width: 430px;
-          margin: 24px 0 0;
-          color: #5F6568;
-          font-size: 14px;
-          line-height: 1.9;
+          max-width: 720px;
+          padding-block: 32px 20px;
         }
         .catalog-search {
           min-width: 0;
-          padding: 32px 36px 28px;
-          background: #F4F5F5;
-        }
-        .catalog-search__eyebrow {
-          margin: 0 0 10px;
-          color: #5F6568;
-          font-size: 12px;
-          line-height: 1;
-          letter-spacing: .08em;
-        }
-        .catalog-search__title {
-          margin: 0 0 24px;
-          color: #181A1B;
-          font-family: "Cormorant Garamond", "Noto Serif SC", serif;
-          font-size: 24px;
-          font-weight: 400;
-          line-height: 1.3;
         }
         .catalog-search__field {
           position: relative;
@@ -864,12 +932,6 @@ export default function Catalog({
         .catalog-search__submit:hover {
           background: #101213;
         }
-        .catalog-search__hint {
-          margin: 12px 0 0;
-          color: #5F6568;
-          font-size: 12px;
-          line-height: 1.6;
-        }
         .catalog-search__suggestions {
           position: absolute;
           inset-inline: 0;
@@ -884,18 +946,11 @@ export default function Catalog({
         }
         .catalog-category-nav__inner {
           max-width: 1440px;
-          min-height: 84px;
+          min-height: 64px;
           margin-inline: auto;
           padding-inline: clamp(32px, 5.55vw, 80px);
-          display: grid;
-          grid-template-columns: minmax(140px, 180px) minmax(0, 1fr);
+          display: flex;
           align-items: center;
-          gap: 32px;
-        }
-        .catalog-category-nav__label {
-          color: #6E7477;
-          font-size: 11px;
-          letter-spacing: .08em;
         }
         .catalog-category-nav__items {
           min-width: 0;
@@ -938,6 +993,58 @@ export default function Catalog({
           height: 1px;
           background: #181A1B;
         }
+        .catalog-page.is-editor-preview .catalog-canvas-categories,
+        .catalog-page.is-editor-preview .catalog-canvas-categories * {
+          pointer-events: auto !important;
+        }
+        .catalog-canvas-category-input {
+          width: auto;
+          min-width: 4em;
+          max-width: 16em;
+          field-sizing: content;
+          border: 0;
+          border-bottom: 1px solid #181A1B;
+          border-radius: 0;
+          background: transparent;
+          color: #181A1B;
+          text-align: center;
+        }
+        .catalog-canvas-subitem {
+          position: relative;
+          min-height: 44px;
+          padding-inline: 12px;
+          border: 0;
+          background: none;
+          color: #5F6568;
+          cursor: pointer;
+          font-size: 13px;
+          white-space: nowrap;
+        }
+        .catalog-canvas-subitem[aria-pressed="true"],
+        .catalog-canvas-subitem.catalog-canvas-category-input {
+          color: #181A1B;
+        }
+        .catalog-canvas-subitem[aria-pressed="true"]::after {
+          content: "";
+          position: absolute;
+          right: 12px;
+          bottom: 12px;
+          left: 12px;
+          height: 1px;
+          background: #181A1B;
+        }
+        .catalog-canvas-categories__hint {
+          max-width: 1440px;
+          margin: 0 auto;
+          padding: 0 clamp(32px, 5.55vw, 80px) 16px;
+          color: #6E7477;
+          font-size: 12px;
+          line-height: 1.6;
+        }
+        .catalog-secondary-nav__inner,
+        .catalog-toolbar__inner {
+          padding-inline: clamp(32px, 5.55vw, 80px);
+        }
         .catalog-toolbar__inner {
           gap: 20px;
         }
@@ -951,37 +1058,22 @@ export default function Catalog({
         }
         @media (max-width: 900px) {
           .catalog-page__discovery-main {
-            grid-template-columns: minmax(240px, .72fr) minmax(360px, 1fr);
-            gap: 40px;
+            gap: 24px;
             padding-inline: 32px;
           }
-          .catalog-category-nav__inner {
+          .catalog-category-nav__inner,
+          .catalog-secondary-nav__inner,
+          .catalog-toolbar__inner {
             padding-inline: 32px;
           }
         }
         @media (max-width: 720px) {
           .catalog-page__discovery-main {
-            grid-template-columns: minmax(0, 1fr);
-            padding: calc(44px + var(--site-header-height)) 20px 40px;
-            gap: 40px;
+            padding: calc(28px + var(--site-header-height, 64px)) 20px 16px;
+            gap: 24px;
           }
           .catalog-page__discovery.is-compact .catalog-page__discovery-main {
-            padding: 44px 20px 40px;
-          }
-          .catalog-page__intro h1 {
-            font-size: 40px;
-            line-height: 1.1;
-          }
-          .catalog-page__intro-copy {
-            margin-top: 18px;
-            font-size: 13px;
-          }
-          .catalog-search {
-            padding: 24px 20px 20px;
-          }
-          .catalog-search__title {
-            margin-bottom: 18px;
-            font-size: 20px;
+            padding: 28px 20px 16px;
           }
           .catalog-search__input {
             font-size: 14px;
@@ -996,9 +1088,9 @@ export default function Catalog({
             padding: 22px 20px 16px;
             display: block;
           }
-          .catalog-category-nav__label {
-            display: block;
-            margin-bottom: 8px;
+          .catalog-secondary-nav__inner,
+          .catalog-toolbar__inner {
+            padding-inline: 20px;
           }
           .catalog-category-nav__items {
             gap: 36px;
@@ -1017,46 +1109,59 @@ export default function Catalog({
         aria-labelledby={hasLeadingDecoration ? undefined : "catalog-page-title"}
       >
         <div className="catalog-page__discovery-main">
-          {hasLeadingDecoration ? (
-            <h1 className="sr-only">选款中心</h1>
-          ) : (
-            <header className="catalog-page__intro">
-            <p className="catalog-page__intro-eyebrow">公开款式</p>
-            <h1 id="catalog-page-title">选款中心</h1>
-            <p className="catalog-page__intro-copy">
-              按关键词、货号与当前公开属性查找作品，并将意向款式加入选款清单。
-            </p>
-            </header>
-          )}
+          <h1 id="catalog-page-title" className="sr-only">选款中心</h1>
           <CatalogSearch
             query={params.query}
             products={suggestionProducts}
-            categories={categories}
+            categories={displayCategories}
             materials={materialOptions}
             onSearch={(value) => update("query", value)}
           />
         </div>
         {showCatalogTools ? (
-          <PrimaryNav
-            active={params.category}
-            onChange={(c) => update("category", c)}
-            categories={categories}
-          />
+          editorPreview ? (
+            <CatalogCanvasPrimary
+              categories={displayCategories}
+              savedNames={savedCategoryNames}
+              active={params.category}
+              note={categoryEditNote}
+              onChange={(id) => update("category", id)}
+              onDraft={setCategoryDraft}
+              onRename={renameCanvasCategory}
+            />
+          ) : (
+            <PrimaryNav
+              active={params.category}
+              onChange={(c) => update("category", c)}
+              categories={categories}
+            />
+          )
         ) : null}
       </section>
       {showCatalogTools ? (
         <>
           {params.category ? (
+            editorPreview ? (
+              <CatalogCanvasSecondary
+                categories={displayCategories}
+                savedNames={savedCategoryNames}
+                parentId={params.category}
+                active={params.subcategory}
+                onChange={(id) => update("subcategory", id)}
+                onDraft={setCategoryDraft}
+                onRename={renameCanvasCategory}
+              />
+            ) : (
             <SecondaryNav
               parentId={params.category}
               active={params.subcategory}
               onChange={(s) => update("subcategory", s)}
               categories={categories}
             />
+            )
           ) : null}
           <div ref={sentinelRef}>
             <Toolbar
-              category={params.category}
               total={displayTotal}
               materials={params.materials}
               materialOptions={materialOptions}
@@ -1070,7 +1175,6 @@ export default function Catalog({
                 filterTriggerRef.current = trigger;
                 setFilterOpen(true);
               }}
-              categories={categories}
             />
           </div>
           {stickyVisible ? (
@@ -1079,7 +1183,17 @@ export default function Catalog({
               total={displayTotal}
               sort={params.sort}
               selCount={selCount}
+              filterCount={
+                params.materials.length
+                + params.crafts.length
+                + params.weights.length
+                + params.sizes.length
+              }
               onSort={(s) => update("sort", s)}
+              onOpenFilter={(trigger) => {
+                filterTriggerRef.current = trigger;
+                setFilterOpen(true);
+              }}
               categories={categories}
             />
           ) : null}
@@ -1191,7 +1305,7 @@ export default function Catalog({
         tabIndex={-1}
         aria-label="作品结果"
         aria-busy={apiLoading}
-        style={{ scrollMarginTop: DESKTOP_HEADER_H + 16 }}
+        style={{ scrollMarginTop: "calc(var(--site-header-offset, var(--site-header-height, 88px)) + 16px)" }}
       >
       {apiLoading && !virtualCatalog ? (
         <div
@@ -1351,11 +1465,17 @@ export default function Catalog({
           commerceAllowed={commerceAllowed}
           catalogUrl={catalogUrlForDetail}
           startIndex={(params.page - 1) * PAGE_SIZE}
-          onQuickView={(product, trigger) => {
-            quickViewTriggerRef.current = trigger;
-            setQuickView(product);
-          }}
         />
+        {displayProducts.length > 0 ? (
+          <CatalogPathways
+            categories={getPrimaryCats(displayCategories)}
+            activeCategoryId={params.category}
+            products={displayProducts}
+            hasMore={!showingVirtualWorks && params.page < Math.ceil(displayTotal / PAGE_SIZE)}
+            onOpenCategory={(id) => update("category", id)}
+            onMore={() => goToPage(params.page + 1)}
+          />
+        ) : null}
         </>
       )}
       </section>
@@ -1364,19 +1484,6 @@ export default function Catalog({
         page={params.page}
         onPage={goToPage}
       />
-      {quickView && (
-        <QuickView
-          product={quickView}
-          onClose={closeQuickView}
-          returnFocusRef={quickViewTriggerRef}
-          commerceAllowed={commerceAllowed}
-          productIndex={
-            (params.page - 1) * PAGE_SIZE
-            + Math.max(0, displayProducts.findIndex((product) => product.id === quickView.id))
-          }
-          catalogUrl={catalogUrlForDetail}
-        />
-      )}
       {filterOpen && (
         <FilterDrawer
           materials={params.materials}

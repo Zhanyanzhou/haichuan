@@ -8,10 +8,7 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import {
-  customerFacingReleaseWhere,
-  isCommerceReleaseProfile,
-} from "../../common/release/release-profile";
+import { customerFacingReleaseWhere } from "../../common/release/release-profile";
 import {
   CreateProductDto,
   AdminProductQueryDto,
@@ -95,42 +92,6 @@ function misleadingJewelryClaims(parts: unknown[]): string[] {
   return MISLEADING_JEWELRY_CLAIMS.filter(([pattern]) => pattern.test(text)).map(([, message]) => message);
 }
 
-function isBlankPublicText(value: unknown): boolean {
-  return typeof value !== "string" || value.trim().length === 0;
-}
-
-function isEmptyPublicDetail(value: unknown): boolean {
-  if (value == null) return true;
-  if (typeof value === "string") return value.trim().length === 0;
-  return Array.isArray(value) && value.length === 0;
-}
-
-function detailTextIsPlaceholder(value: unknown): boolean {
-  const texts: string[] = [];
-  const visit = (node: unknown) => {
-    if (typeof node === "string") {
-      texts.push(node);
-      return;
-    }
-    if (Array.isArray(node)) {
-      node.forEach(visit);
-      return;
-    }
-    if (node && typeof node === "object" && "text" in node) {
-      visit((node as { text: unknown }).text);
-    }
-  };
-  visit(value);
-  return texts.some((text) => text.trim().length > 0 && !isMeaningfulPublicText(text, 1));
-}
-
-function hasMeaningfulDetailContent(value: unknown): boolean {
-  if (value == null) return false;
-  const serialized = JSON.stringify(value);
-  if (!serialized || serialized === "{}" || serialized === "[]") return false;
-  return !FORBIDDEN_PUBLIC_CONTENT.test(serialized) && !MOJIBAKE_OR_REPLACEMENT.test(serialized);
-}
-
 const CUSTOMER_FACING_IMAGE_SELECT = {
   id: true,
   url: true,
@@ -183,8 +144,10 @@ const CUSTOMER_FACING_LIST_SELECT = {
   isCustom: true,
   category: { select: { id: true, name: true } },
   images: {
-    orderBy: { sortOrder: "asc" },
-    take: 5,
+    // 选款卡片只展示商品图，按上传时写入的 sortOrder。详情长图从 1000 起，不进入记号。
+    where: { isVideo: false, sortOrder: { lt: 1000 } },
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+    take: 9,
     select: CUSTOMER_FACING_IMAGE_SELECT,
   },
   skus: {
@@ -461,7 +424,8 @@ function requestedProductCreateIntent(dto: CreateProductDto) {
     craftTechnique: dto.craftTechnique ?? null,
     detailContent: dto.detailContent ?? null,
     status: dto.status ?? "DRAFT",
-    visibility: dto.visibility ?? "MEMBER",
+    // 未指定时默认公开：上架后只进入选款中心，不自动出现在其他页面。
+    visibility: dto.visibility ?? "PUBLIC",
     salesMode: dto.salesMode ?? "DISPLAY_ONLY",
     inventoryPolicy: dto.inventoryPolicy ?? "STANDARD",
     purchaseRegion: dto.purchaseRegion ?? "MAINLAND",
@@ -721,7 +685,8 @@ function mapCreateDto(dto: CreateProductDto): Prisma.ProductCreateInput {
       | Prisma.InputJsonValue
       | undefined,
     status: status ?? "DRAFT",
-    visibility: visibility ?? "MEMBER",
+    // 未指定时默认公开：上架后只进入选款中心，不自动出现在其他页面。
+    visibility: visibility ?? "PUBLIC",
     salesMode: salesMode ?? "DISPLAY_ONLY",
     inventoryPolicy: inventoryPolicy ?? "STANDARD",
     purchaseRegion: purchaseRegion ?? "MAINLAND",
@@ -1438,9 +1403,7 @@ export class ProductsService {
                 ? "NON_PUBLIC"
                 : product.publicationQualityStatus !== "READY"
                   ? "NOT_READY"
-                  : !isCommerceReleaseProfile() && product.salesMode === "DIRECT_PURCHASE"
-                    ? "RELEASE_HIDDEN"
-                    : !imageId
+                  : !imageId
                       ? "MISSING_IMAGE"
                       : !coverEligible
                         ? "NOT_READY"
@@ -2014,7 +1977,6 @@ export class ProductsService {
           product.deletedAt ||
           product.status !== "PUBLISHED" ||
           product.publicationQualityStatus !== "READY" ||
-          (!isCommerceReleaseProfile() && product.salesMode === "DIRECT_PURCHASE") ||
           !visibilities.includes(product.visibility)
         ) {
           throw new NotFoundException("媒体不存在");
@@ -2658,19 +2620,6 @@ export class ProductsService {
     if (!product.code.trim()) errors.push("商品货号");
     else if (FORBIDDEN_PUBLIC_CONTENT.test(product.code) || MOJIBAKE_OR_REPLACEMENT.test(product.code))
       errors.push("正式商品货号（禁止 E2E、Mock、Seed 或乱码标记）");
-    if (!isBlankPublicText(product.shortDescription) && !isMeaningfulPublicText(product.shortDescription, 1))
-      errors.push("商品简介不能整段都是数字、同一个字、测试词或乱码");
-    if (!isBlankPublicText(product.description) && !isMeaningfulPublicText(product.description, 1))
-      errors.push("商品说明不能整段都是数字、同一个字、测试词或乱码");
-    if (
-      !isEmptyPublicDetail(product.detailContent)
-      && (
-        !hasMeaningfulDetailContent(product.detailContent)
-        || detailTextIsPlaceholder(product.detailContent)
-      )
-    ) {
-      errors.push("商品详情不能整段都是数字、同一个字或测试词");
-    }
     if (!product.category.isActive || product.category.deletedAt)
       errors.push("有效且启用的商品分类");
     const publicCopy: unknown[] = [product.name, product.shortDescription, product.description];
@@ -3345,8 +3294,9 @@ export class ProductsService {
         where: { id: imageId },
         data: { sortOrder: 0 },
       });
+      // 序号 1000 及以上是详情图，不跟主图一起重排，避免设主图后把详情图挤进前 9 张。
       const others = await tx.productImage.findMany({
-        where: { productId, id: { not: imageId } },
+        where: { productId, id: { not: imageId }, sortOrder: { lt: 1000 } },
         orderBy: { sortOrder: "asc" },
       });
       if (others.length > 0) {

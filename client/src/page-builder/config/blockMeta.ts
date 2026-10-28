@@ -1,7 +1,6 @@
 /**
- * 区块库展示元数据。
- *
- * 当前只保留首屏模板作为模板库重建期间的测试入口。
+ * 已保存首屏测试区块的展示名称。
+ * 新页面不再从这里插入区块，只从模板组件库添加。
  */
 import type { DesignMode, MasterId } from "../designSystem/masters";
 import type { ContentTemplateCommercialPurpose } from "../generated/contentTemplates.generated";
@@ -61,20 +60,11 @@ export const BLOCK_META: Record<string, BlockMeta> = {
     category: CONTENT_TEMPLATE_CONTRACTS.hero.commercialPurpose,
     order: 1,
     type: "主视觉",
-    badge: "测试模板",
-    description: "模板库重建期间保留的首屏测试入口。",
+    badge: "历史区块",
+    description: "早期页面里保存下来的首屏。新的画面从模板组件库添加。",
     tags: ["首屏", "测试"],
     recommended: true,
     master: CONTENT_TEMPLATE_CONTRACTS.hero.master,
     mode: "brand",
   },
 };
-
-export function getCategoryComponents(): Record<string, { defaultExpanded: boolean; components: string[] }> {
-  return {
-    品牌展示: {
-      defaultExpanded: true,
-      components: ["首屏主视觉"],
-    },
-  };
-}

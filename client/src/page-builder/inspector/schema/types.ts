@@ -117,7 +117,13 @@ export interface MediaFieldDef extends FieldBase {
    * 设置后 mobile 档渲染 DeviceOverrideBadge——
    * 空值显示“继承电脑端”(可拷贝初值),非空显示“恢复继承”(清空回退桌面图)。
    */
-  inheritFrom?: { key: string; label: string };
+  inheritFrom?: {
+    key: string;
+    label: string;
+    overriddenLabel?: string;
+    inheritAction?: string;
+    overrideAction?: string;
+  };
 }
 
 /** 视频字段：上传(/upload/video,≤100MB)或粘贴地址,带预览与替换/删除 */

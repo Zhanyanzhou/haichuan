@@ -49,6 +49,14 @@ export const heroSchema: ModuleInspectorSchema = {
             required: true,
             focusKeys: { x: "mobileFocusX", y: "mobileFocusY" },
             placeholder: "上传手机端主视觉",
+            hint: "没有单独竖图时，桌面宽图会铺满手机框，焦点仍可单独调整。",
+            inheritFrom: {
+              key: "desktopImage",
+              label: "手机框正在使用桌面宽图",
+              overriddenLabel: "已单独上传手机竖图",
+              inheritAction: "上传手机竖图",
+              overrideAction: "改回桌面宽图",
+            },
           },
         ),
         {

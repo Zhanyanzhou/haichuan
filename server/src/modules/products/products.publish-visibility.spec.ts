@@ -759,13 +759,25 @@ test("canPublish：拒绝 E2E、乱码与重复占位文案", async () => {
   const invalidProducts = [
     product({ id: 401, status: "DRAFT", name: "E2E 测试商品", primaryImageId: 1 }),
     product({ id: 402, status: "DRAFT", name: "å®šåˆ¶é¦–é¥°", primaryImageId: 1 }),
-    product({ id: 403, status: "DRAFT", salesMode: "DISPLAY_ONLY", description: "啊啊啊啊", primaryImageId: 1 }),
     product({ id: 404, status: "DRAFT", name: "333333", primaryImageId: 1 }),
   ];
   for (const invalid of invalidProducts) {
     const { service } = createService([invalid]);
     await assert.rejects(() => service.canPublish(invalid.id), BadRequestException);
   }
+
+  const optionalCopy = createService([
+    product({
+      id: 403,
+      status: "DRAFT",
+      salesMode: "DISPLAY_ONLY",
+      description: "啊啊啊啊",
+      shortDescription: "3333",
+      detailContent: [{ type: "TEXT", text: "啊啊啊啊" }],
+      primaryImageId: 1,
+    }),
+  ]);
+  await assert.doesNotReject(() => optionalCopy.service.canPublish(403));
 });
 
 test("canPublish：展示类作品不要求简介、说明、详情、克重，未指定列表图时沿用主图", async () => {

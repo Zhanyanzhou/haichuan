@@ -12,20 +12,26 @@ export function catNameById(tree: RealCategory[], id: number): string {
   return "";
 }
 
-/** 获取一级分类的二级子分类。 */
+function byCatalogOrder(left: RealCategory, right: RealCategory): number {
+  return (left.sortOrder ?? 0) - (right.sortOrder ?? 0) || left.id - right.id;
+}
+
+/** 获取一级分类的二级子分类。顺序与分类管理一致。 */
 export function getRealSubs(
   tree: RealCategory[],
   parentId: number,
 ): RealCategory[] {
   for (const category of tree) {
-    if (category.id === parentId) return category.children || [];
+    if (category.id === parentId) {
+      return (category.children || []).slice().sort(byCatalogOrder);
+    }
   }
   return [];
 }
 
-/** 从真实分类树获取一级分类列表。 */
+/** 从真实分类树获取一级分类列表。顺序与分类管理一致。 */
 export function getPrimaryCats(tree: RealCategory[]): RealCategory[] {
   return tree
     .filter((category) => category.level === 1)
-    .sort((a, b) => a.id - b.id);
+    .sort(byCatalogOrder);
 }

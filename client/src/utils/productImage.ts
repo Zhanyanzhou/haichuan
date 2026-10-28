@@ -14,6 +14,9 @@ import type { ProductImage } from '@/types';
 
 const PRODUCT_PLACEHOLDER = '/images/system/product-placeholder.svg';
 
+/** 详情长图使用这段序号，避免占用主图的前 9 张，也避免出现在前台缩略图条。 */
+export const DETAIL_ONLY_IMAGE_SORT_FLOOR = 1000;
+
 /** ProductImage 对象判断 */
 function isImageObj(img: unknown): img is ProductImage {
   if (typeof img !== 'object' || img === null) return false;
@@ -97,7 +100,9 @@ export function getThumbnailList(
   images?: ProductImage[],
   primaryImage?: ProductImage | null,
 ): ProductImage[] {
-  const sorted = [...(images || [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  const sorted = [...(images || [])]
+    .filter((image) => (image.sortOrder ?? 0) < DETAIL_ONLY_IMAGE_SORT_FLOOR || image.id === primaryImage?.id)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
   if (!primaryImage) return sorted;
   return [primaryImage, ...sorted.filter((image) => image.id !== primaryImage.id)];
 }

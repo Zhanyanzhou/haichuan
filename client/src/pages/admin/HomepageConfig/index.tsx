@@ -24,6 +24,7 @@ import {
 } from "@ant-design/icons";
 import { Puck, useGetPuck, type Data, type PuckAction, type UiState } from "@puckeditor/core";
 import { useAuthStore } from "@/store/authStore";
+import RouteLoading from "@/components/common/RouteLoading";
 import type { PublicContentLocale } from "@/i18n/publicLocale";
 import "@puckeditor/core/no-external.css";
 import { puckConfig } from "@/page-builder/config/puckConfig";
@@ -63,14 +64,11 @@ import {
   type EditorPageKey,
 } from "@/page-builder/config/editorPages";
 import {
-  CONTENT_TEMPLATE_BY_MODULE_TYPE,
   createContentTemplateMarker,
-  getContentTemplatePageRule,
   isContentTemplateAllowedForPage,
   sanitizeContentTemplateLayoutData,
 } from "@/page-builder/generated/contentTemplates.generated";
 import { isVisualRecord } from "@/page-builder/runtime/visualLayout";
-import { isVisiblePrimaryStageBlockInDocument } from "@/page-builder/utils/primaryStagePolicy";
 import {
   MissingMediaState,
   normalizeLegacyRenderColors,
@@ -103,17 +101,17 @@ import {
   DynamicTemplateInstanceView,
   createDynamicTemplateInstanceProps,
   dynamicTemplateVersionKey,
-  planDynamicTemplateDocumentUpgrade,
   readResolvedDynamicTemplateDefinitions,
   registerResolvedDynamicTemplate,
   useResolvedDynamicTemplateDefinitions,
   type DynamicTemplateInstanceProps,
-  type DynamicTemplateDocumentUpgradePlan,
   type ResolvedDynamicTemplateDefinitionMap,
   stripNonEditableSlotContentFromPageDocument,
 } from "@/page-builder/dynamic-template-instance";
 import DynamicTemplateInstanceInspector from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceInspector";
-import { DynamicTemplateUpgradeReviewModal } from "@/page-builder/dynamic-template-instance/DynamicTemplateUpgradePanel";
+import { catalogCardName } from "@/page-builder/template-editor/catalogCardName";
+import { usePublishedTemplateSectionRoles } from "@/page-builder/template-editor/publishedTemplateSectionRoles";
+import { getModuleDisplayName, resolveTemplateSectionRole } from "./editor-utils";
 import type { PromoteDynamicTemplateInstanceRequest } from "@/page-builder/dynamic-template-instance/promoteToTemplate";
 import type { PublishedDynamicTemplateResource } from "@/services/clients/dynamicTemplateClient";
 import type { EditorWorkspaceMode } from "@/page-builder/template-editor/types";
@@ -734,85 +732,12 @@ function CanvasPageDataSynchronizer({
   return null;
 }
 
-/**
- * 模块卡片不使用真实商品素材，而用“布局微缩图”展示该区块插入后的结构。
- * 这让用户先理解版式和内容层级，再决定是否添加。
- */
-function getPageTemplateUpgradeRuleBlockers(
-  pageKey: EditorPageKey,
-  document: Record<string, unknown>,
-  resolvedDefinitions?: ResolvedDynamicTemplateDefinitionMap,
-) {
-  const blockers: string[] = [];
-  const rule = getContentTemplatePageRule(pageKey);
-  if (!rule) return ["当前页面缺少页面规则。"];
-  if (
-    rule.contentPlacement === "root-only"
-    && document.zones
-    && typeof document.zones === "object"
-    && !Array.isArray(document.zones)
-    && Object.values(document.zones as Record<string, unknown>)
-      .some((blocks) => Array.isArray(blocks) && blocks.length > 0)
-  ) {
-    blockers.push("当前页面不符合根内容位置规则。");
-  }
-  const availableDefinitions = {
-    ...(resolvedDefinitions ?? {}),
-    ...readResolvedDynamicTemplateDefinitions(
-      document[DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY],
-    ),
-  };
-  const documentForPolicies = {
-    ...document,
-    [DYNAMIC_TEMPLATE_RESOLVED_DEFINITIONS_KEY]: availableDefinitions,
-  };
-  const visibleContent = (Array.isArray(document.content) ? document.content : [])
-    .filter((block) => {
-      if (!block || typeof block !== "object" || Array.isArray(block)) return false;
-      const props = (block as Record<string, unknown>).props;
-      return !props
-        || typeof props !== "object"
-        || Array.isArray(props)
-        || (props as Record<string, unknown>).isVisible !== false;
-    });
-  const primaryStageIndexes = visibleContent
-    .map((block, index) => (
-      isVisiblePrimaryStageBlockInDocument(block, documentForPolicies) ? index : -1
-    ))
-    .filter((index) => index >= 0);
-  if (primaryStageIndexes.length > 0 && primaryStageIndexes[0] !== 0) {
-    blockers.push("主舞台实例必须是首个可见品牌内容区。");
-  }
-  if (rule.headerMode.configured === "overlay-light") {
-    const first = visibleContent[0];
-    const firstRecord = first && typeof first === "object" && !Array.isArray(first)
-      ? first as Record<string, unknown>
-      : undefined;
-    const fixed = typeof firstRecord?.type === "string"
-      ? CONTENT_TEMPLATE_BY_MODULE_TYPE[firstRecord.type]
-      : undefined;
-    let overlayLightCompatible = fixed?.key === rule.headerMode.overlayRequiresFirstTemplate;
-    if (firstRecord?.type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
-      const props = firstRecord.props && typeof firstRecord.props === "object" && !Array.isArray(firstRecord.props)
-        ? firstRecord.props as Record<string, unknown>
-        : undefined;
-      const templateId = typeof props?.templateId === "string" ? props.templateId : "";
-      const templateVersion = Number(props?.templateVersion);
-      const resolved = availableDefinitions[dynamicTemplateVersionKey(templateId, templateVersion)];
-      overlayLightCompatible = Boolean(
-        resolved?.definition.metadata.headerCompatibility?.includes("overlay-light"),
-      );
-    }
-    if (!overlayLightCompatible) {
-      blockers.push("首个可见品牌模块不兼容当前页面的浅色覆盖导航。");
-    }
-  }
-  return blockers;
+function publishedTemplateDisplayName(template: PublishedDynamicTemplateResource) {
+  return catalogCardName(template.definition.metadata.sectionRole, template.name);
 }
 
 function PageTemplateLibraryAdapter({
   active,
-  pageKey,
   obscuredByInspector,
   onRequestCompactOpen,
   onPageActionComplete,
@@ -821,7 +746,6 @@ function PageTemplateLibraryAdapter({
   onTemplateDragEnd,
 }: {
   active: boolean;
-  pageKey: EditorPageKey;
   obscuredByInspector: boolean;
   onRequestCompactOpen: () => void;
   onPageActionComplete: () => void;
@@ -829,7 +753,7 @@ function PageTemplateLibraryAdapter({
   onTemplateDragStart: (label: string, insertAt: (insertionIndex: number) => void) => void;
   onTemplateDragEnd: () => void;
 }) {
-  const { message, modal } = AntdApp.useApp();
+  const { message } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
   const appDataRef = useRef(appData);
   appDataRef.current = appData;
@@ -843,115 +767,11 @@ function PageTemplateLibraryAdapter({
     && itemSelector.index >= 0
     && itemSelector.index < (appData.content?.length ?? 0),
   );
-  const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
   const dispatch = useHomepagePuck((state) => state.dispatch);
-  const [dynamicUpgradeReview, setDynamicUpgradeReview] = useState<{
-    template: PublishedDynamicTemplateResource;
-    plan: DynamicTemplateDocumentUpgradePlan<Record<string, unknown>>;
-  } | null>(null);
   const currentViewport = useHomepagePuck((state) => state.appState.ui.viewports.current);
   const previewViewport = typeof currentViewport.width === "number" && currentViewport.width <= 480
     ? "mobile"
     : "desktop";
-  const getPublishedUpgradePlan = useCallback((template: PublishedDynamicTemplateResource) => {
-    const currentRuleBlockers = getPageTemplateUpgradeRuleBlockers(
-      pageKey,
-      appData as unknown as Record<string, unknown>,
-      resolvedDynamicTemplateDefinitions,
-    );
-    if (currentRuleBlockers.length > 0) {
-      return {
-        document: appData as unknown as Record<string, unknown>,
-        upgradedCount: 0,
-        blockers: currentRuleBlockers,
-        instancePlans: [],
-        pendingRequiredSlots: [],
-        destructiveBlockers: [],
-      };
-    }
-    const plan = planDynamicTemplateDocumentUpgrade({
-      document: appData as unknown as Record<string, unknown>,
-      resolvedDefinitions: resolvedDynamicTemplateDefinitions,
-      target: {
-        templateId: template.templateId,
-        version: template.version,
-        schemaVersion: template.schemaVersion,
-        definitionChecksum: template.definitionChecksum,
-        definition: template.definition,
-        name: template.name,
-      },
-    });
-    const nextRuleBlockers = plan.upgradedCount > 0
-      ? getPageTemplateUpgradeRuleBlockers(
-          pageKey,
-          plan.document,
-          resolvedDynamicTemplateDefinitions,
-        )
-      : [];
-    if (nextRuleBlockers.length > 0) {
-      return {
-        document: appData as unknown as Record<string, unknown>,
-        upgradedCount: 0,
-        blockers: nextRuleBlockers,
-        instancePlans: [],
-        pendingRequiredSlots: [],
-        destructiveBlockers: [],
-      };
-    }
-    return plan;
-  }, [appData, pageKey, resolvedDynamicTemplateDefinitions]);
-
-  const upgradePublishedDynamicTemplateInPage = useCallback((
-    template: PublishedDynamicTemplateResource,
-  ) => {
-    const plan = getPublishedUpgradePlan(template);
-    if (plan.instancePlans.length === 0) return;
-    setDynamicUpgradeReview({ template, plan });
-  }, [getPublishedUpgradePlan]);
-
-  const confirmPublishedDynamicTemplateUpgrade = useCallback(() => {
-    if (!dynamicUpgradeReview || dynamicUpgradeReview.plan.upgradedCount === 0) return;
-    const { template, plan } = dynamicUpgradeReview;
-    registerResolvedDynamicTemplate({
-      templateId: template.templateId,
-      version: template.version,
-      schemaVersion: template.schemaVersion,
-      definitionChecksum: template.definitionChecksum,
-      definition: template.definition,
-    });
-    dispatch({
-      type: "setData",
-      data: plan.document as typeof appData,
-      recordHistory: true,
-    });
-    const firstPendingPlan = plan.instancePlans.find((item) => item.analysis.pendingRequiredSlots.length > 0);
-    if (firstPendingPlan) {
-      const content = Array.isArray(plan.document.content) ? plan.document.content : [];
-      const index = content.findIndex((block) => {
-        if (!block || typeof block !== "object" || Array.isArray(block)) return false;
-        const props = (block as Record<string, unknown>).props;
-        return Boolean(props && typeof props === "object" && !Array.isArray(props)
-          && (props as Record<string, unknown>).id === firstPendingPlan.blockId);
-      });
-      if (index >= 0) {
-        dispatch({ type: "setUi", ui: { itemSelector: { index, zone: ROOT_ZONE } } });
-      }
-      const firstPending = firstPendingPlan.analysis.pendingRequiredSlots[0];
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        const field = document.querySelector<HTMLElement>(
-          `[data-slot-id="${CSS.escape(firstPending.slotId)}"]`,
-        );
-        const focusTarget = field?.querySelector<HTMLElement>(
-          "input, textarea, select, button, [tabindex]:not([tabindex='-1'])",
-        );
-        field?.scrollIntoView({ block: "center" });
-        focusTarget?.focus();
-      }));
-    }
-    setDynamicUpgradeReview(null);
-    onPageActionComplete();
-    message.success(`已升级 ${plan.upgradedCount} 个模板实例；保存页面草稿后才会持久化`);
-  }, [dispatch, dynamicUpgradeReview, message, onPageActionComplete]);
 
   const insertPublishedDynamicTemplate = useCallback((
     template: PublishedDynamicTemplateResource,
@@ -1020,11 +840,10 @@ function PageTemplateLibraryAdapter({
       templateId: template.templateId,
       version: template.version,
     });
-    message.success(`已添加“${template.name}”v${template.version}，可在右侧填写页面内容`);
+    message.success(`已添加“${publishedTemplateDisplayName(template)}”v${template.version}，可在右侧填写页面内容`);
   }, [dispatch, message, onPageActionComplete, onRetainLibraryAfterSelection]);
 
   return (
-    <>
     <UnifiedTemplateLibrary
       mode="page"
       active={active}
@@ -1036,23 +855,11 @@ function PageTemplateLibraryAdapter({
       hasRootSelection={hasRootSelection}
       onInsertPublished={insertPublishedDynamicTemplate}
       onPublishedDragStart={(template) => onTemplateDragStart(
-        template.name,
+        publishedTemplateDisplayName(template),
         (insertionIndex) => insertPublishedDynamicTemplate(template, insertionIndex),
       )}
       onPublishedDragEnd={onTemplateDragEnd}
-      getPublishedUpgradeCount={(template) => getPublishedUpgradePlan(template).instancePlans.length}
-      onUpgradePublished={upgradePublishedDynamicTemplateInPage}
     />
-    {dynamicUpgradeReview ? (
-      <DynamicTemplateUpgradeReviewModal
-        open
-        title={`升级“${dynamicUpgradeReview.template.name}”模板实例`}
-        plans={dynamicUpgradeReview.plan.instancePlans}
-        onConfirm={confirmPublishedDynamicTemplateUpgrade}
-        onCancel={() => setDynamicUpgradeReview(null)}
-      />
-    ) : null}
-    </>
   );
 }
 
@@ -1339,6 +1146,7 @@ function EditorBody({
   const { message } = AntdApp.useApp();
   const appData = useHomepagePuck((state) => state.appState.data);
   const resolvedDynamicTemplateDefinitions = useResolvedDynamicTemplateDefinitions();
+  const rolesByTemplateId = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
   const appDataRef = useRef(appData);
   appDataRef.current = appData;
   const currentViewport = useHomepagePuck(
@@ -1385,7 +1193,14 @@ function EditorBody({
   const openInspector = useCallback(() => updateInspectorCollapsed(false), [updateInspectorCollapsed]);
   const closeInspector = useCallback(() => updateInspectorCollapsed(true), [updateInspectorCollapsed]);
   const selectedItemLabel = selectedItem
-    ? BLOCK_META[selectedItem.type]?.name ?? selectedItem.type
+    ? getModuleDisplayName(
+      selectedItem.type,
+      selectedItem.props as Record<string, unknown>,
+      resolveTemplateSectionRole(selectedItem.props as Record<string, unknown>, {
+        definitions: resolvedDynamicTemplateDefinitions,
+        rolesByTemplateId,
+      }),
+    )
     : null;
   const inspectorOverlay = useCompactWorkspaceOverlay({
     open: !inspectorCollapsed,
@@ -2175,7 +1990,6 @@ function EditorBody({
       ) : (
         <PageTemplateLibraryAdapter
           active={workspaceActive}
-          pageKey={pageKey}
           obscuredByInspector={!inspectorCollapsed}
           onRequestCompactOpen={closeInspector}
           onPageActionComplete={requestInspectorOpen}
@@ -2749,17 +2563,7 @@ export default function StoreDecorationWorkbench({
           </Button>
         </div>
       ) : initialLoading || loadedPageKey !== pageKey || !resolvedDynamicTemplatesReady ? (
-        <div
-          style={{
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Spin size="large" />
-        </div>
+        <RouteLoading scope="workspace" label="正在加载店铺装修…" />
       ) : (
         <Puck
           key="homepage-editor-canvas"
@@ -2888,14 +2692,7 @@ export default function StoreDecorationWorkbench({
           {workspaceMode === "template" ? (
             <Suspense
               fallback={
-                <div
-                  className="homepage-editor__loading"
-                  role="status"
-                  aria-live="polite"
-                >
-                  <Spin />
-                  <span>正在加载模板编辑器</span>
-                </div>
+                <RouteLoading scope="workspace" label="正在加载模板编辑器…" />
               }
             >
               <TemplateWorkspace controller={templateWorkspaceController} />

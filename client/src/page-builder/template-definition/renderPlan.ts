@@ -55,9 +55,8 @@ export interface CompileDynamicTemplateRenderPlanOptions {
   /** 编辑器与预览可保留空槽位占位；公开渲染必须保持 false。 */
   showEmptySlots?: boolean;
   /**
-   * 公开与预览按 D.38 / D.40 消费：默认图片不进入前台，Schema 3 默认内容不代替页面值，
-   * 未获准的价格文字也不进入前台。
-   * 编辑画布不传此项，以便继续查看模板默认图和设计用文案。
+   * 公开页、页面预览和页面装修画布都传此项：默认图片不代替页面自己的图。
+   * Schema 3 公开面另外不让默认文字代替页面值。模板设计画布不走这条。
    */
   publicSurface?: {
     omitDefaultImages: true;

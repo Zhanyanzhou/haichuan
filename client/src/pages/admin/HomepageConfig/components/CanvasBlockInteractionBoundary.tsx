@@ -93,6 +93,11 @@ const CanvasBlockInteractionBoundary = forwardRef<
 
   const handleCanvasClickCapture = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target;
+    // 画布内联编辑（选款中心的品类名称）要收到点击并写入输入框。
+    // 预览 iframe 里的节点和编辑器窗口不是同一个 Realm，不能用 instanceof。
+    if (target && typeof (target as Element).closest === "function") {
+      if ((target as Element).closest("[data-canvas-inline-edit]")) return;
+    }
     if (!(target instanceof HTMLElement)) return;
     // 编辑画布只负责选择和调整，不执行公开页面的跳转、播放或提交动作。
     if (target.closest("a,button,input,select,textarea,[role='button']")) {
@@ -107,6 +112,15 @@ const CanvasBlockInteractionBoundary = forwardRef<
     event: ReactPointerEvent<HTMLDivElement>,
   ) => {
     if (allowNodeSelection) return;
+    const target = event.target;
+    if (
+      target &&
+      typeof (target as Element).closest === "function" &&
+      (target as Element).closest("[data-canvas-inline-edit]")
+    ) {
+      onSelect();
+      return;
+    }
     // 页面装修只选择整块模板。必须在捕获阶段截断，避免事件继续进入
     // Renderer 的图片、文字或业务对象选择器并改变右侧属性上下文。
     event.preventDefault();

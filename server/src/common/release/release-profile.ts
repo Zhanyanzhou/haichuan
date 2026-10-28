@@ -86,7 +86,7 @@ export function parseReleaseProfile(value?: string): ReleaseProfile {
   return profile as ReleaseProfile;
 }
 
-/** 运行时采用安全默认：只有显式 commerce 才允许公开直购商品事实。 */
+/** 运行时采用安全默认：只有显式 commerce 才允许直购写入。浏览仍可展示已发布直购作品。 */
 export function isCommerceReleaseProfile(value = process.env.RELEASE_PROFILE) {
   return value?.trim() === COMMERCE_RELEASE_PROFILE;
 }
@@ -256,8 +256,10 @@ export function isPartnerApplicationsWriteReady(
     && resolvePartnerAgreementContract(version, hash, status) !== null;
 }
 
+/**
+ * 公开浏览不再按发布档位藏起直购作品。支付未开放时，顾客仍可看到作品和价格；
+ * 购物车、结算和直接下单继续走 directPurchaseProductBaseWhere，线索型档位下该条件恒不命中。
+ */
 export function customerFacingReleaseWhere() {
-  return isCommerceReleaseProfile()
-    ? {}
-    : { NOT: { salesMode: "DIRECT_PURCHASE" as const } };
+  return {};
 }

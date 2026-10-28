@@ -46,90 +46,44 @@ export class CategoriesService {
     }
   }
 
-  private retainPublicBranches<T extends { id: number; children?: T[] }>(
-    nodes: T[],
-    publicCategoryIds: Set<number>,
-  ): T[] {
-    return nodes.flatMap((node) => {
-      const children = this.retainPublicBranches(
-        node.children ?? [],
-        publicCategoryIds,
-      );
-      if (!publicCategoryIds.has(node.id) && children.length === 0) return [];
-      return [{ ...node, children } as T];
-    });
-  }
-
-  private async findPublicProductCategoryIds(): Promise<Set<number>> {
-    const categories = await this.prisma.product.findMany({
-      where: {
-        ...customerFacingProductWhereForVisibilities(['PUBLIC']),
-        category: { isActive: true, deletedAt: null },
-      },
-      select: { categoryId: true },
-      distinct: ['categoryId'],
-    });
-    return new Set(categories.map(({ categoryId }) => categoryId));
-  }
-
+  /** 选款中心与分类管理共用启用中的分类。没有公开商品的分类也保留。 */
   async findAll() {
-    const [categories, directPublicIds] = await Promise.all([
-      this.prisma.category.findMany({
-        where: { isActive: true, deletedAt: null },
-        orderBy: { sortOrder: 'asc' },
-        include: {
-          children: {
-            where: { isActive: true, deletedAt: null },
-            orderBy: { sortOrder: 'asc' },
-          },
+    return this.prisma.category.findMany({
+      where: { isActive: true, deletedAt: null },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+      include: {
+        children: {
+          where: { isActive: true, deletedAt: null },
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
         },
-      }),
-      this.findPublicProductCategoryIds(),
-    ]);
-    const byId = new Map(categories.map((category) => [category.id, category]));
-    const publicIds = new Set(directPublicIds);
-    for (const categoryId of directPublicIds) {
-      let parentId = byId.get(categoryId)?.parentId;
-      while (parentId) {
-        publicIds.add(parentId);
-        parentId = byId.get(parentId)?.parentId;
-      }
-    }
-    return categories
-      .filter(({ id }) => publicIds.has(id))
-      .map((category) => ({
-        ...category,
-        children: category.children.filter(({ id }) => publicIds.has(id)),
-      }));
+      },
+    });
   }
 
   async findTree() {
-    const [categories, publicCategoryIds] = await Promise.all([
-      this.prisma.category.findMany({
-        where: { level: 1, isActive: true, deletedAt: null },
-        orderBy: { sortOrder: 'asc' },
-        include: {
-          children: {
-            where: { isActive: true, deletedAt: null },
-            orderBy: { sortOrder: 'asc' },
-            include: {
-              children: {
-                where: { isActive: true, deletedAt: null },
-                orderBy: { sortOrder: 'asc' },
-                include: {
-                  children: {
-                    where: { isActive: true, deletedAt: null },
-                    orderBy: { sortOrder: 'asc' },
-                  },
+    const active = { isActive: true, deletedAt: null };
+    return this.prisma.category.findMany({
+      where: { level: 1, ...active },
+      orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+      include: {
+        children: {
+          where: active,
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+          include: {
+            children: {
+              where: active,
+              orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+              include: {
+                children: {
+                  where: active,
+                  orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
                 },
               },
             },
           },
         },
-      }),
-      this.findPublicProductCategoryIds(),
-    ]);
-    return this.retainPublicBranches(categories, publicCategoryIds);
+      },
+    });
   }
 
   /** 管理端分类树。不在前台且没有下级和商品的分类会先物理删除。 */
@@ -373,7 +327,7 @@ export class CategoriesService {
       await this.ensureSlugAvailable(categoryData.slug, tx, id);
 
       // 旧数据上的停用入口。有下级或商品时不能停用，避免导航消失但商品仍可被找到。
-      // 后台「删除」走 delete()：空分类会删掉记录并释放网址标识。
+      // 后台「删除」走 delete()：下级款式一并删除；仍有商品时先改到指定分类。
       if (categoryData.isActive === false) {
         await this.assertDeactivatable(id, tx);
       }
@@ -429,28 +383,76 @@ export class CategoriesService {
     }
   }
 
-  async delete(id: number, actor: CategoryActor) {
+  private subtreeIds(
+    categories: Array<{ id: number; parentId: number | null }>,
+    rootId: number,
+  ): number[] {
+    const childrenByParent = new Map<number, number[]>();
+    for (const category of categories) {
+      if (category.parentId == null) continue;
+      const children = childrenByParent.get(category.parentId) ?? [];
+      children.push(category.id);
+      childrenByParent.set(category.parentId, children);
+    }
+    const ids: number[] = [];
+    const walk = (categoryId: number) => {
+      ids.push(categoryId);
+      for (const childId of childrenByParent.get(categoryId) ?? []) walk(childId);
+    };
+    walk(rootId);
+    return ids;
+  }
+
+  /**
+   * 删除分类及其下级款式。商品不删除：范围内仍有商品时，先改到范围外的分类。
+   */
+  async delete(id: number, actor: CategoryActor, moveTo?: number) {
     return this.prisma.$transaction(async (tx) => {
       await this.lockAuthorizedActor(tx, actor);
-      const category = await tx.category.findUnique({
-        where: { id },
-        include: {
-          _count: {
-            select: {
-              children: true,
-              products: true,
-            },
-          },
-        },
+      const categories = await tx.category.findMany({
+        select: { id: true, parentId: true },
       });
-      if (!category) throw new NotFoundException('分类不存在');
-      if (category._count.children > 0) {
-        throw new BadRequestException('请先删除下级款式，再删除这个分类');
+      if (!categories.some((category) => category.id === id)) {
+        throw new NotFoundException('分类不存在');
       }
-      if (category._count.products > 0) {
-        throw new BadRequestException('这个分类下还有商品，请先改到其他分类后再删除');
+      const subtree = this.subtreeIds(categories, id);
+      const subtreeSet = new Set(subtree);
+      const productCount = await tx.product.count({
+        where: { categoryId: { in: subtree } },
+      });
+      if (productCount > 0) {
+        if (!Number.isInteger(moveTo) || !moveTo || moveTo <= 0) {
+          throw new BadRequestException('这个分类下还有商品，请选择要改去的分类后再删除');
+        }
+        if (subtreeSet.has(moveTo) || !categories.some((category) => category.id === moveTo)) {
+          throw new BadRequestException('要改去的分类不存在，或就在即将删除的分类里');
+        }
+        await tx.product.updateMany({
+          where: { categoryId: { in: subtree } },
+          data: { categoryId: moveTo },
+        });
       }
-      await tx.category.delete({ where: { id } });
+
+      const childrenByParent = new Map<number, number[]>();
+      for (const category of categories) {
+        if (category.parentId == null) continue;
+        const children = childrenByParent.get(category.parentId) ?? [];
+        children.push(category.id);
+        childrenByParent.set(category.parentId, children);
+      }
+      const pending = new Set(subtree);
+      while (pending.size > 0) {
+        const leaves = [...pending]
+          .filter((categoryId) =>
+            (childrenByParent.get(categoryId) ?? []).every((childId) => !pending.has(childId)),
+          )
+          .sort((left, right) => left - right);
+        if (leaves.length === 0) {
+          throw new BadRequestException('分类层级异常，没有删除');
+        }
+        await tx.category.deleteMany({ where: { id: { in: leaves } } });
+        for (const leaf of leaves) pending.delete(leaf);
+      }
       return { success: true };
     });
   }

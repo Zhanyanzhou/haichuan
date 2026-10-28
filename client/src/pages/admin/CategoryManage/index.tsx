@@ -241,15 +241,15 @@ export default function CategoryManage() {
     void commitReorder(payload);
   };
 
-  const handleDelete = async (node: CatTreeNode) => {
+  const handleDelete = async (node: CatTreeNode, moveTo?: number) => {
     const snapshot = tree;
     const snapshotSelection = selectedKeys;
     setSaving(true);
     setTree((current) => removeNode(current, node.id));
     setSelectedKeys((current) => current.filter((id) => id !== node.id));
     try {
-      await categoryApi.delete(node.id);
-      message.success("分类已删除");
+      await categoryApi.delete(node.id, moveTo);
+      message.success(moveTo ? "分类已删除，商品已改到所选分类" : "分类已删除");
       await refresh(true);
       setTree((current) => removeNode(current, node.id));
     } catch (err: unknown) {
@@ -259,7 +259,7 @@ export default function CategoryManage() {
       message.error(
         getSafeAdminErrorMessage(
           err,
-          "分类还在。没有下级款式和商品时才能删除，请再试一次。",
+          "分类还在。有商品时请先选择要改去的分类，再删除。",
         ),
       );
     } finally {
@@ -370,7 +370,7 @@ export default function CategoryManage() {
               reordering={reordering}
               saving={saving}
               onAddStyle={(name) => createCategory(selectedNode.id, name)}
-              onDelete={() => void handleDelete(selectedNode)}
+              onDelete={(moveTo) => void handleDelete(selectedNode, moveTo)}
               onMove={(parentId) => void handleMove(selectedNode, parentId)}
               onOpen={(id) => setSelectedKeys([id])}
               onShift={(direction) => handleShift(selectedNode, direction)}

@@ -25,7 +25,12 @@ import {
   getDynamicTemplateDefinitionMediaReferences,
   omitDynamicTemplateInstances,
 } from "./dynamic-template-instance";
-import { createPageLocaleContentHash } from "./page-document-localization";
+import { planDynamicTemplateActivation } from "./dynamic-template-activation";
+import {
+  createPageLocaleContentHash,
+  stripPageLocaleRevisionMetadata,
+} from "./page-document-localization";
+import { withoutContentTemplatePublicationAttestation } from "./generated/contentTemplates.generated";
 import {
   buildConsultationStarterDefinition,
   CONSULTATION_STARTER_SPECS,
@@ -1374,6 +1379,153 @@ export class DynamicTemplatesService {
     }
   }
 
+  private isoTimestamp(value: Date | string | null | undefined): string {
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === "string" && value.trim()) return new Date(value).toISOString();
+    return new Date(0).toISOString();
+  }
+
+  private persistablePageMetadata(metadata: unknown): Record<string, unknown> {
+    return Object.fromEntries(
+      Object.entries(stripPageLocaleRevisionMetadata(
+        withoutContentTemplatePublicationAttestation(metadata),
+      )).filter(([key]) => key !== "contentTemplateContract"),
+    );
+  }
+
+  /**
+   * 模板新版本发布后，把正在使用旧版本的页面草稿和装修方案沿用到新版本。
+   * 页面自己填写的内容、显隐和构图覆盖会保留；无法无损保留时整批不改页面。
+   * 已发布的页面快照保持不动，客户前台仍等「发布页面」。
+   */
+  private async adoptPublishedTemplateOntoDrafts(
+    tx: Prisma.TransactionClient,
+    input: {
+      dynamicTemplateId: number;
+      templateId: string;
+      fromVersion: number;
+      toVersion: number;
+      expectedDraftRevision: number;
+      draftChecksum: string;
+      targetDefinition: TemplateDefinitionV2;
+    },
+  ) {
+    if (input.fromVersion <= 0) {
+      return { adoptedPageCount: 0, adoptedInstanceCount: 0, blockers: [] as string[] };
+    }
+    const versionRows = await tx.dynamicTemplateVersion.findMany({
+      where: { dynamicTemplateId: input.dynamicTemplateId },
+    });
+    const definitionsByVersion: Record<number, TemplateDefinitionV2> = {};
+    for (const row of versionRows) {
+      if (!row.definition || typeof row.definition !== "object") continue;
+      definitionsByVersion[row.version] = row.definition as unknown as TemplateDefinitionV2;
+    }
+    definitionsByVersion[input.toVersion] = input.targetDefinition;
+    const [documents, schemes] = await Promise.all([
+      tx.pageDocument.findMany({
+        include: { publishedRevision: true, localizations: true },
+      }),
+      tx.pageScheme.findMany(),
+    ]);
+    const pagePlans = documents.map((document) => ({
+      documentId: document.id,
+      pageKey: document.pageKey,
+      status: document.status,
+      draftUpdatedAt: this.isoTimestamp(document.updatedAt),
+      draftPuckData: document.puckData,
+      draftMetadata: document.metadata,
+      latestPublishedRevision: document.publishedRevision
+        ? {
+          id: document.publishedRevision.id,
+          version: document.publishedRevision.version,
+          puckData: document.publishedRevision.puckData,
+          metadata: document.publishedRevision.metadata,
+        }
+        : null,
+    }));
+    const localizationPlans = documents.flatMap((document) => (
+      (document.localizations ?? []).map((localization) => ({
+        documentId: localization.id,
+        pageKey: `${document.pageKey}#${localization.locale}`,
+        status: localization.reviewStatus,
+        draftUpdatedAt: this.isoTimestamp(localization.updatedAt),
+        draftPuckData: localization.puckData,
+        draftMetadata: localization.metadata,
+        latestPublishedRevision: null,
+      }))
+    ));
+    const planInput = {
+      templateId: input.templateId,
+      currentPublishedVersion: input.fromVersion,
+      targetVersion: input.toVersion,
+      expectedDraftRevision: input.expectedDraftRevision,
+      draftChecksum: input.draftChecksum,
+      targetDefinition: input.targetDefinition,
+      definitionsByVersion,
+    };
+    const pageImpact = planDynamicTemplateActivation({
+      ...planInput,
+      documents: pagePlans,
+      schemes: schemes.map((scheme) => ({
+        schemeId: scheme.id,
+        pageKey: scheme.pageKey,
+        updatedAt: this.isoTimestamp(scheme.updatedAt),
+        puckData: scheme.puckData,
+      })),
+    });
+    const localizationImpact = planDynamicTemplateActivation({
+      ...planInput,
+      documents: localizationPlans,
+      schemes: [],
+    });
+    const blockers = [...pageImpact.blockers, ...localizationImpact.blockers];
+    if (blockers.length > 0) {
+      return { adoptedPageCount: 0, adoptedInstanceCount: 0, blockers };
+    }
+    const adoptedDrafts = pageImpact.documents.filter((document) => (
+      document.occurrences.some((occurrence) => occurrence.source === "draft" && occurrence.fromVersion !== input.toVersion)
+    ));
+    for (const document of adoptedDrafts) {
+      await tx.pageDocument.update({
+        where: { id: document.documentId },
+        data: { puckData: document.upgradedDraftPuckData as Prisma.InputJsonValue },
+      });
+    }
+    const adoptedLocalizations = localizationImpact.documents.filter((document) => (
+      document.occurrences.some((occurrence) => occurrence.fromVersion !== input.toVersion)
+    ));
+    for (const localization of adoptedLocalizations) {
+      await tx.pageDocumentLocalization.update({
+        where: { id: localization.documentId },
+        data: {
+          puckData: localization.upgradedDraftPuckData as Prisma.InputJsonValue,
+          contentHash: createPageLocaleContentHash(
+            localization.upgradedDraftPuckData,
+            this.persistablePageMetadata(localizationPlans.find((item) => item.documentId === localization.documentId)?.draftMetadata),
+          ),
+        },
+      });
+    }
+    for (const scheme of pageImpact.schemes) {
+      if (!scheme.occurrences.some((occurrence) => occurrence.fromVersion !== input.toVersion)) continue;
+      await tx.pageScheme.update({
+        where: { id: scheme.schemeId },
+        data: { puckData: scheme.upgradedPuckData as Prisma.InputJsonValue },
+      });
+    }
+    const adoptedInstanceCount = adoptedDrafts.reduce(
+      (total, document) => total + document.occurrences.filter((occurrence) => occurrence.source === "draft").length,
+      0,
+    ) + adoptedLocalizations.reduce((total, document) => total + document.occurrences.length, 0)
+      + pageImpact.schemes.reduce((total, scheme) => total + scheme.occurrences.length, 0);
+    return {
+      adoptedPageCount: adoptedDrafts.length + adoptedLocalizations.length + pageImpact.schemes.length,
+      adoptedInstanceCount,
+      blockers: [],
+    };
+  }
+
   async publish(
     actor: DynamicTemplateStaffActorInput,
     templateId: string,
@@ -1589,6 +1741,15 @@ export class DynamicTemplatesService {
         const draft = await tx.dynamicTemplateDraft.findUnique({
           where: { id: template.draft.id },
         });
+        const pageAdoption = await this.adoptPublishedTemplateOntoDrafts(tx, {
+          dynamicTemplateId: template.id,
+          templateId: template.templateId,
+          fromVersion: template.publishedVersion,
+          toVersion: published.version,
+          expectedDraftRevision: input.expectedRevision,
+          draftChecksum: validated.checksum,
+          targetDefinition: validated.definition,
+        });
         await tx.operationLog.create({
           data: {
             userId: resolvedOwnerId,
@@ -1603,6 +1764,7 @@ export class DynamicTemplatesService {
               templateId: template.templateId,
               fromVersion: template.publishedVersion,
               toVersion: published.version,
+              pageAdoption,
               ...(publicationMedia ? {
                 managedMediaAuthorization:
                   buildManagedMediaShadowReport(publicationMedia.resolution),
@@ -1617,6 +1779,7 @@ export class DynamicTemplatesService {
           published,
           draft,
           outcome: "published" as const,
+          pageAdoption,
         };
       }, {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,

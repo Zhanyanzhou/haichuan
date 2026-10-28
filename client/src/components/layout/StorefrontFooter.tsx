@@ -1,4 +1,8 @@
 import { Link } from "react-router-dom";
+import {
+  CONTENT_TEMPLATE_PAGE_KEYS,
+  CONTENT_TEMPLATE_PAGE_PATHS,
+} from "@/page-builder/generated/contentTemplates.generated";
 
 /** 国内公网上线完成备案后填写；空值时不渲染占位信息。 */
 const FOOTER_ICP_NUMBER = "";
@@ -10,14 +14,24 @@ type StorefrontFooterProps = {
   onPreviewNavigate?: (path: string) => void;
 };
 
+const FOOTER_PAGE_LABELS = {
+  products: "珠宝作品",
+  catalog: "选款中心",
+  custom: "定制服务",
+  about: "品牌故事",
+} as const;
+
 const footerLinks = [
-  { label: "珠宝作品", path: "/products" },
-  { label: "选款中心", path: "/catalog" },
-  { label: "定制服务", path: "/custom" },
-  { label: "品牌故事", path: "/about" },
+  ...CONTENT_TEMPLATE_PAGE_KEYS.flatMap((key) => {
+    if (!(key in FOOTER_PAGE_LABELS)) return [];
+    return [{
+      label: FOOTER_PAGE_LABELS[key as keyof typeof FOOTER_PAGE_LABELS],
+      path: CONTENT_TEMPLATE_PAGE_PATHS[key],
+    }];
+  }),
   { label: "隐私说明", path: "/privacy" },
   { label: "经营主体信息", path: "/business-info" },
-] as const;
+];
 
 /** 公开网站与装修画布共用的唯一页脚。 */
 export default function StorefrontFooter({

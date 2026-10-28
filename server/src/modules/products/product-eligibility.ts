@@ -1,5 +1,8 @@
 import { Prisma, ProductVisibility } from "@prisma/client";
-import { customerFacingReleaseWhere } from "../../common/release/release-profile";
+import {
+  customerFacingReleaseWhere,
+  isCommerceReleaseProfile,
+} from "../../common/release/release-profile";
 
 export type CustomerProductAccess = {
   accountType?: string | null;
@@ -46,14 +49,16 @@ export function customerFacingProductWhereForVisibilities(
   };
 }
 
-/** 所有标准零售入口共享的发布状态与销售模式门禁。 */
+/** 所有标准零售入口共享的发布状态与销售模式门禁。线索型档位下与直购条件互斥，查询恒为空。 */
 export function directPurchaseProductBaseWhere(): Prisma.ProductWhereInput {
   return {
     deletedAt: null,
     status: "PUBLISHED",
     publicationQualityStatus: "READY",
     salesMode: "DIRECT_PURCHASE",
-    ...customerFacingReleaseWhere(),
+    ...(isCommerceReleaseProfile()
+      ? {}
+      : { NOT: { salesMode: "DIRECT_PURCHASE" as const } }),
   };
 }
 

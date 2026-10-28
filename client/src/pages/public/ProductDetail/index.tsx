@@ -1,7 +1,7 @@
-// 作品详情：公开安全字段/灯箱/SKU/收藏/评价 Tab(晒单)/相似推荐/SEO meta
+// 作品详情：公开安全字段/主图悬停放大/SKU/收藏/评价 Tab(晒单)/SEO meta。作品列表只在选款中心。
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
-import { motion, useReducedMotion } from "framer-motion";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import { useParams, Link, useLocation, useSearchParams } from "react-router-dom";
 import { App as AntdApp, Tabs, Spin, Rate } from "antd";
 import {
   ShoppingCartOutlined,
@@ -10,16 +10,14 @@ import {
   HeartFilled,
 } from "@ant-design/icons";
 import { getMaterialLabel } from "@/utils/material";
-import { getPrimaryImage, getThumbnailList, getListingImage } from "@/utils/productImage";
+import { getPrimaryImage, getThumbnailList } from "@/utils/productImage";
+import { measureSubjectFrame, mediaIdFromUrl, type SubjectFrame } from "@/utils/subjectFrame";
 import { SecureImage } from "@/components/common/SecureImage";
-import Lightbox from "yet-another-react-lightbox";
-import "yet-another-react-lightbox/styles.css";
 import {
   cartApi,
   customerApi,
   publicProductStreamUrl,
   reviewApi,
-  recommendationApi,
 } from "@/services/api";
 import { USE_MOCK } from "@/services/mockData";
 import { lookupPublicWork } from "@/data/publicWorkLookup";
@@ -47,14 +45,118 @@ import {
 import { buildPublicUrl, normalizePublicSiteOrigin } from "@/utils/publicSiteUrl";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { getRequestErrorMessage } from "@/services/httpClient";
-import { getCatalogReturnUrl } from "@/pages/public/Catalog/catalogReturnContext";
+import { getCatalogReturnUrl, sanitizeCatalogReturnUrl } from "@/pages/public/Catalog/catalogReturnContext";
 
 const productSchemaOrigin = normalizePublicSiteOrigin(
   import.meta.env.VITE_PUBLIC_SITE_ORIGIN,
   { allowHttp: import.meta.env.DEV },
 );
 
-const RESPONSIVE_PRODUCT_IMAGE_WIDTHS = [480, 800, 1200] as const;
+const RESPONSIVE_PRODUCT_IMAGE_WIDTHS = [480, 800, 1200, 1680] as const;
+const DETAIL_ZOOM = 2;
+
+function trackProductDetailZoom(event: ReactPointerEvent<HTMLDivElement>) {
+  if (event.pointerType !== "mouse") return;
+  if (window.matchMedia("(hover: none), (max-width: 900px)").matches) return;
+  const frame = event.currentTarget;
+  const stage = frame.closest(".product-detail-page__stage");
+  const lens = frame.querySelector<HTMLElement>(".product-detail-page__zoom-lens");
+  const pane = stage?.querySelector<HTMLElement>(".product-detail-page__zoom-pane");
+  const photo = pane?.querySelector<HTMLElement>(".product-detail-page__zoom-photo-frame");
+  if (!stage || !lens || !pane || !photo) return;
+  const rect = frame.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+  frame.classList.add("is-detail-zoom");
+  stage.classList.add("is-detail-zoom");
+  const summary = stage.closest(".product-detail-page__layout")?.querySelector(".product-detail-page__summary");
+  const summaryLeft = summary?.getBoundingClientRect().left ?? rect.right;
+  const size = Math.min(rect.width, Math.max(0, window.innerWidth - summaryLeft - 16));
+  if (size < 160) return;
+  pane.style.width = `${size}px`;
+  pane.style.height = `${size}px`;
+  const paneWidth = pane.clientWidth;
+  const paneHeight = pane.clientHeight;
+  if (paneWidth <= 0 || paneHeight <= 0) return;
+  const lensWidth = Math.min(rect.width, paneWidth / DETAIL_ZOOM);
+  const lensHeight = Math.min(rect.height, paneHeight / DETAIL_ZOOM);
+  const localX = event.clientX - rect.left;
+  const localY = event.clientY - rect.top;
+  const lensX = Math.min(rect.width - lensWidth, Math.max(0, localX - lensWidth / 2));
+  const lensY = Math.min(rect.height - lensHeight, Math.max(0, localY - lensHeight / 2));
+  lens.style.width = `${lensWidth}px`;
+  lens.style.height = `${lensHeight}px`;
+  lens.style.transform = `translate(${lensX}px, ${lensY}px)`;
+  const scaleX = paneWidth / lensWidth;
+  const scaleY = paneHeight / lensHeight;
+  photo.style.width = `${rect.width * scaleX}px`;
+  photo.style.height = `${rect.height * scaleY}px`;
+  photo.style.transform = `translate(${-lensX * scaleX}px, ${-lensY * scaleY}px)`;
+}
+
+function clearProductDetailZoom(event: ReactPointerEvent<HTMLDivElement>) {
+  const frame = event.currentTarget;
+  frame.classList.remove("is-detail-zoom");
+  frame.closest(".product-detail-page__stage")?.classList.remove("is-detail-zoom");
+}
+
+function buildDetailZoomSrc(src: string): string {
+  if (!src.includes("/media/")) return src;
+  try {
+    const absolute = /^[a-z][a-z\d+.-]*:/i.test(src);
+    const parsed = new URL(src, "https://public-media.local");
+    parsed.searchParams.set("width", "1680");
+    return absolute
+      ? parsed.toString()
+      : `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return src;
+  }
+}
+
+function useSubjectFrames(sourceKey: string): Record<string, SubjectFrame> {
+  const [frames, setFrames] = useState<Record<string, SubjectFrame>>({});
+  useLayoutEffect(() => {
+    if (!sourceKey) return undefined;
+    const gallery = document.querySelector(".product-detail-page__gallery");
+    if (!gallery) return undefined;
+    const collect = () => {
+      const found: Record<string, SubjectFrame> = {};
+      gallery.querySelectorAll("img").forEach((node) => {
+        const img = node as HTMLImageElement;
+        if (img.closest(".product-detail-page__zoom-pane")) return;
+        const id = mediaIdFromUrl(img.currentSrc || img.src);
+        if (!id || !img.naturalWidth || found[id]) return;
+        const frame = measureSubjectFrame(img);
+        if (frame) found[id] = frame;
+      });
+      if (Object.keys(found).length === 0) return;
+      setFrames((current) => {
+        let changed = false;
+        const next = { ...current };
+        for (const [id, frame] of Object.entries(found)) {
+          if (next[id]?.objectViewBox !== frame.objectViewBox) {
+            next[id] = frame;
+            changed = true;
+          }
+        }
+        return changed ? next : current;
+      });
+    };
+    collect();
+    gallery.addEventListener("load", collect, true);
+    return () => gallery.removeEventListener("load", collect, true);
+  }, [sourceKey]);
+  return frames;
+}
+
+/** 名称若以编号开头，标题只留作品名，编号单独作为参照。 */
+function visibleWorkTitle(name: string, code: string): string {
+  const trimmedName = name.trim();
+  const trimmedCode = code.trim();
+  if (!trimmedCode || !trimmedName.startsWith(trimmedCode)) return trimmedName;
+  const rest = trimmedName.slice(trimmedCode.length).trim();
+  return rest || trimmedName;
+}
 
 function buildProductImageSrcSet(src: string): string | undefined {
   if (!src.includes("/media/")) return undefined;
@@ -71,62 +173,6 @@ function buildProductImageSrcSet(src: string): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** 相似作品推荐（同分类/材质+热度加权；recommendations 模块首次接线启用） */
-type SimilarProduct = Pick<
-  Product,
-  "id" | "code" | "name" | "price" | "images" | "primaryImage" | "listingImage"
->;
-
-function SimilarProducts({ productId }: { productId: number }) {
-  const [list, setList] = useState<SimilarProduct[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setList([]);
-    recommendationApi
-      .getSimilar(productId, 8)
-      .then((res: unknown) => {
-        if (!cancelled) setList(unwrapResponse<SimilarProduct[]>(res) || []);
-      })
-      .catch(() => {
-        if (!cancelled) setList([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [productId]);
-
-  if (list.length === 0) return null;
-  return (
-    <div className="mt-12 pt-8 border-t border-brand-line">
-      <p className="text-xs tracking-[.08em] text-brand-gold mb-5 font-sans">
-        相关作品
-      </p>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-        {list.map((item) => (
-          <Link key={item.id} to={publicProductPath(item)} className="group">
-            <div className="aspect-square bg-brand-bg overflow-hidden">
-              <SecureImage
-                src={getListingImage(item)}
-                alt={item.name}
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-              />
-            </div>
-            <p className="text-sm mt-2 truncate group-hover:text-brand-gold transition-colors">
-              {item.name}
-            </p>
-            {item.price != null && Number(item.price) > 0 ? (
-              <p className="text-sm text-brand-gold mt-1">
-                ¥{Number(item.price).toLocaleString()}
-              </p>
-            ) : null}
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 type PublicReviewsData = {
@@ -351,8 +397,11 @@ function ProductPrimaryAction({
 export default function ProductDetail() {
   const { message } = AntdApp.useApp();
   const { id } = useParams();
-  const catalogReturnUrl = getCatalogReturnUrl(id) || "/catalog";
-  const reduceMotion = useReducedMotion();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const catalogReturnUrl = getCatalogReturnUrl(id)
+    || sanitizeCatalogReturnUrl(searchParams.get("from"))
+    || "/catalog";
   const setPageMeta = usePageMetaStore((s) => s.setMeta);
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   const [loading, setLoading] = useState(true);
@@ -362,7 +411,10 @@ export default function ProductDetail() {
   const [qty, setQty] = useState(1);
   const [selectedSku, setSelectedSku] = useState<ProductSKU | null>(null);
   const [mainImage, setMainImage] = useState(0);
-  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const subjectFrameKey = product
+    ? `${product.id}:${mainImage}:${(product.images ?? []).map((image) => image.id).join(",")}`
+    : "";
+  const subjectFrames = useSubjectFrames(subjectFrameKey);
   const [revision, setRevision] = useState(0);
   const [addingToCart, setAddingToCart] = useState(false);
   const [purchaseError, setPurchaseError] = useState("");
@@ -696,6 +748,7 @@ export default function ProductDetail() {
     thumbnails[mainImage]?.url ||
     (thumbnails.length > 0 ? getPrimaryImage(product) : "");
   const mainImageRecord = thumbnails[mainImage];
+  const mainSubjectFrame = subjectFrames[String(mainImageRecord?.id ?? "")];
   const startingPrice = Number(product.price) || 0;
   const displayPrice = selectedSku ? Number(selectedSku.price) : startingPrice;
   const isDirectPurchase = product.salesMode === "DIRECT_PURCHASE";
@@ -831,10 +884,17 @@ export default function ProductDetail() {
     || (hasSkuSizeFact
       ? "选择规格后查看对应尺寸"
       : "暂无已核实的作品或规格尺寸");
-  const sizeGuidanceStatus = "当前结构化事实中暂无已核实的测量、佩戴适配或改圈指导";
   const decisionNote = isDirectPurchase
     ? "购买前请核对所选规格与尺寸；页面未列明的费用、交付时间或服务不作推定。"
     : "页面未列明的费用、交期或服务不作推定。";
+  const categoryId = product.category?.id;
+  const categoryName = product.category?.name?.trim();
+  const sameCategoryHref = typeof categoryId === "number"
+    && Number.isInteger(categoryId)
+    && categoryId > 0
+    && categoryName
+    ? `/catalog?category=${categoryId}`
+    : null;
 
   const handleAddToCart = async () => {
     if (addPendingRef.current || addingToCart) return;
@@ -915,44 +975,54 @@ export default function ProductDetail() {
 
         <div className="product-detail-page__layout">
           {/* Left: Images */}
-          <motion.div
-            className="product-detail-page__gallery"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: reduceMotion ? 0 : 0.6 }}
-          >
+          <div className="product-detail-page__gallery">
+            <div className="product-detail-page__stage">
             <div
               data-product-main-media-id={
                 thumbnails[mainImage]?.id ?? ""
               }
-              onClick={() => mainImageUrl && setLightboxOpen(true)}
-              role={mainImageUrl ? "button" : undefined}
-              aria-label={mainImageUrl ? "放大查看作品图" : undefined}
-              tabIndex={mainImageUrl ? 0 : undefined}
-              onKeyDown={(e) => {
-                if (mainImageUrl && (e.key === "Enter" || e.key === " ")) {
-                  e.preventDefault();
-                  setLightboxOpen(true);
-                }
-              }}
-              className={`product-detail-page__main-media ${mainImageUrl ? "cursor-zoom-in" : ""}`}
+              className="product-detail-page__main-media"
+              onPointerEnter={mainImageUrl ? trackProductDetailZoom : undefined}
+              onPointerMove={mainImageUrl ? trackProductDetailZoom : undefined}
+              onPointerLeave={mainImageUrl ? clearProductDetailZoom : undefined}
             >
               {mainImageUrl ? (
                 <SecureImage
                   src={mainImageUrl}
                   alt={product.name}
-                  className="w-full h-full object-cover"
+                  className="product-detail-page__photo"
                   srcSet={buildProductImageSrcSet(mainImageUrl)}
                   sizes="(max-width: 900px) calc(100vw - 40px), (max-width: 1440px) 55vw, 700px"
                   width={mainImageRecord?.width ?? undefined}
                   height={mainImageRecord?.height ?? undefined}
-                  aspectRatio="4 / 5"
+                  style={mainSubjectFrame ? {
+                    objectViewBox: mainSubjectFrame.objectViewBox,
+                  } as CSSProperties & { objectViewBox?: string } : undefined}
                   priority
                 />
               ) : (
                 <span className="text-sm text-brand-muted">图片暂不可用</span>
               )}
+              {mainImageUrl ? (
+                <div className="product-detail-page__zoom-lens" aria-hidden="true" />
+              ) : null}
             </div>
+            {mainImageUrl ? (
+              <div className="product-detail-page__zoom-pane" aria-hidden="true">
+                <div className="product-detail-page__zoom-photo-frame">
+                  <SecureImage
+                    src={buildDetailZoomSrc(mainImageUrl)}
+                    alt=""
+                    className="product-detail-page__zoom-photo"
+                    width={mainImageRecord?.width ?? undefined}
+                    height={mainImageRecord?.height ?? undefined}
+                    style={mainSubjectFrame ? {
+                      objectViewBox: mainSubjectFrame.objectViewBox,
+                    } as CSSProperties & { objectViewBox?: string } : undefined}
+                  />
+                </div>
+              </div>
+            ) : null}
             {thumbnails.length > 0 ? <div className="product-detail-page__thumbnails">
               {thumbnails.map((img, i) => (
                 <button
@@ -967,7 +1037,7 @@ export default function ProductDetail() {
                     <SecureImage
                       src={img.mediaUrl || img.url}
                       alt=""
-                      className="w-full h-full object-cover"
+                      className="product-detail-page__thumbnail-photo"
                     />
                   ) : (
                     <span className="text-xs text-brand-muted">图{i + 1}</span>
@@ -975,32 +1045,20 @@ export default function ProductDetail() {
                 </button>
               ))}
             </div> : null}
-            {thumbnails.length > 0 ? <Lightbox
-              open={lightboxOpen}
-              close={() => setLightboxOpen(false)}
-              index={mainImage}
-              slides={thumbnails.map((img) => ({
-                src: img.mediaUrl || img.url,
-                alt: product.name,
-              }))}
-            /> : null}
-          </motion.div>
+            </div>
+          </div>
 
           {/* Right: Info */}
-          <motion.div
-            className="product-detail-page__summary"
-            initial={{ y: 20 }}
-            animate={{ y: 0 }}
-            transition={{ duration: reduceMotion ? 0 : 0.5, delay: reduceMotion ? 0 : 0.12 }}
-          >
-            <p className="text-[10px] tracking-[.08em] text-brand-muted mb-5 font-sans">作品</p>
-            <h1 className="text-[clamp(32px,4vw,52px)] leading-[1.15] tracking-[.02em] font-display font-normal mb-3">
-              {product.name}
-            </h1>
+          <div className="product-detail-page__summary">
+            <div className="product-detail-page__heading">
+              <h1 className="product-detail-page__title">
+                {visibleWorkTitle(product.name, product.code)}
+              </h1>
+            </div>
             {isVirtualWork ? (
               <p className="mb-4 text-sm leading-7 text-brand-muted">演示款式，不是在售作品。</p>
             ) : null}
-            <p className="text-xs text-brand-muted mb-6 font-sans">
+            <p className="product-detail-page__reference">
               {product.code}
             </p>
 
@@ -1034,7 +1092,7 @@ export default function ProductDetail() {
             {/* SKU selection */}
             {isDirectPurchase && activeSkus.length > 0 && (
               <div className="mb-8">
-                <p className="text-xs tracking-[.08em] text-brand-gold mb-3 font-sans">
+                <p className="product-detail-page__section-label">
                   规格
                 </p>
                 <div className="flex gap-2 flex-wrap">
@@ -1073,36 +1131,11 @@ export default function ProductDetail() {
               </div>
             )}
 
-            <section className="product-detail-page__decision-panel" aria-labelledby="product-decision-title">
-              <h2 id="product-decision-title">选购与服务信息</h2>
-              <dl className="product-detail-page__decision-facts">
-                <div>
-                  <dt>公开尺寸事实</dt>
-                  <dd>{sizeFactValue}</dd>
-                </div>
-                <div>
-                  <dt>尺寸辅助状态</dt>
-                  <dd>{sizeGuidanceStatus}</dd>
-                </div>
-                {isDirectPurchase ? (
-                  <div>
-                    <dt>价格口径</dt>
-                    <dd>
-                      {selectedSku
-                        ? "当前显示所选规格的公开价格。"
-                        : "当前显示有效规格的最低公开价格，选择规格后显示该规格价格。"}
-                    </dd>
-                  </div>
-                ) : null}
-                {visibleServiceFacts.map((fact) => (
-                  <div key={`${fact.label}-${fact.value}`}>
-                    <dt>{fact.label}</dt>
-                    <dd>{fact.value}</dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="product-detail-page__decision-note">
-                {decisionNote} 如需判断测量方式、佩戴适配或可否改圈，请
+            <section className="product-detail-page__fit" aria-labelledby="product-fit-title">
+              <h2 id="product-fit-title">尺寸</h2>
+              <p>{sizeFactValue}</p>
+              <p>
+                {/戒/.test(categoryName ?? "") ? "佩戴是否合适、能否改圈，请" : "佩戴是否合适，请"}
                 <Link
                   to={publicProductInquiryPath(product, "purchase-support")}
                   className="inline-flex min-h-11 items-center underline underline-offset-4"
@@ -1162,6 +1195,27 @@ export default function ProductDetail() {
                 onAddToCart={handleAddToCart}
               />
             </div>
+            {!isVirtualWork ? (
+              isSignedIn ? (
+                <button
+                  type="button"
+                  onClick={handleToggleFavorite}
+                  disabled={favBusy}
+                  className="product-detail-page__favorite"
+                >
+                  {favorited ? <HeartFilled /> : <HeartOutlined />}
+                  <span>{favorited ? "已加入心愿单" : "加入心愿单"}</span>
+                </button>
+              ) : (
+                <Link
+                  to={`/customer?returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`}
+                  className="product-detail-page__favorite"
+                >
+                  <HeartOutlined />
+                  <span>登录后加入心愿单</span>
+                </Link>
+              )
+            ) : null}
             {isSingleUnit && isDirectPurchase ? (
               <p className="product-detail-page__status-copy text-xs leading-6 text-brand-muted">
                 一物一件，每位顾客的购物车最多保留 1 件。
@@ -1192,6 +1246,31 @@ export default function ProductDetail() {
                 {purchaseError}
               </p>
             ) : null}
+
+            <section className="product-detail-page__decision-panel" aria-labelledby="product-decision-title">
+              <h2 id="product-decision-title">选购与服务信息</h2>
+              {isDirectPurchase || visibleServiceFacts.length > 0 ? (
+                <dl className="product-detail-page__decision-facts">
+                  {isDirectPurchase ? (
+                    <div>
+                      <dt>价格</dt>
+                      <dd>
+                        {selectedSku
+                          ? "当前显示所选规格的公开价格。"
+                          : "当前显示有效规格的最低公开价格，选择规格后显示该规格价格。"}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {visibleServiceFacts.map((fact) => (
+                    <div key={`${fact.label}-${fact.value}`}>
+                      <dt>{fact.label}</dt>
+                      <dd>{fact.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              <p className="product-detail-page__decision-note">{decisionNote}</p>
+            </section>
 
             {/* 只有存在真实内容的标签才进入公开 DOM。 */}
             {publicFacts.length > 0 || validCertificates.length > 0 ||
@@ -1254,20 +1333,12 @@ export default function ProductDetail() {
               ]}
               />
             ) : null}
-            {isSignedIn && !isVirtualWork ? (
-              <button
-                type="button"
-                onClick={handleToggleFavorite}
-                disabled={favBusy}
-                className="product-detail-page__favorite"
-              >
-                {favorited ? <HeartFilled /> : <HeartOutlined />}
-                <span>{favorited ? "已加入心愿单" : "加入心愿单"}</span>
-              </button>
+            {sameCategoryHref ? (
+              <p className="product-detail-page__continue">
+                <Link to={sameCategoryHref}>继续看{categoryName}</Link>
+              </p>
             ) : null}
-            {/* 推荐接口要求客户登录；游客不发必然 401 的请求。演示款没有真实相似作品。 */}
-            {isSignedIn && !isVirtualWork ? <SimilarProducts productId={product.id} /> : null}
-          </motion.div>
+          </div>
         </div>
         {detailBlocks.length > 0 && (
           <section className="product-detail-page__content" aria-label="商品详情">

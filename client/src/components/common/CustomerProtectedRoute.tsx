@@ -5,6 +5,7 @@ import { customerApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import type { CustomerAccount } from '@/store/customerAuthStore';
 import { requestStatus } from '@/services/httpClient';
+import RouteLoading from '@/components/common/RouteLoading';
 
 /**
  * 前台客户路由守卫（不复用后台 ProtectedRoute，后者依赖管理员 authStore）。
@@ -58,7 +59,7 @@ export function CustomerProtectedRoute({ children }: { children: ReactNode }) {
         </div>
       );
     }
-    return <div className="flex min-h-screen items-center justify-center" role="status">正在验证登录状态…</div>;
+    return <RouteLoading label="正在验证登录状态…" />;
   }
 
   if (status !== 'authenticated') {

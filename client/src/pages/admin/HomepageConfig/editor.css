@@ -1639,6 +1639,25 @@ body:has(.homepage-editor__storefront-frame) {
   flex-direction: column;
   min-height: var(--homepage-editor-preview-height, 900px);
   background: var(--hc-canvas, #FFFFFF);
+  /* 页头在画布里是绝对定位，不占文档流。选款中心和预约页用这个变量把标题
+     让到页头下面。变量必须写在画布根上：页头组件是兄弟节点，变量不会继承过去。
+     断点与 site-shell.css 的页头高度保持一致。 */
+  --site-header-height: 88px;
+}
+@media (min-width: 1200px) {
+  .homepage-editor__storefront-frame {
+    --site-header-height: 108px;
+  }
+}
+@media (min-width: 768px) and (max-width: 1199px) {
+  .homepage-editor__storefront-frame {
+    --site-header-height: 72px;
+  }
+}
+@media (max-width: 767px) {
+  .homepage-editor__storefront-frame {
+    --site-header-height: 64px;
+  }
 }
 .homepage-editor__storefront-frame > .site-footer {
   margin-top: auto;
@@ -1652,6 +1671,11 @@ body:has(.homepage-editor__storefront-frame) {
    ContentTemplateContractFrame 恢复事件；这里仅让模块选择把手保持可点，
    不再用覆盖整块的透明层拦截内部视觉节点。 */
 [data-puck-component] [data-editor-select-handle] {
+  pointer-events: auto !important;
+}
+/* 选款中心画布里的品类名称要能直接输入，预览态不能把这一小块点掉。 */
+.homepage-editor__storefront-frame .catalog-canvas-categories,
+.homepage-editor__storefront-frame .catalog-canvas-categories * {
   pointer-events: auto !important;
 }
 /* 母模板实例的节点自身就是选择与授权构图命中区。Puck 默认关闭模块

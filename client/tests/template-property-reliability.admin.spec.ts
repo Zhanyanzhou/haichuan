@@ -370,7 +370,7 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
   const frame = card.locator("iframe[data-template-catalog-viewport]");
   const thumbnail = frame.contentFrame();
   const title = thumbnail.locator(`[data-template-node-id="${ids.title}"] h1, [data-template-node-id="${ids.title}"] h2`);
-  await expect(title).toHaveText("主标题");
+  await expect(title).toHaveText("主标题待填写");
   const metrics = await title.evaluate((element) => {
     const rect = (item: Element) => { const value = item.getBoundingClientRect(); return { top: value.top, bottom: value.bottom, width: value.width, height: value.height }; };
     const root = document.querySelector('[data-dynamic-template-id] > [data-template-node-id]')!;
@@ -515,7 +515,7 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
   await expect(dialog.locator("[data-template-catalog-preview-shell]")).toHaveAttribute("data-preview-status", "ready");
   await expect(dialog.locator(".template-editor__catalog-preview-issue")).toHaveText("素材未配置");
   const detailTitle = detailFrame.contentFrame().locator(`[data-template-node-id="${ids.title}"] h1, [data-template-node-id="${ids.title}"] h2`);
-  await expect(detailTitle).toHaveText("主标题");
+  await expect(detailTitle).toHaveText("主标题待填写");
   await detailTitle.scrollIntoViewIfNeeded();
   await expect.poll(() => detailScroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await page.screenshot({ path: testInfo.outputPath("catalog-detail-long-page.png"), animations: "disabled" });

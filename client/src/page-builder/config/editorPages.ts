@@ -1,8 +1,7 @@
-import { createHeroTestPageSeed } from "@/page-builder/templates/templates";
 import type { DesignMode } from "@/page-builder/designSystem/masters";
 import {
+  CONTENT_TEMPLATE_PAGE_KEYS,
   CONTENT_TEMPLATE_PAGE_PATHS,
-  createContentTemplateMarker,
   getContentTemplateCompletion,
   getContentTemplateContract,
   getContentTemplateMediaReferences,
@@ -18,14 +17,8 @@ import {
 import { isDynamicTemplateInstancePubliclyVisible } from "@/page-builder/dynamic-template-instance/publicVisibility";
 import type { PuckBlock, PuckDocument } from "@/page-builder/types";
 
-export const EDITOR_PAGE_KEYS = [
-  "home",
-  "about",
-  "products",
-  "catalog",
-  "custom",
-  "contact",
-] as const;
+/** 装修页顺序与内容合同、前台主导航一致，不另排一套。 */
+export const EDITOR_PAGE_KEYS = CONTENT_TEMPLATE_PAGE_KEYS;
 
 export type EditorPageKey = (typeof EDITOR_PAGE_KEYS)[number];
 
@@ -53,8 +46,8 @@ export type EditorPageDefinition = {
   };
 };
 
-export const editorPages: EditorPageDefinition[] = [
-  {
+const editorPageDefinitions: Record<EditorPageKey, EditorPageDefinition> = {
+  home: {
     key: "home",
     label: "店铺首页",
     description: "品牌首屏与首页内容",
@@ -69,23 +62,7 @@ export const editorPages: EditorPageDefinition[] = [
       secondaryAction: { label: "了解珠宝定制", href: "/custom" },
     },
   },
-  {
-    key: "about",
-    label: "关于海川",
-    description: "品牌精神、审美、工艺与可核验背景",
-    publicPath: CONTENT_TEMPLATE_PAGE_PATHS.about,
-    mode: "brand",
-    headerMode: "overlay-light",
-    publicFallback: {
-      eyebrow: "关于海川",
-      title: "关于海川",
-      description:
-        "品牌与工艺资料仍在核验，这里不提前写出未经确认的故事。您可以进入选款中心查看当前可浏览的款式，或预约顾问了解服务。",
-      primaryAction: { label: "进入选款中心", href: "/catalog" },
-      secondaryAction: { label: "预约珠宝顾问", href: "/contact" },
-    },
-  },
-  {
+  products: {
     key: "products",
     label: "珠宝作品",
     description: "编辑式作品展陈；具体找款工具集中在选款中心",
@@ -101,7 +78,7 @@ export const editorPages: EditorPageDefinition[] = [
       secondaryAction: { label: "预约珠宝顾问", href: "/contact?type=product" },
     },
   },
-  {
+  catalog: {
     key: "catalog",
     label: "选款中心",
     description: "视觉页头 + 固定选款工具；筛选数据来自商品配置",
@@ -115,7 +92,7 @@ export const editorPages: EditorPageDefinition[] = [
       items: "关键词/货号搜索|条件筛选|排序与结果|快速查看|选款清单|提交询价",
     },
   },
-  {
+  custom: {
     key: "custom",
     label: "珠宝定制",
     description: "统一的高级定制叙事；需求类型在咨询流程中处理",
@@ -131,7 +108,23 @@ export const editorPages: EditorPageDefinition[] = [
       secondaryAction: { label: "浏览公开款式", href: "/catalog" },
     },
   },
-  {
+  about: {
+    key: "about",
+    label: "关于海川",
+    description: "品牌精神、审美、工艺与可核验背景",
+    publicPath: CONTENT_TEMPLATE_PAGE_PATHS.about,
+    mode: "brand",
+    headerMode: "overlay-light",
+    publicFallback: {
+      eyebrow: "关于海川",
+      title: "关于海川",
+      description:
+        "品牌与工艺资料仍在核验，这里不提前写出未经确认的故事。您可以进入选款中心查看当前可浏览的款式，或预约顾问了解服务。",
+      primaryAction: { label: "进入选款中心", href: "/catalog" },
+      secondaryAction: { label: "预约珠宝顾问", href: "/contact" },
+    },
+  },
+  contact: {
     key: "contact",
     label: "预约咨询",
     description: "视觉页头 + 固定预约表单与联系信息",
@@ -146,7 +139,12 @@ export const editorPages: EditorPageDefinition[] = [
       items: "预约表单|联系信息|服务时间|隐私同意",
     },
   },
-];
+};
+
+/** 页面切换、站内链接和模板推荐页都读这份顺序。 */
+export const editorPages: EditorPageDefinition[] = EDITOR_PAGE_KEYS.map(
+  (key) => editorPageDefinitions[key],
+);
 
 const LEGACY_ABOUT_VISUALS: Record<string, string> = {
   "/uploads/2026/08/12/021a4e7e-5533-4f69-b232-bda3827c55fc.png": "/images/镶嵌.png",
@@ -272,17 +270,9 @@ export function resolvePageHeaderMode(
     : rule.headerMode.fallback;
 }
 
-/** 为尚未保存的页面提供同一套可立即编辑的中性首屏测试结构。 */
-export function createEditorPageDefault(key: EditorPageKey) {
-  const data = createHeroTestPageSeed(key);
-  // 仅新建整页方案时写入印记；已有草稿、导入内容和历史 revision 保持 legacy-0，
-  // 普通读取与保存均不会借此补写或升级。
-  data.content = (data.content ?? []).map((block: { type?: string; props?: Record<string, unknown> }) => {
-    const marker = createContentTemplateMarker(block.type || "");
-    return marker
-      ? { ...block, props: { ...(block.props ?? {}), __contentTemplate: marker } }
-      : block;
-  });
+/** 尚未保存的页面从空画布开始。区块只从模板组件库添加。 */
+export function createEditorPageDefault(key: EditorPageKey): PuckDocument {
+  const data: PuckDocument = { content: [], root: { props: {} } };
   const page = getEditorPage(key);
   if (!page.businessRegion) return data;
 
@@ -398,11 +388,32 @@ function normalizePageCapabilities<T extends PuckDocument>(key: EditorPageKey, d
   return { ...data, content, ...(data.zones ? { zones } : {}) } as T;
 }
 
-/** 规范化已知旧视觉，并为既有草稿补齐固定业务区。 */
+function isBlankText(value: unknown) {
+  return typeof value !== "string" || value.trim() === "";
+}
+
+/** 打开页面时拿掉仍是出厂空内容的测试首屏。已经写过文字或图片的保留。 */
+function omitUntouchedHeroTestSeed<T extends PuckDocument>(key: EditorPageKey, data: T): T {
+  if (!Array.isArray(data?.content)) return data;
+  const seedId = `${key}-hero-test`;
+  const content = data.content.filter((block) => {
+    if (block?.type !== "首屏主视觉" || block.props?.id !== seedId) return true;
+    const props = block.props ?? {};
+    return !["eyebrow", "title", "subtitle", "desktopImage", "mobileImage", "actionText", "linkUrl", "altText"]
+      .every((field) => isBlankText(props[field]));
+  });
+  if (content.length === data.content.length) return data;
+  return { ...data, content };
+}
+
+/** 规范化已知旧视觉，拿掉空的测试首屏，并为既有草稿补齐固定业务区。 */
 export function ensureEditorPageStructure<T extends PuckDocument>(key: EditorPageKey, data: T): T {
-  const normalizedData = normalizePageCapabilities(
+  const normalizedData = omitUntouchedHeroTestSeed(
     key,
-    migrateLegacyAboutVisuals(key, data),
+    normalizePageCapabilities(
+      key,
+      migrateLegacyAboutVisuals(key, data),
+    ),
   );
   const page = getEditorPage(key);
   if (!page.businessRegion) return normalizedData;

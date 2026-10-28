@@ -67,6 +67,9 @@ export default function MediaField({
           label={def.inheritFrom!.label}
           overridden={overridden}
           hasBaseValue={Boolean(inheritBaseValue && inheritBaseValue.trim())}
+          overriddenLabel={def.inheritFrom!.overriddenLabel}
+          inheritAction={def.inheritFrom!.inheritAction}
+          overrideAction={def.inheritFrom!.overrideAction}
           onOverride={() => {
             // 开始单独设置:拷贝继承值为初值,便于在桌面图基础上重裁
             onChange(inheritBaseValue || "");

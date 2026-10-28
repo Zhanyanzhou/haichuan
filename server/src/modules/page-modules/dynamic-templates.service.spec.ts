@@ -1546,6 +1546,7 @@ test("发布生成不可变正式版本、开放 STAFF 读取并保留下一版�
     templateId: definition.templateId,
     fromVersion: 0,
     toVersion: 1,
+    pageAdoption: { adoptedPageCount: 0, adoptedInstanceCount: 0, blockers: [] },
     result: "succeeded",
   });
 
@@ -2377,7 +2378,7 @@ test("历史版本只在显式保存时以同模板可信来源越过结构锁�
   )).length, writesBeforeRestore);
 });
 
-test("发布模板 v2 不读取或修改 PageDocument、PageDocumentRevision、PageScheme，旧实例继续引用 v1", async () => {
+test("无法无损沿用时，发布模板 v2 不改写页面草稿，旧实例继续引用 v1", async () => {
   const { service, calls, setPageDocuments, getState } = createStatefulService();
   const definition = definitionFixture();
   await service.create(17, { definition });
@@ -2385,7 +2386,9 @@ test("发布模板 v2 不读取或修改 PageDocument、PageDocumentRevision、P
   const pageDocument = {
     id: 81,
     pageKey: "home",
+    status: "PUBLISHED",
     updatedAt: "2026-08-30T08:00:00.000Z",
+    metadata: {},
     puckData: {
       content: [{
         type: "动态模板实例",
@@ -2410,14 +2413,98 @@ test("发布模板 v2 不读取或修改 PageDocument、PageDocumentRevision、P
 
   const result = await service.publish(17, definition.templateId, { expectedRevision: 3 });
 
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
   assert.equal(result.version, 2);
   assert.equal(getState().versions.length, 2);
   const publishCalls = calls.slice(beforePublishCallCount);
-  assert.equal(publishCalls.some((call) => call.operation.startsWith("pageDocument.")), false);
+  assert.equal(publishCalls.some((call) => call.operation === "pageDocument.update"), false);
   assert.equal(publishCalls.some((call) => call.operation.startsWith("pageDocumentRevision.")), false);
-  assert.equal(publishCalls.some((call) => call.operation.startsWith("pageScheme.")), false);
+  assert.equal(publishCalls.some((call) => call.operation === "pageScheme.update"), false);
+  assert.ok(result.pageAdoption.blockers.length > 0);
+  assert.equal(result.pageAdoption.adoptedInstanceCount, 0);
   assert.equal(pageDocument.puckData.content[0].props.templateVersion, 1);
   assert.equal(pageDocument.updatedAt, "2026-08-30T08:00:00.000Z");
+});
+
+test("发布模板 v2 时，已使用的页面草稿和方案自动沿用新版本并保留页面内容", async () => {
+  const { service, calls, getState, setPageDocuments, setPageSchemes } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const instance = {
+    type: "动态模板实例",
+    props: {
+      id: "block-1",
+      instanceSchemaVersion: 1,
+      instanceId: "instance-1",
+      templateId: definition.templateId,
+      templateVersion: 1,
+      moduleName: definition.name,
+      contentBySlotId: { slot_heading: "页面自己的标题" },
+      layoutOverridesByNodeId: {},
+      hiddenSlotIds: [],
+      isVisible: true,
+    },
+  };
+  const puckData = { content: [instance], zones: {}, root: { props: {} } };
+  const publishedRevision = {
+    id: 41,
+    version: 3,
+    puckData: structuredClone(puckData),
+    metadata: { title: "首页" },
+  };
+  const pageDocument = {
+    id: 81,
+    pageKey: "home",
+    status: "PUBLISHED",
+    updatedAt: "2026-08-30T08:00:00.000Z",
+    metadata: { title: "首页" },
+    puckData: structuredClone(puckData),
+    publishedRevision,
+    localizations: [{
+      id: 9,
+      locale: "zh-CN",
+      reviewStatus: "PUBLISHED",
+      updatedAt: "2026-08-30T08:00:00.000Z",
+      metadata: { title: "首页" },
+      puckData: structuredClone(puckData),
+      contentHash: "unchanged",
+    }],
+  };
+  const scheme = {
+    id: 12,
+    pageKey: "home",
+    updatedAt: "2026-08-30T08:02:00.000Z",
+    puckData: structuredClone(puckData),
+  };
+  setPageDocuments([pageDocument]);
+  setPageSchemes([scheme]);
+  const changed = definitionFixture();
+  changed.name = "自动沿用 v2";
+  await service.updateDraft(17, definition.templateId, {
+    expectedRevision: 2,
+    definition: changed,
+  });
+
+  const result = await service.publish(17, definition.templateId, { expectedRevision: 3 });
+
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
+  assert.equal(result.version, 2);
+  assert.equal(result.pageAdoption.blockers.length, 0);
+  assert.equal(result.pageAdoption.adoptedInstanceCount, 3);
+  const stored = getState().pageDocuments[0];
+  assert.equal(stored.puckData.content[0].props.templateVersion, 2);
+  assert.equal(stored.puckData.content[0].props.moduleName, "自动沿用 v2");
+  assert.equal(stored.puckData.content[0].props.contentBySlotId.slot_heading, "页面自己的标题");
+  assert.equal(stored.localizations[0].puckData.content[0].props.templateVersion, 2);
+  assert.equal(stored.localizations[0].puckData.content[0].props.contentBySlotId.slot_heading, "页面自己的标题");
+  assert.notEqual(stored.localizations[0].contentHash, "unchanged");
+  assert.equal(stored.publishedRevision.puckData.content[0].props.templateVersion, 1);
+  const schemeUpdate = calls.find((call) => call.operation === "pageScheme.update");
+  assert.equal(schemeUpdate?.args.data.puckData.content[0].props.templateVersion, 2);
+  assert.equal(schemeUpdate?.args.data.puckData.content[0].props.contentBySlotId.slot_heading, "页面自己的标题");
 });
 
 test("新建、发布版本与归档生命周期保留按轴尺寸兼容状态", async () => {

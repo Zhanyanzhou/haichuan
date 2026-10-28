@@ -1,11 +1,14 @@
-import { useEffect, useState } from "react";
-import { App as AntdApp, Button, Input, Popconfirm, Select } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { App as AntdApp, Button, Input, Modal, Popconfirm, Select } from "antd";
 import { RightOutlined } from "@ant-design/icons";
 import { ADMIN_COPY } from "@/constants/adminCopy";
 import { CategoryImageUpload } from "./CategoryFormModal";
 import {
+  categoryMoveOptions,
+  countProductsRecursive,
   getParentName,
   orderedSiblings,
+  subtreeIds,
   visibleProductCount,
   type CatTreeNode,
 } from "./categoryManageModel";
@@ -17,7 +20,7 @@ type CategoryDetailPanelProps = {
   reordering: boolean;
   saving: boolean;
   onAddStyle: (name: string) => Promise<boolean>;
-  onDelete: () => void;
+  onDelete: (moveTo?: number) => void;
   onMove: (parentId: number) => void;
   onOpen: (id: number) => void;
   onShift: (direction: -1 | 1) => void;
@@ -44,6 +47,8 @@ export default function CategoryDetailPanel({
   const { modal } = AntdApp.useApp();
   const [name, setName] = useState(node.name);
   const [styleName, setStyleName] = useState("");
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moveTo, setMoveTo] = useState<number | null>(null);
   useEffect(() => {
     setName(node.name);
   }, [node.name]);
@@ -63,14 +68,16 @@ export default function CategoryDetailPanel({
   const busy = reordering || saving;
   const positionLabel =
     siblingIndex >= 0 ? `第 ${siblingIndex + 1} 位，共 ${siblings.length} 个` : "";
-  const deleteReason = [
-    childCount > 0 ? `下面还有 ${childCount} 个款式，请先删除这些款式。` : "",
-    directProductCount > 0
-      ? `还有 ${directProductCount} 件商品属于这个分类，请先改到其他分类。`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("");
+  const productsInScope = countProductsRecursive(node);
+  const moveOptions = useMemo(
+    () => categoryMoveOptions(tree, new Set(subtreeIds(node))),
+    [node, tree],
+  );
+  const needsMove = productsInScope > 0;
+  const deleteBlocked = needsMove && moveOptions.length === 0;
+  const deleteReason = deleteBlocked
+    ? "商品必须留在一个分类里。请先新建另一个分类，再删除这个。"
+    : "";
   const query = keyword.trim().toLowerCase();
   const styles = orderedSiblings(tree, node.id);
   const visibleStyles =
@@ -206,18 +213,33 @@ export default function CategoryDetailPanel({
           </div>
 
           <div className="cat-detail__danger">
-            {deleteReason ? (
+            {deleteBlocked ? (
               <Button danger disabled>
+                删除分类
+              </Button>
+            ) : needsMove ? (
+              <Button
+                danger
+                disabled={busy}
+                onClick={() => {
+                  setMoveTo(null);
+                  setMoveOpen(true);
+                }}
+              >
                 删除分类
               </Button>
             ) : (
               <Popconfirm
                 title={`删除「${node.name}」？`}
-                description="删除后会从列表里消失，可以按相同名称重新创建。商品不会被删除。"
+                description={
+                  childCount > 0
+                    ? "这个分类和下面的款式会一起从列表消失，可以按相同名称重新创建。"
+                    : "删除后会从列表里消失，可以按相同名称重新创建。商品不会被删除。"
+                }
                 okText="删除分类"
                 okButtonProps={{ danger: true }}
                 cancelText={ADMIN_COPY.actions.cancel}
-                onConfirm={onDelete}
+                onConfirm={() => onDelete()}
               >
                 <Button danger disabled={busy}>
                   删除分类
@@ -225,8 +247,36 @@ export default function CategoryDetailPanel({
               </Popconfirm>
             )}
             {deleteReason ? (
-              <p className="cat-detail__blocked">{deleteReason}商品不会被删除。</p>
+              <p className="cat-detail__blocked">{deleteReason}</p>
             ) : null}
+            <Modal
+              title={`删除「${node.name}」？`}
+              open={moveOpen}
+              okText="删除分类"
+              okButtonProps={{ danger: true, disabled: moveTo == null || busy }}
+              cancelText={ADMIN_COPY.actions.cancel}
+              confirmLoading={busy}
+              onCancel={() => setMoveOpen(false)}
+              onOk={() => {
+                if (moveTo == null) return;
+                setMoveOpen(false);
+                onDelete(moveTo);
+              }}
+            >
+              <p>
+                {`下面的款式会一起删除。${productsInScope} 件商品会改到所选分类，商品本身不会删除。`}
+              </p>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                aria-label="商品改到"
+                placeholder="选择商品要改去的分类"
+                style={{ width: "100%" }}
+                value={moveTo ?? undefined}
+                options={moveOptions}
+                onChange={(value) => setMoveTo(value)}
+              />
+            </Modal>
           </div>
         </div>
       </div>

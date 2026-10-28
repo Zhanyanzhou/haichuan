@@ -2007,7 +2007,7 @@ export default function DynamicTemplateInspectorPanel({
                 </Button>
               </span>
               </details>
-              {publishWorkflow?.status === "review-ready" ? <p>确认后保存当前设计并发布为模板版本。已使用旧版本的页面会继续锁定旧版，直到在页面装修里单独升级。</p> : null}
+              {publishWorkflow?.status === "review-ready" ? <p>确认后保存当前设计并发布为模板版本。正在使用旧版本的页面草稿会自动沿用新版本，页面里已经填写的内容会保留。客户前台仍在发布页面后更新。</p> : null}
               {publishWorkflow?.status === "review-blocked" ? <p>请完成下面的必要修改，再重新检查并发布。</p> : null}
               {publishWorkflow?.status === "review-stale" ? <p>本次检查已过期，请重新检查。已审阅快照不会被当前新输入替换。</p> : null}
               {publishWorkflow?.status === "saving-reviewed-snapshot" ? <p>正在保存本次已审阅快照；保存成功后才会发布同一版本。</p> : null}

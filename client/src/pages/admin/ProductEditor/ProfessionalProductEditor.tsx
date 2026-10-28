@@ -12,6 +12,7 @@ import {
   Alert,
   App as AntdApp,
   Button,
+  Checkbox,
   DatePicker,
   Form,
   Input,
@@ -20,7 +21,6 @@ import {
   Radio,
   Select,
   Space,
-  Spin,
   Switch,
   Table,
   Tag,
@@ -28,11 +28,12 @@ import {
 } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AdminErrorState } from "@/components/common/AdminDataStates";
+import RouteLoading from "@/components/common/RouteLoading";
 import { SecureImage } from "@/components/common/SecureImage";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
-import { categoryApi, productApi, uploadApi } from "@/services/api";
+import { categoryApi, inventoryApi, productApi, uploadApi } from "@/services/api";
 import type {
   ProductSkuWriteInput,
   ProductWriteInput,
@@ -50,13 +51,14 @@ import type {
   ProductStatus,
   SalesMode,
 } from "@/types";
+import { DETAIL_ONLY_IMAGE_SORT_FLOOR } from "@/utils/productImage";
 import { unwrapResponse } from "@/utils/unwrap";
 import { normalizeAdminReturnPath } from "@/utils/adminReturnPath";
 import UnsavedChangesGuard from "../HomepageConfig/components/UnsavedChangesGuard";
 import "./ProfessionalProductEditor.css";
 
 type DetailDraft = ProductDetailBlock & { key: string; pendingMediaKey?: string };
-type PendingMedia = { key: string; file: File; preview: string };
+type PendingMedia = { key: string; file: File; preview: string; purpose?: "detail" };
 type MediaChoice = { key: string; label: string; src?: string; imageId?: number; pending?: boolean };
 type PendingSaveVerification = { productId: number };
 class EditorUserError extends Error {}
@@ -140,6 +142,7 @@ type ProductEditorFormValues = {
   price?: number | string | null;
   initialSkuPrice?: number | string | null;
   derivedPrice?: number | string | null;
+  stockQuantity?: number | null;
 };
 
 type UploadedProductMedia = {
@@ -153,7 +156,7 @@ type UploadedProductMedia = {
 };
 
 type FormValidationError = {
-  errorFields: Array<{ name?: string | number | Array<string | number> }>;
+  errorFields: Array<{ name?: string | number | Array<string | number>; errors?: string[] }>;
 };
 
 function isFormValidationError(error: unknown): error is FormValidationError {
@@ -181,6 +184,112 @@ function jewelryClaimIssues(parts: unknown[]): string[] {
   const text = parts.filter((part): part is string => typeof part === "string").join("\n");
   if (!text.trim()) return [];
   return JEWELRY_CLAIM_RULES.filter(([pattern]) => pattern.test(text)).map(([, message]) => message);
+}
+
+function requiredFieldClass(required: boolean, empty: boolean, extra = ""): string {
+  return [extra, required ? "pro-editor__must" : "", required && empty ? "is-open" : ""].filter(Boolean).join(" ");
+}
+
+function RequiredMark() {
+  return <em className="pro-editor__must-mark" aria-hidden="true">必填</em>;
+}
+
+type PublishTarget =
+  | "name"
+  | "shortDescription"
+  | "description"
+  | "categoryId"
+  | "code"
+  | "initialSkuPrice"
+  | "deliveryMethods"
+  | "scheduledPublishAt"
+  | "inventoryPolicy"
+  | "certificateQueryUrl"
+  | "product-cover"
+  | "product-detail"
+  | "product-skus"
+  | "basic"
+  | "media"
+  | "sales";
+
+type PublishGap = { label: string; target: PublishTarget };
+
+const FORM_JUMP_FIELDS = new Set<string>([
+  "name",
+  "shortDescription",
+  "description",
+  "categoryId",
+  "code",
+  "initialSkuPrice",
+  "deliveryMethods",
+  "scheduledPublishAt",
+  "inventoryPolicy",
+  "certificateQueryUrl",
+]);
+
+function sectionForPublishTarget(target: PublishTarget): "basic" | "media" | "sales" {
+  if (target === "product-cover" || target === "product-detail" || target === "media") return "media";
+  if (
+    target === "initialSkuPrice"
+    || target === "deliveryMethods"
+    || target === "product-skus"
+    || target === "scheduledPublishAt"
+    || target === "inventoryPolicy"
+    || target === "sales"
+  ) return "sales";
+  return "basic";
+}
+
+function publishTargetForLabel(label: string, hasSavedProduct: boolean): PublishTarget {
+  if (/主图|商品图片|公开展示|列表图/.test(label)) return "product-cover";
+  if (/详情/.test(label)) return "product-detail";
+  if (/成交价|商品价格|交易价格|有效规格|SKU|库存|一物一件/.test(label)) {
+    return hasSavedProduct ? "product-skus" : "initialSkuPrice";
+  }
+  if (/配送/.test(label)) return "deliveryMethods";
+  if (/简介/.test(label)) return "shortDescription";
+  if (/说明/.test(label)) return "description";
+  if (/货号/.test(label)) return "code";
+  if (/分类|类目/.test(label)) return "categoryId";
+  if (/定时/.test(label)) return "scheduledPublishAt";
+  if (/标题|名称|促销|纯度|辟邪|保值|杀菌|防过敏/.test(label)) return "name";
+  return "basic";
+}
+
+function gapsFromFormFields(errorFields: FormValidationError["errorFields"]): PublishGap[] {
+  return errorFields.flatMap((field) => {
+    const rawName = field.name;
+    const key = String(Array.isArray(rawName) ? rawName[0] ?? "" : rawName ?? "");
+    const label = field.errors?.find((item) => item.trim()) || "查看这里";
+    const target = (FORM_JUMP_FIELDS.has(key) ? key : "basic") as PublishTarget;
+    return [{ label, target }];
+  });
+}
+
+function gapsForSubmitMessage(message: string, field: string | undefined, hasSavedProduct: boolean): PublishGap[] {
+  const matched = message.match(/(?:上架前请补全|商品未达到发布条件)[:：]\s*([^。]+)/);
+  if (matched) {
+    return matched[1].split(/[、，]/).map((part) => part.trim()).filter(Boolean).map((label) => ({
+      label,
+      target: publishTargetForLabel(label, hasSavedProduct),
+    }));
+  }
+  if (field === "shippingTemplateId") return [{ label: "销售信息", target: "sales" }];
+  if (field && FORM_JUMP_FIELDS.has(field)) {
+    const labels: Record<string, string> = {
+      code: "货号",
+      name: "商品标题",
+      categoryId: "当前类目",
+      shortDescription: "商品简介",
+      description: "商品说明",
+      scheduledPublishAt: "定时上架时间",
+      certificateQueryUrl: "证书查验链接",
+    };
+    return [{ label: labels[field] || "查看对应位置", target: field as PublishTarget }];
+  }
+  if (/一物一件|有效 SKU/.test(message)) return [{ label: "规格与价格", target: "product-skus" }];
+  if (/公开展示|主图/.test(message)) return [{ label: "实物主图", target: "product-cover" }];
+  return [];
 }
 
 function clarifyPublicationGaps(missing: string): string {
@@ -227,6 +336,9 @@ function getProductSubmitFailure(error: unknown): ProductSubmitFailure<
   if (status === 400 && serverMessage.includes("请选择") && serverMessage.includes("商品分类")) {
     return { message: "请选择有效的商品分类后重试。", field: "categoryId" };
   }
+  if (status === 409 && /[\u4e00-\u9fff]/.test(serverMessage)) {
+    return { message: /[。！]$/.test(serverMessage) ? serverMessage : `${serverMessage}。` };
+  }
   return { message: getSafeAdminErrorMessage(error, "商品保存失败，请检查填写内容后重试。") };
 }
 
@@ -272,6 +384,61 @@ const salesModeLabelsForPreview: Record<SalesMode, string> = {
   CUSTOM_INQUIRY: "定制咨询",
 };
 
+const DELIVERY_METHOD_OPTIONS = [
+  { label: "物流配送", value: "EXPRESS" },
+  { label: "到店自提", value: "STORE_PICKUP" },
+  { label: "专人配送", value: "DEDICATED" },
+] as const;
+
+function normalizeDeliveryMethods(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string =>
+    item === "EXPRESS" || item === "STORE_PICKUP" || item === "DEDICATED");
+}
+
+type EditorStockRow = { id: number; quantity: number };
+
+function readEditorStockRows(payload: unknown, productId: number): { rows: EditorStockRow[]; total: number } {
+  if (!payload || typeof payload !== "object") return { rows: [], total: 0 };
+  const body = payload as { list?: unknown; total?: unknown };
+  const list = Array.isArray(body.list) ? body.list : [];
+  const total = Number(body.total);
+  const rows = list.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as {
+      id?: number;
+      quantity?: number;
+      productId?: number;
+      sku?: { product?: { id?: number } };
+    };
+    if (!Number.isInteger(row.id)) return [];
+    const ownerId = row.sku?.product?.id ?? row.productId;
+    if (ownerId != null && ownerId !== productId) return [];
+    const quantity = Number(row.quantity ?? 0);
+    if (!Number.isInteger(quantity) || quantity < 0) return [];
+    return [{ id: row.id as number, quantity }];
+  });
+  return { rows, total: Number.isFinite(total) ? total : rows.length };
+}
+
+async function readProductStock(productId: number) {
+  const data = unwrapResponse<unknown>(await inventoryApi.getList({
+    page: 1,
+    pageSize: 20,
+    productIds: String(productId),
+  }));
+  return readEditorStockRows(data, productId);
+}
+
+function moveGalleryKey(keys: string[], fromKey: string, toIndex: number): string[] | null {
+  const fromIndex = keys.indexOf(fromKey);
+  if (fromIndex < 0 || toIndex < 0 || toIndex >= keys.length || fromIndex === toIndex) return null;
+  const next = keys.slice();
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
 const defaultValues: Partial<ProductEditorFormValues> = {
   condition: "NEW",
   visibility: "PUBLIC",
@@ -286,6 +453,62 @@ const defaultValues: Partial<ProductEditorFormValues> = {
   requiresSignature: false,
   includesCertificate: false,
 };
+
+const PRODUCT_FRAME_KEY = "haichuan.product-publish-frame.v1";
+
+type ProductPublishFrame = {
+  salesMode: SalesMode;
+  visibility: NonNullable<ProductEditorFormValues["visibility"]>;
+  publishMode: ProductEditorFormValues["publishMode"];
+  inventoryPolicy: InventoryPolicy;
+  materialType?: MaterialType;
+  shortDescription?: string;
+  description?: string;
+  deliveryMethods?: string[];
+};
+
+function readProductPublishFrame(): ProductPublishFrame | null {
+  try {
+    const raw = localStorage.getItem(PRODUCT_FRAME_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ProductPublishFrame>;
+    if (!parsed || parsed.salesMode == null || parsed.visibility == null || parsed.publishMode == null || parsed.inventoryPolicy == null) return null;
+    return {
+      salesMode: parsed.salesMode,
+      visibility: parsed.visibility,
+      publishMode: parsed.publishMode,
+      inventoryPolicy: parsed.inventoryPolicy,
+      materialType: parsed.materialType || undefined,
+      shortDescription: typeof parsed.shortDescription === "string" ? parsed.shortDescription : "",
+      description: typeof parsed.description === "string" ? parsed.description : "",
+      deliveryMethods: normalizeDeliveryMethods(parsed.deliveryMethods),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function frameToFormValues(frame: ProductPublishFrame): Partial<ProductEditorFormValues> {
+  return {
+    salesMode: frame.salesMode,
+    visibility: frame.visibility,
+    publishMode: frame.publishMode,
+    inventoryPolicy: frame.inventoryPolicy,
+    ...(frame.materialType ? { materialType: frame.materialType } : {}),
+    ...(frame.shortDescription ? { shortDescription: frame.shortDescription } : {}),
+    ...(frame.description ? { description: frame.description } : {}),
+    ...(frame.deliveryMethods && frame.deliveryMethods.length > 0 ? { deliveryMethods: frame.deliveryMethods } : {}),
+  };
+}
+
+function sharedSkuPrice(items: ProductSKU[]): number | undefined {
+  const prices = items
+    .filter((sku) => sku.isActive !== false)
+    .map((sku) => Number(sku.price))
+    .filter((price) => price > 0);
+  const unique = [...new Set(prices)];
+  return unique.length === 1 ? unique[0] : undefined;
+}
 
 function flattenCategories(nodes: Category[], prefix = ""): { value: number; label: string }[] {
   return (nodes || []).flatMap((node) => {
@@ -316,6 +539,7 @@ export default function ProfessionalProductEditor() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState<string>();
+  const [publishGaps, setPublishGaps] = useState<PublishGap[]>([]);
   const [pendingSaveVerification, setPendingSaveVerification] = useState<PendingSaveVerification | null>(null);
   const [saveVerificationLoading, setSaveVerificationLoading] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -328,6 +552,8 @@ export default function ProfessionalProductEditor() {
   const [mediaActionId, setMediaActionId] = useState<number | null>(null);
   const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const [detail, setDetail] = useState<DetailDraft[]>([]);
+  const [detailPickerOpen, setDetailPickerOpen] = useState(false);
+  const [previewPane, setPreviewPane] = useState<"photos" | "detail" | "copy">("detail");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewValues, setPreviewValues] = useState<Partial<ProductEditorFormValues>>({});
   const [skuForm] = Form.useForm<ProductSkuWriteInput>();
@@ -341,19 +567,62 @@ export default function ProfessionalProductEditor() {
   const pendingMediaRef = useRef<PendingMedia[]>([]);
   const mediaAssetIdsByImage = useRef(new Map<number, number>());
   const uploadSelectionRef = useRef<File[] | null>(null);
+  const detailUploadSelectionRef = useRef<File[] | null>(null);
   const [authorizingImages, setAuthorizingImages] = useState(false);
   const activeEditorRef = useRef(true);
   const [currentProductId, setCurrentProductId] = useState<number | null>(editingId);
+  const [publishFrame, setPublishFrame] = useState<ProductPublishFrame | null>(() => readProductPublishFrame());
+  const [galleryOrder, setGalleryOrder] = useState<string[]>([]);
+  const [draggingGalleryKey, setDraggingGalleryKey] = useState<string | null>(null);
+  const draggingGalleryKeyRef = useRef<string | null>(null);
+  const [galleryDropKey, setGalleryDropKey] = useState<string | null>(null);
+  const [stockRowCount, setStockRowCount] = useState(0);
+  const [stockHint, setStockHint] = useState<string>();
 
-  const mediaChoices = useMemo<MediaChoice[]>(() => [
-    ...images.filter((item) => !item.isVideo).map((item) => ({
-      key: `saved-${item.id}`,
-      imageId: item.id,
-      label: `已上传图片 #${item.id}`,
-      src: item.mediaUrl || item.url,
-    })),
-    ...pendingMedia.map((item, index) => ({ key: item.key, label: `待上传图片 ${index + 1}`, src: item.preview, pending: true })),
-  ], [images, pendingMedia]);
+  const galleryImages = useMemo(
+    () => images.filter((item) => !item.isVideo && (item.sortOrder ?? 0) < DETAIL_ONLY_IMAGE_SORT_FLOOR),
+    [images],
+  );
+  const naturalGalleryKeys = useMemo(() => [
+    ...galleryImages.map((item) => `saved-${item.id}`),
+    ...pendingMedia.filter((item) => item.purpose !== "detail").map((item) => item.key),
+  ], [galleryImages, pendingMedia]);
+  const orderedGalleryKeys = useMemo(() => {
+    const known = new Set(naturalGalleryKeys);
+    const kept = galleryOrder.filter((key) => known.has(key));
+    return [...kept, ...naturalGalleryKeys.filter((key) => !kept.includes(key))];
+  }, [galleryOrder, naturalGalleryKeys]);
+  const mediaChoices = useMemo<MediaChoice[]>(() => {
+    const byKey = new Map<string, MediaChoice>();
+    for (const item of galleryImages) {
+      byKey.set(`saved-${item.id}`, {
+        key: `saved-${item.id}`,
+        imageId: item.id,
+        label: `已上传图片 #${item.id}`,
+        src: item.mediaUrl || item.url,
+      });
+    }
+    pendingMedia.filter((item) => item.purpose !== "detail").forEach((item, index) => {
+      byKey.set(item.key, {
+        key: item.key,
+        label: `待上传图片 ${index + 1}`,
+        src: item.preview,
+        pending: true,
+      });
+    });
+    return orderedGalleryKeys.flatMap((key) => {
+      const choice = byKey.get(key);
+      return choice ? [choice] : [];
+    });
+  }, [galleryImages, orderedGalleryKeys, pendingMedia]);
+  const mediaSrcByKey = useMemo(() => {
+    const sources = new Map<string, string>();
+    for (const image of images) {
+      if (!image.isVideo && (image.mediaUrl || image.url)) sources.set(`saved-${image.id}`, image.mediaUrl || image.url);
+    }
+    for (const item of pendingMedia) sources.set(item.key, item.preview);
+    return sources;
+  }, [images, pendingMedia]);
   const selectedCategoryId = Form.useWatch("categoryId", form);
   const selectedPublishMode = Form.useWatch("publishMode", form) || "IMMEDIATE";
   const selectedSalesMode = (Form.useWatch("salesMode", form) || "DIRECT_PURCHASE") as SalesMode;
@@ -363,11 +632,20 @@ export default function ProfessionalProductEditor() {
   const selectedCategoryLabel = categories.find((item) => item.value === selectedCategoryId)?.label;
   const watchedName = Form.useWatch("name", form);
   const watchedCode = Form.useWatch("code", form);
+  const watchedDescription = Form.useWatch("description", form);
+  const watchedVisibility = Form.useWatch("visibility", form) || "PUBLIC";
+  const watchedPrice = Form.useWatch("initialSkuPrice", form);
   const identityReady = isMeaningfulProductText(watchedName, 2)
     && typeof watchedCode === "string"
     && watchedCode.trim().length > 0
     && Boolean(selectedCategoryId);
-  const coverReady = primaryImageId != null || pendingMedia.length > 0;
+  const coverReady = primaryImageId != null || galleryImages.length > 0 || pendingMedia.some((item) => item.purpose !== "detail");
+  const titleEmpty = !isMeaningfulProductText(watchedName, 2);
+  const codeEmpty = typeof watchedCode !== "string" || watchedCode.trim().length === 0;
+  const categoryEmpty = !selectedCategoryId;
+  const photoRequired = watchedVisibility !== "INTERNAL";
+  const priceRequired = selectedSalesMode === "DIRECT_PURCHASE";
+  const priceEmpty = priceRequired && !(Number(watchedPrice) > 0 || skus.some((sku) => sku.isActive !== false && Number(sku.price) > 0));
   const publishSteps = [
     { title: "1 写下作品", state: identityReady ? "done" : "wait", detail: identityReady ? "标题、货号和类目已填写" : "先写标题、货号，并选择类目" },
     { title: "2 核对事实", state: "note", detail: "材质、克重、宝石和证书知道再写，不编造" },
@@ -380,6 +658,7 @@ export default function ProfessionalProductEditor() {
     setCurrentStatus(loadedStatus);
     setCurrentReviewStatus(product.reviewStatus || "DRAFT");
     const loadedImages = product.images || [];
+    setGalleryOrder([]);
     setImages(loadedImages);
     for (const image of loadedImages) {
       const mediaAssetId = (image as ProductImage & { mediaAssetId?: number | null }).mediaAssetId;
@@ -397,7 +676,7 @@ export default function ProfessionalProductEditor() {
       ...defaultValues,
       ...product,
       derivedPrice: product.price,
-      initialSkuPrice: undefined,
+      initialSkuPrice: sharedSkuPrice(product.skus || []),
       price: undefined,
       publishMode: loadedStatus === "PUBLISHED" ? "IMMEDIATE" : product.publishMode || "WAREHOUSE",
       scheduledPublishAt: product.scheduledPublishAt ? dayjs(product.scheduledPublishAt) : null,
@@ -419,11 +698,16 @@ export default function ProfessionalProductEditor() {
     });
   }, [form]);
 
+  const dismissSubmitError = () => {
+    setSubmitError(undefined);
+    setPublishGaps([]);
+  };
+
   useEffect(() => {
     let mounted = true;
     setLoading(true);
     setLoadError(undefined);
-    setSubmitError(undefined);
+    dismissSubmitError();
     setCurrentProductId(editingId);
     setCurrentStatus("DRAFT");
     setCurrentReviewStatus("DRAFT");
@@ -439,13 +723,32 @@ export default function ProfessionalProductEditor() {
 
     const productRequest = editingId ? productApi.getById(editingId) : Promise.resolve(null);
     Promise.all([categoryApi.getManageTree(), productRequest])
-      .then(([categoryRes, productRes]) => {
+      .then(async ([categoryRes, productRes]) => {
         if (!mounted) return;
         setCategories(flattenCategories(unwrapResponse<Category[]>(categoryRes)));
         if (productRes) {
           const product = unwrapResponse<ProductEditorRecord>(productRes);
           applyCanonicalProduct(product);
+          const canStock = role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE";
+          const loadedActiveSkus = (product.skus || []).filter((sku) => sku.isActive !== false).length;
+          if (canStock && product.salesMode === "DIRECT_PURCHASE" && loadedActiveSkus <= 1) {
+            try {
+              const stock = await readProductStock(product.id);
+              if (!mounted) return;
+              setStockRowCount(stock.total > stock.rows.length ? stock.total : stock.rows.length);
+              if (stock.rows.length === 1 && stock.total <= 1) form.setFieldValue("stockQuantity", stock.rows[0].quantity);
+            } catch {
+              if (!mounted) return;
+              setStockHint("暂时读不到现有库存。保存时会再读一次。");
+            }
+          } else {
+            setStockRowCount(loadedActiveSkus > 1 ? loadedActiveSkus : 0);
+          }
+        } else {
+          const frame = readProductPublishFrame();
+          if (frame) form.setFieldsValue(frameToFormValues(frame));
         }
+        if (!mounted) return;
         setDirty(false);
         setLoading(false);
       }).catch((error) => {
@@ -456,7 +759,7 @@ export default function ProfessionalProductEditor() {
         setLoading(false);
       });
     return () => { mounted = false; };
-  }, [applyCanonicalProduct, editingId, form, id, loadAttempt]);
+  }, [applyCanonicalProduct, editingId, form, id, loadAttempt, role]);
 
   useEffect(() => {
     pendingMediaRef.current = pendingMedia;
@@ -488,7 +791,8 @@ export default function ProfessionalProductEditor() {
     if (uploadSelectionRef.current === fileList) return Upload.LIST_IGNORE;
     uploadSelectionRef.current = fileList;
     const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-    const room = 9 - images.length - pendingMedia.length;
+    const galleryPending = pendingMedia.filter((item) => item.purpose !== "detail").length;
+    const room = 9 - galleryImages.length - galleryPending;
     if (room <= 0) {
       messageApi.warning("最多上传 9 张，请先移除不需要的图片");
       return Upload.LIST_IGNORE;
@@ -530,6 +834,74 @@ export default function ProfessionalProductEditor() {
     return Upload.LIST_IGNORE;
   };
 
+  const addDetailMedia = (_file: File, fileList: File[]) => {
+    if (detailUploadSelectionRef.current === fileList) return Upload.LIST_IGNORE;
+    detailUploadSelectionRef.current = fileList;
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    const room = 20 - detail.filter((block) => block.type === "IMAGE").length;
+    if (room <= 0) {
+      messageApi.warning("详情图最多 20 张，请先删掉不需要的");
+      return Upload.LIST_IGNORE;
+    }
+    const accepted: PendingMedia[] = [];
+    let skippedType = 0;
+    let skippedSize = 0;
+    let skippedDuplicate = 0;
+    fileList.forEach((candidate, index) => {
+      if (accepted.length >= room) return;
+      if (!allowedTypes.includes(candidate.type)) {
+        skippedType += 1;
+        return;
+      }
+      if (candidate.size / 1024 / 1024 > 10) {
+        skippedSize += 1;
+        return;
+      }
+      const sameFile = (item: { file: File }) => item.file.name === candidate.name && item.file.size === candidate.size && item.file.lastModified === candidate.lastModified;
+      if (pendingMedia.some(sameFile) || accepted.some(sameFile)) {
+        skippedDuplicate += 1;
+        return;
+      }
+      accepted.push({
+        key: `detail-${candidate.lastModified}-${candidate.size}-${index}-${candidate.name}`,
+        file: candidate,
+        preview: URL.createObjectURL(candidate),
+        purpose: "detail",
+      });
+    });
+    if (accepted.length > 0) {
+      setPendingMedia((prev) => [...prev, ...accepted]);
+      setDetail((prev) => [
+        ...prev,
+        ...accepted.map((item) => ({ key: `block-${item.key}`, type: "IMAGE" as const, pendingMediaKey: item.key })),
+      ]);
+      setPreviewPane("detail");
+      markDirty();
+    }
+    const overflow = fileList.length - skippedType - skippedSize - skippedDuplicate - accepted.length;
+    if (skippedType > 0) messageApi.error("有图片不是 JPG、PNG、WebP 或 GIF，已跳过");
+    if (skippedSize > 0) messageApi.error("有图片超过 10MB，已跳过");
+    if (skippedDuplicate > 0) messageApi.warning("重复的图片已跳过");
+    if (overflow > 0) messageApi.warning(`详情图最多还能加 ${room} 张，多出的 ${overflow} 张没有加入`);
+    return Upload.LIST_IGNORE;
+  };
+
+  const useGalleryImageInDetail = (choice: MediaChoice) => {
+    if (detail.filter((block) => block.type === "IMAGE").length >= 20) {
+      messageApi.warning("详情图最多 20 张，请先删掉不需要的");
+      return;
+    }
+    setDetail((prev) => [...prev, {
+      key: `detail-pick-${choice.key}-${Date.now()}`,
+      type: "IMAGE",
+      imageId: choice.imageId,
+      pendingMediaKey: choice.pending ? choice.key : undefined,
+    }]);
+    setDetailPickerOpen(false);
+    setPreviewPane("detail");
+    markDirty();
+  };
+
   const removePendingMedia = (key: string) => {
     setPendingMedia((prev) => {
       const target = prev.find((item) => item.key === key);
@@ -545,17 +917,22 @@ export default function ProfessionalProductEditor() {
   const uploadPending = async (productId: number) => {
     const idMap = new Map<string, number>();
     const mediaToUpload = [...pendingMedia];
-    let shouldAssignCover = primaryImageId == null;
+    let assignedCoverId: number | null = null;
+    const shouldAssignCover = primaryImageId == null && galleryImages.length === 0;
+    let gallerySort = galleryImages.length;
+    let detailSort = DETAIL_ONLY_IMAGE_SORT_FLOOR + images.filter((item) => !item.isVideo && (item.sortOrder ?? 0) >= DETAIL_ONLY_IMAGE_SORT_FLOOR).length;
     for (let index = 0; index < mediaToUpload.length; index += 1) {
       const media = mediaToUpload[index];
+      const isDetail = media.purpose === "detail";
+      const visualIndex = orderedGalleryKeys.indexOf(media.key);
       const uploaded = unwrapResponse<UploadedProductMedia[]>(await uploadApi.uploadProductImage(media.file))[0];
       if (!uploaded?.storageKey || !uploaded.mediaAssetId) throw new EditorUserError("图片上传失败，请重新选择图片后重试");
       const created = unwrapResponse<ProductImage>(await productApi.addImage(productId, {
         mediaAssetId: uploaded.mediaAssetId,
         storageKey: uploaded.storageKey,
         url: uploaded.url,
-        type: index === 0 && images.length === 0 ? "FRONT" : "DETAIL",
-        sortOrder: images.length + index,
+        type: isDetail ? "DETAIL" : gallerySort === 0 ? "FRONT" : "SIDE",
+        sortOrder: isDetail ? detailSort : visualIndex >= 0 ? visualIndex : gallerySort,
         width: uploaded.width,
         height: uploaded.height,
         mimeType: uploaded.mimeType,
@@ -563,11 +940,13 @@ export default function ProfessionalProductEditor() {
       }));
       if (!created?.id) throw new EditorUserError("图片关联失败，请重新加载后重试");
       if (uploaded.mediaAssetId) mediaAssetIdsByImage.current.set(created.id, uploaded.mediaAssetId);
-      if (shouldAssignCover && !created.isVideo) {
+      if (!isDetail && shouldAssignCover && assignedCoverId == null && !created.isVideo) {
         await productApi.setCoverImage(productId, created.id);
         setPrimaryImageId(created.id);
-        shouldAssignCover = false;
+        assignedCoverId = created.id;
       }
+      if (isDetail) detailSort += 1;
+      else gallerySort += 1;
       idMap.set(media.key, created.id);
       setPendingMedia((prev) => prev.filter((item) => item.key !== media.key));
       setImages((prev) => [...prev, created]);
@@ -576,7 +955,7 @@ export default function ProfessionalProductEditor() {
         : block));
       URL.revokeObjectURL(media.preview);
     }
-    return idMap;
+    return { idMap, assignedCoverId };
   };
 
   const confirmProductImagesPublic = async () => {
@@ -590,7 +969,7 @@ export default function ProfessionalProductEditor() {
       for (const assetId of assetIds) {
         await uploadApi.authorizeMediaPublicUse(assetId, true);
       }
-      setSubmitError(undefined);
+      dismissSubmitError();
       messageApi.success("已记录这些图片可以在网站公开展示。请再次点击上架。");
     } catch (error) {
       messageApi.error(getSafeAdminErrorMessage(error, "图片公开确认未完成，请稍后重试"));
@@ -627,7 +1006,7 @@ export default function ProfessionalProductEditor() {
     fulfillmentType: values.fulfillmentType,
     dispatchTime: values.dispatchTime,
     shippingTemplateId: values.deliveryMethods?.includes("EXPRESS") ? values.shippingTemplateId || null : null,
-    deliveryMethods: values.deliveryMethods || [],
+    deliveryMethods: normalizeDeliveryMethods(values.deliveryMethods),
     requiresInsuredShipping: values.requiresInsuredShipping,
     requiresSignature: values.requiresSignature,
     includesCertificate: values.includesCertificate,
@@ -659,7 +1038,7 @@ export default function ProfessionalProductEditor() {
       await refreshProduct(pending.productId);
       if (!activeEditorRef.current) return;
       setPendingSaveVerification(null);
-      setSubmitError(undefined);
+      dismissSubmitError();
       setDirty(false);
       setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
       messageApi.success("商品保存结果已确认");
@@ -676,24 +1055,6 @@ export default function ProfessionalProductEditor() {
     }
   };
 
-  const setPrimaryImage = async (imageId: number) => {
-    if (!currentProductId || mediaActionId !== null) return;
-    if (dirty) {
-      messageApi.warning("请先保存当前修改，再设置商品主图");
-      return;
-    }
-    try {
-      setMediaActionId(imageId);
-      await productApi.setCoverImage(currentProductId, imageId);
-      await refreshProduct(currentProductId);
-      messageApi.success("商品主图已更新");
-    } catch (error) {
-      messageApi.error(getSafeAdminErrorMessage(error, "商品主图更新失败，请重新加载后重试。"));
-    } finally {
-      setMediaActionId(null);
-    }
-  };
-
   const confirmDeleteImage = (imageId: number) => {
     if (!currentProductId || mediaActionId !== null) return;
     if (dirty) {
@@ -707,7 +1068,7 @@ export default function ProfessionalProductEditor() {
     modal.confirm({
       title: "确认删除这张商品图片？",
       content: primaryImageId === imageId
-        ? "这是当前商品主图。删除后请重新选择主图，避免影响商品展示。"
+        ? "这是当前主图。删除后，剩下的第一张图片会成为主图。"
         : "删除后无法在当前商品中继续使用这张图片。",
       okText: "确认删除",
       cancelText: "取消",
@@ -716,7 +1077,12 @@ export default function ProfessionalProductEditor() {
         try {
           setMediaActionId(imageId);
           await productApi.deleteImage(currentProductId, imageId);
-          await refreshProduct(currentProductId);
+          const refreshed = await refreshProduct(currentProductId);
+          const nextCover = (refreshed.images || []).find((item) => !item.isVideo);
+          if (!refreshed.primaryImageId && nextCover?.id) {
+            await productApi.setCoverImage(currentProductId, nextCover.id);
+            await refreshProduct(currentProductId);
+          }
           messageApi.success("商品图片已删除");
         } catch (error) {
           messageApi.error(getSafeAdminErrorMessage(error, "商品图片删除失败，请重新加载后重试。"));
@@ -726,6 +1092,176 @@ export default function ProfessionalProductEditor() {
         }
       },
     });
+  };
+
+  const jumpToPublishTarget = (target: PublishTarget) => {
+    setActive(sectionForPublishTarget(target));
+    window.setTimeout(() => {
+      const mark = (node: Element | null | undefined) => {
+        const item = node?.closest(".ant-form-item, .pro-editor__row-label, .pro-editor__detail-head, .pro-editor__sku-panel") || node;
+        if (!item) return;
+        item.classList.add("pro-editor__jump-target");
+        window.setTimeout(() => item.classList.remove("pro-editor__jump-target"), 1600);
+      };
+      if (FORM_JUMP_FIELDS.has(target)) {
+        form.scrollToField(target, { behavior: "smooth", block: "center" });
+        window.setTimeout(() => {
+          const instance = form.getFieldInstance(target) as { focus?: () => void } | undefined;
+          instance?.focus?.();
+          mark(document.getElementById(`product-editor-main_${target}`));
+        }, 250);
+        return;
+      }
+      const anchor = document.getElementById(target);
+      anchor?.scrollIntoView({ behavior: "smooth", block: "center" });
+      mark(anchor);
+    }, 30);
+  };
+
+  const applySharedPrice = async (productId: number, values: ProductEditorFormValues) => {
+    if (values.salesMode !== "DIRECT_PURCHASE") return;
+    const typedPrice = Number(values.initialSkuPrice);
+    if (!Number.isFinite(typedPrice) || typedPrice <= 0) return;
+    const active = skus.filter((sku) => sku.isActive !== false);
+    const unpriced = active.filter((sku) => !(Number(sku.price) > 0));
+    for (const sku of unpriced) {
+      await productApi.updateSku(productId, sku.id, {
+        skuCode: sku.skuCode,
+        material: sku.material,
+        size: sku.size || undefined,
+        goldWeight: sku.goldWeight ?? 0,
+        price: typedPrice,
+        isActive: true,
+      });
+    }
+    if (active.length === 0) {
+      await productApi.createSku(productId, {
+        skuCode: `${values.code}-DEFAULT`,
+        material: values.materialType || "OTHER",
+        size: values.size || undefined,
+        goldWeight: values.goldWeight ?? 0,
+        price: typedPrice,
+        isActive: true,
+      });
+    }
+  };
+
+  const savePublishFrame = () => {
+    const values = form.getFieldsValue(true);
+    const frame: ProductPublishFrame = {
+      salesMode: values.salesMode || "DIRECT_PURCHASE",
+      visibility: values.visibility || "PUBLIC",
+      publishMode: values.publishMode || "IMMEDIATE",
+      inventoryPolicy: values.inventoryPolicy || "STANDARD",
+      materialType: values.materialType || undefined,
+      shortDescription: typeof values.shortDescription === "string" ? values.shortDescription.trim() : "",
+      description: typeof values.description === "string" ? values.description.trim() : "",
+      deliveryMethods: normalizeDeliveryMethods(values.deliveryMethods),
+    };
+    try {
+      localStorage.setItem(PRODUCT_FRAME_KEY, JSON.stringify(frame));
+    } catch {
+      messageApi.error("当前浏览器不能保存上架框架");
+      return;
+    }
+    setPublishFrame(frame);
+    messageApi.success("已存成上架框架。下一件新商品会带上这些设置");
+  };
+
+  const clearPublishFrame = () => {
+    try {
+      localStorage.removeItem(PRODUCT_FRAME_KEY);
+    } catch {
+      messageApi.error("当前浏览器不能清除上架框架");
+      return;
+    }
+    setPublishFrame(null);
+    messageApi.success("已恢复最初默认。下一件新商品不再沿用已存设置");
+  };
+
+  const moveGalleryItem = (fromKey: string, toIndex: number) => {
+    if (saving || isRoleReadOnly) return;
+    const next = moveGalleryKey(orderedGalleryKeys, fromKey, toIndex);
+    if (!next) return;
+    setGalleryOrder(next);
+    setPendingMedia((prev) => {
+      const pendingByKey = new Map(prev.filter((item) => item.purpose !== "detail").map((item) => [item.key, item]));
+      const orderedPending = next.flatMap((key) => {
+        const item = pendingByKey.get(key);
+        return item ? [item] : [];
+      });
+      return [...orderedPending, ...prev.filter((item) => item.purpose === "detail")];
+    });
+    markDirty();
+  };
+
+  const persistGalleryOrder = async (productId: number, idMap: Map<string, number>, assignedCoverId: number | null) => {
+    const resolved = orderedGalleryKeys.flatMap((key) => {
+      if (key.startsWith("saved-")) {
+        const imageId = Number(key.slice("saved-".length));
+        return Number.isInteger(imageId) && imageId > 0 ? [imageId] : [];
+      }
+      const createdId = idMap.get(key);
+      return createdId ? [createdId] : [];
+    });
+    if (resolved.length === 0) return;
+    const sortById = new Map(galleryImages.map((image) => [image.id, image.sortOrder ?? 0]));
+    const createdIds = new Set(idMap.values());
+    for (let index = 0; index < resolved.length; index += 1) {
+      const imageId = resolved[index];
+      if (createdIds.has(imageId)) continue;
+      if (sortById.get(imageId) === index) continue;
+      await productApi.updateImage(productId, imageId, { sortOrder: index });
+    }
+    const firstId = resolved[0];
+    if (firstId && firstId !== primaryImageId && firstId !== assignedCoverId) {
+      await productApi.setCoverImage(productId, firstId);
+      setPrimaryImageId(firstId);
+    }
+    setGalleryOrder([]);
+  };
+
+  const applyEditorStock = async (productId: number, values: ProductEditorFormValues) => {
+    const canStock = role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE";
+    if (!canStock || values.salesMode !== "DIRECT_PURCHASE") return;
+    const raw = values.stockQuantity;
+    if (raw === undefined || raw === null) return;
+    const quantity = Number(raw);
+    if (!Number.isInteger(quantity) || quantity < 0) {
+      throw new EditorUserError("可售数量须为大于或等于 0 的整数");
+    }
+    if ((values.inventoryPolicy || "STANDARD") === "SINGLE_UNIT" && quantity > 1) {
+      throw new EditorUserError("一物一件的可售数量只能是 0 或 1");
+    }
+    const active = skus.filter((sku) => sku.isActive !== false).length;
+    if (active > 1) return;
+    let stock: { rows: EditorStockRow[]; total: number };
+    try {
+      stock = await readProductStock(productId);
+    } catch (error) {
+      throw new EditorUserError(getSafeAdminErrorMessage(error, "商品资料已保存，但可售数量没有写入。请到库存管理重试。"));
+    }
+    if (stock.rows.length !== 1 || stock.total > 1) {
+      if (stock.rows.length === 0 && stock.total === 0) {
+        throw new EditorUserError("商品资料已保存，但还没有读到库存记录。请到库存管理填写可售数量。");
+      }
+      return;
+    }
+    if (stock.rows[0].quantity === quantity) return;
+    try {
+      await inventoryApi.update(stock.rows[0].id, {
+        type: "adjust",
+        quantity,
+        expectedQuantity: stock.rows[0].quantity,
+        remark: "商品编辑页填写可售数量",
+      });
+    } catch (error) {
+      const status = (error as EditorRequestError).status ?? (error as EditorRequestError).response?.status;
+      if (status === 409) {
+        throw new EditorUserError("商品资料已保存，但可售数量已在别处变化。请重新加载后再填写。");
+      }
+      throw new EditorUserError(getSafeAdminErrorMessage(error, "商品资料已保存，但可售数量没有写入。请到库存管理重试。"));
+    }
   };
 
   const save = async (intent: "draft" | "primary" = "draft") => {
@@ -747,39 +1283,48 @@ export default function ProfessionalProductEditor() {
     const requiresFullValidation = currentStatus === "PUBLISHED"
       || (intent === "primary" && (publishMode === "IMMEDIATE" || publishMode === "SCHEDULED"));
     try {
-      setSubmitError(undefined);
-      await form.validateFields(requiresFullValidation ? undefined : ["code", "categoryId"]);
+      dismissSubmitError();
+      let formGaps: PublishGap[] = [];
+      try {
+        await form.validateFields(requiresFullValidation ? undefined : ["code", "categoryId"]);
+      } catch (error) {
+        if (!isFormValidationError(error)) throw error;
+        formGaps = gapsFromFormFields(error.errorFields);
+      }
       const values = form.getFieldsValue(true);
       const enforcingPublishCopy = intent === "primary"
         && currentStatus !== "PUBLISHED"
         && (values.publishMode === "IMMEDIATE" || values.publishMode === "SCHEDULED");
+      if (!enforcingPublishCopy && formGaps.length > 0) {
+        setPublishGaps(formGaps);
+        setSubmitError("点一下即可跳到还没填的位置。");
+        messageApi.warning(requiresFullValidation ? "请检查并修正标红字段" : "保存草稿至少需要选择类目并填写货号");
+        jumpToPublishTarget(formGaps[0].target);
+        return false;
+      }
       if (enforcingPublishCopy) {
         const fieldErrors: Array<{ name: "name" | "shortDescription" | "description" | "code"; errors: string[] }> = [];
-        const gaps: string[] = [];
+        const gaps: PublishGap[] = [...formGaps];
+        const seen = new Set(gaps.map((gap) => `${gap.target}:${gap.label}`));
+        const addGap = (label: string, target: PublishTarget) => {
+          const key = `${target}:${label}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          gaps.push({ label, target });
+        };
         if (!isMeaningfulProductText(values.name, 2)) {
           fieldErrors.push({ name: "name", errors: ["请填写商品标题；整段不能只有数字或同一个字"] });
-          gaps.push("商品标题");
+          addGap("商品标题", "name");
         }
         const code = typeof values.code === "string" ? values.code.trim() : "";
         if (!code) {
           fieldErrors.push({ name: "code", errors: ["请输入货号"] });
-          gaps.push("货号");
-        }
-        if (typeof values.shortDescription === "string" && values.shortDescription.trim() && !isMeaningfulProductText(values.shortDescription, 1)) {
-          fieldErrors.push({ name: "shortDescription", errors: ["简介不能整段只有数字或同一个字"] });
-          gaps.push("商品简介");
-        }
-        if (typeof values.description === "string" && values.description.trim() && !isMeaningfulProductText(values.description, 1)) {
-          fieldErrors.push({ name: "description", errors: ["说明不能整段只有数字或同一个字"] });
-          gaps.push("商品说明");
+          addGap("货号", "code");
         }
         const detailTexts = detail.filter((block) => block.type === "TEXT" && block.text?.trim());
-        if (detailTexts.some((block) => !isMeaningfulProductText(block.text, 1))) {
-          gaps.push("商品详情");
-        }
         if (typeof values.name === "string" && /秒杀|限时折扣|满减/.test(values.name)) {
           fieldErrors.push({ name: "name", errors: ["标题不要写秒杀、限时折扣或满减"] });
-          gaps.push("标题中的促销词");
+          addGap("标题中的促销词", "name");
         }
         const claimIssues = jewelryClaimIssues([
           values.name,
@@ -789,22 +1334,36 @@ export default function ProfessionalProductEditor() {
         ]);
         if (claimIssues.length > 0) {
           fieldErrors.push({ name: "name", errors: claimIssues });
-          gaps.push(...claimIssues);
+          for (const issue of claimIssues) {
+            const rule = JEWELRY_CLAIM_RULES.find(([, message]) => message === issue);
+            const pattern = rule?.[0];
+            const target: PublishTarget = !pattern
+              ? "name"
+              : typeof values.description === "string" && pattern.test(values.description)
+                ? "description"
+                : typeof values.shortDescription === "string" && pattern.test(values.shortDescription)
+                  ? "shortDescription"
+                  : detailTexts.some((block) => pattern.test(block.text || ""))
+                    ? "product-detail"
+                    : "name";
+            addGap(issue, target);
+          }
         }
-        if (values.visibility === "PUBLIC" && !primaryImageId && pendingMedia.length === 0) {
-          gaps.push("这件作品的实物主图");
+        if (values.visibility === "PUBLIC" && !primaryImageId && galleryImages.length === 0 && !pendingMedia.some((item) => item.purpose !== "detail")) {
+          addGap("这件作品的实物主图", "product-cover");
         }
         if (values.salesMode === "DIRECT_PURCHASE") {
           const typedPrice = Number(values.initialSkuPrice);
           const hasTypedPrice = Number.isFinite(typedPrice) && typedPrice > 0;
           const hasSkuPrice = skus.some((sku) => sku.isActive !== false && Number(sku.price) > 0);
-          if (!hasTypedPrice && !hasSkuPrice) gaps.push("一个大于 0 的成交价");
+          if (!hasTypedPrice && !hasSkuPrice) addGap("一个大于 0 的成交价", currentProductId ? "product-skus" : "initialSkuPrice");
         }
         if (fieldErrors.length > 0 || gaps.length > 0) {
           if (fieldErrors.length > 0) form.setFields(fieldErrors);
-          setSubmitError(`上架前请补全：${gaps.join("、")}。`);
+          setPublishGaps(gaps);
+          setSubmitError("上架前还有这些地方需要修改。点一下即可跳到对应位置。");
           messageApi.warning("请检查并修正标红字段");
-          form.scrollToField(fieldErrors[0]?.name || "name", { behavior: "smooth", block: "center" });
+          jumpToPublishTarget(gaps[0].target);
           return false;
         }
       }
@@ -836,13 +1395,20 @@ export default function ProfessionalProductEditor() {
         window.history.replaceState(window.history.state, "", `/admin/products/${productId}/edit`);
       }
       if (!productId) throw new EditorUserError("商品创建失败，未返回商品标识");
-      const idMap = await uploadPending(productId);
+      if (currentStatus === "ARCHIVED") {
+        await productApi.restore(productId);
+        setCurrentStatus("DRAFT");
+      }
+      const { idMap, assignedCoverId } = await uploadPending(productId);
+      await persistGalleryOrder(productId, idMap, assignedCoverId);
       const detailContent = detail.map(({ key: _key, pendingMediaKey, ...block }) => ({
         ...block,
         imageId: pendingMediaKey ? idMap.get(pendingMediaKey) : block.imageId,
       })).filter((block) => block.type === "TEXT" ? Boolean(block.text?.trim()) : Boolean(block.imageId));
       const { code: _code, ...updatePayload } = { ...contentPayload, detailContent };
       await productApi.update(productId, updatePayload);
+      if (!startedWithoutProductId) await applySharedPrice(productId, values);
+      await applyEditorStock(productId, values);
       const publishingPublic = intent === "primary"
         && (values.publishMode === "IMMEDIATE" || values.publishMode === "SCHEDULED")
         && values.visibility === "PUBLIC";
@@ -874,10 +1440,23 @@ export default function ProfessionalProductEditor() {
       } catch {
         if (activeEditorRef.current) {
           setPendingSaveVerification({ productId });
-          setSubmitError(undefined);
+          dismissSubmitError();
           messageApi.warning("商品已写入，最新状态待确认；请重新读取保存结果");
         }
         return false;
+      }
+      if (!activeEditorRef.current) return false;
+      if ((role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE") && values.salesMode === "DIRECT_PURCHASE") {
+        try {
+          const stock = await readProductStock(productId);
+          if (activeEditorRef.current) {
+            setStockRowCount(stock.total > stock.rows.length ? stock.total : stock.rows.length);
+            if (stock.rows.length === 1 && stock.total <= 1) form.setFieldValue("stockQuantity", stock.rows[0].quantity);
+            setStockHint(undefined);
+          }
+        } catch {
+          if (activeEditorRef.current) setStockHint("暂时读不到现有库存。保存时会再读一次。");
+        }
       }
       if (!activeEditorRef.current) return false;
       setDirty(false);
@@ -900,12 +1479,11 @@ export default function ProfessionalProductEditor() {
       return true;
     } catch (error: unknown) {
       if (isFormValidationError(error)) {
-        const firstField = error.errorFields[0]?.name;
+        const gaps = gapsFromFormFields(error.errorFields);
+        setPublishGaps(gaps);
+        setSubmitError("点一下即可跳到还没填的位置。");
         messageApi.warning(requiresFullValidation ? "请检查并修正标红字段" : "保存草稿至少需要选择类目并填写货号");
-        if (firstField) {
-          form.scrollToField(firstField, { behavior: "smooth", block: "center" });
-          window.setTimeout(() => form.getFieldInstance(firstField)?.focus?.(), 0);
-        }
+        if (gaps[0]) jumpToPublishTarget(gaps[0].target);
         return false;
       }
       if (error instanceof EditorUserError) {
@@ -920,8 +1498,11 @@ export default function ProfessionalProductEditor() {
       }
       const failure = getProductSubmitFailure(error);
       if (failure.field) form.setFields([{ name: failure.field, errors: [failure.message] }]);
+      const gaps = gapsForSubmitMessage(failure.message, failure.field, Boolean(currentProductId));
+      setPublishGaps(gaps);
       setSubmitError(failure.message);
       messageApi.error(failure.message);
+      if (gaps[0]) jumpToPublishTarget(gaps[0].target);
       return false;
     } finally {
       setSaving(false);
@@ -996,7 +1577,7 @@ export default function ProfessionalProductEditor() {
     savingRef.current = true;
     setSaving(true);
     try {
-      setSubmitError(undefined);
+      dismissSubmitError();
       await productApi.updateStatus(currentProductId, "PUBLISHED");
       await refreshProduct(currentProductId);
       setDirty(false);
@@ -1004,8 +1585,11 @@ export default function ProfessionalProductEditor() {
       messageApi.success("审核版本已通过并上架");
     } catch (error: unknown) {
       const failure = getProductSubmitFailure(error);
+      const gaps = gapsForSubmitMessage(failure.message, failure.field, true);
+      setPublishGaps(gaps);
       setSubmitError(failure.message);
       messageApi.error(failure.message);
+      if (gaps[0]) jumpToPublishTarget(gaps[0].target);
     } finally {
       setSaving(false);
       savingRef.current = false;
@@ -1017,7 +1601,7 @@ export default function ProfessionalProductEditor() {
     savingRef.current = true;
     setSaving(true);
     try {
-      setSubmitError(undefined);
+      dismissSubmitError();
       await productApi.updateStatus(currentProductId, "DRAFT");
       await refreshProduct(currentProductId);
       setDirty(false);
@@ -1025,8 +1609,11 @@ export default function ProfessionalProductEditor() {
       messageApi.success("作品已退回草稿，可继续修改后重新提交");
     } catch (error: unknown) {
       const failure = getProductSubmitFailure(error);
+      const gaps = gapsForSubmitMessage(failure.message, failure.field, true);
+      setPublishGaps(gaps);
       setSubmitError(failure.message);
       messageApi.error(failure.message);
+      if (gaps[0]) jumpToPublishTarget(gaps[0].target);
     } finally {
       setSaving(false);
       savingRef.current = false;
@@ -1060,10 +1647,22 @@ export default function ProfessionalProductEditor() {
 
   const addTextBlock = () => {
     setDetail((prev) => [...prev, { key: `text-${Date.now()}`, type: "TEXT", text: "" }]);
+    setPreviewPane("detail");
     markDirty();
   };
-  const addImageBlock = () => {
-    setDetail((prev) => [...prev, { key: `image-${Date.now()}`, type: "IMAGE" }]);
+  const removeDetailBlock = (blockKey: string) => {
+    const block = detail.find((item) => item.key === blockKey);
+    setDetail((prev) => prev.filter((item) => item.key !== blockKey));
+    if (block?.pendingMediaKey && pendingMedia.some((item) => item.key === block.pendingMediaKey && item.purpose === "detail")) {
+      const stillUsed = detail.some((item) => item.key !== blockKey && item.pendingMediaKey === block.pendingMediaKey);
+      if (!stillUsed) {
+        setPendingMedia((prev) => {
+          const target = prev.find((item) => item.key === block.pendingMediaKey);
+          if (target) URL.revokeObjectURL(target.preview);
+          return prev.filter((item) => item.key !== block.pendingMediaKey);
+        });
+      }
+    }
     markDirty();
   };
   const moveBlock = (index: number, direction: -1 | 1) => {
@@ -1110,7 +1709,13 @@ export default function ProfessionalProductEditor() {
     ? `${!commerceEnabled ? "支付未开放，公开页面只显示价格，不提供加购或付款。" : ""}直接销售需要一个大于 0 的成交价。`
     : "当前销售方式发布时不要求交易价格、SKU 或正库存。公开前再放上这件作品的照片。";
   const showCommerceFacts = selectedSalesMode === "DIRECT_PURCHASE";
-  const watchedVisibility = Form.useWatch("visibility", form);
+  const canWriteStock = role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE";
+  const stockSplit = activeSkuCount > 1 || stockRowCount > 1;
+  const stockExtra = !canWriteStock
+    ? "当前账号不能修改库存。请让管理员在库存管理填写可售数量。"
+    : stockSplit
+      ? "有多条库存时，不能在这里用一个数字改全部。"
+      : stockHint || "这是现在可卖的件数。不填就保持原数量；新商品不填时是 0。一物一件只能填 0 或 1。";
   const visibilityOptions = [
     { value: "PUBLIC", label: "全部人可见" },
     { value: "INTERNAL", label: "仅内部可见" },
@@ -1119,18 +1724,32 @@ export default function ProfessionalProductEditor() {
   ];
 
   if (loading) {
-    return (
-      <div className="pro-editor__loading" role="status" aria-live="polite">
-        <Spin />
-        <span>正在加载商品信息…</span>
-      </div>
-    );
+    return <RouteLoading scope="admin-content" label="正在加载商品信息…" />;
   }
   if (loadError) return <div className="pro-editor__load-error"><AdminErrorState subject="商品信息" message={loadError} onRetry={() => setLoadAttempt((value) => value + 1)} /></div>;
 
   return (
     <div className="pro-editor">
       <h1 className="pro-editor__sr-only">{editingId ? "编辑商品" : "新建商品"}</h1>
+      <div className="pro-editor__body">
+        <aside className="pro-editor__guide" aria-label="上架标准">
+          <div className="pro-editor__guide-card">
+            <strong>上架框架</strong>
+            <p>新建商品会带上这些默认，不用每次重填。标题、货号、照片和成交价仍按每一件填写。</p>
+            <p>必填：标题、货号、类目、一张作品照片。直接销售再填一次成交价。</p>
+            <p>简介、说明、克重、材质和详情都可以不填。配送方式在「销售信息」，不选也可以上架。</p>
+            <p>{publishFrame
+              ? `已存框架：${salesModeLabelsForPreview[publishFrame.salesMode] || "直接销售"}，${publishFrame.visibility === "PUBLIC" ? "全部人可见" : "沿用已存的可见范围"}。${publishFrame.materialType ? `材质沿用${materials.find((item) => item.value === publishFrame.materialType)?.label || "已存材质"}。` : "材质不预填。"}${publishFrame.shortDescription ? "简介沿用已存文字。" : "简介不预填。"}${publishFrame.description ? "说明沿用已存文字。" : "说明不预填。"}`
+              : "当前默认：直接销售，全部人可见，立刻上架。材质、简介和说明不预填。"}</p>
+            <p>成交价只填一次。还没有价格的规格会沿用，已经标价的规格保持不变。</p>
+            <div className="pro-editor__guide-actions">
+              <button type="button" onClick={savePublishFrame}>把当前设置存成框架</button>
+              {publishFrame ? <button type="button" onClick={clearPublishFrame}>恢复最初默认</button> : null}
+            </div>
+          </div>
+          {submitError ? <Alert className="pro-editor__submit-error" type="error" showIcon message="商品保存未完成" description={<div><span>{submitError}</span>{publishGaps.length > 0 ? <ul className="pro-editor__gap-list">{publishGaps.map((gap) => <li key={`${gap.target}:${gap.label}`}><button type="button" onClick={() => jumpToPublishTarget(gap.target)}>{gap.label}</button></li>)}</ul> : null}</div>} closable onClose={() => dismissSubmitError()} action={role === "SUPER_ADMIN" && submitError.includes("公开展示") ? <Button size="small" loading={authorizingImages} onClick={() => void confirmProductImagesPublic()}>确认这些图片可在网站公开展示</Button> : undefined} /> : null}
+        </aside>
+        <div className="pro-editor__main">
       <header className="pro-editor__tabs">
         <div className="pro-editor__tabs-main">
           <Button
@@ -1155,21 +1774,20 @@ export default function ProfessionalProductEditor() {
           <Button type="link" loading={saveVerificationLoading} onClick={() => void retrySaveVerification()}>重新读取保存结果</Button>
         </Space>}
       />}
-      <Form name="product-editor-main" form={form} initialValues={defaultValues} layout="vertical" disabled={saving || isRoleReadOnly || Boolean(pendingSaveVerification)} onValuesChange={() => { markDirty(); setSubmitError(undefined); }} className="pro-editor__form">
+      <Form name="product-editor-main" form={form} initialValues={defaultValues} layout="vertical" requiredMark={(label) => label} disabled={saving || isRoleReadOnly || Boolean(pendingSaveVerification)} onValuesChange={() => { markDirty(); dismissSubmitError(); }} className="pro-editor__form">
         <ol className="pro-editor__flow" aria-label="发布步骤">
           {publishSteps.map((step) => <li key={step.title} data-state={step.state}><b>{step.title}</b><span>{step.detail}</span></li>)}
         </ol>
-        {submitError && <Alert className="pro-editor__submit-error" type="error" showIcon message="商品保存未完成" description={submitError} closable onClose={() => setSubmitError(undefined)} action={role === "SUPER_ADMIN" && submitError.includes("公开展示") ? <Button size="small" loading={authorizingImages} onClick={() => void confirmProductImagesPublic()}>确认这些图片可在网站公开展示</Button> : undefined} />}
-        <div className="pro-editor__category"><strong>当前类目 <i>*</i></strong><span>{selectedCategoryLabel || "珠宝 / 请选择具体类目"}</span><Tag color={statusMeta[currentStatus].color}>{statusMeta[currentStatus].label}</Tag><button type="button" onClick={() => { setActive("basic"); document.getElementById("basic")?.scrollIntoView({ behavior: "smooth" }); }}>切换类目</button></div>
+        <div className={`pro-editor__category${categoryEmpty ? " is-open" : ""}`}><strong>当前类目 <i>*</i></strong><span>{selectedCategoryLabel || "珠宝 / 请选择具体类目"}</span><Tag color={statusMeta[currentStatus].color}>{statusMeta[currentStatus].label}</Tag><button type="button" onClick={() => { setActive("basic"); document.getElementById("basic")?.scrollIntoView({ behavior: "smooth" }); }}>切换类目</button></div>
 
         <section id="basic" className="pro-editor__card">
           <div className="pro-editor__title-row"><h2>基础信息</h2></div>
-          <Form.Item name="name" label="商品标题" className="pro-editor__horizontal-field" extra="上架前填写。例如「18K金红宝石戒指」。" rules={[{ max: 60, message: "商品标题不能超过 60 个字符" }]}><Input maxLength={60} showCount placeholder="如：18K金红宝石戒指" /></Form.Item>
+          <Form.Item name="name" label={<span>商品标题<RequiredMark /></span>} className={requiredFieldClass(true, titleEmpty, "pro-editor__horizontal-field")} extra="例如「18K金红宝石戒指」。" rules={[{ max: 60, message: "商品标题不能超过 60 个字符" }]}><Input maxLength={60} showCount placeholder="如：18K金红宝石戒指" /></Form.Item>
           <Form.Item
             name="shortDescription"
             label="商品简介"
             className="pro-editor__horizontal-field"
-            extra="选填。"
+            extra="选填，不写也可以上架。"
             rules={[{ max: 500, message: "商品简介不能超过 500 个字符" }]}
           >
             <Input maxLength={500} showCount placeholder="概括材质、设计和佩戴特点" />
@@ -1178,17 +1796,17 @@ export default function ProfessionalProductEditor() {
             name="description"
             label="商品说明"
             className="pro-editor__horizontal-field"
-            extra="选填。"
+            extra="选填，不写也可以上架。"
             rules={[{ max: 5000, message: "商品说明不能超过 5000 个字符" }]}
           >
             <Input.TextArea rows={4} maxLength={5000} showCount placeholder="介绍材质、设计、工艺与佩戴建议" />
           </Form.Item>
-          <Form.Item name="categoryId" label="当前类目" className="pro-editor__horizontal-field" rules={[{ required: true, message: "请选择珠宝类目" }]}><Select showSearch optionFilterProp="label" options={categories} placeholder="请选择珠宝类目" /></Form.Item>
+          <Form.Item name="categoryId" label={<span>当前类目<RequiredMark /></span>} className={requiredFieldClass(true, categoryEmpty, "pro-editor__horizontal-field")} rules={[{ required: true, message: "请选择珠宝类目" }]}><Select showSearch optionFilterProp="label" options={categories} placeholder="请选择珠宝类目" /></Form.Item>
           <Form.Item name="goldWeight" label="金重（g）" className="pro-editor__horizontal-field pro-editor__money-field" extra="选填。知道克重后再填写。"><InputNumber min={0} precision={2} suffix="g" /></Form.Item>
-          <Form.Item name="weight" label="总重（g）" className="pro-editor__horizontal-field pro-editor__money-field"><InputNumber min={0} precision={2} suffix="g" /></Form.Item>
+          <Form.Item name="weight" label="总重（g）" className="pro-editor__horizontal-field pro-editor__money-field" extra="选填。"><InputNumber min={0} precision={2} suffix="g" /></Form.Item>
           <div className="pro-editor__attribute-banner"><b>作品资料</b><span>材质、尺寸、工艺、宝石和证书都是选填</span></div>
           <div className="pro-editor__attributes">
-            <Form.Item name="code" label="货号" rules={[{ required: true, message: "请输入货号" }]}><Input disabled={Boolean(currentProductId)} maxLength={50} /></Form.Item>
+            <Form.Item name="code" label={<span>货号<RequiredMark /></span>} className={requiredFieldClass(true, codeEmpty)} rules={[{ required: true, message: "请输入货号" }]}><Input disabled={Boolean(currentProductId)} maxLength={50} /></Form.Item>
             <Form.Item name="materialType" label="主要材质"><Select allowClear options={materials} placeholder="选填，不确定就留空" /></Form.Item>
             <Form.Item name="size" label="尺寸/圈口"><Input placeholder="如：圈口 14" /></Form.Item>
             <Form.Item name="craftTechnique" label="制作工艺"><Select mode="multiple" options={["古法","花丝","錾刻","抛光","喷砂","镶嵌","珐琅","拉丝"].map((value) => ({ value }))} /></Form.Item>
@@ -1206,31 +1824,81 @@ export default function ProfessionalProductEditor() {
 
         <section id="media" className="pro-editor__card">
           <h2>图文描述</h2>
-          <div className="pro-editor__row-label"><strong>实物主图</strong><span>可以一次多选。公开上架前放这件作品的照片。不要拼图或促销字。最多 9 张，单张 10MB 以内。</span></div>
-          <div className="pro-editor__uploads">
-            {mediaChoices.map((item) => <div className="pro-editor__upload-item" key={item.key}>
-              <SecureImage src={item.src} alt={item.label} tokenKind="staff" />
-              <span>{item.imageId === primaryImageId ? "当前主图" : item.label}</span>
-              {"pending" in item && item.pending && <button type="button" className="pro-editor__upload-remove" aria-label={`移除${item.label}`} onClick={() => removePendingMedia(item.key)}><DeleteOutlined /></button>}
-              {item.imageId && <div className="pro-editor__upload-actions">
-                <Button type="link" size="small" disabled={item.imageId === primaryImageId || mediaActionId !== null} loading={mediaActionId === item.imageId} onClick={() => void setPrimaryImage(item.imageId!)}>{item.imageId === primaryImageId ? "已设主图" : "设为主图"}</Button>
-                <Button type="link" size="small" danger disabled={mediaActionId !== null} onClick={() => confirmDeleteImage(item.imageId!)}>删除</Button>
-              </div>}
-            </div>)}
-            {Array.from({ length: Math.max(0, 9 - mediaChoices.length) }).map((_, index) => <Upload key={`empty-upload-${index}`} multiple accept="image/jpeg,image/png,image/webp,image/gif" showUploadList={false} disabled={saving} beforeUpload={addPendingMedia}><button type="button" disabled={saving} aria-label={`上传图片，可一次多选，当前还可上传 ${9 - mediaChoices.length} 张`} className="pro-editor__upload"><FileImageOutlined /><span>上传图片</span></button></Upload>)}
+          <div className="pro-editor__row-label" id="product-cover"><strong>实物主图{photoRequired ? <RequiredMark /> : null}</strong><span>拖拽图片，或使用前移、后移调整顺序。第一张会成为主图。最多 9 张，单张 10MB 以内。</span></div>
+          <div className={`pro-editor__uploads${photoRequired && !coverReady ? " is-open" : ""}`}>
+            {mediaChoices.map((item, index) => {
+              const isCover = item.key === orderedGalleryKeys[0];
+              return <div
+                className={`pro-editor__upload-card${galleryDropKey === item.key ? " is-drop-target" : ""}`}
+                key={item.key}
+                onDragOver={(event) => {
+                  if (!draggingGalleryKey || saving || isRoleReadOnly) return;
+                  event.preventDefault();
+                  if (galleryDropKey !== item.key) setGalleryDropKey(item.key);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const fromKey = event.dataTransfer.getData("text/plain") || draggingGalleryKeyRef.current;
+                  draggingGalleryKeyRef.current = null;
+                  setDraggingGalleryKey(null);
+                  setGalleryDropKey(null);
+                  if (fromKey) moveGalleryItem(fromKey, index);
+                }}
+              >
+                <div
+                  className={`pro-editor__upload-item${draggingGalleryKey === item.key ? " is-dragging" : ""}`}
+                  draggable={!saving && !isRoleReadOnly}
+                  aria-label={`拖拽调整${item.label}的顺序`}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData("text/plain", item.key);
+                    event.dataTransfer.effectAllowed = "move";
+                    draggingGalleryKeyRef.current = item.key;
+                    setDraggingGalleryKey(item.key);
+                  }}
+                  onDragEnd={() => {
+                    draggingGalleryKeyRef.current = null;
+                    setDraggingGalleryKey(null);
+                    setGalleryDropKey(null);
+                  }}
+                >
+                  <SecureImage className="pro-editor__upload-photo" src={item.src} alt={item.label} tokenKind="staff" style={{ width: "100%", height: "100%", objectFit: "contain", aspectRatio: "1 / 1" }} />
+                  {isCover ? <em className="pro-editor__cover-badge">主图</em> : null}
+                </div>
+                <div className="pro-editor__upload-actions">
+                  <Button type="link" size="small" aria-label={`前移${item.label}`} disabled={index === 0 || saving || isRoleReadOnly} onClick={() => moveGalleryItem(item.key, index - 1)}>前移</Button>
+                  <Button type="link" size="small" aria-label={`后移${item.label}`} disabled={index === mediaChoices.length - 1 || saving || isRoleReadOnly} onClick={() => moveGalleryItem(item.key, index + 1)}>后移</Button>
+                  {"pending" in item && item.pending ? <button type="button" className="pro-editor__upload-text" onClick={() => removePendingMedia(item.key)} aria-label={`移除${item.label}`}>删除</button> : null}
+                  {item.imageId ? <Button type="link" size="small" danger disabled={mediaActionId !== null} onClick={() => confirmDeleteImage(item.imageId!)}>删除</Button> : null}
+                </div>
+              </div>;
+            })}
+            {mediaChoices.length < 9 ? <Upload multiple accept="image/jpeg,image/png,image/webp,image/gif" showUploadList={false} disabled={saving} beforeUpload={addPendingMedia}><button type="button" disabled={saving} aria-label={`上传图片，可一次多选，当前还可上传 ${9 - mediaChoices.length} 张`} className="pro-editor__upload"><FileImageOutlined /><span>上传图片</span></button></Upload> : null}
           </div>
-          <div className="pro-editor__detail-head"><div><strong>商品详情</strong><span>选填。有工艺或佩戴说明时再添加</span></div><Space><Button onClick={addImageBlock}>添加图片</Button><Button onClick={addTextBlock}>添加文字</Button></Space></div>
-          <div className="pro-editor__detail-tip">文字与图片按添加顺序展示，手机端会自动适配。</div>
+          <div className="pro-editor__detail-head" id="product-detail"><div><strong>商品详情</strong><span>选填。详情图和上面的主图分开，不会占用那 9 张。</span></div><Space>
+            <Upload multiple accept="image/jpeg,image/png,image/webp,image/gif" showUploadList={false} disabled={saving} beforeUpload={addDetailMedia}><button type="button" className="pro-editor__detail-add" disabled={saving} aria-label="上传详情图，可一次多选">上传详情图</button></Upload>
+            <Button onClick={() => setDetailPickerOpen((open) => !open)}>从主图选用</Button>
+            <Button onClick={addTextBlock}>添加文字</Button>
+          </Space></div>
+          <div className="pro-editor__detail-tip">可以一次选择多张详情图。文字写工艺、尺寸或佩戴说明。顾客打开商品页后，按这里的顺序往下看。</div>
+          {detailPickerOpen ? <div className="pro-editor__detail-picker">{mediaChoices.length === 0 ? <span>还没有主图。可以先在上面上传，或直接上传详情图。</span> : mediaChoices.map((item) => <button type="button" key={item.key} onClick={() => useGalleryImageInDetail(item)}><SecureImage src={item.src} alt={item.label} tokenKind="staff" style={{ width: "100%", height: "100%", objectFit: "contain" }} /></button>)}</div> : null}
           <div className="pro-editor__detail-grid">
-            <aside><b>添加</b><Button icon={<FileImageOutlined />} onClick={addImageBlock}>图片</Button><Button onClick={addTextBlock}>文字</Button></aside>
             <div className="pro-editor__blocks">
-              {detail.length === 0 && <div className="pro-editor__empty">尚未添加详情模块</div>}
+              {detail.length === 0 && <div className="pro-editor__empty">还没有详情。上传详情图，或写一段说明。</div>}
               {detail.map((block, index) => <div className="pro-editor__block" key={block.key}>
-                <div className="pro-editor__block-tools"><Tag>{block.type === "TEXT" ? "文字" : "图片"}</Tag><Button aria-label={`上移${block.type === "TEXT" ? "文字" : "图片"}模块`} size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => moveBlock(index, -1)} /><Button aria-label={`下移${block.type === "TEXT" ? "文字" : "图片"}模块`} size="small" icon={<ArrowDownOutlined />} disabled={index === detail.length - 1} onClick={() => moveBlock(index, 1)} /><Button aria-label={`删除${block.type === "TEXT" ? "文字" : "图片"}模块`} size="small" danger icon={<DeleteOutlined />} onClick={() => { setDetail((prev) => prev.filter((item) => item.key !== block.key)); markDirty(); }} /></div>
-                {block.type === "TEXT" ? <Input.TextArea rows={4} value={block.text} placeholder="输入商品工艺、设计寓意或佩戴说明" onChange={(event) => { setDetail((prev) => prev.map((item) => item.key === block.key ? { ...item, text: event.target.value } : item)); markDirty(); }} /> : <Select value={block.imageId ? `saved-${block.imageId}` : block.pendingMediaKey} placeholder="选择已上传的商品图片" options={mediaChoices.map((item) => ({ value: item.key, label: item.label }))} onChange={(value) => { const saved = value.startsWith("saved-"); setDetail((prev) => prev.map((item) => item.key === block.key ? { ...item, imageId: saved ? Number(value.replace("saved-", "")) : undefined, pendingMediaKey: saved ? undefined : value } : item)); markDirty(); }} />}
+                <div className="pro-editor__block-tools"><Tag>{block.type === "TEXT" ? "文字" : "图片"}</Tag><Button aria-label={`上移${block.type === "TEXT" ? "文字" : "图片"}模块`} size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => moveBlock(index, -1)} /><Button aria-label={`下移${block.type === "TEXT" ? "文字" : "图片"}模块`} size="small" icon={<ArrowDownOutlined />} disabled={index === detail.length - 1} onClick={() => moveBlock(index, 1)} /><Button aria-label={`删除${block.type === "TEXT" ? "文字" : "图片"}模块`} size="small" danger icon={<DeleteOutlined />} onClick={() => removeDetailBlock(block.key)} /></div>
+                {block.type === "TEXT" ? <Input.TextArea rows={4} value={block.text} aria-label="详情文字" placeholder="写工艺、尺寸或佩戴说明" onChange={(event) => { setDetail((prev) => prev.map((item) => item.key === block.key ? { ...item, text: event.target.value } : item)); markDirty(); }} /> : <div className="pro-editor__block-visual">{mediaSrcByKey.get(block.pendingMediaKey || `saved-${block.imageId || ""}`) ? <SecureImage className="pro-editor__block-photo" src={mediaSrcByKey.get(block.pendingMediaKey || `saved-${block.imageId || ""}`)} alt={block.alt || "商品详情"} tokenKind="staff" style={{ width: "100%", maxHeight: 280, objectFit: "contain" }} /> : <span>这张详情图暂时显示不了，请删除后重新上传。</span>}</div>}
               </div>)}
             </div>
-            <div className="pro-editor__preview"><div className="pro-editor__phone-tabs"><span>图片</span><b>详情</b><span>说明</span></div>{detail.length === 0 ? <div className="pro-editor__preview-empty"><FileImageOutlined /><span>详情内容将在这里预览</span></div> : detail.map((block) => block.type === "TEXT" ? <p key={block.key}>{block.text || "文字内容"}</p> : <SecureImage key={block.key} src={mediaChoices.find((item) => item.key === (block.pendingMediaKey || `saved-${block.imageId}`))?.src} alt={block.alt || "商品详情"} tokenKind="staff" />)}</div>
+            <div className="pro-editor__preview">
+              <div className="pro-editor__phone-tabs" role="tablist" aria-label="商品页预览">
+                <button type="button" role="tab" aria-selected={previewPane === "photos"} className={previewPane === "photos" ? "is-active" : ""} onClick={() => setPreviewPane("photos")}>图片</button>
+                <button type="button" role="tab" aria-selected={previewPane === "detail"} className={previewPane === "detail" ? "is-active" : ""} onClick={() => setPreviewPane("detail")}>详情</button>
+                <button type="button" role="tab" aria-selected={previewPane === "copy"} className={previewPane === "copy" ? "is-active" : ""} onClick={() => setPreviewPane("copy")}>说明</button>
+              </div>
+              {previewPane === "photos" ? (mediaChoices.length === 0 ? <div className="pro-editor__preview-empty"><FileImageOutlined /><span>主图会显示在这里</span></div> : mediaChoices.map((item) => <SecureImage key={item.key} src={item.src} alt={item.label} tokenKind="staff" />)) : null}
+              {previewPane === "detail" ? (detail.length === 0 ? <div className="pro-editor__preview-empty"><FileImageOutlined /><span>详情内容将在这里预览</span></div> : detail.map((block) => block.type === "TEXT" ? <p key={block.key}>{block.text || "文字内容"}</p> : <SecureImage key={block.key} src={mediaSrcByKey.get(block.pendingMediaKey || `saved-${block.imageId || ""}`)} alt={block.alt || "商品详情"} tokenKind="staff" />)) : null}
+              {previewPane === "copy" ? <p>{typeof watchedDescription === "string" && watchedDescription.trim() ? watchedDescription : "还没有商品说明"}</p> : null}
+            </div>
           </div>
         </section>
 
@@ -1240,18 +1908,33 @@ export default function ProfessionalProductEditor() {
             <Form.Item name="salesMode" label="销售方式" extra={showCommerceFacts && !commerceEnabled ? "支付未开放，顾客可以看到价格，但不能在网站付款。" : "选择顾客看到这件作品后的下一步。"}><Radio.Group><Radio value="DIRECT_PURCHASE">直接销售</Radio><Radio value="DISPLAY_ONLY">仅展示</Radio><Radio value="SELECTION">选款咨询</Radio><Radio value="APPOINTMENT">预约到店</Radio><Radio value="CUSTOM_INQUIRY">定制咨询</Radio></Radio.Group></Form.Item>
             {showCommerceFacts ? <>
               <Form.Item label="当前最低价" className="pro-editor__money-field" extra="有多个规格时，页面显示其中的最低价。"><div className="pro-editor__derived-price">{currentProductId ? (derivedPrice > 0 ? `¥ ${derivedPrice.toFixed(2)}` : "—") : "保存商品后显示"}</div></Form.Item>
-              {!currentProductId ? <Form.Item name="initialSkuPrice" label="成交价" className="pro-editor__money-field" extra="顾客看到的价格。有不同规格时，保存后再在下方逐个填写。"><InputNumber min={0} precision={2} suffix="元" /></Form.Item> : null}
+              <Form.Item name="initialSkuPrice" label={<span>成交价{priceRequired ? <RequiredMark /> : null}</span>} className={requiredFieldClass(priceRequired, priceEmpty, "pro-editor__money-field")} extra="填一次即可。还没有价格的规格会用这个价格，已经标价的规格保持不变。"><InputNumber min={0} precision={2} suffix="元" /></Form.Item>
+              <Form.Item
+                name="stockQuantity"
+                label="可售数量"
+                className="pro-editor__money-field"
+                extra={stockSplit && currentProductId && canWriteStock ? <span>{stockExtra} <Link to={`/admin/inventory?productIds=${currentProductId}`}>打开库存管理</Link></span> : stockExtra}
+                rules={[{ validator: async (_rule, value) => {
+                  if (value === undefined || value === null || value === "") return;
+                  const quantity = Number(value);
+                  if (!Number.isInteger(quantity) || quantity < 0) throw new Error("可售数量须为大于或等于 0 的整数");
+                  if (selectedInventoryPolicy === "SINGLE_UNIT" && quantity > 1) throw new Error("一物一件的可售数量只能是 0 或 1");
+                } }]}
+              >
+                <InputNumber min={0} max={selectedInventoryPolicy === "SINGLE_UNIT" ? 1 : undefined} precision={0} suffix="件" disabled={!canWriteStock || stockSplit} />
+              </Form.Item>
               <Form.Item label="库存策略"><Form.Item name="inventoryPolicy" noStyle><Radio.Group><Radio value="STANDARD">标准库存</Radio><Radio value="SINGLE_UNIT">一物一件</Radio></Radio.Group></Form.Item><span className="pro-editor__hint">{inventoryPolicyMessage}</span></Form.Item>
               <Alert className="pro-editor__inventory-alert" type="info" showIcon message={salesModeMessage} />
               {selectedInventoryPolicy === "SINGLE_UNIT" && currentProductId && activeSkuCount !== 1 ? <Alert className="pro-editor__inventory-alert" type="error" showIcon message={`当前有 ${activeSkuCount} 个有效 SKU；一物一件必须且只能保留 1 个。保存时以服务端 409 校验结果为准。`} /> : null}
             </> : <Alert className="pro-editor__inventory-alert" type="info" showIcon message={salesModeMessage} />}
             <Form.Item name="publishMode" label={canGovernPublic ? "上架时间" : "发布流程"}><Radio.Group disabled={!canGovernPublic}><Radio value="IMMEDIATE">立刻上架</Radio><Radio value="SCHEDULED">定时上架</Radio><Radio value="WAREHOUSE">提交审核前保留草稿</Radio></Radio.Group></Form.Item>
-            <Form.Item noStyle shouldUpdate={(prev, next) => prev.publishMode !== next.publishMode}>{({ getFieldValue }) => getFieldValue("publishMode") === "SCHEDULED" ? <Form.Item name="scheduledPublishAt" label="定时上架时间" rules={[{ required: true }]}><DatePicker showTime disabledDate={(date) => date.isBefore(dayjs(), "day")} /></Form.Item> : null}</Form.Item>
-            <Form.Item name="visibility" label="可见范围"><Select options={visibilityOptions} /></Form.Item>
+            <Form.Item noStyle shouldUpdate={(prev, next) => prev.publishMode !== next.publishMode || prev.scheduledPublishAt !== next.scheduledPublishAt}>{({ getFieldValue }) => getFieldValue("publishMode") === "SCHEDULED" ? <Form.Item name="scheduledPublishAt" label={<span>定时上架时间<RequiredMark /></span>} className={requiredFieldClass(true, !getFieldValue("scheduledPublishAt"))} rules={[{ required: true }]}><DatePicker showTime disabledDate={(date) => date.isBefore(dayjs(), "day")} /></Form.Item> : null}</Form.Item>
+            <Form.Item name="visibility" label="可见范围" extra="上架后只出现在选款中心。首页、作品展陈和其他页面不会列出这件商品。"><Select options={visibilityOptions} /></Form.Item>
+            <Form.Item name="deliveryMethods" label="配送方式" extra="选填。不选也可以上架。选中后，顾客打开商品页能看到对应方式。"><Checkbox.Group options={[...DELIVERY_METHOD_OPTIONS]} /></Form.Item>
           </div>
-          {showCommerceFacts ? <div className="pro-editor__sku-panel">
+          {showCommerceFacts ? <div className="pro-editor__sku-panel" id="product-skus">
             <div className="pro-editor__title-row">
-              <div><h3>规格与价格</h3><span>{currentProductId ? `${activeSkuCount} 个有效规格。每种规格填写自己的成交价。` : "只有一种规格时，上面的成交价就够了。"}</span></div>
+              <div><h3>规格与价格</h3><span>{currentProductId ? `${activeSkuCount} 个有效规格。没单独标价的会用上面的成交价。` : "只有一种规格时，上面的成交价就够了。"}</span></div>
               <Button icon={<PlusOutlined />} disabled={!currentProductId || skuActionId !== null || (selectedInventoryPolicy === "SINGLE_UNIT" && activeSkuCount >= 1)} onClick={() => openSkuModal()}>添加 SKU</Button>
             </div>
             <Table<ProductSKU>
@@ -1274,6 +1957,8 @@ export default function ProfessionalProductEditor() {
           </div> : null}
         </section>
       </Form>
+        </div>
+      </div>
 
       <footer className="pro-editor__footer"><div>{isReviewLocked && canGovernPublic ? <><Button type="primary" loading={saving} disabled={Boolean(pendingSaveVerification)} onClick={() => void approveReviewedProduct()}>{primaryActionLabel}</Button><Button disabled={saving || Boolean(pendingSaveVerification)} onClick={() => void returnReviewedProduct()}>退回修改</Button></> : !isRoleReadOnly ? <Button type="primary" loading={saving} disabled={Boolean(pendingSaveVerification)} onClick={() => void save("primary")}>{primaryActionLabel}</Button> : null}{!isReviewLocked && canGovernPublic && currentStatus === "PUBLISHED" ? <Button danger disabled={saving || Boolean(pendingSaveVerification)} onClick={confirmOffline}>下架</Button> : !isReviewLocked && !isRoleReadOnly && (currentStatus !== "OFFLINE" || selectedPublishMode !== "WAREHOUSE") ? <Button icon={<SaveOutlined />} loading={saving} disabled={Boolean(pendingSaveVerification)} onClick={() => void save("draft")}>{currentStatus === "OFFLINE" ? "保存内容" : "保存草稿"}</Button> : null}<Button icon={<EyeOutlined />} disabled={saving} onClick={() => { setPreviewValues(form.getFieldsValue(true)); setPreviewOpen(true); }}>预览</Button><span role="status" aria-live="polite" className={dirty ? "is-dirty" : ""}>{savedStatusText}</span></div></footer>
 
@@ -1286,7 +1971,7 @@ export default function ProfessionalProductEditor() {
           <div className="pro-editor__preview-detail">
             <h4>商品详情</h4>
             {detail.length === 0 && <div className="pro-editor__preview-dialog-empty">尚未添加详情内容</div>}
-            {detail.map((block) => block.type === "TEXT" ? <p key={block.key}>{block.text || "文字内容待完善"}</p> : <SecureImage key={block.key} src={mediaChoices.find((item) => item.key === (block.pendingMediaKey || `saved-${block.imageId}`))?.src} alt={block.alt || "商品详情图片"} tokenKind="staff" />)}
+            {detail.map((block) => block.type === "TEXT" ? <p key={block.key}>{block.text || "文字内容待完善"}</p> : <SecureImage key={block.key} src={mediaSrcByKey.get(block.pendingMediaKey || `saved-${block.imageId || ""}`)} alt={block.alt || "商品详情图片"} tokenKind="staff" />)}
           </div>
         </div>
       </Modal>
@@ -1300,7 +1985,7 @@ export default function ProfessionalProductEditor() {
             <Form.Item name="price" label="价格" rules={[{ required: true, message: "请输入价格" }]}><InputNumber min={0} precision={2} suffix="元" /></Form.Item>
             <Form.Item name="isActive" label="状态" valuePropName="checked"><Switch checkedChildren="启用" unCheckedChildren="停用" /></Form.Item>
           </div>
-          <Alert type="info" showIcon message="SKU 库存不在这里直接修改，请到库存管理维护实际可售数量。" />
+          <Alert type="info" showIcon message="只有一种规格时，用上面的可售数量。多个规格的数量请到库存管理分别填写。" />
         </Form>
       </Modal>
       <UnsavedChangesGuard hasUnsavedChanges={dirty} disabled={saving} subject="商品信息" rootClassName="pro-editor-unsaved-modal" onSaveAndLeave={() => saveRef.current()} />

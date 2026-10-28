@@ -1066,6 +1066,7 @@ export interface InventoryListQuery {
   keyword?: string;
   status?: string;
   warehouseId?: number;
+  productIds?: string;
 }
 
 export const inventoryApi = {
@@ -1078,6 +1079,7 @@ export const inventoryApi = {
           const safetyStock = sku.safetyStock ?? 0;
           return {
             id: sku.id,
+            productId: p.id,
             skuCode: sku.skuCode,
             productName: p.name,
             warehouse: ["深圳展厅", "广州工厂", "北京门店"][
@@ -1095,7 +1097,16 @@ export const inventoryApi = {
           };
         }),
       );
-      return mockRes(paginate(items, params.page || 1, params.pageSize || 20));
+      const requestedIds = params.productIds?.trim()
+        ? params.productIds
+            .split(/[\s,]+/)
+            .map((part) => Number(part))
+            .filter((id) => Number.isInteger(id) && id > 0)
+        : null;
+      const visibleItems = requestedIds
+        ? items.filter((item) => requestedIds.includes(item.productId))
+        : items;
+      return mockRes(paginate(visibleItems, params.page || 1, params.pageSize || 20));
     }
     return api.get("/inventory", { params });
   },

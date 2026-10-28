@@ -70,6 +70,7 @@ test("后台 profile 暂时失败时保留未知态并允许只读重试", async
 });
 
 test("已卸载守卫的迟到 profile 不会清空刚登录的新管理员", async ({ page }) => {
+  await page.setViewportSize({ width: 1912, height: 948 });
   let releaseProfile!: () => void;
   const profileGate = new Promise<void>((resolve) => {
     releaseProfile = resolve;
@@ -92,6 +93,15 @@ test("已卸载守卫的迟到 profile 不会清空刚登录的新管理员", as
 
   await page.goto("/admin/dashboard");
   await profileRequestStarted;
+  const loadingLayer = page.locator(".site-route-loading");
+  await expect(loadingLayer).toContainText("正在验证后台登录状态…");
+  expect(await loadingLayer.evaluate((element) => element.parentElement === document.body)).toBe(true);
+  const indicatorBox = await loadingLayer.locator(".site-route-loading__indicator").boundingBox();
+  const viewport = page.viewportSize();
+  expect(indicatorBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect((indicatorBox?.x ?? 0) + (indicatorBox?.width ?? 0) / 2).toBeCloseTo((viewport?.width ?? 0) / 2, 0);
+  expect((indicatorBox?.y ?? 0) + (indicatorBox?.height ?? 0) / 2).toBeCloseTo((viewport?.height ?? 0) / 2, 0);
   await page.evaluate(() => {
     window.history.pushState({}, "", "/admin/login");
     window.dispatchEvent(new PopStateEvent("popstate"));

@@ -1,9 +1,16 @@
 import type { TemplateDefinitionV2 } from "../template-definition/generated/templateDefinition.generated";
 import { CONTENTS } from "./presets";
 
+/** 模板画布上的中性文字。槽位名称加「待填写」，不写具体品牌句。 */
+export function neutralTemplatePlaceholder(label: string): string {
+  const name = label.trim() || "文字";
+  return name.endsWith("待填写") ? name : `${name}待填写`;
+}
+
 /** 系统样例只供创建预览与初始空间估算，不属于配方或模板的正式内容。 */
 export function getTemplateRecipeSampleText(role: string, name: string, maxLength?: number): string {
-  const sample = role === "customText" ? name : CONTENTS.find(([key]) => key === role)?.[2] ?? name;
+  const named = role === "customText" ? name : CONTENTS.find(([key]) => key === role)?.[1] ?? name;
+  const sample = neutralTemplatePlaceholder(named);
   return maxLength === undefined ? sample : sample.slice(0, maxLength);
 }
 

@@ -16,7 +16,7 @@ import { UpdateStockDto } from "./dto/update-stock.dto";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { RolesGuard } from "../../common/guards/roles.guard";
-import { BoundedListQueryDto } from "../../common/dto/bounded-list-query.dto";
+import { InventoryListQueryDto } from "./dto/inventory-list-query.dto";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 import { SkipGenericAudit } from "../../common/decorators/skip-generic-audit.decorator";
@@ -34,7 +34,7 @@ export class InventoryController {
   @Header("Vary", "Cookie, Authorization")
   @ApiOperation({ summary: "获取库存列表" })
   findAll(
-    @Query() query: BoundedListQueryDto,
+    @Query() query: InventoryListQueryDto,
     @CurrentUser() user: StaffPrincipal,
   ) {
     return this.inventoryService.findAll(query, user);

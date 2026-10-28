@@ -26,6 +26,8 @@ import {
   stripNonEditableSlotContent,
 } from "./unauthorizedSlotContent";
 import DynamicTemplateUpgradePanel from "./DynamicTemplateUpgradePanel";
+import { catalogCardName } from "../template-editor/catalogCardName";
+import { usePublishedTemplateSectionRoles } from "../template-editor/publishedTemplateSectionRoles";
 import {
   promoteInstanceOverridesToTemplateDraft,
   type PromoteDynamicTemplateInstanceRequest,
@@ -116,6 +118,7 @@ export default function DynamicTemplateInstanceInspector({
 }) {
   const editor = useInspectorModuleEditor();
   const props = (editor?.props ?? {}) as DynamicTemplateInstanceProps;
+  const catalogRoles = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
   const resolved = useResolvedDynamicTemplate(props.templateId ?? "", Number(props.templateVersion));
   const selection = useVisualEditorSession((state) => state.selection);
   const selectVisualNode = useVisualEditorSession((state) => state.selectNode);
@@ -393,7 +396,7 @@ export default function DynamicTemplateInstanceInspector({
     const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
     const value = hasPageValue
       ? content[slot.slotId]
-      : field.required
+      : slot.type === "image" || field.required
         ? undefined
         : definition.defaultContent[slot.slotId];
     if (!field.editable) {
@@ -727,7 +730,12 @@ export default function DynamicTemplateInstanceInspector({
     <section className="homepage-editor__properties" aria-label="模板实例属性">
       <div className="homepage-editor__properties-scroll" ref={propertyScrollRef}>
         <div className="homepage-editor__dynamic-instance-overview">
-          <strong>{definition.name}</strong>
+          <strong>{catalogCardName(
+            definition.metadata.sectionRole
+              ?? definition.templateRecipe?.sectionRole
+              ?? (props.templateId ? catalogRoles[props.templateId] : undefined),
+            definition.name || props.moduleName,
+          )}</strong>
           <SwitchField
             label="在页面显示"
             value={props.isVisible !== false}

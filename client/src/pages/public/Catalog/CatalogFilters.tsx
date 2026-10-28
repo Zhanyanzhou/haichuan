@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { RealCategory } from "@/hooks/useProductData";
 import { catalogTokens as T } from "./catalogTokens";
-import { catNameById, getPrimaryCats, getRealSubs } from "./catalogCategories";
+import { getPrimaryCats, getRealSubs } from "./catalogCategories";
 
 export { default as FilterDrawer } from "./CatalogFilterDrawer";
 /* ══════════════════════════════════════
@@ -20,9 +20,17 @@ export function PrimaryNav({
   if (!primaryCats.length) return null;
   return (
     <nav className="catalog-category-nav" aria-label="作品品类">
-      <div className="catalog-category-nav__inner">
-        <span className="catalog-category-nav__label">按品类浏览</span>
-        <div className="catalog-category-nav__items">
+        <div className="catalog-category-nav__inner">
+          <div className="catalog-category-nav__items">
+          <button
+            type="button"
+            className="catalog-category-nav__item"
+            aria-pressed={!active}
+            onClick={() => onChange("")}
+          >
+            全部
+            {!active ? <span aria-hidden="true" /> : null}
+          </button>
           {primaryCats.map((c) => {
             const cid = String(c.id);
             const isA = active === cid;
@@ -66,29 +74,34 @@ export function SecondaryNav({
       <div
         className="catalog-secondary-nav__inner"
         style={{
-          maxWidth: 1280,
+          maxWidth: 1440,
           marginInline: "auto",
-          paddingInline: "clamp(48px,5vw,80px)",
           display: "flex",
           alignItems: "center",
-          minHeight: 52,
-          gap: 4,
+          minHeight: 48,
+          gap: "clamp(24px, 3vw, 40px)",
           overflowX: "auto",
           scrollbarWidth: "none",
         }}
       >
-        <L2Btn active={!active} onClick={() => onChange("")}>
-          全部
-        </L2Btn>
-        {subs.map((s) => (
-          <L2Btn
-            key={s.id}
-            active={active === String(s.id)}
-            onClick={() => onChange(String(s.id))}
-          >
-            {s.name}
+        {active ? (
+          <L2Btn active={false} onClick={() => onChange("")}>
+            全部款式
           </L2Btn>
-        ))}
+        ) : null}
+        {subs.map((s) => {
+          const id = String(s.id);
+          const selected = active === id;
+          return (
+            <L2Btn
+              key={s.id}
+              active={selected}
+              onClick={() => onChange(selected ? "" : id)}
+            >
+              {s.name}
+            </L2Btn>
+          );
+        })}
       </div>
     </div>
   );
@@ -105,10 +118,12 @@ function L2Btn({
 }) {
   return (
     <button
+      type="button"
+      aria-pressed={active}
       onClick={onClick}
       style={{
-        paddingInline: 12,
-        height: 52,
+        minHeight: 44,
+        padding: 0,
         display: "inline-flex",
         alignItems: "center",
         background: "none",
@@ -122,18 +137,18 @@ function L2Btn({
       }}
     >
       {children}
-      {active && (
+      {active ? (
         <span
           style={{
             position: "absolute",
-            bottom: 12,
-            left: 12,
-            right: 12,
+            bottom: 6,
+            left: 0,
+            right: 0,
             height: 1,
             background: T.txt,
           }}
         />
-      )}
+      ) : null}
     </button>
   );
 }
@@ -142,7 +157,6 @@ function L2Btn({
    组件：工具栏（极简风格）
    ══════════════════════════════════════ */
 export function Toolbar({
-  category,
   total,
   materials,
   materialOptions,
@@ -151,9 +165,7 @@ export function Toolbar({
   onToggleMaterial,
   onSort,
   onOpenFilter,
-  categories,
 }: {
-  category: string;
   total: number;
   materials: string[];
   materialOptions: string[];
@@ -162,10 +174,7 @@ export function Toolbar({
   onToggleMaterial: (m: string) => void;
   onSort: (s: string) => void;
   onOpenFilter: (trigger: HTMLButtonElement) => void;
-  categories: RealCategory[];
 }) {
-  const parentName = catNameById(categories, Number(category));
-  const path = category ? parentName : "全部作品";
   const [openDD, setOpenDD] = useState<string | null>(null);
 
   return (
@@ -174,9 +183,8 @@ export function Toolbar({
         <div
           className="catalog-toolbar__inner"
           style={{
-            maxWidth: 1560,
+            maxWidth: 1600,
             marginInline: "auto",
-            paddingInline: "clamp(16px,3vw,28px)",
             height: 52,
             display: "flex",
             alignItems: "center",
@@ -184,9 +192,24 @@ export function Toolbar({
             color: T.sec,
           }}
         >
-          <span style={{ color: T.txt, fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>{path}</span>
-          <span style={{ color: T.sec, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}>{total} 件作品</span>
-          <div className="catalog-toolbar__spacer" style={{ flex: 1 }} />
+          <button
+            onClick={(event) => onOpenFilter(event.currentTarget)}
+            style={{
+              background: "none",
+              border: 0,
+              cursor: "pointer",
+              fontSize: 12,
+              color: T.txt,
+              padding: "0 8px 0 0",
+              minHeight: 44,
+              display: "inline-flex",
+              alignItems: "center",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            更多筛选
+          </button>
           <div className="catalog-toolbar__material" style={{ position: "relative" }}>
             <button
               onClick={() =>
@@ -218,7 +241,7 @@ export function Toolbar({
                   style={{
                     position: "absolute",
                     top: "100%",
-                    right: 0,
+                    left: 0,
                     zIndex: 20,
                     minWidth: 180,
                     background: T.bg,
@@ -252,6 +275,11 @@ export function Toolbar({
               </>
             )}
           </div>
+          {total > 0 ? (
+            <span style={{ color: T.sec, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}>{total} 件</span>
+          ) : null}
+          <div className="catalog-toolbar__spacer" style={{ flex: 1 }} />
+          <span style={{ color: T.txt, fontSize: 12, whiteSpace: "nowrap" }}>排序</span>
           <select
             aria-label="作品排序方式"
             value={sort}
@@ -260,7 +288,7 @@ export function Toolbar({
               background: "none",
               border: 0,
               fontSize: 12,
-              color: T.sec,
+              color: T.txt,
               cursor: "pointer",
               outline: "none",
               minHeight: 44,
@@ -272,24 +300,6 @@ export function Toolbar({
             <option value="newest">最新</option>
             <option value="sku">货号</option>
           </select>
-          <button
-            onClick={(event) => onOpenFilter(event.currentTarget)}
-            style={{
-              background: "none",
-              border: 0,
-              cursor: "pointer",
-              fontSize: 12,
-              color: T.sec,
-              padding: "0 8px",
-              minHeight: 44,
-              display: "inline-flex",
-              alignItems: "center",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            更多筛选
-          </button>
           {selCount > 0 && (
             <span style={{ color: T.txt, whiteSpace: "nowrap", flexShrink: 0 }}>已选 {selCount}</span>
           )}

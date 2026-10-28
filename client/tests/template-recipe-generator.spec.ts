@@ -171,7 +171,7 @@ test("所有新预设及重复自定义文字的系统样例不进入正式内�
   const definition = generateTemplateFromRecipe(recipe);
   const preview = createTemplateRecipePreviewContent(definition);
   expect(Object.keys(preview)).toHaveLength(recipe.content.length);
-  expect(Object.values(preview)).toContain("另一个自定义字段");
+  expect(Object.values(preview)).toContain("另一个自定义字段待填写");
   expect(definition.defaultContent).toEqual({});
   expect(definition.previewContent).toEqual({});
 });
@@ -197,7 +197,7 @@ test("向导样例保持桌面与手机文字层级和几何，序列化重开�
     const previewText = flatten(preview.plan.root).filter((node) => node.slot && node.slot.type !== "image");
     expect(previewText).toHaveLength(3);
     expect(previewText.every((node) => !node.hidden && node.content)).toBe(true);
-    expect(previewText.find((node) => node.slot?.semanticRole === "description")?.content).toContain("在这里介绍内容亮点");
+    expect(previewText.find((node) => node.slot?.semanticRole === "description")?.content).toBe("描述待填写");
     expect(flatten(published.plan.root).filter((node) => node.slot).every((node) => node.hidden && node.content === undefined)).toBe(true);
     expect(flatten(preview.plan.root).map((node) => node.rules)).toEqual(flatten(published.plan.root).map((node) => node.rules));
   }
@@ -209,7 +209,7 @@ test("旧显式配方与编辑后的正式默认内容保持原样，包括与�
     const recipe = createRecommendedRecipe();
     recipe.presetVersion = presetVersion;
     recipe.content = [
-      { ...createContentSlot("title"), defaultContent: "主标题" },
+      { ...createContentSlot("title"), defaultContent: "主标题待填写" },
       { ...createContentSlot("description"), defaultContent: "经确认的作品说明" },
       { ...createContentSlot("cta"), defaultContent: "了解详情" },
     ];
@@ -219,7 +219,7 @@ test("旧显式配方与编辑后的正式默认内容保持原样，包括与�
     expect(recipe).toEqual(source);
     expect(definition.templateRecipe).toEqual(source);
     const slotFor = (role: string) => Object.values(definition.slots).find((slot) => slot.semanticRole === role)!;
-    expect(definition.defaultContent[slotFor("title").slotId]).toBe("主标题");
+    expect(definition.defaultContent[slotFor("title").slotId]).toBe("主标题待填写");
     expect(definition.defaultContent[slotFor("description").slotId]).toBe("经确认的作品说明");
     expect(definition.defaultContent[slotFor("cta").slotId]).toEqual({ label: "了解详情", targetType: "none" });
     expect(definition.defaultContent[slotFor("heroImage").slotId]).toEqual({ src: "/images/approved.jpg", alt: "主图" });

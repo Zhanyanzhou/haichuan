@@ -85,6 +85,19 @@ async function mockCatalogApi(page: Page) {
   );
   await page.route("**/api/products/public**", (route) => {
     const url = new URL(route.request().url());
+    const detailReference = decodeURIComponent(
+      url.pathname.match(/\/products\/public\/([^/]+)$/)?.[1] || "",
+    );
+    if (detailReference) {
+      const product = products.find((item) =>
+        item.code === detailReference || String(item.id) === detailReference,
+      );
+      return route.fulfill({
+        status: product ? 200 : 404,
+        contentType: "application/json",
+        body: JSON.stringify(wrapped(product ?? null)),
+      });
+    }
     const keyword = url.searchParams.get("keyword")?.trim() || "";
     if (keyword === "触发错误") {
       return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
@@ -251,7 +264,7 @@ test("Catalog 在公开商品响应畸形时过滤无效记录而不污染目录
   await expect(page.getByRole("heading", { name: /暂时无法加载/ })).toHaveCount(0);
 });
 
-test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款盘", async ({ page }) => {
+test("Catalog 使用服务端分页并保持 URL、作品页与跨页选款盘", async ({ page }) => {
   const firstRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname.endsWith("/api/products/public") && url.searchParams.get("pageSize") === "32";
@@ -266,17 +279,16 @@ test("Catalog 使用服务端分页并保持 URL、快速预览与跨页选款�
   await expect(pagination.getByRole("button", { name: "下一页" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "2", exact: true })).toBeVisible();
 
-  const quickViewTrigger = page.getByRole("button", { name: "快速预览 作品 01" });
-  await quickViewTrigger.press("Enter");
-  const quickView = page.getByRole("dialog");
-  await expect(quickView).toBeVisible();
-  await expect(quickView).toHaveAccessibleName("作品 01");
-  await expect(quickView.getByRole("button", { name: "关闭快速预览" })).toBeFocused();
-  await expect(quickView.getByRole("heading", { name: "作品 01" })).toBeVisible();
-  await expect(quickView.getByText("HC-TEST-001", { exact: true })).toBeVisible();
-  await quickView.getByRole("button", { name: "+ 加入选款" }).click();
-  await page.keyboard.press("Escape");
-  await expect(quickViewTrigger).toBeFocused();
+  const openLink = page.locator("[data-catalog-product-focus]").first();
+  await openLink.press("Enter");
+  await expect(page).toHaveURL(/\/products\/HC-TEST-001\?from=/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "作品 01" })).toBeVisible();
+  await expect(page.getByText("HC-TEST-001", { exact: true })).toBeVisible();
+  await page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }).click();
+  await expect(page).toHaveURL(/\/catalog$/);
+  await expect(openLink).toBeFocused();
+  await page.getByRole("button", { name: "+ 加入选款" }).first().click();
   await expect(page.getByText("已选 1 款")).toBeVisible();
 
   const secondRequest = page.waitForRequest((request) => {
@@ -955,19 +967,18 @@ test("Catalog 在 390px 保持 4:5 媒体、可用对话框宽度并恢复触发
   expect(productMediaBox).not.toBeNull();
   expect(productMediaBox!.width / productMediaBox!.height).toBeCloseTo(0.8, 1);
 
-  const quickTrigger = page.getByRole("button", { name: "快速预览 作品 01" });
-  await quickTrigger.click();
-  const quickDialog = page.getByRole("dialog", { name: "作品 01" });
-  await expect(quickDialog).toBeVisible();
-  const quickDialogBox = await quickDialog.boundingBox();
-  const quickMediaBox = await quickDialog.locator("[data-catalog-quick-media]").boundingBox();
-  expect(quickDialogBox).not.toBeNull();
-  expect(quickDialogBox!.width).toBeGreaterThanOrEqual(350);
-  expect(quickDialogBox!.x + quickDialogBox!.width).toBeLessThanOrEqual(390);
-  expect(quickMediaBox).not.toBeNull();
-  expect(quickMediaBox!.width / quickMediaBox!.height).toBeCloseTo(0.8, 1);
-  await page.keyboard.press("Escape");
-  await expect(quickTrigger).toBeFocused();
+  const openLink = page.locator("[data-catalog-product-focus]").first();
+  await openLink.click();
+  await expect(page).toHaveURL(/\/products\/HC-TEST-001\?from=/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const detailMedia = page.locator(".product-detail-page__main-media");
+  const detailMediaBox = await detailMedia.boundingBox();
+  expect(detailMediaBox).not.toBeNull();
+  expect(detailMediaBox!.width).toBeGreaterThanOrEqual(300);
+  expect(detailMediaBox!.x + detailMediaBox!.width).toBeLessThanOrEqual(390);
+  await page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }).click();
+  await expect(page).toHaveURL(/\/catalog$/);
+  await expect(openLink).toBeFocused();
 
   const filterTrigger = page.getByRole("button", { name: "更多筛选" });
   await filterTrigger.click();
@@ -981,7 +992,7 @@ test("Catalog 在 390px 保持 4:5 媒体、可用对话框宽度并恢复触发
   await page.keyboard.press("Escape");
   await expect(filterTrigger).toBeFocused();
 
-  for (const control of [quickTrigger, filterTrigger]) {
+  for (const control of [openLink, filterTrigger]) {
     const box = await control.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);

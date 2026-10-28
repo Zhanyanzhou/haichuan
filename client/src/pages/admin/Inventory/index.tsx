@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Alert,
   Card,
@@ -8,6 +9,7 @@ import {
   Space,
   Select,
   Modal,
+  Input,
   InputNumber,
   App as AntdApp,
 } from "antd";
@@ -52,7 +54,7 @@ type InventoryRow = {
 };
 
 export default function Inventory() {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const [items, setItems] = useState<InventoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,9 +68,15 @@ export default function Inventory() {
     record: InventoryRow | null;
   }>({ open: false, record: null });
   const [adjustQty, setAdjustQty] = useState<number | null>(0);
+  const [adjustRemark, setAdjustRemark] = useState("");
   const [adjusting, setAdjusting] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const productIds = searchParams.get("productIds")?.trim() || undefined;
+  const selectedProductCount = productIds
+    ? new Set(productIds.split(/[\s,]+/).filter(Boolean)).size
+    : 0;
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(() => (productIds ? 100 : 20));
   const [total, setTotal] = useState(0);
   const requestIdRef = useRef(0);
 
@@ -77,7 +85,7 @@ export default function Inventory() {
     setLoading(true);
     setError(null);
     try {
-      const res = await inventoryApi.getList({ page, pageSize, warehouseId });
+      const res = await inventoryApi.getList({ page, pageSize, warehouseId, productIds });
       const data = unwrapResponse<{ list: InventoryApiItem[]; total: number }>(res);
       if (!data || !Array.isArray(data.list) || !Number.isFinite(Number(data.total))) {
         throw new Error("Invalid inventory response");
@@ -114,7 +122,12 @@ export default function Inventory() {
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [page, pageSize, warehouseId]);
+  }, [page, pageSize, productIds, warehouseId]);
+
+  useEffect(() => {
+    setPage(1);
+    setPageSize(productIds ? 100 : 20);
+  }, [productIds]);
 
   useEffect(() => {
     void load();
@@ -157,13 +170,29 @@ export default function Inventory() {
       message.error("目标库存超出合理范围（上限 1,000,000），请核对数量");
       return;
     }
+    const remark = adjustRemark.trim();
     const targetQuantity = adjustQty;
+    const delta = Math.abs(targetQuantity - record.quantity);
+    if ((targetQuantity === 0 && record.quantity !== 0) || delta >= 10) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        modal.confirm({
+          title: targetQuantity === 0 ? "确认把库存调整为 0？" : "确认这次较大的库存调整？",
+          content: `「${record.productName ?? "该商品"}」当前 ${record.quantity}，将改为 ${targetQuantity}。`,
+          okText: "确认调整",
+          cancelText: "返回修改",
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        });
+      });
+      if (!confirmed) return;
+    }
     setAdjusting(true);
     try {
       await inventoryApi.update(record.id, {
         type: "adjust",
         quantity: targetQuantity,
         expectedQuantity: record.quantity,
+        ...(remark ? { remark } : {}),
       });
       message.success("库存已调整");
       setAdjustModal({ open: false, record: null });
@@ -232,8 +261,16 @@ export default function Inventory() {
     message.success(`已导出当前页 ${filtered.length} 条库存记录`);
   };
 
+  const clearProductFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("productIds");
+    setSearchParams(next);
+    setPage(1);
+    setPageSize(20);
+  };
+
   const stats = [
-    { t: "库存记录总数（全量）", v: total },
+    { t: productIds ? "所选商品库存记录" : "库存记录总数（全量）", v: total },
     { t: "本页正常", v: items.filter((i) => i.status === "normal").length },
     { t: "本页偏低", v: items.filter((i) => i.status === "low").length },
     { t: "本页缺货", v: items.filter((i) => i.status === "out").length },
@@ -278,6 +315,15 @@ export default function Inventory() {
           </Button>
         </Space>
       </div>
+      {productIds && (
+        <Alert
+          showIcon
+          type="info"
+          message={`正在查看所选 ${selectedProductCount} 件商品的库存`}
+          description="数量仍在本页逐条调整，并保留原有核对。商品列表不会直接改库存。"
+          action={<Button onClick={clearProductFilter}>查看全部库存</Button>}
+        />
+      )}
       {warehouseError && (
         <Alert
           showIcon
@@ -293,7 +339,10 @@ export default function Inventory() {
         <AdminErrorState subject="库存数据" message={error} onRetry={() => void load()} />
       ) : items.length === 0 ? (
         <Card className="!bg-white !border-brand-line">
-          <AdminEmptyState subject="库存记录" />
+          <AdminEmptyState
+            subject="库存记录"
+            description={productIds ? "所选商品还没有库存记录。" : undefined}
+          />
         </Card>
       ) : (
         <>
@@ -371,6 +420,7 @@ export default function Inventory() {
                   type="primary"
                   onClick={() => {
                     setAdjustQty(r.quantity);
+                    setAdjustRemark("");
                     setAdjustModal({ open: true, record: r });
                   }}
                 >
@@ -412,6 +462,15 @@ export default function Inventory() {
             onChange={setAdjustQty}
             className="w-full"
             size="large"
+          />
+          <Input.TextArea
+            aria-label="调整原因"
+            className="mt-3"
+            maxLength={200}
+            rows={3}
+            value={adjustRemark}
+            placeholder="可选。填写调整原因，例如到货、售出或盘点"
+            onChange={(event) => setAdjustRemark(event.target.value)}
           />
         </div>
       </Modal>

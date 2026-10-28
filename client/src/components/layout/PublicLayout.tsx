@@ -1,5 +1,6 @@
 import {
   Suspense,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -31,6 +32,7 @@ import {
 } from "@/page-builder/runtime/usePublishedPageDocument";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
+import SiteSearchDialog from "./SiteSearchDialog";
 import StorefrontFooter from "./StorefrontFooter";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
@@ -44,6 +46,7 @@ import { useStructuredData } from "@/hooks/useStructuredData";
 import { LEGAL_ENTITY } from "@/config/legalEntity";
 import RouteLoading from "@/components/common/RouteLoading";
 import { clearCatalogReturnContext } from "@/pages/public/Catalog/catalogReturnContext";
+import { useDirectionalSiteHeader } from "./useDirectionalSiteHeader";
 
 const NON_PUBLIC_SYSTEM_HERO_MEDIA = new Set([
   "/images/system/product-placeholder.svg",
@@ -416,8 +419,33 @@ export default function PublicLayout() {
     navigate(`${target.pathname}${target.search}${target.hash}`);
   };
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
-  const [scrolled, setScrolled] = useState(false);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    const searchButton = searchButtonRef.current;
+    const searchButtonVisible = Boolean(searchButton && searchButton.getClientRects().length > 0);
+    (searchButtonVisible ? searchButton : menuToggleRef.current)?.focus();
+  }, []);
+  const revealSearch = useCallback(() => {
+    if (location.pathname === "/catalog") {
+      document.getElementById("catalog-search-input")?.focus();
+      return;
+    }
+    setSearchOpen(true);
+  }, [location.pathname]);
+  const requestSearchFromMenu = useCallback(() => {
+    setMenuOpen(false);
+    revealSearch();
+  }, [revealSearch]);
+  const { headerRef, surfaceScrolled, concealed } = useDirectionalSiteHeader({
+    menuOpen: menuOpen || searchOpen,
+    resetKey: location.pathname,
+  });
+  useEffect(() => {
+    setSearchOpen(false);
+  }, [location.pathname, location.search]);
   // 英文站点资料尚无独立正式发布事实；不要请求中文 SiteSettings 再静默复用。
   const siteSettingsResource = usePublicSiteSettingsResource(!english);
   const siteSettings = siteSettingsResource.settings;
@@ -650,13 +678,6 @@ export default function PublicLayout() {
   const contactAddress = siteSettings?.contactAddress?.trim() || "";
   const logoUrl = resolveSiteLogo(siteSettings?.logo);
 
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 40);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-
   useLayoutEffect(() => {
     const remainsInCatalogDetailChain = contentPathname === "/catalog"
       || /^\/products\/[^/]+$/.test(contentPathname);
@@ -696,10 +717,14 @@ export default function PublicLayout() {
         )
       : "solid";
   const overlaysPageContent = Boolean(pageDefinition);
-  const isTransparent = !scrolled && !menuOpen;
+  const isTransparent = !surfaceScrolled && !menuOpen && !searchOpen;
   const usesLightHeaderText = resolvedHeaderMode === "overlay-light" && isTransparent;
-  const headerBg = isTransparent ? "transparent" : "rgba(255,255,255,0.92)";
-  const headerBorder = isTransparent ? "transparent" : "rgba(24,26,27,0.06)";
+  const headerBg = searchOpen
+    ? "#ffffff"
+    : isTransparent
+      ? "transparent"
+      : "rgba(255,255,255,0.92)";
+  const headerBorder = searchOpen || isTransparent ? "transparent" : "rgba(24,26,27,0.06)";
 
   const handleBrandHomeClick = () => {
     // Link 在首页内重复导航时 pathname 不变，不会再次触发路由回顶副作用。
@@ -725,12 +750,13 @@ export default function PublicLayout() {
       </a>
       {/* ═══════ Header ═══════ */}
       <header
-        className={`site-header${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
+        ref={headerRef}
+        className={`site-header${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}${concealed ? " is-concealed" : ""}`}
         style={{
           background: headerBg,
           borderBottomColor: headerBorder,
-          backdropFilter: isTransparent ? "none" : "blur(8px)",
-          WebkitBackdropFilter: isTransparent ? "none" : "blur(8px)",
+          backdropFilter: searchOpen || isTransparent ? "none" : "blur(8px)",
+          WebkitBackdropFilter: searchOpen || isTransparent ? "none" : "blur(8px)",
         }}
       >
         <div className="site-header__inner">
@@ -817,21 +843,44 @@ export default function PublicLayout() {
               </>
             )}
           </button> : null}
+          {english ? (
           <Link
-            to={withPublicLocalePath(english ? "/products" : "/catalog#catalog-search-input", localizedPath.locale)}
-            aria-label={english ? "Collection" : "搜索"}
+            to={withPublicLocalePath("/products", localizedPath.locale)}
+            aria-label="Collection"
             className="site-header__nav-item site-header__nav-item--search"
           >
             <SearchIcon />
-            <span className="site-header__nav-label hidden sm:inline">{english ? "Collection" : "搜索"}</span>
+            <span className="site-header__nav-label hidden sm:inline">Collection</span>
           </Link>
+          ) : (
+          <button
+            ref={searchButtonRef}
+            type="button"
+            aria-label="搜索"
+            aria-expanded={searchOpen}
+            aria-controls="site-search-dialog"
+            className="site-header__nav-item site-header__nav-item--search"
+            onClick={() => {
+              if (searchOpen) closeSearch();
+              else revealSearch();
+            }}
+          >
+            <SearchIcon />
+            <span className="site-header__nav-label hidden sm:inline">搜索</span>
+          </button>
+          )}
         </nav>
+        <SiteSearchDialog
+          open={searchOpen}
+          onClose={closeSearch}
+        />
       </header>
 
       {/* ═══════ 菜单面板 ═══════ */}
       {!english ? <StorefrontMenuDrawer
         open={menuOpen}
         onOpenChange={setMenuOpen}
+        onRequestSearch={requestSearchFromMenu}
         contactPhone={contactPhone}
         contactAddress={contactAddress}
         menuId="brand-menu"

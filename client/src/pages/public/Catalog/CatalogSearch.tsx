@@ -109,8 +109,6 @@ export default function CatalogSearch({
 
   return (
     <div className="catalog-search" aria-label="选款搜索">
-      <p className="catalog-search__eyebrow">名称或货号</p>
-      <h2 className="catalog-search__title">查找作品</h2>
       <div
         className="catalog-search__field"
         onFocusCapture={() => setOpen(true)}
@@ -317,7 +315,6 @@ export default function CatalogSearch({
           </section>
         ) : null}
       </div>
-      <p className="catalog-search__hint">支持作品名称、品类、材质或货号</p>
     </div>
   );
 }

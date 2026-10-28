@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, ParseIntPipe } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Post, Put, Delete, Param, Query, Body, UseGuards, ParseIntPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
 import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
@@ -99,7 +99,17 @@ export class CategoriesController {
   delete(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() actor: StaffPrincipal,
+    @Query('moveTo') moveTo?: string,
   ) {
-    return this.categoriesService.delete(id, actor);
+    const parsedMoveTo = moveTo === undefined || moveTo.trim() === ''
+      ? undefined
+      : Number(moveTo);
+    if (
+      parsedMoveTo !== undefined
+      && (!Number.isInteger(parsedMoveTo) || parsedMoveTo <= 0)
+    ) {
+      throw new BadRequestException('要改去的分类不合法');
+    }
+    return this.categoriesService.delete(id, actor, parsedMoveTo);
   }
 }

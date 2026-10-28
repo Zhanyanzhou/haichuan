@@ -36,7 +36,8 @@ for (const viewport of [
 
     await page.goto("/catalog");
 
-    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeAttached();
+    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeHidden();
     await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
     await expect(page.locator(".catalog-matrix")).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -62,7 +63,8 @@ test("Catalog 观察器构造异常时不升级为整页错误", async ({ page }
 
   await page.goto("/catalog");
 
-  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeAttached();
+  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeHidden();
   await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
   await expect(page.locator(".catalog-matrix")).toBeVisible();
   expect(pageErrors).toEqual([]);
@@ -144,7 +146,8 @@ test("Catalog 慢鉴权期间先显示公开目录，恢复会员后只刷新一
 
   await page.goto("/catalog");
   await profileBarrier.reached;
-  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeAttached();
+  await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeHidden();
   await expect(page.getByText(publicItem.name, { exact: true })).toBeVisible();
   expect(publicReads).toBe(1);
   expect(memberReads).toBe(0);
@@ -366,7 +369,9 @@ async function expectWriteContract(
   await expect.poll(() => writes.cart).toBe(allowedCartWrites);
   await expect.poll(() => writes.favorite).toBe(allowedFavoriteWrites);
   await expect.poll(() => writes.inquiry).toBe(allowedInquiryWrites);
-  await expect.poll(() => writes.unexpected).toBe(0);
+  await expect.poll(() => (
+    writes.unexpected === 0 ? "" : writes.lastUnexpected || "unknown"
+  )).toBe("");
 }
 
 async function fillContactForm(page: import("@playwright/test").Page) {
@@ -381,15 +386,15 @@ for (const viewport of [
   { name: "desktop", width: 1440, height: 900, columns: 3 },
   { name: "mobile", width: 390, height: 844, columns: 1 },
 ]) {
-  test(`Catalog ${viewport.name} 完整层级、QuickView、托盘与媒体稳定`, async ({ page }) => {
+  test(`Catalog ${viewport.name} 完整层级、作品页、托盘与媒体稳定`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const writes = await mockCatalogDetail(page, { products: fiveModes });
     await page.goto("/catalog");
 
-    await expect(page.getByText("公开款式", { exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeVisible();
-    await expect(page.getByText("按关键词、货号与当前公开属性查找作品，并将意向款式加入选款清单。"))
-      .toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeAttached();
+    await expect(page.getByRole("heading", { level: 1, name: "选款中心" })).toBeHidden();
+    await expect(page.getByRole("navigation", { name: "作品品类" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "全部" })).toBeVisible();
     await expect(page.getByPlaceholder("搜索作品名称或编号")).toBeVisible();
 
     const grid = page.locator(".catalog-matrix");
@@ -397,34 +402,46 @@ for (const viewport of [
     await expect.poll(() => grid.evaluate((node) =>
       getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length,
     )).toBe(viewport.columns);
-    await grid.scrollIntoViewIfNeeded();
+    await page.evaluate(() => {
+      const toolbar = document.querySelector<HTMLElement>(".catalog-toolbar__inner");
+      const edge = toolbar ?? document.querySelector<HTMLElement>(".catalog-matrix");
+      if (!edge) return;
+      const top = window.scrollY + edge.getBoundingClientRect().bottom + 2;
+      window.scrollTo({ top, behavior: "instant" });
+    });
     const stickyBar = page.locator(".catalog-sticky-bar");
     await expect(stickyBar).toBeVisible();
+    await expect(stickyBar.getByRole("button", { name: "筛选" })).toBeVisible();
+    await expect(page.getByRole("banner")).toHaveClass(/is-concealed/);
     await expect.poll(async () => Math.round((await stickyBar.boundingBox())?.y ?? -1))
-      .toBe(viewport.name === "mobile" ? 64 : 108);
+      .toBe(0);
     const firstImage = page.locator("[data-catalog-product-media] img").first();
     await firstImage.scrollIntoViewIfNeeded();
     await expect.poll(() => firstImage.evaluate((image: HTMLImageElement) =>
       image.complete && image.naturalWidth > 0,
     )).toBe(true);
 
-    const quickTrigger = page.getByRole("button", { name: /快速预览/ }).first();
-    await quickTrigger.click();
-    const dialog = page.getByRole("dialog", { name: /构图验证作品 1/ });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("构图验证作品 1", { exact: true })).toBeVisible();
-    await expect(dialog.getByText("HC-TEST-001", { exact: true })).toBeVisible();
-    await expect(dialog.getByRole("link", { name: "查看完整信息" }))
-      .toHaveAttribute("href", "/products/HC-TEST-001");
-    const dialogBox = await dialog.boundingBox();
-    expect(dialogBox).not.toBeNull();
+    const openLink = page.locator("[data-catalog-product-focus]").first();
+    await openLink.click();
+    await expect(page).toHaveURL(/\/products\/HC-TEST-001\?from=%2Fcatalog$/);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator(".catalog-matrix")).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 1, name: "构图验证作品 1" })).toBeVisible();
+    await expect(page.getByText("HC-TEST-001", { exact: true })).toBeVisible();
+    const galleryBox = await page.locator(".product-detail-page__gallery").boundingBox();
+    const summaryBox = await page.locator(".product-detail-page__summary").boundingBox();
+    const actionBox = await page.locator(".product-detail-page__primary-action").boundingBox();
+    expect(galleryBox && summaryBox && actionBox).toBeTruthy();
     if (viewport.name === "desktop") {
-      expect(dialogBox!.x).toBeGreaterThanOrEqual(viewport.width / 2);
+      expect(summaryBox!.x).toBeGreaterThanOrEqual(galleryBox!.x + galleryBox!.width - 1);
+      expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(viewport.height);
     } else {
-      expect(dialogBox!.width).toBeGreaterThanOrEqual(viewport.width - 1);
+      expect(summaryBox!.y).toBeGreaterThan(galleryBox!.y);
+      expect(actionBox!.width).toBeGreaterThanOrEqual(summaryBox!.width - 1);
     }
-    await page.keyboard.press("Escape");
-    await expect(quickTrigger).toBeFocused();
+    await page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }).click();
+    await expect(page).toHaveURL(/\/catalog$/);
+    await expect(openLink).toBeFocused();
 
     await page.getByRole("button", { name: "加入选款" }).click();
     const tray = page.getByRole("button", { name: /查看已选 1 款/ });
@@ -439,7 +456,7 @@ for (const viewport of [
     const submitInquiry = inquiryDialog.getByRole("button", {
       name: "提交选款咨询（1 款）",
     });
-    const backgroundLink = page.locator(".catalog-cell").last()
+    const backgroundLink = page.locator(".catalog-cell:not(.catalog-cell--empty)").last()
       .getByRole("link", { name: "查看作品" });
     await expect(closeInquiry).toBeFocused();
     await page.keyboard.press("Shift+Tab");
@@ -474,7 +491,7 @@ for (const viewport of [
     await expect(backgroundLink).not.toBeFocused();
 
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-    const lastCard = page.locator(".catalog-cell").last();
+    const lastCard = page.locator(".catalog-cell:not(.catalog-cell--empty)").last();
     await expect.poll(async () => {
       const [cardBox, trayBox] = await Promise.all([
         lastCard.boundingBox(),
@@ -486,7 +503,7 @@ for (const viewport of [
     await expectWriteContract(writes);
 
     await backgroundLink.click();
-    await expect(page).toHaveURL(/\/products\/HC-TEST-006$/);
+    await expect(page).toHaveURL(/\/products\/HC-TEST-006\?from=/);
     await expect(page.getByRole("heading", { level: 1, name: "构图验证作品 6" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await expectWriteContract(writes);
@@ -529,8 +546,9 @@ for (const viewport of [
     await expect(page.getByRole("tab", { name: "证书" })).toHaveCount(0);
     await expect(page.getByRole("tab", { name: "评价" })).toHaveCount(0);
     const sizeGuidanceLink = page.getByRole("link", { name: "联系珠宝顾问确认尺寸" });
-    await expect(page.locator(".product-detail-page__decision-panel"))
+    await expect(page.locator(".product-detail-page__fit"))
       .toContainText("暂无已核实的作品或规格尺寸");
+    await expect(page.getByRole("link", { name: "登录后加入心愿单" })).toBeVisible();
     await sizeGuidanceLink.scrollIntoViewIfNeeded();
     const sizeGuidanceLinkBox = await sizeGuidanceLink.boundingBox();
     expect(sizeGuidanceLinkBox).not.toBeNull();
@@ -585,30 +603,41 @@ test("Catalog 进入详情后恢复完整来源 URL、滚动位置与原作品�
   const displayDetail = displayCard.getByRole("link", { name: "查看作品" });
   await displayCard.scrollIntoViewIfNeeded();
   await page.evaluate(() => window.scrollBy(0, 80));
-  const displayScrollY = await page.evaluate(() => window.scrollY);
   await displayDetail.click();
-  await expect(page).toHaveURL(/\/products\/HC-TEST-006$/);
+  await expect(page).toHaveURL(/\/products\/HC-TEST-006\?from=/);
   const catalogBreadcrumb = page.getByRole("navigation", { name: "面包屑" })
     .getByRole("link", { name: "选款中心" });
   await expect(catalogBreadcrumb).toHaveAttribute("href", sourceUrl);
-  await catalogBreadcrumb.click();
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }))
+    .toHaveAttribute("href", sourceUrl);
+  await page.getByRole("navigation", { name: "面包屑" }).getByRole("link", { name: "选款中心" }).click();
+  await expect(page).toHaveURL(new RegExp(`${sourceUrl.replace("?", "\\?")}$`));
+  await displayCard.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, 80));
+  const restoredScrollY = await page.evaluate(() => window.scrollY);
+  await displayDetail.click();
+  await expect(page).toHaveURL(/\/products\/HC-TEST-006\?from=/);
+  const restoredBreadcrumb = page.getByRole("navigation", { name: "面包屑" })
+    .getByRole("link", { name: "选款中心" });
+  await expect(restoredBreadcrumb).toHaveAttribute("href", sourceUrl);
+  await restoredBreadcrumb.click();
   await expect(page).toHaveURL(new RegExp(`${sourceUrl.replace("?", "\\?")}$`));
   await expect(displayDetail).toBeFocused();
-  await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - displayScrollY))
+  await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - restoredScrollY))
     .toBeLessThanOrEqual(2);
 
   const selectionCard = page.locator('[data-catalog-product-id="2"]');
-  const quickViewTrigger = selectionCard.getByRole("button", { name: /快速预览/ });
+  const cardOpen = selectionCard.locator("[data-catalog-product-focus]");
   await selectionCard.scrollIntoViewIfNeeded();
-  await quickViewTrigger.click();
-  await page.getByRole("dialog").getByRole("link", { name: "查看完整信息" }).click();
-  await expect(page).toHaveURL(/\/products\/HC-TEST-002$/);
+  await cardOpen.click();
+  await expect(page).toHaveURL(/\/products\/HC-TEST-002\?from=/);
   const secondBreadcrumb = page.getByRole("navigation", { name: "面包屑" })
     .getByRole("link", { name: "选款中心" });
   await expect(secondBreadcrumb).toHaveAttribute("href", sourceUrl);
   await secondBreadcrumb.click();
   await expect(page).toHaveURL(new RegExp(`${sourceUrl.replace("?", "\\?")}$`));
-  await expect(quickViewTrigger).toBeFocused();
+  await expect(cardOpen).toBeFocused();
   await expectWriteContract(writes);
 });
 
@@ -648,7 +677,7 @@ for (const viewport of [
     const sourceCard = page.locator('[data-catalog-product-id="6"]');
     await sourceCard.scrollIntoViewIfNeeded();
     await sourceCard.getByRole("link", { name: "查看作品" }).click();
-    await expect(page).toHaveURL(/\/products\/HC-TEST-006$/);
+    await expect(page).toHaveURL(/\/products\/HC-TEST-006\?from=/);
 
     const sourceIndex = catalogProducts.findIndex((product) => product.id === 6);
     expect(sourceIndex).toBeGreaterThanOrEqual(0);
@@ -664,7 +693,7 @@ for (const viewport of [
     await expect(results).toBeFocused();
     const replacementCard = page.locator(`[data-catalog-product-id="${replacement.id}"]`);
     await expect(replacementCard.getByRole("link", { name: "查看作品" })).not.toBeFocused();
-    await expect(replacementCard.getByRole("button", { name: /快速预览/ })).not.toBeFocused();
+    await expect(replacementCard.locator("[data-catalog-product-focus]")).not.toBeFocused();
     await expectNoHorizontalOverflow(page);
     await expectWriteContract(writes);
   });
@@ -688,7 +717,7 @@ for (const viewport of [
     await page.evaluate(() => window.scrollBy(0, 80));
     expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
     await displayDetail.click();
-    await expect(page).toHaveURL(/\/products\/HC-TEST-006$/);
+    await expect(page).toHaveURL(/\/products\/HC-TEST-006\?from=/);
 
     await page.getByRole("navigation", { name: "面包屑" })
       .getByRole("link", { name: "首页" })
@@ -1231,7 +1260,7 @@ test("详情咨询行动携带稳定货号和明确来源类型", async ({ page 
   await expectWriteContract(writes);
 });
 
-test("Catalog 卡片与 QuickView 咨询行动携带稳定货号和明确来源类型", async ({ page }) => {
+test("Catalog 卡片咨询行动携带稳定货号和明确来源类型", async ({ page }) => {
   const writes = await mockCatalogDetail(page, { products: fiveModes });
   await page.goto("/catalog");
 
@@ -1243,10 +1272,8 @@ test("Catalog 卡片与 QuickView 咨询行动携带稳定货号和明确来源�
   for (const { name, href, product } of expectations) {
     const card = page.locator(".catalog-cell").filter({ hasText: product.name });
     await expect(card.getByRole("link", { name, exact: true })).toHaveAttribute("href", href);
-    await card.getByRole("button", { name: `快速预览 ${product.name}` }).click();
-    const dialog = page.getByRole("dialog", { name: product.name });
-    await expect(dialog.getByRole("link", { name, exact: true })).toHaveAttribute("href", href);
-    await dialog.getByRole("button", { name: "关闭快速预览" }).click();
+    await expect(card.locator("[data-catalog-product-focus]"))
+      .toHaveAttribute("href", new RegExp(`/products/${product.code}\\?from=`));
   }
 
   await expectWriteContract(writes);
@@ -1632,11 +1659,11 @@ test("ProductDetail 遇到历史异常 JSON 形状时保留核心作品与行动
   await expect(page.locator(".product-detail-page__primary-action"))
     .toHaveText("咨询此款作品");
   const decision = page.locator(".product-detail-page__decision-panel");
-  await expect(decision).toContainText("公开尺寸事实");
-  await expect(decision).toContainText("暂无已核实的作品或规格尺寸");
-  await expect(decision).toContainText("尺寸辅助状态");
-  await expect(decision).toContainText("当前结构化事实中暂无已核实的测量、佩戴适配或改圈指导");
-  await expect(decision.getByRole("link", { name: "联系珠宝顾问确认尺寸" }))
+  await expect(page.locator(".product-detail-page__fit")).toContainText("尺寸");
+  await expect(page.locator(".product-detail-page__fit")).toContainText("暂无已核实的作品或规格尺寸");
+  await expect(decision).not.toContainText("公开尺寸事实");
+  await expect(decision).not.toContainText("尺寸辅助状态");
+  await expect(page.getByRole("link", { name: "联系珠宝顾问确认尺寸" }))
     .toHaveAttribute("href", "/contact?type=purchase-support&productRef=HC-TEST-045");
   expect(pageErrors).toEqual([]);
   await expectWriteContract(writes);
@@ -1778,11 +1805,10 @@ test("ProductDetail 仅展示获准的尺寸、价格与履约事实且不读取
   await page.goto("/products/35");
   const decision = page.locator(".product-detail-page__decision-panel");
   await expect(decision.getByRole("heading", { name: "选购与服务信息" })).toBeVisible();
-  await expect(decision).toContainText("公开尺寸事实");
-  await expect(decision).toContainText("13 号");
-  await expect(decision).toContainText("尺寸辅助状态");
-  await expect(decision).toContainText("当前结构化事实中暂无已核实的测量、佩戴适配或改圈指导");
-  await expect(decision.getByRole("link", { name: "联系珠宝顾问确认尺寸" }))
+  await expect(page.locator(".product-detail-page__fit")).toContainText("13 号");
+  await expect(decision).not.toContainText("尺寸辅助状态");
+  await expect(decision).not.toContainText("当前结构化事实中暂无已核实的测量、佩戴适配或改圈指导");
+  await expect(page.getByRole("link", { name: "联系珠宝顾问确认尺寸" }))
     .toHaveAttribute("href", "/contact?type=purchase-support&productRef=HC-TEST-035");
   await expect(decision).toContainText("有效规格的最低公开价格");
   await expect(decision).toContainText("预订作品");
@@ -1975,7 +2001,7 @@ test("Catalog 搜索建议与历史记录支持完整键盘和焦点路径", asy
   await expect(input).toBeFocused();
   await expect(history).toHaveCount(0);
 
-  await page.getByRole("heading", { name: "查找作品" }).click();
+  await page.locator(".catalog-toolbar__spacer").click();
   await input.focus();
   await expect(history).toBeVisible();
   await deleteHistory.focus();
@@ -2017,12 +2043,12 @@ for (const viewport of [
     await scanSeriousAccessibility(page, testInfo, `${viewport.name}-catalog-search`);
     await input.press("Escape");
 
-    await page.getByRole("button", { name: `快速预览 ${detail.name}` }).click();
-    await expect(page.getByRole("dialog", { name: detail.name })).toBeVisible();
-    await scanSeriousAccessibility(page, testInfo, `${viewport.name}-catalog-quick-view`);
-    await page.getByRole("button", { name: "关闭快速预览" }).click();
-
-    await page.locator(".catalog-matrix").scrollIntoViewIfNeeded();
+    await page.evaluate(() => {
+      const toolbar = document.querySelector<HTMLElement>(".catalog-toolbar__inner");
+      if (!toolbar) return;
+      const top = window.scrollY + toolbar.getBoundingClientRect().bottom + 2;
+      window.scrollTo({ top, behavior: "instant" });
+    });
     const stickySort = page.locator(".catalog-sticky-bar")
       .getByRole("combobox", { name: "作品排序方式" });
     await expect(stickySort).toBeVisible();

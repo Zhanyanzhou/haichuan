@@ -32,16 +32,16 @@ export const LAYOUTS = [
   ["cards", "卡片式布局"], ["free", "自由布局"],
 ] as const;
 export const CONTENTS = [
-  ["title", "主标题", "主标题"], ["subtitle", "副标题", "补充一句让人了解主题"],
-  ["description", "描述", "在这里介绍内容亮点，文字可以在创建后继续调整。"],
-  ["brandName", "品牌名称", "品牌名称"], ["tag", "标签", "精选"], ["date", "日期", "活动日期"],
+  ["title", "主标题", "主标题待填写"], ["subtitle", "副标题", "副标题待填写"],
+  ["description", "描述", "描述待填写"],
+  ["brandName", "品牌名称", "品牌名称待填写"], ["tag", "标签", "标签待填写"], ["date", "日期", "日期待填写"],
   ["price", "价格", "价格待填写"], ["originalPrice", "原价", "原价待填写"],
-  ["offer", "优惠信息", "限时礼遇"], ["cta", "主行动", "了解详情"],
-  ["contact", "联系信息", "联系信息"], ["customText", "自定义文字", "自定义文字"],
+  ["offer", "优惠信息", "优惠信息待填写"], ["cta", "主行动", "主行动待填写"],
+  ["contact", "联系信息", "联系信息待填写"], ["customText", "自定义文字", "自定义文字待填写"],
   ["time", "时间", "时间待填写"], ["location", "地点", "地点待填写"],
-  ["productName", "商品名称", "商品名称"], ["sellingPoint", "商品卖点", "商品卖点"],
-  ["discount", "折扣", "折扣待填写"], ["personName", "姓名", "姓名"],
-  ["position", "职位", "职位"], ["biography", "简介", "人物简介"], ["socialInfo", "社交信息", "社交信息"],
+  ["productName", "商品名称", "商品名称待填写"], ["sellingPoint", "商品卖点", "商品卖点待填写"],
+  ["discount", "折扣", "折扣待填写"], ["personName", "姓名", "姓名待填写"],
+  ["position", "职位", "职位待填写"], ["biography", "简介", "简介待填写"], ["socialInfo", "社交信息", "社交信息待填写"],
 ] as const;
 export const MEDIA_ROLES = [["heroImage", "主图"], ["logo", "Logo"], ["backgroundImage", "背景图"], ["secondaryImage", "副图"], ["custom", "自定义图片"]] as const;
 export const MEDIA_PRESETS = [

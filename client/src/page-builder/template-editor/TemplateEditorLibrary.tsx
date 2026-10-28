@@ -4,7 +4,6 @@ import {
   EditOutlined,
   EllipsisOutlined,
   EyeOutlined,
-  ExclamationCircleOutlined,
   InboxOutlined,
   LeftOutlined,
   MinusOutlined,
@@ -38,6 +37,7 @@ import {
 import WorkspacePanelHeader from "../workspace/WorkspacePanelHeader";
 import LaunchMasterPickerModal from "../template-creation/LaunchMasterPickerModal";
 import { catalogCardName } from "./catalogCardName";
+import { rememberCatalogTemplateRoles } from "./publishedTemplateSectionRoles";
 import useCompactWorkspaceOverlay, {
   DOCKED_WORKSPACE_QUERY,
   WIDE_DOCK_QUERY,
@@ -218,8 +218,6 @@ interface PageModeProps {
   onInsertPublished: (template: PublishedDynamicTemplateResource) => void;
   onPublishedDragStart: (template: PublishedDynamicTemplateResource) => void;
   onPublishedDragEnd: () => void;
-  getPublishedUpgradeCount: (template: PublishedDynamicTemplateResource) => number;
-  onUpgradePublished: (template: PublishedDynamicTemplateResource) => void;
 }
 
 export type UnifiedTemplateLibraryProps = DesignModeProps | PageModeProps;
@@ -1052,7 +1050,6 @@ function DesignTemplateCard({
 function PagePublishedTemplateCard({
   device,
   entry,
-  getUpgradeCount,
   hasRootSelection,
   pageHasBlocks,
   handoff = false,
@@ -1060,11 +1057,9 @@ function PagePublishedTemplateCard({
   onDragEnd,
   onDragStart,
   onPreview,
-  onUpgrade,
 }: {
   device: "desktop" | "mobile";
   entry: PagePublishedCatalogEntry;
-  getUpgradeCount: PageModeProps["getPublishedUpgradeCount"];
   hasRootSelection: boolean;
   pageHasBlocks: boolean;
   handoff?: boolean;
@@ -1072,21 +1067,18 @@ function PagePublishedTemplateCard({
   onDragEnd: PageModeProps["onPublishedDragEnd"];
   onDragStart: PageModeProps["onPublishedDragStart"];
   onPreview: (template: PublishedDynamicTemplateResource) => void;
-  onUpgrade: PageModeProps["onUpgradePublished"];
 }) {
-  const upgradeCount = getUpgradeCount(entry.template);
+  const displayName = catalogCardName(entry.template.definition.metadata.sectionRole, entry.name);
   const guidance = describePageTemplateHandoff({
-    name: entry.name,
+    name: displayName,
     version: entry.template.version,
     pageHasBlocks,
-    upgradeCount,
     hasSelection: hasRootSelection,
   });
-  const showHandoffUpgrade = handoff && upgradeCount > 0;
   return (
     <TemplateCatalogCard
       active={handoff}
-      ariaLabel={handoff ? guidance.cardAriaLabel : `预览${entry.name}版本${entry.template.version}`}
+      ariaLabel={handoff ? guidance.cardAriaLabel : `预览${displayName}版本${entry.template.version}`}
       className={`unified-template-library__card is-${device}${handoff ? " is-handoff" : ""}`}
       compact={false}
       controlClassName="homepage-editor__dynamic-template-card-main"
@@ -1094,7 +1086,7 @@ function PagePublishedTemplateCard({
       dataTemplateIdentity={entry.identity}
       dataTemplateName={entry.template.templateId}
       draggable
-      name={catalogCardName(entry.template.definition.metadata.sectionRole, entry.name)}
+      name={displayName}
       preview={entry.preview}
       statusLabel={handoff
         ? `刚发布 · 已发布 · v${entry.template.version}`
@@ -1115,49 +1107,23 @@ function PagePublishedTemplateCard({
             type="button"
             className="template-editor__catalog-preview-action"
             onClick={() => onPreview(entry.template)}
-            aria-label={`放大预览：${entry.name}`}
-            title={`放大预览：${entry.name}`}
+            aria-label={`放大预览：${displayName}`}
+            title={`放大预览：${displayName}`}
           >
             <EyeOutlined />
             <span>预览</span>
           </button>
-          {showHandoffUpgrade ? (
-            <button
-              type="button"
-              className="homepage-editor__template-upgrade-action is-handoff-upgrade"
-              data-catalog-action="primary"
-              data-catalog-handoff-upgrade="true"
-              onClick={() => onUpgrade(entry.template)}
-              aria-label={guidance.upgradeAriaLabel}
-              title={guidance.upgradeAriaLabel}
-            >
-              {guidance.upgradeLabel}
-            </button>
-          ) : null}
           <button
             type="button"
             className="homepage-editor__template-upgrade-action"
             data-catalog-handoff-add={handoff ? "true" : undefined}
-            data-catalog-action={showHandoffUpgrade ? "secondary" : "primary"}
+            data-catalog-action="primary"
             onClick={() => onActivate(entry.template)}
             aria-label={guidance.add.ariaLabel}
             title={guidance.add.title}
           >
             {guidance.add.label}
           </button>
-          {upgradeCount > 0 && !showHandoffUpgrade ? (
-            <button
-              type="button"
-              className="homepage-editor__template-upgrade-action"
-              data-catalog-action="secondary"
-              onClick={() => onUpgrade(entry.template)}
-              aria-label={guidance.upgradeAriaLabel}
-              title={guidance.upgradeAriaLabel}
-            >
-              <ExclamationCircleOutlined />
-              <span>{guidance.upgradeLabel}</span>
-            </button>
-          ) : null}
         </span>
       )}
     />
@@ -1395,6 +1361,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
           const nextItems = Array.isArray(catalog?.items) ? catalog.items : [];
           catalogItemsRef.current = nextItems;
           setCatalogItems(nextItems);
+          rememberCatalogTemplateRoles(nextItems);
           setCatalogError(null);
           return;
         } catch (error) {
@@ -1437,6 +1404,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const applyCatalogItems = useCallback((items: TemplateCatalogItemResource[]) => {
     catalogRequestIdRef.current += 1;
     catalogItemsRef.current = items;
+    rememberCatalogTemplateRoles(items);
     setCatalogItems(items);
     setCatalogLoading(false);
     setCatalogError(null);
@@ -1746,15 +1714,15 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const visibleEntryCount = visibleCatalogGroups.reduce((count, group) => count + group.entries.length, 0);
   const pageHandoffGuidance = props.mode === "page" && pageHandoff
     ? describePageTemplateHandoff({
-      name: pageHandoff.name,
+      name: (() => {
+        const matched = catalogEntries.find((entry) => isPageHandoffEntry(entry, pageHandoff));
+        return matched?.kind === "page-published"
+          ? catalogCardName(matched.template.definition.metadata.sectionRole, matched.name)
+          : pageHandoff.name;
+      })(),
       version: pageHandoff.version,
       pageHasBlocks: props.pageHasBlocks,
       hasSelection: props.hasRootSelection,
-      upgradeCount: catalogEntries.reduce((count, entry) => (
-        isPageHandoffEntry(entry, pageHandoff)
-          ? props.getPublishedUpgradeCount(entry.template)
-          : count
-      ), 0),
     })
     : null;
   useLayoutEffect(() => {
@@ -1981,7 +1949,6 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       key={entry.key}
                       device={props.device}
                       entry={entry}
-                      getUpgradeCount={props.getPublishedUpgradeCount}
                       hasRootSelection={props.hasRootSelection}
                       pageHasBlocks={props.pageHasBlocks}
                       handoff={isPageHandoffEntry(entry, pageHandoff)}
@@ -1989,7 +1956,6 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
                       onDragStart={props.onPublishedDragStart}
                       onDragEnd={props.onPublishedDragEnd}
                       onPreview={openPublishedPreview}
-                      onUpgrade={props.onUpgradePublished}
                     />
                   );
                 }

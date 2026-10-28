@@ -1162,7 +1162,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     await expect(pageLibrary.locator('[data-catalog-handoff="true"]')).toHaveCount(0);
   });
 
-  test("页面已有旧实例时刚发布突出升级，而不是再添加一块", async ({ page }) => {
+  test("页面已有旧实例时刚发布也不在组件库要求升级", async ({ page }) => {
     const previousDefinition = makeDefinition(PUBLISHED_TEMPLATE_ID, PUBLISHED_TEMPLATE_NAME);
     previousDefinition.metadata.headerCompatibility = ["overlay-light", "solid"];
     const previousResource = makeResource({
@@ -1212,13 +1212,9 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     const { pageLibrary, handoffCard } = await openPageLibraryAfterHandoff(page);
 
     await expect(pageLibrary.locator(".unified-template-library__handoff-status")).toContainText(
-      `刚发布的“${PUBLISHED_TEMPLATE_NAME}”v2 已定位到模板组件库。当前页面有 1 处旧实例可升级；也可拖到目标位置添加新实例。`,
+      "正在使用它的页面草稿会自动沿用这一版",
     );
-    const upgradeButton = handoffCard.getByRole("button", {
-      name: `升级页面中的${PUBLISHED_TEMPLATE_NAME}模板实例，共 1 处`,
-      exact: true,
-    });
-    await expect(upgradeButton).toContainText("升级 1 处");
+    await expect(handoffCard.getByRole("button", { name: /升级/ })).toHaveCount(0);
     await expect(handoffCard.getByRole("button", {
       name: `添加到页面：${PUBLISHED_TEMPLATE_NAME} v2`,
       exact: true,

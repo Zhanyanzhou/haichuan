@@ -87,7 +87,7 @@ test("公开目录：商品 ids 与分类 categoryIds 分别进入正确字段�
   const listCall = findManyCalls[0];
   assert.deepEqual(listCall.where.id, { in: [101, 102] });
   assert.deepEqual(listCall.where.categoryId, { in: [7, 8, 9] });
-  assert.deepEqual(listCall.where.NOT, { salesMode: "DIRECT_PURCHASE" });
+  assert.equal(listCall.where.NOT, undefined);
   assert.equal(listCall.skip, 64);
   assert.equal(listCall.take, 32);
   assert.deepEqual(listCall.orderBy, [{ code: "asc" }, { id: "asc" }]);
@@ -156,7 +156,7 @@ test("公开目录：Facet 只继承公开性与分类边界，不被当前材�
   assert.equal(facetCall.where.materialType, undefined);
   assert.deepEqual(facetCall.where.visibility, { in: ["PUBLIC"] });
   assert.equal(facetCall.where.status, "PUBLISHED");
-  assert.deepEqual(facetCall.where.NOT, { salesMode: "DIRECT_PURCHASE" });
+  assert.equal(facetCall.where.NOT, undefined);
 });
 
 test("公开目录：工艺只用于服务端筛选，不进入匿名列表响应", async () => {
@@ -726,7 +726,7 @@ test("commerce 档位的游客详情在全部公开 SKU 售罄时返回作品级
   );
 });
 
-test("线索型档位默认从公开详情排除 DIRECT_PURCHASE", async (t) => {
+test("线索型档位仍可按货号读取已发布直购详情", async (t) => {
   const previousProfile = process.env.RELEASE_PROFILE;
   delete process.env.RELEASE_PROFILE;
   t.after(() => {
@@ -749,7 +749,8 @@ test("线索型档位默认从公开详情排除 DIRECT_PURCHASE", async (t) => 
   );
 
   assert.equal(await service.findPublicById("HC-DIRECT-1"), null);
-  assert.deepEqual(where.NOT, { salesMode: "DIRECT_PURCHASE" });
+  assert.equal(where.NOT, undefined);
+  assert.equal(where.salesMode, undefined);
 });
 
 test("装修商品引用解析：保持输入顺序并区分删除、下架、缺图和不存在", async () => {

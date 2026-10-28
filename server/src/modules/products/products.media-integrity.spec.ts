@@ -403,7 +403,7 @@ test("装修引用与咨询快照只为可读媒体生成受控地址", async ()
   );
   const snapshots = await service.resolveVisibleProductSnapshots([6]);
   assert.equal(snapshots.get(6)?.mediaUrl, "/products/catalog/6/media/2");
-  assert.deepEqual(snapshotWhere.NOT, { salesMode: "DIRECT_PURCHASE" });
+  assert.equal(snapshotWhere.NOT, undefined);
 });
 
 test("公开媒体每次请求都复核授权且禁止缓存旧公开字节", async () => {

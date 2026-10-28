@@ -122,7 +122,10 @@ export default function DynamicTemplateInstanceView({
         contentBySlotId={props.contentBySlotId}
         hiddenSlotIds={props.hiddenSlotIds}
         layoutOverridesByNodeId={props.layoutOverridesByNodeId}
-        publicSurface={publicDecision?.publicSurface}
+        publicSurface={mode === "editor"
+          ? { omitDefaultImages: true }
+          : publicDecision?.publicSurface}
+        omitNodeBackgroundImages
         mode={mode}
         editorSurface={mode === "editor" ? "page-instance" : undefined}
         primaryHeadingLevel={primaryHeadingLevel}

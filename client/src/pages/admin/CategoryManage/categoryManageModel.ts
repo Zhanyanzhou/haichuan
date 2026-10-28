@@ -27,6 +27,31 @@ export function visibleProductCount(node: CatTreeNode): number {
   return node.level === 1 ? countProductsRecursive(node) : (node._count?.products ?? 0);
 }
 
+/** 删除时要一起去掉的分类：自身和下级款式。 */
+export function subtreeIds(node: CatTreeNode): number[] {
+  const ids = [node.id];
+  for (const child of node.children ?? []) ids.push(...subtreeIds(child));
+  return ids;
+}
+
+/** 商品改去的分类。即将删除的分类及其下级不能作为去向。 */
+export function categoryMoveOptions(
+  tree: CatTreeNode[],
+  excluded: Set<number>,
+): Array<{ value: number; label: string }> {
+  const options: Array<{ value: number; label: string }> = [];
+  const walk = (nodes: CatTreeNode[], prefix: string) => {
+    for (const node of nodes) {
+      if (excluded.has(node.id)) continue;
+      const label = prefix ? `${prefix} / ${node.name}` : node.name;
+      options.push({ value: node.id, label });
+      if (node.children?.length) walk(node.children, label);
+    }
+  };
+  walk(tree, "");
+  return options;
+}
+
 export function collectSlugs(
   nodes: CatTreeNode[],
   taken = new Set<string>(),

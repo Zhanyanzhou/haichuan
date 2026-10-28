@@ -2,6 +2,14 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { usePublicSiteSettings } from "@/hooks/usePublicSiteSettings";
+import {
+  CONTENT_TEMPLATE_PAGE_KEYS,
+  CONTENT_TEMPLATE_PAGE_PATHS,
+} from "@/page-builder/generated/contentTemplates.generated";
+import { useDirectionalSiteHeader } from "./useDirectionalSiteHeader";
+import { isStorefrontMenuActive } from "./storefrontMenuActive";
+
+export { isStorefrontMenuActive };
 
 type PublicSiteSettings = {
   siteName?: string;
@@ -31,6 +39,7 @@ type StorefrontMenuDrawerProps = {
   /** 装修预览中仅演示菜单，不离开当前草稿。 */
   preview?: boolean;
   onPreviewNavigate?: (path: string) => void;
+  onRequestSearch?: () => void;
   menuId: string;
   returnFocusRef?: RefObject<HTMLButtonElement>;
 };
@@ -54,13 +63,22 @@ export function resolveSiteLogo(logo?: string | null) {
   }
 }
 
-export const storefrontMenuLinks = [
-  { label: "首页", href: "/" },
-  { label: "珠宝作品", href: "/products" },
-  { label: "选款中心", href: "/catalog" },
-  { label: "珠宝定制", href: "/custom" },
-  { label: "关于海川", href: "/about" },
-] as const;
+const STOREFRONT_MENU_LABELS = {
+  home: "首页",
+  products: "珠宝作品",
+  catalog: "选款中心",
+  custom: "珠宝定制",
+  about: "关于海川",
+} as const;
+
+/** 主导航只取内容合同里的品牌页，顺序与后台装修页一致。预约留在下方服务入口。 */
+export const storefrontMenuLinks = CONTENT_TEMPLATE_PAGE_KEYS.flatMap((key) => {
+  if (!(key in STOREFRONT_MENU_LABELS)) return [];
+  return [{
+    label: STOREFRONT_MENU_LABELS[key as keyof typeof STOREFRONT_MENU_LABELS],
+    href: CONTENT_TEMPLATE_PAGE_PATHS[key],
+  }];
+});
 
 const storefrontServiceLinks = [
   { label: "预约私人珠宝顾问", href: "/contact" },
@@ -124,6 +142,7 @@ export function StorefrontMenuDrawer({
   onOpenChange,
   preview = false,
   onPreviewNavigate,
+  onRequestSearch,
   menuId,
   returnFocusRef,
 }: StorefrontMenuDrawerProps) {
@@ -208,8 +227,7 @@ export function StorefrontMenuDrawer({
     restoreTriggerFocus();
   };
 
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string) => isStorefrontMenuActive(pathname, href);
 
   return (
     <div
@@ -232,6 +250,21 @@ export function StorefrontMenuDrawer({
             <CloseIcon />
             <span>关闭</span>
           </button>
+          {onRequestSearch ? (
+            <button
+              type="button"
+              tabIndex={open ? 0 : -1}
+              className="brand-menu__top-action"
+              aria-label="搜索"
+              onClick={() => {
+                onOpenChange(false);
+                onRequestSearch();
+              }}
+            >
+              <SearchIcon />
+              <span>搜索</span>
+            </button>
+          ) : (
           <Link
             to="/catalog#catalog-search-input"
             tabIndex={open ? 0 : -1}
@@ -241,6 +274,7 @@ export function StorefrontMenuDrawer({
             <SearchIcon />
             <span>搜索</span>
           </Link>
+          )}
         </div>
 
         <p className="brand-menu__eyebrow">探索</p>
@@ -298,31 +332,26 @@ export default function StorefrontNavigation({
   const rootRef = useRef<HTMLDivElement>(null);
   const menuToggleRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
+  const { pathname } = useLocation();
   const sharedSettingsResource = usePublicSiteSettings(!siteSettings);
   const [uncontrolledMenuOpen, setUncontrolledMenuOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
   const isControlled = menuOpen !== undefined;
   const isMenuOpen = isControlled ? menuOpen : uncontrolledMenuOpen;
+  const { headerRef, surfaceScrolled, concealed } = useDirectionalSiteHeader({
+    menuOpen: isMenuOpen,
+    resetKey: pathname,
+    concealEnabled: !preview,
+  });
   const resolvedSettings = siteSettings ?? sharedSettingsResource.settings;
   const siteName = resolvedSettings?.siteName || "海川珠宝";
   const logoUrl = resolveSiteLogo(resolvedSettings?.logo);
-  const isTransparent = !scrolled && !isMenuOpen;
+  const isTransparent = !surfaceScrolled && !isMenuOpen;
   const usesLightHeaderText = headerMode === "overlay-light" && isTransparent;
 
   const setMenuOpen = useCallback((open: boolean) => {
     if (!isControlled) setUncontrolledMenuOpen(open);
     onMenuOpenChange?.(open);
   }, [isControlled, onMenuOpenChange]);
-
-  useEffect(() => {
-    const root = rootRef.current;
-    const ownerWindow = root?.ownerDocument.defaultView;
-    if (!ownerWindow) return;
-    const onScroll = () => setScrolled(ownerWindow.scrollY > 40);
-    onScroll();
-    ownerWindow.addEventListener("scroll", onScroll, { passive: true });
-    return () => ownerWindow.removeEventListener("scroll", onScroll);
-  }, []);
 
   const handlePreviewLink = (event: React.MouseEvent<HTMLAnchorElement>) => {
     if (!preview) return;
@@ -340,7 +369,8 @@ export default function StorefrontNavigation({
       data-page-header-surface={isTransparent ? "transparent" : "solid"}
     >
       <header
-        className={`site-header${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}`}
+        ref={headerRef}
+        className={`site-header${isTransparent ? " is-transparent" : ""}${usesLightHeaderText ? " is-overlay-light" : ""}${concealed ? " is-concealed" : ""}`}
         style={{
           background: isTransparent ? "transparent" : "rgba(255,255,255,0.92)",
           borderBottomColor: isTransparent ? "transparent" : "rgba(24,26,27,0.06)",

@@ -62,8 +62,17 @@ test.describe("商品编辑器现有接口契约", () => {
       await fulfill(route, {});
     });
 
+    await page.setViewportSize({ width: 1912, height: 948 });
     await page.goto("/admin/products/new");
     await expect(page.getByText("正在加载商品信息…")).toBeVisible();
+    const loadingLayer = page.locator(".site-route-loading--admin-content");
+    expect(await loadingLayer.evaluate((element) => element.parentElement === document.body)).toBe(true);
+    const indicatorBox = await loadingLayer.locator(".site-route-loading__indicator").boundingBox();
+    const viewport = page.viewportSize();
+    expect(indicatorBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect((indicatorBox?.x ?? 0) + (indicatorBox?.width ?? 0) / 2).toBeCloseTo((viewport?.width ?? 0) / 2, 0);
+    expect((indicatorBox?.y ?? 0) + (indicatorBox?.height ?? 0) / 2).toBeCloseTo((viewport?.height ?? 0) / 2, 0);
     releaseInitialCategoryRequest();
     await expect(page.getByText("商品编辑所需的类目加载失败。请重新加载后重试。")).toBeVisible();
     await expect(page.getByRole("button", { name: "重新加载" })).toBeVisible();
@@ -88,7 +97,7 @@ test.describe("商品编辑器现有接口契约", () => {
     expect(createAttempts).toBe(1);
   });
 
-  test("已保存商品使用 SKU 起价，并可设置主图和确认删除未引用图片", async ({ page }) => {
+  test("已保存商品使用 SKU 起价，第一张即主图，并可确认删除未引用图片", async ({ page }) => {
     const antdConsoleProblems: string[] = [];
     page.on("console", (entry) => {
       const text = entry.text();
@@ -124,7 +133,6 @@ test.describe("商品编辑器现有接口契约", () => {
       ],
       detailContent: [],
     };
-    let primaryRequests = 0;
     let deleteRequests = 0;
     let skuStatusRequests = 0;
 
@@ -145,13 +153,6 @@ test.describe("商品编辑器现有接口契约", () => {
       }
       if (url.pathname === "/api/products/9" && route.request().method() === "GET") {
         await fulfill(route, product);
-        return;
-      }
-      if (url.pathname === "/api/products/9/images/primary" && route.request().method() === "PUT") {
-        primaryRequests += 1;
-        product.primaryImageId = 102;
-        product.images = [product.images[1], product.images[0]];
-        await fulfill(route, { primaryImageId: 102, listingImageId: 102 });
         return;
       }
       if (url.pathname === "/api/products/9/images/101" && route.request().method() === "DELETE") {
@@ -177,11 +178,10 @@ test.describe("商品编辑器现有接口契约", () => {
     await expect(page.getByText("有多个规格时，页面显示其中的最低价。")).toBeVisible();
     await expect(page.getByText(/2 个有效规格/)).toBeVisible();
 
-    await page.locator(".pro-editor__upload-actions").nth(1).getByRole("button", { name: "设为主图" }).click();
-    await expect(page.getByText("商品主图已更新")).toBeVisible();
-    expect(primaryRequests).toBe(1);
+    await expect(page.getByRole("button", { name: "设为主图" })).toHaveCount(0);
+    await expect(page.locator(".pro-editor__upload-card").first().locator(".pro-editor__cover-badge")).toHaveText("主图");
 
-    await page.locator(".pro-editor__upload-actions").nth(1).getByRole("button", { name: "删除" }).click();
+    await page.locator(".pro-editor__upload-actions").first().getByRole("button", { name: "删除" }).click();
     const confirmDialog = page.getByRole("dialog", { name: "确认删除这张商品图片？" });
     await expect(confirmDialog).toBeVisible();
     await confirmDialog.getByRole("button", { name: "确认删除" }).click();
@@ -712,5 +712,117 @@ test.describe("商品编辑器现有接口契约", () => {
     expect(createAttempts).toBe(2);
     expect(updateAttempts).toBe(1);
     expect(createBodies[1]).toEqual(createBodies[0]);
+  });
+
+  test("拖拽顺序用前移后移保存，直接销售可填写可售数量", async ({ page }) => {
+    await installAdminSession(page);
+    const product = {
+      id: 41,
+      code: "MOVE-041",
+      name: "可调整主图顺序的戒指",
+      categoryId: 1,
+      materialType: "AU750",
+      price: 4200,
+      status: "DRAFT",
+      visibility: "PUBLIC",
+      salesMode: "DIRECT_PURCHASE",
+      inventoryPolicy: "STANDARD",
+      purchaseRegion: "MAINLAND",
+      publishMode: "WAREHOUSE",
+      fulfillmentType: "IN_STOCK",
+      dispatchTime: "WITHIN_48_HOURS",
+      deliveryMethods: [],
+      primaryImageId: 411,
+      images: [
+        { id: 411, productId: 41, url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", type: "FRONT", sortOrder: 0, isVideo: false },
+        { id: 412, productId: 41, url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", type: "SIDE", sortOrder: 1, isVideo: false },
+      ],
+      skus: [
+        { id: 421, productId: 41, skuCode: "MOVE-041-DEFAULT", material: "AU750", price: 4200, isActive: true },
+      ],
+      detailContent: [],
+    };
+    const imageUpdates: Array<{ id: number; sortOrder?: number }> = [];
+    let coverImageId: number | undefined;
+    let stockUpdate: { quantity?: number; expectedQuantity?: number; type?: string } | undefined;
+    let stockQuantity = 0;
+
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      const method = route.request().method();
+      if (url.pathname === "/api/auth/profile") return route.fallback();
+      if (url.pathname === "/api/categories/admin/tree") {
+        await fulfill(route, [{ id: 1, name: "戒指", children: [] }]);
+        return;
+      }
+      if (url.pathname === "/api/shipping-templates") {
+        await fulfill(route, []);
+        return;
+      }
+      if (url.pathname === "/api/settings/flags") {
+        await fulfill(route, { commerceEnabled: true, cartEnabled: true, paymentEnabled: true });
+        return;
+      }
+      if (url.pathname === "/api/products/41" && method === "GET") {
+        await fulfill(route, product);
+        return;
+      }
+      if (url.pathname === "/api/products/41" && method === "PUT") {
+        await fulfill(route, product);
+        return;
+      }
+      if (url.pathname === "/api/inventory" && method === "GET") {
+        await fulfill(route, {
+          list: [{ id: 501, quantity: stockQuantity, sku: { skuCode: "MOVE-041-DEFAULT", product: { id: 41, name: product.name } } }],
+          total: 1,
+        });
+        return;
+      }
+      if (/^\/api\/products\/41\/images\/\d+$/.test(url.pathname) && method === "PUT") {
+        const imageId = Number(url.pathname.split("/").pop());
+        const body = route.request().postDataJSON() as { sortOrder?: number };
+        imageUpdates.push({ id: imageId, sortOrder: body.sortOrder });
+        const image = product.images.find((item) => item.id === imageId);
+        if (image && body.sortOrder != null) image.sortOrder = body.sortOrder;
+        await fulfill(route, { id: imageId, sortOrder: body.sortOrder });
+        return;
+      }
+      if (url.pathname === "/api/products/41/images/primary" && method === "PUT") {
+        const body = route.request().postDataJSON() as { imageId?: number };
+        coverImageId = body.imageId;
+        product.primaryImageId = body.imageId ?? product.primaryImageId;
+        await fulfill(route, { primaryImageId: product.primaryImageId });
+        return;
+      }
+      if (url.pathname === "/api/inventory/501" && method === "PUT") {
+        stockUpdate = route.request().postDataJSON() as { quantity?: number; expectedQuantity?: number; type?: string };
+        stockQuantity = stockUpdate.quantity ?? stockQuantity;
+        await fulfill(route, { id: 501, quantity: stockQuantity });
+        return;
+      }
+      await fulfill(route, {});
+    });
+
+    await page.goto("/admin/products/41/edit");
+    await expect(page.getByRole("spinbutton", { name: "可售数量" })).toHaveValue("0");
+    await expect(page.getByRole("button", { name: "前移已上传图片 #411" })).toBeDisabled();
+    await page.getByRole("button", { name: "后移已上传图片 #411" }).click();
+    const cards = page.locator(".pro-editor__upload-card");
+    await expect(cards.first().locator(".pro-editor__cover-badge")).toHaveText("主图");
+    await expect(cards.nth(0).getByRole("button", { name: "后移已上传图片 #412" })).toBeVisible();
+
+    await page.getByLabel("拖拽调整已上传图片 #412的顺序").dragTo(page.getByLabel("拖拽调整已上传图片 #411的顺序"));
+    await expect(cards.nth(0).getByRole("button", { name: "后移已上传图片 #411" })).toBeVisible();
+
+    await page.getByRole("button", { name: "后移已上传图片 #411" }).click();
+    await page.getByRole("spinbutton", { name: "可售数量" }).fill("3");
+    await page.getByRole("button", { name: "保存草稿" }).click();
+    await expect(page.getByText("草稿已保存")).toBeVisible();
+    expect(imageUpdates).toEqual([
+      { id: 412, sortOrder: 0 },
+      { id: 411, sortOrder: 1 },
+    ]);
+    expect(coverImageId).toBe(412);
+    expect(stockUpdate).toMatchObject({ type: "adjust", quantity: 3, expectedQuantity: 0 });
   });
 });

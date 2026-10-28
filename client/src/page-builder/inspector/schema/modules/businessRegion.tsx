@@ -3,7 +3,9 @@
  *
  * 固定业务区由系统数据驱动(商品列表/筛选等),前台真实渲染;
  * 面板只读展示数据说明,不做任何编辑。systemBlock 标记隐藏删除/隐藏等动作。
+ * 选款中心的品类不在这里改文案，入口指向已有的类目管理。
  */
+import { Link } from "react-router-dom";
 import { businessRegionPuckConfig } from "../../../adapters/businessRegion.puck";
 import type { ModuleInspectorSchema } from "../types";
 import type { PuckProps } from "../../../types";
@@ -46,6 +48,29 @@ function BusinessRegionSummary({ props }: { props: PuckProps }) {
       <p style={{ margin: "10px 0 0", fontSize: 12, color: "#6E7477" }}>
         此区域在前台真实渲染,不能删除、隐藏或调整顺序;请通过对应业务管理维护其数据。
       </p>
+      {String(props.pageKey ?? "") === "catalog" ? (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ margin: "0 0 8px", fontSize: 12, color: "#5F6568" }}>
+            直接点画布上的品类或款式名称修改。画布就是前台选款中心，离开输入框后名称会保存。这里的分类与分类管理是同一份。
+          </p>
+          <Link
+            to="/admin/categories"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              minHeight: 32,
+              padding: "0 12px",
+              border: "1px solid #181A1B",
+              borderRadius: 3,
+              color: "#181A1B",
+              fontSize: 12,
+              textDecoration: "none",
+            }}
+          >
+            管理全部分类
+          </Link>
+        </div>
+      ) : null}
     </div>
   );
 }

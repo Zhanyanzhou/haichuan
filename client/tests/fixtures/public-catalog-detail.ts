@@ -16,6 +16,7 @@ export type WriteObservation = {
   favorite: number;
   inquiry: number;
   unexpected: number;
+  lastUnexpected: string;
 };
 
 export type RouteBarrier = {
@@ -197,6 +198,7 @@ export async function mockCatalogDetail(
     favorite: 0,
     inquiry: 0,
     unexpected: 0,
+    lastUnexpected: "",
   };
   await page.addInitScript(({ signedIn }) => {
     localStorage.removeItem("hc_selection_tray");
@@ -214,10 +216,15 @@ export async function mockCatalogDetail(
         writes.analytics += 1;
         return route.abort();
       }
+      // 公开页进入时的访问计数不是选款、购物车或咨询写入。
+      if (path.endsWith("/statistics/traffic") && method === "POST") {
+        return route.fulfill({ status: 204, body: "" });
+      }
       if (path.endsWith("/cart") && method === "POST") {
         writes.cart += 1;
         if (options.allowCartWrite) return fulfill(route, { id: 1 });
         writes.unexpected += 1;
+        writes.lastUnexpected = `${method} ${path}`;
         return route.abort();
       }
       const isExplicitFavoriteWrite = /\/customers\/me\/favorites\/\d+$/.test(path)
@@ -228,6 +235,7 @@ export async function mockCatalogDetail(
         writes.favorite += 1;
         if (options.allowFavoriteWrite) return fulfill(route, { favorited: method !== "DELETE" });
         writes.unexpected += 1;
+        writes.lastUnexpected = `${method} ${path}`;
         return route.abort();
       }
       if (path.endsWith("/inquiries") && method === "POST") {
@@ -235,9 +243,11 @@ export async function mockCatalogDetail(
         if (options.onInquiry) return options.onInquiry(route);
         if (options.allowInquiryWrite) return fulfill(route, { id: writes.inquiry });
         writes.unexpected += 1;
+        writes.lastUnexpected = `${method} ${path}`;
         return route.abort();
       }
       writes.unexpected += 1;
+      writes.lastUnexpected = `${method} ${path}`;
       return route.abort();
     }
     if (path.endsWith("/stream")) return route.abort();

@@ -18,12 +18,16 @@ export interface RealCategory {
   slug: string;
   level: number;
   parentId: number | null;
+  sortOrder?: number;
   children?: RealCategory[];
 }
 
 type PublicProductMedia = {
+  id?: number;
   mediaUrl?: string;
   url?: string;
+  sortOrder?: number;
+  isVideo?: boolean;
 };
 
 type PublicProductSummary = {
@@ -78,7 +82,16 @@ function parsePublicMedia(value: unknown): PublicProductMedia | undefined {
   if (!isRecord(value)) return undefined;
   const mediaUrl = optionalString(value.mediaUrl);
   const url = optionalString(value.url);
-  return mediaUrl || url ? { mediaUrl, url } : undefined;
+  if (!mediaUrl && !url) return undefined;
+  const id = Number(value.id);
+  const sortOrder = Number(value.sortOrder);
+  return {
+    mediaUrl,
+    url,
+    ...(Number.isInteger(id) && id > 0 ? { id } : {}),
+    ...(Number.isFinite(sortOrder) ? { sortOrder } : {}),
+    ...(value.isVideo === true ? { isVideo: true } : {}),
+  };
 }
 
 function parsePublicProduct(value: unknown): PublicProductSummary | null {
@@ -170,15 +183,11 @@ function mapApiProduct(
 
   const primaryCategory = lineage[0];
   const secondaryCategory = lineage[1];
-  const listingUrl =
-    p.listingImage?.mediaUrl || p.listingImage?.url || "";
-  const primaryUrl =
-    p.primaryImage?.mediaUrl || p.primaryImage?.url || "";
-  const orderedImages = [
-    listingUrl,
-    primaryUrl,
-    ...(p.images || []).map((img) => img.mediaUrl || img.url || ""),
-  ].filter(Boolean);
+  const orderedImages = [...(p.images || [])]
+    .filter((image) => image.isVideo !== true && (image.sortOrder ?? 0) < 1000)
+    .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0) || (left.id ?? 0) - (right.id ?? 0))
+    .map((image) => image.mediaUrl || image.url || "")
+    .filter(Boolean);
 
   return {
     id: p.id,
@@ -198,7 +207,7 @@ function mapApiProduct(
     size: p.size || "",
     series: "",
     scene: p.salesMode || "",
-    // 目录卡片和快速预览都以运营指定的列表图为首图；其后保留主图与排序图片并去重。
+    // 选款卡片按商品图上传顺序排列。详情长图不进入这组记号。
     images: [...new Set<string>(orderedImages)],
     categoryName: categoryById.get(p.categoryId)?.name || p.category?.name || "",
     price: Number(p.price) || 0,

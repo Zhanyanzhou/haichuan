@@ -52,6 +52,22 @@ import { resolveMediaSlotImage } from "../config/mediaSlotContract";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
 import "./DynamicTemplateRenderer.css";
 
+function definitionWithoutNodeBackgroundImages(definition: TemplateDefinitionV2): TemplateDefinitionV2 {
+  const hasBackground = Object.values(definition.nodes).some((node) => Boolean(
+    node.responsive.desktop.backgroundImage
+    || node.responsive.mobile.backgroundImage
+    || node.responsive.tablet?.backgroundImage
+  ));
+  if (!hasBackground) return definition;
+  const projected = structuredClone(definition);
+  for (const node of Object.values(projected.nodes)) {
+    if (node.responsive.desktop.backgroundImage) node.responsive.desktop.backgroundImage = "";
+    if (node.responsive.mobile.backgroundImage) node.responsive.mobile.backgroundImage = "";
+    if (node.responsive.tablet?.backgroundImage) node.responsive.tablet.backgroundImage = "";
+  }
+  return projected;
+}
+
 export interface DynamicTemplateRendererProps {
   definition: TemplateDefinitionV2;
   device: "desktop" | "mobile";
@@ -66,6 +82,8 @@ export interface DynamicTemplateRendererProps {
    */
   showEmptySlots?: boolean;
   publicSurface?: CompileDynamicTemplateRenderPlanOptions["publicSurface"];
+  /** 页面实例不回放模板节点上保存的背景照片。模板设计画布不传。 */
+  omitNodeBackgroundImages?: boolean;
   /**
    * 编辑态的交互边界。页面实例只负责整体预览，只有母模板定义工作面
    * 可以注册内部节点选择和直接布局手势；未声明时按无内部交互处理。
@@ -389,7 +407,7 @@ function sparseLayoutOverride(value: TemplateInstanceLayoutOverride): TemplateIn
   return Object.keys(next).length ? next : undefined;
 }
 
-function getSafeActionContent(content: unknown): { label: string; href?: string } {
+function getSafeActionContent(content: unknown, allowProductTarget = true): { label: string; href?: string } {
   if (!content || typeof content !== "object" || Array.isArray(content)) return { label: "" };
   const record = content as Record<string, unknown>;
   const label = typeof record.label === "string" ? record.label : "";
@@ -407,7 +425,9 @@ function getSafeActionContent(content: unknown): { label: string; href?: string 
     return { label, href: record.url };
   }
   if (record.targetType === "product" && typeof record.productCode === "string" && record.productCode.trim()) {
-    return { label, href: `/products/${encodeURIComponent(record.productCode.trim())}` };
+    return allowProductTarget
+      ? { label, href: `/products/${encodeURIComponent(record.productCode.trim())}` }
+      : { label };
   }
   if (record.targetType === "category" && typeof record.categorySlug === "string" && record.categorySlug.trim()) {
     return { label, href: `/catalog?category=${encodeURIComponent(record.categorySlug.trim())}` };
@@ -476,7 +496,9 @@ function ManagedTemplateSlotImage({
   viewport: "desktop" | "mobile";
   sizes?: string;
 }) {
-  const media = useManagedTemplateMediaDisplayUrl(src, hostFetch);
+  // blob 必须由这张图片所在的 iframe 文档创建，父页面的 blob 在画布里不会显示。
+  const imageRef = useRef<HTMLImageElement>(null);
+  const media = useManagedTemplateMediaDisplayUrl(src, hostFetch, imageRef);
   const previewUrl = hostFetch ? resolveManagedTemplateMediaPreviewUrl(src) : src;
   const displaySrc = hostFetch
     ? (media.status === "error" ? previewUrl : media.displaySrc)
@@ -496,6 +518,7 @@ function ManagedTemplateSlotImage({
   };
   return (
     <img
+      ref={imageRef}
       src={displaySrc || undefined}
       alt={alt}
       data-template-image-fit={objectFit}
@@ -664,17 +687,17 @@ function renderSlotContent(
     return <p className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={relationalLayout ? textStyle : { ...textStyle, whiteSpace: "pre-wrap" }}>{text}</p>;
   }
   if (slot.type === "button" || slot.type === "link") {
-    const action = getSafeActionContent(content);
-    if (!action.label) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">行动待填写</span>;
+    const action = getSafeActionContent(content, mode !== "public");
+    if (!action.label) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">{slot.label}待填写</span>;
     // 行动槽位的可点击语义由承载全部布局/背景/边框的节点外壳负责。
     // 这里始终只输出文案，避免形成“外层视觉盒子 + 内层文字链接”的双重命中区域。
     // 对齐作用于行动槽位的可用宽度；行内 span 不会响应 text-align。
     return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={{ display: "block", ...textStyle }}>{action.label}</span>;
   }
   if (slot.type === "product") {
+    if (mode === "public") return null;
     const productCode = typeof content === "string" ? content.trim() : "";
-    const mockLabel = mode !== "public"
-      && content && typeof content === "object" && !Array.isArray(content)
+    const mockLabel = content && typeof content === "object" && !Array.isArray(content)
       && (content as Record<string, unknown>).mock === true
       && typeof (content as Record<string, unknown>).label === "string"
       ? String((content as Record<string, unknown>).label)
@@ -682,9 +705,10 @@ function renderSlotContent(
     if (mockLabel) return <span data-template-mock-content="product">{mockLabel}</span>;
     return productCode
       ? <a href={`/products/${encodeURIComponent(productCode)}`}>{productCode}</a>
-      : mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">商品待选择</span>;
+      : <span className="hc-dynamic-template__empty-slot">商品待选择</span>;
   }
   if (slot.type === "collection") {
+    if (mode === "public") return null;
     const refs = Array.isArray(content) ? content.filter((item): item is string => typeof item === "string") : [];
     return refs.length ? (
       <ul>
@@ -694,7 +718,7 @@ function renderSlotContent(
           </li>
         ))}
       </ul>
-    ) : mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">集合待选择</span>;
+    ) : <span className="hc-dynamic-template__empty-slot">集合待选择</span>;
   }
   return null;
 }
@@ -879,7 +903,7 @@ function RenderNode({
   const backgroundSource = !node.hidden && node.rules.backgroundImage && isSafeTemplateMediaUrl(node.rules.backgroundImage)
     ? node.rules.backgroundImage
     : "";
-  const backgroundMedia = useManagedTemplateMediaDisplayUrl(backgroundSource, mode !== "public");
+  const backgroundMedia = useManagedTemplateMediaDisplayUrl(backgroundSource, mode !== "public", layoutElement);
   const backgroundDisplayUrl = !backgroundSource
     ? undefined
     : mode === "public"
@@ -910,7 +934,7 @@ function RenderNode({
     return () => observer.disconnect();
   }, [hasPositionedChildren, node.rules.padding]);
   const safeAction = node.slot && (node.slot.type === "button" || node.slot.type === "link")
-    ? getSafeActionContent(node.content)
+    ? getSafeActionContent(node.content, contentRenderMode !== "public")
     : undefined;
   const actionHref = mode !== "editor"
     && (contentRenderMode === "preview" || contentRenderMode === "public")
@@ -1326,6 +1350,7 @@ export default function DynamicTemplateRenderer({
   mode = "public",
   showEmptySlots,
   publicSurface,
+  omitNodeBackgroundImages = false,
   editorSurface,
   interactionOwner,
   templateEditorSessionId,
@@ -1352,7 +1377,10 @@ export default function DynamicTemplateRenderer({
   const structureProtectedNodeIds = allowsNodeInteraction
     ? getDynamicTemplateStructureProtectedNodeIds(definition)
     : undefined;
-  const result = compileDynamicTemplateRenderPlan(definition, {
+  const renderDefinition = omitNodeBackgroundImages
+    ? definitionWithoutNodeBackgroundImages(definition)
+    : definition;
+  const result = compileDynamicTemplateRenderPlan(renderDefinition, {
     device,
     breakpoint,
     contentBySlotId,

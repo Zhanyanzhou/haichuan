@@ -15,18 +15,20 @@ import "../../src/styles/globals.css";
 import "../../src/pages/admin/HomepageConfig/editor.css";
 
 const moduleType = "首屏主视觉";
-const blockId = "template-editor:hero-visual-test";
 
 function VisualEditorHeroFixture() {
-  const hiddenText = new URLSearchParams(window.location.search).get("hiddenText") === "1";
+  const search = new URLSearchParams(window.location.search);
+  const hiddenText = search.get("hiddenText") === "1";
+  const pageCanvas = search.get("pageCanvas") === "1";
+  const blockId = pageCanvas ? "page-hero-overlay-test" : "template-editor:hero-visual-test";
   const [props, setProps] = useState<Record<string, any>>({
     id: blockId,
     desktopImage: "/svg/template-hero.svg",
-    mobileImage: "/svg/template-hero.svg",
+    mobileImage: search.get("inheritImage") === "1" ? "" : "/svg/template-hero.svg",
     title: "",
     eyebrow: "",
     subtitle: "",
-    actionText: "",
+    actionText: search.get("action") ?? "",
     targetType: "none",
     ...(hiddenText ? {
       __instanceOverrides: {
@@ -77,6 +79,18 @@ function VisualEditorHeroFixture() {
     layoutConfig: props,
   } as any;
 
+  const canvas = (
+    <section aria-label="中央画布测试区" className="visual-editor-fixture__canvas">
+      <div className={search.get("selected") === "1" ? "DraggableComponent--isSelected" : undefined}>
+        <ContentTemplateContractFrame moduleType={moduleType} mode="editor" props={props}>
+          <HeroSection module={pageModule} editMode />
+        </ContentTemplateContractFrame>
+      </div>
+    </section>
+  );
+
+  if (pageCanvas) return canvas;
+
   return (
     <main className="visual-editor-fixture">
       <aside aria-label="属性面板测试区">
@@ -124,11 +138,7 @@ function VisualEditorHeroFixture() {
         ) : null}
         <pre data-testid="visual-state">{JSON.stringify(props.__instanceOverrides ?? null)}</pre>
       </aside>
-      <section aria-label="中央画布测试区" className="visual-editor-fixture__canvas">
-        <ContentTemplateContractFrame moduleType={moduleType} mode="editor" props={props}>
-          <HeroSection module={pageModule} editMode />
-        </ContentTemplateContractFrame>
-      </section>
+      {canvas}
     </main>
   );
 }

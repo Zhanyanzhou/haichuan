@@ -843,7 +843,6 @@ async function readProjection(
     status: "PUBLISHED",
     publicationQualityStatus: "READY",
     visibility: "PUBLIC",
-    ...(config.releaseProfile === "lead-generation" ? { NOT: { salesMode: "DIRECT_PURCHASE" } } : {}),
   };
   const products = await database.product.findMany({
     where: productWhere,

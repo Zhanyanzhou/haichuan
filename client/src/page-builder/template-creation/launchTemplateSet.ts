@@ -293,7 +293,7 @@ const PAGE_HERO: MasterSpec = {
   layoutType: "全幅图片 + 内容覆盖",
   desktopRatio: "16:9",
   visualRole: "primary-stage",
-  recommendedFor: ["home", "about", "products", "catalog", "custom", "contact"],
+  recommendedFor: ["home", "products", "catalog", "custom", "about", "contact"],
   body: {
     id: "stage",
     type: "Stack",
@@ -506,7 +506,7 @@ const EDITORIAL_SPLIT: MasterSpec = {
   layoutType: "左图右文",
   desktopRatio: "3:2",
   visualRole: "feature-stage",
-  recommendedFor: ["home", "products", "about", "custom", "contact"],
+  recommendedFor: ["home", "products", "custom", "about", "contact"],
   body: blockBody([
     splitRow(
       structure(
@@ -597,7 +597,7 @@ const CRAFT_DETAIL: MasterSpec = {
   layoutType: "左图右文",
   desktopRatio: "4:5",
   visualRole: "feature-stage",
-  recommendedFor: ["home", "products", "about", "custom"],
+  recommendedFor: ["home", "products", "custom", "about"],
   body: blockBody([
     splitRow(
       structure(

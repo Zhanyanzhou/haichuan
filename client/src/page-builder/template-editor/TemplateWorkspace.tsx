@@ -36,6 +36,7 @@ import type { TemplateInspectorIssueTarget } from "./templateInspectorCapabiliti
 import type { TemplateEditorDraft } from "./types";
 import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
 import type { TemplateDefinitionV2 } from "../template-definition";
+import { catalogCardName } from "./catalogCardName";
 import {
   type DynamicTemplateResource,
   type PublishedDynamicTemplateResource,
@@ -1376,12 +1377,12 @@ export default function TemplateWorkspace({
           <button
             type="button"
             className="template-editor__workspace-subject template-editor__mobile-settings"
-            aria-label={previewMode ? `当前模板：${draft.definition.name}` : "打开模板设置"}
+            aria-label={previewMode ? `当前模板：${catalogCardName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)}` : "打开模板设置"}
             disabled={previewMode || publishing || lifecycleBusy || saveStatus === "saving" || (Boolean(publishReview) && !controller.publishIssueEditing)}
             onClick={() => window.dispatchEvent(new Event("template-editor:open-settings"))}
           >
             <small>{previewMode ? "当前模板" : "模板设置 · 名称与尺寸"}</small>
-            <strong>{draft.definition.name}</strong>
+            <strong>{catalogCardName(draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole, draft.definition.name)}</strong>
           </button>
         ) : null}
         {previewMode ? (

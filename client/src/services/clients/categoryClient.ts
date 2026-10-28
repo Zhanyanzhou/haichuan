@@ -128,12 +128,14 @@ export const categoryApi = {
     }
     return api.put(`/categories/${id}`, data);
   },
-  delete: async (id: number) => {
+  delete: async (id: number, moveTo?: number) => {
     if (USE_MOCK) {
       await mockDelay(200);
       return mockResponse({ success: true });
     }
-    return api.delete(`/categories/${id}`);
+    return api.delete(`/categories/${id}`, {
+      params: moveTo ? { moveTo } : undefined,
+    });
   },
   reorder: async (items: CategorySortItem[]) => {
     if (USE_MOCK) {

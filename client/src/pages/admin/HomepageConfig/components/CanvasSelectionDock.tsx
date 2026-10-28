@@ -15,7 +15,9 @@ import {
 } from "@ant-design/icons";
 import { registerOverlayPortal, useGetPuck } from "@puckeditor/core";
 import { ROOT_ZONE, useHomepagePuck } from "../editor-store";
-import { getModuleDisplayName } from "../editor-utils";
+import { getModuleDisplayName, resolveTemplateSectionRole } from "../editor-utils";
+import { useResolvedDynamicTemplateDefinitions } from "@/page-builder/dynamic-template-instance/registry";
+import { usePublishedTemplateSectionRoles } from "@/page-builder/template-editor/publishedTemplateSectionRoles";
 import type { PuckProps } from "@/page-builder/types";
 import {
   deletePageModules,
@@ -56,6 +58,8 @@ export default function CanvasSelectionDock({
   const [dockHost, setDockHost] = useState<HTMLElement | null>(null);
   const [canvasReadyRevision, setCanvasReadyRevision] = useState(0);
   const appData = useHomepagePuck((state) => state.appState.data);
+  const resolvedDefinitions = useResolvedDynamicTemplateDefinitions();
+  const rolesByTemplateId = usePublishedTemplateSectionRoles((state) => state.rolesByTemplateId);
   const selectedItem = useHomepagePuck((state) => state.selectedItem);
   const componentId = String(selectedItem?.props?.id ?? "");
   const content = appData.content as Array<{
@@ -66,6 +70,13 @@ export default function CanvasSelectionDock({
     (item) => item.props?.id === componentId,
   );
   const selectedModule = selectedIndex >= 0 ? content[selectedIndex] : null;
+  const selectedDisplayName = selectedModule
+    ? getModuleDisplayName(
+      selectedModule.type,
+      selectedModule.props,
+      resolveTemplateSectionRole(selectedModule.props, { definitions: resolvedDefinitions, rolesByTemplateId }),
+    )
+    : "";
   const componentType = selectedModule?.type ?? "";
   const selectedLocked = Boolean(selectedModule?.props?.locked);
   const canMoveUp =
@@ -285,12 +296,8 @@ export default function CanvasSelectionDock({
   const deleteSelected = () => {
     if (readOnly) return;
     if (!selectedModule || selectedLocked) return;
-    const displayName = getModuleDisplayName(
-      selectedModule.type || componentType,
-      selectedModule.props,
-    );
     modal.confirm({
-      title: `删除“${displayName}”？`,
+      title: `删除“${selectedDisplayName}”？`,
       content: "删除后可在本次编辑中撤销；保存页面草稿不会立即更新公开页面。",
       okText: "删除模块",
       okButtonProps: { danger: true },
@@ -313,7 +320,7 @@ export default function CanvasSelectionDock({
           ref={portalRef}
           className="homepage-editor__canvas-selection-dock"
           role="toolbar"
-          aria-label={`调整“${getModuleDisplayName(selectedModule.type, selectedModule.props)}”模块`}
+          aria-label={`调整“${selectedDisplayName}”模块`}
           style={
             dockPosition
               ? { left: dockPosition.left, top: dockPosition.top }

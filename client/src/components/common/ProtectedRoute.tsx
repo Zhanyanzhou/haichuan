@@ -1,5 +1,5 @@
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Result, Button, Spin } from 'antd';
+import { Result, Button } from 'antd';
 import { useAuthStore } from '@/store/authStore';
 import { useEffect } from 'react';
 import { authApi } from '@/services/api';
@@ -8,6 +8,7 @@ import { unwrapResponse } from '@/utils/unwrap';
 import { adminLandingRoute } from '@/config/adminRouteAccess';
 import type { User } from '@/types';
 import { useState } from 'react';
+import RouteLoading from '@/components/common/RouteLoading';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -62,12 +63,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, roles }) => {
         </div>
       );
     }
-    return (
-      <div className="flex min-h-screen items-center justify-center gap-3" role="status">
-        <Spin size="large" />
-        <span>正在验证后台登录状态…</span>
-      </div>
-    );
+    return <RouteLoading label="正在验证后台登录状态…" />;
   }
 
   // 未登录 → 跳转登录页

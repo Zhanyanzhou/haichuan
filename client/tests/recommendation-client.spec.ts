@@ -24,23 +24,17 @@ async function signInCustomer(page: Page) {
   });
 }
 
-test("商品详情以客户 Cookie 会话请求 8 条相似作品并渲染结果", async ({ page }) => {
+test("商品详情不把其他作品列在选款中心之外", async ({ page }) => {
   const detail = publicProduct(12, "DISPLAY_ONLY");
-  const displayOnlySimilar = {
-    ...publicProduct(22, "DISPLAY_ONLY"),
-    name: "相似推荐合同作品",
-  };
-  const directPurchaseSimilar = {
-    ...publicProduct(23, "DIRECT_PURCHASE", { available: true }),
-    name: "直购推荐合同作品",
-  };
+  let similarRequested = false;
 
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
     if (path.endsWith("/products/catalog/12")) return fulfill(route, detail);
     if (path.endsWith("/recommendations/similar/12")) {
-      return fulfill(route, [displayOnlySimilar, directPurchaseSimilar]);
+      similarRequested = true;
+      return fulfill(route, []);
     }
     if (path.endsWith("/reviews/product/12")) {
       return fulfill(route, { list: [], total: 0, averageRating: null });
@@ -58,31 +52,14 @@ test("商品详情以客户 Cookie 会话请求 8 条相似作品并渲染结果
   });
   await signInCustomer(page);
 
-  const requestPromise = page.waitForRequest((request) =>
-    new URL(request.url()).pathname.endsWith("/recommendations/similar/12"),
-  );
   await page.goto("/products/12");
-  const request = await requestPromise;
-
-  expect(new URL(request.url()).searchParams.get("limit")).toBe("8");
-  expect(request.headers().authorization).toBeUndefined();
-  expect(request.headers()["x-session-domain"]).toBe("customer");
-  await expect(page.getByText("相关作品", { exact: true })).toBeVisible();
-  await expect(page.getByText("相似推荐合同作品", { exact: true })).toBeVisible();
-  const displayOnlyCard = page.getByRole("link", { name: /相似推荐合同作品/ });
-  const directPurchaseCard = page.getByRole("link", { name: /直购推荐合同作品/ });
-  await expect(displayOnlyCard).not.toContainText("¥");
-  await expect(directPurchaseCard).toContainText("¥12,800");
+  await expect(page.getByRole("heading", { name: "构图验证作品 12", exact: true })).toBeVisible();
+  await expect(page.getByText("相关作品", { exact: true })).toHaveCount(0);
+  expect(similarRequested).toBe(false);
 });
 
-test("客户中心以客户 Cookie 会话请求 6 条猜你喜欢并渲染结果", async ({ page }) => {
-  const recommendation = {
-    id: 31,
-    code: "HC-REC-031",
-    name: "客户中心推荐合同作品",
-    price: 16800,
-    images: [],
-  };
+test("客户中心不列出选款中心之外的推荐作品", async ({ page }) => {
+  let forYouRequested = false;
 
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -102,7 +79,8 @@ test("客户中心以客户 Cookie 会话请求 6 条猜你喜欢并渲染结果
     }
     if (path.endsWith("/partner-applications/me")) return fulfill(route, null);
     if (path.endsWith("/recommendations/for-you")) {
-      return fulfill(route, [recommendation]);
+      forYouRequested = true;
+      return fulfill(route, []);
     }
     if (path.endsWith("/settings/flags")) {
       return fulfill(route, {
@@ -116,15 +94,8 @@ test("客户中心以客户 Cookie 会话请求 6 条猜你喜欢并渲染结果
   });
   await signInCustomer(page);
 
-  const requestPromise = page.waitForRequest((request) =>
-    new URL(request.url()).pathname.endsWith("/recommendations/for-you"),
-  );
   await page.goto("/customer");
-  const request = await requestPromise;
-
-  expect(new URL(request.url()).searchParams.get("limit")).toBe("6");
-  expect(request.headers().authorization).toBeUndefined();
-  expect(request.headers()["x-session-domain"]).toBe("customer");
-  await expect(page.getByRole("region", { name: "为你推荐" })).toBeVisible();
-  await expect(page.getByText("客户中心推荐合同作品", { exact: true })).toBeVisible();
+  await expect(page.getByText("推荐合同测试客户", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "为你推荐" })).toHaveCount(0);
+  expect(forYouRequested).toBe(false);
 });

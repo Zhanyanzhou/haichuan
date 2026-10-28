@@ -62,6 +62,12 @@ function resolveDirectSource(src: string): string {
   return isPublicProductMedia(src) ? `${API_BASE}${src}` : src;
 }
 
+/** 灯箱等原生 img 不能走 SecureImage 时，使用同一条可请求的公开媒体地址。 */
+export function resolveRenderableImageSrc(src: string): string {
+  const normalized = src.trim();
+  return normalized ? resolveDirectSource(normalized) : "";
+}
+
 function normalizeResponsiveSrcSet(value: string | undefined): string | undefined {
   const input = value?.trim();
   if (!input || input.length > 4096 || /[\r\n]/.test(input)) return undefined;

@@ -8,7 +8,13 @@ import { BLOCK_META } from "@/page-builder/config/blockMeta";
 import { isMobileCanvasWidth } from "@/page-builder/config/blockContracts";
 import type { PublishValidationIssue } from "@/page-builder/inspector/publishValidation";
 import { collapseManagedMediaAuthorizationIssues } from "@/page-builder/inspector/managedMediaPublishIssues";
-import { DYNAMIC_TEMPLATE_BLOCK_TYPE } from "@/page-builder/dynamic-template-instance/types";
+import {
+  DYNAMIC_TEMPLATE_BLOCK_TYPE,
+  dynamicTemplateVersionKey,
+  readResolvedDynamicTemplateDefinitions,
+  type ResolvedDynamicTemplateDefinitionMap,
+} from "@/page-builder/dynamic-template-instance/types";
+import { catalogCardName } from "@/page-builder/template-editor/catalogCardName";
 import { isPuckDocument, type PuckDocument, type PuckProps } from "@/page-builder/types";
 
 export type ViewportPreset = {
@@ -195,17 +201,69 @@ export function resolvePublishValidationIssues(result: {
   ]);
 }
 
+function sectionRoleOnDefinition(definition: {
+  metadata?: { sectionRole?: string };
+  templateRecipe?: { sectionRole?: string };
+} | undefined) {
+  return definition?.metadata?.sectionRole || definition?.templateRecipe?.sectionRole || undefined;
+}
+
+/**
+ * 页面结构、画布和属性标题与模板组件库使用同一区块角色。
+ * 先读页面锁定的精确版本，没有角色时再按 templateId 用目录里的角色。
+ */
+export function resolveTemplateSectionRole(
+  props: Record<string, unknown> | undefined,
+  sources: {
+    definitions?: ResolvedDynamicTemplateDefinitionMap | null;
+    rolesByTemplateId?: Readonly<Record<string, string>> | null;
+  } = {},
+) {
+  const templateId = typeof props?.templateId === "string" ? props.templateId : undefined;
+  const version = props?.templateVersion;
+  if (templateId && typeof version === "number" && Number.isInteger(version)) {
+    const lockedRole = sectionRoleOnDefinition(
+      sources.definitions?.[dynamicTemplateVersionKey(templateId, version)]?.definition,
+    );
+    if (lockedRole) return lockedRole;
+  }
+  if (templateId && sources.definitions) {
+    for (const item of Object.values(sources.definitions)) {
+      if (item.templateId !== templateId) continue;
+      const role = sectionRoleOnDefinition(item.definition);
+      if (role) return role;
+    }
+  }
+  if (templateId && sources.rolesByTemplateId?.[templateId]) {
+    return sources.rolesByTemplateId[templateId];
+  }
+  return undefined;
+}
+
+/** 从页面文档上的解析缓存读取区块角色。Puck 画布状态经常丢掉这个字段，界面还应同时读注册表和目录。 */
+export function sectionRoleFromResolvedDocument(
+  document: object | null | undefined,
+  props?: Record<string, unknown>,
+) {
+  return resolveTemplateSectionRole(props, {
+    definitions: readResolvedDynamicTemplateDefinitions(
+      (document as { resolvedDynamicTemplates?: unknown } | null | undefined)?.resolvedDynamicTemplates,
+    ),
+  });
+}
+
 export function getModuleDisplayName(
   type: string,
   props?: Record<string, unknown>,
+  sectionRole?: string,
 ) {
-  // 普通模块继续使用固定模板名；动态模板实例的 moduleName 由固定模板版本写入，
-  // 表达当前实例引用的模板身份，不是运营可随意填写的历史自定义名称。
+  // 动态模板在目录、页面结构和属性标题使用同一区块角色名。
+  // moduleName 仍是模板保存名，只在没有角色时回退显示。
   if (type === DYNAMIC_TEMPLATE_BLOCK_TYPE) {
     const templateName = typeof props?.moduleName === "string"
       ? props.moduleName.trim()
       : "";
-    if (templateName) return templateName;
+    if (templateName || sectionRole) return catalogCardName(sectionRole, templateName);
   }
   return BLOCK_META[type]?.name ?? type;
 }

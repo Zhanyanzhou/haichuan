@@ -206,4 +206,52 @@ test.describe("Hero 所见即所得编辑器（确定性 UI）", () => {
     );
     expect(invalidFocusTargets).toEqual([]);
   });
+
+  test("页面装修的空文案退出手机文档流，选中后才浮出添加入口", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/__visual-editor-hero?pageCanvas=1");
+    const hero = page.locator(".hc-phase1-hero");
+    await expect(hero).toBeVisible();
+    await expect(page.locator(".hc-phase1-hero__copy-band")).toHaveCount(0);
+    await expect(page.locator(".hc-phase1-hero__copy-shade")).toHaveCount(0);
+    await expect(page.getByText("查看详情")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "点击添加主标题" })).toBeHidden();
+
+    const emptyBox = await hero.evaluate((node) => {
+      const media = node.querySelector(".hc-phase1-hero__media");
+      return {
+        section: node.getBoundingClientRect().height,
+        media: media?.getBoundingClientRect().height ?? 0,
+      };
+    });
+    expect(emptyBox.media).toBeGreaterThan(200);
+    expect(Math.abs(emptyBox.section - emptyBox.media)).toBeLessThan(2);
+
+    await page.goto("/__visual-editor-hero?pageCanvas=1&selected=1");
+    const titleChip = page.getByRole("button", { name: "点击添加主标题" });
+    await expect(titleChip).toBeVisible();
+    const selectedBox = await hero.evaluate((node) => {
+      const media = node.querySelector(".hc-phase1-hero__media");
+      return {
+        section: node.getBoundingClientRect().height,
+        media: media?.getBoundingClientRect().height ?? 0,
+      };
+    });
+    expect(Math.abs(selectedBox.section - selectedBox.media)).toBeLessThan(2);
+
+    await page.goto("/__visual-editor-hero?pageCanvas=1&action=预约到店");
+    const band = page.locator(".hc-phase1-hero__copy-band");
+    await expect(band).toBeVisible();
+    await expect(band).toContainText("预约到店");
+    await expect(band.getByText("点击添加主标题")).toHaveCount(0);
+    await expect(band.getByText("点击添加眉题")).toHaveCount(0);
+    await expect(band.getByText("点击添加副标题")).toHaveCount(0);
+    const actionMargin = await band.locator(".hc-content-template__action").evaluate((node) => getComputedStyle(node).marginTop);
+    expect(actionMargin).toBe("0px");
+
+    await page.goto("/__visual-editor-hero?pageCanvas=1&inheritImage=1");
+    await expect(page.getByText("桌面宽图铺入手机框")).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.getByText("桌面宽图铺入手机框")).toBeHidden();
+  });
 });

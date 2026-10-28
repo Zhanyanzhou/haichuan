@@ -91,7 +91,7 @@ for (const viewport of [
   { name: "desktop", width: 1440, height: 900 },
   { name: "mobile", width: 390, height: 844 },
 ] as const) {
-  test(`${viewport.name}：目录消费 listingImage，详情首显 primaryImage`, async ({ page }) => {
+  test(`${viewport.name}：目录按上传顺序显示第一张，详情首显 primaryImage`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await mockPublicApi(page);
 
@@ -99,14 +99,28 @@ for (const viewport of [
     const catalogMedia = page.locator("[data-catalog-product-media]").first();
     await expect(catalogMedia).toHaveAttribute(
       "data-catalog-product-media-src",
-      "/products/public/77/media/102",
+      "/products/public/77/media/101",
     );
 
     await page.goto("/products/77");
-    await expect(page.getByRole("button", { name: "放大查看作品图" })).toHaveAttribute(
-      "data-product-main-media-id",
-      "103",
-    );
+    const mainMedia = page.locator(".product-detail-page__main-media");
+    await expect(mainMedia).toHaveAttribute("data-product-main-media-id", "103");
+    const zoomPane = page.locator(".product-detail-page__zoom-pane");
+    await mainMedia.hover({ position: { x: 48, y: 120 } });
+    if (viewport.name === "desktop") {
+      await expect(zoomPane).toBeVisible();
+      await expect(page.locator(".product-detail-page__zoom-lens")).toBeVisible();
+      await expect.poll(() => mainMedia.locator(".product-detail-page__photo").evaluate((image) => {
+        const transform = getComputedStyle(image).transform;
+        return transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)";
+      })).toBe(true);
+      await page.mouse.move(0, 0);
+      await expect(zoomPane).toBeHidden();
+    } else {
+      await expect(zoomPane).toBeHidden();
+    }
+    await mainMedia.click({ position: { x: 48, y: 120 } });
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect.poll(() =>
       page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
