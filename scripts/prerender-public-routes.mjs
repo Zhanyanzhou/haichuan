@@ -152,12 +152,40 @@ const HOME_FIRST_FOLD_CSS = `
     .hc-prerendered-home__copy>div{max-width:620px}.hc-prerendered-home h1{max-width:620px;margin:0;font-family:"Noto Serif SC",serif;font-size:clamp(42px,5.2vw,76px);font-weight:400;line-height:1.14}.hc-prerendered-home__eyebrow{margin:0 0 18px;font-size:11px;letter-spacing:.18em;line-height:1.4}.hc-prerendered-home__subtitle{max-width:620px;margin:20px 0 0;font-family:"Noto Serif SC",serif;font-size:clamp(17px,1.45vw,22px);font-style:italic;line-height:1.7}
   </style>`;
 
+function findRootMount(html) {
+  const open = /<div\b(?=[^>]*\bid\s*=\s*["']root["'])[^>]*>/i.exec(html);
+  if (!open) return null;
+  const tag = /<\/?div\b[^>]*>/gi;
+  tag.lastIndex = open.index + open[0].length;
+  let depth = 1;
+  let match;
+  while ((match = tag.exec(html))) {
+    depth += match[0].startsWith("</") ? -1 : 1;
+    if (depth === 0) {
+      return {
+        start: open.index,
+        end: tag.lastIndex,
+        inner: html.slice(open.index + open[0].length, match.index),
+      };
+    }
+  }
+  return null;
+}
+
+function isReplaceableRoot(inner) {
+  const trimmed = inner.trim();
+  if (!trimmed) return true;
+  if (/<script\b/i.test(trimmed)) return false;
+  return /^<div\b(?=[^>]*\bclass\s*=\s*["']site-route-loading["'])[\s\S]*<\/div>$/i.test(trimmed)
+    && trimmed.includes("页面加载中");
+}
+
 export function renderPrerenderedHtml(baseHtml, snapshot, route) {
   if (typeof baseHtml !== "string" || !/<html\b/i.test(baseHtml) || !/<head\b/i.test(baseHtml) || !/<\/head\s*>/i.test(baseHtml)) {
     fail("Base HTML must contain html and head elements.");
   }
-  const rootPattern = /<div\b(?=[^>]*\bid\s*=\s*["']root["'])[^>]*>\s*<\/div\s*>/i;
-  if (!rootPattern.test(baseHtml)) {
+  const initialMount = findRootMount(baseHtml);
+  if (!initialMount || !isReplaceableRoot(initialMount.inner)) {
     fail('Base HTML must contain an empty <div id="root"></div> mount point.');
   }
 
@@ -207,10 +235,12 @@ export function renderPrerenderedHtml(baseHtml, snapshot, route) {
     return `<html${withoutLang} lang="${route.locale}">`;
   });
   html = html.replace(/<\/head\s*>/i, `${managedHead}\n</head>`);
-  html = html.replace(
-    rootPattern,
-    `<div id="root" data-prerendered="true" data-prerendered-path="${escapeHtml(route.path)}" data-published-content-hash="${route.contentHash}">${route.path === "/" ? renderHomeFirstFold(route, snapshot.origin) : route.renderedBodyHtml}${route.bootstrapPageDocument ? `<script id="hc-published-page-document" type="application/json">${safeJson(route.bootstrapPageDocument)}</script>` : ""}</div>`,
-  );
+  const mount = findRootMount(html);
+  if (!mount || !isReplaceableRoot(mount.inner)) {
+    fail('Base HTML must contain an empty <div id="root"></div> mount point.');
+  }
+  const renderedRoot = `<div id="root" data-prerendered="true" data-prerendered-path="${escapeHtml(route.path)}" data-published-content-hash="${route.contentHash}">${route.path === "/" ? renderHomeFirstFold(route, snapshot.origin) : route.renderedBodyHtml}${route.bootstrapPageDocument ? `<script id="hc-published-page-document" type="application/json">${safeJson(route.bootstrapPageDocument)}</script>` : ""}</div>`;
+  html = `${html.slice(0, mount.start)}${renderedRoot}${html.slice(mount.end)}`;
   return html;
 }
 

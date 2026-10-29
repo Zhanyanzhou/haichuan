@@ -236,3 +236,18 @@ test("export and pre-render command-line entrypoints create a verified route tre
   assert.ok(existsSync(join(outputDirectory, "about", "index.html")));
   assert.ok(existsSync(join(outputDirectory, "prerendered-routes.json")));
 });
+
+test("the published SPA shell can replace its loading placeholder", async (t) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-shell-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const baseHtml = readFileSync(fileURLToPath(new URL("../client/index.html", import.meta.url)), "utf8");
+  const manifest = await prerenderPublicRoutes({
+    snapshot: createPublicSeoSnapshot(makeSnapshotInput([makeRoute()])),
+    baseHtml,
+    outDir: temporaryDirectory,
+  });
+  const html = readFileSync(join(temporaryDirectory, "about", "index.html"), "utf8");
+  assert.equal(manifest.routes.length, 1);
+  assert.match(html, /data-prerendered-path="\/about"/);
+  assert.doesNotMatch(html, /site-route-loading/);
+});
