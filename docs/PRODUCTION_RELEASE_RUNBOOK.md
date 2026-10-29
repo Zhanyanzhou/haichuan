@@ -78,6 +78,14 @@ bash scripts/deploy-preproduction.sh \
 
 已有上一版 digest-pinned 三镜像时，容器替换后的失败会自动恢复上一版 server/client/backup。第一次从历史临时 tag 切换到不可变 digest 制品时没有可信的自动回滚引用，环境文件必须显式设置沿用名称 `PREPRODUCTION_INITIAL_SIGNED_CUTOVER_AUTHORIZED=1`；这是一次性切换风险授权，不代表 baseline 已执行签名，也不得作为长期默认值。完成首次切换后应删除该字段。脚本不读取或打印密钥值，不把 `.env` 复制进发布目录。
 
+### 1.1.1 生产一次性部署入口
+
+生产只能使用同 SHA 的 `production/high` manifest、`contentReady=true` 的 `approved-snapshot` 和固定三镜像 digest。入口为 `scripts/deploy-production.sh`，参数与预发布一致，但环境文件使用生产配置；`--dry-run` 只完成清单、九个 sidecar、签名内容、环境和 Compose 展开检查，不检查或变更容器、不拉取镜像。脚本验签后核对 manifest provenance、三镜像签名、SLSA v1、SPDX 2.3、镜像 OCI labels 和客户端 SEO snapshot，再执行只读 migration status 与 release preflight；不会执行 migration、bootstrap-admin 或 DNS 切换。
+
+三个应用容器均不存在时，必须显式设置 `PRODUCTION_INITIAL_SIGNED_CUTOVER_AUTHORIZED=1`，完成后立即恢复为 `0`。已有容器必须属于同一 Compose 生产项目、具有匹配的生产镜像和 OCI 身份，否则停止；预发布容器不得作为生产回滚点。只有上一版 migration bundle 与本次一致时才允许自动回滚，否则失败后保持人工处置，不自动降级。生产与预发布使用固定容器名，不得长期同机并行；三项外部卷必须已经存在且身份各不相同。
+
+替换应用统一使用 `--no-build`。部署后检查 health/ready、六页 API＋HTML、正式 SEO、可信 Host、安全响应头、英文路由和英文公开 API 的退役行为；任一项失败即停止放量。该脚本只完成受控环境部署，不代表 Go 或公开放量已获批准。
+
 ### 1.2 PageDocument 内容发布与公开路由激活
 
 后台把 PageDocument 标记为已发布，只会更新数据库中的已审核中文发布事实，不会修改正在运行的 client 镜像，也不会授予运行时进程生成 Nginx 路由或读取生产库的隐式权限。英文公开站已按 D.35 退役：SEO snapshot 不得包含英文路由，历史 `/en` 与 `/en/<path>` 只允许同源 `308` 到对应中文路径，公开内容接口必须拒绝 `locale=en`；`/en//...`、编码斜杠和反斜杠必须失败关闭。

@@ -28,6 +28,7 @@ import {
   PROFILE_MIGRATION,
   PRODUCT_IMAGE_URL_INDEX_MIGRATION,
   PRODUCT_QUALITY_V3_QUARANTINE_MIGRATION,
+  PRODUCT_QUALITY_V4_QUARANTINE_MIGRATION,
   QUOTATION_CREATION_IDEMPOTENCY_MIGRATION,
   SERVICE_PRIVACY_CONSENT_HASH_MIGRATION,
   STOREFRONT_TRAFFIC_HOURLY_MIGRATION,
@@ -72,7 +73,21 @@ test('migration inventory is the expected complete ordered set', () => {
     QUOTATION_CREATION_IDEMPOTENCY_MIGRATION,
     LEAD_RETENTION_DISPOSITION_IDEMPOTENCY_MIGRATION,
     STOREFRONT_TRAFFIC_HOURLY_MIGRATION,
+    PRODUCT_QUALITY_V4_QUARANTINE_MIGRATION,
   ]);
+});
+
+test('product quality v4 migration fails closed for every v3 READY row', () => {
+  const sql = fs.readFileSync(
+    path.join(migrationsDirectory, PRODUCT_QUALITY_V4_QUARANTINE_MIGRATION, 'migration.sql'),
+    'utf8',
+  );
+  assert.match(sql, /UPDATE `products`/);
+  assert.match(sql, /`publication_quality_status` = 'QUARANTINED'/);
+  assert.match(sql, /`publication_quality_hash` = NULL/);
+  assert.match(sql, /`publication_quality_checked_at` = NULL/);
+  assert.match(sql, /WHERE `publication_quality_status` = 'READY'/);
+  assert.doesNotMatch(sql, /\b(?:DELETE|TRUNCATE|DROP|ALTER)\b/i);
 });
 
 test('storefront traffic hourly migration only adds an empty aggregate table', () => {

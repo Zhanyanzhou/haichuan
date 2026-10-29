@@ -779,6 +779,7 @@ const knownExampleKeys = new Set([
   ...migrationCapabilityEvidenceKeys,
   ...releaseDeploymentKeys,
   ...composeInterpolationKeys,
+  ...collectMatches(read("scripts/prepare-production-deploy.mjs"), [/\benv\.([A-Z][A-Z0-9_]*)/g]),
   ...collectMatches(read("server/scripts/restore-drill.sh"), [/\$\{([A-Z][A-Z0-9_]*)/g]),
 ]);
 const staleExampleKeys = sorted(
