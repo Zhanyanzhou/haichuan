@@ -190,3 +190,31 @@ test("HTTP SEO verification requires locale-correct noindex 404 documents", () =
     /did not remain noindex,nofollow/,
   );
 });
+
+test("preproduction published HTML matches noindex and production HTML stays indexable", () => {
+  const route = makeRoute();
+  const preview = createPublicSeoSnapshot({
+    ...makeSnapshotInput([route]),
+    sourceStage: "preproduction",
+    contentReady: true,
+  });
+  const previewHtml = renderPrerenderedHtml(BASE_HTML, preview, preview.routes[0]);
+  assert.doesNotThrow(() => assertPublishedSnapshotHtml(
+    previewHtml,
+    preview.routes[0],
+    preview.origin,
+    "noindex,nofollow",
+  ));
+  assert.throws(
+    () => assertPublishedSnapshotHtml(previewHtml, preview.routes[0], preview.origin),
+    /does not match its immutable SEO snapshot/,
+  );
+
+  const production = createPublicSeoSnapshot(makeSnapshotInput([route]));
+  const productionHtml = renderPrerenderedHtml(BASE_HTML, production, production.routes[0]);
+  assert.doesNotThrow(() => assertPublishedSnapshotHtml(
+    productionHtml,
+    production.routes[0],
+    production.origin,
+  ));
+});

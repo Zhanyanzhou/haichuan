@@ -228,7 +228,7 @@ export function renderPrerenderedHtml(baseHtml, snapshot, route) {
   const managedHead = [
     `  <title>${escapeHtml(route.title)}</title>`,
     `  <meta data-public-seo="managed" name="description" content="${escapeHtml(route.description)}">`,
-    "  <meta data-public-seo=\"managed\" name=\"robots\" content=\"index,follow,max-image-preview:large\">",
+    `  <meta data-public-seo="managed" name="robots" content="${snapshot.sourceStage === "preproduction" ? "noindex,nofollow" : "index,follow,max-image-preview:large"}">`,
     `  <meta data-public-seo="managed" name="published-content-hash" content="${route.contentHash}">`,
     `  <link data-public-seo="managed" rel="canonical" href="${escapeHtml(canonicalUrl)}">`,
     ...alternates,

@@ -285,3 +285,25 @@ test("the published SPA shell can replace its loading placeholder", async (t) =>
   assert.match(html, /data-prerendered-path="\/about"/);
   assert.doesNotMatch(html, /site-route-loading/);
 });
+
+test("preproduction published HTML is noindex and production HTML stays indexable", async (t) => {
+  const previewDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-preview-"));
+  const productionDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-production-"));
+  t.after(() => {
+    rmSync(previewDirectory, { recursive: true, force: true });
+    rmSync(productionDirectory, { recursive: true, force: true });
+  });
+  const preview = createPublicSeoSnapshot({
+    ...makeSnapshotInput([makeRoute()]),
+    sourceStage: "preproduction",
+    contentReady: true,
+  });
+  const production = createPublicSeoSnapshot(makeSnapshotInput([makeRoute()]));
+  await prerenderPublicRoutes({ snapshot: preview, baseHtml: BASE_HTML, outDir: previewDirectory });
+  await prerenderPublicRoutes({ snapshot: production, baseHtml: BASE_HTML, outDir: productionDirectory });
+  const previewHtml = readFileSync(join(previewDirectory, "about", "index.html"), "utf8");
+  const productionHtml = readFileSync(join(productionDirectory, "about", "index.html"), "utf8");
+  assert.match(previewHtml, /name="robots" content="noindex,nofollow"/);
+  assert.doesNotMatch(previewHtml, /index,follow,max-image-preview:large/);
+  assert.match(productionHtml, /name="robots" content="index,follow,max-image-preview:large"/);
+});

@@ -154,6 +154,36 @@ test("reconciliation rejects non-public response types, noindex HTML, and invali
   );
 });
 
+test("preproduction reconciliation requires noindex HTML and response header", async () => {
+  const previewManifest = manifest();
+  previewManifest.publicSeo.sourceStage = "preproduction";
+  await assert.rejects(
+    verifyPublicPageSync({
+      manifest: previewManifest,
+      baseUrl: "http://127.0.0.1:8081",
+      mode: "full",
+      fetchImpl: synchronizedFetch(),
+    }),
+    { message: "PUBLIC_PAGE_SYNC_HTML_INDEXABLE_INVALID" },
+  );
+  const result = await verifyPublicPageSync({
+    manifest: previewManifest,
+    baseUrl: "http://127.0.0.1:8081",
+    mode: "full",
+    fetchImpl: async (url) => {
+      const response = await synchronizedFetch()(url);
+      const parsed = new URL(url);
+      if (parsed.pathname.startsWith("/api/")) return response;
+      const html = await response.text();
+      return new Response(
+        `<meta name="robots" content="noindex,nofollow">${html}`,
+        { headers: { "content-type": "text/html", "x-robots-tag": "noindex, nofollow" } },
+      );
+    },
+  });
+  assert.deepEqual(result, { pageCount: 6, mode: "full", skipped: false });
+});
+
 test("safe fallback carries no PageDocument hashes and skips the reconciliation", async () => {
   const result = await verifyPublicPageSync({
     manifest: manifest(false),

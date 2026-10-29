@@ -194,6 +194,12 @@ async function verifyPrerenderManifest(pathname, snapshot) {
     if (!canonicalPattern.test(html)) {
       fail(`Pre-rendered HTML canonical does not match snapshot route ${entry.path}.`);
     }
+    const expectedRobots = snapshot.sourceStage === "preproduction"
+      ? "noindex,nofollow"
+      : "index,follow,max-image-preview:large";
+    if (!html.includes(`name="robots" content="${expectedRobots}"`)) {
+      fail(`Pre-rendered HTML robots policy does not match snapshot stage for route ${entry.path}.`);
+    }
     for (const alternate of route.alternates) {
       const alternateHref = escapeHtmlAttribute(new URL(alternate.path, snapshot.origin).href);
       const alternatePattern = new RegExp(
@@ -220,6 +226,7 @@ async function readPublishedRoutes(options) {
       origin: snapshot.origin,
       schemaVersion: 3,
       contentReady: snapshot.contentReady,
+      sourceStage: snapshot.sourceStage,
       routes: snapshot.routes.map((route) => ({
         pathname: route.path,
         locale: route.locale,
@@ -241,8 +248,14 @@ async function readPublishedRoutes(options) {
     origin: normalizeOptionalOrigin(options.origin),
     schemaVersion: 1,
     contentReady: true,
+    sourceStage: "production",
     routes: routes.sort((left, right) => left.pathname.localeCompare(right.pathname, "en")),
   };
+}
+
+/** 正式环境在内容就绪后保持可收录；预发布即使内容就绪也整站禁止收录。 */
+export function publicationIsSearchIndexable({ sourceStage, contentReady = true } = {}) {
+  return sourceStage !== "preproduction" && contentReady !== false;
 }
 
 function escapeXml(value) {
@@ -254,7 +267,7 @@ function escapeXml(value) {
     .replace(/'/g, "&apos;");
 }
 
-export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1, contentReady = true } = {}) {
+export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1, contentReady = true, sourceStage = "production" } = {}) {
   const hasAlternates = routes.some((route) => Array.isArray(route.alternates) && route.alternates.length > 0);
   const sitemapLines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -263,7 +276,8 @@ export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1, co
       : "<!-- Generated from a verified published-route manifest; do not add unverified URLs by hand. -->",
     `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"${hasAlternates ? ' xmlns:xhtml="http://www.w3.org/1999/xhtml"' : ""}>`,
   ];
-  if (origin) {
+  const indexable = publicationIsSearchIndexable({ sourceStage, contentReady });
+  if (origin && indexable) {
     for (const route of routes) {
       sitemapLines.push("  <url>", `    <loc>${escapeXml(new URL(route.pathname, `${origin}/`).href)}</loc>`);
       if (route.lastModified) sitemapLines.push(`    <lastmod>${route.lastModified}</lastmod>`);
@@ -289,20 +303,21 @@ export function renderPublicSeoArtifacts(origin, routes, { schemaVersion = 1, co
       ? "# Generated from client/seo/published-routes.json; use the generator for production."
       : "# Generated from a verified published-route manifest; use the generator for production.",
     "User-agent: *",
-    ...(contentReady
+    ...(indexable
       ? ["Allow: /", ...disallowedPrefixes.map((prefix) => `Disallow: ${prefix}`)]
       : ["Disallow: /"]),
   ];
-  if (origin && routes.length > 0) robotsLines.push(`Sitemap: ${origin}/sitemap.xml`);
+  if (indexable && origin && routes.length > 0) robotsLines.push(`Sitemap: ${origin}/sitemap.xml`);
   robotsLines.push("");
   return { robots: robotsLines.join("\n"), sitemap: sitemapLines.join("\n") };
 }
 
-export function renderPublicSeoPolicy(contentReady = true) {
+export function renderPublicSeoPolicy(contentReady = true, sourceStage = "production") {
+  const indexable = publicationIsSearchIndexable({ sourceStage, contentReady });
   return [
     "# Generated from the immutable SEO snapshot; included at http scope.",
     "map $request_uri $hc_robots_tag {",
-    `  default ${contentReady ? '\"\"' : '\"noindex, nofollow\"'};`,
+    `  default ${indexable ? '\"\"' : '\"noindex, nofollow\"'};`,
     '  ~*^/(admin|preview|customer|cart|checkout|partner)(/|\\?|$) "noindex, nofollow";',
     "}",
     "",
@@ -400,6 +415,7 @@ async function main() {
   const artifacts = renderPublicSeoArtifacts(published.origin, published.routes, {
     schemaVersion: published.schemaVersion,
     contentReady: published.contentReady,
+    sourceStage: published.sourceStage,
   });
   if (!options.check) await mkdir(options.outputDirectory, { recursive: true });
   await Promise.all([
@@ -409,7 +425,7 @@ async function main() {
       ? [checkOrWrite(options.nginxMap, renderPublicSeoNginxMap(published.routes, { contentReady: published.contentReady }), options.check)]
       : []),
     ...(options.nginxPolicy
-      ? [checkOrWrite(options.nginxPolicy, renderPublicSeoPolicy(published.contentReady), options.check)]
+      ? [checkOrWrite(options.nginxPolicy, renderPublicSeoPolicy(published.contentReady, published.sourceStage), options.check)]
       : []),
     ...(options.nginxOriginRedirect
       ? [checkOrWrite(options.nginxOriginRedirect, renderCanonicalOriginRedirect(published.origin), options.check)]

@@ -68,7 +68,7 @@ function apiDocument(value) {
   return candidate;
 }
 
-async function fetchChecked(fetchImpl, url, label) {
+async function fetchChecked(fetchImpl, url, label, options = {}) {
   let response;
   try {
     response = await fetchImpl(url, {
@@ -86,7 +86,11 @@ async function fetchChecked(fetchImpl, url, label) {
   }
   if (label === "html") {
     if (!contentType.includes("text/html")) fail("PUBLIC_PAGE_SYNC_HTML_CONTENT_TYPE_INVALID");
-    if ((response.headers.get("x-robots-tag") ?? "").toLowerCase().includes("noindex")) {
+    const robotsHeader = (response.headers.get("x-robots-tag") ?? "").toLowerCase();
+    const headerBlocksIndexing = robotsHeader.includes("noindex") && robotsHeader.includes("nofollow");
+    if (options.indexBlocked) {
+      if (!headerBlocksIndexing) fail("PUBLIC_PAGE_SYNC_HTML_INDEXABLE_INVALID");
+    } else if (robotsHeader.includes("noindex")) {
       fail("PUBLIC_PAGE_SYNC_HTML_NOINDEX_INVALID");
     }
   }
@@ -118,6 +122,7 @@ export async function verifyPublicPageSync({
     });
   }
   request ??= fetch;
+  const indexBlocked = manifest?.publicSeo?.sourceStage === "preproduction";
 
   for (const page of pages) {
     const apiUrl = new URL("/api/page-modules/document/published", base);
@@ -140,8 +145,14 @@ export async function verifyPublicPageSync({
     ) fail(`PUBLIC_PAGE_SYNC_API_HASH_MISMATCH:${page.pageKey}`);
 
     if (mode === "full") {
-      const htmlResponse = await fetchChecked(request, new URL(page.path, base), "html");
+      const htmlResponse = await fetchChecked(request, new URL(page.path, base), "html", { indexBlocked });
       const html = await htmlResponse.text();
+      if (indexBlocked && !/name=["']robots["'][^>]*content=["']noindex,nofollow["']/i.test(html)) {
+        fail(`PUBLIC_PAGE_SYNC_HTML_INDEXABLE_INVALID:${page.pageKey}`);
+      }
+      if (!indexBlocked && /name=["']robots["'][^>]*content=["'][^"']*noindex/i.test(html)) {
+        fail(`PUBLIC_PAGE_SYNC_HTML_NOINDEX_INVALID:${page.pageKey}`);
+      }
       if (
         !html.includes(`name="published-content-hash" content="${page.contentHash}"`)
         || !html.includes(`data-published-content-hash="${page.contentHash}"`)

@@ -352,3 +352,27 @@ test("contentReady=false produces global noindex and safe public-route routing",
   assert.match(renderPublicSeoPolicy(false), /default "noindex, nofollow"/);
   assert.doesNotMatch(renderPublicSeoNginxMap([], { contentReady: false }), /index,follow/);
 });
+
+test("ready preproduction stays unindexed while ready production stays indexable", () => {
+  const routes = [{ pathname: "/", locale: "zh-CN", lastModified: "2026-10-29" }];
+  const preview = renderPublicSeoArtifacts("https://preview.example.test", routes, {
+    schemaVersion: 3,
+    contentReady: true,
+    sourceStage: "preproduction",
+  });
+  assert.match(preview.robots, /^Disallow: \/$/m);
+  assert.doesNotMatch(preview.robots, /^Allow: \/$/m);
+  assert.doesNotMatch(preview.robots, /^Sitemap:/m);
+  assert.doesNotMatch(preview.sitemap, /<loc>/);
+  assert.match(renderPublicSeoPolicy(true, "preproduction"), /default "noindex, nofollow"/);
+
+  const production = renderPublicSeoArtifacts("https://jewelry.example.test", routes, {
+    schemaVersion: 3,
+    contentReady: true,
+    sourceStage: "production",
+  });
+  assert.match(production.robots, /^Allow: \/$/m);
+  assert.match(production.robots, /Sitemap: https:\/\/jewelry\.example\.test\/sitemap\.xml/);
+  assert.match(production.sitemap, /<loc>https:\/\/jewelry\.example\.test\/<\/loc>/);
+  assert.match(renderPublicSeoPolicy(true, "production"), /default ""/);
+});

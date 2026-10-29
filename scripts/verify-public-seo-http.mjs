@@ -82,7 +82,7 @@ export function matchesPublishedRouteBody(html, route) {
   return html.includes(route.renderedBodyHtml);
 }
 
-export function assertPublishedSnapshotHtml(html, route, origin) {
+export function assertPublishedSnapshotHtml(html, route, origin, robotsContent = "index,follow,max-image-preview:large") {
   assertDocumentLocale(html, route.locale, `Published route ${route.path}`);
   const canonical = escapeHtml(new URL(route.canonicalPath, origin).href);
   const structuredData = route.structuredData ?? {
@@ -103,7 +103,7 @@ export function assertPublishedSnapshotHtml(html, route, origin) {
     `name="description" content="${escapeHtml(route.description)}"`,
     `name="published-content-hash" content="${route.contentHash}"`,
     `rel="canonical" href="${canonical}"`,
-    'name="robots" content="index,follow,max-image-preview:large"',
+    `name="robots" content="${robotsContent}"`,
     `property="og:title" content="${escapeHtml(route.title)}"`,
     `property="og:description" content="${escapeHtml(route.description)}"`,
     `property="og:url" content="${canonical}"`,
@@ -235,11 +235,22 @@ export async function verifyPublicSeoHttp({ baseUrl, snapshot, requireRepresenta
     if (!response.headers.get("content-type")?.toLowerCase().includes("text/html")) {
       fail(`Published route ${route.path} did not return HTML.`);
     }
-    if ((response.headers.get("x-robots-tag") || "").toLowerCase().includes("noindex")) {
+    const previewPublication = verifiedSnapshot.sourceStage === "preproduction";
+    const robotsHeader = (response.headers.get("x-robots-tag") || "").toLowerCase();
+    const headerBlocksIndexing = robotsHeader.includes("noindex") && robotsHeader.includes("nofollow");
+    if (previewPublication && !headerBlocksIndexing) {
+      fail(`Published route ${route.path} did not receive an index-blocking response header.`);
+    }
+    if (!previewPublication && robotsHeader.includes("noindex")) {
       fail(`Published route ${route.path} received an index-blocking response header.`);
     }
     const html = await response.text();
-    assertPublishedSnapshotHtml(html, route, verifiedSnapshot.origin);
+    assertPublishedSnapshotHtml(
+      html,
+      route,
+      verifiedSnapshot.origin,
+      previewPublication ? "noindex,nofollow" : "index,follow,max-image-preview:large",
+    );
 
     const physicalPath = route.path === "/" ? "/index.html" : `${route.path}/index.html`;
     const physical = await fetchRoute(`${physicalPath}?seo-probe=1`);

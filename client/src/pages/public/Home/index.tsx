@@ -69,7 +69,22 @@ function heroImageAtWidth(source: string, width: 480 | 1680) {
  */
 function getHomeHeroPreview(data?: PuckDocument | null): HomeHeroPreview {
   const blocks = Array.isArray(data?.content) ? data.content : [];
-  const hero = blocks.find((block) => block?.type === "首屏主视觉" && block.props?.isVisible !== false);
+  const literalHero = blocks.find((block) => block?.type === "首屏主视觉" && block.props?.isVisible !== false);
+  const dynamicHero = blocks.find((block) => {
+    if (block?.type !== "动态模板实例" || block.props?.isVisible === false) return false;
+    return block.props?.templateId === "hcHomeHero";
+  });
+  const dynamicImage = (() => {
+    const slots = dynamicHero?.props?.contentBySlotId;
+    if (!slots || typeof slots !== "object" || Array.isArray(slots)) return "";
+    for (const slot of Object.values(slots)) {
+      if (!slot || typeof slot !== "object" || Array.isArray(slot)) continue;
+      const source = publicHeroMedia((slot as { src?: unknown }).src);
+      if (source.startsWith("/uploads/")) return source;
+    }
+    return "";
+  })();
+  const hero = literalHero;
   // Puck 的已发布首屏字段直接位于 block.props；此处必须与公开 Renderer、
   // 发布校验和初始模板保持同一数据结构，不能再造嵌套 content 副本。
   const content = hero?.props && typeof hero.props === "object" && !Array.isArray(hero.props)
@@ -81,9 +96,11 @@ function getHomeHeroPreview(data?: PuckDocument | null): HomeHeroPreview {
   const mobileImage = isHeroRoleEnabled(content, "mobileImage")
     ? publicHeroMedia(content.mobileImage)
     : "";
+  const image = desktopImage || mobileImage || dynamicImage;
+  const mobile = mobileImage || desktopImage || dynamicImage;
   return {
-    image: heroImageAtWidth(desktopImage || mobileImage, 1680),
-    mobileImage: heroImageAtWidth(mobileImage || desktopImage, 480),
+    image: heroImageAtWidth(image, 1680),
+    mobileImage: heroImageAtWidth(mobile, 480),
     title: isHeroRoleEnabled(content, "title") ? text(content.title) : "",
     subtitle: isHeroRoleEnabled(content, "subtitle") ? text(content.subtitle) : "",
     eyebrow: isHeroRoleEnabled(content, "eyebrow") ? text(content.eyebrow) : "",
@@ -167,7 +184,7 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
             ) : null}
           </div>
         </div>
-      ) : (
+      ) : hero.image ? null : (
         <div
           data-home-loading-status="true"
           role="status"
@@ -282,6 +299,10 @@ export default function Home() {
 
   const readiness = getPublishedPageReadiness("home", pageDocument.puckData);
   if (!readiness?.ready) {
+    const approvedHero = getHomeHeroPreview(pageDocument.puckData);
+    if (approvedHero.image) {
+      return <HomeFirstFold data={pageDocument.puckData} />;
+    }
     const fallback = homeFallback;
     return (
       <PublicPageFallback
