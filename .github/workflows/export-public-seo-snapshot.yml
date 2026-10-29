@@ -103,6 +103,47 @@ jobs:
           npm ci --prefix server
           npm run build --prefix server
 
+      - name: 记录本次 GitHub Runner 临时 IPv4
+        id: runner-egress
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_ipv4="$(curl --fail --silent --show-error --max-time 10 https://api.ipify.org)"
+          [[ "$runner_ipv4" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] \
+            || { echo "PUBLIC_SEO_RUNNER_IPV4_INVALID" >&2; exit 1; }
+          IFS=. read -r octet1 octet2 octet3 octet4 <<< "$runner_ipv4"
+          for octet in "$octet1" "$octet2" "$octet3" "$octet4"; do
+            (( octet >= 0 && octet <= 255 )) \
+              || { echo "PUBLIC_SEO_RUNNER_IPV4_INVALID" >&2; exit 1; }
+          done
+          echo "runner_ipv4=$runner_ipv4" >> "$GITHUB_OUTPUT"
+          echo "::notice title=本次只读快照 Runner 临时来源::${runner_ipv4}/32"
+          {
+            echo "### 本次只读快照 Runner 临时来源"
+            echo
+            echo "\`${runner_ipv4}/32\`"
+            echo
+            echo "只允许该地址临时访问 TCP/22；快照结束后立即移除对应规则。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 等待安全组精确允许本次 Runner /32
+        shell: bash
+        env:
+          PUBLIC_SEO_RUNNER_IPV4: ${{ steps.runner-egress.outputs.runner_ipv4 }}
+        run: |
+          set -euo pipefail
+          echo "等待 TCP/22 仅对本次 Runner 的精确 /32 临时开放；不会请求任意来源规则。"
+          ready=0
+          for _ in $(seq 1 90); do
+            if timeout 3 bash -c "</dev/tcp/${PUBLIC_SEO_SSH_HOST}/${PUBLIC_SEO_SSH_PORT}" 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ready" = "1" \
+            || { echo "PUBLIC_SEO_SSH_EXACT_RUNNER_RULE_NOT_READY:${PUBLIC_SEO_RUNNER_IPV4}/32" >&2; exit 1; }
+
       - name: 建立固定主机指纹的只读数据库 SSH 隧道
         id: tunnel
         shell: bash

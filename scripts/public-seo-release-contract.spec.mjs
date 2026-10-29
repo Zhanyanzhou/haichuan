@@ -127,6 +127,10 @@ test("SEO producer workflow binds preproduction or production to protected envir
     "PUBLIC_SEO_DATABASE_URL_MUST_USE_SSH_LOOPBACK_TUNNEL",
     "PUBLIC_SEO_SSH_REMOTE_DATABASE_HOST_MUST_USE_TARGET_LOOPBACK",
     'test "$PUBLIC_SEO_EXPECTED_DATABASE_HOST" = "$PUBLIC_SEO_TUNNEL_TARGET_DATABASE_HOST_IDENTITY"',
+    "https://api.ipify.org",
+    "本次只读快照 Runner 临时来源",
+    "等待安全组精确允许本次 Runner /32",
+    "PUBLIC_SEO_SSH_EXACT_RUNNER_RULE_NOT_READY",
     "StrictHostKeyChecking=yes",
     "ExitOnForwardFailure=yes",
     "127.0.0.1:${PUBLIC_SEO_SSH_LOCAL_PORT}",
@@ -146,6 +150,7 @@ test("SEO producer workflow binds preproduction or production to protected envir
   const jobEnv = workflow.match(/\n    env:\n(?<body>(?:      .+\n)+)    steps:/)?.groups?.body ?? "";
   assert.ok(!jobEnv.includes("DATABASE_URL"), "database secret must not be available to checkout/install/build/upload steps");
   assert.ok(!jobEnv.includes("PUBLIC_SEO_SSH_PRIVATE_KEY"), "SSH private key must not be available at job scope");
+  assert.doesNotMatch(workflow, /0\.0\.0\.0\/0/, "SEO snapshot workflow must never request an unrestricted SSH source");
   assert.match(
     workflow,
     /- name: 从专用只读账号导出并冻结快照[\s\S]*?env:\s*\n\s*DATABASE_URL: \$\{\{ secrets\.PUBLIC_SEO_READ_ONLY_DATABASE_URL \}\}[\s\S]*?node server\/dist\/cli\/export-public-seo-snapshot\.js/,
