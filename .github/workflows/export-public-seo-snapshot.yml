@@ -171,6 +171,16 @@ jobs:
             throw new Error("PUBLIC_SEO_DATABASE_URL_MUST_USE_SSH_LOOPBACK_TUNNEL");
           }
           NODE
+          media_root="${GITHUB_WORKSPACE}/uploads"
+          rm -rf "$media_root"
+          mkdir -p "$media_root"
+          tunnel_dir="${RUNNER_TEMP}/public-seo-ssh-tunnel"
+          rsync -a \
+            -e "ssh -i ${tunnel_dir}/id_ed25519 -p ${PUBLIC_SEO_SSH_PORT} -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${tunnel_dir}/known_hosts" \
+            "${PUBLIC_SEO_SSH_USER}@${PUBLIC_SEO_SSH_HOST}:/srv/haichuan-public-uploads/" \
+            "${media_root}/"
+          test "$(find "$media_root" -type f | wc -l)" -gt 0
+          export PUBLIC_MEDIA_ROOT="$media_root"
           export_dir="${RUNNER_TEMP}/public-seo-export"
           artifact_dir="${RUNNER_TEMP}/public-seo-artifact"
           mkdir -p "$export_dir" "$artifact_dir"
@@ -179,6 +189,7 @@ jobs:
           node scripts/export-public-seo-snapshot.mjs \
             --input "$export_dir/public-seo-source.json" \
             --output "$artifact_dir/public-seo-snapshot.json"
+          rm -rf "$media_root"
           SNAPSHOT_PATH="$artifact_dir/public-seo-snapshot.json" \
           node --input-type=module <<'NODE'
           import { readFileSync } from "node:fs";
