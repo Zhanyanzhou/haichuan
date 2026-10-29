@@ -19,8 +19,11 @@ services:
 
   release-preflight:
     extends: migration-status
+    volumes:
+      - uploads_data:/app/uploads:ro
     environment:
       DATABASE_URL: ${RELEASE_PREFLIGHT_DATABASE_URL:-}
+      PUBLIC_MEDIA_ROOT: /app/uploads
       RELEASE_PROFILE: ${RELEASE_PROFILE:-}
       VITE_PUBLIC_SITE_ORIGIN: ${VITE_PUBLIC_SITE_ORIGIN:?VITE_PUBLIC_SITE_ORIGIN is required}
       CUSTOMER_COMMERCE_ENABLED: "${CUSTOMER_COMMERCE_ENABLED:-false}"
