@@ -19,7 +19,7 @@ jobs:
   export:
     name: 只读导出公开 SEO 发布事实
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: public-seo-${{ inputs.source_stage }}
     env:
       PUBLIC_SEO_EXPORT_READ_ONLY_AUTHORIZED: "1"
@@ -126,6 +126,38 @@ jobs:
             echo "只允许该地址临时访问 TCP/22；快照结束后立即移除对应规则。"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: 生成不含凭据的临时 Runner 来源制品
+        shell: bash
+        env:
+          PUBLIC_SEO_RUNNER_IPV4: ${{ steps.runner-egress.outputs.runner_ipv4 }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "${RUNNER_TEMP}/public-seo-runner-source"
+          RUN_ID="$GITHUB_RUN_ID" RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" GIT_SHA="$GITHUB_SHA" \
+            node --input-type=commonjs - <<'NODE'
+          const { writeFileSync } = require("node:fs");
+          const payload = {
+            schemaVersion: 1,
+            runId: Number(process.env.RUN_ID),
+            runAttempt: Number(process.env.RUN_ATTEMPT),
+            gitSha: process.env.GIT_SHA,
+            sourceCidr: `${process.env.PUBLIC_SEO_RUNNER_IPV4}/32`,
+          };
+          writeFileSync(
+            `${process.env.RUNNER_TEMP}/public-seo-runner-source/runner-source.json`,
+            `${JSON.stringify(payload, null, 2)}\n`,
+            { mode: 0o600 },
+          );
+          NODE
+
+      - name: 上传本次 Runner 精确来源（1 天后过期）
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: public-seo-runner-source-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-seo-runner-source/runner-source.json
+          if-no-files-found: error
+          retention-days: 1
+
       - name: 等待安全组精确允许本次 Runner /32
         shell: bash
         env:
@@ -134,7 +166,7 @@ jobs:
           set -euo pipefail
           echo "等待 TCP/22 仅对本次 Runner 的精确 /32 临时开放；不会请求任意来源规则。"
           ready=0
-          for _ in $(seq 1 90); do
+          for _ in $(seq 1 150); do
             if timeout 3 bash -c "</dev/tcp/${PUBLIC_SEO_SSH_HOST}/${PUBLIC_SEO_SSH_PORT}" 2>/dev/null; then
               ready=1
               break
