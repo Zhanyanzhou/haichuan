@@ -94,6 +94,17 @@ function heroImageAtWidth(source, width, origin) {
   }
 }
 
+function dynamicHomeHeroImage(block) {
+  if (block?.type !== "动态模板实例" || block?.props?.isVisible === false) return "";
+  if (block.props.templateId !== "hcHomeHero") return "";
+  const slots = block.props.contentBySlotId;
+  if (!slots || typeof slots !== "object" || Array.isArray(slots)) return "";
+  for (const slot of Object.values(slots)) {
+    if (typeof slot?.src === "string" && slot.src.startsWith("/uploads/")) return slot.src;
+  }
+  return "";
+}
+
 function publicHomeHero(route, origin) {
   const blocks = route.bootstrapPageDocument?.puckData?.content;
   if (!Array.isArray(blocks)) return null;
@@ -113,7 +124,14 @@ function publicHomeHero(route, origin) {
   const publishableMobile = NON_PUBLISHABLE_SYSTEM_MEDIA.has(mobileImage) ? "" : mobileImage;
   const image = heroImageAtWidth(publishableDesktop || publishableMobile, 1680, origin);
   const mobile = heroImageAtWidth(publishableMobile || publishableDesktop, 480, origin);
-  if (!image) return null;
+  if (!image) {
+    const dynamicImage = blocks.map(dynamicHomeHeroImage).find(Boolean) ?? "";
+    const publishableDynamic = NON_PUBLISHABLE_SYSTEM_MEDIA.has(dynamicImage) ? "" : dynamicImage;
+    const dynamicDesktop = heroImageAtWidth(publishableDynamic, 1680, origin);
+    const dynamicMobile = heroImageAtWidth(publishableDynamic, 480, origin);
+    if (!dynamicDesktop) return null;
+    return { image: dynamicDesktop, mobile: dynamicMobile, title: "", subtitle: "", eyebrow: "" };
+  }
   return {
     image,
     mobile,

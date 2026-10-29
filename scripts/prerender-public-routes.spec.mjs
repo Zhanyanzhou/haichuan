@@ -106,6 +106,40 @@ test("home injects the reviewed first-fold document and preloads its same-origin
   assert.doesNotMatch(html, /首页语义正文/);
 });
 
+test("home first fold reads a published dynamic hero template image", async (t) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-dynamic-hero-"));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const home = makeRoute({
+    path: "/",
+    alternateKey: "page:home",
+    title: "海川珠宝",
+    renderedBodyHtml: "<main><h1>首页语义正文</h1></main>",
+    bootstrapPageDocument: {
+      pageKey: "home",
+      puckData: {
+        content: [{
+          type: "动态模板实例",
+          props: {
+            templateId: "hcHomeHero",
+            contentBySlotId: {
+              hcHomeHero_slot_1: { src: "/uploads/page-assets/hero.png" },
+            },
+          },
+        }],
+      },
+      metadata: {},
+      status: "PUBLISHED",
+    },
+  });
+  const snapshot = createPublicSeoSnapshot(makeSnapshotInput([home]));
+  await prerenderPublicRoutes({ snapshot, baseHtml: BASE_HTML, outDir: temporaryDirectory });
+  const html = readFileSync(join(temporaryDirectory, "index.html"), "utf8");
+  assert.match(html, /data-public-first-fold="published"/);
+  assert.match(html, /src="https:\/\/jewelry\.example\.test\/uploads\/page-assets\/hero\.png\?width=1680"/);
+  assert.match(html, /id="hc-published-page-document" type="application\/json"/);
+  assert.doesNotMatch(html, /首页语义正文/);
+});
+
 test("home first fold follows instance visibility and ignores editor-only media", async (t) => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-home-overrides-"));
   t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
