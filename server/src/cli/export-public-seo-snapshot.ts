@@ -103,11 +103,30 @@ export function createPublicSeoExportConfig(environment: NodeJS.ProcessEnv) {
   } as const;
 }
 
-function safeErrorCode(error: unknown): string {
+export function safeErrorCode(error: unknown): string {
   if (
     error instanceof Error
     && /^PUBLIC_SEO_EXPORT_[A-Z0-9_]+(?::[A-Z0-9_,.-]+)?$/.test(error.message)
   ) return error.message;
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as { name?: unknown; code?: unknown };
+    if (candidate.name === "PrismaClientInitializationError") {
+      return "PUBLIC_SEO_EXPORT_DATABASE_CONNECTION_FAILED";
+    }
+    if (candidate.name === "PrismaClientValidationError") {
+      return "PUBLIC_SEO_EXPORT_DATABASE_RESULT_INVALID";
+    }
+    if (candidate.name === "PrismaClientKnownRequestError") {
+      if (candidate.code === "P1010") return "PUBLIC_SEO_EXPORT_DATABASE_ACCESS_DENIED";
+      if (candidate.code === "P2021" || candidate.code === "P2022") {
+        return "PUBLIC_SEO_EXPORT_DATABASE_SCHEMA_MISMATCH";
+      }
+      return "PUBLIC_SEO_EXPORT_DATABASE_QUERY_FAILED";
+    }
+    if (candidate.name === "PrismaClientUnknownRequestError") {
+      return "PUBLIC_SEO_EXPORT_DATABASE_QUERY_FAILED";
+    }
+  }
   return "PUBLIC_SEO_EXPORT_FAILED";
 }
 

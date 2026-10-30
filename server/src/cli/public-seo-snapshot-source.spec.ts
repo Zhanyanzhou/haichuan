@@ -12,7 +12,7 @@ import {
   PAGE_LOCALE_SELF_REVIEW_ACTION,
   withPageLocaleRevisionMetadata,
 } from "../modules/page-modules/page-document-localization";
-import { createPublicSeoExportConfig } from "./export-public-seo-snapshot";
+import { createPublicSeoExportConfig, safeErrorCode } from "./export-public-seo-snapshot";
 import { verifyTargetDatabaseAccess } from "./target-database-audit";
 import {
   createPublicSeoExportInput,
@@ -677,4 +677,39 @@ test("producer 在读取发布事实前拒绝带写权限或跨库权限的数�
     ),
     /CROSS_DATABASE_SCOPE/,
   );
+});
+
+test("SEO 导出错误仅暴露安全的诊断类别", () => {
+  assert.equal(
+    safeErrorCode(Object.assign(new Error("secret database details"), {
+      name: "PrismaClientInitializationError",
+    })),
+    "PUBLIC_SEO_EXPORT_DATABASE_CONNECTION_FAILED",
+  );
+  assert.equal(
+    safeErrorCode(Object.assign(new Error("secret query details"), {
+      name: "PrismaClientKnownRequestError",
+      code: "P1010",
+    })),
+    "PUBLIC_SEO_EXPORT_DATABASE_ACCESS_DENIED",
+  );
+  assert.equal(
+    safeErrorCode(Object.assign(new Error("secret schema details"), {
+      name: "PrismaClientKnownRequestError",
+      code: "P2021",
+    })),
+    "PUBLIC_SEO_EXPORT_DATABASE_SCHEMA_MISMATCH",
+  );
+  assert.equal(
+    safeErrorCode(Object.assign(new Error("secret query details"), {
+      name: "PrismaClientKnownRequestError",
+      code: "P2010",
+    })),
+    "PUBLIC_SEO_EXPORT_DATABASE_QUERY_FAILED",
+  );
+  assert.equal(
+    safeErrorCode(new Error("PUBLIC_SEO_EXPORT_SOURCE_ORIGIN_MISMATCH")),
+    "PUBLIC_SEO_EXPORT_SOURCE_ORIGIN_MISMATCH",
+  );
+  assert.equal(safeErrorCode(new Error("unexpected sensitive detail")), "PUBLIC_SEO_EXPORT_FAILED");
 });
