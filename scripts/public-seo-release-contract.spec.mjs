@@ -16,6 +16,7 @@ test("client image requires immutable SEO inputs and carries their evidence labe
   const dockerfile = read("client/Dockerfile");
   for (const required of [
     "COPY .release-seo/public-seo-snapshot.json",
+    "COPY --from=verify --chown=nginx:nginx /release/public-seo-snapshot.json /release/public-seo-snapshot.json",
     "COPY .release-seo/public-seo-routes.conf",
     "COPY .release-seo/public-origin-redirect.conf",
     "COPY .release-seo/public-origin-host.conf",
@@ -90,6 +91,7 @@ test("release workflow validates a same-SHA artifact before build and performs r
     "--nginx-origin-redirect client/.release-seo/public-origin-redirect.conf",
     "--nginx-origin-host client/.release-seo/public-origin-host.conf",
     "node scripts/verify-public-seo-http.mjs",
+    "docker exec \"$client_container\" cat /release/public-seo-snapshot.json | cmp - client/.release-seo/public-seo-snapshot.json",
     'Host: ${canonical_host}',
     "publicSeo: {",
     "snapshotHash: process.env.PUBLIC_SEO_SNAPSHOT_HASH",

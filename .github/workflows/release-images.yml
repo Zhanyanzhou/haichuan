@@ -518,6 +518,8 @@ jobs:
           node scripts/verify-public-seo-http.mjs \
             --base-url "http://127.0.0.1:${client_port}" \
             --snapshot client/.release-seo/public-seo-snapshot.json
+          docker exec "$client_container" test -r /release/public-seo-snapshot.json
+          docker exec "$client_container" cat /release/public-seo-snapshot.json | cmp - client/.release-seo/public-seo-snapshot.json
           test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-snapshot-sha256"}}{{end}}')" = "$PUBLIC_SEO_SNAPSHOT_HASH"
           test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-prerender-manifest-sha256"}}{{end}}')" = "$PUBLIC_SEO_PRERENDER_MANIFEST_SHA256"
           test "$(docker image inspect "$CLIENT_REFERENCE" --format '{{with .Config.Labels}}{{index . "io.haichuan.public-seo-source-artifact-digest"}}{{end}}')" = "$PUBLIC_SEO_SNAPSHOT_ARTIFACT_DIGEST"

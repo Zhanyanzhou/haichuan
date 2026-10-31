@@ -77,6 +77,7 @@ COPY --from=verify --chown=nginx:nginx /release/public-seo-routes.conf /etc/ngin
 COPY --from=verify --chown=nginx:nginx /release/public-seo-policy.conf /etc/nginx/public-seo-policy.conf
 COPY --from=verify --chown=nginx:nginx /release/public-origin-redirect.conf /etc/nginx/public-origin-redirect.conf
 COPY --from=verify --chown=nginx:nginx /release/public-origin-host.conf /etc/nginx/public-origin-host.conf
+COPY --from=verify --chown=nginx:nginx /release/public-seo-snapshot.json /release/public-seo-snapshot.json
 COPY --from=verify --chown=nginx:nginx /release/dist /usr/share/nginx/html
 
 USER nginx
