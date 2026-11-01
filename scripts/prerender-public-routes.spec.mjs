@@ -63,7 +63,7 @@ test("pre-renders Chinese, legal, and product routes with full SEO metadata", as
   assert.equal(readFileSync(join(temporaryDirectory, "spa-shell.html"), "utf8"), BASE_HTML);
 });
 
-test("home injects the reviewed first-fold document and preloads its same-origin hero", async (t) => {
+test("home keeps the published document for fallback without painting its build-time hero", async (t) => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-home-"));
   t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
   const home = makeRoute({
@@ -96,17 +96,17 @@ test("home injects the reviewed first-fold document and preloads its same-origin
   const spaShell = readFileSync(join(temporaryDirectory, "spa-shell.html"), "utf8");
   assert.match(spaShell, /name="robots" content="noindex, nofollow"/);
   assert.doesNotMatch(spaShell, /data-prerendered|光映新姿/);
+  const visibleFirstFold = html.match(/<main class="hc-prerendered-home"[\s\S]*?<\/main>/)?.[0] ?? "";
   assert.match(html, /data-public-first-fold="published"/);
-  assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero-mobile\.jpg\?width=480" media="\(max-width: 767px\)" fetchpriority="high"/);
-  assert.match(html, /rel="preload" as="image" href="https:\/\/jewelry\.example\.test\/uploads\/hero\.jpg\?width=1680" media="\(min-width: 768px\)" fetchpriority="high"/);
-  assert.match(html, /<source media="\(max-width: 767px\)" srcset="https:\/\/jewelry\.example\.test\/uploads\/hero-mobile\.jpg\?width=480">/);
-  assert.match(html, /<img src="https:\/\/jewelry\.example\.test\/uploads\/hero\.jpg\?width=1680"/);
+  assert.equal(visibleFirstFold.includes("<img"), false);
+  assert.doesNotMatch(html, /rel="preload" as="image"/);
   assert.match(html, /id="hc-published-page-document" type="application\/json"/);
   assert.match(html, /光映新姿/);
+  assert.doesNotMatch(visibleFirstFold, /光映新姿|hero\.jpg/);
   assert.doesNotMatch(html, /首页语义正文/);
 });
 
-test("home first fold reads a published dynamic hero template image", async (t) => {
+test("home snapshot shell does not paint a published dynamic hero template image", async (t) => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-dynamic-hero-"));
   t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
   const home = makeRoute({
@@ -134,13 +134,16 @@ test("home first fold reads a published dynamic hero template image", async (t) 
   const snapshot = createPublicSeoSnapshot(makeSnapshotInput([home]));
   await prerenderPublicRoutes({ snapshot, baseHtml: BASE_HTML, outDir: temporaryDirectory });
   const html = readFileSync(join(temporaryDirectory, "index.html"), "utf8");
+  const visibleFirstFold = html.match(/<main class="hc-prerendered-home"[\s\S]*?<\/main>/)?.[0] ?? "";
   assert.match(html, /data-public-first-fold="published"/);
-  assert.match(html, /src="https:\/\/jewelry\.example\.test\/uploads\/page-assets\/hero\.png\?width=1680"/);
+  assert.doesNotMatch(visibleFirstFold, /hero\.png|<img/);
+  assert.doesNotMatch(html, /rel="preload" as="image"/);
   assert.match(html, /id="hc-published-page-document" type="application\/json"/);
+  assert.match(html, /page-assets\/hero\.png/);
   assert.doesNotMatch(html, /首页语义正文/);
 });
 
-test("home first fold follows instance visibility and ignores editor-only media", async (t) => {
+test("home snapshot shell does not paint instance copy or editor-only media", async (t) => {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), "haichuan-prerender-home-overrides-"));
   t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
   const home = makeRoute({
@@ -177,10 +180,9 @@ test("home first fold follows instance visibility and ignores editor-only media"
 
   const html = readFileSync(join(temporaryDirectory, "index.html"), "utf8");
   const visibleFirstFold = html.match(/<main class="hc-prerendered-home"[\s\S]*?<\/main>/)?.[0] ?? "";
-  assert.doesNotMatch(visibleFirstFold, /不应闪现的眉题|不应闪现的标题/);
-  assert.match(visibleFirstFold, /可见副标题/);
-  assert.doesNotMatch(visibleFirstFold, /launch-short-page-mobile/);
-  assert.match(visibleFirstFold, /hero\.jpg\?width=480/);
+  assert.doesNotMatch(visibleFirstFold, /不应闪现的眉题|不应闪现的标题|可见副标题|hero\.jpg|launch-short-page-mobile|<img/);
+  assert.match(html, /可见副标题/);
+  assert.match(html, /id="hc-published-page-document"/);
 });
 
 test("invalid or tampered snapshots produce no output", async (t) => {

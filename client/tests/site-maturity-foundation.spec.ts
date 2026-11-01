@@ -211,7 +211,8 @@ for (const viewport of [
   });
 }
 
-test("预渲染首页在接口校准前先使用同一份已发布文档", async ({ page }) => {
+test("预渲染首页在公开接口返回前不展示构建快照，接口失败才回退", async ({ page }) => {
+  test.setTimeout(60_000);
   const unknownPropWarnings: string[] = [];
   page.on("console", (message) => {
     if (
@@ -265,12 +266,23 @@ test("预渲染首页在接口校准前先使用同一份已发布文档", async
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
     </script></body></html>`,
   }));
-  await page.route("**/api/page-modules/document/published**", (route) => route.fulfill({
-    status: 503,
-    json: { code: 503, message: "fixture unavailable" },
-  }));
+  let releaseRead: () => void = () => {};
+  const readGate = new Promise<void>((resolve) => {
+    releaseRead = resolve;
+  });
+  await page.route("**/api/page-modules/document/published**", async (route) => {
+    await readGate;
+    await route.fulfill({
+      status: 503,
+      json: { code: 503, message: "fixture unavailable" },
+    });
+  });
 
-  await page.goto("/__prerendered-home-bootstrap");
+  await page.goto("/__prerendered-home-bootstrap", { waitUntil: "commit" });
+  await expect(page.locator("output")).toHaveText("loading", { timeout: 30_000 });
+  await expect(page.locator('section[aria-label="首页首屏"] img')).toHaveCount(0);
+  await expect(page.getByText("首页内容正在准备")).toBeVisible();
+  releaseRead();
   await expect(page.locator("output")).toHaveText("静态首屏");
   await expect(page.getByRole("heading", { name: "静态首屏" })).toHaveCount(0);
   await expect(page.getByText("稳定首屏副标题")).toBeVisible();

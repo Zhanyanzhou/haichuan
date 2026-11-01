@@ -5,6 +5,12 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=20261027b" />
     <link rel="apple-touch-icon" href="/loading-mark.png?v=20261027b" />
     <link rel="stylesheet" href="/route-loading.css" />
+    <!-- 整站构建时写下的首屏不能先于页面构建器的已发布内容出现。 -->
+    <style>
+      .hc-prerendered-home picture,
+      .hc-prerendered-home img,
+      .hc-prerendered-home__copy { display: none !important; }
+    </style>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- SPA fallback 永远不参与索引；严格发布预渲染会用已核验的逐路由标签替换。 -->
     <meta name="robots" content="noindex, nofollow" />
