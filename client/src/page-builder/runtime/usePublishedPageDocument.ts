@@ -85,8 +85,10 @@ export function isPublishedPageDocument(
 }
 
 /**
- * 发布流程会把首页的同一份已发布 PageDocument 随静态首屏一同输出。
- * 浏览器只在首个挂载周期读取它；后续仍由既有公开接口和发布事件校准。
+ * 整站构建会把当时的已发布 PageDocument 嵌进静态页。
+ * 页面构建器之后的发布只推进公开接口，不会重写这份静态页。
+ * 因此它只能在公开接口失败时作为回退，不能在接口返回前先画出来，
+ * 否则刷新会先闪出上一次部署时的图片，再换成刚发布的内容。
  * 解析失败或页面键不匹配时安全忽略，绝不把静态 HTML 当作新的内容来源。
  */
 function readPrerenderedPublishedPageDocument(pageKey?: string): PublishedPageDocument | null {
@@ -122,12 +124,12 @@ export function usePublishedPageDocument(
   }
   const initialBootstrap = initialBootstrapRef.current;
   const [state, setState] = useState<PublishedPageDocumentInternalState>(() => ({
-    resourceKey: initialBootstrap && pageKey ? `${locale}:${pageKey}` : undefined,
-    pageKey: initialBootstrap?.pageKey,
-    pageDocument: initialBootstrap ?? null,
-    status: initialBootstrap
-      ? "published"
-      : (pageKey ? (publishedLocaleAvailable ? "loading" : "invalid") : "idle"),
+    resourceKey: pageKey ? `${locale}:${pageKey}` : undefined,
+    pageKey,
+    pageDocument: null,
+    status: pageKey
+      ? (publishedLocaleAvailable ? "loading" : "invalid")
+      : "idle",
     stale: false,
   }));
   const mountedRef = useRef(true);

@@ -26,6 +26,11 @@ import './styles/globals.css';
  * App 内部自带 <Routes>（descendant routes），外层 pathless splat 承接全部路径，
  * 路由树零改动，任何 location 变化都会触发 blocker。
  */
+// 静态页里的旧首屏会先于已发布接口被解析。脚本一开始就去掉它，避免先闪出上一次部署的图片。
+document
+  .querySelectorAll(".hc-prerendered-home picture, .hc-prerendered-home img, .hc-prerendered-home__copy")
+  .forEach((node) => node.remove());
+
 const router = createBrowserRouter(
   createRoutesFromElements(<Route path="*" element={<App />} />),
 );

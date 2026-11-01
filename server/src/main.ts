@@ -29,8 +29,15 @@ async function bootstrap() {
   // 不按公网链路猜测 hop 数，避免直连路径用伪造 X-Forwarded-For 控制限流和会话 IP。
   configureProxyTrust(app.getHttpAdapter().getInstance());
 
-  // 安全头
-  app.use(helmet({ contentSecurityPolicy: false }));
+  // 安全头。HSTS 不覆盖全部子域名：api、admin 仍由另一台机器提供，证书尚未匹配。
+  app.use(helmet({
+    contentSecurityPolicy: false,
+    strictTransportSecurity: {
+      maxAge: 31536000,
+      includeSubDomains: false,
+      preload: false,
+    },
+  }));
 
   // 访问日志已由 nestjs-pino（pino-http）统一记录，不再手写请求日志中间件。
 

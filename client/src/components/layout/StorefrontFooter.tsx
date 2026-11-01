@@ -4,8 +4,8 @@ import {
   CONTENT_TEMPLATE_PAGE_PATHS,
 } from "@/page-builder/generated/contentTemplates.generated";
 
-/** 国内公网上线完成备案后填写；空值时不渲染占位信息。 */
-const FOOTER_ICP_NUMBER = "";
+/** 广东省首页悬挂主体备案号，不带网站序号；空值时不渲染。 */
+const FOOTER_ICP_NUMBER = "粤ICP备2024299538号";
 
 type StorefrontFooterProps = {
   siteName: string;
