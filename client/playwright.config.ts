@@ -50,7 +50,6 @@ const testBoundaryFiles = {
   ],
   admin: [
     "recipe-radius-input.test.ts",
-    "page-editor-workspace-tiers.spec.ts",
     "template-inline-text-guard.unit.ts",
     "published-page-readiness.unit.ts",
     "dynamic-template-public-visibility.unit.ts",
