@@ -1372,6 +1372,7 @@ test.describe("动态模板页面实例（真实编辑器组件 + 自有 API 夹
       name: "预览内容展示｜版本升级版本2",
     })).toBeVisible();
     await expect(page.getByRole("button", { name: /升级页面中的/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "收起模板组件库" }).click();
     await page.locator(
       '.homepage-editor__layer-item[data-layer-id="dynamic-upgrade-block"] .homepage-editor__layer-select',
     ).click({ position: { x: 12, y: 18 } });
