@@ -1,5 +1,4 @@
-import { App as AntdApp, Alert, Button, Modal, Tag } from "antd";
-import RouteLoading from "@/components/common/RouteLoading";
+import { App as AntdApp, Alert, Button, Modal, Spin, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { unwrapResponse } from "@/utils/unwrap";
 import {
@@ -192,7 +191,7 @@ export default function DynamicTemplateUpgradePanel({
   ), [definition, instance, latest, versionCheck.status]);
 
   if (versionCheck.status === "loading") {
-    return <RouteLoading scope="inline" label="正在检查模板版本…" />;
+    return <div className="homepage-editor__properties-hint" role="status"><Spin size="small" /> 正在检查模板版本…</div>;
   }
   if (versionCheck.status === "catalog-error") {
     return (

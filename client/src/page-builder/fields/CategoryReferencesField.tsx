@@ -4,7 +4,6 @@ import {
   type CategoryReferenceResult,
 } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
-import RouteLoading from "@/components/common/RouteLoading";
 
 interface CategoryNode {
   id: number;
@@ -154,7 +153,7 @@ export default function CategoryReferencesField({
         <input value={query} disabled={readOnly} aria-label="搜索分类" placeholder="搜索分类名称或 slug" onChange={(event) => setQuery(event.target.value)} />
       </div>
       <div className="homepage-editor__product-picker-results" aria-live="polite" aria-busy={loading}>
-        {loading ? <RouteLoading scope="inline" label="正在加载分类" />
+        {loading ? <div className="homepage-editor__product-picker-note">正在加载分类</div>
           : error ? <div className="homepage-editor__product-picker-note is-error">{error === "FORBIDDEN" ? "当前账号无权浏览分类，请联系管理员" : "分类加载失败，原有引用未改变"}<button type="button" onClick={() => setListRevision((value) => value + 1)}>重试加载</button></div>
             : filtered.length ? filtered.map((node) => {
                 const selected = slugs.includes(node.slug);

@@ -18,15 +18,3 @@
   outline: 2px solid currentColor;
   outline-offset: 2px;
 }
-
-/*
- * 区块模板标准 R-9：600～767px 仍用手机内容，单列叙事图和文字组最宽 560px 并居中。
- * 作品卡不带这个标记，继续按内容宽排。inline 出血边距要用 !important 收回。
- */
-.hc-dynamic-template[data-template-large-phone="true"] [data-template-large-phone-measure="true"] {
-  box-sizing: border-box;
-  width: min(100%, 560px) !important;
-  max-width: 560px !important;
-  margin-left: auto !important;
-  margin-right: auto !important;
-}

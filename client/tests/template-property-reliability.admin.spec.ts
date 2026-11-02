@@ -472,26 +472,33 @@ test("模板库按真实画幅自适应完整预览，并以只读放大入口�
     }).not.toBeNull();
     const rect = (await frame.boundingBox())!;
     const clip = (await card.locator('.template-editor__catalog-artboard-stage').boundingBox())!;
+    const scrollable = shape.name === "超长页面";
     await expect(card.locator("[data-template-catalog-preview-shell]"))
-      .toHaveAttribute("data-preview-thumbnail-mode", "overview");
-    const maxHeight = Number(await card.locator("[data-template-catalog-preview-shell]").getAttribute("data-preview-thumbnail-max-height"));
-    const expectedScale = Math.min(clip.width / shape.width, maxHeight / shape.height);
+      .toHaveAttribute("data-preview-thumbnail-mode", scrollable ? "top" : "overview");
+    const expectedScale = scrollable
+      ? clip.width / shape.width
+      : Math.min(clip.width / shape.width, 220 / shape.height);
     expect(rect.width / rect.height, `${shape.name}保持真实比例`).toBeCloseTo(shape.width / shape.height, 2);
     expect(rect.width, `${shape.name}宽度同步缩放`).toBeCloseTo(shape.width * expectedScale, 0);
     expect(rect.height, `${shape.name}高度同步缩放`).toBeCloseTo(shape.height * expectedScale, 0);
     expect(rect.x + rect.width / 2, `${shape.name}水平居中`).toBeCloseTo(clip.x + clip.width / 2, 0);
     expect(rect.x).toBeGreaterThanOrEqual(clip.x - 1);
     expect(rect.x + rect.width).toBeLessThanOrEqual(clip.x + clip.width + 1);
-    expect(rect.y + rect.height / 2, `${shape.name}垂直居中`).toBeCloseTo(clip.y + clip.height / 2, 0);
-    expect(rect.y).toBeGreaterThanOrEqual(clip.y - 1);
-    expect(rect.y + rect.height).toBeLessThanOrEqual(clip.y + clip.height + 1);
+    if (scrollable) {
+      expect(rect.y, `${shape.name}从滚动视窗顶部开始`).toBeCloseTo(clip.y, 0);
+      expect(rect.height, `${shape.name}保留完整可滚动几何`).toBeGreaterThan(clip.height);
+      expect(clip.height, `${shape.name}使用固定目录视窗`).toBeCloseTo(220, 0);
+    } else {
+      expect(rect.y + rect.height / 2, `${shape.name}垂直居中`).toBeCloseTo(clip.y + clip.height / 2, 0);
+      expect(rect.y).toBeGreaterThanOrEqual(clip.y - 1);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(clip.y + clip.height + 1);
+    }
     observedHeights.set(shape.name, clip.height);
   }
   expect(observedHeights.get("超宽横幅")).toBeLessThan(observedHeights.get("普通横版")!);
   expect(observedHeights.get("普通横版")).toBeLessThan(observedHeights.get("方形小尺寸")!);
   expect(observedHeights.get("方形小尺寸")).toBeCloseTo(observedHeights.get("方形大尺寸")!, 0);
-  expect(observedHeights.get("竖版")).toBeLessThanOrEqual(observedHeights.get("超长页面")!);
-  expect(observedHeights.get("超长页面")).toBeLessThanOrEqual(221);
+  expect(observedHeights.get("超长页面")).toBeCloseTo(220, 0);
 
   const sessionBeforePreview = await readSession(page);
   const previewButton = card.getByRole("button", { name: `放大预览：${sessionBeforePreview.definition!.name}`, exact: true });

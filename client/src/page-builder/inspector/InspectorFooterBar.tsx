@@ -3,12 +3,8 @@
  * 整页保存与发布统一留在编辑器顶部；此处只反馈草稿同步状态。
  */
 
-import {
-  formatPublishReminderAccessibleName,
-  formatPublishReminderLabel,
-  formatPublishReminderVisibleLabel,
-} from "./publishReminderDialog";
-import type { PublishValidationIssue, PublishValidationStatus } from "./publishValidation";
+import { formatPublishReminderLabel } from "./publishReminderDialog";
+import type { PublishValidationStatus } from "./publishValidation";
 
 /** 更多菜单可挂载的模块级操作（复制/隐藏/恢复默认/删除等，P5 逐步补齐） */
 export interface EditorAction {
@@ -24,7 +20,6 @@ interface InspectorFooterBarProps {
   saving: boolean;
   errorCount?: number;
   warningCount?: number;
-  issues?: readonly PublishValidationIssue[];
   onReviewIssues?: () => void;
   validationStatus?: PublishValidationStatus;
   onRetryValidation?: () => void;
@@ -36,7 +31,6 @@ export default function InspectorFooterBar({
   saving,
   errorCount = 0,
   warningCount = 0,
-  issues = [],
   onReviewIssues,
   validationStatus = "idle",
   onRetryValidation,
@@ -71,24 +65,12 @@ export default function InspectorFooterBar({
       : errorCount > 0
         ? `${errorCount} 项发布阻断`
         : warningCount > 0
-          ? (issues.some((issue) => issue.severity === "warning")
-            ? formatPublishReminderVisibleLabel(issues)
-            : formatPublishReminderLabel(warningCount))
+          ? formatPublishReminderLabel(warningCount)
           : validationStatus === "valid"
             ? "发布检查已通过"
             : null;
   const issueKind = errorCount > 0 ? "error" : warningCount > 0 ? "warning" : undefined;
-  const warningDetail = issues
-    .filter((issue) => issue.severity === "warning")
-    .map((issue) => issue.message.trim())
-    .filter(Boolean)
-    .join(" ");
-  const issueTitle = issueKind === "warning"
-    ? (warningDetail || "这些提示不影响本次发布")
-    : undefined;
-  const issueAccessibleName = issueKind === "warning" && warningDetail
-    ? formatPublishReminderAccessibleName(warningCount, issues)
-    : undefined;
+  const issueTitle = issueKind === "warning" ? "这些提示不影响本次发布" : undefined;
 
   return (
     <footer className="homepage-editor__properties-actions">
@@ -118,7 +100,6 @@ export default function InspectorFooterBar({
             data-validation-status={validationStatus}
             data-issue-kind={issueKind}
             title={issueTitle}
-            aria-label={issueAccessibleName}
           >
             {validationLabel}
           </button>

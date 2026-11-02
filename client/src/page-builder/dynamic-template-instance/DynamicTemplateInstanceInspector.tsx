@@ -11,7 +11,6 @@ import {
   type DynamicTemplateSlotDefinition,
   type TemplateInstanceLayoutOverride,
 } from "../template-definition";
-import ActionCopyHint from "../template-definition/ActionCopyHint";
 import { objectPositionToPercent } from "../template-definition/imagePosition";
 import { useVisualEditorSession, type VisualNodeKind } from "../visual-editor/visualEditorSession";
 import { useResolvedDynamicTemplate } from "./registry";
@@ -590,7 +589,6 @@ export default function DynamicTemplateInstanceInspector({
             placeholder="行动文案"
             onChange={(event) => updateContent(slot.slotId, { ...action, label: event.target.value })}
           />
-          <ActionCopyHint slotType={field.slotType} label={typeof action.label === "string" ? action.label : ""} />
           <LinkTargetField
             id={`dynamic-template-${props.instanceId}-${slot.slotId}`}
             compact
@@ -738,9 +736,6 @@ export default function DynamicTemplateInstanceInspector({
               ?? (props.templateId ? catalogRoles[props.templateId] : undefined),
             definition.name || props.moduleName,
           )}</strong>
-          {definition.description?.trim() ? (
-            <p className="homepage-editor__properties-hint">{definition.description.trim()}</p>
-          ) : null}
           <SwitchField
             label="在页面显示"
             value={props.isVisible !== false}
@@ -1047,7 +1042,6 @@ export default function DynamicTemplateInstanceInspector({
         saving={saving}
         errorCount={currentPublishErrorCount}
         warningCount={currentPublishWarningCount}
-        issues={currentPublishIssues}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
         onReviewIssues={resolvePublishIssueReviewAction({

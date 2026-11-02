@@ -45,12 +45,9 @@ export function parseTemplateRatio(
   return { width, height };
 }
 
-/** 未写设计宽度的已保存模板按当年的 1920 基准读取，避免默认视口调整后改变它们的几何。 */
-const LEGACY_DESKTOP_DESIGN_WIDTH = 1920;
-
 function getDesignWidth(definition: TemplateDefinitionV2, device: TemplateBreakpoint): number {
   return toTemplateContentBreakpoint(device) === "desktop"
-    ? definition.metadata.canvasSize?.width ?? definition.metadata.previewDesktopWidth ?? LEGACY_DESKTOP_DESIGN_WIDTH
+    ? definition.metadata.canvasSize?.width ?? definition.metadata.previewDesktopWidth ?? RESPONSIVE_CANVAS.desktop.width
     : definition.metadata.previewMobileWidth ?? RESPONSIVE_CANVAS.mobile.width;
 }
 

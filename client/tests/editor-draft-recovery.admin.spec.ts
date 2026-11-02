@@ -524,7 +524,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     });
 
     await page.goto("/admin/editor/home");
-    await expect(page.getByTestId("page-review-status")).toHaveCount(0);
+    await expect(page.getByTestId("page-review-status")).toHaveText("草稿");
     await expect(page.getByRole("button", { name: "提交审核", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "批准", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "本人提交：确认自审", exact: true })).toHaveCount(0);
@@ -675,7 +675,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
     await expect(page.locator(".homepage-editor__toolbar")).toBeVisible({ timeout: 15_000 });
     const reviewStatus = page.getByTestId("page-review-status");
     const publishButton = page.locator(".homepage-editor__toolbar-publish");
-    await expect(reviewStatus).toHaveCount(0);
+    await expect(reviewStatus).toHaveText("已发布");
     await expect(page.getByRole("button", { name: "提交审核", exact: true })).toHaveCount(0);
     await expect(publishButton).toBeEnabled();
     await expect(publishButton).toHaveAttribute(
@@ -685,8 +685,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
 
     const heroTitleInput = await selectHeroTitleInput(page);
     await heroTitleInput.fill("修改后待审核标题");
-    await expect(page.locator('.homepage-editor__draft-status[data-mode="dirty"]')).toContainText("有未保存修改");
-    await expect(reviewStatus).toHaveCount(0);
+    await expect(reviewStatus).toHaveText("草稿");
     await expect(page.getByRole("button", { name: "提交审核", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "批准", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "本人提交：确认自审", exact: true })).toHaveCount(0);
@@ -707,9 +706,7 @@ test.describe("店铺装修 —— 草稿恢复与继续编辑", () => {
       expectedContentHash: savedHash,
       selfReviewAcknowledged: true,
     });
-    await expect(reviewStatus).toHaveCount(0);
-    await expect(page.locator('.homepage-editor__draft-status[data-mode="dirty"]')).toHaveCount(0);
-    await expect(page.getByText("草稿与线上一致", { exact: true })).toBeVisible();
+    await expect(reviewStatus).toHaveText("已发布");
     expect(lifecycleRequests.map(({ method, path }) => `${method} ${path}`)).toEqual([
       "PUT /api/page-modules/document",
       "PUT /api/page-modules/document/publish",

@@ -218,34 +218,6 @@ export default function EditorToolbar({
     ? `，已保存 ${draftSavedAtLabel}`
     : "";
   const draftStatusAriaLabel = `草稿状态：${draftStatusLabel}${savedAtDescription}${draftSaveFailed ? "，请重试" : ""}`;
-  const reviewStatusLabel = effectiveReviewStatus === "DRAFT"
-    ? "草稿"
-    : effectiveReviewStatus === "IN_REVIEW"
-      ? "待审核"
-      : effectiveReviewStatus === "CHANGES_REQUESTED"
-        ? "已退回"
-        : effectiveReviewStatus === "APPROVED"
-          ? "已批准"
-          : effectiveReviewStatus === "PUBLISHED"
-            ? "已发布"
-            : "已归档";
-  // 草稿和已发布已由左侧草稿状态表达。顶栏只在审核进行中保留这一枚状态，
-  // 避免和「有未发布更改」并排出现两套状态。
-  const showReviewStatusChip = effectiveReviewStatus === "IN_REVIEW"
-    || effectiveReviewStatus === "CHANGES_REQUESTED"
-    || effectiveReviewStatus === "APPROVED"
-    || effectiveReviewStatus === "ARCHIVED";
-  const showSubmitReview = (effectiveReviewStatus === "DRAFT" || effectiveReviewStatus === "CHANGES_REQUESTED")
-    && !viewingPublished
-    && !canPublishWithSelfReview;
-  const showReviewDecision = canPublish
-    && effectiveReviewStatus === "IN_REVIEW"
-    && !canPublishWithSelfReview;
-  const showReviewControls = publishedNeedsRevalidation
-    || (!viewingPublished && draftStatusMode === "clean")
-    || showReviewStatusChip
-    || showSubmitReview
-    || showReviewDecision;
   const previewNoteDetail = hasUnsavedChanges
     ? "正在预览尚未保存的修改；预览本身不会保存或发布。"
     : hasPersistedDraft
@@ -789,8 +761,7 @@ export default function EditorToolbar({
                 Mock <span>模式</span>
               </span>
             ) : null}
-            {showReviewControls ? (
-            <div className="homepage-editor__locale-review-controls" aria-label="页面审核">
+            <div className="homepage-editor__locale-review-controls" aria-label="内容语言与审核状态">
               {publishedNeedsRevalidation ? (
                 <button
                   type="button"
@@ -803,20 +774,26 @@ export default function EditorToolbar({
                   {publishedLiveHealthLabel}
                 </button>
               ) : null}
+              <span className="homepage-editor__locale-label" aria-label="内容语言">中文</span>
               {!viewingPublished && draftStatusMode === "clean" ? (
                 <span role="status" data-draft-match="same">草稿与线上一致</span>
               ) : null}
-              {showReviewStatusChip ? (
-                <span role="status" data-testid="page-review-status">
-                  {reviewStatusLabel}
-                </span>
-              ) : null}
-              {showSubmitReview ? (
+              <span role="status" data-testid="page-review-status">
+                {effectiveReviewStatus === "DRAFT" ? "草稿"
+                  : effectiveReviewStatus === "IN_REVIEW" ? "待审核"
+                    : effectiveReviewStatus === "CHANGES_REQUESTED" ? "已退回"
+                      : effectiveReviewStatus === "APPROVED" ? "已批准"
+                        : effectiveReviewStatus === "PUBLISHED" ? "已发布"
+                          : "已归档"}
+              </span>
+              {(effectiveReviewStatus === "DRAFT" || effectiveReviewStatus === "CHANGES_REQUESTED")
+                && !viewingPublished
+                && !canPublishWithSelfReview ? (
                 <button type="button" onClick={onSubmitReview} disabled={saving || publishing}>
                   提交审核
                 </button>
               ) : null}
-              {showReviewDecision ? (
+              {canPublish && effectiveReviewStatus === "IN_REVIEW" && !canPublishWithSelfReview ? (
                 <>
                   {!isOwnReviewSubmission ? (
                     <button type="button" onClick={onApproveReview} disabled={saving || publishing}>
@@ -862,7 +839,6 @@ export default function EditorToolbar({
                 </>
               ) : null}
             </div>
-            ) : null}
           </>
         )}
         preview={{
@@ -904,6 +880,12 @@ export default function EditorToolbar({
               : "页面工具；线上版本需重新校验"
             : "页面设置、发布历史与方案工具",
         }}
+        compareLive={!viewingPublished && hasPendingDraft ? {
+          label: "查看线上",
+          ariaLabel: "查看线上版本",
+          title: "只读查看当前线上版本，返回后草稿和未保存修改仍在",
+          onClick: onViewPublishedVersion,
+        } : undefined}
         publish={{
           label: "发布页面",
           loading: publishing,

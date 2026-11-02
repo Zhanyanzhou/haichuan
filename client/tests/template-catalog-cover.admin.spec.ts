@@ -63,7 +63,7 @@ test("自适应模板只标设计宽度与高随内容，不把预览测量值�
   expect(server.writes).toEqual([]);
 });
 
-test("超长手机模板卡片显示整节，不裁掉下半段，放大预览保留完整画幅", async ({ page }) => {
+test("超长手机模板卡片只显示顶部并标明下面还有，放大预览保留完整画幅", async ({ page }) => {
   const server = await installNewTemplateServer(page);
   await page.setViewportSize({ width: 1600, height: 1000 });
   await openTemplateDesignWithoutDraft(page);
@@ -79,24 +79,20 @@ test("超长手机模板卡片显示整节，不裁掉下半段，放大预览�
   const card = page.locator(`[data-template-name="${definition.templateId}"]`);
   const shell = card.locator("[data-template-catalog-preview-shell]");
   await expect(shell).toHaveAttribute("data-preview-status", "ready");
-  await expect(shell).toHaveAttribute("data-preview-thumbnail-mode", "overview");
-  await expect(card.locator(".template-editor__catalog-long-page-hint")).toHaveCount(0);
+  await expect(shell).toHaveAttribute("data-preview-thumbnail-mode", "top");
+  await expect(card.locator(".template-editor__catalog-long-page-hint"))
+    .toHaveText("下面还有");
   const stage = card.locator(".template-editor__catalog-artboard-stage");
   const geometry = await stage.evaluate((element) => ({
     clientHeight: element.clientHeight,
-    previewHeight: element.querySelector(".template-editor__catalog-viewport-preview")?.getBoundingClientRect().height ?? 0,
     previewWidth: element.querySelector(".template-editor__catalog-viewport-preview")?.getBoundingClientRect().width ?? 0,
     scrollHeight: element.scrollHeight,
     width: element.clientWidth,
   }));
-  const maxHeight = Number(await shell.getAttribute("data-preview-thumbnail-max-height"));
-  expect(maxHeight).toBe(220);
-  expect(geometry.clientHeight).toBeLessThanOrEqual(maxHeight + 1);
-  expect(geometry.clientHeight).toBeGreaterThan(80);
-  expect(geometry.previewHeight).toBeCloseTo(geometry.clientHeight, 0);
-  expect(geometry.scrollHeight).toBeLessThanOrEqual(geometry.clientHeight + 2);
-  expect(geometry.previewWidth).toBeLessThan(geometry.width);
-  expect(geometry.previewWidth / geometry.previewHeight).toBeCloseTo(390 / 3200, 2);
+  expect(geometry.clientHeight).toBe(220);
+  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight * 2);
+  expect(geometry.previewWidth).toBeGreaterThan(geometry.width * 0.85);
+  expect(await stage.evaluate((element) => getComputedStyle(element).overflow)).toBe("hidden");
 
   await card.getByRole("button", { name: `放大预览：${definition.name}` }).click();
   const dialog = page.getByRole("dialog", { name: `放大预览：${definition.name}` });

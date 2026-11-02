@@ -9,7 +9,7 @@ import {
 export const COMPACT_WORKSPACE_MAX_WIDTH = 1024;
 export const COMPACT_WORKSPACE_QUERY = `(max-width: ${COMPACT_WORKSPACE_MAX_WIDTH}px)`;
 export const DOCKED_WORKSPACE_QUERY = `(min-width: ${COMPACT_WORKSPACE_MAX_WIDTH + 1}px)`;
-/** 模板设计从该宽度起四区同时展开。页面装修的分档见 pageEditorWorkspaceTiers。 */
+/** 画布已有宽屏余量时隐藏收起控件；1025–1439 仍允许手动收起并把宽度还给画布。 */
 export const WIDE_DOCK_QUERY = "(min-width: 1440px)";
 const FOCUSABLE_SELECTOR = [
   "a[href]",

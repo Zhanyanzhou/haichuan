@@ -1,5 +1,4 @@
-import { App as AntdApp, Alert, Button, Input, Modal } from "antd";
-import RouteLoading from "@/components/common/RouteLoading";
+import { App as AntdApp, Alert, Button, Input, Modal, Spin } from "antd";
 import {
   useCallback,
   useEffect,
@@ -1597,7 +1596,7 @@ export default function TemplateWorkspace({
           message="历史读取与载入都不会自动写入"
           description="页面实例继续锁定原版本。只有随后明确点击保存或发布，当前模板才会进入既有持久化流程。"
         />
-        {versionsLoading ? <RouteLoading scope="panel" label="正在读取版本历史…" /> : null}
+        {versionsLoading ? <div role="status"><Spin /> 正在读取版本历史…</div> : null}
         {versionsError ? (
           <Alert
             type="error"
@@ -1628,7 +1627,7 @@ export default function TemplateWorkspace({
               {versions.length === 0 ? <span className="homepage-editor__properties-hint">尚未发布正式版本</span> : null}
             </div>
             <section className="template-editor__history-detail" aria-label={selectedVersion ? `正式版本 ${selectedVersion} 预览` : "正式版本详情"}>
-              {versionDetailLoading ? <RouteLoading scope="inline" label="正在校验版本详情…" /> : null}
+              {versionDetailLoading ? <div role="status"><Spin /> 正在校验版本详情…</div> : null}
               {versionDetailError ? (
                 <Alert
                   type="error"

@@ -118,7 +118,7 @@ export function generateTemplateFromRecipe(recipe: TemplateRecipe, options: { te
       if (columns < 1) return fitError();
       const previewText = item.defaultContent || getTemplateRecipeSampleText(item.role, item.name, item.maxLength);
       const lines = previewText.split("\n").reduce((sum, line) => sum + Math.max(1, Math.ceil([...line].length / columns)), 0);
-      return total + Math.ceil(lines * Math.max(1, font.desktop) * font.lineHeight) + (item.role === "cta" ? 16 : 0);
+      return total + Math.ceil(lines * Math.max(1, font.desktop) * 1.3) + (item.role === "cta" ? 16 : 0);
     }, Math.max(0, items.length - 1) * spacing);
     // 字号取自固定层级后不再存在“短边太窄所以正文小于 1px”的情况，容量只由内外框几何决定。
     if (inner.width <= 0 || inner.height <= 0) fitError();
@@ -234,7 +234,7 @@ export function generateTemplateFromRecipe(recipe: TemplateRecipe, options: { te
     const font = typography(content.role);
     slot.desktopRules = { fontRole: type === "button" || type === "link" ? "action" : font.fontRole,
       fontSize: px(Math.max(1, font.desktop)), fontWeight: font.weight,
-      lineHeight: font.lineHeight, textAlign: recipe.style.alignment ?? recommendedAlignment(recipe.layout), overflow: "wrap",
+      lineHeight: 1.3, textAlign: recipe.style.alignment ?? recommendedAlignment(recipe.layout), overflow: "wrap",
       fontFamily: recipe.style.variant === "premium" ? "serif" : "system", color: font.level === "caption" ? recipe.style.secondaryTextColor ?? recipe.style.textColor : recipe.style.textColor,
     };
     slot.mobileRules = { fontSize: px(font.mobile) };

@@ -12,8 +12,7 @@ import {
   ReloadOutlined,
   RightOutlined,
 } from "@ant-design/icons";
-import { App as AntdApp, Button, Dropdown, Modal, type MenuProps } from "antd";
-import RouteLoading from "@/components/common/RouteLoading";
+import { App as AntdApp, Button, Dropdown, Modal, Spin, type MenuProps } from "antd";
 import {
   memo,
   useCallback,
@@ -39,10 +38,6 @@ import WorkspacePanelHeader from "../workspace/WorkspacePanelHeader";
 import LaunchMasterPickerModal from "../template-creation/LaunchMasterPickerModal";
 import { catalogCardName } from "./catalogCardName";
 import { rememberCatalogTemplateRoles } from "./publishedTemplateSectionRoles";
-import {
-  PAGE_EDITOR_LIBRARY_DOCK_QUERY,
-  pageEditorPanelWouldFit,
-} from "../workspace/pageEditorWorkspaceTiers";
 import useCompactWorkspaceOverlay, {
   DOCKED_WORKSPACE_QUERY,
   WIDE_DOCK_QUERY,
@@ -536,15 +531,8 @@ function renderUnifiedTemplatePreview(
   };
 }
 
-function readInitialCollapsed(mode: "page" | "design") {
+function readInitialCollapsed() {
   try {
-    if (
-      mode === "page"
-      && window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
-      && !window.matchMedia(PAGE_EDITOR_LIBRARY_DOCK_QUERY).matches
-    ) {
-      return true;
-    }
     if (window.matchMedia(DOCKED_WORKSPACE_QUERY).matches) return false;
     return window.matchMedia("(max-width: 900px)").matches
       || window.sessionStorage.getItem(COLLAPSED_STORAGE_KEY) === "1";
@@ -1145,14 +1133,7 @@ function PagePublishedTemplateCard({
 export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const catalogActive = props.active ?? true;
   const [keyword, setKeyword] = useState("");
-  const [collapsed, setCollapsed] = useState(() => readInitialCollapsed(props.mode));
-  const [pageLibraryOverlay, setPageLibraryOverlay] = useState(false);
-  const pageLibraryTierRef = useRef<string | null>(null);
-  const pageLibraryManualRef = useRef<boolean | null>(null);
-  const pageLibraryCollapsedRef = useRef(collapsed);
-  const pageLibraryOverlayRef = useRef(false);
-  pageLibraryCollapsedRef.current = collapsed;
-  pageLibraryOverlayRef.current = pageLibraryOverlay;
+  const [collapsed, setCollapsed] = useState(readInitialCollapsed);
   const [designStatus, setDesignStatus] = useState<"all" | "draft" | "published">("all");
   const [designView, setDesignView] = useState<"library" | "trash">("library");
   const [catalogItems, setCatalogItems] = useState<TemplateCatalogItemResource[]>([]);
@@ -1260,77 +1241,15 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   const {
     compact: libraryOverlayCompact,
     requestOpen: requestLibraryOverlayOpen,
-    closeButtonRef: libraryCloseButtonRef,
   } = libraryOverlay;
-  const applyPageLibraryTier = useCallback(() => {
-    if (props.mode !== "page") return;
-    const tier = !window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
-      ? "compact"
-      : window.matchMedia(PAGE_EDITOR_LIBRARY_DOCK_QUERY).matches
-        ? "open"
-        : "rail";
-    if (pageLibraryTierRef.current !== tier) {
-      pageLibraryTierRef.current = tier;
-      pageLibraryManualRef.current = null;
-    }
-    const manual = pageLibraryManualRef.current;
-    let collapsedNext = pageLibraryCollapsedRef.current;
-    let overlayNext = false;
-    if (tier === "open") {
-      collapsedNext = manual === true;
-      overlayNext = false;
-    } else if (tier === "rail") {
-      if (manual === false) {
-        collapsedNext = false;
-        overlayNext = !pageEditorPanelWouldFit("library");
-      } else {
-        collapsedNext = true;
-        overlayNext = false;
-      }
-    }
-    if (collapsedNext !== pageLibraryCollapsedRef.current) setLibraryCollapsed(collapsedNext);
-    if (overlayNext !== pageLibraryOverlayRef.current) setPageLibraryOverlay(overlayNext);
-  }, [props.mode, setLibraryCollapsed]);
   const requestLibraryOpen = useCallback(() => {
-    if (
-      props.mode === "page"
-      && window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
-    ) {
-      pageLibraryManualRef.current = false;
-      const opensAsOverlay = !pageEditorPanelWouldFit("library");
-      applyPageLibraryTier();
-      if (opensAsOverlay) {
-        window.requestAnimationFrame(() => {
-          libraryCloseButtonRef.current?.focus();
-        });
-      }
-      return;
-    }
     if (libraryOverlayCompact && obscuredByInspector && onRequestCompactOpen) {
       pendingCompactOpenRef.current = true;
       onRequestCompactOpen();
       return;
     }
     requestLibraryOverlayOpen();
-  }, [
-    applyPageLibraryTier,
-    libraryCloseButtonRef,
-    libraryOverlayCompact,
-    obscuredByInspector,
-    onRequestCompactOpen,
-    props.mode,
-    requestLibraryOverlayOpen,
-  ]);
-  const collapsePageLibrary = useCallback(() => {
-    if (
-      props.mode === "page"
-      && window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
-    ) {
-      pageLibraryManualRef.current = true;
-      setPageLibraryOverlay(false);
-    }
-    libraryOverlay.requestClose();
-  }, [libraryOverlay, props.mode]);
+  }, [libraryOverlayCompact, obscuredByInspector, onRequestCompactOpen, requestLibraryOverlayOpen]);
 
   const clearMatchingPageHandoff = useCallback((identity: { templateId: string; version: number }) => {
     if (!matchesPageHandoff(pageHandoffRef.current, identity)) return;
@@ -1376,42 +1295,26 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   }, [obscuredByInspector, requestLibraryOverlayOpen]);
 
   useEffect(() => {
-    if (props.mode === "page") return;
-    if (!libraryOverlayCompact) setLibraryCollapsed(false);
-    else setLibraryCollapsed(true);
+    if (!libraryOverlayCompact) {
+      setLibraryCollapsed(false);
+    } else if (props.mode === "design") {
+      setLibraryCollapsed(true);
+    }
   }, [libraryOverlayCompact, props.mode, setLibraryCollapsed]);
   useEffect(() => {
-    if (props.mode === "page") return;
     const wideDock = window.matchMedia(WIDE_DOCK_QUERY);
     const keepLibraryOpen = (event: MediaQueryListEvent) => {
       if (event.matches) setLibraryCollapsed(false);
     };
     wideDock.addEventListener("change", keepLibraryOpen);
     return () => wideDock.removeEventListener("change", keepLibraryOpen);
-  }, [props.mode, setLibraryCollapsed]);
-  useEffect(() => {
-    if (props.mode !== "page") return undefined;
-    applyPageLibraryTier();
-    const libraryTier = window.matchMedia(PAGE_EDITOR_LIBRARY_DOCK_QUERY);
-    const docked = window.matchMedia(DOCKED_WORKSPACE_QUERY);
-    const sync = () => applyPageLibraryTier();
-    libraryTier.addEventListener("change", sync);
-    docked.addEventListener("change", sync);
-    window.addEventListener("resize", sync);
-    return () => {
-      libraryTier.removeEventListener("change", sync);
-      docked.removeEventListener("change", sync);
-      window.removeEventListener("resize", sync);
-    };
-  }, [applyPageLibraryTier, props.mode]);
+  }, [setLibraryCollapsed]);
 
   useEffect(() => {
     if (libraryOverlayCompact && obscuredByInspector) {
-      if (props.mode === "page") pageLibraryManualRef.current = true;
-      setPageLibraryOverlay(false);
       setLibraryCollapsed(true);
     }
-  }, [libraryOverlayCompact, obscuredByInspector, props.mode, setLibraryCollapsed]);
+  }, [libraryOverlayCompact, obscuredByInspector, setLibraryCollapsed]);
 
   useEffect(() => {
     const mobileWorkspace = window.matchMedia("(max-width: 900px)");
@@ -1855,10 +1758,9 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
   if (collapsed) {
     return (
       <aside
-        className={`homepage-editor__library homepage-editor__library--collapsed`}
+        className="homepage-editor__library homepage-editor__library--collapsed"
         aria-label="模板组件库（已收起）"
         data-unified-template-library={props.mode}
-        data-page-panel-state={props.mode === "page" ? "rail" : undefined}
         data-compact-overlay={libraryOverlay.compact ? "library-trigger" : undefined}
       >
         <button
@@ -1878,30 +1780,20 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
 
   return (
     <>
-      <aside
+    <aside
       ref={libraryOverlay.panelRef}
-      className={`homepage-editor__library template-editor__library${pageLibraryOverlay ? " is-dock-overlay" : ""}`}
+      className="homepage-editor__library template-editor__library"
       hidden={libraryOverlay.compact && obscuredByInspector}
       aria-label={libraryOverlay.compact && props.mode === "design"
         ? "模板设计模板目录"
         : "模板组件库"}
       data-unified-template-library={props.mode}
-      data-page-panel-state={props.mode === "page"
-        ? (pageLibraryOverlay ? "overlay" : "dock")
-        : undefined}
       role={libraryOverlay.compact && props.mode === "design" ? "dialog" : undefined}
       aria-modal={libraryOverlay.compact && props.mode === "design" ? "true" : undefined}
       tabIndex={libraryOverlay.compact && props.mode === "design" ? -1 : undefined}
       data-compact-overlay={libraryOverlay.compact ? "library" : undefined}
       data-compact-overlay-open={libraryOverlay.compact || undefined}
-      onKeyDown={(event) => {
-        if (pageLibraryOverlay && event.key === "Escape") {
-          event.preventDefault();
-          collapsePageLibrary();
-          return;
-        }
-        libraryOverlay.onPanelKeyDown(event);
-      }}
+      onKeyDown={libraryOverlay.onPanelKeyDown}
     >
       <div className="homepage-editor__library-tools">
         <WorkspacePanelHeader
@@ -1912,7 +1804,7 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
               ref={libraryOverlay.closeButtonRef}
               type="button"
               className="homepage-editor__library-collapse-btn admin-panel-collapse-toggle"
-              onClick={collapsePageLibrary}
+              onClick={libraryOverlay.requestClose}
               title="收起模板组件库"
               aria-label="收起模板组件库"
             >
@@ -2002,10 +1894,10 @@ export function UnifiedTemplateLibrary(props: UnifiedTemplateLibraryProps) {
         } : undefined}
       >
         {catalogLoading ? (
-          <RouteLoading
-            scope="panel"
-            label={`正在读取${props.mode === "design" && designView === "trash" ? "模板回收站" : "模板目录"}…`}
-          />
+          <div className="homepage-editor__library-empty" role="status">
+            <Spin size="small" />
+            <p>正在读取{props.mode === "design" && designView === "trash" ? "模板回收站" : "模板目录"}…</p>
+          </div>
         ) : null}
         {catalogError ? (
           <div className="homepage-editor__library-empty is-error" role="alert">

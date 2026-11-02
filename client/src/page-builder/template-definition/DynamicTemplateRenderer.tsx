@@ -47,11 +47,7 @@ import {
   resolveManagedTemplateMediaPreviewUrl,
   useManagedTemplateMediaDisplayUrl,
 } from "./managedMediaPreview";
-import { usesLargePhoneMeasure } from "./largePhoneMeasure";
-import { segmentMobileCopyFrames } from "./mobileCopyInsideImage";
 import { attachMobileWorkCaptions, partitionMobileWorkUnits, resolveMobileImageFrame } from "./mobileWorkGrid";
-import { publicFlowNodeIsVisible } from "./publicFlow";
-import { resolveTextOnImageScrim } from "./textOnImageScrim";
 import { resolveMediaSlotImage } from "../config/mediaSlotContract";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
 import "./DynamicTemplateRenderer.css";
@@ -132,76 +128,6 @@ const DYNAMIC_TEMPLATE_BACKGROUND_TOKENS: Record<string, string> = {
 
 function safeColor(value: string | undefined): string | undefined {
   return value && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value) ? value : undefined;
-}
-
-/** 深色画布上没写颜色的文字沿用品牌墨色，会和底融成一条黑带。 */
-const DARK_CANVAS_INK = "#F7F8F8";
-
-function hexLuminance(color: string | undefined): number | undefined {
-  const safe = safeColor(color);
-  if (!safe) return undefined;
-  const raw = safe.slice(1);
-  const expanded = raw.length === 3 ? raw.split("").map((char) => char + char).join("") : raw;
-  const channel = (offset: number) => parseInt(expanded.slice(offset, offset + 2), 16) / 255;
-  const [red, green, blue] = [0, 2, 4].map(channel);
-  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-}
-
-function isDarkCanvas(color: string | undefined): boolean {
-  const luminance = hexLuminance(color);
-  return luminance !== undefined && luminance < 0.4;
-}
-
-function readableTextColor(explicit: string | undefined, canvas: string | undefined): string | undefined {
-  if (explicit) return explicit;
-  return isDarkCanvas(canvas) ? DARK_CANVAS_INK : undefined;
-}
-
-/** 文字落在照片上时，深色字改成反色；按钮自己有底色时保留原字色。 */
-function inkOnImage(explicit: string | undefined, hasOwnSurface: boolean): string {
-  if (hasOwnSurface && explicit) return explicit;
-  const luminance = hexLuminance(explicit);
-  if (!hasOwnSurface && explicit && luminance !== undefined && luminance >= 0.7) return explicit;
-  return DARK_CANVAS_INK;
-}
-
-function occupyingChildren(
-  node: DynamicTemplateRenderPlanNode,
-  showEmptySlots: boolean,
-  mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
-): DynamicTemplateRenderPlanNode[] {
-  const collapseEmpty = mode === "public" || !showEmptySlots;
-  return collapseEmpty
-    ? node.children.filter((child) => !child.hidden && publicFlowNodeIsVisible(child))
-    : node.children.filter((child) => !child.hidden);
-}
-
-function branchIsOnlyImage(
-  node: DynamicTemplateRenderPlanNode,
-  showEmptySlots: boolean,
-  mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
-): boolean {
-  if (node.slot?.type === "image") return true;
-  if (node.slot) return false;
-  const children = occupyingChildren(node, showEmptySlots, mode);
-  return children.length > 0 && children.every((child) => branchIsOnlyImage(child, showEmptySlots, mode));
-}
-
-/**
- * 手机流式排版里，深色画布的下内边距会露在满幅图下面。
- * 图下已经没有文字或按钮时，这段内边距就是一条没有内容的黑带。
- */
-function dropDarkMobileImageTail(
-  node: DynamicTemplateRenderPlanNode,
-  device: "desktop" | "mobile",
-  canvasColor: string | undefined,
-  showEmptySlots: boolean,
-  mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
-): boolean {
-  if (device !== "mobile" || node.rules.layoutMode === "free" || !isDarkCanvas(canvasColor)) return false;
-  if (!(node.rules.padding?.bottom && node.rules.padding.bottom.value > 0)) return false;
-  const visible = occupyingChildren(node, showEmptySlots, mode);
-  return visible.length > 0 && visible.every((child) => branchIsOnlyImage(child, showEmptySlots, mode));
 }
 
 function isDisplayableTemplateMediaUrl(value: string | undefined): value is string {
@@ -628,8 +554,6 @@ function renderSlotContent(
   relationalLayout = false,
   priority = false,
   imageFit?: NonNullable<CSSProperties["objectFit"]>,
-  canvasColor?: string,
-  onImage = false,
 ): ReactNode {
   const { slot, content } = node;
   if (!slot) return null;
@@ -659,9 +583,7 @@ function renderSlotContent(
     fontFamily: node.slotRules?.fontFamily
       ? ({ system: "system-ui, sans-serif", serif: '"Noto Serif SC", "Source Han Serif CN", serif', sans: "Inter, system-ui, sans-serif" } as const)[node.slotRules.fontFamily]
       : undefined,
-    color: onImage
-      ? inkOnImage(safeColor(node.slotRules?.color), Boolean(node.rules.backgroundColor || node.rules.backgroundToken))
-      : readableTextColor(safeColor(node.slotRules?.color), canvasColor),
+    color: safeColor(node.slotRules?.color),
     letterSpacing: Number.isFinite(node.slotRules?.letterSpacing) ? `${node.slotRules!.letterSpacing}px` : undefined,
     lineHeight: node.slotRules?.lineHeight,
     textAlign: node.layoutOverride?.textAlign ?? node.slotRules?.textAlign,
@@ -757,13 +679,7 @@ function renderSlotContent(
   }
   if (["heading", "text", "richText", "badge", "icon"].includes(slot.type)) {
     const text = typeof content === "string" ? content : "";
-    if (!text) {
-      return mode === "public" ? null : (
-        <span className="hc-dynamic-template__empty-slot" style={{ display: "block", textAlign: textStyle.textAlign }}>
-          {slot.label}待填写
-        </span>
-      );
-    }
+    if (!text) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">{slot.label}待填写</span>;
     if (slot.type === "heading") {
       const Heading = headingLevel === 1 ? "h1" : "h2";
       return <Heading className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{text}</Heading>;
@@ -773,22 +689,11 @@ function renderSlotContent(
   }
   if (slot.type === "button" || slot.type === "link") {
     const action = getSafeActionContent(content, mode !== "public");
+    if (!action.label) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">{slot.label}待填写</span>;
     // 行动槽位的可点击语义由承载全部布局/背景/边框的节点外壳负责。
     // 这里始终只输出文案，避免形成“外层视觉盒子 + 内层文字链接”的双重命中区域。
     // 对齐作用于行动槽位的可用宽度；行内 span 不会响应 text-align。
-    // 手机把边框令牌写成 none 时，这是文字链接，不是方框按钮。
-    const quietAction = node.rules.borderToken === "none";
-    if (!action.label) {
-      return mode === "public" ? null : (
-        <span
-          className="hc-dynamic-template__empty-slot"
-          style={{ display: "block", textAlign: textStyle.textAlign, ...(quietAction ? { textDecoration: "underline", textUnderlineOffset: "0.35em", textDecorationThickness: "1px" } : {}) }}
-        >
-          {slot.label}待填写
-        </span>
-      );
-    }
-    return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={{ display: "block", ...(quietAction ? { textDecoration: "underline", textUnderlineOffset: "0.35em", textDecorationThickness: "1px" } : {}), ...textStyle }}>{action.label}</span>;
+    return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={{ display: "block", ...textStyle }}>{action.label}</span>;
   }
   if (slot.type === "product") {
     if (mode === "public") return null;
@@ -837,8 +742,6 @@ function renderTemplateChildren({
   bleedInset = ZERO_MOBILE_BLEED,
   bleedAtStart = true,
   bleedAtEnd = true,
-  parentMeasured = false,
-  onImageCopy = false,
   ...shared
 }: {
   node: DynamicTemplateRenderPlanNode;
@@ -850,44 +753,26 @@ function renderTemplateChildren({
   bleedInset?: MobileBleedInset;
   bleedAtStart?: boolean;
   bleedAtEnd?: boolean;
-  parentMeasured?: boolean;
-  onImageCopy?: boolean;
-} & Omit<Parameters<typeof RenderNode>[0], "node" | "sectionRole" | "device" | "parentFree" | "parentRules" | "siblingIndex" | "siblingPlacements" | "workCardFrame" | "constrainWorkCell" | "inheritedCanvasColor" | "bleedInset" | "bleedAtStart" | "bleedAtEnd" | "parentMeasured" | "siblings" | "onImageCopy" | "fillMobileCopyFrame">) {
-  const dropImageTail = dropDarkMobileImageTail(
-    node,
-    device,
-    inheritedCanvasColor,
-    shared.showEmptySlots ?? false,
-    shared.mode,
-  );
+} & Omit<Parameters<typeof RenderNode>[0], "node" | "sectionRole" | "device" | "parentFree" | "parentRules" | "siblingIndex" | "siblingPlacements" | "workCardFrame" | "constrainWorkCell" | "inheritedCanvasColor" | "bleedInset" | "bleedAtStart" | "bleedAtEnd">) {
   const childInset = extendMobileBleedInset(
     bleedInset,
-    dropImageTail && node.rules.padding
-      ? { ...node.rules.padding, bottom: { ...node.rules.padding.bottom, value: 0 } }
-      : node.rules.padding,
+    node.rules.padding,
     device === "mobile" && !parentFree && !constrainWorkCell && node.rules.layoutMode !== "free",
   );
-  // 公开页和页面画布丢掉没有内容的容器。否则空文字盒的内边距和间距会留在满幅图下方，深色画布就露出黑带。
-  // 模板结构编辑仍留着空位，方便点选。
-  const renderedChildren = shared.mode === "public" || !shared.showEmptySlots
-    ? node.children.filter((child) => !child.hidden && publicFlowNodeIsVisible(child))
-    : node.children;
-  const visibleChildren = renderedChildren.filter((child) => !child.hidden);
+  const visibleChildren = node.children.filter((child) => !child.hidden);
   const firstVisibleId = visibleChildren[0]?.nodeId;
   const lastVisibleId = visibleChildren[visibleChildren.length - 1]?.nodeId;
-  const composeCopyInsideImage = device === "mobile"
-    && !parentFree
-    && !constrainWorkCell
-    && !onImageCopy
-    && node.rules.layoutMode !== "free";
-  const copySegments = composeCopyInsideImage
-    ? segmentMobileCopyFrames(renderedChildren)
-    : [{ kind: "nodes" as const, nodes: renderedChildren }];
+  const groups = attachMobileWorkCaptions(partitionMobileWorkUnits(node.children, {
+    device,
+    sectionRole,
+    layoutMode: node.rules.layoutMode,
+    display: node.rules.display,
+    columnCount: node.rules.columns?.length,
+  }));
   const renderChild = (
     child: DynamicTemplateRenderPlanNode,
     childIndex: number,
     inWorkGrid: boolean,
-    frame?: { onImage?: boolean; fillImage?: boolean; measured?: boolean },
   ) => (
     <RenderNode
       key={child.nodeId}
@@ -903,27 +788,13 @@ function renderTemplateChildren({
         .filter((sibling) => sibling.nodeId !== child.nodeId)
         .flatMap((sibling) => sibling.rules.placement ? [sibling.rules.placement] : [])}
       {...shared}
-      inheritedCanvasColor={frame?.onImage ? "#111315" : inheritedCanvasColor}
+      inheritedCanvasColor={inheritedCanvasColor}
       bleedInset={childInset}
       bleedAtStart={bleedAtStart && child.nodeId === firstVisibleId}
       bleedAtEnd={bleedAtEnd && child.nodeId === lastVisibleId}
-      parentMeasured={parentMeasured || frame?.measured === true}
-      onImageCopy={(onImageCopy || frame?.onImage === true)
-        && !child.rules.backgroundColor
-        && !child.rules.backgroundToken}
-      fillMobileCopyFrame={frame?.fillImage === true}
-      siblings={node.children}
     />
   );
-  const renderNodeGroup = (children: readonly DynamicTemplateRenderPlanNode[]) => {
-    const groups = attachMobileWorkCaptions(partitionMobileWorkUnits(children, {
-      device,
-      sectionRole,
-      layoutMode: node.rules.layoutMode,
-      display: node.rules.display,
-      columnCount: node.rules.columns?.length,
-    }));
-    return groups.map((group) => {
+  return groups.map((group) => {
     if (group.kind === "node") {
       const childIndex = node.children.findIndex((child) => child.nodeId === group.node.nodeId);
       return renderChild(group.node, childIndex, false);
@@ -933,18 +804,13 @@ function renderTemplateChildren({
       const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
       return renderChild(child, childIndex, false);
     }
-    // 奇数张时第一张跨满两列，其余两两并排，避免两张一排、最后一张落单，
-    // 也不把三张竖排成一屏半（区块模板标准 R-6）。
-    const leadCard = group.nodes.length % 2 === 1;
     return (
       <div
         key={group.nodes.map((child) => child.nodeId).join(":")}
         data-template-mobile-work-grid="true"
-        data-template-mobile-work-columns="2"
-        data-template-mobile-work-lead={leadCard ? "true" : undefined}
         style={{
           display: "grid",
-          gap: "24px 12px",
+          gap: "16px",
           gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
           width: "100%",
         }}
@@ -954,7 +820,7 @@ function renderTemplateChildren({
           const caption = group.captions[cardIndex];
           const captionIndex = caption ? node.children.findIndex((item) => item.nodeId === caption.nodeId) : -1;
           return (
-            <div key={child.nodeId} data-template-mobile-work-card="true" style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0, ...(leadCard && cardIndex === 0 ? { gridColumn: "1 / -1" } : {}) }}>
+            <div key={child.nodeId} data-template-mobile-work-card="true" style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0 }}>
               {renderChild(child, childIndex, true)}
               {caption ? renderChild(caption, captionIndex, true) : null}
             </div>
@@ -962,86 +828,6 @@ function renderTemplateChildren({
         })}
       </div>
     );
-    });
-  };
-  return copySegments.flatMap((segment) => {
-    if (segment.kind === "nodes") return renderNodeGroup(segment.nodes);
-    const imageIndex = node.children.findIndex((child) => child.nodeId === segment.image.nodeId);
-    const heightRatio = segment.image.rules.height.mode === "aspect-ratio" && segment.image.rules.height.ratio
-      ? segment.image.rules.height.ratio.width / segment.image.rules.height.ratio.height
-      : undefined;
-    const slotRatio = parseAspectRatio(segment.image.slotRules?.aspectRatio);
-    const ratio = resolveMobileImageFrame({
-      device: "mobile",
-      inWorkGrid: false,
-      slotType: segment.image.slot?.type,
-      semanticRole: segment.image.slot?.semanticRole,
-      sectionRole,
-      ratio: heightRatio ?? (slotRatio ? slotRatio.width / slotRatio.height : undefined),
-    }) ?? (slotRatio ? `${slotRatio.width} / ${slotRatio.height}` : "4 / 5");
-    const bleeds = imageBleedsOnMobile(segment.image, {
-      device: "mobile",
-      constrainWorkCell: false,
-      sectionRole,
-      canvasColor: inheritedCanvasColor,
-    });
-    const frameBleed = bleeds ? mobileBleedBox(childInset, { top: bleedAtStart, bottom: bleedAtEnd }) : undefined;
-    const measured = usesLargePhoneMeasure(segment.image, {
-      device: "mobile",
-      inWorkGrid: false,
-      parentMeasured,
-      sectionRole,
-    });
-    return [
-      <div
-        key={`copy-frame:${segment.image.nodeId}`}
-        data-template-mobile-copy-frame="true"
-        data-template-large-phone-measure={measured ? "true" : undefined}
-        style={{
-          display: "grid",
-          width: "100%",
-          minWidth: 0,
-          ...frameBleed,
-        }}
-      >
-        <div aria-hidden="true" style={{ gridArea: "1 / 1", width: "100%", aspectRatio: ratio }} />
-        <div style={{ gridArea: "1 / 1", position: "relative", minHeight: "100%" }}>
-          {renderChild(segment.image, imageIndex, false, { fillImage: true, measured: true })}
-        </div>
-        <div
-          aria-hidden="true"
-          data-template-text-scrim="bottom"
-          style={{
-            gridArea: "1 / 1",
-            alignSelf: "end",
-            height: "46%",
-            zIndex: 1,
-            pointerEvents: "none",
-            background: "linear-gradient(to top, rgb(24 26 27 / 0.6), rgb(24 26 27 / 0))",
-          }}
-        />
-        <div style={{
-          gridArea: "1 / 1",
-          alignSelf: "end",
-          zIndex: 2,
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-          minWidth: 0,
-          padding: "28px 20px 24px",
-        }}
-        >
-          {segment.copy.map((child) => {
-            const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
-            return renderChild(child, childIndex, false, { onImage: true, measured: true });
-          })}
-        </div>
-      </div>,
-      ...segment.rest.map((child) => {
-        const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
-        return renderChild(child, childIndex, false);
-      }),
-    ];
   });
 }
 
@@ -1080,10 +866,6 @@ function RenderNode({
   bleedInset = ZERO_MOBILE_BLEED,
   bleedAtStart = true,
   bleedAtEnd = true,
-  parentMeasured = false,
-  siblings = [],
-  onImageCopy = false,
-  fillMobileCopyFrame = false,
 }: {
   node: DynamicTemplateRenderPlanNode;
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>;
@@ -1119,10 +901,6 @@ function RenderNode({
   bleedInset?: MobileBleedInset;
   bleedAtStart?: boolean;
   bleedAtEnd?: boolean;
-  parentMeasured?: boolean;
-  siblings?: readonly DynamicTemplateRenderPlanNode[];
-  onImageCopy?: boolean;
-  fillMobileCopyFrame?: boolean;
 }) {
   const layoutElement = useRef<HTMLElement | null>(null);
   const backgroundSource = !node.hidden && node.rules.backgroundImage && isSafeTemplateMediaUrl(node.rules.backgroundImage)
@@ -1382,13 +1160,6 @@ function RenderNode({
     : bleeds
       ? mobileBleedBox(bleedInset, { top: bleedAtStart, bottom: bleedAtEnd })
       : undefined;
-  const largePhoneMeasure = usesLargePhoneMeasure(node, {
-    device,
-    inWorkGrid: constrainWorkCell,
-    parentMeasured,
-    sectionRole,
-  });
-  const overlayScrim = resolveTextOnImageScrim(node, siblings, device);
   const slotContent = node.slot
     ? renderSlotContent(
       node,
@@ -1401,9 +1172,7 @@ function RenderNode({
       interactionOwner,
       relationalLayout,
       node.slotId === primaryImageSlotId,
-      bleedStyle && !node.layoutOverride?.objectFit ? "cover" : fillMobileCopyFrame ? "cover" : undefined,
-      canvasColor,
-      onImageCopy,
+      bleedStyle && !node.layoutOverride?.objectFit ? "cover" : undefined,
     )
     : null;
   return (
@@ -1421,7 +1190,6 @@ function RenderNode({
       data-template-border-token={node.rules.borderToken}
       data-template-semantic-role={node.slot?.semanticRole}
       data-template-mobile-bleed={bleedStyle ? "true" : undefined}
-      data-template-large-phone-measure={largePhoneMeasure ? "true" : undefined}
       style={{
         ...rulesToStyle(
           node,
@@ -1434,9 +1202,6 @@ function RenderNode({
           device,
           preserveResolvedMobileRatio,
         ),
-        ...(dropDarkMobileImageTail(node, device, canvasColor, showEmptySlots, mode)
-          ? { paddingBottom: 0 }
-          : {}),
         ...(showEmptyStructure && !node.slot && node.children.length === 0
           ? { minHeight: "256px" }
           : {}),
@@ -1447,16 +1212,7 @@ function RenderNode({
         ...(device === "mobile" && node.slot?.type !== "image" && node.rules.overflow === "hidden" && subtreeHasMobileBleedImage(node, { device, sectionRole, canvasColor })
           ? { overflow: "visible" as const }
           : {}),
-        ...(fillMobileCopyFrame ? {
-          position: "absolute" as const,
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          maxWidth: "none",
-          margin: 0,
-          aspectRatio: "auto",
-          overflow: "hidden" as const,
-        } : bleedStyle),
+        ...bleedStyle,
         ...(layoutEditable || freePlacementEditable ? {
           ...(layoutEditable ? { position: "relative" as const } : {}),
           cursor: freePlacementEditable || node.instanceEditPolicy?.position ? "move" : undefined,
@@ -1552,21 +1308,6 @@ function RenderNode({
         },
       } : {})}
     >
-      {overlayScrim ? (
-        <div
-          aria-hidden="true"
-          data-template-text-scrim={overlayScrim}
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: -1,
-            pointerEvents: "none",
-            background: overlayScrim === "bottom"
-              ? "linear-gradient(to top, rgb(24 26 27 / 0.6), rgb(24 26 27 / 0))"
-              : "linear-gradient(to bottom, rgb(24 26 27 / 0.6), rgb(24 26 27 / 0))",
-          }}
-        />
-      ) : null}
       {slotContent}
       {renderTemplateChildren({
         node,
@@ -1599,8 +1340,6 @@ function RenderNode({
         bleedInset,
         bleedAtStart,
         bleedAtEnd,
-        parentMeasured: largePhoneMeasure,
-        onImageCopy: onImageCopy && !node.rules.backgroundColor && !node.rules.backgroundToken,
       })}
     </Element>
   );
@@ -1652,28 +1391,11 @@ export default function DynamicTemplateRenderer({
     contentBySlotId,
     hiddenSlotIds,
     layoutOverridesByNodeId,
-    showEmptySlots: showEmptySlots ?? (mode === "editor" && editorSurface !== "page-instance"),
+    showEmptySlots: showEmptySlots ?? mode === "editor",
     publicSurface: mode === "public" && definition.schemaVersion >= 3
       ? { ...publicSurface, omitDefaultImages: true, omitDefaultContent: true }
       : publicSurface,
   });
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [largePhone, setLargePhone] = useState(false);
-  useLayoutEffect(() => {
-    const element = rootRef.current;
-    if (!element || device !== "mobile") {
-      setLargePhone(false);
-      return undefined;
-    }
-    const update = () => {
-      const width = element.clientWidth;
-      setLargePhone(width >= 600 && width < 768);
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [device, result.ok, result.ok ? result.plan.templateId : ""]);
   if (!result.ok) {
     if (mode === "public") return null;
     return (
@@ -1727,7 +1449,6 @@ export default function DynamicTemplateRenderer({
     : undefined;
   return (
     <div
-      ref={rootRef}
       className="hc-dynamic-template"
       data-dynamic-template-id={result.plan.templateId}
       data-dynamic-template-schema-version={result.plan.schemaVersion}
@@ -1742,7 +1463,6 @@ export default function DynamicTemplateRenderer({
         ? `${result.plan.root.rules.height.ratio.width}:${result.plan.root.rules.height.ratio.height}`
         : undefined}
       data-template-default-background-token={result.plan.metadata.defaultBackgroundToken}
-      data-template-large-phone={largePhone ? "true" : undefined}
       style={{
         background: result.plan.metadata.defaultBackgroundToken
           ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[result.plan.metadata.defaultBackgroundToken]
@@ -1771,7 +1491,7 @@ export default function DynamicTemplateRenderer({
         contentRenderMode={contentRenderMode}
         structureProtectedNodeIds={structureProtectedNodeIds}
         editableContractRoleIdsByNode={editableContractRoleIdsByNode}
-        showEmptySlots={showEmptySlots ?? (mode === "editor" && editorSurface !== "page-instance")}
+        showEmptySlots={showEmptySlots ?? mode === "editor"}
         showEmptyStructure={mode === "editor" && editorSurface === "template-definition"}
         sectionRole={definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole}
         inheritedCanvasColor={result.plan.metadata.defaultBackgroundToken

@@ -9,7 +9,6 @@ import {
 } from "../template-definition";
 import { resetTemplateNodeRule, resetTemplateSlotRule, resolveTemplateNodeRules, resolveTemplateSlotRules, setTemplateNodeRule, setTemplateSlotRule, type TemplateBreakpoint } from "../template-definition/responsive";
 import { objectPositionToPercent, percentToExactObjectPosition } from "../template-definition/imagePosition";
-import ActionCopyHint from "../template-definition/ActionCopyHint";
 import { useTemplateEditorSession } from "./templateEditorSession";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -80,12 +79,6 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
           value={action ? typeof record.label === "string" ? record.label : "" : text}
           rows={action || slot.type === "heading" ? undefined : 3} maxLength={slot.validation.maxLength ?? 100000} readOnly={locked}
           onChange={(next) => content(action ? { ...record, label: next } : next)} />}
-        {action && (slot.type === "button" || slot.type === "link") ? (
-          <ActionCopyHint
-            slotType={slot.type}
-            label={typeof record.label === "string" ? record.label : ""}
-          />
-        ) : null}
         {onOpenPageScope ? <button type="button" className="template-native__page-scope-link" onClick={onOpenPageScope}>设置页面开放范围</button> : null}
       </div>
     </section> : null}

@@ -17,7 +17,6 @@ import {
 } from "./usePublishedPageDocument";
 import type { PuckBlock } from "./PuckDocumentRenderer";
 import type { PublicContentLocale } from "@/i18n/publicLocale";
-import RouteLoading from "@/components/common/RouteLoading";
 
 // 页面装修器及其编辑器依赖仅在确有已发布内容时加载，避免进入纯展示页首屏。
 const PuckDocumentRenderer = lazy(() => import("./PuckDocumentRenderer"));
@@ -264,12 +263,10 @@ export default function PublishedPageDecoration({
         className={pageKey === "products" ? "hc-products-page-frame" : undefined}
         data-page-document-state="loading"
         aria-busy="true"
+        aria-live="polite"
+        style={{ minHeight: pageKey === "products" ? undefined : "60vh", display: "grid", placeItems: "center", color: "#5F6568", fontSize: 12 }}
       >
-        <RouteLoading
-          scope="region"
-          surface="public"
-          label={english ? `Loading ${pageLabel || "page"}` : `正在载入${pageLabel || "页面"}`}
-        />
+        {english ? `Loading ${pageLabel || "page"}` : `正在载入${pageLabel || "页面"}`}
       </div>,
     );
   }

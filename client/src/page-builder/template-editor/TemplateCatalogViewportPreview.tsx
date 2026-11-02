@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import RouteLoading from "@/components/common/RouteLoading";
 import {
   AUTO_ARTBOARD_MIN_HEIGHT,
   syncTemplateViewportStyles,
@@ -27,9 +26,9 @@ import type {
 // 同屏目录卡片会并行建立 iframe 与同步样式；低性能设备上 1.2 秒不足以区分
 // “渲染器缺失”和“仍在完成首帧”。保留有限等待，避免短暂拥塞被永久误报。
 const PREVIEW_RENDER_TIMEOUT_MS = 3_000;
+const CATALOG_PREVIEW_MAX_HEIGHT = 220;
+const CATALOG_THUMBNAIL_MIN_WIDTH_RATIO = 0.6;
 const CATALOG_STYLE_RESYNC_DEBOUNCE_MS = 160;
-/** 目录卡片只认结构，不把一整屏手机模板按卡片宽度撑成一条长页。 */
-const CATALOG_THUMBNAIL_MAX_HEIGHT = 220;
 
 function catalogStylesheetSignature(doc: Document): string {
   return Array.from(doc.head.querySelectorAll('link[rel="stylesheet"], style'))
@@ -129,6 +128,7 @@ export default function TemplateCatalogViewportPreview({
   const [measurement, setMeasurement] = useState({
     naturalHeight: initialNaturalHeight,
     scale: viewport === "mobile" ? 0.25 : 0.1,
+    longPage: false,
   });
   const syncFrameStyles = useCallback((nextDocument: Document) => {
     const parentSignature = catalogStylesheetSignature(document);
@@ -184,6 +184,7 @@ export default function TemplateCatalogViewportPreview({
     setMeasurement((current) => ({
       ...current,
       naturalHeight: initialNaturalHeight,
+      longPage: false,
     }));
     setRenderFailed(false);
     setRendererReady(false);
@@ -245,20 +246,22 @@ export default function TemplateCatalogViewportPreview({
       let scale = presentation !== "thumbnail" && zoom
         ? zoom
         : widthFitScale;
+      let longPage = false;
       if (presentation === "thumbnail") {
-        // 整节都要在卡片里，但不能按卡片宽度把竖向模板撑成大半个侧栏。
-        // 超出预览高度时继续缩小，左右留白，不裁下半段，也不写“下面还有”。
-        const naturalHeight = measurement.naturalHeight;
-        const heightFitScale = naturalHeight > 0 ? CATALOG_THUMBNAIL_MAX_HEIGHT / naturalHeight : widthFitScale;
-        scale = Math.min(widthFitScale, heightFitScale);
+        const heightFitScale = CATALOG_PREVIEW_MAX_HEIGHT / measurement.naturalHeight;
+        // 长页完整等比缩放会让槽位无法辨认。保留 Renderer 原始几何，
+        // 卡片窗口只显示顶部，并标明下面还有；分类只由设计画幅决定。
+        const heightFitWidth = sourceWidth * heightFitScale;
+        longPage = heightFitWidth < CATALOG_PREVIEW_MAX_HEIGHT * CATALOG_THUMBNAIL_MIN_WIDTH_RATIO;
+        scale = longPage ? widthFitScale : Math.min(widthFitScale, heightFitScale);
       } else if (!zoom) {
         // “适合宽度”不放大低分辨率设计；用户仍可显式选择 100% 或更高倍率。
         scale = Math.min(1, scale);
       }
       if (scale <= 0) return;
-      setMeasurement((current) => Math.abs(current.scale - scale) < 0.0001
+      setMeasurement((current) => Math.abs(current.scale - scale) < 0.0001 && current.longPage === longPage
         ? current
-        : { ...current, scale });
+        : { ...current, scale, longPage });
     };
     const scheduleWidthMeasurement = () => {
       if (animationFrameId !== null) return;
@@ -469,6 +472,7 @@ export default function TemplateCatalogViewportPreview({
   ]);
 
   const scaledHeight = measurement.naturalHeight * measurement.scale;
+  const clippedLongPage = presentation === "thumbnail" && measurement.longPage && !isUnavailable;
   const visibleSlots = slots.filter((slot) => !slot.hidden);
   const imageSlotCount = visibleSlots.filter((slot) => slot.kind === "media").length;
   const textSlotCount = visibleSlots.filter((slot) => ["title", "description", "text"].includes(slot.kind)).length;
@@ -499,14 +503,13 @@ export default function TemplateCatalogViewportPreview({
       data-preview-slot-box-count={slotBoxCount}
       data-preview-source-size={`${Math.round(sourceWidth)}x${Math.round(measurement.naturalHeight)}`}
       data-preview-content-status={contentIssue ?? "ready"}
-      data-preview-thumbnail-mode="overview"
-      data-preview-thumbnail-max-height={presentation === "thumbnail" ? CATALOG_THUMBNAIL_MAX_HEIGHT : undefined}
+      data-preview-thumbnail-mode={clippedLongPage ? "top" : "overview"}
       style={fixedDetailWidth ? { width: `max(100%, ${fixedDetailWidth}px)` } : undefined}
     >
       <div
         ref={stageRef}
-        className="template-editor__catalog-artboard-stage"
-        style={{ height: isUnavailable ? undefined : scaledHeight }}
+        className={`template-editor__catalog-artboard-stage${clippedLongPage ? " is-long-page" : ""}`}
+        style={{ height: isUnavailable ? undefined : clippedLongPage ? CATALOG_PREVIEW_MAX_HEIGHT : scaledHeight }}
       >
         <div
           ref={hostRef}
@@ -563,11 +566,9 @@ export default function TemplateCatalogViewportPreview({
               />
             ) : null}
             {previewStatus !== "ready" ? (
-              previewStatus === "unavailable" ? (
-                <span className="template-editor__catalog-preview-state" role="status">{failureLabel}</span>
-              ) : (
-                <RouteLoading scope="inline" label="正在生成预览" />
-              )
+              <span className="template-editor__catalog-preview-state" role="status">
+                {previewStatus === "unavailable" ? failureLabel : "正在生成预览"}
+              </span>
             ) : null}
           </>
         )}
@@ -619,6 +620,11 @@ export default function TemplateCatalogViewportPreview({
           : null}
         </div>
       </div>
+      {clippedLongPage ? (
+        <span className="template-editor__catalog-long-page-hint">
+          下面还有
+        </span>
+      ) : null}
       {presentation === "thumbnail" ? null : (
         <>
           <span className="template-editor__catalog-dimensions">
