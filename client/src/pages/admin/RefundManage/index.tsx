@@ -5,6 +5,7 @@ import { CheckOutlined, CloseOutlined, EyeOutlined, PlusOutlined } from '@ant-de
 import { afterSalesApi, refundApi } from '@/services/api';
 import { unwrapResponse } from '@/utils/unwrap';
 import { getSafeAdminErrorMessage } from '@/constants/adminCopy';
+import RouteLoading from '@/components/common/RouteLoading';
 import { useAuthStore } from '@/store/authStore';
 import type { AfterSalesCase, PaginatedResult, Refund, RefundStatus } from '@/types';
 
@@ -798,7 +799,7 @@ export default function RefundManage() {
       </div>
 
       {afterSalesHandoffLoading ? (
-        <Alert type="info" showIcon message="正在加载关联售后工单…" />
+        <RouteLoading scope="inline" label="正在加载关联售后工单…" />
       ) : afterSalesHandoffError ? (
         <Alert
           type="error"

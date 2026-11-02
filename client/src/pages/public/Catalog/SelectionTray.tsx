@@ -4,6 +4,7 @@ import { App as AntdApp } from "antd";
 import { useSelectionStore } from "@/store/selectionStore";
 import type { CatalogProduct } from "@/data/catalogData";
 import { getListingImage } from "@/utils/productImage";
+import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 import { SecureImage } from "@/components/common/SecureImage";
 import { selectionInquiryApi } from "@/services/api";
 import { trackSubmitSelection } from "@/hooks/useAnalytics";
@@ -377,7 +378,7 @@ export default function SelectionTray({
                 }}
               >
                 <SecureImage
-                  src={p.images?.[0] || getListingImage(p)}
+                  src={withPublicMediaWidth(p.images?.[0] || getListingImage(p), 480)}
                   alt={p.sku}
                   style={{ width: "100%", height: "100%", objectFit: "contain" }}
                 />
@@ -573,7 +574,7 @@ export default function SelectionTray({
                     }}
                   >
                     <SecureImage
-                      src={p.images?.[0] || getListingImage(p)}
+                      src={withPublicMediaWidth(p.images?.[0] || getListingImage(p), 480)}
                       alt=""
                       style={{ width: "100%", height: "100%", objectFit: "contain" }}
                     />

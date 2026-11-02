@@ -640,7 +640,7 @@ export default function MediaLibrary() {
         footer={null}
       >
         {authorizationLoading ? (
-          <AdminLoadingState subject="素材授权详情" />
+          <AdminLoadingState subject="素材授权详情" compact />
         ) : !authorizationResource ? (
           <AdminErrorState message="素材授权详情加载失败，请关闭后重试。" />
         ) : (

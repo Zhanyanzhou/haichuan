@@ -1,4 +1,5 @@
 import TemplateSlotControls, { SIMPLE_SLOT_TYPES } from "./TemplateSlotControls";
+import RouteLoading from "@/components/common/RouteLoading";
 import TemplateNativeDesignControls from "./TemplateNativeDesignControls";
 import TemplateDefaultContentControls from "./TemplateDefaultContentControls";
 import TemplateLayoutConversionControls from "./TemplateLayoutConversionControls";
@@ -685,7 +686,7 @@ function formatCanvasMetric(value: number) {
 
 function CanvasMeasurementSummary({ measurement }: { measurement: CanvasObjectMeasurement | null }) {
   if (!measurement) {
-    return <p className="template-editor__panel-empty-copy" role="status">正在读取当前画布数值…</p>;
+    return <RouteLoading scope="inline" label="正在读取当前画布数值…" />;
   }
   const metrics = [
     ["横向位置 X", measurement.x, measurement.xPercent],

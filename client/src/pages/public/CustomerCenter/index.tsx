@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { App as AntdApp, Alert, Button, Spin } from "antd";
+import { App as AntdApp, Alert, Button } from "antd";
+import RouteLoading from "@/components/common/RouteLoading";
 import { customerApi, partnerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import AccountExperience from "./AccountExperience";
@@ -537,9 +538,7 @@ export default function CustomerCenter() {
 
   if (loading)
     return (
-      <div className="min-h-screen bg-brand-bg flex items-center justify-center">
-        <Spin size="large" />
-      </div>
+      <RouteLoading scope="region" surface="public" label="正在加载会员账户…" />
     );
 
   const isSignedIn = authStatus === 'authenticated';
@@ -549,9 +548,7 @@ export default function CustomerCenter() {
 
   if (isSignedIn && !privateSnapshotMatchesIdentity && !loadError) {
     return (
-      <div className="min-h-screen bg-brand-bg flex items-center justify-center">
-        <Spin size="large" />
-      </div>
+      <RouteLoading scope="region" surface="public" label="正在核对会员身份…" />
     );
   }
 

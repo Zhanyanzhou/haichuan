@@ -10,6 +10,7 @@ import {
   ACCOUNT_PASSWORD_MIN_LENGTH,
 } from "@/config/accountPasswordPolicy";
 import "./AccountExperience.css";
+import RouteLoading from "@/components/common/RouteLoading";
 
 type AccountExperienceProps = {
   authLoading: boolean;
@@ -295,9 +296,7 @@ function WechatLoginPanel({
 
   if (!qrConnectUrl) {
     return (
-      <p className="text-xs" style={{ marginTop: 24, textAlign: "center" }}>
-        正在加载微信登录…
-      </p>
+      <RouteLoading scope="panel" surface="public" label="正在加载微信登录…" />
     );
   }
 

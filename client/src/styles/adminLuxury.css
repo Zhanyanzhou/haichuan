@@ -62,7 +62,8 @@
 
   /* 布局 */
   --adm-header-h: 60px;
-  --adm-sidebar-w: 160px;
+  /* 208px：导航内边距、图标、展开箭头和滚动条之后，仍完整显示 2 字一级名称与 5 字二级名称。见 UI_GUIDE A.8。 */
+  --adm-sidebar-w: 208px;
   --adm-nav-top: clamp(58px, 3.75vw, 72px);
   --adm-nav-x: 16px;
   --adm-nav-row-h: 42px;
@@ -853,6 +854,7 @@
 
 /* 主内容 */
 .admin-main {
+  position: relative;
   flex: 1;
   overflow: auto;
   padding: var(--adm-content-gutter) var(--adm-content-gutter) 48px;

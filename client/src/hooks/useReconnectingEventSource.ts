@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isStreamHandshake } from "@/utils/streamHandshake";
 
 /**
  * 带自动重连 + 可选 debounce 的 EventSource（P1-35）。
@@ -94,10 +95,12 @@ export function useReconnectingEventSource(
         retry = 0;
         stopFallback();
       };
-      source.onmessage = () => {
+      source.onmessage = (event) => {
         if (closed || es !== source) return;
         retry = 0; // 连接恢复（包括 ready 消息）后重置退避计数
         stopFallback();
+        // ready / heartbeat 只说明订阅还在，不是商品变更。立刻重拉会把已显示的选款结果盖回加载态。
+        if (isStreamHandshake(event?.data)) return;
         fire();
       };
       source.onerror = () => {

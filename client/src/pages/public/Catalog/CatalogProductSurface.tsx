@@ -4,6 +4,7 @@ import type { CatalogProduct } from "@/data/catalogData";
 import { useSelectionStore } from "@/store/selectionStore";
 import { publicProductInquiryPath, publicProductPath } from "@/utils/publicProductPath";
 import { getListingImage } from "@/utils/productImage";
+import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 import { SecureImage } from "@/components/common/SecureImage";
 import { trackAddToSelection, trackRemoveFromSelection } from "@/hooks/useAnalytics";
 import { salesModeCta } from "@/store/featureFlags";
@@ -145,7 +146,7 @@ function ProductCard({
           onClick={openDetail}
         >
           <SecureImage
-            src={currentImg}
+            src={withPublicMediaWidth(currentImg, 800)}
             alt=""
             className="catalog-img"
           />
@@ -216,7 +217,7 @@ function ProductCard({
 
 function catalogColumnCount(resultCount: number) {
   if (typeof window === "undefined" || resultCount <= 1) return 1;
-  if (window.matchMedia("(max-width: 639px)").matches) return 1;
+  // 选款结果在手机上也是两列；只有一件时保持单列，避免半格。宽屏三件及以上才用三列。
   if (resultCount === 2 || !window.matchMedia("(min-width: 1024px)").matches) return 2;
   return 3;
 }
@@ -226,15 +227,10 @@ function useCatalogColumnCount(resultCount: number) {
 
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 1024px)");
-    const phone = window.matchMedia("(max-width: 639px)");
     const apply = () => setColumns(catalogColumnCount(resultCount));
     apply();
     desktop.addEventListener("change", apply);
-    phone.addEventListener("change", apply);
-    return () => {
-      desktop.removeEventListener("change", apply);
-      phone.removeEventListener("change", apply);
-    };
+    return () => desktop.removeEventListener("change", apply);
   }, [resultCount]);
 
   return columns;
@@ -339,7 +335,7 @@ export function CatalogPathways({
                 onClick={() => onOpenCategory(String(category.id))}
               >
                 <span className="catalog-pathways__frame">
-                  {image ? <SecureImage src={image} alt="" className="catalog-pathways__photo" /> : null}
+                  {image ? <SecureImage src={withPublicMediaWidth(image, 800)} alt="" className="catalog-pathways__photo" /> : null}
                 </span>
                 <span>{category.name}</span>
               </button>

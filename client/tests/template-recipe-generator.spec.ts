@@ -12,7 +12,7 @@ function workNode(nodeId: string, slot?: MobileWorkNode["slot"], children: Mobil
   return { nodeId, type: slot ? "ImageSlot" : "Container", slot, children };
 }
 
-test("连续三张作品卡在手机上并成两列，主图和两张叙事图保持单列", () => {
+test("连续三张作品卡在手机上收成同一组，主图和两张叙事图保持分开", () => {
   const image = (id: string, role?: string) => workNode(id, { type: "image", semanticRole: role });
   const cards = [1, 2, 3].map((index) => workNode(`card-${index}`, undefined, [image(`img-${index}`)]));
   const grouped = partitionMobileWorkUnits(cards, { device: "mobile", layoutMode: "flow" });
@@ -122,15 +122,15 @@ test("长文扩大文字区而不缩字号，同级分栏仍保持等宽", () =>
   recipe.layout = "leftContentRightImage";
   recipe.media = createMediaSlots(["custom", "custom"]);
   // 字号改从 UI_GUIDE 第 2.3 节取固定层级后，300 字的两段描述在 40% 分栏里仍放得下；
-  // 这里把描述写到 600 字，让容纳校验真的走到 50% 分栏——验证的是分栏机制，不是某个字号。
+  // 这里把描述写到 360 字：正文行高 1.75 时 40%、45% 分栏放不下，50% 放得下——验证的是分栏机制，不是某个字号。
   recipe.content = [createContentSlot("title"), ...["description-one", "description-two"].map((id) => ({
-    ...createContentSlot("description", id), defaultContent: "图".repeat(600), maxLength: 2000,
+    ...createContentSlot("description", id), defaultContent: "图".repeat(360), maxLength: 2000,
   }))];
   const definition = generateTemplateFromRecipe(recipe);
   const contentWidth = definition.nodes[`${definition.templateId}_content`].responsive.desktop.placement!.width * 1200;
   expect(contentWidth).toBeGreaterThan((1200 - 108 - 32) * .4);
   const title = Object.values(definition.slots).find((slot) => slot.semanticRole === "title")!;
-  expect(title.desktopRules.fontSize).toEqual({ value: 34, unit: "px" });
+  expect(title.desktopRules.fontSize).toEqual({ value: 40, unit: "px" });
   recipe.layout = "splitColumns";
   const columns = generateTemplateFromRecipe(recipe);
   expect(columns.nodes[`${columns.templateId}_content`].responsive.desktop.placement!.width * 1200).toBeCloseTo((1200 - 108 - 32) / 2, 5);
@@ -310,10 +310,15 @@ test("新推荐准确，字号按 UI_GUIDE 排印层级，主副图有层级且�
   recipe.content = [createContentSlot("title"), createContentSlot("subtitle"), createContentSlot("originalPrice"), createContentSlot("price")];
   const definition = generateTemplateFromRecipe(recipe);
   const role = (name: string) => Object.values(definition.slots).find((item) => item.semanticRole === name)!;
-  expect(role("title").desktopRules.fontSize).toEqual({ value: 34, unit: "px" });
-  expect(role("subtitle").desktopRules.fontSize).toEqual({ value: 18, unit: "px" });
-  expect(role("originalPrice").desktopRules.fontSize).toEqual({ value: 12, unit: "px" });
-  expect(role("price").desktopRules.fontSize).toEqual({ value: 36, unit: "px" });
+  expect(role("title").desktopRules.fontSize).toEqual({ value: 40, unit: "px" });
+  expect(role("title").desktopRules.lineHeight).toBe(1.35);
+  expect(role("subtitle").desktopRules.fontSize).toEqual({ value: 20, unit: "px" });
+  expect(role("subtitle").mobileRules.fontSize).toEqual({ value: 18, unit: "px" });
+  // 价格属于决策信息，划线原价也不降到辅助级（D.44）。
+  expect(role("originalPrice").desktopRules.fontSize).toEqual({ value: 16, unit: "px" });
+  expect(role("originalPrice").mobileRules.fontSize).toEqual({ value: 15, unit: "px" });
+  expect(role("originalPrice").desktopRules.lineHeight).toBe(1.75);
+  expect(role("price").desktopRules.fontSize).toEqual({ value: 40, unit: "px" });
   expect(Object.values(definition.nodes).filter((node) => node.name === "主内容卡片")).toHaveLength(1);
   const imageNode = (name: string) => Object.values(definition.nodes).find((node) => node.slotId === role(name).slotId)!;
   expect(imageNode("heroImage").responsive.desktop.radius).toEqual({ value: 0, unit: "px" });
@@ -441,6 +446,37 @@ test("自定义图片删除后再添加不产生重名，圆角恢复与圆形�
   expect(resolveMediaShapeChange(media[0], "rounded")).toEqual({ shape: "rectangle", borderRadius: 24 });
   expect(resolveMediaShapeChange(media[0], "square")).toEqual({ shape: "rectangle", borderRadius: 0 });
   expect(media[0]).toEqual(original);
+});
+
+test("公开页上空文字容器不占高度，有图或有字的节点仍然留下", async () => {
+  const { publicFlowNodeIsVisible } = await import("../src/page-builder/template-definition/publicFlow");
+  const image = {
+    type: "ImageSlot",
+    slot: { type: "image" },
+    content: { src: "/uploads/hero.png" },
+    children: [],
+  };
+  const emptyCopy = {
+    type: "Container",
+    rules: { padding: { top: { value: 8, unit: "px" } } },
+    children: [
+      { type: "TextSlot", slot: { type: "text" }, content: "  ", children: [] },
+      { type: "HeadingSlot", slot: { type: "heading" }, content: "", children: [] },
+    ],
+  };
+  expect(publicFlowNodeIsVisible(image)).toBe(true);
+  expect(publicFlowNodeIsVisible(emptyCopy)).toBe(false);
+  expect(publicFlowNodeIsVisible({
+    type: "Container",
+    children: [emptyCopy, { type: "TextSlot", slot: { type: "text" }, content: "关于海川", children: [] }],
+  })).toBe(true);
+  expect(publicFlowNodeIsVisible({ type: "Spacer", children: [] })).toBe(true);
+  expect(publicFlowNodeIsVisible({ type: "ImageSlot", slot: { type: "image" }, content: "", children: [] })).toBe(false);
+  expect(publicFlowNodeIsVisible({
+    type: "Container",
+    rules: { backgroundColor: "#111315" },
+    children: [],
+  })).toBe(true);
 });
 
 test("手机深色画布上的通栏图贴边，浅色普通图和作品网格保留边距", async () => {

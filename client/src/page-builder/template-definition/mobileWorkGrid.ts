@@ -112,6 +112,8 @@ export function attachMobileWorkCaptions<T extends MobileWorkNode>(
  * 背景图和 Logo 保持原外框；已经是竖图的叙事图不改。
  */
 const LATER_FULL_BLEED_SECTIONS = new Set(["editorial-media", "video-story"]);
+/** 规格卡要求手机仍用横幅的角色：品牌事实主图手机满宽 3:2。 */
+const MOBILE_LANDSCAPE_SECTIONS = new Set(["maison-fact"]);
 
 /**
  * 手机图片外框。作品卡、以及还没有竖向比例的图，统一 4:5。
@@ -130,6 +132,7 @@ export function resolveMobileImageFrame(input: {
   if (input.semanticRole === "logo") return undefined;
   if (input.inWorkGrid) return "4 / 5";
   if (input.ratio !== undefined && input.ratio <= 1) return undefined;
+  if (input.ratio !== undefined && MOBILE_LANDSCAPE_SECTIONS.has(input.sectionRole ?? "")) return undefined;
   if (input.semanticRole === "backgroundImage") {
     if (LATER_FULL_BLEED_SECTIONS.has(input.sectionRole ?? "")) return undefined;
     if (input.sectionRole === "page-hero" || input.ratio === undefined) return "4 / 5";

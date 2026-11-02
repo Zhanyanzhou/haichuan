@@ -52,6 +52,7 @@ import {
   type URLParamKey,
 } from "./catalogQuery";
 import { catalogTokens as T } from "./catalogTokens";
+import RouteLoading from "@/components/common/RouteLoading";
 import {
   completeCatalogReturnContext,
   readCatalogReturnContext,
@@ -604,6 +605,9 @@ export default function Catalog({
   const displayTotal = virtualCatalog?.total ?? total;
   const suggestionProducts = virtualCatalog?.matches ?? mergedProducts;
   const showingVirtualWorks = virtualCatalog !== null && displayTotal > 0;
+  const showCatalogLoading = apiLoading
+    && !virtualCatalog
+    && (!catalogResponseCurrent || mergedProducts.length === 0);
   const showCatalogTools = apiLoading
     || categories.length > 0
     || displayTotal > 0
@@ -839,7 +843,7 @@ export default function Catalog({
         background: T.bg,
         minHeight: editorPreview ? "auto" : "100vh",
         paddingBottom: 160,
-        overflowX: "hidden",
+        overflowX: "clip",
       }}
     >
       <style>{`
@@ -1093,7 +1097,7 @@ export default function Catalog({
             padding-inline: 20px;
           }
           .catalog-category-nav__items {
-            gap: 36px;
+            gap: 28px;
           }
           .catalog-category-nav__item {
             font-size: 16px;
@@ -1307,24 +1311,11 @@ export default function Catalog({
         aria-busy={apiLoading}
         style={{ scrollMarginTop: "calc(var(--site-header-offset, var(--site-header-height, 88px)) + 16px)" }}
       >
-      {apiLoading && !virtualCatalog ? (
-        <div
-          className="catalog-state"
-          role="status"
-          aria-label="正在加载珠宝作品…"
-          aria-live="polite"
-          aria-busy="true"
-          style={{
-            textAlign: "center",
-            paddingBlock: 80,
-            maxWidth: 1560,
-            marginInline: "auto",
-            paddingInline: "clamp(48px,5vw,80px)",
-          }}
-        >
-          <p style={{ fontSize: 14, color: T.sec }}>正在加载珠宝作品…</p>
+      {showCatalogLoading ? (
+        <div className="catalog-state">
+          <RouteLoading scope="region" surface="public" label="正在加载珠宝作品…" />
         </div>
-      ) : apiError && !virtualCatalog ? (
+      ) : apiError && !virtualCatalog && (!catalogResponseCurrent || mergedProducts.length === 0) ? (
         <div
           className="catalog-state"
           style={{

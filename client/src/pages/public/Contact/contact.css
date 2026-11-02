@@ -1,0 +1,291 @@
+.contact-direct {
+  background: var(--hc-canvas);
+  color: var(--hc-ink);
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: clamp(15px, 1.2vw, 16px);
+  line-height: 1.75;
+}
+
+.contact-direct__intro,
+.contact-direct__content {
+  width: min(1120px, calc(100% - 2 * clamp(20px, 5.55vw, 80px)));
+  margin-inline: auto;
+}
+
+.contact-direct__intro {
+  padding-block: calc(var(--site-header-height) + clamp(28px, 4vw, 48px)) clamp(28px, 4vw, 48px);
+  text-align: center;
+}
+
+.contact-direct__intro h1 {
+  margin: 0 0 16px;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(28px, 3vw, 40px);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.contact-direct__intro p,
+.contact-methods__channel > p {
+  margin: 0;
+  color: var(--hc-text-secondary);
+}
+
+.contact-direct__content {
+  padding-bottom: 40px;
+}
+
+.contact-page--embedded {
+  scroll-margin-top: calc(var(--site-header-height) + 16px);
+  border-top: 1px solid var(--hc-line);
+}
+
+.contact-form--quiet input,
+.contact-form--quiet select,
+.contact-form--quiet textarea {
+  background: transparent !important;
+  border-top-color: transparent !important;
+  border-right-color: transparent !important;
+  border-left-color: transparent !important;
+  border-radius: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.contact-methods__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(32px, 5vw, 72px);
+}
+
+.contact-methods__channel {
+  min-width: 0;
+  padding-block: 16px 32px;
+}
+
+.contact-methods__channel:first-child {
+  padding-right: clamp(32px, 5vw, 72px);
+  border-right: 1px solid var(--hc-line);
+}
+
+.contact-methods__channel h2 {
+  margin: 0 0 12px;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  font-size: clamp(24px, 2.5vw, 32px);
+  font-weight: 400;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.contact-methods__qr {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(264px, 100%);
+  aspect-ratio: 1;
+  margin-block: 28px 20px;
+  padding: 12px;
+  border: 1px solid var(--hc-line);
+  background: #fff;
+}
+
+.contact-methods__qr--empty {
+  width: auto;
+  aspect-ratio: auto;
+  margin-block: 20px 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  place-items: start;
+}
+
+.contact-methods__qr--empty p {
+  position: static;
+  inset: auto;
+  text-align: left;
+}
+
+.contact-methods__qr img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.contact-methods__qr img.is-loading {
+  opacity: 0;
+}
+
+.contact-methods__qr p {
+  position: absolute;
+  inset: 20px;
+  display: grid;
+  align-content: center;
+  margin: 0;
+  text-align: center;
+  color: var(--hc-text-secondary);
+}
+
+.contact-methods__qr.contact-methods__qr--empty p {
+  position: static;
+  inset: auto;
+  display: block;
+  text-align: left;
+}
+
+.contact-methods__channel .contact-methods__account {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0 0 16px;
+  color: var(--hc-ink);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.contact-methods__account > span:first-child {
+  color: var(--hc-text-secondary);
+}
+
+.contact-methods__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.contact-direct__primary-action,
+.contact-direct__text-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  max-width: 100%;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.contact-direct__primary-action {
+  min-height: 48px;
+  padding: 12px 24px;
+  background: var(--hc-ink);
+  color: var(--hc-inverse-text);
+}
+
+.contact-direct__text-action {
+  padding: 0;
+  background: transparent;
+  color: var(--hc-ink);
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+
+.contact-direct__primary-action:hover,
+.contact-direct__text-action:hover {
+  opacity: 0.8;
+}
+
+.contact-direct a:focus-visible,
+.contact-direct button:focus-visible {
+  outline: 2px solid var(--hc-ink);
+  outline-offset: 4px;
+}
+
+.contact-methods__channel .contact-methods__hint {
+  max-width: 34em;
+  margin-top: 20px;
+  font-size: clamp(12px, 1vw, 13px);
+  line-height: 1.5;
+}
+
+.contact-methods__channel .contact-methods__feedback {
+  margin-top: 16px;
+  color: var(--hc-ink);
+}
+
+.contact-methods__channel .contact-methods__phone {
+  margin-block: 56px 24px;
+  font-size: clamp(24px, 2.4vw, 32px);
+  line-height: 1.4;
+  color: var(--hc-ink);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.contact-methods__phone-empty {
+  margin-block: 40px 24px !important;
+}
+
+.contact-methods__hours,
+.contact-methods__address {
+  margin-top: 32px;
+}
+
+.contact-methods__hours h3,
+.contact-methods__address h3 {
+  margin: 0 0 8px;
+  font-size: inherit;
+  font-weight: 400;
+}
+
+.contact-methods__hours p,
+.contact-methods__address p {
+  margin: 0;
+  color: var(--hc-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.contact-direct__context,
+.contact-direct__recovery,
+.contact-direct__unavailable {
+  margin-block: 24px 40px;
+  padding-block: 24px;
+  border-block: 1px solid var(--hc-line);
+}
+
+.contact-direct__context h2,
+.contact-direct__unavailable h2 {
+  margin: 0 0 12px;
+  font-size: clamp(20px, 2vw, 24px);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.contact-direct__context p,
+.contact-direct__recovery p,
+.contact-direct__unavailable p {
+  margin: 0 0 12px;
+}
+
+.contact-direct__work {
+  user-select: text;
+}
+
+.contact-direct__work span {
+  display: block;
+  color: var(--hc-text-secondary);
+}
+
+@media (max-width: 767px) {
+  .contact-direct__content {
+    padding-bottom: 40px;
+  }
+  .contact-methods__grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+  .contact-methods__channel:first-child {
+    padding-right: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--hc-line);
+  }
+  .contact-methods__channel .contact-methods__phone {
+    margin-top: 32px;
+  }
+}

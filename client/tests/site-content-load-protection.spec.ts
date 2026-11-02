@@ -58,6 +58,70 @@ async function installPublicationSettings(page: import("@playwright/test").Page)
 test.describe("站点发布资料入口（自有 API Mock）", () => {
   test.skip(useMock, "使用自有 API 路由验证保存与回显，不使用应用内 Mock");
 
+  test("公司微信号可保存、重新载入并清空，界面明确公开范围", async ({ page }) => {
+    const state = await installPublicationSettings(page);
+    await page.goto("/admin/site-content");
+    const wechat = page.getByLabel("公司微信号", { exact: true });
+    await expect(wechat).toBeVisible();
+    await expect(page.getByText("保存后立即出现在前台联系页。全站网址或搜索信息未完成时，这些联系方式仍会公开。")).toBeVisible();
+    await expect(page.getByText("选填。保存后立即出现在前台联系页；请使用获准公开的公司微信号。")).toBeVisible();
+    expect(state.writes).toHaveLength(0);
+    await wechat.fill("  test_company_wechat  ");
+    await page.getByRole("button", { name: /保存设置$/ }).click();
+    await expect.poll(() => state.writes.length).toBe(1);
+    expect(state.writes[0].contactWechat).toBe("test_company_wechat");
+    await page.reload();
+    await expect(wechat).toHaveValue("test_company_wechat");
+    await wechat.fill("");
+    await page.getByRole("button", { name: /保存设置$/ }).click();
+    await expect.poll(() => state.writes.length).toBe(2);
+    expect(state.writes[1].contactWechat).toBe("");
+    await page.reload();
+    await expect(wechat).toHaveValue("");
+  });
+
+  test("微信加好友二维码可上传预览、替换、保存读回和清空", async ({ page }) => {
+    const state = await installPublicationSettings(page);
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+    let uploads = 0;
+    await page.route("**/api/upload/image", (route) => {
+      uploads += 1;
+      return route.fulfill({ json: { code: 200, data: { url: `/uploads/page-assets/test-qr-${uploads}.png` } } });
+    });
+    await page.route("**/api/upload/media/preview-by-storage-key?*", (route) => route.fulfill({ contentType: "image/png", body: png }));
+    await page.goto("/admin/site-content");
+    await expect(page.getByText("请上传公司微信提供的加好友码，非付款码。保存后立即出现在前台联系页，留空则不显示。素材公开授权沿用媒体库。")).toBeVisible();
+    const chooseImage = async (label: string) => {
+      const chooser = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: label, exact: true }).click();
+      await (await chooser).setFiles({ name: "test-qr.png", mimeType: "image/png", buffer: png });
+    };
+    await chooseImage("上传加好友码");
+    await expect(page.getByRole("img", { name: "公司微信加好友二维码预览", exact: true })).toBeVisible();
+    expect(state.writes).toHaveLength(0);
+    await chooseImage("替换加好友码");
+    await expect(page.getByRole("button", { name: "替换加好友码", exact: true })).toBeEnabled();
+    await page.getByRole("button", { name: /保存设置$/ }).click();
+    await expect.poll(() => state.writes.length).toBe(1);
+    expect(state.writes[0].contactWechatQrCode).toBe("/uploads/page-assets/test-qr-2.png");
+    await page.reload();
+    const preview = page.getByRole("img", { name: "公司微信加好友二维码预览", exact: true });
+    await expect(preview).toHaveAttribute("src", /test-qr-2\.png/);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(preview).toBeVisible();
+      await expect(page.getByRole("button", { name: "清空加好友码", exact: true })).toBeVisible();
+    }
+    await page.getByRole("button", { name: "清空加好友码", exact: true }).click();
+    await expect(preview).toHaveCount(0);
+    await page.getByRole("button", { name: /保存设置$/ }).click();
+    await expect.poll(() => state.writes.length).toBe(2);
+    expect(state.writes[1].contactWechatQrCode).toBe("");
+    await page.reload();
+    await expect(page.getByRole("button", { name: "上传加好友码", exact: true })).toBeVisible();
+    await expect(preview).toHaveCount(0);
+  });
+
   test("必要资料齐全时审核编号可留空，页面显示可发布且不自动保存", async ({ page }) => {
     const state = await installPublicationSettings(page);
     state.settings = {

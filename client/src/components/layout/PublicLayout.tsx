@@ -33,6 +33,7 @@ import {
 } from "@/page-builder/runtime/usePublishedPageDocument";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import { resolveSiteLogo, StorefrontMenuDrawer } from "./StorefrontNavigation";
+import SiteContactLink from "./SiteContactLink";
 import StorefrontFooter from "./StorefrontFooter";
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { isNonIndexablePublicRoute } from "@/utils/publicSeoPolicy";
@@ -278,36 +279,6 @@ const SearchIcon = () => (
     <line x1="19" y1="19" x2="27" y2="27" />
   </svg>
 );
-const DiamondIcon = () => (
-  <svg
-    width="30"
-    height="30"
-    viewBox="0 0 30 30"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.4"
-    strokeLinejoin="round"
-  >
-    <path d="M15 3 L23 13.5 L15 27 L7 13.5 Z" />
-  </svg>
-);
-const CalendarIcon = () => (
-  <svg
-    width="30"
-    height="30"
-    viewBox="0 0 30 30"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.4"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="3" y="5.5" width="24" height="21" rx="2" />
-    <line x1="3" y1="14" x2="27" y2="14" />
-    <line x1="9" y1="2" x2="9" y2="9" />
-    <line x1="21" y1="2" x2="21" y2="9" />
-  </svg>
-);
 const AccountIcon = () => (
   <svg
     width="30"
@@ -320,6 +291,22 @@ const AccountIcon = () => (
   >
     <circle cx="15" cy="10" r="5" />
     <path d="M5 27c.8-5.2 4.2-8 10-8s9.2 2.8 10 8" />
+  </svg>
+);
+const CartIcon = () => (
+  <svg
+    width="30"
+    height="30"
+    viewBox="0 0 30 30"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.4"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M10 11V8a5 5 0 0 1 10 0v3" />
+    <path d="M7 14h16l1.5 13h-19L7 14Z" />
   </svg>
 );
 
@@ -787,26 +774,17 @@ export default function PublicLayout() {
           </Link>
 
           <nav className="site-header__right" aria-label={english ? "Quick links" : "快捷入口"}>
-            <Link
-              to={withPublicLocalePath(english ? "/products" : "/catalog", localizedPath.locale)}
-              aria-label={english ? "Collection" : "选款中心"}
-              className="site-header__nav-item"
+            <SiteContactLink />
+            {!english ? <Link
+              to="/cart"
+              aria-label="购物袋"
+              className="site-header__nav-item site-header__nav-item--cart"
             >
-              <DiamondIcon />
+              <CartIcon />
               <span className="site-header__nav-label hidden sm:inline">
-                {english ? "Collection" : "选款"}
+                购物袋
               </span>
-            </Link>
-            <Link
-              to={withPublicLocalePath(english ? "/custom" : "/contact", localizedPath.locale)}
-              aria-label={english ? "Bespoke" : "预约咨询"}
-              className="site-header__nav-item"
-            >
-              <CalendarIcon />
-              <span className="site-header__nav-label hidden sm:inline">
-                {english ? "Bespoke" : "预约"}
-              </span>
-            </Link>
+            </Link> : null}
             {!english ? <Link
               to="/customer"
               aria-label="我的账户"

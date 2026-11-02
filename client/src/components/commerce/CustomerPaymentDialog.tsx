@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, App as AntdApp, Modal, QRCode, Spin } from "antd";
+import { Alert, App as AntdApp, Modal, QRCode } from "antd";
+import RouteLoading from "@/components/common/RouteLoading";
 import { customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { trackAddPaymentInfo, trackPurchase } from "@/hooks/useAnalytics";
@@ -428,7 +429,7 @@ export default function CustomerPaymentDialog({
         ) : null}
 
         {creating ? (
-          <div className="flex min-h-48 items-center justify-center"><Spin /></div>
+          <RouteLoading scope="panel" surface="public" label="正在生成支付信息…" />
         ) : result?.scene === "native" && result.qrCode ? (
           <div className="mt-6 flex justify-center">
             <QRCode value={result.qrCode} size={216} color="#181A1B" bordered={false} />

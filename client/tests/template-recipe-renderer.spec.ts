@@ -16,6 +16,11 @@ test("双图新构图在预览、编辑与公开 Renderer 一致，手机重排�
     const empty = structuredClone(definition);
     const images = Object.values(definition.nodes).filter((node: any) => definition.slots[node.slotId]?.type === "image") as any[];
     images.forEach((node, index) => { definition.defaultContent[node.slotId] = { src: "/media-layout-fixture.svg", alt: `测试图片 ${index + 1}` }; });
+    // 公开 Renderer 会丢掉没有内容的文字组，这里给标题和描述真实文案，才能比对图文分区。
+    Object.values(definition.slots).forEach((slot: any) => {
+      if (slot.semanticRole === "title") definition.defaultContent[slot.slotId] = "双图构图";
+      if (slot.semanticRole === "description") definition.defaultContent[slot.slotId] = "两张作品图上下排列，文字区留在一侧。";
+    });
     const gallery = document.createElement("main");
     gallery.id = "media-gallery";
     document.body.replaceChildren(gallery);
@@ -288,7 +293,7 @@ test("随内容增长的多画幅各自定高，手机仍按内容顺序单列�
   }
   expect(heights[0], "16:9 没有比 1:1 矮").toBeLessThan(heights[1]);
   expect(heights[1], "1:1 没有比 4:5 矮").toBeLessThan(heights[2]);
-  // 手机端同样靠内容撑高：Logo 固定窄宽，其余按顺序单列，不得重叠。
+  // 手机文字收进主图槽位；Logo 仍在槽位下面，并保持窄宽。
   const phone = mounted.phone;
   await expect(page.locator(`[data-flow="phone"] [data-template-node-id="${phone.stage}"]`)).toBeVisible();
   const phoneRects = await flowRects(page, "phone", [phone.stage, phone.content, ...phone.media.map((item) => item.id)]);
@@ -296,12 +301,14 @@ test("随内容增长的多画幅各自定高，手机仍按内容顺序单列�
   const phoneBlocks = phoneRects.filter((rect) => rect.id !== phone.stage);
   expect(phoneFrame.height, "手机流式画布没有高度").toBeGreaterThan(200);
   expect(phoneBlocks.length, "手机端主图、Logo 与内容块未全部渲染").toBe(3);
-  for (let index = 0; index < phoneBlocks.length; index += 1) {
-    expect(phoneBlocks[index].height, `手机端 ${phoneBlocks[index].id} 高度为 0`).toBeGreaterThan(0);
-    expect(phoneBlocks[index].y, `手机端 ${phoneBlocks[index].id} 起点跑到画布上方`).toBeGreaterThanOrEqual(phoneFrame.y - 1);
-    if (index) expect(phoneBlocks[index].y, `手机端 ${phoneBlocks[index].id} 与上一块重叠`).toBeGreaterThanOrEqual(phoneBlocks[index - 1].y + phoneBlocks[index - 1].height - 1);
-  }
+  const phoneHero = phoneBlocks.find((block) => phone.media.some((item) => item.id === block.id && item.role === "heroImage"))!;
+  const phoneCopy = phoneBlocks.find((block) => block.id === phone.content)!;
   const phoneLogo = phoneBlocks.find((block) => phone.media.some((item) => item.id === block.id && item.role === "logo"))!;
+  expect(phoneCopy.y, "手机文字跑到主图槽位上方").toBeGreaterThanOrEqual(phoneHero.y - 1);
+  expect(phoneCopy.y + phoneCopy.height, "手机文字溢出主图槽位").toBeLessThanOrEqual(phoneHero.y + phoneHero.height + 1);
+  expect(phoneCopy.x, "手机文字跑到主图槽位左侧").toBeGreaterThanOrEqual(phoneHero.x - 1);
+  expect(phoneCopy.x + phoneCopy.width, "手机文字溢出主图槽位右侧").toBeLessThanOrEqual(phoneHero.x + phoneHero.width + 1);
+  expect(phoneLogo.y, "手机端 Logo 叠进了主图").toBeGreaterThanOrEqual(phoneHero.y + phoneHero.height - 1);
   expect(phoneLogo.width, "手机端 Logo 没有保持窄宽").toBeCloseTo(72, 0);
 });
 
@@ -509,7 +516,7 @@ test("方案画布双击默认文字提交进入历史，取消和撤销保持�
   await expect.poll(readState).toEqual({ content: "原默认文字", history: 0 });
 });
 
-test("作品网格和连续作品卡在 390px 下排成两列", async ({ page }) => {
+test("三格作品在 390px 下第一张满宽、后两张并排，不把第三张落单", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", (route) => route.abort());
@@ -545,13 +552,18 @@ test("作品网格和连续作品卡在 390px 下排成两列", async ({ page })
     const box = node.getBoundingClientRect();
     return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
   }));
-  expect(boxes.length).toBeGreaterThanOrEqual(3);
-  expect(boxes[0].width).toBeGreaterThan(120);
-  expect(boxes[0].width).toBeLessThan(220);
-  expect(boxes[1].x).toBeGreaterThan(boxes[0].x + boxes[0].width - 1);
-  expect(boxes[1].y).toBeCloseTo(boxes[0].y, 0);
-  expect(boxes[2].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 1);
-  expect(boxes[0].height / boxes[0].width).toBeGreaterThan(1.1);
+  expect(boxes).toHaveLength(3);
+  await expect(grid).toHaveAttribute("data-template-mobile-work-lead", "true");
+  // 首张跨满两列，后两张同一行并排，三张都是 4:5。
+  expect(boxes[0].width).toBeGreaterThan(250);
+  expect(Math.abs(boxes[1].x - boxes[0].x)).toBeLessThanOrEqual(1);
+  expect(boxes[1].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 1);
+  expect(Math.abs(boxes[2].y - boxes[1].y)).toBeLessThanOrEqual(1);
+  expect(boxes[2].x).toBeGreaterThan(boxes[1].x + boxes[1].width);
+  expect(boxes[2].x - (boxes[1].x + boxes[1].width)).toBeLessThanOrEqual(13);
+  expect(Math.abs(boxes[1].width - boxes[2].width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(boxes[1].x + boxes[1].width * 2 + 12 - (boxes[0].x + boxes[0].width))).toBeLessThanOrEqual(2);
+  for (const box of boxes) expect(box.height / box.width).toBeCloseTo(1.25, 1);
 });
 
 test("深色画布的手机主图贴齐区块边缘，浅色图文仍留边距", async ({ page }) => {
@@ -608,7 +620,11 @@ test("深色画布的手机主图贴齐区块边缘，浅色图文仍留边距",
       title: box(title),
       bleed: image?.getAttribute("data-template-mobile-bleed"),
       imageRatio: imageRect && imageRect.width ? imageRect.height / imageRect.width : 0,
-      titleBelowImage: Boolean(titleRect && imageRect && titleRect.top >= imageRect.bottom - 1),
+      titleInsideImage: Boolean(titleRect && imageRect
+        && titleRect.top >= imageRect.top - 1
+        && titleRect.bottom <= imageRect.bottom + 1
+        && titleRect.left >= imageRect.left - 1
+        && titleRect.right <= imageRect.right + 1),
     };
   });
   const dark = await edges("dark-story");
@@ -627,5 +643,88 @@ test("深色画布的手机主图贴齐区块边缘，浅色图文仍留边距",
   expect(hero.bleed).toBe("true");
   expect(hero.imageRatio, "首屏手机图是 4:5，不是横图压成的细条").toBeGreaterThan(1.2);
   expect(hero.imageRatio).toBeLessThan(1.35);
-  expect(hero.titleBelowImage, "首屏标题在图下，不盖住画面").toBe(true);
+  expect(hero.titleInsideImage, "首屏标题落在图片槽位内").toBe(true);
+});
+
+test("600 到 767 宽时叙事块限宽 560，作品网格仍用内容宽", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__large-phone", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>*,*::before,*::after{box-sizing:border-box}body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      <section id="hero" style="width:700px"></section>
+      <section id="works" style="width:700px"></section>
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      const hero = findLaunchTemplateMaster('page-hero');
+      const works = findLaunchTemplateMaster('creation-grid');
+      ReactDOM.createRoot(document.getElementById('hero')).render(React.createElement((await import('/src/page-builder/template-definition/DynamicTemplateRenderer.tsx')).default, {
+        definition: hero, device: 'mobile', mode: 'editor',
+      }));
+      ReactDOM.createRoot(document.getElementById('works')).render(React.createElement((await import('/src/page-builder/template-definition/DynamicTemplateRenderer.tsx')).default, {
+        definition: works, device: 'mobile', mode: 'editor',
+      }));
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 900, height: 1200 });
+  await page.goto("/__large-phone");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  const heroRoot = page.locator("#hero [data-template-large-phone='true']");
+  await expect(heroRoot).toBeVisible();
+  const measured = page.locator("#hero [data-template-large-phone-measure='true']").first();
+  await expect(measured).toBeVisible();
+  const measuredBox = await measured.boundingBox();
+  expect(measuredBox?.width ?? 0).toBeLessThanOrEqual(560);
+  expect(measuredBox?.width ?? 0).toBeGreaterThan(500);
+  const worksBox = await page.locator("#works .hc-dynamic-template").boundingBox();
+  expect(worksBox?.width ?? 0).toBeGreaterThan(640);
+});
+
+test("浅色文字叠在主图上时，桌面和手机都铺底部中性渐变", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__text-scrim", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      <section id="desktop" style="width:1440px"></section>
+      <section id="mobile" style="width:390px"></section>
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      const hero = findLaunchTemplateMaster('page-hero');
+      ReactDOM.createRoot(document.getElementById('desktop')).render(React.createElement(DynamicTemplateRenderer, {
+        definition: hero, device: 'desktop', mode: 'editor',
+      }));
+      ReactDOM.createRoot(document.getElementById('mobile')).render(React.createElement(DynamicTemplateRenderer, {
+        definition: hero, device: 'mobile', mode: 'editor',
+      }));
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 1500, height: 1000 });
+  await page.goto("/__text-scrim");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  const scrim = page.locator("#desktop [data-template-text-scrim='bottom']");
+  await expect(scrim).toBeVisible();
+  await expect(scrim).toHaveCSS("background-image", /linear-gradient/);
+  const background = await scrim.evaluate((element) => getComputedStyle(element).backgroundImage);
+  expect(background).toContain("0.6");
+  await expect(page.locator("#mobile [data-template-text-scrim='bottom']")).toBeVisible();
 });

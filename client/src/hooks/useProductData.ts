@@ -360,7 +360,9 @@ export function useProductData(
         }
         return;
       }
-      setLoading(true);
+      // 同一查询已有结果时在后台刷新，不要把选款中心盖回“正在加载”。
+      const keepVisibleResults = dataQueryKey === queryKey && apiProducts !== null;
+      if (!keepVisibleResults) setLoading(true);
       setError(false);
       try {
         const params: Record<string, unknown> = Object.fromEntries(

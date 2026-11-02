@@ -1440,19 +1440,28 @@ test.describe("游客公开浏览", () => {
     await expect(page.getByRole("button", { name: "提交申请" })).toHaveCount(0);
   });
 
-  for (const path of ["/cart", "/checkout"]) {
-    test(`${path} 在交易关闭时降级至咨询页`, async ({ page }) => {
-      await page.goto(path);
-      await expect(page).toHaveURL(/\/contact/);
-      await expect(page.getByRole("banner")).toBeVisible();
-      await expectNoHorizontalOverflow(page);
-    });
-  }
+  test("/cart 在交易关闭时仍打开购物车并说明购买尚未开放", async ({ page }) => {
+    await page.goto("/cart");
+    await expect(page).toHaveURL(/\/cart$/);
+    await expect(page.getByRole("heading", { level: 1, name: "购物车" })).toBeVisible();
+    await expect(page.getByText("线上购买尚未开放")).toBeVisible();
+    await expect(page.getByRole("link", { name: "去选款" })).toHaveAttribute("href", "/catalog");
+    await expect(page.getByRole("banner")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
 
-  test("移动端交易关闭时跳转咨询页且没有横向溢出", async ({ page }) => {
+  test("/checkout 在交易关闭时降级至咨询页", async ({ page }) => {
+    await page.goto("/checkout");
+    await expect(page).toHaveURL(/\/contact/);
+    await expect(page.getByRole("banner")).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test("移动端交易关闭时购物车没有横向溢出", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/cart");
-    await expect(page).toHaveURL(/\/contact/);
+    await expect(page).toHaveURL(/\/cart$/);
+    await expect(page.getByRole("heading", { level: 1, name: "购物车" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.keyboard.press("Tab");

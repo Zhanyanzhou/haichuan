@@ -9,6 +9,7 @@ import { getMaterialLabel } from "@/utils/material";
 import type { InventoryPolicy, Product } from "@/types";
 import { trackRemoveFromCart, trackViewCart } from "@/hooks/useAnalytics";
 import { getRequestErrorMessage } from "@/services/httpClient";
+import RouteLoading from "@/components/common/RouteLoading";
 
 type CartItem = {
   id: number;
@@ -185,7 +186,7 @@ export default function Cart() {
     return (
       <div className="cart-page min-h-screen bg-brand-bg flex items-center justify-center">
         <h1 className="sr-only">购物车</h1>
-        <div className="text-brand-muted" role="status" aria-live="polite">购物车加载中…</div>
+        <RouteLoading scope="region" surface="public" label="购物车加载中…" />
       </div>
     );
   }

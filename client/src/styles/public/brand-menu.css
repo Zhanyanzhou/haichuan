@@ -271,18 +271,10 @@
   box-shadow: inset 0 -2px 0 currentColor;
 }
 
-.brand-menu__eyebrow {
-  margin: 26px 0 12px;
-  color: var(--hc-text-muted);
-  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0.5px;
-}
-
 .brand-menu__primary {
   display: flex;
   flex-direction: column;
+  margin-top: 32px;
 }
 
 .brand-menu__primary a {

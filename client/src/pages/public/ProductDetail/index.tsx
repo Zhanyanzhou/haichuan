@@ -2,7 +2,8 @@
 import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useParams, Link, useLocation, useSearchParams } from "react-router-dom";
-import { App as AntdApp, Tabs, Spin, Rate } from "antd";
+import { App as AntdApp, Tabs, Rate } from "antd";
+import RouteLoading from "@/components/common/RouteLoading";
 import {
   ShoppingCartOutlined,
   SafetyCertificateOutlined,
@@ -46,13 +47,13 @@ import { buildPublicUrl, normalizePublicSiteOrigin } from "@/utils/publicSiteUrl
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { getRequestErrorMessage } from "@/services/httpClient";
 import { getCatalogReturnUrl, sanitizeCatalogReturnUrl } from "@/pages/public/Catalog/catalogReturnContext";
+import { PUBLIC_MEDIA_WIDTHS, withPublicMediaWidth } from "@/utils/publicMediaWidth";
 
 const productSchemaOrigin = normalizePublicSiteOrigin(
   import.meta.env.VITE_PUBLIC_SITE_ORIGIN,
   { allowHttp: import.meta.env.DEV },
 );
 
-const RESPONSIVE_PRODUCT_IMAGE_WIDTHS = [480, 800, 1200, 1680] as const;
 const DETAIL_ZOOM = 2;
 
 function trackProductDetailZoom(event: ReactPointerEvent<HTMLDivElement>) {
@@ -104,7 +105,7 @@ function buildDetailZoomSrc(src: string): string {
   try {
     const absolute = /^[a-z][a-z\d+.-]*:/i.test(src);
     const parsed = new URL(src, "https://public-media.local");
-    parsed.searchParams.set("width", "1680");
+    parsed.searchParams.set("width", "1200");
     return absolute
       ? parsed.toString()
       : `${parsed.pathname}${parsed.search}${parsed.hash}`;
@@ -163,7 +164,7 @@ function buildProductImageSrcSet(src: string): string | undefined {
   try {
     const absolute = /^[a-z][a-z\d+.-]*:/i.test(src);
     const parsed = new URL(src, "https://public-media.local");
-    return RESPONSIVE_PRODUCT_IMAGE_WIDTHS.map((width) => {
+    return PUBLIC_MEDIA_WIDTHS.map((width) => {
       parsed.searchParams.set("width", String(width));
       const candidate = absolute
         ? parsed.toString()
@@ -406,6 +407,8 @@ export default function ProductDetail() {
   const clearPageMeta = usePageMetaStore((s) => s.clear);
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<Product | null>(null);
+  const productRef = useRef(product);
+  productRef.current = product;
   const [isVirtualWork, setIsVirtualWork] = useState(false);
   const [loadFailure, setLoadFailure] = useState<"not-found" | "error" | null>(null);
   const [qty, setQty] = useState(1);
@@ -528,8 +531,15 @@ export default function ProductDetail() {
         setLoading(false);
         return;
       }
-      setLoading(true);
-      setLoadFailure(null);
+      const current = productRef.current;
+      const sameWork = Boolean(
+        current
+        && (String(current.id) === id || current.code === id),
+      );
+      if (!sameWork) {
+        setLoading(true);
+        setLoadFailure(null);
+      }
       try {
         const resolution = await lookupPublicWork(id);
         if (cancelled) return;
@@ -539,12 +549,14 @@ export default function ProductDetail() {
         setProduct(data);
         setIsVirtualWork(resolution.kind === "virtual");
         setLoadFailure(data ? null : resolution.kind === "error" ? "error" : "not-found");
-        setMainImage(0);
-        setSelectedSku(null);
-        setQty(1);
-        setPurchaseError("");
+        if (!sameWork) {
+          setMainImage(0);
+          setSelectedSku(null);
+          setQty(1);
+          setPurchaseError("");
+        }
       } catch {
-        if (!cancelled) {
+        if (!cancelled && !sameWork) {
           setProduct(null);
           setIsVirtualWork(false);
           setLoadFailure("error");
@@ -692,10 +704,7 @@ export default function ProductDetail() {
 
   if (loading)
     return (
-      <div className="product-detail-page__state flex flex-col items-center justify-center gap-4 bg-white" aria-live="polite" aria-busy="true">
-        <Spin size="large" />
-        <p className="text-xs tracking-[.12em] text-brand-muted">正在加载作品</p>
-      </div>
+      <RouteLoading scope="region" surface="public" label="正在加载作品" />
     );
   if (!product && loadFailure === "error")
     return (
@@ -988,7 +997,7 @@ export default function ProductDetail() {
             >
               {mainImageUrl ? (
                 <SecureImage
-                  src={mainImageUrl}
+                  src={withPublicMediaWidth(mainImageUrl, 1200)}
                   alt={product.name}
                   className="product-detail-page__photo"
                   srcSet={buildProductImageSrcSet(mainImageUrl)}
@@ -1035,7 +1044,7 @@ export default function ProductDetail() {
                 >
                   {img.mediaUrl || img.url ? (
                     <SecureImage
-                      src={img.mediaUrl || img.url}
+                      src={withPublicMediaWidth(img.mediaUrl || img.url || "", 480)}
                       alt=""
                       className="product-detail-page__thumbnail-photo"
                     />
@@ -1355,7 +1364,7 @@ export default function ProductDetail() {
               return src ? (
                 <SecureImage
                   key={`detail-image-${index}`}
-                  src={src}
+                  src={withPublicMediaWidth(src, 1200)}
                   srcSet={buildProductImageSrcSet(src)}
                   sizes="(max-width: 1000px) calc(100vw - 40px), 960px"
                   width={image?.width ?? undefined}

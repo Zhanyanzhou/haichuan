@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App as AntdApp, Button, Modal, Select, Spin } from "antd";
+import { App as AntdApp, Button, Modal, Select } from "antd";
+import RouteLoading from "@/components/common/RouteLoading";
 import type {
   CooperationDesignFileVersionSummary,
   Quotation,
@@ -616,9 +617,7 @@ export default function CustomerQuotationsPanel({
       ) : null}
 
       {loading && quotations.length === 0 ? (
-        <div className="my-account__quote-state" aria-live="polite">
-          <Spin size="small" /> 正在加载报价…
-        </div>
+        <RouteLoading scope="panel" surface="public" label="正在加载报价…" />
       ) : loadError ? (
         <p className="my-account__quote-state" role="alert">
           {loadError}
@@ -678,9 +677,7 @@ export default function CustomerQuotationsPanel({
         }}
       >
         {detailLoading ? (
-          <div className="my-account__quote-state" aria-live="polite">
-            <Spin size="small" /> 正在加载报价详情…
-          </div>
+          <RouteLoading scope="panel" surface="public" label="正在加载报价详情…" />
         ) : detailError ? (
           <div className="my-account__quote-state" role="alert">
             <p>{detailError}</p>

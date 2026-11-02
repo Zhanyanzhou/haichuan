@@ -6,6 +6,7 @@ import type {
   CustomerNotificationPreferenceResource,
 } from "./types";
 import "./CustomerNotificationPreferences.css";
+import RouteLoading from "@/components/common/RouteLoading";
 
 const TOPIC_LABELS: Record<CustomerNotificationPreference["topic"], string> = {
   SERVICE_ORDER_CREATED: "订单创建",
@@ -116,7 +117,7 @@ export default function CustomerNotificationPreferences() {
         <p>站内服务通知始终保留；这里仅控制发送到邮箱的副本。</p>
       </div>
       {loading ? (
-        <p role="status">正在加载通知偏好…</p>
+        <RouteLoading scope="panel" surface="public" label="正在加载通知偏好…" />
       ) : error && !resource ? (
         <p role="alert">
           {error}

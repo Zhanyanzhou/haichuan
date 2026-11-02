@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -12,6 +13,8 @@ export type PublicSiteSettings = Record<string, unknown> & {
   siteName?: string;
   logo?: string;
   contactPhone?: string;
+  contactWechat?: string;
+  contactWechatQrCode?: string;
   contactEmail?: string;
   contactAddress?: string;
   businessHours?: string;
@@ -26,23 +29,34 @@ export type PublicSiteSettings = Record<string, unknown> & {
 export type PublicSiteSettingsResource = {
   settings: PublicSiteSettings | null;
   status: "loading" | "loaded" | "error";
+  retry?: () => void;
 };
 
 const PublicSiteSettingsContext = createContext<PublicSiteSettingsResource | null>(null);
 
-export function usePublicSiteSettingsResource(
-  enabled = true,
+function useSettingsResource(
+  enabled: boolean,
+  source: "site" | "contact",
 ): PublicSiteSettingsResource {
+  const [requestVersion, setRequestVersion] = useState(0);
   const [resource, setResource] = useState<PublicSiteSettingsResource>({
     settings: null,
     status: enabled ? "loading" : "loaded",
   });
+  const retry = useCallback(() => {
+    if (!enabled) return;
+    setResource({ settings: null, status: "loading" });
+    setRequestVersion((current) => current + 1);
+  }, [enabled]);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     setResource({ settings: null, status: "loading" });
-    settingsApi.getPublicSettings()
+    const request = source === "contact"
+      ? settingsApi.getPublicContact()
+      : settingsApi.getPublicSettings();
+    request
       .then((response) => {
         if (!cancelled) {
           setResource({
@@ -57,9 +71,22 @@ export function usePublicSiteSettingsResource(
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, requestVersion, source]);
 
-  return resource;
+  return { ...resource, retry };
+}
+
+export function usePublicSiteSettingsResource(
+  enabled = true,
+): PublicSiteSettingsResource {
+  return useSettingsResource(enabled, "site");
+}
+
+/** 联系页单独读取已保存的电话、微信、二维码、邮箱、地址和营业时间。 */
+export function usePublicContactResource(
+  enabled = true,
+): PublicSiteSettingsResource {
+  return useSettingsResource(enabled, "contact");
 }
 
 export function PublicSiteSettingsProvider({

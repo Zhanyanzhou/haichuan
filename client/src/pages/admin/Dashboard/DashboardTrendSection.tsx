@@ -9,6 +9,7 @@ import {
 } from "recharts";
 import type { TrendMetric } from "@/services/api";
 import { ADMIN_COPY } from "@/constants/adminCopy";
+import RouteLoading from "@/components/common/RouteLoading";
 import {
   formatCurrency,
   formatNumber,
@@ -144,7 +145,7 @@ export function DashboardTrendSection({
             </button>
           </div>
         ) : loading ? (
-          <div className="admin-dashboard__empty-chart">正在加载趋势数据…</div>
+          <RouteLoading scope="panel" label="正在加载趋势数据…" />
         ) : data.length === 0 ? (
           <div className="admin-dashboard__empty-chart">暂无趋势数据</div>
         ) : (

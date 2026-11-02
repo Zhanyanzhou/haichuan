@@ -9,11 +9,21 @@ import {
   IsIn,
   Matches,
   ValidateIf,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from "class-validator";
 import { Transform } from "class-transformer";
 import {
   DEFAULT_PUBLIC_CONTENT_LOCALE,
 } from "../../../common/content-locale";
+import { isSafeContactWechatQrCode } from "../contact-wechat-qr-code";
+
+@ValidatorConstraint({ name: "contactWechatQrCode", async: false })
+class ContactWechatQrCodeConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown) { return isSafeContactWechatQrCode(value); }
+  defaultMessage() { return "微信加好友二维码必须使用本站上传的受控图片"; }
+}
 
 /** 站点设置更新：仅允许 DEFAULT_SETTINGS 内的已知键，防止任意键污染统一设置。 */
 export class UpdateSettingsDto {
@@ -26,6 +36,17 @@ export class UpdateSettingsDto {
   @IsOptional() @IsString() @MaxLength(500) seoDescription?: string;
   @IsOptional() @IsString() @MaxLength(500) seoKeywords?: string;
   @IsOptional() @IsString() @MaxLength(30) contactPhone?: string;
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => typeof value === "string" ? value.trim() : value)
+  @IsString()
+  @MaxLength(100)
+  contactWechat?: string;
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) => typeof value === "string" ? value.trim() : value)
+  @IsString()
+  @MaxLength(500)
+  @Validate(ContactWechatQrCodeConstraint)
+  contactWechatQrCode?: string;
   @IsOptional()
   @Transform(({ value }: { value: unknown }) => typeof value === "string" ? value.trim() : value)
   @ValidateIf((_object: UpdateSettingsDto, value: unknown) => value !== "")

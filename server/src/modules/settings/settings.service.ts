@@ -16,6 +16,8 @@ import {
 } from './site-publication-readiness';
 import { DEFAULT_PUBLIC_CONTENT_LOCALE } from '../../common/content-locale';
 import type { StaffPrincipal } from '../../common/security/authenticated-principal';
+import { isSafeContactWechatQrCode } from './contact-wechat-qr-code';
+import { toPublicContactSettings, type PublicContactSettings } from './public-contact';
 
 const SETTINGS_FILE = path.resolve(__dirname, '..', '..', '..', 'settings.json');
 const SETTINGS_KEY = 'site';
@@ -30,6 +32,8 @@ const DEFAULT_SETTINGS = {
   seoDescription: '浏览珠宝作品，了解定制与顾问服务。',
   seoKeywords: '珠宝,首饰,黄金,钻石,手镯,吊坠,戒指,耳饰',
   contactPhone: '',
+  contactWechat: '',
+  contactWechatQrCode: '',
   contactEmail: '',
   contactAddress: '',
   storeName: '',
@@ -226,6 +230,7 @@ function normalizeSettings(settings: unknown): Record<string, unknown> {
     ...source,
     brandPresentationMode: source.brandPresentationMode || 'text-only',
     logo: normalizePublishedBrandLogo(source.logo, source.canonicalBaseUrl) ?? '',
+    contactWechatQrCode: isSafeContactWechatQrCode(source.contactWechatQrCode) ? source.contactWechatQrCode : '',
   };
 }
 
@@ -402,6 +407,18 @@ export class SettingsService {
     return published.brandPresentationMode === 'text-only'
       ? { ...published, logo: '' }
       : published;
+  }
+
+  /**
+   * 联系页只读取已保存的联系字段。全站品牌、SEO 和语言准备度未完成时不隐藏这些字段，
+   * 也不返回 Logo、SEO 或审核记录。
+   */
+  async getPublicContactSettings(): Promise<PublicContactSettings> {
+    const stored = await this.prisma.siteSetting.findUnique({
+      where: { key: SETTINGS_KEY },
+      select: { value: true },
+    });
+    return toPublicContactSettings(stored?.value);
   }
 
   async getBackupStatus(actor?: SettingsStaffActorInput) {

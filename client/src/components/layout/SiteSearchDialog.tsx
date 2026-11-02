@@ -6,7 +6,9 @@ import { expandCategoryIds, type RealCategory } from "@/hooks/useProductData";
 import { getPrimaryCats, getRealSubs } from "@/pages/public/Catalog/catalogCategories";
 import { categoryApi, productApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
+import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 import { publicProductPath } from "@/utils/publicProductPath";
+import RouteLoading from "@/components/common/RouteLoading";
 
 type SiteSearchDialogProps = {
   open: boolean;
@@ -66,7 +68,7 @@ function parseWork(value: unknown): SearchWork | null {
     categoryId,
     price: Number.isFinite(price) ? price : 0,
     salesMode: textOf(record.salesMode) || undefined,
-    image: image || undefined,
+    image: image ? withPublicMediaWidth(image, 480) : undefined,
   };
 }
 
@@ -382,9 +384,11 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
             {categoryStatus === "error" ? (
               <p className="site-search__note">品类暂时无法读取</p>
             ) : visibleCategories.length === 0 ? (
-              <p className="site-search__note">
-                {categoryStatus === "loading" ? "正在读取品类" : "没有相符的类别"}
-              </p>
+              categoryStatus === "loading" ? (
+                <RouteLoading scope="inline" surface="public" label="正在读取品类" />
+              ) : (
+                <p className="site-search__note">没有相符的类别</p>
+              )
             ) : (
               <div className="site-search__list">
                 {visibleCategories.map((category) => (
@@ -412,7 +416,7 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
             {categoryStatus === "error" ? (
               <p className="site-search__note">系列暂时无法读取</p>
             ) : seriesPending ? (
-              <p className="site-search__note">正在读取系列</p>
+              <RouteLoading scope="inline" surface="public" label="正在读取系列" />
             ) : visibleSeries.length === 0 ? (
               <p className="site-search__note">
                 {needle ? "没有相符的系列" : "这一类别暂无系列"}
@@ -438,9 +442,11 @@ export default function SiteSearchDialog({ open, onClose }: SiteSearchDialogProp
             {workStatus === "error" ? (
               <p className="site-search__note">作品暂时无法读取</p>
             ) : works.length === 0 ? (
-              <p className="site-search__note">
-                {workStatus === "loading" ? "正在查找作品" : "没有相符的作品"}
-              </p>
+              workStatus === "loading" ? (
+                <RouteLoading scope="inline" surface="public" label="正在查找作品" />
+              ) : (
+                <p className="site-search__note">没有相符的作品</p>
+              )
             ) : (
               <div className="site-search__products">
                 {works.map((work) => {

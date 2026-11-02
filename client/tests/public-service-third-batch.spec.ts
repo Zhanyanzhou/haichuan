@@ -105,7 +105,7 @@ for (const scenario of [
 }
 
 for (const viewport of viewports) {
-  test(`Products ${viewport.name} 安全短页将作品咨询意图带入联系表单`, async ({ page }) => {
+  test(`Products ${viewport.name} 安全短页进入直接联系，显式咨询表单保留作品咨询意图`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const writes = await mockPublicServiceThirdBatch(page);
     await page.goto("/products");
@@ -122,6 +122,9 @@ for (const viewport of viewports) {
     await cta.click();
     await expect(page).toHaveURL(/\/contact\?type=product$/);
     await expect(page.locator("#main-content")).toBeFocused();
+    await expect(page.getByRole("main").locator("form")).toHaveCount(1);
+    await expect(page.locator("#cf-type")).toHaveValue("选款建议");
+    await page.goto("/contact?type=product&view=request");
     await expect(page.locator("#cf-type")).toHaveValue("选款建议");
     await expectWriteGate(writes);
   });
@@ -161,6 +164,9 @@ for (const viewport of viewports) {
     await expect(routedMain).toBeFocused();
     const routedMainFocus = await readFocusStyle(routedMain);
     expect(routedMainFocus.outlineStyle).toBe("none");
+    await expect(routedMain.locator("form")).toHaveCount(1);
+    await expect(page.locator("#cf-type")).toHaveValue("高级定制");
+    await page.goto("/contact?type=custom&productRef=HC-TEST-004&view=request");
     await expect(page.locator("#cf-type")).toHaveValue("高级定制");
     await expect(page.getByText("作品当前不可咨询。您可以移除作品后继续提交普通咨询。"))
       .toBeVisible();
@@ -219,6 +225,9 @@ for (const viewport of viewports) {
     await expect(cta).toHaveAttribute("href", "/contact?type=custom");
     await cta.click();
     await expect(page).toHaveURL(/\/contact\?type=custom&productRef=HC-TEST-004$/);
+    await expect(page.getByRole("main").locator("form")).toHaveCount(1);
+    await expect(page.locator("#cf-type")).toHaveValue("高级定制");
+    await page.goto("/contact?type=custom&productRef=HC-TEST-004&view=request");
     await expect(page.locator("#cf-type")).toHaveValue("高级定制");
     await expectWriteGate(writes);
   });
@@ -226,7 +235,7 @@ for (const viewport of viewports) {
   test(`Contact ${viewport.name} 空联系方式、未知 type、首错焦点与 DOM 一致顺序`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const writes = await mockPublicServiceThirdBatch(page);
-    await page.goto(viewport.name === "desktop" ? "/contact" : "/contact?type=unknown");
+    await page.goto(viewport.name === "desktop" ? "/contact?view=request" : "/contact?type=unknown&view=request");
     await expect(page.locator("#cf-type")).toHaveValue("");
 
     await expect(page.getByRole("link", { name: "15918549866", exact: true })).toBeVisible();
@@ -297,7 +306,7 @@ for (const viewport of viewports) {
         500,
       ),
     });
-    await page.goto("/contact?type=custom");
+    await page.goto("/contact?type=custom&view=request");
     const main = page.locator("main");
 
     const settingsAlert = page.getByText(
@@ -339,7 +348,7 @@ for (const viewport of viewports) {
         await fulfillServiceApi(route, receipt(1));
       },
     });
-    await page.goto("/contact?type=custom");
+    await page.goto("/contact?type=custom&view=request");
     await fillRequiredContactFields(page);
 
     const submit = page.getByRole("button", { name: "提交需求" });
@@ -424,18 +433,18 @@ test("Contact 同一 SPA 切换业务入口时隔离旧回执，异内容需显�
     },
   });
 
-  await page.goto("/contact?type=custom");
+  await page.goto("/contact?type=custom&view=request");
   await fillRequiredContactFields(page);
   await page.getByRole("button", { name: "提交需求" }).click();
   await expect(page.getByRole("button", { name: "正在提交…" })).toBeDisabled();
   await expect.poll(() => writes.inquiry).toBe(1);
 
   await page.evaluate(() => {
-    window.history.pushState(null, "", "/contact?type=appointment");
+    window.history.pushState(null, "", "/contact?type=appointment&view=request");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
 
-  await expect(page).toHaveURL(/\/contact\?type=appointment$/);
+  await expect(page).toHaveURL(/\/contact\?type=appointment&view=request$/);
   await expect(page.locator("#cf-type")).toHaveValue("到店咨询");
   await expect(page.locator("#cf-name")).toHaveValue("测试访客");
   await expect(page.locator("#cf-message"))
@@ -467,10 +476,54 @@ test("Contact 同一 SPA 切换业务入口时隔离旧回执，异内容需显�
   await expectWriteGate(writes, 2);
 });
 
+test("联系与预约共用公开资料，默认同页展示直接联系和咨询表单", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const writes = await mockPublicServiceThirdBatch(page);
+  await page.route("**/api/settings/public**", (route) => fulfillServiceApi(route, {
+    siteName: "海川珠宝", contactPhone: "000-0000-0000", contactWechat: "test_company_wechat", businessHours: "测试服务时间",
+  }));
+  await page.goto("/privacy");
+  await page.getByRole("button", { name: "打开菜单", exact: true }).click();
+  const menu = page.getByRole("dialog", { name: "品牌菜单", exact: true });
+  await expect(menu.getByRole("link", { name: "联系与预约", exact: true })).toHaveAttribute("href", "/contact");
+  await page.keyboard.press("Escape");
+  await page.locator(".site-header__right").getByRole("link", { name: "联系与预约", exact: true }).click();
+  await expect(page).toHaveURL(/\/contact$/);
+  const main = page.getByRole("main");
+  await expect(main.getByText("000-0000-0000", { exact: true })).toBeVisible();
+  await expect(main.getByRole("link", { name: "拨打电话", exact: true })).toHaveAttribute("href", "tel:00000000000");
+  await expect(main.getByText("test_company_wechat", { exact: true })).toBeVisible();
+  await expect(main.getByText("测试服务时间", { exact: true })).toBeVisible();
+  await expect(main.getByRole("button", { name: "复制微信号" })).toBeVisible();
+  await expect(main.getByRole("heading", { name: "预约咨询", exact: true })).toBeVisible();
+  await expect(main.locator("form")).toHaveCount(1);
+  await expectWriteGate(writes);
+});
+
+test("显式咨询入口保留原表单并完成到店需求", async ({ page }) => {
+  let payload: Record<string, unknown> | null = null;
+  const writes = await mockPublicServiceThirdBatch(page, {
+    customer: { id: 7, phone: "13800000007", name: "测试会员", email: null },
+    onInquiry: async (route) => {
+      payload = route.request().postDataJSON() as Record<string, unknown>;
+      await fulfillServiceApi(route, receipt(87));
+    },
+  });
+  await page.goto("/contact?view=request");
+  await expect(page.getByRole("main").locator("form")).toHaveCount(1);
+  await fillRequiredContactFields(page);
+  await page.locator("#cf-type").selectOption("到店咨询");
+  await page.getByRole("button", { name: "提交需求", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "需求已提交", exact: true })).toBeVisible();
+  expect(payload).toMatchObject({ consultationType: "到店咨询" });
+  await expectWriteGate(writes, 1);
+});
+
 test("其他公开路由继续显示唯一共享页脚服务条", async ({ page }) => {
   const writes = await mockPublicServiceThirdBatch(page);
   await page.goto("/privacy");
-  await expect(page.getByText("私人预约", { exact: true })).toBeVisible();
+  await expect(page.locator("footer").getByRole("link", { name: "联系与预约" })).toBeVisible();
+  await expect(page.getByText("私人预约", { exact: true })).toHaveCount(0);
   await expect(page.locator("footer.site-footer")).toHaveCount(1);
   await expectWriteGate(writes);
 });

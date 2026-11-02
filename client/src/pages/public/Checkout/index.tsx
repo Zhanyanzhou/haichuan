@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { App as AntdApp, Form, Input, Spin } from "antd";
+import { App as AntdApp, Form, Input } from "antd";
+import RouteLoading from "@/components/common/RouteLoading";
 import { CheckCircleOutlined } from "@ant-design/icons";
 import { cartApi, customerApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -427,7 +428,7 @@ function CheckoutSession({
   if (returnedFromPayment && returnOrderState === "loading") {
     return (
       <div className="min-h-screen bg-brand-bg flex items-center justify-center">
-        <div role="status" aria-label="正在核实返回的订单"><Spin size="large" /></div>
+        <RouteLoading scope="region" surface="public" label="正在核实返回的订单" />
       </div>
     );
   }
@@ -455,7 +456,7 @@ function CheckoutSession({
     return (
       <div className="min-h-screen bg-brand-bg flex items-center justify-center">
         <h1 className="sr-only">结算</h1>
-        <div role="status" aria-label="结算信息加载中"><Spin size="large" /></div>
+        <RouteLoading scope="region" surface="public" label="结算信息加载中" />
       </div>
     );
   }

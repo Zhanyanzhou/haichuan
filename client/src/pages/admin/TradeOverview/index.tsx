@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Card, Empty, message, Spin, Tag } from "antd";
+import { Card, Empty, message, Tag } from "antd";
+import RouteLoading from "@/components/common/RouteLoading";
 import { ReloadOutlined } from "@ant-design/icons";
 import { orderApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
@@ -69,7 +70,9 @@ export default function TradeOverview() {
         </button>
       </div>
 
-      <Spin spinning={loading} tip="正在加载交易概览…">
+      {loading && !data ? (
+        <RouteLoading scope="region" surface="admin" label="正在加载交易概览…" />
+      ) : (
         <div className="space-y-4">
           {/* 今日 */}
           <div>
@@ -124,7 +127,7 @@ export default function TradeOverview() {
             <div className="text-center text-brand-muted text-sm">数据暂时无法加载，请点击刷新重试。</div>
           )}
         </div>
-      </Spin>
+      )}
     </div>
   );
 }

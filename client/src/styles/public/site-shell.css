@@ -126,6 +126,7 @@
 
 .site-header__nav-item {
   position: relative;
+  -webkit-tap-highlight-color: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -178,11 +179,26 @@
   color: #181a1b;
 }
 
+/* Safari 把点按当成 :focus-visible，并画出 2px 外扩方框；Chrome 安卓的点按不会进入这个状态。
+   方框只在桌面键鼠下声明。不要先画上再用 :is(:focus-visible) 盖掉，WebKit 经常匹配不到那条覆盖。 */
+.site-header__nav-item:focus,
+.site-header__brand:focus,
+.site-menu-toggle:focus,
 .site-header__nav-item:focus-visible,
 .site-header__brand:focus-visible,
 .site-menu-toggle:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 4px;
+  outline: none;
+  outline-offset: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 768px) {
+  .site-header__nav-item:focus-visible,
+  .site-header__brand:focus-visible,
+  .site-menu-toggle:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 4px;
+  }
 }
 
 .site-header__nav-item svg,
@@ -280,6 +296,7 @@
 /* 左侧入口统一使用同一 44px 居中盒；不再用控件级位移补偿不同 padding。 */
 .site-header__left-group > .site-menu-toggle,
 .site-header__left-group > .site-header__nav-item {
+  flex-shrink: 0;
   height: var(--site-header-action-size);
   padding-block: 0;
 }
@@ -302,8 +319,12 @@
   padding: 0;
   margin: 0;
   border: 0;
+  border-radius: 0;
+  -webkit-appearance: none;
   appearance: none;
+  -webkit-tap-highlight-color: transparent;
   background: transparent;
+  box-shadow: none;
   box-sizing: border-box;
   color: rgba(24, 26, 27, 0.68);
   font-family:
@@ -338,12 +359,15 @@
   color: #FFFFFF;
 }
 
-.site-menu-toggle__label {
+/* 左侧文字与页头布局共用 768px 断点，避免 sm:inline 在手机图标盒中提前展开。 */
+.site-menu-toggle__label,
+.site-header__left-group .site-header__nav-label {
   display: none;
 }
 
-@media (min-width: 640px) {
-  .site-menu-toggle__label {
+@media (min-width: 768px) {
+  .site-menu-toggle__label,
+  .site-header__left-group .site-header__nav-label {
     display: inline;
   }
 }
@@ -367,6 +391,10 @@
   }
   .site-header__right {
     width: var(--site-header-utility-width);
+    gap: 28px;
+  }
+  .site-header__right .site-header__nav-item {
+    flex-shrink: 0;
   }
   .site-header__right .site-header__nav-label {
     display: inline !important;
@@ -461,13 +489,14 @@
   }
   .site-header__inner {
     width: calc(100% - 36px);
-    grid-template-columns: 40px minmax(0, 1fr) 56px;
+    grid-template-columns: 88px minmax(0, 1fr) 88px;
   }
   .site-header__left {
     gap: 0;
   }
   .site-header__right {
-    gap: 12px;
+    width: 88px;
+    gap: 0;
   }
   .site-header__spacer {
     width: 44px;
@@ -501,8 +530,13 @@
     letter-spacing: 0.2em;
   }
   .site-menu-toggle {
+    justify-content: center;
+    width: 44px;
     min-width: 44px;
     min-height: 44px;
+  }
+  .site-menu-toggle__label {
+    display: none;
   }
   .site-menu-toggle svg {
     width: 22px;
@@ -510,7 +544,8 @@
   }
   .site-header__left-group {
     left: 18px;
-    gap: 14px;
+    width: 88px;
+    gap: 0;
   }
   .home-brand-signature {
     margin-bottom: 20px;
@@ -549,22 +584,13 @@
   text-align: center;
 }
 
-.site-footer__service-label {
-  margin: 0;
-  color: var(--hc-text-muted);
-  font-size: 9px;
-  font-weight: 400;
-  letter-spacing: 0.24em;
-  line-height: 1.5;
-}
-
 .site-footer__service-link {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
   min-height: 54px;
-  margin-top: 12px;
+  margin-top: 0;
   padding: 0 18px;
   color: var(--hc-ink);
   border: 1px solid var(--hc-line-strong);
@@ -876,7 +902,7 @@
     height: 22px;
     stroke-width: 1.4;
   }
-  .brand-menu__eyebrow {
+  .brand-menu__primary {
     margin-top: 24px;
   }
   .brand-menu__primary a {
@@ -897,12 +923,14 @@
   }
   .site-header__inner {
     width: calc(100% - 36px);
-    grid-template-columns: 40px minmax(0, 1fr) 88px;
+    /* 左右各两枚 44px 图标，列宽相等，品牌才落在视口中线。 */
+    grid-template-columns: 88px minmax(0, 1fr) 88px;
   }
   .site-header__left {
     gap: 0;
   }
   .site-header__right {
+    width: 88px;
     gap: 0;
   }
   .site-header__spacer {
@@ -918,12 +946,6 @@
   .site-menu-toggle svg {
     width: 22px;
     height: 22px;
-  }
-  .site-header__nav-item--catalog {
-    display: none;
-  }
-  .site-header__right > .site-header__nav-item:first-child {
-    display: none;
   }
   .site-header__logo {
     width: 23px;
@@ -944,7 +966,8 @@
   }
   .site-header__left-group {
     left: 18px;
-    gap: 14px;
+    width: 88px;
+    gap: 0;
   }
   .home-brand-signature {
     margin-bottom: 20px;
@@ -1134,11 +1157,17 @@
   }
 }
 
-/* 390px 页头只保留三个必要锚点：菜单、品牌、账户；搜索与选款仍可从菜单进入。 */
+/* 窄屏页头保留购物袋和账户；联系顾问与选款仍可从菜单进入。 */
+@media (max-width: 767px) {
+  .site-header__right > .site-header__nav-item--contact {
+    display: none;
+  }
+}
+
 @media (max-width: 420px) {
   .site-header__inner {
     width: calc(100% - 32px);
-    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    grid-template-columns: 44px minmax(0, 1fr) 88px;
   }
 
   .site-header__left-group {
@@ -1147,13 +1176,12 @@
     gap: 0;
   }
 
-  .site-header__left-group > .site-header__nav-item,
-  .site-header__right > .site-header__nav-item:not(:last-child) {
+  .site-header__left-group > .site-header__nav-item {
     display: none;
   }
 
   .site-header__right {
-    width: 44px;
+    width: 88px;
     gap: 0;
   }
 
@@ -1165,6 +1193,81 @@
   .site-header__brand-text {
     font-size: 20px;
   }
+}
+
+.public-contact-details__wechat button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--hc-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.public-contact-details__channels {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.public-contact-details__channels > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.public-contact-details__channels dt,
+.public-contact-details__notice {
+  color: var(--hc-text-secondary);
+  font-size: 13px;
+}
+
+.public-contact-details__channels dd {
+  min-width: 0;
+  margin: 0;
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.public-contact-details__channels a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--hc-ink);
+}
+
+.public-contact-details__wechat {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+
+.public-contact-details__wechat button {
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.public-contact-details__notice {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.public-contact-details a:focus-visible,
+.public-contact-details button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .site-search__scrim {

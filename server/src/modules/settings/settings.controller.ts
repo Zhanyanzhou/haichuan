@@ -27,6 +27,14 @@ export class SettingsController {
   constructor(private settingsService: SettingsService) {}
 
   @Public()
+  @ApiOperation({ summary: "获取联系页可公开的联系方式" })
+  @Get("public-contact")
+  @Header("Cache-Control", "no-store")
+  getPublicContact() {
+    return this.settingsService.getPublicContactSettings();
+  }
+
+  @Public()
   @ApiOperation({ summary: "获取前台可见的店铺资料" })
   @Get("public")
   @Header("Cache-Control", "no-store")
@@ -41,6 +49,8 @@ export class SettingsController {
       seoDescription: settings.seoDescription,
       seoKeywords: settings.seoKeywords,
       contactPhone: settings.contactPhone,
+      contactWechat: settings.contactWechat,
+      contactWechatQrCode: settings.contactWechatQrCode,
       contactEmail: settings.contactEmail,
       contactAddress: settings.contactAddress,
       storeName: settings.storeName,

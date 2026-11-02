@@ -14,6 +14,7 @@ import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
+import RouteLoading from "@/components/common/RouteLoading";
 
 const LG = "#F4F5F5";
 const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
@@ -168,47 +169,12 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
           </div>
         </div>
       ) : (
-        <div
+        <RouteLoading
           data-home-loading-status="true"
-          role="status"
-          aria-live="polite"
-          style={{
-            display: "grid",
-            minHeight: "max(620px, 100svh)",
-            placeItems: "center",
-            padding: "clamp(112px, 14vw, 180px) 24px 72px",
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              justifyItems: "center",
-              gap: 18,
-              color: "#5F6568",
-              textAlign: "center",
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                display: "block",
-                width: "clamp(56px, 5vw, 76px)",
-                height: 1,
-                background: "#B8BEC1",
-              }}
-            />
-            <span
-              style={{
-                fontFamily: 'var(--hc-font-body, Inter, "Noto Sans SC", sans-serif)',
-                fontSize: 12,
-                fontWeight: 400,
-                lineHeight: 1.7,
-              }}
-            >
-              首页内容正在准备
-            </span>
-          </div>
-        </div>
+          scope="region"
+          surface="public"
+          label="首页内容正在准备"
+        />
       )}
     </section>
   );
