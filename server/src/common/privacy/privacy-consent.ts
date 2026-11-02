@@ -14,4 +14,4 @@ export const PRIVACY_CONSENT_VERSION = "privacy-v2";
  * 当前值并负责落库；修改隐私页或经营主体来源后，目标合同会要求同步提升。
  */
 export const PRIVACY_CONSENT_CONTENT_HASH =
-  "1e953027e44ba31a1c0d48915e4be2805a34927eabf6f53c495c4fb21fc3cde5";
+  "a497f2969af356f60b52dbe6602f52a7e5c08b1f6e9cb5bacabe034d8c85dfc3";

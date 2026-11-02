@@ -389,7 +389,7 @@ async function fillContactForm(page: import("@playwright/test").Page) {
 
 for (const viewport of [
   { name: "desktop", width: 1440, height: 900, columns: 3 },
-  { name: "mobile", width: 390, height: 844, columns: 1 },
+  { name: "mobile", width: 390, height: 844, columns: 2 },
 ]) {
   test(`Catalog ${viewport.name} 完整层级、作品页、托盘与媒体稳定`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
@@ -730,7 +730,8 @@ for (const viewport of [
     if (viewport.name === "mobile") {
       await page.getByRole("link", { name: "进入选款中心" }).click();
     } else {
-      await page.locator("header").getByRole("link", { name: "选款中心" }).click();
+      await page.getByRole("button", { name: "打开菜单" }).click();
+      await page.getByRole("navigation", { name: "品牌菜单" }).getByRole("link", { name: "选款中心" }).click();
     }
     await expect(page).toHaveURL(/\/catalog$/);
     await expect(page.locator(".catalog-matrix")).toBeVisible();

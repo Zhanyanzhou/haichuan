@@ -209,7 +209,7 @@ test.describe("Contact 原生表单与错误可访问性（Mock）", () => {
     await expect.poll(() => inquiryRequests).toBe(1);
 
     releaseInquiry();
-    const successHeading = page.getByRole("heading", { level: 1, name: "需求已提交" });
+    const successHeading = page.getByRole("heading", { level: 2, name: "需求已提交" });
     await expect(successHeading).toBeFocused();
     expect(inquiryRequests).toBe(1);
   });

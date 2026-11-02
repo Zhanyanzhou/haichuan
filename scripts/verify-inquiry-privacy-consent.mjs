@@ -36,7 +36,7 @@ const [
   readSrc("server/prisma/schema.prisma"),
   readSrc("server/prisma/migrations/20260816110000_add_inquiry_privacy_consent_audit/migration.sql"),
   readSrc("server/prisma/migrations/20260923120000_add_service_privacy_consent_hashes/migration.sql"),
-  readSrc("client/src/pages/public/Contact/index.tsx"),
+  readSrc("client/src/pages/public/Contact/ConsultationRequest.tsx"),
   readSrc("client/src/pages/public/Catalog/SelectionTray.tsx"),
   readSrc("client/src/services/clients/inquiriesClient.ts"),
   readSrc("client/src/services/clients/selectionInquiryClient.ts"),

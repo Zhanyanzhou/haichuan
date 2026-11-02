@@ -62,15 +62,12 @@
 }
 
 .site-route-loading--public.site-route-loading--region:not([data-home-loading-status]) {
-  position: fixed;
-  z-index: 40;
-  top: var(--site-header-offset, var(--site-header-height, 88px));
-  right: 0;
-  bottom: 0;
-  left: 0;
-  width: auto;
+  position: relative;
+  z-index: 1;
+  inset: auto;
+  width: 100%;
   height: auto;
-  min-height: 0;
+  min-height: 100dvh;
   background: #ffffff;
 }
 

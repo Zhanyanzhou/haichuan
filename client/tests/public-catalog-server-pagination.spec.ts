@@ -962,10 +962,10 @@ test("Catalog 在 390px 保持正方形作品格、可用对话框宽度并恢�
   await search.fill("");
   await search.blur();
 
-  const productCell = page.locator(".catalog-cell").first();
-  const productCellBox = await productCell.boundingBox();
-  expect(productCellBox).not.toBeNull();
-  expect(productCellBox!.width / productCellBox!.height).toBeCloseTo(1, 1);
+  const productMedia = page.locator(".catalog-product-card__media").first();
+  const productMediaBox = await productMedia.boundingBox();
+  expect(productMediaBox).not.toBeNull();
+  expect(productMediaBox!.width / productMediaBox!.height).toBeCloseTo(1, 1);
   await expect(page.locator("[data-catalog-product-media]").first()).toBeVisible();
 
   const openLink = page.locator("[data-catalog-product-focus]").first();
