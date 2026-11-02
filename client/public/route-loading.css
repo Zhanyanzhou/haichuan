@@ -9,26 +9,93 @@
   color: #5f6568;
 }
 
+/* 后台内容区加载：铺满主工作区，而不是整个浏览器窗口。侧栏和顶栏留在外面，H 才落在看得见的画面中心。 */
 .site-route-loading--admin-content {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  z-index: 45;
-  height: 100vh;
-  height: 100dvh;
-  min-height: 0;
-  background: transparent;
-  pointer-events: none;
+  z-index: 4;
+  width: auto;
+  height: auto;
+  background: #ffffff;
+  pointer-events: auto;
 }
 
-.site-route-loading--workspace {
+.site-route-loading--workspace,
+.site-route-loading--region,
+.site-route-loading--panel,
+.site-route-loading--inline {
   position: relative;
   inset: auto;
   z-index: auto;
   width: 100%;
-  height: 100%;
-  min-height: 0;
-  flex: 1 1 auto;
+  height: auto;
   background: transparent;
+}
+
+/* 店铺装修工作区：H 落在顶栏和侧栏之间。侧栏收起时宽度变量为 0。 */
+.admin-main--workspace .site-route-loading--workspace,
+.admin-shell-v7--workspace .site-route-loading--workspace {
+  position: fixed;
+  z-index: 4;
+  top: var(--adm-header-h, 60px);
+  right: 0;
+  bottom: 0;
+  left: var(--adm-sidebar-w, 0px);
+  width: auto;
+  height: auto;
+  min-height: 0;
+  background: #ffffff;
+}
+
+/* 整页或整表等待：固定在顶栏与侧栏之间的工作区，不跟文档起点走。 */
+.site-route-loading--region:not(.site-route-loading--public) {
+  position: fixed;
+  z-index: 20;
+  top: var(--adm-header-h, 60px);
+  right: 0;
+  bottom: 0;
+  left: var(--adm-sidebar-w, 208px);
+  width: auto;
+  height: auto;
+  min-height: 0;
+  background: var(--adm-content-bg, #ffffff);
+}
+
+.site-route-loading--public.site-route-loading--region:not([data-home-loading-status]) {
+  position: fixed;
+  z-index: 40;
+  top: var(--site-header-offset, var(--site-header-height, 88px));
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.site-route-loading[data-home-loading-status="true"] {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  height: auto;
+  background: transparent;
+}
+
+.site-route-loading--panel {
+  min-height: min(520px, 52vh);
+}
+
+.site-route-loading--inline {
+  min-height: 148px;
+}
+
+@media (max-width: 1024px) {
+  .site-route-loading--region:not(.site-route-loading--public),
+  .admin-main--workspace .site-route-loading--workspace,
+  .admin-shell-v7--workspace .site-route-loading--workspace {
+    left: 0;
+  }
 }
 
 .site-route-loading__indicator {
@@ -61,14 +128,66 @@
   position: absolute;
   top: calc(50% + 48px);
   left: 50%;
+  width: max-content;
+  max-width: min(320px, calc(100% - 32px));
   transform: translateX(-50%);
   font: 400 13px/1.5 system-ui, sans-serif;
   letter-spacing: 0.08em;
-  white-space: nowrap;
+  text-align: center;
+  white-space: normal;
+}
+
+.site-route-loading--inline .site-route-loading__indicator {
+  width: 40px;
+  height: 40px;
+}
+
+.site-route-loading--inline .site-route-loading__mark {
+  width: 18px;
+  height: 18px;
+}
+
+.site-route-loading--inline .site-route-loading__text {
+  top: calc(50% + 28px);
+  font-size: 12px;
+}
+
+.ant-spin-dot.hc-spin-mark {
+  position: relative !important;
+  display: inline-grid !important;
+  width: 16px !important;
+  height: 16px !important;
+  font-size: 16px !important;
+  place-items: center;
+  background: none !important;
+  animation: none !important;
+  transform: none !important;
+}
+
+.hc-spin-mark__ring {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: 1px solid #dfe2e3;
+  border-top-color: #181a1b;
+  border-radius: 50%;
+}
+
+.hc-spin-mark img,
+.site-route-loading__mark--small {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.hc-spin-mark img {
+  width: 9px;
+  height: 9px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .site-route-loading__ring {
+  .site-route-loading__ring,
+  .hc-spin-mark__ring {
     animation: site-route-loading-spin 900ms linear infinite;
   }
 }

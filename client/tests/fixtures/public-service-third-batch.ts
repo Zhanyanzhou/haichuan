@@ -68,13 +68,23 @@ export async function mockPublicServiceThirdBatch(
       return route.abort();
     }
 
-    if (path.endsWith("/settings/public")) {
+    if (path.endsWith("/settings/public") || path.endsWith("/settings/public-contact")) {
       if (options.settingsState === "error") {
         return fulfillServiceApi(
           route,
           { statusCode: 503, message: "settings unavailable" },
           503,
         );
+      }
+      if (path.endsWith("/settings/public-contact")) {
+        return fulfillServiceApi(route, {
+          contactPhone: "",
+          contactWechat: "",
+          contactWechatQrCode: "",
+          contactEmail: "",
+          contactAddress: "",
+          businessHours: "",
+        });
       }
       return fulfillServiceApi(route, {
         siteName: "海川珠宝",

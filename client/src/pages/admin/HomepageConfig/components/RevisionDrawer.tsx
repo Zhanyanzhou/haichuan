@@ -1,5 +1,6 @@
 /** 页面发布历史：摘要分页、可信单版本预览、双基线比较与内存草稿恢复。 */
-import { Alert, Button, Drawer, Empty, Spin, Tag } from "antd";
+import { Alert, Button, Drawer, Empty, Tag } from "antd";
+import RouteLoading from "@/components/common/RouteLoading";
 import {
   CheckCircleFilled,
   ClockCircleOutlined,
@@ -111,7 +112,7 @@ export default function RevisionDrawer({
       className="homepage-editor__revision-drawer"
     >
       {loading ? (
-        <div className="homepage-editor__revision-loading"><Spin /><span>正在加载版本历史</span></div>
+        <RouteLoading scope="panel" label="正在加载版本历史" />
       ) : (
         <div className="homepage-editor__revision-layout">
           <div className="homepage-editor__revision-scroll" aria-label="页面版本列表">
@@ -173,7 +174,7 @@ export default function RevisionDrawer({
           </div>
 
           <section className="homepage-editor__revision-detail" aria-label="页面版本详情">
-            {detailLoading ? <div className="homepage-editor__revision-loading"><Spin /><span>正在核验版本正文</span></div> : null}
+            {detailLoading ? <RouteLoading scope="inline" label="正在核验版本正文" /> : null}
             {detailError ? (
               <Alert
                 type="error"

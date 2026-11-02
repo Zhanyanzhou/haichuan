@@ -86,7 +86,7 @@ export function ProductBatchStockModal({
       destroyOnHidden
     >
       {loading ? (
-        <AdminLoadingState subject="所选商品的库存" />
+        <AdminLoadingState subject="所选商品的库存" compact />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <p style={{ margin: 0 }}>

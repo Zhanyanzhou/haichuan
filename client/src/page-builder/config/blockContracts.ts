@@ -67,8 +67,9 @@ export function getContractFrameAspectRatio(
   return CONTENT_TEMPLATE_CONTRACTS[key].defaultGeometryByViewport[viewport].frameAspectRatio;
 }
 
+/** 编辑器默认视口与验收代表视口一致：桌面 1440×900，手机 390×844（区块模板标准 §6.5）。 */
 export const RESPONSIVE_CANVAS = {
-  desktop: { width: 1920, height: 1200 },
+  desktop: { width: 1440, height: 900 },
   mobile: { width: 390, height: 844 },
   compactDesktopMediaQuery: "(min-width: 768px) and (max-width: 1023px)",
   mobileMaxWidth: 767,

@@ -35,6 +35,8 @@ test("读取缺失的 SiteSettings 返回安全默认值且不写数据库", asy
   assert.equal(settings.seoTitle, "海川珠宝官方网站");
   assert.equal(settings.seoDescription, "浏览珠宝作品，了解定制与顾问服务。");
   assert.equal(settings.contactPhone, "");
+  assert.equal(settings.contactWechat, "");
+  assert.equal(settings.contactWechatQrCode, "");
   assert.equal(upsertCalls, 0);
 });
 
@@ -214,4 +216,126 @@ test("联系邮箱可清空保存，非空无效邮箱仍被写接口校验拒�
   for (const contactEmail of ["invalid", 42, {}, "x".repeat(101) + "@example.invalid"]) {
     await assert.rejects(() => pipe.transform({ contactEmail }, metadata), BadRequestException);
   }
+});
+
+test("公开公司微信号沿用设置保存与读取，支持清空且不暴露内部字段", async () => {
+  const pipe = new ValidationPipe({ whitelist: true, transform: true });
+  const metadata = { type: "body" as const, metatype: UpdateSettingsDto };
+  let value: Record<string, unknown> = {
+    siteName: "测试站点",
+    canonicalBaseUrl: "https://example.invalid",
+    defaultLocale: "zh-CN",
+    publishedLocales: ["zh-CN"],
+    brandReviewReference: "INTERNAL-TEST-REVIEW",
+  };
+  const service = new SettingsService(withStaffAuthorization({
+    siteSetting: {
+      findUnique: async () => ({ value, version: 1 }),
+      updateMany: async (args: { data: { value: Record<string, unknown> } }) => {
+        value = args.data.value;
+        return { count: 1 };
+      },
+    },
+  }) as any);
+  const controller = new SettingsController(service);
+  for (const contactWechat of ["  test_company_wechat  ", ""]) {
+    const dto = await pipe.transform({ contactWechat }, metadata);
+    await service.updateSettings(dto, 9);
+    assert.equal(value.contactWechat, contactWechat.trim());
+    assert.equal((await service.getSettings(9)).contactWechat, contactWechat.trim());
+    const published = await controller.getPublicSettings("zh-CN");
+    assert.equal(published.contactWechat, contactWechat.trim());
+    assert.equal("brandReviewReference" in published, false);
+  }
+  for (const contactWechat of [42, {}, "x".repeat(101)]) {
+    await assert.rejects(() => pipe.transform({ contactWechat }, metadata), BadRequestException);
+  }
+});
+
+test("微信加好友二维码只允许受控图片，保存读回与清空沿用原设置链路", async () => {
+  const pipe = new ValidationPipe({ whitelist: true, transform: true });
+  const metadata = { type: "body" as const, metatype: UpdateSettingsDto };
+  let value: Record<string, unknown> = {
+    siteName: "测试站点", canonicalBaseUrl: "https://example.invalid",
+    defaultLocale: "zh-CN", publishedLocales: ["zh-CN"],
+  };
+  const service = new SettingsService(withStaffAuthorization({
+    siteSetting: {
+      findUnique: async () => ({ value, version: 1 }),
+      updateMany: async (args: { data: { value: Record<string, unknown> } }) => {
+        value = args.data.value;
+        return { count: 1 };
+      },
+    },
+  }) as any);
+  const controller = new SettingsController(service);
+  for (const contactWechatQrCode of [" /uploads/page-assets/test-qr.png ", "/api/upload/public-media/42", ""]) {
+    const dto = await pipe.transform({ contactWechatQrCode }, metadata);
+    await service.updateSettings(dto, 9);
+    assert.equal(value.contactWechatQrCode, contactWechatQrCode.trim());
+    assert.equal((await service.getSettings(9)).contactWechatQrCode, contactWechatQrCode.trim());
+    assert.equal((await controller.getPublicSettings("zh-CN")).contactWechatQrCode, contactWechatQrCode.trim());
+  }
+  for (const contactWechatQrCode of [
+    "javascript:alert(1)", "data:image/png;base64,abc", "https://example.invalid/qr.png",
+    "//example.invalid/qr.png", "/uploads/page-assets/../secret.png",
+    "/uploads/page-assets/%2e%2e/secret.png", "/uploads/page-assets/test.svg",
+    "/uploads/legacy.png", "/api/upload/media/42/preview", "/api/upload/public-media/0", 42,
+  ]) {
+    await assert.rejects(() => pipe.transform({ contactWechatQrCode }, metadata), BadRequestException);
+  }
+  value.contactWechatQrCode = "javascript:alert(1)";
+  assert.equal((await controller.getPublicSettings("zh-CN")).contactWechatQrCode, "");
+});
+
+test("联系页公开读取不依赖全站准备度，并丢弃占位、无效邮箱和不安全二维码", async () => {
+  const value = {
+    siteName: "海川珠宝",
+    brandReviewReference: "INTERNAL-REVIEW",
+    seoTitle: "不应出现",
+    logo: "/uploads/previous-approved-logo.svg",
+    contactPhone: "  13800000000  ",
+    contactWechat: "请填写微信号",
+    contactWechatQrCode: "javascript:alert(1)",
+    contactEmail: "not-an-email",
+    contactAddress: "已保存的接待地址",
+    businessHours: "工作日 10:00-18:00",
+    storeName: "不应作为联系字段返回",
+  };
+  const service = new SettingsService({
+    siteSetting: { findUnique: async () => ({ value }) },
+  } as any);
+  const controller = new SettingsController(service);
+
+  await assert.rejects(() => service.getPublishedSettings(), ServiceUnavailableException);
+  const contact = await controller.getPublicContact();
+
+  assert.deepEqual(contact, {
+    contactPhone: "13800000000",
+    contactWechat: "",
+    contactWechatQrCode: "",
+    contactEmail: "",
+    contactAddress: "已保存的接待地址",
+    businessHours: "工作日 10:00-18:00",
+  });
+  assert.equal("siteName" in contact, false);
+  assert.equal("brandReviewReference" in contact, false);
+  assert.equal("seoTitle" in contact, false);
+  assert.equal("logo" in contact, false);
+  assert.equal("storeName" in contact, false);
+});
+
+test("没有已保存店铺资料时联系页公开读取返回空字段", async () => {
+  const service = new SettingsService({
+    siteSetting: { findUnique: async () => null },
+  } as any);
+
+  assert.deepEqual(await service.getPublicContactSettings(), {
+    contactPhone: "",
+    contactWechat: "",
+    contactWechatQrCode: "",
+    contactEmail: "",
+    contactAddress: "",
+    businessHours: "",
+  });
 });

@@ -22,6 +22,8 @@ interface SettingsUpdateInput {
   seoDescription?: string;
   seoKeywords?: string;
   contactPhone?: string;
+  contactWechat?: string;
+  contactWechatQrCode?: string;
   contactEmail?: string;
   contactAddress?: string;
   storeName?: string;
@@ -63,6 +65,8 @@ export const settingsApi = {
         seoTitle: "海川珠宝官方网站",
         seoDescription: "浏览珠宝作品，了解定制与顾问服务。",
         contactPhone: "",
+        contactWechat: "",
+        contactWechatQrCode: "",
         contactEmail: "",
         contactAddress: "",
         storeName: "",
@@ -74,6 +78,20 @@ export const settingsApi = {
       params: { locale },
       suppressGlobalError: true,
     });
+  },
+  getPublicContact: async () => {
+    if (USE_MOCK) {
+      await mockDelay(200);
+      return mockResponse({
+        contactPhone: "",
+        contactWechat: "",
+        contactWechatQrCode: "",
+        contactEmail: "",
+        contactAddress: "",
+        businessHours: "",
+      });
+    }
+    return api.get("/settings/public-contact", { suppressGlobalError: true });
   },
   getSettings: async () => {
     if (USE_MOCK) {

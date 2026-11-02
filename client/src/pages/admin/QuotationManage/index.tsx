@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import RouteLoading from "@/components/common/RouteLoading";
 import {
   App as AntdApp,
   Alert,
@@ -387,7 +388,6 @@ function LinkedSkuSelector({
         showSearch
         filterOption={false}
         onSearch={searchProducts}
-        loading={productSearching}
         placeholder="搜索并关联商品（按名称/货号）"
         size="small"
         style={{ width: "100%" }}
@@ -398,18 +398,17 @@ function LinkedSkuSelector({
         onSelect={(v) => void selectProduct(v as number)}
         options={productOptions}
         allowClear
-        notFoundContent={productSearching ? "搜索中…" : "输入关键字搜索商品"}
+        notFoundContent={productSearching ? <RouteLoading scope="inline" label="搜索中…" /> : "输入关键字搜索商品"}
       />
       {productId && (
         <Select
           placeholder="选择 SKU"
           size="small"
           style={{ width: "100%" }}
-          loading={skuLoading}
           value={skuId ?? undefined}
           onSelect={(v) => selectSku(v as number)}
           options={skuOptions}
-          notFoundContent={skuLoading ? "正在加载商品规格…" : "该商品暂无可用 SKU"}
+          notFoundContent={skuLoading ? <RouteLoading scope="inline" label="正在加载商品规格…" /> : "该商品暂无可用 SKU"}
         />
       )}
     </div>
@@ -1404,10 +1403,9 @@ export default function QuotationManage() {
                 showSearch
                 filterOption={false}
                 onSearch={(value) => void searchCustomers(value)}
-                loading={customerSearching}
                 placeholder="搜索客户姓名或手机号"
                 options={customerOptions}
-                notFoundContent={customerSearching ? "正在搜索客户…" : customerSearchError ? (
+                notFoundContent={customerSearching ? <RouteLoading scope="inline" label="正在搜索客户…" /> : customerSearchError ? (
                   <div className="space-y-2 py-1 text-sm">
                     <div>{customerSearchError}</div>
                     <Button size="small" onClick={() => void searchCustomers(customerSearchKeyword)}>
@@ -1589,7 +1587,6 @@ export default function QuotationManage() {
                 extra="服务端会复核文件归属、版本状态和客户确认蜡重。"
               >
                 <Select
-                  loading={issueOptionsLoading}
                   placeholder="选择客户已确认的文件版本"
                   options={designFileOptions.flatMap((file) =>
                     (file.versions ?? [])
@@ -1599,7 +1596,7 @@ export default function QuotationManage() {
                         label: `${file.referenceNo} · V${version.version}`,
                       })),
                   )}
-                  notFoundContent={issueOptionsLoading ? "正在加载文件版本…" : "该客户暂无已确认文件版本"}
+                  notFoundContent={issueOptionsLoading ? <RouteLoading scope="inline" label="正在加载文件版本…" /> : "该客户暂无已确认文件版本"}
                 />
               </Form.Item>
               <Form.Item
@@ -1618,13 +1615,12 @@ export default function QuotationManage() {
           <Form.Item name="feeRuleIds" label="费用规则（选填）">
             <Select
               mode="multiple"
-              loading={issueOptionsLoading}
               placeholder="选择适用于当前渠道的费用规则"
               options={feeRuleOptions.map((rule) => ({
                 value: rule.id,
                 label: `${rule.displayText} · ¥${Number(rule.unitAmount).toFixed(2)} · V${rule.version}`,
               }))}
-              notFoundContent={issueOptionsLoading ? "正在加载费用规则…" : "当前渠道没有已启用费用规则"}
+              notFoundContent={issueOptionsLoading ? <RouteLoading scope="inline" label="正在加载费用规则…" /> : "当前渠道没有已启用费用规则"}
             />
           </Form.Item>
 
@@ -1648,13 +1644,12 @@ export default function QuotationManage() {
                           rules={[{ required: true, message: "请输入资源桶 ID" }]}
                         >
                           <Select
-                            loading={issueOptionsLoading}
                             placeholder="选择资源桶"
                             options={resourceBucketOptions.map((bucket) => ({
                               value: bucket.id,
                               label: `${bucket.displayName} · 可用 ${Math.max(0, Number(bucket.availableQuantity) - Number(bucket.reservedQuantity)).toFixed(3)} ${bucket.unit}`,
                             }))}
-                            notFoundContent={issueOptionsLoading ? "正在加载资源桶…" : "当前渠道没有可用资源桶"}
+                            notFoundContent={issueOptionsLoading ? <RouteLoading scope="inline" label="正在加载资源桶…" /> : "当前渠道没有可用资源桶"}
                           />
                         </Form.Item>
                         <Form.Item

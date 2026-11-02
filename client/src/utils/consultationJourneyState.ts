@@ -130,6 +130,18 @@ function isSubmissionAttempt(value: unknown): value is ConsultationSubmissionAtt
     && /^[A-Za-z0-9._:-]+$/.test(attempt.key);
 }
 
+/** 默认联系页仅探测本人的恢复入口，不消费草稿，也不删除其他身份或失效记录。 */
+export function hasContactConsultationRecovery(owner: ConsultationDraftOwner): boolean {
+  if (readDraft(contactDraft, owner)) return true;
+  const key = submissionAttemptStorageKey("contact", owner);
+  if (isSubmissionAttempt(volatileSubmissionAttempts.get(key))) return true;
+  try {
+    return isSubmissionAttempt(JSON.parse(globalThis.sessionStorage?.getItem(key) || "null"));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * 只持久化不可逆请求摘要与随机幂等键，不保存姓名、电话、邮箱、留言或作品详情。
  * sessionStorage 不可用时退化为页内恢复；当前页面的人工重试仍复用同一键。

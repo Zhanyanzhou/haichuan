@@ -7,6 +7,7 @@ import {
   type AdminEmptyKind,
   type AdminErrorContext,
 } from '@/constants/adminCopy';
+import RouteLoading from '@/components/common/RouteLoading';
 
 interface Props {
   subject?: string;
@@ -34,15 +35,11 @@ interface ErrorProps extends Props {
 export function AdminLoadingState({ subject = '数据', message, compact = false }: LoadingProps = {}) {
   const text = message ?? getAdminLoadingText(subject);
   return (
-    <div className={`flex items-center justify-center ${compact ? 'py-6' : 'py-20'}`} role="status" aria-live="polite">
-      <div className="text-center">
-        <div
-          className="inline-block w-8 h-8 border-2 border-[#DDE1E2] border-t-[#181A1B] rounded-full animate-spin"
-          aria-hidden="true"
-        />
-        <p style={{ marginTop: 16, color: 'var(--adm-text)', fontSize: 13 }}>{text}</p>
-      </div>
-    </div>
+    <RouteLoading
+      scope={compact ? 'panel' : 'region'}
+      surface="admin"
+      label={text}
+    />
   );
 }
 

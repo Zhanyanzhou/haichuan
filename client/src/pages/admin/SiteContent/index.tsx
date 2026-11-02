@@ -23,6 +23,7 @@ import {
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import { getSitePublicationField, SITE_PUBLICATION_FIELD_LABELS } from "@/constants/sitePublicationFields";
 import UnsavedChangesGuard from "../HomepageConfig/components/UnsavedChangesGuard";
+import { resolveManagedTemplateMediaPreviewUrl } from "@/page-builder/template-definition/managedMediaPreview";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -47,6 +48,8 @@ interface SiteContentValues {
   defaultLocale?: string;
   publishedLocales?: string[];
   contactPhone?: string;
+  contactWechat?: string;
+  contactWechatQrCode?: string;
   contactEmail?: string;
   contactAddress?: string;
   storeName?: string;
@@ -70,6 +73,8 @@ const SITE_CONTENT_FIELDS: ReadonlyArray<keyof SiteContentValues> = [
   "defaultLocale",
   "publishedLocales",
   "contactPhone",
+  "contactWechat",
+  "contactWechatQrCode",
   "contactEmail",
   "contactAddress",
   "storeName",
@@ -90,6 +95,12 @@ function validateCanonicalBaseUrl(value: unknown) {
   } catch {
     return false;
   }
+}
+
+function isContactQrCodeReference(value: unknown): value is string {
+  return typeof value === "string" && (value === ""
+    || /^\/uploads\/page-assets\/[A-Za-z0-9_-]+\.(?:png|jpe?g|webp|gif)$/i.test(value)
+    || /^\/api\/upload\/public-media\/[1-9]\d*$/.test(value));
 }
 
 function hasSiteContent(values: SiteContentValues | null): values is SiteContentValues {
@@ -139,6 +150,9 @@ export default function SiteContent() {
   const [form] = Form.useForm();
   const defaultLocale = Form.useWatch("defaultLocale", form);
   const publishedLocales = Form.useWatch("publishedLocales", form);
+  const wechatQrCode = Form.useWatch("contactWechatQrCode", form) as string | undefined;
+  const [qrUploading, setQrUploading] = useState(false);
+  const [qrPreviewFailed, setQrPreviewFailed] = useState(false);
   const [searchParams] = useSearchParams();
   const [loadState, setLoadState] = useState<SiteContentLoadState>("loading");
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -258,7 +272,7 @@ export default function SiteContent() {
   }, [applyPersistedSettings, loadReadiness, message, saveReadbackLoading, saveReadbackPending]);
 
   const saveCurrentValues = async (): Promise<boolean> => {
-    if (savingRef.current) return false;
+    if (savingRef.current || qrUploading) return false;
     if (loadState !== "empty" && loadState !== "ready") {
       message.error("店铺资料尚未成功加载，请重试后再保存。");
       return false;
@@ -339,7 +353,29 @@ export default function SiteContent() {
     return false; // 阻止默认上传行为
   };
 
-  const canEdit = (loadState === "empty" || loadState === "ready") && !saveReadbackPending;
+  const handleWechatQrUpload = async (file: File) => {
+    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type) || file.size > 10 * 1024 * 1024) {
+      message.error("请选择不超过 10MB 的 PNG、JPEG、WebP 或 GIF 图片。");
+      return;
+    }
+    setQrUploading(true);
+    try {
+      const data = unwrapResponse<{ url?: string }>(await uploadApi.uploadImage(file));
+      if (!data?.url || !isContactQrCodeReference(data.url)) throw new Error("二维码素材地址无效");
+      form.setFieldsValue({ contactWechatQrCode: data.url });
+      setQrPreviewFailed(false);
+      setDirty(true);
+      message.success("微信加好友码已上传，保存资料后可供联系页使用");
+    } catch (error) {
+      message.error(getSafeAdminErrorMessage(error, "微信加好友码上传失败，请检查图片和网络后重试。"));
+    } finally {
+      setQrUploading(false);
+    }
+  };
+
+  useEffect(() => { setQrPreviewFailed(false); }, [wechatQrCode]);
+
+  const canEdit = (loadState === "empty" || loadState === "ready") && !saveReadbackPending && !qrUploading;
 
   return (
     <div>
@@ -486,8 +522,48 @@ export default function SiteContent() {
             marginBottom: 20,
           }}
         >
+          <p>保存后立即出现在前台联系页。全站网址或搜索信息未完成时，这些联系方式仍会公开。</p>
           <Form.Item name="contactPhone" label="联系电话">
             <Input placeholder="400-xxx-xxxx" />
+          </Form.Item>
+          <Form.Item
+            name="contactWechat"
+            label="公司微信号"
+            extra="选填。保存后立即出现在前台联系页；请使用获准公开的公司微信号。"
+            normalize={(value: string) => value.trim()}
+            rules={[{ max: 100, message: "公司微信号不能超过 100 个字符" }]}
+          >
+            <Input maxLength={100} placeholder="填写公司微信号，留空则不展示微信渠道" />
+          </Form.Item>
+          <Form.Item
+            label="微信加好友二维码"
+            extra="请上传公司微信提供的加好友码，非付款码。保存后立即出现在前台联系页，留空则不显示。素材公开授权沿用媒体库。"
+          >
+            <Form.Item name="contactWechatQrCode" noStyle rules={[{
+              validator: async (_, value: unknown) => {
+                if (value === undefined || isContactQrCodeReference(value)) return;
+                throw new Error("请上传本站受控的二维码图片");
+              },
+            }]}><Input type="hidden" /></Form.Item>
+            {wechatQrCode && isContactQrCodeReference(wechatQrCode) ? (
+              <div style={{ marginBottom: 12 }}>
+                {qrPreviewFailed ? <p role="status">二维码预览暂不可用，请在媒体库核对图片；您仍可替换或清空。</p> : (
+                  <img src={resolveManagedTemplateMediaPreviewUrl(wechatQrCode)} alt="公司微信加好友二维码预览"
+                    width={160} height={160} style={{ display: "block", objectFit: "contain", background: "var(--adm-surface)" }}
+                    onError={() => setQrPreviewFailed(true)} />
+                )}
+              </div>
+            ) : null}
+            <Upload accept="image/png,image/jpeg,image/webp,image/gif" showUploadList={false}
+              disabled={qrUploading} beforeUpload={(file) => { void handleWechatQrUpload(file); return false; }}>
+              <Button aria-label={wechatQrCode ? "替换加好友码" : "上传加好友码"}
+                loading={qrUploading} icon={<UploadOutlined aria-hidden="true" />}>{wechatQrCode ? "替换加好友码" : "上传加好友码"}</Button>
+            </Upload>
+            {wechatQrCode ? <Button disabled={qrUploading} style={{ marginLeft: 8 }} onClick={() => {
+              form.setFieldsValue({ contactWechatQrCode: "" });
+              setDirty(true);
+            }}>清空加好友码</Button> : null}
+            <Link to="/admin/media" style={{ marginLeft: 12 }}>前往媒体库</Link>
           </Form.Item>
           <Form.Item name="contactEmail" label="联系邮箱">
             <Input placeholder="name@example.com" />
@@ -509,7 +585,7 @@ export default function SiteContent() {
           <Form.Item name="storeName" label="门店名称">
             <Input placeholder="用于门店信息模块；未配置时不会把网站名称直接当作实体门店" />
           </Form.Item>
-          <Form.Item name="businessHours" label="营业时间">
+          <Form.Item name="businessHours" label="营业时间" extra="保存后立即出现在前台联系页。">
             <Input placeholder="周一至周日 10:00-22:00" />
           </Form.Item>
           <Form.Item

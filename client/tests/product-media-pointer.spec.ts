@@ -101,6 +101,7 @@ for (const viewport of [
       "data-catalog-product-media-src",
       "/products/public/77/media/101",
     );
+    await expect(catalogMedia.locator("img")).toHaveAttribute("src", /media\/101\?width=800$/);
 
     await page.goto("/products/77");
     const mainMedia = page.locator(".product-detail-page__main-media");

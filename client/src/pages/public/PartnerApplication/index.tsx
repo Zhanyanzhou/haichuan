@@ -9,13 +9,13 @@ import {
   Modal,
   Result,
   Select,
-  Spin,
   message,
 } from "antd";
 import { partnerApi } from "@/services/api";
 import type { PartnerApplicationInput, PartnerApplicationStatus } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { useCommerceCapabilities } from "@/store/featureFlags";
+import RouteLoading from "@/components/common/RouteLoading";
 
 type PartnerAgreementArtifact = {
   status: "draft" | "published";
@@ -154,9 +154,7 @@ export default function PartnerApplication() {
 
   if (loading || flagsLoading || !flags) {
     return (
-      <div className="min-h-[50vh] flex items-center justify-center">
-        <Spin size="large" />
-      </div>
+      <RouteLoading scope="region" surface="public" label="正在加载合作申请…" />
     );
   }
 

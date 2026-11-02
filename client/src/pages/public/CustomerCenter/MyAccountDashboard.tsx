@@ -1,5 +1,6 @@
 // 客户中心登录态主面板：账户总览/心愿单/订单(可视化进度+物流轨迹+评价)/个人资料(导出与注销)/地址管理
 import { useCallback, useEffect, useRef, useState } from "react";
+import RouteLoading from "@/components/common/RouteLoading";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   App as AntdApp,
@@ -30,6 +31,8 @@ import {
   useCommerceEnabled,
 } from "@/store/featureFlags";
 import { SecureImage } from "@/components/common/SecureImage";
+import { buildResponsiveUploadsDerivedUrl } from "@/utils/responsiveUploadsImage";
+import { withPublicMediaWidth } from "@/utils/publicMediaWidth";
 import CustomerPaymentDialog, {
   type CustomerPaymentOrder,
 } from "@/components/commerce/CustomerPaymentDialog";
@@ -1553,9 +1556,7 @@ export default function MyAccountDashboard({
                 </button>
               </div>
               {consultationLoading ? (
-                <p className="my-account__records-state" role="status">
-                  正在加载咨询详情…
-                </p>
+                <RouteLoading scope="panel" surface="public" label="正在加载咨询详情…" />
               ) : consultationError === "not-found" ? (
                 <div className="my-account__records-state" role="alert">
                   <p>未找到这条咨询，或者它不属于当前账户。</p>
@@ -1640,9 +1641,7 @@ export default function MyAccountDashboard({
               </p>
             ) : null}
             {selectionInquiryLoading && selectionInquiries.length === 0 ? (
-              <p className="my-account__records-state" role="status">
-                正在加载选款咨询…
-              </p>
+              <RouteLoading scope="panel" surface="public" label="正在加载选款咨询…" />
             ) : selectionInquiryError && selectionInquiries.length === 0 ? (
               null
             ) : selectionInquiries.length ? (
@@ -1726,9 +1725,7 @@ export default function MyAccountDashboard({
               </p>
             )}
             {inquiryLoading && inquiries.length === 0 ? (
-              <p className="my-account__records-state" role="status">
-                正在加载预约记录…
-              </p>
+              <RouteLoading scope="panel" surface="public" label="正在加载预约记录…" />
             ) : inquiryError && inquiries.length === 0 ? (
               null
             ) : inquiries.length ? (
@@ -1820,9 +1817,7 @@ export default function MyAccountDashboard({
               </strong>
             </div>
             {favoriteStatus === "loading" ? (
-              <p className="my-account-empty" role="status">
-                正在加载心愿单…
-              </p>
+              <RouteLoading scope="panel" surface="public" label="正在加载心愿单…" />
             ) : favoriteStatus === "error" ? (
               <p className="my-account-empty" role="alert">
                 心愿单暂时无法加载。
@@ -1857,7 +1852,11 @@ export default function MyAccountDashboard({
                     >
                       {fav.image ? (
                         <SecureImage
-                          src={fav.image}
+                          src={
+                            fav.image.includes("/media/")
+                              ? withPublicMediaWidth(fav.image, 480)
+                              : buildResponsiveUploadsDerivedUrl(fav.image, 480) || fav.image
+                          }
                           alt={fav.name}
                           style={{
                             width: "100%",

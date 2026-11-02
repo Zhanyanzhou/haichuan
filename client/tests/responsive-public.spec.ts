@@ -354,6 +354,83 @@ test.describe("客户中心移动端首屏层级", () => {
 });
 
 test.describe("公开页面导航一致性", () => {
+  test("页头联系进入同页的微信电话与预约咨询，并支持二维码保存", async ({ page }) => {
+    await page.route("**/api/**", (route) => route.fulfill({ contentType: "application/json", body: apiResponse(null) }));
+    await page.route("**/api/settings/public**", (route) => route.fulfill({
+      contentType: "application/json",
+      body: apiResponse({ siteName: "海川珠宝", contactPhone: "000-0000-0000", contactWechat: "test_company_wechat", contactWechatQrCode: "/uploads/page-assets/test-wechat-qr.png" }),
+    }));
+    // 合成图片仅验证图片读取与保存交互，不作为实际加好友码。
+    await page.route("**/uploads/page-assets/test-wechat-qr.png", (route) => route.fulfill({
+      contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64"),
+    }));
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: async (value: string) => { document.documentElement.dataset.copiedWechat = value; },
+      } });
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/customer");
+    const contact = page.locator(".site-header__right").getByRole("link", { name: "联系与预约", exact: true });
+    await contact.click();
+    await expect(page).toHaveURL(/\/contact$/);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "联系海川", exact: true })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "预约咨询", exact: true })).toBeVisible();
+    await expect(main.locator("form")).toHaveCount(1);
+    await expect(main.getByRole("link", { name: "拨打电话", exact: true })).toHaveAttribute("href", "tel:00000000000");
+    await expect(main.getByRole("img", { name: "公司微信加好友二维码" })).toBeVisible();
+    const download = page.waitForEvent("download");
+    await main.getByRole("link", { name: "保存二维码" }).click();
+    expect((await download).suggestedFilename()).toContain("test-wechat-qr");
+    await main.getByRole("button", { name: "复制微信号" }).click();
+    await expect(main.getByRole("status")).toHaveText("微信号已复制，请在微信中搜索添加");
+    await expect(page.locator("html")).toHaveAttribute("data-copied-wechat", "test_company_wechat");
+    await page.setViewportSize({ width: 768, height: 900 });
+    await page.goto("/customer");
+    await contact.focus();await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/contact$/);await expectNoHorizontalOverflow(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/customer");await expect(contact).toBeHidden();
+    await page.getByRole("button", { name: "打开菜单", exact: true }).click();
+    await page.getByRole("dialog", { name: "品牌菜单", exact: true }).getByRole("link", { name: "联系与预约", exact: true }).click();
+    await expect(page).toHaveURL(/\/contact$/);await expect(main.locator("form")).toHaveCount(1);
+    await expect(main.getByRole("link", { name: "保存二维码" })).toBeVisible();
+  });
+
+  test("直接联系页加载失败可原地重试，缺失或损坏二维码有替代渠道", async ({ page }) => {
+    let failed = true;
+    let qr = "/uploads/page-assets/missing-qr.png";
+    let requests = 0;
+    await page.route("**/api/**", (route) => route.fulfill({ contentType: "application/json", body: apiResponse(null) }));
+    await page.route("**/api/settings/public**", (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (!path.endsWith("/public-contact")) {
+        return route.fulfill({ status: 200, contentType: "application/json", body: apiResponse({ siteName: "海川珠宝" }) });
+      }
+      requests += 1;
+      return route.fulfill({ status: failed ? 503 : 200, contentType: "application/json", body: apiResponse(failed ? null : { contactPhone: "000-0000-0000", contactWechat: "test_company_wechat", contactWechatQrCode: qr }) });
+    });
+    await page.route("**/uploads/page-assets/missing-qr.png", (route) => route.fulfill({ status: 404, body: "missing" }));
+    await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async () => { throw new Error("test clipboard denied"); },
+    } }));
+    await page.goto("/contact");
+    const main = page.getByRole("main");
+    await expect(main.getByRole("alert")).toHaveText("请稍后重试，恢复后即可查看微信与电话。");
+    await expect(main.getByText("您仍可在下方留下咨询需求。", { exact: true })).toBeVisible();
+    await expect(main.locator("form")).toHaveCount(1);
+    failed = false;await main.getByRole("button", { name: "重新加载", exact: true }).click();
+    await expect.poll(() => requests).toBe(2);
+    await expect(main.getByText("二维码暂时无法显示，可复制微信号添加。", { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: "保存二维码" })).toHaveCount(0);
+    await main.getByRole("button", { name: "复制微信号" }).click();
+    await expect(main.getByText("复制未成功，请选中微信号手动复制", { exact: true })).toBeVisible();
+    qr = "";await page.reload();
+    await expect(main.getByText("可复制下方微信号，在微信中搜索添加。", { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: "拨打电话", exact: true })).toBeVisible();
+  });
+
   test.use({ viewport: { width: 1440, height: 900 } });
 
   test("品牌字标从其他页面返回首页，并在首页重复点击时回到顶部", async ({ page }) => {
@@ -409,8 +486,8 @@ test.describe("公开页面导航一致性", () => {
     await page.goto("/contact");
     await page.getByRole("button", { name: "打开菜单" }).click();
     const drawer = page.getByRole("dialog", { name: "品牌菜单" });
-    await expect(drawer.getByText("探索", { exact: true })).toBeVisible();
-    await expect(drawer.getByText("Explore / 探索")).toHaveCount(0);
+    await expect(drawer.getByRole("link", { name: "首页" })).toBeVisible();
+    await expect(drawer.getByText("探索", { exact: true })).toHaveCount(0);
     const searchButton = drawer.getByRole("button", { name: "搜索" });
     await searchButton.click();
     await expect(drawer).toHaveCount(0);
@@ -543,7 +620,7 @@ test.describe("公开页面导航一致性", () => {
 
     const menuToggle = page.getByRole("button", { name: "打开菜单" });
     const rightLabels = page.locator(".site-header__right .site-header__nav-label");
-    await expect(rightLabels).toHaveText(["选款", "预约", "我的账户"]);
+    await expect(rightLabels).toHaveText(["联系", "购物袋", "我的账户"]);
     for (const label of await rightLabels.all()) {
       await expect(label).toBeVisible();
     }

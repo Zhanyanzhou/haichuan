@@ -563,7 +563,8 @@ test.describe("TD-UI-2A 旧空白模板兼容制作流程（route Mock Chromium�
     expect(ratioState.historyPast).toHaveLength(before.historyPast.length + 1);
     expect(ratioState.definition!.nodes[rootId].responsive.desktop.height).toEqual({ mode: "aspect-ratio", ratio: { width: 4, height: 3 } });
     const frame = page.locator("iframe[title$='模板隔离画布']");
-    await expect.poll(() => frame.evaluate((element) => Number.parseFloat((element as HTMLIFrameElement).style.height))).toBe(1440);
+    // 新建空白模板以 1440 宽设计画布起步（D.44），4:3 即 1080 高。
+    await expect.poll(() => frame.evaluate((element) => Number.parseFloat((element as HTMLIFrameElement).style.height))).toBe(1080);
     const ratioWidth = inspector.getByRole("spinbutton", { name: "比例宽", exact: true });
     await ratioWidth.fill("0"); await ratioWidth.press("Enter");
     await expect(ratioWidth).toHaveAttribute("aria-invalid", "true");

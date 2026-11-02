@@ -11,6 +11,7 @@
  */
 
 import type { ProductImage } from '@/types';
+import { withPublicMediaWidth } from '@/utils/publicMediaWidth';
 
 const PRODUCT_PLACEHOLDER = '/images/system/product-placeholder.svg';
 
@@ -35,8 +36,7 @@ function pickImgUrl(img: unknown): string {
  * 仅对我们自己的媒体端点（含 /media/ 的路径）生效；静态资源与已带 width 的 URL 不动。
  */
 function withResize(url: string, width: 480 | 800 | 1200): string {
-  if (!url || !url.includes('/media/') || url.includes('width=')) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}width=${width}`;
+  return withPublicMediaWidth(url, width);
 }
 
 /** 从 images 数组中提取第一张有效 URL */

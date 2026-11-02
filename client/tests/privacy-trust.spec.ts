@@ -75,10 +75,11 @@ test.describe("联系信息真实性", () => {
       route.fulfill({ status: 500 }),
     );
     await page.goto("/contact");
-    await expect(page.getByRole("heading", { name: "提交咨询需求" })).toBeVisible();
-    await expect(
-      page.getByRole("alert").filter({ hasText: "联系信息暂时无法加载" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "联系海川", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "联系方式暂时无法加载", exact: true })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "请稍后重试，恢复后即可查看微信与电话。" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "预约咨询", exact: true })).toBeVisible();
+    await expect(page.getByRole("main").locator("form")).toHaveCount(1);
     await expectNoForbiddenFakeValues(page);
     await expectNoHorizontalOverflow(page);
   });
@@ -94,6 +95,14 @@ test.describe("联系信息真实性", () => {
     );
     await page.goto("/contact");
     const main = page.getByRole("main");
+    await expect(main.getByText(SIGNED_PUBLIC_CONTACT.phone, { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: "拨打电话", exact: true }))
+      .toHaveAttribute("href", `tel:${SIGNED_PUBLIC_CONTACT.phone.replace(/[^\d+]/g, "")}`);
+    await expect(main.getByText(SIGNED_PUBLIC_CONTACT.address, { exact: true })).toBeVisible();
+    await expect(main.getByText(SIGNED_PUBLIC_CONTACT.hours, { exact: true })).toBeVisible();
+    await expect(main.getByText("微信联系方式尚未提供。", { exact: true })).toBeVisible();
+    await expect(main.locator("form")).toHaveCount(1);
+    await page.goto("/contact?view=request");
     await expect(main.getByRole("link", { name: SIGNED_PUBLIC_CONTACT.phone, exact: true })).toBeVisible();
     await expect(main.getByRole("link", { name: SIGNED_PUBLIC_CONTACT.email, exact: true })).toBeVisible();
     await expect(main.getByText(SIGNED_PUBLIC_CONTACT.address, { exact: true })).toBeVisible();
@@ -126,6 +135,12 @@ test.describe("联系信息真实性", () => {
     );
     await page.goto("/contact");
     const main = page.getByRole("main");
+    await expect(main.getByText("13800000000", { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: "拨打电话", exact: true })).toHaveAttribute("href", "tel:13800000000");
+    await expect(main.getByText("测试门店地址", { exact: true })).toBeVisible();
+    await expect(main.getByText("工作日 10:00-18:00", { exact: true })).toBeVisible();
+    await expect(main.locator("form")).toHaveCount(1);
+    await page.goto("/contact?view=request");
     await expect(main.getByRole("link", { name: "13800000000", exact: true })).toBeVisible();
     await expect(main.getByRole("link", { name: "service@example.org", exact: true })).toBeVisible();
     await expect(main.getByText("测试门店地址", { exact: true })).toBeVisible();
@@ -139,7 +154,8 @@ test.describe("联系信息真实性", () => {
     test.skip(!useMock, "仅在模拟数据模式验证 mock 默认值");
     await page.goto("/contact");
     await expectNoForbiddenFakeValues(page);
-    await expect(page.getByRole("link", { name: SIGNED_PUBLIC_CONTACT.phone, exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText(SIGNED_PUBLIC_CONTACT.phone, { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").locator("form")).toHaveCount(1);
     await expect(page.getByText("公开联系方式正在完善")).toHaveCount(0);
   });
 });
@@ -162,7 +178,7 @@ test.describe("隐私页面", () => {
   });
 
   test("咨询表单阅读隐私说明后恢复短时填写状态且不恢复同意", async ({ page }) => {
-    await page.goto("/contact");
+    await page.goto("/contact?view=request");
     await page.locator("#cf-name").fill("本地回填验收用户");
     await page.locator("#cf-phone").fill("13800000000");
     await page.locator("#cf-message").fill("只用于本地隐私返回链路验收");
@@ -178,6 +194,7 @@ test.describe("隐私页面", () => {
     await page.getByRole("link", { name: "返回继续填写" }).click();
 
     await expect.poll(() => new URL(page.url()).pathname).toBe("/contact");
+    await expect(page).toHaveURL(/\/contact\?view=request$/);
     await expect(page.locator("#cf-name")).toHaveValue("本地回填验收用户");
     await expect(page.locator("#cf-phone")).toHaveValue("13800000000");
     await expect(page.locator("#cf-message")).toHaveValue("只用于本地隐私返回链路验收");
@@ -193,7 +210,7 @@ test.describe("隐私页面", () => {
   });
 
   test("客户身份切换后不会恢复上一客户的咨询草稿", async ({ page }) => {
-    await page.goto("/contact");
+    await page.goto("/contact?view=request");
     await page.evaluate(async () => {
       const { useCustomerAuthStore } = await import("/src/store/customerAuthStore.ts");
       useCustomerAuthStore.getState().setAuth({
@@ -222,6 +239,7 @@ test.describe("隐私页面", () => {
     await page.getByRole("link", { name: "返回继续填写" }).click();
 
     await expect.poll(() => new URL(page.url()).pathname).toBe("/contact");
+    await expect(page).toHaveURL(/\/contact\?view=request$/);
     await expect(page.locator("#cf-name")).toHaveValue("客户乙");
     await expect(page.locator("#cf-phone")).toHaveValue("13800000202");
     await expect(page.locator("#cf-email")).toHaveValue("b-owner@example.test");
@@ -406,11 +424,14 @@ test.describe("响应式与键盘", () => {
     { name: "平板 768", width: 768 },
     { name: "移动 390", width: 390 },
   ]) {
-    test(`${name} 像素下隐私页与联系页无横向溢出`, async ({ page }) => {
+    test(`${name} 像素下隐私页、直接联系页与咨询表单无横向溢出`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/privacy");
       await expectNoHorizontalOverflow(page);
       await page.goto("/contact");
+      await expectNoHorizontalOverflow(page);
+      await expect(page.getByRole("main").locator("form")).toHaveCount(1);
+      await page.goto("/contact?view=request");
       await expectNoHorizontalOverflow(page);
     });
   }
@@ -424,7 +445,7 @@ test.describe("响应式与键盘", () => {
   });
 
   test("联系页表单可键盘提交并展示必填错误", async ({ page }) => {
-    await page.goto("/contact");
+    await page.goto("/contact?view=request");
     // 直接点击提交，校验必填错误
     await page.getByRole("button", { name: "提交需求" }).click();
     await expect(page.getByText("请输入姓名")).toBeVisible();
@@ -450,6 +471,8 @@ test.describe("SEO 与索引", () => {
 
   test("联系页有独立标题", async ({ page }) => {
     await page.goto("/contact");
+    await expect(page).toHaveTitle(/联系海川/);
+    await page.goto("/contact?view=request");
     await expect(page).toHaveTitle(/提交咨询需求/);
   });
 

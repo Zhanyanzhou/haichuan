@@ -67,7 +67,7 @@ export function ProductBatchPriceModal({
       destroyOnHidden
     >
       {loading ? (
-        <AdminLoadingState subject="所选商品" />
+        <AdminLoadingState subject="所选商品" compact />
       ) : (
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <p style={{ margin: 0 }}>

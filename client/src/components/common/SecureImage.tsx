@@ -265,7 +265,12 @@ export function SecureImage({
         aria-label={alt ? "正在加载图片" : undefined}
         role={alt ? "status" : undefined}
       >
-        {status === "loading" ? "正在加载图片…" : null}
+        {status === "loading" ? (
+          <span className="site-route-loading__indicator" aria-hidden="true" style={{ position: "relative", top: "auto", left: "auto", transform: "none", width: 40, height: 40 }}>
+            <span className="site-route-loading__ring" />
+            <img className="site-route-loading__mark site-route-loading__mark--small" src="/favicon.svg?v=20261027c" alt="" width="18" height="18" />
+          </span>
+        ) : null}
       </div>
     );
   }

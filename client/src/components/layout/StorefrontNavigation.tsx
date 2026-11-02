@@ -8,6 +8,7 @@ import {
 } from "@/page-builder/generated/contentTemplates.generated";
 import { useDirectionalSiteHeader } from "./useDirectionalSiteHeader";
 import { isStorefrontMenuActive } from "./storefrontMenuActive";
+import SiteContactLink from "./SiteContactLink";
 
 export { isStorefrontMenuActive };
 
@@ -15,7 +16,9 @@ type PublicSiteSettings = {
   siteName?: string;
   logo?: string;
   contactPhone?: string;
+  contactWechat?: string;
   contactAddress?: string;
+  businessHours?: string;
 };
 
 type StorefrontNavigationProps = {
@@ -81,7 +84,7 @@ export const storefrontMenuLinks = CONTENT_TEMPLATE_PAGE_KEYS.flatMap((key) => {
 });
 
 const storefrontServiceLinks = [
-  { label: "预约私人珠宝顾问", href: "/contact" },
+  { label: "联系与预约", href: "/contact" },
   { label: "我的账户", href: "/customer" },
 ] as const;
 
@@ -107,25 +110,17 @@ const SearchIcon = () => (
   </svg>
 );
 
-const DiamondIcon = () => (
-  <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
-    <path d="M15 3 L23 13.5 L15 27 L7 13.5 Z" />
-  </svg>
-);
-
-const CalendarIcon = () => (
-  <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="3" y="5.5" width="24" height="21" rx="2" />
-    <line x1="3" y1="14" x2="27" y2="14" />
-    <line x1="9" y1="2" x2="9" y2="9" />
-    <line x1="21" y1="2" x2="21" y2="9" />
-  </svg>
-);
-
 const AccountIcon = () => (
   <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
     <circle cx="15" cy="10" r="5" />
     <path d="M5 27c.8-5.2 4.2-8 10-8s9.2 2.8 10 8" />
+  </svg>
+);
+
+const CartIcon = () => (
+  <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10 11V8a5 5 0 0 1 10 0v3" />
+    <path d="M7 14h16l1.5 13h-19L7 14Z" />
   </svg>
 );
 
@@ -150,15 +145,21 @@ export function StorefrontMenuDrawer({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const { pathname } = useLocation();
 
-  const restoreTriggerFocus = useCallback(() => {
+  const restoreTriggerFocus = useCallback((keyboard = false) => {
+    const node = returnFocusRef?.current;
+    if (!node) return;
     const ownerWindow = drawerRef.current?.ownerDocument.defaultView;
+    const options: FocusOptions = { preventScroll: true };
+    // 点按关闭后不要再套上 :focus-visible，否则手机页头会留下一圈黑框。
+    if (!keyboard) {
+      (options as FocusOptions & { focusVisible?: boolean }).focusVisible = false;
+    }
+    const focusNode = () => node.focus(options);
     if (!ownerWindow) {
-      returnFocusRef?.current?.focus();
+      focusNode();
       return;
     }
-    ownerWindow.setTimeout(() => {
-      returnFocusRef?.current?.focus({ preventScroll: true });
-    }, 0);
+    ownerWindow.setTimeout(focusNode, 0);
   }, [returnFocusRef]);
 
   useEffect(() => {
@@ -178,7 +179,7 @@ export function StorefrontMenuDrawer({
         if (!open) return;
         event.preventDefault();
         onOpenChange(false);
-        restoreTriggerFocus();
+        restoreTriggerFocus(true);
         return;
       }
       if (event.key !== "Tab" || !open) return;
@@ -277,7 +278,6 @@ export function StorefrontMenuDrawer({
           )}
         </div>
 
-        <p className="brand-menu__eyebrow">探索</p>
         <nav className="brand-menu__primary" aria-label="品牌菜单">
           {storefrontMenuLinks.map((item) => (
             <Link
@@ -358,7 +358,9 @@ export default function StorefrontNavigation({
     event.preventDefault();
     onPreviewNavigate?.(event.currentTarget.getAttribute("href") || "/");
     setMenuOpen(false);
-    menuToggleRef.current?.focus();
+    const options: FocusOptions = { preventScroll: true };
+    (options as FocusOptions & { focusVisible?: boolean }).focusVisible = false;
+    menuToggleRef.current?.focus(options);
   };
 
   return (
@@ -394,13 +396,10 @@ export default function StorefrontNavigation({
             <span className="site-header__brand-text">{siteName}</span>
           </Link>
           <div className="site-header__right">
-            <Link to="/catalog" aria-label="选款中心" className="site-header__nav-item site-header__nav-item--catalog" onClick={handlePreviewLink}>
-              <DiamondIcon />
-              <span className="site-header__nav-label hidden sm:inline">选款</span>
-            </Link>
-            <Link to="/contact" aria-label="预约咨询" className="site-header__nav-item" onClick={handlePreviewLink}>
-              <CalendarIcon />
-              <span className="site-header__nav-label hidden sm:inline">预约</span>
+            <SiteContactLink preview={preview} onPreviewNavigate={onPreviewNavigate} />
+            <Link to="/cart" aria-label="购物袋" className="site-header__nav-item site-header__nav-item--cart" onClick={handlePreviewLink}>
+              <CartIcon />
+              <span className="site-header__nav-label hidden sm:inline">购物袋</span>
             </Link>
             <Link to="/customer" aria-label="我的账户" className="site-header__nav-item" onClick={handlePreviewLink}>
               <AccountIcon />

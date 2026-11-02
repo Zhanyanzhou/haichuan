@@ -10,6 +10,7 @@ import PuckDocumentRenderer, {
   type PuckDocument,
 } from "@/page-builder/runtime/PuckDocumentRenderer";
 import { migratePuckData } from "@/page-builder/utils/migratePuckData";
+import RouteLoading from "@/components/common/RouteLoading";
 
 const LG = "#F4F5F5";
 
@@ -66,7 +67,11 @@ export function PagePreview({ pageKey: pageKeyProp }: { pageKey?: string }) {
     : null;
 
   if (status === "loading") {
-    return <main aria-busy="true" style={{ background: LG, minHeight: "100vh" }} />;
+    return (
+      <main aria-busy="true" style={{ background: LG, minHeight: "100vh" }}>
+        <RouteLoading scope="viewport" label="正在载入草稿预览" />
+      </main>
+    );
   }
 
   if (status === "error") {

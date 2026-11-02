@@ -126,17 +126,17 @@ const editorPageDefinitions: Record<EditorPageKey, EditorPageDefinition> = {
   },
   contact: {
     key: "contact",
-    label: "预约咨询",
-    description: "视觉页头 + 固定预约表单与联系信息",
+    label: "联系海川",
+    description: "视觉页头 + 微信二维码与电话联系",
     publicPath: CONTENT_TEMPLATE_PAGE_PATHS.contact,
     mode: "brand",
     headerMode: "overlay-light",
     dynamic: true,
     businessRegion: {
-      title: "预约表单与联系信息",
+      title: "微信与电话联系",
       description:
-        "预约提交、服务时间和门店联系方式由咨询服务与店铺资料统一管理。",
-      items: "预约表单|联系信息|服务时间|隐私同意",
+        "微信加好友码、电话与服务时间统一读取店铺资料；默认页面不要求访客填写长表单。",
+      items: "微信加好友码|复制微信号|拨打电话|服务时间",
     },
   },
 };

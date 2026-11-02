@@ -14,7 +14,7 @@ import {
   type DragEvent,
   type ReactNode,
 } from "react";
-import { App as AntdApp, Button, Spin } from "antd";
+import { App as AntdApp, Button } from "antd";
 import {
   AppstoreOutlined,
   BlockOutlined,
@@ -119,9 +119,12 @@ import WorkspacePanelHeader from "@/page-builder/workspace/WorkspacePanelHeader"
 import WorkspacePanelCollapseButton from "@/page-builder/workspace/WorkspacePanelCollapseButton";
 import { copyEditorLocalConflictSnapshot } from "@/page-builder/workspace/editorLifecycleErrors";
 import { bindWheelToScroller } from "@/page-builder/workspace/iframeWheelBridge";
+import {
+  PAGE_EDITOR_STRUCTURE_DOCK_QUERY,
+  pageEditorPanelWouldFit,
+} from "@/page-builder/workspace/pageEditorWorkspaceTiers";
 import useCompactWorkspaceOverlay, {
   DOCKED_WORKSPACE_QUERY,
-  WIDE_DOCK_QUERY,
 } from "@/page-builder/workspace/useCompactWorkspaceOverlay";
 import "./editor.css";
 import "@/page-builder/template-editor/TemplateCatalogPreview.css";
@@ -950,6 +953,7 @@ function InspectorPanel({
           saving={saving}
           errorCount={publishErrorCount}
           warningCount={publishWarningCount}
+          issues={publishIssues}
           validationStatus={validationStatus}
           onRetryValidation={onRetryValidation}
           onReviewIssues={resolvePublishIssueReviewAction({
@@ -1222,6 +1226,10 @@ function EditorBody({
         suppressNextInspectorAutoOpenRef.current = false;
         return;
       }
+      // 停靠宽度里属性面板已经展开或由用户收起；点选只更新内容，不再把导轨重新撑开。
+      if (window.matchMedia(DOCKED_WORKSPACE_QUERY).matches) {
+        return;
+      }
       requestInspectorOpen();
     }
   }, [requestInspectorOpen, selectedItemId]);
@@ -1377,8 +1385,13 @@ function EditorBody({
     }));
   }, [dispatch, focusReviewPanel, inspectorOverlay, onExitPreview, onOpenPageSettings, onRetryValidation, onSelectPublishReviewIssue, previewMode, viewports]);
   useEffect(() => {
-    updateInspectorCollapsed(inspectorOverlay.compact);
-  }, [inspectorOverlay.compact, updateInspectorCollapsed]);
+    const docked = window.matchMedia(DOCKED_WORKSPACE_QUERY);
+    const applyDockBoundary = (event: MediaQueryListEvent) => {
+      updateInspectorCollapsed(!event.matches);
+    };
+    docked.addEventListener("change", applyDockBoundary);
+    return () => docked.removeEventListener("change", applyDockBoundary);
+  }, [updateInspectorCollapsed]);
   useEffect(() => {
     try {
       sessionStorage.setItem(
@@ -1391,30 +1404,77 @@ function EditorBody({
   }, [inspectorCollapsed]);
   const [structureCollapsed, setStructureCollapsed] = useState(() =>
     typeof window !== "undefined"
-      ? window.matchMedia("(max-width: 1024px)").matches
+      ? !window.matchMedia(PAGE_EDITOR_STRUCTURE_DOCK_QUERY).matches
       : false,
   );
+  const [structureOverlay, setStructureOverlay] = useState(false);
+  const structureTierRef = useRef<string | null>(null);
+  const structureManualRef = useRef<boolean | null>(null);
+  const structureCollapsedRef = useRef(structureCollapsed);
+  const structureOverlayRef = useRef(false);
+  structureCollapsedRef.current = structureCollapsed;
+  structureOverlayRef.current = structureOverlay;
   const primaryNavigationOpenRef = useRef(false);
-  useEffect(() => {
-    const compactWorkspace = window.matchMedia("(max-width: 1024px)");
-    const syncStructureRail = (event: MediaQueryListEvent) => {
-      setStructureCollapsed(event.matches || primaryNavigationOpenRef.current);
-    };
-    compactWorkspace.addEventListener("change", syncStructureRail);
-    return () => {
-      compactWorkspace.removeEventListener("change", syncStructureRail);
-    };
+  const applyStructureTier = useCallback(() => {
+    const tier = !window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
+      ? "compact"
+      : window.matchMedia(PAGE_EDITOR_STRUCTURE_DOCK_QUERY).matches
+        ? "open"
+        : "rail";
+    if (structureTierRef.current !== tier) {
+      structureTierRef.current = tier;
+      structureManualRef.current = null;
+    }
+    const manual = structureManualRef.current;
+    let collapsedNext = structureCollapsedRef.current;
+    let overlayNext = false;
+    if (primaryNavigationOpenRef.current) {
+      collapsedNext = true;
+      overlayNext = false;
+    } else if (tier === "open") {
+      collapsedNext = manual === true;
+      overlayNext = false;
+    } else if (tier === "rail" || tier === "compact") {
+      if (manual === false && tier === "rail") {
+        collapsedNext = false;
+        overlayNext = !pageEditorPanelWouldFit("structure");
+      } else {
+        collapsedNext = manual !== false;
+        overlayNext = false;
+      }
+    }
+    if (collapsedNext !== structureCollapsedRef.current) setStructureCollapsed(collapsedNext);
+    if (overlayNext !== structureOverlayRef.current) setStructureOverlay(overlayNext);
+  }, []);
+  const structureCloseRef = useRef<HTMLButtonElement>(null);
+  const openStructurePanel = useCallback(() => {
+    structureManualRef.current = false;
+    const opensAsOverlay = window.matchMedia(DOCKED_WORKSPACE_QUERY).matches
+      && !pageEditorPanelWouldFit("structure");
+    applyStructureTier();
+    if (opensAsOverlay) {
+      window.requestAnimationFrame(() => structureCloseRef.current?.focus());
+    }
+  }, [applyStructureTier]);
+  const closeStructurePanel = useCallback(() => {
+    structureManualRef.current = true;
+    setStructureOverlay(false);
+    setStructureCollapsed(true);
   }, []);
   useEffect(() => {
-    const wideDock = window.matchMedia(WIDE_DOCK_QUERY);
-    const keepRailsOpen = (event: MediaQueryListEvent) => {
-      if (!event.matches || primaryNavigationOpenRef.current) return;
-      setStructureCollapsed(false);
-      updateInspectorCollapsed(false);
+    applyStructureTier();
+    const structureTier = window.matchMedia(PAGE_EDITOR_STRUCTURE_DOCK_QUERY);
+    const docked = window.matchMedia(DOCKED_WORKSPACE_QUERY);
+    const sync = () => applyStructureTier();
+    structureTier.addEventListener("change", sync);
+    docked.addEventListener("change", sync);
+    window.addEventListener("resize", sync);
+    return () => {
+      structureTier.removeEventListener("change", sync);
+      docked.removeEventListener("change", sync);
+      window.removeEventListener("resize", sync);
     };
-    wideDock.addEventListener("change", keepRailsOpen);
-    return () => wideDock.removeEventListener("change", keepRailsOpen);
-  }, [updateInspectorCollapsed]);
+  }, [applyStructureTier]);
   const autoSelectedPageRef = useRef<EditorPageKey | null>(null);
   useEffect(() => {
     if (
@@ -1436,7 +1496,7 @@ function EditorBody({
       const detail = (event as CustomEvent<{ open?: boolean }>).detail;
       const primaryNavigationOpen = detail?.open === true;
       primaryNavigationOpenRef.current = primaryNavigationOpen;
-      setStructureCollapsed(primaryNavigationOpen);
+      applyStructureTier();
     };
 
     window.addEventListener(
@@ -1449,11 +1509,13 @@ function EditorBody({
         collapseLayersForPrimaryNavigation,
       );
     };
-  }, []);
+  }, [applyStructureTier]);
   useEffect(() => {
     // 窄平板从图层选择模块后立即把图层收回入口，给画布与属性面板留出
     // 可对照空间；用户仍可随时从 40px 图层入口再次展开。
     if (isInspecting && window.matchMedia("(max-width: 900px)").matches) {
+      structureManualRef.current = true;
+      setStructureOverlay(false);
       setStructureCollapsed(true);
     }
   }, [isInspecting]);
@@ -1825,14 +1887,17 @@ function EditorBody({
     const contentHeight = frame.offsetHeight;
     if (contentHeight <= 0) return;
 
-    // 装修页画布按宽度适配，长页面在工作区内纵向滚动。
-    // 若同时按高度适配，多区块页面会被压成缩略图，且容易制造“画布缺失”的错觉。
+    // 按当前可见宽度适应，长页面纵向滚动。不设 50% 下限，否则首屏会被横向滚动裁掉。
+    // 手动缩放仍可到 16%；核对真实字号用「100%」。
+    const stageStyle = getComputedStyle(stage);
+    const availableWidth = Math.max(
+      0,
+      stage.clientWidth
+        - (parseFloat(stageStyle.paddingLeft) || 0)
+        - (parseFloat(stageStyle.paddingRight) || 0),
+    );
     const nextZoom = isFitView
-      ? Math.min(
-          1,
-          // 工作区左右各 24px 内边距（2026-08-16 收敛：84px 在缩放后显空旷）。
-          Math.max(0.1, (stage.clientWidth - 48) / canvasBaseWidth),
-        )
+      ? Math.min(1, Math.max(0.16, availableWidth / canvasBaseWidth))
       : canvasZoom;
 
     // dock 动画的最后一次测量也必须落地；比例阈值会丢掉最终数像素的变化。
@@ -2000,15 +2065,22 @@ function EditorBody({
       )}
 
       <aside
-        className={`homepage-editor__structure-workspace${structureCollapsed ? " is-collapsed" : ""}`}
+        className={`homepage-editor__structure-workspace${structureCollapsed ? " is-collapsed" : ""}${structureOverlay ? " is-dock-overlay" : ""}`}
         aria-label="图层面板"
+        data-page-panel-state={structureCollapsed ? "rail" : structureOverlay ? "overlay" : "dock"}
+        onKeyDown={(event) => {
+          if (!structureOverlay || event.key !== "Escape") return;
+          event.preventDefault();
+          closeStructurePanel();
+        }}
       >
         {structureCollapsed ? (
           <WorkspacePanelCollapseButton
             action="expand"
             panel="structure"
             panelLabel="图层面板"
-            onClick={() => setStructureCollapsed(false)}
+            compactLabel="图层"
+            onClick={openStructurePanel}
           />
         ) : (
           <>
@@ -2017,10 +2089,11 @@ function EditorBody({
               title="图层面板"
               actions={(
                 <WorkspacePanelCollapseButton
+                  ref={structureCloseRef}
                   action="collapse"
                   panel="structure"
                   panelLabel="图层面板"
-                  onClick={() => setStructureCollapsed(true)}
+                  onClick={closeStructurePanel}
                 />
               )}
             />
@@ -2050,7 +2123,10 @@ function EditorBody({
           onZoomOut={() => adjustCanvasZoom(-0.1)}
           onZoomIn={() => adjustCanvasZoom(0.1)}
         />
-        <div ref={stageRef} className="homepage-editor__canvas-scroll">
+        <div
+          ref={stageRef}
+          className={`homepage-editor__canvas-scroll${isFitView ? " is-fit" : ""}`}
+        >
           <div
             ref={canvasRef}
             className={`homepage-editor__canvas-document${draggingTemplate ? " is-dragging" : ""}`}
@@ -2536,9 +2612,8 @@ export default function StoreDecorationWorkbench({
       ) : null}
 
       {draftDiscardVerificationPending ? (
-        <div className="homepage-editor__load-error" role="status" aria-live="polite">
-          <Spin size="large" />
-          <strong>草稿已放弃，等待重新读取当前权威状态</strong>
+        <div className="homepage-editor__load-error">
+          <RouteLoading scope="panel" label="草稿已放弃，等待重新读取当前权威状态" />
           <span>恢复前编辑器保持只读，避免在未确认基线上继续写入。</span>
         </div>
       ) : loadError ? (

@@ -1220,6 +1220,7 @@ export default function SchemaInspectorPanel({
         saving={saving}
         errorCount={currentPublishErrorCount}
         warningCount={currentPublishWarningCount}
+        issues={currentPublishIssues}
         validationStatus={validationStatus}
         onRetryValidation={onRetryValidation}
         onReviewIssues={resolvePublishIssueReviewAction({

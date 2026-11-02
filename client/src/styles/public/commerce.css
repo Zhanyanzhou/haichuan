@@ -500,23 +500,48 @@
 }
 
 @media (max-width: 639px) {
-  .catalog-matrix,
-  .catalog-matrix[data-result-count="1"],
-  .catalog-matrix[data-result-count="2"] {
+  .catalog-matrix[data-result-count="1"] {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 选款结果是商品卡：手机两列，图在上、名称材质价格在下。一件时仍单列。 */
+  .catalog-matrix:not([data-result-count="1"]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
     gap: 0;
     padding-inline: 0;
   }
 
-  .catalog-cell,
-  .catalog-cell:nth-child(2n) {
-    border-right: 0;
-    padding: 16px 20px 8px;
+  .catalog-cell {
+    padding: 14px 10px 12px;
   }
 
-  .catalog-image-trigger {
-    width: 76%;
+  .catalog-matrix:not([data-result-count="1"]) .catalog-cell {
+    aspect-ratio: auto;
+    height: auto;
+  }
+
+  .catalog-matrix:not([data-result-count="1"]) .catalog-product-card__media {
+    flex: none;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+  }
+
+  .catalog-matrix:not([data-result-count="1"]) .catalog-image-trigger {
+    width: 84%;
     height: 84%;
+    margin-bottom: 2px;
+  }
+
+  .catalog-matrix:not([data-result-count="1"]) .catalog-product-card__copy {
+    padding: 8px 2px 0;
+  }
+
+  .catalog-matrix:not([data-result-count="1"]) .catalog-product-card__title {
+    margin-bottom: 4px;
+    font-size: 13px;
+    line-height: 1.4;
+    -webkit-line-clamp: 2;
   }
 
   .catalog-image-next {

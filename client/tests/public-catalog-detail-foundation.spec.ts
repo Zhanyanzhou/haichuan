@@ -822,6 +822,15 @@ for (const viewport of [
     await expectNoHorizontalOverflow(page);
 
     await page.goto("/contact");
+    await expect(page.getByRole("heading", { name: "联系海川", exact: true })).toBeVisible();
+    await expect.poll(() => page.locator(".contact-methods__grid").evaluate((node) =>
+      getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length,
+    )).toBe(2);
+    await expect(page.locator("main form")).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: "预约咨询", exact: true })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+
+    await page.goto("/contact?view=request");
     const contactGrid = page.locator(".contact-grid");
     const contactRow = page.locator(".contact-row").first();
     await expect.poll(() => contactGrid.evaluate((node) =>
@@ -836,7 +845,7 @@ for (const viewport of [
 }
 
 for (const resultCount of [1, 2]) {
-  test(`Catalog 桌面少量结果 ${resultCount} 件时不保留空轨道，390px 统一单列`, async ({ page }) => {
+  test(`Catalog 桌面少量结果 ${resultCount} 件时不保留空轨道，390px 一件单列、两件两列`, async ({ page }) => {
     const products = fiveModes.slice(0, resultCount);
     const writes = await mockCatalogDetail(page, { products });
 
@@ -855,7 +864,26 @@ for (const resultCount of [1, 2]) {
     await page.setViewportSize({ width: 390, height: 844 });
     await expect.poll(() => grid.evaluate((node) =>
       getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length,
-    )).toBe(1);
+    )).toBe(resultCount === 1 ? 1 : 2);
+    if (resultCount === 2) {
+      const placement = await page.locator(".catalog-cell:not(.catalog-cell--empty)").evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const rect = node.getBoundingClientRect();
+          const media = node.querySelector(".catalog-product-card__media")?.getBoundingClientRect();
+          const title = node.querySelector(".catalog-product-card__title")?.getBoundingClientRect();
+          return {
+            x: rect.x,
+            width: rect.width,
+            mediaBottom: media ? media.y + media.height : 0,
+            titleY: title?.y ?? 0,
+          };
+        }),
+      );
+      expect(placement).toHaveLength(2);
+      expect(placement[1].x).toBeGreaterThan(placement[0].x + placement[0].width - 2);
+      expect(placement[0].titleY).toBeGreaterThanOrEqual(placement[0].mediaBottom - 1);
+      expect(placement[1].titleY).toBeGreaterThanOrEqual(placement[1].mediaBottom - 1);
+    }
     await expectNoHorizontalOverflow(page);
     await expectWriteContract(writes);
   });
@@ -1155,10 +1183,12 @@ test("Catalog empty 与 no-results 分离", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "素面平安扣" })).toBeVisible();
   await expect(page.getByText("演示款式，不是在售作品。")).toBeVisible();
   await page.goto("/contact?type=product&productRef=HC-DEMO-001");
-  await expect(page.getByText("素面平安扣", { exact: true })).toBeVisible();
-  await expect(page.getByText("演示款式，不是在售作品。顾问会按这个款式名称了解需求。")).toBeVisible();
-  await expect(page.getByText("作品当前不可咨询。您可以移除作品后继续提交普通咨询。")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "提交需求" })).toBeEnabled();
+  const contactContext = page.getByRole("region", { name: "咨询作品" });
+  await expect(contactContext).toContainText("素面平安扣");
+  await expect(contactContext.getByText("这是演示作品，仅供说明款式偏好。")).toBeVisible();
+  await expect(contactContext.getByRole("button", { name: "复制作品信息" })).toBeVisible();
+  await expect(page.locator("main form")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "提交需求" })).toBeVisible();
   await expectWriteContract(writes);
 });
 
@@ -1176,10 +1206,12 @@ test("正式目录有作品时演示货号不再覆盖正式作品", async ({ pa
   await expect(page.getByRole("heading", { name: "作品暂不可浏览" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "光圈戒指" })).toHaveCount(0);
   await page.goto("/contact?type=product&productRef=HC-DEMO-001");
-  await expect(page.getByText("正式素面扣", { exact: true })).toBeVisible();
-  await expect(page.getByText("演示款式，不是在售作品。顾问会按这个款式名称了解需求。")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "咨询作品" })).toContainText("正式素面扣");
+  await expect(page.getByText("这是演示作品，仅供说明款式偏好。")).toHaveCount(0);
+  await expect(page.locator("main form")).toHaveCount(1);
   await page.goto("/contact?type=product&productRef=HC-DEMO-002");
-  await expect(page.getByText("作品当前不可咨询。您可以移除作品后继续提交普通咨询。")).toBeVisible();
+  await expect(page.getByText("这件作品当前不可用，您可以先浏览其他作品。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "复制作品信息" })).toHaveCount(0);
   await expectWriteContract(writes);
 });
 
@@ -1287,6 +1319,31 @@ for (const viewport of [
   { name: "desktop", width: 1440, height: 900, columns: 2 },
   { name: "mobile", width: 390, height: 844, columns: 1 },
 ]) {
+  test(`Contact ${viewport.name} 默认直联页保留并复制来源作品，不创建咨询记录`, async ({ page }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const product = publicProduct(31, "APPOINTMENT");
+    const writes = await mockCatalogDetail(page, { products: [product] });
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: async (value: string) => { document.documentElement.dataset.copiedWork = value; },
+      } });
+    });
+
+    await page.goto(`/contact?type=appointment&productRef=${product.code}`);
+    await expect(page).toHaveURL(new RegExp(`/contact\\?type=appointment&productRef=${product.code}$`));
+    const context = page.getByRole("region", { name: "咨询作品" });
+    await expect(context).toContainText(product.name);
+    await expect(context).toContainText(`作品编号：${product.code}`);
+    await expect(page.getByRole("heading", { name: "微信咨询", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "电话联系", exact: true })).toBeVisible();
+    await expect(page.locator("main form")).toHaveCount(1);
+    await context.getByRole("button", { name: "复制作品信息" }).click();
+    await expect(context.getByRole("status")).toHaveText("作品信息已复制，添加微信后可粘贴给商家");
+    await expect(page.locator("html")).toHaveAttribute("data-copied-work", `我想咨询作品：${product.name}（${product.code}）`);
+    await expectNoHorizontalOverflow(page);
+    await expectWriteContract(writes);
+  });
+
   test(`Contact ${viewport.name} 解析来源作品并只提交服务端 ID`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const product = publicProduct(31, "APPOINTMENT");
@@ -1312,7 +1369,7 @@ for (const viewport of [
       },
     });
 
-    await page.goto(`/contact?type=appointment&productRef=${product.code}`);
+    await page.goto(`/contact?view=request&type=appointment&productRef=${product.code}`);
     const context = page.locator(".contact-product-context");
     await expect(context.getByText(product.name, { exact: true })).toBeVisible();
     await expect(context.getByText(`货号：${product.code}`, { exact: true })).toBeVisible();
@@ -1340,6 +1397,36 @@ for (const viewport of [
   });
 }
 
+test("Contact 默认直联页保留来源作品等待、失败与非法引用边界", async ({ page }) => {
+  const product = publicProduct(33, "DISPLAY_ONLY");
+  const barrier = createRouteBarrier();
+  const writes = await mockCatalogDetail(page, { products: [product], productsBarrier: barrier });
+  await page.goto(`/contact?type=product&productRef=${product.code}`);
+  await barrier.reached;
+  const context = page.getByRole("region", { name: "咨询作品" });
+  await expect(context.getByRole("status")).toHaveText("正在读取作品信息…");
+  await expect(context.getByRole("button", { name: "复制作品信息" })).toHaveCount(0);
+  barrier.release();
+  await expect(context).toContainText(product.name);
+  await expect(context.getByRole("button", { name: "复制作品信息" })).toBeVisible();
+  await expectWriteContract(writes);
+
+  const failedPage = await page.context().newPage();
+  const failedWrites = await mockCatalogDetail(failedPage, { products: [product], productsStatus: 503 });
+  await failedPage.goto(`/contact?type=product&productRef=${product.code}`);
+  const failedContext = failedPage.getByRole("region", { name: "咨询作品" });
+  await expect(failedContext.getByRole("alert")).toHaveText("作品信息暂时无法加载。");
+  await expect(failedContext.getByRole("button", { name: "重新读取作品" })).toBeVisible();
+  await expect(failedContext.getByRole("button", { name: "复制作品信息" })).toHaveCount(0);
+  await expect(failedPage.getByText("detail unavailable")).toHaveCount(0);
+  await failedPage.goto(`/contact?type=product&productRef=${"x".repeat(51)}`);
+  await expect(failedContext.getByRole("alert")).toHaveText("作品引用无效，请从作品详情重新进入。");
+  await expect(failedContext.getByRole("link", { name: "返回选款中心" })).toHaveAttribute("href", "/catalog");
+  await expect(failedPage.locator("main form")).toHaveCount(1);
+  await expectWriteContract(failedWrites);
+  await failedPage.close();
+});
+
 test("Contact 首选时间可留空，非空短留言按权威合同提交", async ({ page }) => {
   let submittedPayload: Record<string, unknown> | undefined;
   const writes = await mockCatalogDetail(page, {
@@ -1362,7 +1449,7 @@ test("Contact 首选时间可留空，非空短留言按权威合同提交", asy
       });
     },
   });
-  await page.goto("/contact");
+  await page.goto("/contact?view=request");
 
   await expect(page.getByText("方便联系的时间（选填）", { exact: true })).toBeVisible();
   await expect(page.locator("#cf-time")).not.toHaveAttribute("aria-required", "true");
@@ -1419,7 +1506,7 @@ test("Contact 提交时作品失效会保留可恢复选择，移除后作为普
     },
   });
 
-  await page.goto(`/contact?type=product&productRef=${product.code}`);
+  await page.goto(`/contact?view=request&type=product&productRef=${product.code}`);
   await expect(page.locator(".contact-product-context").getByText(product.name, { exact: true }))
     .toBeVisible();
   await fillContactForm(page);
@@ -1470,7 +1557,7 @@ test("Contact 同一 SPA 更换来源作品时隔离旧提交并只提交当前�
     },
   });
 
-  await page.goto(`/contact?type=product&productRef=${first.code}`);
+  await page.goto(`/contact?view=request&type=product&productRef=${first.code}`);
   await expect(page.locator(".contact-product-context").getByText(first.name, { exact: true }))
     .toBeVisible();
   await fillContactForm(page);
@@ -1480,7 +1567,7 @@ test("Contact 同一 SPA 更换来源作品时隔离旧提交并只提交当前�
   await page.evaluate((nextUrl) => {
     window.history.pushState(null, "", nextUrl);
     window.dispatchEvent(new PopStateEvent("popstate"));
-  }, `/contact?type=product&productRef=${second.code}`);
+  }, `/contact?view=request&type=product&productRef=${second.code}`);
   await expect(page.locator(".contact-product-context").getByText(second.name, { exact: true }))
     .toBeVisible();
   await expect(page.getByRole("button", { name: "提交需求" })).toBeEnabled();
@@ -1516,7 +1603,7 @@ test("Contact 普通表单校验失败不会被误判为作品失效", async ({ 
     },
   });
 
-  await page.goto(`/contact?type=product&productRef=${product.code}`);
+  await page.goto(`/contact?view=request&type=product&productRef=${product.code}`);
   await expect(page.locator(".contact-product-context").getByText(product.name, { exact: true }))
     .toBeVisible();
   await fillContactForm(page);
@@ -1532,7 +1619,7 @@ test("Contact 普通表单校验失败不会被误判为作品失效", async ({ 
 
 test("Contact 非法作品引用不会发起解析或静默提交，可移除恢复普通咨询", async ({ page }) => {
   const writes = await mockCatalogDetail(page, { products: [] });
-  await page.goto(`/contact?type=product&productRef=${"x".repeat(51)}`);
+  await page.goto(`/contact?view=request&type=product&productRef=${"x".repeat(51)}`);
   await expect(page.getByText("作品当前不可咨询。您可以移除作品后继续提交普通咨询。"))
     .toBeVisible();
   await expect(page.getByRole("button", { name: "请先处理来源作品" })).toBeDisabled();
@@ -1549,7 +1636,7 @@ test("Contact 来源作品解析具有等待、失败和移除恢复状态", asy
     products: [product],
     productsBarrier: barrier,
   });
-  await page.goto(`/contact?type=product&productRef=${product.code}`);
+  await page.goto(`/contact?view=request&type=product&productRef=${product.code}`);
   await barrier.reached;
   await expect(page.getByText("正在确认来源作品…", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "正在确认来源作品…" })).toBeDisabled();
@@ -1563,7 +1650,7 @@ test("Contact 来源作品解析具有等待、失败和移除恢复状态", asy
     products: [product],
     productsStatus: 503,
   });
-  await failedPage.goto(`/contact?type=product&productRef=${product.code}`);
+  await failedPage.goto(`/contact?view=request&type=product&productRef=${product.code}`);
   await expect(failedPage.getByText("来源作品暂时无法确认。您可以重试，或移除后提交普通咨询。"))
     .toBeVisible();
   await expect(failedPage.getByText("detail unavailable")).toHaveCount(0);
@@ -2070,7 +2157,7 @@ for (const viewport of [
     }
     await expectNoHorizontalOverflow(page);
 
-    await page.goto("/contact");
+    await page.goto("/contact?view=request");
     await expect(page.locator("#cf-name")).toBeVisible();
     if (viewport.width === 390) {
       const consentTargets = page.locator(".contact-privacy-consent")

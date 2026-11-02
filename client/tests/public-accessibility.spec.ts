@@ -61,28 +61,11 @@ test.describe("公开页面自动无障碍回归（自有 API Mock）", () => {
       await mockPublicApis(page);
       await page.goto("/contact");
       await expect(page.locator("#cf-name")).toBeVisible();
-      const [supportBox, requestBox] = await Promise.all([
-        page.locator(".contact-support").boundingBox(),
-        page.locator(".contact-request").boundingBox(),
-      ]);
-      const requestPrecedesSupport = await page.evaluate(() => {
-        const request = document.querySelector(".contact-request");
-        const support = document.querySelector(".contact-support");
-        return Boolean(
-          request
-          && support
-          && (request.compareDocumentPosition(support) & Node.DOCUMENT_POSITION_FOLLOWING),
-        );
-      });
-      expect(supportBox).not.toBeNull();
+      await expect(page.locator(".contact-support")).toHaveCount(0);
+      await expect(page.locator(".contact-form--quiet")).toBeVisible();
+      const requestBox = await page.locator(".contact-request").boundingBox();
       expect(requestBox).not.toBeNull();
-      expect(requestPrecedesSupport).toBe(true);
-      if (viewport.name === "mobile") {
-        expect(requestBox!.y).toBeLessThan(supportBox!.y);
-        expect(requestBox!.y).toBeLessThan(viewport.height);
-      } else {
-        expect(requestBox!.x).toBeLessThan(supportBox!.x);
-      }
+      await expect(page.getByText("常见问题", { exact: true })).toBeVisible();
       await scan(page, testInfo, "contact");
 
       await page.getByRole("button", { name: "提交需求" }).press("Enter");

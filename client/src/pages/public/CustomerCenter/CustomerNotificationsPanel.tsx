@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import RouteLoading from "@/components/common/RouteLoading";
 import type { CustomerNotificationPage } from "./types";
 import CustomerNotificationPreferences from "./CustomerNotificationPreferences";
 
@@ -96,9 +97,7 @@ export default function CustomerNotificationsPanel({
       </div>
 
       {loading ? (
-        <p className="my-account-empty" role="status">
-          正在加载服务通知…
-        </p>
+        <RouteLoading scope="panel" surface="public" label="正在加载服务通知…" />
       ) : error ? (
         <p className="my-account-empty" role="alert">
           {error}

@@ -2,11 +2,9 @@ import type { Key } from "react";
 import {
   Button,
   Dropdown,
-  Progress,
   Space,
   Table,
   Tag,
-  Tooltip,
   type TableColumnsType,
 } from "antd";
 import { DownOutlined } from "@ant-design/icons";
@@ -24,6 +22,30 @@ import {
   statusMeta,
   type ProductListItem,
 } from "./productManageModel";
+
+function CompletenessCell({ product }: { product: ProductListItem }) {
+  const completeness = product.completeness;
+  if (!completeness) return <>—</>;
+  const missing = completeness.missingFields.map(
+    (field) => completenessFieldLabels[field] || field,
+  );
+  const detail = completeness.isComplete
+    ? "已完整"
+    : missing.length
+      ? `缺${missing.join("、")}`
+      : "仍有资料待补充";
+  return (
+    <div className="product-manage__completeness">
+      <div className="product-manage__completeness-row">
+        <span className="product-manage__completeness-track" aria-hidden="true">
+          <span style={{ width: `${completeness.score}%` }} />
+        </span>
+        <span className="product-manage__completeness-score">{completeness.score}%</span>
+      </div>
+      <span className="product-manage__completeness-detail">{detail}</span>
+    </div>
+  );
+}
 
 type ProductManageTableProps = {
   products: ProductListItem[];
@@ -65,7 +87,7 @@ export default function ProductManageTable({
       {
         title: "商品名称",
         key: "product",
-        width: 330,
+        width: 300,
         render: (_: unknown, product: ProductListItem) => {
           const image = getThumbnailImage(product);
           return (
@@ -100,7 +122,7 @@ export default function ProductManageTable({
       {
         title: "SKU 最低价",
         key: "price",
-        width: 110,
+        width: 100,
         render: (_: unknown, product: ProductListItem) => (
           <span className="product-manage__price">
             {Number(product.price) > 0 ? formatPrice(product.price) : "—"}
@@ -108,30 +130,42 @@ export default function ProductManageTable({
         ),
       },
       {
+        title: "销售方式",
+        key: "salesMode",
+        width: 100,
+        render: (_: unknown, product: ProductListItem) => (
+          <div>
+            <div>{salesModeLabels[product.salesMode || ""] || "—"}</div>
+            <span className="product-manage__product-meta">
+              {product.inventoryPolicy === "SINGLE_UNIT" ? "一物一件" : "标准库存"}
+            </span>
+          </div>
+        ),
+      },
+      {
+        title: "状态",
+        key: "status",
+        width: 84,
+        render: (_: unknown, product: ProductListItem) => {
+          if (product.reviewStatus === "IN_REVIEW") {
+            return <Tag color="blue">审核中</Tag>;
+          }
+          const meta = statusMeta[product.status as ProductStatus] || { label: product.status || "未知状态", color: "default" as const };
+          return <Tag color={meta.color}>{meta.label}</Tag>;
+        },
+      },
+      {
         title: "资料完整度",
         key: "completeness",
-        width: 130,
-        render: (_: unknown, product: ProductListItem) => {
-          const c = product.completeness;
-          const missing = c?.missingFields?.map((field) => completenessFieldLabels[field] || field) || [];
-          return c ? (
-            <Tooltip title={c.isComplete ? "资料已完整" : missing.length ? `待补充：${missing.join("、")}` : "仍有资料待补充"}>
-              <Progress
-                size="small"
-                percent={c.score}
-                status={c.isComplete ? "success" : "active"}
-                format={() => `${c.score}%`}
-              />
-            </Tooltip>
-          ) : (
-            "—"
-          );
-        },
+        width: 176,
+        render: (_: unknown, product: ProductListItem) => (
+          <CompletenessCell product={product} />
+        ),
       },
       {
         title: "库存",
         key: "stock",
-        width: 190,
+        width: 136,
         render: (_: unknown, product: ProductListItem) => (
           <Space size={4} wrap>
             <span>{product.totalStock ?? "—"}</span>
@@ -144,46 +178,21 @@ export default function ProductManageTable({
       {
         title: "累计销量",
         key: "sales",
-        width: 108,
+        width: 96,
         render: (_: unknown, product: ProductListItem) => product.salesCount || 0,
-      },
-      {
-        title: "销售方式",
-        key: "salesMode",
-        width: 120,
-        render: (_: unknown, product: ProductListItem) => (
-          <div>
-            <div>{salesModeLabels[product.salesMode || ""] || "—"}</div>
-            <span className="product-manage__product-meta">
-              {product.inventoryPolicy === "SINGLE_UNIT" ? "一物一件" : "标准库存"}
-            </span>
-          </div>
-        ),
       },
       {
         title: "创建时间",
         key: "created",
-        width: 165,
+        width: 156,
         render: (_: unknown, product: ProductListItem) => formatProductDate(product.createdAt),
       },
       {
         title: "发布时间",
         key: "published",
-        width: 165,
+        width: 156,
         render: (_: unknown, product: ProductListItem) =>
           product.publishedAt ? formatProductDate(product.publishedAt) : "—",
-      },
-      {
-        title: "状态",
-        key: "status",
-        width: 92,
-        render: (_: unknown, product: ProductListItem) => {
-          if (product.reviewStatus === "IN_REVIEW") {
-            return <Tag color="blue">审核中</Tag>;
-          }
-          const meta = statusMeta[product.status as ProductStatus] || { label: product.status || "未知状态", color: "default" as const };
-          return <Tag color={meta.color}>{meta.label}</Tag>;
-        },
       },
       {
         title: "操作",
@@ -330,7 +339,7 @@ export default function ProductManageTable({
       columns={columns}
       pagination={false}
       className="product-manage__table"
-      scroll={{ x: 1500 }}
+      scroll={{ x: 1520 }}
       rowSelection={{
         selectedRowKeys: selectedIds,
         onChange: onSelectionChange,

@@ -13,6 +13,32 @@ export function formatPublishReminderLabel(warningCount: number) {
   return `${warningCount} 项提醒`;
 }
 
+/** 收起时写出提醒事实。来源记录类提醒压成可扫读的短句，其余提醒保留第一句。 */
+export function formatPublishReminderVisibleLabel(
+  issues: readonly PublishValidationIssue[],
+) {
+  const warnings = issues.filter((issue) => issue.severity === "warning");
+  if (warnings.length !== 1) return formatPublishReminderLabel(warnings.length);
+  const message = warnings[0]?.message ?? "";
+  const sourceRecord = message.match(/(\d+)\s*项当前公开素材尚无完整来源记录/);
+  if (sourceRecord) return `${sourceRecord[1]} 项素材尚无来源记录`;
+  const sentence = message.replace(/^提醒：/, "").split("。")[0]?.trim();
+  return sentence || formatPublishReminderLabel(1);
+}
+
+export function formatPublishReminderAccessibleName(
+  warningCount: number,
+  issues: readonly PublishValidationIssue[],
+) {
+  const label = formatPublishReminderLabel(warningCount);
+  const detail = issues
+    .filter((issue) => issue.severity === "warning")
+    .map((issue) => issue.message.trim())
+    .filter(Boolean)
+    .join(" ");
+  return detail ? `${label}。${detail}` : label;
+}
+
 export function formatPublishReminderTitle(warningCount: number) {
   return `不影响发布的提醒 · ${warningCount} 项`;
 }

@@ -56,13 +56,12 @@ export default function StorefrontFooter({
       <div className="site-footer__inner">
         {showService ? (
           <div className="site-footer__service">
-            <p className="site-footer__service-label">私人预约</p>
             <Link
               to="/contact"
               className="site-footer__service-link"
               {...previewLinkProps("/contact")}
             >
-              <span>预约私人珠宝顾问</span>
+              <span>联系与预约</span>
               <span aria-hidden="true">→</span>
             </Link>
           </div>
