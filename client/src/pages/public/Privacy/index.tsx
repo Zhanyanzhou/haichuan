@@ -8,7 +8,6 @@ import {
   preferSiteSetting,
   SIGNED_PUBLIC_CONTACT,
 } from "@/config/publicContact";
-import RouteLoading from "@/components/common/RouteLoading";
 
 const T = {
   bg: "#FFFFFF",
@@ -280,7 +279,9 @@ export default function Privacy() {
               </Link>
             </p>
             {contactStatus === "loading" ? (
-              <RouteLoading scope="inline" surface="public" label="正在加载联系方式…" />
+              <p style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: 0 }}>
+                正在加载联系方式…
+              </p>
             ) : null}
             {contactStatus === "error" ? (
               <p role="alert" style={{ fontSize: 13, color: T.sec, lineHeight: 1.7, margin: 0 }}>
