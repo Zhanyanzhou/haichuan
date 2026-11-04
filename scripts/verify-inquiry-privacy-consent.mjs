@@ -20,6 +20,7 @@ const [
   auditMigration,
   hashMigration,
   contact,
+  consultationRequest,
   selectionTray,
   inquiryClient,
   selectionClient,
@@ -37,6 +38,7 @@ const [
   readSrc("server/prisma/migrations/20260816110000_add_inquiry_privacy_consent_audit/migration.sql"),
   readSrc("server/prisma/migrations/20260923120000_add_service_privacy_consent_hashes/migration.sql"),
   readSrc("client/src/pages/public/Contact/index.tsx"),
+  readSrc("client/src/pages/public/Contact/ConsultationRequest.tsx"),
   readSrc("client/src/pages/public/Catalog/SelectionTray.tsx"),
   readSrc("client/src/services/clients/inquiriesClient.ts"),
   readSrc("client/src/services/clients/selectionInquiryClient.ts"),
@@ -140,7 +142,8 @@ const checks = [
     assert.doesNotMatch(hashMigration, /UPDATE\s+`?(inquiries|selection_inquiries|consent_records)`?/i);
   }],
   ["两个公开表单都实际传递勾选值", () => {
-    assert.match(contact, /privacyConsent:\s*form\.privacyConsent/);
+    assert.match(contact, /ConsultationRequest/);
+    assert.match(consultationRequest, /privacyConsent:\s*form\.privacyConsent/);
     assert.match(selectionTray, /privacyConsent:\s*form\.privacyConsent/);
   }],
 ];
