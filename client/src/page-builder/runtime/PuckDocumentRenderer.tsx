@@ -169,6 +169,7 @@ function renderBlock(
   heroHeadingLevel: 1 | 2,
   homeSurface: boolean,
   priority: boolean,
+  pageHeroPlacement: "primary" | "subsequent",
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap,
   deviceOverride?: TemplateContentBreakpoint,
   pageKey?: string,
@@ -213,6 +214,7 @@ function renderBlock(
         mode={mode}
         primaryHeadingLevel={heroHeadingLevel}
         priority={mode === "public" && priority}
+        pageHeroPlacement={pageHeroPlacement}
         pageKey={pageKey}
       />
     );
@@ -269,6 +271,7 @@ function GuardedBlock({
   heroHeadingLevel,
   homeSurface,
   priority,
+  pageHeroPlacement,
   resolvedDynamicTemplates,
   deviceOverride,
   pageKey,
@@ -279,6 +282,7 @@ function GuardedBlock({
   heroHeadingLevel: 1 | 2;
   homeSurface: boolean;
   priority: boolean;
+  pageHeroPlacement: "primary" | "subsequent";
   resolvedDynamicTemplates: ResolvedDynamicTemplateDefinitionMap;
   deviceOverride?: TemplateContentBreakpoint;
   pageKey?: string;
@@ -290,6 +294,7 @@ function GuardedBlock({
     heroHeadingLevel,
     homeSurface,
     priority,
+    pageHeroPlacement,
     resolvedDynamicTemplates,
     deviceOverride,
     pageKey,
@@ -401,6 +406,7 @@ export default function PuckDocumentRenderer({
           heroHeadingLevel={blockHeroHeadingLevel}
           homeSurface={homeSurface}
           priority={index === primaryStageIndex}
+          pageHeroPlacement={index === primaryStageIndex ? "primary" : "subsequent"}
           resolvedDynamicTemplates={resolvedDynamicTemplates}
           deviceOverride={mode === "public" ? deviceForBlock(block) : undefined}
           pageKey={resolvedPageKey}

@@ -81,12 +81,20 @@ export default function StorefrontFooter({
           <span>© {new Date().getFullYear()} {siteName}</span>
         </div>
 
-        {!preview && FOOTER_ICP_NUMBER ? (
+        {FOOTER_ICP_NUMBER ? (
           <a
             href="https://beian.miit.gov.cn/"
             target="_blank"
             rel="noopener noreferrer"
             className="site-footer__filing"
+            {...(preview
+              ? {
+                  onClick: (event: React.MouseEvent<HTMLAnchorElement>) => {
+                    event.preventDefault();
+                  },
+                  title: "画布预览，点击不离开编辑器",
+                }
+              : undefined)}
           >
             {FOOTER_ICP_NUMBER}
           </a>

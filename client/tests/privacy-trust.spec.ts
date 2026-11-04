@@ -75,7 +75,8 @@ test.describe("联系信息真实性", () => {
       route.fulfill({ status: 500 }),
     );
     await page.goto("/contact");
-    await expect(page.getByRole("heading", { name: "联系海川", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "联系海川", exact: true })).toHaveCount(0);
+    await expect(page).toHaveTitle(/联系海川/);
     await expect(page.getByRole("heading", { name: "联系方式暂时无法加载", exact: true })).toBeVisible();
     await expect(page.getByRole("alert").filter({ hasText: "请稍后重试，恢复后即可查看微信与电话。" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "预约咨询", exact: true })).toBeVisible();

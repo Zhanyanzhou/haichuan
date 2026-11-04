@@ -11,6 +11,7 @@ import {
   HeartFilled,
 } from "@ant-design/icons";
 import { getMaterialLabel } from "@/utils/material";
+import { clampProductTitle } from "@/utils/productTitleLength";
 import { getPrimaryImage, getThumbnailList } from "@/utils/productImage";
 import { measureSubjectFrame, mediaIdFromUrl, type SubjectFrame } from "@/utils/subjectFrame";
 import { SecureImage } from "@/components/common/SecureImage";
@@ -367,7 +368,19 @@ function ProductPrimaryAction({
     );
   }
   if (!canUseCart) {
-    return <Link to={publicProductInquiryPath(product, "purchase-support")} className={`${primaryClass} text-center`}>购买暂未开放，联系顾问</Link>;
+    return (
+      <div className="grid gap-3">
+        <Link to={publicProductInquiryPath(product, "purchase-support")} className={`${primaryClass} text-center`}>购买暂未开放，联系顾问</Link>
+        <button
+          type="button"
+          className="product-detail-page__bag-action"
+          aria-pressed={isSelected}
+          onClick={onToggleSelection}
+        >
+          {isSelected ? "已放入购物袋" : "放入购物袋"}
+        </button>
+      </div>
+    );
   }
   if (purchaseIssue) {
     return <button type="button" className={primaryClass} disabled>{purchaseIssue.actionLabel}</button>;
@@ -595,11 +608,13 @@ export default function ProductDetail() {
     };
   }, [isVirtualWork, product?.id]);
 
+  const publicTitle = product?.name ? clampProductTitle(product.name) : "";
+
   // SEO：商品详情独立标题（不泄露内部编号；未加载时不设误导标题）
   useEffect(() => {
-    if (product?.name) {
+    if (product && publicTitle) {
       setPageMeta({
-        title: `${product.name} | 海川珠宝`,
+        title: `${publicTitle} | 海川珠宝`,
         description: product.shortDescription || undefined,
         // og:image / twitter:image：分享到微信/微博/小红书时展示作品主图
         image: getPrimaryImage(product) || undefined,
@@ -640,7 +655,7 @@ export default function ProductDetail() {
   useStructuredData("product", product && !isVirtualWork ? {
     "@context": "https://schema.org",
     "@type": "Product",
-    name: product.name,
+    name: publicTitle,
     sku: product.code,
     ...(product.shortDescription?.trim()
       ? { description: product.shortDescription.trim() }
@@ -683,7 +698,7 @@ export default function ProductDetail() {
       {
         "@type": "ListItem",
         position: 3,
-        name: product.name,
+        name: publicTitle,
         ...(productCanonicalUrl ? { item: productCanonicalUrl } : {}),
       },
     ],
@@ -979,7 +994,7 @@ export default function ProductDetail() {
             选款中心
           </Link>
           <span className="mx-2 text-brand-muted">/</span>
-          <span className="text-brand-muted">{product.name}</span>
+          <span className="text-brand-muted">{publicTitle}</span>
         </nav>
 
         <div className="product-detail-page__layout">
@@ -998,7 +1013,7 @@ export default function ProductDetail() {
               {mainImageUrl ? (
                 <SecureImage
                   src={withPublicMediaWidth(mainImageUrl, 1200)}
-                  alt={product.name}
+                  alt={publicTitle}
                   className="product-detail-page__photo"
                   srcSet={buildProductImageSrcSet(mainImageUrl)}
                   sizes="(max-width: 900px) calc(100vw - 40px), (max-width: 1440px) 55vw, 700px"
@@ -1061,7 +1076,7 @@ export default function ProductDetail() {
           <div className="product-detail-page__summary">
             <div className="product-detail-page__heading">
               <h1 className="product-detail-page__title">
-                {visibleWorkTitle(product.name, product.code)}
+                {visibleWorkTitle(publicTitle, product.code)}
               </h1>
             </div>
             {isVirtualWork ? (
@@ -1369,7 +1384,7 @@ export default function ProductDetail() {
                   sizes="(max-width: 1000px) calc(100vw - 40px), 960px"
                   width={image?.width ?? undefined}
                   height={image?.height ?? undefined}
-                  alt={block.alt || `${product.name} 详情图 ${index + 1}`}
+                  alt={block.alt || `${publicTitle} 详情图 ${index + 1}`}
                   className="mx-auto block h-auto w-full"
                   deferUntilVisible
                 />

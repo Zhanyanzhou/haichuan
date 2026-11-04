@@ -4,15 +4,12 @@ export type PageTemplateHandoffFocus = "add" | "none";
 
 export function resolvePublishedTemplateInsertionIndex(
   contentLength: number,
-  selectedRootIndex: number | null,
+  _selectedRootIndex: number | null,
   requestedInsertionIndex?: number,
 ) {
   const length = Math.max(0, contentLength);
   if (requestedInsertionIndex !== undefined) {
     return Math.min(length, Math.max(0, requestedInsertionIndex));
-  }
-  if (selectedRootIndex !== null && selectedRootIndex >= 0 && selectedRootIndex < length) {
-    return selectedRootIndex + 1;
   }
   return length;
 }
@@ -25,9 +22,7 @@ export function describePageTemplateAddAction(input: {
 }) {
   const destination = !input.pageHasBlocks
     ? "添加到页面"
-    : input.hasSelection
-      ? "添加到所选模块之后"
-      : "添加到页面末尾";
+    : "添加到页面末尾";
   return {
     label: "添加到页面",
     title: destination,
@@ -47,7 +42,7 @@ export function describePageTemplateHandoff(input: {
 
   if (input.pageHasBlocks) {
     return {
-      liveStatus: `刚发布的${quoted}${versionLabel} 已定位到模板组件库。正在使用它的页面草稿会自动沿用这一版。请拖到目标位置，或${add.title}。`,
+      liveStatus: `刚发布的${quoted}${versionLabel} 已定位到模板组件库。能保留内容的页面草稿会自动沿用这一版。客户前台仍等发布页面。请拖到目标位置，或${add.title}。`,
       cardAriaLabel: `刚发布的${input.name}版本${input.version}，可拖到目标位置或${add.title}`,
       add,
       focusTarget: "none" as const satisfies PageTemplateHandoffFocus,

@@ -7,6 +7,11 @@ import dayjs from 'dayjs';
 import { Prisma, type MediaAsset, type MediaAssetAuthorization, type MediaAssetStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { validateImageContent } from '../../common/media/image-content-validation';
+import {
+  readCachedDisplayImageMetadata,
+  resolveDisplayImageMetadata,
+  type DisplayImageMetadata,
+} from '../../common/media/display-image-metadata';
 import { resolveMediaStorageRoots } from './media-storage-paths';
 import { MediaAuthorizationService } from './media-authorization.service';
 import { evaluateMediaPublicEligibility, MediaPublicEligibility } from './media-public-eligibility';
@@ -20,6 +25,9 @@ import {
 import {
   isResponsivePublicImageWidth,
   resizePublicImageBuffer,
+  responsivePublicImageEtag,
+  responsivePublicImageMemoryKey,
+  responsivePublicImagePrunePrefix,
 } from './responsive-public-media';
 import type { CustomerPrincipal, StaffPrincipal } from '../../common/security/authenticated-principal';
 import { lockAuthorizedStaffForPayment } from '../../common/security/staff-payment-authorization';
@@ -47,6 +55,11 @@ export type PageMediaItem = {
   size: number;
   width?: number;
   height?: number;
+  displayWidth?: number;
+  displayHeight?: number;
+  animated?: boolean;
+  metadataStatus?: 'measured' | 'unknown';
+  mediaRevision?: string;
   createdAt: Date;
   status: MediaAssetStatus;
   available: boolean;
@@ -133,14 +146,16 @@ export class UploadService implements OnModuleInit {
     this.assertSafeOriginalName(file.originalname, expectedType.extension, ['.jpg', '.jpeg', '.png', '.webp', '.gif']);
 
     const metadata = await validateImageContent(file.buffer, expectedType.format);
+    const display = resolveDisplayImageMetadata(metadata);
 
     return this.registerPublicPageMedia({
       file,
       actor,
       extension: expectedType.extension,
-      width: metadata.width,
-      height: metadata.height,
+      width: display?.displayWidth ?? metadata.width,
+      height: display?.displayHeight ?? metadata.height,
       format: metadata.format,
+      display,
     });
   }
 
@@ -448,11 +463,41 @@ export class UploadService implements OnModuleInit {
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
       : await read(this.prisma);
     return {
-      list: rows.map((row) => this.toPageMediaItem(row, row.authorization)),
+      list: await Promise.all(rows.map((row) => this.withDisplayFacts(
+        this.toPageMediaItem(row, row.authorization),
+        row,
+      ))),
       total,
       page: options.page,
       pageSize: options.pageSize,
     };
+  }
+
+  /**
+   * 按本站 page-assets 公开路径只读回填展示尺寸。
+   * 只查已登记素材，不探测任意外链；本地缓存缺失时给属性面板用。
+   */
+  async getPageMediaByPublicUrl(
+    url: string,
+    actor?: MediaStaffActorInput,
+  ): Promise<PageMediaItem> {
+    const storageKey = this.parsePageAssetStorageKey(url);
+    const find = (client: Prisma.TransactionClient | PrismaService) =>
+      client.mediaAsset.findFirst({
+        where: {
+          storageKey,
+          accessLevel: 'PUBLIC',
+        },
+        include: { authorization: true },
+      });
+    const row = actor
+      ? await this.prisma.$transaction(async (transaction) => {
+          await lockAuthorizedMediaStaff(transaction, actor, 'LIBRARY', 'read');
+          return find(transaction);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      : await find(this.prisma);
+    if (!row) throw new NotFoundException('素材不存在');
+    return this.withDisplayFacts(this.toPageMediaItem(row, row.authorization), row);
   }
 
   async archivePageMedia(id: number, actor?: MediaStaffActorInput): Promise<PageMediaItem> {
@@ -548,6 +593,7 @@ export class UploadService implements OnModuleInit {
     width?: number;
     height?: number;
     format?: string;
+    display?: DisplayImageMetadata | null;
   }): Promise<StoredPageMedia> {
     const uploadedBy = input.actor === undefined
       ? undefined
@@ -606,7 +652,7 @@ export class UploadService implements OnModuleInit {
 
     if (prepared.status === 'READY') {
       return {
-        ...this.toPageMediaItem(prepared),
+        ...this.overlayMeasuredDisplay(this.toPageMediaItem(prepared), input.display, prepared),
         filename: basename(storageKey),
         format: input.format,
         deduplicated,
@@ -648,7 +694,7 @@ export class UploadService implements OnModuleInit {
       }
 
       return {
-        ...this.toPageMediaItem(asset),
+        ...this.overlayMeasuredDisplay(this.toPageMediaItem(asset), input.display, asset),
         filename: basename(storageKey),
         format: input.format,
         deduplicated,
@@ -730,7 +776,8 @@ export class UploadService implements OnModuleInit {
 
   /**
    * 为公开页面图片生成固定宽度 WebP。受控 page-assets 仍先经过授权与完整性校验；
-   * 历史 uploads 图片只允许从公开根内读取，原文件不修改，转码失败则返回原图。
+   * 历史 uploads 图片只允许从公开根内读取，原文件不修改。
+   * 转码失败拒绝派生，不把另一套尺寸的原图标成请求宽度。授权失败在读缓存之前抛出。
    */
   async getResponsivePublicImage(
     storageKey: string,
@@ -741,7 +788,7 @@ export class UploadService implements OnModuleInit {
     const source = requirePublicAuthorization
       ? await this.getPageMediaContentByStorageKey(storageKey, true)
       : await this.readLegacyPublicImage(storageKey);
-    const cacheKey = `${storageKey}:w${width}:${source.fingerprint}`;
+    const cacheKey = responsivePublicImageMemoryKey(storageKey, width, source.fingerprint);
     const cached = this.responsivePublicMediaCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
     if (cached) this.responsivePublicMediaCache.delete(cacheKey);
@@ -780,9 +827,8 @@ export class UploadService implements OnModuleInit {
     width: number,
     source: { buffer: Buffer; mimeType: string; fingerprint: string },
   ): Promise<{ buffer: Buffer; mimeType: string; etag: string }> {
-    const fingerprintHash = createHash('sha1').update(source.fingerprint).digest('hex').slice(0, 16);
-    // ETag 与磁盘文件名同源：同一原图指纹 + 宽度 => 同一派生图内容，可安全用于条件请求。
-    const etag = `w${width}-${fingerprintHash}`;
+    // ETag、磁盘名和内存键都带策略版本。旧的无版本文件不复用，也不批量删除。
+    const etag = responsivePublicImageEtag(width, source.fingerprint);
     const diskDir = this.resolveWithinRoot(this.responsivePublicDiskRoot, storageKey);
     const diskPath = diskDir ? join(diskDir, `${etag}.webp`) : null;
     if (diskPath && existsSync(diskPath)) {
@@ -794,32 +840,31 @@ export class UploadService implements OnModuleInit {
     }
 
     const rendered = await resizePublicImageBuffer(source.buffer, width, source.mimeType);
-    // 仅当确实转成 WebP 才落盘；转码失败回退原图时不写，避免污染磁盘缓存。
-    if (diskPath && rendered.mimeType === 'image/webp') {
+    if (!rendered.ok) {
+      throw new NotFoundException('素材不存在');
+    }
+    if (diskPath) {
       try {
         mkdirSync(dirname(diskPath), { recursive: true });
         await writeFile(diskPath, rendered.buffer);
-        await this.pruneStaleResponsiveFiles(diskPath, width, fingerprintHash);
+        await this.pruneStaleResponsiveFiles(diskPath, width);
       } catch {
         // 磁盘不可写时仍返回内存结果，正确性不受影响。
       }
     }
-    return { ...rendered, etag };
+    return { buffer: rendered.buffer, mimeType: rendered.mimeType, etag };
   }
 
-  /** 清理同一宽度下旧指纹的派生文件，防止原图替换后磁盘孤儿无界增长。 */
-  private async pruneStaleResponsiveFiles(
-    diskPath: string,
-    width: number,
-    keepHash: string,
-  ): Promise<void> {
+  /** 只清理同一宽度、同一策略版本下的旧指纹。没有版本号的历史派生文件保留。 */
+  private async pruneStaleResponsiveFiles(diskPath: string, width: number): Promise<void> {
     const dir = dirname(diskPath);
-    const prefix = `w${width}-`;
+    const prefix = responsivePublicImagePrunePrefix(width);
+    const currentName = basename(diskPath);
     try {
       const entries = await readdir(dir);
       await Promise.all(
         entries
-          .filter((name) => name.startsWith(prefix) && name.endsWith('.webp') && !name.startsWith(`${prefix}${keepHash}`))
+          .filter((name) => name.startsWith(prefix) && name.endsWith('.webp') && name !== currentName)
           .map((name) => unlink(join(dir, name))),
       );
     } catch {
@@ -897,6 +942,53 @@ export class UploadService implements OnModuleInit {
     if (result.kind === 'MISSING') throw new NotFoundException('素材文件不存在');
     if (result.kind === 'NOT_READY') throw new NotFoundException('素材当前不可读取');
     throw new NotFoundException('素材不存在');
+  }
+
+  /**
+   * 重复上传不回写已有行的宽高。响应仍可带上这次缓冲区测到的展示尺寸。
+   */
+  private overlayMeasuredDisplay<T extends PageMediaItem>(
+    item: T,
+    display: DisplayImageMetadata | null | undefined,
+    asset: Pick<MediaAsset, 'lifecycleRevision' | 'checksumSha256'>,
+  ): T {
+    if (!display) {
+      return {
+        ...item,
+        displayWidth: undefined,
+        displayHeight: undefined,
+        animated: undefined,
+        mediaRevision: undefined,
+        metadataStatus: 'unknown',
+      };
+    }
+    return {
+      ...item,
+      width: display.displayWidth,
+      height: display.displayHeight,
+      displayWidth: display.displayWidth,
+      displayHeight: display.displayHeight,
+      animated: display.animated,
+      metadataStatus: 'measured',
+      mediaRevision: `${asset.lifecycleRevision}:${asset.checksumSha256.slice(0, 12)}`,
+    };
+  }
+
+  /** READY 图片只读文件头补展示尺寸。读不到就不编造，也不写数据库。 */
+  private async withDisplayFacts(item: PageMediaItem, asset: MediaAsset): Promise<PageMediaItem> {
+    if (asset.status !== 'READY' || !asset.mimeType.startsWith('image/') || !asset.checksumSha256) {
+      return item;
+    }
+    const absolutePath = this.resolveWithinRoot(this.uploadDir, asset.storageKey);
+    if (!absolutePath || !existsSync(absolutePath)) {
+      return this.overlayMeasuredDisplay(item, null, asset);
+    }
+    const display = await readCachedDisplayImageMetadata({
+      absolutePath,
+      checksum: asset.checksumSha256,
+      lifecycleRevision: asset.lifecycleRevision,
+    });
+    return this.overlayMeasuredDisplay(item, display, asset);
   }
 
   private toPageMediaItem(asset: MediaAsset, authorization?: MediaAssetAuthorization | null): PageMediaItem {
@@ -1506,14 +1598,14 @@ export class UploadService implements OnModuleInit {
 
   private parsePageAssetStorageKey(value: string): string {
     if (typeof value !== 'string') {
-      throw new BadRequestException('请选择素材库中的图片再裁切');
+      throw new BadRequestException('请使用本站页面素材路径');
     }
     const path = value.trim().split(/[?#]/, 1)[0];
     let decoded = path;
     try {
       decoded = decodeURIComponent(path);
     } catch {
-      throw new BadRequestException('请选择素材库中的图片再裁切');
+      throw new BadRequestException('请使用本站页面素材路径');
     }
     if (
       decoded !== path
@@ -1521,7 +1613,7 @@ export class UploadService implements OnModuleInit {
       || path.includes('\\')
       || /[\u0000-\u001f\u007f]/.test(path)
     ) {
-      throw new BadRequestException('请选择素材库中的图片再裁切');
+      throw new BadRequestException('请使用本站页面素材路径');
     }
     const storageKey = path.slice('/uploads/'.length);
     const segments = storageKey.split('/');
@@ -1529,7 +1621,7 @@ export class UploadService implements OnModuleInit {
       segments.length < 2
       || segments.some((segment) => !segment || segment === '.' || segment === '..')
     ) {
-      throw new BadRequestException('请选择素材库中的图片再裁切');
+      throw new BadRequestException('请使用本站页面素材路径');
     }
     return storageKey;
   }

@@ -178,6 +178,27 @@ test("发布门禁以根节点高度为唯一尺寸事实并禁止模板保存�
   assert.ok(policyCodes.includes("NON_EDITABLE_SLOT_HAS_INSTANCE_PERMISSIONS"));
 });
 
+test("只有图片槽、没有可见标题的模板可以发布", () => {
+  const imageOnly = definitionFixture();
+  imageOnly.schemaVersion = 3;
+  imageOnly.nodes.node_heading.type = "ImageSlot";
+  imageOnly.nodes.node_heading.name = "主图";
+  Object.assign(imageOnly.slots.slot_heading, {
+    type: "image",
+    label: "主图",
+    semanticRole: "backgroundImage",
+    required: false,
+    editable: true,
+    hideable: true,
+    validation: {},
+    desktopRules: { objectFit: "cover" },
+    mobileRules: { objectFit: "cover" },
+  });
+  const result = validateDynamicTemplatePublishDefinition(imageOnly);
+  assert.equal(result.issues.some((issue) => issue.code === "SECTION_REQUIRES_VISIBLE_TITLE"), false);
+  assert.equal(result.valid, true);
+});
+
 test("发布必须填写名称，合法未命名草稿仍可保存", () => {
   const unnamed = definitionFixture();
   unnamed.name = "未命名模板";

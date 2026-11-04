@@ -1561,6 +1561,8 @@ function assertValidOperationResult(
   definition: TemplateDefinitionV2,
   previous?: TemplateDefinitionV2,
 ) {
+  // 结构操作都在克隆上进行；目标失效的页面设置随操作一并撤回，而不是让操作失败。
+  dropUnreachablePageSettings(definition);
   if (previous) assertDynamicTemplateStructureLocksPreserved(previous, definition);
   const previousErrors = new Set(previous
     ? validateDynamicTemplateDefinition(previous).issues
@@ -2466,6 +2468,18 @@ export function removeDynamicTemplateNode(
   updateSlotSummary(next);
   assertValidOperationResult(next, definition);
   return next;
+}
+
+/** 删除节点后，图片位置设置的目标已不存在或不再是两栏时，撤回该设置声明。 */
+function dropUnreachablePageSettings(definition: TemplateDefinitionV2) {
+  const mediaSide = definition.metadata.pageSettings?.mediaSide;
+  if (!mediaSide) return;
+  const target = definition.nodes[mediaSide.targetNodeId];
+  if (target && target.childIds.length >= 2) return;
+  const rest = { ...definition.metadata.pageSettings };
+  delete rest.mediaSide;
+  if (Object.keys(rest).length > 0) definition.metadata.pageSettings = rest;
+  else delete definition.metadata.pageSettings;
 }
 
 export function duplicateDynamicTemplateNode(

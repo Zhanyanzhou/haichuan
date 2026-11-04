@@ -1,14 +1,19 @@
 /**
  * businessRegion.ts — 业务功能区(系统区块)的编辑面板 Schema。
  *
- * 固定业务区由系统数据驱动(商品列表/筛选等),前台真实渲染;
- * 面板只读展示数据说明,不做任何编辑。systemBlock 标记隐藏删除/隐藏等动作。
+ * 固定业务区由系统数据驱动，前台真实渲染。systemBlock 标记隐藏删除、隐藏等动作。
+ * 联系页的电话、微信、地址和营业时间在此写入同一份店铺资料。
  * 选款中心的品类不在这里改文案，入口指向已有的类目管理。
  */
 import { Link } from "react-router-dom";
 import { businessRegionPuckConfig } from "../../../adapters/businessRegion.puck";
-import type { ModuleInspectorSchema } from "../types";
+import type { InspectorContext, ModuleInspectorSchema } from "../types";
 import type { PuckProps } from "../../../types";
+import ContactFactsEditor from "./ContactFactsEditor";
+
+function isContactPage(ctx: InspectorContext) {
+  return String(ctx.props.pageKey ?? "") === "contact";
+}
 
 function BusinessRegionSummary({ props }: { props: PuckProps }) {
   const items = String(props.items ?? "")
@@ -78,7 +83,7 @@ function BusinessRegionSummary({ props }: { props: PuckProps }) {
 export const businessRegionSchema: ModuleInspectorSchema = {
   moduleType: "业务功能区",
   displayName: "业务功能区",
-  purpose: "固定业务区由系统数据驱动,前台真实渲染,不可在此编辑。",
+  purpose: "固定业务区由系统数据驱动。联系页的电话、微信和地址在此写入店铺资料；选款中心的品类仍到分类管理修改。",
   systemBlock: true,
   defaults: businessRegionPuckConfig.defaultProps,
   groupTitles: { feature: "数据说明" },
@@ -87,12 +92,27 @@ export const businessRegionSchema: ModuleInspectorSchema = {
       id: "business-region-summary",
       title: "数据说明",
       layer: "feature",
+      visibleWhen: (ctx) => !isContactPage(ctx),
       fields: [
         {
           key: "businessRegionSummary",
           label: "固定业务区",
           control: "custom",
           render: (ctx) => <BusinessRegionSummary props={ctx.props} />,
+        },
+      ],
+    },
+    {
+      id: "contact-facts",
+      title: "联系信息",
+      layer: "feature",
+      visibleWhen: isContactPage,
+      fields: [
+        {
+          key: "contactFacts",
+          label: "联系信息",
+          control: "custom",
+          render: () => <ContactFactsEditor />,
         },
       ],
     },

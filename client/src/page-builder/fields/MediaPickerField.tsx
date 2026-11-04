@@ -21,38 +21,153 @@ import {
 import { uploadApi } from "@/services/api";
 import { unwrapResponse } from "@/utils/unwrap";
 import { ratioLabelOf } from "@/page-builder/config/imageSpecs";
-import { sizeMatchStatus, useImageNaturalSize } from "./specCheck";
+import { useImageNaturalSize } from "./specCheck";
 import {
   addPageMediaItem,
+  PAGE_MEDIA_LIBRARY_CHANGED_EVENT,
+  readPageMediaLibrary,
+  type PageMediaItem,
 } from "./pageMediaLibrary";
+import {
+  describeImageSlotAdvice,
+  designCanvasWidthOnDevice,
+  parseFrameAspect,
+} from "../config/imageDeliveryGeometry";
+import { cachedImageFactFields, trustedDisplaySize } from "./trustedMediaSize";
 import { resolveManagedTemplateMediaPreviewUrl } from "../template-definition/managedMediaPreview";
 import ImageFocusPad from "../inspector/controls/ImageFocusPad";
 import SharedPageMediaPicker from "./SharedPageMediaPicker";
+import { type MediaSpec } from "./mediaSpec";
 
 export const SESSION_MEDIA_UPLOADED_EVENT = "page-builder:media-uploaded";
 
-export interface MediaSpec {
-  width: number;
-  height: number;
-  ratio: string;
-  label: string;
+function isManagedPageAssetUrl(url: string): boolean {
+  const path = url.trim().split(/[?#]/, 1)[0];
+  if (!path.startsWith("/uploads/page-assets/") || path.includes("\\")) return false;
+  const segments = path.slice("/uploads/".length).split("/");
+  return segments.length >= 2
+    && segments.every((segment) => segment && segment !== "." && segment !== "..");
 }
 
-/** 槽位建议宽高转为上传规格；缺任一尺寸时不显示比例检查。 */
-export function mediaSpecFromRecommendation(
-  width?: number,
-  height?: number,
-  aspectRatio?: string,
-  label = "建议尺寸",
-): MediaSpec | undefined {
-  if (!width || !height || width <= 0 || height <= 0) return undefined;
+function useLibraryMediaItem(url: string): PageMediaItem | null {
+  const [items, setItems] = useState<PageMediaItem[]>(() => readPageMediaLibrary());
+  useEffect(() => {
+    const sync = () => setItems(readPageMediaLibrary());
+    window.addEventListener(PAGE_MEDIA_LIBRARY_CHANGED_EVENT, sync);
+    window.addEventListener(SESSION_MEDIA_UPLOADED_EVENT, sync);
+    return () => {
+      window.removeEventListener(PAGE_MEDIA_LIBRARY_CHANGED_EVENT, sync);
+      window.removeEventListener(SESSION_MEDIA_UPLOADED_EVENT, sync);
+    };
+  }, []);
+  const path = url.split("?")[0];
+  if (!path) return null;
+  return items.find((item) => item.url.split("?")[0] === path) ?? null;
+}
+
+type MediaFactsFetchState = "idle" | "loading" | "ready" | "unknown" | "error";
+
+/** 本地缓存只作初值；缺尺寸时经受控只读接口补事实，迟到响应不覆盖后来选中的图。 */
+function useResolvedMediaSource(
+  url: string,
+  cached: PageMediaItem | null,
+  enabled: boolean,
+): {
+  source: { displayWidth: number; displayHeight: number; animated?: boolean } | null;
+  fetchState: MediaFactsFetchState;
+  retry: () => void;
+} {
+  const [remote, setRemote] = useState<PageMediaItem | null>(null);
+  const [fetchState, setFetchState] = useState<MediaFactsFetchState>(() => (
+    trustedDisplaySize(cached) ? "ready" : "idle"
+  ));
+  const [retryToken, setRetryToken] = useState(0);
+  const requestSeq = useRef(0);
+
+  useEffect(() => {
+    setRemote(null);
+    if (!enabled || !url) {
+      setFetchState("idle");
+      return;
+    }
+    if (trustedDisplaySize(cached)) {
+      setFetchState("ready");
+      return;
+    }
+    if (!isManagedPageAssetUrl(url)) {
+      setFetchState("unknown");
+      return;
+    }
+    const seq = ++requestSeq.current;
+    const requestedUrl = url.split("?")[0];
+    setFetchState("loading");
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await uploadApi.getPageMediaByUrl(url);
+        const data = unwrapResponse<PageMediaAssetLike>(result);
+        if (cancelled || requestSeq.current !== seq) return;
+        const currentPath = url.split("?")[0];
+        if (currentPath !== requestedUrl) return;
+        const trusted = trustedDisplaySize(data);
+        if (trusted && data?.url) {
+          const item: PageMediaItem = {
+            url: data.url,
+            type: "image",
+            name: data.name || "页面图片",
+            createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+            ...cachedImageFactFields({ ...data, ...trusted, metadataStatus: "measured" }),
+          };
+          addPageMediaItem(item);
+          setRemote(item);
+          setFetchState("ready");
+          return;
+        }
+        setRemote(null);
+        setFetchState("unknown");
+      } catch {
+        if (cancelled || requestSeq.current !== seq) return;
+        setRemote(null);
+        setFetchState("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [url, cached?.displayWidth, cached?.displayHeight, cached?.metadataStatus, cached?.mediaRevision, enabled, retryToken]);
+
+  const trustedCached = trustedDisplaySize(cached);
+  const trustedRemote = trustedDisplaySize(remote);
+  const sourceItem = trustedCached ? cached : trustedRemote ? remote : null;
+  const sourceSize = trustedCached ?? trustedRemote;
   return {
-    width,
-    height,
-    ratio: aspectRatio ? aspectRatio.replace(":", " / ") : `${width} / ${height}`,
-    label,
+    source: sourceItem && sourceSize
+      ? {
+        displayWidth: sourceSize.displayWidth,
+        displayHeight: sourceSize.displayHeight,
+        animated: sourceItem.animated,
+      }
+      : null,
+    fetchState,
+    retry: () => setRetryToken((token) => token + 1),
   };
 }
+
+type PageMediaAssetLike = {
+  url?: string;
+  name?: string;
+  width?: number;
+  height?: number;
+  displayWidth?: number;
+  displayHeight?: number;
+  animated?: boolean;
+  metadataStatus?: "measured" | "unknown";
+  mediaRevision?: string;
+  createdAt?: string;
+};
+
+export type { MediaSpec } from "./mediaSpec";
+export { mediaSpecFromRecommendation, mediaSpecMatchingFrame } from "./mediaSpec";
 
 interface MediaPickerFieldProps {
   /** 用于属性面板导览定位当前上传卡片 */
@@ -79,7 +194,16 @@ interface MediaPickerFieldProps {
   previewZoom?: number;
   /** 在预览上拖动焦点；提供后预览不再兼作更换图片入口。 */
   onFocusChange?: (next: { x: number; y: number }) => void;
+  /** 同一页面同时出现两块取景板时，用来区分无障碍名称。 */
+  focusAriaLabel?: string;
   focusDisabled?: boolean;
+  /** 当前画布这一端的画框，例如 4:3、4:5。有值时信息行显示画框，不再显示文件自身比例。 */
+  frameLabel?: string;
+  /**
+   * 当前端还没有自己的文件时，用这张图显示效果。
+   * 替换、链接仍通过 onChange 写入当前端；删除只在已有自己的文件时出现。
+   */
+  fallbackSrc?: string;
   /** 打开页面素材选择区。 */
   onOpenPageMedia?: () => void;
   pageMediaOpen?: boolean;
@@ -103,7 +227,10 @@ export default function MediaPickerField({
   previewFit,
   previewZoom,
   onFocusChange,
+  focusAriaLabel,
   focusDisabled = false,
+  frameLabel,
+  fallbackSrc,
   onOpenPageMedia,
   pageMediaOpen = false,
   taskPresentation = false,
@@ -122,30 +249,66 @@ export default function MediaPickerField({
     ? () => setBuiltinPageMediaOpen((open) => !open)
     : undefined);
   const pageMediaExpanded = onOpenPageMedia ? pageMediaOpen : builtinPageMediaOpen;
-  const previewSrc = resolveManagedTemplateMediaPreviewUrl(value);
+  const ownValue = value?.trim() ?? "";
+  const inheritedValue = fallbackSrc?.trim() ?? "";
+  const displayValue = ownValue || inheritedValue;
+  const previewSrc = resolveManagedTemplateMediaPreviewUrl(displayValue);
   const imgSize = useImageNaturalSize(previewSrc);
-  const matchStatus = sizeMatchStatus(spec, imgSize.width, imgSize.height);
-  const resolutionTooSmall = Boolean(
-    spec && imgSize.loaded &&
-      (imgSize.width < spec.width * 0.75 || imgSize.height < spec.height * 0.75),
-  );
-  const hasQualityWarning = Boolean(
-    imgSize.loaded && (resolutionTooSmall || matchStatus === "watch" || matchStatus === "risk"),
-  );
-  const naturalRatio = imgSize.loaded && imgSize.height > 0
-    ? imgSize.width / imgSize.height
-    : null;
-  const qualityLabel = imgSize.error
-    ? "不可用"
-    : !imgSize.loaded
-      ? "检测中"
+  const hasOwnValue = ownValue.length > 0;
+  const usingInherited = !hasOwnValue && inheritedValue.length > 0;
+  const libraryItem = useLibraryMediaItem(displayValue);
+  const {
+    source: measuredSource,
+    fetchState: factsFetchState,
+    retry: retryFacts,
+  } = useResolvedMediaSource(displayValue, libraryItem, !sessionOnly && Boolean(displayValue));
+  const deliveryDevice = device === "mobile" ? "mobile" : "desktop";
+  const frameAspect = parseFrameAspect(frameLabel)
+    ?? parseFrameAspect(previewAspectRatio)
+    ?? parseFrameAspect(spec?.ratio);
+  const canvasWidth = spec?.designCanvasWidth ?? spec?.width;
+  const designWidth = canvasWidth && canvasWidth > 0
+    ? designCanvasWidthOnDevice(deliveryDevice, canvasWidth)
+    : undefined;
+  const designHeight = designWidth && frameAspect
+    ? designWidth * frameAspect.height / frameAspect.width
+    : undefined;
+  const advice = describeImageSlotAdvice({
+    device: deliveryDevice,
+    designWidth,
+    designHeight,
+    uploadWidth: spec?.width,
+    uploadHeight: spec?.height,
+    designCanvasWidth: spec?.designCanvasWidth,
+    frameAspect,
+    objectFit: previewFit ?? "cover",
+    authorScale: previewZoom,
+    source: measuredSource,
+    inherited: usingInherited,
+  });
+  const hasQualityWarning = Boolean(displayValue && (advice.pixelsLow || advice.cropHeavy));
+  const qualityState = imgSize.error
+    ? "error"
+    : factsFetchState === "error"
+      ? "error"
       : hasQualityWarning
-        ? "需检查"
-        : "适合";
+        ? "warning"
+        : measuredSource
+          ? "good"
+          : displayValue
+            ? "loading"
+            : "idle";
+  const sourcePixelsLabel = factsFetchState === "loading" && !measuredSource
+    ? `${usingInherited ? "沿用桌面图。" : ""}正在读取原图像素…`
+    : factsFetchState === "error" && !measuredSource
+      ? `${usingInherited ? "沿用桌面图。" : ""}原图像素读取失败。可重试，或打开本页图片后再检测。`
+      : factsFetchState === "unknown" && !measuredSource
+        ? `${usingInherited ? "沿用桌面图。" : ""}原图像素未知。外链或不在本站素材库中的图无法自动检测。`
+        : advice.source;
   const inputRef = useRef<InputRef>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const hasValue = Boolean(value && value.trim().length > 0);
+  const hasValue = displayValue.length > 0;
   const isEmpty = !hasValue;
   const hasCropPreview = Boolean(previewAspectRatio);
   const focusX = Math.min(100, Math.max(0, previewFocus?.x ?? 50));
@@ -190,15 +353,28 @@ export default function MediaPickerField({
         return false;
       }
       const result = await uploadApi.uploadImage(file);
-      const data = unwrapResponse<{ url: string }>(result);
+      const data = unwrapResponse<{
+        url: string;
+        width?: number;
+        height?: number;
+        displayWidth?: number;
+        displayHeight?: number;
+        animated?: boolean;
+        metadataStatus?: "measured" | "unknown";
+        mediaRevision?: string;
+      }>(result);
       const finalUrl = data?.url;
       if (finalUrl) {
-        addPageMediaItem({
-          url: finalUrl,
-          type: "image",
-          name: file.name || "未命名图片",
-          createdAt: new Date().toISOString(),
-        });
+        const facts = cachedImageFactFields(data ?? {});
+        if (facts.metadataStatus === "measured" || facts.metadataStatus === "unknown") {
+          addPageMediaItem({
+            url: finalUrl,
+            type: "image",
+            name: file.name || "未命名图片",
+            createdAt: new Date().toISOString(),
+            ...facts,
+          });
+        }
         window.dispatchEvent(new CustomEvent(SESSION_MEDIA_UPLOADED_EVENT));
         onChange?.(finalUrl);
         message.success("上传成功");
@@ -279,6 +455,8 @@ export default function MediaPickerField({
       className={`homepage-editor__media-picker${taskPresentation ? " is-task-presentation" : ""}`}
       data-media-field={fieldKey}
       data-media-device={device}
+      data-media-inherited={usingInherited ? "true" : undefined}
+      data-media-frame={frameLabel || undefined}
       data-workspace-field-control="media-picker"
       data-workspace-field-shared="true"
       data-has-page-media={!sessionOnly && Boolean(openPageMedia) ? "true" : "false"}
@@ -302,12 +480,12 @@ export default function MediaPickerField({
               <ImageFocusPad
                 value={{ x: focusX, y: focusY }}
                 disabled={Boolean(readOnly || uploading || focusDisabled)}
-                previewSrc={value}
+                previewSrc={previewSrc}
                 previewAlt="预览"
                 previewFit={previewFit ?? (hasCropPreview ? "cover" : "contain")}
                 previewZoom={previewZoom}
                 previewAspectRatio={previewAspectRatio}
-                ariaLabel="拖动调整画面焦点"
+                ariaLabel={focusAriaLabel ?? "拖动调整画面焦点"}
                 onChange={onFocusChange}
               />
               <p className="image-focus-pad__hint">拖动画面中的点调整构图；更换图片请用下方按钮。</p>
@@ -397,38 +575,58 @@ export default function MediaPickerField({
               >
                 图片链接
               </Button>
-              <details className="homepage-editor__media-more-actions">
-                <summary aria-label="更多图片操作">更多</summary>
-                <div>
-                  <Button
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={handleClear}
-                  >
-                    删除图片
-                  </Button>
-                </div>
-              </details>
+              {hasOwnValue ? (
+                <details className="homepage-editor__media-more-actions">
+                  <summary aria-label="更多图片操作">更多</summary>
+                  <div>
+                    <Button
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={handleClear}
+                    >
+                      删除图片
+                    </Button>
+                  </div>
+                </details>
+              ) : null}
             </div>
           )}
           <dl
             className="homepage-editor__media-facts"
-            data-media-quality={imgSize.error ? "error" : hasQualityWarning ? "warning" : imgSize.loaded ? "good" : "loading"}
+            data-media-quality={qualityState}
             aria-label="图片信息"
             role="status"
           >
             <div>
-              <dt>比例</dt>
-              <dd>{naturalRatio === null ? "—" : naturalRatio.toFixed(2)}</dd>
+              <dt>设计画框</dt>
+              <dd data-image-design="true">{advice.design}</dd>
             </div>
             <div>
-              <dt>分辨率</dt>
-              <dd>{imgSize.loaded ? `${imgSize.width} × ${imgSize.height}` : "—"}</dd>
+              <dt>原图像素</dt>
+              <dd data-image-source-pixels="true" data-media-facts-state={factsFetchState}>
+                {sourcePixelsLabel}
+                {(factsFetchState === "error" || (factsFetchState === "unknown" && isManagedPageAssetUrl(displayValue))) && !measuredSource && !readOnly ? (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      className="homepage-editor__media-facts-retry"
+                      onClick={retryFacts}
+                    >
+                      重试
+                    </button>
+                  </>
+                ) : null}
+              </dd>
             </div>
             <div>
-              <dt>状态</dt>
-              <dd><i aria-hidden="true" />{qualityLabel}</dd>
+              <dt>清晰度</dt>
+              <dd data-image-sharpness="true">{advice.sharpness}</dd>
+            </div>
+            <div>
+              <dt>构图</dt>
+              <dd data-image-crop="true">{advice.crop}</dd>
             </div>
           </dl>
         </div>
@@ -577,19 +775,15 @@ export default function MediaPickerField({
         </>
       )}
 
-      {spec && hasQualityWarning && !imgSize.error ? (
+      {displayValue && hasQualityWarning && !imgSize.error ? (
         <div className="homepage-editor__media-warning" role="alert">
           <ExclamationCircleOutlined aria-hidden="true" />
           <span>
-            {resolutionTooSmall
-              ? "图片清晰度不足，建议更换更大的图片。"
-              : matchStatus === "risk"
-                ? "图片比例不适合，建议更换图片或进入设计调整构图。"
-                : "图片比例略有偏差，请检查画布裁切结果。"}
+            {advice.pixelsLow ? advice.sharpness : advice.crop}
           </span>
           <details>
             <summary>查看图片信息</summary>
-            <p>当前 {imgSize.width} × {imgSize.height}；建议 {spec.width} × {spec.height}（{spec.ratio}）。</p>
+            <p>{advice.source}{advice.design}</p>
           </details>
         </div>
       ) : null}

@@ -11,6 +11,7 @@ interface SegmentedFieldProps {
   options: ReadonlyArray<{ label: string; value: string; diagram?: string }>;
   onChange: (value: string) => void;
   ariaLabel?: string;
+  disabled?: boolean;
 }
 
 const IMG_FILL = "#DDE1E2";
@@ -124,6 +125,7 @@ export default function SegmentedField({
   options,
   onChange,
   ariaLabel,
+  disabled,
 }: SegmentedFieldProps) {
   const hasDiagram = options.some((option) => option.diagram);
   const group = (
@@ -138,6 +140,7 @@ export default function SegmentedField({
           type="button"
           className={value === option.value ? "is-active" : ""}
           aria-pressed={value === option.value}
+          disabled={disabled}
           onClick={() => onChange(option.value)}
         >
           {option.diagram ? <OptionDiagram kind={option.diagram} /> : null}

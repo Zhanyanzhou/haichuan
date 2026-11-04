@@ -1135,17 +1135,97 @@ test("中英文公开读取各自精确发布指针，不读取另一语言或�
     value: async (value: unknown) => value,
   });
 
-  const english = await service.getLocalizedPublishedPageDocument("home", "en");
-  const chinese = await service.getLocalizedPublishedPageDocument("home", "zh-CN");
+  const english = await service.getLocalizedPublishedPageDocument("home", "en") as any;
+  const chinese = await service.getLocalizedPublishedPageDocument("home", "zh-CN") as any;
 
   assert.deepEqual(lookedUpRevisionIds, [52, 41]);
   assert.equal(english?.version, 52);
-  assert.equal((english?.puckData as any).content[0].props.title, "English live");
+  assert.equal(english?.puckData.content[0].props.title, "English live");
   assert.equal(chinese?.version, 41);
-  assert.equal((chinese?.puckData as any).content[0].props.title, "中文线上");
+  assert.equal(chinese?.puckData.content[0].props.title, "中文线上");
   assert.deepEqual(chinese?.metadata, { seoTitle: "中文线上" });
   assert.equal("publishedBy" in (chinese ?? {}), false);
   assert.equal("review" in (chinese ?? {}), false);
+});
+
+test("公开 document/published 入口在缺省与显式 zh-CN 都接上 mediaFacts", async () => {
+  const puckData = {
+    content: [{ type: "hero", props: { title: "中文线上", image: "/uploads/page-assets/hero.png" } }],
+    root: { props: {} },
+    zones: {},
+  };
+  const publishedAt = new Date("2026-09-12T07:00:00.000Z");
+  const plainMetadata = { seoTitle: "中文线上" };
+  const contentHash = createPageLocaleContentHash(puckData, plainMetadata);
+  const revision = {
+    id: 41,
+    documentId: 7,
+    version: 41,
+    puckData,
+    metadata: withPageLocaleRevisionMetadata({
+      ...plainMetadata,
+      [CONTENT_TEMPLATE_PUBLICATION_METADATA_KEY]: createContentTemplatePublicationAttestation(),
+    }, "zh-CN", contentHash, {
+      submittedBy: 12,
+      submittedAt: new Date("2026-09-12T05:00:00.000Z"),
+      reviewedBy: 13,
+      reviewedAt: new Date("2026-09-12T06:00:00.000Z"),
+    }),
+    status: "published",
+    publishedAt,
+    publishedBy: 21,
+    createdAt: publishedAt,
+  };
+  const mediaFacts = {
+    "/uploads/page-assets/hero.png": {
+      displayWidth: 3840,
+      displayHeight: 2160,
+      animated: false,
+      revision: "3:abcdef123456",
+    },
+  };
+  const factReads: number[] = [];
+  const prisma = {
+    pageDocumentRevision: {
+      findFirst: async () => structuredClone(revision),
+    },
+  };
+  const service = new PageModulesService(prisma as unknown as PrismaService);
+  Object.defineProperty(service, "getLocalizedPageDraft", {
+    value: async () => ({
+      document: { id: 7, pageKey: "home", publishedRevisionId: 41 },
+      draft: {
+        locale: "zh-CN",
+        publishedRevisionId: 41,
+        publishedHash: contentHash,
+        publishedAt,
+        updatedAt: publishedAt,
+      },
+    }),
+  });
+  Object.defineProperty(service, "collectPageDocumentValidation", {
+    value: async () => ({ valid: true, errors: [], issues: [] }),
+  });
+  Object.defineProperty(service, "hydrateDynamicTemplateDefinitions", {
+    value: async (value: unknown) => value,
+  });
+  Object.defineProperty(service, "readPublishedImageFacts", {
+    value: async (revisionId: number) => {
+      factReads.push(revisionId);
+      return mediaFacts;
+    },
+  });
+
+  const controller = new PageModulesController(service);
+  const defaultLocale = await controller.getPublishedDocument("home", undefined);
+  const explicitZh = await controller.getPublishedDocument("home", "zh-CN");
+
+  assert.deepEqual(factReads, [41, 41]);
+  assert.deepEqual((defaultLocale as { mediaFacts?: unknown }).mediaFacts, mediaFacts);
+  assert.deepEqual((explicitZh as { mediaFacts?: unknown }).mediaFacts, mediaFacts);
+  assert.equal((defaultLocale as { locale?: string }).locale, "zh-CN");
+  assert.equal((explicitZh as { locale?: string }).locale, "zh-CN");
+  assert.equal((defaultLocale as { status?: string }).status, "PUBLISHED");
 });
 
 test("英文发布指针若指向中文 revision，公开读取失败关闭且不返回中文正文", async () => {

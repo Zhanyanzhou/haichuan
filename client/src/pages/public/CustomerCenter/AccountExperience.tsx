@@ -122,6 +122,8 @@ function WechatLoginPanel({
   const [smsCooldown, setSmsCooldown] = useState(0);
   const [sendingSms, setSendingSms] = useState(false);
   const [binding, setBinding] = useState(false);
+  const [bindError, setBindError] = useState<string | null>(null);
+  const [needsExistingPassword, setNeedsExistingPassword] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
@@ -132,15 +134,16 @@ function WechatLoginPanel({
 
   const handleSendBindSmsCode = async () => {
     if (!/^1\d{10}$/.test(phone)) {
-      alert("请先填写有效的手机号");
+      setBindError("请先填写有效的手机号");
       return;
     }
     setSendingSms(true);
+    setBindError(null);
     try {
       await customerApi.requestSmsCode({ phone });
       setSmsCooldown(60);
     } catch (error: unknown) {
-      alert(getRequestErrorMessage(error, "验证码发送失败"));
+      setBindError(getRequestErrorMessage(error, "验证码发送失败"));
     } finally {
       setSendingSms(false);
     }
@@ -205,26 +208,35 @@ function WechatLoginPanel({
 
   const handleBind = async () => {
     if (!/^1\d{10}$/.test(phone)) {
-      alert("请填写有效的手机号");
+      setBindError("请填写有效的手机号");
       return;
     }
-    if (!password) {
-      alert("请输入登录密码");
+    if (!smsCode.trim() && !password.trim()) {
+      setBindError("请填写短信验证码。该手机号已是会员时，改为填写原密码。");
+      return;
+    }
+    if (needsExistingPassword && !password.trim()) {
+      setBindError("该手机号已是会员，请输入原密码完成绑定");
       return;
     }
     setBinding(true);
+    setBindError(null);
     try {
       const res = await customerApi.wechatBind({
         bindToken: bindToken!,
         phone,
-        password,
+        password: password.trim() || undefined,
         smsCode: smsCode.trim() || undefined,
       });
       const result = unwrapResponse<{ customer: CustomerAccount }>(res);
       if (!result?.customer) throw new Error("绑定成功但会话未建立");
       onAuthenticated(result);
     } catch (error: unknown) {
-      alert(getRequestErrorMessage(error, "绑定失败，请重试"));
+      const message = getRequestErrorMessage(error, "绑定失败，请重试");
+      if (message.includes("请输入原密码") || message.includes("尚未设置密码")) {
+        setNeedsExistingPassword(true);
+      }
+      setBindError(message);
     } finally {
       setBinding(false);
     }
@@ -238,7 +250,14 @@ function WechatLoginPanel({
         className="account-wechat-login"
         style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid rgba(0,0,0,0.08)" }}
       >
-        <p className="text-xs">已通过微信验证身份，请绑定手机号完成登录</p>
+        <p className="text-xs">
+          已通过微信验证。填写本人手机号并完成短信验证，即可成为会员并登录。
+        </p>
+        {bindError ? (
+          <p role="alert" style={{ color: "#8C3F3B", marginTop: 12 }}>
+            {bindError}
+          </p>
+        ) : null}
         <label style={{ display: "block", marginTop: 12 }}>
           手机号
           <input
@@ -246,26 +265,18 @@ function WechatLoginPanel({
             onChange={(event) => setPhone(event.target.value)}
             inputMode="numeric"
             maxLength={11}
+            autoComplete="tel"
             style={{ marginTop: 6 }}
           />
         </label>
         <label style={{ display: "block", marginTop: 12 }}>
-          密码
-          <input
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            type="password"
-            maxLength={128}
-            style={{ marginTop: 6 }}
-          />
-        </label>
-        <label style={{ display: "block", marginTop: 12 }}>
-          短信验证码（新手机号创建账户必填）
+          短信验证码
           <span style={{ display: "flex", gap: 8, marginTop: 6 }}>
             <input
               value={smsCode}
               onChange={(event) => setSmsCode(event.target.value)}
               inputMode="numeric"
+              autoComplete="one-time-code"
               maxLength={6}
             />
             <button
@@ -278,8 +289,22 @@ function WechatLoginPanel({
             </button>
           </span>
         </label>
+        <label style={{ display: "block", marginTop: 12 }}>
+          {needsExistingPassword ? "原密码" : "密码（选填）"}
+          <input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            type="password"
+            autoComplete="current-password"
+            maxLength={128}
+            required={needsExistingPassword}
+            style={{ marginTop: 6 }}
+          />
+        </label>
         <p className="text-xs" style={{ marginTop: 6 }}>
-          已注册手机号填原密码即可绑定，无需验证码；未注册手机号将创建新会员账户，需短信验证，新密码需为 {ACCOUNT_PASSWORD_MIN_LENGTH}–{ACCOUNT_PASSWORD_MAX_LENGTH} 位。
+          {needsExistingPassword
+            ? "这个手机号已是会员。填写原密码即可绑定当前微信并登录。"
+            : `新会员只需短信验证，登录后可在账户里设置 ${ACCOUNT_PASSWORD_MIN_LENGTH}–${ACCOUNT_PASSWORD_MAX_LENGTH} 位密码。该手机号已是会员时，改为填写原密码。`}
         </p>
         <button
           type="button"
@@ -288,7 +313,7 @@ function WechatLoginPanel({
           disabled={binding}
           onClick={handleBind}
         >
-          {binding ? "绑定中…" : "绑定并登录"}
+          {binding ? "处理中…" : needsExistingPassword ? "绑定并登录" : "成为会员并登录"}
         </button>
       </div>
     );
@@ -313,7 +338,7 @@ function WechatLoginPanel({
         referrerPolicy="no-referrer"
         style={{ width: 240, height: 240, border: "none", marginTop: 12 }}
       />
-      <p className="text-xs">使用微信「扫一扫」，扫码后自动登录</p>
+      <p className="text-xs">已绑定的微信扫码后直接登录。第一次使用，验证手机号后成为会员。</p>
     </div>
   );
 }

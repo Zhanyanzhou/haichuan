@@ -444,14 +444,14 @@ export class WechatAuthService {
     }
   }
 
-  /** 绑定：扫码拿到 openid 后，绑定到既有手机号账户（校验密码）或新建账户。
-   * 新建账户必须先用短信验证手机号主权（防任意手机号抢注与绕过注册验真）；
+  /** 绑定：扫码拿到 openid 后，绑定到既有手机号账户（校验密码）或新建会员。
+   * 新手机号必须先用短信验证主权，创建后即为会员并登录；密码可留空，稍后在账户里设置。
    * 短信通道未配置时明确拒绝新建，只允许绑定既有账户。
    */
   async bindWechat(data: {
     bindToken: string;
     phone: string;
-    password: string;
+    password?: string;
     name?: string;
     smsCode?: string;
   }, browserBindingToken?: string | null) {
@@ -485,7 +485,7 @@ export class WechatAuthService {
     if (!/^1[3-9]\d{9}$/.test(phone)) {
       throw new BadRequestException("请提供有效的手机号码");
     }
-    const password = data.password ?? "";
+    const password = (data.password ?? "").trim();
 
     const existing = await this.prisma.customer.findUnique({ where: { phone } });
     let customer: {
@@ -498,6 +498,13 @@ export class WechatAuthService {
     if (existing) {
       if (existing.status === "DISABLED") {
         throw new UnauthorizedException("该账户已被停用");
+      }
+      if (!password) {
+        throw new BadRequestException(
+          existing.passwordHash
+            ? "该手机号已是会员，请输入原密码完成绑定"
+            : "该手机号已是会员，尚未设置密码。请用原来的微信登录，在账户里设置密码后再绑定",
+        );
       }
       if (
         !existing.passwordHash ||
@@ -561,8 +568,9 @@ export class WechatAuthService {
       if (!data.smsCode?.trim()) {
         throw new BadRequestException("请输入该手机号收到的短信验证码后再创建账户");
       }
-      assertAccountPassword(password);
-      const passwordHash = await bcrypt.hash(password, 12);
+      // 新会员默认可不设密码；填写时仍执行 6–18 位，避免绕过账户密码策略。
+      if (password) assertAccountPassword(password);
+      const passwordHash = password ? await bcrypt.hash(password, 12) : null;
       try {
         customer = await this.prisma.$transaction(async (tx) => {
           await consumeCustomerSmsCode(tx, phone, data.smsCode!, new Date(), "REGISTER");

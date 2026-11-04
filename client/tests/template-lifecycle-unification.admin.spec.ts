@@ -785,7 +785,7 @@ async function readCanvasReadout(page: Page) {
   await expect(readout).toHaveCount(1);
   const label = await readout.getAttribute("aria-label");
   const match = label?.match(
-    /^画布尺寸\s+(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)，缩放\s*(\d+(?:\.\d+)?)%$/,
+    /^画布尺寸\s+(?:宽\s*)?(\d+(?:\.\d+)?)(?:\s*px)?\s*[×x]\s*(?:高\s*)?(\d+(?:\.\d+)?)(?:\s*px)?(?:\s*·[^，]*)?，缩放\s*(\d+(?:\.\d+)?)%$/,
   );
   if (!label || !match) throw new Error(`无法读取画布尺寸：${label ?? "缺失"}`);
   return {
@@ -1212,7 +1212,7 @@ test.describe("TD-LIFECYCLE-UI-RED1 模板生命周期同权（route-Mock Chromi
     const { pageLibrary, handoffCard } = await openPageLibraryAfterHandoff(page);
 
     await expect(pageLibrary.locator(".unified-template-library__handoff-status")).toContainText(
-      "正在使用它的页面草稿会自动沿用这一版",
+      "能保留内容的页面草稿会自动沿用这一版",
     );
     await expect(handoffCard.getByRole("button", { name: /升级/ })).toHaveCount(0);
     await expect(handoffCard.getByRole("button", {

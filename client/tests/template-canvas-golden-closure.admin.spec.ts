@@ -152,6 +152,7 @@ test.describe("画布黄金场景（隔离 API，不代表真实发布）", () =
     await fillTemplateIdentity(page, "黄金 Hero", "珠宝新品图文展示");
     const region = await add(page, "区域");
     await select(page, region);
+    await page.locator('details[data-template-property-group="尺寸与位置"] > summary').click();
     await page.getByRole("combobox", { name: "高度方式", exact: true }).selectOption("fixed");
     await number(page, "高度", 600);
     await enter(page, region);

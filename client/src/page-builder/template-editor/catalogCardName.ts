@@ -16,3 +16,11 @@ export function catalogCardName(sectionRole: string | undefined, storedName: str
   const trimmed = storedName.trim();
   return trimmed || "未命名模板";
 }
+
+/** 角色名之外的已保存名称。目录仍以角色为主，存储名只作第二行，不改已保存的名称。 */
+export function catalogStoredName(sectionRole: string | undefined, storedName: string): string {
+  const roleLabel = catalogCardName(sectionRole, storedName);
+  const stored = storedName.trim();
+  if (!stored || stored === roleLabel || stored === "未命名模板") return "";
+  return stored;
+}

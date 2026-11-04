@@ -32,6 +32,20 @@ test('创建商品 DTO 接受最小合法载荷和多 SKU 数组', async () => {
   assert.equal(multiSkuErrors.length, 0);
 });
 
+test('创建商品 DTO 按淘宝口径限制标题：汉字计 2，字母与数字计 1，合计不超过 60', async () => {
+  const accepted = await validateCreateProduct({
+    ...validProduct,
+    name: `${'金'.repeat(29)}AB`,
+  });
+  assert.equal(accepted.length, 0);
+
+  const rejected = await validateCreateProduct({
+    ...validProduct,
+    name: '金'.repeat(31),
+  });
+  assert.ok(rejected.some((error) => error.property === 'name'));
+});
+
 test('创建商品 DTO 拒绝非正分类 ID', async () => {
   const errors = await validateCreateProduct({
     ...validProduct,

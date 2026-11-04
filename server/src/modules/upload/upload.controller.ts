@@ -142,6 +142,21 @@ export class UploadController {
   }
 
   @ApiBearerAuth()
+  @ApiOperation({ summary: '按本站公开路径只读回填页面素材展示尺寸' })
+  @Header('Cache-Control', 'private, no-store, max-age=0')
+  @Header('Vary', 'Cookie, Authorization')
+  @Get('media/by-url')
+  async getPageMediaByUrl(
+    @Req() request: StaffRequest,
+    @Query('url') url?: string,
+  ) {
+    if (typeof url !== 'string' || !url.trim() || url.length > 1024) {
+      throw new BadRequestException('素材地址无效');
+    }
+    return this.uploadService.getPageMediaByPublicUrl(url.trim(), request.user);
+  }
+
+  @ApiBearerAuth()
   @ApiOperation({ summary: '按正式存储键在后台预览页面素材' })
   @Throttle(STAFF_MEDIA_PREVIEW_THROTTLE)
   @Get('media/preview-by-storage-key')

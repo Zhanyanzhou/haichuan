@@ -580,7 +580,7 @@ export async function readCanvasReadout(page: Page): Promise<CanvasReadout> {
   const readout = page.locator("output[aria-label^='画布尺寸 ']:visible");
   await expect(readout).toHaveCount(1);
   const label = await readout.getAttribute("aria-label");
-  const match = label?.match(/^画布尺寸\s+(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)，缩放\s*(\d+(?:\.\d+)?)%$/);
+  const match = label?.match(/^画布尺寸\s+(?:宽\s*)?(\d+(?:\.\d+)?)(?:\s*px)?\s*[×x]\s*(?:高\s*)?(\d+(?:\.\d+)?)(?:\s*px)?(?:\s*·[^，]*)?，缩放\s*(\d+(?:\.\d+)?)%$/);
   if (!label || !match) throw new Error(`无法读取画布尺寸：${label ?? "缺失"}`);
   return {
     height: Number(match[2]),

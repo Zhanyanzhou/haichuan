@@ -14,7 +14,69 @@
  * 编辑器画布的行动槽渲染成不可聚焦的 `div`（`actionHref` 在 `editor` 模式下恒为 `undefined`），
  * 所以这条规则不参与画布的选择与点选反馈。
  */
+.hc-dynamic-template__artwork-copy {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+  background: none !important;
+  pointer-events: none !important;
+}
+
 .hc-dynamic-template :is(a, button, [role="button"])[data-template-slot-id]:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 2px;
+}
+
+/*
+ * 区块模板标准 R-9：600～767px 仍用手机内容，单列叙事图和文字组最宽 560px 并居中。
+ * 作品卡不带这个标记，继续按内容宽排。inline 出血边距要用 !important 收回。
+ */
+.hc-dynamic-template[data-template-large-phone="true"] [data-template-large-phone-measure="true"] {
+  box-sizing: border-box;
+  width: min(100%, 560px) !important;
+  max-width: 560px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+/* 显式采用双端固定画幅时，真实根和外壳共用同一尺寸；内容不得把根撑成近似比例。 */
+.hc-dynamic-template[data-template-fixed-canvas="true"] > [data-template-node-id] {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: auto !important;
+  box-sizing: border-box;
+  overflow: visible !important;
+}
+
+.hc-dynamic-template[data-template-fixed-canvas="true"] [data-template-paired-image-cell] {
+  overflow: visible !important;
+}
+
+.hc-dynamic-template[data-template-surface="editor"] .hc-dynamic-template__empty-slot {
+  min-height: 2.5rem;
+  padding: 4px;
+  outline: 1px dashed #8A9194;
+  outline-offset: 2px;
+}
+
+.hc-dynamic-template[data-template-surface="editor"] [data-template-pair-group="true"] > [data-template-slot-id] {
+  outline: 1px solid #8A9194;
+  outline-offset: 2px;
+}
+
+.hc-dynamic-template [data-template-fixed-canvas-note] {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  margin: 0;
 }

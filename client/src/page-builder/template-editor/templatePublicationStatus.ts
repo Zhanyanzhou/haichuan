@@ -32,6 +32,31 @@ export function resolveTemplatePublicationStatus({
     : "published-with-unpublished-changes";
 }
 
+/**
+ * 正式版本已经包含当前设计时，再发下一版会被服务端拒绝。
+ * 有未保存修改、检查过期后的新输入，或校验值对不上时，不把这次发布当成重复。
+ */
+export function templateContentMatchesPublishedVersion({
+  dirty,
+  currentInputChanged = false,
+  publishedDefinitionChecksum,
+  draftDefinitionChecksum,
+  reviewedBaselineChecksum,
+  savedChecksum,
+}: {
+  dirty: boolean;
+  currentInputChanged?: boolean;
+  publishedDefinitionChecksum: string | null | undefined;
+  draftDefinitionChecksum?: string | null;
+  reviewedBaselineChecksum?: string | null;
+  savedChecksum?: string | null;
+}) {
+  if (!publishedDefinitionChecksum || dirty || currentInputChanged) return false;
+  if (savedChecksum) return savedChecksum === publishedDefinitionChecksum;
+  if (!draftDefinitionChecksum || draftDefinitionChecksum !== publishedDefinitionChecksum) return false;
+  return !reviewedBaselineChecksum || reviewedBaselineChecksum === publishedDefinitionChecksum;
+}
+
 export function getTemplatePublicationLabel(status: TemplatePublicationStatus | null) {
   if (status === "draft") return "草稿";
   if (status === "published-current") return "已发布";

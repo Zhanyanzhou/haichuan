@@ -138,6 +138,7 @@ const MASTERS: Record<string, { role: string; root: Skeleton }> = {
                 { type: "ImageSlot", name: "作品图 1" },
                 { type: "ImageSlot", name: "作品图 2" },
                 { type: "ImageSlot", name: "作品图 3" },
+                { type: "ImageSlot", name: "作品图 4" },
               ],
             },
           ],
@@ -339,6 +340,18 @@ test("实现源与文档骨架逐节点一致，且七块定义各自通过发�
             heroMobileRatio: background?.mobileRules?.aspectRatio,
           };
         })() : {}),
+        // D.47：M3 只开放“图片位置”，目标是图文分栏那一行；副图两张都是 4:5。
+        ...(role === "editorial-split" ? (() => {
+          const mediaSide = (definition.metadata as { pageSettings?: { mediaSide?: { targetNodeId: string; authoredSide: string } } }).pageSettings?.mediaSide;
+          const target = mediaSide ? definition.nodes[mediaSide.targetNodeId] : undefined;
+          return {
+            mediaSideTargetName: target?.name,
+            mediaSideAuthoredSide: mediaSide?.authoredSide,
+            detailRatios: Object.values(definition.slots)
+              .filter((slot) => slot.key.startsWith("splitDetail"))
+              .map((slot) => `${slot.desktopRules?.aspectRatio}/${slot.mobileRules?.aspectRatio}`),
+          };
+        })() : {}),
       };
 
       const walk = (nodeId: string, parent: string | null, path: string) => {
@@ -411,7 +424,12 @@ test("实现源与文档骨架逐节点一致，且七块定义各自通过发�
   for (const role of Object.keys(MASTERS)) {
     expect(report.metadata[role]).toMatchObject({ sectionRole: role, schemaVersion: 3, defaultContent: 0, previewContent: 0 });
   }
-  expect(report.metadata["page-hero"]).toMatchObject({ heroDesktopRatio: "16:9", heroMobileRatio: "4:5" });
+  expect(report.metadata["page-hero"]).toMatchObject({ heroDesktopRatio: "16:9", heroMobileRatio: "9:16" });
+  expect(report.metadata["editorial-split"]).toMatchObject({
+    mediaSideTargetName: "图文分栏",
+    mediaSideAuthoredSide: "start",
+    detailRatios: ["4:5/4:5", "4:5/4:5"],
+  });
   expect(report.usedTypes).toEqual(
     ["ButtonSlot", "Column", "Container", "Grid", "HeadingSlot", "ImageSlot", "LinkSlot", "RichTextSlot", "Row", "Section", "Stack", "TextSlot"],
   );

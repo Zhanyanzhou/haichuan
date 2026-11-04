@@ -105,8 +105,8 @@ test("母模板发布保留同一 URL 的每个断点背景与槽位路径", () 
   })
     .filter((item) => item.url === sharedUrl);
   assert.deepEqual(references.map((item) => item.path).sort(), [
-    "defaultContent.slot_image",
-    "defaultContent.slot_image_duplicate",
+    "defaultContent.slot_image.src",
+    "defaultContent.slot_image_duplicate.src",
     "nodes.node_root.responsive.desktop.backgroundImage",
     "nodes.node_root.responsive.mobile.backgroundImage",
   ]);
@@ -218,13 +218,39 @@ test("动态模板媒体收集按桌面与移动端公开可达性取并集并�
 
   assert.equal(references.length, 1);
   assert.equal(references[0]?.url, "/uploads/mobile-only.jpg");
-  assert.equal(references[0]?.field, "slot_image");
+  assert.equal(references[0]?.field, "slot_image.src");
   const publicationReferences = getDynamicTemplateDocumentMediaReferences(
     documentWithDefinition(definition),
     { preserveReferencePaths: true, canonicalResponsivePaths: true },
   );
   assert.equal(publicationReferences.length, 2);
   assert.equal(new Set(publicationReferences.map((item) => item.path)).size, 2);
+});
+
+test("同一槽位的桌面图和手机图使用不同发布路径", () => {
+  const definition = imageDefinition();
+  const references = getDynamicTemplateDocumentMediaReferences(
+    documentWithDefinition(definition, {
+      contentBySlotId: {
+        slot_image: {
+          src: "/uploads/desktop.jpg",
+          mobileSrc: "/uploads/mobile.jpg",
+          alt: "珠宝",
+        },
+        slot_image_duplicate: { src: "/uploads/desktop.jpg", alt: "同一珠宝主图" },
+      },
+    }),
+    { preserveReferencePaths: true, canonicalResponsivePaths: true },
+  );
+  const slotImagePaths = references
+    .filter((item) => item.path.includes("contentBySlotId.slot_image."))
+    .map((item) => item.path)
+    .sort();
+  assert.deepEqual(slotImagePaths, [
+    "content[0].props.contentBySlotId.slot_image.mobileSrc",
+    "content[0].props.contentBySlotId.slot_image.src",
+  ]);
+  assert.equal(new Set(references.map((item) => item.path)).size, references.length);
 });
 
 test("隐藏实例、隐藏槽位和不可达祖先不会扩大公开素材授权范围", async (t) => {

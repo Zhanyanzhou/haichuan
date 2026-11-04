@@ -413,7 +413,7 @@ test.describe("游客公开浏览", () => {
     await page.evaluate((data) => {
       window.postMessage(data, window.location.origin);
     }, validMessage);
-    await expect(page.getByText("已通过微信验证身份")).toHaveCount(0);
+    await expect(page.getByText("已通过微信验证")).toHaveCount(0);
 
     await page.evaluate((data) => {
       const source = document.querySelector<HTMLIFrameElement>(
@@ -427,7 +427,7 @@ test.describe("游客公开浏览", () => {
         }),
       );
     }, validMessage);
-    await expect(page.getByText("已通过微信验证身份")).toHaveCount(0);
+    await expect(page.getByText("已通过微信验证")).toHaveCount(0);
 
     await page.evaluate((data) => {
       const source = document.querySelector<HTMLIFrameElement>(
@@ -441,7 +441,7 @@ test.describe("游客公开浏览", () => {
         }),
       );
     }, validMessage);
-    await expect(page.getByText("已通过微信验证身份")).toHaveCount(0);
+    await expect(page.getByText("已通过微信验证")).toHaveCount(0);
 
     const iframeHandle = await iframe.elementHandle();
     const oauthFrame = await iframeHandle?.contentFrame();
@@ -449,7 +449,8 @@ test.describe("游客公开浏览", () => {
     await oauthFrame!.evaluate(({ data, parentOrigin }) => {
       window.parent.postMessage(data, parentOrigin);
     }, { data: validMessage, parentOrigin: new URL(baseURL!).origin });
-    await expect(page.getByText("已通过微信验证身份")).toBeVisible();
+    await expect(page.getByText("已通过微信验证")).toBeVisible();
+    await expect(page.getByRole("button", { name: "成为会员并登录" })).toBeVisible();
   });
 
   test("找回密码同步阻止重复提交且失败后可以原地重试", async ({ page }) => {
@@ -1443,7 +1444,7 @@ test.describe("游客公开浏览", () => {
   test("/cart 在交易关闭时仍打开购物车并说明购买尚未开放", async ({ page }) => {
     await page.goto("/cart");
     await expect(page).toHaveURL(/\/cart$/);
-    await expect(page.getByRole("heading", { level: 1, name: "购物车" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "购物袋" })).toBeVisible();
     await expect(page.getByText("线上购买尚未开放")).toBeVisible();
     await expect(page.getByRole("link", { name: "去选款" })).toHaveAttribute("href", "/catalog");
     await expect(page.getByRole("banner")).toBeVisible();
@@ -1461,7 +1462,7 @@ test.describe("游客公开浏览", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/cart");
     await expect(page).toHaveURL(/\/cart$/);
-    await expect(page.getByRole("heading", { level: 1, name: "购物车" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "购物袋" })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     await page.keyboard.press("Tab");

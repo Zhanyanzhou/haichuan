@@ -417,12 +417,18 @@ export class DynamicTemplatesService {
       }
       this.assertReplayVersionIntegrity(template.templateId, published);
       this.assertReplayVersionNote(published, identity);
+      const pageAdoption = await this.readRecordedPageAdoption(
+        transaction,
+        template.id,
+        published.version,
+      );
       return {
         templateId: template.templateId,
         version: published.version,
         published,
         draft: template.draft,
         outcome: "already-published" as const,
+        pageAdoption,
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
@@ -446,6 +452,13 @@ export class DynamicTemplatesService {
       definition,
       checksum: createHash("sha256").update(serialized).digest("hex"),
     };
+  }
+
+  private rejectUnchangedPublication(): never {
+    throw new BadRequestException({
+      message: "模板内容与当前正式版本相同，无需重复发布",
+      code: "DYNAMIC_TEMPLATE_CONTENT_UNCHANGED",
+    });
   }
 
   private validatePublishDefinition(input: unknown): ValidatedDefinition {
@@ -1394,9 +1407,9 @@ export class DynamicTemplatesService {
   }
 
   /**
-   * 模板新版本发布后，把正在使用旧版本的页面草稿和装修方案沿用到新版本。
-   * 页面自己填写的内容、显隐和构图覆盖会保留；无法无损保留时整批不改页面。
-   * 已发布的页面快照保持不动，客户前台仍等「发布页面」。
+   * 模板新版本发布后，把能够无损保留的页面草稿、语言草稿和装修方案沿用到新版本。
+   * 一份对象里任一实例无法保留时，整份保持旧内容和旧模板引用。
+   * 已发布快照和历史修订不写入。客户前台仍等「发布页面」。
    */
   private async adoptPublishedTemplateOntoDrafts(
     tx: Prisma.TransactionClient,
@@ -1411,7 +1424,12 @@ export class DynamicTemplatesService {
     },
   ) {
     if (input.fromVersion <= 0) {
-      return { adoptedPageCount: 0, adoptedInstanceCount: 0, blockers: [] as string[] };
+      return {
+        adoptedPageCount: 0,
+        adoptedInstanceCount: 0,
+        blockers: [] as string[],
+        skipped: [],
+      };
     }
     const versionRows = await tx.dynamicTemplateVersion.findMany({
       where: { dynamicTemplateId: input.dynamicTemplateId },
@@ -1466,6 +1484,7 @@ export class DynamicTemplatesService {
     };
     const pageImpact = planDynamicTemplateActivation({
       ...planInput,
+      objectKind: "page-draft",
       documents: pagePlans,
       schemes: schemes.map((scheme) => ({
         schemeId: scheme.id,
@@ -1476,54 +1495,178 @@ export class DynamicTemplatesService {
     });
     const localizationImpact = planDynamicTemplateActivation({
       ...planInput,
+      objectKind: "language-draft",
       documents: localizationPlans,
       schemes: [],
     });
     const blockers = [...pageImpact.blockers, ...localizationImpact.blockers];
     if (blockers.length > 0) {
-      return { adoptedPageCount: 0, adoptedInstanceCount: 0, blockers };
-    }
-    const adoptedDrafts = pageImpact.documents.filter((document) => (
-      document.occurrences.some((occurrence) => occurrence.source === "draft" && occurrence.fromVersion !== input.toVersion)
-    ));
-    for (const document of adoptedDrafts) {
-      await tx.pageDocument.update({
-        where: { id: document.documentId },
-        data: { puckData: document.upgradedDraftPuckData as Prisma.InputJsonValue },
+      throw new ConflictException({
+        code: "DYNAMIC_TEMPLATE_ADOPTION_PLAN_INVALID",
+        message: "模板沿用计划与本次发布身份不一致，已取消这次发布。",
+        blockers,
       });
     }
+    const skipped = [...pageImpact.skipped, ...localizationImpact.skipped];
+    const adoptedDrafts = pageImpact.documents.filter((document) => (
+      document.draftAdoption === "adopt"
+      && document.occurrences.some((occurrence) => (
+        occurrence.source === "draft" && occurrence.fromVersion !== input.toVersion
+      ))
+    ));
+    for (const document of adoptedDrafts) {
+      const source = documents.find((item) => item.id === document.documentId);
+      if (!source) {
+        throw new ConflictException({
+          code: "DYNAMIC_TEMPLATE_ADOPTION_CONCURRENT_DRAFT",
+          message: "页面草稿已变化，这次模板发布已取消，没有改写该草稿。",
+        });
+      }
+      const updated = await tx.pageDocument.updateMany({
+        where: { id: document.documentId, updatedAt: source.updatedAt },
+        data: { puckData: document.upgradedDraftPuckData as Prisma.InputJsonValue },
+      });
+      if (updated.count !== 1) {
+        throw new ConflictException({
+          code: "DYNAMIC_TEMPLATE_ADOPTION_CONCURRENT_DRAFT",
+          message: "页面草稿已由其他会话更新，这次模板发布已取消，没有改写该草稿。",
+        });
+      }
+    }
     const adoptedLocalizations = localizationImpact.documents.filter((document) => (
-      document.occurrences.some((occurrence) => occurrence.fromVersion !== input.toVersion)
+      document.draftAdoption === "adopt"
+      && document.occurrences.some((occurrence) => occurrence.fromVersion !== input.toVersion)
     ));
     for (const localization of adoptedLocalizations) {
-      await tx.pageDocumentLocalization.update({
-        where: { id: localization.documentId },
+      const source = documents
+        .flatMap((document) => document.localizations ?? [])
+        .find((item) => item.id === localization.documentId);
+      if (!source) {
+        throw new ConflictException({
+          code: "DYNAMIC_TEMPLATE_ADOPTION_CONCURRENT_DRAFT",
+          message: "语言草稿已变化，这次模板发布已取消，没有改写该草稿。",
+        });
+      }
+      const updated = await tx.pageDocumentLocalization.updateMany({
+        where: { id: localization.documentId, updatedAt: source.updatedAt },
         data: {
           puckData: localization.upgradedDraftPuckData as Prisma.InputJsonValue,
           contentHash: createPageLocaleContentHash(
             localization.upgradedDraftPuckData,
-            this.persistablePageMetadata(localizationPlans.find((item) => item.documentId === localization.documentId)?.draftMetadata),
+            this.persistablePageMetadata(source.metadata),
           ),
         },
       });
+      if (updated.count !== 1) {
+        throw new ConflictException({
+          code: "DYNAMIC_TEMPLATE_ADOPTION_CONCURRENT_DRAFT",
+          message: "语言草稿已由其他会话更新，这次模板发布已取消，没有改写该草稿。",
+        });
+      }
     }
-    for (const scheme of pageImpact.schemes) {
-      if (!scheme.occurrences.some((occurrence) => occurrence.fromVersion !== input.toVersion)) continue;
-      await tx.pageScheme.update({
-        where: { id: scheme.schemeId },
+    const adoptedSchemes = pageImpact.schemes.filter((scheme) => (
+      scheme.adoption === "adopt"
+      && scheme.occurrences.some((occurrence) => occurrence.fromVersion !== input.toVersion)
+    ));
+    for (const scheme of adoptedSchemes) {
+      const source = schemes.find((item) => item.id === scheme.schemeId);
+      if (!source) {
+        throw new ConflictException({
+          code: "DYNAMIC_TEMPLATE_ADOPTION_CONCURRENT_DRAFT",
+          message: "装修方案已变化，这次模板发布已取消，没有改写该方案。",
+        });
+      }
+      const updated = await tx.pageScheme.updateMany({
+        where: { id: scheme.schemeId, updatedAt: source.updatedAt },
         data: { puckData: scheme.upgradedPuckData as Prisma.InputJsonValue },
       });
+      if (updated.count !== 1) {
+        throw new ConflictException({
+          code: "DYNAMIC_TEMPLATE_ADOPTION_CONCURRENT_DRAFT",
+          message: "装修方案已由其他会话更新，这次模板发布已取消，没有改写该方案。",
+        });
+      }
     }
     const adoptedInstanceCount = adoptedDrafts.reduce(
       (total, document) => total + document.occurrences.filter((occurrence) => occurrence.source === "draft").length,
       0,
     ) + adoptedLocalizations.reduce((total, document) => total + document.occurrences.length, 0)
-      + pageImpact.schemes.reduce((total, scheme) => total + scheme.occurrences.length, 0);
+      + adoptedSchemes.reduce((total, scheme) => total + scheme.occurrences.length, 0);
     return {
-      adoptedPageCount: adoptedDrafts.length + adoptedLocalizations.length + pageImpact.schemes.length,
+      adoptedPageCount: adoptedDrafts.length + adoptedLocalizations.length + adoptedSchemes.length,
       adoptedInstanceCount,
-      blockers: [],
+      blockers: [] as string[],
+      skipped,
     };
+  }
+
+  private async readRecordedPageAdoption(
+    tx: Prisma.TransactionClient,
+    dynamicTemplateId: number,
+    toVersion: number,
+  ): Promise<{
+    adoptedPageCount: number;
+    adoptedInstanceCount: number;
+    blockers: string[];
+    skipped: Array<{
+      kind: "page-draft" | "language-draft" | "scheme";
+      objectId: number;
+      pageKey: string;
+      reasons: Array<{ code: string }>;
+    }>;
+  } | undefined> {
+    const logs = await tx.operationLog.findMany({
+      where: { action: "TEMPLATE_VERSION_PUBLISHED", targetId: dynamicTemplateId },
+      orderBy: { id: "desc" },
+      take: 20,
+    });
+    for (const log of logs) {
+      if (typeof log.detail !== "string") continue;
+      try {
+        const detail = JSON.parse(log.detail) as { toVersion?: unknown; pageAdoption?: unknown };
+        if (detail.toVersion !== toVersion || !detail.pageAdoption || typeof detail.pageAdoption !== "object") {
+          continue;
+        }
+        const pageAdoption = detail.pageAdoption as {
+          adoptedPageCount?: unknown;
+          adoptedInstanceCount?: unknown;
+          blockers?: unknown;
+          skipped?: unknown;
+        };
+        if (!(
+          typeof pageAdoption.adoptedPageCount === "number"
+          && typeof pageAdoption.adoptedInstanceCount === "number"
+          && Array.isArray(pageAdoption.blockers)
+          && pageAdoption.blockers.every((item) => typeof item === "string")
+          && Array.isArray(pageAdoption.skipped)
+          && pageAdoption.skipped.every((item) => {
+            if (!item || typeof item !== "object") return false;
+            const row = item as { kind?: unknown; objectId?: unknown; pageKey?: unknown; reasons?: unknown };
+            return (row.kind === "page-draft" || row.kind === "language-draft" || row.kind === "scheme")
+              && typeof row.objectId === "number"
+              && typeof row.pageKey === "string"
+              && Array.isArray(row.reasons)
+              && row.reasons.every((reason) => (
+                !!reason && typeof reason === "object" && typeof (reason as { code?: unknown }).code === "string"
+              ));
+          })
+        )) continue;
+        return detail.pageAdoption as {
+          adoptedPageCount: number;
+          adoptedInstanceCount: number;
+          blockers: string[];
+          skipped: Array<{
+            kind: "page-draft" | "language-draft" | "scheme";
+            objectId: number;
+            pageKey: string;
+            reasons: Array<{ code: string }>;
+          }>;
+        };
+      } catch {
+        continue;
+      }
+    }
+    return undefined;
   }
 
   async publish(
@@ -1572,12 +1715,18 @@ export class DynamicTemplatesService {
             }
             this.assertReplayVersionIntegrity(template.templateId, existingTarget);
             this.assertReplayVersionNote(existingTarget, strictIdentity);
+            const pageAdoption = await this.readRecordedPageAdoption(
+              tx,
+              template.id,
+              existingTarget.version,
+            );
             return {
               templateId: template.templateId,
               version: existingTarget.version,
               published: existingTarget,
               draft: template.draft,
               outcome: "already-published" as const,
+              pageAdoption,
             };
           }
           const nextExpectedVersion = template.publishedVersion + 1;
@@ -1636,6 +1785,19 @@ export class DynamicTemplatesService {
             "模板草稿校验值已变化，请重新执行发布检查",
           );
         }
+        if (template.publishedVersion > 0) {
+          const currentPublished = await tx.dynamicTemplateVersion.findUnique({
+            where: {
+              dynamicTemplateId_version: {
+                dynamicTemplateId: template.id,
+                version: template.publishedVersion,
+              },
+            },
+          });
+          if (currentPublished?.definitionChecksum === template.draft.definitionChecksum) {
+            this.rejectUnchangedPublication();
+          }
+        }
         const validated = this.validatePublishDefinition(template.draft.definition);
         if (validated.definition.templateId !== template.templateId) {
           throw new BadRequestException("草稿 templateId 与模板记录不一致");
@@ -1656,7 +1818,7 @@ export class DynamicTemplatesService {
             },
           });
           if (current?.definitionChecksum === validated.checksum) {
-            throw new BadRequestException("模板内容与当前正式版本相同，无需重复发布");
+            this.rejectUnchangedPublication();
           }
         }
         const nextVersion = strictIdentity?.targetVersion ?? template.publishedVersion + 1;
@@ -1874,6 +2036,7 @@ export class DynamicTemplatesService {
       });
       if (!definition) throw new ConflictException("正式模板版本完整性校验失败，已拒绝加载");
       const publishedMetadata = this.definitionProjection(definition);
+      const pageAdoption = await this.readRecordedPageAdoption(transaction, template.id, version);
       return {
         templateId: template.templateId,
         name: publishedMetadata.name,
@@ -1889,6 +2052,7 @@ export class DynamicTemplatesService {
         ...published,
         definition,
         definitionChecksum: calculateDynamicTemplateDefinitionChecksum(definition),
+        ...(pageAdoption ? { pageAdoption } : {}),
       };
     });
   }

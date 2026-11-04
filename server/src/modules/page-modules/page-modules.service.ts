@@ -10,7 +10,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { EventEmitter } from "events";
 import { existsSync } from "fs";
-import { relative, resolve, sep } from "path";
+import { isAbsolute, relative, resolve, sep } from "path";
 import { fromEvent, interval, map, merge, Observable, startWith } from "rxjs";
 import {
   CONTENT_TEMPLATE_ASSET_POLICY,
@@ -62,6 +62,7 @@ import {
 } from "./page-document-localization";
 import { MediaAuthorizationResolverService } from "../upload/media-authorization-resolver.service";
 import { resolveMediaStorageRoots } from "../upload/media-storage-paths";
+import { readCachedDisplayImageMetadata } from "../../common/media/display-image-metadata";
 import type { StaffPrincipal } from "../../common/security/authenticated-principal";
 import {
   buildManagedMediaShadowReport,
@@ -215,6 +216,25 @@ function isBusinessRegionBlock(value: unknown): value is VisiblePuckBlock {
     value.type === "业务功能区" &&
     isRecord(value.props)
   );
+}
+
+function isBrandContentBlock(value: unknown): value is VisiblePuckBlock {
+  return (
+    isVisiblePuckBlock(value) &&
+    (Boolean(CONTENT_TEMPLATE_BY_MODULE_TYPE[value.type]) || value.type === DYNAMIC_TEMPLATE_BLOCK_TYPE)
+  );
+}
+
+/**
+ * D.45：联系页的公开内容就是微信、电话和预约。没有品牌导语时，固定业务区本身可以发布。
+ * 一旦放了可见品牌模块，业务区仍须紧随首个品牌模块。
+ */
+function isStandaloneContactPage(pageKey: string, rootContent: readonly unknown[]): boolean {
+  if (pageKey !== "contact") return false;
+  const visibleRegions = rootContent.filter((block) =>
+    isBusinessRegionBlock(block) && block.props.isVisible !== false
+  );
+  return visibleRegions.length === 1 && !rootContent.some(isBrandContentBlock);
 }
 
 function toInputJsonValue(value: unknown): Prisma.InputJsonValue {
@@ -1137,6 +1157,8 @@ export class PageModulesService {
         version: snapshot.version,
       };
     }
+    // 与非本地化公开读取共用同一份修订级展示事实；缺尺寸的素材省略，空结果不加字段。
+    const mediaFacts = await this.readPublishedImageFacts(snapshot.publishedRevisionId);
     return {
       pageKey,
       locale,
@@ -1149,6 +1171,7 @@ export class PageModulesService {
       updatedAt: snapshot.updatedAt,
       version: snapshot.version,
       contentHash: snapshot.contentHash,
+      ...(Object.keys(mediaFacts).length > 0 ? { mediaFacts } : {}),
     };
   }
 
@@ -2145,7 +2168,22 @@ export class PageModulesService {
     };
   }
 
-  async getPublishedPageDocument(pageKey: string) {
+  async getPublishedPageDocument(pageKey: string): Promise<null | {
+    pageKey: string;
+    status: string;
+    publishedAt: Date | null;
+    updatedAt: Date;
+    version: number;
+    invalidReason?: string;
+    puckData?: unknown;
+    metadata?: Record<string, string>;
+    mediaFacts?: Record<string, {
+      displayWidth: number;
+      displayHeight: number;
+      animated: boolean;
+      revision: string;
+    }>;
+  }> {
     const snapshot = await this.getPublishedPageDocumentSnapshot(pageKey);
     if (!snapshot) return null;
     if (!hasCurrentContentTemplatePublicationAttestation(snapshot.metadata)) {
@@ -2188,6 +2226,7 @@ export class PageModulesService {
         version: snapshot.version,
       };
     }
+    const mediaFacts = await this.readPublishedImageFacts(snapshot.publishedRevisionId);
     return {
       pageKey: snapshot.pageKey,
       puckData: await this.hydrateDynamicTemplateDefinitions(snapshot.puckData),
@@ -2197,7 +2236,74 @@ export class PageModulesService {
       publishedAt: snapshot.publishedAt,
       updatedAt: snapshot.updatedAt,
       version: snapshot.version,
+      ...(Object.keys(mediaFacts).length > 0 ? { mediaFacts } : {}),
     };
+  }
+
+  /**
+   * 只给这份已发布修订里、已经具备公开资格的图片附展示尺寸。
+   * 文件头读不到就省略该素材，不用数据库里未核对的宽高冒充。空结果不增加响应字段。
+   */
+  private async readPublishedImageFacts(revisionId: number): Promise<Record<string, {
+    displayWidth: number;
+    displayHeight: number;
+    animated: boolean;
+    revision: string;
+  }>> {
+    try {
+      const delegate = this.prisma.pageDocumentRevisionMediaAsset;
+      if (!delegate || typeof delegate.findMany !== "function") return {};
+      const rows = await delegate.findMany({
+        where: { pageDocumentRevisionId: revisionId },
+        include: { asset: true },
+      });
+      const facts: Record<string, {
+        displayWidth: number;
+        displayHeight: number;
+        animated: boolean;
+        revision: string;
+      }> = {};
+      for (const row of rows) {
+        const asset = row.asset;
+        if (
+          !asset
+          || asset.status !== "READY"
+          || asset.accessLevel !== "PUBLIC"
+          || !asset.storageKey.startsWith("page-assets/")
+          || !asset.mimeType.startsWith("image/")
+          || asset.lifecycleRevision !== row.assetLifecycleRevision
+          || !asset.checksumSha256
+        ) continue;
+        const absolutePath = this.resolvePublishedAssetPath(asset.storageKey);
+        if (!absolutePath) continue;
+        const display = await readCachedDisplayImageMetadata({
+          absolutePath,
+          checksum: asset.checksumSha256,
+          lifecycleRevision: asset.lifecycleRevision,
+        });
+        if (!display) continue;
+        facts[`/uploads/${asset.storageKey}`] = {
+          displayWidth: display.displayWidth,
+          displayHeight: display.displayHeight,
+          animated: display.animated,
+          revision: `${asset.lifecycleRevision}:${asset.checksumSha256.slice(0, 12)}`,
+        };
+      }
+      return facts;
+    } catch {
+      return {};
+    }
+  }
+
+  private resolvePublishedAssetPath(storageKey: string): string | null {
+    if (!storageKey || storageKey.includes("..") || storageKey.includes("\\") || isAbsolute(storageKey)) {
+      return null;
+    }
+    const root = resolve(this.uploadsRoot);
+    const absolute = resolve(root, storageKey);
+    const fromRoot = relative(root, absolute);
+    if (!fromRoot || fromRoot.startsWith("..") || fromRoot.startsWith(sep)) return null;
+    return existsSync(absolute) ? absolute : null;
   }
 
   /** 后台编辑器需要完整发布元数据，才能正确比较草稿并还原线上版本。 */
@@ -3551,7 +3657,9 @@ export class PageModulesService {
           )
         : 0;
 
-    if (visibleContentCount + visibleZoneCount === 0) {
+    const rootContentForPlacement = Array.isArray(puckData.content) ? puckData.content : [];
+    const standaloneContactPage = isStandaloneContactPage(pageKey, rootContentForPlacement);
+    if (visibleContentCount + visibleZoneCount === 0 && !standaloneContactPage) {
       errors.push("页面至少需要 1 个可见的前台内容模块");
     }
 
@@ -3612,6 +3720,7 @@ export class PageModulesService {
       );
       if (
         pageRule.businessRegionPosition === "after-first-brand-block"
+        && !standaloneContactPage
         && semanticRootContent.findIndex(isBusinessRegionBlock) !== 1
       ) {
         errors.push("固定业务区必须紧随首个品牌框架模块之后");
@@ -3866,6 +3975,7 @@ export class PageModulesService {
     });
     if (
       pageRule?.headerMode.configured === "overlay-light"
+      && compositionByBlock.length > 0
       && !compositionByBlock[0]?.overlayLightCompatible
     ) {
       errors.push("覆盖式浅色导航要求首个可见品牌模块明确兼容浅色覆盖导航");

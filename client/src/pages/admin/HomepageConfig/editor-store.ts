@@ -59,23 +59,20 @@ export type CanvasPageNavigationMessage = {
   path: string;
 };
 
-/**
- * Puck 画布运行在 iframe 中，宿主页面不能直接操作其 DOM。
- * 通过 postMessage 把「图层/字段定位」交给画布内的锚点处理，避免图层已选中、画布仍停在首屏。
- */
-export function focusCanvasBlock(blockId?: string, field?: string) {
+let canvasFocusRequest = 0;
+
+/** 同源 iframe 的几何由宿主滚动，postMessage 只负责画布中的定位反馈。 */
+export function focusCanvasBlock(blockId?: string, field?: string, waitForLayout = false) {
   if (!blockId) return;
-  window.requestAnimationFrame(() => {
+  const request = ++canvasFocusRequest;
+  let remainingFrames = waitForLayout ? 60 : 0;
+  const focus = () => {
+    if (request !== canvasFocusRequest) return;
+    const retry = () => {
+      if (remainingFrames-- > 0) window.requestAnimationFrame(focus);
+    };
     const frame = document.querySelector<HTMLIFrameElement>(
       ".homepage-editor__preview-frame iframe",
-    );
-    frame?.contentWindow?.postMessage(
-      {
-        type: CANVAS_FOCUS_MESSAGE,
-        blockId,
-        field,
-      } satisfies CanvasFocusMessage,
-      "*",
     );
 
     // 设计画布 iframe 会随 1920 基准宽度等比缩放，实际滚动容器在宿主 stage。
@@ -85,7 +82,7 @@ export function focusCanvasBlock(blockId?: string, field?: string) {
       frame?.closest<HTMLElement>(".homepage-editor__canvas-scroll") ??
       frame?.closest<HTMLElement>(".homepage-editor__stage");
     const documentElement = frame?.contentDocument?.documentElement;
-    if (!frame || !scrollContainer || !documentElement) return;
+    if (!frame || !scrollContainer || !documentElement) return retry();
     const targetBlock = Array.from(
       frame.contentDocument?.querySelectorAll<HTMLElement>(
         "[data-editor-block-id]",
@@ -99,11 +96,18 @@ export function focusCanvasBlock(blockId?: string, field?: string) {
         )
       : null;
     const target = targetField ?? targetBlock;
-    if (!target) return;
+    if (!target) return retry();
     const iframeRect = frame.getBoundingClientRect();
     const scrollRect = scrollContainer.getBoundingClientRect();
     const scale = iframeRect.width / Math.max(1, documentElement.clientWidth);
     const targetRect = target.getBoundingClientRect();
+    // 新增节点的 DOM 先提交，iframe 高度再经消息回填；过早滚动会被旧高度截断。
+    if (waitForLayout && remainingFrames > 0
+      && documentElement.clientHeight + 2 < targetRect.bottom) return retry();
+    frame.contentWindow?.postMessage(
+      { type: CANVAS_FOCUS_MESSAGE, blockId, field } satisfies CanvasFocusMessage,
+      "*",
+    );
     const targetTop = iframeRect.top + targetRect.top * scale;
     const desiredTop = scrollRect.top + (targetField ? 24 : 12);
     scrollContainer.scrollBy({
@@ -112,7 +116,8 @@ export function focusCanvasBlock(blockId?: string, field?: string) {
       // 多个旧目标排队，导致用户停止操作后画布才跳到先前模块。
       behavior: "auto",
     });
-  });
+  };
+  window.requestAnimationFrame(focus);
 }
 
 export function setCanvasNavigationPreview(open: boolean) {

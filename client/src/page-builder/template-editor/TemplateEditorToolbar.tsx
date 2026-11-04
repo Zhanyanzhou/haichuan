@@ -22,7 +22,7 @@ import {
   useVisualEditorSession,
 } from "../visual-editor/visualEditorSession";
 import useWorkspaceHistoryShortcuts from "./useWorkspaceHistoryShortcuts";
-import { catalogCardName } from "./catalogCardName";
+import { catalogCardName, catalogStoredName } from "./catalogCardName";
 import { resolveTemplatePublicationStatus } from "./templatePublicationStatus";
 import { deriveTemplatePersistencePresentation } from "./templatePublishWorkflow";
 import WorkspaceContextControls from "./WorkspaceContextControls";
@@ -82,6 +82,7 @@ export default function TemplateEditorToolbar({
   const canUndo = useTemplateEditorSession((state) => state.historyPast.length > 0);
   const canRedo = useTemplateEditorSession((state) => state.historyFuture.length > 0);
   const setDevice = useTemplateEditorSession((state) => state.setDevice);
+  const previewWidth = useTemplateEditorSession((state) => state.previewWidth);
   const confirmStressPreviewScenarioReview = useTemplateEditorSession(
     (state) => state.confirmStressPreviewScenarioReview,
   );
@@ -138,16 +139,17 @@ export default function TemplateEditorToolbar({
   }, [navigateHistory]);
 
   const storedDraftName = draft?.definition.name ?? "";
+  const draftRole = draft?.definition.metadata.sectionRole ?? draft?.definition.templateRecipe?.sectionRole;
+  const draftStoredName = draft ? catalogStoredName(draftRole, storedDraftName) : "";
   const draftName = draft
-    ? catalogCardName(
-      draft.definition.metadata.sectionRole ?? draft.definition.templateRecipe?.sectionRole,
-      storedDraftName,
-    )
+    ? `${catalogCardName(draftRole, storedDraftName)}${draftStoredName ? ` · ${draftStoredName}` : ""}`
     : "未选择模板";
-  const desktopPreviewWidth = draft?.definition.metadata.previewDesktopWidth
-    ?? RESPONSIVE_CANVAS.desktop.width;
-  const mobilePreviewWidth = draft?.definition.metadata.previewMobileWidth
-    ?? RESPONSIVE_CANVAS.mobile.width;
+  const desktopPreviewWidth = previewWidth !== null && previewWidth >= 768
+    ? previewWidth
+    : RESPONSIVE_CANVAS.desktop.width;
+  const mobilePreviewWidth = previewWidth !== null && previewWidth < 768
+    ? previewWidth
+    : RESPONSIVE_CANVAS.mobile.width;
   const saving = saveStatus === "saving";
   const saveFailed = saveStatus === "error";
   const permissionDenied = saveStatus === "permission-error";
@@ -509,8 +511,8 @@ export default function TemplateEditorToolbar({
             ?? (publishFailed
               ? "重新发布当前模板的新版本；失败不会丢失模板草稿"
               : publishWillSaveFirst
-                ? "将先保存当前模板草稿，再发布新版本；现有页面仍保持原版本"
-                : "发布当前模板的新版本；现有页面仍保持原版本"),
+                ? "将先保存当前模板草稿，再发布新版本。能保留内容的页面草稿、语言草稿和装修方案会自动沿用，已填写的内容会保留。客户前台在发布页面后更新。某一处无法保留时，整个对象仍用旧版本。"
+                : "发布当前模板的新版本。能保留内容的页面草稿、语言草稿和装修方案会自动沿用，已填写的内容会保留。客户前台在发布页面后更新。某一处无法保留时，整个对象仍用旧版本。"),
         }}
       />
     </header>

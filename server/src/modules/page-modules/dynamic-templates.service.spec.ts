@@ -121,6 +121,13 @@ function createStatefulService(mediaAuthorizationResolver?: {
     winnerChecksum?: string;
     winnerVersionNote?: string | null;
   } = null;
+  let tamperPageDocumentsAfterNextRead = false;
+  let pageDocumentUpdateError: Error | null = null;
+
+  const sameTimestamp = (left: unknown, right: unknown) => {
+    const normalize = (value: unknown) => value instanceof Date ? value.toISOString() : value;
+    return normalize(left) === normalize(right);
+  };
 
   const prismaConflict = (
     code: "P2002" | "P2034",
@@ -452,7 +459,20 @@ function createStatefulService(mediaAuthorizationResolver?: {
     pageDocument: {
       findMany: async (args: any) => {
         calls.push({ operation: "pageDocument.findMany", args: clone(args) });
-        return clone(pageDocuments);
+        const snapshot = clone(pageDocuments);
+        if (tamperPageDocumentsAfterNextRead) {
+          tamperPageDocumentsAfterNextRead = false;
+          pageDocuments = pageDocuments.map((item) => ({
+            ...item,
+            updatedAt: "2026-09-01T00:00:00.000Z",
+            puckData: {
+              content: [{ type: "动态模板实例", props: { templateVersion: 1, marker: "concurrent" } }],
+              zones: {},
+              root: { props: {} },
+            },
+          }));
+        }
+        return snapshot;
       },
       update: async (args: any) => {
         calls.push({ operation: "pageDocument.update", args: clone(args) });
@@ -460,6 +480,21 @@ function createStatefulService(mediaAuthorizationResolver?: {
         if (index < 0) throw new Error("missing page document");
         pageDocuments[index] = { ...pageDocuments[index], ...args.data };
         return clone(pageDocuments[index]);
+      },
+      updateMany: async (args: any) => {
+        calls.push({ operation: "pageDocument.updateMany", args: clone(args) });
+        if (pageDocumentUpdateError) {
+          const error = pageDocumentUpdateError;
+          pageDocumentUpdateError = null;
+          throw error;
+        }
+        const index = pageDocuments.findIndex((item) => item.id === args.where.id);
+        if (index < 0) return { count: 0 };
+        if (args.where.updatedAt !== undefined && !sameTimestamp(pageDocuments[index].updatedAt, args.where.updatedAt)) {
+          return { count: 0 };
+        }
+        pageDocuments[index] = { ...pageDocuments[index], ...args.data };
+        return { count: 1 };
       },
     },
     pageDocumentRevision: {
@@ -485,6 +520,19 @@ function createStatefulService(mediaAuthorizationResolver?: {
         }
         throw new Error("missing page localization");
       },
+      updateMany: async (args: any) => {
+        calls.push({ operation: "pageDocumentLocalization.updateMany", args: clone(args) });
+        for (const document of pageDocuments) {
+          const localization = document.localizations?.find((item: any) => item.id === args.where.id);
+          if (!localization) continue;
+          if (args.where.updatedAt !== undefined && !sameTimestamp(localization.updatedAt, args.where.updatedAt)) {
+            return { count: 0 };
+          }
+          Object.assign(localization, args.data);
+          return { count: 1 };
+        }
+        return { count: 0 };
+      },
     },
     pageScheme: {
       findMany: async (args: any) => {
@@ -498,12 +546,32 @@ function createStatefulService(mediaAuthorizationResolver?: {
         pageSchemes[index] = { ...pageSchemes[index], ...args.data };
         return clone(pageSchemes[index]);
       },
+      updateMany: async (args: any) => {
+        calls.push({ operation: "pageScheme.updateMany", args: clone(args) });
+        const index = pageSchemes.findIndex((item) => item.id === args.where.id);
+        if (index < 0) return { count: 0 };
+        if (args.where.updatedAt !== undefined && !sameTimestamp(pageSchemes[index].updatedAt, args.where.updatedAt)) {
+          return { count: 0 };
+        }
+        pageSchemes[index] = { ...pageSchemes[index], ...args.data };
+        return { count: 1 };
+      },
     },
     operationLog: {
       create: async (args: any) => {
         calls.push({ operation: "operationLog.create", args: clone(args) });
-        operationLogs.push(clone(args.data));
-        return { id: calls.length, ...clone(args.data) };
+        const row = { id: operationLogs.length + 1, ...clone(args.data) };
+        operationLogs.push(row);
+        return clone(row);
+      },
+      findMany: async (args: any) => {
+        calls.push({ operation: "operationLog.findMany", args: clone(args) });
+        const action = args?.where?.action;
+        const targetId = args?.where?.targetId;
+        return clone(operationLogs.filter((log) => (
+          (action === undefined || log.action === action)
+          && (targetId === undefined || log.targetId === targetId)
+        ))).reverse().slice(0, args?.take ?? operationLogs.length);
       },
     },
     mediaAsset: {
@@ -602,6 +670,12 @@ function createStatefulService(mediaAuthorizationResolver?: {
     calls,
     setPageDocuments: (documents: any[]) => {
       pageDocuments = clone(documents);
+    },
+    tamperPageDocumentsAfterNextRead: () => {
+      tamperPageDocumentsAfterNextRead = true;
+    },
+    failNextPageDocumentUpdate: () => {
+      pageDocumentUpdateError = new Error("synthetic page document write failure");
     },
     setPageSchemes: (schemes: any[]) => {
       pageSchemes = clone(schemes);
@@ -717,6 +791,7 @@ function createStatefulService(mediaAuthorizationResolver?: {
       versions: clone(versions),
       operationLogs: clone(operationLogs),
       pageDocuments: clone(pageDocuments),
+      pageSchemes: clone(pageSchemes),
       lineageReferences: clone(lineageReferences),
     }),
   };
@@ -1546,7 +1621,7 @@ test("发布生成不可变正式版本、开放 STAFF 读取并保留下一版�
     templateId: definition.templateId,
     fromVersion: 0,
     toVersion: 1,
-    pageAdoption: { adoptedPageCount: 0, adoptedInstanceCount: 0, blockers: [] },
+    pageAdoption: { adoptedPageCount: 0, adoptedInstanceCount: 0, blockers: [], skipped: [] },
     result: "succeeded",
   });
 
@@ -2419,9 +2494,15 @@ test("无法无损沿用时，发布模板 v2 不改写页面草稿，旧实例�
   assert.equal(getState().versions.length, 2);
   const publishCalls = calls.slice(beforePublishCallCount);
   assert.equal(publishCalls.some((call) => call.operation === "pageDocument.update"), false);
+  assert.equal(publishCalls.some((call) => call.operation === "pageDocument.updateMany"), false);
   assert.equal(publishCalls.some((call) => call.operation.startsWith("pageDocumentRevision.")), false);
   assert.equal(publishCalls.some((call) => call.operation === "pageScheme.update"), false);
-  assert.ok(result.pageAdoption.blockers.length > 0);
+  assert.equal(publishCalls.some((call) => call.operation === "pageScheme.updateMany"), false);
+  assert.equal(result.pageAdoption.blockers.length, 0);
+  assert.equal(result.pageAdoption.skipped.length, 1);
+  assert.equal(result.pageAdoption.skipped[0]?.kind, "page-draft");
+  assert.equal(result.pageAdoption.skipped[0]?.objectId, 81);
+  assert.ok(result.pageAdoption.skipped[0]?.reasons.some((reason) => reason.code === "INSTANCE_INVALID" || reason.code === "MISSING_INSTANCE_ID" || reason.code === "SLOT_NOT_LOSSLESS"));
   assert.equal(result.pageAdoption.adoptedInstanceCount, 0);
   assert.equal(pageDocument.puckData.content[0].props.templateVersion, 1);
   assert.equal(pageDocument.updatedAt, "2026-08-30T08:00:00.000Z");
@@ -2493,6 +2574,7 @@ test("发布模板 v2 时，已使用的页面草稿和方案自动沿用新版�
   if (result.outcome !== "published") return;
   assert.equal(result.version, 2);
   assert.equal(result.pageAdoption.blockers.length, 0);
+  assert.equal(result.pageAdoption.skipped.length, 0);
   assert.equal(result.pageAdoption.adoptedInstanceCount, 3);
   const stored = getState().pageDocuments[0];
   assert.equal(stored.puckData.content[0].props.templateVersion, 2);
@@ -2502,9 +2584,347 @@ test("发布模板 v2 时，已使用的页面草稿和方案自动沿用新版�
   assert.equal(stored.localizations[0].puckData.content[0].props.contentBySlotId.slot_heading, "页面自己的标题");
   assert.notEqual(stored.localizations[0].contentHash, "unchanged");
   assert.equal(stored.publishedRevision.puckData.content[0].props.templateVersion, 1);
-  const schemeUpdate = calls.find((call) => call.operation === "pageScheme.update");
+  const schemeUpdate = calls.find((call) => call.operation === "pageScheme.updateMany");
   assert.equal(schemeUpdate?.args.data.puckData.content[0].props.templateVersion, 2);
   assert.equal(schemeUpdate?.args.data.puckData.content[0].props.contentBySlotId.slot_heading, "页面自己的标题");
+});
+
+function adoptableInstance(templateId: string, name: string, instanceId = "instance-1") {
+  return {
+    type: "动态模板实例",
+    props: {
+      id: `block-${instanceId}`,
+      instanceSchemaVersion: 1,
+      instanceId,
+      templateId,
+      templateVersion: 1,
+      moduleName: name,
+      contentBySlotId: { slot_heading: "页面自己的标题" },
+      layoutOverridesByNodeId: {},
+      hiddenSlotIds: [],
+      isVisible: true,
+    },
+  };
+}
+
+function adoptableDocument(input: {
+  id: number;
+  pageKey: string;
+  templateId: string;
+  name: string;
+  content?: unknown[];
+  publishedContent?: unknown[];
+  localizationContent?: unknown[];
+}) {
+  const content = input.content ?? [adoptableInstance(input.templateId, input.name)];
+  const puckData = { content, zones: {}, root: { props: {} } };
+  return {
+    id: input.id,
+    pageKey: input.pageKey,
+    status: "PUBLISHED",
+    updatedAt: "2026-08-30T08:00:00.000Z",
+    metadata: { title: input.pageKey },
+    puckData,
+    publishedRevision: {
+      id: 400 + input.id,
+      version: 3,
+      puckData: { content: input.publishedContent ?? structuredClone(content), zones: {}, root: { props: {} } },
+      metadata: { title: input.pageKey },
+    },
+    localizations: [{
+      id: 900 + input.id,
+      locale: "zh-CN",
+      reviewStatus: "PUBLISHED",
+      updatedAt: "2026-08-30T08:00:00.000Z",
+      metadata: { title: input.pageKey },
+      puckData: { content: input.localizationContent ?? structuredClone(content), zones: {}, root: { props: {} } },
+      contentHash: "unchanged",
+    }],
+  };
+}
+
+async function publishSecondVersion(service: DynamicTemplatesService, templateId: string) {
+  const changed = definitionFixture();
+  changed.name = "自动沿用 v2";
+  await service.updateDraft(17, templateId, { expectedRevision: 2, definition: changed });
+  return service.publish(17, templateId, { expectedRevision: 3 });
+}
+
+test("一份页面草稿无法沿用时，其余页面草稿继续沿用，失败对象完全不变", async () => {
+  const { service, getState, setPageDocuments, setPageSchemes } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const broken = adoptableInstance(definition.templateId, definition.name, "");
+  delete (broken.props as { instanceId?: string }).instanceId;
+  setPageDocuments([
+    adoptableDocument({ id: 81, pageKey: "home", templateId: definition.templateId, name: definition.name }),
+    adoptableDocument({
+      id: 82,
+      pageKey: "about",
+      templateId: definition.templateId,
+      name: definition.name,
+      content: [broken],
+      publishedContent: [adoptableInstance(definition.templateId, definition.name)],
+      localizationContent: [adoptableInstance(definition.templateId, definition.name)],
+    }),
+  ]);
+  setPageSchemes([]);
+  const before = structuredClone(getState().pageDocuments[1]);
+
+  const result = await publishSecondVersion(service, definition.templateId);
+
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
+  const stored = getState().pageDocuments;
+  assert.equal(stored[0].puckData.content[0].props.templateVersion, 2);
+  assert.equal(stored[0].puckData.content[0].props.contentBySlotId.slot_heading, "页面自己的标题");
+  assert.deepEqual(stored[1].puckData, before.puckData);
+  assert.equal(stored[1].updatedAt, before.updatedAt);
+  assert.equal(result.pageAdoption.blockers.length, 0);
+  assert.equal(result.pageAdoption.skipped.length, 1);
+  assert.equal(result.pageAdoption.skipped[0]?.kind, "page-draft");
+  assert.equal(result.pageAdoption.skipped[0]?.objectId, 82);
+  assert.equal(result.pageAdoption.skipped[0]?.reasons[0]?.code, "MISSING_INSTANCE_ID");
+});
+
+test("同一份草稿中一个实例无法沿用时，整份草稿不变，其他草稿继续沿用", async () => {
+  const { service, getState, setPageDocuments, setPageSchemes } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const broken = adoptableInstance(definition.templateId, definition.name, "");
+  delete (broken.props as { instanceId?: string }).instanceId;
+  const mixed = adoptableDocument({
+    id: 81,
+    pageKey: "home",
+    templateId: definition.templateId,
+    name: definition.name,
+    content: [
+      adoptableInstance(definition.templateId, definition.name, "instance-good"),
+      broken,
+    ],
+  });
+  setPageDocuments([
+    mixed,
+    adoptableDocument({ id: 83, pageKey: "about", templateId: definition.templateId, name: definition.name }),
+  ]);
+  setPageSchemes([]);
+  const before = structuredClone(getState().pageDocuments[0].puckData);
+
+  const result = await publishSecondVersion(service, definition.templateId);
+
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
+  const stored = getState().pageDocuments;
+  assert.deepEqual(stored[0].puckData, before);
+  assert.equal(stored[0].puckData.content[0].props.templateVersion, 1);
+  assert.equal(stored[0].puckData.content[1].props.templateVersion, 1);
+  assert.equal(stored[1].puckData.content[0].props.templateVersion, 2);
+  assert.equal(result.pageAdoption.skipped.some((item) => item.objectId === 81 && item.kind === "page-draft"), true);
+  assert.equal(result.pageAdoption.skipped.some((item) => item.objectId === 83), false);
+});
+
+test("语言草稿无法沿用时，页面草稿仍沿用，语言草稿完全不变", async () => {
+  const { service, getState, setPageDocuments, setPageSchemes } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const broken = adoptableInstance(definition.templateId, definition.name, "");
+  delete (broken.props as { instanceId?: string }).instanceId;
+  setPageDocuments([adoptableDocument({
+    id: 81,
+    pageKey: "home",
+    templateId: definition.templateId,
+    name: definition.name,
+    localizationContent: [broken],
+  })]);
+  setPageSchemes([]);
+  const before = structuredClone(getState().pageDocuments[0].localizations[0]);
+
+  const result = await publishSecondVersion(service, definition.templateId);
+
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
+  const stored = getState().pageDocuments[0];
+  assert.equal(stored.puckData.content[0].props.templateVersion, 2);
+  assert.deepEqual(stored.localizations[0].puckData, before.puckData);
+  assert.equal(stored.localizations[0].contentHash, "unchanged");
+  assert.equal(result.pageAdoption.skipped[0]?.kind, "language-draft");
+  assert.equal(result.pageAdoption.skipped[0]?.objectId, 981);
+});
+
+test("装修方案无法沿用时，页面草稿仍沿用，方案完全不变", async () => {
+  const { service, getState, calls, setPageDocuments, setPageSchemes } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const broken = adoptableInstance(definition.templateId, definition.name, "");
+  delete (broken.props as { instanceId?: string }).instanceId;
+  setPageDocuments([adoptableDocument({
+    id: 81,
+    pageKey: "home",
+    templateId: definition.templateId,
+    name: definition.name,
+  })]);
+  setPageSchemes([{
+    id: 12,
+    pageKey: "home",
+    updatedAt: "2026-08-30T08:02:00.000Z",
+    puckData: { content: [broken], zones: {}, root: { props: {} } },
+  }]);
+  calls.length = 0;
+
+  const result = await publishSecondVersion(service, definition.templateId);
+
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
+  assert.equal(getState().pageDocuments[0].puckData.content[0].props.templateVersion, 2);
+  assert.equal(getState().pageSchemes[0].puckData.content[0].props.templateVersion, 1);
+  assert.equal(calls.some((call) => call.operation === "pageScheme.updateMany"), false);
+  assert.equal(result.pageAdoption.skipped.some((item) => item.kind === "scheme" && item.objectId === 12), true);
+});
+
+test("同一版本再次确认时带回当时记录的沿用失败，不把它显示成没有跳过", async () => {
+  const { service, getState, setPageDocuments, setPageSchemes } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const broken = adoptableInstance(definition.templateId, definition.name, "");
+  delete (broken.props as { instanceId?: string }).instanceId;
+  setPageDocuments([
+    adoptableDocument({ id: 81, pageKey: "about", templateId: definition.templateId, name: definition.name }),
+    adoptableDocument({
+      id: 82,
+      pageKey: "home",
+      templateId: definition.templateId,
+      name: definition.name,
+      content: [broken],
+    }),
+  ]);
+  setPageSchemes([]);
+
+  const result = await publishSecondVersion(service, definition.templateId);
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
+  const replay = await service.publish(17, definition.templateId, {
+    expectedRevision: 3,
+    expectedChecksum: result.published.definitionChecksum,
+    targetVersion: 2,
+  });
+  assert.equal(replay.outcome, "already-published");
+  if (replay.outcome !== "already-published") return;
+  assert.deepEqual(replay.pageAdoption?.skipped, result.pageAdoption.skipped);
+  const loaded = await service.getPublishedVersion(17, definition.templateId, 2);
+  assert.deepEqual(
+    (loaded as { pageAdoption?: { skipped: unknown } }).pageAdoption?.skipped,
+    result.pageAdoption.skipped,
+  );
+  assert.equal(getState().pageDocuments.find((page) => page.id === 82)?.puckData.content[0].props.templateVersion, 1);
+});
+
+test("已发布快照无法转换时，不挡住仍能沿用的当前草稿，也不改写快照", async () => {
+  const { service, getState, setPageDocuments, setPageSchemes } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const broken = adoptableInstance(definition.templateId, definition.name, "");
+  delete (broken.props as { instanceId?: string }).instanceId;
+  setPageDocuments([adoptableDocument({
+    id: 81,
+    pageKey: "home",
+    templateId: definition.templateId,
+    name: definition.name,
+    publishedContent: [broken],
+  })]);
+  setPageSchemes([]);
+
+  const result = await publishSecondVersion(service, definition.templateId);
+
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
+  const stored = getState().pageDocuments[0];
+  assert.equal(stored.puckData.content[0].props.templateVersion, 2);
+  assert.equal(stored.publishedRevision.puckData.content[0].props.templateVersion, 1);
+  assert.equal(result.pageAdoption.skipped.length, 0);
+  assert.equal(result.pageAdoption.blockers.length, 0);
+});
+
+test("未使用本模板的页面草稿在沿用时保持不变", async () => {
+  const { service, getState, setPageDocuments, setPageSchemes } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  const other = adoptableDocument({
+    id: 84,
+    pageKey: "journal",
+    templateId: "another-template",
+    name: "别的模板",
+  });
+  setPageDocuments([
+    adoptableDocument({ id: 81, pageKey: "home", templateId: definition.templateId, name: definition.name }),
+    other,
+  ]);
+  setPageSchemes([]);
+  const before = structuredClone(getState().pageDocuments[1]);
+
+  const result = await publishSecondVersion(service, definition.templateId);
+
+  assert.equal(result.outcome, "published");
+  if (result.outcome !== "published") return;
+  assert.deepEqual(getState().pageDocuments[1], before);
+  assert.equal(result.pageAdoption.skipped.some((item) => item.objectId === 84), false);
+});
+
+test("沿用期间页面草稿被并发改写时取消发布，不覆盖新内容", async () => {
+  const { service, getState, setPageDocuments, setPageSchemes, tamperPageDocumentsAfterNextRead } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  setPageDocuments([adoptableDocument({
+    id: 81,
+    pageKey: "home",
+    templateId: definition.templateId,
+    name: definition.name,
+  })]);
+  setPageSchemes([]);
+  tamperPageDocumentsAfterNextRead();
+
+  await assert.rejects(
+    () => publishSecondVersion(service, definition.templateId),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      const response = error.getResponse() as { code?: string };
+      assert.equal(response.code, "DYNAMIC_TEMPLATE_ADOPTION_CONCURRENT_DRAFT");
+      return true;
+    },
+  );
+  assert.equal(getState().template.publishedVersion, 1);
+  assert.equal(getState().versions.length, 1);
+  assert.equal(getState().pageDocuments[0].puckData.content[0].props.marker, "concurrent");
+});
+
+test("沿用写入异常时不把发布报成成功，并回滚新模板版本", async () => {
+  const { service, getState, setPageDocuments, setPageSchemes, failNextPageDocumentUpdate } = createStatefulService();
+  const definition = definitionFixture();
+  await service.create(17, { definition });
+  await service.publish(17, definition.templateId, { expectedRevision: 1 });
+  setPageDocuments([adoptableDocument({
+    id: 81,
+    pageKey: "home",
+    templateId: definition.templateId,
+    name: definition.name,
+  })]);
+  setPageSchemes([]);
+  failNextPageDocumentUpdate();
+
+  await assert.rejects(
+    () => publishSecondVersion(service, definition.templateId),
+    (error: unknown) => error instanceof Error && error.message === "synthetic page document write failure",
+  );
+  assert.equal(getState().template.publishedVersion, 1);
+  assert.equal(getState().versions.length, 1);
+  assert.equal(getState().pageDocuments[0].puckData.content[0].props.templateVersion, 1);
 });
 
 test("新建、发布版本与归档生命周期保留按轴尺寸兼容状态", async () => {

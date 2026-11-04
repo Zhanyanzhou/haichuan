@@ -65,21 +65,63 @@ export default function CatalogSearch({
   const listboxId = useId();
   const historyId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const onSearchRef = useRef(onSearch);
+  const searchTimerRef = useRef<number | null>(null);
+  const lastSentRef = useRef(query.trim());
   const [draft, setDraft] = useState(query);
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [isComposing, setIsComposing] = useState(false);
   const { history, addToHistory, removeOne, clearAll } = useSearchHistory();
   const suggestions = useMemo(
     () => getCatalogSuggestions(draft, products, categories, materials),
     [categories, draft, materials, products],
   );
 
-  useEffect(() => setDraft(query), [query]);
   useEffect(() => setActiveIndex(-1), [draft, suggestions]);
+  // 只跟随外部改动（清除、后退）。输入过程中的旧请求返回时，不覆盖正在输入的文字。
+  useEffect(() => {
+    const incoming = query.trim();
+    if (incoming === lastSentRef.current) return;
+    lastSentRef.current = incoming;
+    setDraft(query);
+  }, [query]);
+  useEffect(() => {
+    onSearchRef.current = onSearch;
+  }, [onSearch]);
+
+  const cancelPendingSearch = () => {
+    if (searchTimerRef.current === null) return;
+    window.clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = null;
+  };
+
+  const publishSearch = (value: string) => {
+    const clean = value.trim();
+    cancelPendingSearch();
+    lastSentRef.current = clean;
+    if (clean === query.trim()) return;
+    onSearchRef.current(clean);
+  };
+
+  // 停顿后再请求，避免每个字母都刷新目录。删空不走输入法门闩，立刻回到全部作品。
+  useEffect(() => {
+    const clean = draft.trim();
+    if (isComposing && clean) return;
+    if (clean === query.trim()) return;
+    searchTimerRef.current = window.setTimeout(() => {
+      searchTimerRef.current = null;
+      lastSentRef.current = clean;
+      onSearchRef.current(clean);
+    }, clean ? 300 : 0);
+    return cancelPendingSearch;
+  }, [draft, isComposing, query]);
 
   const submit = (value: string) => {
     const clean = value.trim();
+    cancelPendingSearch();
     setDraft(clean);
+    lastSentRef.current = clean;
     onSearch(clean);
     if (clean) {
       addToHistory(clean);
@@ -141,8 +183,20 @@ export default function CatalogSearch({
             id="catalog-search-input"
             value={draft}
             onChange={(event) => {
-              setDraft(event.target.value);
+              const value = event.target.value;
+              setDraft(value);
               setOpen(true);
+              if (!value.trim()) {
+                setIsComposing(false);
+                publishSearch("");
+              }
+            }}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={(event) => {
+              const value = event.currentTarget.value;
+              setDraft(value);
+              setIsComposing(false);
+              if (!value.trim()) publishSearch("");
             }}
             onKeyDown={(event) => {
               if (event.key === "ArrowDown" && showSuggestions) {
@@ -178,7 +232,8 @@ export default function CatalogSearch({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   setDraft("");
-                  onSearch("");
+                  setIsComposing(false);
+                  publishSearch("");
                   setActiveIndex(-1);
                   setOpen(true);
                   inputRef.current?.focus();

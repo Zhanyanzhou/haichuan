@@ -10,7 +10,11 @@ import {
 import { PageModulesService } from "./page-modules.service";
 
 function createService() {
-  return new PageModulesService({} as PrismaService);
+  return new PageModulesService({
+    siteSetting: {
+      findUnique: async () => null,
+    },
+  } as unknown as PrismaService);
 }
 
 function makeHomeDocument() {
@@ -561,6 +565,80 @@ function makeCatalogDocument() {
     root: { props: {} },
   };
 }
+
+function makeContactDocument(content: Array<Record<string, unknown>>) {
+  return {
+    content,
+    zones: {},
+    root: { props: {} },
+  };
+}
+
+const contactBusinessRegion = {
+  type: "业务功能区",
+  props: {
+    id: "contact-business-region",
+    pageKey: "contact",
+    locked: true,
+  },
+};
+
+test("联系页只保留固定业务区时可以直接发布", async () => {
+  const result = await createService().validatePageDocument(
+    "contact",
+    makeContactDocument([contactBusinessRegion]),
+    makeFormalMetadata(),
+  );
+  assert.equal(result.valid, true, result.errors.join("\n"));
+});
+
+test("联系页已有品牌模块时，固定业务区仍须紧随其后", async () => {
+  const result = await createService().validatePageDocument(
+    "contact",
+    makeContactDocument([
+      contactBusinessRegion,
+      {
+        type: "首屏主视觉",
+        props: {
+          id: "contact-brand-stage",
+          title: "联系海川",
+          desktopImage: "/images/hero-desktop.jpg",
+          mobileImage: "/images/hero-mobile.jpg",
+          altText: "联系海川",
+          actionText: "",
+          targetType: "none",
+        },
+      },
+    ]),
+    makeFormalMetadata(),
+  );
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((message) => message.includes("必须紧随首个品牌框架模块之后")));
+});
+
+test("选款中心不能只靠固定业务区通过发布检查", async () => {
+  const result = await createService().validatePageDocument(
+    "catalog",
+    {
+      content: [
+        {
+          type: "业务功能区",
+          props: {
+            id: "catalog-business-region-only",
+            pageKey: "catalog",
+            locked: true,
+          },
+        },
+      ],
+      zones: {},
+      root: { props: {} },
+    },
+    makeFormalMetadata(),
+  );
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((message) => message.includes("至少需要 1 个可见的前台内容模块")));
+  assert.ok(result.errors.some((message) => message.includes("必须紧随首个品牌框架模块之后")));
+});
 
 test("固定业务区按首个可见品牌模块定位，隐藏备选块不改变语义顺序", async () => {
   const result = await createService().validatePageDocument(

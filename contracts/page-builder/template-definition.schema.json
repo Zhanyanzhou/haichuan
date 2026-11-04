@@ -620,6 +620,10 @@
         "mobileRatio": {
           "$ref": "#/$defs/ratioLabel"
         },
+        "geometryPolicy": {
+          "description": "手机几何读取路径。省略或 paired-canvas 按 D.46 对换整节；hero-media-frame 按 D.48 只改本页第一个全幅主视觉的媒体框。",
+          "enum": ["paired-canvas", "hero-media-frame"]
+        },
         "canvasSize": {
           "$ref": "#/$defs/canvasSize"
         },
@@ -674,6 +678,34 @@
               "solid",
               "overlay-light"
             ]
+          }
+        },
+        "pageSettings": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "模板向页面开放的可选设置（D.47）。只声明哪些设置可选，页面未选时按模板原样。",
+          "properties": {
+            "mediaSide": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "targetNodeId",
+                "authoredSide"
+              ],
+              "description": "图片位置：页面可在桌面把目标横排容器左右对调。",
+              "properties": {
+                "targetNodeId": {
+                  "$ref": "#/$defs/stableId"
+                },
+                "authoredSide": {
+                  "enum": [
+                    "start",
+                    "end"
+                  ],
+                  "description": "模板原样的图片位置：start 为左，end 为右。"
+                }
+              }
+            }
           }
         },
         "tags": {
@@ -1703,6 +1735,10 @@
           "type": "number",
           "minimum": 0,
           "maximum": 200
+        },
+        "visuallyCollapsed": {
+          "type": "boolean",
+          "description": "为真时，这一端不绘制该文字槽位，原文仍留在页面里供读屏。不是清空内容。"
         }
       }
     },
@@ -1768,6 +1804,24 @@
         },
         "isVisible": {
           "type": "boolean"
+        },
+        "imageCarriesCopy": {
+          "type": "boolean",
+          "description": "为真时，图片已包含排好的标题。标题仍保存在页面内容里，但不绘制到画面上。缺省按照片处理。"
+        },
+        "pageSettings": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "页面对这块模板做的可选设置，只能选模板声明过的项（D.47）。未选时按模板原样。",
+          "properties": {
+            "mediaSide": {
+              "enum": [
+                "start",
+                "end"
+              ],
+              "description": "桌面图片位置：start 为左，end 为右。手机排布与阅读顺序不变。"
+            }
+          }
         }
       }
     },

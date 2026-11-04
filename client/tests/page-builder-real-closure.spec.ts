@@ -1885,6 +1885,8 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
             layoutOverridesByNodeId: {},
             hiddenSlotIds: [],
             isVisible: true,
+            // M3 开放“图片位置”（D.47）：页面选择图在右，验证真实保存、发布与公开读回。
+            ...(item.role === "editorial-split" ? { pageSettings: { mediaSide: "end" } } : {}),
           },
         })),
         zones: {},
@@ -1949,6 +1951,19 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
         expect(dynamicTemplateVersions(publicApi, item.templateId), `${item.role} 公开快照应锁定 v1`)
           .toEqual([1]);
       }
+      const splitItem = published.find((item) => item.role === "editorial-split");
+      expect(splitItem, "七块母版应包含左右图文 M3").toBeTruthy();
+      expect(
+        publicApi.puckData.content.find((block) => block.props?.templateId === splitItem!.templateId)
+          ?.props?.pageSettings,
+        "公开快照应保留页面选择的图片位置",
+      ).toEqual({ mediaSide: "end" });
+      const splitDefinition = definitions.find((definition) => definition.templateId === splitItem!.templateId);
+      const mirrorTargetNodeId = (splitDefinition?.metadata as {
+        pageSettings?: { mediaSide?: { targetNodeId?: string } };
+      } | undefined)?.pageSettings?.mediaSide?.targetNodeId;
+      expect(mirrorTargetNodeId, "M3 母版应声明图片位置的目标行").toBeTruthy();
+      const splitInstanceSelector = `[data-dynamic-template-instance-id="${splitItem!.instanceId}"]`;
 
       const publicPage = await anonymous.newPage();
       await publicPage.goto(`${browserBaseUrl}/about`);
@@ -1969,6 +1984,14 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
           .toBeVisible();
       }
       await expect(publicPage.locator("h1"), "公开页应只有一个 h1").toHaveCount(1);
+      const desktopMirrored = publicPage.locator(`${splitInstanceSelector} [data-template-mirrored="true"]`);
+      await expect(desktopMirrored, "桌面端图在右只镜像声明的那一行").toHaveCount(1);
+      await expect(desktopMirrored).toHaveAttribute("data-template-node-id", mirrorTargetNodeId!);
+      await expect(desktopMirrored).toHaveCSS("flex-direction", "row-reverse");
+      await expect(
+        publicPage.locator('[data-template-mirrored="true"]'),
+        "其他母版不得被图片位置镜像",
+      ).toHaveCount(1);
       await expect.poll(() => publicPage.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ), "桌面 1440 不得横向溢出").toBe(true);
@@ -1982,6 +2005,10 @@ test.describe("店铺装修真实浏览器闭环（一次性 MySQL + 真实 Nest
         await expect(renderer, `${item.role} 在手机端应可见`).toBeVisible();
         await expect(renderer).toHaveAttribute("data-dynamic-template-device", "mobile");
       }
+      await expect(
+        publicPage.locator('[data-template-mirrored="true"]'),
+        "手机端文字固定在图下，不应用图片位置镜像",
+      ).toHaveCount(0);
       await expect.poll(() => publicPage.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ), "手机 390 不得横向溢出").toBe(true);

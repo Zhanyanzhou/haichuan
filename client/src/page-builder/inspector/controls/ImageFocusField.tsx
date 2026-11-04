@@ -10,6 +10,18 @@ const FOCUS_PRESETS = [
   { x: 0, y: 100, label: "左下" }, { x: 50, y: 100, label: "底部居中" }, { x: 100, y: 100, label: "右下" },
 ] as const;
 
+const FOCUS_PRESET_SHORT: Record<(typeof FOCUS_PRESETS)[number]["label"], string> = {
+  "左上": "左上",
+  "顶部居中": "上",
+  "右上": "右上",
+  "左侧居中": "左",
+  "居中": "中",
+  "右侧居中": "右",
+  "左下": "左下",
+  "底部居中": "下",
+  "右下": "右下",
+};
+
 function formatFocus(value: ImageFocusValue) {
   const x = Math.round(value.x * 100) / 100;
   const y = Math.round(value.y * 100) / 100;
@@ -22,6 +34,7 @@ export default function ImageFocusField({
   disabled,
   allowPreciseInput = true,
   showPad = true,
+  showLabel = true,
   previewSrc,
   previewFit,
   previewZoom,
@@ -37,6 +50,8 @@ export default function ImageFocusField({
   allowPreciseInput?: boolean;
   /** 已由图片预览承担拖动点位时，不再重复一块取景板；快捷与百分比退为次级。 */
   showPad?: boolean;
+  /** 预览上已有拖动点时，不再重复「画面焦点」标题。 */
+  showLabel?: boolean;
   previewSrc?: string;
   previewFit?: "cover" | "contain" | "fill";
   previewZoom?: number;
@@ -63,7 +78,7 @@ export default function ImageFocusField({
           aria-pressed={normalized.x === preset.x && normalized.y === preset.y}
           onClick={() => onChange({ x: preset.x, y: preset.y })}
         >
-          <i aria-hidden="true" />
+          <span aria-hidden="true">{FOCUS_PRESET_SHORT[preset.label]}</span>
         </button>
       ))}
     </div>
@@ -85,16 +100,18 @@ export default function ImageFocusField({
       data-workspace-field-control="image-focus"
       data-workspace-field-shared="true"
     >
-      <label>
-        {label}
-        <span className="homepage-editor__inspector-hint">
-          {showPad
-            ? "拖动画面上的点调整构图，比填写百分比更准确"
-            : onRequestCanvasAdjust
-              ? "优先在画布上拖动取景点；需要时再用快捷位置或精确值"
-              : "请在上方图片预览中拖动焦点点；需要时再用快捷位置或精确值"}
-        </span>
-      </label>
+      {showLabel ? (
+        <label>
+          {label}
+          <span className="homepage-editor__inspector-hint">
+            {showPad
+              ? "拖动画面上的点调整构图，比填写百分比更准确"
+              : onRequestCanvasAdjust
+                ? "优先在画布上拖动取景点；需要时再用快捷位置或精确值"
+                : "请在上方图片预览中拖动焦点点；需要时再用快捷位置或精确值"}
+          </span>
+        </label>
+      ) : null}
       {onRequestCanvasAdjust ? (
         <button
           type="button"
@@ -124,7 +141,10 @@ export default function ImageFocusField({
       ) : (
         <>
           <p className="image-focus-pad__status" role="status">当前焦点 {formatFocus(normalized)}</p>
-          <InspectorDisclosure label="常用位置">{presets}</InspectorDisclosure>
+          <div className="image-focus-pad__assist">
+            <span className="homepage-editor__properties-hint">常用位置</span>
+            {presets}
+          </div>
           {precise}
         </>
       )}

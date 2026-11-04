@@ -12,6 +12,7 @@ import type {
   CustomerReviewOrder,
 } from "./types";
 import { trackRefund } from "@/hooks/useAnalytics";
+import { clampProductTitle } from "@/utils/productTitleLength";
 
 const orderStatus: Record<string, string> = {
   PENDING_PAYMENT: "待付款",
@@ -426,7 +427,7 @@ export default function CustomerOrdersPanel({
                     {order.orderNo} ·{" "}
                     {new Date(order.createdAt).toLocaleDateString("zh-CN")}
                   </small>
-                  <h3>{order.items?.[0]?.product?.name || order.quotedLines?.[0]?.description || "珠宝作品"}</h3>
+                  <h3>{order.items?.[0]?.product?.name ? clampProductTitle(order.items[0].product.name) : order.quotedLines?.[0]?.description || "珠宝作品"}</h3>
                   {order.quoteChannel ? (
                     <small>
                       报价渠道：{{ RETAIL: "标准零售", CUSTOM: "高级定制", PARTNER_WAX: "合作蜡模" }[order.quoteChannel]}
@@ -464,7 +465,7 @@ export default function CustomerOrdersPanel({
                           >
                             <span>
                               <span>
-                                售后 · {item?.product?.name || "订单商品"} ·{" "}
+                                售后 · {item?.product?.name ? clampProductTitle(item.product.name) : "订单商品"} ·{" "}
                                 {afterSalesType[caseRecord.type] || caseRecord.type} ·{" "}
                                 {afterSalesStatus[caseRecord.status] ||
                                   caseRecord.status}

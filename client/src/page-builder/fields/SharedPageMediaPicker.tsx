@@ -9,6 +9,7 @@ import {
   writePageMediaLibrary,
   type PageMediaItem,
 } from "./pageMediaLibrary";
+import { cachedImageFactFields } from "./trustedMediaSize";
 
 const PAGE_SIZE = 100;
 const SESSION_MEDIA_UPLOADED_EVENT = "page-builder:media-uploaded";
@@ -43,7 +44,13 @@ async function readReadyImages(): Promise<PageMediaItem[]> {
 
   return [...assets.values()]
     .filter((asset) => asset.type === "image" && asset.status === "READY" && asset.available)
-    .map(({ url, name, createdAt }) => ({ url, type: "image" as const, name, createdAt }));
+    .map((asset) => ({
+      url: asset.url,
+      type: "image" as const,
+      name: asset.name,
+      createdAt: asset.createdAt,
+      ...cachedImageFactFields(asset),
+    }));
 }
 
 function useSharedPageMedia(active: boolean) {

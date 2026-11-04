@@ -85,6 +85,7 @@ export interface DynamicTemplateVersionResource {
 
 export interface PublishedDynamicTemplateVersionResource extends DynamicTemplateVersionResource {
   templateId: string;
+  pageAdoption?: DynamicTemplatePageAdoptionResource;
 }
 
 export type DynamicTemplateVersionSummaryResource = Omit<
@@ -97,12 +98,33 @@ export interface DynamicTemplateVersionPageResource {
   nextBeforeVersion: number | null;
 }
 
+export interface DynamicTemplateAdoptionSkipReasonResource {
+  code: string;
+  instanceId: string | null;
+  path: string;
+}
+
+export interface DynamicTemplateAdoptionSkippedObjectResource {
+  kind: "page-draft" | "language-draft" | "scheme";
+  objectId: number;
+  pageKey: string;
+  reasons: DynamicTemplateAdoptionSkipReasonResource[];
+}
+
+export interface DynamicTemplatePageAdoptionResource {
+  adoptedPageCount: number;
+  adoptedInstanceCount: number;
+  blockers: string[];
+  skipped: DynamicTemplateAdoptionSkippedObjectResource[];
+}
+
 export interface DynamicTemplatePublishResultResource {
   templateId: string;
   version: number;
   published: DynamicTemplateVersionResource;
   draft: DynamicTemplateDraftResource | null;
   outcome: "published" | "already-published";
+  pageAdoption?: DynamicTemplatePageAdoptionResource;
 }
 
 export interface DynamicTemplateArchiveDraftIdentity {

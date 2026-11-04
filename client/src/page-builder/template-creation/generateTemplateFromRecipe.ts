@@ -8,6 +8,8 @@ import { allowsButtonSlot, TEMPLATE_TYPE_SCALE, typeLevelFor } from "./typograph
 import { layoutRegions, subdivide, type Rect } from "./layoutGeometry";
 import { arrangeMedia, fitMedia } from "./mediaGeometry";
 import { getTemplateRecipeSampleText } from "./previewContent";
+import { STANDARD_TEMPLATE_CANVAS_PAIRS } from "../template-definition/pairedCanvas";
+import { applyStandardTemplateCanvasPair } from "../template-definition/templateDimensions";
 
 const px = (value: number) => ({ value, unit: "px" as const });
 const integerRatio = (ratio: number) => {
@@ -63,6 +65,7 @@ export function generateTemplateFromRecipe(recipe: TemplateRecipe, options: { te
     ...(recipe.sectionRole ? { sectionRole: recipe.sectionRole } : {}),
     layoutType: LAYOUTS.find(([key]) => key === recipe.layout)![1], category: "自主设计",
     canvasSize: { ...recipe.canvas }, desktopRatio: `${width}:${height}`, mobileRatio: "auto",
+    geometryPolicy: "paired-canvas",
     previewDesktopWidth: Math.min(2560, Math.max(768, width)),
     slotSummary: `${recipe.media.length} 个图片槽位，${recipe.content.length} 个内容槽位`,
   };
@@ -73,13 +76,18 @@ export function generateTemplateFromRecipe(recipe: TemplateRecipe, options: { te
     && width === contentHeightPreset.width
     && height === contentHeightPreset.height,
   );
+  // 显式“随内容”不参与画幅配对；固定画幅保存比例规则，而不是设计坐标里的像素高度。
+  // 旧 hero-media-frame 定义继续由读取链兼容，此处只决定新建模板的初值。
+  if (rootGrowsWithContent) definition.metadata.geometryPolicy = "hero-media-frame";
+  const [ratioWidth, ratioHeight] = integerRatio(width / height).split(":").map(Number);
+  const ratioScale = Math.max(1, ratioWidth / 1000, ratioHeight / 1000);
   // “随内容增长”的画布没有固定高度：百分比失去分母，自由坐标的 y/height 也没有参照物，
   // 于是绝对定位的子节点高度全部退化为 auto、又不参与父级高度，根容器塌成 0px。
   // 这一模式下桌面与手机同走流式排版（Stack 默认 flex/column/fill/auto），高度与顺序由内容决定；
   // 布局选择在此表达“顺序与分栏意图”，不再是绝对坐标。固定画幅仍保留自由坐标与溢出拦截。
   root.responsive.desktop.height = rootGrowsWithContent
     ? { mode: "auto" }
-    : { mode: "fixed", value: px(height) };
+    : { mode: "aspect-ratio", ratio: { width: ratioWidth / ratioScale, height: ratioHeight / ratioScale } };
   root.responsive.mobile = { height: { mode: "auto" } };
   const stage = createDynamicTemplateNode("Stack", "布局结构");
   stage.nodeId = `${templateId}_layout`;
@@ -322,7 +330,12 @@ export function generateTemplateFromRecipe(recipe: TemplateRecipe, options: { te
   }
   // 同步真实结构顺序，避免移动端仅依赖 CSS order 而屏幕阅读器与画布树仍保持旧顺序。
   stage.childIds.sort((left, right) => (definition.nodes[left].responsive.mobile.order ?? 0) - (definition.nodes[right].responsive.mobile.order ?? 0));
-  const result = validateDynamicTemplateDefinition(definition);
+  const standardPair = !rootGrowsWithContent && STANDARD_TEMPLATE_CANVAS_PAIRS.find(({ desktop }) => (
+    desktop.width * height === desktop.height * width
+  ));
+  // 标准画幅与属性区共享同一应用入口；已有自定义画幅仍保留精确比例，不静默改成最近档位。
+  const generated = standardPair ? applyStandardTemplateCanvasPair(definition, standardPair.desktop) : definition;
+  const result = validateDynamicTemplateDefinition(generated);
   if (!result.valid) throw new Error(result.issues.filter((issue) => issue.level === "error").map((issue) => issue.message).join("；"));
-  return definition;
+  return generated;
 }

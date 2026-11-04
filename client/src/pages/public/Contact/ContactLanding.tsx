@@ -9,6 +9,7 @@ import { lookupPublicWork, type PublicWorkResolution } from "@/data/publicWorkLo
 import { normalizePublicProductReference } from "@/utils/publicProductPath";
 import { consultationDraftOwner, hasContactConsultationRecovery } from "@/utils/consultationJourneyState";
 import { trackPageView } from "@/hooks/useAnalytics";
+import { clampProductTitle } from "@/utils/productTitleLength";
 import "./contact.css";
 
 export default function ContactLanding({
@@ -55,7 +56,7 @@ export default function ContactLanding({
     try {
       const clipboard = ownerDocument.defaultView?.navigator.clipboard;
       if (!clipboard) throw new Error("clipboard unavailable");
-      await clipboard.writeText(`我想咨询${work?.kind === "virtual" ? "演示作品" : "作品"}：${product.name}（${product.code || reference}）`);
+      await clipboard.writeText(`我想咨询${work?.kind === "virtual" ? "演示作品" : "作品"}：${clampProductTitle(product.name)}（${product.code || reference}）`);
       setCopyStatus("作品信息已复制，添加微信后可粘贴给商家");
     } catch {
       setCopyStatus("复制未成功，请选中下方作品名称与编号手动复制");
@@ -64,17 +65,13 @@ export default function ContactLanding({
 
   return (
     <div className="contact-direct">
-      {!decorated ? <header className="contact-direct__intro">
-        <h1>联系海川</h1>
-        <p>添加微信或致电，也可以留下咨询需求。</p>
-      </header> : null}
-      <div className="contact-direct__content">
+      <div className={`contact-direct__content${decorated ? " contact-direct__content--decorated" : ""}`}>
         {rawReference ? <section className="contact-direct__context" aria-label="咨询作品">
           <h2>关于这件作品</h2>
           {!reference ? <p role="alert">作品引用无效，请从作品详情重新进入。</p> : null}
           {reference && !work ? <p role="status">正在读取作品信息…</p> : null}
           {product ? <>
-            <p className="contact-direct__work">{product.name}<span>作品编号：{product.code || reference}</span></p>
+            <p className="contact-direct__work" title={product.name}>{clampProductTitle(product.name)}<span>作品编号：{product.code || reference}</span></p>
             {work?.kind === "virtual" ? <p>这是演示作品，仅供说明款式偏好。</p> : null}
             <button type="button" className="contact-direct__text-action" onClick={(event) => { void copyProduct(event.currentTarget.ownerDocument); }}>复制作品信息</button>
           </> : null}

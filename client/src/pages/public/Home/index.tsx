@@ -14,6 +14,18 @@ import StaleDocumentNotice from "@/page-builder/runtime/StaleDocumentNotice";
 import { PublicPageFallback } from "@/page-builder/runtime/PublishedPageDecoration";
 import { getPublishedPageReadiness } from "@/page-builder/runtime/publishedPageReadiness";
 import type { PuckDocument } from "@/page-builder/runtime/PuckDocumentRenderer";
+import RouteLoading from "@/components/common/RouteLoading";
+import {
+  buildResponsiveUploadsDerivedUrl,
+  buildResponsiveUploadsSrcSet,
+  type PublicImageSourceFacts,
+} from "@/utils/responsiveUploadsImage";
+import { coverSizesFromViewportBox } from "@/page-builder/config/imageDeliveryGeometry";
+import {
+  PublicImageFactsProvider,
+  readPublicImageFacts,
+  usePublicImageFact,
+} from "@/page-builder/runtime/publicImageFacts";
 
 const LG = "#F4F5F5";
 const NON_PUBLISHABLE_SYSTEM_MEDIA = new Set([
@@ -52,16 +64,24 @@ function isHeroRoleEnabled(content: Record<string, unknown>, roleId: string) {
     || (node as Record<string, unknown>).enabled !== false;
 }
 
-function heroImageAtWidth(source: string, width: 480 | 1680) {
-  if (!/^\/uploads\//.test(source) || !/\.(?:jpe?g|png|webp)(?:[?#]|$)/i.test(source)) return source;
-  try {
-    const parsed = new URL(source, "https://public-media.local");
-    parsed.searchParams.set("width", String(width));
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
-  } catch {
-    return source;
-  }
+function heroDelivery(source: string, facts: PublicImageSourceFacts | null) {
+  const srcSet = facts ? buildResponsiveUploadsSrcSet(source, facts) : undefined;
+  const sizes = facts && !facts.animated
+    ? coverSizesFromViewportBox({
+      width: "100vw",
+      height: "max(620px, 100svh)",
+      sourceWidth: facts.displayWidth,
+      sourceHeight: facts.displayHeight,
+      objectFit: "cover",
+    })
+    : undefined;
+  return {
+    src: srcSet ? buildResponsiveUploadsDerivedUrl(source, 1680) ?? source : source,
+    srcSet,
+    sizes,
+  };
 }
+
 /**
  * 公开首页在完整 Renderer 分块到达前只读取已发布文档的首个 Hero。
  * 这不是第二套内容：同一份 PageDocument 仍是唯一输入，只是先稳定呈现
@@ -99,8 +119,8 @@ function getHomeHeroPreview(data?: PuckDocument | null): HomeHeroPreview {
   const image = desktopImage || mobileImage || dynamicImage;
   const mobile = mobileImage || desktopImage || dynamicImage;
   return {
-    image: heroImageAtWidth(image, 1680),
-    mobileImage: heroImageAtWidth(mobile, 480),
+    image,
+    mobileImage: mobile,
     title: isHeroRoleEnabled(content, "title") ? text(content.title) : "",
     subtitle: isHeroRoleEnabled(content, "subtitle") ? text(content.subtitle) : "",
     eyebrow: isHeroRoleEnabled(content, "eyebrow") ? text(content.eyebrow) : "",
@@ -108,6 +128,10 @@ function getHomeHeroPreview(data?: PuckDocument | null): HomeHeroPreview {
 }
 export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
   const hero = getHomeHeroPreview(data);
+  const desktopFacts = usePublicImageFact(hero.image);
+  const mobileFacts = usePublicImageFact(hero.mobileImage);
+  const desktop = heroDelivery(hero.image, desktopFacts);
+  const mobile = heroDelivery(hero.mobileImage, mobileFacts);
   const hasCopy = Boolean(hero.eyebrow || hero.title || hero.subtitle);
 
   return (
@@ -124,11 +148,15 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
         color: hero.image ? "#FFFFFF" : "#181A1B",
       }}
     >
-      {hero.image ? (
+      {desktop.src ? (
         <picture>
-          {hero.mobileImage ? <source media="(max-width: 767px)" srcSet={hero.mobileImage} /> : null}
+          {mobile.srcSet ? (
+            <source media="(max-width: 767px)" srcSet={mobile.srcSet} sizes={mobile.sizes} />
+          ) : null}
           <img
-            src={hero.image}
+            src={desktop.src}
+            srcSet={desktop.srcSet}
+            sizes={desktop.sizes}
             alt=""
             aria-hidden="true"
             {...{ fetchpriority: "high" }}
@@ -185,47 +213,12 @@ export function HomeFirstFold({ data }: { data?: PuckDocument | null }) {
           </div>
         </div>
       ) : hero.image ? null : (
-        <div
+        <RouteLoading
           data-home-loading-status="true"
-          role="status"
-          aria-live="polite"
-          style={{
-            display: "grid",
-            minHeight: "max(620px, 100svh)",
-            placeItems: "center",
-            padding: "clamp(112px, 14vw, 180px) 24px 72px",
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              justifyItems: "center",
-              gap: 18,
-              color: "#5F6568",
-              textAlign: "center",
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                display: "block",
-                width: "clamp(56px, 5vw, 76px)",
-                height: 1,
-                background: "#B8BEC1",
-              }}
-            />
-            <span
-              style={{
-                fontFamily: 'var(--hc-font-body, Inter, "Noto Sans SC", sans-serif)',
-                fontSize: 12,
-                fontWeight: 400,
-                lineHeight: 1.7,
-              }}
-            >
-              首页内容正在准备
-            </span>
-          </div>
-        </div>
+          scope="region"
+          surface="public"
+          label="首页内容正在准备"
+        />
       )}
     </section>
   );
@@ -320,6 +313,7 @@ export default function Home() {
   }
 
   return (
+    <PublicImageFactsProvider facts={readPublicImageFacts(pageDocument)}>
     <div data-page-document-state="published" style={{ background: LG }}>
       <Suspense fallback={<HomeFirstFold data={readiness.data as PuckDocument} />}>
         <PuckDocumentRenderer
@@ -335,5 +329,6 @@ export default function Home() {
         locale="zh-CN"
       />
     </div>
+    </PublicImageFactsProvider>
   );
 }

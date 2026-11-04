@@ -97,3 +97,24 @@ export function definitionFixture(): TemplateDefinitionV2 {
     defaultContent: {},
   };
 }
+
+/** 开放“图片位置”的同款模板：内容容器桌面改为两栏横排，第一栏为留白（D.47）。 */
+export function mediaSideDefinitionFixture(): TemplateDefinitionV2 {
+  const definition = definitionFixture();
+  const container = definition.nodes.node_container;
+  container.responsive.desktop.direction = "row";
+  container.childIds = ["node_side", "node_heading"];
+  definition.nodes.node_side = {
+    nodeId: "node_side",
+    type: "Spacer",
+    name: "副栏留白",
+    childIds: [],
+    props: {},
+    responsive: { desktop: rules(), mobile: rules() },
+    hidden: false,
+  };
+  definition.metadata.pageSettings = {
+    mediaSide: { targetNodeId: "node_container", authoredSide: "start" },
+  };
+  return definition;
+}

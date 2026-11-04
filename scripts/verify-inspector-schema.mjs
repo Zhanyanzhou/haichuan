@@ -60,15 +60,22 @@ const warnings = [];
 let checked = 0;
 const moduleTypes = new Set();
 const activeControls = new Set();
+const schemaDefiningFiles = [];
 
 const readControls = (source) =>
   [...source.matchAll(/\bcontrol:\s*"([A-Za-z]+)"/g)].map((match) => match[1]);
 
 for (const file of files) {
   const src = await readFile(path.join(schemaDir, file), "utf8");
+  const declaredTypes = [...src.matchAll(/\bmoduleType:\s*"([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+  // 同目录可放 Schema 引用的辅助组件；只有声明 moduleType 的才计入 Schema 源文件。
+  if (declaredTypes.length === 0) continue;
+  schemaDefiningFiles.push(file);
   checked += 1;
-  for (const match of src.matchAll(/\bmoduleType:\s*"([^"]+)"/g)) {
-    moduleTypes.add(match[1]);
+  for (const moduleType of declaredTypes) {
+    moduleTypes.add(moduleType);
   }
   for (const control of readControls(src)) activeControls.add(control);
 
@@ -112,9 +119,9 @@ for (const file of files) {
 
 for (const control of readControls(sharedSource)) activeControls.add(control);
 
-if (files.length !== EXPECTED_SCHEMA_FILE_COUNT) {
+if (schemaDefiningFiles.length !== EXPECTED_SCHEMA_FILE_COUNT) {
   errors.push(
-    `Schema 源文件数量不一致：actual=${files.length} expected=${EXPECTED_SCHEMA_FILE_COUNT}`,
+    `Schema 源文件数量不一致：actual=${schemaDefiningFiles.length} expected=${EXPECTED_SCHEMA_FILE_COUNT}`,
   );
 }
 

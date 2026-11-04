@@ -8,6 +8,7 @@ import {
 } from "@/page-builder/generated/contentTemplates.generated";
 import { useDirectionalSiteHeader } from "./useDirectionalSiteHeader";
 import { isStorefrontMenuActive } from "./storefrontMenuActive";
+import ShoppingBagNavLink from "./ShoppingBagNavLink";
 import SiteContactLink from "./SiteContactLink";
 
 export { isStorefrontMenuActive };
@@ -114,13 +115,6 @@ const AccountIcon = () => (
   <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
     <circle cx="15" cy="10" r="5" />
     <path d="M5 27c.8-5.2 4.2-8 10-8s9.2 2.8 10 8" />
-  </svg>
-);
-
-const CartIcon = () => (
-  <svg width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M10 11V8a5 5 0 0 1 10 0v3" />
-    <path d="M7 14h16l1.5 13h-19L7 14Z" />
   </svg>
 );
 
@@ -397,10 +391,7 @@ export default function StorefrontNavigation({
           </Link>
           <div className="site-header__right">
             <SiteContactLink preview={preview} onPreviewNavigate={onPreviewNavigate} />
-            <Link to="/cart" aria-label="购物袋" className="site-header__nav-item site-header__nav-item--cart" onClick={handlePreviewLink}>
-              <CartIcon />
-              <span className="site-header__nav-label hidden sm:inline">购物袋</span>
-            </Link>
+            <ShoppingBagNavLink onClick={handlePreviewLink} />
             <Link to="/customer" aria-label="我的账户" className="site-header__nav-item" onClick={handlePreviewLink}>
               <AccountIcon />
               <span className="site-header__nav-label hidden sm:inline">我的账户</span>

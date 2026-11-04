@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
+import DynamicTemplateRenderer, { type PageHeroFramePlacement } from "../template-definition/DynamicTemplateRenderer";
 import type { TemplateDefinitionV2 } from "../template-definition";
 import { useResolvedDynamicTemplate } from "./registry";
 import type { DynamicTemplateInstanceProps } from "./types";
@@ -37,7 +37,9 @@ export default function DynamicTemplateInstanceView({
   mode = "public",
   primaryHeadingLevel = 2,
   priority = false,
+  pageHeroPlacement,
   pageKey,
+  retainEmptyFrame = false,
 }: {
   props: DynamicTemplateInstanceProps;
   definition?: TemplateDefinitionV2;
@@ -47,7 +49,11 @@ export default function DynamicTemplateInstanceView({
   primaryHeadingLevel?: 1 | 2;
   /** 公开页首个实际可渲染主舞台的首图获得加载优先语义。 */
   priority?: boolean;
+  /** 页面文档传入。孤立预览不传，按这一节自己的首屏处理。 */
+  pageHeroPlacement?: PageHeroFramePlacement;
   pageKey?: string;
+  /** 页面尚无内容时只在编辑画布保留母模板结构；公开面仍收起空槽位。 */
+  retainEmptyFrame?: boolean;
 }) {
   const registered = useResolvedDynamicTemplate(props.templateId, props.templateVersion);
   const resolvedDefinition = definition ?? registered?.definition;
@@ -121,15 +127,19 @@ export default function DynamicTemplateInstanceView({
         breakpoint={device}
         contentBySlotId={props.contentBySlotId}
         hiddenSlotIds={props.hiddenSlotIds}
+        imageCarriesCopy={props.imageCarriesCopy === true}
         layoutOverridesByNodeId={props.layoutOverridesByNodeId}
+        pageSettings={props.pageSettings}
         publicSurface={mode === "editor"
-          ? { omitDefaultImages: true }
+          ? { omitDefaultImages: true, omitDefaultContent: true }
           : publicDecision?.publicSurface}
         omitNodeBackgroundImages
         mode={mode}
         editorSurface={mode === "editor" ? "page-instance" : undefined}
+        showEmptySlots={mode === "editor" && retainEmptyFrame ? true : undefined}
         primaryHeadingLevel={primaryHeadingLevel}
         priority={priority}
+        pageHeroPlacement={pageHeroPlacement}
       />
     </section>
   );

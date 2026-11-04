@@ -16,6 +16,11 @@ test("双图新构图在预览、编辑与公开 Renderer 一致，手机重排�
     const empty = structuredClone(definition);
     const images = Object.values(definition.nodes).filter((node: any) => definition.slots[node.slotId]?.type === "image") as any[];
     images.forEach((node, index) => { definition.defaultContent[node.slotId] = { src: "/media-layout-fixture.svg", alt: `测试图片 ${index + 1}` }; });
+    // 公开 Renderer 会丢掉没有内容的文字组，这里给标题和描述真实文案，才能比对图文分区。
+    Object.values(definition.slots).forEach((slot: any) => {
+      if (slot.semanticRole === "title") definition.defaultContent[slot.slotId] = "双图构图";
+      if (slot.semanticRole === "description") definition.defaultContent[slot.slotId] = "两张作品图上下排列，文字区留在一侧。";
+    });
     const gallery = document.createElement("main");
     gallery.id = "media-gallery";
     document.body.replaceChildren(gallery);
@@ -49,7 +54,11 @@ test("双图新构图在预览、编辑与公开 Renderer 一致，手机重排�
     expect(a.width).toBeCloseTo(a.height, 0);
     expect(b.width).toBeCloseTo(a.width, 0);
     expect(b.y).toBeGreaterThanOrEqual(a.y + a.height + 15);
-    expect(b.y + b.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
+    if (mode === "mobile") {
+      expect(frame.height / frame.width, "桌面 4:3 在手机上对换成 3:4，装不下的图可以溢出").toBeCloseTo(4 / 3, 1);
+    } else {
+      expect(b.y + b.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
+    }
     if (mode === "mobile") expect(a.y).toBeGreaterThanOrEqual(text.y + text.height);
     else expect(a.x).toBeGreaterThan(text.x + text.width);
     if (mode !== "empty") await expect(host.getByRole("img", { name: "测试图片 1" })).toHaveJSProperty("naturalWidth", 600);
@@ -288,7 +297,7 @@ test("随内容增长的多画幅各自定高，手机仍按内容顺序单列�
   }
   expect(heights[0], "16:9 没有比 1:1 矮").toBeLessThan(heights[1]);
   expect(heights[1], "1:1 没有比 4:5 矮").toBeLessThan(heights[2]);
-  // 手机端同样靠内容撑高：Logo 固定窄宽，其余按顺序单列，不得重叠。
+  // 品牌事实是上图下文：主图保持自己的比例，文字和 Logo 都排在图下，不盖住主图。
   const phone = mounted.phone;
   await expect(page.locator(`[data-flow="phone"] [data-template-node-id="${phone.stage}"]`)).toBeVisible();
   const phoneRects = await flowRects(page, "phone", [phone.stage, phone.content, ...phone.media.map((item) => item.id)]);
@@ -296,12 +305,13 @@ test("随内容增长的多画幅各自定高，手机仍按内容顺序单列�
   const phoneBlocks = phoneRects.filter((rect) => rect.id !== phone.stage);
   expect(phoneFrame.height, "手机流式画布没有高度").toBeGreaterThan(200);
   expect(phoneBlocks.length, "手机端主图、Logo 与内容块未全部渲染").toBe(3);
-  for (let index = 0; index < phoneBlocks.length; index += 1) {
-    expect(phoneBlocks[index].height, `手机端 ${phoneBlocks[index].id} 高度为 0`).toBeGreaterThan(0);
-    expect(phoneBlocks[index].y, `手机端 ${phoneBlocks[index].id} 起点跑到画布上方`).toBeGreaterThanOrEqual(phoneFrame.y - 1);
-    if (index) expect(phoneBlocks[index].y, `手机端 ${phoneBlocks[index].id} 与上一块重叠`).toBeGreaterThanOrEqual(phoneBlocks[index - 1].y + phoneBlocks[index - 1].height - 1);
-  }
+  const phoneHero = phoneBlocks.find((block) => phone.media.some((item) => item.id === block.id && item.role === "heroImage"))!;
+  const phoneCopy = phoneBlocks.find((block) => block.id === phone.content)!;
   const phoneLogo = phoneBlocks.find((block) => phone.media.some((item) => item.id === block.id && item.role === "logo"))!;
+  expect(phoneCopy.y, "手机文字盖住了主图").toBeGreaterThanOrEqual(phoneHero.y + phoneHero.height - 1);
+  expect(phoneCopy.x, "手机文字跑出画布左侧").toBeGreaterThanOrEqual(phoneFrame.x - 1);
+  expect(phoneCopy.x + phoneCopy.width, "手机文字跑出画布右侧").toBeLessThanOrEqual(phoneFrame.x + phoneFrame.width + 1);
+  expect(phoneLogo.y, "手机端 Logo 叠进了主图").toBeGreaterThanOrEqual(phoneHero.y + phoneHero.height - 1);
   expect(phoneLogo.width, "手机端 Logo 没有保持窄宽").toBeCloseTo(72, 0);
 });
 
@@ -509,7 +519,7 @@ test("方案画布双击默认文字提交进入历史，取消和撤销保持�
   await expect.poll(readState).toEqual({ content: "原默认文字", history: 0 });
 });
 
-test("作品网格和连续作品卡在 390px 下排成两列", async ({ page }) => {
+test("三格作品在 390px 下第一张满宽、后两张并排，不把第三张落单", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", (route) => route.abort());
@@ -545,13 +555,367 @@ test("作品网格和连续作品卡在 390px 下排成两列", async ({ page })
     const box = node.getBoundingClientRect();
     return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
   }));
-  expect(boxes.length).toBeGreaterThanOrEqual(3);
-  expect(boxes[0].width).toBeGreaterThan(120);
-  expect(boxes[0].width).toBeLessThan(220);
+  expect(boxes).toHaveLength(3);
+  await expect(grid).toHaveAttribute("data-template-mobile-work-lead", "true");
+  // 首张跨满两列，后两张同一行并排，三张都是 4:5。
+  expect(boxes[0].width).toBeGreaterThan(250);
+  expect(Math.abs(boxes[1].x - boxes[0].x)).toBeLessThanOrEqual(1);
+  expect(boxes[1].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 1);
+  expect(Math.abs(boxes[2].y - boxes[1].y)).toBeLessThanOrEqual(1);
+  expect(boxes[2].x).toBeGreaterThan(boxes[1].x + boxes[1].width);
+  expect(boxes[2].x - (boxes[1].x + boxes[1].width)).toBeLessThanOrEqual(13);
+  expect(Math.abs(boxes[1].width - boxes[2].width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(boxes[1].x + boxes[1].width * 2 + 12 - (boxes[0].x + boxes[0].width))).toBeLessThanOrEqual(2);
+  for (const box of boxes) expect(box.height / box.width).toBeCloseTo(1.25, 1);
+});
+
+test("固定横图根在 390px 下对换成倒数画布：16:9 对 9:16，3:2 对 2:3", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__paired-canvas", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>*,*::before,*::after{box-sizing:border-box}body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      <main id="wide"></main>
+      <main id="edit"></main>
+      <main id="hero"></main>
+      <main id="hero-image"></main>
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { createRecommendedRecipe, createMediaSlots } from '/src/page-builder/template-creation/presets.ts';
+      import { generateTemplateFromRecipe } from '/src/page-builder/template-creation/generateTemplateFromRecipe.ts';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      function mount(id, height) {
+        const recipe = createRecommendedRecipe('creation-grid');
+        recipe.canvas = { width: 1440, height, aspectRatio: 1440 / height };
+        const definition = generateTemplateFromRecipe(recipe, { templateId: id, name: id });
+        delete definition.metadata.geometryPolicy;
+        const host = document.getElementById(id);
+        host.style.width = '390px';
+        ReactDOM.createRoot(host).render(React.createElement(DynamicTemplateRenderer, {
+          definition, device: 'mobile', mode: 'editor',
+        }));
+      }
+      mount('wide', 810);
+      mount('edit', 960);
+      const heroHost = document.getElementById('hero');
+      heroHost.style.width = '390px';
+      ReactDOM.createRoot(heroHost).render(React.createElement(DynamicTemplateRenderer, {
+        definition: findLaunchTemplateMaster('page-hero'), device: 'mobile', mode: 'editor',
+      }));
+      const heroImageHost = document.getElementById('hero-image');
+      heroImageHost.style.width = '390px';
+      const heroImageRecipe = createRecommendedRecipe('page-hero');
+      heroImageRecipe.media = createMediaSlots(['heroImage']);
+      ReactDOM.createRoot(heroImageHost).render(React.createElement(DynamicTemplateRenderer, {
+        definition: generateTemplateFromRecipe(heroImageRecipe, { templateId: 'hero-image', name: 'hero-image' }),
+        device: 'mobile', mode: 'editor',
+      }));
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 1600, height: 1200 });
+  await page.goto("/__paired-canvas");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  const wide = page.locator("#wide .hc-dynamic-template");
+  await expect(wide).toHaveAttribute("data-template-paired-canvas", "9:16");
+  await expect(wide).toHaveAttribute("data-template-root-height-mode", "auto");
+  const wideGrid = page.locator("#wide [data-template-paired-image-grid='true']");
+  await expect(wideGrid).toHaveAttribute("data-template-paired-image-columns", "1");
+  await expect(wideGrid).toHaveAttribute("data-template-paired-image-rows", "3");
+  await expect(page.locator("#wide [data-template-mobile-work-lead='true']")).toHaveCount(0);
+  const wideFrame = await wide.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return { width: box.width, height: box.height };
+  });
+  expect(wideFrame.height / wideFrame.width).toBeCloseTo(16 / 9, 1);
+  const edit = page.locator("#edit .hc-dynamic-template");
+  await expect(edit).toHaveAttribute("data-template-paired-canvas", "2:3");
+  await expect(edit).toHaveAttribute("data-template-root-height-mode", "auto");
+  const grid = page.locator("#edit [data-template-paired-image-grid='true']");
+  await expect(grid).toHaveAttribute("data-template-paired-image-columns", "1");
+  await expect(grid).toHaveAttribute("data-template-paired-image-rows", "3");
+  const boxes = await grid.locator("[data-template-node-type='ImageSlot']").evaluateAll((nodes) => nodes.map((node) => {
+    const box = node.getBoundingClientRect();
+    return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
+  }));
+  expect(boxes).toHaveLength(3);
+  for (let index = 1; index < boxes.length; index += 1) {
+    expect(boxes[index].y).toBeGreaterThan(boxes[index - 1].y + boxes[index - 1].height - 1);
+    expect(Math.abs(boxes[index].width - boxes[0].width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(boxes[index].height - boxes[0].height)).toBeLessThanOrEqual(1);
+  }
+  const frame = await edit.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return { width: box.width, height: box.height };
+  });
+  expect(frame.height / frame.width).toBeCloseTo(3 / 2, 1);
+  const hero = page.locator("#hero .hc-dynamic-template");
+  await expect(hero).toHaveAttribute("data-template-paired-canvas", "9:16");
+  await expect(hero).toHaveAttribute("data-template-root-height-mode", "auto");
+  const heroImage = page.locator("#hero [data-template-semantic-role='backgroundImage']");
+  await expect.poll(async () => heroImage.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return box.width > 300 ? box.height / box.width : 0;
+  })).toBeCloseTo(16 / 9, 1);
+  const heroImageRoot = page.locator("#hero-image .hc-dynamic-template");
+  await expect(heroImageRoot).toHaveAttribute("data-template-paired-canvas", "9:16");
+  const heroImageFill = await heroImageRoot.evaluate((node) => {
+    const root = node.getBoundingClientRect();
+    const image = node.querySelector("[data-template-semantic-role='heroImage']")?.getBoundingClientRect();
+    const button = node.querySelector("[data-template-node-type='ButtonSlot']")?.getBoundingClientRect();
+    return {
+      root: { width: root.width, height: root.height },
+      image: image ? { width: image.width, height: image.height, top: image.top, bottom: image.bottom } : null,
+      button: button ? { top: button.top, bottom: button.bottom } : null,
+    };
+  });
+  expect(heroImageFill.image).not.toBeNull();
+  expect(heroImageFill.image!.width / heroImageFill.root.width).toBeGreaterThan(0.9);
+  expect(heroImageFill.root.height / heroImageFill.root.width, "桌面 16:9 的固定画幅在手机上对换成 9:16").toBeCloseTo(16 / 9, 1);
+  expect(heroImageFill.image!.height / heroImageFill.image!.width, "手机图片框跟着整节使用 9:16").toBeCloseTo(16 / 9, 1);
+  expect(heroImageFill.button).not.toBeNull();
+});
+
+test("四张作品图在对换画布里仍按两列两行", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__works-two-by-two", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>*,*::before,*::after{box-sizing:border-box}body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      <main id="works" style="width:390px"></main>
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      const works = structuredClone(findLaunchTemplateMaster('creation-grid'));
+      works.metadata.desktopRatio = '2:1';
+      for (const node of Object.values(works.nodes)) {
+        if (node.responsive?.desktop?.height) node.responsive.desktop.height = { mode: 'auto' };
+      }
+      const grid = Object.values(works.nodes).find((node) => node.type === 'Grid');
+      grid.responsive.mobile = { display: 'flex', direction: 'column', wrap: 'nowrap' };
+      grid.childIds.forEach((childId, index) => {
+        const slotId = works.nodes[childId].slotId;
+        if (works.slots[slotId]) works.slots[slotId].key = 'highlightImage' + String.fromCharCode(65 + index);
+      });
+      ReactDOM.createRoot(document.getElementById('works')).render(React.createElement(DynamicTemplateRenderer, {
+        definition: works, device: 'mobile', mode: 'editor',
+      }));
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 800, height: 1200 });
+  await page.goto("/__works-two-by-two");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  const frame = page.locator("#works .hc-dynamic-template");
+  await expect(frame).toHaveAttribute("data-template-paired-canvas", "1:2");
+  const grid = page.locator("#works [data-template-paired-image-grid='true']");
+  await expect(grid).toHaveAttribute("data-template-paired-image-columns", "2");
+  await expect(grid).toHaveAttribute("data-template-paired-image-rows", "2");
+  const boxes = await grid.locator("[data-template-node-type='ImageSlot']").evaluateAll((nodes) => nodes.map((node) => {
+    const box = node.getBoundingClientRect();
+    return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
+  }));
+  expect(boxes).toHaveLength(4);
+  expect(Math.abs(boxes[0].y - boxes[1].y)).toBeLessThanOrEqual(1);
   expect(boxes[1].x).toBeGreaterThan(boxes[0].x + boxes[0].width - 1);
-  expect(boxes[1].y).toBeCloseTo(boxes[0].y, 0);
   expect(boxes[2].y).toBeGreaterThan(boxes[0].y + boxes[0].height - 1);
-  expect(boxes[0].height / boxes[0].width).toBeGreaterThan(1.1);
+  expect(Math.abs(boxes[2].y - boxes[3].y)).toBeLessThanOrEqual(1);
+  expect(boxes[3].x).toBeGreaterThan(boxes[2].x + boxes[2].width - 1);
+});
+
+test("首发作品网格在 390 与 768 下按张数跨列，单列保持原样", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__launch-works", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>*,*::before,*::after{box-sizing:border-box}body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      <section id="odd" style="width:390px"></section>
+      <section id="quad" style="width:390px"></section>
+      <section id="one" style="width:390px"></section>
+      <section id="even" style="width:390px"></section>
+      <section id="desktop" style="width:768px"></section>
+      <section id="single" style="width:390px"></section>
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      const master = findLaunchTemplateMaster('creation-grid');
+      const gridOf = (definition) => Object.values(definition.nodes).find((node) => node.type === 'Grid' && node.name === '作品卡组');
+      const withCount = (count) => {
+        const next = structuredClone(master);
+        const grid = gridOf(next);
+        const prototypes = grid.childIds.map((id) => next.nodes[id]);
+        grid.childIds = Array.from({ length: count }, (_, index) => {
+          const source = prototypes[index % prototypes.length];
+          const nodeId = source.nodeId + '__n' + index;
+          const slotId = source.slotId + '__n' + index;
+          next.nodes[nodeId] = { ...structuredClone(source), nodeId, slotId, name: '作品图 ' + (index + 1) };
+          const slot = structuredClone(next.slots[source.slotId]);
+          slot.slotId = slotId;
+          slot.key = slot.key + '_' + index;
+          next.slots[slotId] = slot;
+          return nodeId;
+        });
+        const used = new Set();
+        const walk = (id) => {
+          if (!id || used.has(id)) return;
+          used.add(id);
+          for (const childId of next.nodes[id].childIds ?? []) walk(childId);
+        };
+        walk(next.rootNodeId);
+        for (const id of Object.keys(next.nodes)) if (!used.has(id)) delete next.nodes[id];
+        const usedSlots = new Set(Object.values(next.nodes).map((node) => node.slotId).filter(Boolean));
+        for (const id of Object.keys(next.slots)) if (!usedSlots.has(id)) delete next.slots[id];
+        return next;
+      };
+      const mount = (id, definition, device) => {
+        ReactDOM.createRoot(document.getElementById(id)).render(React.createElement(DynamicTemplateRenderer, {
+          definition, device, mode: 'editor',
+        }));
+      };
+      mount('odd', withCount(3), 'mobile');
+      mount('quad', master, 'mobile');
+      mount('one', withCount(1), 'mobile');
+      mount('even', withCount(6), 'mobile');
+      mount('desktop', master, 'desktop');
+      const single = structuredClone(master);
+      gridOf(single).responsive.mobile = { ...gridOf(single).responsive.mobile, columns: [1] };
+      mount('single', single, 'mobile');
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 900, height: 1400 });
+  await page.goto("/__launch-works");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  const imageBoxes = (id: string) => page.locator(`#${id} [data-template-node-type='ImageSlot']`).evaluateAll((nodes) => nodes.map((node) => {
+    const box = node.getBoundingClientRect();
+    return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width), height: Math.round(box.height) };
+  }));
+  const odd = await imageBoxes("odd");
+  expect(odd).toHaveLength(3);
+  await expect(page.locator("#odd [data-template-mobile-work-grid='true']")).toHaveCount(0);
+  await expect(page.locator("#odd [data-template-mobile-work-lead='true']")).toHaveCount(1);
+  expect(odd[0].width).toBeGreaterThan(odd[1].width * 1.6);
+  expect(odd[1].y).toBeGreaterThan(odd[0].y + odd[0].height - 1);
+  expect(Math.abs(odd[2].y - odd[1].y)).toBeLessThanOrEqual(1);
+  expect(odd[2].x).toBeGreaterThan(odd[1].x + odd[1].width);
+  const quad = await imageBoxes("quad");
+  expect(quad).toHaveLength(4);
+  await expect(page.locator("#quad [data-template-mobile-work-lead='true']")).toHaveCount(0);
+  expect(Math.abs(quad[0].y - quad[1].y)).toBeLessThanOrEqual(1);
+  expect(quad[1].x).toBeGreaterThan(quad[0].x + quad[0].width);
+  expect(quad[2].y).toBeGreaterThan(quad[0].y + quad[0].height - 1);
+  expect(Math.abs(quad[2].y - quad[3].y)).toBeLessThanOrEqual(1);
+  expect(quad[3].x).toBeGreaterThan(quad[2].x + quad[2].width);
+  const one = await imageBoxes("one");
+  expect(one).toHaveLength(1);
+  await expect(page.locator("#one [data-template-mobile-work-lead='true']")).toHaveCount(1);
+  expect(one[0].width).toBeGreaterThan(250);
+  const even = await imageBoxes("even");
+  expect(even).toHaveLength(6);
+  await expect(page.locator("#even [data-template-mobile-work-lead='true']")).toHaveCount(0);
+  expect(Math.abs(even[0].y - even[1].y)).toBeLessThanOrEqual(1);
+  expect(even[1].x).toBeGreaterThan(even[0].x);
+  expect(even[2].y).toBeGreaterThan(even[0].y + even[0].height - 1);
+  expect(Math.abs(even[4].y - even[5].y)).toBeLessThanOrEqual(1);
+  const desktopColumns = await page.locator("#desktop [data-template-node-type='Grid']").evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length);
+  expect(desktopColumns).toBe(4);
+  const desktop = await imageBoxes("desktop");
+  expect(desktop).toHaveLength(4);
+  await expect(page.locator("#desktop [data-template-mobile-work-lead='true']")).toHaveCount(0);
+  expect(Math.abs(desktop[0].y - desktop[1].y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(desktop[1].y - desktop[2].y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(desktop[2].y - desktop[3].y)).toBeLessThanOrEqual(1);
+  expect(desktop[1].x).toBeGreaterThan(desktop[0].x);
+  expect(desktop[2].x).toBeGreaterThan(desktop[1].x);
+  expect(desktop[3].x).toBeGreaterThan(desktop[2].x);
+  const singleBoxes = await imageBoxes("single");
+  expect(singleBoxes).toHaveLength(4);
+  await expect(page.locator("#single [data-template-mobile-work-lead='true']")).toHaveCount(0);
+  expect(singleBoxes[1].y).toBeGreaterThan(singleBoxes[0].y + singleBoxes[0].height - 1);
+  expect(singleBoxes[2].y).toBeGreaterThan(singleBoxes[1].y + singleBoxes[1].height - 1);
+  expect(singleBoxes[3].y).toBeGreaterThan(singleBoxes[2].y + singleBoxes[2].height - 1);
+  expect(Math.abs(singleBoxes[0].x - singleBoxes[1].x)).toBeLessThanOrEqual(1);
+});
+
+test("首发作品网格在 320 到 1920 的指定宽度上保持四列或两列两行", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__launch-works-widths", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>*,*::before,*::after{box-sizing:border-box}body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      ${[320, 375, 390, 430, 768, 1024, 1440, 1920].map((width) => `<section id="w${width}" style="width:${width}px"></section>`).join("")}
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      const master = findLaunchTemplateMaster('creation-grid');
+      for (const width of [320, 375, 390, 430, 768, 1024, 1440, 1920]) {
+        ReactDOM.createRoot(document.getElementById('w' + width)).render(React.createElement(DynamicTemplateRenderer, {
+          definition: master,
+          device: width < 768 ? 'mobile' : 'desktop',
+          mode: 'editor',
+        }));
+      }
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 2100, height: 1600 });
+  await page.goto("/__launch-works-widths");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  for (const width of [320, 375, 390, 430, 768, 1024, 1440, 1920]) {
+    const boxes = await page.locator(`#w${width} [data-template-node-type='ImageSlot']`).evaluateAll((nodes) => nodes.map((node) => {
+      const box = node.getBoundingClientRect();
+      return { x: Math.round(box.x), y: Math.round(box.y), width: Math.round(box.width) };
+    }));
+    expect(boxes, String(width)).toHaveLength(4);
+    const leads = await page.locator(`#w${width} [data-template-mobile-work-lead='true']`).count();
+    expect(leads, String(width)).toBe(0);
+    if (width < 768) {
+      expect(Math.abs(boxes[0].y - boxes[1].y), String(width)).toBeLessThanOrEqual(1);
+      expect(boxes[1].x, String(width)).toBeGreaterThan(boxes[0].x);
+      expect(boxes[2].y, String(width)).toBeGreaterThan(boxes[0].y);
+      expect(Math.abs(boxes[2].y - boxes[3].y), String(width)).toBeLessThanOrEqual(1);
+      expect(boxes[3].x, String(width)).toBeGreaterThan(boxes[2].x);
+    } else {
+      expect(Math.abs(boxes[0].y - boxes[1].y), String(width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(boxes[1].y - boxes[2].y), String(width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(boxes[2].y - boxes[3].y), String(width)).toBeLessThanOrEqual(1);
+      expect(boxes[1].x, String(width)).toBeGreaterThan(boxes[0].x);
+      expect(boxes[2].x, String(width)).toBeGreaterThan(boxes[1].x);
+      expect(boxes[3].x, String(width)).toBeGreaterThan(boxes[2].x);
+    }
+  }
 });
 
 test("深色画布的手机主图贴齐区块边缘，浅色图文仍留边距", async ({ page }) => {
@@ -584,9 +948,50 @@ test("深色画布的手机主图贴齐区块边缘，浅色图文仍留边距",
           definition, device: 'mobile', mode: 'editor',
         }));
       };
+      const mountSaved = () => {
+        const recipe = createRecommendedRecipe('page-hero');
+        recipe.style = styleFor('minimal');
+        const definition = generateTemplateFromRecipe(recipe, { templateId: 'saved_hero', name: 'saved' });
+        delete definition.metadata.geometryPolicy;
+        const root = definition.nodes[definition.rootNodeId];
+        root.responsive.desktop.backgroundColor = '#1C1E20';
+        root.responsive.mobile = { height: { mode: 'auto' } };
+        const stage = definition.nodes[root.childIds[0]];
+        stage.responsive.mobile = {
+          ...stage.responsive.mobile,
+          layoutMode: 'flow', display: 'flex', height: { mode: 'auto' },
+          padding: { top: { value: 0, unit: 'px' }, right: { value: 20, unit: 'px' }, bottom: { value: 64, unit: 'px' }, left: { value: 20, unit: 'px' } },
+        };
+        const imageId = Object.keys(definition.nodes).find((id) => {
+          const candidate = definition.nodes[id];
+          return candidate.type === 'ImageSlot' && definition.slots[candidate.slotId]?.semanticRole !== 'logo';
+        });
+        const image = definition.nodes[imageId];
+        const slot = definition.slots[image.slotId];
+        slot.semanticRole = 'backgroundImage';
+        slot.desktopRules.aspectRatio = '16:9';
+        slot.mobileRules = { ...slot.mobileRules, aspectRatio: '4:5' };
+        image.responsive.mobile = {
+          ...image.responsive.mobile,
+          display: 'flex',
+          width: 'fill',
+          height: { mode: 'aspect-ratio', ratio: { width: 4, height: 5 } },
+          placement: null,
+        };
+        const host = document.createElement('section');
+        host.dataset.case = 'saved-hero';
+        host.style.width = '390px';
+        document.getElementById('fixture').append(host);
+        ReactDOM.createRoot(host).render(React.createElement(DynamicTemplateRenderer, {
+          definition, device: 'mobile', mode: 'editor', editorSurface: 'page-instance',
+          contentBySlotId: { [slot.slotId]: { src: 'https://example.com/desk.jpg', alt: '吊坠' } },
+          layoutOverridesByNodeId: { [image.nodeId]: { mobile: { focusXPercent: 89.5, focusYPercent: 48 } } },
+        }));
+      };
       mount('dark-story', 'collection-story', 'tech');
       mount('light-story', 'collection-story', 'minimal');
       mount('light-hero', 'page-hero', 'minimal');
+      mountSaved();
     </script></body></html>`,
   }));
   await page.setViewportSize({ width: 800, height: 900 });
@@ -602,13 +1007,19 @@ test("深色画布的手机主图贴齐区块边缘，浅色图文仍留边距",
     };
     const imageRect = image?.getBoundingClientRect();
     const titleRect = title?.getBoundingClientRect();
+    const rootRect = root?.getBoundingClientRect();
     return {
       root: box(root),
       image: box(image),
       title: box(title),
       bleed: image?.getAttribute("data-template-mobile-bleed"),
+      canvasRatio: rootRect && rootRect.width ? rootRect.height / rootRect.width : 0,
       imageRatio: imageRect && imageRect.width ? imageRect.height / imageRect.width : 0,
-      titleBelowImage: Boolean(titleRect && imageRect && titleRect.top >= imageRect.bottom - 1),
+      titleInsideImage: Boolean(titleRect && imageRect
+        && titleRect.top >= imageRect.top - 1
+        && titleRect.bottom <= imageRect.bottom + 1
+        && titleRect.left >= imageRect.left - 1
+        && titleRect.right <= imageRect.right + 1),
     };
   });
   const dark = await edges("dark-story");
@@ -625,7 +1036,623 @@ test("深色画布的手机主图贴齐区块边缘，浅色图文仍留边距",
   expect(hero.image && hero.root).toBeTruthy();
   expect(Math.abs(hero.image!.left - hero.root!.left), "浅色首屏主图没有贴边").toBeLessThanOrEqual(1);
   expect(hero.bleed).toBe("true");
-  expect(hero.imageRatio, "首屏手机图是 4:5，不是横图压成的细条").toBeGreaterThan(1.2);
-  expect(hero.imageRatio).toBeLessThan(1.35);
-  expect(hero.titleBelowImage, "首屏标题在图下，不盖住画面").toBe(true);
+  expect(hero.canvasRatio, "桌面 16:9 的固定首屏在手机上对换成 9:16").toBeCloseTo(16 / 9, 1);
+  expect(hero.imageRatio, "手机首屏图片留在竖画布里").toBeGreaterThan(1);
+  expect(hero.title, "首屏标题仍在区块里").toBeTruthy();
+  const saved = await page.locator("[data-case='saved-hero']").evaluate((host) => {
+    const root = host.querySelector("[data-template-root-node-id]");
+    const image = host.querySelector("[data-template-semantic-role='backgroundImage']");
+    const rootBox = root?.getBoundingClientRect();
+    const imageBox = image?.getBoundingClientRect();
+    return {
+      paired: root?.getAttribute("data-template-paired-canvas") ?? null,
+      note: host.textContent?.slice(0, 180) ?? "",
+      leftGap: rootBox && imageBox ? Math.abs(imageBox.left - rootBox.left) : 99,
+      widthGap: rootBox && imageBox ? Math.abs(imageBox.width - rootBox.width) : 99,
+      ratio: imageBox && imageBox.width ? imageBox.height / imageBox.width : 0,
+    };
+  });
+  expect(saved.paired, saved.note).toBe("9:16");
+  expect(saved.leftGap).toBeLessThanOrEqual(1);
+  expect(saved.widthGap).toBeLessThanOrEqual(1);
+  expect(saved.ratio, "整节已对换成竖画布，图片落在竖框里").toBeGreaterThan(1);
+});
+
+test("600 到 767 宽时叙事块限宽 560，作品网格仍用内容宽", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__large-phone", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>*,*::before,*::after{box-sizing:border-box}body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      <section id="hero" style="width:700px"></section>
+      <section id="works" style="width:700px"></section>
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      const hero = findLaunchTemplateMaster('page-hero');
+      const works = findLaunchTemplateMaster('creation-grid');
+      ReactDOM.createRoot(document.getElementById('hero')).render(React.createElement((await import('/src/page-builder/template-definition/DynamicTemplateRenderer.tsx')).default, {
+        definition: hero, device: 'mobile', mode: 'editor',
+      }));
+      ReactDOM.createRoot(document.getElementById('works')).render(React.createElement((await import('/src/page-builder/template-definition/DynamicTemplateRenderer.tsx')).default, {
+        definition: works, device: 'mobile', mode: 'editor',
+      }));
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 900, height: 1200 });
+  await page.goto("/__large-phone");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  const heroRoot = page.locator("#hero [data-template-large-phone='true']");
+  await expect(heroRoot).toBeVisible();
+  const measured = page.locator("#hero [data-template-large-phone-measure='true']").first();
+  await expect(measured).toBeVisible();
+  const measuredBox = await measured.boundingBox();
+  expect(measuredBox?.width ?? 0).toBeLessThanOrEqual(560);
+  expect(measuredBox?.width ?? 0).toBeGreaterThan(500);
+  const worksBox = await page.locator("#works .hc-dynamic-template").boundingBox();
+  expect(worksBox?.width ?? 0).toBeGreaterThan(640);
+});
+
+test("浅色文字叠在主图上时，桌面和手机都铺底部中性渐变", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__text-scrim", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      <section id="desktop" style="width:1440px"></section>
+      <section id="mobile" style="width:390px"></section>
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      const hero = findLaunchTemplateMaster('page-hero');
+      ReactDOM.createRoot(document.getElementById('desktop')).render(React.createElement(DynamicTemplateRenderer, {
+        definition: hero, device: 'desktop', mode: 'editor',
+      }));
+      ReactDOM.createRoot(document.getElementById('mobile')).render(React.createElement(DynamicTemplateRenderer, {
+        definition: hero, device: 'mobile', mode: 'editor',
+      }));
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 1500, height: 1000 });
+  await page.goto("/__text-scrim");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  const scrim = page.locator("#desktop [data-template-text-scrim='bottom']");
+  await expect(scrim).toBeVisible();
+  await expect(scrim).toHaveCSS("background-image", /linear-gradient/);
+  const background = await scrim.evaluate((element) => getComputedStyle(element).backgroundImage);
+  expect(background).toContain("0.6");
+  await expect(page.locator("#mobile [data-template-text-scrim='bottom']")).toBeVisible();
+});
+
+test("左右图文的图片位置只在桌面镜像横排；手机图在上文在下且不对换画布", async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__media-side", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>*,*::before,*::after{box-sizing:border-box}body{margin:0}</style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body>
+      <section id="authored" style="width:1440px"></section>
+      <section id="mirrored" style="width:1440px"></section>
+      <section id="mobile" style="width:390px"></section>
+      <script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      const split = findLaunchTemplateMaster('editorial-split');
+      const mount = (id, device, pageSettings) => ReactDOM.createRoot(document.getElementById(id)).render(
+        React.createElement(DynamicTemplateRenderer, { definition: split, device, mode: 'editor', pageSettings }),
+      );
+      mount('authored', 'desktop', undefined);
+      mount('mirrored', 'desktop', { mediaSide: 'end' });
+      mount('mobile', 'mobile', { mediaSide: 'end' });
+    </script></body></html>`,
+  }));
+  await page.setViewportSize({ width: 1500, height: 1200 });
+  await page.goto("/__media-side");
+  await expect.poll(() => errors.join("\n")).toBe("");
+
+  const columnsOf = (host: string) => page.locator(`#${host}`).evaluate((root) => {
+    const box = (suffix: string) => root.querySelector(`[data-template-node-id$='_node_${suffix}']`)?.getBoundingClientRect();
+    const media = box("media");
+    const text = box("text");
+    return media && text ? { mediaX: media.x, mediaBottom: media.bottom, textX: text.x, textTop: text.top } : null;
+  });
+
+  await expect(page.locator("#authored [data-template-mirrored='true']")).toHaveCount(0);
+  const authored = await columnsOf("authored");
+  expect(authored).not.toBeNull();
+  expect(authored!.mediaX).toBeLessThan(authored!.textX);
+
+  const mirroredRow = page.locator("#mirrored [data-template-mirrored='true']");
+  await expect(mirroredRow).toHaveCount(1);
+  await expect(mirroredRow).toHaveCSS("flex-direction", "row-reverse");
+  const mirrored = await columnsOf("mirrored");
+  expect(mirrored!.mediaX).toBeGreaterThan(mirrored!.textX);
+
+  await expect(page.locator("#mobile [data-template-mirrored='true']")).toHaveCount(0);
+  const mobileRoot = page.locator("#mobile .hc-dynamic-template");
+  await expect(mobileRoot).toHaveAttribute("data-template-paired-canvas", "2:3");
+  const mobile = await columnsOf("mobile");
+  expect(mobile!.mediaBottom).toBeLessThanOrEqual(mobile!.textTop + 1);
+  const detailBoxes = await page.locator("#mobile [data-template-semantic-role='secondaryImage']").evaluateAll(
+    (nodes) => nodes.map((node) => node.getBoundingClientRect().top),
+  );
+  expect(detailBoxes).toHaveLength(2);
+  expect(Math.abs(detailBoxes[0] - detailBoxes[1])).toBeLessThanOrEqual(1);
+  const heroBox = await page.locator("#mobile [data-template-semantic-role='heroImage']").boundingBox();
+  expect(heroBox).not.toBeNull();
+  expect(heroBox!.width / heroBox!.height, "自动 4:5 改回桌面 3:2，文字仍在图下").toBeCloseTo(3 / 2, 1);
+  await page.locator("#mobile .hc-dynamic-template").screenshot({ path: testInfo.outputPath("split-mobile-plate.png") });
+});
+
+test("新几何在指定视口里，没有手机图的首屏按桌面反比例显示", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__hero-frame-viewports", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>
+      :root { --site-header-height: 88px; }
+      *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+      section[data-case]{width:100%}
+    </style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body><main id="fixture"></main><script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      const roles = ['page-hero', 'creation-grid', 'service-invitation', 'editorial-split'];
+      const root = ReactDOM.createRoot(document.getElementById('fixture'));
+      window.renderCases = (device) => {
+        root.render(React.createElement(React.Fragment, null, roles.map((role) =>
+          React.createElement('section', { key: role + device, 'data-case': role },
+            React.createElement(DynamicTemplateRenderer, {
+              definition: findLaunchTemplateMaster(role),
+              device,
+              mode: 'editor',
+              pageHeroPlacement: role === 'page-hero' ? 'primary' : 'subsequent',
+            }),
+          ),
+        )));
+      };
+    </script></body></html>`,
+  }));
+
+  const read = () => page.locator("#fixture").evaluate(() => {
+    const measure = (role: string) => {
+      const host = document.querySelector(`[data-case="${role}"]`);
+      const section = host?.querySelector(".hc-dynamic-template");
+      const image = host?.querySelector("[data-template-semantic-role='backgroundImage'], [data-template-semantic-role='heroImage']");
+      const byText = (snippet: string) => [...(host?.querySelectorAll("[data-template-slot-id]") ?? [])]
+        .filter((node) => node.textContent?.includes(snippet))
+        .sort((left, right) => left.getBoundingClientRect().height - right.getBoundingClientRect().height)[0];
+      const title = byText("页面主标题") ?? byText("主标题");
+      const action = byText("主行动");
+      const rect = (node: Element | null | undefined) => {
+        const box = node?.getBoundingClientRect();
+        return box && box.width > 0 ? { width: box.width, height: box.height, top: box.top, bottom: box.bottom } : null;
+      };
+      const slots = [...(host?.querySelectorAll("[data-template-node-type='ImageSlot']") ?? [])]
+        .map((node) => node.getBoundingClientRect())
+        .filter((box) => box.width > 20 && box.height > 20);
+      const sectionBox = rect(section);
+      const imageBox = rect(image);
+      const titleBox = rect(title);
+      const actionBox = rect(action);
+      const inside = (box: { top: number; bottom: number } | null) => Boolean(
+        sectionBox && box && box.top >= sectionBox.top - 1 && box.bottom <= sectionBox.bottom + 1 && box.bottom - box.top > 8,
+      );
+      return {
+        paired: section?.getAttribute("data-template-paired-canvas") ?? null,
+        copy: section?.getAttribute("data-template-hero-copy") ?? null,
+        cap: section?.getAttribute("data-template-hero-viewport-cap") ?? null,
+        section: sectionBox,
+        image: imageBox,
+        imageRatio: imageBox && imageBox.width ? imageBox.height / imageBox.width : 0,
+        titleInside: inside(titleBox),
+        titleBelowImage: Boolean(imageBox && titleBox && titleBox.top >= imageBox.bottom - 1),
+        actionInside: actionBox ? inside(actionBox) : true,
+        imageCount: slots.length,
+        rowCount: new Set(slots.map((box) => Math.round(box.top / 8))).size,
+        cardRatio: slots[0] ? slots[0].height / slots[0].width : 0,
+      };
+    };
+    return {
+      hero: measure("page-hero"),
+      grid: measure("creation-grid"),
+      invitation: measure("service-invitation"),
+      split: measure("editorial-split"),
+    };
+  });
+
+  await page.goto("/__hero-frame-viewports");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  await page.waitForFunction(() => typeof (window as unknown as { renderCases?: unknown }).renderCases === "function");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => (window as unknown as { renderCases: (device: string) => void }).renderCases("mobile"));
+  await expect.poll(async () => {
+    const ratio = (await read()).hero.imageRatio;
+    return ratio > 1.5;
+  }).toBe(true);
+  const phone = await read();
+  expect(phone.hero.paired).toBe("9:16");
+  expect(phone.hero.imageRatio, "桌面 16:9 的首屏在手机上对换成 9:16").toBeCloseTo(16 / 9, 1);
+  expect(phone.hero.copy === "below" || phone.hero.copy === null).toBe(true);
+  expect(phone.hero.titleInside, "标题留在首屏里，装不下时排到横图下面").toBe(true);
+  expect(phone.hero.actionInside).toBe(true);
+  expect(phone.grid.paired).toBe("5:4");
+  expect(phone.grid.imageCount).toBe(4);
+  expect(phone.grid.rowCount).toBe(2);
+  expect(phone.grid.cardRatio).toBeGreaterThan(1.15);
+  expect(phone.grid.cardRatio).toBeLessThan(1.35);
+  expect(phone.grid.section && phone.grid.section.height / phone.grid.section.width).toBeCloseTo(4 / 5, 1);
+  expect(phone.invitation.paired).toBe("9:16");
+  expect(phone.split.paired).toBe("2:3");
+  expect(phone.invitation.section && phone.split.section).toBeTruthy();
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await expect.poll(async () => (await read()).hero.cap).toBe("true");
+  const short = await read();
+  expect(short.hero.copy).toBe("below");
+  expect(short.hero.image && short.hero.image.height).toBeLessThanOrEqual(568 - 88 + 2);
+  expect(short.hero.titleBelowImage, "320×568 的标题落到图片下方且不被裁掉").toBe(true);
+  expect(short.hero.titleInside).toBe(true);
+  expect(short.hero.actionInside).toBe(true);
+
+  await page.setViewportSize({ width: 767, height: 900 });
+  await expect.poll(async () => (await read()).hero.cap).toBe("true");
+  const narrow = await read();
+  expect(narrow.hero.paired).toBe("9:16");
+  expect(narrow.hero.copy).toBe("below");
+  expect(narrow.hero.image && narrow.hero.image.height).toBeLessThanOrEqual(900 - 88 + 2);
+  expect(narrow.hero.titleBelowImage).toBe(true);
+  expect(narrow.hero.titleInside).toBe(true);
+
+  await page.setViewportSize({ width: 768, height: 900 });
+  await page.evaluate(() => (window as unknown as { renderCases: (device: string) => void }).renderCases("desktop"));
+  await expect.poll(async () => (await read()).hero.imageRatio).toBeGreaterThan(0.7);
+  const desktop = await read();
+  expect(desktop.hero.imageRatio).toBeLessThan(0.8);
+  expect(desktop.hero.paired).toBeNull();
+  expect(desktop.hero.titleInside).toBe(true);
+  expect(desktop.grid.paired).toBeNull();
+  expect(desktop.invitation.paired).toBeNull();
+  expect(desktop.split.paired).toBeNull();
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.evaluate(() => (window as unknown as { renderCases: (device: string) => void }).renderCases("desktop"));
+  await expect.poll(async () => (await read()).hero.copy).toBe("below");
+  const landscape = await read();
+  expect(landscape.hero.paired).toBeNull();
+  expect(landscape.hero.titleBelowImage, "横屏矮视口的标题落到图片下方").toBe(true);
+  expect(landscape.hero.titleInside).toBe(true);
+  expect(landscape.grid.paired).toBeNull();
+  expect(landscape.invitation.paired).toBeNull();
+  expect(landscape.split.paired).toBeNull();
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await expect.poll(async () => (await read()).hero.copy).toBeNull();
+  const wide = await read();
+  expect(wide.hero.imageRatio).toBeGreaterThan(0.5);
+  expect(wide.hero.imageRatio).toBeLessThan(0.62);
+  expect(wide.hero.titleInside).toBe(true);
+  expect(wide.grid.imageCount).toBe(4);
+  expect(wide.grid.rowCount).toBe(1);
+});
+
+test("首页首屏旧画布与新画框在指定视口分开成立", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/**", (route) => route.abort());
+  await page.route("**/__hero-home-proof", (route) => route.fulfill({
+    contentType: "text/html; charset=utf-8",
+    body: `<!doctype html><html><head><meta charset="utf-8"><style>
+      :root { --site-header-height: 88px; }
+      *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+      #fixture{width:100%}
+    </style>
+      <script type="module">
+        import RefreshRuntime from '/@react-refresh';
+        RefreshRuntime.injectIntoGlobalHook(window);
+        window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
+        window.__vite_plugin_react_preamble_installed__ = true;
+      </script></head><body><main id="fixture"></main><script type="module">
+      import React from '/node_modules/.vite/deps/react.js';
+      import ReactDOM from '/node_modules/.vite/deps/react-dom_client.js';
+      import { findLaunchTemplateMaster } from '/src/page-builder/template-creation/launchTemplateSet.ts';
+      import DynamicTemplateRenderer from '/src/page-builder/template-definition/DynamicTemplateRenderer.tsx';
+      const root = ReactDOM.createRoot(document.getElementById('fixture'));
+      const titleId = 'tpl_launch_page_hero_slot_title';
+      const subtitleId = 'tpl_launch_page_hero_slot_subtitle';
+      const imageId = 'tpl_launch_page_hero_slot_heroBackground';
+      const actionId = 'tpl_launch_page_hero_slot_primaryAction';
+      const titleNodeId = 'tpl_launch_page_hero_node_title';
+      window.renderHero = (options) => {
+        const master = findLaunchTemplateMaster('page-hero');
+        const definition = structuredClone(master);
+        if (options.geometry === 'old') delete definition.metadata.geometryPolicy;
+        if (options.ink) {
+          definition.slots[titleId].desktopRules.color = options.ink;
+          definition.slots[titleId].mobileRules.color = options.ink;
+        }
+        const content = {
+          [imageId]: {
+            src: 'https://example.com/desk.jpg',
+            alt: '首屏',
+            ...(options.mobileSrc ? { mobileSrc: options.mobileSrc } : {}),
+          },
+          [titleId]: options.title || '吊坠',
+          [subtitleId]: options.subtitle || '一句说明',
+        };
+        if (options.action) {
+          content[actionId] = { label: '查看作品', targetType: 'page', pagePath: '/products' };
+        }
+        root.render(React.createElement(DynamicTemplateRenderer, {
+          definition,
+          device: options.device,
+          mode: options.mode,
+          pageHeroPlacement: 'primary',
+          contentBySlotId: content,
+          imageCarriesCopy: options.imageCarriesCopy === true,
+          layoutOverridesByNodeId: options.collapse
+            ? { [titleNodeId]: { [options.device]: { visuallyCollapsed: true } } }
+            : undefined,
+        }));
+      };
+    </script></body></html>`,
+  }));
+
+  const read = () => page.locator("#fixture").evaluate(() => {
+    const host = document.querySelector(".hc-dynamic-template");
+    const image = host?.querySelector("img");
+    const imageBox = image?.getBoundingClientRect();
+    const hostBox = host?.getBoundingClientRect();
+    const title = host?.querySelector("[data-template-node-type='HeadingSlot']");
+    const titleInk = title?.querySelector("h1, h2") ?? title;
+    const button = host?.querySelector("[data-template-node-type='ButtonSlot'] span");
+    const links = [...(host?.querySelectorAll("a") ?? [])].map((node) => ({
+      href: node.getAttribute("href"),
+      nested: node.querySelectorAll("a").length,
+    }));
+    const color = (node: Element | null | undefined) => node ? getComputedStyle(node).color : null;
+    const fit = image ? getComputedStyle(image).objectFit : null;
+    return {
+      paired: host?.getAttribute("data-template-paired-canvas") ?? null,
+      copy: host?.getAttribute("data-template-hero-copy") ?? null,
+      source: image?.getAttribute("data-template-image-source") ?? null,
+      src: image?.getAttribute("src") ?? "",
+      fit,
+      poster: image?.closest("[data-template-poster-fit]")?.getAttribute("data-template-poster-fit")
+        ?? host?.querySelector("[data-template-poster-fit]")?.getAttribute("data-template-poster-fit")
+        ?? null,
+      mobileAsset: host?.querySelector("[data-template-mobile-asset]")?.getAttribute("data-template-mobile-asset") ?? null,
+      imageWidth: imageBox?.width ?? 0,
+      imageHeight: imageBox?.height ?? 0,
+      sectionHeight: hostBox?.height ?? 0,
+      titleText: title?.textContent ?? "",
+      titleColor: color(titleInk),
+      titleContrast: titleInk?.getAttribute("data-template-text-contrast") ?? null,
+      titleCollapsed: title?.getAttribute("data-template-visual-collapse") ?? null,
+      titleHidden: title?.getAttribute("aria-hidden") ?? null,
+      titleHeight: title?.getBoundingClientRect().height ?? 0,
+      buttonColor: color(button),
+      links,
+      pairedNote: host?.querySelector("[data-template-paired-image-note]")?.textContent ?? null,
+      correctedNote: host?.querySelector("[data-template-text-contrast-note='corrected']")?.textContent ?? null,
+      lowNote: host?.querySelector("[data-template-text-contrast-note='low']")?.textContent ?? null,
+    };
+  });
+
+  const show = async (options: Record<string, unknown>) => {
+    await page.evaluate((value) => (
+      window as unknown as { renderHero: (options: Record<string, unknown>) => void }
+    ).renderHero(value), options);
+    await expect.poll(async () => (await read()).sectionHeight).toBeGreaterThan(40);
+  };
+
+  await page.goto("/__hero-home-proof");
+  await expect.poll(() => errors.join("\n")).toBe("");
+  await page.waitForFunction(() => typeof (window as unknown as { renderHero?: unknown }).renderHero === "function");
+
+  const longCopy = "这是一段用来检查文字增长的说明。".repeat(12);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await show({ geometry: "new", device: "mobile", mode: "preview", title: "吊坠", subtitle: "一句说明" });
+  const freshPhone = await read();
+  expect(freshPhone.paired).toBe("9:16");
+  expect(freshPhone.source).toBe("desktop");
+  expect(freshPhone.mobileAsset).toBe("desktop-only");
+  expect(freshPhone.fit).toBe("cover");
+  expect(freshPhone.poster).toBeNull();
+  expect(freshPhone.links).toHaveLength(0);
+  expect(freshPhone.imageWidth / freshPhone.imageHeight, "桌面 16:9 的首屏在手机上对换成 9:16").toBeCloseTo(9 / 16, 1);
+  expect(freshPhone.imageHeight).toBeGreaterThan(freshPhone.sectionHeight * 0.25);
+
+  await show({ geometry: "new", device: "mobile", mode: "preview", title: longCopy, subtitle: longCopy });
+  await expect.poll(async () => {
+    const current = await read();
+    return Math.abs(current.imageHeight - freshPhone.imageHeight);
+  }).toBeLessThan(8);
+  const longPhone = await read();
+  expect(longPhone.sectionHeight).toBeGreaterThanOrEqual(freshPhone.sectionHeight - 1);
+  expect(longPhone.pairedNote).toBeNull();
+
+  await show({ geometry: "old", device: "mobile", mode: "editor", title: "吊坠", subtitle: "一句说明" });
+  const oldShort = await read();
+  expect(oldShort.paired).toBe("9:16");
+  expect(oldShort.imageWidth / oldShort.imageHeight, "旧首屏按桌面 16:9 对换成 9:16").toBeCloseTo(9 / 16, 1);
+  await show({ geometry: "old", device: "mobile", mode: "editor", title: longCopy, subtitle: longCopy });
+  const oldLong = await read();
+  expect(oldLong.paired).toBe("9:16");
+  expect(Math.abs(oldLong.imageHeight - oldShort.imageHeight)).toBeLessThan(8);
+
+  await show({
+    geometry: "new",
+    device: "mobile",
+    mode: "public",
+    imageCarriesCopy: true,
+    title: "画面里的标题",
+    subtitle: "画面里的说明",
+  });
+  const poster = await read();
+  expect(poster.fit).toBe("cover");
+  expect(poster.poster).toBeNull();
+  expect(poster.imageWidth / poster.imageHeight, "带字横图也按桌面反比例显示").toBeCloseTo(9 / 16, 1);
+  expect(poster.source).toBe("desktop");
+  expect(poster.titleText).toContain("画面里的标题");
+  expect(poster.titleHeight).toBeLessThan(8);
+  expect(poster.links).toHaveLength(0);
+
+  await show({
+    geometry: "new",
+    device: "mobile",
+    mode: "preview",
+    mobileSrc: "https://example.com/phone.jpg",
+    action: true,
+    title: "吊坠",
+  });
+  const linked = await read();
+  expect(linked.source).toBe("mobile");
+  expect(linked.src).toContain("phone.jpg");
+  expect(linked.fit).toBe("cover");
+  expect(linked.imageHeight, "有手机图时仍用竖向外框").toBeGreaterThan(linked.imageWidth);
+  expect(linked.links).toEqual([{ href: "/products", nested: 0 }]);
+
+  await show({
+    geometry: "new",
+    device: "mobile",
+    mode: "preview",
+    imageCarriesCopy: true,
+    mobileSrc: "https://example.com/phone.jpg",
+    action: true,
+    title: "画面标题",
+  });
+  const artworkLink = await read();
+  expect(artworkLink.links).toEqual([{ href: "/products", nested: 0 }]);
+  expect(artworkLink.titleHeight).toBeLessThan(8);
+
+  await show({
+    geometry: "new",
+    device: "mobile",
+    mode: "preview",
+    collapse: true,
+    title: "收起的标题",
+    subtitle: "仍在的说明",
+  });
+  const collapsed = await read();
+  expect(collapsed.titleCollapsed).toBe("true");
+  expect(collapsed.titleHidden).toBeNull();
+  expect(collapsed.titleText).toContain("收起的标题");
+  expect(collapsed.titleHeight).toBeLessThan(8);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await show({ geometry: "new", device: "desktop", mode: "editor", ink: "#181A1B", title: "深色底标题", action: true });
+  const corrected = await read();
+  expect(corrected.paired).toBeNull();
+  expect(corrected.titleColor).toBe("rgb(247, 248, 248)");
+  expect(corrected.titleContrast).toBe("corrected");
+  expect(corrected.buttonColor).toBe("rgb(24, 26, 27)");
+  expect(corrected.correctedNote).toContain("品牌墨色");
+  expect(corrected.links).toHaveLength(0);
+
+  await show({ geometry: "new", device: "desktop", mode: "editor", ink: "#333333", title: "另选的深色" });
+  const low = await read();
+  expect(low.titleColor).toBe("rgb(51, 51, 51)");
+  expect(low.titleContrast).toBe("low");
+  expect(low.lowNote).toContain("对比不够");
+
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await show({ geometry: "new", device: "desktop", mode: "public", mobileSrc: "https://example.com/phone.jpg", title: "桌面内容" });
+  const tablet = await read();
+  expect(tablet.paired).toBeNull();
+  expect(tablet.source).toBe("desktop");
+  expect(tablet.fit).toBe("cover");
+
+  await page.setViewportSize({ width: 834, height: 1194 });
+  await show({ geometry: "new", device: "desktop", mode: "public", title: "平板竖屏" });
+  const portraitTablet = await read();
+  expect(portraitTablet.paired).toBeNull();
+  expect(portraitTablet.source).toBe("desktop");
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await show({ geometry: "new", device: "desktop", mode: "preview", title: longCopy, subtitle: longCopy });
+  const landscape = await read();
+  expect(landscape.paired).toBeNull();
+  expect(landscape.copy).toBe("below");
+  const landscapeImage = landscape.imageHeight;
+  await show({ geometry: "new", device: "desktop", mode: "preview", title: "短", subtitle: "短" });
+  const landscapeShort = await read();
+  expect(Math.abs(landscapeShort.imageHeight - landscapeImage)).toBeLessThan(8);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await show({ geometry: "old", device: "mobile", mode: "public", title: "旧定义", subtitle: "保持整节画布" });
+  const oldPublic = await read();
+  expect(oldPublic.paired).toBe("9:16");
+  expect(oldPublic.imageWidth / oldPublic.imageHeight).toBeCloseTo(9 / 16, 1);
+  expect(oldPublic.correctedNote).toBeNull();
+  expect(oldPublic.pairedNote).toBeNull();
+
+  const shot = (name: string) => page.screenshot({
+    path: `G:/网站搭建2/.codex-tmp/hero-home-proof/${name}.png`,
+  });
+  await shot("old-390x844-public");
+  await show({ geometry: "old", device: "mobile", mode: "editor", title: longCopy, subtitle: longCopy });
+  await shot("old-390x844-long");
+  await show({ geometry: "new", device: "mobile", mode: "preview", title: "吊坠", subtitle: "一句说明" });
+  await shot("new-390x844-short");
+  await show({ geometry: "new", device: "mobile", mode: "preview", title: longCopy, subtitle: longCopy });
+  await expect.poll(async () => Math.abs((await read()).imageHeight - freshPhone.imageHeight)).toBeLessThan(8);
+  await shot("new-390x844-long");
+  await show({ geometry: "new", device: "mobile", mode: "public", imageCarriesCopy: true, title: "画面里的标题" });
+  await shot("new-390x844-poster-no-mobile");
+  await show({
+    geometry: "new",
+    device: "mobile",
+    mode: "preview",
+    mobileSrc: "https://example.com/phone.jpg",
+    action: true,
+    title: "吊坠",
+  });
+  await shot("new-390x844-mobile-and-action");
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await show({ geometry: "new", device: "desktop", mode: "public", mobileSrc: "https://example.com/phone.jpg", title: "桌面内容" });
+  await shot("new-768x1024");
+  await page.setViewportSize({ width: 834, height: 1194 });
+  await show({ geometry: "new", device: "desktop", mode: "public", title: "平板竖屏" });
+  await shot("new-834x1194");
+  await page.setViewportSize({ width: 844, height: 390 });
+  await show({ geometry: "new", device: "desktop", mode: "preview", title: longCopy, subtitle: longCopy });
+  await shot("new-844x390-long");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await show({ geometry: "new", device: "desktop", mode: "editor", ink: "#181A1B", title: "深色底标题", action: true });
+  await shot("new-1440x900-contrast");
 });

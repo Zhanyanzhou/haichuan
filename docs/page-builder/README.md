@@ -7,9 +7,11 @@
 | 问题 | 文档 |
 | --- | --- |
 | 店铺装修的页面职责、选用、内容分层与发页验收 | [店铺装修产品合同](store-decoration.md) |
-| 三层治理模型、九个区块角色的用途与页面准入 | [店铺装修产品合同第 2 节](store-decoration.md#2-先落实页面目的再谈模板类型) |
+| 日常五条流程：选用、换字、双端、布局、保存 | [店铺装修产品合同 §1.1](store-decoration.md#11-五条日常流程) |
+| 三层治理模型、现行区块角色的用途与页面准入 | [店铺装修产品合同第 2 节](store-decoration.md#2-先落实页面目的再谈模板类型) |
 | 模板设计的创建、预设、生成、精调与模板侧验收 | [模板设计标准](template-creation-rules.md) |
-| 桌面到手机的比例过渡、目录与页面预览图 | [模板设计标准第 3.1 节](template-creation-rules.md#31-双端呈现与预览图) |
+| 比例、栏数、首屏高度和内容端点 | [区块模板标准第 6 节](section-template-standard.md) |
+| 三处预览框的内容来源 | [模板设计标准第 3.1 节](template-creation-rules.md#31-双端呈现与预览图) |
 | 首次上线交付哪七块母模板、每块的结构骨架与槽位 | [首发七母模板合同](launch-template-set.md) |
 | 一节模板在整页中该出现什么、不能出现什么 | [店铺装修产品合同第 4 节](store-decoration.md) |
 | 两种模式、四区任务、编辑与页面交接操作 | [从属编辑与交接细则](template-design-framework.md) |
@@ -21,7 +23,7 @@
 
 ## 研究记录（不是产品规则）
 
-竞品官网的像素、文件名与换片位置只作观察方法和对照基线，**不构成海川的断点、画幅、字号、字重、底色或验收阈值**，也不得被引用为产品理由。要判断海川该怎么做，只读[产品合同](store-decoration.md)、[模板设计标准](template-creation-rules.md)和 [UI_GUIDE](../UI_GUIDE.md)。
+竞品官网的像素、文件名与换片位置只作观察方法和对照基线，**不构成海川的断点、画幅、字号、字重、底色或验收阈值**，也不得被引用为产品理由。要判断海川该怎么做，只读[产品合同](store-decoration.md)、[区块模板标准](section-template-standard.md)、[模板设计标准](template-creation-rules.md)和 [UI_GUIDE](../UI_GUIDE.md)。
 
 | 研究记录 | 内容 |
 | --- | --- |

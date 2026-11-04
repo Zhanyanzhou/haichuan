@@ -47,8 +47,26 @@ import {
   resolveManagedTemplateMediaPreviewUrl,
   useManagedTemplateMediaDisplayUrl,
 } from "./managedMediaPreview";
-import { attachMobileWorkCaptions, partitionMobileWorkUnits, resolveMobileImageFrame } from "./mobileWorkGrid";
+import { usesLargePhoneMeasure } from "./largePhoneMeasure";
+import { segmentMobileCopyFrames } from "./mobileCopyInsideImage";
+import { attachMobileWorkCaptions, creationGridLeadSpanId, heroFrameExceedsViewport, isMobileWorkUnit, pageHeroReusesDesktopFrame, paintDesktopOnlyHeroFrame, partitionMobileWorkUnits, resolveMobileImageFrame, splitHeroMobileFrame } from "./mobileWorkGrid";
+import { choosePeerImageSplit, pairedCanvasContentBox, workCardOverflowsCell, type PairedCanvasRatio } from "./pairedCanvas";
+import { formatExactTemplateRatio, formatTemplateRatio, isContentHeightSplitSection, parseTemplateRatio, resolvePairedMobileCanvas, splitCopyShouldStack } from "./templateDimensions";
+import { hasExplicitMobileTemplateComposition, hasExplicitMobileTemplateLayout, isFixedFourWorkGrid } from "./layoutAuthoring";
+import { publicFlowNodeIsVisible } from "./publicFlow";
+import { hasTemplateImageContent, resolveTemplateImageSource } from "./imageContent";
+import { resolveTextOnImageScrim } from "./textOnImageScrim";
+import { artworkCopyTreatment, artworkNodeClips } from "./imageCarriesCopy";
 import { resolveMediaSlotImage } from "../config/mediaSlotContract";
+import {
+  parseFrameAspect,
+  renderedWidthFactor,
+  resolveImageDeliveryGeometry,
+  scaleSizesExpression,
+  type ImageDeliveryFit,
+} from "../config/imageDeliveryGeometry";
+import { buildResponsiveUploadsDerivedUrl } from "@/utils/responsiveUploadsImage";
+import { usePublicImageFact } from "../runtime/publicImageFacts";
 import { RESPONSIVE_CANVAS } from "../config/blockContracts";
 import "./DynamicTemplateRenderer.css";
 
@@ -74,7 +92,10 @@ export interface DynamicTemplateRendererProps {
   breakpoint?: TemplateBreakpoint;
   contentBySlotId?: Record<string, unknown>;
   hiddenSlotIds?: readonly string[];
+  /** 图片已含排好的标题。标题留在 DOM，副标题和按钮不再画到画面上。 */
+  imageCarriesCopy?: boolean;
   layoutOverridesByNodeId?: TemplateInstanceLayoutOverridesByNodeId;
+  pageSettings?: CompileDynamicTemplateRenderPlanOptions["pageSettings"];
   mode?: ContentTemplateRenderMode;
   /**
    * 是否保留空槽位的编辑占位。只有真正的结构编辑默认保留；
@@ -106,6 +127,11 @@ export interface DynamicTemplateRendererProps {
   primaryHeadingLevel?: 1 | 2;
   /** 仅公开页首个实际可渲染主舞台的首个可达图片槽位使用。 */
   priority?: boolean;
+  /**
+   * 本页第一个可见主舞台为 primary，其余为 subsequent。
+   * 不传表示孤立的模板设计预览，按这一节自己的首屏处理。
+   */
+  pageHeroPlacement?: PageHeroFramePlacement;
   layoutEditMode?: boolean;
   onLayoutOverrideCommit?: (
     nodeId: string,
@@ -119,6 +145,10 @@ export interface DynamicTemplateRendererProps {
   ) => void;
 }
 
+export type PageHeroFramePlacement = "primary" | "subsequent";
+
+const HERO_FRAME_CAP = "calc(100svh - var(--site-header-height, 0px))";
+
 const DYNAMIC_TEMPLATE_BACKGROUND_TOKENS: Record<string, string> = {
   surface: "#ffffff",
   "surface-muted": "#F4F5F5",
@@ -128,6 +158,121 @@ const DYNAMIC_TEMPLATE_BACKGROUND_TOKENS: Record<string, string> = {
 
 function safeColor(value: string | undefined): string | undefined {
   return value && /^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(value) ? value : undefined;
+}
+
+/** 深色画布上没写颜色的文字沿用品牌墨色，会和底融成一条黑带。 */
+const DARK_CANVAS_INK = "#F7F8F8";
+
+function hexLuminance(color: string | undefined): number | undefined {
+  const safe = safeColor(color);
+  if (!safe) return undefined;
+  const raw = safe.slice(1);
+  const expanded = raw.length === 3 ? raw.split("").map((char) => char + char).join("") : raw;
+  const channel = (offset: number) => parseInt(expanded.slice(offset, offset + 2), 16) / 255;
+  const [red, green, blue] = [0, 2, 4].map(channel);
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function isDarkCanvas(color: string | undefined): boolean {
+  const luminance = hexLuminance(color);
+  return luminance !== undefined && luminance < 0.4;
+}
+
+function canonicalHex(color: string | undefined): string | undefined {
+  const safe = safeColor(color);
+  if (!safe) return undefined;
+  const raw = safe.slice(1);
+  const expanded = raw.length === 3 ? raw.split("").map((char) => char + char).join("") : raw;
+  return `#${expanded.toUpperCase()}`;
+}
+
+function contrastRatio(foreground: string | undefined, background: string | undefined): number | undefined {
+  const left = hexLuminance(foreground);
+  const right = hexLuminance(background);
+  if (left === undefined || right === undefined) return undefined;
+  const lighter = Math.max(left, right);
+  const darker = Math.min(left, right);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** 只改深色底上的品牌墨色。其他作者选的低对比颜色保持原样，并标成待改。 */
+function resolveReadableInk(
+  explicit: string | undefined,
+  canvas: string | undefined,
+): { color: string | undefined; contrast?: "corrected" | "low" } {
+  if (!explicit) return { color: isDarkCanvas(canvas) ? DARK_CANVAS_INK : undefined };
+  const ratio = contrastRatio(explicit, canvas);
+  if (ratio === undefined || ratio >= 4.5 || !isDarkCanvas(canvas)) return { color: explicit };
+  if (canonicalHex(explicit) === "#181A1B") return { color: DARK_CANVAS_INK, contrast: "corrected" };
+  return { color: explicit, contrast: "low" };
+}
+
+/** 文字落在照片上时，深色字改成反色；按钮自己有底色时保留原字色。 */
+function inkOnImage(explicit: string | undefined, hasOwnSurface: boolean): string {
+  if (hasOwnSurface && explicit) return explicit;
+  const luminance = hexLuminance(explicit);
+  if (!hasOwnSurface && explicit && luminance !== undefined && luminance >= 0.7) return explicit;
+  return DARK_CANVAS_INK;
+}
+
+function occupyingChildren(
+  node: DynamicTemplateRenderPlanNode,
+  showEmptySlots: boolean,
+  mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
+  device: "desktop" | "mobile",
+): DynamicTemplateRenderPlanNode[] {
+  const collapseEmpty = mode === "public" || !showEmptySlots;
+  return collapseEmpty
+    ? node.children.filter((child) => !child.hidden && publicFlowNodeIsVisible(child, device))
+    : node.children.filter((child) => !child.hidden);
+}
+
+function branchIsOnlyImage(
+  node: DynamicTemplateRenderPlanNode,
+  showEmptySlots: boolean,
+  mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
+  device: "desktop" | "mobile",
+): boolean {
+  if (node.slot?.type === "image") return true;
+  if (node.slot) return false;
+  const children = occupyingChildren(node, showEmptySlots, mode, device);
+  return children.length > 0 && children.every((child) => branchIsOnlyImage(child, showEmptySlots, mode, device));
+}
+
+/**
+ * 手机流式排版里，深色画布的下内边距会露在满幅图下面。
+ * 图下已经没有文字或按钮时，这段内边距就是一条没有内容的黑带。
+ */
+function dropDarkMobileImageTail(
+  node: DynamicTemplateRenderPlanNode,
+  device: "desktop" | "mobile",
+  canvasColor: string | undefined,
+  showEmptySlots: boolean,
+  mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
+): boolean {
+  if (device !== "mobile" || node.rules.layoutMode === "free" || !isDarkCanvas(canvasColor)) return false;
+  if (!(node.rules.padding?.bottom && node.rules.padding.bottom.value > 0)) return false;
+  const visible = occupyingChildren(node, showEmptySlots, mode, device);
+  return visible.length > 0 && visible.every((child) => branchIsOnlyImage(child, showEmptySlots, mode, device));
+}
+
+/**
+ * 子项在当前端都隐藏后，容器只剩内边距。
+ * 它没有自己的底色时，这段空白会把父级深色底露成一条黑带。
+ * 空的新建区域仍保留最小高度，方便在画布上点选。
+ */
+function collapseVacantFlowPadding(
+  node: DynamicTemplateRenderPlanNode,
+  showEmptySlots: boolean,
+  mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
+  showEmptyStructure: boolean,
+  device: "desktop" | "mobile",
+): boolean {
+  if (node.slot || node.type === "Spacer" || node.type === "Divider") return false;
+  if (showEmptyStructure && node.children.length === 0) return false;
+  if (!node.rules.padding) return false;
+  if (node.rules.backgroundColor || node.rules.backgroundToken || node.rules.backgroundImage) return false;
+  return occupyingChildren(node, showEmptySlots, mode, device).length === 0;
 }
 
 function isDisplayableTemplateMediaUrl(value: string | undefined): value is string {
@@ -173,6 +318,12 @@ function spacingToCss(
   return [spacing.top, spacing.right, spacing.bottom, spacing.left]
     .map((value) => lengthToCss(value))
     .join(" ");
+}
+
+function cssFrameIsLandscape(frame: string | undefined): boolean {
+  if (!frame) return false;
+  const [width, height] = frame.split("/").map((part) => Number(part.trim()));
+  return width > 0 && height > 0 && width / height >= 1;
 }
 
 function ratioToCss(ratio: string | undefined): string | undefined {
@@ -231,6 +382,30 @@ function resolveImageFrameAspectRatio(
   return undefined;
 }
 
+function collectDesktopHeroImages(node: DynamicTemplateRenderPlanNode): Array<{
+  desktopAspect?: string;
+  hasMobileAsset: boolean;
+  explicitObjectFit?: string;
+}> {
+  const images: Array<{ desktopAspect?: string; hasMobileAsset: boolean; explicitObjectFit?: string }> = [];
+  const walk = (current: DynamicTemplateRenderPlanNode) => {
+    const role = current.slot?.semanticRole;
+    if (current.slot?.type === "image" && (role === "backgroundImage" || role === "heroImage")) {
+      const content = current.content && typeof current.content === "object" && !Array.isArray(current.content)
+        ? current.content as { mobileSrc?: unknown }
+        : null;
+      images.push({
+        desktopAspect: current.slot.desktopRules?.aspectRatio,
+        hasMobileAsset: isSafeTemplateMediaUrl(content?.mobileSrc),
+        explicitObjectFit: current.layoutOverride?.objectFit,
+      });
+    }
+    current.children.forEach(walk);
+  };
+  walk(node);
+  return images;
+}
+
 function rulesToStyle(
   node: DynamicTemplateRenderPlanNode,
   previewOverride?: TemplateInstanceLayoutOverride,
@@ -278,7 +453,7 @@ function rulesToStyle(
       accent: "1px solid #181A1B",
     }[rules.borderToken] : undefined,
   };
-  if (rules.display === "flex") style.flexDirection = rules.direction ?? "row";
+  if (rules.display === "flex") style.flexDirection = node.mirrored ? "row-reverse" : rules.direction ?? "row";
   if (rules.display === "grid" && rules.columns?.length) {
     style.gridTemplateColumns = rules.columns.map((column) => relationalLayout ? `minmax(0, ${column}fr)` : `${column}fr`).join(" ");
   }
@@ -404,6 +579,7 @@ function sparseLayoutOverride(value: TemplateInstanceLayoutOverride): TemplateIn
   if (value.textAlign) next.textAlign = value.textAlign;
   if (value.marginTopPx) next.marginTopPx = Math.round(value.marginTopPx * 100) / 100;
   if (value.marginBottomPx) next.marginBottomPx = Math.round(value.marginBottomPx * 100) / 100;
+  if (value.visuallyCollapsed === true) next.visuallyCollapsed = true;
   return Object.keys(next).length ? next : undefined;
 }
 
@@ -435,6 +611,21 @@ function getSafeActionContent(content: unknown, allowProductTarget = true): { la
   return { label };
 }
 
+function findArtworkActionHref(
+  node: DynamicTemplateRenderPlanNode,
+  allowProductTarget: boolean,
+): string | undefined {
+  if (!node.hidden && node.slot?.type === "button") {
+    const href = getSafeActionContent(node.content, allowProductTarget).href;
+    if (href) return href;
+  }
+  for (const child of node.children) {
+    const href = findArtworkActionHref(child, allowProductTarget);
+    if (href) return href;
+  }
+  return undefined;
+}
+
 /** 按动态模板节点几何推导桌面宽度系数（%）；无法确定返回 undefined。 */
 function resolveDesktopWidthFraction(node: DynamicTemplateRenderPlanNode): number | undefined {
   const rules = node.rules;
@@ -456,17 +647,29 @@ function resolveDesktopWidthFraction(node: DynamicTemplateRenderPlanNode): numbe
   return undefined;
 }
 
+function authorScaleFromTransform(transform?: string): number {
+  const match = /(?:^|\s)scale\(\s*([0-9.]+)/.exec(transform ?? "");
+  const value = match ? Number(match[1]) : 1;
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+function deliveryFit(objectFit: string): ImageDeliveryFit {
+  if (objectFit === "cover" || objectFit === "contain" || objectFit === "fill") return objectFit;
+  return "fill";
+}
+
 /**
- * 图片槽 sizes：首屏/移动通栏取 100vw；桌面非首屏按节点几何推导宽度系数，
- * 推导不出时退回 100vw（宁可高估不低估），避免候选宽度小于实际渲染宽度而发虚。
+ * 图片槽 sizes 先按画框占视口的宽度。铺满超出画框的部分由原图比例再乘一次。
+ * 窄槽使用自己的宽度系数，不再因为首屏或手机就把每张图当成通栏。
  */
 function resolveTemplateImageSizes(
   node: DynamicTemplateRenderPlanNode,
   viewport: "desktop" | "mobile",
-  priority: boolean,
 ): string {
-  if (priority || viewport === "mobile") return "100vw";
   const fraction = resolveDesktopWidthFraction(node);
+  if (viewport === "mobile") {
+    return fraction !== undefined && fraction < 100 ? `${fraction}vw` : "100vw";
+  }
   if (fraction === undefined || fraction >= 100) return "100vw";
   return `(max-width: ${RESPONSIVE_CANVAS.mobileMaxWidth}px) 100vw, ${fraction}vw`;
 }
@@ -483,6 +686,7 @@ function ManagedTemplateSlotImage({
   ratio,
   viewport,
   sizes,
+  source = "desktop",
 }: {
   src: string;
   alt: string;
@@ -495,6 +699,7 @@ function ManagedTemplateSlotImage({
   ratio?: string;
   viewport: "desktop" | "mobile";
   sizes?: string;
+  source?: "desktop" | "mobile";
 }) {
   // blob 必须由这张图片所在的 iframe 文档创建，父页面的 blob 在画布里不会显示。
   const imageRef = useRef<HTMLImageElement>(null);
@@ -503,10 +708,83 @@ function ManagedTemplateSlotImage({
   const displaySrc = hostFetch
     ? (media.status === "error" ? previewUrl : media.displaySrc)
     : src;
+  const facts = usePublicImageFact(hostFetch ? undefined : src);
+  const [srcSetEnabled, setSrcSetEnabled] = useState(true);
+  const [measuredCssWidth, setMeasuredCssWidth] = useState<number | null>(null);
+  const authorScale = authorScaleFromTransform(transform);
+  const fit = deliveryFit(objectFit);
+  const frame = parseFrameAspect(ratio);
+  const widthFactor = facts && !facts.animated && frame
+    ? renderedWidthFactor({
+      frameAspect: frame,
+      sourceWidth: facts.displayWidth,
+      sourceHeight: facts.displayHeight,
+      objectFit: fit,
+      authorScale,
+    })
+    : authorScale;
+  const sized = facts && !facts.animated
+    ? scaleSizesExpression(sizes || "100vw", widthFactor)
+    : sizes;
+  const deliverySizes = measuredCssWidth ? `${measuredCssWidth}px` : sized;
+  useEffect(() => {
+    setSrcSetEnabled(true);
+  }, [src]);
+  useLayoutEffect(() => {
+    setMeasuredCssWidth(null);
+    if (hostFetch || !facts || facts.animated) return undefined;
+    const parent = imageRef.current?.parentElement;
+    if (!parent || typeof ResizeObserver === "undefined") return undefined;
+    let current = 0;
+    const measure = () => {
+      const frameWidth = parent.offsetWidth;
+      const frameHeight = parent.offsetHeight;
+      if (!(frameWidth > 0) || !(frameHeight > 0)) return;
+      const geometry = resolveImageDeliveryGeometry({
+        sourceWidth: facts.displayWidth,
+        sourceHeight: facts.displayHeight,
+        frameWidth,
+        frameHeight,
+        objectFit: fit,
+        authorScale,
+        devicePixelRatio: 1,
+      });
+      if (!geometry) return;
+      const next = Math.round(geometry.renderedCssWidth);
+      if (current !== 0 && next < current + 8) return;
+      current = next;
+      setMeasuredCssWidth(next);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, [
+    src,
+    viewport,
+    objectFit,
+    ratio,
+    transform,
+    facts?.revision,
+    facts?.displayWidth,
+    facts?.displayHeight,
+    facts?.animated,
+    hostFetch,
+    authorScale,
+    fit,
+  ]);
   // 公开态才接派生图与固有尺寸；后台态走 blob 预览，保持即时显示与既有会话语义。
-  const resolved = hostFetch
+  // 没有原图展示尺寸时不生成 srcset，避免把请求档位写成实际像素。
+  const resolved = hostFetch || !srcSetEnabled
     ? undefined
-    : resolveMediaSlotImage({ ratio: ratio ?? "", viewport, priority, sizes }, displaySrc);
+    : resolveMediaSlotImage(
+      { ratio: ratio ?? "", viewport, priority, sizes: deliverySizes },
+      displaySrc,
+      facts,
+    );
+  const imgSrc = resolved?.srcSet
+    ? buildResponsiveUploadsDerivedUrl(displaySrc, 1680) ?? displaySrc
+    : displaySrc;
   const loading = priority ? "eager" : hostFetch ? undefined : "lazy";
   const style: CSSProperties = {
     width: "100%",
@@ -519,9 +797,13 @@ function ManagedTemplateSlotImage({
   return (
     <img
       ref={imageRef}
-      src={displaySrc || undefined}
+      src={imgSrc || undefined}
+      onError={() => {
+        if (srcSetEnabled) setSrcSetEnabled(false);
+      }}
       alt={alt}
       data-template-image-fit={objectFit}
+      data-template-image-source={source}
       data-template-media-state={media.status}
       data-template-managed-preview={hostFetch ? previewUrl : undefined}
       loading={loading}
@@ -537,13 +819,6 @@ function ManagedTemplateSlotImage({
   );
 }
 
-function readRenderedImageSource(content: unknown): string {
-  if (typeof content === "string") return content.trim();
-  if (!content || typeof content !== "object" || Array.isArray(content)) return "";
-  const src = (content as { src?: unknown }).src;
-  return typeof src === "string" ? src.trim() : "";
-}
-
 function renderSlotContent(
   node: DynamicTemplateRenderPlanNode,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
@@ -554,6 +829,9 @@ function renderSlotContent(
   relationalLayout = false,
   priority = false,
   imageFit?: NonNullable<CSSProperties["objectFit"]>,
+  canvasColor?: string,
+  onImage = false,
+  imageCarriesCopy = false,
 ): ReactNode {
   const { slot, content } = node;
   if (!slot) return null;
@@ -574,6 +852,19 @@ function renderSlotContent(
     priority,
   });
   const textOverflow = node.slotRules?.overflow ?? TEMPLATE_TEXT_DEFAULTS.overflow;
+  const explicitInk = safeColor(node.slotRules?.color);
+  const ownSurface = safeColor(node.rules.backgroundColor)
+    ?? (node.rules.backgroundToken ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[node.rules.backgroundToken] : undefined);
+  const hasOwnSurface = Boolean(ownSurface);
+  const onImageInk = inkOnImage(explicitInk, hasOwnSurface);
+  const ink = onImage
+    ? {
+      color: onImageInk,
+      contrast: !hasOwnSurface && canonicalHex(explicitInk) === "#181A1B" && onImageInk !== explicitInk
+        ? "corrected" as const
+        : undefined,
+    }
+    : resolveReadableInk(explicitInk, ownSurface ?? canvasColor);
   const textStyle: CSSProperties = {
     margin: 0,
     fontSize: node.layoutOverride?.fontSizePx !== undefined
@@ -583,7 +874,7 @@ function renderSlotContent(
     fontFamily: node.slotRules?.fontFamily
       ? ({ system: "system-ui, sans-serif", serif: '"Noto Serif SC", "Source Han Serif CN", serif', sans: "Inter, system-ui, sans-serif" } as const)[node.slotRules.fontFamily]
       : undefined,
-    color: safeColor(node.slotRules?.color),
+    color: ink.color,
     letterSpacing: Number.isFinite(node.slotRules?.letterSpacing) ? `${node.slotRules!.letterSpacing}px` : undefined,
     lineHeight: node.slotRules?.lineHeight,
     textAlign: node.layoutOverride?.textAlign ?? node.slotRules?.textAlign,
@@ -611,8 +902,13 @@ function renderSlotContent(
     const record = content && typeof content === "object" && !Array.isArray(content)
       ? content as Record<string, unknown>
       : null;
-    const src = typeof content === "string" ? content : typeof record?.src === "string" ? record.src : "";
+    const mobileCandidate = record?.mobileSrc;
+    const mobileSrc = editorViewport === "mobile" && isSafeTemplateMediaUrl(mobileCandidate)
+      ? mobileCandidate.trim()
+      : "";
+    const src = resolveTemplateImageSource(content, editorViewport);
     const alt = typeof record?.alt === "string" ? record.alt : "";
+    const imageSource = mobileSrc ? "mobile" as const : "desktop" as const;
     const defaultFocus = objectPositionToPercent(node.slotRules?.objectPosition ?? TEMPLATE_MEDIA_DEFAULTS.objectPosition);
     const focusPosition = `${node.layoutOverride?.focusXPercent ?? defaultFocus.x}% ${node.layoutOverride?.focusYPercent ?? defaultFocus.y}%`;
     // 对外页面没有图片就不留外框。编辑和方案预览仍铺满比例框，标出图片位置。
@@ -629,8 +925,8 @@ function renderSlotContent(
       );
     }
     if (src.includes("catalog-structure-media.svg")) {
-      // 目录卡片把整页缩进 iframe。流式槽位的高度来自比例，cqmin 会算成 0，
-      // 图标和边框都消失，只剩灰块。这里用槽位自身的百分比，缩小时图标仍在框内。
+      // 目录卡片把整页缩进 iframe。图标用槽位百分比，缩小时仍留在框内。
+      // 灰底铺满槽位，图标只是空位标记，不再在画框里再套一张横图。
       return (
         <span
           data-template-neutral-media="true"
@@ -639,10 +935,10 @@ function renderSlotContent(
             inset: 0,
             boxSizing: "border-box",
             background: "#DDE1E2",
-            boxShadow: "inset 0 0 0 8px #5F6568",
+            boxShadow: "inset 0 0 0 1px #5F6568",
           }}
         >
-          <span style={{ position: "absolute", left: "16%", top: "16%", width: "68%", height: "68%" }}>
+          <span style={{ position: "absolute", left: "50%", top: "50%", width: "38%", aspectRatio: "1", transform: "translate(-50%, -50%)" }}>
             <ManagedTemplateSlotImage
               src={src}
               alt={alt}
@@ -650,15 +946,28 @@ function renderSlotContent(
               priority={priority}
               ratio={node.slotRules?.aspectRatio}
               viewport={editorViewport ?? "desktop"}
-              sizes={resolveTemplateImageSizes(node, editorViewport ?? "desktop", priority)}
+              sizes={resolveTemplateImageSizes(node, editorViewport ?? "desktop")}
+              source={imageSource}
               objectFit="contain"
-              objectPosition={focusPosition}
+              objectPosition="50% 50%"
             />
           </span>
         </span>
       );
     }
-    const objectFit = imageFit ?? resolveImageObjectFit(node, editorViewport);
+    const operatorFit = node.layoutOverride?.objectFit;
+    const desktopFrame = parseAspectRatio(node.slot?.desktopRules?.aspectRatio);
+    const landscapeHero = (node.slot?.semanticRole === "backgroundImage" || node.slot?.semanticRole === "heroImage")
+      && Boolean(desktopFrame && desktopFrame.width / desktopFrame.height >= 1);
+    // 横图没有手机图时按原比例铺满，不再完整放入竖框。操作者明确选了铺满或拉伸时保留该选择。
+    const posterContain = imageCarriesCopy
+      && editorViewport === "mobile"
+      && !mobileSrc
+      && operatorFit !== "cover"
+      && operatorFit !== "fill"
+      && !landscapeHero;
+    const resolvedFit = posterContain ? "contain" : imageFit ?? resolveImageObjectFit(node, editorViewport);
+    const objectFit = resolvedFit;
     return (
       <ManagedTemplateSlotImage
         src={src}
@@ -667,7 +976,8 @@ function renderSlotContent(
         priority={priority}
         ratio={node.slotRules?.aspectRatio}
         viewport={editorViewport ?? "desktop"}
-        sizes={resolveTemplateImageSizes(node, editorViewport ?? "desktop", priority)}
+        sizes={resolveTemplateImageSizes(node, editorViewport ?? "desktop")}
+        source={imageSource}
         objectFit={objectFit}
         objectPosition={focusPosition}
         transform={node.layoutOverride?.imageScalePercent && node.layoutOverride.imageScalePercent !== 100
@@ -679,21 +989,38 @@ function renderSlotContent(
   }
   if (["heading", "text", "richText", "badge", "icon"].includes(slot.type)) {
     const text = typeof content === "string" ? content : "";
-    if (!text) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">{slot.label}待填写</span>;
+    if (!text) {
+      return mode === "public" ? null : (
+        <span className="hc-dynamic-template__empty-slot" style={{ display: "block", textAlign: textStyle.textAlign }}>
+          {slot.label}待填写
+        </span>
+      );
+    }
     if (slot.type === "heading") {
       const Heading = headingLevel === 1 ? "h1" : "h2";
-      return <Heading className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{text}</Heading>;
+      return <Heading className={fontClass} data-template-font-role={node.slotRules?.fontRole} data-template-text-contrast={ink.contrast} style={textStyle}>{text}</Heading>;
     }
-    if (slot.type === "badge") return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={textStyle}>{text}</span>;
-    return <p className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={relationalLayout ? textStyle : { ...textStyle, whiteSpace: "pre-wrap" }}>{text}</p>;
+    if (slot.type === "badge") return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} data-template-text-contrast={ink.contrast} style={textStyle}>{text}</span>;
+    return <p className={fontClass} data-template-font-role={node.slotRules?.fontRole} data-template-text-contrast={ink.contrast} style={relationalLayout ? textStyle : { ...textStyle, whiteSpace: "pre-wrap" }}>{text}</p>;
   }
   if (slot.type === "button" || slot.type === "link") {
     const action = getSafeActionContent(content, mode !== "public");
-    if (!action.label) return mode === "public" ? null : <span className="hc-dynamic-template__empty-slot">{slot.label}待填写</span>;
     // 行动槽位的可点击语义由承载全部布局/背景/边框的节点外壳负责。
     // 这里始终只输出文案，避免形成“外层视觉盒子 + 内层文字链接”的双重命中区域。
     // 对齐作用于行动槽位的可用宽度；行内 span 不会响应 text-align。
-    return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} style={{ display: "block", ...textStyle }}>{action.label}</span>;
+    // 手机把边框令牌写成 none 时，这是文字链接，不是方框按钮。
+    const quietAction = node.rules.borderToken === "none";
+    if (!action.label) {
+      return mode === "public" ? null : (
+        <span
+          className="hc-dynamic-template__empty-slot"
+          style={{ display: "block", textAlign: textStyle.textAlign, ...(quietAction ? { textDecoration: "underline", textUnderlineOffset: "0.35em", textDecorationThickness: "1px" } : {}) }}
+        >
+          {slot.label}待填写
+        </span>
+      );
+    }
+    return <span className={fontClass} data-template-font-role={node.slotRules?.fontRole} data-template-text-contrast={ink.contrast} style={{ display: "block", ...(quietAction ? { textDecoration: "underline", textUnderlineOffset: "0.35em", textDecorationThickness: "1px" } : {}), ...textStyle }}>{action.label}</span>;
   }
   if (slot.type === "product") {
     if (mode === "public") return null;
@@ -724,12 +1051,57 @@ function renderSlotContent(
   return null;
 }
 
+function pairedImageCoversSection(
+  node: DynamicTemplateRenderPlanNode,
+  sectionRole: string | undefined,
+): boolean {
+  if (node.slot?.type !== "image") return false;
+  const role = node.slot.semanticRole;
+  // 背景图就是这一节的画面。旧模板经常没写 sectionRole，仍要铺满对换画布。
+  if (role === "backgroundImage") return true;
+  return sectionRole === "page-hero" && role === "heroImage";
+}
+
+function subtreeFillsPairedCanvas(
+  node: DynamicTemplateRenderPlanNode,
+  sectionRole: string | undefined,
+): boolean {
+  if (node.hidden || node.rules.layoutMode === "free") return false;
+  // 铺满对换画布的图钉住整节。上图下文的主图保持自己的比例，排在文字前面。
+  if (pairedImageCoversSection(node, sectionRole)) return true;
+  const groups = partitionMobileWorkUnits(node.children, {
+    device: "mobile",
+    sectionRole,
+    layoutMode: node.rules.layoutMode,
+    display: node.rules.display,
+    columnCount: node.rules.columns?.length,
+  });
+  if (groups.some((group) => group.kind === "works" && group.nodes.length >= 2)) return true;
+  return node.children.some((child) => subtreeFillsPairedCanvas(child, sectionRole));
+}
+
 function nodeElementType(node: DynamicTemplateRenderPlanNode): ElementType {
   if (node.type === "Section") return node.props.semanticTag === "header" ? "header" : "section";
   if (["Container", "Grid", "Row", "Column", "Stack"].includes(node.type)) {
     return node.props.semanticTag ?? "div";
   }
   return "div";
+}
+
+function heroImageFrameRequest(
+  definition: TemplateDefinitionV2 | undefined,
+  node: DynamicTemplateRenderPlanNode,
+  placement: PageHeroFramePlacement | undefined,
+) {
+  if (!definition || definition.metadata.geometryPolicy !== "hero-media-frame") return {};
+  const desktopLabel = node.slotId ? definition.slots[node.slotId]?.desktopRules?.aspectRatio : undefined;
+  const parsed = parseTemplateRatio(desktopLabel);
+  return {
+    geometryPolicy: "hero-media-frame" as const,
+    heroPlacement: placement ?? "design" as const,
+    desktopRatio: parsed && parsed.height > 0 ? parsed.width / parsed.height : undefined,
+    authorLocked: node.rules.height.mode === "fixed",
+  };
 }
 
 function renderTemplateChildren({
@@ -742,6 +1114,12 @@ function renderTemplateChildren({
   bleedInset = ZERO_MOBILE_BLEED,
   bleedAtStart = true,
   bleedAtEnd = true,
+  parentMeasured = false,
+  onImageCopy = false,
+  imageCarriesCopy = false,
+  pairedCanvas = null,
+  fillPairedCell = false,
+  fillSplitRemainder = false,
   ...shared
 }: {
   node: DynamicTemplateRenderPlanNode;
@@ -753,26 +1131,71 @@ function renderTemplateChildren({
   bleedInset?: MobileBleedInset;
   bleedAtStart?: boolean;
   bleedAtEnd?: boolean;
-} & Omit<Parameters<typeof RenderNode>[0], "node" | "sectionRole" | "device" | "parentFree" | "parentRules" | "siblingIndex" | "siblingPlacements" | "workCardFrame" | "constrainWorkCell" | "inheritedCanvasColor" | "bleedInset" | "bleedAtStart" | "bleedAtEnd">) {
+  parentMeasured?: boolean;
+  onImageCopy?: boolean;
+  imageCarriesCopy?: boolean;
+  pairedCanvas?: PairedCanvasRatio | null;
+  fillPairedCell?: boolean;
+  fillSplitRemainder?: boolean;
+} & Omit<Parameters<typeof RenderNode>[0], "node" | "sectionRole" | "device" | "parentFree" | "parentRules" | "siblingIndex" | "siblingPlacements" | "workCardFrame" | "constrainWorkCell" | "inheritedCanvasColor" | "bleedInset" | "bleedAtStart" | "bleedAtEnd" | "parentMeasured" | "siblings" | "onImageCopy" | "imageCarriesCopy" | "fillMobileCopyFrame" | "pairedCanvas" | "fillPairedCell" | "fillSplitRemainder">) {
+  const dropImageTail = dropDarkMobileImageTail(
+    node,
+    device,
+    inheritedCanvasColor,
+    shared.showEmptySlots ?? false,
+    shared.mode,
+  );
   const childInset = extendMobileBleedInset(
     bleedInset,
-    node.rules.padding,
+    dropImageTail && node.rules.padding
+      ? { ...node.rules.padding, bottom: { ...node.rules.padding.bottom, value: 0 } }
+      : node.rules.padding,
     device === "mobile" && !parentFree && !constrainWorkCell && node.rules.layoutMode !== "free",
   );
-  const visibleChildren = node.children.filter((child) => !child.hidden);
+  // 公开页和页面画布丢掉没有内容的容器。否则空文字盒的内边距和间距会留在满幅图下方，深色画布就露出黑带。
+  // 模板结构编辑仍留着空位，方便点选。
+  const renderedChildren = shared.mode === "public" || !shared.showEmptySlots
+    ? node.children.filter((child) => !child.hidden && publicFlowNodeIsVisible(child, device))
+    : node.children;
+  const canvasForChildren = safeColor(node.rules.backgroundColor)
+    ?? (node.rules.backgroundToken ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[node.rules.backgroundToken] : undefined)
+    ?? inheritedCanvasColor;
+  const visibleChildren = renderedChildren.filter((child) => !child.hidden);
   const firstVisibleId = visibleChildren[0]?.nodeId;
   const lastVisibleId = visibleChildren[visibleChildren.length - 1]?.nodeId;
-  const groups = attachMobileWorkCaptions(partitionMobileWorkUnits(node.children, {
-    device,
-    sectionRole,
-    layoutMode: node.rules.layoutMode,
-    display: node.rules.display,
-    columnCount: node.rules.columns?.length,
-  }));
+  // 品牌事实与到店邀请是上图下文：主图保持自己的比例，文字排在图下。
+  // 其余手机流式模板仍把跟随主图的文字收进图片槽位。
+  const stackedCopy = sectionRole === "maison-fact" || sectionRole === "service-invitation";
+  const pairedHeroFrame = Boolean(pairedCanvas)
+    && sectionRole === "page-hero"
+    && device === "mobile"
+    && !shared.heroCopyBelow
+    && !imageCarriesCopy
+    && !constrainWorkCell
+    && node.rules.layoutMode !== "free";
+  const composeCopyInsideImage = !stackedCopy && (
+    pairedHeroFrame || (
+      device === "mobile"
+      && !shared.heroCopyBelow
+      && !(shared.layoutDefinition && hasExplicitMobileTemplateComposition(shared.layoutDefinition, node.nodeId))
+      && sectionRole !== "creation-grid"
+      && !(shared.layoutDefinition && isContentHeightSplitSection(shared.layoutDefinition))
+      && !parentFree
+      && !constrainWorkCell
+      && !onImageCopy
+      && !imageCarriesCopy
+      && node.rules.layoutMode !== "free"
+    )
+  );
+  const copySegments = composeCopyInsideImage
+    ? segmentMobileCopyFrames(renderedChildren)
+    : [{ kind: "nodes" as const, nodes: renderedChildren }];
   const renderChild = (
     child: DynamicTemplateRenderPlanNode,
     childIndex: number,
     inWorkGrid: boolean,
+    frame?: { onImage?: boolean; fillImage?: boolean; measured?: boolean; fillPairedCell?: boolean; pairedWorkCard?: boolean },
+    spanWorkLead = false,
   ) => (
     <RenderNode
       key={child.nodeId}
@@ -780,7 +1203,7 @@ function renderTemplateChildren({
       device={device}
       sectionRole={sectionRole}
       constrainWorkCell={constrainWorkCell || inWorkGrid}
-      workCardFrame={(constrainWorkCell || inWorkGrid) && child.slot?.type === "image"}
+      workCardFrame={(constrainWorkCell || inWorkGrid) && child.slot?.type === "image" && !frame?.fillPairedCell}
       parentFree={parentFree}
       parentRules={node.rules}
       siblingIndex={childIndex}
@@ -788,29 +1211,115 @@ function renderTemplateChildren({
         .filter((sibling) => sibling.nodeId !== child.nodeId)
         .flatMap((sibling) => sibling.rules.placement ? [sibling.rules.placement] : [])}
       {...shared}
-      inheritedCanvasColor={inheritedCanvasColor}
+      spanWorkLead={spanWorkLead}
+      inheritedCanvasColor={frame?.onImage ? "#111315" : canvasForChildren}
       bleedInset={childInset}
       bleedAtStart={bleedAtStart && child.nodeId === firstVisibleId}
       bleedAtEnd={bleedAtEnd && child.nodeId === lastVisibleId}
+      parentMeasured={parentMeasured || frame?.measured === true}
+      onImageCopy={(onImageCopy || frame?.onImage === true)
+        && !child.rules.backgroundColor
+        && !child.rules.backgroundToken}
+      imageCarriesCopy={imageCarriesCopy}
+      fillMobileCopyFrame={frame?.fillImage === true}
+      fillPairedCell={frame?.fillPairedCell === true || fillPairedCell}
+      pairedWorkCard={frame?.pairedWorkCard === true}
+      pairedCanvas={pairedCanvas}
+      fillSplitRemainder={fillSplitRemainder}
+      siblings={node.children}
     />
   );
-  return groups.map((group) => {
+  const renderNodeGroup = (children: readonly DynamicTemplateRenderPlanNode[]) => {
+    const workOptions = {
+      device,
+      sectionRole,
+      layoutMode: node.rules.layoutMode,
+      display: node.rules.display,
+      columnCount: node.rules.columns?.length,
+    };
+    const fourImageWorkGrid = sectionRole === "creation-grid"
+      && children.filter((child) => isMobileWorkUnit(child, sectionRole)).length === 4;
+    const hasAuthorMobileLayout = device === "mobile" && !fourImageWorkGrid && Boolean(shared.layoutDefinition
+      && hasExplicitMobileTemplateLayout(shared.layoutDefinition, node.nodeId)
+      && !isFixedFourWorkGrid(shared.layoutDefinition, node.nodeId));
+    const leadSpanId = creationGridLeadSpanId(children, workOptions);
+    const groups = attachMobileWorkCaptions(hasAuthorMobileLayout
+      ? children.map((child) => ({ kind: "node" as const, node: child }))
+      : partitionMobileWorkUnits(children, workOptions));
+    return groups.map((group) => {
     if (group.kind === "node") {
       const childIndex = node.children.findIndex((child) => child.nodeId === group.node.nodeId);
-      return renderChild(group.node, childIndex, false);
+      return renderChild(group.node, childIndex, false, undefined, group.node.nodeId === leadSpanId);
     }
     if (group.nodes.length < 2) {
       const child = group.nodes[0];
       const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
       return renderChild(child, childIndex, false);
     }
+    // 四张作品固定两列两行。竖画布里的三张同行图排成一列。
+    // 作品网格对换成横画布（例如 4:5 对 5:4）时，三张仍是第一张满宽、后两张并排。
+    const pairedPortrait = pairedCanvas ? pairedCanvas.height > pairedCanvas.width : false;
+    const peerImagesInSwappedFrame = Boolean(pairedCanvas) && device === "mobile"
+      && (sectionRole !== "creation-grid" || group.nodes.length === 4 || pairedPortrait);
+    if (peerImagesInSwappedFrame && pairedCanvas) {
+      const reserveText = children.some((child) => !isMobileWorkUnit(child, sectionRole));
+      const box = pairedCanvasContentBox(pairedCanvas, { reserveText });
+      // 四张作品图固定两列两行。1:2 画布若按可读比例挑选，会排成四行扁图。
+      const workGap = 12;
+      const workCellWidth = (box.innerWidth - workGap) / 2;
+      const workCellHeight = (box.innerHeight - workGap) / 2;
+      const split = sectionRole === "creation-grid" && group.nodes.length === 4
+        ? {
+          columns: 2,
+          rows: 2,
+          cellWidth: workCellWidth,
+          cellHeight: workCellHeight,
+          overflow: workCardOverflowsCell(workCellWidth, workCellHeight),
+        }
+        : choosePeerImageSplit(group.nodes.length, box.innerWidth, box.innerHeight);
+      return (
+        <div
+          key={group.nodes.map((child) => child.nodeId).join(":")}
+          data-template-paired-image-grid="true"
+          data-template-paired-image-columns={split.columns}
+          data-template-paired-image-rows={split.rows}
+          data-template-canvas-overflow={split.overflow ? "true" : undefined}
+          style={{
+            display: "grid",
+            flex: "1 1 0%",
+            gap: 12,
+            gridTemplateColumns: `repeat(${split.columns}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${split.rows}, minmax(0, 1fr))`,
+            minHeight: 0,
+            width: "100%",
+          }}
+        >
+          {group.nodes.map((child) => {
+            const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
+            return (
+              <div key={child.nodeId} data-template-paired-image-cell="true" style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+                {renderChild(child, childIndex, false, {
+                  fillPairedCell: true,
+                  pairedWorkCard: split.columns === 2 && split.rows === 2 && group.nodes.length === 4,
+                })}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    // 奇数张时第一张跨满两列，其余两两并排，避免两张一排、最后一张落单，
+    // 也不把三张竖排成一屏半（区块模板标准 R-6）。
+    const leadCard = group.nodes.length % 2 === 1;
     return (
       <div
         key={group.nodes.map((child) => child.nodeId).join(":")}
         data-template-mobile-work-grid="true"
+        data-template-mobile-work-columns="2"
+        data-template-mobile-work-lead={leadCard ? "true" : undefined}
         style={{
           display: "grid",
-          gap: "16px",
+          gap: "24px 12px",
           gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
           width: "100%",
         }}
@@ -820,7 +1329,7 @@ function renderTemplateChildren({
           const caption = group.captions[cardIndex];
           const captionIndex = caption ? node.children.findIndex((item) => item.nodeId === caption.nodeId) : -1;
           return (
-            <div key={child.nodeId} data-template-mobile-work-card="true" style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0 }}>
+            <div key={child.nodeId} data-template-mobile-work-card="true" style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: 0, ...(leadCard && cardIndex === 0 ? { gridColumn: "1 / -1" } : {}) }}>
               {renderChild(child, childIndex, true)}
               {caption ? renderChild(caption, captionIndex, true) : null}
             </div>
@@ -828,6 +1337,103 @@ function renderTemplateChildren({
         })}
       </div>
     );
+    });
+  };
+  return copySegments.flatMap((segment) => {
+    if (segment.kind === "nodes") return renderNodeGroup(segment.nodes);
+    const imageIndex = node.children.findIndex((child) => child.nodeId === segment.image.nodeId);
+    const heightRatio = segment.image.rules.height.mode === "aspect-ratio" && segment.image.rules.height.ratio
+      ? segment.image.rules.height.ratio.width / segment.image.rules.height.ratio.height
+      : undefined;
+    const slotRatio = parseAspectRatio(segment.image.slotRules?.aspectRatio);
+    const resolvedRatio = resolveMobileImageFrame({
+      device: "mobile",
+      inWorkGrid: false,
+      slotType: segment.image.slot?.type,
+      semanticRole: segment.image.slot?.semanticRole,
+      sectionRole,
+      ratio: heightRatio ?? (slotRatio ? slotRatio.width / slotRatio.height : undefined),
+      ...heroImageFrameRequest(shared.layoutDefinition, segment.image, shared.pageHeroPlacement),
+    });
+    const segmentImage = segment.image.content && typeof segment.image.content === "object" && !Array.isArray(segment.image.content)
+      ? segment.image.content as { mobileSrc?: unknown }
+      : null;
+    const ratio = paintDesktopOnlyHeroFrame({
+      resolvedFrame: resolvedRatio,
+      desktopAspect: segment.image.slot?.desktopRules?.aspectRatio,
+      hasMobileAsset: isSafeTemplateMediaUrl(segmentImage?.mobileSrc),
+      explicitObjectFit: segment.image.layoutOverride?.objectFit,
+      pairedCanvas: Boolean(pairedCanvas),
+    }) ?? (slotRatio ? `${slotRatio.width} / ${slotRatio.height}` : "4 / 5");
+    const bleeds = imageBleedsOnMobile(segment.image, {
+      device: "mobile",
+      constrainWorkCell: false,
+      sectionRole,
+      canvasColor: inheritedCanvasColor,
+    });
+    const frameBleed = bleeds ? mobileBleedBox(childInset, { top: bleedAtStart, bottom: bleedAtEnd }) : undefined;
+    const measured = usesLargePhoneMeasure(segment.image, {
+      device: "mobile",
+      inWorkGrid: false,
+      parentMeasured,
+      sectionRole,
+    });
+    const lockHeroFrame = shared.stableMediaFrame === true && sectionRole === "page-hero";
+    return [
+      <div
+        key={`copy-frame:${segment.image.nodeId}`}
+        data-template-mobile-copy-frame="true"
+        data-template-large-phone-measure={measured ? "true" : undefined}
+        style={{
+          display: "grid",
+          position: "relative",
+          width: "100%",
+          minWidth: 0,
+          maxWidth: "100%",
+          ...(pairedHeroFrame ? { height: "100%", flex: "1 1 auto", minHeight: 0 } : {}),
+          ...frameBleed,
+        }}
+      >
+        <div aria-hidden="true" data-template-hero-frame-ratio={ratio} style={{ gridArea: "1 / 1", width: "100%", ...(pairedHeroFrame ? { height: "100%" } : { aspectRatio: ratio }) }} />
+        <div style={{ gridArea: "1 / 1", position: "relative", minHeight: "100%" }}>
+          {renderChild(segment.image, imageIndex, false, { fillImage: true, measured: true })}
+        </div>
+        <div
+          aria-hidden="true"
+          data-template-text-scrim="bottom"
+          style={{
+            gridArea: "1 / 1",
+            alignSelf: "end",
+            height: "46%",
+            zIndex: 1,
+            pointerEvents: "none",
+            background: "linear-gradient(to top, rgb(24 26 27 / 0.6), rgb(24 26 27 / 0))",
+          }}
+        />
+        <div data-template-hero-frame-copy="true" style={{
+          ...(lockHeroFrame
+            ? { position: "absolute", left: 0, right: 0, bottom: 0 }
+            : { gridArea: "1 / 1", alignSelf: "end" }),
+          zIndex: 2,
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+          minWidth: 0,
+          overflowWrap: "anywhere",
+          padding: "28px 20px 24px",
+        }}
+        >
+          {segment.copy.map((child) => {
+            const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
+            return renderChild(child, childIndex, false, { onImage: true, measured: true });
+          })}
+        </div>
+      </div>,
+      ...segment.rest.map((child) => {
+        const childIndex = node.children.findIndex((item) => item.nodeId === child.nodeId);
+        return renderChild(child, childIndex, false);
+      }),
+    ];
   });
 }
 
@@ -866,6 +1472,23 @@ function RenderNode({
   bleedInset = ZERO_MOBILE_BLEED,
   bleedAtStart = true,
   bleedAtEnd = true,
+  parentMeasured = false,
+  siblings = [],
+  onImageCopy = false,
+  imageCarriesCopy = false,
+  artworkHref,
+  artworkImageSlotId,
+  fillMobileCopyFrame = false,
+  spanWorkLead = false,
+  pairedCanvas = null,
+  fillPairedCell = false,
+  fillSplitRemainder = false,
+  pairedWorkCard = false,
+  layoutDefinition,
+  pageHeroPlacement,
+  heroCopyBelow = false,
+  heroFrameCapped = false,
+  stableMediaFrame = false,
 }: {
   node: DynamicTemplateRenderPlanNode;
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>;
@@ -901,6 +1524,33 @@ function RenderNode({
   bleedInset?: MobileBleedInset;
   bleedAtStart?: boolean;
   bleedAtEnd?: boolean;
+  parentMeasured?: boolean;
+  siblings?: readonly DynamicTemplateRenderPlanNode[];
+  onImageCopy?: boolean;
+  imageCarriesCopy?: boolean;
+  /** 完成稿不绘制按钮时，主图承接这一处跳转。 */
+  artworkHref?: string;
+  artworkImageSlotId?: string;
+  fillMobileCopyFrame?: boolean;
+  /** 作品网格自身的第一张跨满现有两列，不另套内层网格。 */
+  spanWorkLead?: boolean;
+  pairedCanvas?: PairedCanvasRatio | null;
+  /** 对换画布里的图片格：铺满格子，不再套 4:5。 */
+  fillPairedCell?: boolean;
+  /**
+   * 对换后的竖向画布里只有一张主图：主图吃掉文案下方的空白。
+   * 不把 pairedCanvas 传进节点，避免主图盖住文字。
+   */
+  fillSplitRemainder?: boolean;
+  /** 旧对换画布里的四张作品卡保持 4:5；三张及横图根仍铺满格子。 */
+  pairedWorkCard?: boolean;
+  /** 当前渲染定义（含属性预览），仅用于判断手机排列是否由作者明确设置。 */
+  layoutDefinition?: TemplateDefinitionV2;
+  pageHeroPlacement?: PageHeroFramePlacement;
+  heroCopyBelow?: boolean;
+  heroFrameCapped?: boolean;
+  /** 新几何的首屏媒体框：高度只跟比例走，下方文字不能把它挤矮。旧画布不传。 */
+  stableMediaFrame?: boolean;
 }) {
   const layoutElement = useRef<HTMLElement | null>(null);
   const backgroundSource = !node.hidden && node.rules.backgroundImage && isSafeTemplateMediaUrl(node.rules.backgroundImage)
@@ -944,7 +1594,10 @@ function RenderNode({
     && safeAction?.label
     ? safeAction.href
     : undefined;
-  const Element: ElementType = actionHref ? "a" : nodeElementType(node);
+  const artworkImageHref = artworkHref && node.slot?.type === "image" && node.slotId === artworkImageSlotId
+    ? artworkHref
+    : undefined;
+  const Element: ElementType = actionHref || artworkImageHref ? "a" : nodeElementType(node);
   const interactive = mode === "editor" && Boolean(onSelectNode);
   const structureLocked = structureProtectedNodeIds?.has(node.nodeId) === true;
   const layoutEditable = Boolean(
@@ -1118,10 +1771,11 @@ function RenderNode({
     setLayoutPreview(undefined);
   };
   if (node.hidden) return null;
+  if (imageCarriesCopy && artworkCopyTreatment(node.slot) === "omit") return null;
   const emptyPublicImage = mode === "public"
     && !showEmptySlots
     && node.slot?.type === "image"
-    && !readRenderedImageSource(node.content);
+    && !hasTemplateImageContent(node.content, device);
   if (emptyPublicImage) return null;
   if (node.type === "Spacer") {
     return <div data-template-node-id={node.nodeId} aria-hidden="true" style={{ height: lengthToCss(node.props.spacerSize) ?? "1rem" }} />;
@@ -1147,19 +1801,76 @@ function RenderNode({
     ? node.rules.height.ratio.width / node.rules.height.ratio.height
     : undefined;
   const slotRatio = parseAspectRatio(node.slotRules?.aspectRatio);
-  const mobileFrame = resolveMobileImageFrame({
+  const paintedRatio = heightRatio ?? (slotRatio ? slotRatio.width / slotRatio.height : undefined);
+  const mobileFrame = fillPairedCell ? undefined : resolveMobileImageFrame({
     device,
     inWorkGrid: workCardFrame,
     slotType: node.slot?.type,
     semanticRole: node.slot?.semanticRole,
     sectionRole,
-    ratio: heightRatio ?? (slotRatio ? slotRatio.width / slotRatio.height : undefined),
+    ratio: paintedRatio,
+    ...heroImageFrameRequest(layoutDefinition, node, pageHeroPlacement),
   });
+  const mobileAssetRecord = node.content && typeof node.content === "object" && !Array.isArray(node.content)
+    ? node.content as { mobileSrc?: unknown }
+    : null;
+  const missingMobileHero = device === "mobile"
+    && sectionRole === "page-hero"
+    && node.slot?.type === "image"
+    && (node.slot.semanticRole === "backgroundImage" || node.slot.semanticRole === "heroImage")
+    && !isSafeTemplateMediaUrl(mobileAssetRecord?.mobileSrc);
+  const paintedMobileFrame = paintDesktopOnlyHeroFrame({
+    resolvedFrame: mobileFrame,
+    desktopAspect: node.slot?.desktopRules?.aspectRatio,
+    hasMobileAsset: !missingMobileHero,
+    explicitObjectFit: node.layoutOverride?.objectFit,
+    pairedCanvas: Boolean(pairedCanvas),
+  });
+  const splitPlate = !pairedCanvas && !fillSplitRemainder && layoutDefinition && isContentHeightSplitSection(layoutDefinition)
+    ? splitHeroMobileFrame({
+      device,
+      sectionRole,
+      semanticRole: node.slot?.semanticRole,
+      slotType: node.slot?.type,
+      mobileRatio: paintedRatio,
+      desktopAspect: node.slot?.desktopRules?.aspectRatio,
+    })
+    : undefined;
+  const holdsSplitHero = fillSplitRemainder && subtreeHasHeroImage(node);
+  const splitHeroSlot = holdsSplitHero
+    && node.slot?.type === "image"
+    && node.slot.semanticRole === "heroImage";
+  const splitHeroColumn = holdsSplitHero && !splitHeroSlot && node.rules.layoutMode !== "free";
+  const besideSplitHero = fillSplitRemainder
+    && !holdsSplitHero
+    && siblings.some((item) => subtreeHasHeroImage(item));
+  const capHeroFrame = heroFrameCapped && paintedMobileFrame === "9 / 16";
+  const releaseHeroCopy = heroCopyBelow && sectionRole === "page-hero";
   const bleedStyle = parentFree && placement
     ? mobileFreeFrameStyle(placement, bleeds, node.slot?.semanticRole)
     : bleeds
       ? mobileBleedBox(bleedInset, { top: bleedAtStart, bottom: bleedAtEnd })
       : undefined;
+  const largePhoneMeasure = usesLargePhoneMeasure(node, {
+    device,
+    inWorkGrid: constrainWorkCell,
+    parentMeasured,
+    sectionRole,
+  });
+  const holdsSourceRatio = Boolean(paintedMobileFrame && paintedMobileFrame !== mobileFrame);
+  const artworkClip = imageCarriesCopy && artworkNodeClips(node);
+  const visualCollapse = node.layoutOverride?.visuallyCollapsed === true
+    && Boolean(node.slot && ["heading", "text", "richText", "badge"].includes(node.slot.type));
+  const overlayScrim = artworkClip ? undefined : resolveTextOnImageScrim(node, siblings, device);
+  const posterContain = imageCarriesCopy
+    && missingMobileHero
+    && !pairedCanvas
+    && node.layoutOverride?.objectFit !== "cover"
+    && node.layoutOverride?.objectFit !== "fill"
+    && !cssFrameIsLandscape(paintedMobileFrame);
+  const fillSourceFrame = missingMobileHero
+    && cssFrameIsLandscape(paintedMobileFrame)
+    && node.layoutOverride?.objectFit !== "fill";
   const slotContent = node.slot
     ? renderSlotContent(
       node,
@@ -1172,15 +1883,55 @@ function RenderNode({
       interactionOwner,
       relationalLayout,
       node.slotId === primaryImageSlotId,
-      bleedStyle && !node.layoutOverride?.objectFit ? "cover" : undefined,
+      fillSourceFrame
+        ? "cover"
+        : posterContain
+          ? "contain"
+          : bleedStyle && !node.layoutOverride?.objectFit ? "cover" : fillMobileCopyFrame ? "cover" : undefined,
+      canvasColor,
+      onImageCopy,
+      imageCarriesCopy,
     )
     : null;
+  const coversPairedSection = Boolean(pairedCanvas)
+    && device === "mobile"
+    && pairedImageCoversSection(node, sectionRole);
+  const fillsPairedImage = coversPairedSection || (
+    Boolean(pairedCanvas)
+    && device === "mobile"
+    && fillPairedCell
+  );
+  const pairedStructure = Boolean(pairedCanvas)
+    && device === "mobile"
+    && !node.slot
+    && node.rules.layoutMode !== "free"
+    && subtreeFillsPairedCanvas(node, sectionRole);
+  const explicitMobileLayout = device === "mobile" && Boolean(layoutDefinition
+    && hasExplicitMobileTemplateLayout(layoutDefinition, node.nodeId)
+    && !isFixedFourWorkGrid(layoutDefinition, node.nodeId));
   return (
     <Element
       ref={layoutElement}
-      {...(actionHref ? { href: actionHref } : {})}
+      {...(actionHref || artworkImageHref ? { href: actionHref ?? artworkImageHref } : {})}
+      className={[
+        artworkClip ? "hc-dynamic-template__artwork-copy" : undefined,
+        mode === "editor" && visualCollapse && !artworkClip ? "hc-dynamic-template__empty-slot" : undefined,
+      ].filter(Boolean).join(" ") || undefined}
+      data-template-artwork-copy={artworkClip ? (node.slot?.type === "heading" ? "heading" : "frame") : undefined}
+      data-template-artwork-link={artworkImageHref ? "true" : undefined}
       data-template-node-id={node.nodeId}
       data-template-node-type={node.type}
+      data-template-split-row={isSplitCopyRow(node, sectionRole) ? "true" : undefined}
+      data-template-layout={isSplitCopyRow(node, sectionRole) ? (node.rules.layoutMode ?? "flow") : undefined}
+      data-template-split-columns={isSplitCopyRow(node, sectionRole) ? String(splitCopyColumnCount(node)) : undefined}
+      data-template-pair-group={mode === "editor" && node.children.some((child) => child.nodeId === selectedNodeId) ? "true" : undefined}
+      data-template-work-card-ratio={pairedWorkCard || mobileFrame === "4 / 5" ? "4 / 5" : undefined}
+      data-template-split-hero-frame={splitPlate}
+      data-template-split-hero-fill={splitHeroSlot ? "true" : undefined}
+      data-template-mobile-asset={missingMobileHero ? "desktop-only" : undefined}
+      data-template-mobile-frame={holdsSourceRatio ? "source" : undefined}
+      data-template-poster-fit={posterContain ? "contain" : undefined}
+      data-template-visual-collapse={visualCollapse ? "true" : undefined}
       data-template-node-label={interactive ? node.name : undefined}
       data-template-empty-structure={showEmptyStructure && !node.slot && node.children.length === 0 ? "true" : undefined}
       data-template-slot-id={node.slotId}
@@ -1190,6 +1941,9 @@ function RenderNode({
       data-template-border-token={node.rules.borderToken}
       data-template-semantic-role={node.slot?.semanticRole}
       data-template-mobile-bleed={bleedStyle ? "true" : undefined}
+      data-template-mirrored={node.mirrored ? "true" : undefined}
+      data-template-mobile-work-lead={spanWorkLead ? "true" : undefined}
+      data-template-large-phone-measure={largePhoneMeasure ? "true" : undefined}
       style={{
         ...rulesToStyle(
           node,
@@ -1202,20 +1956,188 @@ function RenderNode({
           device,
           preserveResolvedMobileRatio,
         ),
+        ...(dropDarkMobileImageTail(node, device, canvasColor, showEmptySlots, mode)
+          ? { paddingBottom: 0 }
+          : {}),
+        ...(collapseVacantFlowPadding(node, showEmptySlots, mode, showEmptyStructure, device)
+          ? { padding: 0 }
+          : {}),
         ...(showEmptyStructure && !node.slot && node.children.length === 0
           ? { minHeight: "256px" }
           : {}),
         // 新合同的阅读顺序与叠放层序共用 childIds，断点不维护第二套排序。
         ...(constrainWorkCell ? { width: "100%", maxWidth: "100%", minWidth: 0 } : {}),
-        ...(mobileFrame ? { aspectRatio: mobileFrame } : {}),
+        ...(paintedMobileFrame && stableMediaFrame && !capHeroFrame ? {
+          aspectRatio: paintedMobileFrame,
+          height: "auto",
+          maxHeight: "none",
+          flex: "0 0 auto",
+          width: "100%",
+          flexShrink: 0,
+          minHeight: 0,
+        } : paintedMobileFrame ? {
+          aspectRatio: capHeroFrame ? "auto" : paintedMobileFrame,
+          ...(missingMobileHero ? {
+            width: "100%",
+            maxWidth: "100%",
+            height: "auto",
+            flex: "0 0 auto",
+            alignSelf: "flex-start" as const,
+          } : {}),
+        } : {}),
+        ...(splitPlate ? {
+          aspectRatio: splitPlate,
+          height: "auto",
+          maxHeight: "none",
+          flex: "0 0 auto",
+          width: "100%",
+          flexShrink: 0,
+          minHeight: 0,
+        } : {}),
+        ...(releaseHeroCopy && node.rules.layoutMode === "free" ? {
+          position: "relative" as const,
+          display: "flex",
+          flexDirection: "column" as const,
+          height: "auto",
+          aspectRatio: "auto",
+          overflow: "visible" as const,
+          minHeight: 0,
+        } : {}),
+        ...(releaseHeroCopy && parentFree ? {
+          position: "relative" as const,
+          left: "auto",
+          top: "auto",
+          width: "100%",
+          height: capHeroFrame ? HERO_FRAME_CAP : "auto",
+          maxWidth: "100%",
+          transform: "none",
+        } : {}),
+        ...(capHeroFrame ? {
+          width: "100%",
+          height: HERO_FRAME_CAP,
+          maxHeight: HERO_FRAME_CAP,
+          minHeight: 0,
+          overflow: "hidden" as const,
+        } : {}),
         ...(relationalLayout ? { order: siblingIndex, zIndex: layoutPreview?.zIndex ?? node.layoutOverride?.zIndex ?? siblingIndex } : {}),
         ...(device === "mobile" && node.slot?.type !== "image" && node.rules.overflow === "hidden" && subtreeHasMobileBleedImage(node, { device, sectionRole, canvasColor })
           ? { overflow: "visible" as const }
           : {}),
-        ...bleedStyle,
+        ...(fillMobileCopyFrame ? {
+          position: "absolute" as const,
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          maxWidth: "none",
+          margin: 0,
+          aspectRatio: "auto",
+          overflow: "hidden" as const,
+        } : bleedStyle),
         ...(layoutEditable || freePlacementEditable ? {
           ...(layoutEditable ? { position: "relative" as const } : {}),
           cursor: freePlacementEditable || node.instanceEditPolicy?.position ? "move" : undefined,
+        } : {}),
+        ...(spanWorkLead ? { gridColumn: "1 / -1" } : {}),
+        ...(pairedStructure && !parentRules ? {
+          position: "absolute" as const,
+          inset: 0,
+          ...(!explicitMobileLayout ? { display: "flex", flexDirection: "column" as const } : {}),
+          minHeight: 0,
+          width: "100%",
+          height: "100%",
+          boxSizing: "border-box" as const,
+        } : pairedStructure ? {
+          ...(!explicitMobileLayout ? { display: "flex", flexDirection: "column" as const } : {}),
+          flex: "1 1 auto",
+          minHeight: 0,
+          height: "100%",
+          width: "100%",
+          boxSizing: "border-box" as const,
+        } : {}),
+        ...(pairedWorkCard ? {
+          width: "100%",
+          height: "auto",
+          aspectRatio: "4 / 5",
+          flex: "0 0 auto",
+          alignSelf: "start" as const,
+          maxHeight: "none",
+          overflow: "hidden" as const,
+        } : coversPairedSection && !capHeroFrame ? {
+          // 高度按内容盒的 100% 再叠负外边距，会在画布底下留下同样深的底色。贴齐整节才盖住内边距。
+          position: "absolute" as const,
+          inset: 0,
+          margin: 0,
+          width: "100%",
+          height: "100%",
+          maxWidth: "none",
+          maxHeight: "none",
+          minHeight: 0,
+          aspectRatio: "auto",
+          overflow: "hidden" as const,
+        } : fillsPairedImage ? {
+          flex: "1 1 auto",
+          width: "100%",
+          height: capHeroFrame ? HERO_FRAME_CAP : "100%",
+          minHeight: 0,
+          maxHeight: capHeroFrame ? HERO_FRAME_CAP : "100%",
+          aspectRatio: "auto",
+          overflow: "hidden" as const,
+          // 整节定位已经贴齐时不再加宽。仍在内边距里的图，要补回左右留白，否则右边短一截。
+          ...(fillMobileCopyFrame || !bleedStyle ? {} : {
+            width: bleedStyle.width,
+            marginLeft: bleedStyle.marginLeft,
+            marginRight: bleedStyle.marginRight,
+          }),
+        } : {}),
+        ...(artworkClip || (visualCollapse && mode !== "editor") ? {
+          position: "absolute" as const,
+          width: "1px",
+          height: "1px",
+          padding: 0,
+          margin: "-1px",
+          overflow: "hidden" as const,
+          clip: "rect(0 0 0 0)",
+          clipPath: "inset(50%)",
+          whiteSpace: "nowrap" as const,
+          border: 0,
+          background: "none",
+          backgroundColor: "transparent",
+          backgroundImage: "none",
+          boxShadow: "none",
+          minWidth: 0,
+          minHeight: 0,
+          maxWidth: "1px",
+          pointerEvents: "none" as const,
+        } : visualCollapse && mode === "editor" ? {
+          minHeight: "2.5rem",
+          outline: "1px dashed #8A9194",
+          outlineOffset: "2px",
+        } : {}),
+        ...(splitHeroColumn ? {
+          display: "flex",
+          flexDirection: "column" as const,
+          flex: "1 1 auto",
+          alignItems: "stretch" as const,
+          width: "100%",
+          height: "100%",
+          minHeight: 0,
+          boxSizing: "border-box" as const,
+        } : {}),
+        ...(splitHeroSlot ? {
+          position: "relative" as const,
+          flex: "1 1 0%",
+          alignSelf: "stretch" as const,
+          width: "100%",
+          height: "auto",
+          minHeight: 0,
+          maxHeight: "none",
+          aspectRatio: "auto",
+          overflow: "hidden" as const,
+        } : {}),
+        ...(besideSplitHero ? {
+          flex: "0 0 auto",
+          height: "auto",
+          maxHeight: "none",
         } : {}),
       }}
       {...(interactive ? {
@@ -1308,6 +2230,21 @@ function RenderNode({
         },
       } : {})}
     >
+      {overlayScrim ? (
+        <div
+          aria-hidden="true"
+          data-template-text-scrim={overlayScrim}
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: -1,
+            pointerEvents: "none",
+            background: overlayScrim === "bottom"
+              ? "linear-gradient(to top, rgb(24 26 27 / 0.6), rgb(24 26 27 / 0))"
+              : "linear-gradient(to bottom, rgb(24 26 27 / 0.6), rgb(24 26 27 / 0))",
+          }}
+        />
+      ) : null}
       {slotContent}
       {renderTemplateChildren({
         node,
@@ -1340,9 +2277,73 @@ function RenderNode({
         bleedInset,
         bleedAtStart,
         bleedAtEnd,
+        parentMeasured: largePhoneMeasure,
+        onImageCopy: onImageCopy && !node.rules.backgroundColor && !node.rules.backgroundToken,
+        imageCarriesCopy,
+        artworkHref,
+        artworkImageSlotId,
+        pairedCanvas,
+        fillPairedCell,
+        fillSplitRemainder,
+        layoutDefinition,
+        pageHeroPlacement,
+        heroCopyBelow,
+        heroFrameCapped,
+        stableMediaFrame,
       })}
     </Element>
   );
+}
+
+function subtreeHasHeroImage(node: DynamicTemplateRenderPlanNode): boolean {
+  if (node.hidden) return false;
+  if (node.slot?.type === "image" && node.slot.semanticRole === "heroImage") return true;
+  return node.children.some(subtreeHasHeroImage);
+}
+
+function countVisibleImages(node: DynamicTemplateRenderPlanNode): number {
+  if (node.hidden) return 0;
+  const self = node.slot?.type === "image" ? 1 : 0;
+  return node.children.reduce((total, child) => total + countVisibleImages(child), self);
+}
+
+const SPLIT_COPY_ROLES = new Set(["editorial-split", "collection-story", "craft-detail"]);
+const SPLIT_TEXT_SLOT_TYPES = new Set(["heading", "text", "richText", "badge", "button", "link"]);
+
+function subtreeHasSlot(
+  node: DynamicTemplateRenderPlanNode,
+  predicate: (item: DynamicTemplateRenderPlanNode) => boolean,
+): boolean {
+  if (predicate(node)) return true;
+  return node.children.some((child) => subtreeHasSlot(child, predicate));
+}
+
+function splitCopyColumnCount(node: DynamicTemplateRenderPlanNode): number {
+  if (node.rules.display === "grid" && (node.rules.columns?.length ?? 0) >= 2) {
+    return node.rules.columns?.length ?? 0;
+  }
+  const direction = node.rules.direction ?? "row";
+  if (node.rules.display === "flex" && direction !== "column") {
+    return Math.max(2, node.children.filter((child) => !child.hidden).length);
+  }
+  return 0;
+}
+
+function isSplitCopyRow(node: DynamicTemplateRenderPlanNode, sectionRole?: string): boolean {
+  if (!sectionRole || !SPLIT_COPY_ROLES.has(sectionRole)) return false;
+  if (node.slot) return false;
+  const hasImage = subtreeHasSlot(node, (item) => item.slot?.type === "image");
+  const hasText = subtreeHasSlot(node, (item) => Boolean(item.slot && SPLIT_TEXT_SLOT_TYPES.has(item.slot.type)));
+  if (!hasImage || !hasText) return false;
+  if (node.rules.layoutMode === "free") return true;
+  return splitCopyColumnCount(node) >= 2;
+}
+
+function overflowObjectName(item: HTMLElement): string {
+  return item.getAttribute("data-template-node-label")?.trim()
+    || item.getAttribute("data-template-slot-id")?.trim()
+    || item.getAttribute("data-template-node-id")?.trim()
+    || "未命名对象";
 }
 
 export default function DynamicTemplateRenderer({
@@ -1351,7 +2352,9 @@ export default function DynamicTemplateRenderer({
   breakpoint,
   contentBySlotId,
   hiddenSlotIds,
+  imageCarriesCopy = false,
   layoutOverridesByNodeId,
+  pageSettings,
   mode = "public",
   showEmptySlots,
   publicSurface,
@@ -1366,6 +2369,7 @@ export default function DynamicTemplateRenderer({
   onNodeAction,
   primaryHeadingLevel = 2,
   priority = false,
+  pageHeroPlacement,
   layoutEditMode = false,
   onLayoutOverrideCommit,
   onTemplatePlacementCommit,
@@ -1391,11 +2395,233 @@ export default function DynamicTemplateRenderer({
     contentBySlotId,
     hiddenSlotIds,
     layoutOverridesByNodeId,
-    showEmptySlots: showEmptySlots ?? mode === "editor",
+    pageSettings,
+    showEmptySlots: showEmptySlots ?? (mode === "editor" && editorSurface !== "page-instance"),
     publicSurface: mode === "public" && definition.schemaVersion >= 3
       ? { ...publicSurface, omitDefaultImages: true, omitDefaultContent: true }
       : publicSurface,
   });
+  const rootRef = useRef<HTMLDivElement>(null);
+  const sectionRole = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+  // 桌面有可读比例时，手机整节按反比例画出，例如 16:9 对 9:16。缺手机图不能取消这次对换。
+  // 没有可读桌面比例的首屏，才在没有手机图时继续沿用桌面横图。
+  const pairedCanvasRatio = device === "mobile" && result.ok ? resolvePairedMobileCanvas(definition) : null;
+  const reuseDesktopHero = !pairedCanvasRatio
+    && device === "mobile"
+    && result.ok
+    && pageHeroReusesDesktopFrame({
+      sectionRole,
+      images: collectDesktopHeroImages(result.plan.root),
+    });
+  const explicitCanvasRatio = pairedCanvasRatio
+    ?? (definition.metadata.geometryPolicy === "paired-canvas" && result.ok
+      && result.plan.root.rules.height.mode === "aspect-ratio"
+      ? result.plan.root.rules.height.ratio
+      : undefined);
+  const [fixedCanvasOverflow, setFixedCanvasOverflow] = useState("");
+  useLayoutEffect(() => {
+    const canvas = rootRef.current;
+    if (!canvas || !explicitCanvasRatio || mode !== "editor") {
+      setFixedCanvasOverflow("");
+      return;
+    }
+    const owner = canvas.ownerDocument.defaultView;
+    if (!owner) return;
+    const nodes = [...canvas.querySelectorAll<HTMLElement>("[data-template-node-id]")];
+    const update = () => {
+      const frame = canvas.getBoundingClientRect();
+      const names: string[] = [];
+      for (const node of nodes) {
+        if (names.length >= 4) break;
+        if (node.closest("[data-template-artwork-copy], .hc-dynamic-template__artwork-copy")) continue;
+        const box = node.getBoundingClientRect();
+        if (box.width < 1 || box.height < 1) continue;
+        const past = box.left < frame.left - 1 || box.top < frame.top - 1
+          || box.right > frame.right + 1 || box.bottom > frame.bottom + 1
+          || (/Heading|Text|RichText|Badge/.test(node.dataset.templateNodeType ?? "")
+            // 中文字形可能超出行盒 1～2px；这不等于少了一行，几何越框仍按上面的 1px 检查。
+            && node.scrollHeight > node.clientHeight + 2);
+        if (!past) continue;
+        const name = overflowObjectName(node);
+        if (!names.includes(name)) names.push(name);
+      }
+      const deviceLabel = device === "mobile" ? "手机" : "桌面";
+      const overflow = names.length > 0
+        ? `${deviceLabel}固定画幅里，${names.join("、")}超出画框。系统没有裁掉超出内容。`
+        : "";
+      setFixedCanvasOverflow((current) => current === overflow ? current : overflow);
+    };
+    update();
+    const observer = new owner.ResizeObserver(update);
+    observer.observe(canvas);
+    nodes.forEach((node) => observer.observe(node));
+    return () => observer.disconnect();
+  }, [definition, contentBySlotId, device, explicitCanvasRatio?.width, explicitCanvasRatio?.height, mode]);
+  const [largePhone, setLargePhone] = useState(false);
+  // R-2 只限制写了 hero-media-frame 的第一只全幅主视觉。
+  // 未写策略或 paired-canvas 的对换画布要让图片铺满整节；把图片框压到视口高会在底下露出画布底色。
+  const heroMediaFrame = definition.metadata.geometryPolicy === "hero-media-frame"
+    && sectionRole === "page-hero"
+    && pageHeroPlacement !== "subsequent";
+  const [heroCopyBelow, setHeroCopyBelow] = useState(false);
+  const [heroFrameCapped, setHeroFrameCapped] = useState(false);
+  const copySignature = Object.values(contentBySlotId ?? {})
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object" && "text" in item) return String(item.text ?? "");
+      return "";
+    })
+    .join("\u0001");
+  const inkSignature = Object.values(definition.slots)
+    .map((slot) => `${slot.desktopRules?.color ?? ""}\u0001${slot.mobileRules?.color ?? ""}`)
+    .join("\u0002");
+  useLayoutEffect(() => {
+    if (!heroMediaFrame) {
+      setHeroCopyBelow(false);
+      setHeroFrameCapped(false);
+      return undefined;
+    }
+    const update = () => {
+      const height = window.innerHeight;
+      const short = height > 0 && height < 480;
+      const width = rootRef.current?.clientWidth ?? 0;
+      const header = Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--site-header-height"),
+      ) || 0;
+      const capped = device === "mobile" && heroFrameExceedsViewport(width, height, header);
+      const host = rootRef.current;
+      let copyExceedsFrame = false;
+      if (!short && !capped && !imageCarriesCopy && host) {
+        const frame = host.querySelector("[data-template-mobile-copy-frame]");
+        const ratio = frame?.querySelector("[data-template-hero-frame-ratio]");
+        const copy = frame?.querySelector("[data-template-hero-frame-copy]");
+        const rawRatio = ratio?.getAttribute("data-template-hero-frame-ratio") ?? "";
+        const [ratioWidth, ratioHeight] = rawRatio.split("/").map((part) => Number(part.trim()));
+        if (ratio instanceof HTMLElement && copy instanceof HTMLElement && ratioWidth > 0 && ratioHeight > 0) {
+          // 首帧宽度还是 0 时不能把标题判成溢出，否则横图会把文案锁到图下。
+          if (ratio.clientWidth > 0) {
+            const intended = ratio.clientWidth * (ratioHeight / ratioWidth);
+            copyExceedsFrame = copy.scrollHeight > intended + 8;
+          }
+        } else {
+          const image = host.querySelector("[data-template-semantic-role='backgroundImage'], [data-template-semantic-role='heroImage']");
+          const texts = [...host.querySelectorAll("[data-template-node-type='HeadingSlot'], [data-template-node-type='TextSlot'], [data-template-node-type='RichTextSlot'], [data-template-node-type='BadgeSlot']")]
+            .filter((node): node is HTMLElement => node instanceof HTMLElement && node.getAttribute("data-template-visual-collapse") !== "true");
+          if (image instanceof HTMLElement && texts.length > 0 && image.getBoundingClientRect().height > 0) {
+            const top = Math.min(...texts.map((node) => node.getBoundingClientRect().top));
+            const bottom = Math.max(...texts.map((node) => node.getBoundingClientRect().bottom));
+            copyExceedsFrame = bottom - top + 64 > image.getBoundingClientRect().height;
+          }
+        }
+      }
+      setHeroCopyBelow(short || capped || copyExceedsFrame);
+      setHeroFrameCapped(capped);
+    };
+    update();
+    const observed = rootRef.current;
+    const observer = observed ? new ResizeObserver(update) : null;
+    if (observed) observer?.observe(observed);
+    window.addEventListener("resize", update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [copySignature, device, heroMediaFrame, imageCarriesCopy]);
+  useLayoutEffect(() => {
+    const element = rootRef.current;
+    if (!element || device !== "mobile") {
+      setLargePhone(false);
+      return undefined;
+    }
+    const update = () => {
+      const width = element.clientWidth;
+      setLargePhone(width >= 600 && width < 768);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [device, result.ok, result.ok ? result.plan.templateId : ""]);
+  const [narrowSplit, setNarrowSplit] = useState(false);
+  const [copyOverflow, setCopyOverflow] = useState("");
+  const [pairedImageCompressed, setPairedImageCompressed] = useState(false);
+  const [textContrastNote, setTextContrastNote] = useState<"none" | "corrected" | "low" | "both">("none");
+  useLayoutEffect(() => {
+    const element = rootRef.current;
+    if (!element || !result.ok) {
+      setNarrowSplit(false);
+      setCopyOverflow("");
+      setPairedImageCompressed(false);
+      setTextContrastNote("none");
+      return undefined;
+    }
+    const update = () => {
+      if (!element.isConnected) return;
+      const fontSize = Number.parseFloat(getComputedStyle(element).fontSize) || 16;
+      const rows = [...element.querySelectorAll<HTMLElement>("[data-template-split-row='true']")];
+      const stack = rows.some((row) => {
+        const columns = Number(row.getAttribute("data-template-split-columns")) || 2;
+        const gap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
+        const text = row.querySelector<HTMLElement>("[data-template-node-type*='Text'], [data-template-node-type*='Heading']");
+        const rowFont = Number.parseFloat(getComputedStyle(text ?? element).fontSize) || fontSize;
+        return splitCopyShouldStack({
+          sectionRole,
+          containerWidth: row.clientWidth,
+          fontSizePx: rowFont,
+          columns,
+          gapPx: gap,
+          layoutMode: row.getAttribute("data-template-layout") ?? "flow",
+          copyColumnWidth: text?.clientWidth,
+        });
+      });
+      setNarrowSplit((current) => current === stack ? current : stack);
+      if (mode === "editor") {
+        const corrected = Boolean(element.querySelector("[data-template-text-contrast='corrected']"));
+        const low = Boolean(element.querySelector("[data-template-text-contrast='low']"));
+        const nextContrast = corrected && low ? "both" as const : corrected ? "corrected" as const : low ? "low" as const : "none" as const;
+        setTextContrastNote((current) => current === nextContrast ? current : nextContrast);
+        const image = element.querySelector<HTMLElement>("[data-template-semantic-role='backgroundImage'], [data-template-semantic-role='heroImage']");
+        const compressed = device === "mobile"
+          && sectionRole === "page-hero"
+          && Boolean(element.getAttribute("data-template-paired-canvas"))
+          && element.clientHeight > 80
+          && Boolean(image && image.clientHeight > 24 && image.clientHeight < element.clientHeight * 0.5);
+        setPairedImageCompressed((current) => current === compressed ? current : compressed);
+      } else {
+        setTextContrastNote((current) => current === "none" ? current : "none");
+        setPairedImageCompressed((current) => current ? false : current);
+      }
+      if (mode !== "editor" || stack) {
+        setCopyOverflow((current) => current ? "" : current);
+        return;
+      }
+      const rootBox = element.getBoundingClientRect();
+      const names: string[] = [];
+      for (const item of element.querySelectorAll<HTMLElement>("[data-template-slot-id]")) {
+        if (names.length >= 4) break;
+        if (item.closest("[data-template-artwork-copy], .hc-dynamic-template__artwork-copy")) continue;
+        const box = item.getBoundingClientRect();
+        const past = box.width > 1 && box.height > 1 && (
+          box.right > rootBox.right + 8 || box.bottom > rootBox.bottom + 8
+          || box.left < rootBox.left - 8 || box.top < rootBox.top - 8
+        );
+        const overflow = getComputedStyle(item).overflowY;
+        const clipped = (overflow === "hidden" || overflow === "clip") && item.scrollHeight > item.clientHeight + 4;
+        if (!past && !clipped) continue;
+        const name = overflowObjectName(item);
+        if (!names.includes(name)) names.push(name);
+      }
+      const deviceLabel = device === "mobile" ? "手机" : "桌面";
+      const message = names.length > 0
+        ? `${deviceLabel}画面上，${names.join("、")}超出画布。请缩短这些对象，或改排列后再看这一端。`
+        : "";
+      setCopyOverflow((current) => current === message ? current : message);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [copySignature, device, inkSignature, mode, result.ok, sectionRole, result.ok ? result.plan.templateId : ""]);
   if (!result.ok) {
     if (mode === "public") return null;
     return (
@@ -1424,13 +2650,7 @@ export default function DynamicTemplateRenderer({
     if (node.hidden) return undefined;
     if (node.slot && node.slotId) {
       if (node.slot.type === "image") {
-        const value = node.content;
-        const source = typeof value === "string"
-          ? value
-          : value && typeof value === "object" && !Array.isArray(value)
-            ? (value as Record<string, unknown>).src
-            : undefined;
-        if (typeof source === "string" && source.trim()) return node.slotId;
+        if (hasTemplateImageContent(node.content, breakpoint ?? device)) return node.slotId;
       }
       const moduleType = getContentTemplateModuleTypeForSlotType(node.slot.type);
       if (moduleType && getContentTemplateMediaReferences(
@@ -1447,13 +2667,34 @@ export default function DynamicTemplateRenderer({
   const primaryImageSlotId = priority
     ? findPrimaryImageSlotId(result.plan.root)
     : undefined;
+  const artworkHref = imageCarriesCopy && mode !== "editor"
+    ? findArtworkActionHref(result.plan.root, contentRenderMode !== "public")
+    : undefined;
+  const artworkImageSlotId = artworkHref
+    ? findPrimaryImageSlotId(result.plan.root)
+    : undefined;
+  // 左右图文整节用对换比例，文字仍在图下，不把主图盖住文字。
+  // 只有一张主图时，主图吃掉对换画布里文案下方的空白，手机槽位不再沿用桌面横图比例。
+  const pairedCanvas = pairedCanvasRatio && isContentHeightSplitSection(definition) ? null : pairedCanvasRatio;
+  // 图没有铺满时，不再把外壳锁成更高的对换画布，否则底色会在照片下面留出一整条。
+  const lockSwappedCanvas = Boolean(pairedCanvasRatio) && (
+    subtreeFillsPairedCanvas(result.plan.root, sectionRole)
+    || isContentHeightSplitSection(definition)
+  );
+  const fillSplitRemainder = device === "mobile"
+    && Boolean(pairedCanvasRatio)
+    && isContentHeightSplitSection(definition)
+    && countVisibleImages(result.plan.root) === 1
+    && subtreeHasHeroImage(result.plan.root);
   return (
     <div
+      ref={rootRef}
       className="hc-dynamic-template"
       data-dynamic-template-id={result.plan.templateId}
       data-dynamic-template-schema-version={result.plan.schemaVersion}
       data-dynamic-template-device={device}
       data-dynamic-template-mode={mode}
+      data-template-surface={mode}
       data-dynamic-template-editor-surface={mode === "editor" ? editorSurface : undefined}
       data-template-composition-authority="template-definition-v2"
       data-template-root-node-id={result.plan.root.nodeId}
@@ -1462,11 +2703,35 @@ export default function DynamicTemplateRenderer({
         && result.plan.root.rules.height.ratio
         ? `${result.plan.root.rules.height.ratio.width}:${result.plan.root.rules.height.ratio.height}`
         : undefined}
+      data-template-paired-canvas={pairedCanvasRatio ? (definition.metadata.geometryPolicy === "paired-canvas" ? formatExactTemplateRatio : formatTemplateRatio)(pairedCanvasRatio.width, pairedCanvasRatio.height) : undefined}
+      data-template-split-fill={fillSplitRemainder ? "true" : undefined}
+      data-template-fixed-canvas={explicitCanvasRatio && (lockSwappedCanvas || !pairedCanvasRatio) ? "true" : undefined}
+      data-template-fixed-canvas-overflow={fixedCanvasOverflow ? "true" : undefined}
       data-template-default-background-token={result.plan.metadata.defaultBackgroundToken}
+      data-template-large-phone={largePhone ? "true" : undefined}
+      data-template-narrow-split={narrowSplit ? "true" : undefined}
+      data-template-hero-copy={heroCopyBelow ? "below" : undefined}
+      data-template-hero-viewport-cap={heroFrameCapped ? "true" : undefined}
+      data-image-carries-copy={imageCarriesCopy ? "true" : undefined}
       style={{
         background: result.plan.metadata.defaultBackgroundToken
           ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[result.plan.metadata.defaultBackgroundToken]
           : undefined,
+        ...(pairedCanvasRatio && lockSwappedCanvas ? {
+          aspectRatio: `${pairedCanvasRatio.width} / ${pairedCanvasRatio.height}`,
+          display: "flex",
+          flexDirection: "column" as const,
+          overflow: "hidden",
+          position: "relative" as const,
+          width: "100%",
+        } : {}),
+        ...(explicitCanvasRatio && (lockSwappedCanvas || !pairedCanvasRatio) ? {
+          aspectRatio: `${explicitCanvasRatio.width} / ${explicitCanvasRatio.height}`,
+          display: "block",
+          position: "relative" as const,
+          width: "100%",
+          overflow: "visible",
+        } : {}),
       }}
     >
       <RenderNode
@@ -1482,6 +2747,9 @@ export default function DynamicTemplateRenderer({
         primaryHeadingSlotId={primaryHeadingSlotId}
         primaryImageSlotId={primaryImageSlotId}
         primaryHeadingLevel={primaryHeadingLevel}
+        imageCarriesCopy={imageCarriesCopy}
+        artworkHref={artworkHref}
+        artworkImageSlotId={artworkImageSlotId}
         device={device}
         layoutEditMode={allowsNodeInteraction && layoutEditMode}
         onLayoutOverrideCommit={allowsNodeInteraction ? onLayoutOverrideCommit : undefined}
@@ -1491,13 +2759,50 @@ export default function DynamicTemplateRenderer({
         contentRenderMode={contentRenderMode}
         structureProtectedNodeIds={structureProtectedNodeIds}
         editableContractRoleIdsByNode={editableContractRoleIdsByNode}
-        showEmptySlots={showEmptySlots ?? mode === "editor"}
+        showEmptySlots={showEmptySlots ?? (mode === "editor" && editorSurface !== "page-instance")}
         showEmptyStructure={mode === "editor" && editorSurface === "template-definition"}
-        sectionRole={definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole}
+        sectionRole={sectionRole}
+        pageHeroPlacement={pageHeroPlacement}
+        heroCopyBelow={heroCopyBelow}
+        heroFrameCapped={heroFrameCapped}
+        stableMediaFrame={heroMediaFrame || reuseDesktopHero}
         inheritedCanvasColor={result.plan.metadata.defaultBackgroundToken
           ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[result.plan.metadata.defaultBackgroundToken]
           : undefined}
+        pairedCanvas={pairedCanvas}
+        fillSplitRemainder={fillSplitRemainder}
+        layoutDefinition={definition}
       />
+      {fixedCanvasOverflow ? (
+        <p role="status" data-template-fixed-canvas-note="true">
+          {fixedCanvasOverflow}
+        </p>
+      ) : null}
+      {narrowSplit ? (
+        <style>
+          {`[data-template-narrow-split="true"] [data-template-split-row="true"]{flex-direction:column !important;grid-template-columns:minmax(0,1fr) !important}[data-template-narrow-split="true"] [data-template-split-row="true"] > *{width:100% !important;max-width:100% !important;flex:1 1 auto !important;grid-column:auto !important}[data-template-narrow-split="true"] [data-template-split-row="true"][data-template-layout="free"]{display:flex !important;flex-direction:column !important;height:auto !important}[data-template-narrow-split="true"] [data-template-split-row="true"][data-template-layout="free"] > *{position:relative !important;inset:auto !important;width:100% !important;height:auto !important;transform:none !important}`}
+        </style>
+      ) : null}
+      {copyOverflow ? (
+        <p role="status" data-template-copy-overflow-note="true">
+          {copyOverflow}
+        </p>
+      ) : null}
+      {pairedImageCompressed ? (
+        <p role="status" data-template-paired-image-note="true">
+          文字变长后，图片区被挤小。这是旧的整节画布：缩短文字可恢复。新版本把画框固定、文字排在图下，需要选用该版本后才会变。当前画面保持原样。
+        </p>
+      ) : null}
+      {textContrastNote === "corrected" || textContrastNote === "both" ? (
+        <p role="status" data-template-text-contrast-note="corrected">
+          深色底上的品牌墨色已改成浅色，方便阅读。
+        </p>
+      ) : null}
+      {textContrastNote === "low" || textContrastNote === "both" ? (
+        <p role="status" data-template-text-contrast-note="low">
+          这段文字和底色对比不够。请改成可读的前景色。当前颜色保持原样。
+        </p>
+      ) : null}
     </div>
   );
 }

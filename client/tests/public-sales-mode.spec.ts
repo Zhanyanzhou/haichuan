@@ -568,7 +568,7 @@ test("购物车与支付开关关闭时不能进入交易或创建订单", async
 
   await page.goto("/cart");
   await expect(page).toHaveURL(/\/cart$/);
-  await expect(page.getByRole("heading", { level: 1, name: "购物车" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "购物袋" })).toBeVisible();
   await expect(page.getByText("线上购买尚未开放")).toBeVisible();
   await page.goto("/checkout");
   await expect(page).toHaveURL(/\/contact$/);

@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { PublicSiteSettingsResource } from "@/hooks/usePublicSiteSettings";
-import { preferSiteSetting, SIGNED_PUBLIC_CONTACT } from "@/config/publicContact";
+import { isDialablePhone, preferSiteSetting, resolvePublicPhone, resolvePublicWechat, SIGNED_PUBLIC_CONTACT } from "@/config/publicContact";
 import RouteLoading from "./RouteLoading";
 
 type PublicContactDetailsProps = {
@@ -19,10 +19,11 @@ export default function PublicContactDetails({ resource, preview = false, presen
     const value = resource.settings?.[key];
     return typeof value === "string" ? value.trim() : "";
   };
-  const phone = preferSiteSetting(setting("contactPhone"), SIGNED_PUBLIC_CONTACT.phone);
-  const wechat = setting("contactWechat");
+  const storedPhone = setting("contactPhone");
+  const phone = resolvePublicPhone(storedPhone);
+  const wechat = resolvePublicWechat(setting("contactWechat"), storedPhone);
   const hours = preferSiteSetting(setting("businessHours"), SIGNED_PUBLIC_CONTACT.hours);
-  const dialNumber = /^\+?[\d\s()-]+$/.test(phone) && /\d/.test(phone) ? phone.replace(/[^\d+]/g, "") : "";
+  const dialNumber = isDialablePhone(phone) ? phone.replace(/[^\d+]/g, "") : "";
   const email = preferSiteSetting(setting("contactEmail"), SIGNED_PUBLIC_CONTACT.email);
   const qrReference = setting("contactWechatQrCode");
   const qrCode = /^(?:\/uploads\/page-assets\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif)|\/api\/upload\/public-media\/[1-9]\d*)$/i.test(qrReference) ? qrReference : "";
@@ -75,22 +76,28 @@ export default function PublicContactDetails({ resource, preview = false, presen
               {qrFailed ? <p role="status">二维码暂时无法显示{wechat ? "，可复制微信号添加。" : "，请稍后重试。"}</p> : null}
               {!qrCode ? <p>{wechat ? "可复制下方微信号，在微信中搜索添加。" : "微信联系方式尚未提供。"}</p> : null}
             </div>
-            {wechat ? <p className="contact-methods__account"><span>微信号</span><span>{wechat}</span></p> : null}
+            {wechat ? <p className="contact-methods__identity"><span className="contact-methods__label">微信号</span><span className="contact-methods__value">{wechat}</span></p> : null}
             <div className="contact-methods__actions">
-              {wechat ? <button type="button" className="contact-direct__primary-action" onClick={(event) => { void copyWechat(event.currentTarget.ownerDocument); }}>复制微信号</button> : null}
+              {wechat ? <button type="button" className="contact-direct__text-action" onClick={(event) => { void copyWechat(event.currentTarget.ownerDocument); }}>复制微信号</button> : null}
               {qrCode && qrReady && !qrFailed ? <a className="contact-direct__text-action" href={qrCode} download onClick={preview ? (event) => event.preventDefault() : undefined}>保存二维码</a> : null}
             </div>
-            {wechat || qrCode ? <p className="contact-methods__hint">电脑端可使用微信扫一扫；手机端可保存二维码，或复制微信号在微信中添加。</p> : null}
             {copyStatus ? <p className="contact-methods__feedback" role="status">{copyStatus}</p> : null}
           </section>
           <section className="contact-methods__channel" aria-labelledby={`${channelId}-phone`}>
             <h2 id={`${channelId}-phone`}>电话联系</h2>
             <p>直接沟通作品、到店与服务安排。</p>
-            {phone ? <p className="contact-methods__phone">{phone}</p> : <p className="contact-methods__phone-empty">联系电话尚未提供。</p>}
-            {dialNumber ? <a href={`tel:${dialNumber}`} className="contact-direct__primary-action" onClick={preview ? (event) => event.preventDefault() : undefined}>拨打电话</a> : null}
-            {hours ? <div className="contact-methods__hours"><h3>服务时间</h3><p>{hours}</p></div> : null}
-            {address ? <div className="contact-methods__address"><h3>接待地址</h3><p>{address}</p></div> : null}
-            {email ? <div className="contact-methods__address"><h3>邮箱</h3><p><a className="contact-direct__text-action" href={`mailto:${email}`} onClick={preview ? (event) => event.preventDefault() : undefined}>{email}</a></p></div> : null}
+            <dl className="contact-facts">
+              <div>
+                <dt>电话</dt>
+                <dd>
+                  {phone ? <span>{phone}</span> : <span>联系电话尚未提供。</span>}
+                  {dialNumber ? <a href={`tel:${dialNumber}`} className="contact-direct__text-action" onClick={preview ? (event) => event.preventDefault() : undefined}>拨打电话</a> : null}
+                </dd>
+              </div>
+              {hours ? <div><dt>服务时间</dt><dd>{hours}</dd></div> : null}
+              {address ? <div><dt>接待地址</dt><dd>{address}</dd></div> : null}
+              {email ? <div><dt>邮箱</dt><dd><a className="contact-direct__text-action" href={`mailto:${email}`} onClick={preview ? (event) => event.preventDefault() : undefined}>{email}</a></dd></div> : null}
+            </dl>
           </section>
         </div>
       </> : null}

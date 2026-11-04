@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { definitionFixture } from "./dynamic-template-test-fixture";
+import { definitionFixture, mediaSideDefinitionFixture } from "./dynamic-template-test-fixture";
 import {
   classifyDynamicTemplateActivationIdempotency,
   createDynamicTemplateActivationOutboxEvent,
@@ -141,23 +141,25 @@ test("页面方案独立升级并进入影响哈希与计数", () => {
   assert.notEqual(first.impactHash, changed.impactHash);
 });
 
-test("页面方案中的失效覆盖同样阻断整批激活", () => {
-  const target = structuredClone(dynamicTemplateTestDefinition);
-  delete target.nodes.node_heading;
-  target.nodes.node_container.childIds = [];
+test("页面方案中的失效覆盖只跳过该方案，不阻断其他对象", () => {
   const result = plan({
-    target,
-    documents: [],
+    documents: [document()],
     schemes: [scheme([instance(1, {
-      layoutOverridesByNodeId: { node_heading: { desktop: { offsetXPercent: 2 } } },
+      layoutOverridesByNodeId: { node_missing: { desktop: { offsetXPercent: 2 } } },
     })])],
   });
-  assert.equal(result.affectedDocumentCount, 0);
-  assert.equal(result.affectedSchemeCount, 1);
-  assert.ok(result.blockers.some((message) => message.includes("scheme#12") && message.includes("构图覆盖")));
+  assert.equal(result.blockers.length, 0);
+  assert.equal(result.schemes[0]?.adoption, "skip");
+  assert.equal(result.schemes[0]?.skipReasons[0]?.code, "LAYOUT_OVERRIDE_INVALID");
+  assert.equal(result.schemes[0]?.skipReasons[0]?.nodeId, "node_missing");
+  assert.equal((result.schemes[0]?.upgradedPuckData as any).content[0].props.templateVersion, 1);
+  assert.equal((result.schemes[0]?.upgradedPuckData as any).content[0].props.layoutOverridesByNodeId.node_missing.desktop.offsetXPercent, 2);
+  assert.equal(result.documents[0]?.draftAdoption, "adopt");
+  assert.equal((result.documents[0]?.upgradedDraftPuckData as any).content[0].props.templateVersion, 2);
+  assert.equal(result.skipped.some((item) => item.kind === "scheme" && item.objectId === 12), true);
 });
 
-test("内容、隐藏状态或构图覆盖失效时产生 blocker，不静默丢弃页面值", () => {
+test("内容、隐藏状态或构图覆盖失效时整份保持原值，不静默丢弃页面值", () => {
   const target = structuredClone(dynamicTemplateTestDefinition);
   delete target.slots.slot_heading;
   delete target.defaultContent.slot_heading;
@@ -168,12 +170,45 @@ test("内容、隐藏状态或构图覆盖失效时产生 blocker，不静默丢
     layoutOverridesByNodeId: { node_heading: { desktop: { offsetXPercent: 2 } } },
   })]);
   const result = plan({ target, documents: [impacted] });
-  assert.ok(result.blockers.some((message) => message.includes("无法无损映射")));
-  assert.ok(result.blockers.some((message) => message.includes("隐藏槽位")));
-  assert.ok(result.blockers.some((message) => message.includes("构图覆盖")));
+  const codes = result.documents[0]?.skipReasons.map((reason) => reason.code) ?? [];
+  assert.equal(result.blockers.length, 0);
+  assert.equal(result.documents[0]?.draftAdoption, "skip");
+  assert.ok(codes.includes("SLOT_NOT_LOSSLESS"));
+  assert.ok(codes.includes("HIDDEN_SLOT_INVALID"));
+  assert.ok(codes.includes("LAYOUT_OVERRIDE_INVALID"));
+  const draft = result.documents[0]?.upgradedDraftPuckData as any;
+  assert.equal(draft.content[0].props.templateVersion, 1);
+  assert.deepEqual(draft.content[0].props.hiddenSlotIds, ["slot_heading"]);
+  assert.equal(draft.content[0].props.layoutOverridesByNodeId.node_heading.desktop.offsetXPercent, 2);
 });
 
-test("缺少原精确模板版本或重复 instanceId 时整页预检阻断", () => {
+test("页面选的图片位置随激活沿用到新版本", () => {
+  const declared = mediaSideDefinitionFixture();
+  const result = plan({
+    current: declared,
+    target: declared,
+    documents: [document([instance(1, { pageSettings: { mediaSide: "end" } })])],
+  });
+  assert.deepEqual(result.blockers, []);
+  const draft = result.documents[0].upgradedDraftPuckData as any;
+  assert.equal(draft.content[0].props.templateVersion, 2);
+  assert.deepEqual(draft.content[0].props.pageSettings, { mediaSide: "end" });
+});
+
+test("目标版本不再开放图片位置时跳过该对象，不静默丢弃页面选择", () => {
+  const result = plan({
+    current: mediaSideDefinitionFixture(),
+    documents: [document([instance(1, { pageSettings: { mediaSide: "end" } })])],
+  });
+  assert.equal(result.blockers.length, 0);
+  assert.equal(result.documents[0]?.draftAdoption, "skip");
+  assert.equal(result.documents[0]?.skipReasons[0]?.code, "PAGE_SETTING_LOST");
+  const draft = result.documents[0]?.upgradedDraftPuckData as any;
+  assert.equal(draft.content[0].props.templateVersion, 1);
+  assert.deepEqual(draft.content[0].props.pageSettings, { mediaSide: "end" });
+});
+
+test("缺少原精确模板版本或重复 instanceId 时整份对象跳过", () => {
   const duplicated = document([instance(), instance()]);
   const missing = planDynamicTemplateActivation({
     templateId: dynamicTemplateTestDefinition.templateId,
@@ -185,8 +220,74 @@ test("缺少原精确模板版本或重复 instanceId 时整页预检阻断", ()
     definitionsByVersion: {},
     documents: [duplicated],
   });
-  assert.ok(missing.blockers.some((message) => message.includes("缺少原精确模板版本")));
-  assert.ok(missing.blockers.some((message) => message.includes("重复 instanceId")));
+  const codes = missing.documents[0]?.skipReasons.map((reason) => reason.code) ?? [];
+  assert.equal(missing.blockers.length, 0);
+  assert.equal(missing.documents[0]?.draftAdoption, "skip");
+  assert.ok(codes.includes("MISSING_SOURCE_DEFINITION"));
+  assert.ok(codes.includes("DUPLICATE_INSTANCE_ID"));
+  assert.equal((missing.documents[0]?.upgradedDraftPuckData as any).content[0].props.templateVersion, 1);
+  assert.equal((missing.documents[0]?.upgradedDraftPuckData as any).content[1].props.templateVersion, 1);
+});
+
+test("一份草稿无法沿用时，其他草稿仍规划为沿用", () => {
+  const broken = document([instance(1, { instanceId: "" })]);
+  broken.documentId = 8;
+  broken.pageKey = "about";
+  const result = plan({ documents: [document(), broken] });
+  assert.equal(result.blockers.length, 0);
+  assert.equal(result.documents[0]?.draftAdoption, "adopt");
+  assert.equal((result.documents[0]?.upgradedDraftPuckData as any).content[0].props.templateVersion, 2);
+  assert.equal(result.documents[1]?.draftAdoption, "skip");
+  assert.equal(result.documents[1]?.skipReasons[0]?.code, "MISSING_INSTANCE_ID");
+  assert.equal((result.documents[1]?.upgradedDraftPuckData as any).content[0].props.templateVersion, 1);
+});
+
+test("同一份草稿中一个实例无法沿用时，整份草稿保持旧版", () => {
+  const mixed = document([
+    instance(1, { instanceId: "instance-good" }),
+    instance(1, { instanceId: "" }),
+  ]);
+  const other = document();
+  other.documentId = 9;
+  other.pageKey = "about";
+  const result = plan({ documents: [mixed, other] });
+  const kept = result.documents[0]?.upgradedDraftPuckData as any;
+  assert.equal(result.documents[0]?.draftAdoption, "skip");
+  assert.equal(kept.content[0].props.templateVersion, 1);
+  assert.equal(kept.content[1].props.templateVersion, 1);
+  assert.equal(kept.content[0].props.instanceId, "instance-good");
+  assert.equal(result.documents[1]?.draftAdoption, "adopt");
+  assert.equal((result.documents[1]?.upgradedDraftPuckData as any).content[0].props.templateVersion, 2);
+});
+
+test("已发布快照无法转换时，不挡住当前草稿的沿用规划", () => {
+  const current = document();
+  current.latestPublishedRevision = {
+    ...current.latestPublishedRevision,
+    puckData: { content: [instance(1, { instanceId: "" })], zones: {}, root: { props: {} } },
+  };
+  const result = plan({ documents: [current] });
+  assert.equal(result.blockers.length, 0);
+  assert.equal(result.documents[0]?.draftAdoption, "adopt");
+  assert.equal(result.skipped.length, 0);
+  assert.equal((result.documents[0]?.upgradedDraftPuckData as any).content[0].props.templateVersion, 2);
+  assert.equal((result.documents[0]?.upgradedPublishedPuckData as any).content[0].props.templateVersion, 1);
+});
+
+test("模板身份不一致仍是整次计划阻断，不会被写成某个对象的跳过", () => {
+  const result = planDynamicTemplateActivation({
+    templateId: "other-template",
+    currentPublishedVersion: 1,
+    targetVersion: 2,
+    expectedDraftRevision: 3,
+    draftChecksum: "a".repeat(64),
+    targetDefinition: structuredClone(dynamicTemplateTestDefinition),
+    definitionsByVersion: { 1: structuredClone(dynamicTemplateTestDefinition) },
+    documents: [document()],
+    schemes: [],
+  });
+  assert.equal(result.blockers.includes("目标草稿 templateId 与激活模板不一致"), true);
+  assert.equal(result.skipped.some((item) => item.reasons.some((reason) => reason.code === "INSTANCE_INVALID")), false);
 });
 
 test("规范化 requestHash 支持同键重放并拒绝同键不同请求", () => {

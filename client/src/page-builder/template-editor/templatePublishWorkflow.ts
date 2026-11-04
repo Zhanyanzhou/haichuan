@@ -23,6 +23,7 @@ export interface PublishFailure {
   category: PublishFailureCategory;
   code?: string;
   status?: number;
+  message?: string;
 }
 
 export interface LivePublishContext {
@@ -201,7 +202,7 @@ export function deriveTemplatePersistencePresentation({
 }
 
 const STRESS_PREVIEW_LABELS: Record<TemplateStressPreviewScenario, string> = {
-  "short-text": "短文字与中性内容",
+  "short-text": "当前默认内容（保留空值）",
   "long-text": "超长文字与换行",
   "optional-missing": "可选内容缺失",
   "required-missing": "必填内容缺失",
@@ -409,22 +410,125 @@ export interface StrictPublishPayload {
   versionNote?: string;
 }
 
+export interface PublishedTemplateAdoptionSkip {
+  kind: "page-draft" | "language-draft" | "scheme";
+  objectId: number;
+  pageKey: string;
+  reasons: Array<{ code: string }>;
+}
+
+export type PublishedTemplateAdoptionReport =
+  | { skipped: PublishedTemplateAdoptionSkip[] }
+  | "unreadable";
+
 export interface PublishedTemplateFact {
   templateId: string;
   version: number;
   checksum: DefinitionChecksum;
   outcome: "published" | "already-published";
+  pageAdoption?: PublishedTemplateAdoptionReport;
+}
+
+const ADOPTION_KIND_LABEL = {
+  "page-draft": "页面草稿",
+  "language-draft": "语言草稿",
+  scheme: "装修方案",
+} as const;
+
+function adoptionSkipReasonText(code: string) {
+  switch (code) {
+    case "MISSING_INSTANCE_ID":
+      return "缺少稳定实例编号";
+    case "DUPLICATE_INSTANCE_ID":
+      return "实例编号重复";
+    case "INVALID_TEMPLATE_VERSION":
+      return "模板版本无效";
+    case "TEMPLATE_VERSION_NEWER_THAN_TARGET":
+      return "引用的版本高于本次目标";
+    case "MISSING_SOURCE_DEFINITION":
+      return "缺少原来的精确模板版本";
+    case "SLOT_NOT_LOSSLESS":
+      return "槽位无法无损保留";
+    case "NEW_REQUIRED_SLOT":
+      return "新增必填槽位没有页面内容";
+    case "HIDDEN_SLOT_INVALID":
+      return "隐藏状态在新版本不再适用";
+    case "LAYOUT_OVERRIDE_INVALID":
+      return "构图覆盖在新版本不再适用";
+    case "PAGE_SETTING_LOST":
+      return "页面设置在新版本不再适用";
+    case "INSTANCE_INVALID":
+      return "实例无法无损保留";
+    default:
+      return "无法无损保留";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export function readDynamicTemplatePageAdoption(value: unknown): PublishedTemplateAdoptionReport | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!isRecord(value) || !Array.isArray(value.skipped)) return "unreadable";
+  const skipped: PublishedTemplateAdoptionSkip[] = [];
+  for (const item of value.skipped) {
+    if (
+      !isRecord(item)
+      || (item.kind !== "page-draft" && item.kind !== "language-draft" && item.kind !== "scheme")
+      || typeof item.objectId !== "number"
+      || typeof item.pageKey !== "string"
+      || !Array.isArray(item.reasons)
+    ) return "unreadable";
+    const reasons: Array<{ code: string }> = [];
+    for (const reason of item.reasons) {
+      if (!isRecord(reason) || typeof reason.code !== "string") return "unreadable";
+      reasons.push({ code: reason.code });
+    }
+    skipped.push({
+      kind: item.kind,
+      objectId: item.objectId,
+      pageKey: item.pageKey,
+      reasons,
+    });
+  }
+  return { skipped };
+}
+
+export function adoptionReportForPublishedVersion(
+  version: number,
+  raw: unknown,
+): PublishedTemplateAdoptionReport | undefined {
+  const parsed = readDynamicTemplatePageAdoption(raw);
+  if (parsed) return parsed;
+  return version > 1 ? "unreadable" : undefined;
+}
+
+function describeAdoptionSkips(report: PublishedTemplateAdoptionReport | undefined) {
+  if (report === undefined) return "";
+  if (report === "unreadable") return "沿用明细暂时读不出来，请到各页面草稿核对模板版本。";
+  if (report.skipped.length === 0) return "";
+  const lines = report.skipped.map((item) => {
+    const reasons = [...new Set(item.reasons.map((reason) => adoptionSkipReasonText(reason.code)))].join("、");
+    const label = item.kind === "scheme"
+      ? `${ADOPTION_KIND_LABEL[item.kind]} ${item.pageKey} #${item.objectId}`
+      : `${ADOPTION_KIND_LABEL[item.kind]} ${item.pageKey}`;
+    return `${label}（${reasons || "无法无损保留"}）`;
+  });
+  return `没能沿用：${lines.join("；")}。这些对象仍是旧版本，客户前台仍等发布页面。`;
 }
 
 export function describePublishedTemplateAvailability(
   version: number,
   catalogStatus: "refreshing" | "fresh",
+  pageAdoption?: PublishedTemplateAdoptionReport,
 ) {
   const catalog = catalogStatus === "fresh" ? "目录已确认可用" : "正在核对页面装修目录";
   const consequence = version <= 1
     ? "可在页面装修中选用，不会改任何现有页面。"
-    : "正在使用它的页面草稿会自动沿用这个版本，页面里已填写的内容会保留。客户前台在发布页面后更新。";
-  return `模板 v${version} 已发布；${catalog}。${consequence}`;
+    : "能保留内容的页面草稿、语言草稿和装修方案会自动沿用，已填写的内容会保留。客户前台在发布页面后更新。";
+  const skips = version > 1 ? describeAdoptionSkips(pageAdoption) : "";
+  return `模板 v${version} 已发布；${catalog}。${consequence}${skips ? ` ${skips}` : ""}`;
 }
 
 export interface EditingPublishState {
@@ -1001,6 +1105,7 @@ export function publishReviewedSnapshotSucceeded<Definition extends object>(
     version: event.version,
     checksum: event.checksum,
     outcome: event.outcome,
+    ...(event.pageAdoption ? { pageAdoption: event.pageAdoption } : {}),
   });
 }
 
@@ -1117,6 +1222,7 @@ export function publishedVersionVerificationMatched<Definition extends object>(
     version: event.version,
     checksum: event.checksum,
     outcome: event.outcome,
+    ...(event.pageAdoption ? { pageAdoption: event.pageAdoption } : {}),
   });
 }
 

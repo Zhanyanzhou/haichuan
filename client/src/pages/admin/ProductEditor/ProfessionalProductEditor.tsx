@@ -34,6 +34,7 @@ import RouteLoading from "@/components/common/RouteLoading";
 import { SecureImage } from "@/components/common/SecureImage";
 import { getSafeAdminErrorMessage } from "@/constants/adminCopy";
 import { categoryApi, inventoryApi, productApi, uploadApi } from "@/services/api";
+import { clampProductTitle, PRODUCT_TITLE_MAX_UNITS, productTitleUnits } from "@/utils/productTitleLength";
 import type {
   ProductSkuWriteInput,
   ProductWriteInput,
@@ -60,7 +61,7 @@ import "./ProfessionalProductEditor.css";
 type DetailDraft = ProductDetailBlock & { key: string; pendingMediaKey?: string };
 type PendingMedia = { key: string; file: File; preview: string; purpose?: "detail" };
 type MediaChoice = { key: string; label: string; src?: string; imageId?: number; pending?: boolean };
-type PendingSaveVerification = { productId: number };
+type PendingSaveVerification = { productId: number; continueNext?: boolean };
 class EditorUserError extends Error {}
 
 type EditorRequestError = Error & { status?: number; response?: { status?: number } };
@@ -570,6 +571,7 @@ export default function ProfessionalProductEditor() {
   const detailUploadSelectionRef = useRef<File[] | null>(null);
   const [authorizingImages, setAuthorizingImages] = useState(false);
   const activeEditorRef = useRef(true);
+  const suppressDirtyRef = useRef(false);
   const [currentProductId, setCurrentProductId] = useState<number | null>(editingId);
   const [publishFrame, setPublishFrame] = useState<ProductPublishFrame | null>(() => readProductPublishFrame());
   const [galleryOrder, setGalleryOrder] = useState<string[]>([]);
@@ -786,7 +788,10 @@ export default function ProfessionalProductEditor() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [dirty, saving]);
 
-  const markDirty = () => setDirty(true);
+  const markDirty = () => {
+    if (suppressDirtyRef.current) return;
+    setDirty(true);
+  };
   const addPendingMedia = (_file: File, fileList: File[]) => {
     if (uploadSelectionRef.current === fileList) return Upload.LIST_IGNORE;
     uploadSelectionRef.current = fileList;
@@ -1021,13 +1026,51 @@ export default function ProfessionalProductEditor() {
     isCustom: values.isCustom || false,
   });
 
-  const refreshProduct = async (productId: number) => {
+  const refreshProduct = async (productId: number, options?: { apply?: boolean }) => {
     const refreshed = unwrapResponse<ProductEditorRecord>(await productApi.getById(productId));
     if (refreshed.id !== productId) {
       throw new Error("product-save-readback-identity-mismatch");
     }
-    if (activeEditorRef.current) applyCanonicalProduct(refreshed);
+    if (activeEditorRef.current && options?.apply !== false) applyCanonicalProduct(refreshed);
     return refreshed;
+  };
+
+  const resetForNextProduct = () => {
+    pendingMediaRef.current.forEach((item) => URL.revokeObjectURL(item.preview));
+    pendingMediaRef.current = [];
+    mediaAssetIdsByImage.current.clear();
+    setPendingMedia([]);
+    setImages([]);
+    setPrimaryImageId(null);
+    setDetail([]);
+    setSkus([]);
+    setGalleryOrder([]);
+    setDraggingGalleryKey(null);
+    draggingGalleryKeyRef.current = null;
+    setGalleryDropKey(null);
+    setStockRowCount(0);
+    setStockHint(undefined);
+    setCurrentProductId(null);
+    setCurrentStatus("DRAFT");
+    setCurrentReviewStatus("DRAFT");
+    setSavedAt(undefined);
+    setPreviewOpen(false);
+    setPreviewValues({});
+    setActive("basic");
+    dismissSubmitError();
+    setPendingSaveVerification(null);
+    const frame = readProductPublishFrame();
+    setPublishFrame(frame);
+    suppressDirtyRef.current = true;
+    form.resetFields();
+    if (frame) form.setFieldsValue(frameToFormValues(frame));
+    suppressDirtyRef.current = false;
+    setDirty(false);
+    const nextUrl = `/admin/products/new${returnPathQuery}`;
+    if (`${window.location.pathname}${window.location.search}` !== nextUrl) {
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
+    document.querySelector(".pro-editor__body")?.scrollTo({ top: 0 });
   };
 
   const retrySaveVerification = async () => {
@@ -1035,10 +1078,15 @@ export default function ProfessionalProductEditor() {
     if (!pending || saveVerificationLoading) return;
     try {
       setSaveVerificationLoading(true);
-      await refreshProduct(pending.productId);
+      await refreshProduct(pending.productId, { apply: !pending.continueNext });
       if (!activeEditorRef.current) return;
-      setPendingSaveVerification(null);
       dismissSubmitError();
+      if (pending.continueNext) {
+        resetForNextProduct();
+        messageApi.success("商品保存结果已确认。可以继续填写下一件");
+        return;
+      }
+      setPendingSaveVerification(null);
       setDirty(false);
       setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
       messageApi.success("商品保存结果已确认");
@@ -1391,7 +1439,8 @@ export default function ProfessionalProductEditor() {
         }));
         productId = created.id;
         setCurrentProductId(productId);
-        // 先把地址替换为已创建草稿，后续上传或更新失败时刷新/重试也不会再次创建商品。
+        // 写入尚未确认前，先把地址换成已创建草稿。中途刷新或重试会打开这一件，不会再创建一件。
+        // 新建商品上架确认成功后会回到空白新建页；保存草稿仍留在这一件上。
         window.history.replaceState(window.history.state, "", `/admin/products/${productId}/edit`);
       }
       if (!productId) throw new EditorUserError("商品创建失败，未返回商品标识");
@@ -1434,19 +1483,23 @@ export default function ProfessionalProductEditor() {
         await productApi.updateStatus(productId, "OFFLINE");
       }
       setPendingMedia([]);
+      const continueNext = startedWithoutProductId && intent === "primary";
       let refreshed: ProductEditorRecord;
       try {
-        refreshed = await refreshProduct(productId);
+        refreshed = await refreshProduct(productId, { apply: !continueNext });
       } catch {
         if (activeEditorRef.current) {
-          setPendingSaveVerification({ productId });
+          setPendingSaveVerification({
+            productId,
+            continueNext: startedWithoutProductId && intent === "primary",
+          });
           dismissSubmitError();
           messageApi.warning("商品已写入，最新状态待确认；请重新读取保存结果");
         }
         return false;
       }
       if (!activeEditorRef.current) return false;
-      if ((role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE") && values.salesMode === "DIRECT_PURCHASE") {
+      if (!continueNext && (role === "SUPER_ADMIN" || role === "ADMIN" || role === "WAREHOUSE") && values.salesMode === "DIRECT_PURCHASE") {
         try {
           const stock = await readProductStock(productId);
           if (activeEditorRef.current) {
@@ -1459,8 +1512,6 @@ export default function ProfessionalProductEditor() {
         }
       }
       if (!activeEditorRef.current) return false;
-      setDirty(false);
-      setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
       const successMessage = !canGovernPublic && intent === "primary"
         ? "商品草稿已保存并提交审核"
         : intent === "draft"
@@ -1470,11 +1521,18 @@ export default function ProfessionalProductEditor() {
           : values.publishMode === "SCHEDULED"
           ? "已保存定时上架计划"
           : "商品已保存至仓库";
-      messageApi.success(successMessage);
-      if (!editingId) {
-        navigate(`/admin/products/${productId}/edit${returnPathQuery}`, {
-          replace: true,
-        });
+      if (continueNext) {
+        resetForNextProduct();
+        messageApi.success(`${successMessage}。可以继续填写下一件`);
+      } else {
+        setDirty(false);
+        setSavedAt(new Date().toLocaleString("zh-CN", { hour12: false }));
+        messageApi.success(successMessage);
+        if (!editingId) {
+          navigate(`/admin/products/${productId}/edit${returnPathQuery}`, {
+            replace: true,
+          });
+        }
       }
       return true;
     } catch (error: unknown) {
@@ -1782,7 +1840,29 @@ export default function ProfessionalProductEditor() {
 
         <section id="basic" className="pro-editor__card">
           <div className="pro-editor__title-row"><h2>基础信息</h2></div>
-          <Form.Item name="name" label={<span>商品标题<RequiredMark /></span>} className={requiredFieldClass(true, titleEmpty, "pro-editor__horizontal-field")} extra="例如「18K金红宝石戒指」。" rules={[{ max: 60, message: "商品标题不能超过 60 个字符" }]}><Input maxLength={60} showCount placeholder="如：18K金红宝石戒指" /></Form.Item>
+          <Form.Item
+            name="name"
+            label={<span>商品标题<RequiredMark /></span>}
+            className={requiredFieldClass(true, titleEmpty, "pro-editor__horizontal-field")}
+            extra="例如「18K金红宝石戒指」。一个汉字计 2 个字符，字母和数字计 1 个，合计不超过 60。"
+            rules={[{
+              validator: async (_, value: unknown) => {
+                if (typeof value === "string" && productTitleUnits(value) > PRODUCT_TITLE_MAX_UNITS) {
+                  throw new Error("商品标题不能超过 60 个字符，一个汉字计 2 个字符");
+                }
+              },
+            }]}
+          >
+            <Input
+              count={{
+                max: PRODUCT_TITLE_MAX_UNITS,
+                strategy: productTitleUnits,
+                show: true,
+                exceedFormatter: (value, config) => clampProductTitle(value, config.max),
+              }}
+              placeholder="如：18K金红宝石戒指"
+            />
+          </Form.Item>
           <Form.Item
             name="shortDescription"
             label="商品简介"

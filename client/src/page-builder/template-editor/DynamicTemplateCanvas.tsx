@@ -21,6 +21,7 @@ import {
 } from "../template-definition";
 import DynamicTemplateRenderer from "../template-definition/DynamicTemplateRenderer";
 import type { TemplateDefinitionV2, DynamicTemplateDefinitionCommand } from "../template-definition";
+import { settleEvenWorkGrid } from "./evenWorkGridMaintenance";
 import { resolveTemplateDefinitionForBreakpoint, resolveTemplateNodeRules, resolveTemplateSlotRules, setTemplateNodeRule, setTemplateSlotRule } from "../template-definition/responsive";
 import { objectPositionToPercent, percentToExactObjectPosition } from "../template-definition/imagePosition";
 import {
@@ -71,7 +72,7 @@ import {
   withNeutralTemplateImages,
   resolveTemplatePreviewViewport,
 } from "./templatePreviewModel";
-import { createTemplateStressPreviewContentBySlotId } from "./templateStressPreviewEngine";
+import { composeTemplatePreviewFillSamples, createTemplateStressPreviewContentBySlotId } from "./templateStressPreviewEngine";
 import {
   getTemplateTrialContentForSession,
   useTemplateTrialContentSession,
@@ -106,8 +107,9 @@ function compatibilityForMaterializedRect(
 
 function createEditingContent(
   definition: TemplateDefinitionV2,
+  forceNeutral = false,
 ): Record<string, unknown> {
-  return createTemplateDesignCanvasContent(definition);
+  return createTemplateDesignCanvasContent(definition, forceNeutral ? { force: true } : undefined);
 }
 
 export default function DynamicTemplateCanvas() {
@@ -165,6 +167,7 @@ export default function DynamicTemplateCanvas() {
   const setPreviewWidth = useTemplateEditorSession((state) => state.setPreviewWidth);
   const previewMode = useTemplateEditorSession((state) => state.previewMode);
   const previewScenario = useTemplateEditorSession((state) => state.previewScenario);
+  const previewFillSamples = useTemplateEditorSession((state) => state.previewFillSamples);
   const selectedNodeId = useTemplateEditorSession((state) => state.selectedObjectId);
   const selectedContractRole = useTemplateEditorSession((state) => state.selectedContractRole);
   const transitionSelection = useTemplateEditorSession((state) => state.transitionSelection);
@@ -186,6 +189,7 @@ export default function DynamicTemplateCanvas() {
   const [canvasNotice, setCanvasNotice] = useState<string | null>(null);
   const [inlineText, setInlineText] = useState<{ nodeId: string; value: string } | null>(null);
   const [comparison, setComparison] = useState(false);
+  const [neutralImages, setNeutralImages] = useState(false);
   const [spacingEditing, setSpacingEditing] = useState(false);
   const stageRef = useRef<HTMLElement>(null);
 
@@ -283,8 +287,9 @@ export default function DynamicTemplateCanvas() {
   const canvasLocked = getDynamicTemplateStructureLockOwnerId(dynamicDraft.definition, dynamicDraft.definition.rootNodeId) !== null;
   const rootNode = dynamicDraft.definition.nodes[dynamicDraft.definition.rootNodeId];
   const isEmptyTemplate = !rootNode || rootNode.childIds.length === 0;
-  const { sourceWidth, fallbackHeight, heightMode, ratioLabel } = resolveTemplatePreviewViewport(
-    resolveTemplateDefinitionForBreakpoint(dynamicDraft.definition, breakpoint),
+  // 必须用原始定义：按当前断点投影后，桌面比例会被手机规则盖掉，对换画布会算成随内容。
+  const { sourceWidth, fallbackHeight, heightMode, ratioLabel, frameNote } = resolveTemplatePreviewViewport(
+    dynamicDraft.definition,
     device,
   );
   const displayWidth = previewWidth ?? sourceWidth;
@@ -300,13 +305,16 @@ export default function DynamicTemplateCanvas() {
     sessionId: trialSessionId,
     contentBySlotId: trialContentBySlotId,
   }, sessionId);
-  const previewContent = previewMode
+  const stressContent = previewMode
     ? createTemplateStressPreviewContentBySlotId(
       dynamicDraft.definition,
       previewScenario,
       sessionTrialContent,
     )
-    : createEditingContent(dynamicDraft.definition);
+    : null;
+  const previewContent = stressContent
+    ? (previewFillSamples ? composeTemplatePreviewFillSamples(dynamicDraft.definition, stressContent) : stressContent)
+    : createEditingContent(dynamicDraft.definition, neutralImages);
   if (inlineText) {
     const inlineNode = dynamicDraft.definition.nodes[inlineText.nodeId];
     const inlineSlot = inlineNode?.slotId ? dynamicDraft.definition.slots[inlineNode.slotId] : undefined;
@@ -684,7 +692,10 @@ export default function DynamicTemplateCanvas() {
         transform: (current) => {
           const duplicated = duplicateDynamicTemplateNode(current, nodeId);
           duplicatedNodeId = duplicated.nodeId;
-          return duplicated.definition;
+          const slot = duplicated.definition.nodes[duplicated.nodeId]?.slotId
+            ? duplicated.definition.slots[duplicated.definition.nodes[duplicated.nodeId].slotId ?? ""]
+            : undefined;
+          return slot?.type === "image" ? settleEvenWorkGrid(duplicated.definition) : duplicated.definition;
         },
       });
       if (result.ok && duplicatedNodeId) selectObject(duplicatedNodeId);
@@ -804,7 +815,9 @@ export default function DynamicTemplateCanvas() {
     if (!currentDraft || !currentBaseline) return;
     const savedFrame = resolveTemplateDesignFrame(currentBaseline.definition, device);
     let next = setTemplateDesignWidth(currentDraft.definition, device, savedFrame.sourceWidth);
-    if (savedFrame.heightMode === "fixed") {
+    if (savedFrame.pairedCanvas) {
+      next = setTemplateDesignHeightMode(next, device, "auto");
+    } else if (savedFrame.heightMode === "fixed") {
       next = setTemplateDesignHeightMode(next, device, "fixed", savedFrame.fallbackHeight);
     } else if (savedFrame.heightMode === "aspect-ratio") {
       const savedRatio = savedFrame.rootRules.height.mode === "aspect-ratio"
@@ -883,6 +896,11 @@ export default function DynamicTemplateCanvas() {
     if (useTemplateEditorSession.getState().activeInteraction) { setCanvasNotice("请先确认或取消当前操作，再切换并排预览。"); return; }
     setComparison(!comparison);
   }}>{comparison ? "返回单画布编辑" : "多设备并排预览"}</button> : null;
+  const neutralImageAction = previewMode ? null : (
+    <button type="button" aria-pressed={neutralImages} onClick={() => setNeutralImages((current) => !current)}>
+      {neutralImages ? "显示默认图片" : "结构示意"}
+    </button>
+  );
   const insertButtons = (entries: readonly (readonly ["Container" | "Row" | "Stack" | "Grid" | "ImageSlot" | "HeadingSlot" | "TextSlot" | "ButtonSlot", string])[]) => entries.map(([type, label]) => {
     const allowed = canNestDynamicTemplateNode(dynamicDraft.definition.nodes[scopeId].type, type) && !getDynamicTemplateStructureLockOwnerId(dynamicDraft.definition, scopeId);
     return <CanvasInsertButton key={type} type={type} label={label} parentId={scopeId} disabled={!allowed} onNotice={setCanvasNotice} />;
@@ -894,7 +912,8 @@ export default function DynamicTemplateCanvas() {
             aria-label={id === dynamicDraft.definition.rootNodeId ? `选择模板目标 ${dynamicDraft.definition.nodes[id]?.name ?? "模板"}` : undefined}
             onClick={() => { enterEditingScope(id); selectObject(id); }}>{dynamicDraft.definition.nodes[id]?.name ?? "模板"}</Button>
         </span>)}
-        <span role="status">{layoutLabel} · {breakpoint === "desktop" ? "桌面端" : "手机端"}</span>
+        <span role="status">{layoutLabel} · {breakpoint === "desktop" ? "桌面端" : "手机端"}{frameNote ? ` · ${frameNote}` : ""}</span>
+        {neutralImageAction}
         {selectedNodeId && selectedNodeId !== scopeId && getDynamicTemplateNodeRegistryEntry(dynamicDraft.definition.nodes[selectedNodeId].type).canHaveChildren ? <Button size="small" disabled={Boolean(getDynamicTemplateStructureLockOwnerId(dynamicDraft.definition, selectedNodeId))} onClick={() => enterEditingScope(selectedNodeId)}>进入选中容器</Button> : null}
         <details className="template-editor__canvas-add"><summary>＋ 添加内容</summary><div>
           <strong>添加到：{dynamicDraft.definition.nodes[scopeId]?.name}</strong>

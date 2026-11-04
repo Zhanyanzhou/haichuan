@@ -57,6 +57,7 @@ import {
   normalizePuckMetadata,
   resolvePublishValidationIssues,
 } from "./editor-utils";
+import { resolvePublishDraftToken } from "./publishDraftToken";
 import {
   copyEditorLocalConflictSnapshot,
   getEditorApiErrorMessage,
@@ -2232,119 +2233,191 @@ export function usePageWorkspaceController({
           expectedVersion: null,
           expectedPublishedRevisionId: null,
         };
-        try {
-          if (
-            canonicalizePageContent(
-              latestData.current,
-              latestMetadata.current,
-            ) !== publishSourceSignature
-          ) {
-            message.warning(
-              "发布确认期间页面又发生了修改；新修改仍完整保留，请重新发布",
-            );
-            return;
-          }
-
-          const publishResponse = await pageDocumentApi.publish(
-            pageKey,
-            locale,
-            persistedUpdatedAt,
-            persistedContentHash,
-            selfReviewAcknowledged,
-          );
-          const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishResponse);
+        const localContentStillMatches = () => (
+          canonicalizePageContent(
+            latestData.current,
+            latestMetadata.current,
+          ) === publishSourceSignature
+        );
+        const reportPublishConflict = () => {
           if (!isActivePublish()) return;
-          const pendingVerification: PendingPublicationVerification = {
-            ...uncertainPublicationVerification,
-            expectedVersion: Number.isInteger(publishedDocument?.version)
-              ? publishedDocument?.version ?? null
-              : null,
-            expectedPublishedRevisionId: Number.isInteger(
-              publishedDocument?.publishedRevisionId,
-            )
-              ? publishedDocument?.publishedRevisionId ?? null
-              : null,
-          };
-          // PUT 回包只能证明发布请求被服务端接受；线上基线必须由管理端
-          // published GET 权威回读确认，失败时保留该请求身份供 GET-only 重试。
-          pendingPublicationVerificationRef.current = pendingVerification;
-          await verifyPendingPublication(pendingVerification, isActivePublish);
-        } catch (error) {
-          if (!isActivePublish()) return;
-          const status = getEditorHttpStatus(error);
-          if (status === undefined) {
-            // 请求已经发出但没有得到可证明“未提交”的响应。此时只能读取
-            // 线上快照确认同一内容哈希，不能再次 PUT 以免生成重复 revision。
-            pendingPublicationVerificationRef.current = uncertainPublicationVerification;
-            await verifyPendingPublication(
-              uncertainPublicationVerification,
-              isActivePublish,
-            );
-            return;
-          }
-          if (status === 400) {
-            try {
-              const refreshedResponse = await pageDocumentApi.validate(
-                pageKey,
-                publishData,
-                publishMetadata,
-                undefined,
-                locale,
-              );
-              const refreshed = unwrapResponse<{
-                valid: boolean;
-                errors: string[];
-                issues?: PublishValidationIssue[];
-              }>(refreshedResponse);
-              if (!isActivePublish()) return;
-              const refreshedIssues = resolvePublishValidationIssues(refreshed ?? {});
-              const refreshedBlockers = refreshedIssues.filter(
-                (issue) => issue.severity === "error",
-              );
-              setPublishIssues(refreshedIssues);
-              if (refreshedBlockers.length > 0) {
-                setPublishValidationStatus("invalid");
-                activatePublishReview(refreshedBlockers);
-                resumePublishAfterMediaConfirm(refreshedBlockers);
-                return;
-              }
-            } catch {
-              // 保留下面的安全通用错误；不把内部响应正文透传到后台页面。
-            }
-          }
-          const mediaPublishBlocked = /素材|公开使用|授权/.test(getEditorApiErrorMessage(error));
-          const failureMessage = status === 403
-            ? "当前账号已没有发布权限；权限可能已发生变化。请重新登录后再试，或联系管理员确认权限。"
-            : status === 409
-              ? "远端草稿已更新，发布未完成。请选择保留本地修改或重新加载远端草稿。"
-              : status === 400
-                ? (mediaPublishBlocked
-                    ? "新替换的图片尚未批准公开使用，页面没有发布。超级管理员可在本页确认权利后继续发布。"
-                    : "当前草稿尚未完成审核确认，页面没有发布。超级管理员可直接重试发布；其他账号请先提交审核。")
-              : getEditorErrorMessage(error, "发布失败，请稍后重试");
+          const failureMessage = "远端草稿已更新，发布未完成。请选择保留本地修改或重新加载远端草稿。";
           const lifecycleIssue: PublishValidationIssue = {
-            code: status === 409
-              ? "publish-request-conflict"
-              : status === 403
-                ? "publish-permission-changed"
-                : status === 400
-                  ? "publish-review-required"
-                  : "publish-validation-unavailable",
+            code: "publish-request-conflict",
             message: failureMessage,
             severity: "error",
             path: "lifecycle.publish",
           };
-          if (!isActivePublish()) return;
-          if (status === 409) {
-            // 发布前静默保存可能已清掉脏标记；409 后本地仍需对账，离开必须拦截。
-            setHasUnsavedChanges(true);
-          }
+          // 发布前静默保存可能已清掉脏标记；冲突后本地仍需对账，离开必须拦截。
+          setHasUnsavedChanges(true);
           setPublishAttemptFailure({
             issue: lifecycleIssue,
             sourceSignature: publishSourceSignature,
           });
           activatePublishReview([lifecycleIssue]);
           message.error(failureMessage);
+        };
+        let sentToken: { updatedAt: string; contentHash: string } | null = null;
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (!isActivePublish()) return;
+          if (!localContentStillMatches()) {
+            message.warning(
+              "发布确认期间页面又发生了修改；新修改仍完整保留，请重新发布",
+            );
+            return;
+          }
+
+          // 同一份草稿在校验窗口内再写一次时，内容指纹不变但版本时间会前进。
+          // 发布前读回当前草稿，只在内容和审核结论仍一致时改用新的版本时间。
+          let remote: PageDocumentResource | null = null;
+          try {
+            const remoteResponse = await pageDocumentApi.getAdmin(pageKey, locale);
+            if (!isActivePublish()) return;
+            remote = unwrapResponse<PageDocumentResource | null>(remoteResponse);
+          } catch {
+            remote = null;
+          }
+          const token = resolvePublishDraftToken({
+            persistedUpdatedAt,
+            persistedContentHash,
+            persistedReviewStatus: persistedDraft.reviewStatus,
+            remote,
+          });
+          if (token.action === "conflict") {
+            reportPublishConflict();
+            return;
+          }
+          if (
+            sentToken
+            && sentToken.updatedAt === token.updatedAt
+            && sentToken.contentHash === token.contentHash
+          ) {
+            reportPublishConflict();
+            return;
+          }
+          if (!localContentStillMatches()) {
+            message.warning(
+              "发布确认期间页面又发生了修改；新修改仍完整保留，请重新发布",
+            );
+            return;
+          }
+          const cached = pageSessionCacheRef.current[targetWorkspaceKey];
+          if (cached && cached.updatedAt !== token.updatedAt) {
+            pageSessionCacheRef.current[targetWorkspaceKey] = {
+              ...cached,
+              updatedAt: token.updatedAt,
+              contentHash: token.contentHash,
+            };
+          }
+
+          try {
+            sentToken = {
+              updatedAt: token.updatedAt,
+              contentHash: token.contentHash,
+            };
+            const publishResponse = await pageDocumentApi.publish(
+              pageKey,
+              locale,
+              token.updatedAt,
+              token.contentHash,
+              selfReviewAcknowledged,
+            );
+            const publishedDocument = unwrapResponse<PageDocumentResource | null>(publishResponse);
+            if (!isActivePublish()) return;
+            const pendingVerification: PendingPublicationVerification = {
+              ...uncertainPublicationVerification,
+              expectedVersion: Number.isInteger(publishedDocument?.version)
+                ? publishedDocument?.version ?? null
+                : null,
+              expectedPublishedRevisionId: Number.isInteger(
+                publishedDocument?.publishedRevisionId,
+              )
+                ? publishedDocument?.publishedRevisionId ?? null
+                : null,
+            };
+            // PUT 回包只能证明发布请求被服务端接受；线上基线必须由管理端
+            // published GET 权威回读确认，失败时保留该请求身份供 GET-only 重试。
+            pendingPublicationVerificationRef.current = pendingVerification;
+            await verifyPendingPublication(pendingVerification, isActivePublish);
+            return;
+          } catch (error) {
+            if (!isActivePublish()) return;
+            const status = getEditorHttpStatus(error);
+            if (status === undefined) {
+              // 请求已经发出但没有得到可证明“未提交”的响应。此时只能读取
+              // 线上快照确认同一内容哈希，不能再次 PUT 以免生成重复 revision。
+              pendingPublicationVerificationRef.current = uncertainPublicationVerification;
+              await verifyPendingPublication(
+                uncertainPublicationVerification,
+                isActivePublish,
+              );
+              return;
+            }
+            if (status === 409 && attempt === 0) {
+              continue;
+            }
+            if (status === 409) {
+              reportPublishConflict();
+              return;
+            }
+            if (status === 400) {
+              try {
+                const refreshedResponse = await pageDocumentApi.validate(
+                  pageKey,
+                  publishData,
+                  publishMetadata,
+                  undefined,
+                  locale,
+                );
+                const refreshed = unwrapResponse<{
+                  valid: boolean;
+                  errors: string[];
+                  issues?: PublishValidationIssue[];
+                }>(refreshedResponse);
+                if (!isActivePublish()) return;
+                const refreshedIssues = resolvePublishValidationIssues(refreshed ?? {});
+                const refreshedBlockers = refreshedIssues.filter(
+                  (issue) => issue.severity === "error",
+                );
+                setPublishIssues(refreshedIssues);
+                if (refreshedBlockers.length > 0) {
+                  setPublishValidationStatus("invalid");
+                  activatePublishReview(refreshedBlockers);
+                  resumePublishAfterMediaConfirm(refreshedBlockers);
+                  return;
+                }
+              } catch {
+                // 保留下面的安全通用错误；不把内部响应正文透传到后台页面。
+              }
+            }
+            const mediaPublishBlocked = /素材|公开使用|授权/.test(getEditorApiErrorMessage(error));
+            const failureMessage = status === 403
+              ? "当前账号已没有发布权限；权限可能已发生变化。请重新登录后再试，或联系管理员确认权限。"
+              : status === 400
+                ? (mediaPublishBlocked
+                    ? "新替换的图片尚未批准公开使用，页面没有发布。超级管理员可在本页确认权利后继续发布。"
+                    : "当前草稿尚未完成审核确认，页面没有发布。超级管理员可直接重试发布；其他账号请先提交审核。")
+                : getEditorErrorMessage(error, "发布失败，请稍后重试");
+            const lifecycleIssue: PublishValidationIssue = {
+              code: status === 403
+                ? "publish-permission-changed"
+                : status === 400
+                  ? "publish-review-required"
+                  : "publish-validation-unavailable",
+              message: failureMessage,
+              severity: "error",
+              path: "lifecycle.publish",
+            };
+            if (!isActivePublish()) return;
+            setPublishAttemptFailure({
+              issue: lifecycleIssue,
+              sourceSignature: publishSourceSignature,
+            });
+            activatePublishReview([lifecycleIssue]);
+            message.error(failureMessage);
+            return;
+          }
         }
       };
 

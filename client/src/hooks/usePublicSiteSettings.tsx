@@ -34,11 +34,23 @@ export type PublicSiteSettingsResource = {
 
 const PublicSiteSettingsContext = createContext<PublicSiteSettingsResource | null>(null);
 
+type SettingsRequest = {
+  version: number;
+  preserve: boolean;
+};
+
+const contactPreviewListeners = new Set<() => void>();
+
+/** 店铺资料保存后刷新编辑画布里的联系信息，不清空当前预览。 */
+export function refreshPublicContactPreview() {
+  contactPreviewListeners.forEach((listener) => listener());
+}
+
 function useSettingsResource(
   enabled: boolean,
   source: "site" | "contact",
 ): PublicSiteSettingsResource {
-  const [requestVersion, setRequestVersion] = useState(0);
+  const [request, setRequest] = useState<SettingsRequest>({ version: 0, preserve: false });
   const [resource, setResource] = useState<PublicSiteSettingsResource>({
     settings: null,
     status: enabled ? "loading" : "loaded",
@@ -46,32 +58,52 @@ function useSettingsResource(
   const retry = useCallback(() => {
     if (!enabled) return;
     setResource({ settings: null, status: "loading" });
-    setRequestVersion((current) => current + 1);
+    setRequest((current) => ({ version: current.version + 1, preserve: false }));
   }, [enabled]);
+
+  useEffect(() => {
+    if (source !== "contact" || !enabled) return;
+    const listener = () => {
+      setRequest((current) => ({ version: current.version + 1, preserve: true }));
+    };
+    contactPreviewListeners.add(listener);
+    return () => {
+      contactPreviewListeners.delete(listener);
+    };
+  }, [enabled, source]);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    setResource({ settings: null, status: "loading" });
-    const request = source === "contact"
+    const preserve = request.preserve;
+    if (!preserve) {
+      setResource({ settings: null, status: "loading" });
+    }
+    const pending = source === "contact"
       ? settingsApi.getPublicContact()
       : settingsApi.getPublicSettings();
-    request
+    pending
       .then((response) => {
-        if (!cancelled) {
-          setResource({
-            settings: unwrapResponse<PublicSiteSettings>(response),
-            status: "loaded",
-          });
-        }
+        if (cancelled) return;
+        setResource({
+          settings: unwrapResponse<PublicSiteSettings>(response),
+          status: "loaded",
+        });
       })
       .catch(() => {
-        if (!cancelled) setResource({ settings: null, status: "error" });
+        if (cancelled) return;
+        if (preserve) {
+          setResource((current) => (
+            current.settings ? current : { settings: null, status: "error" }
+          ));
+          return;
+        }
+        setResource({ settings: null, status: "error" });
       });
     return () => {
       cancelled = true;
     };
-  }, [enabled, requestVersion, source]);
+  }, [enabled, request, source]);
 
   return { ...resource, retry };
 }

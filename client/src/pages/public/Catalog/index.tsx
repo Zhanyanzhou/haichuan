@@ -529,15 +529,16 @@ export default function Catalog({
   const selCount = selectionLookupState === "ready"
     ? selectionProducts.filter((product) => selectedIds.has(product.id)).length
     : 0;
-  const hasActiveFilters = Boolean(
+  const activeKeyword = params.query.trim();
+  const hasStructuralFilters = Boolean(
     params.category ||
       params.subcategory ||
-      params.query.trim() ||
       params.materials.length ||
       params.crafts.length ||
       params.weights.length ||
       params.sizes.length,
   );
+  const hasActiveFilters = Boolean(activeKeyword || hasStructuralFilters);
   const selectedCategoryNames = useMemo(
     () => namesForCategoryIds(categories, categoryIds),
     [categories, categoryIds],
@@ -607,7 +608,7 @@ export default function Catalog({
   const showingVirtualWorks = virtualCatalog !== null && displayTotal > 0;
   const showCatalogLoading = apiLoading
     && !virtualCatalog
-    && (!catalogResponseCurrent || mergedProducts.length === 0);
+    && mergedProducts.length === 0;
   const showCatalogTools = apiLoading
     || categories.length > 0
     || displayTotal > 0
@@ -1119,7 +1120,7 @@ export default function Catalog({
             products={suggestionProducts}
             categories={displayCategories}
             materials={materialOptions}
-            onSearch={(value) => update("query", value)}
+            onSearch={(value) => update("query", value, { replace: true })}
           />
         </div>
         {showCatalogTools ? (
@@ -1380,9 +1381,24 @@ export default function Catalog({
           {hasActiveFilters ? (
             <>
               <p style={{ fontSize: 15, color: T.txt, marginBottom: 8 }}>
-                没有符合当前筛选的作品
+                {activeKeyword && !hasStructuralFilters
+                  ? `没有找到「${activeKeyword}」`
+                  : "没有符合当前条件的作品"}
               </p>
+              {activeKeyword && !hasStructuralFilters ? (
+                <p
+                  style={{
+                    fontSize: 13,
+                    color: T.sec,
+                    marginBottom: 20,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  修改上方关键词，作品会随输入更新。
+                </p>
+              ) : null}
               <button
+                type="button"
                 className="catalog-recovery-target"
                 onClick={clearAll}
                 style={{
@@ -1394,7 +1410,7 @@ export default function Catalog({
                   color: T.txt,
                 }}
               >
-                清除筛选
+                查看全部作品
               </button>
             </>
           ) : (

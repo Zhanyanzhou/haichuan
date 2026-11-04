@@ -6,6 +6,7 @@ import type {
   DynamicTemplateSlotDefinition,
   TemplateInstanceLayoutOverride,
   TemplateInstanceLayoutOverridesByNodeId,
+  TemplateInstancePageSettings,
   TemplateBreakpoint,
 } from "./generated/templateDefinition.generated";
 import {
@@ -15,6 +16,8 @@ import {
 import { getEffectiveDynamicTemplateInstanceEditPolicy } from "./nodeRegistry";
 import { getEffectiveTemplateRootRules } from "./templateDimensions";
 import { resolveTemplateNodeRules, resolveTemplateSlotRules } from "./responsive";
+import { sectionCopyHiddenByDefault } from "./sectionCopyVisibility";
+import { hasTemplateImageContent } from "./imageContent";
 
 export interface DynamicTemplateRenderPlanNode {
   nodeId: string;
@@ -27,6 +30,8 @@ export interface DynamicTemplateRenderPlanNode {
   rules: DynamicTemplateResponsiveRules;
   props: TemplateDefinitionV2["nodes"][string]["props"];
   hidden: boolean;
+  /** D.47：页面选的图片位置与模板原样相反时，桌面两栏按反向排列；DOM 顺序不变。 */
+  mirrored?: true;
   layoutOverride?: TemplateInstanceLayoutOverride;
   instanceEditPolicy?: NonNullable<ReturnType<typeof getEffectiveDynamicTemplateInstanceEditPolicy>>;
   children: DynamicTemplateRenderPlanNode[];
@@ -52,6 +57,8 @@ export interface CompileDynamicTemplateRenderPlanOptions {
   contentBySlotId?: Record<string, unknown>;
   hiddenSlotIds?: readonly string[];
   layoutOverridesByNodeId?: TemplateInstanceLayoutOverridesByNodeId;
+  /** 页面实例的模板设置；只有模板声明过的项才生效。 */
+  pageSettings?: TemplateInstancePageSettings;
   /** 编辑器与预览可保留空槽位占位；公开渲染必须保持 false。 */
   showEmptySlots?: boolean;
   /**
@@ -60,7 +67,7 @@ export interface CompileDynamicTemplateRenderPlanOptions {
    */
   publicSurface?: {
     omitDefaultImages: true;
-    /** Schema 3 公开面只认页面实例自己的值；模板默认内容仅供设计与后台预览。 */
+    /** 页面画布和 Schema 3 公开面只认页面自己填写的值；模板示例只留在模板设计画布。 */
     omitDefaultContent?: true;
     suppressedSemanticRoles?: readonly string[];
   };
@@ -99,15 +106,21 @@ function hasMeaningfulTemplateContent(value: unknown): boolean {
   return false;
 }
 
+function actionLabel(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const label = (value as { label?: unknown }).label;
+  return typeof label === "string" ? label.trim() : "";
+}
+
 function hasMeaningfulSlotContent(
   slot: DynamicTemplateSlotDefinition,
   value: unknown,
+  breakpoint: TemplateBreakpoint,
 ): boolean {
+  // 跳转类型、空链接和按钮底色都不是文案。只剩这些时，页面画布要收起按钮壳。
+  if (slot.type === "button" || slot.type === "link") return actionLabel(value).length > 0;
   if (slot.type !== "image") return hasMeaningfulTemplateContent(value);
-  if (typeof value === "string") return value.trim().length > 0;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const src = (value as Record<string, unknown>).src;
-  return typeof src === "string" && src.trim().length > 0;
+  return hasTemplateImageContent(value, breakpoint);
 }
 
 export function compileDynamicTemplateRenderPlan(
@@ -120,8 +133,17 @@ export function compileDynamicTemplateRenderPlan(
   }
   const definition = validation.definition;
   const breakpoint = options.breakpoint ?? options.device;
+  const sectionRole = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
   const hiddenSlotIds = new Set(options.hiddenSlotIds ?? []);
   const instanceContent = options.contentBySlotId ?? {};
+  const mediaSideDeclaration = definition.metadata.pageSettings?.mediaSide;
+  const requestedMediaSide = options.pageSettings?.mediaSide;
+  const mirroredNodeId = breakpoint !== "mobile"
+    && mediaSideDeclaration
+    && requestedMediaSide
+    && requestedMediaSide !== mediaSideDeclaration.authoredSide
+    ? mediaSideDeclaration.targetNodeId
+    : undefined;
 
   const compileNode = (nodeId: string): DynamicTemplateRenderPlanNode => {
     const node = definition.nodes[nodeId];
@@ -140,13 +162,13 @@ export function compileDynamicTemplateRenderPlan(
       ? (hasInstanceContent ? instanceValue : undefined)
       : slot && hasInstanceContent
         && slot.emptyPolicy === "use-default"
-        && !hasMeaningfulSlotContent(slot, instanceValue)
+        && !hasMeaningfulSlotContent(slot, instanceValue, breakpoint)
         ? defaultValue
         : hasInstanceContent
           ? instanceValue
           : defaultValue;
     if (slot && options.publicSurface?.omitDefaultImages && slot.type === "image") {
-      content = hasInstanceContent && hasMeaningfulSlotContent(slot, instanceValue)
+      content = hasInstanceContent && hasMeaningfulSlotContent(slot, instanceValue, breakpoint)
         ? instanceValue
         : undefined;
     }
@@ -155,7 +177,7 @@ export function compileDynamicTemplateRenderPlan(
     }
     const emptySlotHidden = Boolean(slot
       && !options.showEmptySlots
-      && !hasMeaningfulSlotContent(slot, content));
+      && !hasMeaningfulSlotContent(slot, content, breakpoint));
     const policy = getEffectiveDynamicTemplateInstanceEditPolicy(node, slot);
     const instanceOverrides = options.layoutOverridesByNodeId?.[nodeId];
     const rawLayoutOverride = definition.schemaVersion >= 2
@@ -202,6 +224,9 @@ export function compileDynamicTemplateRenderPlan(
         && typeof rawLayoutOverride.marginBottomPx === "number" && Number.isFinite(rawLayoutOverride.marginBottomPx)
         ? { marginBottomPx: Math.max(0, Math.min(policy.maxSpacingPx ?? 120, rawLayoutOverride.marginBottomPx)) }
         : {}),
+      ...(slot && ["heading", "text", "richText", "badge"].includes(slot.type) && rawLayoutOverride.visuallyCollapsed === true
+        ? { visuallyCollapsed: true }
+        : {}),
     } : undefined;
     return {
       nodeId,
@@ -218,7 +243,11 @@ export function compileDynamicTemplateRenderPlan(
       props: node.props,
       hidden: node.hidden || Boolean(rules.hidden) || rules.display === "none"
         || Boolean(node.slotId && hiddenSlotIds.has(node.slotId))
-        || emptySlotHidden,
+        || emptySlotHidden
+        || sectionCopyHiddenByDefault(sectionRole, slot, rules.hidden),
+      ...(nodeId === mirroredNodeId && rules.display === "flex" && (rules.direction ?? "row") === "row"
+        ? { mirrored: true as const }
+        : {}),
       ...(layoutOverride && Object.keys(layoutOverride).length > 0 ? { layoutOverride } : {}),
       ...(policy ? { instanceEditPolicy: policy } : {}),
       children: node.childIds.map(compileNode),

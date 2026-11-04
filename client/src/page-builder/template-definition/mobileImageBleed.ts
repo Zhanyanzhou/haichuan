@@ -102,7 +102,7 @@ export function mobileBleedBox(
 
 /**
  * 自由叠放的大图如果只差一圈深色边，手机上铺满所在画布。
- * 故意留小的主体不改。
+ * 主图只要够宽，就先拉满宽度，避免右侧露出一条深色边；故意留小的主体不改。
  */
 export function mobileFreeFrameStyle(
   placement: { x: number; y: number; width: number; height: number },
@@ -111,8 +111,14 @@ export function mobileFreeFrameStyle(
 ): CSSProperties | undefined {
   if (!bleed) return undefined;
   const nearlyFull = placement.width >= 0.7 && placement.height >= 0.7 && placement.x <= 0.2 && placement.y <= 0.2;
-  if (semanticRole !== "backgroundImage" && !nearlyFull) return undefined;
-  return { left: 0, top: 0, width: "100%", height: "100%", margin: 0, borderRadius: 0 };
+  const wideHero = (semanticRole === "heroImage" || semanticRole === "backgroundImage")
+    && placement.width >= 0.6
+    && placement.x <= 0.2;
+  if (semanticRole !== "backgroundImage" && !nearlyFull && !wideHero) return undefined;
+  if (nearlyFull || semanticRole === "backgroundImage") {
+    return { left: 0, top: 0, width: "100%", height: "100%", margin: 0, borderRadius: 0 };
+  }
+  return { left: 0, width: "100%", maxWidth: "none", marginLeft: 0, marginRight: 0 };
 }
 
 export function subtreeHasMobileBleedImage(

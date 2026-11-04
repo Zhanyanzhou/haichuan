@@ -2,13 +2,16 @@ import { useState } from "react";
 import TextField from "../inspector/controls/TextField";
 import NumberField from "../inspector/controls/NumberField";
 import SwitchField from "../inspector/controls/SwitchField";
-import MediaPickerField, { mediaSpecFromRecommendation } from "../fields/MediaPickerField";
+import MediaPickerField, { mediaSpecFromRecommendation, mediaSpecMatchingFrame } from "../fields/MediaPickerField";
 import {
   getDynamicTemplateStructureLockOwnerId,
   type TemplateDefinitionV2,
 } from "../template-definition";
 import { resetTemplateNodeRule, resetTemplateSlotRule, resolveTemplateNodeRules, resolveTemplateSlotRules, setTemplateNodeRule, setTemplateSlotRule, type TemplateBreakpoint } from "../template-definition/responsive";
-import { objectPositionToPercent, percentToExactObjectPosition } from "../template-definition/imagePosition";
+import { objectPositionToPercent } from "../template-definition/imagePosition";
+import { describeEffectiveImageFrames } from "../template-definition/mobileWorkGrid";
+import { isSafeTemplateMediaUrl } from "../template-definition/validateTemplateDefinition";
+import ActionCopyHint from "../template-definition/ActionCopyHint";
 import { useTemplateEditorSession } from "./templateEditorSession";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -36,6 +39,25 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
   const record = isRecord(value) ? value : {};
   const text = typeof value === "string" ? value : "";
   const image = slot?.type === "image";
+  const desktopSrc = typeof value === "string" ? value : typeof record.src === "string" ? record.src : "";
+  const mobileSrc = typeof record.mobileSrc === "string" ? record.mobileSrc : "";
+  const imageAlt = typeof record.alt === "string" ? record.alt : "";
+  const sectionRole = definition.metadata.sectionRole ?? definition.templateRecipe?.sectionRole;
+  const imageFrames = image && slot ? describeEffectiveImageFrames({
+    sectionRole,
+    semanticRole: slot.semanticRole,
+    geometryPolicy: definition.metadata.geometryPolicy,
+    desktopRatioLabel: slot.desktopRules.aspectRatio,
+    mobileRatioLabel: slot.mobileRules.aspectRatio,
+    hasMobileAsset: isSafeTemplateMediaUrl(mobileSrc),
+  }) : null;
+  const heroSlot = Boolean(slot)
+    && sectionRole === "page-hero"
+    && (slot?.semanticRole === "backgroundImage" || slot?.semanticRole === "heroImage");
+  const heroPortraitUpload = breakpoint === "mobile"
+    && heroSlot
+    && (imageFrames?.firstHero === "9:16" || imageFrames?.declaredMobile === "9:16" || imageFrames?.mobile === "9:16")
+    && imageFrames?.desktop !== "9:16";
   const action = slot?.type === "button" || slot?.type === "link";
   const textSlot = slot && ["heading", "text", "richText", "badge", "icon", "button", "link"].includes(slot.type);
   const hasMobileBackgroundImageOverride = breakpoint === "mobile" && node.responsive.mobile.backgroundImage !== undefined;
@@ -45,6 +67,16 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
     setError(result.ok ? null : result.message);
   };
   const content = (nextValue: unknown) => change("修改槽位默认内容", (next) => { if (slot) next.defaultContent[slot.slotId] = nextValue; });
+  const writeImage = (patch: { src?: string; mobileSrc?: string; alt?: string }) => {
+    const src = (patch.src ?? desktopSrc).trim();
+    const phone = (patch.mobileSrc ?? mobileSrc).trim();
+    const alt = patch.alt ?? imageAlt;
+    if (!src && !phone && !alt.trim()) {
+      content("");
+      return;
+    }
+    content({ src, alt, ...(phone ? { mobileSrc: phone } : {}) });
+  };
   const nodeStyle = (key: string, nextValue: unknown) => change("修改模板外观", (next) => {
     if (nextValue !== undefined) setTemplateNodeRule(next, nodeId, breakpoint, key, nextValue);
     else if (breakpoint === "desktop") delete (next.nodes[nodeId].responsive.desktop as unknown as Record<string, unknown>)[key];
@@ -57,31 +89,60 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
     else resetTemplateSlotRule(next, slot.slotId, breakpoint, key);
   });
   const colorField = (label: string, current: string | undefined, onChange: (color: string | undefined) => void) => (
-    <TextField transactional label={label} value={current ?? ""} placeholder="继承预设" readOnly={locked} validate={colorError} onChange={(next) => onChange(next || undefined)} />
+    <div className="template-native__brand-colors">
+      <TextField transactional label={label} value={current ?? ""} placeholder="继承预设" readOnly={locked} validate={colorError} onChange={(next) => onChange(next || undefined)} />
+      <div role="group" aria-label={`${label}品牌色`}>
+        {["#181A1B", "#5F6568", "#FFFFFF", "#F7F8F8", "#111315"].map((token) => (
+          <button key={token} type="button" aria-label={token} disabled={locked} aria-pressed={current?.toUpperCase() === token} onClick={() => onChange(token)} style={{ background: token }} />
+        ))}
+      </div>
+    </div>
   );
   return <>
     {error ? <p role="alert">{error}</p> : null}
-    {(section === "all" || section === "content") && slot && (image || textSlot) ? <section className="homepage-editor__inspector-section" aria-label="模板默认内容" data-template-default-content={slot.slotId}>
-      <div className="homepage-editor__inspector-section-head"><strong>模板默认内容</strong><span>所有设备共享 · 随模板保存</span></div>
+    {(section === "all" || section === "content") && slot && (image || textSlot) ? <details className="homepage-editor__inspector-section template-native__default-content" aria-label="模板默认内容" data-template-default-content={slot.slotId} data-template-default-content-kind={image ? "image" : "text"} open={image ? undefined : true}
+      onToggle={(event) => { if (!event.currentTarget.open && event.currentTarget.querySelector('[aria-invalid="true"]')) event.currentTarget.open = true; }}>
+      <summary>{image ? (heroPortraitUpload ? "手机默认图片" : "模板默认图片") : "模板默认文案"}<small>{image
+        ? (heroPortraitUpload
+          ? (imageFrames?.mobile && imageFrames.mobile !== "9:16"
+            ? "当前画面沿用桌面横图。选一张 9:16 后，手机单独使用竖图"
+            : "按 9:16 上传，桌面 16:9 的图留在桌面端")
+          : "桌面和手机共用这张图。只有首页首屏竖图会单独存成手机图")
+        : "所有设备共享 · 随模板保存"}</small></summary>
       <div className="homepage-editor__inspector-section-body">
         {image ? <>
-          <MediaPickerField fieldKey={`default:${slot.slotId}`} value={typeof value === "string" ? value : typeof record.src === "string" ? record.src : ""}
-            readOnly={locked} placeholder="选择默认图片" spec={mediaSpecFromRecommendation(slot.validation.recommendedWidth, slot.validation.recommendedHeight, slotRules?.aspectRatio, slot.label)}
-            previewAspectRatio={slotRules?.aspectRatio?.replace(":", " / ")} previewFit={slotRules?.objectFit}
+          <MediaPickerField
+            fieldKey={`default:${slot.slotId}${heroPortraitUpload ? ":mobile" : ""}`}
+            device={breakpoint === "mobile" ? "mobile" : "desktop"}
+            value={heroPortraitUpload ? mobileSrc : desktopSrc}
+            fallbackSrc={heroPortraitUpload ? desktopSrc : undefined}
+            readOnly={locked}
+            placeholder={heroPortraitUpload ? "选择 9:16 手机图" : "选择默认图片"}
+            spec={heroPortraitUpload
+              ? mediaSpecMatchingFrame(slot.validation.recommendedWidth, slot.validation.recommendedHeight, "9:16", slot.label)
+              : mediaSpecFromRecommendation(slot.validation.recommendedWidth, slot.validation.recommendedHeight, slotRules?.aspectRatio, slot.label)}
+            previewAspectRatio={heroPortraitUpload ? "9 / 16" : slotRules?.aspectRatio?.replace(":", " / ")}
+            previewFit={slotRules?.objectFit}
             previewFocus={objectPositionToPercent(slotRules?.objectPosition)}
-            onFocusChange={(slotRules?.objectFit ?? "cover") === "fill" ? undefined : (focus) => textStyle("objectPosition", percentToExactObjectPosition(focus))}
-            onChange={(src) => content(src.trim()
-              ? { src, alt: typeof record.alt === "string" ? record.alt : "" }
-              : "")} />
-          <TextField transactional label="默认图片说明" value={typeof record.alt === "string" ? record.alt : ""} maxLength={160} readOnly={locked}
-            onChange={(alt) => content({ src: typeof value === "string" ? value : typeof record.src === "string" ? record.src : "", alt })} />
+            frameLabel={heroPortraitUpload ? "9:16" : slotRules?.aspectRatio}
+            onChange={(src) => writeImage(heroPortraitUpload ? { mobileSrc: src } : { src })}
+          />
+          {imageFrames?.note ? <p>{imageFrames.note}</p> : null}
+          <TextField transactional label="默认图片说明" value={imageAlt} maxLength={160} readOnly={locked}
+            onChange={(alt) => writeImage({ alt })} />
         </> : <TextField transactional key={slot.slotId} label={action ? "默认按钮文字" : "默认文字"}
           value={action ? typeof record.label === "string" ? record.label : "" : text}
           rows={action || slot.type === "heading" ? undefined : 3} maxLength={slot.validation.maxLength ?? 100000} readOnly={locked}
           onChange={(next) => content(action ? { ...record, label: next } : next)} />}
+        {action && (slot.type === "button" || slot.type === "link") ? (
+          <ActionCopyHint
+            slotType={slot.type}
+            label={typeof record.label === "string" ? record.label : ""}
+          />
+        ) : null}
         {onOpenPageScope ? <button type="button" className="template-native__page-scope-link" onClick={onOpenPageScope}>设置页面开放范围</button> : null}
       </div>
-    </section> : null}
+    </details> : null}
     {(() => {
       const showTextColor = Boolean(textSlot && ["all", "text-style", "text-color"].includes(section));
       const showTextFont = Boolean(textSlot && ["all", "text-style", "text-font"].includes(section));
@@ -98,7 +159,14 @@ export default function TemplateDefaultContentControls({ nodeId, breakpoint: ove
         {showAppearance ? <>
         {colorField(action ? "按钮背景颜色" : "背景颜色", rules.backgroundColor, (color) => nodeStyle("backgroundColor", color))}
         {!slot ? <>
-          <MediaPickerField fieldKey={`background:${nodeId}`} value={rules.backgroundImage ?? ""} readOnly={locked} placeholder="选择背景图片" onChange={(src) => nodeStyle("backgroundImage", src)} />
+          <MediaPickerField
+            fieldKey={`background:${nodeId}`}
+            device={breakpoint === "mobile" ? "mobile" : "desktop"}
+            value={rules.backgroundImage ?? ""}
+            readOnly={locked}
+            placeholder="选择背景图片"
+            onChange={(src) => nodeStyle("backgroundImage", src)}
+          />
           {hasMobileBackgroundImageOverride ? <button type="button" disabled={locked} onClick={() => nodeStyle("backgroundImage", undefined)}>背景图片恢复继承</button> : null}
           <SwitchField label="背景渐变" value={Boolean(rules.backgroundGradient)} disabled={locked} onChange={(enabled) => nodeStyle("backgroundGradient", enabled ? { from: rules.backgroundColor ?? "#FFFFFF", to: "#ECEEEF", angle: 135 } : null)} />
           {rules.backgroundGradient ? <>

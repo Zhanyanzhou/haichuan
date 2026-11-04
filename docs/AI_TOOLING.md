@@ -28,7 +28,7 @@
 用简体中文汇报：实际改动、验证结果、未验证的数据库和发布边界。
 ```
 
-日常顺序是：先让 AI 说明准备改哪些文件并对照现状，确认后再实现并在浏览器里验收。只在想保留这批改动时再说“提交”。不要在同一句里同时要求大改文档、改合同、改数据库和发布上线。
+日常顺序是：先让 AI 对照现状说明目标与影响；已经明确授权的普通实现直接推进并按需在浏览器里验收，检查与评审默认只读。只有触及 `AGENTS.md` 的审批边界或真实信息缺口时才集中确认，不为已授权实现重复设置批准步骤。只在想保留这批改动时再说“提交”；数据库和发布操作仍分别核对授权。
 
 ## 1. 共同治理，不按模型强弱分权
 
@@ -53,6 +53,7 @@
 | 入口 | 适配文件 | 项目级 MCP 配置 | 已发现 MCP | 说明 |
 | --- | --- | --- | --- | --- |
 | Codex（OpenAI） | `AGENTS.md` | `.codex/config.toml` | playwright、chrome-devtools、context7 | Codex 的项目指令以 `AGENTS.md` 为入口；按 `WORKFLOW.md` 最小启动，只读取任务相关规则。店铺装修与模板的双端、分节和预览不在本文件或 `.codex/` 复述，从 `AGENTS.md` 进入 `docs/page-builder/store-decoration.md` 第 4 节和 `template-creation-rules.md` 第 3.1 节。 |
+| Cursor | `AGENTS.md`、`.cursor/rules/project-context.mdc` | `.cursor/mcp.json` | context7、playwright、chrome-devtools（独立协议调用通过；Cursor 挂载另验） | 2026-11-04 在 3.24.18 的 Customize 当前工作区技能页确认发现 17 项项目技能，含 `taste-skill`、`luxury-visual`、`figma-design-to-code`、`playwright-testing`；继续共用 `.agents/skills/`，不复制技能。该界面证明可发现，不证明任意会话已触发；新路由的真实执行效果须在后续任务中核验，运行中的会话不自动视为已加载。 |
 | Claude Code | `CLAUDE.md` | `.mcp.json` | playwright、context7 | `.claude/agents/` 有审查代理；仅在当前会话确实提供该能力时使用。chrome-devtools 原经用户级 `~/.claude.json` 挂载（历史会话高频使用），2026-08-19 用户级清理后**项目级挂载待批准**（见 DECISIONS A.11）。 |
 | VS Code 智能体 | `.github/copilot-instructions.md` | `.vscode/mcp.json` | playwright、context7 | 是否加载该指令、实际模型和可用 MCP 取决于用户安装的扩展与当前会话，需以运行界面为准。2026-08-19 起 github/figma/tavily/chrome-devtools/prisma 移除（VS Code 会话全量注入 MCP schema，多服务器是上下文开销大头；figma/tavily/github 历史引用各仅 3 处，近乎未用）；恢复须按第 3 节流程批准。 |
 
@@ -70,11 +71,12 @@
 
 ## 3. MCP 供应链规则
 
-三个 MCP 配置文件格式独立，禁止机械复制：
+各客户端的 MCP 配置入口独立，按对应格式适配，禁止机械复制：
 
 - VS Code：`.vscode/mcp.json`，`servers` 格式；
 - Claude Code：`.mcp.json`，`mcpServers` 格式；
 - Codex：`.codex/config.toml`，`mcp_servers` 格式。
+- Cursor：`.cursor/mcp.json`，`mcpServers` 格式；服务器命令与能力仍需在 Cursor 中单独验证。
 
 配置当前使用 `npx -y` 并锁定精确包版本。版本锁定只减少隐式漂移，不代表已被每个工具成功验证。
 
@@ -97,6 +99,20 @@
 - 回退时恢复变更前已核验的精确固定版本，或在对应工具配置中禁用单一 MCP；不得回退到 `@latest` 或无版本后缀重新引入隐式漂移。回退不修改应用依赖、锁文件或业务代码。
 
 `.vscode/mcp.json` 的 Prisma 配置（曾与项目文档存在版本冲突）已于 2026-08-19 移除；数据库结构一律以直接阅读 `server/prisma/schema.prisma` 为准。
+
+### 2026-11-04 Cursor 接入记录
+
+- 用户先授权为 Cursor 接入 Context7、核对内置浏览器；同日随后明确同意安装 Playwright MCP、只读查询 GitHub 的适用工具，并进一步明确同意安装 Chrome DevTools MCP 以检查性能、网络及控制台。
+- `.cursor/mcp.json` 使用 Windows 的 `cmd.exe /d /c npx.cmd -y @upstash/context7-mcp@4.0.4`，显式包装 `.cmd` 启动，沿用其他客户端已锁定的精确版本，不改应用依赖或 lockfile。npm 注册表核对来源为 `github.com/upstash/context7`，Node 要求 `>=20.18.1`；本次验证运行于 Node `22.23.2`。
+- 可访问的数据域为 Context7 的库文档服务。仅用公开 React 问题测试，未配置新凭据；本次未触发登录。未来若需要认证、付费或扩大数据域，仍按现有授权边界处理。
+- CLI 帮助、MCP 初始化、工具列表及 `resolve-library-id`、`query-docs` 两次真实调用均通过。该独立协议验证不等于 Cursor 当前运行中的 Agent 已调用；客户端发现及挂载结果另记，不重启或打断正在运行的其他任务。
+- 内置浏览器已只读打开本地首页；其手机视口和 Agent 工具调用尚未验收。用户明确要求先完成配置、界面验证稍后进行，因此保留当前窗口和模板草稿，不再操作 UI。三个 MCP 的 Cursor 界面挂载及新会话工具调用均待验证，不能用独立协议调用替代。
+- Playwright 同样通过 `cmd.exe /d /c npx.cmd` 启动，使用同一官方 npm 来源的 `@playwright/mcp@0.0.79`，Node 要求 `>=18`，注册表仓库为 `github.com/microsoft/playwright-mcp`。使用已安装 Edge（`--browser msedge`）、内存隔离会话（`--isolated`）与无界面模式（`--headless`），不连接用户现有 Edge 标签、登录态或草稿；输出目录为工作区下 `.codex-tmp/cursor-playwright`。未增加 Cookie 导入、权限授予、文件系统放宽或自动批准参数。
+- Node `22.23.2` 下，从 Cursor 配置读取命令启动：MCP 初始化、24 项工具发现、本地首页导航、`browser_resize`、只读尺寸查询、截图和关闭浏览器均通过。实测视口为 `1440×900` 与 `390×844`，截图已查看；验证记录在 `.codex-tmp/cursor-playwright/verification.json`。这只证明桌面/手机宽度的工具能力，不证明触屏/UA 仿真、真机、模板视觉合格或保存发布链路通过。
+- Chrome DevTools 使用 `cmd.exe /d /c npx.cmd -y chrome-devtools-mcp@1.12.0`，GitHub 官方稳定发布与 npm 来源均已核对，Node 要求 `^20.19.0 || ^22.12.0 || >=23`。启用 `--headless --isolated`，自动发现本机 Chrome，不使用 `autoConnect`、现有调试端口、用户数据目录或登录态。关闭使用统计（`--no-usage-statistics`）和性能网址向 CrUX 外发（`--no-performance-crux`），启用敏感网络头脱敏（`--redactNetworkHeaders`），文件工具工作目录配置为 `.codex-tmp/cursor-devtools`。
+- Node `22.23.2` 下，按该配置的原始命令启动：版本 `1.12.0`、32 项工具发现、本地首页导航、只读页面查询、控制台读取、网络列表、截图及自动停止的性能 Trace 录制均通过。性能工具仅重载本次独立创建的公开首页。截图和约 6.9 MB 的压缩 Trace 位于 `.codex-tmp/cursor-devtools/`，摘要为 `verification.json`；这是开发环境的独立 MCP 能力验证，不是 Cursor Agent 已调用、网站性能合格、生产监测或完整业务验收。
+- GitHub 选型中的 Chrome DevTools MCP 已按用户后续授权接入；GitHub MCP 仍留待 Cursor 的 PR/CI 集成需求。`@axe-core/playwright` 已在项目依赖和多项测试中使用，复用现有检查，不重复安装；泛用设计 Skill 不直接覆盖现有品牌与 UI 规范。
+- 回退时可在 Cursor 的 Customize 中分别禁用 `context7`、`playwright` 或 `chrome-devtools`；尚无此前 Cursor 版本，不以 `@latest` 作为回退，不改其他客户端的 MCP 或应用依赖锁文件。
 
 ## 4. 用户级配置与数据边界
 

@@ -7,6 +7,7 @@ import {
   catalogRefreshFailed,
   catalogRefreshSucceeded,
   describePublishedTemplateAvailability,
+  adoptionReportForPublishedVersion,
   deriveTemplateProductionReadiness,
   markPublishReviewChanged,
   openPublishReview,
@@ -997,6 +998,24 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
       kind: "refresh-template-catalog",
       checksum: CHECKSUM_B,
     });
+    const recovered = publishedVersionVerificationMatched(uncertain.state, {
+      operation: publishing.operation,
+      templateId: "template-a",
+      version: 3,
+      checksum: CHECKSUM_B,
+      outcome: "already-published",
+      live: live(),
+      pageAdoption: adoptionReportForPublishedVersion(3, undefined),
+    });
+    expect(recovered.state).toMatchObject({
+      status: "published",
+      published: { pageAdoption: "unreadable" },
+    });
+    expect(describePublishedTemplateAvailability(
+      3,
+      "fresh",
+      recovered.state.status === "published" ? recovered.state.published.pageAdoption : undefined,
+    )).toContain("沿用明细暂时读不出来");
   });
 
   test("发布成功文案按版本区分页面影响", () => {
@@ -1005,13 +1024,33 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
     expect(describePublishedTemplateAvailability(1, "refreshing"))
       .toBe("模板 v1 已发布；正在核对页面装修目录。可在页面装修中选用，不会改任何现有页面。");
     expect(describePublishedTemplateAvailability(2, "fresh"))
-      .toBe("模板 v2 已发布；目录已确认可用。正在使用它的页面草稿会自动沿用这个版本，页面里已填写的内容会保留。客户前台在发布页面后更新。");
+      .toBe("模板 v2 已发布；目录已确认可用。能保留内容的页面草稿、语言草稿和装修方案会自动沿用，已填写的内容会保留。客户前台在发布页面后更新。");
+    expect(describePublishedTemplateAvailability(2, "fresh", {
+      skipped: [{
+        kind: "page-draft",
+        objectId: 82,
+        pageKey: "about",
+        reasons: [{ code: "SLOT_NOT_LOSSLESS" }],
+      }],
+    })).toBe("模板 v2 已发布；目录已确认可用。能保留内容的页面草稿、语言草稿和装修方案会自动沿用，已填写的内容会保留。客户前台在发布页面后更新。 没能沿用：页面草稿 about（槽位无法无损保留）。这些对象仍是旧版本，客户前台仍等发布页面。");
+    expect(describePublishedTemplateAvailability(2, "fresh", "unreadable"))
+      .toContain("沿用明细暂时读不出来");
+    expect(adoptionReportForPublishedVersion(2, undefined)).toBe("unreadable");
+    expect(adoptionReportForPublishedVersion(2, { skipped: [] })).toEqual({ skipped: [] });
+    expect(describePublishedTemplateAvailability(2, "fresh", {
+      skipped: [{
+        kind: "scheme",
+        objectId: 12,
+        pageKey: "home",
+        reasons: [{ code: "LAYOUT_OVERRIDE_INVALID" }],
+      }],
+    })).toContain("装修方案 home #12");
   });
 
-  test("点击添加按空画布、选中项和页尾决定落点", () => {
+  test("点击添加统一追加末尾，指定拖拽落点时保留落点", () => {
     expect(resolvePublishedTemplateInsertionIndex(0, null)).toBe(0);
     expect(resolvePublishedTemplateInsertionIndex(3, null)).toBe(3);
-    expect(resolvePublishedTemplateInsertionIndex(3, 1)).toBe(2);
+    expect(resolvePublishedTemplateInsertionIndex(3, 1)).toBe(3);
     expect(resolvePublishedTemplateInsertionIndex(3, 2)).toBe(3);
     expect(resolvePublishedTemplateInsertionIndex(3, 9)).toBe(3);
     expect(resolvePublishedTemplateInsertionIndex(3, 1, 0)).toBe(0);
@@ -1030,7 +1069,7 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
       version: 1,
       pageHasBlocks: true,
       hasSelection: true,
-    }).title).toBe("添加到所选模块之后");
+    }).title).toBe("添加到页面末尾");
     expect(describePageTemplateAddAction({
       name: "工艺区",
       version: 1,
@@ -1058,7 +1097,7 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
       pageHasBlocks: true,
       hasSelection: false,
     })).toMatchObject({
-      liveStatus: "刚发布的“工艺区”v2 已定位到模板组件库。正在使用它的页面草稿会自动沿用这一版。请拖到目标位置，或添加到页面末尾。",
+      liveStatus: "刚发布的“工艺区”v2 已定位到模板组件库。能保留内容的页面草稿会自动沿用这一版。客户前台仍等发布页面。请拖到目标位置，或添加到页面末尾。",
       focusTarget: "none",
     });
   });

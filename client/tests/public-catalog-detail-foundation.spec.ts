@@ -823,7 +823,8 @@ for (const viewport of [
     await expectNoHorizontalOverflow(page);
 
     await page.goto("/contact");
-    await expect(page.getByRole("heading", { name: "联系海川", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "联系海川", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "微信咨询", exact: true })).toBeVisible();
     await expect.poll(() => page.locator(".contact-methods__grid").evaluate((node) =>
       getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length,
     )).toBe(2);
@@ -1173,7 +1174,7 @@ test("Catalog empty 与 no-results 分离", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "素面平安扣" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "光圈戒指" })).toHaveCount(0);
   await page.goto("/catalog?query=%E4%B8%8D%E5%AD%98%E5%9C%A8%E7%9A%84%E6%AC%BE%E5%BC%8F");
-  await expect(page.getByText("没有符合当前筛选的作品")).toBeVisible();
+  await expect(page.getByText("没有找到「不存在的款式」")).toBeVisible();
   await expect(page.getByText("以下为演示款式，只用于查看选款版式。它们不是在售作品，也不代表库存、价格或证书。")).toHaveCount(0);
   await page.goto("/catalog?category=1");
   await expect(page.getByRole("heading", { name: "光圈戒指" })).toBeVisible();
@@ -1220,8 +1221,9 @@ test("Catalog 有数据但关键词无命中时显示 no-results", async ({ page
   await page.setViewportSize({ width: 390, height: 844 });
   const writes = await mockCatalogDetail(page, { products: fiveModes });
   await page.goto("/catalog?query=%E6%97%A0%E7%BB%93%E6%9E%9C");
-  await expect(page.getByText("没有符合当前筛选的作品")).toBeVisible();
-  const clearFilters = page.getByRole("button", { name: "清除筛选" });
+  await expect(page.getByText("没有找到「无结果」")).toBeVisible();
+  await expect(page.getByText("修改上方关键词，作品会随输入更新。")).toBeVisible();
+  const clearFilters = page.getByRole("button", { name: "查看全部作品" });
   await expect(clearFilters).toBeVisible();
   const clearFiltersBox = await clearFilters.boundingBox();
   expect(clearFiltersBox).not.toBeNull();
@@ -1242,7 +1244,7 @@ test("Catalog 清除筛选会原子移除全部 URL 条件并恢复作品", asyn
   );
 
   await page.locator(".catalog-state")
-    .getByRole("button", { name: "清除筛选", exact: true })
+    .getByRole("button", { name: "查看全部作品", exact: true })
     .click();
   await expect(page).toHaveURL(/\/catalog$/);
   await expect(page.getByText("构图验证作品 1", { exact: true })).toBeVisible();
@@ -2056,7 +2058,7 @@ test("Catalog 搜索建议与历史记录支持完整键盘和焦点路径", asy
   await expect(input).toBeFocused();
   await expect(input).toHaveValue("构图验证作品 1");
   await expect(page.getByRole("listbox", { name: "搜索建议" })).toHaveCount(0);
-  await expect(page).not.toHaveURL(/query=/);
+  await expect(page).toHaveURL(/query=%E6%9E%84%E5%9B%BE%E9%AA%8C%E8%AF%81%E4%BD%9C%E5%93%81\+1/);
 
   await input.fill("");
   await input.fill("构图验证作品 1");

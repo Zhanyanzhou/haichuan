@@ -6,6 +6,11 @@ export type PageMediaItem = {
   type: "image" | "video";
   name: string;
   createdAt: string;
+  displayWidth?: number;
+  displayHeight?: number;
+  animated?: boolean;
+  metadataStatus?: "measured" | "unknown";
+  mediaRevision?: string;
 };
 
 function isPageMediaItem(value: unknown): value is PageMediaItem {

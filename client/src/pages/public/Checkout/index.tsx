@@ -10,6 +10,7 @@ import CustomerPaymentDialog from "@/components/commerce/CustomerPaymentDialog";
 import { useCustomerAuthStore } from "@/store/customerAuthStore";
 import { getRequestErrorMessage } from "@/services/httpClient";
 import { isStaleSessionResponseError } from "@/services/sessionEpoch";
+import { clampProductTitle } from "@/utils/productTitleLength";
 
 type CartItem = {
   id: number;
@@ -504,7 +505,7 @@ function CheckoutSession({
             <h3 className="font-display text-lg mb-3">订单商品</h3>
             {cartItems.map((item) => (
               <div key={item.id} className="flex justify-between text-sm py-2">
-                <span>{item.product.name} × {item.quantity}</span>
+                <span title={item.product.name}>{clampProductTitle(item.product.name)} × {item.quantity}</span>
                 <span className="text-brand-gold">¥{(getItemPrice(item) * item.quantity).toLocaleString()}</span>
               </div>
             ))}

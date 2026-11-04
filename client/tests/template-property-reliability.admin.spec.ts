@@ -562,7 +562,7 @@ test("目录图只标出当前可见图文槽位，隐藏与撤销同步更新�
   expect(server.writes).toEqual([]);
 });
 
-test("中性目录图不读取真实素材，放大预览保留失效诊断且不产生写入", async ({ page }) => {
+test("目录显示属性面板产品图，样图仍用中性图，放大预览保留失效诊断且不产生写入", async ({ page }) => {
   const { ids, server } = await openGenerated(page);
   const card = page.locator(`[data-template-name="${ids.templateId}"]`);
   const previewShell = card.locator("[data-template-catalog-preview-shell]");
@@ -589,8 +589,7 @@ test("中性目录图不读取真实素材，放大预览保留失效诊断且�
   await expect(previewShell).toHaveAttribute("data-preview-content-status", "ready");
   await expect(card.locator(".template-editor__catalog-preview-issue")).toHaveCount(0);
   const thumbnail = card.locator("iframe[data-template-catalog-viewport]").contentFrame();
-  await expect(thumbnail.locator('img[src*="catalog-structure-media.svg"]').first()).toBeVisible();
-  await expect(thumbnail.locator('img[src*="template-preview.invalid"]')).toHaveCount(0);
+  await expect(thumbnail.locator('img[src*="template-preview.invalid"]')).toHaveCount(1);
   const requestsBeforeDetail = failedMediaRequests;
   await card.getByRole("button", { name: /放大预览/ }).click();
   const detailPreview = page.getByRole("dialog", { name: /放大预览/ });
@@ -614,6 +613,9 @@ test("中性目录图不读取真实素材，放大预览保留失效诊断且�
   }, { slotId: ids.imageSlot });
   await expect(previewShell).toHaveAttribute("data-preview-content-status", "ready");
   await expect(card.locator(".template-editor__catalog-preview-issue")).toHaveCount(0);
+  await expect(thumbnail.locator('img[src*="template-preview.invalid"]')).toHaveCount(0);
+  await expect(thumbnail.locator('img[src*="neutral-template-preview-v1"]')).toHaveCount(0);
+  await expect(thumbnail.locator('img[src*="catalog-structure-media.svg"]').first()).toBeVisible();
   expect(server.writes).toEqual([]);
 });
 

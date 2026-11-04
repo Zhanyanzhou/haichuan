@@ -37,6 +37,37 @@ export interface DynamicTemplateActivationOccurrence {
   fromVersion: number;
 }
 
+export type DynamicTemplateAdoptionObjectKind = "page-draft" | "language-draft" | "scheme";
+
+export type DynamicTemplateAdoptionSkipCode =
+  | "MISSING_INSTANCE_ID"
+  | "DUPLICATE_INSTANCE_ID"
+  | "INVALID_TEMPLATE_VERSION"
+  | "TEMPLATE_VERSION_NEWER_THAN_TARGET"
+  | "MISSING_SOURCE_DEFINITION"
+  | "SLOT_NOT_LOSSLESS"
+  | "NEW_REQUIRED_SLOT"
+  | "HIDDEN_SLOT_INVALID"
+  | "LAYOUT_OVERRIDE_INVALID"
+  | "PAGE_SETTING_LOST"
+  | "INSTANCE_INVALID";
+
+export interface DynamicTemplateAdoptionSkipReason {
+  code: DynamicTemplateAdoptionSkipCode;
+  instanceId: string | null;
+  path: string;
+  slotId?: string;
+  nodeId?: string;
+  fromVersion?: number;
+}
+
+export interface DynamicTemplateAdoptionSkippedObject {
+  kind: DynamicTemplateAdoptionObjectKind;
+  objectId: number;
+  pageKey: string;
+  reasons: DynamicTemplateAdoptionSkipReason[];
+}
+
 export interface DynamicTemplateActivationDocumentPlan {
   documentId: number;
   pageKey: string;
@@ -49,6 +80,8 @@ export interface DynamicTemplateActivationDocumentPlan {
   hadUnpublishedDraft: boolean;
   nextDocumentStatus: "DRAFT" | "PUBLISHED";
   occurrences: DynamicTemplateActivationOccurrence[];
+  draftAdoption: "adopt" | "skip" | "absent";
+  skipReasons: DynamicTemplateAdoptionSkipReason[];
   upgradedDraftPuckData: unknown;
   upgradedPublishedPuckData: unknown | null;
 }
@@ -59,6 +92,8 @@ export interface DynamicTemplateActivationSchemePlan {
   updatedAt: string;
   contentHash: string;
   occurrences: DynamicTemplateActivationOccurrence[];
+  adoption: "adopt" | "skip";
+  skipReasons: DynamicTemplateAdoptionSkipReason[];
   upgradedPuckData: unknown;
 }
 
@@ -77,6 +112,7 @@ export interface DynamicTemplateActivationImpact {
   affectedSchemeInstanceCount: number;
   blockers: string[];
   warnings: string[];
+  skipped: DynamicTemplateAdoptionSkippedObject[];
   documents: DynamicTemplateActivationDocumentPlan[];
   schemes: DynamicTemplateActivationSchemePlan[];
 }
@@ -91,6 +127,7 @@ export interface PlanDynamicTemplateActivationInput {
   definitionsByVersion: Record<number, TemplateDefinitionV2>;
   documents: DynamicTemplateActivationDocumentSnapshot[];
   schemes?: DynamicTemplateActivationSchemeSnapshot[];
+  objectKind?: "page-draft" | "language-draft";
   initialBlockers?: string[];
   additionalImpactState?: unknown;
 }
@@ -246,16 +283,19 @@ function collectBlockArrays(puckData: unknown): Array<{ path: string; blocks: un
 
 function planSnapshot(input: {
   source: DynamicTemplateActivationOccurrence["source"];
-  contextLabel: string;
   puckData: unknown;
   templateId: string;
   targetVersion: number;
   targetDefinition: TemplateDefinitionV2;
   definitionsByVersion: Record<number, TemplateDefinitionV2>;
-  blockers: string[];
-}): { puckData: unknown; occurrences: DynamicTemplateActivationOccurrence[] } {
+}): {
+  puckData: unknown;
+  occurrences: DynamicTemplateActivationOccurrence[];
+  reasons: DynamicTemplateAdoptionSkipReason[];
+} {
   const upgraded = cloneJson(input.puckData);
   const occurrences: DynamicTemplateActivationOccurrence[] = [];
+  const reasons: DynamicTemplateAdoptionSkipReason[] = [];
   const instanceIds = new Set<string>();
   for (const array of collectBlockArrays(upgraded)) {
     array.blocks.forEach((rawBlock, index) => {
@@ -266,26 +306,41 @@ function planSnapshot(input: {
       const instanceId = typeof props.instanceId === "string" ? props.instanceId : "";
       const fromVersion = Number(props.templateVersion);
       occurrences.push({ source: input.source, path, instanceId, fromVersion });
-      const prefix = `${input.contextLabel} ${path}`;
-      if (!instanceId) {
-        input.blockers.push(`${prefix} 缺少稳定 instanceId`);
-      } else if (instanceIds.has(instanceId)) {
-        input.blockers.push(`${prefix} 存在重复 instanceId ${instanceId}`);
-      } else {
-        instanceIds.add(instanceId);
-      }
+      const instanceReasons: DynamicTemplateAdoptionSkipReason[] = [];
+      const push = (
+        code: DynamicTemplateAdoptionSkipCode,
+        detail: { slotId?: string; nodeId?: string; path?: string } = {},
+      ) => {
+        instanceReasons.push({
+          code,
+          instanceId: instanceId || null,
+          path: detail.path ?? path,
+          ...(detail.slotId ? { slotId: detail.slotId } : {}),
+          ...(detail.nodeId ? { nodeId: detail.nodeId } : {}),
+          ...(Number.isInteger(fromVersion) && fromVersion > 0 ? { fromVersion } : {}),
+        });
+      };
+      if (!instanceId) push("MISSING_INSTANCE_ID");
+      else if (instanceIds.has(instanceId)) push("DUPLICATE_INSTANCE_ID");
+      else instanceIds.add(instanceId);
       if (!Number.isInteger(fromVersion) || fromVersion <= 0) {
-        input.blockers.push(`${prefix} 的模板版本无效`);
+        push("INVALID_TEMPLATE_VERSION");
+        reasons.push(...instanceReasons);
         return;
       }
-      if (fromVersion === input.targetVersion) return;
+      if (fromVersion === input.targetVersion) {
+        reasons.push(...instanceReasons);
+        return;
+      }
       if (fromVersion > input.targetVersion) {
-        input.blockers.push(`${prefix} 引用的 v${fromVersion} 高于本次目标 v${input.targetVersion}`);
+        push("TEMPLATE_VERSION_NEWER_THAN_TARGET");
+        reasons.push(...instanceReasons);
         return;
       }
       const currentDefinition = input.definitionsByVersion[fromVersion];
       if (!currentDefinition || currentDefinition.templateId !== input.templateId) {
-        input.blockers.push(`${prefix} 缺少原精确模板版本 v${fromVersion}`);
+        push("MISSING_SOURCE_DEFINITION");
+        reasons.push(...instanceReasons);
         return;
       }
 
@@ -294,12 +349,12 @@ function planSnapshot(input: {
         const currentSlot = currentDefinition.slots[slotId];
         const targetSlot = input.targetDefinition.slots[slotId];
         if (!currentSlot || !targetSlot || currentSlot.type !== targetSlot.type || !targetSlot.editable) {
-          input.blockers.push(`${prefix} 的槽位 ${slotId} 无法无损映射`);
+          push("SLOT_NOT_LOSSLESS", { slotId });
         }
       }
       for (const [slotId, targetSlot] of Object.entries(input.targetDefinition.slots)) {
         if (!currentDefinition.slots[slotId] && targetSlot.required) {
-          input.blockers.push(`${prefix} 的新增必填槽位 ${slotId} 必须由页面实例填写`);
+          push("NEW_REQUIRED_SLOT", { slotId });
         }
       }
 
@@ -309,7 +364,7 @@ function planSnapshot(input: {
       for (const slotId of hidden) {
         const slot = input.targetDefinition.slots[slotId];
         if (!slot?.hideable || slot.required) {
-          input.blockers.push(`${prefix} 的隐藏槽位 ${slotId} 在目标版本失效`);
+          push("HIDDEN_SLOT_INVALID", { slotId });
         }
       }
 
@@ -320,9 +375,15 @@ function planSnapshot(input: {
         const node = input.targetDefinition.nodes[nodeId];
         const slot = node?.slotId ? input.targetDefinition.slots[node.slotId] : undefined;
         if (!node || !slot?.editable) {
-          input.blockers.push(`${prefix} 的构图覆盖 ${nodeId} 在目标版本失效`);
+          push("LAYOUT_OVERRIDE_INVALID", { nodeId });
         }
       }
+
+      // 页面已选的图片位置不能被静默丢弃。目标版本不再开放时，这一整份对象保持旧版（D.47）。
+      const pageSettings = isRecord(props.pageSettings) ? props.pageSettings : undefined;
+      const mediaSideLost = pageSettings?.mediaSide !== undefined
+        && !input.targetDefinition.metadata.pageSettings?.mediaSide;
+      if (mediaSideLost) push("PAGE_SETTING_LOST");
 
       const nextProps = {
         ...props,
@@ -331,18 +392,26 @@ function planSnapshot(input: {
         contentBySlotId: cloneJson(content),
         hiddenSlotIds: cloneJson(hidden),
         layoutOverridesByNodeId: cloneJson(layoutOverrides),
+        ...(pageSettings ? { pageSettings: cloneJson(pageSettings) } : {}),
       };
       const validation = validateDynamicTemplateInstance(nextProps, input.targetDefinition);
-      if (validation.issues.length > 0) {
-        for (const issue of validation.issues) {
-          input.blockers.push(`${prefix}${issue.pathSuffix}：${issue.message}`);
-        }
+      const issues = mediaSideLost
+        ? validation.issues.filter((issue) => issue.pathSuffix !== ".pageSettings.mediaSide")
+        : validation.issues;
+      for (const issue of issues) {
+        push("INSTANCE_INVALID", { path: `${path}${issue.pathSuffix}` });
+      }
+      if (instanceReasons.length > 0) {
+        reasons.push(...instanceReasons);
         return;
       }
       rawBlock.props = nextProps;
     });
   }
-  return { puckData: upgraded, occurrences };
+  if (reasons.length > 0) {
+    return { puckData: cloneJson(input.puckData), occurrences, reasons };
+  }
+  return { puckData: upgraded, occurrences, reasons };
 }
 
 export function planDynamicTemplateActivation(
@@ -389,29 +458,28 @@ export function planDynamicTemplateActivation(
     }
     const draft = planSnapshot({
       source: "draft",
-      contextLabel: `${document.pageKey} draft`,
       puckData: document.draftPuckData,
       templateId: input.templateId,
       targetVersion: input.targetVersion,
       targetDefinition: input.targetDefinition,
       definitionsByVersion: input.definitionsByVersion,
-      blockers,
     });
     const published = document.latestPublishedRevision
       ? planSnapshot({
           source: "published",
-          contextLabel: `${document.pageKey} published`,
           puckData: document.latestPublishedRevision.puckData,
           templateId: input.templateId,
           targetVersion: input.targetVersion,
           targetDefinition: input.targetDefinition,
           definitionsByVersion: input.definitionsByVersion,
-          blockers,
         })
       : null;
     const occurrences = [...draft.occurrences, ...(published?.occurrences ?? [])];
     if (occurrences.length === 0) continue;
     if (!published) warnings.push(`${document.pageKey} 没有已发布版本，仅升级当前草稿`);
+    const draftAdoption = draft.occurrences.length === 0
+      ? "absent"
+      : draft.reasons.length > 0 ? "skip" : "adopt";
     documents.push({
       documentId: document.documentId,
       pageKey: document.pageKey,
@@ -424,6 +492,8 @@ export function planDynamicTemplateActivation(
       hadUnpublishedDraft,
       nextDocumentStatus: hadUnpublishedDraft ? "DRAFT" : "PUBLISHED",
       occurrences,
+      draftAdoption,
+      skipReasons: draft.reasons,
       upgradedDraftPuckData: draft.puckData,
       upgradedPublishedPuckData: published?.puckData ?? null,
     });
@@ -433,13 +503,11 @@ export function planDynamicTemplateActivation(
   for (const scheme of [...(input.schemes ?? [])].sort((left, right) => left.schemeId - right.schemeId)) {
     const planned = planSnapshot({
       source: "scheme",
-      contextLabel: `${scheme.pageKey} scheme#${scheme.schemeId}`,
       puckData: scheme.puckData,
       templateId: input.templateId,
       targetVersion: input.targetVersion,
       targetDefinition: input.targetDefinition,
       definitionsByVersion: input.definitionsByVersion,
-      blockers,
     });
     if (planned.occurrences.length === 0) continue;
     schemes.push({
@@ -448,9 +516,27 @@ export function planDynamicTemplateActivation(
       updatedAt: scheme.updatedAt,
       contentHash: hashJson(scheme.puckData),
       occurrences: planned.occurrences,
+      adoption: planned.reasons.length > 0 ? "skip" : "adopt",
+      skipReasons: planned.reasons,
       upgradedPuckData: planned.puckData,
     });
   }
+
+  const documentKind = input.objectKind ?? "page-draft";
+  const skipped: DynamicTemplateAdoptionSkippedObject[] = [
+    ...documents.filter((document) => document.draftAdoption === "skip").map((document) => ({
+      kind: documentKind,
+      objectId: document.documentId,
+      pageKey: document.pageKey,
+      reasons: document.skipReasons,
+    })),
+    ...schemes.filter((scheme) => scheme.adoption === "skip").map((scheme) => ({
+      kind: "scheme" as const,
+      objectId: scheme.schemeId,
+      pageKey: scheme.pageKey,
+      reasons: scheme.skipReasons,
+    })),
+  ];
 
   const hashPayload = {
     templateId: input.templateId,
@@ -471,6 +557,8 @@ export function planDynamicTemplateActivation(
       publishedMetadataHash: document.publishedMetadataHash,
       hadUnpublishedDraft: document.hadUnpublishedDraft,
       nextDocumentStatus: document.nextDocumentStatus,
+      draftAdoption: document.draftAdoption,
+      skipReasons: document.skipReasons,
       occurrences: document.occurrences,
     })),
     schemes: schemes.map((scheme) => ({
@@ -478,8 +566,11 @@ export function planDynamicTemplateActivation(
       pageKey: scheme.pageKey,
       updatedAt: scheme.updatedAt,
       contentHash: scheme.contentHash,
+      adoption: scheme.adoption,
+      skipReasons: scheme.skipReasons,
       occurrences: scheme.occurrences,
     })),
+    skipped,
     blockers: [...blockers].sort(),
     additionalImpactState: input.additionalImpactState,
   };
@@ -507,6 +598,7 @@ export function planDynamicTemplateActivation(
     ),
     blockers: [...new Set(blockers)],
     warnings: [...new Set(warnings)],
+    skipped,
     documents,
     schemes,
   };

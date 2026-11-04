@@ -15,6 +15,7 @@ import {
   Tag,
 } from "antd";
 import { customerApi, type CustomerAddressInput } from "@/services/api";
+import { clampProductTitle } from "@/utils/productTitleLength";
 import {
   customerProfileApi,
   type ContactChangeChallenge,
@@ -453,7 +454,7 @@ function ConsultationContext({ detail }: { detail: CustomerConsultationDetail })
       <div>
         <h4>所选作品</h4>
         <p>
-          {detail.items.map((item) => item.productNameSnapshot).join("、")
+          {detail.items.map((item) => clampProductTitle(item.productNameSnapshot)).join("、")
             || "历史记录未保留作品名称。"}
         </p>
       </div>
@@ -674,9 +675,10 @@ export default function MyAccountDashboard({
   };
 
   const consultationTitle = consultationDetail?.type === "selection"
-    ? consultationDetail.items[0]?.productNameSnapshot || "选款咨询"
-    : consultationDetail?.product?.name
-      || consultationDetail?.consultationType
+    ? clampProductTitle(consultationDetail.items[0]?.productNameSnapshot || "") || "选款咨询"
+    : (consultationDetail?.product?.name
+      ? clampProductTitle(consultationDetail.product.name)
+      : consultationDetail?.consultationType)
       || "预约咨询";
 
   // 心愿单（组件自治拉取：CustomerCenter 无需为其扩展 props）
@@ -1655,7 +1657,7 @@ export default function MyAccountDashboard({
                             {new Date(record.createdAt).toLocaleDateString("zh-CN")}
                           </small>
                           <h3>
-                            {record.items?.[0]?.productNameSnapshot || "选款咨询"}
+                            {record.items?.[0]?.productNameSnapshot ? clampProductTitle(record.items[0].productNameSnapshot) : "选款咨询"}
                           </h3>
                         </div>
                         <em>{inquiryStatus[record.status] || record.status}</em>
@@ -1674,7 +1676,7 @@ export default function MyAccountDashboard({
                         <div>
                           <h4>所选作品</h4>
                           <p>
-                            {record.items?.map((item) => item.productNameSnapshot).join("、")
+                            {record.items?.map((item) => clampProductTitle(item.productNameSnapshot)).join("、")
                               || "历史记录未保留作品名称。"}
                           </p>
                         </div>
@@ -1739,9 +1741,9 @@ export default function MyAccountDashboard({
                             {new Date(record.createdAt).toLocaleDateString("zh-CN")}
                           </small>
                           <h3>
-                            {record.product?.name ||
-                              record.consultationType ||
-                              "预约咨询"}
+                            {record.product?.name
+                              ? clampProductTitle(record.product.name)
+                              : record.consultationType || "预约咨询"}
                           </h3>
                         </div>
                         <em>{inquiryStatus[record.status] || record.status}</em>
@@ -1872,7 +1874,7 @@ export default function MyAccountDashboard({
                     </Link>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <Link to={`/products/${fav.productId}`}>
-                        <h3 style={{ fontSize: 15 }}>{fav.name}</h3>
+                        <h3 style={{ fontSize: 15 }} title={fav.name}>{clampProductTitle(fav.name)}</h3>
                       </Link>
                       {fav.shortDescription ? (
                         <p

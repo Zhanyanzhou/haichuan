@@ -22,9 +22,11 @@ interface EditableCanvasSize {
   onLocateOverflow: () => void;
 }
 
-const DESKTOP_RATIO_PRESETS = ["21:9", "16:9", "3:2", "4:3", "1:1"] as const;
-const MOBILE_RATIO_PRESETS = ["1:1", "4:5", "3:4", "9:16"] as const;
-const DESKTOP_WIDTH_PRESETS = [1280, 1440, 1920, 2560] as const;
+/** 与模板整体比例同一组（D.46）：手机档是桌面档的对换值。 */
+const DESKTOP_RATIO_PRESETS = ["2:1", "16:9", "4:3", "4:5", "1:1"] as const;
+const MOBILE_RATIO_PRESETS = ["1:2", "9:16", "3:4", "5:4", "1:1"] as const;
+/** 768 与 1024 只是预览宽度，不另存一套平板内容。 */
+const DESKTOP_WIDTH_PRESETS = [768, 1024, 1280, 1440, 1920, 2560] as const;
 const MOBILE_WIDTH_PRESETS = [320, 375, 390, 430] as const;
 
 export function CanvasDimensionInput({
@@ -147,7 +149,7 @@ function CanvasZoomInput({
 
   return (
     <label className="template-editor__canvas-zoom-field">
-      <span className="sr-only">画布缩放百分比</span>
+      <span aria-hidden="true">缩放</span>
       <input
         type="number"
         inputMode="numeric"
@@ -453,8 +455,9 @@ export default function WorkspaceCanvasControls({
             className="template-editor__canvas-view-readout"
             aria-label={`画布尺寸 ${viewportLabel}，缩放 ${Math.round(zoom * 100)}%`}
             aria-live="polite"
+            title="本节实际宽度 × 高度，单位为 CSS 像素（px），不包含编辑提示；预览宽度用于模拟屏幕，缩放只改变观看大小。"
           >
-            {editableSize.previewWidthOnly ? "视口 " : ""}{viewportLabel}
+            {editableSize.previewWidthOnly ? "本节尺寸 " : ""}{viewportLabel}
           </output>
           <CanvasZoomInput value={zoom} onCommit={onZoomChange} />
         </>

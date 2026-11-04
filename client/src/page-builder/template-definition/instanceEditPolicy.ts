@@ -29,6 +29,7 @@ export const LAYOUT_OVERRIDE_FIELDS = [
   "textAlign",
   "marginTopPx",
   "marginBottomPx",
+  "visuallyCollapsed",
 ] as const satisfies ReadonlyArray<keyof TemplateInstanceLayoutOverride>;
 
 export type LayoutOverrideField = (typeof LAYOUT_OVERRIDE_FIELDS)[number];
@@ -100,6 +101,8 @@ export function isLayoutOverrideCapabilityEnabled(
     case "marginTopPx":
     case "marginBottomPx":
       return Boolean(policy.spacing) && isTextLayoutSlotType(slot.type);
+    case "visuallyCollapsed":
+      return isTextLayoutSlotType(slot.type);
     default:
       return false;
   }

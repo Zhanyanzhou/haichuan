@@ -580,7 +580,7 @@ export const customerApi = {
   wechatBind: (data: {
     bindToken: string;
     phone: string;
-    password: string;
+    password?: string;
     name?: string;
     smsCode?: string;
   }) => api.post("/customers/wechat/bind", data, {
@@ -1179,6 +1179,11 @@ export type PageMediaAsset = {
   size: number;
   width?: number;
   height?: number;
+  displayWidth?: number;
+  displayHeight?: number;
+  animated?: boolean;
+  metadataStatus?: "measured" | "unknown";
+  mediaRevision?: string;
   createdAt: string;
   status: "PENDING" | "READY" | "QUARANTINED" | "ARCHIVED";
   available: boolean;
@@ -1317,6 +1322,11 @@ export const uploadApi = {
       ...params,
       includeArchived: params?.includeArchived ? "true" : undefined,
     },
+  }),
+  /** 已选本站 page-assets 图在本地缓存缺尺寸时，受控只读回填展示事实。 */
+  getPageMediaByUrl: (url: string) => api.get("/upload/media/by-url", {
+    params: { url },
+    suppressGlobalError: true,
   }),
   archivePageMedia: (id: number) => api.delete(`/upload/media/${id}`),
   restorePageMedia: (id: number) => api.post(`/upload/media/${id}/restore`),
