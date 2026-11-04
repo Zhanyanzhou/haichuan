@@ -1,4 +1,6 @@
 import { isSafeTemplateMediaUrl } from "./validateTemplateDefinition";
+import { hasTemplateImageContent } from "./imageContent";
+import type { TemplateBreakpoint } from "./generated/templateDefinition.generated";
 
 /**
  * 公开页上还会占住一条流式高度的节点。
@@ -26,13 +28,6 @@ function textContent(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function imageSource(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
-  const source = (value as { src?: unknown }).src;
-  return typeof source === "string" ? source.trim() : "";
-}
-
 function actionLabel(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   const label = (value as { label?: unknown }).label;
@@ -47,17 +42,17 @@ function hasOwnPaint(node: PublicFlowNode): boolean {
   return Boolean(rules.backgroundImage && isSafeTemplateMediaUrl(rules.backgroundImage));
 }
 
-export function publicFlowNodeIsVisible(node: PublicFlowNode): boolean {
+export function publicFlowNodeIsVisible(node: PublicFlowNode, breakpoint: TemplateBreakpoint = "desktop"): boolean {
   if (node.hidden) return false;
   if (node.type === "Spacer" || node.type === "Divider") return true;
   const slotType = node.slot?.type;
   if (slotType && ACTION_SLOTS.has(slotType)) return Boolean(actionLabel(node.content));
   if (slotType && COPY_SLOTS.has(slotType)) return Boolean(textContent(node.content));
   if (hasOwnPaint(node)) return true;
-  if (slotType === "image") return Boolean(imageSource(node.content));
+  if (slotType === "image") return hasTemplateImageContent(node.content, breakpoint);
   if (slotType && TEXT_SLOTS.has(slotType)) return Boolean(textContent(node.content));
   // 商品和集合在公开页由业务区渲染，槽位本身不占高度。
   if (slotType === "product" || slotType === "collection") return false;
   if (slotType) return true;
-  return (node.children ?? []).some(publicFlowNodeIsVisible);
+  return (node.children ?? []).some((child) => publicFlowNodeIsVisible(child, breakpoint));
 }

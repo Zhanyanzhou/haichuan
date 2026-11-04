@@ -1,8 +1,78 @@
 import { expect, test } from "@playwright/test";
 import { generateTemplateFromRecipe } from "../src/page-builder/template-creation/generateTemplateFromRecipe";
 import { createContentSlot, createRecommendedRecipe } from "../src/page-builder/template-creation/presets";
-import { resolveDynamicTemplatePublicVisibility } from "../src/page-builder/dynamic-template-instance/publicVisibility";
+import { planHasVisibleSlot, resolveDynamicTemplatePublicVisibility } from "../src/page-builder/dynamic-template-instance/publicVisibility";
 import { validateDynamicTemplateDefinition } from "../src/page-builder/template-definition/validateTemplateDefinition";
+import { compileDynamicTemplateRenderPlan } from "../src/page-builder/template-definition/renderPlan";
+import type { DynamicTemplateRenderPlanNode } from "../src/page-builder/template-definition/renderPlan";
+import { publicFlowNodeIsVisible } from "../src/page-builder/template-definition/publicFlow";
+import { resolveTemplateImageSource } from "../src/page-builder/template-definition/imageContent";
+
+function imageNodeInPlan(node: DynamicTemplateRenderPlanNode, slotId: string): DynamicTemplateRenderPlanNode | undefined {
+  if (node.slotId === slotId) return node;
+  return node.children.map((child) => imageNodeInPlan(child, slotId)).find(Boolean);
+}
+
+for (const scenario of [
+  { name: "仅手机图", value: { src: "", mobileSrc: "/uploads/mobile.jpg" }, desktop: false, mobile: true },
+  { name: "桌面图继承到手机", value: { src: "/uploads/desktop.jpg" }, desktop: true, mobile: true },
+  { name: "桌面手机分别有图", value: { src: "/uploads/desktop.jpg", mobileSrc: "/uploads/mobile.jpg" }, desktop: true, mobile: true },
+  // 当前图片字段清空手机图会移除 mobileSrc，恢复沿用桌面图；清空整个槽位才表示两端不要图片。
+  { name: "手机图空串沿用桌面图", value: { src: "/uploads/desktop.jpg", mobileSrc: "" }, desktop: true, mobile: true },
+  { name: "整个图片槽位显式清空", value: "", desktop: false, mobile: false },
+  { name: "两端图片均为空", value: { src: "", mobileSrc: "", alt: "保留替代文字" }, desktop: false, mobile: false },
+] as const) {
+  test(`图片按当前设备判断页面内容：${scenario.name}`, () => {
+    const definition = generateTemplateFromRecipe(createRecommendedRecipe("page-hero"), {
+      name: "设备图片",
+      templateId: "tpl_device_image",
+    });
+    const image = Object.values(definition.slots).find((slot) => slot.type === "image")!;
+    definition.defaultContent[image.slotId] = { src: "/uploads/template-default.jpg" };
+    const contentBySlotId = { [image.slotId]: scenario.value };
+
+    for (const breakpoint of ["desktop", "mobile"] as const) {
+      const expected = scenario[breakpoint];
+      const compiled = compileDynamicTemplateRenderPlan(definition, {
+        device: breakpoint,
+        breakpoint,
+        contentBySlotId,
+        showEmptySlots: false,
+        publicSurface: { omitDefaultImages: true, omitDefaultContent: true },
+      });
+      expect(compiled.ok).toBe(true);
+      if (!compiled.ok) throw new Error("设备图片测试定义必须有效");
+      const node = imageNodeInPlan(compiled.plan.root, image.slotId)!;
+      expect(node.hidden, `${breakpoint} 图片可见性`).toBe(!expected);
+      if (expected) expect(node.content).toEqual(scenario.value);
+      expect(planHasVisibleSlot(compiled.plan.root)).toBe(expected);
+      const imageFlow = { type: "ImageSlot", slot: { type: "image" }, content: scenario.value };
+      expect(publicFlowNodeIsVisible({ type: "Container", children: [imageFlow] }, breakpoint)).toBe(expected);
+
+      for (const required of [false, true]) {
+        image.required = required;
+        const decision = resolveDynamicTemplatePublicVisibility({ definition, contentBySlotId, breakpoint });
+        expect(decision.visible, `${breakpoint} required=${required}`).toBe(expected);
+        if (expected) expect(decision.notices.some((notice) => notice.message.includes(`“${image.label}”没有页面图片`))).toBe(false);
+      }
+    }
+  });
+}
+
+test("图片来源按设备选图，旧调用保留桌面默认且无效手机图回退桌面图", () => {
+  const both = { src: "/uploads/desktop.jpg", mobileSrc: "/uploads/mobile.jpg" };
+  expect(resolveTemplateImageSource(both)).toBe("/uploads/desktop.jpg");
+  expect(resolveTemplateImageSource(both, "mobile")).toBe("/uploads/mobile.jpg");
+  expect(resolveTemplateImageSource({ ...both, mobileSrc: "" }, "mobile")).toBe("/uploads/desktop.jpg");
+  expect(resolveTemplateImageSource({ ...both, mobileSrc: "javascript:invalid" }, "mobile")).toBe("/uploads/desktop.jpg");
+  expect(publicFlowNodeIsVisible({ type: "ImageSlot", slot: { type: "image" }, content: { mobileSrc: "/uploads/mobile.jpg" } })).toBe(false);
+});
+
+test("隐藏父节点下的槽位不算作画布可见内容", () => {
+  const slot = { hidden: false, slotId: "heading", children: [] };
+  expect(planHasVisibleSlot({ hidden: true, children: [slot] })).toBe(false);
+  expect(planHasVisibleSlot({ hidden: false, children: [slot] })).toBe(true);
+});
 
 function noticeText(definition: ReturnType<typeof textNotice>, content: Record<string, unknown>, pageKey?: string) {
   return resolveDynamicTemplatePublicVisibility({

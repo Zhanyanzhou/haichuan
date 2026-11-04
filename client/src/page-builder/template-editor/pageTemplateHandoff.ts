@@ -4,15 +4,12 @@ export type PageTemplateHandoffFocus = "add" | "none";
 
 export function resolvePublishedTemplateInsertionIndex(
   contentLength: number,
-  selectedRootIndex: number | null,
+  _selectedRootIndex: number | null,
   requestedInsertionIndex?: number,
 ) {
   const length = Math.max(0, contentLength);
   if (requestedInsertionIndex !== undefined) {
     return Math.min(length, Math.max(0, requestedInsertionIndex));
-  }
-  if (selectedRootIndex !== null && selectedRootIndex >= 0 && selectedRootIndex < length) {
-    return selectedRootIndex + 1;
   }
   return length;
 }
@@ -25,9 +22,7 @@ export function describePageTemplateAddAction(input: {
 }) {
   const destination = !input.pageHasBlocks
     ? "添加到页面"
-    : input.hasSelection
-      ? "添加到所选模块之后"
-      : "添加到页面末尾";
+    : "添加到页面末尾";
   return {
     label: "添加到页面",
     title: destination,

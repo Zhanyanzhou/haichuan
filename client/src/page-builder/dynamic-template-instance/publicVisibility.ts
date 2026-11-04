@@ -10,6 +10,7 @@ import {
   isBrandNarrativePage,
   isCommercialSemanticRole,
 } from "./publicationPromise";
+import { hasTemplateImageContent } from "../template-definition/imageContent";
 
 export interface DynamicTemplatePublicSurface {
   omitDefaultImages: true;
@@ -31,12 +32,6 @@ export interface DynamicTemplatePublicVisibility {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function hasExplicitImageValue(value: unknown): boolean {
-  if (typeof value === "string") return value.trim().length > 0;
-  if (!isRecord(value)) return false;
-  return typeof value.src === "string" && value.src.trim().length > 0;
 }
 
 function hasBoundBusinessObject(value: unknown): boolean {
@@ -108,8 +103,9 @@ function isNodeStructurallyHidden(
   return false;
 }
 
-function planHasVisibleSlot(node: { hidden: boolean; slotId?: string; children: readonly unknown[] }): boolean {
-  if (!node.hidden && node.slotId) return true;
+export function planHasVisibleSlot(node: { hidden: boolean; slotId?: string; children: readonly unknown[] }): boolean {
+  if (node.hidden) return false;
+  if (node.slotId) return true;
   return node.children.some((child) => planHasVisibleSlot(child as {
     hidden: boolean;
     slotId?: string;
@@ -159,7 +155,7 @@ export function resolveDynamicTemplatePublicVisibility(input: {
       return false;
     }
     const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
-    return !hasPageValue || !hasExplicitImageValue(content[slot.slotId]);
+    return !hasPageValue || !hasTemplateImageContent(content[slot.slotId], input.breakpoint);
   });
   if (requiredImageGap) {
     return {
@@ -176,7 +172,7 @@ export function resolveDynamicTemplatePublicVisibility(input: {
     const node = Object.values(input.definition.nodes).find((candidate) => candidate.slotId === slot.slotId);
     if (!node || isNodeStructurallyHidden(input.definition, node.nodeId, input.breakpoint, hiddenSlotIds)) continue;
     const hasPageValue = Object.prototype.hasOwnProperty.call(content, slot.slotId);
-    if (hasPageValue && hasExplicitImageValue(content[slot.slotId])) continue;
+    if (hasPageValue && hasTemplateImageContent(content[slot.slotId], input.breakpoint)) continue;
     notices.push({
       message: `“${slot.label}”没有页面图片，公开时会收起图片区并保留有效文字。`,
     });

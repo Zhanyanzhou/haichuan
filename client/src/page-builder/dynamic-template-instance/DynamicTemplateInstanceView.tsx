@@ -39,6 +39,7 @@ export default function DynamicTemplateInstanceView({
   priority = false,
   pageHeroPlacement,
   pageKey,
+  retainEmptyFrame = false,
 }: {
   props: DynamicTemplateInstanceProps;
   definition?: TemplateDefinitionV2;
@@ -51,6 +52,8 @@ export default function DynamicTemplateInstanceView({
   /** 页面文档传入。孤立预览不传，按这一节自己的首屏处理。 */
   pageHeroPlacement?: PageHeroFramePlacement;
   pageKey?: string;
+  /** 页面尚无内容时只在编辑画布保留母模板结构；公开面仍收起空槽位。 */
+  retainEmptyFrame?: boolean;
 }) {
   const registered = useResolvedDynamicTemplate(props.templateId, props.templateVersion);
   const resolvedDefinition = definition ?? registered?.definition;
@@ -133,6 +136,7 @@ export default function DynamicTemplateInstanceView({
         omitNodeBackgroundImages
         mode={mode}
         editorSurface={mode === "editor" ? "page-instance" : undefined}
+        showEmptySlots={mode === "editor" && retainEmptyFrame ? true : undefined}
         primaryHeadingLevel={primaryHeadingLevel}
         priority={priority}
         pageHeroPlacement={pageHeroPlacement}

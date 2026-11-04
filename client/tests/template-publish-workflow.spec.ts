@@ -1047,10 +1047,10 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
     })).toContain("装修方案 home #12");
   });
 
-  test("点击添加按空画布、选中项和页尾决定落点", () => {
+  test("点击添加统一追加末尾，指定拖拽落点时保留落点", () => {
     expect(resolvePublishedTemplateInsertionIndex(0, null)).toBe(0);
     expect(resolvePublishedTemplateInsertionIndex(3, null)).toBe(3);
-    expect(resolvePublishedTemplateInsertionIndex(3, 1)).toBe(2);
+    expect(resolvePublishedTemplateInsertionIndex(3, 1)).toBe(3);
     expect(resolvePublishedTemplateInsertionIndex(3, 2)).toBe(3);
     expect(resolvePublishedTemplateInsertionIndex(3, 9)).toBe(3);
     expect(resolvePublishedTemplateInsertionIndex(3, 1, 0)).toBe(0);
@@ -1069,7 +1069,7 @@ test("open review is a zero-effect calculation and reports ready or blocked", ()
       version: 1,
       pageHasBlocks: true,
       hasSelection: true,
-    }).title).toBe("添加到所选模块之后");
+    }).title).toBe("添加到页面末尾");
     expect(describePageTemplateAddAction({
       name: "工艺区",
       version: 1,

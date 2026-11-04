@@ -88,7 +88,6 @@ import { resolvePublishedTemplateInsertionIndex } from "@/page-builder/template-
 import {
   applyEditorCanvasMetrics,
   clearPageCanvasTemplatePreview,
-  pageCanvasTemplatePreviewMatches,
   PageCanvasTemplatePreview,
   setPageCanvasTemplatePreviewAddHandler,
   showPageCanvasTemplatePreview,
@@ -118,6 +117,9 @@ import {
   stripNonEditableSlotContentFromPageDocument,
 } from "@/page-builder/dynamic-template-instance";
 import DynamicTemplateInstanceInspector from "@/page-builder/dynamic-template-instance/DynamicTemplateInstanceInspector";
+import { planHasVisibleSlot } from "@/page-builder/dynamic-template-instance/publicVisibility";
+import { compileDynamicTemplateRenderPlan } from "@/page-builder/template-definition/renderPlan";
+import { resolveTemplateDesignFrame } from "@/page-builder/template-definition/templateDimensions";
 import { catalogCardName } from "@/page-builder/template-editor/catalogCardName";
 import { usePublishedTemplateSectionRoles } from "@/page-builder/template-editor/publishedTemplateSectionRoles";
 import { getModuleDisplayName, resolveTemplateSectionRole } from "./editor-utils";
@@ -228,14 +230,45 @@ function CanvasDynamicTemplateInstance({
     ? "mobile"
     : "desktop";
 
+  // 新实例不复制模板示例；保留可选择的编辑状态，避免空槽位只剩背景或零高度。
+  const plan = mode === "editor" && definition?.templateId === props.templateId && props.isVisible !== false
+    ? compileDynamicTemplateRenderPlan(definition, {
+        device,
+        breakpoint: device,
+        contentBySlotId: props.contentBySlotId,
+        hiddenSlotIds: props.hiddenSlotIds,
+        layoutOverridesByNodeId: props.layoutOverridesByNodeId,
+        pageSettings: props.pageSettings,
+        showEmptySlots: false,
+        publicSurface: { omitDefaultImages: true, omitDefaultContent: true },
+      })
+    : null;
+  const empty = Boolean(plan?.ok && !planHasVisibleSlot(plan.plan.root));
+  const emptyHeightMode = empty && definition
+    ? resolveTemplateDesignFrame(definition, device).heightMode
+    : undefined;
+
   return (
-    <DynamicTemplateInstanceView
-      props={props}
-      definition={definition}
-      deviceOverride={device}
-      mode={mode}
-      pageKey={pageKey}
-    />
+    <div
+      className="homepage-editor__canvas-instance"
+      data-page-instance-empty={empty ? true : undefined}
+      data-page-instance-empty-height={emptyHeightMode}
+    >
+      <DynamicTemplateInstanceView
+        props={props}
+        definition={definition}
+        deviceOverride={device}
+        mode={mode}
+        pageKey={pageKey}
+        retainEmptyFrame={empty}
+      />
+      {empty ? (
+        <div className="homepage-editor__canvas-instance-empty" role="status">
+          <strong>当前设备尚无页面内容</strong>
+          <span>模板已加入页面，请在右侧上传图片或填写文字。</span>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -781,8 +814,6 @@ function PageTemplateLibraryAdapter({
     requestedInsertionIndex?: number,
     source?: "preview",
   ) => {
-    const insertAtPreview = source === "preview"
-      || (requestedInsertionIndex === undefined && pageCanvasTemplatePreviewMatches(template));
     clearPageCanvasTemplatePreview();
     const currentDocument = appDataRef.current;
     const resolved = {
@@ -804,13 +835,11 @@ function PageTemplateLibraryAdapter({
       && typeof itemSelectorRef.current.index === "number"
       ? itemSelectorRef.current.index
       : null;
-    const insertionIndex = insertAtPreview
-      ? 0
-      : resolvePublishedTemplateInsertionIndex(
-        content.length,
-        selectedRootIndex,
-        requestedInsertionIndex,
-      );
+    const insertionIndex = resolvePublishedTemplateInsertionIndex(
+      content.length,
+      selectedRootIndex,
+      requestedInsertionIndex,
+    );
     const instance = {
       type: DYNAMIC_TEMPLATE_BLOCK_TYPE,
       props: createDynamicTemplateInstanceProps({
@@ -842,6 +871,7 @@ function PageTemplateLibraryAdapter({
       type: "setUi",
       ui: { itemSelector: { index: insertionIndex, zone: ROOT_ZONE } },
     });
+    focusCanvasBlock(instance.props.id, undefined, true);
     if (source === "preview" || requestedInsertionIndex === undefined) {
       onPageActionComplete();
     }

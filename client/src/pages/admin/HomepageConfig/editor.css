@@ -2063,6 +2063,39 @@ body:has(#frame-root) .homepage-editor__canvas-selection-overlay {
 .homepage-editor__canvas-empty span {
   font-size: 12px;
 }
+.homepage-editor__canvas-instance {
+  position: relative;
+}
+.homepage-editor__canvas-instance[data-page-instance-empty-height="auto"] {
+  min-height: calc(144px * var(--hc-editor-ui-scale, 1));
+}
+.homepage-editor__canvas-instance[data-page-instance-empty] > [data-dynamic-template-instance-id] {
+  /* 用真实 Renderer 留住画幅；中性提示覆盖时不重复画出内部空槽示例。 */
+  visibility: hidden;
+}
+.homepage-editor__canvas-instance-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  border: 1px dashed var(--adm-neutral-border);
+  color: var(--adm-muted);
+  background: var(--adm-neutral-bg);
+  text-align: center;
+  overflow: auto;
+  pointer-events: none;
+}
+.homepage-editor__canvas-instance-empty strong,
+.homepage-editor__canvas-instance-empty span {
+  font-size: calc(14px * var(--hc-editor-ui-scale, 1));
+}
+.homepage-editor__canvas-instance-empty strong {
+  color: var(--adm-text-strong);
+}
 .homepage-editor__canvas-template-preview {
   position: relative;
   z-index: 2;

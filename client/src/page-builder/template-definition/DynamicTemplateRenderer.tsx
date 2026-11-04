@@ -54,6 +54,7 @@ import { choosePeerImageSplit, pairedCanvasContentBox, workCardOverflowsCell, ty
 import { formatExactTemplateRatio, formatTemplateRatio, isContentHeightSplitSection, parseTemplateRatio, resolvePairedMobileCanvas, splitCopyShouldStack } from "./templateDimensions";
 import { hasExplicitMobileTemplateComposition, hasExplicitMobileTemplateLayout, isFixedFourWorkGrid } from "./layoutAuthoring";
 import { publicFlowNodeIsVisible } from "./publicFlow";
+import { hasTemplateImageContent, resolveTemplateImageSource } from "./imageContent";
 import { resolveTextOnImageScrim } from "./textOnImageScrim";
 import { artworkCopyTreatment, artworkNodeClips } from "./imageCarriesCopy";
 import { resolveMediaSlotImage } from "../config/mediaSlotContract";
@@ -218,10 +219,11 @@ function occupyingChildren(
   node: DynamicTemplateRenderPlanNode,
   showEmptySlots: boolean,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
+  device: "desktop" | "mobile",
 ): DynamicTemplateRenderPlanNode[] {
   const collapseEmpty = mode === "public" || !showEmptySlots;
   return collapseEmpty
-    ? node.children.filter((child) => !child.hidden && publicFlowNodeIsVisible(child))
+    ? node.children.filter((child) => !child.hidden && publicFlowNodeIsVisible(child, device))
     : node.children.filter((child) => !child.hidden);
 }
 
@@ -229,11 +231,12 @@ function branchIsOnlyImage(
   node: DynamicTemplateRenderPlanNode,
   showEmptySlots: boolean,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
+  device: "desktop" | "mobile",
 ): boolean {
   if (node.slot?.type === "image") return true;
   if (node.slot) return false;
-  const children = occupyingChildren(node, showEmptySlots, mode);
-  return children.length > 0 && children.every((child) => branchIsOnlyImage(child, showEmptySlots, mode));
+  const children = occupyingChildren(node, showEmptySlots, mode, device);
+  return children.length > 0 && children.every((child) => branchIsOnlyImage(child, showEmptySlots, mode, device));
 }
 
 /**
@@ -249,8 +252,8 @@ function dropDarkMobileImageTail(
 ): boolean {
   if (device !== "mobile" || node.rules.layoutMode === "free" || !isDarkCanvas(canvasColor)) return false;
   if (!(node.rules.padding?.bottom && node.rules.padding.bottom.value > 0)) return false;
-  const visible = occupyingChildren(node, showEmptySlots, mode);
-  return visible.length > 0 && visible.every((child) => branchIsOnlyImage(child, showEmptySlots, mode));
+  const visible = occupyingChildren(node, showEmptySlots, mode, device);
+  return visible.length > 0 && visible.every((child) => branchIsOnlyImage(child, showEmptySlots, mode, device));
 }
 
 /**
@@ -263,12 +266,13 @@ function collapseVacantFlowPadding(
   showEmptySlots: boolean,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
   showEmptyStructure: boolean,
+  device: "desktop" | "mobile",
 ): boolean {
   if (node.slot || node.type === "Spacer" || node.type === "Divider") return false;
   if (showEmptyStructure && node.children.length === 0) return false;
   if (!node.rules.padding) return false;
   if (node.rules.backgroundColor || node.rules.backgroundToken || node.rules.backgroundImage) return false;
-  return occupyingChildren(node, showEmptySlots, mode).length === 0;
+  return occupyingChildren(node, showEmptySlots, mode, device).length === 0;
 }
 
 function isDisplayableTemplateMediaUrl(value: string | undefined): value is string {
@@ -815,13 +819,6 @@ function ManagedTemplateSlotImage({
   );
 }
 
-function readRenderedImageSource(content: unknown): string {
-  if (typeof content === "string") return content.trim();
-  if (!content || typeof content !== "object" || Array.isArray(content)) return "";
-  const src = (content as { src?: unknown }).src;
-  return typeof src === "string" ? src.trim() : "";
-}
-
 function renderSlotContent(
   node: DynamicTemplateRenderPlanNode,
   mode: NonNullable<DynamicTemplateRendererProps["mode"]>,
@@ -905,12 +902,11 @@ function renderSlotContent(
     const record = content && typeof content === "object" && !Array.isArray(content)
       ? content as Record<string, unknown>
       : null;
-    const desktopSrc = typeof content === "string" ? content : typeof record?.src === "string" ? record.src : "";
     const mobileCandidate = record?.mobileSrc;
     const mobileSrc = editorViewport === "mobile" && isSafeTemplateMediaUrl(mobileCandidate)
       ? mobileCandidate.trim()
       : "";
-    const src = mobileSrc || desktopSrc;
+    const src = resolveTemplateImageSource(content, editorViewport);
     const alt = typeof record?.alt === "string" ? record.alt : "";
     const imageSource = mobileSrc ? "mobile" as const : "desktop" as const;
     const defaultFocus = objectPositionToPercent(node.slotRules?.objectPosition ?? TEMPLATE_MEDIA_DEFAULTS.objectPosition);
@@ -1159,7 +1155,7 @@ function renderTemplateChildren({
   // 公开页和页面画布丢掉没有内容的容器。否则空文字盒的内边距和间距会留在满幅图下方，深色画布就露出黑带。
   // 模板结构编辑仍留着空位，方便点选。
   const renderedChildren = shared.mode === "public" || !shared.showEmptySlots
-    ? node.children.filter((child) => !child.hidden && publicFlowNodeIsVisible(child))
+    ? node.children.filter((child) => !child.hidden && publicFlowNodeIsVisible(child, device))
     : node.children;
   const canvasForChildren = safeColor(node.rules.backgroundColor)
     ?? (node.rules.backgroundToken ? DYNAMIC_TEMPLATE_BACKGROUND_TOKENS[node.rules.backgroundToken] : undefined)
@@ -1779,7 +1775,7 @@ function RenderNode({
   const emptyPublicImage = mode === "public"
     && !showEmptySlots
     && node.slot?.type === "image"
-    && !readRenderedImageSource(node.content);
+    && !hasTemplateImageContent(node.content, device);
   if (emptyPublicImage) return null;
   if (node.type === "Spacer") {
     return <div data-template-node-id={node.nodeId} aria-hidden="true" style={{ height: lengthToCss(node.props.spacerSize) ?? "1rem" }} />;
@@ -1963,7 +1959,7 @@ function RenderNode({
         ...(dropDarkMobileImageTail(node, device, canvasColor, showEmptySlots, mode)
           ? { paddingBottom: 0 }
           : {}),
-        ...(collapseVacantFlowPadding(node, showEmptySlots, mode, showEmptyStructure)
+        ...(collapseVacantFlowPadding(node, showEmptySlots, mode, showEmptyStructure, device)
           ? { padding: 0 }
           : {}),
         ...(showEmptyStructure && !node.slot && node.children.length === 0
@@ -2654,13 +2650,7 @@ export default function DynamicTemplateRenderer({
     if (node.hidden) return undefined;
     if (node.slot && node.slotId) {
       if (node.slot.type === "image") {
-        const value = node.content;
-        const source = typeof value === "string"
-          ? value
-          : value && typeof value === "object" && !Array.isArray(value)
-            ? (value as Record<string, unknown>).src
-            : undefined;
-        if (typeof source === "string" && source.trim()) return node.slotId;
+        if (hasTemplateImageContent(node.content, breakpoint ?? device)) return node.slotId;
       }
       const moduleType = getContentTemplateModuleTypeForSlotType(node.slot.type);
       if (moduleType && getContentTemplateMediaReferences(

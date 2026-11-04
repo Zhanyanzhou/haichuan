@@ -17,6 +17,7 @@ import { getEffectiveDynamicTemplateInstanceEditPolicy } from "./nodeRegistry";
 import { getEffectiveTemplateRootRules } from "./templateDimensions";
 import { resolveTemplateNodeRules, resolveTemplateSlotRules } from "./responsive";
 import { sectionCopyHiddenByDefault } from "./sectionCopyVisibility";
+import { hasTemplateImageContent } from "./imageContent";
 
 export interface DynamicTemplateRenderPlanNode {
   nodeId: string;
@@ -114,14 +115,12 @@ function actionLabel(value: unknown): string {
 function hasMeaningfulSlotContent(
   slot: DynamicTemplateSlotDefinition,
   value: unknown,
+  breakpoint: TemplateBreakpoint,
 ): boolean {
   // 跳转类型、空链接和按钮底色都不是文案。只剩这些时，页面画布要收起按钮壳。
   if (slot.type === "button" || slot.type === "link") return actionLabel(value).length > 0;
   if (slot.type !== "image") return hasMeaningfulTemplateContent(value);
-  if (typeof value === "string") return value.trim().length > 0;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const src = (value as Record<string, unknown>).src;
-  return typeof src === "string" && src.trim().length > 0;
+  return hasTemplateImageContent(value, breakpoint);
 }
 
 export function compileDynamicTemplateRenderPlan(
@@ -163,13 +162,13 @@ export function compileDynamicTemplateRenderPlan(
       ? (hasInstanceContent ? instanceValue : undefined)
       : slot && hasInstanceContent
         && slot.emptyPolicy === "use-default"
-        && !hasMeaningfulSlotContent(slot, instanceValue)
+        && !hasMeaningfulSlotContent(slot, instanceValue, breakpoint)
         ? defaultValue
         : hasInstanceContent
           ? instanceValue
           : defaultValue;
     if (slot && options.publicSurface?.omitDefaultImages && slot.type === "image") {
-      content = hasInstanceContent && hasMeaningfulSlotContent(slot, instanceValue)
+      content = hasInstanceContent && hasMeaningfulSlotContent(slot, instanceValue, breakpoint)
         ? instanceValue
         : undefined;
     }
@@ -178,7 +177,7 @@ export function compileDynamicTemplateRenderPlan(
     }
     const emptySlotHidden = Boolean(slot
       && !options.showEmptySlots
-      && !hasMeaningfulSlotContent(slot, content));
+      && !hasMeaningfulSlotContent(slot, content, breakpoint));
     const policy = getEffectiveDynamicTemplateInstanceEditPolicy(node, slot);
     const instanceOverrides = options.layoutOverridesByNodeId?.[nodeId];
     const rawLayoutOverride = definition.schemaVersion >= 2
