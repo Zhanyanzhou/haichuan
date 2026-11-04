@@ -101,7 +101,10 @@ test("公开 Renderer 只渲染首屏合同并保留真实渲染标记", async (
     "srcset",
     "/uploads/test-hero.png?width=480&rv=2 480w, /uploads/test-hero.png?width=800&rv=2 800w, /uploads/test-hero.png?width=1200&rv=2 1200w, /uploads/test-hero.png?width=1680&rv=2 1680w, /uploads/test-hero.png?width=2400&rv=2 2400w, /uploads/test-hero.png?width=2880&rv=2 2880w",
   );
-  await expect(fixture.locator("img")).toHaveAttribute("sizes", "100vw");
+  await expect(fixture.locator("img")).toHaveAttribute(
+    "sizes",
+    "(max-width: 1023px) 100vw, calc(max(100vw, calc(max(620px, 100svh) * 1.7778)))",
+  );
 });
 
 test("公开 Renderer 展示无图文字并只渲染页面上传的图片", async ({ page }) => {
